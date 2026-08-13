@@ -1,0 +1,11 @@
+komorebi-appmenu-button = Komorebi wallpapers
+komorebi-library-title = Komorebi wallpapers
+komorebi-library-dialog =
+    .aria-label = Komorebi wallpapers
+komorebi-add-folder = Add folder
+komorebi-choose-library-title = Add a wallpaper folder
+komorebi-library-empty = No Wallpaper Engine projects were found in the added folders.
+komorebi-library-cancel = Cancel
+komorebi-use-wallpaper = Use wallpaper
+komorebi-scene-coming-soon = Scene wallpapers are coming soon
+komorebi-unsupported-wallpaper = This wallpaper type is not supported

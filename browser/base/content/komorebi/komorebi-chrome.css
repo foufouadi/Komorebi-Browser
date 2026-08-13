@@ -1,13 +1,3 @@
-/* Komorebi : neutralise le fond opaque peint par le chrome autour du
-   <browser>. .browserContainer peint --tabpanel-background-color
-   (#F9F9FB clair / #2B2A33 sombre, "the frame color behind the clipped
-   radiused corner", voir tabbrowser/content-area.css) - une couche
-   distincte du fond de la page, entre #tabbrowser-tabbox (z-index: 2,
-   au-dessus de tout) et le <browser> lui-meme. Ni l'attribut
-   `transparent` du <browser> ni komorebi-transparent.css (cote
-   contenu) ne peuvent l'atteindre : c'est elle qui forme le bloc blanc.
-   On ne la retire que pour les onglets que le loader a deja marques
-   transparents. */
 body {
   --tabpanel-background-color: transparent;
 }
@@ -36,10 +26,143 @@ body {
   pointer-events: none;
 }
 
+#komorebi-library-dialog {
+  width: calc(2 * var(--size-layout-large));
+  height: calc(var(--size-layout-xlarge) + 3 * var(--size-item-large));
+  overflow: hidden;
+  padding: 0;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--border-radius-large);
+  background: var(--background-color-canvas);
+  box-shadow: var(--box-shadow-level-3);
+  color: var(--text-color);
+  font: menu;
+  font-size: var(--font-size-root);
+}
+
+#komorebi-library-dialog::backdrop {
+  background: var(--background-color-canvas);
+  opacity: var(--opacity-deemphasized-strong);
+}
+
+.komorebi-library-content {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  box-sizing: border-box;
+  height: 100%;
+  padding: var(--space-large);
+}
+
+.komorebi-library-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-medium);
+  margin-block-end: var(--space-large);
+  padding-block-end: var(--space-large);
+  border-block-end: var(--border-width) solid var(--border-color);
+}
+
+.komorebi-library-header h2 {
+  margin: 0;
+  font-size: var(--font-size-heading-large);
+  font-weight: var(--font-weight-semibold);
+}
+
+.komorebi-wallpaper-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-content: start;
+  gap: var(--space-medium);
+  overflow-y: auto;
+  padding: var(--space-small);
+}
+
+.komorebi-wallpaper-card {
+  display: grid;
+  gap: var(--space-small);
+  padding: var(--space-small);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--border-radius-medium);
+  background: var(--background-color-box);
+  color: inherit;
+  text-align: start;
+}
+
+.komorebi-wallpaper-card[aria-pressed="true"] {
+  border-color: var(--color-accent-primary);
+  background: var(--button-background-color-selected);
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+}
+
+.komorebi-wallpaper-card:enabled:hover {
+  background: var(--button-background-color-hover);
+}
+
+.komorebi-wallpaper-preview {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--border-radius-small);
+  object-fit: cover;
+}
+
+.komorebi-wallpaper-title {
+  overflow: hidden;
+  font-weight: var(--font-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.komorebi-wallpaper-status,
+.komorebi-empty-state {
+  color: var(--text-color-deemphasized);
+  font-size: var(--font-size-small);
+}
+
+.komorebi-library-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-medium);
+  padding-block-start: var(--space-large);
+  border-block-start: var(--border-width) solid var(--border-color);
+}
+
+.komorebi-library-header moz-button,
+.komorebi-library-footer moz-button {
+  --button-border-radius: var(--border-radius-medium);
+  --button-font-weight: var(--font-weight-semibold);
+  --button-min-height: var(--size-item-large);
+  --button-padding: var(--space-small) var(--space-large);
+  --button-font-size: var(--font-size-root);
+}
+
+.komorebi-library-header moz-button::part(button),
+.komorebi-library-footer moz-button::part(button) {
+  border-color: var(--button-border-color);
+  background-color: var(--button-background-color);
+  box-shadow: var(--box-shadow-level-1);
+}
+
+.komorebi-library-header moz-button:hover::part(button),
+.komorebi-library-footer moz-button[type="default"]:hover::part(button) {
+  background-color: var(--button-background-color-hover);
+}
+
+.komorebi-library-footer moz-button[type="primary"]::part(button) {
+  border-color: var(--button-border-color-primary);
+  background-color: var(--button-background-color-primary);
+  color: var(--button-text-color-primary);
+}
+
+.komorebi-library-footer moz-button[type="primary"]:hover::part(button) {
+  background-color: var(--button-background-color-primary-hover);
+}
+
 #browser,
 #tabbrowser-tabbox,
 #tabbrowser-tabpanels,
 .browserSidebarContainer,
-.browserContainer:has(browser[transparent="true"]) {
+.browserContainer {
   background: transparent !important;
 }

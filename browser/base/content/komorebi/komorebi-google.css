@@ -1,3 +1,5 @@
+/* stylelint-disable stylelint-plugin-mozilla/use-design-tokens -- Firefox design tokens are not exposed to Google content documents. */
+
 html,
 body,
 #main,
@@ -17,11 +19,48 @@ body,
 }
 
 body {
-  background-color: rgba(255, 255, 255, 0.78) !important;
+  background-color: transparent !important;
+}
+
+#center_col,
+#rhs {
+  box-sizing: border-box;
+  padding: 18px 22px !important;
+  border: 1px solid rgb(0 0 0 / 12%);
+  border-radius: 16px;
+  background: rgb(255 255 255 / 74%) !important;
+  backdrop-filter: blur(20px) saturate(125%);
+  box-shadow: 0 8px 28px rgb(20 30 50 / 14%);
+}
+
+#center_col > div,
+#center_col .MjjYud,
+#center_col .g,
+#center_col .ULSxyf,
+#center_col .Ww4FFb,
+#rhs > div,
+#rhs .kp-wholepage,
+#rhs .osrp-blk {
+  background-color: transparent !important;
+}
+
+#center_col:empty,
+#rhs:empty {
+  display: none;
+}
+
+/* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector -- The AI Mode tab has no stable parent identifier. */
+div[role="navigation"] div[role="list"] > div[role="listitem"]:has(a[href^="/search"][href*="udm=50"]),
+/* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector -- Google only identifies AI Overview reliably through its child marker. */
+div[data-mcpr]:has(.M8OgIe) {
+  display: none !important;
 }
 
 @media (prefers-color-scheme: dark) {
-  body {
-    background-color: rgba(32, 33, 36, 0.82) !important;
+  #center_col,
+  #rhs {
+    border-color: rgb(255 255 255 / 14%);
+    background: rgb(32 33 36 / 76%) !important;
+    box-shadow: 0 8px 30px rgb(0 0 0 / 28%);
   }
 }

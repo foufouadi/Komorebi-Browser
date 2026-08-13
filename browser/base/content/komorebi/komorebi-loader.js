@@ -1,10 +1,10 @@
-(function() {
+(function () {
   "use strict";
 
-  const VIDEO_PATH =
-    "file:///C:/Users/foufouadi/Desktop/2200946611/pekorawallpaper.mp4";
   const PROCESS_SCRIPT =
     "chrome://browser/content/komorebi/komorebi-process.js";
+  const LIBRARY_SCRIPT =
+    "chrome://browser/content/komorebi/komorebi-library.js";
 
   Services.prefs.setBoolPref("browser.tabs.allow_transparent_browser", true);
 
@@ -17,9 +17,7 @@
   }
 
   window.windowUtils.loadSheet(
-    Services.io.newURI(
-      "chrome://browser/content/komorebi/komorebi-chrome.css"
-    ),
+    Services.io.newURI("chrome://browser/content/komorebi/komorebi-chrome.css"),
     window.windowUtils.AUTHOR_SHEET
   );
 
@@ -29,6 +27,8 @@
   let objectUrl;
   let animationFrame = null;
   let resizeObserver;
+
+  Services.scriptloader.loadSubScript(LIBRARY_SCRIPT, window);
 
   function createCanvas() {
     const container = document.createElement("div");
@@ -49,10 +49,10 @@
     context.setTransform(scale, 0, 0, scale, 0, 0);
   }
 
-  function fetchVideo() {
+  function fetchVideo(videoPath) {
     return new Promise((resolve, reject) => {
       const request = new XMLHttpRequest();
-      request.open("GET", VIDEO_PATH, true);
+      request.open("GET", videoPath, true);
       request.responseType = "blob";
       request.onload = () => {
         if (request.status === 0 || request.status === 200) {
@@ -85,9 +85,18 @@
     animationFrame = requestAnimationFrame(renderFrame);
   }
 
-  async function loadVideo() {
+  async function loadVideo(videoPath) {
     try {
-      objectUrl = URL.createObjectURL(await fetchVideo());
+      if (animationFrame !== null) {
+        cancelAnimationFrame(animationFrame);
+        animationFrame = null;
+      }
+      video?.remove();
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+
+      objectUrl = URL.createObjectURL(await fetchVideo(videoPath));
       video = document.createElement("video");
       video.id = "komorebi-video";
       video.src = objectUrl;
@@ -128,7 +137,9 @@
     resizeObserver = new ResizeObserver(resizeCanvas);
     resizeObserver.observe(document.documentElement);
 
-    loadVideo();
+    window.KomorebiLibrary.init(loadVideo).catch(error => {
+      console.error("Komorebi library failed to initialize", error);
+    });
     window.addEventListener("unload", cleanup, { once: true });
   }
 
