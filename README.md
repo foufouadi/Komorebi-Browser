@@ -98,7 +98,7 @@ not been implemented yet.
 ## Current architecture
 
 The implementation is isolated in
-[`browser/base/content/komorebi`](browser/base/content/komorebi/README.md).
+[`browser/base/content/komorebi`](browser/base/content/komorebi/).
 Only two integration points are added to Firefox itself:
 
 1. `browser/base/content/browser.xhtml` loads the Komorebi entry point.
