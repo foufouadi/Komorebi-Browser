@@ -31,6 +31,7 @@ transforms:
 tasks-from:
     - awsy.yml
     - compiled.yml
+    - devtools-compat.yml
     - firefox-ui.yml
     - marionette.yml
     - misc.yml

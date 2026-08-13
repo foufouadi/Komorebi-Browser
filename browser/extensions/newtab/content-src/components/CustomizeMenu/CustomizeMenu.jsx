@@ -144,7 +144,7 @@ export class _CustomizeMenu extends React.PureComponent {
                 onClick={() => this.props.onOpen()}
                 iconsrc="chrome://global/skin/icons/edit-outline.svg"
                 iconposition="end"
-                type="default"
+                type="primary"
               ></moz-button>
             ) : (
               <button

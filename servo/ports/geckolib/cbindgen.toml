@@ -1328,6 +1328,10 @@ renaming_overrides_prefixing = true
   explicit operator bool() const { return IsSome(); }
 
   const T& operator*() const { return AsSome(); }
+
+  const T* operator->() const {
+    return &AsSome();
+  }
 """
 
 "NumericType" = """

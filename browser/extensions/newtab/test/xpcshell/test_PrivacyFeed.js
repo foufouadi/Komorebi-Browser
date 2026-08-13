@@ -135,7 +135,12 @@ add_task(async function test_broadcasts_counts_only_on_tick() {
 
     await feed.onAction({ type });
 
-    Assert.ok(feed.store.dispatch.calledOnce, `Dispatched once on ${type}`);
+    // One broadcast per tick. The feed may also dispatch a SetPref to seed the
+    // celebration baseline, so count broadcasts rather than all dispatches.
+    const broadcasts = feed.store.dispatch
+      .getCalls()
+      .filter(c => c.args[0]?.type === actionTypes.WIDGETS_PRIVACY_UPDATE);
+    Assert.equal(broadcasts.length, 1, `Broadcast once on ${type}`);
     const action = broadcastCall(feed);
     Assert.equal(action.data.trackersToday, 42, "Uses the total, not trackers");
     Assert.equal(action.data.sitesToday, 7, "Includes the site count");
@@ -397,17 +402,21 @@ add_task(async function test_pref_changed_triggers_fetch() {
     type: actionTypes.PREF_CHANGED,
     data: { name: PREF_SYSTEM_PRIVACY_ENABLED },
   });
-  Assert.ok(
-    feed.store.dispatch.calledOnce,
-    "Fetches on enablement PREF_CHANGED"
-  );
+  // Count broadcasts, not raw dispatches: seeding the celebration baseline
+  // also emits a SetPref.
+  const broadcasts = () =>
+    feed.store.dispatch
+      .getCalls()
+      .filter(c => c.args[0]?.type === actionTypes.WIDGETS_PRIVACY_UPDATE)
+      .length;
+  Assert.equal(broadcasts(), 1, "Fetches on enablement PREF_CHANGED");
 
   // ...but an unrelated pref should not.
   await feed.onAction({
     type: actionTypes.PREF_CHANGED,
     data: { name: "some.unrelated.pref" },
   });
-  Assert.ok(feed.store.dispatch.calledOnce, "Ignores unrelated PREF_CHANGED");
+  Assert.equal(broadcasts(), 1, "Ignores unrelated PREF_CHANGED");
 
   sandbox.restore();
 });
@@ -426,4 +435,256 @@ add_task(async function test_getSitesVisitedToday_counts_distinct_origins() {
   Assert.equal(count, 2, "Counts distinct origins visited today, not visits");
 
   await PlacesUtils.history.clear();
+});
+
+// --- Count-up celebration state machine (HNT-2845) -------------------------
+
+const PREF_CELEBRATION_STATE = "widgets.privacy.celebrationState";
+const PREF_FORCE_CELEBRATION = "widgets.privacy.forceCelebration";
+const PREF_CELEBRATION_THRESHOLD = "widgets.privacy.celebrationThreshold";
+
+// utcDayKey() in PrivacyFeed keys off the UTC date, matching the tracking DB.
+function utcToday() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// resolveCelebration persists through ac.SetPref, so fold each write back into
+// the fake store the way the real Prefs feed would.
+function celebrationFeed(values = {}) {
+  const feed = feedWithPrefs({ ...values });
+  const { dispatch } = feed.store;
+  feed.store.dispatch = sinon.spy(action => {
+    if (action.type === actionTypes.SET_PREF) {
+      feed.store.state.Prefs.values[action.data.name] = action.data.value;
+    }
+    return dispatch(action);
+  });
+  return feed;
+}
+
+function storedCelebrationState(feed) {
+  const raw = feed.store.state.Prefs.values[PREF_CELEBRATION_STATE];
+  return raw ? JSON.parse(raw) : null;
+}
+
+add_task(async function test_celebration_seeds_baseline_without_awarding() {
+  const feed = celebrationFeed();
+
+  Assert.equal(feed.resolveCelebration(40), null, "No award on the first run");
+
+  const state = storedCelebrationState(feed);
+  Assert.equal(state.date, utcToday(), "Seeds today's UTC date");
+  Assert.equal(state.baselineCount, 40, "Seeds the baseline at the live count");
+  Assert.equal(state.pending, null, "Nothing pending after seeding");
+});
+
+add_task(async function test_celebration_below_threshold_does_not_award() {
+  const feed = celebrationFeed({
+    [PREF_CELEBRATION_STATE]: JSON.stringify({
+      date: utcToday(),
+      baselineCount: 40,
+      pending: null,
+    }),
+  });
+
+  Assert.equal(feed.resolveCelebration(49), null, "+9 is below the +10 gate");
+  Assert.equal(
+    storedCelebrationState(feed).baselineCount,
+    40,
+    "Baseline is left alone so the climb keeps accumulating"
+  );
+});
+
+add_task(async function test_celebration_awards_at_threshold() {
+  const feed = celebrationFeed({
+    [PREF_CELEBRATION_STATE]: JSON.stringify({
+      date: utcToday(),
+      baselineCount: 40,
+      pending: null,
+    }),
+  });
+
+  const award = feed.resolveCelebration(50);
+
+  Assert.equal(award.fromCount, 40, "Counts up from the old baseline");
+  Assert.equal(award.toCount, 50, "Counts up to the live count");
+  Assert.ok(!award.forcedTier, "A real award carries no forced tier");
+  Assert.equal(
+    storedCelebrationState(feed).baselineCount,
+    50,
+    "Baseline advances so the next +10 is measured from here"
+  );
+});
+
+add_task(async function test_celebration_respects_threshold_pref() {
+  const feed = celebrationFeed({
+    [PREF_CELEBRATION_THRESHOLD]: 25,
+    [PREF_CELEBRATION_STATE]: JSON.stringify({
+      date: utcToday(),
+      baselineCount: 0,
+      pending: null,
+    }),
+  });
+
+  Assert.equal(feed.resolveCelebration(24), null, "Below the raised gate");
+  Assert.ok(feed.resolveCelebration(25), "Awards once the raised gate is met");
+});
+
+add_task(async function test_celebration_reseeds_on_utc_rollover() {
+  const feed = celebrationFeed({
+    [PREF_CELEBRATION_STATE]: JSON.stringify({
+      date: "2000-01-01",
+      baselineCount: 500,
+      pending: null,
+    }),
+  });
+
+  Assert.equal(
+    feed.resolveCelebration(3),
+    null,
+    "Yesterday's state can't fire"
+  );
+
+  const state = storedCelebrationState(feed);
+  Assert.equal(state.date, utcToday(), "Re-dates to today");
+  Assert.equal(state.baselineCount, 3, "Re-seeds at the new day's count");
+});
+
+add_task(async function test_celebration_reseeds_when_count_goes_backwards() {
+  // Cleared history drops the count below the baseline; the rebound back up
+  // must not read as a fresh +10.
+  const feed = celebrationFeed({
+    [PREF_CELEBRATION_STATE]: JSON.stringify({
+      date: utcToday(),
+      baselineCount: 300,
+      pending: null,
+    }),
+  });
+
+  Assert.equal(feed.resolveCelebration(5), null, "No award on the way down");
+  Assert.equal(
+    storedCelebrationState(feed).baselineCount,
+    5,
+    "Re-seeds at the lower count"
+  );
+});
+
+add_task(async function test_celebration_replays_pending_then_expires_it() {
+  const fresh = {
+    date: utcToday(),
+    baselineCount: 50,
+    pending: { awardedAt: Date.now(), fromCount: 40, toCount: 50 },
+  };
+  const feed = celebrationFeed({
+    [PREF_CELEBRATION_STATE]: JSON.stringify(fresh),
+  });
+
+  Assert.equal(
+    feed.resolveCelebration(50).toCount,
+    50,
+    "An unplayed award is re-offered to the next tab"
+  );
+
+  // Older than the 10 minute window.
+  const stale = celebrationFeed({
+    [PREF_CELEBRATION_STATE]: JSON.stringify({
+      ...fresh,
+      pending: { ...fresh.pending, awardedAt: Date.now() - 11 * 60 * 1000 },
+    }),
+  });
+
+  Assert.equal(stale.resolveCelebration(50), null, "A stale award is dropped");
+  Assert.equal(
+    storedCelebrationState(stale).pending,
+    null,
+    "And cleared, so it can't resurface"
+  );
+});
+
+add_task(async function test_celebration_acknowledgement() {
+  const pending = { awardedAt: 1234, fromCount: 40, toCount: 50 };
+  const base = {
+    date: utcToday(),
+    baselineCount: 50,
+    pending,
+  };
+
+  const matched = celebrationFeed({
+    [PREF_CELEBRATION_STATE]: JSON.stringify(base),
+  });
+  matched.onAction({
+    type: actionTypes.WIDGETS_PRIVACY_MARK_CELEBRATED,
+    data: 1234,
+  });
+  Assert.equal(
+    storedCelebrationState(matched).pending,
+    null,
+    "A matching ack clears the pending award"
+  );
+
+  // A slow tab acking an award that a newer one already replaced must not
+  // clear the newer one.
+  const mismatched = celebrationFeed({
+    [PREF_CELEBRATION_STATE]: JSON.stringify(base),
+  });
+  mismatched.onAction({
+    type: actionTypes.WIDGETS_PRIVACY_MARK_CELEBRATED,
+    data: 9999,
+  });
+  Assert.deepEqual(
+    storedCelebrationState(mismatched).pending,
+    pending,
+    "A stale ack leaves the current award pending"
+  );
+});
+
+add_task(async function test_celebration_forced_tier() {
+  const feed = celebrationFeed({
+    [PREF_FORCE_CELEBRATION]: "cap",
+    [PREF_CELEBRATION_STATE]: JSON.stringify({
+      date: utcToday(),
+      baselineCount: 40,
+      pending: null,
+    }),
+  });
+
+  const forced = feed.resolveCelebration(100);
+
+  Assert.equal(forced.forcedTier, "cap", "Passes the tier through to content");
+  Assert.equal(forced.toCount, 100, "Counts up to the live count");
+  Assert.equal(forced.fromCount, 75, "Counts up across the debug span");
+  Assert.equal(
+    storedCelebrationState(feed).baselineCount,
+    40,
+    "The debug lever leaves the real baseline untouched"
+  );
+});
+
+add_task(async function test_celebration_forced_tier_clamps_at_zero() {
+  const feed = celebrationFeed({ [PREF_FORCE_CELEBRATION]: "brief" });
+
+  Assert.equal(
+    feed.resolveCelebration(3).fromCount,
+    0,
+    "Never counts up from a negative number"
+  );
+});
+
+add_task(async function test_celebration_survives_malformed_state() {
+  // The pref is hand-edited during QA, and `null` is valid JSON that used to
+  // throw on property access — either would take the count broadcast down.
+  for (const raw of ["{not json", "null", '"a string"', "[]"]) {
+    const feed = celebrationFeed({ [PREF_CELEBRATION_STATE]: raw });
+
+    Assert.equal(
+      feed.resolveCelebration(40),
+      null,
+      `Recovers from ${raw} instead of throwing`
+    );
+    Assert.equal(
+      storedCelebrationState(feed).baselineCount,
+      40,
+      `Re-seeds a usable baseline after ${raw}`
+    );
+  }
 });

@@ -2564,11 +2564,11 @@
           "Private": "{text/color}",
           "Smart Light (WIP)": "{text/color}",
           "inactive": {
-            "Light": "{text/color/deemphasized}",
-            "Dark": "{text/color/deemphasized}",
-            "HCM": "{text/color/deemphasized}",
-            "Private": "{text/color/deemphasized}",
-            "Smart Light (WIP)": "{text/color/deemphasized}"
+            "Light": "{toolbox/text/color}",
+            "Dark": "{toolbox/text/color}",
+            "HCM": "{toolbox/text/color}",
+            "Private": "{toolbox/text/color}",
+            "Smart Light (WIP)": "{toolbox/text/color}"
           }
         }
       }
@@ -3090,6 +3090,77 @@
             "HCM": "{button/background/color/active}",
             "Private": "{button/background/color/active}",
             "Smart Light (WIP)": "{button/background/color/active}"
+          }
+        }
+      }
+    },
+    "page-nav": {
+      "button": {
+        "background": {
+          "color": {
+            "active": {
+              "Light": "{button/background/color/active}",
+              "Dark": "{button/background/color/active}",
+              "HCM": "{button/background/color/active}",
+              "Private": "{button/background/color/active}",
+              "Smart Light (WIP)": "{button/background/color/active}"
+            },
+            "hover": {
+              "Light": "{button/background/color/hover}",
+              "Dark": "{button/background/color/hover}",
+              "HCM": "{button/background/color/hover}",
+              "Private": "{button/background/color/hover}",
+              "Smart Light (WIP)": "{button/background/color/hover}"
+            },
+            "selected": {
+              "Light": "{color/accent/primary}",
+              "Dark": "{color/accent/primary}",
+              "HCM": "{color/accent/primary}",
+              "Private": "{color/accent/primary}",
+              "Smart Light (WIP)": "{color/accent/primary}"
+            }
+          }
+        },
+        "border": {
+          "color": {
+            "Light": "{border/color/transparent}",
+            "Dark": "{border/color/transparent}",
+            "HCM": "{ButtonText}",
+            "Private": "{border/color/transparent}",
+            "Smart Light (WIP)": "{border/color/transparent}"
+          }
+        },
+        "indicator": {
+          "background": {
+            "color": {
+              "Light": "rgba(0, 0, 0, 0)",
+              "Dark": "rgba(0, 0, 0, 0)",
+              "HCM": "rgba(0, 0, 0, 0)",
+              "Private": "rgba(0, 0, 0, 0)",
+              "Smart Light (WIP)": "rgba(0, 0, 0, 0)"
+            }
+          }
+        },
+        "text": {
+          "color": {
+            "selected": {
+              "Light": "{button/text/color/primary}",
+              "Dark": "{button/text/color/primary}",
+              "HCM": "{button/text/color/primary}",
+              "Private": "{button/text/color/primary}",
+              "Smart Light (WIP)": "{button/text/color/primary}"
+            }
+          }
+        }
+      },
+      "hr": {
+        "background": {
+          "color": {
+            "Light": "{border/color/deemphasized}",
+            "Dark": "{border/color/deemphasized}",
+            "HCM": "{border/color/deemphasized}",
+            "Private": "{border/color/deemphasized}",
+            "Smart Light (WIP)": "{border/color/deemphasized}"
           }
         }
       }
@@ -3970,7 +4041,7 @@
           "Value": 8,
           "touch": {
             "narrow": {
-              "Value": 0
+              "Value": 8
             }
           }
         },
@@ -4233,6 +4304,36 @@
           "Value": "{button/min-height}",
           "small": {
             "Value": "{button/min-height/small}"
+          }
+        }
+      }
+    },
+    "page-nav": {
+      "button": {
+        "border": {
+          "radius": {
+            "Value": "{border/radius/circle}",
+            "focused": {
+              "Value": "{border/radius/circle}"
+            }
+          }
+        },
+        "indicator": {
+          "width": {
+            "Value": 0
+          }
+        },
+        "padding": {
+          "Value": "{space/medium}",
+          "small": {
+            "Value": "{space/medium}"
+          }
+        }
+      },
+      "focus": {
+        "outline": {
+          "offset": {
+            "Value": "{focus/outline/offset}"
           }
         }
       }

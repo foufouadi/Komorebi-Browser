@@ -45,7 +45,7 @@ const ATTR_CODE_VALUE_REGEX = /[a-zA-Z0-9_%\\-\\.\\(\\)]*/;
 const ATTR_CODE_FIELD_SEPARATOR = "%26"; // URL-encoded &
 const ATTR_CODE_KEY_VALUE_SEPARATOR = "%3D"; // URL-encoded =
 const MSCLKID_KEY_PREFIX = "storeBingAd_";
-const REFERRAL_PREFIX = "fxrefer%3A"; // URL-encoded "fxrefer:"
+const REFERRAL_PREFIX = "fxrefer";
 const REFERRAL_SUBMITTED_PREF = "browser.referrals.pingSubmitted";
 const ATTR_CODE_KEYS = [
   "source",
@@ -177,7 +177,7 @@ export var AttributionCode = {
   },
 
   /**
-   * Transforms the utm_content value "fxrefer%3A0123456789ABCXYZ"
+   * Transforms the utm_content value "fxrefer0123456789ABCXYZ"
    * into the referral code 0123456789ABCXYZ and submits via a separate
    * referrals Glean ping.
    */

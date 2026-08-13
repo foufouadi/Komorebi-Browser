@@ -584,8 +584,8 @@ void RenderDXGITextureHost::DeleteTextureHandle() {
     }
   }
 
-  for (int i = 0; i < 2; ++i) {
-    mTextureHandle[i] = 0;
+  for (unsigned int& i : mTextureHandle) {
+    i = 0;
   }
 
   mTexture = nullptr;

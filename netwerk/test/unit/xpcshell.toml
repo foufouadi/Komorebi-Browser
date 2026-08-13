@@ -571,9 +571,6 @@ skip-if = [
 
 ["test_content_decoding_error_telemetry.js"]
 run-sequentially = ["true"]
-skip-if = [
-  "artifact", # Bug 2040417 - known limitation of FOG ping testing APIs
-]
 
 ["test_content_encoding_gzip.js"]
 
@@ -2000,6 +1997,8 @@ run-sequentially = ["true"] # node server exceptions dont replay well
 run-sequentially = ["true"] # node server exceptions dont replay well
 
 ["test_websocket_offline.js"]
+
+["test_websocket_protocol_handler.js"]
 
 ["test_websocket_proxy.js"]
 head = "head_cookies.js head_channels.js head_cache.js head_http3.js http3_proxy_common.js"

@@ -6,8 +6,8 @@
 //!
 //! This implements functionality to pin an app to the taskbar using the
 //! TaskbarManager WinRT API. This was originally exposed to UWP/MSIX apps, and
-//! later extended to unpackaged Win32 apps while locking down the undocumented
-//! [IPinnedList3 COM API][super::com].
+//! later extended to unpackaged Win32 and packaged (Win32 MSIX) apps while
+//! locking down the undocumented [IPinnedList3 COM API][super::com].
 //!
 //! ## Secondary Pinning
 //!
@@ -42,7 +42,11 @@
 use nserror::{NS_ERROR_NOT_AVAILABLE, NS_ERROR_UNEXPECTED, nsresult};
 use nsstring::nsAString;
 use std::sync::LazyLock;
-use windows::{ApplicationModel::Package, UI::Shell::TaskbarManager, core::Error as WinError};
+use windows::{
+    ApplicationModel::Package,
+    UI::Shell::{ITaskbarManagerDesktopAppSupportStatics, TaskbarManager},
+    core::{Error as WinError, factory},
+};
 
 use crate::{
     limited_access_features::LimitedAccessFeatureService,
@@ -51,6 +55,8 @@ use crate::{
 
 use super::PinResult;
 
+/// Lazily attempts to unlock the taskbar pin Limited Access Feature, at most
+/// once.
 static LAF_LOCK: LazyLock<Result<(), nsresult>> = LazyLock::new(|| {
     let svc = LimitedAccessFeatureService::new();
     let feature_id = svc.get_taskbar_pin_feature_id()?;
@@ -58,7 +64,22 @@ static LAF_LOCK: LazyLock<Result<(), nsresult>> = LazyLock::new(|| {
     feature.unlock()?.then_some(()).ok_or(NS_ERROR_UNEXPECTED)
 });
 
-pub(super) fn is_pinning_allowed() -> bool {
+/// Context indicating whether the WinRT pinning APIs are supported on the
+/// current OS version and, if so, whether pinning is currently allowed.
+pub(super) enum CanPin {
+    Supported { allowed: bool },
+    Unsupported,
+}
+
+/// Checks whether the taskbar pinning APIs are supported on the current OS
+/// version and, if so, whether pinning is currently allowed.
+///
+/// Note: This is a best-effort check. For Win32 desktop apps, we always report
+/// that pinning is allowed when it is supported. We do this because we cannot
+/// distinguish between cases where pinning is allowed due to conditions we
+/// handle during pinning and cases where pinning will fail for reasons beyond
+/// our control.
+pub(super) fn can_pin() -> Result<CanPin, WinError> {
     if let Err(_e) = *LAF_LOCK {
         // Limited Access Feature no longer necessary for Windows 11 26200 Build
         // 7840, and possibly other channels.
@@ -67,9 +88,26 @@ pub(super) fn is_pinning_allowed() -> bool {
         );
     }
 
-    TaskbarManager::GetDefault()
-        .and_then(|m| m.IsPinningAllowed())
-        .unwrap_or(false)
+    // Verify pinning is supported for Win32 desktop applications - applies to
+    // both packaged (MSIX) and unpackaged installs.
+    if factory::<TaskbarManager, ITaskbarManagerDesktopAppSupportStatics>().is_err() {
+        return Ok(CanPin::Unsupported);
+    }
+
+    match Package::Current() {
+        Ok(_) => Ok(CanPin::Supported {
+            allowed: TaskbarManager::GetDefault()?.IsPinningAllowed()?,
+        }),
+        Err(_) => {
+            // `TaskbarManager::IsPinningAllowed` returns false if no
+            // shell:appsfolder entry exists, which is only ever the case with
+            // unpackaged installs. We can't rely on `IsPinningAllowed` for our
+            // use case because we dynamically generate shell:appsfolder entries
+            // when not present while pinning. For this reason, we assume
+            // pinning is allowed when supported and not packaged.
+            Ok(CanPin::Supported { allowed: true })
+        }
+    }
 }
 
 /// Pins the provided app to the taskbar using the WinRT TaskbarManager API,

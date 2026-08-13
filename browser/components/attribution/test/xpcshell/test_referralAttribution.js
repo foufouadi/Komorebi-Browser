@@ -29,8 +29,7 @@ add_task(function test_referral_extracted_and_submitted() {
 
   const referralCode = "0123456789ABCDEF";
   const code =
-    "source%3Dgoogle.com%26medium%3Dorganic%26content%3Dfxrefer%3A" +
-    referralCode;
+    "source%3Dgoogle.com%26medium%3Dorganic%26content%3Dfxrefer" + referralCode;
 
   let submitted = false;
   GleanPings.referrals.testBeforeNextSubmit(() => {
@@ -63,7 +62,7 @@ add_task(function test_referral_extracted_and_submitted() {
 add_task(function test_empty_referral_code() {
   resetState();
 
-  const code = "source%3Dgoogle.com%26content%3Dfxrefer%3A";
+  const code = "source%3Dgoogle.com%26content%3Dfxrefer";
 
   let submitted = false;
   GleanPings.referrals.testBeforeNextSubmit(() => {
@@ -87,7 +86,7 @@ add_task(function test_empty_referral_code() {
 add_task(function test_invalid_attribution_still_submitted() {
   resetState();
 
-  const code = "content%3Dfxrefer%3AABC123%26notavalidkey%3Dsomething";
+  const code = "content%3DfxreferABC123%26notavalidkey%3Dsomething";
 
   let submitted = false;
   GleanPings.referrals.testBeforeNextSubmit(() => {
@@ -110,7 +109,7 @@ add_task(function test_invalid_attribution_still_submitted() {
 add_task(function test_referral_submitted_only_once() {
   resetState();
 
-  const code = "source%3Dgoogle.com%26content%3Dfxrefer%3AABC123";
+  const code = "source%3Dgoogle.com%26content%3DfxreferABC123";
 
   let firstSubmit = false;
   GleanPings.referrals.testBeforeNextSubmit(() => {
@@ -143,7 +142,7 @@ add_task(function test_prefix_only_matches_content_field() {
 
   // The referral prefix in a field other than `content` must be treated as an
   // ordinary value: no extraction, no ping.
-  const code = "source%3Dgoogle.com%26campaign%3Dfxrefer%3AABC123";
+  const code = "source%3Dgoogle.com%26campaign%3DfxreferABC123";
 
   let submitted = false;
   GleanPings.referrals.testBeforeNextSubmit(() => {
@@ -160,7 +159,7 @@ add_task(function test_prefix_only_matches_content_field() {
   );
   Assert.deepEqual(
     parsed,
-    { source: "google.com", campaign: "fxrefer%3AABC123" },
+    { source: "google.com", campaign: "fxreferABC123" },
     "The prefixed value passes through unchanged in a non-content field"
   );
 });

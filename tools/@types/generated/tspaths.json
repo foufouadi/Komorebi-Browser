@@ -400,6 +400,9 @@
       "chrome://browser/content/urlbar/UrlbarContentPrefs.mjs": [
         "../../../browser/components/urlbar/content/UrlbarContentPrefs.mjs"
       ],
+      "chrome://browser/content/urlbar/UrlbarContentURIUtils.mjs": [
+        "../../../browser/components/urlbar/content/UrlbarContentURIUtils.mjs"
+      ],
       "chrome://browser/content/urlbar/UrlbarEventBufferer.mjs": [
         "../../../browser/components/urlbar/content/UrlbarEventBufferer.mjs"
       ],

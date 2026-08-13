@@ -478,15 +478,19 @@ function makeASRouterMessages({ position, isVisible = true } = {}) {
 // content feed). To give the content feed a real DOM node, the surrounding
 // tests mount DiscoveryStreamBase against a store with a topstories section and
 // a minimal layout so it renders ".ds-layout".
-function findASRouterMessagePositionIndices(container, containerSelector) {
-  const root = container.querySelector(containerSelector);
+// Takes one or more container selectors, in document order, so callers can span
+// .content and the .content-full-width band the feed now lives in.
+function findASRouterMessagePositionIndices(container, ...containerSelectors) {
   const indices = { messageIdx: -1, topSitesIdx: -1, contentFeedIdx: -1 };
-  if (!root) {
+  const roots = containerSelectors
+    .map(selector => container.querySelector(selector))
+    .filter(Boolean);
+  if (!roots.length) {
     return indices;
   }
-  const ordered = [root, ...root.querySelectorAll("*")];
+  const ordered = roots.flatMap(root => [root, ...root.querySelectorAll("*")]);
   const positionOf = selector => {
-    const node = root.querySelector(selector);
+    const node = ordered.find(candidate => candidate.matches(selector));
     return node ? ordered.indexOf(node) : -1;
   };
   indices.messageIdx = positionOf(".asrouter-newtab-message-wrapper");
@@ -514,13 +518,16 @@ const TOPSTORIES_SECTION = {
   rows: [],
 };
 
-function renderBaseContentWithFeed(props) {
+// storePrefs goes into the Redux store rather than BaseContent's props, for
+// values the connected DiscoveryStreamBase reads itself (e.g. widgets gating).
+function renderBaseContentWithFeed(props, storePrefs = {}) {
   return render(
     <Provider
       store={makeStore(
         {
           "feeds.section.topstories": true,
           "feeds.system.topstories": true,
+          ...storePrefs,
         },
         {
           DiscoveryStream: {
@@ -604,7 +611,8 @@ describe("<BaseContent> Nova layout ASRouterNewTabMessage positions", () => {
     });
     const { messageIdx, topSitesIdx } = findASRouterMessagePositionIndices(
       container,
-      ".content"
+      ".content",
+      ".content-full-width"
     );
 
     expect(topSitesIdx).toBeGreaterThan(-1);
@@ -612,34 +620,81 @@ describe("<BaseContent> Nova layout ASRouterNewTabMessage positions", () => {
     expect(messageIdx).toBeLessThan(topSitesIdx);
   });
 
-  it("renders ASRouterNewTabMessage after TopSites and before the content feed for ABOVE_WIDGETS", () => {
+  // The two positions below both land before the content feed, so ordering
+  // alone cannot tell them apart. Each also asserts which container it rendered
+  // in: ABOVE_WIDGETS sits at the end of .content, above the whole band, while
+  // ABOVE_CONTENT_FEED is slotted inside the band between the widgets and feed.
+  it("renders ASRouterNewTabMessage in .content after TopSites and before the content feed for ABOVE_WIDGETS", () => {
     const { container } = renderBaseContentWithFeed({
       ...NOVA_BASE_PROPS,
       Messages: makeASRouterMessages({ position: "ABOVE_WIDGETS" }),
     });
     const { messageIdx, topSitesIdx, contentFeedIdx } =
-      findASRouterMessagePositionIndices(container, ".content");
+      findASRouterMessagePositionIndices(
+        container,
+        ".content",
+        ".content-full-width"
+      );
 
     expect(topSitesIdx).toBeGreaterThan(-1);
     expect(contentFeedIdx).toBeGreaterThan(-1);
     expect(messageIdx).toBeGreaterThan(-1);
     expect(messageIdx).toBeGreaterThan(topSitesIdx);
     expect(messageIdx).toBeLessThan(contentFeedIdx);
+    expect(
+      container.querySelector(".content .asrouter-newtab-message-wrapper")
+    ).not.toBeNull();
   });
 
-  it("renders ASRouterNewTabMessage before the content feed for ABOVE_CONTENT_FEED", () => {
+  it("renders ASRouterNewTabMessage inside the content band before the content feed for ABOVE_CONTENT_FEED", () => {
     const { container } = renderBaseContentWithFeed({
       ...NOVA_BASE_PROPS,
       Messages: makeASRouterMessages({ position: "ABOVE_CONTENT_FEED" }),
     });
     const { messageIdx, topSitesIdx, contentFeedIdx } =
-      findASRouterMessagePositionIndices(container, ".content");
+      findASRouterMessagePositionIndices(
+        container,
+        ".content",
+        ".content-full-width"
+      );
 
     expect(topSitesIdx).toBeGreaterThan(-1);
     expect(contentFeedIdx).toBeGreaterThan(-1);
     expect(messageIdx).toBeGreaterThan(-1);
     expect(messageIdx).toBeGreaterThan(topSitesIdx);
     expect(messageIdx).toBeLessThan(contentFeedIdx);
+    expect(
+      container.querySelector(
+        ".content-full-width .asrouter-newtab-message-wrapper"
+      )
+    ).not.toBeNull();
+  });
+
+  // The cases above leave widgets off, so their "before the content feed" check
+  // matches the first .ds-layout in the band and cannot see the widgets/feed
+  // boundary. ABOVE_CONTENT_FEED has to land on the far side of the widgets,
+  // so pin that ordering against the two markers directly.
+  it("renders ASRouterNewTabMessage after the widgets for ABOVE_CONTENT_FEED", () => {
+    const { container } = renderBaseContentWithFeed(
+      {
+        ...NOVA_BASE_PROPS,
+        Messages: makeASRouterMessages({ position: "ABOVE_CONTENT_FEED" }),
+      },
+      { "widgets.system.enabled": true }
+    );
+    const band = container.querySelector(".content-full-width");
+    const ordered = [band, ...band.querySelectorAll("*")];
+    const indexOfNode = selector =>
+      ordered.indexOf(band.querySelector(selector));
+
+    const widgetsIdx = indexOfNode(".ds-layout-widgets");
+    const feedIdx = indexOfNode(".ds-layout:not(.discovery-stream)");
+    const messageIdx = indexOfNode(".asrouter-newtab-message-wrapper");
+
+    expect(widgetsIdx).toBeGreaterThan(-1);
+    expect(feedIdx).toBeGreaterThan(-1);
+    expect(messageIdx).toBeGreaterThan(widgetsIdx);
+    expect(messageIdx).toBeLessThan(feedIdx);
   });
 });
 

@@ -94,6 +94,22 @@ class ScrollTimeline : public AnimationTimeline,
     };
     Type mType = Type::Root;
 
+    static Type TypeFromStyleScroller(StyleScroller aType) {
+      switch (aType) {
+        case StyleScroller::Root:
+          break;
+        case StyleScroller::Nearest:
+          return Type::Nearest;
+        case StyleScroller::SelfElement:
+          return Type::Self;
+        default:
+          MOZ_ASSERT_UNREACHABLE("Unhandled scroller type");
+          break;
+      }
+
+      return Type::Root;
+    }
+
    private:
     // This is the target (that is being animade) for:
     //   - Type::Root
@@ -120,21 +136,7 @@ class ScrollTimeline : public AnimationTimeline,
 
     static ScrollerInfo Anonymous(StyleScroller aType,
                                   const NonOwningAnimationTarget& aTarget) {
-      const auto type = [aType]() {
-        switch (aType) {
-          case StyleScroller::Root:
-            break;
-          case StyleScroller::Nearest:
-            return Type::Nearest;
-          case StyleScroller::SelfElement:
-            return Type::Self;
-          default:
-            MOZ_ASSERT_UNREACHABLE("Unhandled scroller type");
-            break;
-        }
-
-        return Type::Root;
-      }();
+      const auto type = TypeFromStyleScroller(aType);
       // Store the animation target - we will look up the source at evaluation
       // time.
       return {type, aTarget.mElement, aTarget.mPseudoRequest};
@@ -307,6 +309,8 @@ class ScrollTimeline : public AnimationTimeline,
       const AnimationRange& aStyleRange) const;
 
   void AutoAlignStartTime();
+
+  bool IsReusableAnonymousTimeline(const StyleScrollFunction& aScroll) const;
 
  protected:
   virtual ~ScrollTimeline();

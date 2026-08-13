@@ -340,9 +340,11 @@ class WaylandSurface final {
   void SetParentLocked(const WaylandSurfaceLock& aProofOfLock,
                        RefPtr<WaylandSurface> aParent);
 
-  bool EnableColorManagementLocked(const WaylandSurfaceLock& aProofOfLock,
-                                   mozilla::gfx::YUVColorSpace aColorSpace,
-                                   gfx::TransferFunction aTransferFunction);
+  bool EnableColorManagementLocked(
+      const WaylandSurfaceLock& aProofOfLock,
+      mozilla::gfx::YUVColorSpace aColorSpace,
+      gfx::TransferFunction aTransferFunction,
+      const mozilla::gfx::HDRMetadata& aHDRMetadata);
   void SetColorRepresentationLocked(const WaylandSurfaceLock& aProofOfLock,
                                     mozilla::gfx::YUVColorSpace aColorSpace,
                                     bool aFullRange,
@@ -556,6 +558,14 @@ class WaylandSurface final {
   WUniquePtr<wp_color_management_surface_v1> mColorSurface;
   WUniquePtr<wp_color_representation_surface_v1> mColorRepresentationSurface;
   WUniquePtr<wp_image_description_v1> mImageDescription;
+
+  static void SetContentLightLevel(
+      wp_image_description_creator_params_v1* aParams,
+      const mozilla::gfx::ContentLightLevel& aContentLightLevel);
+
+  static void SetMasteringDisplayColorVolume(
+      wp_image_description_creator_params_v1* aParams,
+      const mozilla::gfx::Smpte2086Metadata& aSmpte2086);
 };
 
 }  // namespace mozilla::widget

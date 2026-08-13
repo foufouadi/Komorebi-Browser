@@ -498,7 +498,6 @@ scheme = "https"
 skip-if = [
   "http2",
   "http3",
-  "nova", # Bug 2058203
 ]
 
 ["test_ext_tabs_connect.html"]

@@ -402,8 +402,6 @@ class CircularRowBuffer {
 
 SkConvolutionFilter1D::SkConvolutionFilter1D() : fMaxFilter(0) {}
 
-SkConvolutionFilter1D::~SkConvolutionFilter1D() = default;
-
 bool SkConvolutionFilter1D::AddFilter(int filterOffset,
                                       const ConvolutionFixed* filterValues,
                                       int filterLength) {

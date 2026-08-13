@@ -194,7 +194,13 @@
 
 .nova-enabled .edit-topsites {
   .modalOverlayOuter {
-    background: var(--panel-background-color);
+    /*
+     * @backward-compat { version 155 }
+     * The Nova value of --panel-background-color aliases --popup-background-color,
+     * which the platform only defines from 155. Remove the "revert" fallback once
+     * 155 reaches Release.
+     */
+    background: var(--panel-background-color, revert);
     border: 1px solid var(--panel-border-color);
   }
 

@@ -110,7 +110,6 @@ class PrivateBrowsingLockFeature(
     private var browserStoreScope: CoroutineScope? = null
     private var appStoreScope: CoroutineScope? = null
     private var isFeatureEnabled = false
-    private var openInFirefoxRequested = false
 
     init {
         isFeatureEnabled = storage.isFeatureEnabled
@@ -154,19 +153,17 @@ class PrivateBrowsingLockFeature(
         observePrivateTabsClosure()
         observeAppStoreUpdates()
 
-        appStore.dispatch(
-            PrivateBrowsingLockAction.UpdatePrivateBrowsingLock(
-                isLocked = isLocked,
-            ),
-        )
+        if (appStore.state.isPrivateScreenLocked != isLocked) {
+            appStore.dispatch(
+                PrivateBrowsingLockAction.UpdatePrivateBrowsingLock(
+                    isLocked = isLocked,
+                ),
+            )
+        }
     }
 
     private fun deactivate() {
-        browserStoreScope?.cancel()
-        browserStoreScope = null
-
-        appStoreScope?.cancel()
-        appStoreScope = null
+        cancelScopes()
 
         appStore.dispatch(
             PrivateBrowsingLockAction.UpdatePrivateBrowsingLock(
@@ -216,11 +213,7 @@ class PrivateBrowsingLockFeature(
                     flow.map { it.mode }
                         .distinctUntilChanged()
                         .filter { it != BrowsingMode.Private }
-                        .collect {
-                            if (!appStore.state.isPrivateScreenLocked) {
-                                maybeLockPrivateMode()
-                            }
-                        }
+                        .collect { maybeLockPrivateMode() }
                 }
 
                 // Observe tray visibility to lock the private tabs when leaving the tabstray unless it’s private mode.
@@ -229,23 +222,13 @@ class PrivateBrowsingLockFeature(
                         .distinctUntilChanged()
                         .filter { !it }
                         .collect {
-                            if (appStore.state.mode != BrowsingMode.Private && !appStore.state.isPrivateScreenLocked) {
+                            if (appStore.state.mode != BrowsingMode.Private) {
                                 maybeLockPrivateMode()
                             }
                         }
                 }
             }
         }
-    }
-
-    override fun onStart(owner: LifecycleOwner) {
-        super.onStart(owner)
-
-        // We want to persist the request only within a single "user session" - between 'onStart'
-        // and 'onStop' calls. 'onStart' and 'onResume' calls are significantly different within
-        // this feature, because system dialogs (like permission requests) will trigger the
-        // 'onPause' lifecycle event, but not the 'onStop'.
-        openInFirefoxRequested = false
     }
 
     override fun onStop(owner: LifecycleOwner) {
@@ -265,15 +248,37 @@ class PrivateBrowsingLockFeature(
         storage.startObservingSharedPrefs()
     }
 
-    private fun maybeLockPrivateMode() {
-        // When the app gets inactive with opened tabs, we lock the private mode.
-        if (browserStore.state.privateTabs.isNotEmpty()) {
-            appStore.dispatch(
-                PrivateBrowsingLockAction.UpdatePrivateBrowsingLock(
-                    isLocked = true,
-                ),
-            )
+    override fun onDestroy(owner: LifecycleOwner) {
+        cancelScopes()
+
+        // Clear the flag when the Activity is permanently destroyed,so it doesn't affect future browsing sessions.
+        if (owner is Activity && !owner.isChangingConfigurations) {
+            openInFirefoxRequested = false
         }
+
+        super.onDestroy(owner)
+    }
+
+    private fun maybeLockPrivateMode() {
+        if (appStore.state.isPrivateScreenLocked || browserStore.state.privateTabs.isEmpty()) {
+            return
+        }
+
+        appStore.dispatch(PrivateBrowsingLockAction.UpdatePrivateBrowsingLock(isLocked = true))
+    }
+
+    private fun cancelScopes() {
+        browserStoreScope?.cancel()
+        browserStoreScope = null
+
+        appStoreScope?.cancel()
+        appStoreScope = null
+    }
+
+    companion object {
+        // Static flag to bridge suppression signal between activities during "Open in Firefox"
+        @VisibleForTesting
+        internal var openInFirefoxRequested = false
     }
 }
 

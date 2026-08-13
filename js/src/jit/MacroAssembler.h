@@ -4478,18 +4478,18 @@ class MacroAssembler : public MacroAssemblerSpecific {
   //   Registers `value` and `temp` must differ.
 
   void atomicEffectOp64(Synchronization sync, AtomicOp op, Register64 value,
-                        const Address& mem) DEFINED_ON(x64);
+                        const Address& mem) DEFINED_ON(x64, loong64);
 
   void atomicEffectOp64(Synchronization sync, AtomicOp op, Register64 value,
                         const Address& mem, Register64 temp)
-      DEFINED_ON(arm, arm64, mips64, loong64, riscv64);
+      DEFINED_ON(arm, arm64, mips64, riscv64);
 
   void atomicEffectOp64(Synchronization sync, AtomicOp op, Register64 value,
-                        const BaseIndex& mem) DEFINED_ON(x64);
+                        const BaseIndex& mem) DEFINED_ON(x64, loong64);
 
   void atomicEffectOp64(Synchronization sync, AtomicOp op, Register64 value,
                         const BaseIndex& mem, Register64 temp)
-      DEFINED_ON(arm, arm64, mips64, loong64, riscv64);
+      DEFINED_ON(arm, arm64, mips64, riscv64);
 
   // 64-bit atomic load. On 64-bit systems, use regular load with
   // Synchronization::Load, not this method.
@@ -4556,7 +4556,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
                            Register replacement, Register valueTemp,
                            Register offsetTemp, Register maskTemp,
                            Register output, wasm::ZeroExtendIndex zeroExtend)
-      DEFINED_ON(riscv64);
+      DEFINED_ON(loong64, riscv64);
 
   void wasmAtomicExchange(const wasm::MemoryAccessDesc& access,
                           const Address& mem, Register value, Register output)
@@ -4582,7 +4582,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
                           const BaseIndex& mem, Register value,
                           Register valueTemp, Register offsetTemp,
                           Register maskTemp, Register output,
-                          wasm::ZeroExtendIndex zeroExtend) DEFINED_ON(riscv64);
+                          wasm::ZeroExtendIndex zeroExtend)
+      DEFINED_ON(loong64, riscv64);
 
   void wasmAtomicFetchOp(const wasm::MemoryAccessDesc& access, AtomicOp op,
                          Register value, const Address& mem, Register temp,
@@ -4615,7 +4616,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
                          Register value, const BaseIndex& mem,
                          Register valueTemp, Register offsetTemp,
                          Register maskTemp, Register output,
-                         wasm::ZeroExtendIndex zeroExtend) DEFINED_ON(riscv64);
+                         wasm::ZeroExtendIndex zeroExtend)
+      DEFINED_ON(loong64, riscv64);
 
   // Read-modify-write with memory.  Return no value.
   //
@@ -4654,7 +4656,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
                           Register value, const BaseIndex& mem,
                           Register valueTemp, Register offsetTemp,
                           Register maskTemp, wasm::ZeroExtendIndex zeroExtend)
-      DEFINED_ON(riscv64);
+      DEFINED_ON(loong64, riscv64);
 
   // 64-bit wide operations.
 
@@ -4694,7 +4696,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
                              const BaseIndex& mem, Register64 expected,
                              Register64 replacement, Register64 output,
                              wasm::ZeroExtendIndex zeroExtend)
-      DEFINED_ON(riscv64);
+      DEFINED_ON(loong64, riscv64);
 
   // x86: `value` must be ecx:ebx; `output` must be edx:eax.
   // ARM: Registers must be distinct; `value` and `output` must be (even,odd)
@@ -4712,7 +4714,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void wasmAtomicExchange64(const wasm::MemoryAccessDesc& access,
                             const BaseIndex& mem, Register64 value,
                             Register64 output, wasm::ZeroExtendIndex zeroExtend)
-      DEFINED_ON(riscv64);
+      DEFINED_ON(loong64, riscv64);
 
   // x86: `output` must be edx:eax, `temp` must be ecx:ebx.
   // x64: For And, Or, and Xor `output` must be rax.
@@ -4734,7 +4736,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
                            Register64 value, const BaseIndex& mem,
                            Register64 temp, Register64 output,
                            wasm::ZeroExtendIndex zeroExtend)
-      DEFINED_ON(riscv64);
+      DEFINED_ON(loong64, riscv64);
 
   void wasmAtomicFetchOp64(const wasm::MemoryAccessDesc& access, AtomicOp op,
                            const Address& value, const Address& mem,

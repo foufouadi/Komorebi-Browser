@@ -29,7 +29,7 @@ import {
   computeMemoryFrecency,
   computeMemoryStrength,
 } from "moz-src:///browser/components/aiwindow/models/memories/Memories.sys.mjs";
-import { EmbeddingsGenerator } from "chrome://global/content/ml/EmbeddingsGenerator.sys.mjs";
+import { embeddingsGeneratorFactory } from "chrome://global/content/ml/EmbeddingsGenerator.sys.mjs";
 import { cosSim } from "chrome://global/content/ml/NLPUtils.sys.mjs";
 
 /**
@@ -43,6 +43,8 @@ import { cosSim } from "chrome://global/content/ml/NLPUtils.sys.mjs";
  *   "meta": {
  *     "last_history_memory_ts": 0,
  *     "last_chat_memory_ts": 0,
+ *     "last_session_memory_ts": 0,
+ *     "last_generation_run_ts": 0,
  *   },
  *   "version": 1
  * }
@@ -61,6 +63,7 @@ let gState = {
     last_history_memory_ts: 0,
     last_chat_memory_ts: 0,
     last_session_memory_ts: 0,
+    last_generation_run_ts: 0,
   },
   version: MEMORY_STORE_VERSION,
 };
@@ -346,6 +349,7 @@ async function loadMemories() {
         last_history_memory_ts: data.meta?.last_history_memory_ts || 0,
         last_chat_memory_ts: data.meta?.last_chat_memory_ts || 0,
         last_session_memory_ts: data.meta?.last_session_memory_ts || 0,
+        last_generation_run_ts: data.meta?.last_generation_run_ts || 0,
       },
       version:
         typeof data.version === "number" ? data.version : MEMORY_STORE_VERSION,
@@ -734,7 +738,7 @@ export const MemoryStore = {
 
     // Lazy initialize embeddings generator
     if (!this.embeddingsGenerator) {
-      this.embeddingsGenerator = EmbeddingsGenerator.forGeneral();
+      this.embeddingsGenerator = embeddingsGeneratorFactory.forGeneral();
     }
 
     // Re-embed memories only if cache is invalid
@@ -989,6 +993,7 @@ export const MemoryStore = {
       ["last_history_memory_ts", v => Number.isFinite(v)],
       ["last_chat_memory_ts", v => Number.isFinite(v)],
       ["last_session_memory_ts", v => Number.isFinite(v)],
+      ["last_generation_run_ts", v => Number.isFinite(v)],
     ];
 
     for (const [prop, validator] of validatedProps) {

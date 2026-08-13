@@ -14,6 +14,8 @@ import "chrome://global/content/elements/moz-textarea.mjs";
 import "chrome://global/content/elements/moz-select.mjs";
 // eslint-disable-next-line import/no-unassigned-import
 import "chrome://global/content/elements/moz-button.mjs";
+// eslint-disable-next-line import/no-unassigned-import
+import "chrome://browser/content/aiwindow/components/monitor-icon.mjs";
 
 const SCHEDULE_TYPES = Object.freeze({
   DAILY: "daily",
@@ -366,7 +368,7 @@ export class AgentMonitorItem extends MozLitElement {
         <moz-textarea
           class="monitor-condition-input"
           data-l10n-id="ai-tasks-alert-alert"
-          data-l10n-attrs="placeholder,label"
+          data-l10n-attrs="placeholder,label,description"
           .value=${this.alertDescription}
           @input=${this.#onConditionInput}
           @change=${this.#onConditionInput}
@@ -399,7 +401,7 @@ export class AgentMonitorItem extends MozLitElement {
                 ? "error"
                 : ""}"
               data-l10n-id="ai-tasks-alert-pages"
-              data-l10n-attrs="placeholder,label,description"
+              data-l10n-attrs="placeholder,label"
               data-l10n-args=${JSON.stringify({
                 maxPages: MAX_WATCH_URLS,
               })}
@@ -549,6 +551,9 @@ export class AgentMonitorItem extends MozLitElement {
           </div>`;
         })}
       </div>
+      <div class="history-note">
+        <p data-l10n-id="ai-tasks-alert-change-history-description"></p>
+      </div>
     `;
   }
 
@@ -692,16 +697,19 @@ export class AgentMonitorItem extends MozLitElement {
     const agent = this.agent ?? {};
     return html`
       <div class="monitor-card">
-        <h2
-          class="monitor-card-state-title"
-          data-l10n-id="ai-tasks-alert-modal-title"
-        ></h2>
+        <div class="title-container">
+          <monitor-icon size="small"></monitor-icon>
+          <h2
+            class="monitor-card-state-title"
+            data-l10n-id="ai-tasks-alert-modal-title"
+          ></h2>
+        </div>
         <div class="monitor-card-head">
           <div class="monitor-name-field">
             <moz-input-text
               class="monitor-name-input"
               data-l10n-id="ai-tasks-alert-name"
-              data-l10n-attrs="placeholder,label"
+              data-l10n-attrs="label"
               .value=${this.#monitorName}
               @change=${this.#onNameInput}
             ></moz-input-text>

@@ -1489,18 +1489,16 @@ already_AddRefed<gfxFontEntry> CoreTextFontList::LookupLocalFont(
                                     true);
 }
 
-static void ReleaseData(void* info, const void* data, size_t size) {
-  free((void*)data);
+static void ReleaseFontData(void* aInfo, const void* aData, size_t aSize) {
+  // Just release our reference to aInfo (the FontData instance),
+  // which is the owner of the data buffer.
+  static_cast<FontData*>(aInfo)->Release();
 }
-
-MOZ_DEFINE_MALLOC_SIZE_OF_ON_ALLOC(UserFontMallocSizeOfOnAlloc)
 
 already_AddRefed<gfxFontEntry> CoreTextFontList::MakePlatformFont(
     const nsACString& aFontName, WeightRange aWeightForEntry,
     WidthRange aWidthForEntry, SlantStyleRange aStyleForEntry,
-    const uint8_t* aFontData, uint32_t aLength) {
-  NS_ASSERTION(aFontData, "MakePlatformFont called with null data");
-
+    FontData* aFontData) {
   // create the font entry
   nsAutoCString uniqueName;
 
@@ -1512,8 +1510,13 @@ already_AddRefed<gfxFontEntry> CoreTextFontList::MakePlatformFont(
   CrashReporter::AutoRecordAnnotation autoFontName(
       CrashReporter::Annotation::FontName, aFontName);
 
+  // Increment the refcount of the FontData, and create a DataProvider that
+  // wraps the data buffer. The provider will Release the FontData reference
+  // when it is no longer needed.
+  aFontData->AddRef();
   AutoCFTypeRef<CGDataProviderRef> provider(::CGDataProviderCreateWithData(
-      nullptr, aFontData, aLength, &ReleaseData));
+      aFontData, aFontData->Data(), aFontData->Length(), ReleaseFontData));
+
   AutoCFTypeRef<CGFontRef> fontRef(::CGFontCreateWithDataProvider(provider));
   if (!fontRef) {
     return nullptr;
@@ -1522,12 +1525,6 @@ already_AddRefed<gfxFontEntry> CoreTextFontList::MakePlatformFont(
   RefPtr newFontEntry =
       MakeRefPtr<CTFontEntry>(uniqueName, fontRef, aWeightForEntry,
                               aWidthForEntry, aStyleForEntry, true, false);
-
-  // Record size for memory reporting purposes.
-  // The *OnAlloc function will also tell DMD about this block, as the
-  // OS font code may hold on to it for an extended period.
-  newFontEntry->mComputedSizeOfUserFont =
-      UserFontMallocSizeOfOnAlloc(aFontData);
 
   return newFontEntry.forget();
 }

@@ -8,10 +8,46 @@
   @include widget-base-style;
 
   padding: var(--space-large);
+  // Celebration sparkles overhang the count deliberately; keep that overhang
+  // inside the card. The context menu is a top-level popup, so it is unaffected.
+  overflow: clip;
+
+  // Brief tier (default): a short sparkle on an ordinary count-up, just enough
+  // that the widget feels alive. The ring belongs to the cap tier below.
+  --widget-celebration-tint-color: transparent;
+  --widget-celebration-sparkle-color: var(--color-yellow-30);
+  --widget-celebration-sparkle-duration: 1200ms;
+  --widget-celebration-ring-stops:
+    var(--color-violet-30), var(--color-orange-30), var(--color-violet-20),
+    var(--color-violet-30);
+  --widget-celebration-ring-duration: 4000ms;
+  // Hold + exit must outlast the last sparkle, which ends at
+  // 11 x 65ms stagger + 1200ms = 1915ms.
+  --widget-celebration-hold-duration: 1600ms;
+  --widget-celebration-exit-duration: 500ms;
+  --widget-celebration-enter-ease: cubic-bezier(0.2, 0.9, 0.2, 1);
+
+  // Loud tier: major moments sparkle longer than a plain +10 count-up.
+  &.is-major-celebration {
+    // Hold + exit must outlast the last sparkle, which ends at
+    // 23 x 60ms stagger + 3600ms = 4980ms.
+    --widget-celebration-sparkle-duration: 3600ms;
+    --widget-celebration-hold-duration: 4300ms;
+    --widget-celebration-exit-duration: 800ms;
+  }
+
+  @include widget-celebration-styles('privacy-celebration');
 
   &.medium-widget {
     padding-block-start: var(--space-small);
     grid-row: span 2;
+
+    // The count sits close to the card edge here, so a large overhang would
+    // spill out; keep the sparkle layer tight to the badge + number.
+    .privacy-celebration-sparkles {
+      /* stylelint-disable-next-line declaration-property-value-disallowed-list */
+      inset: -4px -4px -2px;
+    }
   }
 
   &.large-widget {
@@ -107,9 +143,32 @@
     gap: var(--space-large);
   }
 
+  .privacy-empty-details {
+    color: inherit;
+    max-width: 75%;
+    text-decoration: none;
+
+    &:hover {
+      color: var(--color-accent-primary);
+    }
+  }
+
   .privacy-empty-message {
     margin: 0;
-    max-width: 75%;
+
+    &::after {
+      content: '';
+      display: inline-block;
+      vertical-align: center;
+      background-color: currentColor;
+      block-size: var(--icon-size-xsmall);
+      inline-size: var(--icon-size-xsmall);
+      mask: url('chrome://global/skin/icons/arrow-right.svg') no-repeat center / contain;
+    }
+
+    &:dir(rtl)::after {
+      mask-image: url('chrome://global/skin/icons/arrow-left.svg');
+    }
   }
 }
 
@@ -124,19 +183,59 @@
 }
 
 .privacy-count {
+  color: inherit;
   display: flex;
   flex-direction: column;
+  text-decoration: none;
+
+  &:hover {
+    color: var(--color-accent-primary);
+  }
 
   .privacy-count-number-wrapper {
     align-items: center;
     display: flex;
     gap: var(--space-small);
+    // Hug the badge + number, and act as the positioning context for the
+    // celebration sparkles rendered inside it.
+    position: relative;
+    width: fit-content;
   }
 
   .privacy-count-number {
     font-size: calc(var(--font-size-root) * 2.5); // ~36px
     .large-widget & {
       font-size: calc(var(--font-size-root) * 4.5); // ~67px
+    }
+  }
+
+  // The visible number is aria-hidden while it counts up, so this stable copy
+  // is what assistive tech reads. No shared visually-hidden mixin exists here;
+  // FocusTimer declares its own the same way.
+  .privacy-count-number-a11y {
+    clip-path: inset(50%);
+    height: 1px;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+    width: 1px;
+  }
+
+  .privacy-count-sites {
+    align-items: center;
+    display: inline-flex;
+    gap: var(--space-xsmall);
+
+    &::after {
+      content: '';
+      background-color: currentColor;
+      block-size: var(--icon-size-xsmall);
+      inline-size: var(--icon-size-xsmall);
+      mask: url('chrome://global/skin/icons/arrow-right.svg') no-repeat center / contain;
+    }
+
+    &:dir(rtl)::after {
+      mask-image: url('chrome://global/skin/icons/arrow-left.svg');
     }
   }
 }

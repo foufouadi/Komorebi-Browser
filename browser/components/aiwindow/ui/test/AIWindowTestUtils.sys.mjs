@@ -15,7 +15,7 @@ import { TestUtils } from "resource://testing-common/TestUtils.sys.mjs";
 import { openAIEngine } from "moz-src:///browser/components/aiwindow/models/openAIEngine.sys.mjs";
 import { ExaSearchProvider } from "moz-src:///browser/components/aiwindow/models/search/SearchProviders.sys.mjs";
 import { MemoryStore } from "moz-src:///browser/components/aiwindow/services/MemoryStore.sys.mjs";
-import { EmbeddingsGenerator } from "chrome://global/content/ml/EmbeddingsGenerator.sys.mjs";
+import { embeddingsGeneratorFactory } from "chrome://global/content/ml/EmbeddingsGenerator.sys.mjs";
 
 /**
  * This class manages the MockLLMEngine for Smart Window. Smart Window instantiates
@@ -317,7 +317,7 @@ export class MockMemoriesRetrieval {
    * Install the mock.
    */
   constructor() {
-    const embeddingsGenerator = EmbeddingsGenerator.forGeneral();
+    const embeddingsGenerator = embeddingsGeneratorFactory.forGeneral();
     this.#embeddingSize = embeddingsGenerator.embeddingSize;
     embeddingsGenerator.setEngine({
       run: async request => {

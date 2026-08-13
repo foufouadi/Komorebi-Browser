@@ -1603,9 +1603,9 @@ export class WebSocketConnection {
 
   static makeWebSocketChan(url) {
     let protocol = url.startsWith("wss:") ? "wss" : "ws";
-    let chan = Cc[
-      `@mozilla.org/network/protocol;1?name=${protocol}`
-    ].createInstance(Ci.nsIWebSocketChannel);
+    let chan = Cc[`@mozilla.org/network/protocol;1?name=${protocol}`]
+      .getService(Ci.nsIWebSocketProtocolHandler)
+      .newWebSocketChannel();
     chan.initLoadInfo(
       null, // aLoadingNode
       Services.scriptSecurityManager.getSystemPrincipal(),

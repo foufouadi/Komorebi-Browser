@@ -121,6 +121,7 @@
 #else
 namespace mozilla {
 namespace dom {
+class BooleanOrImportNodeOptions;
 class ElementCreationOptionsOrString;
 }  // namespace dom
 }  // namespace mozilla
@@ -2408,8 +2409,8 @@ class Document : public nsINode,
           aCustomElementRegistry = mozilla::Nothing());
 
   // https://dom.spec.whatwg.org/#effective-global-custom-element-registry
-  mozilla::dom::CustomElementRegistry*
-  GetEffectiveGlobalCustomElementRegistry();
+  mozilla::dom::CustomElementRegistry* GetEffectiveGlobalCustomElementRegistry()
+      const;
 
   // Whether this document is the key of a scoped custom element registry.
   bool HasScopedCustomElementRegistry() const {
@@ -3547,8 +3548,9 @@ class Document : public nsINode,
   already_AddRefed<Comment> CreateComment(const nsAString& aData) const;
   already_AddRefed<ProcessingInstruction> CreateProcessingInstruction(
       const nsAString& target, const nsAString& data, ErrorResult& rv) const;
-  already_AddRefed<nsINode> ImportNode(nsINode& aNode, bool aDeep,
-                                       ErrorResult& rv) const;
+  already_AddRefed<nsINode> ImportNode(
+      nsINode& aNode, const BooleanOrImportNodeOptions& aOptions,
+      ErrorResult& rv) const;
   // TODO: Convert this to MOZ_CAN_RUN_SCRIPT (bug 1415230)
   MOZ_CAN_RUN_SCRIPT_BOUNDARY nsINode* AdoptNode(
       nsINode& aAdoptedNode, ErrorResult& rv, bool aAcceptShadowRoot = false);

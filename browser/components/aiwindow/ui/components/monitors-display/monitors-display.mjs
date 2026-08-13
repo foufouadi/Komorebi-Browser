@@ -81,14 +81,17 @@ export class MonitorsDisplay extends MozLitElement {
       />
 
       <div class="monitors-section">
-        <p data-l10n-id="ai-task-page-description"></p>
-
-        <h3
-          data-l10n-id="ai-tasks-alerts-count"
-          data-l10n-args=${JSON.stringify({ count: this.monitors.length })}
-        ></h3>
         ${this.monitors.length
           ? html`
+              <p data-l10n-id="ai-task-page-description"></p>
+
+              <p
+                class="monitors-count"
+                data-l10n-id="ai-tasks-alerts-count"
+                data-l10n-args=${JSON.stringify({
+                  count: this.monitors.length,
+                })}
+              ></p>
               <div class="monitors-list">
                 ${repeat(
                   this.monitors,
@@ -103,10 +106,12 @@ export class MonitorsDisplay extends MozLitElement {
                 )}
               </div>
             `
-          : html` <p
-              class="no-monitors"
-              data-l10n-id="ai-task-page-no-alerts"
-            ></p>`}
+          : html` <section class="no-monitors-wrapper">
+              <div class="no-monitors-container">
+                <h2 data-l10n-id="ai-task-page-no-alerts-title"></h2>
+                <p data-l10n-id="ai-task-page-no-alerts"></p>
+              </div>
+            </section>`}
       </div>
     `;
   }

@@ -4,7 +4,6 @@
 
 package mozilla.components.browser.errorpages
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.net.Uri
 import androidx.annotation.StringRes
@@ -52,7 +51,6 @@ object ErrorPages {
      * [archiveUrlFor]), the page is given the parameters needed to offer an archived copy of the
      * failed page. Defaults to `false` so the action is opt-in per consumer.
      */
-    @SuppressLint("StringFormatInvalid")
     fun createUrlEncodedErrorPage(
         context: Context,
         errorType: ErrorType,

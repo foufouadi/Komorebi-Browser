@@ -22,6 +22,7 @@
 #include "nsTArray.h"
 #include "qcms.h"
 
+class FontData;
 class FontVisibilityProvider;
 class gfxASurface;
 class gfxFont;
@@ -410,7 +411,7 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
   already_AddRefed<gfxFontEntry> MakePlatformFont(
       const nsACString& aFontName, const WeightRange& aWeightForEntry,
       const WidthRange& aWidthForEntry, const SlantStyleRange& aStyleForEntry,
-      const uint8_t* aFontData, uint32_t aLength);
+      FontData* aFontData);
 
   /**
    * Whether to allow downloadable fonts via @font-face rules

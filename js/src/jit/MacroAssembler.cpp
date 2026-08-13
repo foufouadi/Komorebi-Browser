@@ -6149,6 +6149,11 @@ uint8_t MacroAssembler::getByteAtOffset(size_t offset) const {
   Instruction* ii = const_cast<MacroAssembler&>(*this).getInstructionAt(
       BufferOffset(offset & ~size_t(3)));
   return ((uint8_t*)ii)[offset & 3];
+#elif defined(JS_CODEGEN_LOONG64)
+  // ii points at the first byte of the instruction
+  Instruction* ii = const_cast<MacroAssembler&>(*this).editSrc(
+      BufferOffset(offset & ~size_t(3)));
+  return ((uint8_t*)ii)[offset & 3];
 #elif defined(JS_CODEGEN_NONE)
   MOZ_CRASH();
 #else

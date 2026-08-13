@@ -117,6 +117,13 @@ EventListenerManagerBase::EventListenerManagerBase()
                 "Keep the size of EventListenerManagerBase size compact!");
 }
 
+// A lot of these are created, so keep it within a mozjemalloc bucket.  Debug
+// builds add a member for the thread safety ownership checks.
+#ifndef MOZ_THREAD_SAFETY_OWNERSHIP_CHECKS_SUPPORTED
+static_assert(sizeof(EventListenerManager) <= 96,
+              "Keep the size of EventListenerManager compact!");
+#endif
+
 EventListenerManager::EventListenerManager(EventTarget* aTarget)
     : mTarget(aTarget) {
   NS_ASSERTION(aTarget, "unexpected null pointer");
@@ -138,6 +145,9 @@ EventListenerManager::~EventListenerManager() {
   // XXX azakai: Is there any reason to not just call Disconnect
   //             from right here, if not previously called?
   NS_ASSERTION(!mTarget, "didn't call Disconnect");
+  if (mIsMainThreadELM) {
+    nsContentUtils::RemoveNodeListenerManager(this);
+  }
   RemoveAllListenersSilently();
 }
 

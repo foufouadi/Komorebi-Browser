@@ -14,6 +14,8 @@ ChromeUtils.defineLazyGetter(this, "ContentSharingMockServer", () => {
   return server;
 });
 
+const SHARE_BUTTON_ID = "share-button";
+
 /**
  * Sets a cookie for test purposes.
  *
@@ -194,4 +196,26 @@ async function createFolderWithBookmarks(
     });
   }
   return folder;
+}
+
+async function openSharePanel(win) {
+  const button = win.document.getElementById(SHARE_BUTTON_ID);
+
+  await TestUtils.waitForCondition(
+    () => BrowserTestUtils.isVisible(button),
+    "Wait for button to be visible"
+  );
+
+  const panelShown = BrowserTestUtils.waitForEvent(
+    win.document,
+    "popupshown",
+    true,
+    e => e.target.id === "share-panel"
+  );
+
+  EventUtils.synthesizeMouseAtCenter(button, {});
+
+  await panelShown;
+
+  return PanelMultiView.getViewNode(win.document, "share-panel");
 }

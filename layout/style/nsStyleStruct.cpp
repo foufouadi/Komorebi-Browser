@@ -3365,6 +3365,7 @@ nsStyleUIReset::nsStyleUIReset()
       mWindowDragging(StyleWindowDragging::Default),
       mWindowShadow(StyleWindowShadow::Auto),
       mFieldSizing(StyleFieldSizing::Fixed),
+      mMozLineScrollAmount(NonNegativeLengthOrAuto::Auto()),
       mMozWindowInputRegionMargin(StyleLength::Zero()),
       mTransitions(
           nsStyleAutoArray<StyleTransition>::WITH_SINGLE_INITIAL_ELEMENT),
@@ -3410,6 +3411,7 @@ nsStyleUIReset::nsStyleUIReset(const nsStyleUIReset& aSource)
       mWindowDragging(aSource.mWindowDragging),
       mWindowShadow(aSource.mWindowShadow),
       mFieldSizing(aSource.mFieldSizing),
+      mMozLineScrollAmount(aSource.mMozLineScrollAmount),
       mMozWindowInputRegionMargin(aSource.mMozWindowInputRegionMargin),
       mMozWindowTransform(aSource.mMozWindowTransform),
       mTransitions(aSource.mTransitions.Clone()),
@@ -3520,6 +3522,7 @@ nsChangeHint nsStyleUIReset::CalcDifference(
        mAnimationRangeEndCount != aNewData.mAnimationRangeEndCount ||
        mIMEMode != aNewData.mIMEMode ||
        mWindowOpacity != aNewData.mWindowOpacity ||
+       mMozLineScrollAmount != aNewData.mMozLineScrollAmount ||
        mMozWindowInputRegionMargin != aNewData.mMozWindowInputRegionMargin ||
        mMozWindowTransform != aNewData.mMozWindowTransform ||
        mScrollTimelines != aNewData.mScrollTimelines ||

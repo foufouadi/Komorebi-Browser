@@ -63,8 +63,9 @@ const MIN_RECENT_VISITS_DAYS = 60;
  * (conversation, if enabled). Each trigger is gated by its enablement pref, so
  * a chat-only or browsing-only user fires only on the relevant signal.
  *
- * Cooldown is keyed off the single session-memory watermark, so the two
- * modalities no longer run on independent clocks.
+ * The cooldown is keyed off when generation last ran (`last_generation_run_ts`),
+ * which is persisted, so restarting the browser inside the cooldown window cannot
+ * buy an extra round of LLM calls.
  *
  * Memory maintenance ({@link MemoriesManager.runMemoryMaintenance}) runs on the
  * same tick but its own clock, so ageing and decay deletion keep their cadence
@@ -84,6 +85,9 @@ export class MemoriesSchedulers {
   // Maintenance keeps its own in-memory, last-run watermark to ensure it runs
   // on the right cadence regardless of it generation runs
   #lastMaintenanceMs = 0;
+  // When generation last ran, driving the cooldown. Mirrors the persisted
+  // `last_generation_run_ts`.
+  #lastGenerationMs = 0;
   /** @type {Promise<void> | null} */
   #initPromise = null;
 
@@ -144,6 +148,9 @@ export class MemoriesSchedulers {
     const lastMemoryTs =
       (await lazy.MemoriesManager.getLastSessionMemoryTimestamp()) ?? 0;
     const isFirstRun = lastMemoryTs === 0;
+
+    this.#lastGenerationMs =
+      (await lazy.MemoriesManager.getLastGenerationRunTimestamp()) ?? 0;
 
     if (isFirstRun) {
       lazy.console.debug("First run detected; running immediately.");
@@ -225,8 +232,9 @@ export class MemoriesSchedulers {
     if (conversationEnabled) {
       // Any new chat message since the watermark is enough to consider a run;
       // the gate drops trivial chat-only sessions at no LLM cost.
-      const chatMessagesSinceLastMemory =
-        await lazy.getRecentChats(lastMemoryTs);
+      const chatMessagesSinceLastMemory = await lazy.getRecentChats(
+        lazy.MemoriesManager.getSessionMemoryDeltaStartMs(lastMemoryTs)
+      );
       if (chatMessagesSinceLastMemory.length) {
         lazy.console.debug(
           `Chat trigger met (newMessages=${chatMessagesSinceLastMemory.length}).`
@@ -311,10 +319,13 @@ export class MemoriesSchedulers {
       const isFirstRun = lastMemoryTs === 0;
 
       // Cooldown check - keep accumulating pagesVisited until eligible.
-      if (!isFirstRun && now - lastMemoryTs < MEMORIES_SCHEDULER_COOLDOWN_MS) {
+      if (
+        this.#lastGenerationMs &&
+        now - this.#lastGenerationMs < MEMORIES_SCHEDULER_COOLDOWN_MS
+      ) {
         lazy.console.debug(
           `Cooldown not met; last run was ${Math.floor(
-            (now - lastMemoryTs) / (60 * 1000)
+            (now - this.#lastGenerationMs) / (60 * 1000)
           )}m ago (<${Math.floor(
             MEMORIES_SCHEDULER_COOLDOWN_MS / (60 * 60 * 1000)
           )}h). Skipping. pagesVisited=${this.#pagesVisited}`
@@ -335,17 +346,26 @@ export class MemoriesSchedulers {
 
       // Run memories generation
       lazy.console.debug("Generating memories from sessions...");
-      await lazy.MemoriesManager.generateMemoriesFromSessions();
+      const persistedMemories =
+        await lazy.MemoriesManager.generateMemoriesFromSessions();
+      this.#lastGenerationMs = Date.now();
+      await lazy.MemoriesManager.setLastGenerationRunTimestamp(
+        this.#lastGenerationMs
+      );
       this.#pagesVisited = 0;
       lazy.console.debug("Memories generation complete.");
 
-      // Run merge memories
+      // Run merge memories if there's something new to merge
       // This **is** conditioned on the same checks as generation because we should
       // only try to merge memories when there are more memories that haven't been
       // through a merge pass, and it requires an LLM call
-      lazy.console.debug("Merging memories...");
-      await lazy.MemoriesManager.mergeMemories();
-      lazy.console.debug("Merging memories complete.");
+      if (persistedMemories.length) {
+        lazy.console.debug("Merging memories...");
+        await lazy.MemoriesManager.mergeMemories();
+        lazy.console.debug("Merging memories complete.");
+      } else {
+        lazy.console.debug("No new memories generated; skipping merge step.");
+      }
     } catch (error) {
       if (lazy.openAIEngine.is429Error(error)) {
         this.#backoffUntilMs = Date.now() + MEMORIES_SCHEDULER_COOLDOWN_MS;
@@ -417,6 +437,16 @@ export class MemoriesSchedulers {
    */
   setLastMaintenanceMsForTesting(ms) {
     this.#lastMaintenanceMs = ms;
+  }
+
+  /**
+   * Testing helper: set the last-generation timestamp (ms since epoch). Pass 0
+   * to clear the cooldown. Not used in production code.
+   *
+   * @param {number} ms
+   */
+  setLastGenerationMsForTesting(ms) {
+    this.#lastGenerationMs = ms;
   }
 
   /**

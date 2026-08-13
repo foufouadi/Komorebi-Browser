@@ -17,6 +17,8 @@
 
 #PopupAutoComplete > richlistbox {
   padding: var(--space-medium);
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
 
   &:not([pointerselected]) > richlistitem.autocomplete-row-item[selected] > autocomplete-row-item:not([subfocused]) {
     border-color: var(--focus-outline-color);

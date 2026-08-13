@@ -199,7 +199,7 @@ export class LoginManagerPrompter {
     const changeMessageIds = {
       prompt: messageStringID ?? "password-manager-update-password-message",
       mainButton: "password-manager-password-password-button-allow",
-      secondaryButton: "password-manager-update-password-button-deny",
+      secondaryButton: "password-manager-save-password-button-deny",
     };
 
     const initialMessageIds =

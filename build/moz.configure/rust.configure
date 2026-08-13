@@ -795,3 +795,150 @@ def rust_flags(compile_flags, warnings_as_errors):
 
 
 set_config("MOZ_RUST_DEFAULT_FLAGS", rust_flags)
+
+
+@depends(
+    cross_compiling,
+    tsan,
+    asan,
+    any_ubsan,
+    target_variables.OS_ARCH,
+    host_variables.HOST_OS_ARCH,
+    code_coverage,
+)
+def pass_only_base_cflags_to_rust(
+    cross_compiling, tsan, asan, ubsan, os_arch, host_os_arch, code_coverage
+):
+    # Cargo does not distinguish native code built for build scripts and procedural
+    # macros from native code built for the target. Passing all target flags to
+    # cc-rs can therefore instrument host code. Sanitizer and coverage builds use
+    # only the base compiler flags.
+    if not cross_compiling:
+        if tsan:
+            return True
+        if (asan or ubsan) and os_arch != "Linux":
+            return True
+    if host_os_arch == "WINNT" and code_coverage:
+        return True
+
+
+set_config("PASS_ONLY_BASE_CFLAGS_TO_RUST", "1", when=pass_only_base_cflags_to_rust)
+
+
+@depends(tsan, enable_js_fuzzilli, enable_libfuzzer, enable_aflfuzzer)
+def rust_sancov_flags(tsan, js_fuzzilli, libfuzzer, aflfuzz):
+    # TSan and Fuzzilli builds do not use these sanitizer coverage flags.
+    if tsan or js_fuzzilli:
+        return []
+    if libfuzzer:
+        # Match the coverage options implied by `clang -fsanitize=fuzzer`.
+        # https://github.com/llvm/llvm-project/blob/release/13.x/clang/lib/Driver/SanitizerArgs.cpp#L422
+        return [
+            "-Cpasses=sancov-module",
+            "-Cllvm-args=-sanitizer-coverage-inline-8bit-counters",
+            "-Cllvm-args=-sanitizer-coverage-level=4",
+            "-Cllvm-args=-sanitizer-coverage-trace-compares",
+            "-Cllvm-args=-sanitizer-coverage-pc-table",
+        ]
+    if aflfuzz:
+        # Match the sanitizer coverage flags used by afl-cc.
+        # https://github.com/AFLplusplus/AFLplusplus/blob/4eaacfb095ac164afaaf9c10b8112f98d8ad7c2a/src/afl-cc.c#L2101
+        return [
+            "-Cpasses=sancov-module",
+            "-Cllvm-args=-sanitizer-coverage-level=3",
+            "-Cllvm-args=-sanitizer-coverage-pc-table",
+            "-Cllvm-args=-sanitizer-coverage-trace-pc-guard",
+        ]
+    return []
+
+
+set_config("RUST_SANCOV_FLAGS", rust_sancov_flags)
+
+
+@depends(
+    moz_pgo_rust,
+    enable_profile_generate,
+    enable_profile_use,
+    pgo_flags.gen_cflags,
+    pgo_profile_path,
+    c_compiler,
+    rustc_info,
+    build_environment,
+)
+def rust_pgo_flags(
+    moz_pgo_rust,
+    profile_generate,
+    profile_use,
+    gen_cflags,
+    profile_path,
+    c_compiler,
+    rustc_info,
+    build_environment,
+):
+    if not moz_pgo_rust:
+        return []
+    if profile_generate:
+        flags = ["-C", f"profile-generate={build_environment.topobjdir}"]
+        # Disable value profiling when:
+        # (RUSTC_LLVM_VERSION < 12 and CC_VERSION >= 12) or
+        # (RUSTC_LLVM_VERSION >= 12 and CC_VERSION < 12)
+        cc_old = c_compiler.version.major < 12
+        rustc_old = bool(rustc_info) and rustc_info.llvm_version.major < 12
+        if cc_old != rustc_old:
+            flags += ["-C", "llvm-args=--disable-vp=true"]
+        # Convert PGO LLVM arguments from the compiler form
+        # ["-mllvm", "foo"] to the Rust form ["-C", "llvm-args=foo"].
+        gen_cflags = gen_cflags or []
+        i = 0
+        while i < len(gen_cflags):
+            if gen_cflags[i] == "-mllvm" and i + 1 < len(gen_cflags):
+                flags += ["-C", f"llvm-args={gen_cflags[i + 1]}"]
+                i += 2
+            else:
+                i += 1
+        return flags
+    if profile_use:
+        return ["-C", f"profile-use={profile_path}"]
+    return []
+
+
+set_config("RUST_PGO_FLAGS", rust_pgo_flags)
+
+
+# PGO flags for C and C++ code compiled through cc-rs.
+# Exclude -fprofile-generate because it can instrument host build scripts on
+# native builds and cause link failures. No Rust directory opts out of PGO.
+@depends(
+    enable_profile_generate,
+    enable_profile_use,
+    pgo_flags.gen_cflags,
+    pgo_flags.use_cflags,
+)
+def rust_pgo_cflags(profile_generate, profile_use, gen_cflags, use_cflags):
+    if profile_generate:
+        flags = ["-DNS_FREE_PERMANENT_DATA=1"] + (gen_cflags or [])
+    elif profile_use:
+        flags = list(use_cflags or [])
+    else:
+        return []
+    return [f for f in flags if not f.startswith("-fprofile-generate")]
+
+
+set_config("RUST_PGO_CFLAGS", rust_pgo_cflags)
+
+
+@depends(
+    enable_profile_generate,
+    enable_profile_use,
+    pgo_flags.gen_ldflags,
+    pgo_flags.use_ldflags,
+)
+def rust_pgo_ldflags(profile_generate, profile_use, gen_ldflags, use_ldflags):
+    if profile_generate:
+        return gen_ldflags or []
+    if profile_use:
+        return use_ldflags or []
+    return []
+
+
+set_config("RUST_PGO_LDFLAGS", rust_pgo_ldflags)

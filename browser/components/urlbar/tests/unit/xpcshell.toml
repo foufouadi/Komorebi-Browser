@@ -46,6 +46,8 @@ support-files = ["data/engine.xml"]
 
 ["test_UrlbarShared_stripUnsafeProtocolOnPaste.js"]
 
+["test_UrlbarShared_unEscapeURIForUI.js"]
+
 ["test_UrlbarTelemetryUtils_wireSerialization.js"]
 
 ["test_UrlbarUtils_addToInputHistoryWhenReady.js"]
@@ -67,8 +69,6 @@ support-files = ["data/engine.xml"]
 ["test_UrlbarUtils_reintegrateAutofill.js"]
 
 ["test_UrlbarUtils_skippableTimer.js"]
-
-["test_UrlbarUtils_unEscapeURIForUI.js"]
 
 ["test_about_urls.js"]
 

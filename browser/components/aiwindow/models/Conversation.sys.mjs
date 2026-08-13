@@ -31,7 +31,7 @@ export const MESSAGE_ROLE = Object.freeze({
   TOOL: 3,
 });
 
-const ROLE_LABEL = {
+export const ROLE_LABEL = {
   [MESSAGE_ROLE.SYSTEM]: "system",
   [MESSAGE_ROLE.USER]: "user",
   [MESSAGE_ROLE.ASSISTANT]: "assistant",

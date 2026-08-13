@@ -143,6 +143,38 @@ describe("WebNotificationsFeed", () => {
     assert.notCalled(addObserverStub);
   });
 
+  it("observes on INIT when trainhop enables the feature with the system pref off", () => {
+    prefs["system.showWebNotifications"] = false;
+    prefs.trainhopConfig = { webNotifications: { enabled: true } };
+    feed.onAction({ type: at.INIT });
+
+    assert.calledWith(addObserverStub, feed, "web-notification-shown");
+    assert.calledWith(addObserverStub, feed, "web-notification-closed");
+  });
+
+  it("does not observe when trainhop enables the feature but the user pref is off", () => {
+    prefs["system.showWebNotifications"] = false;
+    prefs.showWebNotifications = false;
+    prefs.trainhopConfig = { webNotifications: { enabled: true } };
+    feed.onAction({ type: at.INIT });
+
+    assert.notCalled(addObserverStub);
+  });
+
+  it("starts observing when trainhop enrollment arrives mid-session", () => {
+    prefs["system.showWebNotifications"] = false;
+    feed.onAction({ type: at.INIT });
+    assert.notCalled(addObserverStub);
+
+    prefs.trainhopConfig = { webNotifications: { enabled: true } };
+    feed.onAction({
+      type: at.PREF_CHANGED,
+      data: { name: "trainhopConfig", value: prefs.trainhopConfig },
+    });
+
+    assert.calledWith(addObserverStub, feed, "web-notification-shown");
+  });
+
   it("starts observing when the user pref is turned on mid-session", () => {
     prefs.showWebNotifications = false;
     feed.onAction({ type: at.INIT });

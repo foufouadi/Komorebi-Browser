@@ -2044,6 +2044,9 @@ MediaResult FFmpegVideoDecoder<LIBAV_VER>::CreateImage(
         if (mInfo.mTransferFunction) {
           surface->SetTransferFunction(mInfo.mTransferFunction.value());
         }
+        if (mInfo.mHDRMetadata) {
+          surface->SetHDRMetadata(mInfo.mHDRMetadata.value());
+        }
         surface->SetWPChromaLocation(
             AVChromaLocationToWPChromaLocation(mFrame->chroma_location));
         FFMPEG_LOGV(
@@ -2146,6 +2149,11 @@ MediaResult FFmpegVideoDecoder<LIBAV_VER>::CreateImageVAAPI(
   }
   if (mInfo.mTransferFunction) {
     surface->SetTransferFunction(mInfo.mTransferFunction.value());
+  }
+  surface->SetWPChromaLocation(
+      AVChromaLocationToWPChromaLocation(mFrame->chroma_location));
+  if (mInfo.mHDRMetadata) {
+    surface->SetHDRMetadata(mInfo.mHDRMetadata.value());
   }
 
   FFMPEG_LOG(
@@ -2365,6 +2373,11 @@ MediaResult FFmpegVideoDecoder<LIBAV_VER>::CreateImageVulkan(
   }
   if (mInfo.mTransferFunction) {
     surface->SetTransferFunction(mInfo.mTransferFunction.value());
+  }
+  surface->SetWPChromaLocation(
+      AVChromaLocationToWPChromaLocation(mFrame->chroma_location));
+  if (mInfo.mHDRMetadata) {
+    surface->SetHDRMetadata(mInfo.mHDRMetadata.value());
   }
 
   RefPtr<VideoData> vp = VideoData::CreateFromImage(

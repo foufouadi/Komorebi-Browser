@@ -237,13 +237,44 @@ add_task(async function test_ui_state_signedin() {
       "PanelUI-fxa-menu-account-signout-button",
     ],
     disabledItems: [],
-    hiddenItems: ["PanelUI-fxa-menu-setup-sync-container"],
+    hiddenItems: [
+      "PanelUI-fxa-menu-setup-sync-container",
+      // "Get Firefox for mobile" is only offered while sync is off.
+      "PanelUI-fxa-menu-get-firefox-mobile",
+    ],
     visibleItems: [],
   });
 
-  await checkProfilesButtons(
+  // A separator sits directly below the manage account button, dividing it
+  // from the profiles section that follows.
+  const manageAccountSeparator = document.getElementById(
+    "PanelUI-fxa-menu-manage-account-separator"
+  );
+  ok(
+    !manageAccountSeparator.hidden,
+    "The manage account separator is visible when signed in"
+  );
+  is(
+    manageAccountSeparator.previousElementSibling,
     document.getElementById("PanelUI-fxa-menu-manage-account-button"),
-    true
+    "The manage account separator sits directly below the manage account button"
+  );
+
+  await checkProfilesButtons(manageAccountSeparator, true);
+
+  // The sign-out separator and button sit at the bottom of the secure sync
+  // section, directly below the connected devices list.
+  is(
+    document.getElementById("PanelUI-sign-out-separator")
+      .previousElementSibling,
+    document.getElementById("PanelUI-fxa-menu-devices-list"),
+    "The sign-out separator sits directly below the connected devices list"
+  );
+  is(
+    document.getElementById("PanelUI-fxa-menu-account-signout-button")
+      .previousElementSibling,
+    document.getElementById("PanelUI-sign-out-separator"),
+    "The sign-out button sits directly below the sign-out separator"
   );
 
   checkFxAAvatar("signedin");
@@ -436,6 +467,21 @@ add_task(async function test_ui_state_unconfigured() {
 
   await openFxaPanel();
 
+  // When signed out, "Get Firefox for mobile" is offered directly below the
+  // sync status button ("Sync your data").
+  const mobileButton = document.getElementById(
+    "PanelUI-fxa-menu-get-firefox-mobile"
+  );
+  ok(
+    isElementVisible(mobileButton),
+    "Get Firefox for mobile button is visible when signed out"
+  );
+  is(
+    mobileButton.previousElementSibling,
+    document.getElementById("PanelUI-fxa-menu-sync-status-button"),
+    "Get Firefox for mobile sits directly below the sync status button"
+  );
+
   await checkProfilesButtons(
     document.getElementById("PanelUI-signedin-panel"),
     true
@@ -470,7 +516,7 @@ add_task(async function test_ui_state_signed_in() {
     ],
     disabledItems: [],
     hiddenItems: ["PanelUI-fxa-menu-setup-sync-container"],
-    visibleItems: [],
+    visibleItems: ["PanelUI-fxa-menu-get-firefox-mobile"],
   });
   checkFxAAvatar("signedin");
   await closeFxaPanel();
@@ -511,7 +557,7 @@ add_task(async function test_ui_state_signed_in_no_display_name() {
     ],
     disabledItems: [],
     hiddenItems: ["PanelUI-fxa-menu-setup-sync-container"],
-    visibleItems: [],
+    visibleItems: ["PanelUI-fxa-menu-get-firefox-mobile"],
   });
   checkFxAAvatar("signedin");
   await closeFxaPanel();
@@ -555,7 +601,7 @@ add_task(async function test_ui_state_unverified() {
     ],
     disabledItems: [],
     hiddenItems: ["PanelUI-fxa-menu-setup-sync-container"],
-    visibleItems: [],
+    visibleItems: ["PanelUI-fxa-menu-get-firefox-mobile"],
   });
   checkFxAAvatar("unverified");
   await checkSignedOutCard(
@@ -603,7 +649,7 @@ add_task(async function test_ui_state_loginFailed() {
     ],
     disabledItems: [],
     hiddenItems: ["PanelUI-fxa-menu-setup-sync-container"],
-    visibleItems: [],
+    visibleItems: ["PanelUI-fxa-menu-get-firefox-mobile"],
   });
   checkFxAAvatar("login-failed");
   await checkSignedOutCard(
@@ -1190,7 +1236,7 @@ add_task(async function test_new_sync_setup_ui() {
     ],
     disabledItems: [],
     hiddenItems: ["PanelUI-fxa-menu-setup-sync-container"],
-    visibleItems: [],
+    visibleItems: ["PanelUI-fxa-menu-get-firefox-mobile"],
   });
 
   await closeFxaPanel();
@@ -1390,7 +1436,7 @@ add_task(async function test_ui_privacy_tools_all_in_use_signedin() {
     },
     {
       buttonId: "PanelUI-fxa-menu-vpn-button",
-      titleId: "appmenuitem-vpn-title-signed-in",
+      titleId: "appmenuitem-vpn-title-signed-in1",
     },
   ];
 
@@ -2641,6 +2687,10 @@ add_task(async function test_sync_status_button_sync_off_signed_in() {
     BrowserTestUtils.isVisible(offCard),
     "Sync-off card is visible when signed in but sync is off"
   );
+  ok(
+    offCard.querySelector(".fxa-menu-sync-status-icon"),
+    "Sync-off card shows the sync status icon"
+  );
   is(
     PanelMultiView.getViewNode(
       document,
@@ -2696,21 +2746,21 @@ add_task(async function test_sync_status_button_sync_off_signed_out() {
       document,
       "PanelUI-fxa-menu-sync-status-title"
     ).getAttribute("value"),
-    gSync.fluentStrings.formatValueSync("fxa-menu-sync-status-off"),
-    "Sync status title reads 'Sync is Off'"
+    gSync.fluentStrings.formatValueSync("fxa-menu-sync-your-data"),
+    "Sync status title reads 'Sync Your Data' when never signed in"
   );
   const descEl = PanelMultiView.getViewNode(
     document,
     "PanelUI-fxa-menu-sync-status-description"
   );
-  is(
-    descEl.getAttribute("value"),
-    gSync.fluentStrings.formatValueSync("fxa-menu-sync-off-signin-description"),
-    "Description reads 'Sign in to sync'"
-  );
   ok(
-    descEl.classList.contains("fxa-menu-sync-status-description-error"),
-    "Description uses the error color"
+    !descEl.hasAttribute("value"),
+    "No description value is set when never signed in"
+  );
+  ok(descEl.hidden, "Description label is not rendered when never signed in");
+  ok(
+    !descEl.classList.contains("fxa-menu-sync-status-description-error"),
+    "Description does not use the error color when never signed in"
   );
 
   gSync._onSyncStatusButtonClick(syncStatusBtn, new PointerEvent("click"));

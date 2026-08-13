@@ -1302,15 +1302,18 @@ quick_suggest:
       - quick-suggest
 
   context_id:
+    disabled: true
     type: uuid
     description: >
       An identifier to identify users for Contextual Services user interaction pings.
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1941161
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2056936
     data_reviews:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1836283
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1941161
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2056936
     data_sensitivity:
       - technical
     notification_emails:

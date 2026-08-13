@@ -2799,6 +2799,13 @@ static nsresult ProfileMissingDialog(nsINativeAppSupport* aNative) {
   }
 #  endif  // MOZ_BACKGROUNDTASKS
 
+  if (gfxPlatform::IsHeadless()) {
+    // Nothing can dismiss a modal dialog in headless mode, so report the
+    // failure on stderr and exit instead of spinning in the event loop.
+    Output(true, "Could not find profile folder.\n");
+    return NS_ERROR_ABORT;
+  }
+
   nsresult rv;
 
   ScopedXPCOMStartup xpcom;
@@ -2864,6 +2871,12 @@ static nsresult ProfileEncryptionMismatchDialog(const char* aMsgKey,
     return NS_ERROR_ABORT;
   }
 #  endif  // MOZ_BACKGROUNDTASKS
+
+  if (gfxPlatform::IsHeadless()) {
+    // Nothing can dismiss a modal dialog in headless mode.
+    Output(true, "Profile encryption state does not match launching build.\n");
+    return NS_ERROR_ABORT;
+  }
 
   nsresult rv;
 

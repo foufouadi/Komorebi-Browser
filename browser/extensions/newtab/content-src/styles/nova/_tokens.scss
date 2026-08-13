@@ -115,9 +115,6 @@
   --card-header-background-color: var(--button-background-color);
   --card-header-border-color: transparent;
 
-  /** checkbox **/
-  --checkbox-border-radius: var(--border-radius-xsmall);
-
   /** color **/
   --color-accent-attention: light-dark(var(--color-green-40), var(--color-green-30));
   --color-accent-primary: light-dark(var(--color-violet-50), var(--color-violet-30));
@@ -316,7 +313,6 @@
   --toolbarbutton-outline-color-active: transparent;
   --toolbarbutton-outline-color-selected: var(--toolbarbutton-outline-color-active);
   --toolbarbutton-outline-offset: -1px;
-  --toolbarbutton-padding-inner-touch-narrow: 0;
 
   /** toolbox **/
   --toolbox-background-color-gradient-leading: light-dark(var(--color-violet-10), var(--color-violet-desaturated-70));
@@ -326,7 +322,6 @@
   /* This gradient is only used for Nova */
   --toolbox-background-gradient: linear-gradient(96deg, color-mix(var(--toolbox-background-color-gradient-leading) 50%, transparent) 39.84%, color-mix(var(--toolbox-background-color-gradient-trailing) 50%, transparent) 101.72%);
   --toolbox-text-color: var(--text-color);
-  --toolbox-text-color-inactive: var(--text-color-deemphasized);
 }
 
 @media (forced-colors) {

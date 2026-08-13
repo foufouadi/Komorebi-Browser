@@ -276,13 +276,9 @@ export class SidebarState {
         case "panelOpen":
           // we need to know if we have a command value before finalizing panelOpen
           break;
-        case "expandedPinnedTabsHeight":
-        case "collapsedPinnedTabsHeight":
-          this.updatePinnedTabsHeight();
-          break;
-        case "expandedToolsHeight":
-        case "collapsedToolsHeight":
-          this.updateToolsHeight();
+        case "pinnedTabsHeight":
+        case "toolsHeight":
+          this.#props[key] = value;
           break;
         default:
           this[key] = value;
@@ -632,7 +628,7 @@ export class SidebarState {
   }
 
   set pinnedTabsDragActive(active) {
-    this.#props.pinnedDragActive = active;
+    this.#props.pinnedTabsDragActive = active;
 
     let itemsWrapperHeight =
       this.#controllerGlobal.windowUtils.getBoundsWithoutFlushing(
@@ -791,16 +787,20 @@ export class SidebarState {
    * height (if available).
    */
   updatePinnedTabsHeight() {
+    if (!this.#pinnedTabsContainerEl || this.pinnedTabsDragActive) {
+      return;
+    }
     if (!lazy.verticalTabsEnabled) {
-      if (this.#pinnedTabsContainerEl) {
-        this.#pinnedTabsContainerEl.style.height = "";
-      }
+      this.#pinnedTabsContainerEl.style.height = "";
       return;
     }
     const preferredHeight = this.launcherExpanded
       ? this.expandedPinnedTabsHeight
       : this.collapsedPinnedTabsHeight;
-    if (!preferredHeight || !this.#pinnedTabsContainerEl) {
+    if (!preferredHeight) {
+      // Nothing stored for this state, so clear any height left over from the
+      // other state and let the container size itself to its contents.
+      this.#pinnedTabsContainerEl.style.height = "";
       return;
     }
     const itemsWrapper = this.#pinnedTabsItemsWrapper;

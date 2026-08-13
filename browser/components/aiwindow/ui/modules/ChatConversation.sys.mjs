@@ -705,6 +705,31 @@ export class ChatConversation extends Conversation {
   }
 
   /**
+   * Finalize a tool call message added early (with a placeholder body) so the
+   * action log could show a pending row while a slow tool ran: replace its
+   * content in place and re-emit so the renderer refreshes the same row instead
+   * of appending a duplicate. Falls back to adding a fresh message when there
+   * is none to update.
+   *
+   * `content` replaces the existing content entirely (callers pass the complete
+   * object). Like addToolCallMessage, this does NOT persist; the caller must
+   * call ChatStore.updateConversation afterwards.
+   *
+   * @param {ChatMessage|null} message - Message returned by a prior
+   *   addToolCallMessage, or null to add a fresh one.
+   * @param {object} content - The finalized tool call content.
+   * @returns {ChatMessage} The updated (or newly added) tool message.
+   */
+  updateToolCallMessage(message, content) {
+    if (!message) {
+      return this.addToolCallMessage(content);
+    }
+    message.content = content;
+    this.emit("chat-conversation:message-update", message);
+    return message;
+  }
+
+  /**
    * Upserts the chat system prompt at index 0, always rewriting body and
    * version so a fresh build (today's timestamp, latest RS content) wins.
    *

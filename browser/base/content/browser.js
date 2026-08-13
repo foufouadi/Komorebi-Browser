@@ -5008,16 +5008,23 @@ var ConfirmationHint = {
     // 3s after the text transition (duration=120ms) has finished.
     // If there is a description, we show for 6s after the text transition.
     const DURATION = showDescription ? 6000 : 3000;
-    this._panel.addEventListener(
-      "popupshown",
-      () => {
-        this._animationBox.setAttribute("animate", "true");
-        this._timerID = setTimeout(() => {
-          this._panel.hidePopup(true);
-        }, DURATION + 120);
-      },
-      { once: true }
-    );
+    let startAutoHideTimer = () => {
+      this._animationBox.setAttribute("animate", "true");
+      this._timerID = setTimeout(() => {
+        this._panel.hidePopup(true);
+      }, DURATION + 120);
+    };
+
+    if (this._panel.state == "open") {
+      // A hint is already showing: openPopup below would be a no-op and no
+      // popupshown event would fire to restart the timer _reset just cleared.
+      startAutoHideTimer();
+      return;
+    }
+
+    this._panel.addEventListener("popupshown", startAutoHideTimer, {
+      once: true,
+    });
 
     this._panel.addEventListener(
       "popuphidden",

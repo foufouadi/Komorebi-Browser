@@ -4865,43 +4865,18 @@ nsresult Element::CopyInnerTo(Element* aDst) {
                                 IsKnownNewAttr::Yes));
   }
 
-  // https://dom.spec.whatwg.org/#clone-a-single-node
-  // Step 2.1. Let registry be node's custom element registry.
-  // Step 2.2. If registry is null, then set registry to fallbackRegistry.
-  // Step 2.3. If registry is a global custom element registry, then set
-  //           registry to document's effective global custom element registry.
-  // XXX Steps 2.1-2.3 are partially handled here by propagating registry
-  // state; the full registry resolution happens in "create an element".
-  CustomElementRegistryState state = GetCustomElementRegistryState();
-  if (state == CustomElementRegistryState::Scoped) {
-    MOZ_ASSERT(StaticPrefs::dom_scoped_custom_element_registries_enabled());
-    RefPtr<CustomElementRegistry> scopedRegistry =
-        CustomElementRegistry::GetScopedRegistry(*this);
-    aDst->SetCustomElementRegistry(scopedRegistry);
-  } else {
-    MOZ_ASSERT(state == CustomElementRegistryState::Global ||
-               StaticPrefs::dom_scoped_custom_element_registries_enabled());
-    aDst->SetCustomElementRegistryState(state);
-  }
-
-  // https://html.spec.whatwg.org/#enqueue-a-custom-element-upgrade-reaction
-  dom::NodeInfo* dstNodeInfo = aDst->NodeInfo();
+  // NOTE: Custom element registry state propagation, definition lookup, and
+  // upgrade reaction enqueuing are handled by CloneAndAdopt in nsINode.cpp,
+  // which has access to the resolved registry (including fallbackRegistry from
+  // importNode). CopyInnerTo only copies the CustomElementData type atom so
+  // that CloneAndAdopt can use it for definition lookup.
   if (CustomElementData* data = GetCustomElementData()) {
-    // The cloned node may be a custom element that may require
-    // enqueing upgrade reaction.
     if (nsAtom* typeAtom = data->GetCustomElementType()) {
       aDst->SetCustomElementData(MakeUnique<CustomElementData>(typeAtom));
-      MOZ_ASSERT(dstNodeInfo->NameAtom()->Equals(dstNodeInfo->LocalName()));
-      CustomElementDefinition* definition =
-          nsContentUtils::LookupCustomElementDefinition(
-              dstNodeInfo->GetDocument(), dstNodeInfo->NameAtom(),
-              dstNodeInfo->NamespaceID(), typeAtom);
-      if (definition) {
-        nsContentUtils::EnqueueUpgradeReaction(aDst, definition);
-      }
     }
   }
 
+  dom::NodeInfo* dstNodeInfo = aDst->NodeInfo();
   if (dstNodeInfo->GetDocument()->IsStaticDocument()) {
     // Propagate :defined state to the static clone.
     if (State().HasState(ElementState::DEFINED)) {

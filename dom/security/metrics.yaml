@@ -575,69 +575,6 @@ mixed_content:
     expires: never
     telemetry_mirror: MIXED_CONTENT_HSTS
 
-  images:
-    type: labeled_counter
-    description: >
-      How often image loads fail in regular mode and in upgrading mode?
-
-      This metric was generated to correspond to the Legacy Telemetry
-      categorical histogram MIXED_CONTENT_IMAGES.
-    labels:
-      - ImgUpSuccess
-      - ImgUpFailure
-      - ImgNoUpSuccess
-      - ImgNoUpFailure
-    bugs:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1819336
-    data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1819336
-    notification_emails:
-      - seceng-telemetry@mozilla.com
-    expires: never
-    telemetry_mirror: h#MIXED_CONTENT_IMAGES
-
-  video:
-    type: labeled_counter
-    description: >
-      How often video loads fail in regular mode and in upgrading mode?
-
-      This metric was generated to correspond to the Legacy Telemetry
-      categorical histogram MIXED_CONTENT_VIDEO.
-    labels:
-      - VideoUpSuccess
-      - VideoUpFailure
-      - VideoNoUpSuccess
-      - VideoNoUpFailure
-    bugs:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1819336
-    data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1819336
-    notification_emails:
-      - seceng-telemetry@mozilla.com
-    expires: never
-    telemetry_mirror: h#MIXED_CONTENT_VIDEO
-
-  audio:
-    type: labeled_counter
-    description: >
-      How often audio loads fail in regular mode and in upgrading mode?
-
-      This metric was generated to correspond to the Legacy Telemetry
-      categorical histogram MIXED_CONTENT_AUDIO.
-    labels:
-      - AudioUpSuccess
-      - AudioUpFailure
-      - AudioNoUpSuccess
-      - AudioNoUpFailure
-    bugs:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1819336
-    data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1819336
-    notification_emails:
-      - seceng-telemetry@mozilla.com
-    expires: never
-    telemetry_mirror: h#MIXED_CONTENT_AUDIO
-
 security.ui:
   events:
     type: custom_distribution

@@ -1073,16 +1073,18 @@ bool NativeLayerWayland::Map(WaylandSurfaceLock& aParentWaylandSurfaceLock) {
   if (mIsHDR) {
     gfx::YUVColorSpace yuvColorSpace = gfx::YUVColorSpace::BT709;
     gfx::TransferFunction transferFunction = gfx::TransferFunction::BT709;
+    mozilla::gfx::HDRMetadata hdrMetadata{};
     if (auto* external = AsNativeLayerWaylandExternal()) {
       if (RefPtr surface = external->GetSurface()) {
         if (auto* surfaceYUV = surface->GetAsDMABufSurfaceYUV()) {
           yuvColorSpace = surfaceYUV->GetYUVColorSpace();
           transferFunction = surfaceYUV->GetTransferFunction();
+          hdrMetadata = surfaceYUV->GetHDRMetadata();
         }
       }
     }
     mSurface->EnableColorManagementLocked(surfaceLock, yuvColorSpace,
-                                          transferFunction);
+                                          transferFunction, hdrMetadata);
   }
 
   if (auto* external = AsNativeLayerWaylandExternal()) {

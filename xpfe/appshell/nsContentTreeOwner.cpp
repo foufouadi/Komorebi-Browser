@@ -214,11 +214,6 @@ NS_IMETHODIMP nsContentTreeOwner::SetLinkStatus(const nsAString& aStatusText) {
   return NS_OK;
 }
 
-NS_IMETHODIMP nsContentTreeOwner::SetChromeFlags(uint32_t aChromeFlags) {
-  NS_ENSURE_STATE(mAppWindow);
-  return mAppWindow->SetChromeFlags(aChromeFlags);
-}
-
 NS_IMETHODIMP nsContentTreeOwner::GetChromeFlags(uint32_t* aChromeFlags) {
   NS_ENSURE_STATE(mAppWindow);
   return mAppWindow->GetChromeFlags(aChromeFlags);

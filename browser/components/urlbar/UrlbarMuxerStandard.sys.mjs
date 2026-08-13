@@ -1599,7 +1599,8 @@ class MuxerUnifiedComplete extends UrlbarMuxer {
   #setExposureTelemetryProperty(result) {
     const exposureResults = lazy.UrlbarPrefs.get("exposureResults");
     if (exposureResults.size) {
-      const telemetryType = UrlbarUtils.searchEngagementTelemetryType(result);
+      const telemetryType =
+        lazy.UrlbarShared.searchEngagementTelemetryType(result);
       if (exposureResults.has(telemetryType)) {
         result.exposureTelemetry = lazy.UrlbarPrefs.get("showExposureResults")
           ? lazy.UrlbarShared.EXPOSURE_TELEMETRY.SHOWN

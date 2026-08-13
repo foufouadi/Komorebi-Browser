@@ -206,14 +206,6 @@ WebBrowserChrome2Stub::GetChromeFlags(uint32_t* aChromeFlags) {
 }
 
 NS_IMETHODIMP
-WebBrowserChrome2Stub::SetChromeFlags(uint32_t aChromeFlags) {
-  MOZ_ASSERT_UNREACHABLE(
-      "WebBrowserChrome2Stub::SetChromeFlags is "
-      "not supported");
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
 WebBrowserChrome2Stub::ShowAsModal() {
   MOZ_ASSERT_UNREACHABLE("WebBrowserChrome2Stub::ShowAsModal is not supported");
   return NS_ERROR_NOT_IMPLEMENTED;

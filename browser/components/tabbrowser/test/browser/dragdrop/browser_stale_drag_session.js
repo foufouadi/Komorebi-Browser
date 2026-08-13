@@ -43,6 +43,19 @@ async function startTabDragWithoutEnding() {
   return tab;
 }
 
+/**
+ * @param {string} msg  Describes what is expected to leave moving-tab mode.
+ * @returns {Promise}
+ */
+function waitForMovingTabToEnd(msg) {
+  return BrowserTestUtils.waitForMutationCondition(
+    gBrowser.tabContainer,
+    { attributes: true, attributeFilter: ["movingtab"] },
+    () => !gBrowser.tabContainer.hasAttribute("movingtab"),
+    { msg }
+  );
+}
+
 function assertNotMovingTab(why) {
   Assert.ok(
     !gBrowser.tabContainer.hasAttribute("movingtab"),
@@ -54,15 +67,36 @@ function assertNotMovingTab(why) {
   );
 }
 
+async function resetTelemetry() {
+  await Services.fog.testFlushAllChildren();
+  Services.fog.testResetFOG();
+}
+
+function assertRecoveryRecorded(label) {
+  for (let candidate of [
+    "session_live",
+    "session_live_after_drop",
+    "session_ended",
+    "session_ended_after_drop",
+  ]) {
+    let expected = candidate == label ? 1 : null;
+    Assert.equal(
+      Glean.tab.staleDragRecovery[candidate].testGetValue(),
+      expected,
+      `tab.staleDragRecovery["${candidate}"] is ${expected}`
+    );
+  }
+}
+
 add_task(async function test_session_disappears_without_dragend() {
+  await resetTelemetry();
   let tab = await startTabDragWithoutEnding();
   let windowCount = [...Services.wm.getEnumerator("navigator:browser")].length;
 
   info("End the drag session the way a lost dragend would.");
   dragService.getCurrentSession(window).endDragSession(false);
 
-  await TestUtils.waitForCondition(
-    () => !gBrowser.tabContainer.hasAttribute("movingtab"),
+  await waitForMovingTabToEnd(
     "Waiting for the stale drag session to be noticed"
   );
   assertNotMovingTab("after the drag session disappeared");
@@ -71,11 +105,13 @@ add_task(async function test_session_disappears_without_dragend() {
     windowCount,
     "Recovering didn't detach the tab into a new window"
   );
+  assertRecoveryRecorded("session_ended");
 
   BrowserTestUtils.removeTab(tab);
 });
 
 add_task(async function test_session_outlives_the_drag() {
+  await resetTelemetry();
   let tab = await startTabDragWithoutEnding();
   let windowCount = [...Services.wm.getEnumerator("navigator:browser")].length;
 
@@ -96,6 +132,7 @@ add_task(async function test_session_outlives_the_drag() {
     windowCount,
     "Recovering didn't detach the tab into a new window"
   );
+  assertRecoveryRecorded("session_live");
 
   EventUtils.synthesizeMouseAtCenter(
     gURLBar.inputField,
@@ -103,4 +140,51 @@ add_task(async function test_session_outlives_the_drag() {
     window
   );
   BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_drop_doesnt_taint_the_next_drag() {
+  // The drop only sets its deadline when it animates, and it waits on a
+  // transition the stylesheet only defines under prefers-reduced-motion:
+  // no-preference. Overriding the media query keeps both in agreement.
+  await SpecialPowers.pushPrefEnv({ set: [["ui.prefersReducedMotion", 0]] });
+  await TestUtils.waitForCondition(
+    () => !gReduceMotion,
+    "Waiting for the reduced motion setting to be picked up"
+  );
+
+  let droppedTab = await addTab();
+
+  EventUtils.startDragSession(window, "move");
+  let [result, dataTransfer] = EventUtils.synthesizeDragOver(
+    droppedTab,
+    gBrowser.tabs[0],
+    null,
+    "move",
+    window,
+    window,
+    getDragEvent()
+  );
+  EventUtils.synthesizeDropAfterDragOver(
+    result,
+    dataTransfer,
+    gBrowser.tabs[0]
+  );
+  EventUtils._getDOMWindowUtils(window).dragSession?.endDragSession(true);
+  await waitForMovingTabToEnd("Waiting for the drop to leave moving-tab mode");
+
+  // Only the next drag's label matters here, so the drop's own outcome is
+  // deliberately not asserted.
+  await resetTelemetry();
+
+  let tab = await startTabDragWithoutEnding();
+  dragService.getCurrentSession(window).endDragSession(false);
+
+  await waitForMovingTabToEnd(
+    "Waiting for the stale drag session to be noticed"
+  );
+  assertRecoveryRecorded("session_ended");
+
+  BrowserTestUtils.removeTab(droppedTab);
+  BrowserTestUtils.removeTab(tab);
+  await SpecialPowers.popPrefEnv();
 });

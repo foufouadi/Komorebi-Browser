@@ -46,8 +46,11 @@ class BaseHost:
             ]
 
         with tempfile.TemporaryDirectory() as temp_repo_clone:
-            starting_directory = os.getcwd()
-            os.chdir(temp_repo_clone)
+            # Run git with cwd= rather than moving the process with os.chdir():
+            # this directory is deleted when the block exits, so a caller that
+            # handles the exceptions raised below would be left sitting in a
+            # directory that no longer exists.
+            repo_clone = "/".join([temp_repo_clone, self.manifest["origin"]["name"]])
             subprocess.run(
                 ["git", "clone"]
                 + clone_config
@@ -55,11 +58,11 @@ class BaseHost:
                     self.manifest["vendoring"]["url"],
                     self.manifest["origin"]["name"],
                 ],
+                cwd=temp_repo_clone,
                 capture_output=True,
                 text=True,
                 check=True,
             )
-            os.chdir("/".join([temp_repo_clone, self.manifest["origin"]["name"]]))
             revision_arg = []
             if revision and revision != "HEAD":
                 revision_arg = [revision]
@@ -68,6 +71,7 @@ class BaseHost:
                 tag = subprocess.run(
                     ["git", "--no-pager", "tag", "-l", "--sort=creatordate"]
                     + revision_arg,
+                    cwd=repo_clone,
                     capture_output=True,
                     text=True,
                     check=True,
@@ -87,11 +91,11 @@ class BaseHost:
                     "--format=%cd",
                     tag,
                 ],
+                cwd=repo_clone,
                 capture_output=True,
                 text=True,
                 check=True,
             ).stdout.splitlines()[-1]
-            os.chdir(starting_directory)
             return tag, tag_timestamp
 
     def upstream_snapshot(self, revision):

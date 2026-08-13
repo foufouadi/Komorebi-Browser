@@ -1913,10 +1913,9 @@ already_AddRefed<gfxFontEntry> gfxPlatform::LookupLocalFont(
 already_AddRefed<gfxFontEntry> gfxPlatform::MakePlatformFont(
     const nsACString& aFontName, const WeightRange& aWeightForEntry,
     const WidthRange& aWidthForEntry, const SlantStyleRange& aStyleForEntry,
-    const uint8_t* aFontData, uint32_t aLength) {
+    FontData* aFontData) {
   return gfxPlatformFontList::PlatformFontList()->MakePlatformFont(
-      aFontName, aWeightForEntry, aWidthForEntry, aStyleForEntry, aFontData,
-      aLength);
+      aFontName, aWeightForEntry, aWidthForEntry, aStyleForEntry, aFontData);
 }
 
 BackendPrefsData gfxPlatform::GetBackendPrefs() const {

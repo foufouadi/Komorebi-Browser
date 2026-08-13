@@ -30,7 +30,7 @@ class ProfileChunkedBuffer;
 // be updated with a stable commit from Firefox Profiler's production branch
 // (https://github.com/firefox-devtools/profiler/tree/production) that contains
 // the version bump.
-const int GECKO_PROFILER_FORMAT_VERSION = 35;
+const int GECKO_PROFILER_FORMAT_VERSION = 36;
 
 namespace baseprofiler::detail {
 

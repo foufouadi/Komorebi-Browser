@@ -229,7 +229,7 @@ function getNextWorkerDebuggerId() {
   return new Promise(resolve => {
     const wdm = Cc[
       "@mozilla.org/dom/workers/workerdebuggermanager;1"
-    ].createInstance(Ci.nsIWorkerDebuggerManager);
+    ].getService(Ci.nsIWorkerDebuggerManager);
     const listener = {
       onRegister(dbg) {
         wdm.removeListener(listener);

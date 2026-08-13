@@ -9,6 +9,7 @@
 #include "gfxFont.h"
 #include "gfxPlatform.h"
 #include "mozilla/Components.h"
+#include "mozilla/FileUtils.h"
 #include "mozilla/Logging.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Sprintf.h"
@@ -369,16 +370,29 @@ static already_AddRefed<FcPattern> CreatePatternForFace(FT_Face aFace) {
   return pattern.forget();
 }
 
-static already_AddRefed<SharedFTFace> CreateFaceForPattern(
-    FcPattern* aPattern) {
+static FcChar8* GetPatternFilename(FcPattern* aPattern) {
   FcChar8* filename;
   if (FcPatternGetString(aPattern, FC_FILE, 0, &filename) != FcResultMatch) {
-    return nullptr;
+    filename = nullptr;
   }
+  return filename;
+}
+
+static int GetPatternIndex(FcPattern* aPattern) {
   int index;
   if (FcPatternGetInteger(aPattern, FC_INDEX, 0, &index) != FcResultMatch) {
     index = 0;  // default to 0 if not found in pattern
   }
+  return index;
+}
+
+static already_AddRefed<SharedFTFace> CreateFaceForPattern(
+    FcPattern* aPattern) {
+  FcChar8* const filename = GetPatternFilename(aPattern);
+  if (!filename) {
+    return nullptr;
+  }
+  const int index = GetPatternIndex(aPattern);
   return Factory::NewSharedFTFace(nullptr, ToCharPtr(filename), index);
 }
 
@@ -469,6 +483,11 @@ gfxFontconfigFontEntry::~gfxFontconfigFontEntry() {
     auto* face = mFTFace.exchange(nullptr);
     NS_IF_RELEASE(face);
   }
+#ifdef MOZ_FONTATIONS
+  if (mozilla::gfx::SkrifaFontRef* font = mSkrifaFontFace) {
+    skrifa_font_delete(font);
+  }
+#endif
 }
 
 gfxFontconfigFontEntry::AutoHBFace gfxFontconfigFontEntry::GetHBFace() {
@@ -494,10 +513,10 @@ gfxFontconfigFontEntry::AutoHBFace gfxFontconfigFontEntry::GetHBFace() {
       // hb_face_create to wrap that.
       if (mFTFaceInitialized) {
         if (const FTUserFontData* ufd = GetUserFontData()) {
-          if (ufd->FontData()) {
-            hb_blob_t* blob = hb_blob_create(
-                (const char*)ufd->FontData(), ufd->FontDataLength(),
-                HB_MEMORY_MODE_READONLY, nullptr, nullptr);
+          if (const auto* data = ufd->GetData()) {
+            hb_blob_t* blob =
+                hb_blob_create((const char*)data, ufd->Length(),
+                               HB_MEMORY_MODE_READONLY, nullptr, nullptr);
             // Currently the face index is always zero, as we don't support
             // collections as webfonts.
             face = hb_face_create(blob, 0);
@@ -628,8 +647,8 @@ bool gfxFontconfigFontEntry::TestCharacterMap(uint32_t aCh) {
 
 bool gfxFontconfigFontEntry::HasFontTable(uint32_t aTableTag) {
   if (FTUserFontData* ufd = GetUserFontData()) {
-    if (ufd->FontData()) {
-      return !!gfxFontUtils::FindTableDirEntry(ufd->FontData(), aTableTag);
+    if (const auto* data = ufd->GetData()) {
+      return !!gfxFontUtils::FindTableDirEntry(data, aTableTag);
     }
   }
   return gfxFT2FontEntryBase::FaceHasTable(GetFTFace(), aTableTag);
@@ -638,8 +657,8 @@ bool gfxFontconfigFontEntry::HasFontTable(uint32_t aTableTag) {
 hb_blob_t* gfxFontconfigFontEntry::GetFontTable(uint32_t aTableTag) {
   // for data fonts, read directly from the font data
   if (FTUserFontData* ufd = GetUserFontData()) {
-    if (ufd->FontData()) {
-      return gfxFontUtils::GetTableFromFontData(ufd->FontData(), aTableTag);
+    if (const auto* data = ufd->GetData()) {
+      return gfxFontUtils::GetTableFromFontData(data, aTableTag);
     }
   }
 
@@ -1078,9 +1097,47 @@ gfxFont* gfxFontconfigFontEntry::CreateFontInstance(
   return newFont;
 }
 
+#ifdef MOZ_FONTATIONS
+void gfxFontconfigFontEntry::InitSkrifaFont(FcPattern* aPattern) {
+  using mozilla::MemoryMappedFile;
+  using mozilla::gfx::SkrifaFontRef;
+
+  // Try to load the file.
+  const FcChar8* const filenameBytes = GetPatternFilename(aPattern);
+  if (!filenameBytes) {
+    return;
+  }
+  AutoFDClose fd(PR_Open(ToCharPtr(filenameBytes), PR_RDONLY, 0));
+  MemoryMappedFile file = MemoryMappedFile::Open(fd.get());
+  if (!file.IsValid()) {
+    return;
+  }
+
+  const int index = GetPatternIndex(aPattern);
+  const uint8_t* data = static_cast<const uint8_t*>(file.Data());
+  const size_t size = file.Size();
+  if (SkrifaFontRef* font = skrifa_font_new_from_index(data, size, index)) {
+    // If another thread came in and initialized the font face ahead of us,
+    // just delete the face this thread constructed.
+    if (mSkrifaFontFace.compareExchange(nullptr, font)) {
+      // If we won the race, store our file data to back the font.
+      mSkrifaFontFile = std::move(file);
+    } else {
+      // We lost the race, delete the font we just constructed and let the
+      // file mapping be destroyed normally.
+      skrifa_font_delete(font);
+    }
+  }
+}
+#endif
+
 SharedFTFace* gfxFontconfigFontEntry::GetFTFace() {
   if (!mFTFaceInitialized) {
+#ifdef MOZ_FONTATIONS
+    InitSkrifaFont(mFontPattern);
+#endif
     RefPtr<SharedFTFace> face = CreateFaceForPattern(mFontPattern);
+
     if (face) {
       if (mFTFace.compareExchange(nullptr, face.get())) {
         face.forget().leak();  // The reference is now owned by mFTFace.
@@ -2351,8 +2408,8 @@ already_AddRefed<gfxFontEntry> gfxFcPlatformFontList::LookupLocalFont(
 already_AddRefed<gfxFontEntry> gfxFcPlatformFontList::MakePlatformFont(
     const nsACString& aFontName, WeightRange aWeightForEntry,
     WidthRange aWidthForEntry, SlantStyleRange aStyleForEntry,
-    const uint8_t* aFontData, uint32_t aLength) {
-  RefPtr<FTUserFontData> ufd = new FTUserFontData(aFontData, aLength);
+    FontData* aFontData) {
+  RefPtr<FTUserFontData> ufd = new FTUserFontData(aFontData);
   RefPtr<SharedFTFace> face = ufd->CloneFace();
   if (!face) {
     return nullptr;

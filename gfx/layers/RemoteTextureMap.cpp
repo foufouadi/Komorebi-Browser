@@ -29,13 +29,9 @@ namespace mozilla::layers {
 RemoteTextureRecycleBin::RemoteTextureRecycleBin(bool aIsShared)
     : mIsShared(aIsShared) {}
 
-RemoteTextureRecycleBin::~RemoteTextureRecycleBin() = default;
-
 RemoteTextureOwnerClient::RemoteTextureOwnerClient(
     const base::ProcessId aForPid)
     : mForPid(aForPid) {}
-
-RemoteTextureOwnerClient::~RemoteTextureOwnerClient() = default;
 
 bool RemoteTextureOwnerClient::IsRegistered(
     const RemoteTextureOwnerId aOwnerId) {
@@ -294,10 +290,6 @@ void RemoteTextureMap::Shutdown() {
     sInstance = nullptr;
   }
 }
-
-RemoteTextureMap::RemoteTextureMap() : mMonitor("RemoteTextureMap::mMonitor") {}
-
-RemoteTextureMap::~RemoteTextureMap() = default;
 
 bool RemoteTextureMap::RecycleTexture(
     const RefPtr<RemoteTextureRecycleBin>& aRecycleBin,

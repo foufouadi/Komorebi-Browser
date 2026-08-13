@@ -1546,12 +1546,15 @@ class BuildDriver(MozbuildObject):
                 # If the backend doesn't specify a build() method, then just
                 # call client.mk directly.
                 # In automation, client.mk starts the sccache daemon, which
-                # only reads SCCACHE_BASEDIRS when it starts, so it needs the
-                # variable in its environment. config.mk covers the sub-makes.
+                # only reads its configuration from the environment when it
+                # starts, so it needs the sccache variables in its environment.
+                # config.mk covers the sub-makes.
                 client_mk_env = dict(append_env or {})
-                sccache_basedirs = config.substs.get("SCCACHE_BASEDIRS")
-                if sccache_basedirs:
-                    client_mk_env["SCCACHE_BASEDIRS"] = sccache_basedirs
+                client_mk_env.update(
+                    (name, value)
+                    for name, value in config.substs.items()
+                    if name.startswith("SCCACHE_")
+                )
                 status = self._run_client_mk(
                     line_handler=output.on_stdout_line,
                     stderr_line_handler=output.on_stderr_line,

@@ -132,9 +132,6 @@
     <ID>ForbiddenSuppress:StartupStateProvider.kt$StartupStateProvider$@Suppress("MagicNumber")</ID>
     <ID>ForbiddenSuppress:Stories.kt$@Suppress("CyclomaticComplexMethod", "LongMethod", "CognitiveComplexMethod")</ID>
     <ID>ForbiddenSuppress:String.kt$@Suppress("MagicNumber")</ID>
-    <ID>ForbiddenSuppress:SwipeToDismissBox2.kt$@Suppress("CognitiveComplexMethod")</ID>
-    <ID>ForbiddenSuppress:SwipeToDismissBox2.kt$@Suppress("DEPRECATION", "CognitiveComplexMethod")</ID>
-    <ID>ForbiddenSuppress:SwipeToDismissBox2.kt$@Suppress("MagicNumber")</ID>
     <ID>ForbiddenSuppress:SyncedTabsList.kt$@SuppressWarnings("LongMethod", "CognitiveComplexMethod")</ID>
     <ID>ForbiddenSuppress:TabLayout.kt$@Suppress("LongParameterList", "LongMethod")</ID>
     <ID>ForbiddenSuppress:TabLayout.kt$@Suppress("LongParameterList", "LongMethod", "CognitiveComplexMethod")</ID>
@@ -770,8 +767,6 @@
     <ID>UndocumentedPublicFunction:ProfilerMarkers.kt$ProfilerMarkers$fun addForDispatchTouchEvent(profiler: Profiler?, ev: MotionEvent?)</ID>
     <ID>UndocumentedPublicFunction:ProfilerMarkers.kt$ProfilerMarkers$fun addListenerForOnGlobalLayout(engine: Engine, activity: Activity, rootView: View)</ID>
     <ID>UndocumentedPublicFunction:ProfilerMarkers.kt$ProfilerMarkers$fun homeActivityOnStart(rootContainer: View, profiler: Profiler?)</ID>
-    <ID>UndocumentedPublicFunction:PwaOnboardingObserver.kt$PwaOnboardingObserver$fun start()</ID>
-    <ID>UndocumentedPublicFunction:PwaOnboardingObserver.kt$PwaOnboardingObserver$fun stop()</ID>
     <ID>UndocumentedPublicFunction:AutoplayValue.kt$AutoplayValue$abstract fun createSitePermissionsFromCustomRules(origin: String, settings: Settings): SitePermissions</ID>
     <ID>UndocumentedPublicFunction:AutoplayValue.kt$AutoplayValue$abstract fun isSelected(): Boolean</ID>
     <ID>UndocumentedPublicFunction:AutoplayValue.kt$AutoplayValue$abstract fun updateSitePermissions(sitePermissions: SitePermissions): SitePermissions</ID>

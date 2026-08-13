@@ -311,7 +311,12 @@ var tests = [
   // Test notification when chrome is hidden
   {
     id: "Test#11",
+    _oldChromeHidden: document.documentElement.getAttribute("chromehidden"),
     run() {
+      document.documentElement.setAttribute(
+        "chromehidden",
+        this._oldChromeHidden + " location"
+      );
       window.locationbar.visible = false;
       this.notifyObj = new BasicNotification(this.id);
       this.notification = showNotification(this.notifyObj);
@@ -332,7 +337,10 @@ var tests = [
       );
       this.notification.remove();
       ok(this.notifyObj.removedCallbackTriggered, "removed callback triggered");
-      window.locationbar.visible = true;
+      document.documentElement.setAttribute(
+        "chromehidden",
+        this._oldChromeHidden
+      );
     },
   },
 ];

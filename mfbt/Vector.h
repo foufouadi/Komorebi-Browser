@@ -121,14 +121,14 @@ inline size_t GrowEltsByDoubling(size_t aOldElts, size_t aIncr) {
 
 // Fallback version.
 template <typename AP, size_t EltSize>
-static size_t ComputeGrowth(size_t aOldElts, size_t aIncr, int) {
+size_t ComputeGrowth(size_t aOldElts, size_t aIncr, int) {
   return GrowEltsByDoubling<EltSize>(aOldElts, aIncr);
 }
 
 // If the AllocPolicy provides its own computeGrowth<EltSize> implementation,
 // use that.
 template <typename AP, size_t EltSize>
-static size_t ComputeGrowth(
+size_t ComputeGrowth(
     size_t aOldElts, size_t aIncr,
     decltype(std::declval<AP>().template computeGrowth<EltSize>(0, 0),
              bool()) aOverloadSelector) {

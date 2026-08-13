@@ -1669,6 +1669,37 @@ export const PREFS_CONFIG = new Map([
     },
   ],
   [
+    "widgets.privacy.celebrationThreshold",
+    {
+      title:
+        "Increase in blocked trackers that triggers the count-up celebration",
+      value: 10,
+    },
+  ],
+  [
+    "widgets.privacy.forceCelebration",
+    {
+      // Fires on every parent count refresh (new tab, init, tick), counting up
+      // from a fixed span below the live count and leaving the real baseline
+      // alone. Animation only: the message, and so the animated kit icon,
+      // follows widgets.privacy.forceMessageId.
+      title:
+        "Debug: force the Privacy widget celebration. 'brief' | 'major' | 'cap', empty = off",
+      value: "",
+    },
+  ],
+  [
+    "widgets.privacy.celebrationState",
+    {
+      // Parent-only count-up bookkeeping (daily baseline + unplayed award)
+      // owned by PrivacyFeed. Separate from messageState because the
+      // scheduler normalizes that blob and would strip these keys.
+      title: "Privacy widget celebration state (JSON, internal)",
+      skipBroadcast: true,
+      value: "{}",
+    },
+  ],
+  [
     "widgets.privacy.messageState",
     {
       // Parent-only scheduler bookkeeping (frequency caps, milestone
@@ -2162,7 +2193,7 @@ const FEEDS_DATA = [
         IE: ["en-CA", "en-GB", "en-US"],
         ZA: ["en-CA", "en-GB", "en-US"],
         CH: ["de"],
-        BE: ["de"],
+        BE: ["de", "fr"],
         DE: ["de"],
         AT: ["de"],
         IT: ["it"],
@@ -2170,6 +2201,9 @@ const FEEDS_DATA = [
         ES: ["es-ES"],
         PL: ["pl"],
         JP: ["ja", "ja-JP-mac"],
+        NL: ["nl"],
+        PT: ["pt-PT"],
+        BR: ["pt-BR"],
       }[geo];
 
       const regionBlocked = preffedBlockRegions.includes(geo);

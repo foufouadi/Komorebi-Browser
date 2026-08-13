@@ -131,7 +131,7 @@ class nsDisplayTextOverflowMarker final : public nsPaintedDisplayItem {
                               gfxTextRun* aTextRun)
       : nsPaintedDisplayItem(aBuilder, aFrame),
         mRect(aRect),
-        mString(aString),
+        mString(aString ? aString->AsAtom() : nullptr),
         mAscent(aAscent),
         mTextRun(aTextRun) {
     MOZ_COUNT_CTOR(nsDisplayTextOverflowMarker);
@@ -174,7 +174,7 @@ class nsDisplayTextOverflowMarker final : public nsPaintedDisplayItem {
   NS_DISPLAY_DECL_NAME("TextOverflow", TYPE_TEXT_OVERFLOW)
  private:
   nsRect mRect;  // in reference frame coordinates
-  const StyleAtomString* mString;
+  RefPtr<const nsAtom> mString;
   nscoord mAscent;              // baseline for the marker text in mRect
   RefPtr<gfxTextRun> mTextRun;  // precached textrun, if available
 };
@@ -234,7 +234,7 @@ void nsDisplayTextOverflowMarker::PaintTextToContext(
 
   RefPtr<nsFontMetrics> fm =
       nsLayoutUtils::GetInflatedFontMetricsForFrame(mFrame);
-  nsDependentAtomString str16(mString->AsAtom());
+  nsDependentAtomString str16(mString.get());
   nsLayoutUtils::DrawString(mFrame, *fm, aCtx, str16.get(), str16.Length(), pt);
 }
 

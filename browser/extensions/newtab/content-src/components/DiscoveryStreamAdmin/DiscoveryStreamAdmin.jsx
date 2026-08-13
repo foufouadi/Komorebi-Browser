@@ -45,6 +45,7 @@ const WIDGET_EXTRA_FEATURES = {
       label: "Set as wallpaper",
     },
   ],
+  privacy: [{ pref: "widgets.privacy.showVpnMessages", label: "VPN messages" }],
   sportsWidget: [
     { pref: "widgets.sportsWidget.live.enabled", label: "Live scores" },
     {
@@ -1269,7 +1270,7 @@ export function CollapseToggle(props) {
     <>
       {novaEnabled ? (
         <moz-button
-          type="icon"
+          type="primary"
           className={className}
           title={label}
           aria-label={label}

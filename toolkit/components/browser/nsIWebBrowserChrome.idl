@@ -127,7 +127,7 @@ interface nsIWebBrowserChrome : nsISupports
      * reflect the value of this attribute by hiding or showing its chrome
      * appropriately.
      */
-    attribute unsigned long chromeFlags;
+    readonly attribute unsigned long chromeFlags;
 
     /**
      * Shows the window as a modal window.

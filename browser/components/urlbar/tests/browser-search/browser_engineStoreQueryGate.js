@@ -95,6 +95,40 @@ add_task(async function queryWaitsForEngineStore() {
   await BrowserTestUtils.closeWindow(win);
 });
 
+// A query cancelled while it's held back must not be dispatched once the store
+// is ready. Only the held-back query is affected: a cancel says nothing about
+// the results of a query already running, which the view cancels for reasons of
+// its own.
+add_task(async function cancelWhileWaitingForEngineStore() {
+  let win = await BrowserTestUtils.openNewBrowserWindow();
+  let { engineStore } = win.gURLBar.controller;
+  await engineStore.init();
+  let engineId = engineStore.default.id;
+
+  let letInitFinish = await pinUninitializedEngineStore(win);
+
+  let started = false;
+  let listener = { onQueryStarted: () => (started = true) };
+  win.gURLBar.controller.addListener(listener);
+
+  await UrlbarTestUtils.inputIntoURLBar(win, "test");
+  let queryPromise = win.gURLBar.lastQueryContextPromise;
+  win.gURLBar.controller.cancelQuery();
+
+  letInitFinish();
+  await queryPromise;
+  await flushParentRoundTrip(win, engineId);
+
+  Assert.ok(
+    !started,
+    "Cancelled query wasn't dispatched once the store was up"
+  );
+
+  win.gURLBar.controller.removeListener(listener);
+  await UrlbarTestUtils.promisePopupClose(win);
+  await BrowserTestUtils.closeWindow(win);
+});
+
 // The store never being populated must not wedge the input: a failed search
 // service is a permanent state, and queries still have to run without it.
 add_task(async function failedEngineStoreDoesntBlockQueries() {

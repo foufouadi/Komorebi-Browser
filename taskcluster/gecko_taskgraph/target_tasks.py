@@ -1920,6 +1920,20 @@ def target_tasks_android_macrobenchmark_daily(
     ]
 
 
+@register_target_task("devtools_backward_compat")
+def target_tasks_devtools_backward_compat(full_task_graph, parameters, graph_config):
+    """
+    Select the DevTools remote debugging backward compatibility tests. They are
+    too slow and too dependent on external builds to run on every push, see
+    bug 2053559.
+    """
+    return [
+        label
+        for label, task in full_task_graph.tasks.items()
+        if task.attributes.get("unittest_suite") == "devtools-compat"
+    ]
+
+
 @register_target_task("firefox_pull_request_tasks")
 def target_firefox_pull_requests(full_task_graph, parameters, graph_config):
     if parameters["tasks_for"] != "github-pull-request":

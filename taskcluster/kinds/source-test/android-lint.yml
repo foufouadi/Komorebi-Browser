@@ -55,6 +55,7 @@ focus:
     when:
         files-changed:
             - "mobile/android/focus-android/**"
+            - "mobile/android/shared-lint.xml"
     run:
         clone-with: hg
         pre-gradlew:
@@ -71,6 +72,7 @@ fenix:
     when:
         files-changed:
             - "mobile/android/fenix/**"
+            - "mobile/android/shared-lint.xml"
     run:
         clone-with: hg
         pre-gradlew:

@@ -74,9 +74,15 @@ export class UrlbarChildController {
 
   #userSelectionBehavior = /** @type {"arrow"|"tab"|"none"} */ ("none");
 
-  // The id of the query whose results still have a consumer. Notifications
+  // The id of the query the listeners are still hearing about. Notifications
   // carrying an older id belong to a query nobody is waiting for anymore.
   #queryId = 0;
+
+  // Whether the query identified by `#queryId` was cancelled. Only meaningful
+  // while it's held back waiting for the engine store; a cancel can't be taken
+  // as a statement about in-flight results, since the view cancels for reasons
+  // of its own (freezing the list, closing on a stale query's completion).
+  #queryCancelled = false;
 
   // The content-side engagement-telemetry collector, created lazily on the
   // message path (where the parent stand-in has no `engagementEvent`).
@@ -220,10 +226,27 @@ export class UrlbarChildController {
   removeListener(listener) {
     this.#listeners.delete(listener);
   }
+  /**
+   * Hands a notification to the listeners, dropping the results and the end of
+   * a query they have moved on from.
+   *
+   * @param {string} notification
+   *   The notification, one of `UrlbarShared.NOTIFICATIONS`.
+   * @param {...any} params
+   *   The notification's arguments. The query lifecycle ones take the query
+   *   context.
+   */
   notify(notification, ...params) {
+    // Drop the results and the end of a query nobody is waiting for anymore.
+    // Its end, read against results the listeners never saw, would tell the
+    // view that the query produced nothing: the view would clear its rows and
+    // close, cancelling the query that took over. QUERY_STARTED still goes
+    // through -- it carries the per-query state the listeners reset, and the
+    // query they do track resets it again when it starts.
     if (
       (notification === UrlbarShared.NOTIFICATIONS.QUERY_FIRST_RESULT ||
-        notification === UrlbarShared.NOTIFICATIONS.QUERY_RESULTS) &&
+        notification === UrlbarShared.NOTIFICATIONS.QUERY_RESULTS ||
+        notification === UrlbarShared.NOTIFICATIONS.QUERY_FINISHED) &&
       params[0].id < this.#queryId
     ) {
       return;
@@ -308,6 +331,7 @@ export class UrlbarChildController {
    */
   startQuery(queryContext) {
     this.#queryId = queryContext.id;
+    this.#queryCancelled = false;
 
     if (this.engineStore.initialized || this.engineStore.failed) {
       return this.#dispatchQuery(queryContext);
@@ -320,7 +344,7 @@ export class UrlbarChildController {
     this.#input.eventBufferer.queryStarting(queryContext);
 
     return this.#engineStoreReady().then(() =>
-      this.#queryId == queryContext.id
+      this.#queryId == queryContext.id && !this.#queryCancelled
         ? this.#dispatchQuery(queryContext)
         : queryContext
     );
@@ -361,20 +385,24 @@ export class UrlbarChildController {
     }
   }
   cancelQuery() {
-    // Nobody consumes the query's results anymore, and one still waiting for
-    // the engine store must not be dispatched at all.
-    this.#queryId++;
+    // A query still waiting for the engine store must not be dispatched at all.
+    this.#queryCancelled = true;
     return this.#parentController.cancelQuery();
   }
   /**
-   * Keeps the running query's results from reaching the listeners. The input
-   * calls this when it takes the query over after the first result -- entering
-   * search mode and restarting it -- since the results are about to be
-   * replaced. The query keeps running until the restart cancels it, which over
-   * the message path takes a round trip.
+   * Takes the running query away from the listeners, reporting it to them as
+   * cancelled: nothing more of it reaches them, results or end. The input calls
+   * this when it takes the query over after the first result -- entering search
+   * mode and restarting it -- since the results are about to be replaced. The
+   * query keeps running until the restart cancels it, which over the message
+   * path takes a round trip.
+   *
+   * @param {UrlbarQueryContext} queryContext
+   *   The context of the query being discarded.
    */
-  discardResults() {
+  discardResults(queryContext) {
     this.#queryId++;
+    this.notify(UrlbarShared.NOTIFICATIONS.QUERY_CANCELLED, queryContext);
   }
   receiveResults(queryContext) {
     return this.#parentController.receiveResults(queryContext);
@@ -787,6 +815,10 @@ export class UrlbarChildController {
 
   switchToTab(loadData) {
     return this.#parentController.switchToTab(loadData);
+  }
+
+  addToInputHistory(url, input, options) {
+    return this.#parentController.addToInputHistory(url, input, options);
   }
 
   /**

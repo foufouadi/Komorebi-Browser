@@ -749,7 +749,10 @@ void LIRGenerator::visitAtomicExchangeTypedArrayElement(
     outTemp = temp();
   }
 
-  if (Scalar::byteSize(ins->arrayType()) < 4) {
+  const bool needsLlScLoop = Scalar::byteSize(ins->arrayType()) < 4 &&
+                             !LOONG64Flags::HasLamBhExtension();
+
+  if (needsLlScLoop) {
     valueTemp = temp();
     offsetTemp = temp();
     maskTemp = temp();
@@ -775,19 +778,23 @@ void LIRGenerator::visitAtomicTypedArrayElementBinop(
 
   if (Scalar::isBigIntType(ins->arrayType())) {
     LInt64Allocation value = useInt64Register(ins->value());
-    LInt64Definition temp = tempInt64();
 
     // Case 1: the result of the operation is not used.
 
     if (ins->isForEffect()) {
-      auto* lir = new (alloc()) LAtomicTypedArrayElementBinopForEffect64(
-          elements, index, value, temp);
+      auto* lir = new (alloc())
+          LAtomicTypedArrayElementBinopForEffect64(elements, index, value);
       add(lir, ins);
       return;
     }
 
     // Case 2: the result of the operation is used.
 
+    // LoongArch has no "AMSUB", so a temp register is needed to negate the
+    // operand.
+    LInt64Definition temp = ins->operation() == AtomicOp::Sub
+                                ? tempInt64()
+                                : LInt64Definition::BogusTemp();
     auto* lir = new (alloc())
         LAtomicTypedArrayElementBinop64(elements, index, value, temp);
     defineInt64(lir, ins);
@@ -799,7 +806,12 @@ void LIRGenerator::visitAtomicTypedArrayElementBinop(
   LDefinition offsetTemp = LDefinition::BogusTemp();
   LDefinition maskTemp = LDefinition::BogusTemp();
 
-  if (Scalar::byteSize(ins->arrayType()) < 4) {
+  const bool needsLlScLoop = Scalar::byteSize(ins->arrayType()) < 4 &&
+                             !(LOONG64Flags::HasLamBhExtension() &&
+                               (ins->operation() == AtomicOp::Add ||
+                                ins->operation() == AtomicOp::Sub));
+
+  if (needsLlScLoop) {
     valueTemp = temp();
     offsetTemp = temp();
     maskTemp = temp();
@@ -848,10 +860,10 @@ void LIRGenerator::visitWasmLoad(MWasmLoad* ins) {
       ins->hasMemoryBase() ? LAllocation(useRegisterAtStart(ins->memoryBase()))
                            : LGeneralReg(HeapReg);
 
-  LAllocation ptr = useRegisterAtStart(base);
+  LAllocation ptr = useRegisterOrConstantAtStart(base);
 
   LDefinition ptrCopy = LDefinition::BogusTemp();
-  if (ins->access().offset32()) {
+  if (ins->access().offset32() && !base->isConstant()) {
     ptrCopy = tempCopy(base, 0);
   }
 
@@ -875,22 +887,22 @@ void LIRGenerator::visitWasmStore(MWasmStore* ins) {
       ins->hasMemoryBase() ? LAllocation(useRegisterAtStart(ins->memoryBase()))
                            : LGeneralReg(HeapReg);
 
-  LAllocation baseAlloc = useRegisterAtStart(base);
+  LAllocation baseAlloc = useRegisterOrConstantAtStart(base);
 
   LDefinition ptrCopy = LDefinition::BogusTemp();
-  if (ins->access().offset32()) {
+  if (ins->access().offset32() && !base->isConstant()) {
     ptrCopy = tempCopy(base, 0);
   }
 
   if (ins->access().type() == Scalar::Int64) {
-    LInt64Allocation valueAlloc = useInt64RegisterAtStart(value);
+    LInt64Allocation valueAlloc = useInt64RegisterOrZeroAtStart(value);
     auto* lir =
         new (alloc()) LWasmStoreI64(baseAlloc, valueAlloc, memoryBase, ptrCopy);
     add(lir, ins);
     return;
   }
 
-  LAllocation valueAlloc = useRegisterAtStart(value);
+  LAllocation valueAlloc = useRegisterOrZeroAtStart(value);
   auto* lir =
       new (alloc()) LWasmStore(baseAlloc, valueAlloc, memoryBase, ptrCopy);
   add(lir, ins);
@@ -970,7 +982,10 @@ void LIRGenerator::visitWasmAtomicExchangeHeap(MWasmAtomicExchangeHeap* ins) {
   LDefinition offsetTemp = LDefinition::BogusTemp();
   LDefinition maskTemp = LDefinition::BogusTemp();
 
-  if (ins->access().byteSize() < 4) {
+  const bool needsLlScLoop =
+      ins->access().byteSize() < 4 && !LOONG64Flags::HasLamBhExtension();
+
+  if (needsLlScLoop) {
     valueTemp = temp();
     offsetTemp = temp();
     maskTemp = temp();
@@ -991,9 +1006,13 @@ void LIRGenerator::visitWasmAtomicBinopHeap(MWasmAtomicBinopHeap* ins) {
                                : LGeneralReg(HeapReg);
 
   if (ins->access().type() == Scalar::Int64) {
-    auto* lir = new (alloc())
-        LWasmAtomicBinopI64(useRegister(base), useInt64Register(ins->value()),
-                            memoryBase, tempInt64());
+    // LoongArch has no "AMSUB", so a temp register is needed to negate the
+    // operand.
+    LInt64Definition temp = ins->operation() == AtomicOp::Sub
+                                ? tempInt64()
+                                : LInt64Definition::BogusTemp();
+    auto* lir = new (alloc()) LWasmAtomicBinopI64(
+        useRegister(base), useInt64Register(ins->value()), memoryBase, temp);
     defineInt64(lir, ins);
     return;
   }
@@ -1002,7 +1021,12 @@ void LIRGenerator::visitWasmAtomicBinopHeap(MWasmAtomicBinopHeap* ins) {
   LDefinition offsetTemp = LDefinition::BogusTemp();
   LDefinition maskTemp = LDefinition::BogusTemp();
 
-  if (ins->access().byteSize() < 4) {
+  const bool needsLlScLoop =
+      ins->access().byteSize() < 4 && !(LOONG64Flags::HasLamBhExtension() &&
+                                        (ins->operation() == AtomicOp::Add ||
+                                         ins->operation() == AtomicOp::Sub));
+
+  if (needsLlScLoop) {
     valueTemp = temp();
     offsetTemp = temp();
     maskTemp = temp();

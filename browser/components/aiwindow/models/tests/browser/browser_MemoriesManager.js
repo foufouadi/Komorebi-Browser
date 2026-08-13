@@ -23,6 +23,8 @@ const {
   MEMORY_TYPE_LONG_TERM_TO_DURABLE_STRENGTH_THRESHOLD,
   MEMORY_MERGE_MIN_MEMORY_COUNT,
   MAX_MEMORY_SUMMARY_LENGTH,
+  MAX_SESSIONS_FIRST_RUN,
+  MAX_SESSIONS_DELTA_RUN,
 } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/models/memories/MemoriesConstants.sys.mjs"
 );
@@ -198,6 +200,158 @@ async function respondToMergeRequest(componentStatements, newStatement) {
         new_statement: newStatement,
       },
     ])
+  );
+}
+
+// Marks the rendered session data in a generation prompt.
+const SESSION_QUERY_PREFIX = "session query";
+
+/**
+ * Search-query text for the Nth visit of a session fixture. Zero-padded so no
+ * query is a substring of another, which would make prompt assertions lie.
+ *
+ * @param {number} index  The visit's position in the fixture, 0 being oldest
+ * @returns {string}      The query text
+ */
+function sessionQueryFor(index) {
+  return `${SESSION_QUERY_PREFIX} ${String(index).padStart(3, "0")}`;
+}
+
+/**
+ * Summary of the memory the mock model returns for the Nth generation batch.
+ *
+ * @param {number} batch  The generation batch's index
+ * @returns {string}      The memory summary
+ */
+function sessionMemorySummaryFor(batch) {
+  return `Memory from batch ${batch}`;
+}
+
+/**
+ * Build history rows that sessionize into exactly `count` single-visit sessions.
+ *
+ * Visits are spaced 2h apart: comfortably past the sessionizer's 15m gap, so
+ * every visit opens a new session, while still keeping the whole fixture inside
+ * the production first-run lookback window. Row 0 is the oldest.
+ *
+ * @param {number} count        How many sessions to produce
+ * @param {number} baseMicros   Visit date of the oldest row, in microseconds
+ * @returns {Array<object>}     Rows shaped like getRecentHistory() output
+ */
+function buildSessionHistoryRows(count, baseMicros) {
+  const twoHoursMicros = 2 * 60 * 60 * 1000 * 1000;
+  const rows = [];
+  for (let i = 0; i < count; i++) {
+    rows.push({
+      urlHash: i,
+      domain: "mozilla.org",
+      title: `Topic ${i}`,
+      searchQuery: sessionQueryFor(i),
+      visitDateMicros: baseMicros + i * twoHoursMicros,
+      totalViewTimeMs: 1000,
+      source: "search",
+    });
+  }
+  return rows;
+}
+
+/**
+ * Visit date of the last row buildSessionHistoryRows() would produce, in ms.
+ * This is the session end the watermark should advance to.
+ *
+ * @param {number} count       How many sessions the fixture holds
+ * @param {number} baseMicros  Visit date of the oldest row, in microseconds
+ * @returns {number}           Newest session end, in milliseconds
+ */
+function newestSessionEndMs(count, baseMicros) {
+  const rows = buildSessionHistoryRows(count, baseMicros);
+  return Math.floor(rows[rows.length - 1].visitDateMicros / 1000);
+}
+
+/**
+ * Drive one generateMemoriesFromSessions() run to completion against the mock
+ * engine, answering each generation request with a single memory named for its
+ * batch and then keeping all of them through the closing quality filter.
+ *
+ * @param {object} pipelineOpts  Forwarded to generateMemoriesFromSessions()
+ * @returns {Promise<{
+ *   generationPrompts: Array<string>,
+ *   keptSummaries: Array<string>,
+ *   persisted: Array<object>,
+ * }>}
+ *        `generationPrompts` holds one serialized request per generation batch,
+ *        in the order the pipeline issued them.
+ */
+async function runSessionGenerationWithMockEngine(pipelineOpts) {
+  const runPromise = MemoriesManager.generateMemoriesFromSessions(pipelineOpts);
+
+  const generationPrompts = [];
+  let filterTurn = null;
+  while (!filterTurn) {
+    const turn = await gMockEngineManager.captureRequest({
+      purpose: PURPOSES.MEMORY_GENERATION,
+    });
+    const serializedArgs = JSON.stringify(turn.request.args);
+    if (!serializedArgs.includes(SESSION_QUERY_PREFIX)) {
+      filterTurn = turn;
+      break;
+    }
+    generationPrompts.push(serializedArgs);
+    turn.respond(
+      JSON.stringify([
+        {
+          reasoning: "Repeatedly searched this topic",
+          category: "Internet & Telecom",
+          intent: "Research / Learn",
+          memory_summary: sessionMemorySummaryFor(generationPrompts.length - 1),
+          score: 4,
+          evidence: [],
+        },
+      ])
+    );
+  }
+
+  const keptSummaries = generationPrompts.map((_, batch) =>
+    sessionMemorySummaryFor(batch)
+  );
+  filterTurn.respond(JSON.stringify({ kept_memories: keptSummaries }));
+
+  return { generationPrompts, keptSummaries, persisted: await runPromise };
+}
+
+/**
+ * Assert that a capped run sent the newest `cap` sessions of a `count`-session
+ * fixture to the model and nothing older, and that the retained batches ran
+ * oldest-first.
+ *
+ * @param {Array<string>} generationPrompts  Serialized generation requests
+ * @param {number} count                     Sessions in the fixture
+ * @param {number} cap                       Sessions the run should have kept
+ */
+function assertRetainedNewestSessions(generationPrompts, count, cap) {
+  const firstRetained = count - cap;
+  const allPrompts = generationPrompts.join("");
+  for (let i = 0; i < count; i++) {
+    const shouldBeSent = i >= firstRetained;
+    Assert.equal(
+      allPrompts.includes(sessionQueryFor(i)),
+      shouldBeSent,
+      `"${sessionQueryFor(i)}" should ${shouldBeSent ? "" : "not "}be sent to the model.`
+    );
+  }
+
+  // Selection is newest-first, but the retained batches must still run
+  // oldest-to-newest so the pipeline's watermark stays contiguous with the work
+  // it actually did.
+  Assert.ok(
+    generationPrompts[0].includes(sessionQueryFor(firstRetained)),
+    "The first batch should hold the oldest of the retained sessions."
+  );
+  Assert.ok(
+    generationPrompts[generationPrompts.length - 1].includes(
+      sessionQueryFor(count - 1)
+    ),
+    "The last batch should hold the newest of the retained sessions."
   );
 }
 
@@ -616,6 +770,55 @@ add_task(async function test_sessionWatermark_readWrite_and_migration() {
 });
 
 /**
+ * Tests the generation-run timestamp that drives the scheduler cooldown:
+ * read/write, and migration seeding from the session watermark for profiles
+ * written before the timestamp was persisted.
+ */
+add_task(async function test_generationRunTimestamp_readWrite_and_migration() {
+  await MemoryStore.updateMeta({
+    last_generation_run_ts: 0,
+    last_session_memory_ts: 0,
+  });
+
+  // Run timestamp set
+  await MemoriesManager.setLastGenerationRunTimestamp(123456);
+  Assert.equal(
+    await MemoriesManager.getLastGenerationRunTimestamp(),
+    123456,
+    "Should read back the persisted generation run timestamp."
+  );
+
+  // An old profile has no run timestamp, so seed from the session watermark.
+  await MemoryStore.updateMeta({
+    last_generation_run_ts: 0,
+    last_session_memory_ts: 500,
+  });
+  Assert.equal(
+    await MemoriesManager.getLastGenerationRunTimestamp(),
+    500,
+    "Should seed from the session watermark when no run timestamp is stored."
+  );
+
+  // A stored run timestamp takes precedence over the watermark outright, rather
+  // than being reconciled with it.
+  await MemoryStore.updateMeta({
+    last_generation_run_ts: 700,
+    last_session_memory_ts: 900,
+  });
+  Assert.equal(
+    await MemoriesManager.getLastGenerationRunTimestamp(),
+    700,
+    "A stored run timestamp should win over the session watermark."
+  );
+
+  // Reset meta so it doesn't leak into later tasks.
+  await MemoryStore.updateMeta({
+    last_generation_run_ts: 0,
+    last_session_memory_ts: 0,
+  });
+});
+
+/**
  * Tests that runMemoryMaintenance hard-deletes soft-deleted memories in its
  * initial pre-pass, leaving live memories intact.
  */
@@ -972,6 +1175,201 @@ add_task(async function test_runMemoryMaintenance_demotesWeakenedMemory() {
     requestSaveSpy.called,
     "A type-only change should still schedule a save."
   );
+});
+
+/**
+ * Tests that a first-run backlog larger than the session cap is trimmed to the
+ * most recent sessions before any LLM call is made, that the retained sessions
+ * still reach the model oldest-first, and that the watermark advances past the
+ * older sessions the cap abandoned.
+ */
+add_task(async function test_generateMemoriesFromSessions_caps_first_run() {
+  await clearMemories();
+  // First run is defined by an unset watermark.
+  await MemoryStore.updateMeta({
+    last_session_memory_ts: 0,
+    last_history_memory_ts: 0,
+    last_chat_memory_ts: 0,
+  });
+
+  // A backlog deliberately larger than the cap.
+  const EXCESS_SESSIONS = 25;
+  const SESSION_COUNT = MAX_SESSIONS_FIRST_RUN + EXCESS_SESSIONS;
+  const BATCH_SIZE = 10;
+  const EXPECTED_GENERATION_REQUESTS = Math.ceil(
+    MAX_SESSIONS_FIRST_RUN / BATCH_SIZE
+  );
+  const UNCAPPED_GENERATION_REQUESTS = Math.ceil(SESSION_COUNT / BATCH_SIZE);
+  const baseMicros = 1_700_000_000_000_000;
+
+  const sandbox = sinon.createSandbox();
+  try {
+    // Stubbing just the checks to make sure the scheduler runs
+    sandbox
+      .stub(MemoriesManager, "shouldEnableMemoriesFromSchedulers")
+      .returns(true);
+    const getRecentHistory = sandbox
+      .stub(MemoriesManager, "_getRecentHistory")
+      .resolves(buildSessionHistoryRows(SESSION_COUNT, baseMicros));
+    sandbox.stub(MemoriesManager, "_getRecentChats").resolves([]);
+    const setWatermark = sandbox.spy(
+      MemoriesManager,
+      "setLastSessionMemoryTimestamp"
+    );
+
+    const { generationPrompts, keptSummaries, persisted } =
+      await runSessionGenerationWithMockEngine({
+        batchSize: BATCH_SIZE,
+        maxBatchRetries: 1,
+        initialMemoryGenerationRetryDelayMS: 1,
+      });
+
+    const historyOpts = getRecentHistory.firstCall.args[0];
+    Assert.equal(
+      historyOpts.sinceMicros,
+      undefined,
+      "A full-lookup run should leave sinceMicros undefined."
+    );
+    Assert.ok(
+      Number.isFinite(historyOpts.days),
+      "A full-lookup run should define days to look up."
+    );
+
+    Assert.equal(
+      generationPrompts.length,
+      EXPECTED_GENERATION_REQUESTS,
+      `A ${SESSION_COUNT}-session backlog should be capped to ` +
+        `${MAX_SESSIONS_FIRST_RUN} sessions, costing ` +
+        `${EXPECTED_GENERATION_REQUESTS} generation requests instead of ` +
+        `${UNCAPPED_GENERATION_REQUESTS}.`
+    );
+
+    assertRetainedNewestSessions(
+      generationPrompts,
+      SESSION_COUNT,
+      MAX_SESSIONS_FIRST_RUN
+    );
+
+    Assert.deepEqual(
+      persisted.map(memory => memory.memory_summary).sort(),
+      [...keptSummaries].sort(),
+      "Every memory generated from the retained sessions should be persisted."
+    );
+
+    Assert.ok(
+      setWatermark.calledOnce,
+      "The watermark should be advanced exactly once."
+    );
+    Assert.equal(
+      setWatermark.firstCall.args[0],
+      newestSessionEndMs(SESSION_COUNT, baseMicros),
+      "The watermark should advance to the newest session end."
+    );
+  } finally {
+    sandbox.restore();
+    await MemoryStore.updateMeta({
+      last_session_memory_ts: 0,
+      last_history_memory_ts: 0,
+      last_chat_memory_ts: 0,
+    });
+    await clearMemories();
+  }
+});
+
+/**
+ * Tests that a delta run enforces its own, tighter session cap.
+ */
+add_task(async function test_generateMemoriesFromSessions_caps_delta_run() {
+  await clearMemories();
+
+  const EXCESS_SESSIONS = 25;
+  const SESSION_COUNT = MAX_SESSIONS_DELTA_RUN + EXCESS_SESSIONS;
+  const BATCH_SIZE = 10;
+  const EXPECTED_GENERATION_REQUESTS = Math.ceil(
+    MAX_SESSIONS_DELTA_RUN / BATCH_SIZE
+  );
+  const UNCAPPED_GENERATION_REQUESTS = Math.ceil(SESSION_COUNT / BATCH_SIZE);
+  const baseMicros = 1_700_000_000_000_000;
+
+  // Any non-zero watermark makes this a delta run. Set just before the oldest
+  // visit so the whole fixture is genuinely new work.
+  const watermarkMs = Math.floor(baseMicros / 1000) - 1;
+  await MemoryStore.updateMeta({
+    last_session_memory_ts: watermarkMs,
+    last_history_memory_ts: 0,
+    last_chat_memory_ts: 0,
+  });
+
+  const sandbox = sinon.createSandbox();
+  try {
+    // Stubbing just the checks to make sure the scheduler runs
+    sandbox
+      .stub(MemoriesManager, "shouldEnableMemoriesFromSchedulers")
+      .returns(true);
+    const getRecentHistory = sandbox
+      .stub(MemoriesManager, "_getRecentHistory")
+      .resolves(buildSessionHistoryRows(SESSION_COUNT, baseMicros));
+    sandbox.stub(MemoriesManager, "_getRecentChats").resolves([]);
+    const setWatermark = sandbox.spy(
+      MemoriesManager,
+      "setLastSessionMemoryTimestamp"
+    );
+
+    const { generationPrompts, keptSummaries, persisted } =
+      await runSessionGenerationWithMockEngine({
+        batchSize: BATCH_SIZE,
+        maxBatchRetries: 1,
+        initialMemoryGenerationRetryDelayMS: 1,
+      });
+
+    // Guards against the run silently taking the first-run path, which would
+    // apply the wrong cap and make the count below pass for the wrong reason.
+    Assert.equal(
+      getRecentHistory.firstCall.args[0].sinceMicros,
+      MemoriesManager.getSessionMemoryDeltaStartMs(watermarkMs) * 1000,
+      "A set watermark should pull history from one ms past the watermark."
+    );
+
+    Assert.equal(
+      generationPrompts.length,
+      EXPECTED_GENERATION_REQUESTS,
+      `A ${SESSION_COUNT}-session delta backlog should be capped to ` +
+        `${MAX_SESSIONS_DELTA_RUN} sessions, costing ` +
+        `${EXPECTED_GENERATION_REQUESTS} generation requests instead of ` +
+        `${UNCAPPED_GENERATION_REQUESTS}.`
+    );
+
+    assertRetainedNewestSessions(
+      generationPrompts,
+      SESSION_COUNT,
+      MAX_SESSIONS_DELTA_RUN
+    );
+
+    Assert.deepEqual(
+      persisted.map(memory => memory.memory_summary).sort(),
+      [...keptSummaries].sort(),
+      "Every memory generated from the retained sessions should be persisted."
+    );
+
+    Assert.ok(
+      setWatermark.calledOnce,
+      "The watermark should be advanced exactly once."
+    );
+    Assert.equal(
+      setWatermark.firstCall.args[0],
+      newestSessionEndMs(SESSION_COUNT, baseMicros),
+      "The watermark should advance past the whole delta window, including the " +
+        "sessions the cap dropped."
+    );
+  } finally {
+    sandbox.restore();
+    await MemoryStore.updateMeta({
+      last_session_memory_ts: 0,
+      last_history_memory_ts: 0,
+      last_chat_memory_ts: 0,
+    });
+    await clearMemories();
+  }
 });
 
 /**

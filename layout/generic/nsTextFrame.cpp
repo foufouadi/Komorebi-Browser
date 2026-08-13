@@ -9704,7 +9704,7 @@ static bool FindFirstLetterRange(const CharacterDataBuffer& aBuffer,
   // after the virama would be acceptable). So results may be imperfect,
   // depending how the font has chosen to implement visible viramas.
   if (usesIndicHalfForms) {
-    while (i + 1 < length &&
+    while (i + 1 < length && iter.GetSkippedOffset() < aTextRun->GetLength() &&
            !aTextRun->IsLigatureGroupStart(iter.GetSkippedOffset())) {
       char32_t c = aBuffer.ScalarValueAt(AssertedCast<uint32_t>(aOffset + i));
       if (intl::UnicodeProperties::GetCombiningClass(c) ==

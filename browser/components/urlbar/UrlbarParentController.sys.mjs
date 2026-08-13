@@ -1093,12 +1093,8 @@ export class UrlbarParentController {
       if (!activeSplitView && prevTab.isEmpty) {
         gBrowser.removeTab(prevTab);
       }
-      if (!this.isPrivate && !heuristic) {
-        // We don't await this, because a rejection should not interrupt the
-        // load. Just reportError it.
-        lazy.UrlbarUtils.addToInputHistory(url, searchString).catch(
-          console.error
-        );
+      if (!heuristic) {
+        this.addToInputHistory(url, searchString);
       }
       return;
     }
@@ -1113,6 +1109,35 @@ export class UrlbarParentController {
       tabGroup,
       this.isPrivate
     );
+  }
+
+  /**
+   * Adds a (url, input) tuple to the input history that drives adaptive
+   * results. Places writes only happen in the parent, so callers route here.
+   * No-ops in private browsing.
+   *
+   * The write runs in the background and a failure is only reported to the
+   * console.
+   *
+   * @param {string} url
+   *   The picked URL.
+   * @param {string} input
+   *   The search string to associate with it.
+   * @param {object} [options]
+   * @param {boolean} [options.whenReady]
+   *   Whether to wait for the URL to land in moz_places before writing, for a
+   *   URL that only the imminent navigation will record a visit for. The
+   *   observer this needs is registered synchronously, so the caller can start
+   *   the navigation right after.
+   */
+  addToInputHistory(url, input, { whenReady = false } = {}) {
+    if (this.isPrivate) {
+      return;
+    }
+    let promise = whenReady
+      ? lazy.UrlbarUtils.addToInputHistoryWhenReady(url, input)
+      : lazy.UrlbarUtils.addToInputHistory(url, input);
+    promise.catch(console.error);
   }
 
   /**

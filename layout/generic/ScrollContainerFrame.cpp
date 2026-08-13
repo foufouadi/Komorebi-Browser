@@ -5196,15 +5196,24 @@ bool ScrollContainerFrame::ScrollSnap(const nsPoint& aDestination,
 }
 
 nsSize ScrollContainerFrame::GetLineScrollAmount() const {
-  RefPtr<nsFontMetrics> fm =
-      nsLayoutUtils::GetInflatedFontMetricsForFrame(this);
-  NS_ASSERTION(fm, "FontMetrics is null, assuming fontHeight == 1 appunit");
   int32_t appUnitsPerDevPixel = PresContext()->AppUnitsPerDevPixel();
   nscoord minScrollAmountInAppUnits =
       std::max(1, StaticPrefs::mousewheel_min_line_scroll_amount()) *
       appUnitsPerDevPixel;
-  nscoord horizontalAmount = fm ? fm->AveCharWidth() : 0;
-  nscoord verticalAmount = fm ? fm->MaxHeight() : 0;
+
+  nscoord horizontalAmount, verticalAmount;
+  const auto& lineScrollAmount = StyleUIReset()->mMozLineScrollAmount;
+  if (lineScrollAmount.IsLength()) {
+    // A list of items can call an item a line, on whichever axis it scrolls.
+    horizontalAmount = verticalAmount =
+        lineScrollAmount.AsLength().ToAppUnits();
+  } else {
+    RefPtr<nsFontMetrics> fm =
+        nsLayoutUtils::GetInflatedFontMetricsForFrame(this);
+    NS_ASSERTION(fm, "FontMetrics is null, assuming fontHeight == 1 appunit");
+    horizontalAmount = fm ? fm->AveCharWidth() : 0;
+    verticalAmount = fm ? fm->MaxHeight() : 0;
+  }
   return nsSize(std::max(horizontalAmount, minScrollAmountInAppUnits),
                 std::max(verticalAmount, minScrollAmountInAppUnits));
 }

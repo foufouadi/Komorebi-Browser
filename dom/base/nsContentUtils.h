@@ -1877,35 +1877,17 @@ class nsContentUtils {
                                         EventMessage* aEventMessage);
 
   /**
-   * Used only during traversal of the XPCOM graph by the cycle
-   * collector: push a pointer to the listener manager onto the
-   * children deque, if it exists. Do nothing if there is no listener
-   * manager.
-   *
-   * Crucially: does not perform any refcounting operations.
-   *
-   * @param aNode The node to traverse.
-   * @param children The buffer to push a listener manager pointer into.
+   * Adds aManager to the list of the managers nodes own, which is used for
+   * unmarking gray JS listeners during cycle collection.
    */
-  static void TraverseListenerManager(nsINode* aNode,
-                                      nsCycleCollectionTraversalCallback& cb);
+  static void AddNodeListenerManager(mozilla::EventListenerManager* aManager);
 
   /**
-   * Get the eventlistener manager for aNode, creating it if it does not
-   * already exist.
-   *
-   * @param aNode The node for which to get the eventlistener manager.
+   * Removes aManager from that list, if it's in it.  Only for
+   * ~EventListenerManager.
    */
-  static mozilla::EventListenerManager* GetListenerManagerForNode(
-      nsINode* aNode);
-  /**
-   * Get the eventlistener manager for aNode, returning null if it does not
-   * already exist.
-   *
-   * @param aNode The node for which to get the eventlistener manager.
-   */
-  static mozilla::EventListenerManager* GetExistingListenerManagerForNode(
-      const nsINode* aNode);
+  static void RemoveNodeListenerManager(
+      mozilla::EventListenerManager* aManager);
 
   static void AddEntryToDOMArenaTable(nsINode* aNode,
                                       mozilla::dom::DOMArena* aDOMArena);
@@ -1917,13 +1899,6 @@ class nsContentUtils {
       const nsINode* aNode);
 
   static void UnmarkGrayJSListenersInCCGenerationDocuments();
-
-  /**
-   * Remove the eventlistener manager for aNode.
-   *
-   * @param aNode The node for which to remove the eventlistener manager.
-   */
-  static void RemoveListenerManager(nsINode* aNode);
 
   static bool IsInitialized() { return sInitialized; }
 

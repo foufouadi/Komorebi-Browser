@@ -2877,19 +2877,10 @@ sealed class RemoteSettingsServer {
     object Prod : RemoteSettingsServer()
     
     
-    object ProdV2 : RemoteSettingsServer()
-    
-    
     object Stage : RemoteSettingsServer()
     
     
-    object StageV2 : RemoteSettingsServer()
-    
-    
     object Dev : RemoteSettingsServer()
-    
-    
-    object DevV2 : RemoteSettingsServer()
     
     
     data class Custom(
@@ -2918,12 +2909,9 @@ public object FfiConverterTypeRemoteSettingsServer : FfiConverterRustBuffer<Remo
     override fun read(buf: ByteBuffer): RemoteSettingsServer {
         return when(buf.getInt()) {
             1 -> RemoteSettingsServer.Prod
-            2 -> RemoteSettingsServer.ProdV2
-            3 -> RemoteSettingsServer.Stage
-            4 -> RemoteSettingsServer.StageV2
-            5 -> RemoteSettingsServer.Dev
-            6 -> RemoteSettingsServer.DevV2
-            7 -> RemoteSettingsServer.Custom(
+            2 -> RemoteSettingsServer.Stage
+            3 -> RemoteSettingsServer.Dev
+            4 -> RemoteSettingsServer.Custom(
                 FfiConverterString.read(buf),
                 )
             else -> throw RuntimeException("invalid enum value, something is very wrong!!")
@@ -2937,31 +2925,13 @@ public object FfiConverterTypeRemoteSettingsServer : FfiConverterRustBuffer<Remo
                 4UL
             )
         }
-        is RemoteSettingsServer.ProdV2 -> {
-            // Add the size for the Int that specifies the variant plus the size needed for all fields
-            (
-                4UL
-            )
-        }
         is RemoteSettingsServer.Stage -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
                 4UL
             )
         }
-        is RemoteSettingsServer.StageV2 -> {
-            // Add the size for the Int that specifies the variant plus the size needed for all fields
-            (
-                4UL
-            )
-        }
         is RemoteSettingsServer.Dev -> {
-            // Add the size for the Int that specifies the variant plus the size needed for all fields
-            (
-                4UL
-            )
-        }
-        is RemoteSettingsServer.DevV2 -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
                 4UL
@@ -2982,28 +2952,16 @@ public object FfiConverterTypeRemoteSettingsServer : FfiConverterRustBuffer<Remo
                 buf.putInt(1)
                 Unit
             }
-            is RemoteSettingsServer.ProdV2 -> {
+            is RemoteSettingsServer.Stage -> {
                 buf.putInt(2)
                 Unit
             }
-            is RemoteSettingsServer.Stage -> {
+            is RemoteSettingsServer.Dev -> {
                 buf.putInt(3)
                 Unit
             }
-            is RemoteSettingsServer.StageV2 -> {
-                buf.putInt(4)
-                Unit
-            }
-            is RemoteSettingsServer.Dev -> {
-                buf.putInt(5)
-                Unit
-            }
-            is RemoteSettingsServer.DevV2 -> {
-                buf.putInt(6)
-                Unit
-            }
             is RemoteSettingsServer.Custom -> {
-                buf.putInt(7)
+                buf.putInt(4)
                 FfiConverterString.write(value.`url`, buf)
                 Unit
             }

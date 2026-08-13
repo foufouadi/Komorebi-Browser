@@ -8,8 +8,6 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   MozAdsClientBuilder:
     "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustAdsClient.sys.mjs",
-  MozAdsContextIdProvider:
-    "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustAdsClient.sys.mjs",
   MozAdsEnvironment:
     "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustAdsClient.sys.mjs",
   MozAdsRequestOptions:
@@ -52,11 +50,6 @@ ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
 export class _AdsClient {
   #client;
 
-  // Bug 2059281: remove once the ads-client owns context_id directly. Boxed so
-  // the provider reads it without capturing `this`, which would pin the client
-  // (and the telemetry callback it holds) and leak them past xpcom-shutdown.
-  #contextId = { value: "" };
-
   /**
    * @param {object} prefValues The New Tab store's Prefs.values.
    * @returns {boolean}
@@ -92,16 +85,6 @@ export class _AdsClient {
       flags: new Map(Object.entries(prefValues?.adsBackendConfig || {})),
       ohttp: this.#configureOhttp(),
     });
-  }
-
-  /**
-   * Refresh the cached context id the provider returns synchronously.
-   * Fed by AdsFeed from ContextId.request().
-   *
-   * @param {string} contextId
-   */
-  updateContextId(contextId) {
-    this.#contextId.value = contextId;
   }
 
   /**
@@ -199,20 +182,9 @@ export class _AdsClient {
     }
 
     try {
-      // Bug 2059281: remove this provider once the ads-client owns context_id directly.
-      // contextId() is a Sync foreign-callback returning the cached context id which AdsFeed refreshes.
-      // Capture the box, not `this`, so this Rust-held callback doesn't retain the client.
-      const contextId = this.#contextId;
-      class HntContextIdProvider extends lazy.MozAdsContextIdProvider {
-        contextId() {
-          return contextId.value;
-        }
-      }
-
       return lazy.MozAdsClientBuilder.init()
         .environment(lazy.MozAdsEnvironment.PROD)
         .telemetry(this.buildTelemetry())
-        .contextIdProvider(new HntContextIdProvider())
         .build();
     } catch (error) {
       console.error("MozAdsClient failed to initialize", error);

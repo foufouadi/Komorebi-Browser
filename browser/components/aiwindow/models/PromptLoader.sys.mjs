@@ -439,7 +439,11 @@ export async function buildEngineForFeature(feature, opts = {}) {
 
   // resolve the model to use for inference, this allows specific features to default to chat model
   let model = mainConfig.model;
-  const CHAT_MODEL_FALLBACK_FEATURES = new Set([MODEL_FEATURES.AGENT_MONITOR]);
+  const CHAT_MODEL_FALLBACK_FEATURES = new Set([
+    MODEL_FEATURES.AGENT_MONITOR,
+    MODEL_FEATURES.RESUME_ACTIVITY_CONVERSATION,
+    MODEL_FEATURES.RESUME_ACTIVITY_CONVERSATION_STARTER,
+  ]);
   if (
     model === GENERIC_MODEL_NAME &&
     CHAT_MODEL_FALLBACK_FEATURES.has(feature)

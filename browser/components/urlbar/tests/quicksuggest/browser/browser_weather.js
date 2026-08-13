@@ -485,7 +485,7 @@ function assertIsWeatherResult(result, isWeatherResult) {
       "Result should be from UrlbarProviderQuickSuggest"
     );
     Assert.equal(
-      UrlbarUtils.searchEngagementTelemetryType(result),
+      UrlbarShared.searchEngagementTelemetryType(result),
       "weather",
       "Result telemetry type should be 'weather'"
     );
@@ -496,7 +496,7 @@ function assertIsWeatherResult(result, isWeatherResult) {
       "Result should not be from UrlbarProviderQuickSuggest"
     );
     Assert.notEqual(
-      UrlbarUtils.searchEngagementTelemetryType(result),
+      UrlbarShared.searchEngagementTelemetryType(result),
       "weather",
       "Result telemetry type should not be 'weather'"
     );

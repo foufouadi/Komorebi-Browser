@@ -4080,17 +4080,6 @@
   value: 0
   mirror: always
 
-# Origin trial state for Private Attribution
-# 0: normal, 1: always-enabled, 2: always-disabled
-- name: dom.origin-trials.private-attribution.state
-  type: RelaxedAtomicInt32
-#ifdef ANDROID
-  value: 2
-#else
-  value: 0
-#endif
-  mirror: always
-
 # Origin trial state for MLS
 # 0: normal, 1: always-enabled, 2: always-disabled
 - name: dom.origin-trials.mls.state
@@ -4110,13 +4099,6 @@
 #endif
   mirror: always
   rust: true
-
-# User pref to control whether Private Attribution
-# information should be collected / submitted.
-- name: dom.private-attribution.submission.enabled
-  type: bool
-  value: false
-  mirror: always
 
 # Is support for Window.paintWorklet enabled?
 - name: dom.paintWorklet.enabled
@@ -9969,7 +9951,11 @@
 
 -   name: javascript.options.wasm_compact_imports
     type: bool
+#if defined(ENABLE_WASM_COMPACT_IMPORTS)
+    value: true
+#else
     value: false
+#endif
     mirror: always
     set_spidermonkey_pref: always
 
@@ -10110,7 +10096,7 @@
 # Support for the Wide Arithmetic proposal (i64.add/sub128, i64.mul_wide_s/u)
 - name: javascript.options.wasm_wide_arithmetic
   type: bool
-  value: @IS_NIGHTLY_BUILD@
+  value: true
   mirror: always
   set_spidermonkey_pref: always
 
@@ -11787,10 +11773,12 @@
   mirror: always
   rust: true
 
-# Per-domain blocklist for ::-webkit-scrollbar pseudo element
-- name: layout.css.fake-webkit-scrollbar.disabled-domains
+# Per-domain allowlist for ::-webkit-scrollbar pseudo element. The
+# pseudo-element is treated as unsupported on every domain that is not listed,
+# so an empty value disables it everywhere. "*" enables it on every domain.
+- name: layout.css.fake-webkit-scrollbar.enabled-domains
   type: DataMutexString
-  value: "discord.com,shitposter.world,gemini.google.com,content.powerapps.com"
+  value: "mail.google.com"
   mirror: always
   rust: true
 
@@ -12003,6 +11991,12 @@
 #---------------------------------------------------------------------------
 # Prefs starting with "mathml."
 #---------------------------------------------------------------------------
+
+# Enable MathMLAnchorElement dom interface (MathML <a> element).
+- name: mathml.a.element.enabled
+  type: bool
+  value: @IS_NIGHTLY_BUILD@
+  mirror: always
 
 # Enable scale transform for stretchy MathML operators. See bug 414277.
 - name: mathml.scale_stretchy_operators.enabled
@@ -16586,7 +16580,7 @@
 
 - name: network.http.http3.version_negotiation.enabled
   type: RelaxedAtomicBool
-  value: @IS_NIGHTLY_BUILD@
+  value: true
   mirror: always
 
 # When a Http/3 connection failed, whether to retry with a different IP address.
@@ -17015,7 +17009,11 @@
 
 - name: network.http.happy_eyeballs_enabled
   type: RelaxedAtomicBool
+#if defined(ANDROID)
   value: @IS_NIGHTLY_BUILD@
+#else
+  value: true
+#endif
   mirror: always
 
 # When true, Happy Eyeballs is also used for requests carrying an HTTP

@@ -117,7 +117,7 @@ autofill-address-email = Email
 
 autofill-cancel-button = Cancel
 autofill-save-button = Save
-autofill-country-warning-message = Form autofill is currently available only for certain countries.
+autofill-country-warning-message-2 = Form autofill is currently only available for certain countries
 autofill-message-tooltip = View message about autofill
 
 # The dialog title for creating credit cards in browser preferences.

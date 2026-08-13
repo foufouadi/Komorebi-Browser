@@ -5325,17 +5325,26 @@ void GCRuntime::collect(bool nonincrementalByAPI, const SliceBudget& budget,
     maybeDoCycleCollection();
   }
 
-#ifdef JS_GC_ZEAL
   if (!isIncrementalGCInProgress()) {
+#ifdef JS_GC_ZEAL
     if (hasZealMode(ZealMode::CheckHeapAfterGC)) {
       gcstats::AutoPhase ap(stats(), gcstats::PhaseKind::TRACE_HEAP);
       CheckHeapAfterGC(rt);
     }
-    if (hasZealMode(ZealMode::CheckGrayMarking)) {
+    if (hasZealMode(ZealMode::CheckGrayMarking)
+#  ifdef DEBUG
+        || foundUnexpectedGrayCells
+#  endif
+    ) {
       MOZ_RELEASE_ASSERT(CheckGrayMarkingState(rt));
     }
-  }
 #endif
+
+    MOZ_ASSERT(!foundUnexpectedGrayCells,
+               "JS::AssertCellIsNotGray found unexpected gray cells after "
+               "their zone had been marked");
+  }
+
   JS_LOG(gc, Info, "end slice in state %s", StateName(incrementalState));
 
   UnscheduleZones(this);
@@ -6028,6 +6037,22 @@ JS_PUBLIC_API bool js::gc::detail::CellIsMarkedGrayIfKnown(
 
 #ifdef DEBUG
 
+static void DeferGrayMarkingCheck(Zone* zone, const Cell* cell) {
+  // Add the cell to the zone's vector of cells to check. These are checked
+  // after the zone transitions from marking to sweeping in
+  // GCRuntime::beginSweepingSweepGroup.
+
+  auto& cells = zone->cellsToAssertNotGray();
+  if (!cells.empty() && cells.back() == cell) {
+    return;
+  }
+
+  AutoEnterOOMUnsafeRegion oomUnsafe;
+  if (!cells.append(cell)) {
+    oomUnsafe.crash("Can't append to delayed gray checks list");
+  }
+}
+
 JS_PUBLIC_API void js::gc::detail::AssertCellIsNotGray(const Cell* cell) {
   if (!cell->isTenured()) {
     return;
@@ -6059,15 +6084,17 @@ JS_PUBLIC_API void js::gc::detail::AssertCellIsNotGray(const Cell* cell) {
     // non-black cells until we finish gray marking.
 
     if (!tc->isMarkedBlack()) {
-      AutoEnterOOMUnsafeRegion oomUnsafe;
-      if (!zone->cellsToAssertNotGray().append(cell)) {
-        oomUnsafe.crash("Can't append to delayed gray checks list");
-      }
+      DeferGrayMarkingCheck(zone, cell);
     }
     return;
   }
 
-  MOZ_ASSERT(!tc->isMarkedGray());
+  if (!tc->isMarkedGray()) {
+    return;
+  }
+
+  const char* kind = JS::GCTraceKindToAscii(cell->getTraceKind());
+  MOZ_CRASH_UNSAFE_PRINTF("AssertCellIsNotGray: Found gray %s %p", kind, cell);
 }
 
 extern JS_PUBLIC_API bool js::gc::detail::ObjectIsMarkedBlack(

@@ -3488,6 +3488,12 @@ nsresult ContentEventHandler::OnSelectionEvent(WidgetSelectionEvent* aEvent) {
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
+  if (RefPtr<EditContext> editContext = GetEditContext()) {
+    editContext->DoSetSelection(*aEvent);
+    aEvent->mSucceeded = true;
+    return NS_OK;
+  }
+
   // Get range from offset and length
   nsINode* startNode = nullptr;
   nsINode* endNode = nullptr;

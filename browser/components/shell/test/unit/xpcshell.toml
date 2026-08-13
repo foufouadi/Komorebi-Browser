@@ -50,6 +50,11 @@ run-if = [
   "os == 'win'"
 ]
 
+["test_taskbarPinningPolicy.js"]
+run-if = [
+  "os == 'win'",
+]
+
 ["test_writeShortcutIcon.js"]
 run-if = [
   "os == 'win'",

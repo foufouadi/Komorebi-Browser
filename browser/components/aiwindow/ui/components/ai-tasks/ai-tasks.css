@@ -259,3 +259,9 @@ moz-input-text::part(label),
 .unavailable-container {
   text-align: center;
 }
+
+.title-container {
+  display: flex;
+  align-items: center;
+  gap: var(--space-small);
+}

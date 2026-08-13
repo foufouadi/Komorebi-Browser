@@ -1307,7 +1307,10 @@ static void PopAndAllocate(BaseCompiler* bc, ValType type,
     // Architecture-specific i64-to-i32.
     bc->masm.move64To32(Register64(*rv), *rv);
   }
-  if (Scalar::byteSize(viewType) < 4) {
+  const bool needsLlScLoop = Scalar::byteSize(viewType) < 4 &&
+                             !(LOONG64Flags::HasLamBhExtension() &&
+                               (op == AtomicOp::Add || op == AtomicOp::Sub));
+  if (needsLlScLoop) {
     temps->t0 = bc->needI32();
     temps->t1 = bc->needI32();
     temps->t2 = bc->needI32();
@@ -1501,8 +1504,7 @@ static void Deallocate(BaseCompiler* bc, AtomicOp op, RegI64 rv, RegI64 temp) {
   bc->freeI64(temp);
 }
 
-#elif defined(JS_CODEGEN_ARM64) || defined(JS_CODEGEN_MIPS64) || \
-    defined(JS_CODEGEN_LOONG64)
+#elif defined(JS_CODEGEN_ARM64) || defined(JS_CODEGEN_MIPS64)
 
 static void PopAndAllocate(BaseCompiler* bc, AtomicOp op, RegI64* rd,
                            RegI64* rv, RegI64* temp) {
@@ -1521,6 +1523,31 @@ static void Deallocate(BaseCompiler* bc, AtomicOp op, RegI64 rv, RegI64 temp) {
   bc->freeI64(rv);
   bc->freeI64(temp);
 }
+
+#elif defined(JS_CODEGEN_LOONG64)
+
+static void PopAndAllocate(BaseCompiler* bc, AtomicOp op, RegI64* rd,
+                           RegI64* rv, RegI64* temp) {
+  *rv = bc->popI64();
+  if (op == AtomicOp::Sub) {
+    // Only Sub needs a temporary register to store the negated operand.  Others
+    // have matching AMO instructions.
+    *temp = bc->needI64();
+  }
+  *rd = bc->needI64();
+}
+
+static void Perform(BaseCompiler* bc, const MemoryAccessDesc& access,
+                    Address srcAddr, AtomicOp op, RegI64 rv, RegI64 temp,
+                    RegI64 rd) {
+  bc->masm.wasmAtomicFetchOp64(access, op, rv, srcAddr, temp, rd);
+}
+
+static void Deallocate(BaseCompiler* bc, AtomicOp op, RegI64 rv, RegI64 temp) {
+  bc->freeI64(rv);
+  bc->maybeFree(temp);
+}
+
 #elif defined(JS_CODEGEN_RISCV64)
 
 static void PopAndAllocate(BaseCompiler* bc, AtomicOp op, RegI64* rd,
@@ -1690,7 +1717,9 @@ static void PopAndAllocate(BaseCompiler* bc, ValType type,
     // Architecture-specific i64-to-i32.
     bc->masm.move64To32(Register64(*rv), *rv);
   }
-  if (Scalar::byteSize(viewType) < 4) {
+  const bool needsLlScLoop =
+      Scalar::byteSize(viewType) < 4 && !LOONG64Flags::HasLamBhExtension();
+  if (needsLlScLoop) {
     temps->t0 = bc->needI32();
     temps->t1 = bc->needI32();
     temps->t2 = bc->needI32();

@@ -531,6 +531,14 @@ enum OpcodeField {
   op_fldx_d = 0x7068U << 15,
   op_fstx_s = 0x7070U << 15,
   op_fstx_d = 0x7078U << 15,
+  op_amswap_b = 0x70b8U << 15,
+  op_amswap_h = 0x70b9U << 15,
+  op_amadd_b = 0x70baU << 15,
+  op_amadd_h = 0x70bbU << 15,
+  op_amswap_db_b = 0x70bcU << 15,
+  op_amswap_db_h = 0x70bdU << 15,
+  op_amadd_db_b = 0x70beU << 15,
+  op_amadd_db_h = 0x70bfU << 15,
   op_amswap_w = 0x70c0U << 15,
   op_amswap_d = 0x70c1U << 15,
   op_amadd_w = 0x70c2U << 15,
@@ -1029,6 +1037,8 @@ class AssemblerLOONG64 : public AssemblerShared {
 
   // Size of the instruction stream, in bytes.
   size_t size() const;
+  // Returns the size of the buffer we can currently read.
+  size_t readableSize() const;
   // Size of the jump relocation table, in bytes.
   size_t jumpRelocationTableBytes() const;
   size_t dataRelocationTableBytes() const;
@@ -1275,6 +1285,17 @@ class AssemblerLOONG64 : public AssemblerShared {
   BufferOffset as_ll_d(Register rd, Register rj, int32_t si14);
   BufferOffset as_sc_w(Register rd, Register rj, int32_t si14);
   BufferOffset as_sc_d(Register rd, Register rj, int32_t si14);
+
+  // Atomic instructions from LAM_BH extension
+  BufferOffset as_amswap_b(Register rd, Register rj, Register rk);
+  BufferOffset as_amswap_h(Register rd, Register rj, Register rk);
+  BufferOffset as_amadd_b(Register rd, Register rj, Register rk);
+  BufferOffset as_amadd_h(Register rd, Register rj, Register rk);
+
+  BufferOffset as_amswap_db_b(Register rd, Register rj, Register rk);
+  BufferOffset as_amswap_db_h(Register rd, Register rj, Register rk);
+  BufferOffset as_amadd_db_b(Register rd, Register rj, Register rk);
+  BufferOffset as_amadd_db_h(Register rd, Register rj, Register rk);
 
   // Barrier instructions
   BufferOffset as_dbar(int32_t hint);

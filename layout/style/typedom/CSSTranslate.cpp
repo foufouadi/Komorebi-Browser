@@ -133,25 +133,25 @@ void CSSTranslate::SetZ(CSSNumericValue& aArg, ErrorResult& aRv) {
 already_AddRefed<DOMMatrix> CSSTranslate::ToMatrix(ErrorResult& aRv) {
   auto matrix = MakeRefPtr<DOMMatrix>(mParent);
 
-  RefPtr<CSSUnitValue> x = mX->To("px"_ns, aRv);
+  auto x = mX->ToStyleUnitValue("px"_ns, aRv);
   if (aRv.Failed()) {
     return nullptr;
   }
 
-  RefPtr<CSSUnitValue> y = mY->To("px"_ns, aRv);
+  auto y = mY->ToStyleUnitValue("px"_ns, aRv);
   if (aRv.Failed()) {
     return nullptr;
   }
 
   if (Is2D()) {
-    matrix->TranslateSelf(x->Value(), y->Value());
+    matrix->TranslateSelf(x->value, y->value);
   } else {
-    RefPtr<CSSUnitValue> z = mZ->To("px"_ns, aRv);
+    auto z = mZ->ToStyleUnitValue("px"_ns, aRv);
     if (aRv.Failed()) {
       return nullptr;
     }
 
-    matrix->TranslateSelf(x->Value(), y->Value(), z->Value());
+    matrix->TranslateSelf(x->value, y->value, z->value);
   }
 
   return matrix.forget();

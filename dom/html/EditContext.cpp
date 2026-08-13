@@ -193,7 +193,7 @@ void EditContext::SetAssociatedElement(nsGenericHTMLElement* aElement) {
 void EditContext::GetText(nsAString& aText) const { mText->GetData(aText); }
 
 void EditContext::GetTextSubstring(uint32_t aStart, uint32_t aEnd,
-                                   nsAString& aText) {
+                                   nsAString& aText) const {
   mText->SubstringData(aStart, aEnd - aStart, aText, IgnoreErrors());
 }
 
@@ -523,12 +523,20 @@ void EditContext::UpdateTextAndFireEvent(
   } else {
     mSelectionStart = mSelectionEnd = aStart + aString.Length();
   }
+  FireTextUpdate(aStart, aEnd, aString);
+  // Request new character bounds.
+  FireCharacterBoundsUpdateIfNeeded();
+}
+
+void EditContext::FireTextUpdate(uint32_t aUpdateRangeStart,
+                                 uint32_t aUpdateRangeEnd,
+                                 const nsAString& aText) {
   TextUpdateEventInit options;
-  options.mText = aString;
+  options.mText = aText;
   options.mSelectionStart = mSelectionStart;
   options.mSelectionEnd = mSelectionEnd;
-  options.mUpdateRangeStart = aStart;
-  options.mUpdateRangeEnd = aEnd;
+  options.mUpdateRangeStart = aUpdateRangeStart;
+  options.mUpdateRangeEnd = aUpdateRangeEnd;
   options.mBubbles = false;
   options.mCancelable = true;
   RefPtr<TextUpdateEvent> e =
@@ -550,8 +558,28 @@ void EditContext::UpdateTextAndFireEvent(
   AutoRestore restore(mIsFiringTextUpdate);
   mIsFiringTextUpdate = true;
   DispatchEvent(*e);
+}
 
-  // Request new character bounds.
+void EditContext::DoSetSelection(WidgetSelectionEvent& aEvent) {
+  MOZ_LOG_FMT(gEditContextLog, LogLevel::Debug,
+              "[{}] {} with offset={} length={} reversed={} "
+              "expandToClusterBoundary={}",
+              static_cast<void*>(this), __func__, aEvent.mOffset,
+              aEvent.mLength, aEvent.mReversed,
+              aEvent.mExpandToClusterBoundary);
+  TextRange range(std::min(aEvent.mOffset, TextLength()),
+                  std::min(aEvent.mOffset + aEvent.mLength, TextLength()));
+  if (aEvent.mExpandToClusterBoundary) {
+    range = ExpandRangeToClusterBoundaries(range);
+  }
+  mSelectionStart = range.mStart;
+  mSelectionEnd = range.mEnd;
+  if (aEvent.mReversed) {
+    std::swap(mSelectionStart, mSelectionEnd);
+  }
+  // We need to fire textupdate so that the web app is aware that the
+  // selection has changed.
+  FireTextUpdate(0, 0, u""_ns);
   FireCharacterBoundsUpdateIfNeeded();
 }
 
@@ -753,6 +781,46 @@ bool EditContext::ShouldFireNewCharacterBoundsUpdateForRange(
   return true;
 }
 
+auto EditContext::ExpandRangeToClusterBoundaries(TextRange aRange) const
+    -> TextRange {
+  // Number of code units of context to use when determining the
+  // grapheme cluster boundaries.
+  constexpr uint32_t kContext = 16;
+  const uint32_t start = aRange.mStart;
+  const uint32_t end = aRange.mEnd;
+  uint32_t startExtendedToGraphemeCluster = start;
+  {
+    nsAutoString startText;
+    uint32_t startTextOffset = std::max(start, kContext) - kContext;
+    GetTextSubstring(startTextOffset, std::min(start + kContext, TextLength()),
+                     startText);
+    intl::GraphemeClusterBreakIteratorUtf16 iter(startText);
+    // find first grapheme cluster break before or equal to aStart
+    while (Maybe<uint32_t> i = iter.Next()) {
+      if (startTextOffset + *i > start) {
+        break;
+      }
+      startExtendedToGraphemeCluster = startTextOffset + *i;
+    }
+  }
+  uint32_t endExtendedToGraphemeCluster = end;
+  {
+    nsAutoString endText;
+    uint32_t endTextOffset = std::max(end, kContext) - kContext;
+    GetTextSubstring(endTextOffset, std::min(end + kContext, TextLength()),
+                     endText);
+    // find first grapheme cluster break after or equal to aEnd
+    intl::GraphemeClusterBreakIteratorUtf16 iter(endText);
+    while (Maybe<uint32_t> i = iter.Next()) {
+      if (endTextOffset + *i >= end) {
+        endExtendedToGraphemeCluster = endTextOffset + *i;
+        break;
+      }
+    }
+  }
+  return {startExtendedToGraphemeCluster, endExtendedToGraphemeCluster};
+}
+
 void EditContext::FireCharacterBoundsUpdateIfNeeded(IsFromFocus aIsFromFocus) {
   // If characterboundsupdate handler changes text or something, don't fire
   // another characterboundsupdate to avoid infinite recursion.
@@ -784,45 +852,10 @@ void EditContext::FireCharacterBoundsUpdateIfNeeded(IsFromFocus aIsFromFocus) {
   // Extend requested range to grapheme cluster boundaries,
   // in case web app has poor handling of ranges starting/ending
   // in the middle of a grapheme cluster.
-  uint32_t startExtendedToGraphemeCluster = start;
-  // Number of code units of context to use when determining the
-  // grapheme cluster boundaries.
-  constexpr uint32_t kContext = 16;
-  {
-    nsAutoString startText;
-    uint32_t startTextOffset = std::max(start, kContext) - kContext;
-    GetTextSubstring(startTextOffset, std::min(start + kContext, TextLength()),
-                     startText);
-    intl::GraphemeClusterBreakIteratorUtf16 iter(startText);
-    // find first grapheme cluster break before or equal to aStart
-    while (Maybe<uint32_t> i = iter.Next()) {
-      if (startTextOffset + *i > start) {
-        break;
-      }
-      startExtendedToGraphemeCluster = startTextOffset + *i;
-    }
-  }
-  uint32_t endExtendedToGraphemeCluster = end;
-  {
-    nsAutoString endText;
-    uint32_t endTextOffset = std::max(end, kContext) - kContext;
-    GetTextSubstring(endTextOffset, std::min(end + kContext, TextLength()),
-                     endText);
-    // find first grapheme cluster break after or equal to aEnd
-    intl::GraphemeClusterBreakIteratorUtf16 iter(endText);
-    while (Maybe<uint32_t> i = iter.Next()) {
-      if (endTextOffset + *i >= end) {
-        endExtendedToGraphemeCluster = endTextOffset + *i;
-        break;
-      }
-    }
-  }
-
+  const TextRange requestRange = ExpandRangeToClusterBoundaries({start, end});
   // If we already have the requested character bounds or we already
   // requested them, and nothing relevant has changed, don't fire
   // characterboundsupdate again.
-  const TextRange requestRange(startExtendedToGraphemeCluster,
-                               endExtendedToGraphemeCluster);
   if (!ShouldFireNewCharacterBoundsUpdateForRange(requestRange)) {
     return;
   }
@@ -841,8 +874,8 @@ void EditContext::FireCharacterBoundsUpdateIfNeeded(IsFromFocus aIsFromFocus) {
   CharacterBoundsUpdateEventInit eventOptions;
   eventOptions.mBubbles = false;
   eventOptions.mCancelable = true;
-  eventOptions.mRangeStart = startExtendedToGraphemeCluster;
-  eventOptions.mRangeEnd = endExtendedToGraphemeCluster;
+  eventOptions.mRangeStart = requestRange.mStart;
+  eventOptions.mRangeEnd = requestRange.mEnd;
   mIsFiringCharacterBoundsUpdate = true;
   MOZ_LOG_FMT(gEditContextLog, LogLevel::Debug,
               "[{}] Fire characterboundsupdate with range {}-{} "
@@ -860,8 +893,8 @@ void EditContext::FireCharacterBoundsUpdateIfNeeded(IsFromFocus aIsFromFocus) {
     MOZ_LOG_FMT(gEditContextLog, LogLevel::Debug,
                 "[{}] characterboundsupdate handler didn't provide requested "
                 "bounds synchronously - want {}-{}, but have {}-{}",
-                static_cast<void*>(this), startExtendedToGraphemeCluster,
-                endExtendedToGraphemeCluster, mCodepointRectsStartIndex,
+                static_cast<void*>(this), requestRange.mStart,
+                requestRange.mEnd, mCodepointRectsStartIndex,
                 CodepointRectsEndIndex());
     if (!mWarnedAboutUpdateCharacterBoundsNotCalled) {
       nsContentUtils::ReportToConsole(

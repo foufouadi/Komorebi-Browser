@@ -925,7 +925,9 @@ export class BaseContent extends React.PureComponent {
       prefs["system.showWeather"] ||
       prefs.trainhopConfig?.weather?.enabled ||
       prefs.trainhopConfig?.widgetsSettings?.weatherVisible;
-    const mayHaveWebNotifications = prefs["system.showWebNotifications"];
+    const mayHaveWebNotifications =
+      prefs["system.showWebNotifications"] ||
+      prefs.trainhopConfig?.webNotifications?.enabled;
     const supportUrl = prefs["support.url"];
 
     // Widget toggle visibility is resolved by the shared registry helpers, which
@@ -1084,6 +1086,51 @@ export class BaseContent extends React.PureComponent {
       const hasManyTopSitesRows = topSitesEnabled && prefs.topSitesRows > 2;
       const logoShouldBeCentered =
         !pocketEnabled && !hasContentWidgets && !hasManyTopSitesRows;
+      // Rendered as a direct child of .container unless the logo is centered,
+      // so position: sticky is bounded by .container (which spans the whole
+      // page) rather than .content (which now ends above the content band).
+      // With a centered logo the search has to stay under it inside .content.
+      const searchArea = prefs.showSearch && (
+        <>
+          <div
+            ref={this.attachSearchSentinel}
+            className="sticky-search-sentinel"
+            aria-hidden="true"
+          />
+          <ErrorBoundary>
+            <Search showLogo={false} {...props.Search} />
+          </ErrorBoundary>
+        </>
+      );
+      // Slotted into DiscoveryStreamBase between the widgets and the feed,
+      // which is the only place that boundary exists now that both live in the
+      // .content-full-width band.
+      const aboveContentFeedMessage = shouldShowASRouterNewTabMessage(
+        this.props.Messages,
+        "ASRouterNewTabMessage",
+        ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_CONTENT_FEED
+      ) && (
+        <ErrorBoundary>
+          <MessageWrapper dispatch={this.props.dispatch}>
+            <ExternalComponentWrapper
+              type="ASROUTER_NEWTAB_MESSAGE"
+              messageData={this.props.Messages.messageData}
+              className="asrouter-newtab-message-wrapper"
+            />
+          </MessageWrapper>
+        </ErrorBoundary>
+      );
+      // Widgets (injected via DiscoveryStreamBase) + content feed. Always render
+      // in the .content-full-width band below the grid.
+      const contentFeed = isDiscoveryStream && (
+        <ErrorBoundary className="borderless-error">
+          <DiscoveryStreamBase
+            locale={props.App.locale}
+            spocsLoading={this.isSpocsOnDemandExpired}
+            aboveContentFeed={aboveContentFeedMessage}
+          />
+        </ErrorBoundary>
+      );
 
       return (
         <BaseContext.Provider value={baseContextValue}>
@@ -1110,113 +1157,90 @@ export class BaseContent extends React.PureComponent {
                   </ErrorBoundary>
                 )}
               </aside>
-              <main className="content">
-                {!prefs.hideLogo && logoShouldBeCentered && !isPageEmpty && (
-                  <ErrorBoundary>
-                    <Logo />
-                  </ErrorBoundary>
-                )}
 
-                {/* Search */}
-                {prefs.showSearch && (
-                  <>
-                    <div
-                      ref={this.attachSearchSentinel}
-                      className="sticky-search-sentinel"
-                      aria-hidden="true"
-                    />
+              {/* Search */}
+              {!logoShouldBeCentered && searchArea}
+
+              {/* display: contents, so .content and .content-full-width stay
+              direct grid items of .container while both sit inside the main
+              landmark. See _Grid.scss. */}
+              <main className="content-main">
+                <div className="content">
+                  {!prefs.hideLogo && logoShouldBeCentered && !isPageEmpty && (
                     <ErrorBoundary>
-                      <Search showLogo={false} {...props.Search} />
+                      <Logo />
                     </ErrorBoundary>
-                  </>
-                )}
+                  )}
 
-                {/* ASRouterNewTabMessage (ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_TOPSITES) */}
-                {shouldShowASRouterNewTabMessage(
-                  this.props.Messages,
-                  "ASRouterNewTabMessage",
-                  ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_TOPSITES
-                ) && (
-                  <ErrorBoundary>
-                    <MessageWrapper dispatch={this.props.dispatch}>
-                      <ExternalComponentWrapper
-                        type="ASROUTER_NEWTAB_MESSAGE"
-                        messageData={this.props.Messages.messageData}
-                        className="asrouter-newtab-message-wrapper"
-                      />
-                    </MessageWrapper>
-                  </ErrorBoundary>
-                )}
+                  {logoShouldBeCentered && searchArea}
 
-                {/* ActivationWindowMessage */}
-                {shouldShowOMCHighlight(
-                  this.props.Messages,
-                  "ActivationWindowMessage"
-                ) && (
-                  <ErrorBoundary>
-                    <MessageWrapper dispatch={this.props.dispatch}>
-                      <ActivationWindowMessage
-                        dispatch={this.props.dispatch}
-                        messageData={this.props.Messages.messageData}
-                      />
-                    </MessageWrapper>
-                  </ErrorBoundary>
-                )}
+                  {/* ASRouterNewTabMessage (ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_TOPSITES) */}
+                  {shouldShowASRouterNewTabMessage(
+                    this.props.Messages,
+                    "ASRouterNewTabMessage",
+                    ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_TOPSITES
+                  ) && (
+                    <ErrorBoundary>
+                      <MessageWrapper dispatch={this.props.dispatch}>
+                        <ExternalComponentWrapper
+                          type="ASROUTER_NEWTAB_MESSAGE"
+                          messageData={this.props.Messages.messageData}
+                          className="asrouter-newtab-message-wrapper"
+                        />
+                      </MessageWrapper>
+                    </ErrorBoundary>
+                  )}
 
-                {/* TODO: Break out Topsites, Widgets from DiscoveryStreamBase */}
-                {/* Shortcuts / Topsites */}
-                {topSitesEnabled && (
-                  <ErrorBoundary>
-                    <TopSites />
-                  </ErrorBoundary>
-                )}
+                  {/* ActivationWindowMessage */}
+                  {shouldShowOMCHighlight(
+                    this.props.Messages,
+                    "ActivationWindowMessage"
+                  ) && (
+                    <ErrorBoundary>
+                      <MessageWrapper dispatch={this.props.dispatch}>
+                        <ActivationWindowMessage
+                          dispatch={this.props.dispatch}
+                          messageData={this.props.Messages.messageData}
+                        />
+                      </MessageWrapper>
+                    </ErrorBoundary>
+                  )}
 
-                {/* ASRouterNewTabMessage (ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_WIDGETS) */}
-                {shouldShowASRouterNewTabMessage(
-                  this.props.Messages,
-                  "ASRouterNewTabMessage",
-                  ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_WIDGETS
-                ) && (
-                  <ErrorBoundary>
-                    <MessageWrapper dispatch={this.props.dispatch}>
-                      <ExternalComponentWrapper
-                        type="ASROUTER_NEWTAB_MESSAGE"
-                        messageData={this.props.Messages.messageData}
-                        className="asrouter-newtab-message-wrapper"
-                      />
-                    </MessageWrapper>
-                  </ErrorBoundary>
-                )}
+                  {/* TODO: Break out Topsites, Widgets from DiscoveryStreamBase */}
+                  {/* Shortcuts / Topsites */}
+                  {topSitesEnabled && (
+                    <ErrorBoundary>
+                      <TopSites />
+                    </ErrorBoundary>
+                  )}
 
-                {/* Widgets */}
+                  {/* ASRouterNewTabMessage (ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_WIDGETS) */}
+                  {shouldShowASRouterNewTabMessage(
+                    this.props.Messages,
+                    "ASRouterNewTabMessage",
+                    ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_WIDGETS
+                  ) && (
+                    <ErrorBoundary>
+                      <MessageWrapper dispatch={this.props.dispatch}>
+                        <ExternalComponentWrapper
+                          type="ASROUTER_NEWTAB_MESSAGE"
+                          messageData={this.props.Messages.messageData}
+                          className="asrouter-newtab-message-wrapper"
+                        />
+                      </MessageWrapper>
+                    </ErrorBoundary>
+                  )}
 
-                {/* ASRouterNewTabMessage (ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_CONTENT_FEED) */}
-                {shouldShowASRouterNewTabMessage(
-                  this.props.Messages,
-                  "ASRouterNewTabMessage",
-                  ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_CONTENT_FEED
-                ) && (
-                  <ErrorBoundary>
-                    <MessageWrapper dispatch={this.props.dispatch}>
-                      <ExternalComponentWrapper
-                        type="ASROUTER_NEWTAB_MESSAGE"
-                        messageData={this.props.Messages.messageData}
-                        className="asrouter-newtab-message-wrapper"
-                      />
-                    </MessageWrapper>
-                  </ErrorBoundary>
-                )}
+                  {/* ASRouterNewTabMessage (ASROUTER_NEWTAB_MESSAGE_POSITIONS.ABOVE_CONTENT_FEED)
+                renders inside the band, see aboveContentFeedMessage above. */}
 
-                {/* Content Feed */}
-                {isDiscoveryStream && (
-                  <ErrorBoundary className="borderless-error">
-                    <DiscoveryStreamBase
-                      locale={props.App.locale}
-                      spocsLoading={this.isSpocsOnDemandExpired}
-                    />
-                  </ErrorBoundary>
+                  {!pocketEnabled && multistageMessageFeed}
+                </div>
+                {/* Widgets + content feed, in a band spanning all three columns
+              on the row below the grid. See _Grid.scss. */}
+                {contentFeed && (
+                  <div className="content-full-width">{contentFeed}</div>
                 )}
-                {!pocketEnabled && multistageMessageFeed}
               </main>
             </div>
             <ConfirmDialog />

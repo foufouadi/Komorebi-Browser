@@ -1,5 +1,6 @@
 import {
   getNotificationIdsForUrl,
+  isWebNotificationsEnabled,
   notificationKeyForUrl,
   originFromUrl,
 } from "content-src/lib/web-notification-match.mjs";
@@ -80,6 +81,56 @@ describe("web-notification-match", () => {
     });
     it("returns empty for a non-http(s) url", () => {
       assert.deepEqual(getNotificationIdsForUrl(state, "about:newtab"), []);
+    });
+  });
+
+  describe("isWebNotificationsEnabled", () => {
+    const stateWith = values => ({ Prefs: { values } });
+
+    it("is enabled when the system and user prefs are set", () => {
+      assert.isTrue(
+        isWebNotificationsEnabled(
+          stateWith({
+            "system.showWebNotifications": true,
+            showWebNotifications: true,
+          })
+        )
+      );
+    });
+
+    it("is enabled via trainhop with the system pref off", () => {
+      assert.isTrue(
+        isWebNotificationsEnabled(
+          stateWith({
+            "system.showWebNotifications": false,
+            showWebNotifications: true,
+            trainhopConfig: { webNotifications: { enabled: true } },
+          })
+        )
+      );
+    });
+
+    it("is disabled when the user pref is off even if trainhop enables it", () => {
+      assert.isFalse(
+        isWebNotificationsEnabled(
+          stateWith({
+            "system.showWebNotifications": false,
+            showWebNotifications: false,
+            trainhopConfig: { webNotifications: { enabled: true } },
+          })
+        )
+      );
+    });
+
+    it("is disabled when neither the system pref nor trainhop enable it", () => {
+      assert.isFalse(
+        isWebNotificationsEnabled(
+          stateWith({
+            "system.showWebNotifications": false,
+            showWebNotifications: true,
+          })
+        )
+      );
     });
   });
 });

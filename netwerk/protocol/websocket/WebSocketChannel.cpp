@@ -42,7 +42,6 @@
 #include "nsINode.h"
 #include "nsIObserverService.h"
 #include "nsIPrefBranch.h"
-#include "nsIProtocolHandler.h"
 #include "nsIProtocolProxyService.h"
 #include "nsIProxiedChannel.h"
 #include "nsIProxyInfo.h"
@@ -76,11 +75,11 @@ using namespace mozilla::net;
 namespace mozilla::net {
 
 NS_IMPL_ISUPPORTS(WebSocketChannel, nsIWebSocketChannel, nsIHttpUpgradeListener,
-                  nsIRequestObserver, nsIStreamListener, nsIProtocolHandler,
-                  nsIInputStreamCallback, nsIOutputStreamCallback,
-                  nsITimerCallback, nsIDNSListener, nsIProtocolProxyCallback,
-                  nsIInterfaceRequestor, nsIChannelEventSink,
-                  nsIThreadRetargetableRequest, nsIObserver, nsINamed)
+                  nsIRequestObserver, nsIStreamListener, nsIInputStreamCallback,
+                  nsIOutputStreamCallback, nsITimerCallback, nsIDNSListener,
+                  nsIProtocolProxyCallback, nsIInterfaceRequestor,
+                  nsIChannelEventSink, nsIThreadRetargetableRequest,
+                  nsIObserver, nsINamed)
 
 // We implement RFC 6455, which uses Sec-WebSocket-Version: 13 on the wire.
 #define SEC_WEBSOCKET_VERSION "13"

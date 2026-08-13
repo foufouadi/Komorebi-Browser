@@ -1992,6 +1992,85 @@ add_task(function test_addToolCallMessage_emits_message_update() {
   });
 });
 
+add_task(function test_updateToolCallMessage_reconciles_pending_in_place() {
+  const conversation = new ChatConversation({});
+  conversation.addUserMessage("Search the web", null);
+
+  const toolUpdates = [];
+  conversation.on("chat-conversation:message-update", (_event, msg) => {
+    if (msg?.role === MESSAGE_ROLE.TOOL) {
+      toolUpdates.push(msg);
+    }
+  });
+
+  // A slow tool emits a placeholder tool message up front so the action log
+  // can render its pending row.
+  const pending = conversation.addToolCallMessage({
+    tool_call_id: "tc_slow",
+    body: { pending: true },
+    name: "search_the_web",
+  });
+
+  // On completion the same message is reconciled with the real result.
+  const finalized = conversation.updateToolCallMessage(pending, {
+    tool_call_id: "tc_slow",
+    body: { could_answer: true },
+    name: "search_the_web",
+  });
+
+  const toolMessages = conversation.messages.filter(
+    m => m.role === MESSAGE_ROLE.TOOL
+  );
+
+  Assert.withSoftAssertions(function (soft) {
+    soft.strictEqual(
+      finalized,
+      pending,
+      "Reconciles the same message rather than creating a new one"
+    );
+    soft.equal(
+      toolMessages.length,
+      1,
+      "No duplicate tool message is added on reconciliation"
+    );
+    soft.equal(
+      toolMessages[0].content.body.could_answer,
+      true,
+      "Placeholder body is replaced by the real result"
+    );
+    soft.equal(
+      toolUpdates.length,
+      2,
+      "Emits once for the pending row and once for the reconciliation"
+    );
+  });
+});
+
+add_task(function test_updateToolCallMessage_adds_when_no_pending() {
+  const conversation = new ChatConversation({});
+  conversation.addUserMessage("Search the web", null);
+
+  const added = conversation.updateToolCallMessage(null, {
+    tool_call_id: "tc_fresh",
+    body: { ok: true },
+    name: "search_the_web",
+  });
+
+  const toolMessages = conversation.messages.filter(
+    m => m.role === MESSAGE_ROLE.TOOL
+  );
+
+  Assert.withSoftAssertions(function (soft) {
+    soft.ok(added, "Falls back to adding a fresh tool message");
+    soft.equal(toolMessages.length, 1, "Exactly one tool message is present");
+    soft.equal(
+      toolMessages[0].content.tool_call_id,
+      "tc_fresh",
+      "The fresh tool message carries the tool_call_id"
+    );
+  });
+});
+
 add_task(function test_addToolCallMessage_emits_for_error_payload() {
   const conversation = new ChatConversation({});
   conversation.addUserMessage("Anything", null);

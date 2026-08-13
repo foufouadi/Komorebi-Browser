@@ -1229,11 +1229,14 @@ Tester.prototype = {
       this.PromiseTestUtils.assertNoUncaughtRejections();
       this.PromiseTestUtils.clearAllowedUncaughtRejections();
 
-      await this.notifyProfilerOfTestEnd();
-
       // Check the window state before logging testEnd so that any cleanup
       // assertions are included in the test result, not logged after test_end.
+      // This has to happen before notifyProfilerOfTestEnd, which only saves a
+      // profile for a failing test: a test whose only failure is a stale tab or
+      // a leaked window would otherwise not have failed yet.
       this.checkWindowsState();
+
+      await this.notifyProfilerOfTestEnd();
 
       let time = Date.now() - this.lastStartTime;
 

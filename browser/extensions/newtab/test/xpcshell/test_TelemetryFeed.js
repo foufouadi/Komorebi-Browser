@@ -387,8 +387,11 @@ add_task(async function test_browserOpenNewtabStart() {
   Assert.ok(profile.threads);
   Assert.equal(profile.threads.length, 1);
 
-  let foundMarker = profile.threads[0].markers.data.find(marker => {
-    return marker[5]?.name === "browser-open-newtab-start";
+  // The Text marker's "name" field is a unique string, so the payload holds
+  // an index into the thread's string table rather than the string itself.
+  let [thread] = profile.threads;
+  let foundMarker = thread.markers.data.find(marker => {
+    return thread.stringTable[marker[5]?.name] === "browser-open-newtab-start";
   });
 
   Assert.ok(foundMarker, "Found the browser-open-newtab-start marker");

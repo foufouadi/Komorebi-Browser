@@ -5556,7 +5556,10 @@ enum class ComponentTypeBoundKindRaw : uint8_t {
 
 [[nodiscard]] static bool DecodeComponentExternDesc(Decoder& d,
                                                     MutableComponent c,
-                                                    ComponentExternDesc* desc) {
+                                                    ComponentExternDesc* desc,
+                                                    bool* isNewSubResource) {
+  *isNewSubResource = false;
+
   ComponentSort kind;
   if (!DecodeComponentSort(d, &kind, /*forExterndesc=*/true)) {
     return false;
@@ -5606,6 +5609,7 @@ enum class ComponentTypeBoundKindRaw : uint8_t {
             return false;
           }
           *desc = ComponentExternDesc::type(std::move(subResourceType));
+          *isNewSubResource = true;
         } break;
         default:
           return d.failf("invalid kind 0x%02x for type bound", kind);
@@ -6498,7 +6502,8 @@ static bool DecodeComponentImport(Decoder& d, MutableComponent& c,
   }
 
   ComponentExternDesc externDesc;
-  if (!DecodeComponentExternDesc(d, c, &externDesc)) {
+  bool unused;
+  if (!DecodeComponentExternDesc(d, c, &externDesc, &unused)) {
     return false;
   }
   if (externDesc.sort() == ComponentSort::Type) {
@@ -6597,11 +6602,14 @@ enum class ComponentExportFlagsRaw : uint8_t {
   }
   if (hasExplicitExternDesc) {
     ComponentExternDesc explicitExternDesc;
-    if (!DecodeComponentExternDesc(d, c, &explicitExternDesc)) {
+    bool isNewSubResource;
+    if (!DecodeComponentExternDesc(d, c, &explicitExternDesc,
+                                   &isNewSubResource)) {
       return false;
     }
 
-    if (!ComponentExternDesc::matches(externDesc, explicitExternDesc)) {
+    if (!ComponentExternDesc::compatible(externDesc, explicitExternDesc,
+                                         isNewSubResource)) {
       return d.fail(
           "exported item's type did not match explicitly-provided type");
     }

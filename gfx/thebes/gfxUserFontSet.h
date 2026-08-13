@@ -574,7 +574,6 @@ class gfxUserFontSet {
 };
 
 // acts a placeholder until the real font is downloaded
-
 class gfxUserFontEntry : public gfxFontEntry {
   friend class mozilla::PostTraversalTask;
   friend class gfxUserFontSet;
@@ -727,7 +726,7 @@ class gfxUserFontEntry : public gfxFontEntry {
   // aDownloadStatus == NS_OK ==> download succeeded, error otherwise
   // Ownership of aFontData is passed in here; the font set must
   // ensure that it is eventually deleted with free().
-  void FontDataDownloadComplete(uint32_t aSrcIndex, const uint8_t* aFontData,
+  void FontDataDownloadComplete(uint32_t aSrcIndex, const uint8_t*&& aFontData,
                                 uint32_t aLength, nsresult aDownloadStatus,
                                 nsIFontLoadCompleteCallback* aCallback);
 
@@ -735,31 +734,33 @@ class gfxUserFontEntry : public gfxFontEntry {
   // returns true if platform font creation successful
   // Ownership of aFontData is passed in here; the font must
   // ensure that it is eventually deleted with free().
-  bool LoadPlatformFontSync(uint32_t aSrcIndex, const uint8_t* aFontData,
+  bool LoadPlatformFontSync(uint32_t aSrcIndex, const uint8_t*&& aFontData,
                             uint32_t aLength);
 
-  void LoadPlatformFontAsync(uint32_t aSrcIndex, const uint8_t* aFontData,
+  void LoadPlatformFontAsync(uint32_t aSrcIndex, const uint8_t*&& aFontData,
                              uint32_t aLength,
                              nsIFontLoadCompleteCallback* aCallback);
 
   // helper method for LoadPlatformFontAsync; runs on a background thread
   void StartPlatformFontLoadOnBackgroundThread(
-      uint32_t aSrcIndex, const uint8_t* aFontData, uint32_t aLength,
+      uint32_t aSrcIndex, const uint8_t*&& aFontData, uint32_t aLength,
       nsMainThreadPtrHandle<nsIFontLoadCompleteCallback> aCallback);
 
   // helper method for LoadPlatformFontAsync; runs on the main thread
   void ContinuePlatformFontLoadOnMainThread(
-      uint32_t aSrcIndex, const uint8_t* aOriginalFontData,
+      uint32_t aSrcIndex, const uint8_t*&& aOriginalFontData,
       uint32_t aOriginalLength, gfxUserFontType aFontType,
-      const uint8_t* aSanitizedFontData, uint32_t aSanitizedLength,
+      const uint8_t*&& aSanitizedFontData, uint32_t aSanitizedLength,
       nsTArray<OTSMessage>&& aMessages,
       nsMainThreadPtrHandle<nsIFontLoadCompleteCallback> aCallback);
 
   // helper method for LoadPlatformFontSync and
-  // ContinuePlatformFontLoadOnMainThread; runs on the main thread
-  bool LoadPlatformFont(uint32_t aSrcIndex, const uint8_t* aOriginalFontData,
+  // ContinuePlatformFontLoadOnMainThread; runs on the main thread.
+  // This takes ownership of/consumes the original and sanitized data buffers,
+  // so the caller may no longer use them.
+  bool LoadPlatformFont(uint32_t aSrcIndex, const uint8_t*&& aOriginalFontData,
                         uint32_t aOriginalLength, gfxUserFontType aFontType,
-                        const uint8_t* aSanitizedFontData,
+                        const uint8_t*&& aSanitizedFontData,
                         uint32_t aSanitizedLength,
                         nsTArray<OTSMessage>&& aMessages);
 
@@ -811,6 +812,10 @@ class gfxUserFontEntry : public gfxFontEntry {
       mLoader;  // current loader for this entry, if any
   RefPtr<gfxUserFontSet> mLoadingFontSet;
   RefPtr<gfxFontSrcPrincipal> mPrincipal;
+
+  // Sanitized font data for this entry; platform font instances and skrifa
+  // refs may depend on this.
+  RefPtr<FontData> mFontData;
 };
 
 #endif /* GFX_USER_FONT_SET_H */

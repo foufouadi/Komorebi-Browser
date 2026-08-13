@@ -6,6 +6,7 @@
 
 #include "DataChannel.h"
 #include "DataChannelLog.h"
+#include "PeerConnectionImpl.h"
 #include "RTCDataChannelDeclarations.h"
 #include "RTCError.h"
 #include "base/basictypes.h"
@@ -75,10 +76,12 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(RTCDataChannel)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(RTCDataChannel,
                                                   DOMEventTargetHelper)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPeerConnection)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(RTCDataChannel,
                                                 DOMEventTargetHelper)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mPeerConnection)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_ADDREF_INHERITED(RTCDataChannel, DOMEventTargetHelper)
@@ -87,13 +90,11 @@ NS_IMPL_RELEASE_INHERITED(RTCDataChannel, DOMEventTargetHelper)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(RTCDataChannel)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
-RTCDataChannel::RTCDataChannel(const nsACString& aLabel,
-                               const nsAString& aOrigin, bool aOrdered,
-                               Nullable<uint16_t> aMaxLifeTime,
-                               Nullable<uint16_t> aMaxRetransmits,
-                               const nsACString& aProtocol, bool aNegotiated,
-                               already_AddRefed<DataChannel>& aDataChannel,
-                               nsPIDOMWindowInner* aWindow)
+RTCDataChannel::RTCDataChannel(
+    const nsACString& aLabel, const nsAString& aOrigin, bool aOrdered,
+    Nullable<uint16_t> aMaxLifeTime, Nullable<uint16_t> aMaxRetransmits,
+    const nsACString& aProtocol, bool aNegotiated, PeerConnectionImpl* aPc,
+    already_AddRefed<DataChannel>& aDataChannel, nsPIDOMWindowInner* aWindow)
     : DOMEventTargetHelper(aWindow),
       mUuid(nsID::GenerateUUID()),
       mOrigin(aOrigin),
@@ -103,6 +104,7 @@ RTCDataChannel::RTCDataChannel(const nsACString& aLabel,
       mMaxRetransmits(aMaxRetransmits),
       mDataChannelProtocol(aProtocol),
       mNegotiated(aNegotiated),
+      mPeerConnection(aPc),
       mDataChannel(aDataChannel),
       mEventTarget(GetCurrentSerialEventTarget()) {
   DC_INFO(("%p: RTCDataChannel created on main (necko channel %p)", this,
@@ -920,17 +922,15 @@ void RTCDataChannel::EventListenerRemoved(nsAtom* aType) {
 }
 
 /* static */
-nsresult NS_NewDOMDataChannel(already_AddRefed<DataChannel> aDataChannel,
-                              const nsACString& aLabel,
-                              const nsAString& aOrigin, bool aOrdered,
-                              Nullable<uint16_t> aMaxLifeTime,
-                              Nullable<uint16_t> aMaxRetransmits,
-                              const nsACString& aProtocol, bool aNegotiated,
-                              nsPIDOMWindowInner* aWindow,
-                              RTCDataChannel** aDomDataChannel) {
+nsresult NS_NewDOMDataChannel(
+    already_AddRefed<DataChannel> aDataChannel, const nsACString& aLabel,
+    const nsAString& aOrigin, bool aOrdered, Nullable<uint16_t> aMaxLifeTime,
+    Nullable<uint16_t> aMaxRetransmits, const nsACString& aProtocol,
+    bool aNegotiated, PeerConnectionImpl* aPc, nsPIDOMWindowInner* aWindow,
+    RTCDataChannel** aDomDataChannel) {
   RefPtr domdc = MakeRefPtr<RTCDataChannel>(
       aLabel, aOrigin, aOrdered, aMaxLifeTime, aMaxRetransmits, aProtocol,
-      aNegotiated, aDataChannel, aWindow);
+      aNegotiated, aPc, aDataChannel, aWindow);
 
   nsresult rv = domdc->Init();
   NS_ENSURE_SUCCESS(rv, rv);

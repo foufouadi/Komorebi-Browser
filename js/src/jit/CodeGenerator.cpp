@@ -8835,9 +8835,15 @@ bool CodeGenerator::generateBlock(LBlock* current, size_t blockNumber,
       emitDebugResultChecks(*iter);
     }
 #endif
+
+    // To reduce the blast radius of OOM during codegen, bail out early if we've
+    // OOM'ed.
+    if (masm.oom()) {
+      return false;
+    }
   }
 
-  return !masm.oom();
+  return true;
 }
 
 bool CodeGenerator::generateOutOfLineBlocks() {

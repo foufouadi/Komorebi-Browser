@@ -4131,9 +4131,14 @@ product.
               <li><code>js/src/zydis</code> (unless otherwise specified)</li>
               <li><code>js/src/vm/Float16.h</code>(the code contained in the half namespace)</li>
               <li><code>js/src/xsum</code></li>
+              <li><code>toolkit/components/jsoncpp</code></li>
               <li><code>toolkit/components/resistfingerprinting/content/gl-matrix.js</code></li>
               <li><code>toolkit/components/resistfingerprinting/content/ssdeep.js</code></li>
               <li><code>gfx/pixman/pixman</code></li>
+              <li><code>modules/woff2</code></li>
+#ifndef ANDROID
+              <li><code>extensions/spellcheck/hunspell</code></li>
+#endif
 #ifdef XP_WIN
               <li>CoreMessagingXP.dll</li>
               <li>marshal.dll</li>

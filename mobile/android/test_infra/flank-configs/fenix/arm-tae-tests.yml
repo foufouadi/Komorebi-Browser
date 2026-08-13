@@ -20,14 +20,11 @@ gcloud:
   other-files:
     /data/local/tmp/org.mozilla.fenix.debug-geckoview-config.yaml: geckoview-configs/org.mozilla.fenix.debug-geckoview-config.yaml
 
-  # TODO (Jackie J. 03/14/2026): add taskcluster tasks separating test suites into dependencies
   test-targets:
     - notPackage org.mozilla.fenix.syncintegration
     - notPackage org.mozilla.fenix.experimentintegration
     - notPackage org.mozilla.fenix.ui.efficiency.devtools
     - package org.mozilla.fenix.ui.efficiency.tests
-    - package org.mozilla.fenix.ui.efficiency.generation.reachability.shards
-    - package org.mozilla.fenix.ui.efficiency.generation.interaction.shards
 
   device:
     - model: MediumPhone.arm

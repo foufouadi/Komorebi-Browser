@@ -135,6 +135,10 @@ fxa-menu-sync-status-on = Sync is On
 
 fxa-menu-sync-status-off = Sync is Off
 
+# Shown in place of "Sync is Off" on the sync status button when the user has
+# never signed in. Sync is a verb, short for synchronize.
+fxa-menu-sync-your-data = Sync Your Data
+
 # Shown as a secondary label under "Sync is Off" when the user is signed in but
 # sync is turned off.
 fxa-menu-sync-off-data-description = Your data isn’t syncing
@@ -151,16 +155,16 @@ fxa-menu-sync-off-signin-description = Sign in to sync
 # Sync is a verb, short for synchronize.
 # Variables:
 #   $deviceName (String): The name of the local device.
-fxa-menu-sync-device-now = Sync { $deviceName } now
+fxa-menu-sync-device-now = Sync { $deviceName } Now
 
 fxa-menu-manage-sync-settings =
-    .label = Manage sync settings
+    .label = Manage Sync Settings
 
 fxa-menu-add-device =
-    .label = Add a device
+    .label = Add a Device
 
 fxa-menu-manage-devices =
-    .label = Manage your devices
+    .label = Manage Your Devices
 
 fxa-menu-device-missing =
     .label = Don’t See Your Device?
@@ -431,9 +435,9 @@ appmenuitem-relay-description2 = Helps prevent spam in your inbox
 # Shown in place of appmenuitem-relay-title2 when the user has signed up for Relay.
 appmenuitem-relay-title-signed-in = View Email Masks
 appmenuitem-vpn-title2 = Hide Your Location with { -mozilla-vpn-brand-name }
-appmenuitem-vpn-description4 = Get extra protection across apps and devices
+appmenuitem-vpn-description5 = Get extra protection across devices
 # Shown in place of appmenuitem-vpn-title2 when the user has signed up for VPN.
-appmenuitem-vpn-title-signed-in = Open { -mozilla-vpn-brand-name }
+appmenuitem-vpn-title-signed-in1 = Download { -mozilla-vpn-brand-name }
 
 # "Mozilla" is intentionally hardcoded to prevent forks from replacing it
 # with their own vendor name, since these tools are created and maintained by
@@ -488,7 +492,7 @@ fxa-menu-create-profile-heading = Level up your browsing with a new profile
 fxa-menu-create-profile-description = Keep your bookmarks, passwords, and history separate for work and personal browsing.
 
 fxa-menu-create-profile-confirm =
-    .label = Create New profile
+    .label = Create new profile
 
 fxa-menu-create-profile-learn-more =
     .label = What Are Profiles?

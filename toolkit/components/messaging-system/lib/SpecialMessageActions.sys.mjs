@@ -33,6 +33,9 @@ ChromeUtils.defineESModuleGetters(lazy, {
   AIWindow:
     // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
     "moz-src:///browser/components/aiwindow/ui/modules/AIWindow.sys.mjs",
+  AIWindowUI:
+    // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
+    "moz-src:///browser/components/aiwindow/ui/modules/AIWindowUI.sys.mjs",
   CustomIconManager:
     // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
     "moz-src:///browser/components/shell/CustomIconManager.sys.mjs",
@@ -429,15 +432,18 @@ export const SpecialMessageActions = {
       "termsofuse.acceptedDate",
     ];
 
-    // The in-tree baseline allowlist can be extended off-train via Remote
-    // Settings, but not for onImpression prefs, which stay deliberately
-    // restricted to prefs reviewed in-tree. This check is synchronous and does
-    // not wait on the Remote Settings collection to load (see
-    // MessagingSystemAllowlists.ensureInit). Callers that dispatch SET_PREF
-    // outside of ASRouter's own message routing, namely about:welcome and
-    // Spotlight, do not await ASRouter's init sequence, so a pref granted only
-    // through Remote Settings may not be recognized yet if it fires before the
-    // collection has loaded for this session. If that happens the pref is
+    // allowedPrefs above is the in-tree baseline. It can be extended off-train
+    // via Remote Settings, but not for onImpression prefs, which stay
+    // deliberately restricted to prefs reviewed in-tree, and not for the prefs
+    // in MessagingSystemBlocklists.sys.mjs, which are filtered out before they
+    // reach this getter. MessagingSystemAllowlists.sys.mjs documents how the
+    // two in-tree lists and the collection resolve against each other. This
+    // check is synchronous and does not wait on the Remote Settings collection
+    // to load (see MessagingSystemAllowlists.ensureInit). Callers that dispatch
+    // SET_PREF outside of ASRouter's own message routing, namely about:welcome
+    // and Spotlight, do not await ASRouter's init sequence, so a pref granted
+    // only through Remote Settings may not be recognized yet if it fires before
+    // the collection has loaded for this session. If that happens the pref is
     // simply namespaced like any other unlisted pref rather than being set
     // under its real name. Note this case is unlikely outside of automated
     // scenarios since user action is required to fire a SET_PREF action in
@@ -1117,6 +1123,11 @@ export const SpecialMessageActions = {
         await lazy.GenAI.summarizeCurrentPage(window, entry);
         break;
       }
+      case "OPEN_ORGANIZE_TABS_PANEL":
+        lazy.AIWindowUI.toggleGroupTabsPanel(window, {
+          source: action.data?.source ?? "message",
+        });
+        break;
       case "OPEN_PANEL": {
         let { anchor_id, widget_id, panel_id, fallback_to_app_menu } =
           action.data;

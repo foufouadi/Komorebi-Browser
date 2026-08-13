@@ -14,6 +14,7 @@
 
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
+import { clearTimeout, setTimeout } from "resource://gre/modules/Timer.sys.mjs";
 import { TestUtils } from "resource://testing-common/TestUtils.sys.mjs";
 
 const lazy = {};
@@ -37,8 +38,31 @@ const DISABLE_CONTENT_PROCESS_REUSE_PREF = "dom.ipc.disableContentProcessReuse";
 // Upper bound on the tabs BrowserTestUtils.overflowTabs opens.
 const MAX_TABS_FOR_OVERFLOW = 200;
 
+// Default bound on BrowserTestUtils.waitForMutationCondition, past the point
+// where a wait is plausibly still going to pass.
+const DEFAULT_MUTATION_TIMEOUT_MS = 10000;
+
 const kAboutPageRegistrationContentScript =
   "chrome://mochikit/content/tests/BrowserTestUtils/content-about-page-utils.js";
+
+/**
+ * Names a mutation wait whose caller passed no message, so that a wait which
+ * fails can still say which one it was.
+ *
+ * @param {function} checkFn  The condition the wait is testing.
+ * @param {nsIStackFrame} frame  The frame that started the wait.
+ * @returns {string}
+ */
+function describeMutationWait(checkFn, frame) {
+  let source = checkFn.toString().replace(/\s+/g, " ");
+  if (source.length > 100) {
+    source = source.slice(0, 100) + "...";
+  }
+  if (!frame) {
+    return source;
+  }
+  return `${frame.filename.replace(/.*\//, "")}:${frame.lineNumber} - ${source}`;
+}
 
 /**
  * Create and register the BrowserTestUtils and ContentEventListener window
@@ -1455,6 +1479,40 @@ export var BrowserTestUtils = {
   },
 
   /**
+   * Activate a menu item the way a user would, and wait for the menu to close.
+   *
+   * Activating an item dismisses the menu it is in, which is what this waits
+   * for. The menu has to be open already, as activateItem() throws
+   * "Popup is not open" otherwise. Prefer this over clicking the item: while
+   * the menu is still opening, its items are not focusable and not exposed to
+   * the accessibility APIs, so the click activates nothing.
+   *
+   * @param {Element} item
+   *        The menuitem to activate, in a menupopup that is already open.
+   */
+  async activateMenuItem(item) {
+    let popup = item.closest("menupopup");
+    let hidden = this.waitForPopupEvent(popup, "hidden");
+    popup.activateItem(item);
+    await hidden;
+  },
+
+  /**
+   * Open the menulist a menu item belongs to and activate the item, the way a
+   * user would, waiting for the dropdown to open first and to close afterwards.
+   *
+   * @param {Element} item
+   *        The menuitem to activate.
+   */
+  async selectMenulistItem(item) {
+    let menulist = item.closest("menulist");
+    let shown = this.waitForPopupEvent(menulist.menupopup, "shown");
+    menulist.open = true;
+    await shown;
+    await this.activateMenuItem(item);
+  },
+
+  /**
    * Waits for the select popup to be shown. This is needed because the select
    * dropdown is created lazily.
    *
@@ -1691,22 +1749,76 @@ export var BrowserTestUtils = {
    * @param {object}  options   The options to pass to MutationObserver.observe();
    * @param {function} checkFn  Function that returns true when it wants the promise to be
    * resolved.
+   * @param {object} [waitOptions]
+   * @param {string} [waitOptions.msg]
+   *        Describes what's being waited for. Used in the rejection message and
+   *        to label the profiler marker. Defaults to the call site and the
+   *        source of `checkFn`.
+   * @param {number} [waitOptions.timeout=DEFAULT_MUTATION_TIMEOUT_MS]
+   *        Milliseconds to wait before rejecting. Pass Infinity to wait
+   *        indefinitely, in which case the wait still rejects if the test
+   *        finishes while it's pending.
    * @returns {Promise<any>}    The value returned by `checkFn`.
    */
-  waitForMutationCondition(target, options, checkFn) {
+  waitForMutationCondition(
+    target,
+    options,
+    checkFn,
+    { msg, timeout = DEFAULT_MUTATION_TIMEOUT_MS } = {}
+  ) {
     let retVal;
     if ((retVal = checkFn())) {
       return Promise.resolve(retVal);
     }
-    return new Promise(resolve => {
+    let startTime = ChromeUtils.now();
+    let label = `waitForMutationCondition - ${
+      msg ?? describeMutationWait(checkFn, Components.stack.caller)
+    }`;
+
+    return new Promise((resolve, reject) => {
       let win = target.documentGlobal;
-      let obs = new win.MutationObserver(function () {
+      let timer = 0;
+      let settled = false;
+      let obs = new win.MutationObserver(() => {
         if ((retVal = checkFn())) {
-          obs.disconnect();
+          stop();
           resolve(retVal);
         }
       });
+
+      // Don't chain the returned promise (no .then()/.finally()): the extra
+      // microtask defers when an awaiting caller resumes, and tests that drive
+      // the UI right after a wait are sensitive to that. Clean up and record
+      // the wait here instead, before settling.
+      function stop() {
+        settled = true;
+        obs.disconnect();
+        clearTimeout(timer);
+        ChromeUtils.addProfilerMarker(
+          "BrowserTestUtils",
+          { startTime, category: "Test" },
+          label
+        );
+      }
+
       obs.observe(target, options);
+
+      if (timeout !== Infinity) {
+        timer = setTimeout(() => {
+          label += ` - timed out after ${timeout}ms`;
+          stop();
+          reject(label);
+        }, timeout);
+      }
+
+      TestUtils.promiseTestFinished?.then(() => {
+        if (settled) {
+          return;
+        }
+        label += " - still pending at the end of the test";
+        stop();
+        reject(label);
+      });
     });
   },
 
@@ -2104,9 +2216,11 @@ export var BrowserTestUtils = {
       }
     }
 
-    await TestUtils.waitForCondition(
+    await BrowserTestUtils.waitForMutationCondition(
+      arrowScrollbox,
+      { attributes: true, attributeFilter: ["overflowing"] },
       () => arrowScrollbox.hasAttribute("overflowing"),
-      `Tab strip overflows with ${gBrowser.tabs.length} tabs`
+      { msg: `Tab strip overflows with ${gBrowser.tabs.length} tabs` }
     );
   },
 

@@ -61,7 +61,7 @@ static __inline void BuildKeyNameFromFontName(nsACString& aName) {
 ////////////////////////////////////////////////////////////////////////////////
 // gfxDWriteFontFamily
 
-gfxDWriteFontFamily::~gfxDWriteFontFamily() {}
+gfxDWriteFontFamily::~gfxDWriteFontFamily() = default;
 
 static bool GetNameAsUtf8(nsACString& aName, IDWriteLocalizedStrings* aStrings,
                           UINT32 aIndex) {
@@ -1002,13 +1002,14 @@ already_AddRefed<gfxFontEntry> gfxDWriteFontList::LookupLocalFont(
 already_AddRefed<gfxFontEntry> gfxDWriteFontList::MakePlatformFont(
     const nsACString& aFontName, WeightRange aWeightForEntry,
     WidthRange aWidthForEntry, SlantStyleRange aStyleForEntry,
-    const uint8_t* aFontData, uint32_t aLength) {
+    FontData* aFontData) {
   RefPtr<gfxDWriteFontFileStream> fontFileStream;
   RefPtr<IDWriteFontFile> fontFile;
+  // This will create a gfxDWriteFontFileStream that wraps aFontData and
+  // retains a reference to it as long as required.
   HRESULT hr = gfxDWriteFontFileLoader::CreateCustomFontFile(
-      aFontData, aLength, getter_AddRefs(fontFile),
-      getter_AddRefs(fontFileStream));
-  free((void*)aFontData);
+      aFontData, getter_AddRefs(fontFile), getter_AddRefs(fontFileStream));
+
   NS_ASSERTION(SUCCEEDED(hr), "Failed to create font file reference");
   if (FAILED(hr)) {
     return nullptr;
@@ -2669,7 +2670,7 @@ class BundledFontLoader : public IDWriteFontCollectionLoader {
   NS_INLINE_DECL_REFCOUNTING(BundledFontLoader)
 
  public:
-  BundledFontLoader() {}
+  BundledFontLoader() = default;
 
   IFACEMETHODIMP CreateEnumeratorFromKey(
       IDWriteFactory* aFactory, const void* aCollectionKey,

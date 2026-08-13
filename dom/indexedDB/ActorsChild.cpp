@@ -2349,10 +2349,13 @@ nsresult BackgroundRequestChild::PreprocessHelper::ProcessStream() {
       do_QueryInterface(mStream);
   MOZ_ASSERT(blobInputStream);
 
+  // TODO: When FileMetadataCallback is called on close, this will fail
+  // with NS_BASE_STREAM_CLOSED which gets clamped to UnknownError.
+  // Consider mapping to a more specific IDB error.
   nsCOMPtr<nsIInputStream> internalInputStream;
-  MOZ_ALWAYS_SUCCEEDS(
-      blobInputStream->TakeInternalStream(getter_AddRefs(internalInputStream)));
-  MOZ_ASSERT(internalInputStream);
+  QM_TRY(MOZ_TO_RESULT(blobInputStream->TakeInternalStream(
+      getter_AddRefs(internalInputStream))));
+  QM_TRY(OkIf(internalInputStream), NS_ERROR_NOT_AVAILABLE);
 
   QM_TRY(MOZ_TO_RESULT(
       SnappyUncompressStructuredCloneData(*internalInputStream, *mCloneData)));

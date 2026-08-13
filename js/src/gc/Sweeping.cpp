@@ -15,6 +15,7 @@
  */
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/glue/Debug.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/TimeStamp.h"
@@ -1769,11 +1770,23 @@ IncrementalProgress GCRuntime::beginSweepingSweepGroup(JS::GCContext* gcx,
 #ifdef DEBUG
   // Now that the final mark state has been computed check any gray marking
   // assertions we delayed until this point.
-  for (SweepGroupZonesIter zone(this); !zone.done(); zone.next()) {
-    for (const auto* cell : zone->cellsToAssertNotGray()) {
-      JS::AssertCellIsNotGray(cell);
+
+  if (areGrayBitsValid()) {
+    for (SweepGroupZonesIter zone(this); !zone.done(); zone.next()) {
+      for (const auto* cell : zone->cellsToAssertNotGray()) {
+        if (cell->isMarkedGray()) {
+          const char* kind = JS::GCTraceKindToAscii(cell->getTraceKind());
+          printf_stderr("AssertCellIsNotGray: Found gray %s %p\n", kind, cell);
+          foundUnexpectedGrayCells = true;
+        }
+      }
+      zone->cellsToAssertNotGray().clearAndFree();
     }
-    zone->cellsToAssertNotGray().clearAndFree();
+
+    if (foundUnexpectedGrayCells) {
+      // Finish the GC non-incrementally. We will assert at the end of GC.
+      budget = SliceBudget::unlimited();
+    }
   }
 #endif
 

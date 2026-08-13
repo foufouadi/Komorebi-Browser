@@ -8,6 +8,7 @@
 #include "mozilla/ContentBlockingLog.h"
 #include "mozilla/ContentBlockingNotifier.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/PrincipalHashKey.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/dom/CanonicalBrowsingContext.h"
@@ -290,7 +291,7 @@ class WindowGlobalParent final : public WindowContext,
   // loaded, if known.
   already_AddRefed<nsIChannel> GetFailedChannel();
 
-  dom::NoCorsMediaRequestState NoCorsMediaRequestState(nsIURI* aURI) const;
+  dom::NoCorsMediaRequestState NoCorsMediaRequestState(nsIURI* aURI);
 
   void RecordSubsequentNoCorsRequestState(nsIURI* aURI);
 
@@ -475,6 +476,23 @@ class WindowGlobalParent final : public WindowContext,
   using PageUseCounterResult = EnumSet<PageUseCounterResultBits>;
   PageUseCounterResult FinishAccumulatingPageUseCounters();
 
+  struct KnownAllowedSubsequentRequests : public SupportsWeakPtr {
+    NS_INLINE_DECL_REFCOUNTING(KnownAllowedSubsequentRequests);
+    nsTHashtable<nsCStringHashKey> mNoCorsMediaRequestURIs;
+    nsCOMPtr<nsIPrincipal> mPrincipal;
+
+   private:
+    ~KnownAllowedSubsequentRequests();
+  };
+
+  using AllKnownAllowedSubsequentRequests =
+      nsTHashMap<PrincipalHashKey, WeakPtr<KnownAllowedSubsequentRequests>>;
+
+  static AllKnownAllowedSubsequentRequests&
+  GetAllKnownAllowedSubsequentRequests();
+
+  KnownAllowedSubsequentRequests* EnsureKnownAllowedSubsequentRequests();
+
   // NOTE: Neither this document principal nor the partitioned principal reflect
   // possible |document.domain| mutations which may have been made in the actual
   // document.
@@ -576,10 +594,14 @@ class WindowGlobalParent final : public WindowContext,
 
   bool mShouldReportHasBlockedOpaqueResponse = false;
 
-  // URIs of media resources for which an initial no-cors media request has
-  // passed the Opaque Response Blocking media checks in this window. Used to
-  // recognise subsequent (range) requests for the same resource.
-  nsTHashtable<nsCStringHashKey> mNoCorsMediaRequestURIs;
+  // The per-principal set of media resources for which an initial no-cors media
+  // request has passed the Opaque Response Blocking media checks, shared
+  // between all windows with this window's principal. Used to recognise
+  // subsequent (range) requests for the same resource.
+  RefPtr<KnownAllowedSubsequentRequests> mKnownAllowedSubsequentRequests;
+
+  static StaticAutoPtr<AllKnownAllowedSubsequentRequests>
+      sAllKnownSubsequentRequests;
 };
 
 nsCString BFCacheStatusToString(uint32_t aFlags);

@@ -210,22 +210,7 @@
     --card-padding-compact: var(--space-small);
 
     /** checkbox **/
-    --checkbox-background-color: var(--button-background-color);
-    --checkbox-background-color-hover: var(--button-background-color-hover);
-    --checkbox-background-color-active: var(--button-background-color-active);
-    --checkbox-background-color-disabled: var(--button-background-color-disabled);
-    --checkbox-background-color-checked: var(--button-background-color-primary);
-    --checkbox-background-color-checked-hover: var(--button-background-color-primary-hover);
-    --checkbox-background-color-checked-active: var(--button-background-color-primary-active);
-    --checkbox-background-color-checked-disabled: var(--button-background-color-primary-disabled);
-    --checkbox-border-color: var(--border-color-interactive);
-    --checkbox-border-color-checked: var(--checkbox-background-color-checked);
-    --checkbox-border-color-checked-hover: var(--checkbox-background-color-checked-hover);
-    --checkbox-border-color-checked-active: var(--checkbox-background-color-checked-active);
-    --checkbox-border-color-checked-disabled: var(--checkbox-background-color-checked-disabled);
-    --checkbox-border-radius: var(--border-radius-small);
     --checkbox-margin-inline: var(--space-small);
-    --checkbox-opacity-disabled: var(--button-opacity-disabled);
     /* TODO Bug 1876537: Make this em-based, probably? */
     --checkbox-size: var(--size-item-small);
 
@@ -909,9 +894,6 @@
       --card-header-background-color: var(--button-background-color);
       --card-header-border-color: transparent;
 
-      /** checkbox **/
-      --checkbox-border-radius: var(--border-radius-xsmall);
-
       /** color **/
       --color-accent-attention: light-dark(var(--color-green-40), var(--color-green-30));
       --color-accent-primary: light-dark(var(--color-violet-50), var(--color-violet-30));
@@ -1108,7 +1090,6 @@
       --toolbarbutton-outline-color-active: transparent;
       --toolbarbutton-outline-color-selected: var(--toolbarbutton-outline-color-active);
       --toolbarbutton-outline-offset: -1px;
-      --toolbarbutton-padding-inner-touch-narrow: 0;
 
       /** toolbox **/
       --toolbox-background-color-gradient-leading: light-dark(var(--color-violet-10), var(--color-violet-desaturated-70));
@@ -1121,7 +1102,6 @@
         color-mix(var(--toolbox-background-color-gradient-trailing) 50%, transparent) 101.72%
       );
       --toolbox-text-color: var(--text-color);
-      --toolbox-text-color-inactive: var(--text-color-deemphasized);
     }
   }
 

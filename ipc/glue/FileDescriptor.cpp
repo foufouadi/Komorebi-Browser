@@ -35,8 +35,6 @@ FileDescriptor::FileDescriptor(PlatformHandleType aHandle)
 FileDescriptor::FileDescriptor(UniquePlatformHandle&& aHandle)
     : mHandle(std::move(aHandle)) {}
 
-FileDescriptor::~FileDescriptor() = default;
-
 FileDescriptor& FileDescriptor::operator=(const FileDescriptor& aOther) {
   if (this != &aOther) {
     mHandle = aOther.ClonePlatformHandle();

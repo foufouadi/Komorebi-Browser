@@ -455,11 +455,6 @@ export class AdsFeed {
     prefValues,
     returnData
   ) {
-    // Refresh the cached context id the provider reads.
-    // Do not use requestSynchronously as it throws with rotation enabled.
-    // Bug 2059281: remove once the ads-client owns context_id directly.
-    lazy.AdsClient.updateContextId(await lazy.ContextId.request());
-
     const isTile = p => p.placement?.startsWith("newtab_tile_");
     const options = lazy.AdsClient.requestOptions(prefValues);
 

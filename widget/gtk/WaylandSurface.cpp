@@ -1521,7 +1521,8 @@ static const struct wp_image_description_v1_listener
 
 bool WaylandSurface::EnableColorManagementLocked(
     const WaylandSurfaceLock& aProofOfLock, gfx::YUVColorSpace aColorSpace,
-    gfx::TransferFunction aTransferFunction) {
+    gfx::TransferFunction aTransferFunction,
+    const mozilla::gfx::HDRMetadata& aHDRMetadata) {
   MOZ_DIAGNOSTIC_ASSERT(mIsMapped);
   MOZ_DIAGNOSTIC_ASSERT(!mColorSurface);
 
@@ -1587,6 +1588,42 @@ bool WaylandSurface::EnableColorManagementLocked(
 
   wp_image_description_creator_params_v1_set_tf_named(params, requiredTF);
 
+  if (aTransferFunction == gfx::TransferFunction::PQ) {
+    if (aHDRMetadata.mContentLightLevel.isSome()) {
+      LOGWAYLAND(
+          "aHDRMetadata.mContentLightLevel -> MaxCLL=%u cd/m^2, MaxFALL=%u "
+          "cd/m^2",
+          aHDRMetadata.mContentLightLevel->maxContentLightLevel,
+          aHDRMetadata.mContentLightLevel->maxFrameAverageLightLevel);
+
+      SetContentLightLevel(params, aHDRMetadata.mContentLightLevel.value());
+    }
+    if (aHDRMetadata.mSmpte2086.isSome()) {
+      LOGWAYLAND(
+          "aHDRMetadata.mSmpte2086 -> Primaries: R(%f, %f) G(%f, %f) B(%f, %f) "
+          "W(%f, %f)",
+          aHDRMetadata.mSmpte2086->displayPrimaryRed.x,
+          aHDRMetadata.mSmpte2086->displayPrimaryRed.y,
+          aHDRMetadata.mSmpte2086->displayPrimaryGreen.x,
+          aHDRMetadata.mSmpte2086->displayPrimaryGreen.y,
+          aHDRMetadata.mSmpte2086->displayPrimaryBlue.x,
+          aHDRMetadata.mSmpte2086->displayPrimaryBlue.y,
+          aHDRMetadata.mSmpte2086->whitePoint.x,
+          aHDRMetadata.mSmpte2086->whitePoint.y);
+      LOGWAYLAND(
+          "aHDRMetadata.mSmpte2086 -> minLuminance=%f cd/m^2, maxLuminance=%f "
+          "cd/m^2",
+          aHDRMetadata.mSmpte2086->minLuminance,
+          aHDRMetadata.mSmpte2086->maxLuminance);
+
+      if (WaylandDisplayGet()->IsSetMDCVSupported()) {
+        SetMasteringDisplayColorVolume(params, aHDRMetadata.mSmpte2086.value());
+      } else {
+        LOGWAYLAND("SetMDCV feature not supported.");
+      }
+    }
+  }
+
   mImageDescription = WUniquePtr<wp_image_description_v1>(
       wp_image_description_creator_params_v1_create(params));
   // wp_image_description_creator_params_v1_create() consumes params
@@ -1650,6 +1687,52 @@ void WaylandSurface::SetColorRepresentationLocked(
 
 void WaylandSurface::AssertCurrentThreadOwnsMutex() {
   mMutex.AssertCurrentThreadOwns();
+}
+
+void WaylandSurface::SetContentLightLevel(
+    wp_image_description_creator_params_v1* aParams,
+    const mozilla::gfx::ContentLightLevel& aContentLightLevel) {
+  uint16_t maxCLL = aContentLightLevel.maxContentLightLevel;
+  uint16_t maxFALL = aContentLightLevel.maxFrameAverageLightLevel;
+
+  wp_image_description_creator_params_v1_set_max_cll(aParams, maxCLL);
+  wp_image_description_creator_params_v1_set_max_fall(aParams, maxFALL);
+}
+
+void WaylandSurface::SetMasteringDisplayColorVolume(
+    wp_image_description_creator_params_v1* aParams,
+    const mozilla::gfx::Smpte2086Metadata& aSmpte2086) {
+  // MDCV
+  int32_t r_x = std::lround(
+      std::clamp(aSmpte2086.displayPrimaryRed.x, 0.0f, 1.0f) * 1000000.0f);
+  int32_t r_y = std::lround(
+      std::clamp(aSmpte2086.displayPrimaryRed.y, 0.0f, 1.0f) * 1000000.0f);
+
+  int32_t g_x = std::lround(
+      std::clamp(aSmpte2086.displayPrimaryGreen.x, 0.0f, 1.0f) * 1000000.0f);
+  int32_t g_y = std::lround(
+      std::clamp(aSmpte2086.displayPrimaryGreen.y, 0.0f, 1.0f) * 1000000.0f);
+
+  int32_t b_x = std::lround(
+      std::clamp(aSmpte2086.displayPrimaryBlue.x, 0.0f, 1.0f) * 1000000.0f);
+  int32_t b_y = std::lround(
+      std::clamp(aSmpte2086.displayPrimaryBlue.y, 0.0f, 1.0f) * 1000000.0f);
+
+  int32_t w_x =
+      std::lround(std::clamp(aSmpte2086.whitePoint.x, 0.0f, 1.0f) * 1000000.0f);
+  int32_t w_y =
+      std::lround(std::clamp(aSmpte2086.whitePoint.y, 0.0f, 1.0f) * 1000000.0f);
+
+  // Luminance
+  uint32_t minLuminance =
+      std::lround(std::max(0.0f, aSmpte2086.minLuminance) * 10000.0f);
+  uint32_t maxLuminance = std::lround(std::max(0.0f, aSmpte2086.maxLuminance));
+
+  wp_image_description_creator_params_v1_set_mastering_display_primaries(
+      aParams, r_x, r_y, g_x, g_y, b_x, b_y, w_x, w_y);
+
+  wp_image_description_creator_params_v1_set_mastering_luminance(
+      aParams, minLuminance, maxLuminance);
 }
 
 }  // namespace mozilla::widget

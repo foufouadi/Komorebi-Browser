@@ -49,7 +49,7 @@ support-files = [
 
 ["browser_fullscreen-sizemode.js"]
 skip-if = [
-  "os == 'linux' && os_version == '22.04' && arch == 'x86_64' && debug && nova", # Bug 2057873
+  "os == 'linux' && os_version == '22.04' && arch == 'x86_64' && display == 'wayland'", # Bug 2057873
 ]
 
 ["browser_fullscreen-tab-close-race.js"]

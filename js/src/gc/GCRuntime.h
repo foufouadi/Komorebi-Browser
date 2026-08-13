@@ -1332,6 +1332,9 @@ class GCRuntime {
 #ifdef DEBUG
   /* Shutdown has started. Further collections must be shutdown collections. */
   MainThreadData<bool> hadShutdownGC;
+
+  /* Unexpected gray cells were found after marking was finished for zone. */
+  MainThreadData<bool> foundUnexpectedGrayCells;
 #endif
 
   /* Singly linked list of zones to be swept in the background. */

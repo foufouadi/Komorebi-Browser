@@ -29,6 +29,7 @@ browser.jar:
   content/browser/aiwindow/components/ai-tasks.css                  (components/ai-tasks/ai-tasks.css)
   content/browser/aiwindow/components/monitors-display.mjs          (components/monitors-display/monitors-display.mjs)
   content/browser/aiwindow/components/monitors-display.css          (components/monitors-display/monitors-display.css)
+  content/browser/aiwindow/components/monitor-icon.mjs              (components/monitors-display/monitor-icon.mjs)
   content/browser/aiwindow/components/ai-website-chip.mjs           (components/ai-website-chip/ai-website-chip.mjs)
   content/browser/aiwindow/components/ai-website-chip.css           (components/ai-website-chip/ai-website-chip.css)
   content/browser/aiwindow/components/ai-website-select.mjs         (components/ai-website-select/ai-website-select.mjs)

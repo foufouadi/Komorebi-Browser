@@ -35,6 +35,9 @@ import {
   resolvePrivacyShowVpnMessages,
   PREF_PRIVACY_MESSAGE_STATE,
   PREF_PRIVACY_FORCE_MESSAGE_ID,
+  PREF_PRIVACY_CELEBRATION_STATE,
+  PREF_PRIVACY_FORCE_CELEBRATION,
+  resolvePrivacyCelebrationThreshold,
 } from "resource://newtab/common/WidgetsRegistry.mjs";
 import {
   selectPrivacyMessage,
@@ -44,6 +47,16 @@ import {
 const PREF_WIDGETS_ENABLED = "widgets.enabled";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const STREAK_LOOKBACK_DAYS = 10;
+
+// An awarded count-up celebration older than this is dropped unplayed rather
+// than firing on a tab opened long after the trackers were blocked.
+const CELEBRATION_WINDOW_MS = 10 * 60 * 1000;
+
+// How far below the live count a forced (debug) celebration counts up from.
+const FORCED_COUNT_UP_SPAN = 25;
+
+// UTC to match both readouts, which key off the tracking DB's UTC date.
+const utcDayKey = () => new Date().toISOString().slice(0, 10);
 
 const PRIVACY_ENTRY = WIDGET_REGISTRY.find(w => w.id === "privacy");
 
@@ -226,6 +239,106 @@ export class PrivacyFeed {
     );
   }
 
+  // Count-up celebration bookkeeping (HNT-2845), kept in its own JSON pref
+  // rather than messageState: selectPrivacyMessage() round-trips that blob
+  // through normalizeState(), which would strip any keys it doesn't know.
+  readCelebrationState() {
+    const raw =
+      this.store.getState()?.Prefs.values?.[PREF_PRIVACY_CELEBRATION_STATE];
+    // Hand-edited prefs are the documented way to test this, so treat anything
+    // that isn't a well-formed object as "no state yet" — throwing here would
+    // take the count broadcast down with it.
+    let parsed = null;
+    if (raw) {
+      try {
+        parsed = JSON.parse(raw);
+      } catch (e) {
+        parsed = null;
+      }
+    }
+    if (!parsed || typeof parsed !== "object") {
+      parsed = {};
+    }
+    return {
+      date: parsed.date ?? null,
+      baselineCount: parsed.baselineCount ?? 0,
+      pending: parsed.pending ?? null,
+    };
+  }
+
+  writeCelebrationState(state) {
+    this.store.dispatch(
+      ac.SetPref(PREF_PRIVACY_CELEBRATION_STATE, JSON.stringify(state))
+    );
+  }
+
+  /**
+   * Awards a count-up celebration once the count has climbed by the threshold
+   * since the last one. The baseline is persisted because trackersToday
+   * hydrates from 0 on every tab mount — an in-memory comparison would
+   * celebrate on essentially every new tab.
+   *
+   * @param {number} trackersToday Current blocked count.
+   * @returns {object|null} Celebration to broadcast, or null.
+   */
+  resolveCelebration(trackersToday) {
+    const prefs = this.store.getState().Prefs.values;
+
+    // Debug lever (QA/design): force a celebration on every parent count
+    // refresh without touching the persisted baseline. Value picks the tier.
+    // Drives the animation only — the kit icon follows forceMessageId.
+    const forcedTier = prefs[PREF_PRIVACY_FORCE_CELEBRATION];
+    if (forcedTier) {
+      return {
+        awardedAt: Date.now(),
+        // Wide enough a span that the count-up is clearly visible, rather than
+        // the bare threshold, which is over almost before it starts.
+        fromCount: Math.max(0, trackersToday - FORCED_COUNT_UP_SPAN),
+        toCount: trackersToday,
+        forcedTier,
+      };
+    }
+
+    const state = this.readCelebrationState();
+    const today = utcDayKey();
+    // A count below the baseline means the UTC day rolled over between polls
+    // or the user cleared history; re-seed instead of celebrating the rebound.
+    if (state.date !== today || trackersToday < state.baselineCount) {
+      this.writeCelebrationState({
+        date: today,
+        baselineCount: trackersToday,
+        pending: null,
+      });
+      return null;
+    }
+
+    const threshold = resolvePrivacyCelebrationThreshold(prefs);
+    if (trackersToday - state.baselineCount >= threshold) {
+      const pending = {
+        awardedAt: Date.now(),
+        fromCount: state.baselineCount,
+        toCount: trackersToday,
+      };
+      this.writeCelebrationState({
+        date: today,
+        baselineCount: trackersToday,
+        pending,
+      });
+      return pending;
+    }
+
+    // Drop an award nothing ever played rather than surfacing it much later.
+    if (
+      state.pending &&
+      Date.now() - state.pending.awardedAt >= CELEBRATION_WINDOW_MS
+    ) {
+      this.writeCelebrationState({ ...state, pending: null });
+      return null;
+    }
+
+    return state.pending;
+  }
+
   // The headline count is the total blocked across all categories (cookies,
   // trackers, fingerprinters, cryptominers, social) — the same total
   // about:protections shows — not just the "trackers" slice.
@@ -258,7 +371,11 @@ export class PrivacyFeed {
     this.store.dispatch(
       ac.BroadcastToContent({
         type: at.WIDGETS_PRIVACY_UPDATE,
-        data: { ...counts, countCeiling: null },
+        data: {
+          ...counts,
+          countCeiling: null,
+          celebration: this.resolveCelebration(counts.trackersToday),
+        },
       })
     );
   }
@@ -352,6 +469,9 @@ export class PrivacyFeed {
           countArg: decision.countArg,
           cta: decision.cta,
           countCeiling: decision.countCeiling,
+          // Orthogonal to the message decision: the count-up animates whatever
+          // number is on screen, whichever message the scheduler picked.
+          celebration: this.resolveCelebration(counts.trackersToday),
         },
       })
     );
@@ -393,6 +513,15 @@ export class PrivacyFeed {
       case at.WIDGETS_PRIVACY_CTA:
         this.handleCtaAction(action);
         break;
+      // Content played a celebration — clear it so a tab opened afterwards
+      // doesn't replay it. Tabs already open have played it, so no rebroadcast.
+      case at.WIDGETS_PRIVACY_MARK_CELEBRATED: {
+        const state = this.readCelebrationState();
+        if (state.pending?.awardedAt === action.data) {
+          this.writeCelebrationState({ ...state, pending: null });
+        }
+        break;
+      }
     }
   }
 }

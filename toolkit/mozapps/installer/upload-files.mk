@@ -31,8 +31,6 @@ ifeq ($(MOZ_PKG_FORMAT),APK)
 MAKE_PACKAGE = true
 endif
 
-INNER_MAKE_PACKAGE = $(MAKE_PACKAGE)
-
 NO_PKG_FILES += \
 	core \
 	bsdecho \
@@ -94,12 +92,6 @@ ifdef MOZ_FOLD_LIBS
   DEFINES += -DMOZ_FOLD_LIBS=1
 endif
 
-# The following target stages files into two directories: one directory for
-# core files, and one for optional extensions based on the information in
-# the MOZ_PKG_MANIFEST file.
-
-PKG_ARG = , '$(pkg)'
-
 ifndef MOZ_PACKAGER_FORMAT
   MOZ_PACKAGER_FORMAT = $(error MOZ_PACKAGER_FORMAT is not set)
 endif
@@ -118,8 +110,6 @@ endif
 empty :=
 space = $(empty) $(empty)
 QUOTED_WILDCARD = $(if $(wildcard $(subst $(space),?,$(1))),'$(1)')
-ESCAPE_SPACE = $(subst $(space),\$(space),$(1))
-ESCAPE_WILDCARD = $(subst $(space),?,$(1))
 
 # This variable defines which OpenSSL algorithm to use to
 # generate checksums for files that we upload

@@ -717,6 +717,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_ads_client_checksum_method_mozadsclient_request_tile_ads(
     ): Short
+    external fun uniffi_ads_client_checksum_method_mozadsclient_shutdown(
+    ): Short
     external fun uniffi_ads_client_checksum_method_mozadsclientbuilder_build(
     ): Short
     external fun uniffi_ads_client_checksum_method_mozadsclientbuilder_cache_config(
@@ -779,6 +781,8 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_ads_client_fn_method_mozadsclient_request_tile_ads(`ptr`: Long,`mozAdRequests`: RustBuffer.ByValue,`options`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_ads_client_fn_method_mozadsclient_shutdown(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     external fun uniffi_ads_client_fn_clone_mozadsclientbuilder(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
     external fun uniffi_ads_client_fn_free_mozadsclientbuilder(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1370,6 +1374,8 @@ public interface MozAdsClientInterface {
     
     fun `requestTileAds`(`mozAdRequests`: List<MozAdsPlacementRequest>, `options`: MozAdsRequestOptions? = null): Map<kotlin.String, MozAdsTile>
     
+    fun `shutdown`()
+    
     companion object
 }
 
@@ -1561,6 +1567,19 @@ open class MozAdsClient: Disposable, AutoCloseable, MozAdsClientInterface
     }
     )
     }
+    
+
+    
+    @Throws(MozAdsClientApiException::class)override fun `shutdown`()
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(MozAdsClientApiException) { _status ->
+    UniffiLib.uniffi_ads_client_fn_method_mozadsclient_shutdown(
+        it,
+        _status)
+}
+    }
+    
     
 
     

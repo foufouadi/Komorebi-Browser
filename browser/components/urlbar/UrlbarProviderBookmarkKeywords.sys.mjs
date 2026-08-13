@@ -85,7 +85,7 @@ export class UrlbarProviderBookmarkKeywords extends UrlbarProvider {
         ]
       );
     } else {
-      title = UrlbarUtils.prepareUrlForDisplay(url);
+      title = lazy.UrlbarShared.prepareUrlForDisplay(url);
     }
 
     let bookmark = await lazy.PlacesUtils.bookmarks.fetch({ url: entry.url });

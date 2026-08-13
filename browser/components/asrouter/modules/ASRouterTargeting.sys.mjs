@@ -81,6 +81,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   SelectableProfileService:
     "resource:///modules/profiles/SelectableProfileService.sys.mjs",
   SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
+  SmartTabGroupingManager:
+    "moz-src:///browser/components/tabbrowser/SmartTabGrouping.sys.mjs",
   TargetingContext: "resource://messaging-system/targeting/Targeting.sys.mjs",
   TabNotes: "moz-src:///browser/components/tabnotes/TabNotes.sys.mjs",
   TaskbarTabs: "resource:///modules/taskbartabs/TaskbarTabs.sys.mjs",
@@ -1003,6 +1005,9 @@ const TargetingGetters = {
   },
   get hasActiveAIWindow() {
     return !!lazy.AIWindow?.hasActiveAIWindows?.();
+  },
+  get isSmartTabGroupingAllowed() {
+    return !!lazy.SmartTabGroupingManager?.isAllowed;
   },
   get hasAccessedFxAPanel() {
     return lazy.hasAccessedFxAPanel;

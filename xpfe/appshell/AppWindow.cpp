@@ -123,7 +123,6 @@ AppWindow::AppWindow(uint32_t aChromeFlags)
       mLockedUntilChromeLoad(false),
       mIgnoreXULSize(false),
       mIgnoreXULPosition(false),
-      mChromeFlagsFrozen(false),
       mIgnoreXULSizeMode(false),
       mDestroying(false),
       mRegistered(false),
@@ -303,22 +302,6 @@ NS_IMETHODIMP AppWindow::GetDocShell(nsIDocShell** aDocShell) {
 NS_IMETHODIMP AppWindow::GetChromeFlags(uint32_t* aChromeFlags) {
   NS_ENSURE_ARG_POINTER(aChromeFlags);
   *aChromeFlags = mChromeFlags;
-  return NS_OK;
-}
-
-NS_IMETHODIMP AppWindow::SetChromeFlags(uint32_t aChromeFlags) {
-  NS_ASSERTION(!mChromeFlagsFrozen,
-               "SetChromeFlags() after AssumeChromeFlagsAreFrozen()!");
-
-  mChromeFlags = aChromeFlags;
-  if (mChromeLoaded) {
-    ApplyChromeFlags();
-  }
-  return NS_OK;
-}
-
-NS_IMETHODIMP AppWindow::AssumeChromeFlagsAreFrozen() {
-  mChromeFlagsFrozen = true;
   return NS_OK;
 }
 
@@ -1548,11 +1531,6 @@ void AppWindow::SyncAttributesToWidget() {
   // "hidetitlebarseparator" attribute
   mWindow->SetHideTitlebarSeparator(
       windowElement->GetBoolAttr(nsGkAtoms::hidetitlebarseparator));
-  NS_ENSURE_TRUE_VOID(mWindow);
-
-  // "toggletoolbar" attribute
-  mWindow->SetShowsToolbarButton(
-      windowElement->HasAttribute(u"toggletoolbar"_ns));
   NS_ENSURE_TRUE_VOID(mWindow);
 
   // "macnativefullscreen" attribute. Only override the creation-time default
@@ -2811,31 +2789,6 @@ void AppWindow::OcclusionStateChanged(bool aIsFullyOccluded) {
   }
 }
 
-void AppWindow::OSToolbarButtonPressed() {
-  // Keep a reference as setting the chrome flags can fire events.
-  nsCOMPtr<nsIAppWindow> appWindow(this);
-
-  // rjc: don't use "nsIWebBrowserChrome::CHROME_EXTRA"
-  //      due to components with multiple sidebar components
-  //      (such as Mail/News, Addressbook, etc)... and frankly,
-  //      Mac IE, OmniWeb, and other Mac OS X apps all work this way
-  uint32_t chromeMask = (nsIWebBrowserChrome::CHROME_TOOLBAR |
-                         nsIWebBrowserChrome::CHROME_LOCATIONBAR |
-                         nsIWebBrowserChrome::CHROME_PERSONAL_TOOLBAR);
-
-  nsCOMPtr<nsIWebBrowserChrome> wbc(do_GetInterface(appWindow));
-  if (!wbc) return;
-
-  uint32_t chromeFlags, newChromeFlags = 0;
-  wbc->GetChromeFlags(&chromeFlags);
-  newChromeFlags = chromeFlags & chromeMask;
-  if (!newChromeFlags)
-    chromeFlags |= chromeMask;
-  else
-    chromeFlags &= (~newChromeFlags);
-  wbc->SetChromeFlags(chromeFlags);
-}
-
 void AppWindow::WindowActivated() {
   nsCOMPtr<nsIAppWindow> appWindow(this);
 
@@ -3259,11 +3212,6 @@ void AppWindow::WidgetListenerDelegate::OcclusionStateChanged(
     bool aIsFullyOccluded) {
   RefPtr<AppWindow> holder = mAppWindow;
   holder->OcclusionStateChanged(aIsFullyOccluded);
-}
-
-void AppWindow::WidgetListenerDelegate::OSToolbarButtonPressed() {
-  RefPtr<AppWindow> holder = mAppWindow;
-  holder->OSToolbarButtonPressed();
 }
 
 void AppWindow::WidgetListenerDelegate::WindowActivated() {

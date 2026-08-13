@@ -56,6 +56,9 @@ const FIGMA_IGNORES = new Set([
 // still come from Figma; only the surrounding structure is maintained here.
 // See bug 2031765.
 const NOVA_STRUCTURAL_OVERRIDES = {
+  "page-nav/focus/padding": {
+    default: "calc(var(--focus-outline-offset) + var(--focus-outline-width))",
+  },
   "text/color": {
     prefersContrast: "CanvasText",
     nativeTheme: "currentColor",

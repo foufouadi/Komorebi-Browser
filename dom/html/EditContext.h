@@ -40,7 +40,7 @@ class EditContext final : public DOMEventTargetHelper, public SupportsWeakPtr {
   }
 
   void GetText(nsAString& aText) const;
-  void GetTextSubstring(uint32_t aStart, uint32_t aEnd, nsAString& aText);
+  void GetTextSubstring(uint32_t aStart, uint32_t aEnd, nsAString& aText) const;
   uint32_t TextLength() const;
   uint32_t SelectionStart() const { return mSelectionStart; }
   uint32_t SelectionEnd() const { return mSelectionEnd; }
@@ -123,6 +123,9 @@ class EditContext final : public DOMEventTargetHelper, public SupportsWeakPtr {
   MOZ_CAN_RUN_SCRIPT void DoContentCommandReplaceText(
       WidgetContentCommandEvent& aEvent);
 
+  // Handle eSetSelection event (used by certain input methods).
+  MOZ_CAN_RUN_SCRIPT void DoSetSelection(WidgetSelectionEvent& aEvent);
+
   MOZ_CAN_RUN_SCRIPT void FireTextFormatUpdate(const TextRangeArray* aRanges,
                                                uint32_t aCompositionOffset);
   // Get the control bounds for the EditContext,
@@ -174,6 +177,11 @@ class EditContext final : public DOMEventTargetHelper, public SupportsWeakPtr {
   MOZ_CAN_RUN_SCRIPT void FireCharacterBoundsUpdateIfNeeded(
       IsFromFocus aIsFromFocus = IsFromFocus::No);
 
+  // Fire textupdate event.
+  MOZ_CAN_RUN_SCRIPT void FireTextUpdate(uint32_t aUpdateRangeStart,
+                                         uint32_t aUpdateRangeEnd,
+                                         const nsAString& aText);
+
   using Rect = gfx::RectTyped<CSSPixel, double>;
 
   RefPtr<DOMRect> ToDOMRect(const Rect& aCopy) const;
@@ -224,6 +232,11 @@ class EditContext final : public DOMEventTargetHelper, public SupportsWeakPtr {
       return IsContainedIn(aOther.mStart, aOther.mEnd);
     }
   };
+
+  // Expand this range so that its endpoints are on grapheme cluster
+  // boundaries.
+  [[nodiscard]] TextRange ExpandRangeToClusterBoundaries(
+      TextRange aRange) const;
 
   // Returns true if we should fire a new characterboundsupdate event for
   // querying the character rectangles in aRange, or false if the existing

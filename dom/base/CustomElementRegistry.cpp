@@ -706,13 +706,13 @@ void CustomElementRegistry::EnqueueLifecycleCallback(
 }
 
 using ScopedRegistryMap =
-    nsRefPtrHashtable<nsPtrHashKey<nsINode>, CustomElementRegistry>;
+    nsRefPtrHashtable<nsPtrHashKey<const nsINode>, CustomElementRegistry>;
 
 static StaticAutoPtr<ScopedRegistryMap> gScopedRegistryMap;
 
 /* static */
 already_AddRefed<CustomElementRegistry>
-CustomElementRegistry::GetScopedRegistry(nsINode& aNode) {
+CustomElementRegistry::GetScopedRegistry(const nsINode& aNode) {
   if (!gScopedRegistryMap) {
     return nullptr;
   }

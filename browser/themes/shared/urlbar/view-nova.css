@@ -407,8 +407,6 @@
   }
 }
 
-/* `pinned` is currently only set on top sites, which have `type="top_site"`, so
-   this rule is mutually exclusive with the other badge rules. */
 .urlbarView-row[pinned] > .urlbarView-row-inner {
   > .urlbarView-favicon {
     mask-image: url(chrome://browser/skin/urlbar/badge-pin.svg#ltr-mask);
@@ -723,7 +721,7 @@
 
     &.urlbarView-switchToTab {
       padding-inline-start: calc(var(--space-medium) + var(--urlbarview-favicon-size) + var(--space-small));
-      background-image: url("chrome://browser/content/firefoxview/view-opentabs.svg");
+      background-image: url("chrome://browser/skin/open-tabs.svg");
       background-position-x: var(--space-medium);
       background-size: var(--urlbarview-favicon-size);
 
@@ -1818,7 +1816,7 @@
 
 .urlbarView-row[source="actions"] > .urlbarView-row-inner > .urlbarView-favicon,
 #urlbar-engine-one-off-item-actions {
-  list-style-image: url("chrome://browser/skin/quickactions.svg");
+  list-style-image: url("chrome://browser/skin/lightning-bolt.svg");
   -moz-context-properties: fill, fill-opacity;
   fill: currentColor;
   fill-opacity: var(--urlbar-icon-fill-opacity);

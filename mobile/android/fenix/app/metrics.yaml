@@ -11670,24 +11670,6 @@ progressive_web_app:
     metadata:
       tags:
         - PWA
-  onboarding_cancel:
-    type: event
-    description: |
-      User interacts with the onboarding PWA dialog cancel button which takes
-      them to the website.
-    bugs:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1821030
-    data_reviews:
-      - https://github.com/mozilla-mobile/firefox-android/pull/1164
-      - https://github.com/mozilla-mobile/firefox-android/pull/4039
-    data_sensitivity:
-      - interaction
-    notification_emails:
-      - android-probes@mozilla.com
-    expires: never
-    metadata:
-      tags:
-        - PWA
 
 tabs:
   setting_opened:
@@ -16269,6 +16251,30 @@ browser:
     notification_emails:
       - android-probes@mozilla.com
     expires: never
+
+referrals:
+  code:
+    type: string
+    lifetime: ping
+    send_in_pings:
+      - referrals
+    description: |
+      The referral code extracted from the install referrer's `utm_content`
+      parameter on first run. Recorded and submitted via the separate `referrals`
+      ping so that the referral code is kept out of regular attribution data
+      (bug 2062793; desktop equivalent bug 2055255).
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2062793
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2062793
+    data_sensitivity:
+      - highly_sensitive
+    notification_emails:
+      - android-probes@mozilla.com
+    expires: never
+    metadata:
+      tags:
+        - Attribution
 
 vpn:
   onboarding_shown:

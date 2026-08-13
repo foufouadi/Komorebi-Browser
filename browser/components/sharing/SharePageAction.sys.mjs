@@ -9,6 +9,7 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   PanelMultiView:
     "moz-src:///browser/components/customizableui/PanelMultiView.sys.mjs",
+  SharingUtils: "moz-src:///browser/components/sharing/SharingUtils.sys.mjs",
 });
 
 const ENABLED_PREF = "browser.urlbar.share-button.enabled";
@@ -73,7 +74,73 @@ class SharePageActionClass {
   handleEvent(event) {
     if (event.type === "click") {
       this.togglePanel(event);
+    } else if (event.type === "command") {
+      this.handleCommand(event);
     }
+  }
+
+  handleCommand(event) {
+    let panel = event.currentTarget;
+    let hintL10nId;
+
+    switch (event.target.id) {
+      case "share-panel-copy-link": {
+        hintL10nId = this.#copyLink(panel);
+        break;
+      }
+      case "share-panel-screenshot": {
+        Services.obs.notifyObservers(
+          event.target.documentGlobal,
+          "menuitem-screenshot",
+          "SharePanel"
+        );
+        break;
+      }
+      default: {
+        return;
+      }
+    }
+
+    if (hintL10nId) {
+      this.#showConfirmationHint(panel, hintL10nId);
+    }
+
+    lazy.PanelMultiView.hidePopup(panel);
+  }
+
+  /**
+   * Copies the current page URL to the clipboard.
+   *
+   * @param {Element} panel
+   * @returns {string|null} The l10n id of the confirmation hint to show, or
+   *   null if nothing was copied.
+   */
+  #copyLink(panel) {
+    if (!lazy.SharingUtils.getLinkToShare(panel).urlToShare) {
+      return null;
+    }
+
+    lazy.SharingUtils.copyLink(panel);
+
+    return "confirmation-hint-link-copied";
+  }
+
+  /**
+   * Shows a confirmation hint on the share button once the panel has closed.
+   *
+   * @param {Element} panel
+   * @param {string} l10nId
+   */
+  #showConfirmationHint(panel, l10nId) {
+    let window = panel.documentGlobal;
+    let button = window.document.getElementById(BUTTON_ID);
+    panel.addEventListener(
+      "popuphidden",
+      () => {
+        window.ConfirmationHint.show(button, l10nId);
+      },
+      { once: true }
+    );
   }
 
   togglePanel(event) {
@@ -89,6 +156,10 @@ class SharePageActionClass {
       lazy.PanelMultiView.hidePopup(panel);
       return;
     }
+
+    panel.contextBrowserToShare = Cu.getWeakReference(
+      window.gBrowser.selectedBrowser
+    );
 
     lazy.PanelMultiView.openPopup(panel, button, {
       position: "bottomright topright",
@@ -110,7 +181,10 @@ class SharePageActionClass {
       let template = window.document.getElementById(TEMPLATE_ID);
       panel = template.content.firstElementChild;
       template.replaceWith(template.content);
+
+      panel.addEventListener("command", this);
     }
+
     return panel;
   }
 }

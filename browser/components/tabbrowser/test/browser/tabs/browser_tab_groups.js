@@ -1340,12 +1340,21 @@ add_task(async function test_bug1997096_autoUncollapseOnRightClick() {
 
   let newTabPromise = BrowserTestUtils.waitForNewTab(gBrowser, null, true);
 
+  let contextMenu = document.getElementById("contentAreaContextMenu");
+  let contextMenuShown = BrowserTestUtils.waitForPopupEvent(
+    contextMenu,
+    "shown"
+  );
   await BrowserTestUtils.synthesizeMouseAtCenter(
     "a",
     { type: "contextmenu", button: 2 },
     groupedTab.linkedBrowser
   );
-  document.getElementById("context-openlinkintab").click();
+  await contextMenuShown;
+
+  await BrowserTestUtils.activateMenuItem(
+    document.getElementById("context-openlinkintab")
+  );
 
   let newTab = await newTabPromise;
 
@@ -1355,7 +1364,6 @@ add_task(async function test_bug1997096_autoUncollapseOnRightClick() {
     "Group is automatically uncollapsed when opening tab via right click"
   );
 
-  document.querySelector("#contentAreaContextMenu").hidePopup();
   BrowserTestUtils.removeTab(newTab);
   BrowserTestUtils.removeTab(groupedTab);
 });

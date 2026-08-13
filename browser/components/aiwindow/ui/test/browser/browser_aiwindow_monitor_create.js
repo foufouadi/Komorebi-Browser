@@ -107,12 +107,12 @@ add_task(async function test_dialog_opens() {
       Assert.ok(dialog, "Dialog element exists");
       Assert.ok(dialog.open, "Dialog is open");
 
-      // Check dialog title
+      // Check dialog title exists and is localized (avoid asserting on copy)
       const title = dialog.querySelector(".modal-title");
-      Assert.equal(
-        title.textContent,
-        "Create alert",
-        "Dialog has correct title"
+      Assert.ok(title, "Dialog title element exists");
+      Assert.ok(
+        title.hasAttribute("data-l10n-id"),
+        "Dialog title is localized"
       );
 
       // Check that form elements exist

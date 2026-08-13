@@ -1089,14 +1089,6 @@ class nsIWidget : public nsSupportsWeakReference {
   virtual void SetInputRegion(const InputRegion&) {}
 
   /*
-   * On macOS, this method shows or hides the pill button in the titlebar
-   * that's used to collapse the toolbar.
-   *
-   * Ignored on child widgets and on non-Mac platforms.
-   */
-  virtual void SetShowsToolbarButton(bool aShow) {}
-
-  /*
    * On macOS, this method determines whether we tell cocoa that the window
    * supports native full screen. If we do so, and another window is in
    * native full screen, this window will also appear in native full screen.

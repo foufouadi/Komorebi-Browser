@@ -48,6 +48,8 @@ support-files = [
 
 ["browser_bouncetracking_simple.js"]
 
+["browser_bouncetracking_siteContainer.js"]
+
 ["browser_bouncetracking_tab_close.js"]
 # Bug 1959947: Make this test work for BTP stateless mode.
 disabled = "Bug 1959947"

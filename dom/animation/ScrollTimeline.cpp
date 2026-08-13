@@ -470,6 +470,20 @@ void ScrollTimeline::AutoAlignStartTime() {
   }
 }
 
+bool ScrollTimeline::IsReusableAnonymousTimeline(
+    const StyleScrollFunction& aScroll) const {
+  if (!mScrollerInfo.IsAnonymous()) {
+    return false;
+  }
+
+  if (mAxis != aScroll.axis) {
+    return false;
+  }
+
+  return ScrollerInfo::TypeFromStyleScroller(aScroll.scroller) ==
+         mScrollerInfo.mType;
+}
+
 Maybe<ScrollTimeline::ComputedTimelineData>
 ScrollTimeline::ComputeTimelineData() const {
   return mCachedCurrentTime

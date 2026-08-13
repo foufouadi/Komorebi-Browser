@@ -788,7 +788,7 @@ SettingGroupManager.registerGroups({
   recommendations: {
     l10nId: "recommendations-group",
     headingLevel: 2,
-    iconSrc: "chrome://browser/skin/trending.svg",
+    iconSrc: "chrome://browser/skin/lightning-bolt.svg",
     items: [
       {
         id: "cfrRecommendations",

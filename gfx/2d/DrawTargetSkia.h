@@ -188,10 +188,10 @@ class DrawTargetSkia : public DrawTarget {
                   SkShader* aShader = nullptr);
 
   struct PushedLayer {
-    PushedLayer(bool aOldPermitSubpixelAA, SourceSurface* aMask)
-        : mOldPermitSubpixelAA(aOldPermitSubpixelAA), mMask(aMask) {}
-    bool mOldPermitSubpixelAA;
     RefPtr<SourceSurface> mMask;
+    Matrix mMaskToDevice;
+    CompositionOp mCompositionOp = CompositionOp::OP_OVER;
+    bool mOldPermitSubpixelAA = false;
   };
   std::vector<PushedLayer> mPushedLayers;
 

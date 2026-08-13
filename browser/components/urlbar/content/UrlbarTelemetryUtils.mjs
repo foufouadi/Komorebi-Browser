@@ -265,7 +265,7 @@ export class UrlbarTelemetryUtils {
    * @returns {{resultType: string, keyword: ?string}}
    */
   static exposureEntry(result, queryContext) {
-    let resultType = lazy.UrlbarUtils.searchEngagementTelemetryType(result);
+    let resultType = UrlbarShared.searchEngagementTelemetryType(result);
     let keyword =
       !queryContext.isPrivate &&
       UrlbarPrefs.get("keywordExposureResults").has(resultType)
@@ -598,7 +598,7 @@ export class UrlbarTelemetryUtils {
       .map(r => lazy.UrlbarUtils.searchEngagementTelemetryGroup(r))
       .join(",");
     let results = visibleResults
-      .map(r => lazy.UrlbarUtils.searchEngagementTelemetryType(r))
+      .map(r => UrlbarShared.searchEngagementTelemetryType(r))
       .join(",");
     let actions = visibleResults
       .map(r => lazy.UrlbarUtils.searchEngagementTelemetryAction(r))
@@ -607,7 +607,7 @@ export class UrlbarTelemetryUtils {
 
     switch (method) {
       case "engagement": {
-        let selected_result = lazy.UrlbarUtils.searchEngagementTelemetryType(
+        let selected_result = UrlbarShared.searchEngagementTelemetryType(
           visibleResults[selIndex],
           selType
         );
@@ -675,7 +675,7 @@ export class UrlbarTelemetryUtils {
             : "engagement";
         let selected_result = "none";
         if (previousEvent == "engagement") {
-          selected_result = lazy.UrlbarUtils.searchEngagementTelemetryType(
+          selected_result = UrlbarShared.searchEngagementTelemetryType(
             visibleResults[selIndex],
             selType
           );
@@ -697,7 +697,7 @@ export class UrlbarTelemetryUtils {
         };
       }
       case "bounce": {
-        let selected_result = lazy.UrlbarUtils.searchEngagementTelemetryType(
+        let selected_result = UrlbarShared.searchEngagementTelemetryType(
           visibleResults[selIndex],
           selType
         );

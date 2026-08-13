@@ -884,19 +884,64 @@ already_AddRefed<nsIChannel> WindowGlobalParent::GetFailedChannel() {
 }
 
 dom::NoCorsMediaRequestState WindowGlobalParent::NoCorsMediaRequestState(
-    nsIURI* aURI) const {
+    nsIURI* aURI) {
   nsCString uri;
   return (NS_SUCCEEDED(aURI->GetSpecIgnoringRef(uri)) &&
-          mNoCorsMediaRequestURIs.Contains(uri))
+          EnsureKnownAllowedSubsequentRequests()
+              ->mNoCorsMediaRequestURIs.Contains(uri))
              ? dom::NoCorsMediaRequestState::Subsequent
              : dom::NoCorsMediaRequestState::Initial;
 }
 
+StaticAutoPtr<WindowGlobalParent::AllKnownAllowedSubsequentRequests>
+    WindowGlobalParent::sAllKnownSubsequentRequests;
+
+/* static */ WindowGlobalParent::AllKnownAllowedSubsequentRequests&
+WindowGlobalParent::GetAllKnownAllowedSubsequentRequests() {
+  if (!sAllKnownSubsequentRequests) {
+    sAllKnownSubsequentRequests =
+        new nsTHashMap<PrincipalHashKey,
+                       WeakPtr<KnownAllowedSubsequentRequests>>;
+  }
+
+  return *sAllKnownSubsequentRequests;
+}
+
+WindowGlobalParent::KnownAllowedSubsequentRequests::
+    ~KnownAllowedSubsequentRequests() {
+  if (!sAllKnownSubsequentRequests) {
+    return;
+  }
+
+  auto& allKnownRequests = GetAllKnownAllowedSubsequentRequests();
+  allKnownRequests.Remove(mPrincipal);
+}
+
+WindowGlobalParent::KnownAllowedSubsequentRequests*
+WindowGlobalParent::EnsureKnownAllowedSubsequentRequests() {
+  if (!mKnownAllowedSubsequentRequests) {
+    auto& allKnownRequests = GetAllKnownAllowedSubsequentRequests();
+    RefPtr<KnownAllowedSubsequentRequests> knownAllowedSubsequentRequests;
+    mKnownAllowedSubsequentRequests = allKnownRequests.LookupOrInsertWith(
+        mDocumentPrincipal, [knownAllowedSubsequentRequests,
+                             principal = mDocumentPrincipal]() mutable {
+          knownAllowedSubsequentRequests =
+              MakeAndAddRef<KnownAllowedSubsequentRequests>();
+          knownAllowedSubsequentRequests->mPrincipal = principal;
+          return knownAllowedSubsequentRequests;
+        });
+  }
+
+  return mKnownAllowedSubsequentRequests;
+}
+
 void WindowGlobalParent::RecordSubsequentNoCorsRequestState(nsIURI* aURI) {
   nsCString uri;
-  if (NS_SUCCEEDED(aURI->GetSpecIgnoringRef(uri)) && !uri.IsEmpty()) {
-    mNoCorsMediaRequestURIs.PutEntry(uri);
+  if (NS_FAILED(aURI->GetSpecIgnoringRef(uri)) || uri.IsEmpty()) {
+    return;
   }
+
+  EnsureKnownAllowedSubsequentRequests()->mNoCorsMediaRequestURIs.PutEntry(uri);
 }
 
 mozilla::ipc::IPCResult WindowGlobalParent::RecvShare(

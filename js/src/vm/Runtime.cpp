@@ -373,7 +373,7 @@ void JSRuntime::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
   }
 
   rtSizes->wasmRuntime +=
-      wasmInstances.lock()->sizeOfExcludingThis(mallocSizeOf);
+      wasmInstances.lock()->shallowSizeOfExcludingThis(mallocSizeOf);
 
 #ifdef ENABLE_WASM_JSPI
   rtSizes->wasmContStacks +=

@@ -122,9 +122,12 @@ export class UrlbarProviderClipboard extends UrlbarProvider {
       type: lazy.UrlbarShared.RESULT_TYPE.URL,
       source: lazy.UrlbarShared.RESULT_SOURCE.OTHER_LOCAL,
       payload: {
-        title: UrlbarUtils.prepareUrlForDisplay(this.#previousClipboard.value, {
-          trimURL: false,
-        }),
+        title: lazy.UrlbarShared.prepareUrlForDisplay(
+          this.#previousClipboard.value,
+          {
+            trimURL: false,
+          }
+        ),
         url: this.#previousClipboard.value,
         icon: "chrome://global/skin/icons/clipboard.svg",
         isBlockable: true,

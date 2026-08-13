@@ -77,7 +77,6 @@ skip-if = [
 ["browser_tabclose.js"]
 skip-if = [
   "os == 'mac' && os_version == '10.15' && arch == 'x86_64'", # Bug 1531417
-  "os == 'mac' && nova", # Bug 2057522
   "os == 'win'", # Bug 1488537, Bug 1497713
 ]
 

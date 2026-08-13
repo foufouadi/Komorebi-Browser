@@ -306,7 +306,7 @@ conditioned_profile:
 socketprocess:
     description: "{description} with socket process enabled"
     component: "Core::Networking"
-    expiration: "2026-09-01"
+    expiration: "2027-06-01"
     suffix: "spi"
     mozinfo: "socketprocess_e10s"
     when:
@@ -531,7 +531,7 @@ msix:
 http3:
     description: "{description} with http3 server"
     component: "Core::Networking"
-    expiration: "2026-09-01"
+    expiration: "2027-06-01"
     suffix: "http3"
     mozinfo: "http3"
     when:
@@ -550,7 +550,7 @@ http3:
 http2:
     description: "{description} with http2 server"
     component: "Core::Networking"
-    expiration: "2026-09-01"
+    expiration: "2027-06-01"
     suffix: "http2"
     mozinfo: "http2"
     when:

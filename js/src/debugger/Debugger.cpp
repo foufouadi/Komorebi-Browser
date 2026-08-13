@@ -3449,7 +3449,8 @@ static bool UpdateExecutionObservabilityOfScriptsInZone(
 
   // Iterate through all wasm instances to find ones that need to be updated.
   for (RealmsInZoneIter r(zone); !r.done(); r.next()) {
-    for (wasm::Instance* instance : r->wasm.instances()) {
+    for (auto iter = r->wasm.instances().iter(); !iter.done(); iter.next()) {
+      wasm::Instance* instance = iter.get();
       if (!instance->debugEnabled()) {
         continue;
       }
@@ -5728,7 +5729,9 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery : public Debugger::QueryBase {
     // TODO: Until such time that wasm modules are real ES6 modules,
     // unconditionally consider all wasm toplevel instance scripts.
     for (auto iter = debugger->allDebuggees(); !iter.done(); iter.next()) {
-      for (wasm::Instance* instance : iter.get()->realm()->wasm.instances()) {
+      for (auto instIter = iter.get()->realm()->wasm.instances().iter();
+           !instIter.done(); instIter.next()) {
+        wasm::Instance* instance = instIter.get();
         if (instance->codeMeta().isSelfHostedModule()) {
           continue;
         }
@@ -6189,7 +6192,9 @@ class MOZ_STACK_CLASS Debugger::SourceQuery : public Debugger::QueryBase {
     // TODO: Until such time that wasm modules are real ES6 modules,
     // unconditionally consider all wasm toplevel instance scripts.
     for (auto iter = debugger->allDebuggees(); !iter.done(); iter.next()) {
-      for (wasm::Instance* instance : iter.get()->realm()->wasm.instances()) {
+      for (auto instIter = iter.get()->realm()->wasm.instances().iter();
+           !instIter.done(); instIter.next()) {
+        wasm::Instance* instance = instIter.get();
         if (instance->codeMeta().isSelfHostedModule()) {
           continue;
         }

@@ -8,7 +8,7 @@
 
   @media -moz-pref("browser.nova.enabled") {
     --panel-padding: 0 var(--space-small) var(--space-small);
-    --panel-border-radius: var(--border-radius-xlarge);
+    --panel-border-radius: var(--border-radius-large);
   }
 
   @media not -moz-pref("browser.tabs.notes.enabled") {
@@ -126,9 +126,6 @@
     border: var(--border-width) solid var(--border-color-deemphasized);
     border-radius: var(--border-radius-medium);
     box-sizing: border-box;
-    @media -moz-pref("browser.nova.enabled") {
-      border-radius: var(--border-radius-large);
-    }
   }
 }
 

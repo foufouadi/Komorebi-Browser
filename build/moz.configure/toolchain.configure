@@ -961,6 +961,32 @@ def sccache_verbose_stats(using_sccache, verbose_stats):
 
 set_config("SCCACHE_VERBOSE_STATS", sccache_verbose_stats)
 
+
+@depends(when=using_sccache)
+def sccache_max_frame_length():
+    # Workaround for https://github.com/mozilla/sccache/issues/459#issuecomment-618756635
+    return "500000000"
+
+
+@depends(moz_automation)
+def sccache_client_side_default(moz_automation):
+    return "false" if moz_automation else "true"
+
+
+option(
+    env="SCCACHE_CLIENT_SIDE",
+    choices=("true", "false"),
+    default=sccache_client_side_default,
+    help="Whether to enable sccache client side mode",
+)
+
+
+@depends("SCCACHE_CLIENT_SIDE", using_sccache)
+def sccache_client_side(client_side, using_sccache):
+    if using_sccache:
+        return client_side[0]
+
+
 # The base directories are handled further below, where the sysroot and SDK
 # paths they contain are known.
 option(
@@ -1315,24 +1341,39 @@ def default_sccache_basedirs(build_env, sysroot_path, windows_sdk_dir, vc_path):
 
 
 @depends("SCCACHE_BASEDIRS", default_sccache_basedirs, using_sccache)
-@imports("os")
 def sccache_basedirs(basedirs, default_basedirs, using_sccache):
     if not using_sccache:
         return
 
     # Don't override a value the developer set explicitly.
-    basedirs = basedirs[0] if basedirs else default_basedirs
-
-    # sccache only reads SCCACHE_BASEDIRS when its server starts, and the
-    # server is started by the first sccache invocation, which can be one of
-    # the compiler checks below. So the variable needs to be in the
-    # environment before that happens.
-    os.environ["SCCACHE_BASEDIRS"] = basedirs
-
-    return basedirs
+    return basedirs[0] if basedirs else default_basedirs
 
 
-set_config("SCCACHE_BASEDIRS", sccache_basedirs)
+@template
+def sccache_config(**kwargs):
+    """Set the given configuration items, and return a @depends function that
+    puts them in the environment. sccache reads its configuration from the
+    environment, and its server only does so when it starts, which can be from
+    one of the compiler checks below, so the variables need to be set before
+    that happens."""
+    for name, value in kwargs.items():
+        set_config(name, value)
+
+    @depends(*kwargs.values())
+    @imports("os")
+    def sccache_environment(*values):
+        for name, value in zip(kwargs, values):
+            if value:
+                os.environ[name] = value
+
+    return sccache_environment
+
+
+sccache_environment = sccache_config(
+    SCCACHE_BASEDIRS=sccache_basedirs,
+    SCCACHE_CLIENT_SIDE=sccache_client_side,
+    SCCACHE_MAX_FRAME_LENGTH=sccache_max_frame_length,
+)
 
 
 def minimum_gcc_version():
@@ -1433,7 +1474,7 @@ def compiler(
         multiarch_dir,
         winsysroot,
         host,
-        sccache_basedirs,
+        sccache_environment,
     )
     @checking("whether %s can be used" % what, lambda x: bool(x))
     @imports(_from="mozshellutil", _import="quote")
@@ -1452,13 +1493,13 @@ def compiler(
         multiarch_dir,
         winsysroot,
         host,
-        sccache_basedirs,
+        sccache_environment,
     ):
-        # This is only a dependency for its side effect of setting
-        # SCCACHE_BASEDIRS in the environment, which needs to happen before the
+        # This is only a dependency for its side effect of setting the sccache
+        # variables in the environment, which needs to happen before the
         # compiler wrapper is invoked. The statement below is only there to
         # appease configure's lint, which rejects unused dependencies.
-        sccache_basedirs
+        sccache_environment
 
         wrapper = list(compiler_wrapper or ())
         flags = []
@@ -3490,7 +3531,7 @@ def add_libfuzzer_flags(libfuzzer_flags, linker_flags):
 
 
 # The LLVM symbolizer is used by all sanitizers
-check_prog(
+llvm_symbolizer = check_prog(
     "LLVM_SYMBOLIZER",
     ("llvm-symbolizer",),
     allow_missing=True,

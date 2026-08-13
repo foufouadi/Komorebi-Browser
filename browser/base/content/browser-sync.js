@@ -1514,8 +1514,10 @@ var gSync = {
    *    and opens the secure sync subpanel.
    *  - signed in with sync off: "Sync is Off" with an error-colored
    *    "Your data isn't syncing" and opens sync preferences.
-   *  - signed out, or signed in but needing (re-)authentication: "Sync is Off"
-   *    with an error-colored "Sign in to sync" and opens the sign-in page.
+   *  - never signed in: "Sync Your Data" with no description and opens the
+   *    sign-in page.
+   *  - signed in but needing (re-)authentication: "Sync is Off" with an
+   *    error-colored "Sign in to sync" and opens the sign-in page.
    */
   _updateSyncStatusButton(state) {
     const btn = PanelMultiView.getViewNode(
@@ -1542,6 +1544,10 @@ var gSync = {
       document,
       "PanelUI-fxa-menu-sync-status-off-description"
     );
+    const mobileBtn = PanelMultiView.getViewNode(
+      document,
+      "PanelUI-fxa-menu-get-firefox-mobile"
+    );
 
     const syncOn =
       state.status == UIState.STATUS_SIGNED_IN && state.syncEnabled;
@@ -1561,16 +1567,23 @@ var gSync = {
         "value",
         this.fluentStrings.formatValueSync("fxa-menu-sync-off-data-description")
       );
+      offCard.after(mobileBtn);
+      mobileBtn.hidden = false;
       return;
     }
+
+    // A user who has never signed in gets a call-to-action title with no
+    // description instead of the "Sync is Off" / "Sign in to sync" copy.
+    const neverSignedIn = state.status == UIState.STATUS_NOT_CONFIGURED;
 
     // The chevron is only meaningful when the button navigates to the secure
     // sync subpanel (sync on).
     btn.classList.toggle("subviewbutton-nav", syncOn);
 
-    let titleId = syncOn
-      ? "fxa-menu-sync-status-on"
+    let neverSignedInId = neverSignedIn
+      ? "fxa-menu-sync-your-data"
       : "fxa-menu-sync-status-off";
+    let titleId = syncOn ? "fxa-menu-sync-status-on" : neverSignedInId;
     titleEl.setAttribute("value", this.fluentStrings.formatValueSync(titleId));
 
     if (syncOn) {
@@ -1586,6 +1599,9 @@ var gSync = {
       } else {
         descEl.removeAttribute("value");
       }
+    } else if (neverSignedIn) {
+      descEl.classList.remove("fxa-menu-sync-status-description-error");
+      descEl.removeAttribute("value");
     } else {
       descEl.classList.add("fxa-menu-sync-status-description-error");
       descEl.setAttribute(
@@ -1596,7 +1612,15 @@ var gSync = {
       );
     }
 
+    // Don't render the description label when there's nothing to show.
+    descEl.hidden = !descEl.hasAttribute("value");
+
     btn.hidden = false;
+
+    // "Get Firefox for mobile" sits directly under the sync status button and
+    // is only offered while sync is off.
+    btn.after(mobileBtn);
+    mobileBtn.hidden = syncOn;
   },
 
   _onSyncStatusButtonClick(anchor, event) {
@@ -1901,6 +1925,10 @@ var gSync = {
       document,
       "PanelUI-fxa-menu-signed-out-card"
     );
+    const signedOutSeparatorEl = PanelMultiView.getViewNode(
+      document,
+      "PanelUI-fxa-menu-signed-out-separator"
+    );
     const signedInContainer = PanelMultiView.getViewNode(
       document,
       "PanelUI-signedin-panel"
@@ -1909,21 +1937,9 @@ var gSync = {
       document,
       "PanelUI-sign-out-separator"
     );
-    const profilesHeaderLabel = PanelMultiView.getViewNode(
+    const manageAccountSeparator = PanelMultiView.getViewNode(
       document,
-      "PanelUI-fxa-menu-profiles-header-label"
-    );
-    const profileButtonsContainer = PanelMultiView.getViewNode(
-      document,
-      "PanelUI-fxa-menu-profile-buttons"
-    );
-    const profilesSeparator = PanelMultiView.getViewNode(
-      document,
-      "PanelUI-fxa-menu-profiles-separator"
-    );
-    const secureSyncHeader = PanelMultiView.getViewNode(
-      document,
-      "PanelUI-fxa-menu-secure-sync-header"
+      "PanelUI-fxa-menu-manage-account-separator"
     );
     const syncSetupEl = PanelMultiView.getViewNode(
       document,
@@ -1949,8 +1965,10 @@ var gSync = {
     syncSetupEl.setAttribute("hidden", "true");
     signedInContainer.hidden = false;
     manageAccountButtonEl.hidden = true;
+    manageAccountSeparator.hidden = true;
     signInPromoEl.hidden = true;
     signedOutCardEl.hidden = true;
+    signedOutSeparatorEl.hidden = true;
     menuHeaderDescriptionEl.hidden = false;
 
     // Expanded sign in copy experiment is only for signed out users
@@ -2017,21 +2035,7 @@ var gSync = {
           }
         }
 
-        // Reposition profiles elements
-        profilesHeaderLabel.remove();
-        profileButtonsContainer.remove();
-        profilesSeparator.remove();
-        secureSyncHeader.remove();
-
-        profilesSeparator.hidden = false;
-        secureSyncHeader.hidden = false;
-
-        signedInContainer.after(secureSyncHeader);
-        signedInContainer.after(profilesSeparator);
-        signedInContainer.after(profileButtonsContainer);
-        signedInContainer.after(profilesHeaderLabel);
-
-        secureSyncHeader.after(syncStatusBtn);
+        this._positionSecureSyncSection(signedInContainer);
 
         break;
 
@@ -2042,6 +2046,7 @@ var gSync = {
         headerDescription = state.displayName || state.email;
         mainWindowEl.style.removeProperty("--avatar-image-url");
         this._showFxASignedOutCard(signedOutCardEl, state);
+        this._positionSecureSyncSection(signedInContainer);
         break;
 
       case UIState.STATUS_NOT_VERIFIED:
@@ -2050,6 +2055,7 @@ var gSync = {
         headerTitleL10nId = "account-finish-account-setup";
         headerDescription = state.displayName || state.email;
         this._showFxASignedOutCard(signedOutCardEl, state);
+        this._positionSecureSyncSection(signedInContainer);
         break;
 
       case UIState.STATUS_SIGNED_IN:
@@ -2073,18 +2079,14 @@ var gSync = {
         syncSetupSeparator.setAttribute("hidden", "true");
 
         // Reposition profiles elements
-        profilesHeaderLabel.remove();
-        profileButtonsContainer.remove();
-        profilesSeparator.remove();
-        secureSyncHeader.remove();
-
-        profilesSeparator.hidden = false;
-        secureSyncHeader.hidden = false;
-
-        manageAccountButtonEl.after(secureSyncHeader);
-        manageAccountButtonEl.after(profilesSeparator);
-        manageAccountButtonEl.after(profileButtonsContainer);
-        manageAccountButtonEl.after(profilesHeaderLabel);
+        manageAccountSeparator.remove();
+        this._positionSecureSyncSection(manageAccountButtonEl);
+        // Single separator below the manage account button, above whichever
+        // section comes next (profiles when shown, otherwise secure sync).
+        manageAccountSeparator.hidden = false;
+        // Inserted last so it lands directly below the manage account button,
+        // separating it from the profiles section.
+        manageAccountButtonEl.after(manageAccountSeparator);
 
         break;
 
@@ -2116,6 +2118,47 @@ var gSync = {
     menuHeaderDescriptionEl.removeAttribute("data-l10n-id");
   },
 
+  // Moves the Profiles and Secure sync sections directly below the header
+  // anchored by anchorEl, so the visible sync status button lands under the
+  // "Secure sync" header instead of above the Profiles section.
+  _positionSecureSyncSection(anchorEl) {
+    const profilesHeaderLabel = PanelMultiView.getViewNode(
+      document,
+      "PanelUI-fxa-menu-profiles-header-label"
+    );
+    const profileButtonsContainer = PanelMultiView.getViewNode(
+      document,
+      "PanelUI-fxa-menu-profile-buttons"
+    );
+    const profilesSeparator = PanelMultiView.getViewNode(
+      document,
+      "PanelUI-fxa-menu-profiles-separator"
+    );
+    const secureSyncHeader = PanelMultiView.getViewNode(
+      document,
+      "PanelUI-fxa-menu-secure-sync-header"
+    );
+    const syncStatusBtn = PanelMultiView.getViewNode(
+      document,
+      "PanelUI-fxa-menu-sync-status-button"
+    );
+
+    profilesHeaderLabel.remove();
+    profileButtonsContainer.remove();
+    profilesSeparator.remove();
+    secureSyncHeader.remove();
+
+    profilesSeparator.hidden = false;
+    secureSyncHeader.hidden = false;
+
+    anchorEl.after(secureSyncHeader);
+    anchorEl.after(profilesSeparator);
+    anchorEl.after(profileButtonsContainer);
+    anchorEl.after(profilesHeaderLabel);
+
+    secureSyncHeader.after(syncStatusBtn);
+  },
+
   // Shows a card with the remembered account's email, a status-specific reason,
   // and a button to sign back in.
   _showFxASignedOutCard(cardEl, state) {
@@ -2127,6 +2170,10 @@ var gSync = {
       document,
       "PanelUI-fxa-menu-signed-out-message"
     );
+    const separatorEl = PanelMultiView.getViewNode(
+      document,
+      "PanelUI-fxa-menu-signed-out-separator"
+    );
 
     emailEl.value = state.email ?? "";
     document.l10n.setAttributes(
@@ -2137,6 +2184,7 @@ var gSync = {
     );
 
     cardEl.hidden = false;
+    separatorEl.hidden = false;
   },
 
   updateAvatarURL(mainWindowEl, avatarURL, avatarIsDefault) {
@@ -3439,9 +3487,13 @@ var gSync = {
   },
 
   openGetFirefoxMobile() {
-    switchToTabHavingURI("https://www.firefox.com/en-US/mobile/", true, {
-      replaceQueryString: true,
-    });
+    switchToTabHavingURI(
+      "https://www.firefox.com/mobile/?utm_medium=firefox-desktop&utm_source=toolbar&utm_campaign=desktop-account-menu",
+      true,
+      {
+        replaceQueryString: true,
+      }
+    );
   },
 
   openSyncedTabsPanel() {
@@ -3654,8 +3706,8 @@ var gSync = {
     this.updateCTAButtonStrings(VpnPanelEl, {
       inUse: vpnInUse,
       titleId: "appmenuitem-vpn-title2",
-      inUseTitleId: "appmenuitem-vpn-title-signed-in",
-      descriptionId: "appmenuitem-vpn-description4",
+      inUseTitleId: "appmenuitem-vpn-title-signed-in1",
+      descriptionId: "appmenuitem-vpn-description5",
     });
 
     // Share Firefox checks

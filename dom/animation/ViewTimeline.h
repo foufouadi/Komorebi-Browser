@@ -76,15 +76,19 @@ class ViewTimeline final : public ScrollTimeline {
                                     PseudoStyleRequest{mSubjectPseudoType}};
   }
 
+  bool IsReusableAnonymousTimeline(
+      const StyleGenericViewFunction<StyleLengthPercentage>& aView) const;
+
  private:
   ~ViewTimeline() = default;
   ViewTimeline(Document* aDocument, const ScrollerInfo& aScrollerInfo,
                StyleScrollAxis aAxis, Element* aSubject,
                PseudoStyleType aSubjectPseudoType,
-               const StyleViewTimelineInset& aInset)
+               const StyleViewTimelineInset& aInset, bool aIsAnonymous)
       : ScrollTimeline(aDocument, aScrollerInfo, aAxis),
         mSubject(aSubject),
         mSubjectPseudoType(aSubjectPseudoType),
+        mIsAnonymous(aIsAnonymous),
         mInset(aInset) {}
 
   Maybe<ComputedTimelineData> ComputeTimelineData() const override;
@@ -107,6 +111,7 @@ class ViewTimeline final : public ScrollTimeline {
   // FIXME: Bug 1928437. We have to update mSubjectPseudoType to use
   // PseudoStyleRequest.
   PseudoStyleType mSubjectPseudoType;
+  bool mIsAnonymous;
 
   // FIXME: Bug 1817073. view-timeline-inset is an animatable property. However,
   // the inset from view() is not animatable, so for named view timeline, this

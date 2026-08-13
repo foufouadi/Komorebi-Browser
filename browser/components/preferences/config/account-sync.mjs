@@ -824,6 +824,9 @@ Preferences.addSetting({
   visible() {
     return Referrals.isEnabled;
   },
+  onUserClick: () => {
+    Referrals.openReferralsTab(window);
+  },
 });
 
 let accountsEnabled = Services.prefs.getBoolPref("identity.fxaccounts.enabled");
@@ -1139,11 +1142,8 @@ SettingGroupManager.registerGroups({
     items: [
       {
         id: "referrals-link",
-        control: "moz-box-link",
+        control: "moz-box-button",
         l10nId: "referrals-link",
-        controlAttrs: {
-          href: "about:referrals",
-        },
       },
     ],
   },

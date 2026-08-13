@@ -239,8 +239,6 @@ DataTextureSourceD3D11::DataTextureSourceD3D11(gfx::SurfaceFormat aFormat,
                                                TextureFlags aFlags)
     : DataTextureSourceD3D11(aProvider->GetD3D11Device(), aFormat, aFlags) {}
 
-DataTextureSourceD3D11::~DataTextureSourceD3D11() {}
-
 enum class SerializeWithMoz2D : bool { No, Yes };
 
 template <typename T>  // ID3D10Texture2D or ID3D11Texture2D
@@ -1887,7 +1885,7 @@ bool SyncObjectD3D11Client::Init(ID3D11Device* aDevice, bool aFallible) {
   aDevice->QueryInterface((ID3D11Device1**)getter_AddRefs(device1));
   if (!device1) {
     gfxCriticalNoteOnce << "Failed to get ID3D11Device1";
-    return 0;
+    return false;
   }
 
   HRESULT hr = device1->OpenSharedResource1(

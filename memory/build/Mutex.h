@@ -149,9 +149,9 @@ struct MOZ_CAPABILITY("mutex") Mutex {
 // everywhere incur a performance penalty. See bug 1418389.
 #if defined(XP_WIN)
 struct MOZ_CAPABILITY("mutex") StaticMutex {
-  SRWLOCK mMutex;
+  SRWLOCK mMutex = SRWLOCK_INIT;
 
-  constexpr StaticMutex() : mMutex(SRWLOCK_INIT) {}
+  constexpr StaticMutex() = default;
 
   inline void Lock() MOZ_CAPABILITY_ACQUIRE() {
     AcquireSRWLockExclusive(&mMutex);

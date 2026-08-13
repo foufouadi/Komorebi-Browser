@@ -61,6 +61,8 @@ skip-if = [
 
 ["browser_customizeMode.js"]
 
+["browser_discardedQueryNotifications.js"]
+
 ["browser_display_selectedAction_Extensions.js"]
 
 ["browser_dns_first_for_single_words.js"]
@@ -144,6 +146,8 @@ skip-if = [
 ]
 
 ["browser_strip_on_share_telemetry.js"]
+
+["browser_supersededQueryNotifications.js"]
 
 ["browser_suppressFocusBorder.js"]
 skip-if = [

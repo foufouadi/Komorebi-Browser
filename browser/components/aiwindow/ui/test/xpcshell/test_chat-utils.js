@@ -14,6 +14,7 @@ const {
   parseJSONOrNull,
   getRoleLabel,
   getKeepSidebarOpenState,
+  normalizeChatLog,
 } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/ui/modules/ChatUtils.sys.mjs"
 );
@@ -391,5 +392,94 @@ const keepSidebarPermutations = [
 keepSidebarPermutations.forEach(([state, pref, expected, message]) => {
   add_task(function () {
     Assert.equal(getKeepSidebarOpenState(state, pref), expected, message);
+  });
+});
+
+add_task(function test_normalizeChatLog_only_includes_allowlisted_fields() {
+  // These fields pass through normalizeChatLog unchanged, so the same
+  // values apply to both the input message and the expected output.
+  const passthroughFields = {
+    id: "msg1",
+    createdDate: 1700000000000,
+    parentMessageId: "msg0",
+    revisionRootMessageId: "msg1",
+    ordinal: 0,
+    isActiveBranch: true,
+    role: 1,
+    modelId: "test-model",
+    pageUrl: "https://example.com",
+    turnIndex: 0,
+    memoriesEnabled: true,
+    memoriesFlagSource: 1,
+    memoriesApplied: ["memory1"],
+    webSearchQueries: ["query1"],
+    followUpSuggestions: ["suggestion1"],
+    pageHistoryDeleted: false,
+    tokens: { search: ["s1"], existing_memory: ["m1"], followup: ["f1"] },
+    toolUIData: {
+      uiType: "ui1",
+      toolCallId: "tc1",
+      properties: {
+        originalUserPrompt: "prompt",
+        tabs: [
+          {
+            linkedPanel: "p1",
+            url: "u1",
+            title: "t1",
+            iconSrc: "i1",
+            checked: true,
+          },
+        ],
+      },
+    },
+  };
+
+  const normalized = normalizeChatLog({
+    log: [
+      {
+        ...passthroughFields,
+        content: {
+          type: "text",
+          body: "hello",
+          tool_call_id: "tc1",
+          name: "someName",
+          userContext: { realTimeContext: "some context" },
+          contextMentions: [
+            {
+              type: "currentTab",
+              url: "https://example.com",
+              label: "Example",
+              iconSrc: "icon.png",
+            },
+          ],
+          contextPageUrl: "https://example.com",
+        },
+        // convId, params, and usage are real ChatMessage fields that are
+        // not in normalizeChatLog's allowlist, so all three should be dropped.
+        convId: "conv-1",
+        params: { some: "data" },
+        usage: { some: "usage data" },
+      },
+    ],
+  });
+
+  Assert.deepEqual(normalized.log[0], {
+    ...passthroughFields,
+    content: {
+      content_type: "text",
+      tool_call_id: "tc1",
+      body: { text: "hello" },
+      name: "someName",
+      userContext: { realTimeContext: "some context" },
+      contextMentions: [
+        {
+          mention_type: "currentTab",
+          url: "https://example.com",
+          label: "Example",
+          iconSrc: "icon.png",
+        },
+      ],
+      contextPageUrl: "https://example.com",
+    },
   });
 });

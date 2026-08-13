@@ -1590,7 +1590,7 @@ void Loader::NotifyObservers(SheetLoadData& aData, nsresult aStatus,
     }
   }
   if (!aData.mTitle.IsEmpty() && NS_SUCCEEDED(aStatus)) {
-    nsContentUtils::AddScriptRunner(NS_NewRunnableFunction(
+    NS_DispatchToMainThread(NS_NewRunnableFunction(
         "Loader::NotifyObservers - Create PageStyle actor",
         [doc = RefPtr{mDocument}] {
           // Force creating the page style actor, if available.

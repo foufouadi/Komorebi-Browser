@@ -151,10 +151,11 @@ function normalizeDiskEntry(entry, origin) {
  * broadcasts, so NewTabInit hands each new tab an up-to-date snapshot.
  *
  * This is a system feed: it is constructed for every profile and does nothing
- * until both `system.showWebNotifications` (the feature gate) and
- * `showWebNotifications` (the user preference) are set. It observes only while
- * they are, which is what keeps platform capture inert for everyone else —
- * the platform reports notifications either way, but to no one.
+ * until the feature gate (`system.showWebNotifications`, or a trainhop
+ * enrollment via `trainhopConfig.webNotifications.enabled`) and the user
+ * preference (`showWebNotifications`) are set. It observes only while they are,
+ * which is what keeps platform capture inert for everyone else — the platform
+ * reports notifications either way, but to no one.
  */
 export class WebNotificationsFeed {
   constructor() {
@@ -408,10 +409,16 @@ export class WebNotificationsFeed {
     }
   }
 
-  /** The feature exists (gate) and the user wants it (preference). */
+  /**
+   * The feature exists (gate) and the user wants it (preference). The gate is
+   * satisfied by either the system pref or a trainhop enrollment, so the
+   * feature can roll out ahead of the release train without the system pref.
+   */
   get _enabled() {
     const prefs = this.store.getState().Prefs.values;
-    return Boolean(prefs[PREF_SYSTEM] && prefs[PREF_USER]);
+    const systemValue =
+      prefs[PREF_SYSTEM] || prefs.trainhopConfig?.webNotifications?.enabled;
+    return Boolean(systemValue && prefs[PREF_USER]);
   }
 
   _startObserving() {
@@ -475,7 +482,8 @@ export class WebNotificationsFeed {
       case at.PREF_CHANGED:
         if (
           action.data.name === PREF_SYSTEM ||
-          action.data.name === PREF_USER
+          action.data.name === PREF_USER ||
+          action.data.name === "trainhopConfig"
         ) {
           this._updateEnabled();
         }

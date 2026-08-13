@@ -1031,37 +1031,6 @@ script.preloader:
     expires: never
     telemetry_mirror: SCRIPT_PRELOADER_MAINTHREAD_RECOMPILE
 
-  requests:
-    type: labeled_counter
-    description: >
-      Record hits and misses to the script preloader, with categories.
-
-      This metric was generated to correspond to the Legacy Telemetry
-      categorical histogram SCRIPT_PRELOADER_REQUESTS.
-    labels:
-      - Hit
-      - HitChild
-      - Miss
-    bugs:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1364235
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1590385
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1623098
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1649954
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1689257
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1754639
-    data_reviews:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1364235
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1590385
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1623098
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1649954
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1689257
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1754639
-    notification_emails:
-      - dothayer@mozilla.com
-      - plawless@mozilla.com
-    expires: never
-    telemetry_mirror: h#SCRIPT_PRELOADER_REQUESTS
-
   wait_time:
     type: timing_distribution
     description: >

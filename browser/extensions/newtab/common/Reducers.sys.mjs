@@ -311,6 +311,10 @@ export const INITIAL_STATE = {
     cta: null,
     // When set, the count readout shows "{countCeiling}+" (the daily-cap render).
     countCeiling: null,
+    // Pending count-up celebration awarded by PrivacyFeed, or null. Shaped
+    // { awardedAt, fromCount, toCount }, plus `forcedTier` when the debug
+    // pref made it; `awardedAt` doubles as its id.
+    celebration: null,
   },
 };
 

@@ -1480,6 +1480,20 @@ class AsyncPanZoomController {
   // held whenever this is updated. In practice though... see bug 897017.
   PanZoomState mState;
 
+  // Whether an active scroll gesture that started on another APZC has been
+  // handed off to this APZC and scrolled it. While true, this APZC reports
+  // itself as being in a scrolling gesture. Set during handoff in
+  // AttemptScroll() and cleared via ClearScrolledByHandedOffGesture() when
+  // the gesture ends. Protected by |mRecursiveMutex|.
+  bool mScrolledByHandedOffGesture = false;
+
+ public:
+  void SetScrolledByHandedOffGesture(bool aState);
+
+ private:
+  void ClearScrolledByHandedOffGestureOnChain();
+
+ protected:
   AxisX mX;
   AxisY mY;
 
@@ -1905,7 +1919,12 @@ class AsyncPanZoomController {
 
   // Returns whether being in the middle of a gesture. E.g., this APZC has
   // started handling a pan gesture but hasn't yet received pan-end, etc.
+  // This includes being scrolled by a gesture handed off from another APZC.
   bool IsInScrollingGesture() const;
+
+  // Clears |mScrolledByHandedOffGesture|, requesting a content repaint to
+  // deliver the change to the main thread if it was set.
+  void ClearScrolledByHandedOffGesture();
 
  private:
   /* This is the cumulative CSS transform for all the layers from (and

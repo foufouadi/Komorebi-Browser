@@ -192,6 +192,15 @@ export class UrlbarResult {
    */
   commands = undefined;
 
+  /**
+   * Whether the result's URL is a search engine results page. Resolved when the
+   * result is finalized, since it takes the search service, which only the
+   * parent process has.
+   *
+   * @type {boolean}
+   */
+  isSERP = false;
+
   get type() {
     return this.#type;
   }
@@ -348,7 +357,7 @@ export class UrlbarResult {
    *   Make highlighting that matches this tokens.
    *   If no specific tokens, this function returns only value.
    * @param {object} [options.isURL]
-   *   If true, the value will be from UrlbarUtils.prepareUrlForDisplay().
+   *   If true, the value will be from UrlbarShared.prepareUrlForDisplay().
    */
   getDisplayableValueAndHighlights(payloadName, options = {}) {
     if (!this.#displayValuesCache) {
@@ -396,7 +405,7 @@ export class UrlbarResult {
     }
 
     if (isURL) {
-      value = lazy.UrlbarUtils.prepareUrlForDisplay(value);
+      value = UrlbarShared.prepareUrlForDisplay(value);
     }
 
     if (typeof value == "string") {
@@ -485,7 +494,8 @@ export class UrlbarResult {
    * Serializes this result to a plain, structured-cloneable object for sending
    * across the Urlbar actor boundary. Most data lives in private fields that a
    * bare structuredClone() would drop, so capture it explicitly; `id`,
-   * `rowIndex`, `viewTemplate`, and `commands` are the public own properties.
+   * `rowIndex`, `viewTemplate`, `commands`, and `isSERP` are the public own
+   * properties.
    *
    * @returns {object} The wire representation; reconstruct with fromWire().
    */
@@ -517,6 +527,7 @@ export class UrlbarResult {
       rowIndex: this.rowIndex,
       viewTemplate: this.viewTemplate,
       commands: this.commands,
+      isSERP: this.isSERP,
     };
   }
 
@@ -529,13 +540,13 @@ export class UrlbarResult {
    */
   static fromWire(wire) {
     let result = new UrlbarResult({ ...wire, skipPayloadValidation: true });
-    // providerType, id and rowIndex aren't constructor parameters, so re-apply
-    // them.
+    // The following aren't constructor parameters, so re-apply them.
     result.providerType = wire.providerType;
     result.id = wire.id;
     result.rowIndex = wire.rowIndex;
     result.viewTemplate = wire.viewTemplate;
     result.commands = wire.commands;
+    result.isSERP = wire.isSERP;
     return result;
   }
 

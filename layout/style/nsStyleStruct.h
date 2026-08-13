@@ -2155,6 +2155,10 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleUIReset {
   mozilla::StyleWindowShadow mWindowShadow;
   mozilla::StyleFieldSizing mFieldSizing;
 
+  // How far one line scrolls this scroll container, when it doesn't want the
+  // font-derived amount. See ScrollContainerFrame::GetLineScrollAmount().
+  mozilla::NonNegativeLengthOrAuto mMozLineScrollAmount;
+
   // The margin of the window region that should be transparent to events.
   mozilla::StyleLength mMozWindowInputRegionMargin;
   mozilla::StyleTransform mMozWindowTransform;

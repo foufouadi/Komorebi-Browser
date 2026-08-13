@@ -345,9 +345,9 @@ export var WindowsLaunchOnLogin = {
    * like "Mozilla-Firefox-71AE18FE3142402B".
    */
   getLaunchOnLoginRegistryName() {
-    let xreDirProvider = Cc[
-      "@mozilla.org/xre/directory-provider;1"
-    ].createInstance(Ci.nsIXREDirProvider);
+    let xreDirProvider = Cc["@mozilla.org/xre/directory-provider;1"].getService(
+      Ci.nsIXREDirProvider
+    );
     let registryName = `${Services.appinfo.vendor}-${
       Services.appinfo.name
     }-${xreDirProvider.getInstallHash()}`;

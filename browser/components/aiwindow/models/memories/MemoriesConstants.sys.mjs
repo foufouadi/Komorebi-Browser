@@ -61,6 +61,12 @@ export const MEMORY_TYPE_TIERS = Object.freeze([
 export const MEMORY_MERGE_MIN_MEMORY_COUNT = 5;
 
 /**
+ * Memory generation constants
+ */
+export const MAX_SESSIONS_FIRST_RUN = 50;
+export const MAX_SESSIONS_DELTA_RUN = 30;
+
+/**
  * Memory frecency constants
  */
 export const MEMORY_FRECENCY_MAX_DAYS = 7;

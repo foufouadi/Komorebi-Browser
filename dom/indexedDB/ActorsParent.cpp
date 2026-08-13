@@ -9216,17 +9216,16 @@ Factory::AllocPBackgroundIDBFactoryRequestParent(
     return nullptr;
   }
 
-  if (NS_AUUF_OR_WARN_IF(
-          principalInfo.type() == PrincipalInfo::TSystemPrincipalInfo &&
-          metadata.persistenceType() != PERSISTENCE_TYPE_PERSISTENT)) {
-    return nullptr;
-  }
-
-  if (NS_AUUF_OR_WARN_IF(
-          principalInfo.type() == PrincipalInfo::TContentPrincipalInfo &&
-          QuotaManager::IsOriginInternal(
-              principalInfo.get_ContentPrincipalInfo().originNoSuffix()) &&
-          metadata.persistenceType() != PERSISTENCE_TYPE_PERSISTENT)) {
+  /* GetPersistenceType returns PERSISTENT for system principals and internal
+  content principals, PRIVATE for private-browsing content principals, and
+  DEFAULT for everything else. The sent value is technically redundant and
+  always deducible from the principal but we validate it here so that an
+  incorrect metadata value cannot reach other parts of the code.
+  TODO: Stop sending persistenceType from the content process and just derive it
+  on the parent side. */
+  if (metadata.persistenceType() !=
+      IDBFactory::GetPersistenceType(principalInfo)) {
+    IPC_FAIL(this, "Persistence type does not match principal!");
     return nullptr;
   }
 

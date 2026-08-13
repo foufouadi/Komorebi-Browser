@@ -1275,6 +1275,11 @@ export class SidebarBookmarks extends SidebarPage {
       queryRef.value,
       optionsRef.value
     );
+    node.isTagContainer =
+      !targetGuid &&
+      (optionsRef.value.resultType ===
+        Ci.nsINavHistoryQueryOptions.RESULTS_AS_TAGS_ROOT ||
+        queryRef.value.tags?.length === 1);
     const ancestorKeys = targetGuid ? new Set([targetGuid]) : new Set();
     try {
       node.children = await this.#runPlaceQueryAsync(
@@ -1395,9 +1400,10 @@ export class SidebarBookmarks extends SidebarPage {
     }
 
     const isTagContainer =
-      parentOptions.resultType ===
+      !this.#simpleFolderTargetGuid(queryRef.value, optionsRef.value) &&
+      (parentOptions.resultType ===
         Ci.nsINavHistoryQueryOptions.RESULTS_AS_TAGS_ROOT ||
-      queryRef.value.tags?.length === 1;
+        queryRef.value.tags?.length === 1);
     const key = guid || url;
     const node = {
       title,

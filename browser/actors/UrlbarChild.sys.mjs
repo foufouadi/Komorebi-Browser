@@ -148,6 +148,7 @@ export class UrlbarChild extends JSWindowActorChild {
         getFixupPrimitives: (searchString, isPrivate) =>
           Cu.cloneInto(this.getFixupPrimitives(searchString, isPrivate), win),
         getDisplaySpec: url => this.getDisplaySpec(url),
+        unEscapeURIForUI: uri => this.unEscapeURIForUI(uri),
         getSupportUrl: topic => this.getSupportUrl(topic),
         isTextDirectionRTL: (value, window) =>
           this.isTextDirectionRTL(value, window),
@@ -281,6 +282,20 @@ export class UrlbarChild extends JSWindowActorChild {
     } catch (ex) {
       return null;
     }
+  }
+
+  /**
+   * Unescapes a URI's percent-encoding for display, applying the spoofing
+   * protections `nsITextToSubURI` implements. Lets content-realm code render a
+   * URL without reaching `Services.textToSubURI`.
+   *
+   * @param {string} uri
+   *   The URI fragment to unescape.
+   * @returns {string}
+   *   The unescaped fragment.
+   */
+  unEscapeURIForUI(uri) {
+    return Services.textToSubURI.unEscapeURIForUI(uri);
   }
 
   receiveMessage(message) {

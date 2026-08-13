@@ -1432,8 +1432,8 @@ Maybe<SkipTransitionReason> ViewTransition::CaptureOldState() {
       // capturing of old content.
       if (RefPtr widget = ps->GetRootWidget()) {
         VT_LOG("ViewTransitions::CaptureOldState(), requesting composite");
-        ps->PaintAndRequestComposite(ps->GetRootFrame(),
-                                     widget->GetWindowRenderer(),
+        RefPtr<WindowRenderer> renderer = widget->GetWindowRenderer();
+        ps->PaintAndRequestComposite(ps->GetRootFrame(), renderer,
                                      PaintFlags::PaintCompositeOffscreen);
         VT_LOG("ViewTransitions::CaptureOldState(), requesting composite end");
       }

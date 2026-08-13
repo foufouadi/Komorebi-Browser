@@ -65,8 +65,9 @@ export function getNotificationIdsForUrl(state, url) {
 
 /**
  * Whether to render any web notifications surface. The feature has to exist for
- * this profile (`system.showWebNotifications`, the gate that also decides
- * whether the customize toggle is offered at all) and the user has to want it
+ * this profile (`system.showWebNotifications`, or a trainhop enrollment via
+ * `trainhopConfig.webNotifications.enabled`, which is also what decides whether
+ * the customize toggle is offered at all) and the user has to want it
  * (`showWebNotifications`, what that toggle writes).
  *
  * @param {object} state Newtab Redux state.
@@ -74,7 +75,8 @@ export function getNotificationIdsForUrl(state, url) {
  */
 export function isWebNotificationsEnabled(state) {
   const prefs = state.Prefs.values;
-  return Boolean(
-    prefs["system.showWebNotifications"] && prefs.showWebNotifications
-  );
+  const systemEnabled =
+    prefs["system.showWebNotifications"] ||
+    prefs.trainhopConfig?.webNotifications?.enabled;
+  return Boolean(systemEnabled && prefs.showWebNotifications);
 }

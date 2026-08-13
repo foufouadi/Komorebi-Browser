@@ -13,9 +13,11 @@ https://scan.coverity.com/projects/firefox?tab=analysis_settings#:~:text=Modelin
 #define NULL (void*)0
 
 typedef unsigned char jsbytecode;
+typedef short int16_t;
 typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
 typedef int int32_t;
+typedef unsigned long long uint64_t;
 typedef unsigned char uint8_t;
 
 static const uint16_t CHUNK_HEAD_SIZE = 8;
@@ -148,6 +150,58 @@ static inline uint16_t ReadShortAt(const uint8_t* aBuf, uint32_t aIndex) {
   __coverity_tainted_data_sanitize__(static_cast<void*>(&value));
   return value;
 }
+
+/// ots::Buffer, the bounds-checked reader of the OpenType sanitiser, verifies
+/// that the requested bytes are within the buffer before reading them and
+/// returns false otherwise, so the values it hands out are validated.
+/// Sanitize them to avoid the tainted data reports (untrusted loop bound,
+/// untrusted divisor, ...) on every field read from a font.
+namespace ots {
+
+class Buffer {
+ public:
+  /// Left undefined so that both the success and the failure paths of the
+  /// real bounds check stay reachable.
+  bool CheckBounds(size_t aCount);
+
+  bool Read(uint8_t* buf, size_t n_bytes) {
+    if (!CheckBounds(n_bytes)) {
+      return false;
+    }
+    __coverity_tainted_data_sanitize__(static_cast<void*>(buf));
+    return true;
+  }
+
+  bool Skip(size_t n_bytes) { return CheckBounds(n_bytes); }
+
+  bool ReadU8(uint8_t* value) { return Read(value, 1); }
+
+  bool ReadU16(uint16_t* value) {
+    return Read(reinterpret_cast<uint8_t*>(value), 2);
+  }
+
+  bool ReadS16(int16_t* value) {
+    return Read(reinterpret_cast<uint8_t*>(value), 2);
+  }
+
+  bool ReadU24(uint32_t* value) {
+    return Read(reinterpret_cast<uint8_t*>(value), 3);
+  }
+
+  bool ReadU32(uint32_t* value) {
+    return Read(reinterpret_cast<uint8_t*>(value), 4);
+  }
+
+  bool ReadS32(int32_t* value) {
+    return Read(reinterpret_cast<uint8_t*>(value), 4);
+  }
+
+  bool ReadR64(uint64_t* value) {
+    return Read(reinterpret_cast<uint8_t*>(value), 8);
+  }
+};
+
+}  // namespace ots
 
 /// Infallible allocators
 /// The moz_x* functions are MOZ_INFALLIBLE_ALLOCATOR: they abort on OOM instead

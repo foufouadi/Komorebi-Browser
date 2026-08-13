@@ -27,5 +27,5 @@ run-if = [
   "os == 'linux' && !release_or_beta", # Linux-specific crash type, release/beta builds do not crash on sandbox violations
 ]
 skip-if = [
-  "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && ccov && nova", # Bug 2057896
+  "ccov", # Bug 2057896: ccov builds use --disable-sandbox
 ]

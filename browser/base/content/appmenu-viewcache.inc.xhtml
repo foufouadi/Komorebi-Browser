@@ -653,6 +653,7 @@
         <html:moz-button id="PanelUI-fxa-menu-signed-out-sign-in-button"
                          data-l10n-id="fxa-menu-signed-out-sign-in-button"/>
       </hbox>
+      <toolbarseparator id="PanelUI-fxa-menu-signed-out-separator" hidden="true"/>
       <toolbarbutton id="PanelUI-fxa-menu-manage-account-button"
                      align="center"
                      class="subviewbutton"
@@ -667,6 +668,7 @@
                  data-l10n-id="fxa-menu-manage-account-subtitle"/>
         </vbox>
       </toolbarbutton>
+      <toolbarseparator id="PanelUI-fxa-menu-manage-account-separator" hidden="true"/>
       <!-- Hidden holder for the account header title/description. These are no
            longer shown directly (the signed-in, signed-out and promo states
            each render their own header), but the sign-in CTA copy experiment
@@ -711,10 +713,15 @@
                    crop="end"/>
           </vbox>
         </toolbarbutton>
+        <toolbarbutton id="PanelUI-fxa-menu-get-firefox-mobile"
+                       class="subviewbutton subviewbutton-iconic"
+                       data-l10n-id="fxa-menu-get-firefox-mobile"
+                       hidden="true"/>
         <hbox id="PanelUI-fxa-menu-sync-status-off-card"
               class="fxa-menu-sync-status-off-card"
               align="center"
               hidden="true">
+          <image class="fxa-menu-sync-status-icon" role="presentation"/>
           <vbox flex="1">
             <label id="PanelUI-fxa-menu-sync-status-off-title"
                    class="fxa-menu-sync-status-title"
@@ -744,17 +751,14 @@
                     class="subviewbutton"
                     data-l10n-id="appmenu-fxa-setup-sync-new"/>
           </vbox>
-          <toolbarbutton id="PanelUI-fxa-menu-get-firefox-mobile"
-                  class="subviewbutton subviewbutton-iconic"
-                  data-l10n-id="fxa-menu-get-firefox-mobile"/>
           <toolbarseparator id="PanelUI-set-up-sync-separator" />
       </vbox>
+      <vbox id="PanelUI-fxa-menu-devices-list" hidden="true"/>
       <toolbarseparator id="PanelUI-sign-out-separator" />
       <toolbarbutton id="PanelUI-fxa-menu-account-signout-button"
               class="subviewbutton"
               data-l10n-id="fxa-menu-sign-out"
               hidden="true"/>
-      <vbox id="PanelUI-fxa-menu-devices-list" hidden="true"/>
       </vbox>
       <label id="PanelUI-fxa-menu-profiles-header-label" crop="end" class="subview-subheader" data-l10n-id="appmenu-profiles-header" />
       <vbox id="PanelUI-fxa-menu-profile-buttons" hidden="true"/>
@@ -787,7 +791,7 @@
             <image class="PanelUI-fxa-menu-vpn-button ctaMenuLogo" role="presentation" />
             <vbox flex="1">
               <label id="fxa-menu-header-title" class="cta-menu-title" crop="end" data-l10n-id="appmenuitem-vpn-title2" />
-              <label id="cta-menu-header-description" class="cta-menu-description" crop="end" data-l10n-id="appmenuitem-vpn-description4" />
+              <label id="cta-menu-header-description" class="cta-menu-description" crop="end" data-l10n-id="appmenuitem-vpn-description5" />
             </vbox>
           </hbox>
         </toolbarbutton>

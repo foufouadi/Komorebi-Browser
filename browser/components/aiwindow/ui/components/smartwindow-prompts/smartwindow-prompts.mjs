@@ -15,7 +15,7 @@ const MAX_VISIBLE_FAVICONS = 3;
  * A component for displaying conversation starter prompts.
  * Renders a list of prompt buttons that can be clicked to start a conversation.
  *
- * @property {Array<{text: string, type: string, previewIcons?: Array<{iconSrc: string}>}>} prompts - Array of prompt objects to display
+ * @property {Array<{text: string, type: string, previewIcons?: Array<{iconSrc: string}>, memory?: object, content?: object}>} prompts - Array of prompt objects to display
  */
 export class SmartWindowPrompts extends MozLitElement {
   static properties = {
@@ -30,8 +30,19 @@ export class SmartWindowPrompts extends MozLitElement {
   }
 
   #promptSelected(swPrompt) {
+    const { text, type } = swPrompt;
+    const detail =
+      type === "resume"
+        ? {
+            text,
+            type,
+            memory: swPrompt.memory,
+            content: swPrompt.content,
+          }
+        : { text, type };
+
     const event = new CustomEvent("SmartWindowPrompt:prompt-selected", {
-      detail: { text: swPrompt.text, type: swPrompt.type },
+      detail,
       bubbles: true,
       composed: true,
     });
@@ -84,6 +95,18 @@ export class SmartWindowPrompts extends MozLitElement {
     `;
   }
 
+  /**
+   * Renders a non-interactive placeholder pill shown in a starter slot
+   * while its real content is still loading.
+   */
+  #renderSkeletonPrompt() {
+    return html`
+      <span class="sw-prompt-skeleton" aria-hidden="true">
+        <span class="sw-prompt-skeleton-text"></span>
+      </span>
+    `;
+  }
+
   render() {
     if (!this.prompts.length) {
       return html``;
@@ -96,18 +119,20 @@ export class SmartWindowPrompts extends MozLitElement {
       />
       <!-- TODO : TODO a11y translations? -->
       <div class="sw-prompts-container" role="group">
-        ${this.prompts.map(
-          swPrompt => html`
-            <moz-button
-              class="sw-prompt-button"
-              @click=${() => this.#promptSelected(swPrompt)}
-              @mouseenter=${this.#hasInteracted}
-              @focusin=${this.#hasInteracted}
-              aria-label=${swPrompt.text}
-            >
-              ${this.#renderFavicons(swPrompt.previewIcons)}${swPrompt.text}
-            </moz-button>
-          `
+        ${this.prompts.map(swPrompt =>
+          swPrompt.type === "skeleton"
+            ? this.#renderSkeletonPrompt()
+            : html`
+                <moz-button
+                  class="sw-prompt-button"
+                  @click=${() => this.#promptSelected(swPrompt)}
+                  @mouseenter=${this.#hasInteracted}
+                  @focusin=${this.#hasInteracted}
+                  aria-label=${swPrompt.text}
+                >
+                  ${this.#renderFavicons(swPrompt.previewIcons)}${swPrompt.text}
+                </moz-button>
+              `
         )}
       </div>
     `;

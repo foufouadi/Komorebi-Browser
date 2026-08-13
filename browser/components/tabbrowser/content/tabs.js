@@ -18,8 +18,6 @@
   class MozTabbrowserTabs extends MozElements.TabsBase {
     static observedAttributes = ["orient"];
 
-    #mustUpdateTabMinHeight = false;
-    #tabMinHeight = 36;
     #animatingGroups = new Set();
 
     constructor() {
@@ -108,13 +106,11 @@
       // this then arrowscrollbox computes this value by calling
       // _getScrollableElements and dividing the box size by that number.
       // However in the tabstrip case we already know the answer to this as,
-      // when we're overflowing, it is always the same as the tab min width or
-      // height. For tab group labels, the number won't exactly match, but
-      // that shouldn't be a problem in practice since the arrowscrollbox
-      // stops at element bounds when finishing scrolling.
+      // when we're overflowing, it is always the same as the tab min width.
+      // Vertical mode scrolls natively and takes the amount from
+      // -moz-line-scroll-amount.
       Object.defineProperty(this.arrowScrollbox, "lineScrollAmount", {
-        get: () =>
-          this.verticalMode ? this.#tabMinHeight : this._tabMinWidthPref,
+        get: () => this._tabMinWidthPref,
       });
 
       this.baseConnect();
@@ -174,7 +170,6 @@
         }
       );
       this.#updateTabMinWidth(this._tabMinWidthPref);
-      this.#updateTabMinHeight();
 
       CustomizableUI.addListener(this);
       this._updateNewTabVisibility();
@@ -231,7 +226,6 @@
         // reset this attribute so we don't have incorrect styling for vertical tabs
         this.removeAttribute("overflow");
         this.#updateTabMinWidth();
-        this.#updateTabMinHeight();
         this.pinnedTabsContainer?.setAttribute("orient", newValue);
       }
       super.attributeChangedCallback(name, oldValue, newValue);
@@ -831,7 +825,6 @@
 
     on_uidensitychanged() {
       this._updateCloseButtons();
-      this.#updateTabMinHeight();
       this._handleTabSelect(true);
     }
 
@@ -1238,10 +1231,6 @@
       }
 
       node.before(tab);
-
-      if (this.#mustUpdateTabMinHeight) {
-        this.#updateTabMinHeight();
-      }
     }
 
     #updateTabMinWidth(val) {
@@ -1249,53 +1238,6 @@
         "--tab-min-width-pref",
         (val ?? this._tabMinWidthPref) + "px"
       );
-    }
-
-    #updateTabMinHeight() {
-      if (!this.verticalMode || !window.toolbar.visible) {
-        this.#mustUpdateTabMinHeight = false;
-        return;
-      }
-
-      // Find at least one tab we can scroll to.
-      let firstScrollableTab = this.visibleTabs.find(
-        this.arrowScrollbox._canScrollToElement
-      );
-
-      if (!firstScrollableTab) {
-        // If not, we're in a pickle. We should never get here except if we
-        // also don't use the outcome of this work (because there's nothing to
-        // scroll so we don't care about the scrollbox size).
-        // So just set a flag so we re-run once we do have a new tab.
-        this.#mustUpdateTabMinHeight = true;
-        return;
-      }
-
-      let { height } =
-        window.windowUtils.getBoundsWithoutFlushing(firstScrollableTab);
-
-      // Use the current known height or a sane default.
-      this.#tabMinHeight = height || 36;
-
-      // The height we got may be incorrect if a flush is pending so re-check it after
-      // a flush completes.
-      window
-        .promiseDocumentFlushed(() => {})
-        .then(
-          () => {
-            height =
-              window.windowUtils.getBoundsWithoutFlushing(
-                firstScrollableTab
-              ).height;
-
-            if (height) {
-              this.#tabMinHeight = height;
-            }
-          },
-          () => {
-            /* ignore errors */
-          }
-        );
     }
 
     get _isCustomizing() {

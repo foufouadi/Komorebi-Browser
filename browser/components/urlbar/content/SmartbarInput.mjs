@@ -2697,9 +2697,7 @@ ${
       }
       // `input` may be an empty string, so do a strict comparison here.
       if (input !== undefined) {
-        // We don't await for this, because a rejection should not interrupt
-        // the load. Just reportError it.
-        lazy.UrlbarUtils.addToInputHistory(url, input).catch(console.error);
+        this.controller.addToInputHistory(url, input);
       }
     }
 
@@ -3018,7 +3016,7 @@ ${
       })
     ) {
       // Search mode restarts the query, so these results are obsolete.
-      this.controller.discardResults();
+      this.controller.discardResults(queryContext);
       return;
     }
 

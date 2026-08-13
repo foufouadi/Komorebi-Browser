@@ -288,7 +288,13 @@ option(
     help="Disable building the notification server",
 )
 
-set_config("MOZ_NOTIFICATION_SERVER", True, when="--enable-notification-server")
+@depends("--enable-notification-server", when=notification_server_default)
+def notification_server_flag(enabled):
+    if enabled:
+        return True
+
+
+set_config("MOZ_NOTIFICATION_SERVER", notification_server_flag)
 
 # Supported patch formats for the updater
 # =======================================

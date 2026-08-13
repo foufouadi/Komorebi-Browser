@@ -229,7 +229,6 @@
 #include "nsINetworkLinkService.h"
 #include "nsIObserverService.h"
 #include "nsIParentChannel.h"
-#include "nsIPrivateAttributionService.h"
 #include "nsIScriptError.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIServiceWorkerManager.h"
@@ -972,6 +971,11 @@ UniqueContentParentKeepAlive ContentParent::GetUsedBrowserProcess(
          PromiseFlatCString(aRemoteType).get(),
          preallocated->IsLaunching() ? " (still launching)" : ""));
 
+    MOZ_LOG(mozilla::ipc::gChildProcessLifecycleLog, LogLevel::Info,
+            ("REMOTETYPE [childID = %" PRIi32 "] [remoteType = %s]",
+             preallocated->Process()->GetChildID(),
+             PromiseFlatCString(aRemoteType).get()));
+
     // This ensures that the preallocator won't shut down the process once
     // it finishes starting
     preallocated->mRemoteType.Assign(aRemoteType);
@@ -1265,35 +1269,6 @@ mozilla::ipc::IPCResult ContentParent::RecvCreateGMPService() {
 
   mGMPCreated = true;
 
-  return IPC_OK();
-}
-
-IPCResult ContentParent::RecvAttributionEvent(
-    const nsACString& aHost, PrivateAttributionImpressionType aType,
-    uint32_t aIndex, const nsAString& aAd, const nsACString& aTargetHost) {
-  nsCOMPtr<nsIPrivateAttributionService> pa =
-      components::PrivateAttribution::Service();
-  if (NS_WARN_IF(!pa)) {
-    return IPC_OK();
-  }
-  pa->OnAttributionEvent(aHost, GetEnumString(aType), aIndex, aAd, aTargetHost);
-  return IPC_OK();
-}
-
-IPCResult ContentParent::RecvAttributionConversion(
-    const nsACString& aHost, const nsAString& aTask, uint32_t aHistogramSize,
-    const Maybe<uint32_t>& aLookbackDays,
-    const Maybe<PrivateAttributionImpressionType>& aImpressionType,
-    const nsTArray<nsString>& aAds, const nsTArray<nsCString>& aSourceHosts) {
-  nsCOMPtr<nsIPrivateAttributionService> pa =
-      components::PrivateAttribution::Service();
-  if (NS_WARN_IF(!pa)) {
-    return IPC_OK();
-  }
-  pa->OnAttributionConversion(
-      aHost, aTask, aHistogramSize, aLookbackDays.valueOr(0),
-      aImpressionType ? GetEnumString(*aImpressionType) : EmptyCString(), aAds,
-      aSourceHosts);
   return IPC_OK();
 }
 
@@ -2526,6 +2501,10 @@ bool ContentParent::BeginSubprocessLaunch(ProcessPriority aPriority) {
     mSubprocess->SetEnv("MOZ_HEADLESS", "1");
   }
 #endif
+
+  MOZ_LOG(mozilla::ipc::gChildProcessLifecycleLog, LogLevel::Info,
+          ("REMOTETYPE [childID = %" PRIi32 "] [remoteType = %s]",
+           mSubprocess->GetChildID(), mRemoteType.get()));
 
   mLaunchYieldTS = TimeStamp::Now();
   return mSubprocess->AsyncLaunch(std::move(extraArgs));
@@ -7482,6 +7461,39 @@ mozilla::ipc::IPCResult ContentParent::RecvWindowPostMessage(
     return IPC_OK();
   }
 
+  if (!aData.source().IsNull()) {
+    RefPtr<CanonicalBrowsingContext> bc = aData.source().get_canonical();
+    if (!bc || !bc->IsOwnedByProcess(ChildID())) {
+      return IPC_FAIL(this, "RecvWindowPostMessage: unowned source");
+    }
+  }
+
+  if (!ValidatePrincipal(aData.callerPrincipal(),
+                         {ValidatePrincipalOptions::AlwaysAllowSystem,
+                          ValidatePrincipalOptions::AllowExpanded})) {
+    return PrincipalValidationIpcFail(aData.callerPrincipal(), this, __func__);
+  }
+
+  if (!ValidatePrincipal(aData.subjectPrincipal(),
+                         {ValidatePrincipalOptions::AlwaysAllowSystem,
+                          ValidatePrincipalOptions::AllowExpanded})) {
+    return PrincipalValidationIpcFail(aData.subjectPrincipal(), this, __func__);
+  }
+
+  if (aData.callerPrincipal()->IsSystemPrincipal()) {
+    // In practice all SystemPrincipals in a content process should result in an
+    // empty origin.
+    if (!aData.origin().IsEmpty()) {
+      return IPC_FAIL(this, "RecvWindowPostMessage: system origin mismatch");
+    }
+  } else {
+    nsAutoCString callerOrigin;
+    aData.callerPrincipal()->GetWebExposedOriginSerialization(callerOrigin);
+    if (aData.origin() != NS_ConvertUTF8toUTF16(callerOrigin)) {
+      return IPC_FAIL(this, "RecvWindowPostMessage: origin mismatch");
+    }
+  }
+
   RefPtr<ContentParent> cp = context->GetContentParent();
   if (!cp) {
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Debug,
@@ -7610,6 +7622,10 @@ mozilla::ipc::IPCResult ContentParent::RecvHistoryGo(
     bool aCheckForCancelation, HistoryGoResolver&& aResolveRequestedIndex) {
   if (!aContext.IsNullOrDiscarded()) {
     RefPtr<CanonicalBrowsingContext> canonical = aContext.get_canonical();
+    if (!canonical->Top()->IsKnownInSubTree(ChildID())) {
+      return IPC_OK();
+    }
+
     aResolveRequestedIndex(canonical->HistoryGo(
         aOffset, aHistoryEpoch, aRequireUserInteraction, aUserActivation,
         aCheckForCancelation, Some(ChildID())));
@@ -7623,6 +7639,10 @@ mozilla::ipc::IPCResult ContentParent::RecvNavigationTraverse(
     NavigationTraverseResolver&& aResolver) {
   if (!aContext.IsNullOrDiscarded()) {
     RefPtr<CanonicalBrowsingContext> canonical = aContext.get_canonical();
+    if (!canonical->Top()->IsKnownInSubTree(ChildID())) {
+      return IPC_OK();
+    }
+
     canonical->NavigationTraverse(aKey, aHistoryEpoch, aUserActivation,
                                   aCheckForCancelation, Some(ChildID()),
                                   aResolver);
@@ -7857,8 +7877,12 @@ mozilla::ipc::IPCResult ContentParent::RecvHistoryReload(
     const MaybeDiscarded<BrowsingContext>& aContext,
     const uint32_t aReloadFlags) {
   if (!aContext.IsNullOrDiscarded()) {
-    nsCOMPtr<nsISHistory> shistory =
-        aContext.get_canonical()->GetSessionHistory();
+    RefPtr<CanonicalBrowsingContext> canonical = aContext.get_canonical();
+    if (!canonical->Top()->IsKnownInSubTree(ChildID())) {
+      return IPC_OK();
+    }
+
+    nsCOMPtr<nsISHistory> shistory = canonical->GetSessionHistory();
     if (shistory) {
       shistory->Reload(aReloadFlags);
     }

@@ -19,6 +19,7 @@ BROWSER_CHROME_MANIFESTS += [
     "content/test/about/sslkeylogging/browser.toml",
     "content/test/alerts/browser.toml",
     "content/test/backforward/browser.toml",
+    "content/test/browser-confirmationHint/browser.toml",
     "content/test/caps/browser.toml",
     "content/test/captivePortal/browser.toml",
     "content/test/contentTheme/browser.toml",

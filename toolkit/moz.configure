@@ -3344,13 +3344,6 @@ set_config("MOZ_BACKGROUNDTASK_CLSID", moz_backgroundtask_clsid)
 
 
 confvar(
-    "MOZ_DEV_EDITION",
-    nargs=1,
-    set_as_define=True,
-    help="Whether this a dev edition build",
-)
-
-confvar(
     "MOZ_MACBUNDLE_ID",
     nargs=1,
     set_as_config=False,
@@ -3809,8 +3802,6 @@ set_config("MOZ_LANGPACK_EID_HOST", moz_langpack_eid_host)
 
 # Every other platform just winds up in dist/bin
 non_macos_pkg_path = dependable("bin")
-set_config("MOZ_PKG_BINPATH", non_macos_pkg_path, when=~target_is_osx)
-set_config("MOZ_PKG_RESPATH", non_macos_pkg_path, when=~target_is_osx)
 
 
 # Smart card support
@@ -3842,19 +3833,6 @@ with only_when(target_is_osx):
         return f"{prefix}{app_displayname}{suffix}.app"
 
     set_config("MOZ_MACBUNDLE_NAME", mac_bundle_name)
-
-    @depends(mac_bundle_name)
-    def moz_pkg_binpath(mac_bundle_name):
-        return f"{mac_bundle_name}/Contents/MacOS"
-
-    set_config("MOZ_PKG_BINPATH", moz_pkg_binpath)
-
-    # Resource path for the precomplete file
-    @depends(mac_bundle_name)
-    def moz_pkg_respath(mac_bundle_name):
-        return f"{mac_bundle_name}/Contents/Resources"
-
-    set_config("MOZ_PKG_RESPATH", moz_pkg_respath)
 
     @depends(
         "MOZ_MACBUNDLE_ID", moz_app_displayname, "--with-distribution-id", moz_debug
@@ -3976,6 +3954,27 @@ with only_when(target_is_osx):
             )
 
         set_config("MOZ_PKCS11_PROCESS_BUNDLEID", moz_pkcs11_process_bundle_id)
+
+
+@depends(mac_bundle_name, non_macos_pkg_path)
+def moz_pkg_binpath(mac_bundle_name, non_macos_pkg_path):
+    if mac_bundle_name:
+        return f"{mac_bundle_name}/Contents/MacOS"
+    return non_macos_pkg_path
+
+
+set_config("MOZ_PKG_BINPATH", moz_pkg_binpath)
+
+
+# Resource path for the precomplete file
+@depends(mac_bundle_name, non_macos_pkg_path)
+def moz_pkg_respath(mac_bundle_name, non_macos_pkg_path):
+    if mac_bundle_name:
+        return f"{mac_bundle_name}/Contents/Resources"
+    return non_macos_pkg_path
+
+
+set_config("MOZ_PKG_RESPATH", moz_pkg_respath)
 
 
 # Update-related programs: updater, maintenance service, update agent,

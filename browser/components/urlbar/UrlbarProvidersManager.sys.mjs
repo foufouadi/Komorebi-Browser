@@ -989,6 +989,10 @@ export class Query {
       result.commands = commands;
     }
 
+    if (result.payload.url) {
+      result.isSERP = lazy.UrlbarSearchUtils.resultIsSERP(result);
+    }
+
     this.unsortedResults.push(result);
 
     this._notifyResultsFromProvider(provider);

@@ -1913,6 +1913,24 @@ profiles:
     expiry_version: never
     products:
       - "firefox"
+  error:
+    objects: ["avatar"]
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+    description: >
+      Recorded when the profile system attempts to load a custom avatar
+      image, but the file is not found on disk. See Glean probe
+      definition for details.
+    notification_emails:
+      - "dtownsend@mozilla.com"
+      - "jhirsch@mozilla.com"
+      - "nbaumgardner@mozilla.com"
+    bug_numbers:
+      - 2028725
+    expiry_version: never
+    products:
+      - "firefox"
   existing:
     objects: ["alert", "avatar", "closed", "deleted", "displayed", "learn_more", "name", "shortcut", "theme"]
     release_channel_collection: opt-out

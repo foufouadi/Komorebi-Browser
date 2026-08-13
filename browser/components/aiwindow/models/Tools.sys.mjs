@@ -115,6 +115,11 @@ export const SEARCH_QUERY_ENDPOINT_PREF =
 export const SEARCH_QUERY_APIKEY_PREF =
   "browser.smartwindow.searchQuery.apiKey";
 
+// When true, search_the_web returns Exa snippets straight to the main
+// assistant. When false, it runs the answer-generation flow with page reads.
+// The two paths return different shapes and so need different tool configs.
+export const SEARCH_THE_WEB_FAST_PREF = "browser.smartwindow.searchTheWebFast";
+
 export const TOOLS = [
   GET_OPEN_TABS,
   SEARCH_BROWSING_HISTORY,
@@ -177,6 +182,15 @@ export const SEARCH_THE_WEB_DESCRIPTION =
   "clear, self-contained query; you may rewrite the user's phrasing (for " +
   "example resolve 'near me' to a place) and add brief context.";
 
+export const SEARCH_THE_WEB_FAST_DESCRIPTION =
+  "Search the web. Returns a short list of results, each with a title, a URL, " +
+  "and a snippet of text from the page. Use this whenever the user asks an " +
+  "informational question that needs fresh or external knowledge. Answer from " +
+  "the snippets when they are enough, and call get_page_content on one of the " +
+  "returned URLs when you need the full page. Pass a clear, self-contained " +
+  "query; you may rewrite the user's phrasing (for example resolve 'near me' " +
+  "to a place).";
+
 const SEARCH_THE_WEB_TOOL_CONFIG = {
   type: "function",
   function: {
@@ -195,6 +209,27 @@ const SEARCH_THE_WEB_TOOL_CONFIG = {
           description:
             "Optional additional context that helps answer the query, such as " +
             "a location or a clarification the user gave earlier.",
+        },
+      },
+      required: ["query"],
+    },
+  },
+};
+
+// Fast-path variant, selected in Chat.sys.mjs when SEARCH_THE_WEB_FAST_PREF is
+// on. No `context` parameter: the fast path has no sub-agent prompt to feed it.
+export const SEARCH_THE_WEB_TOOL_CONFIG_FAST = {
+  type: "function",
+  function: {
+    name: SEARCH_THE_WEB,
+    description: SEARCH_THE_WEB_FAST_DESCRIPTION,
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description:
+            "The self-contained question or query to answer from the web.",
         },
       },
       required: ["query"],

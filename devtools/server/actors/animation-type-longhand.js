@@ -203,6 +203,7 @@ exports.ANIMATION_TYPE_FOR_LONGHANDS = [
       "word-break",
       "writing-mode",
       "-moz-image-decoding",
+      "-moz-line-scroll-amount",
     ]),
   ],
   [

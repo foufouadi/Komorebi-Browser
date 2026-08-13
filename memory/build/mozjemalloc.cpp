@@ -2507,13 +2507,12 @@ class AllocInfo {
     if (mSize <= gMaxLargeClass) {
       return mChunk->mArena;
     }
+
     // Best effort detection that we're not trying to access an already
-    // disposed arena. In the case of a disposed arena, the memory location
-    // pointed by mNode->mArena is either free (but still a valid memory
-    // region, per TypedBaseAlloc<arena_t>), in which case its id was reset,
-    // or has been reallocated for a new region, and its id is very likely
-    // different (per randomness). In both cases, the id is unlikely to
-    // match what it was for the disposed arena.
+    // disposed arena.  arena_t's destructor will clear mMagic and mId;
+    // any other use of the same memory will usually set them to some other
+    // value.
+    MOZ_DIAGNOSTIC_ASSERT(mNode->mArena->mMagic == ARENA_MAGIC);
     MOZ_RELEASE_ASSERT(mNode->mArenaId == mNode->mArena->mId);
     return mNode->mArena;
   }
@@ -3079,6 +3078,9 @@ arena_t::~arena_t() {
       MOZ_RELEASE_ASSERT(node->mArenaId != mId, "Arena has huge allocations");
     }
   }
+#endif
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+  mMagic = 0;
 #endif
   mId = 0;
 }
@@ -4059,6 +4061,7 @@ inline arena_t* ArenaCollection::GetById(arena_id_t aArenaId, bool aIsPrivate) {
   arena_t* result = tree->Search(aArenaId);
 #endif
   MOZ_RELEASE_ASSERT(result);
+  MOZ_DIAGNOSTIC_ASSERT(result->mMagic == ARENA_MAGIC);
   MOZ_RELEASE_ASSERT(result->mId == aArenaId);
   return result;
 }
@@ -4074,7 +4077,6 @@ inline arena_id_t MozJemalloc::moz_create_arena_with_params(
 
 inline void MozJemalloc::moz_dispose_arena(arena_id_t aArenaId) {
   arena_t* arena = gArenas.GetById(aArenaId, /* IsPrivate = */ true);
-  MOZ_RELEASE_ASSERT(arena);
   gArenas.DisposeArena(arena);
 }
 

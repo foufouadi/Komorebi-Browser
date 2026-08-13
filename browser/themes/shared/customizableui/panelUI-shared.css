@@ -879,6 +879,7 @@ toolbarbutton[constrain-size="true"][cui-areatype="panel"] > .toolbarbutton-badg
   }
 
   & .fxa-menu-signed-out-text {
+    min-width: 0;
     /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
     gap: var(--dimension-2);
   }
@@ -952,8 +953,12 @@ toolbarbutton[constrain-size="true"][cui-areatype="panel"] > .toolbarbutton-badg
   align-self: center;
 }
 
-#appMenu-fxa-status2[fxastatus] > #appMenu-fxa-label2 > vbox > #appMenu-header-description,
-#appMenu-fxa-text {
+#appMenu-fxa-label2,
+#appMenu-fxa-label2 > vbox {
+  min-width: 0;
+}
+
+#appMenu-fxa-status2[fxastatus] > #appMenu-fxa-label2 > vbox > #appMenu-header-description {
   font-weight: var(--font-weight-semibold);
 }
 
@@ -1091,19 +1096,27 @@ toolbarbutton[constrain-size="true"][cui-areatype="panel"] > .toolbarbutton-badg
 .fxa-menu-sync-status-off-card {
   gap: var(--space-medium);
   padding: var(--panel-menuitem-padding);
+  margin: var(--panel-menuitem-margin);
 
   > vbox {
     min-width: 0;
   }
+
+  /* The card's own gap handles spacing, so drop the icon's default margin. */
+  > .fxa-menu-sync-status-icon {
+    margin-inline-end: 0;
+  }
 }
 
 .fxa-menu-sync-status-title {
-  font-weight: var(--font-weight-semibold);
+  /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
+  margin: 0;
 }
 
 .fxa-menu-sync-status-description {
   color: var(--text-color-deemphasized);
   font-size: var(--font-size-small);
+  margin: 0;
 }
 
 .fxa-menu-sync-status-description.fxa-menu-sync-status-description-error {
@@ -1112,6 +1125,7 @@ toolbarbutton[constrain-size="true"][cui-areatype="panel"] > .toolbarbutton-badg
 
 #PanelUI-fxa-menu-manage-account-button {
   align-items: center;
+  border-radius: var(--border-radius-circle);
 
   > vbox {
     min-width: 0;
@@ -1130,11 +1144,13 @@ toolbarbutton[constrain-size="true"][cui-areatype="panel"] > .toolbarbutton-badg
 
   & .fxa-menu-manage-account-email {
     font-weight: var(--font-weight-semibold);
+    margin-block: 0;
   }
 
   & .fxa-menu-manage-account-subtitle {
     color: var(--text-color-deemphasized);
     font-size: var(--font-size-small);
+    margin-block: 0;
   }
 }
 
@@ -1308,6 +1324,10 @@ toolbarbutton[constrain-size="true"][cui-areatype="panel"] > .toolbarbutton-badg
 
 #PanelUI-fxa-menu-create-profile-button {
   list-style-image: url("chrome://global/skin/icons/users.svg");
+
+  > .toolbarbutton-icon {
+    margin-inline-end: var(--space-xsmall);
+  }
 }
 
 #PanelUI-fxa-menu-create-profile-content {
@@ -1342,6 +1362,12 @@ toolbarbutton[constrain-size="true"][cui-areatype="panel"] > .toolbarbutton-badg
   list-style-image: url("chrome://browser/skin/device-phone.svg");
   -moz-context-properties: fill;
   fill: currentColor;
+
+  /* Match the icon-to-text gap of the sync status button above it, whose icon
+     uses margin-inline-end: var(--space-medium). */
+  > .toolbarbutton-text {
+    padding-inline-start: var(--space-medium);
+  }
 }
 
 :root:not([fxastatus="signedin"]) #PanelUI-fxa-menu-connect-device-button {
@@ -1414,6 +1440,11 @@ panelmultiview[mainViewId="PanelUI-fxa"] #PanelUI-remotetabs-syncnow {
 
   &.signintosync {
     list-style-image: url("chrome://browser/skin/sync.svg");
+  }
+
+  /* Override the .subviewbutton > .toolbarbutton-icon { margin: 0 } reset. */
+  &.subviewbutton > .toolbarbutton-icon {
+    margin-inline-end: var(--space-xsmall);
   }
 }
 

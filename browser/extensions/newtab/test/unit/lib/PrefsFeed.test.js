@@ -710,6 +710,65 @@ describe("PrefsFeed", () => {
       );
     });
 
+    it("should write widgetPrivacy.enabled to the user pref default branch, not the system pref", () => {
+      const setBoolPref = sinon.spy();
+      ServicesStub.prefs.getDefaultBranch = sinon
+        .stub()
+        .returns({ setBoolPref });
+      const enrollment = {
+        meta: { isRollout: false },
+        value: {
+          type: "widgetPrivacy",
+          payload: {
+            enabled: true,
+            showVpnMessages: true,
+            maxDisplayCount: 50,
+            size: "large",
+          },
+        },
+      };
+      sandbox
+        .stub(global.NimbusFeatures.newtabTrainhop, "getAllEnrollments")
+        .returns([enrollment]);
+
+      feed.onTrainhopExperimentUpdated();
+
+      // `enabled` overrides the user-facing enabled pref's default; `visible`
+      // (not present here) would reveal the widget separately; size and the
+      // message-scheduling keys are read directly from trainhopConfig.
+      assert.calledWith(setBoolPref, "widgets.privacy.enabled", true);
+      assert.neverCalledWith(
+        setBoolPref,
+        "widgets.system.privacy.enabled",
+        sinon.match.any
+      );
+    });
+
+    it("should not write the privacy enabled default when widgetPrivacy.enabled is absent", () => {
+      const setBoolPref = sinon.spy();
+      ServicesStub.prefs.getDefaultBranch = sinon
+        .stub()
+        .returns({ setBoolPref });
+      const enrollment = {
+        meta: { isRollout: false },
+        value: {
+          type: "widgetPrivacy",
+          payload: { showVpnMessages: true },
+        },
+      };
+      sandbox
+        .stub(global.NimbusFeatures.newtabTrainhop, "getAllEnrollments")
+        .returns([enrollment]);
+
+      feed.onTrainhopExperimentUpdated();
+
+      assert.neverCalledWith(
+        setBoolPref,
+        "widgets.privacy.enabled",
+        sinon.match.any
+      );
+    });
+
     it("should not write the crossword enabled default when widgetCrossword.enabled is absent", () => {
       const setBoolPref = sinon.spy();
       ServicesStub.prefs.getDefaultBranch = sinon

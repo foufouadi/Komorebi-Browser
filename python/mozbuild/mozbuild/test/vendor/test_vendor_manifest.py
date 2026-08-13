@@ -295,6 +295,46 @@ def test_update_yaml_rewrites_quoted_and_unusual_values(tmp_path, initial_value)
     assert "  revision: v9.9.9\n" in result
 
 
+@mock.patch("mozbuild.vendor.vendor_manifest.remove_file_from_moz_build_file")
+@mock.patch("mozbuild.vendor.vendor_manifest.add_file_to_moz_build_file")
+def test_update_moz_build_only_touches_tracked_file_types(add_file, remove_file):
+    """Only file types that appear in moz.build source lists are added or
+    removed. Anything else, a Rust source or a build script for instance, is
+    not tracked in a moz.build file, so there is nothing to update and the
+    vendor must not abort over it."""
+    vm = VendorManifest.__new__(VendorManifest)
+    vm.log = mock.Mock()
+    vm.logInfo = mock.Mock()
+    vm.repository = mock.Mock()
+
+    changed = {
+        "D": [
+            "third_party/foo/components/fxa-client/build.rs",
+            "third_party/foo/components/fxa-client/src/fxa_client.udl",
+            "third_party/foo/src/gone.cpp",
+            "third_party/foo/src/gone.h",
+        ],
+        "A": [
+            "third_party/foo/src/new.rs",
+            "third_party/foo/uniffi.toml",
+            "third_party/foo/src/new.c",
+        ],
+    }
+    vm.repository.get_changed_files.side_effect = lambda diff_filter: changed[
+        diff_filter
+    ]
+
+    vm.update_moz_build("third_party/foo", "third_party/foo", False)
+
+    assert [call.args[0] for call in add_file.call_args_list] == [
+        "third_party/foo/src/new.c"
+    ]
+    assert [call.args[0] for call in remove_file.call_args_list] == [
+        "third_party/foo/src/gone.cpp",
+        "third_party/foo/src/gone.h",
+    ]
+
+
 def test_update_yaml_asserts_when_a_field_is_missing(tmp_path):
     """update_yaml fails loudly (rather than silently leaving a stale field) if
     a release/revision line it expects to rewrite is absent (bug 2056510)."""

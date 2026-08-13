@@ -4614,7 +4614,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
             if "VirtualSendImpl" in md.attributes:
                 decl.methodspec = MethodSpec.VIRTUAL
             promisemethod = MethodDefn(decl)
-            stmts = self.sendAsyncWithPromise(md)
+            stmts = self.sendAsyncWithPromise(md, decl.params)
             promisemethod.addstmts(stmts)
 
             (lbl, case) = self.genRecvAsyncReplyCase(md)
@@ -5166,7 +5166,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
             ),
         )
 
-    def sendAsyncWithPromise(self, md):
+    def sendAsyncWithPromise(self, md, params):
         # Create a new promise, and forward to the callback send overload.
         promise = _makePromise(md.returns, self.side, resolver=True)
 
@@ -5192,7 +5192,9 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
             resolvetype=resolvetype,
         )
 
-        args = [ExprMove(p.var()) for p in md.params] + [resolve, reject]
+        args = [
+            ExprCode("std::forward<${t}>(${n})", t=p.type, n=p.name) for p in params
+        ] + [resolve, reject]
         stmt = StmtCode(
             """
             RefPtr<${promise}> promise__ = new ${promise}(__func__);

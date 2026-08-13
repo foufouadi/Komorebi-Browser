@@ -6528,7 +6528,7 @@ Standard benchmarks are third-party tests (i.e. Speedometer) that we have integr
 * **expected**: pass
 * **expose browser profiler**: true
 * **gecko profile interval**: 1
-* **link searchfox**: {searchfox}`testing/raptor/raptor/tests/benchmarks/unity-webgl-desktop.toml#15`
+* **link searchfox**: {searchfox}`testing/raptor/raptor/tests/benchmarks/unity-webgl-desktop.toml#17`
 * **lower is better**: false
 * **page cycles**: 5
 * **page timeout**: 420000
@@ -6536,6 +6536,8 @@ Standard benchmarks are third-party tests (i.e. Speedometer) that we have integr
 * **repository path**: benchmarks/unity-webgl
 * **repository revision**: 61332db584026b73e37066d717a162825408c36b
 * **sparse checkout**: true
+* **subtest lower is better**: false
+* **subtest unit**: score
 * **test url**: <http://\<host\>:\<port\>/index.html?raptor>
 * **type**: benchmark
 * **unit**: score
@@ -6829,13 +6831,15 @@ Standard benchmarks are third-party tests (i.e. Speedometer) that we have integr
 * **expected**: pass
 * **expose browser profiler**: true
 * **gecko profile interval**: 1
-* **link searchfox**: {searchfox}`testing/raptor/raptor/tests/benchmarks/unity-webgl-mobile.toml#14`
+* **link searchfox**: {searchfox}`testing/raptor/raptor/tests/benchmarks/unity-webgl-mobile.toml#16`
 * **lower is better**: false
 * **page cycles**: 1
 * **page timeout**: 420000
 * **repository**: https://github.com/mozilla/perf-automation
 * **repository path**: benchmarks/unity-webgl
 * **repository revision**: 61332db584026b73e37066d717a162825408c36b
+* **subtest lower is better**: false
+* **subtest unit**: score
 * **test url**: <http://\<host\>:\<port\>/index.html?raptor>
 * **type**: benchmark
 * **unit**: score

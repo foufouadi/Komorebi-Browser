@@ -935,6 +935,28 @@
         {
           "type": "object",
           "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["OPEN_ORGANIZE_TABS_PANEL"]
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "description": "Identifies the surface that opened the panel, recorded as the `source` extra key on the panel's telemetry. Defaults to \"message\"."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": ["type"],
+          "additionalProperties": false,
+          "description": "Opens the Smart Window \"Organize Tabs\" panel."
+        },
+        {
+          "type": "object",
+          "properties": {
             "data": {
               "anchor_id": {
                 "type": "string",

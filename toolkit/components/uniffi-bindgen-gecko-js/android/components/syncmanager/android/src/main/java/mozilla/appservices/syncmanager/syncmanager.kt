@@ -1773,6 +1773,8 @@ sealed class SyncManagerException(message: String): kotlin.Exception(message) {
         
         class UnsupportedFeature(message: String) : SyncManagerException(message)
         
+        class Busy(message: String) : SyncManagerException(message)
+        
         class Sync15Exception(message: String) : SyncManagerException(message)
         
         class UrlParseException(message: String) : SyncManagerException(message)
@@ -1802,13 +1804,14 @@ public object FfiConverterTypeSyncManagerError : FfiConverterRustBuffer<SyncMana
             return when(buf.getInt()) {
             1 -> SyncManagerException.UnknownEngine(FfiConverterString.read(buf))
             2 -> SyncManagerException.UnsupportedFeature(FfiConverterString.read(buf))
-            3 -> SyncManagerException.Sync15Exception(FfiConverterString.read(buf))
-            4 -> SyncManagerException.UrlParseException(FfiConverterString.read(buf))
-            5 -> SyncManagerException.InterruptedException(FfiConverterString.read(buf))
-            6 -> SyncManagerException.JsonException(FfiConverterString.read(buf))
-            7 -> SyncManagerException.LoginsException(FfiConverterString.read(buf))
-            8 -> SyncManagerException.PlacesException(FfiConverterString.read(buf))
-            9 -> SyncManagerException.AnyhowException(FfiConverterString.read(buf))
+            3 -> SyncManagerException.Busy(FfiConverterString.read(buf))
+            4 -> SyncManagerException.Sync15Exception(FfiConverterString.read(buf))
+            5 -> SyncManagerException.UrlParseException(FfiConverterString.read(buf))
+            6 -> SyncManagerException.InterruptedException(FfiConverterString.read(buf))
+            7 -> SyncManagerException.JsonException(FfiConverterString.read(buf))
+            8 -> SyncManagerException.LoginsException(FfiConverterString.read(buf))
+            9 -> SyncManagerException.PlacesException(FfiConverterString.read(buf))
+            10 -> SyncManagerException.AnyhowException(FfiConverterString.read(buf))
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
         
@@ -1828,32 +1831,36 @@ public object FfiConverterTypeSyncManagerError : FfiConverterRustBuffer<SyncMana
                 buf.putInt(2)
                 Unit
             }
-            is SyncManagerException.Sync15Exception -> {
+            is SyncManagerException.Busy -> {
                 buf.putInt(3)
                 Unit
             }
-            is SyncManagerException.UrlParseException -> {
+            is SyncManagerException.Sync15Exception -> {
                 buf.putInt(4)
                 Unit
             }
-            is SyncManagerException.InterruptedException -> {
+            is SyncManagerException.UrlParseException -> {
                 buf.putInt(5)
                 Unit
             }
-            is SyncManagerException.JsonException -> {
+            is SyncManagerException.InterruptedException -> {
                 buf.putInt(6)
                 Unit
             }
-            is SyncManagerException.LoginsException -> {
+            is SyncManagerException.JsonException -> {
                 buf.putInt(7)
                 Unit
             }
-            is SyncManagerException.PlacesException -> {
+            is SyncManagerException.LoginsException -> {
                 buf.putInt(8)
                 Unit
             }
-            is SyncManagerException.AnyhowException -> {
+            is SyncManagerException.PlacesException -> {
                 buf.putInt(9)
+                Unit
+            }
+            is SyncManagerException.AnyhowException -> {
+                buf.putInt(10)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }

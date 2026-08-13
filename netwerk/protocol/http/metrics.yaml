@@ -1749,7 +1749,6 @@ orb:
       - sefeng@mozilla.com
       - afarre@mozilla.com
     expires: never
-    telemetry_mirror: h#ORB_BLOCK_REASON
 
   block_initiator:
     type: labeled_counter
@@ -1791,7 +1790,6 @@ orb:
       - sefeng@mozilla.com
       - afarre@mozilla.com
     expires: never
-    telemetry_mirror: h#ORB_BLOCK_INITIATOR
 
 spdy:
   parallel_streams:

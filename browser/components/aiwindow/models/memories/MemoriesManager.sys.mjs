@@ -38,6 +38,8 @@ import {
   MAX_MEMORY_SUMMARY_LENGTH,
   MEMORY_FRECENCY_MAX_DAYS,
   MEMORY_MERGE_MIN_MEMORY_COUNT,
+  MAX_SESSIONS_FIRST_RUN,
+  MAX_SESSIONS_DELTA_RUN,
   MEMORY_TYPE_PROFILE_FACT,
   DEFAULT_RELEVANT_MEMORIES_TOP_K,
   DEFAULT_RELEVANT_MEMORIES_SIMILARITY_THRESHOLD,
@@ -56,19 +58,53 @@ import { AIWindow } from "moz-src:///browser/components/aiwindow/ui/modules/AIWi
 import { EveryWindow } from "resource:///modules/EveryWindow.sys.mjs";
 import { AIWindowAccountAuth } from "moz-src:///browser/components/aiwindow/ui/modules/AIWindowAccountAuth.sys.mjs";
 
-const DEFAULT_HISTORY_FULL_LOOKUP_DAYS = 20;
-const DEFAULT_HISTORY_FULL_MAX_RESULTS = 3000;
+const lazy = {};
+ChromeUtils.defineLazyGetter(lazy, "console", function () {
+  return console.createInstance({
+    prefix: "MemoriesManager",
+    maxLogLevelPref: "browser.smartwindow.memoriesLogLevel",
+  });
+});
+
+const DEFAULT_HISTORY_FULL_LOOKUP_DAYS = 7;
+const DEFAULT_HISTORY_FULL_MAX_RESULTS = 500;
 const DEFAULT_HISTORY_DELTA_MAX_RESULTS = 500;
 const DEFAULT_CHAT_FULL_MAX_RESULTS = 50;
 const DEFAULT_CHAT_HALF_LIFE_DAYS_FULL_RESULTS = 7;
 
 const LAST_SESSION_MEMORY_TS_ATTRIBUTE = "last_session_memory_ts";
+const LAST_GENERATION_RUN_TS_ATTRIBUTE = "last_generation_run_ts";
 
 const PREF_FIRSTRUN_HAS_COMPLETED = "browser.smartwindow.firstrun.hasCompleted";
 
 // Single shared detector instance, mirroring MemoriesChatSource /
 // MemoriesHistorySource usage.
 const _sensitiveInfoDetector = new SensitiveInfoDetector();
+
+/**
+ * Keeps at most `maxSessions` sessions, selecting the most recent ones.
+ *
+ * Selection is newest-first so that a backlog contributes its most recent
+ * activity rather than an arbitrary prefix. The result is returned in
+ * chronological order because the pipeline batches sessions in array order and
+ * advances `processedThroughMs` monotonically as batches complete, so an
+ * ascending run keeps that watermark contiguous with the work actually done.
+ *
+ * @param {Array<object>} sessions  Gated session bundles from `buildSessions`
+ * @param {number} maxSessions      Hard cap on sessions handed to the pipeline
+ * @returns {Array<object>}
+ *        At most `maxSessions` sessions, ascending by `session_end_ms`.
+ */
+function takeMostRecentSessions(sessions, maxSessions) {
+  if (sessions.length <= maxSessions) {
+    return sessions;
+  }
+  return sessions
+    .slice()
+    .sort((a, b) => b.session_end_ms - a.session_end_ms)
+    .slice(0, maxSessions)
+    .reverse();
+}
 
 /**
  * MemoriesManager class
@@ -235,8 +271,11 @@ export class MemoriesManager {
    *  2. Reads the single {@link getLastSessionMemoryTimestamp} watermark and
    *     pulls recent history rows and/or chat messages since it (delta), or a
    *     full lookup on first run. Disabled sources contribute `[]`.
-   *  3. Builds unified sessions via {@link buildSessions} and drops sessions
-   *     the heuristic gate marks `SKIP`.
+   *  3. Builds unified sessions via {@link buildSessions}, drops sessions the
+   *     heuristic gate marks `SKIP`, and keeps only the most recent
+   *     {@link MAX_SESSIONS_FIRST_RUN} (first run) or
+   *     {@link MAX_SESSIONS_DELTA_RUN} (delta) survivors, so one run cannot
+   *     issue an unbounded number of LLM calls.
    *  4. Runs the batched generate -> global filter pipeline.
    *  5. Persists survivors once and advances the unified watermark to the
    *     contiguous successfully-processed point.
@@ -259,12 +298,13 @@ export class MemoriesManager {
 
     const watermarkMs = await this.getLastSessionMemoryTimestamp();
     const isDelta = watermarkMs > 0;
+    const deltaStartMs = this.getSessionMemoryDeltaStartMs(watermarkMs);
 
     let historyRows = [];
     if (historyEnabled) {
       const recentHistoryOpts = isDelta
         ? {
-            sinceMicros: watermarkMs * 1000,
+            sinceMicros: deltaStartMs * 1000,
             maxResults: DEFAULT_HISTORY_DELTA_MAX_RESULTS,
           }
         : {
@@ -277,16 +317,30 @@ export class MemoriesManager {
     let chatMessages = [];
     if (conversationEnabled) {
       chatMessages = await this._getRecentChats(
-        isDelta ? watermarkMs : 0,
+        deltaStartMs,
         DEFAULT_CHAT_FULL_MAX_RESULTS,
         DEFAULT_CHAT_HALF_LIFE_DAYS_FULL_RESULTS
       );
     }
 
     const sessions = buildSessions(historyRows, chatMessages);
-    const retainedSessions = sessions.filter(
+    const gatedSessions = sessions.filter(
       session => runHeuristicGate(session).decision !== GATE_SKIP
     );
+
+    // Cap sessions after gating.
+    const maxSessions = isDelta
+      ? MAX_SESSIONS_DELTA_RUN
+      : MAX_SESSIONS_FIRST_RUN;
+    const retainedSessions = takeMostRecentSessions(gatedSessions, maxSessions);
+    if (retainedSessions.length < gatedSessions.length) {
+      lazy.console.debug(
+        "[generateMemoriesFromSessions] " +
+          `Capped ${gatedSessions.length} sessions to the ${maxSessions} most ` +
+          `recent; the older ${gatedSessions.length - retainedSessions.length} ` +
+          "will not be processed."
+      );
+    }
 
     if (!retainedSessions.length) {
       // Since no retainedSessions are present due to SKIP decisions, then advance
@@ -299,8 +353,8 @@ export class MemoriesManager {
       if (maxSessionEndMs > watermarkMs) {
         await this.setLastSessionMemoryTimestamp(maxSessionEndMs);
       }
-      console.warn(
-        "MemoriesManager.generateMemoriesFromSessions: " +
+      lazy.console.debug(
+        "[generateMemoriesFromSessions] " +
           "No sessions to process after gating; skipping memory generation."
       );
       return [];
@@ -496,6 +550,18 @@ export class MemoriesManager {
   }
 
   /**
+   * Converts the session-memory watermark into the start of the not-yet-processed
+   * range. The watermark is the last timestamp already processed. The next session
+   * must be +1 milliseconds later to avoid pulling events included in the last session.
+   *
+   * @param {number} watermarkMs   Value from {@link getLastSessionMemoryTimestamp}
+   * @returns {number}             Inclusive start for a delta read, 0 on first run
+   */
+  static getSessionMemoryDeltaStartMs(watermarkMs) {
+    return watermarkMs > 0 ? watermarkMs + 1 : 0;
+  }
+
+  /**
    * Persists the unified session-memory watermark.
    *
    * @param {number} tsMs  Milliseconds since Unix epoch
@@ -503,6 +569,29 @@ export class MemoriesManager {
    */
   static async setLastSessionMemoryTimestamp(tsMs) {
     await MemoryStore.updateMeta({ [LAST_SESSION_MEMORY_TS_ATTRIBUTE]: tsMs });
+  }
+
+  /**
+   * Returns when generation last ran (ms since Unix epoch).
+   *
+   * Profiles written before this was persisted seed from the last session
+   * memory watermark, which is never newer than the run that wrote it.
+   *
+   * @returns {Promise<number>}  Milliseconds since Unix epoch (0 if never run)
+   */
+  static async getLastGenerationRunTimestamp() {
+    const meta = await MemoryStore.getMeta();
+    return meta.last_generation_run_ts || meta.last_session_memory_ts || 0;
+  }
+
+  /**
+   * Persists when generation last ran.
+   *
+   * @param {number} tsMs  Milliseconds since Unix epoch
+   * @returns {Promise<void>}
+   */
+  static async setLastGenerationRunTimestamp(tsMs) {
+    await MemoryStore.updateMeta({ [LAST_GENERATION_RUN_TS_ATTRIBUTE]: tsMs });
   }
 
   /**

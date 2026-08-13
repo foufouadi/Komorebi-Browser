@@ -3,6 +3,7 @@ support-files = ["head.js"]
 
 prefs = [
   "browser.contentsharing.enabled=true",
+  "browser.urlbar.share-button.enabled=true",
 ]
 
 
@@ -26,6 +27,12 @@ support-files = [ "!/browser/components/places/tests/browser/head.js"]
 ["browser_testShareFolderEmpties.js"]
 support-files = [ "!/browser/components/places/tests/browser/head.js"]
 
+["browser_testSharePanelCopyLink.js"]
+
+["browser_testSharePanelScreenshot.js"]
+
 ["browser_testShareTabGroup.js"]
 
 ["browser_testShareTabs.js"]
+
+["browser_urlbar_share_button.js"]

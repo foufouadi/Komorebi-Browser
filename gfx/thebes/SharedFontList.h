@@ -39,7 +39,7 @@ struct Pointer {
  public:
   static Pointer Null() { return Pointer(); }
 
-  Pointer() : mBlockAndOffset(kNullValue) {}
+  Pointer() = default;
 
   Pointer(uint32_t aBlock, uint32_t aOffset)
       : mBlockAndOffset((aBlock << kBlockShift) | aOffset) {
@@ -103,7 +103,7 @@ struct Pointer {
   // We store the block index and the offset within the block as a single
   // atomic 32-bit value so we can safely modify a Pointer without other
   // processes seeing a broken (partially-updated) value.
-  std::atomic<uint32_t> mBlockAndOffset;
+  std::atomic<uint32_t> mBlockAndOffset{kNullValue};
 };
 
 /**

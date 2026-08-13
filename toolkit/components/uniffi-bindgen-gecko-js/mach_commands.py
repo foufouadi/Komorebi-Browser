@@ -7,7 +7,6 @@ import logging
 import os
 import subprocess
 import sys
-import textwrap
 from collections import namedtuple
 
 import mozpack.path as mozpath
@@ -39,34 +38,9 @@ def _uniffi_objdir(topsrcdir):
     return mozpath.join(topsrcdir, "obj-uniffi-generate")
 
 
-def _ensure_uniffi_mozconfig(uniffi_objdir):
-    if not os.path.isdir(uniffi_objdir):
-        os.makedirs(uniffi_objdir)
-
-    mozconfig_path = mozpath.join(uniffi_objdir, "mozconfig")
-    contents = textwrap.dedent(
-        f"""\
-        ac_add_options --enable-application=browser
-        ac_add_options --enable-appservices-in-tree
-
-        mk_add_options MOZ_OBJDIR={uniffi_objdir}
-        """
-    )
-
-    if os.path.isfile(mozconfig_path):
-        with open(mozconfig_path, encoding="utf-8") as f:
-            if f.read() == contents:
-                return mozconfig_path
-
-    with open(mozconfig_path, "w", encoding="utf-8") as f:
-        f.write(contents)
-    return mozconfig_path
-
-
 def build_uniffi_targets(command_context):
     # Use a dedicated objdir so we can run this without the user having to change their mozconfig.
     uniffi_objdir = _uniffi_objdir(command_context.topsrcdir)
-    mozconfig_path = _ensure_uniffi_mozconfig(uniffi_objdir)
 
     command_context.log(
         logging.WARNING,
@@ -76,14 +50,13 @@ def build_uniffi_targets(command_context):
     )
 
     env = os.environ.copy()
-    env["MOZCONFIG"] = mozconfig_path
+    env["MOZCONFIG"] = mozpath.join(
+        command_context.topsrcdir,
+        "toolkit/components/uniffi-bindgen-gecko-js/uniffi-mozconfig",
+    )
+    env["MOZ_OBJDIR"] = uniffi_objdir
     mach_path = mozpath.join(command_context.topsrcdir, "mach")
 
-    subprocess.check_call(
-        [sys.executable, mach_path, "configure"],
-        env=env,
-        cwd=command_context.topsrcdir,
-    )
     subprocess.check_call(
         [
             sys.executable,

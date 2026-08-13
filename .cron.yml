@@ -550,3 +550,14 @@ jobs:
           - mozilla-central
       when:
           - {hour: 10, minute: 0}
+
+    - name: devtools-backward-compat
+      job:
+          type: decision-task
+          treeherder-symbol: DTbc
+          target-tasks-method: devtools_backward_compat
+      run-on-projects:
+          - mozilla-central
+      # Replaces manual smoke tests from the DevTools release checklist.
+      when:
+          - {hour: 8, minute: 0}

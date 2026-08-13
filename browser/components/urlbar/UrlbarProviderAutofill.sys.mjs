@@ -1022,9 +1022,12 @@ export class UrlbarProviderAutofill extends UrlbarProvider {
       payload.title = title;
     } else {
       let trimHttps = lazy.UrlbarPrefs.getScotchBonnetPref("trimHttps");
-      let displaySpec = UrlbarUtils.prepareUrlForDisplay(finalCompleteValue, {
-        trimURL: false,
-      });
+      let displaySpec = lazy.UrlbarShared.prepareUrlForDisplay(
+        finalCompleteValue,
+        {
+          trimURL: false,
+        }
+      );
       let [fallbackTitle] = lazy.UrlbarShared.stripPrefixAndTrim(displaySpec, {
         stripHttp: !trimHttps,
         stripHttps: trimHttps,

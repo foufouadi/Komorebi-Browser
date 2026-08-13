@@ -383,14 +383,15 @@ add_task(async function test_loading_state_shimmer_and_swap() {
         "Searching tabs",
         "The pending label is shown while loading"
       );
-      // The expand chevron is hidden while loading (not interactive yet).
-      Assert.equal(
+      // The expand chevron stays visible while loading so the card can be
+      // expanded mid-flight to reveal the in-progress steps.
+      Assert.notEqual(
         content.getComputedStyle(
           shadow.querySelector(".action-result-header"),
           "::after"
         ).display,
         "none",
-        "The expand chevron is hidden while loading"
+        "The expand chevron is shown while loading"
       );
     });
 
@@ -423,6 +424,40 @@ add_task(async function test_loading_state_shimmer_and_swap() {
         ).display,
         "none",
         "The expand chevron is shown again once completed"
+      );
+    });
+  });
+});
+
+add_task(async function test_expand_while_loading() {
+  await withTestPage(async browser => {
+    await setProps(browser, {
+      label: "Searching the web with Exa",
+      rows: [{ label: "Searching the web with Exa", items: [] }],
+      isLoading: true,
+    });
+
+    await SpecialPowers.spawn(browser, [], async () => {
+      const el = content.document.getElementById("test-action-result");
+      const shadow = el.shadowRoot;
+
+      Assert.ok(
+        el.hasAttribute("shimmering"),
+        "Card is shimmering while loading"
+      );
+      Assert.ok(
+        !shadow.querySelector(".action-result-expanded"),
+        "Not expanded initially"
+      );
+
+      const header = shadow.querySelector(".action-result-header");
+      header.getBoundingClientRect();
+      header.click();
+      await el.updateComplete;
+
+      Assert.ok(
+        shadow.querySelector(".action-result-expanded"),
+        "The card can be expanded while still loading"
       );
     });
   });

@@ -443,7 +443,7 @@ SVGBBox SVGGeometryFrame::GetBBoxContribution(const Matrix& aToBBoxUserspace,
     // lazily: when both fill and stroke bounds are requested, the stroke
     // bounds below are computed from pathInUserSpace and the transformed
     // copy is only needed on the rare empty-stroke fallback.
-    auto getBoundsInBBoxSpace = [&]() -> std::pair<bool, Rect> {
+    auto getBoundsInBBoxSpace = [&]() -> Maybe<Rect> {
       RefPtr<Path> pathInBBoxSpace;
       if (aToBBoxUserspace.IsIdentity()) {
         pathInBBoxSpace = pathInUserSpace;
@@ -452,22 +452,22 @@ SVGBBox SVGGeometryFrame::GetBBoxContribution(const Matrix& aToBBoxUserspace,
             aToBBoxUserspace, fillRule);
         pathInBBoxSpace = builder->Finish();
         if (!pathInBBoxSpace) {
-          return {false, Rect()};
+          return Nothing();
         }
       }
       Rect rect = pathInBBoxSpace->GetBounds();
-      return {rect.IsFinite(), rect};
+      return rect.IsFinite() ? Some(rect) : Nothing();
     };
 
     // Account for fill:
     if (getFill && !getStroke) {
-      auto [ok, pathBBoxExtents] = getBoundsInBBoxSpace();
-      if (!ok) {
+      Maybe<Rect> pathBBoxExtents = getBoundsInBBoxSpace();
+      if (!pathBBoxExtents) {
         // This can happen in the case that we only have a move-to command in
         // the path commands, in which case we know nothing gets rendered.
         return bbox;
       }
-      bbox = pathBBoxExtents;
+      bbox = pathBBoxExtents.value();
     }
 
     // Account for stroke:
@@ -505,19 +505,20 @@ SVGBBox SVGGeometryFrame::GetBBoxContribution(const Matrix& aToBBoxUserspace,
               strokeOptions, aToBBoxUserspace);
         }
         if (strokeBBoxExtents.IsEmpty() && getFill) {
-          auto [ok, pathBBoxExtents] = getBoundsInBBoxSpace();
-          if (!ok) {
+          Maybe<Rect> pathBBoxExtents = getBoundsInBBoxSpace();
+          if (!pathBBoxExtents) {
             return bbox;
           }
-          strokeBBoxExtents = pathBBoxExtents;
+          strokeBBoxExtents = pathBBoxExtents.value();
         }
       } else {
-        auto [ok, pathBBoxExtents] = getBoundsInBBoxSpace();
-        if (!ok) {
+        Maybe<Rect> pathBBoxExtents = getBoundsInBBoxSpace();
+        if (!pathBBoxExtents) {
           return bbox;
         }
         strokeBBoxExtents = ToRect(SVGUtils::PathExtentsToMaxStrokeExtents(
-            ThebesRect(pathBBoxExtents), this, ThebesMatrix(aToBBoxUserspace)));
+            ThebesRect(pathBBoxExtents.value()), this,
+            ThebesMatrix(aToBBoxUserspace)));
       }
       if (!strokeBBoxExtents.IsFinite()) {
         return bbox;

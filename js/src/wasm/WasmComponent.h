@@ -826,8 +826,15 @@ class ComponentExternDesc {
     return coreModuleIndex_;
   }
 
-  static bool matches(const ComponentExternDesc& sub,
-                      const ComponentExternDesc& super);
+  // Checks whether an item can be ascribed the given new externdesc, e.g. a
+  // defined resource type being ascribed the (sub resource) type bound.
+  // `isNewSubResource` should be true if attempting to ascribe `(sub resource)`
+  // _and_ the `(sub resource)` was part of the current definition (as opposed
+  // to an eq of a previously-defined `(sub resource)`); i.e. are we
+  // "generating" the resource type now or did we already generate it?
+  static bool compatible(const ComponentExternDesc& defined,
+                         const ComponentExternDesc& ascribed,
+                         bool isNewSubResource);
 };
 
 static_assert(std::is_default_constructible_v<ComponentExternDesc>);

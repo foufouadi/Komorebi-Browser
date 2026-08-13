@@ -114,10 +114,10 @@ struct FileHandleHelper {
 #endif
   }
 
-  MOZ_IMPLICIT constexpr FileHandleHelper() : mHandle(kInvalidHandle) {}
+  MOZ_IMPLICIT constexpr FileHandleHelper() = default;
 
   MOZ_IMPLICIT constexpr FileHandleHelper(std::nullptr_t)
-      : mHandle(kInvalidHandle) {}
+      : FileHandleHelper() {}
 
   static bool IsValid(FileHandleType aHandle) {
 #ifdef XP_WIN
@@ -154,7 +154,7 @@ struct FileHandleHelper {
   }
 
  private:
-  FileHandleType mHandle;
+  FileHandleType mHandle{kInvalidHandle};
 
 #ifdef XP_WIN
   // See above for why this is nullptr.  (Also, INVALID_HANDLE_VALUE

@@ -23,7 +23,11 @@ import {
 } from "chrome://global/content/ml/ClusterAlgos.sys.mjs";
 
 import { AIFeature } from "chrome://global/content/ml/AIFeature.sys.mjs";
-import { EmbeddingsGenerator } from "chrome://global/content/ml/EmbeddingsGenerator.sys.mjs";
+import { embeddingsGeneratorFactory } from "chrome://global/content/ml/EmbeddingsGenerator.sys.mjs";
+
+/**
+ * @typedef {import("chrome://global/content/ml/EmbeddingsGenerator.sys.mjs").EmbeddingsGenerator} EmbeddingsGenerator
+ */
 
 const lazy = {};
 
@@ -129,8 +133,8 @@ const LABEL_REASONS = {
 };
 
 export const SMART_TAB_GROUPING_CONFIG = {
-  // Embeddings use the shared EmbeddingsGenerator.forGeneral() model; see
-  // _generateEmbeddings.
+  // Embeddings use the shared embeddingsGeneratorFactory.forGeneral() model;
+  // see _generateEmbeddings.
   topicGeneration: {
     dtype: "q8",
     timeoutMS: 2 * 60 * 1000, // 2 minutes
@@ -421,7 +425,7 @@ export class SmartTabGroupingManager extends AIFeature {
    */
   getEmbeddingsGenerator() {
     if (!this.embeddingsGenerator) {
-      this.embeddingsGenerator = EmbeddingsGenerator.forGeneral();
+      this.embeddingsGenerator = embeddingsGeneratorFactory.forGeneral();
     }
     return this.embeddingsGenerator;
   }

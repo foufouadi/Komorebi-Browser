@@ -150,6 +150,11 @@ browsertime-ref-hw:
     - browsertime-benchmark
     - browsertime-nav-bench
 
+devtools-compat:
+    - devtools-compat-same-version
+    - devtools-compat-beta
+    - devtools-compat-release
+
 awsy:
     - awsy
     - awsy-base
@@ -189,6 +194,7 @@ linux-tests:
     - mochitest-a11y
     - mochitest-browser-a11y
     - mochitest-browser-chrome
+    - mochitest-browser-chrome-ml-models
     - mochitest-browser-media
     - mochitest-browser-translations
     - mochitest-chrome
@@ -478,6 +484,7 @@ macosx1500-aarch64-tests:
     - jittest
     - mochitest-a11y
     - mochitest-browser-a11y
+    - mochitest-browser-chrome
     - mochitest-browser-media
     - mochitest-browser-translations
     - mochitest-chrome
@@ -540,7 +547,6 @@ macosx1015-64-qr-tests:
     - cppunittest
     - crashtest
     - jittest
-    - mochitest-browser-chrome
     - mochitest-media
     - mochitest-webgl1-core
     - mochitest-webgl1-ext

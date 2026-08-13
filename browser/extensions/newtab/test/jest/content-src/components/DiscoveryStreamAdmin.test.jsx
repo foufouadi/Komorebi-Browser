@@ -498,6 +498,20 @@ describe("<DiscoveryStreamAdminUI>", () => {
         ac.SetPref("widgets.pictureOfTheDay.setAsWallpaper.enabled", true)
       );
     });
+
+    it("should flip the privacy VPN messages pref from its toggle", () => {
+      const { container, dispatch } = renderWidgets({
+        "widgets.system.enabled": true,
+        "widgets.privacy.showVpnMessages": false,
+      });
+      fireToggle(
+        container.querySelector('[id="widgets.privacy.showVpnMessages"]'),
+        true
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref("widgets.privacy.showVpnMessages", true)
+      );
+    });
   });
 });
 

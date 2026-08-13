@@ -1299,7 +1299,6 @@ public class GeckoAppShell {
 
   @RequiresApi(Build.VERSION_CODES.S)
   private static class AndroidSScreenCompat implements ScreenCompat {
-    @SuppressLint("StaticFieldLeak")
     private final SimpleArrayMap<Integer, Context> mWindowContextMap = new SimpleArrayMap<>();
 
     private final ComponentCallbacks mComponentCallbacks =

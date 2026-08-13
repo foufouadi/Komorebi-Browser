@@ -10,7 +10,6 @@ support-files = [
 # the native onnxruntime (matches browser_ml_native.js skip-if).
 ["browser_ml_best_onnx.js"]
 skip-if = [
-  "arch == 'x86'",
   "asan",
   "debug",
   "os == 'android'",
@@ -47,7 +46,6 @@ support-files = ["ml_engine_e2e_cancel_stub.worker.mjs"]
 
 ["browser_ml_inference_session_error.js"]
 skip-if = [
-  "arch == 'x86'",
   "asan", # global onnxruntime env leaks its thread pool; trips leakcheck
   "debug", # same
   "os == 'android'",
@@ -61,7 +59,6 @@ support-files = [
 
 ["browser_ml_native.js"]
 skip-if = [
-  "arch == 'x86'",
   "asan",
   "debug",
   "os == 'android'",
@@ -100,7 +97,6 @@ support-files = [
 
 ["browser_ml_utf8_codepoint.js"]
 skip-if = [
-  "arch == 'x86'",
   "asan",
   "debug",
   "os == 'android'",

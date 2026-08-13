@@ -198,6 +198,7 @@ class nsWaylandDisplay {
   bool RemoveMonitorConfig(int aId);
 
   bool IsTFSupported(int aTF);
+  bool IsSetMDCVSupported();
 
   ~nsWaylandDisplay();
 

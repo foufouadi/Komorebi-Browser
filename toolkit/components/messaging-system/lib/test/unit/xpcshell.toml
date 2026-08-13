@@ -3,3 +3,5 @@ tags = "messaging-system"
 firefox-appdir = "browser"
 
 ["test_MessagingSystemAllowlists.js"]
+
+["test_MessagingSystemBlocklists.js"]

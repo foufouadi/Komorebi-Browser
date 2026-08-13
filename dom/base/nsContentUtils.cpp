@@ -330,7 +330,6 @@
 #include "nsILoadGroup.h"
 #include "nsILoadInfo.h"
 #include "nsIMIMEService.h"
-#include "nsIMemoryReporter.h"
 #include "nsINetUtil.h"
 #include "nsINode.h"
 #include "nsIObjectLoadingContent.h"
@@ -680,41 +679,15 @@ static constexpr nsAttrValue::EnumTableEntry
 
 namespace {
 
-static StaticAutoPtr<nsTHashMap<const nsINode*, RefPtr<EventListenerManager>>>
-    sEventListenerManagersHash;
+// Non-owning list of the managers nodes store themselves; the managers remove
+// themselves from it when deleted.  Documents keep their manager in
+// Document::mListenerManager and are not in this list.
+constinit DoublyLinkedList<EventListenerManager> sNodeEventListenerManagers;
 
 // A global hashtable to for keeping the arena alive for cross docGroup node
 // adoption.
 static nsRefPtrHashtable<nsPtrHashKey<const nsINode>, mozilla::dom::DOMArena>*
     sDOMArenaHashtable;
-
-class DOMEventListenerManagersHashReporter final : public nsIMemoryReporter {
-  MOZ_DEFINE_MALLOC_SIZE_OF(MallocSizeOf)
-
-  ~DOMEventListenerManagersHashReporter() = default;
-
- public:
-  NS_DECL_ISUPPORTS
-
-  NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
-                            nsISupports* aData, bool aAnonymize) override {
-    // We don't measure the |EventListenerManager| objects pointed to by the
-    // entries because those references are non-owning.
-    int64_t amount =
-        sEventListenerManagersHash
-            ? sEventListenerManagersHash->ShallowSizeOfIncludingThis(
-                  MallocSizeOf)
-            : 0;
-
-    MOZ_COLLECT_REPORT(
-        "explicit/dom/event-listener-managers-hash", KIND_HEAP, UNITS_BYTES,
-        amount, "Memory used by the event listener manager's hash table.");
-
-    return NS_OK;
-  }
-};
-
-NS_IMPL_ISUPPORTS(DOMEventListenerManagersHashReporter, nsIMemoryReporter)
 
 class SameOriginCheckerImpl final : public nsIChannelEventSink,
                                     public nsIInterfaceRequestor {
@@ -1288,14 +1261,6 @@ nsresult nsContentUtils::Init() {
   fingerprintingProtectionPrincipal.forget(&sFingerprintingProtectionPrincipal);
 
   if (!InitializeEventTable()) return NS_ERROR_FAILURE;
-
-  if (!sEventListenerManagersHash) {
-    sEventListenerManagersHash =
-        new nsTHashMap<const nsINode*, RefPtr<EventListenerManager>>();
-
-    RegisterStrongMemoryReporter(
-        MakeAndAddRef<DOMEventListenerManagersHashReporter>());
-  }
 
   sBlockedScriptRunners = new AutoTArray<nsCOMPtr<nsIRunnable>, 8>;
 
@@ -2460,23 +2425,10 @@ void nsContentUtils::Shutdown() {
   delete sUserDefinedEvents;
   sUserDefinedEvents = nullptr;
 
-  if (sEventListenerManagersHash) {
-    NS_ASSERTION(sEventListenerManagersHash->Count() == 0,
-                 "Event listener manager hash not empty at shutdown!");
-
-    // See comment above.
-
-    // However, we have to handle this table differently.  If it still
-    // has entries, we want to leak it too, so that we can keep it alive
-    // in case any elements are destroyed.  Because if they are, we need
-    // their event listener managers to be destroyed too, or otherwise
-    // it could leave dangling references in DOMClassInfo's preserved
-    // wrapper table.
-
-    if (sEventListenerManagersHash->Count() == 0) {
-      sEventListenerManagersHash = nullptr;
-    }
-  }
+  // Managers left in the list remove themselves from it when they're deleted,
+  // which can happen after this point.
+  NS_ASSERTION(sNodeEventListenerManagers.isEmpty(),
+               "Node event listener manager list not empty at shutdown!");
 
   MOZ_ASSERT_IF(sDOMArenaHashtable, sDOMArenaHashtable->Count() == 0);
   delete sDOMArenaHashtable;
@@ -6710,73 +6662,29 @@ void nsContentUtils::NotifyDevToolsOfNodeRemoval(nsINode& aRemovingNode) {
 }
 
 void nsContentUtils::UnmarkGrayJSListenersInCCGenerationDocuments() {
-  if (!sEventListenerManagersHash) {
-    return;
-  }
-
-  for (EventListenerManager* mgr : sEventListenerManagersHash->Values()) {
-    nsINode* n = static_cast<nsINode*>(mgr->GetTarget());
+  for (EventListenerManager& mgr : sNodeEventListenerManagers) {
+    nsINode* n = static_cast<nsINode*>(mgr.GetTarget());
     if (n && n->IsInComposedDoc() &&
         nsCCUncollectableMarker::InGeneration(
             n->OwnerDoc()->GetMarkedCCGeneration())) {
-      mgr->MarkForCC();
+      mgr.MarkForCC();
     }
   }
 }
 
 /* static */
-void nsContentUtils::TraverseListenerManager(
-    nsINode* aNode, nsCycleCollectionTraversalCallback& cb) {
-  if (!sEventListenerManagersHash) {
-    // We're already shut down, just return.
-    return;
-  }
-
-  auto entry = sEventListenerManagersHash->Lookup(aNode);
-  if (entry) {
-    CycleCollectionNoteChild(cb, entry->get(), "[via hash] mListenerManager");
-  }
+void nsContentUtils::AddNodeListenerManager(EventListenerManager* aManager) {
+  MOZ_ASSERT(NS_IsMainThread());
+  sNodeEventListenerManagers.pushBack(aManager);
 }
 
-EventListenerManager* nsContentUtils::GetListenerManagerForNode(
-    nsINode* aNode) {
-  if (!sEventListenerManagersHash) {
-    // We're already shut down, don't bother creating an event listener
-    // manager.
-
-    return nullptr;
+/* static */
+void nsContentUtils::RemoveNodeListenerManager(EventListenerManager* aManager) {
+  MOZ_ASSERT(NS_IsMainThread());
+  // ~EventListenerManager passes here managers which are not in the list.
+  if (sNodeEventListenerManagers.ElementProbablyInList(aManager)) {
+    sNodeEventListenerManagers.remove(aManager);
   }
-
-  auto& entry = sEventListenerManagersHash->LookupOrInsert(aNode);
-
-  if (!entry) {
-    entry = new EventListenerManager(aNode);
-
-    aNode->SetFlags(NODE_HAS_LISTENERMANAGER);
-  }
-
-  return entry;
-}
-
-EventListenerManager* nsContentUtils::GetExistingListenerManagerForNode(
-    const nsINode* aNode) {
-  if (!aNode->HasFlag(NODE_HAS_LISTENERMANAGER)) {
-    return nullptr;
-  }
-
-  if (!sEventListenerManagersHash) {
-    // We're already shut down, don't bother creating an event listener
-    // manager.
-
-    return nullptr;
-  }
-
-  auto entry = sEventListenerManagersHash->Lookup(aNode);
-  if (entry) {
-    return entry.Data();
-  }
-
-  return nullptr;
 }
 
 void nsContentUtils::AddEntryToDOMArenaTable(nsINode* aNode,
@@ -6804,19 +6712,6 @@ already_AddRefed<DOMArena> nsContentUtils::TakeEntryFromDOMArenaTable(
   RefPtr<DOMArena> arena;
   sDOMArenaHashtable->Remove(aNode, getter_AddRefs(arena));
   return arena.forget();
-}
-
-/* static */
-void nsContentUtils::RemoveListenerManager(nsINode* aNode) {
-  if (sEventListenerManagersHash) {
-    // Remove the entry and *then* do operations that could cause further
-    // modification of sEventListenerManagersHash.  See bug 334177.
-    Maybe<RefPtr<EventListenerManager>> listenerManager =
-        sEventListenerManagersHash->Extract(aNode);
-    if (listenerManager && *listenerManager) {
-      (*listenerManager)->Disconnect();
-    }
-  }
 }
 
 /* static */
@@ -11672,30 +11567,95 @@ static bool StartSerializingShadowDOM(
     return false;
   }
 
+  // https://html.spec.whatwg.org/#html-fragment-serialisation-algorithm
+  // steps 4-12
+
+  // 4.2.1. Append "<template shadowrootmode="".
   aBuilder.Append(u"<template shadowrootmode=\"");
+
+  // 4.2.2. If shadow's mode is "open", then append "open". Otherwise, append
+  //    "closed".
+  // 3. Append U+0022 (").
   if (shadow->IsClosed()) {
     aBuilder.Append(u"closed\"");
   } else {
     aBuilder.Append(u"open\"");
   }
 
+  // 4. If shadow's delegates focus is set, then append "
+  // shadowrootdelegatesfocus=""".
   if (shadow->DelegatesFocus()) {
     aBuilder.Append(u" shadowrootdelegatesfocus=\"\"");
   }
+
+  // 5. If shadow's serializable is set, then append "
+  //    shadowrootserializable=""".
   if (shadow->Serializable()) {
     aBuilder.Append(u" shadowrootserializable=\"\"");
   }
+
+  // 6. If shadow's slot assignment is "manual", then append "
+  // shadowrootslotassignment="manual"".
   if (StaticPrefs::dom_shadowdom_shadowRootSlotAssignment_enabled() &&
       shadow->SlotAssignment() == SlotAssignmentMode::Manual) {
     aBuilder.Append(u" shadowrootslotassignment=\"manual\"");
   }
+
+  // 7. If shadow's slot assignment is "manual", then append "
+  // shadowrootslotassignment="manual"".
   if (shadow->Clonable()) {
     aBuilder.Append(u" shadowrootclonable=\"\"");
   }
 
+  auto isGlobalCustomElementRegistry = [](CustomElementRegistry* registry) {
+    return registry && !registry->IsScoped();
+  };
+
+  // 8. Let shouldAppendRegistryAttribute be the result of running these steps:
+  const bool shouldAppendRegistryAttribute = [&]() {
+    if (!StaticPrefs::dom_scoped_custom_element_registries_enabled()) {
+      return false;
+    }
+
+    // 8.1. Let documentRegistry be shadow's node document's custom element
+    //    registry.
+    CustomElementRegistry* documentRegistry =
+        shadow->OwnerDoc()->GetCustomElementRegistry();
+    // 8.2. Let shadowRegistry be shadow's custom element registry.
+    CustomElementRegistry* shadowRegistry = shadow->GetCustomElementRegistry();
+
+    // 8.3. If documentRegistry is null and shadowRegistry is null, then return
+    //    false.
+    if (!documentRegistry && !shadowRegistry) {
+      return false;
+    }
+    // 8.4. If documentRegistry is a global custom element registry and
+    //    shadowRegistry is a global custom element registry, then return
+    //    false.
+    else if (isGlobalCustomElementRegistry(documentRegistry) &&
+             isGlobalCustomElementRegistry(shadowRegistry)) {
+      return false;
+    }
+
+    // 8.5. Return true.
+    return true;
+  }();
+
+  // 9. If shouldAppendRegistryAttribute is true, then append "
+  //    shadowrootcustomelementregistry=""".
+  if (shouldAppendRegistryAttribute) {
+    aBuilder.Append(u" shadowrootcustomelementregistry=\"\"");
+  }
+
+  // 10. Append U+003E (>).
   aBuilder.Append(u">");
 
+  // 11. Append the value of running the HTML fragment serialization algorithm
+  //     with shadow, serializableShadowRoots, and shadowRoots (thus recursing
+  //     into this algorithm for that element).
+  // (Returning `true` tells the caller to continue).
   if (!shadow->HasChildren()) {
+    // 12. Append "</template>".
     aBuilder.Append(u"</template>");
     return false;
   }

@@ -63,6 +63,7 @@
 #include "DOMMediaStream.h"
 #include "MediaManager.h"
 #include "MediaStreamTrack.h"
+#include "PeerConnectionImpl.h"
 #include "RTCDataChannel.h"
 #include "RTCDtlsTransport.h"
 #include "RTCIceCandidate.h"
@@ -272,16 +273,17 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(PeerConnectionImpl)
   tmp->BreakCycles();
   NS_IMPL_CYCLE_COLLECTION_UNLINK(
       mPCObserver, mWindow, mCertificate, mSTSThread, mReceiveStreams,
-      mOperations, mTransportIdToRTCDtlsTransport, mSctpTransport,
-      mLastStableSctpTransport, mLastStableSctpDtlsTransport, mKungFuDeathGrip)
+      mOperations, mMainthreadDatachannels, mTransportIdToRTCDtlsTransport,
+      mSctpTransport, mLastStableSctpTransport, mLastStableSctpDtlsTransport,
+      mKungFuDeathGrip)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(PeerConnectionImpl)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(
       mPCObserver, mWindow, mCertificate, mSTSThread, mReceiveStreams,
-      mOperations, mTransceivers, mTransportIdToRTCDtlsTransport,
-      mSctpTransport, mLastStableSctpTransport, mLastStableSctpDtlsTransport,
-      mKungFuDeathGrip)
+      mOperations, mTransceivers, mMainthreadDatachannels,
+      mTransportIdToRTCDtlsTransport, mSctpTransport, mLastStableSctpTransport,
+      mLastStableSctpDtlsTransport, mKungFuDeathGrip)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(PeerConnectionImpl)
@@ -1069,11 +1071,12 @@ PeerConnectionImpl::CreateDataChannel(
   RefPtr<RTCDataChannel> retval;
   rv = NS_NewDOMDataChannel(dataChannel.forget(), aLabel, mOrigin, ordered,
                             maxLifeTime, maxRetransmits, aProtocol,
-                            aExternalNegotiated, mWindow,
+                            aExternalNegotiated, this, mWindow,
                             getter_AddRefs(retval));
   if (NS_FAILED(rv)) {
     return rv;
   }
+  mMainthreadDatachannels.AppendElement(retval);
   retval.forget(aRetval);
   return NS_OK;
 }
@@ -1365,11 +1368,12 @@ void PeerConnectionImpl::NotifyDataChannel(
   CSFLogDebug(LOGTAG, "%s: channel: %p", __FUNCTION__, channel.get());
 
   RefPtr<RTCDataChannel> domchannel;
-  nsresult rv =
-      NS_NewDOMDataChannel(channel.forget(), aLabel, mOrigin, aOrdered,
-                           aMaxLifeTime, aMaxRetransmits, aProtocol,
-                           aNegotiated, mWindow, getter_AddRefs(domchannel));
+  nsresult rv = NS_NewDOMDataChannel(channel.forget(), aLabel, mOrigin,
+                                     aOrdered, aMaxLifeTime, aMaxRetransmits,
+                                     aProtocol, aNegotiated, this, mWindow,
+                                     getter_AddRefs(domchannel));
   NS_ENSURE_SUCCESS_VOID(rv);
+  mMainthreadDatachannels.AppendElement(domchannel);
 
   domchannel->SetReadyState(RTCDataChannelState::Open);
 

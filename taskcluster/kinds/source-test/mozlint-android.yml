@@ -134,6 +134,7 @@ fenix:
             - 'mobile/android/config/**'
             - 'mobile/android/gradle.configure'
             - 'mobile/android/**/moz.build'
+            - 'mobile/android/shared-lint.xml'
             - '**/*.gradle'
             # Other misc lint related files.
             - 'python/mozlint/**'
@@ -162,6 +163,7 @@ focus:
             - 'mobile/android/config/**'
             - 'mobile/android/gradle.configure'
             - 'mobile/android/**/moz.build'
+            - 'mobile/android/shared-lint.xml'
             - '**/*.gradle'
             # Other misc lint related files.
             - 'python/mozlint/**'

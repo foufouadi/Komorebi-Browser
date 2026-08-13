@@ -555,6 +555,7 @@ function Widgets() {
           <moz-button
             id="toggle-widgets-size-button"
             className={`widgets-expand-button${isMaximized ? " is-maximized" : ""}`}
+            size="small"
             data-l10n-id={
               isMaximized
                 ? "newtab-widget-section-minimize"

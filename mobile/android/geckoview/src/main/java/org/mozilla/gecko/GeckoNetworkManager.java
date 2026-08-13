@@ -4,7 +4,6 @@
 
 package org.mozilla.gecko;
 
-import android.annotation.SuppressLint;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -557,7 +556,6 @@ public class GeckoNetworkManager extends BroadcastReceiver {
         return 0;
       }
 
-      @SuppressLint("MissingPermission")
       final DhcpInfo d = mgr.getDhcpInfo();
       if (d == null) {
         return 0;

@@ -98,6 +98,7 @@ CycleCollectedJSContext::~CycleCollectedJSContext() {
   mPendingException = nullptr;
 
   mUncaughtRejections.reset();
+  mUncaughtRejectionIndices.Clear();
   mConsumedRejections.reset();
 
   mAboutToBeNotifiedRejectedPromises.Clear();
@@ -388,30 +389,29 @@ void CycleCollectedJSContext::PromiseRejectionTrackerCallback(
   uint64_t promiseID = JS::GetPromiseID(aPromise);
 
   if (state == JS::PromiseRejectionHandlingState::Unhandled) {
-    PromiseDebugging::AddUncaughtRejection(aPromise);
+    PromiseDebugging::AddUncaughtRejection(aPromise, promiseID);
     if (!aMutedErrors) {
       RefPtr<Promise> promise =
           Promise::CreateFromExisting(xpc::NativeGlobal(aPromise), aPromise);
+      size_t index = aboutToBeNotified.Length();
       aboutToBeNotified.AppendElement(promise);
-      unhandled.InsertOrUpdate(promiseID, std::move(promise));
+      unhandled.InsertOrUpdate(promiseID,
+                               PendingRejection{std::move(promise), index});
     }
   } else {
-    PromiseDebugging::AddConsumedRejection(aPromise);
-    for (size_t i = 0; i < aboutToBeNotified.Length(); i++) {
-      if (aboutToBeNotified[i] &&
-          aboutToBeNotified[i]->PromiseObj() == aPromise) {
-        // To avoid large amounts of memmoves, we don't shrink the vector
-        // here. Instead, we filter out nullptrs when iterating over the
-        // vector later.
-        aboutToBeNotified[i] = nullptr;
-        DebugOnly<bool> isFound = unhandled.Remove(promiseID);
-        MOZ_ASSERT(isFound);
-        return;
+    PromiseDebugging::AddConsumedRejection(aPromise, promiseID);
+    if (Maybe<PendingRejection> pending = unhandled.Extract(promiseID)) {
+      // The stored index outlives the array whenever AfterProcessMicrotasks
+      // hands it off, so only clear the slot if it still holds this promise.
+      // To avoid large amounts of memmoves, we don't shrink the vector here.
+      // Instead, we filter out nullptrs when iterating over the vector later.
+      if (pending->mIndex < aboutToBeNotified.Length() &&
+          aboutToBeNotified[pending->mIndex] == pending->mPromise) {
+        aboutToBeNotified[pending->mIndex] = nullptr;
       }
+      return;
     }
-    RefPtr<Promise> promise;
-    unhandled.Remove(promiseID, getter_AddRefs(promise));
-    if (!promise && !aMutedErrors) {
+    if (!aMutedErrors) {
       nsIGlobalObject* global = xpc::NativeGlobal(aPromise);
       if (nsCOMPtr<EventTarget> owner = do_QueryInterface(global)) {
         RootedDictionary<PromiseRejectionEventInit> init(aCx);

@@ -104,12 +104,13 @@ already_AddRefed<SharedFTFace> FT2FontEntry::GetFTFace(bool aCommit) {
     NS_ASSERTION(item, "failed to find zip entry");
 
     uint32_t bufSize = item->RealSize();
-    uint8_t* fontDataBuf = static_cast<uint8_t*>(malloc(bufSize));
-    if (fontDataBuf) {
+    if (uint8_t* fontDataBuf = static_cast<uint8_t*>(malloc(bufSize))) {
       nsZipCursor cursor(item, reader, fontDataBuf, bufSize);
       cursor.Copy(&bufSize);
       NS_ASSERTION(bufSize == item->RealSize(), "error reading bundled font");
-      RefPtr<FTUserFontData> ufd = new FTUserFontData(fontDataBuf, bufSize);
+      // fontData takes ownership of fontDataBuf
+      auto fontData = MakeRefPtr<FontData>(std::move(fontDataBuf), bufSize);
+      auto ufd = MakeRefPtr<FTUserFontData>(fontData);
       face = ufd->CloneFace(mFTFontIndex);
       if (!face) {
         NS_WARNING("failed to create freetype face");
@@ -249,11 +250,11 @@ gfxFont* FT2FontEntry::CreateFontInstance(const gfxFontStyle* aStyle) {
 /* static */
 already_AddRefed<FT2FontEntry> FT2FontEntry::CreateFontEntry(
     const nsACString& aFontName, WeightRange aWeight, WidthRange aWidth,
-    SlantStyleRange aStyle, const uint8_t* aFontData, uint32_t aLength) {
+    SlantStyleRange aStyle, FontData* aFontData) {
   // Ownership of aFontData is passed in here; the fontEntry must
   // retain it as long as the FT_Face needs it, and ensure it is
   // eventually deleted.
-  RefPtr<FTUserFontData> ufd = MakeRefPtr<FTUserFontData>(aFontData, aLength);
+  RefPtr<FTUserFontData> ufd = MakeRefPtr<FTUserFontData>(aFontData);
   RefPtr<SharedFTFace> face = ufd->CloneFace();
   if (!face) {
     return nullptr;
@@ -579,9 +580,8 @@ hb_blob_t* FT2FontEntry::GetFontTable(uint32_t aTableTag) {
   if (FTUserFontData* userFontData = GetUserFontData()) {
     // If there's a cairo font face, we may be able to return a blob
     // that just wraps a range of the attached user font data
-    if (userFontData->FontData()) {
-      return gfxFontUtils::GetTableFromFontData(userFontData->FontData(),
-                                                aTableTag);
+    if (const auto* data = userFontData->GetData()) {
+      return gfxFontUtils::GetTableFromFontData(data, aTableTag);
     }
   }
 
@@ -1925,13 +1925,11 @@ FontFamily gfxFT2FontList::GetDefaultFontForPlatform(
 already_AddRefed<gfxFontEntry> gfxFT2FontList::MakePlatformFont(
     const nsACString& aFontName, WeightRange aWeightForEntry,
     WidthRange aWidthForEntry, SlantStyleRange aStyleForEntry,
-    const uint8_t* aFontData, uint32_t aLength) {
-  // The FT2 font needs the font data to persist, so we do NOT free it here
-  // but instead pass ownership to the font entry.
-  // Deallocation will happen later, when the font face is destroyed.
-  return FT2FontEntry::CreateFontEntry(aFontName, aWeightForEntry,
-                                       aWidthForEntry, aStyleForEntry,
-                                       aFontData, aLength);
+    FontData* aFontData) {
+  // The FT2 font needs the font data to persist, so the font entry will
+  // hold a strong ref to aFontData for as long as it exists.
+  return FT2FontEntry::CreateFontEntry(
+      aFontName, aWeightForEntry, aWidthForEntry, aStyleForEntry, aFontData);
 }
 
 already_AddRefed<gfxFontFamily> gfxFT2FontList::CreateFontFamily(

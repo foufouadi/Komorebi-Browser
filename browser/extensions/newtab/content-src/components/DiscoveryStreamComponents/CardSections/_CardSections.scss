@@ -503,11 +503,7 @@
   grid-column: 1 / -1;
 
   .section-title {
-    font-size: var(--font-size-heading-large);
-
-    @include at-content-cols(12) {
-      font-size: var(--font-size-heading-xlarge);
-    }
+    font-size: var(--font-size-heading-medium);
   }
 }
 

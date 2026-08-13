@@ -16,6 +16,7 @@
 
 namespace mozilla {
 class DataChannel;
+class PeerConnectionImpl;
 
 namespace dom {
 class Blob;
@@ -28,6 +29,7 @@ class RTCDataChannel final : public DOMEventTargetHelper {
                  bool aOrdered, Nullable<uint16_t> aMaxLifeTime,
                  Nullable<uint16_t> aMaxRetransmits,
                  const nsACString& aProtocol, bool aNegotiated,
+                 PeerConnectionImpl* aPc,
                  already_AddRefed<DataChannel>& aDataChannel,
                  nsPIDOMWindowInner* aWindow);
 
@@ -149,6 +151,11 @@ class RTCDataChannel final : public DOMEventTargetHelper {
 
   // to keep us alive while we have listeners
   RefPtr<RTCDataChannel> mSelfRef;
+  // https://w3c.github.io/webrtc-pc/#garbage-collection
+  // RTCDataChannel objects have a strong reference to the RTCPeerConnection
+  // object. Only set for mainthread datachannels.
+  RefPtr<PeerConnectionImpl> mPeerConnection;
+  // Only set for, you guessed it, worker datachannels
   RefPtr<StrongWorkerRef> mWorkerRef;
   // Owning reference
   const RefPtr<DataChannel> mDataChannel;

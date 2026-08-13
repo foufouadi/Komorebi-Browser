@@ -36,6 +36,8 @@ support-files = ["common.js"]
 ["test_editcontext_resist_fingerprinting.html"]
 support-files = ["file_editcontext_resist_fingerprinting.html"]
 
+["test_editcontext_set_selection.html"]
+
 ["test_editcontext_spellcheck.html"]
 skip-if = [
   "os == 'android'", # using the spellchecker

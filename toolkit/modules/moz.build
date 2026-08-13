@@ -222,6 +222,7 @@ MOZ_SRC_FILES += [
     "DateTimePickerPanel.sys.mjs",
     "FaviconUtils.sys.mjs",
     "InputPickerPanelCommon.sys.mjs",
+    "RegionLocaleMap.sys.mjs",
 ]
 
 if CONFIG["MOZ_ASAN_REPORTER"]:

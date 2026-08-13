@@ -9,7 +9,7 @@
 # user when a condition they described is met.
 # The user-facing name is not final.
 ai-tasks-monitor-notification-title = { -smart-window-brand-name } monitor agent
-ai-tasks-monitor-notification-body = A page you’re watching met your alert.
+ai-tasks-monitor-notification-body = Found what you’re watching for.
 ai-tasks-monitor-notification-snooze = Snooze
 ai-tasks-monitor-notification-dismiss = Dismiss
 
@@ -20,20 +20,16 @@ ai-tasks-monitor-notification-dismiss = Dismiss
 ## Alert Creation Form - Strings used in the alert creation dialog and form fields
 
 ai-tasks-alert-name =
-  .label = Alert name
-  .placeholder = Name this alert
+  .label = Task name
 ai-tasks-alert-alert =
-  .label = What to watch for
-  .placeholder = E.g., price drops below $100, size M is back in stock, tickets go on sale, etc.
+  .label = Notify me when
+  .placeholder = Examples: New JBL Tune 670NC headphones under $50 (not refurbished). Lasagna recipe appears on blog home.
+  .description = Describe in detail what you want to watch for.
 # Variables:
 #   $maxPages (number) - The maximum number of webpages that can be monitored
 ai-tasks-alert-pages =
-  .label = Pages to watch
+  .label = Pages to watch ({ $maxPages } max)
   .placeholder = Type or paste a webpage address
-  .description = { $maxPages ->
-    [one] Add up to { $maxPages } webpage.
-   *[other] Add up to { $maxPages } webpages.
-  }
 ai-tasks-alert-check-label = How often to check
 ai-tasks-alert-time-label = Time
 ai-tasks-alert-day-label = Day
@@ -64,9 +60,9 @@ ai-tasks-alert-weekday-saturday =
 
 ## Alert Actions - Button labels for alert management
 
-ai-tasks-alert-create-button = Create alert
+ai-tasks-alert-create-button = Create task
 ai-tasks-alert-cancel-button = Cancel
-ai-tasks-alert-save-button = Save
+ai-tasks-alert-save-button = Save changes
 ai-tasks-alert-delete-button =
   .aria-label = Delete alert
 ai-tasks-alert-edit-button = Edit
@@ -76,21 +72,22 @@ ai-tasks-alert-check-now-button = Check now
 
 ## Dialog Headers - Titles for alert dialogs
 
-ai-tasks-alert-modal-title = Create alert
+ai-tasks-alert-modal-title = Create task
 
 ## Page Content - Strings displayed on the alerts page
 
-ai-tasks-page-title = Smart Window alerts
-ai-tasks-add-alert-button = Create alert
-ai-task-page-description = Create alerts for price drops, restocks, ticket sales, and more. Choose the pages to watch and Smart Window checks for changes.
-ai-tasks-no-monitors-title = Smart Window tasks aren’t available in your region
+ai-tasks-page-title = Tasks
+ai-tasks-add-alert-button = Create task
+ai-task-page-description = { -smart-window-brand-name } can watch prices and content on pages you choose. You’ll get a desktop notification when it finds a match.
+ai-tasks-no-monitors-title = { -smart-window-brand-name } tasks aren’t available in your region
 ai-tasks-no-monitors-message = Learn more <a data-l10n-name="smart-window-link">about Smart Window</a>.
-ai-task-page-no-alerts = No alerts created yet.
+ai-task-page-no-alerts = Create a task to track prices or content on pages you choose. You’ll get notified when { -smart-window-brand-name } finds a match.
+ai-task-page-no-alerts-title = Watch what matters
 # Variables:
-#   $count (number) - The number of alerts currently active
+#   $count (number) - The number of tasks currently active
 ai-tasks-alerts-count = { $count ->
-    [one] { $count } alert
-   *[other] { $count } alerts
+    [one] { $count } task
+   *[other] { $count } tasks
 }
 # Variables:
 #   $count (number) - The number of webpages being watched
@@ -116,14 +113,16 @@ ai-tasks-alert-error-max-urls = { $maxUrls ->
 ai-tasks-alert-remove-page-label =
   .aria-label = Remove page
 ai-tasks-alert-show-details =
-  .aria-label = Show alert details
-ai-tasks-alert-add-url = Save
+  .aria-label = Show task details
+ai-tasks-alert-add-url = Add page
 
 ## Alert Display - Strings used when displaying alert details
 
-ai-tasks-alert-change-history = Change history
-ai-tasks-alert-on-this-page = On this page
-ai-tasks-alert-the-alert = The Alert
+ai-tasks-alert-change-history = Result
+ai-tasks-alert-change-history-description = Results show what { -smart-window-brand-name } found at the time of each check. Open the page to confirm.
+ai-tasks-alert-on-this-page = Pages to watch
+# When viewing a monitor's details the user will see this string as a label for the box containing the prompt the user entered on monitor creation
+ai-tasks-alert-the-alert = Notify me when
 # Variables:
 #   $time (DateTime) - The time to be formatted based on locale
 ai-tasks-alert-schedule-daily-at = Check daily at { DATETIME($time, timeStyle: "short") }
@@ -158,9 +157,13 @@ ai-tasks-alert-status-paused = Paused
 # the page address; keep it and the element (with its name) unchanged.
 # Variables:
 #   $count (number) - The maximum number of watch tasks allowed
-smartwindow-agent-monitor-limit-reached = You already have { $count } watch tasks running — that’s the limit for now. Remove one at <a data-l10n-name="tasks">about:smartwindowtasks</a> then type /watch here again.
+smartwindow-agent-monitor-limit-reached =
+    { $count ->
+        [one] You’ve got { $count } active watch task, which is the current limit. To create a new task, go to <a data-l10n-name="tasks">about:smartwindowtasks</a> and delete one you no longer need.
+       *[other] You’ve got { $count } active watch tasks, which is the current limit. To create a new task, go to <a data-l10n-name="tasks">about:smartwindowtasks</a> and delete one you no longer need.
+    }
 
-smartwindow-agent-monitor-setup = I’ve set up a task to watch this page. Tweak anything, then start it.
+smartwindow-agent-monitor-setup = Let’s create a task to watch this page. The more detail you include about what you’re looking for, the better.
 
 # Shown when the user runs the watch command from a page that has no address
 # to watch (for example an internal page or a blank tab).
@@ -196,23 +199,22 @@ smartwindow-agent-monitor-schedule-weekly = weekly on { DATETIME($time, weekday:
 smartwindow-agent-monitor-status-watching = Watching
 smartwindow-agent-monitor-status-paused = Paused
 smartwindow-agent-monitor-history-check-failed = Check failed. Check again later.
-smartwindow-agent-monitor-history-no-match = Checked, didn’t meet your alert. Check again later.
+smartwindow-agent-monitor-history-no-match = Checked, didn’t meet your task. Check again later.
 
 ## Alert deletion confirmation
 
-ai-tasks-alert-delete-confirmation-title = Delete this alert?
+ai-tasks-alert-delete-confirmation-title = Delete this task?
 
-ai-tasks-alert-delete-confirmation-message =
-    This alert and its history will be permanently deleted.
+ai-tasks-alert-delete-confirmation-message = { -smart-window-brand-name } won’t watch these pages anymore. To stop watching temporarily, pause instead.
 
 ai-tasks-alert-delete-confirm-button = Delete
 
 ## Used in the header to show the last check result
 
-ai-tasks-alert-last-result-met = Last result: Found
+ai-tasks-alert-last-result-met = Last result: Match
 ai-tasks-alert-last-result-not-met = Last result: No match
 
 ## Used in the history table as a simple status badge
 
-ai-tasks-alert-condition-met = Found
+ai-tasks-alert-condition-met = Match
 ai-tasks-alert-condition-not-met = No match

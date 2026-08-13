@@ -11,6 +11,7 @@
 
 #include "mozilla/dom/RustTypes.h"
 #include "nsCOMPtr.h"
+#include "nsIContent.h"
 #include "nsWrapperCache.h"  // For nsWrapperCache::FlagsType
 
 class nsIURI;
@@ -77,6 +78,12 @@ class Link : public nsISupports {
   void GetSearch(nsACString& aSearch);
   void GetPort(nsACString& aPort);
   void GetHash(nsACString& aHash);
+
+  /**
+   * Helper function for link elements (HTML/SVG/MathML anchor elements)
+   * to evaluate focusability based on common link-handling constraints.
+   */
+  Focusable IsLinkFocusableWithoutStyle(IsFocusableFlags aFlags) const;
 
   /**
    * Invalidates any link caching, and resets the state to the default.

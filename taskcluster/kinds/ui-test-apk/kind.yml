@@ -356,6 +356,54 @@ tasks:
         treeherder:
             symbol: fenix-debug(tae-behavior-arm)
 
+    fenix-tae-interaction-arm-debug:
+        attributes:
+            build-type: fenix-debug-firebase
+        task-context:
+            from-object:
+                app-name: fenix
+        description: Run TAE (test automation efficiency) interaction factory tests on ARM devices
+        dependencies:
+            signed-apk-debug-apk: signing-apk-fenix-debug
+            signed-apk-android-test: signing-apk-fenix-android-test-debug
+        fetches:
+            signed-apk-debug-apk:
+                - artifact: target.arm64-v8a.apk
+                  extract: false
+            signed-apk-android-test:
+                - artifact: target.noarch.apk
+                  extract: false
+        optimization:
+            skip-unless-backstop: null
+        run-on-projects: [trunk]
+        flank-config: fenix/arm-tae-interaction-tests.yml
+        treeherder:
+            symbol: fenix-debug(tae-interaction-arm)
+
+    fenix-tae-reachability-arm-debug:
+        attributes:
+            build-type: fenix-debug-firebase
+        task-context:
+            from-object:
+                app-name: fenix
+        description: Run TAE (test automation efficiency) reachability factory tests on ARM devices
+        dependencies:
+            signed-apk-debug-apk: signing-apk-fenix-debug
+            signed-apk-android-test: signing-apk-fenix-android-test-debug
+        fetches:
+            signed-apk-debug-apk:
+                - artifact: target.arm64-v8a.apk
+                  extract: false
+            signed-apk-android-test:
+                - artifact: target.noarch.apk
+                  extract: false
+        optimization:
+            skip-unless-backstop: null
+        run-on-projects: [trunk]
+        flank-config: fenix/arm-tae-reachability-tests.yml
+        treeherder:
+            symbol: fenix-debug(tae-reachability-arm)
+
     fenix-arm-debug-smoke:
         attributes:
             build-type: fenix-debug-firebase

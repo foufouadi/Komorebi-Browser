@@ -884,6 +884,8 @@ class PeerConnectionImpl final
   std::set<std::pair<std::string, std::string>> mLocalIceCredentialsToReplace;
 
   nsTArray<RefPtr<dom::RTCRtpTransceiver>> mTransceivers;
+  // The lifecycle of worker datachannels is managed in RTCDataChannel
+  nsTArray<RefPtr<dom::RTCDataChannel>> mMainthreadDatachannels;
   RTCDtlsTransportMap mTransportIdToRTCDtlsTransport;
   RefPtr<dom::RTCSctpTransport> mSctpTransport;
   // This is similar to [[LastStableStateSender/ReceiverTransport]], but for

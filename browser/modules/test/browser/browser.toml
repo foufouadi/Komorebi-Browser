@@ -11,7 +11,7 @@ prefs = [
 
 ["browser_BrowserWindowTracker_minimize.js"]
 skip-if = [
-  "os == 'linux' && os_version == '22.04' && arch == 'x86_64' && opt && nova", # Bug 2057872
+  "os == 'linux' && os_version == '22.04' && arch == 'x86_64' && display == 'wayland'", # Bug 2057872
 ]
 
 ["browser_CrashFileCleaner.js"]

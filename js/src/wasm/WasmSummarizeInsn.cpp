@@ -1698,6 +1698,26 @@ SummarizeResult SummarizeTrapInstruction(const InstructionBytes& insn) {
     return SummarizeResult(TrapMachineInsn::OfficialUD, 4);
   }
 
+  switch (INSN(31, 15) << 15) {
+    case op_amswap_db_b:
+    case op_amswap_db_h:
+    case op_amswap_db_w:
+    case op_amswap_db_d:
+    case op_amadd_db_b:
+    case op_amadd_db_h:
+    case op_amadd_db_w:
+    case op_amadd_db_d:
+    case op_amand_db_w:
+    case op_amand_db_d:
+    case op_amor_db_w:
+    case op_amor_db_d:
+    case op_amxor_db_w:
+    case op_amxor_db_d:
+      return SummarizeResult(TrapMachineInsn::Atomic, 4);
+    default:
+      break;
+  }
+
   // Loads/stores with reg + offset (si12).
   if (INSN(31, 26) == 0b001010) {
     switch (INSN(25, 22)) {

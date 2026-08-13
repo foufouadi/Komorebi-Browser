@@ -380,6 +380,24 @@ export class UrlbarParentControllerProxy {
   }
 
   /**
+   * Records input history parent-side, where the Places write belongs.
+   *
+   * @param {string} url The picked URL.
+   * @param {string} input The search string to associate with it.
+   * @param {object} [options]
+   * @param {boolean} [options.whenReady]
+   *   Whether to defer the write until the URL lands in moz_places.
+   */
+  addToInputHistory(url, input, { whenReady = false } = {}) {
+    this.#actor.sendAsyncMessage("AddToInputHistory", {
+      instanceId: this.#instanceId,
+      url,
+      input,
+      whenReady,
+    });
+  }
+
+  /**
    * @param {UrlbarResult} result The result to remove.
    * @param {object} [options] Options forwarded to the parent controller's
    *   removeResult.

@@ -966,7 +966,8 @@ void HeapCheckTracerBase::dumpCellInfo(Cell* cell) {
   if (obj) {
     fprintf(stderr, " in compartment %p", obj->compartment());
   }
-  fprintf(stderr, " in zone %p", cell->zone());
+  fprintf(stderr, " in zone %p (state %s)", cell->zone(),
+          StateName(cell->zone()->gcState()));
 }
 
 void HeapCheckTracerBase::dumpCellPath(const char* name) {

@@ -663,12 +663,20 @@ bool Decoder::decodeOp17(const Instruction* instruction) const {
       return formatRdRjRk("add.d", word);
     case op_add_w:
       return formatRdRjRk("add.w", word);
+    case op_amadd_b:
+      return formatRdRkRj("amadd.b", word);
     case op_amadd_d:
       return formatRdRkRj("amadd.d", word);
+    case op_amadd_db_b:
+      return formatRdRkRj("amadd_db.b", word);
     case op_amadd_db_d:
       return formatRdRkRj("amadd_db.d", word);
+    case op_amadd_db_h:
+      return formatRdRkRj("amadd_db.h", word);
     case op_amadd_db_w:
       return formatRdRkRj("amadd_db.w", word);
+    case op_amadd_h:
+      return formatRdRkRj("amadd.h", word);
     case op_amadd_w:
       return formatRdRkRj("amadd.w", word);
     case op_amand_d:
@@ -719,12 +727,20 @@ bool Decoder::decodeOp17(const Instruction* instruction) const {
       return formatRdRkRj("amor_db.w", word);
     case op_amor_w:
       return formatRdRkRj("amor.w", word);
+    case op_amswap_b:
+      return formatRdRkRj("amswap.b", word);
     case op_amswap_d:
       return formatRdRkRj("amswap.d", word);
+    case op_amswap_db_b:
+      return formatRdRkRj("amswap_db.b", word);
     case op_amswap_db_d:
       return formatRdRkRj("amswap_db.d", word);
+    case op_amswap_db_h:
+      return formatRdRkRj("amswap_db.h", word);
     case op_amswap_db_w:
       return formatRdRkRj("amswap_db.w", word);
+    case op_amswap_h:
+      return formatRdRkRj("amswap.h", word);
     case op_amswap_w:
       return formatRdRkRj("amswap.w", word);
     case op_amxor_d:

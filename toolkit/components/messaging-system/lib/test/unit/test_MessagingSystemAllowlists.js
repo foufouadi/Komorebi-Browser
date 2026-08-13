@@ -110,6 +110,74 @@ add_task(async function test_sync_updates_cache() {
   Assert.deepEqual(MessagingSystemAllowlists.getAllowedPrefs(), ["foo.pref"]);
 });
 
+add_task(async function test_blocklisted_records_are_discarded() {
+  useClient(
+    makeFakeClient([
+      { id: "a", list: "actionOnly", value: "INSTALL_ADDON_FROM_URL" },
+      { id: "b", list: "actionOnly", value: "SHOW_SPOTLIGHT" },
+      // Grantable by design, unlike the two above.
+      { id: "c", list: "actionOnly", value: "SET_PREF" },
+      { id: "d", list: "actionOnly", value: "FOO_ACTION" },
+      // Blocked by an exact entry, and by each pref prefix respectively.
+      { id: "e", list: "setPref", value: "pdfjs.enableScripting" },
+      { id: "f", list: "setPref", value: "network.proxy.type" },
+      { id: "g", list: "setPref", value: "xpinstall.signatures.required" },
+      { id: "h", list: "setPref", value: "services.settings.server" },
+      { id: "i", list: "setPref", value: "foo.pref" },
+    ])
+  );
+
+  await MessagingSystemAllowlists.ensureInit();
+
+  Assert.deepEqual(
+    MessagingSystemAllowlists.getActionOnlyActions(),
+    ["SET_PREF", "FOO_ACTION"],
+    "blocklisted actions are dropped and everything else is kept"
+  );
+  Assert.deepEqual(
+    MessagingSystemAllowlists.getAllowedPrefs(),
+    ["foo.pref"],
+    "blocklisted prefs are dropped and everything else is kept"
+  );
+});
+
+add_task(async function test_blocklist_applies_to_sync() {
+  const client = makeFakeClient([]);
+  useClient(client);
+  await MessagingSystemAllowlists.ensureInit();
+
+  client.fireSync([
+    { id: "a", list: "actionOnly", value: "OPEN_URL" },
+    { id: "b", list: "setPref", value: "security.enterprise_roots.enabled" },
+  ]);
+
+  Assert.deepEqual(
+    MessagingSystemAllowlists.getActionOnlyActions(),
+    [],
+    "a later sync cannot introduce a blocklisted action"
+  );
+  Assert.deepEqual(
+    MessagingSystemAllowlists.getAllowedPrefs(),
+    [],
+    "a later sync cannot introduce a blocklisted pref"
+  );
+});
+
+add_task(async function test_blocklist_applies_to_set_for_test() {
+  MessagingSystemAllowlists._resetForTest();
+  registerCleanupFunction(() => MessagingSystemAllowlists._resetForTest());
+
+  MessagingSystemAllowlists._setForTest({
+    actionOnly: ["SUMMARIZE_PAGE", "FOO_ACTION"],
+    setPref: ["app.update.disabledForTesting", "foo.pref"],
+  });
+
+  Assert.deepEqual(MessagingSystemAllowlists.getActionOnlyActions(), [
+    "FOO_ACTION",
+  ]);
+  Assert.deepEqual(MessagingSystemAllowlists.getAllowedPrefs(), ["foo.pref"]);
+});
+
 add_task(async function test_ensure_init_is_idempotent() {
   MessagingSystemAllowlists._resetForTest();
   let createCount = 0;

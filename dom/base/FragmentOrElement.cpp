@@ -699,7 +699,7 @@ FragmentOrElement::nsExtendedDOMSlots* FragmentOrElement::ExtendedDOMSlots() {
   if (!slots) {
     void* mem = AllocateSlots(sizeof(FatSlots));
     FatSlots* fatSlots = new (mem) FatSlots();
-    mSlots = fatSlots;
+    SetSlots(fatSlots);
     return fatSlots;
   }
 

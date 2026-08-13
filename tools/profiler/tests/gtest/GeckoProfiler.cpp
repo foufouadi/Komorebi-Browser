@@ -3208,7 +3208,11 @@ TEST(GeckoProfiler, Markers)
                   ts2Double = marker[END_TIME].asDouble();
                   state = State(S_FirstMarker + 1);
                   EXPECT_EQ(typeString, "Text");
-                  EXPECT_EQ_JSON(payload["name"], String, "First Marker");
+                  // The Text marker's "name" field is a unique string.
+                  ASSERT_TRUE(payload["name"].isUInt());
+                  GET_JSON(firstMarkerName,
+                           stringTable[payload["name"].asUInt()], String);
+                  EXPECT_EQ(firstMarkerName.asString(), "First Marker");
 
                 } else if (nameString == "Gtest custom marker") {
                   EXPECT_EQ(state, S_CustomMarker);
@@ -3483,14 +3487,22 @@ TEST(GeckoProfiler, Markers)
                   EXPECT_EQ(typeString, "Text");
                   EXPECT_FALSE(payload["stack"].isNull());
                   EXPECT_TIMING_INTERVAL_AT(ts1Double, ts2Double);
-                  EXPECT_EQ_JSON(payload["name"], String, "");
+                  // The Text marker's "name" field is a unique string.
+                  ASSERT_TRUE(payload["name"].isUInt());
+                  GET_JSON(textName, stringTable[payload["name"].asUInt()],
+                           String);
+                  EXPECT_EQ(textName.asString(), "");
 
                 } else if (nameString == "Text from main thread with stack") {
                   EXPECT_EQ(state, S_TextToMTWithStack);
                   state = State(S_TextToMTWithStack + 1);
                   EXPECT_EQ(typeString, "Text");
                   EXPECT_FALSE(payload["stack"].isNull());
-                  EXPECT_EQ_JSON(payload["name"], String, "");
+                  // The Text marker's "name" field is a unique string.
+                  ASSERT_TRUE(payload["name"].isUInt());
+                  GET_JSON(textName, stringTable[payload["name"].asUInt()],
+                           String);
+                  EXPECT_EQ(textName.asString(), "");
 
                 } else if (nameString ==
                            "Text in registered thread with stack") {
@@ -3503,7 +3515,11 @@ TEST(GeckoProfiler, Markers)
                   state = State(S_RegThread_TextToMTWithStack + 1);
                   EXPECT_EQ(typeString, "Text");
                   EXPECT_FALSE(payload["stack"].isNull());
-                  EXPECT_EQ_JSON(payload["name"], String, "");
+                  // The Text marker's "name" field is a unique string.
+                  ASSERT_TRUE(payload["name"].isUInt());
+                  GET_JSON(textName, stringTable[payload["name"].asUInt()],
+                           String);
+                  EXPECT_EQ(textName.asString(), "");
 
                 } else if (nameString ==
                            "Text in unregistered thread with stack") {
@@ -3516,7 +3532,11 @@ TEST(GeckoProfiler, Markers)
                   state = State(S_UnregThread_TextToMTWithStack + 1);
                   EXPECT_EQ(typeString, "Text");
                   EXPECT_TRUE(payload["stack"].isNull());
-                  EXPECT_EQ_JSON(payload["name"], String, "");
+                  // The Text marker's "name" field is a unique string.
+                  ASSERT_TRUE(payload["name"].isUInt());
+                  GET_JSON(textName, stringTable[payload["name"].asUInt()],
+                           String);
+                  EXPECT_EQ(textName.asString(), "");
                 }
               }  // marker with payload
             }  // for (marker : data)
@@ -3559,7 +3579,7 @@ TEST(GeckoProfiler, Markers)
             ASSERT_TRUE(data[0u].isObject());
             EXPECT_EQ_JSON(data[0u]["key"], String, "name");
             EXPECT_EQ_JSON(data[0u]["label"], String, "Details");
-            EXPECT_EQ_JSON(data[0u]["format"], String, "string");
+            EXPECT_EQ_JSON(data[0u]["format"], String, "unique-string");
 
           } else if (nameString == "NoPayloadUserData") {
             // TODO: Remove this when bug 1646714 lands.

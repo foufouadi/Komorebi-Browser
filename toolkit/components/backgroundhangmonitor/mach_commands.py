@@ -112,6 +112,13 @@ def _run_gcloud_login():
     help="Run `gcloud auth application-default login` if GCP credentials are "
     "missing or expired, instead of just reporting it.",
 )
+@CommandArgument(
+    "--client-metrics",
+    action="store_true",
+    help="Also compute per-signature distinct affected-client counts via "
+    "HyperLogLog (with mergeable sketches for the cross-day roll-up). "
+    "Reads client_id locally; only aggregate counts and sketches are written.",
+)
 def bhr_aggregate(
     command_context,
     date,
@@ -121,6 +128,7 @@ def bhr_aggregate(
     output_tag,
     thread_filter,
     login,
+    client_metrics,
 ):
     if not 0 < sample_size <= 1:
         print(f"error: --sample-size must be in (0, 1], got {sample_size}")
@@ -166,6 +174,9 @@ def bhr_aggregate(
         billing_project=billing_project,
         output_dir=output_dir,
         output_tag=output_tag,
-        config_overrides={"thread_filter": thread_filter},
+        config_overrides={
+            "thread_filter": thread_filter,
+            "client_metrics": client_metrics,
+        },
     )
     return 0

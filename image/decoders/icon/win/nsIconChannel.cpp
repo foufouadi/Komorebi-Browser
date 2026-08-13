@@ -558,7 +558,7 @@ NS_IMPL_ISUPPORTS(nsIconChannel, nsIChannel, nsIRequest, nsIRequestObserver,
                   nsIStreamListener)
 
 // nsIconChannel methods
-nsIconChannel::nsIconChannel() {}
+nsIconChannel::nsIconChannel() = default;
 
 nsIconChannel::~nsIconChannel() {
   if (mLoadInfo) {
