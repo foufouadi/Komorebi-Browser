@@ -1,0 +1,45 @@
+/* Komorebi : neutralise le fond opaque peint par le chrome autour du
+   <browser>. .browserContainer peint --tabpanel-background-color
+   (#F9F9FB clair / #2B2A33 sombre, "the frame color behind the clipped
+   radiused corner", voir tabbrowser/content-area.css) - une couche
+   distincte du fond de la page, entre #tabbrowser-tabbox (z-index: 2,
+   au-dessus de tout) et le <browser> lui-meme. Ni l'attribut
+   `transparent` du <browser> ni komorebi-transparent.css (cote
+   contenu) ne peuvent l'atteindre : c'est elle qui forme le bloc blanc.
+   On ne la retire que pour les onglets que le loader a deja marques
+   transparents. */
+body {
+  --tabpanel-background-color: transparent;
+}
+
+#komorebi-container {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  background: transparent;
+}
+
+#komorebi-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+#komorebi-video {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#browser,
+#tabbrowser-tabbox,
+#tabbrowser-tabpanels,
+.browserSidebarContainer,
+.browserContainer:has(browser[transparent="true"]) {
+  background: transparent !important;
+}

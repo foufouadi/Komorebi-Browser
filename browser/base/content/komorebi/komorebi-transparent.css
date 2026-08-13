@@ -1,0 +1,16 @@
+/* Komorebi : rend le fond d'about:home/about:newtab transparent.
+   L'attribut `transparent` du <browser> ne retire que le backstop du
+   navigateur, jamais le fond opaque (#F9F9FB clair / #2B2A33 sombre et
+   le wallpaper) que la page Activity Stream peint elle-meme. Cette
+   feuille auteur (injectee par komorebi-process.js) l'ecrase donc. */
+html,
+body,
+#root,
+.outer-wrapper,
+.nova-outer-wrapper,
+.onboardingContainer,
+.onboardingContainer > .screen,
+.onboardingContainer .section-main,
+.onboardingContainer .main-content {
+  background: transparent !important;
+}

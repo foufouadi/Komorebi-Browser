@@ -1,0 +1,27 @@
+html,
+body,
+#main,
+#cnt,
+#rcnt,
+#center_col,
+#rhs,
+#search,
+#searchform,
+#appbar,
+#top_nav,
+#botstuff,
+#foot,
+.sfbg,
+.appbar {
+  background: transparent !important;
+}
+
+body {
+  background-color: rgba(255, 255, 255, 0.78) !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background-color: rgba(32, 33, 36, 0.82) !important;
+  }
+}
