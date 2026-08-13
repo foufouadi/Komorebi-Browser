@@ -13,7 +13,7 @@ together in a single experience.
 
 ## Demo
 
-https://github.com/user-attachments/assets/01e4d744-20d6-4e84-bd23-e01fea540e9f
+https://github.com/user-attachments/assets/d7341e54-3858-46b1-8716-e5c5a166c3c0
 
 ## Current status
 
