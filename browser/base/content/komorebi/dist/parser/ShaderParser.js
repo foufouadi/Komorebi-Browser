@@ -1,3 +1,10 @@
+/*
+ * Copyright (c) 2026 Foued Attar
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
 import { SHADER_INCLUDE_PATTERN } from "./ShaderIncludes.js";
 // "commands/copy" is not a real shipped WE asset: it's the engine's own built-in passthrough shader for effect "copy" commands.
 const COMMANDS_COPY_SOURCE = {

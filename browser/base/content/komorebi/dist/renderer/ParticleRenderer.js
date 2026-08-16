@@ -1,3 +1,10 @@
+/*
+ * Copyright (c) 2026 Foued Attar
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
 import { PARTICLE_FRAGMENT_SHADER } from "../graphics/shaders/ParticleFragmentShader.js";
 import { PARTICLE_VERTEX_SHADER } from "../graphics/shaders/ParticleVertexShader.js";
 export class ParticleRenderer {

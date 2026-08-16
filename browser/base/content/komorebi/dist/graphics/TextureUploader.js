@@ -1,3 +1,10 @@
+/*
+ * Copyright (c) 2026 Foued Attar
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
 /** TEXI0001 flag bits (WallpaperEngine/Data/Assets/Texture.h). */
 const TEX_FLAG_NO_INTERPOLATION = 1;
 const TEX_FLAG_CLAMP_UVS = 2;

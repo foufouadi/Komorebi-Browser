@@ -1,3 +1,11 @@
+/*
+ * Copyright (c) 2026 Foued Attar
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
+
 /* Komorebi : rend le fond d'about:home/about:newtab transparent.
    L'attribut `transparent` du <browser> ne retire que le backstop du
    navigateur, jamais le fond opaque (#F9F9FB clair / #2B2A33 sombre et
