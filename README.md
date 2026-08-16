@@ -14,7 +14,7 @@ isolated as possible from upstream.
 
 ## Demo
 
-https://github.com/user-attachments/assets/1332af82-d3e1-4c34-a1f8-e39471436dc2
+https://github.com/user-attachments/assets/434cdabe-d264-4f9e-99a4-db01065f25e5
 
 ---
 
