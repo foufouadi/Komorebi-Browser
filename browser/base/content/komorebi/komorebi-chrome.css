@@ -12,6 +12,57 @@ body {
   background: transparent;
 }
 
+#komorebi-scene-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+#komorebi-scene-audio {
+  position: fixed;
+  inset-block-end: var(--space-large);
+  inset-inline-end: var(--space-large);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  max-width: calc(3 * var(--size-layout-large));
+  gap: var(--space-small);
+  padding: var(--space-small) var(--space-medium);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--border-radius-large);
+  background: color-mix(in srgb, var(--background-color-box) 82%, transparent);
+  box-shadow: var(--box-shadow-level-2);
+  color: var(--text-color);
+  font: menu;
+  backdrop-filter: blur(16px);
+}
+
+#komorebi-scene-audio[hidden] {
+  display: none;
+}
+
+#komorebi-scene-audio button {
+  min-width: var(--size-item-small);
+  min-height: var(--size-item-small);
+  border: 0;
+  border-radius: var(--border-radius-medium);
+  background: var(--button-background-color);
+  color: inherit;
+}
+
+#komorebi-scene-audio button:hover {
+  background: var(--button-background-color-hover);
+}
+
+.komorebi-scene-audio-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 #komorebi-canvas {
   display: block;
   width: 100%;
@@ -47,10 +98,22 @@ body {
 
 .komorebi-library-content {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto minmax(0, 1fr);
   box-sizing: border-box;
   height: 100%;
   padding: var(--space-large);
+}
+
+.komorebi-library-view {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  min-height: 0;
+}
+
+.komorebi-library-view[hidden],
+.komorebi-folders-view[hidden],
+.komorebi-settings-view[hidden] {
+  display: none;
 }
 
 .komorebi-library-header {
@@ -69,9 +132,48 @@ body {
   font-weight: var(--font-weight-semibold);
 }
 
+.komorebi-header-actions,
+.komorebi-folders-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-medium);
+}
+
+.komorebi-library-filters {
+  display: grid;
+  grid-template-columns: minmax(12em, 2fr) repeat(2, minmax(8em, 1fr)) auto;
+  gap: var(--space-medium);
+  margin-block-end: var(--space-medium);
+}
+
+.komorebi-library-filters input[type="search"],
+.komorebi-library-filters select,
+.komorebi-video-controls select,
+.komorebi-video-controls input[type="range"] {
+  box-sizing: border-box;
+  min-height: var(--size-item-large);
+  border: var(--border-width) solid var(--input-border-color);
+  border-radius: var(--border-radius-medium);
+  background-color: var(--background-color-box);
+  color: var(--text-color);
+  font: menu;
+}
+
+.komorebi-library-filters input[type="search"] {
+  padding-inline: var(--space-medium);
+}
+
+.komorebi-favorites-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-small);
+  white-space: nowrap;
+}
+
 .komorebi-wallpaper-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: max-content;
   align-content: start;
   gap: var(--space-medium);
   overflow-y: auto;
@@ -79,29 +181,56 @@ body {
 }
 
 .komorebi-wallpaper-card {
-  display: grid;
-  gap: var(--space-small);
-  padding: var(--space-small);
+  position: relative;
+  align-self: start;
+  overflow: hidden;
   border: var(--border-width) solid var(--border-color);
   border-radius: var(--border-radius-medium);
   background: var(--background-color-box);
   color: inherit;
-  text-align: start;
 }
 
-.komorebi-wallpaper-card[aria-pressed="true"] {
+.komorebi-wallpaper-card.active,
+.komorebi-wallpaper-card.selected {
   border-color: var(--color-accent-primary);
   background: var(--button-background-color-selected);
   outline: var(--focus-outline);
   outline-offset: var(--focus-outline-offset);
 }
 
-.komorebi-wallpaper-card:enabled:hover {
+.komorebi-wallpaper-select {
+  appearance: none;
+  display: grid;
+  grid-template-rows: auto auto auto;
+  align-content: start;
+  gap: var(--space-small);
+  width: 100%;
+  padding: var(--space-small);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: menu;
+  text-align: start;
+}
+
+.komorebi-wallpaper-select:disabled {
+  opacity: 1;
+  color: inherit;
+}
+
+.komorebi-wallpaper-select:enabled:hover {
   background: var(--button-background-color-hover);
 }
 
+.komorebi-wallpaper-select:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: calc(-1 * var(--focus-outline-width));
+}
+
 .komorebi-wallpaper-preview {
+  display: block;
   width: 100%;
+  min-height: 0;
   aspect-ratio: 16 / 9;
   border-radius: var(--border-radius-small);
   object-fit: cover;
@@ -120,6 +249,110 @@ body {
   font-size: var(--font-size-small);
 }
 
+.komorebi-wallpaper-status.error {
+  color: var(--text-color-error);
+}
+
+.komorebi-active-badge {
+  width: max-content;
+  padding: var(--space-xsmall) var(--space-small);
+  border-radius: var(--border-radius-circle);
+  background: var(--color-accent-primary);
+  color: var(--button-text-color-primary);
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-semibold);
+}
+
+.komorebi-favorite-button {
+  position: absolute;
+  inset-block-start: var(--space-medium);
+  inset-inline-end: var(--space-medium);
+  width: var(--size-item-large);
+  height: var(--size-item-large);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--border-radius-circle);
+  background: color-mix(in srgb, var(--background-color-canvas) 85%, transparent);
+  color: var(--text-color-deemphasized);
+  font: menu;
+  font-size: var(--font-size-root);
+}
+
+.komorebi-favorite-button:hover,
+.komorebi-favorite-button.selected {
+  background: var(--button-background-color-hover);
+  color: var(--color-accent-primary);
+}
+
+.komorebi-video-controls {
+  padding: var(--space-large);
+}
+
+.komorebi-video-controls h3 {
+  margin-block-start: 0;
+  font-weight: var(--font-weight-semibold);
+}
+
+.komorebi-video-controls-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-medium) var(--space-large);
+  padding-block-start: var(--space-medium);
+}
+
+.komorebi-video-controls-grid label {
+  display: grid;
+  align-items: center;
+  gap: var(--space-small);
+}
+
+.komorebi-checkbox-control {
+  grid-template-columns: auto 1fr;
+}
+
+.komorebi-folders-view {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.komorebi-settings-view {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.komorebi-folders-header {
+  justify-content: flex-start;
+  padding-block-end: var(--space-large);
+  border-block-end: var(--border-width) solid var(--border-color);
+}
+
+.komorebi-folders-header h3 {
+  margin: 0;
+}
+
+.komorebi-folders-list {
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--space-medium) 0;
+  list-style: none;
+}
+
+.komorebi-folder-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-large);
+  padding: var(--space-medium);
+  border-block-end: var(--border-width) solid var(--border-color);
+}
+
+.komorebi-folder-row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .komorebi-library-footer {
   display: flex;
   justify-content: flex-end;
@@ -129,7 +362,9 @@ body {
 }
 
 .komorebi-library-header moz-button,
-.komorebi-library-footer moz-button {
+.komorebi-library-footer moz-button,
+.komorebi-folders-view moz-button,
+.komorebi-settings-view moz-button {
   --button-border-radius: var(--border-radius-medium);
   --button-font-weight: var(--font-weight-semibold);
   --button-min-height: var(--size-item-large);
@@ -138,7 +373,9 @@ body {
 }
 
 .komorebi-library-header moz-button::part(button),
-.komorebi-library-footer moz-button::part(button) {
+.komorebi-library-footer moz-button::part(button),
+.komorebi-folders-view moz-button::part(button),
+.komorebi-settings-view moz-button::part(button) {
   border-color: var(--button-border-color);
   background-color: var(--button-background-color);
   box-shadow: var(--box-shadow-level-1);
