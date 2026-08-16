@@ -44,7 +44,6 @@ export class Matrix4 {
         matrix.values[5] = cosine;
         return matrix;
     }
-    // Y row negated to match this engine's Y-down pixel space (y=0 at top), like SceneVertexShader's own flip.
     static orthographic(width, height) {
         return new Matrix4(new Float32Array([
             2 / width,
@@ -52,7 +51,7 @@ export class Matrix4 {
             0,
             0,
             0,
-            -2 / height,
+            2 / height,
             0,
             0,
             0,
@@ -60,7 +59,7 @@ export class Matrix4 {
             -1,
             0,
             -1,
-            1,
+            -1,
             0,
             1,
         ]));
@@ -72,7 +71,7 @@ export class Matrix4 {
             0,
             0,
             0,
-            -height / 2,
+            height / 2,
             0,
             0,
             0,
