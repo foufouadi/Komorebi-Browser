@@ -77,7 +77,8 @@ class NotificationObserver final : public nsIAlertCallbacks {
     glean::web_notification::shown.Record(
         Some(glean::web_notification::ShownExtra{.siteCategory = mCategory}));
 
-    if (RunActor([](auto* actor) { actor->OnAlertShow(); })) {
+    if (RunActor([](auto* actor) { actor->OnAlertShow(); }) ||
+        mScope.IsEmpty()) {
       return NS_OK;
     }
 
@@ -122,7 +123,8 @@ class NotificationObserver final : public nsIAlertCallbacks {
       glean::web_notification::dismissed.Record(Some(
           glean::web_notification::DismissedExtra{.siteCategory = mCategory}));
     }
-    if (RunActor([](auto* actor) { actor->OnAlertFinished(true); })) {
+    if (RunActor([](auto* actor) { actor->OnAlertFinished(true); }) ||
+        mScope.IsEmpty()) {
       return NS_OK;
     }
     return OnAlertFinishedCommon();
@@ -133,7 +135,8 @@ class NotificationObserver final : public nsIAlertCallbacks {
       glean::web_notification::dismissed.Record(Some(
           glean::web_notification::DismissedExtra{.siteCategory = mCategory}));
     }
-    if (RunActor([](auto* actor) { actor->OnAlertFinished(false); })) {
+    if (RunActor([](auto* actor) { actor->OnAlertFinished(false); }) ||
+        mScope.IsEmpty()) {
       return NS_OK;
     }
     return OnAlertFinishedCommon();

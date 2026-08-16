@@ -24,6 +24,7 @@ import mozilla.components.browser.state.selector.findCustomTab
 import mozilla.components.browser.state.state.CustomTabSessionState
 import mozilla.components.browser.state.state.SecurityInfo
 import mozilla.components.browser.state.store.BrowserStore
+import mozilla.components.browser.toolbar.R as toolbarR
 import mozilla.components.compose.browser.toolbar.concept.Action
 import mozilla.components.compose.browser.toolbar.concept.Action.ActionButton
 import mozilla.components.compose.browser.toolbar.concept.Action.ActionButtonRes
@@ -44,12 +45,14 @@ import mozilla.components.compose.browser.toolbar.store.ProgressBarConfig
 import mozilla.components.concept.engine.permission.SitePermissions
 import mozilla.components.concept.engine.permission.SitePermissionsStorage
 import mozilla.components.concept.engine.prompt.ShareData
+import mozilla.components.feature.customtabs.R as customtabsR
 import mozilla.components.feature.ipprotection.store.IPProtectionAction
 import mozilla.components.feature.ipprotection.store.IPProtectionStore
 import mozilla.components.feature.ipprotection.store.state.Authorized
 import mozilla.components.feature.session.TrackingProtectionUseCases
 import mozilla.components.feature.tabs.CustomTabsUseCases
 import mozilla.components.lib.publicsuffixlist.PublicSuffixList
+import mozilla.components.lib.state.Action as MVIAction
 import mozilla.components.lib.state.Middleware
 import mozilla.components.lib.state.State
 import mozilla.components.lib.state.Store
@@ -61,6 +64,7 @@ import mozilla.components.support.ktx.kotlin.isIpv4OrIpv6
 import mozilla.components.support.ktx.kotlin.trimmed
 import mozilla.components.support.ktx.kotlinx.coroutines.flow.ifAnyChanged
 import mozilla.components.support.utils.ClipboardHandler
+import mozilla.components.ui.icons.R as iconsR
 import mozilla.telemetry.glean.private.NoExtras
 import org.mozilla.fenix.GleanMetrics.Events
 import org.mozilla.fenix.GleanMetrics.Toolbar
@@ -84,16 +88,12 @@ import org.mozilla.fenix.telemetry.ACTION_SHARE_CLICKED
 import org.mozilla.fenix.telemetry.ACTION_SITE_CUSTOM_CLICKED
 import org.mozilla.fenix.telemetry.SOURCE_ADDRESS_BAR
 import org.mozilla.fenix.telemetry.SURFACE_CUSTOM_TAB
-import mozilla.components.browser.toolbar.R as toolbarR
-import mozilla.components.feature.customtabs.R as customtabsR
-import mozilla.components.lib.state.Action as MVIAction
-import mozilla.components.ui.icons.R as iconsR
 
 private const val CUSTOM_BUTTON_CLICK_RETURN_CODE = 0
 
 /**
- * [Middleware] responsible for configuring and handling interactions with the composable toolbar
- * when shown in a custom tab.
+ * [Middleware] responsible for configuring and handling interactions with the composable toolbar when shown in a custom
+ * tab.
  *
  * This is also a [ViewModel] allowing to be easily persisted between activity restarts.
  *
@@ -104,8 +104,8 @@ private const val CUSTOM_BUTTON_CLICK_RETURN_CODE = 0
  * @param ipProtectionStore [IPProtectionStore] to observe IP protection proxy status.
  * @param permissionsStorage [SitePermissionsStorage] to sync from.
  * @param useCases [CustomTabsUseCases] used for cleanup when closing the custom tab.
- * @param trackingProtectionUseCases [TrackingProtectionUseCases] allowing to query
- * tracking protection data of the current tab.
+ * @param trackingProtectionUseCases [TrackingProtectionUseCases] allowing to query tracking protection data of the
+ *   current tab.
  * @param publicSuffixList [PublicSuffixList] used to obtain the base domain of the current site.
  * @param clipboard [ClipboardHandler] to use for reading from device's clipboard.
  * @param navController [NavController] to use for navigating to other in-app destinations.
@@ -132,6 +132,7 @@ class CustomTabBrowserToolbarMiddleware(
 ) : Middleware<BrowserToolbarState, BrowserToolbarAction> {
     private val customTab
         get() = browserStore.state.findCustomTab(customTabId)
+
     private var wasTitleShown = false
 
     @Suppress("LongMethod")
@@ -164,7 +165,7 @@ class CustomTabBrowserToolbarMiddleware(
                         source = SOURCE_ADDRESS_BAR,
                         item = ACTION_CLOSE_CLICKED,
                         surface = SURFACE_CUSTOM_TAB,
-                    ),
+                    )
                 )
 
                 useCases.remove(customTabId)
@@ -177,14 +178,15 @@ class CustomTabBrowserToolbarMiddleware(
                         source = SOURCE_ADDRESS_BAR,
                         item = ACTION_SECURITY_INDICATOR_CLICKED,
                         surface = SURFACE_CUSTOM_TAB,
-                    ),
+                    )
                 )
 
                 val safeCustomTab = customTab ?: return
                 scope.launch(Dispatchers.IO) {
-                    val sitePermissions: SitePermissions? = safeCustomTab.content.url.getOrigin()?.let { origin ->
-                        permissionsStorage.findSitePermissionsBy(origin, private = safeCustomTab.content.private)
-                    }
+                    val sitePermissions: SitePermissions? =
+                        safeCustomTab.content.url.getOrigin()?.let { origin ->
+                            permissionsStorage.findSitePermissionsBy(origin, private = safeCustomTab.content.private)
+                        }
 
                     scope.launch(Dispatchers.Main) {
                         trackingProtectionUseCases.containsException(customTabId) { isExcepted ->
@@ -218,14 +220,18 @@ class CustomTabBrowserToolbarMiddleware(
                         source = SOURCE_ADDRESS_BAR,
                         item = ACTION_SITE_CUSTOM_CLICKED,
                         surface = SURFACE_CUSTOM_TAB,
-                    ),
+                    )
                 )
                 val customTab = customTab
-                customTab?.config?.actionButtonConfig?.pendingIntent?.send(
-                    uiContext,
-                    CUSTOM_BUTTON_CLICK_RETURN_CODE,
-                    Intent(null, customTab.content.url.toUri()),
-                )
+                customTab
+                    ?.config
+                    ?.actionButtonConfig
+                    ?.pendingIntent
+                    ?.send(
+                        uiContext,
+                        CUSTOM_BUTTON_CLICK_RETURN_CODE,
+                        Intent(null, customTab.content.url.toUri()),
+                    )
             }
 
             is ShareClicked -> {
@@ -234,20 +240,21 @@ class CustomTabBrowserToolbarMiddleware(
                         source = SOURCE_ADDRESS_BAR,
                         item = ACTION_SHARE_CLICKED,
                         surface = SURFACE_CUSTOM_TAB,
-                    ),
+                    )
                 )
                 val customTab = customTab
                 navController.navigate(
                     NavGraphDirections.actionGlobalShareFragment(
                         sessionId = customTabId,
-                        data = arrayOf(
-                            ShareData(
-                                url = customTab?.content?.url,
-                                title = customTab?.content?.title,
+                        data =
+                            arrayOf(
+                                ShareData(
+                                    url = customTab?.content?.url,
+                                    title = customTab?.content?.title,
+                                )
                             ),
-                        ),
                         showPage = true,
-                    ),
+                    )
                 )
             }
 
@@ -257,7 +264,7 @@ class CustomTabBrowserToolbarMiddleware(
                         source = SOURCE_ADDRESS_BAR,
                         item = ACTION_MENU_CLICKED,
                         surface = SURFACE_CUSTOM_TAB,
-                    ),
+                    )
                 )
                 navController.nav(
                     R.id.externalAppBrowserFragment,
@@ -312,11 +319,7 @@ class CustomTabBrowserToolbarMiddleware(
             mapNotNull { state -> state.findCustomTab(customTabId) }
                 .distinctUntilChangedBy { it.content.progress }
                 .collect {
-                    store.dispatch(
-                        UpdateProgressBarConfig(
-                            buildProgressBar(it.content.progress),
-                        ),
-                    )
+                    store.dispatch(UpdateProgressBarConfig(buildProgressBar(it.content.progress)))
                 }
         }
     }
@@ -331,9 +334,7 @@ class CustomTabBrowserToolbarMiddleware(
         }
     }
 
-    private fun observePageTrackingProtectionUpdates(
-        store: Store<BrowserToolbarState, BrowserToolbarAction>,
-    ) {
+    private fun observePageTrackingProtectionUpdates(store: Store<BrowserToolbarState, BrowserToolbarAction>) {
         browserStore.observeWhileActive {
             mapNotNull { state -> state.findCustomTab(customTabId) }
                 .distinctUntilChangedBy { tab -> tab.trackingProtection }
@@ -353,20 +354,12 @@ class CustomTabBrowserToolbarMiddleware(
     private fun updateStartBrowserActions(
         store: Store<BrowserToolbarState, BrowserToolbarAction>,
         customTab: CustomTabSessionState?,
-    ) = store.dispatch(
-        BrowserActionsStartUpdated(
-            buildStartBrowserActions(customTab),
-        ),
-    )
+    ) = store.dispatch(BrowserActionsStartUpdated(buildStartBrowserActions(customTab)))
 
     private fun updateStartPageActions(
         store: Store<BrowserToolbarState, BrowserToolbarAction>,
         customTab: CustomTabSessionState?,
-    ) = store.dispatch(
-        PageActionsStartUpdated(
-            buildStartPageActions(customTab),
-        ),
-    )
+    ) = store.dispatch(PageActionsStartUpdated(buildStartPageActions(customTab)))
 
     private fun updateCurrentPageOrigin(
         store: Store<BrowserToolbarState, BrowserToolbarAction>,
@@ -381,8 +374,8 @@ class CustomTabBrowserToolbarMiddleware(
                         url = getHostFromUrl()?.trimmed(),
                         contextualMenuOptions = listOf(ContextualMenuOption.CopyURLToClipboard),
                         onClick = null,
-                    ),
-                ),
+                    )
+                )
             )
         }
     }
@@ -390,41 +383,34 @@ class CustomTabBrowserToolbarMiddleware(
     private fun updateEndPageActions(
         store: Store<BrowserToolbarState, BrowserToolbarAction>,
         customTab: CustomTabSessionState?,
-    ) = store.dispatch(
-        BrowserDisplayToolbarAction.PageActionsEndUpdated(
-            buildEndPageActions(customTab),
-        ),
-    )
+    ) = store.dispatch(BrowserDisplayToolbarAction.PageActionsEndUpdated(buildEndPageActions(customTab)))
 
-    private fun updateEndBrowserActions(
-        store: Store<BrowserToolbarState, BrowserToolbarAction>,
-    ) = store.dispatch(
-        BrowserActionsEndUpdated(
-            buildEndBrowserActions(),
-        ),
-    )
+    private fun updateEndBrowserActions(store: Store<BrowserToolbarState, BrowserToolbarAction>) =
+        store.dispatch(BrowserActionsEndUpdated(buildEndBrowserActions()))
 
     private fun buildStartBrowserActions(customTab: CustomTabSessionState?): List<Action> {
         val customTabConfig = customTab?.config
         val customIconBitmap = customTabConfig?.closeButtonIcon
 
         return when (customTabConfig?.showCloseButton) {
-            true -> listOf(
-                ActionButton(
-                    drawable = when (customIconBitmap) {
-                        null -> AppCompatResources.getDrawable(
-                            uiContext,
-                            iconsR.drawable.mozac_ic_cross_24,
-                        )
+            true ->
+                listOf(
+                    ActionButton(
+                        drawable =
+                            when (customIconBitmap) {
+                                null ->
+                                    AppCompatResources.getDrawable(
+                                        uiContext,
+                                        iconsR.drawable.mozac_ic_cross_24,
+                                    )
 
-                        else -> customIconBitmap.toDrawable(uiContext.resources)
-                    },
-                    contentDescription = uiContext.getString(
-                        customtabsR.string.mozac_feature_customtabs_exit_button,
-                    ),
-                    onClick = CloseClicked,
-                ),
-            )
+                                else -> customIconBitmap.toDrawable(uiContext.resources)
+                            },
+                        contentDescription =
+                            uiContext.getString(customtabsR.string.mozac_feature_customtabs_exit_button),
+                        onClick = CloseClicked,
+                    )
+                )
 
             else -> emptyList()
         }
@@ -437,17 +423,15 @@ class CustomTabBrowserToolbarMiddleware(
                     drawableResId = iconsR.drawable.mozac_ic_page_portrait_24,
                     contentDescription = toolbarR.string.mozac_browser_toolbar_content_description_site_info,
                     onClick = SiteInfoClicked,
-                ),
+                )
             )
-        } else if (customTab?.content?.securityInfo == null ||
-            customTab.content.securityInfo == SecurityInfo.Unknown
-        ) {
+        } else if (customTab?.content?.securityInfo == null || customTab.content.securityInfo == SecurityInfo.Unknown) {
             add(
                 buildSiteInfoAction(
                     drawableResId = iconsR.drawable.mozac_ic_globe_24,
                     contentDescription = toolbarR.string.mozac_browser_toolbar_content_description_site_info,
                     onClick = object : BrowserToolbarEvent {},
-                ),
+                )
             )
         } else if (!customTab.content.securityInfo.isSecure) {
             add(
@@ -455,18 +439,15 @@ class CustomTabBrowserToolbarMiddleware(
                     drawableResId = iconsR.drawable.mozac_ic_shield_slash_24,
                     contentDescription = toolbarR.string.mozac_browser_toolbar_content_description_site_info,
                     onClick = SiteInfoClicked,
-                ),
+                )
             )
-        } else if (
-            customTab.trackingProtection.enabled &&
-            !customTab.trackingProtection.ignoredOnTrackingProtection
-        ) {
+        } else if (customTab.trackingProtection.enabled && !customTab.trackingProtection.ignoredOnTrackingProtection) {
             add(
                 buildSiteInfoAction(
                     drawableResId = iconsR.drawable.mozac_ic_shield_checkmark_24,
                     contentDescription = toolbarR.string.mozac_browser_toolbar_content_description_site_info,
                     onClick = SiteInfoClicked,
-                ),
+                )
             )
         } else {
             add(
@@ -474,7 +455,7 @@ class CustomTabBrowserToolbarMiddleware(
                     drawableResId = iconsR.drawable.mozac_ic_shield_cross_24,
                     contentDescription = toolbarR.string.mozac_browser_toolbar_content_description_site_info,
                     onClick = SiteInfoClicked,
-                ),
+                )
             )
         }
     }
@@ -511,14 +492,15 @@ class CustomTabBrowserToolbarMiddleware(
 
         return when (customButtonIcon) {
             null -> emptyList()
-            else -> listOf(
-                ActionButton(
-                    drawable = customButtonIcon.toDrawable(uiContext.resources),
-                    shouldTint = customTab.content.private || customButtonConfig.tint,
-                    contentDescription = customButtonConfig.description,
-                    onClick = CustomButtonClicked,
-                ),
-            )
+            else ->
+                listOf(
+                    ActionButton(
+                        drawable = customButtonIcon.toDrawable(uiContext.resources),
+                        shouldTint = customTab.content.private || customButtonConfig.tint,
+                        contentDescription = customButtonConfig.description,
+                        onClick = CustomButtonClicked,
+                    )
+                )
         }
     }
 
@@ -528,15 +510,15 @@ class CustomTabBrowserToolbarMiddleware(
                 drawableResId = iconsR.drawable.mozac_ic_ellipsis_vertical_24,
                 contentDescription = R.string.content_description_menu,
                 onClick = MenuClicked,
-            ),
+            )
         )
     }
 
     private fun buildProgressBar(progress: Int = 0) = ProgressBarConfig(progress)
 
     /**
-     * Get the host of the current URL with the registrable domain span applied.
-     * If this cannot be done, the original URL is returned.
+     * Get the host of the current URL with the registrable domain span applied. If this cannot be done, the original
+     * URL is returned.
      */
     private suspend fun getHostFromUrl(): CharSequence? {
         val url = customTab?.content?.url
@@ -575,12 +557,10 @@ class CustomTabBrowserToolbarMiddleware(
     }
 
     private inline fun <S : State, A : MVIAction> Store<S, A>.observeWhileActive(
-        crossinline observe: suspend (Flow<S>.() -> Unit),
+        crossinline observe: suspend (Flow<S>.() -> Unit)
     ): Job = scope.launch { flow().observe() }
 
-    /**
-     * Static functionalities of the [BrowserToolbarMiddleware].
-     */
+    /** Static functionalities of the [BrowserToolbarMiddleware]. */
     companion object {
         @VisibleForTesting
         internal sealed class StartBrowserActions : BrowserToolbarEvent {
@@ -600,6 +580,7 @@ class CustomTabBrowserToolbarMiddleware(
         @VisibleForTesting
         internal sealed class DisplayActions : BrowserToolbarEvent {
             data object ShareClicked : DisplayActions()
+
             data object MenuClicked : DisplayActions()
         }
     }

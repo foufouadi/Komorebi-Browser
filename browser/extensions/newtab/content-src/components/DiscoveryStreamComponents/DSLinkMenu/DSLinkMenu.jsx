@@ -67,7 +67,6 @@ export class _DSLinkMenu extends React.PureComponent {
               bookmarkGuid: this.props.bookmarkGuid,
               flight_id: this.props.flightId,
               tile_id: this.props.tile_id,
-              recommendation_id: this.props.recommendation_id,
               corpus_item_id: this.props.corpus_item_id,
               scheduled_corpus_item_id: this.props.scheduled_corpus_item_id,
               recommended_at: this.props.recommended_at,

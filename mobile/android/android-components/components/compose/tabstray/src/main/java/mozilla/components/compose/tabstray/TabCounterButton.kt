@@ -101,13 +101,16 @@ private fun TabCounterButtonPreview() {
             ) {
                 PREVIEW_TAB_COUNTS.forEach { count ->
                     TabCounterButton(
-                        store = BrowserStore(
-                            initialState = BrowserState(
-                                tabs = List(count) { index ->
-                                    createTab(url = "https://example.com/$index")
-                                },
+                        store =
+                            BrowserStore(
+                                initialState =
+                                    BrowserState(
+                                        tabs =
+                                            List(count) { index ->
+                                                createTab(url = "https://example.com/$index")
+                                            }
+                                    )
                             ),
-                        ),
                         onClicked = {},
                     )
                 }

@@ -57,6 +57,7 @@ UNIFIED_SOURCES += [
 SOURCES += [
     "TestCacheCrypto.cpp",
     "TestCacheEntryWriterHang.cpp",
+    "TestDiagnosticRWLock.cpp",
     "TestHappyEyeballsConnectionAttempt.cpp",
 ]
 

@@ -18,7 +18,6 @@ const DEFAULT_PROPS = {
       publisher: "Publisher One",
       icon_src: "https://example.com/icon1.png",
       pos: 0,
-      recommendation_id: "rec-1",
       section: "daily-brief",
     },
     {
@@ -28,7 +27,6 @@ const DEFAULT_PROPS = {
       publisher: "Publisher Two",
       icon_src: "https://example.com/icon2.png",
       pos: 1,
-      recommendation_id: "rec-2",
       section: "daily-brief",
     },
     {
@@ -38,7 +36,6 @@ const DEFAULT_PROPS = {
       publisher: "Publisher Three",
       icon_src: "https://example.com/icon3.png",
       pos: 2,
-      recommendation_id: "rec-3",
       section: "daily-brief",
     },
   ],

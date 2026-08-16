@@ -4,9 +4,7 @@ import android.util.Log
 import org.mozilla.fenix.ui.efficiency.helpers.BasePage
 import org.mozilla.fenix.ui.efficiency.helpers.BaseTest
 
-abstract class BaseInteractionShardTest(
-    private val case: InteractionCase,
-) : BaseTest() {
+abstract class BaseInteractionShardTest(private val case: InteractionCase) : BaseTest() {
 
     protected fun runInteractionCase() {
         Log.i(

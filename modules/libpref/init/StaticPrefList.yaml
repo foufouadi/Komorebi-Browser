@@ -2936,6 +2936,12 @@
   value: true
   mirror: always
 
+# Whether the ContainerTiming API is enabled
+- name: dom.enable_container_timing
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
 # Whether the LargestContentfulPaint API will be gathered and returned by performance observer*
 - name: dom.enable_largest_contentful_paint
   type: RelaxedAtomicBool
@@ -8985,6 +8991,22 @@
   value: true
   mirror: always
 
+# Whether to use libjpeg-turbo DCT scaling to produce a reduced-size
+# intermediate image before the downscaling filter.
+- name: image.jpeg.dct-scaling.enabled
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
+# Minimum remaining scale factor to leave for the downscaling filter (Lanczos3)
+# after IDCT scaling. 1.0 means scale as close to the target as the discrete
+# IDCT factors allow; 2.0 means only take an IDCT step if at least 2x of
+# downscaling remains for Lanczos. Values below 1.0 are clamped.
+- name: image.jpeg.dct-scaling.min-factor
+  type: AtomicFloat
+  value: 2.5f
+  mirror: always
+
 # Whether EXIF density metadata is sanity checked against PixelXDimension and PixelYDimension
 - name: image.exif-density-correction.sanity-check.enabled
   type: RelaxedAtomicBool
@@ -10630,6 +10652,14 @@
   mirror: always
   rust: true
 
+# Whether anchor positioning takes the anchor element's transforms into account.
+# https://drafts.csswg.org/css-anchor-position-1/#determining
+- name: layout.css.anchor-positioning.follows-transforms.enabled
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+  rust: true
+
 # Whether to enable appearance: base for authors.
 - name: layout.css.appearance-base.enabled
   type: RelaxedAtomicBool
@@ -11461,6 +11491,13 @@
 - name: layout.forms.reveal-password-button.enabled
   type: bool
   value: false
+  mirror: always
+
+# Whether we respect <button> and <input> align-content on blocks.
+# See https://github.com/w3c/csswg-drafts/issues/14190
+- name: layout.forms.button-input-align-content-block.enabled
+  type: bool
+  value: true
   mirror: always
 
 # If enabled, textareas won't include 'overflow:auto' scrollbars in their
@@ -13053,6 +13090,11 @@
 
 - name: media.hardware-video-decoding-vulkan.enabled
   type: bool
+  value: @IS_NIGHTLY_BUILD@
+  mirror: once
+
+- name: media.hardware-video-decoding-vulkan.force-enabled
+  type: bool
   value: false
   mirror: once
 
@@ -13660,11 +13702,7 @@
   # acceleration for decoding.
 -   name: media.navigator.mediadatadecoder_h264_enabled
     type: RelaxedAtomicBool
-  #if defined(_ARM64_) && defined(XP_WIN)
-    value: false
-  #else
     value: true
-  #endif
     mirror: always
 
 #if defined(MOZ_WIDGET_GTK)
@@ -15464,6 +15502,17 @@
   value: 40
   mirror: always
 
+# How long a single unchanging holder may keep nsHostResolver's DB lock while
+# another thread waits, before we treat the lock as wedged and crash, naming the
+# thread and code site holding it. The lock is normally held for microseconds.
+# The timer restarts whenever the holder changes, so slow-but-progressing
+# contention never trips this. Only has an effect in builds where
+# MOZ_DIAGNOSTIC_ASSERT is fatal. 0 disables the check.
+- name: network.dns.db_lock_timeout_ms
+  type: RelaxedAtomicUint32
+  value: 3000
+  mirror: always
+
 - name: network.dns.max_any_priority_threads
   type: RelaxedAtomicUint32
   value: 24
@@ -15683,9 +15732,11 @@
 # When true, block LNA requests from insecure contexts (http:// origins that
 # are not localhost or .local). Uses IsPotentiallyTrustworthyOrigin to
 # determine if the origin is trustworthy.
+# The spec requires this, but it is disabled by default until Chrome ships the
+# same restriction, to avoid breaking sites that only work in Firefox.
 - name: network.lna.block_insecure_contexts
   type: RelaxedAtomicBool
-  value: true
+  value: false
   mirror: always
 
 

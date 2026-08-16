@@ -521,7 +521,6 @@ function CardSection({
           pocket_id={rec.pocket_id}
           context_type={rec.context_type}
           bookmarkGuid={rec.bookmarkGuid}
-          recommendation_id={rec.recommendation_id}
           corpus_item_id={rec.corpus_item_id}
           scheduled_corpus_item_id={rec.scheduled_corpus_item_id}
           recommended_at={rec.recommended_at}

@@ -22,34 +22,34 @@ class PbmLockStatusBindingTest {
     lateinit var appStore: AppStore
 
     @Test
-    fun `WHEN private browsing lock status updates THEN tabs tray action dispatched with new status`() = runTest(testDispatcher) {
-        appStore = AppStore(
-            AppState(
-                inactiveTabsExpanded = false,
-            ),
-        )
+    fun `WHEN private browsing lock status updates THEN tabs tray action dispatched with new status`() =
+        runTest(testDispatcher) {
+            appStore = AppStore(AppState(inactiveTabsExpanded = false))
 
-        tabsTrayStore = spyk(
-            TabsTrayStore(
-                TabsTrayState(
-                    privateBrowsing = TabsTrayState.PrivateBrowsingState(
-                        tabs = listOf(TabsTrayItem.Tab(tab = createTab("mozilla.org", id = "mozilla"))),
-                        showLockBanner = false,
-                        isLocked = false,
-                    ),
-                ),
-            ),
-        )
+            tabsTrayStore =
+                spyk(
+                    TabsTrayStore(
+                        TabsTrayState(
+                            privateBrowsing =
+                                TabsTrayState.PrivateBrowsingState(
+                                    tabs = listOf(TabsTrayItem.Tab(tab = createTab("mozilla.org", id = "mozilla"))),
+                                    showLockBanner = false,
+                                    isLocked = false,
+                                )
+                        )
+                    )
+                )
 
-        val binding = PbmLockStatusBinding(
-            appStore = appStore,
-            tabsTrayStore = tabsTrayStore,
-            mainDispatcher = testDispatcher,
-        )
-        binding.start()
-        appStore.dispatch(AppAction.PrivateBrowsingLockAction.UpdatePrivateBrowsingLock(isLocked = true))
-        testDispatcher.scheduler.advanceUntilIdle()
+            val binding =
+                PbmLockStatusBinding(
+                    appStore = appStore,
+                    tabsTrayStore = tabsTrayStore,
+                    mainDispatcher = testDispatcher,
+                )
+            binding.start()
+            appStore.dispatch(AppAction.PrivateBrowsingLockAction.UpdatePrivateBrowsingLock(isLocked = true))
+            testDispatcher.scheduler.advanceUntilIdle()
 
-        verify { tabsTrayStore.dispatch(TabsTrayAction.UpdatePbmLockStatus(true)) }
-    }
+            verify { tabsTrayStore.dispatch(TabsTrayAction.UpdatePbmLockStatus(true)) }
+        }
 }

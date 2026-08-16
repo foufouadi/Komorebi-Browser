@@ -13,6 +13,4 @@ package org.mozilla.fenix.customannotations
  */
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
-annotation class SkipLeaks(
-    val reasons: Array<String> = [],
-)
+annotation class SkipLeaks(val reasons: Array<String> = [])

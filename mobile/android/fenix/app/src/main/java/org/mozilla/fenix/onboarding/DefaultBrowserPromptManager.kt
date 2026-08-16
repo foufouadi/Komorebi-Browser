@@ -9,26 +9,18 @@ import androidx.annotation.VisibleForTesting
 import mozilla.components.support.utils.Browsers
 import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.ext.isDefaultBrowserPromptSupported
+import org.mozilla.fenix.nimbus.FxNimbus
 import org.mozilla.fenix.onboarding.view.OnboardingPageUiData
-import org.mozilla.fenix.utils.Settings
 
-/**
- * An interface to calculate and persist the state of the default browser prompt.
- */
+/** An interface to calculate and persist the state of the default browser prompt. */
 interface DefaultBrowserPromptStorage {
-    /**
-     * Indicates if the browser is already set as the default.
-     */
+    /** Indicates if the browser is already set as the default. */
     val isDefaultBrowser: Boolean
 
-    /**
-     * Indicates if the device supports default browser prompt functionality.
-     */
+    /** Indicates if the device supports default browser prompt functionality. */
     val isDefaultBrowserPromptSupported: Boolean
 
-    /**
-     * Indicates whether the prompt to set the default browser has been shown during onboarding.
-     */
+    /** Indicates whether the prompt to set the default browser has been shown during onboarding. */
     var promptToSetAsDefaultBrowserDisplayedInOnboarding: Boolean
 }
 
@@ -37,34 +29,32 @@ interface DefaultBrowserPromptStorage {
  *
  * @property context is used for calculating and persisting the state.
  */
-class DefaultDefaultBrowserPromptStorage(
-    val context: Context,
-) : DefaultBrowserPromptStorage {
+class DefaultDefaultBrowserPromptStorage(val context: Context) : DefaultBrowserPromptStorage {
     override val isDefaultBrowser = Browsers.isDefaultBrowser(context)
 
     override val isDefaultBrowserPromptSupported = context.isDefaultBrowserPromptSupported()
 
     override var promptToSetAsDefaultBrowserDisplayedInOnboarding: Boolean
         get() = context.components.settings.promptToSetAsDefaultBrowserDisplayedInOnboarding
-        set(value) { context.components.settings.promptToSetAsDefaultBrowserDisplayedInOnboarding = value }
+        set(value) {
+            context.components.settings.promptToSetAsDefaultBrowserDisplayedInOnboarding = value
+        }
 }
 
 /**
  * Handles the logic of prompting users to set Firefox as the default browser during onboarding.
  *
  * @param storage A [DefaultBrowserPromptStorage] implementation to persist and retrieve the prompt state.
- * @param settings A lazy provider to retrieve the up-to-date [Settings] instance.
  * @param promptToSetAsDefaultBrowser A callback to trigger the default browser prompt.
  */
 class DefaultBrowserPromptManager(
     private val storage: DefaultBrowserPromptStorage,
-    private val settings: () -> Settings,
     private val promptToSetAsDefaultBrowser: () -> Unit,
 ) {
 
     @VisibleForTesting
     internal fun canShowPrompt(): Boolean {
-        return settings().shouldShowSetAsDefaultPrompt() &&
+        return FxNimbus.features.defaultBrowserPrompt.value().enabled &&
             !storage.isDefaultBrowser &&
             storage.isDefaultBrowserPromptSupported &&
             !storage.promptToSetAsDefaultBrowserDisplayedInOnboarding

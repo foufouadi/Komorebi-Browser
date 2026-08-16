@@ -105,6 +105,7 @@ body {
   /* z-indices that fight on the browser container */
   --browser-container-z-index-devtools-toolbox: 1;
   --browser-container-z-index-devtools-splitter: 2;
+  --browser-container-z-index-devtools-rdm-with-devices-dialog: 3;
 
   /* z-indices that fight on the browser stack */
   --browser-stack-z-index-dialog-stack: 2;
@@ -180,7 +181,7 @@ body {
     --chrome-block-radius: 10px;
 
     &[uidensity="compact"] {
-      --chrome-window-gap: 0px;
+      --chrome-window-gap: 2px;
     }
 
     @media (-moz-platform: linux) {
@@ -426,7 +427,7 @@ body {
   background-color: transparent;
   color: inherit;
 
-  @media not -moz-pref("sidebar.verticalTabs") {
+  @media (not -moz-pref("sidebar.verticalTabs")) or (-moz-pref("sidebar.verticalTabs") and -moz-pref("browser.nova.enabled")) {
     &:not(.browser-titlebar) {
       background-color: var(--toolbar-background-color);
       color: var(--toolbar-text-color);
@@ -660,14 +661,9 @@ body {
   padding-inline: var(--space-small);
 
   @media -moz-pref("browser.nova.enabled") {
-    :root:not([lwtheme]) & {
-      background-color: var(--toolbar-background-color);
-      color: var(--toolbar-text-color);
-
-      &:not([collapsed]) {
-        /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
-        border-top: 1px solid var(--chrome-content-separator-color);
-      }
+    :root:not([lwtheme]) &:not([collapsed]) {
+      /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
+      border-top: 1px solid var(--chrome-content-separator-color);
     }
   }
 
@@ -752,6 +748,11 @@ toolbarpaletteitem > #personal-bookmarks > #PlacesToolbar,
 #notifications-toolbar {
   min-height: 0;
   flex-direction: column;
+
+  @media -moz-pref("browser.nova.enabled") {
+    --info-bar-margin-block-start: 0;
+    --info-bar-margin-inline: 0;
+  }
 }
 
 .bookmark-item[cutting] {
@@ -1718,20 +1719,36 @@ popupnotificationcontent {
   /* Smart Window toggle in Smart Window */
   :root[ai-window] & {
     list-style-image: url("chrome://browser/skin/smart-window-simplified.svg");
+  }
 
-    &[cui-areatype="toolbar"]:not([overflowedItem]) > .toolbarbutton-icon {
+  :root[ai-window] &[cui-areatype="toolbar"]:not([overflowedItem]) {
+    @media (not (forced-colors)) and -moz-pref("browser.nova.enabled") {
+      /* toolbar button size (--toolbarbutton-icon-size) + 2 x the hover size (--toolbarbutton-padding-inner-compact) */
+      --smart-window-switcher-hover-size: calc(var(--toolbarbutton-icon-size) + 2 * var(--toolbarbutton-padding-inner-compact));
+      &::before {
+        aspect-ratio: 1;
+        background-color: transparent;
+        border-radius: var(--border-radius-circle);
+        content: "";
+        position: absolute;
+        /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
+        width: var(--smart-window-switcher-hover-size);
+        z-index: -1;
+      }
+
+      &:is(:hover, [open])::before {
+        /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
+        background-color: light-dark(color-mix(in srgb, var(--color-violet-desaturated-50) 15%, transparent), var(--color-violet-desaturated-50));
+      }
+    }
+
+    > .toolbarbutton-icon {
       @media not -moz-pref("browser.nova.enabled") {
         /* Smart Window icon has additional 2px padding per side, to be slightly smaller than Classic Window icon when used in Switcher */
         padding: var(--toolbarbutton-padding-inner);
         /* The design system does not have any inset box-shadow tokens. */
         /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
         box-shadow: 0 0 16px 4px var(--smartwindow-toggle-shadow-color) inset;
-      }
-
-      @media (not (forced-colors)) and -moz-pref("browser.nova.enabled") {
-        /* The design system does not have any outline width tokens. */
-        /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
-        outline-width: var(--toolbarbutton-padding-inner-compact);
       }
 
       @media -moz-pref("browser.nova.enabled") {

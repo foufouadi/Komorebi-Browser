@@ -8,9 +8,7 @@ import mozilla.components.concept.llm.LlmProvider
 import mozilla.components.lib.state.State
 import mozilla.components.ui.richtext.ir.RichDocument
 
-/**
- * The [State] of the [SummarizationStore]
- */
+/** The [State] of the [SummarizationStore] */
 sealed class SummarizationState : State {
     /**
      * The feature is idle and not actively summarizing.
@@ -19,9 +17,7 @@ sealed class SummarizationState : State {
      */
     data class Inert(val initializedWithShake: Boolean) : SummarizationState()
 
-    /**
-     * The user has requested summary but the feature is waiting for the browser page to load.
-     */
+    /** The user has requested summary but the feature is waiting for the browser page to load. */
     data object PageLoading : SummarizationState()
 
     /** The user must consent to shake-to-summarize before proceeding. */
@@ -33,9 +29,10 @@ sealed class SummarizationState : State {
     /** The user must download an on-device model before continuing */
     data object DownloadConsentRequired : SummarizationState()
 
-    /** The on-device model is downloading  */
+    /** The on-device model is downloading */
     data class Downloading(val bytesToDownload: Float, val bytesDownloaded: Float) : SummarizationState() {
-        val downloadProgress: Float get() = bytesToDownload / bytesToDownload
+        val downloadProgress: Float
+            get() = bytesToDownload / bytesToDownload
     }
 
     /**
@@ -104,13 +101,12 @@ sealed class SummarizationState : State {
     data object SignInRequired : SummarizationState()
 
     companion object {
-        val initial: SummarizationState get() = Inert(false)
+        val initial: SummarizationState
+            get() = Inert(false)
     }
 }
 
-/**
-* Describes the possible failure modes of the summarization feature.
-*/
+/** Describes the possible failure modes of the summarization feature. */
 sealed class SummarizationError {
     /** The model download did not complete successfully. */
     data object DownloadFailed : SummarizationError()
@@ -119,7 +115,11 @@ sealed class SummarizationError {
     data class SummarizationFailed(val exception: Throwable) : SummarizationError()
 }
 
-val SummarizationState.isLoading get() = this is SummarizationState.Loading
-val SummarizationState.isPageLoading get() = this is SummarizationState.PageLoading
-val SummarizationState.isSummarizing get() = this is SummarizationState.Summarizing
-val SummarizationState.isSummarized get() = this is SummarizationState.Summarized
+val SummarizationState.isLoading
+    get() = this is SummarizationState.Loading
+val SummarizationState.isPageLoading
+    get() = this is SummarizationState.PageLoading
+val SummarizationState.isSummarizing
+    get() = this is SummarizationState.Summarizing
+val SummarizationState.isSummarized
+    get() = this is SummarizationState.Summarized

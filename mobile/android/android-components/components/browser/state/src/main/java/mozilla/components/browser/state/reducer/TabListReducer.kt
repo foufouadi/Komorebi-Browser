@@ -4,6 +4,7 @@
 
 package mozilla.components.browser.state.reducer
 
+import kotlin.math.max
 import mozilla.components.browser.state.action.TabListAction
 import mozilla.components.browser.state.selector.findTab
 import mozilla.components.browser.state.selector.selectedTab
@@ -11,12 +12,9 @@ import mozilla.components.browser.state.state.BrowserState
 import mozilla.components.browser.state.state.TabPartition
 import mozilla.components.browser.state.state.TabSessionState
 import mozilla.components.browser.state.state.recover.toTabSessionStates
-import kotlin.math.max
 
 internal object TabListReducer {
-    /**
-     * [TabListAction] Reducer function for modifying the list of [TabSessionState] objects in [BrowserState.tabs].
-     */
+    /** [TabListAction] Reducer function for modifying the list of [TabSessionState] objects in [BrowserState.tabs]. */
     @Suppress("LongMethod", "CognitiveComplexMethod")
     fun reduce(state: BrowserState, action: TabListAction): BrowserState {
         return when (action) {
@@ -24,43 +22,48 @@ internal object TabListReducer {
                 // Verify that tab doesn't already exist
                 requireUniqueTab(state, action.tab)
 
-                val updatedTabList = if (action.tab.parentId != null) {
-                    val parentIndex = state.tabs.indexOfFirst { it.id == action.tab.parentId }
-                    require(parentIndex != -1) {
-                        "The parent does not exist"
-                    }
+                val updatedTabList =
+                    if (action.tab.parentId != null) {
+                        val parentIndex = state.tabs.indexOfFirst { it.id == action.tab.parentId }
+                        require(parentIndex != -1) {
+                            "The parent does not exist"
+                        }
 
-                    // Add the child tab next to its parent
-                    val childIndex = parentIndex + 1
-                    state.tabs.subList(0, childIndex) + action.tab + state.tabs.subList(childIndex, state.tabs.size)
-                } else {
-                    state.tabs + action.tab
-                }
+                        // Add the child tab next to its parent
+                        val childIndex = parentIndex + 1
+                        state.tabs.subList(0, childIndex) + action.tab + state.tabs.subList(childIndex, state.tabs.size)
+                    } else {
+                        state.tabs + action.tab
+                    }
 
                 state.copy(
                     tabs = updatedTabList,
-                    selectedTabId = if (action.select || state.selectedTabId == null) {
-                        action.tab.id
-                    } else {
-                        state.selectedTabId
-                    },
+                    selectedTabId =
+                        if (action.select || state.selectedTabId == null) {
+                            action.tab.id
+                        } else {
+                            state.selectedTabId
+                        },
                 )
             }
 
             is TabListAction.AddMultipleTabsAction -> {
                 action.tabs.forEach { requireUniqueTab(state, it) }
 
-                action.tabs.find { tab -> tab.parentId != null }?.let {
-                    throw IllegalArgumentException("Adding multiple tabs with a parent id is not supported")
-                }
+                action.tabs
+                    .find { tab -> tab.parentId != null }
+                    ?.let {
+                        throw IllegalArgumentException("Adding multiple tabs with a parent id is not supported")
+                    }
 
                 state.copy(
                     tabs = state.tabs + action.tabs,
-                    selectedTabId = if (state.selectedTabId == null) {
-                        action.tabs.find { tab -> !tab.content.private }?.id
-                    } else {
-                        state.selectedTabId
-                    },
+                    selectedTabId =
+                        if (state.selectedTabId == null) {
+                            action.tabs.find { tab -> !tab.content.private }?.id
+                        } else {
+                            state.selectedTabId
+                        },
                 )
             }
 
@@ -70,14 +73,16 @@ internal object TabListReducer {
                     state
                 } else {
                     val targetPosition = state.tabs.indexOf(tabTarget) + (if (action.placeAfter) 1 else 0)
-                    val positionOffset = state.tabs.filterIndexed { index, tab ->
-                        (index < targetPosition && tab.id in action.tabIds)
-                    }.count()
+                    val positionOffset =
+                        state.tabs
+                            .filterIndexed { index, tab ->
+                                (index < targetPosition && tab.id in action.tabIds)
+                            }
+                            .count()
                     val finalPos = targetPosition - positionOffset
                     val (movedTabs, unmovedTabs) = state.tabs.partition { it.id in action.tabIds }
-                    val updatedTabList = unmovedTabs.subList(0, finalPos) +
-                        movedTabs +
-                        unmovedTabs.subList(finalPos, unmovedTabs.size)
+                    val updatedTabList =
+                        unmovedTabs.subList(0, finalPos) + movedTabs + unmovedTabs.subList(finalPos, unmovedTabs.size)
 
                     state.copy(tabs = updatedTabList)
                 }
@@ -94,31 +99,33 @@ internal object TabListReducer {
                     state
                 } else {
                     // Remove tab and update child tabs in case their parent was removed
-                    val updatedTabList = (state.tabs - tabToRemove).map {
-                        if (it.parentId == tabToRemove.id) it.copy(parentId = tabToRemove.parentId) else it
-                    }
+                    val updatedTabList =
+                        (state.tabs - tabToRemove).map {
+                            if (it.parentId == tabToRemove.id) it.copy(parentId = tabToRemove.parentId) else it
+                        }
                     val removedTabWasSelected = tabToRemove.id == state.selectedTabId
 
-                    val updatedSelection = when {
-                        removedTabWasSelected && action.selectParentIfExists && tabToRemove.parentId != null -> {
-                            // The parent tab should be selected if one exists
-                            tabToRemove.parentId
+                    val updatedSelection =
+                        when {
+                            removedTabWasSelected && action.selectParentIfExists && tabToRemove.parentId != null -> {
+                                // The parent tab should be selected if one exists
+                                tabToRemove.parentId
+                            }
+                            removedTabWasSelected -> {
+                                // The selected tab was removed and we need to find a new one
+                                val previousIndex = state.tabs.indexOf(tabToRemove)
+                                findNewSelectedTabId(
+                                    tabs = updatedTabList,
+                                    isPrivate = tabToRemove.content.private,
+                                    previousIndex = previousIndex,
+                                    excludedTabIds = action.excludedTabIds,
+                                )
+                            }
+                            else -> {
+                                // The selected tab is not affected and can stay the same
+                                state.selectedTabId
+                            }
                         }
-                        removedTabWasSelected -> {
-                            // The selected tab was removed and we need to find a new one
-                            val previousIndex = state.tabs.indexOf(tabToRemove)
-                            findNewSelectedTabId(
-                                tabs = updatedTabList,
-                                isPrivate = tabToRemove.content.private,
-                                previousIndex = previousIndex,
-                                excludedTabIds = action.excludedTabIds,
-                            )
-                        }
-                        else -> {
-                            // The selected tab is not affected and can stay the same
-                            state.selectedTabId
-                        }
-                    }
 
                     state.copy(
                         tabs = updatedTabList,
@@ -135,16 +142,16 @@ internal object TabListReducer {
                     state
                 } else {
                     // Remove tabs and update child tabs' parentId if their parent is in removed list
-                    val updatedTabList = (state.tabs - tabsToRemove).map { tabState ->
-                        tabsToRemove.firstOrNull { removedTab -> tabState.parentId == removedTab.id }
-                            ?.let { tabState.copy(parentId = findNewParentId(it, tabsToRemove)) }
-                            ?: tabState
-                    }
+                    val updatedTabList =
+                        (state.tabs - tabsToRemove).map { tabState ->
+                            tabsToRemove
+                                .firstOrNull { removedTab -> tabState.parentId == removedTab.id }
+                                ?.let { tabState.copy(parentId = findNewParentId(it, tabsToRemove)) } ?: tabState
+                        }
 
                     val updatedSelection =
                         if (action.tabIds.contains(state.selectedTabId)) {
-                            val removedSelectedTab =
-                                tabsToRemove.first { it.id == state.selectedTabId }
+                            val removedSelectedTab = tabsToRemove.first { it.id == state.selectedTabId }
                             // The selected tab was removed and we need to find a new one
                             val previousIndex = state.tabs.indexOf(removedSelectedTab)
                             findNewSelectedTabId(
@@ -176,40 +183,45 @@ internal object TabListReducer {
                 // specified index (RecoverableTab.index). If the index for some reason is -1,
                 // the tab will be restored to the end of the tab list. Upon restoration, the
                 // index will be reset to -1 when added to the combined list.
-                val combinedTabList: List<TabSessionState> = when (action.restoreLocation) {
-                    TabListAction.RestoreAction.RestoreLocation.BEGINNING -> restoredTabs + state.tabs
-                    TabListAction.RestoreAction.RestoreLocation.END -> state.tabs + restoredTabs
-                    TabListAction.RestoreAction.RestoreLocation.AT_INDEX -> mutableListOf<TabSessionState>().apply {
-                        addAll(state.tabs)
-                        restoredTabs.forEachIndexed { index, restoredTab ->
-                            val tabIndex = action.tabs[index].state.index
-                            val restoreIndex =
-                                if (tabIndex > size || tabIndex < 0) {
-                                    size
-                                } else {
-                                    tabIndex
+                val combinedTabList: List<TabSessionState> =
+                    when (action.restoreLocation) {
+                        TabListAction.RestoreAction.RestoreLocation.BEGINNING -> restoredTabs + state.tabs
+                        TabListAction.RestoreAction.RestoreLocation.END -> state.tabs + restoredTabs
+                        TabListAction.RestoreAction.RestoreLocation.AT_INDEX ->
+                            mutableListOf<TabSessionState>().apply {
+                                addAll(state.tabs)
+                                restoredTabs.forEachIndexed { index, restoredTab ->
+                                    val tabIndex = action.tabs[index].state.index
+                                    val restoreIndex =
+                                        if (tabIndex > size || tabIndex < 0) {
+                                            size
+                                        } else {
+                                            tabIndex
+                                        }
+                                    add(restoreIndex, restoredTab)
                                 }
-                            add(restoreIndex, restoredTab)
-                        }
+                            }
                     }
-                }
 
-                val combinedTabPartitions = mergeTabPartitions(
-                    currentTabPartitions = state.tabPartitions,
-                    restoredTabPartitions = action.tabPartitions,
-                )
+                val combinedTabPartitions =
+                    mergeTabPartitions(
+                        currentTabPartitions = state.tabPartitions,
+                        restoredTabPartitions = action.tabPartitions,
+                    )
 
                 state.copy(
                     tabs = combinedTabList,
                     tabPartitions = combinedTabPartitions,
-                    selectedTabId = if (action.selectedTabId != null && state.selectedTabId == null) {
-                        // We only want to update the selected tab if none has been already selected. Otherwise we may
-                        // switch to a restored tab even though the user is already looking at an existing tab (e.g.
-                        // a tab that came from an intent).
-                        action.selectedTabId
-                    } else {
-                        state.selectedTabId
-                    },
+                    selectedTabId =
+                        if (action.selectedTabId != null && state.selectedTabId == null) {
+                            // We only want to update the selected tab if none has been already selected. Otherwise we
+                            // may
+                            // switch to a restored tab even though the user is already looking at an existing tab (e.g.
+                            // a tab that came from an intent).
+                            action.selectedTabId
+                        } else {
+                            state.selectedTabId
+                        },
                 )
             }
 
@@ -227,13 +239,14 @@ internal object TabListReducer {
                 val normalTabs = partition.second
                 state.copy(
                     tabs = normalTabs,
-                    selectedTabId = if (selectionAffected) {
-                        // If the selection is affected, we'll set it to null as there's no
-                        // normal tab left and NO normal tab should get selected instead.
-                        null
-                    } else {
-                        state.selectedTabId
-                    },
+                    selectedTabId =
+                        if (selectionAffected) {
+                            // If the selection is affected, we'll set it to null as there's no
+                            // normal tab left and NO normal tab should get selected instead.
+                            null
+                        } else {
+                            state.selectedTabId
+                        },
                     tabPartitions = state.tabPartitions.removeTabs(partition.first.map { it.id }.toSet()),
                 )
             }
@@ -244,13 +257,14 @@ internal object TabListReducer {
                 val privateTabs = partition.first
                 state.copy(
                     tabs = privateTabs,
-                    selectedTabId = if (selectionAffected) {
-                        // If the selection is affected, we'll set it to null as there's no
-                        // normal tab left and NO private tab should get selected instead.
-                        null
-                    } else {
-                        state.selectedTabId
-                    },
+                    selectedTabId =
+                        if (selectionAffected) {
+                            // If the selection is affected, we'll set it to null as there's no
+                            // normal tab left and NO private tab should get selected instead.
+                            null
+                        } else {
+                            state.selectedTabId
+                        },
                     tabPartitions = state.tabPartitions.removeTabs(partition.second.map { it.id }.toSet()),
                 )
             }
@@ -259,8 +273,8 @@ internal object TabListReducer {
 }
 
 /**
- * Looks for an appropriate new parentId for a tab by checking if the parent is being removed,
- * and if so, will recursively check the parent's parent and so on.
+ * Looks for an appropriate new parentId for a tab by checking if the parent is being removed, and if so, will
+ * recursively check the parent's parent and so on.
  */
 private fun findNewParentId(
     tabToFindNewParent: TabSessionState,
@@ -277,9 +291,7 @@ private fun findNewParentId(
     }
 }
 
-/**
- * Find a new selected tab and return its id after the tab at [previousIndex] was removed.
- */
+/** Find a new selected tab and return its id after the tab at [previousIndex] was removed. */
 private fun findNewSelectedTabId(
     tabs: List<TabSessionState>,
     isPrivate: Boolean,
@@ -313,9 +325,7 @@ private fun findNewSelectedTabId(
     }
 }
 
-/**
- * Find a tab that is near the provided [index] and matches the [predicate].
- */
+/** Find a tab that is near the provided [index] and matches the [predicate]. */
 private fun findNearbyTab(
     tabs: List<TabSessionState>,
     index: Int,
@@ -329,9 +339,7 @@ private fun findNearbyTab(
     // Try tabs oscillating near the index.
     for (steps in 1..maxSteps) {
         listOf(index - steps, index + steps).forEach { current ->
-            if (current in 0..tabs.lastIndex &&
-                predicate(tabs[current])
-            ) {
+            if (current in 0..tabs.lastIndex && predicate(tabs[current])) {
                 return tabs[current]
             }
         }
@@ -341,8 +349,7 @@ private fun findNearbyTab(
 }
 
 /**
- * Checks that the provided tab doesn't already exist and throws an
- * [IllegalArgumentException] otherwise.
+ * Checks that the provided tab doesn't already exist and throws an [IllegalArgumentException] otherwise.
  *
  * @param state the current [BrowserState] (including all existing tabs).
  * @param tab the [TabSessionState] to check.
@@ -353,29 +360,22 @@ private fun requireUniqueTab(state: BrowserState, tab: TabSessionState) {
     }
 }
 
-/**
- * Removes references to the provided tabs from all [TabPartition]s.
- */
-private fun Map<String, TabPartition>.removeTabs(removedTabIds: Set<String>) =
-    mapValues {
-        val partition = it.value
-        partition.copy(
-            tabGroups = partition.tabGroups.map { group ->
+/** Removes references to the provided tabs from all [TabPartition]s. */
+private fun Map<String, TabPartition>.removeTabs(removedTabIds: Set<String>) = mapValues {
+    val partition = it.value
+    partition.copy(
+        tabGroups =
+            partition.tabGroups.map { group ->
                 group.copy(tabIds = group.tabIds - removedTabIds)
-            },
-        )
-    }
+            }
+    )
+}
 
-/**
- * Removes references to the provided tabs from all [TabPartition]s.
- */
-private fun Map<String, TabPartition>.removeAllTabs() =
-    mapValues {
-        val partition = it.value
-        partition.copy(
-            tabGroups = partition.tabGroups.map { group -> group.copy(tabIds = emptySet()) },
-        )
-    }
+/** Removes references to the provided tabs from all [TabPartition]s. */
+private fun Map<String, TabPartition>.removeAllTabs() = mapValues {
+    val partition = it.value
+    partition.copy(tabGroups = partition.tabGroups.map { group -> group.copy(tabIds = emptySet()) })
+}
 
 private fun mergeTabPartitions(
     currentTabPartitions: Map<String, TabPartition>,
@@ -385,11 +385,12 @@ private fun mergeTabPartitions(
 
     restoredTabPartitions.forEach { (id, restoredPartition) ->
         val existingPartition = combinedTabPartitions[id]
-        combinedTabPartitions[id] = if (existingPartition != null) {
-            mergeTabGroups(existingPartition, restoredPartition)
-        } else {
-            restoredPartition
-        }
+        combinedTabPartitions[id] =
+            if (existingPartition != null) {
+                mergeTabGroups(existingPartition, restoredPartition)
+            } else {
+                restoredPartition
+            }
     }
 
     return combinedTabPartitions
@@ -405,9 +406,8 @@ private fun mergeTabGroups(
         val existingGroupIndex = combinedTabGroups.indexOfFirst { it.id == restoredGroup.id }
         if (existingGroupIndex != -1) {
             val existingGroup = combinedTabGroups[existingGroupIndex]
-            combinedTabGroups[existingGroupIndex] = existingGroup.copy(
-                tabIds = existingGroup.tabIds + restoredGroup.tabIds,
-            )
+            combinedTabGroups[existingGroupIndex] =
+                existingGroup.copy(tabIds = existingGroup.tabIds + restoredGroup.tabIds)
         } else {
             combinedTabGroups.add(restoredGroup)
         }

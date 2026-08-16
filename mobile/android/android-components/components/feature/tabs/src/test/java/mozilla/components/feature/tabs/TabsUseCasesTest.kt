@@ -4,6 +4,7 @@
 
 package mozilla.components.feature.tabs
 
+import kotlin.test.assertNotNull
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -48,7 +49,6 @@ import org.mockito.ArgumentMatchers.anyString
 import org.mockito.Mockito.never
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
-import kotlin.test.assertNotNull
 
 const val DAY_IN_MS = 24 * 60 * 60 * 1000L
 
@@ -68,12 +68,14 @@ class TabsUseCasesTest {
         engine = mock()
 
         whenever(engine.createSession(anyBoolean(), any())).thenReturn(engineSession)
-        store = BrowserStore(
-            middleware = EngineMiddleware.create(
-                engine = engine,
-                scope = testScope,
-            ),
-        )
+        store =
+            BrowserStore(
+                middleware =
+                    EngineMiddleware.create(
+                        engine = engine,
+                        scope = testScope,
+                    )
+            )
         tabsUseCases = TabsUseCases(store, testDispatcher, testDispatcher)
     }
 
@@ -190,7 +192,8 @@ class TabsUseCasesTest {
 
         assertEquals(1, store.state.tabs.size)
         assertEquals("https://www.mozilla.org", store.state.tabs[0].content.url)
-        verify(engineSession, times(1)).loadUrl("https://www.mozilla.org", null, LoadUrlFlags.external(), null, null, true)
+        verify(engineSession, times(1))
+            .loadUrl("https://www.mozilla.org", null, LoadUrlFlags.external(), null, null, true)
     }
 
     @Test
@@ -240,11 +243,12 @@ class TabsUseCasesTest {
 
     @Test
     fun `AddNewTabUseCase uses provided history metadata`() {
-        val historyMetadata = HistoryMetadataKey(
-            "https://www.mozilla.org",
-            searchTerm = "test",
-            referrerUrl = "http://firefox.com",
-        )
+        val historyMetadata =
+            HistoryMetadataKey(
+                "https://www.mozilla.org",
+                searchTerm = "test",
+                referrerUrl = "http://firefox.com",
+            )
 
         tabsUseCases.addTab.invoke(
             "https://www.mozilla.org",
@@ -292,11 +296,12 @@ class TabsUseCasesTest {
             store.state.tabs.single().engineState.initialAdditionalHeaders,
         )
 
-        verify(engineSession, times(1)).loadUrl(
-            url = url,
-            flags = flags,
-            additionalHeaders = additionalHeaders,
-        )
+        verify(engineSession, times(1))
+            .loadUrl(
+                url = url,
+                flags = flags,
+                additionalHeaders = additionalHeaders,
+            )
     }
 
     @Test
@@ -304,12 +309,13 @@ class TabsUseCasesTest {
         val parentTabId = tabsUseCases.addTab(url = "https://www.firefox.com", selectTab = true)
         testDispatcher.scheduler.advanceUntilIdle()
 
-        verify(engineSession, times(1)).loadUrl(
-            url = "https://www.firefox.com",
-            parent = null,
-            flags = LoadUrlFlags.none(),
-            additionalHeaders = null,
-        )
+        verify(engineSession, times(1))
+            .loadUrl(
+                url = "https://www.firefox.com",
+                parent = null,
+                flags = LoadUrlFlags.none(),
+                additionalHeaders = null,
+            )
 
         assertEquals(1, store.state.tabs.size)
 
@@ -318,12 +324,13 @@ class TabsUseCasesTest {
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertEquals(2, store.state.tabs.size)
-        verify(engineSession, times(1)).loadUrl(
-            url = "https://www.mozilla.org",
-            parent = engineSession,
-            flags = LoadUrlFlags.none(),
-            additionalHeaders = null,
-        )
+        verify(engineSession, times(1))
+            .loadUrl(
+                url = "https://www.mozilla.org",
+                parent = engineSession,
+                flags = LoadUrlFlags.none(),
+                additionalHeaders = null,
+            )
     }
 
     @Test
@@ -364,12 +371,13 @@ class TabsUseCasesTest {
         val now = System.currentTimeMillis()
         val twoDays = now - 2 * DAY_IN_MS
         val threeDays = now - 3 * DAY_IN_MS
-        val tabs = listOf(
-            createTab("https://mozilla.org", lastAccess = 0).toRecoverableTab(),
-            createTab("https://mozilla.org", lastAccess = now).toRecoverableTab(),
-            createTab("https://firefox.com", lastAccess = twoDays, createdAt = threeDays).toRecoverableTab(),
-            createTab("https://getpocket.com", lastAccess = threeDays, createdAt = threeDays).toRecoverableTab(),
-        )
+        val tabs =
+            listOf(
+                createTab("https://mozilla.org", lastAccess = 0).toRecoverableTab(),
+                createTab("https://mozilla.org", lastAccess = now).toRecoverableTab(),
+                createTab("https://firefox.com", lastAccess = twoDays, createdAt = threeDays).toRecoverableTab(),
+                createTab("https://getpocket.com", lastAccess = threeDays, createdAt = threeDays).toRecoverableTab(),
+            )
 
         val sessionStorage: SessionStorage = mock()
         useCases.restore(sessionStorage, tabTimeoutInMs = DAY_IN_MS)
@@ -384,95 +392,103 @@ class TabsUseCasesTest {
     }
 
     @Test
-    fun `GIVEN the previous browser session has not yet been restored WHEN the user opens a new tab THEN the restored tabs should be placed before the newly opened tab`() = runTest(testDispatcher) {
-        val newTab = createTab("https://www.example.org")
-        val restoredTabs = listOf(
-            createTab("https://mozilla.org"),
-            createTab("https://mozilla.org"),
-            createTab("https://firefox.com"),
-            createTab("https://getpocket.com"),
-        )
-        val recoverableBrowserState = RecoverableBrowserState(
-            tabs = restoredTabs.map { it.toRecoverableTab() },
-            selectedTabId = null,
-            tabPartitions = emptyMap(),
-        )
-        val sessionStorage: SessionStorage = mock()
-        whenever(sessionStorage.restore(any())).thenReturn(recoverableBrowserState)
+    fun `GIVEN the previous browser session has not yet been restored WHEN the user opens a new tab THEN the restored tabs should be placed before the newly opened tab`() =
+        runTest(testDispatcher) {
+            val newTab = createTab("https://www.example.org")
+            val restoredTabs =
+                listOf(
+                    createTab("https://mozilla.org"),
+                    createTab("https://mozilla.org"),
+                    createTab("https://firefox.com"),
+                    createTab("https://getpocket.com"),
+                )
+            val recoverableBrowserState =
+                RecoverableBrowserState(
+                    tabs = restoredTabs.map { it.toRecoverableTab() },
+                    selectedTabId = null,
+                    tabPartitions = emptyMap(),
+                )
+            val sessionStorage: SessionStorage = mock()
+            whenever(sessionStorage.restore(any())).thenReturn(recoverableBrowserState)
 
-        store.dispatch(TabListAction.AddTabAction(tab = newTab))
+            store.dispatch(TabListAction.AddTabAction(tab = newTab))
 
-        tabsUseCases.restore.invoke(
-            storage = sessionStorage,
-            tabTimeoutInMs = DAY_IN_MS,
-        )
+            tabsUseCases.restore.invoke(
+                storage = sessionStorage,
+                tabTimeoutInMs = DAY_IN_MS,
+            )
 
-        assertEquals(restoredTabs.first().id, store.state.tabs.first().id)
-        assertEquals(newTab.id, store.state.tabs.last().id)
-    }
-
-    @Test
-    fun `GIVEN a recoverable browser state with tabs and partitions in storage WHEN browsing session is restored THEN restore the tabs and partition from storage`() = runTest(testDispatcher) {
-        val restoredTabs = listOf(
-            createTab(id = "tab1", url = "https://mozilla.org"),
-            createTab(id = "tab2", url = "https://firefox.com"),
-        )
-        val tabGroup = TabGroup("group1", tabIds = setOf("tab1"))
-        val tabPartition = TabPartition("testFeaturePartition", tabGroups = listOf(tabGroup))
-        val restoredTabPartitions = mapOf("testFeaturePartition" to tabPartition)
-        val recoverableBrowserState = RecoverableBrowserState(
-            tabs = restoredTabs.map { it.toRecoverableTab() },
-            selectedTabId = null,
-            tabPartitions = restoredTabPartitions,
-        )
-        val sessionStorage: SessionStorage = mock()
-        whenever(sessionStorage.restore(any())).thenReturn(recoverableBrowserState)
-
-        tabsUseCases.restore.invoke(
-            storage = sessionStorage,
-        )
-
-        assertEquals(restoredTabs.size, store.state.tabs.size)
-        restoredTabs.forEachIndexed { index, restoredTab ->
-            assertEquals(restoredTab.id, store.state.tabs[index].id)
-            assertEquals(restoredTab.content.url, store.state.tabs[index].content.url)
+            assertEquals(restoredTabs.first().id, store.state.tabs.first().id)
+            assertEquals(newTab.id, store.state.tabs.last().id)
         }
-        assertEquals(restoredTabPartitions, store.state.tabPartitions)
-    }
 
     @Test
-    fun `GIVEN a recoverable browser state with translations engine support WHEN browsing session is restored THEN update the store with the recovered value`() = runTest(testDispatcher) {
-        val restoredTabs = listOf(createTab(id = "tab1", url = "https://mozilla.org"))
-        val recoverableBrowserState = RecoverableBrowserState(
-            tabs = restoredTabs.map { it.toRecoverableTab() },
-            selectedTabId = null,
-            tabPartitions = emptyMap(),
-            isTranslationsEngineSupported = true,
-        )
-        val sessionStorage: SessionStorage = mock()
-        whenever(sessionStorage.restore(any())).thenReturn(recoverableBrowserState)
+    fun `GIVEN a recoverable browser state with tabs and partitions in storage WHEN browsing session is restored THEN restore the tabs and partition from storage`() =
+        runTest(testDispatcher) {
+            val restoredTabs =
+                listOf(
+                    createTab(id = "tab1", url = "https://mozilla.org"),
+                    createTab(id = "tab2", url = "https://firefox.com"),
+                )
+            val tabGroup = TabGroup("group1", tabIds = setOf("tab1"))
+            val tabPartition = TabPartition("testFeaturePartition", tabGroups = listOf(tabGroup))
+            val restoredTabPartitions = mapOf("testFeaturePartition" to tabPartition)
+            val recoverableBrowserState =
+                RecoverableBrowserState(
+                    tabs = restoredTabs.map { it.toRecoverableTab() },
+                    selectedTabId = null,
+                    tabPartitions = restoredTabPartitions,
+                )
+            val sessionStorage: SessionStorage = mock()
+            whenever(sessionStorage.restore(any())).thenReturn(recoverableBrowserState)
 
-        tabsUseCases.restore.invoke(storage = sessionStorage)
+            tabsUseCases.restore.invoke(storage = sessionStorage)
 
-        assertEquals(true, store.state.translationEngine.isEngineSupported)
-    }
+            assertEquals(restoredTabs.size, store.state.tabs.size)
+            restoredTabs.forEachIndexed { index, restoredTab ->
+                assertEquals(restoredTab.id, store.state.tabs[index].id)
+                assertEquals(restoredTab.content.url, store.state.tabs[index].content.url)
+            }
+            assertEquals(restoredTabPartitions, store.state.tabPartitions)
+        }
 
     @Test
-    fun `GIVEN a recoverable browser state without translations engine support WHEN browsing session is restored THEN leave the store value undetermined`() = runTest(testDispatcher) {
-        val restoredTabs = listOf(createTab(id = "tab1", url = "https://mozilla.org"))
-        val recoverableBrowserState = RecoverableBrowserState(
-            tabs = restoredTabs.map { it.toRecoverableTab() },
-            selectedTabId = null,
-            tabPartitions = emptyMap(),
-            isTranslationsEngineSupported = null,
-        )
-        val sessionStorage: SessionStorage = mock()
-        whenever(sessionStorage.restore(any())).thenReturn(recoverableBrowserState)
+    fun `GIVEN a recoverable browser state with translations engine support WHEN browsing session is restored THEN update the store with the recovered value`() =
+        runTest(testDispatcher) {
+            val restoredTabs = listOf(createTab(id = "tab1", url = "https://mozilla.org"))
+            val recoverableBrowserState =
+                RecoverableBrowserState(
+                    tabs = restoredTabs.map { it.toRecoverableTab() },
+                    selectedTabId = null,
+                    tabPartitions = emptyMap(),
+                    isTranslationsEngineSupported = true,
+                )
+            val sessionStorage: SessionStorage = mock()
+            whenever(sessionStorage.restore(any())).thenReturn(recoverableBrowserState)
 
-        tabsUseCases.restore.invoke(storage = sessionStorage)
+            tabsUseCases.restore.invoke(storage = sessionStorage)
 
-        assertNull(store.state.translationEngine.isEngineSupported)
-    }
+            assertEquals(true, store.state.translationEngine.isEngineSupported)
+        }
+
+    @Test
+    fun `GIVEN a recoverable browser state without translations engine support WHEN browsing session is restored THEN leave the store value undetermined`() =
+        runTest(testDispatcher) {
+            val restoredTabs = listOf(createTab(id = "tab1", url = "https://mozilla.org"))
+            val recoverableBrowserState =
+                RecoverableBrowserState(
+                    tabs = restoredTabs.map { it.toRecoverableTab() },
+                    selectedTabId = null,
+                    tabPartitions = emptyMap(),
+                    isTranslationsEngineSupported = null,
+                )
+            val sessionStorage: SessionStorage = mock()
+            whenever(sessionStorage.restore(any())).thenReturn(recoverableBrowserState)
+
+            tabsUseCases.restore.invoke(storage = sessionStorage)
+
+            assertNull(store.state.translationEngine.isEngineSupported)
+        }
 
     @Test
     fun `selectOrAddTab selects already existing tab`() {
@@ -496,10 +512,11 @@ class TabsUseCasesTest {
 
     @Test
     fun `selectOrAddTab selects already existing tab with matching historyMetadata`() {
-        val historyMetadata = HistoryMetadataKey(
-            url = "https://mozilla.org",
-            referrerUrl = "https://firefox.com",
-        )
+        val historyMetadata =
+            HistoryMetadataKey(
+                url = "https://mozilla.org",
+                referrerUrl = "https://firefox.com",
+            )
 
         val tab = createTab("https://mozilla.org", historyMetadata = historyMetadata)
         val otherTab = createTab("https://firefox.com")
@@ -538,10 +555,11 @@ class TabsUseCasesTest {
     @Test
     fun `selectOrAddTab adds new tab if no matching existing history metadata could be found`() {
         val tab = createTab("https://mozilla.org")
-        val historyMetadata = HistoryMetadataKey(
-            url = "https://mozilla.org",
-            referrerUrl = "https://firefox.com",
-        )
+        val historyMetadata =
+            HistoryMetadataKey(
+                url = "https://mozilla.org",
+                referrerUrl = "https://firefox.com",
+            )
 
         store.dispatch(TabListAction.AddTabAction(tab))
 
@@ -549,8 +567,7 @@ class TabsUseCasesTest {
         assertEquals(tab, store.state.selectedTab)
         assertEquals(1, store.state.tabs.size)
 
-        val tabID =
-            tabsUseCases.selectOrAddTab("https://firefox.com", historyMetadata = historyMetadata)
+        val tabID = tabsUseCases.selectOrAddTab("https://firefox.com", historyMetadata = historyMetadata)
 
         assertEquals(2, store.state.tabs.size)
         assertNotNull(store.state.findNormalOrPrivateTabByUrl("https://firefox.com", false))
@@ -623,17 +640,11 @@ class TabsUseCasesTest {
 
     @Test
     fun `duplicateTab creates a duplicate of the given tab`() {
-        store.dispatch(
-            TabListAction.AddTabAction(
-                createTab(id = "mozilla", url = "https://www.mozilla.org"),
-            ),
-        )
+        store.dispatch(TabListAction.AddTabAction(createTab(id = "mozilla", url = "https://www.mozilla.org")))
         assertEquals(1, store.state.tabs.size)
 
         val engineSessionState: EngineSessionState = mock()
-        store.dispatch(
-            EngineAction.UpdateEngineSessionStateAction("mozilla", engineSessionState),
-        )
+        store.dispatch(EngineAction.UpdateEngineSessionStateAction("mozilla", engineSessionState))
 
         val tab = store.state.findTab("mozilla")!!
         val dupId = tabsUseCases.duplicateTab.invoke(tab)

@@ -60,6 +60,12 @@
  * 5. If it has a sidebar variant, set hasSidebar: true and add its component
  *    to WIDGET_SIDEBAR_COMPONENTS in WidgetsComponentRegistry.jsx.
  *
+ * RETIRING A WIDGET
+ * Set retired: true on its entry. Turn its feed off separately in
+ * lib/ActivityStream.sys.mjs — feeds read their own prefs, not the registry.
+ * Keep the entry until the code goes: unguarded WIDGET_REGISTRY.find() call
+ * sites throw on a missing entry.
+ *
  * ADDING A NEW PER-WIDGET DIMENSION (e.g. "scale")
  * 1. Add scalePref and trainhopScaleKey fields to each registry entry.
  * 2. Export a resolveWidgetScale(widget, prefs) helper following the same
@@ -77,9 +83,9 @@
  * To expose an extra pref-gated widget feature in that panel (e.g. an internal
  * feature that defaults off but QA/devs want to flip, such as
  * widgets.pictureOfTheDay.setAsWallpaper.enabled or
- * widgets.sportsWidget.live.enabled), add an entry to the hand-maintained
+ * widgets.privacy.showVpnMessages), add an entry to the hand-maintained
  * WIDGET_EXTRA_FEATURES map in DiscoveryStreamAdmin.jsx keyed by widget id:
- *   sportsWidget: [{ pref: "widgets.sportsWidget.live.enabled", label: "Live scores" }]
+ *   privacy: [{ pref: "widgets.privacy.showVpnMessages", label: "VPN messages" }]
  * Each entry becomes a boolean toggle nested under that widget's row. This map is
  * intentionally kept in the devtools component, not the registry, so shipping code
  * carries no dependency on dev-only feature lists.
@@ -158,6 +164,7 @@ export const PREF_WIDGETS_SYSTEM_PICTURE_OF_THE_DAY_ENABLED =
  * @property {string|null} trainhopSidebarKey - Key in trainhopConfig.widgets.* for the hasSidebar override.
  * @property {string} widgetsSettingsVisibleKey - Key in trainhopConfig.widgetsSettings.* that additively reveals this widget's toggle in the settings UIs (does not enable the widget).
  * @property {string} widgetsSettingsEnabledKey - Key in trainhopConfig.widgetsSettings.* that overrides this widget's default enabled value (written to the pref default branch; an explicit user toggle still wins).
+ * @property {boolean} [retired] - When true the widget never renders and gets no settings or devtools toggle, whatever its prefs and trainhopConfig say.
  * @property {string|null} [trainhopNamespace] - When set, the widget ships its whole config in one dedicated object at trainhopConfig.<namespace>. Its `enabled` overrides the default value of enabledPref on the default branch (user toggle still wins, like widgetsSettings.*Enabled); `visible` reveals the widget (isWidgetAddable) without writing a pref; `size` is read by resolveWidgetSize. Picture of the Day, Crossword and Privacy use this today.
  */
 
@@ -195,6 +202,8 @@ export const WIDGET_REGISTRY = [
     trainhopSidebarKey: null,
     widgetsSettingsVisibleKey: "sportsWidgetVisible",
     widgetsSettingsEnabledKey: "sportsWidgetEnabled",
+    // Bug 2063657: retired; entry deleted in bug 2063656.
+    retired: true,
   },
   {
     id: "clocks",
@@ -358,11 +367,16 @@ export function resolveWidgetOrder(prefs) {
  * addable so the toggle is functional). Does not consider whether the user has
  * turned the widget on, or whether the widgets container is enabled.
  *
+ * A retired widget is never addable.
+ *
  * @param {object} widget - a WIDGET_REGISTRY entry
  * @param {object} prefs - current pref values from the Redux store
  * @returns {boolean}
  */
 export function isWidgetAddable(widget, prefs) {
+  if (widget.retired) {
+    return false;
+  }
   return Boolean(
     (widget.trainhopNamespace &&
       prefs.trainhopConfig?.[widget.trainhopNamespace]?.visible) ||
@@ -380,11 +394,16 @@ export function isWidgetAddable(widget, prefs) {
  * does NOT enable the widget — enablement is the widget's own enabled pref,
  * whose default can be overridden via widgetsSettings.*Enabled.
  *
+ * A retired widget gets no toggle; checked here too, to beat widgetsConfig.
+ *
  * @param {object} widget - a WIDGET_REGISTRY entry
  * @param {object} prefs - current pref values from the Redux store
  * @returns {boolean}
  */
 export function isWidgetToggleVisible(widget, prefs) {
+  if (widget.retired) {
+    return false;
+  }
   return Boolean(
     isWidgetAddable(widget, prefs) ||
     prefs.widgetsConfig?.[widget.trainhopEnabledKey]
@@ -469,6 +488,30 @@ export function resolveWidgetHasSidebar(widget, prefs) {
     }
   }
   return widget.hasSidebar;
+}
+
+/**
+ * Returns true if at least one enabled widget renders in the content area rather
+ * than the inline-end sidebar. Weather is the only widget that can move to the
+ * sidebar, and only at its small size.
+ *
+ * Layout code needs this rather than isWidgetsContainerVisible, which is true
+ * even when the user has hidden every widget.
+ *
+ * @param {object} prefs - current pref values from the Redux store
+ * @returns {boolean}
+ */
+export function hasContentAreaWidgets(prefs) {
+  const weatherWidget = WIDGET_REGISTRY.find(w => w.id === "weather");
+  const weatherGoesToSidebar =
+    resolveWidgetHasSidebar(weatherWidget, prefs) &&
+    resolveWidgetSize(weatherWidget, prefs) === "small";
+
+  return WIDGET_REGISTRY.some(
+    w =>
+      isWidgetEnabled(w, prefs, prefs["widgets.enabled"]) &&
+      !(w.id === "weather" && weatherGoesToSidebar)
+  );
 }
 
 /**

@@ -26,9 +26,7 @@ data class Selector(
 }
 
 enum class SelectorStrategy {
-    /**
-     * Supported strategies for locating UI elements.
-     */
+    /** Supported strategies for locating UI elements. */
     COMPOSE_BY_CONTENT_DESCRIPTION,
     COMPOSE_BY_CONTENT_DESCRIPTION_SUBSTRING,
     COMPOSE_BY_TAG,

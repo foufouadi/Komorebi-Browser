@@ -60,15 +60,15 @@ import org.mozilla.fenix.theme.Theme
 import org.mozilla.fenix.wallpapers.Wallpaper
 
 /**
- * The screen for controlling settings around Wallpapers. When a new wallpaper is selected,
- * a snackbar will be displayed.
+ * The screen for controlling settings around Wallpapers. When a new wallpaper is selected, a snackbar will be
+ * displayed.
  *
  * @param wallpaperGroups Wallpapers groups to add to grid.
  * @param loadWallpaperResource Callback to handle loading a wallpaper bitmap. Only optional in the default case.
  * @param selectedWallpaper The currently selected wallpaper.
  * @param onSelectWallpaper Callback for when a new wallpaper is selected.
- * @param onLearnMoreClick Callback for when the learn more action is clicked from the group description.
- * Parameters are the URL that is clicked and the name of the collection.
+ * @param onLearnMoreClick Callback for when the learn more action is clicked from the group description. Parameters are
+ *   the URL that is clicked and the name of the collection.
  */
 @Composable
 fun WallpaperSettings(
@@ -80,10 +80,10 @@ fun WallpaperSettings(
 ) {
     Surface {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = FirefoxTheme.layout.space.dynamic400),
+            modifier =
+                Modifier.fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = FirefoxTheme.layout.space.dynamic400)
         ) {
             Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.dynamic400))
 
@@ -141,9 +141,7 @@ private fun WallpaperGroupHeading(
                     }
                 }
             }
-        Column(
-            modifier = Modifier.semantics(mergeDescendants = true, properties = headingSemantics),
-        ) {
+        Column(modifier = Modifier.semantics(mergeDescendants = true, properties = headingSemantics)) {
             Text(
                 text = stringResource(R.string.wallpaper_artist_series_title),
                 color = MaterialTheme.colorScheme.onSurface,
@@ -235,45 +233,48 @@ private fun WallpaperThumbnailItem(
     LaunchedEffect(LocalConfiguration.current.orientation) {
         bitmap = loadWallpaperResource(wallpaper)
     }
-    val border = if (isSelected) {
-        BorderStroke(
-            width = FirefoxTheme.layout.border.heaviest,
-            color = MaterialTheme.colorScheme.primary,
-        )
-    } else if (wallpaper.name == Wallpaper.DEFAULT) {
-        BorderStroke(
-            width = FirefoxTheme.layout.border.heaviest,
-            color = MaterialTheme.colorScheme.outlineVariant,
-        )
-    } else {
-        null
-    }
+    val border =
+        if (isSelected) {
+            BorderStroke(
+                width = FirefoxTheme.layout.border.heaviest,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        } else if (wallpaper.name == Wallpaper.DEFAULT) {
+            BorderStroke(
+                width = FirefoxTheme.layout.border.heaviest,
+                color = MaterialTheme.colorScheme.outlineVariant,
+            )
+        } else {
+            null
+        }
 
     // Completely avoid drawing the item if a bitmap cannot be loaded and is required
     if (bitmap != null || wallpaper.collection == Wallpaper.DefaultCollection) {
-        val description = stringResource(
-            R.string.wallpapers_item_name_content_description,
-            wallpaper.name,
-        )
+        val description =
+            stringResource(
+                R.string.wallpapers_item_name_content_description,
+                wallpaper.name,
+            )
         // For the default wallpaper to be accessible, we should set the content description for
         // the Surface instead of the thumbnail image
-        val contentDescriptionModifier = if (bitmap == null) {
-            Modifier.semantics {
-                contentDescription = description
+        val contentDescriptionModifier =
+            if (bitmap == null) {
+                Modifier.semantics {
+                    contentDescription = description
+                }
+            } else {
+                Modifier
             }
-        } else {
-            Modifier
-        }
         Surface(
-            modifier = Modifier
-                .width(width = FirefoxTheme.layout.size.static1000)
-                .aspectRatio(aspectRatio)
-                .debouncedClickable { onSelect(wallpaper) }
-                .then(contentDescriptionModifier)
-                .wallpaperThumbnailTestTag(
-                    wallpaper = wallpaper,
-                    isSelected = isSelected,
-                ),
+            modifier =
+                Modifier.width(width = FirefoxTheme.layout.size.static1000)
+                    .aspectRatio(aspectRatio)
+                    .debouncedClickable { onSelect(wallpaper) }
+                    .then(contentDescriptionModifier)
+                    .wallpaperThumbnailTestTag(
+                        wallpaper = wallpaper,
+                        isSelected = isSelected,
+                    ),
             shape = MaterialTheme.shapes.small,
             border = border,
             shadowElevation = FirefoxTheme.layout.elevation.level2,
@@ -298,11 +299,7 @@ private fun WallpaperThumbnailContent(
     loadingOpacity: Float,
 ) {
     if (bitmap == null) {
-        Spacer(
-            modifier = Modifier
-                .fillMaxSize()
-                .edgeToEdgeGradientConditional { wallpaper == Wallpaper.EdgeToEdge },
-        )
+        Spacer(modifier = Modifier.fillMaxSize().edgeToEdgeGradientConditional { wallpaper == Wallpaper.EdgeToEdge })
     } else {
         Image(
             bitmap = bitmap.asImageBitmap(),
@@ -336,7 +333,7 @@ private fun Modifier.wallpaperThumbnailTestTag(
             "${WallpaperSettingsTestTag.WALLPAPER_THUMBNAIL_SELECTED}.${wallpaper.name}"
         } else {
             "${WallpaperSettingsTestTag.WALLPAPER_THUMBNAIL_ITEM}.${wallpaper.name}"
-        },
+        }
     )
 
 @Composable
@@ -345,11 +342,12 @@ private fun Modifier.edgeToEdgeGradientConditional(predicate: () -> Boolean): Mo
         Modifier.background(
             brush =
                 Brush.verticalGradient(
-                    colors = listOf(
-                        colorResource(R.color.homepage_edge_to_edge_gradient_start),
-                        colorResource(R.color.homepage_edge_to_edge_gradient_end),
-                    ),
-                ),
+                    colors =
+                        listOf(
+                            colorResource(R.color.homepage_edge_to_edge_gradient_start),
+                            colorResource(R.color.homepage_edge_to_edge_gradient_end),
+                        )
+                )
         ),
         predicate,
     )
@@ -357,31 +355,31 @@ private fun Modifier.edgeToEdgeGradientConditional(predicate: () -> Boolean): Mo
 @FlexibleWindowPreview
 @Composable
 @Suppress("MagicNumber")
-private fun WallpaperThumbnailsPreview(
-    @PreviewParameter(PreviewThemeProvider::class) theme: Theme,
-) {
-    val downloadedCollection: List<Wallpaper> = List(size = 5) { index ->
-        Wallpaper(
-            name = "downloaded wallpaper $index",
-            textColor = 0L,
-            cardColorLight = 0L,
-            cardColorDark = 0L,
-            thumbnailFileState = Wallpaper.ImageFileState.Downloaded,
-            assetsFileState = Wallpaper.ImageFileState.Downloaded,
-            collection = Wallpaper.ClassicFirefoxCollection,
-        )
-    } + Wallpaper.Default
-    val downloadingCollection: List<Wallpaper> = List(size = 5) { index ->
-        Wallpaper(
-            name = "downloading wallpaper $index",
-            textColor = 0L,
-            cardColorLight = 0L,
-            cardColorDark = 0L,
-            thumbnailFileState = Wallpaper.ImageFileState.Downloading,
-            assetsFileState = Wallpaper.ImageFileState.Downloading,
-            collection = Wallpaper.ClassicFirefoxCollection,
-        )
-    }
+private fun WallpaperThumbnailsPreview(@PreviewParameter(PreviewThemeProvider::class) theme: Theme) {
+    val downloadedCollection: List<Wallpaper> =
+        List(size = 5) { index ->
+            Wallpaper(
+                name = "downloaded wallpaper $index",
+                textColor = 0L,
+                cardColorLight = 0L,
+                cardColorDark = 0L,
+                thumbnailFileState = Wallpaper.ImageFileState.Downloaded,
+                assetsFileState = Wallpaper.ImageFileState.Downloaded,
+                collection = Wallpaper.ClassicFirefoxCollection,
+            )
+        } + Wallpaper.Default
+    val downloadingCollection: List<Wallpaper> =
+        List(size = 5) { index ->
+            Wallpaper(
+                name = "downloading wallpaper $index",
+                textColor = 0L,
+                cardColorLight = 0L,
+                cardColorDark = 0L,
+                thumbnailFileState = Wallpaper.ImageFileState.Downloading,
+                assetsFileState = Wallpaper.ImageFileState.Downloading,
+                collection = Wallpaper.ClassicFirefoxCollection,
+            )
+        }
     var selectedWallpaper by remember { mutableStateOf(downloadedCollection[0]) }
 
     FirefoxTheme(theme) {
@@ -393,10 +391,11 @@ private fun WallpaperThumbnailsPreview(
                     createBitmap(100, 100, Bitmap.Config.ARGB_8888)
                 }
             },
-            wallpaperGroups = mapOf(
-                Wallpaper.DefaultCollection to downloadedCollection,
-                Wallpaper.ClassicFirefoxCollection to downloadingCollection,
-            ),
+            wallpaperGroups =
+                mapOf(
+                    Wallpaper.DefaultCollection to downloadedCollection,
+                    Wallpaper.ClassicFirefoxCollection to downloadingCollection,
+                ),
             selectedWallpaper = selectedWallpaper,
             onSelectWallpaper = { wallpaper ->
                 selectedWallpaper = wallpaper

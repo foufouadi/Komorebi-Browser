@@ -6,8 +6,8 @@
 
 package org.mozilla.fenix.components.metrics.fake
 
-import org.mozilla.fenix.components.metrics.GleanProfileId
 import java.util.UUID
+import org.mozilla.fenix.components.metrics.GleanProfileId
 
 class FakeGleanProfileId : GleanProfileId {
     var gleanStoredProfileId: UUID? = null
@@ -17,6 +17,12 @@ class FakeGleanProfileId : GleanProfileId {
         gleanStoredProfileId = generatedProfileId
         return generatedProfileId
     }
-    override fun set(profileId: UUID) { gleanStoredProfileId = profileId }
-    override fun unset() { gleanStoredProfileId = null }
+
+    override fun set(profileId: UUID) {
+        gleanStoredProfileId = profileId
+    }
+
+    override fun unset() {
+        gleanStoredProfileId = null
+    }
 }

@@ -4,22 +4,18 @@
 
 package org.mozilla.fenix.onboarding.continuous
 
-import mozilla.components.support.base.log.logger.Logger
-import mozilla.components.support.utils.DateTimeProvider
-import mozilla.components.support.utils.DefaultDateTimeProvider
-import org.mozilla.fenix.utils.Settings
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
+import mozilla.components.support.base.log.logger.Logger
+import mozilla.components.support.utils.DateTimeProvider
+import mozilla.components.support.utils.DefaultDateTimeProvider
+import org.mozilla.fenix.utils.Settings
 
-/**
- * Determines the [ContinuousOnboardingStage] for the current user onboarding journey.
- */
+/** Determines the [ContinuousOnboardingStage] for the current user onboarding journey. */
 interface ContinuousOnboardingStageProvider {
-    /**
-     * Returns the [ContinuousOnboardingStage] for the current user onboarding journey.
-     */
+    /** Returns the [ContinuousOnboardingStage] for the current user onboarding journey. */
     fun getContinuousOnboardingStage(): ContinuousOnboardingStage
 }
 
@@ -40,41 +36,45 @@ class ContinuousOnboardingStageProviderDefault(
 ) : ContinuousOnboardingStageProvider {
     private val logger = Logger("ContinuousOnboardingStageProviderDefault")
 
-    override fun getContinuousOnboardingStage(): ContinuousOnboardingStage = with(settings) {
-        if (onboardingCompletedTimestamp == -1L) {
-            logger.info("Initial onboarding has not been completed.")
-            return ContinuousOnboardingStage.NONE
-        }
+    override fun getContinuousOnboardingStage(): ContinuousOnboardingStage =
+        with(settings) {
+            if (onboardingCompletedTimestamp == -1L) {
+                logger.info("Initial onboarding has not been completed.")
+                return ContinuousOnboardingStage.NONE
+            }
 
-        val today = dateTimeProvider.currentTimeMillis().toLocalDate(zoneId)
+            val today = dateTimeProvider.currentTimeMillis().toLocalDate(zoneId)
 
-        return when {
-            shouldShowDay2(today, zoneId) -> ContinuousOnboardingStage.DAY_2
-            shouldShowDay3(today, zoneId) -> ContinuousOnboardingStage.DAY_3
-            shouldShowDay7(today, zoneId) -> ContinuousOnboardingStage.DAY_7
-            else -> ContinuousOnboardingStage.NONE
+            return when {
+                shouldShowDay2(today, zoneId) -> ContinuousOnboardingStage.DAY_2
+                shouldShowDay3(today, zoneId) -> ContinuousOnboardingStage.DAY_3
+                shouldShowDay7(today, zoneId) -> ContinuousOnboardingStage.DAY_7
+                else -> ContinuousOnboardingStage.NONE
+            }
         }
-    }
 
     private fun Settings.shouldShowDay2(today: LocalDate, zoneId: ZoneId): Boolean {
-        val result = secondDayOnboardingCompletedTimestamp == -1L &&
-            onboardingCompletedTimestamp.daysElapsedTo(today, zoneId) >= ONE_DAY
+        val result =
+            secondDayOnboardingCompletedTimestamp == -1L &&
+                onboardingCompletedTimestamp.daysElapsedTo(today, zoneId) >= ONE_DAY
         logger.info("shouldShowDay2: $result")
         return result
     }
 
     private fun Settings.shouldShowDay3(today: LocalDate, zoneId: ZoneId): Boolean {
-        val result = thirdDayOnboardingCompletedTimestamp == -1L &&
-            secondDayOnboardingCompletedTimestamp != -1L &&
-            secondDayOnboardingCompletedTimestamp.daysElapsedTo(today, zoneId) >= ONE_DAY
+        val result =
+            thirdDayOnboardingCompletedTimestamp == -1L &&
+                secondDayOnboardingCompletedTimestamp != -1L &&
+                secondDayOnboardingCompletedTimestamp.daysElapsedTo(today, zoneId) >= ONE_DAY
         logger.info("shouldShowDay3: $result")
         return result
     }
 
     private fun Settings.shouldShowDay7(today: LocalDate, zoneId: ZoneId): Boolean {
-        val result = seventhDayOnboardingCompletedTimestamp == -1L &&
-            thirdDayOnboardingCompletedTimestamp != -1L &&
-            thirdDayOnboardingCompletedTimestamp.daysElapsedTo(today, zoneId) >= FOUR_DAYS
+        val result =
+            seventhDayOnboardingCompletedTimestamp == -1L &&
+                thirdDayOnboardingCompletedTimestamp != -1L &&
+                thirdDayOnboardingCompletedTimestamp.daysElapsedTo(today, zoneId) >= FOUR_DAYS
         logger.info("shouldShowDay7: $result")
         return result
     }
@@ -82,8 +82,5 @@ class ContinuousOnboardingStageProviderDefault(
     private fun Long.daysElapsedTo(today: LocalDate, zoneId: ZoneId) =
         ChronoUnit.DAYS.between(toLocalDate(zoneId), today)
 
-    private fun Long.toLocalDate(zoneId: ZoneId): LocalDate =
-        Instant.ofEpochMilli(this)
-            .atZone(zoneId)
-            .toLocalDate()
+    private fun Long.toLocalDate(zoneId: ZoneId): LocalDate = Instant.ofEpochMilli(this).atZone(zoneId).toLocalDate()
 }

@@ -57,16 +57,15 @@ class WebAppActivityFeatureTest {
     @Test
     @Config(sdk = [28])
     fun `enters immersive mode only when display mode is fullscreen on SDK 28`() {
-        val basicManifest = WebAppManifest(
-            name = "Demo",
-            startUrl = "https://mozilla.com",
-            display = WebAppManifest.DisplayMode.STANDALONE,
-        )
+        val basicManifest =
+            WebAppManifest(
+                name = "Demo",
+                startUrl = "https://mozilla.com",
+                display = WebAppManifest.DisplayMode.STANDALONE,
+            )
         WebAppActivityFeature(activity, icons, basicManifest).onResume(mock())
 
-        val fullscreenManifest = basicManifest.copy(
-            display = WebAppManifest.DisplayMode.FULLSCREEN,
-        )
+        val fullscreenManifest = basicManifest.copy(display = WebAppManifest.DisplayMode.FULLSCREEN)
         WebAppActivityFeature(activity, icons, fullscreenManifest).onResume(mock())
     }
 
@@ -74,26 +73,26 @@ class WebAppActivityFeatureTest {
     fun `enters immersive mode only when display mode is fullscreen`() {
         `when`(window.insetsController).thenReturn(insetsController)
 
-        val basicManifest = WebAppManifest(
-            name = "Demo",
-            startUrl = "https://mozilla.com",
-            display = WebAppManifest.DisplayMode.STANDALONE,
-        )
+        val basicManifest =
+            WebAppManifest(
+                name = "Demo",
+                startUrl = "https://mozilla.com",
+                display = WebAppManifest.DisplayMode.STANDALONE,
+            )
         WebAppActivityFeature(activity, icons, basicManifest).onResume(mock())
 
-        val fullscreenManifest = basicManifest.copy(
-            display = WebAppManifest.DisplayMode.FULLSCREEN,
-        )
+        val fullscreenManifest = basicManifest.copy(display = WebAppManifest.DisplayMode.FULLSCREEN)
         WebAppActivityFeature(activity, icons, fullscreenManifest).onResume(mock())
     }
 
     @Test
     fun `applies orientation`() {
-        val manifest = WebAppManifest(
-            name = "Test Manifest",
-            startUrl = "/",
-            orientation = WebAppManifest.Orientation.LANDSCAPE,
-        )
+        val manifest =
+            WebAppManifest(
+                name = "Test Manifest",
+                startUrl = "/",
+                orientation = WebAppManifest.Orientation.LANDSCAPE,
+            )
 
         WebAppActivityFeature(activity, icons, manifest).onResume(mock())
 
@@ -102,10 +101,11 @@ class WebAppActivityFeatureTest {
 
     @Test
     fun `sets task description`() {
-        val manifest = WebAppManifest(
-            name = "Test Manifest",
-            startUrl = "/",
-        )
+        val manifest =
+            WebAppManifest(
+                name = "Test Manifest",
+                startUrl = "/",
+            )
         val icon = Icon(mock(), source = Icon.Source.GENERATOR)
         `when`(icons.loadIcon(any())).thenReturn(CompletableDeferred(icon))
 

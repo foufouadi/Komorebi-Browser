@@ -134,11 +134,16 @@ add_task(async function test_session_outlives_the_drag() {
   );
   assertRecoveryRecorded("session_live");
 
+  // The press landed on the toolbox, because moving-tab mode makes #nav-bar
+  // inert, while the release lands on the input. The click then goes to the two
+  // targets' common ancestor, the toolbox, which is no control.
+  AccessibilityUtils.setEnv({ mustHaveAccessibleRule: false });
   EventUtils.synthesizeMouseAtCenter(
     gURLBar.inputField,
     { type: "mouseup" },
     window
   );
+  AccessibilityUtils.resetEnv();
   BrowserTestUtils.removeTab(tab);
 });
 

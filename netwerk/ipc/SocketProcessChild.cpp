@@ -280,7 +280,7 @@ void SocketProcessChild::CleanUp() {
 }
 
 mozilla::ipc::IPCResult SocketProcessChild::RecvInit(
-    const SocketPorcessInitAttributes& aAttributes) {
+    const SocketProcessInitAttributes& aAttributes) {
   (void)RecvSetOffline(aAttributes.mOffline());
   (void)RecvSetConnectivity(aAttributes.mConnectivity());
   if (aAttributes.mInitSandbox()) {

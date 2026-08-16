@@ -243,10 +243,11 @@ class WorkManagerSyncManagerTest {
 
     private fun createSyncManager(observer: FakeSyncStatusObserver): WorkManagerSyncManager =
         WorkManagerSyncManager(
-            testContext,
-            SyncConfig(supportedEngines = setOf(SyncEngine.Tabs), periodicSyncConfig = null),
-        ).apply {
-            registerSyncStatusObserver(observer)
-            start()
-        }
+                testContext,
+                SyncConfig(supportedEngines = setOf(SyncEngine.Tabs), periodicSyncConfig = null),
+            )
+            .apply {
+                registerSyncStatusObserver(observer)
+                start()
+            }
 }

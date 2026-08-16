@@ -6,6 +6,7 @@ package org.mozilla.fenix.summarization
 
 import io.mockk.every
 import io.mockk.mockk
+import kotlin.test.assertNotNull
 import mozilla.components.concept.llm.Llm
 import mozilla.components.concept.llm.LlmProvider
 import mozilla.components.feature.summarize.ContentExtracted
@@ -34,18 +35,15 @@ import org.junit.runner.RunWith
 import org.mozilla.fenix.GleanMetrics.AiSummarize
 import org.mozilla.fenix.helpers.FenixGleanTestRule
 import org.robolectric.RobolectricTestRunner
-import kotlin.test.assertNotNull
 
 @RunWith(RobolectricTestRunner::class)
 class SummarizationTelemetryMiddlewareTest {
 
-    @get:Rule
-    val gleanTestRule = FenixGleanTestRule(testContext)
+    @get:Rule val gleanTestRule = FenixGleanTestRule(testContext)
 
     private lateinit var middleware: SummarizationTelemetryMiddleware
 
-    private val store =
-        mockk<Store<SummarizationState, SummarizationAction>>(relaxed = true)
+    private val store = mockk<Store<SummarizationState, SummarizationAction>>(relaxed = true)
 
     @Before
     fun setup() {
@@ -97,17 +95,18 @@ class SummarizationTelemetryMiddlewareTest {
         every { store.state } returns SummarizationState.Inert(initializedWithShake = false)
         invokeMiddleware(ViewAppeared)
         invokeMiddleware(
-            SummarizationRequested(LlmProvider.Info(nameRes = 42, modelId = LlmProvider.ModelID(TEST_MODEL))),
+            SummarizationRequested(LlmProvider.Info(nameRes = 42, modelId = LlmProvider.ModelID(TEST_MODEL)))
         )
         invokeMiddleware(
             createContentExtractedAction(
                 content = "hello world foo",
-                pageMetadata = PageMetadata(
-                    structuredDataTypes = listOf("recipe"),
-                    wordCount = 120,
-                    language = "en",
-                ),
-            ),
+                pageMetadata =
+                    PageMetadata(
+                        structuredDataTypes = listOf("recipe"),
+                        wordCount = 120,
+                        language = "en",
+                    ),
+            )
         )
 
         val snapshot = AiSummarize.started.testGetValue()!!
@@ -207,7 +206,7 @@ class SummarizationTelemetryMiddlewareTest {
         every { store.state } returns SummarizationState.Inert(initializedWithShake = false)
         invokeMiddleware(ViewAppeared)
         invokeMiddleware(
-            SummarizationRequested(LlmProvider.Info(nameRes = 99, modelId = LlmProvider.ModelID("another-model"))),
+            SummarizationRequested(LlmProvider.Info(nameRes = 99, modelId = LlmProvider.ModelID("another-model")))
         )
         invokeMiddleware(ViewDismissed(true))
 
@@ -314,7 +313,7 @@ class SummarizationTelemetryMiddlewareTest {
 
         invokeMiddleware(ViewAppeared)
         invokeMiddleware(
-            SummarizationRequested(LlmProvider.Info(nameRes = 42, modelId = LlmProvider.ModelID(TEST_MODEL))),
+            SummarizationRequested(LlmProvider.Info(nameRes = 42, modelId = LlmProvider.ModelID(TEST_MODEL)))
         )
         invokeMiddleware(LlmProviderAction.ProviderInitialized(mockk()))
 
@@ -346,7 +345,7 @@ class SummarizationTelemetryMiddlewareTest {
         every { store.state } returns SummarizationState.Inert(initializedWithShake = false)
         invokeMiddleware(ViewAppeared)
         invokeMiddleware(
-            SummarizationRequested(LlmProvider.Info(nameRes = 42, modelId = LlmProvider.ModelID(TEST_MODEL))),
+            SummarizationRequested(LlmProvider.Info(nameRes = 42, modelId = LlmProvider.ModelID(TEST_MODEL)))
         )
         invokeMiddleware(createContentExtractedAction())
     }

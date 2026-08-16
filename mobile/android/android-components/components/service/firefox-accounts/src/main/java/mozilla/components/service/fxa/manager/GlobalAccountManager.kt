@@ -9,10 +9,9 @@ import java.lang.ref.WeakReference
 import java.util.concurrent.TimeUnit
 
 /**
- * A singleton which exposes an instance of [FxaAccountManager] for internal consumption.
- * Populated during initialization of [FxaAccountManager].
- * This exists to allow various internal parts without a direct reference to an instance of
- * [FxaAccountManager] to notify it of encountered auth errors via [authError].
+ * A singleton which exposes an instance of [FxaAccountManager] for internal consumption. Populated during
+ * initialization of [FxaAccountManager]. This exists to allow various internal parts without a direct reference to an
+ * instance of [FxaAccountManager] to notify it of encountered auth errors via [authError].
  */
 internal object GlobalAccountManager {
     private var instance: WeakReference<FxaAccountManager>? = null
@@ -23,12 +22,13 @@ internal object GlobalAccountManager {
         fun getTimeCheckPoint(): Long
     }
 
-    private val systemClock = object : Clock {
-        override fun getTimeCheckPoint(): Long {
-            // nanoTime to decouple from wall-time.
-            return TimeUnit.NANOSECONDS.toMillis(System.nanoTime())
+    private val systemClock =
+        object : Clock {
+            override fun getTimeCheckPoint(): Long {
+                // nanoTime to decouple from wall-time.
+                return TimeUnit.NANOSECONDS.toMillis(System.nanoTime())
+            }
         }
-    }
 
     internal fun setInstance(am: FxaAccountManager) {
         instance = WeakReference(am)
@@ -47,11 +47,12 @@ internal object GlobalAccountManager {
     ) {
         val authErrorCheckPoint: Long = clock.getTimeCheckPoint()
 
-        val timeSinceLastAuthErrorMs: Long? = if (lastAuthErrorCheckPoint == 0L) {
-            null
-        } else {
-            authErrorCheckPoint - lastAuthErrorCheckPoint
-        }
+        val timeSinceLastAuthErrorMs: Long? =
+            if (lastAuthErrorCheckPoint == 0L) {
+                null
+            } else {
+                authErrorCheckPoint - lastAuthErrorCheckPoint
+            }
         lastAuthErrorCheckPoint = authErrorCheckPoint
 
         if (timeSinceLastAuthErrorMs == null) {

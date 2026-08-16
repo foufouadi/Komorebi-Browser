@@ -4,40 +4,26 @@
 
 package mozilla.components.feature.prompts.dialog
 
-import android.content.DialogInterface.BUTTON_NEUTRAL
-import android.content.DialogInterface.BUTTON_POSITIVE
-import android.os.Looper.getMainLooper
-import android.widget.DatePicker
 import android.widget.NumberPicker
-import android.widget.TimePicker
-import androidx.appcompat.app.AlertDialog
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import java.util.Calendar
+import java.util.Date
 import mozilla.components.feature.prompts.R
-import mozilla.components.feature.prompts.dialog.TimePickerDialogFragment.Companion.SELECTION_TYPE_DATE_AND_TIME
 import mozilla.components.feature.prompts.dialog.TimePickerDialogFragment.Companion.SELECTION_TYPE_MONTH
-import mozilla.components.feature.prompts.dialog.TimePickerDialogFragment.Companion.SELECTION_TYPE_TIME
 import mozilla.components.feature.prompts.ext.month
 import mozilla.components.feature.prompts.ext.toCalendar
 import mozilla.components.feature.prompts.ext.year
 import mozilla.components.support.ktx.kotlin.toDate
-import mozilla.components.support.test.any
-import mozilla.components.support.test.eq
 import mozilla.components.support.test.ext.appCompatContext
 import mozilla.components.support.test.mock
 import mozilla.components.support.test.robolectric.testContext
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.mockito.Mock
 import org.mockito.Mockito.doReturn
 import org.mockito.Mockito.spy
-import org.mockito.Mockito.verify
 import org.mockito.MockitoAnnotations.openMocks
-import org.robolectric.Shadows.shadowOf
-import java.util.Calendar
-import java.util.Date
 
 @RunWith(AndroidJUnit4::class)
 class TimePickerDialogFragmentTest {
@@ -70,17 +56,18 @@ class TimePickerDialogFragmentTest {
         val minCal = minDate.toCalendar()
         val maxCal = maxDate.toCalendar()
 
-        val fragment = spy(
-            TimePickerDialogFragment.newInstance(
-                "sessionId",
-                "uid",
-                false,
-                initialDate,
-                minDate,
-                maxDate,
-                SELECTION_TYPE_MONTH,
-            ),
-        )
+        val fragment =
+            spy(
+                TimePickerDialogFragment.newInstance(
+                    "sessionId",
+                    "uid",
+                    false,
+                    initialDate,
+                    minDate,
+                    maxDate,
+                    SELECTION_TYPE_MONTH,
+                )
+            )
 
         doReturn(appCompatContext).`when`(fragment).requireContext()
 
@@ -111,17 +98,18 @@ class TimePickerDialogFragmentTest {
         val initialDate = "2018-06-12T19:30".toDate("yyyy-MM-dd'T'HH:mm")
         val minDate = "2018-06-07T00:00".toDate("yyyy-MM-dd'T'HH:mm")
         val maxDate = "2018-06-14T00:00".toDate("yyyy-MM-dd'T'HH:mm")
-        val fragment = spy(
-            TimePickerDialogFragment.newInstance(
-                "sessionId",
-                "uid",
-                false,
-                initialDate,
-                minDate,
-                maxDate,
-                -223,
-            ),
-        )
+        val fragment =
+            spy(
+                TimePickerDialogFragment.newInstance(
+                    "sessionId",
+                    "uid",
+                    false,
+                    initialDate,
+                    minDate,
+                    maxDate,
+                    -223,
+                )
+            )
 
         doReturn(appCompatContext).`when`(fragment).requireContext()
 
@@ -134,17 +122,18 @@ class TimePickerDialogFragmentTest {
         val initialDate = "2018-06-12T19:30".toDate("yyyy-MM-dd'T'HH:mm")
         val minDate = "2018-06-07T00:00".toDate("yyyy-MM-dd'T'HH:mm")
         val maxDate = "2018-06-14T00:00".toDate("yyyy-MM-dd'T'HH:mm")
-        val fragment = spy(
-            TimePickerDialogFragment.newInstance(
-                "sessionId",
-                "uid",
-                true,
-                initialDate,
-                minDate,
-                maxDate,
-                -223,
-            ),
-        )
+        val fragment =
+            spy(
+                TimePickerDialogFragment.newInstance(
+                    "sessionId",
+                    "uid",
+                    true,
+                    initialDate,
+                    minDate,
+                    maxDate,
+                    -223,
+                )
+            )
 
         doReturn(appCompatContext).`when`(fragment).requireContext()
 
@@ -154,6 +143,7 @@ class TimePickerDialogFragmentTest {
 
     private val Calendar.minutes: Int
         get() = get(Calendar.MINUTE)
+
     private val Calendar.hour: Int
         get() = get(Calendar.HOUR_OF_DAY)
 }

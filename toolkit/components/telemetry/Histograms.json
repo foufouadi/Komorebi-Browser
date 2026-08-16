@@ -296,31 +296,6 @@
     "releaseChannelCollection": "opt-out",
     "description": "GPU Forced Device Reset Reason (OpenSharedHandle)"
   },
-  "FORGET_SKIPPABLE_DURING_IDLE": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec"],
-    "alert_emails": ["dev-telemetry-gc-alerts@mozilla.org"],
-    "expires_in_version": "never",
-    "kind": "linear",
-    "high": 100,
-    "n_buckets": 50,
-    "bug_numbers": [1372042],
-    "description": "Percent of the cycle collector's forget skippable done during idle time"
-  },
-  "FORGET_SKIPPABLE_FREQUENCY": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec"],
-    "alert_emails": [
-      "smaug@mozilla.com",
-      "dev-telemetry-gc-alerts@mozilla.org"
-    ],
-    "expires_in_version": "never",
-    "kind": "linear",
-    "high": 500,
-    "n_buckets": 100,
-    "bug_numbers": [1487271],
-    "description": "Number of forget skippables occurred during a minute"
-  },
   "FULLSCREEN_TRANSITION_BLACK_MS": {
     "record_in_processes": ["main", "content"],
     "products": ["firefox", "fennec"],
@@ -2516,20 +2491,6 @@
     "high": 30000,
     "n_buckets": 10,
     "description": "Session restore: Time to collect all window and tab data (ms)"
-  },
-  "FX_SESSION_RESTORE_COLLECT_SESSION_HISTORY_MS": {
-    "record_in_processes": ["main"],
-    "products": ["firefox"],
-    "alert_emails": [
-      "session-restore-telemetry-alerts@mozilla.com",
-      "farre@mozilla.com"
-    ],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 30000,
-    "n_buckets": 20,
-    "bug_numbers": [1810704],
-    "description": "Session restore: Duration of session history collection in the parent process (ms)."
   },
   "FX_SESSION_RESTORE_READ_FILE_MS": {
     "record_in_processes": ["main", "content"],
@@ -5383,44 +5344,6 @@
     "n_values": 3,
     "keyed": true,
     "description": "Users action on blocked download, keyed by verdict type (0=Number of blocked downloads, 1=Confirm block, 2=Confirm unblock)"
-  },
-  "ORB_JAVASCRIPT_VALIDATION_MS": {
-    "record_in_processes": ["main"],
-    "products": ["firefox"],
-    "alert_emails": ["farre@mozilla.com"],
-    "releaseChannelCollection": "opt-out",
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "keyed": true,
-    "keys": ["javascript", "json", "other", "failure"],
-    "high": 10000,
-    "n_buckets": 50,
-    "bug_numbers": [1804638],
-    "description": "Time (in ms) that it takes for a ORB JavaScript validator to complete a validation, including IPC to the validator actor."
-  },
-  "ORB_RECEIVE_DATA_FOR_VALIDATION_MS": {
-    "record_in_processes": ["main"],
-    "products": ["firefox"],
-    "alert_emails": ["farre@mozilla.com"],
-    "releaseChannelCollection": "opt-out",
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "keyed": true,
-    "keys": ["javascript", "json", "other", "failure"],
-    "high": 10000,
-    "n_buckets": 50,
-    "bug_numbers": [1804638],
-    "description": "Time (in ms) that it takes to receive data for ORB JavaScript validation, including IPC to the validator actor."
-  },
-  "ORB_DID_EVER_BLOCK_RESPONSE": {
-    "record_in_processes": ["main"],
-    "products": ["firefox"],
-    "alert_emails": ["farre@mozilla.com"],
-    "releaseChannelCollection": "opt-out",
-    "expires_in_version": "never",
-    "kind": "boolean",
-    "bug_numbers": [1812051],
-    "description": "If any opaque response was blocked for a given top-level window context."
   },
   "STRIP_ON_SHARE_PARAMS_REMOVED": {
     "record_in_processes": ["main"],

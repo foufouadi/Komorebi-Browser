@@ -33,24 +33,24 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class SearchWidgetProviderTest {
-    @get:Rule
-    val gleanRule = FenixGleanTestRule(testContext)
+    @get:Rule val gleanRule = FenixGleanTestRule(testContext)
 
     @Test
     fun testGetLayoutSize() {
-        val sizes = mapOf(
-            0 to SearchWidgetProviderSize.EXTRA_SMALL_V1,
-            10 to SearchWidgetProviderSize.EXTRA_SMALL_V1,
-            63 to SearchWidgetProviderSize.EXTRA_SMALL_V1,
-            64 to SearchWidgetProviderSize.EXTRA_SMALL_V2,
-            99 to SearchWidgetProviderSize.EXTRA_SMALL_V2,
-            100 to SearchWidgetProviderSize.SMALL,
-            191 to SearchWidgetProviderSize.SMALL,
-            192 to SearchWidgetProviderSize.MEDIUM,
-            255 to SearchWidgetProviderSize.MEDIUM,
-            256 to SearchWidgetProviderSize.LARGE,
-            1000 to SearchWidgetProviderSize.LARGE,
-        )
+        val sizes =
+            mapOf(
+                0 to SearchWidgetProviderSize.EXTRA_SMALL_V1,
+                10 to SearchWidgetProviderSize.EXTRA_SMALL_V1,
+                63 to SearchWidgetProviderSize.EXTRA_SMALL_V1,
+                64 to SearchWidgetProviderSize.EXTRA_SMALL_V2,
+                99 to SearchWidgetProviderSize.EXTRA_SMALL_V2,
+                100 to SearchWidgetProviderSize.SMALL,
+                191 to SearchWidgetProviderSize.SMALL,
+                192 to SearchWidgetProviderSize.MEDIUM,
+                255 to SearchWidgetProviderSize.MEDIUM,
+                256 to SearchWidgetProviderSize.LARGE,
+                1000 to SearchWidgetProviderSize.LARGE,
+            )
 
         for ((dp, layoutSize) in sizes) {
             assertEquals(layoutSize, SearchWidgetProvider.getLayoutSize(dp))

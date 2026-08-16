@@ -45,8 +45,7 @@ class BrowserPrefObserverIntegrationTest {
             onError,
         )
 
-        verify(engine)
-            .registerPrefForObservation(anyString(), any(), any())
+        verify(engine).registerPrefForObservation(anyString(), any(), any())
     }
 
     @Test
@@ -62,8 +61,7 @@ class BrowserPrefObserverIntegrationTest {
             onError,
         )
 
-        verify(engine)
-            .registerPrefsForObservation(anyList<String>(), any(), any())
+        verify(engine).registerPrefsForObservation(anyList<String>(), any(), any())
     }
 
     @Test
@@ -79,8 +77,7 @@ class BrowserPrefObserverIntegrationTest {
             onError,
         )
 
-        verify(engine)
-            .unregisterPrefForObservation(anyString(), any(), any())
+        verify(engine).unregisterPrefForObservation(anyString(), any(), any())
     }
 
     @Test
@@ -96,8 +93,7 @@ class BrowserPrefObserverIntegrationTest {
             onError,
         )
 
-        verify(engine)
-            .unregisterPrefsForObservation(anyList<String>(), any(), any())
+        verify(engine).unregisterPrefsForObservation(anyList<String>(), any(), any())
     }
 
     @Test
@@ -112,17 +108,18 @@ class BrowserPrefObserverIntegrationTest {
                 override fun onPreferenceChange(observedPreference: BrowserPreference<*>) {
                     onPreferenceChangeWasCalled = true
                 }
-            },
+            }
         )
 
-        val pref = BrowserPreference(
-            "hello-world",
-            value = true,
-            defaultValue = false,
-            userValue = true,
-            hasUserChangedValue = true,
-            prefType = BrowserPrefType.STRING,
-        )
+        val pref =
+            BrowserPreference(
+                "hello-world",
+                value = true,
+                defaultValue = false,
+                userValue = true,
+                hasUserChangedValue = true,
+                prefType = BrowserPrefType.STRING,
+            )
         feature.onPreferenceChange(pref)
         assert(onPreferenceChangeWasCalled)
     }

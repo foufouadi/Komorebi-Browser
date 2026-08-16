@@ -101,7 +101,6 @@ const BriefingCard = ({
       value: {
         event_source: "CARD_GRID",
         card_type: "organic",
-        recommendation_id: headline.recommendation_id,
         tile_id: headline.id,
         corpus_item_id: headline.corpus_item_id,
         scheduled_corpus_item_id: headline.scheduled_corpus_item_id,
@@ -189,7 +188,6 @@ const BriefingCard = ({
         rows={headlines.map(headline => ({
           id: headline.id,
           pos: headline.pos,
-          recommendation_id: headline.recommendation_id,
           corpus_item_id: headline.corpus_item_id,
           scheduled_corpus_item_id: headline.scheduled_corpus_item_id,
           recommended_at: headline.recommended_at,

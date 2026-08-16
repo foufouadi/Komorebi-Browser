@@ -192,7 +192,6 @@ allowed_warnings:
     - "ipc/ipdl\\.md:.*: WARNING: Duplicate explicit target name"
     - "setup/building_with_debug_symbols\\.md:.*: WARNING: undefined label"
     - "setup/configuring_build_options\\.md:.*: WARNING: undefined label"
-    - "setup/contributing_code\\.md:.*: WARNING: undefined label"
     - "setup/linux_32bit_build_on_64bit_OS\\.md:.*: WARNING: undefined label"
     - "setup/linux_build\\.md:.*: WARNING: undefined label"
     - "setup/macos_build\\.md:.*: WARNING: undefined label"

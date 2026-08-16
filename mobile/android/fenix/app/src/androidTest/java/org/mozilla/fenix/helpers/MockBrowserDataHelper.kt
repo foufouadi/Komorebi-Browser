@@ -34,8 +34,8 @@ object MockBrowserDataHelper {
      * @param url The URL of the bookmark item to add. URLs should use the "https://example.com" format.
      * @param title The title of the bookmark item to add.
      * @param position Example for the position param: 1u, 2u, etc.
-     * @param parentGuid The parent guid of the bookmark item to add.
-     * BookmarkRoot.Mobile.id is the root id for mobile bookmarks.
+     * @param parentGuid The parent guid of the bookmark item to add. BookmarkRoot.Mobile.id is the root id for mobile
+     *   bookmarks.
      */
     fun createBookmarkItem(
         url: String,
@@ -65,8 +65,8 @@ object MockBrowserDataHelper {
     /**
      * Adds a new bookmark folder, visible in the Bookmarks folder.
      *
-     * @param parentGuid The parent guid of the bookmark folder to add.
-     * BookmarkRoot.Mobile.id is the root id for mobile bookmarks.
+     * @param parentGuid The parent guid of the bookmark folder to add. BookmarkRoot.Mobile.id is the root id for mobile
+     *   bookmarks.
      * @param title The title of the bookmark folder to add.
      * @param position Example for the position param: null, 1u, 2u, etc.
      * @return The guid of the newly created bookmark folder.
@@ -82,7 +82,8 @@ object MockBrowserDataHelper {
                     parentGuid = parentGuid,
                     title = title,
                     position = position,
-                ).getOrDefault("")
+                )
+                .getOrDefault("")
         }
     }
 
@@ -116,10 +117,7 @@ object MockBrowserDataHelper {
         Log.i(TAG, "createTabItem: Created a new tab with url: $url")
     }
 
-    /**
-     * Triggers a search for the provided search term in a new tab.
-     *
-     */
+    /** Triggers a search for the provided search term in a new tab. */
     fun createSearchHistory(searchTerm: String) {
         Log.i(TAG, "createSearchHistory: Trying to perform a new search with search term: $searchTerm")
         appContext.components.useCases.searchUseCases.newTabSearch.invoke(searchTerm)
@@ -133,9 +131,11 @@ object MockBrowserDataHelper {
      * @param searchEngineName The name of the new search engine.
      */
     private fun createCustomSearchEngine(mockWebServer: MockWebServer, searchEngineName: String): SearchEngine {
-        val searchString =
-            "http://localhost:${mockWebServer.port}/pages/searchResults.html?search={searchTerms}"
-        Log.i(TAG, "createCustomSearchEngine: Trying to create a custom search engine named: $searchEngineName and search string: $searchString")
+        val searchString = "http://localhost:${mockWebServer.port}/pages/searchResults.html?search={searchTerms}"
+        Log.i(
+            TAG,
+            "createCustomSearchEngine: Trying to create a custom search engine named: $searchEngineName and search string: $searchString",
+        )
         return createSearchEngine(
             name = searchEngineName,
             url = searchString,
@@ -198,10 +198,9 @@ object MockBrowserDataHelper {
      */
     fun createCollection(vararg tabInfo: Pair<String, String>, title: String) {
         runBlocking {
-            val tabs =
-                tabInfo.map { (tabUrl, tabTitle) ->
-                    createTab(url = tabUrl, title = tabTitle)
-                }
+            val tabs = tabInfo.map { (tabUrl, tabTitle) ->
+                createTab(url = tabUrl, title = tabTitle)
+            }
 
             TabCollectionStorage(context).createCollection(title, tabs)
         }

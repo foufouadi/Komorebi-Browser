@@ -4,34 +4,32 @@
 
 package mozilla.components.feature.summarize.settings
 
-/**
- * Reducer for [SummarizeSettingsAction]s on [SummarizeSettingsState].
- */
+/** Reducer for [SummarizeSettingsAction]s on [SummarizeSettingsState]. */
 fun summarizeSettingsReducer(
     state: SummarizeSettingsState,
     action: SummarizeSettingsAction,
-) = when (action) {
-    is SettingsLoaded -> {
-        state.copy(
-            isFeatureEnabled = action.isFeatureEnabled,
-            isGestureEnabled = action.isGestureEnabled,
-            shakeSensitivity = action.shakeSensitivity,
-        )
-    }
+) =
+    when (action) {
+        is SettingsLoaded -> {
+            state.copy(
+                isFeatureEnabled = action.isFeatureEnabled,
+                isGestureEnabled = action.isGestureEnabled,
+                shakeSensitivity = action.shakeSensitivity,
+            )
+        }
 
-    is ShakeSensitivityChanged -> {
-        state.copy(shakeSensitivity = action.value)
-    }
+        is ShakeSensitivityChanged -> {
+            state.copy(shakeSensitivity = action.value)
+        }
 
-    SummarizePagesPreferenceToggled -> {
-        state.copy(isFeatureEnabled = !state.isFeatureEnabled)
-    }
+        SummarizePagesPreferenceToggled -> {
+            state.copy(isFeatureEnabled = !state.isFeatureEnabled)
+        }
 
-    ShakeToSummarizePreferenceToggled -> {
-        state.copy(isGestureEnabled = !state.isGestureEnabled)
-    }
+        ShakeToSummarizePreferenceToggled -> {
+            state.copy(isGestureEnabled = !state.isGestureEnabled)
+        }
 
-    ViewAppeared,
-    LearnMoreClicked,
-    -> state
-}
+        ViewAppeared,
+        LearnMoreClicked -> state
+    }

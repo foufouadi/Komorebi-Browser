@@ -10,13 +10,13 @@ import android.net.Uri
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import java.io.InputStream
+import java.io.OutputStream
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mozilla.fenix.components.menu.share.QRCodeDownloader
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import java.io.InputStream
-import java.io.OutputStream
 
 @RunWith(RobolectricTestRunner::class)
 class QRCodeDownloaderTest {
@@ -29,10 +29,7 @@ class QRCodeDownloaderTest {
     @Test
     @Config(sdk = [28])
     fun `WHEN below Android Q THEN save to directory downloads`() {
-        val uri = Uri.Builder()
-            .scheme("https")
-            .authority("www.test.com")
-            .build()
+        val uri = Uri.Builder().scheme("https").authority("www.test.com").build()
         val mockInputStream: InputStream = InputStream.nullInputStream()
         every { mockContentResolver.openInputStream(any()) }.returns(mockInputStream)
         downloader.saveQRCodeToDownloads(
@@ -46,10 +43,7 @@ class QRCodeDownloaderTest {
     @Test
     @Config(sdk = [30])
     fun `WHEN above Android Q THEN save to media store downloads`() {
-        val uri = Uri.Builder()
-            .scheme("https")
-            .authority("www.test.com")
-            .build()
+        val uri = Uri.Builder().scheme("https").authority("www.test.com").build()
         val mockInputStream: InputStream = InputStream.nullInputStream()
         val mockOutputStream: OutputStream = mockk(relaxed = true)
 

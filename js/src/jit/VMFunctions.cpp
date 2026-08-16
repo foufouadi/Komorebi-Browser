@@ -663,6 +663,10 @@ static bool CheckOverRecursedImpl(JSContext* cx, size_t extra,
 
 bool CheckOverRecursed(JSContext* cx) { return CheckOverRecursedImpl(cx, 0); }
 
+bool CheckOverRecursedResumingGenerator(JSContext* cx) {
+  return CheckOverRecursedImpl(cx, 0, /* isResumingGenerator = */ true);
+}
+
 bool CheckOverRecursedBaseline(JSContext* cx, BaselineFrame* frame) {
   // The stack check in Baseline happens before pushing locals so we have to
   // account for that by including script->nslots() in the C++ recursion check.

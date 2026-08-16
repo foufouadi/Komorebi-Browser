@@ -1023,6 +1023,10 @@ class BrowserParent final : public PBrowserParent,
   // UnlockNativePointer has been called.
   bool mLockedNativePointer : 1;
 
+  // True after mLockedNativePointer is changed to `false` and reset to false
+  // once we receive a native mouse move request.
+  bool mWaitingForNativeMouseMoveAfterUnlock : 1;
+
   // True between ShowTooltip and HideTooltip messages.
   bool mShowingTooltip : 1;
 };

@@ -97,7 +97,7 @@
   "color/accent/primary": {
     "light": "{Colors$color/violet/50}",
     "dark": "{Colors$color/violet/30}",
-    "forcedColors": "{HCM Theme$AccentColor}"
+    "forcedColors": "{HCM Theme$ButtonText}"
   },
   "color/accent/primary/hover": {
     "light": "{Colors$color/violet/60}",
@@ -219,6 +219,11 @@
     "dark": "{Theme$button/background/color/ghost}",
     "forcedColors": "{Theme$button/background/color}"
   },
+  "button/background/color/selected": {
+    "light": "{Theme$button/background/color/active}",
+    "dark": "{Theme$button/background/color/active}",
+    "forcedColors": "{HCM Theme$SelectedItem}"
+  },
   "button/border/color": {
     "light": "{Theme$color/accent/primary}",
     "dark": "{Theme$color/accent/primary}",
@@ -304,6 +309,11 @@
     "dark": 0.7,
     "forcedColors": 1
   },
+  "button/split/separator/background/color": {
+    "light": "{Theme$button/border/color}",
+    "dark": "{Theme$button/border/color}",
+    "forcedColors": "{Theme$button/border/color}"
+  },
   "button/text/color": {
     "light": "{Colors$color/violet/90}",
     "dark": "{Colors$color/gray/0}",
@@ -377,7 +387,7 @@
   "button/text/color/menu/disabled": {
     "light": "{Theme$button/text/color/ghost/disabled}",
     "dark": "{Theme$button/text/color/disabled}",
-    "forcedColors": "{Theme$button/text/color/primary/disabled}"
+    "forcedColors": "{Theme$button/text/color/disabled}"
   },
   "button/text/color/menu/hover": {
     "light": "{Theme$button/text/color/ghost/hover}",
@@ -760,9 +770,9 @@
     "forcedColors": "{Theme$border/color}"
   },
   "tab/background/color/hover": {
-    "light": "{Primitives$toolbarbutton/background/color/hover}",
-    "dark": "{Primitives$toolbarbutton/background/color/hover}",
-    "forcedColors": "{Primitives$toolbarbutton/background/color/hover}"
+    "light": "{Theme$toolbarbutton/background/color/hover}",
+    "dark": "{Theme$toolbarbutton/background/color/hover}",
+    "forcedColors": "{Theme$toolbarbutton/background/color/hover}"
   },
   "tab/background/color/selected": {
     "light": "{Theme$background/color/box}",
@@ -920,14 +930,14 @@
     "forcedColors": 1
   },
   "urlbarview/background/color/hover": {
-    "light": "{Primitives$toolbarbutton/background/color/hover}",
-    "dark": "{Primitives$toolbarbutton/background/color/hover}",
-    "forcedColors": "{Primitives$toolbarbutton/background/color/hover}"
+    "light": "{Theme$toolbarbutton/background/color/hover}",
+    "dark": "{Theme$toolbarbutton/background/color/hover}",
+    "forcedColors": "{Theme$toolbarbutton/background/color/hover}"
   },
   "urlbarview/background/color/selected": {
-    "light": "{Primitives$toolbarbutton/background/color/active}",
-    "dark": "{Primitives$toolbarbutton/background/color/active}",
-    "forcedColors": "{Primitives$toolbarbutton/background/color/active}"
+    "light": "{Theme$toolbarbutton/background/color/active}",
+    "dark": "{Theme$toolbarbutton/background/color/active}",
+    "forcedColors": "{Theme$toolbarbutton/background/color/active}"
   },
   "urlbarview/separator/color": {
     "light": "{Colors$color/gray/20}",

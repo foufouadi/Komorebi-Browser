@@ -124,26 +124,23 @@ internal fun Homepage(
     val browsingModeChanged = interactor::onPrivateModeButtonClicked
     var shortcutsDialogState by remember { mutableStateOf<DialogState>(DialogState.Closed) }
 
-    BoxWithConstraints(
-        modifier = modifier
-            .fillMaxSize(),
-    ) {
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .semantics {
-                    testTagsAsResourceId = true
-                    testTag = HOMEPAGE
-                }
-                .pointerInput(state.isSearchInProgress) {
-                    if (state.isSearchInProgress) {
-                        awaitEachGesture {
-                            awaitFirstDown(false, PointerEventPass.Initial)
-                            interactor.onHomeContentFocusedWhileSearchIsActive()
+            modifier =
+                Modifier.fillMaxSize()
+                    .semantics {
+                        testTagsAsResourceId = true
+                        testTag = HOMEPAGE
+                    }
+                    .pointerInput(state.isSearchInProgress) {
+                        if (state.isSearchInProgress) {
+                            awaitEachGesture {
+                                awaitFirstDown(false, PointerEventPass.Initial)
+                                interactor.onHomeContentFocusedWhileSearchIsActive()
+                            }
                         }
                     }
-                }
-                .verticalScroll(scrollState),
+                    .verticalScroll(scrollState),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             if (state is HomepageState.Normal) {
@@ -169,9 +166,7 @@ internal fun Homepage(
                 }
 
                 is HeaderState.Experimental.Private -> {
-                    ExperimentalPrivateHomepageHeader(
-                        onHomeTapped = { browsingModeChanged(BrowsingMode.Normal) },
-                    )
+                    ExperimentalPrivateHomepageHeader(onHomeTapped = { browsingModeChanged(BrowsingMode.Normal) })
                 }
 
                 is HeaderState.Normal -> {
@@ -186,9 +181,7 @@ internal fun Homepage(
                 with(state) {
                     when (this) {
                         is HomepageState.Private -> {
-                            PrivateBrowsingDescription(
-                                onLearnMoreClick = interactor::onLearnMoreClicked,
-                            )
+                            PrivateBrowsingDescription(onLearnMoreClick = interactor::onLearnMoreClicked)
                         }
 
                         is HomepageState.Normal -> {
@@ -197,9 +190,7 @@ internal fun Homepage(
                             LaunchedEffect(showLongfoxAnimation) {
                                 if (showLongfoxAnimation) {
                                     settings.longfoxPeekAnimationShownCount++
-                                    appStore.dispatch(
-                                        AppAction.UpdateShowFoxPeekAnimation(false),
-                                    )
+                                    appStore.dispatch(AppAction.UpdateShowFoxPeekAnimation(false))
                                 }
                             }
 
@@ -219,8 +210,8 @@ internal fun Homepage(
                                     onAddShortcutClicked = {
                                         appStore.dispatch(
                                             ShortcutAction.AddShortcutSheetShown(
-                                                entryPoint = AddShortcutEntryPoint.HOMEPAGE,
-                                            ),
+                                                entryPoint = AddShortcutEntryPoint.HOMEPAGE
+                                            )
                                         )
                                         shortcutsDialogState = DialogState.AddShortcutBottomSheet
                                     },
@@ -250,24 +241,24 @@ internal fun Homepage(
                                 when (val syncedTabState = recentSyncedTabSectionState) {
                                     RecentSyncedTabSectionState.Gone -> Unit
                                     RecentSyncedTabSectionState.Loading,
-                                    is RecentSyncedTabSectionState.Visible,
-                                        -> {
-                                        val syncedTab =
-                                            (syncedTabState as? RecentSyncedTabSectionState.Visible)?.tab
+                                    is RecentSyncedTabSectionState.Visible -> {
+                                        val syncedTab = (syncedTabState as? RecentSyncedTabSectionState.Visible)?.tab
                                         Box(
-                                            modifier = Modifier.padding(
-                                                start = horizontalMargin,
-                                                end = horizontalMargin,
-                                                top = verticalMargin,
-                                            ),
+                                            modifier =
+                                                Modifier.padding(
+                                                    start = horizontalMargin,
+                                                    end = horizontalMargin,
+                                                    top = verticalMargin,
+                                                )
                                         ) {
                                             RecentSyncedTab(
                                                 tab = syncedTab,
-                                                buttonBackgroundColor = if (syncedTab != null) {
-                                                    WallpaperTheme.buttonBackgroundColor
-                                                } else {
-                                                    MaterialTheme.colorScheme.surfaceContainerHighest
-                                                },
+                                                buttonBackgroundColor =
+                                                    if (syncedTab != null) {
+                                                        WallpaperTheme.buttonBackgroundColor
+                                                    } else {
+                                                        MaterialTheme.colorScheme.surfaceContainerHighest
+                                                    },
                                                 buttonTextColor = WallpaperTheme.buttonTextColor,
                                                 onRecentSyncedTabClick = interactor::onRecentSyncedTabClicked,
                                                 onSeeAllSyncedTabsButtonClick = interactor::onSyncedTabShowAllClicked,
@@ -299,11 +290,12 @@ internal fun Homepage(
 
                             if (pocketState != null) {
                                 Spacer(
-                                    modifier = if (isMinimalLayout()) {
-                                        Modifier.weight(1f)
-                                    } else {
-                                        Modifier.padding(top = 72.dp)
-                                    },
+                                    modifier =
+                                        if (isMinimalLayout()) {
+                                            Modifier.weight(1f)
+                                        } else {
+                                            Modifier.padding(top = 72.dp)
+                                        }
                                 )
 
                                 PocketSection(
@@ -317,29 +309,33 @@ internal fun Homepage(
                             when (shortcutsDialogState) {
                                 DialogState.AddShortcutBottomSheet -> {
                                     val merinoManifestProvider = components.core.merinoManifestProvider
-                                    val popularSites by produceState(
-                                        initialValue = emptyList(),
-                                        key1 = merinoManifestProvider,
-                                        key2 = topSiteState?.topSites,
-                                    ) {
-                                        value = withContext(Dispatchers.IO) {
-                                            merinoManifestProvider.getTopDomains(
-                                                limit = POPULAR_SITES_TO_SHOW,
-                                                excludedDomains = topSiteState?.topSites.orEmpty()
-                                                    .mapNotNullTo(mutableSetOf()) {
-                                                    it.url.toUri().hostWithoutCommonPrefixes
-                                                },
-                                            ).map { it.toPopularSite() }
+                                    val popularSites by
+                                        produceState(
+                                            initialValue = emptyList(),
+                                            key1 = merinoManifestProvider,
+                                            key2 = topSiteState?.topSites,
+                                        ) {
+                                            value =
+                                                withContext(Dispatchers.IO) {
+                                                    merinoManifestProvider
+                                                        .getTopDomains(
+                                                            limit = POPULAR_SITES_TO_SHOW,
+                                                            excludedDomains =
+                                                                topSiteState?.topSites.orEmpty().mapNotNullTo(
+                                                                    mutableSetOf()
+                                                                ) {
+                                                                    it.url.toUri().hostWithoutCommonPrefixes
+                                                                },
+                                                        )
+                                                        .map { it.toPopularSite() }
+                                                }
                                         }
-                                    }
 
                                     AddShortcutBottomSheet(
                                         popularSites = popularSites,
                                         onDismiss = { shortcutsDialogState = DialogState.Closed },
                                         onAddWebsiteClicked = {
-                                            appStore.dispatch(
-                                                ShortcutAction.AddWebsiteDialogShown,
-                                            )
+                                            appStore.dispatch(ShortcutAction.AddWebsiteDialogShown)
                                             shortcutsDialogState = DialogState.AddShortcut
                                         },
                                         onAddPopularSiteClick = { site ->
@@ -433,7 +429,12 @@ internal fun TopSitesSection(
             headerText = stringResource(R.string.homepage_shortcuts_title),
             modifier = Modifier.padding(horizontal = horizontalMargin),
             description = stringResource(R.string.homepage_shortcuts_show_all_content_description),
-            onButtonClick = interactor::onShowAllTopSitesClicked,
+            onButtonClick =
+                if (state.showShortcutsLibraryButton) {
+                    interactor::onShowAllTopSitesClicked
+                } else {
+                    null
+                },
         )
 
         Spacer(Modifier.height(16.dp))
@@ -469,12 +470,13 @@ private fun RecentTabsSection(
         RecentTabs(
             recentTabs = recentTabs,
             onRecentTabClick = { interactor.onRecentTabClicked(it) },
-            menuItems = listOf(
-                RecentTabMenuItem(
-                    title = stringResource(id = R.string.recent_tab_menu_item_remove),
-                    onClick = interactor::onRemoveRecentTab,
+            menuItems =
+                listOf(
+                    RecentTabMenuItem(
+                        title = stringResource(id = R.string.recent_tab_menu_item_remove),
+                        onClick = interactor::onRemoveRecentTab,
+                    )
                 ),
-            ),
         )
     }
 }
@@ -501,12 +503,13 @@ private fun BookmarksSection(
 
     Bookmarks(
         bookmarks = bookmarks,
-        menuItems = listOf(
-            BookmarksMenuItem(
-                stringResource(id = R.string.home_bookmarks_menu_item_remove),
-                onClick = interactor::onBookmarkRemoved,
+        menuItems =
+            listOf(
+                BookmarksMenuItem(
+                    stringResource(id = R.string.home_bookmarks_menu_item_remove),
+                    onClick = interactor::onBookmarkRemoved,
+                )
             ),
-        ),
         onBookmarkClick = interactor::onBookmarkClicked,
     )
 }
@@ -530,19 +533,18 @@ private fun RecentlyVisitedSection(
 
     RecentlyVisited(
         recentVisits = recentVisits,
-        menuItems = listOfNotNull(
-            RecentVisitMenuItem(
-                title = stringResource(R.string.recently_visited_menu_item_remove),
-                onClick = { visit ->
-                    when (visit) {
-                        is RecentHistoryGroup -> interactor.onRemoveRecentHistoryGroup(visit.title)
-                        is RecentHistoryHighlight -> interactor.onRemoveRecentHistoryHighlight(
-                            visit.url,
-                        )
-                    }
-                },
+        menuItems =
+            listOfNotNull(
+                RecentVisitMenuItem(
+                    title = stringResource(R.string.recently_visited_menu_item_remove),
+                    onClick = { visit ->
+                        when (visit) {
+                            is RecentHistoryGroup -> interactor.onRemoveRecentHistoryGroup(visit.title)
+                            is RecentHistoryHighlight -> interactor.onRemoveRecentHistoryHighlight(visit.url)
+                        }
+                    },
+                )
             ),
-        ),
         onRecentVisitClick = { recentlyVisitedItem, pageNumber ->
             when (recentlyVisitedItem) {
                 is RecentHistoryHighlight -> {
@@ -552,11 +554,7 @@ private fun RecentlyVisitedSection(
 
                 is RecentHistoryGroup -> {
                     RecentlyVisitedHomepage.searchGroupOpened.record(NoExtras())
-                    History.recentSearchesTapped.record(
-                        History.RecentSearchesTappedExtra(
-                            pageNumber.toString(),
-                        ),
-                    )
+                    History.recentSearchesTapped.record(History.RecentSearchesTappedExtra(pageNumber.toString()))
                     interactor.onRecentHistoryGroupClicked(recentlyVisitedItem)
                 }
             }
@@ -599,33 +597,34 @@ private fun HomepagePreview() {
     FirefoxTheme {
         Surface {
             Homepage(
-                state = HomepageState.Normal(
-                    shouldShowPrivacyNoticeBanner = false,
-                    nimbusMessage = null,
-                    topSiteState = TopSiteState(
-                        topSites = FakeHomepagePreview.topSites(),
-                        colors = TopSiteColors.colors(),
+                state =
+                    HomepageState.Normal(
+                        shouldShowPrivacyNoticeBanner = false,
+                        nimbusMessage = null,
+                        topSiteState =
+                            TopSiteState(
+                                topSites = FakeHomepagePreview.topSites(),
+                                colors = TopSiteColors.colors(),
+                            ),
+                        recentTabs = FakeHomepagePreview.recentTabs(),
+                        recentSyncedTabSectionState =
+                            RecentSyncedTabSectionState.Visible(FakeHomepagePreview.recentSyncedTab()),
+                        bookmarks = FakeHomepagePreview.bookmarks(),
+                        recentlyVisited = FakeHomepagePreview.recentHistory(),
+                        collectionsState = CollectionsState.Gone,
+                        pocketState = FakeHomepagePreview.pocketState(),
+                        showPrivacyReport = true,
+                        longfoxEnabled = false,
+                        showLongfoxAnimation = false,
+                        trackersBlockedCount = 754,
+                        headerState = HeaderState.Normal,
+                        middleSearchState = MiddleSearchState(searchBarVisible = true, searchBarEnabled = false),
+                        firstFrameDrawn = true,
+                        setupChecklistState = null,
+                        isSearchInProgress = false,
+                        bottomPadding = 68,
+                        showTopSitesHeader = true,
                     ),
-                    recentTabs = FakeHomepagePreview.recentTabs(),
-                    recentSyncedTabSectionState = RecentSyncedTabSectionState.Visible(
-                        FakeHomepagePreview.recentSyncedTab(),
-                    ),
-                    bookmarks = FakeHomepagePreview.bookmarks(),
-                    recentlyVisited = FakeHomepagePreview.recentHistory(),
-                    collectionsState = CollectionsState.Gone,
-                    pocketState = FakeHomepagePreview.pocketState(),
-                    showPrivacyReport = true,
-                    longfoxEnabled = false,
-                    showLongfoxAnimation = false,
-                    trackersBlockedCount = 754,
-                    headerState = HeaderState.Normal,
-                    middleSearchState = MiddleSearchState(searchBarVisible = true, searchBarEnabled = false),
-                    firstFrameDrawn = true,
-                    setupChecklistState = null,
-                    isSearchInProgress = false,
-                    bottomPadding = 68,
-                    showTopSitesHeader = true,
-                ),
                 interactor = FakeHomepagePreview.homepageInteractor,
                 onTopSitesItemBound = {},
                 modifier = Modifier.fillMaxSize(),
@@ -640,33 +639,34 @@ private fun HomepageBannerPreview() {
     FirefoxTheme {
         Surface {
             Homepage(
-                state = HomepageState.Normal(
-                    shouldShowPrivacyNoticeBanner = true,
-                    nimbusMessage = null,
-                    topSiteState = TopSiteState(
-                        topSites = FakeHomepagePreview.topSites(),
-                        colors = TopSiteColors.colors(),
+                state =
+                    HomepageState.Normal(
+                        shouldShowPrivacyNoticeBanner = true,
+                        nimbusMessage = null,
+                        topSiteState =
+                            TopSiteState(
+                                topSites = FakeHomepagePreview.topSites(),
+                                colors = TopSiteColors.colors(),
+                            ),
+                        recentTabs = FakeHomepagePreview.recentTabs(),
+                        recentSyncedTabSectionState =
+                            RecentSyncedTabSectionState.Visible(FakeHomepagePreview.recentSyncedTab()),
+                        bookmarks = FakeHomepagePreview.bookmarks(),
+                        recentlyVisited = FakeHomepagePreview.recentHistory(),
+                        collectionsState = CollectionsState.Gone,
+                        pocketState = FakeHomepagePreview.pocketState(),
+                        showPrivacyReport = true,
+                        longfoxEnabled = false,
+                        showLongfoxAnimation = false,
+                        trackersBlockedCount = 754,
+                        headerState = HeaderState.Normal,
+                        middleSearchState = MiddleSearchState(searchBarVisible = true, searchBarEnabled = false),
+                        firstFrameDrawn = true,
+                        setupChecklistState = null,
+                        isSearchInProgress = false,
+                        bottomPadding = 68,
+                        showTopSitesHeader = true,
                     ),
-                    recentTabs = FakeHomepagePreview.recentTabs(),
-                    recentSyncedTabSectionState = RecentSyncedTabSectionState.Visible(
-                        FakeHomepagePreview.recentSyncedTab(),
-                    ),
-                    bookmarks = FakeHomepagePreview.bookmarks(),
-                    recentlyVisited = FakeHomepagePreview.recentHistory(),
-                    collectionsState = CollectionsState.Gone,
-                    pocketState = FakeHomepagePreview.pocketState(),
-                    showPrivacyReport = true,
-                    longfoxEnabled = false,
-                    showLongfoxAnimation = false,
-                    trackersBlockedCount = 754,
-                    headerState = HeaderState.Normal,
-                    middleSearchState = MiddleSearchState(searchBarVisible = true, searchBarEnabled = false),
-                    firstFrameDrawn = true,
-                    setupChecklistState = null,
-                    isSearchInProgress = false,
-                    bottomPadding = 68,
-                    showTopSitesHeader = true,
-                ),
                 interactor = FakeHomepagePreview.homepageInteractor,
                 onTopSitesItemBound = {},
                 modifier = Modifier.fillMaxSize(),
@@ -681,24 +681,25 @@ private fun HomepagePreviewCollections() {
     FirefoxTheme {
         Surface {
             Homepage(
-                state = HomepageState.Normal(
-                    shouldShowPrivacyNoticeBanner = false,
-                    nimbusMessage = null,
-                    recentlyVisited = FakeHomepagePreview.recentHistory(),
-                    collectionsState = FakeHomepagePreview.collectionState(),
-                    pocketState = FakeHomepagePreview.pocketState(),
-                    showPrivacyReport = true,
-                    longfoxEnabled = false,
-                    showLongfoxAnimation = false,
-                    trackersBlockedCount = 754,
-                    headerState = HeaderState.Normal,
-                    middleSearchState = MiddleSearchState(searchBarVisible = true, searchBarEnabled = false),
-                    firstFrameDrawn = true,
-                    setupChecklistState = null,
-                    isSearchInProgress = false,
-                    bottomPadding = 68,
-                    showTopSitesHeader = true,
-                ),
+                state =
+                    HomepageState.Normal(
+                        shouldShowPrivacyNoticeBanner = false,
+                        nimbusMessage = null,
+                        recentlyVisited = FakeHomepagePreview.recentHistory(),
+                        collectionsState = FakeHomepagePreview.collectionState(),
+                        pocketState = FakeHomepagePreview.pocketState(),
+                        showPrivacyReport = true,
+                        longfoxEnabled = false,
+                        showLongfoxAnimation = false,
+                        trackersBlockedCount = 754,
+                        headerState = HeaderState.Normal,
+                        middleSearchState = MiddleSearchState(searchBarVisible = true, searchBarEnabled = false),
+                        firstFrameDrawn = true,
+                        setupChecklistState = null,
+                        isSearchInProgress = false,
+                        bottomPadding = 68,
+                        showTopSitesHeader = true,
+                    ),
                 interactor = FakeHomepagePreview.homepageInteractor,
                 onTopSitesItemBound = {},
                 modifier = Modifier.fillMaxSize(),
@@ -713,26 +714,28 @@ private fun MinimalHomepagePreview() {
     FirefoxTheme {
         Surface {
             Homepage(
-                state = HomepageState.Normal(
-                    shouldShowPrivacyNoticeBanner = false,
-                    nimbusMessage = null,
-                    topSiteState = TopSiteState(
-                        topSites = FakeHomepagePreview.topSites(),
-                        colors = TopSiteColors.colors(),
+                state =
+                    HomepageState.Normal(
+                        shouldShowPrivacyNoticeBanner = false,
+                        nimbusMessage = null,
+                        topSiteState =
+                            TopSiteState(
+                                topSites = FakeHomepagePreview.topSites(),
+                                colors = TopSiteColors.colors(),
+                            ),
+                        collectionsState = CollectionsState.Gone,
+                        pocketState = FakeHomepagePreview.pocketState(),
+                        showPrivacyReport = true,
+                        longfoxEnabled = false,
+                        showLongfoxAnimation = false,
+                        trackersBlockedCount = 754,
+                        headerState = HeaderState.Normal,
+                        firstFrameDrawn = true,
+                        setupChecklistState = null,
+                        isSearchInProgress = false,
+                        bottomPadding = 68,
+                        showTopSitesHeader = true,
                     ),
-                    collectionsState = CollectionsState.Gone,
-                    pocketState = FakeHomepagePreview.pocketState(),
-                    showPrivacyReport = true,
-                    longfoxEnabled = false,
-                    showLongfoxAnimation = false,
-                    trackersBlockedCount = 754,
-                    headerState = HeaderState.Normal,
-                    firstFrameDrawn = true,
-                    setupChecklistState = null,
-                    isSearchInProgress = false,
-                    bottomPadding = 68,
-                    showTopSitesHeader = true,
-                ),
                 interactor = FakeHomepagePreview.homepageInteractor,
                 onTopSitesItemBound = {},
                 modifier = Modifier.fillMaxSize(),
@@ -746,11 +749,12 @@ private fun MinimalHomepagePreview() {
 private fun PrivateHomepagePreview() {
     FirefoxTheme(theme = Theme.Private) {
         Homepage(
-            state = HomepageState.Private(
-                headerState = HeaderState.Normal,
-                firstFrameDrawn = true,
-                isSearchInProgress = false,
-            ),
+            state =
+                HomepageState.Private(
+                    headerState = HeaderState.Normal,
+                    firstFrameDrawn = true,
+                    isSearchInProgress = false,
+                ),
             interactor = FakeHomepagePreview.homepageInteractor,
             onTopSitesItemBound = {},
             modifier = Modifier.fillMaxSize(),
@@ -759,11 +763,7 @@ private fun PrivateHomepagePreview() {
 }
 
 internal val horizontalMargin: Dp
-    @Composable
-    @ReadOnlyComposable
-    get() = dimensionResource(R.dimen.home_item_horizontal_margin)
+    @Composable @ReadOnlyComposable get() = dimensionResource(R.dimen.home_item_horizontal_margin)
 
 private val verticalMargin: Dp
-    @Composable
-    @ReadOnlyComposable
-    get() = dimensionResource(R.dimen.home_item_vertical_margin)
+    @Composable @ReadOnlyComposable get() = dimensionResource(R.dimen.home_item_vertical_margin)

@@ -283,9 +283,9 @@ already_AddRefed<gfxPattern> SVGGradientFrame::GetPaintServerPattern(
 
   // revert any vector effect transform so that the gradient appears unchanged
   if (aFillOrStroke == &nsStyleSVG::mStroke) {
-    gfxMatrix userToOuterSVG;
-    if (SVGUtils::GetNonScalingStrokeTransform(aSource, &userToOuterSVG)) {
-      patternMatrix *= userToOuterSVG;
+    if (Maybe<gfxMatrix> userToOuterSVG =
+            SVGUtils::GetNonScalingStrokeTransform(aSource)) {
+      patternMatrix *= *userToOuterSVG;
     }
   }
 
@@ -517,18 +517,18 @@ nsresult SVGRadialGradientFrame::AttributeChanged(int32_t aNameSpaceID,
 float SVGRadialGradientFrame::GetLengthValue(uint32_t aIndex,
                                              Maybe<float> aDefaultValue) {
   dom::SVGRadialGradientElement* lengthElement = GetRadialGradientWithLength(
-      aIndex, aDefaultValue.isNothing()
+      aIndex, !aDefaultValue
                   ? static_cast<dom::SVGRadialGradientElement*>(GetContent())
                   : nullptr);
 
   // If we passed our content as a fallback, then assuming that is non-null,
   // the return value should also be non-null.
-  MOZ_ASSERT(aDefaultValue.isSome() || lengthElement,
+  MOZ_ASSERT(aDefaultValue || lengthElement,
              "Got unexpected null element from GetRadialGradientWithLength");
 
   return lengthElement
              ? GetLengthValue(lengthElement->mLengthAttributes[aIndex])
-             : aDefaultValue.value();
+             : *aDefaultValue;
 }
 
 dom::SVGRadialGradientElement*

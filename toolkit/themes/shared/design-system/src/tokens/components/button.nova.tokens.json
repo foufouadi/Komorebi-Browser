@@ -119,6 +119,12 @@
             "forcedColors": "{button.background.color.@base}"
           }
         }
+      },
+      "selected": {
+        "value": {
+          "default": "{button.background.color.active}",
+          "forcedColors": "SelectedItem"
+        }
       }
     }
   },
@@ -231,6 +237,16 @@
     },
     "radius": {
       "value": "{border.radius.xlarge}"
+    },
+    "width": {
+      "split": {
+        "value": "0"
+      }
+    }
+  },
+  "gap": {
+    "split": {
+      "value": "0"
     }
   },
   "opacity": {
@@ -248,10 +264,12 @@
       }
     }
   },
-  "size": {
-    "icon": {
-      "small": {
-        "value": "{size.item.medium}"
+  "split": {
+    "separator": {
+      "background": {
+        "color": {
+          "value": "{button.border.color.@base}"
+        }
       }
     }
   },
@@ -357,7 +375,7 @@
           "value": {
             "light": "{button.text.color.ghost.disabled}",
             "dark": "{button.text.color.disabled}",
-            "forcedColors": "{button.text.color.primary.disabled}"
+            "forcedColors": "{button.text.color.disabled}"
           }
         },
         "hover": {

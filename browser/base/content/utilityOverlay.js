@@ -16,6 +16,8 @@ ChromeUtils.defineESModuleGetters(this, {
     "moz-src:///browser/components/aiwindow/ui/modules/AIWindow.sys.mjs",
   BrowserUtils: "resource://gre/modules/BrowserUtils.sys.mjs",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
+  ContainerCreationPanel:
+    "chrome://browser/content/usercontext/ContainerCreationPanel.mjs",
   ContextualIdentityService:
     "moz-src:///toolkit/components/contextualidentity/ContextualIdentityService.sys.mjs",
   ExtensionSettingsStore:
@@ -260,7 +262,10 @@ function createUserContextMenu(
       );
       menuitem.setAttribute("label", label);
     }
-    menuitem.setAttribute("command", "Browser:AddContainer");
+    menuitem.addEventListener("command", commandEvent => {
+      commandEvent.stopPropagation();
+      ContainerCreationPanel.open(window);
+    });
     docfrag.appendChild(menuitem);
   }
 
@@ -274,7 +279,10 @@ function createUserContextMenu(
       );
       menuitem.setAttribute("label", label);
     }
-    menuitem.setAttribute("command", "Browser:OpenAboutContainers");
+    menuitem.addEventListener("command", commandEvent => {
+      commandEvent.stopPropagation();
+      openPreferences("paneContainers");
+    });
     docfrag.appendChild(menuitem);
   }
 

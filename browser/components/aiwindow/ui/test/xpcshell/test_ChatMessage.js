@@ -42,6 +42,7 @@ add_task(function test_ChatMessage_constructor_defaults() {
       "convId",
       "memoriesEnabled",
       "memoriesFlagSource",
+      "toolUIDraft",
     ];
 
     nullFields.forEach(nullField => {

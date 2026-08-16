@@ -1362,13 +1362,6 @@ newtabPrivatePing:
         pref: browser.newtabpage.activity-stream.telemetry.privatePing.enabled
       description: >-
         Enables the private newtab-content ping sent through OHTTP
-    redactNewtabPing:
-      type: boolean
-      setPref:
-        branch: user
-        pref: browser.newtabpage.activity-stream.telemetry.privatePing.redactNewtabPing.enabled
-      description: >-
-        Provides an option to redact content ids of users from click, impression and related events in the NewTab ping. Should be enabled when data colection has shefted to the more private NewTab_content ping.
     includeInferredInterests:
       type: boolean
       setPref:
@@ -3358,6 +3351,12 @@ localNetworkAccess:
       setPref:
         branch: default
         pref: "network.lna.enabled"
+    blockInsecureContexts:
+      description: Whether LNA requests from insecure contexts should be blocked outright, without prompting the user for permission.
+      type: boolean
+      setPref:
+        branch: default
+        pref: "network.lna.block_insecure_contexts"
 
 essentialFallbackDomains:
   description: "Whether to retry failing system requests with a backup domain"

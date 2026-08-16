@@ -19,6 +19,7 @@ import io.mockk.verifyAll
 import mozilla.components.browser.state.state.BrowserState
 import mozilla.components.browser.state.state.createTab
 import mozilla.components.browser.state.store.BrowserStore
+import mozilla.components.feature.readerview.R as readerviewR
 import mozilla.components.feature.readerview.ReaderViewFeature
 import mozilla.components.support.base.feature.ViewBoundFeatureWrapper
 import mozilla.components.support.test.robolectric.testContext
@@ -26,9 +27,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.mozilla.fenix.R
 import org.robolectric.RobolectricTestRunner
-import mozilla.components.feature.readerview.R as readerviewR
 
 @RunWith(RobolectricTestRunner::class)
 class DefaultReaderModeControllerTest {
@@ -42,19 +41,21 @@ class DefaultReaderModeControllerTest {
     @Before
     fun setup() {
         val tab = createTab("https://mozilla.org")
-        val store = BrowserStore(
-            BrowserState(
-                tabs = listOf(tab),
-                selectedTabId = tab.id,
-            ),
-        )
+        val store =
+            BrowserStore(
+                BrowserState(
+                    tabs = listOf(tab),
+                    selectedTabId = tab.id,
+                )
+            )
         readerViewFeature = spyk(ReaderViewFeature(testContext, mockk(), store, mockk()))
 
-        featureWrapper = ViewBoundFeatureWrapper(
-            feature = readerViewFeature,
-            owner = mockk(relaxed = true),
-            view = mockk(relaxed = true),
-        )
+        featureWrapper =
+            ViewBoundFeatureWrapper(
+                feature = readerViewFeature,
+                owner = mockk(relaxed = true),
+                view = mockk(relaxed = true),
+            )
         readerViewControlsBar = mockk(relaxed = true)
 
         every { readerViewFeature.hideReaderView() } just Runs
@@ -65,11 +66,12 @@ class DefaultReaderModeControllerTest {
 
     @Test
     fun testHideReaderView() {
-        val controller = DefaultReaderModeController(
-            featureWrapper,
-            readerViewControlsBar,
-            onReaderModeChanged = onReaderModeChanged,
-        )
+        val controller =
+            DefaultReaderModeController(
+                featureWrapper,
+                readerViewControlsBar,
+                onReaderModeChanged = onReaderModeChanged,
+            )
         controller.hideReaderView()
         verify { readerViewFeature.hideReaderView() }
         verify { readerViewFeature.hideControls() }
@@ -78,11 +80,12 @@ class DefaultReaderModeControllerTest {
 
     @Test
     fun testShowReaderView() {
-        val controller = DefaultReaderModeController(
-            featureWrapper,
-            readerViewControlsBar,
-            onReaderModeChanged = onReaderModeChanged,
-        )
+        val controller =
+            DefaultReaderModeController(
+                featureWrapper,
+                readerViewControlsBar,
+                onReaderModeChanged = onReaderModeChanged,
+            )
         controller.showReaderView()
         verify { readerViewFeature.showReaderView() }
         assertEquals(1, onReaderModeChangedCount)
@@ -90,11 +93,12 @@ class DefaultReaderModeControllerTest {
 
     @Test
     fun testShowControlsNormalTab() {
-        val controller = DefaultReaderModeController(
-            featureWrapper,
-            readerViewControlsBar,
-            isPrivate = false,
-        )
+        val controller =
+            DefaultReaderModeController(
+                featureWrapper,
+                readerViewControlsBar,
+                isPrivate = false,
+            )
 
         controller.showControls()
         verify { readerViewFeature.showControls() }
@@ -103,13 +107,14 @@ class DefaultReaderModeControllerTest {
 
     @Test
     fun testShowControlsPrivateTab() {
-        val controller = spyk(
-            DefaultReaderModeController(
-                featureWrapper,
-                readerViewControlsBar,
-                isPrivate = true,
-            ),
-        )
+        val controller =
+            spyk(
+                DefaultReaderModeController(
+                    featureWrapper,
+                    readerViewControlsBar,
+                    isPrivate = true,
+                )
+            )
 
         val privateButtonColor = mockk<ColorStateList>()
         val privateRadioButtonColor = mockk<ColorStateList>()

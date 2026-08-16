@@ -6,6 +6,7 @@ package mozilla.components.support.utils
 
 import androidx.core.text.TextDirectionHeuristicCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlin.random.Random
 import mozilla.components.support.ktx.util.URLStringUtils
 import mozilla.components.support.ktx.util.URLStringUtils.isSearchTerm
 import mozilla.components.support.ktx.util.URLStringUtils.isURLLike
@@ -16,7 +17,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import kotlin.random.Random
 
 @RunWith(AndroidJUnit4::class)
 class URLStringUtilsTest {
@@ -87,14 +87,15 @@ class URLStringUtilsTest {
         assertFalse(isURLLike("3-3 "))
 
         // Valid IPv6 literals correctly recognized as valid.
-        val validIPv6Literals = listOf(
-            "[::]",
-            "[::1]",
-            "[1::]",
-            "[1:2:3:4:5:6:7:8]",
-            "[2001:db8::1.2.3.4]",
-            "[::1]:8080",
-        )
+        val validIPv6Literals =
+            listOf(
+                "[::]",
+                "[::1]",
+                "[1::]",
+                "[1:2:3:4:5:6:7:8]",
+                "[2001:db8::1.2.3.4]",
+                "[::1]:8080",
+            )
 
         validIPv6Literals.forEach { url ->
             assertTrue(isURLLike(url))
@@ -280,8 +281,8 @@ class URLStringUtilsTest {
 }
 
 /**
- * Custom [TextDirectionHeuristicCompat] used only in tests to make possible testing of RTL checks.
- * Overcomes the limitations not allowing Mockito to mock platform implementations.
+ * Custom [TextDirectionHeuristicCompat] used only in tests to make possible testing of RTL checks. Overcomes the
+ * limitations not allowing Mockito to mock platform implementations.
  *
  * The return of both [isRtl] is non-deterministic. Setup a different behavior if needed.
  */

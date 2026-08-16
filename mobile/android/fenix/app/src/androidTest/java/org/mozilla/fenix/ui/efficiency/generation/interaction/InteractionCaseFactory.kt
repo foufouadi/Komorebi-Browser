@@ -7,23 +7,17 @@ object InteractionCaseFactory {
 
     private const val TAG = "InteractionCaseFactory"
 
-    fun buildInteractionCases(
-        runState: String,
-    ): List<InteractionCase> {
-        val generatedCases = InteractionTestPlanner
-            .buildInteractionCases()
-            .filter { it.isRunnable }
+    fun buildInteractionCases(runState: String): List<InteractionCase> {
+        val generatedCases = InteractionTestPlanner.buildInteractionCases().filter { it.isRunnable }
 
         val cases = generatedCases.map { generated ->
             val selectorRefs = SelectorCatalog.discoverSelectorsForPage(generated.pagePropertyName)
 
-            val interactionSelector = selectorRefs
-                .first { it.selectorName == generated.interactionSelectorName }
-                .selector
+            val interactionSelector =
+                selectorRefs.first { it.selectorName == generated.interactionSelectorName }.selector
 
-            val expectedSelectors = selectorRefs
-                .filter { it.selectorName in generated.expectedSelectorNames }
-                .map { it.selector }
+            val expectedSelectors =
+                selectorRefs.filter { it.selectorName in generated.expectedSelectorNames }.map { it.selector }
 
             InteractionCase(
                 label = "${generated.pageName} - ${generated.interactionSelectorName}",
@@ -48,11 +42,12 @@ object InteractionCaseFactory {
     ): List<InteractionCase> {
         val allCases = buildInteractionCases(runState)
 
-        val shardCases = ShardUtils.filterForShard(
-            items = allCases,
-            shardIndex = shardIndex,
-            shardCount = shardCount,
-        )
+        val shardCases =
+            ShardUtils.filterForShard(
+                items = allCases,
+                shardIndex = shardIndex,
+                shardCount = shardCount,
+            )
 
         Log.i(
             TAG,

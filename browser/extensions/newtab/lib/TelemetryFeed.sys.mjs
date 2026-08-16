@@ -23,6 +23,7 @@ import {
   WIDGET_REGISTRY,
   isWidgetEnabled,
 } from "resource://newtab/common/WidgetsRegistry.mjs";
+import { resolvePageLayoutVariant } from "resource://newtab/common/PageLayoutVariants.mjs";
 import { Prefs } from "resource://newtab/lib/ActivityStreamPrefs.sys.mjs";
 import { classifySite } from "resource://newtab/lib/SiteClassifier.sys.mjs";
 
@@ -30,6 +31,7 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   AboutNewTab: "resource:///modules/AboutNewTab.sys.mjs",
+  AdsClient: "resource://newtab/lib/AdsClient.sys.mjs",
   ClientEnvironmentBase:
     "resource://gre/modules/components-utils/ClientEnvironment.sys.mjs",
   ClientID: "resource://gre/modules/ClientID.sys.mjs",
@@ -43,6 +45,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   NewTabContentPing: "resource://newtab/lib/NewTabContentPing.sys.mjs",
   NewTabUtils: "resource://gre/modules/NewTabUtils.sys.mjs",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
+  MozAdsReportReason:
+    "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustAdsClient.sys.mjs",
 });
 
 export const PREF_IMPRESSION_ID = "impressionId";
@@ -54,8 +58,6 @@ const PREF_SHOW_SPONSORED_STORIES = "showSponsored";
 const PREF_SHOW_SPONSORED_TOPSITES = "showSponsoredTopSites";
 const BLANK_HOMEPAGE_URL = "chrome://browser/content/blanktab.html";
 const PREF_PRIVATE_PING_ENABLED = "telemetry.privatePing.enabled";
-const PREF_REDACT_NEWTAB_PING_ENABLED =
-  "telemetry.privatePing.redactNewtabPing.enabled";
 const PREF_MERINO_FEED_EXPERIMENT =
   "browser.newtabpage.activity-stream.discoverystream.merino-feed-experiment";
 const PREF_PRIVATE_PING_INFERRED_ENABLED =
@@ -164,6 +166,7 @@ export class TelemetryFeed {
     this._prefs = new Prefs();
     this._impressionId = this.getOrCreateImpressionId();
     this._aboutHomeSeen = false;
+    this._adsClient = null;
     this._classifySite = classifySite;
     this._browserOpenNewtabStart = null;
     this._privateRandomContentTelemetryProbablityValues = {};
@@ -195,10 +198,6 @@ export class TelemetryFeed {
 
   get privatePingEnabled() {
     return this._prefs.get(PREF_PRIVATE_PING_ENABLED);
-  }
-
-  get redactNewTabPingEnabled() {
-    return this._prefs.get(PREF_REDACT_NEWTAB_PING_ENABLED);
   }
 
   get privatePingInferredInterestsEnabled() {
@@ -248,6 +247,13 @@ export class TelemetryFeed {
   get inferredTelemetrySettingsOverrides() {
     return this.store?.getState()?.InferredPersonalization
       ?.inferredTelemetrySettingsOverrides;
+  }
+
+  get tileIdRedactedForSponsored() {
+    return (
+      this.store?.getState()?.Prefs.values?.trainhopConfig?.newtabPing
+        ?.redactTileIdForSponsored || false
+    );
   }
 
   /**
@@ -314,6 +320,15 @@ export class TelemetryFeed {
     }
 
     this.gleanSessionType = GleanSessionType.NormalGleanSession;
+  }
+
+  /**
+   * Initializes MAC
+   */
+  initializeMac() {
+    if (lazy.AdsClient.isEnabled(this.store?.getState()?.Prefs.values)) {
+      this._adsClient = lazy.AdsClient.getClient();
+    }
   }
 
   /**
@@ -583,14 +598,13 @@ export class TelemetryFeed {
 
   /**
    * Removes fields that link to any user content preference.
-   * Redactions only occur if the appropriate pref is enabled.
    *
    * @param {*} pingDict Input dictionary
    * @param {boolean} isSponsored Is this in ad, in which case there is nothing we can redact currently
-   * @returns {*} Possibly redacted dictionary
+   * @returns {*} Redacted dictionary
    */
   redactNewTabPing(pingDict, isSponsored = false) {
-    if (this.redactNewTabPingEnabled && !isSponsored) {
+    if (!isSponsored) {
       const {
         // eslint-disable-next-line no-unused-vars
         corpus_item_id,
@@ -609,22 +623,25 @@ export class TelemetryFeed {
       result.content_redacted = true;
       return result;
     }
-    // For spocs we need to retain the tile id.
-    if (this.redactNewTabPingEnabled && isSponsored) {
-      const {
-        // eslint-disable-next-line no-unused-vars
-        section,
-        // eslint-disable-next-line no-unused-vars
-        selected_topics,
-        // eslint-disable-next-line no-unused-vars
-        topic,
-        ...result
-      } = pingDict;
-      result.content_redacted = true;
-      return result;
+
+    const {
+      // eslint-disable-next-line no-unused-vars
+      section,
+      // eslint-disable-next-line no-unused-vars
+      selected_topics,
+      // eslint-disable-next-line no-unused-vars
+      topic,
+      ...result
+    } = pingDict;
+
+    // For spocs we need to retain the tile id, unless we're configured to
+    // redact it.
+    if (this.tileIdRedactedForSponsored) {
+      delete result.tile_id;
     }
 
-    return pingDict; // No modification
+    result.content_redacted = true;
+    return result;
   }
 
   /**
@@ -850,11 +867,15 @@ export class TelemetryFeed {
     }
 
     if (data.reporting_url && this.canSendUnifiedAdsTilesCallbacks) {
-      // Send callback events to MARS unified ads api
-      this.sendUnifiedAdsCallbackEvent({
-        url: data.reporting_url,
-        position,
-      });
+      if (this._adsClient) {
+        this.sendMacCallbackEvent(data.reporting_url, type);
+      } else {
+        // Send callback events to MARS unified ads api
+        this.sendUnifiedAdsCallbackEvent({
+          url: data.reporting_url,
+          position,
+        });
+      }
     }
   }
 
@@ -919,7 +940,6 @@ export class TelemetryFeed {
       case "PIN": {
         Glean.topsites.pin.record({
           newtab_visit_id: session.session_id,
-          is_sponsored: false,
           position: action.data.action_position,
         });
         break;
@@ -927,7 +947,6 @@ export class TelemetryFeed {
       case "UNPIN": {
         Glean.topsites.unpin.record({
           newtab_visit_id: session.session_id,
-          is_sponsored: false,
           position: action.data.action_position,
         });
         break;
@@ -935,7 +954,6 @@ export class TelemetryFeed {
       case "TOP_SITES_ADD": {
         Glean.topsites.add.record({
           newtab_visit_id: session.session_id,
-          is_sponsored: false,
           position: action.data.action_position,
         });
         break;
@@ -943,7 +961,6 @@ export class TelemetryFeed {
       case "TOP_SITES_EDIT": {
         Glean.topsites.edit.record({
           newtab_visit_id: session.session_id,
-          is_sponsored: false,
           position: action.data.action_position,
           has_title_changed: action.data.hasTitleChanged,
           has_url_changed: action.data.hasURLChanged,
@@ -1077,7 +1094,6 @@ export class TelemetryFeed {
           layout_name,
           matches_selected_topic,
           received_rank,
-          recommendation_id,
           recommended_at,
           scheduled_corpus_item_id,
           section_position,
@@ -1131,9 +1147,7 @@ export class TelemetryFeed {
                   received_rank,
                   recommended_at,
                 }
-              : {
-                  recommendation_id,
-                }),
+              : {}),
           };
           if (this.trainhopClickOnlyEnabled) {
             this.transitionToPrivateSession();
@@ -1151,11 +1165,16 @@ export class TelemetryFeed {
           );
           if (shim) {
             if (this.canSendUnifiedAdsSpocCallbacks) {
-              // Send unified ads callback event
-              this.sendUnifiedAdsCallbackEvent({
-                url: shim,
-                position: action.data.action_position,
-              });
+              if (this._adsClient) {
+                // Send callback event via MAC
+                this.sendMacCallbackEvent(shim, "click");
+              } else {
+                // Send unified ads callback event
+                this.sendUnifiedAdsCallbackEvent({
+                  url: shim,
+                  position: action.data.action_position,
+                });
+              }
             }
           }
         }
@@ -1198,6 +1217,37 @@ export class TelemetryFeed {
   }
 
   /**
+   * This function submits callback events to MARS via MAC.
+   */
+
+  async sendMacCallbackEvent(url, event) {
+    if (!url) {
+      throw new Error(
+        `[Unified ads callback] Missing argument (No url). Cannot send telemetry event.`
+      );
+    }
+
+    // Make sure the callback endpoint is allowed
+    const allowed = this.allowedEndpoints;
+    if (!allowed.some(prefix => url.startsWith(prefix))) {
+      throw new Error(
+        `[Unified ads callback] Not one of allowed prefixes (${allowed})`
+      );
+    }
+
+    const options = lazy.AdsClient.callbackOptions();
+    if (event === "impression") {
+      await this._adsClient.recordImpression(url, options);
+    } else if (event === "click") {
+      await this._adsClient.recordClick(url, options);
+    } else {
+      throw new Error(
+        `[Unified ads callback] Unknown callback event type. Cannot send telemetry event.`
+      );
+    }
+  }
+
+  /**
    * This function submits callback events to the MARS unified ads service.
    */
 
@@ -1216,12 +1266,7 @@ export class TelemetryFeed {
     }
 
     // Make sure the callback endpoint is allowed
-    const allowed =
-      this._prefs
-        .get(PREF_ENDPOINTS)
-        .split(",")
-        .map(item => item.trim())
-        .filter(item => item) || [];
+    const allowed = this.allowedEndpoints;
     if (!allowed.some(prefix => data.url.startsWith(prefix))) {
       throw new Error(
         `[Unified ads callback] Not one of allowed prefixes (${allowed})`
@@ -1549,7 +1594,6 @@ export class TelemetryFeed {
       case at.INLINE_SELECTION_IMPRESSION:
         this.handleInlineSelectionUserEvent(action);
         break;
-      case at.REPORT_AD_OPEN:
       case at.REPORT_AD_SUBMIT:
         this.handleReportAdUserEvent(action);
         break;
@@ -1589,6 +1633,8 @@ export class TelemetryFeed {
       case at.PREFS_INITIAL_VALUES:
         this.initializeGleanSession();
         this.recordEnabledWidgets();
+        this.initializeMac();
+        this.recordPageLayoutVariant();
         break;
     }
   }
@@ -1735,6 +1781,16 @@ export class TelemetryFeed {
     );
   }
 
+  // Read from the store rather than NEWTAB_PING_PREFS, since the variant can
+  // also come from a train-hop config, which is not a pref.
+  recordPageLayoutVariant() {
+    const prefs = this.store?.getState()?.Prefs.values;
+    if (!prefs) {
+      return;
+    }
+    Glean.newtab.pageLayoutVariant.set(resolvePageLayoutVariant(prefs));
+  }
+
   handleWidgetsHideAll(action) {
     const { targets, widget_size } = action.data;
     this.handleUnifiedWidgetContainerAction({
@@ -1773,31 +1829,67 @@ export class TelemetryFeed {
     }
   }
 
-  async handleReportAdUserEvent(action) {
-    const { placement_id, position, report_reason, reporting_url } =
-      action.data || {};
-
-    const url = new URL(reporting_url);
-    url.searchParams.append("placement_id", placement_id);
-    url.searchParams.append("reason", report_reason);
-    url.searchParams.append("position", position);
-    const adResponse = url.toString();
-
-    const allowed =
+  get allowedEndpoints() {
+    return (
       this._prefs
         .get(PREF_ENDPOINTS)
         .split(",")
         .map(item => item.trim())
-        .filter(item => item) || [];
+        .filter(item => item) || []
+    );
+  }
 
-    if (!allowed.some(prefix => adResponse.startsWith(prefix))) {
+  async handleReportAdUserEvent(action) {
+    const { placement_id, position, report_reason, reporting_url } =
+      action.data || {};
+
+    if (!reporting_url) {
+      throw new Error(
+        `[Unified ads callback] Missing argument (No url). Cannot send telemetry event.`
+      );
+    }
+
+    if (!report_reason) {
+      throw new Error(
+        `[Unified ads callback] Missing argument (No report reason). Cannot send telemetry event.`
+      );
+    }
+
+    const allowed = this.allowedEndpoints;
+    if (!allowed.some(prefix => reporting_url.startsWith(prefix))) {
       throw new Error(
         `[Unified ads callback] Not one of allowed prefixes (${allowed})`
       );
     }
 
     try {
-      await fetch(adResponse);
+      if (this._adsClient) {
+        // js-style enum string (eg. "seen_too_many_times") must be converted to
+        // rust-style enum name (eg. "SEEN_TOO_MANY_TIMES") and then converted to
+        // enum value (eg. 2) by lookup in uniffi bindings
+        const reportReasonValue =
+          lazy.MozAdsReportReason[report_reason.toUpperCase()];
+        if (reportReasonValue === undefined) {
+          throw new Error(
+            `[Unified ads callback] Invalid argument (Invalid report reason). Cannot send telemetry event.`
+          );
+        }
+
+        const options = lazy.AdsClient.callbackOptions();
+        await this._adsClient.reportAd(
+          reporting_url,
+          reportReasonValue,
+          options
+        );
+      } else {
+        const url = new URL(reporting_url);
+        url.searchParams.append("placement_id", placement_id);
+        url.searchParams.append("position", position);
+        url.searchParams.append("reason", report_reason);
+        const adResponse = url.toString();
+
+        await fetch(adResponse);
+      }
     } catch (error) {
       console.error("Error:", error);
     }
@@ -2177,9 +2269,7 @@ export class TelemetryFeed {
                 received_rank: datum.received_rank,
                 recommended_at: datum.recommended_at,
               }
-            : {
-                recommendation_id: datum.recommendation_id,
-              }),
+            : {}),
         };
 
         if (this.trainhopClickOnlyEnabled) {
@@ -2295,9 +2385,7 @@ export class TelemetryFeed {
               received_rank: tile.received_rank,
               recommended_at: tile.recommended_at,
             }
-          : {
-              recommendation_id: tile.recommendation_id,
-            }),
+          : {}),
       };
       this.recordOrQueueEvent(
         "impression",
@@ -2313,11 +2401,16 @@ export class TelemetryFeed {
 
       if (tile.shim) {
         if (this.canSendUnifiedAdsSpocCallbacks) {
-          // Send unified ads callback event
-          this.sendUnifiedAdsCallbackEvent({
-            url: tile.shim,
-            position: tile.pos,
-          });
+          if (this._adsClient) {
+            // Send callback event via MAC
+            this.sendMacCallbackEvent(tile.shim, "impression");
+          } else {
+            // Send unified ads callback event
+            this.sendUnifiedAdsCallbackEvent({
+              url: tile.shim,
+              position: tile.pos,
+            });
+          }
         }
       }
     });

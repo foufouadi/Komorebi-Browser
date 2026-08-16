@@ -47,7 +47,7 @@ const { AppConstants } = ChromeUtils.importESModule(
  * @import { WebsiteChipContainer } from "chrome://browser/content/aiwindow/components/website-chip-container.mjs"
  * @import { AIWindow } from "moz-src:///browser/components/aiwindow/ui/components/ai-window/ai-window.mjs"
  * @import { SmartwindowSmartbarGlow } from "moz-src:///browser/components/aiwindow/ui/components/smartwindow-smartbar-glow/smartwindow-smartbar-glow.mjs"
- * @import { WindowMode } from "moz-src:///browser/components/urlbar/content/UrlbarInput.mjs"
+ * @import { WindowMode } from "moz-src:///browser/components/urlbar/content/UrlbarInputBase.mjs"
  */
 
 /**
@@ -133,6 +133,7 @@ export class SmartbarInput extends HTMLElement {
         <html:moz-urlbar-slot name="remote-control-box" />
 
         <html:moz-button class="searchmode-switcher chromeclass-toolbar-additional"
+                         type="muted"
                          iconsrc="chrome://global/skin/icons/search-glass.svg"
                          title="More options"
                          aria-label="More options"
@@ -2509,7 +2510,7 @@ ${
         this.controller.switchToTab({
           url,
           searchString,
-          userContextId: result.payload.userContextId,
+          userContextId: result.payload.userContext?.id,
           tabGroup: result.payload.tabGroup,
           heuristic: result.heuristic,
         });
@@ -5904,7 +5905,8 @@ ${
    *
    * Since the placeholder was already initialized to the pre-saved engine
    * name by #initPlaceholderFromPref when this is called, the update is
-   * delayed to avoid confusing the user.
+   * delayed to avoid confusing the user. A placeholder that names an engine may
+   * be naming a stale one, so it's updated right away.
    */
   async #deferUpdatePlaceholder() {
     if (this.sapName == "smartbar") {
@@ -5912,6 +5914,12 @@ ${
     }
 
     if (!this.value) {
+      if (this.inputField.dataset.l10nId == "urlbar-placeholder-with-name") {
+        // The switcher icon has no pre-saved value that could be stale, so it
+        // still waits for the listener below.
+        this.updatePlaceholder();
+      }
+
       // Only delay if requested, and we're not displaying text in the URL bar
       // currently.
       // Delays changing the URL Bar placeholder and Unified Search Button icon

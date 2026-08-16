@@ -50,11 +50,6 @@ skip-if = [
 ["browser_ext_windows_remove.js"]
 
 ["browser_ext_windows_size.js"]
-skip-if = [
-  "os == 'mac' && os_version == '10.15' && arch == 'x86_64'",
-  "os == 'mac' && os_version == '14.70' && arch == 'x86_64'", # Bug 1869793
-  "os == 'mac' && os_version == '15.30' && arch == 'aarch64'",
-]
 
 ["browser_ext_windows_update.js"]
 tags = "fullscreen"

@@ -4,6 +4,9 @@
 
 package org.mozilla.fenix.onboarding.continuous
 
+import java.time.LocalDate
+import java.time.ZoneOffset
+import java.util.concurrent.TimeUnit
 import mozilla.components.support.test.robolectric.testContext
 import mozilla.components.support.utils.FakeDateTimeProvider
 import org.junit.Assert.assertEquals
@@ -12,9 +15,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.mozilla.fenix.utils.Settings
 import org.robolectric.RobolectricTestRunner
-import java.time.LocalDate
-import java.time.ZoneOffset
-import java.util.concurrent.TimeUnit
 
 private val ONE_DAY_MILLIS = TimeUnit.DAYS.toMillis(1)
 
@@ -160,9 +160,11 @@ class ContinuousOnboardingStageProviderTest {
         )
     }
 
-    private fun getStage(currentTimeMillis: Long) = ContinuousOnboardingStageProviderDefault(
-        settings = settings,
-        dateTimeProvider = FakeDateTimeProvider(currentTime = currentTimeMillis),
-        zoneId = ZoneOffset.UTC,
-    ).getContinuousOnboardingStage()
+    private fun getStage(currentTimeMillis: Long) =
+        ContinuousOnboardingStageProviderDefault(
+                settings = settings,
+                dateTimeProvider = FakeDateTimeProvider(currentTime = currentTimeMillis),
+                zoneId = ZoneOffset.UTC,
+            )
+            .getContinuousOnboardingStage()
 }

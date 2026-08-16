@@ -1,10 +1,10 @@
 package org.mozilla.focus.locale.screen
 
+import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.mockito.Mockito.spy
 import org.mockito.Mockito.`when`
-import java.util.Locale
 
 class LocaleDescriptorTest {
 

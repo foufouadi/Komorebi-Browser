@@ -6,9 +6,7 @@ package mozilla.components.ui.colors
 
 import androidx.compose.ui.graphics.Color
 
-/**
- * Colors from the Nova design system primitives.
- */
+/** Colors from the Nova design system primitives. */
 object NovaColors {
     val White = Color(0xFFFFFFFF)
     val Black = Color(0xFF000000)

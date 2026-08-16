@@ -122,7 +122,7 @@ BaselineInterpreterGenerator::BaselineInterpreterGenerator(JSContext* cx,
                       /* no handlerArgs */) {}
 
 bool BaselineCompilerHandler::init() {
-  if (!analysis_.init(alloc_)) {
+  if (!analysis_.init()) {
     return false;
   }
 
@@ -5860,7 +5860,7 @@ void BaselineCompilerCodeGen::emitTableSwitchJump(Register key,
                                                   Register scratch2) {
   // Jump to resumeEntries[firstResumeIndex + key].
 
-  // Note: BytecodeEmitter::allocateResumeIndex static_asserts
+  // Note: BytecodeEmitter::checkResumeIndexLimit static_asserts
   // |firstResumeIndex * sizeof(uintptr_t)| fits in int32_t.
   uint32_t firstResumeIndex =
       GET_RESUMEINDEX(handler.pc() + TableSwitchOpFirstResumeIndexOffset);
@@ -6515,15 +6515,28 @@ bool BaselineCodeGen<Handler>::emitGeneratorResumePrologueBody() {
         Imm32(0),
         Address(scratch2, ObjectElements::offsetOfInitializedLength()));
 
-    Label loop, loopDone;
+    // Whether the zone needs a marking barrier cannot change while this loop
+    // runs, so test it once rather than once per slot. The barrier is only
+    // armed during an incremental GC, so the common case is the loop that has
+    // no barrier code in it at all.
+    Label loop, barrierLoop, loopDone;
     masm.branchTest32(Assembler::Zero, initLength, initLength, &loopDone);
+    masm.branchTestNeedsMarkingBarrierAnyZone(Assembler::NonZero, &barrierLoop,
+                                              scratch1);
     masm.bind(&loop);
     {
       masm.pushValue(Address(scratch2, 0));
-      emitGuardedCallPreBarrierAnyZone(Address(scratch2, 0), MIRType::Value,
-                                       scratch1);
       masm.addPtr(Imm32(sizeof(Value)), scratch2);
       masm.branchSub32(Assembler::NonZero, Imm32(1), initLength, &loop);
+    }
+    masm.jump(&loopDone);
+
+    masm.bind(&barrierLoop);
+    {
+      masm.pushValue(Address(scratch2, 0));
+      masm.unguardedCallPreBarrier(Address(scratch2, 0), MIRType::Value);
+      masm.addPtr(Imm32(sizeof(Value)), scratch2);
+      masm.branchSub32(Assembler::NonZero, Imm32(1), initLength, &barrierLoop);
     }
     masm.bind(&loopDone);
     regs.add(initLength);
@@ -6664,11 +6677,18 @@ bool BaselineCodeGen<Handler>::emit_Resume() {
   MOZ_ASSERT(masm.framePushed() == sizeof(uintptr_t));
   masm.setFramePushed(0);
 
-  // Load the code to call. We can't use jitCodeRaw unconditionally because it
-  // may point to Ion code and the Ion prologue doesn't support resuming a
-  // generator.
+  // Load the code to call. Throw and Return currently always resume in
+  // Baseline; see MaybeEnterJit.
   Register code = regs.takeAny();
+  Label baselineOnly, gotEntry;
+  masm.unboxInt32(resumeKindSlot, scratch1);
+  masm.branch32(Assembler::NotEqual, scratch1,
+                Imm32(int32_t(GeneratorResumeKind::Next)), &baselineOnly);
+  masm.loadJitCodeRaw(callee, code);
+  masm.jump(&gotEntry);
+  masm.bind(&baselineOnly);
   masm.loadJitCodeRawNoIon(callee, code, scratch1);
+  masm.bind(&gotEntry);
   regs.add(callee);
 
   masm.switchToObjectRealm(genObj, scratch1);
@@ -6994,6 +7014,10 @@ bool BaselineCodeGen<Handler>::emitPrologue() {
 
   masm.subFromStackPtr(Imm32(BaselineFrame::Size()));
 
+  // A bailout of an Ion frame that's still mid-generator-resume re-enters here
+  // to redo the resume in Baseline.
+  masm.bind(&bailoutResumePrologue_);
+
   if (!emitGeneratorResumePrologue()) {
     return false;
   }
@@ -7293,6 +7317,13 @@ bool BaselineInterpreterGenerator::emitInterpreterLoop() {
   restoreInterpreterPCReg();
   masm.jump(&bailoutPrologue_);
 
+  // External entry point for Ion resume prologue bailouts.
+  bailoutResumePrologueOffset_ = CodeOffset(masm.currentOffset());
+  restoreInterpreterPCReg();
+  masm.moveToStackPtr(FramePointer);
+  masm.subFromStackPtr(Imm32(BaselineFrame::Size()));
+  masm.jump(&bailoutResumePrologue_);
+
   // Emit debug trap handler code (target of patchable call instructions). This
   // is just a tail call to the debug trap handler trampoline code.
   {
@@ -7461,7 +7492,7 @@ bool BaselineInterpreterGenerator::generate(JSContext* cx,
 
     interpreter.init(
         code, interpretOpOffset_, interpretOpNoDebugTrapOffset_,
-        bailoutPrologueOffset_.offset(),
+        bailoutPrologueOffset_.offset(), bailoutResumePrologueOffset_.offset(),
         profilerEnterFrameToggleOffset_.offset(),
         profilerExitFrameToggleOffset_.offset(), debugTrapHandlerOffset_,
         std::move(handler.debugInstrumentationOffsets()),

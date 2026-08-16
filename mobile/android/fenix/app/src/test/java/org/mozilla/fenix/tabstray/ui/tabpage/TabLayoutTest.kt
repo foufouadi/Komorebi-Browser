@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import junit.framework.TestCase.assertEquals
+import kotlin.test.assertEquals
 import mozilla.components.compose.base.utils.LocalUnderTest
 import org.junit.Rule
 import org.junit.Test
@@ -29,12 +30,10 @@ import org.mozilla.fenix.tabstray.redux.state.TabsTrayState
 import org.mozilla.fenix.tabstray.ui.tabitems.TabGridColumnCountKey
 import org.mozilla.fenix.theme.FirefoxTheme
 import org.mozilla.fenix.theme.Theme
-import kotlin.test.assertEquals
 
 @RunWith(AndroidJUnit4::class)
 class TabLayoutTest {
-    @get:Rule
-    val composeTestRule = createComposeRule()
+    @get:Rule val composeTestRule = createComposeRule()
 
     private val tabletLandscapeSize = DpSize(1280.dp, 800.dp)
     private val tabletPortraitSize = DpSize(800.dp, 1280.dp)
@@ -42,9 +41,7 @@ class TabLayoutTest {
     @Test
     fun `WHEN the container for TabLayout is large on a large device in landscape THEN 5 columns are created`() {
         composeTestRule.setContent {
-            DeviceConfigurationOverride(
-                DeviceConfigurationOverride.WindowSize(tabletLandscapeSize),
-            ) {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.WindowSize(tabletLandscapeSize)) {
                 GridContainer(1280.dp)
             }
         }
@@ -55,9 +52,7 @@ class TabLayoutTest {
     @Test
     fun `WHEN the container for TabLayout is medium with a large device in landscape THEN 4 columns are created`() {
         composeTestRule.setContent {
-            DeviceConfigurationOverride(
-                DeviceConfigurationOverride.WindowSize(tabletLandscapeSize),
-            ) {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.WindowSize(tabletLandscapeSize)) {
                 GridContainer(800.dp)
             }
         }
@@ -68,9 +63,7 @@ class TabLayoutTest {
     @Test
     fun `WHEN the container for TabLayout is small with a large device in landscape THEN 3 columns are created`() {
         composeTestRule.setContent {
-            DeviceConfigurationOverride(
-                DeviceConfigurationOverride.WindowSize(tabletLandscapeSize),
-            ) {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.WindowSize(tabletLandscapeSize)) {
                 GridContainer(500.dp)
             }
         }
@@ -81,9 +74,7 @@ class TabLayoutTest {
     @Test
     fun `WHEN the container for TabLayout is large on a large device in portrait THEN 5 columns are created`() {
         composeTestRule.setContent {
-            DeviceConfigurationOverride(
-                DeviceConfigurationOverride.WindowSize(tabletPortraitSize),
-            ) {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.WindowSize(tabletPortraitSize)) {
                 GridContainer(1280.dp)
             }
         }
@@ -94,9 +85,7 @@ class TabLayoutTest {
     @Test
     fun `WHEN the container for TabLayout is small with a large device in portrait THEN 3 columns are created`() {
         composeTestRule.setContent {
-            DeviceConfigurationOverride(
-                DeviceConfigurationOverride.WindowSize(tabletPortraitSize),
-            ) {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.WindowSize(tabletPortraitSize)) {
                 GridContainer(400.dp)
             }
         }
@@ -157,7 +146,7 @@ class TabLayoutTest {
                             onCloseTabGroupClick = { _ -> },
                             onShareTabGroupClick = { _ -> },
                             onDeleteTabGroupClick = { _ -> },
-                            onTabGroupOnboardingDismiss = { },
+                            onTabGroupOnboardingDismiss = {},
                             liveReorderEnabled = false,
                         )
                     }
@@ -195,7 +184,7 @@ class TabLayoutTest {
                             onCloseTabGroupClick = { _ -> },
                             onShareTabGroupClick = { _ -> },
                             onDeleteTabGroupClick = { _ -> },
-                            onTabGroupOnboardingDismiss = { },
+                            onTabGroupOnboardingDismiss = {},
                             liveReorderEnabled = false,
                         )
                     }
@@ -211,7 +200,8 @@ class TabLayoutTest {
     }
 
     private val gridColumnCount: Int
-        get() = composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GRID).fetchSemanticsNode().config[TabGridColumnCountKey]
+        get() =
+            composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GRID).fetchSemanticsNode().config[TabGridColumnCountKey]
 
     @Composable
     private fun GridContainer(width: Dp) {
@@ -228,9 +218,10 @@ class TabLayoutTest {
 
     @Composable
     private fun TabLayoutGrid(modifier: Modifier = Modifier) {
-        val tabs = List(10) {
-            createTab(url = "www.mozilla.org")
-        }
+        val tabs =
+            List(10) {
+                createTab(url = "www.mozilla.org")
+            }
         TabLayout(
             tabs = tabs,
             displayTabsInGrid = true,
@@ -249,27 +240,28 @@ class TabLayoutTest {
             onCloseTabGroupClick = { _ -> },
             onShareTabGroupClick = { _ -> },
             onDeleteTabGroupClick = { _ -> },
-            onTabGroupOnboardingDismiss = { },
+            onTabGroupOnboardingDismiss = {},
             onPrivacyReportTapped = {},
             liveReorderEnabled = false,
         )
     }
 
-    private fun fakeTabInteractionHandler() = object : TabInteractionHandler {
-        override fun onMove(sourceKey: String, targetKey: String?, placeAfter: Boolean) {
-            // no op
-        }
+    private fun fakeTabInteractionHandler() =
+        object : TabInteractionHandler {
+            override fun onMove(sourceKey: String, targetKey: String?, placeAfter: Boolean) {
+                // no op
+            }
 
-        override fun onDrop(sourceKey: String, targetKey: String) {
-            // no op
-        }
+            override fun onDrop(sourceKey: String, targetKey: String) {
+                // no op
+            }
 
-        override fun onDragCancel() {
-            // no op
-        }
+            override fun onDragCancel() {
+                // no op
+            }
 
-        override fun onDragStart(sourceKey: String, preserveSelectMode: Boolean) {
-            // no op
+            override fun onDragStart(sourceKey: String, preserveSelectMode: Boolean) {
+                // no op
+            }
         }
-    }
 }

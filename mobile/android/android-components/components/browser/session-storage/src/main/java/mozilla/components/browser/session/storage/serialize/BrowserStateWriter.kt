@@ -14,34 +14,23 @@ import mozilla.components.browser.state.state.TabSessionState
 import mozilla.components.concept.engine.EngineSessionState
 import mozilla.components.support.ktx.util.streamJSON
 
-/**
- * Writes a [BrowserState] or a single [TabSessionState] to disk to be restored later using
- * [BrowserStateReader].
- */
+/** Writes a [BrowserState] or a single [TabSessionState] to disk to be restored later using [BrowserStateReader]. */
 class BrowserStateWriter {
-    /**
-     * Writes the [BrowserState] to [file] as JSON.
-     */
+    /** Writes the [BrowserState] to [file] as JSON. */
     fun write(
         state: BrowserState,
         file: AtomicFile,
     ): Boolean = file.streamJSON { state(state) }
 
-    /**
-     * Writes a single [TabSessionState] to [file] in JSON format.
-     */
+    /** Writes a single [TabSessionState] to [file] in JSON format. */
     fun writeTab(
         tab: TabSessionState,
         file: AtomicFile,
     ): Boolean = file.streamJSON { tab(tab) }
 }
 
-/**
- * Writes [BrowserState] to [JsonWriter].
- */
-private fun JsonWriter.state(
-    state: BrowserState,
-) {
+/** Writes [BrowserState] to [JsonWriter]. */
+private fun JsonWriter.state(state: BrowserState) {
     beginObject()
 
     name(Keys.VERSION_KEY)
@@ -59,9 +48,11 @@ private fun JsonWriter.state(
 
     beginArray()
 
-    state.tabs.filter { !it.content.private }.forEachIndexed { _, tab ->
-        tab(tab)
-    }
+    state.tabs
+        .filter { !it.content.private }
+        .forEachIndexed { _, tab ->
+            tab(tab)
+        }
 
     endArray()
 
@@ -78,12 +69,8 @@ private fun JsonWriter.state(
     endObject()
 }
 
-/**
- * Writes a [TabSessionState] to [JsonWriter].
- */
-private fun JsonWriter.tab(
-    tab: TabSessionState,
-) {
+/** Writes a [TabSessionState] to [JsonWriter]. */
+private fun JsonWriter.tab(tab: TabSessionState) {
     beginObject()
 
     name(Keys.SESSION_KEY)
@@ -174,12 +161,8 @@ private fun JsonWriter.tab(
     endObject()
 }
 
-/**
- * Writes a [TabPartition] to [JsonWriter].
- */
-private fun JsonWriter.partition(
-    partition: TabPartition,
-) {
+/** Writes a [TabPartition] to [JsonWriter]. */
+private fun JsonWriter.partition(partition: TabPartition) {
     beginObject()
 
     name(Keys.TAB_PARTITION_ID_KEY)
@@ -198,12 +181,8 @@ private fun JsonWriter.partition(
     endObject()
 }
 
-/**
- * Writes a [TabGroup] to [JsonWriter].
- */
-private fun JsonWriter.group(
-    group: TabGroup,
-) {
+/** Writes a [TabGroup] to [JsonWriter]. */
+private fun JsonWriter.group(group: TabGroup) {
     beginObject()
 
     name(Keys.TAB_GROUP_ID_KEY)
@@ -225,9 +204,7 @@ private fun JsonWriter.group(
     endObject()
 }
 
-/**
- * Writes a (nullable) [EngineSessionState] to [JsonWriter].
- */
+/** Writes a (nullable) [EngineSessionState] to [JsonWriter]. */
 private fun JsonWriter.engineSession(engineSessionState: EngineSessionState?) {
     if (engineSessionState == null) {
         beginObject()

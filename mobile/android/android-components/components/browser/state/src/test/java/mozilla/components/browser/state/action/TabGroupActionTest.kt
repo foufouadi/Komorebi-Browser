@@ -4,6 +4,7 @@
 
 package mozilla.components.browser.state.action
 
+import kotlin.test.assertNotNull
 import mozilla.components.browser.state.reducer.BrowserStateReducer
 import mozilla.components.browser.state.state.BrowserState
 import mozilla.components.browser.state.state.TabGroup
@@ -17,7 +18,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import kotlin.test.assertNotNull
 
 class TabGroupActionTest {
 
@@ -27,7 +27,11 @@ class TabGroupActionTest {
 
         val partition = "testFeaturePartition"
         val testGroup = TabGroup("test", "testGroup")
-        state = BrowserStateReducer.reduce(state, TabGroupAction.AddTabGroupAction(partition = partition, group = testGroup))
+        state =
+            BrowserStateReducer.reduce(
+                state,
+                TabGroupAction.AddTabGroupAction(partition = partition, group = testGroup),
+            )
 
         val expectedPartition = state.tabPartitions[partition]
         assertNotNull(expectedPartition)
@@ -37,16 +41,22 @@ class TabGroupActionTest {
 
     @Test
     fun `AddTabGroupAction - Adds provided group with tabs`() {
-        var state = BrowserState(
-            tabs = listOf(
-                createTab(id = "tab1", url = "https://firefox.com"),
-                createTab(id = "tab2", url = "https://mozilla.org"),
-            ),
-        )
+        var state =
+            BrowserState(
+                tabs =
+                    listOf(
+                        createTab(id = "tab1", url = "https://firefox.com"),
+                        createTab(id = "tab2", url = "https://mozilla.org"),
+                    )
+            )
 
         val partition = "testFeaturePartition"
         val testGroup = TabGroup("test", tabIds = setOf("tab1", "tab2"))
-        state = BrowserStateReducer.reduce(state, TabGroupAction.AddTabGroupAction(partition = partition, group = testGroup))
+        state =
+            BrowserStateReducer.reduce(
+                state,
+                TabGroupAction.AddTabGroupAction(partition = partition, group = testGroup),
+            )
 
         val expectedPartition = state.tabPartitions[partition]
         assertNotNull(expectedPartition)
@@ -60,13 +70,15 @@ class TabGroupActionTest {
         val tabGroup2 = TabGroup("test2", tabIds = setOf("tab1", "tab2"))
         val tabPartition = TabPartition("testFeaturePartition", tabGroups = listOf(tabGroup1, tabGroup2))
 
-        var state = BrowserState(
-            tabs = listOf(
-                createTab(id = "tab1", url = "https://firefox.com"),
-                createTab(id = "tab2", url = "https://mozilla.org"),
-            ),
-            tabPartitions = mapOf("testFeaturePartition" to tabPartition),
-        )
+        var state =
+            BrowserState(
+                tabs =
+                    listOf(
+                        createTab(id = "tab1", url = "https://firefox.com"),
+                        createTab(id = "tab2", url = "https://mozilla.org"),
+                    ),
+                tabPartitions = mapOf("testFeaturePartition" to tabPartition),
+            )
 
         assertNotNull(state.tabPartitions[tabPartition.id]?.getGroupById(tabGroup1.id))
         assertNotNull(state.tabPartitions[tabPartition.id]?.getGroupById(tabGroup2.id))
@@ -80,13 +92,15 @@ class TabGroupActionTest {
         val tabGroup = TabGroup("test1", tabIds = setOf("tab1", "tab2"))
         val tabPartition = TabPartition("testFeaturePartition", tabGroups = listOf(tabGroup))
 
-        var state = BrowserState(
-            tabs = listOf(
-                createTab(id = "tab1", url = "https://firefox.com"),
-                createTab(id = "tab2", url = "https://mozilla.org"),
-            ),
-            tabPartitions = mapOf("testFeaturePartition" to tabPartition),
-        )
+        var state =
+            BrowserState(
+                tabs =
+                    listOf(
+                        createTab(id = "tab1", url = "https://firefox.com"),
+                        createTab(id = "tab2", url = "https://mozilla.org"),
+                    ),
+                tabPartitions = mapOf("testFeaturePartition" to tabPartition),
+            )
 
         assertNotNull(state.tabPartitions[tabPartition.id]?.getGroupById(tabGroup.id))
         state = BrowserStateReducer.reduce(state, TabGroupAction.RemoveTabGroupAction(tabPartition.id, tabGroup.id))
@@ -99,10 +113,11 @@ class TabGroupActionTest {
         val tabPartition = TabPartition("testFeaturePartition", tabGroups = listOf(tabGroup))
         val tab = createTab(id = "tab1", url = "https://firefox.com")
 
-        var state = BrowserState(
-            tabs = listOf(tab),
-            tabPartitions = mapOf("testFeaturePartition" to tabPartition),
-        )
+        var state =
+            BrowserState(
+                tabs = listOf(tab),
+                tabPartitions = mapOf("testFeaturePartition" to tabPartition),
+            )
 
         state = BrowserStateReducer.reduce(state, TabGroupAction.AddTabAction(tabPartition.id, tabGroup.id, tab.id))
 
@@ -119,9 +134,7 @@ class TabGroupActionTest {
         val tabPartition = TabPartition("testFeaturePartition")
         val tab = createTab(id = "tab1", url = "https://firefox.com")
 
-        var state = BrowserState(
-            tabs = listOf(tab),
-        )
+        var state = BrowserState(tabs = listOf(tab))
 
         state = BrowserStateReducer.reduce(state, TabGroupAction.AddTabAction(tabPartition.id, tabGroup.id, tab.id))
 
@@ -138,10 +151,11 @@ class TabGroupActionTest {
         val tabPartition = TabPartition("testFeaturePartition", tabGroups = listOf(tabGroup))
         val tab = createTab(id = "tab1", url = "https://firefox.com")
 
-        var state = BrowserState(
-            tabs = listOf(tab),
-            tabPartitions = mapOf("testFeaturePartition" to tabPartition),
-        )
+        var state =
+            BrowserState(
+                tabs = listOf(tab),
+                tabPartitions = mapOf("testFeaturePartition" to tabPartition),
+            )
 
         state = BrowserStateReducer.reduce(state, TabGroupAction.AddTabAction(tabPartition.id, tabGroup.id, tab.id))
 
@@ -160,15 +174,17 @@ class TabGroupActionTest {
         val tab1 = createTab(id = "tab1", url = "https://firefox.com")
         val tab2 = createTab(id = "tab2", url = "https://mozilla.org")
 
-        var state = BrowserState(
-            tabs = listOf(tab1, tab2),
-            tabPartitions = mapOf("testFeaturePartition" to tabPartition),
-        )
+        var state =
+            BrowserState(
+                tabs = listOf(tab1, tab2),
+                tabPartitions = mapOf("testFeaturePartition" to tabPartition),
+            )
 
-        state = BrowserStateReducer.reduce(
-            state,
-            TabGroupAction.AddTabsAction(tabPartition.id, tabGroup.id, setOf(tab1.id, tab2.id)),
-        )
+        state =
+            BrowserStateReducer.reduce(
+                state,
+                TabGroupAction.AddTabsAction(tabPartition.id, tabGroup.id, setOf(tab1.id, tab2.id)),
+            )
 
         val expectedPartition = state.tabPartitions[tabPartition.id]
         assertNotNull(expectedPartition)
@@ -185,14 +201,13 @@ class TabGroupActionTest {
         val tab1 = createTab(id = "tab1", url = "https://firefox.com")
         val tab2 = createTab(id = "tab2", url = "https://mozilla.org")
 
-        var state = BrowserState(
-            tabs = listOf(tab1, tab2),
-        )
+        var state = BrowserState(tabs = listOf(tab1, tab2))
 
-        state = BrowserStateReducer.reduce(
-            state,
-            TabGroupAction.AddTabsAction(tabPartition.id, tabGroup.id, setOf(tab1.id, tab2.id)),
-        )
+        state =
+            BrowserStateReducer.reduce(
+                state,
+                TabGroupAction.AddTabsAction(tabPartition.id, tabGroup.id, setOf(tab1.id, tab2.id)),
+            )
 
         val expectedPartition = state.tabPartitions[tabPartition.id]
         assertNotNull(expectedPartition)
@@ -209,15 +224,17 @@ class TabGroupActionTest {
         val tab1 = createTab(id = "tab1", url = "https://firefox.com")
         val tab2 = createTab(id = "tab2", url = "https://mozilla.org")
 
-        var state = BrowserState(
-            tabs = listOf(tab1, tab2),
-            tabPartitions = mapOf("testFeaturePartition" to tabPartition),
-        )
+        var state =
+            BrowserState(
+                tabs = listOf(tab1, tab2),
+                tabPartitions = mapOf("testFeaturePartition" to tabPartition),
+            )
 
-        state = BrowserStateReducer.reduce(
-            state,
-            TabGroupAction.AddTabsAction(tabPartition.id, tabGroup.id, setOf(tab1.id, tab2.id)),
-        )
+        state =
+            BrowserStateReducer.reduce(
+                state,
+                TabGroupAction.AddTabsAction(tabPartition.id, tabGroup.id, setOf(tab1.id, tab2.id)),
+            )
 
         val expectedPartition = state.tabPartitions[tabPartition.id]
         assertNotNull(expectedPartition)
@@ -234,14 +251,13 @@ class TabGroupActionTest {
         val tabPartition = TabPartition("testFeaturePartition")
         val tab1 = createTab(id = "tab1", url = "https://firefox.com")
 
-        var state = BrowserState(
-            tabs = listOf(tab1),
-        )
+        var state = BrowserState(tabs = listOf(tab1))
 
-        state = BrowserStateReducer.reduce(
-            state,
-            TabGroupAction.AddTabsAction(tabPartition.id, tabGroup.id, setOf(tab1.id, tab1.id)),
-        )
+        state =
+            BrowserStateReducer.reduce(
+                state,
+                TabGroupAction.AddTabsAction(tabPartition.id, tabGroup.id, setOf(tab1.id, tab1.id)),
+            )
 
         val expectedPartition = state.tabPartitions[tabPartition.id]
         assertNotNull(expectedPartition)
@@ -258,10 +274,11 @@ class TabGroupActionTest {
         val tabGroup = TabGroup("test1", tabIds = setOf(tab1.id, tab2.id))
         val tabPartition = TabPartition("testFeaturePartition", tabGroups = listOf(tabGroup))
 
-        var state = BrowserState(
-            tabs = listOf(tab1, tab2),
-            tabPartitions = mapOf("testFeaturePartition" to tabPartition),
-        )
+        var state =
+            BrowserState(
+                tabs = listOf(tab1, tab2),
+                tabPartitions = mapOf("testFeaturePartition" to tabPartition),
+            )
 
         state = BrowserStateReducer.reduce(state, TabGroupAction.RemoveTabAction(tabPartition.id, tabGroup.id, tab1.id))
 
@@ -280,15 +297,17 @@ class TabGroupActionTest {
         val tabGroup = TabGroup("test1", tabIds = setOf(tab1.id, tab2.id))
         val tabPartition = TabPartition("testFeaturePartition", tabGroups = listOf(tabGroup))
 
-        var state = BrowserState(
-            tabs = listOf(tab1, tab2),
-            tabPartitions = mapOf("testFeaturePartition" to tabPartition),
-        )
+        var state =
+            BrowserState(
+                tabs = listOf(tab1, tab2),
+                tabPartitions = mapOf("testFeaturePartition" to tabPartition),
+            )
 
-        state = BrowserStateReducer.reduce(
-            state,
-            TabGroupAction.RemoveTabsAction(tabPartition.id, tabGroup.id, setOf(tab1.id, tab2.id)),
-        )
+        state =
+            BrowserStateReducer.reduce(
+                state,
+                TabGroupAction.RemoveTabsAction(tabPartition.id, tabGroup.id, setOf(tab1.id, tab2.id)),
+            )
 
         val expectedPartition = state.tabPartitions[tabPartition.id]
         assertNotNull(expectedPartition)

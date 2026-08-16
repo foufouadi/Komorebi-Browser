@@ -239,7 +239,6 @@ treeherder:
         'buildconfig': 'Make sure the content of .buildconfig.yml matches what gradle knows about its projects'
         'compare-locales': 'Validate strings.xml with compare-locales'
         'detekt': 'detekt linter'
-        'ktlint': 'ktlint linter'
         'lint': 'gradle lint linter'
 
         'focus': 'Focus general tasks no matter the variant'

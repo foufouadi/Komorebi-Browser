@@ -16,25 +16,24 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/**
- * While [DomainAutoCompleteProvider] exists (even if it's deprecated) we need to test it.
- */
+/** While [DomainAutoCompleteProvider] exists (even if it's deprecated) we need to test it. */
 @RunWith(AndroidJUnit4::class)
 class DomainAutoCompleteProviderTest {
 
     @Test
     fun autocompletionWithShippedDomains() {
-        val provider = DomainAutoCompleteProvider().also {
-            it.initialize(
-                testContext,
-                useShippedDomains = true,
-                useCustomDomains = false,
-                loadDomainsFromDisk = false,
-            )
+        val provider =
+            DomainAutoCompleteProvider().also {
+                it.initialize(
+                    testContext,
+                    useShippedDomains = true,
+                    useCustomDomains = false,
+                    loadDomainsFromDisk = false,
+                )
 
-            it.shippedDomains = listOf("mozilla.org", "google.com", "facebook.com").into()
-            it.customDomains = emptyList()
-        }
+                it.shippedDomains = listOf("mozilla.org", "google.com", "facebook.com").into()
+                it.customDomains = emptyList()
+            }
 
         val size = provider.shippedDomains.size
 
@@ -56,16 +55,17 @@ class DomainAutoCompleteProviderTest {
         val domains = listOf("facebook.com", "google.com", "mozilla.org")
         val customDomains = listOf("gap.com", "www.fanfiction.com", "https://mobile.de")
 
-        val provider = DomainAutoCompleteProvider().also {
-            it.initialize(
-                testContext,
-                useShippedDomains = true,
-                useCustomDomains = true,
-                loadDomainsFromDisk = false,
-            )
-            it.shippedDomains = domains.into()
-            it.customDomains = customDomains.into()
-        }
+        val provider =
+            DomainAutoCompleteProvider().also {
+                it.initialize(
+                    testContext,
+                    useShippedDomains = true,
+                    useCustomDomains = true,
+                    loadDomainsFromDisk = false,
+                )
+                it.shippedDomains = domains.into()
+                it.customDomains = customDomains.into()
+            }
 
         assertCompletion(provider, "f", CUSTOM_LIST, customDomains.size, "fanfiction.com", "http://www.fanfiction.com")
         assertCompletion(provider, "fa", CUSTOM_LIST, customDomains.size, "fanfiction.com", "http://www.fanfiction.com")

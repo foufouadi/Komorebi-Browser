@@ -12,7 +12,9 @@ class FakeGleanProfileIdStore : GleanProfileIdStore {
     var appStoredProfileId: String? = null
     override var profileId: String?
         get() = appStoredProfileId
-        set(value) { appStoredProfileId = value }
+        set(value) {
+            appStoredProfileId = value
+        }
 
     override fun clear() {
         appStoredProfileId = null

@@ -45,15 +45,15 @@ import org.mozilla.fenix.ext.components
  * - Launches QR scan activity and updates AppStore with the result.
  * - Does NOT update any UI or toolbar state directly.
  *
- * Other features (such as toolbar middleware) should observe AppStore for
- * QR scan results and update their own state accordingly.
+ * Other features (such as toolbar middleware) should observe AppStore for QR scan results and update their own state
+ * accordingly.
  */
 class QrScanFenixFeature(
     private val context: Context,
     private val appStore: AppStore,
     private val qrScanActivityLauncher: ActivityResultLauncher<Intent>,
     private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
-    override val onNeedToRequestPermissions: OnNeedToRequestPermissions = { },
+    override val onNeedToRequestPermissions: OnNeedToRequestPermissions = {},
 ) : LifecycleAwareFeature, PermissionsFeature {
 
     private var scope: CoroutineScope? = null
@@ -69,17 +69,19 @@ class QrScanFenixFeature(
     }
 
     private fun observeQrScanRequests() {
-        scope = appStore.flowScoped(dispatcher = mainDispatcher) { flow ->
-            flow.map { state -> state.qrScannerState }
-                .distinctUntilChangedBy { it.isRequesting }
-                .collect { qrScannerState ->
-                    if (qrScannerState.isRequesting) {
-                        appStore.dispatch(QrScannerAction.QrScannerRequestConsumed)
-                        // launch qr scan
-                        launchQrScan()
+        scope =
+            appStore.flowScoped(dispatcher = mainDispatcher) { flow ->
+                flow
+                    .map { state -> state.qrScannerState }
+                    .distinctUntilChangedBy { it.isRequesting }
+                    .collect { qrScannerState ->
+                        if (qrScannerState.isRequesting) {
+                            appStore.dispatch(QrScannerAction.QrScannerRequestConsumed)
+                            // launch qr scan
+                            launchQrScan()
+                        }
                     }
-                }
-        }
+            }
     }
 
     private fun launchQrScan() {
@@ -98,45 +100,47 @@ class QrScanFenixFeature(
      * @param data the intent data of the activity
      */
     fun handleToolbarQrScanResults(resultCode: Int, data: Intent?) {
-        val url = if (resultCode == Activity.RESULT_OK && data != null) {
-            data.getStringExtra(EXTRA_SCAN_RESULT_DATA)
-        } else {
-            null
-        }
+        val url =
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                data.getStringExtra(EXTRA_SCAN_RESULT_DATA)
+            } else {
+                null
+            }
         if (url != null && url.isNotEmpty()) {
             val normalizedUrl = url.toNormalizedUrl()
             if (!normalizedUrl.toUri().isHttpOrHttps) {
-                MaterialAlertDialogBuilder(context).apply {
-                    setMessage(R.string.qr_scanner_dialog_invalid)
-                    setPositiveButton(R.string.qr_scanner_dialog_invalid_ok) { dialog: DialogInterface, _ ->
-                        appStore.dispatch(QrScannerAction.QrScannerInputConsumed)
-                        dialog.dismiss()
+                MaterialAlertDialogBuilder(context)
+                    .apply {
+                        setMessage(R.string.qr_scanner_dialog_invalid)
+                        setPositiveButton(R.string.qr_scanner_dialog_invalid_ok) { dialog: DialogInterface, _ ->
+                            appStore.dispatch(QrScannerAction.QrScannerInputConsumed)
+                            dialog.dismiss()
+                        }
+                        create().withCenterAlignedButtons()
                     }
-                    create().withCenterAlignedButtons()
-                }.show()
+                    .show()
             } else {
                 val appName = context.resources.getString(R.string.app_name)
-                MaterialAlertDialogBuilder(context).apply {
-                    val spannable = context.resources.getSpanned(
-                        R.string.qr_scanner_confirmation_dialog_message,
-                        appName to StyleSpan(Typeface.BOLD),
-                        normalizedUrl to StyleSpan(Typeface.ITALIC),
-                    )
-                    setMessage(spannable)
-                    setNegativeButton(R.string.qr_scanner_dialog_negative) { dialog: DialogInterface, _ ->
-                        appStore.dispatch(QrScannerAction.QrScannerInputConsumed)
-                        dialog.cancel()
+                MaterialAlertDialogBuilder(context)
+                    .apply {
+                        val spannable =
+                            context.resources.getSpanned(
+                                R.string.qr_scanner_confirmation_dialog_message,
+                                appName to StyleSpan(Typeface.BOLD),
+                                normalizedUrl to StyleSpan(Typeface.ITALIC),
+                            )
+                        setMessage(spannable)
+                        setNegativeButton(R.string.qr_scanner_dialog_negative) { dialog: DialogInterface, _ ->
+                            appStore.dispatch(QrScannerAction.QrScannerInputConsumed)
+                            dialog.cancel()
+                        }
+                        setPositiveButton(R.string.qr_scanner_dialog_positive) { dialog: DialogInterface, _ ->
+                            appStore.dispatch(QrScannerAction.QrScannerInputAvailable(normalizedUrl))
+                            dialog.dismiss()
+                        }
+                        create().withCenterAlignedButtons()
                     }
-                    setPositiveButton(R.string.qr_scanner_dialog_positive) { dialog: DialogInterface, _ ->
-                        appStore.dispatch(
-                            QrScannerAction.QrScannerInputAvailable(
-                                normalizedUrl,
-                            ),
-                        )
-                        dialog.dismiss()
-                    }
-                    create().withCenterAlignedButtons()
-                }.show()
+                    .show()
             }
         }
         appStore.dispatch(QrScannerAction.QrScannerInputConsumed)
@@ -154,15 +158,12 @@ class QrScanFenixFeature(
         }
     }
 
-    /**
-     * Static binding for [QrScanFenixFeature]
-     */
+    /** Static binding for [QrScanFenixFeature] */
     companion object {
 
         /**
-         * Convenient method to register [QrScanFenixFeature] with [Fragment].
-         * Upon destruction of the fragment's view, the binding will be unregistered and all
-         * references cleared.
+         * Convenient method to register [QrScanFenixFeature] with [Fragment]. Upon destruction of the fragment's view,
+         * the binding will be unregistered and all references cleared.
          *
          * @param fragment the fragment to register with.
          * @param activityResultLauncher the [ActivityResultLauncher] to use for the result.
@@ -174,11 +175,12 @@ class QrScanFenixFeature(
             var qrBinding: ViewBoundFeatureWrapper<QrScanFenixFeature>? = ViewBoundFeatureWrapper()
 
             qrBinding?.set(
-                feature = QrScanFenixFeature(
-                    context = fragment.requireContext(),
-                    appStore = fragment.requireContext().components.appStore,
-                    qrScanActivityLauncher = activityResultLauncher,
-                ),
+                feature =
+                    QrScanFenixFeature(
+                        context = fragment.requireContext(),
+                        appStore = fragment.requireContext().components.appStore,
+                        qrScanActivityLauncher = activityResultLauncher,
+                    ),
                 owner = fragment.viewLifecycleOwner,
                 view = fragment.requireView(),
             )
@@ -188,7 +190,7 @@ class QrScanFenixFeature(
                     override fun onDestroy(owner: androidx.lifecycle.LifecycleOwner) {
                         qrBinding = null
                     }
-                },
+                }
             )
 
             return qrBinding

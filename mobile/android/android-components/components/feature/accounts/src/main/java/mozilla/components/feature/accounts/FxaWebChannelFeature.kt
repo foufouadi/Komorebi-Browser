@@ -5,6 +5,7 @@
 package mozilla.components.feature.accounts
 
 import androidx.annotation.VisibleForTesting
+import java.net.URL
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -43,19 +44,16 @@ import mozilla.components.support.webextensions.BuiltInWebExtensionController
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
-import java.net.URL
 
-/**
- * Configurable FxA capabilities.
- */
+/** Configurable FxA capabilities. */
 enum class FxaCapability {
     // Enables "choose what to sync" selection during support auth flows (currently, sign-up).
-    CHOOSE_WHAT_TO_SYNC,
+    CHOOSE_WHAT_TO_SYNC
 }
 
 /**
- * Feature implementation that provides Firefox Accounts WebChannel support.
- * For more information https://github.com/mozilla/fxa/blob/master/packages/fxa-content-server/docs/relier-communication-protocols/fx-webchannel.md
+ * Feature implementation that provides Firefox Accounts WebChannel support. For more information
+ * https://github.com/mozilla/fxa/blob/master/packages/fxa-content-server/docs/relier-communication-protocols/fx-webchannel.md
  * This feature uses a web extension to communicate with FxA Web Content.
  *
  * @property customTabSessionId optional custom tab session ID, if feature is being used with a custom tab.
@@ -80,11 +78,12 @@ class FxaWebChannelFeature(
 
     @VisibleForTesting
     // This is an internal var to make it mutable for unit testing purposes only
-    internal var extensionController = BuiltInWebExtensionController(
-        WEB_CHANNEL_EXTENSION_ID,
-        WEB_CHANNEL_EXTENSION_URL,
-        WEB_CHANNEL_MESSAGING_ID,
-    )
+    internal var extensionController =
+        BuiltInWebExtensionController(
+            WEB_CHANNEL_EXTENSION_ID,
+            WEB_CHANNEL_EXTENSION_URL,
+            WEB_CHANNEL_MESSAGING_ID,
+        )
 
     override fun start() {
         val messageHandler = WebChannelViewBackgroundMessageHandler(serverConfig)
@@ -92,15 +91,17 @@ class FxaWebChannelFeature(
 
         extensionController.install(runtime)
 
-        scope = store.flowScoped(dispatcher = mainDispatcher) { flow ->
-            flow.mapNotNull { state -> state.findCustomTabOrSelectedTab(customTabSessionId) }
-                .distinctUntilChangedBy { it.engineState.engineSession }
-                .collect {
-                    it.engineState.engineSession?.let { engineSession ->
-                        registerFxaContentMessageHandler(engineSession)
+        scope =
+            store.flowScoped(dispatcher = mainDispatcher) { flow ->
+                flow
+                    .mapNotNull { state -> state.findCustomTabOrSelectedTab(customTabSessionId) }
+                    .distinctUntilChangedBy { it.engineState.engineSession }
+                    .collect {
+                        it.engineState.engineSession?.let { engineSession ->
+                            registerFxaContentMessageHandler(engineSession)
+                        }
                     }
-                }
-        }
+            }
     }
 
     override fun stop() {
@@ -137,13 +138,14 @@ class FxaWebChannelFeature(
                 return
             }
 
-            val json = try {
-                message as JSONObject
-            } catch (e: ClassCastException) {
-                logger.error("Received an invalid WebChannel message of type: ${message.javaClass}")
-                // TODO ideally, this should log to Sentry
-                return
-            }
+            val json =
+                try {
+                    message as JSONObject
+                } catch (e: ClassCastException) {
+                    logger.error("Received an invalid WebChannel message of type: ${message.javaClass}")
+                    // TODO ideally, this should log to Sentry
+                    return
+                }
 
             val payload: JSONObject
             val command: WebChannelCommand?
@@ -167,16 +169,19 @@ class FxaWebChannelFeature(
 
             logger.debug("Processing WebChannel command: $rawCommand")
 
-            val response = when (command) {
-                WebChannelCommand.CAN_LINK_ACCOUNT -> processCanLinkAccountCommand(accountManager, messageId, payload)
-                WebChannelCommand.FXA_STATUS -> processFxaStatusCommand(accountManager, messageId, fxaCapabilities)
-                WebChannelCommand.OAUTH_LOGIN -> processOauthLoginCommand(accountManager, payload)
-                WebChannelCommand.LOGIN -> processLoginCommand(accountManager, payload)
-                WebChannelCommand.CHANGE_PASSWORD -> processChangePasswordCommand(accountManager, payload)
-                WebChannelCommand.SYNC_PREFERENCES -> processSyncPreferencesCommand(accountManager)
-                WebChannelCommand.LOGOUT, WebChannelCommand.DELETE_ACCOUNT -> processLogoutCommand(accountManager)
-                else -> processUnknownCommand(rawCommand)
-            }
+            val response =
+                when (command) {
+                    WebChannelCommand.CAN_LINK_ACCOUNT ->
+                        processCanLinkAccountCommand(accountManager, messageId, payload)
+                    WebChannelCommand.FXA_STATUS -> processFxaStatusCommand(accountManager, messageId, fxaCapabilities)
+                    WebChannelCommand.OAUTH_LOGIN -> processOauthLoginCommand(accountManager, payload)
+                    WebChannelCommand.LOGIN -> processLoginCommand(accountManager, payload)
+                    WebChannelCommand.CHANGE_PASSWORD -> processChangePasswordCommand(accountManager, payload)
+                    WebChannelCommand.SYNC_PREFERENCES -> processSyncPreferencesCommand(accountManager)
+                    WebChannelCommand.LOGOUT,
+                    WebChannelCommand.DELETE_ACCOUNT -> processLogoutCommand(accountManager)
+                    else -> processUnknownCommand(rawCommand)
+                }
             response?.let { port.postMessage(it) }
 
             // Finally, let any consumer be aware of the action to update any UI affordances
@@ -189,24 +194,21 @@ class FxaWebChannelFeature(
     }
 
     private fun registerFxaContentMessageHandler(engineSession: EngineSession) {
-        val messageHandler = WebChannelViewContentMessageHandler(
-            accountManager,
-            serverConfig,
-            fxaCapabilities,
-            onCommandExecuted,
-        )
+        val messageHandler =
+            WebChannelViewContentMessageHandler(
+                accountManager,
+                serverConfig,
+                fxaCapabilities,
+                onCommandExecuted,
+            )
         extensionController.registerContentMessageHandler(engineSession, messageHandler)
     }
 
-    private class WebChannelViewBackgroundMessageHandler(
-        private val serverConfig: ServerConfig,
-    ) : MessageHandler {
+    private class WebChannelViewBackgroundMessageHandler(private val serverConfig: ServerConfig) : MessageHandler {
         override fun onPortConnected(port: Port) {
             if (serverConfig.server.isCustom()) {
                 port.postMessage(
-                    JSONObject()
-                        .put("type", "overrideFxAServer")
-                        .put("url", serverConfig.server.contentUrl()),
+                    JSONObject().put("type", "overrideFxAServer").put("url", serverConfig.server.contentUrl())
                 )
             }
         }
@@ -215,14 +217,11 @@ class FxaWebChannelFeature(
     companion object {
         private val logger = Logger("mozac-fxawebchannel")
 
-        @VisibleForTesting
-        internal const val WEB_CHANNEL_EXTENSION_ID = "fxa@mozac.org"
+        @VisibleForTesting internal const val WEB_CHANNEL_EXTENSION_ID = "fxa@mozac.org"
 
-        @VisibleForTesting
-        internal const val WEB_CHANNEL_MESSAGING_ID = "mozacWebchannel"
+        @VisibleForTesting internal const val WEB_CHANNEL_MESSAGING_ID = "mozacWebchannel"
 
-        @VisibleForTesting
-        internal const val WEB_CHANNEL_BACKGROUND_MESSAGING_ID = "mozacWebchannelBackground"
+        @VisibleForTesting internal const val WEB_CHANNEL_BACKGROUND_MESSAGING_ID = "mozacWebchannelBackground"
 
         @VisibleForTesting
         internal const val WEB_CHANNEL_EXTENSION_URL = "resource://android/assets/extensions/fxawebchannel/"
@@ -245,59 +244,50 @@ class FxaWebChannelFeature(
         // https://github.com/mozilla/fxa/blob/master/packages/fxa-content-server/docs/relier-communication-protocols/fx-webchannel.md
 
         /**
-         * Gets triggered when user initiates a login within FxA web content.
-         * Expects a response.
-         * On Fx Desktop, this event triggers "a different user was previously signed in on this machine" warning.
+         * Gets triggered when user initiates a login within FxA web content. Expects a response. On Fx Desktop, this
+         * event triggers "a different user was previously signed in on this machine" warning.
          */
         private const val COMMAND_CAN_LINK_ACCOUNT = "fxaccounts:can_link_account"
 
-        /**
-         * Gets triggered when a user successfully authenticates via OAuth.
-         */
+        /** Gets triggered when a user successfully authenticates via OAuth. */
         private const val COMMAND_OAUTH_LOGIN = "fxaccounts:oauth_login"
 
         /**
-         * Gets triggered on startup to fetch the FxA state from the host application.
-         * Expects a response, which includes application's capabilities and a description of the
-         * current Firefox Account (if present).
+         * Gets triggered on startup to fetch the FxA state from the host application. Expects a response, which
+         * includes application's capabilities and a description of the current Firefox Account (if present).
          */
         private const val COMMAND_STATUS = "fxaccounts:fxa_status"
 
         /**
-         * Gets triggered when the web content is signed in/up, but not necessarily verified
-         * it passes in its payload the session token the web content is holding on to
+         * Gets triggered when the web content is signed in/up, but not necessarily verified it passes in its payload
+         * the session token the web content is holding on to
          */
         private const val COMMAND_LOGIN = "fxaccounts:login"
 
         /**
-         * Triggered when the web content has changed the password for the signed-in account.
-         * The payload carries the new session token.
+         * Triggered when the web content has changed the password for the signed-in account. The payload carries the
+         * new session token.
          */
         private const val COMMAND_CHANGE_PASSWORD = "fxaccounts:change_password"
 
         /**
-         * Gets triggered when the web content signals to open sync preferences,
-         * typically right after a sign-in/sign-up.
+         * Gets triggered when the web content signals to open sync preferences, typically right after a
+         * sign-in/sign-up.
          */
         private const val COMMAND_SYNC_PREFERENCES = "fxaccounts:sync_preferences"
 
-        /**
-         * Triggered when web content logs out of the account.
-         */
+        /** Triggered when web content logs out of the account. */
         private const val COMMAND_LOGOUT = "fxaccounts:logout"
 
-        /**
-         * Triggered when web content notifies a delete account request.
-         */
+        /** Triggered when web content notifies a delete account request. */
         private const val COMMAND_DELETE_ACCOUNT = "fxaccounts:delete"
 
         /**
-         * Handles the [COMMAND_CAN_LINK_ACCOUNT] event from the web-channel.
-         * On Fx Desktop, this event prompts a possible "another user was previously logged in on
-         * this device" warning. Currently we don't persist that info so can't support that, so
-         * always say it's OK to link when no one is signed in.
-         * However, when a profile is already signed in we do check that the account being linked matches,
-         * which is an important safety-valve for things like re-authenticating or authorizing new scopes.
+         * Handles the [COMMAND_CAN_LINK_ACCOUNT] event from the web-channel. On Fx Desktop, this event prompts a
+         * possible "another user was previously logged in on this device" warning. Currently we don't persist that info
+         * so can't support that, so always say it's OK to link when no one is signed in. However, when a profile is
+         * already signed in we do check that the account being linked matches, which is an important safety-valve for
+         * things like re-authenticating or authorizing new scopes.
          */
         private fun processCanLinkAccountCommand(
             accountManager: FxaAccountManager,
@@ -307,17 +297,18 @@ class FxaWebChannelFeature(
             // In 'data' we currently have 'email', but hopefully soon FxA will also send `uid`.
             // If we have `uid` that's the only thing we check as emails might change.
             val profile = accountManager.accountProfile()
-            val ok = if (profile == null) {
-                true
-            } else {
-                val data = payload.optJSONObject("data")
-                val uid = data?.optString("uid")
-                if (!uid.isNullOrEmpty()) {
-                    uid == profile.uid
+            val ok =
+                if (profile == null) {
+                    true
                 } else {
-                    data?.optString("email") == profile.email
+                    val data = payload.optJSONObject("data")
+                    val uid = data?.optString("uid")
+                    if (!uid.isNullOrEmpty()) {
+                        uid == profile.uid
+                    } else {
+                        data?.optString("email") == profile.email
+                    }
                 }
-            }
             if (!ok) {
                 logger.error("Signed in user doesn't match new user, rejecting login")
             }
@@ -340,10 +331,9 @@ class FxaWebChannelFeature(
         }
 
         /**
-         * Handles the [COMMAND_STATUS] event from the web-channel.
-         * Responds with supported application capabilities and information about currently signed-in Firefox Account.
+         * Handles the [COMMAND_STATUS] event from the web-channel. Responds with supported application capabilities and
+         * information about currently signed-in Firefox Account.
          */
-
         private fun processFxaStatusCommand(
             accountManager: FxaAccountManager,
             messageId: String,
@@ -400,9 +390,7 @@ class FxaWebChannelFeature(
             return result
         }
 
-        /**
-         * Handles the [COMMAND_LOGIN] event from the web-channel
-         */
+        /** Handles the [COMMAND_LOGIN] event from the web-channel */
         private fun processLoginCommand(accountManager: FxaAccountManager, payload: JSONObject): JSONObject? {
             val dataJson: String
             try {
@@ -417,9 +405,7 @@ class FxaWebChannelFeature(
             return null
         }
 
-        /**
-         * Handles the [COMMAND_CHANGE_PASSWORD] event from the web-channel.
-         */
+        /** Handles the [COMMAND_CHANGE_PASSWORD] event from the web-channel. */
         private fun processChangePasswordCommand(
             accountManager: FxaAccountManager,
             payload: JSONObject,
@@ -437,9 +423,7 @@ class FxaWebChannelFeature(
             return null
         }
 
-        /**
-         * Handles the [COMMAND_OAUTH_LOGIN] event from the web-channel.
-         */
+        /** Handles the [COMMAND_OAUTH_LOGIN] event from the web-channel. */
         private fun processOauthLoginCommand(accountManager: FxaAccountManager, payload: JSONObject): JSONObject? {
             val authType: AuthType
             val code: String
@@ -465,7 +449,7 @@ class FxaWebChannelFeature(
                         code = code,
                         state = state,
                         declinedEngines = declinedEngines?.toSyncEngines(),
-                    ),
+                    )
                 )
             }
 
@@ -473,8 +457,7 @@ class FxaWebChannelFeature(
         }
 
         /**
-         * Handles unknown message types by responding with a `data` json that only contains an
-         * `error` error message.
+         * Handles unknown message types by responding with a `data` json that only contains an `error` error message.
          */
         private fun processUnknownCommand(command: String): JSONObject {
             return JSONObject().apply {
@@ -484,10 +467,11 @@ class FxaWebChannelFeature(
                     JSONObject().apply {
                         put(
                             "data",
-                            JSONObject().put(
-                                "error",
-                                "Unrecognized FxAccountsWebChannel command: $command",
-                            ),
+                            JSONObject()
+                                .put(
+                                    "error",
+                                    "Unrecognized FxAccountsWebChannel command: $command",
+                                ),
                         )
                     },
                 )
@@ -495,8 +479,8 @@ class FxaWebChannelFeature(
         }
 
         /**
-         * Handles the [COMMAND_SYNC_PREFERENCES] event from the web-channel. The UI affordances
-         * will be handled by [FxaWebChannelFeature.onCommandExecuted].
+         * Handles the [COMMAND_SYNC_PREFERENCES] event from the web-channel. The UI affordances will be handled by
+         * [FxaWebChannelFeature.onCommandExecuted].
          */
         private fun processSyncPreferencesCommand(accountManager: FxaAccountManager): JSONObject {
             // If we don't have an authenticated account, we should let FxA know that we couldn't
@@ -516,9 +500,7 @@ class FxaWebChannelFeature(
             }
         }
 
-        /**
-         * Handles the [COMMAND_LOGOUT] and [COMMAND_DELETE_ACCOUNT] event from the web-channel.
-         */
+        /** Handles the [COMMAND_LOGOUT] and [COMMAND_DELETE_ACCOUNT] event from the web-channel. */
         private fun processLogoutCommand(accountManager: FxaAccountManager): JSONObject? {
             CoroutineScope(Dispatchers.Main).launch {
                 accountManager.logout()
@@ -563,9 +545,7 @@ class FxaWebChannelFeature(
             return true
         }
 
-        /**
-         * Rejects URLs that are deemed "unsafe" (not expected).
-         */
+        /** Rejects URLs that are deemed "unsafe" (not expected). */
         private fun isSafeUrl(urlStr: String): Boolean {
             val url = URL(urlStr)
             return url.userInfo.isNullOrEmpty() &&

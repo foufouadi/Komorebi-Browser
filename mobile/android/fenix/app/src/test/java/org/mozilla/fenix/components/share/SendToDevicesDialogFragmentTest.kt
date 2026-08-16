@@ -30,13 +30,14 @@ class SendToDevicesDialogFragmentTest {
 
     @Before
     fun setUp() {
-        fragment = spyk(
-            SendToDevicesDialogFragment.newInstance(
-                urls = listOf("https://example.com"),
-                titles = listOf("Title"),
-                isPrivate = false,
-            ),
-        )
+        fragment =
+            spyk(
+                SendToDevicesDialogFragment.newInstance(
+                    urls = listOf("https://example.com"),
+                    titles = listOf("Title"),
+                    isPrivate = false,
+                )
+            )
         every { fragment.navigateToSignIn() } just runs
         every { fragment.onAuthenticated() } just runs
     }
@@ -45,10 +46,11 @@ class SendToDevicesDialogFragmentTest {
 
     @Test
     fun `GIVEN bundle with PRIVATE privacy WHEN loadTabData is called THEN tabs use Private privacy`() {
-        val bundle = Bundle().apply {
-            putStringArrayList("urls", arrayListOf("https://example.com"))
-            putString("privacy", "PRIVATE")
-        }
+        val bundle =
+            Bundle().apply {
+                putStringArrayList("urls", arrayListOf("https://example.com"))
+                putString("privacy", "PRIVATE")
+            }
 
         fragment.loadTabData(bundle)
 
@@ -66,10 +68,11 @@ class SendToDevicesDialogFragmentTest {
 
     @Test
     fun `GIVEN bundle with urls and titles WHEN loadTabData is called THEN tabs are updated`() {
-        val bundle = Bundle().apply {
-            putStringArrayList("urls", arrayListOf("https://mozilla.org", "https://example.com"))
-            putStringArrayList("titles", arrayListOf("Mozilla", "Example"))
-        }
+        val bundle =
+            Bundle().apply {
+                putStringArrayList("urls", arrayListOf("https://mozilla.org", "https://example.com"))
+                putStringArrayList("titles", arrayListOf("Mozilla", "Example"))
+            }
 
         fragment.loadTabData(bundle)
 
@@ -84,9 +87,10 @@ class SendToDevicesDialogFragmentTest {
 
     @Test
     fun `GIVEN a url with a missing title WHEN loadTabData is called THEN the tab title defaults to empty`() {
-        val bundle = Bundle().apply {
-            putStringArrayList("urls", arrayListOf("https://mozilla.org"))
-        }
+        val bundle =
+            Bundle().apply {
+                putStringArrayList("urls", arrayListOf("https://mozilla.org"))
+            }
 
         fragment.loadTabData(bundle)
 

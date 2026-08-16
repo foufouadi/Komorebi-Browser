@@ -6,6 +6,7 @@ package org.mozilla.fenix.home.intent
 
 import android.app.Activity
 import android.content.Intent
+import android.provider.Settings as AndroidSettings
 import androidx.core.net.toUri
 import androidx.navigation.NavController
 import io.mockk.Called
@@ -37,7 +38,6 @@ import org.mozilla.fenix.onboarding.MARKETING_CHANNEL_ID
 import org.mozilla.fenix.trackingprotection.ProtectionsDashboardFragment
 import org.mozilla.fenix.utils.Settings
 import org.robolectric.RobolectricTestRunner
-import android.provider.Settings as AndroidSettings
 
 @RunWith(RobolectricTestRunner::class)
 class HomeDeepLinkIntentProcessorTest {
@@ -53,11 +53,12 @@ class HomeDeepLinkIntentProcessorTest {
         activity = mockk(relaxed = true)
         navController = mockk(relaxed = true)
         out = mockk()
-        processorHome = HomeDeepLinkIntentProcessor(
-            activity = activity,
-            showAddSearchWidgetPrompt = ::showAddSearchWidgetPrompt,
-            shareUseCases = shareUseCases,
-        )
+        processorHome =
+            HomeDeepLinkIntentProcessor(
+                activity = activity,
+                showAddSearchWidgetPrompt = ::showAddSearchWidgetPrompt,
+                shareUseCases = shareUseCases,
+            )
     }
 
     @Test
@@ -135,11 +136,7 @@ class HomeDeepLinkIntentProcessorTest {
 
         verify { activity wasNot Called }
         verify {
-            navController.navigate(
-                NavGraphDirections.actionGlobalTurnOnSync(
-                    entrypoint = FenixFxAEntryPoint.DeepLink,
-                ),
-            )
+            navController.navigate(NavGraphDirections.actionGlobalTurnOnSync(entrypoint = FenixFxAEntryPoint.DeepLink))
         }
         verify { out wasNot Called }
     }
@@ -226,7 +223,9 @@ class HomeDeepLinkIntentProcessorTest {
         verify { navController wasNot Called }
         verify { out wasNot Called }
 
-        assertTrue(processorHome.process(testIntent("open?url=https%3A%2F%2Fwww.example.org%2F"), navController, out, settings))
+        assertTrue(
+            processorHome.process(testIntent("open?url=https%3A%2F%2Fwww.example.org%2F"), navController, out, settings)
+        )
 
         verify {
             @Suppress("DEPRECATION")
@@ -268,7 +267,16 @@ class HomeDeepLinkIntentProcessorTest {
             )
         } just Runs
 
-        assertTrue(processorHome.process(testIntent("share_sheet?url=https%3A%2F%2Fexample.com&title=TestTitle&text=TestText&subject=TestSubject"), navController, out, settings))
+        assertTrue(
+            processorHome.process(
+                testIntent(
+                    "share_sheet?url=https%3A%2F%2Fexample.com&title=TestTitle&text=TestText&subject=TestSubject"
+                ),
+                navController,
+                out,
+                settings,
+            )
+        )
 
         verify {
             shareUseCases.shareUrl(
@@ -287,14 +295,16 @@ class HomeDeepLinkIntentProcessorTest {
 
         verify {
             navController.navigate(
-                directions = match {
-                    with(it.arguments) {
-                        getBoolean("showPage") == false &&
-                            getParcelableArray("data", ShareData::class.java)?.get(0)?.url == "https://example.com" &&
-                            getString("sessionId") == null &&
-                            getString("shareSubject") == "TestSubject"
+                directions =
+                    match {
+                        with(it.arguments) {
+                            getBoolean("showPage") == false &&
+                                getParcelableArray("data", ShareData::class.java)?.get(0)?.url ==
+                                    "https://example.com" &&
+                                getString("sessionId") == null &&
+                                getString("shareSubject") == "TestSubject"
+                        }
                     }
-                },
             )
         }
         verify { out wasNot Called }
@@ -310,7 +320,14 @@ class HomeDeepLinkIntentProcessorTest {
         verify { navController wasNot Called }
         verify { out wasNot Called }
 
-        assertTrue(invalidProcessor.process(testIntent("open?url=open?url=https%3A%2F%2Fwww.example.org%2F"), navController, out, settings))
+        assertTrue(
+            invalidProcessor.process(
+                testIntent("open?url=open?url=https%3A%2F%2Fwww.example.org%2F"),
+                navController,
+                out,
+                settings,
+            )
+        )
 
         verify { activity wasNot Called }
         verify { navController wasNot Called }
@@ -395,7 +412,7 @@ class HomeDeepLinkIntentProcessorTest {
                 NavGraphDirections.actionGlobalProtectionsDashboard(
                     customTabSessionId = null,
                     source = ProtectionsDashboardFragment.SOURCE_DEEPLINK,
-                ),
+                )
             )
         }
         verify { out wasNot Called }
@@ -411,7 +428,7 @@ class HomeDeepLinkIntentProcessorTest {
                 NavGraphDirections.actionGlobalIpProtectionFragment(
                     entrypoint = FenixFxAEntryPoint.DeepLink,
                     startAuthFlow = false,
-                ),
+                )
             )
         }
         verify { out wasNot Called }

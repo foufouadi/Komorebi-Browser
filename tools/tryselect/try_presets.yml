@@ -54,6 +54,7 @@ android-components:
 
 android-fenix:
     selector: fuzzy
+    full: true
     description: >-
         Run Fenix builds and tests.
     query:
@@ -68,10 +69,11 @@ android-fenix:
 
 android-frontend:
     selector: fuzzy
+    full: true
     description: >-
         Run android-components, Focus, and Fenix builds and tests.
     query:
-        - "'build-components"
+        - "'build-components !nightly- !beta- !release-"
         - "'test-components"
         - "'build-apk-fenix-debug"
         - "'signing-apk-fenix-debug"

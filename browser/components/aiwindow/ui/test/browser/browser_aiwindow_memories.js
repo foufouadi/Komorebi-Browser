@@ -107,4 +107,45 @@ describe("MemoriesSchedulers scheduling from AIWindow", () => {
       );
     });
   });
+
+  describe("firstrun completing after an AI Window toggle", () => {
+    beforeEach(async () => {
+      await SpecialPowers.pushPrefEnv({
+        set: [["browser.smartwindow.firstrun.hasCompleted", false]],
+      });
+      AIWindow.uninit();
+      AIWindow.init(window);
+    });
+
+    afterEach(async () => {
+      AIWindow.uninit();
+      await SpecialPowers.popPrefEnv();
+      AIWindow.init(window);
+    });
+
+    it("calls maybeRunAndSchedule when firstrun completes", () => {
+      Services.prefs.setBoolPref(
+        "browser.smartwindow.firstrun.hasCompleted",
+        true
+      );
+
+      Assert.ok(stub.calledOnce, "called once when firstrun completes");
+    });
+
+    it("does not call maybeRunAndSchedule when firstrun is set to false", () => {
+      Services.prefs.setBoolPref(
+        "browser.smartwindow.firstrun.hasCompleted",
+        true
+      );
+      // Only the false-transition below should be counted.
+      stub.resetHistory();
+
+      Services.prefs.setBoolPref(
+        "browser.smartwindow.firstrun.hasCompleted",
+        false
+      );
+
+      Assert.ok(stub.notCalled, "not called when firstrun is set to false");
+    });
+  });
 });

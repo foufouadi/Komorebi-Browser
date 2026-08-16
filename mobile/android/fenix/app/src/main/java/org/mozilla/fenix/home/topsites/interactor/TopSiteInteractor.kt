@@ -9,13 +9,11 @@ import org.mozilla.fenix.home.topsites.AddShortcutEntryPoint
 import org.mozilla.fenix.home.topsites.AddShortcutSource
 import org.mozilla.fenix.home.topsites.controller.TopSiteController
 
-/**
- * Interface for top site related actions on the homepage.
- */
+/** Interface for top site related actions on the homepage. */
 interface TopSiteInteractor {
     /**
-     * Opens the given top site in private mode. Called when an user clicks on the "Open in private
-     * tab" top site menu item.
+     * Opens the given top site in private mode. Called when an user clicks on the "Open in private tab" top site menu
+     * item.
      *
      * @param topSite The top site that will be open in private mode.
      */
@@ -51,35 +49,29 @@ interface TopSiteInteractor {
      */
     fun onTopSiteImpression(topSite: TopSite.Provided, position: Int)
 
-    /**
-     * Navigates to the Homepage Settings. Called when an user clicks on the "Settings" top site
-     * menu item.
-     */
+    /** Navigates to the Homepage Settings. Called when an user clicks on the "Settings" top site menu item. */
     fun onSettingsClicked()
 
     /**
-     * Opens the sponsor privacy support articles. Called when an user clicks on the
-     * "Our sponsors & your privacy" top site menu item.
+     * Opens the sponsor privacy support articles. Called when an user clicks on the "Our sponsors & your privacy" top
+     * site menu item.
      */
     fun onSponsorPrivacyClicked()
 
     /**
-     * Handles long click event for the given top site. Called when an user long clicks on a top
-     * site.
+     * Handles long click event for the given top site. Called when an user long clicks on a top site.
      *
      * @param topSite The top site that was long clicked.
      */
     fun onTopSiteLongClicked(topSite: TopSite)
 
     /**
-     * Navigates to the Shortcuts screen. Called when an user clicks on the "Show all" button for
-     * shortcuts on the homepage.
+     * Navigates to the Shortcuts screen. Called when an user clicks on the "Show all" button for shortcuts on the
+     * homepage.
      */
     fun onShowAllTopSitesClicked()
 
-    /**
-     * Sends telemetry related to the shortcuts library being viewed.
-     */
+    /** Sends telemetry related to the shortcuts library being viewed. */
     fun onShortcutsLibraryViewed()
 
     /**
@@ -98,12 +90,8 @@ interface TopSiteInteractor {
     )
 }
 
-/**
- * Default implementation of [TopSiteInteractor].
- */
-class DefaultTopSiteInteractor(
-    private val controller: TopSiteController,
-) : TopSiteInteractor {
+/** Default implementation of [TopSiteInteractor]. */
+class DefaultTopSiteInteractor(private val controller: TopSiteController) : TopSiteInteractor {
     override fun onOpenInPrivateTabClicked(topSite: TopSite) {
         controller.handleOpenInPrivateTabClicked(topSite)
     }

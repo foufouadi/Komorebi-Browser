@@ -13,7 +13,8 @@ import org.mozilla.fenix.ui.efficiency.navigation.NavigationStep
 import org.mozilla.fenix.ui.efficiency.selectors.SettingsCustomizeSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.SettingsSelectors
 
-class SettingsCustomizePage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule, *>) : BasePage(composeRule) {
+class SettingsCustomizePage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule, *>) :
+    BasePage(composeRule) {
     override val pageName = "SettingsCustomizePage"
 
     init {

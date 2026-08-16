@@ -541,7 +541,7 @@ async function clickBookmarkStar(win = window) {
     menuList,
     { attributes: true },
     () => !!menuList.getAttribute("selectedGuid"),
-    "Should select the menu folder item"
+    { msg: "Should select the menu folder item" }
   );
 }
 

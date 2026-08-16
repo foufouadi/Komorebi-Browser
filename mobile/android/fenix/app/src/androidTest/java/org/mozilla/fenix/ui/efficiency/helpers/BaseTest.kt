@@ -7,6 +7,7 @@ package org.mozilla.fenix.ui.efficiency.helpers
 import android.os.SystemClock
 import android.util.Log
 import androidx.compose.ui.test.junit4.AndroidComposeTestRule
+import androidx.compose.ui.test.junit4.v2.AndroidComposeTestRule as AndroidComposeTestRuleV2
 import androidx.test.espresso.Espresso
 import androidx.test.espresso.IdlingResourceTimeoutException
 import androidx.test.espresso.NoMatchingViewException
@@ -37,26 +38,25 @@ import org.mozilla.fenix.ui.efficiency.logging.TestLogging
 import org.mozilla.fenix.ui.efficiency.navigation.LaunchConfig
 import org.mozilla.fenix.ui.efficiency.navigation.NavigationRegistry
 import org.mozilla.fenix.ui.efficiency.navigation.PageCatalog
-import androidx.compose.ui.test.junit4.v2.AndroidComposeTestRule as AndroidComposeTestRuleV2
 
 /**
  * BaseTest
  *
  * Why BaseTest wires up the structured logger:
  * - Tests should only describe "what is being tested".
- * - The harness (BaseTest/BasePage/helpers) owns "how it runs": navigation, retries, selectors,
- *   and therefore it owns observability for those behaviors.
+ * - The harness (BaseTest/BasePage/helpers) owns "how it runs": navigation, retries, selectors, and therefore it owns
+ *   observability for those behaviors.
  *
  * Why we print to stdout:
  * - Instrumentation captures System.out into logcat, which can be filtered into a clean stream.
- * - This gives us a single location for human debugging locally and in CI artifacts without
- *   requiring additional infrastructure during early iteration.
+ * - This gives us a single location for human debugging locally and in CI artifacts without requiring additional
+ *   infrastructure during early iteration.
  *
  * Long-term intent:
- * - This structured log stream becomes a source-of-truth execution trace that remains useful
- *   even when tests are dynamically generated (factories, reflection, CI-driven permutations).
- * - Later we can route the same events into richer sinks (files/JSON/XML) and unify with the
- *   existing Feature.spec / factory logging pipeline.
+ * - This structured log stream becomes a source-of-truth execution trace that remains useful even when tests are
+ *   dynamically generated (factories, reflection, CI-driven permutations).
+ * - Later we can route the same events into richer sinks (files/JSON/XML) and unify with the existing Feature.spec /
+ *   factory logging pipeline.
  */
 abstract class BaseTest(
     private val skipOnboarding: Boolean = true,
@@ -65,29 +65,32 @@ abstract class BaseTest(
     private val isRecentlyVisitedFeatureEnabled: Boolean = true,
     private val shouldUseExpandedToolbar: Boolean = false,
     private val isTabStripEnabled: Boolean = false,
+    private val shakeToSummarizeFeatureFlagEnabled: Boolean = true,
 ) {
 
     // Default launch built from the constructor args (back-compat for every existing subclass).
-    private val defaultLaunchConfig = LaunchConfig(
-        skipOnboarding = skipOnboarding,
-        isPageLoadTranslationsPromptEnabled = isPageLoadTranslationsPromptEnabled,
-        isPocketEnabled = isPocketEnabled,
-        isRecentlyVisitedFeatureEnabled = isRecentlyVisitedFeatureEnabled,
-        shouldUseExpandedToolbar = shouldUseExpandedToolbar,
-        isTabStripEnabled = isTabStripEnabled,
-    )
+    private val defaultLaunchConfig =
+        LaunchConfig(
+            skipOnboarding = skipOnboarding,
+            isPageLoadTranslationsPromptEnabled = isPageLoadTranslationsPromptEnabled,
+            isPocketEnabled = isPocketEnabled,
+            isRecentlyVisitedFeatureEnabled = isRecentlyVisitedFeatureEnabled,
+            shouldUseExpandedToolbar = shouldUseExpandedToolbar,
+            isTabStripEnabled = isTabStripEnabled,
+            shakeToSummarizeFeatureFlagEnabled = shakeToSummarizeFeatureFlagEnabled,
+        )
 
     /** Override to vary the launch per run/case (e.g. the reachability shard uses the case's config). */
     protected open fun launchConfig(): LaunchConfig = defaultLaunchConfig
 
-    @get:Rule(order = 0)
-    val fenixTestRule: FenixTestRule = FenixTestRule()
+    @get:Rule(order = 0) val fenixTestRule: FenixTestRule = FenixTestRule()
 
     // Backing property so composeRule can be re-created fresh on each retry attempt.
     // AndroidComposeTestRule holds a TestScope that can only be entered once — re-creating
     // the rule per attempt ensures a clean TestScope every time.
     private var _composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule, *>? = null
-    val composeRule get() = _composeRule!!
+    val composeRule
+        get() = _composeRule!!
 
     // Combines retry and compose rule creation into a single rule. We cannot reuse
     // RetryTestRule here because the retry logic must own the creation of composeRule —
@@ -101,16 +104,20 @@ abstract class BaseTest(
             override fun evaluate() {
                 repeat(1 + MAX_RETRIES) { attempt ->
                     val cfg = launchConfig()
-                    _composeRule = AndroidComposeTestRuleV2(
-                        HomeActivityIntentTestRule(
-                            skipOnboarding = cfg.skipOnboarding,
-                            isPageLoadTranslationsPromptEnabled = cfg.isPageLoadTranslationsPromptEnabled,
-                            isPocketEnabled = cfg.isPocketEnabled,
-                            isRecentlyVisitedFeatureEnabled = cfg.isRecentlyVisitedFeatureEnabled,
-                            shouldUseExpandedToolbar = cfg.shouldUseExpandedToolbar,
-                            isTabStripEnabled = cfg.isTabStripEnabled,
-                        ),
-                    ) { it.activity }
+                    _composeRule =
+                        AndroidComposeTestRuleV2(
+                            HomeActivityIntentTestRule(
+                                skipOnboarding = cfg.skipOnboarding,
+                                isPageLoadTranslationsPromptEnabled = cfg.isPageLoadTranslationsPromptEnabled,
+                                isPocketEnabled = cfg.isPocketEnabled,
+                                isRecentlyVisitedFeatureEnabled = cfg.isRecentlyVisitedFeatureEnabled,
+                                shouldUseExpandedToolbar = cfg.shouldUseExpandedToolbar,
+                                isTabStripEnabled = cfg.isTabStripEnabled,
+                                shakeToSummarizeFeatureFlagEnabled = cfg.shakeToSummarizeFeatureFlagEnabled,
+                            )
+                        ) {
+                            it.activity
+                        }
                     try {
                         Log.i("BaseTest", "RetryTestRule: Started try #${attempt + 1}.")
                         runBlocking {
@@ -131,17 +138,19 @@ abstract class BaseTest(
                                     // cards" on the Autofill screen, so a retry of a card test starts on
                                     // a different screen than the first attempt did.
                                     autofill.getAllCreditCards().forEach { autofill.deleteCreditCard(it.guid) }
-                                }.onFailure {
-                                    Log.i("BaseTest", "RetryTestRule: autofill clear failed: ${it.message}")
                                 }
+                                    .onFailure {
+                                        Log.i("BaseTest", "RetryTestRule: autofill clear failed: ${it.message}")
+                                    }
                                 // Clear saved logins for the same reason (and so a retry doesn't inherit
                                 // logins the previous attempt saved — a re-submit of the same credentials
                                 // shows no save prompt, which reads as a spurious failure).
                                 runCatching {
                                     appContext.components.core.passwordsStorage.wipeLocal()
-                                }.onFailure {
-                                    Log.i("BaseTest", "RetryTestRule: logins clear failed: ${it.message}")
                                 }
+                                    .onFailure {
+                                        Log.i("BaseTest", "RetryTestRule: logins clear failed: ${it.message}")
+                                    }
                             }
                         }
                         appContext.components.useCases.tabsUseCases.removeAllTabs()
@@ -164,7 +173,8 @@ abstract class BaseTest(
 
     // get() ensures this always delegates to the current composeRule instance,
     // not a stale one captured at class construction time.
-    protected val on: PageContext get() = PageContext(composeRule)
+    protected val on: PageContext
+        get() = PageContext(composeRule)
 
     /**
      * Reporter lifecycle:
@@ -243,9 +253,7 @@ abstract class BaseTest(
     }
 
     private companion object {
-        /**
-         * Number of retry attempts to do, if the test fails.
-         */
+        /** Number of retry attempts to do, if the test fails. */
         const val MAX_RETRIES = 1
     }
 }
@@ -253,16 +261,15 @@ abstract class BaseTest(
 /**
  * Finish whatever the failed attempt left running, and wait for it to actually be gone.
  *
- * The next attempt launches a fresh HomeActivity, and that launch is what breaks if the previous
- * attempt's instance is still alive: HomeActivity is launchMode="singleTask", so the intent is
- * delivered to the existing instance instead of creating one, MonitoringInstrumentation never sees a
- * newly launched activity reach RESUMED, and the attempt dies after 45s on "Could not launch intent
- * ... HomeActivity". That error names HomeActivity, so it hides whatever actually failed first.
+ * The next attempt launches a fresh HomeActivity, and that launch is what breaks if the previous attempt's instance is
+ * still alive: HomeActivity is launchMode="singleTask", so the intent is delivered to the existing instance instead of
+ * creating one, MonitoringInstrumentation never sees a newly launched activity reach RESUMED, and the attempt dies
+ * after 45s on "Could not launch intent ... HomeActivity". That error names HomeActivity, so it hides whatever actually
+ * failed first.
  *
- * The activity rule's own teardown is not enough to rely on here — the retry runs immediately after
- * the failure, and the previous attempt's HomeActivity has been observed still RESUMED at that point.
- * Best-effort: this must never turn a retryable failure into a different one, so errors are logged
- * and swallowed, and the wait is bounded.
+ * The activity rule's own teardown is not enough to rely on here — the retry runs immediately after the failure, and
+ * the previous attempt's HomeActivity has been observed still RESUMED at that point. Best-effort: this must never turn
+ * a retryable failure into a different one, so errors are logged and swallowed, and the wait is bounded.
  */
 private fun finishLeftoverActivities() {
     val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -272,17 +279,19 @@ private fun finishLeftoverActivities() {
         runCatching {
             instrumentation.runOnMainSync {
                 val monitor = ActivityLifecycleMonitorRegistry.getInstance()
-                val live = Stage.values()
-                    .filter { it != Stage.DESTROYED }
-                    .flatMap { monitor.getActivitiesInStage(it) }
-                    .distinct()
+                val live =
+                    Stage.values()
+                        .filter { it != Stage.DESTROYED }
+                        .flatMap { monitor.getActivitiesInStage(it) }
+                        .distinct()
                 remaining = live.map { it.javaClass.simpleName }
                 live.forEach { it.finish() }
             }
-        }.onFailure {
-            Log.i("BaseTest", "RetryTestRule: could not inspect leftover activities: ${it.message}")
-            return
         }
+            .onFailure {
+                Log.i("BaseTest", "RetryTestRule: could not inspect leftover activities: ${it.message}")
+                return
+            }
         if (remaining.isEmpty()) return
         Log.i("BaseTest", "RetryTestRule: finishing leftover activities: $remaining")
         SystemClock.sleep(LEFTOVER_ACTIVITY_POLL)
@@ -301,14 +310,14 @@ private fun cleanup(removeTabs: Boolean = false) {
     exitMenu()
 }
 
-private fun Throwable.isRetryable(): Boolean = when (this) {
-    is AssertionError,
-    is junit.framework.AssertionFailedError,
-    is UiObjectNotFoundException,
-    is NoMatchingViewException,
-    is IdlingResourceTimeoutException,
-    is RuntimeException,
-    is NullPointerException,
-    -> true
-    else -> false
-}
+private fun Throwable.isRetryable(): Boolean =
+    when (this) {
+        is AssertionError,
+        is junit.framework.AssertionFailedError,
+        is UiObjectNotFoundException,
+        is NoMatchingViewException,
+        is IdlingResourceTimeoutException,
+        is RuntimeException,
+        is NullPointerException -> true
+        else -> false
+    }

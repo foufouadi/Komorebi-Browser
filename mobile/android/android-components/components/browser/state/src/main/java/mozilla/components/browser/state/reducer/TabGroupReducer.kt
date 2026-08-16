@@ -13,9 +13,7 @@ import mozilla.components.browser.state.state.getGroupById
 
 internal object TabGroupReducer {
 
-    /**
-     * [TabGroupAction] reducer function for modifying tab groups in [BrowserState.tabPartitions].
-     */
+    /** [TabGroupAction] reducer function for modifying tab groups in [BrowserState.tabPartitions]. */
     fun reduce(state: BrowserState, action: TabGroupAction): BrowserState {
         return when (action) {
             is TabGroupAction.AddTabGroupAction -> {
@@ -66,25 +64,22 @@ internal object TabGroupReducer {
     }
 }
 
-/**
- * Adds the provided tab group and creates the partition if needed.
- */
+/** Adds the provided tab group and creates the partition if needed. */
 private fun BrowserState.addTabGroup(partitionId: String, group: TabGroup): BrowserState {
     val partition = tabPartitions[partitionId]
-    val updatedPartition = if (partition != null) {
-        require(partition.getGroupById(group.id) == null) {
-            "Tab group with same ID already exists"
+    val updatedPartition =
+        if (partition != null) {
+            require(partition.getGroupById(group.id) == null) {
+                "Tab group with same ID already exists"
+            }
+            partition.copy(tabGroups = partition.tabGroups + group)
+        } else {
+            TabPartition(partitionId, tabGroups = listOf(group))
         }
-        partition.copy(tabGroups = partition.tabGroups + group)
-    } else {
-        TabPartition(partitionId, tabGroups = listOf(group))
-    }
     return copy(tabPartitions = tabPartitions + (partitionId to updatedPartition))
 }
 
-/**
- * Removes a tab group from the provided partition.
- */
+/** Removes a tab group from the provided partition. */
 private fun BrowserState.removeTabGroup(partitionId: String, groupId: String): BrowserState {
     val partition = tabPartitions[partitionId]
     val group = partition?.getGroupById(groupId)
@@ -100,16 +95,13 @@ private fun BrowserState.removeTabGroup(partitionId: String, groupId: String): B
     }
 }
 
-/**
- * Checks if a tab group exists in the provided partition.
- */
+/** Checks if a tab group exists in the provided partition. */
 private fun BrowserState.groupExists(partitionId: String, groupId: String): Boolean {
     return tabPartitions[partitionId]?.getGroupById(groupId) != null
 }
 
 /**
- * Checks that the provided tab exists and throws an
- * [IllegalArgumentException] otherwise.
+ * Checks that the provided tab exists and throws an [IllegalArgumentException] otherwise.
  *
  * @param tabId the id of the [TabSessionState] to check.
  */
@@ -119,9 +111,7 @@ private fun BrowserState.assertTabExists(tabId: String) {
     }
 }
 
-/**
- * Utility function to update a [TabGroup] within a [TabPartition] in [BrowserState].
- */
+/** Utility function to update a [TabGroup] within a [TabPartition] in [BrowserState]. */
 private fun BrowserState.updateTabGroup(
     partitionId: String,
     groupId: String,
@@ -132,9 +122,7 @@ private fun BrowserState.updateTabGroup(
     }
 }
 
-/**
- * Updates the specified tab partition by invoking [update].
- */
+/** Updates the specified tab partition by invoking [update]. */
 private inline fun BrowserState.updateTabPartition(
     partitionId: String,
     crossinline update: (TabPartition) -> TabPartition,
@@ -143,9 +131,7 @@ private inline fun BrowserState.updateTabPartition(
     return copy(tabPartitions = tabPartitions + (partitionId to update(partition)))
 }
 
-/**
- * Updates the specified tab group within this partition by invoking [update].
- */
+/** Updates the specified tab group within this partition by invoking [update]. */
 private inline fun TabPartition.updateTabGroup(
     groupId: String,
     crossinline update: (TabGroup) -> TabGroup,
@@ -155,9 +141,7 @@ private inline fun TabPartition.updateTabGroup(
     } ?: this
 }
 
-/**
- * Updates the provided tab group by invoking [update].
- */
+/** Updates the provided tab group by invoking [update]. */
 private inline fun List<TabGroup>.update(
     groupId: String,
     crossinline update: (TabGroup) -> TabGroup,

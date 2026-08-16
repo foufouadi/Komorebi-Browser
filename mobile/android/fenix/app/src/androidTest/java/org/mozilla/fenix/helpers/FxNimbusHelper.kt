@@ -7,35 +7,25 @@ import org.mozilla.fenix.nimbus.IpProtection
 import org.mozilla.fenix.nimbus.Translations
 
 object FxNimbusHelper {
-    /**
-     * Disable the translations prompt after a page that can be translated is loaded.
-     */
+    /** Disable the translations prompt after a page that can be translated is loaded. */
     fun disablePageLoadTranslationsPrompt() {
         Log.i(TAG, "disableTranslationsPrompt: Trying to disable the translations prompt")
         FxNimbus.features.translations.withInitializer { _, _ ->
-            Translations(
-                mainFlowToolbarEnabled = false,
-            )
+            Translations(mainFlowToolbarEnabled = false)
         }
         Log.i(TAG, "disableTranslationsPrompt: Disabled the translations prompt")
     }
 
-    /**
-     * Enable the translations prompt after a page that can be translated is loaded.
-     */
+    /** Enable the translations prompt after a page that can be translated is loaded. */
     fun enablePageLoadTranslationsPrompt() {
         Log.i(TAG, "enableTranslationsPrompt: Trying to enable the translations prompt")
         FxNimbus.features.translations.withInitializer { _, _ ->
-            Translations(
-                mainFlowToolbarEnabled = true,
-            )
+            Translations(mainFlowToolbarEnabled = true)
         }
         Log.i(TAG, "enableTranslationsPrompt: Enabled the translations prompt")
     }
 
-    /**
-     * Disable the IP Protection feature.
-     */
+    /** Disable the IP Protection feature. */
     fun disableIPProtection() {
         Log.i(TAG, "disableIPProtection: Trying to disable the IP Protection feature")
         FxNimbus.features.ipProtection.withInitializer { _, _ ->
@@ -44,9 +34,7 @@ object FxNimbusHelper {
         Log.i(TAG, "disableIPProtection: Disabled the IP Protection feature")
     }
 
-    /**
-     * Enable the IP Protection feature.
-     */
+    /** Enable the IP Protection feature. */
     fun enableIPProtection() {
         Log.i(TAG, "enableIPProtection: Trying to enable the IP Protection feature")
         FxNimbus.features.ipProtection.withInitializer { _, _ ->

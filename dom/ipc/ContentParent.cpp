@@ -1359,6 +1359,12 @@ bool ContentParent::ValidatePrincipal(
   return mThreadsafeHandle->ValidatePrincipal(aPrincipal, aOptions);
 }
 
+NS_IMETHODIMP ContentParent::ValidatePrincipalXPCOM(nsIPrincipal* aPrincipal,
+                                                    bool* aRetVal) {
+  *aRetVal = ValidatePrincipal(aPrincipal);
+  return NS_OK;
+}
+
 /*static*/
 already_AddRefed<RemoteBrowser> ContentParent::CreateBrowser(
     const TabContext& aContext, Element* aFrameElement,
@@ -7658,7 +7664,7 @@ mozilla::ipc::IPCResult ContentParent::RecvSynchronizeLayoutHistoryState(
   }
 
   BrowsingContext* bc = aContext.GetMaybeDiscarded();
-  if (!bc) {
+  if (!bc || !bc->Canonical()->IsOwnedByProcess(ChildID())) {
     return IPC_OK();
   }
   SessionHistoryEntry* entry = bc->Canonical()->GetActiveSessionHistoryEntry();
@@ -7774,6 +7780,10 @@ ContentParent::RecvGetLoadingSessionHistoryInfoFromParent(
     const MaybeDiscarded<BrowsingContext>& aContext,
     GetLoadingSessionHistoryInfoFromParentResolver&& aResolver) {
   if (aContext.IsNullOrDiscarded()) {
+    return IPC_OK();
+  }
+
+  if (!aContext.get_canonical()->IsOwnedByProcess(ChildID())) {
     return IPC_OK();
   }
 

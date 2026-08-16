@@ -26,9 +26,7 @@ import org.mozilla.fenix.ext.showToolbar
 import org.mozilla.fenix.settings.SupportUtils
 import org.mozilla.fenix.theme.FirefoxTheme
 
-/**
- * A fragment displaying the Page Summaries settings screen.
- */
+/** A fragment displaying the Page Summaries settings screen. */
 class PageSummariesSettingsFragment : Fragment(), SystemInsetsPaddedFragment {
 
     override fun onResume() {
@@ -43,21 +41,24 @@ class PageSummariesSettingsFragment : Fragment(), SystemInsetsPaddedFragment {
     ): View {
         val summarizeSettings = requireComponents.summarizationSettings
         val cache = requireComponents.summarizationSettingsCache
-        val store = SummarizeSettingsStore(
-            initialState = SummarizeSettingsState(
-                isFeatureEnabled = cache.featureEnabled.value,
-                isGestureEnabled = cache.gestureEnabled.value,
-                shakeSensitivity = cache.shakeSensitivity.value,
-            ),
-            reducer = ::summarizeSettingsReducer,
-            middleware = listOf(
-                SummarizeSettingsMiddleware(
-                    settings = summarizeSettings,
-                    onLearnMoreClicked = { openLearnMoreLink() },
-                    scope = viewLifecycleOwner.lifecycleScope,
-                ),
-            ),
-        )
+        val store =
+            SummarizeSettingsStore(
+                initialState =
+                    SummarizeSettingsState(
+                        isFeatureEnabled = cache.featureEnabled.value,
+                        isGestureEnabled = cache.gestureEnabled.value,
+                        shakeSensitivity = cache.shakeSensitivity.value,
+                    ),
+                reducer = ::summarizeSettingsReducer,
+                middleware =
+                    listOf(
+                        SummarizeSettingsMiddleware(
+                            settings = summarizeSettings,
+                            onLearnMoreClicked = { openLearnMoreLink() },
+                            scope = viewLifecycleOwner.lifecycleScope,
+                        )
+                    ),
+            )
 
         return content {
             FirefoxTheme {

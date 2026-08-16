@@ -115,11 +115,7 @@ async function getDisplayCardActionDetail(
         );
 
         if (args.edit) {
-          card.shadowRoot
-            .querySelector(
-              'moz-button[data-l10n-id="ai-tasks-alert-edit-button"]'
-            )
-            .click();
+          card.shadowRoot.querySelector("#edit-button").click();
           await ContentTaskUtils.waitForCondition(
             () =>
               card.shadowRoot.querySelector(
@@ -268,6 +264,81 @@ add_task(async function test_monitor_start_dispatches_create_update() {
   }
 });
 
+add_task(async function test_form_edit_dispatches_draft_update() {
+  const restoreSignIn = skipSignIn();
+  const { restore } = await stubEngineNetworkBoundaries({
+    serverOptions: { streamChunks: ["Set up a monitor for this page."] },
+  });
+  const win = await openAIWindow();
+
+  try {
+    const browser = win.gBrowser.selectedBrowser;
+    const aichatBrowser = await getAichatBrowser(browser);
+
+    await setupConversationWithToolUI(aichatBrowser, MONITOR_CARD);
+
+    const detail = await SpecialPowers.spawn(aichatBrowser, [], async () => {
+      const chatContent = content.document.querySelector("ai-chat-content");
+
+      const card = await ContentTaskUtils.waitForCondition(
+        () => chatContent.shadowRoot.querySelector("agent-monitor-item"),
+        "Wait for agent-monitor-item"
+      );
+      await card.updateComplete;
+
+      let captured = null;
+      chatContent.addEventListener(
+        "AIChatContent:ToolUIUpdate",
+        e => (captured = e.detail),
+        { once: true }
+      );
+
+      const nameInput = card.shadowRoot.querySelector(
+        "moz-input-text.monitor-name-input"
+      );
+      // value is a Lit property, so it has to be set on the element itself and
+      // not on the Xray wrapper, or the card reads it back empty
+      const nameInputJS = nameInput.wrappedJSObject || nameInput;
+      nameInputJS.value = "Example product";
+      nameInput.dispatchEvent(new content.Event("change", { bubbles: true }));
+      await new Promise(resolve => content.setTimeout(resolve, 0));
+
+      return captured;
+    });
+
+    Assert.ok(detail, "AIChatContent:ToolUIUpdate fires on a form edit");
+    Assert.equal(
+      detail.updateType,
+      "save-watch-draft",
+      "updateType is save-watch-draft"
+    );
+    Assert.equal(
+      detail.messageId,
+      "monitor-msg-1",
+      "messageId is correlated back"
+    );
+    Assert.equal(
+      detail.toolCallId,
+      "monitor-call-1",
+      "toolCallId is correlated back"
+    );
+    Assert.equal(
+      detail.updateData?.draft?.monitorName,
+      "Example product",
+      "draft payload carries the edited field"
+    );
+    Assert.deepEqual(
+      detail.updateData?.draft?.watchUrls,
+      ["https://example.com/product"],
+      "draft payload is a full snapshot of the form, not just the edit"
+    );
+  } finally {
+    await BrowserTestUtils.closeWindow(win);
+    restoreSignIn();
+    await restore();
+  }
+});
+
 add_task(async function test_monitor_cancel_dispatches_cancel_update() {
   const restoreSignIn = skipSignIn();
   const { restore } = await stubEngineNetworkBoundaries({
@@ -298,7 +369,7 @@ add_task(async function test_monitor_cancel_dispatches_cancel_update() {
       );
 
       const cancelButton = card.shadowRoot.querySelector(
-        'moz-button[data-l10n-id="ai-tasks-alert-cancel-button"]'
+        "#cancel-create-button"
       );
       Assert.ok(cancelButton, "Cancel button exists");
       cancelButton.click();

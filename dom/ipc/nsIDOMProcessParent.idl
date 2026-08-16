@@ -61,6 +61,11 @@ interface nsIDOMProcessParent: nsISupports {
    * Remote type of the process.
    */
   readonly attribute ACString remoteType;
+
+  /*
+   * Validates the given principal based on its remote type.
+   */
+  [binaryname(ValidatePrincipalXPCOM)] boolean validatePrincipal(in nsIPrincipal principal);
 };
 
 /**

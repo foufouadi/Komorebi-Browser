@@ -66,6 +66,7 @@ export class ChatMessage extends Message {
   pageHistoryDeleted;
   tokens;
   toolUIData;
+  toolUIDraft; // transient value, in-progress form state for the tool UI
   historyResults;
   citations;
   kit;
@@ -177,6 +178,7 @@ export class ChatMessage extends Message {
     this.followUpSuggestions = followUpSuggestions;
     this.pageHistoryDeleted = pageHistoryDeleted;
     this.toolUIData = toolUIData;
+    this.toolUIDraft = null;
     this.historyResults = historyResults;
     this.citations = citations;
     this.tokens = {

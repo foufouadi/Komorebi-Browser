@@ -122,6 +122,8 @@ async function doTest(
     aInsertRelatedAfterCurrent +
     ", aInsertAfterCurrent=" +
     aInsertAfterCurrent +
+    ", aInsertAfterCurrentExceptPinned=" +
+    aInsertAfterCurrentExceptPinned +
     "): ";
 
   await SpecialPowers.pushPrefEnv({
@@ -195,6 +197,65 @@ async function doTest(
   }
   is(openTab.openerTab, openerTab, "opener tab is set");
 
+  // Open a second related tab without switching tabs in between. It chains
+  // after the previously opened related tab when the related-tab feature is
+  // enabled; otherwise it is placed like any other new tab.
+  let secondOpenTabIndex;
+  if (aInsertRelatedAfterCurrent) {
+    secondOpenTabIndex = openTabIndex + 1;
+  } else if (aInsertAfterCurrent) {
+    secondOpenTabIndex = openerTabIndex + 1;
+  } else {
+    secondOpenTabIndex = gBrowser.tabs.length;
+  }
+  let secondOpenTab = await openRelatedTab(openerTab);
+  is(
+    secondOpenTab._tPos,
+    secondOpenTabIndex,
+    kDescription +
+      "A second middle click should open site in a new tab at position " +
+      secondOpenTabIndex
+  );
+
+  // After a second consecutive related open neither tab is owned: the open
+  // revoked the first one's owner where one was set, and the second never
+  // got one.
+  is(openTab.owner, null, kDescription + "first related tab is unowned");
+  is(secondOpenTab.owner, null, kDescription + "second related tab is unowned");
+
+  // Interleave an unrelated foreground tab, then open a third related tab from
+  // the opener. The tab switch resets the related-tab chain, so the third tab
+  // is positioned like the first one was.
+  let unrelatedMidIndex = aInsertAfterCurrent
+    ? openerTabIndex + 1
+    : gBrowser.tabs.length;
+  let unrelatedMidTab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    pageURL
+  );
+  is(
+    unrelatedMidTab._tPos,
+    unrelatedMidIndex,
+    kDescription +
+      "An unrelated tab between related tabs should open at position " +
+      unrelatedMidIndex
+  );
+  let thirdOpenTabIndex =
+    aInsertRelatedAfterCurrent || aInsertAfterCurrent
+      ? openerTabIndex + 1
+      : gBrowser.tabs.length;
+  let thirdOpenTab = await openRelatedTab(openerTab);
+  is(
+    thirdOpenTab._tPos,
+    thirdOpenTabIndex,
+    kDescription +
+      "A middle click after a tab switch should open site in a new tab at position " +
+      thirdOpenTabIndex
+  );
+  await BrowserTestUtils.removeTab(thirdOpenTab);
+  await BrowserTestUtils.removeTab(unrelatedMidTab);
+  await BrowserTestUtils.removeTab(secondOpenTab);
+
   // Open an unrelated tab from the URL bar and test its position.
   openTabIndex = aInsertAfterCurrent
     ? openerTabIndex + 1
@@ -243,6 +304,7 @@ async function doTest(
   );
 
   // Go back to the opener tab.  Closing the child tab should return to the opener.
+  // (Vacuous: openTab is unowned by now and openerTab is already selected.)
   BrowserTestUtils.removeTab(openTab);
   is(
     gBrowser.selectedTab,
@@ -269,8 +331,39 @@ async function doTest(
   is(
     relatedTab._tPos,
     relatedIndex,
-    "related tab should be opened at the end of the tabbar " + relatedTab._tPos
+    kDescription +
+      "A related tab from a pinned opener should open at position " +
+      relatedIndex
   );
+
+  // A second related tab from the pinned opener, without switching in between.
+  let secondRelatedIndex;
+  if (aInsertRelatedAfterCurrent) {
+    secondRelatedIndex = relatedTab._tPos + 1;
+  } else if (aInsertAfterCurrent && !aInsertAfterCurrentExceptPinned) {
+    secondRelatedIndex = pinnedIndex + 1;
+  } else {
+    secondRelatedIndex = gBrowser.tabs.length;
+  }
+  let secondRelatedTab = await openRelatedTab(pinnedTab);
+  is(
+    secondRelatedTab._tPos,
+    secondRelatedIndex,
+    kDescription +
+      "A second related tab from a pinned opener should open at position " +
+      secondRelatedIndex
+  );
+  is(
+    relatedTab.owner,
+    null,
+    kDescription + "first related tab of the pinned opener is unowned"
+  );
+  is(
+    secondRelatedTab.owner,
+    null,
+    kDescription + "second related tab of the pinned opener is unowned"
+  );
+  await BrowserTestUtils.removeTab(secondRelatedTab);
 
   // Flush before messing with browser state.
   for (let tab of gBrowser.tabs) {
@@ -350,18 +443,18 @@ add_task(async function test_settings_always_insertAtEnd() {
   await doTest(false, false, false);
 });
 
-add_task(async function test_settings_always_insertAtEnd() {
+add_task(async function test_settings_insertRelatedAfter_exceptPinned() {
   await doTest(true, false, true);
 });
 
-add_task(async function test_settings_always_insertAtEnd() {
+add_task(async function test_settings_insertAfter_exceptPinned() {
   await doTest(true, true, true);
 });
 
-add_task(async function test_settings_always_insertAtEnd() {
+add_task(async function test_settings_always_insertAfter_exceptPinned() {
   await doTest(false, true, true);
 });
 
-add_task(async function test_settings_always_insertAtEnd() {
+add_task(async function test_settings_always_insertAtEnd_exceptPinned() {
   await doTest(false, false, true);
 });

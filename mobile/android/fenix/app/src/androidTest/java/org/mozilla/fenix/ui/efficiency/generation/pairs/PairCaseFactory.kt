@@ -9,15 +9,14 @@ object PairCaseFactory {
 
     private const val TAG = "PairCaseFactory"
 
-    fun buildPairCases(
-        runState: String,
-    ): List<PairCase> {
+    fun buildPairCases(runState: String): List<PairCase> {
         val generatedCases = NavigationTestPlanner.buildNavigationPairCases()
 
         val cases = generatedCases.map { generated ->
             PairCase(
-                label = "${generated.firstPropertyName.toDisplayLabel()} -> " +
-                    generated.secondPropertyName.toDisplayLabel(),
+                label =
+                    "${generated.firstPropertyName.toDisplayLabel()} -> " +
+                        generated.secondPropertyName.toDisplayLabel(),
                 testRailId = "TBD",
                 firstPage = generated.firstPage,
                 secondPage = generated.secondPage,
@@ -35,11 +34,12 @@ object PairCaseFactory {
         shardCount: Int,
     ): List<PairCase> {
         val allCases = buildPairCases(runState)
-        val shardCases = ShardUtils.filterForShard(
-            items = allCases,
-            shardIndex = shardIndex,
-            shardCount = shardCount,
-        )
+        val shardCases =
+            ShardUtils.filterForShard(
+                items = allCases,
+                shardIndex = shardIndex,
+                shardCount = shardCount,
+            )
 
         Log.i(
             TAG,

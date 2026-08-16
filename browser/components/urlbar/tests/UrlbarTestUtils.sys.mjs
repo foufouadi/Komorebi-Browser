@@ -634,7 +634,7 @@ class UrlbarInputTestUtils {
     details.title = result.getDisplayableValueAndHighlights("title").value;
     details.tags = "tags" in result.payload ? result.payload.tags : [];
     details.isSponsored = result.payload.isSponsored;
-    details.userContextId = result.payload.userContextId;
+    details.userContextId = result.payload.userContext?.id;
     let actions = element.getElementsByClassName("urlbarView-action");
     let urls = element.getElementsByClassName("urlbarView-url");
     let typeIcon = element.querySelector(".urlbarView-type-icon");

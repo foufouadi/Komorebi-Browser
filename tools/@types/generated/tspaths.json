@@ -409,6 +409,9 @@
       "chrome://browser/content/urlbar/UrlbarInput.mjs": [
         "../../../browser/components/urlbar/content/UrlbarInput.mjs"
       ],
+      "chrome://browser/content/urlbar/UrlbarInputBase.mjs": [
+        "../../../browser/components/urlbar/content/UrlbarInputBase.mjs"
+      ],
       "chrome://browser/content/urlbar/UrlbarParentControllerProxy.mjs": [
         "../../../browser/components/urlbar/content/UrlbarParentControllerProxy.mjs"
       ],

@@ -26,12 +26,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
+import kotlin.time.Duration.Companion.seconds
 import mozilla.components.compose.base.PromoCard
 import mozilla.components.ui.animation.AnimatedIllustration
 import org.mozilla.fenix.R
 import org.mozilla.fenix.tabstray.TabsTrayTestTag
 import org.mozilla.fenix.theme.FirefoxTheme
-import kotlin.time.Duration.Companion.seconds
 
 private val OnboardingGridItemMinHeight = 104.dp
 
@@ -48,18 +48,19 @@ fun TabGroupOnboardingGridItem(
 ) {
     PromoCard(
         description = stringResource(R.string.tab_group_onboarding_grid_item_description),
-        modifier = modifier
-            .heightIn(min = OnboardingGridItemMinHeight)
-            .testTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_GRID_ITEM),
+        modifier =
+            modifier
+                .heightIn(min = OnboardingGridItemMinHeight)
+                .testTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_GRID_ITEM),
         title = stringResource(R.string.tab_group_onboarding_item_title),
         illustration = {
             AnimatedIllustration(
                 animationResource = R.raw.mozac_ic_kit_tab_groups_animation,
                 staticDrawableResource = R.drawable.mozac_ic_kit_tab_groups,
-                modifier = Modifier
-                    .height(OnboardingGridItemMinHeight)
-                    .padding(vertical = FirefoxTheme.layout.space.static150)
-                    .testTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_ILLUSTRATION),
+                modifier =
+                    Modifier.height(OnboardingGridItemMinHeight)
+                        .padding(vertical = FirefoxTheme.layout.space.static150)
+                        .testTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_ILLUSTRATION),
                 contentDescription = null,
                 iterationDelay = 8.seconds,
             )
@@ -82,16 +83,17 @@ fun TabGroupOnboardingListItem(
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = TabListItemHeight)
-            .background(MaterialTheme.colorScheme.primaryContainer)
-            .padding(
-                start = FirefoxTheme.layout.space.dynamic200,
-                top = FirefoxTheme.layout.space.static100,
-                bottom = FirefoxTheme.layout.space.static100,
-            )
-            .testTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_LIST_ITEM),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .heightIn(min = TabListItemHeight)
+                .background(MaterialTheme.colorScheme.primaryContainer)
+                .padding(
+                    start = FirefoxTheme.layout.space.dynamic200,
+                    top = FirefoxTheme.layout.space.static100,
+                    bottom = FirefoxTheme.layout.space.static100,
+                )
+                .testTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_LIST_ITEM),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(

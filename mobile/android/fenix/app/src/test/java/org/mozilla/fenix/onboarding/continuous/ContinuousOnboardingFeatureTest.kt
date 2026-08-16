@@ -13,6 +13,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.app.ActivityOptionsCompat
 import androidx.test.filters.SdkSuppress
+import kotlin.test.assertNotNull
 import mozilla.components.support.test.robolectric.testContext
 import mozilla.components.support.utils.DateTimeProvider
 import mozilla.components.support.utils.FakeDateTimeProvider
@@ -36,14 +37,12 @@ import org.mozilla.fenix.onboarding.view.OnboardingPageUiData
 import org.mozilla.fenix.utils.Settings
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
-import kotlin.test.assertNotNull
 
 private const val CONTINUOUS_ONBOARDING_DIALOG_TAG = "continuous_onboarding_dialog"
 
 @RunWith(RobolectricTestRunner::class)
 class ContinuousOnboardingFeatureTest {
-    @get:Rule
-    val gleanTestRule = FenixGleanTestRule(testContext)
+    @get:Rule val gleanTestRule = FenixGleanTestRule(testContext)
 
     private lateinit var activity: Activity
     private lateinit var settings: Settings
@@ -56,21 +55,23 @@ class ContinuousOnboardingFeatureTest {
     fun setup() {
         activity = Robolectric.buildActivity(AppCompatActivity::class.java).create().get()
         settings = Settings(testContext)
-        telemetryRecorder = OnboardingTelemetryRecorder(
-            onboardingReason = OnboardingReason.NEW_USER,
-            installSource = "test",
-        )
+        telemetryRecorder =
+            OnboardingTelemetryRecorder(
+                onboardingReason = OnboardingReason.NEW_USER,
+                installSource = "test",
+            )
         dateTimeProvider = FakeDateTimeProvider()
         stageProvider = FakeContinuousOnboardingStageProvider()
-        feature = ContinuousOnboardingFeature(
-            activity = activity,
-            launcher = FakeActivityResultLauncher(),
-            settings = settings,
-            telemetryRecorder = telemetryRecorder,
-            stageProvider = stageProvider,
-            dateTimeProvider = dateTimeProvider,
-            navigateToSyncSignIn = {},
-        )
+        feature =
+            ContinuousOnboardingFeature(
+                activity = activity,
+                launcher = FakeActivityResultLauncher(),
+                settings = settings,
+                telemetryRecorder = telemetryRecorder,
+                stageProvider = stageProvider,
+                dateTimeProvider = dateTimeProvider,
+                navigateToSyncSignIn = {},
+            )
     }
 
     // shouldShowContinuousOnboarding
@@ -118,36 +119,40 @@ class ContinuousOnboardingFeatureTest {
 
     @Test
     fun `getSyncOnboardingPageState returns the expected state`() {
-        val expectedState = OnboardingPageState(
-            imageRes = R.drawable.nova_onboarding_sync,
-            title = "Instantly pick up where you left off",
-            description = "Grab bookmarks, passwords, and more on any device in a snap. Your personal data stays safe and secure with encryption.",
-            primaryButton = Action(
-                text = "Start syncing",
-                onClick = {
-                    telemetryRecorder.onSyncSignInClick(
+        val expectedState =
+            OnboardingPageState(
+                imageRes = R.drawable.nova_onboarding_sync,
+                title = "Instantly pick up where you left off",
+                description =
+                    "Grab bookmarks, passwords, and more on any device in a snap. Your personal data stays safe and secure with encryption.",
+                primaryButton =
+                    Action(
+                        text = "Start syncing",
+                        onClick = {
+                            telemetryRecorder.onSyncSignInClick(
+                                sequenceId = OnboardingPageUiData.Type.SYNC_SIGN_IN.telemetryId,
+                                sequencePosition = "0",
+                            )
+                        },
+                    ),
+                secondaryButton =
+                    Action(
+                        text = "Continue",
+                        onClick = {
+                            telemetryRecorder.onSkipSignInClick(
+                                sequenceId = OnboardingPageUiData.Type.SYNC_SIGN_IN.telemetryId,
+                                sequencePosition = "0",
+                            )
+                        },
+                    ),
+                onRecordImpressionEvent = {
+                    telemetryRecorder.onImpression(
                         sequenceId = OnboardingPageUiData.Type.SYNC_SIGN_IN.telemetryId,
+                        pageType = OnboardingPageUiData.Type.SYNC_SIGN_IN,
                         sequencePosition = "0",
                     )
                 },
-            ),
-            secondaryButton = Action(
-                text = "Continue",
-                onClick = {
-                    telemetryRecorder.onSkipSignInClick(
-                        sequenceId = OnboardingPageUiData.Type.SYNC_SIGN_IN.telemetryId,
-                        sequencePosition = "0",
-                    )
-                },
-            ),
-            onRecordImpressionEvent = {
-                telemetryRecorder.onImpression(
-                    sequenceId = OnboardingPageUiData.Type.SYNC_SIGN_IN.telemetryId,
-                    pageType = OnboardingPageUiData.Type.SYNC_SIGN_IN,
-                    sequencePosition = "0",
-                )
-            },
-        )
+            )
         val actualState = feature.getSyncOnboardingPageState(ContinuousOnboardingStage.DAY_7)
 
         assertEquals(expectedState.imageRes, actualState.imageRes)
@@ -183,15 +188,16 @@ class ContinuousOnboardingFeatureTest {
     fun `WHEN sync primary button is clicked THEN navigateToSyncSignIn is invoked`() {
         var navigateToSyncSignInInvoked = false
         val navigateToSyncSignIn = { navigateToSyncSignInInvoked = true }
-        val feature = ContinuousOnboardingFeature(
-            activity = activity,
-            launcher = FakeActivityResultLauncher(),
-            settings = settings,
-            telemetryRecorder = telemetryRecorder,
-            stageProvider = stageProvider,
-            dateTimeProvider = dateTimeProvider,
-            navigateToSyncSignIn = navigateToSyncSignIn,
-        )
+        val feature =
+            ContinuousOnboardingFeature(
+                activity = activity,
+                launcher = FakeActivityResultLauncher(),
+                settings = settings,
+                telemetryRecorder = telemetryRecorder,
+                stageProvider = stageProvider,
+                dateTimeProvider = dateTimeProvider,
+                navigateToSyncSignIn = navigateToSyncSignIn,
+            )
         val pageState = feature.getSyncOnboardingPageState(ContinuousOnboardingStage.DAY_7)
 
         pageState.primaryButton.onClick()
@@ -247,37 +253,41 @@ class ContinuousOnboardingFeatureTest {
     @SdkSuppress(minSdkVersion = 33)
     @Test
     fun `getNotificationOnboardingPageState returns the expected state`() {
-        val expectedState = OnboardingPageState(
-            imageRes = R.drawable.nova_onboarding_notifications,
-            title = "Notifications help you stay safer with Firefox",
-            description = "Discover the latest privacy features in Firefox so you’re always up to date on how to stay protected.",
-            primaryButton = Action(
-                text = "Turn on notifications",
-                onClick = {
-                    telemetryRecorder.onNotificationPermissionClick(
+        val expectedState =
+            OnboardingPageState(
+                imageRes = R.drawable.nova_onboarding_notifications,
+                title = "Notifications help you stay safer with Firefox",
+                description =
+                    "Discover the latest privacy features in Firefox so you’re always up to date on how to stay protected.",
+                primaryButton =
+                    Action(
+                        text = "Turn on notifications",
+                        onClick = {
+                            telemetryRecorder.onNotificationPermissionClick(
+                                sequenceId = OnboardingPageUiData.Type.NOTIFICATION_PERMISSION.telemetryId,
+                                sequencePosition = "0",
+                            )
+                            activity.components.notificationsDelegate.requestNotificationPermission()
+                        },
+                    ),
+                secondaryButton =
+                    Action(
+                        text = "Not now",
+                        onClick = {
+                            telemetryRecorder.onSkipTurnOnNotificationsClick(
+                                sequenceId = OnboardingPageUiData.Type.NOTIFICATION_PERMISSION.telemetryId,
+                                sequencePosition = "0",
+                            )
+                        },
+                    ),
+                onRecordImpressionEvent = {
+                    telemetryRecorder.onImpression(
                         sequenceId = OnboardingPageUiData.Type.NOTIFICATION_PERMISSION.telemetryId,
+                        pageType = OnboardingPageUiData.Type.NOTIFICATION_PERMISSION,
                         sequencePosition = "0",
                     )
-                    activity.components.notificationsDelegate.requestNotificationPermission()
                 },
-            ),
-            secondaryButton = Action(
-                text = "Not now",
-                onClick = {
-                    telemetryRecorder.onSkipTurnOnNotificationsClick(
-                        sequenceId = OnboardingPageUiData.Type.NOTIFICATION_PERMISSION.telemetryId,
-                        sequencePosition = "0",
-                    )
-                },
-            ),
-            onRecordImpressionEvent = {
-                telemetryRecorder.onImpression(
-                    sequenceId = OnboardingPageUiData.Type.NOTIFICATION_PERMISSION.telemetryId,
-                    pageType = OnboardingPageUiData.Type.NOTIFICATION_PERMISSION,
-                    sequencePosition = "0",
-                )
-            },
-        )
+            )
 
         val actualState = feature.getNotificationOnboardingPageState(ContinuousOnboardingStage.DAY_2)
 
@@ -422,15 +432,16 @@ class ContinuousOnboardingFeatureTest {
     fun `WHEN pendingStage is not none THEN start does not evaluate the stage`() {
         settings.continuousOnboardingFeatureEnabled = true
         val fakeStageProvider = FakeContinuousOnboardingStageProvider(ContinuousOnboardingStage.DAY_7)
-        val feature = ContinuousOnboardingFeature(
-            activity = activity,
-            launcher = FakeActivityResultLauncher(),
-            settings = settings,
-            telemetryRecorder = telemetryRecorder,
-            stageProvider = fakeStageProvider,
-            dateTimeProvider = dateTimeProvider,
-            navigateToSyncSignIn = {},
-        )
+        val feature =
+            ContinuousOnboardingFeature(
+                activity = activity,
+                launcher = FakeActivityResultLauncher(),
+                settings = settings,
+                telemetryRecorder = telemetryRecorder,
+                stageProvider = fakeStageProvider,
+                dateTimeProvider = dateTimeProvider,
+                navigateToSyncSignIn = {},
+            )
         feature.pendingStage = ContinuousOnboardingStage.DAY_2
 
         feature.start()
@@ -442,20 +453,21 @@ class ContinuousOnboardingFeatureTest {
     fun `WHEN a continuous onboarding dialog is already showing THEN start does not evaluate the stage`() {
         settings.continuousOnboardingFeatureEnabled = true
         val fakeStageProvider = FakeContinuousOnboardingStageProvider(ContinuousOnboardingStage.DAY_7)
-        val feature = ContinuousOnboardingFeature(
-            activity = activity,
-            launcher = FakeActivityResultLauncher(),
-            settings = settings,
-            telemetryRecorder = telemetryRecorder,
-            stageProvider = fakeStageProvider,
-            dateTimeProvider = dateTimeProvider,
-            navigateToSyncSignIn = {},
-        )
+        val feature =
+            ContinuousOnboardingFeature(
+                activity = activity,
+                launcher = FakeActivityResultLauncher(),
+                settings = settings,
+                telemetryRecorder = telemetryRecorder,
+                stageProvider = fakeStageProvider,
+                dateTimeProvider = dateTimeProvider,
+                navigateToSyncSignIn = {},
+            )
         val decorView = activity.window.decorView as ViewGroup
         decorView.addView(
             ComposeView(activity).apply {
                 tag = CONTINUOUS_ONBOARDING_DIALOG_TAG
-            },
+            }
         )
 
         feature.start()
@@ -465,13 +477,15 @@ class ContinuousOnboardingFeatureTest {
 
     class FakeActivityResultLauncher : ActivityResultLauncher<Intent>() {
         override fun launch(input: Intent, options: ActivityOptionsCompat?) = Unit
+
         override fun unregister() = Unit
+
         override val contract: ActivityResultContract<Intent, *>
             get() = throw UnsupportedOperationException("Not used in tests.")
     }
 
     class FakeContinuousOnboardingStageProvider(
-        private val stage: ContinuousOnboardingStage = ContinuousOnboardingStage.NONE,
+        private val stage: ContinuousOnboardingStage = ContinuousOnboardingStage.NONE
     ) : ContinuousOnboardingStageProvider {
         var callCount = 0
             private set

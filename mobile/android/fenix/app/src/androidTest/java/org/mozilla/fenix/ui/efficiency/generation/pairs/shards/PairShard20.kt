@@ -8,17 +8,16 @@ import org.mozilla.fenix.ui.efficiency.generation.pairs.PairCase
 import org.mozilla.fenix.ui.efficiency.generation.pairs.PairShardData
 
 @RunWith(Parameterized::class)
-class PairShard20(
-    private val case: PairCase,
-) : BasePairShardTest(case) {
+class PairShard20(private val case: PairCase) : BasePairShardTest(case) {
 
     companion object {
         @JvmStatic
         @Parameterized.Parameters(name = "{index}: {0}")
-        fun data(): List<Array<Any>> = PairShardData.loadShard(
-            shardIndex = 20,
-            shardCount = 20,
-        )
+        fun data(): List<Array<Any>> =
+            PairShardData.loadShard(
+                shardIndex = 20,
+                shardCount = 20,
+            )
     }
 
     @Test

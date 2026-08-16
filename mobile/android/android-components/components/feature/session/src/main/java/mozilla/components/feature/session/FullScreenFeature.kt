@@ -17,9 +17,7 @@ import mozilla.components.lib.state.ext.flowScoped
 import mozilla.components.support.base.feature.LifecycleAwareFeature
 import mozilla.components.support.base.feature.UserInteractionHandler
 
-/**
- * Feature implementation for handling fullscreen mode (exiting and back button presses).
- */
+/** Feature implementation for handling fullscreen mode (exiting and back button presses). */
 open class FullScreenFeature(
     private val store: BrowserStore,
     private val sessionUseCases: SessionUseCases,
@@ -31,22 +29,20 @@ open class FullScreenFeature(
     private var scope: CoroutineScope? = null
     private var observation: Observation = createDefaultObservation()
 
-    /**
-     * Returns true if the app is in fullscreen mode.
-     */
+    /** Returns true if the app is in fullscreen mode. */
     val isFullScreen: Boolean
         get() = observation.inFullScreen
 
-    /**
-     * Starts the feature and a observer to listen for fullscreen changes.
-     */
+    /** Starts the feature and a observer to listen for fullscreen changes. */
     override fun start() {
-        scope = store.flowScoped(dispatcher = mainDispatcher) { flow ->
-            flow.map { state -> state.findTabOrCustomTabOrSelectedTab(tabId) }
-                .map { tab -> tab.toObservation() }
-                .distinctUntilChanged()
-                .collect { observation -> onChange(observation) }
-        }
+        scope =
+            store.flowScoped(dispatcher = mainDispatcher) { flow ->
+                flow
+                    .map { state -> state.findTabOrCustomTabOrSelectedTab(tabId) }
+                    .map { tab -> tab.toObservation() }
+                    .distinctUntilChanged()
+                    .collect { observation -> onChange(observation) }
+            }
     }
 
     override fun stop() {
@@ -85,9 +81,7 @@ open class FullScreenFeature(
     }
 }
 
-/**
- * Simple holder data class to keep a reference to the last values we observed.
- */
+/** Simple holder data class to keep a reference to the last values we observed. */
 private data class Observation(
     val tabId: String?,
     val inFullScreen: Boolean,
@@ -102,8 +96,9 @@ private fun SessionState?.toObservation(): Observation {
     }
 }
 
-private fun createDefaultObservation() = Observation(
-    tabId = null,
-    inFullScreen = false,
-    layoutInDisplayCutoutMode = 0,
-)
+private fun createDefaultObservation() =
+    Observation(
+        tabId = null,
+        inFullScreen = false,
+        layoutInDisplayCutoutMode = 0,
+    )

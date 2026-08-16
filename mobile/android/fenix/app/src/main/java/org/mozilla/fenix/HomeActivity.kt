@@ -43,6 +43,7 @@ import androidx.navigation.NavDirections
 import androidx.navigation.fragment.NavHostFragment
 import androidx.navigation.ui.AppBarConfiguration
 import androidx.navigation.ui.NavigationUI
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.Dispatchers.Main
@@ -86,6 +87,7 @@ import mozilla.components.support.utils.SafeIntent
 import mozilla.components.support.utils.toSafeIntent
 import mozilla.components.support.webextensions.WebExtensionOptionsPageObserver
 import mozilla.components.support.webextensions.WebExtensionPopupObserver
+import mozilla.components.ui.icons.R as iconsR
 import mozilla.telemetry.glean.private.NoExtras
 import org.mozilla.experiments.nimbus.initializeTooling
 import org.mozilla.fenix.GleanMetrics.AppIcon
@@ -193,26 +195,22 @@ import org.mozilla.fenix.translations.TranslationsEnabledSettings
 import org.mozilla.fenix.utils.AccessibilityUtils.announcePrivateModeForAccessibility
 import org.mozilla.fenix.utils.Settings
 import org.mozilla.fenix.utils.changeAppLauncherIcon
-import java.util.Locale
-import mozilla.components.ui.icons.R as iconsR
 
 /**
- * The main activity of the application. The application is primarily a single Activity (this one)
- * with fragments switching out to display different views. The most important views shown here are the:
+ * The main activity of the application. The application is primarily a single Activity (this one) with fragments
+ * switching out to display different views. The most important views shown here are the:
  * - home screen
  * - browser screen
  */
 @SuppressWarnings("TooManyFunctions", "LargeClass", "LongMethod")
 open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, CrashActionDispatcher {
-    @VisibleForTesting
-    internal lateinit var binding: ActivityHomeBinding
+    @VisibleForTesting internal lateinit var binding: ActivityHomeBinding
     lateinit var themeManager: ThemeManager
     lateinit var browsingModeManager: BrowsingModeManager
 
     private var isVisuallyComplete = false
 
-    private var privateNotificationObserver: PrivateNotificationFeature<PrivateNotificationService>? =
-        null
+    private var privateNotificationObserver: PrivateNotificationFeature<PrivateNotificationService>? = null
 
     private var isToolbarInflated = false
 
@@ -243,7 +241,7 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
                         SupportUtils.createCustomTabIntent(
                             context = this,
                             url = url,
-                        ),
+                        )
                     )
                 }
             },
@@ -254,12 +252,14 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
         IPProtectionInfoPrompter(
             store = components.ipProtection.store,
             appStore = components.appStore,
-            errorMessages = ErrorMessages(
-                dataLimitReached = this.getString(
-                    R.string.ip_protection_data_limit_reached_snackbar,
-                    FxNimbus.features.ipProtection.value().dataLimitGigabyte,
+            errorMessages =
+                ErrorMessages(
+                    dataLimitReached =
+                        this.getString(
+                            R.string.ip_protection_data_limit_reached_snackbar,
+                            FxNimbus.features.ipProtection.value().dataLimitGigabyte,
+                        )
                 ),
-            ),
         )
     }
 
@@ -351,10 +351,11 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
         PrivateBrowsingLockFeature(
             appStore = components.appStore,
             browserStore = components.core.store,
-            storage = DefaultPrivateBrowsingLockStorage(
-                preferences = components.settings.preferences,
-                privateBrowsingLockPrefKey = getString(R.string.pref_key_private_browsing_locked),
-            ),
+            storage =
+                DefaultPrivateBrowsingLockStorage(
+                    preferences = components.settings.preferences,
+                    privateBrowsingLockPrefKey = getString(R.string.pref_key_private_browsing_locked),
+                ),
         )
     }
 
@@ -395,43 +396,44 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
     private val startupPathProvider: StartupPathProvider = DefaultStartupPathProvider()
     private lateinit var startupTypeTelemetry: StartupTypeTelemetry
 
-    private val onBackPressedCallback = object : UserInteractionOnBackPressedCallback(
-        fragmentManager = supportFragmentManager,
-        dispatcher = onBackPressedDispatcher,
-    ) {
-        override fun handleOnBackPressed() {
-            if (shouldUsePredictiveBackLongPress()) {
-                backLongPressJob?.cancel()
+    private val onBackPressedCallback =
+        object :
+            UserInteractionOnBackPressedCallback(
+                fragmentManager = supportFragmentManager,
+                dispatcher = onBackPressedDispatcher,
+            ) {
+            override fun handleOnBackPressed() {
+                if (shouldUsePredictiveBackLongPress()) {
+                    backLongPressJob?.cancel()
+                }
+                super.handleOnBackPressed()
             }
-            super.handleOnBackPressed()
-        }
 
-        private fun isButtonPress(backEvent: BackEventCompat): Boolean {
-            return (
+            private fun isButtonPress(backEvent: BackEventCompat): Boolean {
+                return (
                 // Both touchX and touchY being 0 means this is a back button press and not a back gesture.
                 // Android 16+ will introduce a better way of checking for this.
                 // See https://bugzilla.mozilla.org/show_bug.cgi?id=1944282
                 (backEvent.touchX == 0.0f && backEvent.touchY == 0.0f) ||
                     // touchX and touchY are also documented to return NaN for button presses
-                    (backEvent.touchX.isNaN() && backEvent.touchY.isNaN())
-                )
-        }
+                    (backEvent.touchX.isNaN() && backEvent.touchY.isNaN()))
+            }
 
-        override fun handleOnBackStarted(backEvent: BackEventCompat) {
-            if (shouldUsePredictiveBackLongPress() && isButtonPress(backEvent)) {
-                backLongPressJob = lifecycleScope.launch {
-                    delay(ViewConfiguration.getLongPressTimeout().toLong())
-                    handleBackLongPress()
+            override fun handleOnBackStarted(backEvent: BackEventCompat) {
+                if (shouldUsePredictiveBackLongPress() && isButtonPress(backEvent)) {
+                    backLongPressJob = lifecycleScope.launch {
+                        delay(ViewConfiguration.getLongPressTimeout().toLong())
+                        handleBackLongPress()
+                    }
+                }
+            }
+
+            override fun handleOnBackCancelled() {
+                if (shouldUsePredictiveBackLongPress()) {
+                    backLongPressJob?.cancel()
                 }
             }
         }
-
-        override fun handleOnBackCancelled() {
-            if (shouldUsePredictiveBackLongPress()) {
-                backLongPressJob?.cancel()
-            }
-        }
-    }
 
     @Suppress("CognitiveComplexMethod", "CyclomaticComplexMethod")
     final override fun onCreate(savedInstanceState: Bundle?) {
@@ -464,10 +466,11 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
         // https://github.com/mozilla-mobile/android-components/issues/7960
         breadcrumb(
             message = "onCreate()",
-            data = mapOf(
-                "recreated" to (savedInstanceState != null).toString(),
-                "intent" to (intent?.action ?: "null"),
-            ),
+            data =
+                mapOf(
+                    "recreated" to (savedInstanceState != null).toString(),
+                    "intent" to (intent?.action ?: "null"),
+                ),
         )
 
         components.publicSuffixList.prefetch()
@@ -485,73 +488,76 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
 
         components.settings.seedOnboardingCompletedTimestampForDebugIfNeeded()
 
-        val shouldShowOnboarding = !intent.isAllowedDuringOnboardingIntent(packageName) &&
-            with(components) {
-                settings.shouldShowOnboarding(
-                    hasUserBeenOnboarded = fenixOnboarding.userHasBeenOnboarded(),
-                    forceOnboardingForBenchmark = intent.getBooleanExtra(EXTRA_FORCE_ONBOARDING, false),
-                )
-            }
-
-        SplashScreenManager(
-            splashScreenOperation = createSplashScreenOperation(shouldShowOnboarding),
-            scope = lifecycleScope,
-            splashScreenTimeout = FxNimbus.features.splashScreen.value().maximumDurationMs.toLong(),
-            storage = DefaultSplashScreenStorage(components.settings),
-            showSplashScreen = { installSplashScreen().setKeepOnScreenCondition(it) },
-            onSplashScreenFinished = { result ->
-                if (result.sendTelemetry) {
-                    SplashScreen.firstLaunchExtended.record(
-                        SplashScreen.FirstLaunchExtendedExtra(dataFetched = result.wasDataFetched),
+        val shouldShowOnboarding =
+            !intent.isAllowedDuringOnboardingIntent(packageName) &&
+                with(components) {
+                    settings.shouldShowOnboarding(
+                        hasUserBeenOnboarded = fenixOnboarding.userHasBeenOnboarded(),
+                        forceOnboardingForBenchmark = intent.getBooleanExtra(EXTRA_FORCE_ONBOARDING, false),
                     )
                 }
 
-                if (savedInstanceState == null && shouldShowOnboarding) {
-                    navHost.navController.navigate(NavGraphDirections.actionGlobalOnboarding())
-                }
-            },
-        ).showSplashScreen()
+        SplashScreenManager(
+                splashScreenOperation = createSplashScreenOperation(shouldShowOnboarding),
+                scope = lifecycleScope,
+                splashScreenTimeout = FxNimbus.features.splashScreen.value().maximumDurationMs.toLong(),
+                storage = DefaultSplashScreenStorage(components.settings),
+                showSplashScreen = { installSplashScreen().setKeepOnScreenCondition(it) },
+                onSplashScreenFinished = { result ->
+                    if (result.sendTelemetry) {
+                        SplashScreen.firstLaunchExtended.record(
+                            SplashScreen.FirstLaunchExtendedExtra(dataFetched = result.wasDataFetched)
+                        )
+                    }
+
+                    if (savedInstanceState == null && shouldShowOnboarding) {
+                        navHost.navController.navigate(NavGraphDirections.actionGlobalOnboarding())
+                    }
+                },
+            )
+            .showSplashScreen()
 
         lifecycleScope.launch {
-            val debugSettingsRepository = DefaultDebugSettingsRepository(
-                context = this@HomeActivity,
-                writeScope = this,
-            )
+            val debugSettingsRepository =
+                DefaultDebugSettingsRepository(
+                    context = this@HomeActivity,
+                    writeScope = this,
+                )
 
-            debugSettingsRepository.debugDrawerEnabled
-                .distinctUntilChanged()
-                .collect { enabled ->
-                    with(binding.debugOverlay) {
-                        if (enabled) {
-                            visibility = View.VISIBLE
+            debugSettingsRepository.debugDrawerEnabled.distinctUntilChanged().collect { enabled ->
+                with(binding.debugOverlay) {
+                    if (enabled) {
+                        visibility = View.VISIBLE
 
-                            setContent {
-                                FenixOverlay(
-                                    browserStore = components.core.store,
-                                    inactiveTabsEnabled = components.settings.inactiveTabsAreEnabled,
-                                    loginsStorage = components.core.passwordsStorage,
-                                    tabGroupRepository = components.core.tabGroupRepository,
-                                )
-                            }
-                        } else {
-                            setContent {}
-
-                            visibility = View.GONE
+                        setContent {
+                            FenixOverlay(
+                                browserStore = components.core.store,
+                                inactiveTabsEnabled = components.settings.inactiveTabsAreEnabled,
+                                loginsStorage = components.core.passwordsStorage,
+                                tabGroupRepository = components.core.tabGroupRepository,
+                            )
                         }
+                    } else {
+                        setContent {}
+
+                        visibility = View.GONE
                     }
                 }
+            }
         }
 
         setContentView(binding.root)
         ProfilerMarkers.addListenerForOnGlobalLayout(components.core.engine, this, binding.root)
 
-        privateNotificationObserver = PrivateNotificationFeature(
-            applicationContext,
-            components.core.store,
-            PrivateNotificationService::class,
-        ).also {
-            it.start()
-        }
+        privateNotificationObserver =
+            PrivateNotificationFeature(
+                    applicationContext,
+                    components.core.store,
+                    PrivateNotificationService::class,
+                )
+                .also {
+                    it.start()
+                }
 
         if (!shouldShowOnboarding) {
             lifecycleScope.launch(IO) {
@@ -582,23 +588,17 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
                     components.analytics.crashReporter,
                     navHost.navController,
                     ::getBreadcrumbMessage,
-                ),
+                )
             )
 
             val safeIntent = intent?.toSafeIntent()
-            safeIntent
-                ?.let(::getIntentSource)
-                ?.also { source ->
-                    Events.appOpened.record(
-                        Events.AppOpenedExtra(
-                            source = source,
-                        ),
-                    )
+            safeIntent?.let(::getIntentSource)?.also { source ->
+                Events.appOpened.record(Events.AppOpenedExtra(source = source))
 
-                    if (safeIntent.action.equals(ACTION_OPEN_PRIVATE_TAB) && source == APP_ICON) {
-                        AppIcon.newPrivateTabTapped.record(NoExtras())
-                    }
+                if (safeIntent.action.equals(ACTION_OPEN_PRIVATE_TAB) && source == APP_ICON) {
+                    AppIcon.newPrivateTabTapped.record(NoExtras())
                 }
+            }
         }
         supportActionBar?.hide()
 
@@ -641,9 +641,10 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
 
         startupTelemetryOnCreateCalled(intent.toSafeIntent())
         startupPathProvider.attachOnActivityOnCreate(lifecycle, intent)
-        startupTypeTelemetry = StartupTypeTelemetry(components.startupStateProvider, startupPathProvider).apply {
-            attachOnHomeActivityOnCreate(lifecycle)
-        }
+        startupTypeTelemetry =
+            StartupTypeTelemetry(components.startupStateProvider, startupPathProvider).apply {
+                attachOnHomeActivityOnCreate(lifecycle)
+            }
 
         components.core.requestInterceptor.setNavigationController(navHost.navController)
 
@@ -653,10 +654,11 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
                 activity = this,
                 appStore = components.appStore,
                 settings = components.settings,
-                tabStripStatusBarView = TabStripStatusBarView(
-                    rootView = window.decorView as ViewGroup,
-                    lifecycle = lifecycle,
-                ),
+                tabStripStatusBarView =
+                    TabStripStatusBarView(
+                        rootView = window.decorView as ViewGroup,
+                        lifecycle = lifecycle,
+                    ),
             ),
             true,
         )
@@ -690,9 +692,7 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
         components.settings.coldStartsBetweenSetAsDefaultPrompts++
 
         components.appStore.dispatch(
-            AppAction.OrientationChange(
-                orientation = OrientationMode.fromInteger(resources.configuration.orientation),
-            ),
+            AppAction.OrientationChange(orientation = OrientationMode.fromInteger(resources.configuration.orientation))
         )
 
         onBackPressedDispatcher.addCallback(
@@ -759,9 +759,7 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
     ) {
         when (requestCode) {
             REQUEST_CODE_CAMERA_PERMISSIONS -> {
-                if (grantResults.isNotEmpty() &&
-                    grantResults[0] == PackageManager.PERMISSION_DENIED
-                    ) {
+                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_DENIED) {
                     // if denied, do not relaunch QR Scanner
                     components.appStore.dispatch(AppAction.QrScannerAction.QrScannerRequestConsumed)
                 } else {
@@ -778,9 +776,7 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
 
         // Diagnostic breadcrumb for "Display already aquired" crash:
         // https://github.com/mozilla-mobile/android-components/issues/7960
-        breadcrumb(
-            message = "onResume()",
-        )
+        breadcrumb(message = "onResume()")
 
         binding.root.doOnLayout {
             if (browsingModeManager.mode.isPrivate) {
@@ -840,16 +836,14 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
 
         // Diagnostic breadcrumb for "Display already aquired" crash:
         // https://github.com/mozilla-mobile/android-components/issues/7960
-        breadcrumb(
-            message = "onStart()",
-        )
+        breadcrumb(message = "onStart()")
 
         ProfilerMarkers.homeActivityOnStart(binding.rootContainer, components.core.engine.profiler)
 
         if (components.settings.longfoxPeekAnimationShownCount < Settings.LONGFOX_PEEK_ANIMATION_MAX_SHOWS) {
             components.settings.appLaunchCount++
             components.appStore.dispatch(
-                AppAction.UpdateShowFoxPeekAnimation(components.settings.shouldShowLongfoxPeekAnimationThisTime()),
+                AppAction.UpdateShowFoxPeekAnimation(components.settings.shouldShowLongfoxPeekAnimationThisTime())
             )
         }
 
@@ -870,9 +864,7 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
         // https://github.com/mozilla-mobile/android-components/issues/7960
         breadcrumb(
             message = "onStop()",
-            data = mapOf(
-                "finishing" to isFinishing.toString(),
-            ),
+            data = mapOf("finishing" to isFinishing.toString()),
         )
 
         if (FxNimbus.features.alternativeAppLauncherIcon.value().enabled) {
@@ -902,15 +894,15 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
             components.core.store.state.getNormalOrPrivateTabs(private = false).isNotEmpty()
 
         lifecycleScope.launch(IO) {
-            val desktopFolders = DesktopFolders(
-                applicationContext,
-                showMobileRoot = false,
-            )
+            val desktopFolders =
+                DesktopFolders(
+                    applicationContext,
+                    showMobileRoot = false,
+                )
             components.settings.desktopBookmarksSize = desktopFolders.count()
 
-            components.settings.mobileBookmarksSize = components.core.bookmarksStorage.countBookmarksInTrees(
-                listOf(BookmarkRoot.Mobile.id),
-            ).toInt()
+            components.settings.mobileBookmarksSize =
+                components.core.bookmarksStorage.countBookmarksInTrees(listOf(BookmarkRoot.Mobile.id)).toInt()
         }
 
         super.onPause()
@@ -919,9 +911,7 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
         // https://github.com/mozilla-mobile/android-components/issues/7960
         breadcrumb(
             message = "onPause()",
-            data = mapOf(
-                "finishing" to isFinishing.toString(),
-            ),
+            data = mapOf("finishing" to isFinishing.toString()),
         )
 
         // Every time the application goes into the background, it is possible that the user
@@ -948,9 +938,7 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
         // https://github.com/mozilla-mobile/android-components/issues/7960
         breadcrumb(
             message = "onDestroy()",
-            data = mapOf(
-                "finishing" to isFinishing.toString(),
-            ),
+            data = mapOf("finishing" to isFinishing.toString()),
         )
 
         components.core.macTopSitesUpdater.stopPeriodicWork()
@@ -980,30 +968,22 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
 
         // Diagnostic breadcrumb for "Display already aquired" crash:
         // https://github.com/mozilla-mobile/android-components/issues/7960
-        breadcrumb(
-            message = "onConfigurationChanged()",
-        )
+        breadcrumb(message = "onConfigurationChanged()")
 
         components.appStore.dispatch(
-            AppAction.OrientationChange(
-                orientation = OrientationMode.fromInteger(newConfig.orientation),
-            ),
+            AppAction.OrientationChange(orientation = OrientationMode.fromInteger(newConfig.orientation))
         )
     }
 
     final override fun recreate() {
         // Diagnostic breadcrumb for "Display already aquired" crash:
         // https://github.com/mozilla-mobile/android-components/issues/7960
-        breadcrumb(
-            message = "recreate()",
-        )
+        breadcrumb(message = "recreate()")
 
         super.recreate()
     }
 
-    /**
-     * Handles intents received when the activity is open.
-     */
+    /** Handles intents received when the activity is open. */
     final override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleNewIntent(intent)
@@ -1031,19 +1011,18 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
                     NativeShareSheet.qrCodeTapped.record(NoExtras())
                 }
 
-                QRCodeDialogFragment.newInstance(qrCodeUri).showNow(
-                    supportFragmentManager,
-                    QRCodeDialogFragment.TAG,
-                )
+                QRCodeDialogFragment.newInstance(qrCodeUri)
+                    .showNow(
+                        supportFragmentManager,
+                        QRCodeDialogFragment.TAG,
+                    )
             }
         } else {
             // Diagnostic breadcrumb for "Display already aquired" crash:
             // https://github.com/mozilla-mobile/android-components/issues/7960
             breadcrumb(
                 message = "onNewIntent()",
-                data = mapOf(
-                    "intent" to intent.action.toString(),
-                ),
+                data = mapOf("intent" to intent.action.toString()),
             )
 
             val tab = components.core.store.state.findActiveMediaTab()
@@ -1052,9 +1031,7 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
             }
 
             val intentProcessors =
-                listOf(
-                    CrashReporterIntentProcessor(components.appStore),
-                ) + externalSourceIntentProcessors
+                listOf(CrashReporterIntentProcessor(components.appStore)) + externalSourceIntentProcessors
             intentProcessors.forEach { it.process(intent, navHost.navController, this.intent, components.settings) }
             browsingModeManager.updateMode(intent)
         }
@@ -1064,41 +1041,47 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
         val urls = intent.getStringArrayListExtra(SendToDevicesDialogFragment.EXTRA_URLS)
         if (urls.isNullOrEmpty()) return
         val titles = intent.getStringArrayListExtra(SendToDevicesDialogFragment.EXTRA_TITLES).orEmpty()
-        val isPrivate = intent.getStringExtra(SendToDevicesDialogFragment.EXTRA_PRIVACY) ==
-            SendToDevicesDialogFragment.PRIVACY_PRIVATE
+        val isPrivate =
+            intent.getStringExtra(SendToDevicesDialogFragment.EXTRA_PRIVACY) ==
+                SendToDevicesDialogFragment.PRIVACY_PRIVATE
 
         if (supportFragmentManager.findFragmentByTag(SendToDevicesDialogFragment.TAG) == null) {
-            SendToDevicesDialogFragment.newInstance(urls, titles, isPrivate).showNow(
-                supportFragmentManager,
-                SendToDevicesDialogFragment.TAG,
-            )
+            SendToDevicesDialogFragment.newInstance(urls, titles, isPrivate)
+                .showNow(
+                    supportFragmentManager,
+                    SendToDevicesDialogFragment.TAG,
+                )
         }
     }
 
-    /**
-     * Overrides view inflation to inject a custom [EngineView] from [components].
-     */
+    /** Overrides view inflation to inject a custom [EngineView] from [components]. */
     final override fun onCreateView(
         parent: View?,
         name: String,
         context: Context,
         attrs: AttributeSet,
-    ): View? = when (name) {
-        EngineView::class.java.name -> components.core.engine.createView(context, attrs).apply {
-            selectionActionDelegate = DefaultSelectionActionDelegate(
-                BrowserStoreSearchAdapter(
-                    components.core.store,
-                    tabId = getIntentSessionId(intent.toSafeIntent()),
-                ),
-                resources = context.resources,
-                shareTextClicked = { share(it) },
-                emailTextClicked = { email(it) },
-                callTextClicked = { call(it) },
-                actionSorter = ::actionSorter,
-            )
-        }.asView()
-        else -> super.onCreateView(parent, name, context, attrs)
-    }
+    ): View? =
+        when (name) {
+            EngineView::class.java.name ->
+                components.core.engine
+                    .createView(context, attrs)
+                    .apply {
+                        selectionActionDelegate =
+                            DefaultSelectionActionDelegate(
+                                BrowserStoreSearchAdapter(
+                                    components.core.store,
+                                    tabId = getIntentSessionId(intent.toSafeIntent()),
+                                ),
+                                resources = context.resources,
+                                shareTextClicked = { share(it) },
+                                emailTextClicked = { email(it) },
+                                callTextClicked = { call(it) },
+                                actionSorter = ::actionSorter,
+                            )
+                    }
+                    .asView()
+            else -> super.onCreateView(parent, name, context, attrs)
+        }
 
     final override fun onActionModeStarted(mode: ActionMode?) {
         actionMode = mode
@@ -1128,10 +1111,12 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
         order["org.mozilla.geckoview.SELECT_ALL"] = 6
         order["CUSTOM_CONTEXT_MENU_SHARE"] = 7
 
-        return actions.sortedBy { actionName ->
-            // Sort the actions in our preferred order, putting "other" actions unsorted at the end
-            order[actionName] ?: actions.size
-        }.toTypedArray()
+        return actions
+            .sortedBy { actionName ->
+                // Sort the actions in our preferred order, putting "other" actions unsorted at the end
+                order[actionName] ?: actions.size
+            }
+            .toTypedArray()
     }
 
     @Deprecated("Deprecated in Java")
@@ -1142,8 +1127,7 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
                 return
             }
         }
-        @Suppress("DEPRECATION")
-        super.onActivityResult(requestCode, resultCode, data)
+        @Suppress("DEPRECATION") super.onActivityResult(requestCode, resultCode, data)
     }
 
     private fun shouldUseCustomBackLongPress(): Boolean {
@@ -1153,9 +1137,8 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
     }
 
     /**
-     * Get whether to use [OnBackPressedDispatcher] listeners for back button long presses
-     * instead of deprecated `onKey` callbacks.
-     * Requires `enableOnBackInvokedCallback` feature.
+     * Get whether to use [OnBackPressedDispatcher] listeners for back button long presses instead of deprecated `onKey`
+     * callbacks. Requires `enableOnBackInvokedCallback` feature.
      */
     private fun shouldUsePredictiveBackLongPress(): Boolean {
         // When predictive back handlers are enabled (android:enableOnBackInvokedCallback),
@@ -1195,22 +1178,17 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
         // after navigating to another fragment like Settings or Bookmarks, and then back this
         // key event is somehow getting consumed before it reaches onKeyDown or onKeyUp.
         if (event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_MENU) {
-            val navHostFragment =
-                supportFragmentManager.findFragmentById(R.id.container) as? NavHostFragment
+            val navHostFragment = supportFragmentManager.findFragmentById(R.id.container) as? NavHostFragment
             val currentFragment = navHostFragment?.childFragmentManager?.primaryNavigationFragment
             when (currentFragment) {
                 is HomeFragment -> {
-                    val action = NavGraphDirections.actionGlobalMenuDialogFragment(
-                        MenuAccessPoint.Home,
-                    )
+                    val action = NavGraphDirections.actionGlobalMenuDialogFragment(MenuAccessPoint.Home)
                     navHost.navController.navigate(action)
                     return true
                 }
 
                 is BrowserFragment -> {
-                    val action = NavGraphDirections.actionGlobalMenuDialogFragment(
-                        MenuAccessPoint.Browser,
-                    )
+                    val action = NavGraphDirections.actionGlobalMenuDialogFragment(MenuAccessPoint.Browser)
                     navHost.navController.navigate(action)
                     return true
                 }
@@ -1220,15 +1198,14 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
     }
 
     final override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        // Inspired by https://searchfox.org/mozilla-esr68/source/mobile/android/base/java/org/mozilla/gecko/BrowserApp.java#584-613
+        // Inspired by
+        // https://searchfox.org/mozilla-esr68/source/mobile/android/base/java/org/mozilla/gecko/BrowserApp.java#584-613
         // Android N and Huawei devices have broken onKeyLongPress events for the back button, so we
         // instead implement the long press behavior ourselves
         // - For short presses, we cancel the callback in onKeyUp
         // - For long presses, the normal keypress is marked as cancelled, hence won't be handled elsewhere
         //   (but Android still provides the haptic feedback), and the long press action is run
-        if (shouldUseCustomBackLongPress() && keyCode == KeyEvent.KEYCODE_BACK &&
-            !shouldUsePredictiveBackLongPress()
-        ) {
+        if (shouldUseCustomBackLongPress() && keyCode == KeyEvent.KEYCODE_BACK && !shouldUsePredictiveBackLongPress()) {
             backLongPressJob = lifecycleScope.launch {
                 delay(ViewConfiguration.getLongPressTimeout().toLong())
                 handleBackLongPress()
@@ -1245,15 +1222,14 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
 
     @Suppress("ReturnCount")
     final override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
-        if (shouldUseCustomBackLongPress() && keyCode == KeyEvent.KEYCODE_BACK &&
-            !shouldUsePredictiveBackLongPress()
-        ) {
+        if (shouldUseCustomBackLongPress() && keyCode == KeyEvent.KEYCODE_BACK && !shouldUsePredictiveBackLongPress()) {
             backLongPressJob?.cancel()
 
             // check if the key has been pressed for longer than the time needed for a press to turn into a long press
             // and if tab history is already visible we do not want to dismiss it.
-            if (event.eventTime - event.downTime >= ViewConfiguration.getLongPressTimeout() &&
-                navHost.navController.hasTopDestination(TabHistoryDialogFragment.NAME)
+            if (
+                event.eventTime - event.downTime >= ViewConfiguration.getLongPressTimeout() &&
+                    navHost.navController.hasTopDestination(TabHistoryDialogFragment.NAME)
             ) {
                 // returning true avoids further processing of the KeyUp event and avoids dismissing tab history.
                 return true
@@ -1279,8 +1255,8 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
     final override fun onKeyLongPress(keyCode: Int, event: KeyEvent?): Boolean {
         // onKeyLongPress is broken in Android N so we don't handle back button long presses here
         // for N. The version check ensures we don't handle back button long presses twice.
-        if (!shouldUseCustomBackLongPress() && keyCode == KeyEvent.KEYCODE_BACK &&
-            !shouldUsePredictiveBackLongPress()
+        if (
+            !shouldUseCustomBackLongPress() && keyCode == KeyEvent.KEYCODE_BACK && !shouldUsePredictiveBackLongPress()
         ) {
             return handleBackLongPress()
         }
@@ -1307,8 +1283,9 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
     }
 
     /**
-     * Determines whether the activity should be pushed to be backstack (i.e., 'minimized' to the recents
-     * screen) upon starting.
+     * Determines whether the activity should be pushed to be backstack (i.e., 'minimized' to the recents screen) upon
+     * starting.
+     *
      * @param intent - The intent that started this activity. Is checked for having the 'START_IN_RECENTS_SCREEN'-extra.
      * @return true if the activity should be started and pushed to the recents screen, false otherwise.
      */
@@ -1320,17 +1297,18 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
     }
 
     private fun createSplashScreenOperation(shouldShowOnboarding: Boolean): SplashScreenOperation {
-        val nimbusOperation = if (FxNimbus.features.splashScreen.value().offTrainOnboarding) {
-            ApplyExperimentsOperation(
-                storage = DefaultExperimentsOperationStorage(components.settings),
-                nimbus = components.nimbus.sdk,
-            )
-        } else {
-            FetchExperimentsOperation(
-                storage = DefaultExperimentsOperationStorage(components.settings),
-                nimbus = components.nimbus.sdk,
-            )
-        }
+        val nimbusOperation =
+            if (FxNimbus.features.splashScreen.value().offTrainOnboarding) {
+                ApplyExperimentsOperation(
+                    storage = DefaultExperimentsOperationStorage(components.settings),
+                    nimbus = components.nimbus.sdk,
+                )
+            } else {
+                FetchExperimentsOperation(
+                    storage = DefaultExperimentsOperationStorage(components.settings),
+                    nimbus = components.nimbus.sdk,
+                )
+            }
 
         if (shouldShowOnboarding) {
             InstallReferrerHandlingService(applicationContext).start()
@@ -1356,18 +1334,13 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
             }
 
             components.core.store.state.findActiveMediaTab()?.let {
-                components.core.store.dispatch(
-                    MediaSessionAction.DeactivatedMediaSessionAction(
-                        it.id,
-                    ),
-                )
+                components.core.store.dispatch(MediaSessionAction.DeactivatedMediaSessionAction(it.id))
             }
         }
     }
 
     /**
-     * Returns the [supportActionBar], inflating it if necessary.
-     * Everyone should call this instead of supportActionBar.
+     * Returns the [supportActionBar], inflating it if necessary. Everyone should call this instead of supportActionBar.
      */
     final override fun getSupportActionBarAndInflateIfNecessary(): ActionBar {
         if (!isToolbarInflated) {
@@ -1397,24 +1370,23 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
     }
 
     /**
-     * Navigates to the browser fragment and loads a URL or performs a search (depending on the
-     * value of [searchTermOrURL]).
+     * Navigates to the browser fragment and loads a URL or performs a search (depending on the value of
+     * [searchTermOrURL]).
      *
      * @param searchTermOrURL The entered search term to search or URL to be loaded.
      * @param newTab Whether or not to load the URL in a new tab.
-     * @param from The [BrowserDirection] to indicate which fragment the browser is being
-     * opened from.
+     * @param from The [BrowserDirection] to indicate which fragment the browser is being opened from.
      * @param customTabSessionId Optional custom tab session ID if navigating from a custom tab.
      * @param engine Optional [SearchEngine] to use when performing a search.
      * @param forceSearch Whether or not to force performing a search.
      * @param flags Flags that will be used when loading the URL (not applied to searches).
-     * @param historyMetadata The [HistoryMetadataKey] of the new tab in case this tab
-     * was opened from history.
+     * @param historyMetadata The [HistoryMetadataKey] of the new tab in case this tab was opened from history.
      * @param additionalHeaders The extra headers to use when loading the URL.
      */
     @Deprecated(
-        message = "Use NavController.openToBrowser() and " +
-            "components.useCases.fenixBrowserUseCases.loadUrlOrSearch() instead",
+        message =
+            "Use NavController.openToBrowser() and " +
+                "components.useCases.fenixBrowserUseCases.loadUrlOrSearch() instead",
         level = DeprecationLevel.WARNING,
     )
     fun openToBrowserAndLoad(
@@ -1533,15 +1505,17 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
     }
 
     private fun openPopup(webExtensionState: WebExtensionState) {
-        val action = NavGraphDirections.actionGlobalWebExtensionActionPopupFragment(
-            webExtensionId = webExtensionState.id,
-            webExtensionTitle = webExtensionState.name,
-        )
+        val action =
+            NavGraphDirections.actionGlobalWebExtensionActionPopupFragment(
+                webExtensionId = webExtensionState.id,
+                webExtensionTitle = webExtensionState.name,
+            )
         navHost.navController.navigate(action)
     }
 
     private fun openOptionsPage(activeOptionsPage: ActiveOptionsPage) {
-        if (!suppressOptionsPageInAddonManagement(
+        if (
+            !suppressOptionsPageInAddonManagement(
                 navHost.navController.currentDestination?.id,
                 activeOptionsPage,
             )
@@ -1560,12 +1534,9 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
         if (currentDestinationId !in ADDON_MANAGEMENT_DESTINATIONS) {
             return false
         }
-        findExtensionForOptionsPage(activeOptionsPage)
-            ?.let {
-                components.core.store.dispatch(
-                    WebExtensionAction.ClearOptionsPageSession(it.id),
-                )
-            }
+        findExtensionForOptionsPage(activeOptionsPage)?.let {
+            components.core.store.dispatch(WebExtensionAction.ClearOptionsPageSession(it.id))
+        }
         return true
     }
 
@@ -1583,24 +1554,21 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
     }
 
     private fun findExtensionForOptionsPage(activeOptionsPage: ActiveOptionsPage): WebExtensionState? =
-        components.core.store.state.extensions.values
-            .firstOrNull { it.activeOptionsPage == activeOptionsPage }
+        components.core.store.state.extensions.values.firstOrNull { it.activeOptionsPage == activeOptionsPage }
 
-    /**
-     * The root container is null at this point, so let the HomeActivity know that
-     * we are visually complete.
-     */
+    /** The root container is null at this point, so let the HomeActivity know that we are visually complete. */
     fun setVisualCompletenessQueueReady() {
         isVisuallyComplete = true
     }
 
     private fun captureSnapshotTelemetryMetrics() {
         lifecycleScope.launch {
-            val recentlyUsedPwaCount = withContext(Dispatchers.IO) {
-                components.core.webAppShortcutManager.recentlyUsedWebAppsCount(
-                    activeThresholdMs = PWA_RECENTLY_USED_THRESHOLD,
-                )
-            }
+            val recentlyUsedPwaCount =
+                withContext(Dispatchers.IO) {
+                    components.core.webAppShortcutManager.recentlyUsedWebAppsCount(
+                        activeThresholdMs = PWA_RECENTLY_USED_THRESHOLD
+                    )
+                }
             if (recentlyUsedPwaCount == 0) {
                 Metrics.hasRecentPwas.set(false)
             } else {
@@ -1625,8 +1593,8 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
     }
 
     /**
-     *  Indicates if the user should be redirected to the [BrowserFragment] or to the [HomeFragment],
-     *  links from an external apps should always opened in the [BrowserFragment].
+     * Indicates if the user should be redirected to the [BrowserFragment] or to the [HomeFragment], links from an
+     * external apps should always opened in the [BrowserFragment].
      */
     @VisibleForTesting
     internal fun shouldStartOnHome(intent: Intent? = this.intent): Boolean {
@@ -1648,22 +1616,21 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
         }
     }
 
-    @VisibleForTesting
-    internal fun getSettings(): Settings = components.settings
+    @VisibleForTesting internal fun getSettings(): Settings = components.settings
 
     private fun shouldNavigateToBrowserOnColdStart(savedInstanceState: Bundle?): Boolean {
-        return isActivityColdStarted(intent, savedInstanceState) &&
-            !processIntent(intent)
+        return isActivityColdStarted(intent, savedInstanceState) && !processIntent(intent)
     }
 
     private suspend fun showFullscreenMessageIfNeeded(context: Context) {
         val messaging = context.components.nimbus.messaging
         val nextMessage = messaging.getNextMessage(FenixMessageSurfaceId.SURVEY) ?: return
-        val researchSurfaceDialogFragment = ResearchSurfaceDialogFragment.newInstance(
-            keyMessageText = nextMessage.text,
-            keyAcceptButtonText = nextMessage.buttonLabel,
-            keyDismissButtonText = null,
-        )
+        val researchSurfaceDialogFragment =
+            ResearchSurfaceDialogFragment.newInstance(
+                keyMessageText = nextMessage.text,
+                keyAcceptButtonText = nextMessage.buttonLabel,
+                keyDismissButtonText = null,
+            )
 
         researchSurfaceDialogFragment.onAccept = {
             processIntent(messaging.getIntentForMessage(nextMessage))
@@ -1687,16 +1654,13 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
         messaging.onMessageDisplayed(nextMessage, currentBootUniqueIdentifier)
     }
 
-    /**
-     * Dispatches the received [CrashAction] from [UnsubmittedCrashDialog]
-     */
+    /** Dispatches the received [CrashAction] from [UnsubmittedCrashDialog] */
     override fun dispatchCrashAction(action: CrashAction) {
         components.appStore.dispatch(AppAction.CrashActionWrapper(action))
     }
 
     private fun showCrashReporter(crashIDs: List<String>?) {
-        UnsubmittedCrashDialog.create(crashIDs = crashIDs)
-            .show(supportFragmentManager, UnsubmittedCrashDialog.TAG)
+        UnsubmittedCrashDialog.create(crashIDs = crashIDs).show(supportFragmentManager, UnsubmittedCrashDialog.TAG)
     }
 
     companion object {
@@ -1718,12 +1682,13 @@ open class HomeActivity : LocaleAwareAppCompatActivity(), NavHostActivity, Crash
 
         private const val REQUEST_CODE_CAMERA_PERMISSIONS = 1
 
-        private val ADDON_MANAGEMENT_DESTINATIONS = setOf(
-            R.id.addonsManagementFragment,
-            R.id.installedAddonDetailsFragment,
-            R.id.addonInternalSettingsFragment,
-            R.id.addonDetailsFragment,
-            R.id.addonPermissionsDetailFragment,
-        )
+        private val ADDON_MANAGEMENT_DESTINATIONS =
+            setOf(
+                R.id.addonsManagementFragment,
+                R.id.installedAddonDetailsFragment,
+                R.id.addonInternalSettingsFragment,
+                R.id.addonDetailsFragment,
+                R.id.addonPermissionsDetailFragment,
+            )
     }
 }

@@ -318,7 +318,7 @@ async function waitForElementHidden(elem, hidden = true) {
     elem,
     { attributes: true, attributeFilter: ["hidden"] },
     () => elem.hidden === hidden,
-    `Element hidden should be ${hidden}`
+    { msg: `Element hidden should be ${hidden}` }
   );
 }
 

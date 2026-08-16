@@ -15,24 +15,27 @@ import mozilla.components.feature.summarize.settings.SummarizationSettings
 import mozilla.components.lib.shake.ShakeSensitivity
 
 /**
- * Eagerly mirrors the user's [SummarizationSettings] preferences into hot [StateFlow]s so the UI
- * can read the latest value synchronously via `.value` instead of showing a placeholder while the
- * underlying DataStore flow loads. Persistence still goes through [settings].
+ * Eagerly mirrors the user's [SummarizationSettings] preferences into hot [StateFlow]s so the UI can read the latest
+ * value synchronously via `.value` instead of showing a placeholder while the underlying DataStore flow loads.
+ * Persistence still goes through [settings].
  */
 class SummarizationSettingsCache(
     private val settings: SummarizationSettings,
     scope: CoroutineScope,
 ) {
-    val featureEnabled: StateFlow<Boolean> =
-        flow { emitAll(settings.getFeatureEnabledUserStatus()) }
-            .map { it == true }
-            .stateIn(scope, SharingStarted.Eagerly, false)
+    val featureEnabled: StateFlow<Boolean> = flow {
+        emitAll(settings.getFeatureEnabledUserStatus())
+    }
+        .map { it == true }
+        .stateIn(scope, SharingStarted.Eagerly, false)
 
-    val gestureEnabled: StateFlow<Boolean> =
-        flow { emitAll(settings.getGestureEnabledUserStatus()) }
-            .stateIn(scope, SharingStarted.Eagerly, true)
+    val gestureEnabled: StateFlow<Boolean> = flow {
+        emitAll(settings.getGestureEnabledUserStatus())
+    }
+        .stateIn(scope, SharingStarted.Eagerly, true)
 
-    val shakeSensitivity: StateFlow<ShakeSensitivity> =
-        flow { emitAll(settings.getShakeSensitivity()) }
-            .stateIn(scope, SharingStarted.Eagerly, ShakeSensitivity.Medium)
+    val shakeSensitivity: StateFlow<ShakeSensitivity> = flow {
+        emitAll(settings.getShakeSensitivity())
+    }
+        .stateIn(scope, SharingStarted.Eagerly, ShakeSensitivity.Medium)
 }

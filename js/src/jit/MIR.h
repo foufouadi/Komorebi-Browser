@@ -430,10 +430,13 @@ class AliasSet {
     // The SharedArrayRawBuffer::length field.
     SharedArrayRawBufferLength = 1 << 28,
 
-    Last = SharedArrayRawBufferLength,
+    // The frame descriptor's IsResumingGenerator bit.
+    GeneratorResumeState = 1 << 29,
+
+    Last = GeneratorResumeState,
 
     Any = Last | (Last - 1),
-    NumCategories = 29,
+    NumCategories = 30,
 
     // Indicates load or store.
     Store_ = 1 << 31

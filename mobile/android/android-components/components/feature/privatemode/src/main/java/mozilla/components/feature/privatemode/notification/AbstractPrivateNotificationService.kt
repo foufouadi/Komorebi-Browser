@@ -17,6 +17,7 @@ import androidx.annotation.VisibleForTesting
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationCompat.VISIBILITY_SECRET
 import androidx.core.app.NotificationManagerCompat.IMPORTANCE_LOW
+import java.util.Locale
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,16 +37,13 @@ import mozilla.components.support.base.ids.SharedIdsHelper
 import mozilla.components.support.ktx.android.notification.ChannelData
 import mozilla.components.support.ktx.android.notification.ensureNotificationChannelExists
 import mozilla.components.support.utils.ext.stopForegroundCompat
-import java.util.Locale
 
 /**
  * Manages notifications for private tabs.
  *
  * Private tab notifications solve two problems:
- * 1. They allow users to interact with the browser from outside of the app
- *    (example: by closing all private tabs).
- * 2. The notification will keep the process alive, allowing the browser to
- *    keep private tabs in memory.
+ * 1. They allow users to interact with the browser from outside of the app (example: by closing all private tabs).
+ * 2. The notification will keep the process alive, allowing the browser to keep private tabs in memory.
  *
  * As long as a private tab is open this service will keep its notification alive.
  */
@@ -60,34 +58,24 @@ abstract class AbstractPrivateNotificationService(
     abstract val store: BrowserStore
     abstract val notificationsDelegate: NotificationsDelegate
 
-    /**
-     * Customizes the private browsing notification.
-     */
+    /** Customizes the private browsing notification. */
     abstract fun NotificationCompat.Builder.buildNotification()
 
-    /**
-     * Customize the notification response when the [Locale] has been changed.
-     */
+    /** Customize the notification response when the [Locale] has been changed. */
     abstract fun notifyLocaleChanged()
 
-    /**
-     * Erases all private tabs in reaction to the user tapping the notification.
-     */
+    /** Erases all private tabs in reaction to the user tapping the notification. */
     @CallSuper
     protected open fun erasePrivateTabs() {
         store.dispatch(TabListAction.RemoveAllPrivateTabsAction)
     }
 
-    /**
-     * Retrieves the notification id based on the tag.
-     */
+    /** Retrieves the notification id based on the tag. */
     protected fun getNotificationId(): Int {
         return SharedIdsHelper.getIdForTag(this, NOTIFICATION_TAG)
     }
 
-    /**
-     * Retrieves the channel id based on the channel data.
-     */
+    /** Retrieves the channel id based on the channel data. */
     protected fun getChannelId(): String {
         return ensureNotificationChannelExists(
             this,
@@ -100,9 +88,7 @@ abstract class AbstractPrivateNotificationService(
         )
     }
 
-    /**
-     * Re-build and notify an existing notification.
-     */
+    /** Re-build and notify an existing notification. */
     protected fun refreshNotification() {
         notificationScope.launch {
             val notificationId = getNotificationId()
@@ -116,8 +102,7 @@ abstract class AbstractPrivateNotificationService(
     }
 
     /**
-     * Create the private browsing notification and
-     * add a listener to stop the service once all private tabs are closed.
+     * Create the private browsing notification and add a listener to stop the service once all private tabs are closed.
      *
      * The service should be started only if private tabs are open.
      */
@@ -128,9 +113,7 @@ abstract class AbstractPrivateNotificationService(
             val notification = createNotification(channelId)
 
             if (SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                notificationsDelegate.requestNotificationPermission(
-                    onPermissionGranted = { refreshNotification() },
-                )
+                notificationsDelegate.requestNotificationPermission(onPermissionGranted = { refreshNotification() })
             }
 
             withContext(mainDispatcher) {
@@ -138,21 +121,25 @@ abstract class AbstractPrivateNotificationService(
             }
         }
 
-        privateTabsScope = store.flowScoped(dispatcher = mainDispatcher) { flow ->
-            flow.map { state -> state.privateTabs.isEmpty() }
-                .distinctUntilChanged()
-                .collect { noPrivateTabs ->
-                    if (noPrivateTabs) stopService()
-                }
-        }
+        privateTabsScope =
+            store.flowScoped(dispatcher = mainDispatcher) { flow ->
+                flow
+                    .map { state -> state.privateTabs.isEmpty() }
+                    .distinctUntilChanged()
+                    .collect { noPrivateTabs ->
+                        if (noPrivateTabs) stopService()
+                    }
+            }
 
-        localeScope = store.flowScoped(dispatcher = mainDispatcher) { flow ->
-            flow.mapNotNull { state -> state.locale }
-                .distinctUntilChanged()
-                .collect {
-                    notifyLocaleChanged()
-                }
-        }
+        localeScope =
+            store.flowScoped(dispatcher = mainDispatcher) { flow ->
+                flow
+                    .mapNotNull { state -> state.locale }
+                    .distinctUntilChanged()
+                    .collect {
+                        notifyLocaleChanged()
+                    }
+            }
     }
 
     /**
@@ -161,15 +148,16 @@ abstract class AbstractPrivateNotificationService(
      * @param channelId The channel id for the [Notification]
      */
     private fun createNotification(channelId: String): Notification {
-        val eraseIntent = Intent(ACTION_ERASE).let { intent ->
-            intent.setClass(this, this::class.java)
-            PendingIntent.getService(
-                this,
-                0,
-                intent,
-                PendingIntent.FLAG_IMMUTABLE or FLAG_ONE_SHOT,
-            )
-        }
+        val eraseIntent =
+            Intent(ACTION_ERASE).let { intent ->
+                intent.setClass(this, this::class.java)
+                PendingIntent.getService(
+                    this,
+                    0,
+                    intent,
+                    PendingIntent.FLAG_IMMUTABLE or FLAG_ONE_SHOT,
+                )
+            }
 
         return NotificationCompat.Builder(this, channelId)
             .setOngoing(true)
@@ -203,9 +191,10 @@ abstract class AbstractPrivateNotificationService(
     final override fun onBind(intent: Intent?): IBinder? = null
 
     final override fun onTaskRemoved(rootIntent: Intent) {
-        if (rootIntent.action in defaultIgnoreTaskActions ||
-            rootIntent.action in ignoreTaskActions() ||
-            rootIntent.component?.className in ignoreTaskComponentClasses()
+        if (
+            rootIntent.action in defaultIgnoreTaskActions ||
+                rootIntent.action in ignoreTaskActions() ||
+                rootIntent.component?.className in ignoreTaskComponentClasses()
         ) {
             // The app may have multiple tasks (e.g. for PWAs). If tasks get removed that are not
             // the main browser task then we do not want to remove all private tabs here.
@@ -226,16 +215,14 @@ abstract class AbstractPrivateNotificationService(
     }
 
     /**
-     * Builds a list of Intent actions that will get ignored
-     * when they are in the root intent that gets passed to onTaskRemoved().
-     *
+     * Builds a list of Intent actions that will get ignored when they are in the root intent that gets passed to
+     * onTaskRemoved().
      */
     abstract fun ignoreTaskActions(): List<String>
 
     /**
-     * Builds a list of Intent components' qualified class name that will get ignored
-     * when they are in the root intent that gets passed to onTaskRemoved().
-     *
+     * Builds a list of Intent components' qualified class name that will get ignored when they are in the root intent
+     * that gets passed to onTaskRemoved().
      */
     abstract fun ignoreTaskComponentClasses(): List<String>
 
@@ -244,17 +231,15 @@ abstract class AbstractPrivateNotificationService(
             "mozilla.components.feature.privatemode.notification.AbstractPrivateNotificationService"
         const val ACTION_ERASE = "mozilla.components.feature.privatemode.action.ERASE"
 
-        val NOTIFICATION_CHANNEL = ChannelData(
-            id = "browsing-session",
-            name = R.string.mozac_feature_privatemode_notification_channel_name,
-            importance = IMPORTANCE_LOW,
-        )
+        val NOTIFICATION_CHANNEL =
+            ChannelData(
+                id = "browsing-session",
+                name = R.string.mozac_feature_privatemode_notification_channel_name,
+                importance = IMPORTANCE_LOW,
+            )
 
         // List of default Intent actions that will get ignored
         // when they are in the root intent that gets passed to onTaskRemoved().
-        @VisibleForTesting
-        internal val defaultIgnoreTaskActions = listOf(
-            "mozilla.components.feature.pwa.VIEW_PWA",
-        )
+        @VisibleForTesting internal val defaultIgnoreTaskActions = listOf("mozilla.components.feature.pwa.VIEW_PWA")
     }
 }

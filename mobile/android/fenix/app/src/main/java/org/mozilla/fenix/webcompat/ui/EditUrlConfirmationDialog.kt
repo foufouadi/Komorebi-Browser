@@ -73,9 +73,10 @@ fun EditUrlConfirmationDialog(
                 TextButton(
                     text = stringResource(id = R.string.webcompat_reporter_edit_url_dialog_dismiss),
                     onClick = onDismiss,
-                    modifier = Modifier.testTag(
-                        tag = BrokenSiteReporterTestTags.BROKEN_SITE_REPORTER_EDIT_URL_DIALOG_DISMISS_BUTTON,
-                    ),
+                    modifier =
+                        Modifier.testTag(
+                            tag = BrokenSiteReporterTestTags.BROKEN_SITE_REPORTER_EDIT_URL_DIALOG_DISMISS_BUTTON
+                        ),
                 )
 
                 Spacer(modifier = Modifier.width(FirefoxTheme.layout.space.static100))
@@ -84,9 +85,10 @@ fun EditUrlConfirmationDialog(
                     text = stringResource(id = R.string.webcompat_reporter_edit_url_dialog_save),
                     onClick = onSave,
                     enabled = !isError,
-                    modifier = Modifier.testTag(
-                        tag = BrokenSiteReporterTestTags.BROKEN_SITE_REPORTER_EDIT_URL_DIALOG_SAVE_BUTTON,
-                    ),
+                    modifier =
+                        Modifier.testTag(
+                            tag = BrokenSiteReporterTestTags.BROKEN_SITE_REPORTER_EDIT_URL_DIALOG_SAVE_BUTTON
+                        ),
                 )
             }
         },
@@ -95,9 +97,7 @@ fun EditUrlConfirmationDialog(
 
 @FlexibleWindowPreview
 @Composable
-private fun EditUrlConfirmationDialogPreview(
-    @PreviewParameter(PreviewThemeProvider::class) theme: Theme,
-) {
+private fun EditUrlConfirmationDialogPreview(@PreviewParameter(PreviewThemeProvider::class) theme: Theme) {
     FirefoxTheme(theme) {
         Surface {
             EditUrlConfirmationDialog(

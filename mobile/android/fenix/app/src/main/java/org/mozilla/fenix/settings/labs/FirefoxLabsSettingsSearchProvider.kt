@@ -17,9 +17,7 @@ import org.mozilla.fenix.settings.settingssearch.SettingsSearchProvider
  *
  * @param isLabsEnabled Returns whether Firefox Labs is currently enabled.
  */
-class FirefoxLabsSettingsSearchProvider(
-    private val isLabsEnabled: () -> Boolean,
-) : SettingsSearchProvider {
+class FirefoxLabsSettingsSearchProvider(private val isLabsEnabled: () -> Boolean) : SettingsSearchProvider {
 
     private val preferenceFileInformation = PreferenceFileInformation.FirefoxLabsPreferences
 
@@ -33,7 +31,7 @@ class FirefoxLabsSettingsSearchProvider(
                 preferenceKey = FIREFOX_LABS_KEY,
                 categoryHeader = context.getString(preferenceFileInformation.categoryHeaderResourceId),
                 preferenceFileInformation = preferenceFileInformation,
-            ),
+            )
         )
     }
 

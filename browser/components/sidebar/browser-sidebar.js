@@ -1923,24 +1923,7 @@ var SidebarController = {
       return;
     }
 
-    const preferredHeight = this._state.launcherExpanded
-      ? this._state.expandedPinnedTabsHeight
-      : this._state.collapsedPinnedTabsHeight;
-
-    if (!preferredHeight) {
-      // Nothing stored for this state, so clear any height left over from the
-      // other state rather than leaving it stranded at the wrong size.
-      this._pinnedTabsContainer.style.height = "";
-      return;
-    }
-
-    let itemsWrapperHeight = window.windowUtils.getBoundsWithoutFlushing(
-      this._pinnedTabsItemsWrapper
-    ).height;
-
-    // Clamp for display only — never overwrite the user's saved preference
-    const clampedHeight = Math.min(preferredHeight, itemsWrapperHeight);
-    this._pinnedTabsContainer.style.height = `${clampedHeight}px`;
+    this._state.updatePinnedTabsHeight();
   },
 
   async updatePinnedTabsHeightAfterReflow() {

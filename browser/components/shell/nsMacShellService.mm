@@ -25,11 +25,13 @@
 #include "DesktopBackgroundImage.h"
 
 #include <Carbon/Carbon.h>
+#include <CoreFoundation/CFArray.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <ApplicationServices/ApplicationServices.h>
 
 #import <AppKit/AppKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import <ServiceManagement/ServiceManagement.h>
 
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/Promise.h"
@@ -528,5 +530,133 @@ nsMacShellService::IsDefaultHandlerAWebBrowserFor(
     }
   }
 
+  return NS_OK;
+}
+
+// For OS versions >= 13.0 we use the newest available API (SMAppService)
+// but for earlier OS versions we use the old LSSharedFileList API which was
+// deprecated in 10.11 but was still working up to version 12 (indeed it
+// still works in 26.0). The API that wasn't deprecated between 10.11 and 12
+// is much more complex and requires a helper application so using this older
+// API felt like an ok trade off for versions before 13.
+static bool EnableLaunchOnLoginBefore13() {
+  LSSharedFileListRef loginItemsListRef = LSSharedFileListCreate(
+      nullptr, kLSSharedFileListSessionLoginItems, nullptr);
+  if (!loginItemsListRef) {
+    return false;
+  }
+  NSURL* bundleURL = [[NSBundle mainBundle] bundleURL];
+
+  LSSharedFileListItemRef itemRef;
+  itemRef = LSSharedFileListInsertItemURL(
+      loginItemsListRef, kLSSharedFileListItemLast, nullptr, nullptr,
+      (__bridge CFURLRef)bundleURL, nullptr, nullptr);
+
+  CFRelease(loginItemsListRef);
+
+  if (itemRef) {
+    CFRelease(itemRef);
+  } else {
+    return false;
+  }
+
+  return true;
+}
+
+NS_IMETHODIMP
+nsMacShellService::EnableLaunchOnLogin(bool* aResult) {
+  if (@available(macOS 13.0, *)) {
+    *aResult = [[SMAppService mainAppService] registerAndReturnError:nil];
+  } else {
+    *aResult = EnableLaunchOnLoginBefore13();
+  }
+
+  return NS_OK;
+}
+
+#define kLSSharesFileListEmptyOptions 0
+
+/**
+ *
+ * Find the bundle in the Login Items shared file list and
+ * maybe remove it. Returns true if it was found (and removed).
+ *
+ * @param {bool} alsoRemove - Whether the item should be removed
+ * when it is found.
+ *
+ * @returns {bool}
+ *          Whether item was found in the Login Items.
+ */
+static bool FindAndMaybeRemoveBundleBefore13(bool aAlsoRemove) {
+  LSSharedFileListRef loginItemsListRef = LSSharedFileListCreate(
+      nullptr, kLSSharedFileListSessionLoginItems, nullptr);
+  if (!loginItemsListRef) {
+    return false;
+  }
+
+  CFArrayRef snapshot =
+      LSSharedFileListCopySnapshot(loginItemsListRef, nullptr);
+  if (!snapshot) {
+    CFRelease(loginItemsListRef);
+    return false;
+  }
+
+  NSArray* loginItems = (NSArray*)snapshot;
+  NSURL* bundleURL = [[NSBundle mainBundle] bundleURL];
+
+  bool found = false;
+
+  for (id item in loginItems) {
+    // itemRef doesn't need released as it is owned by snapshot
+    LSSharedFileListItemRef itemRef = (LSSharedFileListItemRef)item;
+    CFURLRef itemURLRef;
+
+    itemURLRef = LSSharedFileListItemCopyResolvedURL(
+        itemRef, kLSSharesFileListEmptyOptions, nullptr);
+    if (!itemURLRef) {
+      continue;
+    }
+
+    NSURL* itemURL = (NSURL*)itemURLRef;
+
+    if ([itemURL isEqual:bundleURL]) {
+      if (aAlsoRemove) {
+        LSSharedFileListItemRemove(loginItemsListRef, itemRef);
+      }
+
+      found = true;
+    }
+
+    CFRelease(itemURLRef);
+
+    if (found) {
+      break;
+    }
+  }
+
+  CFRelease(snapshot);
+  CFRelease(loginItemsListRef);
+
+  return found;
+}
+
+NS_IMETHODIMP
+nsMacShellService::DisableLaunchOnLogin(bool* aResult) {
+  if (@available(macOS 13.0, *)) {
+    *aResult = [[SMAppService mainAppService] unregisterAndReturnError:nil];
+  } else {
+    *aResult = FindAndMaybeRemoveBundleBefore13(true);
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsMacShellService::GetLaunchOnLoginEnabled(bool* aResult) {
+  if (@available(macOS 13.0, *)) {
+    SMAppServiceStatus status = [[SMAppService mainAppService] status];
+    *aResult = (status == SMAppServiceStatusEnabled);
+  } else {
+    *aResult = FindAndMaybeRemoveBundleBefore13(false);
+  }
   return NS_OK;
 }

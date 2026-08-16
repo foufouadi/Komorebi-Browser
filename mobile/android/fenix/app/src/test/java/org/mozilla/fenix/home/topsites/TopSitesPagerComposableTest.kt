@@ -21,8 +21,7 @@ import org.mozilla.fenix.theme.Theme
 @RunWith(AndroidJUnit4::class)
 class TopSitesPagerComposableTest {
 
-    @get:Rule
-    val composeTestRule = createComposeRule()
+    @get:Rule val composeTestRule = createComposeRule()
 
     private fun setTopSitesContent(
         count: Int,

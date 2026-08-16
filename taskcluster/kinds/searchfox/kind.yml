@@ -69,6 +69,7 @@ tasks:
                 - linux64-nasm
                 - linux64-node
                 - linux64-rust
+                - linux64-rust-analyzer
                 - linux64-cbindgen
                 - linux64-dump_syms
                 - linux64-pkgconf
@@ -100,6 +101,7 @@ tasks:
                 - linux64-nasm
                 - linux64-node
                 - linux64-rust
+                - linux64-rust-analyzer
                 - linux64-cbindgen
                 - linux64-dump_syms
                 - linux64-pkgconf
@@ -132,6 +134,7 @@ tasks:
                 - linux64-nasm
                 - linux64-node
                 - linux64-rust-cross
+                - linux64-rust-analyzer
                 - linux64-cbindgen
                 - linux64-dump_syms
                 - macosx64-sdk
@@ -167,6 +170,7 @@ tasks:
                 - linux64-nasm
                 - linux64-node
                 - linux64-rust-cross
+                - linux64-rust-analyzer
                 - linux64-cbindgen
                 - linux64-dump_syms
                 - macosx64-sdk
@@ -203,6 +207,7 @@ tasks:
                 - linux64-nasm
                 - linux64-node
                 - linux64-rust-cross
+                - linux64-rust-analyzer
                 - linux64-cbindgen
                 - linux64-dump_syms
                 - macosx64-sdk
@@ -240,6 +245,7 @@ tasks:
                 - linux64-nasm
                 - linux64-node
                 - linux64-rust-ios
+                - linux64-rust-analyzer
                 - linux64-cbindgen
                 - linux64-dump_syms
                 - ios-sdk
@@ -275,6 +281,7 @@ tasks:
                 - linux64-nasm
                 - linux64-node
                 - linux64-rust-cross
+                - linux64-rust-analyzer
                 - linux64-rust-size
                 - linux64-upx
                 - linux64-winchecksec
@@ -318,6 +325,7 @@ tasks:
                 - linux64-nasm
                 - linux64-node
                 - linux64-rust-cross
+                - linux64-rust-analyzer
                 - linux64-rust-size
                 - linux64-upx
                 - linux64-winchecksec
@@ -361,6 +369,7 @@ tasks:
                 - linux64-jdk
                 - linux64-clang
                 - linux64-rust-cross
+                - linux64-rust-analyzer
                 - linux64-rust-size
                 - linux64-cbindgen
                 - linux64-dump_syms

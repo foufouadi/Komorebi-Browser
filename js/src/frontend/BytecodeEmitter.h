@@ -730,10 +730,13 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   }
   [[nodiscard]] bool emitGetDotGeneratorInScope(EmitterScope& currentScope);
 
+  [[nodiscard]] bool checkResumeIndexLimit();
   [[nodiscard]] bool allocateResumeIndex(BytecodeOffset offset,
                                          uint32_t* resumeIndex);
-  [[nodiscard]] bool allocateResumeIndexRange(
-      mozilla::Span<BytecodeOffset> offsets, uint32_t* firstResumeIndex);
+  [[nodiscard]] bool allocateTableSwitchResumeIndexRange(
+      mozilla::Span<BytecodeOffset> caseOffsets, BytecodeOffset switchOffset,
+      uint32_t* firstResumeIndex);
+  [[nodiscard]] bool finishResumeOffsets();
 
   [[nodiscard]] bool emitInitialYield(UnaryNode* yieldNode);
   [[nodiscard]] bool emitYield(UnaryNode* yieldNode);

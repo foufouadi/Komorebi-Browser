@@ -24,26 +24,31 @@ data class BehaviorBaseTestConfig(
  */
 fun BehaviorContextVariant.toBaseTestConfig(): BehaviorBaseTestConfig {
     return BehaviorBaseTestConfig(
-        skipOnboarding = booleanValue(
-            key = "SkipOnboarding",
-            default = true,
-        ),
-        isPageLoadTranslationsPromptEnabled = booleanValue(
-            key = "PageLoadTranslationsPromptEnabled",
-            default = false,
-        ),
-        isPocketEnabled = booleanValue(
-            key = "PocketEnabled",
-            default = true,
-        ),
-        isRecentlyVisitedFeatureEnabled = booleanValue(
-            key = "RecentlyVisitedEnabled",
-            default = true,
-        ),
-        isUnifiedTrustPanelEnabled = booleanValue(
-            key = "UnifiedTrustPanelEnabled",
-            default = true,
-        ),
+        skipOnboarding =
+            booleanValue(
+                key = "SkipOnboarding",
+                default = true,
+            ),
+        isPageLoadTranslationsPromptEnabled =
+            booleanValue(
+                key = "PageLoadTranslationsPromptEnabled",
+                default = false,
+            ),
+        isPocketEnabled =
+            booleanValue(
+                key = "PocketEnabled",
+                default = true,
+            ),
+        isRecentlyVisitedFeatureEnabled =
+            booleanValue(
+                key = "RecentlyVisitedEnabled",
+                default = true,
+            ),
+        isUnifiedTrustPanelEnabled =
+            booleanValue(
+                key = "UnifiedTrustPanelEnabled",
+                default = true,
+            ),
     )
 }
 
@@ -51,7 +56,5 @@ private fun BehaviorContextVariant.booleanValue(
     key: String,
     default: Boolean,
 ): Boolean {
-    return values[key]
-        ?.toBooleanStrictOrNull()
-        ?: default
+    return values[key]?.toBooleanStrictOrNull() ?: default
 }

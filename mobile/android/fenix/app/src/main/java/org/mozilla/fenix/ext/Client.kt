@@ -6,24 +6,26 @@ package org.mozilla.fenix.ext
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import mozilla.components.concept.fetch.Client
 import mozilla.components.concept.fetch.Request
-import java.io.IOException
 
 /**
  * Given an image [url], fetches and returns a [Bitmap] if possible, otherwise null.
  *
  * @param url The image URL to fetch from.
  */
-suspend fun Client.bitmapForUrl(url: String): Bitmap? = withContext(Dispatchers.IO) {
-    // Code below will cache it in Gecko's cache, which ensures that as long as we've fetched it once,
-    // we will be able to display this avatar as long as the cache isn't purged (e.g. via 'clear user data').
-    val body = try {
-        fetch(Request(url, useCaches = true, conservative = true)).body
-    } catch (e: IOException) {
-        return@withContext null
+suspend fun Client.bitmapForUrl(url: String): Bitmap? =
+    withContext(Dispatchers.IO) {
+        // Code below will cache it in Gecko's cache, which ensures that as long as we've fetched it once,
+        // we will be able to display this avatar as long as the cache isn't purged (e.g. via 'clear user data').
+        val body =
+            try {
+                fetch(Request(url, useCaches = true, conservative = true)).body
+            } catch (e: IOException) {
+                return@withContext null
+            }
+        body.useStream { BitmapFactory.decodeStream(it) }
     }
-    body.useStream { BitmapFactory.decodeStream(it) }
-}

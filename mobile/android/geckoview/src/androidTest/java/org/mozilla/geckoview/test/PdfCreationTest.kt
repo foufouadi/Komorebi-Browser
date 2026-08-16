@@ -1,5 +1,5 @@
 /* Any copyright is dedicated to the Public Domain.
-   http://creativecommons.org/publicdomain/zero/1.0/ */
+http://creativecommons.org/publicdomain/zero/1.0/ */
 
 package org.mozilla.geckoview.test
 
@@ -15,6 +15,9 @@ import androidx.test.ext.junit.rules.ActivityScenarioRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.LargeTest
 import androidx.test.platform.app.InstrumentationRegistry
+import java.io.File
+import java.io.InputStream
+import kotlin.math.roundToInt
 import org.hamcrest.Matchers.equalTo
 import org.junit.After
 import org.junit.Assert.assertTrue
@@ -28,9 +31,6 @@ import org.mozilla.geckoview.Autofill
 import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.GeckoViewPrintDocumentAdapter
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.NullDelegate
-import java.io.File
-import java.io.InputStream
-import kotlin.math.roundToInt
 
 @RunWith(AndroidJUnit4::class)
 @LargeTest
@@ -42,8 +42,7 @@ class PdfCreationTest : BaseSessionTest() {
     var scaledWidth = 12
     private val uiAutomation = InstrumentationRegistry.getInstrumentation().uiAutomation
 
-    @get:Rule
-    override val rules: RuleChain = RuleChain.outerRule(activityRule).around(sessionRule)
+    @get:Rule override val rules: RuleChain = RuleChain.outerRule(activityRule).around(sessionRule)
 
     @Before
     fun setup() {
@@ -140,11 +139,7 @@ class PdfCreationTest : BaseSessionTest() {
                 assertTrue("The PDF green color matches.", greenPixel == Color.GREEN)
                 val bluePixel = scaled[scaledWidth - 2, scaledHeight / 2]
                 assertTrue("The PDF blue color matches.", bluePixel == Color.BLUE)
-                val doPixelsMatch = (
-                    redPixel == Color.RED &&
-                        greenPixel == Color.GREEN &&
-                        bluePixel == Color.BLUE
-                    )
+                val doPixelsMatch = (redPixel == Color.RED && greenPixel == Color.GREEN && bluePixel == Color.BLUE)
                 assertTrue("The PDF generated RGB colors.", doPixelsMatch)
             }
         }
@@ -192,7 +187,11 @@ class PdfCreationTest : BaseSessionTest() {
 
             val response = mainSession.pdfFileSaver.save()
             sessionRule.waitForResult(response).let {
-                assertThat("The PDF File must the same as the original one.", it.body?.readBytes(), equalTo(originalBytes))
+                assertThat(
+                    "The PDF File must the same as the original one.",
+                    it.body?.readBytes(),
+                    equalTo(originalBytes),
+                )
             }
         }
     }

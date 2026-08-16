@@ -80,7 +80,7 @@ struct SocketDataArgs
   SocketInfo[] info;
 };
 
-struct SocketPorcessInitAttributes {
+struct SocketProcessInitAttributes {
   bool mOffline;
   bool mConnectivity;
   bool mInitSandbox;
@@ -154,7 +154,7 @@ parent:
 #endif  // defined(XP_WIN)
 
 child:
-  async Init(SocketPorcessInitAttributes aAttributes);
+  async Init(SocketProcessInitAttributes aAttributes);
   async PreferenceUpdate(Pref pref);
   async RequestMemoryReport(uint32_t generation,
                             bool anonymize,

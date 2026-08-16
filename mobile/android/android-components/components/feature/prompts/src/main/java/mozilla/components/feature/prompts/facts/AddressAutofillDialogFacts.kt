@@ -9,13 +9,9 @@ import mozilla.components.support.base.facts.Action
 import mozilla.components.support.base.facts.Fact
 import mozilla.components.support.base.facts.collect
 
-/**
- * Facts emitted for telemetry related to the Autofill prompt feature for addresses.
- */
+/** Facts emitted for telemetry related to the Autofill prompt feature for addresses. */
 class AddressAutofillDialogFacts {
-    /**
-     * Specific types of telemetry items.
-     */
+    /** Specific types of telemetry items. */
     object Items {
         const val AUTOFILL_ADDRESS_FORM_DETECTED = "autofill_address_form_detected"
         const val AUTOFILL_ADDRESS_SUCCESS = "autofill_address_success"
@@ -33,12 +29,13 @@ private fun emitAddressAutofillDialogFact(
     metadata: Map<String, Any>? = null,
 ) {
     Fact(
-        Component.FEATURE_PROMPTS,
-        action,
-        item,
-        value,
-        metadata,
-    ).collect()
+            Component.FEATURE_PROMPTS,
+            action,
+            item,
+            value,
+            metadata,
+        )
+        .collect()
 }
 
 internal fun emitSuccessfulAddressAutofillFormDetectedFact() {

@@ -13,6 +13,7 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.annotation.VisibleForTesting
 import androidx.fragment.compose.content
+import com.google.android.material.R as materialR
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import mozilla.components.compose.base.theme.AcornTheme
@@ -23,17 +24,16 @@ import mozilla.components.feature.prompts.dialog.KEY_SESSION_ID
 import mozilla.components.feature.prompts.dialog.KEY_SHOULD_DISMISS_ON_LOAD
 import mozilla.components.feature.prompts.dialog.PromptDialogFragment
 import mozilla.components.support.utils.ext.getParcelableCompat
-import com.google.android.material.R as materialR
 
 internal const val KEY_ADDRESS = "KEY_ADDRESS"
 
 /**
- * [DialogFragment] that displays a read-only "Save address?" confirmation, or "Update address?"
- * when the candidate merges into an already saved address.
+ * [DialogFragment] that displays a read-only "Save address?" confirmation, or "Update address?" when the candidate
+ * merges into an already saved address.
  *
  * Renders entirely in Jetpack Compose. The fragment shell extends [PromptDialogFragment] so that
- * [mozilla.components.feature.prompts.PromptFeature] can track it via its existing
- * active-prompt machinery and route confirm/cancel callbacks through [feature].
+ * [mozilla.components.feature.prompts.PromptFeature] can track it via its existing active-prompt machinery and route
+ * confirm/cancel callbacks through [feature].
  */
 internal class AddressSaveDialogFragment : PromptDialogFragment() {
 
@@ -43,8 +43,8 @@ internal class AddressSaveDialogFragment : PromptDialogFragment() {
     }
 
     /**
-     * Gecko sends the guid of the record being merged into when the capture is an update, and no
-     * guid when the address is new. See `FormAutofillPrompter.promptToSave`.
+     * Gecko sends the guid of the record being merged into when the capture is an update, and no guid when the address
+     * is new. See `FormAutofillPrompter.promptToSave`.
      */
     @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
     internal val isUpdate by lazy { address.guid.isNotBlank() }
@@ -53,8 +53,7 @@ internal class AddressSaveDialogFragment : PromptDialogFragment() {
         return BottomSheetDialog(requireContext(), R.style.MozDialogStyle).apply {
             setCancelable(true)
             setOnShowListener {
-                val bottomSheet =
-                    findViewById<View>(materialR.id.design_bottom_sheet) as FrameLayout
+                val bottomSheet = findViewById<View>(materialR.id.design_bottom_sheet) as FrameLayout
                 val behavior = BottomSheetBehavior.from(bottomSheet)
                 behavior.peekHeight = context.resources.displayMetrics.heightPixels
                 behavior.state = BottomSheetBehavior.STATE_EXPANDED

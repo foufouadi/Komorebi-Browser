@@ -1067,7 +1067,7 @@ static void ReleaseSurface(void* aReleaseRef, const void* aBaseAddress) {
 static void ReleaseImage(void* aImageGrip, const void* aDataPtr,
                          size_t aDataSize, size_t aNumOfPlanes,
                          const void** aPlanes) {
-  (static_cast<PlanarYCbCrImage*>(aImageGrip))->Release();
+  (static_cast<Image*>(aImageGrip))->Release();
 }
 
 CVPixelBufferRef AppleVTEncoder::CreateCVPixelBuffer(Image* aSource) {
@@ -1107,15 +1107,20 @@ CVPixelBufferRef AppleVTEncoder::CreateCVPixelBuffer(Image* aSource) {
     // encoder.
   }
 
-  if (aSource->GetFormat() == ImageFormat::PLANAR_YCBCR) {
-    PlanarYCbCrImage* image = aSource->AsPlanarYCbCrImage();
-    if (!image || !image->GetData()) {
-      LOGE("Failed to get PlanarYCbCrImage or its data");
+  if (aSource->GetFormat() == ImageFormat::PLANAR_YCBCR ||
+      aSource->GetFormat() == ImageFormat::NV_IMAGE) {
+    const PlanarYCbCrData* yuv = nullptr;
+    if (PlanarYCbCrImage* image = aSource->AsPlanarYCbCrImage()) {
+      yuv = image->GetData();
+    } else if (NVImage* image = aSource->AsNVImage()) {
+      yuv = image->GetData();
+    }
+    if (!yuv) {
+      LOGE("Failed to get YCbCr data");
       return nullptr;
     }
 
     size_t numPlanes = NumberOfPlanes(pixelFormat);
-    const PlanarYCbCrImage::Data* yuv = image->GetData();
 
     auto ySize = yuv->YDataSize();
     auto cbcrSize = yuv->CbCrDataSize();
@@ -1149,19 +1154,18 @@ CVPixelBufferRef AppleVTEncoder::CreateCVPixelBuffer(Image* aSource) {
     }
 
     CVPixelBufferRef buffer = nullptr;
-    image->AddRef();  // Grip input buffers.
+    aSource->AddRef();
     CVReturn rv = CVPixelBufferCreateWithPlanarBytes(
         kCFAllocatorDefault, yuv->mPictureRect.width, yuv->mPictureRect.height,
         pixelFormat, nullptr /* dataPtr */, 0 /* dataSize */, numPlanes,
         addresses, widths, heights, strides, ReleaseImage /* releaseCallback */,
-        image /* releaseRefCon */, nullptr /* pixelBufferAttributes */,
+        aSource /* releaseRefCon */, nullptr /* pixelBufferAttributes */,
         &buffer);
     if (rv == kCVReturnSuccess) {
       return buffer;
-      // |image| will be released in |ReleaseImage()|.
     }
     LOGE("CVPIxelBufferCreateWithPlanarBytes error");
-    image->Release();
+    aSource->Release();
     return nullptr;
   }
 

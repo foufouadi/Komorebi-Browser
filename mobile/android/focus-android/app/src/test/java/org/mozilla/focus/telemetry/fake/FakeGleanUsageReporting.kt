@@ -8,10 +8,7 @@ package org.mozilla.focus.telemetry.fake
 
 import org.mozilla.focus.telemetry.GleanUsageReportingApi
 
-/**
- * Allows tests to insert their own version of a GleanUsageReportingApi
- * and make assertions against it
- */
+/** Allows tests to insert their own version of a GleanUsageReportingApi and make assertions against it */
 class FakeGleanUsageReporting : GleanUsageReportingApi {
     var pingSubmitCount: Int = 0
     var lastUsageReason: String? = null

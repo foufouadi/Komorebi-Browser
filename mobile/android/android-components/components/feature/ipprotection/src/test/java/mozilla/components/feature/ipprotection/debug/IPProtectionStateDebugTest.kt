@@ -26,8 +26,7 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class IPProtectionStateDebugTest {
 
-    @get:Rule
-    val composeTestRule = createComposeRule()
+    @get:Rule val composeTestRule = createComposeRule()
 
     @Test
     fun `WHEN rendered with a populated state THEN section headers and values are displayed`() {
@@ -69,24 +68,23 @@ class IPProtectionStateDebugTest {
     fun `WHEN lastError has a value THEN that value is displayed`() {
         composeTestRule.setContent {
             AcornTheme {
-                IPProtectionStateDebugContent(
-                    state = IPProtectionState(lastError = "network-error"),
-                )
+                IPProtectionStateDebugContent(state = IPProtectionState(lastError = "network-error"))
             }
         }
 
         composeTestRule.onNodeWithText("network-error").assertExists()
     }
 
-    private val populatedState = IPProtectionState(
-        eligibilityStatus = EligibilityStatus.Eligible,
-        proxyStatus = Authorized.Active,
-        serviceStatus = ServiceState.Ready,
-        remainingDataBytes = 2_000_000_000L,
-        maxDataBytes = 5_000_000_000L,
-        resetDate = "2026-06-01",
-        accountState = AccountState(status = AccountStatus.EnrolledAndEntitled),
-        lastError = null,
-        activate = true,
-    )
+    private val populatedState =
+        IPProtectionState(
+            eligibilityStatus = EligibilityStatus.Eligible,
+            proxyStatus = Authorized.Active,
+            serviceStatus = ServiceState.Ready,
+            remainingDataBytes = 2_000_000_000L,
+            maxDataBytes = 5_000_000_000L,
+            resetDate = "2026-06-01",
+            accountState = AccountState(status = AccountStatus.EnrolledAndEntitled),
+            lastError = null,
+            activate = true,
+        )
 }

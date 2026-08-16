@@ -9,8 +9,8 @@ package org.mozilla.fenix.ui.efficiency.logging
  *
  * Why this is a global holder:
  * - We want logging to be automatic and consistent without polluting test code.
- * - Most helper calls flow through BasePage / BaseTest, and wiring a reporter through every
- *   page object constructor quickly becomes noisy boilerplate.
+ * - Most helper calls flow through BasePage / BaseTest, and wiring a reporter through every page object constructor
+ *   quickly becomes noisy boilerplate.
  *
  * Tradeoffs:
  * - A global is not "pure DI", but it's pragmatic for instrumentation tests where:
@@ -23,10 +23,9 @@ package org.mozilla.fenix.ui.efficiency.logging
  * - The logger should never be allowed to fail a test; it is a debugging aid.
  *
  * Future direction:
- * - Once the logging approach stabilizes, we can replace this with dependency injection
- *   (or a per-test context object) without changing test code.
+ * - Once the logging approach stabilizes, we can replace this with dependency injection (or a per-test context object)
+ *   without changing test code.
  */
 object TestLogging {
-    @Volatile
-    var reporter: TimedReporter? = null
+    @Volatile var reporter: TimedReporter? = null
 }

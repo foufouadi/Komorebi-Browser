@@ -18,16 +18,14 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.unit.dp
-import mozilla.components.compose.base.theme.surfaceDimVariant
+import mozilla.components.ui.icons.R as iconsR
 import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 import org.mozilla.fenix.compose.list.IconListItem
-import mozilla.components.ui.icons.R as iconsR
 
 class MenuItemTest {
-    @get:Rule
-    val composeTestRule = createComposeRule()
+    @get:Rule val composeTestRule = createComposeRule()
 
     @Test
     fun testIconListItemIconUntintedArgumentRespected() {
@@ -49,8 +47,10 @@ class MenuItemTest {
                     )
                 }
             }
-            val untintedIconListItem = onNode(hasTestTag("NoTint"), useUnmergedTree = true).captureToImage().asAndroidBitmap()
-            val defaultTintedIconListItem = onNode(hasTestTag("DefaultTint"), useUnmergedTree = true).captureToImage().asAndroidBitmap()
+            val untintedIconListItem =
+                onNode(hasTestTag("NoTint"), useUnmergedTree = true).captureToImage().asAndroidBitmap()
+            val defaultTintedIconListItem =
+                onNode(hasTestTag("DefaultTint"), useUnmergedTree = true).captureToImage().asAndroidBitmap()
 
             assertFalse(untintedIconListItem.sameColorsAs(defaultTintedIconListItem))
         }

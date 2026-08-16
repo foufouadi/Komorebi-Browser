@@ -1,36 +1,4 @@
 {
-  "nova": {
-    "background": {
-      "color": {
-        "selected": {
-          "value": {
-            "forcedColors": "SelectedItem"
-          }
-        }
-      }
-    },
-    "border": {
-      "width": {
-        "split": {
-          "value": "0"
-        }
-      }
-    },
-    "gap": {
-      "split": {
-        "value": "0"
-      }
-    },
-    "split": {
-      "separator": {
-        "background": {
-          "color": {
-            "value": "{button.border.color.@base}"
-          }
-        }
-      }
-    }
-  },
   "background": {
     "color": {
       "@base": {

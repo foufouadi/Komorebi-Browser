@@ -7,14 +7,13 @@ package mozilla.components.browser.state.state
 import java.util.UUID
 
 /**
- * Value type representing a tab partition. Partitions can overlap i.e., a tab
- * can be in multiple partitions at the same time.
+ * Value type representing a tab partition. Partitions can overlap i.e., a tab can be in multiple partitions at the same
+ * time.
  *
- * @property id The ID of a tab partition. This should uniquely identify
- * the feature responsible for managing those groups.
- * @property tabGroups The groups of tabs in this partition. A partition can
- * have one or more groups, depending on use case. Empty partitions will be
- * removed by the system.
+ * @property id The ID of a tab partition. This should uniquely identify the feature responsible for managing those
+ *   groups.
+ * @property tabGroups The groups of tabs in this partition. A partition can have one or more groups, depending on use
+ *   case. Empty partitions will be removed by the system.
  */
 data class TabPartition(
     val id: String,
@@ -35,20 +34,19 @@ data class TabGroup(
 )
 
 /**
- * Returns the first tab group matching the provided [name], or null if no match
- * was found. Note that we allow multiple groups with the same name in a
- * partition but disambiguation needs to be handled on a feature level.
+ * Returns the first tab group matching the provided [name], or null if no match was found. Note that we allow multiple
+ * groups with the same name in a partition but disambiguation needs to be handled on a feature level.
  */
-fun TabPartition.getGroupByName(name: String) = this.tabGroups.firstOrNull {
-    it.name.equals(name, ignoreCase = true)
-}
+fun TabPartition.getGroupByName(name: String) =
+    this.tabGroups.firstOrNull {
+        it.name.equals(name, ignoreCase = true)
+    }
 
-/**
- * Returns the tab group matching the provided [id], or null if not match was found.
- */
-fun TabPartition.getGroupById(id: String) = this.tabGroups.firstOrNull {
-    it.id == id
-}
+/** Returns the tab group matching the provided [id], or null if not match was found. */
+fun TabPartition.getGroupById(id: String) =
+    this.tabGroups.firstOrNull {
+        it.id == id
+    }
 
 /**
  * Check if a [TabPartition] has no tabs
@@ -56,8 +54,7 @@ fun TabPartition.getGroupById(id: String) = this.tabGroups.firstOrNull {
  * @return true if the [TabPartition] has no tabs, false otherwise.
  */
 fun TabPartition?.isEmpty(): Boolean {
-    return this?.tabGroups?.filter { tabGroup -> tabGroup.tabIds.isNotEmpty() }
-        .isNullOrEmpty()
+    return this?.tabGroups?.filter { tabGroup -> tabGroup.tabIds.isNotEmpty() }.isNullOrEmpty()
 }
 
 /**

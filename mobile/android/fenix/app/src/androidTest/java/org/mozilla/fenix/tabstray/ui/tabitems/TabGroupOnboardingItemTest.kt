@@ -27,8 +27,7 @@ import org.mozilla.fenix.theme.Theme
 
 @RunWith(AndroidJUnit4::class)
 class TabGroupOnboardingItemTest {
-    @get:Rule
-    val composeTestRule = createComposeRule()
+    @get:Rule val composeTestRule = createComposeRule()
 
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
@@ -45,14 +44,10 @@ class TabGroupOnboardingItemTest {
             }
         }
 
-        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_GRID_ITEM)
-            .assertIsDisplayed()
-        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_ILLUSTRATION)
-            .assertIsDisplayed()
-        composeTestRule.onNodeWithText(title)
-            .assertIsDisplayed()
-        composeTestRule.onNodeWithText(description)
-            .assertIsDisplayed()
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_GRID_ITEM).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_ILLUSTRATION).assertIsDisplayed()
+        composeTestRule.onNodeWithText(title).assertIsDisplayed()
+        composeTestRule.onNodeWithText(description).assertIsDisplayed()
     }
 
     @Test
@@ -68,16 +63,11 @@ class TabGroupOnboardingItemTest {
             }
         }
 
-        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_LIST_ITEM)
-            .assertIsDisplayed()
-        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_ILLUSTRATION)
-            .assertIsDisplayed()
-        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_ITEM_DISMISS)
-            .assertIsDisplayed()
-        composeTestRule.onNodeWithText(title)
-            .assertIsDisplayed()
-        composeTestRule.onNodeWithText(description)
-            .assertIsDisplayed()
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_LIST_ITEM).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_ILLUSTRATION).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_ITEM_DISMISS).assertIsDisplayed()
+        composeTestRule.onNodeWithText(title).assertIsDisplayed()
+        composeTestRule.onNodeWithText(description).assertIsDisplayed()
     }
 
     @Test
@@ -92,9 +82,9 @@ class TabGroupOnboardingItemTest {
             }
         }
 
-        composeTestRule.onNode(
-            hasClickAction() and hasAnyAncestor(hasTestTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_GRID_ITEM)),
-        ).performClick()
+        composeTestRule
+            .onNode(hasClickAction() and hasAnyAncestor(hasTestTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_GRID_ITEM)))
+            .performClick()
 
         assertTrue(dismissed)
     }
@@ -111,8 +101,7 @@ class TabGroupOnboardingItemTest {
             }
         }
 
-        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_ITEM_DISMISS)
-            .performClick()
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_ITEM_DISMISS).performClick()
 
         assertTrue(dismissed)
     }
@@ -121,42 +110,39 @@ class TabGroupOnboardingItemTest {
     fun verifyOnboardingDisplayedInGrid() {
         setTabLayoutContent(displayTabGroupOnboarding = true)
 
-        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_GRID_ITEM)
-            .assertIsDisplayed()
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_GRID_ITEM).assertIsDisplayed()
     }
 
     @Test
     fun verifyOnboardingNotDisplayedInGrid() {
         setTabLayoutContent(displayTabGroupOnboarding = false)
 
-        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_GRID_ITEM)
-            .assertDoesNotExist()
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_GRID_ITEM).assertDoesNotExist()
     }
 
     @Test
     fun verifyOnboardingDisplayedInList() {
         setTabLayoutContent(displayTabGroupOnboarding = true, displayTabsInGrid = false)
 
-        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_LIST_ITEM)
-            .assertIsDisplayed()
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_LIST_ITEM).assertIsDisplayed()
     }
 
     @Test
     fun verifyOnboardingNotDisplayedInList() {
         setTabLayoutContent(displayTabGroupOnboarding = false, displayTabsInGrid = false)
 
-        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_LIST_ITEM)
-            .assertDoesNotExist()
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_LIST_ITEM).assertDoesNotExist()
     }
 
     private fun setTabLayoutContent(
         displayTabGroupOnboarding: Boolean,
         displayTabsInGrid: Boolean = true,
     ) {
-        val tabs: List<TabsTrayItem> = listOf(
-            createTab(url = "www.mozilla.org"),
-            createTab(url = "www.example.com"),
-        )
+        val tabs: List<TabsTrayItem> =
+            listOf(
+                createTab(url = "www.mozilla.org"),
+                createTab(url = "www.example.com"),
+            )
         composeTestRule.setContent {
             FirefoxTheme(theme = Theme.Light) {
                 Surface {

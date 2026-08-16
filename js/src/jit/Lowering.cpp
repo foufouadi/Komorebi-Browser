@@ -45,6 +45,14 @@ LBoxAllocation LIRGenerator::useBoxFixedAtStart(MDefinition* mir,
 #endif
 }
 
+LBoxAllocation LIRGenerator::useBoxFixed(MDefinition* mir, ValueOperand op) {
+#if defined(JS_NUNBOX32)
+  return useBoxFixed(mir, op.typeReg(), op.payloadReg(), false);
+#elif defined(JS_PUNBOX64)
+  return useBoxFixed(mir, op.valueReg(), op.scratchReg(), false);
+#endif
+}
+
 LBoxAllocation LIRGenerator::useBoxAtStart(MDefinition* mir,
                                            LUse::Policy policy) {
   return useBox(mir, policy, /* useAtStart = */ true);
@@ -1282,6 +1290,11 @@ void LIRGenerator::visitTest(MTest* test) {
     LIsNoIterAndBranch* lir =
         new (alloc()) LIsNoIterAndBranch(ifTrue, ifFalse, useBox(input));
     add(lir, test);
+    return;
+  }
+
+  if (opd->isIsResumingGenerator() && opd->isEmittedAtUses()) {
+    add(new (alloc()) LIsResumingGeneratorAndBranch(ifTrue, ifFalse), test);
     return;
   }
 
@@ -6724,6 +6737,40 @@ void LIRGenerator::visitIsObject(MIsObject* ins) {
   define(lir, ins);
 }
 
+void LIRGenerator::visitIsGenClosing(MIsGenClosing* ins) {
+  MOZ_ASSERT(ins->value()->type() == MIRType::Value);
+  define(new (alloc()) LIsGenClosing(useBoxAtStart(ins->value())), ins);
+}
+
+void LIRGenerator::visitIsResumingGenerator(MIsResumingGenerator* ins) {
+  // Try to emit LIsResumingGeneratorAndBranch. IsResumingGenerator loads the
+  // frame descriptor so we also make sure the MTest instruction is the next
+  // instruction, to prevent moving the load past MClearResumingGeneratorFlag.
+  if (CanEmitAtUseForSingleTest(ins)) {
+    MInstructionIterator next(ins->block()->begin(ins));
+    next++;
+    if (*next == ins->usesBegin()->consumer()->toDefinition()) {
+      emitAtUses(ins);
+      return;
+    }
+  }
+
+  define(new (alloc()) LIsResumingGenerator(), ins);
+}
+
+void LIRGenerator::visitResumeFrameArg(MResumeFrameArg* ins) {
+  defineBox(new (alloc()) LResumeFrameArg(), ins);
+}
+
+void LIRGenerator::visitAssertResumeKindIsNext(MAssertResumeKindIsNext* ins) {
+  add(new (alloc()) LAssertResumeKindIsNext(temp()), ins);
+}
+
+void LIRGenerator::visitClearResumingGeneratorFlag(
+    MClearResumingGeneratorFlag* ins) {
+  add(new (alloc()) LClearResumingGeneratorFlag(), ins);
+}
+
 void LIRGenerator::visitIsSuspendedGenerator(MIsSuspendedGenerator* ins) {
   MOZ_ASSERT(ins->object()->type() == MIRType::Object);
 
@@ -7424,8 +7471,7 @@ void LIRGenerator::visitWasmFindHandler(MWasmFindHandler* ins) {
 }
 
 void LIRGenerator::visitWasmSuspend(MWasmSuspend* ins) {
-  // This is a call instruction, all other registers should be spilled
-  // We're not passing params either, so we can just let registers be free
+  // This is a call instruction, all other registers should be spilled.
   auto* lir = new (alloc())
       LWasmSuspend(useFixedAtStart(ins->instance(), InstanceReg),
                    useRegisterAtStart(ins->suspendedCont()),
@@ -7445,18 +7491,20 @@ void LIRGenerator::visitWasmResumeBarrier(MWasmResumeBarrier* ins) {
   assignWasmSafepoint(lir);
 }
 
+void LIRGenerator::visitWasmPrepareResume(MWasmPrepareResume* ins) {
+  auto* lir = new (alloc())
+      LWasmPrepareResume(useRegister(ins->cont()), temp(), temp());
+  define(lir, ins);
+}
+
 void LIRGenerator::visitWasmResume(MWasmResume* ins) {
-  // This is a call instruction, all other registers should be spilled
-  // We're not passing params either, so we can just let registers be free
-  LAllocation handlersParamsArea = LAllocation();
-  if (ins->hasHandlersParamsArea()) {
-    handlersParamsArea = useRegisterAtStart(ins->handlersParamsArea());
-  }
+  // This is a call instruction, all other registers should be spilled.
+  // handlersParamsArea is passed as a frame-pointer-relative offset to
+  // EmitResume to avoid excessive register pressure on 32-bit.
   auto* lir = new (alloc())
       LWasmResume(useFixedAtStart(ins->instance(), InstanceReg),
-                  useRegisterAtStart(ins->cont()), handlersParamsArea,
-                  tempFixed(ABINonArgReg0), tempFixed(ABINonArgReg1),
-                  tempFixed(ABINonArgReg2));
+                  useRegisterAtStart(ins->cont()), tempFixed(ABINonArgReg0),
+                  tempFixed(ABINonArgReg1), tempFixed(ABINonArgReg2));
 
   add(lir, ins);
   assignWasmSafepoint(lir);
@@ -7806,11 +7854,10 @@ void LIRGenerator::visitBuiltinObject(MBuiltinObject* ins) {
 }
 
 void LIRGenerator::visitReturn(MReturn* ret) {
-  return visitReturnImpl(ret->getOperand(0));
-}
+  MDefinition* opd = ret->getOperand(0);
+  MOZ_ASSERT(opd->type() == MIRType::Value);
 
-void LIRGenerator::visitGeneratorReturn(MGeneratorReturn* ret) {
-  return visitReturnImpl(ret->getOperand(0), true);
+  add(new (alloc()) LReturn(useBoxFixed(opd, JSReturnOperand)));
 }
 
 void LIRGenerator::visitSuperFunction(MSuperFunction* ins) {
@@ -9134,7 +9181,3 @@ void LIRGenerator::visitFuzzilliHashStore(MFuzzilliHashStore* ins) {
 
 static_assert(!std::is_polymorphic_v<LIRGenerator>,
               "LIRGenerator should not have any virtual methods");
-
-#ifdef JS_CODEGEN_NONE
-void LIRGenerator::visitReturnImpl(MDefinition*, bool) { MOZ_CRASH(); }
-#endif

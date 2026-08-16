@@ -12,9 +12,7 @@ class OnboardingStoreTest {
 
         store.dispatch(OnboardingAction.Init)
 
-        val expected = OnboardingState(
-            toolbarOptionSelected = ToolbarOptionType.TOOLBAR_TOP,
-        )
+        val expected = OnboardingState(toolbarOptionSelected = ToolbarOptionType.TOOLBAR_TOP)
         assertEquals(expected, store.state)
     }
 

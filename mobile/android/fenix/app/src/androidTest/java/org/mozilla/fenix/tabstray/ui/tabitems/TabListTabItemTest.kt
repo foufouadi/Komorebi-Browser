@@ -17,8 +17,7 @@ import org.mozilla.fenix.tabstray.data.createTab
  */
 @RunWith(AndroidJUnit4::class)
 class TabListTabItemTest {
-    @get:Rule
-    val composeTestRule = createComposeRule()
+    @get:Rule val composeTestRule = createComposeRule()
 
     @Test
     fun verifyDraggedItemScale() {

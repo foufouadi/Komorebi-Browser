@@ -351,8 +351,15 @@ pref("browser.startup.couldRestoreSession.count", 0);
 // users as it is not implemented anywhere else.
 #if defined(XP_WIN)
 pref("browser.startup.preXulSkeletonUI", true);
+#endif
 
-// Whether the checkbox to enable Windows launch on login is shown
+#ifndef XP_LINUX
+// These are called browser.startup.windowsLaunchOnLogin.* because they originated
+// on Windows, but they now operate on macOS as well.
+// They can't be changed until there are no experiments running that are using the
+// old name - https://bugzilla.mozilla.org/show_bug.cgi?id=2059749
+
+// Whether the checkbox to enable Launch on login is shown
 pref("browser.startup.windowsLaunchOnLogin.enabled", true);
 // Whether to show the launch on login infobar notification
 pref("browser.startup.windowsLaunchOnLogin.disableLaunchOnLoginPrompt", false);
@@ -1090,18 +1097,17 @@ pref("browser.tabs.closeTabByDblclick", false);
 pref("browser.tabs.closeWindowWithLastTab", true);
 pref("browser.tabs.allowTabDetach", true);
 // Open related links to a tab, e.g., link in current tab, at next to the
-// current tab if |insertRelatedAfterCurrent| is true.  Otherwise, always
-// append new tab to the end.
+// current tab if |insertRelatedAfterCurrent| is true, chaining consecutive
+// related tabs behind their opener. Otherwise, position related tabs like
+// any other new tab, as governed by |insertAfterCurrent|.
 pref("browser.tabs.insertRelatedAfterCurrent", true);
 // Open all links, e.g., bookmarks, history items at next to current tab
 // if |insertAfterCurrent| is true.  Otherwise, append new tab to the end
-// for non-related links. Note that if this is set to true, it will trump
-// the value of browser.tabs.insertRelatedAfterCurrent.
+// for non-related links.
 pref("browser.tabs.insertAfterCurrent", false);
-// When |insertRelatedAfterCurrent| is true opening a link from a pinned tab
-// results in the tabbar scrolling back to the beginning. Setting
-// |insertAfterCurrentExceptPinned| to true will add tabs at the end of the
-// tabbar.
+// When a new tab is inserted next to a pinned tab, the tabbar scrolls
+// back to the beginning. Setting |insertAfterCurrentExceptPinned| to true
+// will add such tabs at the end of the tabbar instead.
 pref("browser.tabs.insertAfterCurrentExceptPinned", false);
 pref("browser.tabs.warnOnClose", false);
 pref("browser.tabs.warnOnCloseOtherTabs", true);
@@ -1438,6 +1444,13 @@ pref("browser.xul.error_pages.show_safe_browsing_details_on_load", false);
 // Enable the one-click search call-to-action on the online dnsNotFound error
 // page. Disabled by default; consumers land in later bugs (meta bug 2055374).
 pref("browser.netError.searchCTA.enabled", false);
+
+// Freshness window for the search CTA's connectivity signal. If the last
+// captive-portal check is older than this, an authoritative re-check runs
+// before the CTA is shown (bug 2055712). connectivityRecheckTimeoutMs bounds
+// that re-check so the CTA can never hang.
+pref("browser.netError.searchCTA.connectivityFreshnessMs", 60000);
+pref("browser.netError.searchCTA.connectivityRecheckTimeoutMs", 3000);
 
 // Enable captive portal detection.
 pref("network.captive-portal-service.enabled", true);
@@ -2130,8 +2143,11 @@ pref("browser.newtabpage.activity-stream.discoverystream.merino-feed-experiment"
 
 pref("browser.newtabpage.activity-stream.telemetry.privatePing.enabled", true);
 
-// Redacts content interaction ids from original New Tab ping once data processing migrated to the Newtab_content private ping
+// This preference isn't read anymore, but kept around until we eventually end
+// the rollout that's been setting it. Then we can remove the default here, and
+// not leave any lingering preferences lying around.
 pref("browser.newtabpage.activity-stream.telemetry.privatePing.redactNewtabPing.enabled", true);
+
 pref("browser.newtabpage.activity-stream.telemetry.privatePing.maxSubmissionDelayMs", 5000);
 
   // Include differentialy private inferred New Tab interests with New Tab content Ping. Only used when user has enabled personalization.
@@ -3653,6 +3669,20 @@ pref("browser.ipProtection.userEnabled", false);
 pref("browser.ipProtection.userEnableCount", 0);
 // Pref to track if user has ever opened the VPN panel
 pref("browser.ipProtection.everOpenedPanel", false);
+// Pref to track if the VPN UI has ever been exposed to the user. Once it is
+// true the UI is shown regardless of the l10n coverage of
+// browser/ipProtection.ftl. A profile data upgrade sets it to true on profiles
+// that predate the gate, so the gate only applies to new profiles. On Nightly
+// the gate is off: translations always lag there.
+#ifdef NIGHTLY_BUILD
+pref("browser.ipProtection.hasSeenFeature", true);
+#else
+pref("browser.ipProtection.hasSeenFeature", false);
+#endif
+// Firefox major version that the l10n coverage gate was last enforced for, 0
+// when it never hid the feature. The gate stops applying as soon as the browser
+// is updated to a different major version.
+pref("browser.ipProtection.l10nGateVersion", 0);
 // Pref to track if user has opened the VPN panel since location controls were introduced
 pref("browser.ipProtection.openedPanelWithLocation", false);
 // Pref to enable support for site exceptions

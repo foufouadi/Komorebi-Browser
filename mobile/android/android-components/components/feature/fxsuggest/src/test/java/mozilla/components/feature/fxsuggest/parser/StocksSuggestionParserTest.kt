@@ -10,28 +10,30 @@ class StocksSuggestionParserTest {
 
     @Test
     fun `WHEN payload has values THEN maps each stock item`() {
-        val payload = PolygonPayloadDto(
-            values = listOf(
-                StockTickerDto(
-                    ticker = "AAPL",
-                    name = "Apple Inc.",
-                    lastPrice = "$213.18 USD",
-                    todaysChangePerc = "+0.57",
-                    query = "AAPL stock",
-                    exchange = "NASDAQ",
-                    imageUrl = "https://example.com/aapl.png",
-                ),
-                StockTickerDto(
-                    ticker = "MSFT",
-                    name = "Microsoft Corporation",
-                    lastPrice = "$432.67 USD",
-                    todaysChangePerc = "-0.11",
-                    query = "MSFT stock",
-                    exchange = "NASDAQ",
-                    imageUrl = null,
-                ),
-            ),
-        )
+        val payload =
+            PolygonPayloadDto(
+                values =
+                    listOf(
+                        StockTickerDto(
+                            ticker = "AAPL",
+                            name = "Apple Inc.",
+                            lastPrice = "$213.18 USD",
+                            todaysChangePerc = "+0.57",
+                            query = "AAPL stock",
+                            exchange = "NASDAQ",
+                            imageUrl = "https://example.com/aapl.png",
+                        ),
+                        StockTickerDto(
+                            ticker = "MSFT",
+                            name = "Microsoft Corporation",
+                            lastPrice = "$432.67 USD",
+                            todaysChangePerc = "-0.11",
+                            query = "MSFT stock",
+                            exchange = "NASDAQ",
+                            imageUrl = null,
+                        ),
+                    )
+            )
 
         val result = parser.parse(payload)
 

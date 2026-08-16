@@ -15,19 +15,21 @@ import org.mozilla.fenix.ui.efficiency.selectors.MainMenuSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.SettingsPrivateBrowsingSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.SettingsSelectors
 
-class SettingsPrivateBrowsingPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule, *>) : BasePage(composeRule) {
+class SettingsPrivateBrowsingPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule, *>) :
+    BasePage(composeRule) {
     override val pageName = "SettingsPrivateBrowsingPage"
 
     init {
         NavigationRegistry.register(
             from = "HomePage",
             to = pageName,
-            steps = listOf(
-                NavigationStep.Click(HomeSelectors.MAIN_MENU_BUTTON),
-                NavigationStep.Click(MainMenuSelectors.SETTINGS_BUTTON),
-                NavigationStep.Swipe(SettingsSelectors.PRIVATE_BROWSING_BUTTON),
-                NavigationStep.Click(SettingsSelectors.PRIVATE_BROWSING_BUTTON),
-            ),
+            steps =
+                listOf(
+                    NavigationStep.Click(HomeSelectors.MAIN_MENU_BUTTON),
+                    NavigationStep.Click(MainMenuSelectors.SETTINGS_BUTTON),
+                    NavigationStep.Swipe(SettingsSelectors.PRIVATE_BROWSING_BUTTON),
+                    NavigationStep.Click(SettingsSelectors.PRIVATE_BROWSING_BUTTON),
+                ),
         )
     }
 
@@ -38,13 +40,12 @@ class SettingsPrivateBrowsingPage(composeRule: AndroidComposeTestRule<HomeActivi
     /**
      * NOTE: Temporary stub for the Test Factory demo.
      *
-     * This method exists only to illustrate how the `SettingsPrivateBrowsingTest`
-     * (and the Test Factory pattern) would toggle Private Browsing in a real page
-     * object. It is **not** connected to functional UI code and should be replaced
-     * with the actual implementation when Settings pages are integrated.
+     * This method exists only to illustrate how the `SettingsPrivateBrowsingTest` (and the Test Factory pattern) would
+     * toggle Private Browsing in a real page object. It is **not** connected to functional UI code and should be
+     * replaced with the actual implementation when Settings pages are integrated.
      *
-     * The `UnsupportedOperationException` is intentional to ensure this placeholder
-     * is never used in production or non-demo tests.
+     * The `UnsupportedOperationException` is intentional to ensure this placeholder is never used in production or
+     * non-demo tests.
      */
     fun setPrivateBrowsing(on: Boolean) {
         throw UnsupportedOperationException("setPrivateBrowsing is not supported by ${this::class.simpleName}")

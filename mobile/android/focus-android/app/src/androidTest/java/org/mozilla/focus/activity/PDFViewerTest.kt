@@ -21,13 +21,12 @@ class PDFViewerTest {
     private val featureSettingsHelper = FeatureSettingsHelper()
     private val pdfLink = "PDF file"
 
-    @get:Rule(order = 0)
-    val focusTestRule: FocusTestRule = FocusTestRule()
+    @get:Rule(order = 0) val focusTestRule: FocusTestRule = FocusTestRule()
 
-    private val webServerRule get() = focusTestRule.mockWebServerRule
+    private val webServerRule
+        get() = focusTestRule.mockWebServerRule
 
-    @get:Rule
-    val mActivityTestRule = MainActivityIntentsTestRule(showFirstRun = false)
+    @get:Rule val mActivityTestRule = MainActivityIntentsTestRule(showFirstRun = false)
 
     @Before
     fun setUp() {
@@ -46,13 +45,13 @@ class PDFViewerTest {
         val genericPageUrl = webServerRule.server.genericAsset.url
         val pdfDoc = webServerRule.server.pdfTestAsset
 
-        searchScreen {
-        }.loadPage(genericPageUrl) {
-            progressBar.waitUntilGone(waitingTime)
-            clickLinkMatchingText(pdfLink)
-            verifyPageURL(pdfDoc.url)
-            verifyPageContent(pdfDoc.content)
-        }
+        searchScreen {}
+            .loadPage(genericPageUrl) {
+                progressBar.waitUntilGone(waitingTime)
+                clickLinkMatchingText(pdfLink)
+                verifyPageURL(pdfDoc.url)
+                verifyPageContent(pdfDoc.content)
+            }
     }
 
     @SmokeTest
@@ -60,15 +59,15 @@ class PDFViewerTest {
     fun downloadPdfTest() {
         val pdfDoc = webServerRule.server.pdfTestAsset
 
-        searchScreen {
-        }.loadPage(pdfDoc.url) {
-            verifyPageContent(pdfDoc.content)
-            clickButtonWithText("Download")
-            // If permission dialog appears, grant it
-            if (permAllowBtn.waitForExists(waitingTime)) {
-                permAllowBtn.click()
+        searchScreen {}
+            .loadPage(pdfDoc.url) {
+                verifyPageContent(pdfDoc.content)
+                clickButtonWithText("Download")
+                // If permission dialog appears, grant it
+                if (permAllowBtn.waitForExists(waitingTime)) {
+                    permAllowBtn.click()
+                }
+                verifyDownloadedFileOnStorage(pdfDoc.title)
             }
-            verifyDownloadedFileOnStorage(pdfDoc.title)
-        }
     }
 }

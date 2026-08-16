@@ -46,6 +46,28 @@ async function getCompatConfig() {
 }
 /* exported getCompatConfig */
 
+function getCurrentVersion() {
+  const { AppConstants } = ChromeUtils.importESModule(
+    "resource://gre/modules/AppConstants.sys.mjs"
+  );
+  return AppConstants.MOZ_APP_VERSION;
+}
+
+// When testing against the release channel close to a new release, Nightly
+// might already have been bumped while release is still lagging behind and
+// now has a gap of 3 versions against Nightly.
+function isReleaseVersionTooOld(compatConfig) {
+  if (compatConfig.runtime.channel !== "release") {
+    // Only relevant when testing release channel.
+    return false;
+  }
+
+  const getMajor = version => Number.parseInt(version.match(/\d+/)[0], 10);
+  return (
+    getMajor(getCurrentVersion()) === getMajor(compatConfig.runtime.version) + 3
+  );
+}
+
 /**
  * Register a test which only runs when a server has been provisioned. Without
  * one the task reports a single passing assertion and returns immediately.
@@ -70,6 +92,16 @@ function addCompatTask(taskFn) {
     info(
       `Testing against ${brandName} ${version} (${channel}) on ${config.host}`
     );
+
+    if (isReleaseVersionTooOld(config)) {
+      ok(
+        true,
+        `The release version (${version}) is too old to be tested against the current version (${getCurrentVersion()}). ` +
+          "This should only happen for a few days around release time"
+      );
+      return;
+    }
+
     await taskFn(config);
   });
 }

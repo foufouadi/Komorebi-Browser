@@ -8,17 +8,16 @@ import org.mozilla.fenix.ui.efficiency.generation.interaction.InteractionCase
 import org.mozilla.fenix.ui.efficiency.generation.interaction.InteractionShardData
 
 @RunWith(Parameterized::class)
-class InteractionShard01(
-    private val case: InteractionCase,
-) : BaseInteractionShardTest(case) {
+class InteractionShard01(private val case: InteractionCase) : BaseInteractionShardTest(case) {
 
     companion object {
         @JvmStatic
         @Parameterized.Parameters(name = "{index}: {0}")
-        fun data(): List<Array<Any>> = InteractionShardData.loadShard(
-            shardIndex = 1,
-            shardCount = 1,
-        )
+        fun data(): List<Array<Any>> =
+            InteractionShardData.loadShard(
+                shardIndex = 1,
+                shardCount = 1,
+            )
     }
 
     @Test

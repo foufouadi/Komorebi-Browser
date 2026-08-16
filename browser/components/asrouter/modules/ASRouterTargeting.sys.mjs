@@ -88,7 +88,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   TaskbarTabs: "resource:///modules/taskbartabs/TaskbarTabs.sys.mjs",
   TelemetryEnvironment: "resource://gre/modules/TelemetryEnvironment.sys.mjs",
   TelemetrySession: "resource://gre/modules/TelemetrySession.sys.mjs",
-  WindowsLaunchOnLogin: "resource://gre/modules/WindowsLaunchOnLogin.sys.mjs",
+  LaunchOnLogin: "resource://gre/modules/LaunchOnLogin.sys.mjs",
 });
 
 ChromeUtils.defineLazyGetter(lazy, "fxAccounts", () => {
@@ -1195,20 +1195,20 @@ const TargetingGetters = {
   },
 
   get launchOnLoginEnabled() {
-    if (AppConstants.platform !== "win") {
+    if (!lazy.LaunchOnLogin.isSupported()) {
       return false;
     }
-    return lazy.WindowsLaunchOnLogin.getLaunchOnLoginEnabled();
+    return lazy.LaunchOnLogin.isEnabled();
   },
 
   // Whether launch on login could be enabled, i.e. it isn't overridden by
   // Windows Settings or enterprise policy. Used to avoid offering launch on
   // login to users for whom enabling it would silently no-op.
   get launchOnLoginAllowedByPolicy() {
-    if (AppConstants.platform !== "win") {
+    if (!lazy.LaunchOnLogin.isSupported()) {
       return false;
     }
-    return lazy.WindowsLaunchOnLogin.getLaunchOnLoginApproved();
+    return lazy.LaunchOnLogin.isAllowed();
   },
 
   get isMSIX() {

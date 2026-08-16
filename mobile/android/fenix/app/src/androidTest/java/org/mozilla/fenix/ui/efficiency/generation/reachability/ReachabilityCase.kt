@@ -11,6 +11,5 @@ data class ReachabilityCase(
     val state: String = "",
     val launch: LaunchConfig = LaunchConfig(),
 ) {
-    override fun toString(): String =
-        "$label ($testRailId)${if (state.isNotBlank()) " — $state" else ""}"
+    override fun toString(): String = "$label ($testRailId)${if (state.isNotBlank()) " — $state" else ""}"
 }

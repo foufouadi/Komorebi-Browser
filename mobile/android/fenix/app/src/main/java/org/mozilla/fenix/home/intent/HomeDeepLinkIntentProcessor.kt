@@ -25,15 +25,13 @@ import org.mozilla.fenix.components.usecases.ShareUseCases
 import org.mozilla.fenix.ext.alreadyOnDestination
 import org.mozilla.fenix.ext.openSetDefaultBrowserOption
 import org.mozilla.fenix.onboarding.MARKETING_CHANNEL_ID
-import org.mozilla.fenix.utils.maybeShowAddSearchWidgetPrompt
 import org.mozilla.fenix.utils.Settings as AppSettings
+import org.mozilla.fenix.utils.maybeShowAddSearchWidgetPrompt
 
 // Intent extra to enable or disable TabTray animation setting for testing
 private const val EXTRA_TAB_TRAY_ANIMATION = "EXTRA_TAB_TRAY_ANIMATION"
 
-/**
- * Deep links in the form of `fenix://host` open different parts of the app.
- */
+/** Deep links in the form of `fenix://host` open different parts of the app. */
 class HomeDeepLinkIntentProcessor(
     private val activity: HomeActivity,
     private val shareUseCases: ShareUseCases,
@@ -60,41 +58,41 @@ class HomeDeepLinkIntentProcessor(
     ) {
         handleDeepLinkSideEffects(deepLink, extras, settings, navController)
 
-        val globalDirections = when (deepLink.host) {
-            "home", "enable_private_browsing" -> GlobalDirections.Home
-            "urls_bookmarks" -> GlobalDirections.Bookmarks
-            "urls_history" -> GlobalDirections.History
-            "settings" -> GlobalDirections.Settings
-            "turn_on_sync" -> GlobalDirections.Sync
-            "settings_search_engine" -> GlobalDirections.SearchEngine
-            "settings_accessibility" -> GlobalDirections.Accessibility
-            "settings_delete_browsing_data" -> GlobalDirections.DeleteData
-            "settings_addon_manager" -> GlobalDirections.SettingsAddonManager
-            "settings_logins" -> GlobalDirections.SettingsLogins
-            "settings_tracking_protection" -> GlobalDirections.SettingsTrackingProtection
-            // We'd like to highlight views within the fragment
-            // https://github.com/mozilla-mobile/fenix/issues/11856
-            // The current version of UI has these features in more complex screens.
-            "settings_privacy" -> GlobalDirections.Settings
-            "settings_wallpapers" -> GlobalDirections.WallpaperSettings
-            "home_collections" -> GlobalDirections.Home
-            "settings_private_browsing" -> GlobalDirections.SettingsPrivateBrowsing
-            "settings_app_icon" -> GlobalDirections.SettingsAppIcon
-            "settings_ai_controls" -> GlobalDirections.SettingsAIControls
-            "protections_dashboard" -> GlobalDirections.ProtectionsDashboard
-            "settings_ip_protection" -> GlobalDirections.SettingsIpProtection
+        val globalDirections =
+            when (deepLink.host) {
+                "home",
+                "enable_private_browsing" -> GlobalDirections.Home
+                "urls_bookmarks" -> GlobalDirections.Bookmarks
+                "urls_history" -> GlobalDirections.History
+                "settings" -> GlobalDirections.Settings
+                "turn_on_sync" -> GlobalDirections.Sync
+                "settings_search_engine" -> GlobalDirections.SearchEngine
+                "settings_accessibility" -> GlobalDirections.Accessibility
+                "settings_delete_browsing_data" -> GlobalDirections.DeleteData
+                "settings_addon_manager" -> GlobalDirections.SettingsAddonManager
+                "settings_logins" -> GlobalDirections.SettingsLogins
+                "settings_tracking_protection" -> GlobalDirections.SettingsTrackingProtection
+                // We'd like to highlight views within the fragment
+                // https://github.com/mozilla-mobile/fenix/issues/11856
+                // The current version of UI has these features in more complex screens.
+                "settings_privacy" -> GlobalDirections.Settings
+                "settings_wallpapers" -> GlobalDirections.WallpaperSettings
+                "home_collections" -> GlobalDirections.Home
+                "settings_private_browsing" -> GlobalDirections.SettingsPrivateBrowsing
+                "settings_app_icon" -> GlobalDirections.SettingsAppIcon
+                "settings_ai_controls" -> GlobalDirections.SettingsAIControls
+                "protections_dashboard" -> GlobalDirections.ProtectionsDashboard
+                "settings_ip_protection" -> GlobalDirections.SettingsIpProtection
 
-            else -> return
-        }
+                else -> return
+            }
 
         if (!navController.alreadyOnDestination(globalDirections.destinationId)) {
             navController.navigate(globalDirections.navDirections)
         }
     }
 
-    /**
-     * Handle links that require more than just simple navigation.
-     */
+    /** Handle links that require more than just simple navigation. */
     private fun handleDeepLinkSideEffects(
         deepLink: Uri,
         extras: Bundle?,
@@ -104,10 +102,11 @@ class HomeDeepLinkIntentProcessor(
         when (deepLink.host) {
             "home" -> {
                 if (extras?.containsKey(EXTRA_TAB_TRAY_ANIMATION) == true) {
-                    val tabTrayAnimationPreference = extras.getBoolean(
-                        EXTRA_TAB_TRAY_ANIMATION,
-                        settings.tabManagerOpeningAnimationEnabled,
-                    )
+                    val tabTrayAnimationPreference =
+                        extras.getBoolean(
+                            EXTRA_TAB_TRAY_ANIMATION,
+                            settings.tabManagerOpeningAnimationEnabled,
+                        )
                     settings.tabManagerOpeningAnimationEnabled = tabTrayAnimationPreference
                 }
             }
@@ -153,10 +152,11 @@ class HomeDeepLinkIntentProcessor(
 
     private fun notificationSettings(context: Context, channel: String? = null) =
         Intent().apply {
-            action = channel?.let {
-                putExtra(Settings.EXTRA_CHANNEL_ID, it)
-                Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS
-            } ?: Settings.ACTION_APP_NOTIFICATION_SETTINGS
+            action =
+                channel?.let {
+                    putExtra(Settings.EXTRA_CHANNEL_ID, it)
+                    Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS
+                } ?: Settings.ACTION_APP_NOTIFICATION_SETTINGS
             putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
         }
 
@@ -185,7 +185,7 @@ class HomeDeepLinkIntentProcessor(
                         shareSubject = subject.ifEmpty { title },
                         showPage = false,
                         sessionId = null,
-                    ),
+                    )
                 )
             },
         )

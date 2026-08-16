@@ -12,9 +12,7 @@ import org.mozilla.fenix.startupCrash.startupCrashReducer
 
 class StartupCrashReducerTest {
 
-    private val defaultState = StartupCrashState(
-        uiState = UiState.Idle,
-    )
+    private val defaultState = StartupCrashState(uiState = UiState.Idle)
 
     @Test
     fun `when No is tapped then uiState is set to Loading`() {

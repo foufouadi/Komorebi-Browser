@@ -26,6 +26,7 @@ import {
   resolveWidgetHasSidebar,
   getHideAllTargets,
 } from "common/WidgetsRegistry.mjs";
+import { isSideBySideActive } from "common/PageLayoutVariants.mjs";
 import { WIDGET_ROW_COMPONENTS } from "./WidgetsComponentRegistry.jsx";
 import { WidgetWrapper } from "./WidgetWrapper";
 import { ErrorBoundary } from "content-src/components/ErrorBoundary/ErrorBoundary";
@@ -142,9 +143,13 @@ function Widgets() {
     prefs[PREF_WIDGETS_HIDE_ALL_TOAST_ENABLED];
   const feedbackUrl =
     prefs.trainhopConfig?.widgets?.feedbackUrl ?? WIDGETS_FEEDBACK_URL;
-  const showWidgetsSizeToggle =
+  const sideBySideActive = isSideBySideActive(prefs);
+  const widgetsMayBeMaximized =
     nimbusMaximizedTrainhopEnabled || prefs[PREF_WIDGETS_SYSTEM_MAXIMIZED];
-  const widgetsMayBeMaximized = showWidgetsSizeToggle;
+  // The row toggle resizes every widget at once, which a one-card-wide column has
+  // no room for; that slot gets an add button instead. Per-widget "Change size"
+  // still applies -- size is a row span, so medium and large are both one card wide.
+  const showWidgetsSizeToggle = !sideBySideActive && widgetsMayBeMaximized;
 
   const widgetsEnabled = prefs[PREF_WIDGETS_ENABLED];
 
@@ -566,6 +571,15 @@ function Widgets() {
             onKeyDown={handleToggleMaximizeKeyDown}
           />
         ) : null}
+        {sideBySideActive ? (
+          <moz-button
+            id="add-widgets-button"
+            size="small"
+            data-l10n-id="newtab-widget-add-widgets-button"
+            iconsrc="chrome://global/skin/icons/plus.svg"
+            onClick={handleManageWidgetsClick}
+          />
+        ) : null}
       </div>
     );
   }
@@ -637,7 +651,7 @@ function Widgets() {
   // CSS container queries on the widgets section decide whether the toggle
   // button is shown — see _Widgets.scss. The collapsed row holds one widget
   // per card-column slot regardless of size, so for each card-column count
-  // (1–4) anything past the first N positions overflows. This keeps mediums
+  // (1–5) anything past the first N positions overflows. This keeps mediums
   // to a single (shorter) row rather than stacking them two-deep to fill a
   // large-height band. The matching `data-overflow-N` attribute is read by
   // the @container rules in CSS.
@@ -667,12 +681,14 @@ function Widgets() {
     2: hiddenIndicesAt(2),
     3: hiddenIndicesAt(3),
     4: hiddenIndicesAt(4),
+    5: hiddenIndicesAt(5),
   };
   const overflowAttrs = {
     "data-overflow-1": overflowsAt(1) ? "" : undefined,
     "data-overflow-2": overflowsAt(2) ? "" : undefined,
     "data-overflow-3": overflowsAt(3) ? "" : undefined,
     "data-overflow-4": overflowsAt(4) ? "" : undefined,
+    "data-overflow-5": overflowsAt(5) ? "" : undefined,
   };
   const isCollapsed = novaEnabled && !rowExpanded;
 
@@ -728,6 +744,9 @@ function Widgets() {
                   ? ""
                   : undefined,
                 "data-hidden-4": hiddenAtCols[4].has(renderIdx)
+                  ? ""
+                  : undefined,
+                "data-hidden-5": hiddenAtCols[5].has(renderIdx)
                   ? ""
                   : undefined,
               };
@@ -811,7 +830,10 @@ function Widgets() {
               </React.Fragment>
             );
           })}
-          {novaEnabled && !allWidgetsAdded && (
+          {/* Side-by-side has its own add button in the section header, and
+              this tile's at-content-cols() reveal rules resolve against the
+              band rather than the one-card-wide widgets column. */}
+          {novaEnabled && !sideBySideActive && !allWidgetsAdded && (
             <button
               type="button"
               className={`widgets-add-button col-4 ${addButtonSize}-widget`}

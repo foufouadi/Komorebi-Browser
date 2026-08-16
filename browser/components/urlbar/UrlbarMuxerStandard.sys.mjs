@@ -37,11 +37,14 @@ const SEMANTIC_HISTORY_PROVIDER_NAME = "UrlbarProviderSemanticHistorySearch";
  * @returns {string} map key
  */
 function makeMapKeyForTabResult(result) {
+  let userContextId =
+    result.type == lazy.UrlbarShared.RESULT_TYPE.TAB_SWITCH
+      ? result.payload.userContext?.id
+      : undefined;
   return UrlbarUtils.tupleString(
     result.payload.url,
-    result.type == lazy.UrlbarShared.RESULT_TYPE.TAB_SWITCH &&
-      lazy.UrlbarShared.isNonPrivateUserContextId(result.payload.userContextId)
-      ? result.payload.userContextId
+    lazy.UrlbarShared.isNonPrivateUserContextId(userContextId)
+      ? userContextId
       : undefined
   );
 }

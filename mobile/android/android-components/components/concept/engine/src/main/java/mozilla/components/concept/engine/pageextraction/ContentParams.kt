@@ -7,9 +7,6 @@ package mozilla.components.concept.engine.pageextraction
 /**
  * Options for controlling how text is extracted from a page.
  *
- * @property removeBoilerplate When true, attempts to remove boilerplate content from the page
- *   using reader mode.
+ * @property removeBoilerplate When true, attempts to remove boilerplate content from the page using reader mode.
  */
-data class ContentParams(
-    val removeBoilerplate: Boolean = false,
-)
+data class ContentParams(val removeBoilerplate: Boolean = false)

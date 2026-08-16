@@ -835,6 +835,8 @@ KeyHandlingState IMContextWrapper::OnKeyEvent(
     bool aKeyboardEventWasDispatched /* = false */) {
   MOZ_ASSERT(aEvent, "aEvent must be non-null");
 
+  mGraphemeClusterFallbackToKeyEvent.SetIsVoid(true);
+
   if (mPendingKeyEvents.HasNonProcessedEvents()) {
     // If IME processed key events asynchronously without dispatching a
     // synthesized key event, we just marked them as "handled". To clean up them
@@ -1093,7 +1095,6 @@ KeyHandlingState IMContextWrapper::OnKeyEvent(
     // dispatched eKeyDown or eKeyUp event's state.
   }
 
-  mGraphemeClusterFallbackToKeyEvent.SetIsVoid(true);
   mHandlingKeyEvent = aEvent;
   gboolean isFiltered = gtk_im_context_filter_keypress(currentContext, aEvent);
 

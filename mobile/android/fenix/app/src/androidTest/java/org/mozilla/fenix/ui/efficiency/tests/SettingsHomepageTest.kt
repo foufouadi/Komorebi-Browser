@@ -21,7 +21,8 @@ import org.mozilla.fenix.ui.efficiency.selectors.SettingsSelectors
 
 class SettingsHomepageTest : BaseTest() {
 
-    private val mockWebServer get() = fenixTestRule.mockWebServer
+    private val mockWebServer
+        get() = fenixTestRule.mockWebServer
 
     @Ignore("Covered by verifyNavigationReachability[1: SettingsHomepagePage (TBD) — Navigation Reachability]")
     @Test
@@ -36,12 +37,9 @@ class SettingsHomepageTest : BaseTest() {
         val genericURL = mockWebServer.getGenericAsset(1)
 
         on.browserPage.navigateToPage(genericURL.url.toString())
-        on.home.navigateToPage()
-            .mozVerifyElementsByGroup("jumpBackIn")
-        on.settingsHomepage.navigateToPage()
-            .mozClick(JUMP_BACK_IN_BUTTON)
-        on.home.navigateToPage()
-            .mozVerifyElementAbsent(JUMP_BACK_IN_SECTION)
+        on.home.navigateToPage().mozVerifyElementsByGroup("jumpBackIn")
+        on.settingsHomepage.navigateToPage().mozClick(JUMP_BACK_IN_BUTTON)
+        on.home.navigateToPage().mozVerifyElementAbsent(JUMP_BACK_IN_SECTION)
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1565000
@@ -51,15 +49,11 @@ class SettingsHomepageTest : BaseTest() {
         val genericURL = mockWebServer.getGenericAsset(1)
 
         on.browserPage.navigateToPage(genericURL.url.toString())
-        on.mainMenu.navigateToPage()
-            .mozClick(BOOKMARK_THIS_PAGE_BUTTON)
+        on.mainMenu.navigateToPage().mozClick(BOOKMARK_THIS_PAGE_BUTTON)
         on.browserPage.navigateToPage()
-        on.home.navigateToPage()
-            .mozVerifyElementsByGroup("recentBookmarksSection")
-        on.settingsHomepage.navigateToPage()
-            .mozClick(RECENT_BOOKMARKS_BUTTON)
-        on.home.navigateToPage()
-            .mozVerifyElementAbsent(RECENT_BOOKMARKS_SECTION)
+        on.home.navigateToPage().mozVerifyElementsByGroup("recentBookmarksSection")
+        on.settingsHomepage.navigateToPage().mozClick(RECENT_BOOKMARKS_BUTTON)
+        on.home.navigateToPage().mozVerifyElementAbsent(RECENT_BOOKMARKS_SECTION)
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1569831
@@ -69,28 +63,42 @@ class SettingsHomepageTest : BaseTest() {
         val genericURL = mockWebServer.getGenericAsset(1)
 
         on.browserPage.navigateToPage(genericURL.url.toString())
-        on.settings.navigateToPage()
-            .mozVerify(SettingsSelectors.SETTING_OPTION_SUMMARY(settingName = "Homepage", settingSummary = "Open on homepage after four hours"))
-        on.settingsHomepage.navigateToPage()
-            .mozVerifyElementIsChecked(SettingsHomepageSelectors.OPENING_SCREEN_OPTION("Homepage after four hours of inactivity"))
+        on.settings
+            .navigateToPage()
+            .mozVerify(
+                SettingsSelectors.SETTING_OPTION_SUMMARY(
+                    settingName = "Homepage",
+                    settingSummary = "Open on homepage after four hours",
+                )
+            )
+        on.settingsHomepage
+            .navigateToPage()
+            .mozVerifyElementIsChecked(
+                SettingsHomepageSelectors.OPENING_SCREEN_OPTION("Homepage after four hours of inactivity")
+            )
             .mozClick(SettingsHomepageSelectors.OPENING_SCREEN_OPTION("Last tab"))
             .mozVerifyElementIsChecked(SettingsHomepageSelectors.OPENING_SCREEN_OPTION("Last tab"))
 
         restartApp(composeRule.activityRule)
 
-        on.browserPage.navigateToPage()
-            .verifyUrl(genericURL.url.toString())
-        on.settings.navigateToPage()
-            .mozVerify(SettingsSelectors.SETTING_OPTION_SUMMARY(settingName = "Homepage", settingSummary = "Open on last tab"))
-        on.settingsHomepage.navigateToPage()
+        on.browserPage.navigateToPage().verifyUrl(genericURL.url.toString())
+        on.settings
+            .navigateToPage()
+            .mozVerify(
+                SettingsSelectors.SETTING_OPTION_SUMMARY(settingName = "Homepage", settingSummary = "Open on last tab")
+            )
+        on.settingsHomepage
+            .navigateToPage()
             .mozClick(SettingsHomepageSelectors.OPENING_SCREEN_OPTION("Homepage"))
             .mozVerifyElementIsChecked(SettingsHomepageSelectors.OPENING_SCREEN_OPTION("Homepage"))
-        on.settings.navigateToPage()
-            .mozVerify(SettingsSelectors.SETTING_OPTION_SUMMARY(settingName = "Homepage", settingSummary = "Open on homepage"))
+        on.settings
+            .navigateToPage()
+            .mozVerify(
+                SettingsSelectors.SETTING_OPTION_SUMMARY(settingName = "Homepage", settingSummary = "Open on homepage")
+            )
 
         restartApp(composeRule.activityRule)
 
-        on.home
-            .mozVerify(HomeSelectors.HOMEPAGE_VIEW)
+        on.home.mozVerify(HomeSelectors.HOMEPAGE_VIEW)
     }
 }

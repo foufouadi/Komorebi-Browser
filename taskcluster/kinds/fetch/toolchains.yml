@@ -317,6 +317,15 @@ rust-size:
         repo: https://github.com/luser/rust-size
         revision: ab659d93b1faba95307df952aefe3fbed3583669
 
+rust-analyzer-linux64:
+    description: rust-analyzer 2026-08-10.1
+    fetch:
+        type: static-url
+        url: https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-10.1/rust-analyzer-x86_64-unknown-linux-gnu.gz
+        sha256: d42908a7dc7b89250ae881a0919e477296843665c98574ecc8fe16ba60cecefb
+        size: 14805784
+        artifact-name: rust-analyzer.gz
+
 gn:
     description: GN source code
     fetch:
@@ -574,7 +583,7 @@ samply:
     fetch:
         type: git
         repo: https://github.com/mstange/samply
-        revision: 49c072db1a88165c9ba92b7b0ee0d425bb6e7231
+        revision: 3880b41b5d2bed38e9fa58f309c442c05ea3541c
 
 nodejs-12-linux64:
     description: nodejs 12 for x64 linux

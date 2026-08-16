@@ -19,10 +19,10 @@ import mozilla.components.feature.readerview.ReaderViewFeature.FontType
 const val MAX_TEXT_SIZE = 9
 const val MIN_TEXT_SIZE = 1
 
-/**
- * A customizable ReaderView control bar implementing [ReaderViewControlsView].
- */
-class ReaderViewControlsBar @JvmOverloads constructor(
+/** A customizable ReaderView control bar implementing [ReaderViewControlsView]. */
+class ReaderViewControlsBar
+@JvmOverloads
+constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0,
@@ -48,33 +48,35 @@ class ReaderViewControlsBar @JvmOverloads constructor(
      * @param font The applicable font types available.
      */
     override fun setFont(font: FontType) {
-        val selected = when (font) {
-            FontType.SERIF -> R.id.mozac_feature_readerview_font_serif
-            FontType.SANSSERIF -> R.id.mozac_feature_readerview_font_sans_serif
-        }
+        val selected =
+            when (font) {
+                FontType.SERIF -> R.id.mozac_feature_readerview_font_serif
+                FontType.SANSSERIF -> R.id.mozac_feature_readerview_font_sans_serif
+            }
         fontGroup.check(selected)
     }
 
     /**
      * Sets the font size of the current and future ReaderView sessions.
      *
-     * Note: The readerview.js implementation under the hood scales the entire page's contents and not just
-     * the text size.
+     * Note: The readerview.js implementation under the hood scales the entire page's contents and not just the text
+     * size.
      *
      * @param size An integer value in the range [MIN_TEXT_SIZE] to [MAX_TEXT_SIZE].
      */
     override fun setFontSize(size: Int) {
-        val (incrementState, decrementState) = when {
-            size <= MIN_TEXT_SIZE -> {
-                Pair(first = true, second = false)
+        val (incrementState, decrementState) =
+            when {
+                size <= MIN_TEXT_SIZE -> {
+                    Pair(first = true, second = false)
+                }
+                size >= MAX_TEXT_SIZE -> {
+                    Pair(first = false, second = true)
+                }
+                else -> {
+                    Pair(first = true, second = true)
+                }
             }
-            size >= MAX_TEXT_SIZE -> {
-                Pair(first = false, second = true)
-            }
-            else -> {
-                Pair(first = true, second = true)
-            }
-        }
         fontIncrementButton.isEnabled = incrementState
         fontDecrementButton.isEnabled = decrementState
     }
@@ -85,26 +87,23 @@ class ReaderViewControlsBar @JvmOverloads constructor(
      * @param scheme The applicable colour schemes available.
      */
     override fun setColorScheme(scheme: ColorScheme) {
-        val selected = when (scheme) {
-            ColorScheme.DARK -> R.id.mozac_feature_readerview_color_dark
-            ColorScheme.SEPIA -> R.id.mozac_feature_readerview_color_sepia
-            ColorScheme.LIGHT -> R.id.mozac_feature_readerview_color_light
-        }
+        val selected =
+            when (scheme) {
+                ColorScheme.DARK -> R.id.mozac_feature_readerview_color_dark
+                ColorScheme.SEPIA -> R.id.mozac_feature_readerview_color_sepia
+                ColorScheme.LIGHT -> R.id.mozac_feature_readerview_color_light
+            }
 
         colorSchemeGroup.check(selected)
     }
 
-    /**
-     * Updates visibility to [View.VISIBLE] and requests focus for the UI controls.
-     */
+    /** Updates visibility to [View.VISIBLE] and requests focus for the UI controls. */
     override fun showControls() {
         visibility = View.VISIBLE
         requestFocus()
     }
 
-    /**
-     * Updates visibility to [View.GONE] of the UI controls.
-     */
+    /** Updates visibility to [View.GONE] of the UI controls. */
     override fun hideControls() {
         visibility = View.GONE
     }
@@ -134,29 +133,35 @@ class ReaderViewControlsBar @JvmOverloads constructor(
     }
 
     private fun bindViews() {
-        fontGroup = applyCheckedListener(R.id.mozac_feature_readerview_font_group) { checkedId ->
-            val fontType = when (checkedId) {
-                R.id.mozac_feature_readerview_font_sans_serif -> FontType.SANSSERIF
-                R.id.mozac_feature_readerview_font_serif -> FontType.SERIF
-                else -> FontType.SERIF
+        fontGroup =
+            applyCheckedListener(R.id.mozac_feature_readerview_font_group) { checkedId ->
+                val fontType =
+                    when (checkedId) {
+                        R.id.mozac_feature_readerview_font_sans_serif -> FontType.SANSSERIF
+                        R.id.mozac_feature_readerview_font_serif -> FontType.SERIF
+                        else -> FontType.SERIF
+                    }
+                listener?.onFontChanged(fontType)
             }
-            listener?.onFontChanged(fontType)
-        }
-        colorSchemeGroup = applyCheckedListener(R.id.mozac_feature_readerview_color_scheme_group) { checkedId ->
-            val colorSchemeChoice = when (checkedId) {
-                R.id.mozac_feature_readerview_color_dark -> ColorScheme.DARK
-                R.id.mozac_feature_readerview_color_sepia -> ColorScheme.SEPIA
-                R.id.mozac_feature_readerview_color_light -> ColorScheme.LIGHT
-                else -> ColorScheme.DARK
+        colorSchemeGroup =
+            applyCheckedListener(R.id.mozac_feature_readerview_color_scheme_group) { checkedId ->
+                val colorSchemeChoice =
+                    when (checkedId) {
+                        R.id.mozac_feature_readerview_color_dark -> ColorScheme.DARK
+                        R.id.mozac_feature_readerview_color_sepia -> ColorScheme.SEPIA
+                        R.id.mozac_feature_readerview_color_light -> ColorScheme.LIGHT
+                        else -> ColorScheme.DARK
+                    }
+                listener?.onColorSchemeChanged(colorSchemeChoice)
             }
-            listener?.onColorSchemeChanged(colorSchemeChoice)
-        }
-        fontIncrementButton = applyClickListener(R.id.mozac_feature_readerview_font_size_increase) {
-            listener?.onFontSizeIncreased()?.let { setFontSize(it) }
-        }
-        fontDecrementButton = applyClickListener(R.id.mozac_feature_readerview_font_size_decrease) {
-            listener?.onFontSizeDecreased()?.let { setFontSize(it) }
-        }
+        fontIncrementButton =
+            applyClickListener(R.id.mozac_feature_readerview_font_size_increase) {
+                listener?.onFontSizeIncreased()?.let { setFontSize(it) }
+            }
+        fontDecrementButton =
+            applyClickListener(R.id.mozac_feature_readerview_font_size_decrease) {
+                listener?.onFontSizeDecreased()?.let { setFontSize(it) }
+            }
     }
 
     private inline fun applyClickListener(

@@ -23,10 +23,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.fragment.findNavController
 import androidx.navigation.fragment.navArgs
+import com.google.android.material.R as materialR
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
-import mozilla.components.browser.state.selector.selectedTab
-import mozilla.components.browser.state.state.TabSessionState
+import mozilla.components.browser.state.selector.findTabOrCustomTabOrSelectedTab
+import mozilla.components.browser.state.state.SessionState
 import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.feature.summarize.SummarizationState
 import mozilla.components.feature.summarize.SummarizationUi
@@ -44,7 +45,6 @@ import org.mozilla.fenix.ext.requireComponents
 import org.mozilla.fenix.settings.SupportUtils
 import org.mozilla.fenix.tabstray.ext.toDisplayTitle
 import org.mozilla.fenix.theme.FirefoxTheme
-import com.google.android.material.R as materialR
 
 private const val HIDING_FRICTION = 0.9f
 
@@ -59,14 +59,18 @@ private fun Context.getConnectionType(): ConnectionType {
     }
 }
 
-/**
- * Summarization UI entry fragment.
- */
+/** Summarization UI entry fragment. */
 class SummarizationFragment : BottomSheetDialogFragment() {
     private val args by navArgs<SummarizationFragmentArgs>()
-    private val browserStore: BrowserStore get() = requireComponents.core.store
-    private val currentTab: TabSessionState? get() = browserStore.state.selectedTab
-    private val isEngineAvailable: Boolean get() = currentTab?.engineState?.engineSession != null
+    private val browserStore: BrowserStore
+        get() = requireComponents.core.store
+
+    private val currentTab: SessionState?
+        get() = browserStore.state.findTabOrCustomTabOrSelectedTab(args.sessionId)
+
+    private val isEngineAvailable: Boolean
+        get() = currentTab?.engineState?.engineSession != null
+
     private val storeViewModel: SummarizationStoreViewModel by viewModels {
         val title = currentTab?.toDisplayTitle() ?: ""
 
@@ -133,20 +137,23 @@ class SummarizationFragment : BottomSheetDialogFragment() {
         val summarizeSettings = requireComponents.summarizationSettings
         val cache = requireComponents.summarizationSettingsCache
 
-        val settingsStore = SummarizeSettingsStore(
-            initialState = SummarizeSettingsState(
-                isFeatureEnabled = cache.featureEnabled.value,
-                isGestureEnabled = cache.gestureEnabled.value,
-            ),
-            reducer = ::summarizeSettingsReducer,
-            middleware = listOf(
-                SummarizeSettingsMiddleware(
-                    settings = summarizeSettings,
-                    onLearnMoreClicked = { openLearnMoreLink(SupportUtils.SumoTopic.PAGE_SUMMARIZATION) },
-                    storeViewModel.viewModelScope,
-                ),
-            ),
-        )
+        val settingsStore =
+            SummarizeSettingsStore(
+                initialState =
+                    SummarizeSettingsState(
+                        isFeatureEnabled = cache.featureEnabled.value,
+                        isGestureEnabled = cache.gestureEnabled.value,
+                    ),
+                reducer = ::summarizeSettingsReducer,
+                middleware =
+                    listOf(
+                        SummarizeSettingsMiddleware(
+                            settings = summarizeSettings,
+                            onLearnMoreClicked = { openLearnMoreLink(SupportUtils.SumoTopic.PAGE_SUMMARIZATION) },
+                            storeViewModel.viewModelScope,
+                        )
+                    ),
+            )
 
         return content {
             val state by storeViewModel.store.stateFlow.collectAsStateWithLifecycle()
@@ -182,9 +189,10 @@ class SummarizationFragment : BottomSheetDialogFragment() {
     }
 
     private fun navigateToSignIn() {
-        val directions = SummarizationFragmentDirections.actionSummarizationFragmentToTurnOnSyncFragment(
-            entrypoint = FenixFxAEntryPoint.ShakeToSummarize,
-        )
+        val directions =
+            SummarizationFragmentDirections.actionSummarizationFragmentToTurnOnSyncFragment(
+                entrypoint = FenixFxAEntryPoint.ShakeToSummarize
+            )
         findNavController().navigate(directions)
     }
 

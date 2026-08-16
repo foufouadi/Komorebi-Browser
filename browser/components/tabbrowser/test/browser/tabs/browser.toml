@@ -131,8 +131,6 @@ tags = "vertical-tabs"
 ["browser_lastSeenActive.js"]
 tags = "vertical-tabs"
 skip-if = [
-  "os == 'linux' && os_version == '22.04' && arch == 'x86_64' && debug && vertical_tab && nova", # Bug 2057865
-  "os == 'linux' && os_version == '22.04' && arch == 'x86_64' && opt && vertical_tab && nova", # Bug 2057865
   "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && display == 'x11' && opt", # Bug 1889774
 ]
 
@@ -494,6 +492,8 @@ tags = "vertical-tabs"
 ["browser_standalonePinnedTab.js"]
 # Unclear why this fails with vertical tabs
 # tags = "vertical-tabs"
+
+["browser_swapBrowsers.js"]
 
 ["browser_switch_by_scrolling.js"]
 tags = "vertical-tabs"

@@ -50,8 +50,7 @@ class ContinuousOnboardingFeature(
 ) : LifecycleAwareFeature {
     private val logger = Logger("ContinuousOnboardingFeatureDefault")
 
-    @VisibleForTesting
-    internal var pendingStage: ContinuousOnboardingStage = ContinuousOnboardingStage.NONE
+    @VisibleForTesting internal var pendingStage: ContinuousOnboardingStage = ContinuousOnboardingStage.NONE
 
     override fun start() {
         if (!shouldShowContinuousOnboarding()) return
@@ -60,18 +59,18 @@ class ContinuousOnboardingFeature(
 
         when (val stage = stageProvider.getContinuousOnboardingStage()) {
             ContinuousOnboardingStage.DAY_2,
-            ContinuousOnboardingStage.DAY_3,
-                -> maybeRequestDefaultBrowserRole(stage)
+            ContinuousOnboardingStage.DAY_3 -> maybeRequestDefaultBrowserRole(stage)
 
-            ContinuousOnboardingStage.DAY_7 -> if (!settings.signedInFxaAccount) {
-                showSyncCardDialog()
-            } else {
-                telemetryRecorder.onOnboardingComplete(
-                    sequenceId = OnboardingPageUiData.Type.SYNC_SIGN_IN.telemetryId,
-                    sequencePosition = "0",
-                )
-                markStageCompleted(stage)
-            }
+            ContinuousOnboardingStage.DAY_7 ->
+                if (!settings.signedInFxaAccount) {
+                    showSyncCardDialog()
+                } else {
+                    telemetryRecorder.onOnboardingComplete(
+                        sequenceId = OnboardingPageUiData.Type.SYNC_SIGN_IN.telemetryId,
+                        sequencePosition = "0",
+                    )
+                    markStageCompleted(stage)
+                }
 
             ContinuousOnboardingStage.NONE -> {
                 logger.info("No continuous onboarding stage to show.")
@@ -84,11 +83,9 @@ class ContinuousOnboardingFeature(
     /**
      * Returns whether the continuous onboarding flow is already active.
      *
-     * `pendingStage` tracks the period while the Android system role-request Activity
-     * is in progress, and `isContinuousOnboardingDialogShowing()` tracks the
-     * follow-up onboarding dialog shown afterward. Together they prevent the
-     * DAY_2/DAY_3 onboarding flow from being started again if `start()` is
-     * invoked multiple times.
+     * `pendingStage` tracks the period while the Android system role-request Activity is in progress, and
+     * `isContinuousOnboardingDialogShowing()` tracks the follow-up onboarding dialog shown afterward. Together they
+     * prevent the DAY_2/DAY_3 onboarding flow from being started again if `start()` is invoked multiple times.
      */
     private fun isContinuousOnboardingInProgress(): Boolean {
         if (pendingStage != ContinuousOnboardingStage.NONE || isContinuousOnboardingDialogShowing()) {
@@ -120,14 +117,13 @@ class ContinuousOnboardingFeature(
                 return
             }
 
-            if (roleManager.isRoleAvailable(RoleManager.ROLE_BROWSER) &&
-                !roleManager.isRoleHeld(RoleManager.ROLE_BROWSER)
+            if (
+                roleManager.isRoleAvailable(RoleManager.ROLE_BROWSER) &&
+                    !roleManager.isRoleHeld(RoleManager.ROLE_BROWSER)
             ) {
                 logger.info("Showing default-browser role request dialog.")
                 pendingStage = stage
-                launcher.launch(
-                    roleManager.createRequestRoleIntent(RoleManager.ROLE_BROWSER),
-                )
+                launcher.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_BROWSER))
             } else {
                 logger.info("Default-browser role is already held or is unavailable.")
                 maybeShowNotificationCardDialog(stage)
@@ -165,60 +161,60 @@ class ContinuousOnboardingFeature(
     }
 
     @VisibleForTesting
-    internal fun getSyncOnboardingPageState(
-        stage: ContinuousOnboardingStage,
-    ) = OnboardingPageState(
-        imageRes = R.drawable.nova_onboarding_sync,
-        title = activity.getString(R.string.nova_onboarding_sync_title),
-        description = activity.getString(R.string.nova_onboarding_sync_subtitle),
-        primaryButton = Action(
-            text = activity.getString(R.string.nova_onboarding_sync_button),
-            onClick = {
-                logger.info("Sync card dialog primary button click.")
-                navigateToSyncSignIn()
+    internal fun getSyncOnboardingPageState(stage: ContinuousOnboardingStage) =
+        OnboardingPageState(
+            imageRes = R.drawable.nova_onboarding_sync,
+            title = activity.getString(R.string.nova_onboarding_sync_title),
+            description = activity.getString(R.string.nova_onboarding_sync_subtitle),
+            primaryButton =
+                Action(
+                    text = activity.getString(R.string.nova_onboarding_sync_button),
+                    onClick = {
+                        logger.info("Sync card dialog primary button click.")
+                        navigateToSyncSignIn()
 
-                telemetryRecorder.onSyncSignInClick(
+                        telemetryRecorder.onSyncSignInClick(
+                            sequenceId = OnboardingPageUiData.Type.SYNC_SIGN_IN.telemetryId,
+                            sequencePosition = "0",
+                        )
+                        telemetryRecorder.onOnboardingComplete(
+                            sequenceId = OnboardingPageUiData.Type.SYNC_SIGN_IN.telemetryId,
+                            sequencePosition = "0",
+                        )
+                    },
+                ),
+            secondaryButton =
+                Action(
+                    text = activity.getString(R.string.nova_onboarding_continue_button),
+                    onClick = {
+                        logger.info("Sync card dialog secondary button click.")
+                        markStageCompleted(stage)
+
+                        telemetryRecorder.onSkipSignInClick(
+                            sequenceId = OnboardingPageUiData.Type.SYNC_SIGN_IN.telemetryId,
+                            sequencePosition = "0",
+                        )
+                        telemetryRecorder.onOnboardingComplete(
+                            sequenceId = OnboardingPageUiData.Type.SYNC_SIGN_IN.telemetryId,
+                            sequencePosition = "0",
+                            dismissedMethod = DismissedMethod.SKIPPED,
+                        )
+                    },
+                ),
+            onRecordImpressionEvent = {
+                telemetryRecorder.onImpression(
                     sequenceId = OnboardingPageUiData.Type.SYNC_SIGN_IN.telemetryId,
-                    sequencePosition = "0",
-                )
-                telemetryRecorder.onOnboardingComplete(
-                    sequenceId = OnboardingPageUiData.Type.SYNC_SIGN_IN.telemetryId,
+                    pageType = OnboardingPageUiData.Type.SYNC_SIGN_IN,
                     sequencePosition = "0",
                 )
             },
-        ),
-        secondaryButton = Action(
-            text = activity.getString(R.string.nova_onboarding_continue_button),
-            onClick = {
-                logger.info("Sync card dialog secondary button click.")
-                markStageCompleted(stage)
-
-                telemetryRecorder.onSkipSignInClick(
-                    sequenceId = OnboardingPageUiData.Type.SYNC_SIGN_IN.telemetryId,
-                    sequencePosition = "0",
-                )
-                telemetryRecorder.onOnboardingComplete(
-                    sequenceId = OnboardingPageUiData.Type.SYNC_SIGN_IN.telemetryId,
-                    sequencePosition = "0",
-                    dismissedMethod = DismissedMethod.SKIPPED,
-                )
-            },
-        ),
-        onRecordImpressionEvent = {
-            telemetryRecorder.onImpression(
-                sequenceId = OnboardingPageUiData.Type.SYNC_SIGN_IN.telemetryId,
-                pageType = OnboardingPageUiData.Type.SYNC_SIGN_IN,
-                sequencePosition = "0",
-            )
-        },
-    )
+        )
 
     /**
      * Continues the onboarding flow after the default-browser role request has returned.
      *
-     * Invoked with the result of the system role request. Depending on the result code and device
-     * capabilities, this may show the notification-permission onboarding card or mark the stage
-     * as completed.
+     * Invoked with the result of the system role request. Depending on the result code and device capabilities, this
+     * may show the notification-permission onboarding card or mark the stage as completed.
      *
      * @param resultCode The result code returned by the system role request.
      */
@@ -237,8 +233,9 @@ class ContinuousOnboardingFeature(
     }
 
     private fun maybeShowNotificationCardDialog(stage: ContinuousOnboardingStage) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            !activity.components.notificationsDelegate.hasPostNotificationsPermission()
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                !activity.components.notificationsDelegate.hasPostNotificationsPermission()
         ) {
             logger.info("Showing notification-permission card dialog.")
 
@@ -265,45 +262,46 @@ class ContinuousOnboardingFeature(
 
     @VisibleForTesting
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
-    internal fun getNotificationOnboardingPageState(
-        stage: ContinuousOnboardingStage,
-    ) = OnboardingPageState(
-        imageRes = R.drawable.nova_onboarding_notifications,
-        title = activity.getString(R.string.nova_onboarding_notifications_title),
-        description = activity.getString(R.string.nova_onboarding_notifications_subtitle),
-        primaryButton = Action(
-            text = activity.getString(R.string.nova_onboarding_notifications_button),
-            onClick = {
-                logger.info("Notification card dialog primary button click.")
-                activity.components.notificationsDelegate.requestNotificationPermission()
-                markStageCompleted(stage)
+    internal fun getNotificationOnboardingPageState(stage: ContinuousOnboardingStage) =
+        OnboardingPageState(
+            imageRes = R.drawable.nova_onboarding_notifications,
+            title = activity.getString(R.string.nova_onboarding_notifications_title),
+            description = activity.getString(R.string.nova_onboarding_notifications_subtitle),
+            primaryButton =
+                Action(
+                    text = activity.getString(R.string.nova_onboarding_notifications_button),
+                    onClick = {
+                        logger.info("Notification card dialog primary button click.")
+                        activity.components.notificationsDelegate.requestNotificationPermission()
+                        markStageCompleted(stage)
 
-                telemetryRecorder.onNotificationPermissionClick(
+                        telemetryRecorder.onNotificationPermissionClick(
+                            sequenceId = OnboardingPageUiData.Type.NOTIFICATION_PERMISSION.telemetryId,
+                            sequencePosition = "0",
+                        )
+                    },
+                ),
+            secondaryButton =
+                Action(
+                    text = activity.getString(R.string.nova_onboarding_negative_button),
+                    onClick = {
+                        logger.info("Notification card dialog secondary button click.")
+                        markStageCompleted(stage)
+
+                        telemetryRecorder.onSkipTurnOnNotificationsClick(
+                            sequenceId = OnboardingPageUiData.Type.NOTIFICATION_PERMISSION.telemetryId,
+                            sequencePosition = "0",
+                        )
+                    },
+                ),
+            onRecordImpressionEvent = {
+                telemetryRecorder.onImpression(
                     sequenceId = OnboardingPageUiData.Type.NOTIFICATION_PERMISSION.telemetryId,
+                    pageType = OnboardingPageUiData.Type.NOTIFICATION_PERMISSION,
                     sequencePosition = "0",
                 )
             },
-        ),
-        secondaryButton = Action(
-            text = activity.getString(R.string.nova_onboarding_negative_button),
-            onClick = {
-                logger.info("Notification card dialog secondary button click.")
-                markStageCompleted(stage)
-
-                telemetryRecorder.onSkipTurnOnNotificationsClick(
-                    sequenceId = OnboardingPageUiData.Type.NOTIFICATION_PERMISSION.telemetryId,
-                    sequencePosition = "0",
-                )
-            },
-        ),
-        onRecordImpressionEvent = {
-            telemetryRecorder.onImpression(
-                sequenceId = OnboardingPageUiData.Type.NOTIFICATION_PERMISSION.telemetryId,
-                pageType = OnboardingPageUiData.Type.NOTIFICATION_PERMISSION,
-                sequencePosition = "0",
-            )
-        },
-    )
+        )
 
     private fun showDialog(
         pageState: OnboardingPageState,
@@ -320,9 +318,10 @@ class ContinuousOnboardingFeature(
             return
         }
 
-        val composeView = ComposeView(activity).apply {
-            tag = CONTINUOUS_ONBOARDING_DIALOG_TAG
-        }
+        val composeView =
+            ComposeView(activity).apply {
+                tag = CONTINUOUS_ONBOARDING_DIALOG_TAG
+            }
         val removeDialogView = {
             logger.info("Removing continuous onboarding dialog.")
             decorView.removeView(composeView)
@@ -360,9 +359,8 @@ class ContinuousOnboardingFeature(
         private const val CONTINUOUS_ONBOARDING_DIALOG_TAG = "continuous_onboarding_dialog"
 
         /**
-         * Convenience method to register [ContinuousOnboardingFeature] with a [Fragment].
-         * Upon destruction of the fragment's view, the binding will be unregistered and all
-         * references cleared.
+         * Convenience method to register [ContinuousOnboardingFeature] with a [Fragment]. Upon destruction of the
+         * fragment's view, the binding will be unregistered and all references cleared.
          *
          * @param fragment The [Fragment] to register with.
          * @param binding The [ViewBoundFeatureWrapper] to bind the feature to.
@@ -380,14 +378,15 @@ class ContinuousOnboardingFeature(
             val settings = fragment.requireContext().components.settings
 
             binding.set(
-                feature = ContinuousOnboardingFeature(
-                    activity = fragment.requireActivity(),
-                    launcher = launcher,
-                    settings = settings,
-                    telemetryRecorder = telemetryRecorder,
-                    stageProvider = ContinuousOnboardingStageProviderDefault(settings),
-                    navigateToSyncSignIn = navigateToSyncSignIn,
-                ),
+                feature =
+                    ContinuousOnboardingFeature(
+                        activity = fragment.requireActivity(),
+                        launcher = launcher,
+                        settings = settings,
+                        telemetryRecorder = telemetryRecorder,
+                        stageProvider = ContinuousOnboardingStageProviderDefault(settings),
+                        navigateToSyncSignIn = navigateToSyncSignIn,
+                    ),
                 owner = fragment.viewLifecycleOwner,
                 view = fragment.requireView(),
             )

@@ -25,15 +25,15 @@ import org.mozilla.fenix.trackingprotection.ProtectionsDashboardFragment
 
 @RunWith(AndroidJUnit4::class)
 class TrackingProtectionControllerTest {
-    @get:Rule
-    val gleanRule = FenixGleanTestRule(testContext)
+    @get:Rule val gleanRule = FenixGleanTestRule(testContext)
 
     @Test
     fun `WHEN the protection status pill is clicked THEN navigate to the protections dashboard`() {
         val navController: NavController = mockk {
-            every { currentDestination } returns mockk<NavDestination> {
-                every { id } returns R.id.homeFragment
-            }
+            every { currentDestination } returns
+                mockk<NavDestination> {
+                    every { id } returns R.id.homeFragment
+                }
             every { navigate(any<NavDirections>(), anyNullable<NavOptions>()) } just Runs
         }
         val currentSessionId = "test"
@@ -44,10 +44,11 @@ class TrackingProtectionControllerTest {
         verify { navController.currentDestination }
         verify {
             navController.navigate(
-                directions = HomeFragmentDirections.actionHomeFragmentToGlobalProtectionsDashboard(
-                    currentSessionId,
-                    source = ProtectionsDashboardFragment.SOURCE_HOME,
-                ),
+                directions =
+                    HomeFragmentDirections.actionHomeFragmentToGlobalProtectionsDashboard(
+                        currentSessionId,
+                        source = ProtectionsDashboardFragment.SOURCE_HOME,
+                    ),
                 navOptions = null,
             )
         }

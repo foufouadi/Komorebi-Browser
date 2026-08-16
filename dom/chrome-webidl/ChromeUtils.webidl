@@ -994,6 +994,12 @@ partial namespace ChromeUtils {
                                       optional PredictRemoteTypeOptions options = {});
 
   boolean isBlobURLValid(Principal principal, UTF8String uriString);
+
+  /*
+   * Validates the given service worker scope and throws an exception when invalid.
+   */
+  [Throws]
+  undefined validateServiceWorkerScope(Principal principal, URI uri);
 };
 
 /*

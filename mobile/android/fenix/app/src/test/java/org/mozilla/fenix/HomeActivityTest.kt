@@ -13,6 +13,7 @@ import io.mockk.just
 import io.mockk.mockk
 import io.mockk.spyk
 import io.mockk.verify
+import kotlin.test.assertNotNull
 import mozilla.components.browser.state.state.ActiveOptionsPage
 import mozilla.components.browser.state.state.BrowserState
 import mozilla.components.browser.state.state.WebExtensionState
@@ -41,12 +42,10 @@ import org.mozilla.fenix.helpers.perf.TestStrictModeManager
 import org.mozilla.fenix.utils.Settings
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import kotlin.test.assertNotNull
 
 @RunWith(RobolectricTestRunner::class)
 class HomeActivityTest {
-    @get:Rule
-    val gleanTestRule = FenixGleanTestRule(testContext)
+    @get:Rule val gleanTestRule = FenixGleanTestRule(testContext)
 
     private lateinit var activity: HomeActivity
     private lateinit var appStore: AppStore
@@ -70,9 +69,12 @@ class HomeActivityTest {
 
     @Test
     fun getIntentSource() {
-        val launcherIntent = Intent(Intent.ACTION_MAIN).apply {
-            addCategory(Intent.CATEGORY_LAUNCHER)
-        }.toSafeIntent()
+        val launcherIntent =
+            Intent(Intent.ACTION_MAIN)
+                .apply {
+                    addCategory(Intent.CATEGORY_LAUNCHER)
+                }
+                .toSafeIntent()
         assertEquals("APP_ICON", activity.getIntentSource(launcherIntent))
 
         val viewIntent = Intent(Intent.ACTION_VIEW).toSafeIntent()
@@ -94,9 +96,10 @@ class HomeActivityTest {
 
     @Test
     fun `isActivityColdStarted returns false for null savedInstanceState and launched from history`() {
-        val startingIntent = Intent().apply {
-            flags = flags or Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY
-        }
+        val startingIntent =
+            Intent().apply {
+                flags = flags or Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY
+            }
 
         assertFalse(activity.isActivityColdStarted(startingIntent, null))
     }
@@ -133,9 +136,10 @@ class HomeActivityTest {
 
     @Test
     fun `isActivityColdStarted returns false for null savedInstanceState and not launched from history`() {
-        val startingIntent = Intent().apply {
-            flags = flags or Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY
-        }
+        val startingIntent =
+            Intent().apply {
+                flags = flags or Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY
+            }
 
         assertFalse(activity.isActivityColdStarted(startingIntent, Bundle()))
     }
@@ -144,9 +148,10 @@ class HomeActivityTest {
     fun `GIVEN the user has been away for a long time WHEN the user opens the app THEN do start on home`() {
         every { testContext.components.strictMode } returns TestStrictModeManager()
         val settings: Settings = mockk()
-        val startingIntent = Intent().apply {
-            action = Intent.ACTION_MAIN
-        }
+        val startingIntent =
+            Intent().apply {
+                action = Intent.ACTION_MAIN
+            }
         every { activity.applicationContext } returns testContext
 
         every { settings.shouldStartOnHome() } returns true
@@ -159,9 +164,10 @@ class HomeActivityTest {
     fun `GIVEN the user has been away for a long time WHEN opening a link THEN do not start on home`() {
         every { testContext.components.strictMode } returns TestStrictModeManager()
         val settings: Settings = mockk()
-        val startingIntent = Intent().apply {
-            action = Intent.ACTION_VIEW
-        }
+        val startingIntent =
+            Intent().apply {
+                action = Intent.ACTION_VIEW
+            }
         every { settings.shouldStartOnHome() } returns true
         every { activity.getSettings() } returns settings
         every { activity.applicationContext } returns testContext
@@ -222,15 +228,17 @@ class HomeActivityTest {
     @Config(sdk = [34])
     @Test
     fun `GIVEN native Android share sheet is supported WHEN handleNewIntent is called with QR code URI THEN qr_code_tapped telemetry is recorded`() {
-        val fragmentManager = mockk<FragmentManager>(relaxed = true) {
-            every { findFragmentByTag(any()) } returns null
-        }
+        val fragmentManager =
+            mockk<FragmentManager>(relaxed = true) {
+                every { findFragmentByTag(any()) } returns null
+            }
         every { activity.supportFragmentManager } returns fragmentManager
         every { activity.applicationContext } returns testContext
 
-        val intent = Intent().apply {
-            putExtra(QR_CODE_URI_KEY, "content://cache/qr_code.png")
-        }
+        val intent =
+            Intent().apply {
+                putExtra(QR_CODE_URI_KEY, "content://cache/qr_code.png")
+            }
 
         assertNull(NativeShareSheet.qrCodeTapped.testGetValue())
 
@@ -242,15 +250,17 @@ class HomeActivityTest {
     @Config(sdk = [33])
     @Test
     fun `GIVEN native Android share sheet is not supported WHEN handleNewIntent is called with QR code URI THEN qr_code_tapped telemetry is not recorded`() {
-        val fragmentManager = mockk<FragmentManager>(relaxed = true) {
-            every { findFragmentByTag(any()) } returns null
-        }
+        val fragmentManager =
+            mockk<FragmentManager>(relaxed = true) {
+                every { findFragmentByTag(any()) } returns null
+            }
         every { activity.supportFragmentManager } returns fragmentManager
         every { activity.applicationContext } returns testContext
 
-        val intent = Intent().apply {
-            putExtra(QR_CODE_URI_KEY, "content://cache/qr_code.png")
-        }
+        val intent =
+            Intent().apply {
+                putExtra(QR_CODE_URI_KEY, "content://cache/qr_code.png")
+            }
 
         assertNull(NativeShareSheet.qrCodeTapped.testGetValue())
 
@@ -261,20 +271,18 @@ class HomeActivityTest {
 
     @Test
     fun `GIVEN active options page belongs to an extension WHEN creating open options page directions THEN return directions`() {
-        val activeOptionsPage = ActiveOptionsPage(
-            instanceId = "instanceId",
-            url = "moz-extension://extensionId/options.html",
-            name = "Test extension",
-        )
-        val extension = WebExtensionState(
-            id = "extensionId",
-            activeOptionsPage = activeOptionsPage,
-        )
-        val browserStore = BrowserStore(
-            BrowserState(
-                extensions = mapOf(extension.id to extension),
-            ),
-        )
+        val activeOptionsPage =
+            ActiveOptionsPage(
+                instanceId = "instanceId",
+                url = "moz-extension://extensionId/options.html",
+                name = "Test extension",
+            )
+        val extension =
+            WebExtensionState(
+                id = "extensionId",
+                activeOptionsPage = activeOptionsPage,
+            )
+        val browserStore = BrowserStore(BrowserState(extensions = mapOf(extension.id to extension)))
         every { activity.applicationContext } returns testContext
         every { testContext.components.core.store } returns browserStore
 
@@ -288,11 +296,12 @@ class HomeActivityTest {
 
     @Test
     fun `GIVEN active options page does not belong to an extension WHEN creating open options page directions THEN return null`() {
-        val activeOptionsPage = ActiveOptionsPage(
-            instanceId = "instanceId",
-            url = "moz-extension://extensionId/options.html",
-            name = "Test extension",
-        )
+        val activeOptionsPage =
+            ActiveOptionsPage(
+                instanceId = "instanceId",
+                url = "moz-extension://extensionId/options.html",
+                name = "Test extension",
+            )
         val browserStore = BrowserStore(BrowserState())
         every { activity.applicationContext } returns testContext
         every { testContext.components.core.store } returns browserStore
@@ -302,25 +311,26 @@ class HomeActivityTest {
 
     @Test
     fun `GIVEN the user is in the extension management UI WHEN opening an options page THEN suppress the request and clear activeOptionsPage`() {
-        val activeOptionsPage = ActiveOptionsPage(
-            instanceId = "instanceId",
-            url = "moz-extension://extensionId/options.html",
-            name = "Test extension",
-        )
-        val extension = WebExtensionState(
-            id = "extensionId",
-            activeOptionsPage = activeOptionsPage,
-        )
-        val browserStore = BrowserStore(
-            BrowserState(extensions = mapOf(extension.id to extension)),
-        )
+        val activeOptionsPage =
+            ActiveOptionsPage(
+                instanceId = "instanceId",
+                url = "moz-extension://extensionId/options.html",
+                name = "Test extension",
+            )
+        val extension =
+            WebExtensionState(
+                id = "extensionId",
+                activeOptionsPage = activeOptionsPage,
+            )
+        val browserStore = BrowserStore(BrowserState(extensions = mapOf(extension.id to extension)))
         every { activity.applicationContext } returns testContext
         every { testContext.components.core.store } returns browserStore
 
-        val suppressed = activity.suppressOptionsPageInAddonManagement(
-            currentDestinationId = R.id.installedAddonDetailsFragment,
-            activeOptionsPage = activeOptionsPage,
-        )
+        val suppressed =
+            activity.suppressOptionsPageInAddonManagement(
+                currentDestinationId = R.id.installedAddonDetailsFragment,
+                activeOptionsPage = activeOptionsPage,
+            )
 
         assertTrue(suppressed)
         assertNull(browserStore.state.extensions[extension.id]?.activeOptionsPage)
@@ -328,25 +338,26 @@ class HomeActivityTest {
 
     @Test
     fun `GIVEN the user is on an addon options page WHEN opening an options page THEN suppress the request and clear activeOptionsPage`() {
-        val activeOptionsPage = ActiveOptionsPage(
-            instanceId = "instanceId",
-            url = "moz-extension://extensionId/options.html",
-            name = "Test extension",
-        )
-        val extension = WebExtensionState(
-            id = "extensionId",
-            activeOptionsPage = activeOptionsPage,
-        )
-        val browserStore = BrowserStore(
-            BrowserState(extensions = mapOf(extension.id to extension)),
-        )
+        val activeOptionsPage =
+            ActiveOptionsPage(
+                instanceId = "instanceId",
+                url = "moz-extension://extensionId/options.html",
+                name = "Test extension",
+            )
+        val extension =
+            WebExtensionState(
+                id = "extensionId",
+                activeOptionsPage = activeOptionsPage,
+            )
+        val browserStore = BrowserStore(BrowserState(extensions = mapOf(extension.id to extension)))
         every { activity.applicationContext } returns testContext
         every { testContext.components.core.store } returns browserStore
 
-        val suppressed = activity.suppressOptionsPageInAddonManagement(
-            currentDestinationId = R.id.addonInternalSettingsFragment,
-            activeOptionsPage = activeOptionsPage,
-        )
+        val suppressed =
+            activity.suppressOptionsPageInAddonManagement(
+                currentDestinationId = R.id.addonInternalSettingsFragment,
+                activeOptionsPage = activeOptionsPage,
+            )
 
         assertTrue(suppressed)
         assertNull(browserStore.state.extensions[extension.id]?.activeOptionsPage)
@@ -354,25 +365,26 @@ class HomeActivityTest {
 
     @Test
     fun `GIVEN the user is not in the extension management UI WHEN opening an options page THEN do not suppress the request`() {
-        val activeOptionsPage = ActiveOptionsPage(
-            instanceId = "instanceId",
-            url = "moz-extension://extensionId/options.html",
-            name = "Test extension",
-        )
-        val extension = WebExtensionState(
-            id = "extensionId",
-            activeOptionsPage = activeOptionsPage,
-        )
-        val browserStore = BrowserStore(
-            BrowserState(extensions = mapOf(extension.id to extension)),
-        )
+        val activeOptionsPage =
+            ActiveOptionsPage(
+                instanceId = "instanceId",
+                url = "moz-extension://extensionId/options.html",
+                name = "Test extension",
+            )
+        val extension =
+            WebExtensionState(
+                id = "extensionId",
+                activeOptionsPage = activeOptionsPage,
+            )
+        val browserStore = BrowserStore(BrowserState(extensions = mapOf(extension.id to extension)))
         every { activity.applicationContext } returns testContext
         every { testContext.components.core.store } returns browserStore
 
-        val suppressed = activity.suppressOptionsPageInAddonManagement(
-            currentDestinationId = R.id.browserFragment,
-            activeOptionsPage = activeOptionsPage,
-        )
+        val suppressed =
+            activity.suppressOptionsPageInAddonManagement(
+                currentDestinationId = R.id.browserFragment,
+                activeOptionsPage = activeOptionsPage,
+            )
 
         assertFalse(suppressed)
         assertEquals(

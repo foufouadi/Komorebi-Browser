@@ -19,19 +19,17 @@ import org.mozilla.geckoview.ExperimentalGeckoViewApi
 import org.mozilla.geckoview.IPProtectionController.IPProxyException
 
 /**
- * [Middleware] that records telemetry for the FxA authentication and authorization initiated through IP Protection
- * as well as if a network error is encountered when user tries to toggle the VPN.
+ * [Middleware] that records telemetry for the FxA authentication and authorization initiated through IP Protection as
+ * well as if a network error is encountered when user tries to toggle the VPN.
  *
- * A flow is considered complete when the status leaves
- * [AccountStatus.AwaitingAuthentication] or [AccountStatus.AwaitingAuthorization] for a successful
- * state. The flow duration is measured from when the status first enters the corresponding
- * `Requesting*` state.
+ * A flow is considered complete when the status leaves [AccountStatus.AwaitingAuthentication] or
+ * [AccountStatus.AwaitingAuthorization] for a successful state. The flow duration is measured from when the status
+ * first enters the corresponding `Requesting*` state.
  *
- * @param currentTimeInMillis the current time in milliseconds, used to measure
- * how long the corresponding flow takes.
+ * @param currentTimeInMillis the current time in milliseconds, used to measure how long the corresponding flow takes.
  */
 internal class IPProtectionTelemetryMiddleware(
-    private val currentTimeInMillis: () -> Long = { SystemClock.elapsedRealtime() },
+    private val currentTimeInMillis: () -> Long = { SystemClock.elapsedRealtime() }
 ) : Middleware<IPProtectionState, IPProtectionAction> {
 
     private var authenticationFlowStartMs: Long? = null
@@ -75,8 +73,7 @@ internal class IPProtectionTelemetryMiddleware(
             AccountStatus.AuthFailed,
             AccountStatus.Authenticated,
             AccountStatus.EnrolledAndEntitled,
-            AccountStatus.TryAgain,
-                -> {
+            AccountStatus.TryAgain -> {
                 // no-op
             }
         }
@@ -88,14 +85,14 @@ internal class IPProtectionTelemetryMiddleware(
         when (previousStatus) {
             AccountStatus.AwaitingAuthentication -> {
                 Vpn.fxAccountFlowCompleted.record(
-                    Vpn.FxAccountFlowCompletedExtra(durationMs = durationSince(authenticationFlowStartMs)),
+                    Vpn.FxAccountFlowCompletedExtra(durationMs = durationSince(authenticationFlowStartMs))
                 )
                 authenticationFlowStartMs = null
             }
 
             AccountStatus.AwaitingAuthorization -> {
                 Vpn.fxAuthorizationFlowCompleted.record(
-                    Vpn.FxAuthorizationFlowCompletedExtra(durationMs = durationSince(authorizationFlowStartMs)),
+                    Vpn.FxAuthorizationFlowCompletedExtra(durationMs = durationSince(authorizationFlowStartMs))
                 )
                 authorizationFlowStartMs = null
             }
@@ -111,8 +108,7 @@ internal class IPProtectionTelemetryMiddleware(
             AccountStatus.AuthFailed,
             AccountStatus.Authenticated,
             AccountStatus.EnrolledAndEntitled,
-            AccountStatus.TryAgain,
-                -> {
+            AccountStatus.TryAgain -> {
                 // no-op
             }
         }
@@ -120,8 +116,9 @@ internal class IPProtectionTelemetryMiddleware(
 
     @androidx.annotation.OptIn(ExperimentalGeckoViewApi::class)
     private fun handleToggleFailedAction(state: IPProtectionState, error: Throwable?) {
-        if (state.accountState.status == AccountStatus.EnrolledAndEntitled &&
-            state.serviceStatus == ServiceState.Unauthenticated
+        if (
+            state.accountState.status == AccountStatus.EnrolledAndEntitled &&
+                state.serviceStatus == ServiceState.Unauthenticated
         ) {
             Vpn.entitledAccountUnauthenticated.record()
         }
@@ -135,9 +132,10 @@ internal class IPProtectionTelemetryMiddleware(
         // succeeds, so it is considered a completed status.
         // [AccountStatus.EnrolledAndEntitled] is deliberately excluded since it is a VPN only state
         // reached after VPN enrollment, beyond the FxA auth time that we are interested in.
-        val COMPLETED_STATUSES = setOf(
-            AccountStatus.Authenticated,
-            AccountStatus.AwaitingEnrollment,
-        )
+        val COMPLETED_STATUSES =
+            setOf(
+                AccountStatus.Authenticated,
+                AccountStatus.AwaitingEnrollment,
+            )
     }
 }

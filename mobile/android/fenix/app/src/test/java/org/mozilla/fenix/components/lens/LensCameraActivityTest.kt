@@ -19,6 +19,9 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import io.mockk.every
 import io.mockk.verify
+import java.io.File
+import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import mozilla.components.feature.qr.QrScanActivity
 import mozilla.components.support.test.robolectric.testContext
 import org.junit.Assert.assertEquals
@@ -38,9 +41,6 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows
 import org.robolectric.shadows.ShadowToast
-import java.io.File
-import kotlin.test.assertIs
-import kotlin.test.assertNotNull
 
 @RunWith(RobolectricTestRunner::class)
 class LensCameraActivityTest {
@@ -109,8 +109,7 @@ class LensCameraActivityTest {
         activity.handlePermissionResult(isGranted = true)
         activity.supportFragmentManager.executePendingTransactions()
 
-        val fragment = activity.supportFragmentManager
-            .findFragmentById(R.id.lens_fragment_container_view)
+        val fragment = activity.supportFragmentManager.findFragmentById(R.id.lens_fragment_container_view)
         assertNotNull(fragment)
         assertIs<LensCameraFragment>(fragment)
     }
@@ -120,8 +119,7 @@ class LensCameraActivityTest {
         val activity = Robolectric.buildActivity(LensCameraActivity::class.java).create().get()
         activity.handlePermissionResult(isGranted = true)
         activity.supportFragmentManager.executePendingTransactions()
-        val firstFragment = activity.supportFragmentManager
-            .findFragmentById(R.id.lens_fragment_container_view)
+        val firstFragment = activity.supportFragmentManager.findFragmentById(R.id.lens_fragment_container_view)
 
         activity.handlePermissionResult(isGranted = true)
         activity.supportFragmentManager.executePendingTransactions()
@@ -140,8 +138,7 @@ class LensCameraActivityTest {
         val activity = controller.get()
         activity.supportFragmentManager.executePendingTransactions()
 
-        val fragment = activity.supportFragmentManager
-            .findFragmentById(R.id.lens_fragment_container_view)
+        val fragment = activity.supportFragmentManager.findFragmentById(R.id.lens_fragment_container_view)
         assertNotNull(fragment)
         assertIs<LensCameraFragment>(fragment)
     }
@@ -294,14 +291,8 @@ class LensCameraActivityTest {
         val activity = Robolectric.buildActivity(LensCameraActivity::class.java).setup().get()
         activity.supportFragmentManager.executePendingTransactions()
 
-        assertNotNull(
-            activity.supportFragmentManager
-                .findFragmentByTag(GoogleLensOptOutBottomSheetFragment.TAG),
-        )
-        assertNull(
-            activity.supportFragmentManager
-                .findFragmentById(R.id.lens_fragment_container_view),
-        )
+        assertNotNull(activity.supportFragmentManager.findFragmentByTag(GoogleLensOptOutBottomSheetFragment.TAG))
+        assertNull(activity.supportFragmentManager.findFragmentById(R.id.lens_fragment_container_view))
     }
 
     @Test
@@ -312,10 +303,7 @@ class LensCameraActivityTest {
         activity.requestOptOutBottomSheet()
         activity.supportFragmentManager.executePendingTransactions()
 
-        assertNull(
-            activity.supportFragmentManager
-                .findFragmentByTag(GoogleLensOptOutBottomSheetFragment.TAG),
-        )
+        assertNull(activity.supportFragmentManager.findFragmentByTag(GoogleLensOptOutBottomSheetFragment.TAG))
     }
 
     @Test
@@ -328,8 +316,7 @@ class LensCameraActivityTest {
 
         assertEquals(
             1,
-            activity.supportFragmentManager.fragments
-                .count { it is GoogleLensOptOutBottomSheetFragment },
+            activity.supportFragmentManager.fragments.count { it is GoogleLensOptOutBottomSheetFragment },
         )
     }
 
@@ -338,16 +325,14 @@ class LensCameraActivityTest {
         every { settings.hasAcceptedGoogleLensFirstRun } returns false
         val activity = Robolectric.buildActivity(LensCameraActivity::class.java).setup().get()
         activity.supportFragmentManager.executePendingTransactions()
-        val sheet = activity.supportFragmentManager
-            .findFragmentByTag(GoogleLensOptOutBottomSheetFragment.TAG)
+        val sheet = activity.supportFragmentManager.findFragmentByTag(GoogleLensOptOutBottomSheetFragment.TAG)
 
         activity.showOptOutBottomSheet()
         activity.supportFragmentManager.executePendingTransactions()
 
         assertSame(
             sheet,
-            activity.supportFragmentManager
-                .findFragmentByTag(GoogleLensOptOutBottomSheetFragment.TAG),
+            activity.supportFragmentManager.findFragmentByTag(GoogleLensOptOutBottomSheetFragment.TAG),
         )
     }
 
@@ -356,8 +341,7 @@ class LensCameraActivityTest {
         every { settings.hasAcceptedGoogleLensFirstRun } returns false
         val activity = Robolectric.buildActivity(LensCameraActivity::class.java).setup().get()
         activity.supportFragmentManager.executePendingTransactions()
-        val sheet = activity.supportFragmentManager
-            .findFragmentByTag(GoogleLensOptOutBottomSheetFragment.TAG)
+        val sheet = activity.supportFragmentManager.findFragmentByTag(GoogleLensOptOutBottomSheetFragment.TAG)
         assertIs<GoogleLensOptOutBottomSheetFragment>(sheet)
 
         val behavior = assertIs<BottomSheetDialog>(sheet.dialog).behavior
@@ -375,8 +359,7 @@ class LensCameraActivityTest {
         every { settings.hasAcceptedGoogleLensFirstRun } returns false
         val activity = Robolectric.buildActivity(LensCameraActivity::class.java).setup().get()
         activity.supportFragmentManager.executePendingTransactions()
-        val sheet = activity.supportFragmentManager
-            .findFragmentByTag(GoogleLensOptOutBottomSheetFragment.TAG)
+        val sheet = activity.supportFragmentManager.findFragmentByTag(GoogleLensOptOutBottomSheetFragment.TAG)
         assertIs<GoogleLensOptOutBottomSheetFragment>(sheet)
 
         // A swipe, back press or tap outside all route through the dialog's cancel, which posts
@@ -400,10 +383,7 @@ class LensCameraActivityTest {
 
         // onDismiss also fires from onDestroyView on a configuration change; only onCancel means
         // the user actually declined, so a recreate must not cancel the activity.
-        assertNotNull(
-            activity.supportFragmentManager
-                .findFragmentByTag(GoogleLensOptOutBottomSheetFragment.TAG),
-        )
+        assertNotNull(activity.supportFragmentManager.findFragmentByTag(GoogleLensOptOutBottomSheetFragment.TAG))
         assertFalse(activity.isFinishing)
     }
 
@@ -424,10 +404,7 @@ class LensCameraActivityTest {
             .grantPermissions(Manifest.permission.CAMERA)
         controller.pause().resume()
 
-        assertNull(
-            activity.supportFragmentManager
-                .findFragmentById(R.id.lens_fragment_container_view),
-        )
+        assertNull(activity.supportFragmentManager.findFragmentById(R.id.lens_fragment_container_view))
         assertEquals(Activity.RESULT_CANCELED, Shadows.shadowOf(activity).resultCode)
     }
 
@@ -469,8 +446,7 @@ class LensCameraActivityTest {
 
         verify { settings.hasAcceptedGoogleLensFirstRun = true }
         assertIs<LensCameraFragment>(
-            activity.supportFragmentManager
-                .findFragmentById(R.id.lens_fragment_container_view),
+            activity.supportFragmentManager.findFragmentById(R.id.lens_fragment_container_view)
         )
         assertFalse(activity.isFinishing)
     }

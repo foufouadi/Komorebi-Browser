@@ -362,6 +362,7 @@ bool InvokeFromInterpreterStub(JSContext* cx,
 void* GetContextSensitiveInterpreterStub();
 
 bool CheckOverRecursed(JSContext* cx);
+bool CheckOverRecursedResumingGenerator(JSContext* cx);
 bool CheckOverRecursedBaseline(JSContext* cx, BaselineFrame* frame);
 
 [[nodiscard]] bool MutatePrototype(JSContext* cx, Handle<PlainObject*> obj,

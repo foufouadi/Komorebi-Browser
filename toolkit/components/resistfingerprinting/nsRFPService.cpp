@@ -3387,9 +3387,11 @@ void nsRFPService::CalculateFontLocaleAllowlist() {
 #elif defined(XP_MACOSX)
 #  include "../../gfx/thebes/StandardFonts-macos.inc"
 #elif defined(XP_LINUX)
-#  include "../../gfx/thebes/StandardFonts-linux.inc"
-#elif defined(XP_ANDROID)
-#  include "../../gfx/thebes/StandardFonts-android.inc"
+#  if defined(ANDROID)
+#    include "../../gfx/thebes/StandardFonts-android.inc"
+#  else
+#    include "../../gfx/thebes/StandardFonts-linux.inc"
+#  endif
 #endif
 
 #undef FontInclusionByLocaleRules

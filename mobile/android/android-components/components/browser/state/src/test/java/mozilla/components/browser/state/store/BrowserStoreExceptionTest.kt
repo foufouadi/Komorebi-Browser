@@ -47,26 +47,16 @@ class BrowserStoreExceptionTest {
             TabListAction.RestoreAction(
                 listOf(tab1.toRecoverableTab()),
                 restoreLocation = TabListAction.RestoreAction.RestoreLocation.BEGINNING,
-            ),
+            )
         )
     }
 
     @Test(expected = IllegalArgumentException::class)
     fun `AddMultipleTabsAction - Exception is thrown in tab with id already exists`() {
-        val store = BrowserStore(
-            BrowserState(
-                tabs = listOf(
-                    createTab(id = "a", url = "https://www.mozilla.org"),
-                ),
-            ),
-        )
+        val store = BrowserStore(BrowserState(tabs = listOf(createTab(id = "a", url = "https://www.mozilla.org"))))
 
         store.dispatch(
-            TabListAction.AddMultipleTabsAction(
-                tabs = listOf(
-                    createTab(id = "a", url = "https://www.example.org"),
-                ),
-            ),
+            TabListAction.AddMultipleTabsAction(tabs = listOf(createTab(id = "a", url = "https://www.example.org")))
         )
     }
 
@@ -74,45 +64,46 @@ class BrowserStoreExceptionTest {
     fun `AddMultipleTabsAction - Exception is thrown if parent id is set`() {
         val store = BrowserStore()
 
-        val tab1 = createTab(
-            id = "a",
-            url = "https://www.mozilla.org",
-        )
+        val tab1 =
+            createTab(
+                id = "a",
+                url = "https://www.mozilla.org",
+            )
 
-        val tab2 = createTab(
-            id = "b",
-            url = "https://www.firefox.com",
-            private = true,
-            parent = tab1,
-        )
+        val tab2 =
+            createTab(
+                id = "b",
+                url = "https://www.firefox.com",
+                private = true,
+                parent = tab1,
+            )
 
-        store.dispatch(
-            TabListAction.AddMultipleTabsAction(
-                tabs = listOf(tab1, tab2),
-            ),
-        )
+        store.dispatch(TabListAction.AddMultipleTabsAction(tabs = listOf(tab1, tab2)))
     }
 
     @Test(expected = IllegalArgumentException::class)
     fun `AddTabGroupAction - Exception is thrown when group already exists`() {
         val partitionId = "testFeaturePartition"
         val testGroup = TabGroup("test")
-        val store = BrowserStore(
-            BrowserState(
-                tabPartitions = mapOf(
-                    partitionId to TabPartition(
-                        partitionId,
-                        tabGroups = listOf(testGroup),
-                    ),
-                ),
-            ),
-        )
+        val store =
+            BrowserStore(
+                BrowserState(
+                    tabPartitions =
+                        mapOf(
+                            partitionId to
+                                TabPartition(
+                                    partitionId,
+                                    tabGroups = listOf(testGroup),
+                                )
+                        )
+                )
+            )
 
         store.dispatch(
             TabGroupAction.AddTabGroupAction(
                 partition = partitionId,
                 group = testGroup,
-            ),
+            )
         )
     }
 
@@ -126,7 +117,7 @@ class BrowserStoreExceptionTest {
             TabGroupAction.AddTabGroupAction(
                 partition = partition,
                 group = testGroup,
-            ),
+            )
         )
     }
 
@@ -135,12 +126,13 @@ class BrowserStoreExceptionTest {
         val tabGroup = TabGroup("test1", tabIds = emptySet())
         val tabPartition = TabPartition("testFeaturePartition", tabGroups = listOf(tabGroup))
 
-        val store = BrowserStore(
-            BrowserState(
-                tabs = listOf(),
-                tabPartitions = mapOf("testFeaturePartition" to tabPartition),
-            ),
-        )
+        val store =
+            BrowserStore(
+                BrowserState(
+                    tabs = listOf(),
+                    tabPartitions = mapOf("testFeaturePartition" to tabPartition),
+                )
+            )
 
         val tab = createTab(id = "tab1", url = "https://firefox.com")
         store.dispatch(TabGroupAction.AddTabAction(tabPartition.id, tabGroup.id, tab.id))
@@ -153,15 +145,14 @@ class BrowserStoreExceptionTest {
         val tab1 = createTab(id = "tab1", url = "https://firefox.com")
         val tab2 = createTab(id = "tab2", url = "https://mozilla.org")
 
-        val store = BrowserStore(
-            BrowserState(
-                tabs = listOf(tab1),
-                tabPartitions = mapOf("testFeaturePartition" to tabPartition),
-            ),
-        )
+        val store =
+            BrowserStore(
+                BrowserState(
+                    tabs = listOf(tab1),
+                    tabPartitions = mapOf("testFeaturePartition" to tabPartition),
+                )
+            )
 
-        store.dispatch(
-            TabGroupAction.AddTabsAction(tabPartition.id, tabGroup.id, setOf(tab1.id, tab2.id)),
-        )
+        store.dispatch(TabGroupAction.AddTabsAction(tabPartition.id, tabGroup.id, setOf(tab1.id, tab2.id)))
     }
 }

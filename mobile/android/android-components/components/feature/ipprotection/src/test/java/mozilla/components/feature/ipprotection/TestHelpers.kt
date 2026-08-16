@@ -40,7 +40,7 @@ internal class FakeEligibilityStorage : IPProtectionEligibilityStorage {
 internal typealias IPProtectionTestMiddleware = CaptureActionsMiddleware<IPProtectionState, IPProtectionAction>
 
 internal fun buildStore(
-    initialState: IPProtectionState = buildIPProtectionState(),
+    initialState: IPProtectionState = buildIPProtectionState()
 ): Pair<IPProtectionStore, IPProtectionTestMiddleware> {
     val middleware = IPProtectionTestMiddleware()
     val store = IPProtectionStore(initialState = initialState, middleware = listOf(middleware))

@@ -820,7 +820,7 @@ std::pair<nsPoint, nsRect> DocAccessible::ComputeScrollData(
       scrollRange = sf->GetScrollRange();
 
       if (aShouldScaleByResolution) {
-        scrollPoint = scrollPoint * mPresShell->GetResolution();
+        scrollPoint = scrollPoint.ApplyResolution(mPresShell->GetResolution());
         scrollRange.ScaleRoundOut(mPresShell->GetResolution());
       }
     }

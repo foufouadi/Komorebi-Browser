@@ -15,18 +15,20 @@ import org.mozilla.fenix.ui.efficiency.selectors.MainMenuSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.SettingsSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.SettingsTurnOnSyncSelectors
 
-class SettingsTurnOnSyncPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule, *>) : BasePage(composeRule) {
+class SettingsTurnOnSyncPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule, *>) :
+    BasePage(composeRule) {
     override val pageName = "SettingsTurnOnSyncPage"
 
     init {
         NavigationRegistry.register(
             from = "HomePage",
             to = pageName,
-            steps = listOf(
-                NavigationStep.Click(HomeSelectors.MAIN_MENU_BUTTON),
-                NavigationStep.Click(MainMenuSelectors.SETTINGS_BUTTON),
-                NavigationStep.Click(SettingsSelectors.SIGN_IN_BUTTON),
-            ),
+            steps =
+                listOf(
+                    NavigationStep.Click(HomeSelectors.MAIN_MENU_BUTTON),
+                    NavigationStep.Click(MainMenuSelectors.SETTINGS_BUTTON),
+                    NavigationStep.Click(SettingsSelectors.SIGN_IN_BUTTON),
+                ),
         )
     }
 

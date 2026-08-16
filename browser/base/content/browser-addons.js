@@ -2495,6 +2495,14 @@ var gUnifiedExtensions = {
           );
           emptyStateBox.hidden = false;
 
+          // Without the discovery pane there is nowhere to send the user, so
+          // keep the "Manage Extensions" button instead.
+          if (
+            !Services.prefs.getBoolPref("extensions.getAddons.showPane", true)
+          ) {
+            return;
+          }
+
           // Replace the "Manage Extensions" button with "Discover Extensions".
           // We add the "Discover Extensions" button, and "Manage Extensions"
           // button (#unified-extensions-manage-extensions) is hidden by CSS.
@@ -3244,18 +3252,7 @@ var gUnifiedExtensions = {
     );
 
     discoverButton.addEventListener("click", () => {
-      if (
-        // The "Discover Extensions" button is only shown if the user has not
-        // installed any extension. In that case, we direct to the discopane
-        // in about:addons. If the discopane is disabled, open the default
-        // view (Extensions list) instead. This view shows a link to AMO when
-        // the user does not have any extensions installed.
-        Services.prefs.getBoolPref("extensions.getAddons.showPane", true)
-      ) {
-        BrowserAddonUI.openAddonsMgr("addons://list/discover");
-      } else {
-        BrowserAddonUI.openAddonsMgr("addons://list/extension");
-      }
+      BrowserAddonUI.openAddonsMgr("addons://list/discover");
       // The panel closes automatically when the `<moz-button>` is pressed since
       // the `closepanel` attribute was not set to `none`.
     });

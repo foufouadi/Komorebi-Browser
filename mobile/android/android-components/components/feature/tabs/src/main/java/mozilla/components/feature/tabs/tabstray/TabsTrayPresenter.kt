@@ -20,8 +20,8 @@ import mozilla.components.feature.tabs.ext.toTabs
 import mozilla.components.lib.state.ext.flowScoped
 
 /**
- * Presenter implementation for a tabs tray implementation in order to update the tabs tray whenever
- * the state of the session manager changes.
+ * Presenter implementation for a tabs tray implementation in order to update the tabs tray whenever the state of the
+ * session manager changes.
  */
 class TabsTrayPresenter(
     private val tabsTray: TabsTray,
@@ -43,7 +43,8 @@ class TabsTrayPresenter(
     }
 
     private suspend fun collect(flow: Flow<BrowserState>) {
-        flow.distinctUntilChangedBy { Pair(it.toTabs(tabsFilter), tabPartitionsFilter(it.tabPartitions)) }
+        flow
+            .distinctUntilChangedBy { Pair(it.toTabs(tabsFilter), tabPartitionsFilter(it.tabPartitions)) }
             .collect { state ->
                 val (tabs, selectedTabId) = state.toTabList(tabsFilter)
                 // Do not invoke the callback on start if this is the initial state.

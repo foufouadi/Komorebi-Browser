@@ -9,10 +9,8 @@ import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.DependencySubstitution
-import org.gradle.api.artifacts.ExternalModuleDependency
 import org.gradle.api.artifacts.VersionCatalogsExtension
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
-import org.gradle.api.attributes.Bundling
 import org.gradle.api.artifacts.component.ModuleComponentSelector
 import org.gradle.api.logging.Logger
 import org.gradle.api.logging.StandardOutputListener
@@ -25,6 +23,7 @@ import org.gradle.api.tasks.testing.TestOutputEvent
 import org.gradle.api.tasks.testing.TestOutputListener
 import org.gradle.api.tasks.testing.TestResult
 import org.gradle.process.CommandLineArgumentProvider
+import org.mozilla.conventions.ktfmt.configureKtfmt
 import java.io.File
 
 class ProjectPlugin : Plugin<Project> {
@@ -32,7 +31,7 @@ class ProjectPlugin : Plugin<Project> {
     override fun apply(project: Project) {
         val mozilla = project.extensions.create("mozilla", ProjectExtension::class.java)
         mozilla.androidComponentsProject.convention(false)
-        mozilla.ktlintSourcePaths.convention(emptyList())
+        mozilla.ktfmtSourcePaths.convention(emptyList())
         mozilla.detektSourcePaths.convention(emptyList())
         mozilla.detektAutoCorrect.convention(true)
         mozilla.detektReports.convention(emptyMap())
@@ -58,7 +57,7 @@ class ProjectPlugin : Plugin<Project> {
         configureAppServicesSubstitution(project, extraProperties, substs)
         configureGleanSubstitution(project, extraProperties)
         configureGleanVersionResolution(project)
-        configureKtlint(project, mozilla)
+        configureKtfmt(project, mozilla)
         configureDetekt(project, mozilla)
         configureAndroidComponentsLint(project, mozilla, topsrcdir)
         configureTestOutputFormatting(project)
@@ -321,75 +320,6 @@ class ProjectPlugin : Plugin<Project> {
         private val GLEAN_GROUPS = setOf("org.mozilla.telemetry")
     }
 
-    private fun configureKtlint(project: Project, mozilla: ProjectExtension) {
-        val sourcePaths = mozilla.ktlintSourcePaths
-
-        val ktlintConfig = project.configurations.register("ktlint")
-
-        val ktlintDep = project.provider {
-            val versionCatalogs = project.extensions.getByType(VersionCatalogsExtension::class.java)
-            val libs = versionCatalogs.named("libs")
-            val dep = project.dependencies.create(libs.findLibrary("ktlint").get().get())
-            if (dep is ExternalModuleDependency) {
-                dep.attributes {
-                    attribute(Bundling.BUNDLING_ATTRIBUTE, project.objects.named(Bundling::class.java, Bundling.EXTERNAL))
-                }
-            }
-            dep
-        }
-        ktlintConfig.configure { dependencies.addLater(ktlintDep) }
-        val ktlintClasspath = project.files(ktlintConfig)
-
-        // Resolve the include/exclude globs (with leading "!" meaning exclude)
-        // into a FileTree rooted at projectDir, so Gradle can use the actual
-        // Kotlin source set to compute UP-TO-DATE / build cache keys.
-        fun ktlintSourceTree() = project.fileTree(project.projectDir).matching {
-            sourcePaths.get().forEach { pattern ->
-                if (pattern.startsWith("!")) {
-                    exclude(pattern.removePrefix("!"))
-                } else {
-                    include(pattern)
-                }
-            }
-        }
-
-        project.tasks.register("ktlint", JavaExec::class.java) {
-            group = "verification"
-            description = "Check Kotlin code style."
-            classpath = ktlintClasspath
-            mainClass.set("com.pinterest.ktlint.Main")
-            onlyIf { sourcePaths.get().isNotEmpty() }
-            sourcePaths.get().forEach { args(it) }
-            args("--reporter=json,output=build/reports/ktlint/ktlint.json")
-            args("--reporter=plain")
-            inputs.files(ktlintSourceTree())
-                .withPropertyName("ktlintSources")
-                .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.RELATIVE)
-                .skipWhenEmpty()
-            outputs.file(project.file("build/reports/ktlint/ktlint.json"))
-                .withPropertyName("ktlintReport")
-            outputs.cacheIf { true }
-        }
-
-        project.tasks.register("ktlintFormat", JavaExec::class.java) {
-            group = "formatting"
-            description = "Fix Kotlin code style deviations."
-            classpath = ktlintClasspath
-            mainClass.set("com.pinterest.ktlint.Main")
-            onlyIf { sourcePaths.get().isNotEmpty() }
-            args("-F")
-            sourcePaths.get().forEach { args(it) }
-            args("--reporter=json,output=build/reports/ktlint/ktlintFormat.json")
-            args("--reporter=plain")
-            jvmArgs("--add-opens", "java.base/java.lang=ALL-UNNAMED")
-            inputs.files(ktlintSourceTree())
-                .withPropertyName("ktlintFormatSources")
-                .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.RELATIVE)
-                .skipWhenEmpty()
-            outputs.file(project.file("build/reports/ktlint/ktlintFormat.json"))
-                .withPropertyName("ktlintFormatReport")
-        }
-    }
 
     private fun configureDetekt(project: Project, mozilla: ProjectExtension) {
         val sourcePaths = mozilla.detektSourcePaths

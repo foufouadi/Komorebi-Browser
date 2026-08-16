@@ -16,6 +16,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat.Type.systemBars
 import androidx.fragment.compose.content
 import androidx.navigation.fragment.navArgs
+import com.google.android.material.R as materialR
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
@@ -25,11 +26,8 @@ import org.mozilla.fenix.GleanMetrics.TrackingProtection
 import org.mozilla.fenix.R
 import org.mozilla.fenix.ext.requireComponents
 import org.mozilla.fenix.ext.runIfFragmentIsAttached
-import com.google.android.material.R as materialR
 
-/**
- * [BottomSheetDialog] showing the global protections dashboard.
- */
+/** [BottomSheetDialog] showing the global protections dashboard. */
 class ProtectionsDashboardFragment : BottomSheetDialogFragment() {
     private val args by navArgs<ProtectionsDashboardFragmentArgs>()
     private val trackersBlockedFeature = ViewBoundFeatureWrapper<TrackersBlockedFeature>()
@@ -76,19 +74,22 @@ class ProtectionsDashboardFragment : BottomSheetDialogFragment() {
             totalTrackersBlocked = blockedTrackersState.trackersBlockedCount,
             trackersBlockedThisWeek = blockedTrackersState.trackersBlockedThisWeek,
             earliestTrackingDate = blockedTrackersState.earliestTrackingDate,
-        ) { dismiss() }
+        ) {
+            dismiss()
+        }
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
         trackersBlockedFeature.set(
-            feature = TrackersBlockedFeature(
-                browserStore = requireComponents.core.store,
-                appStore = requireComponents.appStore,
-                currentSessionId = args.customTabSessionId,
-                trackingProtectionUseCases = requireComponents.useCases.trackingProtectionUseCases,
-            ),
+            feature =
+                TrackersBlockedFeature(
+                    browserStore = requireComponents.core.store,
+                    appStore = requireComponents.appStore,
+                    currentSessionId = args.customTabSessionId,
+                    trackingProtectionUseCases = requireComponents.useCases.trackingProtectionUseCases,
+                ),
             owner = viewLifecycleOwner,
             view = view,
         )
@@ -97,9 +98,7 @@ class ProtectionsDashboardFragment : BottomSheetDialogFragment() {
     @VisibleForTesting
     internal fun recordPrivacyReportTapped() {
         val source = arguments?.getString(ARG_SOURCE) ?: SOURCE_HOME
-        TrackingProtection.privacyReportTapped.record(
-            TrackingProtection.PrivacyReportTappedExtra(source = source),
-        )
+        TrackingProtection.privacyReportTapped.record(TrackingProtection.PrivacyReportTappedExtra(source = source))
     }
 
     companion object {

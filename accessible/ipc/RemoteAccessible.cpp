@@ -1779,13 +1779,13 @@ void RemoteAccessible::ScrollSubstringToPoint(int32_t aStartOffset,
                                          aCoordinateType, aX, aY);
 }
 
-RefPtr<const AccAttributes> RemoteAccessible::GetCachedTextAttributes() {
+const AccAttributes* RemoteAccessible::GetCachedTextAttributes() {
   if (mDoc->RequestDomainsIfInactive(CacheDomain::Text)) {
     return nullptr;
   }
   MOZ_ASSERT(IsText() || IsHyperText());
   if (mCachedFields) {
-    auto attrs = mCachedFields->GetAttributeRefPtr<AccAttributes>(
+    auto attrs = mCachedFields->GetAttributeWeakPtr<AccAttributes>(
         CacheKey::TextAttributes);
     VERIFY_CACHE(CacheDomain::Text);
     return attrs;
@@ -1817,8 +1817,7 @@ already_AddRefed<AccAttributes> RemoteAccessible::DefaultTextAttributes() {
       continue;
     }
 
-    if (RefPtr<const AccAttributes> parentAttrs =
-            parent->GetCachedTextAttributes()) {
+    if (const AccAttributes* parentAttrs = parent->GetCachedTextAttributes()) {
       // Update our text attributes with any parent entries we don't have.
       parentAttrs->CopyTo(result, true);
     }
@@ -2736,20 +2735,28 @@ void RemoteAccessible::Language(nsAString& aLocale) {
   if (mDoc->RequestDomainsIfInactive(CacheDomain::Text)) {
     return;
   }
-
-  if (IsHyperText() || IsText()) {
-    for (RemoteAccessible* parent = this; parent;
-         parent = parent->RemoteParent()) {
-      // Climb up the tree to find where the nearest language attribute is.
-      if (RefPtr<const AccAttributes> attrs =
-              parent->GetCachedTextAttributes()) {
+  auto GetLanguage = [&aLocale](RemoteAccessible* aAcc) {
+    if (aAcc->IsHyperText() || aAcc->IsText()) {
+      if (const AccAttributes* attrs = aAcc->GetCachedTextAttributes()) {
         if (attrs->GetAttribute(nsGkAtoms::language, aLocale)) {
-          return;
+          return true;
         }
       }
+    } else if (aAcc->mCachedFields) {
+      if (aAcc->mCachedFields->GetAttribute(CacheKey::Language, aLocale)) {
+        return true;
+      }
     }
-  } else if (mCachedFields) {
-    mCachedFields->GetAttribute(CacheKey::Language, aLocale);
+
+    return false;
+  };
+
+  for (RemoteAccessible* parent = this; parent;
+       parent = parent->RemoteParent()) {
+    // Climb up the tree to find where the nearest language attribute is.
+    if (GetLanguage(parent)) {
+      return;
+    }
   }
 }
 

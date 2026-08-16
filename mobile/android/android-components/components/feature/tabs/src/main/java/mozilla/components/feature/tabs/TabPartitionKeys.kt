@@ -4,9 +4,7 @@
 
 package mozilla.components.feature.tabs
 
-/**
- * Keys used to identify tab partitions.
- */
+/** Keys used to identify tab partitions. */
 internal object TabPartitionKeys {
     const val TAB_GROUPS = "TAB_GROUPS"
 }

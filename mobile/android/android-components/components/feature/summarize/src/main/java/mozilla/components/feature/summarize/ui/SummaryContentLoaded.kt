@@ -33,32 +33,23 @@ import mozilla.components.compose.base.button.IconButton
 import mozilla.components.compose.base.theme.AcornTheme
 import mozilla.components.concept.llm.LlmProvider
 import mozilla.components.feature.summarize.R
+import mozilla.components.ui.icons.R as iconsR
 import mozilla.components.ui.richtext.RichText
 import mozilla.components.ui.richtext.ir.RichDocument
-import mozilla.components.ui.icons.R as iconsR
 
-/**
- * Content being shown after the page summary has been generated
- */
+/** Content being shown after the page summary has been generated */
 @Composable
 internal fun SummaryContentLoaded(
     document: RichDocument,
     info: LlmProvider.Info,
     onSettingsClicked: () -> Unit = {},
 ) {
-    Column(
-        modifier = Modifier
-            .padding(horizontal = AcornTheme.layout.space.static200)
-            .fillMaxWidth(),
-    ) {
+    Column(modifier = Modifier.padding(horizontal = AcornTheme.layout.space.static200).fillMaxWidth()) {
         SummarizationHeader(info, onSettingsClicked = onSettingsClicked)
         Spacer(Modifier.height(AcornTheme.layout.space.static200))
         SummarizedContent(
             document = document,
-            modifier = Modifier
-                .weight(1f, fill = true)
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState()),
+            modifier = Modifier.weight(1f, fill = true).fillMaxWidth().verticalScroll(rememberScrollState()),
         )
         Spacer(Modifier.height(AcornTheme.layout.space.static200))
         DisclaimerMessage()
@@ -82,9 +73,7 @@ internal fun SummarizationHeader(
 
         IconButton(
             onClick = onSettingsClicked,
-            contentDescription = stringResource(
-                id = R.string.mozac_summarize_settings_button_content_description,
-            ),
+            contentDescription = stringResource(id = R.string.mozac_summarize_settings_button_content_description),
         ) {
             Icon(
                 painter = painterResource(id = iconsR.drawable.mozac_ic_settings_24),
@@ -101,12 +90,13 @@ private fun ModelInformation(
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier
-            .fillMaxHeight()
-            .background(
-                color = MaterialTheme.colorScheme.secondaryContainer,
-                shape = MaterialTheme.shapes.small,
-            ),
+        modifier =
+            modifier
+                .fillMaxHeight()
+                .background(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = MaterialTheme.shapes.small,
+                ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Spacer(Modifier.width(8.dp))
@@ -115,19 +105,18 @@ private fun ModelInformation(
             Image(
                 painter = painterResource(it),
                 contentDescription = null,
-                modifier = Modifier
-                    .size(16.dp)
-                    .offset(y = (-1).dp),
+                modifier = Modifier.size(16.dp).offset(y = (-1).dp),
             )
 
             Spacer(Modifier.width(8.dp))
         }
 
         Text(
-            text = stringResource(
-                id = R.string.mozac_feature_summarize_summary_model,
-                stringResource(info.nameRes),
-            ),
+            text =
+                stringResource(
+                    id = R.string.mozac_feature_summarize_summary_model,
+                    stringResource(info.nameRes),
+                ),
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSecondaryContainer,
         )
@@ -148,9 +137,7 @@ private fun DisclaimerMessage() {
     Text(
         text = stringResource(R.string.mozac_feature_summarize_disclaimer_message),
         fontSize = 14.sp,
-        modifier = Modifier
-            .height(24.dp)
-            .width(AcornTheme.layout.size.containerMaxWidth),
+        modifier = Modifier.height(24.dp).width(AcornTheme.layout.size.containerMaxWidth),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }

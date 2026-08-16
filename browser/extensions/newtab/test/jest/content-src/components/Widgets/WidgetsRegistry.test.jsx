@@ -63,6 +63,27 @@ describe("isWidgetToggleVisible", () => {
   });
 });
 
+// Bug 2063657: the sports widget is retired; removed in bug 2063656.
+describe("retired sports widget", () => {
+  const sportsWidget = WIDGET_REGISTRY.find(w => w.id === "sportsWidget");
+  const everythingOn = {
+    "widgets.enabled": true,
+    "widgets.sportsWidget.enabled": true,
+    "widgets.system.sportsWidget.enabled": true,
+    widgetsConfig: { sportsWidgetEnabled: true },
+    trainhopConfig: {
+      widgets: { sportsWidgetEnabled: true },
+      widgetsSettings: { sportsWidgetVisible: true },
+    },
+  };
+
+  it("is never addable, visible or enabled, whatever the prefs say", () => {
+    expect(isWidgetAddable(sportsWidget, everythingOn)).toBe(false);
+    expect(isWidgetToggleVisible(sportsWidget, everythingOn)).toBe(false);
+    expect(isWidgetEnabled(sportsWidget, everythingOn, true)).toBe(false);
+  });
+});
+
 describe("isWidgetsContainerVisible", () => {
   it("is false when nothing enables it", () => {
     expect(isWidgetsContainerVisible({})).toBe(false);

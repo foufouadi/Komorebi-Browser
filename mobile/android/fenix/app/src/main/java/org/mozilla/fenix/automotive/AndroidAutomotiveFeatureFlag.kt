@@ -7,8 +7,7 @@ package org.mozilla.fenix.automotive
 import android.content.Context
 
 /**
- * Checks if the android automotive hardware feature is present.
- * Note: Android Automotive is NOT the same as Android Auto.
+ * Checks if the android automotive hardware feature is present. Note: Android Automotive is NOT the same as Android
+ * Auto.
  */
-fun Context.isAndroidAutomotiveAvailable() =
-    packageManager.hasSystemFeature("android.hardware.type.automotive")
+fun Context.isAndroidAutomotiveAvailable() = packageManager.hasSystemFeature("android.hardware.type.automotive")

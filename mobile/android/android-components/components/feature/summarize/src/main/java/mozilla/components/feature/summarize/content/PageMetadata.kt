@@ -4,19 +4,13 @@
 
 package mozilla.components.feature.summarize.content
 
-/**
- * An interface to conform to do deliver page metadata.
- */
+/** An interface to conform to do deliver page metadata. */
 fun interface PageMetadataExtractor {
-    /**
-     * Retrieve the page metadata.
-     */
+    /** Retrieve the page metadata. */
     suspend fun getPageMetadata(): Result<PageMetadata>
 }
 
-/**
- * Page metadata required for logical choices.
- */
+/** Page metadata required for logical choices. */
 data class PageMetadata(
     val structuredDataTypes: List<String> = listOf(),
     val wordCount: Int = 0,

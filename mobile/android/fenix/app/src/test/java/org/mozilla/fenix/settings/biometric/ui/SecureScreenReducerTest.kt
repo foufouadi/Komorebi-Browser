@@ -14,10 +14,11 @@ class SecureScreenReducerTest {
 
     @Test
     fun `WHEN authentication flow starts THEN authentication state is set to in progress`() {
-        val result = secureScreenReducer(
-            state = createState(BiometricAuthenticationState.Inert),
-            action = AuthenticationFlowAction.Started,
-        )
+        val result =
+            secureScreenReducer(
+                state = createState(BiometricAuthenticationState.Inert),
+                action = AuthenticationFlowAction.Started,
+            )
 
         assertEquals(
             BiometricAuthenticationState.InProgress,
@@ -27,10 +28,11 @@ class SecureScreenReducerTest {
 
     @Test
     fun `WHEN authentication flow succeeds THEN authentication state is set to authorized`() {
-        val result = secureScreenReducer(
-            state = createState(authenticationState = BiometricAuthenticationState.Inert),
-            action = AuthenticationFlowAction.Succeeded,
-        )
+        val result =
+            secureScreenReducer(
+                state = createState(authenticationState = BiometricAuthenticationState.Inert),
+                action = AuthenticationFlowAction.Succeeded,
+            )
 
         assertEquals(
             BiometricAuthenticationState.Authorized,
@@ -40,10 +42,11 @@ class SecureScreenReducerTest {
 
     @Test
     fun `WHEN authentication flow fails THEN authentication state is set to failed`() {
-        val result = secureScreenReducer(
-            state = createState(authenticationState = BiometricAuthenticationState.Inert),
-            action = AuthenticationFlowAction.Failed,
-        )
+        val result =
+            secureScreenReducer(
+                state = createState(authenticationState = BiometricAuthenticationState.Inert),
+                action = AuthenticationFlowAction.Failed,
+            )
 
         assertEquals(
             BiometricAuthenticationState.Failed,
@@ -53,10 +56,11 @@ class SecureScreenReducerTest {
 
     @Test
     fun `GIVEN previously ready to lock WHEN the lifecycle becomes resumed THEN authentication state is set to in progress`() {
-        val result = secureScreenReducer(
-            state = createState(authenticationState = BiometricAuthenticationState.ReadyToLock),
-            action = LifecycleAction.OnResume,
-        )
+        val result =
+            secureScreenReducer(
+                state = createState(authenticationState = BiometricAuthenticationState.ReadyToLock),
+                action = LifecycleAction.OnResume,
+            )
 
         assertEquals(
             BiometricAuthenticationState.InProgress,
@@ -66,10 +70,11 @@ class SecureScreenReducerTest {
 
     @Test
     fun `GIVEN previous state not ready to lock WHEN the lifecycle becomes resumed THEN authentication state is unchanged`() {
-        val result = secureScreenReducer(
-            state = createState(authenticationState = BiometricAuthenticationState.Authorized),
-            action = LifecycleAction.OnResume,
-        )
+        val result =
+            secureScreenReducer(
+                state = createState(authenticationState = BiometricAuthenticationState.Authorized),
+                action = LifecycleAction.OnResume,
+            )
 
         assertEquals(
             BiometricAuthenticationState.Authorized,
@@ -79,10 +84,11 @@ class SecureScreenReducerTest {
 
     @Test
     fun `GIVEN previously authorized WHEN the lifecycle becomes paused THEN state is set to ready to lock`() {
-        val result = secureScreenReducer(
-            state = createState(authenticationState = BiometricAuthenticationState.Authorized),
-            action = LifecycleAction.OnPause,
-        )
+        val result =
+            secureScreenReducer(
+                state = createState(authenticationState = BiometricAuthenticationState.Authorized),
+                action = LifecycleAction.OnPause,
+            )
 
         assertEquals(
             BiometricAuthenticationState.ReadyToLock,
@@ -92,10 +98,11 @@ class SecureScreenReducerTest {
 
     @Test
     fun `GIVEN a previous unauthorized state WHEN the lifecycle becomes paused THEN state remains unchanged`() {
-        val result = secureScreenReducer(
-            state = createState(authenticationState = BiometricAuthenticationState.Inert),
-            action = LifecycleAction.OnPause,
-        )
+        val result =
+            secureScreenReducer(
+                state = createState(authenticationState = BiometricAuthenticationState.Inert),
+                action = LifecycleAction.OnPause,
+            )
 
         assertEquals(
             BiometricAuthenticationState.Inert,
@@ -105,10 +112,11 @@ class SecureScreenReducerTest {
 
     @Test
     fun `GIVEN previous state WHEN the unlock action is received THEN authentication state is set to in progress`() {
-        val result = secureScreenReducer(
-            state = createState(authenticationState = BiometricAuthenticationState.ReadyToLock),
-            action = UnlockScreenAction.UnlockTapped,
-        )
+        val result =
+            secureScreenReducer(
+                state = createState(authenticationState = BiometricAuthenticationState.ReadyToLock),
+                action = UnlockScreenAction.UnlockTapped,
+            )
 
         assertEquals(
             BiometricAuthenticationState.InProgress,
@@ -118,10 +126,11 @@ class SecureScreenReducerTest {
 
     @Test
     fun `WHEN the leave action is received THEN state is set to exit`() {
-        val result = secureScreenReducer(
-            state = createState(authenticationState = BiometricAuthenticationState.Inert),
-            action = UnlockScreenAction.LeaveTapped,
-        )
+        val result =
+            secureScreenReducer(
+                state = createState(authenticationState = BiometricAuthenticationState.Inert),
+                action = UnlockScreenAction.LeaveTapped,
+            )
 
         assertTrue(result.shouldExit)
     }

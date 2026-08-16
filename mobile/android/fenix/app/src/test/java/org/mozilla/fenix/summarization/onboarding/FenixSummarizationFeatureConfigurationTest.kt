@@ -36,16 +36,18 @@ class FenixSummarizationFeatureConfigurationTest {
 
     @Before
     fun setUp() {
-        testSettings = Settings(
-            appContext = testContext,
-            packageName = "package-name",
-            isBenchmarkBuild = false,
-        )
+        testSettings =
+            Settings(
+                appContext = testContext,
+                packageName = "package-name",
+                isBenchmarkBuild = false,
+            )
         settingsBinding = FakeSummarizationSettingsBinding()
-        discoverySettings = FenixSummarizationFeatureConfiguration(
-            settings = testSettings,
-            summarizationSettingsBinding = settingsBinding,
-        )
+        discoverySettings =
+            FenixSummarizationFeatureConfiguration(
+                settings = testSettings,
+                summarizationSettingsBinding = settingsBinding,
+            )
     }
 
     @Test

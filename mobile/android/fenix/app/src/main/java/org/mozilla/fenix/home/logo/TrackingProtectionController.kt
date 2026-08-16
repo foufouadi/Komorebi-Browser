@@ -20,9 +20,7 @@ class TrackingProtectionController(
     private val navController: NavController,
     private val currentSessionId: String?,
 ) {
-    /**
-     * Handle the tracking protections pill being clicked.
-     */
+    /** Handle the tracking protections pill being clicked. */
     fun handleProtectionStatusPillClicked() {
         navController.nav(
             R.id.homeFragment,

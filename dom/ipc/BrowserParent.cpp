@@ -324,6 +324,7 @@ BrowserParent::BrowserParent(ContentParent* aManager, const TabId& aTabId,
       mIsReadyToHandleInputEvents(false),
       mIsMouseEnterIntoWidgetEventSuppressed(false),
       mLockedNativePointer(false),
+      mWaitingForNativeMouseMoveAfterUnlock(false),
       mShowingTooltip(false) {
   MOZ_ASSERT(aManager);
 
@@ -1995,8 +1996,14 @@ mozilla::ipc::IPCResult BrowserParent::RecvSynthesizeNativeMouseEvent(
 
 mozilla::ipc::IPCResult BrowserParent::RecvSynthesizeNativeMouseMove(
     const LayoutDeviceIntPoint& aPoint, const Maybe<uint64_t>& aCallbackId) {
-  // This is used by pointer lock API.  So, even if it's not in the automation
-  // mode, we need to accept the request.
+  NS_ENSURE_TRUE(
+      xpc::IsInAutomation()
+          // This is used by pointer lock API.  So, even if it's not
+          // in the automation mode, we need to accept the request.
+          || (mLockedNativePointer || mWaitingForNativeMouseMoveAfterUnlock),
+      IPC_FAIL(this, "Unexpected event"));
+
+  mWaitingForNativeMouseMoveAfterUnlock = false;
   nsCOMPtr<nsISynthesizedEventCallback> callback =
       SynthesizedEventCallback::MaybeCreate(this, aCallbackId);
   if (nsCOMPtr<nsIWidget> widget = GetWidget()) {
@@ -2111,8 +2118,9 @@ mozilla::ipc::IPCResult BrowserParent::RecvLockNativePointer(
     const nsIWidget::NativePointerLockMode& aNativePointerLockMode) {
   // XXX(edgar): LockNativePointer IPC message can be removed if pointer lock
   // is handled mainly from parent process.
-  MOZ_ASSERT(
-      !StaticPrefs::dom_pointer_lock_reset_to_center_from_parent_enabled());
+  NS_ENSURE_TRUE(
+      !StaticPrefs::dom_pointer_lock_reset_to_center_from_parent_enabled(),
+      IPC_FAIL(this, "Unexpected request"));
 
   if (nsCOMPtr<nsIWidget> widget = GetWidget()) {
     mLockedNativePointer = true;
@@ -2128,14 +2136,16 @@ void BrowserParent::UnlockNativePointer() {
   if (nsCOMPtr<nsIWidget> widget = GetWidget()) {
     widget->UnlockNativePointer();
     mLockedNativePointer = false;
+    mWaitingForNativeMouseMoveAfterUnlock = true;
   }
 }
 
 mozilla::ipc::IPCResult BrowserParent::RecvUnlockNativePointer() {
   // XXX(edgar): LockNativePointer IPC message can be removed if pointer lock
   // is handled mainly from parent process.
-  MOZ_ASSERT(
-      !StaticPrefs::dom_pointer_lock_reset_to_center_from_parent_enabled());
+  NS_ENSURE_TRUE(
+      !StaticPrefs::dom_pointer_lock_reset_to_center_from_parent_enabled(),
+      IPC_FAIL(this, "Unexpected request"));
   UnlockNativePointer();
   return IPC_OK();
 }

@@ -9,22 +9,25 @@ import org.mozilla.fenix.ui.efficiency.helpers.SelectorStrategy
 
 object SettingsTurnOnSyncSelectors {
 
-    val USE_EMAIL_INSTEAD_BUTTON = Selector(
-        strategy = SelectorStrategy.UIAUTOMATOR_WITH_RES_ID,
-        value = "signInEmailButton",
-        description = "Use email instead button",
-        groups = listOf("requiredForPage"),
-    )
+    val USE_EMAIL_INSTEAD_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.UIAUTOMATOR_WITH_RES_ID,
+            value = "signInEmailButton",
+            description = "Use email instead button",
+            groups = listOf("requiredForPage"),
+        )
 
-    val READY_TO_SCAN_BUTTON = Selector(
-        strategy = SelectorStrategy.UIAUTOMATOR_WITH_RES_ID,
-        value = "signInScanButton",
-        description = "Use email instead button",
-        groups = listOf("requiredForPage"),
-    )
+    val READY_TO_SCAN_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.UIAUTOMATOR_WITH_RES_ID,
+            value = "signInScanButton",
+            description = "Use email instead button",
+            groups = listOf("requiredForPage"),
+        )
 
-    val all = listOf(
-        USE_EMAIL_INSTEAD_BUTTON,
-        READY_TO_SCAN_BUTTON,
-    )
+    val all =
+        listOf(
+            USE_EMAIL_INSTEAD_BUTTON,
+            READY_TO_SCAN_BUTTON,
+        )
 }

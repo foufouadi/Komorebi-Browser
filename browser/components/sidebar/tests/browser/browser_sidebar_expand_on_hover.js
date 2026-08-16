@@ -41,7 +41,7 @@ async function mouseOverSidebarToExpand() {
           "absolute"
       );
     },
-    "The sidebar launcher is expanded"
+    { msg: "The sidebar launcher is expanded" }
   );
 
   info("The sidebar launcher is expanded on mouse over");
@@ -73,7 +73,7 @@ async function mouseOutSidebarToCollapse() {
             .position === "relative")
       );
     },
-    "The sidebar launcher is collapsed"
+    { msg: "The sidebar launcher is collapsed" }
   );
 
   info("The sidebar launcher is collapsed on mouse out");
@@ -96,7 +96,7 @@ add_task(async function test_enable_expand_on_hover() {
     () =>
       BrowserTestUtils.isVisible(sidebarBox) &&
       panel.expandOnHoverInput?.shadowRoot.querySelector("input"),
-    "Sidebar panel is visible and input is displayed"
+    { msg: "Sidebar panel is visible and input is displayed" }
   );
 
   info("Sidebar panel is visible and input is displayed");
@@ -127,7 +127,7 @@ add_task(async function test_enable_expand_on_hover() {
         window.getComputedStyle(SidebarController.sidebarContainer).position ===
           "relative") &&
       panel.expandOnHoverInput.checked,
-    "Expand on hover has been enabled"
+    { msg: "Expand on hover has been enabled" }
   );
 
   info("Expand on hover has been enabled");
@@ -147,7 +147,7 @@ add_task(async function test_enable_expand_on_hover() {
     { attributes: true },
     () =>
       SidebarController.sidebarContainer.hasAttribute("sidebar-positionend"),
-    "The sidebar is positioned on the right"
+    { msg: "The sidebar is positioned on the right" }
   );
 
   await mouseOverSidebarToExpand();
@@ -160,7 +160,7 @@ add_task(async function test_enable_expand_on_hover() {
     { attributes: true },
     () =>
       !SidebarController.sidebarContainer.hasAttribute("sidebar-positionend"),
-    "The sidebar is positioned on the left"
+    { msg: "The sidebar is positioned on the left" }
   );
 
   await mouseOutSidebarToCollapse();
@@ -174,7 +174,7 @@ add_task(async function test_enable_expand_on_hover() {
       window.getComputedStyle(SidebarController.sidebarContainer).position !==
         "relative" &&
       !panel.expandOnHoverInput.checked,
-    "Expand on hover has been disabled"
+    { msg: "Expand on hover has been disabled" }
   );
 });
 
@@ -187,7 +187,7 @@ add_task(async function test_expand_on_hover_context_menu() {
     SidebarController.sidebarContainer,
     { attributes: true },
     () => SidebarController._state.launcherExpanded,
-    "The launcher is expanded"
+    { msg: "The launcher is expanded" }
   );
 
   const toolbarContextMenu = document.getElementById("toolbar-context-menu");
@@ -238,7 +238,7 @@ add_task(async function test_expand_on_hover_pinned_tabs() {
     () =>
       SidebarController._state.launcherExpanded &&
       SidebarController.sidebarMain.hasAttribute("expanded"),
-    "The launcher is expanded"
+    { msg: "The launcher is expanded" }
   );
   let pinnedTabsContainer = document.getElementById("pinned-tabs-container");
   let verticalTabsWidth = pinnedTabsContainer.clientWidth;

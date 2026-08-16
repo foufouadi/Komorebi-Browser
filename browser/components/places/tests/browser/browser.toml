@@ -186,6 +186,8 @@ https_first_disabled = true
 
 ["browser_library_commands.js"]
 
+["browser_library_container_menu.js"]
+
 ["browser_library_delete.js"]
 
 ["browser_library_delete_bookmarks_in_tags.js"]

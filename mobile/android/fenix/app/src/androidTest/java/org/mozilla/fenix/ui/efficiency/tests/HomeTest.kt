@@ -11,7 +11,8 @@ import org.mozilla.fenix.ui.efficiency.helpers.BaseTest
 import org.mozilla.fenix.ui.efficiency.selectors.HomeSelectors
 
 class HomeTest : BaseTest(isPocketEnabled = false, isRecentlyVisitedFeatureEnabled = false) {
-    private val mockWebServer get() = fenixTestRule.mockWebServer
+    private val mockWebServer
+        get() = fenixTestRule.mockWebServer
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/235396
     @Test
@@ -35,20 +36,14 @@ class HomeTest : BaseTest(isPocketEnabled = false, isRecentlyVisitedFeatureEnabl
         val secondWebPage = mockWebServer.getGenericAsset(1)
 
         on.browserPage.navigateToPage(firstWebPage.url.toString())
-        on.home.navigateToPage()
-            .mozVerify(HomeSelectors.JUMP_BACK_IN_SECTION)
-            .mozVerifyElementsByGroup("jumpBackIn")
+        on.home.navigateToPage().mozVerify(HomeSelectors.JUMP_BACK_IN_SECTION).mozVerifyElementsByGroup("jumpBackIn")
 
         on.browserPage.navigateToPage(secondWebPage.url.toString())
-        on.home.navigateToPage()
-            .mozVerify(HomeSelectors.JUMP_BACK_IN_SECTION)
-            .mozVerifyElementsByGroup("jumpBackIn")
+        on.home.navigateToPage().mozVerify(HomeSelectors.JUMP_BACK_IN_SECTION).mozVerifyElementsByGroup("jumpBackIn")
 
         on.tabDrawer.navigateToPage()
         on.tabDrawer.closeTabWithTitle(secondWebPage.title)
-        on.home.navigateToPage()
-            .mozVerify(HomeSelectors.JUMP_BACK_IN_SECTION)
-            .mozVerifyElementsByGroup("jumpBackIn")
+        on.home.navigateToPage().mozVerify(HomeSelectors.JUMP_BACK_IN_SECTION).mozVerifyElementsByGroup("jumpBackIn")
 
         on.tabDrawer.navigateToPage()
         on.tabDrawer.closeTabWithTitle(firstWebPage.title)

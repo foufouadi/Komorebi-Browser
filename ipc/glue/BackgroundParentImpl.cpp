@@ -42,6 +42,7 @@
 #include "mozilla/dom/ServiceWorkerParent.h"
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
 #include "mozilla/dom/ServiceWorkerRegistrationParent.h"
+#include "mozilla/dom/ServiceWorkerUtils.h"
 #include "mozilla/dom/SessionStorageManager.h"
 #include "mozilla/dom/SharedWorkerParent.h"
 #include "mozilla/dom/StorageActivityService.h"
@@ -552,6 +553,16 @@ mozilla::ipc::IPCResult BackgroundParentImpl::RecvCreateNotificationParent(
     return IPC_FAIL(
         this,
         "Invalid aEffectiveStoragePrincipal for CreateNotificationParent");
+  }
+  if (!aScope.IsEmpty()) {
+    nsCOMPtr<nsIURI> scopeURI;
+    NS_ENSURE_SUCCESS(NS_NewURI(getter_AddRefs(scopeURI), aScope),
+                      IPC_FAIL(this, "Malformed scope parameter"));
+    IgnoredErrorResult rv;
+    dom::ServiceWorkerScopeIsValid(aPrincipal, scopeURI, rv);
+    if (rv.Failed()) {
+      return IPC_FAIL(this, "Invalid scope parameter");
+    }
   }
 
   dom::notification::NotificationParentArgs args{

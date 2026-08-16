@@ -12,9 +12,7 @@ import mozilla.components.browser.state.state.TabPartition
 import mozilla.components.browser.state.state.TabSessionState
 import mozilla.components.concept.base.images.ImageLoader
 
-/**
- * Function responsible for creating a `TabViewHolder` in the `TabsAdapter`.
- */
+/** Function responsible for creating a `TabViewHolder` in the `TabsAdapter`. */
 typealias ViewHolderProvider = (ViewGroup) -> TabViewHolder
 
 /**

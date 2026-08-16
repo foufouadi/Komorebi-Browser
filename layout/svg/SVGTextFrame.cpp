@@ -2766,10 +2766,9 @@ void SVGTextDrawPathCallbacks::StrokeGeometry() {
         SVGElement::FromNode(mFrame->GetParent()->GetContent());
 
     // Apply any stroke-specific transform
-    gfxMatrix outerSVGToUser;
-    if (SVGUtils::GetNonScalingStrokeTransform(mFrame, &outerSVGToUser) &&
-        outerSVGToUser.Invert()) {
-      mContext.Multiply(outerSVGToUser);
+    if (Maybe<gfxMatrix> userToOuterSVG =
+            SVGUtils::GetNonScalingStrokeTransform(mFrame)) {
+      mContext.Multiply(userToOuterSVG->Inverse());
     }
 
     RefPtr<Path> path = mContext.GetPath();

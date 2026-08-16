@@ -12,8 +12,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class TabGroupDeleteConfirmationDialogTest {
 
-    @get:Rule
-    val composeTestRule = createComposeRule()
+    @get:Rule val composeTestRule = createComposeRule()
 
     @Test
     fun confirmTabGroupDeleteDialogClickedTest() {
@@ -22,12 +21,11 @@ class TabGroupDeleteConfirmationDialogTest {
         composeTestRule.setContent {
             DeleteTabGroupConfirmationDialog(
                 onConfirmDelete = { onConfirmInvoked = true },
-                onCancel = { },
+                onCancel = {},
             )
         }
 
-        composeTestRule.onNodeWithTag(TabGroupsTestTag.DELETE_DIALOG_CONFIRM_BUTTON)
-            .performClick()
+        composeTestRule.onNodeWithTag(TabGroupsTestTag.DELETE_DIALOG_CONFIRM_BUTTON).performClick()
 
         assertTrue(onConfirmInvoked)
     }
@@ -38,13 +36,12 @@ class TabGroupDeleteConfirmationDialogTest {
 
         composeTestRule.setContent {
             DeleteTabGroupConfirmationDialog(
-                onConfirmDelete = { },
+                onConfirmDelete = {},
                 onCancel = { onCancelInvoked = true },
             )
         }
 
-        composeTestRule.onNodeWithTag(TabGroupsTestTag.DELETE_DIALOG_CANCEL_BUTTON)
-            .performClick()
+        composeTestRule.onNodeWithTag(TabGroupsTestTag.DELETE_DIALOG_CANCEL_BUTTON).performClick()
 
         assertTrue(onCancelInvoked)
     }

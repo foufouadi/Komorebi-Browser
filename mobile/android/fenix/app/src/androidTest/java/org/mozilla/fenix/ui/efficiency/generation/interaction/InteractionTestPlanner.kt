@@ -1,11 +1,11 @@
 package org.mozilla.fenix.ui.efficiency.generation.interaction
 
+import kotlin.text.contains
 import org.mozilla.fenix.ui.efficiency.generation.NavigationTestPlanner
 import org.mozilla.fenix.ui.efficiency.generation.toDisplayLabel
 import org.mozilla.fenix.ui.efficiency.helpers.BasePage
 import org.mozilla.fenix.ui.efficiency.helpers.PageContext
 import org.mozilla.fenix.ui.efficiency.navigation.NavigationRegistry
-import kotlin.text.contains
 
 object InteractionTestPlanner {
 
@@ -34,10 +34,8 @@ object InteractionTestPlanner {
                     .map { button ->
                         val expectedGroup = "resultOf:${button.selectorName}"
 
-                        val expectedSelectors = selectorRefs
-                            .filter { expectedGroup in it.selector.groups }
-                            .map { it.selectorName }
-                            .sorted()
+                        val expectedSelectors =
+                            selectorRefs.filter { expectedGroup in it.selector.groups }.map { it.selectorName }.sorted()
 
                         InteractionCasePlan(
                             pagePropertyName = pageCase.propertyName,

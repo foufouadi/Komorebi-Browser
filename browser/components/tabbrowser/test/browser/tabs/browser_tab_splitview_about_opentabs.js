@@ -100,7 +100,7 @@ add_task(async function test_contextMenuMoveTabsToNewSplitView() {
       () =>
         !moveTabToNewSplitViewItem.hidden &&
         !moveTabToNewSplitViewItem.disabled,
-      "moveTabToNewSplitViewItem is visible and not disabled"
+      { msg: "moveTabToNewSplitViewItem is visible and not disabled" }
     );
     Assert.ok(
       !moveTabToNewSplitViewItem.hidden && !moveTabToNewSplitViewItem.disabled,
@@ -148,7 +148,7 @@ add_task(async function test_contextMenuMoveTabsToNewSplitView() {
     openTabsComponent.sidebarTabList.shadowRoot,
     { childList: true, subtree: true },
     () => openTabsComponent.sidebarTabList.rowEls.length === 3,
-    "Tabs are shown in the open tabs list"
+    { msg: "Tabs are shown in the open tabs list" }
   );
 
   Assert.ok(
@@ -225,7 +225,7 @@ add_task(async function test_contextMenuMoveTabsToNewSplitView() {
       () =>
         !moveTabToNewSplitViewItem.hidden &&
         !moveTabToNewSplitViewItem.disabled,
-      "moveTabToNewSplitViewItem is visible and not disabled"
+      { msg: "moveTabToNewSplitViewItem is visible and not disabled" }
     );
     Assert.ok(
       !moveTabToNewSplitViewItem.hidden && !moveTabToNewSplitViewItem.disabled,
@@ -251,7 +251,7 @@ add_task(async function test_contextMenuMoveTabsToNewSplitView() {
         unsplitTabItem,
         { attributes: true },
         () => !unsplitTabItem.hidden,
-        "unsplitTabItem is visible"
+        { msg: "unsplitTabItem is visible" }
       );
       Assert.ok(!unsplitTabItem.hidden, "unsplitTabItem is visible");
 
@@ -316,7 +316,7 @@ add_task(async function test_containerIndicators() {
       () =>
         !moveTabToNewSplitViewItem.hidden &&
         !moveTabToNewSplitViewItem.disabled,
-      "moveTabToNewSplitViewItem is visible and not disabled"
+      { msg: "moveTabToNewSplitViewItem is visible and not disabled" }
     );
     Assert.ok(
       !moveTabToNewSplitViewItem.hidden && !moveTabToNewSplitViewItem.disabled,
@@ -364,7 +364,7 @@ add_task(async function test_containerIndicators() {
     openTabsComponent.sidebarTabList.shadowRoot,
     { childList: true, subtree: true },
     () => openTabsComponent.sidebarTabList.rowEls.length === 3,
-    "Tabs are shown in the open tabs list"
+    { msg: "Tabs are shown in the open tabs list" }
   );
 
   Assert.ok(
@@ -435,7 +435,7 @@ add_task(async function test_aboutOpenTabsReplacedWhenLeftViewActive() {
       () =>
         !moveTabToNewSplitViewItem.hidden &&
         !moveTabToNewSplitViewItem.disabled,
-      "moveTabToNewSplitViewItem is visible and not disabled"
+      { msg: "moveTabToNewSplitViewItem is visible and not disabled" }
     );
 
     info("Click menu option to add new split view");
@@ -481,7 +481,7 @@ add_task(async function test_aboutOpenTabsReplacedWhenLeftViewActive() {
     openTabsComponent.sidebarTabList.shadowRoot,
     { childList: true, subtree: true },
     () => openTabsComponent.sidebarTabList.rowEls.length,
-    "Tabs are shown in the open tabs list"
+    { msg: "Tabs are shown in the open tabs list" }
   );
 
   let tabRowForTab2 = Array.from(openTabsComponent.sidebarTabList.rowEls).find(
@@ -552,7 +552,7 @@ add_task(async function test_splitview_with_unloaded_tab() {
         unloadTabItem,
         { attributes: true },
         () => !unloadTabItem.hidden && !unloadTabItem.disabled,
-        "unloadTabItem is visible and not disabled"
+        { msg: "unloadTabItem is visible and not disabled" }
       );
       Assert.ok(
         !unloadTabItem.hidden && !unloadTabItem.disabled,
@@ -565,7 +565,7 @@ add_task(async function test_splitview_with_unloaded_tab() {
         tab1,
         { attributes: true },
         () => tab1.hasAttribute("discarded"),
-        "tab1 has been unloaded"
+        { msg: "tab1 has been unloaded" }
       );
       info("Tab has been unloaded");
     }
@@ -578,7 +578,7 @@ add_task(async function test_splitview_with_unloaded_tab() {
       () =>
         !moveTabToNewSplitViewItem.hidden &&
         !moveTabToNewSplitViewItem.disabled,
-      "moveTabToNewSplitViewItem is visible and not disabled"
+      { msg: "moveTabToNewSplitViewItem is visible and not disabled" }
     );
     Assert.ok(
       !moveTabToNewSplitViewItem.hidden && !moveTabToNewSplitViewItem.disabled,
@@ -627,7 +627,7 @@ add_task(async function test_about_opentabs_reverts_to_newtab_when_no_tabs() {
       () =>
         !moveTabToNewSplitViewItem.hidden &&
         !moveTabToNewSplitViewItem.disabled,
-      "moveTabToNewSplitViewItem is visible and not disabled"
+      { msg: "moveTabToNewSplitViewItem is visible and not disabled" }
     );
 
     info("Click menu option to add new split view");
@@ -994,7 +994,7 @@ add_task(async function test_about_opentabs_cannot_be_pinned() {
       () =>
         !moveTabToNewSplitViewItem.hidden &&
         !moveTabToNewSplitViewItem.disabled,
-      "moveTabToNewSplitViewItem is visible and not disabled"
+      { msg: "moveTabToNewSplitViewItem is visible and not disabled" }
     );
 
     info("Click menu option to add new split view");

@@ -274,7 +274,7 @@
       "x-compatibility": {
         "firefox": { "version_added": "75" },
         "firefox_esr": { "version_added": "68.7.0" },
-        "firefox_enterprise": { "version_added": false }
+        "firefox_enterprise": { "version_added": "149" }
       },
       "description": "Enable or disable automatic application update.",
       "examples": [false]
@@ -1061,7 +1061,7 @@
       "x-compatibility": {
         "firefox": { "version_added": "60" },
         "firefox_esr": { "version_added": "60" },
-        "firefox_enterprise": { "version_added": false }
+        "firefox_enterprise": { "version_added": "149" }
       },
       "description": "Turn off application updates within Firefox.",
       "examples": [true]
@@ -2015,6 +2015,10 @@
           "SponsoredPocket": true,
           "SponsoredStories": true,
           "Snippets": true,
+          "Widgets": {
+            "Enabled": true,
+            "Blocked": ["crossword", "stocks"]
+          },
           "Locked": true
         }
       ],
@@ -2048,6 +2052,20 @@
         },
         "Snippets": {
           "type": "boolean"
+        },
+        "Widgets": {
+          "type": "object",
+          "properties": {
+            "Enabled": {
+              "type": "boolean"
+            },
+            "Blocked": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
         },
         "Locked": {
           "type": "boolean"
@@ -2571,7 +2589,7 @@
       "x-compatibility": {
         "firefox": { "version_added": "87" },
         "firefox_esr": { "version_added": "91" },
-        "firefox_enterprise": { "version_added": false }
+        "firefox_enterprise": { "version_added": "149" }
       },
       "description": "Switch to manual updates only.",
       "examples": [true]
@@ -3334,7 +3352,7 @@
         "firefox_esr": { "version_added": "60.4.0" },
         "firefox_enterprise": { "version_added": "149" }
       },
-      "description": "Set the the list of requested locales for the application in order of preference.",
+      "description": "Set the list of requested locales for the application in order of preference.",
       "examples": [["de", "en-US"]],
       "items": {
         "type": "string"

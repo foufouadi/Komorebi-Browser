@@ -46,13 +46,13 @@ import mozilla.components.compose.base.button.IconButton
 import mozilla.components.feature.ipprotection.store.state.Country
 import mozilla.components.feature.ipprotection.store.state.Location
 import mozilla.components.feature.ipprotection.store.state.Recommended
+import mozilla.components.ui.icons.R as iconsR
 import org.mozilla.fenix.R
 import org.mozilla.fenix.components.menu.compose.MenuGroup
 import org.mozilla.fenix.components.menu.compose.MenuTextItem
 import org.mozilla.fenix.theme.FirefoxTheme
 import org.mozilla.fenix.theme.PreviewThemeProvider
 import org.mozilla.fenix.theme.Theme
-import mozilla.components.ui.icons.R as iconsR
 
 /**
  * The IP Protection location selection screen.
@@ -74,23 +74,16 @@ fun IPProtectionLocationsScreen(
     val screenTitle = stringResource(R.string.ip_protection_locations_title)
 
     Scaffold(
-        modifier = Modifier
-            .semantics { paneTitle = screenTitle },
+        modifier = Modifier.semantics { paneTitle = screenTitle },
         topBar = {
-            IPProtectionLocationsTopAppBar(
-                onNavigateBack = onNavigateBack,
-            )
+            IPProtectionLocationsTopAppBar(onNavigateBack = onNavigateBack)
         },
         snackbarHost = {
-            SnackbarHost(
-                hostState = snackbarHostState,
-            )
+            SnackbarHost(hostState = snackbarHostState)
         },
     ) { paddingValues ->
         Surface(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues),
+            modifier = Modifier.fillMaxSize().padding(paddingValues),
             color = MaterialTheme.colorScheme.surface,
         ) {
             LocationList(
@@ -112,12 +105,12 @@ private fun LocationList(
     val countries = locations.filterIsInstance<Country>()
 
     Column(
-        modifier = Modifier
-            .verticalScroll(rememberScrollState())
-            .padding(
-                horizontal = FirefoxTheme.layout.space.static200,
-                vertical = FirefoxTheme.layout.space.static150,
-            ),
+        modifier =
+            Modifier.verticalScroll(rememberScrollState())
+                .padding(
+                    horizontal = FirefoxTheme.layout.space.static200,
+                    vertical = FirefoxTheme.layout.space.static150,
+                ),
         verticalArrangement = Arrangement.spacedBy(FirefoxTheme.layout.space.static200),
     ) {
         if (recommended != null) {
@@ -152,15 +145,16 @@ private fun LocationList(
 private fun LocationsEmptyState() {
     MenuGroup {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(color = MaterialTheme.colorScheme.surfaceBright)
-                .padding(
-                    paddingValues = PaddingValues(
-                        horizontal = FirefoxTheme.layout.space.dynamic200,
-                        vertical = FirefoxTheme.layout.space.static150,
+            modifier =
+                Modifier.fillMaxWidth()
+                    .background(color = MaterialTheme.colorScheme.surfaceBright)
+                    .padding(
+                        paddingValues =
+                            PaddingValues(
+                                horizontal = FirefoxTheme.layout.space.dynamic200,
+                                vertical = FirefoxTheme.layout.space.static150,
+                            )
                     ),
-                ),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Image(
@@ -200,28 +194,28 @@ private fun LocationOption(
 ) {
     MenuTextItem(
         label = label,
-        modifier = Modifier.semantics(mergeDescendants = true) {
-            selected = isSelected
-            role = Role.RadioButton
-        },
+        modifier =
+            Modifier.semantics(mergeDescendants = true) {
+                selected = isSelected
+                role = Role.RadioButton
+            },
         description = description,
         // We should have alternative design for unavailable items,
         // tracked in https://bugzilla.mozilla.org/show_bug.cgi?id=2056379
         enabled = enabled,
-        iconPainter = if (isSelected) {
-            painterResource(iconsR.drawable.mozac_ic_checkmark_24)
-        } else {
-            null
-        },
+        iconPainter =
+            if (isSelected) {
+                painterResource(iconsR.drawable.mozac_ic_checkmark_24)
+            } else {
+                null
+            },
         onClick = onClick,
     )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun IPProtectionLocationsTopAppBar(
-    onNavigateBack: () -> Unit,
-) {
+private fun IPProtectionLocationsTopAppBar(onNavigateBack: () -> Unit) {
     TopAppBar(
         title = {
             Text(
@@ -233,9 +227,8 @@ private fun IPProtectionLocationsTopAppBar(
         navigationIcon = {
             IconButton(
                 onClick = onNavigateBack,
-                contentDescription = stringResource(
-                    R.string.ip_protection_locations_navigate_back_button_content_description,
-                ),
+                contentDescription =
+                    stringResource(R.string.ip_protection_locations_navigate_back_button_content_description),
             ) {
                 Icon(
                     painter = painterResource(iconsR.drawable.mozac_ic_back_24),
@@ -249,9 +242,7 @@ private fun IPProtectionLocationsTopAppBar(
 
 @FlexibleWindowPreview
 @Composable
-private fun IPProtectionLocationsRecommendedPreview(
-    @PreviewParameter(PreviewThemeProvider::class) theme: Theme,
-) {
+private fun IPProtectionLocationsRecommendedPreview(@PreviewParameter(PreviewThemeProvider::class) theme: Theme) {
     FirefoxTheme(theme = theme) {
         IPProtectionLocationsScreen(
             selectedLocation = SAMPLE_LOCATIONS.first(),
@@ -265,9 +256,7 @@ private fun IPProtectionLocationsRecommendedPreview(
 
 @FlexibleWindowPreview
 @Composable
-private fun IPProtectionLocationsCountrySelectedPreview(
-    @PreviewParameter(PreviewThemeProvider::class) theme: Theme,
-) {
+private fun IPProtectionLocationsCountrySelectedPreview(@PreviewParameter(PreviewThemeProvider::class) theme: Theme) {
     FirefoxTheme(theme = theme) {
         IPProtectionLocationsScreen(
             selectedLocation = SAMPLE_LOCATIONS[1],
@@ -281,9 +270,7 @@ private fun IPProtectionLocationsCountrySelectedPreview(
 
 @FlexibleWindowPreview
 @Composable
-private fun IPProtectionLocationsEmptyPreview(
-    @PreviewParameter(PreviewThemeProvider::class) theme: Theme,
-) {
+private fun IPProtectionLocationsEmptyPreview(@PreviewParameter(PreviewThemeProvider::class) theme: Theme) {
     FirefoxTheme(theme = theme) {
         IPProtectionLocationsScreen(
             selectedLocation = SAMPLE_LOCATIONS.first(),
@@ -295,10 +282,11 @@ private fun IPProtectionLocationsEmptyPreview(
     }
 }
 
-private val SAMPLE_LOCATIONS = listOf(
-    Recommended(),
-    Country(countryCode = "dk", available = true),
-    Country(countryCode = "fr", available = true),
-    Country(countryCode = "gb", available = false),
-    Country(countryCode = "us", available = true),
-)
+private val SAMPLE_LOCATIONS =
+    listOf(
+        Recommended(),
+        Country(countryCode = "dk", available = true),
+        Country(countryCode = "fr", available = true),
+        Country(countryCode = "gb", available = false),
+        Country(countryCode = "us", available = true),
+    )

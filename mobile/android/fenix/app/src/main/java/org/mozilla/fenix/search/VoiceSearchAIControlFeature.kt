@@ -12,14 +12,12 @@ import kotlinx.coroutines.flow.map
 import mozilla.components.concept.ai.controls.AIControllableFeature
 import mozilla.components.concept.ai.controls.AIFeatureMetadata
 import mozilla.components.concept.ai.controls.AIFeatureState
+import mozilla.components.ui.icons.R as iconsR
 import org.mozilla.fenix.R
 import org.mozilla.fenix.utils.Settings
 import org.mozilla.gecko.search.SearchWidgetProvider
-import mozilla.components.ui.icons.R as iconsR
 
-/**
- * The AI Controls feature settings for voice search.
- */
+/** The AI Controls feature settings for voice search. */
 class VoiceSearchAIControlFeature(
     private val settings: Settings,
     private val onUpdateWidget: () -> Unit,
@@ -46,15 +44,14 @@ class VoiceSearchAIControlFeature(
 
     companion object : AIFeatureMetadata {
         override val id: AIFeatureMetadata.FeatureId = AIFeatureMetadata.FeatureId("voiceSearch")
-        override val description: AIFeatureMetadata.Description = AIFeatureMetadata.Description(
-            titleRes = R.string.ai_controls_voice_search_title,
-            descriptionRes = R.string.ai_controls_voice_search_description,
-            iconRes = iconsR.drawable.mozac_ic_microphone_24,
-        )
+        override val description: AIFeatureMetadata.Description =
+            AIFeatureMetadata.Description(
+                titleRes = R.string.ai_controls_voice_search_title,
+                descriptionRes = R.string.ai_controls_voice_search_description,
+                iconRes = iconsR.drawable.mozac_ic_microphone_24,
+            )
 
-        /**
-         * Updates the search widget.
-         */
+        /** Updates the search widget. */
         fun updateWidget(context: Context) {
             val appWidgetManager = AppWidgetManager.getInstance(context)
             SearchWidgetProvider.updateAllWidgets(context, appWidgetManager)

@@ -66,8 +66,15 @@ class ActivityTest {
         verify(insetsController).systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         verify(window.decorView).setOnApplyWindowInsetsListener(any())
 
-        verify(window).setFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
-        assertEquals(WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES, layoutParams.layoutInDisplayCutoutMode)
+        verify(window)
+            .setFlags(
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            )
+        assertEquals(
+            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES,
+            layoutParams.layoutInDisplayCutoutMode,
+        )
     }
 
     @Test
@@ -79,7 +86,11 @@ class ActivityTest {
         verify(insetsController).systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         verify(window.decorView).setOnApplyWindowInsetsListener(any())
 
-        verify(window, never()).setFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+        verify(window, never())
+            .setFlags(
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            )
     }
 
     @Test
@@ -91,13 +102,15 @@ class ActivityTest {
         activity.enterImmersiveMode(insetsController)
 
         verify(insetsController, times(1)).hide(WindowInsetsCompat.Type.systemBars())
-        verify(insetsController, times(1)).systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        verify(insetsController, times(1)).systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
 
         verify(window.decorView).setOnApplyWindowInsetsListener(insetListenerCaptor.capture())
         insetListenerCaptor.value.onApplyWindowInsets(window.decorView, windowInsets)
 
         verify(insetsController, times(2)).hide(WindowInsetsCompat.Type.systemBars())
-        verify(insetsController, times(2)).systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        verify(insetsController, times(2)).systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
     }
 
     @Test
@@ -108,13 +121,15 @@ class ActivityTest {
         activity.enterImmersiveMode(insetsController)
 
         verify(insetsController, times(1)).hide(WindowInsetsCompat.Type.systemBars())
-        verify(insetsController, times(1)).systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        verify(insetsController, times(1)).systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
 
         verify(window.decorView).setOnApplyWindowInsetsListener(insetListenerCaptor.capture())
         insetListenerCaptor.value.onApplyWindowInsets(window.decorView, windowInsets)
 
         verify(insetsController, times(1)).hide(WindowInsetsCompat.Type.systemBars())
-        verify(insetsController, times(1)).systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        verify(insetsController, times(1)).systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
     }
 
     @Test
@@ -131,7 +146,10 @@ class ActivityTest {
         activity.exitImmersiveMode()
 
         verify(window).clearFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
-        assertEquals(WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT, layoutParams.layoutInDisplayCutoutMode)
+        assertEquals(
+            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT,
+            layoutParams.layoutInDisplayCutoutMode,
+        )
     }
 
     @Test
@@ -139,6 +157,10 @@ class ActivityTest {
     fun `GIVEN Android version O_MR1 WHEN exitImmersiveMode is called THEN notch flags were not being set`() {
         activity.exitImmersiveMode()
 
-        verify(window, never()).setFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+        verify(window, never())
+            .setFlags(
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            )
     }
 }

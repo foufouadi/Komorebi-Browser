@@ -92,38 +92,34 @@ class SearchWidgetProvider : AppWidgetProvider() {
         }
     }
 
-    /**
-     * Builds pending intent that opens the browser and starts a new text search.
-     */
+    /** Builds pending intent that opens the browser and starts a new text search. */
     private fun createTextSearchIntent(context: Context): PendingIntent {
-        return Intent(context, IntentReceiverActivity::class.java)
-            .let { intent ->
-                val createTextSearchIntentFlags = IntentUtils.DEFAULT_PENDING_INTENT_FLAGS or
-                    PendingIntent.FLAG_UPDATE_CURRENT
-                intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                intent.putExtra(HomeActivity.OPEN_TO_SEARCH, StartSearchIntentProcessor.SEARCH_WIDGET)
-                PendingIntent.getActivity(
-                    context,
-                    REQUEST_CODE_NEW_TAB,
-                    intent,
-                    createTextSearchIntentFlags,
-                )
-            }
+        return Intent(context, IntentReceiverActivity::class.java).let { intent ->
+            val createTextSearchIntentFlags =
+                IntentUtils.DEFAULT_PENDING_INTENT_FLAGS or PendingIntent.FLAG_UPDATE_CURRENT
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            intent.putExtra(HomeActivity.OPEN_TO_SEARCH, StartSearchIntentProcessor.SEARCH_WIDGET)
+            PendingIntent.getActivity(
+                context,
+                REQUEST_CODE_NEW_TAB,
+                intent,
+                createTextSearchIntentFlags,
+            )
+        }
     }
 
-    /**
-     * Builds pending intent that starts a new voice search.
-     */
+    /** Builds pending intent that starts a new voice search. */
     @VisibleForTesting
     internal fun createVoiceSearchIntent(context: Context): PendingIntent? {
         if (!context.components.settings.shouldShowVoiceSearch) {
             return null
         }
 
-        val voiceIntent = Intent(context, VoiceSearchActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            putExtra(SPEECH_PROCESSING, true)
-        }
+        val voiceIntent =
+            Intent(context, VoiceSearchActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                putExtra(SPEECH_PROCESSING, true)
+            }
 
         val intentSpeech = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
 
@@ -149,8 +145,7 @@ class SearchWidgetProvider : AppWidgetProvider() {
             when (layout) {
                 R.layout.search_widget_extra_small_v1,
                 R.layout.search_widget_extra_small_v2,
-                R.layout.search_widget_small_no_mic,
-                -> {
+                R.layout.search_widget_small_no_mic -> {
                     setOnClickPendingIntent(R.id.button_search_widget_new_tab, textSearchIntent)
                 }
                 R.layout.search_widget_small -> {
@@ -158,8 +153,7 @@ class SearchWidgetProvider : AppWidgetProvider() {
                     setOnClickPendingIntent(R.id.button_search_widget_voice, voiceSearchIntent)
                 }
                 R.layout.search_widget_medium,
-                R.layout.search_widget_large,
-                -> {
+                R.layout.search_widget_large -> {
                     setOnClickPendingIntent(R.id.button_search_widget_new_tab, textSearchIntent)
                     setOnClickPendingIntent(R.id.button_search_widget_voice, voiceSearchIntent)
                     setOnClickPendingIntent(R.id.button_search_widget_new_tab_icon, textSearchIntent)
@@ -175,10 +169,11 @@ class SearchWidgetProvider : AppWidgetProvider() {
     }
 
     private fun RemoteViews.setIcon(context: Context) {
-        val repository = DefaultAppIconRepository(
-            packageManager = DefaultPackageManagerWrapper(context.packageManager),
-            packageName = context.packageName,
-        )
+        val repository =
+            DefaultAppIconRepository(
+                packageManager = DefaultPackageManagerWrapper(context.packageManager),
+                packageName = context.packageName,
+            )
         // gradient color available for android:fillColor only on SDK 24+
         setImageViewResource(
             R.id.button_search_widget_new_tab_icon,
@@ -204,8 +199,8 @@ class SearchWidgetProvider : AppWidgetProvider() {
         /**
          * Updates all instances of the search widget.
          *
-         * This function is used to refresh the widget when its appearance or behavior
-         * needs to be changed, for example, when the voice search setting is toggled.
+         * This function is used to refresh the widget when its appearance or behavior needs to be changed, for example,
+         * when the voice search setting is toggled.
          *
          * @param context The application context.
          * @param appWidgetManager An instance of [AppWidgetManager].
@@ -218,49 +213,46 @@ class SearchWidgetProvider : AppWidgetProvider() {
                     Intent(context, SearchWidgetProvider::class.java).apply {
                         action = AppWidgetManager.ACTION_APPWIDGET_UPDATE
                         putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, widgetIds)
-                    },
+                    }
                 )
             }
         }
 
         @VisibleForTesting
-        internal fun getLayoutSize(
-            @Dimension(unit = DP) dp: Int,
-        ) = when {
-            dp >= DP_LARGE -> SearchWidgetProviderSize.LARGE
-            dp >= DP_MEDIUM -> SearchWidgetProviderSize.MEDIUM
-            dp >= DP_SMALL -> SearchWidgetProviderSize.SMALL
-            dp >= DP_EXTRA_SMALL -> SearchWidgetProviderSize.EXTRA_SMALL_V2
-            else -> SearchWidgetProviderSize.EXTRA_SMALL_V1
-        }
-
-        /**
-         * Get the layout resource to use for the search widget.
-         */
-        @VisibleForTesting
-        internal fun getLayout(size: SearchWidgetProviderSize, showMic: Boolean) = when (size) {
-            SearchWidgetProviderSize.LARGE -> R.layout.search_widget_large
-            SearchWidgetProviderSize.MEDIUM -> R.layout.search_widget_medium
-            SearchWidgetProviderSize.SMALL -> {
-                if (showMic) {
-                    R.layout.search_widget_small
-                } else {
-                    R.layout.search_widget_small_no_mic
-                }
+        internal fun getLayoutSize(@Dimension(unit = DP) dp: Int) =
+            when {
+                dp >= DP_LARGE -> SearchWidgetProviderSize.LARGE
+                dp >= DP_MEDIUM -> SearchWidgetProviderSize.MEDIUM
+                dp >= DP_SMALL -> SearchWidgetProviderSize.SMALL
+                dp >= DP_EXTRA_SMALL -> SearchWidgetProviderSize.EXTRA_SMALL_V2
+                else -> SearchWidgetProviderSize.EXTRA_SMALL_V1
             }
-            SearchWidgetProviderSize.EXTRA_SMALL_V2 -> R.layout.search_widget_extra_small_v2
-            SearchWidgetProviderSize.EXTRA_SMALL_V1 -> R.layout.search_widget_extra_small_v1
-        }
 
-        /**
-         * Get the text to place in the search widget
-         */
+        /** Get the layout resource to use for the search widget. */
         @VisibleForTesting
-        internal fun getText(layout: SearchWidgetProviderSize, context: Context) = when (layout) {
-            SearchWidgetProviderSize.MEDIUM -> context.getString(R.string.search_widget_text_short)
-            SearchWidgetProviderSize.LARGE -> context.getString(R.string.search_widget_text_long)
-            else -> null
-        }
+        internal fun getLayout(size: SearchWidgetProviderSize, showMic: Boolean) =
+            when (size) {
+                SearchWidgetProviderSize.LARGE -> R.layout.search_widget_large
+                SearchWidgetProviderSize.MEDIUM -> R.layout.search_widget_medium
+                SearchWidgetProviderSize.SMALL -> {
+                    if (showMic) {
+                        R.layout.search_widget_small
+                    } else {
+                        R.layout.search_widget_small_no_mic
+                    }
+                }
+                SearchWidgetProviderSize.EXTRA_SMALL_V2 -> R.layout.search_widget_extra_small_v2
+                SearchWidgetProviderSize.EXTRA_SMALL_V1 -> R.layout.search_widget_extra_small_v1
+            }
+
+        /** Get the text to place in the search widget */
+        @VisibleForTesting
+        internal fun getText(layout: SearchWidgetProviderSize, context: Context) =
+            when (layout) {
+                SearchWidgetProviderSize.MEDIUM -> context.getString(R.string.search_widget_text_short)
+                SearchWidgetProviderSize.LARGE -> context.getString(R.string.search_widget_text_long)
+                else -> null
+            }
     }
 }
 

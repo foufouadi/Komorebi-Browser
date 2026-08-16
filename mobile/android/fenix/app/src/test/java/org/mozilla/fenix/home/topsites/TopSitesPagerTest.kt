@@ -13,9 +13,7 @@ import org.mozilla.fenix.home.fake.FakeHomepagePreview
 class TopSitesPagerTest {
 
     private fun pagerPages(topSites: List<TopSite>): List<List<TopSite>> =
-        topSites.take(TOP_SITES_TO_SHOW)
-            .sortedByDescending { it is TopSite.Provided }
-            .chunked(TOP_SITES_PER_ROW)
+        topSites.take(TOP_SITES_TO_SHOW).sortedByDescending { it is TopSite.Provided }.chunked(TOP_SITES_PER_ROW)
 
     @Test
     fun `GIVEN a mix of provided and non-provided sites WHEN sorted for pager THEN provided sites appear first`() {

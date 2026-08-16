@@ -2005,12 +2005,12 @@ bool Gecko_GetAnchorPosSize(const AnchorPosResolutionParams* aParams,
     return false;
   }
   const auto* positioned = aParams->mFrame;
+  const auto* containingBlock = positioned->GetParent();
   const auto size = AnchorPositioningUtils::ResolveAnchorPosSize(
-      positioned, {aAnchorName, *aTreeScope}, aParams->mCache);
+      positioned, containingBlock, {aAnchorName, *aTreeScope}, aParams->mCache);
   if (!size) {
     return false;
   }
-  const auto* containingBlock = positioned->GetParent();
   const auto l = [&]() {
     switch (aAnchorSizeKeyword) {
       case StyleAnchorSizeKeyword::None:

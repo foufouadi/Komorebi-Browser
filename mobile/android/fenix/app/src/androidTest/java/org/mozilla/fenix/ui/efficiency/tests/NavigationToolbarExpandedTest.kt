@@ -19,12 +19,12 @@ import org.mozilla.fenix.ui.efficiency.selectors.BookmarksSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.BrowserPageSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.HomeSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.SearchBarSelectors
-import org.mozilla.fenix.ui.efficiency.selectors.SettingsCustomizeSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.ToolbarSelectors
 
 class NavigationToolbarExpandedTest : BaseTest(shouldUseExpandedToolbar = true) {
 
-    private val mockWebServer get() = fenixTestRule.mockWebServer
+    private val mockWebServer
+        get() = fenixTestRule.mockWebServer
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333211
     // Converted from legacy NavigationToolbarExpandedTest.verifyTheExpandedToolbarAddBookmarkButtonTest
@@ -72,8 +72,7 @@ class NavigationToolbarExpandedTest : BaseTest(shouldUseExpandedToolbar = true) 
 
         val website = mockWebServer.getGenericAsset(1)
 
-        on.browserPage.navigateToPage(website.url.toString())
-            .verifyPageContent(website.content)
+        on.browserPage.navigateToPage(website.url.toString()).verifyPageContent(website.content)
 
         setScreenOrientation(orientationRule, ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
 
@@ -102,8 +101,7 @@ class NavigationToolbarExpandedTest : BaseTest(shouldUseExpandedToolbar = true) 
 
         val website = mockWebServer.getGenericAsset(1)
 
-        on.browserPage.navigateToPage(website.url.toString())
-            .verifyPageContent(website.content)
+        on.browserPage.navigateToPage(website.url.toString()).verifyPageContent(website.content)
 
         setScreenOrientation(orientationRule, ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
 
@@ -126,8 +124,7 @@ class NavigationToolbarExpandedTest : BaseTest(shouldUseExpandedToolbar = true) 
 
         val website = mockWebServer.getGenericAsset(1)
 
-        on.browserPage.navigateToPage(website.url.toString())
-            .verifyPageContent(website.content)
+        on.browserPage.navigateToPage(website.url.toString()).verifyPageContent(website.content)
 
         setScreenOrientation(orientationRule, ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
 
@@ -149,15 +146,12 @@ class NavigationToolbarExpandedTest : BaseTest(shouldUseExpandedToolbar = true) 
 
         val website = mockWebServer.getGenericAsset(1)
 
-        on.browserPage.navigateToPage(website.url.toString())
-            .verifyPageContent(website.content)
+        on.browserPage.navigateToPage(website.url.toString()).verifyPageContent(website.content)
 
         setScreenOrientation(orientationRule, ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
 
-        on.browserPage
-            .openMainMenu()
-        on.mainMenu
-            .mozVerifyElementsByGroup("browserViewMainMenuItems")
+        on.browserPage.openMainMenu()
+        on.mainMenu.mozVerifyElementsByGroup("browserViewMainMenuItems")
 
         setScreenOrientation(orientationRule, ActivityInfo.SCREEN_ORIENTATION_PORTRAIT)
     }
@@ -170,8 +164,7 @@ class NavigationToolbarExpandedTest : BaseTest(shouldUseExpandedToolbar = true) 
         val website = mockWebServer.getGenericAsset(1)
         on.browserPage.navigateToPage(website.url.toString())
         on.browserPage.verifyPageContent(website.content)
-        on.mainMenu.navigateToPage()
-            .mozVerifyElementsByGroup("browserViewMainMenuItems")
+        on.mainMenu.navigateToPage().mozVerifyElementsByGroup("browserViewMainMenuItems")
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333214
@@ -234,7 +227,8 @@ class NavigationToolbarExpandedTest : BaseTest(shouldUseExpandedToolbar = true) 
             it.isTabStripEnabled = true
         }
 
-        on.browserPage.navigateToPage(website.url.toString())
+        on.browserPage
+            .navigateToPage(website.url.toString())
             .verifyPageContent(website.content)
             .verifyUrl(website.url.toString())
         on.browserPage.mozVerify(ToolbarSelectors.SITE_INFO_BUTTON)

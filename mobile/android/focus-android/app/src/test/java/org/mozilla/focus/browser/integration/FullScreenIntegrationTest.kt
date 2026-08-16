@@ -41,9 +41,10 @@ internal class FullScreenIntegrationTest {
     @Test
     fun `WHEN the integration is started THEN start FullScreenFeature`() {
         val feature: FullScreenFeature = mock()
-        val integration = createFullScreenIntegration().apply {
-            this.feature = feature
-        }
+        val integration =
+            createFullScreenIntegration().apply {
+                this.feature = feature
+            }
 
         integration.start()
 
@@ -53,9 +54,10 @@ internal class FullScreenIntegrationTest {
     @Test
     fun `WHEN the integration is stopped THEN stop FullScreenFeature`() {
         val feature: FullScreenFeature = mock()
-        val integration = createFullScreenIntegration().apply {
-            this.feature = feature
-        }
+        val integration =
+            createFullScreenIntegration().apply {
+                this.feature = feature
+            }
 
         integration.stop()
 
@@ -65,9 +67,10 @@ internal class FullScreenIntegrationTest {
     @Test
     fun `WHEN back is pressed THEN send this to the feature`() {
         val feature: FullScreenFeature = mock()
-        val integration = createFullScreenIntegration().apply {
-            this.feature = feature
-        }
+        val integration =
+            createFullScreenIntegration().apply {
+                this.feature = feature
+            }
 
         integration.onBackPressed()
 
@@ -131,10 +134,11 @@ internal class FullScreenIntegrationTest {
         // verify hiding system bars
         verify(insetsController).hide(WindowInsetsCompat.Type.systemBars())
 
-        verify(activityWindow).setFlags(
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-        )
+        verify(activityWindow)
+            .setFlags(
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            )
 
         assertEquals(
             WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES,
@@ -195,11 +199,12 @@ internal class FullScreenIntegrationTest {
         val toolbar: BrowserToolbar = mock()
         val engineView: GeckoEngineView = mock()
         doReturn(mock<View>()).`when`(engineView).asView()
-        val integration = createFullScreenIntegration(
-            toolbar = toolbar,
-            engineView = engineView,
-            isAccessibilityEnabled = { true },
-        )
+        val integration =
+            createFullScreenIntegration(
+                toolbar = toolbar,
+                engineView = engineView,
+                isAccessibilityEnabled = { true },
+            )
 
         integration.enterBrowserFullscreen()
 
@@ -213,11 +218,12 @@ internal class FullScreenIntegrationTest {
         val toolbar: BrowserToolbar = mock()
         val engineView: GeckoEngineView = mock()
         doReturn(mock<View>()).`when`(engineView).asView()
-        val integration = createFullScreenIntegration(
-            toolbar = toolbar,
-            engineView = engineView,
-            isAccessibilityEnabled = { false },
-        )
+        val integration =
+            createFullScreenIntegration(
+                toolbar = toolbar,
+                engineView = engineView,
+                isAccessibilityEnabled = { false },
+            )
 
         integration.enterBrowserFullscreen()
 
@@ -282,14 +288,15 @@ internal class FullScreenIntegrationTest {
         val engineView: GeckoEngineView = mock()
         doReturn(mock<View>()).`when`(engineView).asView()
         val activity = Robolectric.buildActivity(Activity::class.java).get()
-        val integration = spy(
-            createFullScreenIntegration(
-                activity = activity,
-                toolbar = toolbar,
-                engineView = engineView,
-                isAccessibilityEnabled = { true },
-            ),
-        )
+        val integration =
+            spy(
+                createFullScreenIntegration(
+                    activity = activity,
+                    toolbar = toolbar,
+                    engineView = engineView,
+                    isAccessibilityEnabled = { true },
+                )
+            )
 
         val fullScreenNotification = mock<FullScreenNotification>()
         integration.fullScreenChanged(true, fullScreenNotification)
@@ -306,14 +313,15 @@ internal class FullScreenIntegrationTest {
         val engineView: GeckoEngineView = mock()
         doReturn(mock<View>()).`when`(engineView).asView()
         val activity = Robolectric.buildActivity(Activity::class.java).get()
-        val integration = spy(
-            createFullScreenIntegration(
-                activity = activity,
-                toolbar = toolbar,
-                engineView = engineView,
-                isAccessibilityEnabled = { false },
-            ),
-        )
+        val integration =
+            spy(
+                createFullScreenIntegration(
+                    activity = activity,
+                    toolbar = toolbar,
+                    engineView = engineView,
+                    isAccessibilityEnabled = { false },
+                )
+            )
 
         val fullScreenNotification = mock<FullScreenNotification>()
         integration.fullScreenChanged(true, fullScreenNotification)
@@ -341,14 +349,15 @@ internal class FullScreenIntegrationTest {
         doReturn(windowAttributes).`when`(activityWindow).attributes
         doReturn(resources).`when`(activity).resources
         doReturn("").`when`(resources).getString(anyInt())
-        val integration = spy(
-            createFullScreenIntegration(
-                activity = activity,
-                toolbar = toolbar,
-                engineView = engineView,
-                isAccessibilityEnabled = { false },
-            ),
-        )
+        val integration =
+            spy(
+                createFullScreenIntegration(
+                    activity = activity,
+                    toolbar = toolbar,
+                    engineView = engineView,
+                    isAccessibilityEnabled = { false },
+                )
+            )
 
         integration.fullScreenChanged(false)
 
@@ -376,14 +385,15 @@ internal class FullScreenIntegrationTest {
         doReturn("").`when`(resources).getString(anyInt())
         doReturn(insetsController).`when`(activityWindow).insetsController
 
-        val integration = spy(
-            createFullScreenIntegration(
-                activity = activity,
-                toolbar = toolbar,
-                engineView = engineView,
-                isAccessibilityEnabled = { false },
-            ),
-        )
+        val integration =
+            spy(
+                createFullScreenIntegration(
+                    activity = activity,
+                    toolbar = toolbar,
+                    engineView = engineView,
+                    isAccessibilityEnabled = { false },
+                )
+            )
 
         integration.fullScreenChanged(false)
 
@@ -396,13 +406,14 @@ internal class FullScreenIntegrationTest {
         toolbar: BrowserToolbar = mock(),
         engineView: GeckoEngineView = mock(),
         isAccessibilityEnabled: () -> Boolean = { false },
-    ) = FullScreenIntegration(
-        activity = activity,
-        store = BrowserStore(),
-        tabId = null,
-        sessionUseCases = mock(),
-        toolbarView = toolbar,
-        engineView = engineView,
-        isAccessibilityEnabled = isAccessibilityEnabled,
-    )
+    ) =
+        FullScreenIntegration(
+            activity = activity,
+            store = BrowserStore(),
+            tabId = null,
+            sessionUseCases = mock(),
+            toolbarView = toolbar,
+            engineView = engineView,
+            isAccessibilityEnabled = isAccessibilityEnabled,
+        )
 }

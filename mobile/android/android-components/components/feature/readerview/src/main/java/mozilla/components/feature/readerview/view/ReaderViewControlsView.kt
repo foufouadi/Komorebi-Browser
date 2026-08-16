@@ -8,41 +8,27 @@ import android.view.View
 import mozilla.components.feature.readerview.ReaderViewFeature.ColorScheme
 import mozilla.components.feature.readerview.ReaderViewFeature.FontType
 
-/**
- * An interface for views that can display ReaderView appearance controls (e.g. font size, font type).
- */
+/** An interface for views that can display ReaderView appearance controls (e.g. font size, font type). */
 interface ReaderViewControlsView {
 
     var listener: Listener?
 
-    /**
-     * Sets the selected font option.
-     */
+    /** Sets the selected font option. */
     fun setFont(font: FontType)
 
-    /**
-     * Sets the selected font size.
-     */
+    /** Sets the selected font size. */
     fun setFontSize(size: Int)
 
-    /**
-     * Sets the selected color scheme.
-     */
+    /** Sets the selected color scheme. */
     fun setColorScheme(scheme: ColorScheme)
 
-    /**
-     * Makes the UI controls visible and requests focus.
-     */
+    /** Makes the UI controls visible and requests focus. */
     fun showControls()
 
-    /**
-     * Makes the UI controls invisible.
-     */
+    /** Makes the UI controls invisible. */
     fun hideControls()
 
-    /**
-     * Casts this [ReaderViewControlsView] interface to an actual Android [View] object.
-     */
+    /** Casts this [ReaderViewControlsView] interface to an actual Android [View] object. */
     fun asView(): View = (this as View)
 
     /**
@@ -56,8 +42,11 @@ interface ReaderViewControlsView {
 
     interface Listener {
         fun onFontChanged(font: FontType)
+
         fun onFontSizeIncreased(): Int
+
         fun onFontSizeDecreased(): Int
+
         fun onColorSchemeChanged(scheme: ColorScheme)
     }
 }

@@ -1,6 +1,7 @@
 package org.mozilla.fenix.ui
 
 import android.os.Build
+import androidx.compose.ui.test.junit4.v2.AndroidComposeTestRule as AndroidComposeTestRuleV2
 import androidx.test.filters.SdkSuppress
 import mozilla.components.support.ktx.util.PromptAbuserDetector
 import org.junit.After
@@ -20,22 +21,19 @@ import org.mozilla.fenix.helpers.TestAssetHelper.htmlControlsFormAsset
 import org.mozilla.fenix.helpers.perf.DetectMemoryLeaksRule
 import org.mozilla.fenix.ui.robots.clickPageObject
 import org.mozilla.fenix.ui.robots.navigationToolbar
-import androidx.compose.ui.test.junit4.v2.AndroidComposeTestRule as AndroidComposeTestRuleV2
 
 class UploadPermissionsTest {
 
-    @get:Rule(order = 0)
-    val fenixTestRule: FenixTestRule = FenixTestRule()
+    @get:Rule(order = 0) val fenixTestRule: FenixTestRule = FenixTestRule()
 
-    private val mockWebServer get() = fenixTestRule.mockWebServer
+    private val mockWebServer
+        get() = fenixTestRule.mockWebServer
 
     @get:Rule(order = 1)
-    val composeTestRule = AndroidComposeTestRuleV2(
-        HomeActivityIntentTestRule.withDefaultSettingsOverrides(),
-    ) { it.activity }
+    val composeTestRule =
+        AndroidComposeTestRuleV2(HomeActivityIntentTestRule.withDefaultSettingsOverrides()) { it.activity }
 
-    @get:Rule(order = 2)
-    val memoryLeaksRule = DetectMemoryLeaksRule(composeTestRule = { composeTestRule })
+    @get:Rule(order = 2) val memoryLeaksRule = DetectMemoryLeaksRule(composeTestRule = { composeTestRule })
 
     @Before
     fun setUp() {
@@ -53,17 +51,17 @@ class UploadPermissionsTest {
     fun fileUploadPermissionTest() {
         val testPage = mockWebServer.htmlControlsFormAsset
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(testPage.url) {
-            clickPageObject(composeTestRule, itemWithResId("upload_file"))
-            // Grant app permission to access storage
-            grantSystemPermission()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                assertExternalAppOpens("com.google.android.documentsui")
-            } else {
-                assertExternalAppOpens("com.android.documentsui")
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(testPage.url) {
+                clickPageObject(composeTestRule, itemWithResId("upload_file"))
+                // Grant app permission to access storage
+                grantSystemPermission()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    assertExternalAppOpens("com.google.android.documentsui")
+                } else {
+                    assertExternalAppOpens("com.android.documentsui")
+                }
             }
-        }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2751914
@@ -71,15 +69,15 @@ class UploadPermissionsTest {
     fun uploadSelectedAudioFilesWhileNoPermissionGrantedTest() {
         val testPage = mockWebServer.htmlControlsFormAsset
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(testPage.url) {
-            clickPageObject(composeTestRule, itemWithResId("audioFileUpload"))
-            // Deny app access to voice recording
-            denyPermission()
-            // Deny app access to audio files storage
-            denyPermission()
-            verifyPageContent("Choose audio file to upload")
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(testPage.url) {
+                clickPageObject(composeTestRule, itemWithResId("audioFileUpload"))
+                // Deny app access to voice recording
+                denyPermission()
+                // Deny app access to audio files storage
+                denyPermission()
+                verifyPageContent("Choose audio file to upload")
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2779525
@@ -87,15 +85,15 @@ class UploadPermissionsTest {
     fun uploadSelectedAudioFilesWhenStoragePermissionGrantedTest() {
         val testPage = mockWebServer.htmlControlsFormAsset
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(testPage.url) {
-            clickPageObject(composeTestRule, itemWithResId("audioFileUpload"))
-            // Deny app access to voice recording
-            denyPermission()
-            // Grant app access to audio files storage
-            grantSystemPermission()
-            assertExternalAppOpens("com.google.android.documentsui")
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(testPage.url) {
+                clickPageObject(composeTestRule, itemWithResId("audioFileUpload"))
+                // Deny app access to voice recording
+                denyPermission()
+                // Grant app access to audio files storage
+                grantSystemPermission()
+                assertExternalAppOpens("com.google.android.documentsui")
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2751915
@@ -105,13 +103,13 @@ class UploadPermissionsTest {
     fun uploadSelectedVideoOrImageFilesWhenStoragePermissionGrantedTest() {
         val testPage = mockWebServer.htmlControlsFormAsset
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(testPage.url) {
-            clickPageObject(composeTestRule, itemWithResId("photosUpload"))
-            // Deny app access to pictures and video recordings
-            denyPermission()
-            verifySystemPhotoAndVideoPickerExists()
-            closeSystemPhotoAndVideoPicker()
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(testPage.url) {
+                clickPageObject(composeTestRule, itemWithResId("photosUpload"))
+                // Deny app access to pictures and video recordings
+                denyPermission()
+                verifySystemPhotoAndVideoPickerExists()
+                closeSystemPhotoAndVideoPicker()
+            }
     }
 }

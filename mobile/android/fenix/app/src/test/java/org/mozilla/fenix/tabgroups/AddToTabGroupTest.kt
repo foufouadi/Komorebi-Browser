@@ -7,6 +7,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import junit.framework.TestCase.assertTrue
+import kotlin.test.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -14,12 +15,10 @@ import org.mozilla.fenix.tabstray.TabsTrayTestTag
 import org.mozilla.fenix.tabstray.data.createTabGroup
 import org.mozilla.fenix.theme.FirefoxTheme
 import org.mozilla.fenix.theme.Theme
-import kotlin.test.assertEquals
 
 @RunWith(AndroidJUnit4::class)
 class AddToTabGroupTest {
-    @get:Rule
-    val composeTestRule = createComposeRule()
+    @get:Rule val composeTestRule = createComposeRule()
     val testGroupTitle = "Test Tab Group"
 
     @Test
@@ -36,10 +35,8 @@ class AddToTabGroupTest {
             }
         }
 
-        composeTestRule.onNodeWithTag(TabsTrayTestTag.ADD_TO_TAB_GROUP_ROOT)
-            .assertIsDisplayed()
-        composeTestRule.onNodeWithTag(TabsTrayTestTag.ADD_TO_NEW_TAB_GROUP)
-            .assertIsDisplayed()
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.ADD_TO_TAB_GROUP_ROOT).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.ADD_TO_NEW_TAB_GROUP).assertIsDisplayed()
     }
 
     @Test
@@ -58,12 +55,9 @@ class AddToTabGroupTest {
             }
         }
 
-        composeTestRule.onNodeWithTag(TabsTrayTestTag.ADD_TO_TAB_GROUP_ROOT)
-            .assertIsDisplayed()
-        composeTestRule.onNodeWithTag(TabsTrayTestTag.ADD_TO_NEW_TAB_GROUP)
-            .assertIsDisplayed()
-        composeTestRule.onNodeWithTag("${TabsTrayTestTag.TAB_GROUP_ROOT}.${group.id}")
-            .assertIsDisplayed()
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.ADD_TO_TAB_GROUP_ROOT).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.ADD_TO_NEW_TAB_GROUP).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("${TabsTrayTestTag.TAB_GROUP_ROOT}.${group.id}").assertIsDisplayed()
     }
 
     @Test
@@ -81,8 +75,7 @@ class AddToTabGroupTest {
             }
         }
 
-        composeTestRule.onNodeWithTag(TabsTrayTestTag.ADD_TO_NEW_TAB_GROUP)
-            .performClick()
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.ADD_TO_NEW_TAB_GROUP).performClick()
 
         assertTrue(clicked)
     }
@@ -104,8 +97,7 @@ class AddToTabGroupTest {
             }
         }
 
-        composeTestRule.onNodeWithTag("${TabsTrayTestTag.TAB_GROUP_ROOT}.${group.id}")
-            .performClick()
+        composeTestRule.onNodeWithTag("${TabsTrayTestTag.TAB_GROUP_ROOT}.${group.id}").performClick()
 
         assertEquals(group.id, clickedGroupId)
     }

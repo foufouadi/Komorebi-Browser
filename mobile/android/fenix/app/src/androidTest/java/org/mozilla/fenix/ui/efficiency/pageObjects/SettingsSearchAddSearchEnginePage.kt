@@ -18,7 +18,8 @@ import org.mozilla.fenix.ui.efficiency.selectors.SettingsSearchAddSearchEngineSe
 import org.mozilla.fenix.ui.efficiency.selectors.SettingsSearchDefaultSearchEngineSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.SettingsSelectors
 
-class SettingsSearchAddSearchEnginePage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule, *>) : BasePage(composeRule) {
+class SettingsSearchAddSearchEnginePage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule, *>) :
+    BasePage(composeRule) {
     override val pageName = "SettingsSearchAddSearchEnginePage"
 
     init {
@@ -46,9 +47,9 @@ class SettingsSearchAddSearchEnginePage(composeRule: AndroidComposeTestRule<Home
     }
 
     /**
-     * Fills the name and search-string fields. The fields are plain View EditTexts reached by res id;
-     * setting UiObject2.text directly mirrors the legacy SettingsSubMenuSearchRobot.typeCustomEngineDetails
-     * and fires the TextWatcher that enables the Save button.
+     * Fills the name and search-string fields. The fields are plain View EditTexts reached by res id; setting
+     * UiObject2.text directly mirrors the legacy SettingsSubMenuSearchRobot.typeCustomEngineDetails and fires the
+     * TextWatcher that enables the Save button.
      */
     fun typeCustomEngineDetails(engineName: String, engineUrl: String): SettingsSearchAddSearchEnginePage {
         mDevice.findObject(By.res("$packageName:id/edit_engine_name")).text = engineName

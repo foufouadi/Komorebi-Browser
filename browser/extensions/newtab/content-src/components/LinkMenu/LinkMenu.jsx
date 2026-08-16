@@ -90,7 +90,6 @@ export class _LinkMenu extends React.PureComponent {
                   format,
                   is_section_followed,
                   received_rank,
-                  recommendation_id,
                   recommended_at,
                   scheduled_corpus_item_id,
                   section_position,
@@ -106,7 +105,6 @@ export class _LinkMenu extends React.PureComponent {
                   event_source,
                   format,
                   received_rank,
-                  recommendation_id,
                   recommended_at,
                   scheduled_corpus_item_id,
                   ...(section

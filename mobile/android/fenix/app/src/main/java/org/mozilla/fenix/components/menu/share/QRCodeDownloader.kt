@@ -15,24 +15,26 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.widget.Toast
 import androidx.annotation.RequiresApi
-import org.mozilla.fenix.R
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import org.mozilla.fenix.R
 
 /**
  * Utility class to download and save QR code images to the device's Downloads folder.
- * @param onResponse A callback function that is invoked with the [Context] and a [Boolean]
- * indicating success or failure of the save operation. By default, it shows a Toast message.
+ *
+ * @param onResponse A callback function that is invoked with the [Context] and a [Boolean] indicating success or
+ *   failure of the save operation. By default, it shows a Toast message.
  * @param currentTimeMillis provider for the current time in milliseconds, injectable for testing.
  */
 class QRCodeDownloader(
     private val onResponse: (Context, Boolean) -> Unit = { context, isSuccess ->
         Toast.makeText(
-            context,
-            if (isSuccess) R.string.qr_code_download_success else R.string.qr_code_download_failure,
-            Toast.LENGTH_SHORT,
-        ).show()
+                context,
+                if (isSuccess) R.string.qr_code_download_success else R.string.qr_code_download_failure,
+                Toast.LENGTH_SHORT,
+            )
+            .show()
     },
     private val currentTimeMillis: () -> Long = { System.currentTimeMillis() },
 ) {
@@ -45,9 +47,10 @@ class QRCodeDownloader(
      * @param context The [Context] used to show Toast messages.
      */
     fun saveQRCodeToDownloads(qrCodeUri: Uri, contentResolver: ContentResolver, context: Context) {
-        val bitmap = contentResolver.openInputStream(qrCodeUri)?.use { inputStream ->
-            BitmapFactory.decodeStream(inputStream)
-        }
+        val bitmap =
+            contentResolver.openInputStream(qrCodeUri)?.use { inputStream ->
+                BitmapFactory.decodeStream(inputStream)
+            }
 
         if (bitmap != null) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -80,11 +83,12 @@ class QRCodeDownloader(
         bitmap: Bitmap,
         context: Context,
     ) {
-        val contentValues = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, "qr_code_${currentTimeMillis()}.png")
-            put(MediaStore.Downloads.MIME_TYPE, "image/png")
-            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-        }
+        val contentValues =
+            ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, "qr_code_${currentTimeMillis()}.png")
+                put(MediaStore.Downloads.MIME_TYPE, "image/png")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            }
 
         val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
         uri?.let {
@@ -92,9 +96,10 @@ class QRCodeDownloader(
                 bitmap.compress(Bitmap.CompressFormat.PNG, PNG_QUALITY, outputStream)
             }
             onResponse(context, true)
-        } ?: run {
-            onResponse(context, false)
         }
+            ?: run {
+                onResponse(context, false)
+            }
     }
 
     companion object {

@@ -142,7 +142,7 @@ android-arm-lite/opt:
         toolchain:
             - linux64-clang
             - linux64-sccache
-            - android-gradle-dependencies-lite
+            - android-gradle-dependencies
 
 android-arm-shippable/opt:
     description: "Android Arm Shippable"
@@ -203,7 +203,7 @@ android-arm-shippable-lite/opt:
     fetches:
         toolchain:
             - linux64-clang
-            - android-gradle-dependencies-lite
+            - android-gradle-dependencies
 
 android-aarch64/opt:
     description: "Android AArch64 Opt"
@@ -254,7 +254,7 @@ android-aarch64-lite/opt:
         toolchain:
             - linux64-clang
             - linux64-sccache
-            - android-gradle-dependencies-lite
+            - android-gradle-dependencies
 
 android-aarch64-non-unified/opt:
     description: "Android AArch64 Opt Non-unified"
@@ -369,7 +369,7 @@ android-aarch64-shippable-lite/opt:
     fetches:
         toolchain:
             - linux64-clang
-            - android-gradle-dependencies-lite
+            - android-gradle-dependencies
 
 android-x86_64/opt:
     description: "Android x86-64 Opt"
@@ -421,7 +421,7 @@ android-x86_64-lite/opt:
         toolchain:
             - linux64-clang
             - linux64-sccache
-            - android-gradle-dependencies-lite
+            - android-gradle-dependencies
 
 android-x86_64-fuzzing/debug:
     description: "Android x86_64 Fuzzing Debug"
@@ -536,7 +536,7 @@ android-x86_64-shippable-lite/opt:
     fetches:
         toolchain:
             - linux64-clang
-            - android-gradle-dependencies-lite
+            - android-gradle-dependencies
 
 android-x86_64/debug:
     description: "Android x86-64 Debug"

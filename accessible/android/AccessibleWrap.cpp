@@ -178,8 +178,8 @@ Maybe<std::pair<int32_t, int32_t>> AccessibleWrap::NavigateText(
   uint16_t endBoundaryType = nsIAccessibleText::BOUNDARY_LINE_END;
   switch (aGranularity) {
     case 1:  // MOVEMENT_GRANULARITY_CHARACTER
-      startBoundaryType = nsIAccessibleText::BOUNDARY_CHAR;
-      endBoundaryType = nsIAccessibleText::BOUNDARY_CHAR;
+      startBoundaryType = nsIAccessibleText::BOUNDARY_CLUSTER;
+      endBoundaryType = nsIAccessibleText::BOUNDARY_CLUSTER;
       break;
     case 2:  // MOVEMENT_GRANULARITY_WORD
       startBoundaryType = nsIAccessibleText::BOUNDARY_WORD_START;

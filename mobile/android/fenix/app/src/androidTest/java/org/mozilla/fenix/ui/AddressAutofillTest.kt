@@ -4,6 +4,7 @@
 
 package org.mozilla.fenix.ui
 
+import androidx.compose.ui.test.junit4.v2.AndroidComposeTestRule as AndroidComposeTestRuleV2
 import androidx.test.espresso.Espresso.closeSoftKeyboard
 import org.junit.Rule
 import org.junit.Test
@@ -22,7 +23,6 @@ import org.mozilla.fenix.ui.robots.autofillScreen
 import org.mozilla.fenix.ui.robots.clickPageObject
 import org.mozilla.fenix.ui.robots.homeScreen
 import org.mozilla.fenix.ui.robots.navigationToolbar
-import androidx.compose.ui.test.junit4.v2.AndroidComposeTestRule as AndroidComposeTestRuleV2
 
 class AddressAutofillTest {
     object FirstAddressAutofillDetails {
@@ -51,19 +51,16 @@ class AddressAutofillTest {
         var emailAddress = "fuu@bar.org"
     }
 
-    @get:Rule(order = 0)
-    val fenixTestRule: FenixTestRule = FenixTestRule()
+    @get:Rule(order = 0) val fenixTestRule: FenixTestRule = FenixTestRule()
 
-    private val mockWebServer get() = fenixTestRule.mockWebServer
+    private val mockWebServer
+        get() = fenixTestRule.mockWebServer
 
     @get:Rule(order = 1)
     val composeTestRule =
-        AndroidComposeTestRuleV2(
-            HomeActivityIntentTestRule.withDefaultSettingsOverrides(),
-        ) { it.activity }
+        AndroidComposeTestRuleV2(HomeActivityIntentTestRule.withDefaultSettingsOverrides()) { it.activity }
 
-    @get:Rule(order = 2)
-    val memoryLeaksRule = DetectMemoryLeaksRule(composeTestRule = { composeTestRule })
+    @get:Rule(order = 2) val memoryLeaksRule = DetectMemoryLeaksRule(composeTestRule = { composeTestRule })
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3205329
     @Converted(
@@ -77,37 +74,37 @@ class AddressAutofillTest {
         val addressFormPage = mockWebServer.addressFormAsset
 
         autofillScreen(composeTestRule) {
-            fillAndSaveAddress(
-                composeTestRule,
-                navigateToAutofillSettings = FirstAddressAutofillDetails.navigateToAutofillSettings,
-                isAddressAutofillEnabled = FirstAddressAutofillDetails.isAddressAutofillEnabled,
-                userHasSavedAddress = FirstAddressAutofillDetails.userHasSavedAddress,
-                name = FirstAddressAutofillDetails.name,
-                streetAddress = FirstAddressAutofillDetails.streetAddress,
-                city = FirstAddressAutofillDetails.city,
-                state = FirstAddressAutofillDetails.state,
-                zipCode = FirstAddressAutofillDetails.zipCode,
-                country = FirstAddressAutofillDetails.country,
-                phoneNumber = FirstAddressAutofillDetails.phoneNumber,
-                emailAddress = FirstAddressAutofillDetails.emailAddress,
-            )
-        }.goBack {
-        }.goBack(composeTestRule) {
-        }
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(addressFormPage.url) {
-            clickPageObject(composeTestRule, itemWithResId("streetAddress"))
-            clickSelectAddressButton()
-            clickPageObject(
-                composeTestRule,
-                itemWithResIdContainingText(
-                    "$packageName:id/address_name",
-                    "Harrison Street",
-                ),
-            )
-            waitForAppWindowToBeUpdated()
-            verifyAutofilledAddress("Harrison Street")
-        }
+                fillAndSaveAddress(
+                    composeTestRule,
+                    navigateToAutofillSettings = FirstAddressAutofillDetails.navigateToAutofillSettings,
+                    isAddressAutofillEnabled = FirstAddressAutofillDetails.isAddressAutofillEnabled,
+                    userHasSavedAddress = FirstAddressAutofillDetails.userHasSavedAddress,
+                    name = FirstAddressAutofillDetails.name,
+                    streetAddress = FirstAddressAutofillDetails.streetAddress,
+                    city = FirstAddressAutofillDetails.city,
+                    state = FirstAddressAutofillDetails.state,
+                    zipCode = FirstAddressAutofillDetails.zipCode,
+                    country = FirstAddressAutofillDetails.country,
+                    phoneNumber = FirstAddressAutofillDetails.phoneNumber,
+                    emailAddress = FirstAddressAutofillDetails.emailAddress,
+                )
+            }
+            .goBack {}
+            .goBack(composeTestRule) {}
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(addressFormPage.url) {
+                clickPageObject(composeTestRule, itemWithResId("streetAddress"))
+                clickSelectAddressButton()
+                clickPageObject(
+                    composeTestRule,
+                    itemWithResIdContainingText(
+                        "$packageName:id/address_name",
+                        "Harrison Street",
+                    ),
+                )
+                waitForAppWindowToBeUpdated()
+                verifyAutofilledAddress("Harrison Street")
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3205332
@@ -148,15 +145,16 @@ class AddressAutofillTest {
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3205316
     @Test
     fun verifyAddAddressViewTest() {
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            clickAddAddressButton()
-            verifyAddAddressView()
-        }.goBackToAutofillSettings(composeTestRule) {
-            verifyAutofillToolbarTitle()
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                clickAddAddressButton()
+                verifyAddAddressView()
+            }
+            .goBackToAutofillSettings(composeTestRule) {
+                verifyAutofillToolbarTitle()
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3205321
@@ -208,25 +206,26 @@ class AddressAutofillTest {
 
         exitMenu()
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(addressFormPage.url) {
-            clickAddressFormFieldAndVerifyAutofillSuggestionExists()
-            closeSoftKeyboard()
-            waitForAppWindowToBeUpdated()
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            clickSaveAndAutofillAddressesOption()
-            verifyAddressAutofillSection(false, true)
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(addressFormPage.url) {
+                clickAddressFormFieldAndVerifyAutofillSuggestionExists()
+                closeSoftKeyboard()
+                waitForAppWindowToBeUpdated()
+            }
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                clickSaveAndAutofillAddressesOption()
+                verifyAddressAutofillSection(false, true)
+            }
 
         exitMenu()
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(addressFormPage.url) {
-            clickPageObject(composeTestRule, itemWithResId("streetAddress"))
-            verifySelectAddressButtonExists(false)
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(addressFormPage.url) {
+                clickPageObject(composeTestRule, itemWithResId("streetAddress"))
+                verifySelectAddressButtonExists(false)
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3205330
@@ -253,15 +252,17 @@ class AddressAutofillTest {
 
         exitMenu()
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(addressFormPage.url) {
-            clickPageObject(composeTestRule, itemWithResId("streetAddress"))
-            clickSelectAddressButton()
-        }.clickManageAddressButton {
-            verifyAutofillToolbarTitle()
-        }.goBackToBrowser(composeTestRule) {
-            verifySaveLoginPromptIsNotDisplayed()
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(addressFormPage.url) {
+                clickPageObject(composeTestRule, itemWithResId("streetAddress"))
+                clickSelectAddressButton()
+            }
+            .clickManageAddressButton {
+                verifyAutofillToolbarTitle()
+            }
+            .goBackToBrowser(composeTestRule) {
+                verifySaveLoginPromptIsNotDisplayed()
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3205319
@@ -303,30 +304,30 @@ class AddressAutofillTest {
 
         exitMenu()
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(addressFormPage.url) {
-            clickPageObject(composeTestRule, itemWithResId("streetAddress"))
-            clickSelectAddressButton()
-            clickPageObject(
-                composeTestRule,
-                itemWithResIdContainingText(
-                    "$packageName:id/address_name",
-                    "Harrison Street",
-                ),
-            )
-            verifyAutofilledAddress("Harrison Street")
-            clearAddressForm()
-            clickPageObject(composeTestRule, itemWithResId("streetAddress"))
-            clickSelectAddressButton()
-            clickPageObject(
-                composeTestRule,
-                itemWithResIdContainingText(
-                    "$packageName:id/address_name",
-                    "Fort Street",
-                ),
-            )
-            verifyAutofilledAddress("Fort Street")
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(addressFormPage.url) {
+                clickPageObject(composeTestRule, itemWithResId("streetAddress"))
+                clickSelectAddressButton()
+                clickPageObject(
+                    composeTestRule,
+                    itemWithResIdContainingText(
+                        "$packageName:id/address_name",
+                        "Harrison Street",
+                    ),
+                )
+                verifyAutofilledAddress("Harrison Street")
+                clearAddressForm()
+                clickPageObject(composeTestRule, itemWithResId("streetAddress"))
+                clickSelectAddressButton()
+                clickPageObject(
+                    composeTestRule,
+                    itemWithResIdContainingText(
+                        "$packageName:id/address_name",
+                        "Fort Street",
+                    ),
+                )
+                verifyAutofilledAddress("Fort Street")
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3205322
@@ -368,19 +369,19 @@ class AddressAutofillTest {
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3205320
     @Test
     fun verifyStateFieldUpdatesInAccordanceWithCountryFieldTest() {
-        homeScreen(composeTestRule) {
-        }.openThreeDotMenu {
-        }.clickSettingsButton {
-        }.openAutofillSubMenu(composeTestRule) {
-            verifyAddressAutofillSection(true, false)
-            clickAddAddressButton()
-            waitForAddressFormReady()
-            clickCountryOption("United States")
-            verifyCountryOption("United States")
-            verifyStateOption("Alabama")
-            clickCountryOption("Canada")
-            verifyStateOption("Alberta")
-        }
+        homeScreen(composeTestRule) {}
+            .openThreeDotMenu {}
+            .clickSettingsButton {}
+            .openAutofillSubMenu(composeTestRule) {
+                verifyAddressAutofillSection(true, false)
+                clickAddAddressButton()
+                waitForAddressFormReady()
+                clickCountryOption("United States")
+                verifyCountryOption("United States")
+                verifyStateOption("Alabama")
+                clickCountryOption("Canada")
+                verifyStateOption("Alberta")
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3205331
@@ -407,21 +408,21 @@ class AddressAutofillTest {
 
         exitMenu()
 
-        navigationToolbar(composeTestRule) {
-        }.enterURLAndEnterToBrowser(addressFormPage.url) {
-            clickPageObject(composeTestRule, itemWithResId("streetAddress"))
-            clickSelectAddressButton()
-            clickPageObject(
-                composeTestRule,
-                itemWithResIdContainingText(
-                    "$packageName:id/address_name",
-                    "Harrison Street",
-                ),
-            )
-            verifyAutofilledAddress("Harrison Street")
-            setTextForApartmentTextBox("Ap. 07")
-            verifyManuallyFilledAddress("Ap. 07")
-        }
+        navigationToolbar(composeTestRule) {}
+            .enterURLAndEnterToBrowser(addressFormPage.url) {
+                clickPageObject(composeTestRule, itemWithResId("streetAddress"))
+                clickSelectAddressButton()
+                clickPageObject(
+                    composeTestRule,
+                    itemWithResIdContainingText(
+                        "$packageName:id/address_name",
+                        "Harrison Street",
+                    ),
+                )
+                verifyAutofilledAddress("Harrison Street")
+                setTextForApartmentTextBox("Ap. 07")
+                verifyManuallyFilledAddress("Ap. 07")
+            }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3205317

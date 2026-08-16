@@ -17,8 +17,7 @@ import org.mozilla.fenix.helpers.FenixGleanTestRule
 @RunWith(AndroidJUnit4::class)
 class ProtectionsDashboardFragmentTest {
 
-    @get:Rule
-    val gleanRule = FenixGleanTestRule(testContext)
+    @get:Rule val gleanRule = FenixGleanTestRule(testContext)
 
     @Test
     fun `GIVEN no source argument WHEN the privacy report tapped event is recorded THEN source defaults to home`() {
@@ -33,11 +32,16 @@ class ProtectionsDashboardFragmentTest {
 
     @Test
     fun `GIVEN a tabs tray source argument WHEN the privacy report tapped event is recorded THEN source is tabs_tray`() {
-        val fragment = ProtectionsDashboardFragment().apply {
-            arguments = Bundle().apply {
-                putString(ProtectionsDashboardFragment.ARG_SOURCE, ProtectionsDashboardFragment.SOURCE_TABS_TRAY)
+        val fragment =
+            ProtectionsDashboardFragment().apply {
+                arguments =
+                    Bundle().apply {
+                        putString(
+                            ProtectionsDashboardFragment.ARG_SOURCE,
+                            ProtectionsDashboardFragment.SOURCE_TABS_TRAY,
+                        )
+                    }
             }
-        }
 
         fragment.recordPrivacyReportTapped()
 

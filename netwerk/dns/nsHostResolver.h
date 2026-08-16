@@ -26,11 +26,200 @@
 #include "nsTArray.h"
 #include "nscore.h"
 #include "prnetdb.h"
+#include "prthread.h"
 
 namespace mozilla {
 namespace net {
 class TRR;
 class TRRQuery;
+
+// A lock holder leaves no stack frame of its own, so a wedged RWLock appears in
+// a hang report as waiters with no owner at all -- undiagnosable, which is the
+// situation in bug 2059597. In diagnostic builds mDBLock is a DiagnosticRWLock
+// that records who holds it and lets a blocked writer give up after a timeout
+// and crash naming the holder; elsewhere it is a plain RWLock. Use the
+// ResolverRWLock / AutoResolver*Lock aliases below rather than either directly.
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+
+class MOZ_CAPABILITY("rwlock") DiagnosticRWLock final : public RWLock {
+ public:
+  explicit DiagnosticRWLock(const char* aName) : RWLock(aName) {}
+
+  void WriteLock() MOZ_CAPABILITY_ACQUIRE() {
+    RWLock::WriteLock();
+    // Recorded only once the lock is held, so a thread still blocked acquiring
+    // it never appears to be the owner.
+    mWriter = PR_GetCurrentThread();
+    ++mAcquisitions;
+  }
+
+  [[nodiscard]] bool TryWriteLock() MOZ_TRY_ACQUIRE(true) {
+    bool locked = RWLock::TryWriteLock();
+    if (locked) {
+      mWriter = PR_GetCurrentThread();
+      ++mAcquisitions;
+    }
+    return locked;
+  }
+
+  void WriteUnlock() MOZ_EXCLUSIVE_RELEASE() {
+    mWriter = nullptr;
+    RWLock::WriteUnlock();
+  }
+
+  void ReadLock() MOZ_ACQUIRE_SHARED() {
+    RWLock::ReadLock();
+    NoteReadAcquired();
+  }
+
+  void ReadUnlock() MOZ_RELEASE_SHARED() {
+    NoteReadReleased();
+    RWLock::ReadUnlock();
+  }
+
+  // Acquires the write lock, but rather than blocking forever on a wedged lock,
+  // crashes after network.dns.db_lock_timeout_ms naming whoever holds it.
+  void WriteLockOrDiagnose()
+      MOZ_CAPABILITY_ACQUIRE() MOZ_NO_THREAD_SAFETY_ANALYSIS {
+    uint32_t timeoutMs = StaticPrefs::network_dns_db_lock_timeout_ms();
+    if (timeoutMs) {
+      if (TryWriteLock()) {
+        return;
+      }
+      // This lock is taken on every lookup and normally held for microseconds,
+      // so ordinary contention must not pay a sleep. Yield briefly first; the
+      // holder almost always finishes within a yield or two.
+      TimeStamp start = TimeStamp::Now();
+      while ((TimeStamp::Now() - start).ToMilliseconds() < 2.0) {
+        PR_Sleep(PR_INTERVAL_NO_WAIT);
+        if (TryWriteLock()) {
+          return;
+        }
+      }
+      // Still blocked after yielding: either a long legitimate hold or a wedged
+      // lock. Only crash if nobody acquired the lock at all during the wait --
+      // slow-but-progressing contention keeps bumping mAcquisitions. The poll
+      // count additionally rules out this thread having been descheduled (or
+      // the process suspended) for the whole window, which would otherwise be
+      // indistinguishable from a wedge.
+      uint32_t acquisitions = mAcquisitions;
+      start = TimeStamp::Now();
+      uint32_t polls = 0;
+      while (!TryWriteLock()) {
+        if (uint32_t current = mAcquisitions; current != acquisitions) {
+          acquisitions = current;
+          start = TimeStamp::Now();
+          polls = 0;
+        } else if (++polls >= 10 &&
+                   (TimeStamp::Now() - start).ToMilliseconds() > timeoutMs) {
+          CrashWithHolder();
+        }
+        PR_Sleep(PR_MillisecondsToInterval(50));
+      }
+      return;
+    }
+    WriteLock();
+  }
+
+  bool LockedForWritingByCurrentThread() const {
+    return mWriter == PR_GetCurrentThread();
+  }
+
+  bool LockedForReadingByCurrentThread() const {
+    return FindReaderSlot(PR_GetCurrentThread()) < kMaxTrackedReaders;
+  }
+
+ private:
+  // Two read sites, on distinct threads: SizeOfIncludingThis from the memory
+  // reporter on the main thread, and GetDNSCacheEntries from the dashboard on
+  // the socket thread. A further concurrent reader simply goes unrecorded.
+  static constexpr size_t kMaxTrackedReaders = 2;
+
+  void NoteReadAcquired() {
+    PRThread* self = PR_GetCurrentThread();
+    ++mAcquisitions;
+    for (auto& slot : mReaders) {
+      if (slot.compareExchange(nullptr, self)) {
+        return;
+      }
+    }
+    // More concurrent readers than slots; this one goes unrecorded.
+  }
+
+  void NoteReadReleased() {
+    size_t i = FindReaderSlot(PR_GetCurrentThread());
+    if (i < kMaxTrackedReaders) {
+      mReaders[i] = nullptr;
+    }
+  }
+
+  size_t FindReaderSlot(PRThread* aThread) const {
+    for (size_t i = 0; i < kMaxTrackedReaders; ++i) {
+      if (mReaders[i] == aThread) {
+        return i;
+      }
+    }
+    return kMaxTrackedReaders;
+  }
+
+  [[noreturn]] void CrashWithHolder() {
+    if (PRThread* writer = mWriter) {
+      MOZ_CRASH_UNSAFE_PRINTF("nsHostResolver DB lock wedged by writer on %s",
+                              ThreadName(writer));
+    }
+    for (auto& slot : mReaders) {
+      if (PRThread* reader = slot) {
+        // The thread identifies the site: SizeOfIncludingThis runs on the main
+        // thread, GetDNSCacheEntries on the socket thread.
+        MOZ_CRASH_UNSAFE_PRINTF("nsHostResolver DB lock wedged by reader on %s",
+                                ThreadName(reader));
+      }
+    }
+    // No holder recorded: either an untracked reader, an acquisition that
+    // bypassed this class, or corrupted lock state.
+    MOZ_CRASH("nsHostResolver DB lock wedged by an unrecorded holder");
+  }
+
+  static const char* ThreadName(PRThread* aThread) {
+    const char* name = PR_GetThreadName(aThread);
+    return name ? name : "unnamed";
+  }
+
+  // Relaxed is sufficient: purely diagnostic, and always published while the
+  // lock itself provides the ordering for the data it guards.
+  Atomic<PRThread*, Relaxed> mWriter{nullptr};
+  Atomic<PRThread*, Relaxed> mReaders[kMaxTrackedReaders]{};
+  // Bumped on every acquisition, so a waiter can tell a wedged lock from one
+  // that is merely busy.
+  Atomic<uint32_t, Relaxed> mAcquisitions{0};
+};
+
+// Write-locks a DiagnosticRWLock, crashing rather than hanging forever if the
+// lock is wedged.
+class MOZ_SCOPED_CAPABILITY MOZ_RAII AutoDiagnosticWriteLock final {
+ public:
+  explicit AutoDiagnosticWriteLock(DiagnosticRWLock& aLock)
+      MOZ_CAPABILITY_ACQUIRE(aLock)
+      : mLock(aLock) {
+    mLock.WriteLockOrDiagnose();
+  }
+  ~AutoDiagnosticWriteLock() MOZ_CAPABILITY_RELEASE() { mLock.WriteUnlock(); }
+
+ private:
+  DiagnosticRWLock& mLock;
+};
+
+using ResolverRWLock = DiagnosticRWLock;
+using AutoResolverReadLock = BaseAutoReadLock<DiagnosticRWLock>;
+using AutoResolverWriteLock = AutoDiagnosticWriteLock;
+
+#else  // !MOZ_DIAGNOSTIC_ASSERT_ENABLED
+
+using ResolverRWLock = RWLock;
+using AutoResolverReadLock = AutoReadLock;
+using AutoResolverWriteLock = AutoWriteLock;
+
+#endif  // MOZ_DIAGNOSTIC_ASSERT_ENABLED
 
 // Clamped to 1 so DequeueNextRecord can always make progress.
 static inline uint32_t MaxResolverThreadsAnyPriority() {
@@ -301,7 +490,7 @@ class nsHostResolver : public nsISupports, public AHostResolver {
   // mutable so SizeOfIncludingThis can be const
   // Protects mRecordDB. When held together with mQueue.mLock, always acquire
   // mDBLock first.
-  mutable mozilla::RWLock mDBLock{"nsHostResolver.mDBLock"};
+  mutable mozilla::net::ResolverRWLock mDBLock{"nsHostResolver.mDBLock"};
   mozilla::net::HostRecordQueue mQueue;
   nsRefPtrHashtable<nsGenericHashKey<nsHostKey>, nsHostRecord> mRecordDB
       MOZ_GUARDED_BY(mDBLock);

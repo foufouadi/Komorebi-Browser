@@ -4,6 +4,7 @@
 
 package mozilla.components.feature.summarize.settings
 
+import kotlin.test.assertEquals
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -14,7 +15,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import kotlin.test.assertEquals
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class PageSummariesSettingsMiddlewareTest {
@@ -28,10 +28,11 @@ class PageSummariesSettingsMiddlewareTest {
 
     @Test
     fun `WHEN summarize pages is toggled on THEN feature is enabled `() = runTest {
-        val settings = SummarizationSettings.inMemory(
-            isFeatureEnabled = false,
-            isGestureEnabled = false,
-        )
+        val settings =
+            SummarizationSettings.inMemory(
+                isFeatureEnabled = false,
+                isGestureEnabled = false,
+            )
         val middleware = buildMiddleware(settings, this)
         val store = middleware.makeStore()
 
@@ -46,10 +47,11 @@ class PageSummariesSettingsMiddlewareTest {
 
     @Test
     fun `WHEN summarize pages is toggled off THEN feature is disabled`() = runTest {
-        val settings = SummarizationSettings.inMemory(
-            isFeatureEnabled = true,
-            isGestureEnabled = false,
-        )
+        val settings =
+            SummarizationSettings.inMemory(
+                isFeatureEnabled = true,
+                isGestureEnabled = false,
+            )
         val middleware = buildMiddleware(settings, this)
         val store = middleware.makeStore()
 
@@ -64,10 +66,11 @@ class PageSummariesSettingsMiddlewareTest {
 
     @Test
     fun `WHEN shake to summarize is toggled on THEN gesture is enabled`() = runTest {
-        val settings = SummarizationSettings.inMemory(
-            isFeatureEnabled = true,
-            isGestureEnabled = false,
-        )
+        val settings =
+            SummarizationSettings.inMemory(
+                isFeatureEnabled = true,
+                isGestureEnabled = false,
+            )
         val middleware = buildMiddleware(settings, this)
         val store = middleware.makeStore()
 
@@ -82,10 +85,11 @@ class PageSummariesSettingsMiddlewareTest {
 
     @Test
     fun `WHEN shake to summarize is toggled off THEN gesture is disabled`() = runTest {
-        val settings = SummarizationSettings.inMemory(
-            isFeatureEnabled = true,
-            isGestureEnabled = true,
-        )
+        val settings =
+            SummarizationSettings.inMemory(
+                isFeatureEnabled = true,
+                isGestureEnabled = true,
+            )
         val middleware = buildMiddleware(settings, this)
         val store = middleware.makeStore()
 
@@ -100,10 +104,11 @@ class PageSummariesSettingsMiddlewareTest {
 
     @Test
     fun `WHEN page summaries are toggled off THEN gesture preference is preserved`() = runTest {
-        val settings = SummarizationSettings.inMemory(
-            isFeatureEnabled = true,
-            isGestureEnabled = true,
-        )
+        val settings =
+            SummarizationSettings.inMemory(
+                isFeatureEnabled = true,
+                isGestureEnabled = true,
+            )
         val middleware = buildMiddleware(settings, this)
         val store = middleware.makeStore()
 
@@ -119,10 +124,11 @@ class PageSummariesSettingsMiddlewareTest {
 
     @Test
     fun `WHEN shake sensitivity is changed THEN it is persisted`() = runTest {
-        val settings = SummarizationSettings.inMemory(
-            isFeatureEnabled = true,
-            isGestureEnabled = true,
-        )
+        val settings =
+            SummarizationSettings.inMemory(
+                isFeatureEnabled = true,
+                isGestureEnabled = true,
+            )
         val middleware = buildMiddleware(settings, this)
         val store = middleware.makeStore()
 
@@ -165,15 +171,17 @@ class PageSummariesSettingsMiddlewareTest {
     private fun buildMiddleware(
         settings: SummarizationSettings,
         scope: CoroutineScope,
-    ) = SummarizeSettingsMiddleware(
-        settings = settings,
-        onLearnMoreClicked = { learnMoreClicked = true },
-        scope = scope,
-    )
+    ) =
+        SummarizeSettingsMiddleware(
+            settings = settings,
+            onLearnMoreClicked = { learnMoreClicked = true },
+            scope = scope,
+        )
 
-    private fun SummarizeSettingsMiddleware.makeStore() = SummarizeSettingsStore(
-        initialState = SummarizeSettingsState(),
-        reducer = ::summarizeSettingsReducer,
-        middleware = listOf(this),
-    )
+    private fun SummarizeSettingsMiddleware.makeStore() =
+        SummarizeSettingsStore(
+            initialState = SummarizeSettingsState(),
+            reducer = ::summarizeSettingsReducer,
+            middleware = listOf(this),
+        )
 }

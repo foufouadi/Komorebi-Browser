@@ -33,8 +33,8 @@ object NavigationTestPlanner {
                 ReachabilityCase(
                     propertyName = pageRef.propertyName,
                     page = pageRef.getter,
-                    launch = NavigationRegistry.launchConfigFor(pageRef.propertyName.toDisplayLabel())
-                        ?: LaunchConfig(),
+                    launch =
+                        NavigationRegistry.launchConfigFor(pageRef.propertyName.toDisplayLabel()) ?: LaunchConfig(),
                 )
             }
             .sortedBy { it.propertyName }
@@ -43,9 +43,8 @@ object NavigationTestPlanner {
     fun buildNavigationPairCases(): List<NavigationPairCasePlan> {
         val reachabilityCases = buildReachabilityCases()
 
-        val casesByPageName = reachabilityCases
-            .filter { it.launch == LaunchConfig() }
-            .associateBy { it.propertyName.toDisplayLabel() }
+        val casesByPageName =
+            reachabilityCases.filter { it.launch == LaunchConfig() }.associateBy { it.propertyName.toDisplayLabel() }
         val sortedPageNames = casesByPageName.keys.sorted()
 
         return buildList {
@@ -70,7 +69,7 @@ object NavigationTestPlanner {
                             firstPage = firstCase.page,
                             secondPage = secondCase.page,
                             distinctPathCount = paths.size,
-                        ),
+                        )
                     )
                 }
             }

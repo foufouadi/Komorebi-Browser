@@ -139,7 +139,7 @@ native code. [Bug
 making Android Studio and Gradle do this automatically.
 
 If you want set up code formatting for Kotlin, please reference
-[IntelliJ IDEA configuration](https://pinterest.github.io/ktlint/rules/configuration-intellij-idea/).
+[IntelliJ IDEA configuration](https://github.com/Kotlin/ktfmt#intellij-android-studio-and-other-jetbrains-ides).
 
 ## Mobile Devices and Emulators
 

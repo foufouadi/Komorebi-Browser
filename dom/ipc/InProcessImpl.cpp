@@ -195,6 +195,12 @@ JSActorManager* InProcessParent::AsJSActorManager() { return this; }
 NS_IMETHODIMP
 InProcessParent::AboutToLoadOrigin(nsIPrincipal* aPrincipal) { return NS_OK; }
 
+NS_IMETHODIMP InProcessParent::ValidatePrincipalXPCOM(nsIPrincipal* aPrincipal,
+                                                      bool* aRetVal) {
+  *aRetVal = true;
+  return NS_OK;
+}
+
 ////////////////////////
 // nsIDOMProcessChild //
 ////////////////////////

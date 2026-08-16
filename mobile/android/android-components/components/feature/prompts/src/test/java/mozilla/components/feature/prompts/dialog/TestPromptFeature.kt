@@ -4,19 +4,20 @@ import mozilla.components.concept.storage.CreditCardValidationDelegate
 import mozilla.components.concept.storage.LoginValidationDelegate
 import mozilla.components.feature.prompts.login.LoginExceptions
 
-/**
- * Test prompt feature that allows testers to override the specific functionality they like
- */
+/** Test prompt feature that allows testers to override the specific functionality they like */
 internal class TestPromptFeature : Prompter {
     override val creditCardValidationDelegate: CreditCardValidationDelegate?
         get() = null
+
     override val loginValidationDelegate: LoginValidationDelegate?
         get() = null
+
     override val loginExceptionStorage: LoginExceptions?
         get() = null
 
     var confirmedPrompt: TestPrompt? = null
         private set
+
     var canceledPrompt: TestPrompt? = null
         private set
 

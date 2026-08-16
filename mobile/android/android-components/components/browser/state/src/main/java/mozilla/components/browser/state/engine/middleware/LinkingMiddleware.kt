@@ -19,12 +19,8 @@ import mozilla.components.lib.state.Middleware
 import mozilla.components.lib.state.Store
 import mozilla.components.support.ktx.kotlin.isExtensionUrl
 
-/**
- * [Middleware] that handles side-effects of linking a session to an engine session.
- */
-internal class LinkingMiddleware(
-    private val scope: CoroutineScope,
-) : Middleware<BrowserState, BrowserAction> {
+/** [Middleware] that handles side-effects of linking a session to an engine session. */
+internal class LinkingMiddleware(private val scope: CoroutineScope) : Middleware<BrowserState, BrowserAction> {
 
     override fun invoke(
         store: Store<BrowserState, BrowserAction>,
@@ -35,13 +31,14 @@ internal class LinkingMiddleware(
         when (action) {
             is TabListAction.AddTabAction -> {
                 if (action.tab.engineState.engineSession != null && action.tab.engineState.engineObserver == null) {
-                    engineObserver = link(
-                        store,
-                        action.tab.engineState.engineSession,
-                        action.tab,
-                        skipLoading = true,
-                        includeParent = false,
-                    )
+                    engineObserver =
+                        link(
+                            store,
+                            action.tab.engineState.engineSession,
+                            action.tab,
+                            skipLoading = true,
+                            includeParent = false,
+                        )
                 }
             }
             is TabListAction.AddMultipleTabsAction -> {
@@ -96,11 +93,12 @@ internal class LinkingMiddleware(
             // tab, but opened by an extension e.g. via browser.tabs.update.
             performLoadOnMainThread(engineSession, tab.content.url, loadFlags = tab.engineState.initialLoadFlags)
         } else {
-            val parentEngineSession = if (includeParent && tab is TabSessionState) {
-                tab.parentId?.let { store.state.findTabOrCustomTab(it)?.engineState?.engineSession }
-            } else {
-                null
-            }
+            val parentEngineSession =
+                if (includeParent && tab is TabSessionState) {
+                    tab.parentId?.let { store.state.findTabOrCustomTab(it)?.engineState?.engineSession }
+                } else {
+                    null
+                }
 
             performLoadOnMainThread(
                 engineSession = engineSession,

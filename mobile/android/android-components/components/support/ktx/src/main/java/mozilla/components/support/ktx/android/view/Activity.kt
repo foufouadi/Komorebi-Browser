@@ -19,20 +19,21 @@ import mozilla.components.support.base.log.logger.Logger
 private const val IMMERSIVE_MODE_WINDOW_INSETS_LISTENER = "IMMERSIVE_MODE_WINDOW_INSETS_LISTENER"
 
 /**
- * Attempts to enter immersive mode - fullscreen with the status bar and navigation buttons hidden,
- * expanding itself into the notch area for devices running API 28+.
+ * Attempts to enter immersive mode - fullscreen with the status bar and navigation buttons hidden, expanding itself
+ * into the notch area for devices running API 28+.
  *
- * This will automatically register and use an inset listener: [View.OnApplyWindowInsetsListener]
- * to restore immersive mode if interactions with various other widgets like the keyboard or dialogs
- * got the activity out of immersive mode without [exitImmersiveMode] being called.
+ * This will automatically register and use an inset listener: [View.OnApplyWindowInsetsListener] to restore immersive
+ * mode if interactions with various other widgets like the keyboard or dialogs got the activity out of immersive mode
+ * without [exitImmersiveMode] being called.
  *
  * @param setListenerFunction is an optional function to setup an WindowInsets listener:
- * [View.OnApplyWindowInsetsListener] to allow having multiple listeners at the same time.
+ *   [View.OnApplyWindowInsetsListener] to allow having multiple listeners at the same time.
  */
 fun Activity.enterImmersiveMode(
     insetsController: WindowInsetsControllerCompat = window.createWindowInsetsController(),
-    setOnApplyWindowInsetsListener: (String, OnApplyWindowInsetsListener) ->
-    Unit = { _, listener -> ViewCompat.setOnApplyWindowInsetsListener(window.decorView, listener) },
+    setOnApplyWindowInsetsListener: (String, OnApplyWindowInsetsListener) -> Unit = { _, listener ->
+        ViewCompat.setOnApplyWindowInsetsListener(window.decorView, listener)
+    },
 ) {
     insetsController.hideInsets()
 
@@ -57,18 +58,17 @@ private fun WindowInsetsControllerCompat.hideInsets() {
 }
 
 /**
- * Shows the system UI windows that were hidden, thereby exiting the immersive experience.
- * For devices running API 28+, this function also restores the application's use
- * of the notch area of the phone to the default behavior.
+ * Shows the system UI windows that were hidden, thereby exiting the immersive experience. For devices running API 28+,
+ * this function also restores the application's use of the notch area of the phone to the default behavior.
  *
- * @param insetsController is an optional [WindowInsetsControllerCompat] object for controlling the
- * window insets.
+ * @param insetsController is an optional [WindowInsetsControllerCompat] object for controlling the window insets.
  * @param removeListenerFunction is an optional function which was used for [enterImmersiveMode].
  */
 fun Activity.exitImmersiveMode(
     insetsController: WindowInsetsControllerCompat = window.createWindowInsetsController(),
-    unregisterOnApplyWindowInsetsListener: (String) ->
-    Unit = { ViewCompat.setOnApplyWindowInsetsListener(window.decorView, null) },
+    unregisterOnApplyWindowInsetsListener: (String) -> Unit = {
+        ViewCompat.setOnApplyWindowInsetsListener(window.decorView, null)
+    },
 ) {
     insetsController.show(WindowInsetsCompat.Type.systemBars())
 
@@ -96,9 +96,7 @@ fun Activity.reportFullyDrawnSafe(errorLogger: Logger) {
     }
 }
 
-/**
- * For devices running Android 9 Pie, force the given activity to enter edge-to-edge mode.
- */
+/** For devices running Android 9 Pie, force the given activity to enter edge-to-edge mode. */
 fun Activity.tryEnableEnterEdgeToEdge() {
     if (SDK_INT >= VERSION_CODES.P) {
         window.setFlags(
@@ -110,13 +108,10 @@ fun Activity.tryEnableEnterEdgeToEdge() {
     }
 }
 
-/**
- * For devices running Android 9 Pie, force the given activity to exit edge-to-edge mode.
- */
+/** For devices running Android 9 Pie, force the given activity to exit edge-to-edge mode. */
 fun Activity.tryDisableEdgeToEdge() {
     if (SDK_INT >= VERSION_CODES.P) {
         window.clearFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
-        window.attributes.layoutInDisplayCutoutMode =
-            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+        window.attributes.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
     }
 }

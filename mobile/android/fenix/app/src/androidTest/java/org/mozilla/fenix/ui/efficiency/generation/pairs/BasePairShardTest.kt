@@ -4,9 +4,7 @@ import android.util.Log
 import org.mozilla.fenix.ui.efficiency.helpers.BasePage
 import org.mozilla.fenix.ui.efficiency.helpers.BaseTest
 
-abstract class BasePairShardTest(
-    private val case: PairCase,
-) : BaseTest() {
+abstract class BasePairShardTest(private val case: PairCase) : BaseTest() {
 
     protected fun runNavigationPairCase() {
         Log.i(

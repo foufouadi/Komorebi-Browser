@@ -942,9 +942,6 @@ dom:
     type: custom_distribution
     description: >
       Percent of the cycle collector's forget skippable done during idle time
-
-      This metric was generated to correspond to the Legacy Telemetry linear
-      histogram FORGET_SKIPPABLE_DURING_IDLE.
     range_min: 1
     range_max: 100
     bucket_count: 50
@@ -957,15 +954,11 @@ dom:
     notification_emails:
       - dev-telemetry-gc-alerts@mozilla.org
     expires: never
-    telemetry_mirror: FORGET_SKIPPABLE_DURING_IDLE
 
   forget_skippable_frequency:
     type: custom_distribution
     description: >
       Number of forget skippables occurred during a minute
-
-      This metric was generated to correspond to the Legacy Telemetry linear
-      histogram FORGET_SKIPPABLE_FREQUENCY.
     range_min: 1
     range_max: 500
     bucket_count: 100
@@ -979,7 +972,6 @@ dom:
       - smaug@mozilla.com
       - dev-telemetry-gc-alerts@mozilla.org
     expires: never
-    telemetry_mirror: FORGET_SKIPPABLE_FREQUENCY
 
   fullscreen_transition_black:
     type: timing_distribution

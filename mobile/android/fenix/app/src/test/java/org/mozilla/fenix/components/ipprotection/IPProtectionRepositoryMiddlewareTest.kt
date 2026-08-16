@@ -24,10 +24,11 @@ class IPProtectionRepositoryMiddlewareTest {
         fakeRepository = FakeIPProtectionRepository()
         middleware = IPProtectionPreferencesMiddleware(fakeRepository)
 
-        store = Store(
-            initialState = IPProtectionState(),
-            reducer = { state, _ -> state },
-        )
+        store =
+            Store(
+                initialState = IPProtectionState(),
+                reducer = { state, _ -> state },
+            )
     }
 
     @Test

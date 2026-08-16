@@ -4416,6 +4416,10 @@ already_AddRefed<nsINode> nsINode::CloneAndAdopt(
       newDoc->SetMayHaveAnimationObservers();
     }
 
+    if (oldDoc->MayHaveContainerTimingAttributes()) {
+      newDoc->SetMayHaveContainerTimingAttributes();
+    }
+
     if (elem) {
       elem->RecompileScriptEventListeners();
     }

@@ -283,7 +283,7 @@ If no useful data is gleaned from the log, the next step is to attempt to reprod
 3. In `about:config`
    1. Set `xpinstall.signatures.required` to `false`
    2. Set `browser.newtabpage.resource-mapping.log` to `true` (this is optional, but may emit some useful debugging information)
-   3. Create a new string pref with key `browser.newtabpage.trainhopAddon.version` and set the value to `any`
+   3. Create new string prefs with keys `browser.newtabpage.trainhopAddon.version` and `browser.newtabpage.trainhopAddonDeployment.version`, and set both values to `any`. These prefs normally hold the train-hop version Nimbus says this client is entitled to; `any` is a sentinel meaning “entitled to whichever version is installed”, so the XPI you install by hand is not treated as an unentitled version and uninstalled at startup. Set both: the entitled version is the highest of the two, so a stale real version left in one of them by a past enrollment would otherwise defeat the sentinel in the other.
 4. Visit `about:addons`
 5. Click on the gear icon, and choose “Install Add-on From File”
 6. Choose the `newtab@mozilla.org.xpi` file from the first step in the native file picker

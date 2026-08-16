@@ -17,7 +17,8 @@ import org.mozilla.fenix.ui.efficiency.selectors.ToolbarSelectors
 
 class NavigationToolbarTest : BaseTest() {
 
-    private val mockWebServer get() = fenixTestRule.mockWebServer
+    private val mockWebServer
+        get() = fenixTestRule.mockWebServer
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/987326
     @SmokeTest
@@ -30,8 +31,7 @@ class NavigationToolbarTest : BaseTest() {
         enableOrDisableBackGestureNavigationOnDevice(backGestureNavigationEnabled = false)
 
         on.browserPage.navigateToPage(firstWebPage.url.toString())
-        on.tabDrawer.navigateToPage()
-            .mozClick(TabDrawerSelectors.FAB)
+        on.tabDrawer.navigateToPage().mozClick(TabDrawerSelectors.FAB)
         on.searchBar
             .mozEnterText(secondWebPage.url.toString(), SearchBarSelectors.TOOLBAR_IN_EDIT_MODE)
             .mozPressEnter(SearchBarSelectors.TOOLBAR_IN_EDIT_MODE)

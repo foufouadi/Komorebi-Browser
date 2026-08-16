@@ -1,48 +1,55 @@
 package mozilla.components.lib.bookmark.parser.jsoup
 
-/**
- * Sample HTML strings in Netscape Bookmark format for use in parser tests.
- */
+/** Sample HTML strings in Netscape Bookmark format for use in parser tests. */
 object TestData {
 
     /** Single bookmark with url, title, and timestamps. */
-    val SINGLE_BOOKMARK = """
+    val SINGLE_BOOKMARK =
+        """
         <!DOCTYPE NETSCAPE-Bookmark-file-1>
         <HTML>
         <DL><p>
           <DT><A HREF="https://example.com" ADD_DATE="1000" LAST_MODIFIED="2000">Example</A>
         </DL>
-    """.trimIndent()
+        """
+            .trimIndent()
 
     /** Single bookmark without ADD_DATE or LAST_MODIFIED attributes. */
-    val BOOKMARK_WITHOUT_TIMESTAMPS = """
+    val BOOKMARK_WITHOUT_TIMESTAMPS =
+        """
         <!DOCTYPE NETSCAPE-Bookmark-file-1>
         <HTML>
         <DL><p>
           <DT><A HREF="https://example.com">Example</A>
         </DL>
-    """.trimIndent()
+        """
+            .trimIndent()
 
     /** Bookmark with an empty href attribute. */
-    val BOOKMARK_EMPTY_HREF = """
+    val BOOKMARK_EMPTY_HREF =
+        """
         <!DOCTYPE NETSCAPE-Bookmark-file-1>
         <HTML>
         <DL><p>
           <DT><A HREF="">No URL</A>
         </DL>
-    """.trimIndent()
+        """
+            .trimIndent()
 
     /** Bookmark with an empty text node. */
-    val BOOKMARK_EMPTY_TEXT = """
+    val BOOKMARK_EMPTY_TEXT =
+        """
         <!DOCTYPE NETSCAPE-Bookmark-file-1>
         <HTML>
         <DL><p>
           <DT><A HREF="https://example.com"></A>
         </DL>
-    """.trimIndent()
+        """
+            .trimIndent()
 
     /** Multiple bookmarks at the same level. */
-    val MULTIPLE_BOOKMARKS = """
+    val MULTIPLE_BOOKMARKS =
+        """
         <!DOCTYPE NETSCAPE-Bookmark-file-1>
         <HTML>
         <DL><p>
@@ -50,10 +57,12 @@ object TestData {
           <DT><A HREF="https://two.com" ADD_DATE="300" LAST_MODIFIED="400">Two</A>
           <DT><A HREF="https://three.com" ADD_DATE="500" LAST_MODIFIED="600">Three</A>
         </DL>
-    """.trimIndent()
+        """
+            .trimIndent()
 
     /** Multiple bookmarks, folders, separators, and nesting levels. */
-    val MULTIPLE_BOOKMARKS_FOLDERS_SEPARATORS_LEVELS = """
+    val MULTIPLE_BOOKMARKS_FOLDERS_SEPARATORS_LEVELS =
+        """
         <!DOCTYPE NETSCAPE-Bookmark-file-1>
         <HTML>
         <DL><p>
@@ -74,10 +83,12 @@ object TestData {
           </DL><p>
           <DT><A HREF="https://last.com">Last Bookmark</A>
         </DL>
-    """.trimIndent()
+        """
+            .trimIndent()
 
     /** A folder containing a single bookmark, with timestamps on the folder. */
-    val FOLDER_WITH_BOOKMARK = """
+    val FOLDER_WITH_BOOKMARK =
+        """
         <!DOCTYPE NETSCAPE-Bookmark-file-1>
         <HTML>
         <DL><p>
@@ -86,10 +97,12 @@ object TestData {
             <DT><A HREF="https://example.com" ADD_DATE="300" LAST_MODIFIED="400">Example</A>
           </DL><p>
         </DL>
-    """.trimIndent()
+        """
+            .trimIndent()
 
     /** A folder with no timestamps. */
-    val FOLDER_WITHOUT_TIMESTAMPS = """
+    val FOLDER_WITHOUT_TIMESTAMPS =
+        """
         <!DOCTYPE NETSCAPE-Bookmark-file-1>
         <HTML>
         <DL><p>
@@ -98,10 +111,12 @@ object TestData {
             <DT><A HREF="https://example.com">Example</A>
           </DL><p>
         </DL>
-    """.trimIndent()
+        """
+            .trimIndent()
 
     /** An empty folder (no children). */
-    val EMPTY_FOLDER = """
+    val EMPTY_FOLDER =
+        """
         <!DOCTYPE NETSCAPE-Bookmark-file-1>
         <HTML>
         <DL><p>
@@ -109,10 +124,12 @@ object TestData {
           <DL><p>
           </DL><p>
         </DL>
-    """.trimIndent()
+        """
+            .trimIndent()
 
     /** Two levels of nested folders. */
-    val NESTED_FOLDERS = """
+    val NESTED_FOLDERS =
+        """
         <!DOCTYPE NETSCAPE-Bookmark-file-1>
         <HTML>
         <DL><p>
@@ -124,10 +141,12 @@ object TestData {
             </DL><p>
           </DL><p>
         </DL>
-    """.trimIndent()
+        """
+            .trimIndent()
 
     /** Three levels of nesting. */
-    val DEEPLY_NESTED_FOLDERS = """
+    val DEEPLY_NESTED_FOLDERS =
+        """
         <!DOCTYPE NETSCAPE-Bookmark-file-1>
         <HTML>
         <DL><p>
@@ -142,10 +161,12 @@ object TestData {
             </DL><p>
           </DL><p>
         </DL>
-    """.trimIndent()
+        """
+            .trimIndent()
 
     /** Separator between two bookmarks. */
-    val SEPARATOR_BETWEEN_BOOKMARKS = """
+    val SEPARATOR_BETWEEN_BOOKMARKS =
+        """
         <!DOCTYPE NETSCAPE-Bookmark-file-1>
         <HTML>
         <DL><p>
@@ -153,28 +174,34 @@ object TestData {
           <HR>
           <DT><A HREF="https://after.com">After</A>
         </DL>
-    """.trimIndent()
+        """
+            .trimIndent()
 
     /** Separator with timestamps. */
-    val SEPARATOR_WITH_TIMESTAMPS = """
+    val SEPARATOR_WITH_TIMESTAMPS =
+        """
         <!DOCTYPE NETSCAPE-Bookmark-file-1>
         <HTML>
         <DL><p>
           <HR ADD_DATE="1000" LAST_MODIFIED="2000">
         </DL>
-    """.trimIndent()
+        """
+            .trimIndent()
 
     /** Separator without timestamps. */
-    val SEPARATOR_WITHOUT_TIMESTAMPS = """
+    val SEPARATOR_WITHOUT_TIMESTAMPS =
+        """
         <!DOCTYPE NETSCAPE-Bookmark-file-1>
         <HTML>
         <DL><p>
           <HR>
         </DL>
-    """.trimIndent()
+        """
+            .trimIndent()
 
     /** Mix of bookmarks, a folder, and a separator at the same level. */
-    val MIXED_CONTENT = """
+    val MIXED_CONTENT =
+        """
         <!DOCTYPE NETSCAPE-Bookmark-file-1>
         <HTML>
         <DL><p>
@@ -186,17 +213,21 @@ object TestData {
           <HR>
           <DT><A HREF="https://last.com" ADD_DATE="50" LAST_MODIFIED="60">Last</A>
         </DL>
-    """.trimIndent()
+        """
+            .trimIndent()
 
-    /** Invalid bookmark HTML content **/
-    val INVALID_HTML_CONTENT = """
+    /** Invalid bookmark HTML content * */
+    val INVALID_HTML_CONTENT =
+        """
         "content" : {
           "body": "hi this is a json file"
         }
-    """.trimIndent()
+        """
+            .trimIndent()
 
-    /** Valid HTML content, but not a Netscape format **/
-    val VALID_HTML_BUT_INVALID_BOOKMARK_CONTENT = """
+    /** Valid HTML content, but not a Netscape format * */
+    val VALID_HTML_BUT_INVALID_BOOKMARK_CONTENT =
+        """
         <!DOCTYPE html>
         <html>
         <head><title>Just a regular page</title></head>
@@ -204,5 +235,6 @@ object TestData {
           <p>This is a normal HTML page, not a bookmarks file.</p>
         </body>
         </html>
-    """.trimIndent()
+        """
+            .trimIndent()
 }

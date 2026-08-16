@@ -259,19 +259,17 @@ export default class TurnOnScheduledBackups extends MozLitElement {
       detail.password = this._inputPassValue;
     }
 
-    if (this.embeddedFxBackupOptIn && this.backupIsEncrypted) {
-      if (!detail.password) {
-        this.dispatchEvent(
-          new CustomEvent("SpotlightOnboardingAdvanceScreens", {
-            bubbles: true,
-          })
-        );
-        return;
-      }
-
-      detail.parentDirPath =
-        this.backupServiceState?.embeddedComponentPersistentData?.path ||
-        detail.parentDirPath;
+    if (
+      this.embeddedFxBackupOptIn &&
+      this.backupIsEncrypted &&
+      !detail.password
+    ) {
+      this.dispatchEvent(
+        new CustomEvent("SpotlightOnboardingAdvanceScreens", {
+          bubbles: true,
+        })
+      );
+      return;
     }
 
     this._pendingConfirmDetail = detail;
@@ -279,7 +277,6 @@ export default class TurnOnScheduledBackups extends MozLitElement {
       new CustomEvent("BackupUI:ProbeDefaultBackupDir", {
         bubbles: true,
         composed: true,
-        detail: { parentDirPath: detail.parentDirPath },
       })
     );
   }

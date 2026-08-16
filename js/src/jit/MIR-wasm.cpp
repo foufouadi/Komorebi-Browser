@@ -882,6 +882,10 @@ bool MWasmResume::initHandler(size_t index, uint32_t tagInstanceDataOffset,
   handlers_[index].resultsAreaOffset = resultsAreaOffset;
   return true;
 }
+
+AliasSet MWasmSuspend::getAliasSet() const {
+  return MWasmCallBase::wasmCallAliasSet();
+}
 #endif  // ENABLE_WASM_JSPI
 
 MIonToWasmCall* MIonToWasmCall::New(TempAllocator& alloc,

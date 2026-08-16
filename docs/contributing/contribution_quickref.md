@@ -1,3 +1,5 @@
+(firefox-contributors-quick-reference)=
+
 # Firefox Contributors' Quick Reference
 
 Some parts of this process, including cloning and compiling, can take a long time even on modern hardware.

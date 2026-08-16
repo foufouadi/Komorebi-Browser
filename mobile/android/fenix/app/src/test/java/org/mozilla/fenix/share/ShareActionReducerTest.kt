@@ -14,10 +14,11 @@ class ShareActionReducerTest {
     fun `WHEN ShareToAppFailed action is dispatched THEN snackbar state is updated`() {
         val initialState = AppState()
 
-        val finalState = AppStoreReducer.reduce(
-            initialState,
-            AppAction.ShareAction.ShareToAppFailed,
-        )
+        val finalState =
+            AppStoreReducer.reduce(
+                initialState,
+                AppAction.ShareAction.ShareToAppFailed,
+            )
 
         assertEquals(
             SnackbarState.ShareToAppFailed,
@@ -31,10 +32,11 @@ class ShareActionReducerTest {
         val tabs = listOf(mockk<TabData>(), mockk<TabData>())
         val initialState = AppState()
 
-        val finalState = AppStoreReducer.reduce(
-            initialState,
-            AppAction.ShareAction.SharedTabsSuccessfully(destination, tabs),
-        )
+        val finalState =
+            AppStoreReducer.reduce(
+                initialState,
+                AppAction.ShareAction.SharedTabsSuccessfully(destination, tabs),
+            )
 
         assertEquals(
             SnackbarState.SharedTabsSuccessfully(destination, tabs),
@@ -48,10 +50,11 @@ class ShareActionReducerTest {
         val tabs = listOf(mockk<TabData>(), mockk<TabData>())
         val initialState = AppState()
 
-        val finalState = AppStoreReducer.reduce(
-            initialState,
-            AppAction.ShareAction.ShareTabsFailed(destination, tabs),
-        )
+        val finalState =
+            AppStoreReducer.reduce(
+                initialState,
+                AppAction.ShareAction.ShareTabsFailed(destination, tabs),
+            )
 
         assertEquals(
             SnackbarState.ShareTabsFailed(destination, tabs),
@@ -63,10 +66,11 @@ class ShareActionReducerTest {
     fun `WHEN CopyLinkToClipboard action is dispatched THEN snackbar state is updated`() {
         val initialState = AppState()
 
-        val finalState = AppStoreReducer.reduce(
-            initialState,
-            AppAction.ShareAction.CopyLinkToClipboard,
-        )
+        val finalState =
+            AppStoreReducer.reduce(
+                initialState,
+                AppAction.ShareAction.CopyLinkToClipboard,
+            )
 
         assertEquals(
             SnackbarState.CopyLinkToClipboard,

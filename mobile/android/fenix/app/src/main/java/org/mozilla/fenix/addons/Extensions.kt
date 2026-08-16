@@ -28,12 +28,14 @@ internal fun showSnackBar(
     duration: SnackbarState.Duration = SnackbarState.Duration.Preset.Short,
 ) {
     Snackbar.make(
-        snackBarParentView = view,
-        snackbarState = SnackbarState(
-            message = text,
-            duration = duration,
-        ),
-    ).show()
+            snackBarParentView = view,
+            snackbarState =
+                SnackbarState(
+                    message = text,
+                    duration = duration,
+                ),
+        )
+        .show()
 }
 
 internal fun View.openLearnMoreLink(

@@ -4,17 +4,18 @@
 
 package mozilla.components.support.base.utils
 
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 
 class LazyComponentTest {
 
-    private val initCount: Int get() = LazyComponent.initCount.get()
+    private val initCount: Int
+        get() = LazyComponent.initCount.get()
 
     @Before
     fun setUp() {

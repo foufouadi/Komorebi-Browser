@@ -50,9 +50,7 @@ fun SelectAccountDialog(
     colors: DialogColors = DialogColors.default(),
     onAccountClick: (Account) -> Unit,
 ) {
-    Column(
-        modifier = modifier.fillMaxWidth(),
-    ) {
+    Column(modifier = modifier.fillMaxWidth()) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(16.dp),
@@ -62,24 +60,25 @@ fun SelectAccountDialog(
                     bitmap = it,
                     contentDescription = null,
                     contentScale = ContentScale.FillWidth,
-                    modifier = Modifier
-                        .size(16.dp),
+                    modifier = Modifier.size(16.dp),
                 )
 
                 Spacer(Modifier.width(4.dp))
             }
 
             Text(
-                text = stringResource(
-                    id = R.string.mozac_feature_prompts_identity_credentials_choose_account_for_provider,
-                    provider.name,
-                ),
-                style = TextStyle(
-                    fontSize = 16.sp,
-                    lineHeight = 24.sp,
-                    color = colors.title,
-                    letterSpacing = 0.15.sp,
-                ),
+                text =
+                    stringResource(
+                        id = R.string.mozac_feature_prompts_identity_credentials_choose_account_for_provider,
+                        provider.name,
+                    ),
+                style =
+                    TextStyle(
+                        fontSize = 16.sp,
+                        lineHeight = 24.sp,
+                        color = colors.title,
+                        letterSpacing = 0.15.sp,
+                    ),
             )
         }
 
@@ -110,15 +109,9 @@ private fun AccountItem(
                 bitmap = bitmap,
                 contentDescription = null,
                 contentScale = ContentScale.FillWidth,
-                modifier = Modifier
-                    .padding(horizontal = 16.dp)
-                    .size(32.dp),
+                modifier = Modifier.padding(horizontal = 16.dp).size(32.dp),
             )
-        } ?: Spacer(
-            Modifier
-                .padding(horizontal = 16.dp)
-                .width(32.dp),
-        )
+        } ?: Spacer(Modifier.padding(horizontal = 16.dp).width(32.dp))
     }
 }
 
@@ -127,12 +120,13 @@ private fun AccountItem(
 private fun AccountItemPreview() {
     AccountItem(
         modifier = Modifier.background(Color.White),
-        account = Account(
-            0,
-            "user@mozilla.com",
-            "User",
-            USER_PICTURE,
-        ),
+        account =
+            Account(
+                0,
+                "user@mozilla.com",
+                "User",
+                USER_PICTURE,
+            ),
         onClick = {},
     )
 }
@@ -143,22 +137,23 @@ private fun SelectAccountDialogPreview() {
     DialogPreviewMaterialTheme {
         SelectAccountDialog(
             provider = Provider(0, GOOGLE_FAVICON, "Google", "google.com"),
-            accounts = listOf(
-                Account(
-                    0,
-                    "user@mozilla.com",
-                    "User",
-                    USER_PICTURE,
+            accounts =
+                listOf(
+                    Account(
+                        0,
+                        "user@mozilla.com",
+                        "User",
+                        USER_PICTURE,
+                    ),
+                    Account(
+                        1,
+                        "user2@mozilla.com",
+                        "Google",
+                        null,
+                    ),
                 ),
-                Account(
-                    1,
-                    "user2@mozilla.com",
-                    "Google",
-                    null,
-                ),
-            ),
             modifier = Modifier.background(Color.White),
-            onAccountClick = { },
+            onAccountClick = {},
         )
     }
 }

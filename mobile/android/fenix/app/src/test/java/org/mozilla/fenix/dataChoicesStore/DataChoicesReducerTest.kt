@@ -11,13 +11,14 @@ import org.mozilla.fenix.settings.datachoices.dataChoicesReducer
 
 class DataChoicesReducerTest {
 
-    private val defaultState = DataChoicesState(
-        telemetryEnabled = false,
-        measurementDataEnabled = false,
-        usagePingEnabled = false,
-        studiesEnabled = false,
-        selectedCrashOption = CrashReportOption.Ask,
-    )
+    private val defaultState =
+        DataChoicesState(
+            telemetryEnabled = false,
+            measurementDataEnabled = false,
+            usagePingEnabled = false,
+            studiesEnabled = false,
+            selectedCrashOption = CrashReportOption.Ask,
+        )
 
     @Test
     fun `when telemetry is clicked then the state of telemetry is toggled`() {
@@ -49,14 +50,15 @@ class DataChoicesReducerTest {
 
     @Test
     fun `when settings are loaded then the entire settings state is replaced`() {
-        val action = SettingsLoaded(
-            telemetryEnabled = true,
-            usagePingEnabled = true,
-            studiesEnabled = true,
-            showMeasurementDataSection = true,
-            measurementDataEnabled = true,
-            crashReportOption = CrashReportOption.Never,
-        )
+        val action =
+            SettingsLoaded(
+                telemetryEnabled = true,
+                usagePingEnabled = true,
+                studiesEnabled = true,
+                showMeasurementDataSection = true,
+                measurementDataEnabled = true,
+                crashReportOption = CrashReportOption.Never,
+            )
         val after = dataChoicesReducer(defaultState, action)
         assertEquals(true, after.telemetryEnabled)
         assertEquals(true, after.usagePingEnabled)

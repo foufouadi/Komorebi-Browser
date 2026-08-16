@@ -23,17 +23,15 @@ import org.mozilla.fenix.components.LogMiddleware
 import org.mozilla.fenix.utils.Settings
 
 /**
- * Auth sources for IP Protection. Bundles the providers that supply credentials
- * to the underlying [IPProtectionFeature].
+ * Auth sources for IP Protection. Bundles the providers that supply credentials to the underlying
+ * [IPProtectionFeature].
  */
 data class IPProtectionAuthSources(
     val fxaAccountManager: Lazy<FxaAccountManager>,
     val integrityClient: Lazy<GooglePlayIntegrityClient>,
 )
 
-/**
- * Provides access to IP Protection related components.
- */
+/** Provides access to IP Protection related components. */
 @Suppress("LongParameterList")
 class IPProtection(
     val engine: Engine,
@@ -46,19 +44,20 @@ class IPProtection(
 ) {
     val store by lazy {
         IPProtectionStore(
-            middleware = listOf(
-                LogMiddleware(
-                    shouldIncludeDetailedData = { Config.channel.isDebug },
-                    // tag has a max line-length; the rest of the default was unhelpful.
-                    logger = Logger("IPPStore"),
-                ),
-                IPProtectionSnackbarMiddleware(
-                    lazyAppStore = lazyAppStore,
-                    messages = snackbarMessages,
-                ),
-                IPProtectionTelemetryMiddleware(),
-                IPProtectionPreferencesMiddleware(DefaultIPProtectionRepository(settings)),
-            ),
+            middleware =
+                listOf(
+                    LogMiddleware(
+                        shouldIncludeDetailedData = { Config.channel.isDebug },
+                        // tag has a max line-length; the rest of the default was unhelpful.
+                        logger = Logger("IPPStore"),
+                    ),
+                    IPProtectionSnackbarMiddleware(
+                        lazyAppStore = lazyAppStore,
+                        messages = snackbarMessages,
+                    ),
+                    IPProtectionTelemetryMiddleware(),
+                    IPProtectionPreferencesMiddleware(DefaultIPProtectionRepository(settings)),
+                )
         )
     }
 
@@ -95,9 +94,7 @@ class IPProtection(
 
     private val snackbarMessages by lazy {
         IPProtectionSnackbarMessages(
-            connectionError = context.getString(
-                R.string.ip_protection_connection_error_snackbar,
-            ),
+            connectionError = context.getString(R.string.ip_protection_connection_error_snackbar)
         )
     }
 }

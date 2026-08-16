@@ -1,18 +1,21 @@
 package org.mozilla.fenix.components.metrics
 
+import java.util.Calendar
+import java.util.Locale
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.util.Calendar
-import java.util.Locale
 
 class InstallAgeTest {
     private val dayMillis: Long = 1000 * 60 * 60 * 24
 
-    private val installedTime: Long = Calendar.getInstance(Locale.US).apply {
-        set(2026, Calendar.FEBRUARY, 6, 12, 0, 0)
-        set(Calendar.MILLISECOND, 0)
-    }.timeInMillis
+    private val installedTime: Long =
+        Calendar.getInstance(Locale.US)
+            .apply {
+                set(2026, Calendar.FEBRUARY, 6, 12, 0, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            .timeInMillis
 
     private val installAge = InstallAge(installedTime)
 

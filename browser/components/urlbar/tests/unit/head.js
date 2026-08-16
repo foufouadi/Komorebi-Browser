@@ -638,7 +638,7 @@ function makeTabSwitchResult(
     title,
     // Check against undefined so consumers can pass in the empty string.
     icon: typeof iconUri != "undefined" ? iconUri : `page-icon:${uri}`,
-    userContextId: userContextId || 0,
+    userContext: UrlbarUtils.getUserContextData(userContextId || 0),
     tabGroup,
   };
 

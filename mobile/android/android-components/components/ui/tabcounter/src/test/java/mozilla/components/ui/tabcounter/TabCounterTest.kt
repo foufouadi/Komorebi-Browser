@@ -30,8 +30,7 @@ class TabCounterTest {
     @Before
     fun setUp() {
         tabCounter = TabCounterView(testContext)
-        binding =
-            MozacUiTabcounterLayoutBinding.inflate(LayoutInflater.from(testContext), tabCounter)
+        binding = MozacUiTabcounterLayoutBinding.inflate(LayoutInflater.from(testContext), tabCounter)
     }
 
     @Test
@@ -69,7 +68,8 @@ class TabCounterTest {
     @Test
     fun `Setting tab count as three digit value shows correct icon`() {
         tabCounter.setCount(100)
-        val expectedIcon = ContextCompat.getDrawable(testContext, R.drawable.mozac_ui_infinite_tabcounter_box)?.toBitmap()
+        val expectedIcon =
+            ContextCompat.getDrawable(testContext, R.drawable.mozac_ui_infinite_tabcounter_box)?.toBitmap()
         val actualIcon = binding.counterBox.background.toBitmap()
 
         assertTrue(actualIcon.sameAs(expectedIcon))

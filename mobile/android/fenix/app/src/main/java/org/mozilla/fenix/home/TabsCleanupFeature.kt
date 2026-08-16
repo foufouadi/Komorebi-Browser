@@ -57,9 +57,7 @@ class TabsCleanupFeature(
     private val viewLifecycleScope: CoroutineScope,
 ) : LifecycleAwareFeature {
 
-    /**
-     * Removes the sessions that have been queued for deletion when the home screen is started.
-     */
+    /** Removes the sessions that have been queued for deletion when the home screen is started. */
     override fun start() {
         viewModel.sessionToDelete?.also {
             if (it == ALL_NORMAL_TABS || it == ALL_PRIVATE_TABS) {
@@ -95,11 +93,12 @@ class TabsCleanupFeature(
     private fun removeAllTabsAndShowSnackbar(sessionCode: String) {
         val isPrivate = sessionCode == ALL_PRIVATE_TABS
 
-        val tabsCount = if (isPrivate) {
-            browserStore.state.privateTabs.size
-        } else {
-            browserStore.state.normalTabs.size
-        }
+        val tabsCount =
+            if (isPrivate) {
+                browserStore.state.privateTabs.size
+            } else {
+                browserStore.state.normalTabs.size
+            }
 
         if (isPrivate) {
             tabsUseCases.removePrivateTabs()
@@ -112,15 +111,11 @@ class TabsCleanupFeature(
             // Add a new tab after all the tabs are removed to ensure there's always 1 tab.
             // Hold onto the new tab ID so that the new tab can be removed if the tabs are restored
             // by the undo action.
-            tabId = fenixBrowserUseCases.addNewHomepageTab(
-                private = browsingModeManager.mode.isPrivate,
-            )
+            tabId = fenixBrowserUseCases.addNewHomepageTab(private = browsingModeManager.mode.isPrivate)
         }
 
         showUndoSnackbar(
-            message = context.tabsClosedUndoMessage(
-                count = tabsCount,
-            ),
+            message = context.tabsClosedUndoMessage(count = tabsCount),
             onCancel = {
                 onUndoAllTabsRemoved(tabId)
             },
@@ -130,8 +125,7 @@ class TabsCleanupFeature(
     /**
      * Callback invoked when the remove all tabs action is cancelled.
      *
-     * @param tabId Optional ID of the tab that should be removed after the tab removal is
-     * undone.
+     * @param tabId Optional ID of the tab that should be removed after the tab removal is undone.
      */
     @VisibleForTesting
     internal fun onUndoAllTabsRemoved(tabId: String?) {
@@ -140,9 +134,7 @@ class TabsCleanupFeature(
         if (tabId?.isNotBlank() == true) {
             tabsUseCases.removeTab.invoke(tabId)
         }
-        navController.navigate(
-            HomeFragmentDirections.actionGlobalBrowser(null),
-        )
+        navController.navigate(HomeFragmentDirections.actionGlobalBrowser(null))
     }
 
     private fun removeTabAndShowSnackbar(sessionId: String) {
@@ -150,11 +142,12 @@ class TabsCleanupFeature(
         val isPrivate = browsingModeManager.mode.isPrivate
 
         // Check if this is the last tab being removed.
-        val hasTabsRemaining = if (isPrivate) {
-            browserStore.state.privateTabs.size > 1
-        } else {
-            browserStore.state.normalTabs.size > 1
-        }
+        val hasTabsRemaining =
+            if (isPrivate) {
+                browserStore.state.privateTabs.size > 1
+            } else {
+                browserStore.state.normalTabs.size > 1
+            }
 
         val inactiveTabs = browserStore.state.actualInactiveTabs(settings = settings)
 
@@ -165,9 +158,7 @@ class TabsCleanupFeature(
             // Add a new tab if the last tab is being removed to ensure there's always 1 tab.
             // Hold onto the new tab ID so that the new tab can be removed if the tabs are restored
             // by the undo action.
-            tabId = fenixBrowserUseCases.addNewHomepageTab(
-                private = isPrivate,
-            )
+            tabId = fenixBrowserUseCases.addNewHomepageTab(private = isPrivate)
         }
 
         showUndoSnackbar(

@@ -32,10 +32,10 @@ import mozilla.components.compose.browser.toolbar.concept.Action.SearchSelectorA
 import mozilla.components.compose.browser.toolbar.concept.Action.SearchSelectorAction.Icon.DrawableResIcon
 import mozilla.components.compose.browser.toolbar.concept.Action.TabCounterAction
 import mozilla.components.compose.browser.toolbar.store.BrowserToolbarInteraction.BrowserToolbarEvent
+import mozilla.components.compose.browser.toolbar.ui.ActionButton as ActionButtonComposable
 import mozilla.components.compose.browser.toolbar.ui.AnimatedPillButton
 import mozilla.components.compose.browser.toolbar.ui.SearchSelector
 import mozilla.components.compose.browser.toolbar.ui.TabCounter
-import mozilla.components.compose.browser.toolbar.ui.ActionButton as ActionButtonComposable
 import mozilla.components.ui.icons.R as iconsR
 
 /**
@@ -168,8 +168,7 @@ private fun ActionButtonRes.iconDrawable(): Drawable? {
     val tint = MaterialTheme.colorScheme.onSurface
 
     return remember(this, context, tint) {
-        AppCompatResources.getDrawable(context, drawableResId)
-            ?.apply { mutate().setTint(tint.toArgb()) }
+        AppCompatResources.getDrawable(context, drawableResId)?.apply { mutate().setTint(tint.toArgb()) }
     }
 }
 
@@ -202,23 +201,25 @@ private fun ActionButton.iconDrawable(): Drawable? {
 
 @Composable
 @ReadOnlyComposable
-private fun SearchSelectorAction.contentDescription() = when (contentDescription) {
-    is StringContentDescription -> contentDescription.text
-    is StringResContentDescription -> stringResource(contentDescription.resourceId)
-}
+private fun SearchSelectorAction.contentDescription() =
+    when (contentDescription) {
+        is StringContentDescription -> contentDescription.text
+        is StringResContentDescription -> stringResource(contentDescription.resourceId)
+    }
 
 @Composable
 private fun SearchSelectorAction.iconDrawable(): Drawable? {
     val context = LocalContext.current
     val tint = MaterialTheme.colorScheme.onSurface
 
-    val drawable = remember(this, context, tint) {
-        when (icon) {
-            is DrawableIcon -> icon.drawable
-            is DrawableResIcon -> AppCompatResources.getDrawable(context, icon.resourceId)
-                ?.apply { setTint(tint.toArgb()) }
+    val drawable =
+        remember(this, context, tint) {
+            when (icon) {
+                is DrawableIcon -> icon.drawable
+                is DrawableResIcon ->
+                    AppCompatResources.getDrawable(context, icon.resourceId)?.apply { setTint(tint.toArgb()) }
+            }
         }
-    }
     return drawable
 }
 
@@ -227,38 +228,40 @@ private fun SearchSelectorAction.iconDrawable(): Drawable? {
 private fun ActionContainerPreview() {
     AcornTheme {
         ActionContainer(
-            actions = listOf(
-                SearchSelectorAction(
-                    icon = DrawableResIcon(iconsR.drawable.mozac_ic_search_24),
-                    contentDescription = StringContentDescription("Change search engine for this search"),
-                    menu = { emptyList() },
-                    onClick = null,
+            actions =
+                listOf(
+                    SearchSelectorAction(
+                        icon = DrawableResIcon(iconsR.drawable.mozac_ic_search_24),
+                        contentDescription = StringContentDescription("Change search engine for this search"),
+                        menu = { emptyList() },
+                        onClick = null,
+                    ),
+                    ActionButtonRes(
+                        drawableResId = iconsR.drawable.mozac_ic_microphone_24,
+                        contentDescription = R.string.mozac_clear_button_description,
+                        onClick = object : BrowserToolbarEvent {},
+                    ),
+                    ActionButton(
+                        drawable =
+                            AppCompatResources.getDrawable(LocalContext.current, iconsR.drawable.mozac_ic_tool_24),
+                        contentDescription = stringResource(R.string.mozac_clear_button_description),
+                        onClick = object : BrowserToolbarEvent {},
+                    ),
+                    TabCounterAction(
+                        count = 1,
+                        contentDescription = "",
+                        showPrivacyMask = false,
+                        onClick = object : BrowserToolbarEvent {},
+                    ),
+                    AnimatedPillActionRes(
+                        iconResId = iconsR.drawable.mozac_ic_shield_checkmark_24,
+                        overlayResId = iconsR.drawable.mozac_ic_globe_24,
+                        textResId = R.string.mozac_clear_button_description,
+                        contentDescriptionResId = R.string.mozac_clear_button_description,
+                        highlighted = true,
+                        onClick = object : BrowserToolbarEvent {},
+                    ),
                 ),
-                ActionButtonRes(
-                    drawableResId = iconsR.drawable.mozac_ic_microphone_24,
-                    contentDescription = R.string.mozac_clear_button_description,
-                    onClick = object : BrowserToolbarEvent {},
-                ),
-                ActionButton(
-                    drawable = AppCompatResources.getDrawable(LocalContext.current, iconsR.drawable.mozac_ic_tool_24),
-                    contentDescription = stringResource(R.string.mozac_clear_button_description),
-                    onClick = object : BrowserToolbarEvent {},
-                ),
-                TabCounterAction(
-                    count = 1,
-                    contentDescription = "",
-                    showPrivacyMask = false,
-                    onClick = object : BrowserToolbarEvent {},
-                ),
-                AnimatedPillActionRes(
-                    iconResId = iconsR.drawable.mozac_ic_shield_checkmark_24,
-                    overlayResId = iconsR.drawable.mozac_ic_globe_24,
-                    textResId = R.string.mozac_clear_button_description,
-                    contentDescriptionResId = R.string.mozac_clear_button_description,
-                    highlighted = true,
-                    onClick = object : BrowserToolbarEvent {},
-                ),
-            ),
             onInteraction = {},
             modifier = Modifier.background(color = MaterialTheme.colorScheme.surfaceContainerHighest),
         )

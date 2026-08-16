@@ -22,12 +22,13 @@ class SystemSettingsPage(composeRule: AndroidComposeTestRule<HomeActivityIntentT
         NavigationRegistry.register(
             from = "HomePage",
             to = pageName,
-            steps = listOf(
-                NavigationStep.Click(HomeSelectors.MAIN_MENU_BUTTON),
-                NavigationStep.Click(MainMenuSelectors.SETTINGS_BUTTON),
-                NavigationStep.Swipe(SettingsSelectors.NOTIFICATIONS_BUTTON),
-                NavigationStep.Click(SettingsSelectors.NOTIFICATIONS_BUTTON),
-            ),
+            steps =
+                listOf(
+                    NavigationStep.Click(HomeSelectors.MAIN_MENU_BUTTON),
+                    NavigationStep.Click(MainMenuSelectors.SETTINGS_BUTTON),
+                    NavigationStep.Swipe(SettingsSelectors.NOTIFICATIONS_BUTTON),
+                    NavigationStep.Click(SettingsSelectors.NOTIFICATIONS_BUTTON),
+                ),
         )
     }
 

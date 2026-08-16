@@ -4,15 +4,14 @@
 
 package org.mozilla.fenix.ui.efficiency.logging
 
-import org.json.JSONObject
 import java.io.File
 import java.util.Date
+import org.json.JSONObject
 
 /**
  * Appends structured **newline-delimited JSON** (JSONL) events to a file.
  *
- * Each call to [event] writes exactly one JSON object per line,
- * injecting a millisecond-resolution `"ts"` timestamp.
+ * Each call to [event] writes exactly one JSON object per line, injecting a millisecond-resolution `"ts"` timestamp.
  * This format is easy to stream, parse, or index with log tools.
  *
  * Example line:
@@ -20,16 +19,16 @@ import java.util.Date
  * {"type":"stepEnd","stepId":"presence-0","result":"PASS","ts":1731000000000}
  * ```
  *
- * This sink is **best-effort**: any I/O or serialization failure is caught and
- * logged to Logcat, never propagated to the caller, ensuring tests continue.
+ * This sink is **best-effort**: any I/O or serialization failure is caught and logged to Logcat, never propagated to
+ * the caller, ensuring tests continue.
  */
 class JsonSink(private val file: File) {
 
     /**
      * Serializes [map] to JSON, injects `"ts"` (epoch millis), and appends a line.
      *
-     * Thread-safe: synchronized to avoid interleaved writes from parallel tests
-     * within the same process (AndroidX can run multiple tests in one instrumentation).
+     * Thread-safe: synchronized to avoid interleaved writes from parallel tests within the same process (AndroidX can
+     * run multiple tests in one instrumentation).
      *
      * Exceptions are caught and logged at WARN level to prevent test interruption.
      */

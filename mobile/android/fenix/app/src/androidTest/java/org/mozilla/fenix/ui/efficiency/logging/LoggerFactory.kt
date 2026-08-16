@@ -14,11 +14,11 @@ import java.io.File
  * - [SummarySink]: human-readable, line-oriented log (`summary.log`)
  * - [JsonSink]: machine-readable, newline-delimited JSON (`details.jsonl`)
  *
- *  This logger is **best-effort**: any sink failure is swallowed and logged to Logcat
- *  so logging can never crash a test or mask the root failure.
+ * This logger is **best-effort**: any sink failure is swallowed and logged to Logcat so logging can never crash a test
+ * or mask the root failure.
  *
- * This class implements the [StepLogger] interface used by factories so
- * calling code does not care about concrete sinks or file layout.
+ * This class implements the [StepLogger] interface used by factories so calling code does not care about concrete sinks
+ * or file layout.
  */
 class CombinedLogger(
     private val summary: SummarySink,
@@ -26,8 +26,8 @@ class CombinedLogger(
 ) : StepLogger {
 
     /**
-     * Executes [fn] and swallows any Throwable raised by sinks, logging a WARN.
-     * This ensures logging never interferes with test execution.
+     * Executes [fn] and swallows any Throwable raised by sinks, logging a WARN. This ensures logging never interferes
+     * with test execution.
      */
     private fun swallow(phase: String, fn: () -> Unit) {
         try {
@@ -69,7 +69,7 @@ class CombinedLogger(
                     "name" to step.name,
                     "result" to status,
                     "reason" to (result as? StepResult.Fail)?.reason,
-                ),
+                )
             )
         }
     }
@@ -94,10 +94,7 @@ class CombinedLogger(
         }
     }
 
-    /**
-     * Attaches a screenshot path to both sinks so consumers
-     * (humans + machines) can correlate imagery with a step.
-     */
+    /** Attaches a screenshot path to both sinks so consumers (humans + machines) can correlate imagery with a step. */
     override fun attachScreenshot(step: StepDescriptor, path: String) {
         swallow("screenshot:summary") { summary.line("[SHOT] ${step.name} → $path") }
         swallow("screenshot:json") { json.event(mapOf("type" to "screenshot", "stepId" to step.id, "path" to path)) }
@@ -121,14 +118,12 @@ object LoggerFactory {
     /**
      * Create a [StepLogger] and initialize the artifacts root for this run.
      *
-     * The method prefers external app storage, then falls back to internal storage,
-     * and finally to an internal fallback directory if needed. If sink setup fails,
-     * a **no-op** logger is returned so tests continue to run.
+     * The method prefers external app storage, then falls back to internal storage, and finally to an internal fallback
+     * directory if needed. If sink setup fails, a **no-op** logger is returned so tests continue to run.
      *
-     * @param runId Optional run identifier used as the artifacts directory name (sanitized).
-     *              Defaults to current epoch millis for uniqueness.
-     * @param ctx Optional Android context; defaults to instrumentation target context
-     *            via [InstrumentationRegistry].
+     * @param runId Optional run identifier used as the artifacts directory name (sanitized). Defaults to current epoch
+     *   millis for uniqueness.
+     * @param ctx Optional Android context; defaults to instrumentation target context via [InstrumentationRegistry].
      */
     fun create(
         runId: String = System.currentTimeMillis().toString(),
@@ -138,21 +133,25 @@ object LoggerFactory {
         val safeRunId = runId.replace("""[^\w.\-]+""".toRegex(), "_")
 
         // Choose a base storage root (prefer external, fall back to internal)
-        val externalBase: File? = try {
-            appCtx.getExternalFilesDir(null)
-        } catch (_: Throwable) {
-            null
-        }
+        val externalBase: File? =
+            try {
+                appCtx.getExternalFilesDir(null)
+            } catch (_: Throwable) {
+                null
+            }
         val internalBase: File = appCtx.filesDir
 
         // Try external/artifacts/<runId>, else internal/artifacts/<runId>, else internal fallback.
-        val candidateRoots = sequenceOf(
-            (externalBase ?: internalBase) to "preferred",
-            internalBase to "internal",
-        ).map { (base, label) ->
-            val dir = File(base, "artifacts/$safeRunId")
-            label to dir
-        }.toList()
+        val candidateRoots =
+            sequenceOf(
+                    (externalBase ?: internalBase) to "preferred",
+                    internalBase to "internal",
+                )
+                .map { (base, label) ->
+                    val dir = File(base, "artifacts/$safeRunId")
+                    label to dir
+                }
+                .toList()
 
         val root: File = run {
             var chosen: File? = null
@@ -169,10 +168,11 @@ object LoggerFactory {
                     android.util.Log.w("LoggerFactory", "Failed creating ${dir.absolutePath}: ${t.message}", t)
                 }
             }
-            chosen ?: File(internalBase, "artifacts/_fallback_${System.currentTimeMillis()}").apply {
-                mkdirs()
-                android.util.Log.w("LoggerFactory", "Using fallback artifacts root: $absolutePath")
-            }
+            chosen
+                ?: File(internalBase, "artifacts/_fallback_${System.currentTimeMillis()}").apply {
+                    mkdirs()
+                    android.util.Log.w("LoggerFactory", "Using fallback artifacts root: $absolutePath")
+                }
         }
 
         // Initialize artifact manager safely
@@ -195,14 +195,22 @@ object LoggerFactory {
     }
 
     /** Minimal logger that never writes; used when sinks cannot be initialized. */
-    private fun noOpLogger(): StepLogger = object : StepLogger {
-        override fun testStart(testId: String, meta: Map<String, Any?>) {}
-        override fun testEnd(testId: String, status: TestStatus) {}
-        override fun stepStart(step: StepDescriptor) {}
-        override fun stepEnd(step: StepDescriptor, result: StepResult) {}
-        override fun info(msg: String, kv: Map<String, Any?>) {}
-        override fun warn(msg: String, kv: Map<String, Any?>) {}
-        override fun error(msg: String, kv: Map<String, Any?>, throwable: Throwable?) {}
-        override fun attachScreenshot(step: StepDescriptor, path: String) {}
-    }
+    private fun noOpLogger(): StepLogger =
+        object : StepLogger {
+            override fun testStart(testId: String, meta: Map<String, Any?>) {}
+
+            override fun testEnd(testId: String, status: TestStatus) {}
+
+            override fun stepStart(step: StepDescriptor) {}
+
+            override fun stepEnd(step: StepDescriptor, result: StepResult) {}
+
+            override fun info(msg: String, kv: Map<String, Any?>) {}
+
+            override fun warn(msg: String, kv: Map<String, Any?>) {}
+
+            override fun error(msg: String, kv: Map<String, Any?>, throwable: Throwable?) {}
+
+            override fun attachScreenshot(step: StepDescriptor, path: String) {}
+        }
 }

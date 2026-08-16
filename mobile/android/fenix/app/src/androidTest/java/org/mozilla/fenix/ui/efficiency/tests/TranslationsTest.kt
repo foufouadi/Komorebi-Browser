@@ -15,7 +15,8 @@ import org.mozilla.fenix.ui.efficiency.selectors.MainMenuSelectors
 
 class TranslationsTest : BaseTest(isPageLoadTranslationsPromptEnabled = true) {
 
-    private val mockWebServer get() = fenixTestRule.mockWebServer
+    private val mockWebServer
+        get() = fenixTestRule.mockWebServer
 
     @SmokeTest
     @Test
@@ -23,7 +24,8 @@ class TranslationsTest : BaseTest(isPageLoadTranslationsPromptEnabled = true) {
         val testPage = mockWebServer.firstForeignWebPageAsset
         val url = testPage.url.toString()
 
-        on.browserPage.navigateToPage(url)
+        on.browserPage
+            .navigateToPage(url)
             .verifyTranslationSheetWithReload(url)
             .mozClickIfPresent(BrowserPageSelectors.TRANSLATION_SHEET_NOT_NOW_BUTTON)
             .mozWaitUntilAbsent(BrowserPageSelectors.TRANSLATION_SHEET_NOT_NOW_BUTTON, TestAssetHelper.waitingTimeLong)
@@ -47,7 +49,8 @@ class TranslationsTest : BaseTest(isPageLoadTranslationsPromptEnabled = true) {
         val testPage = mockWebServer.firstForeignWebPageAsset
         val url = testPage.url.toString()
 
-        on.browserPage.navigateToPage(url)
+        on.browserPage
+            .navigateToPage(url)
             .verifyTranslationSheetWithReload(url)
             .mozClickIfPresent(BrowserPageSelectors.TRANSLATION_SHEET_NOT_NOW_BUTTON)
         on.browserPage
@@ -56,8 +59,10 @@ class TranslationsTest : BaseTest(isPageLoadTranslationsPromptEnabled = true) {
             .mozClick(MainMenuSelectors.TRANSLATE_BUTTON)
             .mozVerifyElementsByGroup("notTranslatedPageTranslationSheet")
             .mozClickIfPresent(BrowserPageSelectors.TRANSLATION_SHEET_TRANSLATE_BUTTON)
-            .mozWaitUntilAbsent(BrowserPageSelectors.TRANSLATION_SHEET_TRANSLATE_BUTTON, TestAssetHelper.waitingTimeLong)
-        on.browserPage
-            .verifyPageContent("Article of the day")
+            .mozWaitUntilAbsent(
+                BrowserPageSelectors.TRANSLATION_SHEET_TRANSLATE_BUTTON,
+                TestAssetHelper.waitingTimeLong,
+            )
+        on.browserPage.verifyPageContent("Article of the day")
     }
 }

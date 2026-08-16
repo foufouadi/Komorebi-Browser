@@ -1340,6 +1340,37 @@ export var UrlbarUtils = {
   },
 
   /**
+   * Builds the `userContext` payload of a tab-switch result: the container id
+   * the tab lives in, plus the container's display data, resolved here because
+   * the view can't reach ContextualIdentityService.
+   *
+   * @param {number} userContextId
+   *   The container id for the tab.
+   * @returns {{id: number, label?: string, color?: string, iconUrl?: string}}
+   *   The display data is absent when the id has no public identity. The label
+   *   is trimmed.
+   */
+  getUserContextData(userContextId) {
+    let identity =
+      lazy.ContextualIdentityService.getPublicIdentityFromId(userContextId);
+    if (!identity) {
+      return { id: userContextId };
+    }
+
+    return {
+      id: userContextId,
+      label:
+        lazy.ContextualIdentityService.getUserContextLabel(
+          userContextId
+        ).trim(),
+      color: identity.color,
+      iconUrl: lazy.ContextualIdentityService.getContainerIconURL(
+        identity.icon
+      ),
+    };
+  },
+
+  /**
    * Gets the URL bar element that should be focused for the given window.
    * Returns window.gURLBar for regular browser windows, or the smartbar
    * for AI windows in immersive view.
@@ -1498,8 +1529,23 @@ UrlbarUtils.RESULT_PAYLOAD_SCHEMA = {
       url: {
         type: "string",
       },
-      userContextId: {
-        type: "number",
+      userContext: {
+        type: "object",
+        required: ["id"],
+        properties: {
+          color: {
+            type: "string",
+          },
+          iconUrl: {
+            type: "string",
+          },
+          id: {
+            type: "number",
+          },
+          label: {
+            type: "string",
+          },
+        },
       },
     },
   },

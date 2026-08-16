@@ -259,6 +259,23 @@ static void OnLeaveIonFrame(JSContext* cx, const InlineFrameIterator& frame,
 static void HandleExceptionIon(JSContext* cx, const InlineFrameIterator& frame,
                                ResumeFromException* rfe,
                                bool* hitBailoutException) {
+  // A frame that's still mid-generator-resume must not handle the exception
+  // here. JSOp::AfterYield hasn't run, so the expression stack slots aren't
+  // restored yet and CloseLiveIteratorIon below would read them from the
+  // snapshot, and the environment chain is still the suspended generator's so
+  // it must not be unwound. Pop the frame and keep propagating, like
+  // HandleExceptionBaseline does.
+  //
+  // Only resource errors get here: the overrecursion check in the resume
+  // prologue, which no try note covers, and OOM from instructions LICM hoisted
+  // into a loop's resume merge block. The latter does skip the generator's own
+  // try/catch blocks, but OOM is implementation-defined so that's acceptable.
+  if (frame.frame().jsFrame()->isResumingGenerator()) {
+    MOZ_ASSERT(!frame.more(), "the resume path has no calls to inline");
+    MOZ_ASSERT(!cx->isClosingGenerator());
+    return;
+  }
+
   if (ShouldBailoutForDebugger(cx, frame, *hitBailoutException)) {
     // We do the following:
     //

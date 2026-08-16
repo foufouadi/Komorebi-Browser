@@ -25,9 +25,7 @@ import org.mozilla.focus.ext.enableDynamicBehavior
 import org.mozilla.focus.ext.hide
 import org.mozilla.focus.ext.showAsFixed
 
-/**
- * Integration for the full-screen feature, managing immersive mode and toolbar visibility.
- */
+/** Integration for the full-screen feature, managing immersive mode and toolbar visibility. */
 @Suppress("LongParameterList")
 class FullScreenIntegration(
     val activity: Activity,
@@ -39,13 +37,14 @@ class FullScreenIntegration(
     private val isAccessibilityEnabled: () -> Boolean,
 ) : LifecycleAwareFeature, UserInteractionHandler {
     @VisibleForTesting
-    internal var feature = FullScreenFeature(
-        store,
-        sessionUseCases,
-        tabId,
-        ::viewportFitChanged,
-        ::fullScreenChanged,
-    )
+    internal var feature =
+        FullScreenFeature(
+            store,
+            sessionUseCases,
+            tabId,
+            ::viewportFitChanged,
+            ::fullScreenChanged,
+        )
 
     override fun start() {
         feature.start()
@@ -96,18 +95,16 @@ class FullScreenIntegration(
     }
 
     /**
-     * Hide system bars. They can be revealed temporarily with system gestures, such as swiping from
-     * the top of the screen. These transient system bars will overlay app’s content, may have some
-     * degree of transparency, and will automatically hide after a short timeout.
+     * Hide system bars. They can be revealed temporarily with system gestures, such as swiping from the top of the
+     * screen. These transient system bars will overlay app’s content, may have some degree of transparency, and will
+     * automatically hide after a short timeout.
      */
     @VisibleForTesting
     internal fun switchToImmersiveMode() {
         activity.enterImmersiveMode()
     }
 
-    /**
-     * Show the system bars again.
-     */
+    /** Show the system bars again. */
     fun exitImmersiveMode() {
         activity.exitImmersiveMode()
     }

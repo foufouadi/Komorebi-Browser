@@ -339,7 +339,7 @@ tasks:
                         .*-wayland.*: []
                         .*-32.*: []
                         linux2404-64(-shippable)?/opt: ['trunk']
-                        macosx.*-64(-shippable)?(-qr)?/opt: ['trunk']
+                        macosx1500-aarch64(-shippable)?/opt: ['trunk']
                         windows11-64-25h2(-shippable)?/opt: ['trunk']
                         default: []
                 trainhop-release:
@@ -347,7 +347,7 @@ tasks:
                         .*-wayland.*: []
                         .*-32.*: []
                         linux2404-64(-shippable)?/opt: ['trunk']
-                        macosx.*-64(-shippable)?(-qr)?/opt: ['trunk']
+                        macosx1500-aarch64(-shippable)?/opt: ['trunk']
                         windows11-64-25h2(-shippable)?/opt: ['trunk']
                         default: []
                 webrender-sw:

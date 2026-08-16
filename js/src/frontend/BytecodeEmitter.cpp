@@ -2121,10 +2121,9 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitSwitch(SwitchStatement* switchStmt) {
   return true;
 }
 
-bool BytecodeEmitter::allocateResumeIndex(BytecodeOffset offset,
-                                          uint32_t* resumeIndex) {
-  static constexpr uint32_t MaxResumeIndex = BitMask(24);
+static constexpr size_t MaxResumeIndex = BitMask(24);
 
+bool BytecodeEmitter::checkResumeIndexLimit() {
   static_assert(
       MaxResumeIndex < uint32_t(AbstractGeneratorObject::RESUME_INDEX_RUNNING),
       "resumeIndex should not include magic AbstractGeneratorObject "
@@ -2134,29 +2133,75 @@ bool BytecodeEmitter::allocateResumeIndex(BytecodeOffset offset,
       "resumeIndex * sizeof(uintptr_t) must fit in an int32. JIT code relies "
       "on this when loading resume entries from BaselineScript");
 
-  *resumeIndex = bytecodeSection().resumeOffsetList().length();
-  if (*resumeIndex > MaxResumeIndex) {
+  size_t numIndices =
+      bytecodeSection().resumeOffsetList().length() +
+      bytecodeSection().tableSwitchOffsetList().numCaseOffsets();
+  if (numIndices > MaxResumeIndex) {
     reportError(nullptr, JSMSG_TOO_MANY_RESUME_INDEXES);
     return false;
   }
+  return true;
+}
 
+bool BytecodeEmitter::allocateResumeIndex(BytecodeOffset offset,
+                                          uint32_t* resumeIndex) {
+  if (!checkResumeIndexLimit()) {
+    return false;
+  }
+  *resumeIndex = bytecodeSection().resumeOffsetList().length();
   return bytecodeSection().resumeOffsetList().append(offset.value());
 }
 
-bool BytecodeEmitter::allocateResumeIndexRange(
-    mozilla::Span<BytecodeOffset> offsets, uint32_t* firstResumeIndex) {
-  *firstResumeIndex = 0;
+bool BytecodeEmitter::allocateTableSwitchResumeIndexRange(
+    mozilla::Span<BytecodeOffset> caseOffsets, BytecodeOffset switchOffset,
+    uint32_t* firstResumeIndex) {
+  auto& list = bytecodeSection().tableSwitchOffsetList();
 
-  for (size_t i = 0, len = offsets.size(); i < len; i++) {
-    uint32_t resumeIndex;
-    if (!allocateResumeIndex(offsets[i], &resumeIndex)) {
+  // The final resume index depends on the number of yield and await ops in the
+  // script, so store an index relative to the first table switch entry for now.
+  // finishResumeOffsets adjusts it.
+  *firstResumeIndex = list.numCaseOffsets();
+  if (!list.appendTableSwitch(switchOffset)) {
+    return false;
+  }
+
+  for (BytecodeOffset offset : caseOffsets) {
+    if (!checkResumeIndexLimit()) {
       return false;
     }
-    if (i == 0) {
-      *firstResumeIndex = resumeIndex;
+    if (!list.appendCaseOffset(offset)) {
+      return false;
     }
   }
 
+  return true;
+}
+
+bool BytecodeEmitter::finishResumeOffsets() {
+  auto& resumeOffsets = bytecodeSection().resumeOffsetList();
+  auto& tableSwitches = bytecodeSection().tableSwitchOffsetList();
+
+  size_t numIndices = resumeOffsets.length() + tableSwitches.numCaseOffsets();
+  MOZ_RELEASE_ASSERT(numIndices <= MaxResumeIndex + 1);
+
+  // Without yield/await entries, the relative indices SwitchEmitter wrote are
+  // already the final resume indices, so there's nothing to patch.
+  if (resumeOffsets.length() == 0) {
+    resumeOffsets.setFrom(std::move(tableSwitches.caseOffsets));
+    return true;
+  }
+
+  // The table switch entries go after the yield and await entries.
+  uint32_t firstTableSwitchIndex = resumeOffsets.length();
+  if (!resumeOffsets.appendAll(tableSwitches.caseOffsets)) {
+    return false;
+  }
+  for (BytecodeOffset switchOffset : tableSwitches.switchOffsets) {
+    jsbytecode* pc = bytecodeSection().code(switchOffset);
+    MOZ_ASSERT(JSOp(*pc) == JSOp::TableSwitch);
+    pc += 3 * JUMP_OFFSET_LEN;
+    SET_RESUMEINDEX(pc, GET_RESUMEINDEX(pc) + firstTableSwitchIndex);
+  }
   return true;
 }
 
@@ -2495,6 +2540,10 @@ js::UniquePtr<ImmutableScriptData>
 BytecodeEmitter::createImmutableScriptData() {
   uint32_t nslots;
   if (!getNslots(&nslots)) {
+    return nullptr;
+  }
+
+  if (!finishResumeOffsets()) {
     return nullptr;
   }
 

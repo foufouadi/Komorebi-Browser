@@ -2034,7 +2034,7 @@ bool nsLayoutUtils::ShouldSnapToGrid(const nsIFrame* aFrame,
 }
 
 Matrix4x4Flagged nsLayoutUtils::GetTransformToAncestor(
-    RelativeTo aFrame, RelativeTo aAncestor, uint32_t aFlags,
+    RelativeTo aFrame, RelativeTo aAncestor, TransformMatrixFlags aFlags,
     nsIFrame** aOutAncestor) {
   nsIFrame* parent;
   Matrix4x4Flagged ctm;
@@ -2051,7 +2051,8 @@ Matrix4x4Flagged nsLayoutUtils::GetTransformToAncestor(
     ctm.ProjectTo2D();
   }
   while (parent && parent != aAncestor.mFrame &&
-         (!(aFlags & nsIFrame::STOP_AT_STACKING_CONTEXT_AND_DISPLAY_PORT) ||
+         (!aFlags.contains(
+              TransformMatrixFlag::StopAtStackingContextAndDisplayPort) ||
           (!parent->IsStackingContext() &&
            !DisplayPortUtils::FrameHasDisplayPort(parent)))) {
     nsIFrame* cur = parent;
@@ -2272,16 +2273,15 @@ static Rect TransformGfxRectToAncestor(
     RelativeTo aFrame, const Rect& aRect, RelativeTo aAncestor,
     bool* aPreservesAxisAlignedRectangles = nullptr,
     Maybe<Matrix4x4Flagged>* aMatrixCache = nullptr,
-    bool aStopAtStackingContextAndDisplayPortAndOOFFrame = false,
-    nsIFrame** aOutAncestor = nullptr) {
+    TransformMatrixFlags aFlags = {}, nsIFrame** aOutAncestor = nullptr) {
   Rect result;
   Matrix4x4Flagged ctm;
   if (SVGTextFrame* text = GetContainingSVGTextFrame(aFrame.mFrame)) {
     result = text->TransformFrameRectFromTextChild(aRect, aFrame.mFrame);
 
-    result = TransformGfxRectToAncestor(
-        RelativeTo{text}, result, aAncestor, nullptr, aMatrixCache,
-        aStopAtStackingContextAndDisplayPortAndOOFFrame, aOutAncestor);
+    result =
+        TransformGfxRectToAncestor(RelativeTo{text}, result, aAncestor, nullptr,
+                                   aMatrixCache, aFlags, aOutAncestor);
     if (aPreservesAxisAlignedRectangles) {
       // TransformFrameRectFromTextChild could involve any kind of transform, we
       // could drill down into it to get an answer out of it but we don't yet.
@@ -2294,11 +2294,7 @@ static Rect TransformGfxRectToAncestor(
     ctm = aMatrixCache->value();
   } else {
     // Else, compute it
-    uint32_t flags = 0;
-    if (aStopAtStackingContextAndDisplayPortAndOOFFrame) {
-      flags |= nsIFrame::STOP_AT_STACKING_CONTEXT_AND_DISPLAY_PORT;
-    }
-    ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor, flags,
+    ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor, aFlags,
                                                 aOutAncestor);
     if (aMatrixCache) {
       // and put it in the cache, if provided
@@ -2507,19 +2503,19 @@ nsRect nsLayoutUtils::TransformFrameRectToAncestor(
     const nsIFrame* aFrame, const nsRect& aRect, RelativeTo aAncestor,
     bool* aPreservesAxisAlignedRectangles /* = nullptr */,
     Maybe<Matrix4x4Flagged>* aMatrixCache /* = nullptr */,
-    bool aStopAtStackingContextAndDisplayPortAndOOFFrame /* = false */,
+    TransformMatrixFlags aFlags /* = {} */,
     nsIFrame** aOutAncestor /* = nullptr */) {
   MOZ_ASSERT(IsAncestorFrameCrossDocInProcess(aAncestor.mFrame, aFrame),
              "Fix the caller");
+  MOZ_ASSERT(!aFlags.contains(TransformMatrixFlag::InCSSUnits),
+             "TransformMatrixFlag::InCSSUnits is not supported here!");
+
   float srcAppUnitsPerDevPixel = aFrame->PresContext()->AppUnitsPerDevPixel();
-  Rect result(NSAppUnitsToFloatPixels(aRect.x, srcAppUnitsPerDevPixel),
-              NSAppUnitsToFloatPixels(aRect.y, srcAppUnitsPerDevPixel),
-              NSAppUnitsToFloatPixels(aRect.width, srcAppUnitsPerDevPixel),
-              NSAppUnitsToFloatPixels(aRect.height, srcAppUnitsPerDevPixel));
-  result = TransformGfxRectToAncestor(
-      RelativeTo{aFrame}, result, aAncestor, aPreservesAxisAlignedRectangles,
-      aMatrixCache, aStopAtStackingContextAndDisplayPortAndOOFFrame,
-      aOutAncestor);
+  Rect result = LayoutDeviceRect::FromAppUnits(aRect, srcAppUnitsPerDevPixel)
+                    .ToUnknownRect();
+  result = TransformGfxRectToAncestor(RelativeTo{aFrame}, result, aAncestor,
+                                      aPreservesAxisAlignedRectangles,
+                                      aMatrixCache, aFlags, aOutAncestor);
 
   return ScaleThenRoundGfxRectToAppRect(
       result, aAncestor.mFrame->PresContext()->AppUnitsPerDevPixel());
@@ -9370,8 +9366,15 @@ CSSRect nsLayoutUtils::GetBoundingFrameRect(
 }
 
 /* static */
-bool nsLayoutUtils::IsTransformed(nsIFrame* aForFrame, nsIFrame* aTopFrame) {
-  for (nsIFrame* f = aForFrame; f != aTopFrame; f = f->GetParent()) {
+bool nsLayoutUtils::IsTransformed(const nsIFrame* aForFrame,
+                                  const nsIFrame* aTopFrame) {
+  MOZ_ASSERT(aForFrame);
+  MOZ_ASSERT(!aTopFrame || aForFrame == aTopFrame ||
+                 IsProperAncestorFrame(aTopFrame, aForFrame),
+             "aTopFrame should be either nullptr, same as aForFrame, or a "
+             "proper ancestor of aForFrame!");
+
+  for (const nsIFrame* f = aForFrame; f && f != aTopFrame; f = f->GetParent()) {
     if (f->IsTransformed()) {
       return true;
     }
@@ -10204,58 +10207,4 @@ CSSSize nsLayoutUtils::ExpandHeightForDynamicToolbar(
 nsSize nsLayoutUtils::ExpandHeightForDynamicToolbar(
     const nsPresContext* aPresContext, const nsSize& aSize) {
   return ExpandHeightForDynamicToolbarImpl(aPresContext, aSize);
-}
-
-auto nsLayoutUtils::GetCombinedFragmentRects(const nsIFrame* aFrame,
-                                             const nsIFrame* aContainingBlock)
-    -> CombinedFragments {
-  bool mustCheckCBFragment = false;
-  nsPoint offset{};
-  if (aContainingBlock) {
-    MOZ_ASSERT(nsLayoutUtils::IsProperAncestorFrame(aContainingBlock, aFrame));
-    mustCheckCBFragment = aContainingBlock->GetPrevContinuation() ||
-                          aContainingBlock->GetNextContinuation();
-    offset = aFrame->GetOffsetToIgnoringScrolling(aContainingBlock);
-  }
-  bool isPaginated = aFrame->PresContext()->IsPaginated();
-
-  // Lazy getter for aFrame's page-frame ancestor, if any.
-  Maybe<const nsIFrame*> maybePageFrame;
-  auto currPageFrame = [=, &maybePageFrame]() -> const nsIFrame* {
-    MOZ_ASSERT(isPaginated);
-    if (!maybePageFrame) {
-      maybePageFrame.emplace(nsLayoutUtils::GetPageFrame(aFrame));
-    }
-    return maybePageFrame.ref();
-  };
-
-  // A continuation is considered "on the same page" if the context is not
-  // paginated, or if it has the same page-frame ancestor.
-  auto onSamePage = [=](const nsIFrame* aContinuation) -> bool {
-    return !isPaginated ||
-           nsLayoutUtils::GetPageFrame(aContinuation) == currPageFrame();
-  };
-
-  auto inSameCBFragment = [&](const nsIFrame* aContinuation) {
-    return !mustCheckCBFragment || nsLayoutUtils::IsProperAncestorFrame(
-                                       aContainingBlock, aContinuation);
-  };
-
-  // Collect rects from our continuations (limited to those that are on the
-  // same page if the context is paginated).
-  nsRect rect = aFrame->GetRectRelativeToSelf();
-  const auto* next = aFrame->GetNextContinuation();
-  for (; next && onSamePage(next) && inSameCBFragment(next);
-       next = next->GetNextContinuation()) {
-    rect =
-        rect.Union(next->GetRectRelativeToSelf() + next->GetOffsetTo(aFrame));
-  }
-  const auto* prev = aFrame->GetPrevContinuation();
-  for (; prev && onSamePage(prev) && inSameCBFragment(prev);
-       prev = prev->GetPrevContinuation()) {
-    rect =
-        rect.Union(prev->GetRectRelativeToSelf() + prev->GetOffsetTo(aFrame));
-  }
-
-  return CombinedFragments{prev, next, rect + offset};
 }

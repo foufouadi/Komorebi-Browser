@@ -48,6 +48,7 @@ export interface Modules {
   "chrome://browser/content/urlbar/UrlbarChildController.mjs": typeof import("chrome://browser/content/urlbar/UrlbarChildController.mjs"),
   "chrome://browser/content/urlbar/UrlbarEventBufferer.mjs": typeof import("chrome://browser/content/urlbar/UrlbarEventBufferer.mjs"),
   "chrome://browser/content/urlbar/UrlbarInput.mjs": typeof import("chrome://browser/content/urlbar/UrlbarInput.mjs"),
+  "chrome://browser/content/urlbar/UrlbarInputBase.mjs": typeof import("chrome://browser/content/urlbar/UrlbarInputBase.mjs"),
   "chrome://browser/content/urlbar/UrlbarQueryContext.mjs": typeof import("chrome://browser/content/urlbar/UrlbarQueryContext.mjs"),
   "chrome://browser/content/urlbar/UrlbarResult.mjs": typeof import("chrome://browser/content/urlbar/UrlbarResult.mjs"),
   "chrome://browser/content/urlbar/UrlbarShared.mjs": typeof import("chrome://browser/content/urlbar/UrlbarShared.mjs"),

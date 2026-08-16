@@ -103,38 +103,46 @@ class UtilsKtTest {
     }
 }
 
-internal fun testBookmarkItem(parentGuid: String, url: String, title: String = "Item for $url") = BookmarkNode(
-    BookmarkNodeType.ITEM,
-    "guid#${Math.random() * 1000}",
-    parentGuid,
-    0u,
-    title,
-    url,
-    0,
-    0,
-    null,
-)
+internal fun testBookmarkItem(parentGuid: String, url: String, title: String = "Item for $url") =
+    BookmarkNode(
+        BookmarkNodeType.ITEM,
+        "guid#${Math.random() * 1000}",
+        parentGuid,
+        0u,
+        title,
+        url,
+        0,
+        0,
+        null,
+    )
 
-internal fun testFolder(guid: String, parentGuid: String?, children: List<BookmarkNode>?, title: String = "Folder: $guid") = BookmarkNode(
-    BookmarkNodeType.FOLDER,
-    guid,
-    parentGuid,
-    0u,
-    title,
-    null,
-    0,
-    0,
-    children,
-)
+internal fun testFolder(
+    guid: String,
+    parentGuid: String?,
+    children: List<BookmarkNode>?,
+    title: String = "Folder: $guid",
+) =
+    BookmarkNode(
+        BookmarkNodeType.FOLDER,
+        guid,
+        parentGuid,
+        0u,
+        title,
+        null,
+        0,
+        0,
+        children,
+    )
 
-internal fun testSeparator(parentGuid: String) = BookmarkNode(
-    BookmarkNodeType.SEPARATOR,
-    "guid#${Math.random() * 1000}",
-    parentGuid,
-    null,
-    null,
-    null,
-    0,
-    0,
-    null,
-)
+internal fun testSeparator(parentGuid: String) =
+    BookmarkNode(
+        BookmarkNodeType.SEPARATOR,
+        "guid#${Math.random() * 1000}",
+        parentGuid,
+        null,
+        null,
+        null,
+        0,
+        0,
+        null,
+    )

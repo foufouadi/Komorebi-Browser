@@ -45,15 +45,16 @@ class StartupCrashMiddlewareTest {
 
     @Test
     fun `when Report is tapped then unsent crash reports are submitted and FenixReady is dispatched`() = runTest {
-        val crash = Crash.NativeCodeCrash(
-            timestamp = 1755089858034L,
-            minidumpPath = null,
-            extrasPath = null,
-            processVisibility = null,
-            processType = null,
-            breadcrumbs = arrayListOf(),
-            remoteType = null,
-        )
+        val crash =
+            Crash.NativeCodeCrash(
+                timestamp = 1755089858034L,
+                minidumpPath = null,
+                extrasPath = null,
+                processVisibility = null,
+                processType = null,
+                breadcrumbs = arrayListOf(),
+                remoteType = null,
+            )
 
         coEvery { crashReporter.unsentCrashReportsSince(any()) } returns listOf(crash)
         every { crashReporter.submitReport(any(), any()) } returns CompletableDeferred(Unit)
@@ -104,13 +105,14 @@ class StartupCrashMiddlewareTest {
         scope: TestScope,
     ): Pair<StartupCrashStore, () -> Boolean> {
         var called = false
-        val middleware = StartupCrashMiddleware(
-            settings = settings,
-            crashReporter = crashReporter,
-            restartHandler = { called = true },
-            currentTimeInMillis = currentTime,
-            scope = scope,
-        )
+        val middleware =
+            StartupCrashMiddleware(
+                settings = settings,
+                crashReporter = crashReporter,
+                restartHandler = { called = true },
+                currentTimeInMillis = currentTime,
+                scope = scope,
+            )
 
         return StartupCrashStore(
             initialState = StartupCrashState(UiState.Idle),

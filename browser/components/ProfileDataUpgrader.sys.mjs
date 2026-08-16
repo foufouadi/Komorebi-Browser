@@ -1078,6 +1078,17 @@ export let ProfileDataUpgrader = {
       Services.prefs.clearUserBranch("browser.promo.cookiebanners.");
     }
 
+    if (existingDataVersion < 180) {
+      // Bug 2056232: the IP Protection UI is now gated on the l10n coverage of
+      // browser/ipProtection.ftl, and only for users who have never seen the
+      // feature. Existing profiles are assumed to have already seen it, so the
+      // gate never takes it away from them.
+      const IPP_HAS_SEEN_FEATURE_PREF = "browser.ipProtection.hasSeenFeature";
+      if (!Services.prefs.prefHasUserValue(IPP_HAS_SEEN_FEATURE_PREF)) {
+        Services.prefs.setBoolPref(IPP_HAS_SEEN_FEATURE_PREF, true);
+      }
+    }
+
     // Update the migration version.
     Services.prefs.setIntPref("browser.migration.version", newVersion);
   },

@@ -12,7 +12,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   LoginHelper: "resource://gre/modules/LoginHelper.sys.mjs",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   OsEnvironment: "resource://gre/modules/OsEnvironment.sys.mjs",
-  WindowsLaunchOnLogin: "resource://gre/modules/WindowsLaunchOnLogin.sys.mjs",
+  LaunchOnLogin: "resource://gre/modules/LaunchOnLogin.sys.mjs",
   PlacesDBUtils: "resource://gre/modules/PlacesDBUtils.sys.mjs",
   ShellService: "moz-src:///browser/components/shell/ShellService.sys.mjs",
   TelemetryReportingPolicy:
@@ -481,12 +481,11 @@ export let StartupTelemetry = {
 
   async launchOnLoginState() {
     let state;
-    if (AppConstants.platform != "win") {
+    if (!lazy.LaunchOnLogin.isSupported()) {
       state = "not_supported";
     } else {
       try {
-        const enablementDetails =
-          await lazy.WindowsLaunchOnLogin.getLaunchOnLoginEnablementDetails();
+        const enablementDetails = await lazy.LaunchOnLogin.enablementDetails();
         if (enablementDetails.isEnabled) {
           state = "enabled";
         } else if (!enablementDetails.isSupported) {

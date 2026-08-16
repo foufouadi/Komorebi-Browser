@@ -152,6 +152,12 @@ def _set_priority(command_context, priority, verbose):
     action="store_true",
     help="Allow building subdirectories (not recommended, can result in bad tree state).",
 )
+@CommandArgument(
+    "--no-completion-messages",
+    default=False,
+    action="store_true",
+    help="Suppress the build completion messages (useful for nested builds).",
+)
 def build(
     command_context,
     what=None,
@@ -164,6 +170,7 @@ def build(
     priority="idle",
     show_all_warnings=None,
     allow_subdirectory_build=False,
+    no_completion_messages=False,
 ):
     """Build the source tree.
 
@@ -359,6 +366,7 @@ def build(
             mach_context=command_context._mach_context,
             append_env=append_env,
             allow_subdirectory_build=allow_subdirectory_build,
+            no_completion_messages=no_completion_messages,
         )
     finally:
         command_context.log_manager.terminal_handler.setLevel(original_log_level)

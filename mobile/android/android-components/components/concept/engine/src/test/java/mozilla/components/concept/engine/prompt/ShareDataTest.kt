@@ -30,10 +30,11 @@ class ShareDataTest {
     fun `Save to bundle`() {
         val noText = ShareData(title = "Title", url = "https://mozilla.org")
         val noUrl = ShareData(title = "Title", text = "Text")
-        val bundle = Bundle().apply {
-            putParcelable("noText", noText)
-            putParcelable("noUrl", noUrl)
-        }
+        val bundle =
+            Bundle().apply {
+                putParcelable("noText", noText)
+                putParcelable("noUrl", noUrl)
+            }
         assertEquals(noText, bundle.getParcelableCompat("noText", ShareData::class.java))
         assertEquals(noUrl, bundle.getParcelableCompat("noUrl", ShareData::class.java))
     }

@@ -34,37 +34,38 @@ class TabCollectionTest {
 
     @Test
     fun `GIVEN list of collections WHEN default collection number is required THEN return next default number`() {
-        val collections = mutableListOf<TabCollection>(
-            mockk {
-                every { title } returns "Collection 1"
-            },
-            mockk {
-                every { title } returns "Collection 2"
-            },
-            mockk {
-                every { title } returns "Collection 3"
-            },
-        )
+        val collections =
+            mutableListOf<TabCollection>(
+                mockk {
+                    every { title } returns "Collection 1"
+                },
+                mockk {
+                    every { title } returns "Collection 2"
+                },
+                mockk {
+                    every { title } returns "Collection 3"
+                },
+            )
         assertEquals(4, collections.getDefaultCollectionNumber())
 
         collections.add(
             mockk {
                 every { title } returns "Collection 5"
-            },
+            }
         )
         assertEquals(6, collections.getDefaultCollectionNumber())
 
         collections.add(
             mockk {
                 every { title } returns "Random name"
-            },
+            }
         )
         assertEquals(6, collections.getDefaultCollectionNumber())
 
         collections.add(
             mockk {
                 every { title } returns "Collection 10 10"
-            },
+            }
         )
         assertEquals(6, collections.getDefaultCollectionNumber())
     }

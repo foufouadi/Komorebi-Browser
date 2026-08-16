@@ -173,6 +173,9 @@
 }
 
 toolbar .toolbarbutton-1 {
+  /* horizontal padding + actual icon width */
+  --toolbarbutton-icon-size: calc(2 * var(--toolbarbutton-padding-inner) + 16px);
+
   appearance: none;
   margin: 0;
   padding: 0 var(--toolbarbutton-padding-outer);
@@ -200,9 +203,8 @@ toolbar .toolbarbutton-1 {
   }
 
   > .toolbarbutton-icon {
-    /* horizontal padding + actual icon width */
-    width: calc(2 * var(--toolbarbutton-padding-inner) + 16px);
-    height: calc(2 * var(--toolbarbutton-padding-inner) + 16px);
+    width: var(--toolbarbutton-icon-size);
+    height: var(--toolbarbutton-icon-size);
   }
 
   > .toolbarbutton-text {

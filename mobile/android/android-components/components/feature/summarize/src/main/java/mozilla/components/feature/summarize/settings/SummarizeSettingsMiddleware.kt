@@ -32,27 +32,31 @@ class SummarizeSettingsMiddleware(
         next(action)
 
         when (action) {
-            ViewAppeared -> scope.launch {
-                store.dispatch(
-                    SettingsLoaded(
-                        isFeatureEnabled = settings.getFeatureEnabledUserStatus().first() == true,
-                        isGestureEnabled = settings.getGestureEnabledUserStatus().first(),
-                        shakeSensitivity = settings.getShakeSensitivity().first(),
-                    ),
-                )
-            }
+            ViewAppeared ->
+                scope.launch {
+                    store.dispatch(
+                        SettingsLoaded(
+                            isFeatureEnabled = settings.getFeatureEnabledUserStatus().first() == true,
+                            isGestureEnabled = settings.getGestureEnabledUserStatus().first(),
+                            shakeSensitivity = settings.getShakeSensitivity().first(),
+                        )
+                    )
+                }
 
-            SummarizePagesPreferenceToggled -> scope.launch {
-                settings.setFeatureEnabledUserStatus(store.state.isFeatureEnabled)
-            }
+            SummarizePagesPreferenceToggled ->
+                scope.launch {
+                    settings.setFeatureEnabledUserStatus(store.state.isFeatureEnabled)
+                }
 
-            is ShakeSensitivityChanged -> scope.launch {
-                settings.setShakeSensitivity(store.state.shakeSensitivity)
-            }
+            is ShakeSensitivityChanged ->
+                scope.launch {
+                    settings.setShakeSensitivity(store.state.shakeSensitivity)
+                }
 
-            ShakeToSummarizePreferenceToggled -> scope.launch {
-                settings.setGestureEnabledUserStatus(store.state.isGestureEnabled)
-            }
+            ShakeToSummarizePreferenceToggled ->
+                scope.launch {
+                    settings.setGestureEnabledUserStatus(store.state.isGestureEnabled)
+                }
 
             LearnMoreClicked -> {
                 onLearnMoreClicked()

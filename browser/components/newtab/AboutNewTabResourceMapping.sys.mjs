@@ -36,6 +36,12 @@ export const TRAINHOP_XPI_VERSION_PREF =
 // Nimbus treat it as a user opt-out and unenroll the client. See Bug 1995391.
 export const TRAINHOP_XPI_DEPLOYMENT_VERSION_PREF =
   "browser.newtabpage.trainhopAddonDeployment.version";
+// "any" is a sentinel value accepted in either of the two version prefs above,
+// meaning "entitled to whichever train-hop version happens to be installed".
+// Nimbus never writes it; it exists for the callers that install the XPI with
+// the traditional extension install mechanism (namely, newtab devs and our CI
+// infrastructure).
+export const TRAINHOP_ANY_VERSION_SENTINEL = "any";
 export const TRAINHOP_SCHEDULED_UPDATE_STATE_DELAY_PREF =
   "browser.newtabpage.trainhopAddon.scheduledUpdateState.delay";
 export const TRAINHOP_SCHEDULED_UPDATE_STATE_TIMEOUT_PREF =
@@ -341,6 +347,8 @@ export var AboutNewTabResourceMapping = {
     //   client is currently entitled to (e.g. the higher-version rollout has
     //   ended while a lower-version one is still active); we stop using it so the
     //   highest currently-enrolled version can take over on the next startups.
+    //   This comparison is skipped when the entitled version is
+    //   TRAINHOP_ANY_VERSION_SENTINEL.
     // - the train-hop add-on xpi is not system-signed (as specifically required for
     //   newtab xpi being installed in the `extensions` profile subdirectory by
     //   the custom install logic provided by the _installTrainhopAddon method).
@@ -348,10 +356,14 @@ export var AboutNewTabResourceMapping = {
       lazy.trainhopAddonXPIVersion,
       lazy.trainhopAddonDeploymentXPIVersion
     );
+    const entitledToAnyVersion =
+      lazy.trainhopAddonXPIVersion === TRAINHOP_ANY_VERSION_SENTINEL ||
+      lazy.trainhopAddonDeploymentXPIVersion === TRAINHOP_ANY_VERSION_SENTINEL;
     const shouldUninstallXPI = isXPI
       ? entitledVersion === "" ||
         Services.vc.compare(this._builtinVersion, version) >= 0 ||
-        Services.vc.compare(version, entitledVersion) > 0 ||
+        (!entitledToAnyVersion &&
+          Services.vc.compare(version, entitledVersion) > 0) ||
         (lazy.AddonSettings.REQUIRE_SIGNING && !isPrivileged)
       : false;
 

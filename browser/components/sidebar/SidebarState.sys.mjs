@@ -809,10 +809,16 @@ export class SidebarState {
           itemsWrapper
         ).height
       : 0;
-    const clampedHeight = itemsWrapperHeight
-      ? Math.min(preferredHeight, itemsWrapperHeight)
-      : preferredHeight;
-    this.#pinnedTabsContainerEl.style.height = `${clampedHeight}px`;
+    if (!itemsWrapperHeight) {
+      // The pinned tabs have no layout to clamp the stored height to, so leave
+      // the container's height alone until they do.
+      return;
+    }
+    // Clamp for display only, never overwriting the user's saved preference.
+    this.#pinnedTabsContainerEl.style.height = `${Math.min(
+      preferredHeight,
+      itemsWrapperHeight
+    )}px`;
   }
 
   /**

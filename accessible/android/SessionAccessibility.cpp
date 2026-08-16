@@ -632,6 +632,8 @@ void SessionAccessibility::PopulateNodeInfo(
   aAccessible->DOMNodeID(nodeID);
   nsAutoString accDesc;
   aAccessible->Description(accDesc);
+  nsAutoString language;
+  aAccessible->Language(language);
   uint64_t state = aAccessible->State();
   LayoutDeviceIntRect bounds = aAccessible->Bounds();
   int32_t virtualViewID = AccessibleWrap::GetVirtualViewID(aAccessible);
@@ -722,7 +724,7 @@ void SessionAccessibility::PopulateNodeInfo(
       className, jni::IntArray::New(boundsArray, 4), jni::StringParam(text),
       jni::StringParam(description), jni::StringParam(hint),
       jni::StringParam(geckoRole), jni::StringParam(roleDescription),
-      jni::StringParam(nodeID), inputType);
+      jni::StringParam(nodeID), jni::StringParam(language), inputType);
 
   if (aAccessible->HasNumericValue()) {
     double curValue = aAccessible->CurValue();

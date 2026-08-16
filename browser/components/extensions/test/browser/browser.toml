@@ -105,9 +105,6 @@ support-files = ["head_devtools.js"]
 ["browser_ext_themes_validation.js"]
 
 ["browser_ext_topSites.js"]
-skip-if = [
-  "os == 'linux' && display == 'x11' && opt", # Bug 1775583
-]
 
 ["browser_ext_user_events.js"]
 
@@ -140,10 +137,5 @@ https_first_disabled = true
 support-files = ["file_slowed_document.sjs"]
 
 ["browser_ext_webrtc.js"]
-skip-if = [
-  "os == 'mac' && os_version == '10.15' && arch == 'x86_64'", # Bug 1565738
-  "os == 'mac' && os_version == '14.70' && arch == 'x86_64'", # Bug 1565738
-  "os == 'mac' && os_version == '15.30' && arch == 'aarch64'", # Bug 1565738
-]
 
 ["browser_toolbar_prefers_color_scheme.js"]

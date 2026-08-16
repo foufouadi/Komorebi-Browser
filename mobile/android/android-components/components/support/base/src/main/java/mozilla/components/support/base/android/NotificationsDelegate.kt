@@ -18,6 +18,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.Lifecycle
 
 typealias OnPermissionGranted = () -> Unit
+
 typealias OnPermissionRejected = () -> Unit
 
 /**
@@ -27,25 +28,20 @@ typealias OnPermissionRejected = () -> Unit
  * @property onPermissionGranted optional callback for handling permission acceptance.
  * @property onPermissionRejected optional callback for handling permission refusal.
  */
-class NotificationsDelegate(
-    val notificationManagerCompat: NotificationManagerCompat,
-) {
+class NotificationsDelegate(val notificationManagerCompat: NotificationManagerCompat) {
     var isRequestingPermission: Boolean = false
         private set
 
-    @VisibleForTesting
-    internal var permissionRequestsCount: Int = 0
+    @VisibleForTesting internal var permissionRequestsCount: Int = 0
 
-    private var onPermissionGranted: OnPermissionGranted = { }
-    private var onPermissionRejected: OnPermissionRejected = { }
+    private var onPermissionGranted: OnPermissionGranted = {}
+    private var onPermissionRejected: OnPermissionRejected = {}
 
     @VisibleForTesting
     internal val notificationPermissionHandler: MutableMap<AppCompatActivity, ActivityResultLauncher<String>> =
         mutableMapOf()
 
-    /**
-     * Provides the context for a permission request.
-     */
+    /** Provides the context for a permission request. */
     @Suppress("unused")
     fun bindToActivity(activity: AppCompatActivity) {
         val activityResultLauncher =
@@ -61,17 +57,13 @@ class NotificationsDelegate(
         notificationPermissionHandler[activity] = activityResultLauncher
     }
 
-    /**
-     * Removes activity reference from the [NotificationsDelegate]
-     */
+    /** Removes activity reference from the [NotificationsDelegate] */
     @Suppress("unused")
     fun unBindActivity(activity: AppCompatActivity) {
         notificationPermissionHandler.remove(activity)
     }
 
-    /**
-     * Checks if the post permission notification was previously granted.
-     */
+    /** Checks if the post permission notification was previously granted. */
     fun hasPostNotificationsPermission(): Boolean {
         return try {
             notificationManagerCompat.areNotificationsEnabled()
@@ -86,9 +78,8 @@ class NotificationsDelegate(
      * @param notificationTag the string identifier for a notification. Can be null
      * @param notificationId ID of the notification. The pair (tag, id) must be unique throughout the app
      * @param notification the notification to post to the system
-     * @param onPermissionGranted optional callback for handling permission acceptance,
-     * in addition to showing the notification.
-     * Note that it will also be called when the permission is already granted.
+     * @param onPermissionGranted optional callback for handling permission acceptance, in addition to showing the
+     *   notification. Note that it will also be called when the permission is already granted.
      * @param onPermissionRejected optional callback for handling permission refusal.
      */
     @SuppressLint("MissingPermission", "NotifyUsage")
@@ -96,8 +87,8 @@ class NotificationsDelegate(
         notificationTag: String? = null,
         notificationId: Int,
         notification: Notification,
-        onPermissionGranted: OnPermissionGranted = { },
-        onPermissionRejected: OnPermissionRejected = { },
+        onPermissionGranted: OnPermissionGranted = {},
+        onPermissionRejected: OnPermissionRejected = {},
         showPermissionRationale: Boolean = false,
     ) {
         if (hasPostNotificationsPermission()) {
@@ -119,7 +110,8 @@ class NotificationsDelegate(
                 )
             } else {
                 // This means we cannot show standard notifications without user changing it from OS Settings
-                // redirect to that, or maybe show in-app notifications? See https://bugzilla.mozilla.org/show_bug.cgi?id=1814863
+                // redirect to that, or maybe show in-app notifications? See
+                // https://bugzilla.mozilla.org/show_bug.cgi?id=1814863
                 // for crash notifications we could show the prompt instead.
                 // For now we just call onPermissionRejected here to ping the caller about the permission status.
                 onPermissionRejected.invoke()
@@ -135,8 +127,8 @@ class NotificationsDelegate(
      */
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     fun requestNotificationPermission(
-        onPermissionGranted: OnPermissionGranted = { },
-        onPermissionRejected: OnPermissionRejected = { },
+        onPermissionGranted: OnPermissionGranted = {},
+        onPermissionRejected: OnPermissionRejected = {},
         showPermissionRationale: Boolean = false,
     ) {
         // some clients might request notification permission when it is already granted,
@@ -158,12 +150,16 @@ class NotificationsDelegate(
             showPermissionRationale(onPermissionGranted, onPermissionRejected)
         } else {
             isRequestingPermission = false
-            notificationPermissionHandler.entries.firstOrNull {
-                it.key.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-            }?.value?.also {
-                isRequestingPermission = true
-                permissionRequestsCount++
-            }?.launch(POST_NOTIFICATIONS)
+            notificationPermissionHandler.entries
+                .firstOrNull {
+                    it.key.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+                }
+                ?.value
+                ?.also {
+                    isRequestingPermission = true
+                    permissionRequestsCount++
+                }
+                ?.launch(POST_NOTIFICATIONS)
         }
     }
 

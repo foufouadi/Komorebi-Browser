@@ -68,6 +68,7 @@ const UI_UPDATE_TYPES = {
   DELETE_WATCH: "delete-watch",
   PAUSE_WATCH: "pause-watch",
   CHECK_WATCH: "check-watch",
+  SAVE_WATCH_DRAFT: "save-watch-draft",
 };
 
 const CONFIRMATION_UI_TYPES = [
@@ -954,6 +955,7 @@ export class AIChatContent extends MozLitElement {
       followUpSuggestions = [],
       isPreviousMessage,
       toolUIData,
+      toolUIDraft,
       kit,
       isRestored,
       historyResults = [],
@@ -990,6 +992,7 @@ export class AIChatContent extends MozLitElement {
       showCallout: showMemoriesCallout ?? false,
       isLastChunk,
       toolUIData,
+      toolUIDraft,
       historyResultsMap,
       citations,
       isRestored,
@@ -1393,11 +1396,19 @@ export class AIChatContent extends MozLitElement {
   };
 
   #renderAgentMonitorComponent(msg) {
-    const { messageId, toolUIData } = msg;
+    const { messageId, toolUIData, toolUIDraft } = msg;
     const toolCallId = toolUIData.toolCallId;
     return html`<agent-monitor-item
       mode=${toolUIData.properties?.mode ?? "create"}
       .agent=${toolUIData.properties?.agent}
+      .draft=${toolUIDraft}
+      @agent-monitor-item:draft-change=${event =>
+        this.#handleMonitorAction(
+          event,
+          messageId,
+          toolCallId,
+          UI_UPDATE_TYPES.SAVE_WATCH_DRAFT
+        )}
       @agent-monitor-item:submit=${event =>
         this.#handleMonitorSubmit(event, messageId, toolCallId)}
       @agent-monitor-item:cancel=${event =>

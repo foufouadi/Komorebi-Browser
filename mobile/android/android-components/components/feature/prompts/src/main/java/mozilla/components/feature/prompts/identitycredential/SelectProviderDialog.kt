@@ -34,6 +34,7 @@ import mozilla.components.support.ktx.kotlin.base64ToBitmap
 
 /**
  * A Federated Credential Management dialog for selecting a provider.
+ *
  * @param providers The list of available providers.
  * @param colors The colors of the dialog.
  * @param modifier [Modifier] to be applied to the layout.
@@ -46,18 +47,17 @@ fun SelectProviderDialog(
     colors: DialogColors = DialogColors.default(),
     onProviderClick: (Provider) -> Unit,
 ) {
-    Column(
-        modifier = modifier.fillMaxWidth(),
-    ) {
+    Column(modifier = modifier.fillMaxWidth()) {
         Text(
             text = stringResource(id = R.string.mozac_feature_prompts_identity_credentials_choose_provider),
-            style = TextStyle(
-                fontSize = 16.sp,
-                lineHeight = 24.sp,
-                color = colors.title,
-                letterSpacing = 0.15.sp,
-                fontWeight = FontWeight.Bold,
-            ),
+            style =
+                TextStyle(
+                    fontSize = 16.sp,
+                    lineHeight = 24.sp,
+                    color = colors.title,
+                    letterSpacing = 0.15.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
             modifier = Modifier.padding(16.dp),
         )
 
@@ -88,15 +88,9 @@ private fun ProviderItem(
                 bitmap = bitmap,
                 contentDescription = null,
                 contentScale = ContentScale.FillWidth,
-                modifier = Modifier
-                    .padding(horizontal = 16.dp)
-                    .size(24.dp),
+                modifier = Modifier.padding(horizontal = 16.dp).size(24.dp),
             )
-        } ?: Spacer(
-            Modifier
-                .padding(horizontal = 16.dp)
-                .width(24.dp),
-        )
+        } ?: Spacer(Modifier.padding(horizontal = 16.dp).width(24.dp))
     }
 }
 
@@ -105,12 +99,13 @@ private fun ProviderItem(
 private fun ProviderItemPreview() {
     ProviderItem(
         modifier = Modifier.background(Color.White),
-        provider = Provider(
-            0,
-            null,
-            "Title",
-            "Description",
-        ),
+        provider =
+            Provider(
+                0,
+                null,
+                "Title",
+                "Description",
+            ),
         onClick = {},
     )
 }
@@ -120,22 +115,23 @@ private fun ProviderItemPreview() {
 private fun SelectProviderDialogPreview() {
     DialogPreviewMaterialTheme {
         SelectProviderDialog(
-            providers = listOf(
-                Provider(
-                    0,
-                    null,
-                    "Title",
-                    "Description",
+            providers =
+                listOf(
+                    Provider(
+                        0,
+                        null,
+                        "Title",
+                        "Description",
+                    ),
+                    Provider(
+                        0,
+                        GOOGLE_FAVICON,
+                        "Google",
+                        "google.com",
+                    ),
                 ),
-                Provider(
-                    0,
-                    GOOGLE_FAVICON,
-                    "Google",
-                    "google.com",
-                ),
-            ),
             modifier = Modifier.background(MaterialTheme.colorScheme.background),
-        ) { }
+        ) {}
     }
 }
 

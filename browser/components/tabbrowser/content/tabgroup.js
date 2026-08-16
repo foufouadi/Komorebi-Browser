@@ -51,6 +51,16 @@
     /** @type {boolean} */
     #wasCreatedByAdoption = false;
 
+    /**
+     * Whether a drag collapsed this tab group, as opposed to the user, and it
+     * therefore has to be expanded again when the drag ends. Stays true until
+     * the group's tabs are back to their full size, which is how long the tab
+     * strip keeps reserving space for them.
+     *
+     * @type {boolean}
+     */
+    collapsedByDrag = false;
+
     #observerRemoved = false;
 
     constructor() {

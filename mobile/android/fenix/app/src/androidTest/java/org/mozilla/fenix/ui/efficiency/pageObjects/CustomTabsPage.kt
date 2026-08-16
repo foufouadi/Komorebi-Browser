@@ -10,6 +10,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import org.mozilla.fenix.IntentReceiverActivity
 import org.mozilla.fenix.helpers.DataGenerationHelper.createCustomTabIntent
 import org.mozilla.fenix.helpers.HomeActivityIntentTestRule
+import org.mozilla.fenix.helpers.TestAssetHelper.waitingTime
 import org.mozilla.fenix.ui.efficiency.helpers.BasePage
 import org.mozilla.fenix.ui.efficiency.helpers.PageStateTracker
 import org.mozilla.fenix.ui.efficiency.helpers.Selector
@@ -25,10 +26,11 @@ class CustomTabsPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestR
 
     fun launchCustomTab(url: String, customMenuItemLabel: String = ""): CustomTabsPage {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val intent = createCustomTabIntent(url, customMenuItemLabel).apply {
-            setClass(context, IntentReceiverActivity::class.java)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
+        val intent =
+            createCustomTabIntent(url, customMenuItemLabel).apply {
+                setClass(context, IntentReceiverActivity::class.java)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
         context.startActivity(intent)
         mozVerify(CustomTabsSelectors.MAIN_MENU_BUTTON) // wait for the custom-tab toolbar to settle
         PageStateTracker.currentPageName = pageName
@@ -41,8 +43,11 @@ class CustomTabsPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestR
     }
 
     // Web content is rendered by GeckoView and matched device-wide (UIAutomator text), so the BrowserPage
-    // page-content locator works inside a custom tab too.
+    // page-content locator works inside a custom tab too. Wait for the content to render before tapping:
+    // mozClick resolves once with no polling, and GeckoView's accessibility node for freshly-loaded text
+    // can lag the toolbar settling, so an immediate tap intermittently misses it (element not found).
     fun clickWebContent(text: String): CustomTabsPage {
+        mozVerify(BrowserPageSelectors.PAGE_CONTENT(text), timeout = waitingTime)
         mozClick(BrowserPageSelectors.PAGE_CONTENT(text))
         return this
     }

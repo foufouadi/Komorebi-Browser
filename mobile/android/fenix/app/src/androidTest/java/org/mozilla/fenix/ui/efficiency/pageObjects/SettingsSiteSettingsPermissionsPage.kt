@@ -15,20 +15,22 @@ import org.mozilla.fenix.ui.efficiency.selectors.MainMenuSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.SettingsSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.SettingsSiteSettingsPermissionsSelectors
 
-class SettingsSiteSettingsPermissionsPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule, *>) : BasePage(composeRule) {
+class SettingsSiteSettingsPermissionsPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule, *>) :
+    BasePage(composeRule) {
     override val pageName = "SettingsSiteSettingsPermissionsPage"
 
     init {
         NavigationRegistry.register(
             from = "HomePage",
             to = pageName,
-            steps = listOf(
-                NavigationStep.Click(HomeSelectors.MAIN_MENU_BUTTON),
-                NavigationStep.Click(MainMenuSelectors.SETTINGS_BUTTON),
-                NavigationStep.Swipe(SettingsSelectors.SITE_SETTINGS_BUTTON),
-                NavigationStep.Click(SettingsSelectors.SITE_SETTINGS_BUTTON),
-                // Will need to add for each permission type
-            ),
+            steps =
+                listOf(
+                    NavigationStep.Click(HomeSelectors.MAIN_MENU_BUTTON),
+                    NavigationStep.Click(MainMenuSelectors.SETTINGS_BUTTON),
+                    NavigationStep.Swipe(SettingsSelectors.SITE_SETTINGS_BUTTON),
+                    NavigationStep.Click(SettingsSelectors.SITE_SETTINGS_BUTTON),
+                    // Will need to add for each permission type
+                ),
         )
     }
 

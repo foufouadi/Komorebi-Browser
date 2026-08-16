@@ -89,6 +89,11 @@
         tab = tab.splitview;
       }
 
+      // Don't start a drag on a split view whose tabs are hidden.
+      if (isSplitViewWrapper(tab) && !tab.visible) {
+        return;
+      }
+
       this._tabbrowserTabs.previewPanel?.deactivate(null, { force: true });
       this.startTabDrag(event, tab);
     }
@@ -147,6 +152,7 @@
           draggedTab._dragData.expandGroupOnDrop &&
           !draggedTab.group.collapsed
         ) {
+          draggedTab.group.collapsedByDrag = true;
           draggedTab.group.collapsed = true;
         }
 
@@ -459,11 +465,6 @@
               metricsContext: dropMetricsContext,
             });
           }
-
-          if (isTabGroupLabel(draggedTab)) {
-            this._setIsDraggingTabGroup(draggedTab.group, false);
-            this._expandGroupOnDrop(draggedTab);
-          }
         };
 
         if (shouldPin || shouldUnpin) {
@@ -550,6 +551,13 @@
             moveTabs();
             this._tabbrowserTabs._notifyBackgroundTab(movingTabs.at(-1));
           }
+        }
+
+        // Every branch above has to end the tab group drag, including the ones
+        // that don't move anything.
+        if (isTabGroupLabel(draggedTab)) {
+          this._setIsDraggingTabGroup(draggedTab.group, false);
+          this._expandGroupOnDrop(draggedTab);
         }
       } else if (isTabGroupLabel(draggedTab)) {
         const dropIndex = this._getDropIndex(event);
@@ -1156,31 +1164,35 @@
       this._tabbrowserTabs._invalidateCachedVisibleTabs();
     }
 
+    /**
+     * Undoes the collapse a drag applied to a tab group. Safe to call from
+     * every way out of a drag: it does nothing for a group the user collapsed
+     * themselves, and nothing once the group is already on its way back.
+     *
+     * @param {MozTabbrowserTab|typeof MozTabbrowserTabGroup.labelElement} [draggedTab]
+     */
     _expandGroupOnDrop(draggedTab) {
-      if (
-        !isTabGroupLabel(draggedTab) ||
-        !draggedTab._dragData?.expandGroupOnDrop
-      ) {
+      if (!isTabGroupLabel(draggedTab)) {
         return;
       }
       let group = draggedTab.group;
+      if (!group.collapsedByDrag || !group.collapsed) {
+        return;
+      }
       let periphery = draggedTab.ownerDocument.getElementById(
         "tabbrowser-arrowscrollbox-periphery"
       );
-      let releaseReservedSpace = () =>
-        this.#releaseSpaceInScrolledContent(periphery);
-      if (group.collapsed) {
-        // The group's tabs animate back to their full size, so hold on to the
-        // space reserved for them until they get there.
-        group.addEventListener(
-          "TabGroupAnimationComplete",
-          releaseReservedSpace,
-          { once: true }
-        );
-        group.collapsed = false;
-      } else {
-        releaseReservedSpace();
-      }
+      // The group's tabs animate back to their full size, so hold on to the
+      // space reserved for them until they get there.
+      group.addEventListener(
+        "TabGroupAnimationComplete",
+        () => {
+          group.collapsedByDrag = false;
+          this.#releaseSpaceInScrolledContent(periphery);
+        },
+        { once: true }
+      );
+      group.collapsed = false;
     }
 
     /**
@@ -2839,7 +2851,7 @@
       periphery.style.top = "";
       // Space reserved for the tabs of a collapsed tab group is released by
       // _expandGroupOnDrop once they are back to their full size.
-      if (!draggedTab?._dragData?.expandGroupOnDrop) {
+      if (!isTabGroupLabel(draggedTab) || !draggedTab.group.collapsedByDrag) {
         this.#releaseSpaceInScrolledContent(periphery);
       }
       let pinnedTabsContainer = draggedTabDocument.getElementById(

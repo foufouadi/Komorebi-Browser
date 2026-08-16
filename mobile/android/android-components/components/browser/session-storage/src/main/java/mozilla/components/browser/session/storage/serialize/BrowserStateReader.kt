@@ -7,6 +7,7 @@ package mozilla.components.browser.session.storage.serialize
 import android.util.AtomicFile
 import android.util.JsonReader
 import android.util.JsonToken
+import java.util.UUID
 import mozilla.components.browser.session.storage.RecoverableBrowserState
 import mozilla.components.browser.state.state.BrowserState
 import mozilla.components.browser.state.state.LastMediaAccessState
@@ -24,11 +25,10 @@ import mozilla.components.support.ktx.android.util.nextBooleanOrNull
 import mozilla.components.support.ktx.android.util.nextIntOrNull
 import mozilla.components.support.ktx.android.util.nextStringOrNull
 import mozilla.components.support.ktx.util.readJSON
-import java.util.UUID
 
 /**
- * Reads a [RecoverableBrowserState] (partial, serialized [BrowserState]) or a single [RecoverableTab]
- * (partial, serialized [TabSessionState]) from disk.
+ * Reads a [RecoverableBrowserState] (partial, serialized [BrowserState]) or a single [RecoverableTab] (partial,
+ * serialized [TabSessionState]) from disk.
  */
 class BrowserStateReader {
     /**
@@ -57,10 +57,10 @@ class BrowserStateReader {
      * Reads a single [RecoverableTab] from the given [file].
      *
      * @param engine The [Engine] implementation for restoring the engine state.
-     * @param restoreSessionId Whether the original tab ID should be restored or whether a new ID
-     * should be generated for the tab.
-     * @param restoreParentId Whether the original parent tab ID should be restored or whether it
-     * should be set to `null`.
+     * @param restoreSessionId Whether the original tab ID should be restored or whether a new ID should be generated
+     *   for the tab.
+     * @param restoreParentId Whether the original parent tab ID should be restored or whether it should be set to
+     *   `null`.
      */
     fun readTab(
         engine: Engine,
@@ -162,10 +162,11 @@ private fun JsonReader.tab(
 
     return tab?.copy(
         engineSessionState = engineSessionState,
-        state = tab.state.copy(
-            id = if (restoreSessionId) tab.state.id else UUID.randomUUID().toString(),
-            parentId = if (restoreParentId) tab.state.parentId else null,
-        ),
+        state =
+            tab.state.copy(
+                id = if (restoreSessionId) tab.state.id else UUID.randomUUID().toString(),
+                parentId = if (restoreParentId) tab.state.parentId else null,
+            ),
     )
 }
 
@@ -233,39 +234,43 @@ private fun JsonReader.tabSession(): RecoverableTab {
 
     return RecoverableTab(
         engineSessionState = null, // This will be deserialized and added separately
-        state = TabState(
-            id = requireNotNull(id),
-            parentId = parentId,
-            url = requireNotNull(url),
-            title = requireNotNull(title),
-            searchTerm = requireNotNull(searchTerm),
-            contextId = contextId,
-            readerState = ReaderState(
-                active = readerStateActive ?: false,
-                activeUrl = readerActiveUrl,
-                scrollY = readerScrollY,
+        state =
+            TabState(
+                id = requireNotNull(id),
+                parentId = parentId,
+                url = requireNotNull(url),
+                title = requireNotNull(title),
+                searchTerm = requireNotNull(searchTerm),
+                contextId = contextId,
+                readerState =
+                    ReaderState(
+                        active = readerStateActive ?: false,
+                        activeUrl = readerActiveUrl,
+                        scrollY = readerScrollY,
+                    ),
+                historyMetadata =
+                    if (historyMetadataUrl != null) {
+                        HistoryMetadataKey(
+                            historyMetadataUrl,
+                            historyMetadataSearchTerm,
+                            historyMetadataReferrerUrl,
+                        )
+                    } else {
+                        null
+                    },
+                private = false, // We never serialize private sessions
+                lastAccess = lastAccess ?: 0,
+                createdAt = createdAt ?: 0,
+                lastVisibleAt = lastVisibleAt ?: 0,
+                lastMediaAccessState =
+                    LastMediaAccessState(
+                        lastMediaUrl ?: "",
+                        lastMediaAccess = lastMediaAccess ?: 0,
+                        mediaSessionActive = mediaSessionActive ?: false,
+                    ),
+                source = SessionState.Source.restore(sourceId, externalSourcePackageId, externalSourceCategory),
+                desktopMode = desktopMode ?: false,
             ),
-            historyMetadata = if (historyMetadataUrl != null) {
-                HistoryMetadataKey(
-                    historyMetadataUrl,
-                    historyMetadataSearchTerm,
-                    historyMetadataReferrerUrl,
-                )
-            } else {
-                null
-            },
-            private = false, // We never serialize private sessions
-            lastAccess = lastAccess ?: 0,
-            createdAt = createdAt ?: 0,
-            lastVisibleAt = lastVisibleAt ?: 0,
-            lastMediaAccessState = LastMediaAccessState(
-                lastMediaUrl ?: "",
-                lastMediaAccess = lastMediaAccess ?: 0,
-                mediaSessionActive = mediaSessionActive ?: false,
-            ),
-            source = SessionState.Source.restore(sourceId, externalSourcePackageId, externalSourceCategory),
-            desktopMode = desktopMode ?: false,
-        ),
     )
 }
 

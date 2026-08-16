@@ -58,21 +58,22 @@ class SessionControlInteractorTest {
 
     @Before
     fun setup() {
-        interactor = SessionControlInteractor(
-            controller,
-            recentTabController,
-            recentSyncedTabController,
-            bookmarksController,
-            recentVisitsController,
-            pocketStoriesController,
-            privateBrowsingController,
-            toolbarController,
-            homeSearchController,
-            topSiteController,
-            privacyNoticeBannerController,
-            trackingProtectionController,
-            logoController,
-        )
+        interactor =
+            SessionControlInteractor(
+                controller,
+                recentTabController,
+                recentSyncedTabController,
+                bookmarksController,
+                recentVisitsController,
+                pocketStoriesController,
+                privateBrowsingController,
+                toolbarController,
+                homeSearchController,
+                topSiteController,
+                privacyNoticeBannerController,
+                trackingProtectionController,
+                logoController,
+            )
     }
 
     @Test

@@ -30,7 +30,7 @@ object BehaviorRuntimeStateSetup {
             else -> {
                 throw AssertionError(
                     "Runtime setup for BrowserMode=$browserMode is not implemented. " +
-                        "This context should have been filtered by BehaviorContextSupportRegistry.",
+                        "This context should have been filtered by BehaviorContextSupportRegistry."
                 )
             }
         }

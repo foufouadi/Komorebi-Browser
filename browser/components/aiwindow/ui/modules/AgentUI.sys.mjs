@@ -75,6 +75,7 @@ export const AGENT_UPDATE_TYPES = Object.freeze({
   DELETE_WATCH: "delete-watch",
   PAUSE_WATCH: "pause-watch",
   CHECK_WATCH: "check-watch",
+  SAVE_WATCH_DRAFT: "save-watch-draft",
 });
 
 export const AGENT_COMMANDS = Object.freeze({
@@ -134,6 +135,8 @@ export class AgentUI {
     [AGENT_UPDATE_TYPES.DELETE_WATCH]: this.#handleDeleteMonitor.bind(this),
     [AGENT_UPDATE_TYPES.PAUSE_WATCH]: this.#handlePauseMonitor.bind(this),
     [AGENT_UPDATE_TYPES.CHECK_WATCH]: this.#handleCheckMonitor.bind(this),
+    [AGENT_UPDATE_TYPES.SAVE_WATCH_DRAFT]:
+      this.#handleSaveMonitorDraft.bind(this),
   };
 
   /**
@@ -233,6 +236,7 @@ export class AgentUI {
       schedule: this.#formatScheduleSummary(updateData?.schedule),
     };
     message.content.link = { l10nName: "tasks", href: TASKS_PAGE_URL };
+    message.toolUIDraft = null;
     message.toolUIData = {
       ...message.toolUIData,
       properties: {
@@ -280,7 +284,20 @@ export class AgentUI {
    * @returns {Promise<boolean>}
    */
   static async #handleCancelMonitor({ message, conversation }) {
+    message.toolUIDraft = null;
     await conversation.updateToolUI(message, null, null);
+    return true;
+  }
+
+  /**
+   * Mirrors the card's in-progress form state onto the message so it survives
+   * the card being torn down and rebuilt.
+   *
+   * @param {AgentHandlerContext} context
+   * @returns {boolean}
+   */
+  static #handleSaveMonitorDraft({ message, updateData }) {
+    message.toolUIDraft = updateData?.draft ?? null;
     return true;
   }
 
@@ -310,6 +327,7 @@ export class AgentUI {
     }
 
     const agent = message?.toolUIData?.properties?.agent ?? {};
+    message.toolUIDraft = null;
     message.toolUIData = {
       ...message.toolUIData,
       properties: {

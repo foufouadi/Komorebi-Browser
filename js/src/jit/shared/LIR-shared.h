@@ -676,20 +676,6 @@ class LConstructArrayNative : public LCallInstructionHelper<BOX_PIECES, 2, 3> {
   const LAllocation* getArgc() { return getOperand(0); }
 };
 
-// Returns from the function being compiled (not used in inlined frames). The
-// input must be a box.
-class LReturn : public LInstructionHelper<0, BOX_PIECES, 0> {
-  bool isGenerator_;
-
- public:
-  LIR_HEADER(Return)
-
-  explicit LReturn(bool isGenerator)
-      : LInstructionHelper(classOpcode), isGenerator_(isGenerator) {}
-
-  bool isGenerator() { return isGenerator_; }
-};
-
 class LHypot : public LCallInstructionHelper<1, 4, 0> {
   uint32_t numOperands_;
 
@@ -919,23 +905,77 @@ class LWasmSystemFloatRegisterResult : public LInstructionHelper<1, 0, 0> {
 };
 
 #ifdef ENABLE_WASM_JSPI
-class LWasmResume : public LInstructionHelper<0, 3, 3> {
+class LWasmSuspend : public LInstructionHelper<0, 3, 3> {
+ public:
+  LIR_HEADER(WasmSuspend);
+
+  static constexpr size_t InstanceIndex = 0;
+  static constexpr size_t SuspendedContIndex = 1;
+  static constexpr size_t HandlerIndex = 2;
+
+  explicit LWasmSuspend(const LAllocation& instance,
+                        const LAllocation& suspendedCont,
+                        const LAllocation& handler, const LDefinition& temp0,
+                        const LDefinition& temp1, const LDefinition& temp2)
+      : LInstructionHelper(classOpcode) {
+    this->setIsCall();
+    setOperand(InstanceIndex, instance);
+    setOperand(SuspendedContIndex, suspendedCont);
+    setOperand(HandlerIndex, handler);
+    setTemp(0, temp0);
+    setTemp(1, temp1);
+    setTemp(2, temp2);
+  }
+
+  const LAllocation* instance() const { return getOperand(InstanceIndex); }
+  const LAllocation* suspendedCont() const {
+    return getOperand(SuspendedContIndex);
+  }
+  const LAllocation* handler() const { return getOperand(HandlerIndex); }
+  const LDefinition* temp0() { return getTemp(0); }
+  const LDefinition* temp1() { return getTemp(1); }
+  const LDefinition* temp2() { return getTemp(2); }
+  MWasmSuspend* mir() const { return mir_->toWasmSuspend(); }
+
+  static bool isCallPreserved(AnyRegister reg) {
+    return LWasmCall::isCallPreserved(reg);
+  }
+};
+
+class LWasmPrepareResume : public LInstructionHelper<1, 1, 2> {
+ public:
+  LIR_HEADER(WasmPrepareResume);
+
+  static constexpr size_t ContIndex = 0;
+
+  explicit LWasmPrepareResume(const LAllocation& cont, const LDefinition& temp0,
+                              const LDefinition& temp1)
+      : LInstructionHelper(classOpcode) {
+    setOperand(ContIndex, cont);
+    setTemp(0, temp0);
+    setTemp(1, temp1);
+  }
+
+  const LAllocation* cont() const { return getOperand(ContIndex); }
+  const LDefinition* temp0() { return getTemp(0); }
+  const LDefinition* temp1() { return getTemp(1); }
+  MWasmPrepareResume* mir() const { return mir_->toWasmPrepareResume(); }
+};
+
+class LWasmResume : public LInstructionHelper<0, 2, 3> {
  public:
   LIR_HEADER(WasmResume);
 
   static constexpr size_t InstanceIndex = 0;
   static constexpr size_t ContIndex = 1;
-  static constexpr size_t HandlersParamsAreaIndex = 2;
 
   explicit LWasmResume(const LAllocation& instance, const LAllocation& cont,
-                       const LAllocation& handlersParamsArea,
                        const LDefinition& temp0, const LDefinition& temp1,
                        const LDefinition& temp2)
       : LInstructionHelper(classOpcode) {
     this->setIsCall();
     setOperand(InstanceIndex, instance);
     setOperand(ContIndex, cont);
-    setOperand(HandlersParamsAreaIndex, handlersParamsArea);
     setTemp(0, temp0);
     setTemp(1, temp1);
     setTemp(2, temp2);
@@ -943,9 +983,6 @@ class LWasmResume : public LInstructionHelper<0, 3, 3> {
 
   const LAllocation* instance() const { return getOperand(InstanceIndex); }
   const LAllocation* cont() const { return getOperand(ContIndex); }
-  const LAllocation* handlersParamsArea() const {
-    return getOperand(HandlersParamsAreaIndex);
-  }
   const LDefinition* temp0() { return getTemp(0); }
   const LDefinition* temp1() { return getTemp(1); }
   const LDefinition* temp2() { return getTemp(2); }

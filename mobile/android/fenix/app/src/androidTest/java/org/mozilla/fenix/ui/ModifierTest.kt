@@ -25,11 +25,9 @@ private const val ON_SHOWN_INDEX = 15
 private const val ON_SHOWN_NODE_COUNT = 30
 
 class ModifierTest {
-    @get:Rule(order = 0)
-    val fenixTestRule: FenixTestRule = FenixTestRule()
+    @get:Rule(order = 0) val fenixTestRule: FenixTestRule = FenixTestRule()
 
-    @get:Rule(order = 1)
-    val composeTestRule = createComposeRule()
+    @get:Rule(order = 1) val composeTestRule = createComposeRule()
 
     @Test
     fun verifyModifierOnShownWhenScrolledToWithNoSettleTime() {
@@ -55,7 +53,7 @@ class ModifierTest {
             ModifierOnShownContent(
                 onVisible = {
                     onShown = true
-                },
+                }
             )
         }
 
@@ -85,8 +83,7 @@ class ModifierTest {
     }
 
     private fun ComposeTestRule.scrollToOnShownIndex(index: Int = ON_SHOWN_INDEX) {
-        this.onNodeWithTag(ON_SHOWN_ROOT_TAG)
-            .performScrollToIndex(index)
+        this.onNodeWithTag(ON_SHOWN_ROOT_TAG).performScrollToIndex(index)
     }
 
     @Composable
@@ -95,25 +92,22 @@ class ModifierTest {
         settleTime: Int = ON_SHOWN_SETTLE_TIME_MS,
         onVisible: () -> Unit,
     ) {
-        LazyColumn(
-            modifier = Modifier.testTag(ON_SHOWN_ROOT_TAG),
-        ) {
+        LazyColumn(modifier = Modifier.testTag(ON_SHOWN_ROOT_TAG)) {
             items(ON_SHOWN_NODE_COUNT) { index ->
-                val modifier = if (index == indexToValidate) {
-                    Modifier.onShown(
-                        threshold = 1.0f,
-                        settleTime = settleTime,
-                        onVisible = onVisible,
-                    )
-                } else {
-                    Modifier
-                }
+                val modifier =
+                    if (index == indexToValidate) {
+                        Modifier.onShown(
+                            threshold = 1.0f,
+                            settleTime = settleTime,
+                            onVisible = onVisible,
+                        )
+                    } else {
+                        Modifier
+                    }
 
                 Text(
                     text = "Test item $index",
-                    modifier = modifier
-                        .fillMaxWidth()
-                        .height(50.dp),
+                    modifier = modifier.fillMaxWidth().height(50.dp),
                 )
             }
         }

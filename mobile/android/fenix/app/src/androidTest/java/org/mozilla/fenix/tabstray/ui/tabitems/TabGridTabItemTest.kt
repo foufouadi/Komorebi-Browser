@@ -18,8 +18,7 @@ import org.mozilla.fenix.tabstray.data.createTab
  */
 @RunWith(AndroidJUnit4::class)
 class TabGridTabItemTest {
-    @get:Rule
-    val composeTestRule = createComposeRule()
+    @get:Rule val composeTestRule = createComposeRule()
 
     @Test
     fun verifyDraggedItemScale() {
@@ -102,9 +101,7 @@ class TabGridTabItemTest {
     }
 
     @Composable
-    private fun ComposableUnderTest(
-        interactionState: TabItemInteractionState = TabItemInteractionState(),
-    ) {
+    private fun ComposableUnderTest(interactionState: TabItemInteractionState = TabItemInteractionState()) {
         TabGridTabItem(
             tab = createTab(url = "mozilla.org"),
             swipeToDismissBoxState = rememberSwipeToDismissBoxState(),

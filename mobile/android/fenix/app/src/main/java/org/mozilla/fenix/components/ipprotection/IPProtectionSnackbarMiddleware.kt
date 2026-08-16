@@ -17,13 +17,10 @@ import org.mozilla.fenix.components.appstate.AppAction
  *
  * @property connectionError Message shown when activation fails with a connection error.
  */
-data class IPProtectionSnackbarMessages(
-    val connectionError: String,
-)
+data class IPProtectionSnackbarMessages(val connectionError: String)
 
 /**
- * A middleware for observing error states in [IPProtectionState] and notifying the Snackbar for
- * user-facing messaging.
+ * A middleware for observing error states in [IPProtectionState] and notifying the Snackbar for user-facing messaging.
  *
  * This differs from the [IPProtectionInfoPrompter] which is similar, but handles sticky snackbar messages.
  */
@@ -39,9 +36,7 @@ class IPProtectionSnackbarMiddleware(
     ) {
         next(action)
         if (action is IPProtectionAction.ToggleFailed) {
-            lazyAppStore.value.dispatch(
-                AppAction.IPProtectionSnackbarAction.ConnectionError(messages.connectionError),
-            )
+            lazyAppStore.value.dispatch(AppAction.IPProtectionSnackbarAction.ConnectionError(messages.connectionError))
         }
     }
 }

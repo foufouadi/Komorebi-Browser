@@ -86,10 +86,11 @@ fun MarketingDataOnboardingPage(
     ) {
         val verticalPadding = if (state.isSmallDevice) 0.dp else FirefoxTheme.layout.space.static300
         Column(
-            modifier = Modifier.padding(
-                horizontal = FirefoxTheme.layout.space.static200,
-                vertical = verticalPadding,
-            ),
+            modifier =
+                Modifier.padding(
+                    horizontal = FirefoxTheme.layout.space.static200,
+                    vertical = verticalPadding,
+                ),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             if (state.isSmallDevice) {
@@ -100,22 +101,16 @@ fun MarketingDataOnboardingPage(
 
             var checkboxChecked by remember { mutableStateOf(true) }
 
-            Box(
-                modifier = Modifier
-                    .weight(CONTENT_WEIGHT)
-                    .fillMaxWidth(),
-            ) {
+            Box(modifier = Modifier.weight(CONTENT_WEIGHT).fillMaxWidth()) {
                 val scrollState = rememberScrollState()
 
-                CompositionLocalProvider(
-                    LocalOverscrollFactory provides null,
-                ) {
+                CompositionLocalProvider(LocalOverscrollFactory provides null) {
                     val startPadding = 20.dp
                     Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(scrollState)
-                            .padding(start = startPadding, end = FirefoxTheme.layout.space.static400),
+                        modifier =
+                            Modifier.fillMaxSize()
+                                .verticalScroll(scrollState)
+                                .padding(start = startPadding, end = FirefoxTheme.layout.space.static400),
                         verticalArrangement = Arrangement.spacedBy(36.dp),
                     ) {
                         val title = getTitleForVariant(state)
@@ -198,16 +193,15 @@ fun MarketingDataOnboardingPage(
     }
 }
 
-/**
- * We are temporarily adjusting the image size for treatment c only.
- */
+/** We are temporarily adjusting the image size for treatment c only. */
 @Composable
 private fun imageHeightForTreatment(data: OnboardingMarketingData): Dp {
-    val imageHeight = if (data.marketingCardVariant == MarketingCardVariant.TREATMENT_C) {
-        MARKETING_CONTENT_IMAGE_HEIGHT_TREATMENT_C
-    } else {
-        MARKETING_CONTENT_IMAGE_HEIGHT
-    }
+    val imageHeight =
+        if (data.marketingCardVariant == MarketingCardVariant.TREATMENT_C) {
+            MARKETING_CONTENT_IMAGE_HEIGHT_TREATMENT_C
+        } else {
+            MARKETING_CONTENT_IMAGE_HEIGHT
+        }
     return imageHeight
 }
 
@@ -220,8 +214,7 @@ private fun SecondaryButton(
 ) {
     when (state.marketingData?.marketingCardVariant) {
         MarketingCardVariant.DEFAULT,
-        null,
-            -> Unit
+        null -> Unit
 
         else -> SecondaryButtonOutline(action, state, onMarketingDataSkipClick, modifier)
     }
@@ -229,23 +222,25 @@ private fun SecondaryButton(
 
 @Composable
 private fun getImageResourceForVariant(state: OnboardingPageState): Int {
-    val imageResource = state.marketingData?.let {
-        imageResourceForVariant(
-            defaultImageResource = state.imageRes,
-            marketingCardVariant = it.marketingCardVariant,
-        )
-    } ?: state.imageRes
+    val imageResource =
+        state.marketingData?.let {
+            imageResourceForVariant(
+                defaultImageResource = state.imageRes,
+                marketingCardVariant = it.marketingCardVariant,
+            )
+        } ?: state.imageRes
     return imageResource
 }
 
 @Composable
 private fun getTitleForVariant(state: OnboardingPageState): String {
-    val title = state.marketingData?.let {
-        titleCopyForVariant(
-            defaultString = state.title,
-            marketingCardVariant = it.marketingCardVariant,
-        )
-    } ?: state.title
+    val title =
+        state.marketingData?.let {
+            titleCopyForVariant(
+                defaultString = state.title,
+                marketingCardVariant = it.marketingCardVariant,
+            )
+        } ?: state.title
     return title
 }
 
@@ -256,27 +251,30 @@ private fun PrimaryButton(
     checkboxChecked: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val buttonText = state.marketingData?.let {
-        primaryButtonCopyForVariant(
-            defaultString = state.primaryButton.text,
-            marketingCardVariant = it.marketingCardVariant,
-        )
-    } ?: state.primaryButton.text
+    val buttonText =
+        state.marketingData?.let {
+            primaryButtonCopyForVariant(
+                defaultString = state.primaryButton.text,
+                marketingCardVariant = it.marketingCardVariant,
+            )
+        } ?: state.primaryButton.text
 
     if (state.marketingData?.marketingCardVariant == MarketingCardVariant.DEFAULT) {
         FilledButton(
             text = buttonText,
-            modifier = modifier.semantics {
-                testTag = state.title + "onboarding_card.positive_button"
-            },
+            modifier =
+                modifier.semantics {
+                    testTag = state.title + "onboarding_card.positive_button"
+                },
             onClick = { onMarketingDataContinueClick(checkboxChecked) },
         )
     } else {
         FilledButton(
             text = buttonText,
-            modifier = modifier.semantics {
-                testTag = state.title + "onboarding_card.positive_button"
-            },
+            modifier =
+                modifier.semantics {
+                    testTag = state.title + "onboarding_card.positive_button"
+                },
             icon = painterResource(id = R.drawable.ic_favourite_filled),
             iconModifier = Modifier.size(16.dp),
             iconTint = PhotonColors.Red50,
@@ -292,18 +290,20 @@ private fun SecondaryButtonOutline(
     onMarketingDataSkipClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val buttonText = state.marketingData?.let {
-        secondaryButtonCopyForVariant(
-            defaultString = action.text,
-            marketingCardVariant = it.marketingCardVariant,
-        )
-    } ?: action.text
+    val buttonText =
+        state.marketingData?.let {
+            secondaryButtonCopyForVariant(
+                defaultString = action.text,
+                marketingCardVariant = it.marketingCardVariant,
+            )
+        } ?: action.text
 
     OutlinedButton(
         text = buttonText,
-        modifier = modifier.semantics {
-            testTag = state.title + "onboarding_card.negative_button"
-        },
+        modifier =
+            modifier.semantics {
+                testTag = state.title + "onboarding_card.negative_button"
+            },
         onClick = { onMarketingDataSkipClick() },
     )
 }
@@ -350,13 +350,10 @@ private fun DefaultContent(
             onValueChange = {
                 onMarketingOptInToggle.invoke(!checkboxChecked)
             },
-        ),
+        )
     ) {
         Checkbox(
-            modifier = Modifier
-                .align(Alignment.Top)
-                .offset(y = (-12).dp, x = (-12).dp)
-                .clearAndSetSemantics {},
+            modifier = Modifier.align(Alignment.Top).offset(y = (-12).dp, x = (-12).dp).clearAndSetSemantics {},
             checked = checkboxChecked,
             onCheckedChange = {
                 onMarketingOptInToggle.invoke(!checkboxChecked)
@@ -365,13 +362,14 @@ private fun DefaultContent(
 
         LinkText(
             text = marketingData.bodyOneText.updateFirstPlaceholder(marketingData.bodyOneLinkText),
-            linkTextStates = listOf(
-                LinkTextState(
-                    text = marketingData.bodyOneLinkText,
-                    url = "",
-                    onClick = { onMarketingDataLearnMoreClick() },
+            linkTextStates =
+                listOf(
+                    LinkTextState(
+                        text = marketingData.bodyOneLinkText,
+                        url = "",
+                        onClick = { onMarketingDataLearnMoreClick() },
+                    )
                 ),
-            ),
             linkTextDecoration = TextDecoration.Underline,
             style = FirefoxTheme.typography.body2,
             textAlign = TextAlign.Start,
@@ -390,13 +388,14 @@ private fun TreatmentCContent(
 
     LinkText(
         text = bodyCopy.updateFirstPlaceholder(linkCopy),
-        linkTextStates = listOf(
-            LinkTextState(
-                text = linkCopy,
-                url = "",
-                onClick = { onMarketingDataLearnMoreClick() },
+        linkTextStates =
+            listOf(
+                LinkTextState(
+                    text = linkCopy,
+                    url = "",
+                    onClick = { onMarketingDataLearnMoreClick() },
+                )
             ),
-        ),
         linkTextDecoration = TextDecoration.Underline,
         style = FirefoxTheme.typography.body2,
         textAlign = TextAlign.Start,
@@ -421,41 +420,41 @@ private fun TreatmentCContent(
 private fun primaryButtonCopyForVariant(
     defaultString: String,
     marketingCardVariant: MarketingCardVariant,
-) = when (marketingCardVariant) {
-    MarketingCardVariant.DEFAULT -> defaultString
+) =
+    when (marketingCardVariant) {
+        MarketingCardVariant.DEFAULT -> defaultString
 
-    MarketingCardVariant.TREATMENT_C ->
-        stringResource(R.string.nova_onboarding_marketing_primary_button_text_3)
-}
+        MarketingCardVariant.TREATMENT_C -> stringResource(R.string.nova_onboarding_marketing_primary_button_text_3)
+    }
 
 @Composable
 private fun secondaryButtonCopyForVariant(
     defaultString: String,
     marketingCardVariant: MarketingCardVariant,
-) = when (marketingCardVariant) {
-    MarketingCardVariant.DEFAULT -> defaultString
-    MarketingCardVariant.TREATMENT_C,
-        -> stringResource(R.string.nova_onboarding_marketing_secondary_button_text_2)
-}
+) =
+    when (marketingCardVariant) {
+        MarketingCardVariant.DEFAULT -> defaultString
+        MarketingCardVariant.TREATMENT_C -> stringResource(R.string.nova_onboarding_marketing_secondary_button_text_2)
+    }
 
 private fun imageResourceForVariant(
     defaultImageResource: Int,
     marketingCardVariant: MarketingCardVariant,
-) = when (marketingCardVariant) {
-    MarketingCardVariant.DEFAULT -> defaultImageResource
-    MarketingCardVariant.TREATMENT_C,
-        -> R.drawable.ic_kit_heart
-}
+) =
+    when (marketingCardVariant) {
+        MarketingCardVariant.DEFAULT -> defaultImageResource
+        MarketingCardVariant.TREATMENT_C -> R.drawable.ic_kit_heart
+    }
 
 @Composable
 private fun titleCopyForVariant(
     defaultString: String,
     marketingCardVariant: MarketingCardVariant,
-) = when (marketingCardVariant) {
-    MarketingCardVariant.DEFAULT -> defaultString
-    MarketingCardVariant.TREATMENT_C,
-        -> stringResource(R.string.onboarding_marketing_redesign_title)
-}
+) =
+    when (marketingCardVariant) {
+        MarketingCardVariant.DEFAULT -> defaultString
+        MarketingCardVariant.TREATMENT_C -> stringResource(R.string.onboarding_marketing_redesign_title)
+    }
 
 private fun bodyCopyForVariant(marketingCardVariant: MarketingCardVariant) =
     when (marketingCardVariant) {
@@ -464,10 +463,11 @@ private fun bodyCopyForVariant(marketingCardVariant: MarketingCardVariant) =
     }
 
 private class BodyResourcePreviewProvider : PreviewParameterProvider<MarketingCardVariant> {
-    override val values = sequenceOf(
-        MarketingCardVariant.DEFAULT,
-        MarketingCardVariant.TREATMENT_C,
-    )
+    override val values =
+        sequenceOf(
+            MarketingCardVariant.DEFAULT,
+            MarketingCardVariant.TREATMENT_C,
+        )
 
     override fun getDisplayName(index: Int): String {
         return values.elementAt(index).name
@@ -481,29 +481,33 @@ private class BodyResourcePreviewProvider : PreviewParameterProvider<MarketingCa
 @PreviewLightDark
 @Composable
 private fun MarketingDataOnboardingPagePreview(
-    @PreviewParameter(BodyResourcePreviewProvider::class) variant: MarketingCardVariant,
+    @PreviewParameter(BodyResourcePreviewProvider::class) variant: MarketingCardVariant
 ) {
     FirefoxTheme {
         MarketingDataOnboardingPage(
-            state = OnboardingPageState(
-                imageRes = R.drawable.nova_onboarding_marketing,
-                title = stringResource(id = R.string.nova_onboarding_marketing_title),
-                description = "", // NB: not used
-                primaryButton = Action(
-                    text = stringResource(id = R.string.nova_onboarding_continue_button),
-                    onClick = {},
+            state =
+                OnboardingPageState(
+                    imageRes = R.drawable.nova_onboarding_marketing,
+                    title = stringResource(id = R.string.nova_onboarding_marketing_title),
+                    description = "", // NB: not used
+                    primaryButton =
+                        Action(
+                            text = stringResource(id = R.string.nova_onboarding_continue_button),
+                            onClick = {},
+                        ),
+                    secondaryButton =
+                        Action(
+                            text = "", // NB: value should be set in the secondaryButtonCopyForVariant function
+                            onClick = {},
+                        ),
+                    marketingData =
+                        OnboardingMarketingData(
+                            marketingCardVariant = variant,
+                            bodyOneText = stringResource(id = R.string.nova_onboarding_marketing_body),
+                            bodyOneLinkText = stringResource(id = R.string.nova_onboarding_marketing_body_link_text),
+                            bodyTwoText = "", // NB: not used
+                        ),
                 ),
-                secondaryButton = Action(
-                    text = "", // NB: value should be set in the secondaryButtonCopyForVariant function
-                    onClick = {},
-                ),
-                marketingData = OnboardingMarketingData(
-                    marketingCardVariant = variant,
-                    bodyOneText = stringResource(id = R.string.nova_onboarding_marketing_body),
-                    bodyOneLinkText = stringResource(id = R.string.nova_onboarding_marketing_body_link_text),
-                    bodyTwoText = "", // NB: not used
-                ),
-            ),
             onMarketingDataLearnMoreClick = {},
             onMarketingOptInToggle = {},
             onMarketingDataContinueClick = {},

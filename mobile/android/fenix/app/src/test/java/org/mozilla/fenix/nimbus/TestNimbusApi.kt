@@ -8,13 +8,10 @@ import mozilla.components.service.nimbus.NimbusApi
 import org.mozilla.experiments.nimbus.NimbusInterface
 
 /**
- * Test variant of [mozilla.components.service.nimbus.NimbusApi]. This class exists so that
- * we can easily create fake implementations of [NimbusApi] for tests without having to override or
- * so many functions
+ * Test variant of [mozilla.components.service.nimbus.NimbusApi]. This class exists so that we can easily create fake
+ * implementations of [NimbusApi] for tests without having to override or so many functions
  */
-abstract class TestNimbusApi(
-    val testContext: Context,
-) : NimbusApi {
+abstract class TestNimbusApi(val testContext: Context) : NimbusApi {
 
     override fun register(observer: NimbusInterface.Observer) = Unit
 

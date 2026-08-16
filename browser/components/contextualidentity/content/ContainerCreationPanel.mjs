@@ -7,6 +7,12 @@ import { ContainerEditor } from "chrome://browser/content/usercontext/ContainerE
 const ANCHOR_ID = "userContext-icons";
 const ANCHOR_PINNED_CLASS = "container-anchor-pinned";
 
+const lazy = {};
+
+ChromeUtils.defineESModuleGetters(lazy, {
+  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
+});
+
 function unpinAnchor(anchor) {
   if (!anchor.classList.contains(ANCHOR_PINNED_CLASS)) {
     return;
@@ -23,10 +29,24 @@ function unpinAnchor(anchor) {
  */
 export const ContainerCreationPanel = {
   /**
-   * @param {Window} win
-   *   The browser window hosting the panel.
+   * The menu items are also built by chrome windows without a browser command
+   * set, like the Library and the legacy sidebars, so the panel is shown on the
+   * topmost browser window rather than on the window owning the menu item,
+   * opening one when none is available.
+   *
+   * @param {Window} sourceWin
+   *   The chrome window the request originated from.
    */
-  open(win) {
+  async open(sourceWin) {
+    let source = sourceWin.top;
+    let win = source.gBrowser
+      ? source
+      : (lazy.BrowserWindowTracker.getTopWindow() ??
+        (await lazy.BrowserWindowTracker.promiseOpenWindow()));
+    if (win != source) {
+      win.focus();
+    }
+
     let doc = win.document;
 
     let panel = doc.getElementById("containerCreation-panel");

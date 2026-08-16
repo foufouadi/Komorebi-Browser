@@ -258,6 +258,11 @@ class XPCShellTestThread(Thread):
         self.timedout = False
         self.infra = False
 
+        # Set by run() when the thread finishes; testTimeout can mark a test done
+        # while its thread is still blocked, so they need a value from the start.
+        self.exception = None
+        self.traceback = None
+
         # event from main thread to signal work done
         self.event = kwargs.get("event")
         self.done = False  # explicitly set flag so we don't rely on thread.isAlive
@@ -523,6 +528,12 @@ class XPCShellTestThread(Thread):
         # Now that we've finished cleaning up after the timed out test we can
         # relinquish the lock to allow run_test() to finish.
         self.lock.release()
+
+        # A killed process can leave a child holding its stdout pipe open, in
+        # which case run_test never returns from communicate() and run() never
+        # gets to set this. Set it here, after the test_end above so a retry
+        # can't interleave its test_start with our output.
+        self.done = True
 
     def reportTimeoutResult(self):
         """Log the structured failure for a timed-out test: a FAIL test_status
@@ -2612,6 +2623,14 @@ class XPCShellTests:
     def test_ended(self, test):
         pass
 
+    def join_test(self, test):
+        """Wait for a test to be done rather than for its thread to exit: a test
+        that timed out leaving a child process holding its stdout pipe open
+        never returns from communicate(), and testTimeout marks it done for us.
+        The thread is a daemon, so leaving it blocked behind is harmless."""
+        while not test.done:
+            test.join(1)
+
     def runTestList(
         self, tests_queue, sequential_tests, testClass, mobileArgs, **kwargs
     ):
@@ -2720,7 +2739,7 @@ class XPCShellTests:
                     )
                     break
                 self.start_test(test)
-                test.join()
+                self.join_test(test)
                 self.test_ended(test)
                 if (test.failCount > 0 or test.passCount <= 0) and test.retry:
                     self.try_again_list.append(test.test_object)
@@ -2755,7 +2774,7 @@ class XPCShellTests:
                 **try_again_kwargs,
             )
             self.start_test(test)
-            test.join()
+            self.join_test(test)
             self.test_ended(test)
             self.addTestResults(test)
             # did the test encounter any exception?

@@ -32,10 +32,7 @@ import org.mozilla.fenix.theme.FirefoxTheme
 import org.mozilla.fenix.theme.PreviewThemeProvider
 import org.mozilla.fenix.theme.Theme
 
-/**
- * Distribution UI for the debug drawer that displays various distribution related tools.
- */
-
+/** Distribution UI for the debug drawer that displays various distribution related tools. */
 @Composable
 fun DistributionTools() {
     val context = LocalContext.current
@@ -43,7 +40,8 @@ fun DistributionTools() {
 
     val distributionId: String by remember {
         stateFlow.map { it.distributionId ?: "" }
-    }.collectAsState(initial = "")
+    }
+        .collectAsState(initial = "")
 
     val settings = components.settings
 
@@ -56,7 +54,8 @@ fun DistributionTools() {
                 utmSource: ${settings.utmSource}
                 utmContent: ${settings.utmContent}
                 utmCampaign: ${settings.utmCampaign}
-            """.trimIndent(),
+            """
+                .trimIndent()
         )
     }
 
@@ -81,9 +80,9 @@ private fun DistributionToolsContent(
 ) {
     Surface {
         Column(
-            modifier = Modifier
-                .padding(all = FirefoxTheme.layout.space.static200)
-                .verticalScroll(state = rememberScrollState()),
+            modifier =
+                Modifier.padding(all = FirefoxTheme.layout.space.static200)
+                    .verticalScroll(state = rememberScrollState())
         ) {
             Text(
                 text = stringResource(R.string.debug_drawer_distribution_id),
@@ -117,9 +116,7 @@ private fun DistributionToolsContent(
 
 @Preview
 @Composable
-private fun DistributionToolsPreview(
-    @PreviewParameter(PreviewThemeProvider::class) theme: Theme,
-) {
+private fun DistributionToolsPreview(@PreviewParameter(PreviewThemeProvider::class) theme: Theme) {
     FirefoxTheme(theme) {
         DistributionToolsContent(
             distributionId = "distributionId",

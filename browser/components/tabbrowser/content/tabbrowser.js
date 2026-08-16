@@ -4889,17 +4889,20 @@
       if (typeof elementIndex != "number" && typeof tabIndex != "number") {
         // Move the new tab after another tab if needed, to the end otherwise.
         elementIndex = Infinity;
+        let insertRelatedAfterCurrent = Services.prefs.getBoolPref(
+          "browser.tabs.insertRelatedAfterCurrent"
+        );
         if (
           !bulkOrderedOpen &&
-          ((openerTab &&
-            Services.prefs.getBoolPref(
-              "browser.tabs.insertRelatedAfterCurrent"
-            )) ||
+          ((openerTab && insertRelatedAfterCurrent) ||
             Services.prefs.getBoolPref("browser.tabs.insertAfterCurrent"))
         ) {
           let lastRelatedTab =
             openerTab && this.#lastRelatedTabMap.get(openerTab);
-          let previousTab = lastRelatedTab || openerTab || this.selectedTab;
+          let previousTab =
+            (insertRelatedAfterCurrent && lastRelatedTab) ||
+            openerTab ||
+            this.selectedTab;
           if (!tabGroup) {
             tabGroup = previousTab.group;
           }
@@ -6538,7 +6541,9 @@
 
       // Expedite the removal of the icon if it was already scheduled.
       if (aOtherTab._soundPlayingAttrRemovalTimer) {
-        clearTimeout(aOtherTab._soundPlayingAttrRemovalTimer);
+        aOtherTab.documentGlobal.clearTimeout(
+          aOtherTab._soundPlayingAttrRemovalTimer
+        );
         aOtherTab._soundPlayingAttrRemovalTimer = 0;
         aOtherTab.removeAttribute("soundplaying");
         remoteBrowser._tabAttrModified(aOtherTab, ["soundplaying"]);
@@ -6719,7 +6724,9 @@
     // another window's gBrowser is an instance of a different Tabbrowser class
     // and its private fields can't be read directly. These thin accessors run
     // in the owning window's realization, so callers can route through them
-    // (e.g. otherWindowGBrowser._getTabProgressListener(tab)).
+    // (e.g. otherWindowGBrowser._getTabProgressListener(tab)). Creating the
+    // listener there also keeps it in the realm of the window it belongs to,
+    // so it can't keep another window alive.
     _getTabProgressListener(aTab) {
       return this.#tabListeners.get(aTab);
     }
@@ -6728,8 +6735,10 @@
       return this.#tabFilters.get(aTab);
     }
 
-    _setTabProgressListener(aTab, aListener) {
-      this.#tabListeners.set(aTab, aListener);
+    _createTabProgressListener(aTab, aBrowser) {
+      let listener = new TabProgressListener(aTab, aBrowser, false, false);
+      this.#tabListeners.set(aTab, listener);
+      return listener;
     }
 
     swapBrowsers(aOurTab, aOtherTab) {
@@ -6746,13 +6755,10 @@
       this._swapBrowserDocShells(aOurTab, otherBrowser);
 
       // Restore the listeners for the swapped in tab.
-      tabListener = new otherTabBrowser.documentGlobal.TabProgressListener(
+      tabListener = otherTabBrowser._createTabProgressListener(
         aOtherTab,
-        otherBrowser,
-        false,
-        false
+        otherBrowser
       );
-      otherTabBrowser._setTabProgressListener(aOtherTab, tabListener);
 
       const notifyAll = Ci.nsIWebProgress.NOTIFY_ALL;
       filter.addProgressListener(tabListener, notifyAll);
@@ -6915,6 +6921,17 @@
       event.initEvent("TabShow", true, false);
       aTab.dispatchEvent(event);
       SessionStore.deleteCustomTabValue(aTab, "hiddenBy");
+
+      // Treat split view as one unit. Showing one of its tabs shows
+      // the whole view. This prevents invisible tabs from appearing in the
+      // splitview container.
+      if (aTab.splitview) {
+        for (let sibling of aTab.splitview.tabs) {
+          if (sibling != aTab) {
+            this.showTab(sibling);
+          }
+        }
+      }
     }
 
     hideTab(aTab, aSource) {
@@ -6946,6 +6963,22 @@
       aTab.dispatchEvent(event);
       if (aSource) {
         SessionStore.setCustomTabValue(aTab, "hiddenBy", aSource);
+      }
+
+      // Treat split view as one unit. Hiding one of its tabs hides the whole
+      // view.
+      // One exception: a selected tab can't be hidden (see the
+      // guard above), so if the split view holds the active tab, that tab
+      // stays selected while its sibling is set to hidden. It remains selected
+      // until focus moves to a tab outside the view. Despite a mismatch in
+      // state, the splitview container still becomes visually hidden via a
+      // display: none rule in browser/themes/shared/tabbrowser/tabs.css.
+      if (aTab.splitview) {
+        for (let sibling of aTab.splitview.tabs) {
+          if (sibling != aTab) {
+            this.hideTab(sibling, aSource);
+          }
+        }
       }
     }
 

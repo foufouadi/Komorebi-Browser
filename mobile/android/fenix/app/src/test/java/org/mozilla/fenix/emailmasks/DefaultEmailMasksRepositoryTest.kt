@@ -1,6 +1,5 @@
 package org.mozilla.fenix.emailmasks
 
-import androidx.test.core.app.ApplicationProvider
 import mozilla.components.support.test.robolectric.testContext
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

@@ -10,9 +10,7 @@ object ReachabilityCaseFactory {
 
     private const val TAG = "ReachabilityCaseFactory"
 
-    fun buildReachabilityCases(
-        runState: String,
-    ): List<ReachabilityCase> {
+    fun buildReachabilityCases(runState: String): List<ReachabilityCase> {
         NavigationGraphBootstrap.ensureInitialized()
         val generatedCases = NavigationTestPlanner.buildReachabilityCases()
 
@@ -36,11 +34,12 @@ object ReachabilityCaseFactory {
         shardCount: Int,
     ): List<ReachabilityCase> {
         val allCases = buildReachabilityCases(runState)
-        val shardCases = ShardUtils.filterForShard(
-            items = allCases,
-            shardIndex = shardIndex,
-            shardCount = shardCount,
-        )
+        val shardCases =
+            ShardUtils.filterForShard(
+                items = allCases,
+                shardIndex = shardIndex,
+                shardCount = shardCount,
+            )
 
         Log.i(
             TAG,

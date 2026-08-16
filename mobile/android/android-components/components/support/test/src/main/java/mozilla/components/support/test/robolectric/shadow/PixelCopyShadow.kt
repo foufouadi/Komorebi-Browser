@@ -12,9 +12,7 @@ import android.view.Window
 import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
 
-/**
- * Shadow for [PixelCopy] API.
- */
+/** Shadow for [PixelCopy] API. */
 @Implements(PixelCopy::class)
 class PixelCopyShadow {
 

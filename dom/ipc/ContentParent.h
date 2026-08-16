@@ -664,6 +664,8 @@ class ContentParent final : public PContentParent,
       nsIPrincipal* aPrincipal,
       const EnumSet<ValidatePrincipalOptions>& aOptions = {});
 
+  nsIDOMProcessParent* ProcessParent() override { return this; }
+
   void OnCompositorDeviceReset() override;
 
   // Control the priority of the IPC messages for input events.

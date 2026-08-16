@@ -106,7 +106,9 @@
  *
  * Operands named `resumeIndex` (`JOF_RESUMEINDEX`) refer to a resume point in
  * the current script. `resumeIndex` must be a valid index into
- * `script->resumeOffsets()`.
+ * `script->resumeOffsets()`. That list starts with an entry for each of the
+ * script's yield and await ops, in bytecode order, followed by the case
+ * targets of the `JSOp::TableSwitch` ops.
  *
  * Operands named `hops` and `slot` (`JOF_ENVCOORD`) refer a slot in an
  * `EnvironmentObject`. At run time, they must point to a fixed slot in an
