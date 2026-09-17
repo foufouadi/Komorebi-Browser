@@ -142,13 +142,6 @@ struct ParamTraits<mozilla::layers::RepaintRequest::ScrollOffsetUpdateType>
           mozilla::layers::RepaintRequest::sHighestScrollOffsetUpdateType> {};
 
 template <>
-struct ParamTraits<mozilla::layers::OverscrollBehavior>
-    : public ContiguousEnumSerializerInclusive<
-          mozilla::layers::OverscrollBehavior,
-          mozilla::layers::OverscrollBehavior::Auto,
-          mozilla::layers::kHighestOverscrollBehavior> {};
-
-template <>
 struct ParamTraits<mozilla::StyleOverflow>
     : public ContiguousEnumSerializerInclusive<mozilla::StyleOverflow,
                                                mozilla::StyleOverflow::Visible,
@@ -806,6 +799,7 @@ DEFINE_SERVO_PARAMTRAITS(StyleScale)
 DEFINE_SERVO_PARAMTRAITS(StyleTranslate)
 DEFINE_SERVO_PARAMTRAITS(StyleTransform)
 DEFINE_SERVO_PARAMTRAITS(StyleComputedTimingFunction)
+DEFINE_SERVO_PARAMTRAITS(StyleOverscrollBehavior)
 
 #undef DEFINE_SERVO_PARAMTRAITS
 

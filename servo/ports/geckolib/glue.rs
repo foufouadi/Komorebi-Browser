@@ -1061,6 +1061,12 @@ ipdl_utils::define_ffi_serializer!(
     Servo_StyleComputedTimingFunction_Deserialize
 );
 
+ipdl_utils::define_ffi_serializer!(
+    computed::box_::OverscrollBehavior,
+    Servo_StyleOverscrollBehavior_Serialize,
+    Servo_StyleOverscrollBehavior_Deserialize
+);
+
 // Return the ComputedValues by a base ComputedValues and the rules.
 fn resolve_rules_for_element_with_context<'a>(
     element: GeckoElement<'a>,

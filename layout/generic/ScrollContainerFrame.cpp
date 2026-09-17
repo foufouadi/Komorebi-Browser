@@ -4328,8 +4328,8 @@ void ScrollContainerFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     // APZ's fallback behaviour of scrolling the enclosing scroll frame
     // would violate the specified overscroll-behavior.
     auto overscroll = GetOverscrollBehaviorInfo();
-    if (overscroll.mBehaviorX != OverscrollBehavior::Auto ||
-        overscroll.mBehaviorY != OverscrollBehavior::Auto) {
+    if (overscroll.mBehaviorX != StyleOverscrollBehavior::Auto ||
+        overscroll.mBehaviorY != StyleOverscrollBehavior::Auto) {
       info += CompositorHitTestFlags::eRequiresTargetConfirmation;
     }
 
