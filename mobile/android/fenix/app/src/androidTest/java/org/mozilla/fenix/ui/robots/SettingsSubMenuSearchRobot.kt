@@ -769,9 +769,9 @@ fun settingsSubMenuSearch(interact: SettingsSubMenuSearchRobot.() -> Unit): Sett
 /**
  * Matches search shortcut items inside the 'Manage search shortcuts' menu
  *
- * @param name, of type String, should be the name of the search engine.
- * @param checkboxIndex, of type Int, is the checkbox' index afferent to the search engine.
- * @param isChecked, of type Boolean, should show if the checkbox is expected to be checked.
+ * @property name, of type String, should be the name of the search engine.
+ * @property checkboxIndex, of type Int, is the checkbox' index afferent to the search engine.
+ * @property isChecked, of type Boolean, should show if the checkbox is expected to be checked.
  */
 class EngineShortcut(
     val name: String,

@@ -28,6 +28,18 @@ use thiserror::Error;
 use webdriver::capabilities::{BrowserCapabilities, Capabilities};
 use webdriver::error::{ErrorStatus, WebDriverError, WebDriverResult};
 
+/// Firefox for Android packages (release, beta, nightly) plus the debug variant
+const FENIX_FAMILY_PACKAGES: &[&str] = &[
+    "org.mozilla.fenix",
+    "org.mozilla.fenix.debug",
+    "org.mozilla.firefox",
+    "org.mozilla.firefox_beta",
+];
+
+fn is_fenix_family(package: &str) -> bool {
+    FENIX_FAMILY_PACKAGES.contains(&package)
+}
+
 #[derive(Clone, Debug, Error)]
 enum VersionError {
     #[error(transparent)]
@@ -731,11 +743,7 @@ impl FirefoxOptions {
                 }
                 None => {
                     match package.as_str() {
-                        "org.mozilla.firefox"
-                        | "org.mozilla.firefox_beta"
-                        | "org.mozilla.fenix"
-                        | "org.mozilla.fenix.debug"
-                        | "org.mozilla.reference.browser" => {
+                        p if is_fenix_family(p) || p == "org.mozilla.reference.browser" => {
                             Some("org.mozilla.fenix.IntentReceiverActivity".to_string())
                         }
                         "org.mozilla.focus"
@@ -764,7 +772,7 @@ impl FirefoxOptions {
                 None => None,
             };
 
-            android.intent_arguments = match options.get("androidIntentArguments") {
+            let intent_arguments = match options.get("androidIntentArguments") {
                 Some(json) => {
                     let args_array = json.as_array().ok_or_else(|| {
                         WebDriverError::new(
@@ -772,7 +780,7 @@ impl FirefoxOptions {
                             "androidIntentArguments is not an array",
                         )
                     })?;
-                    let args = args_array
+                    args_array
                         .iter()
                         .map(|x| x.as_str().map(|x| x.to_owned()))
                         .collect::<Option<Vec<String>>>()
@@ -781,27 +789,73 @@ impl FirefoxOptions {
                                 ErrorStatus::InvalidArgument,
                                 "androidIntentArguments entries are not all strings",
                             )
-                        })?;
-
-                    Some(args)
+                        })?
                 }
-                None => {
-                    // All GeckoView based applications support this view,
-                    // and allow to open a blank page in a Gecko window.
-                    Some(vec![
-                        "-a".to_string(),
-                        "android.intent.action.VIEW".to_string(),
-                        "-d".to_string(),
-                        "about:blank".to_string(),
-                    ])
-                }
+                None => Vec::new(),
             };
+
+            android.intent_arguments = Some(merge_default_intent_arguments(
+                intent_arguments,
+                package.as_str(),
+            ));
 
             Ok(Some(android))
         } else {
             Ok(None)
         }
     }
+}
+
+/// Combines client-supplied Android intent arguments with the defaults required
+/// to launch a GeckoView based application into a blank Gecko window.
+///
+/// A default is only added when the client did not already provide the
+/// corresponding flag, so explicit client values are never overridden:
+/// - `-a` (action) and `-d` (data URI) are single-use per intent.
+/// - `--ez automationtest` (Fenix-family only, bug 2064609) may appear multiple
+///   times, so it is matched by its key name.
+///
+/// See: https://developer.android.com/tools/adb#IntentSpec
+///
+/// Defaults are placed before the client arguments, which keeps the client's
+/// own ordering intact and matches the argument order used when no client
+/// arguments are supplied.
+fn merge_default_intent_arguments(client_args: Vec<String>, package: &str) -> Vec<String> {
+    let mut has_action: bool = false;
+    let mut has_data: bool = false;
+    let mut has_automationtest: bool = false;
+    let mut prev: Option<&str> = None;
+
+    for arg in &client_args {
+        match arg.as_str() {
+            "-a" => has_action = true,
+            "-d" => has_data = true,
+            "automationtest" if prev == Some("--ez") => has_automationtest = true,
+            _ => {}
+        }
+        prev = Some(arg.as_str());
+    }
+
+    let mut args = Vec::new();
+
+    if !has_action {
+        args.extend(["-a".to_string(), "android.intent.action.VIEW".to_string()]);
+    }
+
+    if !has_data {
+        args.extend(["-d".to_string(), "about:blank".to_string()]);
+    }
+
+    if is_fenix_family(package) && !has_automationtest {
+        args.extend([
+            "--ez".to_string(),
+            "automationtest".to_string(),
+            "true".to_string(),
+        ]);
+    }
+
+    args.extend(client_args);
+    args
 }
 
 fn pref_from_json(value: &Value) -> WebDriverResult<Pref> {
@@ -1303,20 +1357,25 @@ mod tests {
             firefox_opts.insert("androidPackage".into(), json!(package));
 
             let opts = make_options(firefox_opts, None).expect("valid firefox options");
-            assert_eq!(
-                opts.android.unwrap().intent_arguments,
-                Some(vec![
-                    "-a".to_string(),
-                    "android.intent.action.VIEW".to_string(),
-                    "-d".to_string(),
-                    "about:blank".to_string(),
-                ])
-            );
+            let mut expected = vec![
+                "-a".to_string(),
+                "android.intent.action.VIEW".to_string(),
+                "-d".to_string(),
+                "about:blank".to_string(),
+            ];
+            if is_fenix_family(package) {
+                expected.extend([
+                    "--ez".to_string(),
+                    "automationtest".to_string(),
+                    "true".to_string(),
+                ]);
+            }
+            assert_eq!(opts.android.unwrap().intent_arguments, Some(expected));
         }
     }
 
     #[test]
-    fn fx_options_android_intent_arguments_override() {
+    fn fx_options_android_intent_arguments_appends_defaults() {
         let mut firefox_opts = Capabilities::new();
         firefox_opts.insert("androidPackage".into(), json!("foo.bar"));
         firefox_opts.insert("androidIntentArguments".into(), json!(["lorem", "ipsum"]));
@@ -1324,7 +1383,87 @@ mod tests {
         let opts = make_options(firefox_opts, None).expect("valid firefox options");
         assert_eq!(
             opts.android.unwrap().intent_arguments,
-            Some(vec!["lorem".to_string(), "ipsum".to_string()])
+            Some(vec![
+                "-a".to_string(),
+                "android.intent.action.VIEW".to_string(),
+                "-d".to_string(),
+                "about:blank".to_string(),
+                "lorem".to_string(),
+                "ipsum".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn fx_options_android_intent_arguments_appends_automationtest_for_fenix() {
+        let mut firefox_opts = Capabilities::new();
+        firefox_opts.insert("androidPackage".into(), json!("org.mozilla.fenix"));
+        firefox_opts.insert(
+            "androidIntentArguments".into(),
+            json!(["--ez", "somekey", "true"]),
+        );
+
+        let opts = make_options(firefox_opts, None).expect("valid firefox options");
+        assert_eq!(
+            opts.android.unwrap().intent_arguments,
+            Some(vec![
+                "-a".to_string(),
+                "android.intent.action.VIEW".to_string(),
+                "-d".to_string(),
+                "about:blank".to_string(),
+                "--ez".to_string(),
+                "automationtest".to_string(),
+                "true".to_string(),
+                "--ez".to_string(),
+                "somekey".to_string(),
+                "true".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn fx_options_android_intent_arguments_does_not_override_action_and_data() {
+        let mut firefox_opts = Capabilities::new();
+        firefox_opts.insert("androidPackage".into(), json!("foo.bar"));
+        firefox_opts.insert(
+            "androidIntentArguments".into(),
+            json!(["-a", "android.intent.action.MAIN", "-d", "https://example.com/"]),
+        );
+
+        let opts = make_options(firefox_opts, None).expect("valid firefox options");
+        assert_eq!(
+            opts.android.unwrap().intent_arguments,
+            Some(vec![
+                "-a".to_string(),
+                "android.intent.action.MAIN".to_string(),
+                "-d".to_string(),
+                "https://example.com/".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn fx_options_android_intent_arguments_does_not_override_automationtest() {
+        let mut firefox_opts = Capabilities::new();
+        firefox_opts.insert("androidPackage".into(), json!("org.mozilla.fenix"));
+        firefox_opts.insert(
+            "androidIntentArguments".into(),
+            json!(["--ez", "automationtest", "false"]),
+        );
+
+        let opts = make_options(firefox_opts, None)
+            .expect("valid firefox options");
+        assert_eq!(
+            opts.android.unwrap().intent_arguments,
+            Some(vec![
+                "-a".to_string(),
+                "android.intent.action.VIEW".to_string(),
+                "-d".to_string(),
+                "about:blank".to_string(),
+                "--ez".to_string(),
+                "automationtest".to_string(),
+                "false".to_string(),
+            ])
         );
     }
 

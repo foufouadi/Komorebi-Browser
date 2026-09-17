@@ -2,7 +2,7 @@
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 const { GenAI } = ChromeUtils.importESModule(
-  "resource:///modules/GenAI.sys.mjs"
+  "moz-src:///browser/components/genai/GenAI.sys.mjs"
 );
 const { sinon } = ChromeUtils.importESModule(
   "resource://testing-common/Sinon.sys.mjs"
@@ -514,14 +514,17 @@ add_task(async function test_plain_clicks() {
  * Check that input selection can show shortcuts
  */
 add_task(async function test_input_selection() {
-  Assert.equal(GenAI.ignoredInputs.size, 1, "Default ignore 1 type of field");
+  Assert.equal(GenAI.ignoredInputs.size, 2, "Default ignore 2 types of fields");
   Assert.ok(GenAI.ignoredInputs.has("input"), "Default ignore inputs");
   await SpecialPowers.pushPrefEnv({
     set: [
-      ["browser.ml.chat.shortcuts.ignoreFields", "contenteditable,textarea"],
+      [
+        "browser.ml.chat.shortcuts.ignoreFields",
+        "contenteditable,textarea,moz-multiline-editor",
+      ],
     ],
   });
-  Assert.equal(GenAI.ignoredInputs.size, 2, "Ignoring other fields not input");
+  Assert.equal(GenAI.ignoredInputs.size, 3, "Ignoring other fields not input");
   Assert.ok(GenAI.ignoredInputs.has("textarea"), "Now ignore textarea");
   Assert.ok(!GenAI.ignoredInputs.has("input"), "Not ignoring input for test");
 
@@ -560,4 +563,65 @@ add_task(async function test_input_selection() {
   );
 
   sandbox.restore();
+});
+
+/**
+ * Check that IME composition hides the shortcuts panel visually
+ */
+add_task(async function test_ime_composition_hides_panel() {
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      ["browser.ml.chat.shortcuts", true],
+      ["browser.ml.chat.provider", "http://localhost:8080"],
+    ],
+  });
+
+  await BrowserTestUtils.withNewTab("data:text/plain,hello", async browser => {
+    await SimpleTest.promiseFocus(browser);
+
+    const selectPromise = SpecialPowers.spawn(browser, [], () => {
+      ContentTaskUtils.waitForCondition(() => content.getSelection());
+    });
+    goDoCommand("cmd_selectAll");
+    await selectPromise;
+    BrowserTestUtils.synthesizeMouseAtCenter(
+      browser,
+      { type: "mouseup" },
+      browser
+    );
+
+    const panel = document.getElementById("selection-shortcut-action-panel");
+    await TestUtils.waitForCondition(
+      () => panel.getAttribute("panelopen") === "true",
+      "Panel should open after text selection"
+    );
+
+    Assert.ok(!panel.hasAttribute("ime-hiding"), "No ime-hiding before IME");
+
+    // Simulate IME composition - compositionstart sets #compositionActive, then
+    // selectionchange triggers a CSS-only hide instead of hidePopup().
+    await SpecialPowers.spawn(browser, [], () => {
+      content.document.dispatchEvent(
+        new content.CompositionEvent("compositionstart", {
+          bubbles: true,
+          data: "",
+        })
+      );
+      content.document.dispatchEvent(
+        new content.Event("selectionchange", { bubbles: true })
+      );
+    });
+
+    await TestUtils.waitForCondition(
+      () => panel.hasAttribute("ime-hiding"),
+      "Panel should have ime-hiding attribute during IME composition"
+    );
+    Assert.equal(
+      panel.getAttribute("panelopen"),
+      "true",
+      "hidePopup was not called during IME composition"
+    );
+  });
+
+  await SpecialPowers.popPrefEnv();
 });

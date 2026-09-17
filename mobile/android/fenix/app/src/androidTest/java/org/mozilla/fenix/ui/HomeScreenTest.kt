@@ -72,13 +72,13 @@ class HomeScreenTest {
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1364362
     @Converted(
-        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.HomeTest#verifyJumpBackInSectionTest"],
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.HomeTest#verifyContinueSectionTest"],
         bug = 2039207,
         since = "2026-05",
     )
     @SmokeTest
     @Test
-    fun verifyJumpBackInSectionTest() {
+    fun verifyContinueSectionTest() {
         composeTestRule.activityRule.applySettingsExceptions {
             it.isRecentlyVisitedFeatureEnabled = false
             it.isPocketEnabled = false
@@ -93,15 +93,10 @@ class HomeScreenTest {
                 verifyUrl(firstWebPage.url.toString())
             }
             .goToHomescreen {
-                verifyJumpBackInSectionIsDisplayed()
-                verifyJumpBackInItemTitle(composeTestRule, firstWebPage.title)
-                verifyJumpBackInItemWithUrl(composeTestRule, firstWebPage.url.toString())
-                verifyJumpBackInShowAllButton()
+                verifyContinueSectionIsDisplayed()
+                verifyContinueItemTitle(composeTestRule, firstWebPage.title)
+                verifyContinueItemWithUrl(composeTestRule, firstWebPage.url.toString())
             }
-            .clickJumpBackInShowAllButton {
-                verifyExistingOpenTabs(firstWebPage.title)
-            }
-            .closeTabDrawer {}
 
         navigationToolbar(composeTestRule) {}
             .enterURLAndEnterToBrowser(secondWebPage.url) {
@@ -109,9 +104,9 @@ class HomeScreenTest {
                 verifyUrl(secondWebPage.url.toString())
             }
             .goToHomescreen {
-                verifyJumpBackInSectionIsDisplayed()
-                verifyJumpBackInItemTitle(composeTestRule, secondWebPage.title)
-                verifyJumpBackInItemWithUrl(composeTestRule, secondWebPage.url.toString())
+                verifyContinueSectionIsDisplayed()
+                verifyContinueItemTitle(composeTestRule, secondWebPage.title)
+                verifyContinueItemWithUrl(composeTestRule, secondWebPage.url.toString())
             }
             .openTabDrawer {
                 closeTabWithTitle(secondWebPage.title)
@@ -121,16 +116,16 @@ class HomeScreenTest {
             .closeTabDrawer {}
 
         homeScreen(composeTestRule) {
-                verifyJumpBackInSectionIsDisplayed()
-                verifyJumpBackInItemTitle(composeTestRule, firstWebPage.title)
-                verifyJumpBackInItemWithUrl(composeTestRule, firstWebPage.url.toString())
+                verifyContinueSectionIsDisplayed()
+                verifyContinueItemTitle(composeTestRule, firstWebPage.title)
+                verifyContinueItemWithUrl(composeTestRule, firstWebPage.url.toString())
             }
             .openTabDrawer {
                 closeTab()
             }
 
         homeScreen(composeTestRule) {
-            verifyJumpBackInSectionIsNotDisplayed()
+            verifyContinueSectionIsNotDisplayed()
         }
     }
 }

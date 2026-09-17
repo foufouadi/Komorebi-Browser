@@ -3,9 +3,10 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+use std::path::Path;
+
 use crate::image::Image;
 use crate::tests::decode::{compare_frames, compute_mse, decode, decode_internal};
-use std::path::Path;
 
 pub fn run(path: &Path, expected_checkpoints: &[(usize, f32)]) {
     let file = std::fs::read(path).unwrap();
@@ -32,8 +33,17 @@ pub fn run(path: &Path, expected_checkpoints: &[(usize, f32)]) {
     };
 
     // Incremental decode with progressive callback
-    let (_, frames) =
-        decode_internal(&file, 123, false, true, None, Some(&mut flush_callback)).unwrap();
+    let (_, frames) = decode_internal(
+        &file,
+        123,
+        false,
+        true,
+        None,
+        Some(&mut flush_callback),
+        None,
+        false,
+    )
+    .unwrap();
 
     // Record the final state (fully decoded frame has MSE 0.0)
     actual_checkpoints.push((file.len(), 0.0));

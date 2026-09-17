@@ -814,7 +814,8 @@ bool ParseExtmap(absl::string_view line,
   if (!GetValueFromString(line, sub_fields[0], &value, error)) {
     return false;
   }
-  if (!RtpHeaderExtensionId(value).Valid()) {
+  std::optional<RtpHeaderExtensionId> id = RtpHeaderExtensionId::Create(value);
+  if (!id.has_value()) {
     return ParseFailed(line, "Extension ID is not in valid range.", error);
   }
 
@@ -840,7 +841,7 @@ bool ParseExtmap(absl::string_view line,
     return ParseFailed(line, "URI contains invalid characters.", error);
   }
 
-  *extmap = RtpExtension(uri, RtpHeaderExtensionId(value), encrypted);
+  *extmap = RtpExtension(uri, *id, encrypted);
   return true;
 }
 
@@ -1390,17 +1391,6 @@ void BuildRtpContentAttributes(const MediaContentDescription* media_desc,
     InitAttrLine(kAttributeRtcpXr, &os);
     os << kSdpDelimiterColon << kRtcpXrFormatRcvrRtt << "=all";
     AddLine(os.str(), message);
-    // Interim backward-compat: also advertise the non-standard
-    // a=rtcp-fb:<pt> rrtr for peers that do not understand rtcp-xr. rrtr is
-    // no longer carried as a codec feedback param (the parser folds it into
-    // receive_non_sender_rtt), so it is emitted here from the flag rather
-    // than via AddRtcpFbLines.
-    for (const Codec& codec : media_desc->codecs()) {
-      StringBuilder fb_os;
-      WriteRtcpFbHeader(codec.id, &fb_os);
-      fb_os << " " << kRtcpFbParamRrtr;
-      AddLine(fb_os.str(), message);
-    }
   }
 
   if (media_desc->conference_mode()) {
@@ -2556,14 +2546,6 @@ bool ParseRtcpFbAttribute(absl::string_view line,
     param.append(iter->data(), iter->length());
   }
   const FeedbackParam feedback_param(id, param);
-
-  // The non-standard "rrtr" rtcp-fb is the legacy way of signaling receiver
-  // reference time reports (RFC 3611). Translate it to the single internal
-  // flag rather than storing it as a per-codec feedback param.
-  if (id == kRtcpFbParamRrtr) {
-    media_desc->set_receive_non_sender_rtt(true);
-    return true;
-  }
 
   if (media_type == MediaType::AUDIO || media_type == MediaType::VIDEO) {
     UpdateCodec(media_desc, payload_type, feedback_param);

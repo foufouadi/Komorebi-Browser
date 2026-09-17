@@ -629,6 +629,7 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
  private:
   [[nodiscard]] bool emitInterpreterLoop();
   [[nodiscard]] bool emitDebugTrap();
+  void emitICBailoutStub();
 
   void emitOutOfLineCodeCoverageInstrumentation();
   [[nodiscard]] bool emitOutOfLineGeneratorResumePrologue();

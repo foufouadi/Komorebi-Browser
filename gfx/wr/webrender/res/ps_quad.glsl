@@ -198,8 +198,6 @@ VertexInfo write_vertex(vec2 local_pos,
 
     // Transform the current vertex to device space.
     vec4 transformed = transform.m * vec4(local_pos, 0.0, 1.0);
-
-    // Convert the world positions to device pixel space.
     vec2 device_pos = transformed.xy;
     float w = transformed.w;
 

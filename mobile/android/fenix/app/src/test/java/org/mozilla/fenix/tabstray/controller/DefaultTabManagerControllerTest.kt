@@ -59,6 +59,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.mozilla.fenix.GleanMetrics.Events
 import org.mozilla.fenix.GleanMetrics.TabsTray
+import org.mozilla.fenix.GleanMetrics.TrackingProtection
 import org.mozilla.fenix.R
 import org.mozilla.fenix.browser.browsingmode.BrowsingMode
 import org.mozilla.fenix.browser.browsingmode.BrowsingModeManager
@@ -74,6 +75,7 @@ import org.mozilla.fenix.components.usecases.ShareUseCases
 import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.ext.maxActiveTime
 import org.mozilla.fenix.helpers.FenixGleanTestRule
+import org.mozilla.fenix.home.HomeScreenViewModel.Companion.ALL_ACTIVE_NORMAL_TABS
 import org.mozilla.fenix.home.HomeScreenViewModel.Companion.ALL_NORMAL_TABS
 import org.mozilla.fenix.home.HomeScreenViewModel.Companion.ALL_PRIVATE_TABS
 import org.mozilla.fenix.tabstray.data.TabGroupTheme
@@ -84,7 +86,6 @@ import org.mozilla.fenix.tabstray.redux.state.Page
 import org.mozilla.fenix.tabstray.redux.state.TabsTrayState
 import org.mozilla.fenix.tabstray.redux.store.TabsTrayStore
 import org.mozilla.fenix.tabstray.ui.TabManagementFragmentDirections
-import org.mozilla.fenix.trackingprotection.ProtectionsDashboardFragment
 import org.mozilla.fenix.utils.Settings
 import org.robolectric.RobolectricTestRunner
 
@@ -120,13 +121,6 @@ class DefaultTabManagerControllerTest {
     private val collectionStorage: TabCollectionStorage = mockk(relaxed = true)
     private val testDispatcher = StandardTestDispatcher()
 
-    private val testPrivateTab =
-        createTab(
-            id = "privateTestTabId",
-            url = "",
-            private = true,
-        )
-
     private val testNormalTab =
         createTab(
             id = "testTabId",
@@ -153,6 +147,7 @@ class DefaultTabManagerControllerTest {
                 every { getProfilerTime() } returns PROFILER_START_TIME
                 every { isProfilerActive() } returns true
             }
+        every { settings.inactiveTabsAreEnabled } returns true
     }
 
     @Test
@@ -505,7 +500,7 @@ class DefaultTabManagerControllerTest {
     }
 
     @Test
-    fun `GIVEN only one tab opened WHEN handleTabDeletion is called THEN it navigates to home where the tab will be removed`() {
+    fun `GIVEN only one tab is open WHEN handleTabDeletion is called THEN it navigates to home where the tab will be removed`() {
         val testTabId = "33"
         var showUndoSnackbarForTabInvoked = false
         val controller = spyk(createController(showUndoSnackbarForTab = { showUndoSnackbarForTabInvoked = true }))
@@ -542,7 +537,45 @@ class DefaultTabManagerControllerTest {
     }
 
     @Test
-    fun `WHEN handleMultipleTabsDeletion is called to close all private tabs THEN that it navigates to home where that tabs will be removed`() {
+    fun `GIVEN homepage as new tab is enabled and only one tab is open WHEN handleTabDeletion is called THEN the tab is removed and it does not navigate to home`() {
+        every { settings.enableHomepageAsNewTab } returns true
+        val testTabId = "33"
+        var showUndoSnackbarForTabInvoked = false
+        val controller = spyk(createController(showUndoSnackbarForTab = { showUndoSnackbarForTabInvoked = true }))
+
+        val tab = createTab(id = testTabId, url = "https://mozilla.org", private = true)
+
+        every { browserStore.state } returns
+            mockk {
+                every { tabs } returns listOf(tab)
+                every { selectedTabId } returns testTabId
+                every { downloads } returns emptyMap()
+            }
+
+        every { trayStore.state } returns
+            mockk {
+                every { selectedTabId } returns testTabId
+                every { privateBrowsing } returns
+                    mockk {
+                        every { tabs } returns listOf(TabsTrayItem.Tab(tab))
+                    }
+                every { inactiveTabs } returns
+                    mockk {
+                        every { tabs } returns emptyList()
+                    }
+            }
+
+        controller.handleTabDeletion(TabsTrayItem.Tab(tab = tab))
+
+        verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(testTabId) }
+
+        verify { tabsUseCases.removeTab(any()) }
+
+        assertTrue(showUndoSnackbarForTabInvoked)
+    }
+
+    @Test
+    fun `WHEN deleteMultipleTabs is called to close all private tabs THEN that it navigates to home where that tabs will be removed`() {
         val controller = spyk(createController())
 
         val privateTab1 = createTab(id = "1", url = "https://mozilla.org", private = true)
@@ -569,12 +602,98 @@ class DefaultTabManagerControllerTest {
         controller.deleteMultipleTabs(tabItems)
 
         verify { controller.dismissTabManagerAndNavigateHome(ALL_PRIVATE_TABS) }
-
-        verify(exactly = 0) { tabsUseCases.removeTabs(any<List<String>>(), any<Set<String>>()) }
     }
 
     @Test
-    fun `WHEN handleMultipleTabsDeletion is called to close all normal tabs THEN that it navigates to home where that tabs will be removed`() {
+    fun `GIVEN homepage as new tab is enabled WHEN deleteMultipleTabs is called to close all private tabs THEN private tabs are closed and it does not navigate home`() {
+        every { settings.enableHomepageAsNewTab } returns true
+        var undoSnackbarIsPrivate: Boolean? = null
+        var undoSnackbarTabCount: Int? = null
+        val controller =
+            spyk(
+                createController(
+                    showUndoSnackbarForMultipleTabs = { isPrivate, count ->
+                        undoSnackbarIsPrivate = isPrivate
+                        undoSnackbarTabCount = count
+                    }
+                )
+            )
+
+        val privateTab1 = createTab(id = "1", url = "https://mozilla.org", private = true)
+        val privateTab2 = createTab(id = "2", url = "https://mozilla.org", private = true)
+        val tabItems = listOf(TabsTrayItem.Tab(tab = privateTab1), TabsTrayItem.Tab(tab = privateTab2))
+
+        every { browserStore.state } returns
+            mockk {
+                every { tabs } returns listOf(privateTab1, privateTab2)
+            }
+
+        every { trayStore.state } returns
+            mockk {
+                every { privateBrowsing } returns
+                    mockk {
+                        every { tabs } returns tabItems
+                    }
+                every { inactiveTabs } returns
+                    mockk {
+                        every { tabs } returns emptyList()
+                    }
+            }
+
+        controller.deleteMultipleTabs(tabItems)
+
+        verify { tabsUseCases.removePrivateTabs() }
+
+        verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(ALL_PRIVATE_TABS) }
+
+        assertEquals(true, undoSnackbarIsPrivate)
+        assertEquals(2, undoSnackbarTabCount)
+    }
+
+    @Test
+    fun `WHEN deleteMultipleTabs is called to close all active normal tabs THEN that it navigates to home where those tabs will be removed`() {
+        val normalTab1 = createTab(id = "1", url = "https://mozilla.org", private = false)
+        val normalTab2 = createTab(id = "2", url = "https://mozilla.org", private = false)
+        val inactiveTab =
+            createTab(
+                id = "3",
+                url = "https://mozilla.org",
+                private = false,
+                lastAccess = 0L,
+                createdAt = 0L,
+            )
+        val tabItems =
+            listOf(
+                TabsTrayItem.Tab(tab = normalTab1),
+                TabsTrayItem.Tab(tab = normalTab2),
+                TabsTrayItem.Tab(tab = inactiveTab),
+            )
+
+        every { browserStore.state } returns
+            mockk {
+                every { tabs } returns listOf(normalTab1, normalTab2, inactiveTab)
+            }
+
+        every { trayStore.state } returns
+            mockk {
+                every { normalTabsState.items } returns tabItems
+                every { inactiveTabs } returns
+                    mockk {
+                        every { tabs } returns listOf(TabsTrayItem.Tab(inactiveTab))
+                    }
+            }
+
+        val controller = spyk(createController())
+
+        controller.deleteMultipleTabs(tabItems)
+
+        verify { controller.dismissTabManagerAndNavigateHome(ALL_ACTIVE_NORMAL_TABS) }
+    }
+
+    @Test
+    fun `GIVEN homepage as new tab is enabled WHEN deleteMultipleTabs is called to close all normal tabs THEN all normal tabs are closed and it does not navigate home`() {
+        every { settings.enableHomepageAsNewTab } returns true
+
         val normalTab1 = createTab(id = "1", url = "https://mozilla.org", private = false)
         val normalTab2 = createTab(id = "2", url = "https://mozilla.org", private = false)
         val tabItems = listOf(TabsTrayItem.Tab(tab = normalTab1), TabsTrayItem.Tab(tab = normalTab2))
@@ -593,19 +712,41 @@ class DefaultTabManagerControllerTest {
                     }
             }
 
-        val controller = spyk(createController())
+        var undoSnackbarIsPrivate: Boolean? = null
+        var undoSnackbarTabCount: Int? = null
+        val controller =
+            spyk(
+                createController(
+                    showUndoSnackbarForMultipleTabs = { isPrivate, count ->
+                        undoSnackbarIsPrivate = isPrivate
+                        undoSnackbarTabCount = count
+                    }
+                )
+            )
 
         controller.deleteMultipleTabs(tabItems)
 
-        verify { controller.dismissTabManagerAndNavigateHome(ALL_NORMAL_TABS) }
+        verify { tabsUseCases.removeTabs(listOf("1", "2"), setOf()) }
 
-        verify(exactly = 0) { tabsUseCases.removeTabs(any<List<String>>(), any<Set<String>>()) }
+        verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(any()) }
+
+        assertEquals(false, undoSnackbarIsPrivate)
+        assertEquals(2, undoSnackbarTabCount)
     }
 
     @Test
-    fun `WHEN handleMultipleTabsDeletion is called to close some private tabs THEN that it uses tabsUseCases#removeTabs and shows an undo snackbar`() {
-        var showUndoSnackbarForTabInvoked = false
-        val controller = spyk(createController(showUndoSnackbarForTab = { showUndoSnackbarForTabInvoked = true }))
+    fun `WHEN deleteMultipleTabs is called to close some private tabs THEN that it uses tabsUseCases#removeTabs and shows an undo snackbar`() {
+        var undoSnackbarIsPrivate: Boolean? = null
+        var undoSnackbarTabCount: Int? = null
+        val controller =
+            spyk(
+                createController(
+                    showUndoSnackbarForMultipleTabs = { isPrivate, count ->
+                        undoSnackbarIsPrivate = isPrivate
+                        undoSnackbarTabCount = count
+                    }
+                )
+            )
 
         val privateTabToClose = createTab(id = "42", url = "https://mozilla.org", private = true)
         val otherPrivateTab = createTab(id = "43", url = "https://mozilla.org", private = true)
@@ -636,13 +777,23 @@ class DefaultTabManagerControllerTest {
 
         verify { tabsUseCases.removeTabs(listOf("42"), emptySet()) }
         verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(any()) }
-        assertTrue(showUndoSnackbarForTabInvoked)
+        assertEquals(true, undoSnackbarIsPrivate)
+        assertEquals(1, undoSnackbarTabCount)
     }
 
     @Test
-    fun `WHEN handleMultipleTabsDeletion is called to close some normal tabs THEN that it uses tabsUseCases#removeTabs and shows an undo snackbar`() {
-        var showUndoSnackbarForTabInvoked = false
-        val controller = spyk(createController(showUndoSnackbarForTab = { showUndoSnackbarForTabInvoked = true }))
+    fun `WHEN deleteMultipleTabs is called to close some normal tabs THEN that it uses tabsUseCases#removeTabs and shows an undo snackbar`() {
+        var undoSnackbarIsPrivate: Boolean? = null
+        var undoSnackbarTabCount: Int? = null
+        val controller =
+            spyk(
+                createController(
+                    showUndoSnackbarForMultipleTabs = { isPrivate, count ->
+                        undoSnackbarIsPrivate = isPrivate
+                        undoSnackbarTabCount = count
+                    }
+                )
+            )
 
         val normalTab1 = createTab(id = "24", url = "https://mozilla.org", private = false)
         val normalTab2 = createTab(id = "25", url = "https://mozilla.org", private = false)
@@ -674,13 +825,69 @@ class DefaultTabManagerControllerTest {
 
         verify { tabsUseCases.removeTabs(listOf("24"), emptySet()) }
         verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(any()) }
-        assertTrue(showUndoSnackbarForTabInvoked)
+        assertEquals(false, undoSnackbarIsPrivate)
+        assertEquals(1, undoSnackbarTabCount)
     }
 
     @Test
-    fun `GIVEN 1 active tab and 1 inactive tab WHEN handleTabDeletion is called on the active tab THEN it navigates home and excludes the inactive tab`() {
+    fun `GIVEN homepage as new tab is enabled WHEN deleteMultipleTabs is called to close some normal tabs THEN that it uses tabsUseCases#removeTabs and shows an undo snackbar`() {
+        var undoSnackbarIsPrivate: Boolean? = null
+        var undoSnackbarTabCount: Int? = null
+        val controller =
+            spyk(
+                createController(
+                    showUndoSnackbarForMultipleTabs = { isPrivate, count ->
+                        undoSnackbarIsPrivate = isPrivate
+                        undoSnackbarTabCount = count
+                    }
+                )
+            )
+
+        val normalTab1 = createTab(id = "24", url = "https://mozilla.org", private = false)
+        val normalTab2 = createTab(id = "25", url = "https://mozilla.org", private = false)
+
+        every { browserStore.state } returns
+            BrowserState(
+                tabs = listOf(normalTab1, normalTab2),
+                selectedTabId = "24",
+                downloads = emptyMap(),
+            )
+
+        every { trayStore.state } returns
+            TabsTrayState(
+                selectedTabId = "24",
+                normalTabsState =
+                    TabsTrayState.NormalTabsState(
+                        items =
+                            listOf(
+                                TabsTrayItem.Tab(tab = normalTab1),
+                                TabsTrayItem.Tab(tab = normalTab2),
+                            )
+                    ),
+                privateBrowsing = TabsTrayState.PrivateBrowsingState(tabs = emptyList()),
+                inactiveTabs = TabsTrayState.InactiveTabsState(tabs = emptyList()),
+                tabGroupState = TabsTrayState.TabGroupState(groups = emptyList()),
+            )
+
+        controller.deleteMultipleTabs(listOf(TabsTrayItem.Tab(tab = normalTab1)))
+
+        verify { tabsUseCases.removeTabs(listOf("24"), emptySet()) }
+        verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(any()) }
+        assertEquals(false, undoSnackbarIsPrivate)
+        assertEquals(1, undoSnackbarTabCount)
+    }
+
+    @Test
+    fun `GIVEN 1 active tab and 1 inactive tab are open WHEN handleTabDeletion is called on the active tab THEN it navigates home and excludes the inactive tab`() {
         val activeTab = createTab(id = "activeId", url = "https://mozilla.org", private = false)
-        val inactiveTab = createTab(id = "inactiveId", url = "https://mozilla.org", private = false)
+        val inactiveTab =
+            createTab(
+                id = "inactiveId",
+                url = "https://mozilla.org",
+                private = false,
+                lastAccess = 0L,
+                createdAt = 0L,
+            )
 
         every { browserStore.state } returns
             mockk {
@@ -710,10 +917,56 @@ class DefaultTabManagerControllerTest {
     }
 
     @Test
-    fun `GIVEN 2 active tabs and 1 inactive tab WHEN deleteMultipleTabs is called on both active tabs THEN it navigates home and excludes the inactive tab`() {
+    fun `GIVEN homepage as a new tab is enabled and 1 active tab and 1 inactive tab WHEN handleTabDeletion is called on the active tab THEN it does not navigate home and the active tab is removed`() {
+        every { settings.enableHomepageAsNewTab } returns true
+        val activeTab = createTab(id = "activeId", url = "https://mozilla.org", private = false)
+        val inactiveTab =
+            createTab(
+                id = "inactiveId",
+                url = "https://mozilla.org",
+                private = false,
+                lastAccess = 0L,
+                createdAt = 0L,
+            )
+
+        every { browserStore.state } returns
+            BrowserState(
+                tabs = listOf(activeTab, inactiveTab),
+                selectedTabId = "activeId",
+                downloads = emptyMap(),
+            )
+
+        every { trayStore.state } returns
+            TabsTrayState(
+                selectedTabId = "activeId",
+                normalTabsState = TabsTrayState.NormalTabsState(items = listOf(TabsTrayItem.Tab(activeTab))),
+                privateBrowsing = TabsTrayState.PrivateBrowsingState(tabs = emptyList()),
+                inactiveTabs = TabsTrayState.InactiveTabsState(tabs = listOf(TabsTrayItem.Tab(inactiveTab))),
+                tabGroupState = TabsTrayState.TabGroupState(groups = emptyList()),
+            )
+
+        var showUndoSnackbarForTabInvoked = false
+        val controller = spyk(createController(showUndoSnackbarForTab = { showUndoSnackbarForTabInvoked = true }))
+
+        controller.handleTabDeletion(TabsTrayItem.Tab(tab = activeTab))
+
+        assertTrue(showUndoSnackbarForTabInvoked)
+        verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(any()) }
+        verify { tabsUseCases.removeTab(tabId = "activeId", excludedFallbackTabIds = setOf("inactiveId")) }
+    }
+
+    @Test
+    fun `GIVEN 2 active tabs and 1 inactive tab are open WHEN deleteMultipleTabs is called on both active tabs THEN it navigates home and deletes the active tab only`() {
         val activeTab1 = createTab(id = "active1", url = "https://mozilla.org", private = false)
         val activeTab2 = createTab(id = "active2", url = "https://mozilla.org", private = false)
-        val inactiveTab = createTab(id = "inactiveId", url = "https://mozilla.org", private = false)
+        val inactiveTab =
+            createTab(
+                id = "inactiveId",
+                url = "https://mozilla.org",
+                private = false,
+                lastAccess = 0L,
+                createdAt = 0L,
+            )
 
         val activeTabItems = listOf(TabsTrayItem.Tab(activeTab1), TabsTrayItem.Tab(activeTab2))
 
@@ -736,16 +989,79 @@ class DefaultTabManagerControllerTest {
 
         controller.deleteMultipleTabs(activeTabItems)
 
-        verify { controller.dismissTabManagerAndNavigateHome(ALL_NORMAL_TABS) }
-
-        verify(exactly = 0) { tabsUseCases.removeTabs(ids = any(), excludedTabIds = any()) }
+        verify { controller.dismissTabManagerAndNavigateHome(ALL_ACTIVE_NORMAL_TABS) }
     }
 
     @Test
-    fun `GIVEN 2 active tabs and 1 inactive tab WHEN handleTabDeletion is called on 1 active tab THEN it removes the tab, excludes the inactive tab, and shows undo snackbar`() {
+    fun `GIVEN homepage as new tab is enabled and 2 active tabs and 1 inactive tab are open WHEN deleteMultipleTabs is called on both active tabs THEN it does not navigate home and deletes the active tab only`() {
+        every { settings.enableHomepageAsNewTab } returns true
+
+        val activeTab1 = createTab(id = "active1", url = "https://mozilla.org", private = false)
+        val activeTab2 = createTab(id = "active2", url = "https://mozilla.org", private = false)
+        val inactiveTab =
+            createTab(
+                id = "inactiveId",
+                url = "https://mozilla.org",
+                private = false,
+                lastAccess = 0L,
+                createdAt = 0L,
+            )
+
+        val activeTabItems =
+            listOf(
+                TabsTrayItem.Tab(activeTab1),
+                TabsTrayItem.Tab(activeTab2),
+                TabsTrayItem.Tab(inactiveTab),
+            )
+
+        every { browserStore.state } returns
+            mockk {
+                every { tabs } returns listOf(activeTab1, activeTab2, inactiveTab)
+            }
+
+        every { trayStore.state } returns
+            mockk {
+                every { normalTabsState.items } returns activeTabItems
+                every { privateBrowsing } returns mockk { every { tabs } returns emptyList() }
+                every { inactiveTabs } returns
+                    mockk {
+                        every { tabs } returns listOf(TabsTrayItem.Tab(inactiveTab))
+                    }
+            }
+
+        var undoSnackbarIsPrivate: Boolean? = null
+        var undoSnackbarTabCount: Int? = null
+        val controller =
+            spyk(
+                createController(
+                    showUndoSnackbarForMultipleTabs = { isPrivate, count ->
+                        undoSnackbarIsPrivate = isPrivate
+                        undoSnackbarTabCount = count
+                    }
+                )
+            )
+
+        controller.deleteMultipleTabs(activeTabItems)
+
+        verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(any()) }
+        verify { tabsUseCases.removeTabs(listOf("active1", "active2"), setOf("inactiveId")) }
+
+        assertEquals(false, undoSnackbarIsPrivate)
+        assertEquals(2, undoSnackbarTabCount)
+    }
+
+    @Test
+    fun `GIVEN 2 active tabs and 1 inactive tab are open WHEN handleTabDeletion is called on 1 active tab THEN it removes the tab, excludes the inactive tab, and shows undo snackbar`() {
         val active1 = createTab(id = "active1", url = "https://mozilla.org", private = false)
         val active2 = createTab(id = "active2", url = "https://mozilla.org", private = false)
-        val inactiveTab = createTab(id = "inactive1", url = "https://mozilla.org", private = false)
+        val inactiveTab =
+            createTab(
+                id = "inactive1",
+                url = "https://mozilla.org",
+                private = false,
+                lastAccess = 0L,
+                createdAt = 0L,
+            )
 
         every { browserStore.state } returns
             BrowserState(
@@ -778,7 +1094,7 @@ class DefaultTabManagerControllerTest {
 
         controller.handleTabDeletion(TabsTrayItem.Tab(tab = active1))
 
-        verify { tabsUseCases.removeTab(tabId = "active1", excludedTabIds = setOf("inactive1")) }
+        verify { tabsUseCases.removeTab(tabId = "active1", excludedFallbackTabIds = setOf("inactive1")) }
         verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(sessionId = any()) }
         assertTrue(showUndoSnackbarForTabInvoked)
     }
@@ -787,7 +1103,14 @@ class DefaultTabManagerControllerTest {
     fun `GIVEN grouped tabs and an inactive tab WHEN deleteMultipleTabs is called on all grouped tabs THEN it flattens the group, navigates home, and excludes the inactive tab`() {
         val grouped1 = createTab(id = "grouped1", url = "https://mozilla.org", private = false)
         val grouped2 = createTab(id = "grouped2", url = "https://mozilla.org", private = false)
-        val inactiveTab = createTab(id = "inactive1", url = "https://mozilla.org", private = false)
+        val inactiveTab =
+            createTab(
+                id = "inactive1",
+                url = "https://mozilla.org",
+                private = false,
+                lastAccess = 0L,
+                createdAt = 0L,
+            )
 
         val tabGroup =
             TabsTrayItem.TabGroup(
@@ -818,8 +1141,69 @@ class DefaultTabManagerControllerTest {
 
         controller.deleteMultipleTabs(itemsToDelete)
 
-        verify { controller.dismissTabManagerAndNavigateHome(ALL_NORMAL_TABS) }
-        verify(exactly = 0) { tabsUseCases.removeTabs(any(), any()) }
+        verify { controller.dismissTabManagerAndNavigateHome(ALL_ACTIVE_NORMAL_TABS) }
+    }
+
+    @Test
+    fun `GIVEN homepage as new tab is enabled and there are grouped tabs and an inactive tab WHEN deleteMultipleTabs is called on all grouped tabs THEN it flattens the group, does not navigate home, and deletes the grouped tabs only`() {
+        every { settings.enableHomepageAsNewTab } returns true
+
+        val grouped1 = createTab(id = "grouped1", url = "https://mozilla.org", private = false)
+        val grouped2 = createTab(id = "grouped2", url = "https://mozilla.org", private = false)
+        val inactiveTab =
+            createTab(
+                id = "inactive1",
+                url = "https://mozilla.org",
+                private = false,
+                lastAccess = 0L,
+                createdAt = 0L,
+            )
+
+        val tabGroup =
+            TabsTrayItem.TabGroup(
+                id = "group1",
+                title = "Test Group",
+                theme = TabGroupTheme.default,
+                tabs = mutableListOf(TabsTrayItem.Tab(grouped1), TabsTrayItem.Tab(grouped2)),
+            )
+
+        val itemsToDelete = listOf(TabsTrayItem.Tab(grouped1), TabsTrayItem.Tab(grouped2))
+
+        every { browserStore.state } returns
+            mockk {
+                every { tabs } returns listOf(grouped1, grouped2, inactiveTab)
+            }
+
+        every { trayStore.state } returns
+            mockk {
+                every { normalTabsState.items } returns listOf(tabGroup)
+                every { privateBrowsing } returns mockk { every { tabs } returns emptyList() }
+                every { inactiveTabs } returns
+                    mockk {
+                        every { tabs } returns listOf(TabsTrayItem.Tab(inactiveTab))
+                    }
+            }
+
+        var undoSnackbarIsPrivate: Boolean? = null
+        var undoSnackbarTabCount: Int? = null
+
+        val controller =
+            spyk(
+                createController(
+                    showUndoSnackbarForMultipleTabs = { isPrivate, count ->
+                        undoSnackbarIsPrivate = isPrivate
+                        undoSnackbarTabCount = count
+                    }
+                )
+            )
+
+        controller.deleteMultipleTabs(itemsToDelete)
+
+        verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(any()) }
+        verify { tabsUseCases.removeTabs(listOf("grouped1", "grouped2"), setOf("inactive1")) }
+
+        assertEquals(false, undoSnackbarIsPrivate)
+        assertEquals(2, undoSnackbarTabCount)
     }
 
     @Test
@@ -862,7 +1246,7 @@ class DefaultTabManagerControllerTest {
 
         controller.handleTabDeletion(TabsTrayItem.Tab(tab = focusedPrivateTab))
 
-        verify { tabsUseCases.removeTab(tabId = "focusedPrivate", excludedTabIds = any()) }
+        verify { tabsUseCases.removeTab(tabId = "focusedPrivate", excludedFallbackTabIds = any()) }
         verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(any()) }
         assertTrue(showUndoSnackbarForTabInvoked)
     }
@@ -907,13 +1291,13 @@ class DefaultTabManagerControllerTest {
 
         controller.handleTabDeletion(TabsTrayItem.Tab(tab = focusedNormalTab))
 
-        verify { tabsUseCases.removeTab(tabId = "focusedNormal", excludedTabIds = emptySet()) }
+        verify { tabsUseCases.removeTab(tabId = "focusedNormal", excludedFallbackTabIds = emptySet()) }
         verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(any()) }
         assertTrue(showUndoSnackbarForTabInvoked)
     }
 
     @Test
-    fun `GIVEN only one normal tab opened WHEN handleTabDeletion is called THEN it navigates to home where the tab will be removed`() {
+    fun `GIVEN only one normal tab is open WHEN handleTabDeletion is called THEN it navigates to home where the tab will be removed`() {
         val normalTab = createTab(id = "onlyNormalTab", url = "https://mozilla.org", private = false)
 
         val displayTab = TabsTrayItem.Tab(tab = normalTab)
@@ -946,12 +1330,51 @@ class DefaultTabManagerControllerTest {
         controller.handleTabDeletion(displayTab)
 
         verify { controller.dismissTabManagerAndNavigateHome(displayTab.id) }
-        verify(exactly = 0) { tabsUseCases.removeTab(tabId = displayTab.id, excludedTabIds = any()) }
+        verify(exactly = 0) { tabsUseCases.removeTab(tabId = displayTab.id, excludedFallbackTabIds = any()) }
         assertFalse(showUndoSnackbarForTabInvoked)
     }
 
     @Test
-    fun `WHEN handleMultipleTabsDeletion is called to close all private tabs THEN it navigates to home where those tabs will be removed`() {
+    fun `GIVEN homepage as new tab is enabled and only one normal tab is open WHEN handleTabDeletion is called THEN the tab is removed and it does not navigate to home`() {
+        every { settings.enableHomepageAsNewTab } returns true
+        val normalTab = createTab(id = "onlyNormalTab", url = "https://mozilla.org", private = false)
+
+        val displayTab = TabsTrayItem.Tab(tab = normalTab)
+
+        every { browserStore.state } returns
+            BrowserState(
+                tabs = listOf(normalTab),
+                selectedTabId = "onlyNormalTab",
+                downloads = emptyMap(),
+            )
+
+        every { trayStore.state } returns
+            TabsTrayState(
+                selectedTabId = "onlyNormalTab",
+                normalTabsState = TabsTrayState.NormalTabsState(items = listOf(TabsTrayItem.Tab(tab = normalTab))),
+                privateBrowsing = TabsTrayState.PrivateBrowsingState(tabs = emptyList()),
+                inactiveTabs = TabsTrayState.InactiveTabsState(tabs = emptyList()),
+            )
+
+        var showUndoSnackbarForTabInvoked = false
+        val controller =
+            spyk(
+                createController(
+                    showUndoSnackbarForTab = {
+                        showUndoSnackbarForTabInvoked = true
+                    }
+                )
+            )
+
+        controller.handleTabDeletion(displayTab)
+
+        verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(displayTab.id) }
+        verify { tabsUseCases.removeTab(tabId = displayTab.id, excludedFallbackTabIds = any()) }
+        assertTrue(showUndoSnackbarForTabInvoked)
+    }
+
+    @Test
+    fun `WHEN deleteMultipleTabs is called to close all private tabs THEN it navigates to home where those tabs will be removed`() {
         val privateTab1 = createTab(id = "private1", url = "https://mozilla.org", private = true)
         val privateTab2 = createTab(id = "private2", url = "https://mozilla.org", private = true)
         val tabItems = listOf(TabsTrayItem.Tab(tab = privateTab1), TabsTrayItem.Tab(tab = privateTab2))
@@ -974,39 +1397,54 @@ class DefaultTabManagerControllerTest {
         controller.deleteMultipleTabs(tabItems)
 
         verify { controller.dismissTabManagerAndNavigateHome(ALL_PRIVATE_TABS) }
-        verify(exactly = 0) { tabsUseCases.removeTabs(ids = any(), excludedTabIds = any()) }
+        verify(exactly = 0) { tabsUseCases.removeTabs(ids = any(), excludedFallbackTabIds = any()) }
     }
 
     @Test
-    fun `WHEN handleMultipleTabsDeletion is called to close all inactive tabs THEN it navigates to home where those tabs will be removed`() {
-        val inactiveTab1 = createTab(id = "inactive1", url = "https://mozilla.org", private = false)
-        val inactiveTab2 = createTab(id = "inactive2", url = "https://mozilla.com", private = false)
+    fun `GIVEN homepage as new tab is enabled WHEN deleteMultipleTabs is called to close all private tabs THEN it does not navigate home and those tabs are removed`() {
+        every { settings.enableHomepageAsNewTab } returns true
 
-        val inactiveTabItems = listOf(TabsTrayItem.Tab(inactiveTab1), TabsTrayItem.Tab(inactiveTab2))
+        val privateTab1 = createTab(id = "private1", url = "https://mozilla.org", private = true)
+        val privateTab2 = createTab(id = "private2", url = "https://mozilla.org", private = true)
+        val tabItems = listOf(TabsTrayItem.Tab(tab = privateTab1), TabsTrayItem.Tab(tab = privateTab2))
 
         every { browserStore.state } returns
             BrowserState(
-                tabs = listOf(inactiveTab1, inactiveTab2),
+                tabs = listOf(privateTab1, privateTab2),
                 downloads = emptyMap(),
             )
 
         every { trayStore.state } returns
             TabsTrayState(
-                privateBrowsing = TabsTrayState.PrivateBrowsingState(tabs = emptyList()),
+                privateBrowsing = TabsTrayState.PrivateBrowsingState(tabs = tabItems),
                 normalTabsState = TabsTrayState.NormalTabsState(items = emptyList()),
-                inactiveTabs = TabsTrayState.InactiveTabsState(tabs = inactiveTabItems),
+                inactiveTabs = TabsTrayState.InactiveTabsState(tabs = emptyList()),
             )
 
-        val controller = spyk(createController())
+        var undoSnackbarIsPrivate: Boolean? = null
+        var undoSnackbarTabCount: Int? = null
 
-        controller.deleteMultipleTabs(tabs = inactiveTabItems)
+        val controller =
+            spyk(
+                createController(
+                    showUndoSnackbarForMultipleTabs = { isPrivate, count ->
+                        undoSnackbarIsPrivate = isPrivate
+                        undoSnackbarTabCount = count
+                    }
+                )
+            )
 
-        verify { controller.dismissTabManagerAndNavigateHome(ALL_NORMAL_TABS) }
-        verify(exactly = 0) { tabsUseCases.removeTabs(ids = any(), excludedTabIds = any()) }
+        controller.deleteMultipleTabs(tabItems)
+
+        verify { tabsUseCases.removePrivateTabs() }
+        verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(ALL_PRIVATE_TABS) }
+
+        assertEquals(true, undoSnackbarIsPrivate)
+        assertEquals(2, undoSnackbarTabCount)
     }
 
     @Test
-    fun `GIVEN no tab groups exist WHEN handleMultipleTabsDeletion is called to close all normal tabs THEN it navigates to home where those tabs will be removed`() {
+    fun `GIVEN no tab groups exist WHEN deleteMultipleTabs is called to close all normal tabs THEN it navigates to home where those tabs will be removed`() {
         val normalTab1 = createTab(id = "normal1", url = "https://mozilla.org", private = false)
         val normalTab2 = createTab(id = "normal2", url = "https://mozilla.com", private = false)
 
@@ -1030,13 +1468,56 @@ class DefaultTabManagerControllerTest {
 
         controller.deleteMultipleTabs(tabs = normalTabItems)
 
-        verify { controller.dismissTabManagerAndNavigateHome(ALL_NORMAL_TABS) }
-
-        verify(exactly = 0) { tabsUseCases.removeTabs(ids = any(), excludedTabIds = any()) }
+        verify { controller.dismissTabManagerAndNavigateHome(ALL_ACTIVE_NORMAL_TABS) }
     }
 
     @Test
-    fun `GIVEN only open tab groups exist WHEN handleMultipleTabsDeletion is called to close all normal tabs THEN it flattens the groups and navigates to home`() {
+    fun `GIVEN homepage as new tab is enabled and no tab groups exist WHEN handleMultipleTabsDeletion is called to close all normal tabs THEN it does not navigate home and those tabs are removed`() {
+        every { settings.enableHomepageAsNewTab } returns true
+
+        val normalTab1 = createTab(id = "normal1", url = "https://mozilla.org", private = false)
+        val normalTab2 = createTab(id = "normal2", url = "https://mozilla.com", private = false)
+
+        val normalTabItems = listOf(TabsTrayItem.Tab(normalTab1), TabsTrayItem.Tab(normalTab2))
+
+        every { browserStore.state } returns
+            BrowserState(
+                tabs = listOf(normalTab1, normalTab2),
+                downloads = emptyMap(),
+            )
+
+        every { trayStore.state } returns
+            TabsTrayState(
+                privateBrowsing = TabsTrayState.PrivateBrowsingState(tabs = emptyList()),
+                normalTabsState = TabsTrayState.NormalTabsState(items = normalTabItems),
+                inactiveTabs = TabsTrayState.InactiveTabsState(tabs = emptyList()),
+                tabGroupState = TabsTrayState.TabGroupState(groups = emptyList()),
+            )
+
+        var undoSnackbarIsPrivate: Boolean? = null
+        var undoSnackbarTabCount: Int? = null
+
+        val controller =
+            spyk(
+                createController(
+                    showUndoSnackbarForMultipleTabs = { isPrivate, count ->
+                        undoSnackbarIsPrivate = isPrivate
+                        undoSnackbarTabCount = count
+                    }
+                )
+            )
+
+        controller.deleteMultipleTabs(tabs = normalTabItems)
+
+        verify { tabsUseCases.removeTabs(listOf("normal1", "normal2"), setOf()) }
+
+        verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(any()) }
+        assertEquals(false, undoSnackbarIsPrivate)
+        assertEquals(2, undoSnackbarTabCount)
+    }
+
+    @Test
+    fun `GIVEN only open tab groups exist WHEN deleteMultipleTabs is called to close all active normal tabs THEN it flattens the groups and navigates to home, where the tabs will be deleted`() {
         val groupedTab1 = createTab(id = "grouped1", url = "https://mozilla.org", private = false)
         val groupedTab2 = createTab(id = "grouped2", url = "https://mozilla.com", private = false)
 
@@ -1069,15 +1550,64 @@ class DefaultTabManagerControllerTest {
 
         controller.deleteMultipleTabs(tabs = tabItemsToDelete)
 
-        verify { controller.dismissTabManagerAndNavigateHome(ALL_NORMAL_TABS) }
-
-        verify(exactly = 0) {
-            tabsUseCases.removeTabs(ids = any(), excludedTabIds = any())
-        }
+        verify { controller.dismissTabManagerAndNavigateHome(ALL_ACTIVE_NORMAL_TABS) }
     }
 
     @Test
-    fun `GIVEN a closed tab group exists WHEN deleteMultipleTabs is called to close all visible normal tabs THEN it navigates to home`() {
+    fun `GIVEN homepage as new tab is enabled and only open tab groups exist WHEN deleteMultipleTabs is called to close all normal tabs THEN it flattens the groups, deletes the normal tabs, and does not navigate home`() {
+        every { settings.enableHomepageAsNewTab } returns true
+        val groupedTab1 = createTab(id = "grouped1", url = "https://mozilla.org", private = false)
+        val groupedTab2 = createTab(id = "grouped2", url = "https://mozilla.com", private = false)
+
+        val tabItemsToDelete = listOf(TabsTrayItem.Tab(groupedTab1), TabsTrayItem.Tab(groupedTab2))
+
+        val openTabGroup =
+            TabsTrayItem.TabGroup(
+                id = "group1",
+                title = "Group 1",
+                theme = TabGroupTheme.default,
+                tabs = tabItemsToDelete.toMutableList(),
+                closed = false,
+            )
+
+        every { browserStore.state } returns
+            BrowserState(
+                tabs = listOf(groupedTab1, groupedTab2),
+                downloads = emptyMap(),
+            )
+
+        every { trayStore.state } returns
+            TabsTrayState(
+                privateBrowsing = TabsTrayState.PrivateBrowsingState(tabs = emptyList()),
+                inactiveTabs = TabsTrayState.InactiveTabsState(tabs = emptyList()),
+                tabGroupState = TabsTrayState.TabGroupState(groups = listOf(openTabGroup)),
+                normalTabsState = TabsTrayState.NormalTabsState(items = listOf(openTabGroup)),
+            )
+
+        var undoSnackbarIsPrivate: Boolean? = null
+        var undoSnackbarTabCount: Int? = null
+
+        val controller =
+            spyk(
+                createController(
+                    showUndoSnackbarForMultipleTabs = { isPrivate, count ->
+                        undoSnackbarIsPrivate = isPrivate
+                        undoSnackbarTabCount = count
+                    }
+                )
+            )
+
+        controller.deleteMultipleTabs(tabs = tabItemsToDelete)
+
+        verify { tabsUseCases.removeTabs(listOf("grouped1", "grouped2"), setOf()) }
+
+        verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(ALL_NORMAL_TABS) }
+        assertEquals(false, undoSnackbarIsPrivate)
+        assertEquals(2, undoSnackbarTabCount)
+    }
+
+    @Test
+    fun `GIVEN a closed tab group exists WHEN deleteMultipleTabs is called to close all visible normal tabs THEN it navigates to home, where the tabs will be deleted`() {
         val visibleTab = createTab(id = "visibleTab", url = "https://mozilla.org", private = false)
         val closedGroupTab = createTab(id = "closedTabForTabGroup", url = "https://mozilla.org", private = false)
 
@@ -1110,8 +1640,60 @@ class DefaultTabManagerControllerTest {
 
         controller.deleteMultipleTabs(listOf(visibleTabItem))
 
-        verify { controller.dismissTabManagerAndNavigateHome(ALL_NORMAL_TABS) }
-        verify(exactly = 0) { tabsUseCases.removeTabs(ids = any(), excludedTabIds = any()) }
+        verify { controller.dismissTabManagerAndNavigateHome(ALL_ACTIVE_NORMAL_TABS) }
+    }
+
+    @Test
+    fun `GIVEN homepage as new tab is enabled and a closed tab group exists WHEN deleteMultipleTabs is called to close all visible normal tabs THEN those tabs are closed and it does not navigate home`() {
+        every { settings.enableHomepageAsNewTab } returns true
+
+        val visibleTab = createTab(id = "visibleTab", url = "https://mozilla.org", private = false)
+        val closedGroupTab = createTab(id = "closedTabForTabGroup", url = "https://mozilla.org", private = false)
+
+        val visibleTabItem = TabsTrayItem.Tab(tab = visibleTab)
+
+        val closedTabGroup =
+            TabsTrayItem.TabGroup(
+                id = "group1",
+                title = "Closed Group",
+                theme = TabGroupTheme.default,
+                tabs = mutableListOf(TabsTrayItem.Tab(closedGroupTab)),
+                closed = true,
+            )
+
+        every { browserStore.state } returns
+            BrowserState(
+                tabs = listOf(visibleTab, closedGroupTab),
+                downloads = emptyMap(),
+            )
+
+        every { trayStore.state } returns
+            TabsTrayState(
+                tabGroupState = TabsTrayState.TabGroupState(groups = listOf(closedTabGroup)),
+                normalTabsState = TabsTrayState.NormalTabsState(items = listOf(visibleTabItem)),
+                privateBrowsing = TabsTrayState.PrivateBrowsingState(tabs = emptyList()),
+                inactiveTabs = TabsTrayState.InactiveTabsState(tabs = emptyList()),
+            )
+
+        var undoSnackbarIsPrivate: Boolean? = null
+        var undoSnackbarTabCount: Int? = null
+
+        val controller =
+            spyk(
+                createController(
+                    showUndoSnackbarForMultipleTabs = { isPrivate, count ->
+                        undoSnackbarIsPrivate = isPrivate
+                        undoSnackbarTabCount = count
+                    }
+                )
+            )
+
+        controller.deleteMultipleTabs(listOf(visibleTabItem))
+
+        verify { tabsUseCases.removeTabs(listOf("visibleTab", "closedTabForTabGroup"), setOf()) }
+        verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(ALL_NORMAL_TABS) }
+        assertEquals(false, undoSnackbarIsPrivate)
+        assertEquals(2, undoSnackbarTabCount)
     }
 
     @Test
@@ -1138,22 +1720,25 @@ class DefaultTabManagerControllerTest {
                 inactiveTabs = TabsTrayState.InactiveTabsState(tabs = emptyList()),
             )
 
-        var showUndoSnackbarForTabInvoked = false
+        var undoSnackbarIsPrivate: Boolean? = null
+        var undoSnackbarTabCount: Int? = null
         val controller =
             spyk(
                 createController(
-                    showUndoSnackbarForTab = {
-                        showUndoSnackbarForTabInvoked = true
+                    showUndoSnackbarForMultipleTabs = { isPrivate, count ->
+                        undoSnackbarIsPrivate = isPrivate
+                        undoSnackbarTabCount = count
                     }
                 )
             )
 
         controller.deleteMultipleTabs(itemsToDelete)
 
-        verify { tabsUseCases.removeTabs(ids = itemsToDelete.map { it.id }, excludedTabIds = emptySet()) }
+        verify { tabsUseCases.removeTabs(ids = itemsToDelete.map { it.id }, excludedFallbackTabIds = emptySet()) }
 
         verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(any()) }
-        assertTrue(showUndoSnackbarForTabInvoked)
+        assertEquals(false, undoSnackbarIsPrivate)
+        assertEquals(2, undoSnackbarTabCount)
     }
 
     @Test
@@ -1161,7 +1746,14 @@ class DefaultTabManagerControllerTest {
         val focusedTab = createTab(id = "focused_tab_to_delete", url = "https://mozilla.org", private = false)
         val normalTabToDelete = createTab(id = "normal_deleting", url = "https://mozilla.com", private = false)
         val normalTabSurviving = createTab(id = "normal_safe", url = "https://mozilla.org", private = false)
-        val inactiveTab = createTab(id = "inactive_safe", url = "https://mozilla.org", private = false)
+        val inactiveTab =
+            createTab(
+                id = "inactive_safe",
+                url = "https://mozilla.org",
+                private = false,
+                lastAccess = 0L,
+                createdAt = 0L,
+            )
 
         val itemsToDelete = listOf(TabsTrayItem.Tab(focusedTab), TabsTrayItem.Tab(normalTabToDelete))
 
@@ -1182,26 +1774,31 @@ class DefaultTabManagerControllerTest {
                 tabGroupState = TabsTrayState.TabGroupState(groups = emptyList()),
             )
 
-        var showUndoSnackbarForTabInvoked = false
+        var undoSnackbarIsPrivate: Boolean? = null
+        var undoSnackbarTabCount: Int? = null
         val controller =
             spyk(
                 createController(
-                    showUndoSnackbarForTab = {
-                        showUndoSnackbarForTabInvoked = true
+                    showUndoSnackbarForMultipleTabs = { isPrivate, count ->
+                        undoSnackbarIsPrivate = isPrivate
+                        undoSnackbarTabCount = count
                     }
                 )
             )
 
         controller.deleteMultipleTabs(tabs = itemsToDelete)
 
-        verify { tabsUseCases.removeTabs(ids = itemsToDelete.map { it.id }, excludedTabIds = setOf("inactive_safe")) }
+        verify {
+            tabsUseCases.removeTabs(ids = itemsToDelete.map { it.id }, excludedFallbackTabIds = setOf("inactive_safe"))
+        }
 
         verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(any()) }
-        assertTrue(showUndoSnackbarForTabInvoked)
+        assertEquals(false, undoSnackbarIsPrivate)
+        assertEquals(2, undoSnackbarTabCount)
     }
 
     @Test
-    fun `GIVEN an unselected visible tab and a closed group WHEN deleteMultipleTabs includes the focused tab THEN it removes the tab and omits the closed group from excludedTabIds`() {
+    fun `GIVEN an unselected visible tab and a closed group WHEN deleteMultipleTabs includes the focused tab THEN it removes the tab and omits the closed group from excludedFallbackTabIds`() {
         val focusedTabToDelete = createTab(id = "focused_tab_to_delete", url = "https://mozilla.org", private = false)
         val unselectedVisibleTab =
             createTab(id = "unselected_visible_tab", url = "https://mozilla.com", private = false)
@@ -1235,22 +1832,25 @@ class DefaultTabManagerControllerTest {
                 inactiveTabs = TabsTrayState.InactiveTabsState(tabs = emptyList()),
             )
 
-        var showUndoSnackbarForTabInvoked = false
+        var undoSnackbarIsPrivate: Boolean? = null
+        var undoSnackbarTabCount: Int? = null
         val controller =
             spyk(
                 createController(
-                    showUndoSnackbarForTab = {
-                        showUndoSnackbarForTabInvoked = true
+                    showUndoSnackbarForMultipleTabs = { isPrivate, count ->
+                        undoSnackbarIsPrivate = isPrivate
+                        undoSnackbarTabCount = count
                     }
                 )
             )
 
         controller.deleteMultipleTabs(tabs = itemsToDelete)
 
-        verify { tabsUseCases.removeTabs(ids = listOf("focused_tab_to_delete"), excludedTabIds = emptySet()) }
+        verify { tabsUseCases.removeTabs(ids = listOf("focused_tab_to_delete"), excludedFallbackTabIds = emptySet()) }
 
         verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(any()) }
-        assertTrue(showUndoSnackbarForTabInvoked)
+        assertEquals(false, undoSnackbarIsPrivate)
+        assertEquals(1, undoSnackbarTabCount)
     }
 
     @Test
@@ -1278,15 +1878,66 @@ class DefaultTabManagerControllerTest {
 
         controller.deleteMultipleTabs(tabs = itemsToDelete)
 
-        verify { controller.dismissTabManagerAndNavigateHome(ALL_NORMAL_TABS) }
+        verify { controller.dismissTabManagerAndNavigateHome(ALL_ACTIVE_NORMAL_TABS) }
+    }
 
-        verify(exactly = 0) { tabsUseCases.removeTabs(any(), any()) }
+    @Test
+    fun `GIVEN homepage as new tab is enabled and multiple normal tabs WHEN deleteMultipleTabs manually includes all open normal tabs THEN it does not navigate home and those tabs will be removed`() {
+        every { settings.enableHomepageAsNewTab } returns true
+
+        val normalTabToDelete1 = createTab(id = "normal_to_delete_1", url = "https://mozilla.org", private = false)
+        val normalTabToDelete2 = createTab(id = "normal_to_delete_2", url = "https://mozilla.com", private = false)
+
+        val itemsToDelete = listOf(TabsTrayItem.Tab(normalTabToDelete1), TabsTrayItem.Tab(normalTabToDelete2))
+
+        every { browserStore.state } returns
+            BrowserState(
+                tabs = listOf(normalTabToDelete1, normalTabToDelete2),
+                downloads = emptyMap(),
+            )
+
+        every { trayStore.state } returns
+            TabsTrayState(
+                normalTabsState = TabsTrayState.NormalTabsState(items = itemsToDelete),
+                privateBrowsing = TabsTrayState.PrivateBrowsingState(tabs = emptyList()),
+                inactiveTabs = TabsTrayState.InactiveTabsState(tabs = emptyList()),
+                tabGroupState = TabsTrayState.TabGroupState(groups = emptyList()),
+            )
+
+        var undoSnackbarIsPrivate: Boolean? = null
+        var undoSnackbarTabCount: Int? = null
+
+        val controller =
+            spyk(
+                createController(
+                    showUndoSnackbarForMultipleTabs = { isPrivate, count ->
+                        undoSnackbarIsPrivate = isPrivate
+                        undoSnackbarTabCount = count
+                    }
+                )
+            )
+
+        controller.deleteMultipleTabs(tabs = itemsToDelete)
+
+        verify { tabsUseCases.removeTabs(listOf("normal_to_delete_1", "normal_to_delete_2"), setOf()) }
+
+        verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(ALL_ACTIVE_NORMAL_TABS) }
+
+        assertEquals(false, undoSnackbarIsPrivate)
+        assertEquals(2, undoSnackbarTabCount)
     }
 
     @Test
     fun `GIVEN inactive tabs and a closed group WHEN deleteMultipleTabs deletes all visible normal tabs THEN it navigates to home`() {
         val visibleNormalTabToDelete = createTab(id = "visible_to_delete", url = "https://mozilla.org", private = false)
-        val inactiveTab = createTab(id = "inactive_tab", url = "https://mozilla.com", private = false)
+        val inactiveTab =
+            createTab(
+                id = "inactive_tab",
+                url = "https://mozilla.com",
+                private = false,
+                lastAccess = 0L,
+                createdAt = 0L,
+            )
         val tabInsideClosedGroup = createTab(id = "tab_in_closed_group", url = "https://mozilla.org", private = false)
 
         val itemsToDelete = listOf(TabsTrayItem.Tab(visibleNormalTabToDelete))
@@ -1318,13 +1969,74 @@ class DefaultTabManagerControllerTest {
 
         controller.deleteMultipleTabs(tabs = itemsToDelete)
 
-        verify { controller.dismissTabManagerAndNavigateHome(ALL_NORMAL_TABS) }
-
-        verify(exactly = 0) { tabsUseCases.removeTabs(any(), any()) }
+        verify { controller.dismissTabManagerAndNavigateHome(ALL_ACTIVE_NORMAL_TABS) }
     }
 
     @Test
-    fun `GIVEN last private tab WHEN handleDeleteTabWarningAccepted is called THEN it bypasses the download warning and navigates to home`() {
+    fun `GIVEN homepage as new tab is enabled and inactive tabs and a closed group WHEN deleteMultipleTabs deletes all visible normal tabs THEN all visible normal tabs will be removed and it does not navigate home`() {
+        every { settings.enableHomepageAsNewTab } returns true
+
+        val visibleNormalTabToDelete = createTab(id = "visible_to_delete", url = "https://mozilla.org", private = false)
+        val inactiveTab =
+            createTab(
+                id = "inactive_tab",
+                url = "https://mozilla.com",
+                private = false,
+                lastAccess = 0L,
+                createdAt = 0L,
+            )
+        val tabInsideClosedGroup = createTab(id = "tab_in_closed_group", url = "https://mozilla.org", private = false)
+
+        val itemsToDelete = listOf(TabsTrayItem.Tab(visibleNormalTabToDelete))
+
+        val closedTabGroup =
+            TabsTrayItem.TabGroup(
+                id = "group1",
+                title = "Closed Group",
+                theme = TabGroupTheme.default,
+                tabs = mutableListOf(TabsTrayItem.Tab(tabInsideClosedGroup)),
+                closed = true,
+            )
+
+        every { browserStore.state } returns
+            BrowserState(
+                tabs = listOf(visibleNormalTabToDelete, inactiveTab, tabInsideClosedGroup),
+                downloads = emptyMap(),
+            )
+
+        every { trayStore.state } returns
+            TabsTrayState(
+                normalTabsState = TabsTrayState.NormalTabsState(items = itemsToDelete),
+                inactiveTabs = TabsTrayState.InactiveTabsState(tabs = listOf(TabsTrayItem.Tab(inactiveTab))),
+                tabGroupState = TabsTrayState.TabGroupState(groups = listOf(closedTabGroup)),
+                privateBrowsing = TabsTrayState.PrivateBrowsingState(tabs = emptyList()),
+            )
+
+        var undoSnackbarIsPrivate: Boolean? = null
+        var undoSnackbarTabCount: Int? = null
+
+        val controller =
+            spyk(
+                createController(
+                    showUndoSnackbarForMultipleTabs = { isPrivate, count ->
+                        undoSnackbarIsPrivate = isPrivate
+                        undoSnackbarTabCount = count
+                    }
+                )
+            )
+
+        controller.deleteMultipleTabs(tabs = itemsToDelete)
+
+        verify { tabsUseCases.removeTabs(listOf("visible_to_delete", "tab_in_closed_group"), setOf("inactive_tab")) }
+
+        verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(ALL_ACTIVE_NORMAL_TABS) }
+
+        assertEquals(false, undoSnackbarIsPrivate)
+        assertEquals(2, undoSnackbarTabCount)
+    }
+
+    @Test
+    fun `GIVEN only one private tab is open WHEN handleDeleteTabWarningAccepted is called THEN it bypasses the download warning and navigates to home, where the tab is deleted`() {
         val tabToDelete = createTab(id = "private_last", url = "https://mozilla.org", private = true)
 
         every { browserStore.state } returns
@@ -1349,16 +2061,83 @@ class DefaultTabManagerControllerTest {
 
         verify { controller.dismissTabManagerAndNavigateHome("private_last") }
 
-        verify(exactly = 0) { tabsUseCases.removeTab(tabId = any<String>(), excludedTabIds = any<Set<String>>()) }
+        verify(exactly = 0) {
+            tabsUseCases.removeTab(tabId = any<String>(), excludedFallbackTabIds = any<Set<String>>())
+        }
     }
 
     @Test
-    fun `WHEN onCloseAllPrivateTabsWarningConfirmed is called THEN it bypasses the download warning and navigates to home`() {
+    fun `GIVEN homepage as a new tab is enabled and only one private tab is open WHEN handleDeleteTabWarningAccepted is called THEN it bypasses the download warning, deletes the tab, and does not navigate home`() {
+        every { settings.enableHomepageAsNewTab } returns true
+        val tabToDelete = createTab(id = "private_last", url = "https://mozilla.org", private = true)
+
+        every { browserStore.state } returns
+            BrowserState(
+                tabs = listOf(tabToDelete),
+                selectedTabId = "private_last",
+                downloads = emptyMap(),
+            )
+
+        every { trayStore.state } returns
+            TabsTrayState(
+                selectedTabId = "private_last",
+                privateBrowsing = TabsTrayState.PrivateBrowsingState(tabs = listOf(TabsTrayItem.Tab(tabToDelete))),
+                normalTabsState = TabsTrayState.NormalTabsState(items = emptyList()),
+                inactiveTabs = TabsTrayState.InactiveTabsState(tabs = emptyList()),
+                tabGroupState = TabsTrayState.TabGroupState(groups = emptyList()),
+            )
+
+        val controller = spyk(createController())
+
+        controller.handleDeletePrivateTabWarningAccepted(tabId = "private_last")
+
+        verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome("private_last") }
+
+        verify { tabsUseCases.removeTab(tabId = any<String>(), excludedFallbackTabIds = any<Set<String>>()) }
+    }
+
+    @Test
+    fun `WHEN onCloseAllPrivateTabsWarningConfirmed is called THEN it bypasses the download warning and navigates to home where the private tabs are deleted`() {
         val controller = spyk(createController())
 
         controller.onCloseAllPrivateTabsWarningConfirmed(private = true)
 
         verify { controller.dismissTabManagerAndNavigateHome(ALL_PRIVATE_TABS) }
+    }
+
+    @Test
+    fun `GIVEN homepage as new tab is enabled WHEN onCloseAllPrivateTabsWarningConfirmed is called THEN it bypasses the download warning, deletes the private tabs, and does not navigate to home`() {
+        every { settings.enableHomepageAsNewTab } returns true
+
+        val privateTab1 = createTab(id = "private1", url = "https://mozilla.org", private = true)
+        val privateTab2 = createTab(id = "private2", url = "https://mozilla.org", private = true)
+
+        every { browserStore.state } returns
+            BrowserState(
+                tabs = listOf(privateTab1, privateTab2),
+                downloads = emptyMap(),
+            )
+
+        var undoSnackbarIsPrivate: Boolean? = null
+        var undoSnackbarTabCount: Int? = null
+
+        val controller =
+            spyk(
+                createController(
+                    showUndoSnackbarForMultipleTabs = { isPrivate, count ->
+                        undoSnackbarIsPrivate = isPrivate
+                        undoSnackbarTabCount = count
+                    }
+                )
+            )
+
+        controller.onCloseAllPrivateTabsWarningConfirmed(private = true)
+
+        verify { tabsUseCases.removePrivateTabs() }
+        verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(ALL_PRIVATE_TABS) }
+
+        assertEquals(true, undoSnackbarIsPrivate)
+        assertEquals(2, undoSnackbarTabCount)
     }
 
     @Test
@@ -1587,6 +2366,8 @@ class DefaultTabManagerControllerTest {
                     createTab(
                         id = "1",
                         url = "www.google.com",
+                        lastAccess = 0L,
+                        createdAt = 0L,
                     )
             )
 
@@ -1726,7 +2507,7 @@ class DefaultTabManagerControllerTest {
     @Test
     fun `WHEN an inactive tab is selected THEN report the telemetry event and open the tab`() {
         val controller = spyk(createController())
-        val tab = TabsTrayItem.Tab(tab = createTab(url = ""))
+        val tab = TabsTrayItem.Tab(tab = createTab(url = "", lastAccess = 0L, createdAt = 0L))
 
         every { controller.handleTabSelected(any(), any()) } just runs
 
@@ -1742,7 +2523,7 @@ class DefaultTabManagerControllerTest {
     @Test
     fun `WHEN an inactive tab is closed THEN report the telemetry event and delete the tab`() {
         val controller = spyk(createController())
-        val tab = TabsTrayItem.Tab(tab = createTab(url = ""))
+        val tab = TabsTrayItem.Tab(tab = createTab(url = "", lastAccess = 0L, createdAt = 0L))
 
         every { controller.handleTabDeletion(any(), any()) } just runs
 
@@ -1926,7 +2707,14 @@ class DefaultTabManagerControllerTest {
 
         verify {
             shareUseCases.shareItems(
-                items = listOf(ShareData(url = tab.content.url, title = tab.content.title)),
+                items =
+                    listOf(
+                        ShareData(
+                            url = tab.content.url,
+                            title = tab.content.title,
+                            private = tab.content.private,
+                        )
+                    ),
                 source = ShareSource.TABS_TRAY,
                 isPrivate = false,
                 chooserActions = ShareSheetChooserAction.tabChooserActions,
@@ -1953,8 +2741,16 @@ class DefaultTabManagerControllerTest {
             shareUseCases.shareItems(
                 items =
                     listOf(
-                        ShareData(url = tab1.content.url, title = tab1.content.title),
-                        ShareData(url = tab2.content.url, title = tab2.content.title),
+                        ShareData(
+                            url = tab1.content.url,
+                            title = tab1.content.title,
+                            private = tab1.content.private,
+                        ),
+                        ShareData(
+                            url = tab2.content.url,
+                            title = tab2.content.title,
+                            private = tab2.content.private,
+                        ),
                     ),
                 source = ShareSource.TABS_TRAY,
                 isPrivate = false,
@@ -1989,8 +2785,16 @@ class DefaultTabManagerControllerTest {
             shareUseCases.shareItems(
                 items =
                     listOf(
-                        ShareData(url = tab1.content.url, title = tab1.content.title),
-                        ShareData(url = tab2.content.url, title = tab2.content.title),
+                        ShareData(
+                            url = tab1.content.url,
+                            title = tab1.content.title,
+                            private = tab1.content.private,
+                        ),
+                        ShareData(
+                            url = tab2.content.url,
+                            title = tab2.content.title,
+                            private = tab2.content.private,
+                        ),
                     ),
                 source = ShareSource.TABS_TRAY,
                 isPrivate = false,
@@ -2192,7 +2996,7 @@ class DefaultTabManagerControllerTest {
     }
 
     @Test
-    fun `GIVEN public tabs and one download in progress WHEN close all tabs clicked THEN dismiss tab manager and navigate to home`() {
+    fun `GIVEN 1 download is in progress in a normal tab WHEN close all normal tabs clicked THEN dismiss tab manager and navigate to home, where all normal tabs will be closed`() {
         val tab: TabSessionState = mockk { every { content.private } returns false }
         every { browserStore.state } returns
             mockk {
@@ -2215,11 +3019,51 @@ class DefaultTabManagerControllerTest {
     }
 
     @Test
-    fun `GIVEN private tabs and 1 download in progress WHEN close all tabs clicked THEN dismiss tab manager and navigate to home`() {
-        val tab: TabSessionState = mockk { every { content.private } returns true }
+    fun `GIVEN homepage as new tab is enabled and 1 download is in progress in a normal tab WHEN close all normal tabs clicked THEN do not dismiss tab manager, do not navigate to home, and close all normal tabs`() {
+        every { settings.enableHomepageAsNewTab } returns true
+        val normalTab = createTab(id = "1", url = "https://mozilla.org/download", private = false)
+        val privateTab = createTab(id = "2", url = "https://mozilla.org", private = true)
+        every { browserStore.state } returns
+            BrowserState(
+                tabs = listOf(normalTab, privateTab),
+                downloads =
+                    mapOf(
+                        "1" to
+                            DownloadState(
+                                "https://mozilla.org/download",
+                                private = true,
+                                status = DownloadState.Status.DOWNLOADING,
+                            )
+                    ),
+            )
+
+        var undoSnackbarIsPrivate: Boolean? = null
+        var undoSnackbarTabCount: Int? = null
+        val controller =
+            spyk(
+                createController(
+                    showUndoSnackbarForMultipleTabs = { isPrivate, count ->
+                        undoSnackbarIsPrivate = isPrivate
+                        undoSnackbarTabCount = count
+                    }
+                )
+            )
+        controller.onCloseAllTabsClicked(private = false)
+
+        verify { tabsUseCases.removeNormalTabs() }
+        verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(any()) }
+
+        assertEquals(false, undoSnackbarIsPrivate)
+        assertEquals(1, undoSnackbarTabCount)
+    }
+
+    @Test
+    fun `GIVEN 1 download is in progress in a private tab WHEN close all normal tabs clicked THEN dismiss tab manager and navigate to home, where all normal tabs will be removed`() {
+        val privateTab = createTab(id = "1", url = "https://mozilla.org", private = true)
+        val normalTab = createTab(id = "2", url = "https://mozilla.org", private = false)
         every { browserStore.state } returns
             mockk {
-                every { tabs } returns listOf(tab)
+                every { tabs } returns listOf(normalTab, privateTab)
             }
         every { browserStore.state.downloads } returns
             mapOf(
@@ -2235,6 +3079,46 @@ class DefaultTabManagerControllerTest {
         controller.onCloseAllTabsClicked(private = false)
 
         verify { controller.dismissTabManagerAndNavigateHome(any()) }
+    }
+
+    @Test
+    fun `GIVEN homepage as new tab is enabled and 1 download is in progress in a private tab WHEN close all normal tabs clicked THEN do not dismiss tab manager, do not navigate to home, and close all normal tabs`() {
+        every { settings.enableHomepageAsNewTab } returns true
+        val privateTab = createTab(id = "1", url = "https://mozilla.org/download", private = true)
+        val normalTab = createTab(id = "2", url = "https://mozilla.org", private = false)
+        every { browserStore.state } returns
+            BrowserState(
+                tabs = listOf(normalTab, privateTab),
+                downloads =
+                    mapOf(
+                        "1" to
+                            DownloadState(
+                                "https://mozilla.org/download",
+                                private = true,
+                                status = DownloadState.Status.DOWNLOADING,
+                            )
+                    ),
+            )
+
+        var undoSnackbarIsPrivate: Boolean? = null
+        var undoSnackbarTabCount: Int? = null
+        val controller =
+            spyk(
+                createController(
+                    showUndoSnackbarForMultipleTabs = { isPrivate, count ->
+                        undoSnackbarIsPrivate = isPrivate
+                        undoSnackbarTabCount = count
+                    }
+                )
+            )
+        controller.onCloseAllTabsClicked(private = false)
+
+        verify { tabsUseCases.removeNormalTabs() }
+
+        verify(exactly = 0) { controller.dismissTabManagerAndNavigateHome(any()) }
+
+        assertEquals(false, undoSnackbarIsPrivate)
+        assertEquals(1, undoSnackbarTabCount)
     }
 
     @Test
@@ -2364,7 +3248,7 @@ class DefaultTabManagerControllerTest {
     }
 
     @Test
-    fun `WHEN the privacy report pill is tapped THEN navigate to the protections dashboard with the tabs_tray source`() {
+    fun `WHEN the privacy report pill is tapped THEN navigate to the protections dashboard`() {
         every { navController.currentDestination } returns
             mockk<NavDestination> {
                 every { id } returns R.id.tabManagementFragment
@@ -2381,12 +3265,22 @@ class DefaultTabManagerControllerTest {
             navController.navigate(
                 directions =
                     TabManagementFragmentDirections.actionTabManagementFragmentToGlobalProtectionsDashboard(
-                        currentSessionId,
-                        source = ProtectionsDashboardFragment.SOURCE_TABS_TRAY,
+                        customTabSessionId = currentSessionId
                     ),
                 navOptions = null,
             )
         }
+    }
+
+    @Test
+    fun `WHEN the privacy report pill is tapped THEN record telemetry`() {
+        browserStore = BrowserStore()
+        createController().onPrivacyReportTapped()
+
+        assertEquals(
+            TABS_TRAY_TELEMETRY_SOURCE,
+            TrackingProtection.privacyReportTapped.testGetValue()?.last()?.extra?.get("source"),
+        )
     }
 
     private fun makeBookmarkFolder(guid: String) =
@@ -2407,6 +3301,7 @@ class DefaultTabManagerControllerTest {
         showUndoSnackbarForTab: (Boolean) -> Unit = { _ -> },
         showUndoSnackbarForInactiveTab: (Int) -> Unit = { _ -> },
         showUndoSnackbarForSyncedTab: (CloseTabsUseCases.UndoableOperation) -> Unit = { _ -> },
+        showUndoSnackbarForMultipleTabs: (Boolean, Int) -> Unit = { _, _ -> },
         showCancelledDownloadWarning: (Int, String?, String?) -> Unit = { _, _, _ -> },
         showCollectionSnackbar: (Int, Boolean) -> Unit = { _, _ -> },
         showBookmarkSnackbar: (Int, String?) -> Unit = { _, _ -> },
@@ -2433,6 +3328,7 @@ class DefaultTabManagerControllerTest {
             showUndoSnackbarForTab = showUndoSnackbarForTab,
             showUndoSnackbarForInactiveTab = showUndoSnackbarForInactiveTab,
             showUndoSnackbarForSyncedTab = showUndoSnackbarForSyncedTab,
+            showUndoSnackbarForMultipleTabs = showUndoSnackbarForMultipleTabs,
             showCancelledDownloadWarning = showCancelledDownloadWarning,
             showBookmarkSnackbar = showBookmarkSnackbar,
             showCollectionSnackbar = showCollectionSnackbar,

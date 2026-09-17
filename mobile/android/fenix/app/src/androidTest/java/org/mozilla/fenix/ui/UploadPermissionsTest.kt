@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.fenix.ui
 
 import android.os.Build
@@ -8,6 +12,7 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import org.mozilla.fenix.customannotations.Converted
 import org.mozilla.fenix.customannotations.SmokeTest
 import org.mozilla.fenix.helpers.AppAndSystemHelper.assertExternalAppOpens
 import org.mozilla.fenix.helpers.AppAndSystemHelper.closeSystemPhotoAndVideoPicker
@@ -46,6 +51,11 @@ class UploadPermissionsTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2121537
+    @Converted(
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.UploadPermissionsTest#fileUploadPermissionTest"],
+        bug = 2063263,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun fileUploadPermissionTest() {

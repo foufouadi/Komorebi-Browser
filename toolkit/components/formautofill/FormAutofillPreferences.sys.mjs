@@ -52,7 +52,7 @@ export class FormAutofillPreferences {
    * @param  {HTMLDocument} document
    */
   createPreferenceGroup(document) {
-    const win = document.ownerGlobal;
+    const win = document.documentGlobal;
     Services.obs.notifyObservers(win, "formautofill-preferences-initialized");
   }
 
@@ -529,7 +529,7 @@ export class FormAutofillPreferences {
         cancelBtn
       )
     ) {
-      lazy.formAutofillStorage.addresses.remove(guid);
+      await lazy.formAutofillStorage.addresses.remove(guid);
     }
   }
 

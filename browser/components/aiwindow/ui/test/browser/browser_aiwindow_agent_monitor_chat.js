@@ -46,6 +46,7 @@ const MONITOR_CARD = {
     uiType: "agent-monitor-item",
     properties: {
       agent: {
+        monitorName: "Example product",
         url: "https://example.com/product",
         watchUrls: ["https://example.com/product"],
         condition: "the price drops",
@@ -77,9 +78,27 @@ const DISPLAY_MONITOR_CARD = {
   },
 };
 
+/**
+ * Clicks an action in the expanded display card and returns the detail of the
+ * event it makes the chat dispatch.
+ *
+ * @param {string} selector - Action to click, inside the card's shadow root
+ * @param {object} [options]
+ * @param {string} [options.matchText]
+ * @param {boolean} [options.edit] - Open edit mode before clicking
+ * @param {string} [options.eventType] - Event to capture on ai-chat-content
+ * @param {string} [options.innerSelector] - Click this inside the action's own
+ *  shadow root instead of the action itself, for nested components like chips
+ * @returns {Promise<object|null>} The captured event detail
+ */
 async function getDisplayCardActionDetail(
   selector,
-  { matchText, edit = false } = {}
+  {
+    matchText,
+    edit = false,
+    eventType = "AIChatContent:ToolUIUpdate",
+    innerSelector = "",
+  } = {}
 ) {
   const restoreSignIn = skipSignIn();
   const { restore } = await stubEngineNetworkBoundaries({
@@ -94,7 +113,7 @@ async function getDisplayCardActionDetail(
 
     return await SpecialPowers.spawn(
       aichatBrowser,
-      [{ selector, matchText, edit }],
+      [{ selector, matchText, edit, eventType, innerSelector }],
       async args => {
         const chatContent = content.document.querySelector("ai-chat-content");
         const card = await ContentTaskUtils.waitForCondition(
@@ -126,14 +145,17 @@ async function getDisplayCardActionDetail(
         }
 
         let detail = null;
-        chatContent.addEventListener(
-          "AIChatContent:ToolUIUpdate",
-          e => (detail = e.detail),
-          { once: true }
-        );
+        chatContent.addEventListener(args.eventType, e => (detail = e.detail), {
+          once: true,
+        });
 
-        const button = card.shadowRoot.querySelector(args.selector);
-        Assert.ok(button, `Action button (${args.selector}) exists`);
+        const action = card.shadowRoot.querySelector(args.selector);
+        Assert.ok(action, `Action (${args.selector}) exists`);
+        let button = action;
+        if (args.innerSelector) {
+          button = action.shadowRoot.querySelector(args.innerSelector);
+          Assert.ok(button, `Action target (${args.innerSelector}) exists`);
+        }
         button.click();
         await new Promise(resolve => content.setTimeout(resolve, 0));
         return detail;
@@ -452,5 +474,22 @@ add_task(async function test_check_now_dispatches_check_update() {
     detail.updateData,
     { id: "monitor-id-2" },
     "check now carries the monitor id"
+  );
+});
+
+add_task(async function test_watch_url_chip_dispatches_open_link() {
+  const detail = await getDisplayCardActionDetail("ai-website-chip", {
+    eventType: "AIChatContent:OpenLink",
+    innerSelector: ".chip",
+  });
+  Assert.ok(detail, "OpenLink fires when a watched page chip is clicked");
+  Assert.equal(
+    detail.url,
+    "https://example.com/product",
+    "OpenLink carries the full watched page URL"
+  );
+  Assert.ok(
+    detail.preferSwitchToTab,
+    "A watched page prefers an already open tab"
   );
 });

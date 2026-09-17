@@ -20,7 +20,6 @@ import time
 import traceback
 from argparse import Namespace
 from collections import defaultdict, deque, namedtuple
-from contextlib import contextmanager
 from datetime import datetime, timedelta
 from functools import partial
 from multiprocessing import cpu_count
@@ -32,6 +31,7 @@ import mozdebug
 import six
 from mozgeckoprofiler import (
     symbolicate_profile_json,
+    symbolicate_profiles,
     view_gecko_profile,
 )
 from mozserve import Http3Server, MozHttp2Server
@@ -142,25 +142,6 @@ def cleanup_encoding(s):
         s = s.decode("utf-8", "replace")
     # Replace all C0 and C1 control characters with \xNN escapes.
     return _cleanup_encoding_re.sub(_cleanup_encoding_repl, s)
-
-
-@contextmanager
-def popenCleanupHack():
-    """
-    Hack to work around https://bugs.python.org/issue37380
-    The basic idea is that on old versions of Python on Windows,
-    we need to clear subprocess._cleanup before we call Popen(),
-    then restore it afterwards.
-    """
-    savedCleanup = None
-    if mozinfo.isWin and sys.version_info[0] == 3 and sys.version_info < (3, 7, 5):
-        savedCleanup = subprocess._cleanup
-        subprocess._cleanup = lambda: None
-    try:
-        yield
-    finally:
-        if savedCleanup:
-            subprocess._cleanup = savedCleanup
 
 
 """ Control-C handling """
@@ -366,10 +347,7 @@ class XPCShellTestThread(Thread):
         else:
             popen_func = Popen
 
-        with popenCleanupHack():
-            proc = popen_func(cmd, stdout=stdout, stderr=stderr, env=env, cwd=cwd)
-
-        return proc
+        return popen_func(cmd, stdout=stdout, stderr=stderr, env=env, cwd=cwd)
 
     def checkForCrashes(self, dump_directory, symbols_path, test_name=None):
         """
@@ -485,55 +463,55 @@ class XPCShellTestThread(Thread):
                 return
 
         # Mark timed out so run_test reports the timeout instead of a result for
-        # the process we're killing. Leave self.done for run() to set after the
-        # TIMEOUT test_end below; setting it now lets the scheduler start the
-        # retry mid-dump, interleaving its test_start with our late test_end.
+        # the process we're killing.
         self.timedout = True
 
-        # Kill the test process before calling log_full_output that can take a
-        # a while due to stack fixing.
-        self.killTimeout(proc)
+        try:
+            # Kill the test process before calling log_full_output that can take a
+            # a while due to stack fixing.
+            self.killTimeout(proc)
 
-        # On Linux/macOS kill_and_get_minidump only sends SIGABRT, so wait for
-        # the process to finish writing its minidump before postCheck's SIGKILL
-        # cuts it off, then symbolicate it -- this timeout path returns before
-        # run_test's own checkForCrashes.
-        if proc is not None and hasattr(proc, "pid"):
-            deadline = time.time() + TIMEOUT_MINIDUMP_WAIT
-            while self.poll(proc) is None and time.time() < deadline:
-                time.sleep(0.1)
-        self.checkForCrashes(
-            self.tempDir, self.symbolsPath, test_name=self.test_object["id"]
-        )
+            # On Linux/macOS kill_and_get_minidump only sends SIGABRT, so wait for
+            # the process to finish writing its minidump before postCheck's SIGKILL
+            # cuts it off, then symbolicate it -- this timeout path returns before
+            # run_test's own checkForCrashes.
+            if proc is not None and hasattr(proc, "pid"):
+                deadline = time.time() + TIMEOUT_MINIDUMP_WAIT
+                while self.poll(proc) is None and time.time() < deadline:
+                    time.sleep(0.1)
+            self.checkForCrashes(
+                self.tempDir, self.symbolsPath, test_name=self.test_object["id"]
+            )
 
-        # Note that the crash above is this force-killed process, not a real
-        # crash. Buffered as a test message so the retry replay demotes it out of
-        # the failure summary, like the crash itself.
-        self.report_message({
-            "action": "log",
-            "level": "ERROR",
-            "message": (
-                f"{self.test_object['id']} | Timed out and was force-killed by "
-                "the harness; the crash dump reported for this test is that "
-                "force-killed process, not an actual crash."
-            ),
-        })
+            # Note that the crash above is this force-killed process, not a real
+            # crash. Buffered as a test message so the retry replay demotes it out of
+            # the failure summary, like the crash itself.
+            self.report_message({
+                "action": "log",
+                "level": "ERROR",
+                "message": (
+                    f"{self.test_object['id']} | Timed out and was force-killed by "
+                    "the harness; the crash dump reported for this test is that "
+                    "force-killed process, not an actual crash."
+                ),
+            })
 
-        self.reportTimeoutResult()
+            self.reportTimeoutResult()
 
-        self.log.info(f"xpcshell return code: {self.getReturnCode(proc)}")
-        self.postCheck(proc)
-        self.clean_temp_dirs(self.test_object["path"])
-
-        # Now that we've finished cleaning up after the timed out test we can
-        # relinquish the lock to allow run_test() to finish.
-        self.lock.release()
-
-        # A killed process can leave a child holding its stdout pipe open, in
-        # which case run_test never returns from communicate() and run() never
-        # gets to set this. Set it here, after the test_end above so a retry
-        # can't interleave its test_start with our output.
-        self.done = True
+            self.log.info(f"xpcshell return code: {self.getReturnCode(proc)}")
+            self.postCheck(proc)
+            self.clean_temp_dirs(self.test_object["path"])
+        finally:
+            # Relinquish the lock to allow run_test() to finish, and mark the test
+            # done. Both have to happen even if the cleanup above raised -- this
+            # runs on the timer thread, and the test thread it leaves behind can be
+            # blocked forever on a stdout pipe a surviving child process holds open,
+            # so nothing else will ever set this and the scheduler would wait for
+            # the test until mozharness kills the job. Reached after the TIMEOUT
+            # test_end above, so a retry can't interleave its test_start with our
+            # output.
+            self.lock.release()
+            self.done = True
 
     def reportTimeoutResult(self):
         """Log the structured failure for a timed-out test: a FAIL test_status
@@ -1817,6 +1795,17 @@ class XPCShellTests:
         for key, value in self.mozHttp2Server.ports().items():
             self.env[key] = value
 
+    def removeOwnedTempDir(self):
+        """
+        Remove the temp dir this run created because the caller gave none.
+        """
+        if not self.ownsTempDir:
+            return
+        try:
+            shutil.rmtree(self.tempDir)
+        except Exception:
+            self.log.info(f"{self.tempDir} could not be cleaned up.")
+
     def shutdownNode(self):
         """
         Shut down our node process, if it exists
@@ -2141,12 +2130,22 @@ class XPCShellTests:
         """
         Run xpcshell tests.
         """
-
-        # Number of times to repeat test(s) in --verify mode
-        VERIFY_REPEAT = 10
-
         if isinstance(options, Namespace):
             options = vars(options)
+
+        self.tempDir = options.get("tempDir")
+        self.ownsTempDir = not self.tempDir
+        if self.ownsTempDir:
+            self.tempDir = mkdtemp(prefix="xpc-")
+        self.tempDir = os.path.normpath(self.tempDir)
+        try:
+            return self._runTests(options, testClass, mobileArgs)
+        finally:
+            self.removeOwnedTempDir()
+
+    def _runTests(self, options, testClass, mobileArgs):
+        # Number of times to repeat test(s) in --verify mode
+        VERIFY_REPEAT = 10
 
         # Try to guess modules directory.
         # This somewhat grotesque hack allows the buildbot machines to find the
@@ -2212,7 +2211,6 @@ class XPCShellTests:
         self.utility_path = options.get("utility_path")
         self.appPath = options.get("appPath")
         self.symbolsPath = options.get("symbolsPath")
-        self.tempDir = os.path.normpath(options.get("tempDir") or tempfile.gettempdir())
         self.manifest = options.get("manifest")
         self.dump_tests = options.get("dump_tests")
         self.interactive = options.get("interactive")
@@ -2861,6 +2859,10 @@ def main():
         sys.exit(1)
 
     result = xpcsh.runTests(options)
+
+    if "MOZ_AUTOMATION" in os.environ:
+        symbolicate_profiles()
+
     if result == TBPL_RETRY:
         sys.exit(4)
 

@@ -124,7 +124,7 @@ add_task(async function () {
     "@mozilla.org/security/certoverride;1"
   ].getService(Ci.nsICertOverrideService);
 
-  let cert = getTestServerCertificate();
+  let cert = await getTestServerCertificate();
   // Start a server and trust its certificate.
   let server = startServer(cert);
   certOverrideService.rememberValidityOverride(
@@ -155,10 +155,6 @@ add_task(async function () {
     );
 
     let identityMode = window.document.getElementById("identity-box").className;
-    is(
-      identityMode,
-      "certErrorPage notSecureText",
-      "identity should be 'unknown'"
-    );
+    is(identityMode, "unknownIdentity", "identity should be 'unknown'");
   });
 });

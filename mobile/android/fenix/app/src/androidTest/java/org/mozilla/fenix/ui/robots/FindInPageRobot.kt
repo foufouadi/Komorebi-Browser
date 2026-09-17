@@ -113,8 +113,6 @@ class FindInPageRobot {
 
 private fun findInPageQuery() = onView(withId(findinpageR.id.find_in_page_query_text))
 
-private fun findInPageResult() = onView(withId(findinpageR.id.find_in_page_result_text))
-
 private fun findInPageNextButton() = onView(withId(findinpageR.id.find_in_page_next_btn))
 
 private fun findInPagePrevButton() = onView(withId(findinpageR.id.find_in_page_prev_btn))

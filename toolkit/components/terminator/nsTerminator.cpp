@@ -43,7 +43,6 @@
 #include "mozilla/MemoryChecking.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/SpinEventLoopUntil.h"
-#include "mozilla/UniquePtr.h"
 
 #include "mozilla/dom/workerinternals/RuntimeService.h"
 
@@ -55,7 +54,7 @@
 
 // Additional number of milliseconds to wait until we decide to exit
 // forcefully.
-#define ADDITIONAL_WAIT_BEFORE_CRASH_MS 3000
+#define ADDITIONAL_WAIT_BEFORE_CRASH_MS 10000
 
 #define HEARTBEAT_INTERVAL_MS 100
 
@@ -145,12 +144,10 @@ PRThread* CreateSystemThread(void (*start)(void* arg), void* arg) {
 // extracted from gHeartbeat must be considered rounded up.
 Atomic<uint32_t> gHeartbeat(0);
 
-struct Options {
-  /**
-   * How many ticks before we should crash the process.
-   */
-  uint32_t crashAfterTicks;
-};
+/**
+ * How many ticks before we should crash the process.
+ */
+Atomic<uint32_t> gCrashAfterTicks(0);
 
 /**
  * Save a profile of this process before we crash on a shutdown hang, so a
@@ -208,16 +205,9 @@ void MaybeSaveShutdownHangProfile() {
 /**
  * Entry point for the watchdog thread
  */
-void RunWatchdog(void* arg) {
+void RunWatchdog(void*) {
   NS_SetCurrentThreadName("Shutdown Hang Terminator");
 
-  // Let's copy and deallocate options, that's one less leak to worry
-  // about.
-  UniquePtr<Options> options((Options*)arg);
-  uint32_t crashAfterTicks = options->crashAfterTicks;
-  options = nullptr;
-
-  const uint32_t timeToLive = crashAfterTicks;
   while (true) {
     //
     // We do not want to sleep for the entire duration,
@@ -235,7 +225,7 @@ void RunWatchdog(void* arg) {
     usleep(HEARTBEAT_INTERVAL_MS * 1000 /* usec */);
 #endif
 
-    if (gHeartbeat++ < timeToLive) {
+    if (gHeartbeat++ < gCrashAfterTicks) {
       continue;
     }
 
@@ -247,6 +237,8 @@ void RunWatchdog(void* arg) {
     profiler_wait_for_scheduled_dump();
 
     NoteIntentionalCrash(XRE_GetProcessTypeString());
+
+    CollectShutdownHangAnnotations();
 
     MaybeSaveShutdownHangProfile();
 
@@ -398,12 +390,11 @@ void nsTerminator::StartWatchdog() {
   }
 #endif
 
-  UniquePtr<Options> options(new Options());
-  // Guarantee that crashAfterTicks is non-zero
-  options->crashAfterTicks = std::max(1, crashAfterMS / HEARTBEAT_INTERVAL_MS);
+  // Guarantee that gCrashAfterTicks is non-zero
+  gCrashAfterTicks = std::max(1, crashAfterMS / HEARTBEAT_INTERVAL_MS);
 
   DebugOnly<PRThread*> watchdogThread =
-      CreateSystemThread(RunWatchdog, options.release());
+      CreateSystemThread(RunWatchdog, nullptr);
   MOZ_ASSERT(watchdogThread);
 }
 
@@ -471,5 +462,12 @@ nsTerminator::GetTicksForShutdownPhases(JSContext* aCx,
   }
 
   return NS_OK;
-}  // namespace mozilla
+}
+
+NS_IMETHODIMP
+nsTerminator::SetTicksBeforeCrash(uint32_t aTicks) {
+  gCrashAfterTicks = aTicks;
+  return NS_OK;
+}
+
 }  // namespace mozilla

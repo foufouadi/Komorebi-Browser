@@ -36,13 +36,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.CollectionItemInfo
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.collectionItemInfo
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.tooling.preview.PreviewParameterProvider
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import mozilla.components.browser.state.state.createTab
 import mozilla.components.compose.base.annotation.FlexibleWindowLightDarkPreview
 import mozilla.components.compose.base.theme.surfaceDimVariant
 import mozilla.components.support.base.utils.MAX_URI_LENGTH
@@ -54,7 +58,9 @@ import org.mozilla.fenix.tabstray.TabsTrayTestTag.TAB_GROUP_TITLE
 import org.mozilla.fenix.tabstray.browser.compose.TabItemInteractionState
 import org.mozilla.fenix.tabstray.data.TabGroupTheme
 import org.mozilla.fenix.tabstray.data.TabsTrayItem
+import org.mozilla.fenix.tabstray.data.createTab
 import org.mozilla.fenix.tabstray.ui.tabitems.LOREM_IPSUM
+import org.mozilla.fenix.tabstray.ui.tabitems.MediaPlaybackIndicator
 import org.mozilla.fenix.tabstray.ui.tabitems.MultiSelectTabButton
 import org.mozilla.fenix.tabstray.ui.tabitems.TabGridTabItem
 import org.mozilla.fenix.tabstray.ui.tabitems.TabGroupMenuButton
@@ -87,6 +93,9 @@ const val BOTTOM_END_THUMBNAIL_INDEX = 3
  * @param onCloseTabGroupClick Invoked when the user clicks to close the tab group.
  * @param onShareTabGroupClick Invoked when the user clicks to share the tab group.
  * @param onDeleteTabGroupClick Invoked when the user clicks on delete tab group.
+ * @param onUngroupTabGroupClick Invoked when the user clicks to ungroup the tab group.
+ * @param itemInfo: Optional CollectionItemInfo? for reading this item in a list.
+ * @param accessibilityActions Accessibility actions offered on the item, such as reordering it.
  */
 @Suppress("LongParameterList")
 @Composable
@@ -100,6 +109,9 @@ fun TabGroupCard(
     onCloseTabGroupClick: () -> Unit,
     onShareTabGroupClick: (TabsTrayItem.TabGroup) -> Unit,
     onDeleteTabGroupClick: (TabsTrayItem.TabGroup) -> Unit,
+    onUngroupTabGroupClick: () -> Unit,
+    itemInfo: CollectionItemInfo? = null,
+    accessibilityActions: List<CustomAccessibilityAction> = emptyList(),
 ) {
     val containerColor = tabGridItemContainerColor(selectionState)
 
@@ -117,61 +129,99 @@ fun TabGroupCard(
                     .tabItemClickable(
                         clickHandler = clickHandler,
                         clickedItem = group,
-                    ),
+                    )
+                    .semantics {
+                        if (itemInfo != null) {
+                            collectionItemInfo = itemInfo
+                        }
+                        if (accessibilityActions.isNotEmpty()) {
+                            customActions = accessibilityActions
+                        }
+                    },
             shape = tabContentCardShape,
             border = tabItemConditionalBorder(selectionState),
             colors = CardDefaults.cardColors(containerColor = containerColor),
         ) {
-            Column(modifier = Modifier.aspectRatio(gridItemAspectRatio)) {
-                // Title Row
-                Row(
-                    modifier = Modifier.background(color = group.theme.primary).fillMaxWidth().wrapContentHeight(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    CompositionLocalProvider(LocalContentColor provides group.theme.onPrimary) {
-                        Spacer(modifier = Modifier.width(FirefoxTheme.layout.space.static100))
+            TabGroupCardBody(
+                group = group,
+                selectionState = selectionState,
+                containerColor = containerColor,
+                onDeleteTabGroupClick = onDeleteTabGroupClick,
+                onShareTabGroupClick = onShareTabGroupClick,
+                onEditTabGroupClick = onEditTabGroupClick,
+                onCloseTabGroupClick = onCloseTabGroupClick,
+                onUngroupTabGroupClick = onUngroupTabGroupClick,
+            )
+        }
+    }
+}
 
-                        Text(
-                            text = group.title.take(MAX_URI_LENGTH),
-                            modifier = Modifier.weight(1f).testTag(TAB_GROUP_TITLE),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = FirefoxTheme.typography.caption,
-                        )
+/** Renders the content of the [TabGroupCard]. */
+@Suppress("LongParameterList")
+@Composable
+private fun TabGroupCardBody(
+    group: TabsTrayItem.TabGroup,
+    selectionState: TabsTrayItemSelectionState,
+    containerColor: Color,
+    onDeleteTabGroupClick: (TabsTrayItem.TabGroup) -> Unit,
+    onShareTabGroupClick: (TabsTrayItem.TabGroup) -> Unit,
+    onEditTabGroupClick: () -> Unit,
+    onCloseTabGroupClick: () -> Unit,
+    onUngroupTabGroupClick: () -> Unit,
+) {
+    Column(modifier = Modifier.aspectRatio(gridItemAspectRatio)) {
+        // Title Row
+        Row(
+            modifier = Modifier.background(color = group.theme.primary).fillMaxWidth().wrapContentHeight(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CompositionLocalProvider(LocalContentColor provides group.theme.onPrimary) {
+                Spacer(modifier = Modifier.width(FirefoxTheme.layout.space.static100))
 
-                        Spacer(modifier = Modifier.width(FirefoxTheme.layout.space.static50))
+                Text(
+                    text = group.title.take(MAX_URI_LENGTH),
+                    modifier = Modifier.weight(1f).testTag(TAB_GROUP_TITLE),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = FirefoxTheme.typography.caption,
+                )
 
-                        TabGroupOptionButton(
-                            selectionState = selectionState,
-                            onEditTabGroupClick = onEditTabGroupClick,
-                            onCloseTabGroupClick = onCloseTabGroupClick,
-                            onShareTabGroupClick = { onShareTabGroupClick(group) },
-                            onDeleteTabGroupClick = { onDeleteTabGroupClick(group) },
-                        )
-                    }
-                }
+                Spacer(modifier = Modifier.width(FirefoxTheme.layout.space.static50))
 
-                Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.static25))
-
-                // 4x4 Thumbnail Grid
-                Card(
-                    modifier =
-                        Modifier.padding(
-                            start = FirefoxTheme.layout.space.static50,
-                            end = FirefoxTheme.layout.space.static50,
-                            bottom = FirefoxTheme.layout.space.static50,
-                        ),
-                    shape = thumbnailShape,
-                ) {
-                    ThumbnailsGridView(
-                        thumbnails = group.thumbnails,
-                        containerColor = containerColor,
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.static50))
+                TabGroupOptionButton(
+                    selectionState = selectionState,
+                    onEditTabGroupClick = onEditTabGroupClick,
+                    onCloseTabGroupClick = onCloseTabGroupClick,
+                    onShareTabGroupClick = { onShareTabGroupClick(group) },
+                    onDeleteTabGroupClick = { onDeleteTabGroupClick(group) },
+                    onUngroupTabGroupClick = onUngroupTabGroupClick,
+                )
             }
         }
+
+        Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.static25))
+
+        // 4x4 Thumbnail Grid
+        Card(
+            modifier =
+                Modifier.padding(
+                    start = FirefoxTheme.layout.space.static50,
+                    end = FirefoxTheme.layout.space.static50,
+                    bottom = FirefoxTheme.layout.space.static50,
+                ),
+            shape = thumbnailShape,
+        ) {
+            Box {
+                ThumbnailsGridView(
+                    thumbnails = group.thumbnails,
+                    containerColor = containerColor,
+                )
+
+                MediaPlaybackIndicator(isMediaActive = group.isMediaActive)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.static50))
     }
 }
 
@@ -183,6 +233,7 @@ private fun TabGroupOptionButton(
     onCloseTabGroupClick: () -> Unit,
     onShareTabGroupClick: () -> Unit,
     onDeleteTabGroupClick: () -> Unit,
+    onUngroupTabGroupClick: () -> Unit,
 ) {
     if (selectionState.multiSelectEnabled) {
         MultiSelectTabButton(
@@ -198,7 +249,7 @@ private fun TabGroupOptionButton(
             onEditTabGroupClick = onEditTabGroupClick,
             onCloseTabGroupClick = onCloseTabGroupClick,
             onShareTabGroupClick = onShareTabGroupClick,
-            onUngroupTabGroupClick = {},
+            onUngroupTabGroupClick = onUngroupTabGroupClick,
         )
     }
 }
@@ -344,6 +395,7 @@ private data class TabGroupCardPreviewState(
                             inactive = false,
                             private = false,
                             icon = null,
+                            isMediaActive = false,
                             lastAccess = 0L,
                             isFocused = false,
                         )
@@ -496,11 +548,9 @@ private fun TabGroupCardPreview(
         ) {
             TabGridTabItem(
                 tab =
-                    TabsTrayItem.Tab(
-                        createTab(
-                            url = "about:home",
-                            title = "Kit's Blog",
-                        )
+                    createTab(
+                        url = "about:home",
+                        title = "Kit's Blog",
                     ),
                 swipeToDismissBoxState = rememberSwipeToDismissBoxState(),
                 swipingEnabled = true,
@@ -528,8 +578,32 @@ private fun TabGroupCardPreview(
                 onCloseTabGroupClick = {},
                 onShareTabGroupClick = {},
                 onDeleteTabGroupClick = {},
+                onUngroupTabGroupClick = {},
             )
         }
+    }
+}
+
+@PreviewLightDark
+@Composable
+private fun TabGroupCardMediaPreview() {
+    FirefoxTheme {
+        TabGroupCard(
+            group =
+                TabsTrayItem.TabGroup(
+                    title = "Tab Group Item",
+                    theme = TabGroupTheme.default,
+                    tabs = listOf(createTab(url = "www.mozilla.org", isMediaActive = true)),
+                ),
+            selectionState = TabsTrayItemSelectionState(),
+            clickHandler = TabsTrayItemClickHandler(onClick = {}),
+            interactionState = TabItemInteractionState(),
+            onEditTabGroupClick = {},
+            onCloseTabGroupClick = {},
+            onShareTabGroupClick = {},
+            onDeleteTabGroupClick = {},
+            onUngroupTabGroupClick = {},
+        )
     }
 }
 

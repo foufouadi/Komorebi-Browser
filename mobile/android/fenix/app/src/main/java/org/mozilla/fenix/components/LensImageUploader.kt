@@ -130,10 +130,7 @@ class LensImageUploader(
 
     @VisibleForTesting
     internal fun decodeBitmap(uri: Uri): Bitmap? {
-        val bitmap =
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                BitmapFactory.decodeStream(input)
-            } ?: return null
+        val bitmap = decodeSampledBitmap(uri) ?: return null
 
         // Camera2 writes the capture orientation as an EXIF tag rather than rotating pixels,
         // and BitmapFactory.decodeStream discards EXIF. Re-read the tag from a fresh stream and
@@ -221,6 +218,29 @@ class LensImageUploader(
             total += read
             if (total > max) return null
             out.write(buffer, 0, read)
+        }
+    }
+
+    /**
+     * Decodes the image at [uri] into a Bitmap, subsampling so neither dimension exceeds [MAX_IMAGE_DIMENSION]. Camera
+     * captures are at full sensor resolution, well beyond what the upload needs. The stream is opened twice because it
+     * cannot be rewound after the bounds have been read.
+     */
+    private fun decodeSampledBitmap(uri: Uri): Bitmap? {
+        val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            BitmapFactory.decodeStream(input, null, boundsOptions)
+        }
+        // A bounds pass always returns a null bitmap, so the decoded dimensions are what tell
+        // us whether the image could be read. They are untouched if the stream could not be opened.
+        if (boundsOptions.outWidth <= 0 || boundsOptions.outHeight <= 0) return null
+
+        val decodeOptions =
+            BitmapFactory.Options().apply {
+                inSampleSize = computeSampleSize(boundsOptions.outWidth, boundsOptions.outHeight)
+            }
+        return context.contentResolver.openInputStream(uri)?.use { input ->
+            BitmapFactory.decodeStream(input, null, decodeOptions)
         }
     }
 

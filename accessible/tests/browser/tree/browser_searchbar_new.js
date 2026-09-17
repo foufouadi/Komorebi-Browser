@@ -32,33 +32,23 @@ add_task(async function test_searchbar_a11y_tree() {
     role: ROLE_GROUPING,
 
     children: [
-      // input container
+      // The background and the input container are decorative, so neither is
+      // in the tree.
+
+      // search mode switcher
       {
-        role: ROLE_SECTION,
-
-        children: [
-          // search mode switcher
-          {
-            role: ROLE_EDITCOMBOBOX,
-            // not testing the structure inside the switcher
-          },
-
-          // input element
-          {
-            role: ROLE_EDITCOMBOBOX,
-            children: [],
-          },
-
-          // context menu
-          {
-            role: ROLE_MENUPOPUP,
-            children: [],
-          },
-
-          // The go button is hidden and the result list is empty, so neither
-          // shows up in the tree.
-        ],
+        role: ROLE_PUSHBUTTON,
+        // not testing the structure inside the switcher
       },
+
+      // input element
+      {
+        role: ROLE_EDITCOMBOBOX,
+        children: [],
+      },
+
+      // The go button is hidden and the result list is empty, so neither
+      // shows up in the tree.
     ],
   });
 });
@@ -79,47 +69,31 @@ add_task(async function test_searchbar_a11y_tree_with_results() {
     role: ROLE_GROUPING,
 
     children: [
-      // The background becomes visible while the result list is open.
+      // The background and the input container are decorative, so neither is
+      // in the tree.
+
+      // search mode switcher
       {
-        role: ROLE_SECTION,
-        children: [],
+        role: ROLE_PUSHBUTTON,
+        // not testing the structure inside the switcher
       },
 
-      // input container
+      // input element
       {
-        role: ROLE_SECTION,
-
+        role: ROLE_EDITCOMBOBOX,
         children: [
-          // search mode switcher
           {
-            role: ROLE_EDITCOMBOBOX,
-            // not testing the structure inside the switcher
-          },
-
-          // input element
-          {
-            role: ROLE_EDITCOMBOBOX,
-            children: [
-              {
-                role: ROLE_TEXT_LEAF,
-                name: "example",
-                children: [],
-              },
-            ],
-          },
-
-          // context menu
-          {
-            role: ROLE_MENUPOPUP,
-            children: [],
-          },
-
-          // go button
-          {
-            role: ROLE_PUSHBUTTON,
+            role: ROLE_TEXT_LEAF,
+            name: "example",
             children: [],
           },
         ],
+      },
+
+      // go button
+      {
+        role: ROLE_PUSHBUTTON,
+        children: [],
       },
 
       // result view

@@ -7,6 +7,7 @@ package org.mozilla.fenix.components.metrics
 import androidx.annotation.VisibleForTesting
 import java.util.UUID
 import mozilla.components.browser.menu.facts.BrowserMenuFacts
+import mozilla.components.browser.thumbnails.facts.BrowserThumbnailsFacts
 import mozilla.components.browser.toolbar.facts.ToolbarFacts
 import mozilla.components.compose.browser.awesomebar.AwesomeBarFacts as ComposeAwesomeBarFacts
 import mozilla.components.concept.awesomebar.AwesomeBar
@@ -49,6 +50,7 @@ import org.mozilla.fenix.GleanMetrics.Addresses
 import org.mozilla.fenix.GleanMetrics.AndroidAutofill
 import org.mozilla.fenix.GleanMetrics.Awesomebar
 import org.mozilla.fenix.GleanMetrics.BrowserSearch
+import org.mozilla.fenix.GleanMetrics.BrowserThumbnails
 import org.mozilla.fenix.GleanMetrics.ContextMenu
 import org.mozilla.fenix.GleanMetrics.ContextualMenu
 import org.mozilla.fenix.GleanMetrics.CreditCards
@@ -247,6 +249,14 @@ internal class ReleaseMetricController(
                 Addresses.autofillPromptExpanded.record(NoExtras())
             Component.FEATURE_PROMPTS to AddressAutofillDialogFacts.Items.AUTOFILL_ADDRESS_PROMPT_DISMISSED ->
                 Addresses.autofillPromptDismissed.record(NoExtras())
+            Component.FEATURE_PROMPTS to AddressAutofillDialogFacts.Items.AUTOFILL_ADDRESS_SAVE_PROMPT_SHOWN ->
+                Addresses.savePromptShown.record(NoExtras())
+            Component.FEATURE_PROMPTS to AddressAutofillDialogFacts.Items.AUTOFILL_ADDRESS_SAVE_PROMPT_DISMISSED ->
+                Addresses.savePromptDismissed.record(NoExtras())
+            Component.FEATURE_PROMPTS to AddressAutofillDialogFacts.Items.AUTOFILL_ADDRESS_CREATED ->
+                Addresses.savePromptCreate.record(NoExtras())
+            Component.FEATURE_PROMPTS to AddressAutofillDialogFacts.Items.AUTOFILL_ADDRESS_UPDATED ->
+                Addresses.savePromptUpdate.record(NoExtras())
 
             Component.FEATURE_PROMPTS to LoginAutofillDialogFacts.Items.AUTOFILL_LOGIN_PERFORMED ->
                 Logins.autofilled.record(NoExtras())
@@ -402,6 +412,7 @@ internal class ReleaseMetricController(
                         FxSuggest.reportingUrl.set(clickInfo.reportingUrl)
                         FxSuggest.iabCategory.set(clickInfo.iabCategory)
                         FxSuggest.contextId.set(UUID.fromString(clickInfo.contextId))
+                        FxSuggest.suggestionId.set(UUID.fromString(clickInfo.suggestionId))
                     }
                     is FxSuggestInteractionInfo.Wikipedia -> {
                         FxSuggest.advertiser.set("wikipedia")
@@ -501,6 +512,26 @@ internal class ReleaseMetricController(
                 Sync.failed.record(NoExtras())
             }
 
+            Component.BROWSER_THUMBNAILS to BrowserThumbnailsFacts.Items.CAPTURE_ATTEMPTED -> {
+                value?.let { BrowserThumbnails.captureAttempted[it].add() } ?: Unit
+            }
+
+            Component.BROWSER_THUMBNAILS to BrowserThumbnailsFacts.Items.CAPTURE_RESULT -> {
+                value?.let { BrowserThumbnails.captureResult[it].add() } ?: Unit
+            }
+
+            Component.BROWSER_THUMBNAILS to BrowserThumbnailsFacts.Items.CAPTURE_DURATION -> {
+                (metadata?.get(BrowserThumbnailsFacts.MetadataKeys.DURATION_MS) as? Long)?.let {
+                    BrowserThumbnails.captureDuration.accumulateSamples(listOf(it))
+                } ?: Unit
+            }
+
+            Component.BROWSER_THUMBNAILS to BrowserThumbnailsFacts.Items.DISK_WRITE_DURATION -> {
+                (metadata?.get(BrowserThumbnailsFacts.MetadataKeys.DURATION_MS) as? Long)?.let {
+                    BrowserThumbnails.diskWriteDuration.accumulateSamples(listOf(it))
+                } ?: Unit
+            }
+
             else -> {
                 // no-op
             }
@@ -584,6 +615,7 @@ internal class ReleaseMetricController(
                 FxSuggest.reportingUrl.set(impressionInfo.reportingUrl)
                 FxSuggest.iabCategory.set(impressionInfo.iabCategory)
                 FxSuggest.contextId.set(UUID.fromString(impressionInfo.contextId))
+                FxSuggest.suggestionId.set(UUID.fromString(impressionInfo.suggestionId))
             }
             is FxSuggestInteractionInfo.Wikipedia -> {
                 FxSuggest.advertiser.set("wikipedia")

@@ -17,6 +17,7 @@ import org.mozilla.fenix.ext.shouldShowRecentSyncedTabs
 import org.mozilla.fenix.ext.shouldShowRecentTabs
 import org.mozilla.fenix.home.bookmarks.Bookmark
 import org.mozilla.fenix.home.collections.CollectionsState
+import org.mozilla.fenix.home.collections.migration.CollectionsMigrationCardState
 import org.mozilla.fenix.home.pocket.PocketState
 import org.mozilla.fenix.home.recentsyncedtabs.RecentSyncedTab
 import org.mozilla.fenix.home.recentsyncedtabs.RecentSyncedTabState
@@ -129,6 +130,7 @@ internal sealed class HomepageState {
          *
          * @param appState State to build the [HomepageState] from.
          * @param privacyNoticeBannerState State of the privacy notice banner.
+         * @param collectionsMigrationCardState State of the collections migration card.
          * @param browsingModeManager Manager holding current state of whether the browser is in private mode or not.
          * @param settings [Settings] corresponding to how the homepage should be displayed.
          */
@@ -136,6 +138,7 @@ internal sealed class HomepageState {
         internal fun build(
             appState: AppState,
             privacyNoticeBannerState: PrivacyNoticeBannerState,
+            collectionsMigrationCardState: CollectionsMigrationCardState,
             browsingModeManager: BrowsingModeManager,
             settings: Settings,
         ): HomepageState {
@@ -148,6 +151,7 @@ internal sealed class HomepageState {
                 buildNormalState(
                     appState = appState,
                     privacyNoticeBannerState = privacyNoticeBannerState,
+                    collectionsMigrationCardState = collectionsMigrationCardState,
                     settings = settings,
                 )
             }
@@ -177,12 +181,14 @@ internal sealed class HomepageState {
          *
          * @param appState State to build the [HomepageState.Normal] from.
          * @param privacyNoticeBannerState State of the privacy notice banner.
+         * @param collectionsMigrationCardState State of the collections migration card.
          * @param settings [Settings] corresponding to how the homepage should be displayed.
          */
         @Composable
         private fun buildNormalState(
             appState: AppState,
             privacyNoticeBannerState: PrivacyNoticeBannerState,
+            collectionsMigrationCardState: CollectionsMigrationCardState,
             settings: Settings,
         ) =
             with(appState) {
@@ -198,14 +204,12 @@ internal sealed class HomepageState {
                             settings.historyMetadataUIFeature && it.isNotEmpty()
                         },
                     collectionsState =
-                        if (settings.collections) {
-                            CollectionsState.build(
-                                appState = appState,
-                                browserState = components.core.store.state,
-                            )
-                        } else {
-                            CollectionsState.Gone
-                        },
+                        CollectionsState.build(
+                            appState = appState,
+                            browserState = components.core.store.state,
+                            showCollections = settings.collections,
+                            shouldShowCollectionsMigrationCard = collectionsMigrationCardState.visible,
+                        ),
                     pocketState =
                         PocketState.build(appState = appState).takeIf {
                             settings.showPocketRecommendationsFeature &&

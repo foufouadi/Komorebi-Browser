@@ -196,7 +196,6 @@ namespace jit {
   _(FunctionBindSpecializedBaseline,                                           \
     js::BoundFunctionObject::functionBindSpecializedBaseline)                  \
   VMFUNCTION_FUZZILLI_LIST(_)                                                  \
-  _(GeneratorThrowOrReturn, js::jit::GeneratorThrowOrReturn)                   \
   _(GetAndClearException, js::GetAndClearException)                            \
   _(GetElemMaybeCached, js::jit::GetElemMaybeCached)                           \
   _(GetFirstDollarIndexRaw, js::GetFirstDollarIndexRaw)                        \

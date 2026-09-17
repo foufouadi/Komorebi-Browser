@@ -239,5 +239,3 @@ class SettingsSubMenuDataCollectionRobot {
 private fun goBackButton() = itemWithDescription("Navigate up")
 
 private fun studiesDialogOkButton() = onView(withId(android.R.id.button1)).inRoot(RootMatchers.isDialog())
-
-private fun studiesDialogCancelButton() = onView(withId(android.R.id.button2)).inRoot(RootMatchers.isDialog())

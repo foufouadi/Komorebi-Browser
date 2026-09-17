@@ -81,6 +81,10 @@ class TabCollectionStorage(
         return collectionStorage.getCollections().asLiveData()
     }
 
+    /** Returns the list of stored [TabCollection]s. */
+    suspend fun getCollectionsList(): List<TabCollection> =
+        withContext(ioScope.coroutineContext) { collectionStorage.getCollectionsList() }
+
     suspend fun removeCollection(tabCollection: TabCollection) =
         ioScope
             .launch {

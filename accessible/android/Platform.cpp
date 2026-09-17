@@ -46,6 +46,12 @@ void a11y::PlatformInit() {
     sLocalizedStrings.InsertOrUpdate(u"stateRequired"_ns, localizedStr);
   }
 
+  // Preload the state mixed localized string.
+  rv = stringBundle->GetStringFromName("statePartiallyChecked", localizedStr);
+  if (NS_SUCCEEDED(rv)) {
+    sLocalizedStrings.InsertOrUpdate(u"statePartiallyChecked"_ns, localizedStr);
+  }
+
   // Preload heading level localized descriptions 1 thru 6.
   for (int32_t level = 1; level <= 6; level++) {
     nsAutoString token;
@@ -66,9 +72,14 @@ void a11y::PlatformInit() {
 #define ROLE(geckoRole, stringRole, ariaRole, atkRole, macRole, macSubrole, \
              msaaRole, ia2Role, androidClass, iosIsElement, uiaControlType, \
              nameRule)                                                      \
-  rv = stringBundle->GetStringFromName(stringRole, localizedStr);           \
-  if (NS_SUCCEEDED(rv)) {                                                   \
-    sLocalizedStrings.InsertOrUpdate(u##stringRole##_ns, localizedStr);     \
+  {                                                                         \
+    nsAutoString stringRoleToken(u##stringRole##_ns);                       \
+    stringRoleToken.StripWhitespace();                                      \
+    rv = stringBundle->GetStringFromName(                                   \
+        NS_ConvertUTF16toUTF8(stringRoleToken).get(), localizedStr);        \
+    if (NS_SUCCEEDED(rv)) {                                                 \
+      sLocalizedStrings.InsertOrUpdate(stringRoleToken, localizedStr);      \
+    }                                                                       \
   }
 
 #include "RoleMap.inc"
@@ -102,6 +113,15 @@ void a11y::PlatformEvent(Accessible* aTarget, uint32_t aEventType) {
               true, true)) {
         sessionAcc->SendAccessibilityFocusedEvent(result, false);
       }
+      break;
+    case nsIAccessibleEvent::EVENT_TEXT_VALUE_CHANGE:
+    case nsIAccessibleEvent::EVENT_VALUE_CHANGE:
+      if (aTarget->HasNumericValue()) {
+        sessionAcc->SendValueChangedEvent(aTarget);
+      }
+      break;
+    case nsIAccessibleEvent::EVENT_NAME_CHANGE:
+      sessionAcc->MaybeSendLiveRegionEvents(aTarget);
       break;
     default:
       break;
@@ -185,8 +205,17 @@ void a11y::PlatformTextChangeEvent(Accessible* aTarget, const nsAString& aStr,
 
 void a11y::PlatformShowHideEvent(Accessible* aTarget, Accessible* aParent,
                                  bool aInsert, bool aFromUser) {
-  // We rely on the window content changed events to be dispatched
-  // after the viewport cache is refreshed.
+  RefPtr<SessionAccessibility> sessionAcc =
+      SessionAccessibility::GetInstanceFor(aTarget);
+
+  if (sessionAcc) {
+    if (aInsert && !aFromUser && !aTarget->IsTextLeaf()) {
+      // If this was a non-user show event, it may be inside of a live region.
+      // If this is a text leaf, we will handle that case in the text change
+      // event of its parent.
+      sessionAcc->MaybeSendLiveRegionEvents(aTarget);
+    }
+  }
 }
 
 void a11y::PlatformSelectionEvent(Accessible*, Accessible*, uint32_t) {}

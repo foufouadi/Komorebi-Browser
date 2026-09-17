@@ -61,7 +61,11 @@ class AppRequestInterceptorTest {
     }
 
     @Test
-    fun `GIVEN request to ABOUT_HOME WHEN request is intercepted THEN return a null interception response and navigate to the homepage`() {
+    fun `GIVEN browser is currently shown and a request to ABOUT_HOME WHEN request is intercepted THEN return a null interception response and navigate to the homepage`() {
+        val mockDestination: NavDestination = mockk(relaxed = true)
+        every { mockDestination.id } returns R.id.browserFragment
+        every { navigationController.currentDestination } returns mockDestination
+
         val result =
             interceptor.onLoadRequest(
                 engineSession = mockk(),

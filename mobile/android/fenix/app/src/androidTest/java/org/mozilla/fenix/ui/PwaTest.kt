@@ -28,8 +28,6 @@ class PwaTest {
     @get:Rule(order = 0) val fenixTestRule: FenixTestRule = FenixTestRule()
 
     private val externalLinksPWAPage = "https://mozilla-mobile.github.io/testapp/v2.0/externalLinks.html"
-    private val emailLink = "mailto://example@example.com"
-    private val phoneLink = "tel://1234567890"
     private val shortcutTitle = "TEST_APP"
 
     @get:Rule(order = 1)

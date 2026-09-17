@@ -10,7 +10,7 @@ import org.mozilla.fenix.ui.efficiency.helpers.BaseTest
 import org.mozilla.fenix.ui.efficiency.selectors.SettingsPageSummariesSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.SettingsSelectors
 
-class SettingsPageSummariesTest : BaseTest(shakeToSummarizeFeatureFlagEnabled = true) {
+class SettingsPageSummariesTest : BaseTest() {
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/4036042
     @SmokeTest

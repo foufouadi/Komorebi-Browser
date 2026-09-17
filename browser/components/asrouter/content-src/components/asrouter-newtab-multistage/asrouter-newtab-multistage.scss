@@ -48,7 +48,16 @@ $split-screen-min-height: 280px;
 .multistage-newtab-wrapper {
   position: relative;
   max-width: 904px; /* stylelint-disable-line stylelint-plugin-mozilla/use-design-tokens */
+  min-width: var(--size-layout-large);
   margin-inline: auto;
+
+  // The card stack should be as wide as the rest of the New Tab content
+  // (such as the search bar), so it stays in sync across breakpoints
+  &:has(.screen[pos='card-stack']) {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+  }
 
   > moz-button {
     position: absolute;
@@ -94,5 +103,11 @@ $split-screen-min-height: 280px;
         }
       }
     }
+  }
+}
+
+@media (width <= 800px) {
+  .multistage-newtab-wrapper {
+    height: unset !important; /* stylelint-disable-line declaration-no-important */
   }
 }

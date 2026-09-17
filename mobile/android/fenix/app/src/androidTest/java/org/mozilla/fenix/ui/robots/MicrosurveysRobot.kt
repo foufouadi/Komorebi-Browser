@@ -253,8 +253,6 @@ fun surveyScreen(
     return MicrosurveysRobot.Transition(composeTestRule)
 }
 
-private fun surveyButton() = itemContainingText(getStringResource(R.string.preferences_take_survey))
-
 private fun surveyNoThanksButton() = itemContainingText(getStringResource(R.string.preferences_not_take_survey))
 
 private fun homescreenSurveyCloseButton() = itemWithDescription("Close")

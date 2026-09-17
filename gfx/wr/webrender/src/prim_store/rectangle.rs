@@ -7,17 +7,16 @@ use crate::scene_building::{IsVisible};
 use crate::intern;
 use crate::internal_types::LayoutPrimitiveInfo;
 use crate::prim_store::{
-    PrimKey, InternablePrimitive, PrimitiveStore, PrimitiveKind,
+    InternablePrimitive, PrimitiveStore, PrimitiveKind,
     PrimTemplate, PrimTemplateCommonData,
 };
 use crate::scene::SceneProperties;
 use std::ops;
 
-// `RectanglePrim` now lives in `webrender_api::interned_prims` so content-process
-// interning can hold it. Re-exported to keep existing references working.
-pub use api::interned_prims::RectanglePrim;
-
-pub type RectangleKey = PrimKey<RectanglePrim>;
+// `RectanglePrim` and its key live in `webrender_api::interned_prims` so
+// content-process interning can hold them. Re-exported to keep existing
+// references working.
+pub use api::interned_prims::{RectangleKey, RectanglePrim};
 
 pub type RectangleDataHandle = intern::Handle<RectanglePrim>;
 
@@ -102,6 +101,6 @@ impl From<RectangleKey> for RectangleTemplate {
 fn test_struct_sizes() {
     use std::mem;
     assert_eq!(mem::size_of::<RectanglePrim>(), 16, "RectanglePrim size changed");
-    assert_eq!(mem::size_of::<RectangleTemplate>(), 32, "RectangleTemplate size changed");
-    assert_eq!(mem::size_of::<RectangleKey>(), 20, "RectangleKey size changed");
+    assert_eq!(mem::size_of::<RectangleTemplate>(), 64, "RectangleTemplate size changed");
+    assert_eq!(mem::size_of::<RectangleKey>(), 52, "RectangleKey size changed");
 }

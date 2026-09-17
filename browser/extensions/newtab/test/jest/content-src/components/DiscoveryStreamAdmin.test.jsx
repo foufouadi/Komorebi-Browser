@@ -388,6 +388,103 @@ describe("<DiscoveryStreamAdminUI>", () => {
     });
   });
 
+  describe("IAB Banner Ad Sizes", () => {
+    const IAB_PREFS = {
+      ...CONTEXTUAL_PREFS,
+      "discoverystream.sections.enabled": true,
+      "discoverystream.sections.contextualAds.enabled": true,
+      "discoverystream.placements.spocs": "newtab_spocs",
+      "discoverystream.placements.spocs.counts": "6",
+      "newtabAdSize.billboard": false,
+      "newtabAdSize.mediumRectangle": false,
+    };
+
+    const renderIAB = (otherPrefs = {}) =>
+      renderUI({ otherPrefs: { ...IAB_PREFS, ...otherPrefs } });
+
+    it("should add the billboard placement when the toggle is turned on", () => {
+      const { container, dispatch } = renderIAB();
+      fireToggle(container.querySelector("#newtab_billboard"), true);
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref("newtabAdSize.billboard", true)
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref(
+          "discoverystream.placements.spocs",
+          "newtab_spocs, newtab_billboard"
+        )
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref("discoverystream.placements.spocs.counts", "6, 1")
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref(
+          "discoverystream.placements.contextualBanners",
+          "newtab_billboard"
+        )
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref("discoverystream.placements.contextualBanners.counts", "1")
+      );
+    });
+
+    it("should remove the billboard placement when the toggle is turned off", () => {
+      const { container, dispatch } = renderIAB({
+        "discoverystream.placements.spocs": "newtab_spocs, newtab_billboard",
+        "discoverystream.placements.spocs.counts": "6, 1",
+        "newtabAdSize.billboard": true,
+      });
+      fireToggle(container.querySelector("#newtab_billboard"), false);
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref("newtabAdSize.billboard", false)
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref("discoverystream.placements.spocs", "newtab_spocs")
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref("discoverystream.placements.spocs.counts", "6")
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref("discoverystream.placements.contextualBanners", "")
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref("discoverystream.placements.contextualBanners.counts", "")
+      );
+    });
+
+    it("should update the medium rectangle placement independently", () => {
+      const { container, dispatch } = renderIAB({
+        "discoverystream.placements.spocs": "newtab_spocs, newtab_billboard",
+        "discoverystream.placements.spocs.counts": "6, 1",
+        "newtabAdSize.billboard": true,
+      });
+      fireToggle(container.querySelector("#newtab_rectangle"), true);
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref("newtabAdSize.mediumRectangle", true)
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref(
+          "discoverystream.placements.spocs",
+          "newtab_spocs, newtab_billboard, newtab_rectangle"
+        )
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref(
+          "discoverystream.placements.contextualBanners",
+          "newtab_billboard"
+        )
+      );
+    });
+
+    it("should refresh the cache after an ad size changes", () => {
+      const { container, dispatch } = renderIAB();
+      fireToggle(container.querySelector("#newtab_billboard"), true);
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.OnlyToMain({ type: at.DISCOVERY_STREAM_DEV_REFRESH_CACHE })
+      );
+    });
+  });
+
   describe("Widgets", () => {
     const renderWidgets = (otherPrefs = { "widgets.system.enabled": false }) =>
       renderUI({ otherPrefs });
@@ -568,12 +665,16 @@ describe("<ToggleStoryButton>", () => {
 });
 
 describe("<DiscoveryStreamAdminUI> Layouts", () => {
+  // Rendered order is alphabetical by displayed label, not declaration order.
   const VARIANTS = [
+    "auto-minimize-widgets",
     "nova-full-width",
     "side-by-side-content-lead",
-    "side-by-side-widgets-lead",
     "side-by-side-content-lead-five",
+    "side-by-side-widgets-lead",
     "side-by-side-widgets-lead-five",
+    "spaces-buttons-bottom",
+    "spaces-buttons-top",
   ];
   // Everything isSideBySideActive gates on, so the status line stays quiet.
   const ACTIVE_PREFS = {

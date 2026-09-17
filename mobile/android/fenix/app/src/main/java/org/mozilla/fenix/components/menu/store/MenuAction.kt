@@ -5,13 +5,13 @@
 package org.mozilla.fenix.components.menu.store
 
 import android.app.PendingIntent
+import mozilla.components.compose.menu.store.MenuEvent
 import mozilla.components.feature.addons.Addon
-import mozilla.components.lib.state.Action
 import mozilla.components.service.fxa.manager.AccountState
 import org.mozilla.fenix.components.menu.MenuAccessPoint
 
 /** Actions to dispatch through the [MenuStore] to modify the [MenuState]. */
-sealed class MenuAction : Action {
+sealed class MenuAction : MenuEvent {
 
     /**
      * [MenuAction] dispatched to indicate that the store is initialized and ready to use. This action is dispatched
@@ -154,6 +154,9 @@ sealed class MenuAction : Action {
      */
     data class UpdateIPProtectionMenuState(val state: IPProtectionMenuState) : MenuAction()
 
+    /** [MenuAction] dispatched when the user clicks the IP protection menu item. */
+    data object IPProtectionToggle : MenuAction()
+
     /** [MenuAction] dispatched when a navigation event occurs for a specific destination. */
     sealed class Navigate : MenuAction() {
 
@@ -186,8 +189,12 @@ sealed class MenuAction : Action {
         /** [Navigate] action dispatched when navigating to passwords. */
         data object Passwords : Navigate()
 
-        /** [Navigate] action dispatched when navigating to edit the existing bookmark. */
-        data object EditBookmark : Navigate()
+        /**
+         * [Navigate] action dispatched when navigating to edit the existing bookmark.
+         *
+         * @property guidToEdit The guid of the bookmark to edit if known.
+         */
+        data class EditBookmark(val guidToEdit: String? = null) : Navigate()
 
         /** [Navigate] action dispatched when navigating to add site to home screen. */
         data object AddToHomeScreen : Navigate()

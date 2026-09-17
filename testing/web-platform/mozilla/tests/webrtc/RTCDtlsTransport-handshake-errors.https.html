@@ -36,7 +36,9 @@ promise_test(async t => {
     const answerer = new RTCPeerConnection();
     t.add_cleanup(() => answerer.close());
     exchangeIceCandidates(offerer, answerer);
-    await exchangeOfferAnswer(offerer, answerer);
+    await answerer.setRemoteDescription(offerer.localDescription);
+    await answerer.setLocalDescription();
+    await offerer.setRemoteDescription(answerer.localDescription);
 
     const answererTransport = answerer.getSenders()[0].transport;
     const answererErrorPromise = new Promise(r => {

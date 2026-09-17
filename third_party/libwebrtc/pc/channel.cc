@@ -190,7 +190,6 @@ BaseChannel::BaseChannel(
       signaling_thread_(signaling_thread),
       alive_(PendingTaskSafetyFlag::CreateAttachedToTaskQueue(true,
                                                               worker_thread)),
-      on_first_packet_received_(std::move(callbacks.on_first_packet_received)),
       on_first_packet_sent_(std::move(callbacks.on_first_packet_sent)),
       on_packet_received_n_(std::move(callbacks.on_packet_received)),
       srtp_required_(srtp_required),
@@ -453,11 +452,6 @@ void BaseChannel::OnRtpPacket(const RtpPacketReceived& parsed_packet) {
   RTC_DCHECK_RUN_ON(network_thread());
   RTC_DCHECK(network_initialized());
 
-  if (on_first_packet_received_) {
-    std::move(on_first_packet_received_)(parsed_packet);
-    on_first_packet_received_ = nullptr;
-  }
-
   if (!srtp_active() && srtp_required_) {
     // Our session description indicates that SRTP is required, but we got a
     // packet before our SRTP filter is active. This means either that
@@ -685,20 +679,20 @@ RTCError BaseChannel::SetLocalContent_w(const MediaContentDescription* content,
       sb << "Failed to set local video description recv parameters for "
             "m-section with mid='"
          << mid() << "'.";
-      error = RTCError::InvalidParameter(sb.str());
+      error = RTCError::InvalidParameter(sb.Release());
       return error;
     }
-    last_recv_params_ = recv_params;
+    last_recv_params_ = std::move(recv_params);
 
     if (type == SdpType::kAnswer || type == SdpType::kPrAnswer) {
       if (!video_media_send_channel()->SetSenderParameters(send_params)) {
         StringBuilder sb;
         sb << "Failed to set send parameters for m-section with mid='" << mid()
            << "'.";
-        error = RTCError::InvalidParameter(sb.str());
+        error = RTCError::InvalidParameter(sb.Release());
         return error;
       }
-      last_send_params_ = send_params;
+      last_send_params_ = std::move(send_params);
     }
   } else {
     AudioReceiverParameters recv_params =
@@ -720,20 +714,20 @@ RTCError BaseChannel::SetLocalContent_w(const MediaContentDescription* content,
       sb << "Failed to set local audio description recv parameters for "
             "m-section with mid='"
          << mid() << "'.";
-      error = RTCError::InvalidParameter(sb.str());
+      error = RTCError::InvalidParameter(sb.Release());
       return error;
     }
-    last_recv_params_ = recv_params;
+    last_recv_params_ = std::move(recv_params);
 
     if (type == SdpType::kAnswer || type == SdpType::kPrAnswer) {
       if (!voice_media_send_channel()->SetSenderParameters(send_params)) {
         StringBuilder sb;
         sb << "Failed to set send parameters for m-section with mid='" << mid()
            << "'.";
-        error = RTCError::InvalidParameter(sb.str());
+        error = RTCError::InvalidParameter(sb.Release());
         return error;
       }
-      last_send_params_ = send_params;
+      last_send_params_ = std::move(send_params);
     }
   }
 
@@ -791,18 +785,18 @@ RTCError BaseChannel::SetRemoteContent_w(const MediaContentDescription* content,
       sb << "Failed to set remote video description send parameters for "
             "m-section with mid='"
          << mid() << "'.";
-      return RTCError::InvalidParameter(sb.str());
+      return RTCError::InvalidParameter(sb.Release());
     }
-    last_send_params_ = send_params;
+    last_send_params_ = std::move(send_params);
 
     if (type == SdpType::kAnswer || type == SdpType::kPrAnswer) {
       if (!video_media_receive_channel()->SetReceiverParameters(recv_params)) {
         StringBuilder sb;
         sb << "Failed to set recv parameters for m-section with mid='" << mid()
            << "'.";
-        return RTCError::InvalidParameter(sb.str());
+        return RTCError::InvalidParameter(sb.Release());
       }
-      last_recv_params_ = recv_params;
+      last_recv_params_ = std::move(recv_params);
     }
   } else {
     AudioSenderParameter send_params =
@@ -822,20 +816,27 @@ RTCError BaseChannel::SetRemoteContent_w(const MediaContentDescription* content,
       sb << "Failed to set remote audio description send parameters for "
             "m-section with mid='"
          << mid() << "'.";
-      return RTCError::InvalidParameter(sb.str());
+      return RTCError::InvalidParameter(sb.Release());
     }
-    last_send_params_ = send_params;
+    last_send_params_ = std::move(send_params);
 
     if (type == SdpType::kAnswer || type == SdpType::kPrAnswer) {
       if (!voice_media_receive_channel()->SetReceiverParameters(recv_params)) {
         StringBuilder sb;
         sb << "Failed to set recv parameters for m-section with mid='" << mid()
            << "'.";
-        return RTCError::InvalidParameter(sb.str());
+        return RTCError::InvalidParameter(sb.Release());
       }
-      last_recv_params_ = recv_params;
+      last_recv_params_ = std::move(recv_params);
     }
   }
+
+  // Non-sender RTT (RRTR/DLRR) is signaled either by the standard
+  // a=rtcp-xr:rcvr-rtt or by the legacy non-standard a=rtcp-fb:<pt> rrtr.
+  const bool receive_non_sender_rtt =
+      content->receive_non_sender_rtt() ||
+      absl::c_any_of(content->codecs(),
+                     [](const Codec& codec) { return HasRrtr(codec); });
 
   if (media_type_ == MediaType::AUDIO) {
     voice_media_receive_channel()->SetRtcpMode(content->rtcp_reduced_size()
@@ -843,20 +844,15 @@ RTCError BaseChannel::SetRemoteContent_w(const MediaContentDescription* content,
                                                    : RtcpMode::kCompound);
     voice_media_receive_channel()->SetReceiveNackEnabled(
         voice_media_send_channel()->SenderNackEnabled());
-    // Enable non-sender RTT (RRTR/DLRR) when negotiated. Both the standard
-    // a=rtcp-xr:rcvr-rtt and the legacy rtcp-fb rrtr are folded into
-    // receive_non_sender_rtt by the SDP layer.
     voice_media_receive_channel()->SetReceiveNonSenderRttEnabled(
-        content->receive_non_sender_rtt());
+        receive_non_sender_rtt);
   }
 
   RTC_DCHECK_BLOCK_COUNT_NO_MORE_THAN(0);
 
   if (media_type_ == MediaType::VIDEO) {
-    // Enable non-sender RTT (RRTR/DLRR) when negotiated (both wire forms are
-    // folded into receive_non_sender_rtt by the SDP layer).
     video_media_receive_channel()->SetReceiveNonSenderRttEnabled(
-        content->receive_non_sender_rtt());
+        receive_non_sender_rtt);
   }
 
   error = UpdateRemoteStreams_w(content, type);
@@ -975,7 +971,7 @@ RTCError BaseChannel::UpdateLocalStreams_w(
              << " into m-section with mid='" << mid() << "'";
     }
   }
-  local_streams_ = all_streams;
+  local_streams_ = std::move(all_streams);
   return RTCError::OK();
 }
 

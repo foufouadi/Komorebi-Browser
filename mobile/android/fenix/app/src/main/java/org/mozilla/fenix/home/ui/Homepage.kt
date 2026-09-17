@@ -9,6 +9,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -40,8 +41,12 @@ import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
+import kotlin.collections.mapNotNullTo
+import kotlin.collections.orEmpty
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import mozilla.components.compose.base.theme.Theme
+import mozilla.components.feature.top.sites.TopSite
 import mozilla.components.support.ktx.android.net.hostWithoutCommonPrefixes
 import mozilla.telemetry.glean.private.NoExtras
 import org.mozilla.fenix.GleanMetrics.History
@@ -55,12 +60,16 @@ import org.mozilla.fenix.components.appstate.setup.checklist.SetupChecklistState
 import org.mozilla.fenix.components.components
 import org.mozilla.fenix.compose.MessageCard
 import org.mozilla.fenix.compose.home.HomeSectionHeader
+import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.home.bookmarks.Bookmark
 import org.mozilla.fenix.home.bookmarks.interactor.BookmarksInteractor
 import org.mozilla.fenix.home.bookmarks.view.Bookmarks
 import org.mozilla.fenix.home.bookmarks.view.BookmarksMenuItem
 import org.mozilla.fenix.home.collections.Collections
+import org.mozilla.fenix.home.collections.CollectionsMigrationPromoCard
 import org.mozilla.fenix.home.collections.CollectionsState
+import org.mozilla.fenix.home.collections.migration.CollectionsMigrationCardAction
+import org.mozilla.fenix.home.collections.migration.CollectionsMigrationCardAction.ViewTabGroupsClicked
 import org.mozilla.fenix.home.fake.FakeHomepagePreview
 import org.mozilla.fenix.home.interactor.HomepageInteractor
 import org.mozilla.fenix.home.pocket.ui.PocketSection
@@ -92,12 +101,12 @@ import org.mozilla.fenix.home.topsites.TopSiteState
 import org.mozilla.fenix.home.topsites.TopSites
 import org.mozilla.fenix.home.topsites.interactor.TopSiteInteractor
 import org.mozilla.fenix.home.topsites.store.DialogState
+import org.mozilla.fenix.home.topsites.store.PopularSite
 import org.mozilla.fenix.home.topsites.store.toPopularSite
 import org.mozilla.fenix.home.topsites.ui.AddShortcutBottomSheet
 import org.mozilla.fenix.home.topsites.ui.AddShortcutDialog
 import org.mozilla.fenix.home.ui.HomepageTestTag.HOMEPAGE
 import org.mozilla.fenix.theme.FirefoxTheme
-import org.mozilla.fenix.theme.Theme
 import org.mozilla.fenix.trackingprotection.TrackersBlockedCard
 import org.mozilla.fenix.utils.isLargeScreenSize
 import org.mozilla.fenix.wallpapers.WallpaperTheme
@@ -109,6 +118,7 @@ private const val POPULAR_SITES_TO_SHOW = 8
  *
  * @param state State representing the homepage.
  * @param interactor [HomepageInteractor] for interactions with the homepage UI.
+ * @param onCollectionsMigrationCardAction Invoked with the [CollectionsMigrationCardAction] to dispatch.
  * @param onTopSitesItemBound Invoked during the composition of a top site item.
  * @param modifier [Modifier] to be applied to the layout.
  */
@@ -117,6 +127,7 @@ private const val POPULAR_SITES_TO_SHOW = 8
 internal fun Homepage(
     state: HomepageState,
     interactor: HomepageInteractor,
+    onCollectionsMigrationCardAction: (CollectionsMigrationCardAction) -> Unit,
     onTopSitesItemBound: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -185,12 +196,14 @@ internal fun Homepage(
                         }
 
                         is HomepageState.Normal -> {
-                            val settings = components.settings
-                            val appStore = components.appStore
+                            val context = LocalContext.current
+
                             LaunchedEffect(showLongfoxAnimation) {
                                 if (showLongfoxAnimation) {
-                                    settings.longfoxPeekAnimationShownCount++
-                                    appStore.dispatch(AppAction.UpdateShowFoxPeekAnimation(false))
+                                    with(context.components) {
+                                        settings.longfoxPeekAnimationShownCount++
+                                        appStore.dispatch(AppAction.UpdateShowFoxPeekAnimation(false))
+                                    }
                                 }
                             }
 
@@ -208,7 +221,7 @@ internal fun Homepage(
                                     interactor = interactor,
                                     onTopSitesItemBound = onTopSitesItemBound,
                                     onAddShortcutClicked = {
-                                        appStore.dispatch(
+                                        context.components.appStore.dispatch(
                                             ShortcutAction.AddShortcutSheetShown(
                                                 entryPoint = AddShortcutEntryPoint.HOMEPAGE
                                             )
@@ -286,6 +299,7 @@ internal fun Homepage(
                             CollectionsSection(
                                 collectionsState = collectionsState,
                                 interactor = interactor,
+                                onCollectionsMigrationCardAction = onCollectionsMigrationCardAction,
                             )
 
                             if (pocketState != null) {
@@ -306,36 +320,15 @@ internal fun Homepage(
 
                             Spacer(Modifier.height(bottomPadding.dp))
 
+                            val popularSites = observePopularSites(topSites = topSiteState?.topSites)
+
                             when (shortcutsDialogState) {
                                 DialogState.AddShortcutBottomSheet -> {
-                                    val merinoManifestProvider = components.core.merinoManifestProvider
-                                    val popularSites by
-                                        produceState(
-                                            initialValue = emptyList(),
-                                            key1 = merinoManifestProvider,
-                                            key2 = topSiteState?.topSites,
-                                        ) {
-                                            value =
-                                                withContext(Dispatchers.IO) {
-                                                    merinoManifestProvider
-                                                        .getTopDomains(
-                                                            limit = POPULAR_SITES_TO_SHOW,
-                                                            excludedDomains =
-                                                                topSiteState?.topSites.orEmpty().mapNotNullTo(
-                                                                    mutableSetOf()
-                                                                ) {
-                                                                    it.url.toUri().hostWithoutCommonPrefixes
-                                                                },
-                                                        )
-                                                        .map { it.toPopularSite() }
-                                                }
-                                        }
-
                                     AddShortcutBottomSheet(
                                         popularSites = popularSites,
                                         onDismiss = { shortcutsDialogState = DialogState.Closed },
                                         onAddWebsiteClicked = {
-                                            appStore.dispatch(ShortcutAction.AddWebsiteDialogShown)
+                                            context.components.appStore.dispatch(ShortcutAction.AddWebsiteDialogShown)
                                             shortcutsDialogState = DialogState.AddShortcut
                                         },
                                         onAddPopularSiteClick = { site ->
@@ -445,7 +438,6 @@ internal fun TopSitesSection(
         interactor = interactor,
         onTopSitesItemBound = onTopSitesItemBound,
         onAddShortcutClicked = onAddShortcutClicked,
-        isPager = components.settings.topSitesPager,
     )
 }
 
@@ -459,11 +451,7 @@ private fun RecentTabsSection(
     Spacer(modifier = Modifier.height(topSpacing))
 
     Column(modifier = Modifier.padding(horizontal = horizontalMargin)) {
-        HomeSectionHeader(
-            headerText = stringResource(R.string.recent_tabs_header),
-            description = stringResource(R.string.recent_tabs_show_all_content_description_2),
-            onButtonClick = interactor::onRecentTabShowAllClicked,
-        )
+        HomeSectionHeader(headerText = stringResource(R.string.recent_tabs_header_2))
 
         Spacer(Modifier.height(16.dp))
 
@@ -566,28 +554,65 @@ private fun RecentlyVisitedSection(
 private fun CollectionsSection(
     collectionsState: CollectionsState,
     interactor: CollectionInteractor,
+    onCollectionsMigrationCardAction: (CollectionsMigrationCardAction) -> Unit,
 ) {
     when (collectionsState) {
         is CollectionsState.Content -> {
-            Column(modifier = Modifier.padding(horizontal = horizontalMargin)) {
-                Spacer(Modifier.height(56.dp))
+            CollectionsSectionContent {
+                Collections(
+                    collections = collectionsState.collections,
+                    expandedCollections = collectionsState.expandedCollections,
+                    showAddTabToCollection = collectionsState.showSaveTabsToCollection,
+                    interactor = interactor,
+                )
+            }
+        }
 
-                HomeSectionHeader(headerText = stringResource(R.string.collections_header))
-
-                Spacer(Modifier.height(10.dp))
-
-                with(collectionsState) {
-                    Collections(
-                        collections = collections,
-                        expandedCollections = expandedCollections,
-                        showAddTabToCollection = showSaveTabsToCollection,
-                        interactor = interactor,
-                    )
-                }
+        CollectionsState.MigrationCard -> {
+            CollectionsSectionContent {
+                CollectionsMigrationPromoCard(onClick = { onCollectionsMigrationCardAction(ViewTabGroupsClicked) })
             }
         }
 
         CollectionsState.Gone -> {} // no-op. Nothing is shown where there are no collections.
+    }
+}
+
+@Composable
+private fun observePopularSites(topSites: List<TopSite>?): List<PopularSite> {
+    val merinoManifestProvider = components.core.merinoManifestProvider
+    val popularSites by
+        produceState(
+            initialValue = emptyList(),
+            key1 = merinoManifestProvider,
+            key2 = topSites,
+        ) {
+            value =
+                withContext(Dispatchers.IO) {
+                    merinoManifestProvider
+                        .getTopDomains(
+                            limit = POPULAR_SITES_TO_SHOW,
+                            excludedDomains =
+                                topSites.orEmpty().mapNotNullTo(mutableSetOf()) {
+                                    it.url.toUri().hostWithoutCommonPrefixes
+                                },
+                        )
+                        .map { it.toPopularSite() }
+                }
+        }
+    return popularSites
+}
+
+@Composable
+private fun CollectionsSectionContent(content: @Composable ColumnScope.() -> Unit) {
+    Column(modifier = Modifier.padding(horizontal = horizontalMargin)) {
+        Spacer(Modifier.height(56.dp))
+
+        HomeSectionHeader(headerText = stringResource(R.string.collections_header))
+
+        Spacer(Modifier.height(10.dp))
+
+        content()
     }
 }
 
@@ -626,6 +651,7 @@ private fun HomepagePreview() {
                         showTopSitesHeader = true,
                     ),
                 interactor = FakeHomepagePreview.homepageInteractor,
+                onCollectionsMigrationCardAction = {},
                 onTopSitesItemBound = {},
                 modifier = Modifier.fillMaxSize(),
             )
@@ -668,6 +694,7 @@ private fun HomepageBannerPreview() {
                         showTopSitesHeader = true,
                     ),
                 interactor = FakeHomepagePreview.homepageInteractor,
+                onCollectionsMigrationCardAction = {},
                 onTopSitesItemBound = {},
                 modifier = Modifier.fillMaxSize(),
             )
@@ -701,6 +728,41 @@ private fun HomepagePreviewCollections() {
                         showTopSitesHeader = true,
                     ),
                 interactor = FakeHomepagePreview.homepageInteractor,
+                onCollectionsMigrationCardAction = {},
+                onTopSitesItemBound = {},
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+@Composable
+@PreviewLightDark
+private fun HomepageCollectionsMigrationCardPreview() {
+    FirefoxTheme {
+        Surface {
+            Homepage(
+                state =
+                    HomepageState.Normal(
+                        shouldShowPrivacyNoticeBanner = false,
+                        nimbusMessage = null,
+                        recentlyVisited = FakeHomepagePreview.recentHistory(),
+                        collectionsState = CollectionsState.MigrationCard,
+                        pocketState = FakeHomepagePreview.pocketState(),
+                        showPrivacyReport = true,
+                        longfoxEnabled = false,
+                        showLongfoxAnimation = false,
+                        trackersBlockedCount = 754,
+                        headerState = HeaderState.Normal,
+                        middleSearchState = MiddleSearchState(searchBarVisible = true, searchBarEnabled = false),
+                        firstFrameDrawn = true,
+                        setupChecklistState = null,
+                        isSearchInProgress = false,
+                        bottomPadding = 68,
+                        showTopSitesHeader = true,
+                    ),
+                interactor = FakeHomepagePreview.homepageInteractor,
+                onCollectionsMigrationCardAction = {},
                 onTopSitesItemBound = {},
                 modifier = Modifier.fillMaxSize(),
             )
@@ -737,6 +799,7 @@ private fun MinimalHomepagePreview() {
                         showTopSitesHeader = true,
                     ),
                 interactor = FakeHomepagePreview.homepageInteractor,
+                onCollectionsMigrationCardAction = {},
                 onTopSitesItemBound = {},
                 modifier = Modifier.fillMaxSize(),
             )
@@ -756,6 +819,7 @@ private fun PrivateHomepagePreview() {
                     isSearchInProgress = false,
                 ),
             interactor = FakeHomepagePreview.homepageInteractor,
+            onCollectionsMigrationCardAction = {},
             onTopSitesItemBound = {},
             modifier = Modifier.fillMaxSize(),
         )

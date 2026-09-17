@@ -61,13 +61,13 @@ OTHER_PRIVACY_PREFS = {
             "Reset Private Browsing",
             "browser.privatebrowsing.resetPBM.enabled",
             None,
-            "Clears all private browsing mode data when last private window is closed.",
+            "Shows a toolbar button in private windows that restarts the private session, clearing all site data and closing all private tabs and windows.",
         ),
         (
             "Show Reset Confirmation",
             "browser.privatebrowsing.resetPBM.showConfirmationDialog",
             None,
-            "Shows confirmation dialog before clearing private browsing data on window close.",
+            "Shows a confirmation dialog before the private browsing session is restarted.",
         ),
     ],
     "Cookie Behavior": [
@@ -102,12 +102,6 @@ OTHER_PRIVACY_PREFS = {
             "privacy.globalprivacycontrol.enabled",
             "privacy.globalprivacycontrol.pbmode.enabled",
             "Sends Sec-GPC: 1 HTTP header and exposes navigator.globalPrivacyControl=true.",
-        ),
-        (
-            "GPC Functionality",
-            "privacy.globalprivacycontrol.functionality.enabled",
-            None,
-            "Master switch that controls whether GPC signals are sent (requires .enabled to also be true).",
         ),
     ],
     "Fingerprinting Resistance": [
@@ -237,7 +231,7 @@ FEATURES = [
         "pb_code": None,
         "pref_normal": "privacy.bounceTrackingProtection.mode",
         "pref_pb": None,
-        "desc": "Clears state for sites used as bounce trackers. See [Bounce Tracking Protection docs](../bounce-tracking-protection) for mode values.",
+        "desc": "Clears state for sites used as bounce trackers. See [Bounce Tracking Protection docs](/toolkit/components/antitracking/anti-tracking/bounce-tracking-protection/index.md) for mode values.",
     },
     {
         "name": "Local Network Access Blocking",
@@ -265,6 +259,17 @@ for f in FEATURES:
     if f["pb_code"]:
         KNOWN_CODES.add(f["pb_code"])
 
+# Prefs where `true` means the protection is skipped/disabled not enabled,
+# so a reader scanning for "more true = safer" would draw the
+# opposite conclusion from the truth.
+# Rows for these prefs get an inline note.
+INVERTED_POLARITY_PREFS = {
+    "privacy.trackingprotection.consentmanager.skip.enabled",
+    "privacy.trackingprotection.consentmanager.skip.pbmode.enabled",
+    "privacy.trackingprotection.antifraud.skip.enabled",
+    "privacy.trackingprotection.antifraud.skip.pbmode.enabled",
+}
+
 
 def parse_static_pref_list(yaml_path):
     """
@@ -291,10 +296,12 @@ def parse_static_pref_list(yaml_path):
         comment_lines = []
         for j in range(i - 1, -1, -1):
             prev_line = lines[j].strip()
-            if prev_line.startswith("#") and not prev_line.startswith("#ifdef"):
+            if re.match(r"^#(ifdef|ifndef|if\b|else|endif)", prev_line):
+                break
+            if prev_line.startswith("#"):
                 if re.match(r"^#-+$", prev_line):
                     break
-                comment_lines.insert(0, prev_line.lstrip("# "))
+                comment_lines.insert(0, re.sub(r"^#\s?", "", prev_line))
             elif prev_line == "":
                 pass
             else:
@@ -380,7 +387,7 @@ def make_searchfox_link(pref_name, path):
         # For .js files, search for pref("pref.name",
         query = f'pref\\("{escaped_pref}"'
     url = (
-        f"https://searchfox.org/mozilla-central/search"
+        f"https://searchfox.org/firefox-main/search"
         f"?q={quote(query)}&path={quote(path)}&case=true&regexp=true"
     )
     return url
@@ -391,13 +398,15 @@ def _build_pref_links(pref_name, pref_info, firefox_js_overrides, all_js_prefs):
     links = []
     if pref_name in pref_info:
         path = "modules/libpref/init/StaticPrefList.yaml"
-        links.append(f"[StaticPrefList.yaml]({make_searchfox_link(pref_name, path)})")
+        links.append(
+            f'<a href="{make_searchfox_link(pref_name, path)}">StaticPrefList.yaml</a>'
+        )
     if pref_name in all_js_prefs:
         path = "modules/libpref/init/all.js"
-        links.append(f"[all.js]({make_searchfox_link(pref_name, path)})")
+        links.append(f'<a href="{make_searchfox_link(pref_name, path)}">all.js</a>')
     if pref_name in firefox_js_overrides:
         path = "browser/app/profile/firefox.js"
-        links.append(f"[firefox.js]({make_searchfox_link(pref_name, path)})")
+        links.append(f'<a href="{make_searchfox_link(pref_name, path)}">firefox.js</a>')
     if not links:
         return f"`{pref_name}`"
     return f"`{pref_name}`: " + ", ".join(links)
@@ -672,6 +681,20 @@ def _get_footnote_ref(pref, ifdef_block, footnotes):
     return f"[{len(footnotes)}]"
 
 
+def _format_status(value):
+    """Render a pref value for a table cell, defending against a validate_prefs_exist() gap."""
+    if value is None:
+        return "*(pref not found)*"
+    return f"`{value}`"
+
+
+def _polarity_marker(pref_normal, pref_pb):
+    """Return an inline note if either pref has inverted polarity."""
+    if pref_normal in INVERTED_POLARITY_PREFS or pref_pb in INVERTED_POLARITY_PREFS:
+        return "<br/>**Note:** the value `true` unblocks domains in this category.."
+    return ""
+
+
 def _render_footnotes(footnotes, start_idx):
     """Render footnotes from start_idx to end of list as markdown lines."""
     if start_idx >= len(footnotes):
@@ -734,7 +757,21 @@ def generate_markdown(
         "## Enhanced Tracking Protection (ETP)",
         "",
         "Enhanced Tracking Protection features that change between **Standard** and **Strict** modes. ",
-        "Users select their ETP mode in Firefox Settings.",
+        "Users select their ETP mode in Firefox Settings, which is stored in the ",
+        "[`browser.contentblocking.category`](https://searchfox.org/firefox-main/source/browser/components/protections/ContentBlockingPrefs.sys.mjs) ",
+        'pref as `"standard"`, `"strict"`, or `"custom"`.',
+        "",
+        "```{note}",
+        "This page only tabulates the **Standard** and **Strict** presets.",
+        "",
+        "**Custom** has no preset of its own, it's set by the individual user, ",
+        "either directly or automatically whenever a user or enterprise policy ",
+        "changes one of those prefs directly.",
+        "",
+        "`browser.contentblocking.category` itself is computed at runtime by ",
+        "[`ContentBlockingPrefs.matchCBCategory()`](https://searchfox.org/firefox-main/source/browser/components/protections/ContentBlockingPrefs.sys.mjs) ",
+        "from the current pref values (**Standard** on an unmodified profile).",
+        "```",
         "",
         "The **Normal** and **Private** columns indicate whether each feature is enabled in normal ",
         "browsing and private browsing modes, respectively.",
@@ -744,7 +781,7 @@ def generate_markdown(
         "[all.js](https://searchfox.org/firefox-main/source/modules/libpref/init/all.js), and ",
         "[firefox.js](https://searchfox.org/firefox-main/source/browser/app/profile/firefox.js) ",
         "(applied in that order). **ETP Strict** additionally enables features based on the ",
-        "[`browser.contentblocking.features.strict`](https://searchfox.org/mozilla-central/search?q=%22browser.contentblocking.features.strict%22&path=%5Ebrowser%2Fapp%2Fprofile%2Ffirefox.js%24&case=true&regexp=false) string in firefox.js.",
+        "[`browser.contentblocking.features.strict`](https://searchfox.org/firefox-main/search?q=%22browser.contentblocking.features.strict%22&path=%5Ebrowser%2Fapp%2Fprofile%2Ffirefox.js%24&case=true&regexp=false) string in firefox.js.",
         "",
     ])
 
@@ -806,20 +843,22 @@ def generate_markdown(
             fn_ref = _get_footnote_ref(pref_normal, normal_ifdef, footnotes)
             std_normal_status = fn_ref
             strict_normal_status = (
-                f"`{strict_normal_val}`" if normal_overridden else fn_ref
+                _format_status(strict_normal_val) if normal_overridden else fn_ref
             )
         else:
-            std_normal_status = f"`{std_normal_val}`"
-            strict_normal_status = f"`{strict_normal_val}`"
+            std_normal_status = _format_status(std_normal_val)
+            strict_normal_status = _format_status(strict_normal_val)
 
         if pref_pb:
             if pb_ifdef:
                 fn_ref = _get_footnote_ref(pref_pb, pb_ifdef, footnotes)
                 std_pb_status = fn_ref
-                strict_pb_status = f"`{strict_pb_val}`" if pb_overridden else fn_ref
+                strict_pb_status = (
+                    _format_status(strict_pb_val) if pb_overridden else fn_ref
+                )
             else:
-                std_pb_status = f"`{std_pb_val}`"
-                strict_pb_status = f"`{strict_pb_val}`"
+                std_pb_status = _format_status(std_pb_val)
+                strict_pb_status = _format_status(strict_pb_val)
         else:
             std_pb_status = ""
             strict_pb_status = ""
@@ -858,18 +897,18 @@ def generate_markdown(
         pref_text = "<br/>".join(pref_links)
 
         desc = feature.get("desc", "")
+        marker = _polarity_marker(pref_normal, pref_pb)
         if desc:
-            cell_name = f"{display_name}<br/><small>{desc}<br/>{pref_text}</small>"
+            cell_name = (
+                f"{display_name}<br/><small>{desc}{marker}<br/>{pref_text}</small>"
+            )
         else:
-            cell_name = f"{display_name}<br/><small>{pref_text}</small>"
+            cell_name = f"{display_name}<br/><small>{pref_text}{marker}</small>"
 
         lines.append(
             f"| {cell_name} | {std_normal_status} | {std_pb_status} "
             f"| {strict_normal_status} | {strict_pb_status} |"
         )
-
-    # ETP table footnotes (placed directly under the table)
-    lines.extend(_render_footnotes(footnotes, 0))
 
     # Unknown features
     unknown = set(strict_features.keys()) - KNOWN_CODES
@@ -885,12 +924,16 @@ def generate_markdown(
             status = "enabled" if strict_features[code] else "disabled"
             lines.append(f"- `{code}` ({status})")
 
-    # Other privacy prefs tables (footnotes continue global count)
+    # Other privacy prefs tables (share the same footnote list/numbering as
+    # the ETP table above)
     lines.extend(
         generate_other_privacy_table(
             pref_info, firefox_js_overrides, all_js_prefs, footnotes
         )
     )
+
+    # All footnotes are rendered together at the end.
+    lines.extend(_render_footnotes(footnotes, 0))
 
     lines.extend([
         "",
@@ -909,8 +952,6 @@ def generate_other_privacy_table(
     lines = []
 
     for category, features in OTHER_PRIVACY_PREFS.items():
-        footnote_start = len(footnotes)
-
         lines.extend([
             "",
             f"## {category}",
@@ -931,7 +972,7 @@ def generate_other_privacy_table(
             if normal_ifdef:
                 normal_status = _get_footnote_ref(normal_pref, normal_ifdef, footnotes)
             else:
-                normal_status = f"`{normal_value}`"
+                normal_status = _format_status(normal_value)
 
             if pb_pref:
                 pb_value = _get_pref_value(
@@ -943,7 +984,7 @@ def generate_other_privacy_table(
                 if pb_ifdef:
                     pb_status = _get_footnote_ref(pb_pref, pb_ifdef, footnotes)
                 else:
-                    pb_status = f"`{pb_value}`"
+                    pb_status = _format_status(pb_value)
             else:
                 pb_status = ""
 
@@ -959,45 +1000,63 @@ def generate_other_privacy_table(
                         )
                     )
             pref_text = "<br/>".join(pref_links)
+            marker = _polarity_marker(normal_pref, pb_pref)
 
             if description:
                 lines.append(
-                    f"| {display_name}<br/><small>{description}<br/>{pref_text}</small> | {normal_status} | {pb_status} |"
+                    f"| {display_name}<br/><small>{description}{marker}<br/>{pref_text}</small> | {normal_status} | {pb_status} |"
                 )
             else:
                 lines.append(
-                    f"| {display_name}<br/><small>{pref_text}</small> | {normal_status} | {pb_status} |"
+                    f"| {display_name}<br/><small>{pref_text}{marker}</small> | {normal_status} | {pb_status} |"
                 )
-
-        # Footnotes directly under this category's table
-        lines.extend(_render_footnotes(footnotes, footnote_start))
 
     return lines
 
 
-def validate_prefs_exist(pref_info):
+def validate_prefs_exist(pref_info, firefox_js_overrides, all_js_prefs):
     """
-    Validate that all prefs used in FEATURES exist in StaticPrefList.yaml.
+    Validate that all prefs used in FEATURES and OTHER_PRIVACY_PREFS exist in
+    StaticPrefList.yaml, all.js, or firefox.js.
 
-    Raises an error with instructions if any are missing.
+    Raises an error with instructions if any are missing, so a renamed or
+    removed pref fails the build instead of publishing `None` in
+    the generated table.
     """
+
+    def _is_missing(pref):
+        return (
+            pref not in pref_info
+            and pref not in all_js_prefs
+            and pref not in firefox_js_overrides
+        )
+
     missing_prefs = []
 
     for feature in FEATURES:
         pref_normal = feature["pref_normal"]
         pref_pb = feature.get("pref_pb")
 
-        if pref_normal not in pref_info:
+        if _is_missing(pref_normal):
             missing_prefs.append(pref_normal)
-        if pref_pb and pref_pb not in pref_info:
+        if pref_pb and _is_missing(pref_pb):
             missing_prefs.append(pref_pb)
+
+    for prefs in OTHER_PRIVACY_PREFS.values():
+        for _name, normal_pref, pb_pref, _desc in prefs:
+            if _is_missing(normal_pref):
+                missing_prefs.append(normal_pref)
+            if pb_pref and _is_missing(pb_pref):
+                missing_prefs.append(pb_pref)
 
     if missing_prefs:
         prefs_list = "\n  - ".join(missing_prefs)
         raise ValueError(
-            f"ETP feature prefs not found in StaticPrefList.yaml:\n  - {prefs_list}\n\n"
+            f"Privacy capabilities matrix prefs not found in StaticPrefList.yaml, "
+            f"all.js, or firefox.js:\n  - {prefs_list}\n\n"
             "To fix this:\n"
-            "1. If the pref was renamed, update docs/_addons/etp_matrix.py FEATURES list\n"
+            "1. If the pref was renamed, update docs/_addons/etp_matrix.py FEATURES\n"
+            "   or OTHER_PRIVACY_PREFS\n"
             "2. If the pref is new, add it to modules/libpref/init/StaticPrefList.yaml\n"
             "   with a descriptive comment above the entry"
         )
@@ -1055,11 +1114,11 @@ def generate_etp_matrix(app):
 
     pref_info = parse_static_pref_list(static_pref_list)
 
-    validate_prefs_exist(pref_info)
-
     all_js_prefs = parse_firefox_js_overrides(all_js)
 
     firefox_js_overrides = parse_firefox_js_overrides(firefox_js)
+
+    validate_prefs_exist(pref_info, firefox_js_overrides, all_js_prefs)
 
     standard_defaults = get_standard_defaults(
         pref_info, firefox_js_overrides, all_js_prefs

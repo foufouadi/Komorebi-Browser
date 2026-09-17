@@ -11,7 +11,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import mozilla.components.browser.state.state.BrowserState
-import mozilla.components.browser.state.state.TabPartition
 import mozilla.components.browser.state.state.TabSessionState
 import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.browser.tabstray.TabsTray
@@ -27,7 +26,6 @@ class TabsTrayPresenter(
     private val tabsTray: TabsTray,
     private val store: BrowserStore,
     internal var tabsFilter: (TabSessionState) -> Boolean,
-    internal var tabPartitionsFilter: (Map<String, TabPartition>) -> TabPartition?,
     private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
     private val closeTabsTray: () -> Unit,
 ) {
@@ -44,7 +42,7 @@ class TabsTrayPresenter(
 
     private suspend fun collect(flow: Flow<BrowserState>) {
         flow
-            .distinctUntilChangedBy { Pair(it.toTabs(tabsFilter), tabPartitionsFilter(it.tabPartitions)) }
+            .distinctUntilChangedBy { it.toTabs(tabsFilter) }
             .collect { state ->
                 val (tabs, selectedTabId) = state.toTabList(tabsFilter)
                 // Do not invoke the callback on start if this is the initial state.
@@ -52,7 +50,7 @@ class TabsTrayPresenter(
                     closeTabsTray.invoke()
                 }
 
-                tabsTray.updateTabs(tabs, tabPartitionsFilter(state.tabPartitions), selectedTabId)
+                tabsTray.updateTabs(tabs, selectedTabId)
 
                 initialOpen = false
             }

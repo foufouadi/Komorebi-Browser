@@ -104,6 +104,35 @@ const loginToLoginInfo = login => {
   return loginInfo;
 };
 
+// The fields a LoginCandidate carries, under the storage field names that
+// #searchLogins matches on. A search restricted to these fields can be answered
+// without the encryption key, i.e. without prompting for the primary password.
+const candidateToMatchable = candidate => ({
+  hostname: candidate.origin,
+  formSubmitURL: candidate.formActionOrigin,
+  httpRealm: candidate.httpRealm,
+  usernameField: candidate.usernameField,
+  passwordField: candidate.passwordField,
+  guid: candidate.id,
+  timeCreated: candidate.timeCreated,
+  timeLastUsed: candidate.timeLastUsed,
+  timePasswordChanged: candidate.timePasswordChanged,
+  timesUsed: candidate.timesUsed,
+});
+
+const CANDIDATE_MATCH_FIELDS = new Set([
+  "origin",
+  "formActionOrigin",
+  "httpRealm",
+  "usernameField",
+  "passwordField",
+  "guid",
+  "timeCreated",
+  "timeLastUsed",
+  "timePasswordChanged",
+  "timesUsed",
+]);
+
 // Build a bare LoginInfo carrying only the given guid. Used to report the ids
 // of removed logins in "removeAllLogins" notifications, since the bulk deletion
 // APIs only return guids rather than full logins.
@@ -129,6 +158,22 @@ class RustLoginsStoreAdapter {
 
   async list() {
     const logins = await this.#store.list();
+    return logins.map(loginToLoginInfo);
+  }
+
+  async listCandidates() {
+    return this.#store.listCandidates();
+  }
+
+  // getMany() returns the rows in whatever order the query gives it, so sort
+  // them back into the order of `ids`. Callers hand the logins on in the order
+  // they receive them, and both the deduping in LoginManagerParent and the
+  // username suggestions in the prompter pick by position among equal
+  // candidates.
+  async getMany(ids) {
+    const order = new Map(ids.map((id, index) => [id, index]));
+    const logins = await this.#store.getMany(ids);
+    logins.sort((a, b) => order.get(a.id) - order.get(b.id));
     return logins.map(loginToLoginInfo);
   }
 
@@ -289,6 +334,14 @@ class RustLoginStorageAuthenticator extends PrimaryPasswordAuthenticator {
   // calling get_key(), so this method is always invoked serially.
   async getPrimaryPassword() {
     this.#logger.log("getPrimaryPassword called");
+    // Removed by bug 2067167. Declining is a workaround for requestReauth()
+    // locking the token out from under in-flight store operations; once re-auth
+    // stops relocking the token there is nothing left to decline.
+    if (lazy.LoginHelper.primaryPasswordReauthInProgress) {
+      this.#logger.log("declining, a re-authentication is already in progress");
+      this.authCanceled = true;
+      throw new AuthenticationCanceled("Re-authentication already in progress");
+    }
     this.authCanceled = false;
     this.uiBusy = true;
     try {
@@ -308,24 +361,40 @@ class RustLoginStorageAuthenticator extends PrimaryPasswordAuthenticator {
 
       if (!result.getProperty("ok")) {
         this.authCanceled = true;
+        this.#recordPrompt("cancel");
         Services.obs.notifyObservers(null, "passwordmgr-crypto-loginCanceled");
         throw new AuthenticationCanceled("User cancelled");
       }
 
       this.#logger.log("got a password");
       return result.getProperty("pass");
+    } catch (e) {
+      if (!(e instanceof AuthenticationCanceled)) {
+        this.#recordPrompt("error");
+      }
+      throw e;
     } finally {
       this.uiBusy = false;
     }
   }
 
   async onAuthenticationSuccess() {
+    this.#recordPrompt("success");
     Services.obs.notifyObservers(null, "passwordmgr-crypto-login");
     this.#logger.log("authenticated with success");
   }
 
+  // Rust prompts again after a failure, so every attempt gets its own event.
   async onAuthenticationFailure() {
+    this.#recordPrompt("wrong_password");
     this.#logger.log("failed to authenticate");
+  }
+
+  #recordPrompt(result) {
+    Glean.pwmgr.primaryPasswordPrompt.record({
+      source: "rust_storage",
+      result,
+    });
   }
 }
 
@@ -333,12 +402,21 @@ export class LoginManagerRustStorage {
   #storageAdapter = null;
   #authenticator = null;
   #initializationPromise = null;
+  #initTimings = null;
   // Only the active backend fires storage-changed events to avoid duplicates
   // when both JSON and Rust stores are initialized.
   // Default is false (json is active)
   #isActive = false;
   set isActive(v) {
     this.#isActive = v;
+  }
+
+  get backendName() {
+    return "rust";
+  }
+
+  get initTimings() {
+    return this.#initTimings;
   }
 
   // have it a singleton
@@ -354,35 +432,59 @@ export class LoginManagerRustStorage {
     if (this.#initializationPromise) {
       this.log("rust storage already initialized");
     } else {
-      try {
-        const profilePath = Services.dirsvc.get("ProfD", Ci.nsIFile).path;
-        const path = `${profilePath}/logins.db`;
-
-        this.#initializationPromise = new Promise(resolve => {
-          this.log(`Initializing Rust login storage at ${path}`);
-
-          initRustComponents(profilePath).then(() => {
-            const authenticator = new RustLoginStorageAuthenticator();
-            this.#authenticator = authenticator;
-            const store = createLoginStoreWithNssKeymanager(
-              path,
-              authenticator
-            );
-
-            this.#storageAdapter = new RustLoginsStoreAdapter(store);
-            this.log("Rust login storage ready.");
-
-            this._registerShutdownBlocker().then(() => resolve(this));
-          });
-        });
-      } catch (e) {
-        this.log(`Initialization failed ${e.name}.`);
-        this.log(e);
-        throw new Error("Initialization failed");
-      }
+      this.#initializationPromise = this.#doInitialize();
     }
 
     return this.#initializationPromise;
+  }
+
+  async #doInitialize() {
+    try {
+      // If we are already in the “Profile-Change-Teardown” phase or have
+      // already completed it, “false” is returned and initialization is
+      // aborted.
+      if (!(await this._registerShutdownBlocker())) {
+        throw new Error(
+          "Shutdown is past profile-change-teardown, not opening the store"
+        );
+      }
+
+      const profilePath = Services.dirsvc.get("ProfD", Ci.nsIFile).path;
+      const path = `${profilePath}/logins.db`;
+      this.log(`Initializing Rust login storage at ${path}`);
+
+      const startedAt = ChromeUtils.now();
+      await initRustComponents(profilePath);
+      const componentsReadyAt = ChromeUtils.now();
+
+      this.#authenticator = new RustLoginStorageAuthenticator();
+      const store = await createLoginStoreWithNssKeymanager(
+        path,
+        this.#authenticator
+      );
+      this.#initTimings = {
+        initRustComponentsMs: Math.round(componentsReadyAt - startedAt),
+        createRustStoreMs: Math.round(ChromeUtils.now() - componentsReadyAt),
+      };
+      this.#storageAdapter = new RustLoginsStoreAdapter(store);
+
+      this.log("Rust login storage ready.");
+      return this;
+    } catch (e) {
+      this.log(`Initialization failed: ${e}`);
+      // Failing after the store was created leaves it holding the only
+      // reference to the authenticator, and UniFFI asserts at xpcom-shutdown
+      // that no callback object is still registered. Let it go, and report the
+      // original failure rather than anything shutdown runs into.
+      try {
+        await this.#storageAdapter?.shutdown();
+      } catch (shutdownError) {
+        this.log(`Shutdown after failed initialization: ${shutdownError}`);
+      }
+      this.#storageAdapter = null;
+      this.#authenticator = null;
+      throw e;
+    }
   }
 
   /**
@@ -392,29 +494,42 @@ export class LoginManagerRustStorage {
     // TODO: Currently we do not mark the instance as closed, not sure if later
     // calls would be rejected elsewhere.
 
-    await this.#storageAdapter.shutdown();
+    // Null when initialization failed, which shuts the store down itself.
+    await this.#storageAdapter?.shutdown();
   }
 
   /**
    * Ensure the storage is finalized at shutdown. All LoginManager storage
    * backends must have their own shutdown blocker to finalize properly.
    *
+   * Called before the store is opened, so the blocker waits for
+   * initialization to settle before finalizing: the store holds the only
+   * reference to the authenticator, and UniFFI asserts at `xpcom-shutdown`
+   * that no callback object is still registered.
+   *
    * In the corner case where the shutdown phase has already passed by the time
    * we get here, registering a blocker would throw, so we call `finalize()`
-   * immediately instead.
+   * immediately instead and report that nothing is in place to close a store.
    *
    * @param {object} phase An `AsyncShutdown` phase object. Exposed as a
    *   parameter for testing.
+   * @returns {Promise<boolean>} Whether a blocker was registered.
    */
-  _registerShutdownBlocker(phase = lazy.AsyncShutdown.profileChangeTeardown) {
+  async _registerShutdownBlocker(
+    phase = lazy.AsyncShutdown.profileChangeTeardown
+  ) {
     if (phase.isClosed) {
-      return this.finalize();
+      await this.finalize();
+      return false;
     }
     phase.addBlocker(
       "LoginManagerRustStorage: Interrupt IO operations on login store",
-      async () => this.finalize()
+      async () => {
+        await this.initialize().catch(() => {});
+        await this.finalize();
+      }
     );
-    return Promise.resolve();
+    return true;
   }
 
   /**
@@ -474,10 +589,12 @@ export class LoginManagerRustStorage {
   }
 
   async addLoginsAsync(logins, continueOnDuplicates = false) {
-    const result = await this.#addLoginsWithResults(
-      logins,
-      continueOnDuplicates
-    );
+    let result;
+    try {
+      result = await this.#addLoginsWithResults(logins, continueOnDuplicates);
+    } catch (e) {
+      throw this.#translateLockedError(e);
+    }
 
     // Return only successfully added logins, matching the JSON backend.
     return continueOnDuplicates
@@ -553,91 +670,123 @@ export class LoginManagerRustStorage {
     return null;
   }
 
-  async modifyLoginAsync(oldLogin, newLoginData, _fromSync) {
-    // Resolve the stored login by value so callers may pass a login without a
-    // guid, matching the JSON storage backend.
-    const oldStoredLogin =
-      await this.#storageAdapter.findLoginToUpdate(oldLogin);
-
-    if (!oldStoredLogin) {
-      throw new Error("No matching logins");
-    }
-
-    const idToModify = oldStoredLogin.guid;
-
-    const newLogin = lazy.LoginHelper.buildModifiedLogin(
-      oldStoredLogin,
-      newLoginData
-    );
-
-    // Check if the new GUID is duplicate.
+  /**
+   * Resolves a stored login from a login passed by value, so callers may pass
+   * a login without a guid. findLoginToUpdate() has dedupe semantics: having
+   * already matched on origin, it picks by username alone, ignoring the
+   * password, and falls back to an entry with an empty username. Require the
+   * credentials to agree too, so a caller never acts on a record it did not
+   * describe.
+   *
+   * This deliberately does not use nsILoginInfo.equals() the way the JSON
+   * backend's _getIdForLogin() does: the Rust store normalizes origin and
+   * formActionOrigin on write, so a stored login is frequently not
+   * field-for-field identical to the one the caller holds.
+   */
+  async #findLoginWithSameCredentials(login) {
+    const storedLogin = await this.#storageAdapter.findLoginToUpdate(login);
     if (
-      newLogin.guid != idToModify &&
-      (await this.#storageAdapter.get(newLogin.guid))
+      !storedLogin ||
+      storedLogin.username !== login.username ||
+      storedLogin.password !== login.password
     ) {
-      throw new Error("specified GUID already exists");
+      return null;
     }
+    return storedLogin;
+  }
 
-    // Look for an existing entry in case key properties changed.
-    if (!newLogin.matches(oldLogin, true)) {
-      const matchData = {};
-      for (const field of ["origin", "formActionOrigin", "httpRealm"]) {
-        if (newLogin[field] != "") {
-          matchData[field] = newLogin[field];
+  async modifyLoginAsync(oldLogin, newLoginData, _fromSync) {
+    try {
+      const oldStoredLogin = await this.#findLoginWithSameCredentials(oldLogin);
+
+      if (!oldStoredLogin) {
+        throw new Error("No matching logins");
+      }
+
+      const idToModify = oldStoredLogin.guid;
+
+      const newLogin = lazy.LoginHelper.buildModifiedLogin(
+        oldStoredLogin,
+        newLoginData
+      );
+
+      // Check if the new GUID is duplicate.
+      if (
+        newLogin.guid != idToModify &&
+        (await this.#storageAdapter.get(newLogin.guid))
+      ) {
+        throw new Error("specified GUID already exists");
+      }
+
+      // Look for an existing entry in case key properties changed.
+      if (!newLogin.matches(oldLogin, true)) {
+        const matchData = {};
+        for (const field of ["origin", "formActionOrigin", "httpRealm"]) {
+          if (newLogin[field] != "") {
+            matchData[field] = newLogin[field];
+          }
+        }
+        const [logins] = await this.#searchLogins(matchData);
+
+        const matchingLogin = logins.find(login =>
+          newLogin.matches(login, true)
+        );
+        if (matchingLogin) {
+          throw lazy.LoginHelper.createLoginAlreadyExistsError(
+            matchingLogin.guid
+          );
         }
       }
-      const [logins] = await this.#searchLogins(matchData);
 
-      const matchingLogin = logins.find(login => newLogin.matches(login, true));
-      if (matchingLogin) {
-        throw lazy.LoginHelper.createLoginAlreadyExistsError(
-          matchingLogin.guid
-        );
+      const updatedLogin = await this.#storageAdapter.update(
+        idToModify,
+        newLogin
+      );
+
+      // The Rust `update` deliberately treats an edit as "not a use" and leaves
+      // timesUsed/timeLastUsed unchanged (bug 2045032). Honor a requested
+      // increment (e.g. timesUsedIncrement) by recording the use(s) via `touch`.
+      let finalLogin = updatedLogin;
+      const increment = newLogin.timesUsed - oldStoredLogin.timesUsed;
+      for (let i = 0; i < increment; i++) {
+        await this.#storageAdapter.touch(updatedLogin.guid);
       }
-    }
+      if (increment > 0) {
+        finalLogin = await this.#storageAdapter.get(updatedLogin.guid);
+      }
 
-    const updatedLogin = await this.#storageAdapter.update(
-      idToModify,
-      newLogin
-    );
+      if (this.#isActive) {
+        lazy.LoginHelper.notifyStorageChanged("modifyLogin", [
+          oldStoredLogin,
+          finalLogin,
+        ]);
+      }
 
-    // The Rust `update` deliberately treats an edit as "not a use" and leaves
-    // timesUsed/timeLastUsed unchanged (bug 2045032). Honor a requested
-    // increment (e.g. timesUsedIncrement) by recording the use(s) via `touch`.
-    let finalLogin = updatedLogin;
-    const increment = newLogin.timesUsed - oldStoredLogin.timesUsed;
-    for (let i = 0; i < increment; i++) {
-      await this.#storageAdapter.touch(updatedLogin.guid);
+      return finalLogin;
+    } catch (e) {
+      throw this.#translateLockedError(e);
     }
-    if (increment > 0) {
-      finalLogin = await this.#storageAdapter.get(updatedLogin.guid);
-    }
-
-    if (this.#isActive) {
-      lazy.LoginHelper.notifyStorageChanged("modifyLogin", [
-        oldStoredLogin,
-        finalLogin,
-      ]);
-    }
-
-    return finalLogin;
   }
 
   async recordPasswordUseAsync(login) {
-    const oldStoredLogin = await this.#storageAdapter.findLoginToUpdate(login);
+    try {
+      const oldStoredLogin = await this.#findLoginWithSameCredentials(login);
 
-    if (!oldStoredLogin) {
-      throw new Error("No matching logins");
-    }
+      if (!oldStoredLogin) {
+        throw new Error("No matching logins");
+      }
 
-    await this.#storageAdapter.touch(oldStoredLogin.guid);
-    const updatedLogin = await this.#storageAdapter.get(oldStoredLogin.guid);
+      await this.#storageAdapter.touch(oldStoredLogin.guid);
+      const updatedLogin = await this.#storageAdapter.get(oldStoredLogin.guid);
 
-    if (this.#isActive) {
-      lazy.LoginHelper.notifyStorageChanged("modifyLogin", [
-        oldStoredLogin,
-        updatedLogin,
-      ]);
+      if (this.#isActive) {
+        lazy.LoginHelper.notifyStorageChanged("modifyLogin", [
+          oldStoredLogin,
+          updatedLogin,
+        ]);
+      }
+    } catch (e) {
+      throw this.#translateLockedError(e);
     }
   }
 
@@ -646,7 +795,11 @@ export class LoginManagerRustStorage {
   }
 
   async getBreachAlertDismissalsByLoginGUID() {
-    return this.#storageAdapter.getBreachAlertDismissalsByLoginGUID();
+    try {
+      return await this.#storageAdapter.getBreachAlertDismissalsByLoginGUID();
+    } catch (e) {
+      throw this.#translateLockedError(e);
+    }
   }
 
   /**
@@ -667,25 +820,32 @@ export class LoginManagerRustStorage {
     try {
       return await this.#storageAdapter.list();
     } catch (e) {
-      // The store fails to decrypt when the primary password is locked (either
-      // the user cancelled the prompt, or the key can't be unlocked). Translate
-      // that into NS_ERROR_ABORT so callers (e.g. getAllUserFacingLogins) treat
-      // it as "no logins available right now" instead of leaking a raw Rust
-      // error, matching crypto-SDR and searchLoginsAsync.
-      if (
-        this.#authenticator?.authCanceled ||
-        /decryption failed/i.test(e.message)
-      ) {
-        if (this.#authenticator) {
-          this.#authenticator.authCanceled = false;
-        }
-        throw Components.Exception(
-          "Primary password locked",
-          Cr.NS_ERROR_ABORT
-        );
-      }
-      throw e;
+      throw this.#translateLockedError(e);
     }
+  }
+
+  /**
+   * Store operations fail to decrypt whenever the primary password is not
+   * available: the user cancelled the prompt, or the authenticator declined to
+   * prompt because NSS already has one on screen. Callers expect
+   * NS_ERROR_ABORT for that, the way crypto-SDR reports it, rather than a raw
+   * Rust error.
+   *
+   * @param {Error} e The error the store threw.
+   * @returns {Error} NS_ERROR_ABORT if the primary password was unavailable,
+   *   otherwise `e` unchanged, for the caller to rethrow.
+   */
+  #translateLockedError(e) {
+    if (
+      !this.#authenticator?.authCanceled &&
+      !/decryption failed/i.test(e.message)
+    ) {
+      return e;
+    }
+    if (this.#authenticator) {
+      this.#authenticator.authCanceled = false;
+    }
+    return Components.Exception("Primary password locked", Cr.NS_ERROR_ABORT);
   }
 
   async searchLoginsAsync(matchData, includeDeleted) {
@@ -722,17 +882,7 @@ export class LoginManagerRustStorage {
       );
       return logins;
     } catch (e) {
-      // When the user cancels the primary-password prompt, the store fails to
-      // decrypt. Translate that into NS_ERROR_ABORT so callers (e.g.
-      // LoginManagerParent) can throttle further prompts, matching crypto-SDR.
-      if (this.#authenticator?.authCanceled) {
-        this.#authenticator.authCanceled = false;
-        throw Components.Exception(
-          "User canceled primary password entry",
-          Cr.NS_ERROR_ABORT
-        );
-      }
-      throw e;
+      throw this.#translateLockedError(e);
     }
   }
 
@@ -744,11 +894,8 @@ export class LoginManagerRustStorage {
       acceptDifferentSubdomains: false,
       acceptRelatedRealms: false,
       relatedRealms: [],
-    },
-    candidateLogins
+    }
   ) {
-    candidateLogins ||= await this.#storageAdapter.list();
-
     function match(aLoginItem) {
       for (const field in matchData) {
         const wantedValue = matchData[field];
@@ -833,6 +980,24 @@ export class LoginManagerRustStorage {
       return true;
     }
 
+    let candidateLogins;
+    if (
+      Object.keys(matchData).every(field => CANDIDATE_MATCH_FIELDS.has(field))
+    ) {
+      // Matching the cleartext fields first means that a search without a hit
+      // never needs the encryption key, and so never prompts for the primary
+      // password. Only the logins that are actually returned get decrypted.
+      const ids = (await this.#storageAdapter.listCandidates())
+        .filter(candidate => match(candidateToMatchable(candidate)))
+        .map(candidate => candidate.id);
+      candidateLogins = ids.length
+        ? await this.#storageAdapter.getMany(ids)
+        : [];
+    } else {
+      // Matching on a field the candidates don't carry needs everything.
+      candidateLogins = await this.#storageAdapter.list();
+    }
+
     const foundLogins = [];
     const foundIds = [];
 
@@ -854,9 +1019,7 @@ export class LoginManagerRustStorage {
   }
 
   async removeLoginAsync(login, _fromSync) {
-    // Resolve the stored login by value so callers may pass a login without a
-    // guid, matching the JSON storage backend.
-    const storedLogin = await this.#storageAdapter.findLoginToUpdate(login);
+    const storedLogin = await this.#findLoginWithSameCredentials(login);
     if (!storedLogin) {
       throw new Error("No matching logins");
     }
@@ -963,9 +1126,13 @@ export class LoginManagerRustStorage {
   }
 
   async isPotentiallyVulnerablePassword(login) {
-    return this.#storageAdapter.isPotentiallyVulnerablePassword(
-      login.QueryInterface(Ci.nsILoginMetaInfo).guid
-    );
+    try {
+      return await this.#storageAdapter.isPotentiallyVulnerablePassword(
+        login.QueryInterface(Ci.nsILoginMetaInfo).guid
+      );
+    } catch (e) {
+      throw this.#translateLockedError(e);
+    }
   }
 
   async arePotentiallyVulnerablePasswords(logins) {
@@ -980,7 +1147,11 @@ export class LoginManagerRustStorage {
           ).guid
       )
       .filter(Boolean);
-    return this.#storageAdapter.arePotentiallyVulnerablePasswords(ids);
+    try {
+      return await this.#storageAdapter.arePotentiallyVulnerablePasswords(ids);
+    } catch (e) {
+      throw this.#translateLockedError(e);
+    }
   }
 
   async clearAllPotentiallyVulnerablePasswords() {

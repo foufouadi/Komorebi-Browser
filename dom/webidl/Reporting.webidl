@@ -20,8 +20,8 @@ interface ReportBody {
 interface Report {
   [Default] object toJSON
 ();
-  readonly attribute DOMString type;
-  readonly attribute DOMString url;
+  readonly attribute UTF8String type;
+  readonly attribute UTF8String url;
   readonly attribute ReportBody? body;
 };
 

@@ -1187,6 +1187,7 @@ JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
       hadResourceExhaustion_(this, false),
       hadUncatchableException_(this, false),
 #endif
+      hasDelayedOverRecursed(this, false),
       reportGranularity(this, JS_DEFAULT_JITREPORT_GRANULARITY),
       resolvingList(this, nullptr),
 #ifdef DEBUG
@@ -1423,11 +1424,6 @@ const JS::Value& JSContext::getPendingExceptionUnwrapped() {
   return unwrappedException();
 }
 #endif
-
-bool JSContext::isClosingGenerator() {
-  return isExceptionPending() &&
-         unwrappedException().isMagic(JS_GENERATOR_CLOSING);
-}
 
 bool JSContext::isThrowingDebuggeeWouldRun() {
   return isExceptionPending() && unwrappedException().isObject() &&

@@ -40,10 +40,6 @@ class CustomTabsTest {
     private val customMenuItem = "TestMenuItem"
     private val customTabActionButton = "CustomActionButton"
 
-    /* Updated externalLinks.html to v2.0,
-      changed the hypertext reference to mozilla-mobile.github.io/testapp/downloads for "External link"
-    */
-    private val externalLinksPWAPage = "https://mozilla-mobile.github.io/testapp/v2.0/externalLinks.html"
     private val loginPage = "https://mozilla-mobile.github.io/testapp/loginForm"
 
     @get:Rule(order = 1)
@@ -61,6 +57,11 @@ class CustomTabsTest {
     @get:Rule(order = 2) val memoryLeaksRule = DetectMemoryLeaksRule(composeTestRule = { composeTestRule })
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/249659
+    @Converted(
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.CustomTabsTest#verifyLoginSaveInCustomTabTest"],
+        bug = 2063232,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun verifyLoginSaveInCustomTabTest() {
@@ -150,7 +151,7 @@ class CustomTabsTest {
 
         browserScreen(composeTestRule) {}
             .clickDownloadLink(downloadFile) {
-                verifyDownloadPrompt(composeTestRule, downloadFile)
+                verifyDownloadPrompt(composeTestRule)
             }
             .clickDownload(composeTestRule) {
                 verifyDownloadCompleteSnackbar(fileName = "web_icon.png")

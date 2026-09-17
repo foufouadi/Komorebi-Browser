@@ -206,7 +206,7 @@ void GPUProcessManager::OnPreferenceChange(const char16_t* aData) {
                           /* isSanitized */ false, Nothing(), Nothing());
 
   Preferences::GetPreference(&pref, GeckoProcessType_GPU,
-                             /* remoteType */ ""_ns);
+                             /* remoteType */ {});
   if (mGPUChild) {
     MOZ_ASSERT(mQueuedPrefs.IsEmpty());
     mGPUChild->SendPreferenceUpdate(pref);
@@ -1389,9 +1389,9 @@ bool GPUProcessManager::CreateContentBridges(
   const uint32_t compositorBridgeNamespace = AllocateNamespace();
   const uint32_t imageBridgeNamespace = AllocateNamespace();
   const uint32_t vrManagerNamespace = AllocateNamespace();
-  if (!CreateContentCompositorManager(aOtherProcess, aChildId,
-                                      compositorManagerNamespace,
-                                      aOutCompositor) ||
+  if (!CreateContentCompositorManager(
+          aOtherProcess, aChildId, compositorManagerNamespace,
+          compositorBridgeNamespace, aOutCompositor) ||
       !CreateContentImageBridge(aOtherProcess, aChildId, imageBridgeNamespace,
                                 aOutImageBridge) ||
       !CreateContentVRManager(aOtherProcess, aChildId, vrManagerNamespace,
@@ -1413,7 +1413,8 @@ bool GPUProcessManager::CreateContentBridges(
 
 bool GPUProcessManager::CreateContentCompositorManager(
     ipc::EndpointProcInfo aOtherProcess, dom::ContentParentId aChildId,
-    uint32_t aNamespace, ipc::Endpoint<PCompositorManagerChild>* aOutEndpoint) {
+    uint32_t aNamespace, uint32_t aContentBridgeNamespace,
+    ipc::Endpoint<PCompositorManagerChild>* aOutEndpoint) {
   MOZ_DIAGNOSTIC_ASSERT(IsGPUReady());
 
   ipc::Endpoint<PCompositorManagerParent> parentPipe;
@@ -1432,10 +1433,11 @@ bool GPUProcessManager::CreateContentCompositorManager(
   }
 
   if (mGPUChild) {
-    mGPUChild->SendNewContentCompositorManager(std::move(parentPipe), aChildId,
-                                               aNamespace);
+    mGPUChild->SendNewContentCompositorManager(
+        std::move(parentPipe), aChildId, aNamespace, aContentBridgeNamespace);
   } else if (!CompositorManagerParent::Create(std::move(parentPipe), aChildId,
                                               aNamespace,
+                                              aContentBridgeNamespace,
                                               /* aIsRoot */ false)) {
     return false;
   }
@@ -1687,7 +1689,8 @@ uint32_t GPUProcessManager::AllocateNamespace() {
 
 bool GPUProcessManager::AllocateAndConnectLayerTreeId(
     PCompositorBridgeChild* aCompositorBridge, base::ProcessId aOtherPid,
-    LayersId* aOutLayersId, CompositorOptions* aOutCompositorOptions) {
+    LayersId aEmbedderLayersId, LayersId* aOutLayersId,
+    CompositorOptions* aOutCompositorOptions) {
   MOZ_ASSERT(aOutLayersId);
 
   LayersId layersId = AllocateLayerTreeId();
@@ -1709,10 +1712,10 @@ bool GPUProcessManager::AllocateAndConnectLayerTreeId(
   if (aCompositorBridge) {
     if (mGPUChild) {
       return aCompositorBridge->SendMapAndNotifyChildCreated(
-          layersId, aOtherPid, aOutCompositorOptions);
+          layersId, aEmbedderLayersId, aOtherPid, aOutCompositorOptions);
     }
-    return aCompositorBridge->SendNotifyChildCreated(layersId,
-                                                     aOutCompositorOptions);
+    return aCompositorBridge->SendNotifyChildCreated(
+        layersId, aEmbedderLayersId, aOutCompositorOptions);
   }
 
   // If we don't have a CompositorBridgeChild, we just need to call

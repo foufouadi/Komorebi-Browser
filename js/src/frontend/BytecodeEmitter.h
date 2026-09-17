@@ -859,6 +859,8 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
     return emitIteratorCloseInScope(*innermostEmitterScope(), iterKind,
                                     completionKind, selfHostedIter);
   }
+  [[nodiscard]] bool emitDestructuringIteratorClose(
+      SelfHostedIter selfHostedIter);
 
   template <typename InnerEmitter>
   [[nodiscard]] bool wrapWithDestructuringTryNote(int32_t iterDepth,
@@ -894,6 +896,9 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
 
   [[nodiscard]] bool emitReturn(UnaryNode* returnNode);
   [[nodiscard]] bool finishReturn(BytecodeOffset setRvalOffset);
+
+  [[nodiscard]] bool emitCheckYieldResumeKind();
+  [[nodiscard]] bool emitCheckAwaitResumeKind();
 
   [[nodiscard]] bool emitExpressionStatement(UnaryNode* exprStmt);
   [[nodiscard]] bool emitStatementList(ListNode* stmtList);

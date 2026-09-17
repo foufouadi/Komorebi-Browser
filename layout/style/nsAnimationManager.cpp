@@ -574,6 +574,10 @@ static void UpdateNamedTimelineAnimation(
     return;
   }
   const auto target = aAnimation->GetTargetForAnimation();
+  if (MOZ_UNLIKELY(!target.mElement)) {
+    // Animation likely does not have an associated effect.
+    return;
+  }
   // Ok, we know at least one timeline by this name got updated, which may
   // change our lookup result. Lookup by our scoped name again.
   const RefPtr<dom::AnimationTimeline> newTimeline =
@@ -643,6 +647,8 @@ void nsAnimationManager::UpdateDeferredTimelineChanges() {
   if (mAnimationsWithDeferredUpdate.IsEmpty()) {
     return;
   }
+  // This is unneeded once we resolve Bug 2033912.
+  nsAutoScriptBlocker scriptBlocker;
   auto* document = mPresContext->Document();
   for (auto* animation : mAnimationsWithDeferredUpdate) {
     if (!animation->GetTimelineName().mName) {

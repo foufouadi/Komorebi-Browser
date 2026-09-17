@@ -78,7 +78,7 @@ class SettingsAddonsTest {
                 cancelInstallAddon()
                 clickInstallAddon(addonName)
                 acceptPermissionToInstallAddon()
-                verifyAddonInstallCompletedPrompt(addonName, composeTestRule.activityRule)
+                verifyAddonInstallCompletedPrompt(addonName)
                 closeAddonInstallCompletePrompt()
                 verifyAddonIsInstalled(addonName)
                 verifyEnabledTitleDisplayed()
@@ -92,7 +92,7 @@ class SettingsAddonsTest {
         val addonName = "uBlock Origin"
 
         addonsMenu(composeTestRule) {
-                installAddon(addonName, composeTestRule.activityRule)
+                installAddon(addonName)
                 closeAddonInstallCompletePrompt()
             }
             .openDetailedMenuForAddon(addonName) {}
@@ -104,8 +104,8 @@ class SettingsAddonsTest {
             }
     }
 
-    // TODO: Harden to dynamically install addons from position
-    //   in list of detected addons on screen instead of hard-coded values.
+    // This test should be hardened to dynamically install addons from their position in the list of
+    // detected addons on screen instead of relying on hard-coded values.
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/561600
     // Installs 2 add-on and checks that the app doesn't crash while navigating the app
     @Converted(
@@ -124,13 +124,13 @@ class SettingsAddonsTest {
         val trackingProtectionPage = mockWebServer.enhancedTrackingProtectionAsset
 
         addonsMenu(composeTestRule) {
-                installAddon(uBlockAddon, composeTestRule.activityRule)
+                installAddon(uBlockAddon)
                 closeAddonInstallCompletePrompt()
-                // installAddon(darkReaderAddon, composeTestRule.activityRule)
+                // installAddon(darkReaderAddon)
                 clickInstallAddon(darkReaderAddon)
                 verifyAddonPermissionPrompt(darkReaderAddon)
                 acceptPermissionToInstallAddon()
-                verifyAddonInstallCompletedPrompt(darkReaderAddon, composeTestRule.activityRule)
+                verifyAddonInstallCompletedPrompt(darkReaderAddon)
                 closeAddonInstallCompletePrompt()
             }
             .goBackToHomeScreen {}
@@ -159,7 +159,7 @@ class SettingsAddonsTest {
         val webPage = "https://mozilla-mobile.github.io/testapp/"
 
         addonsMenu(composeTestRule) {
-                installAddonInPrivateMode(addonName, composeTestRule.activityRule)
+                installAddonInPrivateMode(addonName)
                 closeAddonInstallCompletePrompt()
             }
             .goBackToHomeScreen {}
@@ -181,7 +181,7 @@ class SettingsAddonsTest {
         val webPage = "https://mozilla-mobile.github.io/testapp/"
 
         addonsMenu(composeTestRule) {
-                installAddon(addonName, composeTestRule.activityRule)
+                installAddon(addonName)
                 closeAddonInstallCompletePrompt()
                 verifyAddonIsInstalled(addonName)
             }

@@ -221,7 +221,7 @@ export class ASRouterAdminInner extends React.PureComponent {
   }
 
   messageRequiresAnchor(msg) {
-    const anchorTemplates = ["cfr_doorhanger", "bookmarks_bar_button"];
+    const anchorTemplates = ["bookmarks_bar_button"];
     return (
       anchorTemplates.includes(msg.template) ||
       !!msg.content?.anchors ||
@@ -512,7 +512,6 @@ export class ASRouterAdminInner extends React.PureComponent {
     const aboutMessagePreviewSupported = [
       "infobar",
       "spotlight",
-      "cfr_doorhanger",
       "feature_callout",
       "pb_newtab",
       "sidebar_chatbot_promo",
@@ -1494,6 +1493,9 @@ export class ASRouterAdminInner extends React.PureComponent {
               messageImpressions={this.state.messageImpressions}
               groupImpressions={this.state.groupImpressions}
               screenImpressions={this.state.screenImpressions}
+              multiProfileMessageImpressions={
+                this.state.multiProfileMessageImpressions
+              }
             />
           </React.Fragment>
         );

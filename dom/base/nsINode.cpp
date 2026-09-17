@@ -54,7 +54,6 @@
 #include "mozilla/dom/ElementBinding.h"
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/Exceptions.h"
-#include "mozilla/dom/FeaturePolicyUtils.h"
 #include "mozilla/dom/HTMLButtonElement.h"
 #include "mozilla/dom/HTMLDetailsElement.h"
 #include "mozilla/dom/HTMLDialogElement.h"
@@ -69,6 +68,7 @@
 #include "mozilla/dom/NodeBinding.h"
 #include "mozilla/dom/NodeInfo.h"
 #include "mozilla/dom/NodeInfoInlines.h"
+#include "mozilla/dom/PermissionsPolicyUtils.h"
 #include "mozilla/dom/PolicyContainer.h"
 #include "mozilla/dom/SVGUseElement.h"
 #include "mozilla/dom/ScriptSettings.h"
@@ -3639,9 +3639,18 @@ void nsINode::BindObject(nsISupports* aObject, UnbindCallback aDtor) {
 }
 
 void nsINode::UnbindObject(nsISupports* aObject) {
-  if (auto* slots = GetExistingSlots()) {
-    slots->mBoundObjects.UnorderedRemoveElement(aObject);
+  auto* slots = GetExistingSlots();
+  if (!slots) {
+    return;
   }
+  // Keep only single-object storage for nodes that are repeatedly observed.
+  if (slots->mBoundObjects.Capacity() == 1 &&
+      slots->mBoundObjects.Length() == 1 &&
+      slots->mBoundObjects[0] == aObject) {
+    slots->mBoundObjects.ClearAndRetainStorage();
+    return;
+  }
+  slots->mBoundObjects.UnorderedRemoveElement(aObject);
 }
 
 already_AddRefed<AccessibleNode> nsINode::GetAccessibleNode() {
@@ -4261,11 +4270,11 @@ already_AddRefed<nsINode> nsINode::CloneAndAdopt(
           cloneElem->SetCustomElementRegistry(registry);
         } else if (elem->GetCustomElementRegistryState() ==
                    CustomElementRegistryState::Null) {
-          cloneElem->SetKeepCustomElementRegistryNull();
+          cloneElem->SetNullCustomElementRegistry();
         } else if (cloneElem->OwnerDoc()->HasScopedCustomElementRegistry()) {
           // Keep the clone from inheriting the destination document's scoped
           // registry; a global-registry element must not resolve to it.
-          cloneElem->SetKeepCustomElementRegistryNull();
+          cloneElem->SetNullCustomElementRegistry();
         }
       }
 
@@ -4323,6 +4332,12 @@ already_AddRefed<nsINode> nsINode::CloneAndAdopt(
     bool wasRegistered = false;
     if (elem) {
       wasRegistered = oldDoc->UnregisterActivityObserver(elem);
+
+      if (elem->State().HasAtLeastOneOfStates(
+              ElementState::HAS_DIR_ATTR_RTL |
+              ElementState::HAS_DIR_ATTR_LIKE_AUTO)) {
+        newDoc->SetNeedsDirHandling();
+      }
     }
 
     const bool hadProperties = aNode->HasProperties();
@@ -4337,12 +4352,102 @@ already_AddRefed<nsINode> nsINode::CloneAndAdopt(
     }
 
     aNode->mNodeInfo.swap(newNodeInfo);
+
+    // https://dom.spec.whatwg.org/#concept-node-adopt 3.3. onward
+    // 3.3. Otherwise, if inclusiveDescendant is an element:
+    // 3.3.1. Set the node document of each attribute in inclusiveDescendant's
+    //        attribute list to document.
     aNode->NodeInfoChanged(oldDoc);
 
     MOZ_ASSERT(newDoc != oldDoc);
-    if (elem) {
-      // Adopted callback must be enqueued whenever a node’s
-      // shadow-including inclusive descendants that is custom.
+
+    // https://dom.spec.whatwg.org/#concept-node-adopt
+    // 3.2. If inclusiveDescendant is a shadow root and if any of the
+    //      following are true:
+    if (ShadowRoot* shadow = ShadowRoot::FromNode(aNode)) {
+      if (StaticPrefs::dom_scoped_custom_element_registries_enabled()) {
+        //   - inclusiveDescendant's custom element registry is null and
+        //     inclusiveDescendant's keep custom element registry null is false;
+        //     or
+        //   - inclusiveDescendant's custom element registry is a global custom
+        //     element registry...
+        const CustomElementRegistryState state =
+            shadow->GetCustomElementRegistryState();
+        const bool isNullNonKeep = state == CustomElementRegistryState::Null &&
+                                   !shadow->KeepCustomElementRegistryNull();
+        const bool isGlobal = state == CustomElementRegistryState::Global;
+        if (isNullNonKeep || isGlobal) {
+          // ...then set inclusiveDescendant's custom element registry to
+          // document's custom element registry's effective global custom
+          // element registry.
+          if (newDoc->GetEffectiveGlobalCustomElementRegistry()) {
+            shadow->SetCustomElementRegistryState(
+                CustomElementRegistryState::Global);
+          } else {
+            shadow->SetCustomElementRegistryState(
+                CustomElementRegistryState::Null);
+          }
+        }
+      }
+      // 3.3. Otherwise, if inclusiveDescendant is an element:
+    } else if (elem) {
+      if (StaticPrefs::dom_scoped_custom_element_registries_enabled()) {
+        const CustomElementRegistryState state =
+            elem->GetCustomElementRegistryState();
+        // 3.3.2. If inclusiveDescendant's custom element registry is null
+        //        or inclusiveDescendant's custom element registry's is scoped
+        //        is false:
+        // (A non-null scoped registry is kept as-is; additionally append the
+        // new document to the registry's scoped document set per
+        // https://html.spec.whatwg.org/#scoped-document-set.)
+        if (state == CustomElementRegistryState::Scoped) {
+          RefPtr<CustomElementRegistry> scopedRegistry =
+              CustomElementRegistry::GetScopedRegistry(*elem);
+          MOZ_ASSERT(scopedRegistry,
+                     "How did we get a Scoped state without a registry?");
+          scopedRegistry->AddToScopedDocumentSet(newDoc);
+        } else {
+          // 3.3.2.1. Let registry be null.
+          CustomElementRegistry* registry = nullptr;
+
+          nsINode* parent = elem->GetParentNode();
+          // 3.3.2.2. If inclusiveDescendant's custom element registry is
+          //          non-null, inclusiveDescendant's parent is null, or
+          //          inclusiveDescendant's parent is an exclusive
+          //          DocumentFragment node, then set registry to document's
+          //          custom element registry.
+          // 3.3.2.3. Otherwise, set registry to the result of looking up a
+          //          custom element registry given inclusiveDescendant's
+          //          parent.
+          if (state != CustomElementRegistryState::Null || !parent ||
+              (parent->IsDocumentFragment() && !parent->IsShadowRoot())) {
+            registry = newDoc->GetCustomElementRegistry();
+          } else {
+            Maybe<RefPtr<CustomElementRegistry>> parentRegistry =
+                nsContentUtils::GetCustomElementRegistry(parent);
+            registry = parentRegistry ? parentRegistry->get()
+                                      : newDoc->GetCustomElementRegistry();
+          }
+
+          // 3.3.2.4. Set inclusiveDescendant's custom element registry to
+          //          registry's effective global custom element registry.
+          //
+          // (A scoped registry's effective global registry is null, a global
+          // one's is itself.)
+          CustomElementRegistry* effectiveGlobal =
+              (registry && !registry->IsScoped()) ? registry : nullptr;
+          if (effectiveGlobal) {
+            elem->SetCustomElementRegistry(effectiveGlobal);
+          } else if (state == CustomElementRegistryState::Global &&
+                     elem->OwnerDoc()->HasScopedCustomElementRegistry()) {
+            elem->SetNullCustomElementRegistry();
+          }
+        }
+      }
+
+      // 3.3.3. If inclusiveDescendant is custom, then enqueue a custom element
+      //        callback reaction with inclusiveDescendant, callback name
+      //        "adoptedCallback", and « oldDocument, document ».
       CustomElementData* data = elem->GetCustomElementData();
       if (data && data->mState == CustomElementData::State::eCustom) {
         LifecycleCallbackArgs args;
@@ -4544,6 +4649,12 @@ already_AddRefed<nsINode> nsINode::CloneAndAdopt(
         return nullptr;
       }
       newShadowRoot->SetIsDeclarative(originalShadowRoot->IsDeclarative());
+      // https://dom.spec.whatwg.org/#concept-node-clone step 6.6: copy the
+      // source shadow root's keep custom element registry null.
+      if (StaticPrefs::dom_scoped_custom_element_registries_enabled() &&
+          originalShadowRoot->KeepCustomElementRegistryNull()) {
+        newShadowRoot->SetKeepCustomElementRegistryNull();
+      }
       if (originalShadowRoot->IsAvailableToElementInternals()) {
         newShadowRoot->SetAvailableToElementInternals();
       }
@@ -4842,7 +4953,8 @@ void nsINode::AncestorRevealingAlgorithm(ErrorResult& aRv) {
 
 void nsINode::AriaNotify(const nsAString& aAnnouncement,
                          const AriaNotificationOptions& aOptions) {
-  if (!FeaturePolicyUtils::IsFeatureAllowed(OwnerDoc(), u"aria-notify"_ns)) {
+  if (!PermissionsPolicyUtils::IsFeatureAllowed(OwnerDoc(),
+                                                u"aria-notify"_ns)) {
     return;
   }
 #ifdef ACCESSIBILITY

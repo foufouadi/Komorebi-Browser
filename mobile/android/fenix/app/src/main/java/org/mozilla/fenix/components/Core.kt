@@ -6,6 +6,7 @@ package org.mozilla.fenix.components
 
 import android.content.Context
 import android.content.res.Configuration
+import androidx.annotation.VisibleForTesting
 import androidx.core.content.ContextCompat
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
@@ -39,6 +40,7 @@ import mozilla.components.concept.engine.Engine
 import mozilla.components.concept.engine.fission.WebContentIsolationStrategy
 import mozilla.components.concept.engine.mediaquery.PreferredColorScheme
 import mozilla.components.concept.fetch.Client
+import mozilla.components.feature.automotive.CarUxRestrictionsFeature
 import mozilla.components.feature.awesomebar.provider.SessionAutocompleteProvider
 import mozilla.components.feature.customtabs.store.CustomTabsServiceStore
 import mozilla.components.feature.downloads.DefaultFileSizeFormatter
@@ -76,10 +78,13 @@ import mozilla.components.feature.session.middleware.LastAccessMiddleware
 import mozilla.components.feature.session.middleware.undo.UndoMiddleware
 import mozilla.components.feature.sitepermissions.OnDiskSitePermissionsStorage
 import mozilla.components.feature.summarize.settings.SummarizationSettings
+import mozilla.components.feature.tabgroups.storage.repository.DefaultTabGroupRepository
 import mozilla.components.feature.top.sites.DefaultTopSitesStorage
 import mozilla.components.feature.top.sites.PinnedSiteStorage
 import mozilla.components.feature.webcompat.WebCompatFeature
 import mozilla.components.feature.webnotifications.WebNotificationFeature
+import mozilla.components.lib.ai.controls.AIFeatureBlockStorage
+import mozilla.components.lib.ai.controls.dataStore
 import mozilla.components.lib.dataprotect.SecureAbove22Preferences
 import mozilla.components.service.digitalassetlinks.RelationChecker
 import mozilla.components.service.digitalassetlinks.local.StatementApi
@@ -118,6 +123,7 @@ import org.mozilla.fenix.browser.desktopmode.DefaultDesktopModeRepository
 import org.mozilla.fenix.browser.desktopmode.DesktopModeMiddleware
 import org.mozilla.fenix.components.search.ApplicationSearchMiddleware
 import org.mozilla.fenix.components.search.SearchMigration
+import org.mozilla.fenix.components.search.SearchWidgetMiddleware
 import org.mozilla.fenix.downloads.DownloadService
 import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.ext.isLargeWindow
@@ -127,6 +133,8 @@ import org.mozilla.fenix.historymetadata.HistoryMetadataMiddleware
 import org.mozilla.fenix.historymetadata.HistoryMetadataService
 import org.mozilla.fenix.longfox.LongFoxFeature
 import org.mozilla.fenix.media.MediaSessionService
+import org.mozilla.fenix.nimbus.BaselineFpp
+import org.mozilla.fenix.nimbus.FingerprintingProtection
 import org.mozilla.fenix.nimbus.FxNimbus
 import org.mozilla.fenix.perf.StrictModeManager
 import org.mozilla.fenix.perf.lazyMonitored
@@ -140,13 +148,14 @@ import org.mozilla.fenix.summarization.eligibility.DefaultSummarizationEligibili
 import org.mozilla.fenix.summarization.eligibility.SummarizationEligibilityChecker
 import org.mozilla.fenix.summarization.onboarding.FenixSummarizationFeatureConfiguration
 import org.mozilla.fenix.summarization.onboarding.SummarizationFeatureDiscoveryConfiguration
-import org.mozilla.fenix.tabgroups.storage.redux.middleware.TabGroupMiddleware
-import org.mozilla.fenix.tabgroups.storage.repository.DefaultTabGroupRepository
+import org.mozilla.fenix.tabgroups.middleware.TabGroupMiddleware
 import org.mozilla.fenix.telemetry.TelemetryMiddleware
 import org.mozilla.fenix.translations.TranslationsEnabledSettings
 import org.mozilla.fenix.utils.Settings.DeleteDownloadBehavior
 import org.mozilla.fenix.utils.getUndoDelay
 import org.mozilla.geckoview.GeckoRuntime
+
+internal val ADDITIONAL_BUNDLED_SEARCH_ENGINE_IDS = listOf("reddit", "youtube")
 
 /** Component group for all core browser functionality. */
 @Suppress("LargeClass")
@@ -155,6 +164,7 @@ class Core(
     private val crashReporter: CrashReporting,
     strictMode: StrictModeManager,
     visualCompletenessQueue: RunWhenReadyQueue,
+    @Suppress("UnusedPrivateProperty") private val applicationScope: CoroutineScope,
 ) {
     /** The browser engine component initialized based on the build configuration (see build variants). */
     val engine: Engine by lazyMonitored {
@@ -212,19 +222,15 @@ class Core(
                 useContentBlockingDatabase = true,
             )
 
-        // Apply fingerprinting protection overrides if the feature is enabled in Nimbus
-        if (FxNimbus.features.fingerprintingProtection.value().enabled) {
-            defaultSettings.fingerprintingProtectionOverrides =
-                FxNimbus.features.fingerprintingProtection.value().overrides
-            defaultSettings.fingerprintingProtection = FxNimbus.features.fingerprintingProtection.value().enabledNormal
-            defaultSettings.fingerprintingProtectionPrivateBrowsing =
-                FxNimbus.features.fingerprintingProtection.value().enabledPrivate
-        }
+        applyFingerprintingProtectionFeature(
+            defaultSettings,
+            FxNimbus.features.fingerprintingProtection.value(),
+        )
 
-        if (FxNimbus.features.baselineFpp.value().featEnabled) {
-            defaultSettings.baselineFingerprintingProtection = FxNimbus.features.baselineFpp.value().enabled
-            defaultSettings.baselineFingerprintingProtectionOverrides = FxNimbus.features.baselineFpp.value().overrides
-        }
+        applyBaselineFingerprintingProtectionFeature(
+            defaultSettings,
+            FxNimbus.features.baselineFpp.value(),
+        )
 
         // Apply third-party cookie blocking settings if the Nimbus feature is
         // enabled.
@@ -285,7 +291,7 @@ class Core(
     }
 
     val fileUploadsDirCleaner: FileUploadsDirCleaner by lazyMonitored {
-        FileUploadsDirCleaner { context.cacheDir }
+        FileUploadsDirCleaner(scope = applicationScope) { context.cacheDir }
     }
 
     val geckoRuntime: GeckoRuntime by lazyMonitored {
@@ -294,6 +300,7 @@ class Core(
             lazyAutofillStorage,
             lazyPasswordsStorage,
             trackingProtectionPolicyFactory.createTrackingProtectionPolicy(),
+            applicationScope,
         )
     }
 
@@ -302,7 +309,7 @@ class Core(
     }
 
     val sessionStorage: SessionStorage by lazyMonitored {
-        SessionStorage(context, engine, crashReporter)
+        SessionStorage(context, engine, crashReporter, applicationScope)
     }
 
     private val locationService: LocationService by lazyMonitored {
@@ -357,10 +364,10 @@ class Core(
                 TelemetryMiddleware(context, context.components.settings, metrics, crashReporter),
                 ThumbnailsMiddleware(thumbnailStorage),
                 UndoMiddleware(context.components.settings.getUndoDelay()),
-                RegionMiddleware(context, locationService),
+                RegionMiddleware(context, locationService, applicationScope = applicationScope),
                 SearchMiddleware(
                     context = context,
-                    additionalBundledSearchEngineIds = listOf("reddit", "youtube"),
+                    additionalBundledSearchEngineIds = ADDITIONAL_BUNDLED_SEARCH_ENGINE_IDS,
                     migration = SearchMigration(context),
                     searchExtraParams = searchExtraParams,
                     searchEngineSelectorConfig = getSearchEngineSelectorConfig(),
@@ -377,6 +384,7 @@ class Core(
                 FileUploadsDirCleanerMiddleware(fileUploadsDirCleaner),
                 DesktopModeMiddleware(repository = DefaultDesktopModeRepository(context = context)),
                 ApplicationSearchMiddleware(context),
+                SearchWidgetMiddleware(context),
                 // We are disabling automatically initializing translations so that we can control when
                 // we start this process. For details, see:
                 // https://bugzilla.mozilla.org/show_bug.cgi?id=1958042
@@ -440,6 +448,11 @@ class Core(
                 )
 
                 MediaSessionFeature(context, MediaSessionService::class.java, this).start()
+                CarUxRestrictionsFeature(
+                        applicationContext = context,
+                        store = this,
+                    )
+                    .start()
             }
     }
 
@@ -583,7 +596,11 @@ class Core(
         PocketStoriesConfig(
             client,
             contentRecommendationsParams =
-                ContentRecommendationsRequestConfig(locale = LocaleManager.getSelectedLocale(context).toLanguageTag()),
+                ContentRecommendationsRequestConfig(
+                    locale = LocaleManager.getSelectedLocale(context),
+                    userAgent = engine.settings.userAgentString.orEmpty(),
+                    useMerinoClient = context.components.settings.enableMerinoClient,
+                ),
             marsSponsoredContentsParams =
                 MarsSpocsRequestConfig(
                     contextId = context.components.settings.contileContextId,
@@ -598,7 +615,13 @@ class Core(
                 ),
         )
     }
-    val pocketStoriesService by lazyMonitored { PocketStoriesService(context, pocketStoriesConfig) }
+    val pocketStoriesService by lazyMonitored {
+        PocketStoriesService(
+            context = context,
+            pocketStoriesConfig = pocketStoriesConfig,
+            crashReporter = crashReporter,
+        )
+    }
 
     val macTopSitesProvider by lazyMonitored {
         MacTopSitesProvider(
@@ -638,8 +661,11 @@ class Core(
 
     val loginExceptionStorage by lazyMonitored { LoginExceptionStorage(context) }
 
-    val summarizationSettings: FenixSummarizationSettingsBinding by lazyMonitored {
-        FenixSummarizationSettingsBinding(SummarizationSettings.dataStore(context))
+    val summarizationSettingsBinding: FenixSummarizationSettingsBinding by lazyMonitored {
+        FenixSummarizationSettingsBinding(
+            summarizationSettings = SummarizationSettings.dataStore(context),
+            aiFeatureBlockStorage = AIFeatureBlockStorage.dataStore(context),
+        )
     }
 
     /**
@@ -648,7 +674,7 @@ class Core(
     val summarizeFeatureSettings: FenixSummarizationFeatureConfiguration by lazyMonitored {
         FenixSummarizationFeatureConfiguration(
             settings = context.components.settings,
-            summarizationSettingsBinding = summarizationSettings,
+            summarizationSettingsBinding = summarizationSettingsBinding,
         )
     }
 
@@ -684,9 +710,10 @@ class Core(
         val inDark =
             (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
                 Configuration.UI_MODE_NIGHT_YES
+        val settings = context.components.settings
         return when {
-            context.components.settings.shouldUseDarkTheme -> PreferredColorScheme.Dark
-            context.components.settings.shouldUseLightTheme -> PreferredColorScheme.Light
+            settings.shouldUseDarkTheme || settings.shouldUseOledTheme -> PreferredColorScheme.Dark
+            settings.shouldUseLightTheme -> PreferredColorScheme.Light
             inDark -> PreferredColorScheme.Dark
             else -> PreferredColorScheme.Light
         }
@@ -740,4 +767,42 @@ class Core(
         internal const val REMOTE_STAGE_ENDPOINT_URL = "https://firefox.settings.services.allizom.org"
         internal const val REMOTE_DEV_ENDPOINT_URL = "https://remote-settings-dev.allizom.org"
     }
+}
+
+/**
+ * Applies the Nimbus `fingerprinting-protection` feature to [settings].
+ *
+ * Each value is optional. A `null` means the recipe did not supply that value, so the existing setting is left
+ * untouched rather than being reset to a manifest default. This lets a recipe change one field (for example
+ * `fdlibm-math`) without silently overwriting the user's choices for the others.
+ *
+ * @param settings the engine settings to update in place.
+ * @param feature the Nimbus feature value to apply.
+ */
+@VisibleForTesting
+internal fun applyFingerprintingProtectionFeature(
+    settings: DefaultSettings,
+    feature: FingerprintingProtection,
+) {
+    feature.overrides?.let { settings.fingerprintingProtectionOverrides = it }
+    feature.enabledNormal?.let { settings.fingerprintingProtection = it }
+    feature.enabledPrivate?.let { settings.fingerprintingProtectionPrivateBrowsing = it }
+}
+
+/**
+ * Applies the Nimbus `baseline-fpp` feature to [settings].
+ *
+ * Each value is optional. A `null` means the recipe did not supply that value, so the existing setting is left
+ * untouched rather than being reset to a manifest default.
+ *
+ * @param settings the engine settings to update in place.
+ * @param feature the Nimbus feature value to apply.
+ */
+@VisibleForTesting
+internal fun applyBaselineFingerprintingProtectionFeature(
+    settings: DefaultSettings,
+    feature: BaselineFpp,
+) {
+    feature.enabled?.let { settings.baselineFingerprintingProtection = it }
+    feature.overrides?.let { settings.baselineFingerprintingProtectionOverrides = it }
 }

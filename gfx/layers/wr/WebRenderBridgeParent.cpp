@@ -1352,6 +1352,42 @@ bool WebRenderBridgeParent::SetDisplayList(
   return success;
 }
 
+// Clear every referent id that the parent process's own record of the frame
+// tree doesn't confirm as embedded by aOwnLayersId. An unregistered referent
+// is cleared too: it may just be stale, but LayersIds are allocated
+// predictably, so it may also name one that isn't allocated yet.
+static void ClearUnconfirmedReferentIds(WebRenderScrollData& aScrollData,
+                                        LayersId aOwnLayersId) {
+  for (size_t i = 0; i < aScrollData.GetLayerCount(); i++) {
+    WebRenderLayerScrollData* layer = aScrollData.GetLayerData(i);
+    Maybe<LayersId> referent = layer->GetReferentId();
+    if (!referent) {
+      continue;
+    }
+    LayersId embedder;
+    bool found = CompositorBridgeParent::CallWithLayerTreeState(
+        *referent, [&](CompositorBridgeParent::LayerTreeState& aState) {
+          embedder = aState.mEmbedderLayersId;
+        });
+    if (!found || embedder != aOwnLayersId) {
+      layer->ClearReferentId();
+    }
+  }
+}
+
+// Edit out of the incoming scroll data anything the parent process can tell is
+// wrong, so that what's left is safe to use even if the sender is compromised.
+// A root WebRenderBridgeParent has nothing to check: its transactions come
+// from the parent process, and its referents can legitimately be unregistered
+// while layer trees re-register after a GPU process restart.
+void WebRenderBridgeParent::SanitizeScrollData(
+    WebRenderScrollData& aScrollData) {
+  if (IsRootWebRenderBridgeParent()) {
+    return;
+  }
+  ClearUnconfirmedReferentIds(aScrollData, GetLayersId());
+}
+
 bool WebRenderBridgeParent::ProcessDisplayListData(
     DisplayListData& aDisplayList, wr::Epoch aWrEpoch,
     const TimeStamp& aTxnStartTime, bool aValidTransaction,
@@ -1360,13 +1396,18 @@ bool WebRenderBridgeParent::ProcessDisplayListData(
                              mRemoteTextureTxnScheduler, mFwdTransactionId);
   Maybe<wr::AutoTransactionSender> sender;
 
-  if (aDisplayList.mScrollData && !aDisplayList.mScrollData->Validate()) {
-    // If the scroll data is invalid, the entire transaction needs to be dropped
-    // because the scroll data and the display list cross-reference each other.
-    MOZ_ASSERT(
-        false,
-        "Content sent malformed scroll data (or validation check has a bug)");
-    aValidTransaction = false;
+  if (aDisplayList.mScrollData) {
+    if (!aDisplayList.mScrollData->ValidateShape()) {
+      // If the scroll data is malformed, the entire transaction needs to be
+      // dropped because the scroll data and the display list cross-reference
+      // each other.
+      MOZ_ASSERT(false,
+                 "Content sent malformed scroll data (or validation check "
+                 "has a bug)");
+      aValidTransaction = false;
+    } else {
+      SanitizeScrollData(*aDisplayList.mScrollData);
+    }
   }
 
   if (!aValidTransaction) {
@@ -2121,6 +2162,17 @@ void WebRenderBridgeParent::AddPipelineIdForCompositable(
     return;
   }
 
+  // The AsyncImagePipelineManager is shared by every bridge composited into
+  // this window, including the window's root pipeline. A pipeline id must not
+  // collide with one that is already live there, possibly registered by
+  // another bridge. Pipeline ids are never legitimately reused, so reject
+  // collisions outright.
+  if (mLateInit->mAsyncImageManager->HasLivePipeline(aPipelineId)) {
+    gfxCriticalNote << "Content attempted AddPipelineIdForCompositable with "
+                       "pipelineId already registered";
+    return;
+  }
+
   wrHost->SetWrBridge(aPipelineId, this);
   mAsyncCompositables.emplace(wr::AsUint64(aPipelineId), wrHost);
   mLateInit->mAsyncImageManager->AddAsyncImagePipeline(aPipelineId, wrHost);
@@ -2340,6 +2392,9 @@ void WebRenderBridgeParent::ScheduleForcedGenerateFrame(
 }
 
 mozilla::ipc::IPCResult WebRenderBridgeParent::RecvCapture() {
+  if (!IsRootWebRenderBridgeParent()) {
+    return IPC_FAIL(this, "Capture is only allowed on the root bridge");
+  }
   if (EnsureInitialized()) {
     mLateInit->mApi->Capture();
   }
@@ -2348,6 +2403,10 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvCapture() {
 
 mozilla::ipc::IPCResult WebRenderBridgeParent::RecvStartCaptureSequence(
     const uint32_t& aFlags) {
+  if (!IsRootWebRenderBridgeParent()) {
+    return IPC_FAIL(this,
+                    "StartCaptureSequence is only allowed on the root bridge");
+  }
   if (EnsureInitialized()) {
     mLateInit->mApi->StartCaptureSequence(aFlags);
   }
@@ -2355,6 +2414,10 @@ mozilla::ipc::IPCResult WebRenderBridgeParent::RecvStartCaptureSequence(
 }
 
 mozilla::ipc::IPCResult WebRenderBridgeParent::RecvStopCaptureSequence() {
+  if (!IsRootWebRenderBridgeParent()) {
+    return IPC_FAIL(this,
+                    "StopCaptureSequence is only allowed on the root bridge");
+  }
   if (EnsureInitialized()) {
     mLateInit->mApi->StopCaptureSequence();
   }

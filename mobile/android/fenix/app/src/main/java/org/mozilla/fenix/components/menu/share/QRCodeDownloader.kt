@@ -7,8 +7,6 @@ package org.mozilla.fenix.components.menu.share
 import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -18,7 +16,11 @@ import androidx.annotation.RequiresApi
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InputStream
+import mozilla.components.support.base.log.logger.Logger
 import org.mozilla.fenix.R
+
+private val logger = Logger("QRCodeDownloader")
 
 /**
  * Utility class to download and save QR code images to the device's Downloads folder.
@@ -47,62 +49,80 @@ class QRCodeDownloader(
      * @param context The [Context] used to show Toast messages.
      */
     fun saveQRCodeToDownloads(qrCodeUri: Uri, contentResolver: ContentResolver, context: Context) {
-        val bitmap =
-            contentResolver.openInputStream(qrCodeUri)?.use { inputStream ->
-                BitmapFactory.decodeStream(inputStream)
+        val saved =
+            try {
+                contentResolver.openInputStream(qrCodeUri)?.use { inputStream ->
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        saveToMediaStoreDownloadsFolder(contentResolver, inputStream)
+                    } else {
+                        saveToDirectoryDownloads(inputStream)
+                    }
+                } ?: false
+            } catch (e: IOException) {
+                logger.warn("Unable to read the QR code at $qrCodeUri", e)
+                false
             }
 
-        if (bitmap != null) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                saveToMediaStoreDownloadsFolder(contentResolver, bitmap, context)
-            } else {
-                saveToDirectoryDownloads(bitmap, context)
-            }
-        } else {
-            onResponse(context, false)
-        }
+        onResponse(context, saved)
     }
 
-    private fun saveToDirectoryDownloads(bitmap: Bitmap, context: Context) {
+    private fun saveToDirectoryDownloads(inputStream: InputStream): Boolean {
         val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         val file = File(downloadsDir, "qr_code_${currentTimeMillis()}.png")
 
-        try {
-            FileOutputStream(file).use { outputStream ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, PNG_QUALITY, outputStream)
+        val copied =
+            try {
+                FileOutputStream(file).use { inputStream.copyTo(it) }
+            } catch (e: IOException) {
+                logger.warn("Failed to write the QR code to $file", e)
+                0L
             }
-            onResponse(context, true)
-        } catch (e: IOException) {
-            onResponse(context, false)
+
+        if (copied == 0L) {
+            file.delete()
+            return false
         }
+        return true
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
     private fun saveToMediaStoreDownloadsFolder(
         contentResolver: ContentResolver,
-        bitmap: Bitmap,
-        context: Context,
-    ) {
+        inputStream: InputStream,
+    ): Boolean {
         val contentValues =
             ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, "qr_code_${currentTimeMillis()}.png")
                 put(MediaStore.Downloads.MIME_TYPE, "image/png")
                 put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                put(MediaStore.Downloads.IS_PENDING, 1)
             }
 
-        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-        uri?.let {
-            contentResolver.openOutputStream(it)?.use { outputStream ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, PNG_QUALITY, outputStream)
+        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues) ?: return false
+
+        // openOutputStream both returns null and throws, so both share one failure path.
+        val copied =
+            try {
+                contentResolver.openOutputStream(uri)?.use { inputStream.copyTo(it) } ?: 0L
+            } catch (e: IOException) {
+                logger.warn("Failed to write the QR code to $uri", e)
+                0L
             }
-            onResponse(context, true)
+
+        // The entry stays hidden until the flag is cleared, so failing to clear it is a failed save.
+        val saved = copied > 0L && contentResolver.clearPendingFlag(uri)
+        if (!saved) {
+            contentResolver.delete(uri, null, null)
         }
-            ?: run {
-                onResponse(context, false)
-            }
+        return saved
     }
 
-    companion object {
-        private const val PNG_QUALITY = 100
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun ContentResolver.clearPendingFlag(uri: Uri): Boolean {
+        val cleared = update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null) > 0
+        if (!cleared) {
+            logger.warn("Wrote the QR code to $uri but could not make it visible")
+        }
+        return cleared
     }
 }

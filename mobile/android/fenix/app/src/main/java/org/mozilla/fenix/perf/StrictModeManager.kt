@@ -24,7 +24,7 @@ import org.mozilla.fenix.components.Components
 
 private const val DELAY_TO_REMOVE_STRICT_MODE_MILLIS = 1000L
 
-private val logger = Performance.logger
+private val logger = PerformanceLogger.logger
 private val mainLooper = Looper.getMainLooper()
 
 /**

@@ -172,6 +172,7 @@ let Player = {
     "command",
     "dblclick",
     "keydown",
+    "mousedown",
     "mouseup",
     "mousemove",
     "MozDOMFullscreen:Entered",
@@ -514,14 +515,19 @@ let Player = {
           this.cyclePlaybackRate(event.key == ">" ? 1 : -1);
         } else if (
           Services.prefs.getBoolPref(KEYBOARD_CONTROLS_ENABLED_PREF, false) &&
-          (event.keyCode != KeyEvent.DOM_VK_SPACE || !event.target.id)
+          (event.key != " " || !event.target.closest(".control-button, .panel"))
         ) {
-          // Pressing "space" fires a "keydown" event which can also trigger a control
-          // button's "click" event. Handle the "keydown" event only when the event did
-          // not originate from a control button and it is not a "space" keypress.
+          // Pressing "space" fires a "keydown" event which can also activate a
+          // focused control. Let "space" toggle playback unless a control that
+          // it would activate has focus.
           this.onKeyDown(event);
         }
 
+        break;
+      }
+
+      case "mousedown": {
+        this.onMouseDown(event);
         break;
       }
 
@@ -1253,6 +1259,21 @@ let Player = {
       dragDirection = "draggedUp";
     }
     return dragDirection;
+  },
+
+  /**
+   * Event handler for "mousedown" events on the PiP window.
+   *
+   * @param {Event} event
+   *  Event context details
+   */
+  onMouseDown(event) {
+    // Prevent mouse clicks moving focus onto the control buttons.
+    // Otherwise, if focus stays, "space" key presses would act on that button
+    // instead of toggling playback.
+    if (event.target.closest(".control-button")) {
+      event.preventDefault();
+    }
   },
 
   /**

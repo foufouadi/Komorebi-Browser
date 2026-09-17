@@ -54,7 +54,6 @@ class WebControlsTest {
         val currentDate = LocalDate.now()
         val currentDay = currentDate.dayOfMonth
         val currentMonth = currentDate.month
-        val currentYear = currentDate.year
         val htmlControlsPage = mockWebServer.htmlControlsFormAsset
 
         navigationToolbar(composeTestRule) {}

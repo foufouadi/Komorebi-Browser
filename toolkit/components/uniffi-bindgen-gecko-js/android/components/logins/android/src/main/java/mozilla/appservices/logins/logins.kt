@@ -99,6 +99,43 @@ internal open class ForeignBytes : Structure() {
 
     class ByValue : ForeignBytes(), Structure.ByValue
 }
+
+// Converter for `&[u8]` / `[ByRef] bytes` arguments.
+//
+// Only `lower` is valid — zero-copy byte buffers only flow foreign -> Rust,
+// and only in argument position. `lift`, `read`, `write`, and
+// `allocationSize` have no sound implementation here and all panic at
+// runtime. The `FfiConverter` interface is implemented so that the
+// compiler enforces the full method set (rather than relying on eyeball).
+//
+// The provided `ByteBuffer` MUST be direct — only direct buffers have a
+// stable native address that JNA can expose via `getDirectBufferPointer`.
+// The returned `ForeignBytes.ByValue` is only valid for the duration of
+// the FFI call; the Rust side treats it as a borrow.
+internal object FfiConverterByRefBytes : FfiConverter<java.nio.ByteBuffer, ForeignBytes.ByValue> {
+    override fun lower(value: java.nio.ByteBuffer): ForeignBytes.ByValue {
+        require(value.isDirect) { "UniFFI zero-copy &[u8] requires a direct ByteBuffer. Use ByteBuffer.allocateDirect()." }
+        val remaining = value.remaining()
+        val fb = ForeignBytes.ByValue()
+        fb.len = remaining
+        // Zero-length direct buffers: skip getDirectBufferPointer (platform-variable behavior)
+        // and pass null. The Rust side treats (null, 0) as &[].
+        fb.data = if (remaining == 0) null else com.sun.jna.Native.getDirectBufferPointer(value)
+        return fb
+    }
+
+    override fun lift(value: ForeignBytes.ByValue): java.nio.ByteBuffer =
+        error("ByRef bytes cannot be lifted: zero-copy &[u8] only flows foreign->Rust")
+
+    override fun read(buf: java.nio.ByteBuffer): java.nio.ByteBuffer =
+        error("ByRef bytes cannot be read from a buffer: zero-copy &[u8] is only supported in argument position, not nested in records/options/etc.")
+
+    override fun write(value: java.nio.ByteBuffer, buf: java.nio.ByteBuffer): Unit =
+        error("ByRef bytes cannot be written to a buffer: zero-copy &[u8] is only supported in argument position, not nested in records/options/etc.")
+
+    override fun allocationSize(value: java.nio.ByteBuffer): ULong =
+        error("ByRef bytes have no RustBuffer allocation size: zero-copy &[u8] is only supported in argument position, not nested in records/options/etc.")
+}
 /**
  * The FfiConverter interface handles converter types to and from the FFI
  *
@@ -686,121 +723,125 @@ internal object IntegrityCheckingUniffiLib {
         uniffiCheckContractApiVersion(this)
     }
     external fun uniffi_logins_checksum_func_check_canary(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_func_create_canary(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_func_create_key(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_func_create_login_store_with_static_key_manager(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_func_create_managed_encdec(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_func_create_static_key_manager(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_encryptordecryptor_decrypt(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_encryptordecryptor_encrypt(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_keymanager_get_key(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_add(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_add_many(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_add_many_with_meta(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_add_or_update(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_add_with_meta(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_are_potentially_vulnerable_passwords(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_bridged_engine(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_count(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_count_by_form_action_origin(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_count_by_origin(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_delete(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_delete_all(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_delete_all_except_fxa(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_delete_many(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_delete_undecryptable_records_for_remote_replacement(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_find_login_to_update(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_get(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_get_by_base_domain(
-    ): Short
+    ): Int
+    external fun uniffi_logins_checksum_method_loginstore_get_many(
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_has_logins_by_base_domain(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_is_empty(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_is_potentially_vulnerable_password(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_list(
-    ): Short
+    ): Int
+    external fun uniffi_logins_checksum_method_loginstore_list_candidates(
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_record_breach_alert_dismissal(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_record_breach_alert_dismissal_time(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_record_potentially_vulnerable_passwords(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_register_with_sync_manager(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_reset(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_reset_all_breaches(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_run_maintenance(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_shutdown(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_touch(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_update(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_wipe_local(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginstore_wipe_local_except_fxa(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginsbridgedengine_apply(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginsbridgedengine_ensure_current_sync_id(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginsbridgedengine_last_sync(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginsbridgedengine_reset(
-    ): Short
+    ): Int
+    external fun uniffi_logins_checksum_method_loginsbridgedengine_reset_last_sync(
+    ): Int
     external fun uniffi_logins_checksum_method_loginsbridgedengine_reset_sync_id(
-    ): Short
-    external fun uniffi_logins_checksum_method_loginsbridgedengine_set_last_sync(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginsbridgedengine_set_uploaded(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginsbridgedengine_store_incoming(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginsbridgedengine_sync_finished(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginsbridgedengine_sync_id(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginsbridgedengine_sync_started(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_method_loginsbridgedengine_wipe(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_constructor_loginstore_new(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_constructor_managedencryptordecryptor_new(
-    ): Short
+    ): Int
     external fun uniffi_logins_checksum_constructor_statickeymanager_new(
-    ): Short
+    ): Int
     external fun ffi_logins_uniffi_contract_version(
     ): Int
 
@@ -822,255 +863,259 @@ internal object UniffiLib {
         
     }
     external fun uniffi_logins_fn_clone_encryptordecryptor(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_logins_fn_free_encryptordecryptor(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_init_callback_vtable_encryptordecryptor(`vtable`: UniffiVTableCallbackInterfaceEncryptorDecryptor,
-): Unit
-external fun uniffi_logins_fn_method_encryptordecryptor_decrypt(`ptr`: Long,`ciphertext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_method_encryptordecryptor_encrypt(`ptr`: Long,`cleartext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_clone_keymanager(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_logins_fn_free_keymanager(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_init_callback_vtable_keymanager(`vtable`: UniffiVTableCallbackInterfaceKeyManager,
-): Unit
-external fun uniffi_logins_fn_method_keymanager_get_key(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_clone_loginstore(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_logins_fn_free_loginstore(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_constructor_loginstore_new(`path`: RustBuffer.ByValue,`encdec`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_logins_fn_method_loginstore_add(`ptr`: Long,`login`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_method_loginstore_add_many(`ptr`: Long,`logins`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_method_loginstore_add_many_with_meta(`ptr`: Long,`entriesWithMeta`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_method_loginstore_add_or_update(`ptr`: Long,`login`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_method_loginstore_add_with_meta(`ptr`: Long,`entryWithMeta`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_method_loginstore_are_potentially_vulnerable_passwords(`ptr`: Long,`ids`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_method_loginstore_bridged_engine(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_logins_fn_method_loginstore_count(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_logins_fn_method_loginstore_count_by_form_action_origin(`ptr`: Long,`formActionOrigin`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_logins_fn_method_loginstore_count_by_origin(`ptr`: Long,`origin`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_logins_fn_method_loginstore_delete(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Byte
-external fun uniffi_logins_fn_method_loginstore_delete_all(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_method_loginstore_delete_all_except_fxa(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_method_loginstore_delete_many(`ptr`: Long,`ids`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_method_loginstore_delete_undecryptable_records_for_remote_replacement(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_method_loginstore_find_login_to_update(`ptr`: Long,`look`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_method_loginstore_get(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_method_loginstore_get_by_base_domain(`ptr`: Long,`baseDomain`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_method_loginstore_has_logins_by_base_domain(`ptr`: Long,`baseDomain`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Byte
-external fun uniffi_logins_fn_method_loginstore_is_empty(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Byte
-external fun uniffi_logins_fn_method_loginstore_is_potentially_vulnerable_password(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Byte
-external fun uniffi_logins_fn_method_loginstore_list(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_method_loginstore_record_breach_alert_dismissal(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_method_loginstore_record_breach_alert_dismissal_time(`ptr`: Long,`id`: RustBuffer.ByValue,`timestamp`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_method_loginstore_record_potentially_vulnerable_passwords(`ptr`: Long,`passwords`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_method_loginstore_register_with_sync_manager(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_method_loginstore_reset(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_method_loginstore_reset_all_breaches(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_method_loginstore_run_maintenance(`ptr`: Long,`options`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_method_loginstore_shutdown(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_method_loginstore_touch(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_method_loginstore_update(`ptr`: Long,`id`: RustBuffer.ByValue,`login`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_method_loginstore_wipe_local(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_method_loginstore_wipe_local_except_fxa(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_clone_loginsbridgedengine(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_logins_fn_free_loginsbridgedengine(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_method_loginsbridgedengine_apply(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_method_loginsbridgedengine_ensure_current_sync_id(`ptr`: Long,`newSyncId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_method_loginsbridgedengine_last_sync(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_logins_fn_method_loginsbridgedengine_reset(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_method_loginsbridgedengine_reset_sync_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_method_loginsbridgedengine_set_last_sync(`ptr`: Long,`lastSync`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_method_loginsbridgedengine_set_uploaded(`ptr`: Long,`newTimestamp`: Long,`uploadedIds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_method_loginsbridgedengine_store_incoming(`ptr`: Long,`incomingEnvelopesAsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_method_loginsbridgedengine_sync_finished(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_method_loginsbridgedengine_sync_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_method_loginsbridgedengine_sync_started(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_method_loginsbridgedengine_wipe(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_clone_managedencryptordecryptor(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_logins_fn_free_managedencryptordecryptor(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_constructor_managedencryptordecryptor_new(`keyManager`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_logins_fn_clone_statickeymanager(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_logins_fn_free_statickeymanager(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_logins_fn_constructor_statickeymanager_new(`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_logins_fn_func_check_canary(`canary`: RustBuffer.ByValue,`text`: RustBuffer.ByValue,`encryptionKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Byte
-external fun uniffi_logins_fn_func_create_canary(`text`: RustBuffer.ByValue,`encryptionKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_func_create_key(uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_logins_fn_func_create_login_store_with_static_key_manager(`path`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_logins_fn_func_create_managed_encdec(`keyManager`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_logins_fn_func_create_static_key_manager(`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun ffi_logins_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun ffi_logins_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun ffi_logins_rustbuffer_free(`buf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun ffi_logins_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun ffi_logins_rust_future_poll_u8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_logins_rust_future_cancel_u8(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_free_u8(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Byte
-external fun ffi_logins_rust_future_poll_i8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_logins_rust_future_cancel_i8(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_free_i8(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_complete_i8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Byte
-external fun ffi_logins_rust_future_poll_u16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_logins_rust_future_cancel_u16(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_free_u16(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Short
-external fun ffi_logins_rust_future_poll_i16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_logins_rust_future_cancel_i16(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_free_i16(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_complete_i16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Short
-external fun ffi_logins_rust_future_poll_u32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_logins_rust_future_cancel_u32(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_free_u32(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_complete_u32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Int
-external fun ffi_logins_rust_future_poll_i32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_logins_rust_future_cancel_i32(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_free_i32(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_complete_i32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Int
-external fun ffi_logins_rust_future_poll_u64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_logins_rust_future_cancel_u64(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_free_u64(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_complete_u64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun ffi_logins_rust_future_poll_i64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_logins_rust_future_cancel_i64(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_free_i64(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_complete_i64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun ffi_logins_rust_future_poll_f32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_logins_rust_future_cancel_f32(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_free_f32(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_complete_f32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Float
-external fun ffi_logins_rust_future_poll_f64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_logins_rust_future_cancel_f64(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_free_f64(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_complete_f64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Double
-external fun ffi_logins_rust_future_poll_rust_buffer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_logins_rust_future_cancel_rust_buffer(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_free_rust_buffer(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_complete_rust_buffer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun ffi_logins_rust_future_poll_void(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_logins_rust_future_cancel_void(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_free_void(`handle`: Long,
-): Unit
-external fun ffi_logins_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
+    ): Long
+    external fun uniffi_logins_fn_free_encryptordecryptor(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_init_callback_vtable_encryptordecryptor(`vtable`: UniffiVTableCallbackInterfaceEncryptorDecryptor,
+    ): Unit
+    external fun uniffi_logins_fn_method_encryptordecryptor_decrypt(`ptr`: Long,`ciphertext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_encryptordecryptor_encrypt(`ptr`: Long,`cleartext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_clone_keymanager(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_logins_fn_free_keymanager(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_init_callback_vtable_keymanager(`vtable`: UniffiVTableCallbackInterfaceKeyManager,
+    ): Unit
+    external fun uniffi_logins_fn_method_keymanager_get_key(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_clone_loginstore(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_logins_fn_free_loginstore(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_constructor_loginstore_new(`path`: RustBuffer.ByValue,`encdec`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_logins_fn_method_loginstore_add(`ptr`: Long,`login`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginstore_add_many(`ptr`: Long,`logins`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginstore_add_many_with_meta(`ptr`: Long,`entriesWithMeta`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginstore_add_or_update(`ptr`: Long,`login`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginstore_add_with_meta(`ptr`: Long,`entryWithMeta`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginstore_are_potentially_vulnerable_passwords(`ptr`: Long,`ids`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginstore_bridged_engine(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_logins_fn_method_loginstore_count(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_logins_fn_method_loginstore_count_by_form_action_origin(`ptr`: Long,`formActionOrigin`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_logins_fn_method_loginstore_count_by_origin(`ptr`: Long,`origin`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_logins_fn_method_loginstore_delete(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    external fun uniffi_logins_fn_method_loginstore_delete_all(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginstore_delete_all_except_fxa(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginstore_delete_many(`ptr`: Long,`ids`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginstore_delete_undecryptable_records_for_remote_replacement(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginstore_find_login_to_update(`ptr`: Long,`look`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginstore_get(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginstore_get_by_base_domain(`ptr`: Long,`baseDomain`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginstore_get_many(`ptr`: Long,`ids`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginstore_has_logins_by_base_domain(`ptr`: Long,`baseDomain`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    external fun uniffi_logins_fn_method_loginstore_is_empty(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    external fun uniffi_logins_fn_method_loginstore_is_potentially_vulnerable_password(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    external fun uniffi_logins_fn_method_loginstore_list(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginstore_list_candidates(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginstore_record_breach_alert_dismissal(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_method_loginstore_record_breach_alert_dismissal_time(`ptr`: Long,`id`: RustBuffer.ByValue,`timestamp`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_method_loginstore_record_potentially_vulnerable_passwords(`ptr`: Long,`passwords`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_method_loginstore_register_with_sync_manager(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_method_loginstore_reset(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_method_loginstore_reset_all_breaches(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_method_loginstore_run_maintenance(`ptr`: Long,`options`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_method_loginstore_shutdown(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_method_loginstore_touch(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_method_loginstore_update(`ptr`: Long,`id`: RustBuffer.ByValue,`login`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginstore_wipe_local(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_method_loginstore_wipe_local_except_fxa(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_clone_loginsbridgedengine(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_logins_fn_free_loginsbridgedengine(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_method_loginsbridgedengine_apply(`ptr`: Long,`serverModifiedMillis`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginsbridgedengine_ensure_current_sync_id(`ptr`: Long,`newSyncId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginsbridgedengine_last_sync(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_logins_fn_method_loginsbridgedengine_reset(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_method_loginsbridgedengine_reset_last_sync(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_method_loginsbridgedengine_reset_sync_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginsbridgedengine_set_uploaded(`ptr`: Long,`newTimestamp`: Long,`uploadedIds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_method_loginsbridgedengine_store_incoming(`ptr`: Long,`incomingEnvelopesAsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_method_loginsbridgedengine_sync_finished(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_method_loginsbridgedengine_sync_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_method_loginsbridgedengine_sync_started(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_method_loginsbridgedengine_wipe(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_clone_managedencryptordecryptor(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_logins_fn_free_managedencryptordecryptor(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_constructor_managedencryptordecryptor_new(`keyManager`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_logins_fn_clone_statickeymanager(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_logins_fn_free_statickeymanager(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_logins_fn_constructor_statickeymanager_new(`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_logins_fn_func_check_canary(`canary`: RustBuffer.ByValue,`text`: RustBuffer.ByValue,`encryptionKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    external fun uniffi_logins_fn_func_create_canary(`text`: RustBuffer.ByValue,`encryptionKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_func_create_key(uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_logins_fn_func_create_login_store_with_static_key_manager(`path`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_logins_fn_func_create_managed_encdec(`keyManager`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_logins_fn_func_create_static_key_manager(`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun ffi_logins_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun ffi_logins_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun ffi_logins_rustbuffer_free(`buf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun ffi_logins_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun ffi_logins_rust_future_poll_u8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_cancel_u8(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_free_u8(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Int
+    external fun ffi_logins_rust_future_poll_i8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_cancel_i8(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_free_i8(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_complete_i8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    external fun ffi_logins_rust_future_poll_u16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_cancel_u16(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_free_u16(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Int
+    external fun ffi_logins_rust_future_poll_i16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_cancel_i16(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_free_i16(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_complete_i16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Short
+    external fun ffi_logins_rust_future_poll_u32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_cancel_u32(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_free_u32(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_complete_u32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Int
+    external fun ffi_logins_rust_future_poll_i32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_cancel_i32(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_free_i32(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_complete_i32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Int
+    external fun ffi_logins_rust_future_poll_u64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_cancel_u64(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_free_u64(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_complete_u64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun ffi_logins_rust_future_poll_i64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_cancel_i64(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_free_i64(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_complete_i64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun ffi_logins_rust_future_poll_f32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_cancel_f32(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_free_f32(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_complete_f32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Float
+    external fun ffi_logins_rust_future_poll_f64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_cancel_f64(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_free_f64(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_complete_f64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Double
+    external fun ffi_logins_rust_future_poll_rust_buffer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_cancel_rust_buffer(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_free_rust_buffer(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_complete_rust_buffer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun ffi_logins_rust_future_poll_void(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_cancel_void(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_free_void(`handle`: Long,
+    ): Unit
+    external fun ffi_logins_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
 
-    
+        
 }
 
 private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
@@ -1550,6 +1595,11 @@ open class EncryptorDecryptorImpl: Disposable, AutoCloseable, EncryptorDecryptor
     private val wasDestroyed = AtomicBoolean(false)
     private val callCounter = AtomicLong(1)
 
+    /**
+     * Whether the current object has been destroyed and its reference is gone in the Rust side.
+     */
+    val uniffiIsDestroyed: Boolean get() = wasDestroyed.get()
+
     override fun destroy() {
         // Only allow a single call to this method.
         // TODO: maybe we should log a warning if called more than once?
@@ -1622,6 +1672,7 @@ open class EncryptorDecryptorImpl: Disposable, AutoCloseable, EncryptorDecryptor
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_encryptordecryptor_decrypt(
         it,
+        
         FfiConverterByteArray.lower(`ciphertext`),_status)
 }
     }
@@ -1636,6 +1687,7 @@ open class EncryptorDecryptorImpl: Disposable, AutoCloseable, EncryptorDecryptor
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_encryptordecryptor_encrypt(
         it,
+        
         FfiConverterByteArray.lower(`cleartext`),_status)
 }
     }
@@ -1893,6 +1945,11 @@ open class KeyManagerImpl: Disposable, AutoCloseable, KeyManager
 
     private val wasDestroyed = AtomicBoolean(false)
     private val callCounter = AtomicLong(1)
+
+    /**
+     * Whether the current object has been destroyed and its reference is gone in the Rust side.
+     */
+    val uniffiIsDestroyed: Boolean get() = wasDestroyed.get()
 
     override fun destroy() {
         // Only allow a single call to this method.
@@ -2232,6 +2289,12 @@ public interface LoginStoreInterface {
     
     fun `getByBaseDomain`(`baseDomain`: kotlin.String): List<Login>
     
+    /**
+     * Get and decrypt the logins with the given ids. Ids which don't exist are skipped, as are
+     * logins which fail to decrypt.
+     */
+    fun `getMany`(`ids`: List<kotlin.String>): List<Login>
+    
     fun `hasLoginsByBaseDomain`(`baseDomain`: kotlin.String): kotlin.Boolean
     
     fun `isEmpty`(): kotlin.Boolean
@@ -2246,6 +2309,12 @@ public interface LoginStoreInterface {
     fun `isPotentiallyVulnerablePassword`(`id`: kotlin.String): kotlin.Boolean
     
     fun `list`(): List<Login>
+    
+    /**
+     * Like `list()`, but without the encrypted fields - and so without needing the encryption
+     * key. Resolve the ids you're interested in with `get_many()`.
+     */
+    fun `listCandidates`(): List<LoginCandidate>
     
     /**
      * Stores that the user dismissed the breach alert for a login.
@@ -2341,7 +2410,9 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_constructor_loginstore_new(
     
-        FfiConverterString.lower(`path`),FfiConverterTypeEncryptorDecryptor.lower(`encdec`),_status)
+        
+        FfiConverterString.lower(`path`),
+        FfiConverterTypeEncryptorDecryptor.lower(`encdec`),_status)
 }
     )
 
@@ -2350,6 +2421,11 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
 
     private val wasDestroyed = AtomicBoolean(false)
     private val callCounter = AtomicLong(1)
+
+    /**
+     * Whether the current object has been destroyed and its reference is gone in the Rust side.
+     */
+    val uniffiIsDestroyed: Boolean get() = wasDestroyed.get()
 
     override fun destroy() {
         // Only allow a single call to this method.
@@ -2423,6 +2499,7 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_add(
         it,
+        
         FfiConverterTypeLoginEntry.lower(`login`),_status)
 }
     }
@@ -2437,6 +2514,7 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_add_many(
         it,
+        
         FfiConverterSequenceTypeLoginEntry.lower(`logins`),_status)
 }
     }
@@ -2451,6 +2529,7 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_add_many_with_meta(
         it,
+        
         FfiConverterSequenceTypeLoginEntryWithMeta.lower(`entriesWithMeta`),_status)
 }
     }
@@ -2465,6 +2544,7 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_add_or_update(
         it,
+        
         FfiConverterTypeLoginEntry.lower(`login`),_status)
 }
     }
@@ -2479,6 +2559,7 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_add_with_meta(
         it,
+        
         FfiConverterTypeLoginEntryWithMeta.lower(`entryWithMeta`),_status)
 }
     }
@@ -2500,6 +2581,7 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_are_potentially_vulnerable_passwords(
         it,
+        
         FfiConverterSequenceString.lower(`ids`),_status)
 }
     }
@@ -2547,6 +2629,7 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_count_by_form_action_origin(
         it,
+        
         FfiConverterString.lower(`formActionOrigin`),_status)
 }
     }
@@ -2561,6 +2644,7 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_count_by_origin(
         it,
+        
         FfiConverterString.lower(`origin`),_status)
 }
     }
@@ -2575,6 +2659,7 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_delete(
         it,
+        
         FfiConverterString.lower(`id`),_status)
 }
     }
@@ -2624,6 +2709,7 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_delete_many(
         it,
+        
         FfiConverterSequenceString.lower(`ids`),_status)
 }
     }
@@ -2660,6 +2746,7 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_find_login_to_update(
         it,
+        
         FfiConverterTypeLoginEntry.lower(`look`),_status)
 }
     }
@@ -2674,6 +2761,7 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_get(
         it,
+        
         FfiConverterString.lower(`id`),_status)
 }
     }
@@ -2688,7 +2776,27 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_get_by_base_domain(
         it,
+        
         FfiConverterString.lower(`baseDomain`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Get and decrypt the logins with the given ids. Ids which don't exist are skipped, as are
+     * logins which fail to decrypt.
+     */
+    @Throws(LoginsApiException::class)override fun `getMany`(`ids`: List<kotlin.String>): List<Login> {
+            return FfiConverterSequenceTypeLogin.lift(
+    callWithHandle {
+    uniffiRustCallWithError(LoginsApiException) { _status ->
+    UniffiLib.uniffi_logins_fn_method_loginstore_get_many(
+        it,
+        
+        FfiConverterSequenceString.lower(`ids`),_status)
 }
     }
     )
@@ -2702,6 +2810,7 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_has_logins_by_base_domain(
         it,
+        
         FfiConverterString.lower(`baseDomain`),_status)
 }
     }
@@ -2737,6 +2846,7 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_is_potentially_vulnerable_password(
         it,
+        
         FfiConverterString.lower(`id`),_status)
 }
     }
@@ -2760,6 +2870,24 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
 
     
     /**
+     * Like `list()`, but without the encrypted fields - and so without needing the encryption
+     * key. Resolve the ids you're interested in with `get_many()`.
+     */
+    @Throws(LoginsApiException::class)override fun `listCandidates`(): List<LoginCandidate> {
+            return FfiConverterSequenceTypeLoginCandidate.lift(
+    callWithHandle {
+    uniffiRustCallWithError(LoginsApiException) { _status ->
+    UniffiLib.uniffi_logins_fn_method_loginstore_list_candidates(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * Stores that the user dismissed the breach alert for a login.
      */
     @Throws(LoginsApiException::class)override fun `recordBreachAlertDismissal`(`id`: kotlin.String)
@@ -2768,6 +2896,7 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_record_breach_alert_dismissal(
         it,
+        
         FfiConverterString.lower(`id`),_status)
 }
     }
@@ -2784,7 +2913,9 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_record_breach_alert_dismissal_time(
         it,
-        FfiConverterString.lower(`id`),FfiConverterLong.lower(`timestamp`),_status)
+        
+        FfiConverterString.lower(`id`),
+        FfiConverterLong.lower(`timestamp`),_status)
 }
     }
     
@@ -2804,6 +2935,7 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_record_potentially_vulnerable_passwords(
         it,
+        
         FfiConverterSequenceString.lower(`passwords`),_status)
 }
     }
@@ -2864,6 +2996,7 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_run_maintenance(
         it,
+        
         FfiConverterOptionalTypeRunMaintenanceOptions.lower(`options`),_status)
 }
     }
@@ -2889,6 +3022,7 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_touch(
         it,
+        
         FfiConverterString.lower(`id`),_status)
 }
     }
@@ -2902,7 +3036,9 @@ open class LoginStore: Disposable, AutoCloseable, LoginStoreInterface
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginstore_update(
         it,
-        FfiConverterString.lower(`id`),FfiConverterTypeLoginEntry.lower(`login`),_status)
+        
+        FfiConverterString.lower(`id`),
+        FfiConverterTypeLoginEntry.lower(`login`),_status)
 }
     }
     )
@@ -3086,14 +3222,15 @@ public object FfiConverterTypeLoginStore: FfiConverter<LoginStore, Long> {
 
 
 /**
- * The Desktop-facing bridged sync engine. The canonical docs are in
- * https://searchfox.org/mozilla-central/source/services/interfaces/mozIBridgedSyncEngine.idl
+ * The Desktop-facing bridged sync engine - a thin wrapper over the
+ * `sync15::engine::SyncEngine` implemented by this component (see
+ * `sync15::engine::BridgedEngineWrapper`).
  * It's only actually used on Desktop, but it's fine to expose this everywhere.
  * NOTE: all timestamps here are milliseconds.
  */
 public interface LoginsBridgedEngineInterface {
     
-    fun `apply`(): List<kotlin.String>
+    fun `apply`(`serverModifiedMillis`: kotlin.Long): List<kotlin.String>
     
     fun `ensureCurrentSyncId`(`newSyncId`: kotlin.String): kotlin.String
     
@@ -3101,9 +3238,9 @@ public interface LoginsBridgedEngineInterface {
     
     fun `reset`()
     
-    fun `resetSyncId`(): kotlin.String
+    fun `resetLastSync`()
     
-    fun `setLastSync`(`lastSync`: kotlin.Long)
+    fun `resetSyncId`(): kotlin.String
     
     fun `setUploaded`(`newTimestamp`: kotlin.Long, `uploadedIds`: List<kotlin.String>)
     
@@ -3121,8 +3258,9 @@ public interface LoginsBridgedEngineInterface {
 }
 
 /**
- * The Desktop-facing bridged sync engine. The canonical docs are in
- * https://searchfox.org/mozilla-central/source/services/interfaces/mozIBridgedSyncEngine.idl
+ * The Desktop-facing bridged sync engine - a thin wrapper over the
+ * `sync15::engine::SyncEngine` implemented by this component (see
+ * `sync15::engine::BridgedEngineWrapper`).
  * It's only actually used on Desktop, but it's fine to expose this everywhere.
  * NOTE: all timestamps here are milliseconds.
  */
@@ -3156,6 +3294,11 @@ open class LoginsBridgedEngine: Disposable, AutoCloseable, LoginsBridgedEngineIn
 
     private val wasDestroyed = AtomicBoolean(false)
     private val callCounter = AtomicLong(1)
+
+    /**
+     * Whether the current object has been destroyed and its reference is gone in the Rust side.
+     */
+    val uniffiIsDestroyed: Boolean get() = wasDestroyed.get()
 
     override fun destroy() {
         // Only allow a single call to this method.
@@ -3223,13 +3366,14 @@ open class LoginsBridgedEngine: Disposable, AutoCloseable, LoginsBridgedEngineIn
     }
 
     
-    @Throws(LoginsApiException::class)override fun `apply`(): List<kotlin.String> {
+    @Throws(LoginsApiException::class)override fun `apply`(`serverModifiedMillis`: kotlin.Long): List<kotlin.String> {
             return FfiConverterSequenceString.lift(
     callWithHandle {
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginsbridgedengine_apply(
         it,
-        _status)
+        
+        FfiConverterLong.lower(`serverModifiedMillis`),_status)
 }
     }
     )
@@ -3243,6 +3387,7 @@ open class LoginsBridgedEngine: Disposable, AutoCloseable, LoginsBridgedEngineIn
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginsbridgedengine_ensure_current_sync_id(
         it,
+        
         FfiConverterString.lower(`newSyncId`),_status)
 }
     }
@@ -3278,6 +3423,19 @@ open class LoginsBridgedEngine: Disposable, AutoCloseable, LoginsBridgedEngineIn
     
 
     
+    @Throws(LoginsApiException::class)override fun `resetLastSync`()
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(LoginsApiException) { _status ->
+    UniffiLib.uniffi_logins_fn_method_loginsbridgedengine_reset_last_sync(
+        it,
+        _status)
+}
+    }
+    
+    
+
+    
     @Throws(LoginsApiException::class)override fun `resetSyncId`(): kotlin.String {
             return FfiConverterString.lift(
     callWithHandle {
@@ -3292,26 +3450,15 @@ open class LoginsBridgedEngine: Disposable, AutoCloseable, LoginsBridgedEngineIn
     
 
     
-    @Throws(LoginsApiException::class)override fun `setLastSync`(`lastSync`: kotlin.Long)
-        = 
-    callWithHandle {
-    uniffiRustCallWithError(LoginsApiException) { _status ->
-    UniffiLib.uniffi_logins_fn_method_loginsbridgedengine_set_last_sync(
-        it,
-        FfiConverterLong.lower(`lastSync`),_status)
-}
-    }
-    
-    
-
-    
     @Throws(LoginsApiException::class)override fun `setUploaded`(`newTimestamp`: kotlin.Long, `uploadedIds`: List<kotlin.String>)
         = 
     callWithHandle {
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginsbridgedengine_set_uploaded(
         it,
-        FfiConverterLong.lower(`newTimestamp`),FfiConverterSequenceString.lower(`uploadedIds`),_status)
+        
+        FfiConverterLong.lower(`newTimestamp`),
+        FfiConverterSequenceString.lower(`uploadedIds`),_status)
 }
     }
     
@@ -3324,6 +3471,7 @@ open class LoginsBridgedEngine: Disposable, AutoCloseable, LoginsBridgedEngineIn
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_method_loginsbridgedengine_store_incoming(
         it,
+        
         FfiConverterSequenceString.lower(`incomingEnvelopesAsJson`),_status)
 }
     }
@@ -3551,6 +3699,7 @@ open class ManagedEncryptorDecryptor: Disposable, AutoCloseable, ManagedEncrypto
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_logins_fn_constructor_managedencryptordecryptor_new(
     
+        
         FfiConverterTypeKeyManager.lower(`keyManager`),_status)
 }
     )
@@ -3560,6 +3709,11 @@ open class ManagedEncryptorDecryptor: Disposable, AutoCloseable, ManagedEncrypto
 
     private val wasDestroyed = AtomicBoolean(false)
     private val callCounter = AtomicLong(1)
+
+    /**
+     * Whether the current object has been destroyed and its reference is gone in the Rust side.
+     */
+    val uniffiIsDestroyed: Boolean get() = wasDestroyed.get()
 
     override fun destroy() {
         // Only allow a single call to this method.
@@ -3794,6 +3948,7 @@ open class StaticKeyManager: Disposable, AutoCloseable, StaticKeyManagerInterfac
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_logins_fn_constructor_statickeymanager_new(
     
+        
         FfiConverterString.lower(`key`),_status)
 }
     )
@@ -3803,6 +3958,11 @@ open class StaticKeyManager: Disposable, AutoCloseable, StaticKeyManagerInterfac
 
     private val wasDestroyed = AtomicBoolean(false)
     private val callCounter = AtomicLong(1)
+
+    /**
+     * Whether the current object has been destroyed and its reference is gone in the Rust side.
+     */
+    val uniffiIsDestroyed: Boolean get() = wasDestroyed.get()
 
     override fun destroy() {
         // Only allow a single call to this method.
@@ -4000,6 +4160,95 @@ public object FfiConverterTypeLogin: FfiConverterRustBuffer<Login> {
             FfiConverterString.write(value.`passwordField`, buf)
             FfiConverterString.write(value.`password`, buf)
             FfiConverterString.write(value.`username`, buf)
+    }
+}
+
+
+
+/**
+ * A login stored in the database, minus the encrypted fields.
+ *
+ * Reading these never needs the encryption key, so consumers which filter on the cleartext
+ * fields can do so without forcing the user to authenticate. See `list_candidates()`.
+ */
+data class LoginCandidate (
+    var `id`: kotlin.String
+    , 
+    var `timesUsed`: kotlin.Long
+    , 
+    var `timeCreated`: kotlin.Long
+    , 
+    var `timeLastUsed`: kotlin.Long
+    , 
+    var `timePasswordChanged`: kotlin.Long
+    , 
+    var `timeLastBreachAlertDismissed`: kotlin.Long?
+    , 
+    var `origin`: kotlin.String
+    , 
+    var `httpRealm`: kotlin.String?
+    , 
+    var `formActionOrigin`: kotlin.String?
+    , 
+    var `usernameField`: kotlin.String
+    , 
+    var `passwordField`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeLoginCandidate: FfiConverterRustBuffer<LoginCandidate> {
+    override fun read(buf: ByteBuffer): LoginCandidate {
+        return LoginCandidate(
+            FfiConverterString.read(buf),
+            FfiConverterLong.read(buf),
+            FfiConverterLong.read(buf),
+            FfiConverterLong.read(buf),
+            FfiConverterLong.read(buf),
+            FfiConverterOptionalLong.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: LoginCandidate) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterLong.allocationSize(value.`timesUsed`) +
+            FfiConverterLong.allocationSize(value.`timeCreated`) +
+            FfiConverterLong.allocationSize(value.`timeLastUsed`) +
+            FfiConverterLong.allocationSize(value.`timePasswordChanged`) +
+            FfiConverterOptionalLong.allocationSize(value.`timeLastBreachAlertDismissed`) +
+            FfiConverterString.allocationSize(value.`origin`) +
+            FfiConverterOptionalString.allocationSize(value.`httpRealm`) +
+            FfiConverterOptionalString.allocationSize(value.`formActionOrigin`) +
+            FfiConverterString.allocationSize(value.`usernameField`) +
+            FfiConverterString.allocationSize(value.`passwordField`)
+    )
+
+    override fun write(value: LoginCandidate, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterLong.write(value.`timesUsed`, buf)
+            FfiConverterLong.write(value.`timeCreated`, buf)
+            FfiConverterLong.write(value.`timeLastUsed`, buf)
+            FfiConverterLong.write(value.`timePasswordChanged`, buf)
+            FfiConverterOptionalLong.write(value.`timeLastBreachAlertDismissed`, buf)
+            FfiConverterString.write(value.`origin`, buf)
+            FfiConverterOptionalString.write(value.`httpRealm`, buf)
+            FfiConverterOptionalString.write(value.`formActionOrigin`, buf)
+            FfiConverterString.write(value.`usernameField`, buf)
+            FfiConverterString.write(value.`passwordField`, buf)
     }
 }
 
@@ -4301,7 +4550,7 @@ public object FfiConverterTypeBulkResultEntry : FfiConverterRustBuffer<BulkResul
         }
     }
 
-    override fun allocationSize(value: BulkResultEntry) = when(value) {
+    override fun allocationSize(value: BulkResultEntry): ULong = when(value) {
         is BulkResultEntry.Success -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -4899,6 +5148,34 @@ public object FfiConverterSequenceTypeLogin: FfiConverterRustBuffer<List<Login>>
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeLoginCandidate: FfiConverterRustBuffer<List<LoginCandidate>> {
+    override fun read(buf: ByteBuffer): List<LoginCandidate> {
+        val len = buf.getInt()
+        return List<LoginCandidate>(len) {
+            FfiConverterTypeLoginCandidate.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<LoginCandidate>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeLoginCandidate.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<LoginCandidate>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeLoginCandidate.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeLoginEntry: FfiConverterRustBuffer<List<LoginEntry>> {
     override fun read(buf: ByteBuffer): List<LoginEntry> {
         val len = buf.getInt()
@@ -4984,7 +5261,10 @@ public object FfiConverterSequenceTypeBulkResultEntry: FfiConverterRustBuffer<Li
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_func_check_canary(
     
-        FfiConverterString.lower(`canary`),FfiConverterString.lower(`text`),FfiConverterString.lower(`encryptionKey`),_status)
+        
+        FfiConverterString.lower(`canary`),
+        FfiConverterString.lower(`text`),
+        FfiConverterString.lower(`encryptionKey`),_status)
 }
     )
     }
@@ -4998,7 +5278,9 @@ public object FfiConverterSequenceTypeBulkResultEntry: FfiConverterRustBuffer<Li
     uniffiRustCallWithError(LoginsApiException) { _status ->
     UniffiLib.uniffi_logins_fn_func_create_canary(
     
-        FfiConverterString.lower(`text`),FfiConverterString.lower(`encryptionKey`),_status)
+        
+        FfiConverterString.lower(`text`),
+        FfiConverterString.lower(`encryptionKey`),_status)
 }
     )
     }
@@ -5027,7 +5309,9 @@ public object FfiConverterSequenceTypeBulkResultEntry: FfiConverterRustBuffer<Li
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_logins_fn_func_create_login_store_with_static_key_manager(
     
-        FfiConverterString.lower(`path`),FfiConverterString.lower(`key`),_status)
+        
+        FfiConverterString.lower(`path`),
+        FfiConverterString.lower(`key`),_status)
 }
     )
     }
@@ -5041,6 +5325,7 @@ public object FfiConverterSequenceTypeBulkResultEntry: FfiConverterRustBuffer<Li
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_logins_fn_func_create_managed_encdec(
     
+        
         FfiConverterTypeKeyManager.lower(`keyManager`),_status)
 }
     )
@@ -5057,6 +5342,7 @@ public object FfiConverterSequenceTypeBulkResultEntry: FfiConverterRustBuffer<Li
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_logins_fn_func_create_static_key_manager(
     
+        
         FfiConverterString.lower(`key`),_status)
 }
     )

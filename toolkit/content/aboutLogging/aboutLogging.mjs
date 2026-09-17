@@ -519,6 +519,15 @@ function init() {
   gDashboard.enableLogging = true;
 
   populatePresets();
+
+  // This must happen before parseURL, otherwise it would clobber the logging
+  // preset the URL parameters have selected: setting the module list from the
+  // URL switches the dropdown to "custom", which writes "custom" to this pref.
+  try {
+    let loggingPreset = Services.prefs.getCharPref("logging.config.preset");
+    gLoggingSettings.loggingPreset = loggingPreset;
+  } catch {}
+
   parseURL();
 
   $("#log-file-configuration").addEventListener("submit", e => {
@@ -574,11 +583,6 @@ function init() {
     "logging.config.javascriptTracing",
     false
   );
-
-  try {
-    let loggingPreset = Services.prefs.getCharPref("logging.config.preset");
-    gLoggingSettings.loggingPreset = loggingPreset;
-  } catch {}
 
   try {
     let running = Services.prefs.getBoolPref("logging.config.running");

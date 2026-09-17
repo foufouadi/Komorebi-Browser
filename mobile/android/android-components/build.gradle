@@ -22,8 +22,8 @@ mozilla {
     detektSourcePaths = [
         "**/components/**/*.kt", "**/buildSrc/**/*.kt", "**/samples/**/*.kt",
         "!**/build.gradle.kts", "!**/build/**", "!**/docs/**", "!**/resources/**",
-        "!**/src/androidTest/**", "!**/src/iosTest/**", "!**/src/main/assets/extensions/**",
-        "!**/src/test/**", "!**/test/src/**", "!**/tmp/**", "!**/tooling/fetch-tests/**",
+        "!**/src/iosTest/**", "!**/src/main/assets/extensions/**",
+        "!**/tmp/**", "!**/tooling/fetch-tests/**",
     ]
     detektConfig = "$projectDir/config/detekt.yml"
     detektBaseline = "$projectDir/config/detekt-baseline.xml"

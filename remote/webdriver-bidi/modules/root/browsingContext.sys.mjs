@@ -14,6 +14,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   capture: "chrome://remote/content/shared/Capture.sys.mjs",
   ContextDescriptorType:
     "chrome://remote/content/shared/messagehandler/MessageHandler.sys.mjs",
+  Downloads: "resource://gre/modules/Downloads.sys.mjs",
   error: "chrome://remote/content/shared/webdriver/Errors.sys.mjs",
   EventPromise: "chrome://remote/content/shared/Sync.sys.mjs",
   generateUUID: "chrome://remote/content/shared/UUID.sys.mjs",
@@ -399,6 +400,16 @@ class BrowsingContextModule extends RootBiDiModule {
    */
 
   /**
+   * Used as an argument for the browsingContext.captureScreenshot command to
+   * represent the maximum dimensions of the output image.
+   *
+   * @typedef ImageSize
+   *
+   * @property {number=} maxHeight
+   * @property {number=} maxWidth
+   */
+
+  /**
    * Used as an argument for browsingContext.captureScreenshot command
    * to represent an element which is going to be a target of the command.
    *
@@ -420,6 +431,8 @@ class BrowsingContextModule extends RootBiDiModule {
    * @param {OriginType=} options.origin
    * @param {ImageFormat=} options.format
    *    Configuration options for the output image.
+   * @param {ImageSize=} options.imageSize
+   *    Maximum dimensions of the output image.
    *
    * @throws {NoSuchFrameError}
    *     If the browsing context cannot be found.
@@ -430,6 +443,7 @@ class BrowsingContextModule extends RootBiDiModule {
       context: contextId,
       origin = OriginType.viewport,
       format = { type: "image/png", quality: undefined },
+      imageSize = null,
     } = options;
 
     lazy.assert.string(
@@ -467,6 +481,24 @@ class BrowsingContextModule extends RootBiDiModule {
         imageQuality => imageQuality >= 0 && imageQuality <= 1,
         lazy.pprint`Expected "quality" to be in the range of 0 to 1, got ${quality}`
       )(quality);
+    }
+
+    let maxHeight, maxWidth;
+    if (imageSize !== null) {
+      lazy.assert.object(
+        imageSize,
+        lazy.pprint`Expected "imageSize" to be an object, got ${imageSize}`
+      );
+
+      maxHeight = imageSize.maxHeight;
+      maxWidth = imageSize.maxWidth;
+      for (const [name, value] of Object.entries({ maxHeight, maxWidth })) {
+        if (value !== undefined && value !== null) {
+          const errorMessage = lazy.pprint`Expected "imageSize.${name}" to be an integer greater than 0, got ${value}`;
+          lazy.assert.integer(value, errorMessage);
+          lazy.assert.that(size => size >= 1, errorMessage)(value);
+        }
+      }
     }
 
     if (clip !== null) {
@@ -546,7 +578,8 @@ class BrowsingContextModule extends RootBiDiModule {
       rect.x,
       rect.y,
       rect.width,
-      rect.height
+      rect.height,
+      { maxHeight, maxWidth }
     );
 
     return {
@@ -2021,7 +2054,7 @@ class BrowsingContextModule extends RootBiDiModule {
       },
     });
 
-    const downloadsDir = Services.dirsvc.get("DfltDwnld", Ci.nsIFile).path;
+    const downloadsDir = await lazy.Downloads.getPreferredDownloadsDirectory();
     const screencast = lazy.generateUUID();
 
     // Extract video file extension from mimeType.

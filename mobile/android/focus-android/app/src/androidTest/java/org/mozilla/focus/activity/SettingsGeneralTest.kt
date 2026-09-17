@@ -133,8 +133,6 @@ class SettingsGeneralTest {
     @SmokeTest
     @Test
     fun changeDefaultBrowserTest() {
-        val supportPageUrl = "https://support.mozilla.org/en-US/kb/set-firefox-focus-default-browser-android"
-
         homeScreen {}
             .openMainMenu {}
             .openSettings {}

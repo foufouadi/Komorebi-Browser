@@ -3,34 +3,34 @@
 
 "use strict";
 
-add_setup(async function () {
-  await SpecialPowers.pushPrefEnv({
-    set: [["test.wait300msAfterTabSwitch", true]],
-  });
-});
+const { NodeHTTPServer } = ChromeUtils.importESModule(
+  "resource://testing-common/NodeServer.sys.mjs"
+);
 
-function startDropServer() {
-  const server = Cc["@mozilla.org/network/server-socket;1"].createInstance(
-    Ci.nsIServerSocket
-  );
-  info("Using a random port.");
-  server.init(-1, true, -1);
-  server.asyncListen({
-    onSocketAccepted(socket, transport) {
-      // Close immediately, no response sent.
-      transport.close(Cr.NS_OK);
-    },
-    onStopListening() {},
-  });
-  registerCleanupFunction(() => server.close());
-  return server.port;
+// A 4xx response with no body is what nsURILoader turns into
+// NS_ERROR_NET_EMPTY_RESPONSE.
+//
+// registerPathHandler ships the handler to a separate Node process via
+// handler.toString(), so it must not close over anything from this scope;
+// pick a self-contained handler before registering it.
+async function startEmptyResponseServer(setContentLength) {
+  const server = new NodeHTTPServer();
+  await server.start();
+  registerCleanupFunction(() => server.stop());
+  const handler = setContentLength
+    ? (req, resp) => {
+        resp.writeHead(404, { "Content-Length": "0" });
+        resp.end();
+      }
+    : (req, resp) => {
+        resp.writeHead(404);
+        resp.end();
+      };
+  await server.registerPathHandler("/empty", handler);
+  return `${server.origin()}/empty`;
 }
 
-add_task(async function test_net_empty_response_copy() {
-  await setSecurityCertErrorsFeltPrivacyToTrue();
-
-  const port = startDropServer();
-  const url = `http://127.0.0.1:${port}/`;
+async function loadEmptyResponseErrorPage(url) {
   let browser, tab;
   let pageLoaded;
   await BrowserTestUtils.openNewForegroundTab(
@@ -46,8 +46,10 @@ add_task(async function test_net_empty_response_copy() {
 
   info("Loading and waiting for the net error.");
   await pageLoaded;
+  return { browser, tab };
+}
 
-  Assert.ok("Loaded empty server response.");
+async function assertEmptyResponseCopy(browser) {
   await SpecialPowers.spawn(browser, [], async () => {
     await ContentTaskUtils.waitForCondition(
       () => content?.document?.querySelector("net-error-card"),
@@ -66,27 +68,40 @@ add_task(async function test_net_empty_response_copy() {
     );
     Assert.equal(
       netErrorCard.errorIntro.dataset.l10nId,
-      "neterror-http-empty-response-description",
-      "Using the 'empty response' intro."
+      "fp-neterror-http-error-intro",
+      "Using the HTTP error intro."
     );
     const list = netErrorCard.renderRoot.querySelector(".what-can-you-do-list");
     Assert.ok(list, "NetErrorCard has what-can-you-do list.");
     Assert.ok(
+      list.querySelector('[data-l10n-id="neterror-http-error-page"]'),
+      "List includes check-the-address item"
+    );
+    Assert.ok(
       list.querySelector('[data-l10n-id="neterror-load-error-try-again"]'),
       "List includes try-again item"
-    );
-    Assert.ok(
-      list.querySelector('[data-l10n-id="neterror-load-error-connection"]'),
-      "List includes connection item"
-    );
-    Assert.ok(
-      list.querySelector('[data-l10n-id="neterror-load-error-firewall"]'),
-      "List includes firewall item"
     );
     Assert.ok(
       ContentTaskUtils.isVisible(netErrorCard.tryAgainButton),
       "The 'Try Again' button is shown."
     );
   });
+}
+
+add_task(async function test_net_empty_response_copy() {
+  await setSecurityCertErrorsFeltPrivacyToTrue();
+
+  const url = await startEmptyResponseServer(true);
+  const { browser, tab } = await loadEmptyResponseErrorPage(url);
+  await assertEmptyResponseCopy(browser);
+  BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_net_empty_response_copy_no_content_length() {
+  await setSecurityCertErrorsFeltPrivacyToTrue();
+
+  const url = await startEmptyResponseServer(false);
+  const { browser, tab } = await loadEmptyResponseErrorPage(url);
+  await assertEmptyResponseCopy(browser);
   BrowserTestUtils.removeTab(tab);
 });

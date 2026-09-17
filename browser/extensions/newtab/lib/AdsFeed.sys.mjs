@@ -233,7 +233,7 @@ export class AdsFeed {
    */
   async getAdsData(isStartup = false) {
     const supportedAdTypes = this.getSupportedAdTypes();
-    const cachedData = (await this.cache.get()) || {};
+    const cachedData = this.adsClient ? {} : (await this.cache.get()) || {};
 
     const { ads } = cachedData;
     const adsCacheValid = ads
@@ -543,12 +543,16 @@ export class AdsFeed {
    * @returns {void}
    */
   async update(isStartup) {
-    await this.cache.set("ads", {
-      ...(this.tiles ? { tiles: this.tiles } : {}),
-      ...(this.spocs ? { spocs: this.spocs } : {}),
-      ...(this.spocPlacements ? { spocPlacements: this.spocPlacements } : {}),
-      lastUpdated: this.lastUpdated,
-    });
+    // The ads-client has its own HTTP response cache, so it is the only cache
+    // on that path.
+    if (!this.adsClient) {
+      await this.cache.set("ads", {
+        ...(this.tiles ? { tiles: this.tiles } : {}),
+        ...(this.spocs ? { spocs: this.spocs } : {}),
+        ...(this.spocPlacements ? { spocPlacements: this.spocPlacements } : {}),
+        lastUpdated: this.lastUpdated,
+      });
+    }
 
     if (this.tiles && this.tiles.length) {
       this.store.dispatch(

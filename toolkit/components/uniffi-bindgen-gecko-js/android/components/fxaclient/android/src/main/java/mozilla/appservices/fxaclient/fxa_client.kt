@@ -102,6 +102,43 @@ internal open class ForeignBytes : Structure() {
 
     class ByValue : ForeignBytes(), Structure.ByValue
 }
+
+// Converter for `&[u8]` / `[ByRef] bytes` arguments.
+//
+// Only `lower` is valid — zero-copy byte buffers only flow foreign -> Rust,
+// and only in argument position. `lift`, `read`, `write`, and
+// `allocationSize` have no sound implementation here and all panic at
+// runtime. The `FfiConverter` interface is implemented so that the
+// compiler enforces the full method set (rather than relying on eyeball).
+//
+// The provided `ByteBuffer` MUST be direct — only direct buffers have a
+// stable native address that JNA can expose via `getDirectBufferPointer`.
+// The returned `ForeignBytes.ByValue` is only valid for the duration of
+// the FFI call; the Rust side treats it as a borrow.
+internal object FfiConverterByRefBytes : FfiConverter<java.nio.ByteBuffer, ForeignBytes.ByValue> {
+    override fun lower(value: java.nio.ByteBuffer): ForeignBytes.ByValue {
+        require(value.isDirect) { "UniFFI zero-copy &[u8] requires a direct ByteBuffer. Use ByteBuffer.allocateDirect()." }
+        val remaining = value.remaining()
+        val fb = ForeignBytes.ByValue()
+        fb.len = remaining
+        // Zero-length direct buffers: skip getDirectBufferPointer (platform-variable behavior)
+        // and pass null. The Rust side treats (null, 0) as &[].
+        fb.data = if (remaining == 0) null else com.sun.jna.Native.getDirectBufferPointer(value)
+        return fb
+    }
+
+    override fun lift(value: ForeignBytes.ByValue): java.nio.ByteBuffer =
+        error("ByRef bytes cannot be lifted: zero-copy &[u8] only flows foreign->Rust")
+
+    override fun read(buf: java.nio.ByteBuffer): java.nio.ByteBuffer =
+        error("ByRef bytes cannot be read from a buffer: zero-copy &[u8] is only supported in argument position, not nested in records/options/etc.")
+
+    override fun write(value: java.nio.ByteBuffer, buf: java.nio.ByteBuffer): Unit =
+        error("ByRef bytes cannot be written to a buffer: zero-copy &[u8] is only supported in argument position, not nested in records/options/etc.")
+
+    override fun allocationSize(value: java.nio.ByteBuffer): ULong =
+        error("ByRef bytes have no RustBuffer allocation size: zero-copy &[u8] is only supported in argument position, not nested in records/options/etc.")
+}
 /**
  * The FfiConverter interface handles converter types to and from the FFI
  *
@@ -639,87 +676,87 @@ internal object IntegrityCheckingUniffiLib {
         uniffiCheckContractApiVersion(this)
     }
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_simulate_network_error(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_get_connection_success_url(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_get_manage_account_url(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_get_manage_devices_url(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_get_token_server_endpoint_url(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_matches_server(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_check_authorization_status(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_disconnect(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_get_auth_state(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_get_pairing_authority_url(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_get_state(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_handle_web_channel_login(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_on_auth_issues(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_process_event(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_simulate_permanent_auth_token_issue(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_simulate_temporary_auth_token_issue(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_clear_device_name(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_ensure_capabilities(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_get_attached_clients(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_get_current_device_id(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_get_devices(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_initialize_device(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_set_device_name(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_get_profile(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_close_tabs(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_handle_push_message(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_poll_device_commands(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_send_single_tab(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_set_push_subscription(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_to_json(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_gather_telemetry(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_authorize_code_using_session_token(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_clear_access_token_cache(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_get_access_token(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_get_session_token(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_get_signed_in_user_for_web_channel(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_handle_session_token_change(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_handle_web_channel_password_change(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_method_firefoxaccount_has_scope(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_constructor_firefoxaccount_new(
-    ): Short
+    ): Int
     external fun uniffi_fxa_client_checksum_constructor_firefoxaccount_from_json(
-    ): Short
+    ): Int
     external fun ffi_fxa_client_uniffi_contract_version(
     ): Int
 
@@ -740,197 +777,197 @@ internal object UniffiLib {
         
     }
     external fun uniffi_fxa_client_fn_clone_firefoxaccount(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_fxa_client_fn_free_firefoxaccount(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_fxa_client_fn_constructor_firefoxaccount_new(`config`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_fxa_client_fn_constructor_firefoxaccount_from_json(`data`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun uniffi_fxa_client_fn_method_firefoxaccount_simulate_network_error(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_fxa_client_fn_method_firefoxaccount_get_connection_success_url(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_get_manage_account_url(`ptr`: Long,`entrypoint`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_get_manage_devices_url(`ptr`: Long,`entrypoint`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_get_token_server_endpoint_url(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_matches_server(`ptr`: Long,`server`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Byte
-external fun uniffi_fxa_client_fn_method_firefoxaccount_check_authorization_status(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_disconnect(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_fxa_client_fn_method_firefoxaccount_get_auth_state(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_get_pairing_authority_url(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_get_state(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_handle_web_channel_login(`ptr`: Long,`jsonPayload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_fxa_client_fn_method_firefoxaccount_on_auth_issues(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_fxa_client_fn_method_firefoxaccount_process_event(`ptr`: Long,`event`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_simulate_permanent_auth_token_issue(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_fxa_client_fn_method_firefoxaccount_simulate_temporary_auth_token_issue(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_fxa_client_fn_method_firefoxaccount_clear_device_name(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_fxa_client_fn_method_firefoxaccount_ensure_capabilities(`ptr`: Long,`supportedCapabilities`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_get_attached_clients(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_get_current_device_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_get_devices(`ptr`: Long,`ignoreCache`: Byte,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_initialize_device(`ptr`: Long,`name`: RustBuffer.ByValue,`deviceType`: RustBufferDeviceType.ByValue,`supportedCapabilities`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_set_device_name(`ptr`: Long,`displayName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_get_profile(`ptr`: Long,`ignoreCache`: Byte,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_close_tabs(`ptr`: Long,`targetDeviceId`: RustBuffer.ByValue,`urls`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_handle_push_message(`ptr`: Long,`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_poll_device_commands(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_send_single_tab(`ptr`: Long,`targetDeviceId`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`url`: RustBuffer.ByValue,`isPrivate`: Byte,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_fxa_client_fn_method_firefoxaccount_set_push_subscription(`ptr`: Long,`subscription`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_to_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_gather_telemetry(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_authorize_code_using_session_token(`ptr`: Long,`params`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_clear_access_token_cache(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_fxa_client_fn_method_firefoxaccount_get_access_token(`ptr`: Long,`scope`: RustBuffer.ByValue,`useCache`: Byte,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_get_session_token(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_get_signed_in_user_for_web_channel(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_fxa_client_fn_method_firefoxaccount_handle_session_token_change(`ptr`: Long,`sessionToken`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_fxa_client_fn_method_firefoxaccount_handle_web_channel_password_change(`ptr`: Long,`jsonPayload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun uniffi_fxa_client_fn_method_firefoxaccount_has_scope(`ptr`: Long,`scope`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Byte
-external fun ffi_fxa_client_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun ffi_fxa_client_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun ffi_fxa_client_rustbuffer_free(`buf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
-external fun ffi_fxa_client_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun ffi_fxa_client_rust_future_poll_u8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_cancel_u8(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_free_u8(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Byte
-external fun ffi_fxa_client_rust_future_poll_i8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_cancel_i8(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_free_i8(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_complete_i8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Byte
-external fun ffi_fxa_client_rust_future_poll_u16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_cancel_u16(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_free_u16(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Short
-external fun ffi_fxa_client_rust_future_poll_i16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_cancel_i16(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_free_i16(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_complete_i16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Short
-external fun ffi_fxa_client_rust_future_poll_u32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_cancel_u32(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_free_u32(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_complete_u32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Int
-external fun ffi_fxa_client_rust_future_poll_i32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_cancel_i32(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_free_i32(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_complete_i32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Int
-external fun ffi_fxa_client_rust_future_poll_u64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_cancel_u64(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_free_u64(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_complete_u64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun ffi_fxa_client_rust_future_poll_i64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_cancel_i64(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_free_i64(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_complete_i64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Long
-external fun ffi_fxa_client_rust_future_poll_f32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_cancel_f32(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_free_f32(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_complete_f32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Float
-external fun ffi_fxa_client_rust_future_poll_f64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_cancel_f64(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_free_f64(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_complete_f64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Double
-external fun ffi_fxa_client_rust_future_poll_rust_buffer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_cancel_rust_buffer(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_free_rust_buffer(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_complete_rust_buffer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun ffi_fxa_client_rust_future_poll_void(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_cancel_void(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_free_void(`handle`: Long,
-): Unit
-external fun ffi_fxa_client_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): Unit
+    ): Long
+    external fun uniffi_fxa_client_fn_free_firefoxaccount(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_fxa_client_fn_constructor_firefoxaccount_new(`config`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_fxa_client_fn_constructor_firefoxaccount_from_json(`data`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_simulate_network_error(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_get_connection_success_url(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_get_manage_account_url(`ptr`: Long,`entrypoint`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_get_manage_devices_url(`ptr`: Long,`entrypoint`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_get_token_server_endpoint_url(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_matches_server(`ptr`: Long,`server`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_check_authorization_status(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_disconnect(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_get_auth_state(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_get_pairing_authority_url(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_get_state(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_handle_web_channel_login(`ptr`: Long,`jsonPayload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_on_auth_issues(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_process_event(`ptr`: Long,`event`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_simulate_permanent_auth_token_issue(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_simulate_temporary_auth_token_issue(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_clear_device_name(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_ensure_capabilities(`ptr`: Long,`supportedCapabilities`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_get_attached_clients(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_get_current_device_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_get_devices(`ptr`: Long,`ignoreCache`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_initialize_device(`ptr`: Long,`name`: RustBuffer.ByValue,`deviceType`: RustBufferDeviceType.ByValue,`supportedCapabilities`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_set_device_name(`ptr`: Long,`displayName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_get_profile(`ptr`: Long,`ignoreCache`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_close_tabs(`ptr`: Long,`targetDeviceId`: RustBuffer.ByValue,`urls`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_handle_push_message(`ptr`: Long,`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_poll_device_commands(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_send_single_tab(`ptr`: Long,`targetDeviceId`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`url`: RustBuffer.ByValue,`isPrivate`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_set_push_subscription(`ptr`: Long,`subscription`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_to_json(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_gather_telemetry(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_authorize_code_using_session_token(`ptr`: Long,`params`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_clear_access_token_cache(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_get_access_token(`ptr`: Long,`scope`: RustBuffer.ByValue,`useCache`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_get_session_token(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_get_signed_in_user_for_web_channel(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_handle_session_token_change(`ptr`: Long,`sessionToken`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_handle_web_channel_password_change(`ptr`: Long,`jsonPayload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_fxa_client_fn_method_firefoxaccount_has_scope(`ptr`: Long,`scope`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    external fun ffi_fxa_client_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun ffi_fxa_client_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun ffi_fxa_client_rustbuffer_free(`buf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun ffi_fxa_client_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun ffi_fxa_client_rust_future_poll_u8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_cancel_u8(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_free_u8(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Int
+    external fun ffi_fxa_client_rust_future_poll_i8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_cancel_i8(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_free_i8(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_complete_i8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    external fun ffi_fxa_client_rust_future_poll_u16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_cancel_u16(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_free_u16(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Int
+    external fun ffi_fxa_client_rust_future_poll_i16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_cancel_i16(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_free_i16(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_complete_i16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Short
+    external fun ffi_fxa_client_rust_future_poll_u32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_cancel_u32(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_free_u32(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_complete_u32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Int
+    external fun ffi_fxa_client_rust_future_poll_i32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_cancel_i32(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_free_i32(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_complete_i32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Int
+    external fun ffi_fxa_client_rust_future_poll_u64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_cancel_u64(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_free_u64(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_complete_u64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun ffi_fxa_client_rust_future_poll_i64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_cancel_i64(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_free_i64(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_complete_i64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun ffi_fxa_client_rust_future_poll_f32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_cancel_f32(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_free_f32(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_complete_f32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Float
+    external fun ffi_fxa_client_rust_future_poll_f64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_cancel_f64(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_free_f64(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_complete_f64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Double
+    external fun ffi_fxa_client_rust_future_poll_rust_buffer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_cancel_rust_buffer(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_free_rust_buffer(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_complete_rust_buffer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun ffi_fxa_client_rust_future_poll_void(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_cancel_void(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_free_void(`handle`: Long,
+    ): Unit
+    external fun ffi_fxa_client_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
 
-    
+        
 }
 
 private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
@@ -1898,6 +1935,7 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_fxa_client_fn_constructor_firefoxaccount_new(
     
+        
         FfiConverterTypeFxaConfig.lower(`config`),_status)
 }
     )
@@ -1907,6 +1945,11 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
 
     private val wasDestroyed = AtomicBoolean(false)
     private val callCounter = AtomicLong(1)
+
+    /**
+     * Whether the current object has been destroyed and its reference is gone in the Rust side.
+     */
+    val uniffiIsDestroyed: Boolean get() = wasDestroyed.get()
 
     override fun destroy() {
         // Only allow a single call to this method.
@@ -2032,6 +2075,7 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCallWithError(FxaException) { _status ->
     UniffiLib.uniffi_fxa_client_fn_method_firefoxaccount_get_manage_account_url(
         it,
+        
         FfiConverterString.lower(`entrypoint`),_status)
 }
     }
@@ -2061,6 +2105,7 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCallWithError(FxaException) { _status ->
     UniffiLib.uniffi_fxa_client_fn_method_firefoxaccount_get_manage_devices_url(
         it,
+        
         FfiConverterString.lower(`entrypoint`),_status)
 }
     }
@@ -2097,6 +2142,7 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCallWithError(FxaException) { _status ->
     UniffiLib.uniffi_fxa_client_fn_method_firefoxaccount_matches_server(
         it,
+        
         FfiConverterTypeFxaServer.lower(`server`),_status)
 }
     }
@@ -2227,6 +2273,7 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCallWithError(FxaException) { _status ->
     UniffiLib.uniffi_fxa_client_fn_method_firefoxaccount_handle_web_channel_login(
         it,
+        
         FfiConverterString.lower(`jsonPayload`),_status)
 }
     }
@@ -2266,6 +2313,7 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCallWithError(FxaException) { _status ->
     UniffiLib.uniffi_fxa_client_fn_method_firefoxaccount_process_event(
         it,
+        
         FfiConverterTypeFxaEvent.lower(`event`),_status)
 }
     }
@@ -2360,6 +2408,7 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCallWithError(FxaException) { _status ->
     UniffiLib.uniffi_fxa_client_fn_method_firefoxaccount_ensure_capabilities(
         it,
+        
         FfiConverterSequenceTypeDeviceCapability.lower(`supportedCapabilities`),_status)
 }
     }
@@ -2443,6 +2492,7 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCallWithError(FxaException) { _status ->
     UniffiLib.uniffi_fxa_client_fn_method_firefoxaccount_get_devices(
         it,
+        
         FfiConverterBoolean.lower(`ignoreCache`),_status)
 }
     }
@@ -2482,7 +2532,10 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCallWithError(FxaException) { _status ->
     UniffiLib.uniffi_fxa_client_fn_method_firefoxaccount_initialize_device(
         it,
-        FfiConverterString.lower(`name`),FfiConverterTypeDeviceType.lower(`deviceType`),FfiConverterSequenceTypeDeviceCapability.lower(`supportedCapabilities`),_status)
+        
+        FfiConverterString.lower(`name`),
+        FfiConverterTypeDeviceType.lower(`deviceType`),
+        FfiConverterSequenceTypeDeviceCapability.lower(`supportedCapabilities`),_status)
 }
     }
     )
@@ -2513,6 +2566,7 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCallWithError(FxaException) { _status ->
     UniffiLib.uniffi_fxa_client_fn_method_firefoxaccount_set_device_name(
         it,
+        
         FfiConverterString.lower(`displayName`),_status)
 }
     }
@@ -2549,6 +2603,7 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCallWithError(FxaException) { _status ->
     UniffiLib.uniffi_fxa_client_fn_method_firefoxaccount_get_profile(
         it,
+        
         FfiConverterBoolean.lower(`ignoreCache`),_status)
 }
     }
@@ -2571,7 +2626,9 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCallWithError(FxaException) { _status ->
     UniffiLib.uniffi_fxa_client_fn_method_firefoxaccount_close_tabs(
         it,
-        FfiConverterString.lower(`targetDeviceId`),FfiConverterSequenceString.lower(`urls`),_status)
+        
+        FfiConverterString.lower(`targetDeviceId`),
+        FfiConverterSequenceString.lower(`urls`),_status)
 }
     }
     )
@@ -2599,6 +2656,7 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCallWithError(FxaException) { _status ->
     UniffiLib.uniffi_fxa_client_fn_method_firefoxaccount_handle_push_message(
         it,
+        
         FfiConverterString.lower(`payload`),_status)
 }
     }
@@ -2662,7 +2720,11 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCallWithError(FxaException) { _status ->
     UniffiLib.uniffi_fxa_client_fn_method_firefoxaccount_send_single_tab(
         it,
-        FfiConverterString.lower(`targetDeviceId`),FfiConverterString.lower(`title`),FfiConverterString.lower(`url`),FfiConverterBoolean.lower(`isPrivate`),_status)
+        
+        FfiConverterString.lower(`targetDeviceId`),
+        FfiConverterString.lower(`title`),
+        FfiConverterString.lower(`url`),
+        FfiConverterBoolean.lower(`isPrivate`),_status)
 }
     }
     
@@ -2695,6 +2757,7 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCallWithError(FxaException) { _status ->
     UniffiLib.uniffi_fxa_client_fn_method_firefoxaccount_set_push_subscription(
         it,
+        
         FfiConverterTypeDevicePushSubscription.lower(`subscription`),_status)
 }
     }
@@ -2774,6 +2837,7 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCallWithError(FxaException) { _status ->
     UniffiLib.uniffi_fxa_client_fn_method_firefoxaccount_authorize_code_using_session_token(
         it,
+        
         FfiConverterTypeAuthorizationParameters.lower(`params`),_status)
 }
     }
@@ -2839,7 +2903,9 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCallWithError(FxaException) { _status ->
     UniffiLib.uniffi_fxa_client_fn_method_firefoxaccount_get_access_token(
         it,
-        FfiConverterString.lower(`scope`),FfiConverterBoolean.lower(`useCache`),_status)
+        
+        FfiConverterString.lower(`scope`),
+        FfiConverterBoolean.lower(`useCache`),_status)
 }
     }
     )
@@ -2917,6 +2983,7 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCallWithError(FxaException) { _status ->
     UniffiLib.uniffi_fxa_client_fn_method_firefoxaccount_handle_session_token_change(
         it,
+        
         FfiConverterString.lower(`sessionToken`),_status)
 }
     }
@@ -2936,6 +3003,7 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCallWithError(FxaException) { _status ->
     UniffiLib.uniffi_fxa_client_fn_method_firefoxaccount_handle_web_channel_password_change(
         it,
+        
         FfiConverterString.lower(`jsonPayload`),_status)
 }
     }
@@ -2956,6 +3024,7 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_fxa_client_fn_method_firefoxaccount_has_scope(
         it,
+        
         FfiConverterString.lower(`scope`),_status)
 }
     }
@@ -2987,6 +3056,7 @@ open class FirefoxAccount: Disposable, AutoCloseable, FirefoxAccountInterface
     uniffiRustCallWithError(FxaException) { _status ->
     UniffiLib.uniffi_fxa_client_fn_constructor_firefoxaccount_from_json(
     
+        
         FfiConverterString.lower(`data`),_status)
 }
     )
@@ -4037,7 +4107,7 @@ public object FfiConverterTypeAccountEvent : FfiConverterRustBuffer<AccountEvent
         }
     }
 
-    override fun allocationSize(value: AccountEvent) = when(value) {
+    override fun allocationSize(value: AccountEvent): ULong = when(value) {
         is AccountEvent.CommandReceived -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -4191,7 +4261,7 @@ public object FfiConverterTypeCloseTabsResult : FfiConverterRustBuffer<CloseTabs
         }
     }
 
-    override fun allocationSize(value: CloseTabsResult) = when(value) {
+    override fun allocationSize(value: CloseTabsResult): ULong = when(value) {
         is CloseTabsResult.Ok -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -4612,7 +4682,7 @@ public object FfiConverterTypeFxaEvent : FfiConverterRustBuffer<FxaEvent>{
         }
     }
 
-    override fun allocationSize(value: FxaEvent) = when(value) {
+    override fun allocationSize(value: FxaEvent): ULong = when(value) {
         is FxaEvent.Initialize -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -4836,7 +4906,7 @@ public object FfiConverterTypeFxaServer : FfiConverterRustBuffer<FxaServer>{
         }
     }
 
-    override fun allocationSize(value: FxaServer) = when(value) {
+    override fun allocationSize(value: FxaServer): ULong = when(value) {
         is FxaServer.Release -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -4985,7 +5055,7 @@ public object FfiConverterTypeFxaState : FfiConverterRustBuffer<FxaState>{
         }
     }
 
-    override fun allocationSize(value: FxaState) = when(value) {
+    override fun allocationSize(value: FxaState): ULong = when(value) {
         is FxaState.Uninitialized -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -5115,7 +5185,7 @@ public object FfiConverterTypeIncomingDeviceCommand : FfiConverterRustBuffer<Inc
         }
     }
 
-    override fun allocationSize(value: IncomingDeviceCommand) = when(value) {
+    override fun allocationSize(value: IncomingDeviceCommand): ULong = when(value) {
         is IncomingDeviceCommand.TabReceived -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (

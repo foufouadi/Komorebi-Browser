@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.fenix.ui.efficiency.tests
 
 import org.junit.Test
@@ -20,9 +24,6 @@ import org.mozilla.fenix.ui.efficiency.selectors.ToolbarSelectors
 
 class TabbedBrowsingTest : BaseTest() {
 
-    private val mockWebServer
-        get() = fenixTestRule.mockWebServer
-
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1046683
     @Test
     fun verifySyncedTabsWhenUserIsNotSignedInTest() {
@@ -31,9 +32,9 @@ class TabbedBrowsingTest : BaseTest() {
             .mozClick(TabDrawerSelectors.SYNCED_TABS_BUTTON)
             .mozVerifyElementIsSelected(TabDrawerSelectors.SYNCED_TABS_BUTTON)
         on.tabDrawer
-            .mozVerifyElementsByGroup("tabDrawerUnauthenticatedSyncedTabs")
+            .mozVerifyElementsByGroup(TabDrawerSelectors.Group.TAB_DRAWER_UNAUTHENTICATED_SYNCED_TABS)
             .mozClick(TabDrawerSelectors.SIGN_IN_TO_SYNC_BUTTON)
-        on.settingsTurnOnSync.mozVerifyElementsByGroup()
+        on.settingsTurnOnSync.mozVerifyReadiness()
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/903587
@@ -66,7 +67,7 @@ class TabbedBrowsingTest : BaseTest() {
     @SmokeTest
     @Test
     fun verifyTheTabsGroupButtonTabsTrayPositionTest() {
-        on.tabDrawer.navigateToPage().mozVerifyElementsByGroup("tabDrawerBannerButtons")
+        on.tabDrawer.navigateToPage().mozVerifyElementsByGroup(TabDrawerSelectors.Group.TAB_DRAWER_BANNER_BUTTONS)
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/4034504
@@ -83,13 +84,13 @@ class TabbedBrowsingTest : BaseTest() {
         on.tabDrawer.mozClick(TAB_GROUPS_BUTTON)
         on.tabDrawer
             .deleteTabGroupFromTabGroupPage()
-            .mozVerifyElementsByGroup("deleteTabGroupDialog")
+            .mozVerifyElementsByGroup(TabDrawerSelectors.Group.DELETE_TAB_GROUP_DIALOG)
             .mozClick(DELETE_TAB_GROUP_DIALOG_CANCEL_BUTTON)
         on.tabDrawer
             .deleteTabGroupFromTabGroupPage()
-            .mozVerifyElementsByGroup("deleteTabGroupDialog")
+            .mozVerifyElementsByGroup(TabDrawerSelectors.Group.DELETE_TAB_GROUP_DIALOG)
             .mozClick(DELETE_TAB_GROUP_DIALOG_DELETE_GROUP_BUTTON)
-            .mozVerifyElementsByGroup("emptyTabGroupsView")
+            .mozVerifyElementsByGroup(TabDrawerSelectors.Group.EMPTY_TAB_GROUPS_TAB_DRAWER_VIEW)
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/4034505
@@ -107,7 +108,9 @@ class TabbedBrowsingTest : BaseTest() {
         on.tabDrawer
             .selectAllTabsAndCreateTabGroup(tabGroupColor = tabGroupColor)
             .mozVerify(TAB_ITEM_WITH_TITLE(tabTitle = tabGroupTitle))
-        on.tabDrawer.closeTabGroup().mozVerifyElementsByGroup("emptyNormalBrowsingTabDrawerView")
+        on.tabDrawer
+            .closeTabGroup()
+            .mozVerifyElementsByGroup(TabDrawerSelectors.Group.EMPTY_NORMAL_BROWSING_TAB_DRAWER_VIEW)
         on.tabDrawer
             .openTabGroupFromTabGroupPage(
                 tabGroupTitle = tabGroupTitle,
@@ -115,7 +118,7 @@ class TabbedBrowsingTest : BaseTest() {
                 tabGroupColor = tabGroupColor,
             )
             .swipCloseTabGroupBottomSheet()
-            .mozVerifyElementsByGroup("normalBrowsingTabDrawerView")
+            .mozVerifyElementsByGroup(TabDrawerSelectors.Group.NORMAL_BROWSING_TAB_DRAWER_VIEW)
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/4034506
@@ -238,7 +241,7 @@ class TabbedBrowsingTest : BaseTest() {
         closeApp(composeRule.activityRule)
         restartApp(composeRule.activityRule)
 
-        on.home.mozVerify(HomeSelectors.PRIVATE_BROWSING_INFO_CARD_TITLE)
+        on.home.navigateToPage().mozVerify(HomeSelectors.PRIVATE_BROWSING_INFO_CARD_TITLE)
         on.tabDrawer.navigateToPage().mozVerify(TabDrawerSelectors.EMPTY_PRIVATE_TABS_LIST)
     }
 
@@ -313,7 +316,7 @@ class TabbedBrowsingTest : BaseTest() {
             .navigateToPage()
             .openTabSearch()
             .typeInTabSearch("android")
-            .mozVerifyElementsByGroup("tabSearchNoResults")
+            .mozVerifyElementsByGroup(TabDrawerSelectors.Group.TAB_SEARCH_NO_RESULTS)
         on.tabDrawer
             .clearTabSearch()
             .typeInTabSearch("localhost")

@@ -49,6 +49,7 @@ import mozilla.components.feature.customtabs.R as customtabsR
 import mozilla.components.feature.ipprotection.store.IPProtectionAction
 import mozilla.components.feature.ipprotection.store.IPProtectionStore
 import mozilla.components.feature.ipprotection.store.state.Authorized
+import mozilla.components.feature.ipprotection.store.state.ProxyActivation
 import mozilla.components.feature.session.TrackingProtectionUseCases
 import mozilla.components.feature.tabs.CustomTabsUseCases
 import mozilla.components.lib.publicsuffixlist.PublicSuffixList
@@ -172,6 +173,11 @@ class CustomTabBrowserToolbarMiddleware(
                 closeTabDelegate()
             }
 
+            is StartPageActions.ProxyActivationAnimationFinished -> {
+                ipProtectionStore.dispatch(IPProtectionAction.ProxyActivationShown)
+                next(action)
+            }
+
             is SiteInfoClicked -> {
                 Toolbar.buttonTapped.record(
                     Toolbar.ButtonTappedExtra(
@@ -242,15 +248,16 @@ class CustomTabBrowserToolbarMiddleware(
                         surface = SURFACE_CUSTOM_TAB,
                     )
                 )
-                val customTab = customTab
+                val tabContent = customTab?.content ?: return
                 navController.navigate(
                     NavGraphDirections.actionGlobalShareFragment(
                         sessionId = customTabId,
                         data =
                             arrayOf(
                                 ShareData(
-                                    url = customTab?.content?.url,
-                                    title = customTab?.content?.title,
+                                    url = tabContent.url,
+                                    title = tabContent.title,
+                                    private = tabContent.private,
                                 )
                             ),
                         showPage = true,
@@ -344,7 +351,9 @@ class CustomTabBrowserToolbarMiddleware(
 
     private fun observeIPProtectionUpdates(store: Store<BrowserToolbarState, BrowserToolbarAction>) {
         ipProtectionStore.observeWhileActive {
-            distinctUntilChangedBy { it.proxyStatus }
+            // Includes proxyActivation so start page actions rebuild once the pending pill
+            // animation is consumed (ProxyActivationShown), dropping the pill again.
+            distinctUntilChangedBy { it.proxyStatus to it.proxyActivation }
                 .collect {
                     updateStartPageActions(store, customTab)
                 }
@@ -465,24 +474,36 @@ class CustomTabBrowserToolbarMiddleware(
         contentDescription: Int,
         onClick: BrowserToolbarInteraction,
     ): Action {
-        return if (ipProtectionStore.state.proxyStatus == Authorized.Active) {
-            Action.AnimatedPillActionRes(
-                iconResId = drawableResId,
-                overlayResId = iconsR.drawable.mozac_ic_globe_24,
-                textResId = R.string.ip_protection_toolbar_pill_label,
-                contentDescriptionResId = R.string.ip_protection_toolbar_pill_description,
-                animated = !ipProtectionStore.state.proxyActiveShown,
-                onClick = onClick,
-                onAnimationStarted = {
-                    ipProtectionStore.dispatch(IPProtectionAction.ProxyActiveShown)
-                },
-            )
-        } else {
-            ActionButtonRes(
-                drawableResId = drawableResId,
-                contentDescription = contentDescription,
-                onClick = onClick,
-            )
+        val ipProtectionState = ipProtectionStore.state
+        return when {
+            ipProtectionState.proxyStatus == Authorized.Active ->
+                Action.AnimatedPillActionRes(
+                    iconResId = drawableResId,
+                    overlayResId = iconsR.drawable.mozac_ic_globe_24,
+                    textResId = R.string.ip_protection_toolbar_pill_label,
+                    contentDescriptionResId = R.string.ip_protection_toolbar_pill_description,
+                    animated = ipProtectionState.proxyActivation == ProxyActivation.TurningOn,
+                    onClick = onClick,
+                    onAnimationFinished = StartPageActions.ProxyActivationAnimationFinished,
+                )
+
+            ipProtectionState.proxyActivation == ProxyActivation.TurningOff ->
+                Action.AnimatedPillActionRes(
+                    iconResId = drawableResId,
+                    overlayResId = iconsR.drawable.mozac_ic_globe_24,
+                    textResId = R.string.ip_protection_toolbar_pill_label_off,
+                    contentDescriptionResId = R.string.ip_protection_toolbar_pill_description_off,
+                    animated = true,
+                    onClick = onClick,
+                    onAnimationFinished = StartPageActions.ProxyActivationAnimationFinished,
+                )
+
+            else ->
+                ActionButtonRes(
+                    drawableResId = drawableResId,
+                    contentDescription = contentDescription,
+                    onClick = onClick,
+                )
         }
     }
 
@@ -570,6 +591,8 @@ class CustomTabBrowserToolbarMiddleware(
         @VisibleForTesting
         internal sealed class StartPageActions : BrowserToolbarEvent {
             data object SiteInfoClicked : StartPageActions()
+
+            data object ProxyActivationAnimationFinished : StartPageActions()
         }
 
         @VisibleForTesting

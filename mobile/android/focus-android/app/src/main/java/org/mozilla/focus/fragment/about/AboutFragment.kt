@@ -4,6 +4,7 @@
 
 package org.mozilla.focus.fragment.about
 
+import android.os.Build
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -171,11 +172,13 @@ private fun getAboutHeader(
     val servicesVersion = mozilla.components.Build.APPLICATION_SERVICES_VERSION
     val geckoVersionInfo =
         GECKO_EMOJI + GeckoViewBuildConfig.MOZ_APP_VERSION + "-" + GeckoViewBuildConfig.MOZ_APP_BUILDID
-    val vcsHash = BuildConfig.VCS_HASH.takeIf { it.isNotBlank() }?.let { ", $it" } ?: ""
+    val vcsHash = BuildConfig.VCS_HASH.takeIf { it.isNotBlank() && it != "null" }?.let { ", $it" } ?: ""
+    val operatingSystemVersion = "Android ${Build.VERSION.RELEASE}"
 
     return """
         ${versionName ?: ""} (Build #${versionCode}$geckoVersionInfo)$vcsHash
         $servicesAbbreviation: $servicesVersion
+        OS: $operatingSystemVersion
     """
         .trimIndent()
 }

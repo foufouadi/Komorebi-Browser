@@ -139,19 +139,6 @@ class FenixBrowserUseCases(
         )
     }
 
-    /**
-     * Adds a new homepage ("about:home") tab to the provided tab group.
-     *
-     * @param group The ID of the group.
-     */
-    fun addNewHomepageTabInGroup(group: String) {
-        val tabId = addNewHomepageTab()
-        tabsUseCases.addTabsInGroup(
-            group = group,
-            tabId = tabId,
-        )
-    }
-
     /** Loads the homepage ("about:home"). */
     fun navigateToHomepage() {
         loadUrlUseCase.invoke(url = ABOUT_HOME_URL)

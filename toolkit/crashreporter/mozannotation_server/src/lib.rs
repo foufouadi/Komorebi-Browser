@@ -23,14 +23,14 @@ use std::cmp::min;
 use std::ffi::CString;
 use std::mem::{size_of, ManuallyDrop};
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum AnnotationData {
     Empty,
     ByteBuffer(Vec<u8>),
     String(CString),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CAnnotation {
     #[allow(dead_code)] // This is implicitly stored to and used externally
     pub id: u32,

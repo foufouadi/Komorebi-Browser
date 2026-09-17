@@ -30,7 +30,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.mozilla.fenix.helpers.SHADOW_HEIGHT
+import org.mozilla.fenix.helpers.SHADOW_WIDTH
+import org.mozilla.fenix.helpers.ShadowBoundsReportingBitmapFactory
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 class LensImageUploaderTest {
@@ -77,6 +81,30 @@ class LensImageUploaderTest {
         assertNotNull(bitmap)
         assertEquals(40, bitmap.width)
         assertEquals(80, bitmap.height)
+    }
+
+    @Test
+    fun `GIVEN a full resolution camera capture WHEN decoded THEN it is subsampled during the decode`() {
+        val jpegBytes = encodeJpeg(width = 4000, height = 3000)
+
+        val bitmap = createUploader(jpegBytes).decodeBitmap(mockk())
+
+        // 4000x3000 subsampled by 4 is the smallest power of two that fits the upload cap.
+        assertNotNull(bitmap)
+        assertEquals(1000, bitmap.width)
+        assertEquals(750, bitmap.height)
+    }
+
+    @Test
+    @Config(shadows = [ShadowBoundsReportingBitmapFactory::class])
+    fun `GIVEN the platform returns no bitmap for the bounds pass WHEN decoded THEN the image still decodes`() {
+        val uploader = createUploader(encodeJpeg(width = SHADOW_WIDTH, height = SHADOW_HEIGHT))
+
+        val bitmap = uploader.decodeBitmap(mockk())
+
+        assertNotNull(bitmap)
+        assertEquals(SHADOW_WIDTH, bitmap.width)
+        assertEquals(SHADOW_HEIGHT, bitmap.height)
     }
 
     @Test
@@ -260,7 +288,7 @@ class LensImageUploaderTest {
 
     private fun createUploader(jpegBytes: ByteArray): LensImageUploader {
         val contentResolver = mockk<ContentResolver>()
-        // decodeBitmap opens the stream twice: once for the bitmap, once for EXIF.
+        // decodeBitmap opens the stream three times: bounds, then the bitmap, then EXIF.
         every { contentResolver.openInputStream(any<Uri>()) } answers
             {
                 ByteArrayInputStream(jpegBytes)

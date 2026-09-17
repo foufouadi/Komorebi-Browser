@@ -38,7 +38,6 @@ clippy:
         - netwerk/base/idna_glue/
         - netwerk/base/mozurl/
         - netwerk/base/rust-helper/
-        - netwerk/base/ssl_tokens_cache/
         - netwerk/base/urlpattern_glue/
         - netwerk/base/uritemplate_glue/
         - netwerk/protocol/http/happy_eyeballs_glue/
@@ -99,11 +98,11 @@ clippy:
         - toolkit/crashreporter/mozwer-rust/
         - toolkit/crashreporter/process_reader/
         - toolkit/crashreporter/rust_minidump_writer_linux/
+        - toolkit/crashreporter/win32_process_mitigations/
         # - toolkit/library/buildid_reader/
         - toolkit/library/buildid_reader/ffi/
         - toolkit/library/gtest/rust/
         - toolkit/library/rust/
-        - toolkit/xre/detect_win32k_conflicts/
         - tools/fuzzing/rust/
         - tools/lint/mozcheck/
         - widget/windows/rust/

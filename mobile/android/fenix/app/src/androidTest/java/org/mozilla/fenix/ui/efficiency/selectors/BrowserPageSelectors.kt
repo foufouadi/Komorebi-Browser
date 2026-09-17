@@ -10,16 +10,27 @@ import org.mozilla.fenix.compose.snackbar.SNACKBAR_BUTTON_TEST_TAG
 import org.mozilla.fenix.compose.snackbar.SNACKBAR_TEST_TAG
 import org.mozilla.fenix.helpers.DataGenerationHelper.getStringResource
 import org.mozilla.fenix.helpers.TestHelper.shortAppName
+import org.mozilla.fenix.ui.efficiency.helpers.PageReadinessProfiles
 import org.mozilla.fenix.ui.efficiency.helpers.Selector
+import org.mozilla.fenix.ui.efficiency.helpers.SelectorContainer
+import org.mozilla.fenix.ui.efficiency.helpers.SelectorGroup
 import org.mozilla.fenix.ui.efficiency.helpers.SelectorStrategy
 
-object BrowserPageSelectors {
+object BrowserPageSelectors : SelectorContainer {
+    enum class Group : SelectorGroup {
+        SNACKBAR,
+        TAB_CRASH_REPORTER,
+        NOT_TRANSLATED_PAGE_TRANSLATION_SHEET,
+        TRANSLATED_PAGE_TRANSLATION_SHEET,
+        ADDED_TO_SHORTCUTS_SNACKBAR,
+    }
+
     val ENGINE_VIEW =
         Selector(
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_RES_ID,
             value = "engineView",
             description = "Engine view",
-            groups = listOf("requiredForPage"),
+            readiness = PageReadinessProfiles.IDENTITY_ANCHOR,
         )
 
     val PAGE_CONTENT =
@@ -27,7 +38,6 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_TEXT,
             value = "mozilla",
             description = "Page content",
-            groups = listOf(""),
         )
 
     // The Play control on the media test pages (video's custom <button>Play</button> and audio's native
@@ -42,15 +52,17 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR2_BY_TEXT,
             value = "Play",
             description = "Web media Play button",
-            groups = listOf(),
         )
 
-    val SNACKBAR_EDIT_BUTTON =
+    // The snackbar's single action button. The tag is generic and the label varies with the snackbar
+    // ("Edit", "SWITCH", "UNDO"), which is why the legacy helper matches the tag OR the label rather than
+    // both. Named for the element, not for one of its labels.
+    val SNACKBAR_ACTION_BUTTON =
         Selector(
             strategy = SelectorStrategy.COMPOSE_BY_TAG,
             value = SNACKBAR_BUTTON_TEST_TAG,
-            description = "Snackbar Edit button",
-            groups = listOf("snackbar"),
+            description = "Snackbar action button",
+            groups = setOf(Group.SNACKBAR),
         )
 
     val SNACKBAR =
@@ -58,7 +70,6 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_COMPOSE_TAG,
             value = SNACKBAR_TEST_TAG,
             description = "Snackbar container",
-            groups = listOf(),
         )
 
     val MAIN_MENU_BUTTON =
@@ -68,8 +79,8 @@ object BrowserPageSelectors {
             description = "Three Dot Menu",
             // NOT an arrival anchor: the menu button lives on the top toolbar in the default layout but moves to
             // the bottom navigation bar when shouldUseExpandedToolbar is on — so it's layout-dependent (gotcha B7).
-            // ENGINE_VIEW (the web content) is the layout-invariant "browser is loaded" signal for requiredForPage.
-            groups = listOf(),
+            // ENGINE_VIEW (the web content) is the layout-invariant browser-readiness signal.
+
         )
 
     val TAB_CRASH_REPORTER_IMAGE =
@@ -77,7 +88,7 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_RES_ID,
             value = "crash_tab_image",
             description = "Tab crash reporter image",
-            groups = listOf("tabCrashReporter"),
+            groups = setOf(Group.TAB_CRASH_REPORTER),
         )
 
     val TAB_CRASH_REPORTER_TITLE =
@@ -85,7 +96,7 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_TEXT_CONTAINS,
             value = getStringResource(R.string.tab_crash_title_2),
             description = "Tab crash reporter title",
-            groups = listOf("tabCrashReporter"),
+            groups = setOf(Group.TAB_CRASH_REPORTER),
         )
 
     val TAB_CRASH_REPORTER_MESSAGE =
@@ -93,7 +104,7 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_TEXT_CONTAINS,
             value = getStringResource(R.string.tab_crash_send_report),
             description = "Tab crash reporter send crash message",
-            groups = listOf("tabCrashReporter"),
+            groups = setOf(Group.TAB_CRASH_REPORTER),
         )
 
     val TAB_CRASH_REPORTER_RESTORE_BUTTON =
@@ -101,7 +112,7 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_RES_ID,
             value = "restoreTabButton",
             description = "Tab crash reporter restore button",
-            groups = listOf("tabCrashReporter"),
+            groups = setOf(Group.TAB_CRASH_REPORTER),
         )
 
     val TAB_CRASH_REPORTER_CLOSE_BUTTON =
@@ -109,7 +120,7 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_RES_ID,
             value = "closeTabButton",
             description = "Tab crash reporter close button",
-            groups = listOf("tabCrashReporter"),
+            groups = setOf(Group.TAB_CRASH_REPORTER),
         )
 
     @Suppress("FunctionName")
@@ -118,7 +129,6 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_TEXT_CONTAINS,
             value = text,
             description = "Page content '$text'",
-            groups = listOf(),
         )
 
     // An item on the GeckoView text-selection floating action bar (and the app's paste popup),
@@ -130,7 +140,29 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR2_BY_TEXT,
             value = item,
             description = "Text selection context menu item '$item'",
-            groups = listOf(),
+        )
+
+    // A link in web content, keyed on its exact text like the legacy MatcherHelper.itemWithText. Exact and
+    // not CONTAINS on purpose: PAGE_CONTENT(text) above cannot tell "Link 1" from "Link 10", and the
+    // search-group tests long-press "Link 1" and "Link 2" on the same page.
+    @Suppress("ktlint:standard:function-naming", "FunctionName")
+    fun PAGE_LINK(linkText: String = "") =
+        Selector(
+            strategy = SelectorStrategy.UIAUTOMATOR_WITH_TEXT,
+            value = linkText,
+            description = "'$linkText' link in web content",
+        )
+
+    // An item in the web-content long-press context menu ("Open link in new tab", "Open link in private
+    // tab"). UiObject2 rather than UiObject, matching the legacy By.text: these items open a tab without
+    // necessarily updating the window, and UiObject's clickAndSync reports a slow-but-successful click as a
+    // failure.
+    @Suppress("ktlint:standard:function-naming", "FunctionName")
+    fun CONTEXT_MENU_ITEM(itemText: String = "") =
+        Selector(
+            strategy = SelectorStrategy.UIAUTOMATOR2_BY_TEXT,
+            value = itemText,
+            description = "'$itemText' context menu item",
         )
 
     val TRANSLATION_SHEET =
@@ -138,7 +170,7 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR2_BY_RES,
             value = "design_bottom_sheet",
             description = "Translation bottom sheet",
-            groups = listOf("notTranslatedPageTranslationSheet"),
+            groups = setOf(Group.NOT_TRANSLATED_PAGE_TRANSLATION_SHEET),
         )
 
     val TRANSLATION_SHEET_TITLE =
@@ -146,7 +178,7 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TEXT,
             value = getStringResource(R.string.translations_bottom_sheet_title_first_time, argument = shortAppName),
             description = "Translation bottom sheet title",
-            groups = listOf("notTranslatedPageTranslationSheet"),
+            groups = setOf(Group.NOT_TRANSLATED_PAGE_TRANSLATION_SHEET),
         )
 
     val TRANSLATION_SHEET_TRANSLATE_FROM =
@@ -154,7 +186,7 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TEXT,
             value = getStringResource(R.string.translations_bottom_sheet_translate_from),
             description = "Translation bottom sheet translate from dropdown",
-            groups = listOf("notTranslatedPageTranslationSheet"),
+            groups = setOf(Group.NOT_TRANSLATED_PAGE_TRANSLATION_SHEET),
         )
 
     val TRANSLATION_SHEET_TRANSLATE_TO =
@@ -162,7 +194,7 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TEXT,
             value = getStringResource(R.string.translations_bottom_sheet_translate_to),
             description = "Translation bottom sheet translate to dropdown",
-            groups = listOf("notTranslatedPageTranslationSheet"),
+            groups = setOf(Group.NOT_TRANSLATED_PAGE_TRANSLATION_SHEET),
         )
 
     val TRANSLATION_SHEET_TRANSLATE_BUTTON =
@@ -170,7 +202,7 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TEXT,
             value = getStringResource(R.string.translations_bottom_sheet_positive_button),
             description = "Translation bottom sheet translate button",
-            groups = listOf("notTranslatedPageTranslationSheet"),
+            groups = setOf(Group.NOT_TRANSLATED_PAGE_TRANSLATION_SHEET),
         )
 
     val TRANSLATION_SHEET_NOT_NOW_BUTTON =
@@ -178,7 +210,7 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TEXT,
             value = getStringResource(R.string.translations_bottom_sheet_negative_button),
             description = "Translation bottom sheet not now button",
-            groups = listOf("notTranslatedPageTranslationSheet"),
+            groups = setOf(Group.NOT_TRANSLATED_PAGE_TRANSLATION_SHEET),
         )
 
     val TRANSLATION_SHEET_SHOW_ORIGINAL_BUTTON =
@@ -186,7 +218,7 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TEXT,
             value = getStringResource(R.string.translations_bottom_sheet_negative_button_restore),
             description = "Translation bottom sheet show original button",
-            groups = listOf("translatedPageTranslationSheet"),
+            groups = setOf(Group.TRANSLATED_PAGE_TRANSLATION_SHEET),
         )
 
     val ADDED_TO_SHORTCUTS_SNACKBAR_TEXT =
@@ -194,7 +226,7 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_TEXT,
             value = getStringResource(R.string.snackbar_added_to_shortcuts),
             description = "Added to shortcuts snackbar text",
-            groups = listOf("addedToShortcutsSnackbar"),
+            groups = setOf(Group.ADDED_TO_SHORTCUTS_SNACKBAR),
         )
 
     // Web form submit button. The value is a raw web DOM id, NOT a Compose tag — but GeckoView exposes web
@@ -205,7 +237,13 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_COMPOSE_TAG,
             value = "submit",
             description = "Web form submit/login button",
-            groups = listOf(),
+        )
+
+    val UPLOAD_FILE_WEB_INPUT =
+        Selector(
+            strategy = SelectorStrategy.UIAUTOMATOR_WITH_RAW_RES_ID,
+            value = "upload_file",
+            description = "Web form file upload input",
         )
 
     val USERNAME_WEB_FIELD =
@@ -213,7 +251,6 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_COMPOSE_TAG,
             value = "username",
             description = "Web form username field",
-            groups = listOf(),
         )
 
     val PASSWORD_WEB_FIELD =
@@ -221,7 +258,6 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_COMPOSE_TAG,
             value = "password",
             description = "Web form password field",
-            groups = listOf(),
         )
 
     val TOGGLE_PASSWORD_WEB_BUTTON =
@@ -229,7 +265,6 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_COMPOSE_TAG,
             value = "togglePassword",
             description = "Web form show-password toggle",
-            groups = listOf(),
         )
 
     @Suppress("FunctionName")
@@ -239,7 +274,6 @@ object BrowserPageSelectors {
             value = "username",
             secondaryValue = text,
             description = "Web form username prefilled with '$text'",
-            groups = listOf(),
         )
 
     @Suppress("FunctionName")
@@ -249,7 +283,6 @@ object BrowserPageSelectors {
             value = "password",
             secondaryValue = text,
             description = "Web form password prefilled with '$text'",
-            groups = listOf(),
         )
 
     val SUGGESTED_LOGINS_BAR =
@@ -257,7 +290,6 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR2_BY_RES,
             value = "loginSelectBar",
             description = "Suggested logins bar",
-            groups = listOf(),
         )
 
     @Suppress("FunctionName")
@@ -266,7 +298,6 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TEXT,
             value = username,
             description = "Suggested login '$username'",
-            groups = listOf(),
         )
 
     // Save-login prompt is an app View (package-prefixed res-id).
@@ -275,7 +306,6 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_RES_ID,
             value = "feature_prompt_login_fragment",
             description = "Save-login prompt",
-            groups = listOf(),
         )
 
     val SAVE_LOGIN_PROMPT_CONFIRM_BUTTON =
@@ -283,7 +313,6 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR2_BY_RES,
             value = "save_confirm",
             description = "Save-login prompt: confirm (Save/Update) button",
-            groups = listOf(),
         )
 
     // --- Address autofill on a web form (GeckoView content + the app's autofill prompt) ---
@@ -296,7 +325,6 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_COMPOSE_TAG,
             value = "streetAddress",
             description = "Web address form: street address field",
-            groups = listOf(),
         )
 
     val ADDRESS_CITY_WEB_FIELD =
@@ -304,7 +332,6 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_COMPOSE_TAG,
             value = "city",
             description = "Web address form: city field",
-            groups = listOf(),
         )
 
     val ADDRESS_COUNTRY_WEB_FIELD =
@@ -312,7 +339,6 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_COMPOSE_TAG,
             value = "country",
             description = "Web address form: country field",
-            groups = listOf(),
         )
 
     // NOTE: the Android stylus-handwriting prompt that can cover this page is handled centrally via
@@ -324,7 +350,6 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_RES_ID,
             value = "select_address_header",
             description = "Autofill prompt: 'Select address' header",
-            groups = listOf(),
         )
 
     // A saved-address suggestion row in the autofill prompt, keyed by the substring shown in its
@@ -336,7 +361,6 @@ object BrowserPageSelectors {
             value = "address_name",
             secondaryValue = text,
             description = "Autofill suggestion containing '$text'",
-            groups = listOf(),
         )
 
     // Assertion helper: the web street-address field is populated with the expected value.
@@ -348,7 +372,6 @@ object BrowserPageSelectors {
             value = "streetAddress",
             secondaryValue = text,
             description = "Web address form: street address autofilled with '$text'",
-            groups = listOf(),
         )
 
     // --- Credit card autofill on a web form (GeckoView content + the app's autofill prompt) ---
@@ -361,7 +384,6 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_COMPOSE_TAG,
             value = "cardNumber",
             description = "Web credit card form: card number field",
-            groups = listOf(),
         )
 
     // The "Select credit card" header of the autofill prompt (an app View, package-prefixed res-id).
@@ -370,7 +392,6 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_RES_ID,
             value = "select_credit_card_header",
             description = "Autofill prompt: 'Select credit card' header",
-            groups = listOf(),
         )
 
     // A saved-card suggestion row in the autofill prompt, keyed by the last digits shown in its masked
@@ -382,7 +403,6 @@ object BrowserPageSelectors {
             value = "credit_card_number",
             secondaryValue = lastDigits,
             description = "Autofill suggestion for card ending '$lastDigits'",
-            groups = listOf(),
         )
 
     // Assertion helper: the web card-number field is populated with the expected value. Raw web DOM id
@@ -394,7 +414,6 @@ object BrowserPageSelectors {
             value = "cardNumber",
             secondaryValue = number,
             description = "Web credit card form: card number autofilled with '$number'",
-            groups = listOf(),
         )
 
     // "Set cookies" button on the storage_write.html test page. Web DOM id, exposed unprefixed by
@@ -404,7 +423,6 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_COMPOSE_TAG,
             value = "setCookies",
             description = "Web page 'Set cookies' button",
-            groups = listOf(),
         )
 
     // UiObject2 (By.textContains): clicking these applinks-prompt buttons only dismisses the in-app
@@ -415,7 +433,6 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR2_BY_TEXT_CONTAINS,
             value = "Stay in",
             description = "Applinks prompt 'Stay in Firefox' button",
-            groups = listOf(),
         )
 
     val OPEN_IN_APP_PROMPT_BUTTON =
@@ -423,7 +440,6 @@ object BrowserPageSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR2_BY_TEXT_CONTAINS,
             value = getStringResource(applinksR.string.mozac_feature_applinks_confirm_dialog_confirm_2),
             description = "Applinks prompt 'Open in App' button",
-            groups = listOf(),
         )
 
     // Title of the "open link in another app" prompt, parameterized by the target app name.
@@ -437,56 +453,5 @@ object BrowserPageSelectors {
                     appName,
                 ),
             description = "Open link in '$appName' app prompt",
-            groups = listOf(),
-        )
-
-    val all =
-        listOf(
-            ADDED_TO_SHORTCUTS_SNACKBAR_TEXT,
-            ADDRESS_CITY_WEB_FIELD,
-            ADDRESS_COUNTRY_WEB_FIELD,
-            ADDRESS_STREET_WEB_FIELD,
-            ADDRESS_SUGGESTION(),
-            AUTOFILLED_STREET_ADDRESS(),
-            AUTOFILLED_CREDIT_CARD(),
-            CREDIT_CARD_NUMBER_WEB_FIELD,
-            CREDIT_CARD_SUGGESTION(),
-            SELECT_CREDIT_CARD_HEADER,
-            ENGINE_VIEW,
-            MAIN_MENU_BUTTON,
-            MEDIA_PLAY_BUTTON,
-            OPEN_IN_APP_PROMPT(),
-            OPEN_IN_APP_PROMPT_BUTTON,
-            PAGE_CONTENT,
-            PAGE_CONTENT(),
-            PASSWORD_WEB_FIELD,
-            PREFILLED_PASSWORD(),
-            PREFILLED_USERNAME(),
-            SAVE_LOGIN_PROMPT,
-            SAVE_LOGIN_PROMPT_CONFIRM_BUTTON,
-            SELECT_ADDRESS_HEADER,
-            SET_COOKIES_WEB_BUTTON,
-            SNACKBAR_EDIT_BUTTON,
-            STAY_IN_FIREFOX_PROMPT_BUTTON,
-            SUBMIT_LOGIN_BUTTON,
-            TEXT_SELECTION_CONTEXT_MENU_ITEM(),
-            SUGGESTED_LOGIN(),
-            SUGGESTED_LOGINS_BAR,
-            TAB_CRASH_REPORTER_CLOSE_BUTTON,
-            SNACKBAR,
-            MAIN_MENU_BUTTON,
-            TAB_CRASH_REPORTER_IMAGE,
-            TAB_CRASH_REPORTER_MESSAGE,
-            TAB_CRASH_REPORTER_RESTORE_BUTTON,
-            TAB_CRASH_REPORTER_TITLE,
-            TOGGLE_PASSWORD_WEB_BUTTON,
-            TRANSLATION_SHEET,
-            TRANSLATION_SHEET_NOT_NOW_BUTTON,
-            TRANSLATION_SHEET_SHOW_ORIGINAL_BUTTON,
-            TRANSLATION_SHEET_TITLE,
-            TRANSLATION_SHEET_TRANSLATE_BUTTON,
-            TRANSLATION_SHEET_TRANSLATE_FROM,
-            TRANSLATION_SHEET_TRANSLATE_TO,
-            USERNAME_WEB_FIELD,
         )
 }

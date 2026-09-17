@@ -34,10 +34,8 @@ import androidx.test.espresso.action.ViewActions.pressImeActionButton
 import androidx.test.espresso.assertion.PositionAssertions.isCompletelyAbove
 import androidx.test.espresso.assertion.PositionAssertions.isPartiallyBelow
 import androidx.test.espresso.assertion.ViewAssertions.matches
-import androidx.test.espresso.matcher.ViewMatchers.Visibility
 import androidx.test.espresso.matcher.ViewMatchers.hasDescendant
 import androidx.test.espresso.matcher.ViewMatchers.isRoot
-import androidx.test.espresso.matcher.ViewMatchers.withEffectiveVisibility
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.uiautomator.By
@@ -51,8 +49,6 @@ import mozilla.components.compose.browser.toolbar.concept.BrowserToolbarTestTags
 import mozilla.components.compose.browser.toolbar.concept.BrowserToolbarTestTags.NAVIGATION_BAR
 import mozilla.components.compose.browser.toolbar.concept.BrowserToolbarTestTags.SEARCH_SELECTOR
 import mozilla.components.compose.browser.toolbar.concept.BrowserToolbarTestTags.TABS_COUNTER
-import mozilla.components.ui.tabcounter.R as tabcounterR
-import org.hamcrest.CoreMatchers.allOf
 import org.junit.Assert.assertTrue
 import org.mozilla.fenix.R
 import org.mozilla.fenix.helpers.Constants.LONG_CLICK_DURATION
@@ -204,18 +200,10 @@ class NavigationToolbarRobot(private val composeTestRule: ComposeTestRule) {
             )
         )
 
-    fun verifySearchBarPlaceholder(string: String) {
-        Log.i(
-            TAG,
-            "verifySearchBarPlaceholder: Trying to verify that the search bar place holder is \"Search or enter address\"",
-        )
-        composeTestRule
-            .onAllNodesWithTag(ADDRESSBAR_URL_BOX)
-            .assertAny(hasContentDescription("Search or enter address"))
-        Log.i(
-            TAG,
-            "verifySearchBarPlaceholder: Verified that the search bar place holder is \"Search or enter address\"",
-        )
+    fun verifySearchBarPlaceholder(searchHint: String) {
+        Log.i(TAG, "verifySearchBarPlaceholder: Trying to verify that the search bar place holder is \"$searchHint\"")
+        composeTestRule.onAllNodesWithTag(ADDRESSBAR_URL_BOX).assertAny(hasContentDescription(searchHint))
+        Log.i(TAG, "verifySearchBarPlaceholder: Verified that the search bar place holder is \"$searchHint\"")
     }
 
     fun verifyDefaultSearchEngine(engineName: String) {
@@ -397,7 +385,7 @@ class NavigationToolbarRobot(private val composeTestRule: ComposeTestRule) {
      * Asserts that the navigation bar compose node is positioned relative to the view identified by
      * [referenceResourceId].
      */
-    private fun assertNavBarIsPositioned(referenceResourceId: String, isAtBottom: Boolean = true) {
+    private fun assertNavBarIsPositioned(referenceResourceId: String) {
         val navBarBounds = composeTestRule.onNodeWithTag(NAVIGATION_BAR).fetchSemanticsNode().boundsInWindow
         val reference = mDevice.findObject(UiSelector().resourceId(referenceResourceId))
 
@@ -886,8 +874,6 @@ fun openEditURLView() {
 
 private fun urlBar() = mDevice.findObject(UiSelector().resourceId("$packageName:id/toolbar"))
 
-private fun homeUrlBar() = mDevice.findObject(UiSelector().resourceId("$packageName:id/toolbar_text"))
-
 private fun awesomeBar() =
     mDevice.findObject(UiSelector().resourceId("$packageName:id/mozac_browser_toolbar_edit_url_view"))
 
@@ -925,16 +911,4 @@ private fun pressImeActionOnAwesomeBar() {
     }
 }
 
-private fun threeDotButton() = onView(withId(toolbarR.id.mozac_browser_toolbar_menu))
-
-private fun tabsCounter() =
-    onView(
-        allOf(
-            withId(tabcounterR.id.counter_root),
-            withEffectiveVisibility(Visibility.VISIBLE),
-        )
-    )
-
 private fun clearAddressBarButton() = itemWithResId("$packageName:id/mozac_browser_toolbar_clear_view")
-
-private fun readerViewToggle() = itemWithDescription(getStringResource(R.string.browser_menu_read))

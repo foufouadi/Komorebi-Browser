@@ -208,6 +208,10 @@ internal object FakeHomepagePreview {
                     /* no op */
                 }
 
+                override fun onExpandToggleClicked(isExpanded: Boolean) {
+                    /* no op */
+                }
+
                 override fun onShortcutsLibraryViewed() {
                     /* no op */
                 }
@@ -226,10 +230,6 @@ internal object FakeHomepagePreview {
         get() =
             object : RecentTabInteractor {
                 override fun onRecentTabClicked(tabId: String) {
-                    /* no op */
-                }
-
-                override fun onRecentTabShowAllClicked() {
                     /* no op */
                 }
 

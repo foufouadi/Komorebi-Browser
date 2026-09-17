@@ -537,6 +537,41 @@ class PromptDelegateTest :
 
     @Test
     @WithDisplay(width = 100, height = 100)
+    fun selectTestNested() {
+        mainSession.loadTestPath(SELECT_NESTED_HTML_PATH)
+        sessionRule.waitForPageStop()
+
+        val result = GeckoResult<Void>()
+        sessionRule.delegateUntilTestEnd(
+            object : PromptDelegate {
+                @AssertCalled(count = 1)
+                override fun onChoicePrompt(
+                    session: GeckoSession,
+                    prompt: PromptDelegate.ChoicePrompt,
+                ): GeckoResult<PromptDelegate.PromptResponse>? {
+                    assertThat("Should not be multiple", prompt.type, equalTo(PromptDelegate.ChoicePrompt.Type.SINGLE))
+                    assertThat("There should be three choices", prompt.choices.size, equalTo(3))
+                    assertThat("First choice is correct", prompt.choices[0].label, equalTo("ABC"))
+                    assertThat("Second choice is correct", prompt.choices[1].label, equalTo("DEF"))
+                    assertThat("Third choice is a group", prompt.choices[2].label, equalTo("GROUP"))
+                    assertThat("Group has one child", prompt.choices[2].items!!.size, equalTo(1))
+                    assertThat(
+                        "Group child is correct",
+                        prompt.choices[2].items!![0].label,
+                        equalTo("GHI"),
+                    )
+                    result.complete(null)
+                    return null
+                }
+            }
+        )
+
+        mainSession.synthesizeTap(20, 20)
+        sessionRule.waitForResult(result)
+    }
+
+    @Test
+    @WithDisplay(width = 100, height = 100)
     fun selectTestSize() {
         mainSession.loadTestPath(SELECT_LISTBOX_HTML_PATH)
         sessionRule.waitForPageStop()

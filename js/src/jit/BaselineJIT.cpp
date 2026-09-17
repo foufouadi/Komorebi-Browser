@@ -280,7 +280,7 @@ static bool DispatchOffThreadBaselineCompile(JSContext* cx,
 // Either through stencil instantiation where we perform eager baseline
 // compilations speculatively based on Jit Hints, or on demand through the JIT.
 static bool DispatchOffThreadBaselineBatchImpl(JSContext* cx, bool isEager) {
-  BaselineCompileQueue& queue = cx->realm()->baselineCompileQueue();
+  BaselineCompileQueue& queue = cx->realm()->jitRealm().baselineCompileQueue();
   MOZ_ASSERT(queue.numQueued() > 0);
 
   // We maintain the invariant that there's always room to push an entry into
@@ -473,10 +473,6 @@ MethodStatus jit::BaselineCompile(JSContext* cx, JSScript* script,
 
 static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
                                         AbstractFramePtr osrSourceFrame) {
-  if (!CanBaselineCompileScript(cx, script)) {
-    return Method_CantCompile;
-  }
-
   // This check is needed in the following corner case. Consider a function h,
   //
   //   function h(x) {
@@ -504,6 +500,10 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
 
   if (script->hasBaselineScript()) {
     return Method_Compiled;
+  }
+
+  if (!CanBaselineCompileScript(cx, script)) {
+    return Method_CantCompile;
   }
 
   if (script->isBaselineCompilingOffThread()) {
@@ -1374,6 +1374,15 @@ uint8_t* BaselineInterpreter::retAddrForIC(JSOp op) const {
   for (const ICReturnOffset& entry : icReturnOffsets_) {
     if (entry.op == op) {
       return codeAtOffset(entry.offset);
+    }
+  }
+  MOZ_CRASH("Unexpected op");
+}
+
+uint8_t* BaselineInterpreter::bailoutStubAddrForIC(JSOp op) const {
+  for (const ICReturnOffset& entry : icReturnOffsets_) {
+    if (entry.op == op) {
+      return codeAtOffset(entry.bailoutStubOffset);
     }
   }
   MOZ_CRASH("Unexpected op");

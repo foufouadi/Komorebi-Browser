@@ -23,7 +23,7 @@ task-defaults:
     attributes:
         retrigger: true
     use-python: system
-    use-uv: false
+    use-uv: true
     require-signed-extensions:
         by-release-type:
             release|esr.*: true
@@ -58,7 +58,7 @@ task-defaults:
                     - android-sdk-macos
                     - android-system-image-arm64-macos
                     - android-avd-arm64-macos
-                    - macosx64-jdk-repack
+                    - macosx64-aarch64-jdk-repack
                     - macosx64-aarch64-minidump-stackwalk
                     - macosx64-aarch64-fix-stacks
                     - linux64-hostutils

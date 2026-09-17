@@ -12,15 +12,4 @@
             column="6"/>
     </issue>
 
-    <issue
-        id="ContentDescription"
-        message="Missing `contentDescription` attribute on image"
-        errorLine1="    &lt;ImageView"
-        errorLine2="     ~~~~~~~~~">
-        <location
-            file="src/main/res/layout/mozac_browser_toolbar_edittoolbar.xml"
-            line="27"
-            column="6"/>
-    </issue>
-
 </issues>

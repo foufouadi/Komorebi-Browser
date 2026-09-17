@@ -552,32 +552,12 @@ uint32_t H265ProfileTierLevel::GetDpbMaxPicBuf() const {
 }
 
 bool H265ProfileTierLevel::operator==(
-    const H265ProfileTierLevel& aOther) const {
-  return COMPARE_FIELD(general_profile_space) &&
-         COMPARE_FIELD(general_tier_flag) &&
-         COMPARE_FIELD(general_profile_idc) &&
-         COMPARE_FIELD(general_profile_compatibility_flags) &&
-         COMPARE_FIELD(general_progressive_source_flag) &&
-         COMPARE_FIELD(general_interlaced_source_flag) &&
-         COMPARE_FIELD(general_non_packed_constraint_flag) &&
-         COMPARE_FIELD(general_frame_only_constraint_flag) &&
-         COMPARE_FIELD(general_level_idc);
-}
+    const H265ProfileTierLevel& aOther) const = default;
 
-bool H265StRefPicSet::operator==(const H265StRefPicSet& aOther) const {
-  return COMPARE_FIELD(num_negative_pics) && COMPARE_FIELD(num_positive_pics) &&
-         COMPARE_FIELD(numDeltaPocs) && COMPARE_ARRAY(usedByCurrPicS0) &&
-         COMPARE_ARRAY(usedByCurrPicS1) && COMPARE_ARRAY(deltaPocS0) &&
-         COMPARE_ARRAY(deltaPocS1);
-}
+bool H265StRefPicSet::operator==(const H265StRefPicSet& aOther) const = default;
 
-bool H265VUIParameters::operator==(const H265VUIParameters& aOther) const {
-  return COMPARE_FIELD(sar_width) && COMPARE_FIELD(sar_height) &&
-         COMPARE_FIELD(video_full_range_flag) &&
-         COMPARE_FIELD(colour_primaries) &&
-         COMPARE_FIELD(transfer_characteristics) &&
-         COMPARE_FIELD(matrix_coeffs);
-}
+bool H265VUIParameters::operator==(const H265VUIParameters& aOther) const =
+    default;
 
 bool H265VUIParameters::HasValidAspectRatio() const {
   return aspect_ratio_info_present_flag && mIsSARValid;
@@ -1771,10 +1751,11 @@ already_AddRefed<mozilla::MediaByteBuffer> H265::CreateNewExtraData(
   return extradata.forget();
 }
 
-/* static */
-Result<bool, nsresult> H265::IsKeyFrame(const mozilla::MediaRawData* aSample) {
+template <typename Pred>
+static Result<bool, nsresult> SampleContainsNalu(
+    const mozilla::MediaRawData* aSample, Pred aIsWantedNalu) {
   if (aSample->mCrypto.IsEncrypted()) {
-    LOG("Can't check if encrypted sample is keyframe");
+    LOG("Can't examine encrypted sample");
     return Err(NS_ERROR_DOM_MEDIA_DEMUXER_ERR);
   }
 
@@ -1814,11 +1795,24 @@ Result<bool, nsresult> H265::IsKeyFrame(const mozilla::MediaRawData* aSample) {
       break;
     }
     const H265NALU nalu(p, nalLen);
-    if (nalu.IsIframe()) {
+    if (aIsWantedNalu(nalu)) {
       return true;
     }
   }
   return false;
+}
+
+/* static */
+Result<bool, nsresult> H265::IsKeyFrame(const mozilla::MediaRawData* aSample) {
+  return SampleContainsNalu(
+      aSample, [](const H265NALU& aNalu) { return aNalu.IsIframe(); });
+}
+
+/* static */
+Result<bool, nsresult> H265::IsRandomAccessPoint(
+    const mozilla::MediaRawData* aSample) {
+  return SampleContainsNalu(
+      aSample, [](const H265NALU& aNalu) { return aNalu.IsIRAP(); });
 }
 
 #undef LOG

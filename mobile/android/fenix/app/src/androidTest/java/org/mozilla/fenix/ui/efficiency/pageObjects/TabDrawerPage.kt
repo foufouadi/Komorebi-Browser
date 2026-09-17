@@ -4,12 +4,21 @@
 
 package org.mozilla.fenix.ui.efficiency.pageObjects
 
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.hasAnyChild
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.AndroidComposeTestRule
+import androidx.compose.ui.test.onChildAt
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
 import org.mozilla.fenix.helpers.HomeActivityIntentTestRule
+import org.mozilla.fenix.tabstray.TabsTrayTestTag
 import org.mozilla.fenix.ui.efficiency.helpers.BasePage
-import org.mozilla.fenix.ui.efficiency.helpers.Selector
 import org.mozilla.fenix.ui.efficiency.helpers.SwipeDirection
-import org.mozilla.fenix.ui.efficiency.navigation.NavigationRegistry
+import org.mozilla.fenix.ui.efficiency.navigation.NavigationFacts
+import org.mozilla.fenix.ui.efficiency.navigation.NavigationGraph
+import org.mozilla.fenix.ui.efficiency.navigation.NavigationOptions
 import org.mozilla.fenix.ui.efficiency.navigation.NavigationStep
 import org.mozilla.fenix.ui.efficiency.selectors.TabDrawerSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.ToolbarSelectors
@@ -17,8 +26,8 @@ import org.mozilla.fenix.ui.efficiency.selectors.ToolbarSelectors
 class TabDrawerPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule, *>) : BasePage(composeRule) {
     override val pageName = "TabDrawerPage"
 
-    init {
-        NavigationRegistry.register(
+    internal override fun registerNavigation(builder: NavigationGraph.Builder) {
+        builder.register(
             from = "HomePage",
             to = pageName,
             steps = listOf(NavigationStep.Click(ToolbarSelectors.TAB_COUNTER)),
@@ -28,31 +37,35 @@ class TabDrawerPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRu
         // the content-description variant: UIAutomator (not Compose, which can hang while GeckoView is
         // active) AND not the testTag, because with shouldUseExpandedToolbar the counter moves to the bottom
         // navigation bar and carries no tag there.
-        NavigationRegistry.register(
+        builder.register(
             from = "BrowserPage",
             to = pageName,
             steps = listOf(NavigationStep.Click(ToolbarSelectors.TAB_COUNTER_ANY_LAYOUT)),
         )
 
-        NavigationRegistry.register(
+        builder.register(
             from = pageName,
             to = "HomePage",
             steps = listOf(NavigationStep.PressBack),
+            requires = setOf(NavigationFacts.RETURN_SURFACE_HOME),
         )
 
-        NavigationRegistry.register(
+        builder.register(
             from = pageName,
             to = "BrowserPage",
             steps = listOf(NavigationStep.PressBack),
+            requires = setOf(NavigationFacts.RETURN_SURFACE_BROWSER),
         )
     }
 
-    override fun mozGetSelectorsByGroup(group: String): List<Selector> {
-        return TabDrawerSelectors.all.filter { it.groups.contains(group) }
-    }
+    override val selectorCatalog = TabDrawerSelectors
 
-    override fun navigateToPage(url: String, forceNavigation: Boolean): TabDrawerPage {
-        super.navigateToPage(url, forceNavigation)
+    override fun navigateToPage(
+        url: String,
+        forceNavigation: Boolean,
+        navigationOptions: NavigationOptions,
+    ): TabDrawerPage {
+        super.navigateToPage(url, forceNavigation, navigationOptions)
         return this
     }
 
@@ -62,7 +75,7 @@ class TabDrawerPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRu
     }
 
     fun verifyNoOpenTabsInNormalBrowsing(): TabDrawerPage {
-        mozVerifyElementsByGroup("emptyNormalBrowsingTabDrawerView")
+        mozVerifyElementsByGroup(TabDrawerSelectors.Group.EMPTY_NORMAL_BROWSING_TAB_DRAWER_VIEW)
         return this
     }
 
@@ -108,6 +121,53 @@ class TabDrawerPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRu
 
     fun clearTabSearch(): TabDrawerPage {
         mozClick(TabDrawerSelectors.TAB_SEARCH_CLEAR_BUTTON)
+        return this
+    }
+
+    /**
+     * Assert the tab at a 1-based [position] in the normal-browsing list is the one titled [tabTitle].
+     *
+     * Ordering cannot be expressed with the mozVerify* family, which only answers "does any node match". The wait is
+     * delegated to the harness first because the positional assert below is a one-shot check and would race a list that
+     * is still populating.
+     */
+    fun verifyOpenTabsOrder(position: Int, tabTitle: String): TabDrawerPage {
+        mozVerifyAnyHasChildWithText(TabDrawerSelectors.TAB_ITEM_ROOT, tabTitle)
+        composeRule
+            .onNodeWithTag(TabsTrayTestTag.NORMAL_TABS_LIST)
+            .onChildAt(position - 1)
+            .assert(hasTestTag(TabsTrayTestTag.TAB_ITEM_ROOT))
+            .assert(hasAnyChild(hasText(tabTitle)))
+        return this
+    }
+
+    /**
+     * Open the private tab at 1-based [position] in the private-tabs list.
+     *
+     * Positional like verifyOpenTabsOrder above, and for the same reason: the mozClick family can only say "click
+     * something matching", not "click the nth child". Note the legacy helper indexes from 0.
+     *
+     * Lands on the browser, so re-anchor with `on.browserPage.navigateToPage()` before returning here — a TabDrawerPage
+     * -> TabDrawerPage path resolves to no steps and would silently do nothing.
+     */
+    fun openPrivateTab(position: Int): TabDrawerPage {
+        mozVerify(TabDrawerSelectors.PRIVATE_TABS_LIST)
+        composeRule.onNodeWithTag(TabsTrayTestTag.PRIVATE_TABS_LIST).onChildAt(position - 1).performClick()
+        return this
+    }
+
+    /**
+     * Close every open tab from the tab manager's three-dot menu, confirming the dialog it opens.
+     *
+     * Lands on the homepage, so re-anchor with `on.home.navigateToPage()` before asserting there. The confirmation step
+     * is not optional: "Close all tabs" only arms the dialog, and skipping the confirm leaves every tab open — which
+     * turns any later "no tabs" or search-group assertion into a false pass.
+     */
+    fun closeAllTabs(): TabDrawerPage {
+        mozClick(TabDrawerSelectors.THREE_DOT_BUTTON)
+        mozClick(TabDrawerSelectors.CLOSE_ALL_TABS_BUTTON)
+        mozVerify(TabDrawerSelectors.CLOSE_ALL_TABS_CONFIRM_BUTTON)
+        mozClick(TabDrawerSelectors.CLOSE_ALL_TABS_CONFIRM_BUTTON)
         return this
     }
 

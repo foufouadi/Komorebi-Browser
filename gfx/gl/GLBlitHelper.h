@@ -23,6 +23,7 @@
 #include "mozilla/gfx/Rect.h"
 #include "mozilla/gfx/Types.h"
 #include "mozilla/ipc/IPCTypes.h"
+#include "mozilla/layers/LayersTypes.h"
 #include "nsSize.h"
 #include "nsString.h"
 #include "nsTString.h"
@@ -66,6 +67,8 @@ class SurfaceDescriptorDXGIYCbCr;
 #endif
 
 #ifdef MOZ_WIDGET_ANDROID
+class AndroidHardwareBuffer;
+class AndroidImageReader;
 class SurfaceTextureDescriptor;
 #endif
 
@@ -252,6 +255,14 @@ class GLBlitHelper final {
                        const gfx::IntSize& fbSize = gfx::IntSize(),
                        Maybe<gfxAlphaType> convertAlpha = {});
 #ifdef MOZ_WIDGET_ANDROID
+  bool Blit(layers::AndroidHardwareBuffer* buffer, const gfx::IntRect& destRect,
+            OriginPos destOrigin, const gfx::IntSize& fbSize = gfx::IntSize(),
+            Maybe<gfxAlphaType> convertAlpha = {}) const;
+  bool Blit(layers::AndroidImageReader* imageReader,
+            const layers::AndroidMediaCodecFrameId frameId,
+            const gfx::IntSize& texSize, const gfx::IntRect& destRect,
+            OriginPos destOrigin, const gfx::IntSize& fbSize = gfx::IntSize(),
+            Maybe<gfxAlphaType> convertAlpha = {}) const;
   bool Blit(const java::GeckoSurfaceTexture::Ref& surfaceTexture,
             const gfx::IntSize& texSize, const gfx::IntRect& destRect,
             const OriginPos destOrigin,
@@ -262,18 +273,10 @@ class GLBlitHelper final {
             const gfx::IntSize& fbSize = gfx::IntSize(),
             Maybe<gfxAlphaType> convertAlpha = {}) const;
 #endif
-#ifdef XP_MACOSX
-  bool BlitImage(layers::MacIOSurfaceImage* srcImage,
-                 const gfx::IntRect& destRect, OriginPos destOrigin,
-                 const gfx::IntSize& fbSize = gfx::IntSize()) const;
-#endif
 #ifdef MOZ_WIDGET_GTK
   bool Blit(DMABufSurface* surface, const gfx::IntRect& destRect,
             OriginPos destOrigin, const gfx::IntSize& fbSize = gfx::IntSize(),
             Maybe<gfxAlphaType> convertAlpha = {}) const;
-  bool BlitImage(layers::DMABUFSurfaceImage* srcImage,
-                 const gfx::IntRect& destRect, OriginPos destOrigin,
-                 const gfx::IntSize& fbSize = gfx::IntSize()) const;
   bool BlitYCbCrImageToDMABuf(const layers::PlanarYCbCrData& yuvData,
                               DMABufSurface* surface);
 #endif
@@ -307,19 +310,12 @@ class GLBlitHelper final {
       GLenum srcTarget = LOCAL_GL_TEXTURE_2D, bool srcIsBGRA = false,
       bool yFlip = false, Maybe<gfxAlphaType> convertAlpha = {}) const;
 
-  bool BlitImageToFramebuffer(layers::Image* srcImage,
-                              const gfx::IntRect& destRect,
-                              OriginPos destOrigin,
-                              const gfx::IntSize& fbSize = gfx::IntSize());
   bool BlitSdToFramebuffer(const layers::SurfaceDescriptor&,
                            const gfx::IntRect& destRect, OriginPos destOrigin,
                            const gfx::IntSize& fbSize = gfx::IntSize(),
                            Maybe<gfxAlphaType> convertAlpha = {});
 
  private:
-  bool BlitImage(layers::GPUVideoImage* srcImage, const gfx::IntRect& destRect,
-                 OriginPos destOrigin,
-                 const gfx::IntSize& fbSize = gfx::IntSize()) const;
 #ifdef XP_MACOSX
   bool BlitImage(MacIOSurface* const iosurf, const gfx::IntRect& destRect,
                  OriginPos destOrigin,
@@ -328,13 +324,6 @@ class GLBlitHelper final {
 #endif
 #ifdef XP_WIN
   // GLBlitHelperD3D.cpp:
-  bool BlitImage(layers::D3D11ShareHandleImage* srcImage,
-                 const gfx::IntRect& destRect, OriginPos destOrigin,
-                 const gfx::IntSize& fbSize = gfx::IntSize()) const;
-  bool BlitImage(layers::D3D11ZeroCopyTextureImage* srcImage,
-                 const gfx::IntRect& destRect, OriginPos destOrigin,
-                 const gfx::IntSize& fbSize = gfx::IntSize()) const;
-
   bool BlitDescriptor(const layers::SurfaceDescriptorD3D10& desc,
                       const gfx::IntRect& destRect, OriginPos destOrigin,
                       const gfx::IntSize& fbSize = gfx::IntSize(),

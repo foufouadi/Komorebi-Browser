@@ -426,44 +426,6 @@ class FenixBrowserUseCasesTest {
         }
     }
 
-    @Test
-    fun `WHEN add new homepage tab in group use case is invoked with default partition THEN create a new homepage tab and add it to group`() {
-        val tabId = "new-tab-id"
-        val group = "test-group"
-        appStore = AppStore(initialState = AppState(mode = BrowsingMode.Normal))
-        useCases =
-            FenixBrowserUseCases(
-                appStore = appStore,
-                tabsUseCases = tabsUseCases,
-                loadUrlUseCase = loadUrlUseCase,
-                searchUseCases = searchUseCases,
-                homepageTitle = homepageTitle,
-                profiler = profiler,
-            )
-
-        every {
-            tabsUseCases.addTab.invoke(
-                url = any(),
-                title = any(),
-                private = any(),
-            )
-        } returns tabId
-
-        useCases.addNewHomepageTabInGroup(group = group)
-
-        verifyOrder {
-            tabsUseCases.addTab.invoke(
-                url = ABOUT_HOME_URL,
-                title = homepageTitle,
-                private = false,
-            )
-            tabsUseCases.addTabsInGroup(
-                group = group,
-                tabId = tabId,
-            )
-        }
-    }
-
     companion object {
         private const val PROFILER_START_TIME = Double.MAX_VALUE
     }

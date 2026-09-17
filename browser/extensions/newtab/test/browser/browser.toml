@@ -81,6 +81,8 @@ skip-if = [
 
 ["browser_newtab_side_by_side_layout.js"]
 
+["browser_newtab_spaces.js"]
+
 ["browser_newtab_sticky_search.js"]
 
 ["browser_newtab_towindow.js"]
@@ -101,5 +103,6 @@ run-if = [
 ["browser_topsites_contextMenu_options.js"]
 
 ["browser_topsites_section.js"]
+tags = "urlbar"
 
 ["browser_topsites_sponsored.js"]

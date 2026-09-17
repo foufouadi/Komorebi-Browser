@@ -14,6 +14,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,6 +38,7 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import kotlin.math.max
@@ -88,10 +90,12 @@ fun Modifier.dashedBorder(
 /**
  * Used when clickable needs to be debounced to prevent rapid successive clicks from calling the onClick function.
  *
+ * @param role The type of user interface element (used by accessibility services).
  * @param debounceInterval The length of time to wait between click events in milliseconds
  * @param onClick Callback for when item this modifier effects is clicked
  */
 fun Modifier.debouncedClickable(
+    role: Role? = null,
     debounceInterval: Long = 1000L,
     onClick: () -> Unit,
 ) = composed {
@@ -99,13 +103,49 @@ fun Modifier.debouncedClickable(
 
     this.then(
         Modifier.clickable(
+            role = role,
             onClick = {
                 val currentSystemTime = SystemClock.elapsedRealtime()
                 if (currentSystemTime - lastClickTime > debounceInterval) {
                     onClick()
                     lastClickTime = currentSystemTime
                 }
-            }
+            },
+        )
+    )
+}
+
+/**
+ * Used when toggleable needs to be debounced to prevent rapid successive toggles from calling the `onValueChange`
+ * function.
+ *
+ * @param value Whether the underlying element is toggled on or off.
+ * @param enabled Whether the underlying element will handle input events.
+ * @param role The type of user interface element (used by accessibility services).
+ * @param debounceInterval The length of time to wait between toggle events in milliseconds
+ * @param onValueChange Callback for when item this modifier effects is toggled
+ */
+fun Modifier.debouncedToggleable(
+    value: Boolean,
+    enabled: Boolean = true,
+    role: Role? = null,
+    debounceInterval: Long = 1000L,
+    onValueChange: (Boolean) -> Unit,
+) = composed {
+    var lastToggleTime: Long by remember { mutableLongStateOf(0) }
+
+    this.then(
+        Modifier.toggleable(
+            value = value,
+            enabled = enabled,
+            role = role,
+            onValueChange = { newValue ->
+                val currentSystemTime = SystemClock.elapsedRealtime()
+                if (currentSystemTime - lastToggleTime > debounceInterval) {
+                    onValueChange(newValue)
+                    lastToggleTime = currentSystemTime
+                }
+            },
         )
     )
 }

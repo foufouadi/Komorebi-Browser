@@ -240,6 +240,13 @@ void gfxPlatformGtk::InitPlatformHardwareVideoConfig() {
                             FeatureStatus::Unavailable, "Requires EGL",
                             "FEATURE_FAILURE_REQUIRES_EGL"_ns);
   }
+  if (!gfxVars::UseDMABuf()) {
+    featureDec.ForceDisable(FeatureStatus::Unavailable, "Requires DMABUF",
+                            "FEATURE_FAILURE_REQUIRES_DMABUF"_ns);
+    gfxConfig::ForceDisable(Feature::HARDWARE_VIDEO_ENCODING,
+                            FeatureStatus::Unavailable, "Requires DMABUF",
+                            "FEATURE_FAILURE_REQUIRES_DMABUF"_ns);
+  }
 
   if (!featureDec.IsEnabled()) {
     return;
@@ -494,7 +501,7 @@ static nsTArray<uint8_t> GetDisplayICCProfile(Display* dpy, Window& root) {
 
   if (XGetWindowProperty(dpy, root, iccAtom, 0, INT_MAX /* length */, X11False,
                          AnyPropertyType, &retAtom, &retFormat, &retLength,
-                         &retAfter, &retProperty) != Success) {
+                         &retAfter, &retProperty) != X11Success) {
     return nsTArray<uint8_t>();
   }
 
@@ -563,7 +570,7 @@ nsTArray<uint8_t> gfxPlatformGtk::GetPlatformCMSOutputProfileData() {
 
   if (XGetWindowProperty(dpy, root, edidAtom, 0, 32, X11False, AnyPropertyType,
                          &retAtom, &retFormat, &retLength, &retAfter,
-                         &retProperty) != Success) {
+                         &retProperty) != X11Success) {
     return nsTArray<uint8_t>();
   }
 

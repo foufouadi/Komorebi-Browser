@@ -1060,36 +1060,40 @@ const nsLiteralCString KeyExchangeAlgorithmNameFromType(SSLKEAType keaType) {
   }
 }
 
-const nsLiteralCString ECNameFromNamedGroup(SSLNamedGroup namedGroup) {
+glean::tls::KeaEcdheCurveLabel ECDHECurveLabelFromNamedGroup(
+    SSLNamedGroup namedGroup) {
   switch (namedGroup) {
     case ssl_grp_ec_secp256r1:
-      return "p256"_ns;
+      return glean::tls::KeaEcdheCurveLabel::eP256;
     case ssl_grp_ec_secp384r1:
-      return "p384"_ns;
+      return glean::tls::KeaEcdheCurveLabel::eP384;
     case ssl_grp_ec_secp521r1:
-      return "p521"_ns;
+      return glean::tls::KeaEcdheCurveLabel::eP521;
     case ssl_grp_ec_curve25519:
-      return "curve25519"_ns;
+      return glean::tls::KeaEcdheCurveLabel::eCurve25519;
     default:
       MOZ_ASSERT_UNREACHABLE("unhandled or invalid group");
-      return "__other__"_ns;
+      return glean::tls::KeaEcdheCurveLabel::e__Other__;
   }
 }
 
-const nsLiteralCString ECNameFromSignatureScheme(
-    SSLSignatureScheme signatureScheme) {
-  switch (signatureScheme) {
-    case ssl_sig_ecdsa_secp256r1_sha256:
-      return "p256"_ns;
-    case ssl_sig_ecdsa_secp384r1_sha384:
-      return "p384"_ns;
-    case ssl_sig_ecdsa_secp521r1_sha512:
-      return "p521"_ns;
-    case ssl_sig_ed25519:
-      return "curve25519"_ns;
+// In terms of ECDSA, only keys on secp256r1, secp384r1, or secp521r1 may be
+// present in the server certificate, and thus there should be a 1-to-1
+// relationship between the bit length of the auth key and the curve. If other
+// curves are ever accepted in server certificates in the future, this property
+// may not hold.
+glean::tls::AuthEcdsaCurveLabel AuthCurveLabelFromBitLength(
+    uint32_t curveLengthBits) {
+  switch (curveLengthBits) {
+    case 256:
+      return glean::tls::AuthEcdsaCurveLabel::eP256;
+    case 384:
+      return glean::tls::AuthEcdsaCurveLabel::eP384;
+    case 521:
+      return glean::tls::AuthEcdsaCurveLabel::eP521;
     default:
-      MOZ_ASSERT_UNREACHABLE("unhandled or invalid signature scheme");
-      return "__other__"_ns;
+      MOZ_ASSERT_UNREACHABLE("unhandled or invalid ecdsa auth curve size");
+      return glean::tls::AuthEcdsaCurveLabel::e__Other__;
   }
 }
 
@@ -1142,7 +1146,7 @@ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
   if (infoObject->IsFullHandshake()) {
     if (channelInfo.keaType == ssl_kea_ecdh) {
       glean::tls::kea_ecdhe_curve
-          .Get(ECNameFromNamedGroup(channelInfo.keaGroup))
+          .EnumGet(ECDHECurveLabelFromNamedGroup(channelInfo.keaGroup))
           .Add();
     }
 
@@ -1155,7 +1159,7 @@ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
     if (channelInfo.keaType != ssl_kea_rsa &&
         channelInfo.authType == ssl_auth_ecdsa) {
       glean::tls::auth_ecdsa_curve
-          .Get(ECNameFromSignatureScheme(channelInfo.signatureScheme))
+          .EnumGet(AuthCurveLabelFromBitLength(channelInfo.authKeyBits))
           .Add();
     }
   }

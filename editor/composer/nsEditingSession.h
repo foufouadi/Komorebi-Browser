@@ -59,12 +59,6 @@ class nsEditingSession final : public nsIEditingSession,
    */
   nsresult DetachFromWindow(nsPIDOMWindowOuter* aWindow);
 
-  /**
-   * Undos DetachFromWindow(), reattaches this editing session/editor
-   * to the window.
-   */
-  nsresult ReattachToWindow(nsPIDOMWindowOuter* aWindow);
-
  protected:
   virtual ~nsEditingSession();
 

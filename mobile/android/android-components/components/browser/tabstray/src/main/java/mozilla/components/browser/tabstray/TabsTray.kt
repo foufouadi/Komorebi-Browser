@@ -4,7 +4,6 @@
 
 package mozilla.components.browser.tabstray
 
-import mozilla.components.browser.state.state.TabPartition
 import mozilla.components.browser.state.state.TabSessionState
 
 /** An interface to display a list of tabs. */
@@ -21,5 +20,5 @@ interface TabsTray {
     }
 
     /** Called when the list of tabs are updated. */
-    fun updateTabs(tabs: List<TabSessionState>, tabPartition: TabPartition?, selectedTabId: String?)
+    fun updateTabs(tabs: List<TabSessionState>, selectedTabId: String?)
 }

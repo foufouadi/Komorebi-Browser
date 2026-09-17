@@ -77,6 +77,7 @@ function makeMonitor(options = {}) {
     lastRunTime: options.lastRunTime ?? "2026-06-23T12:00:00.000Z",
     nextRunTime: options.nextRunTime ?? "2026-06-23T18:00:00.000Z",
     history: options.history ?? [],
+    initialSnapshot: options.initialSnapshot ?? null,
   };
 }
 
@@ -118,6 +119,67 @@ add_task(async function test_saveMonitor_persists_monitor_and_history() {
     await MonitorStore.listMonitors(),
     [monitor],
     "The monitor and run history persist through a real IndexedDB reopen."
+  );
+});
+
+add_task(async function test_saveMonitor_persists_initial_snapshot() {
+  await resetMonitorStore();
+
+  const monitor = makeMonitor({
+    id: "monitor-with-snapshot",
+    initialSnapshot: {
+      capturedAt: "2026-06-23T12:00:00.000Z",
+      pageContent: "Product Page\nThe price is $999",
+    },
+  });
+  await MonitorStore.saveMonitor(monitor);
+  await MonitorStore.close();
+
+  Assert.deepEqual(
+    await MonitorStore.listMonitors(),
+    [monitor],
+    "The initial snapshot persists through a real IndexedDB reopen."
+  );
+});
+
+add_task(async function test_initial_snapshot_validation() {
+  await resetMonitorStore();
+
+  await Assert.rejects(
+    MonitorStore.saveMonitor(
+      makeMonitor({
+        id: "invalid-snapshot-content",
+        initialSnapshot: {
+          capturedAt: "2026-06-23T12:00:00.000Z",
+          pageContent: 42,
+        },
+      })
+    ),
+    /Monitor initial snapshot is invalid/,
+    "Snapshots with non-string page content are rejected on save."
+  );
+  await Assert.rejects(
+    MonitorStore.saveMonitor(
+      makeMonitor({
+        id: "invalid-snapshot-timestamp",
+        initialSnapshot: { capturedAt: "not-a-date", pageContent: "text" },
+      })
+    ),
+    /Monitor initial snapshot timestamp is invalid/,
+    "Snapshots with invalid timestamps are rejected on save."
+  );
+
+  // A corrupt stored snapshot is dropped on load instead of losing the monitor.
+  const corruptSnapshot = makeMonitor({
+    id: "corrupt-stored-snapshot",
+    initialSnapshot: { capturedAt: "not-a-date", pageContent: "text" },
+  });
+  await writeRawMonitorRecords([corruptSnapshot]);
+
+  Assert.deepEqual(
+    await MonitorStore.listMonitors(),
+    [{ ...corruptSnapshot, initialSnapshot: null }],
+    "A monitor with a corrupt stored snapshot loads with the snapshot dropped."
   );
 });
 
@@ -266,6 +328,54 @@ add_task(async function test_listMonitors_does_not_require_created_at_index() {
   );
 });
 
+add_task(async function test_shutdown_fetch_state_describes_pending_writes() {
+  await resetMonitorStore();
+
+  let fetchState;
+  const shutdownClient = {
+    addBlocker(_name, _blocker, options) {
+      fetchState = options.fetchState;
+    },
+    removeBlocker() {},
+  };
+  const store = new MonitorStoreImpl(shutdownClient);
+  const savePromise = store.saveMonitor(
+    makeMonitor({ id: "private-monitor-id" })
+  );
+  const deletePromise = store.deleteMonitor("private-monitor-id");
+
+  const state = fetchState();
+  Assert.deepEqual(
+    state.pendingWrites.map(write => ({
+      operation: write.operation,
+      state: write.state,
+    })),
+    [
+      { operation: "saveMonitor", state: "queued" },
+      { operation: "deleteMonitor", state: "queued" },
+    ],
+    "Shutdown state identifies queued writes without their data."
+  );
+  Assert.ok(
+    state.pendingWrites.every(
+      write => Number.isInteger(write.pendingForMs) && write.pendingForMs >= 0
+    ),
+    "Shutdown state reports how long each write has been pending."
+  );
+  Assert.ok(
+    !JSON.stringify(state).includes("private-monitor-id"),
+    "Shutdown state does not expose monitor identifiers."
+  );
+
+  await Promise.all([savePromise, deletePromise]);
+  Assert.deepEqual(
+    fetchState().pendingWrites,
+    [],
+    "Completed writes are removed from shutdown state."
+  );
+  await store.close();
+});
+
 add_task(async function test_shutdown_waits_for_pending_real_database_write() {
   await resetMonitorStore();
 
@@ -322,6 +432,79 @@ add_task(async function test_shutdown_waits_for_pending_real_database_write() {
     );
   } finally {
     await verificationStore.close();
+  }
+});
+
+add_task(async function test_shutdown_does_not_wait_for_database_open() {
+  await resetMonitorStore();
+
+  const barrier = new AsyncShutdown.Barrier("MonitorStore test shutdown");
+  const store = new MonitorStoreImpl(barrier.client);
+  const blockingDatabase = await IndexedDB.open(
+    MonitorStore.databaseName,
+    MonitorStore.databaseVersion
+  );
+  const waitForRequest = request =>
+    new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  let deletionPromise;
+
+  try {
+    const deletionRequest = IndexedDB.deleteDatabase(MonitorStore.databaseName);
+    deletionPromise = waitForRequest(deletionRequest);
+    const deletionBlocked = new Promise(resolve => {
+      deletionRequest.onblocked = resolve;
+    });
+    await deletionBlocked;
+
+    const listPromise = store.listMonitors();
+    let listFinished = false;
+    listPromise.then(
+      () => {
+        listFinished = true;
+      },
+      () => {
+        listFinished = true;
+      }
+    );
+    await TestUtils.waitForTick();
+    Assert.ok(!listFinished, "Opening the database is blocked.");
+
+    let shutdownFinished = false;
+    const shutdownPromise = barrier.wait().then(() => {
+      shutdownFinished = true;
+    });
+    for (let attempt = 0; attempt < 10 && !shutdownFinished; attempt++) {
+      await TestUtils.waitForTick();
+    }
+    const shutdownFinishedBeforeOpen = shutdownFinished;
+
+    blockingDatabase.close();
+    await deletionPromise;
+    await Assert.rejects(
+      listPromise,
+      /Monitor store is shutting down/,
+      "The pending read rejects when its database eventually opens."
+    );
+    await shutdownPromise;
+
+    Assert.ok(
+      shutdownFinishedBeforeOpen,
+      "Shutdown does not wait for a read-only database open."
+    );
+
+    let cleanupBlocked = false;
+    const cleanupRequest = IndexedDB.deleteDatabase(MonitorStore.databaseName);
+    cleanupRequest.onblocked = () => {
+      cleanupBlocked = true;
+    };
+    await waitForRequest(cleanupRequest);
+    Assert.ok(!cleanupBlocked, "The late database was closed.");
+  } finally {
+    blockingDatabase.close();
+    await deletionPromise?.catch(() => {});
   }
 });
 

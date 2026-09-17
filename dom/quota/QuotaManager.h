@@ -388,8 +388,7 @@ class QuotaManager final : public BackgroundThreadObject {
 
   // Collect inactive and the least recently used origins.
   uint64_t CollectOriginsForEviction(
-      uint64_t aMinSizeToBeFreed,
-      nsTArray<RefPtr<OriginDirectoryLock>>& aLocks);
+      int64_t aMinSizeToBeFreed, nsTArray<RefPtr<OriginDirectoryLock>>& aLocks);
 
   /**
    * Helper method to invoke the provided predicate on all "pending" OriginInfo
@@ -715,8 +714,8 @@ class QuotaManager final : public BackgroundThreadObject {
 
   void SetThumbnailPrivateIdentityId(uint32_t aThumbnailPrivateIdentityId);
 
-  uint64_t GetGroupLimit() const;
-  static uint64_t GetGroupLimitForLimit(uint64_t aLimit);
+  int64_t GetGroupLimit() const;
+  static int64_t GetGroupLimitForLimit(int64_t aLimit);
 
   Maybe<OriginStateMetadata> GetOriginStateMetadata(
       const OriginMetadata& aOriginMetadata);
@@ -861,6 +860,8 @@ class QuotaManager final : public BackgroundThreadObject {
   nsresult UpgradeStorageFrom2_1To2_2(mozIStorageConnection* aConnection);
 
   nsresult UpgradeStorageFrom2_2To2_3(mozIStorageConnection* aConnection);
+
+  nsresult UpgradeStorageFrom2_3To2_4(mozIStorageConnection* aConnection);
 
   nsresult MaybeCreateOrUpgradeStorage(mozIStorageConnection& aConnection);
 
@@ -1280,8 +1281,16 @@ class QuotaManager final : public BackgroundThreadObject {
 
   MozPromiseHolder<BoolPromise> mInitializeAllTemporaryOriginsPromiseHolder;
 
-  uint64_t mTemporaryStorageLimit;
-  uint64_t mTemporaryStorageUsage;
+  // Technically the limits should be unsigned, but mTemporaryStorageUsage can
+  // go below zero sometimes. We suppose this could either be of because a race
+  // condition in the order of completion of the quota operations, leading a
+  // temporary negative value until everything completes; or because of bugs
+  // elsewhere in our implementation leading to underflow in our usage values.
+  // In any case having signed integers ensures comparisons between numbers make
+  // sense. See bug 1585978 for details.
+  int64_t mTemporaryStorageLimit;
+  int64_t mTemporaryStorageUsage;
+
   int64_t mNextDirectoryLockId;
   bool mStorageInitialized;
   bool mPersistentStorageInitialized;

@@ -151,7 +151,8 @@ class nsDisplayTextOverflowMarker final : public nsPaintedDisplayItem {
       // On OS X, web authors can turn off subpixel text rendering using the
       // CSS property -moz-osx-font-smoothing. If they do that, we don't need
       // to use component alpha layers for the affected text.
-      if (mFrame->StyleFont()->mFont.smoothing == NS_FONT_SMOOTHING_GRAYSCALE) {
+      if (mFrame->StyleFont()->mFont.smoothing ==
+          mozilla::StyleFontSmoothing::Grayscale) {
         return nsRect();
       }
     }
@@ -164,7 +165,7 @@ class nsDisplayTextOverflowMarker final : public nsPaintedDisplayItem {
   void PaintTextToContext(gfxContext* aCtx, imgDrawingParams& aImgParams,
                           const nsPoint& aOffsetFromRect);
 
-  bool CreateWebRenderCommands(
+  WebRenderCommandsResult CreateWebRenderCommands(
       mozilla::wr::DisplayListBuilder& aBuilder,
       mozilla::wr::IpcResourceUpdateQueue& aResources,
       const StackingContextHelper& aSc,
@@ -238,7 +239,7 @@ void nsDisplayTextOverflowMarker::PaintTextToContext(
   nsLayoutUtils::DrawString(mFrame, *fm, aCtx, str16.get(), str16.Length(), pt);
 }
 
-bool nsDisplayTextOverflowMarker::CreateWebRenderCommands(
+WebRenderCommandsResult nsDisplayTextOverflowMarker::CreateWebRenderCommands(
     mozilla::wr::DisplayListBuilder& aBuilder,
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc, layers::RenderRootStateManager* aManager,
@@ -246,7 +247,7 @@ bool nsDisplayTextOverflowMarker::CreateWebRenderCommands(
   bool snap;
   nsRect bounds = GetBounds(aDisplayListBuilder, &snap);
   if (bounds.IsEmpty()) {
-    return true;
+    return Ok();
   }
 
   // Run the rendering algorithm to capture the glyphs and shadows
@@ -254,13 +255,17 @@ bool nsDisplayTextOverflowMarker::CreateWebRenderCommands(
                                                aManager, this, bounds);
   MOZ_ASSERT(textDrawer->IsValid());
   if (!textDrawer->IsValid()) {
-    return false;
+    return Err("text draw target is invalid");
   }
   gfxContext captureCtx(textDrawer);
   Paint(aDisplayListBuilder, &captureCtx);
   textDrawer->TerminateShadows();
 
-  return textDrawer->Finish();
+  if (!textDrawer->Finish()) {
+    return Err("text drawer could not emit all glyph commands");
+  }
+
+  return Ok();
 }
 
 TextOverflow::TextOverflow(nsDisplayListBuilder* aBuilder,

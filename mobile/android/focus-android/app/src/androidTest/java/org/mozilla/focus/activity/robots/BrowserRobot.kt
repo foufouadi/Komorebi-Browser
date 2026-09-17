@@ -593,8 +593,6 @@ private val shareImage = onView(withText("Share image"))
 // Find in page toolbar
 private val findInPageQuery = onView(withId(findinpageR.id.find_in_page_query_text))
 
-private val findInPageResult = onView(withId(findinpageR.id.find_in_page_result_text))
-
 private val findInPageNextButton = mDevice.findObject(UiSelector().resourceId("$packageName:id/find_in_page_next_btn"))
 
 private val findInPagePrevButton = mDevice.findObject(UiSelector().resourceId("$packageName:id/find_in_page_prev_btn"))
@@ -613,7 +611,6 @@ private val openLinksInAppsOpenButton =
 private val currentDate = LocalDate.now()
 private val currentDay = currentDate.dayOfMonth
 private val currentMonth = currentDate.month
-private val currentYear = currentDate.year
 
 private val permissionAllowBtn = mDevice.findObject(UiSelector().resourceId("$packageName:id/allow_button"))
 

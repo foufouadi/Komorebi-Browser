@@ -76,6 +76,7 @@ var TabContextMenu = {
             "#context_askChat",
             "#context_aiSeparator",
             "#context_askChatSummarize",
+            "#context_createAITab",
           ],
         },
         {
@@ -235,6 +236,7 @@ var TabContextMenu = {
             ["#context_bookmarkSelectedTabs", "#context_bookmarkTab"],
             ["#context_addNote", "#context_editNote"],
             "#context_askChatSummarize",
+            "#context_createAITab",
             "#context_tabToolsSeparator",
           ],
         },
@@ -507,7 +509,7 @@ var TabContextMenu = {
     // bug1973996: This call is not guaranteed to complete
     // before the saved groups menu is populated
     for (let tab of this.contextTabs) {
-      gBrowser.TabStateFlusher.flush(tab.linkedBrowser);
+      TabContextMenu.TabStateFlusher.flush(tab.linkedBrowser);
 
       // Add unique split views for count info below
       if (tab.splitview) {
@@ -583,7 +585,7 @@ var TabContextMenu = {
     let openGroupsToMoveTo = [];
     let savedGroupsToMoveTo = [];
 
-    if (gBrowser._tabGroupsEnabled) {
+    if (TabContextMenu.Tabbrowser.prefs.tabGroupsEnabled) {
       let selectedGroupCount = new Set(
         // The filter removes the "null" group for ungrouped tabs.
         this.contextTabs.map(t => t.group).filter(g => g)
@@ -716,14 +718,14 @@ var TabContextMenu = {
     }
 
     this._updateMoveTabToFlattenedVisibility(
-      gBrowser._tabGroupsEnabled,
+      TabContextMenu.Tabbrowser.prefs.tabGroupsEnabled,
       !!openGroupsToMoveTo.length,
       !!savedGroupsToMoveTo.length
     );
 
     let contextAddNote = document.getElementById("context_addNote");
     let contextEditNote = document.getElementById("context_editNote");
-    if (gBrowser._tabNotesEnabled) {
+    if (this._tabNotesEnabled) {
       // Tab notes behaviour is disabled if a user has a selection of tabs that
       // contains more than one canonical URL.
       let multiselectingDiverseUrls =
@@ -797,7 +799,7 @@ var TabContextMenu = {
     document.getElementById("context_reloadSelectedTabs").hidden =
       !this.multiselected;
     let unloadTabItem = document.getElementById("context_unloadTab");
-    if (gBrowser._unloadTabInContextMenu) {
+    if (this._unloadTabInContextMenu) {
       // linkedPanel is false if the tab is already unloaded
       // Cannot unload about: pages, etc., so skip browsers that are not remote
       let unloadableTabs = this.contextTabs.filter(
@@ -862,6 +864,14 @@ var TabContextMenu = {
       );
     }
 
+    document.getElementById("context_createAITab").hidden = !(
+      TabContextMenu.AITAB_ENABLED &&
+      TabContextMenu.AIWindow.isAIWindowActiveAndEnabled(window) &&
+      this.contextTabs.some(tab =>
+        ["http", "https"].includes(tab.linkedBrowser.currentURI.scheme)
+      )
+    );
+
     // Move Tab items
     let contextMoveTabOptions = document.getElementById(
       "context_moveTabOptions"
@@ -894,7 +904,7 @@ var TabContextMenu = {
     let allSelectedTabsAdjacent = selectedTabs.every(
       (element, index, array) => {
         return array.length > index + 1
-          ? element._tPos + 1 == array[index + 1]._tPos
+          ? element.index + 1 == array[index + 1].index
           : true;
       }
     );
@@ -1158,10 +1168,11 @@ var TabContextMenu = {
     createUserContextMenu(event, {
       isContextMenu: true,
       excludeUserContextId: this.contextTab.getAttribute("usercontextid"),
+      containerSource: "tab_context_menu",
     });
   },
   duplicateSelectedTabs() {
-    let newIndex = this.contextTabs.at(-1)._tPos + 1;
+    let newIndex = this.contextTabs.at(-1).index + 1;
     for (let tab of this.contextTabs) {
       let newTab = SessionStore.duplicateTab(window, tab);
       if (tab.group) {
@@ -1219,8 +1230,9 @@ var TabContextMenu = {
       let newTab = gBrowser.addTab(tab.linkedBrowser.currentURI.spec, {
         userContextId,
         pinned: tab.pinned,
-        tabIndex: tab._tPos + 1,
+        tabIndex: tab.index + 1,
         triggeringPrincipal,
+        eventDetail: { containerSource: "tab_context_menu" },
       });
 
       Glean.containers.tabAssignedContainer.record({
@@ -1260,7 +1272,7 @@ var TabContextMenu = {
 
   moveTabsToNewGroup() {
     let insertBefore = this.contextTab;
-    if (insertBefore._tPos < gBrowser.pinnedTabCount) {
+    if (insertBefore.index < gBrowser.pinnedTabCount) {
       let firstUnpinnedTab = gBrowser.tabs[gBrowser.pinnedTabCount];
       if (firstUnpinnedTab.splitview) {
         insertBefore = firstUnpinnedTab.splitview;
@@ -1288,7 +1300,7 @@ var TabContextMenu = {
 
   moveSplitViewToNewGroup() {
     let insertBefore = this.contextTab;
-    if (insertBefore._tPos < gBrowser.pinnedTabCount) {
+    if (insertBefore.index < gBrowser.pinnedTabCount) {
       insertBefore = gBrowser.tabs[gBrowser.pinnedTabCount];
     } else if (this.contextTab.group) {
       insertBefore = this.contextTab.group;
@@ -1444,8 +1456,34 @@ var TabContextMenu = {
   },
 };
 
+XPCOMUtils.defineLazyPreferenceGetter(
+  TabContextMenu,
+  "_tabNotesEnabled",
+  "browser.tabs.notes.enabled",
+  false
+);
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  TabContextMenu,
+  "_unloadTabInContextMenu",
+  "browser.tabs.unloadTabInContextMenu",
+  false
+);
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  TabContextMenu,
+  "AITAB_ENABLED",
+  "browser.smartwindow.aitab.enabled",
+  false
+);
+
 ChromeUtils.defineESModuleGetters(TabContextMenu, {
-  GenAI: "resource:///modules/GenAI.sys.mjs",
+  AIWindow:
+    "moz-src:///browser/components/aiwindow/ui/modules/AIWindow.sys.mjs",
+  GenAI: "moz-src:///browser/components/genai/GenAI.sys.mjs",
   MenuSectionLayout: "resource:///modules/MenuSectionLayout.sys.mjs",
+  Tabbrowser: "moz-src:///browser/components/tabbrowser/Tabbrowser.sys.mjs",
   TabNotes: "moz-src:///browser/components/tabnotes/TabNotes.sys.mjs",
+  TabStateFlusher:
+    "moz-src:///browser/components/sessionstore/TabStateFlusher.sys.mjs",
 });

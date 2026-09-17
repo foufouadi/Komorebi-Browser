@@ -122,8 +122,6 @@ private fun gridToggle() = onView(withText("Grid"))
 
 private fun closeTabsHeading() = onView(withText("Close tabs"))
 
-private fun manuallyToggle() = onView(withText("Manually"))
-
 private fun neverOption() = onView(withText("Never"))
 
 private fun afterOneDayOption() = onView(withText("After one day"))

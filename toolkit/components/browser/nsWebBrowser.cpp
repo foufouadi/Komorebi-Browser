@@ -45,10 +45,8 @@
 #include "mozilla/ServoStyleConsts.h"
 
 // Printing Includes
-#ifdef NS_PRINTING
-#  include "nsIWebBrowserPrint.h"
-#  include "nsIDocumentViewer.h"
-#endif
+#include "nsIWebBrowserPrint.h"
+#include "nsIDocumentViewer.h"
 
 // PSM2 includes
 #include "nsISecureBrowserUI.h"
@@ -188,7 +186,6 @@ nsWebBrowser::GetInterface(const nsIID& aIID, void** aSink) {
   }
 
   if (mDocShell) {
-#ifdef NS_PRINTING
     if (aIID.Equals(NS_GET_IID(nsIWebBrowserPrint))) {
       nsCOMPtr<nsIDocumentViewer> viewer;
       mDocShell->GetDocViewer(getter_AddRefs(viewer));
@@ -203,7 +200,6 @@ nsWebBrowser::GetInterface(const nsIID& aIID, void** aSink) {
       *aSink = print;
       return NS_OK;
     }
-#endif
     return mDocShell->GetInterface(aIID, aSink);
   }
 

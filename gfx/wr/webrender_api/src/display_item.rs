@@ -11,6 +11,7 @@ use crate::{APZScrollGeneration, HasScrollLinkedEffect, PipelineId, PropertyBind
 use crate::serde::{Serialize, Deserialize};
 use crate::color::ColorF;
 use crate::image::{ColorDepth, ImageKey};
+use crate::key_types::EdgeMask;
 use crate::units::*;
 use std::hash::{Hash, Hasher};
 
@@ -53,6 +54,11 @@ bitflags! {
         const ANTIALISED = 1 << 4;
         /// If true, this primitive is used as a background for checkerboarding
         const CHECKERBOARD_BACKGROUND = 1 << 5;
+        /// For an image primitive: the texture was rasterized at the device
+        /// size of the primitive rect. If the rect's snapped extent disagrees
+        /// with the texture by a device pixel, the texture is drawn 1:1 from
+        /// the snapped origin instead of being stretched to fit.
+        const RASTERIZED_FOR_RECT = 1 << 6;
     }
 }
 
@@ -322,6 +328,12 @@ pub struct RectangleDisplayItem {
     pub common: CommonItemProperties,
     pub bounds: LayoutRect,
     pub color: PropertyBinding<ColorF>,
+    /// Which edges get anti-aliased under a transform. A rect is the one item
+    /// that says, because the display list builder splits one primitive into
+    /// abutting rects (the solid margins around a clamped radial gradient) and
+    /// the interior edges must not be anti-aliased or they seam. There is no
+    /// aligned equivalent: that mask is `EdgeMask::empty()` for every primitive.
+    pub transformed_aa_edges: EdgeMask,
 }
 
 /// A minimal hit-testable item for the parent browser's convenience, and is
@@ -637,14 +649,27 @@ pub enum BoxShadowClipMode {
     Inset = 1,
 }
 
+/// The blur shader samples `BLUR_SAMPLE_SCALE * blur_radius` surrounding texels.
+pub const BLUR_SAMPLE_SCALE: f32 = 3.0;
+
+/// Maximum blur radius for box-shadows (different than blur filters).
+/// Taken from nsCSSRendering.cpp in Gecko.
+pub const MAX_BLUR_RADIUS: f32 = 300.;
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
 pub struct BoxShadowDisplayItem {
     pub common: CommonItemProperties,
-    pub box_bounds: LayoutRect,
+    /// The shadow's local rect: the blur-inflated outer rect for `Outset`, the
+    /// element rect for `Inset`. `prepare_box_shadow` recovers the element rect
+    /// from this and the clip mode.
+    pub bounds: LayoutRect,
     pub offset: LayoutVector2D,
     pub color: ColorF,
+    /// Already clamped to `MAX_BLUR_RADIUS`.
     pub blur_radius: f32,
-    pub spread_radius: f32,
+    /// The authored spread radius, signed by the clip mode: inset shadows get
+    /// smaller as it increases, so this is `-spread_radius` for `Inset`.
+    pub spread_amount: f32,
     pub border_radius: BorderRadius,
     pub shadow_radius: BorderRadius,
     pub clip_mode: BoxShadowClipMode,
@@ -758,6 +783,10 @@ pub struct RadialGradientDisplayItem {
     pub gradient: RadialGradient,
     pub tile_size: LayoutSize,
     pub tile_spacing: LayoutSize,
+    /// Which edges get anti-aliased under a transform. Narrowed by
+    /// `optimize_radial_gradient` where the gradient abuts a solid margin it
+    /// split off; see `RectangleDisplayItem::transformed_aa_edges`.
+    pub transformed_aa_edges: EdgeMask,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
@@ -927,6 +956,10 @@ pub struct StackingContext {
     pub transform_style: TransformStyle,
     pub mix_blend_mode: MixBlendMode,
     pub clip_chain_id: Option<ClipChainId>,
+    /// Raster space already resolved against the enclosing stacking contexts by
+    /// `DisplayListBuilder::push_stacking_context`, not the space its caller
+    /// requested. Resolving on the builder means one raster space stack rather
+    /// than two that have to agree.
     pub raster_space: RasterSpace,
     pub flags: StackingContextFlags,
 }
@@ -2050,6 +2083,19 @@ pub enum YuvData {
 }
 
 impl YuvData {
+    /// The planes actually referenced, padded with `ImageKey::DUMMY` to the
+    /// three a yuv primitive holds.
+    pub fn planes(&self) -> [ImageKey; 3] {
+        match *self {
+            YuvData::NV12(p0, p1)
+            | YuvData::P010(p0, p1)
+            | YuvData::NV16(p0, p1)
+            | YuvData::P210(p0, p1) => [p0, p1, ImageKey::DUMMY],
+            YuvData::PlanarYCbCr(p0, p1, p2) => [p0, p1, p2],
+            YuvData::InterleavedYCbCr(p0) => [p0, ImageKey::DUMMY, ImageKey::DUMMY],
+        }
+    }
+
     pub fn get_format(&self) -> YuvFormat {
         match *self {
             YuvData::NV12(..) => YuvFormat::NV12,

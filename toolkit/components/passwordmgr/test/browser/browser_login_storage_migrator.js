@@ -191,3 +191,93 @@ add_task(async function test_migration_moves_vulnerable_passwords() {
     "vulnerable password migrated to the Rust store"
   );
 }).skip(isRustBackend);
+
+// Works under either backend: storage_operation_time is recorded at the
+// LoginManager funnel, with the active backend's name.
+add_task(async function test_storage_operation_time_telemetry() {
+  Services.fog.testResetFOG();
+  const login = LoginTestUtils.testData.formLogin({
+    origin: "https://telemetry.example.com",
+    formActionOrigin: "https://telemetry.example.com",
+    username: "telemetry-user",
+    password: "telemetry-password",
+  });
+  await Services.logins.addLoginAsync(login);
+
+  const found = await Services.logins.searchLoginsAsync({
+    origin: "https://telemetry.example.com",
+  });
+  Assert.equal(found.length, 1, "the added login is found");
+
+  const events = Glean.pwmgr.storageOperationTime.testGetValue();
+  const searches = events.filter(e => e.extra.operation == "search");
+  Assert.ok(searches.length, "the search recorded an event");
+  const { extra } = searches.at(-1);
+  Assert.ok(
+    ["json", "rust"].includes(extra.backend),
+    `backend is the active store, got "${extra.backend}"`
+  );
+  Assert.greaterOrEqual(Number(extra.duration_ms), 0, "duration_ms recorded");
+
+  await LoginTestUtils.clearData();
+});
+
+// A storage operation that starts while the primary password is locked is not
+// recorded, so the user's time in the prompt cannot inflate the duration.
+add_task(async function test_storage_operation_time_skips_locked_store() {
+  const { PromptTestUtils } = ChromeUtils.importESModule(
+    "resource://testing-common/PromptTestUtils.sys.mjs"
+  );
+  // The window-modal prompt suspends the parent window's timers, so use the
+  // nsITimer-backed module setTimeout for the hold.
+  const { setTimeout: setTimeoutMod } = ChromeUtils.importESModule(
+    "resource://gre/modules/Timer.sys.mjs"
+  );
+
+  const login = LoginTestUtils.testData.formLogin({
+    origin: "https://locked-timer.example.com",
+    formActionOrigin: "https://locked-timer.example.com",
+    username: "locked-user",
+    password: "locked-password",
+  });
+  await Services.logins.addLoginAsync(login);
+
+  await LoginTestUtils.primaryPassword.enable();
+  registerCleanupFunction(async () => {
+    await LoginTestUtils.primaryPassword.disable();
+    await LoginTestUtils.clearData();
+  });
+  // Refresh the cached isPrimaryPasswordSet state, which the guard reads. In
+  // the field this happens at storage init; here the PP is enabled mid-session.
+  await LoginTestUtils.reloadData();
+
+  Services.fog.testResetFOG();
+
+  // The search finds one login; decrypting it needs the key, which is locked,
+  // so the primary password prompt appears mid-operation.
+  const searchPromise = Services.logins.searchLoginsAsync({
+    origin: "https://locked-timer.example.com",
+  });
+
+  const prompt = await PromptTestUtils.waitForPrompt(window, {
+    modalType: Services.prompt.MODAL_TYPE_WINDOW,
+    promptType: "promptPassword",
+  });
+  await new Promise(resolve => setTimeoutMod(resolve, 500));
+  PromptTestUtils.handlePrompt(prompt, {
+    buttonNumClick: 0,
+    passwordInput: LoginTestUtils.primaryPassword.primaryPassword,
+  }).catch(() => {});
+
+  const found = await searchPromise;
+  Assert.equal(found.length, 1, "search succeeded after entering the PP");
+
+  const events = (Glean.pwmgr.storageOperationTime.testGetValue() ?? []).filter(
+    e => e.extra.operation == "search"
+  );
+  Assert.equal(
+    events.length,
+    0,
+    "the search that started locked recorded no event"
+  );
+});

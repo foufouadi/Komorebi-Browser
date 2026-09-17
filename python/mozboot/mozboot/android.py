@@ -2,6 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this,
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import annotations
+
 import errno
 import os
 import platform
@@ -50,8 +52,8 @@ AVD_HOME_PATH = Path(
 )
 
 JAVA_VERSION_MAJOR = "17"
-JAVA_VERSION_MINOR = "0.18"
-JAVA_VERSION_PATCH = "8"
+JAVA_VERSION_MINOR = "0.20.1"
+JAVA_VERSION_PATCH = "1"
 
 ANDROID_NDK_EXISTS = """
 Looks like you have the correct version of the Android NDK installed at:
@@ -785,6 +787,19 @@ def main():
         help="If true, list installed packages.",
     )
 
+    parser.add_argument(
+        "--os-name",
+        dest="os_name",
+        choices=["linux", "macosx", "windows"],
+        help="Download the JDK for the specified OS rather than the host OS. Requires --jdk-only.",
+    )
+    parser.add_argument(
+        "--os-arch",
+        dest="os_arch",
+        choices=["x86_64", "arm64"],
+        help="Download the JDK for the specified CPU architecture rather than the host's. Requires --jdk-only.",
+    )
+
     exclusive_group = parser.add_mutually_exclusive_group()
 
     exclusive_group.add_argument(
@@ -814,9 +829,12 @@ def main():
     if options.artifact_mode and options.emulator_only:
         raise NotImplementedError("Use no options to install the SDK and emulators.")
 
-    os_name = get_os_name_for_android()
+    if (options.os_name or options.os_arch) and not options.jdk_only:
+        parser.error("--os-name and --os-arch are only supported with --jdk-only.")
+
+    os_name = options.os_name or get_os_name_for_android()
     os_tag = get_os_tag_for_android(os_name)
-    os_arch = platform.machine()
+    os_arch = options.os_arch or platform.machine()
 
     avd_manifest_path = (
         Path(options.avd_manifest_path) if options.avd_manifest_path else None
@@ -896,7 +914,7 @@ def ensure_java(os_name: str, os_arch: str):
         ext = "zip" if os_name == "windows" else "tar.gz"
 
         # e.g. https://github.com/adoptium/temurin17-binaries/releases/
-        #      download/jdk-17.0.18%2B8/OpenJDK17U-jdk_x64_linux_hotspot_17.0.18_8.tar.gz
+        #      download/jdk-17.0.20.1%2B1/OpenJDK17U-jdk_x64_linux_hotspot_17.0.20.1_1.tar.gz
         java_url = (
             f"https://github.com/adoptium/temurin{JAVA_VERSION_MAJOR}-binaries/releases/"
             f"download/jdk-{JAVA_VERSION_MAJOR}.{JAVA_VERSION_MINOR}%2B{JAVA_VERSION_PATCH}/"
@@ -972,7 +990,7 @@ def ensure_gradle_jdk_installations(
 
 
 def get_java_bin_path(os_name: str, toolchain_path: Path):
-    # Like jdk-17.0.18+8
+    # Like jdk-17.0.20.1+1
     jdk_folder = f"jdk-{JAVA_VERSION_MAJOR}.{JAVA_VERSION_MINOR}+{JAVA_VERSION_PATCH}"
 
     java_path = toolchain_path / "jdk" / jdk_folder

@@ -242,14 +242,7 @@ void ClientWebGLContext::MarkCanvasDirty() {
 }
 
 void WebGLContext::OnMemoryPressure() {
-  bool shouldLoseContext = mLoseContextOnMemoryPressure;
-
-  if (!mCanLoseContextInForeground &&
-      ProcessPriorityManager::CurrentProcessIsForeground()) {
-    shouldLoseContext = false;
-  }
-
-  if (shouldLoseContext) LoseContext();
+  if (mLoseContextOnMemoryPressure) LoseContext();
 }
 
 // --
@@ -806,6 +799,7 @@ void WebGLContext::InitUploadableSdTypes() {
     types[layers::SurfaceDescriptor::TSurfaceDescriptorMacIOSurface] = true;
   }
   if (kIsAndroid) {
+    types[layers::SurfaceDescriptor::TAndroidImageReaderImageDescriptor] = true;
     types[layers::SurfaceDescriptor::TSurfaceTextureDescriptor] = true;
   }
   if (kIsLinux) {
@@ -1393,15 +1387,6 @@ bool WebGLContext::PushRemoteTexture(
   Maybe<layers::SurfaceDescriptor> desc;
   if (surf) {
     desc = surf->ToSurfaceDescriptor();
-    // Move surface's GpuFence to the SurfaceDescriptor. Done here rather than
-    // in SharedSurface_MacIOSurface::ToSurfaceDescriptor() as we know this
-    // surface will not be sent cross process, but that's not true for all
-    // callers of SharedSurface::ToSurfaceDescriptor().
-    if (desc && desc->type() ==
-                    layers::SurfaceDescriptor::TSurfaceDescriptorMacIOSurface) {
-      auto& ioDesc = desc->get_SurfaceDescriptorMacIOSurface();
-      ioDesc.gpuFence() = surf->TakeGpuFence();
-    }
   }
   if (!desc) {
     if (surf && surf->mDesc.type != gl::SharedSurfaceType::Basic) {

@@ -6,6 +6,8 @@ package org.mozilla.fenix.components
 
 import android.content.Context
 import android.os.StrictMode
+import android.util.Size
+import androidx.annotation.VisibleForTesting
 import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.concept.engine.Engine
 import mozilla.components.concept.fetch.Client
@@ -142,6 +144,7 @@ class UseCases(
             client.value,
             rootStorageDirectory,
             currentLocale,
+            getDisplaySize = { displaySize(context) },
         )
     }
 
@@ -186,5 +189,14 @@ class UseCases(
 
     val privateBrowsingLockUseCases by lazyMonitored {
         PrivateBrowsingLockUseCases(appStore.value)
+    }
+
+    companion object {
+        /** The size, in pixels, of the display a full screen wallpaper has to cover. */
+        @VisibleForTesting
+        internal fun displaySize(context: Context): Size {
+            val metrics = context.resources.displayMetrics
+            return Size(metrics.widthPixels, metrics.heightPixels)
+        }
     }
 }

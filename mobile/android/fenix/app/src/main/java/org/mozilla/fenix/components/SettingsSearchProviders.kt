@@ -23,16 +23,14 @@ import org.mozilla.fenix.summarization.onboarding.SummarizationFeatureDiscoveryC
  * silently disappearing from settings search.
  *
  * @param summarizationFeatureConfiguration Gates whether the Page Summaries screen is indexed.
- * @param isFirefoxLabsEnabled Returns whether Firefox Labs is currently enabled.
  */
 internal fun settingsSearchProviders(
-    summarizationFeatureConfiguration: SummarizationFeatureDiscoveryConfiguration,
-    isFirefoxLabsEnabled: () -> Boolean,
+    summarizationFeatureConfiguration: SummarizationFeatureDiscoveryConfiguration
 ): List<SettingsSearchProvider> =
     listOf(
         DataChoicesSearchProvider,
         AIControlsSearchProvider,
         PageSummariesSettingsSearchProvider(summarizationFeatureConfiguration),
-        FirefoxLabsSettingsSearchProvider(isFirefoxLabsEnabled),
+        FirefoxLabsSettingsSearchProvider(),
         ToolbarShortcutSettingsSearchProvider,
     )

@@ -81,10 +81,6 @@ async function getElementFromDocumentByText(document, text) {
 // Before running, save any MOZ_LOG environment variable that might be preset,
 // and restore them at the end of this test.
 add_setup(async function saveRestoreLogModules() {
-  await SpecialPowers.pushPrefEnv({
-    set: [["test.wait300msAfterTabSwitch", true]],
-  });
-
   let savedLogModules = Services.env.get("MOZ_LOG");
   Services.env.set("MOZ_LOG", "");
   registerCleanupFunction(() => {
@@ -280,6 +276,80 @@ add_task(async function testURLParameters() {
       });
     }
   );
+  clearLoggingPrefs();
+});
+
+// A URL can carry both an explicit module list and a logging preset. The
+// module list switches the dropdown to "custom", but the preset must still be
+// honoured, because the profiler threads to record are taken from it.
+add_task(async function testPresetAndModulesInURL() {
+  const modules =
+    "timestamp,sync,nsHttp:5,nsWebSocket:5,nsSocketTransport:5,nsHostResolver:5";
+  const url =
+    PAGE +
+    "?modules=" +
+    encodeURIComponent(modules) +
+    "&preset=websocket&output=profiler";
+
+  await BrowserTestUtils.withNewTab(url, async browser => {
+    await SpecialPowers.spawn(browser, [modules], async modulesInURL => {
+      let $ = content.document.querySelector.bind(content.document);
+      Assert.equal(
+        content.settings().loggingPreset,
+        "websocket",
+        "When both modules and a preset are passed via URL params, the preset is kept in the logging manager settings."
+      );
+      Assert.equal(
+        $("#log-modules").value,
+        modulesInURL,
+        "The explicit module list from the URL params takes precedence over the preset's module list."
+      );
+    });
+
+    let profilerOpenedPromise = BrowserTestUtils.waitForNewTab(
+      gBrowser,
+      "https://example.com/",
+      false
+    );
+    SpecialPowers.spawn(browser, [], async () => {
+      let $ = content.document.querySelector.bind(content.document);
+      // Override the URL the profiler uses to avoid hitting external
+      // resources (and crash).
+      await SpecialPowers.pushPrefEnv({
+        set: [
+          ["devtools.performance.recording.ui-base-url", "https://example.com"],
+          ["devtools.performance.recording.ui-base-url-path", "/"],
+        ],
+      });
+      $("#toggle-logging-button").click();
+      // Wait for the profiler to start. This can be very slow.
+      await content.profilerPromise();
+      // eslint-disable-next-line mozilla/no-arbitrary-setTimeout
+      await new Promise(resolve => content.setTimeout(resolve, 200));
+      $("#toggle-logging-button").click();
+    });
+    let tab = await profilerOpenedPromise;
+    await BrowserTestUtils.removeTab(tab);
+  });
+
+  Assert.equal(
+    Services.prefs.getCharPref(
+      "devtools.performance.recording.preset.aboutlogging"
+    ),
+    "networking",
+    "The profiler preset associated with the logging preset from the URL params is used."
+  );
+  const threads = JSON.parse(
+    Services.prefs.getCharPref(
+      "devtools.performance.recording.threads.aboutlogging"
+    )
+  );
+  for (const thread of ["Socket Thread", "DNS Resolver", "Cache2 I/O"]) {
+    Assert.ok(
+      threads.includes(thread),
+      `The threads of the profiler preset are recorded (${thread}).`
+    );
+  }
   clearLoggingPrefs();
 });
 

@@ -191,7 +191,6 @@ security.ui.certerror:
         description: >
           If the error is due to wildcard trying to match reference ID label with hyphen at begin/end
         type: boolean
-    telemetry_mirror: SecurityUiCerterror_Load_Aboutcerterror
 
   click_advanced_button:
     type: event
@@ -230,7 +229,6 @@ security.ui.certerror:
         description: >
           If the error page is for a site with HSTS headers or with a pinned key.
         type: boolean
-    telemetry_mirror: SecurityUiCerterror_Click_AdvancedButton
 
   click_exception_button:
     type: event
@@ -245,7 +243,6 @@ security.ui.certerror:
     notification_emails: *security_ui_certerror_click_emails
     expires: never
     extra_keys: *security_ui_certerror_click_extra
-    telemetry_mirror: SecurityUiCerterror_Click_ExceptionButton
 
   click_return_button_top:
     type: event
@@ -260,7 +257,6 @@ security.ui.certerror:
     notification_emails: *security_ui_certerror_click_emails
     expires: never
     extra_keys: *security_ui_certerror_click_extra
-    telemetry_mirror: SecurityUiCerterror_Click_ReturnButtonTop
 
   click_return_button_adv:
     type: event
@@ -275,7 +271,6 @@ security.ui.certerror:
     notification_emails: *security_ui_certerror_click_emails
     expires: never
     extra_keys: *security_ui_certerror_click_extra
-    telemetry_mirror: SecurityUiCerterror_Click_ReturnButtonAdv
 
   click_learn_more_link:
     type: event
@@ -290,7 +285,6 @@ security.ui.certerror:
     notification_emails: *security_ui_certerror_click_emails
     expires: never
     extra_keys: *security_ui_certerror_click_extra
-    telemetry_mirror: SecurityUiCerterror_Click_LearnMoreLink
 
   click_auto_report_cb:
     type: event
@@ -305,7 +299,6 @@ security.ui.certerror:
     notification_emails: *security_ui_certerror_click_emails
     expires: never
     extra_keys: *security_ui_certerror_click_extra
-    telemetry_mirror: SecurityUiCerterror_Click_AutoReportCb
 
   click_error_code_link:
     type: event
@@ -320,7 +313,6 @@ security.ui.certerror:
     notification_emails: *security_ui_certerror_click_emails
     expires: never
     extra_keys: *security_ui_certerror_click_extra
-    telemetry_mirror: SecurityUiCerterror_Click_ErrorCodeLink
 
   click_clipboard_button_top:
     type: event
@@ -335,7 +327,6 @@ security.ui.certerror:
     notification_emails: *security_ui_certerror_click_emails
     expires: never
     extra_keys: *security_ui_certerror_click_extra
-    telemetry_mirror: SecurityUiCerterror_Click_ClipboardButtonTop
 
   click_clipboard_button_bot:
     type: event
@@ -350,7 +341,6 @@ security.ui.certerror:
     notification_emails: *security_ui_certerror_click_emails
     expires: never
     extra_keys: *security_ui_certerror_click_extra
-    telemetry_mirror: SecurityUiCerterror_Click_ClipboardButtonBot
 
 security.ui.tlserror:
   load_abouttlserror:
@@ -382,7 +372,6 @@ security.ui.tlserror:
         description: >
           The status of the failed channel, as an nsresult.
         type: quantity
-    telemetry_mirror: SecurityUiTlserror_Load_Abouttlserror
 
 security.ui.neterror:
   load_aboutneterror:
@@ -525,8 +514,20 @@ security.ui.neterror:
       we were online at page load: the captive-portal reading was stale and the
       authoritative re-check came back offline/captive or timed out, so no CTA
       was shown. Connectivity dropping *after* the CTA was shown is a different
-      thing and is counted by search_cta_click_aborted, not here. Records only
-      the reason label, never content.
+      thing and is counted by search_cta_click_aborted, not here.
+      decision_timed_out means the decision did not finish inside
+      browser.netError.searchCTA.decisionTimeoutMs, the deadline the page waits
+      out before rendering without a CTA, so it was abandoned and no CTA was
+      shown. It absorbs most of what used to be counted under
+      connectivity_unconfirmed. The stale-reading re-check is the slowest step
+      here and rarely finishes inside that deadline.
+      not_top_level means the error document was not the top-level document (a
+      DNS failure inside an embedded document on a page that loaded fine), so no
+      CTA was offered; it is evaluated before the failed URL is looked at, which
+      is why such a load can never appear under keywords_found, no_path or
+      no_meaningful_keywords. When computing shown-rate or click-through rate,
+      exclude not_top_level from the denominator: it is a scope exclusion, not a
+      failure to find keywords. Records only the reason label, never content.
     labels:
       - keywords_found
       - no_path
@@ -535,14 +536,20 @@ security.ui.neterror:
       - search_unavailable
       - engine_not_general
       - connectivity_unconfirmed
+      - not_top_level
+      - decision_timed_out
     bugs:
       - https://bugzil.la/2055675
       - https://bugzil.la/2055637
       - https://bugzil.la/2055712
+      - https://bugzil.la/2063091
+      - https://bugzil.la/2067882
     data_reviews:
       - https://bugzil.la/2055675
       - https://bugzil.la/2055637
       - https://bugzil.la/2055712
+      - https://bugzil.la/2063091
+      - https://bugzil.la/2067882
     notification_emails:
       - jbrown@mozilla.com
       - seceng-telemetry@mozilla.com
@@ -610,7 +617,8 @@ security.ui.neterror:
     type: event
     description: >
       How the user left an online dnsNotFound page on which the search CTA was
-      eligible (browser.netError.searchCTA.enabled on, online, not TRR-only).
+      eligible (browser.netError.searchCTA.enabled on, online, not TRR-only, and
+      the top-level document, so a frame records nothing here).
       Recorded exactly once per page: at the click for the three click-driven
       reasons, and at pagehide otherwise. Clicking Search opens a separate tab
       and leaves the error page loaded, so recording that outcome at pagehide
@@ -620,6 +628,7 @@ security.ui.neterror:
       destination).
     bugs:
       - https://bugzil.la/2055717
+      - https://bugzil.la/2063091
     data_reviews:
       - https://bugzil.la/2055717
     notification_emails:

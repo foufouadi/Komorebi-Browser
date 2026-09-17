@@ -128,6 +128,12 @@ ifeq (Darwin_cocoa, $(OS_ARCH)_$(MOZ_WIDGET_TOOLKIT))
 	$(call py_action,zip $(UPDATE_FRAMEWORK_ARTIFACTS_ARCHIVE_BASENAME).zip,--error-if-empty -C $(ABS_DIST)/update_framework_artifacts '$(ABS_DIST)/$(PKG_PATH)$(UPDATE_FRAMEWORK_ARTIFACTS_ARCHIVE_BASENAME).zip' '*.framework')
 endif # Darwin_cocoa
 endif # MOZ_ARTIFACT_BUILDS
+ifdef MOZ_APPSERVICES_IN_TREE
+ifdef MOZ_LIBMEGAZORD_ARTIFACTS
+	@echo 'Generating libmegazord.so artifacts archive ($(LIBMEGAZORD_SO_ARTIFACTS_ARCHIVE_BASENAME).zip)'
+	$(call py_action,package_libmegazord_artifacts $(LIBMEGAZORD_SO_ARTIFACTS_ARCHIVE_BASENAME).zip,--dist-bin '$(ABS_DIST)/bin' '$(ABS_DIST)/$(PKG_PATH)$(LIBMEGAZORD_SO_ARTIFACTS_ARCHIVE_BASENAME).zip')
+endif
+endif
 
 make-package-internal: prepare-package make-sourcestamp-file
 	@echo 'Compressing...'

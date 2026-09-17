@@ -197,8 +197,6 @@ private fun addPrivateBrowsingShortcutButton() = onView(withText("Add private br
 
 private fun goBackButton() = onView(withContentDescription("Navigate up"))
 
-private fun addAutomaticallyButton() = mDevice.findObject(UiSelector().textStartsWith("add automatically"))
-
 private fun cancelShortcutAdditionButton() = mDevice.findObject(UiSelector().textContains("CANCEL"))
 
 private fun privateBrowsingShortcutIcon() = mDevice.findObject(text("Private $appName"))

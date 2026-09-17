@@ -149,7 +149,10 @@ class ArtifactJob:
     # is the prefix of the pattern relevant to its location in the archive, and
     # dest_prefix is the prefix to be added that will yield the final path relative
     # to dist/.
-    test_artifact_patterns = {
+    # This must stay an ordered sequence: consumers use the first matching
+    # pattern, and some patterns overlap (a trailing `*` matches a whole
+    # subtree), so more specific patterns have to come first.
+    test_artifact_patterns = (
         ("bin/BadCertAndPinningServer", ("bin", "bin")),
         ("bin/DelegatedCredentialsServer", ("bin", "bin")),
         ("bin/EncryptedClientHelloServer", ("bin", "bin")),
@@ -168,7 +171,7 @@ class ArtifactJob:
         ("bin/http3server", ("bin", "bin")),
         ("bin/plugins/gmp-*/*/*", ("bin/plugins", "bin")),
         ("bin/plugins/*", ("bin/plugins", "plugins")),
-    }
+    )
 
     # We can tell our input is a test archive by this suffix, which happens to
     # be the same across platforms.
@@ -895,7 +898,8 @@ class WinArtifactJob(ArtifactJob):
         return {p.format(product=self.product) for p in self._package_artifact_patterns}
 
     # These are a subset of TEST_HARNESS_BINS in testing/mochitest/Makefile.in.
-    test_artifact_patterns = {
+    # See `ArtifactJob.test_artifact_patterns` for why the order matters.
+    test_artifact_patterns = (
         ("bin/BadCertAndPinningServer.exe", ("bin", "bin")),
         ("bin/DelegatedCredentialsServer.exe", ("bin", "bin")),
         ("bin/EncryptedClientHelloServer.exe", ("bin", "bin")),
@@ -916,7 +920,7 @@ class WinArtifactJob(ArtifactJob):
         ("bin/plugins/gmp-*/*/*", ("bin/plugins", "bin")),
         ("bin/plugins/*", ("bin/plugins", "plugins")),
         ("bin/components/*", ("bin/components", "bin/components")),
-    }
+    )
 
     def process_package_artifact(self, filename, processed_filename):
         added_entry = False
@@ -1206,27 +1210,39 @@ class TaskCache(CacheManager):
         # 'autoland'
         tree = tree.split("/")[1] if "/" in tree else tree
 
+        # Optimized builds are normally only published to the `.shippable`
+        # index. Some consumers (e.g. the Android Gradle python tests) run on
+        # autoland, where shippable Android builds aren't scheduled by default;
+        # with MOZ_ARTIFACT_ALLOW_NON_SHIPPABLE they fall back to the regular
+        # per-push opt builds. The shippable index is still tried first, so
+        # branches that only publish shippable builds (central, beta, release,
+        # esr) are unaffected. See bug 1768186 for lifting this more generally.
         if job.endswith("-opt"):
-            tree += ".shippable"
-
-        namespace = f"{job_configuration.trust_domain}.v2.{tree}.revision.{rev}.{job_configuration.product}.{job}"
-        self.log(
-            logging.DEBUG,
-            "artifact",
-            {"namespace": namespace},
-            "Searching Taskcluster index with namespace: {namespace}",
-        )
+            if os.environ.get("MOZ_ARTIFACT_ALLOW_NON_SHIPPABLE"):
+                trees = [f"{tree}.shippable", tree]
+            else:
+                trees = [f"{tree}.shippable"]
+        else:
+            trees = [tree]
 
         from taskcluster.exceptions import TaskclusterRestFailure
 
-        try:
-            index = get_taskcluster_client("index")
-            task = index.findTask(namespace)
-            taskId = task["taskId"]
-        except (KeyError, TaskclusterRestFailure) as e:
-            if isinstance(e, TaskclusterRestFailure) and e.status_code != 404:
-                raise
-
+        index = get_taskcluster_client("index")
+        for candidate_tree in trees:
+            namespace = f"{job_configuration.trust_domain}.v2.{candidate_tree}.revision.{rev}.{job_configuration.product}.{job}"
+            self.log(
+                logging.DEBUG,
+                "artifact",
+                {"namespace": namespace},
+                "Searching Taskcluster index with namespace: {namespace}",
+            )
+            try:
+                taskId = index.findTask(namespace)["taskId"]
+                break
+            except (KeyError, TaskclusterRestFailure) as e:
+                if isinstance(e, TaskclusterRestFailure) and e.status_code != 404:
+                    raise
+        else:
             # Not all revisions correspond to pushes that produce the job we
             # care about; and even those that do may not have completed yet.
             raise ValueError(f"Task for {namespace} does not exist (yet)!")

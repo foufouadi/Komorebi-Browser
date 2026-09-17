@@ -164,7 +164,10 @@ Accessible* RemoteAccessible::EmbeddedChildAt(uint32_t aChildIdx) {
 }
 
 LocalAccessible* RemoteAccessible::OuterDocOfRemoteBrowser() const {
-  auto tab = mDoc->Manager();
+  auto* tab = mDoc->GetBrowserParent();
+  if (NS_WARN_IF(!tab)) {
+    return nullptr;
+  }
   dom::Element* frame = tab->GetOwnerElement();
   NS_ASSERTION(frame, "why isn't the tab in a frame!");
   if (!frame) return nullptr;
@@ -215,8 +218,10 @@ bool RemoteAccessible::ApplyCache(CacheUpdateType aUpdateType,
     // Updating the viewport cache means the offscreen state of this
     // document's accessibles has changed. Update the HashSet we use for
     // checking offscreen state here.
-    MOZ_ASSERT(IsDoc(),
-               "Fetched the viewport cache from a non-doc accessible?");
+    if (!IsDoc()) {
+      MOZ_ASSERT_UNREACHABLE("Received viewport cache for non-doc accessible");
+      return false;
+    }
     AsDoc()->mOnScreenAccessibles.Clear();
     for (auto id : *maybeViewportCache) {
       AsDoc()->mOnScreenAccessibles.Insert(id);
@@ -1011,7 +1016,7 @@ LayoutDeviceIntRect RemoteAccessible::BoundsWithOffset(
 
     if (aOffset.isSome()) {
       // The rect we've passed in is in app units, so no conversion needed.
-      nsRect internalRect = *aOffset;
+      const nsRect& internalRect = *aOffset;
       bounds.SetRectX(bounds.x + internalRect.x, internalRect.width);
       bounds.SetRectY(bounds.y + internalRect.y, internalRect.height);
     }
@@ -2414,7 +2419,7 @@ bool RemoteAccessible::HasPrimaryAction() const {
 
 void RemoteAccessible::TakeFocus() const {
   (void)mDoc->SendTakeFocus(mID);
-  auto* bp = mDoc->Manager();
+  auto* bp = mDoc->GetBrowserParent();
   MOZ_ASSERT(bp);
   if (nsFocusManager::GetFocusedElementStatic() == bp->GetOwnerElement()) {
     // This remote document tree is already focused. We don't need to do

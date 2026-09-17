@@ -7,6 +7,7 @@
 
 #include "H264.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/Result.h"
 #include "mozilla/ResultVariant.h"
 #include "nsStringFwd.h"
@@ -25,6 +26,22 @@ struct H264FmtpParams {
       Err(H264FmtpParseError::NotPresent);
   Result<uint32_t, H264FmtpParseError> mPacketizationMode =
       Err(H264FmtpParseError::NotPresent);
+
+  // Whether any parameter was present but invalid.
+  bool HasInvalidParam() const {
+    const auto invalid = [](const auto& aResult) {
+      return aResult.isErr() &&
+             aResult.inspectErr() == H264FmtpParseError::Invalid;
+    };
+    return invalid(mProfileLevel) || invalid(mPacketizationMode);
+  }
+};
+
+// H.264 Annex A Table A-1 macroblock limits for a level: maximum
+// macroblocks per frame and per second.
+struct H264MacroblockLimits {
+  uint32_t mMaxMacroblocksPerFrame;
+  uint32_t mMaxMacroblocksPerSecond;
 };
 
 #ifdef MOZ_WEBRTC
@@ -32,6 +49,10 @@ struct H264FmtpParams {
 // type. Missing parameters return Err(NotPresent), present but unparseable or
 // unsupported values return Err(Invalid).
 H264FmtpParams ParseH264Fmtp(const nsACString& aMimeString);
+
+// The H.264 Annex A Table A-1 macroblock limits for aLevel. Nothing() for
+// unknown levels.
+Maybe<H264MacroblockLimits> H264MacroblockLimitsForLevel(H264_LEVEL aLevel);
 
 // Whether the given resolution and framerate fit aLevel's H.264 Annex A
 // macroblocks-per-frame and macroblocks-per-second caps. False for unknown
@@ -42,6 +63,11 @@ H264FmtpParams ParseH264Fmtp(const nsACString& aMimeString);
 inline H264FmtpParams ParseH264Fmtp(const nsACString&) {
   MOZ_ASSERT_UNREACHABLE("ParseH264Fmtp called in non-MOZ_WEBRTC build");
   return {};
+}
+inline Maybe<H264MacroblockLimits> H264MacroblockLimitsForLevel(H264_LEVEL) {
+  MOZ_ASSERT_UNREACHABLE(
+      "H264MacroblockLimitsForLevel called in non-MOZ_WEBRTC build");
+  return Nothing();
 }
 inline bool H264LevelFits(H264_LEVEL, uint32_t, uint32_t, double) {
   MOZ_ASSERT_UNREACHABLE("H264LevelFits called in non-MOZ_WEBRTC build");

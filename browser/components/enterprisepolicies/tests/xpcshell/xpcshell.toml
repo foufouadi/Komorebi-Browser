@@ -25,6 +25,8 @@ support-files = [
 
 ["test_clear_blocked_cookies.js"]
 
+["test_clear_on_shutdown.js"]
+
 ["test_containers.js"]
 
 ["test_defaultbrowsercheck.js"]
@@ -62,6 +64,8 @@ support-files = [
 
 ["test_policy_descriptions.js"]
 
+["test_policy_failures.js"]
+
 ["test_policy_search_engine.js"]
 
 ["test_popups_cookies_addons.js"]
@@ -80,6 +84,8 @@ support-files = ["config_popups_cookies_addons.json"]
 ["test_simple_pref_policies.js"]
 
 ["test_sitepolicies.js"]
+
+["test_sitepolicies_container.js"]
 
 ["test_sorted_alphabetically.js"]
 

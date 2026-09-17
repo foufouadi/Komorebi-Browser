@@ -5,7 +5,7 @@
 use api::{ImageBufferKind, units::DeviceSize};
 use crate::batch::{BatchKey, BatchKind, BatchFeatures};
 use crate::composite::{CompositeFeatures, CompositeSurfaceFormat};
-use crate::device::{Device, Program, ShaderError};
+use crate::device::{Device, Program, ShaderError, VertexDescriptor};
 use crate::pattern::PatternKind;
 use crate::telemetry::Telemetry;
 use euclid::default::Transform3D;
@@ -16,8 +16,6 @@ use crate::renderer::{
     TextureSampler, VertexArrayKind, ShaderPrecacheFlags,
 };
 use crate::profiler::{self, RenderCommandLog, TransactionProfile, ns_to_ms};
-
-use gleam::gl::GlType;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -46,14 +44,12 @@ fn get_feature_string(kind: ImageBufferKind, texture_external_version: TextureEx
 }
 
 fn has_platform_support(kind: ImageBufferKind, device: &Device) -> bool {
-    match (kind, device.gl().get_type()) {
-        (ImageBufferKind::Texture2D, _) => true,
-        (ImageBufferKind::TextureRect, GlType::Gles) => false,
-        (ImageBufferKind::TextureRect, GlType::Gl) => true,
-        (ImageBufferKind::TextureExternal, GlType::Gles) => true,
-        (ImageBufferKind::TextureExternal, GlType::Gl) => false,
-        (ImageBufferKind::TextureExternalBT709, GlType::Gles) => device.supports_extension("GL_EXT_YUV_target"),
-        (ImageBufferKind::TextureExternalBT709, GlType::Gl) => false,
+    let caps = device.get_capabilities();
+    match kind {
+        ImageBufferKind::Texture2D => true,
+        ImageBufferKind::TextureRect => caps.supports_texture_rect,
+        ImageBufferKind::TextureExternal => caps.supports_texture_external,
+        ImageBufferKind::TextureExternalBT709 => caps.supports_texture_external_bt709,
     }
 }
 
@@ -64,9 +60,26 @@ pub const IMAGE_BUFFER_KINDS: [ImageBufferKind; 4] = [
     ImageBufferKind::TextureExternalBT709,
 ];
 
+/// Sampler uniforms bound on every program after a successful link. Names
+/// absent from a given shader are skipped by `bind_shader_samplers`.
+const SAMPLER_BINDINGS: &[(&'static str, TextureSampler)] = &[
+    ("sColor0", TextureSampler::Color0),
+    ("sColor1", TextureSampler::Color1),
+    ("sColor2", TextureSampler::Color2),
+    ("sDither", TextureSampler::Dither),
+    ("sTransformPalette", TextureSampler::TransformPalette),
+    ("sRenderTasks", TextureSampler::RenderTasks),
+    ("sPrimitiveHeadersF", TextureSampler::PrimitiveHeadersF),
+    ("sPrimitiveHeadersI", TextureSampler::PrimitiveHeadersI),
+    ("sClipMask", TextureSampler::ClipMask),
+    ("sGpuBufferF", TextureSampler::GpuBufferF),
+    ("sGpuBufferI", TextureSampler::GpuBufferI),
+];
+
 const DITHERING_FEATURE: &str = "DITHERING";
 const DUAL_SOURCE_FEATURE: &str = "DUAL_SOURCE_BLENDING";
 const FAST_PATH_FEATURE: &str = "FAST_PATH";
+const SUPERELLIPSE_FEATURE: &str = "SUPERELLIPSE";
 
 pub(crate) enum ShaderKind {
     Primitive,
@@ -117,6 +130,101 @@ impl LazilyCompiledShader {
         };
 
         Ok(shader)
+    }
+
+    #[cfg(feature = "debugger")]
+    pub fn name(&self) -> &'static str {
+        self.name
+    }
+
+    #[cfg(feature = "debugger")]
+    pub fn features(&self) -> &[&'static str] {
+        &self.features
+    }
+
+    /// The name the driver sees, base filename plus features, as used in
+    /// compile and link logs.
+    #[cfg(feature = "debugger")]
+    pub fn full_name(&self) -> String {
+        if self.features.is_empty() {
+            self.name.to_string()
+        } else {
+            format!("{}_{}", self.name, self.features.join("_"))
+        }
+    }
+
+    /// Whether this shader has a program that has been linked, and so has
+    /// source compiled into it that an edit can invalidate.
+    ///
+    /// This is deliberately not `program.is_some()`. An async precache calls
+    /// `create_program` on every variant without linking any of them, which
+    /// Firefox does at startup, so a program object existing says nothing
+    /// about whether anything has been compiled.
+    #[cfg(feature = "debugger")]
+    pub fn is_compiled(&self) -> bool {
+        self.program.as_ref().map_or(false, Program::is_initialized)
+    }
+
+    /// Drop a program that was created but never linked, so that the next use
+    /// builds a fresh one.
+    ///
+    /// `ProgramSourceInfo` is computed by `create_program` and decides, among
+    /// other things, whether to compile the `.glsl` source or the variant
+    /// optimized at build time. An unlinked program created before a source
+    /// override was installed still carries that decision, so linking it as it
+    /// stands would compile the build-time source and silently ignore the
+    /// edit.
+    #[cfg(feature = "debugger")]
+    fn discard_unlinked_program(&mut self, device: &mut Device) {
+        if self.program.as_ref().map_or(true, Program::is_initialized) {
+            return;
+        }
+
+        if let Some(program) = self.program.take() {
+            device.delete_program(program);
+        }
+        self.cached_projection = Transform3D::identity();
+    }
+
+    fn vertex_descriptor(&self) -> &'static VertexDescriptor {
+        let vertex_format = match self.kind {
+            ShaderKind::Primitive |
+            ShaderKind::Text => VertexArrayKind::Primitive,
+            ShaderKind::Cache(format) => format,
+            ShaderKind::Composite => VertexArrayKind::Composite,
+            ShaderKind::Clear => VertexArrayKind::Clear,
+            ShaderKind::Copy => VertexArrayKind::Copy,
+        };
+
+        match vertex_format {
+            VertexArrayKind::Primitive => &desc::PRIM_INSTANCES,
+            VertexArrayKind::LineDecoration => &desc::LINE,
+            VertexArrayKind::Blur => &desc::BLUR,
+            VertexArrayKind::Border => &desc::BORDER,
+            VertexArrayKind::Scale => &desc::SCALE,
+            VertexArrayKind::SvgFilterNode => &desc::SVG_FILTER_NODE,
+            VertexArrayKind::Composite => &desc::COMPOSITE,
+            VertexArrayKind::Clear => &desc::CLEAR,
+            VertexArrayKind::Copy => &desc::COPY,
+            VertexArrayKind::Mask => &desc::MASK,
+        }
+    }
+
+    /// Compile and link a program for this shader from the sources currently
+    /// in effect, leaving the one already in use alone.
+    #[cfg(feature = "debugger")]
+    fn build_program(&self, device: &mut Device) -> Result<Program, ShaderError> {
+        let mut program = device.create_program(self.name, &self.features)?;
+
+        if let Err(err) = device.link_program(&mut program, self.vertex_descriptor()) {
+            device.delete_program(program);
+            return Err(err);
+        }
+
+        device.bind_program(&program);
+        device.bind_shader_samplers(&program, SAMPLER_BINDINGS);
+
+        Ok(program)
     }
 
     pub fn precache(
@@ -207,51 +315,29 @@ impl LazilyCompiledShader {
             }
         }
 
-        let program = self.program.as_mut().unwrap();
+        let needs_link = precache_flags.contains(ShaderPrecacheFlags::FULL_COMPILE)
+            && !self.program.as_ref().unwrap().is_initialized();
 
-        if precache_flags.contains(ShaderPrecacheFlags::FULL_COMPILE) && !program.is_initialized() {
+        if needs_link {
             let start_time = zeitstempel::now();
 
-            let vertex_format = match self.kind {
-                ShaderKind::Primitive |
-                ShaderKind::Text => VertexArrayKind::Primitive,
-                ShaderKind::Cache(format) => format,
-                ShaderKind::Composite => VertexArrayKind::Composite,
-                ShaderKind::Clear => VertexArrayKind::Clear,
-                ShaderKind::Copy => VertexArrayKind::Copy,
-            };
+            let vertex_descriptor = self.vertex_descriptor();
 
-            let vertex_descriptor = match vertex_format {
-                VertexArrayKind::Primitive => &desc::PRIM_INSTANCES,
-                VertexArrayKind::LineDecoration => &desc::LINE,
-                VertexArrayKind::Blur => &desc::BLUR,
-                VertexArrayKind::Border => &desc::BORDER,
-                VertexArrayKind::Scale => &desc::SCALE,
-                VertexArrayKind::SvgFilterNode => &desc::SVG_FILTER_NODE,
-                VertexArrayKind::Composite => &desc::COMPOSITE,
-                VertexArrayKind::Clear => &desc::CLEAR,
-                VertexArrayKind::Copy => &desc::COPY,
-                VertexArrayKind::Mask => &desc::MASK,
-            };
+            let program = self.program.as_mut().unwrap();
+            if let Err(err) = device.link_program(program, vertex_descriptor) {
+                // A failed link deletes the program object, so drop it rather
+                // than retrying against a dead GL name on the next bind. The
+                // next attempt builds a fresh one, which is what makes a
+                // shader that has been fixed since recover on its own.
+                if let Some(program) = self.program.take() {
+                    device.delete_program(program);
+                }
+                return Err(err);
+            }
 
-            device.link_program(program, vertex_descriptor)?;
+            let program = self.program.as_mut().unwrap();
             device.bind_program(program);
-            device.bind_shader_samplers(
-                &program,
-                &[
-                    ("sColor0", TextureSampler::Color0),
-                    ("sColor1", TextureSampler::Color1),
-                    ("sColor2", TextureSampler::Color2),
-                    ("sDither", TextureSampler::Dither),
-                    ("sTransformPalette", TextureSampler::TransformPalette),
-                    ("sRenderTasks", TextureSampler::RenderTasks),
-                    ("sPrimitiveHeadersF", TextureSampler::PrimitiveHeadersF),
-                    ("sPrimitiveHeadersI", TextureSampler::PrimitiveHeadersI),
-                    ("sClipMask", TextureSampler::ClipMask),
-                    ("sGpuBufferF", TextureSampler::GpuBufferF),
-                    ("sGpuBufferI", TextureSampler::GpuBufferI),
-                ],
-            );
+            device.bind_shader_samplers(&program, SAMPLER_BINDINGS);
 
             if let Some(profile) = &mut profile {
                 let end_time = zeitstempel::now();
@@ -259,7 +345,7 @@ impl LazilyCompiledShader {
             }
         }
 
-        Ok(program)
+        Ok(self.program.as_mut().unwrap())
     }
 
     fn deinit(self, device: &mut Device) {
@@ -390,6 +476,94 @@ impl ShaderLoader {
         self.shaders[shader.0].precache(device, flags)
     }
 
+    /// Rebuild every compiled shader whose source pulls in `changed_file`,
+    /// from the sources currently in effect on the device.
+    ///
+    /// Either all of them are replaced or none is: if any variant fails to
+    /// compile or link, the programs in use are left untouched and the
+    /// instance keeps rendering with the shaders it already had. Shaders that
+    /// have not been linked yet are skipped; they pick the new source up when
+    /// they are first bound.
+    #[cfg(feature = "debugger")]
+    pub fn reload(
+        &mut self,
+        device: &mut Device,
+        changed_file: &str,
+    ) -> Result<usize, Vec<ShaderError>> {
+        // A broken shared include fails identically for every variant that
+        // pulls it in, so stop once enough have failed to describe the
+        // problem rather than reporting the same error a hundred times.
+        const MAX_REPORTED_FAILURES: usize = 8;
+
+        let affected: Vec<usize> = {
+            let device = &*device;
+            self.shaders
+                .iter()
+                .enumerate()
+                .filter(|(_, shader)| {
+                    shader.name() == changed_file
+                        || device.shader_include_closure(shader.name()).contains(changed_file)
+                })
+                .map(|(index, _)| index)
+                .collect()
+        };
+
+        // Unlinked programs carry a source decision that predates the edit, so
+        // drop them rather than rebuild them: they have compiled nothing yet,
+        // and a fresh one is built when they are first used.
+        for &index in &affected {
+            self.shaders[index].discard_unlinked_program(device);
+        }
+
+        let to_rebuild: Vec<usize> = affected
+            .iter()
+            .cloned()
+            .filter(|&index| self.shaders[index].is_compiled())
+            .collect();
+
+        let mut rebuilt = Vec::with_capacity(to_rebuild.len());
+        let mut errors = Vec::new();
+
+        for &index in &to_rebuild {
+            match self.shaders[index].build_program(device) {
+                Ok(program) => rebuilt.push((index, program)),
+                Err(err) => {
+                    errors.push(err);
+                    if errors.len() >= MAX_REPORTED_FAILURES {
+                        break;
+                    }
+                }
+            }
+        }
+
+        if !errors.is_empty() {
+            for (_, program) in rebuilt {
+                device.delete_program(program);
+            }
+            return Err(errors);
+        }
+
+        let count = rebuilt.len();
+
+        for (index, program) in rebuilt {
+            let shader = &mut self.shaders[index];
+            if let Some(old_program) = shader.program.replace(program) {
+                device.delete_program(old_program);
+            }
+            // The cached projection describes uniform state uploaded to the
+            // program that has just been replaced, so force the next bind to
+            // upload it to the new one.
+            shader.cached_projection = Transform3D::identity();
+        }
+
+        Ok(count)
+    }
+
+    #[cfg(feature = "debugger")]
+    pub fn shaders(&self) -> &[LazilyCompiledShader] {
+        &self.shaders
+    }
+
     pub fn all_handles(&self) -> Vec<ShaderHandle> {
         self.shaders.iter().enumerate().map(|(index, _)| ShaderHandle(index)).collect()
     }
@@ -414,6 +588,8 @@ pub struct Shaders {
     cs_blur_rgba8: ShaderHandle,
     cs_border_segment: ShaderHandle,
     cs_border_solid: ShaderHandle,
+    cs_border_segment_superellipse: ShaderHandle,
+    cs_border_solid_superellipse: ShaderHandle,
     cs_scale: Vec<Option<ShaderHandle>>,
     cs_line_decoration: ShaderHandle,
     cs_svg_filter_node: ShaderHandle,
@@ -439,6 +615,7 @@ pub struct Shaders {
     ps_quad_repeat: ShaderHandle,
     ps_quad_gradient: ShaderHandle,
     ps_quad_box_shadow: ShaderHandle,
+    ps_quad_box_shadow_superellipse: ShaderHandle,
     // ps_quad_yuv, like ps_quad_textured, comes in sampler-type-specific
     // variants so the YUV planes are sampled with the matching sColor
     // declaration. The variant is selected via PatternKind.
@@ -451,6 +628,7 @@ pub struct Shaders {
     ps_quad_mix_blend: ShaderHandle,
     ps_mask: ShaderHandle,
     ps_mask_fast: ShaderHandle,
+    ps_mask_superellipse: ShaderHandle,
     ps_clear: ShaderHandle,
     ps_copy: ShaderHandle,
 
@@ -465,7 +643,6 @@ pub struct PendingShadersToPrecache {
 impl Shaders {
     pub fn new(
         device: &mut Device,
-        gl_type: GlType,
         options: &WebRenderOptions,
     ) -> Result<Self, ShaderError> {
         let use_dual_source_blending =
@@ -480,7 +657,7 @@ impl Shaders {
         } else {
             TextureExternalVersion::ESSL1
         };
-        let mut shader_flags = get_shader_feature_flags(gl_type, texture_external_version, device);
+        let mut shader_flags = device.shader_feature_flags();
         shader_flags.set(ShaderFeatureFlags::ADVANCED_BLEND_EQUATION, use_advanced_blend_equation);
         shader_flags.set(ShaderFeatureFlags::DUAL_SOURCE_BLENDING, use_dual_source_blending);
         shader_flags.set(ShaderFeatureFlags::DITHERING, options.enable_dithering);
@@ -513,6 +690,13 @@ impl Shaders {
             ShaderKind::Cache(VertexArrayKind::Mask),
             "ps_quad_mask",
             &[FAST_PATH_FEATURE],
+            &shader_list,
+        )?;
+
+        let ps_mask_superellipse = loader.create_shader(
+            ShaderKind::Cache(VertexArrayKind::Mask),
+            "ps_quad_mask",
+            &[SUPERELLIPSE_FEATURE],
             &shader_list,
         )?;
 
@@ -644,6 +828,13 @@ impl Shaders {
             &shader_list,
         )?;
 
+        let ps_quad_box_shadow_superellipse = loader.create_shader(
+            ShaderKind::Primitive,
+            "ps_quad_box_shadow",
+            &[SUPERELLIPSE_FEATURE],
+            &shader_list,
+        )?;
+
         let ps_quad_yuv = loader.create_shader(
             ShaderKind::Primitive,
             "ps_quad_yuv",
@@ -759,15 +950,31 @@ impl Shaders {
             &shader_list,
         )?;
 
-        let composite = CompositorShaders::new(device, gl_type, &mut loader)?;
+        let cs_border_segment_superellipse = loader.create_shader(
+            ShaderKind::Cache(VertexArrayKind::Border),
+            "cs_border_segment",
+             &[SUPERELLIPSE_FEATURE],
+            &shader_list,
+        )?;
+
+        let cs_border_solid_superellipse = loader.create_shader(
+            ShaderKind::Cache(VertexArrayKind::Border),
+            "cs_border_solid",
+            &[SUPERELLIPSE_FEATURE],
+            &shader_list,
+        )?;
+
+        let composite = CompositorShaders::new(device, &mut loader)?;
 
         Ok(Shaders {
             loader,
 
             cs_blur_rgba8,
             cs_border_segment,
-            cs_line_decoration,
             cs_border_solid,
+            cs_border_segment_superellipse,
+            cs_border_solid_superellipse,
+            cs_line_decoration,
             cs_scale,
             cs_svg_filter_node,
             ps_text_run,
@@ -779,6 +986,7 @@ impl Shaders {
             ps_quad_repeat,
             ps_quad_gradient,
             ps_quad_box_shadow,
+            ps_quad_box_shadow_superellipse,
             ps_quad_yuv,
             ps_quad_yuv_external,
             ps_quad_yuv_external_bt709,
@@ -788,6 +996,7 @@ impl Shaders {
             ps_quad_mix_blend,
             ps_mask,
             ps_mask_fast,
+            ps_mask_superellipse,
             ps_split_composite,
             ps_clear,
             ps_copy,
@@ -859,6 +1068,7 @@ impl Shaders {
             PatternKind::Gradient => self.ps_quad_gradient,
             PatternKind::Repeat => self.ps_quad_repeat,
             PatternKind::BoxShadow => self.ps_quad_box_shadow,
+            PatternKind::BoxShadowSuperellipse => self.ps_quad_box_shadow_superellipse,
             PatternKind::Yuv => self.ps_quad_yuv,
             PatternKind::YuvTextureExternal => self.ps_quad_yuv_external
                 .expect("bug: ps_quad_yuv TEXTURE_EXTERNAL variant not loaded"),
@@ -915,6 +1125,9 @@ impl Shaders {
             BatchKind::Quad(PatternKind::BoxShadow) => {
                 self.ps_quad_box_shadow
             }
+            BatchKind::Quad(PatternKind::BoxShadowSuperellipse) => {
+                self.ps_quad_box_shadow_superellipse
+            }
             BatchKind::Quad(PatternKind::Yuv) => {
                 self.ps_quad_yuv
             }
@@ -958,6 +1171,8 @@ impl Shaders {
     pub fn cs_blur_rgba8(&mut self) -> &mut LazilyCompiledShader { self.loader.get(self.cs_blur_rgba8) }
     pub fn cs_border_segment(&mut self) -> &mut LazilyCompiledShader { self.loader.get(self.cs_border_segment) }
     pub fn cs_border_solid(&mut self) -> &mut LazilyCompiledShader { self.loader.get(self.cs_border_solid) }
+    pub fn cs_border_segment_superellipse(&mut self) -> &mut LazilyCompiledShader { self.loader.get(self.cs_border_segment_superellipse) }
+    pub fn cs_border_solid_superellipse(&mut self) -> &mut LazilyCompiledShader { self.loader.get(self.cs_border_solid_superellipse) }
     pub fn cs_line_decoration(&mut self) -> &mut LazilyCompiledShader { self.loader.get(self.cs_line_decoration) }
     pub fn cs_svg_filter_node(&mut self) -> &mut LazilyCompiledShader { self.loader.get(self.cs_svg_filter_node) }
     pub fn ps_quad_textured(&mut self) -> &mut LazilyCompiledShader {
@@ -965,8 +1180,26 @@ impl Shaders {
     }
     pub fn ps_mask(&mut self) -> &mut LazilyCompiledShader { self.loader.get(self.ps_mask) }
     pub fn ps_mask_fast(&mut self) -> &mut LazilyCompiledShader { self.loader.get(self.ps_mask_fast) }
+    pub fn ps_mask_superellipse(&mut self) -> &mut LazilyCompiledShader { self.loader.get(self.ps_mask_superellipse) }
     pub fn ps_clear(&mut self) -> &mut LazilyCompiledShader { self.loader.get(self.ps_clear) }
     pub fn ps_copy(&mut self) -> &mut LazilyCompiledShader { self.loader.get(self.ps_copy) }
+
+    /// Rebuild the compiled shaders affected by an edit to `changed_file`.
+    /// See `ShaderLoader::reload`.
+    #[cfg(feature = "debugger")]
+    pub fn reload(
+        &mut self,
+        device: &mut Device,
+        changed_file: &str,
+    ) -> Result<usize, Vec<ShaderError>> {
+        self.loader.reload(device, changed_file)
+    }
+
+    /// Every shader variant this instance may use, whether compiled or not.
+    #[cfg(feature = "debugger")]
+    pub fn variants(&self) -> &[LazilyCompiledShader] {
+        self.loader.shaders()
+    }
 
     pub fn deinit(self, device: &mut Device) {
         self.loader.deinit(device);
@@ -998,7 +1231,6 @@ pub struct CompositorShaders {
 impl CompositorShaders {
     pub fn new(
         device: &mut Device,
-        gl_type: GlType,
         loader: &mut ShaderLoader,
     )  -> Result<Self, ShaderError>  {
         let mut yuv_clip_features = Vec::new();
@@ -1016,7 +1248,7 @@ impl CompositorShaders {
             TextureExternalVersion::ESSL1
         };
 
-        let feature_flags = get_shader_feature_flags(gl_type, texture_external_version, device);
+        let feature_flags = device.shader_feature_flags();
         let shader_list = get_shader_features(feature_flags);
 
         for _ in 0..IMAGE_BUFFER_KINDS.len() {
@@ -1132,26 +1364,5 @@ impl CompositorShaders {
 
     fn get_shader_index(buffer_kind: ImageBufferKind) -> usize {
         buffer_kind as usize
-    }
-}
-
-fn get_shader_feature_flags(
-    gl_type: GlType,
-    texture_external_version: TextureExternalVersion,
-    device: &Device
-) -> ShaderFeatureFlags {
-    match gl_type {
-        GlType::Gl => ShaderFeatureFlags::GL,
-        GlType::Gles => {
-            let mut flags = ShaderFeatureFlags::GLES;
-            flags |= match texture_external_version {
-                TextureExternalVersion::ESSL3 => ShaderFeatureFlags::TEXTURE_EXTERNAL,
-                TextureExternalVersion::ESSL1 => ShaderFeatureFlags::TEXTURE_EXTERNAL_ESSL1,
-            };
-            if device.supports_extension("GL_EXT_YUV_target") {
-                flags |= ShaderFeatureFlags::TEXTURE_EXTERNAL_BT709;
-            }
-            flags
-        }
     }
 }

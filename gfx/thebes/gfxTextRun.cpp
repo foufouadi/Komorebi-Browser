@@ -2585,6 +2585,9 @@ static Script ResolveScriptForLang(const nsAtom* aLanguage, Script aDefault) {
       : public MruCache<const nsAtom*, std::pair<const nsAtom*, Script>,
                         LangScriptCache> {
    public:
+    static bool IsEmpty(const std::pair<const nsAtom*, Script>& aValue) {
+      return !aValue.first;
+    }
     static HashNumber Hash(const nsAtom* const& aKey) { return aKey->hash(); }
     static bool Match(const nsAtom* const& aKey,
                       const std::pair<const nsAtom*, Script>& aValue) {
@@ -2912,7 +2915,7 @@ void gfxFontGroup::InitScriptRun(DrawTarget* aDrawTarget, gfxTextRun* aTextRun,
       bool syntheticLower = false;
       bool syntheticUpper = false;
 
-      if (mStyle.variantSubSuper != NS_FONT_VARIANT_POSITION_NORMAL &&
+      if (mStyle.variantSubSuper != StyleFontVariantPosition::Normal &&
           mStyle.useSyntheticPosition &&
           (aTextRun->GetShapingState() ==
                gfxTextRun::eShapingState_ForceFallbackFeature ||
@@ -2942,7 +2945,7 @@ void gfxFontGroup::InitScriptRun(DrawTarget* aDrawTarget, gfxTextRun* aTextRun,
           // glyph layout failed! treat as missing glyphs
           matchedFont = nullptr;
         }
-      } else if (mStyle.variantCaps != NS_FONT_VARIANT_CAPS_NORMAL &&
+      } else if (mStyle.variantCaps != StyleFontVariantCaps::Normal &&
                  mStyle.allowSyntheticSmallCaps &&
                  !matchedFont->SupportsVariantCaps(
                      aRunScript, mStyle.variantCaps, petiteToSmallCaps,

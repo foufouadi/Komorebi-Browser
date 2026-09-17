@@ -27,6 +27,7 @@ tasks-from:
     - android-gradle-plugins.yml
     - buildconfig.yml
     - clang.yml
+    - clang-tidy.yml
     - doc.yml
     - file-metadata.yml
     - jsshell.yml
@@ -39,6 +40,7 @@ tasks-from:
     - shadow-scheduler.yml
     - taskgraph.yml
     - vendor.yml
+    - vendor-verify.yml
     - webidl.yml
     - webcompat.yml
     - wpt-manifest.yml

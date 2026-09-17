@@ -78,6 +78,8 @@ prefs = [
 
 ["browser_contextMenu.js"]
 
+["browser_controlButtonClickFocus.js"]
+
 ["browser_controlsHover.js"]
 skip-if = [
   "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && display == 'x11' && socketprocess_networking", # bug 1784652
@@ -159,6 +161,8 @@ support-files = ["test-page-with-nan-video-duration.html"]
 ["browser_reconnectPiPAfterVideoReparented.js"]
 
 ["browser_removeVideoElement.js"]
+
+["browser_resistFingerprinting.js"]
 
 ["browser_resizeVideo.js"]
 skip-if = [

@@ -1,0 +1,4 @@
+[DEFAULT]
+run-if = ["os == 'win'"]
+
+["test_push_notification_helper.js"]

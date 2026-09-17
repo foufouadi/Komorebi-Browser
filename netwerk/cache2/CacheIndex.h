@@ -499,15 +499,16 @@ class CacheIndexEntryUpdate : public CacheIndexEntry {
       aDst->mRec->Get()->mFlags ^= kHasAltDataMask;
     }
 
-    if (mUpdateFlags & kFileSizeUpdatedMask) {
-      // Copy all flags except |HasAltData|.
-      aDst->mRec->Get()->mFlags |= (mRec->Get()->mFlags & ~kHasAltDataMask);
-    } else {
-      // Copy all flags except |HasAltData| and file size.
-      aDst->mRec->Get()->mFlags &= kFileSizeMask;
-      aDst->mRec->Get()->mFlags |=
-          (mRec->Get()->mFlags & ~kHasAltDataMask & ~kFileSizeMask);
+    // mFlags packs the file size alongside the boolean flags, so this must be
+    // an assignment and not a merge. Keep |HasAltData|, which the toggle above
+    // has already set, and keep the file size unless the update carries a new
+    // one; take every other bit from the update.
+    uint32_t keepMask = kHasAltDataMask;
+    if (!(mUpdateFlags & kFileSizeUpdatedMask)) {
+      keepMask |= kFileSizeMask;
     }
+    aDst->mRec->Get()->mFlags = (aDst->mRec->Get()->mFlags & keepMask) |
+                                (mRec->Get()->mFlags & ~keepMask);
   }
 
  private:
@@ -816,20 +817,15 @@ class CacheIndex final : public CacheFileIOListener, public nsIRunnable {
       const std::function<void(const CacheIndexEntry*)>& aCB = nullptr);
 
   // Returns a hash of the least important entry that should be evicted if the
-  // cache size is over limit and also returns a total number of all entries in
-  // the index minus the number of forced valid entries and unpinned entries
-  // that we encounter when searching (see below)
+  // cache size is over limit and also returns the number of entries we had to
+  // reject -- pinned, in use, or of the wrong content type -- before finding
+  // one we could evict.
   static nsresult GetEntryForEviction(EvictionSortedSnapshot& aSnapshot,
                                       bool aIgnoreEmptyEntries,
                                       SHA1Sum::Hash* aHash, uint32_t* aCnt);
 
   // Returns a sorted snapshot of the frecency storage.
   static EvictionSortedSnapshot GetSortedSnapshotForEviction();
-
-  // Checks if a cache entry is currently forced valid. Used to prevent an entry
-  // (that has been forced valid) from being evicted when the cache size reaches
-  // its limit.
-  static bool IsForcedValidEntry(const SHA1Sum::Hash* aHash);
 
   // Returns cache size in kB.
   static nsresult GetCacheSize(uint32_t* _retval);
@@ -1195,6 +1191,13 @@ class CacheIndex final : public CacheFileIOListener, public nsIRunnable {
   // in hashtable that are initialized and are not marked as removed when
   // writing begins.
   uint32_t mProcessEntries MOZ_GUARDED_BY(sLock){0};
+  // The entries WriteRecords() is writing, captured when the write begins so
+  // that each buffer-sized chunk can resume where the previous one stopped
+  // instead of walking mIndex from the start again. mIndex is not mutated while
+  // mState is WRITING -- AddEntry(), RemoveEntry(), InitEntry() and
+  // UpdateEntry() all stage their changes in mPendingUpdates -- so these
+  // pointers, and the flags that selected them, stay valid for the whole write.
+  nsTArray<CacheIndexEntry*> mRWEntries MOZ_GUARDED_BY(sLock);
   char* mRWBuf MOZ_GUARDED_BY(sLock){nullptr};
   uint32_t mRWBufSize MOZ_GUARDED_BY(sLock){0};
   uint32_t mRWBufPos MOZ_GUARDED_BY(sLock){0};

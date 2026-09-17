@@ -5,6 +5,7 @@
 package mozilla.components.support.ktx.android.view
 
 import android.app.Activity
+import android.content.pm.ApplicationInfo
 import android.os.Build
 import android.view.View
 import android.view.ViewTreeObserver
@@ -17,12 +18,14 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import mozilla.components.support.test.any
 import mozilla.components.support.test.argumentCaptor
 import mozilla.components.support.test.mock
+import mozilla.components.support.test.robolectric.testContext
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.Mockito.doReturn
 import org.mockito.Mockito.never
+import org.mockito.Mockito.spy
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
@@ -44,7 +47,8 @@ class ActivityTest {
     fun setup() {
         activity = mock()
         window = mock()
-        decorView = mock()
+        // A spy over a real View so that the display cutout mode can actually be stored as a tag.
+        decorView = spy(View(testContext))
         viewTreeObserver = mock()
         windowInsets = mock()
         insetsController = mock()
@@ -55,6 +59,11 @@ class ActivityTest {
         `when`(window.decorView.viewTreeObserver).thenReturn(viewTreeObserver)
         `when`(window.decorView.onApplyWindowInsets(windowInsets)).thenReturn(windowInsets)
         `when`(window.attributes).thenReturn(layoutParams)
+
+        // Drives isEdgeToEdgeDisabled() purely off the SDK level under test.
+        `when`(activity.applicationInfo)
+            .thenReturn(ApplicationInfo().apply { targetSdkVersion = Build.VERSION_CODES.VANILLA_ICE_CREAM })
+        `when`(activity.theme).thenReturn(testContext.theme)
     }
 
     @Test
@@ -75,6 +84,7 @@ class ActivityTest {
             WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES,
             layoutParams.layoutInDisplayCutoutMode,
         )
+        verify(window).attributes = layoutParams
     }
 
     @Test
@@ -142,12 +152,68 @@ class ActivityTest {
 
     @Test
     @Config(sdk = [Build.VERSION_CODES.P])
-    fun `GIVEN Android version P WHEN exitImmersiveMode is called THEN notch flags are reset to defaults`() {
+    fun `GIVEN nothing was remembered WHEN exitImmersiveMode is called THEN the cutout mode is left alone`() {
+        layoutParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+
         activity.exitImmersiveMode()
 
         verify(window).clearFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
         assertEquals(
-            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT,
+            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES,
+            layoutParams.layoutInDisplayCutoutMode,
+        )
+        verify(window, never()).attributes = any()
+    }
+
+    @Test
+    @Config(sdk = [Build.VERSION_CODES.P])
+    fun `GIVEN immersive mode was entered WHEN it is exited THEN the previous cutout mode is restored`() {
+        layoutParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+
+        activity.enterImmersiveMode(insetsController)
+
+        assertEquals(
+            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES,
+            layoutParams.layoutInDisplayCutoutMode,
+        )
+
+        activity.exitImmersiveMode(insetsController)
+
+        assertEquals(
+            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS,
+            layoutParams.layoutInDisplayCutoutMode,
+        )
+    }
+
+    @Test
+    @Config(sdk = [Build.VERSION_CODES.P])
+    fun `GIVEN immersive mode was entered twice WHEN it is exited THEN the mode from before the first enter is used`() {
+        layoutParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+
+        activity.enterImmersiveMode(insetsController)
+        activity.enterImmersiveMode(insetsController)
+        activity.exitImmersiveMode(insetsController)
+
+        assertEquals(
+            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS,
+            layoutParams.layoutInDisplayCutoutMode,
+        )
+    }
+
+    @Test
+    @Config(sdk = [Build.VERSION_CODES.P])
+    fun `GIVEN a remembered cutout mode was restored WHEN exiting again THEN it is not restored twice`() {
+        layoutParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+
+        activity.enterImmersiveMode(insetsController)
+        activity.exitImmersiveMode(insetsController)
+
+        layoutParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_NEVER
+
+        activity.exitImmersiveMode(insetsController)
+
+        assertEquals(
+            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_NEVER,
             layoutParams.layoutInDisplayCutoutMode,
         )
     }
@@ -162,5 +228,56 @@ class ActivityTest {
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             )
+    }
+
+    @Test
+    @Config(sdk = [Build.VERSION_CODES.VANILLA_ICE_CREAM])
+    fun `GIVEN edge-to-edge is enforced WHEN enterImmersiveMode is called THEN the cutout mode is left alone`() {
+        activity.enterImmersiveMode(insetsController)
+
+        verify(window)
+            .setFlags(
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            )
+        assertEquals(
+            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT,
+            layoutParams.layoutInDisplayCutoutMode,
+        )
+        verify(window, never()).attributes = any()
+    }
+
+    @Test
+    @Config(sdk = [Build.VERSION_CODES.VANILLA_ICE_CREAM])
+    fun `GIVEN edge-to-edge is enforced WHEN immersive mode is toggled THEN the no-limits flag is still applied`() {
+        // Window.setupPersistentInsets and Focus's EdgeToEdgeActivity both detect immersive mode from
+        // FLAG_LAYOUT_NO_LIMITS, so it must stay applied even when the cutout mode is not.
+        activity.enterImmersiveMode(insetsController)
+
+        verify(window)
+            .setFlags(
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            )
+
+        activity.exitImmersiveMode(insetsController)
+
+        verify(window).clearFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+        verify(window, never()).attributes = any()
+    }
+
+    @Test
+    @Config(sdk = [Build.VERSION_CODES.VANILLA_ICE_CREAM])
+    fun `GIVEN edge-to-edge is enforced WHEN exitImmersiveMode is called THEN the cutout mode is left alone`() {
+        layoutParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+
+        activity.exitImmersiveMode(insetsController)
+
+        verify(window).clearFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+        assertEquals(
+            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES,
+            layoutParams.layoutInDisplayCutoutMode,
+        )
+        verify(window, never()).attributes = any()
     }
 }

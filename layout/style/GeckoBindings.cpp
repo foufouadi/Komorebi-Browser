@@ -378,8 +378,8 @@ const StyleLockedDeclarationBlock* Gecko_GetStyleAttrDeclarationBlock(
   return aElement->GetInlineStyleDeclaration();
 }
 
-const StyleLockedDeclarationBlock*
-Gecko_GetHTMLPresentationAttrDeclarationBlock(const Element* aElement) {
+const StyleLockedDeclarationBlock* Gecko_GetMappedAttributeDeclarations(
+    const Element* aElement) {
   return aElement->GetMappedAttributeStyle();
 }
 
@@ -794,11 +794,15 @@ bool Gecko_MatchViewTransitionClass(
   const Document* doc = aElement->OwnerDoc();
   MOZ_ASSERT(doc);
   const ViewTransition* vt = doc->GetActiveViewTransition();
-  MOZ_ASSERT(
-      vt, "We should have an active view transition for this pseudo-element");
-
+  if (!vt) {
+    // We can get here while lazily resolving the style of a named view
+    // transition pseudo-element that doesn't exist.
+    return false;
+  }
   nsAtom* name = Gecko_GetImplementedPseudoIdentifier(aElement);
-  MOZ_ASSERT(name);
+  if (!name) {
+    return false;
+  }
   return vt->MatchClassList(name, *aPtNameAndClassSelector);
 }
 
@@ -833,20 +837,6 @@ bool Gecko_HasActiveViewTransitionTypes(
     }
   }
   return false;
-}
-
-nsAtom* Gecko_GetXMLLangValue(const Element* aElement) {
-  const nsAttrValue* attr =
-      aElement->GetParsedAttr(nsGkAtoms::lang, kNameSpaceID_XML);
-
-  if (!attr) {
-    return nullptr;
-  }
-
-  MOZ_ASSERT(attr->Type() == nsAttrValue::eAtom);
-
-  RefPtr<nsAtom> atom = attr->GetAtomValue();
-  return atom.forget().take();
 }
 
 const PreferenceSheet::Prefs* Gecko_GetPrefSheetPrefs(const Document* aDoc) {
@@ -962,7 +952,11 @@ SERVO_IMPL_ELEMENT_ATTR_MATCHING_FUNCTIONS(Gecko_Snapshot,
 #undef SERVO_IMPL_ELEMENT_ATTR_MATCHING_FUNCTIONS
 
 nsAtom* Gecko_Atomize(const char* aString, uint32_t aLength) {
-  return NS_Atomize(nsDependentCSubstring(aString, aLength)).take();
+  nsDependentCSubstring str(aString, aLength);
+  if (NS_IsMainThread()) {
+    return NS_AtomizeMainThread(str).take();
+  }
+  return NS_Atomize(str).take();
 }
 
 nsAtom* Gecko_Atomize16(const nsAString* aString) {
@@ -1036,7 +1030,7 @@ void Gecko_SetFontPaletteOverride(
     return;
   }
   aValues->mOverrides.AppendElement(gfx::FontPaletteValueSet::OverrideColor{
-      uint32_t(aIndex), gfx::sRGBColor::FromABGR(aColor->ToColor())});
+      uint32_t(aIndex), aColor->ToColor()});
 }
 
 void Gecko_EnsureImageLayersLength(nsStyleImageLayers* aLayers, size_t aLen,

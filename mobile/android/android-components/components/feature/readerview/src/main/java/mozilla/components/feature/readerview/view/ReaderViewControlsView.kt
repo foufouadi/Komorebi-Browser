@@ -38,15 +38,30 @@ interface ReaderViewControlsView {
      *
      * @return true if the inflation was completed, false if the view was already inflated.
      */
-    fun tryInflate(): Boolean
+    fun tryInflate(isListenEnabled: Boolean): Boolean
 
     interface Listener {
+        /** Invoked when the user selects a new font type. */
         fun onFontChanged(font: FontType)
 
+        /**
+         * Invoked when the user requests a larger font size.
+         *
+         * @return the resulting font size, in the range [MIN_TEXT_SIZE] to [MAX_TEXT_SIZE].
+         */
         fun onFontSizeIncreased(): Int
 
+        /**
+         * Invoked when the user requests a smaller font size.
+         *
+         * @return the resulting font size, in the range [MIN_TEXT_SIZE] to [MAX_TEXT_SIZE].
+         */
         fun onFontSizeDecreased(): Int
 
+        /** Invoked when the user selects a new color scheme. */
         fun onColorSchemeChanged(scheme: ColorScheme)
+
+        /** Invoked when the listen button is clicked. */
+        fun onListenClicked()
     }
 }

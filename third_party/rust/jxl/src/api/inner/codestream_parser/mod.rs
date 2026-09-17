@@ -3,22 +3,17 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-use crate::{
-    api::{
-        JxlColorProfile, JxlDecoderOptions, JxlOutputBuffer, JxlPixelFormat,
-        inner::{
-            box_parser::CodestreamInput,
-            codestream_parser::{
-                frame_info::FrameInfo, frame_scan_info::FrameScanInfo, image_info::ImageInfo,
-            },
-            process::SmallBuffer,
-        },
-    },
-    error::{Error, Result},
-};
-
 #[cfg(test)]
 use crate::api::FrameCallback;
+use crate::api::inner::box_parser::CodestreamInput;
+use crate::api::inner::codestream_parser::frame_info::FrameInfo;
+use crate::api::inner::codestream_parser::frame_scan_info::FrameScanInfo;
+use crate::api::inner::codestream_parser::image_info::ImageInfo;
+use crate::api::inner::process::SmallBuffer;
+use crate::api::{
+    JxlColorProfile, JxlDecoderOptions, JxlOutputBuffer, JxlParallelRunner, JxlPixelFormat,
+};
+use crate::error::{Error, Result};
 
 mod frame_info;
 mod frame_scan_info;
@@ -77,7 +72,8 @@ fn validate_output_buffers(
     output_buffers: &[JxlOutputBuffer],
     pixel_format: Option<&JxlPixelFormat>,
 ) -> Result<()> {
-    let px = pixel_format.unwrap();
+    let px = pixel_format
+        .expect("API usage error: cannot pass output buffers before having color information");
     let expected_len = std::iter::once(&px.color_data_format)
         .chain(px.extra_channel_format.iter())
         .filter(|x| x.is_some())
@@ -138,6 +134,11 @@ impl CodestreamParser {
         self.frame_info.use_simple_pipeline = u;
     }
 
+    #[cfg(test)]
+    pub(crate) fn disable_16bit_modular_buffers(&mut self) {
+        self.frame_info.disable_16bit_modular_buffers();
+    }
+
     pub(super) fn start_new_frame(
         &mut self,
         visible_frames_to_skip: usize,
@@ -187,12 +188,13 @@ impl CodestreamParser {
                 }
                 Err(Error::OutOfBounds(n)) => {
                     let new_range = self.local_buffer.range();
-                    let enlarge = new_range == range && !self.local_buffer.can_read_more();
+                    let made_progress = new_range != range;
+                    let enlarge = !made_progress && !self.local_buffer.can_read_more();
                     if enlarge {
                         self.local_buffer.enlarge();
                     }
                     self.header_needed_bytes = Some(n);
-                    if c > 0 || enlarge {
+                    if c > 0 || made_progress || enlarge {
                         continue;
                     }
                     return Err(Error::OutOfBounds(n));
@@ -206,7 +208,25 @@ impl CodestreamParser {
         &mut self,
         input: &mut CodestreamInput,
         decode_options: &JxlDecoderOptions,
+        output_buffers: Option<&mut [JxlOutputBuffer]>,
+        parallel_runner: &mut dyn JxlParallelRunner,
+    ) -> Result<()> {
+        let result = self.process_inner(input, decode_options, output_buffers, parallel_runner);
+        if let Err(Error::OutOfBounds(_)) = result
+            && input.box_parser().is_codestream_complete()
+        {
+            Err(Error::UnexpectedCodestreamBoxEnd)
+        } else {
+            result
+        }
+    }
+
+    fn process_inner(
+        &mut self,
+        input: &mut CodestreamInput,
+        decode_options: &JxlDecoderOptions,
         mut output_buffers: Option<&mut [JxlOutputBuffer]>,
+        parallel_runner: &mut dyn JxlParallelRunner,
     ) -> Result<()> {
         if let Some(output_buffers) = &output_buffers {
             validate_output_buffers(output_buffers, self.pixel_format.as_ref())?;
@@ -327,6 +347,7 @@ impl CodestreamParser {
                             &mut output_buffers,
                             self.output_color_profile.as_ref().unwrap(),
                             self.pixel_format.as_ref().unwrap(),
+                            parallel_runner,
                         ) {
                             Ok(None) => Ok(()),
                             Ok(Some(missing)) => Err(Error::OutOfBounds(missing)),

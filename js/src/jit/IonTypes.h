@@ -30,12 +30,7 @@ class IonCompilationId {
  public:
   explicit IonCompilationId(uint64_t id)
       : idLo_(id & UINT32_MAX), idHi_(id >> 32) {}
-  bool operator==(const IonCompilationId& other) const {
-    return idLo_ == other.idLo_ && idHi_ == other.idHi_;
-  }
-  bool operator!=(const IonCompilationId& other) const {
-    return !operator==(other);
-  }
+  bool operator==(const IonCompilationId& other) const = default;
 };
 
 namespace jit {

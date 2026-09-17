@@ -289,10 +289,6 @@ class SettingsSubMenuAboutRobot {
     }
 }
 
-private fun navigateBackToAboutPage(composeTestRule: ComposeTestRule) {
-    browserScreen(composeTestRule) {}.openThreeDotMenu {}.clickSettingsButton {}.openAboutFirefoxPreview {}
-}
-
 private val aboutMenuList = UiScrollable(UiSelector().resourceId("$packageName:id/about_layout"))
 
 private fun goBackButton() = onView(withContentDescription("Navigate up"))

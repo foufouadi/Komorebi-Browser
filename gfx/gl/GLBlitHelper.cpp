@@ -20,14 +20,18 @@
 #include "mozilla/gfx/BuildConstants.h"
 #include "mozilla/gfx/Logging.h"
 #include "mozilla/gfx/Matrix.h"
+#include "mozilla/layers/CompositeProcessFencesHolderMap.h"
 #include "mozilla/layers/GpuFence.h"
 #include "mozilla/layers/ImageDataSerializer.h"
 #include "mozilla/layers/LayersSurfaces.h"
 
 #ifdef MOZ_WIDGET_ANDROID
 #  include "AndroidSurfaceTexture.h"
+#  include "GLContextEGL.h"
 #  include "GLImages.h"
 #  include "GLLibraryEGL.h"
+#  include "mozilla/layers/AndroidHardwareBuffer.h"
+#  include "mozilla/layers/AndroidImageReader.h"
 #endif
 
 #ifdef XP_MACOSX
@@ -953,9 +957,15 @@ bool GLBlitHelper::BlitSdToFramebuffer(const layers::SurfaceDescriptor& asd,
 #ifdef XP_MACOSX
     case layers::SurfaceDescriptor::TSurfaceDescriptorMacIOSurface: {
       const auto& sd = asd.get_SurfaceDescriptorMacIOSurface();
-      if (sd.gpuFence() &&
-          !sd.gpuFence()->ServerWait(mGL, TimeDuration::Forever())) {
-        return false;
+      if (sd.fencesHolderId().isSome()) {
+        auto* fencesHolderMap = layers::CompositeProcessFencesHolderMap::Get();
+        RefPtr<layers::Fence> fence =
+            fencesHolderMap->GetWriteFence(sd.fencesHolderId().ref());
+        RefPtr<layers::GpuFence> gpuFence =
+            fence ? fence->AsGpuFence() : nullptr;
+        if (gpuFence && gpuFence->ServerWait(mGL, TimeDuration::Forever())) {
+          return false;
+        }
       }
       const auto surf = LookupSurface(sd);
       if (!surf) {
@@ -968,6 +978,39 @@ bool GLBlitHelper::BlitSdToFramebuffer(const layers::SurfaceDescriptor& asd,
     }
 #endif
 #ifdef MOZ_WIDGET_ANDROID
+    case layers::SurfaceDescriptor::TSurfaceDescriptorAndroidHardwareBuffer: {
+      const auto& sd = asd.get_SurfaceDescriptorAndroidHardwareBuffer();
+
+      auto* manager = layers::AndroidHardwareBufferManager::Get();
+      if (!manager) {
+        return false;
+      }
+
+      RefPtr<layers::AndroidHardwareBuffer> buffer =
+          manager->GetBuffer(sd.bufferId());
+      if (!buffer) {
+        return false;
+      }
+
+      return Blit(buffer, destRect, destOrigin, fbSize, convertAlpha);
+    }
+    case layers::SurfaceDescriptor::TAndroidImageReaderImageDescriptor: {
+      const auto& sd = asd.get_AndroidImageReaderImageDescriptor();
+
+      auto* imageReaderMap = layers::GpuProcessAndroidImageReaderMap::Get();
+      if (!imageReaderMap) {
+        return false;
+      }
+
+      RefPtr<layers::AndroidImageReader> imageReader =
+          imageReaderMap->GetImageReader(sd.imageReaderId());
+      if (!imageReader) {
+        return false;
+      }
+
+      return Blit(imageReader, sd.frameId(), sd.size(), destRect, destOrigin,
+                  fbSize, convertAlpha);
+    }
     case layers::SurfaceDescriptor::TSurfaceTextureDescriptor: {
       const auto& sd = asd.get_SurfaceTextureDescriptor();
       auto surfaceTexture = java::GeckoSurfaceTexture::Lookup(sd.handle());
@@ -995,83 +1038,6 @@ bool GLBlitHelper::BlitSdToFramebuffer(const layers::SurfaceDescriptor& asd,
   }
 }
 
-bool GLBlitHelper::BlitImageToFramebuffer(layers::Image* const srcImage,
-                                          const gfx::IntRect& destRect,
-                                          const OriginPos destOrigin,
-                                          const gfx::IntSize& fbSize) {
-  switch (srcImage->GetFormat()) {
-    case ImageFormat::PLANAR_YCBCR: {
-      const auto srcImage2 = static_cast<PlanarYCbCrImage*>(srcImage);
-      const auto data = srcImage2->GetData();
-      return BlitPlanarYCbCr(*data, destRect, destOrigin, fbSize);
-    }
-
-    case ImageFormat::SURFACE_TEXTURE: {
-#ifdef MOZ_WIDGET_ANDROID
-      auto* image = srcImage->AsSurfaceTextureImage();
-      MOZ_ASSERT(image);
-      auto surfaceTexture =
-          java::GeckoSurfaceTexture::Lookup(image->GetHandle());
-      return Blit(surfaceTexture, image->GetSize(), destRect, destOrigin,
-                  fbSize);
-#else
-      MOZ_ASSERT(false);
-      return false;
-#endif
-    }
-    case ImageFormat::ANDROID_IMAGE_READER: {
-      MOZ_ASSERT(false);
-      return false;
-    }
-    case ImageFormat::MAC_IOSURFACE:
-#ifdef XP_MACOSX
-      return BlitImage(srcImage->AsMacIOSurfaceImage(), destRect, destOrigin,
-                       fbSize);
-#else
-      MOZ_ASSERT(false);
-      return false;
-#endif
-
-    case ImageFormat::GPU_VIDEO:
-      return BlitImage(static_cast<layers::GPUVideoImage*>(srcImage), destRect,
-                       destOrigin, fbSize);
-#ifdef XP_WIN
-    case ImageFormat::D3D11_SHARE_HANDLE_TEXTURE:
-      return BlitImage(static_cast<layers::D3D11ShareHandleImage*>(srcImage),
-                       destRect, destOrigin, fbSize);
-    case ImageFormat::D3D11_TEXTURE_ZERO_COPY:
-      return BlitImage(
-          static_cast<layers::D3D11ZeroCopyTextureImage*>(srcImage), destRect,
-          destOrigin, fbSize);
-    case ImageFormat::D3D9_RGB32_TEXTURE:
-      return false;  // todo
-    case ImageFormat::DCOMP_SURFACE:
-      return false;
-#else
-    case ImageFormat::D3D11_SHARE_HANDLE_TEXTURE:
-    case ImageFormat::D3D11_TEXTURE_ZERO_COPY:
-    case ImageFormat::D3D9_RGB32_TEXTURE:
-    case ImageFormat::DCOMP_SURFACE:
-      MOZ_ASSERT(false);
-      return false;
-#endif
-    case ImageFormat::DMABUF:
-#ifdef MOZ_WIDGET_GTK
-      return BlitImage(static_cast<layers::DMABUFSurfaceImage*>(srcImage),
-                       destRect, destOrigin, fbSize);
-#else
-      return false;
-#endif
-    case ImageFormat::MOZ2D_SURFACE:
-    case ImageFormat::NV_IMAGE:
-    case ImageFormat::OVERLAY_IMAGE:
-    case ImageFormat::SHARED_RGB:
-    case ImageFormat::TEXTURE_WRAPPER:
-      return false;  // todo
-  }
-  return false;
-}
-
 // -------------------------------------
 
 const char* GLBlitHelper::GetAlphaMixin(
@@ -1092,6 +1058,117 @@ const char* GLBlitHelper::GetAlphaMixin(
 }
 
 #ifdef MOZ_WIDGET_ANDROID
+bool GLBlitHelper::Blit(layers::AndroidHardwareBuffer* const buffer,
+                        const gfx::IntRect& destRect,
+                        const OriginPos destOrigin, const gfx::IntSize& fbSize,
+                        const Maybe<gfxAlphaType> convertAlpha) const {
+  MOZ_ASSERT(buffer);
+
+  if (!buffer) {
+    return false;
+  }
+
+  if (!mGL->MakeCurrent()) {
+    return false;
+  }
+
+  const auto& gle = GLContextEGL::Cast(mGL);
+  const auto& egl = gle->mEgl;
+
+  auto fenceFd = buffer->GetAcquireFence();
+  if (fenceFd) {
+    const EGLint attribs[] = {
+        LOCAL_EGL_SYNC_NATIVE_FENCE_FD_ANDROID,
+        fenceFd.get(),
+        LOCAL_EGL_NONE,
+    };
+
+    EGLSync sync =
+        egl->fCreateSyncKHR(LOCAL_EGL_SYNC_NATIVE_FENCE_ANDROID, attribs);
+    if (!sync) {
+      gfxCriticalNote
+          << "GLBlitHelper::Blit: Failed to create EGLSync from acquire fence";
+      return false;
+    }
+
+    // EGL owns the fd after a successful eglCreateSyncKHR().
+    (void)fenceFd.release();
+
+    if (egl->IsExtensionSupported(EGLExtension::KHR_wait_sync)) {
+      egl->fWaitSync(sync, 0);
+    } else {
+      egl->fClientWaitSync(sync, 0, LOCAL_EGL_FOREVER);
+    }
+    egl->fDestroySync(sync);
+  }
+
+  EGLClientBuffer clientBuffer =
+      egl->mLib->fGetNativeClientBufferANDROID(buffer->GetNativeBuffer());
+  if (!clientBuffer) {
+    gfxCriticalNote
+        << "GLBlitHelper::Blit: eglGetNativeClientBufferANDROID failed";
+    return false;
+  }
+
+  const EGLint attrs[] = {
+      LOCAL_EGL_IMAGE_PRESERVED,
+      LOCAL_EGL_TRUE,
+      LOCAL_EGL_NONE,
+  };
+
+  const EGLImage image = egl->fCreateImage(
+      EGL_NO_CONTEXT, LOCAL_EGL_NATIVE_BUFFER_ANDROID, clientBuffer, attrs);
+  if (!image) {
+    gfxCriticalNote << "GLBlitHelper::Blit: eglCreateImage failed";
+    return false;
+  }
+
+  const bool ret = Blit(image, EGL_NO_SYNC, buffer->mSize, destRect, destOrigin,
+                        fbSize, convertAlpha);
+
+  egl->fDestroyImage(image);
+
+  return ret;
+}
+
+bool GLBlitHelper::Blit(layers::AndroidImageReader* imageReader,
+                        const layers::AndroidMediaCodecFrameId frameId,
+                        const gfx::IntSize& texSize,
+                        const gfx::IntRect& destRect, OriginPos destOrigin,
+                        const gfx::IntSize& fbSize,
+                        Maybe<gfxAlphaType> convertAlpha) const {
+  MOZ_ASSERT(imageReader);
+
+  if (!mGL->MakeCurrent()) {
+    return false;
+  }
+
+  const ScopedBindTextureUnit boundTU(mGL, LOCAL_GL_TEXTURE0);
+  ScopedTexture tex(mGL);
+  ScopedBindTexture bindTex(mGL, tex.Texture(), LOCAL_GL_TEXTURE_EXTERNAL);
+
+  mGL->TexParams_SetClampNoMips(LOCAL_GL_TEXTURE_EXTERNAL);
+
+  RefPtr<layers::AndroidImageWrapper> image;
+  if (!imageReader->UpdateTexImage(frameId, mGL, tex.Texture(),
+                                   getter_AddRefs(image))) {
+    return false;
+  }
+
+  const auto srcOrigin = OriginPos::BottomLeft;
+  const bool yFlip = (srcOrigin != destOrigin);
+
+  const auto& prog = GetDrawBlitProg(
+      {kFragHeader_TexExt,
+       {kFragSample_OnePlane, kFragConvert_None, GetAlphaMixin(convertAlpha)}});
+
+  const DrawBlitProg::BaseArgs baseArgs = {SubRectMat3(0, 0, 1, 1), yFlip,
+                                           fbSize, destRect, texSize};
+  prog.Draw(baseArgs);
+
+  return true;
+}
+
 bool GLBlitHelper::Blit(const java::GeckoSurfaceTexture::Ref& surfaceTexture,
                         const gfx::IntSize& texSize,
                         const gfx::IntRect& destRect,
@@ -1316,13 +1393,6 @@ bool GLBlitHelper::BlitPlanarYCbCr(const PlanarYCbCrData& yuvData,
 // -------------------------------------
 
 #ifdef XP_MACOSX
-bool GLBlitHelper::BlitImage(layers::MacIOSurfaceImage* const srcImage,
-                             const gfx::IntRect& destRect,
-                             const OriginPos destOrigin,
-                             const gfx::IntSize& fbSize) const {
-  return BlitImage(srcImage->GetSurface(), destRect, destOrigin, fbSize);
-}
-
 static std::string IntAsAscii(const int x) {
   std::string str;
   str.reserve(6);
@@ -1583,66 +1653,6 @@ void GLBlitHelper::BlitTextureToTexture(GLuint srcTex, GLuint destTex,
 }
 
 // -------------------------------------
-
-bool GLBlitHelper::BlitImage(layers::GPUVideoImage* const srcImage,
-                             const gfx::IntRect& destRect,
-                             const OriginPos destOrigin,
-                             const gfx::IntSize& fbSize) const {
-  const auto& desc = srcImage->SD();
-
-  MOZ_ASSERT(
-      desc.type() ==
-      layers::SurfaceDescriptorGPUVideo::TSurfaceDescriptorRemoteDecoder);
-  const auto& subdescUnion =
-      desc.get_SurfaceDescriptorRemoteDecoder().subdesc();
-  switch (subdescUnion.type()) {
-#ifdef MOZ_WIDGET_GTK
-    case layers::RemoteDecoderVideoSubDescriptor::TSurfaceDescriptorDMABuf: {
-      const auto& subdesc = subdescUnion.get_SurfaceDescriptorDMABuf();
-      RefPtr<DMABufSurface> surface =
-          DMABufSurface::CreateDMABufSurface(subdesc);
-      return Blit(surface, destRect, destOrigin, fbSize);
-    }
-#endif
-#ifdef XP_WIN
-    case layers::RemoteDecoderVideoSubDescriptor::TSurfaceDescriptorD3D10: {
-      const auto& subdesc = subdescUnion.get_SurfaceDescriptorD3D10();
-      return BlitDescriptor(subdesc, destRect, destOrigin, fbSize);
-    }
-    case layers::RemoteDecoderVideoSubDescriptor::TSurfaceDescriptorDXGIYCbCr: {
-      const auto& subdesc = subdescUnion.get_SurfaceDescriptorDXGIYCbCr();
-      return BlitDescriptor(subdesc, destRect, destOrigin, fbSize);
-    }
-#endif
-#ifdef XP_MACOSX
-    case layers::RemoteDecoderVideoSubDescriptor::
-        TSurfaceDescriptorMacIOSurface: {
-      const auto& subdesc = subdescUnion.get_SurfaceDescriptorMacIOSurface();
-      MacIOSurface::AllowAlpha allowAlpha = subdesc.isOpaque()
-                                                ? MacIOSurface::AllowAlpha::No
-                                                : MacIOSurface::AllowAlpha::Yes;
-      RefPtr<MacIOSurface> surface = MacIOSurface::LookupSurface(
-          subdesc.surfaceId(), subdesc.yUVColorSpace(),
-          subdesc.transferFunction(), allowAlpha);
-      MOZ_ASSERT(surface);
-      if (!surface) {
-        return false;
-      }
-      return BlitImage(surface, destRect, destOrigin, fbSize);
-    }
-#endif
-    case layers::RemoteDecoderVideoSubDescriptor::Tnull_t:
-      // This GPUVideoImage isn't directly readable outside the GPU process.
-      // Abort.
-      return false;
-    default:
-      gfxCriticalError() << "Unhandled subdesc type: "
-                         << uint32_t(subdescUnion.type());
-      return false;
-  }
-}
-
-// -------------------------------------
 #ifdef MOZ_WIDGET_GTK
 bool GLBlitHelper::Blit(DMABufSurface* surface, const gfx::IntRect& destRect,
                         OriginPos destOrigin, const gfx::IntSize& fbSize,
@@ -1736,11 +1746,15 @@ bool GLBlitHelper::Blit(DMABufSurface* surface, const gfx::IntRect& destRect,
     mGL->TexParams_SetClampNoMips(texTarget);
   }
 
-  // We support only NV12/YUV420 formats only with 1/2 texture scale.
-  // We don't set cliprect as DMABus textures are created without padding.
-  baseArgs.texMatrix0 = SubRectMat3(0, 0, 1, 1);
+  // Crop to visible region: VA-API surfaces may have macroblock-aligned
+  // textures larger than the visible size (bug 2054811).
+  baseArgs.texMatrix0 = SubRectMat3(
+      0, 0, float(surface->GetWidth(0)) / float(surface->GetWidthAligned(0)),
+      float(surface->GetHeight(0)) / float(surface->GetHeightAligned(0)));
   baseArgs.texSize = gfx::IntSize(surface->GetWidth(), surface->GetHeight());
-  yuvArgs.texMatrix1 = SubRectMat3(0, 0, 1, 1);
+  yuvArgs.texMatrix1 = SubRectMat3(
+      0, 0, float(surface->GetWidth(1)) / float(surface->GetWidthAligned(1)),
+      float(surface->GetHeight(1)) / float(surface->GetHeightAligned(1)));
 
   const auto& prog =
       GetDrawBlitProg({kFragHeader_Tex2D,
@@ -1748,17 +1762,6 @@ bool GLBlitHelper::Blit(DMABufSurface* surface, const gfx::IntRect& destRect,
   prog.Draw(baseArgs, pYuvArgs);
 
   return true;
-}
-
-bool GLBlitHelper::BlitImage(layers::DMABUFSurfaceImage* srcImage,
-                             const gfx::IntRect& destRect, OriginPos destOrigin,
-                             const gfx::IntSize& fbSize) const {
-  DMABufSurface* surface = srcImage->GetSurface();
-  if (!surface) {
-    gfxCriticalError() << "Null DMABUFSurface for GLBlitHelper::BlitImage";
-    return false;
-  }
-  return Blit(surface, destRect, destOrigin, fbSize);
 }
 
 bool GLBlitHelper::BlitYCbCrImageToDMABuf(const PlanarYCbCrData& yuvData,

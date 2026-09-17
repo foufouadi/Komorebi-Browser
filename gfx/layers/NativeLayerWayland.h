@@ -220,7 +220,7 @@ class NativeLayerWayland : public NativeLayer {
 
   void RenderLayer(double aScale);
   // TODO
-  GpuFence* GetGpuFence() override { return nullptr; }
+  RefPtr<GpuFence> GetGpuFence() override { return nullptr; }
 
   RefPtr<widget::WaylandSurface> GetWaylandSurface() { return mSurface; }
 
@@ -336,6 +336,9 @@ class NativeLayerWayland : public NativeLayer {
   // by WaylandSurface itself.
   Atomic<MainThreadUpdate, mozilla::Relaxed> mNeedsMainThreadUpdate{
       MainThreadUpdate::None};
+
+  void SetColorProperties(const widget::WaylandSurfaceLock& aSurfaceLock,
+                          widget::WaylandSurface* aParentSurface);
 };
 
 class NativeLayerWaylandRender final : public NativeLayerWayland {

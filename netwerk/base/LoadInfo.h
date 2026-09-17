@@ -8,7 +8,7 @@
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/Result.h"
 #include "mozilla/dom/ClientInfo.h"
-#include "mozilla/dom/FeaturePolicy.h"
+#include "mozilla/dom/PermissionsPolicy.h"
 #include "mozilla/dom/ReferrerPolicyBinding.h"
 #include "mozilla/dom/ServiceWorkerDescriptor.h"
 #include "mozilla/dom/UserNavigationInvolvement.h"
@@ -46,7 +46,7 @@ class WebTransportSessionProxy;
 namespace ipc {
 // we have to forward declare that function so we can use it as a friend.
 nsresult LoadInfoArgsToLoadInfo(const mozilla::net::LoadInfoArgs& aLoadInfoArgs,
-                                const nsACString& aOriginRemoteType,
+                                const dom::RemoteType& aOriginRemoteType,
                                 nsINode* aCspToInheritLoadingContext,
                                 net::LoadInfo** outLoadInfo);
 
@@ -61,9 +61,6 @@ nsresult LoadInfoArgsToLoadInfo(const mozilla::net::LoadInfoArgs& aLoadInfoArgs,
                                                                                \
   GETTER(uint64_t, TriggeringWindowId, triggeringWindowId, 0)                  \
   SETTER(uint64_t, TriggeringWindowId)                                         \
-                                                                               \
-  GETTER(bool, TriggeringStorageAccess, triggeringStorageAccess, false)        \
-  SETTER(bool, TriggeringStorageAccess)                                        \
                                                                                \
   GETTER(uint32_t, TriggeringFirstPartyClassificationFlags,                    \
          triggeringFirstPartyClassificationFlags, 0)                           \
@@ -195,14 +192,15 @@ nsresult LoadInfoArgsToLoadInfo(const mozilla::net::LoadInfoArgs& aLoadInfoArgs,
   GETTER(bool, IsMetaRefresh, isMetaRefresh, false)                            \
   SETTER(bool, IsMetaRefresh)                                                  \
                                                                                \
+  GETTER(bool, ActivatedFromNavigationalPrefetch,                              \
+         activatedFromNavigationalPrefetch, false)                             \
+  SETTER(bool, ActivatedFromNavigationalPrefetch)                              \
+                                                                               \
   GETTER(bool, IsFromProcessingFrameAttributes,                                \
          isFromProcessingFrameAttributes, false)                               \
                                                                                \
   GETTER(bool, IsMediaRequest, isMediaRequest, false)                          \
   SETTER(bool, IsMediaRequest)                                                 \
-                                                                               \
-  GETTER(bool, IsFromObjectOrEmbed, isFromObjectOrEmbed, false)                \
-  SETTER(bool, IsFromObjectOrEmbed)                                            \
                                                                                \
   GETTER(nsILoadInfo::CrossOriginEmbedderPolicy, LoadingEmbedderPolicy,        \
          loadingEmbedderPolicy, nsILoadInfo::EMBEDDER_POLICY_NULL)             \
@@ -251,7 +249,7 @@ class LoadInfo final : public nsILoadInfo {
   static already_AddRefed<LoadInfo> CreateForDocument(
       dom::CanonicalBrowsingContext* aBrowsingContext, nsIURI* aURI,
       nsIPrincipal* aTriggeringPrincipal,
-      const nsACString& aTriggeringRemoteType,
+      const dom::RemoteType& aTriggeringRemoteType,
       const OriginAttributes& aOriginAttributes, nsSecurityFlags aSecurityFlags,
       uint32_t aSandboxFlags);
 
@@ -259,8 +257,8 @@ class LoadInfo final : public nsILoadInfo {
   static already_AddRefed<LoadInfo> CreateForFrame(
       dom::CanonicalBrowsingContext* aBrowsingContext,
       nsIPrincipal* aTriggeringPrincipal,
-      const nsACString& aTriggeringRemoteType, nsSecurityFlags aSecurityFlags,
-      uint32_t aSandboxFlags);
+      const dom::RemoteType& aTriggeringRemoteType,
+      nsSecurityFlags aSecurityFlags, uint32_t aSandboxFlags);
 
   // Use for non-{TYPE_DOCUMENT|TYPE_FRAME|TYPE_IFRAME} load.
   static already_AddRefed<LoadInfo> CreateForNonDocument(
@@ -290,7 +288,7 @@ class LoadInfo final : public nsILoadInfo {
   // Used for TYPE_DOCUMENT load.
   LoadInfo(dom::CanonicalBrowsingContext* aBrowsingContext, nsIURI* aURI,
            nsIPrincipal* aTriggeringPrincipal,
-           const nsACString& aTriggeringRemoteType,
+           const dom::RemoteType& aTriggeringRemoteType,
            const OriginAttributes& aOriginAttributes,
            nsSecurityFlags aSecurityFlags, uint32_t aSandboxFlags);
 
@@ -298,14 +296,14 @@ class LoadInfo final : public nsILoadInfo {
   // Used for TYPE_FRAME or TYPE_IFRAME load.
   LoadInfo(dom::CanonicalBrowsingContext* aBrowsingContext,
            nsIPrincipal* aTriggeringPrincipal,
-           const nsACString& aTriggeringRemoteType,
+           const dom::RemoteType& aTriggeringRemoteType,
            nsSecurityFlags aSecurityFlags, uint32_t aSandboxFlags);
 
   // Used for loads initiated by DocumentLoadListener that are not
   // TYPE_DOCUMENT | TYPE_FRAME | TYPE_FRAME.
   LoadInfo(dom::WindowGlobalParent* aParentWGP,
            nsIPrincipal* aTriggeringPrincipal,
-           const nsACString& aTriggeringRemoteType,
+           const dom::RemoteType& aTriggeringRemoteType,
            nsContentPolicyType aContentPolicyType,
            nsSecurityFlags aSecurityFlags, uint32_t aSandboxFlags);
 
@@ -378,9 +376,9 @@ class LoadInfo final : public nsILoadInfo {
     mIsThirdPartyContextToTopWindow.reset();
   }
 
-  void SetContinerFeaturePolicy(
-      const Maybe<dom::FeaturePolicyInfo>& aContainerFeaturePolicy) {
-    mContainerFeaturePolicyInfo = aContainerFeaturePolicy;
+  void SetContinerPermissionsPolicy(
+      const Maybe<dom::PermissionsPolicyInfo>& aContainerPermissionsPolicy) {
+    mContainerPermissionsPolicyInfo = aContainerPermissionsPolicy;
   }
 
 #ifdef DEBUG
@@ -394,42 +392,42 @@ class LoadInfo final : public nsILoadInfo {
   // mozilla::ipc::LoadInfoArgsToLoadInfo declared as friends undeneath.
   // In e10s we can not serialize nsINode, hence we store the innerWindowID.
   // Please note that aRedirectChain uses swapElements.
-  LoadInfo(nsIPrincipal* aLoadingPrincipal, nsIPrincipal* aTriggeringPrincipal,
-           nsIPrincipal* aPrincipalToInherit, nsIPrincipal* aTopLevelPrincipal,
-           nsIURI* aResultPrincipalURI,
-           nsICookieJarSettings* aCookieJarSettings,
-           nsIPolicyContainer* aPolicyContainerToInherit,
-           const Maybe<dom::FeaturePolicyInfo>& aContainerFeaturePolicyInfo,
-           const nsACString& aTriggeringRemoteType,
-           const nsID& aSandboxedNullPrincipalID,
-           const Maybe<mozilla::dom::ClientInfo>& aClientInfo,
-           const Maybe<mozilla::dom::ClientInfo>& aReservedClientInfo,
-           const Maybe<mozilla::dom::ClientInfo>& aInitialClientInfo,
-           const Maybe<mozilla::dom::ServiceWorkerDescriptor>& aController,
-           nsSecurityFlags aSecurityFlags, uint32_t aSandboxFlags,
-           nsContentPolicyType aContentPolicyType,
-           bool aServiceWorkerTaintingSynthesized, LoadTainting aTainting,
+  LoadInfo(
+      nsIPrincipal* aLoadingPrincipal, nsIPrincipal* aTriggeringPrincipal,
+      nsIPrincipal* aPrincipalToInherit, nsIPrincipal* aTopLevelPrincipal,
+      nsIURI* aResultPrincipalURI, nsICookieJarSettings* aCookieJarSettings,
+      nsIPolicyContainer* aPolicyContainerToInherit,
+      const Maybe<dom::PermissionsPolicyInfo>& aContainerPermissionsPolicyInfo,
+      const dom::RemoteType& aTriggeringRemoteType,
+      const nsID& aSandboxedNullPrincipalID,
+      const Maybe<mozilla::dom::ClientInfo>& aClientInfo,
+      const Maybe<mozilla::dom::ClientInfo>& aReservedClientInfo,
+      const Maybe<mozilla::dom::ClientInfo>& aInitialClientInfo,
+      const Maybe<mozilla::dom::ServiceWorkerDescriptor>& aController,
+      nsSecurityFlags aSecurityFlags, uint32_t aSandboxFlags,
+      nsContentPolicyType aContentPolicyType,
+      bool aServiceWorkerTaintingSynthesized, LoadTainting aTainting,
 
 #define DEFINE_PARAMETER(type, name, _n, _d) type a##name,
-           LOADINFO_FOR_EACH_FIELD(DEFINE_PARAMETER, LOADINFO_DUMMY_SETTER)
+      LOADINFO_FOR_EACH_FIELD(DEFINE_PARAMETER, LOADINFO_DUMMY_SETTER)
 #undef DEFINE_PARAMETER
 
-               bool aInitialSecurityCheckDone,
-           bool aIsThirdPartyContext,
-           const Maybe<bool>& aIsThirdPartyContextToTopWindow,
-           const OriginAttributes& aOriginAttributes,
-           RedirectHistoryArray&& aRedirectChainIncludingInternalRedirects,
-           RedirectHistoryArray&& aRedirectChain,
-           nsTArray<nsCOMPtr<nsIPrincipal>>&& aAncestorPrincipals,
-           const nsTArray<uint64_t>& aAncestorBrowsingContextIDs,
-           const nsTArray<nsCString>& aCorsUnsafeHeaders,
-           bool aLoadTriggeredFromExternal, const nsAString& aCspNonce,
-           const nsAString& aIntegrityMetadata, bool aIsSameDocumentNavigation,
-           const Maybe<RFPTargetSet>& aOverriddenFingerprintingSettings,
-           nsINode* aLoadingContext, nsIURI* aUnstrippedURI,
-           nsIInterceptionInfo* aInterceptionInfo,
-           nsILoadInfo::SchemelessInputType aSchemelessInput,
-           dom::UserNavigationInvolvement aUserNavigationInvolvement);
+          bool aInitialSecurityCheckDone,
+      bool aIsThirdPartyContext,
+      const Maybe<bool>& aIsThirdPartyContextToTopWindow,
+      const OriginAttributes& aOriginAttributes,
+      RedirectHistoryArray&& aRedirectChainIncludingInternalRedirects,
+      RedirectHistoryArray&& aRedirectChain,
+      nsTArray<nsCOMPtr<nsIPrincipal>>&& aAncestorPrincipals,
+      const nsTArray<uint64_t>& aAncestorBrowsingContextIDs,
+      const nsTArray<nsCString>& aCorsUnsafeHeaders,
+      bool aLoadTriggeredFromExternal, const nsAString& aCspNonce,
+      const nsAString& aIntegrityMetadata, bool aIsSameDocumentNavigation,
+      const Maybe<RFPTargetSet>& aOverriddenFingerprintingSettings,
+      nsINode* aLoadingContext, nsIURI* aUnstrippedURI,
+      nsIInterceptionInfo* aInterceptionInfo,
+      nsILoadInfo::SchemelessInputType aSchemelessInput,
+      dom::UserNavigationInvolvement aUserNavigationInvolvement);
 
   LoadInfo(const LoadInfo& rhs);
 
@@ -439,8 +437,8 @@ class LoadInfo final : public nsILoadInfo {
 
   friend nsresult mozilla::ipc::LoadInfoArgsToLoadInfo(
       const mozilla::net::LoadInfoArgs& aLoadInfoArgs,
-      const nsACString& aOriginRemoteType, nsINode* aCspToInheritLoadingContext,
-      net::LoadInfo** outLoadInfo);
+      const dom::RemoteType& aOriginRemoteType,
+      nsINode* aCspToInheritLoadingContext, net::LoadInfo** outLoadInfo);
 
   ~LoadInfo();
 
@@ -483,8 +481,8 @@ class LoadInfo final : public nsILoadInfo {
   nsCOMPtr<nsICSPEventListener> mCSPEventListener;
   nsCOMPtr<nsICookieJarSettings> mCookieJarSettings;
   nsCOMPtr<nsIPolicyContainer> mPolicyContainerToInherit;
-  Maybe<dom::FeaturePolicyInfo> mContainerFeaturePolicyInfo;
-  nsCString mTriggeringRemoteType;
+  Maybe<dom::PermissionsPolicyInfo> mContainerPermissionsPolicyInfo;
+  dom::RemoteType mTriggeringRemoteType;
   nsID mSandboxedNullPrincipalID;
 
   Maybe<mozilla::dom::ClientInfo> mClientInfo;
@@ -503,6 +501,10 @@ class LoadInfo final : public nsILoadInfo {
   nsContentPolicyType mInternalContentPolicyType;
   bool mServiceWorkerTaintingSynthesized = false;
   LoadTainting mTainting = LoadTainting::Basic;
+
+  // NOTE: This flag is intentionally not serialized, as it is used to disable
+  // IPC security checks based on mTriggeringRemoteType.
+  bool mTrustedPrincipalToInherit = false;
 
 #define DEFINE_FIELD(type, name, _, default_init) type m##name = default_init;
   LOADINFO_FOR_EACH_FIELD(DEFINE_FIELD, LOADINFO_DUMMY_SETTER)

@@ -186,7 +186,13 @@ NSPoint nsCocoaUtils::ScreenLocationForEvent(NSEvent* anEvent) {
   NS_OBJC_BEGIN_TRY_BLOCK_RETURN;
 
   // Don't trust mouse locations of mouse move events, see bug 443178.
-  if (!anEvent || [anEvent type] == NSEventTypeMouseMoved)
+  // Likewise, on macOS 26 the locationInWindow of mouseEntered/mouseExited
+  // events can be reported relative to a wrong window origin, which puts the
+  // point off to the side by an amount that depends on the window's screen
+  // position (Bug 2043963). The live cursor location is reliable, so use it.
+  if (!anEvent || [anEvent type] == NSEventTypeMouseMoved ||
+      [anEvent type] == NSEventTypeMouseEntered ||
+      [anEvent type] == NSEventTypeMouseExited)
     return [NSEvent mouseLocation];
 
   // Pin momentum scroll events to the location of the last user-controlled
@@ -1187,22 +1193,44 @@ static NSString* ActionOnDoubleClickSystemPref() {
   return nil;
 }
 
-@interface NSWindow (NSWindowShouldZoomOnDoubleClick)
+@interface NSWindow (TitlebarDoubleClickAction)
 + (BOOL)_shouldZoomOnDoubleClick;  // present on 10.7 and above
++ (BOOL)_shouldFillOnDoubleClick;  // present on macOS 15 and above
+- (void)_zoomFill:(id)aSender;     // present on macOS 15 and above
 @end
 
-bool nsCocoaUtils::ShouldZoomOnTitlebarDoubleClick() {
+static bool ShouldZoomOnTitlebarDoubleClick() {
   if ([NSWindow respondsToSelector:@selector(_shouldZoomOnDoubleClick)]) {
     return [NSWindow _shouldZoomOnDoubleClick];
   }
   return [ActionOnDoubleClickSystemPref() isEqualToString:@"Maximize"];
 }
 
-bool nsCocoaUtils::ShouldMinimizeOnTitlebarDoubleClick() {
+static bool ShouldMinimizeOnTitlebarDoubleClick() {
   // Check the system preferences.
   // We could also check -[NSWindow _shouldMiniaturizeOnDoubleClick]. It's not
   // clear to me which approach would be preferable; neither is public API.
   return [ActionOnDoubleClickSystemPref() isEqualToString:@"Minimize"];
+}
+
+// "Fill" is the window tiling action that macOS 15 added as a third choice
+// next to "Zoom" and "Minimize".
+static bool ShouldFillOnTitlebarDoubleClick() {
+  if ([NSWindow respondsToSelector:@selector(_shouldFillOnDoubleClick)]) {
+    return [NSWindow _shouldFillOnDoubleClick];
+  }
+  return [ActionOnDoubleClickSystemPref() isEqualToString:@"Fill"];
+}
+
+void nsCocoaUtils::PerformTitlebarDoubleClickAction(NSWindow* aWindow) {
+  if (ShouldZoomOnTitlebarDoubleClick()) {
+    [aWindow performZoom:nil];
+  } else if (ShouldMinimizeOnTitlebarDoubleClick()) {
+    [aWindow performMiniaturize:nil];
+  } else if (ShouldFillOnTitlebarDoubleClick() &&
+             [aWindow respondsToSelector:@selector(_zoomFill:)]) {
+    [aWindow _zoomFill:nil];
+  }
 }
 
 static const char* AVMediaTypeToString(AVMediaType aType) {

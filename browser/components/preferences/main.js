@@ -19,14 +19,30 @@
  * @import { Setting } from "chrome://global/content/preferences/Setting.mjs"
  */
 
-const { Multilingual } = ChromeUtils.importESModule(
-  "chrome://browser/content/preferences/config/languages.mjs",
-  { global: "current" }
+/**
+ * Imports a module into this window's global.
+ *
+ * These imports spin the event loop until the module graph has been fetched, so
+ * the tab can be closed while one of them is in flight. Once that has happened
+ * there is nothing left to set up, and evaluating the top level code of another
+ * module against the torn down window only produces errors, so stop importing.
+ *
+ * @param {string} uri
+ * @returns {object}
+ */
+function importIntoWindow(uri) {
+  if (window.closed) {
+    return {};
+  }
+  return ChromeUtils.importESModule(uri, { global: "current" });
+}
+
+const { Multilingual } = importIntoWindow(
+  "chrome://browser/content/preferences/config/languages.mjs"
 );
 
-const { DefaultBrowserHelper } = ChromeUtils.importESModule(
-  "chrome://browser/content/preferences/DefaultBrowserHelper.mjs",
-  { global: "current" }
+const { DefaultBrowserHelper } = importIntoWindow(
+  "chrome://browser/content/preferences/DefaultBrowserHelper.mjs"
 );
 
 ChromeUtils.defineESModuleGetters(this, {
@@ -43,23 +59,15 @@ ChromeUtils.defineESModuleGetters(this, {
     "resource://autofill/FormAutofillPreferences.sys.mjs",
 });
 
-ChromeUtils.importESModule(
-  "chrome://browser/content/preferences/config/accessibility.mjs",
-  { global: "current" }
+importIntoWindow(
+  "chrome://browser/content/preferences/config/accessibility.mjs"
 );
-ChromeUtils.importESModule(
-  "chrome://browser/content/preferences/config/about-firefox.mjs",
-  { global: "current" }
+importIntoWindow(
+  "chrome://browser/content/preferences/config/about-firefox.mjs"
 );
-
-ChromeUtils.importESModule(
-  "chrome://browser/content/preferences/config/appearance.mjs",
-  { global: "current" }
-);
-
-ChromeUtils.importESModule(
-  "chrome://browser/content/preferences/config/tabs-browsing.mjs",
-  { global: "current" }
+importIntoWindow("chrome://browser/content/preferences/config/appearance.mjs");
+importIntoWindow(
+  "chrome://browser/content/preferences/config/tabs-browsing.mjs"
 );
 
 // Constants & Enumeration Values
@@ -110,6 +118,7 @@ Preferences.addAll([
   { id: "browser.ai.control.pdfjsAltText", type: "string" },
   { id: "browser.ai.control.smartTabGroups", type: "string" },
   { id: "browser.ai.control.linkPreviewKeyPoints", type: "string" },
+  { id: "browser.ai.control.speechRecognition", type: "string" },
   { id: "browser.ai.control.sidebarChatbot", type: "string" },
   { id: "browser.ai.control.smartWindow", type: "string" },
 
@@ -227,10 +236,6 @@ Preferences.addSetting(
         // of testing.
         // @ts-ignore bug 1996860
         LaunchOnLogin.enable();
-        Services.prefs.setBoolPref(
-          "browser.startup.windowsLaunchOnLogin.disableLaunchOnLoginPrompt",
-          true
-        );
       } else {
         // windowsLaunchOnLogin has been unchecked: delete registry key and shortcut
         // @ts-ignore bug 1996860
@@ -768,8 +773,10 @@ var gMainPane = {
     if (!(await FxAccounts.canConnectAccount())) {
       return;
     }
-    let url =
-      await FxAccounts.config.promiseConnectAccountURI("dev-edition-setup");
+    let url = await FxAccounts.config.promiseConnectAccountURI(
+      "sync",
+      "dev-edition-setup"
+    );
     let accountsTab = win.gBrowser.addWebTab(url);
     win.gBrowser.selectedTab = accountsTab;
   },
@@ -1290,7 +1297,7 @@ var gMainPane = {
 
   /* Show the confirmation message bar to allow a restart into the new locales. */
   async showConfirmLanguageChangeMessageBar(locales) {
-    let messageBar = document.getElementById("confirmBrowserLanguage");
+    let messageBarContainer = document.getElementById("confirmBrowserLanguage");
 
     // Get the bundle for the new locale.
     let newBundle = getBundleForLocales(locales);
@@ -1313,51 +1320,38 @@ var gMainPane = {
       buttonLabels.pop();
     }
 
-    let contentContainer = messageBar.querySelector(
-      ".message-bar-content-container"
-    );
-    contentContainer.textContent = "";
+    messageBarContainer.textContent = "";
 
     for (let i = 0; i < messages.length; i++) {
-      let messageContainer = document.createXULElement("hbox");
-      messageContainer.classList.add("message-bar-content");
-      messageContainer.style.flex = "1 50%";
-      messageContainer.setAttribute("align", "center");
-
-      let description = document.createXULElement("description");
-      description.classList.add("message-bar-description");
-
+      let messageBar = document.createElement("moz-message-bar");
+      messageBar.setAttribute("type", "info");
+      messageBar.setAttribute("data-l10n-attrs", "message");
+      messageBar.setAttribute("message", messages[i]);
       if (i == 0 && Services.intl.getScriptDirection(locales[0]) === "rtl") {
-        description.classList.add("rtl-locale");
+        messageBar.setAttribute("dir", "rtl");
       }
-      description.setAttribute("flex", "1");
-      description.textContent = messages[i];
-      messageContainer.appendChild(description);
 
       let button = document.createXULElement("button");
       button.addEventListener(
         "command",
         gMainPane.confirmBrowserLanguageChange
       );
-      button.classList.add("message-bar-button");
       button.setAttribute("locales", locales.join(","));
       button.setAttribute("label", buttonLabels[i]);
-      messageContainer.appendChild(button);
+      button.setAttribute("slot", "actions");
+      messageBar.appendChild(button);
 
-      contentContainer.appendChild(messageContainer);
+      messageBarContainer.appendChild(messageBar);
     }
 
-    messageBar.hidden = false;
+    messageBarContainer.hidden = false;
     gMainPane.selectedLocalesForRestart = locales;
   },
 
   hideConfirmLanguageChangeMessageBar() {
-    let messageBar = document.getElementById("confirmBrowserLanguage");
-    messageBar.hidden = true;
-    let contentContainer = messageBar.querySelector(
-      ".message-bar-content-container"
-    );
-    contentContainer.textContent = "";
+    let messageBarContainer = document.getElementById("confirmBrowserLanguage");
+    messageBarContainer.hidden = true;
+    messageBarContainer.textContent = "";
     gMainPane.requestingLocales = null;
   },
 
@@ -1423,7 +1417,7 @@ var gMainPane = {
     win.toOpenWindowByType(
       "about:profilemanager",
       "about:profilemanager",
-      "chrome,extrachrome,menubar,resizable,scrollbars,status,toolbar,centerscreen"
+      "chrome,resizable,toolbar,centerscreen"
     );
   },
 

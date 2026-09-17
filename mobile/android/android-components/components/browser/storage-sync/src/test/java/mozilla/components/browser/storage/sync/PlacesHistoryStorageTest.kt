@@ -1164,11 +1164,11 @@ class PlacesHistoryStorageTest {
         expectedKey: HistoryMetadataKey,
         expectedTotalViewTime: Int,
         expectedDocumentType: DocumentType,
-        db_meta: HistoryMetadata,
+        dbMeta: HistoryMetadata,
     ) {
-        assertEquals(expectedKey, db_meta.key)
-        assertEquals(expectedTotalViewTime, db_meta.totalViewTime)
-        assertEquals(expectedDocumentType, db_meta.documentType)
+        assertEquals(expectedKey, dbMeta.key)
+        assertEquals(expectedTotalViewTime, dbMeta.totalViewTime)
+        assertEquals(expectedDocumentType, dbMeta.documentType)
     }
 }
 

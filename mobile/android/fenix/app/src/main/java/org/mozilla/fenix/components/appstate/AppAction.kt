@@ -37,8 +37,10 @@ import org.mozilla.fenix.home.recenttabs.RecentTab
 import org.mozilla.fenix.home.recentvisits.RecentlyVisitedItem
 import org.mozilla.fenix.home.topsites.AddShortcutEntryPoint
 import org.mozilla.fenix.home.topsites.AddShortcutSource
+import org.mozilla.fenix.ipprotection.ui.IPProtectionSnackbarBinding
 import org.mozilla.fenix.library.history.PendingDeletionHistory
 import org.mozilla.fenix.messaging.MessagingState
+import org.mozilla.fenix.snackbar.SnackbarBinding
 import org.mozilla.fenix.wallpapers.Wallpaper
 
 /** [Action] implementation related to [AppStore]. */
@@ -696,20 +698,30 @@ sealed class AppAction : Action {
         data class UpdateEarliestTrackingDate(val date: Long?) : BlockedTrackersAction()
     }
 
-    /** [SnackbarAction]s related to the IP Protection feature. */
+    /**
+     * [SnackbarAction]s related to the IP Protection feature.
+     *
+     * The states of these actions are consumed by two bindings: the general [SnackbarBinding] and the feature specific
+     * [IPProtectionSnackbarBinding]. The IP Protection feature could be interacted with, in addition to the dedicated
+     * screens, from the three dot and the trust panel menus - and the binding allows those surfaces to show only the
+     * specific snackbars. As well as ensuring that the snackbar is shown by one binding at a time (depending on the
+     * active view focus).
+     */
     sealed class IPProtectionSnackbarAction : SnackbarAction() {
         /**
-         * Dispatched when IP Protection feature experienced a connection error.
+         * [IPProtectionSnackbarAction] dispatched to show a snackbar with a custom title. This is the IP Protection
+         * equivalent of [SnackbarAction.ShowSnackbar].
          *
          * @property title The title to display in the snackbar.
          */
-        data class ConnectionError(val title: String) : IPProtectionSnackbarAction()
+        data class ShowSnackbar(val title: String) : IPProtectionSnackbarAction()
 
         /**
-         * Dispatched when IP Protection feature experienced a connection error.
+         * [IPProtectionSnackbarAction] dispatched to show a snackbar with a custom title and with an action that
+         * navigates the user into the IP Protection settings screen.
          *
          * @property title The title to display in the snackbar.
          */
-        data class DataLimitReached(val title: String) : IPProtectionSnackbarAction()
+        data class ShowActionSettingsSnackbar(val title: String) : IPProtectionSnackbarAction()
     }
 }

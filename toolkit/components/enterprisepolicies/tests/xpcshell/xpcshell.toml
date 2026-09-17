@@ -1,8 +1,8 @@
 [DEFAULT]
 firefox-appdir = "browser"
 head = "head.js"
-skip-if = [
-  "os == 'android'",
+run-if = [
+  "os != 'android'",
 ]
 
 ["test_combined_provider_precedence.js"]

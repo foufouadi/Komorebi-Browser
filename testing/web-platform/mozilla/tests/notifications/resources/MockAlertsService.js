@@ -31,6 +31,21 @@ function mockServicesChromeScript() {
         callbacks,
         title: alert.title,
         image: alert.image,
+        // data about this alert that can be queried by the content process
+        // with getNotificationData().
+        data: {
+          title: alert.title,
+          imageURL: alert.imageURL,
+          dir: alert.dir,
+          lang: alert.lang,
+          body: alert.text,
+          tag: alert.name,
+          actions: alert.actions.map(action => ({
+            action: action.action,
+            title: action.title,
+            iconURL: action.iconURL,
+          })),
+        },
       };
 
       // fake async alert show event
@@ -146,6 +161,10 @@ function mockServicesChromeScript() {
     Object.keys(activeNotifications)
   );
 
+  addMessageListener("mock-alert-service:get-notification-data", () =>
+    Object.values(activeNotifications).map(value => value.data)
+  );
+
   addMessageListener("mock-alert-service:get-icon-image", id => {
     let image = activeNotifications[id].image;
     if (!image) {
@@ -243,6 +262,11 @@ const MockAlertsService = {
   async getNotificationIds() {
     return await this._chromeScript.sendQuery(
       "mock-alert-service:get-notification-ids"
+    );
+  },
+  async getNotificationData() {
+    return await this._chromeScript.sendQuery(
+      "mock-alert-service:get-notification-data"
     );
   },
   async getIconImage(id) {

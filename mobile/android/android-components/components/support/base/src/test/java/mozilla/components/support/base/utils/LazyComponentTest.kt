@@ -62,7 +62,7 @@ class LazyComponentTest {
         // coroutines add complex behavior - suspension, test APIs affecting true concurrency, etc. -
         // so we use traditional threads for a simpler implementation.
         val executorService = Executors.newFixedThreadPool(12)
-        for (i in 1..100) {
+        repeat(100) {
             executorService.submit { component.get() }
         }
         executorService.shutdown()

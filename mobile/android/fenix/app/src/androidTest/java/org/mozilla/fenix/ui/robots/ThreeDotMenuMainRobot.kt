@@ -1097,20 +1097,10 @@ private fun shareTabButton() = onView(allOf(withText("Share all tabs"))).inRoot(
 
 private fun selectTabsButton() = onView(allOf(withText("Select tabs"))).inRoot(RootMatchers.isPlatformPopup())
 
-private fun readerViewAppearanceToggle() = mDevice.findObject(UiSelector().text("Customize reader view"))
-
 private fun removeFromShortcutsButton() = onView(allOf(withText(R.string.browser_menu_remove_from_shortcuts)))
 
 private fun addAppToHomeScreenButton() =
     itemContainingText(getStringResource(R.string.browser_menu_add_app_to_homescreen))
-
-private fun openInAppButton() =
-    onView(
-        allOf(
-            withText("Open in app"),
-            withEffectiveVisibility(Visibility.VISIBLE),
-        )
-    )
 
 private fun shareAllTabsButton() = onView(allOf(withText("Share all tabs"))).inRoot(RootMatchers.isPlatformPopup())
 
@@ -1122,8 +1112,6 @@ private fun ComposeTestRule.forwardButton() = onNodeWithText("Forward")
 
 private fun ComposeTestRule.refreshButton() = onNodeWithText("Refresh")
 
-private fun ComposeTestRule.stopButton() = onNodeWithText("Stop")
-
 private fun ComposeTestRule.shareButton() = onNodeWithText("Share")
 
 private fun ComposeTestRule.signInButton() = onNodeWithContentDescription("Sign in Sync passwords, bookmarks, and more")
@@ -1132,9 +1120,6 @@ private fun ComposeTestRule.settingsButton(localizedText: String = getStringReso
     onNodeWithContentDescription(localizedText)
 
 private fun ComposeTestRule.extensionsButton() = onNodeWithTag(EXTENSIONS)
-
-private fun ComposeTestRule.tryRecommendedExtensionButton() =
-    onNodeWithContentDescription("Extensions Try a recommended extension", substring = true)
 
 private fun ComposeTestRule.noExtensionsEnabledButton() =
     onNodeWithContentDescription("Extensions No extensions enabled", substring = true)

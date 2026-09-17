@@ -30,7 +30,25 @@ created under their own account with a chance to review and adjust.
      engineering changes with no user-facing behavior change (tooling, tests, docs, build).
 
 3. **Draft the summary and description and show them to the user.**
-   - Keep the summary short and specific.
+   - **Shape the summary to the bug type chosen above.** In all three cases the
+     mechanism, the file list, and any counts belong in the description, not the
+     summary.
+     - `defect` - the observable symptom, in the terms someone hitting it would
+       use ("Restored tabs come back with blank titles"). Not the suspected
+       cause and not the fix: either can turn out wrong, and the symptom is what
+       people search for.
+     - `enhancement` - the capability wanted ("Allow pinned tabs to be restored
+       per window").
+     - `task` - the action to take ("Use `declareLazy` in the remaining
+       sessionstore modules").
+   - Cut what goes stale or reads as code in prose: a count ("Six modules..."),
+     a helper's namespace prefix (`declareLazy`, not `XPCOMUtils.declareLazy`),
+     glob shorthand (`lazy.*`).
+   - Use ordinary words, and never a term coined for the occasion. Where the
+     project has no established name for the thing, describe it instead.
+   - Match a sibling bug's shape when one exists, so the two are findable
+     together, and let any trailing clause carry only what distinguishes this
+     one.
    - In the description, wrap code identifiers (function, variable, class, file,
      pref, and flag names) in backticks so they render as code in the filed bug.
    - For a test-failure bug, include a link to the test's dashboard:
@@ -45,13 +63,23 @@ created under their own account with a chance to review and adjust.
    `enter_bug.cgi` field as a `field=value` argument; it URL-encodes the values and
    opens the form in the browser (cross-platform, so Linux, macOS, and Windows all work):
    ```
-   python3 .agents/skills/bug-filing/file-bug.py product=<P> component=<C> \
-       bug_type=<T> short_desc=<summary> comment=<description>
+   python3 .agents/skills/bug-filing/file-bug.py 'product=<P>' 'component=<C>' \
+       'bug_type=<T>' 'short_desc=<summary>' 'comment=<description>'
    ```
+   - Single-quote every `field=value` argument.
    - Write `short_desc` and `comment` as plain text, with markdown backticks around
      code identifiers; the script does all the encoding.
    - Any form field works, so add more as the bug needs them, e.g. `blocked=<bug>`
      (blocks), `dependson=<bug>` (depends on), or `see_also=<url>`.
+
+   The script opens the form and prints a one-line confirmation. **Never paste the
+   URL into your reply**: a prefilled form carries the whole description
+   percent-encoded in its query string, which puts the URL past the length at which
+   a terminal stops linkifying it, so the reader gets an unclickable wall of `%20`.
+   It also costs you: those characters stay resident in your context and are re-sent
+   with every later request in the session. Report the summary and the component
+   instead - and don't compress the description to shorten the URL, which nobody
+   was meant to read.
 
    The user reviews and submits the form to create the bug, then provides the bug number.
 

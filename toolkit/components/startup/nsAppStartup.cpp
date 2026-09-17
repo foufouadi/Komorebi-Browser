@@ -27,6 +27,7 @@
 #include "mozilla/ProfilerMarkers.h"
 #include "mozilla/ResultExtensions.h"
 #include "mozilla/Try.h"
+#include "nsThread.h"
 
 #include "GeckoProfiler.h"
 #include "prprf.h"
@@ -546,7 +547,7 @@ static_assert(int(nsIAppStartup::SHUTDOWN_PHASE_NOTINSHUTDOWN) ==
                       int(mozilla::ShutdownPhase::AppShutdown) &&
                   int(nsIAppStartup::SHUTDOWN_PHASE_APPSHUTDOWNQM) ==
                       int(mozilla::ShutdownPhase::AppShutdownQM) &&
-                  int(nsIAppStartup::SHUTDOWN_PHASE_APPSHUTDOWNRELEMETRY) ==
+                  int(nsIAppStartup::SHUTDOWN_PHASE_APPSHUTDOWNTELEMETRY) ==
                       int(mozilla::ShutdownPhase::AppShutdownTelemetry) &&
                   int(nsIAppStartup::SHUTDOWN_PHASE_XPCOMWILLSHUTDOWN) ==
                       int(mozilla::ShutdownPhase::XPCOMWillShutdown) &&
@@ -581,6 +582,22 @@ nsAppStartup::IsInOrBeyondShutdownPhase(IDLShutdownPhase aPhase,
 NS_IMETHODIMP
 nsAppStartup::SetImpendingShutdown() {
   AppShutdown::SetImpendingShutdown();
+  return NS_OK;
+}
+
+namespace mozilla {
+
+void CollectShutdownHangAnnotations() {
+#ifdef NS_THREAD_SHUTDOWN_ANNOTATIONS_ENABLED
+  nsThread::CollectShutdownHangAnnotation();
+#endif
+}
+
+}  // namespace mozilla
+
+NS_IMETHODIMP
+nsAppStartup::CollectShutdownHangAnnotations() {
+  mozilla::CollectShutdownHangAnnotations();
   return NS_OK;
 }
 

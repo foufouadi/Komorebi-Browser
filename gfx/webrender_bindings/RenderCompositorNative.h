@@ -11,13 +11,13 @@
 #include "GLTypes.h"
 #include "mozilla/HashFunctions.h"
 #include "mozilla/TimeStamp.h"
+#include "mozilla/layers/GpuFence.h"
 #include "mozilla/layers/ScreenshotGrabber.h"
 #include "mozilla/webrender/RenderCompositor.h"
 
 namespace mozilla {
 
 namespace layers {
-class GpuFence;
 class NativeLayerRootSnapshotter;
 class NativeLayerRoot;
 class NativeLayer;
@@ -168,8 +168,8 @@ class RenderCompositorNativeOGL : public RenderCompositorNative {
 
   gl::GLContext* gl() const override { return mGL; }
 
-  void Bind(wr::NativeTileId aId, wr::DeviceIntPoint* aOffset, uint32_t* aFboId,
-            wr::DeviceIntRect aDirtyRect,
+  void Bind(wr::NativeTileId aId, wr::DeviceIntPoint* aOffset,
+            uint64_t* aSurfaceHandle, wr::DeviceIntRect aDirtyRect,
             wr::DeviceIntRect aValidRect) override;
   void Unbind() override;
 

@@ -80,8 +80,8 @@ pub unsafe extern "C" fn content_classifier_engine_destroy(
 pub unsafe extern "C" fn content_classifier_engine_check_network_request_preparsed(
     engine: *const ContentClassifierFFIEngine,
     url: &nsACString,
-    schemeless_site: &nsACString,
-    source_schemeless_site: &nsACString,
+    hostname: &nsACString,
+    source_hostname: &nsACString,
     request_type: &nsACString,
     third_party: bool,
     previously_matched_rule: bool,
@@ -96,15 +96,14 @@ pub unsafe extern "C" fn content_classifier_engine_check_network_request_prepars
     let engine = &(*engine).engine;
 
     let url_str = String::from_utf8_lossy(url.as_ref()).to_string();
-    let schemeless_site_str = String::from_utf8_lossy(schemeless_site.as_ref()).to_string();
-    let source_schemeless_site_str =
-        String::from_utf8_lossy(source_schemeless_site.as_ref()).to_string();
+    let hostname_str = String::from_utf8_lossy(hostname.as_ref()).to_string();
+    let source_hostname_str = String::from_utf8_lossy(source_hostname.as_ref()).to_string();
     let request_type_str = String::from_utf8_lossy(request_type.as_ref()).to_string();
 
     let request = adblock::request::Request::preparsed(
         &url_str,
-        &schemeless_site_str,
-        &source_schemeless_site_str,
+        &hostname_str,
+        &source_hostname_str,
         &request_type_str,
         third_party,
     );

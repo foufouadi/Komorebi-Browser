@@ -37,6 +37,7 @@ from mozlog.formatters import MachFormatter
 from mozlog.handlers import ResourceHandler, StreamHandler
 from mozlog.structuredlog import StructuredLogger
 from mozlog.structuredlog import log_actions as get_log_actions
+from packaging.version import Version
 
 from mozbuild.base import (
     BinaryNotFoundException,
@@ -305,12 +306,16 @@ def cargo(
 
     for crate in crates:
         crate_info = crates_and_roots.get(crate, None)
+        package_arg = ""
         if not crate_info:
-            print(
-                "Cannot locate crate %s.  Please check your spelling or "
-                "add the crate information to the list." % crate
-            )
-            return 1
+            # Not one of the top-level crates we know how to build directly, assume it's
+            # other crate in the gkrust workspace and target it explicitly via `-p`.
+            #
+            # gkrust's features and lib/bin targets don't apply to an individual crate,
+            # so pass the target explicitly instead, and let the makefiles skip the
+            # automatically-computed arguments via CARGO_NO_AUTO_ARG below.
+            crate_info = crates_and_roots["gkrust"]
+            package_arg = f"-p {crate} --target={{arch}} "
 
         targets = [
             "force-cargo-library-%s" % cargo_command,
@@ -331,9 +336,12 @@ def cargo(
             "topsrcdir": str(topsrcdir),
         }
 
-        if subcommand_args:
+        extra_cli_flags = (
+            package_arg + subcommand_args if subcommand_args else package_arg
+        )
+        if extra_cli_flags:
             targets = targets + [
-                "cargo_extra_cli_flags=%s" % (subcommand_args.format(**subst))
+                "cargo_extra_cli_flags=%s" % (extra_cli_flags.format(**subst))
             ]
         if cargo_build_flags:
             targets = targets + [
@@ -347,12 +355,8 @@ def cargo(
             append_env["USE_CARGO_JSON_MESSAGE_FORMAT"] = "1"
         if continue_on_error:
             append_env["CARGO_CONTINUE_ON_ERROR"] = "1"
-        if cargo_build_flags:
+        if cargo_build_flags or package_arg:
             append_env["CARGO_NO_AUTO_ARG"] = "1"
-        else:
-            append_env["ADD_RUST_LTOABLE"] = (
-                f"force-cargo-library-{cargo_command:s} force-cargo-program-{cargo_command:s}"
-            )
 
         ret = command_context._run_make(
             srcdir=False,
@@ -2466,6 +2470,23 @@ def _run_jsshell(command_context, params, debug, debugger, debugger_args):
     )
 
 
+MOZILLA_MACOS_TEAM_ID = "43AQ936H96"
+
+
+def _macos_is_signed_by_mozilla(path):
+    try:
+        proc = subprocess.run(
+            ["codesign", "-dvv", path],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return False
+    m = re.search(r"^TeamIdentifier=(.+)$", proc.stderr, re.MULTILINE)
+    return bool(m) and m.group(1) == MOZILLA_MACOS_TEAM_ID
+
+
 def _run_desktop(
     command_context,
     params,
@@ -2630,6 +2651,50 @@ def _run_desktop(
         "MOZ_DEVELOPER_OBJ_DIR": command_context.topobjdir,
         "RUST_BACKTRACE": "full",
     }
+
+    if (
+        not appdata
+        and sys.platform == "darwin"
+        and conditions.is_firefox(command_context)
+        and "MOZ_APP_DATA" not in os.environ
+        and Version(platform.mac_ver()[0]) >= Version("27")
+    ):
+        # Starting with macOS 27, Firefox's data directory (by default
+        # `~/Library/Application Support/Firefox` unless overriden by the
+        # environment variable MOZ_APP_DATA) is not accessible unless the
+        # application is signed by Mozilla or given permission to read
+        # Firefox data in macOS Privacy & Security system settings. For
+        # `./mach run`, which launches Firefox by bare executable (unless
+        # --macos-open is used), the terminal application is the
+        # "responsible process" and therefore giving it permission to read
+        # Firefox data is sufficient for `./mach run` to work normally.
+        # The extended attribute `com.apple.macl` indicates protection is
+        # enabled for the directory, but reading the attribute is prevented
+        # when the protection is enabled. For `--macos-open`, either an
+        # alternate app data directory or a signed build must be used.
+        if macos_open:
+            app_data_protected = not _macos_is_signed_by_mozilla(apppath)
+        else:
+            app_data_dir = os.path.expanduser("~/Library/Application Support/Firefox")
+            app_data_protected = os.path.isdir(app_data_dir) and not os.access(
+                app_data_dir, os.R_OK
+            )
+
+        if app_data_protected:
+            command_context.log(
+                logging.ERROR,
+                "run",
+                {},
+                "Firefox's application data directory could not be read "
+                "due to macOS application data protections. Allow the "
+                "terminal access to Firefox data in macOS Privacy & "
+                "Security -> Files & Folders settings to allow builds launched "
+                "from the CLI to access profile data. Alternatively, use "
+                "`./mach run -a` OR set MOZ_APP_DATA & MOZ_LOCAL_APP_DATA "
+                "environment variables to use an alternate app directory for "
+                "all instances launched from the terminal. See bug 2068208 for "
+                "more information.",
+            )
 
     if appdata:
         if appdata is True:

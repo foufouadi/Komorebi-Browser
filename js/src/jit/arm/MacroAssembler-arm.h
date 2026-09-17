@@ -7,6 +7,8 @@
 
 #include "mozilla/DebugOnly.h"
 
+#include <type_traits>
+
 #include "jit/arm/Assembler-arm.h"
 #include "jit/MoveResolver.h"
 #include "vm/BytecodeUtil.h"
@@ -131,10 +133,11 @@ class MacroAssemblerARM : public Assembler {
   void wasmTruncateToInt32(FloatRegister input, Register output,
                            MIRType fromType, bool isUnsigned, bool isSaturating,
                            Label* oolEntry);
-  void outOfLineWasmTruncateToIntCheck(FloatRegister input, MIRType fromType,
-                                       MIRType toType, TruncFlags flags,
-                                       Label* rejoin,
-                                       const wasm::TrapSiteDesc& trapSiteDesc);
+  void outOfLineWasmTruncateToIntCheck(
+      FloatRegister input, MIRType fromType, MIRType toType, TruncFlags flags,
+      Label* rejoin, const wasm::TrapSiteDesc& trapSiteDesc,
+      wasm::StackMap* stackMapForTraps,
+      wasm::StackMapRegistry* stackMapRegistry);
 
   // Somewhat direct wrappers for the low-level assembler funcitons
   // bitops. Attempt to encode a virtual alu instruction using two real
@@ -699,6 +702,22 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM {
     ScratchRegisterScope scratch(asMasm());
     Imm32 totSpace = Imm32(extraSpace.value + 4);
     ma_dtr(IsLoad, sp, totSpace, reg, scratch, PostIndex);
+  }
+
+  template <typename... Regs>
+  void pushRegs(const Regs&... regs) {
+    static_assert((std::is_convertible_v<Regs, Register> && ...));
+    static_assert(sizeof...(Regs) > 0);
+
+    (push(regs), ...);
+  }
+
+  template <typename... Regs>
+  void popRegs(const Regs&... regs) {
+    static_assert((std::is_convertible_v<Regs, Register> && ...));
+    static_assert(sizeof...(Regs) > 0);
+
+    (pop(regs), ...);
   }
 
   CodeOffset toggledJump(Label* label);

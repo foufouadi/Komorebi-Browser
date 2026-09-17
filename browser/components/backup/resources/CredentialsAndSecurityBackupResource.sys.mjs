@@ -49,6 +49,7 @@ export class CredentialsAndSecurityBackupResource extends BackupResource {
       "key4.db",
       "credentialstate.sqlite",
       "logins.db",
+      "autofill.db",
     ];
     await BackupResource.copySqliteDatabases(
       profilePath,
@@ -80,6 +81,7 @@ export class CredentialsAndSecurityBackupResource extends BackupResource {
       "key4.db",
       "credentialstate.sqlite",
       "logins.db",
+      "autofill.db",
     ];
 
     if (await IOUtils.exists(AUTOFILL_RECORDS_PATH)) {
@@ -150,6 +152,7 @@ export class CredentialsAndSecurityBackupResource extends BackupResource {
       "autofill-profiles.json",
       "credentialstate.sqlite",
       "logins.db",
+      "autofill.db",
     ];
     let credentialsSize = 0;
 

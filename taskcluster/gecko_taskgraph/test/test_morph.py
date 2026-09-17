@@ -212,14 +212,17 @@ def test_make_index_tasks(make_taskgraph, graph_config):
 
 
 @pytest.mark.parametrize(
-    "has_ccov,expected_task_added",
+    "project,has_ccov,expected_task_added",
     (
-        pytest.param(True, True, id="with ccov tasks"),
-        pytest.param(False, False, id="without ccov tasks"),
+        pytest.param("mozilla-central", True, True, id="with ccov tasks"),
+        pytest.param("mozilla-central", False, False, id="without ccov tasks"),
+        pytest.param("comm-central", True, True, id="comm-central"),
+        pytest.param("try", True, False, id="try"),
+        pytest.param("try-comm-central", True, False, id="try-comm-central"),
     ),
 )
 def test_add_code_coverage_task(
-    make_taskgraph, graph_config, has_ccov, expected_task_added
+    make_taskgraph, graph_config, project, has_ccov, expected_task_added
 ):
     tasks = {}
     if has_ccov:
@@ -247,6 +250,7 @@ def test_add_code_coverage_task(
         strict=False,
         owner="test@example.com",
         head_repository="https://hg.mozilla.org/mozilla-central",
+        project=project,
     )
 
     taskgraph, label_to_taskid = morph.add_code_coverage_task(

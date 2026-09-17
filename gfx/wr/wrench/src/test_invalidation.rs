@@ -25,6 +25,10 @@ struct InvalidationTest {
     op: InvalidationOp,
     file1: PathBuf,
     file2: PathBuf,
+    /// Build the second display list with a fresh `DisplayListBuilder`, the way
+    /// a replaced content process would, instead of the builder retained from
+    /// the first.
+    new_builder: bool,
 }
 
 fn parse_manifest(path: &Path) -> Vec<InvalidationTest> {
@@ -46,14 +50,25 @@ fn parse_manifest(path: &Path) -> Vec<InvalidationTest> {
         }
 
         let tokens: Vec<&str> = line.split_whitespace().collect();
-        if tokens.len() != 3 {
+        if tokens.len() < 3 || tokens.len() > 4 {
             panic!(
-                "{}:{}: expected 'OP file1 file2', got: {}",
+                "{}:{}: expected 'OP file1 file2 [new-builder]', got: {}",
                 path.display(),
                 line_num + 1,
                 line,
             );
         }
+
+        let new_builder = match tokens.get(3) {
+            None => false,
+            Some(&"new-builder") => true,
+            Some(other) => panic!(
+                "{}:{}: unknown option '{}', expected new-builder",
+                path.display(),
+                line_num + 1,
+                other,
+            ),
+        };
 
         let op = match tokens[0] {
             "==" => InvalidationOp::Equal,
@@ -70,6 +85,7 @@ fn parse_manifest(path: &Path) -> Vec<InvalidationTest> {
             op,
             file1: dir.join(tokens[1]),
             file2: dir.join(tokens[2]),
+            new_builder,
         });
     }
 
@@ -153,6 +169,9 @@ impl<'a> TestHarness<'a> {
 
             // Render file1 (baseline)
             self.render_yaml_path(&test.file1);
+            if test.new_builder {
+                self.wrench.drop_dl_builders();
+            }
             // Render file2 (the change)
             let results = self.render_yaml_path(&test.file2);
 
@@ -168,10 +187,11 @@ impl<'a> TestHarness<'a> {
                 InvalidationOp::NotEqual => "!=",
             };
 
+            let opts = if test.new_builder { " new-builder" } else { "" };
             if pass {
-                println!("PASS {} {} {}", op_str, file1_str, file2_str);
+                println!("PASS {} {} {}{}", op_str, file1_str, file2_str, opts);
             } else {
-                println!("FAIL {} {} {}", op_str, file1_str, file2_str);
+                println!("FAIL {} {} {}{}", op_str, file1_str, file2_str, opts);
                 failures += 1;
             }
         }

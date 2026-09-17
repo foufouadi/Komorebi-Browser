@@ -70,8 +70,8 @@ class WallpaperSettingsFragment : Fragment(), SystemInsetsPaddedFragment {
                         WallpaperSettings(
                             wallpaperGroups = wallpapers.groupByDisplayableCollection(),
                             selectedWallpaper = currentWallpaper,
-                            loadWallpaperResource = {
-                                wallpaperUseCases.loadThumbnail(it)
+                            loadWallpaperResource = { wallpaper, size ->
+                                wallpaperUseCases.loadThumbnail(wallpaper, size)
                             },
                             onSelectWallpaper = {
                                 if (it.name != currentWallpaper.name) {

@@ -18,4 +18,6 @@ support-files = [
 
 ["browser_content_classifier_remote_settings.js"]
 
+["browser_content_classifier_subdomain_rules.js"]
+
 ["browser_urlclassifier_disable_for_channel_classifier.js"]

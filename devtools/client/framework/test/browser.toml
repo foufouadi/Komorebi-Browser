@@ -184,9 +184,6 @@ skip-if = [
 ["browser_toolbox_hosts.js"]
 
 ["browser_toolbox_hosts_size.js"]
-fail-if = [
-  "a11y_checks", # Bug 1849028 clicked element may not be focusable and/or labeled
-]
 
 ["browser_toolbox_hosts_telemetry.js"]
 
@@ -347,6 +344,8 @@ fail-if = [
 ["browser_toolbox_visibility.js"]
 
 ["browser_toolbox_watchedByDevTools.js"]
+
+["browser_toolbox_window_closed_during_startup.js"]
 
 ["browser_toolbox_window_global_debugging.js"]
 skip-if = [

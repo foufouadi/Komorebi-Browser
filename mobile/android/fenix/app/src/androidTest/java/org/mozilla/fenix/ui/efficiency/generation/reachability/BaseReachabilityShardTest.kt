@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.fenix.ui.efficiency.generation.reachability
 
 import android.util.Log
@@ -19,7 +23,5 @@ abstract class BaseReachabilityShardTest(private val case: ReachabilityCase) : B
 
         val pageObj: BasePage = case.page(on)
         pageObj.navigateToPage()
-
-        // Add optional page-specific assertions later if needed.
     }
 }

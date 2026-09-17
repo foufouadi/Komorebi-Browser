@@ -25,6 +25,8 @@ prefs = [
 
 ["test_change_event.html"]
 
+["test_content_label_no_center_cropping.html"]
+
 ["test_datalist_element.html"]
 
 ["test_double_submit.html"]
@@ -234,6 +236,8 @@ skip-if = [
   "os == 'mac' && os_version == '14.70' && arch == 'x86_64'", # Bug 1929441
   "os == 'mac' && os_version == '15.30' && arch == 'aarch64'", # Bug 2023967
 ]
+
+["test_select_list_items.html"]
 
 ["test_select_selectedOptions.html"]
 

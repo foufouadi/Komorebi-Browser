@@ -4,17 +4,22 @@
 */
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
-use crate::http_cache::{ByteSize, CachePolicy, HttpCache};
+use crate::ads_store::AdsStore;
+use crate::common::bytesize::ByteSize;
+use crate::http_cache::{CachePolicy, HttpCache};
 use crate::mars::ad_request::{AdPlacementRequest, AdRequestFlags};
 use crate::mars::ad_response::{AdImage, AdResponse, AdResponseValue, AdSpoc, AdTile};
 use crate::mars::error::{RecordClickError, RecordImpressionError, ReportAdError};
 use crate::mars::{MARSClient, ReportReason};
+use crate::shutdown::{AdsStoreShutdown, ShutdownReferences};
 use crate::telemetry::Telemetry;
 use config::AdsClientConfig;
 use context_id::{ContextIDComponent, DefaultContextIdCallback};
 use error::RequestAdsError;
+use parking_lot::Mutex;
 use url::Url;
 use uuid::Uuid;
 
@@ -39,6 +44,7 @@ pub struct AdsClient<T>
 where
     T: Clone + Telemetry,
 {
+    ads_store: Arc<Mutex<Option<AdsStore>>>,
     client: MARSClient<T>,
     context_id_provider: Box<dyn ContextIdProvider>,
     telemetry: T,
@@ -85,29 +91,29 @@ where
             }
         });
 
+        let ads_store =
+            client_config
+                .store_config
+                .and_then(|x| match AdsStore::builder(x.db_path).build() {
+                    Ok(store) => Some(store),
+                    Err(e) => {
+                        telemetry.record(&e);
+                        None
+                    }
+                });
+
         let client = MARSClient::new(environment, http_cache, telemetry.clone());
         telemetry.record(&ClientOperationEvent::New);
         Self {
             client,
             context_id_provider,
             telemetry: telemetry.clone(),
+            ads_store: Arc::new(Mutex::new(ads_store)),
         }
     }
 
     pub fn clear_cache(&self) -> Result<(), rusqlite::Error> {
         self.client.clear_cache()
-    }
-
-    // Shutdown the db connection and drop references to telemetry callbacks.
-    // Should be used only when dropping the ads client, this may be extended to drop more things.
-    pub fn shutdown_client(&mut self) -> Result<(), rusqlite::Error> {
-        // Drop telemetry (within the telemetry wrapper)
-        self.telemetry.shutdown();
-
-        // Shutdown DB
-        self.client.shutdown_db()?;
-
-        Ok(())
     }
 
     pub fn get_context_id(&self) -> context_id::ApiResult<String> {
@@ -198,9 +204,10 @@ where
         flags: AdRequestFlags,
         options: Option<CachePolicy>,
         ohttp: bool,
+        blocks: Vec<String>,
     ) -> Result<HashMap<String, AdImage>, RequestAdsError> {
         let response = self
-            .request_ads::<AdImage>(ad_placement_requests, flags, options, ohttp)
+            .request_ads::<AdImage>(ad_placement_requests, flags, options, ohttp, blocks)
             .inspect_err(|e| {
                 self.telemetry.record(e);
             })?;
@@ -214,8 +221,10 @@ where
         flags: AdRequestFlags,
         options: Option<CachePolicy>,
         ohttp: bool,
+        blocks: Vec<String>,
     ) -> Result<HashMap<String, Vec<AdSpoc>>, RequestAdsError> {
-        let result = self.request_ads::<AdSpoc>(ad_placement_requests, flags, options, ohttp);
+        let result =
+            self.request_ads::<AdSpoc>(ad_placement_requests, flags, options, ohttp, blocks);
         result
             .inspect_err(|e| {
                 self.telemetry.record(e);
@@ -232,8 +241,10 @@ where
         flags: AdRequestFlags,
         options: Option<CachePolicy>,
         ohttp: bool,
+        blocks: Vec<String>,
     ) -> Result<HashMap<String, AdTile>, RequestAdsError> {
-        let result = self.request_ads::<AdTile>(ad_placement_requests, flags, options, ohttp);
+        let result =
+            self.request_ads::<AdTile>(ad_placement_requests, flags, options, ohttp, blocks);
         result
             .inspect_err(|e| {
                 self.telemetry.record(e);
@@ -250,17 +261,30 @@ where
         flags: AdRequestFlags,
         options: Option<CachePolicy>,
         ohttp: bool,
+        blocks: Vec<String>,
     ) -> Result<AdResponse<A>, RequestAdsError>
     where
         A: AdResponseValue,
     {
         let context_id = self.get_context_id()?;
         let cache_policy = options.unwrap_or_default();
-        let (mut response, request_hash) =
-            self.client
-                .fetch_ads::<A>(context_id, flags, placements, cache_policy, ohttp)?;
+        let (mut response, request_hash) = self.client.fetch_ads::<A>(
+            context_id,
+            flags,
+            placements,
+            cache_policy,
+            ohttp,
+            blocks,
+        )?;
         response.enrich_callbacks(&request_hash);
         Ok(response)
+    }
+
+    pub fn shutdown_references(&self) -> ShutdownReferences<T> {
+        ShutdownReferences::new(
+            self.telemetry.clone(),
+            AdsStoreShutdown::new(self.ads_store.clone()),
+        )
     }
 }
 
@@ -275,9 +299,10 @@ pub enum ClientOperationEvent {
 
 #[cfg(test)]
 mod tests {
-    use std::{assert_eq, assert_ne, sync::Arc};
+    use std::assert_eq;
 
     use crate::{
+        ads_store::builder::AdsStoreBuilder,
         ffi::telemetry::MozAdsTelemetryWrapper,
         mars::Environment,
         test_utils::{
@@ -301,6 +326,11 @@ mod tests {
                 Box::new(DefaultContextIdCallback),
             )),
             telemetry,
+            ads_store: Arc::new(Mutex::new(Some(
+                AdsStoreBuilder::new("test_store.db")
+                    .build()
+                    .expect("Simplest AdsStoreBuilder should be constructable"),
+            ))),
         }
     }
 
@@ -311,6 +341,7 @@ mod tests {
             context_id_provider: None,
             environment: Environment::Test,
             telemetry: MozAdsTelemetryWrapper::noop(),
+            store_config: None,
         };
         let client = AdsClient::new(config);
         let context_id = client.get_context_id().unwrap();
@@ -336,6 +367,7 @@ mod tests {
             AdRequestFlags::default(),
             None,
             false,
+            Default::default(),
         );
         assert!(result.is_ok());
         m.assert();
@@ -360,6 +392,7 @@ mod tests {
             AdRequestFlags::default(),
             None,
             false,
+            Default::default(),
         );
         assert!(result.is_ok());
         m.assert();
@@ -384,6 +417,7 @@ mod tests {
             AdRequestFlags::default(),
             None,
             false,
+            Default::default(),
         );
         assert!(result.is_ok());
         m.assert();
@@ -415,6 +449,7 @@ mod tests {
             context_id_provider: Some(Box::new(FixedContextId)),
             environment: Environment::Test,
             telemetry: MozAdsTelemetryWrapper::noop(),
+            store_config: None,
         };
         let client = AdsClient::new(config);
 
@@ -425,6 +460,7 @@ mod tests {
             AdRequestFlags::default(),
             None,
             false,
+            Default::default(),
         );
         assert!(result.is_ok());
         m.assert();
@@ -486,6 +522,7 @@ mod tests {
                 AdRequestFlags::default(),
                 None,
                 false,
+                Default::default(),
             )
             .unwrap();
         let callback_url = response.values().next().unwrap().callbacks.click.clone();
@@ -500,6 +537,7 @@ mod tests {
                 AdRequestFlags::default(),
                 None,
                 false,
+                Default::default(),
             )
             .unwrap();
 
@@ -511,53 +549,11 @@ mod tests {
                 AdRequestFlags::default(),
                 Some(CachePolicy::default()),
                 false,
+                Default::default(),
             )
             .unwrap();
 
         m1.assert();
         m2.assert();
-    }
-
-    #[test]
-    fn test_shutdown_telemetry() {
-        viaduct_dev::init_backend_dev();
-
-        // test with client created from config
-        let noop_telemetry = MozAdsTelemetryWrapper::noop();
-        let weak_reference = Arc::downgrade(
-            &noop_telemetry
-                .clone_inner_arc()
-                .expect("Inner telemetry should be Some before dropping"),
-        );
-        let config = AdsClientConfig {
-            cache_config: None,
-            context_id_provider: None,
-            environment: Environment::Test,
-            telemetry: noop_telemetry,
-        };
-        let mut client = AdsClient::new(config);
-
-        // weak ref will show 0 strong references when the Arc<dyn MozAdsTelemetry> is gone.
-        assert_ne!(weak_reference.strong_count(), 0);
-        client.shutdown_client().unwrap();
-        assert_eq!(weak_reference.strong_count(), 0);
-
-        // test also with internal function from_mars
-        let noop_telemetry = MozAdsTelemetryWrapper::noop();
-        let weak_reference = Arc::downgrade(
-            &noop_telemetry
-                .clone_inner_arc()
-                .expect("Inner telemetry should be Some before dropping"),
-        );
-        let cache = HttpCache::builder("test_shutdown_telemetry")
-            .build()
-            .unwrap();
-        let mars_client = MARSClient::new(Environment::Test, Some(cache), noop_telemetry);
-        let mut client = new_with_mars_client(mars_client);
-
-        // weak ref will show 0 strong references when the Arc<dyn MozAdsTelemetry> is gone.
-        assert_ne!(weak_reference.strong_count(), 0);
-        client.shutdown_client().unwrap();
-        assert_eq!(weak_reference.strong_count(), 0);
     }
 }

@@ -40,7 +40,6 @@ task-defaults:
     fetches:
         toolchain:
             - terser
-            - newtab-node-modules
     run:
         clone-with: hg
         mozconfig-variant:

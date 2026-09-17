@@ -68,11 +68,15 @@ urlbar-keyword-exposure:
     for each instance where a result is matched during the session. The ping is
     not submitted for sessions in private windows.
   include_client_id: false
+  uploader_capabilities:
+    - ohttp
   bugs:
     - https://bugzilla.mozilla.org/show_bug.cgi?id=1881875
     - https://bugzilla.mozilla.org/show_bug.cgi?id=1915507
+    - https://bugzilla.mozilla.org/show_bug.cgi?id=2070771
   data_reviews:
     - https://bugzilla.mozilla.org/show_bug.cgi?id=1881875
     - https://bugzilla.mozilla.org/show_bug.cgi?id=1915507
+    - https://bugzilla.mozilla.org/show_bug.cgi?id=2070771
   notification_emails:
     - fx-search-telemetry@mozilla.com

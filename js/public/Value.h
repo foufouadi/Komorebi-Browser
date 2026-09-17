@@ -331,14 +331,20 @@ constexpr bool ValueTypeIsGCThing(JSValueType type) {
 #define JSVAL_TYPE_TO_TAG(type) (JS::detail::ValueTypeToTag(type))
 
 enum JSWhyMagic {
+  /**
+   * uninitialized lexical bindings that produce ReferenceError on touch.
+   *
+   * Kept first so its payload is zero: the JITs materialize this Value at
+   * every TDZ check and lexical slot initialization, and a zero payload takes
+   * one instruction fewer on ARM64.
+   */
+  JS_UNINITIALIZED_LEXICAL,
+
   /** a hole in a native object's elements */
   JS_ELEMENTS_HOLE,
 
   /** there is not a pending iterator value */
   JS_NO_ITER_VALUE,
-
-  /** exception value thrown when closing a generator */
-  JS_GENERATOR_CLOSING,
 
   /** used in debug builds to catch tracing errors */
   JS_ARG_POISON,
@@ -360,9 +366,6 @@ enum JSWhyMagic {
 
   /** optimized out slot */
   JS_OPTIMIZED_OUT,
-
-  /** uninitialized lexical bindings that produce ReferenceError on touch. */
-  JS_UNINITIALIZED_LEXICAL,
 
   /** arguments object can't be created because environment is dead. */
   JS_MISSING_ARGUMENTS,
@@ -484,8 +487,8 @@ static MOZ_ALWAYS_INLINE double CanonicalizeNaN(double d) {
  *   "reason" for the magic value or a uint32_t value. By providing JSWhyMagic
  *   values when creating and checking for magic values, it is possible to
  *   assert, at runtime, that only magic values with the expected reason flow
- *   through a particular value. For example, if cx->exception has a magic
- *   value, the reason must be JS_GENERATOR_CLOSING.
+ *   through a particular value. For example, if an array's dense elements
+ *   contains a magic value, the reason must be JS_ELEMENTS_HOLE.
  *
  * - To help prevent mistakenly boxing a nullable JSObject* as an object,
  *   Value::setObject takes a JSObject&. (Conversely, Value::toObject returns a
@@ -925,9 +928,7 @@ class Value {
 
   /*** Comparison ***/
 
-  bool operator==(const Value& rhs) const { return asBits_ == rhs.asBits_; }
-
-  bool operator!=(const Value& rhs) const { return asBits_ != rhs.asBits_; }
+  bool operator==(const Value& rhs) const = default;
 
   friend inline bool SameType(const Value& lhs, const Value& rhs);
 

@@ -24,6 +24,7 @@ import mozilla.components.support.test.file.loadResourceAsString
 import mozilla.components.support.test.mock
 import mozilla.components.support.test.robolectric.testContext
 import mozilla.components.support.test.whenever
+import mozilla.components.ui.widgets.R as widgetsR
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -36,6 +37,8 @@ import org.mockito.Mockito.never
 import org.mockito.Mockito.spy
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
+
+private const val LARGE_ICON_SIZE = 512
 
 @RunWith(AndroidJUnit4::class)
 class AMOAddonsProviderTest {
@@ -433,6 +436,27 @@ class AMOAddonsProviderTest {
 
             val bitmap = provider.loadIcon("id", "https://example.com/image.png")
             assertIs<Bitmap>(bitmap)
+        }
+
+    @Test
+    fun `loadIcon - an oversized icon is subsampled down towards the size it is displayed at`() =
+        runTest(dispatcher) {
+            val mockedClient = mock<Client>()
+            val mockedResponse = mock<Response>()
+            val stream: InputStream = javaClass.getResourceAsStream("/png/mozac_large.png")!!.buffered()
+
+            whenever(mockedResponse.body).thenReturn(Response.Body(stream))
+            whenever(mockedResponse.status).thenReturn(200)
+            whenever(mockedClient.fetch(any())).thenReturn(mockedResponse)
+
+            val provider = AMOAddonsProvider(testContext, client = mockedClient, ioDispatcher = dispatcher)
+
+            val bitmap = provider.loadIcon("id", "https://example.com/image.png")
+
+            val displayedSize = testContext.resources.getDimensionPixelSize(widgetsR.dimen.mozac_widget_favicon_size)
+            assertIs<Bitmap>(bitmap)
+            assertTrue(bitmap.width < LARGE_ICON_SIZE)
+            assertTrue(bitmap.width >= displayedSize)
         }
 
     @Test

@@ -71,8 +71,7 @@ class SettingsSearchProviderRegistrationTest {
             summarizationFeatureConfiguration =
                 FakeSummarizationFeatureConfiguration().apply {
                     isFeatureAvailable = true
-                },
-            isFirefoxLabsEnabled = { true },
+                }
         )
 
     /** Builds the index the way production does, returning the screens that contributed items. */

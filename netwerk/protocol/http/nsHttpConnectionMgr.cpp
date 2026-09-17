@@ -655,7 +655,7 @@ void nsHttpConnectionMgr::ProcessPendingQForEntry(ConnectionEntry* aEntry) {
   aEntry->mPendingQProcessingScheduled = true;
 
   RefPtr<ConnectionEntry> entry = aEntry;
-  NS_DispatchToCurrentThread(NS_NewRunnableFunction(
+  DispatchToCurrent(NS_NewRunnableFunction(
       "nsHttpConnectionMgr::ProcessPendingQForEntry",
       [self = RefPtr{this}, entry]() {
         entry->mPendingQProcessingScheduled = false;
@@ -756,14 +756,15 @@ nsresult nsHttpConnectionMgr::RemoveIdleConnection(nsHttpConnection* conn) {
 }
 
 HttpConnectionBase* nsHttpConnectionMgr::FindCoalescableConnectionByHashKey(
-    ConnectionEntry* ent, HashNumber key, bool justKidding, bool aNoHttp2,
-    bool aNoHttp3) {
+    ConnectionEntry* ent, const CoalescingKey& key, bool justKidding,
+    bool aNoHttp2, bool aNoHttp3) {
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
   MOZ_ASSERT(!aNoHttp2 || !aNoHttp3);
   MOZ_ASSERT(ent->mConnInfo);
   nsHttpConnectionInfo* ci = ent->mConnInfo;
 
-  nsTArray<nsWeakPtr>* listOfWeakConns = mCoalescingHash.Get(key);
+  nsTArray<CoalescedConnection>* listOfWeakConns =
+      mCoalescingHash.Get(key.mHash);
   if (!listOfWeakConns) {
     return nullptr;
   }
@@ -771,13 +772,13 @@ HttpConnectionBase* nsHttpConnectionMgr::FindCoalescableConnectionByHashKey(
   uint32_t listLen = listOfWeakConns->Length();
   for (uint32_t j = 0; j < listLen;) {
     RefPtr<HttpConnectionBase> potentialMatch =
-        do_QueryReferent(listOfWeakConns->ElementAt(j));
+        do_QueryReferent(listOfWeakConns->ElementAt(j).mConn);
     if (!potentialMatch) {
       // This is a connection that needs to be removed from the list
       LOG(
           ("FindCoalescableConnectionByHashKey() found old conn %p that has "
            "null weak ptr - removing\n",
-           listOfWeakConns->ElementAt(j).get()));
+           listOfWeakConns->ElementAt(j).mConn.get()));
       if (j != listLen - 1) {
         listOfWeakConns->Elements()[j] =
             listOfWeakConns->Elements()[listLen - 1];
@@ -796,6 +797,17 @@ HttpConnectionBase* nsHttpConnectionMgr::FindCoalescableConnectionByHashKey(
       j++;
       continue;
     }
+
+    // Check this is a match and not a hash collision.
+    const nsCString& matchKey = listOfWeakConns->ElementAt(j).mKey;
+    if (matchKey != key.mString) {
+      LOG(("FindCoalescableConnectionByHashKey() hash %" PRIu32
+           " collides but key differs new=%s matched=%s - skipping\n",
+           key.mHash, key.mString.get(), matchKey.get()));
+      j++;
+      continue;
+    }
+
     bool couldJoin;
     if (justKidding) {
       couldJoin =
@@ -808,13 +820,13 @@ HttpConnectionBase* nsHttpConnectionMgr::FindCoalescableConnectionByHashKey(
       LOG(
           ("FindCoalescableConnectionByHashKey() found match conn=%p "
            "key=%" PRIu32 " newCI=%s matchedCI=%s join ok\n",
-           potentialMatch.get(), key, ci->HashKey().get(),
+           potentialMatch.get(), key.mHash, ci->HashKey().get(),
            potentialMatch->ConnectionInfo()->HashKey().get()));
       return potentialMatch.get();
     }
     LOG(("FindCoalescableConnectionByHashKey() found match conn=%p key=%" PRIu32
          " newCI=%s matchedCI=%s join failed\n",
-         potentialMatch.get(), key, ci->HashKey().get(),
+         potentialMatch.get(), key.mHash, ci->HashKey().get(),
          potentialMatch->ConnectionInfo()->HashKey().get()));
 
     ++j;  // bypassed by continue when weakptr fails
@@ -822,7 +834,7 @@ HttpConnectionBase* nsHttpConnectionMgr::FindCoalescableConnectionByHashKey(
 
   if (!listLen) {  // shrunk to 0 while iterating
     LOG(("FindCoalescableConnectionByHashKey() removing empty list element\n"));
-    mCoalescingHash.Remove(key);
+    mCoalescingHash.Remove(key.mHash);
   }
   return nullptr;
 }
@@ -844,7 +856,7 @@ HttpConnectionBase* nsHttpConnectionMgr::FindCoalescableConnection(
       ent, ent->OriginFrameHashKey(), justKidding, aNoHttp2, aNoHttp3);
   if (conn) {
     LOG(("FindCoalescableConnection(%s) match conn %p on frame key %" PRIu32,
-         ci->HashKey().get(), conn, ent->OriginFrameHashKey()));
+         ci->HashKey().get(), conn, ent->OriginFrameHashKey().mHash));
     return conn;
   }
 
@@ -956,21 +968,24 @@ void nsHttpConnectionMgr::UpdateCoalescingForNewConn(
 
   uint32_t keyLen = ent->mCoalescingKeys.Length();
   for (uint32_t i = 0; i < keyLen; ++i) {
+    const CoalescingKey& coalescingKey = ent->mCoalescingKeys[i];
     LOG(
         ("UpdateCoalescingForNewConn() registering newConn %p %s under key "
          "%" PRIu32 "\n",
          newConn, newConn->ConnectionInfo()->HashKey().get(),
-         ent->mCoalescingKeys[i]));
+         coalescingKey.mHash));
 
     mCoalescingHash
         .LookupOrInsertWith(
-            ent->mCoalescingKeys[i],
+            coalescingKey.mHash,
             [] {
               LOG(("UpdateCoalescingForNewConn() need new list element\n"));
-              return MakeUnique<nsTArray<nsWeakPtr>>(1);
+              return MakeUnique<nsTArray<CoalescedConnection>>(1);
             })
-        ->AppendElement(do_GetWeakReference(
-            static_cast<nsISupportsWeakReference*>(newConn)));
+        ->AppendElement(CoalescedConnection{
+            do_GetWeakReference(
+                static_cast<nsISupportsWeakReference*>(newConn)),
+            coalescingKey.mString});
   }
 
   // this is a new connection that can be coalesced onto. hooray!
@@ -1031,6 +1046,58 @@ void nsHttpConnectionMgr::ReportSpdyConnection(nsHttpConnection* conn,
          "failed to post event (%08x)\n",
          conn, ent, static_cast<uint32_t>(rv)));
   }
+}
+
+already_AddRefed<ConnectionEntry>
+nsHttpConnectionMgr::HandOffHttp3OnlyConnection(HttpConnectionBase* aConn,
+                                                ConnectionEntry* aFromEnt) {
+  MOZ_ASSERT(OnSocketThread(), "not on socket thread");
+  if (!aConn || !aConn->ConnectionInfo() || !aFromEnt) {
+    return nullptr;
+  }
+
+  RefPtr<HttpConnectionUDP> connUDP = do_QueryObject(aConn);
+  if (!connUDP) {
+    return nullptr;
+  }
+
+  RefPtr<nsHttpConnectionInfo> allowedCI = aConn->ConnectionInfo()->Clone();
+  allowedCI->SetHttp3Policy(Http3Policy::Allowed);
+
+  bool unused = false;
+  RefPtr<ConnectionEntry> originEnt =
+      GetOrCreateConnectionEntry(allowedCI, true, false, false, &unused);
+  if (!originEnt || originEnt == aFromEnt) {
+    return nullptr;
+  }
+
+  // The origin can already have its own h3 connection, because its Happy
+  // Eyeballs race runs an h3 leg too. Handing this one over would only add a
+  // second, which UpdateCoalescingForNewConn retires again straight away --
+  // after CloseIdleConnections() below has thrown away the entry's idle
+  // connections for nothing. Leave it here to be reclaimed instead. A merely
+  // in-flight h3 attempt is not a reason to bail: this connection is already
+  // established, and that attempt may still fail.
+  if (originEnt->HasUsableH3Connection()) {
+    LOG(
+        ("nsHttpConnectionMgr::HandOffHttp3OnlyConnection conn %p not handed "
+         "off, ent %p already has a usable h3 connection\n",
+         aConn, originEnt.get()));
+    return nullptr;
+  }
+
+  LOG(
+      ("nsHttpConnectionMgr::HandOffHttp3OnlyConnection conn %p from ent %p to "
+       "ent %p, CI %s -> %s\n",
+       aConn, aFromEnt, originEnt.get(),
+       aConn->ConnectionInfo()->HashKey().get(), allowedCI->HashKey().get()));
+
+  aFromEnt->MoveConnection(aConn, originEnt);
+  connUDP->RekeyAfterHttp3OnlyHandOff(allowedCI);
+
+  originEnt->CloseIdleConnections();
+
+  return originEnt.forget();
 }
 
 void nsHttpConnectionMgr::ReportHttp3Connection(HttpConnectionBase* conn,
@@ -3730,12 +3797,27 @@ void nsHttpConnectionMgr::DoSpeculativeConnectionInternal(
           ("DoSpeculativeConnectionInternal Transport socket creation "
            "failure: %" PRIx32 "\n",
            static_cast<uint32_t>(rv)));
+      // Nothing will complete this transaction now, so release whoever is
+      // waiting on it. See the fallback comment below.
+      if (aTrans->IsForFallback()) {
+        aTrans->InvokeCallback();
+      }
     }
   } else {
     LOG(
         ("DoSpeculativeConnectionInternal Transport ci=%s "
          "not created due to existing connection count:%d",
          aEnt->mConnInfo->HashKey().get(), parallelSpeculativeConnectLimit));
+    // An ordinary speculative connection is only a warm-up and can be skipped,
+    // but a fallback transaction has a real transaction waiting on its
+    // callback to move off a connection that may never come up (e.g. HTTP/3 to
+    // an endpoint that blackholes QUIC). Dropping the callback would leave that
+    // transaction stalled until the HTTP/3 connection times out, so let it fall
+    // back anyway; it will get a connection from the fallback entry through the
+    // regular dispatch path once one is free.
+    if (aTrans->IsForFallback()) {
+      aTrans->InvokeCallback();
+    }
   }
 }
 
@@ -3807,15 +3889,17 @@ void nsHttpConnectionMgr::RegisterOriginCoalescingKey(HttpConnectionBase* conn,
     return;
   }
 
-  HashNumber newKey =
+  CoalescingKey newKey =
       nsHttpConnectionInfo::BuildOriginFrameHashKey(ci, host, port);
-  mCoalescingHash.GetOrInsertNew(newKey, 1)->AppendElement(
-      do_GetWeakReference(static_cast<nsISupportsWeakReference*>(conn)));
+  mCoalescingHash.GetOrInsertNew(newKey.mHash, 1)
+      ->AppendElement(CoalescedConnection{
+          do_GetWeakReference(static_cast<nsISupportsWeakReference*>(conn)),
+          newKey.mString});
 
   LOG(
       ("nsHttpConnectionMgr::RegisterOriginCoalescingKey "
        "Established New Coalescing Key %" PRIu32 " to %p %s\n",
-       newKey, conn, ci->HashKey().get()));
+       newKey.mHash, conn, ci->HashKey().get()));
 }
 
 bool nsHttpConnectionMgr::GetConnectionData(nsTArray<HttpRetParams>* aArg) {

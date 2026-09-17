@@ -218,13 +218,7 @@ struct VideoColorSpace {
   gfx::CICP::MatrixCoefficients mMatrix = gfx::CICP::MC_BT709;
   gfx::ColorRange mRange = gfx::ColorRange::LIMITED;
 
-  bool operator==(const VideoColorSpace& aOther) const {
-    return mPrimaries == aOther.mPrimaries && mTransfer == aOther.mTransfer &&
-           mMatrix == aOther.mMatrix && mRange == aOther.mRange;
-  }
-  bool operator!=(const VideoColorSpace& aOther) const {
-    return !(*this == aOther);
-  }
+  bool operator==(const VideoColorSpace& aOther) const = default;
 };
 
 // Extracts the VPX codecs parameter string.

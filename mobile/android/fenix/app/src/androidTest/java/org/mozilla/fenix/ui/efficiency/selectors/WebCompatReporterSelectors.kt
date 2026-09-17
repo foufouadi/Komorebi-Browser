@@ -8,17 +8,27 @@ import mozilla.components.compose.base.R as composeBaseR
 import org.mozilla.fenix.R
 import org.mozilla.fenix.helpers.DataGenerationHelper.getStringResource
 import org.mozilla.fenix.helpers.TestHelper.appName
+import org.mozilla.fenix.ui.efficiency.helpers.PageReadinessProfiles
 import org.mozilla.fenix.ui.efficiency.helpers.Selector
+import org.mozilla.fenix.ui.efficiency.helpers.SelectorContainer
+import org.mozilla.fenix.ui.efficiency.helpers.SelectorGroup
 import org.mozilla.fenix.ui.efficiency.helpers.SelectorStrategy
+import org.mozilla.fenix.webcompat.BrokenSiteReporterTestTags
 
-object WebCompatReporterSelectors {
+object WebCompatReporterSelectors : SelectorContainer {
+    enum class Group : SelectorGroup {
+        REPORTER_VIEW_ITEMS,
+        REPORTER_FORM,
+        EDIT_URLDIALOG,
+    }
 
     val URL_LABEL =
         Selector(
             strategy = SelectorStrategy.COMPOSE_BY_TEXT,
             value = getStringResource(R.string.webcompat_reporter_label_url),
             description = "Report broken site URL label",
-            groups = listOf("requiredForPage", "reporterViewItems"),
+            groups = setOf(Group.REPORTER_VIEW_ITEMS, Group.REPORTER_FORM),
+            readiness = PageReadinessProfiles.IDENTITY_ANCHOR,
         )
 
     val WHATS_BROKEN_LABEL =
@@ -26,7 +36,8 @@ object WebCompatReporterSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TEXT,
             value = getStringResource(R.string.webcompat_reporter_label_whats_broken_3),
             description = "Report broken site \"What's not working?\" label",
-            groups = listOf("reporterViewItems"),
+            groups = setOf(Group.REPORTER_VIEW_ITEMS, Group.REPORTER_FORM),
+            readiness = PageReadinessProfiles.READY_CONTENT,
         )
 
     // The description is a single content-description node built from the body copy, the inlined
@@ -42,7 +53,8 @@ object WebCompatReporterSelectors {
                     getStringResource(R.string.webcompat_reporter_learn_more),
                 ) + " " + getStringResource(composeBaseR.string.mozac_compose_base_link_text_links_available),
             description = "Report broken site description",
-            groups = listOf("reporterViewItems"),
+            groups = setOf(Group.REPORTER_VIEW_ITEMS, Group.REPORTER_FORM),
+            readiness = PageReadinessProfiles.READY_CONTENT,
         )
 
     @Suppress("FunctionName")
@@ -51,14 +63,87 @@ object WebCompatReporterSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TEXT,
             value = url,
             description = "Report broken site reported URL: $url",
-            groups = listOf(),
+            groups = setOf(Group.REPORTER_VIEW_ITEMS),
         )
 
-    val all =
-        listOf(
-            URL_LABEL,
-            WHATS_BROKEN_LABEL,
-            DESCRIPTION,
-            REPORTED_SITE_URL(),
+    val EDIT_SITE_URL_DIALOG_TEXT_FIELD =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TAG,
+            value = BrokenSiteReporterTestTags.BROKEN_SITE_REPORTER_EDIT_URL_DIALOG_TEXT_FIELD,
+            description = "Report broken site edit url dialog URL text field",
+            groups = setOf(Group.EDIT_URLDIALOG),
+        )
+
+    val EDIT_SITE_URL_DIALOG_SAVE_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TAG,
+            value = BrokenSiteReporterTestTags.BROKEN_SITE_REPORTER_EDIT_URL_DIALOG_SAVE_BUTTON,
+            description = "Report broken site edit url dialog save button",
+            groups = setOf(Group.EDIT_URLDIALOG),
+        )
+
+    @Suppress("FunctionName")
+    fun REPORTED_BROKEN_SITE_REASON(reason: String = "") =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TEXT,
+            value = reason,
+            description = "Report broken site reported reason: $reason",
+            groups = setOf(Group.REPORTER_VIEW_ITEMS),
+        )
+
+    val DESCRIBE_PROBLEM_LABEL =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TEXT,
+            value = getStringResource(R.string.webcompat_reporter_label_optional_description),
+            description = "Report broken site \"What's not working?\" label",
+            groups = setOf(Group.REPORTER_FORM),
+        )
+
+    val DESCRIPTION_INPUT_BOX =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TAG,
+            value = BrokenSiteReporterTestTags.BROKEN_SITE_REPORTER_DESCRIPTION_INPUT,
+            description = "Report broken site description input box",
+            groups = setOf(Group.REPORTER_FORM),
+        )
+
+    val ITEMS_BLOCKED_BY_TRACKING_PROTECTION_DESCRIPTION =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TEXT,
+            value = getStringResource(R.string.webcompat_reporter_etp_checkbox_text_2),
+            description = "Report broken site items blocked by tracking protection",
+            groups = setOf(Group.REPORTER_FORM),
+        )
+
+    val ITEMS_BLOCKED_BY_TRACKING_PROTECTION_CHECKBOX =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TAG,
+            value = BrokenSiteReporterTestTags.BROKEN_SITE_REPORTER_INCLUDE_ETP_BLOCKED_URLS_CHECKBOX,
+            description = "Report broken site items blocked by tracking protection checkbox",
+            groups = setOf(Group.REPORTER_FORM),
+        )
+
+    val PREVIEW_REPORT_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TEXT,
+            value = getStringResource(R.string.webcompat_reporter_preview_report),
+            description = "Report broken site preview report button",
+            groups = setOf(Group.REPORTER_FORM),
+        )
+
+    val SEND_REPORT_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TAG,
+            value = BrokenSiteReporterTestTags.BROKEN_SITE_REPORTER_SEND_BUTTON,
+            description = "Report broken site send report button",
+            groups = setOf(Group.REPORTER_FORM),
+        )
+
+    val CLOSE_REPORT_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION,
+            value = "Close",
+            description = "Report broken site close report button",
+            groups = setOf(Group.REPORTER_FORM),
         )
 }

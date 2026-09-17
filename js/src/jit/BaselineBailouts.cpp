@@ -214,6 +214,7 @@ class MOZ_STACK_CLASS BaselineStackBuilder {
   bool isGeneratorResumePrologueBailout();
   jsbytecode* getResumePC();
   void* getStubReturnAddress();
+  uint8_t* getBailoutStubAddr();
 
   uint32_t exprStackSlots() const { return exprStackSlots_; }
 
@@ -256,6 +257,17 @@ class MOZ_STACK_CLASS BaselineStackBuilder {
     return resumeMode() == ResumeMode::InlinedAccessor;
   }
 
+  // Helpers for the stub info entries immediately following the header.
+  size_t stubInfoBytes() {
+    return header_->numStubInfos * sizeof(BailoutStubInfo);
+  }
+
+  uint8_t* stubInfoBegin() {
+    return reinterpret_cast<uint8_t*>(info()) + sizeof(BaselineBailoutInfo);
+  }
+
+  uint8_t* stubInfoEnd() { return stubInfoBegin() + stubInfoBytes(); }
+
   [[nodiscard]] bool enlarge() {
     MOZ_ASSERT(header_ != nullptr);
     size_t newSize;
@@ -274,11 +286,11 @@ class MOZ_STACK_CLASS BaselineStackBuilder {
     //
     //   Before:
     //
-    //     [ Header | .. | Payload ]
+    //     [ Header | StubInfo | .. | Payload ]
     //
     //   After:
     //
-    //     [ Header | ............... | Payload ]
+    //     [ Header | StubInfo | ............... | Payload ]
     //
     // Size of Payload is |bufferUsed_|.
     //
@@ -287,14 +299,34 @@ class MOZ_STACK_CLASS BaselineStackBuilder {
     //
     // We also need to update |copyStackBottom| and |copyStackTop| because these
     // fields point to the Payload's start and end, respectively.
+    //
+    // We also need to copy the bailout stub information to the new buffer.
     using BailoutInfoPtr = UniquePtr<BaselineBailoutInfo>;
     BailoutInfoPtr newHeader(new (newBufferRaw) BaselineBailoutInfo(*header_));
     newHeader->copyStackTop = newBufferRaw + newSize;
     newHeader->copyStackBottom = newHeader->copyStackTop - bufferUsed_;
     memcpy(newHeader->copyStackBottom, header_->copyStackBottom, bufferUsed_);
+    memcpy(newBufferRaw + sizeof(BaselineBailoutInfo), stubInfoBegin(),
+           stubInfoBytes());
     bufferTotal_ = newSize;
-    bufferAvail_ = newSize - (sizeof(BaselineBailoutInfo) + bufferUsed_);
+    size_t totalUsed =
+        sizeof(BaselineBailoutInfo) + stubInfoBytes() + bufferUsed_;
+    bufferAvail_ = newSize - totalUsed;
     header_ = std::move(newHeader);
+    return true;
+  }
+
+  [[nodiscard]] bool writeBailoutStubInfo(const BailoutStubInfo& info) {
+    if (sizeof(info) > bufferAvail_ && !enlarge()) {
+      return false;
+    }
+
+    memcpy(stubInfoEnd(), &info, sizeof(info));
+    JitSpew(JitSpew_BaselineBailouts,
+            "      BAILOUT_STUB_INFO  frameBoundary=%p bailoutStub=%p at=%p",
+            info.frameBoundary, info.bailoutStub, stubInfoEnd());
+    header_->numStubInfos++;
+    bufferAvail_ -= sizeof(info);
     return true;
   }
 
@@ -990,6 +1022,12 @@ bool BaselineStackBuilder::finishOuterFrame() {
     return false;
   }
 
+  uint8_t* frameBoundary = virtualPointerAtStackOffset(0);
+  uint8_t* bailoutStub = baselineInterp.bailoutStubAddrForIC(op_);
+  if (!writeBailoutStubInfo({frameBoundary, bailoutStub})) {
+    return false;
+  }
+
   uint8_t* retAddr = baselineInterp.retAddrForIC(op_);
   return writePtr(retAddr, "ReturnAddr");
 }
@@ -1166,6 +1204,12 @@ bool BaselineStackBuilder::buildStubFrame(uint32_t frameSize,
     return false;
   }
 
+  uint8_t* frameBoundary = virtualPointerAtStackOffset(0);
+  uint8_t* bailoutStub = getBailoutStubAddr();
+  if (!writeBailoutStubInfo({frameBoundary, bailoutStub})) {
+    return false;
+  }
+
   // Push return address into ICCall_Scripted stub, immediately after the call.
   void* baselineCallReturnAddr = getStubReturnAddress();
   MOZ_ASSERT(baselineCallReturnAddr);
@@ -1213,6 +1257,11 @@ bool BaselineStackBuilder::finishLastFrame() {
   setResumeAddr(resumeAddr);
   JitSpew(JitSpew_BaselineBailouts, "      Set resumeAddr=%p", resumeAddr);
 
+  uint8_t* stackPointer = virtualPointerAtStackOffset(0);
+  if (!writeBailoutStubInfo({stackPointer, nullptr})) {
+    return false;
+  }
+
   if (cx_->runtime()->geckoProfiler().enabled()) {
     // Register bailout with profiler.
     const char* filename = script_->filename();
@@ -1256,8 +1305,13 @@ bool BaselineStackBuilder::envChainSlotCanBeOptimized() {
 bool jit::AssertBailoutStackDepth(JSContext* cx, JSScript* script,
                                   jsbytecode* pc, ResumeMode mode,
                                   uint32_t exprStackSlots) {
+  bool resumeAfterNonFallthrough = false;
   if (IsResumeAfter(mode)) {
-    pc = GetNextPc(pc);
+    if (BytecodeFallsThrough(JSOp(*pc))) {
+      pc = GetNextPc(pc);
+    } else {
+      resumeAfterNonFallthrough = true;
+    }
   }
 
   uint32_t expectedDepth;
@@ -1270,6 +1324,14 @@ bool jit::AssertBailoutStackDepth(JSContext* cx, JSScript* script,
   }
 
   JSOp op = JSOp(*pc);
+
+  if (resumeAfterNonFallthrough) {
+    // Because the op doesn't fall through, ReconstructStackDepth returned the
+    // depth before it. Account for the op's own stack effect.
+    uint32_t uses = StackUses(op, pc);
+    MOZ_ASSERT(expectedDepth >= uses);
+    expectedDepth = expectedDepth - uses + StackDefs(op);
+  }
 
   if (mode == ResumeMode::InlinedFunCall) {
     // For inlined fun.call(this, ...); the reconstructed stack depth will
@@ -1349,6 +1411,27 @@ void* BaselineStackBuilder::getStubReturnAddress() {
     return code.bailoutReturnAddr(BailoutReturnKind::New);
   }
   return code.bailoutReturnAddr(BailoutReturnKind::Call);
+}
+
+uint8_t* BaselineStackBuilder::getBailoutStubAddr() {
+  const BaselineICFallbackCode& code =
+      cx_->runtime()->jitRuntime()->baselineICFallbackCode();
+
+  if (IsGetPropOp(op_)) {
+    return code.bailoutStubAddr(BailoutReturnKind::GetProp);
+  }
+  if (IsSetPropOp(op_)) {
+    return code.bailoutStubAddr(BailoutReturnKind::SetProp);
+  }
+  if (IsGetElemOp(op_)) {
+    return code.bailoutStubAddr(BailoutReturnKind::GetElem);
+  }
+
+  MOZ_ASSERT(IsInvokeOp(op_) && !IsSpreadOp(op_));
+  if (IsConstructOp(op_)) {
+    return code.bailoutStubAddr(BailoutReturnKind::New);
+  }
+  return code.bailoutStubAddr(BailoutReturnKind::Call);
 }
 
 static inline jsbytecode* GetNextNonLoopHeadPc(jsbytecode* pc) {

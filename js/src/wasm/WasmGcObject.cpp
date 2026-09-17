@@ -290,7 +290,9 @@ void WasmArrayObject::obj_trace(JSTracer* trc, JSObject* object) {
   for (uint32_t i = 0; i < numElements; i++) {
     AnyRef* elementPtr =
         reinterpret_cast<AnyRef*>(arrayObj.data_ + i * elemSize);
-    TraceManuallyBarrieredEdge(trc, elementPtr, "wasm-array-element");
+    if (!elementPtr->isNull()) {
+      TraceManuallyBarrieredEdge(trc, elementPtr, "wasm-array-element");
+    }
   }
 }
 

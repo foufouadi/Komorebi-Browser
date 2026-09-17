@@ -180,6 +180,6 @@ internal class ExternalIntentNavigationTest {
 @Implements(Performance::class)
 class ShadowPerformance {
     @Implementation
-    @Suppress("Unused_Parameter")
+    @Suppress("UnusedParameter", "FunctionOnlyReturningConstant")
     fun processIntentIfPerformanceTest(bundle: Bundle?, context: Context) = true
 }

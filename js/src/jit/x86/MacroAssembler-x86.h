@@ -1156,10 +1156,7 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared {
   template <typename T>
   inline void loadUnboxedValue(const T& src, MIRType type, AnyRegister dest);
 
-  // Note: this function clobbers the source register.
   inline void convertUInt32ToDouble(Register src, FloatRegister dest);
-
-  // Note: this function clobbers the source register.
   inline void convertUInt32ToFloat32(Register src, FloatRegister dest);
 
   void incrementInt32Value(const Address& addr) {

@@ -50,46 +50,15 @@ already_AddRefed<SVGRect> SVGGraphicsElement::GetBBox(
   }
   ISVGDisplayableFrame* svgframe = do_QueryFrame(frame);
 
-  if (!svgframe) {
-    if (!frame->IsInSVGTextSubtree()) {
-      return ZeroBBox(*this);
-    }
-
-    // For <tspan>, <textPath>, the frame is an nsInlineFrame or
-    // nsBlockFrame, |svgframe| will be a nullptr.
-    // We implement their getBBox directly here instead of in
-    // SVGUtils::GetBBox, because SVGUtils::GetBBox is more
-    // or less used for other purpose elsewhere. e.g. gradient
-    // code assumes GetBBox of <tspan> returns the bbox of the
-    // outer <text>.
-    // TODO: cleanup this sort of usecase of SVGUtils::GetBBox,
-    // then move this code SVGUtils::GetBBox.
-    SVGTextFrame* text =
-        static_cast<SVGTextFrame*>(nsLayoutUtils::GetClosestFrameOfType(
-            frame->GetParent(), LayoutFrameType::SVGText));
-
-    if (text->HasAnyStateBits(NS_FRAME_IS_NONDISPLAY)) {
-      return ZeroBBox(*this);
-    }
-
-    gfxRect rec = text->TransformFrameRectFromTextChild(
-        frame->GetRectRelativeToSelf(), frame);
-
-    // Should also add the |x|, |y| of the SVGTextFrame itself, since
-    // the result obtained by TransformFrameRectFromTextChild doesn't
-    // include them.
-    rec.x += float(text->GetPosition().x) / AppUnitsPerCSSPixel();
-    rec.y += float(text->GetPosition().y) / AppUnitsPerCSSPixel();
-
-    rec.Scale(1 / dom::UserSpaceMetrics::GetZoom(this));
-
-    return MakeAndAddRef<SVGRect>(this, ToRect(rec));
+  if (!svgframe && !frame->IsInSVGTextSubtree()) {
+    return ZeroBBox(*this);
   }
 
   if (!NS_SVGNewGetBBoxEnabled()) {
     return MakeAndAddRef<SVGRect>(
         this,
         ToRect(SVGUtils::GetBBox(frame, {SVGBBoxFlag::IncludeFillGeometry,
+                                         SVGBBoxFlag::TextContentBounds,
                                          SVGBBoxFlag::UseUserSpaceOfUseElement,
                                          SVGBBoxFlag::DisregardCSSZoom})));
   }
@@ -107,10 +76,10 @@ already_AddRefed<SVGRect> SVGGraphicsElement::GetBBox(
     flags += {SVGBBoxFlag::IncludeFillGeometry, SVGBBoxFlag::IncludeClipped};
   }
   if (flags.isEmpty()) {
-    return MakeAndAddRef<SVGRect>(this, gfx::Rect());
+    return ZeroBBox(*this);
   }
-  flags +=
-      {SVGBBoxFlag::UseUserSpaceOfUseElement, SVGBBoxFlag::DisregardCSSZoom};
+  flags += {SVGBBoxFlag::UseUserSpaceOfUseElement,
+            SVGBBoxFlag::TextContentBounds, SVGBBoxFlag::DisregardCSSZoom};
   return MakeAndAddRef<SVGRect>(this, ToRect(SVGUtils::GetBBox(frame, flags)));
 }
 

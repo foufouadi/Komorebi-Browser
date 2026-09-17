@@ -6,10 +6,17 @@ import {
   DEFAULT_PAGE_LAYOUT_VARIANT,
   PAGE_LAYOUT_VARIANTS,
   SIDE_BY_SIDE_PAGE_LAYOUTS,
+  SPACES_PAGE_LAYOUTS,
   isSideBySideActive,
   isSideBySideAssigned,
+  isSpacesActive,
+  isSpacesAssigned,
+  isAutoMinimizeWidgetsAssigned,
+  resolveAutoMinimizeDelayMs,
   resolvePageLayoutVariant,
+  resolvePopulatedSpaces,
   sideBySideBandClasses,
+  spacesBandClasses,
 } from "common/PageLayoutVariants.mjs";
 
 // The gates isSideBySideActive checks besides the variant itself.
@@ -281,5 +288,242 @@ describe("sideBySideBandClasses", () => {
         },
       })
     ).toEqual(["side-by-side-widgets-lead", "side-by-side-five"]);
+  });
+});
+
+const spaces = {
+  "nova.enabled": true,
+  "pageLayouts.variant": PAGE_LAYOUT_VARIANTS.SPACES_BUTTONS_BOTTOM,
+  ...STORIES_ON,
+  ...WIDGETS_ON,
+};
+
+describe("spacesBandClasses", () => {
+  it("decomposes each variant into the family class plus a placement", () => {
+    expect(
+      spacesBandClasses({
+        "pageLayouts.variant": PAGE_LAYOUT_VARIANTS.SPACES_BUTTONS_TOP,
+      })
+    ).toEqual(["spaces", "spaces-buttons-top"]);
+    expect(
+      spacesBandClasses({
+        "pageLayouts.variant": PAGE_LAYOUT_VARIANTS.SPACES_BUTTONS_BOTTOM,
+      })
+    ).toEqual(["spaces", "spaces-buttons-bottom"]);
+  });
+
+  it("returns nothing for the other layouts", () => {
+    expect(spacesBandClasses({})).toEqual([]);
+    expect(
+      spacesBandClasses({
+        "pageLayouts.variant": PAGE_LAYOUT_VARIANTS.SIDE_BY_SIDE_CONTENT_LEAD,
+      })
+    ).toEqual([]);
+  });
+});
+
+describe("isSpacesAssigned", () => {
+  it("is true for every spaces variant, whatever the content prefs", () => {
+    for (const variant of SPACES_PAGE_LAYOUTS) {
+      expect(isSpacesAssigned({ "pageLayouts.variant": variant })).toBe(true);
+    }
+  });
+
+  it("is false outside the spaces variants", () => {
+    expect(isSpacesAssigned({})).toBe(false);
+    expect(
+      isSpacesAssigned({
+        "pageLayouts.variant": PAGE_LAYOUT_VARIANTS.SIDE_BY_SIDE_WIDGETS_LEAD,
+      })
+    ).toBe(false);
+  });
+});
+
+describe("resolvePopulatedSpaces", () => {
+  it("lists only the spaces whose content is enabled, in tablist order", () => {
+    expect(resolvePopulatedSpaces(spaces)).toEqual(["stories", "widgets"]);
+    expect(
+      resolvePopulatedSpaces({
+        ...spaces,
+        "feeds.section.highlights": true,
+      })
+    ).toEqual(["stories", "widgets", "activity"]);
+  });
+
+  it("does not turn anything on", () => {
+    expect(resolvePopulatedSpaces({ ...spaces, ...{} })).not.toContain(
+      "activity"
+    );
+    expect(resolvePopulatedSpaces({})).toEqual([]);
+  });
+});
+
+describe("the experiment override", () => {
+  // One shape for all three spaces: the experiment turns a space on unless its
+  // opt-out pref says the user turned it off while enrolled. The user's own
+  // pref is never written, so unenrolling restores their choice.
+  const enrolled = {
+    ...spaces,
+    trainhopConfig: {
+      stories: { enabled: true },
+      widgets: { enabled: true },
+      highlights: { enabled: true },
+    },
+  };
+
+  it("overrides a space the profile enrolled with turned off", () => {
+    expect(
+      resolvePopulatedSpaces({
+        ...enrolled,
+        "feeds.section.topstories": false,
+        "feeds.section.highlights": false,
+      })
+    ).toEqual(["stories", "widgets", "activity"]);
+  });
+
+  it("respects a space turned off while enrolled, for every space", () => {
+    expect(
+      resolvePopulatedSpaces({
+        ...enrolled,
+        "feeds.section.topstories": false,
+        "spaces.storiesOptOut": true,
+        "widgets.enabled": false,
+        "spaces.widgetsOptOut": true,
+        "feeds.section.highlights": false,
+        "spaces.activityOptOut": true,
+      })
+    ).toEqual([]);
+  });
+
+  it("does not override outside the experiment", () => {
+    expect(
+      resolvePopulatedSpaces({
+        ...enrolled,
+        "pageLayouts.variant": PAGE_LAYOUT_VARIANTS.NOVA_FULL_WIDTH,
+        "feeds.section.topstories": false,
+      })
+    ).toEqual(["widgets"]);
+  });
+
+  it("does not conjure content that is not there", () => {
+    // Region and locale decide whether stories exist at all, and no override
+    // should produce an empty panel.
+    expect(
+      resolvePopulatedSpaces({
+        ...enrolled,
+        "feeds.system.topstories": false,
+      })
+    ).not.toContain("stories");
+  });
+});
+
+describe("the widgets space gate", () => {
+  it("is not a space when the user has switched widgets off", () => {
+    expect(
+      resolvePopulatedSpaces({ ...spaces, "widgets.enabled": false })
+    ).not.toContain("widgets");
+  });
+
+  it("is not a space when the container is on but no widget is enabled", () => {
+    expect(
+      resolvePopulatedSpaces({
+        ...spaces,
+        "widgets.lists.enabled": false,
+      })
+    ).not.toContain("widgets");
+  });
+
+  it("is not a space when weather is the only widget", () => {
+    // Weather moves to the sidebar at its small size, so the row is empty.
+    expect(
+      resolvePopulatedSpaces({
+        ...spaces,
+        "widgets.lists.enabled": false,
+        "widgets.system.weather.enabled": true,
+        "widgets.weather.enabled": true,
+        "widgets.weather.size": "small",
+      })
+    ).not.toContain("widgets");
+  });
+
+  it("is a space when a widget is actually showing", () => {
+    expect(resolvePopulatedSpaces(spaces)).toContain("widgets");
+  });
+});
+
+describe("isSpacesActive", () => {
+  it("is true with a spaces variant and somewhere to navigate to", () => {
+    expect(isSpacesActive(spaces)).toBe(true);
+  });
+
+  it("is false with only one populated space", () => {
+    expect(
+      isSpacesActive({
+        "pageLayouts.variant": PAGE_LAYOUT_VARIANTS.SPACES_BUTTONS_BOTTOM,
+        ...STORIES_ON,
+      })
+    ).toBe(false);
+  });
+
+  it("is false outside the spaces variants", () => {
+    expect(
+      isSpacesActive({
+        ...spaces,
+        "pageLayouts.variant": PAGE_LAYOUT_VARIANTS.NOVA_FULL_WIDTH,
+      })
+    ).toBe(false);
+  });
+
+  it("is false without Nova, whose stylesheet it depends on", () => {
+    expect(isSpacesActive({ ...spaces, "nova.enabled": false })).toBe(false);
+  });
+});
+
+// @experiment(remove) { bug 2066527 }
+describe("auto-minimize widgets variant", () => {
+  const assigned = {
+    "pageLayouts.variant": PAGE_LAYOUT_VARIANTS.AUTO_MINIMIZE_WIDGETS,
+  };
+
+  it("is assigned by pref and by trainhop", () => {
+    expect(isAutoMinimizeWidgetsAssigned(assigned)).toBe(true);
+    expect(
+      isAutoMinimizeWidgetsAssigned({
+        trainhopConfig: {
+          pageLayouts: {
+            variant: PAGE_LAYOUT_VARIANTS.AUTO_MINIMIZE_WIDGETS,
+          },
+        },
+      })
+    ).toBe(true);
+    expect(isAutoMinimizeWidgetsAssigned({})).toBe(false);
+  });
+
+  it("defaults the delay to 3s", () => {
+    expect(resolveAutoMinimizeDelayMs({})).toBe(3000);
+  });
+
+  it("prefers trainhop over the pref, and the pref over the default", () => {
+    expect(
+      resolveAutoMinimizeDelayMs({ "pageLayouts.autoMinimizeDelayMs": 750 })
+    ).toBe(750);
+    expect(
+      resolveAutoMinimizeDelayMs({
+        "pageLayouts.autoMinimizeDelayMs": 750,
+        trainhopConfig: { pageLayouts: { autoMinimizeDelayMs: 200 } },
+      })
+    ).toBe(200);
+  });
+
+  it("ignores non-numeric and negative values", () => {
+    expect(
+      resolveAutoMinimizeDelayMs({
+        "pageLayouts.autoMinimizeDelayMs": 750,
+        trainhopConfig: { pageLayouts: { autoMinimizeDelayMs: "200" } },
+      })
+    ).toBe(750);
+    expect(
+      resolveAutoMinimizeDelayMs({ "pageLayouts.autoMinimizeDelayMs": -1 })
+    ).toBe(3000);
   });
 });

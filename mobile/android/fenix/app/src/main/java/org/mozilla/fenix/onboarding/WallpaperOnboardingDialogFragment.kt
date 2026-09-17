@@ -109,7 +109,7 @@ class WallpaperOnboardingDialogFragment : BottomSheetDialogFragment() {
                         findNavController().navigate(directions)
                         Wallpapers.onboardingExploreMoreClick.record(NoExtras())
                     },
-                    loadWallpaperResource = { wallpaperUseCases.loadThumbnail(it) },
+                    loadWallpaperResource = { wallpaper, size -> wallpaperUseCases.loadThumbnail(wallpaper, size) },
                     onSelectWallpaper = {
                         coroutineScope.launch {
                             val result = wallpaperUseCases.selectWallpaper(it)

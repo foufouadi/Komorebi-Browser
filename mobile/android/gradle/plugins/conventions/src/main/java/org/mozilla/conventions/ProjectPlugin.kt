@@ -14,8 +14,22 @@ import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.component.ModuleComponentSelector
 import org.gradle.api.logging.Logger
 import org.gradle.api.logging.StandardOutputListener
+import org.gradle.api.artifacts.ArtifactView
+import org.gradle.api.artifacts.component.ComponentIdentifier
+import org.gradle.api.artifacts.transform.InputArtifact
+import org.gradle.api.artifacts.transform.TransformAction
+import org.gradle.api.artifacts.transform.TransformOutputs
+import org.gradle.api.artifacts.transform.TransformParameters
+import org.gradle.api.artifacts.transform.TransformSpec
+import org.gradle.api.artifacts.type.ArtifactTypeDefinition
+import org.gradle.api.file.FileSystemLocation
 import org.gradle.api.plugins.AppliedPlugin
+import org.gradle.api.provider.Property
+import org.gradle.api.provider.Provider
+import org.gradle.api.specs.Spec
+import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.JavaExec
+import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.testing.Test
 import org.gradle.api.tasks.testing.TestDescriptor
 import org.gradle.api.tasks.testing.TestListener
@@ -25,6 +39,8 @@ import org.gradle.api.tasks.testing.TestResult
 import org.gradle.process.CommandLineArgumentProvider
 import org.mozilla.conventions.ktfmt.configureKtfmt
 import java.io.File
+import java.util.concurrent.Callable
+import java.util.zip.ZipFile
 
 class ProjectPlugin : Plugin<Project> {
     @Suppress("UNCHECKED_CAST")
@@ -63,6 +79,7 @@ class ProjectPlugin : Plugin<Project> {
         configureTestOutputFormatting(project)
         configurePackagingResourcesExcludes(project)
         registerPrintVariantsTask(project)
+        configureNativeLibsForTests(project, substs)
     }
 
     // Initialize the project buildDir to be in ${topobjdir} to follow
@@ -140,6 +157,94 @@ class ProjectPlugin : Plugin<Project> {
         if (extraProperties.has("localProperties.autoPublish.glean.dir")) {
             substituteWithMavenLocal(project, "local-glean", GLEAN_GROUPS)
         }
+    }
+
+    // Extract native libs from libsForTests JARs so transitive .so dependencies
+    // (e.g. libmozsqlite3.so needed by libmegazord.so) can be found by the OS
+    // dynamic linker during JVM unit tests.
+    private fun configureNativeLibsForTests(project: Project, substs: Map<String, Any>) {
+        if (substs["DOWNLOAD_ALL_GRADLE_DEPENDENCIES"].isTruthy()) {
+            return
+        }
+
+        val osName = System.getProperty("os.name", "").lowercase()
+        val osArch = System.getProperty("os.arch", "").lowercase()
+        val osPrefix = when {
+            osName.contains("linux") -> "linux"
+            osName.contains("mac") || osName.contains("darwin") -> "darwin"
+            osName.contains("win") -> "win32"
+            else -> return
+        }
+        val archSuffix = when {
+            osArch.contains("aarch64") || osArch.contains("arm64") -> "aarch64"
+            osArch.contains("x86_64") || osArch.contains("amd64") -> "x86-64"
+            else -> return
+        }
+        val jnaPlatform = "$osPrefix-$archSuffix"
+        val nativeLibsType = "mozilla-native-libs-for-tests"
+
+        // Unpack the libsForTests JAR's native libs through an artifact transform.
+        // The transform is cached and only runs for configurations that actually
+        // resolve the JAR, so test tasks without the dependency see an empty view.
+        project.dependencies.registerTransform(
+            ExtractNativeLibsForTests::class.java,
+            Action<TransformSpec<ExtractNativeLibsForTests.Parameters>> {
+                from.attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
+                to.attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, nativeLibsType)
+                parameters.jnaPlatform.set(jnaPlatform)
+            }
+        )
+
+        val nativeLibs = project.files(Callable {
+            project.configurations
+                .filter { it.isCanBeResolved && it.name.contains("UnitTestRuntimeClasspath") }
+                .map { config ->
+                    config.incoming.artifactView(Action<ArtifactView.ViewConfiguration> {
+                        attributes.attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, nativeLibsType)
+                        componentFilter(Spec<ComponentIdentifier> { id ->
+                            id is ModuleComponentIdentifier && id.module.contains("libsForTests")
+                        })
+                        lenient(true)
+                    }).files
+                }
+        })
+
+        // Stage the extracted libs into a fixed directory so the test tasks have
+        // a stable location to point their library paths at.
+        val stageNativeLibs = project.tasks.register(
+            "stageNativeLibsForTests",
+            Sync::class.java,
+            Action<Sync> {
+                from(nativeLibs)
+                into(project.layout.buildDirectory.dir("nativeLibsForTests"))
+            }
+        )
+        val nativeLibsDir = project.layout.buildDirectory.dir("nativeLibsForTests").get().asFile
+        val hostPath = project.providers.environmentVariable("PATH")
+
+        project.tasks.withType(Test::class.java).configureEach(Action<Test> {
+            val testTask = this
+            testTask.dependsOn(stageNativeLibs)
+            testTask.inputs.files(stageNativeLibs).withPropertyName("nativeLibsForTests")
+            testTask.jvmArgumentProviders.add(CommandLineArgumentProvider {
+                if (nativeLibsDir.list().isNullOrEmpty()) {
+                    emptyList()
+                } else {
+                    listOf(
+                        "-Djna.library.path=${nativeLibsDir.absolutePath}",
+                        "-Djava.library.path=${nativeLibsDir.absolutePath}",
+                    )
+                }
+            })
+            // Windows has no rpath; nss3 loads softokn3/freebl3 through the OS
+            // DLL search, so put the staged libs directory on the test JVM PATH.
+            if (osPrefix == "win32") {
+                testTask.environment(
+                    "PATH",
+                    "${nativeLibsDir.absolutePath}${File.pathSeparator}${hostPath.getOrElse("")}",
+                )
+            }
+        })
     }
 
     // Substitutes dependencies to use locally published versions from mavenLocal.
@@ -633,5 +738,35 @@ private class MozillaTestOutputListener(
 
     override fun onOutput(testDescriptor: TestDescriptor, outputEvent: TestOutputEvent) {
         taskLogger.lifecycle("    ${outputEvent.message.trim()}")
+    }
+}
+
+// Unpacks the host platform native libs (the `<jna platform>/` entries) out of a
+// libsForTests JAR into a flat directory, so JVM unit tests can load them.
+abstract class ExtractNativeLibsForTests : TransformAction<ExtractNativeLibsForTests.Parameters> {
+    interface Parameters : TransformParameters {
+        @get:Input
+        val jnaPlatform: Property<String>
+    }
+
+    @get:InputArtifact
+    abstract val inputArtifact: Provider<FileSystemLocation>
+
+    override fun transform(outputs: TransformOutputs) {
+        val jar = inputArtifact.get().asFile
+        val platform = parameters.jnaPlatform.get()
+        val outputDir = outputs.dir("native-libs")
+        ZipFile(jar).use { zip ->
+            zip.entries().asSequence()
+                .filter { it.name.startsWith("$platform/") && !it.isDirectory }
+                .forEach { entry ->
+                    val outFile = File(outputDir, entry.name.substringAfterLast("/"))
+                    zip.getInputStream(entry).use { input ->
+                        outFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                }
+        }
     }
 }

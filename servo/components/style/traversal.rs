@@ -14,31 +14,18 @@ use crate::sharing::StyleSharingTarget;
 use crate::style_resolver::{PseudoElementResolution, StyleResolverForElement};
 use crate::stylist::RuleInclusion;
 use crate::traversal_flags::TraversalFlags;
+use hashbrown::HashMap;
 use selectors::matching::SelectorCaches;
 #[cfg(feature = "gecko")]
 use selectors::parser::PseudoElement as PseudoElementTrait;
 use smallvec::SmallVec;
-use std::collections::HashMap;
 
 /// A cache from element reference to known-valid computed style.
 pub type UndisplayedStyleCache =
     HashMap<selectors::OpaqueElement, servo_arc::Arc<crate::properties::ComputedValues>>;
 
-/// A per-traversal-level chunk of data. This is sent down by the traversal, and
-/// currently only holds the dom depth for the bloom filter.
-///
-/// NB: Keep this as small as possible, please!
-#[derive(Clone, Copy, Debug)]
-pub struct PerLevelTraversalData {
-    /// The current dom depth.
-    ///
-    /// This is kept with cooperation from the traversal code and the bloom
-    /// filter.
-    pub current_dom_depth: usize,
-}
-
 /// We use this structure, rather than just returning a boolean from pre_traverse,
-/// to enfore that callers process root invalidations before starting the traversal.
+/// to enforce that callers process root invalidations before starting the traversal.
 pub struct PreTraverseToken<E: TElement>(Option<E>);
 impl<E: TElement> PreTraverseToken<E> {
     /// Whether we should traverse children.
@@ -61,7 +48,6 @@ pub trait DomTraversal<E: TElement>: Sync {
     /// the traversal.
     fn process_preorder<F>(
         &self,
-        data: &PerLevelTraversalData,
         context: &mut StyleContext<E>,
         node: E::ConcreteNode,
         note_child: F,
@@ -143,27 +129,27 @@ pub trait DomTraversal<E: TElement>: Sync {
         let traversal_flags = shared_context.traversal_flags;
 
         let mut data = root.mutate_data();
-        let mut data = data.as_mut().map(|d| &mut **d);
+        let mut data = data.as_deref_mut();
 
-        if let Some(ref mut data) = data {
-            if !traversal_flags.for_animation_only() {
-                // Invalidate our style, and that of our siblings and
-                // descendants as needed.
-                let invalidation_result = data.invalidate_style_if_needed(
-                    root,
-                    shared_context,
-                    None,
-                    &mut SelectorCaches::default(),
-                );
+        if let Some(ref mut data) = data
+            && !traversal_flags.for_animation_only()
+        {
+            // Invalidate our style, and that of our siblings and
+            // descendants as needed.
+            let invalidation_result = data.invalidate_style_if_needed(
+                root,
+                shared_context,
+                None,
+                &mut SelectorCaches::default(),
+            );
 
-                if invalidation_result.has_invalidated_siblings() {
-                    let actual_root = root.as_node().parent_element_or_host().expect(
-                        "How in the world can you invalidate \
+            if invalidation_result.has_invalidated_siblings() {
+                let actual_root = root.as_node().parent_element_or_host().expect(
+                    "How in the world can you invalidate \
                          siblings without a parent?",
-                    );
-                    propagate_dirty_bit_up_to(actual_root, root);
-                    return PreTraverseToken(Some(actual_root));
-                }
+                );
+                propagate_dirty_bit_up_to(actual_root, root);
+                return PreTraverseToken(Some(actual_root));
             }
         }
 
@@ -251,8 +237,8 @@ where
 {
     debug_assert!(
         rule_inclusion == RuleInclusion::DefaultOnly
-            || pseudo.map_or(false, |p| p.is_before_or_after())
-            || element.borrow_data().map_or(true, |d| !d.has_styles()),
+            || pseudo.is_some_and(|p| p.is_before_or_after())
+            || element.borrow_data().is_none_or(|d| !d.has_styles()),
         "Why are we here?"
     );
     debug_assert!(
@@ -268,19 +254,18 @@ where
     let mut style = None;
     let mut ancestor = element.traversal_parent();
     while let Some(current) = ancestor {
-        if rule_inclusion == RuleInclusion::All {
-            if let Some(data) = current.borrow_data() {
-                if let Some(ancestor_style) = data.styles.get_primary() {
-                    style = Some(ancestor_style.clone());
-                    break;
-                }
-            }
+        if rule_inclusion == RuleInclusion::All
+            && let Some(data) = current.borrow_data()
+            && let Some(ancestor_style) = data.styles.get_primary()
+        {
+            style = Some(ancestor_style.clone());
+            break;
         }
-        if let Some(ref mut cache) = undisplayed_style_cache {
-            if let Some(s) = cache.get(&current.opaque()) {
-                style = Some(s.clone());
-                break;
-            }
+        if let Some(ref mut cache) = undisplayed_style_cache
+            && let Some(s) = cache.get(&current.opaque())
+        {
+            style = Some(s.clone());
+            break;
         }
         ancestors_requiring_style_resolution.push(current);
         ancestor = current.traversal_parent();
@@ -305,6 +290,7 @@ where
 
     for ancestor in ancestors_requiring_style_resolution.iter().rev() {
         context.thread_local.bloom_filter.assert_complete(*ancestor);
+        context.thread_local.current_dom_depth = context.thread_local.bloom_filter.matching_depth();
 
         // Actually `PseudoElementResolution` doesn't really matter here.
         // (but it does matter below!).
@@ -330,6 +316,7 @@ where
     }
 
     context.thread_local.bloom_filter.assert_complete(element);
+    context.thread_local.current_dom_depth = context.thread_local.bloom_filter.matching_depth();
     let styles: ElementStyles = StyleResolverForElement::new(
         element,
         context,
@@ -351,7 +338,6 @@ where
 #[allow(unsafe_code)]
 pub fn recalc_style_at<E, D, F>(
     _traversal: &D,
-    traversal_data: &PerLevelTraversalData,
     context: &mut StyleContext<E>,
     element: E,
     data: &mut ElementData,
@@ -373,7 +359,7 @@ pub fn recalc_style_at<E, D, F>(
         "Should've handled snapshots here already"
     );
 
-    let restyle_kind = data.restyle_kind(&context.shared);
+    let restyle_kind = data.restyle_kind(context.shared);
     debug!(
         "recalc_style_at: {:?} (restyle_kind={:?}, dirty_descendants={:?}, data={:?})",
         element,
@@ -386,7 +372,7 @@ pub fn recalc_style_at<E, D, F>(
 
     // Compute style for this element if necessary.
     if let Some(restyle_kind) = restyle_kind {
-        child_restyle_hint = compute_style(traversal_data, context, element, data, restyle_kind);
+        child_restyle_hint = compute_style(context, element, data, restyle_kind);
 
         if !element.matches_user_and_content_rules() {
             // We must always cascade native anonymous subtrees, since they
@@ -493,7 +479,6 @@ where
 }
 
 fn compute_style<E>(
-    traversal_data: &PerLevelTraversalData,
     context: &mut StyleContext<E>,
     element: E,
     data: &mut ElementData,
@@ -522,12 +507,12 @@ where
             context
                 .thread_local
                 .bloom_filter
-                .insert_parents_recovering(element, traversal_data.current_dom_depth);
+                .insert_parents_recovering(element, context.thread_local.current_dom_depth);
 
             context.thread_local.bloom_filter.assert_complete(element);
             debug_assert_eq!(
                 context.thread_local.bloom_filter.matching_depth(),
-                traversal_data.current_dom_depth
+                context.thread_local.current_dom_depth
             );
 
             // This is only relevant for animations as of right now.
@@ -556,12 +541,13 @@ where
                         resolver.resolve_style_with_default_parents()
                     };
 
+                    let dom_depth = context.thread_local.current_dom_depth;
                     context.thread_local.sharing_cache.insert_if_possible(
                         &element,
                         &new_styles.primary,
                         Some(&mut target),
-                        traversal_data.current_dom_depth,
-                        &context.shared,
+                        dom_depth,
+                        context.shared,
                     );
 
                     new_styles
@@ -617,8 +603,8 @@ where
                     &element,
                     &new_styles.primary,
                     None,
-                    traversal_data.current_dom_depth,
-                    &context.shared,
+                    context.thread_local.current_dom_depth,
+                    context.shared,
                 );
             }
 
@@ -696,7 +682,7 @@ fn note_children<E, D, F>(
         };
 
         let mut child_data = child.mutate_data();
-        let mut child_data = child_data.as_mut().map(|d| &mut **d);
+        let mut child_data = child_data.as_deref_mut();
         trace!(
             " > {:?} -> {:?} + {:?}, pseudo: {:?}",
             child,
@@ -714,7 +700,7 @@ fn note_children<E, D, F>(
             // NB: This will be a no-op if there's no snapshot.
             child_data.invalidate_style_if_needed(
                 child,
-                &context.shared,
+                context.shared,
                 Some(&context.thread_local.stack_limit_checker),
                 &mut context.thread_local.selector_caches,
             );
@@ -762,7 +748,9 @@ where
                 // By consequence, any element without data has no descendants with
                 // data.
                 if kid.has_data() {
-                    kid.clear_data();
+                    unsafe {
+                        kid.clear_data();
+                    }
                     parents.push(kid);
                 }
             }
@@ -770,5 +758,7 @@ where
     }
 
     // Make sure not to clear NODE_NEEDS_FRAME on the root.
-    root.clear_descendant_bits();
+    unsafe {
+        root.clear_descendant_bits();
+    }
 }

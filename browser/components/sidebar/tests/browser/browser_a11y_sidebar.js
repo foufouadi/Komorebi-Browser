@@ -6,7 +6,7 @@
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
-  GenAI: "resource:///modules/GenAI.sys.mjs",
+  GenAI: "moz-src:///browser/components/genai/GenAI.sys.mjs",
 });
 
 async function focusAndActivateElement(elem, activateMethod) {
@@ -86,7 +86,11 @@ add_task(async function test_keyboard_navigation() {
   );
   ok(isActiveElement(toolButtons[1]), "Second tool button is focused.");
 
-  // 2nd tool is synced tabs which is a less-moving target than the chat panel
+  info("Press Arrow Down key.");
+  EventUtils.synthesizeKey("KEY_ArrowDown", {});
+  ok(isActiveElement(toolButtons[2]), "Third tool button is focused.");
+
+  // 3rd tool is history, which is a less-moving target than the chat panel
   info("Press Enter key.");
   promisePanelFocused = BrowserTestUtils.waitForEvent(window, "SidebarFocused");
   EventUtils.synthesizeKey("KEY_Enter", {});
@@ -102,12 +106,12 @@ add_task(async function test_keyboard_navigation() {
   info("selectedView is:" + sidebar.selectedView);
   is(
     sidebar.selectedView,
-    toolButtons[1].getAttribute("view"),
-    "Sidebar is showing the 2nd tool."
+    toolButtons[2].getAttribute("view"),
+    "Sidebar is showing the 3rd tool."
   );
   // Moz-button is passing an "aria-pressed" attribute to the actual buttonEl:
   is(
-    toolButtons[1].buttonEl.getAttribute("aria-pressed"),
+    toolButtons[2].buttonEl.getAttribute("aria-pressed"),
     "true",
     "aria-pressed is true for the active tool button."
   );
@@ -135,7 +139,7 @@ add_task(async function test_keyboard_navigation() {
 
   ok(!sidebar.open, "Sidebar panel is closed.");
   is(
-    toolButtons[1].buttonEl.getAttribute("aria-pressed"),
+    toolButtons[2].buttonEl.getAttribute("aria-pressed"),
     "false",
     "Tool is no longer active, aria-pressed becomes false."
   );

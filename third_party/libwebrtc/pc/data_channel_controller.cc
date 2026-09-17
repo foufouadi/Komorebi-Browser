@@ -24,6 +24,7 @@
 #include "absl/strings/string_view.h"
 #include "api/data_channel_event_observer_interface.h"
 #include "api/data_channel_interface.h"
+#include "api/peer_connection_tracer_interface.h"
 #include "api/priority.h"
 #include "api/rtc_error.h"
 #include "api/scoped_refptr.h"
@@ -346,6 +347,9 @@ void DataChannelController::OnDataChannelOpenMessage(
   channel_usage_ = DataChannelUsage::kInUse;
   auto proxy = SctpDataChannel::CreateProxy(channel);
 
+  if (auto* tracer = pc_->tracer()) {
+    tracer->OnDataChannel(*proxy);
+  }
   pc_->RunWithObserver([&](auto observer) { observer->OnDataChannel(proxy); });
   pc_->NoteDataAddedEvent();
 
@@ -413,6 +417,15 @@ DataChannelController::CreateDataChannel(absl::string_view label,
       return RTCError(RTCErrorType::INVALID_RANGE, "StreamId out of range.");
     }
     sid = StreamId(config.id);
+  }
+
+  size_t total_strings_size = label.size() + config.protocol.size();
+  for (const scoped_refptr<SctpDataChannel>& dc : sctp_data_channels_n_) {
+    total_strings_size += dc->label().size() + dc->protocol().size();
+  }
+  if (total_strings_size > 1024 * 1024) {
+    return RTCError(RTCErrorType::RESOURCE_EXHAUSTED,
+                    "DataChannel labels and protocols use too much memory");
   }
 
   RTCError err = ReserveOrAllocateSid(sid, config.fallback_ssl_role);

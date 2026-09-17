@@ -61,6 +61,7 @@ DIRS += [
     "protocolhandler",
     "qrcode",
     "referrals",
+    "remotecontrol",
     "reportbrokensite",
     "resistfingerprinting",
     "screenshots",
@@ -105,6 +106,9 @@ XPCOM_MANIFESTS += [
     "components.conf",
 ]
 
+if CONFIG["MOZ_DEFAULT_BROWSER_AGENT"] and CONFIG["OS_ARCH"] == "WINNT":
+    DEFINES["MOZ_DEFAULT_BROWSER_AGENT"] = CONFIG["MOZ_DEFAULT_BROWSER_AGENT"]
+
 EXTRA_PP_COMPONENTS += [
     "BrowserComponents.manifest",
 ]
@@ -120,6 +124,7 @@ MOZ_SRC_FILES += [
     "DefaultBrowserCheck.sys.mjs",
     "DesktopActorRegistry.sys.mjs",
     "ProfileDataUpgrader.sys.mjs",
+    "ReinstallCheck.sys.mjs",
     "StartupTelemetry.sys.mjs",
 ]
 

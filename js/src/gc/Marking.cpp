@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/glue/Debug.h"
 #include "mozilla/IntegerRange.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Maybe.h"
@@ -1893,10 +1894,10 @@ scan_value_range:
       JSObject* obj2 = &v.toObject();
 #ifdef DEBUG
       if (!obj2) {
-        fprintf(stderr,
-                "processMarkStackTop found ObjectValue(nullptr) "
-                "at %zu Values from end of range in object:\n",
-                size_t(end - (index - 1)));
+        printf_stderr(
+            "processMarkStackTop found ObjectValue(nullptr) "
+            "at %zu Values from end of range in object:\n",
+            size_t(end - (index - 1)));
         obj->dump();
       }
 #endif

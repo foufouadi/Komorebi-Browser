@@ -11,12 +11,12 @@ package org.mozilla.fenix.customannotations
  *
  * The annotation is documentation-only at runtime.
  *
- * @param replacedBy Fully-qualified pointers to the TAE tests that cover this test, in `package.ClassName#methodName`
- *   form. Every entry must resolve to a real, non-`@Ignore`d `@Test` method — validated at build time by the conversion
- *   lint check.
- * @param bug Optional. Bugzilla bug ID tracking the conversion (e.g. 1234567).
- * @param since Optional. Annotation date in `YYYY-MM` form.
- * @param notes Optional. Use to call out coverage that intentionally did not carry over (edge cases, partial
+ * @property replacedBy Fully-qualified pointers to the TAE tests that cover this test, in
+ *   `package.ClassName#methodName` form. Every entry must resolve to a real, non-`@Ignore`d `@Test` method — validated
+ *   at build time by the conversion lint check.
+ * @property bug Optional. Bugzilla bug ID tracking the conversion (e.g. 1234567).
+ * @property since Optional. Annotation date in `YYYY-MM` form.
+ * @property notes Optional. Use to call out coverage that intentionally did not carry over (edge cases, partial
  *   replacements) and the bug tracking the gap.
  */
 @Target(AnnotationTarget.FUNCTION)

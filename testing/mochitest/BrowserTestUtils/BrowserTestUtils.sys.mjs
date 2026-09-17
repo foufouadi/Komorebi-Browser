@@ -66,6 +66,25 @@ function describeMutationWait(checkFn, frame) {
 }
 
 /**
+ * Gives a lazy tab the browser it was created without.
+ *
+ * @backward-compat { version 156 }
+ * `insertBrowser()` is new in 156, but the newtab train-hop jobs run these
+ * tests against Beta and Release builds, whose tabbrowser only has the
+ * underscored predecessor. Call it directly once 156 reaches Release.
+ *
+ * @param {object} tabbrowser
+ * @param {MozTabbrowserTab} tab
+ */
+function insertBrowser(tabbrowser, tab) {
+  if (tabbrowser.insertBrowser) {
+    tabbrowser.insertBrowser(tab);
+  } else {
+    tabbrowser._insertBrowser(tab);
+  }
+}
+
+/**
  * Create and register the BrowserTestUtils and ContentEventListener window
  * actors.
  */
@@ -273,6 +292,21 @@ export var BrowserTestUtils = {
               opening
             );
           }
+        }).then(async result => {
+          // The content process only gets the browser's size once we have
+          // reflowed it, so until then callers that synthesize input would hit
+          // test against a 0x0 viewport. Callers that opted out of waiting for
+          // the load want the tab before it is ready, and tests don't interact
+          // with a minimized or fully occluded window, whose refresh driver is
+          // throttled anyway.
+          if (aWaitForLoad && win.browsingContext.isActive) {
+            await win.promiseDocumentFlushed(() => {});
+            // Avoid ever resolving in the middle of a refresh driver tick,
+            // which would otherwise happen whenever this is the last promise
+            // to resolve.
+            await TestUtils.waitForTick();
+          }
+          return result;
         }),
       ];
 
@@ -517,7 +551,7 @@ export var BrowserTestUtils = {
     if (tabbrowser && tabbrowser.getTabForBrowser) {
       let tab = tabbrowser.getTabForBrowser(browser);
       if (tab) {
-        tabbrowser._insertBrowser(tab);
+        insertBrowser(tabbrowser, tab);
       }
     }
 
@@ -1243,7 +1277,7 @@ export var BrowserTestUtils = {
         // Ensure all browsers have been inserted or we won't get
         // messages back from them.
         browserSet.forEach(browser => {
-          win.gBrowser._insertBrowser(win.gBrowser.getTabForBrowser(browser));
+          insertBrowser(win.gBrowser, win.gBrowser.getTabForBrowser(browser));
         });
 
         let observer = subject => {

@@ -10,7 +10,7 @@ support-files = [
   "autoconfig-no-sandbox.js",
 ]
 run-if = [
-  "!msix", # Does not work in MSIX builds.
+  "!msix", # AutoConfig is not supported in MSIX builds (bug 1807926)
 ]
 
 ["test_autoconfig.js"]

@@ -1,6 +1,6 @@
 ChromeUtils.defineESModuleGetters(this, {
   FormHistory: "resource://gre/modules/FormHistory.sys.mjs",
-  NetErrorParent: "resource://gre/actors/NetErrorParent.sys.mjs",
+  NetErrorParent: "moz-src:///toolkit/actors/NetErrorParent.sys.mjs",
   SEARCH_CTA_ACTIONS: "resource://gre/modules/URLKeywordAnalyzer.sys.mjs",
   SEARCH_CTA_REASONS: "resource://gre/modules/URLKeywordAnalyzer.sys.mjs",
   SearchTestUtils: "resource://testing-common/SearchTestUtils.sys.mjs",
@@ -8,6 +8,23 @@ ChromeUtils.defineESModuleGetters(this, {
 });
 
 SearchTestUtils.init(this);
+
+/**
+ * Decode ui.key.contentAccess into the modifier set a content access key needs,
+ * so tests synthesize the right combination on every platform (Alt+Shift on
+ * Windows and Linux, Control+Option on macOS).
+ *
+ * @returns {object} Modifiers for EventUtils.synthesizeKey().
+ */
+function getAccessKeyModifiers() {
+  const contentAccess = Services.prefs.getIntPref("ui.key.contentAccess", 5);
+  return {
+    shiftKey: !!(contentAccess & 1),
+    ctrlKey: !!(contentAccess & 2),
+    altKey: !!(contentAccess & 4),
+    metaKey: !!(contentAccess & 8),
+  };
+}
 
 // Force the search CTA to accept the test's default engine as a supported
 // general-purpose engine. installSearchExtension() creates addon engines, which
@@ -19,6 +36,14 @@ function stubSearchCTASupportedEngine() {
     .stub(NetErrorParent.prototype, "isSupportedSearchEngine")
     .returns(true);
   registerCleanupFunction(() => sandbox.restore());
+}
+
+// The search CTA decision has a deadline, which the page waits out before
+// rendering without a CTA (bug 2067882). The deadline has its own tests.
+function pinSearchCTADecisionDeadline() {
+  const pref = "browser.netError.searchCTA.decisionTimeoutMs";
+  Services.prefs.setIntPref(pref, 0);
+  registerCleanupFunction(() => Services.prefs.clearUserPref(pref));
 }
 
 /**
@@ -59,7 +84,8 @@ async function loadDnsNotFoundPage(failedURL, win = window) {
  * DOM overlays separately, so text inserted by an overlay (for example the
  * <strong> inside a hint) still needs its own wait.
  *
- * @param {MozBrowser} browser The browser showing the error page.
+ * @param {MozBrowser|BrowsingContext} browser The browser showing the error
+ *   page, or the BrowsingContext of the frame showing it.
  * @param {object} [options]
  * @param {string} [options.clickQuery] Name of a net-error-card static query,
  *   for example "reloadButton", to click once the card has settled.
@@ -70,7 +96,10 @@ async function waitForSettledNetErrorCard(browser, { clickQuery = null } = {}) {
       () => content.document.querySelector("net-error-card")?.wrappedJSObject,
       "The net-error-card is present"
     );
-    if (card.shouldShowSearchCTA()) {
+    // Eligibility, not shouldShowSearchCTA(): a frame suppresses the CTA but
+    // still awaits the parent's decision, and callers assert on that decision's
+    // telemetry (bug 2063091).
+    if (card.isSearchCTAEligible()) {
       await ContentTaskUtils.waitForCondition(
         () => card.searchCTAResolved,
         "The search CTA decision came back from the parent"
@@ -127,6 +156,47 @@ async function injectErrorPageFrame(tab, src, sandboxed) {
   await BrowserTestUtils.waitForPaintingUnsuppressed(
     tab.linkedBrowser.browsingContext.children[0]
   );
+}
+
+/**
+ * Load a synthetic online dnsNotFound error page inside an iframe, for the
+ * search CTA's not-top-level gate (bug 2063091). Content cannot link to
+ * about:neterror, so we make an empty frame and navigate it with privileges.
+ *
+ * @param {string} failedURL The address the frame reports as having failed.
+ * @returns {Promise<object>} The tab, its browser, and the frame's
+ *   BrowsingContext. Assert against the frame rather than reaching through
+ *   contentDocument, since the frame may live in its own process.
+ */
+async function loadDnsNotFoundFrame(failedURL) {
+  const dummyPage =
+    getRootDirectory(gTestPath).replace(
+      "chrome://mochitests/content",
+      "https://example.com"
+    ) + "dummy_page.html";
+  const tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, dummyPage);
+  const browser = tab.linkedBrowser;
+
+  await SpecialPowers.spawn(browser, [], async () => {
+    content.document.body.appendChild(content.document.createElement("iframe"));
+  });
+  await TestUtils.waitForCondition(
+    () => browser.browsingContext.children.length === 1,
+    "The frame's BrowsingContext exists"
+  );
+
+  const url = `about:neterror?e=dnsNotFound&u=${encodeURIComponent(failedURL)}`;
+  await SpecialPowers.spawn(browser.browsingContext.children[0], [url], u => {
+    content.location = u;
+  });
+  // Re-read the BrowsingContext afterwards: navigating to the error page can
+  // swap the frame into a different process, replacing the one spawned into.
+  await TestUtils.waitForCondition(
+    () => browser.browsingContext.children[0]?.currentURI?.spec === url,
+    "The frame is showing the synthetic error page"
+  );
+
+  return { tab, browser, frame: browser.browsingContext.children[0] };
 }
 
 async function openErrorPage(src, useFrame, sandboxed) {

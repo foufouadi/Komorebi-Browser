@@ -357,8 +357,6 @@ private fun collectionTitle(title: String) = itemWithText(title)
 
 private fun collectionThreeDotButton(rule: ComposeTestRule) = rule.onNode(hasContentDescription("Collection menu"))
 
-private fun collectionListItem(title: String) = mDevice.findObject(UiSelector().text(title))
-
 private fun removeTabFromCollectionButton(title: String) =
     mDevice.findObject(UiSelector().text(title)).getFromParent(UiSelector().description("Remove tab from collection"))
 

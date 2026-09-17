@@ -16,13 +16,14 @@ use std::{
 use thiserror::Error;
 use windows_sys::Win32::{
     Foundation::{
-        GetLastError, ERROR_BROKEN_PIPE, ERROR_IO_PENDING, ERROR_NOT_FOUND, ERROR_PIPE_CONNECTED,
-        FALSE, HANDLE, WAIT_TIMEOUT, WIN32_ERROR,
+        DuplicateHandle, GetLastError, DUPLICATE_SAME_ACCESS, ERROR_BROKEN_PIPE, ERROR_IO_PENDING,
+        ERROR_NOT_FOUND, ERROR_PIPE_CONNECTED, FALSE, HANDLE, INVALID_HANDLE_VALUE, TRUE,
+        WAIT_TIMEOUT, WIN32_ERROR,
     },
     Storage::FileSystem::{ReadFile, WriteFile},
     System::{
         Pipes::ConnectNamedPipe,
-        Threading::{CreateEventA, ResetEvent, SetEvent, INFINITE},
+        Threading::{CreateEventA, GetCurrentProcess, ResetEvent, SetEvent, INFINITE},
         IO::{CancelIoEx, GetOverlappedResultEx, OVERLAPPED},
     },
 };
@@ -47,6 +48,33 @@ impl ProcessHandle {
         let string = string.to_str().map_err(|_e| PlatformError::ParseHandle)?;
         let handle = usize::from_str(string).map_err(|_e| PlatformError::ParseHandle)?;
 
+        Ok(ProcessHandle(unsafe {
+            OwnedHandle::from_raw_handle(handle as RawHandle)
+        }))
+    }
+
+    /// Returns a handle to the current process. This handle *can* be shared.
+    pub fn current_process() -> Result<Self, PlatformError> {
+        let mut handle: HANDLE = INVALID_HANDLE_VALUE;
+        // SAFETY: handle is stack-allocated, and GetCurrentProcess
+        // presumably returns safe pseudohandles
+        let res = unsafe {
+            DuplicateHandle(
+                GetCurrentProcess(),
+                GetCurrentProcess(),
+                GetCurrentProcess(),
+                &mut handle,
+                /* dwDesiredAccess */ 0,
+                /* bInheritHandle */ TRUE,
+                DUPLICATE_SAME_ACCESS,
+            )
+        };
+
+        if res == FALSE {
+            return Err(PlatformError::DuplicateHandleFailed(get_last_error()));
+        }
+
+        // SAFETY: we checked the error status so handle must be valid.
         Ok(ProcessHandle(unsafe {
             OwnedHandle::from_raw_handle(handle as RawHandle)
         }))

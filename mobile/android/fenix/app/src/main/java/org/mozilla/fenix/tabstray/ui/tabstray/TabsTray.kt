@@ -267,6 +267,9 @@ fun TabsTray(
                             onDeleteTabGroupClick = { group ->
                                 onAction(TabGroupAction.DeleteClicked(group))
                             },
+                            onUngroupTabGroupClick = { group ->
+                                onAction(TabGroupAction.UngroupRequested(group = group))
+                            },
                             onTabGroupOnboardingDismiss = onTabGroupOnboardingDismiss,
                             onTabGroupOnboardingShown = onTabGroupOnboardingShown,
                             trackersBlockedCount = trackersBlockedCount,
@@ -315,6 +318,9 @@ fun TabsTray(
                             onShareTabGroupClick = onShareTabGroupClick,
                             onDeleteTabGroupClick = { group ->
                                 onAction(TabGroupAction.DeleteClicked(group))
+                            },
+                            onCollectionsMigrationCardDismiss = {
+                                onAction(TabGroupAction.CollectionsMigrationCardDismissed)
                             },
                         )
                     }

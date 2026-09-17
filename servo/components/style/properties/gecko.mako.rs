@@ -4,7 +4,7 @@
 
 // `data` comes from components/style/properties.mako.rs; see build.rs for more details.
 
-<%! from data import to_camel_case, to_camel_case_lower, Keyword, SYSTEM_FONT_LONGHANDS %>
+<%! from data import to_camel_case, to_camel_case_lower, SYSTEM_FONT_LONGHANDS %>
 <%namespace name="helpers" file="/helpers.mako.rs" />
 
 use crate::Atom;
@@ -57,6 +57,7 @@ impl ComputedValues {
         &self.0
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         pseudo: Option<&PseudoElement>,
         custom_properties: ComputedCustomProperties,
@@ -82,7 +83,7 @@ impl ComputedValues {
             % for style_struct in data.style_structs:
             ${style_struct.ident},
             % endfor
-        ).to_outer()
+        ).into_outer()
     }
 
     pub fn default_values(doc: &structs::Document) -> Arc<Self> {
@@ -98,7 +99,7 @@ impl ComputedValues {
             % for style_struct in data.style_structs:
             style_structs::${style_struct.name}::default(doc),
             % endfor
-        ).to_outer()
+        ).into_outer()
     }
 
     /// Converts the computed values to an Arc<> from a reference.
@@ -135,11 +136,11 @@ impl ComputedValues {
     ) -> bool {
         use crate::properties::longhands::display::computed_value::T as Display;
 
-        old_values.map_or(false, |old| {
-            let old_display_style = old.get_box().clone_display();
-            let new_display_style = self.get_box().clone_display();
-            old_display_style == Display::None &&
-            new_display_style != Display::None
+        old_values.is_some_and(|old| {
+            let old_display_style = old.get_box().get_display();
+            let new_display_style = self.get_box().get_display();
+            *old_display_style == Display::None &&
+            *new_display_style != Display::None
         })
     }
 
@@ -189,6 +190,7 @@ impl Drop for ComputedValuesInner {
 }
 
 impl ComputedValuesInner {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         pseudo: Option<&PseudoElement>,
         custom_properties: ComputedCustomProperties,
@@ -227,8 +229,8 @@ impl ComputedValuesInner {
             pseudo,
             self.custom_properties.clone(),
             self.attribute_references.clone(),
-            self.writing_mode.clone(),
-            self.effective_zoom.clone(),
+            self.writing_mode,
+            self.effective_zoom,
             flags,
             self.rules.clone(),
             if self.visited_style.is_null() {
@@ -239,10 +241,10 @@ impl ComputedValuesInner {
             % for style_struct in data.style_structs:
             unsafe { Arc::from_raw_addrefed(self.${style_struct.gecko_name} as *const _) },
             % endfor
-        ).to_outer()
+        ).into_outer()
     }
 
-    fn to_outer(self) -> Arc<ComputedValues> {
+    fn into_outer(self) -> Arc<ComputedValues> {
         unsafe {
             let mut arc = UniqueArc::<ComputedValues>::new_uninit();
             bindings::Gecko_ComputedStyle_Init(
@@ -305,7 +307,7 @@ impl ComputedValuesInner {
 }
 
 <%def name="impl_simple_setter(ident, gecko_ffi_name)">
-    #[allow(non_snake_case)]
+    #[allow(non_snake_case, clippy::useless_conversion)]
     pub fn set_${ident}(&mut self, v: longhands::${ident}::computed_value::T) {
         ${set_gecko_property(gecko_ffi_name, "From::from(v)")}
     }
@@ -318,19 +320,26 @@ impl ComputedValuesInner {
     }
 </%def>
 
-<%def name="impl_fallback_eq(ident)">
+<%def name="impl_simple_clone(ident, gecko_ffi_name, borrowed)">
+    % if borrowed:
     #[allow(non_snake_case)]
-    pub fn ${ident}_equals(&self, other: &Self) -> bool {
-        // TODO: Could be more efficient
-        self.clone_${ident}() == other.clone_${ident}()
+    #[inline]
+    pub fn get_${ident}(&self) -> &longhands::${ident}::computed_value::T {
+        &self.${gecko_ffi_name}
     }
-</%def>
 
-<%def name="impl_simple_clone(ident, gecko_ffi_name)">
-    #[allow(non_snake_case)]
-    pub fn clone_${ident}(&self) -> longhands::${ident}::computed_value::T {
+    #[allow(non_snake_case, clippy::clone_on_copy)]
+    #[inline]
+    pub fn slow_clone_${ident}(&self) -> longhands::${ident}::computed_value::T {
+        self.get_${ident}().clone()
+    }
+    % else:
+    #[allow(non_snake_case, clippy::useless_conversion, clippy::clone_on_copy)]
+    #[inline]
+    pub fn slow_clone_${ident}(&self) -> longhands::${ident}::computed_value::T {
         From::from(self.${gecko_ffi_name}.clone())
     }
+    % endif
 </%def>
 
 <%def name="impl_physical_sides(ident, props)">
@@ -353,7 +362,7 @@ impl ComputedValuesInner {
 </%def>
 
 <%def name="impl_simple_copy(ident, gecko_ffi_name, *kwargs)">
-    #[allow(non_snake_case)]
+    #[allow(non_snake_case, clippy::clone_on_copy)]
     pub fn copy_${ident}_from(&mut self, other: &Self) {
         self.${gecko_ffi_name} = other.${gecko_ffi_name}.clone();
     }
@@ -365,113 +374,15 @@ impl ComputedValuesInner {
 </%def>
 
 <%!
-def get_gecko_property(ffi_name, self_param = "self"):
-    return "%s.%s" % (self_param, ffi_name)
-
 def set_gecko_property(ffi_name, expr):
     return "self.%s = %s;" % (ffi_name, expr)
 %>
 
-<%def name="impl_keyword_setter(ident, gecko_ffi_name, keyword, cast_type='u8')">
-    #[allow(non_snake_case)]
-    pub fn set_${ident}(&mut self, v: longhands::${ident}::computed_value::T) {
-        use crate::properties::longhands::${ident}::computed_value::T as Keyword;
-        // FIXME(bholley): Align binary representations and ditch |match| for cast + static_asserts
-        let result = match v {
-            % for value in keyword.values_for('gecko'):
-                Keyword::${to_camel_case(value)} =>
-                    structs::${keyword.gecko_constant(value)} ${keyword.maybe_cast(cast_type)},
-            % endfor
-        };
-        ${set_gecko_property(gecko_ffi_name, "result")}
-    }
-</%def>
-
-<%def name="impl_keyword_clone(ident, gecko_ffi_name, keyword, cast_type='u8')">
-    #[allow(non_snake_case)]
-    pub fn clone_${ident}(&self) -> longhands::${ident}::computed_value::T {
-        use crate::properties::longhands::${ident}::computed_value::T as Keyword;
-        // FIXME(bholley): Align binary representations and ditch |match| for cast + static_asserts
-
-        // Some constant macros in the gecko are defined as negative integer(e.g. font-width).
-        // And they are convert to signed integer in Rust bindings. We need to cast then
-        // as signed type when we have both signed/unsigned integer in order to use them
-        // as match's arms.
-        // Also, to use same implementation here we use casted constant if we have only singed values.
-        % if keyword.gecko_enum_prefix is None:
-        % for value in keyword.values_for('gecko'):
-        const ${keyword.casted_constant_name(value, cast_type)} : ${cast_type} =
-            structs::${keyword.gecko_constant(value)} as ${cast_type};
-        % endfor
-
-        match ${get_gecko_property(gecko_ffi_name)} as ${cast_type} {
-            % for value in keyword.values_for('gecko'):
-            ${keyword.casted_constant_name(value, cast_type)} => Keyword::${to_camel_case(value)},
-            % endfor
-            % if keyword.gecko_inexhaustive:
-            _ => panic!("Found unexpected value in style struct for ${ident} property"),
-            % endif
-        }
-        % else:
-        match ${get_gecko_property(gecko_ffi_name)} {
-            % for value in keyword.values_for('gecko'):
-            structs::${keyword.gecko_constant(value)} => Keyword::${to_camel_case(value)},
-            % endfor
-            % if keyword.gecko_inexhaustive:
-            _ => panic!("Found unexpected value in style struct for ${ident} property"),
-            % endif
-        }
-        % endif
-    }
-</%def>
-
-<%def name="impl_keyword(ident, gecko_ffi_name, keyword, cast_type='u8', **kwargs)">
-<%call expr="impl_keyword_setter(ident, gecko_ffi_name, keyword, cast_type, **kwargs)"></%call>
-<%call expr="impl_simple_copy(ident, gecko_ffi_name, **kwargs)"></%call>
-<%call expr="impl_keyword_clone(ident, gecko_ffi_name, keyword, cast_type)"></%call>
-<%call expr="impl_simple_eq(ident, gecko_ffi_name)"></%call>
-</%def>
-
-<%def name="impl_simple(ident, gecko_ffi_name)">
+<%def name="impl_simple(ident, gecko_ffi_name, borrowed=True)">
 <%call expr="impl_simple_setter(ident, gecko_ffi_name)"></%call>
 <%call expr="impl_simple_copy(ident, gecko_ffi_name)"></%call>
-<%call expr="impl_simple_clone(ident, gecko_ffi_name)"></%call>
+<%call expr="impl_simple_clone(ident, gecko_ffi_name, borrowed)"></%call>
 <%call expr="impl_simple_eq(ident, gecko_ffi_name)"></%call>
-</%def>
-
-<%def name="impl_border_width(ident, gecko_ffi_name, inherit_from)">
-    #[allow(non_snake_case)]
-    pub fn set_${ident}(&mut self, v: Au) {
-        let value = v.0;
-        self.${inherit_from} = value;
-        self.${gecko_ffi_name} = value;
-    }
-
-    #[allow(non_snake_case)]
-    pub fn copy_${ident}_from(&mut self, other: &Self) {
-        self.${inherit_from} = other.${inherit_from};
-        // NOTE: This is needed to easily handle the `unset` and `initial`
-        // keywords, which are implemented calling this function.
-        //
-        // In practice, this means that we may have an incorrect value here, but
-        // we'll adjust that properly in the style fixup phase.
-        //
-        // FIXME(emilio): We could clean this up a bit special-casing the reset_
-        // function below.
-        self.${gecko_ffi_name} = other.${inherit_from};
-    }
-
-    #[allow(non_snake_case)]
-    pub fn reset_${ident}(&mut self, other: &Self) {
-        self.copy_${ident}_from(other)
-    }
-
-    #[allow(non_snake_case)]
-    pub fn clone_${ident}(&self) -> Au {
-        Au(self.${gecko_ffi_name})
-    }
-
-    ${impl_simple_eq(ident, gecko_ffi_name)}
 </%def>
 
 <%def name="impl_style_struct(style_struct)">
@@ -557,9 +468,15 @@ impl Clone for ${style_struct.gecko_struct_name} {
     }
 
     ${impl_simple_copy(ident, "mFont." + gecko_ffi_name)}
-    ${impl_fallback_eq(ident)}
 
-    pub fn clone_${ident}(&self) -> longhands::${ident}::computed_value::T {
+    pub fn ${ident}_equals(&self, other: &Self) -> bool {
+        let ours = &self.mFont.${gecko_ffi_name};
+        let theirs = &other.mFont.${gecko_ffi_name};
+        ours.len() == theirs.len() &&
+            ours.iter().zip(theirs.iter()).all(|(a, b)| a.mTag == b.mTag && a.mValue == b.mValue)
+    }
+
+    pub fn slow_clone_${ident}(&self) -> longhands::${ident}::computed_value::T {
         use crate::values::generics::font::{FontSettings, FontTag, ${tag_type}};
 
         FontSettings(
@@ -580,20 +497,13 @@ impl Clone for ${style_struct.gecko_struct_name} {
                 if not (skip_longhands == "*" or x.name in skip_longhands.split())]
 
     def longhand_method(longhand):
-        args = dict(ident=longhand.ident, gecko_ffi_name=longhand.gecko_ffi_name)
-
         if longhand.logical:
             return
-        # get the method and pass additional keyword or type-specific arguments
-        if longhand.keyword:
-            method = impl_keyword
-            args.update(keyword=longhand.keyword)
-            if "font" in longhand.ident:
-                args.update(cast_type=longhand.cast_type)
-        else:
-            method = impl_simple
-
-        method(**args)
+        impl_simple(
+            ident=longhand.ident,
+            gecko_ffi_name=longhand.gecko_ffi_name,
+            borrowed=longhand.has_borrowed_getter(),
+        )
 %>
 impl ${style_struct.gecko_struct_name} {
     /*
@@ -703,7 +613,7 @@ fn static_assert() {
         self.mFontSizeOffset = v.keyword_info.offset;
     }
 
-    pub fn clone_font_size(&self) -> FontSize {
+    pub fn slow_clone_font_size(&self) -> FontSize {
         use crate::values::specified::font::KeywordInfo;
 
         FontSize {
@@ -739,7 +649,7 @@ fn static_assert() {
     }
 
     #[allow(non_snake_case)]
-    pub fn clone__x_lang(&self) -> longhands::_x_lang::computed_value::T {
+    pub fn slow_clone__x_lang(&self) -> longhands::_x_lang::computed_value::T {
         longhands::_x_lang::computed_value::T(unsafe {
             Atom::from_raw(self.mLanguage.mRawPtr)
         })
@@ -803,7 +713,7 @@ fn static_assert() {
         if count != other.${type}_${ident}_count() {
             return false;
         }
-        let iter = self.m${to_camel_case(type)}s.iter().take(count as usize).zip(
+        let iter = self.m${to_camel_case(type)}s.iter().take(count).zip(
             other.m${to_camel_case(type)}s.iter()
         );
         for (ours, others) in iter {
@@ -843,7 +753,12 @@ fn static_assert() {
     }
 
     #[inline]
-    pub fn clone_display(&self) -> longhands::display::computed_value::T {
+    pub fn get_display(&self) -> &longhands::display::computed_value::T {
+        &self.mDisplay
+    }
+
+    #[inline]
+    pub fn slow_clone_display(&self) -> longhands::display::computed_value::T {
         self.mDisplay
     }
 
@@ -869,7 +784,12 @@ fn static_assert() {
     }
 
     #[inline]
-    pub fn clone_contain(&self) -> longhands::contain::computed_value::T {
+    pub fn get_contain(&self) -> &longhands::contain::computed_value::T {
+        &self.mContain
+    }
+
+    #[inline]
+    pub fn slow_clone_contain(&self) -> longhands::contain::computed_value::T {
         self.mContain
     }
 
@@ -887,12 +807,32 @@ fn static_assert() {
     }
 
     #[inline]
-    pub fn clone_effective_containment(&self) -> longhands::contain::computed_value::T {
+    pub fn get_effective_containment(&self) -> &longhands::contain::computed_value::T {
+        &self.mEffectiveContainment
+    }
+
+    #[inline]
+    pub fn slow_clone_effective_containment(&self) -> longhands::contain::computed_value::T {
         self.mEffectiveContainment
     }
 </%self:impl_trait>
 
-<%def name="simple_image_array_property(name, shorthand, field_name)">
+<%def name="impl_image_layer_eq(ident, layers_field_name, field_name, eq_expr=None)">
+    <%
+        if eq_expr is None:
+            eq_expr = "ours.%s == theirs.%s" % (field_name, field_name)
+    %>
+    pub fn ${ident}_equals(&self, other: &Self) -> bool {
+        let count = self.${layers_field_name}.${field_name}Count;
+        count == other.${layers_field_name}.${field_name}Count &&
+            self.${layers_field_name}.mLayers.iter()
+                .zip(other.${layers_field_name}.mLayers.iter())
+                .take(count as usize)
+                .all(|(ours, theirs)| ${eq_expr})
+    }
+</%def>
+
+<%def name="simple_image_array_property(name, shorthand, field_name, eq_expr=None)">
     <%
         image_layers_field = "mImage" if shorthand == "background" else "mMask"
         copy_simple_image_array_property(name, shorthand, image_layers_field, field_name)
@@ -917,7 +857,7 @@ fn static_assert() {
             };
         }
     }
-    ${impl_fallback_eq(f"{shorthand}_{name}")}
+    ${impl_image_layer_eq(f"{shorthand}_{name}", image_layers_field, field_name, eq_expr)}
 </%def>
 
 <%def name="copy_simple_image_array_property(name, shorthand, layers_field_name, field_name)">
@@ -944,13 +884,8 @@ fn static_assert() {
     }
 </%def>
 
-<%def name="impl_simple_image_array_property(name, shorthand, layer_field_name, field_name, struct_name)">
-    <%
-        ident = "%s_%s" % (shorthand, name)
-        style_struct = next(x for x in data.style_structs if x.name == struct_name)
-        longhand = next(x for x in style_struct.longhands if x.ident == ident)
-        keyword = longhand.keyword
-    %>
+<%def name="impl_simple_image_array_property(name, shorthand, layer_field_name, field_name)">
+    <% ident = "%s_%s" % (shorthand, name) %>
 
     <% copy_simple_image_array_property(name, shorthand, layer_field_name, field_name) %>
 
@@ -959,9 +894,6 @@ fn static_assert() {
         I: IntoIterator<Item=longhands::${ident}::computed_value::single_value::T>,
         I::IntoIter: ExactSizeIterator,
     {
-        % if keyword:
-        use crate::properties::longhands::${ident}::single_value::computed_value::T as Keyword;
-        % endif
         use crate::gecko_bindings::structs::nsStyleImageLayers_LayerType as LayerType;
 
         let v = v.into_iter();
@@ -973,61 +905,27 @@ fn static_assert() {
 
         self.${layer_field_name}.${field_name}Count = v.len() as u32;
         for (servo, geckolayer) in v.zip(self.${layer_field_name}.mLayers.iter_mut()) {
-            geckolayer.${field_name} = {
-                % if keyword:
-                match servo {
-                    % for value in keyword.values_for("gecko"):
-                    Keyword::${to_camel_case(value)} =>
-                        structs::${keyword.gecko_constant(value)} ${keyword.maybe_cast('u8')},
-                    % endfor
-                }
-                % else:
-                // The Gecko field stores the computed value directly.
-                servo
-                % endif
-            };
+            geckolayer.${field_name} = servo;
         }
     }
 
-    ${impl_fallback_eq(ident)}
+    ${impl_image_layer_eq(ident, layer_field_name, field_name)}
 
-    pub fn clone_${ident}(&self) -> longhands::${ident}::computed_value::T {
-        % if keyword:
-        use crate::properties::longhands::${ident}::single_value::computed_value::T as Keyword;
-        % endif
+    pub fn slow_clone_${ident}(&self) -> longhands::${ident}::computed_value::T {
         longhands::${ident}::computed_value::List(
             self.${layer_field_name}.mLayers.iter()
                 .take(self.${layer_field_name}.${field_name}Count as usize)
-                .map(|ref layer| {
-                    % if keyword:
-                    match layer.${field_name} {
-                        % for value in longhand.keyword.values_for("gecko"):
-                        structs::${keyword.gecko_constant(value)}
-                            => Keyword::${to_camel_case(value)},
-                        % endfor
-                        % if keyword.gecko_inexhaustive:
-                        _ => panic!("Found unexpected value in style struct for ${ident} property"),
-                        % endif
-                    }
-                    % else:
-                    layer.${field_name}
-                    % endif
-                }).collect()
+                .map(|layer| layer.${field_name})
+                .collect()
         )
     }
 </%def>
 
 <%def name="impl_common_image_layer_properties(shorthand)">
-    <%
-        if shorthand == "background":
-            image_layers_field = "mImage"
-            struct_name = "Background"
-        else:
-            image_layers_field = "mMask"
-            struct_name = "SVG"
-    %>
+    <% image_layers_field = "mImage" if shorthand == "background" else "mMask" %>
 
-    <%self:simple_image_array_property name="repeat" shorthand="${shorthand}" field_name="mRepeat">
+    <%self:simple_image_array_property name="repeat" shorthand="${shorthand}" field_name="mRepeat"
+        eq_expr="ours.mRepeat.mXRepeat == theirs.mRepeat.mXRepeat && ours.mRepeat.mYRepeat == theirs.mRepeat.mYRepeat">
         use crate::values::specified::background::BackgroundRepeatKeyword;
         use crate::gecko_bindings::structs::nsStyleImageLayers_Repeat;
         use crate::gecko_bindings::structs::StyleImageLayerRepeat;
@@ -1049,7 +947,7 @@ fn static_assert() {
         }
     </%self:simple_image_array_property>
 
-    pub fn clone_${shorthand}_repeat(&self) -> longhands::${shorthand}_repeat::computed_value::T {
+    pub fn slow_clone_${shorthand}_repeat(&self) -> longhands::${shorthand}_repeat::computed_value::T {
         use crate::properties::longhands::${shorthand}_repeat::single_value::computed_value::T;
         use crate::values::specified::background::BackgroundRepeatKeyword;
         use crate::gecko_bindings::structs::StyleImageLayerRepeat;
@@ -1067,14 +965,14 @@ fn static_assert() {
         longhands::${shorthand}_repeat::computed_value::List(
             self.${image_layers_field}.mLayers.iter()
                 .take(self.${image_layers_field}.mRepeatCount as usize)
-                .map(|ref layer| {
+                .map(|layer| {
                     T(to_servo(layer.mRepeat.mXRepeat), to_servo(layer.mRepeat.mYRepeat))
                 }).collect()
         )
     }
 
-    <% impl_simple_image_array_property("clip", shorthand, image_layers_field, "mClip", struct_name) %>
-    <% impl_simple_image_array_property("origin", shorthand, image_layers_field, "mOrigin", struct_name) %>
+    <% impl_simple_image_array_property("clip", shorthand, image_layers_field, "mClip") %>
+    <% impl_simple_image_array_property("origin", shorthand, image_layers_field, "mOrigin") %>
 
     % for (orientation, keyword) in [("x", "horizontal"), ("y", "vertical")]:
     pub fn copy_${shorthand}_position_${orientation}_from(&mut self, other: &Self) {
@@ -1100,7 +998,7 @@ fn static_assert() {
         self.copy_${shorthand}_position_${orientation}_from(other)
     }
 
-    pub fn clone_${shorthand}_position_${orientation}(&self)
+    pub fn slow_clone_${shorthand}_position_${orientation}(&self)
         -> longhands::${shorthand}_position_${orientation}::computed_value::T {
         longhands::${shorthand}_position_${orientation}::computed_value::List(
             self.${image_layers_field}.mLayers.iter()
@@ -1110,7 +1008,8 @@ fn static_assert() {
         )
     }
 
-    ${impl_fallback_eq(f"{shorthand}_position_{orientation}")}
+    ${impl_image_layer_eq(f"{shorthand}_position_{orientation}", image_layers_field, "mPosition" + orientation.upper(),
+                          f"ours.mPosition.{keyword} == theirs.mPosition.{keyword}")}
 
     pub fn set_${shorthand}_position_${orientation[0]}<I>(&mut self, v: I)
     where
@@ -1138,7 +1037,7 @@ fn static_assert() {
         servo
     </%self:simple_image_array_property>
 
-    pub fn clone_${shorthand}_size(&self) -> longhands::${shorthand}_size::computed_value::T {
+    pub fn slow_clone_${shorthand}_size(&self) -> longhands::${shorthand}_size::computed_value::T {
         longhands::${shorthand}_size::computed_value::List(
             self.${image_layers_field}.mLayers.iter().map(|layer| layer.mSize.clone()).collect()
         )
@@ -1189,9 +1088,9 @@ fn static_assert() {
         }
     }
 
-    ${impl_fallback_eq(f"{shorthand}_image")}
+    ${impl_image_layer_eq(f"{shorthand}_image", image_layers_field, "mImage")}
 
-    pub fn clone_${shorthand}_image(&self) -> longhands::${shorthand}_image::computed_value::T {
+    pub fn slow_clone_${shorthand}_image(&self) -> longhands::${shorthand}_image::computed_value::T {
         longhands::${shorthand}_image::computed_value::List(
             self.${image_layers_field}.mLayers.iter()
                 .take(self.${image_layers_field}.mImageCount as usize)
@@ -1237,8 +1136,8 @@ fn static_assert() {
                   skip_longhands="${skip_background_longhands}">
 
     <% impl_common_image_layer_properties("background") %>
-    <% impl_simple_image_array_property("attachment", "background", "mImage", "mAttachment", "Background") %>
-    <% impl_simple_image_array_property("blend_mode", "background", "mImage", "mBlendMode", "Background") %>
+    <% impl_simple_image_array_property("attachment", "background", "mImage", "mAttachment") %>
+    <% impl_simple_image_array_property("blend_mode", "background", "mImage", "mBlendMode") %>
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="List">
@@ -1269,8 +1168,8 @@ mask-mode mask-repeat mask-clip mask-origin mask-composite mask-position-x mask-
 <%self:impl_trait style_struct_name="SVG"
                   skip_longhands="${skip_svg_longhands}">
     <% impl_common_image_layer_properties("mask") %>
-    <% impl_simple_image_array_property("mode", "mask", "mMask", "mMaskMode", "SVG") %>
-    <% impl_simple_image_array_property("composite", "mask", "mMask", "mComposite", "SVG") %>
+    <% impl_simple_image_array_property("mode", "mask", "mMask", "mMaskMode") %>
+    <% impl_simple_image_array_property("composite", "mask", "mMask", "mComposite") %>
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="InheritedSVG">
@@ -1333,7 +1232,7 @@ mask-mode mask-repeat mask-clip mask-origin mask-composite mask-position-x mask-
     }
 
     pub fn animations_equals(&self, other: &Self) -> bool {
-        return self.mAnimationNameCount == other.mAnimationNameCount
+        self.mAnimationNameCount == other.mAnimationNameCount
             && self.mAnimationDelayCount == other.mAnimationDelayCount
             && self.mAnimationDirectionCount == other.mAnimationDirectionCount
             && self.mAnimationDurationCount == other.mAnimationDurationCount
@@ -1426,7 +1325,7 @@ pub fn assert_initial_values_match(data: &PerDocumentStyleData) {
         %>
         % for property in TO_TEST:
         assert_eq!(
-            cv.clone_${property.ident}(),
+            cv.slow_clone_${property.ident}(),
             longhands::${property.ident}::get_initial_value(),
             concat!(
                 "initial value in Gecko style struct for ",

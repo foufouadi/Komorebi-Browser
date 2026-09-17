@@ -57,6 +57,7 @@ where
         self.transport.clear_cache()
     }
 
+    #[allow(dead_code)]
     pub fn shutdown_db(&mut self) -> Result<(), rusqlite::Error> {
         self.transport.shutdown_db()
     }
@@ -68,12 +69,19 @@ where
         placements: Vec<AdPlacementRequest>,
         cache_policy: CachePolicy,
         ohttp: bool,
+        blocks: Vec<String>,
     ) -> Result<(AdResponse<A>, RequestHash), FetchAdsError>
     where
         A: AdResponseValue,
     {
-        let mut ad_request =
-            AdRequest::try_new(context_id, self.environment, flags, ohttp, placements)?;
+        let mut ad_request = AdRequest::try_new(
+            blocks,
+            context_id,
+            self.environment.clone(),
+            flags,
+            ohttp,
+            placements,
+        )?;
         let request_hash = RequestHash::new(&ad_request);
 
         if ohttp {
@@ -122,7 +130,7 @@ where
 
     fn fetch_preflight(&self) -> Result<preflight::PreflightResponse, CallbackRequestError> {
         let response = self.transport.send(
-            PreflightRequest(self.environment.into_url("ads-preflight")),
+            PreflightRequest(self.environment.clone().into_url("ads-preflight")),
             &CachePolicy::CacheFirst { ttl: None },
             false,
         )?;
@@ -239,6 +247,7 @@ mod tests {
             make_happy_placement_requests(),
             CachePolicy::default(),
             false,
+            Default::default(),
         );
         assert!(result.is_ok());
         let (response, _request_hash) = result.unwrap();
@@ -259,7 +268,7 @@ mod tests {
 
         let cache = HttpCache::builder("test_fetch_ads_cache_hit_skips_network.db")
             .default_ttl(std::time::Duration::from_secs(300))
-            .max_size(crate::http_cache::ByteSize::mib(1))
+            .max_size(crate::common::bytesize::ByteSize::mib(1))
             .build()
             .unwrap();
         let client = make_test_client(Some(cache));
@@ -272,6 +281,7 @@ mod tests {
                 make_happy_placement_requests(),
                 CachePolicy::default(),
                 false,
+                Default::default(),
             )
             .unwrap();
         assert_eq!(response1, expected);
@@ -284,6 +294,7 @@ mod tests {
                 make_happy_placement_requests(),
                 CachePolicy::default(),
                 false,
+                Default::default(),
             )
             .unwrap();
         assert_eq!(response2, expected);
@@ -295,7 +306,7 @@ mod tests {
         viaduct_dev::init_backend_dev();
         let cache = HttpCache::builder("test_record_click.db")
             .default_ttl(std::time::Duration::from_secs(300))
-            .max_size(crate::http_cache::ByteSize::mib(1))
+            .max_size(crate::common::bytesize::ByteSize::mib(1))
             .build()
             .unwrap();
 
@@ -314,7 +325,7 @@ mod tests {
         viaduct_dev::init_backend_dev();
         let cache = HttpCache::builder("test_record_impression.db")
             .default_ttl(std::time::Duration::from_secs(300))
-            .max_size(crate::http_cache::ByteSize::mib(1))
+            .max_size(crate::common::bytesize::ByteSize::mib(1))
             .build()
             .unwrap();
 

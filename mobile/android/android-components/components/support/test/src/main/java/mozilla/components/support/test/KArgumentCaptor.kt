@@ -14,7 +14,8 @@ inline fun <reified T : Any> argumentCaptor(): KArgumentCaptor<T> {
 
 class KArgumentCaptor<out T : Any?>(
     private val captor: ArgumentCaptor<T>,
-    private val tClass: KClass<*>,
+    // Part of the published API of this component, so it is kept even though nothing reads it.
+    @Suppress("UnusedPrivateProperty") private val tClass: KClass<*>,
 ) {
 
     /**

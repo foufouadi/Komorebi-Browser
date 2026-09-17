@@ -490,8 +490,10 @@ class CommonBackend(BuildBackend):
                 # Prefer a relative path to make the output not depend on the sourcedir.
                 # This makes caching across worktrees possible.
                 if os.path.isabs(s):
-                    s = mozpath.relpath(s, output_directory)
-                f.write(includeTemplate % {"cppfile": s})
+                    rel_path = mozpath.relpath(s, output_directory)
+                else:
+                    rel_path = s
+                f.write(includeTemplate % {"cppfile": rel_path})
                 f.write("\n")
 
     def _write_unified_files(

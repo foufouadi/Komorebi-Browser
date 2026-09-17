@@ -5,9 +5,7 @@ package org.mozilla.focus.activity.robots
 
 import androidx.test.uiautomator.UiObject
 import androidx.test.uiautomator.UiSelector
-import mozilla.components.feature.downloads.R as downloadsR
 import org.junit.Assert.assertTrue
-import org.mozilla.focus.helpers.TestHelper.getStringResource
 import org.mozilla.focus.helpers.TestHelper.mDevice
 import org.mozilla.focus.helpers.TestHelper.packageName
 import org.mozilla.focus.helpers.TestHelper.waitingTime
@@ -74,6 +72,3 @@ private val downloadFileName = mDevice.findObject(UiSelector().resourceId("$pack
 private val downloadCancelBtn = mDevice.findObject(UiSelector().resourceId("$packageName:id/close_button"))
 
 private val downloadBtn = mDevice.findObject(UiSelector().resourceId("$packageName:id/download_button"))
-
-private val downloadNotificationText =
-    getStringResource(downloadsR.string.mozac_feature_downloads_completed_notification_text2)

@@ -30,7 +30,6 @@
 #include "mozilla/dom/ServiceWorkerChild.h"
 #include "mozilla/dom/SharedWorkerChild.h"
 #include "mozilla/dom/StorageIPC.h"
-#include "mozilla/dom/MessagePortChild.h"
 #include "mozilla/dom/ServiceWorkerContainerChild.h"
 #include "mozilla/dom/ServiceWorkerManagerChild.h"
 #include "mozilla/ipc/PBackgroundTestChild.h"
@@ -253,7 +252,7 @@ dom::PSharedWorkerChild* BackgroundChildImpl::AllocPSharedWorkerChild(
 bool BackgroundChildImpl::DeallocPSharedWorkerChild(
     dom::PSharedWorkerChild* aActor) {
   RefPtr<dom::SharedWorkerChild> actor =
-      dont_AddRef(static_cast<dom::SharedWorkerChild*>(aActor));
+      dont_AddRef(mozilla::ipc::ActorCast<dom::SharedWorkerChild>(aActor));
   return true;
 }
 
@@ -266,7 +265,7 @@ BackgroundChildImpl::AllocPTemporaryIPCBlobChild() {
 bool BackgroundChildImpl::DeallocPTemporaryIPCBlobChild(
     dom::PTemporaryIPCBlobChild* aActor) {
   RefPtr<dom::TemporaryIPCBlobChild> actor =
-      dont_AddRef(static_cast<dom::TemporaryIPCBlobChild*>(aActor));
+      dont_AddRef(mozilla::ipc::ActorCast<dom::TemporaryIPCBlobChild>(aActor));
   return true;
 }
 
@@ -278,7 +277,7 @@ dom::PFileCreatorChild* BackgroundChildImpl::AllocPFileCreatorChild(
 }
 
 bool BackgroundChildImpl::DeallocPFileCreatorChild(PFileCreatorChild* aActor) {
-  delete static_cast<dom::FileCreatorChild*>(aActor);
+  delete mozilla::ipc::ActorCast<dom::FileCreatorChild>(aActor);
   return true;
 }
 
@@ -312,7 +311,7 @@ dom::PCookieStoreChild* BackgroundChildImpl::AllocPCookieStoreChild() {
 
 bool BackgroundChildImpl::DeallocPCookieStoreChild(PCookieStoreChild* aActor) {
   RefPtr<dom::CookieStoreChild> child =
-      dont_AddRef(static_cast<dom::CookieStoreChild*>(aActor));
+      dont_AddRef(mozilla::ipc::ActorCast<dom::CookieStoreChild>(aActor));
   MOZ_ASSERT(child);
   return true;
 }
@@ -353,8 +352,8 @@ BackgroundChildImpl::AllocPServiceWorkerManagerChild() {
 
 bool BackgroundChildImpl::DeallocPServiceWorkerManagerChild(
     PServiceWorkerManagerChild* aActor) {
-  RefPtr<dom::ServiceWorkerManagerChild> child =
-      dont_AddRef(static_cast<dom::ServiceWorkerManagerChild*>(aActor));
+  RefPtr<dom::ServiceWorkerManagerChild> child = dont_AddRef(
+      mozilla::ipc::ActorCast<dom::ServiceWorkerManagerChild>(aActor));
   MOZ_ASSERT(child);
   return true;
 }
@@ -370,24 +369,6 @@ already_AddRefed<PCacheChild> BackgroundChildImpl::AllocPCacheChild() {
 already_AddRefed<PCacheStreamControlChild>
 BackgroundChildImpl::AllocPCacheStreamControlChild() {
   return dom::cache::AllocPCacheStreamControlChild();
-}
-
-// -----------------------------------------------------------------------------
-// MessageChannel/MessagePort API
-// -----------------------------------------------------------------------------
-
-dom::PMessagePortChild* BackgroundChildImpl::AllocPMessagePortChild(
-    const nsID& aUUID, const nsID& aDestinationUUID,
-    const uint32_t& aSequenceID) {
-  RefPtr<dom::MessagePortChild> agent = new dom::MessagePortChild();
-  return agent.forget().take();
-}
-
-bool BackgroundChildImpl::DeallocPMessagePortChild(PMessagePortChild* aActor) {
-  RefPtr<dom::MessagePortChild> child =
-      dont_AddRef(static_cast<dom::MessagePortChild*>(aActor));
-  MOZ_ASSERT(child);
-  return true;
 }
 
 already_AddRefed<PServiceWorkerChild>

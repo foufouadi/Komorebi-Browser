@@ -315,7 +315,8 @@ Tests which are imported benchmarks are:
 - [dromaeo](#dromaeo)
 - [JetStream](#jetstream)
 - [kraken](#kraken)
-- [motionmark](#motionmark)
+- motionmark ([animometer](#motionmark_animometer),
+  [htmlsuite](#motionmark_htmlsuite), [webgl](#motionmark_webgl))
 - [stylebench](#stylebench)
 
 ### Row major vs. column major

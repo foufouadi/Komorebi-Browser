@@ -23,6 +23,7 @@ using SVGPathElementBase = SVGGeometryElement;
 
 class SVGPathElement final : public SVGPathElementBase {
   using Path = mozilla::gfx::Path;
+  using Element::UnsetAttr;
 
  protected:
   friend nsresult(::NS_NewSVGPathElement(
@@ -37,7 +38,7 @@ class SVGPathElement final : public SVGPathElementBase {
   NS_DECL_ADDSIZEOFEXCLUDINGTHIS
 
   // nsIContent interface
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* name) const override;
+  bool IsNoNamespaceAttrMapped(const nsAtom* name) const override;
 
   // SVGSVGElement methods:
   bool HasValidDimensions() const override;

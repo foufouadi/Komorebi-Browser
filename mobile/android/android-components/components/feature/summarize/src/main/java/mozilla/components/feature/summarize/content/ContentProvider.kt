@@ -19,6 +19,12 @@ data class Content(
 )
 
 /**
+ * Thrown when the page declares its content to be gated, for example behind a paywall. Raised as soon as the metadata
+ * is known so the body is never extracted.
+ */
+class PaywalledContentException : Exception("Page content is gated and will not be summarized")
+
+/**
  * Provides the [Content] of a web page for summarization.
  *
  * Use [fromPage] to create an instance backed by a [PageContentExtractor] and [PageMetadataExtractor], or supply a
@@ -35,6 +41,8 @@ fun interface ContentProvider {
          * Metadata failures are non-fatal and fall back to a default [PageMetadata]. Content failures are propagated
          * and cause the returned [Result] to fail.
          *
+         * Gated pages fail with a [PaywalledContentException] before the body is extracted.
+         *
          * @param pageContentExtractor Extracts the main textual content of the page.
          * @param pageMetadataExtractor Extracts metadata such as the page title and author.
          */
@@ -47,6 +55,11 @@ fun interface ContentProvider {
             try {
                 val metadata =
                     pageMetadataExtractor.getPageMetadata().getOrDefault(PageMetadata()).copy(pageTitle = pageTitle)
+
+                if (metadata.isGated) {
+                    throw PaywalledContentException()
+                }
+
                 val content =
                     pageContentExtractor
                         .getPageContent(

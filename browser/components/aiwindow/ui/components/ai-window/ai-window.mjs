@@ -12,6 +12,8 @@ import "chrome://browser/content/aiwindow/components/smartwindow-promo.mjs";
 // eslint-disable-next-line import/no-unassigned-import
 import "chrome://browser/content/aiwindow/components/smartwindow-topsites.mjs";
 // eslint-disable-next-line import/no-unassigned-import
+import "chrome://browser/content/aiwindow/components/smartwindow-resume-section.mjs";
+// eslint-disable-next-line import/no-unassigned-import
 import "chrome://browser/content/aiwindow/components/kit-mention.mjs";
 // eslint-disable-next-line import/no-unassigned-import
 import "chrome://browser/content/aiwindow/components/smartwindow-history-menu.mjs";
@@ -60,8 +62,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "moz-src:///browser/components/aiwindow/models/ConversationSuggestions.sys.mjs",
   generateResumeActivityConversationStarters:
     "moz-src:///browser/components/aiwindow/models/ConversationSuggestions.sys.mjs",
-  MAX_NUM_MEMORIES_FOR_RESUME_ACTIVITY:
-    "moz-src:///browser/components/aiwindow/models/ConversationSuggestions.sys.mjs",
   constructConversationToResumeActivity:
     "moz-src:///browser/components/aiwindow/models/ConversationSuggestions.sys.mjs",
   MemoriesManager:
@@ -87,6 +87,10 @@ ChromeUtils.defineESModuleGetters(lazy, {
   UrlbarShared: "chrome://browser/content/urlbar/UrlbarShared.mjs",
   SmartWindowTelemetry:
     "moz-src:///browser/components/aiwindow/ui/modules/SmartWindowTelemetry.sys.mjs",
+  isResumeActivityMemoryDismissed:
+    "moz-src:///browser/components/aiwindow/ui/modules/ResumeActivityDismissals.sys.mjs",
+  dismissResumeActivityMemory:
+    "moz-src:///browser/components/aiwindow/ui/modules/ResumeActivityDismissals.sys.mjs",
 });
 
 ChromeUtils.defineLazyGetter(lazy, "log", function () {
@@ -136,7 +140,7 @@ ChromeUtils.defineLazyGetter(lazy, "log", function () {
  */
 
 /**
- * @typedef {"button" | "enter" | "follow-up" | "shortcuts" | "starter" | "suggestion"} ChatSubmitType
+ * @typedef {"button" | "enter" | "follow-up" | "menu" | "resume" | "retry" | "shortcuts" | "starter" | "suggestion"} ChatSubmitType
  */
 
 const MODE = {
@@ -165,7 +169,11 @@ const TAB_FAVICON_CHAT =
   "chrome://browser/content/aiwindow/assets/ask-icon.svg";
 const PREF_CHAT_INTERACTION_COUNT = "browser.smartwindow.chat.interactionCount";
 const PREF_HIDE_TOP_SITES = "browser.smartwindow.hideTopSites";
+// Hide Top Sites if the user has turned Shortcuts off in the New Tab settings.
+const PREF_TOPSITES_FEED_ENABLED =
+  "browser.newtabpage.activity-stream.feeds.topsites";
 const PREF_AGENT_ENABLED = "browser.smartwindow.agent.enabled";
+const PREF_RESUME_CARDS = "browser.smartwindow.resumeCards.enabled";
 const MAX_INTERACTION_COUNT = 1000;
 const HISTORY_MENU_MAX_RECENT_CHATS = 6;
 
@@ -179,7 +187,15 @@ const HISTORY_MENU_EVENTS = [
 ];
 const MAX_SIDEBAR_STARTER_CACHE_KEYS = 20;
 const MAX_TOP_SITES = 8;
-const MAX_PILL_COUNT = 3;
+// Temporary cap until regular starters increase to 5.
+const MAX_PILL_COUNT = 6;
+// Show 3 undismissed candidates from the larger generated pool.
+const MAX_RESUME_PILLS_DISPLAYED = 3;
+// Show up to 4 cards from the generated pool.
+const MAX_RESUME_CARDS_DISPLAYED = 4;
+// TEMP: English-only workaround. Remove once resume headlines support
+// localization - see Bug 2066263.
+const RESUME_HEADLINE_PREFIX_RE = /^\s*pick\s+up\b[\s:;,.—-]*/iu;
 
 // 1-6 are MLPA spec codes; 7 is set locally for Fastly-blocked 406s.
 const ERROR_TELEMETRY_NAME_BY_CODE = {
@@ -233,6 +249,7 @@ export class AIWindow extends MozLitElement {
     availableModels: { type: Object, state: true },
     selectedModelId: { type: String, state: true },
     topSites: { type: Array, state: true },
+    resumeCards: { type: Array, state: true },
     startersResolved: { type: Boolean, state: true },
     recentChats: { type: Array, state: true },
   };
@@ -251,6 +268,8 @@ export class AIWindow extends MozLitElement {
   #smartbarReadyPromise;
   #resolveSmartbarReady;
   #sidebarStarterCache = new Map();
+  // The panel-list opened most recently, in any shadow root.
+  #openPanel = null;
   #smartbarResizeObserver = null;
   #windowModeObserver = null;
   #topSitesObserver = null;
@@ -271,6 +290,15 @@ export class AIWindow extends MozLitElement {
     return (
       this.memoriesConversationPref ||
       this.memoriesHistoryPref ||
+      this.#hasMemories
+    );
+  }
+
+  // Skip resume loading UI when generation cannot produce results.
+  get #resumeActivityMemoriesEnabled() {
+    return (
+      (this.#memoriesToggled ??
+        (this.memoriesConversationPref || this.memoriesHistoryPref)) &&
       this.#hasMemories
     );
   }
@@ -443,9 +471,23 @@ export class AIWindow extends MozLitElement {
     );
     XPCOMUtils.defineLazyPreferenceGetter(
       this,
+      "topSitesFeedPref",
+      PREF_TOPSITES_FEED_ENABLED,
+      true,
+      () => this.#syncTopSites()
+    );
+    XPCOMUtils.defineLazyPreferenceGetter(
+      this,
       "agentEnabledPref",
       PREF_AGENT_ENABLED,
       false
+    );
+    XPCOMUtils.defineLazyPreferenceGetter(
+      this,
+      "resumeCardsPref",
+      PREF_RESUME_CARDS,
+      false,
+      () => this.requestUpdate()
     );
     // TODO Bug 2053495: remove with mistral release pref
     XPCOMUtils.defineLazyPreferenceGetter(
@@ -470,6 +512,7 @@ export class AIWindow extends MozLitElement {
     this.mode = this.#detectModeFromContext();
     this.showStarters = false;
     this.topSites = [];
+    this.resumeCards = [];
     this.startersResolved = false;
     this.recentChats = [];
     this.showFooter = this.mode === MODE.FULLPAGE;
@@ -606,6 +649,7 @@ export class AIWindow extends MozLitElement {
     for (const eventName of HISTORY_MENU_EVENTS) {
       this.ownerDocument.addEventListener(eventName, this.#onHistoryMenuEvent);
     }
+    this.ownerDocument.addEventListener("showing", this.#onPanelShowing);
 
     Services.prefs.addObserver(
       PREF_MODEL_CHOICE,
@@ -894,6 +938,8 @@ export class AIWindow extends MozLitElement {
         this.#onHistoryMenuEvent
       );
     }
+    this.ownerDocument.removeEventListener("showing", this.#onPanelShowing);
+    this.#openPanel = null;
     if (this.#smartbar) {
       this.#smartbar.removeEventListener(
         "aiwindow-memories-toggle:on-change",
@@ -1305,14 +1351,10 @@ export class AIWindow extends MozLitElement {
       if (shouldLoadResumeStarters) {
         this.#canLoadResumeStarters = false;
 
-        // Ensure #hasMemories is current before checking it.
-        if (!this.memoriesConversationPref && !this.memoriesHistoryPref) {
-          await this.#refreshHasMemories();
-        }
-        const memoriesEnabled =
-          this.#memoriesToggled ?? this.#memoriesIconShown;
+        // Refresh the memory gate before loading resume starters.
+        await this.#refreshHasMemories();
 
-        if (memoriesEnabled) {
+        if (this.#resumeActivityMemoriesEnabled) {
           resumeStartersPromise =
             lazy.generateResumeActivityConversationStarters();
 
@@ -1362,11 +1404,26 @@ export class AIWindow extends MozLitElement {
           starters = sidebarStarters;
         }
       } else if (resumeStartersPromise) {
-        const resumeStarters = this.#resumeActivitiesToStarterPrompts(
+        const resumeActivities = this.#filterResumeActivities(
           await resumeStartersPromise
-        ).slice(0, lazy.MAX_NUM_MEMORIES_FOR_RESUME_ACTIVITY);
+        );
 
-        if (selectedTab === this.#getCurrentTab()) {
+        if (abortController.signal.aborted) {
+          return;
+        }
+
+        // TODO Bug 2067871: this is already the permanent path; drop the
+        // pill fallback below once cards ship for real.
+        this.resumeCards = resumeActivities.slice(
+          0,
+          MAX_RESUME_CARDS_DISPLAYED
+        );
+
+        // The temporary pref replaces resume pills with cards.
+        if (!this.resumeCardsPref && selectedTab === this.#getCurrentTab()) {
+          const resumeStarters = this.#resumeActivitiesToStarterPrompts(
+            resumeActivities
+          ).slice(0, MAX_RESUME_PILLS_DISPLAYED);
           starters = [...resumeStarters, ...starters].slice(0, MAX_PILL_COUNT);
         }
       }
@@ -1381,24 +1438,24 @@ export class AIWindow extends MozLitElement {
     }
   }
 
-  #resumeActivitiesToStarterPrompts(resumeActivities) {
-    return resumeActivities.flatMap(({ memory, content }) => {
-      if (!content.headline.trim()) {
-        return [];
-      }
+  #filterResumeActivities(resumeActivities) {
+    return resumeActivities.filter(
+      ({ memory, content }) =>
+        content.headline.trim() &&
+        !lazy.isResumeActivityMemoryDismissed(memory.id)
+    );
+  }
 
-      return [
-        {
-          text: content.headline,
-          type: "resume",
-          previewIcons: content.previewTabs.map(({ url }) => ({
-            iconSrc: `page-icon:${url}`,
-          })),
-          memory,
-          content,
-        },
-      ];
-    });
+  #resumeActivitiesToStarterPrompts(resumeActivities) {
+    return resumeActivities.map(({ memory, content }) => ({
+      text: content.headline,
+      type: "resume",
+      previewIcons: content.previewTabs.map(({ url }) => ({
+        iconSrc: `page-icon:${url}`,
+      })),
+      memory,
+      content,
+    }));
   }
 
   /**
@@ -1431,31 +1488,37 @@ export class AIWindow extends MozLitElement {
     }
 
     if (this.showStarters && recordTelemetry) {
-      this.onQuickPromptDisplayed(this.#starters.length);
+      const resumePrompts = this.#starters.filter(
+        starter => starter.type === "resume"
+      ).length;
+      this.onQuickPromptDisplayed(this.#starters.length, resumePrompts);
     }
     this.requestUpdate();
   }
 
   /**
-   * Loads the user's Top Sites and renders a single row of them below the
-   * Smartbar in fullpage mode. Sponsored sites are filtered out; we only keep
-   * the first MAX_TOP_SITES entries to fit a single row.
+   * Whether Top Sites should be shown: the user must not have hidden them in
+   * Smart Window, and Shortcuts must still be enabled in the New Tab settings.
    *
    * @private
    */
+  get #topSitesEnabled() {
+    return !this.hideTopSitesPref && this.topSitesFeedPref;
+  }
+
   /**
    * Loads or clears Top Sites based on the current mode and the
-   * hideTopSites pref. Invoked on connect and whenever the pref changes
+   * Top Sites prefs. Invoked on connect and whenever either pref changes
    * so every open AI window reflects the new value.
    *
    * @private
    */
   #syncTopSites() {
     if (this.mode === MODE.FULLPAGE) {
-      Glean.smartWindow.topsitesEnabled.set(!this.hideTopSitesPref);
+      Glean.smartWindow.topsitesEnabled.set(this.#topSitesEnabled);
     }
 
-    if (this.mode === MODE.FULLPAGE && !this.hideTopSitesPref) {
+    if (this.mode === MODE.FULLPAGE && this.#topSitesEnabled) {
       // Only the visible tab can exhibit the prompts-row layout shift, so gate
       // its Top Sites on starter resolution (see #renderStarterPrompts).
       // Background tabs are hidden and never reload starters on tab switch, so
@@ -1752,8 +1815,17 @@ export class AIWindow extends MozLitElement {
           contextPageUrl,
           conversation: this.#conversation,
           window: this.#topChromeWindow,
+          isFullPage: this.mode === MODE.FULLPAGE,
         })
       ) {
+        // This command renders the monitor chat UI, so switch to the chat
+        // layout as if communication has started
+        if (
+          this.mode === MODE.FULLPAGE &&
+          !this.classList.contains("chat-active")
+        ) {
+          this.#initActiveChatlayout();
+        }
         return;
       }
 
@@ -1862,6 +1934,14 @@ export class AIWindow extends MozLitElement {
    * @param {SmartbarAction} [options.detectedIntent] - The detected smarbar intent
    * @param {number} [options.inlineMentionsCount] - Number of inline mentions
    * @param {string} [options.sourceLocation] - Override smartbar location
+   * @param {boolean} [options.skipPromptGeneration=false] - When true, `text`
+   *   is already present in the conversation as a user turn, so skip
+   *   generatePrompt and only add the assistant message the stream writes
+   *   into. `text` is still used for telemetry.
+   * @param {boolean} [options.skipSystemPromptRefresh=false] - When true, keep
+   *   the conversation's existing system prompt instead of reloading it.
+   * @param {object} [options.assistantToolUIData] - Tool UI attached to the
+   *   assistant message so it renders alongside the streamed response.
    */
   submitChatMessage({
     text,
@@ -1871,6 +1951,9 @@ export class AIWindow extends MozLitElement {
     detectedIntent,
     inlineMentionsCount = 0,
     sourceLocation,
+    skipPromptGeneration = false,
+    skipSystemPromptRefresh = false,
+    assistantToolUIData,
   }) {
     const trimmed = String(text ?? "").trim();
     if (!trimmed) {
@@ -1901,9 +1984,12 @@ export class AIWindow extends MozLitElement {
     }
 
     this.#recordChatInteraction();
-    this.#fetchAIResponse(trimmed, {
+    this.#fetchAIResponse(skipPromptGeneration ? undefined : trimmed, {
       ...this.#createUserRoleOpts(contextMentions),
       pageUrl: contextPageUrl,
+      ensureAssistantResponse: skipPromptGeneration,
+      skipSystemPromptRefresh,
+      assistantToolUIData,
     });
     this.#dispatchChromeEvent(
       "ai-window:smartbar-input",
@@ -1969,17 +2055,31 @@ export class AIWindow extends MozLitElement {
       return;
     }
 
-    Glean.smartWindow.quickPromptClicked.record({
-      location: this.mode,
-      chat_id: this.conversationId,
-      message_seq: this.#conversation?.messageCount ?? 0,
-      starter: true,
-    });
+    this.#recordQuickPromptClicked("resume");
 
     this.#generateResumeActivityConversation(resumePrompt).catch(e =>
       lazy.log.error("[Prompts] Resume-activity generation failed:", e)
     );
   }
+
+  /**
+   * Dismisses the memory for the session and removes its pill from this tab.
+   *
+   * @param {CustomEvent} event - The prompt-dismissed event
+   * @private
+   */
+  #handlePromptDismissed = event => {
+    const { memory } = event.detail;
+    lazy.dismissResumeActivityMemory(memory.id);
+
+    const remaining = this.#conversation.transientStarters.filter(
+      starter => starter.memory?.id !== memory.id
+    );
+    this.#conversation.transientStarters = remaining;
+    this.#renderStarterPrompts(remaining, true, false);
+
+    this.#recordQuickPromptDismissed();
+  };
 
   /**
    * Builds a conversation seeded with the selected resume-activity
@@ -1996,14 +2096,22 @@ export class AIWindow extends MozLitElement {
   async #generateResumeActivityConversation(resumePrompt) {
     const conversationAtClick = this.#conversation;
     let conversation = null;
+    // Only the memory-driven builder composes a bespoke system prompt that has
+    // to survive the request; the plain fallback leaves the system prompt to
+    // #fetchAIResponse, which builds it for the model it resolves.
+    let hasBespokeSystemPrompt = false;
     this.#isGeneratingResumeActivityConversation = true;
     try {
-      if (this.#memoriesToggled ?? this.#memoriesIconShown) {
+      if (this.#resumeActivityMemoriesEnabled) {
         try {
-          conversation = await lazy.constructConversationToResumeActivity({
-            memory: resumePrompt.memory,
-            content: resumePrompt.content,
-          });
+          conversation = await lazy.constructConversationToResumeActivity(
+            {
+              memory: resumePrompt.memory,
+              content: resumePrompt.content,
+            },
+            conversationAtClick?.id
+          );
+          hasBespokeSystemPrompt = !!conversation;
         } catch (e) {
           lazy.log.error(
             "[Prompts] Failed to create resume-activity conversation:",
@@ -2013,7 +2121,10 @@ export class AIWindow extends MozLitElement {
       }
       if (!conversation) {
         try {
-          conversation = await this.#buildPlainResumeConversation(resumePrompt);
+          conversation = await this.#buildPlainResumeConversation(
+            resumePrompt,
+            conversationAtClick?.id
+          );
         } catch (e) {
           lazy.log.error(
             "[Prompts] Failed to create plain resume-activity conversation:",
@@ -2043,13 +2154,31 @@ export class AIWindow extends MozLitElement {
         checked: false,
       })
     );
-    await this.reloadAndGenerate(conversation, {
-      uiType: "tab-group-confirmation",
-      toolCallId: `resume-activity-${resumePrompt.memory.id}`,
-      properties: {
-        actionType: "open_tabs",
-        tabGroupLabel: resumePrompt.text,
-        tabs,
+    const strippedHeadline =
+      resumePrompt.text.replace(RESUME_HEADLINE_PREFIX_RE, "").trim() ||
+      resumePrompt.text.trim();
+
+    // The conversation was built with its user turn already appended, so the
+    // request only needs real-time context injected before it goes out.
+    const userMessage = conversation.messages.at(-1);
+    await conversation.injectRealTimeContext(userMessage, {});
+    this.openConversation(conversation);
+    this.submitChatMessage({
+      text: userMessage?.content?.body ?? resumePrompt.content.headline,
+      submitType: "resume",
+      skipPromptGeneration: true,
+      skipSystemPromptRefresh: hasBespokeSystemPrompt,
+      assistantToolUIData: {
+        uiType: "tab-group-confirmation",
+        toolCallId: `resume-activity-${resumePrompt.memory.id}`,
+        isResumeActivity: true,
+        properties: {
+          actionType: "open_tabs",
+          tabGroupLabel:
+            strippedHeadline.charAt(0).toUpperCase() +
+            strippedHeadline.slice(1),
+          tabs,
+        },
       },
     });
   }
@@ -2059,19 +2188,21 @@ export class AIWindow extends MozLitElement {
    * no memory content in the system prompt - used when memories are
    * toggled off, or as a fallback if the memory-driven builder fails.
    *
+   * The engine is left for #fetchAIResponse to build, so the system prompt
+   * loaded here is a placeholder that keeps the system message ahead of the
+   * user turn; #fetchAIResponse rewrites it for the model it resolves.
+   *
    * @param {object} resumePrompt
+   * @param {string} [conversationId] - Id to reuse for the new conversation,
+   *   so telemetry keeps the chat_id of the conversation the pill was clicked
+   *   in. A new id is generated when omitted.
    * @returns {Promise<ChatConversation>}
    */
-  async #buildPlainResumeConversation(resumePrompt) {
-    const { engine, parameters } = await lazy.buildEngineForFeature(
-      lazy.MODEL_FEATURES.CHAT,
-      { flowId: null, modelChoiceIdOverride: this.#selectedModelChoiceId }
-    );
+  async #buildPlainResumeConversation(resumePrompt, conversationId) {
     const conversation = new lazy.ChatConversation({
+      ...(conversationId ? { id: conversationId } : {}),
       title: resumePrompt.content.headline,
     });
-    conversation.engine = engine;
-    conversation.parameters = parameters;
     await conversation.loadSystemPrompt();
     conversation.addUserMessage(resumePrompt.content.headline);
     conversation.securityProperties.setPrivateData();
@@ -2085,15 +2216,43 @@ export class AIWindow extends MozLitElement {
    * Called for both conversation starters and follow-up suggestions.
    *
    * @param {number} prompts - Number of prompts shown
+   * @param {number} [resumePrompts] - Number of those prompts that were
+   *   resume pills
    */
-  onQuickPromptDisplayed = prompts => {
+  onQuickPromptDisplayed = (prompts, resumePrompts = 0) => {
     Glean.smartWindow.quickPromptDisplayed.record({
       location: this.mode,
       chat_id: this.conversationId,
       message_seq: this.#conversation?.messageCount ?? 0,
       prompts,
+      resume_prompts: resumePrompts,
     });
   };
+
+  /**
+   * Records a quick_prompt_clicked Glean event.
+   *
+   * @param {"default"|"resume"|"followup"} starterType - The type of prompt
+   *   that was clicked.
+   */
+  #recordQuickPromptClicked(starterType) {
+    Glean.smartWindow.quickPromptClicked.record({
+      location: this.mode,
+      chat_id: this.conversationId,
+      message_seq: this.#conversation?.messageCount ?? 0,
+      starter: starterType !== "followup",
+      starter_type: starterType,
+    });
+  }
+
+  /**
+   * Records a quick_prompt_dismissed Glean event.
+   */
+  #recordQuickPromptDismissed() {
+    Glean.smartWindow.quickPromptDismissed.record({
+      chat_id: this.conversationId,
+    });
+  }
 
   /**
    * Records a quick_prompt_clicked Glean event and submits the prompt.
@@ -2105,12 +2264,7 @@ export class AIWindow extends MozLitElement {
    * supplied by the prompt
    */
   onQuickPromptClicked(text, starter, contextMentionsOverride) {
-    Glean.smartWindow.quickPromptClicked.record({
-      location: this.mode,
-      chat_id: this.conversationId,
-      message_seq: this.#conversation?.messageCount ?? 0,
-      starter,
-    });
+    this.#recordQuickPromptClicked(starter ? "default" : "followup");
 
     const { pageUrl: contextPageUrl, contextWebsites } =
       this.#smartbar.getCurrentContextData();
@@ -2243,6 +2397,12 @@ export class AIWindow extends MozLitElement {
     }
   }
 
+  #initActiveChatlayout() {
+    this.showStarters = false;
+    this.showFooter = false;
+    this.#setBrowserContainerActiveState(true);
+  }
+
   /**
    * Fetches an AI response based on the current user prompt.
    * Validates the prompt, updates conversation state, streams the response,
@@ -2326,6 +2486,11 @@ export class AIWindow extends MozLitElement {
     conversation.on("chat-conversation:message-update", onUpdate);
 
     try {
+      // Kicked off before the engine and prompt work, which it has no data
+      // dependency on, so a cold or expired token doesn't add a round-trip
+      // between the user hitting send and the request going out.
+      const fxAccountTokenPromise = lazy.openAIEngine.getFxAccountToken();
+
       const { engine, parameters } = await lazy.buildEngineForFeature(
         lazy.MODEL_FEATURES.CHAT,
         {
@@ -2371,6 +2536,7 @@ export class AIWindow extends MozLitElement {
         browsingContext,
         mode: this.mode,
         signal,
+        fxAccountTokenPromise,
       });
 
       ChromeUtils.addProfilerMarker(
@@ -3045,6 +3211,21 @@ export class AIWindow extends MozLitElement {
     }
   };
 
+  // Closes the previously open panel-list before a new one opens. Otherwise the
+  // popover API evicts it from the top layer without panel-list clearing
+  // `open`, leaving it painted at a position that no longer resolves. Only
+  // popovers stack this way, so submenus and XUL-hosted lists are left alone.
+  #onPanelShowing = event => {
+    const panel = event.composedPath()[0];
+    if (panel?.localName !== "panel-list" || !panel.hasAttribute("popover")) {
+      return;
+    }
+    if (panel !== this.#openPanel && this.#openPanel?.open) {
+      this.#openPanel.hide();
+    }
+    this.#openPanel = panel;
+  };
+
   // Renders the <smartwindow-history-menu> for the given mode.
   #historyMenu(mode) {
     return html`<smartwindow-history-menu
@@ -3069,32 +3250,6 @@ export class AIWindow extends MozLitElement {
     }
     this.openConversation(conversation);
     this.#continueAfterToolResult();
-  }
-
-  /**
-   * Opens a pre-built conversation whose last message is a user turn and
-   * generates the assistant reply. Unlike reloadAndContinue (which resumes
-   * an in-flight tool turn), this adds the assistant placeholder the stream
-   * needs, and skips the usual system-prompt reload since the conversation
-   * was just built with its own bespoke system prompt.
-   *
-   * @param {ChatConversation} conversation
-   * @param {object} [assistantToolUIData] - Attached to the assistant
-   *   message so it renders alongside the streamed response (e.g. a
-   *   tab-selection card for resume-activity starters).
-   */
-  async reloadAndGenerate(conversation, assistantToolUIData) {
-    if (!conversation) {
-      return;
-    }
-    const userMessage = conversation.messages.at(-1);
-    await conversation.injectRealTimeContext(userMessage, {});
-    this.openConversation(conversation);
-    this.#fetchAIResponse(undefined, {
-      ensureAssistantResponse: true,
-      skipSystemPromptRefresh: true,
-      assistantToolUIData,
-    });
   }
 
   async #continueAfterToolResult() {
@@ -3463,6 +3618,8 @@ export class AIWindow extends MozLitElement {
                     .mode=${this.mode}
                     @SmartWindowPrompt:prompt-selected=${this
                       .#handlePromptSelected}
+                    @SmartWindowPrompt:prompt-dismissed=${this
+                      .#handlePromptDismissed}
                   ></smartwindow-prompts>
                 `
               : ""}
@@ -3473,6 +3630,13 @@ export class AIWindow extends MozLitElement {
                     @SmartWindowTopSites:site-selected=${this
                       .#handleTopSiteSelected}
                   ></smartwindow-topsites>
+                `
+              : ""}
+            ${this.resumeCardsPref
+              ? html`
+                  <smartwindow-resume-section
+                    .cards=${this.resumeCards}
+                  ></smartwindow-resume-section>
                 `
               : ""}
           `}

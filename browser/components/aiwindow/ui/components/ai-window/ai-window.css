@@ -19,6 +19,8 @@
 
 /* Fullpage: browser collapsed (0 height) until chat starts, showing prompts and smartbar */
 :host([mode="fullpage"]) {
+  /* stylelint-disable-next-line stylelint-plugin-mozilla/no-base-design-tokens */
+  box-shadow: inset 0 80px 80px -80px color-mix(in srgb, light-dark(var(--color-violet-70), var(--color-violet-50)) 60%, transparent);
   grid-template-areas:
     "browser"
     "."
@@ -26,9 +28,11 @@
     "smartbar"
     "prompts"
     "topsites"
+    "resume-section"
     "."
     "footer";
-  grid-template-rows: 0 1fr auto auto auto auto 1fr auto;
+  /* Preserve space above the heading as the resume section grows. */
+  grid-template-rows: 0 minmax(var(--space-xlarge), 1fr) auto auto auto auto auto 1fr auto;
   align-content: stretch;
 }
 
@@ -164,6 +168,13 @@ smartwindow-prompts {
   width: 100%;
 }
 
+/* Match the smartbar/fullpage-header content column so the pill row lines
+ * up with the input above it, and so overflow (for scrolling) triggers at
+ * a consistent width instead of depending on the window's own width. */
+:host([mode="fullpage"]) smartwindow-prompts {
+  max-width: var(--smartwindow-content-max-width);
+}
+
 .chat-header {
   box-sizing: border-box;
   justify-content: flex-end;
@@ -199,7 +210,7 @@ moz-button.close-sidebar-button {
     --button-background-color-ghost: var(--smartwindow-ghost-button-background);
     --button-background-color-ghost-hover: var(--smartwindow-ghost-button-background-hover);
     --button-background-color-ghost-active: var(--smartwindow-ghost-button-background-active);
-    --button-text-color-ghost: var(--smartwindow-ghost-button-text);
+    --button-text-color-ghost: var(--smartwindow-text-color);
 
     @media -moz-pref("browser.nova.enabled") {
       --button-icon-fill: light-dark(var(--color-violet-desaturated-60), var(--color-violet-desaturated-40));
@@ -227,6 +238,7 @@ moz-button.close-sidebar-button {
       background:
         image(var(--button-background-color-ghost)) padding-box,
         var(--nova-border-gradient) border-box;
+      color: var(--button-text-color-ghost);
     }
 
     &:is(:hover, :active)::part(button) {
@@ -296,6 +308,20 @@ smartwindow-topsites {
   :host(.chat-active) & {
     display: none;
   }
+}
+
+smartwindow-resume-section {
+  grid-area: resume-section;
+  width: 100%;
+
+  :host(.chat-active) & {
+    display: none;
+  }
+}
+
+/* Align the card grid with the content above it. */
+:host([mode="fullpage"]) smartwindow-resume-section {
+  max-width: var(--smartwindow-content-max-width);
 }
 
 smartwindow-footer {

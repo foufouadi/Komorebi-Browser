@@ -7,6 +7,12 @@ with Files("**"):
     SCHEDULES.inclusive += ["android-hw-gfx"]
 with Files("wr/**"):
     BUG_COMPONENT = ("Core", "Graphics: WebRender")
+with Files("cairo/**"):
+    BUG_COMPONENT = ("Core", "Graphics: Cairo")
+with Files("skia/**"):
+    BUG_COMPONENT = ("Core", "Graphics: Skia")
+with Files("angle/**"):
+    BUG_COMPONENT = ("Core", "Graphics: ANGLE")
 
 DIRS += [
     "cairo",

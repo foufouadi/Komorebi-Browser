@@ -13,9 +13,6 @@ import androidx.core.app.NotificationManagerCompat
 import com.google.android.play.core.review.ReviewManagerFactory
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.MainScope
-import kotlinx.coroutines.SupervisorJob
 import mozilla.components.concept.ai.controls.AIFeatureBlock
 import mozilla.components.concept.ai.controls.AIFeatureRegistry
 import mozilla.components.feature.addons.AddonManager
@@ -25,6 +22,8 @@ import mozilla.components.feature.addons.update.DefaultAddonUpdater
 import mozilla.components.feature.autofill.AutofillConfiguration
 import mozilla.components.feature.summarize.PageSummaryFeature
 import mozilla.components.feature.summarize.settings.SummarizationSettings
+import mozilla.components.feature.tabdata.coordinator.DefaultTabDataCoordinator
+import mozilla.components.feature.tabdata.coordinator.TabDataCoordinator
 import mozilla.components.lib.ai.controls.AIFeatureBlockStorage
 import mozilla.components.lib.ai.controls.dataStore
 import mozilla.components.lib.ai.controls.default
@@ -61,9 +60,12 @@ import org.mozilla.fenix.components.appstate.setup.checklist.getSetupChecklistCo
 import org.mozilla.fenix.components.bookmarks.lastSavedFolderCache
 import org.mozilla.fenix.components.ipprotection.IPProtection
 import org.mozilla.fenix.components.ipprotection.IPProtectionAuthSources
+import org.mozilla.fenix.components.lens.LensImageSearch
+import org.mozilla.fenix.components.listentopage.ListenToPage
 import org.mozilla.fenix.components.llm.Llm
 import org.mozilla.fenix.components.llm.ext.accessTokenProvider
 import org.mozilla.fenix.components.metrics.MetricsMiddleware
+import org.mozilla.fenix.components.tabs.DefaultTabRepository
 import org.mozilla.fenix.crashes.CrashReportingAppMiddleware
 import org.mozilla.fenix.crashes.SettingsCrashReportCache
 import org.mozilla.fenix.datastore.pocketStoriesSelectedCategoriesDataStore
@@ -79,6 +81,8 @@ import org.mozilla.fenix.home.PocketMiddleware
 import org.mozilla.fenix.home.SettingsBackedPocketSettings
 import org.mozilla.fenix.home.blocklist.BlocklistHandler
 import org.mozilla.fenix.home.blocklist.BlocklistMiddleware
+import org.mozilla.fenix.home.collections.migration.CollectionsMigrationRepository
+import org.mozilla.fenix.home.collections.migration.DefaultCollectionsMigrationRepository
 import org.mozilla.fenix.home.middleware.HomeTelemetryMiddleware
 import org.mozilla.fenix.home.setup.store.DefaultSetupChecklistRepository
 import org.mozilla.fenix.home.setup.store.SetupChecklistPreferencesMiddleware
@@ -103,6 +107,7 @@ import org.mozilla.fenix.termsofuse.store.DefaultTermsOfUsePromptRepository
 import org.mozilla.fenix.utils.Settings
 import org.mozilla.fenix.utils.isLargeScreenSize
 import org.mozilla.fenix.wifi.WifiConnectionMonitor
+import org.mozilla.gecko.search.SearchWidgetProvider
 
 private const val AMO_COLLECTION_MAX_CACHE_AGE = 2 * 24 * 60L // Two days in minutes
 
@@ -115,6 +120,13 @@ private const val AMO_COLLECTION_MAX_CACHE_AGE = 2 * 24 * 60L // Two days in min
  */
 class Components(
     private val context: Context,
+    /**
+     * A [CoroutineScope] that is tied to the lifetime of the application process.
+     *
+     * Note: Tasks should be scoped to the container which holds their UI. If necessary, applicationScope can be used
+     * for top-level background work that must remain active for the whole duration of the application.
+     */
+    val applicationScope: CoroutineScope,
     private val currentTimeMillis: () -> Long = { System.currentTimeMillis() },
 ) {
     val backgroundServices by lazyMonitored {
@@ -129,11 +141,12 @@ class Components(
             core.lazyRemoteTabsStorage,
             core.lazyAutofillStorage,
             strictMode,
+            applicationScope,
         )
     }
     val services by lazyMonitored { Services(context, core.store, backgroundServices.accountManager) }
     val core by lazyMonitored {
-        Core(context, analytics.crashReporter, strictMode, performance.visualCompletenessQueue)
+        Core(context, analytics.crashReporter, strictMode, performance.visualCompletenessQueue, applicationScope)
     }
 
     val useCases by lazyMonitored {
@@ -171,6 +184,7 @@ class Components(
             useCases.searchUseCases,
             core.webAppManifestStorage,
             core.engine,
+            applicationScope,
         )
     }
 
@@ -369,6 +383,20 @@ class Components(
             }
     }
 
+    val lensImageSearch by lazyMonitored {
+        LensImageSearch(
+            appStore = appStore,
+            uploader = {
+                LensImageUploader(
+                    context = context,
+                    client = core.client,
+                    userAgent = core.engine.settings.userAgentString ?: "",
+                )
+            },
+            browserUseCases = { useCases.fenixBrowserUseCases },
+        )
+    }
+
     private fun setupChecklistState() =
         if (settings.showSetupChecklist) {
             val type = FxNimbus.features.setupChecklist.value().setupChecklistType
@@ -416,10 +444,7 @@ class Components(
         DefaultFenixSettingsIndexer(
             context = context,
             additionalProviders =
-                settingsSearchProviders(
-                    summarizationFeatureConfiguration = core.summarizeFeatureSettings,
-                    isFirefoxLabsEnabled = { settings.enableFirefoxLabs },
-                ),
+                settingsSearchProviders(summarizationFeatureConfiguration = core.summarizeFeatureSettings),
         )
     }
 
@@ -437,6 +462,10 @@ class Components(
 
     val emailMasksRepository: EmailMasksRepository by lazyMonitored {
         DefaultEmailMasksRepository(settings)
+    }
+
+    val collectionsMigrationRepository: CollectionsMigrationRepository by lazyMonitored {
+        DefaultCollectionsMigrationRepository(settings)
     }
 
     val relayFeatureIntegration by lazyMonitored {
@@ -461,22 +490,19 @@ class Components(
         SummarizationSettings.dataStore(context)
     }
 
-    val summarizationSettingsCache by lazyMonitored {
-        SummarizationSettingsCache(
-            settings = summarizationSettings,
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
-        )
+    val listenToPage by lazyMonitored {
+        ListenToPage(browserStore = core.store, context = context, scope = applicationScope)
     }
 
     val aiFeatureRegistry by lazyMonitored {
-        AIFeatureRegistry.default(scope = MainScope(), context = context).also {
+        AIFeatureRegistry.default(scope = applicationScope, context = context).also {
             if (settings.shakeToSummarizeFeatureFlagEnabled) {
                 it.register(PageSummaryFeature(summarizationSettings))
             }
             it.register(
                 VoiceSearchAIControlFeature(
                     settings = settings,
-                    onUpdateWidget = { VoiceSearchAIControlFeature.updateWidget(context) },
+                    onUpdateWidget = { SearchWidgetProvider.updateAllWidgets(context) },
                 )
             )
         }
@@ -515,6 +541,16 @@ class Components(
             lazyAppStore = lazy { appStore },
             settings = settings,
             context = context,
+        )
+    }
+
+    val tabDataCoordinator: TabDataCoordinator by lazyMonitored {
+        DefaultTabDataCoordinator(
+            tabRepository = DefaultTabRepository(browserStore = core.store),
+            tabGroupRepository = core.tabGroupRepository,
+            isInactiveTabsEnabled = settings::inactiveTabsAreEnabled,
+            isTabGroupsEnabled = settings::tabGroupsEnabled,
+            scope = applicationScope,
         )
     }
 }

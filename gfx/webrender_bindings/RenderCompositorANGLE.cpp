@@ -555,7 +555,7 @@ RenderedFrameId RenderCompositorANGLE::EndFrame(
   return frameId;
 }
 
-RefPtr<layers::Fence> RenderCompositorANGLE::GetAndResetReleaseFence() {
+RefPtr<layers::Fence> RenderCompositorANGLE::GetAndResetReadFence() {
   RefPtr<layers::Fence> fence;
   if (mFence) {
     fence = mFence->CloneFromHandle();
@@ -837,10 +837,11 @@ void RenderCompositorANGLE::CompositorEndFrame() {
 }
 
 void RenderCompositorANGLE::Bind(wr::NativeTileId aId,
-                                 wr::DeviceIntPoint* aOffset, uint32_t* aFboId,
+                                 wr::DeviceIntPoint* aOffset,
+                                 uint64_t* aSurfaceHandle,
                                  wr::DeviceIntRect aDirtyRect,
                                  wr::DeviceIntRect aValidRect) {
-  mDCLayerTree->Bind(aId, aOffset, aFboId, aDirtyRect, aValidRect);
+  mDCLayerTree->Bind(aId, aOffset, aSurfaceHandle, aDirtyRect, aValidRect);
 }
 
 void RenderCompositorANGLE::Unbind() { mDCLayerTree->Unbind(); }

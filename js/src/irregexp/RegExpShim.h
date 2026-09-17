@@ -404,7 +404,8 @@ inline constexpr size_t RoundUpToPowerOfTwo(size_t value) {
 
 template <typename T>
 constexpr bool IsPowerOfTwo(T value) {
-  return std::has_single_bit(value);
+  static_assert(std::is_integral_v<T>);
+  return value > 0 && (value & (value - 1)) == 0;
 }
 
 constexpr uint32_t CountPopulation(uint32_t value) {
@@ -1164,14 +1165,10 @@ using DisallowGarbageCollection = JS::AutoAssertNoGC;
 
 // V8 uses this inside DisallowGarbageCollection regions to turn
 // allocation back on before throwing a stack overflow exception or
-// handling interrupts. AutoSuppressGC is sufficient for the former
-// case, but not for the latter: handling interrupts can execute
-// arbitrary script code, and V8 jumps through some scary hoops to
-// "manually relocate unhandlified references" afterwards. To keep
-// things sane, we don't try to handle interrupts while regex code is
-// still on the stack. Instead, we return EXCEPTION and handle
-// interrupts in the caller. (See RegExpShared::execute.)
-
+// handling interrupts. We instead arrange to throw exceptions and do
+// any necessary work in the caller. See Isolate::StackOverflow and
+// Isolate::HandleInterrupts. AllowGarbageCollection is therefore a
+// no-op for us.
 class AllowGarbageCollection {
  public:
   AllowGarbageCollection() = default;
@@ -1474,9 +1471,9 @@ class Isolate {
   js::LifoAlloc* allocator() { return &cx_->tempLifoAlloc(); }
 
   // This is called from inside no-GC code. Instead of suppressing GC
-  // to allocate the error, we return false from Execute and call
-  // ReportOverRecursed in the caller.
-  void StackOverflow() {}
+  // to allocate the error, we set a flag on the context, return false
+  // from Execute and call ReportOverRecursed in the caller.
+  void StackOverflow() { cx_->noteDelayedOverRecursed(); }
 
 #ifndef V8_INTL_SUPPORT
   unibrow::Mapping<unibrow::Ecma262UnCanonicalize>* jsregexp_uncanonicalize() {
@@ -1604,6 +1601,11 @@ class StackLimitCheck {
 
   // Use this to check for interrupt request in C++ code.
   bool InterruptRequested() {
+#ifdef DEBUG
+    if (cx_->isolate->shouldSimulateInterrupt_) {
+      return true;
+    }
+#endif
     return cx_->hasPendingInterrupt(js::InterruptReason::CallbackUrgent);
   }
 
@@ -1620,6 +1622,7 @@ class StackLimitCheck {
 class ExternalReference {
  public:
   static const void* TopOfRegexpStack(Isolate* isolate);
+  static const void* RegexpStackPointer(Isolate* isolate);
   static size_t SizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf,
                                     regexp::Stack* regexpStack);
 };

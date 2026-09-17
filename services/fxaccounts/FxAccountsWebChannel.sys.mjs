@@ -26,6 +26,8 @@ import {
   COMMAND_PAIR_AUTHORIZE,
   COMMAND_PAIR_DECLINE,
   COMMAND_PAIR_COMPLETE,
+  COMMAND_PAIR_OAUTH_START,
+  COMMAND_PAIR_OAUTH_FINISH,
   COMMAND_PAIR_PREFERENCES,
   COMMAND_FIREFOX_VIEW,
   COMMAND_OAUTH_FLOW_IS_ACTIVE,
@@ -35,6 +37,8 @@ import {
   ON_SERVICE_ENABLED_NOTIFICATION,
   PREF_LAST_FXA_USER_UID,
   PREF_LAST_FXA_USER_EMAIL,
+  SCOPE_OLD_SYNC,
+  SCOPE_PROFILE,
   WEBCHANNEL_ID,
   log,
   logPII,
@@ -71,6 +75,12 @@ XPCOMUtils.defineLazyPreferenceGetter(
   lazy,
   "pairingEnabled",
   "identity.fxaccounts.pairing.enabled"
+);
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "pairingVersion",
+  "identity.fxaccounts.pairing.version",
+  1
 );
 XPCOMUtils.defineLazyPreferenceGetter(
   lazy,
@@ -416,6 +426,24 @@ FxAccountsWebChannel.prototype = {
           });
         break;
       }
+      case COMMAND_PAIR_OAUTH_START: {
+        this._ensurePairingEnabled(command, 2);
+        const params = await this._helpers.pairOAuthStart(data);
+        await this._channel.send(
+          { command, messageId: message.messageId, data: params },
+          sendingContext
+        );
+        break;
+      }
+      case COMMAND_PAIR_OAUTH_FINISH: {
+        this._ensurePairingEnabled(command, 2);
+        const codeAndState = await this._helpers.pairOAuthFinish(data);
+        await this._channel.send(
+          { command, messageId: message.messageId, data: codeAndState },
+          sendingContext
+        );
+        break;
+      }
       case COMMAND_PAIR_HEARTBEAT:
       case COMMAND_PAIR_SUPP_METADATA:
       case COMMAND_PAIR_AUTHORIZE:
@@ -453,6 +481,12 @@ FxAccountsWebChannel.prototype = {
         lazy.FxAccountsPairingFlow.finalizeAll();
         break;
       }
+    }
+  },
+
+  _ensurePairingEnabled(command, requiredVersion) {
+    if (!lazy.pairingEnabled || lazy.pairingVersion < requiredVersion) {
+      throw new Error(`Pairing is disabled for command: ${command}`);
     }
   },
 
@@ -656,7 +690,9 @@ FxAccountsWebChannelHelpers.prototype = {
     // Importantly, the message from (a) is the one that actually has the service information we care about
     // (eg, the sync engine selections) - (c) *will* have `services.sync` but it will be an empty object.
     // This means we need to take care to not lose the services from (a) when processing (c).
-    const signedInUser = await this._fxAccounts.getSignedInUser([
+    let signedInUser = await this._fxAccounts._internal.getUserAccountData([
+      "uid",
+      "sessionToken",
       "requestedServices",
     ]);
     let existingServices;
@@ -666,6 +702,9 @@ FxAccountsWebChannelHelpers.prototype = {
           "the webchannel found a different user signed in - signing them out."
         );
         await this._disconnect();
+        // They are no longer signed in, so everything below treats this message
+        // as a new user signing in.
+        signedInUser = null;
       } else {
         existingServices = signedInUser.requestedServices
           ? JSON.parse(signedInUser.requestedServices)
@@ -704,16 +743,41 @@ FxAccountsWebChannelHelpers.prototype = {
 
     this.setPreviousAccountHashPref(accountData.uid);
 
-    // For scenarios like user is logged in via third-party but wants
-    // to enable sync (password) the server will send an additional login command
-    // we need to ensure we don't destroy the existing session
-    if (signedInUser && signedInUser.uid === accountData.uid) {
-      await this._fxAccounts._internal.updateUserAccountData(accountData);
-      log.debug("Webchannel finished updating already logged in user.");
-    } else {
+    // Reauth can omit the stored token, while third-party auth can repeat the
+    // current session; neither should replace the device.
+    const previousSessionToken = signedInUser?.sessionToken;
+    const isReplacementSession =
+      !!previousSessionToken &&
+      !!accountData.sessionToken &&
+      previousSessionToken !== accountData.sessionToken;
+
+    if (!signedInUser) {
       await this._fxAccounts._internal.setSignedInUser(accountData);
       log.debug("Webchannel finished logging a user in.");
+      return;
     }
+
+    if (isReplacementSession) {
+      // Our device record belongs to the old session, so forget it - the next
+      // registration then creates a new record rather than trying to move the
+      // old one, which the server rejects as a device/session conflict.
+      accountData.device = null;
+      accountData.encryptedSendTabKeys = null;
+    }
+    await this._fxAccounts._internal.updateUserAccountData(accountData);
+    if (isReplacementSession) {
+      // Destroying the session also removes its device record. Failing to
+      // clean up must not fail the login we've already stored.
+      log.debug("Webchannel is destroying the previous session.");
+      try {
+        await this._fxAccounts._internal.fxAccountsClient.signOut(
+          previousSessionToken
+        );
+      } catch (ex) {
+        log.warn("failed to destroy the previous session", ex);
+      }
+    }
+    log.debug("Webchannel finished updating already logged in user.");
   },
 
   /**
@@ -784,6 +848,69 @@ FxAccountsWebChannelHelpers.prototype = {
   async oauthBegin(scopes) {
     log.debug(`Webchannel is starting a new oauth flow for scopes ${scopes}`);
     return await this._fxAccounts._internal.oauth.beginOAuthFlow(scopes);
+  },
+
+  /**
+   * Starts an OAuth flow on behalf of a pairing supplicant.
+   *
+   * The browser is the supplicant here - it owns the PKCE verifier and the
+   * private key needed to later complete the flow, but it is FxA which relays
+   * the resulting public parameters to the authority over the pairing channel.
+   *
+   * @param {string[]} [scopes] The scopes to request, defaults to the Sync scopes.
+   * @returns {Promise<object>} The OAuth parameters the authority needs, ie,
+   *   `state`, `scope`, `code_challenge`, `code_challenge_method` and
+   *   `keys_jwk`.
+   */
+  async pairOAuthStart({ scopes = [SCOPE_OLD_SYNC, SCOPE_PROFILE] } = {}) {
+    log.debug(`Webchannel is starting a pairing oauth flow for ${scopes}`);
+    const { state, scope, code_challenge, code_challenge_method, keys_jwk } =
+      await this._fxAccounts._internal.oauth.beginOAuthFlow(scopes);
+    return {
+      state,
+      scope,
+      code_challenge,
+      code_challenge_method,
+      keys_jwk,
+    };
+  },
+
+  /**
+   * Grants an OAuth authorization code for a pairing supplicant.
+   *
+   * The browser is the pairing authority here - it is already signed in, so it
+   * holds the scoped keys and the session token needed to authorize the
+   * supplicant's OAuth parameters. FxA relays the returned code and state to
+   * the supplicant over the pairing channel.
+   *
+   * @param {object} oauthParams The supplicant's OAuth parameters, as produced
+   *   by `pairOAuthStart` on the supplicant.
+   * @returns {Promise<object>} Object containing "code" and "state" properties.
+   */
+  async pairOAuthFinish({
+    client_id,
+    state,
+    scope,
+    code_challenge,
+    // `pairOAuthStart` always uses S256, so that's what we assume when the
+    // supplicant didn't tell us which method it used.
+    code_challenge_method = "S256",
+    keys_jwk,
+  }) {
+    log.debug("Webchannel is authorizing an oauth code for a pairing flow");
+    const codeAndState = await this._fxAccounts._internal.authorizeOAuthCode({
+      client_id,
+      access_type: "offline",
+      state,
+      scope,
+      code_challenge,
+      code_challenge_method,
+      keys_jwk,
+    });
+    if (codeAndState.state != state) {
+      throw new Error("OAuth state mismatch");
+    }
+    return codeAndState;
   },
 
   /**
@@ -918,6 +1045,7 @@ FxAccountsWebChannelHelpers.prototype = {
     return {
       multiService: true,
       pairing: lazy.pairingEnabled,
+      pairingVersion: lazy.pairingVersion,
       choose_what_to_sync: true,
       // This capability is for telling FxA that the current build can accept
       // accounts without passwords/sync keys (third-party auth)

@@ -222,14 +222,12 @@ EnterJitStatus js::jit::MaybeEnterJit(JSContext* cx, RunState& state) {
       return EnterJitStatus::NotEntered;
     }
 
-    // A Next resume enters the highest available tier via jitCodeRaw. Throw and
-    // Return resume in Baseline: they always enter the exception handler
-    // machinery and that would be slower for Ion frames. We also assume
-    // Next-only resumes in WarpBuilder::build_AfterYield and
-    // build_CheckResumeKind.
+    // A Next or Return resume enters the highest available tier via jitCodeRaw.
+    // Throw always resumes in Baseline because it enters the exception handler
+    // machinery and that would be slower for Ion frames.
     JitScript* jitScript = script->jitScript();
     uint8_t* code;
-    if (state.asGeneratorResume()->resumeKind() != GeneratorResumeKind::Next &&
+    if (state.asGeneratorResume()->resumeKind() == GeneratorResumeKind::Throw &&
         jitScript->hasIonScript()) {
       code = jitScript->baselineScript()->method()->raw();
     } else {

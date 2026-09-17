@@ -11,8 +11,9 @@
 
 [package]
 edition = "2024"
+rust-version = "1.89.0"
 name = "jxl"
-version = "0.5.1"
+version = "0.7.3"
 authors = ["Luca Versari <veluca93@gmail.com>"]
 build = false
 exclude = ["resources/"]
@@ -36,8 +37,10 @@ resolver = "2"
 all-simd = ["jxl_simd/all-simd"]
 avx = ["jxl_simd/avx"]
 avx512 = ["jxl_simd/avx512"]
+brotli = ["dep:brotli-decompressor"]
 default = ["all-simd"]
 neon = ["jxl_simd/neon"]
+shuttle = ["dep:shuttle"]
 simd128 = ["jxl_simd/simd128"]
 sse42 = ["jxl_simd/sse42"]
 
@@ -53,23 +56,31 @@ harness = false
 [dependencies.array-init]
 version = "2.0.0"
 
+[dependencies.brotli-decompressor]
+version = "6.0.0"
+optional = true
+
 [dependencies.byteorder]
 version = "1.4.3"
 
 [dependencies.jxl_macros]
-version = "=0.5.1"
+version = "=0.7.3"
 
 [dependencies.jxl_simd]
-version = "=0.5.1"
+version = "=0.7.3"
 
 [dependencies.jxl_transforms]
-version = "=0.5.1"
+version = "=0.7.3"
 
 [dependencies.num-derive]
 version = "0.4"
 
 [dependencies.num-traits]
 version = "0.2.14"
+
+[dependencies.shuttle]
+version = "0.9"
+optional = true
 
 [dependencies.thiserror]
 version = "2.0"
@@ -82,7 +93,7 @@ optional = true
 version = "0.3.2"
 
 [dev-dependencies.jxl_macros]
-version = "=0.5.1"
+version = "=0.7.3"
 features = ["test"]
 
 [dev-dependencies.paste]
@@ -112,6 +123,7 @@ features = [
 default-features = false
 
 [lints.clippy]
+chunks_exact_to_as_chunks = "allow"
 missing_safety_doc = "deny"
 undocumented_unsafe_blocks = "deny"
 

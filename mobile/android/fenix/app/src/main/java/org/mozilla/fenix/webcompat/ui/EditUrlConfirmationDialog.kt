@@ -16,15 +16,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import mozilla.components.compose.base.annotation.FlexibleWindowPreview
 import mozilla.components.compose.base.button.TextButton
 import mozilla.components.compose.base.textfield.TextField
+import mozilla.components.compose.base.theme.PreviewThemeProvider
+import mozilla.components.compose.base.theme.Theme
 import org.mozilla.fenix.R
 import org.mozilla.fenix.theme.FirefoxTheme
-import org.mozilla.fenix.theme.PreviewThemeProvider
-import org.mozilla.fenix.theme.Theme
 import org.mozilla.fenix.webcompat.BrokenSiteReporterTestTags
 
 /**
@@ -63,6 +66,11 @@ fun EditUrlConfirmationDialog(
                 label = stringResource(id = R.string.webcompat_reporter_label_url),
                 isError = isError,
                 singleLine = true,
+                modifier =
+                    Modifier.semantics {
+                        testTagsAsResourceId = true
+                        testTag = BrokenSiteReporterTestTags.BROKEN_SITE_REPORTER_EDIT_URL_DIALOG_TEXT_FIELD
+                    },
             )
         },
         confirmButton = {

@@ -70,6 +70,7 @@ import mozilla.components.feature.tab.collections.TabCollection
 import mozilla.components.feature.top.sites.presenter.DefaultTopSitesPresenter
 import mozilla.components.lib.state.ext.flow
 import mozilla.components.lib.state.ext.observeAsComposableState
+import mozilla.components.support.base.feature.UserInteractionHandler
 import mozilla.components.support.base.feature.ViewBoundFeatureWrapper
 import mozilla.components.support.ktx.android.view.createWindowInsetsController
 import mozilla.components.support.ktx.android.view.toScope
@@ -84,6 +85,7 @@ import org.mozilla.fenix.GleanMetrics.HomeScreen
 import org.mozilla.fenix.GleanMetrics.Vpn
 import org.mozilla.fenix.HomeActivity
 import org.mozilla.fenix.NavGraphDirections
+import org.mozilla.fenix.OnLongPressedListener
 import org.mozilla.fenix.R
 import org.mozilla.fenix.biometricauthentication.AuthenticationStatus
 import org.mozilla.fenix.biometricauthentication.BiometricAuthenticationManager
@@ -119,6 +121,10 @@ import org.mozilla.fenix.ext.requireComponents
 import org.mozilla.fenix.ext.tabClosedUndoMessage
 import org.mozilla.fenix.home.bookmarks.BookmarksFeature
 import org.mozilla.fenix.home.bookmarks.controller.DefaultBookmarksController
+import org.mozilla.fenix.home.collections.migration.CollectionsMigrationCardAction
+import org.mozilla.fenix.home.collections.migration.CollectionsMigrationCardMiddleware
+import org.mozilla.fenix.home.collections.migration.CollectionsMigrationCardState
+import org.mozilla.fenix.home.collections.migration.CollectionsMigrationCardStore
 import org.mozilla.fenix.home.ext.showWallpaperOnboardingDialog
 import org.mozilla.fenix.home.logo.LogoController
 import org.mozilla.fenix.home.logo.TrackingProtectionController
@@ -151,7 +157,6 @@ import org.mozilla.fenix.home.topsites.getTopSitesConfig
 import org.mozilla.fenix.home.ui.HomeSwipeIntegration
 import org.mozilla.fenix.home.ui.Homepage
 import org.mozilla.fenix.home.ui.WallpaperBackground
-import org.mozilla.fenix.ipprotection.store.IPProtectionOnboardingPrompt
 import org.mozilla.fenix.ipprotection.store.Surface as IPProtectionSurface
 import org.mozilla.fenix.messaging.DefaultMessageController
 import org.mozilla.fenix.messaging.FenixMessageSurfaceId
@@ -191,7 +196,7 @@ import org.mozilla.fenix.wallpapers.Wallpaper
 
 /** The home screen. */
 @Suppress("TooManyFunctions", "LargeClass")
-class HomeFragment : Fragment() {
+class HomeFragment : Fragment(), UserInteractionHandler, OnLongPressedListener {
     private val args by navArgs<HomeFragmentArgs>()
 
     @VisibleForTesting internal lateinit var bundleArgs: Bundle
@@ -227,9 +232,11 @@ class HomeFragment : Fragment() {
     private val privacyNoticeBannerRepository by lazy {
         DefaultPrivacyNoticeBannerRepository(settings = requireComponents.settings)
     }
+
     private val dateTimeProvider: DateTimeProvider by lazy { DefaultDateTimeProvider() }
 
     private lateinit var privacyNoticeBannerStore: PrivacyNoticeBannerStore
+    private lateinit var collectionsMigrationCardStore: CollectionsMigrationCardStore
 
     private var _sessionControlController: SessionControlController? = null
 
@@ -268,7 +275,6 @@ class HomeFragment : Fragment() {
     private val topSitesBinding = ViewBoundFeatureWrapper<TopSitesBinding>()
     private val trackersBlockedFeature = ViewBoundFeatureWrapper<TrackersBlockedFeature>()
     private val ipProtectionWarningBinding = ViewBoundFeatureWrapper<IPProtectionWarningBinding>()
-    private val ipProtectionOnboardingPrompt = ViewBoundFeatureWrapper<IPProtectionOnboardingPrompt>()
     private val continuousOnboardingFeature = ViewBoundFeatureWrapper<ContinuousOnboardingFeature>()
 
     private val homepageEdgeToEdgeFeature = ViewBoundFeatureWrapper<HomepageEdgeToEdgeFeature>()
@@ -447,6 +453,7 @@ class HomeFragment : Fragment() {
         homeNavigationBar =
             HomeNavigationBar(
                 toolbarStore = toolbarStore,
+                appStore = activity.components.appStore,
                 browsingModeManager = activity.browsingModeManager,
                 settings = activity.components.settings,
                 hideWhenKeyboardShown = true,
@@ -574,6 +581,16 @@ class HomeFragment : Fragment() {
                     ),
             )
 
+        val collectionsMigrationRepository = requireComponents.collectionsMigrationRepository
+        collectionsMigrationCardStore =
+            CollectionsMigrationCardStore(
+                initialState =
+                    CollectionsMigrationCardState(
+                        visible = collectionsMigrationRepository.shouldShowCollectionsMigrationCard()
+                    ),
+                middleware = listOf(CollectionsMigrationCardMiddleware(repository = collectionsMigrationRepository)),
+            )
+
         initController()
         initInteractor()
 
@@ -649,6 +666,8 @@ class HomeFragment : Fragment() {
                     }
                 val privacyNoticeBannerState =
                     privacyNoticeBannerStore.flow().collectAsState(initial = privacyNoticeBannerStore.state)
+                val collectionsMigrationCardState =
+                    collectionsMigrationCardStore.flow().collectAsState(initial = collectionsMigrationCardStore.state)
                 val isToolbarAtTop = settings.toolbarPosition == ToolbarPosition.TOP
                 val captureToolbarBounds = remember { isToolbarSwipeToSwitchTabsEnabled() }
 
@@ -729,6 +748,7 @@ class HomeFragment : Fragment() {
                             HomeContent(
                                 appState = appState.value,
                                 privacyNoticeBannerState = privacyNoticeBannerState.value,
+                                collectionsMigrationCardState = collectionsMigrationCardState.value,
                                 settings = settings,
                                 innerPadding = innerPadding,
                                 microsurveyVisible = microsurveyVisible,
@@ -795,10 +815,12 @@ class HomeFragment : Fragment() {
         }
     }
 
+    @Suppress("LongParameterList")
     @Composable
     private fun HomeContent(
         appState: AppState,
         privacyNoticeBannerState: PrivacyNoticeBannerState,
+        collectionsMigrationCardState: CollectionsMigrationCardState,
         settings: Settings,
         innerPadding: PaddingValues,
         microsurveyVisible: Boolean,
@@ -822,10 +844,18 @@ class HomeFragment : Fragment() {
                     HomepageState.build(
                         appState = appState,
                         privacyNoticeBannerState = privacyNoticeBannerState,
+                        collectionsMigrationCardState = collectionsMigrationCardState,
                         settings = settings,
                         browsingModeManager = browsingModeManager,
                     ),
                 interactor = sessionControlInteractor,
+                onCollectionsMigrationCardAction = { action ->
+                    collectionsMigrationCardStore.dispatch(action)
+
+                    when (action) {
+                        is CollectionsMigrationCardAction.ViewTabGroupsClicked -> openTabGroups()
+                    }
+                },
                 onTopSitesItemBound = {
                     StartupTimeline.onTopSitesItemBound(activity = (requireActivity() as HomeActivity))
                 },
@@ -921,7 +951,12 @@ class HomeFragment : Fragment() {
                             private = (requireActivity() as HomeActivity).browsingModeManager.mode.isPrivate
                         )
                     } else {
-                        sessionControlInteractor.onNavigateSearch()
+                        findNavController()
+                            .navigate(
+                                NavGraphDirections.actionGlobalHome(
+                                    focusOnAddressBar = !requireComponents.settings.enableHomepageTrendingRecentSearch
+                                )
+                            )
                     }
                 },
                 onSelectedTabClick = { url ->
@@ -1106,6 +1141,50 @@ class HomeFragment : Fragment() {
         findNavController().removeOnDestinationChangedListener(destinationChangedListener)
     }
 
+    override fun onBackPressed(): Boolean {
+        if (context == null || !requireComponents.settings.enableHomepageAsNewTab) {
+            return false
+        }
+
+        return goBackFromHomepage(
+            browserStore = store,
+            navController = findNavController(),
+        )
+    }
+
+    override fun onBackLongPressed(): Boolean {
+        if (context == null || !requireComponents.settings.enableHomepageAsNewTab) {
+            return false
+        }
+
+        navigateToGlobalTabHistoryDialogFragment(navController = findNavController())
+        return true
+    }
+
+    override fun onForwardPressed(): Boolean {
+        if (context == null || !requireComponents.settings.enableHomepageAsNewTab) {
+            return false
+        }
+
+        return goForwardFromHomepage(
+            browserStore = store,
+            navController = findNavController(),
+        )
+    }
+
+    override fun onForwardLongPressed(): Boolean {
+        if (context == null || !requireComponents.settings.enableHomepageAsNewTab) {
+            return false
+        }
+
+        navigateToGlobalTabHistoryDialogFragment(navController = findNavController())
+        return true
+    }
+
+    private fun navigateToGlobalTabHistoryDialogFragment(navController: NavController) {
+        navController.navigate(NavGraphDirections.actionGlobalTabHistoryDialogFragment(activeSessionId = null))
+    }
+
     private fun subscribeToTabCollections(): Observer<List<TabCollection>> {
         return Observer<List<TabCollection>> {
                 requireComponents.core.tabCollectionStorage.cachedTabCollections = it
@@ -1131,6 +1210,14 @@ class HomeFragment : Fragment() {
                             BrowsingMode.Private -> Page.PrivateTabs
                         }
                 ),
+            )
+    }
+
+    private fun openTabGroups() {
+        findNavController()
+            .nav(
+                R.id.homeFragment,
+                HomeFragmentDirections.actionGlobalTabManagementFragment(page = Page.TabGroups),
             )
     }
 
@@ -1353,6 +1440,7 @@ class HomeFragment : Fragment() {
                     tabsUseCases = requireComponents.useCases.tabsUseCases,
                     sendTabUseCases = SendTabUseCases(requireComponents.backgroundServices.accountManager),
                     customTabSessionId = null,
+                    applicationScope = requireComponents.applicationScope,
                     viewHasFocus = { view.hasWindowFocus() },
                 ),
             owner = this,
@@ -1368,23 +1456,6 @@ class HomeFragment : Fragment() {
                     proxyUnavailable = {
                         Vpn.proxyUnavailable.record()
                         findNavController().navigate(HomeFragmentDirections.actionGlobalIpProtectionUnavailableDialog())
-                    },
-                ),
-            owner = this,
-            view = view,
-        )
-
-        ipProtectionOnboardingPrompt.set(
-            feature =
-                IPProtectionOnboardingPrompt(
-                    repository = requireComponents.ipProtectionPromptRepository,
-                    timeProvider = DefaultDateTimeProvider(),
-                    store = requireComponents.ipProtection.store,
-                    onShowOnboarding = {
-                        findNavController()
-                            .navigate(
-                                HomeFragmentDirections.actionGlobalIpProtectionDialog(IPProtectionSurface.HOMEPAGE)
-                            )
                     },
                 ),
             owner = this,
@@ -1407,6 +1478,10 @@ class HomeFragment : Fragment() {
                                 entrypoint = FenixFxAEntryPoint.NewUserOnboarding
                             ),
                     )
+            },
+            navigateToIpProtection = {
+                findNavController()
+                    .navigate(HomeFragmentDirections.actionGlobalIpProtectionDialog(IPProtectionSurface.HOMEPAGE))
             },
         )
     }

@@ -116,28 +116,28 @@ class SettingsHomepageTest {
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1564999
     @Converted(
-        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.SettingsHomepageTest#jumpBackInOptionTest"],
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.SettingsHomepageTest#continueOptionTest"],
         bug = 2042363,
         since = "2026-05",
     )
     @SmokeTest
     @Test
-    fun jumpBackInOptionTest() {
+    fun continueOptionTest() {
         val genericURL = mockWebServer.getGenericAsset(1)
 
         navigationToolbar(composeTestRule) {}
             .enterURLAndEnterToBrowser(genericURL.url) {}
             .goToHomescreen {
-                verifyJumpBackInSectionIsDisplayed()
+                verifyContinueSectionIsDisplayed()
             }
             .openThreeDotMenu {}
             .clickSettingsButton {}
             .openHomepageSubMenu {
-                clickJumpBackInButton()
+                clickContinueButton()
             }
             .goBack {}
             .goBack(composeTestRule) {
-                verifyJumpBackInSectionIsNotDisplayed()
+                verifyContinueSectionIsNotDisplayed()
             }
     }
 

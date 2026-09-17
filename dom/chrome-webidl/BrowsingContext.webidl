@@ -122,7 +122,7 @@ interface BrowsingContext {
 
   [SetterThrows] attribute [LegacyNullToEmptyString] DOMString customPlatform;
 
-  [SetterThrows] attribute [LegacyNullToEmptyString] DOMString customUserAgent;
+  [SetterThrows] attribute [LegacyNullToEmptyString] UTF8String customUserAgent;
 
   readonly attribute DOMString embedderElementType;
 
@@ -328,6 +328,9 @@ BrowsingContext includes LoadContextMixin;
 
 [Exposed=Window, ChromeOnly]
 interface CanonicalBrowsingContext : BrowsingContext {
+  // Whether enterprise policy has disabled service workers for the top-level site.
+  readonly attribute boolean serviceWorkersDisabledByPolicy;
+
   // Top-level only download folder override for WebDriver BiDi's.
   [SetterThrows] attribute DOMString downloadFolderOverride;
 

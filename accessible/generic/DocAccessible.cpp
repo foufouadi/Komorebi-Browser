@@ -25,7 +25,6 @@
 #include "mozilla/a11y/DocAccessibleChild.h"
 #include "mozilla/a11y/Role.h"
 #include "mozilla/dom/AncestorIterator.h"
-#include "mozilla/dom/BrowserChild.h"
 #include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/DocumentType.h"
@@ -33,6 +32,8 @@
 #include "mozilla/dom/ElementInlines.h"
 #include "mozilla/dom/HTMLSelectElement.h"
 #include "mozilla/dom/UserActivation.h"
+#include "mozilla/dom/WindowGlobalChild.h"
+#include "mozilla/ipc/ProtocolUtils.h"
 #include "nsAccUtils.h"
 #include "nsAccessibilityService.h"
 #include "nsEventShell.h"
@@ -528,6 +529,20 @@ void DocAccessible::Init() {
     logging::DocCreate("document initialize", mDocumentNode, this);
   }
 #endif
+
+  // Our WindowGlobal might already be managing a PDocAccessible for a
+  // document that hasn't been shut down yet; e.g. the initial about:blank. Shut
+  // that one down now so we don't end up with two DocAccessibles alive for the
+  // same WindowGlobal.
+  if (dom::WindowGlobalChild* wgc = mDocumentNode->GetWindowGlobalChild()) {
+    if (auto* actor =
+            LoneManagedOrNullAsserts(wgc->ManagedPDocAccessibleChild())) {
+      if (DocAccessible* prevDocAcc =
+              static_cast<DocAccessibleChild*>(actor)->GetDocAccessible()) {
+        prevDocAcc->Shutdown();
+      }
+    }
+  }
 
   // Initialize notification controller.
   mNotificationController =
@@ -1358,6 +1373,9 @@ void DocAccessible::UnbindFromDocument(LocalAccessible* aAccessible) {
   NS_ASSERTION(mAccessibleCache.GetWeak(aAccessible->UniqueID()),
                "Unbinding the unbound accessible!");
 
+  MOZ_ASSERT(!mARIAOwnsHash.Contains(aAccessible),
+             "Container still lingering in mARIAOwnsHash");
+
   // Fire focus event on accessible having DOM focus if last focus was removed
   // from the tree.
   if (FocusMgr()->WasLastFocused(aAccessible)) {
@@ -1498,6 +1516,12 @@ bool DocAccessible::PruneOrInsertSubtree(nsIContent* aRoot,
     nsIFrame* frame = acc->GetFrame();
     if (frame) {
       acc->MaybeQueueCacheUpdateForStyleChanges();
+      // If we got a new frame after being display:contents, we may have become
+      // focusable.
+      if (frame->IsFocusable()) {
+        auto event = MakeRefPtr<AccStateChangeEvent>(acc, states::FOCUSABLE);
+        FireDelayedEvent(event);
+      }
     }
 
     // LocalAccessible has no frame and it's not display:contents. Remove it.
@@ -1517,6 +1541,10 @@ bool DocAccessible::PruneOrInsertSubtree(nsIContent* aRoot,
       // notifications won't fire either. Therefore, queue cache updates for
       // both.
       QueueCacheUpdate(acc, CacheDomain::Style | CacheDomain::Bounds);
+      // If we became display: contents, we may have lost the focusable state.
+      auto event =
+          MakeRefPtr<AccStateChangeEvent>(acc, states::FOCUSABLE, false);
+      FireDelayedEvent(event);
     }
 
     // If the frame is hidden because its ancestor is specified with
@@ -1807,18 +1835,14 @@ void DocAccessible::DoInitialUpdate() {
   if (nsCoreUtils::IsTopLevelContentDocInProcess(mDocumentNode)) {
     mDocFlags |= eTopLevelContentDocInProcess;
     if (ShouldSendToParentProcess()) {
-      nsIDocShell* docShell = mDocumentNode->GetDocShell();
-      if (RefPtr<dom::BrowserChild> browserChild =
-              dom::BrowserChild::GetFrom(docShell)) {
+      if (dom::WindowGlobalChild* wgc = mDocumentNode->GetWindowGlobalChild()) {
         // In content processes, top level content documents are always
         // RootAccessibles.
         MOZ_ASSERT(IsRoot());
-        DocAccessibleChild* ipcDoc = IPCDoc();
-        if (!ipcDoc) {
-          ipcDoc = new DocAccessibleChild(this, browserChild);
-          MOZ_RELEASE_ASSERT(browserChild->SendPDocAccessibleConstructor(
-              ipcDoc, nullptr, 0, mDocumentNode->GetBrowsingContext(),
-              IsPrintDoc()));
+        if (!IPCDoc()) {
+          RefPtr<DocAccessibleChild> ipcDoc = new DocAccessibleChild(this, wgc);
+          MOZ_RELEASE_ASSERT(
+              wgc->SendPDocAccessibleConstructor(ipcDoc, 0, IsPrintDoc()));
           // trying to recover from this failing is problematic
           SetIPCDoc(ipcDoc);
         }
@@ -2139,7 +2163,7 @@ bool DocAccessible::UpdateAccessibleOnAttrChange(dom::Element* aElement,
     if (mContent == aElement) {
       SetRoleMapEntryForDoc(aElement);
       if (mIPCDoc) {
-        mIPCDoc->SendRoleChangedEvent(Role(), mRoleMapEntryIndex);
+        mIPCDoc->SendRoleChangedEvent(mRoleMapEntryIndex);
       }
 
       return true;
@@ -2186,7 +2210,8 @@ bool DocAccessible::UpdateAccessibleOnAttrChange(dom::Element* aElement,
     // listeners, we need to recreate the accessible since the role might have
     // changed. Without an href or click listener, the accessible must be a
     // generic.
-    if (aElement->IsHTMLElement(nsGkAtoms::a)) {
+    if (aElement->IsHTMLElement(nsGkAtoms::a) ||
+        aElement->IsMathMLElement(nsGkAtoms::a)) {
       LocalAccessible* acc = GetAccessible(aElement);
       if (!acc) {
         return false;
@@ -2240,7 +2265,7 @@ void DocAccessible::UpdateRootElIfNeeded() {
     mContent = rootEl;
     SetRoleMapEntryForDoc(rootEl);
     if (mIPCDoc) {
-      mIPCDoc->SendRoleChangedEvent(Role(), mRoleMapEntryIndex);
+      mIPCDoc->SendRoleChangedEvent(mRoleMapEntryIndex);
     }
   }
 }
@@ -3139,6 +3164,13 @@ bool DocAccessible::IsLoadEventTarget() const {
 
 void DocAccessible::SetIPCDoc(DocAccessibleChild* aIPCDoc) {
   MOZ_ASSERT(!mIPCDoc || !aIPCDoc, "Clobbering an attached IPCDoc!");
+  if (!aIPCDoc) {
+    // If our IPC actor dies (e.g. because its WindowGlobalChild dies), clear
+    // any queued cache updates, since we can never send them.
+    mQueuedCacheUpdatesArray.Clear();
+    mQueuedCacheUpdatesHash.Clear();
+    mViewportCacheDirty = false;
+  }
   mIPCDoc = aIPCDoc;
 }
 
@@ -3187,8 +3219,7 @@ void DocAccessible::ARIAActiveDescendantIDMaybeMoved(
 
 void DocAccessible::SetRoleMapEntryForDoc(dom::Element* aElement) {
   const nsRoleMapEntry* entry = aria::GetRoleMap(aElement);
-  if (!entry || entry->role == roles::APPLICATION ||
-      entry->role == roles::DIALOG ||
+  if (!entry || nsAccUtils::IsARIARoleAllowedOnContentDoc(entry->role) ||
       // Role alert isn't valid on the body element according to the ARIA spec,
       // but it's useful for our UI; e.g. the WebRTC sharing indicator.
       (entry->role == roles::ALERT && !mDocumentNode->IsContentDocument())) {
@@ -3375,15 +3406,14 @@ void DocAccessible::BindChildDocument(DocAccessible* aDocument) {
         AppendChildDocument(aDocument);
         if (mIPCDoc) {
           MOZ_ASSERT(!aDocument->IPCDoc());
-          DocAccessibleChild* ipcDoc =
-              new DocAccessibleChild(aDocument, mIPCDoc->Manager());
+          dom::WindowGlobalChild* wgc =
+              aDocument->DocumentNode()->GetWindowGlobalChild();
+          MOZ_ASSERT(wgc);
+          RefPtr<DocAccessibleChild> ipcDoc =
+              new DocAccessibleChild(aDocument, wgc);
           aDocument->SetIPCDoc(ipcDoc);
-          auto* bc = dom::BrowserChild::GetFrom(mDocumentNode->GetDocShell());
-          MOZ_ASSERT(bc);
-          bc->SendPDocAccessibleConstructor(
-              ipcDoc, mIPCDoc, embedderAcc->ID(),
-              aDocument->DocumentNode()->GetBrowsingContext(),
-              aDocument->IsPrintDoc());
+          wgc->SendPDocAccessibleConstructor(ipcDoc, embedderAcc->ID(),
+                                             aDocument->IsPrintDoc());
         }
       }
     }

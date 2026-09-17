@@ -23,9 +23,7 @@ import org.mozilla.fenix.ui.robots.navigationToolbar
 class SettingsHTTPSOnlyModeTest {
     @get:Rule(order = 0) val fenixTestRule: FenixTestRule = FenixTestRule()
 
-    private val httpPageUrl = "http://example.com/"
     private val secondHttpPageUrl = "http://permission.site/"
-    private val httpsPageUrl = "https://example.com/"
     private val secondHttpsPageUrl = "https://permission.site/"
     private val insecureHttpPage = "http.badssl.com"
 

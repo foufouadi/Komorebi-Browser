@@ -184,6 +184,9 @@ Function .onInit
     ${UnitTest} TestGetHadExistingProfileFailure
     ${UnitTest} TestGetHadExistingProfileSuccess
 
+    ${UnitTest} TestGetProfileDirExistedFailure
+    ${UnitTest} TestGetProfileDirExistedSuccess
+
     ${UnitTest} TestIsInstallerLaunchedByDesktopLauncherNoParameter
     ${UnitTest} TestIsInstallerLaunchedByDesktopLauncherUnknownParameter
     ${UnitTest} TestIsInstallerLaunchedByDesktopLauncherSuccess
@@ -676,6 +679,32 @@ Function TestGetHadExistingProfileSuccess
   Call GetHadExistingProfile
   Pop $0
   ${AssertEqual} 0 "1"
+
+  RMDir /r $MockLocalAppDataFolder
+FunctionEnd
+
+Function TestGetProfileDirExistedFailure
+  GetTempFileName $0
+  Delete $0
+  CreateDirectory $0
+  StrCpy $MockLocalAppDataFolder $0
+
+  Call GetProfileDirExisted
+  Pop $0
+  ${AssertEqual} 0 "false"
+
+  RMDir $MockLocalAppDataFolder
+FunctionEnd
+
+Function TestGetProfileDirExistedSuccess
+  GetTempFileName $0
+  Delete $0
+  CreateDirectory "$0\Mozilla\Firefox"
+  StrCpy $MockLocalAppDataFolder $0
+
+  Call GetProfileDirExisted
+  Pop $0
+  ${AssertEqual} 0 "true"
 
   RMDir /r $MockLocalAppDataFolder
 FunctionEnd

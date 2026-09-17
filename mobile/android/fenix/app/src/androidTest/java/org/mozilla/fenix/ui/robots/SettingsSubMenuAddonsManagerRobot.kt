@@ -48,7 +48,6 @@ import org.mozilla.fenix.helpers.Constants.TAG
 import org.mozilla.fenix.helpers.Constants.recommendedAddons
 import org.mozilla.fenix.helpers.DataGenerationHelper.getRecommendedExtensionTitle
 import org.mozilla.fenix.helpers.DataGenerationHelper.getStringResource
-import org.mozilla.fenix.helpers.HomeActivityIntentTestRule
 import org.mozilla.fenix.helpers.MatcherHelper.assertUIObjectExists
 import org.mozilla.fenix.helpers.MatcherHelper.assertUIObjectIsGone
 import org.mozilla.fenix.helpers.MatcherHelper.itemContainingText
@@ -151,7 +150,7 @@ class SettingsSubMenuAddonsManagerRobot(private val composeTestRule: ComposeTest
         }
     }
 
-    fun verifyAddonInstallCompletedPrompt(addonName: String, activityTestRule: HomeActivityIntentTestRule) {
+    fun verifyAddonInstallCompletedPrompt(addonName: String) {
         // Assigns a more descriptive name to the addon if it is "Bitwarden" or "Tomato Clock", otherwise keeps the
         // original name
         // The name of this extenssion is being displayed differently across the app
@@ -201,7 +200,7 @@ class SettingsSubMenuAddonsManagerRobot(private val composeTestRule: ComposeTest
         Log.i(TAG, "verifyAddonIsInstalled: Trying to verify that the $addonDisplayName add-on was installed")
         onView(
                 allOf(
-                    withId(R.id.add_button),
+                    withId(addonsR.id.add_button),
                     isDescendantOfA(withId(addonsR.id.add_on_item)),
                     hasSibling(hasDescendant(withText(addonDisplayName))),
                 )
@@ -222,7 +221,7 @@ class SettingsSubMenuAddonsManagerRobot(private val composeTestRule: ComposeTest
 
     fun verifyAddonsItems() {
         Log.i(TAG, "verifyAddonsItems: Trying to verify that the \"Recommended\" heading is visible")
-        onView(allOf(withId(R.id.title), withText("Recommended")))
+        onView(allOf(withId(addonsR.id.title), withText("Recommended")))
             .check(matches(withEffectiveVisibility(Visibility.VISIBLE)))
         Log.i(TAG, "verifyAddonsItems: Verified that the \"Recommended\" heading is visible")
         Log.i(TAG, "verifyAddonsItems: Trying to verify that all uBlock Origin items are completely displayed")
@@ -238,11 +237,11 @@ class SettingsSubMenuAddonsManagerRobot(private val composeTestRule: ComposeTest
                             hasDescendant(
                                 withText("Finally, an efficient wide-spectrum content blocker. Easy on CPU and memory.")
                             ),
-                            hasDescendant(withId(R.id.rating)),
-                            hasDescendant(withId(R.id.review_count)),
+                            hasDescendant(withId(addonsR.id.rating)),
+                            hasDescendant(withId(addonsR.id.review_count)),
                         )
                     ),
-                    hasDescendant(withId(R.id.add_button)),
+                    hasDescendant(withId(addonsR.id.add_button)),
                 )
             )
             .check(matches(isCompletelyDisplayed()))
@@ -255,7 +254,7 @@ class SettingsSubMenuAddonsManagerRobot(private val composeTestRule: ComposeTest
         Log.i(TAG, "verifyAddonCanBeInstalled: Trying to verify that the install $addonName button is visible")
         onView(
                 allOf(
-                    withId(R.id.add_button),
+                    withId(addonsR.id.add_button),
                     hasSibling(
                         hasDescendant(
                             allOf(
@@ -277,7 +276,7 @@ class SettingsSubMenuAddonsManagerRobot(private val composeTestRule: ComposeTest
         Log.i(TAG, "selectAllowInPrivateBrowsing: Clicked the \"Allow in private browsing\" check box")
     }
 
-    fun installAddon(addonName: String, activityTestRule: HomeActivityIntentTestRule) {
+    fun installAddon(addonName: String) {
         homeScreen(composeTestRule) {}
             .openThreeDotMenu {}
             .clickExtensionsButton {
@@ -285,11 +284,11 @@ class SettingsSubMenuAddonsManagerRobot(private val composeTestRule: ComposeTest
                 clickInstallAddon(addonName)
                 verifyAddonPermissionPrompt(addonName)
                 acceptPermissionToInstallAddon()
-                verifyAddonInstallCompletedPrompt(addonName, activityTestRule)
+                verifyAddonInstallCompletedPrompt(addonName)
             }
     }
 
-    fun installAddonInPrivateMode(addonName: String, activityTestRule: HomeActivityIntentTestRule) {
+    fun installAddonInPrivateMode(addonName: String) {
         homeScreen(composeTestRule) {}
             .openThreeDotMenu {}
             .clickExtensionsButton {
@@ -298,7 +297,7 @@ class SettingsSubMenuAddonsManagerRobot(private val composeTestRule: ComposeTest
                 verifyAddonPermissionPrompt(addonName)
                 selectAllowInPrivateBrowsing()
                 acceptPermissionToInstallAddon()
-                verifyAddonInstallCompletedPrompt(addonName, activityTestRule)
+                verifyAddonInstallCompletedPrompt(addonName)
             }
     }
 

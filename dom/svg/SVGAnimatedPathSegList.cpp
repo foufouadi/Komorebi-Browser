@@ -79,6 +79,11 @@ class MOZ_STACK_CLASS SVGPathSegmentInitWrapper final {
         mInit.mValues.Length() != uint32_t(expectedArgCount)) {
       return false;
     }
+    for (const auto& value : mInit.mValues) {
+      if (!std::isfinite(value)) {
+        return false;
+      }
+    }
     if (IsArc() &&
         !(IsValidFlag(mInit.mValues[3]) && IsValidFlag(mInit.mValues[4]))) {
       return false;
@@ -213,21 +218,24 @@ class MOZ_STACK_CLASS SVGPathSegmentInitWrapper final {
   const SVGPathSegmentInit& mInit;
 };
 
+bool SVGAnimatedPathSegList::FirstSegmentIsValid(
+    const Sequence<SVGPathSegmentInit>& aValues) const {
+  if (aValues.IsEmpty()) {
+    return false;
+  }
+  SVGPathSegmentInitWrapper firstSegment(aValues[0]);
+  return firstSegment.IsMove() && firstSegment.IsValid();
+}
+
 void SVGAnimatedPathSegList::SetBaseValueFromPathSegments(
     const Sequence<SVGPathSegmentInit>& aValues) {
   AutoTArray<StylePathCommand, 10> pathData;
-  if (!aValues.IsEmpty() && SVGPathSegmentInitWrapper(aValues[0]).IsMove()) {
-    for (const auto& value : aValues) {
-      SVGPathSegmentInitWrapper seg(value);
-      if (!seg.IsValid()) {
-        break;
-      }
-      pathData.AppendElement(seg.ToStylePathCommand());
+  for (const auto& value : aValues) {
+    SVGPathSegmentInitWrapper seg(value);
+    if (!seg.IsValid()) {
+      break;
     }
-  }
-  if (pathData.IsEmpty()) {
-    mBaseVal.Clear();
-    return;
+    pathData.AppendElement(seg.ToStylePathCommand());
   }
   Servo_CreatePathDataFromCommands(&pathData, &mBaseVal.RawData());
 }

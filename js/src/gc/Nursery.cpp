@@ -4,6 +4,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/glue/Debug.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/TimeStamp.h"
@@ -285,7 +286,7 @@ js::Nursery::Nursery(GCRuntime* gc)
 }
 
 static void PrintAndExit(const char* message) {
-  fprintf(stderr, "%s", message);
+  printf_stderr("%s", message);
   exit(0);
 }
 
@@ -574,7 +575,7 @@ void js::Nursery::updateAllocFlagsForZone(JS::Zone* zone) {
 }
 
 void js::Nursery::discardCodeAndSetJitFlagsForZone(JS::Zone* zone) {
-  zone->forceDiscardJitCode(runtime()->gcContext());
+  zone->discardJitCodeForAllRealms(runtime()->gcContext());
 
   if (jit::JitZone* jitZone = zone->jitZone()) {
     jitZone->discardStubs();
@@ -967,9 +968,16 @@ void js::Nursery::forwardBufferPointer(uintptr_t* pSlotsElems) {
   //  - Nursery-allocated buffer
   //  - A BufferRelocationOverlay inside the nursery
   //
-  // Note: The buffer has already be relocated. We are just patching stale
+  // Note: The buffer has already been relocated. We are just patching stale
   //       pointers now.
   auto* buffer = reinterpret_cast<void*>(*pSlotsElems);
+
+  // If the pointer is to the beginning of a chunk, then that chunk cannot be a
+  // nursery chunk due to the chunk header. Also, the pointer cannot be to the
+  // end of a previous nursery chunk since the last word is never allocated.
+  if ((uintptr_t(buffer) & ChunkMask) == 0) {
+    return;
+  }
 
   if (!isInside(buffer)) {
     return;
@@ -1493,13 +1501,12 @@ void js::Nursery::sendTelemetry(JS::GCReason reason, TimeDuration totalTime,
 void js::Nursery::printDeduplicationData(js::StringStats& prev,
                                          js::StringStats& curr) {
   if (curr.deduplicatedStrings > prev.deduplicatedStrings) {
-    fprintf(stderr,
-            "pid %zu: deduplicated %" PRIi64 " strings, %" PRIu64
-            " chars, %" PRIu64 " malloc bytes\n",
-            size_t(getpid()),
-            curr.deduplicatedStrings - prev.deduplicatedStrings,
-            curr.deduplicatedChars - prev.deduplicatedChars,
-            curr.deduplicatedBytes - prev.deduplicatedBytes);
+    printf_stderr("pid %zu: deduplicated %" PRIi64 " strings, %" PRIu64
+                  " chars, %" PRIu64 " malloc bytes\n",
+                  size_t(getpid()),
+                  curr.deduplicatedStrings - prev.deduplicatedStrings,
+                  curr.deduplicatedChars - prev.deduplicatedChars,
+                  curr.deduplicatedBytes - prev.deduplicatedBytes);
   }
 }
 
@@ -1771,14 +1778,14 @@ size_t js::Nursery::doPretenuring(JSRuntime* rt, JS::GCReason reason,
   stats().setStat(gcstats::STAT_BIGINTS_PROMOTED, numBigIntsPromoted);
 
   if (reportPretenuring() && zonesWhereStringsDisabled) {
-    fprintf(stderr,
-            "Pretenuring disabled nursery string allocation in %zu zones\n",
-            zonesWhereStringsDisabled);
+    printf_stderr(
+        "Pretenuring disabled nursery string allocation in %zu zones\n",
+        zonesWhereStringsDisabled);
   }
   if (reportPretenuring() && zonesWhereBigIntsDisabled) {
-    fprintf(stderr,
-            "Pretenuring disabled nursery big int allocation in %zu zones\n",
-            zonesWhereBigIntsDisabled);
+    printf_stderr(
+        "Pretenuring disabled nursery big int allocation in %zu zones\n",
+        zonesWhereBigIntsDisabled);
   }
 
   return sitesPretenured;

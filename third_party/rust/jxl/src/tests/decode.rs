@@ -3,9 +3,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+use std::cell::RefCell;
+use std::path::Path;
+use std::rc::Rc;
+
+use crate::api::process::SequentialRunner;
 use crate::api::{
-    JxlDataFormat, JxlDecoder, JxlDecoderOptions, JxlPixelFormat, ProcessingResult,
-    VisibleFrameInfo, states,
+    JxlDataFormat, JxlDecoder, JxlDecoderOptions, JxlParallelRunner, JxlPixelFormat,
+    ProcessingResult, VisibleFrameInfo, states,
 };
 use crate::error::{Error, Result};
 use crate::frame::Frame;
@@ -13,16 +18,18 @@ use crate::headers::FileHeader;
 use crate::headers::frame_header::FrameHeader;
 use crate::headers::toc::Toc;
 use crate::image::{Image, JxlOutputBuffer, Rect};
-use std::cell::RefCell;
-use std::path::Path;
-use std::rc::Rc;
 
 #[allow(clippy::type_complexity)]
 pub fn decode(input: &[u8]) -> Result<(usize, Vec<Vec<Image<f32>>>), Error> {
-    decode_internal(input, usize::MAX, false, false, None, None)
+    decode_internal(input, usize::MAX, false, false, None, None, None, false)
 }
 
 #[allow(clippy::type_complexity)]
+pub fn decode_32bit(input: &[u8]) -> Result<(usize, Vec<Vec<Image<f32>>>), Error> {
+    decode_internal(input, usize::MAX, false, false, None, None, None, true)
+}
+
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn decode_internal(
     mut input: &[u8],
     chunk_size: usize,
@@ -30,7 +37,11 @@ pub fn decode_internal(
     do_flush: bool,
     callback: Option<Box<dyn FnMut(&FileHeader, &Frame, usize) -> Result<(), Error>>>,
     mut flush_callback: Option<&mut dyn FnMut(usize, usize, &[Image<f32>]) -> Result<(), Error>>,
+    parallel_runner: Option<&mut dyn JxlParallelRunner>,
+    disable_16bit_modular_buffers: bool,
 ) -> Result<(usize, Vec<Vec<Image<f32>>>), Error> {
+    let s = &mut SequentialRunner;
+    let parallel_runner = parallel_runner.unwrap_or(s);
     let options = JxlDecoderOptions::default();
     let mut initialized_decoder = JxlDecoder::<states::Initialized>::new(options);
 
@@ -70,7 +81,7 @@ pub fn decode_internal(
                                         )
                                     })
                                     .collect();
-                                flushed = fallback.flush_pixels(&mut api_buffers)?;
+                                flushed = fallback.flush_pixels(&mut api_buffers, Some(parallel_runner))?;
                             )?
                         }
                         if flushed {
@@ -94,9 +105,12 @@ pub fn decode_internal(
     // Process until we have image info
     let mut decoder_with_image_info = advance_decoder!(
         initialized_decoder,
-        initialized_decoder.process(&mut chunk_input)
+        initialized_decoder.process(&mut chunk_input, Some(parallel_runner))
     );
     decoder_with_image_info.set_use_simple_pipeline(use_simple_pipeline);
+    if disable_16bit_modular_buffers {
+        decoder_with_image_info.disable_16bit_modular_buffers();
+    }
 
     // Get basic info
     let basic_info = decoder_with_image_info.basic_info().clone();
@@ -118,7 +132,9 @@ pub fn decode_internal(
             .map(|_| Some(JxlDataFormat::f32()))
             .collect(),
     };
-    decoder_with_image_info.set_pixel_format(requested_format);
+    decoder_with_image_info
+        .set_pixel_format(requested_format)
+        .unwrap();
 
     // Get the configured pixel format
     let pixel_format = decoder_with_image_info.current_pixel_format().clone();
@@ -149,7 +165,7 @@ pub fn decode_internal(
         // Process until we have frame info
         let mut decoder_with_frame_info = advance_decoder!(
             decoder_with_image_info,
-            decoder_with_image_info.process(&mut chunk_input);
+            decoder_with_image_info.process(&mut chunk_input, Some(parallel_runner));
             flush: buffers,
             f_idx
         );
@@ -168,7 +184,7 @@ pub fn decode_internal(
                         )
                     })
                     .collect();
-                let res = decoder_with_frame_info.process(&mut chunk_input, &mut api_buffers);
+                let res = decoder_with_frame_info.process(&mut chunk_input, &mut api_buffers, Some(parallel_runner));
                 drop(api_buffers);
                 res
             };
@@ -217,7 +233,7 @@ pub fn scan_frames_with_decoder(mut input: &[u8], chunk_size: usize) -> Vec<Visi
                 chunk_input =
                     &input[..(chunk_input.len().saturating_add(chunk_size)).min(input.len())];
                 let available_before = chunk_input.len();
-                let process_result = $decoder.process(&mut chunk_input);
+                let process_result = $decoder.process(&mut chunk_input, None);
                 input = &input[(available_before - chunk_input.len())..];
                 match process_result.unwrap() {
                     ProcessingResult::Complete { result } => break result,
@@ -326,6 +342,8 @@ pub fn read_headers_and_toc(data: &[u8]) -> Result<(FileHeader, FrameHeader, Toc
             Ok(())
         })),
         None,
+        None,
+        false,
     )?;
 
     Ok(result.take().unwrap())

@@ -167,3 +167,44 @@ TEST(H264FmtpParser, ShortProfileLevelId)
   ASSERT_TRUE(p.mProfileLevel.isErr());
   EXPECT_EQ(p.mProfileLevel.inspectErr(), H264FmtpParseError::Invalid);
 }
+
+TEST(H264MacroblockLimitsForLevel, KnownLevel)
+{
+  Maybe<H264MacroblockLimits> limits =
+      H264MacroblockLimitsForLevel(H264_LEVEL::H264_LEVEL_3_1);
+  ASSERT_TRUE(limits.isSome());
+  EXPECT_EQ(limits->mMaxMacroblocksPerFrame, 3600u);
+  EXPECT_EQ(limits->mMaxMacroblocksPerSecond, 108000u);
+}
+
+TEST(H264MacroblockLimitsForLevel, AnotherKnownLevel)
+{
+  Maybe<H264MacroblockLimits> limits =
+      H264MacroblockLimitsForLevel(H264_LEVEL::H264_LEVEL_1);
+  ASSERT_TRUE(limits.isSome());
+  EXPECT_EQ(limits->mMaxMacroblocksPerFrame, 99u);
+  EXPECT_EQ(limits->mMaxMacroblocksPerSecond, 1485u);
+}
+
+TEST(H264MacroblockLimitsForLevel, UnknownLevel)
+{
+  // Levels 6.0/6.1/6.2 are not in the Annex A Table A-1 data this file
+  // vendors.
+  Maybe<H264MacroblockLimits> limits =
+      H264MacroblockLimitsForLevel(H264_LEVEL::H264_LEVEL_6);
+  EXPECT_TRUE(limits.isNothing());
+}
+
+TEST(H264MacroblockLimitsForLevel, ConsistentWithH264LevelFits)
+{
+  Maybe<H264MacroblockLimits> limits =
+      H264MacroblockLimitsForLevel(H264_LEVEL::H264_LEVEL_3_1);
+  ASSERT_TRUE(limits.isSome());
+  // 3600 macroblocks is exactly the level 3.1 cap; a resolution fitting
+  // within it at a framerate fitting the macroblocks/second cap should
+  // satisfy H264LevelFits.
+  EXPECT_TRUE(
+      H264LevelFits(H264_LEVEL::H264_LEVEL_3_1, 1280, 720,
+                    static_cast<double>(limits->mMaxMacroblocksPerSecond) /
+                        limits->mMaxMacroblocksPerFrame));
+}

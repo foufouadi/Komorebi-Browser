@@ -30,6 +30,8 @@ class AppRequestInterceptor(
 
     private var navController: WeakReference<NavController>? = null
 
+    private val interceptAboutHomeAllowList = listOf(R.id.browserFragment)
+
     fun setNavigationController(navController: NavController) {
         this.navController = WeakReference(navController)
     }
@@ -159,12 +161,16 @@ class AppRequestInterceptor(
         }
 
         val currentDestination = navController?.get()?.currentDestination?.id
-        if (!listOf(R.id.homeFragment, R.id.onboardingFragment).contains(currentDestination)) {
+
+        if (isCurrentDestinationInAllowList(currentDestination)) {
             navController?.get()?.navigate(NavGraphDirections.actionGlobalHome())
         }
 
         return true
     }
+
+    private fun isCurrentDestinationInAllowList(currentDestination: Int?) =
+        interceptAboutHomeAllowList.contains(currentDestination)
 
     /** Where possible, this will make the error type more accurate by including information not available to AC. */
     private fun improveErrorType(errorType: ErrorType): ErrorType {

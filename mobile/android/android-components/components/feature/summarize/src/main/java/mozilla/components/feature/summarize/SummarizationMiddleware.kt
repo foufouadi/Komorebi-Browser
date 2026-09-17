@@ -108,12 +108,15 @@ class SummarizationMiddleware(
             is ReceivedParsedDocument,
             SettingsBackClicked,
             SettingsClicked,
+            is SettingsLoaded,
             ShakeConsentRequested,
             SignInSummarizationContentAction.DismissClicked,
             SignInSummarizationContentAction.LearnMoreClicked,
             SignInSummarizationContentAction.SignInClicked,
             SummarizationCompleted,
             is SummarizationRequested,
+            is SummarizeSettingsActionWrapper,
+            is SummaryFeedbackProvided,
             is ViewDismissed -> Unit
         }
 

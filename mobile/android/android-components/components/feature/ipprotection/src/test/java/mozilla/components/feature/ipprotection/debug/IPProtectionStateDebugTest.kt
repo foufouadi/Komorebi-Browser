@@ -18,6 +18,7 @@ import mozilla.components.feature.ipprotection.store.state.AccountStatus
 import mozilla.components.feature.ipprotection.store.state.Authorized
 import mozilla.components.feature.ipprotection.store.state.EligibilityStatus
 import mozilla.components.feature.ipprotection.store.state.IPProtectionState
+import mozilla.components.feature.ipprotection.store.state.PendingActivationRequest
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -48,7 +49,8 @@ class IPProtectionStateDebugTest {
         composeTestRule.onNodeWithText("Ready").assertExists()
         composeTestRule.onNodeWithText("EnrolledAndEntitled").assertExists()
         composeTestRule.onNodeWithText("2026-06-01").assertExists()
-        composeTestRule.onNodeWithText("true").assertExists()
+        composeTestRule.onNodeWithText("Activate").assertExists()
+        composeTestRule.onNodeWithText("JP").assertExists()
     }
 
     @Test
@@ -60,8 +62,8 @@ class IPProtectionStateDebugTest {
         }
 
         composeTestRule.onNodeWithText("lastError").assertExists()
-        // resetDate, lastError, and activate all default to "null" placeholders.
-        composeTestRule.onAllNodesWithText("null").assertCountEquals(3)
+        // resetDate, lastError, activate state and selected location code all default to "null" placeholders.
+        composeTestRule.onAllNodesWithText("null").assertCountEquals(4)
     }
 
     @Test
@@ -85,6 +87,6 @@ class IPProtectionStateDebugTest {
             resetDate = "2026-06-01",
             accountState = AccountState(status = AccountStatus.EnrolledAndEntitled),
             lastError = null,
-            activate = true,
+            pendingActivationRequest = PendingActivationRequest.Activate("JP"),
         )
 }

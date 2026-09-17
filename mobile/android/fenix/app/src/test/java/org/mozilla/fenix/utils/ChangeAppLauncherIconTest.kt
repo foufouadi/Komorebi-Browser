@@ -638,7 +638,7 @@ private class TestShortcutManagerWrapper(context: Context) : ShortcutManagerWrap
     }
 }
 
-private class TestCrashReporter() : CrashReporting {
+private class TestCrashReporter : CrashReporting {
     var submitCaughtExceptionInvoked = false
     var errors: MutableList<Throwable> = mutableListOf()
 

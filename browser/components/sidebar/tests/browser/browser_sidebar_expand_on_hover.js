@@ -397,3 +397,179 @@ add_task(
     await SidebarController.waitUntilStable();
   }
 );
+
+const UI_DENSITY_PREF = "browser.uidensity";
+
+registerCleanupFunction(() => {
+  Services.prefs.clearUserPref(UI_DENSITY_PREF);
+  gUIDensity.update();
+});
+
+function getReservedLauncherWidth() {
+  return parseFloat(
+    document
+      .getElementById("browser")
+      .style.getPropertyValue("--sidebar-launcher-collapsed-width")
+  );
+}
+
+async function setDensity(mode) {
+  if (mode === null) {
+    Services.prefs.clearUserPref(UI_DENSITY_PREF);
+  } else {
+    Services.prefs.setIntPref(UI_DENSITY_PREF, mode);
+  }
+  await SidebarController.waitUntilStable();
+  await new Promise(resolve =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))
+  );
+}
+
+function launcherReservationIsExact() {
+  return (
+    Math.abs(
+      getReservedLauncherWidth() -
+        SidebarController.sidebarContainer.getBoundingClientRect().width
+    ) <= 1
+  );
+}
+
+async function assertLauncherReservationExact(label) {
+  await TestUtils.waitForCondition(
+    launcherReservationIsExact,
+    `${label}: reserved launcher width converges on the launcher's actual width`
+  );
+  const reserved = getReservedLauncherWidth();
+  const actual =
+    SidebarController.sidebarContainer.getBoundingClientRect().width;
+  Assert.lessOrEqual(
+    Math.abs(reserved - actual),
+    1,
+    `${label}: reserved launcher width (${reserved}) matches the launcher (${actual})`
+  );
+}
+
+add_task(async function test_collapsed_width_tracks_uidensity() {
+  await SidebarTestUtils.showPanel(window, "viewCustomizeSidebar");
+  await SidebarController.toggleExpandOnHover(true);
+  await SidebarController.waitUntilStable();
+
+  await setDensity(gUIDensity.MODE_COMPACT);
+  is(
+    document.documentElement.getAttribute("uidensity"),
+    "compact",
+    "Compact density is applied"
+  );
+  await assertLauncherReservationExact("compact density");
+
+  await setDensity(null);
+  ok(
+    !document.documentElement.hasAttribute("uidensity"),
+    "Normal density is applied"
+  );
+  await assertLauncherReservationExact("back to normal density");
+
+  await setDensity(gUIDensity.MODE_COMPACT);
+  await assertLauncherReservationExact("compact density again");
+
+  await setDensity(null);
+  await SidebarController.toggleExpandOnHover(false);
+  SidebarController.hide();
+  await SidebarController.waitUntilStable();
+});
+
+add_task(async function test_density_change_leaves_expanded_launcher_alone() {
+  await SidebarController.show("viewCustomizeSidebar");
+  await SidebarController.toggleExpandOnHover(true);
+  await SidebarController.waitUntilStable();
+
+  SidebarController._state.launcherExpanded = true;
+  await SidebarController.waitUntilStable();
+  const reservedWhileExpanded = getReservedLauncherWidth();
+
+  await setDensity(gUIDensity.MODE_COMPACT);
+  is(
+    getReservedLauncherWidth(),
+    reservedWhileExpanded,
+    "Reserved width is left alone while the launcher is expanded"
+  );
+
+  SidebarController._state.launcherExpanded = false;
+  await SidebarController.waitUntilStable();
+  await assertLauncherReservationExact("after collapsing in the new density");
+
+  await setDensity(null);
+  await SidebarController.toggleExpandOnHover(false);
+  SidebarController.hide();
+  await SidebarController.waitUntilStable();
+});
+
+// The collapsed launcher relies on the tools list shrinking away so that only
+// the overflow chevron remains in view. See bug 2049659.
+add_task(async function test_overflow_chevron_visible_while_collapsed() {
+  await SpecialPowers.pushPrefEnv({
+    set: [[SIDEBAR_VISIBILITY_PREF, "expand-on-hover"]],
+  });
+
+  const main = SidebarController.sidebarMain;
+  main.expanded = false;
+  await main.updateComplete;
+  await waitForRepaint();
+
+  Assert.ok(
+    main.shouldShowOverflowButton,
+    "The collapsed launcher shows the overflow chevron."
+  );
+
+  // isVisible() only reports CSS visibility, so it stays true for a button its
+  // container has clipped out of view. Compare geometry instead.
+  const wrapper = main.buttonsWrapper.getBoundingClientRect();
+  const chevron = main.moreToolsButton.getBoundingClientRect();
+
+  Assert.greater(chevron.height, 0, "The chevron has been laid out.");
+  Assert.lessOrEqual(
+    Math.round(chevron.bottom),
+    Math.round(wrapper.bottom),
+    "The chevron is not clipped below the buttons wrapper."
+  );
+  Assert.greaterOrEqual(
+    Math.round(chevron.top),
+    Math.round(wrapper.top),
+    "The chevron is not clipped above the buttons wrapper."
+  );
+
+  await SpecialPowers.popPrefEnv();
+});
+
+// Disabling expand on hover has to restore the height on the same element it
+// collapsed. See bug 1971922.
+add_task(async function test_tools_height_restored_on_disable() {
+  await SpecialPowers.pushPrefEnv({
+    set: [[SIDEBAR_VISIBILITY_PREF, "expand-on-hover"]],
+  });
+
+  const { sidebarMain: main, _state: state } = SidebarController;
+  main.expanded = false;
+  await main.updateComplete;
+  state.collapsedToolsHeight = 120;
+
+  await SidebarController.toggleExpandOnHover(true);
+  await SidebarController.waitUntilStable();
+  Assert.equal(
+    main.buttonsWrapper.style.height,
+    "0px",
+    "Enabling expand on hover collapses the tools."
+  );
+
+  await SidebarController.toggleExpandOnHover(false);
+  await SidebarController.waitUntilStable();
+  Assert.equal(
+    main.buttonsWrapper.style.height,
+    "120px",
+    "Disabling expand on hover restores the stored height, with units."
+  );
+
+  state.collapsedToolsHeight = undefined;
+  state.updateToolsHeight();
+  await SpecialPowers.popPrefEnv();
+});

@@ -1,18 +1,25 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.fenix.ui.efficiency.selectors
 
 import org.mozilla.fenix.R
 import org.mozilla.fenix.helpers.DataGenerationHelper.getStringResource
 import org.mozilla.fenix.ui.efficiency.helpers.Selector
+import org.mozilla.fenix.ui.efficiency.helpers.SelectorContainer
+import org.mozilla.fenix.ui.efficiency.helpers.SelectorGroup
 import org.mozilla.fenix.ui.efficiency.helpers.SelectorStrategy
 
-object SettingsSearchDefaultSearchEngineSelectors {
+object SettingsSearchDefaultSearchEngineSelectors : SelectorContainer {
+    enum class Group : SelectorGroup {
+        DEFAULT_SEARCH_ENGINES
+    }
 
     val DEFAULT_SEARCH_ENGINE_TITLE =
-        Selector(
-            strategy = SelectorStrategy.ESPRESSO_BY_TEXT,
-            value = "Default search engine",
-            description = "Default search engine title",
-            groups = listOf("requiredForPage"),
+        navigationToolbarTitle(
+            title = getStringResource(R.string.preferences_default_search_engine),
+            description = "Default search engine toolbar title",
         )
 
     fun DEFAULT_SEARCH_ENGINE_OPTION(engineName: String = "") =
@@ -21,7 +28,7 @@ object SettingsSearchDefaultSearchEngineSelectors {
             value = "engine_text",
             secondaryValue = engineName,
             description = "Default search engine option: $engineName",
-            groups = listOf("defaultSearchEngines"),
+            groups = setOf(Group.DEFAULT_SEARCH_ENGINES),
         )
 
     // The "Add search engine" row at the bottom of the default-engine list; opens the custom-engine form.
@@ -30,7 +37,6 @@ object SettingsSearchDefaultSearchEngineSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_TEXT,
             value = getStringResource(R.string.search_engine_add_custom_search_engine_title),
             description = "Add search engine button",
-            groups = listOf(),
         )
 
     // Overflow (three-dot) button on a custom engine's row. Only custom engines expose it on this
@@ -40,7 +46,6 @@ object SettingsSearchDefaultSearchEngineSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_DESCRIPTION_CONTAINS,
             value = getStringResource(R.string.content_description_menu),
             description = "Custom engine overflow menu button",
-            groups = listOf(),
         )
 
     val OVERFLOW_EDIT_ITEM =
@@ -48,15 +53,5 @@ object SettingsSearchDefaultSearchEngineSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_TEXT,
             value = getStringResource(R.string.search_engine_edit),
             description = "Edit item in the custom engine overflow menu",
-            groups = listOf(),
-        )
-
-    val all =
-        listOf(
-            DEFAULT_SEARCH_ENGINE_TITLE,
-            DEFAULT_SEARCH_ENGINE_OPTION(),
-            ADD_SEARCH_ENGINE_BUTTON,
-            ENGINE_OVERFLOW_MENU,
-            OVERFLOW_EDIT_ITEM,
         )
 }

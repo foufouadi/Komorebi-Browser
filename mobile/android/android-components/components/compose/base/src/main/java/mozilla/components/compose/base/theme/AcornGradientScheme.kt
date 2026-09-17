@@ -156,7 +156,7 @@ val darkAcornGradientScheme =
                 type = AcornGradientType.Linear(angleInDegrees = ACCENT_GRADIENT_ANGLE),
                 colorStops =
                     listOf(
-                        ColorStop(0.4f, NovaColors.VioletDesaturated90A50),
+                        ColorStop(0.4f, NovaColors.VioletDesaturated90A40),
                         ColorStop(1f, NovaColors.Orange70A50),
                     ),
             ),
@@ -173,8 +173,8 @@ val privateAcornGradientScheme =
                 type = AcornGradientType.Linear(angleInDegrees = ACCENT_GRADIENT_ANGLE),
                 colorStops =
                     listOf(
-                        ColorStop(0.4f, NovaColors.VioletDesaturated90),
-                        ColorStop(1f, NovaColors.VioletDesaturated90),
+                        ColorStop(0.4f, NovaColors.VioletDesaturated80),
+                        ColorStop(1f, NovaColors.VioletDesaturated80),
                     ),
             ),
         tabOutline = tabOutline,

@@ -8102,7 +8102,23 @@ void nsTextFrame::DrawTextRunAndDecorations(Range aRange,
     }
     clipRect.emplace(x, y, w, h);
     clipRect->Scale(1 / app);
-    clipRect->Round();
+    // Round the inline axis to nearest: that's the axis the clip exists for,
+    // and it keeps the clips of adjacent ranges tiling exactly, so a decoration
+    // is neither dropped nor drawn twice where two ranges meet. The block axis
+    // only bounds the rect - it spans the ink overflow rect, which contains the
+    // decoration - so round it outward instead. An edge rounded inward there
+    // can land on the device pixel row the line was snapped to, and then the
+    // line is culled entirely rather than trimmed (bug 2059455).
+    gfxRect inlineRounded = *clipRect;
+    inlineRounded.Round();
+    clipRect->RoundOut();
+    if (verticalDec) {
+      clipRect->y = inlineRounded.y;
+      clipRect->height = inlineRounded.height;
+    } else {
+      clipRect->x = inlineRounded.x;
+      clipRect->width = inlineRounded.width;
+    }
   }
 
   typedef gfxFont::Metrics Metrics;

@@ -11,20 +11,15 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.SerializationException
-import kotlinx.serialization.json.Json
 import mozilla.components.browser.state.search.RegionState
 import mozilla.components.browser.state.state.BrowserState
 import mozilla.components.browser.state.store.BrowserStore
-import mozilla.components.concept.base.crash.Breadcrumb
 import mozilla.components.feature.top.sites.DefaultTopSitesStorage
 import mozilla.components.lib.crash.CrashReporter
 import mozilla.components.lib.state.helpers.AbstractBinding
-import mozilla.components.support.ktx.kotlin.tryGetHostFromUrl
 import org.mozilla.fenix.Config
 import org.mozilla.fenix.R
+import org.mozilla.fenix.home.topsites.utils.fetchDefaultTopSites
 import org.mozilla.fenix.utils.Settings
 
 /**
@@ -65,75 +60,23 @@ class DefaultTopSitesBinding(
                 val defaultTopSites = getTopSites(region = regionState.current)
 
                 if (defaultTopSites.isNotEmpty()) {
-                    topSitesStorage.addTopSites(topSites = defaultTopSites, isDefault = true)
+                    topSitesStorage.addTopSites(
+                        topSites = defaultTopSites.map { it.title to it.url },
+                        isDefault = true,
+                    )
                     settings.defaultTopSitesAdded = true
                 }
             }
     }
 
-    internal suspend fun getTopSites(region: String): List<Pair<String, String>> =
+    internal suspend fun getTopSites(region: String): List<DefaultTopSite> =
         withContext(ioDispatcher) {
-            try {
-                val json = Json { ignoreUnknownKeys = true }
-                val jsonString =
-                    resources.openRawResource(R.raw.initial_shortcuts).bufferedReader().use { it.readText() }
-
-                json
-                    .decodeFromString<DefaultTopSitesList>(jsonString)
-                    .data
-                    .filter { item ->
-                        val includedInRegions = item.includeRegions.isEmpty() || region in item.includeRegions
-                        val notExcludedInRegions = item.excludeRegions.isEmpty() || region !in item.excludeRegions
-
-                        val includedInExperiments =
-                            if (
-                                item.includeExperiments.isNotEmpty() &&
-                                    item.includeExperiments.first() == "firefox-jp-guide-default-site"
-                            ) {
-                                settings.showFirefoxJpGuideDefaultSite
-                            } else {
-                                true
-                            }
-
-                        includedInRegions && notExcludedInRegions && includedInExperiments
-                    }
-                    .map {
-                        Pair(
-                            it.title?.takeIf(String::isNotBlank) ?: it.url.tryGetHostFromUrl(),
-                            it.url,
-                        )
-                    }
-            } catch (e: SerializationException) {
-                crashReporter.recordCrashBreadcrumb(
-                    Breadcrumb(message = "DefaultShortcutsProvider - Failed to parse initial_shortcuts.json")
+            fetchDefaultTopSites(
+                    resources = resources,
+                    rawResId = R.raw.initial_shortcuts,
+                    crashReporter = crashReporter,
+                    region = region,
                 )
-                crashReporter.submitCaughtException(e)
-                listOf()
-            } catch (e: IllegalArgumentException) {
-                crashReporter.recordCrashBreadcrumb(
-                    Breadcrumb(message = "DefaultShortcutsProvider - Failed to parse initial_shortcuts.json")
-                )
-                crashReporter.submitCaughtException(e)
-                listOf()
-            }
+                .map { it.toDefaultTopSite() }
         }
 }
-
-@Serializable
-private data class DefaultTopSiteItem(
-    val url: String,
-    val title: String? = null,
-    val order: Int,
-    val schema: Long,
-    @SerialName("exclude_locales") val excludeLocales: List<String> = emptyList(),
-    @SerialName("exclude_regions") val excludeRegions: List<String> = emptyList(),
-    @SerialName("include_locales") val includeLocales: List<String> = emptyList(),
-    @SerialName("include_regions") val includeRegions: List<String> = emptyList(),
-    @SerialName("exclude_experiments") val excludeExperiments: List<String> = emptyList(),
-    @SerialName("include_experiments") val includeExperiments: List<String> = emptyList(),
-    val id: String,
-    @SerialName("last_modified") val lastModified: Long,
-    @SerialName("search_shortcut") val searchShortcut: Boolean = false,
-)
-
-@Serializable private data class DefaultTopSitesList(val data: List<DefaultTopSiteItem>)

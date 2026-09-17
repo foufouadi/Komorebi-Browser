@@ -34,9 +34,7 @@
 #include "mozilla/dom/SessionStorageManager.h"
 #include "mozilla/ipc/ProtocolUtils.h"
 #include "mozilla/layers/CompositorBridgeChild.h"
-#ifdef NS_PRINTING
-#  include "mozilla/layout/RemotePrintJobParent.h"
-#endif
+#include "mozilla/layout/RemotePrintJobParent.h"
 #include "mozilla/net/DocumentLoadListener.h"
 #include "mozilla/NullPrincipal.h"
 #include "mozilla/ScopedPrefs.h"
@@ -247,7 +245,7 @@ void CanonicalBrowsingContext::GetCurrentRemoteType(nsACString& aRemoteType,
                                                     ErrorResult& aRv) const {
   // If we're in the parent process, dump out the void string.
   if (mProcessId == 0) {
-    aRemoteType = NOT_REMOTE_TYPE;
+    aRemoteType = RemoteType::NotRemote().Stringify();
     return;
   }
 
@@ -257,7 +255,7 @@ void CanonicalBrowsingContext::GetCurrentRemoteType(nsACString& aRemoteType,
     return;
   }
 
-  aRemoteType = cp->GetRemoteType();
+  aRemoteType = cp->GetRemoteType().Stringify();
 }
 
 void CanonicalBrowsingContext::SetOwnerProcessId(uint64_t aProcessId) {
@@ -336,6 +334,12 @@ void CanonicalBrowsingContext::ReplacedBy(
   txn.SetDisplayMode(GetDisplayMode());
   txn.SetForceDesktopViewport(GetForceDesktopViewport());
   txn.SetIsUnderHiddenEmbedderElement(GetIsUnderHiddenEmbedderElement());
+
+  // Propagate WatchedByDevTools state so that cross-group navigations
+  // are kept being tracked by DevTools.
+  if (GetWatchedByDevToolsInternal()) {
+    txn.SetWatchedByDevToolsInternal(true);
+  }
 
   // When using site-specific zoom, we let the frontend manage the zoom level
   // of BFCache'd contexts. Overriding those zoom levels can cause weirdness
@@ -475,24 +479,20 @@ CanonicalBrowsingContext::GetBrowserDOMWindow() {
 }
 
 already_AddRefed<WindowGlobalParent>
-CanonicalBrowsingContext::GetEmbedderWindowGlobal() const {
-  uint64_t windowId = GetEmbedderInnerWindowId();
-  if (windowId == 0) {
-    return nullptr;
+CanonicalBrowsingContext::GetEmbedderWindowGlobal() {
+  if (auto* parent = GetParentWindowContext()) {
+    return do_AddRef(parent);
   }
-
-  return WindowGlobalParent::GetByInnerWindowId(windowId);
+  if (mCrossGroupEmbedderWindowId) {
+    return WindowGlobalParent::GetByInnerWindowId(mCrossGroupEmbedderWindowId);
+  }
+  return nullptr;
 }
 
 CanonicalBrowsingContext*
 CanonicalBrowsingContext::GetParentCrossChromeBoundary() {
-  if (GetParent()) {
-    return Cast(GetParent());
-  }
-  if (auto* embedder = GetEmbedderElement()) {
-    return Cast(embedder->OwnerDoc()->GetBrowsingContext());
-  }
-  return nullptr;
+  RefPtr<WindowGlobalParent> parent = GetEmbedderWindowGlobal();
+  return parent ? parent->BrowsingContext() : nullptr;
 }
 
 CanonicalBrowsingContext* CanonicalBrowsingContext::TopCrossChromeBoundary() {
@@ -865,7 +865,6 @@ void CanonicalBrowsingContext::MaybeReuseNavigationKeyFromActiveEntry(
 }
 
 using PrintPromise = CanonicalBrowsingContext::PrintPromise;
-#ifdef NS_PRINTING
 // Clients must call StaticCloneForPrintingCreated or
 // NoStaticCloneForPrintingWillBeCreated before the underlying promise can
 // resolve.
@@ -946,7 +945,6 @@ class PrintListenerAdapter final : public nsIWebProgressListener {
 };
 
 NS_IMPL_ISUPPORTS(PrintListenerAdapter, nsIWebProgressListener)
-#endif
 
 already_AddRefed<Promise> CanonicalBrowsingContext::PrintJS(
     nsIPrintSettings* aPrintSettings, ErrorResult& aRv) {
@@ -967,9 +965,6 @@ already_AddRefed<Promise> CanonicalBrowsingContext::PrintJS(
 
 RefPtr<PrintPromise> CanonicalBrowsingContext::Print(
     nsIPrintSettings* aPrintSettings) {
-#ifndef NS_PRINTING
-  return PrintPromise::CreateAndReject(NS_ERROR_NOT_AVAILABLE, __func__);
-#else
   bool needContentAnalysis = false;
   nsCOMPtr<nsIContentAnalysis> contentAnalysis =
       mozilla::components::nsIContentAnalysis::Service();
@@ -1013,26 +1008,20 @@ RefPtr<PrintPromise> CanonicalBrowsingContext::Print(
     return done;
   }
   return PrintWithNoContentAnalysis(aPrintSettings, false, nullptr);
-#endif
 }
 
 void CanonicalBrowsingContext::ReleaseClonedPrint(
     const MaybeDiscardedBrowsingContext& aClonedStaticBrowsingContext) {
-#ifdef NS_PRINTING
   auto* browserParent = GetBrowserParent();
   if (NS_WARN_IF(!browserParent)) {
     return;
   }
   (void)browserParent->SendDestroyPrintClone(aClonedStaticBrowsingContext);
-#endif
 }
 
 RefPtr<PrintPromise> CanonicalBrowsingContext::PrintWithNoContentAnalysis(
     nsIPrintSettings* aPrintSettings, bool aForceStaticDocument,
     const MaybeDiscardedBrowsingContext& aCachedStaticDocument) {
-#ifndef NS_PRINTING
-  return PrintPromise::CreateAndReject(NS_ERROR_NOT_AVAILABLE, __func__);
-#else
   auto promise = MakeRefPtr<PrintPromise::Private>(__func__);
   auto listener = MakeRefPtr<PrintListenerAdapter>(promise);
   if (IsInProcess()) {
@@ -1121,7 +1110,6 @@ RefPtr<PrintPromise> CanonicalBrowsingContext::PrintWithNoContentAnalysis(
         });
   }
   return promise.forget();
-#endif
 }
 
 void CanonicalBrowsingContext::CallOnTopDescendants(
@@ -1655,7 +1643,7 @@ void CanonicalBrowsingContext::NavigationTraverse(
   MOZ_LOG_FMT(gNavigationAPILog, LogLevel::Debug, "Traverse navigation to {}",
               aKey.ToString().get());
   nsSHistory* shistory = static_cast<nsSHistory*>(GetSessionHistory());
-  if (!shistory) {
+  if (!shistory || !mActiveEntry) {
     return aResolver(NS_ERROR_DOM_INVALID_STATE_ERR);
   }
   RefPtr<SessionHistoryEntry> targetEntry;
@@ -2546,7 +2534,8 @@ CanonicalBrowsingContext::ChangeRemoteness(
     return RemotenessPromise::CreateAndReject(NS_ERROR_NOT_AVAILABLE, __func__);
   }
 
-  if (aOptions.mRemoteType.IsEmpty() && (!IsTop() || !GetEmbedderElement())) {
+  if (aOptions.mRemoteType.IsNotRemote() &&
+      (!IsTop() || !GetEmbedderElement())) {
     NS_WARNING("Cannot load non-remote subframes");
     return RemotenessPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
   }
@@ -2615,7 +2604,8 @@ CanonicalBrowsingContext::ChangeRemoteness(
         "which will never perform a process-switch to being in-process with "
         "their embedder");
     MOZ_DIAGNOSTIC_ASSERT(!aOptions.mReplaceBrowsingContext);
-    MOZ_DIAGNOSTIC_ASSERT(!aOptions.mRemoteType.IsEmpty());
+    MOZ_DIAGNOSTIC_ASSERT(aOptions.mRemoteType.IsKnown());
+    MOZ_DIAGNOSTIC_ASSERT(!aOptions.mRemoteType.IsNotRemote());
     MOZ_DIAGNOSTIC_ASSERT(!change->mWaitingForPrepareToChange);
     MOZ_DIAGNOSTIC_ASSERT(!change->mSpecificGroup);
 
@@ -2628,7 +2618,7 @@ CanonicalBrowsingContext::ChangeRemoteness(
   }
 
   // Switching to the parent process.
-  if (aOptions.mRemoteType.IsEmpty()) {
+  if (aOptions.mRemoteType.IsNotRemote()) {
     change->ProcessLaunched();
     return promise.forget();
   }
@@ -2689,15 +2679,16 @@ CanonicalBrowsingContext::ChangeRemoteness(
   return promise.forget();
 }
 
-void CanonicalBrowsingContext::MaybeSetPermanentKey(Element* aEmbedder) {
-  MOZ_DIAGNOSTIC_ASSERT(IsTop());
+void CanonicalBrowsingContext::SetCrossGroupEmbedderElement(
+    Element* aEmbedder) {
+  MOZ_DIAGNOSTIC_ASSERT(IsTop() && aEmbedder);
 
-  if (aEmbedder) {
-    if (nsCOMPtr<nsIBrowser> browser = aEmbedder->AsBrowser()) {
-      JS::Rooted<JS::Value> key(RootingCx());
-      if (NS_SUCCEEDED(browser->GetPermanentKey(&key)) && key.isObject()) {
-        mPermanentKey = key;
-      }
+  mCrossGroupEmbedderWindowId = aEmbedder->OwnerDoc()->InnerWindowID();
+
+  if (nsCOMPtr<nsIBrowser> browser = aEmbedder->AsBrowser()) {
+    JS::Rooted<JS::Value> key(RootingCx());
+    if (NS_SUCCEEDED(browser->GetPermanentKey(&key)) && key.isObject()) {
+      mPermanentKey = key;
     }
   }
 }
@@ -3243,9 +3234,9 @@ void CanonicalBrowsingContext::CancelSessionStoreUpdate() {
   }
 }
 
-void CanonicalBrowsingContext::SetContainerFeaturePolicy(
-    Maybe<FeaturePolicyInfo>&& aContainerFeaturePolicyInfo) {
-  mContainerFeaturePolicyInfo = std::move(aContainerFeaturePolicyInfo);
+void CanonicalBrowsingContext::SetContainerPermissionsPolicy(
+    Maybe<PermissionsPolicyInfo>&& aContainerPermissionsPolicyInfo) {
+  mContainerPermissionsPolicyInfo = std::move(aContainerPermissionsPolicyInfo);
 }
 
 already_AddRefed<CanonicalBrowsingContext>
@@ -3544,11 +3535,6 @@ nsresult CanonicalBrowsingContext::ClearBfcacheByPrincipal(
   NS_ENSURE_ARG_POINTER(aPrincipal);
   MOZ_DIAGNOSTIC_ASSERT(XRE_IsParentProcess());
 
-  // Allow disabling the feature if unexpected regressions occur
-  if (!StaticPrefs::privacy_clearSiteDataHeader_cache_bfcache_enabled()) {
-    return NS_OK;
-  }
-
   // Iter through all open tabs by going through all top-level browsing
   // contexts.
   AutoTArray<RefPtr<BrowsingContextGroup>, 32> groups;
@@ -3631,7 +3617,7 @@ void CanonicalBrowsingContext::RemovePageAwakeRequest() {
 }
 
 void CanonicalBrowsingContext::CloneDocumentTreeInto(
-    CanonicalBrowsingContext* aSource, const nsACString& aRemoteType,
+    CanonicalBrowsingContext* aSource, const RemoteType& aRemoteType,
     embedding::PrintData&& aPrintData) {
   NavigationIsolationOptions options;
   options.mRemoteType = aRemoteType;
@@ -3728,10 +3714,11 @@ bool CanonicalBrowsingContext::StartApzAutoscroll(float aAnchorX,
 
   mozilla::layers::ScrollableLayerGuid guid(layersId, aPresShellId, aScrollId);
 
-  return widget->StartAsyncAutoscroll(
+  widget->StartAsyncAutoscroll(
       ViewAs<ScreenPixel>(
           anchor, PixelCastJustification::LayoutDeviceIsScreenForBounds),
       guid);
+  return true;
 }
 
 void CanonicalBrowsingContext::StopApzAutoscroll(nsViewID aScrollId,

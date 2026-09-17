@@ -3,8 +3,9 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-use crate::render::{Channels, ChannelsMut, RenderPipelineInOutStage};
 use jxl_simd::{F32SimdVec, simd_function};
+
+use crate::render::{Channels, ChannelsMut, ErasedLocalState, RenderPipelineInOutStage};
 
 pub struct HorizontalChromaUpsample {
     channel: usize,
@@ -76,7 +77,8 @@ impl RenderPipelineInOutStage for HorizontalChromaUpsample {
         xsize: usize,
         input_rows: &Channels<f32>,
         output_rows: &mut ChannelsMut<f32>,
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut ErasedLocalState>,
+        _previous_call_was_previous_row: bool,
     ) {
         let input = &input_rows[0];
         let output = &mut output_rows[0];
@@ -163,7 +165,8 @@ impl RenderPipelineInOutStage for VerticalChromaUpsample {
         xsize: usize,
         input_rows: &Channels<f32>,
         output_rows: &mut ChannelsMut<f32>,
-        _state: Option<&mut dyn std::any::Any>,
+        _state: Option<&mut ErasedLocalState>,
+        _previous_call_was_previous_row: bool,
     ) {
         let input = &input_rows[0];
         let output = &mut output_rows[0];
@@ -181,9 +184,12 @@ impl RenderPipelineInOutStage for VerticalChromaUpsample {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use crate::{error::Result, image::Image, render::test::make_and_run_simple_pipeline};
     use test_log::test;
+
+    use super::*;
+    use crate::error::Result;
+    use crate::image::Image;
+    use crate::render::test::make_and_run_simple_pipeline;
 
     #[test]
     fn hchr_consistency() -> Result<()> {

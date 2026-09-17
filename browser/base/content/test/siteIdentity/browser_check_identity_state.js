@@ -64,10 +64,13 @@ requestLongerTimeout(2);
 
 add_task(async function chromeUITest() {
   // needs to be set due to bug in ion.js that occurs when testing
-  SpecialPowers.pushPrefEnv({
+  await SpecialPowers.pushPrefEnv({
     set: [
       ["toolkit.pioneer.testCachedContent", "[]"],
       ["toolkit.pioneer.testCachedAddons", "[]"],
+      // about:protections is loaded below, and its VPN card sets
+      // browser.contentblocking.report.hide_vpn_banner on the first visit.
+      ["browser.vpn_promo.enabled", false],
     ],
   });
   // Might needs to be extended with new secure chrome pages
@@ -138,6 +141,8 @@ add_task(async function chromeUITest() {
       );
     });
   }
+
+  await SpecialPowers.popPrefEnv();
 });
 
 add_task(async function test_webpage() {
@@ -669,8 +674,6 @@ add_task(async function test_reader_uri() {
   );
 
   gBrowser.removeTab(newTab);
-
-  await SpecialPowers.popPrefEnv();
 });
 
 add_task(async function test_data_uri() {

@@ -11,7 +11,7 @@ import mozilla.components.concept.storage.BookmarkNodeType
 import mozilla.components.concept.storage.BookmarksStorage
 import mozilla.components.concept.storage.bookmarks.InsertableBookmarkTreeRoot
 
-class FakeBookmarksStorage() : BookmarksStorage {
+class FakeBookmarksStorage : BookmarksStorage {
     private val bookmarkMap: HashMap<String, BookmarkNode> = hashMapOf()
 
     override suspend fun warmUp() {

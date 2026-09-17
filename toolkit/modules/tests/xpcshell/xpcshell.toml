@@ -129,6 +129,9 @@ skip-if = [
 ]
 
 ["test_ScheduledTask.js"]
+skip-if = [
+  "os == 'android'",
+]
 
 ["test_Services.js"]
 
@@ -147,6 +150,12 @@ reason = "LOCALE is not defined without MOZ_UPDATER"
 tags = "os_integration"
 
 ["test_UrlUtils.js"]
+
+["test_WindowsLaunchOnLogin_missingExecutables.js"]
+run-if = [
+  "os == 'win'", # Test of a Windows-specific feature
+]
+tags = "os_integration"
 
 ["test_firstStartup.js"]
 

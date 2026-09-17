@@ -13,7 +13,9 @@ import {
   PAGE_LAYOUT_VARIANTS,
   PREF_PAGE_LAYOUT_VARIANT,
   isSideBySideAssigned,
+  isSpacesAssigned,
   resolvePageLayoutVariant,
+  resolvePopulatedSpaces,
 } from "common/PageLayoutVariants.mjs";
 import { connect } from "react-redux";
 import React from "react";
@@ -21,7 +23,6 @@ import React from "react";
 // Pref Constants
 const PREF_AD_SIZE_MEDIUM_RECTANGLE = "newtabAdSize.mediumRectangle";
 const PREF_AD_SIZE_BILLBOARD = "newtabAdSize.billboard";
-const PREF_AD_SIZE_LEADERBOARD = "newtabAdSize.leaderboard";
 const PREF_SECTIONS_ENABLED = "discoverystream.sections.enabled";
 const PREF_SPOC_PLACEMENTS = "discoverystream.placements.spocs";
 const PREF_SPOC_COUNTS = "discoverystream.placements.spocs.counts";
@@ -62,6 +63,13 @@ const WIDGET_EXTRA_FEATURES = {
 // Devtools-only copy, so not localized. A variant with no entry falls back to its
 // raw pref value and renders no description.
 const PAGE_LAYOUTS_INFO = {
+  // @experiment(remove) { bug 2066527 }
+  [PAGE_LAYOUT_VARIANTS.AUTO_MINIMIZE_WIDGETS]: {
+    label: "Auto-minimize Widgets",
+    description:
+      "Nova, but the widgets section collapses to just its title a few " +
+      "seconds after load.",
+  },
   [PAGE_LAYOUT_VARIANTS.NOVA_FULL_WIDTH]: {
     label: "Nova",
     description:
@@ -92,7 +100,22 @@ const PAGE_LAYOUTS_INFO = {
       "Same as Widgets lead, but stories get a fourth card across on wide " +
       "screens.",
   },
+  [PAGE_LAYOUT_VARIANTS.SPACES_BUTTONS_BOTTOM]: {
+    label: "Spaces (Buttons at the bottom)",
+    description:
+      "Stories, widgets and Highlights each get their own panel, navigated " +
+      "with a segmented control below the content and arrows at either edge.",
+  },
+  [PAGE_LAYOUT_VARIANTS.SPACES_BUTTONS_TOP]: {
+    label: "Spaces (Buttons at the top)",
+    description: "Same as above, with the segmented control above the content.",
+  },
 };
+
+// Falls back to the raw pref value for a variant with no PAGE_LAYOUTS_INFO entry.
+function variantLabel(variant) {
+  return PAGE_LAYOUTS_INFO[variant]?.label ?? variant;
+}
 
 const Row = props => (
   <tr className="message-item" {...props}>
@@ -382,11 +405,6 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
         this.props.dispatch(ac.SetPref(PREF_AD_SIZE_BILLBOARD, pressed));
 
         break;
-      case "newtab_leaderboard":
-        // Update boolean pref for billboard ad size
-        this.props.dispatch(ac.SetPref(PREF_AD_SIZE_LEADERBOARD, pressed));
-
-        break;
       case "newtab_rectangle":
         // Update boolean pref for mediumRectangle (MREC) ad size
         this.props.dispatch(ac.SetPref(PREF_AD_SIZE_MEDIUM_RECTANGLE, pressed));
@@ -410,11 +428,7 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
           .filter(item => item) || [];
 
       // Confirm that the IAB type will have a count value of "1"
-      const supportIABAdTypes = [
-        "newtab_leaderboard",
-        "newtab_rectangle",
-        "newtab_billboard",
-      ];
+      const supportIABAdTypes = ["newtab_rectangle", "newtab_billboard"];
       let countValue;
       if (supportIABAdTypes.includes(id)) {
         countValue = "1"; // Default count value for all IAB ad types
@@ -458,19 +472,15 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
           ac.SetPref(PREF_CONTEXTUAL_BANNER_PLACEMENTS, "newtab_billboard")
         );
         this.props.dispatch(ac.SetPref(PREF_CONTEXTUAL_BANNER_COUNTS, "1"));
-      } else if (
-        PREF_AD_SIZE_LEADERBOARD &&
-        placements.includes("newtab_leaderboard")
-      ) {
-        this.props.dispatch(
-          ac.SetPref(PREF_CONTEXTUAL_BANNER_PLACEMENTS, "newtab_leaderboard")
-        );
-        this.props.dispatch(ac.SetPref(PREF_CONTEXTUAL_BANNER_COUNTS, "1"));
       } else {
         this.props.dispatch(ac.SetPref(PREF_CONTEXTUAL_BANNER_PLACEMENTS, ""));
         this.props.dispatch(ac.SetPref(PREF_CONTEXTUAL_BANNER_COUNTS, ""));
       }
     }
+
+    // The layout is cached, so the new placements only take effect once the
+    // cache is rebuilt.
+    this.refreshCache();
   }
 
   handleSectionsToggle(e) {
@@ -560,6 +570,20 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
     return null;
   }
 
+  // Same idea for spaces, which needs two places to navigate between. Without
+  // this an assigned-but-inactive spaces variant is indistinguishable from
+  // today's page, since spaces adds no visible frame of its own when it falls
+  // back. Callers check the variant is spaces first.
+  spacesInactiveReason() {
+    const populated = resolvePopulatedSpaces(this.props.otherPrefs);
+    if (populated.length > 1) {
+      return null;
+    }
+    return populated.length
+      ? `only the ${populated[0]} space has content, so there is nowhere to navigate to`
+      : "no space has content";
+  }
+
   renderLayouts() {
     const prefs = this.props.otherPrefs;
     // The pref, not the effective value: what the radio sets and reset clears.
@@ -568,35 +592,42 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
     const effectiveVariant = resolvePageLayoutVariant(prefs);
     const trainhopOverride = effectiveVariant !== prefVariant;
     const inactiveReason =
-      isSideBySideAssigned(prefs) && this.pageLayoutInactiveReason();
+      (isSideBySideAssigned(prefs) && this.pageLayoutInactiveReason()) ||
+      (isSpacesAssigned(prefs) && this.spacesInactiveReason());
 
     return (
       <>
         <div className="layout-variants">
-          {Object.values(PAGE_LAYOUT_VARIANTS).map(variant => (
-            <label key={variant} className="layout-variant">
-              <input
-                type="radio"
-                name="page-layout-variant"
-                value={variant}
-                checked={prefVariant === variant}
-                onChange={this.handlePageLayoutChange}
-              />
-              <span className="layout-variant-text">
-                <span className="layout-variant-name">
-                  {PAGE_LAYOUTS_INFO[variant]?.label ?? variant}
-                  {variant === DEFAULT_PAGE_LAYOUT_VARIANT ? " (default)" : ""}
-                  {/* The pref value, for a Nimbus recipe or about:config. */}
-                  <code className="layout-variant-value">{variant}</code>
-                </span>
-                {PAGE_LAYOUTS_INFO[variant]?.description && (
-                  <span className="layout-variant-description">
-                    {PAGE_LAYOUTS_INFO[variant].description}
+          {Object.values(PAGE_LAYOUT_VARIANTS)
+            // By pref value, not label: locale collation orders the
+            // parenthesised labels' punctuation unintuitively.
+            .sort((a, b) => a.localeCompare(b))
+            .map(variant => (
+              <label key={variant} className="layout-variant">
+                <input
+                  type="radio"
+                  name="page-layout-variant"
+                  value={variant}
+                  checked={prefVariant === variant}
+                  onChange={this.handlePageLayoutChange}
+                />
+                <span className="layout-variant-text">
+                  <span className="layout-variant-name">
+                    {variantLabel(variant)}
+                    {variant === DEFAULT_PAGE_LAYOUT_VARIANT
+                      ? " (default)"
+                      : ""}
+                    {/* The pref value, for a Nimbus recipe or about:config. */}
+                    <code className="layout-variant-value">{variant}</code>
                   </span>
-                )}
-              </span>
-            </label>
-          ))}
+                  {PAGE_LAYOUTS_INFO[variant]?.description && (
+                    <span className="layout-variant-description">
+                      {PAGE_LAYOUTS_INFO[variant].description}
+                    </span>
+                  )}
+                </span>
+              </label>
+            ))}
         </div>
         <moz-button
           disabled={prefVariant === DEFAULT_PAGE_LAYOUT_VARIANT ? true : null}
@@ -1150,14 +1181,11 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
     const mediumRectangleEnabled =
       this.props.otherPrefs[PREF_AD_SIZE_MEDIUM_RECTANGLE];
     const billboardsEnabled = this.props.otherPrefs[PREF_AD_SIZE_BILLBOARD];
-    const leaderboardEnabled = this.props.otherPrefs[PREF_AD_SIZE_LEADERBOARD];
     const spocPlacements = this.props.otherPrefs[PREF_SPOC_PLACEMENTS];
     const mediumRectangleEnabledPressed =
       mediumRectangleEnabled && spocPlacements.includes("newtab_rectangle");
     const billboardPressed =
       billboardsEnabled && spocPlacements.includes("newtab_billboard");
-    const leaderboardPressed =
-      leaderboardEnabled && spocPlacements.includes("newtab_leaderboard");
 
     const widgetsSystemEnabled =
       this.props.otherPrefs[PREF_WIDGETS_SYSTEM_ENABLED];
@@ -1198,14 +1226,6 @@ export class DiscoveryStreamAdminUI extends React.PureComponent {
         </details>
         <details className="details-section">
           <summary>IAB Banner Ad Sizes</summary>
-          <div className="toggle-wrapper">
-            <moz-toggle
-              id="newtab_leaderboard"
-              pressed={leaderboardPressed || null}
-              ontoggle={this.toggleIABBanners}
-              label="Enable IAB Leaderboard"
-            />
-          </div>
           <div className="toggle-wrapper">
             <moz-toggle
               id="newtab_billboard"

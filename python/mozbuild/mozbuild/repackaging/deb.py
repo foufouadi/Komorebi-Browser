@@ -277,7 +277,15 @@ def _get_command(arch):
 
     if _is_chroot_available(arch):
         flattened_command = " ".join(command)
+        # chroot(2) requires CAP_SYS_CHROOT. Rather than running the whole task as
+        # root, enter an unprivileged user namespace: --map-root-user maps us to
+        # uid 0 inside it, which grants CAP_SYS_CHROOT and makes dpkg-buildpackage
+        # skip its gain-root command while still recording root:root ownership in
+        # the .deb (so no fakeroot needed either).
         command = [
+            "unshare",
+            "--user",
+            "--map-root-user",
             "chroot",
             _get_chroot_path(arch),
             "bash",

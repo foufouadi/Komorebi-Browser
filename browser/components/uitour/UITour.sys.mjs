@@ -415,7 +415,7 @@ export var UITour = {
       }
 
       case "showNewTab": {
-        this.showNewTab(window, browser);
+        this.showNewTab(window, browser, data.hash);
         break;
       }
 
@@ -466,9 +466,11 @@ export var UITour = {
             return data.email
               ? lazy.FxAccounts.config.promiseEmailURI(
                   data.email,
+                  "sync",
                   data.entrypoint || "uitour"
                 )
               : lazy.FxAccounts.config.promiseConnectAccountURI(
+                  "sync",
                   data.entrypoint || "uitour"
                 );
           })
@@ -494,6 +496,13 @@ export var UITour = {
       }
 
       case "showFirefoxAccountsForAIWindow": {
+        if (AppConstants.IS_ESR) {
+          lazy.log.warn(
+            "showFirefoxAccountsForAIWindow: Smart Window is not available on ESR"
+          );
+          break;
+        }
+
         // if user "Blocked" Smart Window feature from AI Control or global AI Control default
         // override Smart Window feature to "available"
         if (lazy.AIWindow.isBlocked) {
@@ -503,7 +512,7 @@ export var UITour = {
           );
         }
 
-        lazy.AIWindow.launchWindow(browser).then(success => {
+        lazy.AIWindow.launchWindow(browser, false, "bedrock").then(success => {
           if (!success) {
             lazy.log.warn(
               "showFirefoxAccountsForAIWindow: Failed to launch Smart Window"
@@ -515,7 +524,7 @@ export var UITour = {
 
       case "showConnectAnotherDevice": {
         lazy.FxAccounts.config
-          .promiseConnectDeviceURI(data.entrypoint || "uitour")
+          .promiseConnectDeviceURI("sync", data.entrypoint || "uitour")
           .then(uri => {
             const url = new URL(uri);
             // Call our helper to validate extraURLParams and populate URLSearchParams
@@ -565,6 +574,14 @@ export var UITour = {
         if (shell) {
           shell.pinToTaskbar().catch(console.error);
         }
+        break;
+      }
+
+      case "setNewtabWallpaper": {
+        let prefix = "browser.newtabpage.activity-stream.newtabWallpapers.";
+        Services.prefs.setStringPref(prefix + "wallpaper", data.wallpaper);
+        Services.prefs.setStringPref(prefix + "initialWallpaper", "");
+        Services.prefs.setBoolPref(prefix + "user.enabled", true);
         break;
       }
 
@@ -1480,9 +1497,12 @@ export var UITour = {
     }
   },
 
-  showNewTab(aWindow, aBrowser) {
+  showNewTab(aWindow, aBrowser, aHash) {
     aWindow.gURLBar.focus();
     let url = "about:newtab";
+    if (typeof aHash == "string" && /^[a-zA-Z0-9_-]+$/.test(aHash)) {
+      url += "#" + aHash;
+    }
     aWindow.openLinkIn(url, "current", {
       targetBrowser: aBrowser,
       triggeringPrincipal:
@@ -1669,6 +1689,10 @@ export var UITour = {
           ),
           smartWindow: Services.prefs.getStringPref(
             "browser.ai.control.smartWindow",
+            "default"
+          ),
+          speechRecognition: Services.prefs.getStringPref(
+            "browser.ai.control.speechRecognition",
             "default"
           ),
         });

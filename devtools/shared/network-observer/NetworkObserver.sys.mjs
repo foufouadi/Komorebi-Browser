@@ -485,10 +485,17 @@ export class NetworkObserver {
    */
   async #checkForLocalModeHook(httpActivity) {
     const channel = httpActivity.channel;
+
     const localFolderPath = this.#localModeMappings[channel.URI.host];
 
     // Only intercept requests matching a local mode host name
     if (!localFolderPath) {
+      return;
+    }
+
+    // Ignore any request done on a custom port which isn't http, nor https
+    const { port } = channel.URI;
+    if (port != -1 && port != 80 && port != 443) {
       return;
     }
 
@@ -508,7 +515,11 @@ export class NetworkObserver {
 
     dump(" Override " + channel.URI.spec + " to " + overridePath + "\n");
     try {
-      lazy.NetworkOverride.overrideChannelWithFilePath(channel, overridePath);
+      lazy.NetworkOverride.overrideChannelWithFilePath(
+        channel,
+        overridePath,
+        true
+      );
       // Handle the activity as being from the cache to avoid looking up
       // typical information from the http channel, which would error for
       // overridden channels.

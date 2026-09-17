@@ -50,6 +50,8 @@ typealias UUIDCreator = () -> String
  * @property onReaderViewStatusChange a callback invoked to indicate whether or not reader view is available and active
  *   for the page loaded by the currently selected session. The callback will be invoked when a page is loaded or
  *   refreshed, on any navigation (back or forward), and when the selected session changes.
+ * @property onListenClicked a callback invoked when the user clicks the listen button. Consumers are expected to start
+ *   a listening session, for example by dispatching to their own store.
  */
 class ReaderViewFeature(
     private val context: Context,
@@ -59,6 +61,7 @@ class ReaderViewFeature(
     private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
     private val createUUID: UUIDCreator = { UUID.randomUUID().toString() },
     private val onReaderViewStatusChange: onReaderViewStatusChange = { _, _ -> },
+    private val onListenClicked: () -> Unit = {},
 ) : LifecycleAwareFeature, UserInteractionHandler {
 
     private var scope: CoroutineScope? = null
@@ -82,7 +85,7 @@ class ReaderViewFeature(
         }
 
     private val controlsPresenter = ReaderViewControlsPresenter(controlsView, config)
-    private val controlsInteractor = ReaderViewControlsInteractor(controlsView, config)
+    private val controlsInteractor = ReaderViewControlsInteractor(controlsView, config, onListenClicked)
 
     enum class FontType(val value: String) {
         SANSSERIF("sans-serif"),
@@ -185,8 +188,8 @@ class ReaderViewFeature(
     }
 
     /** Shows the reader view appearance controls. */
-    fun showControls() {
-        controlsPresenter.show()
+    fun showControls(isListenEnabled: Boolean) {
+        controlsPresenter.show(isListenEnabled)
     }
 
     /** Hides the reader view appearance controls. */

@@ -57,26 +57,9 @@ using namespace mozilla::widget;
   for later restore.
 */
 
-bool GenerateWorkspaceID(nsAString& aName) {
-  nsresult rv;
-  nsCOMPtr<nsIUUIDGenerator> uuidGenerator =
-      do_GetService("@mozilla.org/uuid-generator;1", &rv);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return false;
-  }
-
-  nsID id;
-  rv = uuidGenerator->GenerateUUIDInPlace(&id);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return false;
-  }
-
-  char chars[NSID_LENGTH];
-  id.ToProvidedString(chars);
-
-  // NSID_LENGTH counts the null terminator.
-  aName.AssignASCII(chars, NSID_LENGTH - 1);
-  return true;
+static nsCString GenerateWorkspaceID() {
+  nsID id = nsID::GenerateUUID();
+  return nsCString(id.ToString().get());
 }
 
 static struct xdg_toplevel* GetXdgToplevelFromGdkWindow(GdkWindow* aWindow) {
@@ -113,28 +96,36 @@ bool nsWindowWayland::CreateRestoreSession(bool aRestoreWindow) {
     return false;
   }
 
-  NS_ConvertUTF16toUTF8 id(mSessionID);
+  // If we have old profile / workspace ID just replace it by
+  // UUID to avoid protocol error crash (Bug 2059617).
+  nsresult ret;
+  (void)mWorkspaceID.ToInteger(&ret);
+  if (NS_SUCCEEDED(ret)) {
+    mWorkspaceID = GenerateWorkspaceID();
+    aRestoreWindow = false;
+  }
+
   if (aRestoreWindow) {
     mSessionRestoreToken =
-        xdg_session_v1_restore_toplevel(session, toplevel, id.get());
+        xdg_session_v1_restore_toplevel(session, toplevel, mWorkspaceID.get());
   } else {
     mSessionRestoreToken =
-        xdg_session_v1_add_toplevel(session, toplevel, id.get());
+        xdg_session_v1_add_toplevel(session, toplevel, mWorkspaceID.get());
   }
 
   LOG("nsWindowWayland::CreateRestoreSession() ID %s restore %d token %p",
-      id.get(), aRestoreWindow, mSessionRestoreToken);
+      mWorkspaceID.get(), aRestoreWindow, mSessionRestoreToken);
   return !!mSessionRestoreToken;
 }
 
 void nsWindowWayland::GetWorkspaceID(nsAString& workspaceID) {
-  if (mSessionID.IsEmpty() && !GenerateWorkspaceID(mSessionID)) {
-    return;
+  if (mWorkspaceID.IsEmpty()) {
+    mWorkspaceID = GenerateWorkspaceID();
   }
-  workspaceID.Assign(mSessionID);
+  workspaceID = NS_ConvertUTF8toUTF16(mWorkspaceID);
 
-  LOG("nsWindowWayland::GetWorkspaceID() ID %s token %p",
-      NS_ConvertUTF16toUTF8(mSessionID).get(), mSessionRestoreToken);
+  LOG("nsWindowWayland::GetWorkspaceID() ID %s token %p", mWorkspaceID.get(),
+      mSessionRestoreToken);
 
   if (mSessionRestoreToken) {
     return;
@@ -156,7 +147,7 @@ static const xdg_toplevel_session_v1_listener sSessionListener = {
 
 void nsWindowWayland::RestoreXdgToplevel() {
   LOG("nsWindowWayland::RestoreXdgToplevel() ID %s GdkWindow [%p]",
-      NS_ConvertUTF16toUTF8(mSessionID).get(), GetToplevelGdkWindow());
+      mWorkspaceID.get(), GetToplevelGdkWindow());
   if (CreateRestoreSession(/* aRestoreWindow */ true)) {
 #ifdef MOZ_LOGGING
     if (LOG_ENABLED()) {
@@ -168,11 +159,10 @@ void nsWindowWayland::RestoreXdgToplevel() {
 }
 
 void nsWindowWayland::MoveToWorkspace(const nsAString& workspaceIDStr) {
-  mSessionID.Assign(workspaceIDStr);
+  mWorkspaceID = NS_ConvertUTF16toUTF8(workspaceIDStr);
   LOG("nsWindowWayland::MoveToWorkspace() session ID %s "
       "mWaitingToSessionRestore %d mNeedsShow %d",
-      NS_ConvertUTF16toUTF8(mSessionID).get(), mWaitingToSessionRestore,
-      mNeedsShow);
+      mWorkspaceID.get(), mWaitingToSessionRestore, mNeedsShow);
   if (!mWaitingToSessionRestore) {
     return;
   }
@@ -648,9 +638,8 @@ nsWindowWayland::WaylandPopupGetPositionFromLayout() {
     popupAlign = popupFrame->GetUntransformedPopupAlignment();
     anchorAlign = popupFrame->GetUntransformedPopupAnchor();
   }
-  if (isRTL) {
-    popupAlign = -popupAlign;
-    anchorAlign = -anchorAlign;
+  if (isRTL && (anchored || isTopContextMenu)) {
+    nsMenuPopupFrame::FlipAnchorForRTL(anchorAlign, popupAlign);
   }
 
   // So we need to extract popup position from nsMenuPopupFrame() and duplicate

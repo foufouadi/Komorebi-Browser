@@ -1110,14 +1110,8 @@ LogicalMargin ReflowInput::ComputeRelativeOffsets(WritingMode aWM,
   }
 
   // Convert the offsets to physical coordinates and store them on the frame
-  const nsMargin physicalOffsets = offsets.GetPhysicalMargin(aWM);
-  if (nsMargin* prop =
-          aFrame->GetProperty(nsIFrame::ComputedOffsetProperty())) {
-    *prop = physicalOffsets;
-  } else {
-    aFrame->AddProperty(nsIFrame::ComputedOffsetProperty(),
-                        new nsMargin(physicalOffsets));
-  }
+  aFrame->SetOrUpdateDeletableProperty(nsIFrame::ComputedOffsetProperty(),
+                                       offsets.GetPhysicalMargin(aWM));
 
   NS_ASSERTION(offsets.IStart(aWM) == -offsets.IEnd(aWM) &&
                    offsets.BStart(aWM) == -offsets.BEnd(aWM),
@@ -1131,11 +1125,9 @@ void ReflowInput::ApplyRelativePositioning(nsIFrame* aFrame,
                                            const nsMargin& aComputedOffsets,
                                            nsPoint* aPosition) {
   if (!aFrame->IsRelativelyOrStickyPositioned()) {
-    NS_ASSERTION(!aFrame->HasProperty(nsIFrame::NormalPositionProperty()),
-                 "We assume that changing the 'position' property causes "
-                 "frame reconstruction.  If that ever changes, this code "
-                 "should call "
-                 "aFrame->RemoveProperty(nsIFrame::NormalPositionProperty())");
+    MOZ_ASSERT(!aFrame->HasProperty(nsIFrame::NormalPositionProperty()),
+               "Only a relatively or sticky positioned frame should have a "
+               "stored normal position.");
     return;
   }
 
@@ -2453,11 +2445,7 @@ static void UpdateProp(nsIFrame* aFrame,
                        const FramePropertyDescriptor<nsMargin>* aProperty,
                        bool aNeeded, const nsMargin& aNewValue) {
   if (aNeeded) {
-    if (nsMargin* propValue = aFrame->GetProperty(aProperty)) {
-      *propValue = aNewValue;
-    } else {
-      aFrame->AddProperty(aProperty, new nsMargin(aNewValue));
-    }
+    aFrame->SetOrUpdateDeletableProperty(aProperty, aNewValue);
   } else {
     aFrame->RemoveProperty(aProperty);
   }

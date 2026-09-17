@@ -6,7 +6,7 @@ package org.mozilla.fenix.wallpapers
 
 import android.content.res.Configuration
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
+import android.util.Size
 import androidx.annotation.VisibleForTesting
 import java.io.File
 import java.util.Date
@@ -14,6 +14,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import mozilla.components.concept.fetch.Client
+import mozilla.components.support.ktx.android.graphics.toSampledBitmap
 import org.mozilla.fenix.components.AppStore
 import org.mozilla.fenix.components.appstate.AppAction
 import org.mozilla.fenix.utils.Settings
@@ -27,7 +28,9 @@ import org.mozilla.fenix.utils.Settings
  * @param client Handles downloading wallpapers and their metadata.
  * @param storageRootDirectory The top level app-local storage directory.
  * @param currentLocale The locale currently being used on the device.
+ * @param getDisplaySize Returns the current size of the display, in pixels, that a full screen wallpaper has to cover.
  */
+@Suppress("LongParameterList")
 class WallpapersUseCases(
     settings: Settings,
     filesDir: File,
@@ -35,6 +38,7 @@ class WallpapersUseCases(
     client: Client,
     storageRootDirectory: File,
     currentLocale: String,
+    private val getDisplaySize: () -> Size,
 ) {
     private val downloader = WallpaperDownloader(storageRootDirectory, client)
     private val fileManager = WallpaperFileManager(storageRootDirectory)
@@ -66,7 +70,7 @@ class WallpapersUseCases(
 
     // Use case for loading specific wallpaper bitmaps.
     val loadBitmap: LoadBitmapUseCase by lazy {
-        DefaultLoadBitmapUseCase(getFilesDir = { filesDir })
+        DefaultLoadBitmapUseCase(getFilesDir = { filesDir }, getDisplaySize = getDisplaySize)
     }
 
     val loadThumbnail: LoadThumbnailUseCase by lazy {
@@ -190,7 +194,10 @@ class WallpapersUseCases(
     }
 
     @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
-    internal class DefaultLoadBitmapUseCase(private val getFilesDir: suspend () -> File) : LoadBitmapUseCase {
+    internal class DefaultLoadBitmapUseCase(
+        private val getFilesDir: suspend () -> File,
+        private val getDisplaySize: () -> Size,
+    ) : LoadBitmapUseCase {
         override suspend fun invoke(wallpaper: Wallpaper, orientation: Int): Bitmap? =
             loadWallpaperFromDisk(wallpaper, orientation)
 
@@ -203,7 +210,8 @@ class WallpapersUseCases(
                 val path = wallpaper.getLocalPathFromContext(orientation)
                 withContext(Dispatchers.IO) {
                     val file = File(getFilesDir(), path)
-                    BitmapFactory.decodeStream(file.inputStream())
+                    val target = getDisplaySize().orientedTo(orientation)
+                    file.toSampledBitmap(targetWidth = target.width, targetHeight = target.height)
                 }
             } catch (e: CancellationException) {
                 // CancellationException must not be swallowed: if the coroutine was canceled while loading,
@@ -213,6 +221,22 @@ class WallpapersUseCases(
             } catch (_: Exception) {
                 null
             }
+
+        /**
+         * Returns this size with its longer edge assigned to match [orientation]. The asset that gets loaded is chosen
+         * from [orientation], but the display metrics are the device's current ones, so the two can disagree in split
+         * screen or mid-rotation. Without this the target would be transposed relative to the image and no subsampling
+         * would happen.
+         */
+        private fun Size.orientedTo(orientation: Int): Size {
+            val longEdge = maxOf(width, height)
+            val shortEdge = minOf(width, height)
+            return if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                Size(longEdge, shortEdge)
+            } else {
+                Size(shortEdge, longEdge)
+            }
+        }
 
         /**
          * Get the expected local path on disk for a wallpaper. This will differ depending on orientation and app theme.
@@ -234,22 +258,24 @@ class WallpapersUseCases(
          * Load the bitmap for a [wallpaper] thumbnail, if available.
          *
          * @param wallpaper The wallpaper to load a thumbnail for.
+         * @param targetSize The size, in pixels, the thumbnail is drawn at, which it is subsampled towards.
          */
-        suspend operator fun invoke(wallpaper: Wallpaper): Bitmap?
+        suspend operator fun invoke(wallpaper: Wallpaper, targetSize: Size): Bitmap?
     }
 
     @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
     internal class DefaultLoadThumbnailUseCase(private val filesDir: File) : LoadThumbnailUseCase {
-        override suspend fun invoke(wallpaper: Wallpaper): Bitmap? =
-            withContext(Dispatchers.IO) {
-                Result.runCatching {
-                        val path = Wallpaper.getLocalPath(wallpaper.name, Wallpaper.ImageType.Thumbnail)
-                        withContext(Dispatchers.IO) {
-                            val file = File(filesDir, path)
-                            BitmapFactory.decodeStream(file.inputStream())
-                        }
-                    }
-                    .getOrNull()
+        override suspend fun invoke(wallpaper: Wallpaper, targetSize: Size): Bitmap? =
+            try {
+                withContext(Dispatchers.IO) {
+                    val path = Wallpaper.getLocalPath(wallpaper.name, Wallpaper.ImageType.Thumbnail)
+                    val file = File(filesDir, path)
+                    file.toSampledBitmap(targetWidth = targetSize.width, targetHeight = targetSize.height)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
             }
     }
 

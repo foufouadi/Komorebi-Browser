@@ -9,7 +9,10 @@ typescript:
         # taskcluster/kinds/source-test/mozlint.yml
         - browser/components/places/
         - browser/components/search/
+        - browser/components/sessionstore/
+        - browser/components/tabbrowser/
         - browser/components/urlbar/
+        - browser/extensions/newtab/
         - toolkit/components/extensions/
         - toolkit/components/places/
         - toolkit/components/search/

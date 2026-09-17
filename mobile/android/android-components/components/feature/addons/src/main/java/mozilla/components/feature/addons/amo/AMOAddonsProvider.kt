@@ -6,7 +6,6 @@ package mozilla.components.feature.addons.amo
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.util.AtomicFile
 import androidx.annotation.VisibleForTesting
 import java.io.File
@@ -29,10 +28,13 @@ import mozilla.components.concept.fetch.isSuccess
 import mozilla.components.feature.addons.Addon
 import mozilla.components.feature.addons.AddonsProvider
 import mozilla.components.support.base.log.logger.Logger
+import mozilla.components.support.ktx.android.content.pixelSizeFor
+import mozilla.components.support.ktx.android.graphics.toSampledBitmap
 import mozilla.components.support.ktx.kotlin.sanitizeFileName
 import mozilla.components.support.ktx.kotlin.sanitizeURL
 import mozilla.components.support.ktx.util.readAndDeserialize
 import mozilla.components.support.ktx.util.writeString
+import mozilla.components.ui.widgets.R as widgetsR
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
@@ -48,6 +50,8 @@ internal const val REGEX_FILE_NAMES = "$COLLECTION_FILE_NAME_PREFIX(_\\w+)?_%s.j
 internal const val MINUTE_IN_MS = 60 * 1000
 internal const val DEFAULT_READ_TIMEOUT_IN_SECONDS = 20L
 internal const val PAGE_SIZE = 50
+
+private const val MAX_ICON_BYTES = 5 * 1024 * 1024
 
 /**
  * Implement an add-ons provider that uses the AMO API.
@@ -81,6 +85,9 @@ class AMOAddonsProvider(
 
     // Acts as an in-memory cache for the fetched addon's icons.
     @VisibleForTesting internal val iconsCache = ConcurrentHashMap<String, Bitmap>()
+
+    // Add-on icons are shown in views styled as favicons, the largest size any of them use.
+    private val iconSizePx by lazy { context.pixelSizeFor(widgetsR.dimen.mozac_widget_favicon_size) }
 
     /**
      * Interacts with the collections endpoint to provide a list of available add-ons. May return a cached response, if
@@ -225,7 +232,6 @@ class AMOAddonsProvider(
 
     /** Loads the add-on icon for the given [iconUrl] and stores it in the cache. */
     @VisibleForTesting
-    @Suppress("NestedBlockDepth")
     internal suspend fun loadIcon(addonId: String, iconUrl: String): Bitmap? {
         val cachedIcon = iconsCache[addonId]
         return if (cachedIcon != null) {
@@ -235,27 +241,34 @@ class AMOAddonsProvider(
             logger.info("Unable to find the icon for $addonId blank iconUrl")
             null
         } else {
-            try {
-                logger.info("Trying to fetch the icon for $addonId from the network")
-                client.fetch(Request(url = iconUrl.sanitizeURL(), useCaches = true, conservative = true)).use { response
-                    ->
-                    if (response.isSuccess) {
-                        response.body.useStream {
-                            val icon = BitmapFactory.decodeStream(it)
-                            logger.info("Icon for $addonId fetched from the network")
-                            iconsCache[addonId] = icon
-                            icon
-                        }
-                    } else {
-                        // There was an network error and we couldn't fetch the icon.
-                        logger.info("Unable to fetch the icon for $addonId HTTP code ${response.status}")
-                        null
-                    }
+            fetchIcon(addonId, iconUrl)?.also { iconsCache[addonId] = it }
+        }
+    }
+
+    private suspend fun fetchIcon(addonId: String, iconUrl: String): Bitmap? {
+        return try {
+            logger.info("Trying to fetch the icon for $addonId from the network")
+            client.fetch(Request(url = iconUrl.sanitizeURL(), useCaches = true, conservative = true)).use { response ->
+                if (!response.isSuccess) {
+                    // There was an network error and we couldn't fetch the icon.
+                    logger.info("Unable to fetch the icon for $addonId HTTP code ${response.status}")
+                    return@use null
                 }
-            } catch (e: IOException) {
-                logger.error("Attempt to fetch the $addonId icon failed", e)
-                null
+
+                val icon =
+                    response.body.useStream { stream ->
+                        stream.toSampledBitmap(iconSizePx, iconSizePx, MAX_ICON_BYTES)
+                    }
+                if (icon == null) {
+                    logger.info("Unable to decode the icon for $addonId")
+                } else {
+                    logger.info("Icon for $addonId fetched from the network")
+                }
+                icon
             }
+        } catch (e: IOException) {
+            logger.error("Attempt to fetch the $addonId icon failed", e)
+            null
         }
     }
 

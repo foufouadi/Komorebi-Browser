@@ -187,7 +187,8 @@ class CompositorBridgeParentBase : public PCompositorBridgeParent,
   virtual already_AddRefed<PCompositorWidgetParent>
   AllocPCompositorWidgetParent(const CompositorWidgetInitData& aInitData) = 0;
 
-  virtual mozilla::ipc::IPCResult RecvAdoptChild(const LayersId& id) = 0;
+  virtual mozilla::ipc::IPCResult RecvAdoptChild(
+      const LayersId& id, const LayersId& embedderId) = 0;
   virtual mozilla::ipc::IPCResult RecvFlushRenderingAsync(
       const wr::RenderReasons& aReasons) = 0;
   virtual mozilla::ipc::IPCResult RecvForcePresent(
@@ -204,12 +205,14 @@ class CompositorBridgeParentBase : public PCompositorBridgeParent,
   virtual mozilla::ipc::IPCResult RecvResume() = 0;
   virtual mozilla::ipc::IPCResult RecvResumeAsync() = 0;
   virtual mozilla::ipc::IPCResult RecvNotifyChildCreated(
-      const LayersId& id, CompositorOptions* compositorOptions) = 0;
+      const LayersId& id, const LayersId& embedderId,
+      CompositorOptions* compositorOptions) = 0;
   virtual mozilla::ipc::IPCResult RecvMapAndNotifyChildCreated(
-      const LayersId& id, const ProcessId& owner,
+      const LayersId& id, const LayersId& embedderId, const ProcessId& owner,
       CompositorOptions* compositorOptions) = 0;
   virtual mozilla::ipc::IPCResult RecvNotifyChildRecreated(
-      const LayersId& id, CompositorOptions* compositorOptions) = 0;
+      const LayersId& id, const LayersId& embedderId,
+      CompositorOptions* compositorOptions) = 0;
   virtual mozilla::ipc::IPCResult RecvFlushRendering(
       const wr::RenderReasons& aReasons) = 0;
   virtual mozilla::ipc::IPCResult RecvNotifyMemoryPressure() = 0;
@@ -268,13 +271,16 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase {
   mozilla::ipc::IPCResult RecvResume() override;
   mozilla::ipc::IPCResult RecvResumeAsync() override;
   mozilla::ipc::IPCResult RecvNotifyChildCreated(
-      const LayersId& child, CompositorOptions* aOptions) override;
-  mozilla::ipc::IPCResult RecvMapAndNotifyChildCreated(
-      const LayersId& child, const base::ProcessId& pid,
+      const LayersId& aChild, const LayersId& aEmbedderId,
       CompositorOptions* aOptions) override;
+  mozilla::ipc::IPCResult RecvMapAndNotifyChildCreated(
+      const LayersId& aChild, const LayersId& aEmbedderId,
+      const base::ProcessId& aPid, CompositorOptions* aOptions) override;
   mozilla::ipc::IPCResult RecvNotifyChildRecreated(
-      const LayersId& child, CompositorOptions* aOptions) override;
-  mozilla::ipc::IPCResult RecvAdoptChild(const LayersId& child) override;
+      const LayersId& aChild, const LayersId& aEmbedderId,
+      CompositorOptions* aOptions) override;
+  mozilla::ipc::IPCResult RecvAdoptChild(const LayersId& child,
+                                         const LayersId& embedderId) override;
   mozilla::ipc::IPCResult RecvFlushRendering(
       const wr::RenderReasons& aReasons) override;
   mozilla::ipc::IPCResult RecvFlushRenderingAsync(
@@ -372,7 +378,7 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase {
    */
   void ForceIsFirstPaint();
 
-  void NotifyChildCreated(LayersId aChild);
+  void NotifyChildCreated(LayersId aChild, LayersId aEmbedderId);
 
   void AsyncRender();
 
@@ -417,6 +423,9 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase {
     LayerTreeState();
     ~LayerTreeState();
     RefPtr<GeckoContentController> mController;
+    // The LayersId of the pipeline that embeds this one, or an invalid
+    // LayersId if no widget could be found.
+    LayersId mEmbedderLayersId;
     RefPtr<APZCTreeManagerParent> mApzcTreeManagerParent;
     // The mApzInputBridgeParent is only populated for LayerTreeState
     // objects corresponding to root LayerIds (one for each top-level
@@ -493,26 +502,20 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase {
   }
 
   /**
-   * Given the layers id for a content process, get the APZCTreeManagerParent
-   * for the corresponding *root* layers id. That is, the APZCTreeManagerParent,
-   * if one is found, will always be connected to the parent process rather
-   * than a content process. Note that unless the compositor process is
-   * separated this is expected to return null, because if the compositor is
-   * living in the gecko parent process then there is no APZCTreeManagerParent
-   * for the parent process.
-   */
-  static RefPtr<APZCTreeManagerParent> GetApzcTreeManagerParentForRoot(
-      LayersId aContentLayersId);
-  /**
-   * Same as the GetApzcTreeManagerParentForRoot function, but returns
-   * the GeckoContentController for the parent process.
+   * Given the layers id for a content process, get the GeckoContentController
+   * for the corresponding *root* layers id. That is, the
+   * GeckoContentController, if one is found, will always be connected to the
+   * parent process rather than a content process. Note that unless the
+   * compositor process is separated this is expected to return null, because if
+   * the compositor is living in the gecko parent process then there is no
+   * GeckoContentController for the parent process.
    */
   static GeckoContentController* GetGeckoContentControllerForRoot(
       LayersId aContentLayersId);
 
   /**
-   * Same as the GetApzcTreeManagerParentForRoot function, but returns
-   * the APZInputBridge for the parent process.
+   * Same as the GetGeckoContentControllerForRoot function, but returns
+   * the APZInputBridge.
    */
   static RefPtr<APZInputBridgeParent> GetApzInputBridgeParentForRoot(
       LayersId aContentLayersId);

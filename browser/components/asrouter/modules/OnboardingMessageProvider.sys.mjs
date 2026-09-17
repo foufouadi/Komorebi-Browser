@@ -60,7 +60,6 @@ const L10N = new Localization([
 
 const HOMEPAGE_PREF = "browser.startup.homepage";
 const NEWTAB_PREF = "browser.newtabpage.enabled";
-const FOURTEEN_DAYS_IN_MS = 14 * 24 * 60 * 60 * 1000;
 const isMSIX =
   AppConstants.platform === "win" &&
   Services.sysinfo.getProperty("hasWinPackageId", false);
@@ -163,6 +162,12 @@ const BASE_MESSAGES = () => [
             {
               type: "SET_DEFAULT_BROWSER",
             },
+            {
+              type: "BLOCK_MESSAGE",
+              data: {
+                id: "MENU_MESSAGE_DEFAULT_CTA_ILLUSTRATION_LAYOUT",
+              },
+            },
           ],
         },
       },
@@ -174,7 +179,7 @@ const BASE_MESSAGES = () => [
       },
     },
     targeting:
-      "'browser.nova.enabled'|preferenceValue != true && source == 'app_menu' && os.isWindows && os.windowsVersion >= 10 && !isDefaultBrowserUncached && !hasActiveEnterprisePolicies && 'browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features' | preferenceValue != false",
+      "'browser.nova.enabled'|preferenceValue != true && source == 'app_menu' && os.isWindows && os.windowsVersion >= 10 && !isDefaultBrowser && !hasActiveEnterprisePolicies && 'browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features' | preferenceValue != false",
     trigger: {
       id: "menuOpened",
     },
@@ -210,6 +215,12 @@ const BASE_MESSAGES = () => [
             {
               type: "PIN_FIREFOX_TO_TASKBAR",
             },
+            {
+              type: "BLOCK_MESSAGE",
+              data: {
+                id: "MENU_MESSAGE_DEFAULT_CTA_ILLUSTRATION_LAYOUT",
+              },
+            },
           ],
         },
       },
@@ -221,7 +232,7 @@ const BASE_MESSAGES = () => [
       },
     },
     targeting:
-      "'browser.nova.enabled'|preferenceValue != true && source == 'app_menu' && os.isMac && !isDefaultBrowserUncached && !hasActiveEnterprisePolicies && 'browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features' | preferenceValue != false",
+      "'browser.nova.enabled'|preferenceValue != true && source == 'app_menu' && os.isMac && !isDefaultBrowser && !hasActiveEnterprisePolicies && 'browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features' | preferenceValue != false",
     trigger: {
       id: "menuOpened",
     },
@@ -257,6 +268,12 @@ const BASE_MESSAGES = () => [
             {
               type: "SET_DEFAULT_BROWSER",
             },
+            {
+              type: "BLOCK_MESSAGE",
+              data: {
+                id: "MENU_MESSAGE_DEFAULT_CTA_ILLUSTRATION_LAYOUT",
+              },
+            },
           ],
         },
       },
@@ -268,7 +285,7 @@ const BASE_MESSAGES = () => [
       },
     },
     targeting:
-      "'browser.nova.enabled'|preferenceValue == true && source == 'app_menu' && os.isWindows && os.windowsVersion >= 10 && !isDefaultBrowserUncached && !hasActiveEnterprisePolicies && 'browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features'| preferenceValue != false",
+      "'browser.nova.enabled'|preferenceValue == true && source == 'app_menu' && os.isWindows && os.windowsVersion >= 10 && !isDefaultBrowser && !hasActiveEnterprisePolicies && 'browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features'| preferenceValue != false",
     trigger: {
       id: "menuOpened",
     },
@@ -306,6 +323,12 @@ const BASE_MESSAGES = () => [
             {
               type: "PIN_FIREFOX_TO_TASKBAR",
             },
+            {
+              type: "BLOCK_MESSAGE",
+              data: {
+                id: "MENU_MESSAGE_DEFAULT_CTA_ILLUSTRATION_LAYOUT",
+              },
+            },
           ],
         },
       },
@@ -317,7 +340,7 @@ const BASE_MESSAGES = () => [
       },
     },
     targeting:
-      "'browser.nova.enabled'|preferenceValue == true && source == 'app_menu' && os.isMac && !isDefaultBrowserUncached && !hasActiveEnterprisePolicies && 'browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features'| preferenceValue != false",
+      "'browser.nova.enabled'|preferenceValue == true && source == 'app_menu' && os.isMac && !isDefaultBrowser && !hasActiveEnterprisePolicies && 'browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features'| preferenceValue != false",
     trigger: {
       id: "menuOpened",
     },
@@ -1285,53 +1308,6 @@ const BASE_MESSAGES = () => [
     trigger: { id: "toolbarBadgeUpdate" },
   },
   {
-    id: "MILESTONE_MESSAGE_87",
-    groups: ["cfr"],
-    content: {
-      text: "",
-      layout: "short_message",
-      buttons: {
-        primary: {
-          event: "PROTECTION",
-          label: {
-            string_id: "cfr-doorhanger-milestone-ok-button",
-          },
-          action: {
-            type: "OPEN_PROTECTION_REPORT",
-          },
-        },
-        secondary: [
-          {
-            event: "DISMISS",
-            label: {
-              string_id: "cfr-doorhanger-milestone-close-button",
-            },
-            action: {
-              type: "CANCEL",
-            },
-          },
-        ],
-      },
-      category: "cfrFeatures",
-      anchor_id: "tracking-protection-icon-container",
-      bucket_id: "CFR_MILESTONE_MESSAGE",
-      heading_text: {
-        string_id: "cfr-doorhanger-milestone-heading2",
-      },
-      notification_text: "",
-      skip_address_bar_notifier: true,
-    },
-    trigger: {
-      id: "contentBlocking",
-      params: ["ContentBlockingMilestone"],
-    },
-    template: "milestone_message",
-    frequency: {
-      lifetime: 7,
-    },
-    targeting: "pageLoad >= 4 && userPrefs.cfrFeatures",
-  },
-  {
     id: "FX_MR_106_UPGRADE",
     template: "spotlight",
     targeting: "true",
@@ -1799,131 +1775,54 @@ const BASE_MESSAGES = () => [
     targeting: "doesAppNeedPrivatePin",
   },
   {
-    id: "INFOBAR_LAUNCH_ON_LOGIN",
-    groups: ["cfr"],
-    template: "infobar",
+    id: "PB_NEWTAB_RELAY_PROMO",
+    template: "pb_newtab",
+    type: "default",
+    groups: ["pbNewtab"],
     content: {
-      type: "global",
-      text: {
-        string_id: "launch-on-login-infobar-message",
-      },
-      buttons: [
-        {
-          label: {
-            string_id: "launch-on-login-learnmore",
-          },
-          supportPage: "make-firefox-automatically-open-when-you-start",
-          action: {
-            type: "CANCEL",
-          },
-        },
-        {
-          label: { string_id: "launch-on-login-infobar-reject-button" },
-          action: {
-            type: "CANCEL",
-          },
-        },
-        {
-          label: { string_id: "launch-on-login-infobar-confirm-button" },
-          primary: true,
-          action: {
-            type: "MULTI_ACTION",
-            data: {
-              actions: [
-                {
-                  type: "SET_PREF",
-                  data: {
-                    pref: {
-                      name: "browser.startup.windowsLaunchOnLogin.disableLaunchOnLoginPrompt",
-                      value: true,
-                    },
-                  },
+      promoEnabled: true,
+      promoType: "RELAY",
+      promoHeader: "fluent:about-private-browsing-relay-promo-header",
+      promoImageLarge: "chrome://browser/content/assets/relay-promo.svg",
+      promoLinkText: "fluent:about-private-browsing-relay-promo-link-text",
+      promoLinkType: "button",
+      promoSectionStyle: "below-search",
+      promoTitle: "fluent:about-private-browsing-relay-promo-title",
+      promoTitleEnabled: true,
+      promoButton: {
+        action: {
+          type: "MULTI_ACTION",
+          data: {
+            actions: [
+              {
+                type: "OPEN_URL",
+                data: {
+                  args: "https://relay.firefox.com/",
+                  where: "tabshifted",
                 },
-                {
-                  type: "CONFIRM_LAUNCH_ON_LOGIN",
-                },
-              ],
-            },
-          },
-        },
-      ],
-    },
-    frequency: {
-      lifetime: 1,
-    },
-    trigger: { id: "defaultBrowserCheck" },
-    targeting: `source == 'newtab'
-    && 'browser.startup.windowsLaunchOnLogin.disableLaunchOnLoginPrompt'|preferenceValue == false
-    && 'browser.startup.windowsLaunchOnLogin.enabled'|preferenceValue == true && isDefaultBrowser && !activeNotifications
-    && !launchOnLoginEnabled`,
-  },
-  {
-    id: "INFOBAR_LAUNCH_ON_LOGIN_FINAL",
-    groups: ["cfr"],
-    template: "infobar",
-    content: {
-      type: "global",
-      text: {
-        string_id: "launch-on-login-infobar-final-message",
-      },
-      buttons: [
-        {
-          label: {
-            string_id: "launch-on-login-learnmore",
-          },
-          supportPage: "make-firefox-automatically-open-when-you-start",
-          action: {
-            type: "CANCEL",
-          },
-        },
-        {
-          label: { string_id: "launch-on-login-infobar-final-reject-button" },
-          action: {
-            type: "SET_PREF",
-            data: {
-              pref: {
-                name: "browser.startup.windowsLaunchOnLogin.disableLaunchOnLoginPrompt",
-                value: true,
               },
-            },
+              {
+                type: "BLOCK_MESSAGE",
+                data: {
+                  id: "PB_NEWTAB_RELAY_PROMO",
+                },
+              },
+            ],
           },
         },
+      },
+    },
+    priority: 3,
+    frequency: {
+      custom: [
         {
-          label: { string_id: "launch-on-login-infobar-confirm-button" },
-          primary: true,
-          action: {
-            type: "MULTI_ACTION",
-            data: {
-              actions: [
-                {
-                  type: "SET_PREF",
-                  data: {
-                    pref: {
-                      name: "browser.startup.windowsLaunchOnLogin.disableLaunchOnLoginPrompt",
-                      value: true,
-                    },
-                  },
-                },
-                {
-                  type: "CONFIRM_LAUNCH_ON_LOGIN",
-                },
-              ],
-            },
-          },
+          cap: 1,
+          period: 86400000,
         },
       ],
+      lifetime: 12,
     },
-    frequency: {
-      lifetime: 1,
-    },
-    trigger: { id: "defaultBrowserCheck" },
-    targeting: `source == 'newtab'
-    && 'browser.startup.windowsLaunchOnLogin.disableLaunchOnLoginPrompt'|preferenceValue == false
-    && 'browser.startup.windowsLaunchOnLogin.enabled'|preferenceValue == true && isDefaultBrowser && !activeNotifications
-    && messageImpressions.INFOBAR_LAUNCH_ON_LOGIN[messageImpressions.INFOBAR_LAUNCH_ON_LOGIN | length - 1]
-    && messageImpressions.INFOBAR_LAUNCH_ON_LOGIN[messageImpressions.INFOBAR_LAUNCH_ON_LOGIN | length - 1] <
-      currentDate|date - ${FOURTEEN_DAYS_IN_MS}
-    && !launchOnLoginEnabled`,
+    targeting: "'browser.privateWindowRedesign.enabled'|preferenceValue",
   },
   {
     id: "RESTORE_FROM_BACKUP",
@@ -2258,6 +2157,7 @@ const BASE_MESSAGES = () => [
     // an OS-level prompt, in lieu of the AW_EASY_SETUP pin checkbox.
     id: "PIN_FIREFOX_TASKBAR_WIN_OS_PROMPT",
     template: "action_only",
+    profileScope: "single",
     skip_in_tests: "it silently triggers a real OS-level pin request",
     content: {
       action: {
@@ -2271,6 +2171,7 @@ const BASE_MESSAGES = () => [
     frequency: {
       lifetime: 1,
     },
+    priority: 5,
   },
   {
     // Silently triggers set default for users on Mac, and on Windows when
@@ -2281,6 +2182,7 @@ const BASE_MESSAGES = () => [
     // consent surface at all.
     id: "SET_DEFAULT_MAC_AND_WINDOWS_OS_PROMPT",
     template: "action_only",
+    profileScope: "single",
     skip_in_tests: "it silently triggers a real OS-level set default request",
     content: {
       action: {
@@ -2294,6 +2196,7 @@ const BASE_MESSAGES = () => [
     frequency: {
       lifetime: 1,
     },
+    priority: 5,
   },
   {
     id: "SET_DEFAULT_BROWSER_GUIDANCE_NOTIFICATION_WIN10",
@@ -2725,6 +2628,49 @@ const BASE_MESSAGES = () => [
     trigger: {
       id: "selectableProfilesUpdated",
     },
+  },
+  {
+    id: "REFRESH_UNUSED_PROFILE_INFOBAR",
+    template: "infobar",
+    content: {
+      type: "global",
+      priority: 1,
+      text: { string_id: "refresh-unused-profile-infobar-message" },
+      buttons: [
+        {
+          label: { string_id: "refresh-profile-infobar-button" },
+          action: { type: "RESET_PROFILE" },
+        },
+      ],
+    },
+    trigger: {
+      id: "defaultBrowserCheck",
+    },
+    skip_in_tests: "fires on startup, may interfere with other tests",
+    priority: 1,
+    targeting:
+      "source == 'startup' && canResetProfile && !'browser.disableResetPrompt'|preferenceValue && profileLastUse && currentDate|date - profileLastUse >= 5184000000 && !activeNotifications",
+  },
+  {
+    id: "REFRESH_REINSTALLED_PROFILE_INFOBAR",
+    template: "infobar",
+    content: {
+      type: "global",
+      priority: 1,
+      text: { string_id: "refresh-reinstalled-profile-infobar-message" },
+      buttons: [
+        {
+          label: { string_id: "refresh-profile-infobar-button" },
+          action: { type: "RESET_PROFILE" },
+        },
+      ],
+    },
+    trigger: {
+      id: "defaultBrowserCheck",
+    },
+    skip_in_tests: "fires on startup, may interfere with other tests",
+    targeting:
+      "source == 'startup' && isFirefoxReinstalled && canResetProfile && !'browser.disableResetPrompt'|preferenceValue && !activeNotifications",
   },
   {
     id: "updated-privacy-notice-notification-infobar",

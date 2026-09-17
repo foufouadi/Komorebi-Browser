@@ -227,7 +227,7 @@ The worst-case scenario is that none of the layout can be skipped
 despite being interrupted, and the entire layout calculation occurs.
 
 Reflows that are triggered "naturally" by the 16ms tick are all
-considered interruptible. Despite not actually being interuptible when
+considered interruptible. Despite not actually being interruptible when
 laying out chrome UI, striving for interruptible layout is always good
 practice because uninterruptible layout has the potential to be much
 worse (see next section).
@@ -588,7 +588,6 @@ performance of the browser.
 If you've ever used the subscript loader, you might not know that it can
 load scripts asynchronously, and return a Promise once they're loaded.
 For example:
-
 
     Services.scriptloader.loadSubScriptWithOptions(myScriptURL, { async: true }).then(() => {
       console.log("Script at " + myScriptURL + " loaded asynchronously!");

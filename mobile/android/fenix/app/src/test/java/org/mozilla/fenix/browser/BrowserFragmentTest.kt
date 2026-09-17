@@ -5,8 +5,12 @@
 package org.mozilla.fenix.browser
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.content.res.Resources
+import android.os.Build
 import android.view.View
+import android.view.Window
+import android.view.WindowManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -28,6 +32,7 @@ import mozilla.components.browser.state.state.TabSessionState
 import mozilla.components.browser.state.state.createTab
 import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.support.test.robolectric.testContext
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -389,5 +394,24 @@ class BrowserFragmentTest {
         browserFragment.updateLastBrowseActivity()
 
         verify(exactly = 1) { settings.recordLastBrowseActivity() }
+    }
+
+    @Test
+    fun `WHEN the viewport fit changes THEN the cutout mode is applied to the window`() {
+        val layoutParams = WindowManager.LayoutParams()
+        val window: Window = mockk(relaxed = true)
+        every { window.attributes } returns layoutParams
+        every { homeActivity.window } returns window
+        every { homeActivity.applicationInfo } returns
+            ApplicationInfo().apply { targetSdkVersion = Build.VERSION_CODES.UPSIDE_DOWN_CAKE }
+
+        browserFragment.viewportFitChange(WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES)
+
+        assertEquals(
+            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES,
+            layoutParams.layoutInDisplayCutoutMode,
+        )
+        // Mutating the params is not enough, they only reach WindowManager through setAttributes.
+        verify(exactly = 1) { window.attributes = layoutParams }
     }
 }

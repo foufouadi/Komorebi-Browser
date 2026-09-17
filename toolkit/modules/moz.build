@@ -204,7 +204,6 @@ EXTRA_JS_MODULES += [
     "RemotePageAccessManager.sys.mjs",
     "ResetProfile.sys.mjs",
     "RustSharedRemoteSettingsService.sys.mjs",
-    "ScheduledTask.sys.mjs",
     "SelectionUtils.sys.mjs",
     "ServiceRequest.sys.mjs",
     "ShortcutUtils.sys.mjs",
@@ -268,8 +267,11 @@ if "Android" != CONFIG["OS_TARGET"]:
         "GMPInstallManager.sys.mjs",
         "GMPUtils.sys.mjs",
         "LightweightThemeConsumer.sys.mjs",
+        "ScheduledTask.sys.mjs",
     ]
-
+    TESTING_JS_MODULES += [
+        "tests/modules/SystemDelay.sys.mjs",
+    ]
     DIRS += [
         "launchonlogin",
         "subprocess",
@@ -291,7 +293,7 @@ for var in (
     "MOZ_APP_DISPLAYNAME",
     "MOZ_APP_VERSION",
     "MOZ_APP_VERSION_DISPLAY",
-    "MOZ_BACKGROUNDTASK_CLSID",
+    "MOZ_BACKGROUNDTASK_ACTIVATABLE_CLASS_ID",
     "MOZ_BING_API_CLIENTID",
     "MOZ_BING_API_KEY",
     "MOZ_GOOGLE_SAFEBROWSING_API_KEY",

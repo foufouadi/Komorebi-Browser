@@ -9,6 +9,7 @@
 #include "PendingTransactionInfo.h"
 #include "PendingTransactionQueue.h"
 #include "mozilla/WeakPtr.h"
+#include "nsHttpConnectionInfo.h"
 #include "nsTHashSet.h"
 
 namespace mozilla {
@@ -137,7 +138,7 @@ class ConnectionEntry : public SupportsWeakPtr {
   // to build the hash key for hosts in the same ip pool.
   //
 
-  nsTArray<HashNumber> mCoalescingKeys;
+  nsTArray<CoalescingKey> mCoalescingKeys;
 
   // This is a list of addresses matching the coalescing keys.
   // This is necessary to check if the origin's DNS entries
@@ -230,6 +231,10 @@ class ConnectionEntry : public SupportsWeakPtr {
   // active connections and unconnected half open connections.
   uint32_t TotalActiveConnections() const;
 
+  // An h3 connection in mActiveConns that can still serve transactions.
+  bool HasUsableH3Connection() const;
+
+  // HasUsableH3Connection(), or an h3 connection attempt still in flight.
   bool HasActiveH3Connection() const;
 
   bool RemoveTransFromPendingQ(nsHttpTransaction* aTrans);
@@ -249,7 +254,7 @@ class ConnectionEntry : public SupportsWeakPtr {
 
   const nsTArray<RefPtr<nsIWebTransportHash>>& GetServerCertHashes();
 
-  const HashNumber& OriginFrameHashKey();
+  const CoalescingKey& OriginFrameHashKey();
 
  private:
   void MaybeRemoveFromPendingSet();
@@ -278,7 +283,7 @@ class ConnectionEntry : public SupportsWeakPtr {
   PendingTransactionQueue mPendingQ;
   ~ConnectionEntry();
 
-  Maybe<HashNumber> mOriginFrameHashKey;
+  Maybe<CoalescingKey> mOriginFrameHashKey;
 
   bool mRetriedDifferentIPFamilyForHttp3 = false;
 };

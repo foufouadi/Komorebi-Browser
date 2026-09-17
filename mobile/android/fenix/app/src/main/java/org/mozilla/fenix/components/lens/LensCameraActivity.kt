@@ -120,7 +120,7 @@ class LensCameraActivity : AppCompatActivity() {
             if (!qrString.isNullOrEmpty()) {
                 val resultIntent =
                     Intent().apply {
-                        putExtra(QrScanActivity.EXTRA_SCAN_RESULT_DATA, qrString)
+                        putExtra(EXTRA_SCAN_RESULT_DATA, qrString)
                     }
                 setResult(RESULT_OK, resultIntent)
                 finish()
@@ -353,7 +353,7 @@ class LensCameraActivity : AppCompatActivity() {
         }
         val resultIntent =
             Intent().apply {
-                putExtra(QrScanActivity.EXTRA_SCAN_RESULT_DATA, qrString)
+                putExtra(EXTRA_SCAN_RESULT_DATA, qrString)
             }
         setResult(RESULT_OK, resultIntent)
         finish()
@@ -380,20 +380,26 @@ class LensCameraActivity : AppCompatActivity() {
         }
     }
 
-    private fun decodeDownsampledStream(uri: Uri): Bitmap {
+    @VisibleForTesting
+    internal fun decodeDownsampledStream(uri: Uri): Bitmap {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         contentResolver.openInputStream(uri)?.use {
             BitmapFactory.decodeStream(it, null, bounds)
-        } ?: throw IOException("Unable to open $uri")
+        }
+        // A bounds pass always returns a null bitmap, so the decoded dimensions are what tell
+        // us whether the image could be read. They are untouched if the stream could not be opened.
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            throw IOException("Unable to read the bounds of $uri")
+        }
 
         val longEdge = maxOf(bounds.outWidth, bounds.outHeight)
         var sampleSize = 1
         while (longEdge / sampleSize > QR_DECODE_MAX_DIMENSION) sampleSize *= 2
 
         val opts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
-        return contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, opts)
-        } ?: throw IOException("Unable to open $uri")
+        val stream = contentResolver.openInputStream(uri)
+        return stream?.use { BitmapFactory.decodeStream(it, null, opts) }
+            ?: throw IOException(if (stream == null) "Unable to open $uri" else "Unable to decode $uri")
     }
 
     @VisibleForTesting
@@ -405,6 +411,14 @@ class LensCameraActivity : AppCompatActivity() {
     }
 
     companion object {
+        /**
+         * Result-intent extra key carrying a decoded QR string produced by the in-camera QR mode. Re-exported from
+         * [QrScanActivity] so Lens consumers don't need to depend on the QR component directly, while keeping the value
+         * identical to the key [org.mozilla.fenix.components.QrScanFenixFeature] expects when the intent is forwarded
+         * to it.
+         */
+        const val EXTRA_SCAN_RESULT_DATA = QrScanActivity.EXTRA_SCAN_RESULT_DATA
+
         // Cap the long edge of decoded gallery images before QR analysis. Modern phone photos
         // are 12 MP+ which would allocate ~50 MB as ARGB_8888 plus another ~50 MB for the
         // IntArray pixel copy inside QrAnalyzer — enough to OOM low-RAM devices. ZXing

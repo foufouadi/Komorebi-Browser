@@ -72,6 +72,7 @@
 #include "mozilla/dom/PopoverData.h"
 #include "mozilla/dom/Record.h"
 #include "mozilla/dom/Selection.h"
+#include "mozilla/dom/SpeculationRules.h"
 #include "mozilla/dom/UIEvent.h"
 #include "mozilla/dom/UIEventBinding.h"
 #include "mozilla/dom/UserActivation.h"
@@ -119,6 +120,7 @@
 #include "nsPIDOMWindow.h"
 #include "nsPIWindowRoot.h"
 #include "nsPresContext.h"
+#include "nsRefreshObservers.h"
 #include "nsServiceManagerUtils.h"
 #include "nsSubDocumentFrame.h"
 #include "nsTArray.h"
@@ -805,7 +807,8 @@ NS_IMPL_CYCLE_COLLECTION_WEAK(
     mLastSecondaryButtonPressInfo.mDownContent,
     mLastSecondaryButtonPressInfo.mUpContent, mActiveContent, mHoverContent,
     mURLTargetContent, mPopoverPointerDownTarget, mMouseEnterLeaveHelper,
-    mPointersEnterLeaveHelper, mDocument, mIMEContentObserver, mAccessKeys)
+    mPointersEnterLeaveHelper, mDocument, mIMEContentObserver, mAccessKeys,
+    mPendingLeaveLinkElement)
 
 void EventStateManager::ReleaseCurrentIMEContentObserver() {
   if (mIMEContentObserver) {
@@ -2153,7 +2156,7 @@ void EventStateManager::DispatchCrossProcessEvent(WidgetEvent* aEvent,
   MOZ_ASSERT(aRemoteTarget);
   MOZ_ASSERT(aStatus);
 
-  BrowserParent* remote = aRemoteTarget;
+  RefPtr<BrowserParent> remote = aRemoteTarget;
 
   WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent();
   bool isContextMenuKey = mouseEvent && mouseEvent->IsContextMenuKeyEvent();
@@ -2167,10 +2170,10 @@ void EventStateManager::DispatchCrossProcessEvent(WidgetEvent* aEvent,
     // else there is a race between layout and focus tracking,
     // so fall back to delivering the event to the topmost child process.
   } else if (aEvent->mLayersId.IsValid()) {
-    BrowserParent* preciseRemote =
+    RefPtr<BrowserParent> preciseRemote =
         BrowserParent::GetBrowserParentFromLayersId(aEvent->mLayersId);
     if (preciseRemote) {
-      remote = preciseRemote;
+      remote = preciseRemote.forget();
     }
     // else there is a race between APZ and the LayersId to BrowserParent
     // mapping, so fall back to delivering the event to the topmost child
@@ -2636,6 +2639,8 @@ void EventStateManager::BeginTrackingDragGesture(
     if (!mGestureDownFrameOwner) {
       mGestureDownFrameOwner = mGestureDownContent;
     }
+    mGestureDownTopLevelRemoteTarget =
+        BrowserParent::GetFrom(mGestureDownContent);
   }
   mGestureModifiers = aMouseDownOrTouchDragEvent.mModifiers;
   mGestureDownButtons = aMouseDownOrTouchDragEvent.mButtons;
@@ -2686,6 +2691,8 @@ void EventStateManager::StopTrackingDragGesture(bool aClearInChildProcesses) {
   if (!aClearInChildProcesses || !XRE_IsParentProcess()) {
     return;
   }
+
+  mGestureDownTopLevelRemoteTarget = nullptr;
 
   // Only notify if there is NOT a drag session active in the parent.
   RefPtr<nsIDragSession> dragSession =
@@ -4829,9 +4836,30 @@ void EventStateManager::ClearFrameRefs(nsIFrame* aFrame) {
   if (aFrame == mLinkOverFrame.GetFrame()) {
     nsIContent* content = aFrame->GetContent();
     if (content && content->IsElement()) {
-      content->AsElement()->LeaveLink(mPresContext);
+      nsPresContext* rootPc = mPresContext->GetRootPresContext();
+      if (rootPc) {
+        mPendingLeaveLinkElement = content->AsElement();
+        RefPtr<ManagedPostRefreshObserver> observer =
+            new ManagedPostRefreshObserver(
+                rootPc,
+                [esm = RefPtr<EventStateManager>(this)](bool aWasCanceled)
+                    -> ManagedPostRefreshObserver::Unregister {
+                  esm->MaybeLeavePendingLink(aWasCanceled);
+                  return ManagedPostRefreshObserver::Unregister::Yes;
+                });
+        rootPc->RegisterManagedPostRefreshObserver(observer);
+      }
     }
   }
+}
+
+void EventStateManager::MaybeLeavePendingLink(bool aWasCanceled) {
+  RefPtr<dom::Element> element = std::move(mPendingLeaveLinkElement);
+  if (aWasCanceled || !element || element->GetPrimaryFrame() ||
+      mLinkOverFrame.GetFrame()) {
+    return;
+  }
+  element->LeaveLink(mPresContext);
 }
 
 struct CursorImage {
@@ -5557,7 +5585,7 @@ void EventStateManager::NotifyMouseOut(WidgetMouseEvent* aMouseEvent,
   // hover state itself, and we have optimizations for hover switching between
   // two nearby elements both deep in the DOM tree that would be defeated by
   // switching the hover state to null here.
-  if (!aMovingInto && !isPointer) {
+  if (!aMovingInto && (!isPointer || aMouseEvent->InputSourceSupportsHover())) {
     // Unset :hover
     SetContentState(nullptr, ElementState::HOVER);
   }
@@ -5664,7 +5692,7 @@ void EventStateManager::NotifyMouseOver(WidgetMouseEvent* aMouseEvent,
                                        aMouseEvent,
                                        isPointer ? ePointerEnter : eMouseEnter);
 
-  if (!isPointer) {
+  if (!isPointer || aMouseEvent->InputSourceSupportsHover()) {
     SetContentState(aContent, ElementState::HOVER);
   }
 
@@ -6893,6 +6921,7 @@ bool EventStateManager::SetContentState(nsIContent* aContent,
       if (newHover != mHoverContent) {
         notifyContent1 = newHover;
         notifyContent2 = mHoverContent;
+        NotifySpeculationRulesOfHover(newHover);
         mHoverContent = newHover;
       }
     }
@@ -6955,6 +6984,20 @@ bool EventStateManager::SetContentState(nsIContent* aContent,
   }
 
   return true;
+}
+
+// Hovering a link is a signal of user interest that can enact a speculation
+// rules prefetch candidate. This is notified on hover chain changes rather than
+// from mouseover/mouseout so that moving the cursor between the children of a
+// link doesn't read as leaving and re-entering the link itself.
+void EventStateManager::NotifySpeculationRulesOfHover(nsIContent* aNewHover) {
+  nsIContent* content = aNewHover ? aNewHover : mHoverContent.get();
+  if (!content) {
+    return;
+  }
+  if (auto* speculationRules = content->OwnerDoc()->GetSpeculationRules()) {
+    speculationRules->HoverContentChanged(aNewHover);
+  }
 }
 
 void EventStateManager::RemoveNodeFromChainIfNeeded(ElementState aState,
@@ -7990,6 +8033,7 @@ bool EventStateManager::WheelPrefs::IsOverOnePageScrollAllowedY(
 void EventStateManager::UpdateGestureContent(nsIContent* aContent) {
   mGestureDownContent = aContent;
   mGestureDownFrameOwner = aContent;
+  mGestureDownTopLevelRemoteTarget = BrowserParent::GetFrom(aContent);
 }
 
 void EventStateManager::NotifyContentWillBeRemovedForGesture(

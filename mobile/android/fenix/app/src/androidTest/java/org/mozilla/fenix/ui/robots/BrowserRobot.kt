@@ -35,7 +35,6 @@ import androidx.core.net.toUri
 import androidx.test.espresso.Espresso.closeSoftKeyboard
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.matcher.RootMatchers.isDialog
-import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.By.text
@@ -58,6 +57,7 @@ import mozilla.components.feature.app.links.R as applinksR
 import mozilla.components.feature.contextmenu.R as contextmenuR
 import mozilla.components.feature.downloads.R as downloadsR
 import mozilla.components.feature.prompts.R as promptsR
+import mozilla.components.lib.crash.store.CrashReportOption
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.mozilla.fenix.R
@@ -66,6 +66,7 @@ import org.mozilla.fenix.helpers.AppAndSystemHelper.registerAndCleanupIdlingReso
 import org.mozilla.fenix.helpers.Constants.RETRY_COUNT
 import org.mozilla.fenix.helpers.Constants.TAG
 import org.mozilla.fenix.helpers.DataGenerationHelper.getStringResource
+import org.mozilla.fenix.helpers.MatcherHelper.assertItemIsChecked
 import org.mozilla.fenix.helpers.MatcherHelper.assertItemTextEquals
 import org.mozilla.fenix.helpers.MatcherHelper.assertUIObjectExists
 import org.mozilla.fenix.helpers.MatcherHelper.assertUIObjectIsGone
@@ -305,14 +306,19 @@ class BrowserRobot(private val composeTestRule: ComposeTestRule) {
         }
     }
 
-    fun verifyTabCrashReporterView() {
+    /**
+     * Verifies the expected view of the tab crash reporter.
+     *
+     * @param crashReportOption - User's crash reporting setting, default is [CrashReportOption.Ask].
+     */
+    fun verifyTabCrashReporterView(crashReportOption: CrashReportOption = CrashReportOption.Ask) {
         mDevice.waitForIdle()
         for (i in 1..RETRY_COUNT) {
             Log.i(TAG, "verifyTabCrashReporterView: Started try #$i")
             try {
                 assertUIObjectExists(itemWithResId("$packageName:id/crash_tab_image"), waitingTime = waitingTimeLong)
                 assertUIObjectExists(itemWithText(getStringResource(R.string.tab_crash_title_2)))
-                assertUIObjectExists(itemWithText(getStringResource(R.string.tab_crash_send_report)))
+                verifyCrashReportOption(crashReportOption)
                 assertUIObjectExists(itemWithResId("$packageName:id/restoreTabButton"))
                 assertUIObjectExists(itemWithResId("$packageName:id/closeTabButton"))
 
@@ -324,6 +330,41 @@ class BrowserRobot(private val composeTestRule: ComposeTestRule) {
                 } else {
                     navigationToolbar(composeTestRule) {}.enterURLAndEnterToBrowser("about:crashcontent".toUri()) {}
                 }
+            }
+        }
+    }
+
+    /**
+     * Toggles the "Send to Mozilla" checkbox in the tab crash reporter.
+     *
+     * @param expectedCheckedState The checkbox state expected after the toggle.
+     */
+    fun toggleTabCrashReporterCheckbox(expectedCheckedState: Boolean) {
+        clickPageObject(composeTestRule, itemWithResId("$packageName:id/sendCrashCheckbox"))
+        assertItemIsChecked(
+            isChecked = expectedCheckedState,
+            appItems = arrayOf(itemWithResId("$packageName:id/sendCrashCheckbox")),
+        )
+    }
+
+    private fun verifyCrashReportOption(crashReportOption: CrashReportOption) {
+        when (crashReportOption) {
+            CrashReportOption.Auto -> {
+                assertUIObjectExists(itemWithText(getStringResource(R.string.tab_crash_send_report)))
+                assertItemIsChecked(
+                    isChecked = true,
+                    appItems = arrayOf(itemWithText(getStringResource(R.string.tab_crash_send_report))),
+                )
+            }
+            CrashReportOption.Never -> {
+                assertUIObjectIsGone(itemWithText(getStringResource(R.string.tab_crash_send_report)))
+            }
+            CrashReportOption.Ask -> {
+                assertUIObjectExists(itemWithText(getStringResource(R.string.tab_crash_send_report)))
+                assertItemIsChecked(
+                    isChecked = true,
+                    appItems = arrayOf(itemWithText(getStringResource(R.string.tab_crash_send_report))),
+                )
             }
         }
     }
@@ -534,12 +575,11 @@ class BrowserRobot(private val composeTestRule: ComposeTestRule) {
     }
 
     /**
-     * Asserts that in [waitingTime] the playback state of the current tab will be [expectedState].
+     * Asserts that in [waitingTime] the playback state of the current tab will be [expectedState], failing the
+     * assertion otherwise.
      *
      * @param store [BrowserStore] from which to get data about the current tab's state.
      * @param expectedState [MediaSession.PlaybackState] the playback state that will be asserted
-     * @param waitingTime maximum time the test will wait for the playback state to become [expectedState] before
-     *   failing the assertion.
      */
     fun assertPlaybackState(store: BrowserStore, expectedState: MediaSession.PlaybackState) {
         val startMills = SystemClock.uptimeMillis()
@@ -1650,6 +1690,16 @@ class BrowserRobot(private val composeTestRule: ComposeTestRule) {
             return HomeScreenRobot.Transition(composeTestRule)
         }
 
+        fun clickTabCrashedRestoreButton(interact: BrowserRobot.() -> Unit): Transition {
+            clickPageObject(composeTestRule, itemWithResId("$packageName:id/restoreTabButton"))
+            Log.i(TAG, "clickTabCrashedRestoreButton: Waiting for device to be idle")
+            mDevice.waitForIdle()
+            Log.i(TAG, "clickTabCrashedRestoreButton: Waited for device to be idle")
+
+            BrowserRobot(composeTestRule).interact()
+            return Transition(composeTestRule)
+        }
+
         fun clickShareSelectedText(interact: ShareOverlayRobot.() -> Unit): ShareOverlayRobot.Transition {
             clickContextMenuItem("Share")
 
@@ -1870,19 +1920,11 @@ private fun navURLBar() = itemWithResId("$packageName:id/toolbar")
 
 private fun searchBar() = itemWithResId("$packageName:id/mozac_browser_toolbar_url_view")
 
-private fun threeDotButton() = onView(withContentDescription("Menu"))
-
-private fun tabsCounter() = mDevice.findObject(By.res("$packageName:id/counter_root"))
-
-private fun progressBar() = itemWithResId("$packageName:id/mozac_browser_toolbar_progress")
-
 private fun suggestedLogins() = itemWithResId("$packageName:id/loginSelectBar")
 
 private fun selectAddressButton() = itemWithResId("$packageName:id/select_address_header")
 
 private fun selectCreditCardButton() = itemWithResId("$packageName:id/select_credit_card_header")
-
-private fun siteInfoToolbarButton() = itemWithResId("$packageName:id/mozac_browser_toolbar_site_info_indicator")
 
 fun clickPageObject(composeTestRule: ComposeTestRule, item: UiObject) {
     for (i in 1..RETRY_COUNT) {

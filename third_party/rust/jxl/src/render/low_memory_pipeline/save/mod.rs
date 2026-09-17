@@ -3,14 +3,12 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-use crate::{
-    api::{Endianness, JxlDataFormat, JxlOutputBuffer},
-    error::Result,
-    headers::Orientation,
-    render::save::SaveStage,
-};
-
 use super::row_buffers::RowBuffer;
+use crate::api::{Endianness, JxlDataFormat};
+use crate::error::Result;
+use crate::headers::Orientation;
+use crate::render::buffer_splitter::OutputChannelRef;
+use crate::render::save::SaveStage;
 
 mod identity;
 
@@ -21,7 +19,7 @@ impl SaveStage {
     pub(crate) fn save_lowmem(
         &self,
         data: &[&RowBuffer],
-        buffers: &mut [Option<JxlOutputBuffer>],
+        buffers: &mut [Option<OutputChannelRef>],
         group_size: (usize, usize),
         frame_y: usize,
         group_origin: (usize, usize),

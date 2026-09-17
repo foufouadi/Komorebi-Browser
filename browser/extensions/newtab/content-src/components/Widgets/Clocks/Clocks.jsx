@@ -398,7 +398,11 @@ function Clocks({ dispatch, handleUserInteraction, widgetEnabledMap }) {
           size="small"
           ref={contextMenuButtonRef}
         />
-        <panel-list ref={contextMenuRef} id="clocks-widget-context-menu">
+        <panel-list
+          className="panel-list-no-icons"
+          ref={contextMenuRef}
+          id="clocks-widget-context-menu"
+        >
           <panel-item
             data-l10n-id="newtab-clock-widget-menu-edit"
             onClick={() => {

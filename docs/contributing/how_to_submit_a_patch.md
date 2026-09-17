@@ -1,3 +1,5 @@
+(how-to-submit-a-patch)=
+
 # How to submit a patch
 
 Submitting a patch, getting it reviewed, and committed to the Firefox
@@ -24,11 +26,11 @@ graph TD;
     d[Getting Reviews] --> Lando[(Lando)];
     Lando[(Lando)] --> h[Push the change];
     h[Push the change] --> Git2[(Git)];
-    style Bugzilla fill:#e1f5ff,stroke:#0366d6
-    style Git fill:#e1f5ff,stroke:#0366d6
-    style Phabricator fill:#e1f5ff,stroke:#0366d6
-    style Lando fill:#e1f5ff,stroke:#0366d6
-    style Git2 fill:#e1f5ff,stroke:#0366d6
+    style Bugzilla fill:#e1f5ff,stroke:#0366d6,color:#1a1a1a
+    style Git fill:#e1f5ff,stroke:#0366d6,color:#1a1a1a
+    style Phabricator fill:#e1f5ff,stroke:#0366d6,color:#1a1a1a
+    style Lando fill:#e1f5ff,stroke:#0366d6,color:#1a1a1a
+    style Git2 fill:#e1f5ff,stroke:#0366d6,color:#1a1a1a
 ```
 
 ## Preparation
@@ -135,6 +137,12 @@ submit jobs for those currently without try server privileges.
 Make sure you rebase your patch on top of the latest build before you
 submit to prevent any merge conflicts.
 :::
+
+Review your own patch before requesting a peer review: read the full diff
+as if it were someone else's, and make sure you can explain every change.
+If you used AI tools, this step is mandatory, and running an AI review
+locally to catch issues you may have missed is also recommended. See the
+{doc}`AI Coding Policy <ai-coding>` for the full expectations.
 
 Mozilla uses Phabricator for code review. See the [Mozilla Phabricator
 User

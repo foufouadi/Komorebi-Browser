@@ -84,6 +84,7 @@
 #include "nsIURI.h"
 #include "nsIUploadChannel2.h"
 #include "nsNetUtil.h"
+#include "nsPrintfCString.h"
 #include "nsProxyRelease.h"
 #include "nsQueryObject.h"
 #include "nsRFPService.h"
@@ -427,8 +428,9 @@ Result<IPCInternalRequest, nsresult> GetIPCInternalRequest(
       Nothing(), -1, alternativeDataType, contentPolicyType, internalPriority,
       referrer, referrerPolicy, environmentReferrerPolicy, requestMode,
       requestCredentials, cacheMode, requestRedirect, requestPriority,
-      integrity, false, fragment, principalInfo, interceptionPrincipalInfo,
-      contentPolicyType, redirectChain, isThirdPartyChannel, embedderPolicy);
+      integrity, /* keepalive */ false, /* hasStreamBody */ false, fragment,
+      principalInfo, interceptionPrincipalInfo, contentPolicyType,
+      redirectChain, isThirdPartyChannel, embedderPolicy);
 }
 
 nsresult MaybeStoreStreamForBackgroundThread(nsIInterceptedChannel* aChannel,
@@ -483,12 +485,7 @@ ServiceWorkerPrivate::ServiceWorkerPrivate(ServiceWorkerInfo* aInfo)
   mIdleWorkerTimer = NS_NewTimer();
   MOZ_ASSERT(mIdleWorkerTimer);
 
-  // Assert in all debug builds as well as non-debug Nightly and Dev Edition.
-#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
-  MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(Initialize()));
-#else
-  MOZ_ALWAYS_SUCCEEDS(Initialize());
-#endif
+  (void)Initialize();
 }
 
 ServiceWorkerPrivate::~ServiceWorkerPrivate() {
@@ -504,18 +501,46 @@ nsresult ServiceWorkerPrivate::Initialize() {
   AssertIsOnMainThread();
   MOZ_ASSERT(mInfo);
 
+  // Initialize() is only ever called from our constructor and there is no retry
+  // mechanism, so on failure this ServiceWorkerPrivate can never become usable;
+  // in particular mRemoteWorkerData would stay default-constructed, and its
+  // OptionalServiceWorkerData union would fatally assert the first time
+  // RefreshRemoteWorkerData() touched it. Neutralize ourselves by clearing
+  // mInfo, which is the same state NoteDeadServiceWorkerInfo() establishes and
+  // which SpawnWorkerIfNeeded() already refuses to act on, so that every
+  // operation fails cleanly instead. For fetch that means the interception is
+  // reset and the request goes to the network.
+  //
+  // Note that we run from within ServiceWorkerInfo's constructor, so mInfo
+  // points at a not-yet-fully-constructed object; this only clears the pointer.
+  //
+  // Every failure return goes through fail() so that the scope exit can report
+  // which step failed; give each one a distinct message.
+  const char* failureReason = nullptr;
+  auto fail = [&failureReason](const char* aReason, nsresult aRv) {
+    failureReason = aReason;
+    return aRv;
+  };
+
+  auto neutralizeOnFailure = MakeScopeExit([&] {
+    NS_WARNING(nsPrintfCString("ServiceWorkerPrivate::Initialize failed: %s",
+                               failureReason ? failureReason : "unknown")
+                   .get());
+    mInfo = nullptr;
+  });
+
   nsCOMPtr<nsIPrincipal> principal = mInfo->Principal();
 
   nsCOMPtr<nsIURI> uri;
   auto* basePrin = BasePrincipal::Cast(principal);
   nsresult rv = basePrin->GetURI(getter_AddRefs(uri));
 
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+  if (NS_FAILED(rv)) {
+    return fail("cannot get the URI of the principal", rv);
   }
 
-  if (NS_WARN_IF(!uri)) {
-    return NS_ERROR_FAILURE;
+  if (!uri) {
+    return fail("the principal has no URI", NS_ERROR_FAILURE);
   }
 
   URIParams baseScriptURL;
@@ -524,27 +549,28 @@ nsresult ServiceWorkerPrivate::Initialize() {
   nsString id;
   rv = mInfo->GetId(id);
 
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+  if (NS_FAILED(rv)) {
+    return fail("cannot get the id of the ServiceWorkerInfo", rv);
   }
 
   PrincipalInfo principalInfo;
   rv = PrincipalToPrincipalInfo(principal, &principalInfo);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+  if (NS_FAILED(rv)) {
+    return fail("cannot serialize the principal", rv);
   }
 
   RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
 
-  if (NS_WARN_IF(!swm)) {
-    return NS_ERROR_DOM_ABORT_ERR;
+  if (!swm) {
+    return fail("no ServiceWorkerManager instance", NS_ERROR_DOM_ABORT_ERR);
   }
 
   RefPtr<ServiceWorkerRegistrationInfo> regInfo =
       swm->GetRegistration(principal, mInfo->Scope());
 
-  if (NS_WARN_IF(!regInfo)) {
-    return NS_ERROR_DOM_INVALID_STATE_ERR;
+  if (!regInfo) {
+    return fail("no registration for the scope",
+                NS_ERROR_DOM_INVALID_STATE_ERR);
   }
 
   nsCOMPtr<nsICookieJarSettings> cookieJarSettings =
@@ -616,7 +642,9 @@ nsresult ServiceWorkerPrivate::Initialize() {
       // worker is running in first-party context.
       bool isThirdParty;
       rv = principal->IsThirdPartyURI(firstPartyURI, &isThirdParty);
-      NS_ENSURE_SUCCESS(rv, rv);
+      if (NS_FAILED(rv)) {
+        return fail("cannot tell if the first-party URI is third-party", rv);
+      }
 
       overriddenFingerprintingSettings =
           isThirdParty
@@ -687,15 +715,15 @@ nsresult ServiceWorkerPrivate::Initialize() {
   nsCOMPtr<nsIPrincipal> partitionedPrincipal;
   rv = StoragePrincipalHelper::CreatePartitionedPrincipalForServiceWorker(
       principal, cookieJarSettings, getter_AddRefs(partitionedPrincipal));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+  if (NS_FAILED(rv)) {
+    return fail("cannot create the partitioned principal", rv);
   }
 
   PrincipalInfo partitionedPrincipalInfo;
   rv =
       PrincipalToPrincipalInfo(partitionedPrincipal, &partitionedPrincipalInfo);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+  if (NS_FAILED(rv)) {
+    return fail("cannot serialize the partitioned principal", rv);
   }
 
   StorageAccess storageAccess =
@@ -709,15 +737,15 @@ nsresult ServiceWorkerPrivate::Initialize() {
 
   nsAutoCString domain;
   rv = uri->GetHost(domain);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+  if (NS_FAILED(rv)) {
+    return fail("cannot get the host of the URI", rv);
   }
 
   auto remoteType = RemoteWorkerManager::GetRemoteType(
       principal, WorkerKind::WorkerKindService,
-      SharedWebRemoteType(principal->OriginAttributesRef()));
-  if (NS_WARN_IF(remoteType.isErr())) {
-    return remoteType.unwrapErr();
+      RemoteType::SharedWeb(principal->OriginAttributesRef()));
+  if (remoteType.isErr()) {
+    return fail("cannot get the remote type", remoteType.unwrapErr());
   }
 
   // Determine if the service worker is registered under a third-party context
@@ -730,8 +758,8 @@ nsresult ServiceWorkerPrivate::Initialize() {
       // The partitioned principal for ServiceWorkers is currently always
       // partitioned and so we only use it when in a third party context.
       isThirdPartyContextToTopWindow ? partitionedPrincipal : principal);
-  if (NS_WARN_IF(!mClientInfo.isSome())) {
-    return NS_ERROR_DOM_INVALID_STATE_ERR;
+  if (mClientInfo.isNothing()) {
+    return fail("cannot create the ClientInfo", NS_ERROR_DOM_INVALID_STATE_ERR);
   }
 
   mClientInfo->SetAgentClusterId(regInfo->AgentClusterId());
@@ -787,12 +815,14 @@ nsresult ServiceWorkerPrivate::Initialize() {
   // This fills in the rest of mRemoteWorkerData.serviceWorkerData().
   RefreshRemoteWorkerData(regInfo);
 
+  neutralizeOnFailure.release();
   return NS_OK;
 }
 
 void ServiceWorkerPrivate::RegenerateClientInfo() {
   // inductively, this object can only still be alive after Initialize() if the
-  // mClientInfo was correctly initialized.
+  // mClientInfo was correctly initialized; a failed Initialize() clears mInfo,
+  // which stops us from ever spawning a worker and therefore from getting here.
   MOZ_DIAGNOSTIC_ASSERT(mClientInfo.isSome());
 
   // Preserve the ipAddressSpace from the current RemoteWorkerData clientInfo
@@ -802,7 +832,7 @@ void ServiceWorkerPrivate::RegenerateClientInfo() {
   nsILoadInfo::IPAddressSpace ipAddressSpace = nsILoadInfo::Unknown;
   if (mRemoteWorkerData.clientInfo().isSome()) {
     ClientInfo current(mRemoteWorkerData.clientInfo().ref());
-    if (auto args = current.GetPolicyContainerArgs()) {
+    if (const auto& args = current.GetPolicyContainerArgs()) {
       ipAddressSpace = args->ipAddressSpace();
     }
   }
@@ -969,8 +999,14 @@ nsresult ServiceWorkerPrivate::SendCookieChangeEvent(
     const net::CookieStruct& aCookie, bool aCookieDeleted,
     RefPtr<ServiceWorkerRegistrationInfo> aRegistration) {
   AssertIsOnMainThread();
-  MOZ_ASSERT(mInfo);
   MOZ_ASSERT(aRegistration);
+
+  // mInfo is cleared both when our ServiceWorkerInfo dies and when Initialize()
+  // failed, and unlike the ops below we dereference it before delegating to
+  // SpawnWorkerIfNeeded(), which is where that is normally caught.
+  if (NS_WARN_IF(!mInfo)) {
+    return NS_ERROR_DOM_INVALID_STATE_ERR;
+  }
 
   ServiceWorkerCookieChangeEventOpArgs args;
   args.cookie() = aCookie;
@@ -1013,8 +1049,14 @@ nsresult ServiceWorkerPrivate::SendPushEvent(
     const nsAString& aMessageId, const Maybe<nsTArray<uint8_t>>& aData,
     RefPtr<ServiceWorkerRegistrationInfo> aRegistration) {
   AssertIsOnMainThread();
-  MOZ_ASSERT(mInfo);
   MOZ_ASSERT(aRegistration);
+
+  // mInfo is cleared both when our ServiceWorkerInfo dies and when Initialize()
+  // failed, and unlike the ops below we dereference it before delegating to
+  // SpawnWorkerIfNeeded(), which is where that is normally caught.
+  if (NS_WARN_IF(!mInfo)) {
+    return NS_ERROR_DOM_INVALID_STATE_ERR;
+  }
 
   ServiceWorkerPushEventOpArgs args;
   args.messageId() = nsString(aMessageId);
@@ -1599,6 +1641,8 @@ void ServiceWorkerPrivate::TerminateWorkerCallback(nsITimer* aTimer) {
   // mInfo must be non-null at this point because NoteDeadServiceWorkerInfo
   // which zeroes it calls TerminateWorker which cancels our timer which will
   // ensure we don't get invoked even if the nsTimerEvent is in the event queue.
+  // The other place which zeroes mInfo, a failed Initialize(), stops us from
+  // ever spawning a worker and therefore from ever arming this timer.
   ServiceWorkerManager::LocalizeAndReportToAllClients(
       mInfo->Scope(), "ServiceWorkerGraceTimeoutTermination",
       nsTArray<nsString>{NS_ConvertUTF8toUTF16(mInfo->Scope())});
@@ -1786,8 +1830,7 @@ void ServiceWorkerPrivate::CreationFailed() {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mControllerChild);
 
-  if (mRemoteWorkerData.remoteType().Find(SERVICEWORKER_REMOTE_TYPE) !=
-      kNotFound) {
+  if (mRemoteWorkerData.remoteType().IsWebServiceWorker()) {
     glean::service_worker::isolated_launch_time.AccumulateRawDuration(
         TimeStamp::Now() - mServiceWorkerLaunchTimeStart);
   } else {
@@ -1813,8 +1856,7 @@ void ServiceWorkerPrivate::CreationSucceeded() {
     return;
   }
 
-  if (mRemoteWorkerData.remoteType().Find(SERVICEWORKER_REMOTE_TYPE) !=
-      kNotFound) {
+  if (mRemoteWorkerData.remoteType().IsWebServiceWorker()) {
     glean::service_worker::isolated_launch_time.AccumulateRawDuration(
         TimeStamp::Now() - mServiceWorkerLaunchTimeStart);
   } else {

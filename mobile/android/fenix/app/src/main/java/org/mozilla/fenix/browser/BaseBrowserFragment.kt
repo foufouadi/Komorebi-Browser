@@ -71,6 +71,7 @@ import mozilla.components.browser.state.state.TabSessionState
 import mozilla.components.browser.state.state.content.DownloadState
 import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.browser.thumbnails.BrowserThumbnails
+import mozilla.components.browser.thumbnails.facts.BrowserThumbnailsFacts
 import mozilla.components.browser.toolbar.BrowserToolbar
 import mozilla.components.compose.browser.toolbar.store.BrowserToolbarStore
 import mozilla.components.concept.base.crash.Breadcrumb
@@ -145,6 +146,7 @@ import mozilla.components.support.base.feature.PermissionsFeature
 import mozilla.components.support.base.feature.UserInteractionHandler
 import mozilla.components.support.base.feature.ViewBoundFeatureWrapper
 import mozilla.components.support.ktx.android.content.appName
+import mozilla.components.support.ktx.android.content.isEdgeToEdgeDisabled
 import mozilla.components.support.ktx.android.view.ImeInsetsSynchronizer
 import mozilla.components.support.ktx.android.view.enterImmersiveMode
 import mozilla.components.support.ktx.android.view.exitImmersiveMode
@@ -522,11 +524,13 @@ abstract class BaseBrowserFragment :
                 putExtra(HomeActivity.OPEN_TO_BROWSER, true)
             }
 
+        val isListenToPageEnabled = context.components.settings.listenToPageFeatureFlagEnabled
         val readerMenuController =
             DefaultReaderModeController(
                 readerViewFeature,
                 binding.readerViewControlsBar,
                 isPrivate = appStore.state.mode.isPrivate,
+                isListenToPageEnabled = isListenToPageEnabled,
                 onReaderModeChanged = { activity.finishActionMode() },
             )
         _findInPageLauncher = {
@@ -620,6 +624,7 @@ abstract class BaseBrowserFragment :
                     tabsUseCases = context.components.useCases.tabsUseCases,
                     sendTabUseCases = SendTabUseCases(requireComponents.backgroundServices.accountManager),
                     customTabSessionId = customTabSessionId,
+                    applicationScope = context.components.applicationScope,
                     viewHasFocus = { view.hasWindowFocus() },
                 ),
             owner = this,
@@ -1747,7 +1752,9 @@ abstract class BaseBrowserFragment :
     }
 
     private fun onTabCounterClicked(browsingMode: BrowsingMode) {
-        thumbnailsFeature.get()?.requestScreenshot()
+        thumbnailsFeature
+            .get()
+            ?.requestScreenshot(trigger = BrowserThumbnailsFacts.CaptureAttemptedTriggers.TAB_COUNTER_CLICK)
         findNavController()
             .nav(
                 R.id.browserFragment,
@@ -2211,11 +2218,13 @@ abstract class BaseBrowserFragment :
         pipFeature?.onPictureInPictureModeChanged(isInPipMode)
     }
 
-    private fun viewportFitChange(layoutInDisplayCutoutMode: Int) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val layoutParams = activity?.window?.attributes
-            layoutParams?.layoutInDisplayCutoutMode = layoutInDisplayCutoutMode
-            activity?.window?.attributes = layoutParams
+    @VisibleForTesting
+    internal fun viewportFitChange(layoutInDisplayCutoutMode: Int) {
+        val activity = activity ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && activity.isEdgeToEdgeDisabled()) {
+            val layoutParams = activity.window.attributes
+            layoutParams.layoutInDisplayCutoutMode = layoutInDisplayCutoutMode
+            activity.window.attributes = layoutParams
         }
     }
 

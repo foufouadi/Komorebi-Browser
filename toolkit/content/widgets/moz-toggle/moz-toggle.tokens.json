@@ -2,23 +2,74 @@
   "background": {
     "color": {
       "@base": {
-        "value": "{button.background.color.@base}"
+        "value": {
+          "default": "{button.background.color.@base}",
+          "nova": {
+            "comment": "HCM colors for toggle need to be updated in Figma",
+            "value": {
+              "forcedColors": "SelectedItemText"
+            }
+          }
+        }
       },
       "hover": {
-        "value": "{button.background.color.hover}"
+        "value": {
+          "default": "{button.background.color.hover}",
+          "nova": {
+            "comment": "HCM colors for toggle need to be updated in Figma",
+            "value": {
+              "forcedColors": "SelectedItemText"
+            }
+          }
+        }
       },
       "active": {
-        "value": "{button.background.color.active}"
+        "value": {
+          "default": "{button.background.color.active}",
+          "nova": {
+            "comment": "HCM colors for toggle need to be updated in Figma",
+            "value": {
+              "forcedColors": "SelectedItemText"
+            }
+          }
+        }
       },
       "pressed": {
         "@base": {
-          "value": "{color.accent.primary.@base}"
+          "value": {
+            "default": "{color.accent.primary.@base}",
+            "nova": {
+              "comment": "HCM colors for toggle need to be updated in Figma",
+              "value": {
+                "default": "{button.background.color.primary.@base}",
+                "forcedColors": "ButtonText"
+              }
+            }
+          }
         },
         "hover": {
-          "value": "{color.accent.primary.hover}"
+          "value": {
+            "default": "{color.accent.primary.hover}",
+            "nova": {
+              "comment": "HCM colors for toggle need to be updated in Figma",
+              "value": {
+                "default": "{button.background.color.primary.hover}",
+                "forcedColors": "SelectedItem"
+              }
+            }
+          }
         },
         "active": {
-          "value": "{color.accent.primary.active}"
+          "value": {
+            "default": "{color.accent.primary.active}",
+            "nova": {
+              "comment": "HCM colors for toggle need to be updated in Figma",
+              "value": {
+                "default": "{button.background.color.primary.active}",
+                "forcedColors": "SelectedItem"
+              }
+            }
+          }
         }
       }
     }
@@ -30,19 +81,40 @@
           "light": "{color.gray.70}",
           "dark": "{border.color.interactive.@base}",
           "prefersContrast": "{border.color.interactive.@base}",
-          "forcedColors": "{border.color.interactive.@base}"
+          "forcedColors": "{border.color.interactive.@base}",
+          "nova": {
+            "comment": "HCM colors for toggle need to be updated in Figma",
+            "value": {
+              "default": "{border.color.interactive.@base}",
+              "forcedColors": "ButtonText"
+            }
+          }
         }
       },
       "hover": {
         "value": {
           "default": "{toggle.border.color.@base}",
-          "forcedColors": "{border.color.interactive.hover}"
+          "forcedColors": "{border.color.interactive.hover}",
+          "nova": {
+            "comment": "HCM colors for toggle need to be updated in Figma",
+            "value": {
+              "default": "{border.color.interactive.hover}",
+              "forcedColors": "SelectedItem"
+            }
+          }
         }
       },
       "active": {
         "value": {
           "default": "{toggle.border.color.@base}",
-          "forcedColors": "{border.color.interactive.active}"
+          "forcedColors": "{border.color.interactive.active}",
+          "nova": {
+            "comment": "HCM colors for toggle need to be updated in Figma",
+            "value": {
+              "default": "{border.color.interactive.active}",
+              "forcedColors": "ButtonText"
+            }
+          }
         }
       }
     },
@@ -65,25 +137,52 @@
         "@base": {
           "value": {
             "default": "{toggle.border.color.@base}",
-            "forcedColors": "{color.accent.primary.@base}"
+            "forcedColors": "{color.accent.primary.@base}",
+            "nova": {
+              "comment": "HCM colors for toggle need to be updated in Figma",
+              "value": {
+                "forcedColors": "ButtonText"
+              }
+            }
           }
         },
         "hover": {
           "value": {
             "default": "{toggle.dot.background.color.@base}",
-            "forcedColors": "{color.accent.primary.hover}"
+            "forcedColors": "{color.accent.primary.hover}",
+            "nova": {
+              "comment": "HCM colors for toggle need to be updated in Figma",
+              "value": {
+                "default": "{toggle.border.color.hover}",
+                "forcedColors": "SelectedItem"
+              }
+            }
           }
         },
         "active": {
           "value": {
             "default": "{toggle.dot.background.color.@base}",
-            "forcedColors": "{color.accent.primary.active}"
+            "forcedColors": "{color.accent.primary.active}",
+            "nova": {
+              "comment": "HCM colors for toggle need to be updated in Figma",
+              "value": {
+                "default": "{toggle.border.color.active}",
+                "forcedColors": "SelectedItem"
+              }
+            }
           }
         },
         "on-pressed": {
           "value": {
             "default": "{background.color.canvas}",
-            "forcedColors": "{button.background.color.@base}"
+            "forcedColors": "{button.background.color.@base}",
+            "nova": {
+              "comment": "HCM colors for toggle need to be updated in Figma",
+              "value": {
+                "default": "{background.color.box.@base}",
+                "forcedColors": "ButtonText"
+              }
+            }
           }
         }
       }
@@ -102,7 +201,7 @@
     }
   },
   "inset": {
-    "value": "calc(-1 * {dimension.2})"
+    "value": "-2px"
   },
   "opacity": {
     "disabled": {

@@ -64,8 +64,21 @@ android-fenix:
         - "'signing-apk-fenix-android-test-debug"
         - "'test-apk-fenix-debug"
         - "'ui-test-apk-fenix-arm-debug"
+        - "'ui-test-apk-fenix-tae-arm-debug"
         - "^source-test 'fenix"
         - "'generate-baseline-profile-firebase-fenix-simulation"
+
+android-fenix-prototype:
+    selector: fuzzy
+    full: true
+    no_artifact: true
+    description: >-
+        Build and sign Fenix Nightly without any baseline profile nor PGO.
+    query:
+        - "'signing-apk-fenix-nightly-nobp"
+    try_config_params:
+        enable_always_target:
+            - docker-image
 
 android-frontend:
     selector: fuzzy
@@ -81,6 +94,7 @@ android-frontend:
         - "'signing-apk-fenix-android-test-debug"
         - "'test-apk-fenix-debug"
         - "'ui-test-apk-fenix-arm-debug"
+        - "'ui-test-apk-fenix-tae-arm-debug"
         - "'build-apk-focus-debug"
         - "'signing-apk-focus-debug"
         - "'build-apk-focus-android-test-debug"
@@ -121,6 +135,7 @@ android-fullstack:
         - "'signing-apk-fenix-android-test-debug"
         - "'test-apk-fenix-debug"
         - "'ui-test-apk-fenix-arm-debug"
+        - "'ui-test-apk-fenix-tae-arm-debug"
         - "'build-apk-focus-debug"
         - "'signing-apk-focus-debug"
         - "'build-apk-focus-android-test-debug"
@@ -406,6 +421,16 @@ media-full:
         - "'gtest"
     intersect_query:
         - "'debug | '-asan | '-tsan"
+
+ml-perf:
+    selector: fuzzy
+    description: >-
+        Run the ml-* perftests on every desktop platform, rather than Linux
+        only like "ai-perf". ONNX tests run as one job per backend
+        (-native/-wasm task variants).
+    query:
+        - "^perftest 'ml-"
+    full: true
 
 mochitest-bc:
     description: >-

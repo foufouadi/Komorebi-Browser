@@ -34,6 +34,7 @@ gecko_metrics = [
     "dom/media/metrics.yaml",
     "dom/media/mp4/metrics.yaml",
     "dom/media/webrtc/metrics.yaml",
+    "dom/media/webspeech/metrics.yaml",
     "dom/metrics.yaml",
     "dom/notification/metrics.yaml",
     "dom/performance/metrics.yaml",
@@ -86,6 +87,7 @@ gecko_metrics = [
     "toolkit/components/messaging-system/metrics.yaml",
     "toolkit/components/ml/metrics.yaml",
     "toolkit/components/normandy/metrics.yaml",
+    "toolkit/components/pageextractor/metrics.yaml",
     "toolkit/components/passwordmgr/metrics.yaml",
     "toolkit/components/pdfjs/metrics.yaml",
     "toolkit/components/printing/metrics.yaml",
@@ -214,6 +216,7 @@ gecko_pings = [
     "toolkit/components/captchadetection/pings.yaml",
     "toolkit/components/gecko-trace/pings.yaml",
     "toolkit/components/glean/pings.yaml",
+    "toolkit/components/pageextractor/pings.yaml",
     "toolkit/components/resistfingerprinting/pings.yaml",
     "toolkit/mozapps/extensions/pings.yaml",
 ]

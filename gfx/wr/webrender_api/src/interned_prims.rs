@@ -18,7 +18,7 @@ use crate::{
     ImageRendering, LineOrientation, LineStyle, PropertyBinding, YuvColorSpace, YuvFormat,
 };
 use crate::key_types::{
-    BorderRadiusAu, ConicGradientParams, EdgeMask, GradientStopKey, NinePatchDescriptor,
+    BorderRadiusAu, ConicGradientParams, GradientStopKey, NinePatchDescriptor,
     NormalBorderAu, PointKey, PrimKeyCommonData, RadialGradientParams, SizeKey, StretchSizeKey,
     VectorKey,
 };
@@ -48,6 +48,8 @@ pub struct RectanglePrim {
     pub color: PropertyBinding<ColorU>,
 }
 
+pub type RectangleKey = PrimKey<RectanglePrim>;
+
 #[derive(Debug, Clone, MallocSizeOf, Hash, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BoxShadow {
     pub color: ColorU,
@@ -63,6 +65,8 @@ pub struct BoxShadow {
     pub spread_amount: Au,
 }
 
+pub type BoxShadowKey = PrimKey<BoxShadow>;
+
 #[derive(Debug, Clone, Eq, PartialEq, MallocSizeOf, Hash, Serialize, Deserialize)]
 pub struct Image {
     pub key: ImageKey,
@@ -72,6 +76,10 @@ pub struct Image {
     pub image_rendering: ImageRendering,
     pub alpha_type: AlphaType,
 }
+
+/// Named to stay clear of `crate::ImageKey`, the resource key that is one of
+/// the fields.
+pub type ImagePrimKey = PrimKey<Image>;
 
 #[derive(Debug, Clone, Eq, MallocSizeOf, PartialEq, Hash, Serialize, Deserialize)]
 pub struct YuvImage {
@@ -83,6 +91,8 @@ pub struct YuvImage {
     pub image_rendering: ImageRendering,
 }
 
+pub type YuvImagePrimKey = PrimKey<YuvImage>;
+
 #[derive(Clone, Debug, Hash, MallocSizeOf, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LineDecoration {
     pub style: LineStyle,
@@ -91,11 +101,15 @@ pub struct LineDecoration {
     pub color: ColorU,
 }
 
+pub type LineDecorationKey = PrimKey<LineDecoration>;
+
 #[derive(Debug, Clone, Eq, MallocSizeOf, PartialEq, Hash, Serialize, Deserialize)]
 pub struct NormalBorderPrim {
     pub border: NormalBorderAu,
     pub widths: LayoutSideOffsetsAu,
 }
+
+pub type NormalBorderKey = PrimKey<NormalBorderPrim>;
 
 /// Interned representation of an image-source nine-patch border. The interned
 /// key stores the image request's parts directly (rather than a webrender
@@ -108,6 +122,8 @@ pub struct ImageBorder {
     pub tile: Option<TileOffset>,
     pub nine_patch: NinePatchDescriptor,
 }
+
+pub type ImageBorderKey = PrimKey<ImageBorder>;
 
 #[derive(Debug, Clone, Eq, PartialEq, MallocSizeOf, Hash, Serialize, Deserialize)]
 pub struct BackdropCapture {
@@ -129,7 +145,6 @@ pub struct LinearGradient {
     pub stops: Vec<GradientStopKey>,
     pub reverse_stops: bool,
     pub nine_patch: Option<Box<NinePatchDescriptor>>,
-    pub edge_aa_mask: EdgeMask,
 }
 
 #[derive(Clone, Debug, Eq, MallocSizeOf, PartialEq, Hash, Serialize, Deserialize)]

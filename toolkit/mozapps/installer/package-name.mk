@@ -48,6 +48,8 @@ MOZSEARCH_JAVA_INDEX_BASENAME = $(PKG_BASENAME).mozsearch-java-index
 # Mozharness naming
 MOZHARNESS_PACKAGE = mozharness.zip
 
+# `libmegazord.so` artifacts: for use in Android unit tests run on host.
+LIBMEGAZORD_SO_ARTIFACTS_ARCHIVE_BASENAME = $(PKG_BASENAME).libmegazord_so_artifacts
 # `.xpt` artifacts: for use in artifact builds.
 XPT_ARTIFACTS_ARCHIVE_BASENAME = $(PKG_BASENAME).xpt_artifacts
 ifeq (Darwin, $(OS_ARCH))

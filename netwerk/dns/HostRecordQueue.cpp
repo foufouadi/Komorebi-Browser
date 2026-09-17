@@ -70,22 +70,33 @@ void HostRecordQueue::AddToEvictionQ(
     RefPtr<nsHostRecord> head = mEvictionQ.popFirst();
     aDB.Remove(*static_cast<nsHostKey*>(head.get()));
 
+    bool stillValid =
+        head->CheckExpiration(TimeStamp::Now()) != nsHostRecord::EXP_EXPIRED;
     if (!head->negative) {
-      // record the age of the entry upon eviction.
+      // record the age of the entry upon eviction. Only positive records have a
+      // valid mValidStart (set in PrepareRecordExpiration); negative records
+      // may leave it null, so computing the age there would assert.
       TimeDuration age = TimeStamp::NowLoRes() - head->mValidStart;
-      if (aRec->IsAddrRecord()) {
+      if (head->IsAddrRecord()) {
         glean::dns::cleanup_age.AccumulateRawDuration(age);
+        if (stillValid) {
+          glean::dns::premature_eviction.AccumulateRawDuration(age);
+        }
       } else {
         glean::dns::by_type_cleanup_age.AccumulateRawDuration(age);
-      }
-      if (head->CheckExpiration(TimeStamp::Now()) !=
-          nsHostRecord::EXP_EXPIRED) {
-        if (aRec->IsAddrRecord()) {
-          glean::dns::premature_eviction.AccumulateRawDuration(age);
-        } else {
+        if (stillValid) {
           glean::dns::by_type_premature_eviction.AccumulateRawDuration(age);
         }
       }
+    } else {
+      // Negative record (A/AAAA or by-type, e.g. HTTPS) evicted because the
+      // cache reached its size limit. Split by family and by whether it was
+      // still within its (short) negative lifetime, to distinguish size-driven
+      // eviction from TTL expiry.
+      glean::dns::negative_eviction
+          .Get(RecordFamilyLabel(head),
+               stillValid ? "premature"_ns : "expired"_ns)
+          .Add(1);
     }
   }
 }

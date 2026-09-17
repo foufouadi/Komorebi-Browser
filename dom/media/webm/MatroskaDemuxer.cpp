@@ -191,7 +191,12 @@ bool MatroskaDemuxer::CheckKeyFrameByExamineByteStream(
              frameType == H264::FrameType::I_FRAME_OTHER;
     }
     case NESTEGG_CODEC_HEVC: {
+#ifdef MOZ_APPLEMEDIA
+      // VideoToolbox can only start from IDR, see MP4Demuxer.
       auto isKeyFrame = H265::IsKeyFrame(aSample);
+#else
+      auto isKeyFrame = H265::IsRandomAccessPoint(aSample);
+#endif
       return isKeyFrame.isOk() ? isKeyFrame.unwrap() : false;
     }
     case NESTEGG_CODEC_VP8:

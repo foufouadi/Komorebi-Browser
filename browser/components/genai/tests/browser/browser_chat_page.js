@@ -2,7 +2,7 @@
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 const { GenAI } = ChromeUtils.importESModule(
-  "resource:///modules/GenAI.sys.mjs"
+  "moz-src:///browser/components/genai/GenAI.sys.mjs"
 );
 const { sinon } = ChromeUtils.importESModule(
   "resource://testing-common/Sinon.sys.mjs"
@@ -111,12 +111,6 @@ function assertContextMenuStubResult(stub) {
 
 // Schedule reset to the initial sidebar state after the test.
 SidebarTestUtils.restoreStateAtCleanup(window);
-
-add_setup(async function () {
-  await SpecialPowers.pushPrefEnv({
-    set: [["test.wait300msAfterTabSwitch", true]],
-  });
-});
 
 /**
  * Check page, tab, and tool context menu have summarize prompt

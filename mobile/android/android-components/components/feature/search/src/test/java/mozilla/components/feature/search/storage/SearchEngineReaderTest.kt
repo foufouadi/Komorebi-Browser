@@ -6,6 +6,7 @@ package mozilla.components.feature.search.storage
 
 import android.graphics.Bitmap
 import android.util.AtomicFile
+import android.util.Base64
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.File
 import java.io.IOException
@@ -23,6 +24,7 @@ import mozilla.components.support.locale.LocaleManager
 import mozilla.components.support.test.mock
 import mozilla.components.support.test.robolectric.testContext
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -305,6 +307,20 @@ class SearchEngineReaderTest {
     }
 
     @Test
+    fun `GIVEN a png larger than the icon size THEN readImageAPI still decodes it rather than falling back`() {
+        val reader = SearchEngineReader(context = testContext, type = SearchEngine.Type.BUNDLED)
+        val searchEngineDefinition = sampleSearchEngineDefinitionData()
+        val defaultIcon = Bitmap.createBitmap(7, 7, Bitmap.Config.ARGB_8888)
+        val icon = Base64.decode(LARGE_PNG_BASE64, Base64.DEFAULT)
+
+        val searchEngine = reader.loadStreamAPI(searchEngineDefinition, icon, validMimeType, defaultIcon)
+
+        assertNotSame(defaultIcon, searchEngine.icon)
+        assertEquals(LARGE_PNG_SIZE, searchEngine.icon.width)
+        assertEquals(LARGE_PNG_SIZE, searchEngine.icon.height)
+    }
+
+    @Test
     fun `GIVEN invalid image mimetype THEN readImageAPI returns defaultIcon`() {
         val reader = SearchEngineReader(context = testContext, type = SearchEngine.Type.BUNDLED)
         val searchEngineDefinition = sampleSearchEngineDefinitionData()
@@ -457,14 +473,10 @@ class SearchEngineReaderTest {
             )
         return engineDefinition
     }
-
-    private fun sampleAttachmentModelData(): AttachmentModel {
-        return AttachmentModel(
-            filename = "test",
-            mimetype = "image/jpeg",
-            location = "main-workspace/search-config-icons/d0e5c407-7b88-4030-8870-f44498141ec7.jpg",
-            hash = "test",
-            size = 100u,
-        )
-    }
 }
+
+private const val LARGE_PNG_SIZE = 128
+
+// A 128x128 PNG, comfortably larger than the size a search engine icon is drawn at.
+private const val LARGE_PNG_BASE64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAIAAABMXPacAAAAyElEQVR42u3RQQ0AAAjEsJOGNKQhDRnwaDIFa6pHh8UCAAAEAIAAABAAAAIAQAAACAAAAQAgAAAEAIAAABAAAAIAQAAACAAAAQAgAAAEAIAAABAAAAIAQAAACAAAAQAgAAAEAIAAABAAAAIAQAAACAAAAQAAwAUAAAQAgAAAEAAAAgBAAAAIAAABACAAAAQAgAAAEAAAAgBAAAAIAAABACAAAAQAgAAAEAAAAgBAAAAIAAABACAAAAQAgAAAEAAAAgBAAAAIwIcWRmIFoZah+J4AAAAASUVORK5CYII="

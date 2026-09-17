@@ -412,6 +412,17 @@ void AddSizeOfBaselineData(JSScript* script, mozilla::MallocSizeOf mallocSizeOf,
 
 void ToggleBaselineProfiling(JSContext* cx, bool enable);
 
+// Metadata about a stack frame that is reconstructed during bailout.
+struct BailoutStubInfo {
+  // The stack address up to which the frame's contents extend.
+  // This excludes the return address calling into the next frame.
+  uint8_t* frameBoundary = nullptr;
+  // The bailout stub that pushes the return address for the frame's
+  // call into an outer frame.
+  // A nullptr indicates the final reconstructed frame.
+  uint8_t* bailoutStub = nullptr;
+};
+
 struct alignas(uintptr_t) BaselineBailoutInfo {
   // Pointer into the current C stack, where overwriting will start.
   uint8_t* incomingStack = nullptr;
@@ -420,6 +431,9 @@ struct alignas(uintptr_t) BaselineBailoutInfo {
   // which will be copied to the bottom.
   uint8_t* copyStackTop = nullptr;
   uint8_t* copyStackBottom = nullptr;
+
+  // The number of BailoutStubInfo entries that follow this header.
+  uint32_t numStubInfos = 0;
 
   // The value of the frame pointer register on resume.
   void* resumeFramePtr = nullptr;
@@ -484,6 +498,7 @@ class BaselineInterpreter {
   };
   struct ICReturnOffset {
     uint32_t offset;
+    uint32_t bailoutStubOffset = 0;
     JSOp op;
     ICReturnOffset(uint32_t offset, JSOp op) : offset(offset), op(op) {}
   };
@@ -575,6 +590,7 @@ class BaselineInterpreter {
   }
 
   uint8_t* retAddrForIC(JSOp op) const;
+  uint8_t* bailoutStubAddrForIC(JSOp op) const;
 
   TrampolinePtr interpretOpAddr() const {
     return TrampolinePtr(codeAtOffset(interpretOpOffset_));

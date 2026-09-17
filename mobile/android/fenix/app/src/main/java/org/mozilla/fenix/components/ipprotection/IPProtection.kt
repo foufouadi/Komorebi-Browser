@@ -11,6 +11,8 @@ import mozilla.components.concept.engine.Engine
 import mozilla.components.feature.ipprotection.IPProtectionFeature
 import mozilla.components.feature.ipprotection.IPProtectionStorageSynchronizer
 import mozilla.components.feature.ipprotection.auth.gpi.IPProtectionGpiProvider
+import mozilla.components.feature.ipprotection.store.DefaultIPProtectionLocationRepository
+import mozilla.components.feature.ipprotection.store.IPProtectionLocationMiddleware
 import mozilla.components.feature.ipprotection.store.IPProtectionStore
 import mozilla.components.lib.integrity.googleplay.GooglePlayIntegrityClient
 import mozilla.components.service.fxa.manager.FxaAccountManager
@@ -57,6 +59,7 @@ class IPProtection(
                     ),
                     IPProtectionTelemetryMiddleware(),
                     IPProtectionPreferencesMiddleware(DefaultIPProtectionRepository(settings)),
+                    IPProtectionLocationMiddleware(repository = DefaultIPProtectionLocationRepository(context)),
                 )
         )
     }
@@ -94,7 +97,8 @@ class IPProtection(
 
     private val snackbarMessages by lazy {
         IPProtectionSnackbarMessages(
-            connectionError = context.getString(R.string.ip_protection_connection_error_snackbar)
+            connectionError = context.getString(R.string.ip_protection_connection_error_snackbar),
+            locationSelectionReset = context.getString(R.string.ip_protection_location_selection_reset_snackbar),
         )
     }
 }

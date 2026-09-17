@@ -295,6 +295,10 @@ void MacroAssembler::xor32(const Address& src, Register dest) {
   xor32(scratch, dest);
 }
 
+void MacroAssembler::nor32(Imm32 imm, Register src, Register dest) {
+  ma_nor(dest, src, imm);
+}
+
 // ===============================================================
 // Swap instructions
 
@@ -731,6 +735,11 @@ void MacroAssembler::lshift64(Imm32 imm, Register64 dest) {
   as_slli_d(dest.reg, dest.reg, imm.value);
 }
 
+void MacroAssembler::lshift64(Imm32 imm, Register64 src, Register64 dest) {
+  MOZ_ASSERT(0 <= imm.value && imm.value < 64);
+  as_slli_d(dest.reg, src.reg, imm.value);
+}
+
 void MacroAssembler::lshiftPtr(Register shift, Register dest) {
   as_sll_d(dest, dest, shift);
 }
@@ -790,9 +799,20 @@ void MacroAssembler::rshift64(Imm32 imm, Register64 dest) {
   as_srli_d(dest.reg, dest.reg, imm.value);
 }
 
+void MacroAssembler::rshift64(Imm32 imm, Register64 src, Register64 dest) {
+  MOZ_ASSERT(0 <= imm.value && imm.value < 64);
+  as_srli_d(dest.reg, src.reg, imm.value);
+}
+
 void MacroAssembler::rshift64Arithmetic(Imm32 imm, Register64 dest) {
   MOZ_ASSERT(0 <= imm.value && imm.value < 64);
   as_srai_d(dest.reg, dest.reg, imm.value);
+}
+
+void MacroAssembler::rshift64Arithmetic(Imm32 imm, Register64 src,
+                                        Register64 dest) {
+  MOZ_ASSERT(0 <= imm.value && imm.value < 64);
+  as_srai_d(dest.reg, src.reg, imm.value);
 }
 
 void MacroAssembler::rshift64Arithmetic(Register shift, Register64 dest) {
@@ -899,7 +919,7 @@ void MacroAssembler::popcnt64(Register64 input, Register64 output,
                               Register tmp) {
   UseScratchRegisterScope temps(asMasm());
   Register scratch = temps.Acquire();
-  as_or(output.reg, input.reg, zero);
+  ma_move(output.reg, input.reg);
   as_srai_d(tmp, input.reg, 1);
   ma_li(scratch, Imm32(0x55555555));
   as_bstrins_d(scratch, scratch, 63, 32);
@@ -932,7 +952,7 @@ void MacroAssembler::ctz32(Register src, Register dest, bool knownNotZero) {
 
 void MacroAssembler::popcnt32(Register input, Register output, Register tmp) {
   // Equivalent to GCC output of std::popcount()
-  as_or(output, input, zero);
+  ma_move(output, input);
   as_srai_w(tmp, input, 1);
   ma_and(tmp, tmp, Imm32(0x55555555));
   as_sub_w(output, output, tmp);
@@ -1083,8 +1103,6 @@ void MacroAssembler::branch8(Condition cond, const BaseIndex& lhs, Register rhs,
   Register scratch = temps.Acquire();
   MOZ_ASSERT(scratch != lhs.base);
 
-  computeScaledAddress(lhs, scratch);
-
   switch (cond) {
     case Assembler::Equal:
     case Assembler::NotEqual:
@@ -1092,7 +1110,7 @@ void MacroAssembler::branch8(Condition cond, const BaseIndex& lhs, Register rhs,
     case Assembler::AboveOrEqual:
     case Assembler::Below:
     case Assembler::BelowOrEqual:
-      load8ZeroExtend(Address(scratch, lhs.offset), scratch);
+      load8ZeroExtend(lhs, scratch);
       branch32(cond, scratch, rhs, label);
       break;
 
@@ -1100,7 +1118,7 @@ void MacroAssembler::branch8(Condition cond, const BaseIndex& lhs, Register rhs,
     case Assembler::GreaterThanOrEqual:
     case Assembler::LessThan:
     case Assembler::LessThanOrEqual:
-      load8SignExtend(Address(scratch, lhs.offset), scratch);
+      load8SignExtend(lhs, scratch);
       branch32(cond, scratch, rhs, label);
       break;
 

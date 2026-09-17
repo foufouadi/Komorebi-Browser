@@ -3063,7 +3063,6 @@ JS_PUBLIC_API bool JS::RejectPromise(JSContext* cx, JS::HandleObject promiseObj,
   return ResolveOrRejectPromise(cx, promiseObj, rejectionValue, true);
 }
 
-#ifdef NIGHTLY_BUILD
 JS_PUBLIC_API bool JS::SafeResolve(JSContext* cx, JS::HandleObject promiseObj,
                                    JS::HandleValue resolutionValue) {
   AssertHeapIsIdle();
@@ -3091,7 +3090,6 @@ JS_PUBLIC_API bool JS::SafeResolve(JSContext* cx, JS::HandleObject promiseObj,
 
   return js::SafeResolvePromise(cx, promise, resolution);
 }
-#endif  // NIGHTLY_BUILD
 
 JS_PUBLIC_API JSObject* JS::CallOriginalPromiseThen(
     JSContext* cx, JS::HandleObject promiseObj, JS::HandleObject onFulfilled,
@@ -4601,11 +4599,6 @@ JS_PUBLIC_API void JS_SetGlobalJitCompilerOption(JSContext* cx,
     case JSJITCOMPILER_WASM_JIT_OPTIMIZING:
       JS::ContextOptionsRef(cx).setWasmIon(!!value);
       break;
-#ifdef NIGHTLY_BUILD
-    case JSJITCOMPILER_REGEXP_BUFFER_BOUNDARIES:
-      jit::JitOptions.js_regexp_buffer_boundaries = !!value;
-      break;
-#endif
 #ifdef DEBUG
     case JSJITCOMPILER_FULL_DEBUG_CHECKS:
       jit::JitOptions.fullDebugChecks = !!value;

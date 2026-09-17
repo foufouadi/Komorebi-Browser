@@ -66,7 +66,6 @@ import org.mozilla.fenix.helpers.MatcherHelper.itemWithDescription
 import org.mozilla.fenix.helpers.MatcherHelper.itemWithIndex
 import org.mozilla.fenix.helpers.MatcherHelper.itemWithResId
 import org.mozilla.fenix.helpers.MatcherHelper.itemWithResIdAndIndex
-import org.mozilla.fenix.helpers.MatcherHelper.itemWithResIdAndText
 import org.mozilla.fenix.helpers.MatcherHelper.itemWithResIdContainingText
 import org.mozilla.fenix.helpers.TestAssetHelper.waitingTime
 import org.mozilla.fenix.helpers.TestAssetHelper.waitingTimeLong
@@ -304,29 +303,26 @@ class HomeScreenRobot(private val composeTestRule: ComposeTestRule) {
         assertUIObjectExists(itemContainingText(getStringResource(R.string.top_sites_edit_dialog_url_error)))
     }
 
-    fun verifyJumpBackInSectionIsDisplayed() {
-        assertUIObjectExists(itemContainingText(getStringResource(R.string.recent_tabs_header)))
+    fun verifyContinueSectionIsDisplayed() {
+        assertUIObjectExists(itemContainingText(getStringResource(R.string.recent_tabs_header_2)))
     }
 
-    fun verifyJumpBackInSectionIsNotDisplayed() =
+    fun verifyContinueSectionIsNotDisplayed() =
         this@HomeScreenRobot.composeTestRule
-            .onNodeWithText(getStringResource(R.string.recent_tabs_header))
+            .onNodeWithText(getStringResource(R.string.recent_tabs_header_2))
             .assertIsNotDisplayed()
 
-    fun verifyJumpBackInItemTitle(testRule: ComposeTestRule, itemTitle: String) {
-        Log.i(TAG, "verifyJumpBackInItemTitle: Trying to verify jump back in item with title: $itemTitle")
+    fun verifyContinueItemTitle(testRule: ComposeTestRule, itemTitle: String) {
+        Log.i(TAG, "verifyContinueItemTitle: Trying to verify continue item with title: $itemTitle")
         testRule.onNodeWithTag("recent.tab.title", useUnmergedTree = true).assert(hasText(itemTitle))
-        Log.i(TAG, "verifyJumpBackInItemTitle: Verified jump back in item with title: $itemTitle")
+        Log.i(TAG, "verifyContinueItemTitle: Verified continue item with title: $itemTitle")
     }
 
-    fun verifyJumpBackInItemWithUrl(testRule: ComposeTestRule, itemUrl: String) {
-        Log.i(TAG, "verifyJumpBackInItemWithUrl: Trying to verify jump back in item with URL: $itemUrl")
+    fun verifyContinueItemWithUrl(testRule: ComposeTestRule, itemUrl: String) {
+        Log.i(TAG, "verifyContinueItemWithUrl: Trying to verify continue item with URL: $itemUrl")
         testRule.onNodeWithTag("recent.tab.url", useUnmergedTree = true).assert(hasText(itemUrl))
-        Log.i(TAG, "verifyJumpBackInItemWithUrl: Verified jump back in item with URL: $itemUrl")
+        Log.i(TAG, "verifyContinueItemWithUrl: Verified continue item with URL: $itemUrl")
     }
-
-    fun verifyJumpBackInShowAllButton() =
-        assertUIObjectExists(itemContainingText(getStringResource(R.string.recent_tabs_show_all)))
 
     fun verifyRecentlyVisitedSectionIsDisplayed(exists: Boolean) =
         assertUIObjectExists(itemContainingText(getStringResource(R.string.history_metadata_header_2)), exists = exists)
@@ -1140,26 +1136,6 @@ class HomeScreenRobot(private val composeTestRule: ComposeTestRule) {
             return HistoryRobot.Transition(composeTestRule)
         }
 
-        fun clickJumpBackInShowAllButton(interact: TabDrawerRobot.() -> Unit): TabDrawerRobot.Transition {
-            Log.i(
-                TAG,
-                "clickJumpBackInShowAllButton: Trying to click \"Show all\" button and wait for $waitingTime ms for a new window",
-            )
-            mDevice
-                .findObject(
-                    UiSelector()
-                        .descriptionContains(getStringResource(R.string.recent_tabs_show_all_content_description_2))
-                )
-                .clickAndWaitForNewWindow(waitingTime)
-            Log.i(
-                TAG,
-                "clickJumpBackInShowAllButton: Clicked \"Show all\" button and wait for $waitingTime ms for a new window",
-            )
-
-            TabDrawerRobot(composeTestRule).interact()
-            return TabDrawerRobot.Transition(composeTestRule)
-        }
-
         @OptIn(ExperimentalTestApi::class)
         fun clickPocketStoryItem(position: Int, interact: BrowserRobot.() -> Unit): BrowserRobot.Transition {
             Log.i(TAG, "clickPocketStoryItem: Trying to scroll to the \"$POCKET_STORIES\" section")
@@ -1233,22 +1209,12 @@ fun homeScreen(composeTestRule: ComposeTestRule, interact: HomeScreenRobot.() ->
     return HomeScreenRobot.Transition(composeTestRule)
 }
 
-private fun homeScreenList() = UiScrollable(UiSelector().resourceId(HOMEPAGE).scrollable(true)).setAsVerticalList()
-
 private fun saveTabsToCollectionButton(composeTestRule: ComposeTestRule) =
     composeTestRule.onNodeWithText(getStringResource(R.string.tabs_menu_save_to_collection1))
 
 private fun tabsCounterFromRedesignedToolbar() = itemWithResId("$packageName:id/counter_box")
 
 private fun tabsCounter() = mDevice.findObject(By.res("$packageName:id/counter_root"))
-
-private fun sponsoredShortcut(sponsoredShortcutTitle: String) =
-    onView(
-        allOf(
-            withId(R.id.top_site_title),
-            withText(sponsoredShortcutTitle),
-        )
-    )
 
 private fun homeScreen() = itemWithResId("$packageName:id/homepageView")
 
@@ -1269,9 +1235,6 @@ private fun homepageWordmarkText() = itemWithResId(HOMEPAGE_WORDMARK_TEXT)
 private fun navigationToolbar() = itemWithResId("$packageName:id/composable_toolbar")
 
 private fun menuButton() = itemWithDescription(getStringResource(R.string.content_description_menu))
-
-private fun tabCounter(numberOfOpenTabs: String) =
-    itemWithResIdAndText("$packageName:id/counter_text", numberOfOpenTabs)
 
 fun deleteFromHistory() =
     onView(

@@ -169,7 +169,12 @@ add_task(async function test_preset_updates_condition() {
 add_task(async function test_submit_and_delete_dispatch_detail() {
   await withTestPage(async browser => {
     await setProps(browser, {
-      agent: AGENT,
+      // A schedule the card seeds from, so the submitted one doesn't depend on
+      // the form's clock-based default
+      agent: {
+        ...AGENT,
+        schedule: { frequency: "daily", time: "09:00", weekday: 1 },
+      },
       mode: "display",
       expanded: true,
       editing: true,
@@ -219,6 +224,48 @@ add_task(async function test_submit_and_delete_dispatch_detail() {
         deleteDetail,
         { id: "agent-1" },
         "delete carries the agent id"
+      );
+    });
+  });
+});
+
+/**
+ * The watching/paused pill is its own element, so every surface that lists
+ * monitors shows the same one. The card only says which status to state.
+ */
+add_task(async function test_status_chip_states_the_status() {
+  await withTestPage(async browser => {
+    await setProps(browser, { agent: AGENT, mode: "display" });
+
+    await SpecialPowers.spawn(browser, [], async () => {
+      const el = content.document.getElementById("test-agent-monitor-item");
+      const chip = el.shadowRoot.querySelector("monitor-status-chip");
+      Assert.ok(chip, "The display card shows a status chip");
+      Assert.equal(chip.kind, "watching", "An active monitor is watching");
+
+      await ContentTaskUtils.waitForCondition(
+        () => chip.shadowRoot.querySelector("span")?.textContent,
+        "the chip is localized"
+      );
+      Assert.equal(
+        chip.shadowRoot.querySelector("span").textContent,
+        "Active",
+        "The chip states the status in words"
+      );
+
+      el.agent = { ...el.agent, status: { kind: "paused" } };
+      await el.updateComplete;
+      Assert.equal(chip.kind, "paused", "A paused monitor says so");
+
+      el.agent = { ...el.agent, status: null };
+      await el.updateComplete;
+      Assert.ok(
+        !chip.shadowRoot.querySelector("span"),
+        "A monitor with no status has no pill"
+      );
+      await ContentTaskUtils.waitForCondition(
+        () => content.getComputedStyle(chip).display === "none",
+        "an empty pill takes up no room"
       );
     });
   });
@@ -314,6 +361,92 @@ add_task(async function test_check_now_dispatches_detail() {
   });
 });
 
+add_task(async function test_watch_url_chip_dispatches_open() {
+  const WATCH_URL = "https://soundnest.com/audio/sony-wh-1000xm5";
+
+  await withTestPage(async browser => {
+    await setProps(browser, {
+      agent: { ...AGENT, watchUrls: [WATCH_URL] },
+      mode: "display",
+      expanded: true,
+    });
+
+    await SpecialPowers.spawn(browser, [WATCH_URL], async watchUrl => {
+      const el = content.document.getElementById("test-agent-monitor-item");
+      const shadow = el.shadowRoot;
+
+      let openDetail = null;
+      el.addEventListener(
+        "AIChatContent:OpenLink",
+        e => (openDetail = e.detail)
+      );
+
+      const chip = shadow.querySelector(".url-chips ai-website-chip");
+      Assert.ok(chip, "Watched pages render as website chips");
+      Assert.equal(
+        chip.label,
+        "soundnest.com",
+        "The chip is labelled with the hostname"
+      );
+      Assert.equal(
+        chip.href,
+        watchUrl,
+        "The chip is a real link to the full watched URL"
+      );
+
+      chip.shadowRoot.querySelector(".chip").click();
+      await el.updateComplete;
+
+      Assert.ok(openDetail, "Clicking a chip emits AIChatContent:OpenLink");
+      Assert.equal(
+        openDetail.url,
+        watchUrl,
+        "OpenLink carries the full watched URL"
+      );
+      Assert.ok(
+        openDetail.preferSwitchToTab,
+        "A plain click prefers an already open tab"
+      );
+    });
+  });
+});
+
+add_task(async function test_watch_url_chip_shows_resolved_title() {
+  const WITH_TITLE = "https://soundnest.com/audio/sony-wh-1000xm5";
+  const NO_TITLE = "https://example.com/no-title-here";
+
+  await withTestPage(async browser => {
+    await setProps(browser, {
+      agent: {
+        ...AGENT,
+        watchUrls: [WITH_TITLE, NO_TITLE],
+        watchUrlTitles: { [WITH_TITLE]: "Sony WH-1000XM5 Headphones" },
+      },
+      mode: "display",
+      expanded: true,
+    });
+
+    await SpecialPowers.spawn(browser, [], async () => {
+      const el = content.document.getElementById("test-agent-monitor-item");
+      const chips = el.shadowRoot.querySelectorAll(
+        ".url-chips ai-website-chip"
+      );
+
+      Assert.equal(chips.length, 2, "Both watched pages render as chips");
+      Assert.equal(
+        chips[0].label,
+        "Sony WH-1000XM5 Headphones",
+        "A chip with a resolved title is labelled with the title"
+      );
+      Assert.equal(
+        chips[1].label,
+        "example.com",
+        "A chip with no resolved title falls back to the hostname"
+      );
+    });
+  });
+});
+
 add_task(async function test_edit_mode_shows_pages_and_scheduler() {
   await withTestPage(async browser => {
     await setProps(browser, {
@@ -328,7 +461,7 @@ add_task(async function test_edit_mode_shows_pages_and_scheduler() {
       const shadow = el.shadowRoot;
 
       Assert.equal(
-        shadow.querySelectorAll(".page-pill").length,
+        shadow.querySelectorAll(".page-pills-row ai-website-chip").length,
         1,
         "Edit mode seeds a pill for the monitor's existing URL"
       );
@@ -429,6 +562,119 @@ add_task(async function test_create_mode_renders_form() {
   });
 });
 
+/**
+ * A self-contained card frames and titles itself. A host that already does both
+ * - the Tasks panel, which has its own header - sets selfContained to false and
+ * gets just the fields.
+ */
+add_task(async function test_self_contained_frame_and_title() {
+  await withTestPage(async browser => {
+    await setProps(browser, { agent: AGENT, mode: "create" });
+
+    await SpecialPowers.spawn(browser, [], async () => {
+      const el = content.document.getElementById("test-agent-monitor-item");
+      const shadow = el.shadowRoot;
+
+      Assert.ok(
+        el.selfContained,
+        "Cards are self-contained unless a host says otherwise"
+      );
+      Assert.ok(
+        el.hasAttribute("self-contained"),
+        "selfContained is reflected so the stylesheet can drop the frame"
+      );
+      Assert.ok(
+        shadow.querySelector(".title-container"),
+        "A self-contained create card states its own title"
+      );
+
+      el.selfContained = false;
+      await el.updateComplete;
+
+      Assert.ok(
+        !el.hasAttribute("self-contained"),
+        "Turning it off removes the attribute"
+      );
+      Assert.ok(
+        !shadow.querySelector(".title-container"),
+        "A hosted create card leaves the title to its host"
+      );
+      Assert.ok(
+        shadow.querySelector("moz-textarea.monitor-condition-input"),
+        "A hosted create card still shows the fields"
+      );
+
+      const card = shadow.querySelector(".monitor-card");
+      const style = content.getComputedStyle(card);
+      Assert.equal(
+        style.borderTopWidth,
+        "0px",
+        "A hosted card does not draw its own border"
+      );
+      Assert.notEqual(
+        style.paddingTop,
+        "0px",
+        "A hosted card keeps its padding so fields clear the host's edge"
+      );
+    });
+  });
+});
+
+/**
+ * moz-select swaps its native <select> for a popover-based list as soon as an
+ * option has an icon, and a popover renders in the document's top layer - the
+ * wrong place when the host is a XUL panel, which is its own widget. A hosted
+ * card therefore drops the option icons to keep the native dropdown.
+ */
+add_task(async function test_hosted_card_keeps_native_select() {
+  await withTestPage(async browser => {
+    await setProps(browser, { agent: AGENT, mode: "create" });
+
+    await SpecialPowers.spawn(browser, [], async () => {
+      const el = content.document.getElementById("test-agent-monitor-item");
+      const selects = () => [...el.shadowRoot.querySelectorAll("moz-select")];
+      const optionsHaveIcons = () =>
+        selects().every(select =>
+          [...select.querySelectorAll("moz-option")].every(option =>
+            option.hasAttribute("iconsrc")
+          )
+        );
+
+      await Promise.all(selects().map(select => select.updateComplete));
+      Assert.ok(selects().length, "The create form has selects to check");
+      Assert.ok(
+        optionsHaveIcons(),
+        "A self-contained card keeps its option icons"
+      );
+      Assert.ok(
+        selects().every(select => select.usePanelList),
+        "Icons mean moz-select renders its popover list"
+      );
+
+      el.selfContained = false;
+      await el.updateComplete;
+      await Promise.all(selects().map(select => select.updateComplete));
+
+      Assert.ok(
+        selects().every(select =>
+          [...select.querySelectorAll("moz-option")].every(
+            option => !option.hasAttribute("iconsrc")
+          )
+        ),
+        "A hosted card drops the option icons"
+      );
+      Assert.ok(
+        selects().every(select => !select.usePanelList),
+        "Without icons moz-select falls back to the native dropdown"
+      );
+      Assert.ok(
+        selects().every(select => select.shadowRoot.querySelector("select")),
+        "A hosted card renders real native selects"
+      );
+    });
+  });
+});
+
 add_task(async function test_create_mode_empty_state_inputs() {
   await withTestPage(async browser => {
     // when no monitorName or value is available the card should offer editable inputs instead
@@ -470,6 +716,37 @@ add_task(async function test_create_mode_empty_state_inputs() {
         "Submit is blocked while the form is empty"
       );
 
+      const errorIds = [...shadow.querySelectorAll(".error-message")]
+        .map(node => node.getAttribute("data-l10n-id"))
+        .sort();
+      Assert.deepEqual(
+        errorIds,
+        [
+          "ai-tasks-alert-error-condition-required",
+          "ai-tasks-alert-error-name-required",
+          "ai-tasks-alert-error-no-pages",
+        ],
+        "Empty submit surfaces name, condition and pages errors"
+      );
+      Assert.ok(nameInput.hasAttribute("invalid"), "Name input is invalid");
+      Assert.ok(
+        shadow
+          .querySelector("moz-textarea.monitor-condition-input")
+          .hasAttribute("invalid"),
+        "Condition input is invalid"
+      );
+      Assert.ok(
+        shadow
+          .querySelector("moz-input-url.page-url-input")
+          .hasAttribute("invalid"),
+        "URL input is invalid"
+      );
+      Assert.equal(
+        shadow.activeElement,
+        nameInput,
+        "Focus moves to the first invalid field"
+      );
+
       setValue(nameInput, "Sony Headphone");
       setValue(
         shadow.querySelector("moz-textarea.monitor-condition-input"),
@@ -484,7 +761,7 @@ add_task(async function test_create_mode_empty_state_inputs() {
       );
       await el.updateComplete;
       Assert.equal(
-        shadow.querySelectorAll(".page-pill").length,
+        shadow.querySelectorAll(".page-pills-row ai-website-chip").length,
         1,
         "Adding a URL shows a pill"
       );
@@ -507,6 +784,50 @@ add_task(async function test_create_mode_empty_state_inputs() {
         ["https://example.com/product"],
         "submit carries the added page URL"
       );
+    });
+  });
+});
+
+add_task(async function test_create_mode_defaults_time_to_next_slot() {
+  await withTestPage(async browser => {
+    await SpecialPowers.spawn(browser, [], async () => {
+      const SLOTS_PER_DAY = 48;
+      const slotValue = date => {
+        const slot =
+          Math.ceil((date.getHours() * 60 + date.getMinutes()) / 30) %
+          SLOTS_PER_DAY;
+        const hour = Math.floor(slot / 2);
+        return `${String(hour).padStart(2, "0")}:${slot % 2 ? "30" : "00"}`;
+      };
+
+      // The card computes its default in its constructor, so bracket that call
+      // with timestamps: the only acceptable values are the slots those two
+      // instants map to, which collapse to one unless a boundary was crossed.
+      const before = new Date();
+      const el = content.document.createElement("agent-monitor-item");
+      const after = new Date();
+
+      const accepted = [...new Set([slotValue(before), slotValue(after)])];
+
+      el.mode = "create";
+      content.document.body.append(el);
+      await el.updateComplete;
+
+      const timeSelect = el.shadowRoot.querySelectorAll(
+        "moz-select.form-select"
+      )[1];
+      Assert.ok(
+        accepted.includes(timeSelect.value),
+        `Time defaults to the upcoming half-hour slot, got ${timeSelect.value}, expected one of ${accepted}`
+      );
+      Assert.ok(
+        [...el.shadowRoot.querySelectorAll("moz-option")].some(
+          opt => opt.value === timeSelect.value
+        ),
+        "The default is a value the time dropdown actually offers"
+      );
+
+      el.remove();
     });
   });
 });
@@ -776,7 +1097,7 @@ add_task(async function test_draft_restores_over_agent_values() {
         "Condition is restored from the draft, not the agent"
       );
       Assert.equal(
-        shadow.querySelectorAll(".page-pill").length,
+        shadow.querySelectorAll(".page-pills-row ai-website-chip").length,
         2,
         "Added URLs are restored from the draft, replacing the seeded one"
       );
@@ -823,7 +1144,7 @@ add_task(async function test_add_and_remove_page_pills() {
       const shadow = el.shadowRoot;
 
       Assert.equal(
-        shadow.querySelectorAll(".page-pill").length,
+        shadow.querySelectorAll(".page-pills-row ai-website-chip").length,
         0,
         "Starts with no page pills when nothing is seeded"
       );
@@ -834,21 +1155,19 @@ add_task(async function test_add_and_remove_page_pills() {
       shadow.querySelector("moz-button.add-page-btn").click();
       await el.updateComplete;
       Assert.equal(
-        shadow.querySelectorAll(".page-pill").length,
+        shadow.querySelectorAll(".page-pills-row ai-website-chip").length,
         1,
         "Add button adds the typed URL as a pill"
       );
 
-      const removeButton = shadow.querySelector(".page-pill .page-pill-remove");
-
-      await ContentTaskUtils.waitForCondition(() => {
-        const rect = removeButton.getBoundingClientRect();
-        return rect.width > 0 && rect.height > 0;
-      }, "Remove button is laid out before clicking");
-      removeButton.click();
+      const chip = shadow.querySelector(".page-pills-row ai-website-chip");
+      await chip.updateComplete;
+      // The chip's remove button only becomes visible on hover, which a test
+      // can't trigger reliably, so click it directly.
+      chip.shadowRoot.querySelector(".chip-remove").click();
       await el.updateComplete;
       Assert.equal(
-        shadow.querySelectorAll(".page-pill").length,
+        shadow.querySelectorAll(".page-pills-row ai-website-chip").length,
         0,
         "Pill remove button removes the URL"
       );
@@ -872,21 +1191,302 @@ add_task(async function test_invalid_url_shows_error() {
       urlInput.dispatchEvent(new content.Event("input", { bubbles: true }));
       shadow.querySelector("moz-button.add-page-btn").click();
 
-      // Wait for the async validation to complete and the error message to appear
       await el.updateComplete;
-      await ContentTaskUtils.waitForCondition(
-        () => shadow.querySelector(".error-message"),
-        "Waiting for error message to appear"
+      Assert.equal(
+        shadow.querySelector(".error-message")?.getAttribute("data-l10n-id"),
+        "ai-tasks-alert-error-invalid-url",
+        "A value that is not a URL shows the invalid-URL error"
       );
+      Assert.equal(
+        shadow.querySelectorAll(".page-pills-row ai-website-chip").length,
+        0,
+        "An invalid URL is not added as a pill"
+      );
+    });
+  });
+});
 
-      Assert.ok(
-        shadow.querySelector(".error-message"),
-        "An invalid URL surfaces an error message"
+add_task(async function test_url_missing_scheme_shows_error() {
+  await withTestPage(async browser => {
+    await setProps(browser, {
+      agent: { conditionPresets: [] },
+      mode: "create",
+    });
+
+    await SpecialPowers.spawn(browser, [], async () => {
+      const el = content.document.getElementById("test-agent-monitor-item");
+      const shadow = el.shadowRoot;
+
+      const urlInput = shadow.querySelector("moz-input-url.page-url-input");
+      urlInput.value = "example.com";
+      urlInput.dispatchEvent(new content.Event("input", { bubbles: true }));
+      shadow.querySelector("moz-button.add-page-btn").click();
+
+      await el.updateComplete;
+      Assert.equal(
+        shadow.querySelector(".error-message")?.getAttribute("data-l10n-id"),
+        "ai-tasks-alert-error-url-scheme",
+        "An address missing its scheme prompts to add https:// or http://"
       );
       Assert.equal(
         shadow.querySelectorAll(".page-pill").length,
         0,
-        "An invalid URL is not added as a pill"
+        "An address missing its scheme is not added as a pill"
+      );
+    });
+  });
+});
+
+add_task(async function test_submit_handles_uncommitted_url() {
+  await withTestPage(async browser => {
+    await setProps(browser, {
+      agent: { conditionPresets: [] },
+      mode: "create",
+    });
+
+    await SpecialPowers.spawn(browser, [], async () => {
+      const el = content.document.getElementById("test-agent-monitor-item");
+      const shadow = el.shadowRoot;
+
+      const setValue = (input, value) => {
+        input.value = value;
+        input.dispatchEvent(new content.Event("input", { bubbles: true }));
+        input.dispatchEvent(new content.Event("change", { bubbles: true }));
+      };
+
+      let submitDetail = null;
+      el.addEventListener(
+        "agent-monitor-item:submit",
+        e => (submitDetail = e.detail)
+      );
+
+      setValue(
+        shadow.querySelector("moz-input-text.monitor-name-input"),
+        "Sony Headphone"
+      );
+      setValue(
+        shadow.querySelector("moz-textarea.monitor-condition-input"),
+        "the price drops"
+      );
+
+      const urlInput = shadow.querySelector("moz-input-url.page-url-input");
+      const addButton = shadow.querySelector("moz-button.add-page-btn");
+      const startButton = shadow.querySelector(
+        'moz-button[data-l10n-id="ai-tasks-alert-create-button"]'
+      );
+
+      // A valid page is added, then invalid text is typed but never committed
+      // with +, so there's no visible error yet.
+      setValue(urlInput, "https://example.com/product");
+      addButton.click();
+      await el.updateComplete;
+      setValue(urlInput, "not a url");
+
+      // Submit must not silently drop the uncommitted input
+      startButton.click();
+      await el.updateComplete;
+
+      Assert.equal(
+        submitDetail,
+        null,
+        "An uncommitted invalid url blocks submit even with a valid page added"
+      );
+      Assert.equal(
+        shadow.querySelector(".error-message")?.getAttribute("data-l10n-id"),
+        "ai-tasks-alert-error-invalid-url",
+        "Submit surfaces the uncommitted url's error"
+      );
+      Assert.ok(
+        urlInput.hasAttribute("invalid"),
+        "The url input is marked invalid"
+      );
+      Assert.equal(
+        shadow.activeElement,
+        urlInput,
+        "Focus moves to the url input"
+      );
+
+      // Correcting the input to a valid url lets submit commit it
+      setValue(urlInput, "https://example.com/second");
+      startButton.click();
+      await el.updateComplete;
+
+      Assert.deepEqual(
+        submitDetail?.watchUrls,
+        ["https://example.com/product", "https://example.com/second"],
+        "A valid uncommitted url is committed and carried on submit"
+      );
+    });
+  });
+});
+
+add_task(async function test_max_watch_urls_from_host() {
+  await withTestPage(async browser => {
+    // The host owns the cap: about:smartwindowtasks passes the actor's value
+    await setProps(browser, {
+      agent: { conditionPresets: [] },
+      mode: "create",
+      maxWatchUrls: 1,
+    });
+
+    await SpecialPowers.spawn(browser, [], async () => {
+      const el = content.document.getElementById("test-agent-monitor-item");
+      const shadow = el.shadowRoot;
+
+      const addUrl = async url => {
+        const urlInput = shadow.querySelector("moz-input-url.page-url-input");
+        urlInput.value = url;
+        urlInput.dispatchEvent(new content.Event("input", { bubbles: true }));
+        shadow.querySelector("moz-button.add-page-btn").click();
+        await el.updateComplete;
+      };
+
+      await addUrl("https://example.com/a");
+      Assert.equal(
+        shadow.querySelectorAll(".page-pills-row ai-website-chip").length,
+        1,
+        "The first URL is added"
+      );
+
+      await addUrl("https://example.com/b");
+      Assert.equal(
+        shadow.querySelector(".error-message")?.getAttribute("data-l10n-id"),
+        "ai-tasks-alert-error-max-urls",
+        "Adding past the cap shows the max-pages error"
+      );
+      Assert.equal(
+        shadow.querySelectorAll(".page-pills-row ai-website-chip").length,
+        1,
+        "A URL past the host's cap is not added"
+      );
+      // Assert on substitution rather than copy: the cap has to reach Fluent
+      // under the name the string expects, or the message never resolves.
+      // data-l10n-id fills text asynchronously, so wait for the cap to appear.
+      await ContentTaskUtils.waitForCondition(
+        () => shadow.querySelector(".error-message")?.textContent.includes("1"),
+        "Waiting for the max URLs error to interpolate the cap"
+      );
+      const errorText = shadow
+        .querySelector(".error-message")
+        .textContent.trim();
+      Assert.ok(
+        errorText.includes("1") && !errorText.includes("{"),
+        `The error message interpolates the cap: ${errorText}`
+      );
+    });
+  });
+});
+
+add_task(async function test_history_result_states() {
+  const checkedAt = "2026-06-23T13:00:00.000Z";
+  const history = [
+    {
+      id: "h-error",
+      checkedAt,
+      status: "error",
+      resultExplanation: "TypeError: raw internal detail",
+      conditionMet: false,
+      errorCode: "rate_limit",
+    },
+    {
+      id: "h-met",
+      checkedAt,
+      status: "success",
+      resultExplanation: "The price dropped to $265.",
+      conditionMet: true,
+    },
+    {
+      id: "h-not-met",
+      checkedAt,
+      status: "success",
+      resultExplanation: "The price is still $299.",
+      conditionMet: false,
+    },
+  ];
+
+  await withTestPage(async browser => {
+    await setProps(browser, {
+      agent: { ...AGENT, history },
+      mode: "display",
+      expanded: true,
+      showLastResult: true,
+    });
+
+    await SpecialPowers.spawn(browser, [], async () => {
+      const el = content.document.getElementById("test-agent-monitor-item");
+      const shadow = el.shadowRoot;
+      const badges = shadow.querySelectorAll(".history-item .condition-badge");
+
+      Assert.deepEqual(
+        Array.from(badges, badge => badge.getAttribute("data-l10n-id")),
+        [
+          "ai-tasks-alert-condition-could-not-check",
+          "ai-tasks-alert-condition-met",
+          "ai-tasks-alert-condition-not-met",
+        ],
+        "A failed run reads Couldn't check, alongside the two success states"
+      );
+
+      const rows = shadow.querySelectorAll(".history-item");
+      Assert.equal(
+        rows[0].lastElementChild.getAttribute("data-l10n-id"),
+        "ai-tasks-alert-history-error-rate-limit",
+        "The note explains the failure the error code names"
+      );
+      Assert.ok(
+        !rows[0].textContent.includes("TypeError"),
+        "The raw error message is not shown to the user"
+      );
+      Assert.equal(
+        rows[1].lastElementChild.textContent.trim(),
+        "The price dropped to $265.",
+        "A successful run still shows the model's explanation"
+      );
+
+      Assert.equal(
+        shadow
+          .querySelector(".monitor-card-head-right .last-result")
+          .getAttribute("data-l10n-id"),
+        "ai-tasks-alert-last-result-could-not-check",
+        "The header chip reports the most recent run's failure too"
+      );
+    });
+  });
+});
+
+add_task(async function test_history_error_without_a_code() {
+  // Entries stored before error codes existed still have to render.
+  await withTestPage(async browser => {
+    await setProps(browser, {
+      agent: {
+        ...AGENT,
+        history: [
+          {
+            id: "h-legacy",
+            checkedAt: "2026-06-23T13:00:00.000Z",
+            status: "error",
+            resultExplanation: "Something went wrong",
+            conditionMet: false,
+          },
+        ],
+      },
+      mode: "display",
+      expanded: true,
+    });
+
+    await SpecialPowers.spawn(browser, [], async () => {
+      const el = content.document.getElementById("test-agent-monitor-item");
+      const row = el.shadowRoot.querySelector(".history-item");
+
+      Assert.equal(
+        row.querySelector(".condition-badge").getAttribute("data-l10n-id"),
+        "ai-tasks-alert-condition-could-not-check",
+        "An entry with no error code still reads Couldn't check"
+      );
+      Assert.equal(
+        row.lastElementChild.getAttribute("data-l10n-id"),
+        "ai-tasks-alert-history-error-unknown",
+        "It falls back to the generic explanation"
       );
     });
   });

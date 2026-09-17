@@ -94,6 +94,33 @@ sequenceDiagram
     Bob-->>John: Jolly good!
 ```
 
+## Size and alignment
+
+Diagrams render at their intrinsic size, centered horizontally within the page.
+Their caption is centered automatically as well, so the `:align:` option isn't
+needed.
+
+A diagram wider than the page scrolls horizontally within its container, and
+fades at the edges to indicate it overflows.
+
+## Colors
+
+A diagram follows the page's color scheme. A node you do not style takes the
+theme's default fill, pale in light mode and near-black in dark mode, so prose
+cannot identify a node by that color.
+
+A node you style with an explicit `fill:` keeps that color in both schemes.
+Give it an explicit `color:` too, or its label takes the theme's own label
+color and comes out grey on a light fill in dark mode:
+
+```
+classDef offstrip fill:#fef3c7,stroke:#92400e,color:#1a1a1a;
+```
+
+Do not let color be the only thing that identifies a node in prose. Pair it
+with the shape or the label, since color alone does not reach a reader who
+cannot tell the colors apart.
+
 See [Mermaid's official](https://mermaid-js.github.io/mermaid/#/) docs for
 more details on the syntax, and use the
 [Mermaid Live Editor](https://mermaidjs.github.io/mermaid-live-editor/) to

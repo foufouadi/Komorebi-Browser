@@ -10,6 +10,12 @@ XPCOMUtils.defineLazyPreferenceGetter(
   "shortcutsDelay",
   "browser.ml.chat.shortcuts.longPress"
 );
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "shortcutsDebounce",
+  "browser.ml.chat.shortcuts.debounce",
+  200
+);
 
 ChromeUtils.defineESModuleGetters(lazy, {
   ReaderMode: "moz-src:///toolkit/components/reader/ReaderMode.sys.mjs",
@@ -25,8 +31,8 @@ export class GenAIChild extends JSWindowActorChild {
   mouseUpTimeout = null;
   downSelection = null;
   downTimeStamp = 0;
-  debounceDelay = 200;
   pendingHide = false;
+  #compositionActive = false;
 
   /**
    * A flag that gets set when this actor is destroyed.
@@ -35,6 +41,8 @@ export class GenAIChild extends JSWindowActorChild {
 
   registerHideEvents() {
     this.document.addEventListener("selectionchange", this);
+    this.document.addEventListener("compositionstart", this);
+    this.document.addEventListener("compositionend", this);
     HIDE_EVENTS.forEach(ev =>
       this.contentWindow.addEventListener(ev, this, true)
     );
@@ -43,10 +51,13 @@ export class GenAIChild extends JSWindowActorChild {
 
   removeHideEvents() {
     this.document.removeEventListener("selectionchange", this);
+    this.document.removeEventListener("compositionstart", this);
+    this.document.removeEventListener("compositionend", this);
     HIDE_EVENTS.forEach(ev =>
       this.contentWindow?.removeEventListener(ev, this, true)
     );
     this.pendingHide = false;
+    this.#compositionActive = false;
   }
 
   handleEvent(event) {
@@ -109,15 +120,32 @@ export class GenAIChild extends JSWindowActorChild {
 
           // Clear the timeout reference after execution
           this.mouseUpTimeout = null;
-        }, this.debounceDelay);
+        }, lazy.shortcutsDebounce);
 
         break;
       }
+      case "compositionstart":
+        this.#compositionActive = true;
+        break;
+      case "compositionend":
+        this.#compositionActive = false;
+        break;
+      case "selectionchange":
+        if (this.#compositionActive) {
+          // Visually hide without calling sendHide()
+          // sendHide() triggers hidePopup() which issues a focus change event
+          // that breaking any active IME composition
+          if (this.pendingHide) {
+            this.sendAsyncMessage("GenAI:HideShortcuts", "selectionchange-ime");
+            this.removeHideEvents();
+          }
+        } else {
+          sendHide();
+        }
+        break;
       case "pagehide":
       case "resize":
       case "scroll":
-      case "selectionchange":
-        // Hide if selection might have shifted away from shortcuts
         sendHide();
         break;
     }
@@ -130,18 +158,23 @@ export class GenAIChild extends JSWindowActorChild {
    */
   getSelectionInfo() {
     // Handle regular selection outside of inputs
-    const { activeElement } = this.document;
-    const selection = this.contentWindow.getSelection()?.toString().trim();
+    const contentSelection = this.contentWindow.getSelection();
+    const selection = contentSelection?.toString().trim();
     if (selection) {
-      return {
-        inputType: activeElement.closest("[contenteditable]")
-          ? "contenteditable"
-          : "",
-        selection,
-      };
+      const anchor = contentSelection.anchorNode;
+      const anchorElement =
+        anchor.nodeType === Node.ELEMENT_NODE ? anchor : anchor.parentElement;
+      let inputType = "";
+      let host;
+      if (anchorElement?.closest("[contenteditable]")) {
+        inputType = "contenteditable";
+        host = anchorElement.getRootNode().host?.localName;
+      }
+      return { inputType, host, selection };
     }
 
     // Selection within input elements
+    const { activeElement } = this.document;
     const { selectionStart, value } = activeElement;
     if (selectionStart != null && value != null) {
       return {

@@ -22,7 +22,7 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   ASRouter: "resource:///modules/asrouter/ASRouter.sys.mjs",
   ShortcutUtils: "resource://gre/modules/ShortcutUtils.sys.mjs",
-  GenAI: "resource:///modules/GenAI.sys.mjs",
+  GenAI: "moz-src:///browser/components/genai/GenAI.sys.mjs",
 });
 
 /**
@@ -200,7 +200,15 @@ export default class SidebarMain extends MozLitElement {
             if (!newCopyButton) {
               continue;
             }
-            panelButtonGroup.appendChild(newCopyButton);
+            // The Customize button stays last in the panel.
+            const customizeCopy = panelButtonGroup.querySelector(
+              '[view="viewCustomizeSidebar"]'
+            );
+            if (customizeCopy && view !== "viewCustomizeSidebar") {
+              panelButtonGroup.insertBefore(newCopyButton, customizeCopy);
+            } else {
+              panelButtonGroup.appendChild(newCopyButton);
+            }
 
             // Hide original button
             entry.target.style.visibility = "hidden";
@@ -506,6 +514,21 @@ export default class SidebarMain extends MozLitElement {
     return window.SidebarController.toolsAndExtensions;
   }
 
+  getLauncherActions() {
+    const actions = [...this.getToolsAndExtensions().values()];
+    if (!window.SidebarController.sidebarVerticalTabsEnabled) {
+      return actions;
+    }
+    const settingsFirst =
+      this.expanded && !window.SidebarController._positionStart;
+    actions.splice(
+      settingsFirst ? 0 : actions.length,
+      0,
+      ...this.bottomActions
+    );
+    return actions;
+  }
+
   setCustomize() {
     const view = "viewCustomizeSidebar";
     const customizeSidebar = window.SidebarController.sidebars.get(view);
@@ -682,16 +705,17 @@ export default class SidebarMain extends MozLitElement {
     // observing. In horizontal tabs mode we also clear the overflow panel
     // copies that were populated while in vertical tabs.
     this.shouldShowOverflowButton = isExpandOnHover ? !this.expanded : false;
-    const overflowList = isExpandOnHover
-      ? null
-      : document.getElementById("tools-overflow-list");
     for (const buttonEl of this.allButtons) {
       if (buttonEl.style.visibility === "hidden") {
         buttonEl.style.visibility = "visible";
       }
-      overflowList
-        ?.querySelector(`[view='${buttonEl.getAttribute("view")}']`)
-        ?.remove();
+    }
+    if (!isExpandOnHover) {
+      // The copies only mirror the buttons the observer hid, and nothing is
+      // hidden here, so all of them are stale. Matching them against the
+      // remaining buttons would keep the copy of a tool that was removed while
+      // overflowing.
+      document.getElementById("tools-overflow-list").replaceChildren();
     }
     this._toolsIntersectionObserver.disconnect();
     this._toolsResizeObserver.disconnect();
@@ -878,26 +902,10 @@ export default class SidebarMain extends MozLitElement {
             orientation=${this.isToolsOverflowing() ? "horizontal" : "vertical"}
             overflowing=${ifDefined(this.shouldShowOverflowButton)}
           >
-            ${when(!this.isToolsOverflowing(), () =>
-              repeat(
-                this.getToolsAndExtensions().values(),
-                action => action.view,
-                action => this.entrypointTemplate(action)
-              )
-            )}
-            ${when(window.SidebarController.sidebarVerticalTabsEnabled, () =>
-              repeat(
-                this.bottomActions,
-                action => action.view,
-                action => this.entrypointTemplate(action)
-              )
-            )}
-            ${when(this.isToolsOverflowing(), () =>
-              repeat(
-                this.getToolsAndExtensions().values(),
-                action => action.view,
-                action => this.entrypointTemplate(action)
-              )
+            ${repeat(
+              this.getLauncherActions(),
+              action => action.view,
+              action => this.entrypointTemplate(action)
             )}
           </button-group>
           ${when(

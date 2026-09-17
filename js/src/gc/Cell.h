@@ -1000,6 +1000,11 @@ class MarkingLock : public LightLock {
   MarkingLock() : LightLock(js::mutexid::GCMarkingLock) {}
 };
 
+class AtomRefLock : public LightLock {
+ public:
+  AtomRefLock() : LightLock(js::mutexid::GCAtomRefLock) {}
+};
+
 // A lock used to synchronize access to some data structures during concurrent
 // marking. This is only intended for use where lock-free approaches are
 // infeasible.
@@ -1011,7 +1016,7 @@ class MarkingLock : public LightLock {
 // This is a no op outside concurrent marking builds.
 class MOZ_RAII AutoMarkingLock {
 #ifdef JS_GC_CONCURRENT_MARKING
-  MarkingLock* lock = nullptr;
+  LightLock* lock = nullptr;
   JSRuntime* runtime = nullptr;
 #endif
 
@@ -1020,7 +1025,7 @@ class MOZ_RAII AutoMarkingLock {
 
  public:
   // Take the lock if concurrent marking is currently happening in zone |zone|.
-  AutoMarkingLock(JS::Zone* zone, MarkingLock& markingLock) {
+  AutoMarkingLock(JS::Zone* zone, LightLock& markingLock) {
 #ifdef JS_GC_CONCURRENT_MARKING
     auto* shadowZone = JS::shadow::Zone::from(zone);
     if (shadowZone->needsMarkingBarrier(JS::shadow::Zone::Concurrent)) {
@@ -1032,7 +1037,10 @@ class MOZ_RAII AutoMarkingLock {
   }
 
   // Take the lock if |trc| is a concurrent marking tracer.
-  inline AutoMarkingLock(JSTracer* trc, MarkingLock& markingLock);
+  inline AutoMarkingLock(JSTracer* trc, LightLock& markingLock);
+
+  // Take the lock if any concurrent marking is currently happening.
+  inline AutoMarkingLock(JSRuntime* rt, LightLock& markingLock);
 
   ~AutoMarkingLock() {
 #ifdef JS_GC_CONCURRENT_MARKING

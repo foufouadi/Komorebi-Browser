@@ -300,7 +300,9 @@ nsresult nsHttpTransaction::Init(
   if (NS_FAILED(rv)) return rv;
 
   mHasRequestBody = !!requestBody;
-  if (mHasRequestBody && !requestContentLength) {
+  // A streaming upload body has no length known up front, so a zero length
+  // does not mean there is nothing to send.
+  if (mHasRequestBody && !requestContentLength && !mRequestBodyIsStreaming) {
     mHasRequestBody = false;
   }
 
@@ -771,8 +773,9 @@ void nsHttpTransaction::OnTransportStatus(nsITransport* transport,
     }
 
     // when uploading, we include the request headers in the progress
-    // notifications.
-    progressMax = mRequestSize;
+    // notifications. A streaming body has no length, so mRequestSize only
+    // covers the headers and the total has to be reported as unknown.
+    progressMax = mRequestBodyIsStreaming ? -1 : mRequestSize;
   } else {
     progress = 0;
     progressMax = 0;
@@ -822,6 +825,18 @@ nsresult nsHttpTransaction::ReadSegments(nsAHttpSegmentReader* reader,
   if (mTransactionDone) {
     *countRead = 0;
     return mStatus;
+  }
+
+  // A length-less body cannot be framed on HTTP/1.x. Fail here, before any of
+  // it is written, rather than after the whole upload has gone out.
+  if (mRequestBodyIsStreaming && mConnection &&
+      mConnection->Version() < HttpVersion::v2_0) {
+    LOG(
+        ("nsHttpTransaction::ReadSegments %p streaming upload needs HTTP/2 or "
+         "HTTP/3, got version %u\n",
+         this, static_cast<uint32_t>(mConnection->Version())));
+    *countRead = 0;
+    return NS_ERROR_NET_BODY_NOT_REPLAYABLE;
   }
 
   if (!m0RTTInProgress) {
@@ -1963,6 +1978,20 @@ void nsHttpTransaction::SetRestartReason(TRANSACTION_RESTART_REASON aReason) {
 nsresult nsHttpTransaction::Restart() {
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
 
+  // The pipe backing a streaming body cannot be rewound, so replaying it
+  // after anything has been read would re-send from mid-request.
+  if (mRequestBodyIsStreaming) {
+    int64_t position = 0;
+    nsCOMPtr<nsITellableStream> tellable = do_QueryInterface(mRequestStream);
+    if (!tellable || NS_FAILED(tellable->Tell(&position)) || position != 0) {
+      LOG(
+          ("nsHttpTransaction::Restart %p streaming request body already "
+           "started, cannot replay it; failing transaction\n",
+           this));
+      return NS_ERROR_NET_RESET;
+    }
+  }
+
   // limit the number of restart attempts - bug 92224
   if (++mRestartCount >= gHttpHandler->MaxRequestAttempts()) {
     LOG(("reached max request attempts, failing transaction @%p\n", this));
@@ -2035,6 +2064,29 @@ nsresult nsHttpTransaction::Restart() {
   mResumptionAttempted = false;
   mRestarted = true;
 
+  // These must describe the serving attempt; Activate only bootstraps the
+  // first.
+  TimingStruct prevTimings;
+  {
+    MutexAutoLock lock(mLock);
+    prevTimings = mTimings;
+    mTimings = TimingStruct();
+    mTimings.transactionPending = prevTimings.transactionPending;
+  }
+
+  // Apply0RTTTimingOverride would rewrite connectEnd from a stale stamp.
+  const TimeStamp prevEarlyDataSent = mEarlyDataSentTime;
+  mEarlyDataSentTime = TimeStamp();
+
+  // Only this one, which would send OnTransportStatus down
+  // Apply0RTTTimingOverride and past the clamp of requestStart to connectEnd.
+  // The rest still describe what HandleContentStart reports on the retried
+  // response.
+  const auto prevEarlyData = mEarlyDataDisposition;
+  if (prevEarlyData == EARLY_ACCEPTED) {
+    mEarlyDataDisposition = EARLY_NONE;
+  }
+
   // If we weren't trying to do 'proper' ECH, disable ECH GREASE when retrying.
   if (mConnInfo->GetEchConfig().IsEmpty() &&
       StaticPrefs::security_tls_ech_disable_grease_on_fallback()) {
@@ -2052,7 +2104,17 @@ nsresult nsHttpTransaction::Restart() {
     gHttpHandler->ConnMgr()->ResetIPFamilyPreference(mConnInfo);
   }
 
-  return gHttpHandler->InitiateTransaction(this, mPriority);
+  nsresult rv = gHttpHandler->InitiateTransaction(this, mPriority);
+  if (NS_SUCCEEDED(rv)) {
+    return rv;
+  }
+
+  // No attempt will follow, so the failed one's record is all there is.
+  mEarlyDataSentTime = prevEarlyDataSent;
+  mEarlyDataDisposition = prevEarlyData;
+  MutexAutoLock lock(mLock);
+  mTimings = prevTimings;
+  return rv;
 }
 
 bool nsHttpTransaction::TakeRestartedState() {
@@ -2467,6 +2529,11 @@ nsresult nsHttpTransaction::HandleContentStart() {
                                                   mResponseHead, &reset);
     NS_ENSURE_SUCCESS(rv, rv);
 
+    // OnHeadersAvailable can re-enter and set mConnection to null.
+    if (!mConnection) {
+      return NS_ERROR_NET_RESET;
+    }
+
     // looks like we should ignore this response, resetting...
     if (reset) {
       LOG(("resetting transaction's response head\n"));
@@ -2537,7 +2604,13 @@ nsresult nsHttpTransaction::HandleContentStart() {
           // NS_HTTP_STICKY_CONNECTION is set. In the case that a connection
           // already passed NTLM authentication, restarting the transaction will
           // cause the connection to be closed.
-          if (!mRestartCount && !(mCaps & NS_HTTP_STICKY_CONNECTION)) {
+          // Also skip the restart when the request body is a non-replayable
+          // streaming upload: the retry is only permitted when the body's
+          // source is non-null, so a 421 must be surfaced as-is. See
+          // https://fetch.spec.whatwg.org/#concept-http-network-or-cache-fetch
+          // step 17.
+          if (!mRestartCount && !(mCaps & NS_HTTP_STICKY_CONNECTION) &&
+              !mRequestBodyIsStreaming) {
             mCaps &= ~NS_HTTP_ALLOW_KEEPALIVE;
             mForceRestart = true;  // force restart has built in loop protection
             return NS_ERROR_NET_RESET;
@@ -2995,11 +3068,17 @@ TimingStruct nsHttpTransaction::Timings() {
 
 void nsHttpTransaction::BootstrapTimings(TimingStruct times) {
   mozilla::MutexAutoLock lock(mLock);
-  TimeStamp savedRequestStart = mTimings.requestStart;
-  mTimings = times;
-  if (!savedRequestStart.IsNull() && mTimings.requestStart.IsNull()) {
-    mTimings.requestStart = savedRequestStart;
-  }
+  // Only the connection phase is bootstrapped: it is owned by whoever
+  // established the connection this transaction runs on. The request and
+  // response timings are recorded by the transaction itself and must survive,
+  // because the connection phase can be reported after the request was already
+  // sent (a handshake finishing after 0-RTT data went out, for example).
+  mTimings.domainLookupStart = times.domainLookupStart;
+  mTimings.domainLookupEnd = times.domainLookupEnd;
+  mTimings.connectStart = times.connectStart;
+  mTimings.tcpConnectEnd = times.tcpConnectEnd;
+  mTimings.secureConnectionStart = times.secureConnectionStart;
+  mTimings.connectEnd = times.connectEnd;
 
   // Clamp connectStart to domainLookupEnd: with HE the state machine can start
   // a connection attempt as soon as one address family (A or AAAA) resolves
@@ -3041,17 +3120,18 @@ void nsHttpTransaction::Apply0RTTTimingOverride() {
   mLock.AssertCurrentThreadOwns();
   // Only when this request's early data (0-RTT) was accepted; otherwise
   // connectEnd keeps the full-handshake time set elsewhere.
-  if (mEarlyDataDisposition != EARLY_ACCEPTED || mEarlyDataSentTime.IsNull()) {
+  // Without a connect phase there is nothing to override: a transaction on a
+  // reused connection reports none, and a connectEnd on its own would be
+  // incoherent.
+  if (mEarlyDataDisposition != EARLY_ACCEPTED || mEarlyDataSentTime.IsNull() ||
+      mTimings.connectStart.IsNull()) {
     return;
   }
   // The request went out as early data, so connectEnd must exclude the
   // ServerHello round trip: report it (and requestStart) at the early-data
   // send. See "record connection timing info":
   // https://fetch.spec.whatwg.org/#record-connection-timing-info
-  TimeStamp early = mEarlyDataSentTime;
-  if (!mTimings.connectStart.IsNull() && early < mTimings.connectStart) {
-    early = mTimings.connectStart;
-  }
+  TimeStamp early = std::max(mEarlyDataSentTime, mTimings.connectStart);
   mTimings.connectEnd = early;
   mTimings.requestStart = early;
 }
@@ -3090,6 +3170,19 @@ void nsHttpTransaction::SetResponseStart(mozilla::TimeStamp timeStamp,
     return;  // We only set the timestamp if it was previously null
   }
   mTimings.responseStart = timeStamp;
+}
+
+void nsHttpTransaction::SetResponseIsComplete() {
+  if (!mResponseIsComplete.compareExchange(false, true)) {
+    return;
+  }
+
+  // Http2Session marks this from the stream end, which without a content-length
+  // reaches neither HandleContent's report nor Close's.
+  gHttpHandler->ObserveHttpActivityWithArgs(
+      HttpActivityArgs(mChannelId), NS_HTTP_ACTIVITY_TYPE_HTTP_TRANSACTION,
+      NS_HTTP_ACTIVITY_SUBTYPE_RESPONSE_COMPLETE, PR_Now(),
+      static_cast<uint64_t>(mContentRead), ""_ns);
 }
 
 void nsHttpTransaction::SetResponseEnd(mozilla::TimeStamp timeStamp,

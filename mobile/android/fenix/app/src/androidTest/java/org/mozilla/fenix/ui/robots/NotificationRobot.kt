@@ -357,7 +357,7 @@ class NotificationRobot {
         )
     }
 
-    class Transition() {
+    class Transition {
 
         fun clickClosePrivateTabsNotification(
             composeTestRule: ComposeTestRule,

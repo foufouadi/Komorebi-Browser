@@ -64,6 +64,8 @@
   _(GeckoProfilerScriptSources, 500)    \
   _(GCMarkingLock, 500)                 \
                                         \
+  _(GCAtomRefLock, 550)                 \
+                                        \
   _(SharedImmutableStringsCache, 600)   \
   _(IrregexpLazyStatic, 600)            \
   _(ThreadId, 600)                      \

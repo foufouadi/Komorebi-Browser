@@ -6,6 +6,7 @@ package org.mozilla.fenix.settings.account
 
 import android.content.Context
 import androidx.appcompat.content.res.AppCompatResources
+import androidx.core.graphics.drawable.RoundedBitmapDrawable
 import androidx.core.graphics.drawable.RoundedBitmapDrawableFactory
 import androidx.preference.Preference
 import androidx.preference.PreferenceCategory
@@ -17,6 +18,7 @@ import kotlinx.coroutines.launch
 import mozilla.components.concept.fetch.Client
 import mozilla.components.concept.sync.Profile
 import mozilla.components.service.fxa.manager.FxaAccountManager
+import mozilla.components.support.ktx.android.content.pixelSizeFor
 import mozilla.components.ui.icons.R as iconsR
 import org.mozilla.fenix.R
 import org.mozilla.fenix.ext.bitmapForUrl
@@ -102,11 +104,13 @@ class AccountUiView(
     private suspend fun toRoundedDrawable(
         url: String,
         context: Context,
-    ) =
-        httpClient.bitmapForUrl(url)?.let { bitmap ->
+    ): RoundedBitmapDrawable? {
+        val size = context.pixelSizeFor(R.dimen.preference_icon_drawable_size)
+        return httpClient.bitmapForUrl(url, targetWidth = size, targetHeight = size)?.let { bitmap ->
             RoundedBitmapDrawableFactory.create(context.resources, bitmap).apply {
                 isCircular = true
                 setAntiAlias(true)
             }
         }
+    }
 }

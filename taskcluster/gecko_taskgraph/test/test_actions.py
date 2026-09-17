@@ -1101,5 +1101,115 @@ def test_backfill_sliced_boundary_gap(mocker, run_action):
     assert set(called_pids) == {"101", "103", "105"}
 
 
+def _bhr_graph():
+    return make_graph(
+        make_task(
+            label="bhr-aggregate-cron",
+            task_def={
+                "payload": {
+                    "env": {
+                        "BHR_AGGREGATE_DATE_OFFSET_DAYS": "4",
+                        "BHR_AGGREGATE_SAMPLE_SIZE": "0.5",
+                    }
+                },
+                "extra": {"treeherder": {"symbol": "BHR"}},
+                "routes": [
+                    "index.gecko.v2.mozilla-central.latest.firefox.bhr-aggregate",
+                    "index.gecko.v2.mozilla-central.pushdate.2026.09.02.latest"
+                    ".firefox.bhr-aggregate",
+                    "tc-treeherder.v2.mozilla-central.abcdef",
+                ],
+            },
+        ),
+    )
+
+
+@pytest.fixture
+def run_bhr_action(mocker, run_action, get_artifact):
+    def inner(action_input):
+        graph = _bhr_graph()
+        m = mocker.patch("gecko_taskgraph.actions.bhr_aggregate.fetch_graph_and_labels")
+        m.return_value = (
+            "gid",
+            graph,
+            {label: "tid" for label in graph.tasks.keys()},
+            None,
+        )
+        run_action("bhr-aggregate", input=action_input)
+        # task-graph.json is keyed by taskid, so find our task by its label.
+        task_graph = get_artifact("task-graph.json")
+        entries = [e for e in task_graph.values() if e["label"] == "bhr-aggregate-cron"]
+        assert len(entries) == 1
+        return entries[0]["task"]
+
+    return inner
+
+
+def test_bhr_aggregate_pins_date_and_sample_size(run_bhr_action):
+    task = run_bhr_action({"date": "20260401", "sample_size": 0.02})
+    env = task["payload"]["env"]
+    assert env["BHR_AGGREGATE_DATE"] == "20260401"
+    assert env["BHR_AGGREGATE_SAMPLE_SIZE"] == "0.02"
+    # The offset stays, but the script prefers an explicit date over it.
+    assert env["BHR_AGGREGATE_DATE_OFFSET_DAYS"] == "4"
+    assert task["extra"]["treeherder"]["symbol"] == "BHR-custom"
+
+
+def test_bhr_aggregate_empty_input_keeps_cron_defaults(run_bhr_action):
+    task = run_bhr_action({})
+    env = task["payload"]["env"]
+    assert "BHR_AGGREGATE_DATE" not in env
+    assert env["BHR_AGGREGATE_SAMPLE_SIZE"] == "0.5"
+
+
+def test_bhr_aggregate_accepts_either_field_alone(run_bhr_action):
+    env = run_bhr_action({"sample_size": 0.001})["payload"]["env"]
+    assert "BHR_AGGREGATE_DATE" not in env
+    assert env["BHR_AGGREGATE_SAMPLE_SIZE"] == "0.001"
+
+    env = run_bhr_action({"date": "20260401"})["payload"]["env"]
+    assert env["BHR_AGGREGATE_DATE"] == "20260401"
+    assert env["BHR_AGGREGATE_SAMPLE_SIZE"] == "0.5"
+
+
+def test_bhr_aggregate_publishes_under_the_build_date(run_bhr_action):
+    task = run_bhr_action({"date": "20260802"})
+    assert task["routes"] == [
+        "tc-treeherder.v2.mozilla-central.abcdef",
+        "index.gecko.v2.mozilla-central.bhr-aggregate.build.20260802",
+    ]
+
+
+def test_bhr_aggregate_never_takes_the_crons_index_routes(run_bhr_action):
+    # Without a date there is no build date to publish under, so the run is
+    # reachable by task id alone rather than displacing the day's real run.
+    task = run_bhr_action({"sample_size": 0.01})
+    assert task["routes"] == ["tc-treeherder.v2.mozilla-central.abcdef"]
+
+
+def test_bhr_aggregate_leaves_the_timeseries_alone(run_bhr_action):
+    for action_input in ({"date": "20260802"}, {"sample_size": 0.01}, {}):
+        env = run_bhr_action(action_input)["payload"]["env"]
+        assert env["BHR_SKIP_TIMESERIES"] == "1"
+
+
+def test_bhr_aggregate_refill_keeps_the_crons_routes_and_roll_up(run_bhr_action):
+    task = run_bhr_action({"refill_dates": ["20260816", "20260817"]})
+    env = task["payload"]["env"]
+    assert env["BHR_TIMESERIES_REFILL_DATES"] == "20260816,20260817"
+    assert "BHR_SKIP_TIMESERIES" not in env
+    # It replaces the day's run rather than sitting beside it, so it publishes
+    # where the dashboard and the next cron run look.
+    assert (
+        "index.gecko.v2.mozilla-central.latest.firefox.bhr-aggregate" in task["routes"]
+    )
+    assert task["extra"]["treeherder"]["symbol"] == "BHR-custom"
+
+
+def test_bhr_aggregate_refuses_a_pinned_date_with_a_refill(run_bhr_action):
+    with pytest.raises(Exception, match="cannot be combined"):
+        run_bhr_action({"date": "20260802", "refill_dates": ["20260816"]})
+
+
 if __name__ == "__main__":
     main()

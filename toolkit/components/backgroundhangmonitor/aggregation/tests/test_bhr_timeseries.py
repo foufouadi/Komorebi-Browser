@@ -5,6 +5,7 @@
 """Tests for the bhr_timeseries secondary job."""
 
 import datetime
+import gzip
 import json
 import os
 import sys
@@ -33,6 +34,10 @@ def _make_processor():
 
 
 def _row(stack, build_date, hang_ms, hang_count=1.0):
+    # Frames are (func, lib, inline_depth); these tests are about cross-day
+    # aggregation, not inlining, so they pass plain (func, lib) pairs and get
+    # depth 0.
+    stack = [f if len(f) == 3 else (f[0], f[1], 0) for f in stack]
     return (
         stack,
         "",
@@ -137,7 +142,7 @@ def test_build_timeseries_end_to_end(tmpdir):
     assert sig_a["totalMs"] == 140.0
 
     assert os.path.exists(os.path.join(work, "hangs_timeseries_main.json"))
-    assert os.path.exists(os.path.join(work, "hangs_timeseries_main_state.json"))
+    assert os.path.exists(os.path.join(work, "hangs_timeseries_main_state.json.gz"))
     # Profiles without client metrics: affected-users fields are omitted, not
     # emitted as misleading zeros.
     assert "totalUsers" not in published
@@ -159,11 +164,38 @@ def test_build_timeseries_is_incremental_and_prunes(tmpdir):
     )
 
     assert published["dates"] == ["20260402", "20260403"]
-    state_path = os.path.join(work, "hangs_timeseries_main_state.json")
-    with open(state_path, encoding="utf-8") as state_file:
+    state_path = os.path.join(work, "hangs_timeseries_main_state.json.gz")
+    with gzip.open(state_path, "rt", encoding="utf-8") as state_file:
         state = json.load(state_file)
     assert "20260401" not in state["days"]
     assert set(state["days"]) == {"20260402", "20260403"}
+
+
+def test_refill_dates_recomputes_a_day_already_in_state(tmpdir):
+    work = str(tmpdir)
+    _write_profile(work, "20260401", [_row(STACK_A, "20260401", 100.0)])
+    _write_profile(work, "20260402", [_row(STACK_A, "20260402", 10.0)])
+    bhr_timeseries.build_timeseries(
+        input_dir=work, output_dir=work, window_days=2, top_count=10
+    )
+
+    # The day is re-run and its artifact replaced, as a backfill does.
+    _write_profile(work, "20260401", [_row(STACK_A, "20260401", 555.0)])
+
+    # Left to itself the roll-up keeps what the first run produced.
+    published = bhr_timeseries.build_timeseries(
+        input_dir=work, output_dir=work, window_days=2, top_count=10
+    )
+    assert published["signatures"][0]["ms"] == [100.0, 10.0]
+
+    published = bhr_timeseries.build_timeseries(
+        input_dir=work,
+        output_dir=work,
+        window_days=2,
+        top_count=10,
+        refill_dates=["20260401"],
+    )
+    assert published["signatures"][0]["ms"] == [555.0, 10.0]
 
 
 def test_top_count_caps_published_signatures(tmpdir):
@@ -247,7 +279,7 @@ def test_day_is_complete_only_below_the_cap():
 
 
 def _sketch_for(client_ids):
-    """Sparse HLL sketch over a set of client ids, as the primary job emits."""
+    """Serialized HLL sketch over a set of client ids, as the primary job emits."""
     hll = HyperLogLog()
     for client_id in client_ids:
         hll.add(client_id)

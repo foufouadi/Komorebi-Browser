@@ -310,6 +310,16 @@ class StringTest {
     }
 
     @Test
+    fun truncateMiddle() {
+        assertEquals("123…890", "1234567890".truncateMiddle(7))
+        assertEquals("1234567890", "1234567890".truncateMiddle(10))
+        assertEquals("1234567890", "1234567890".truncateMiddle(20))
+        assertEquals("1…0", "1234567890".truncateMiddle(3))
+        assertEquals("1", "1234567890".truncateMiddle(1))
+        assertEquals("123...890", "1234567890".truncateMiddle(9, "..."))
+    }
+
+    @Test
     fun `WHEN a string contains utf 8 encoded characters or illegal filename characters decode decodes it`() {
         // List of pairs of encoded strings or illegal filename characters and their expected decoded results
         val testCases =
@@ -684,13 +694,13 @@ class StringTest {
     @Test
     fun `GIVEN an invalid base64 image string WHEN converting it into bitmap THEN the result is null`() {
         val invalidBase64BitmapString = "aa"
-        assertNull(invalidBase64BitmapString.base64ToBitmap())
+        assertNull(invalidBase64BitmapString.base64ToBitmap(ICON_PX, ICON_PX))
     }
 
     @Test
     fun `GIVEN a valid base64 png string WHEN converting it into bitmap THEN the result is not null and no exception is thrown`() {
         val validBase64BitmapString = "data:image/png;base64,R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs="
-        assertNotNull(validBase64BitmapString.base64ToBitmap())
+        assertNotNull(validBase64BitmapString.base64ToBitmap(ICON_PX, ICON_PX))
     }
 
     @Test
@@ -698,9 +708,9 @@ class StringTest {
         val validBase64JpegString = "data:image/jpeg;base64,R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs="
         val validBase64JpgString = "data:image/jpg;base64,R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs="
         val validBase64AnythingString = "data:image/anything;base64,R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs="
-        assertNotNull(validBase64JpegString.base64ToBitmap())
-        assertNotNull(validBase64JpgString.base64ToBitmap())
-        assertNotNull(validBase64AnythingString.base64ToBitmap())
+        assertNotNull(validBase64JpegString.base64ToBitmap(ICON_PX, ICON_PX))
+        assertNotNull(validBase64JpgString.base64ToBitmap(ICON_PX, ICON_PX))
+        assertNotNull(validBase64AnythingString.base64ToBitmap(ICON_PX, ICON_PX))
     }
 
     @Test
@@ -708,9 +718,33 @@ class StringTest {
         val invalidBase64String = "R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs="
         val invalidBase64String2 = "data:image/jpg;base64;R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs="
         val invalidBase64String3 = "image/jpg;base64,R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs="
-        assertNull(invalidBase64String.base64ToBitmap())
-        assertNull(invalidBase64String2.base64ToBitmap())
-        assertNull(invalidBase64String3.base64ToBitmap())
+        assertNull(invalidBase64String.base64ToBitmap(ICON_PX, ICON_PX))
+        assertNull(invalidBase64String2.base64ToBitmap(ICON_PX, ICON_PX))
+        assertNull(invalidBase64String3.base64ToBitmap(ICON_PX, ICON_PX))
+    }
+
+    @Test
+    fun `GIVEN a base64 image larger than the target WHEN converting it into a bitmap THEN it is subsampled`() {
+        val bitmap = FOUR_BY_FOUR_PNG.base64ToBitmap(targetWidth = 1, targetHeight = 1)
+
+        assertNotNull(bitmap)
+        assertEquals(1, bitmap.width)
+        assertEquals(1, bitmap.height)
+    }
+
+    @Test
+    fun `GIVEN a data URI whose payload is not base64 WHEN converting it into a bitmap THEN null is returned`() {
+        // The other invalid cases here are rejected by the data URI pattern, so they never reach the decode.
+        assertNull("data:image/png;base64,!!!!not-base64!!!!".base64ToBitmap(ICON_PX, ICON_PX))
+    }
+
+    @Test
+    fun `GIVEN a base64 image smaller than the target WHEN converting it into a bitmap THEN it is decoded whole`() {
+        val bitmap = FOUR_BY_FOUR_PNG.base64ToBitmap(targetWidth = 64, targetHeight = 64)
+
+        assertNotNull(bitmap)
+        assertEquals(4, bitmap.width)
+        assertEquals(4, bitmap.height)
     }
 
     @Test
@@ -752,3 +786,9 @@ class StringTest {
 
     private fun String.shortened() = this.toShortUrl(publicSuffixList)
 }
+
+private const val ICON_PX = 32
+
+// A 4x4 PNG, small enough to inline but large enough to subsample.
+private const val FOUR_BY_FOUR_PNG =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAEElEQVR42mMQVDKGIwbiOACj1AZhWTrROwAAAABJRU5ErkJggg=="

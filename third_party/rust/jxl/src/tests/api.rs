@@ -3,14 +3,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+use std::path::Path;
+
 use crate::api::{
     JxlColorType, JxlDataFormat, JxlDecoder, JxlDecoderInner, JxlDecoderOptions, JxlPixelFormat,
     JxlTransferFunction, ProcessingResult, states,
 };
 use crate::error::Error;
 use crate::image::{Image, JxlOutputBuffer, Rect};
-use std::path::Path;
-
 use crate::tests::decode::{compare_frames, decode, decode_internal, scan_frames_with_decoder};
 
 #[test]
@@ -23,6 +23,8 @@ fn decode_small_chunks() {
             false,
             None,
             None,
+            None,
+            false,
         )
         .unwrap();
         Ok(())
@@ -49,7 +51,7 @@ fn test_preview_size_none_for_regular_files() {
     let mut decoder = JxlDecoder::<states::Initialized>::new(options);
     let mut input = file.as_slice();
     let decoder = loop {
-        match decoder.process(&mut input).unwrap() {
+        match decoder.process(&mut input, None).unwrap() {
             ProcessingResult::Complete { result } => break result,
             ProcessingResult::NeedsMoreInput { fallback, .. } => decoder = fallback,
         }
@@ -64,7 +66,7 @@ fn test_preview_size_some_for_preview_files() {
     let mut decoder = JxlDecoder::<states::Initialized>::new(options);
     let mut input = file.as_slice();
     let decoder = loop {
-        match decoder.process(&mut input).unwrap() {
+        match decoder.process(&mut input, None).unwrap() {
             ProcessingResult::Complete { result } => break result,
             ProcessingResult::NeedsMoreInput { fallback, .. } => decoder = fallback,
         }
@@ -79,7 +81,7 @@ fn test_set_pixel_format() {
     let mut decoder = JxlDecoder::<states::Initialized>::new(options);
     let mut input = file.as_slice();
     let mut decoder = loop {
-        match decoder.process(&mut input).unwrap() {
+        match decoder.process(&mut input, None).unwrap() {
             ProcessingResult::Complete { result } => break result,
             ProcessingResult::NeedsMoreInput { fallback, .. } => decoder = fallback,
         }
@@ -92,7 +94,7 @@ fn test_set_pixel_format() {
         color_data_format: Some(JxlDataFormat::U8 { bit_depth: 8 }),
         extra_channel_format: vec![],
     };
-    decoder.set_pixel_format(new_format.clone());
+    decoder.set_pixel_format(new_format.clone()).unwrap();
     assert_eq!(decoder.current_pixel_format(), &new_format);
 }
 
@@ -103,7 +105,7 @@ fn test_default_output_tf_by_pixel_format() {
     let mut decoder = JxlDecoder::<states::Initialized>::new(options);
     let mut input = file.as_slice();
     let mut decoder = loop {
-        match decoder.process(&mut input).unwrap() {
+        match decoder.process(&mut input, None).unwrap() {
             ProcessingResult::Complete { result } => break result,
             ProcessingResult::NeedsMoreInput { fallback, .. } => decoder = fallback,
         }
@@ -114,19 +116,21 @@ fn test_default_output_tf_by_pixel_format() {
         JxlTransferFunction::Linear,
     );
 
-    decoder.set_pixel_format(JxlPixelFormat::rgba8(0));
+    decoder.set_pixel_format(JxlPixelFormat::rgba8(0)).unwrap();
     assert_eq!(
         *decoder.output_color_profile().transfer_function().unwrap(),
         JxlTransferFunction::SRGB,
     );
 
-    decoder.set_pixel_format(JxlPixelFormat::rgba_f16(0));
+    decoder
+        .set_pixel_format(JxlPixelFormat::rgba_f16(0))
+        .unwrap();
     assert_eq!(
         *decoder.output_color_profile().transfer_function().unwrap(),
         JxlTransferFunction::Linear,
     );
 
-    decoder.set_pixel_format(JxlPixelFormat::rgba16(0));
+    decoder.set_pixel_format(JxlPixelFormat::rgba16(0)).unwrap();
     assert_eq!(
         *decoder.output_color_profile().transfer_function().unwrap(),
         JxlTransferFunction::SRGB,
@@ -150,7 +154,7 @@ fn test_fill_opaque_alpha_both_pipelines() {
         macro_rules! advance_decoder {
             ($decoder:expr) => {
                 loop {
-                    match $decoder.process(&mut input).unwrap() {
+                    match $decoder.process(&mut input, None).unwrap() {
                         ProcessingResult::Complete { result } => break result,
                         ProcessingResult::NeedsMoreInput { fallback, .. } => {
                             if input.is_empty() {
@@ -163,7 +167,7 @@ fn test_fill_opaque_alpha_both_pipelines() {
             };
             ($decoder:expr, $buffers:expr) => {
                 loop {
-                    match $decoder.process(&mut input, $buffers).unwrap() {
+                    match $decoder.process(&mut input, $buffers, None).unwrap() {
                         ProcessingResult::Complete { result } => break result,
                         ProcessingResult::NeedsMoreInput { fallback, .. } => {
                             if input.is_empty() {
@@ -179,7 +183,7 @@ fn test_fill_opaque_alpha_both_pipelines() {
         let mut decoder = decoder;
         let mut decoder = advance_decoder!(decoder);
         decoder.set_use_simple_pipeline(use_simple);
-        decoder.set_pixel_format(rgba_format.clone());
+        decoder.set_pixel_format(rgba_format.clone()).unwrap();
 
         let basic_info = decoder.basic_info().clone();
         let (width, height) = basic_info.size;
@@ -226,9 +230,11 @@ fn test_premultiply_output_straight_alpha() {
 
     for use_simple in [true, false] {
         let (straight_buffer, width, height) =
-            decode_with_format::<f32>(&file, &rgba_format, use_simple, false);
+            decode_with_format::<f32>(&file, &rgba_format, use_simple, false).unwrap();
+        let straight_buffer = &straight_buffer[0];
         let (premul_buffer, _, _) =
-            decode_with_format::<f32>(&file, &rgba_format, use_simple, true);
+            decode_with_format::<f32>(&file, &rgba_format, use_simple, true).unwrap();
+        let premul_buffer = &premul_buffer[0];
 
         let mut found_semitransparent = false;
         for y in 0..height {
@@ -302,6 +308,23 @@ fn test_premultiply_output_straight_alpha() {
     }
 }
 
+/// Test that premultiplied RGBA output from a grayscale image remains gray.
+#[test]
+fn test_premultiply_output_grayscale_as_rgba() {
+    let file = std::fs::read("resources/test/gray_alpha_lossless.jxl").unwrap();
+    let (buffers, width, height) =
+        decode_with_format::<f32>(&file, &JxlPixelFormat::rgba_f32(1), false, true).unwrap();
+    let rgba = &buffers[0];
+
+    for y in 0..height {
+        let row = rgba.row(y);
+        for x in 0..width {
+            assert_eq!(row[x * 4], row[x * 4 + 1]);
+            assert_eq!(row[x * 4 + 1], row[x * 4 + 2]);
+        }
+    }
+}
+
 /// Test that premultiply_output=true doesn't double-premultiply
 /// when the source already has premultiplied alpha (alpha_associated=true).
 #[test]
@@ -317,9 +340,11 @@ fn test_premultiply_output_already_premultiplied() {
 
     for use_simple in [true, false] {
         let (without_flag_buffer, width, height) =
-            decode_with_format::<f32>(&file, &rgba_format, use_simple, false);
+            decode_with_format::<f32>(&file, &rgba_format, use_simple, false).unwrap();
+        let without_flag_buffer = &without_flag_buffer[0];
         let (with_flag_buffer, _, _) =
-            decode_with_format::<f32>(&file, &rgba_format, use_simple, true);
+            decode_with_format::<f32>(&file, &rgba_format, use_simple, true).unwrap();
+        let with_flag_buffer = &with_flag_buffer[0];
 
         for y in 0..height {
             let without_row = without_flag_buffer.row(y);
@@ -356,7 +381,7 @@ fn test_animation_with_reference_frames() {
 
     let mut decoder = decoder;
     let mut decoder = loop {
-        match decoder.process(&mut input).unwrap() {
+        match decoder.process(&mut input, None).unwrap() {
             ProcessingResult::Complete { result } => break result,
             ProcessingResult::NeedsMoreInput { fallback, .. } => {
                 decoder = fallback;
@@ -369,7 +394,7 @@ fn test_animation_with_reference_frames() {
         color_data_format: Some(JxlDataFormat::f32()),
         extra_channel_format: vec![],
     };
-    decoder.set_pixel_format(rgb_format);
+    decoder.set_pixel_format(rgb_format).unwrap();
 
     let basic_info = decoder.basic_info().clone();
     let (width, height) = basic_info.size;
@@ -378,7 +403,7 @@ fn test_animation_with_reference_frames() {
 
     loop {
         let mut decoder_frame = loop {
-            match decoder.process(&mut input).unwrap() {
+            match decoder.process(&mut input, None).unwrap() {
                 ProcessingResult::Complete { result } => break result,
                 ProcessingResult::NeedsMoreInput { fallback, .. } => {
                     decoder = fallback;
@@ -397,7 +422,10 @@ fn test_animation_with_reference_frames() {
         )];
 
         decoder = loop {
-            match decoder_frame.process(&mut input, &mut buffers).unwrap() {
+            match decoder_frame
+                .process(&mut input, &mut buffers, None)
+                .unwrap()
+            {
                 ProcessingResult::Complete { result } => break result,
                 ProcessingResult::NeedsMoreInput { fallback, .. } => {
                     decoder_frame = fallback;
@@ -430,7 +458,7 @@ fn test_skip_frame_then_decode_next() {
 
     let mut decoder = decoder;
     let mut decoder = loop {
-        match decoder.process(&mut input).unwrap() {
+        match decoder.process(&mut input, None).unwrap() {
             ProcessingResult::Complete { result } => break result,
             ProcessingResult::NeedsMoreInput { fallback, .. } => {
                 decoder = fallback;
@@ -443,13 +471,13 @@ fn test_skip_frame_then_decode_next() {
         color_data_format: Some(JxlDataFormat::f32()),
         extra_channel_format: vec![],
     };
-    decoder.set_pixel_format(rgb_format);
+    decoder.set_pixel_format(rgb_format).unwrap();
 
     let basic_info = decoder.basic_info().clone();
     let (width, height) = basic_info.size;
 
     let mut decoder_frame = loop {
-        match decoder.process(&mut input).unwrap() {
+        match decoder.process(&mut input, None).unwrap() {
             ProcessingResult::Complete { result } => break result,
             ProcessingResult::NeedsMoreInput { fallback, .. } => {
                 decoder = fallback;
@@ -472,7 +500,7 @@ fn test_skip_frame_then_decode_next() {
     );
 
     let mut decoder_frame = loop {
-        match decoder.process(&mut input).unwrap() {
+        match decoder.process(&mut input, None).unwrap() {
             ProcessingResult::Complete { result } => break result,
             ProcessingResult::NeedsMoreInput { fallback, .. } => {
                 decoder = fallback;
@@ -491,7 +519,10 @@ fn test_skip_frame_then_decode_next() {
     )];
 
     let decoder = loop {
-        match decoder_frame.process(&mut input, &mut buffers).unwrap() {
+        match decoder_frame
+            .process(&mut input, &mut buffers, None)
+            .unwrap()
+        {
             ProcessingResult::Complete { result } => break result,
             ProcessingResult::NeedsMoreInput { fallback, .. } => {
                 decoder_frame = fallback;
@@ -521,10 +552,13 @@ fn test_output_format_u8_matches_f32() {
 
         for use_simple in [true, false] {
             let (f32_buffer, width, height) =
-                decode_with_format::<f32>(&file, &f32_format, use_simple, false);
-            let (u8_buffer, _, _) = decode_with_format::<u8>(&file, &u8_format, use_simple, false);
+                decode_with_format::<f32>(&file, &f32_format, use_simple, false).unwrap();
+            let f32_buffer = &f32_buffer[0];
+            let (u8_buffer, _, _) =
+                decode_with_format::<u8>(&file, &u8_format, use_simple, false).unwrap();
+            let u8_buffer = &u8_buffer[0];
 
-            let tolerance = 0.003;
+            let tolerance = 0.004;
             let mut max_error: f32 = 0.0;
 
             for y in 0..height {
@@ -577,9 +611,11 @@ fn test_output_format_u16_matches_f32() {
 
         for use_simple in [true, false] {
             let (f32_buffer, width, height) =
-                decode_with_format::<f32>(&file, &f32_format, use_simple, false);
+                decode_with_format::<f32>(&file, &f32_format, use_simple, false).unwrap();
+            let f32_buffer = &f32_buffer[0];
             let (u16_buffer, _, _) =
-                decode_with_format::<u16>(&file, &u16_format, use_simple, false);
+                decode_with_format::<u16>(&file, &u16_format, use_simple, false).unwrap();
+            let u16_buffer = &u16_buffer[0];
 
             let tolerance = 0.0001;
 
@@ -632,9 +668,11 @@ fn test_output_format_f16_matches_f32() {
 
         for use_simple in [true, false] {
             let (f32_buffer, width, height) =
-                decode_with_format::<f32>(&file, &f32_format, use_simple, false);
+                decode_with_format::<f32>(&file, &f32_format, use_simple, false).unwrap();
+            let f32_buffer = &f32_buffer[0];
             let (f16_buffer, _, _) =
-                decode_with_format::<f16>(&file, &f16_format, use_simple, false);
+                decode_with_format::<f16>(&file, &f16_format, use_simple, false).unwrap();
+            let f16_buffer = &f16_buffer[0];
 
             let tolerance = 0.002;
 
@@ -662,13 +700,72 @@ fn test_output_format_f16_matches_f32() {
     }
 }
 
-/// Helper function to decode an image with a specific format.
+/// CMYK interleaved output matches the RGB color channels for C, M and Y, and
+/// the Black extra channel plane for K.
+#[test]
+fn test_cmyk_pixel_format() {
+    let file = std::fs::read("resources/test/conformance_test_images/cmyk_layers.jxl").unwrap();
+
+    // cmyk_layers.jxl has two extra channels: Black (index 0) and Alpha
+    // (index 1).
+    let cmyk_format = JxlPixelFormat::cmyk8(2);
+    let reference_format = JxlPixelFormat {
+        color_type: JxlColorType::Rgb,
+        color_data_format: Some(JxlDataFormat::U8 { bit_depth: 8 }),
+        extra_channel_format: vec![Some(JxlDataFormat::U8 { bit_depth: 8 }), None],
+    };
+
+    for use_simple in [true, false] {
+        let (cmyk_buffers, width, height) =
+            decode_with_format::<u8>(&file, &cmyk_format, use_simple, false).unwrap();
+        let (reference_buffers, _, _) =
+            decode_with_format::<u8>(&file, &reference_format, use_simple, false).unwrap();
+        let cmyk = &cmyk_buffers[0];
+        let rgb = &reference_buffers[0];
+        let black = &reference_buffers[1];
+
+        for y in 0..height {
+            let cmyk_row = cmyk.row(y);
+            let rgb_row = rgb.row(y);
+            let black_row = black.row(y);
+            for x in 0..width {
+                for c in 0..3 {
+                    assert_eq!(
+                        cmyk_row[x * 4 + c],
+                        rgb_row[x * 3 + c],
+                        "CMY mismatch at ({x},{y}) channel {c} (use_simple={use_simple})"
+                    );
+                }
+                assert_eq!(
+                    cmyk_row[x * 4 + 3],
+                    black_row[x],
+                    "K mismatch at ({x},{y}) (use_simple={use_simple})"
+                );
+            }
+        }
+    }
+}
+
+/// Requesting CMYK output for a non-CMYK image fails.
+#[test]
+fn test_cmyk_pixel_format_requires_cmyk_image() {
+    let file = std::fs::read("resources/test/basic.jxl").unwrap();
+    let result = decode_with_format::<u8>(&file, &JxlPixelFormat::cmyk8(0), false, false);
+    assert!(
+        matches!(result, Err(Error::NotCmyk)),
+        "expected NotCmyk, got {result:?}"
+    );
+}
+
+/// Helper function to decode an image with a specific format, with buffers
+/// for the color channels (if requested) plus every requested extra channel
+/// plane. Returns the decoded buffers in process() buffer order.
 fn decode_with_format<T: crate::image::ImageDataType>(
     file: &[u8],
     pixel_format: &JxlPixelFormat,
     use_simple: bool,
     premultiply: bool,
-) -> (Image<T>, usize, usize) {
+) -> Result<(Vec<Image<T>>, usize, usize), Error> {
     let options = JxlDecoderOptions {
         premultiply_output: premultiply,
         ..Default::default()
@@ -677,7 +774,7 @@ fn decode_with_format<T: crate::image::ImageDataType>(
     let mut input = file;
 
     let mut decoder = loop {
-        match decoder.process(&mut input).unwrap() {
+        match decoder.process(&mut input, None)? {
             ProcessingResult::Complete { result } => break result,
             ProcessingResult::NeedsMoreInput { fallback, .. } => {
                 if input.is_empty() {
@@ -688,15 +785,13 @@ fn decode_with_format<T: crate::image::ImageDataType>(
         }
     };
     decoder.set_use_simple_pipeline(use_simple);
-    decoder.set_pixel_format(pixel_format.clone());
+    decoder.set_pixel_format(pixel_format.clone()).unwrap();
 
-    let basic_info = decoder.basic_info().clone();
-    let (width, height) = basic_info.size;
-
+    let (width, height) = decoder.basic_info().size;
     let num_samples = pixel_format.color_type.samples_per_pixel();
 
-    let decoder = loop {
-        match decoder.process(&mut input).unwrap() {
+    let mut decoder = loop {
+        match decoder.process(&mut input, None)? {
             ProcessingResult::Complete { result } => break result,
             ProcessingResult::NeedsMoreInput { fallback, .. } => {
                 if input.is_empty() {
@@ -707,19 +802,32 @@ fn decode_with_format<T: crate::image::ImageDataType>(
         }
     };
 
-    let mut buffer = Image::<T>::new((width * num_samples, height)).unwrap();
-    let mut buffers: Vec<_> = vec![JxlOutputBuffer::from_image_rect_mut(
-        buffer
-            .get_rect_mut(Rect {
-                origin: (0, 0),
-                size: (width * num_samples, height),
-            })
-            .into_raw(),
-    )];
+    let mut images = Vec::new();
+    if pixel_format.color_data_format.is_some() {
+        images.push(Image::<T>::new((width * num_samples, height))?);
+    }
+    for ec_format in &pixel_format.extra_channel_format {
+        if ec_format.is_some() {
+            images.push(Image::<T>::new((width, height))?);
+        }
+    }
+    let mut buffers: Vec<JxlOutputBuffer> = images
+        .iter_mut()
+        .map(|image| {
+            let size = image.size();
+            JxlOutputBuffer::from_image_rect_mut(
+                image
+                    .get_rect_mut(Rect {
+                        origin: (0, 0),
+                        size,
+                    })
+                    .into_raw(),
+            )
+        })
+        .collect();
 
-    let mut decoder = decoder;
     loop {
-        match decoder.process(&mut input, &mut buffers).unwrap() {
+        match decoder.process(&mut input, &mut buffers, None)? {
             ProcessingResult::Complete { .. } => break,
             ProcessingResult::NeedsMoreInput { fallback, .. } => {
                 if input.is_empty() {
@@ -729,8 +837,9 @@ fn decode_with_format<T: crate::image::ImageDataType>(
             }
         }
     }
+    drop(buffers);
 
-    (buffer, width, height)
+    Ok((images, width, height))
 }
 
 /// Regression test for ClusterFuzz issue 5342436251336704
@@ -741,7 +850,7 @@ fn test_fuzzer_smallbuffer_overflow() {
     let data = include_bytes!("../../tests/testdata/fuzzer_smallbuffer_overflow.jxl");
 
     let result = panic::catch_unwind(|| {
-        let _ = decode_internal(data, 1024, false, false, None, None);
+        let _ = decode_internal(data, 1024, false, false, None, None, None, false);
     });
 
     if let Err(e) = result {
@@ -755,6 +864,17 @@ fn test_fuzzer_smallbuffer_overflow() {
             "Unexpected overflow panic: {}",
             panic_msg
         );
+    }
+}
+
+/// Regression test for https://issues.chromium.org/issues/541318910: flushing a
+/// frame that does not support rendering before the last pass used to force an
+/// eager render of an incomplete group.
+#[test]
+fn flush_without_partial_render_support() {
+    let data = std::fs::read("resources/test/squeeze_empty_residual.jxl").unwrap();
+    for chunk_size in 1..=16 {
+        decode_internal(&data, chunk_size, false, true, None, None, None, false).unwrap();
     }
 }
 
@@ -823,7 +943,9 @@ fn assert_start_new_frame_matches_sequential(data: &[u8]) {
         let mut decoder = JxlDecoderInner::new(options);
         let mut input = &data[..initial_offset];
 
-        while let ProcessingResult::Complete { .. } = decoder.process(&mut input, None).unwrap() {
+        while let ProcessingResult::Complete { .. } =
+            decoder.process(&mut input, None, None).unwrap()
+        {
             if input.is_empty() {
                 break;
             }
@@ -840,7 +962,7 @@ fn assert_start_new_frame_matches_sequential(data: &[u8]) {
             decoder.start_new_frame(seek_target);
             let mut input = &data[seek_target.decode_start_file_offset as usize..];
 
-            let result = decoder.process(&mut input, None);
+            let result = decoder.process(&mut input, None, None);
             assert!(
                 matches!(result, Ok(ProcessingResult::Complete { .. })),
                 "decoder.process: {result:?}"
@@ -859,7 +981,7 @@ fn assert_start_new_frame_matches_sequential(data: &[u8]) {
                     .map(|_| Some(JxlDataFormat::f32()))
                     .collect(),
             };
-            decoder.set_pixel_format(requested_format.clone());
+            decoder.set_pixel_format(requested_format.clone()).unwrap();
 
             let channels = requested_format.color_type.samples_per_pixel();
             let num_ec = requested_format.extra_channel_format.len();
@@ -887,7 +1009,7 @@ fn assert_start_new_frame_matches_sequential(data: &[u8]) {
             }
 
             assert!(matches!(
-                decoder.process(&mut input, Some(&mut buffers)),
+                decoder.process(&mut input, Some(&mut buffers), None),
                 Ok(ProcessingResult::Complete { .. })
             ));
 
@@ -909,7 +1031,7 @@ fn assert_start_new_frame_matches_sequential(data: &[u8]) {
             let mut extra_input = &input[..extra_bytes];
 
             while let ProcessingResult::Complete { .. } =
-                decoder.process(&mut extra_input, None).unwrap()
+                decoder.process(&mut extra_input, None, None).unwrap()
             {
                 if extra_input.is_empty() {
                     break;
@@ -1092,7 +1214,7 @@ fn test_fuzzer_xyb_icc_no_panic() {
     let mut decoder = JxlDecoderInner::new(Default::default());
     let mut input = data;
 
-    if let Ok(ProcessingResult::Complete { .. }) = decoder.process(&mut input, None)
+    if let Ok(ProcessingResult::Complete { .. }) = decoder.process(&mut input, None, None)
         && let Some(profile) = decoder.output_color_profile()
     {
         let _ = profile.try_as_icc();
@@ -1117,7 +1239,7 @@ fn test_scan_frames_only_empty_followup_no_panic_502853162() {
 
     let mut input = data;
     while decoder.has_more_frames() && !input.is_empty() {
-        let _ = decoder.process(&mut input, None).unwrap();
+        let _ = decoder.process(&mut input, None, None).unwrap();
     }
 }
 
@@ -1174,4 +1296,103 @@ fn decode_test_strategic_solid_blue_grid_boundary() {
             );
         }
     }
+}
+
+/// Regression test: a grayscale, non-XYB VarDCT frame has no stage consuming colour
+/// channels 1 and 2, so those channels end up with no type in the pipeline. VarDCT still
+/// decodes all three channels, and asking the pipeline for their scratch buffers used to
+/// panic.
+#[test]
+fn test_fuzzer_vardct_grayscale_unused_channel() {
+    let data = include_bytes!("../../tests/testdata/vardct_grayscale_unused_channel.jxl");
+    let (_, frames) =
+        decode_internal(data, usize::MAX, false, false, None, None, None, false).unwrap();
+    let (_, simple_frames) =
+        decode_internal(data, usize::MAX, true, false, None, None, None, false).unwrap();
+    assert_eq!(frames.len(), 1);
+    assert_eq!(frames[0].len(), 1);
+    assert_eq!(frames[0][0].size(), (1, 1));
+    compare_frames(
+        Path::new("vardct_grayscale_unused_channel.jxl"),
+        0,
+        &frames[0],
+        &simple_frames[0],
+    );
+    // Streaming input with flushing exercises the low-memory pipeline's partial renders.
+    decode_internal(data, 1, false, true, None, None, None, false).unwrap();
+}
+
+/// Regression test: a context map with cluster index 255. This shouldn't panic.
+#[test]
+fn test_fuzzer_context_map_num_histograms_overflow() {
+    let data = include_bytes!("../../tests/testdata/context_map_num_histograms_overflow.jxl");
+    let _ = decode_internal(data, usize::MAX, false, false, None, None, None, false);
+    let _ = decode_internal(data, 1024, false, true, None, None, None, false);
+}
+
+/// Regression test: two nested palette transforms, where the inner one has no colors and no
+/// deltas and so produces a 0x1 palette channel. `Image` allocates such a channel as 0x0, and
+/// applying the outer palette on top of it used to compare the declared 0x1 size against the
+/// allocated 0x0 one and panic. The file is malformed further on, so decoding it must fail --
+/// but with an error rather than a panic.
+#[test]
+fn test_fuzzer_modular_palette_empty_meta_channel() {
+    let data = include_bytes!("../../tests/testdata/modular_palette_empty_meta_channel.jxl");
+    assert!(decode_internal(data, usize::MAX, false, false, None, None, None, false).is_err());
+}
+
+/// Regression test: a frame with patches that declares `upsampling = 4` and `ec_upsampling = [4]`
+/// for an extra channel with `dim_shift = 1`. The declared amounts match, so the guard against
+/// mixing patches with differing upsampling used to pass, and `postprocess` then shifted the
+/// extra channel to an effective 8x. The extra channel is upsampled before the patches stage
+/// while the color channels are upsampled after it, so the patches stage (which uses both)
+/// saw channels at two different resolutions and tripped an assertion in the low-memory
+/// pipeline.
+#[test]
+fn test_fuzzer_patches_ec_upsampling_dim_shift() {
+    let data = include_bytes!("../../tests/testdata/patches_ec_upsampling_dim_shift.jxl");
+    let result = decode_internal(data, usize::MAX, false, false, None, None, None, false);
+    assert!(
+        matches!(result, Err(Error::PatchesUnsupportedMixedUpsampling(..))),
+        "expected a mixed upsampling error, got {:?}",
+        result.map(|_| "a decoded image")
+    );
+}
+
+/// Regression test: a Modular stream that disables LZ77, but whose pixel histogram codes the
+/// constant symbol 1 with a split-exponent-zero uint config -- the shape `Histograms::is_rle()`
+/// used to accept, since without LZ77 it inspected cluster 0 instead of the (nonexistent)
+/// distance cluster. Together with a single Gradient leaf and prefix codes, that made
+/// `decode_modular_subbitstream()` take the RLE fast path, where `decode_fast_lossless()`
+/// unwraps the LZ77 parameters -- all `None` here -- and panicked. The stream is valid and
+/// decodes on the normal path, so it must decode rather than merely not panic.
+#[test]
+fn test_fuzzer_modular_rle_fast_path_without_lz77() {
+    let data = include_bytes!("../../tests/testdata/modular_rle_fast_path_without_lz77.jxl");
+    let (_, frames) =
+        decode_internal(data, usize::MAX, false, false, None, None, None, false).unwrap();
+    assert_eq!(frames.len(), 1);
+    // A single 8x8 frame, with its three colour channels interleaved.
+    assert_eq!(frames[0][0].size(), (3 * 8, 8));
+    // Streaming input with flushing exercises the low-memory pipeline as well.
+    decode_internal(data, 1, false, true, None, None, None, false).unwrap();
+}
+
+/// The other direction: a stream that is genuinely RLE-coded (LZ77 enabled, every copy at
+/// distance 1) still takes the fast path. It codes the same image as
+/// `modular_rle_fast_path_without_lz77.jxl`, so the two must decode to the same pixels.
+#[test]
+fn test_modular_rle_fast_path() {
+    let data = include_bytes!("../../tests/testdata/modular_rle_fast_path.jxl");
+    let (_, frames) =
+        decode_internal(data, usize::MAX, false, false, None, None, None, false).unwrap();
+    let no_lz77 = include_bytes!("../../tests/testdata/modular_rle_fast_path_without_lz77.jxl");
+    let (_, no_lz77_frames) =
+        decode_internal(no_lz77, usize::MAX, false, false, None, None, None, false).unwrap();
+    compare_frames(
+        Path::new("modular_rle_fast_path.jxl"),
+        0,
+        &frames[0],
+        &no_lz77_frames[0],
+    );
 }

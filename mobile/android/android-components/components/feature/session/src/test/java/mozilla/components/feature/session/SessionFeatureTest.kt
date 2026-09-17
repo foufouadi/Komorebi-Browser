@@ -5,7 +5,6 @@
 package mozilla.components.feature.session
 
 import android.view.View
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import mozilla.components.browser.state.action.BrowserAction
@@ -41,7 +40,7 @@ class SessionFeatureTest {
     @Test
     fun `start renders selected session`() =
         runTest(testDispatcher) {
-            val store = prepareStore(scope = this)
+            val store = prepareStore()
 
             val actualView: View = mock()
             val view: EngineView = mock()
@@ -62,7 +61,7 @@ class SessionFeatureTest {
     @Test
     fun `start renders fixed session`() =
         runTest(testDispatcher) {
-            val store = prepareStore(scope = this)
+            val store = prepareStore()
 
             val actualView: View = mock()
             val view: EngineView = mock()
@@ -83,7 +82,7 @@ class SessionFeatureTest {
     @Test
     fun `start renders custom tab session`() =
         runTest(testDispatcher) {
-            val store = prepareStore(scope = this)
+            val store = prepareStore()
 
             val actualView: View = mock()
             val view: EngineView = mock()
@@ -103,7 +102,7 @@ class SessionFeatureTest {
     @Test
     fun `renders selected tab after changes`() =
         runTest(testDispatcher) {
-            val store = prepareStore(scope = this)
+            val store = prepareStore()
 
             val actualView: View = mock()
             val view: EngineView = mock()
@@ -133,7 +132,7 @@ class SessionFeatureTest {
         runTest(testDispatcher) {
             val captureActionsMiddleware = CaptureActionsMiddleware<BrowserState, BrowserAction>()
 
-            val store = prepareStore(captureActionsMiddleware, this)
+            val store = prepareStore(captureActionsMiddleware)
             val actualView: View = mock()
             val view: EngineView = mock()
             doReturn(actualView).`when`(view).asView()
@@ -152,7 +151,7 @@ class SessionFeatureTest {
     @Test
     fun `does not render new selected session after stop`() =
         runTest(testDispatcher) {
-            val store = prepareStore(scope = this)
+            val store = prepareStore()
 
             val actualView: View = mock()
             val view: EngineView = mock()
@@ -179,7 +178,7 @@ class SessionFeatureTest {
     @Test
     fun `releases when last selected session gets removed`() =
         runTest(testDispatcher) {
-            val store = prepareStore(scope = this)
+            val store = prepareStore()
 
             val actualView: View = mock()
             val view: EngineView = mock()
@@ -204,7 +203,7 @@ class SessionFeatureTest {
     @Test
     fun `release stops observing and releases session from view`() =
         runTest(testDispatcher) {
-            val store = prepareStore(scope = this)
+            val store = prepareStore()
             val actualView: View = mock()
 
             val view: EngineView = mock()
@@ -232,7 +231,7 @@ class SessionFeatureTest {
     @Test
     fun `releases when custom tab gets removed`() =
         runTest(testDispatcher) {
-            val store = prepareStore(scope = this)
+            val store = prepareStore()
 
             val actualView: View = mock()
             val view: EngineView = mock()
@@ -373,7 +372,7 @@ class SessionFeatureTest {
     @Test
     fun `stop releases engine view`() =
         runTest(testDispatcher) {
-            val store = prepareStore(scope = this)
+            val store = prepareStore()
 
             val actualView: View = mock()
             val view: EngineView = mock()
@@ -397,7 +396,7 @@ class SessionFeatureTest {
     fun `presenter observes crash state and does not create new engine session immediately`() =
         runTest(testDispatcher) {
             val middleware = CaptureActionsMiddleware<BrowserState, BrowserAction>()
-            val store = prepareStore(middleware, this)
+            val store = prepareStore(middleware)
 
             val actualView: View = mock()
             val view: EngineView = mock()
@@ -422,7 +421,7 @@ class SessionFeatureTest {
     @Test
     fun `last access is updated when session is rendered`() =
         runTest(testDispatcher) {
-            val store = prepareStore(scope = this)
+            val store = prepareStore()
 
             val actualView: View = mock()
             val view: EngineView = mock()
@@ -445,7 +444,7 @@ class SessionFeatureTest {
     @Test
     fun `lastVisibleAt is stamped when stop is called`() =
         runTest(testDispatcher) {
-            val store = prepareStore(scope = this)
+            val store = prepareStore()
 
             val actualView: View = mock()
             val view: EngineView = mock()
@@ -469,7 +468,7 @@ class SessionFeatureTest {
     @Test
     fun `lastVisibleAt is stamped on the outgoing tab when switching tabs`() =
         runTest(testDispatcher) {
-            val store = prepareStore(scope = this)
+            val store = prepareStore()
 
             val actualView: View = mock()
             val view: EngineView = mock()
@@ -497,7 +496,7 @@ class SessionFeatureTest {
     fun `lastVisibleAt is stamped when last tab is removed`() =
         runTest(testDispatcher) {
             val captureActionsMiddleware = CaptureActionsMiddleware<BrowserState, BrowserAction>()
-            val store = prepareStore(captureActionsMiddleware, this)
+            val store = prepareStore(captureActionsMiddleware)
 
             val actualView: View = mock()
             val view: EngineView = mock()
@@ -521,10 +520,7 @@ class SessionFeatureTest {
             }
         }
 
-    private fun prepareStore(
-        middleware: CaptureActionsMiddleware<BrowserState, BrowserAction>? = null,
-        scope: CoroutineScope,
-    ): BrowserStore =
+    private fun prepareStore(middleware: CaptureActionsMiddleware<BrowserState, BrowserAction>? = null): BrowserStore =
         BrowserStore(
             BrowserState(
                 tabs =

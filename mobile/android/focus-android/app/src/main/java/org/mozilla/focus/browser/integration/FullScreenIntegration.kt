@@ -17,6 +17,7 @@ import mozilla.components.feature.session.FullScreenFeature
 import mozilla.components.feature.session.SessionUseCases
 import mozilla.components.support.base.feature.LifecycleAwareFeature
 import mozilla.components.support.base.feature.UserInteractionHandler
+import mozilla.components.support.ktx.android.content.isEdgeToEdgeDisabled
 import mozilla.components.support.ktx.android.view.enterImmersiveMode
 import mozilla.components.support.ktx.android.view.exitImmersiveMode
 import org.mozilla.focus.R
@@ -89,8 +90,8 @@ class FullScreenIntegration(
 
     @VisibleForTesting
     internal fun viewportFitChanged(viewportFit: Int) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            activity.window.attributes.layoutInDisplayCutoutMode = viewportFit
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && activity.isEdgeToEdgeDisabled()) {
+            activity.window.attributes = activity.window.attributes.apply { layoutInDisplayCutoutMode = viewportFit }
         }
     }
 

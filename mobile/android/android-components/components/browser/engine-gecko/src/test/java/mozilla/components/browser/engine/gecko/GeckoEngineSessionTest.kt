@@ -96,7 +96,9 @@ import org.mozilla.geckoview.GeckoSession.PermissionDelegate.PERMISSION_STORAGE_
 import org.mozilla.geckoview.GeckoSession.PermissionDelegate.PERMISSION_TRACKING
 import org.mozilla.geckoview.GeckoSession.ProgressDelegate.SecurityInformation
 import org.mozilla.geckoview.GeckoSessionSettings
+import org.mozilla.geckoview.PdfViewerController
 import org.mozilla.geckoview.SessionFinder
+import org.mozilla.geckoview.SessionPdfFileSaver
 import org.mozilla.geckoview.TranslationsController
 import org.mozilla.geckoview.TranslationsController.TranslationsException
 import org.mozilla.geckoview.WebRequestError
@@ -1897,7 +1899,7 @@ class GeckoEngineSessionTest {
         val observers = mutableListOf<EngineSession.Observer>()
         val policy = TrackingProtectionPolicy.strict()
 
-        for (x in 1..5) {
+        repeat(5) {
             observers.add(spy(object : EngineSession.Observer {}))
         }
 
@@ -3182,6 +3184,58 @@ class GeckoEngineSessionTest {
         var onExceptionCalled = false
 
         engineSession.getNeverTranslateSiteSetting(
+            onResult = { onResultCalled = true },
+            onException = { onExceptionCalled = true },
+        )
+
+        geckoResult.completeExceptionally(Exception())
+        shadowOf(getMainLooper()).idle()
+
+        assertFalse(onResultCalled)
+        assertTrue(onExceptionCalled)
+    }
+
+    @Test
+    fun `WHEN addSignatureToPdf is successful THEN onResult should be called`() {
+        val engineSession = GeckoEngineSession(mock(), geckoSessionProvider = geckoSessionProvider)
+        val mockedGeckoEditor: PdfViewerController.SessionEditor = mock()
+
+        val geckoResult = GeckoResult<Void>()
+
+        whenever(geckoSession.pdfViewerEditor).thenReturn(mockedGeckoEditor)
+        whenever(mockedGeckoEditor.addSignature(any())).thenReturn(geckoResult)
+
+        var onResultCalled = false
+        var onExceptionCalled = false
+
+        engineSession.addSignatureToPdf(
+            "Test User",
+            onResult = { onResultCalled = true },
+            onException = { onExceptionCalled = true },
+        )
+
+        geckoResult.complete(null)
+        shadowOf(getMainLooper()).idle()
+
+        assertTrue(onResultCalled)
+        assertFalse(onExceptionCalled)
+    }
+
+    @Test
+    fun `WHEN addSignatureToPdf has an error THEN onException should be called`() {
+        val engineSession = GeckoEngineSession(mock(), geckoSessionProvider = geckoSessionProvider)
+        val mockedGeckoEditor: PdfViewerController.SessionEditor = mock()
+
+        val geckoResult = GeckoResult<Void>()
+
+        whenever(geckoSession.pdfViewerEditor).thenReturn(mockedGeckoEditor)
+        whenever(mockedGeckoEditor.addSignature(any())).thenReturn(geckoResult)
+
+        var onResultCalled = false
+        var onExceptionCalled = false
+
+        engineSession.addSignatureToPdf(
+            "Test User",
             onResult = { onResultCalled = true },
             onException = { onExceptionCalled = true },
         )
@@ -4924,10 +4978,60 @@ class GeckoEngineSessionTest {
             }
         )
 
+        whenever(geckoSession.isPdfJs).thenReturn(GeckoResult.fromValue(false))
         whenever(geckoSession.saveAsPdf()).thenReturn(GeckoResult.fromValue(mock()))
 
         engineSession.requestPdfToDownload()
         shadowOf(getMainLooper()).idle()
+    }
+
+    @Test
+    fun `GIVEN a PDF is showing the document WHEN requestPdfToDownload THEN it describes the download`() {
+        var seenUrl: String? = null
+        val engineSession =
+            GeckoEngineSession(runtime = mock(), geckoSessionProvider = geckoSessionProvider).apply {
+                currentUrl = "content://com.android.providers.downloads.documents/document/1"
+            }
+        engineSession.register(
+            object : EngineSession.Observer {
+                override fun onExternalResource(
+                    url: String,
+                    fileName: String?,
+                    contentLength: Long?,
+                    contentType: String?,
+                    cookie: String?,
+                    userAgent: String?,
+                    isPrivate: Boolean,
+                    skipConfirmation: Boolean,
+                    openInApp: Boolean,
+                    response: Response?,
+                ) {
+                    seenUrl = url
+                }
+            }
+        )
+
+        val pdfFileSaver = mock<SessionPdfFileSaver>()
+        whenever(pdfFileSaver.save())
+            .thenReturn(
+                GeckoResult.fromValue(
+                    WebResponse.Builder("blob:resource://pdf.js/0123")
+                        .statusCode(200)
+                        .body("%PDF-1.4".byteInputStream())
+                        .build()
+                )
+            )
+        whenever(geckoSession.pdfFileSaver).thenReturn(pdfFileSaver)
+        whenever(geckoSession.isPdfJs).thenReturn(GeckoResult.fromValue(true))
+
+        engineSession.requestPdfToDownload()
+        shadowOf(getMainLooper()).idle()
+
+        assertEquals(
+            "The URL comes from PDF.",
+            "blob:resource://pdf.js/0123",
+            seenUrl,
+        )
     }
 
     @Test
@@ -4956,6 +5060,7 @@ class GeckoEngineSessionTest {
             }
         )
 
+        whenever(geckoSession.isPdfJs).thenReturn(GeckoResult.fromValue(false))
         whenever(geckoSession.saveAsPdf())
             .thenReturn(GeckoResult.fromValue(null))
             .thenReturn(GeckoResult.fromException(IllegalStateException()))
@@ -5027,7 +5132,7 @@ class GeckoEngineSessionTest {
                 runtime = mock(),
                 geckoSessionProvider = geckoSessionProvider,
             )
-        class MockGeckoPrintException() : GeckoPrintException()
+        class MockGeckoPrintException : GeckoPrintException()
         whenever(geckoSession.didPrintPageContent()).thenReturn(GeckoResult.fromException(MockGeckoPrintException()))
 
         engineSession.register(

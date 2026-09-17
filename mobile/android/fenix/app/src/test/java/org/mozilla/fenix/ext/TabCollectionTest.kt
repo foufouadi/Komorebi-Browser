@@ -23,7 +23,7 @@ class TabCollectionTest {
     fun getIconColor() {
         val color = mockTabCollection(100L).getIconColor(testContext)
         // Color does not change
-        for (i in 0..99) {
+        repeat(100) {
             assertEquals(color, mockTabCollection(100L).getIconColor(testContext))
         }
 

@@ -106,6 +106,7 @@ class AppRequestInterceptor(
 
     // This method is the only difference from the production code.
     // Otherwise the code should be kept identical
+    @Suppress("LongParameterList") // Mirrors the production RequestInterceptor.onLoadRequest signature.
     private fun interceptFxaRequest(
         engineSession: EngineSession,
         uri: String,

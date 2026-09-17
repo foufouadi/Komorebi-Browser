@@ -4,7 +4,6 @@
 
 import itertools
 import re
-from collections import OrderedDict
 from copy import deepcopy
 
 import ipdl.ast
@@ -1600,7 +1599,7 @@ class _GenerateProtocolCode(ipdl.ast.Visitor):
         """Generate the definitions for all structs and unions. This will
         re-order the declarations if needed in the C++ code such that
         dependencies have already been defined."""
-        decls = OrderedDict()
+        decls = {}
         for su in tu.structsAndUnions:
             if isinstance(su, StructDecl):
                 which = "struct"
@@ -1652,13 +1651,13 @@ class _GenerateProtocolCode(ipdl.ast.Visitor):
         def gen_struct(deps, defn):
             for dep in deps:
                 if dep in decls:
-                    d, t = decls[dep]
-                    del decls[dep]
+                    d, t = decls.pop(dep)
                     gen_struct(d, t)
             self.hdrfile.addthings(defn)
 
-        while len(decls) > 0:
-            _, (d, t) = decls.popitem(False)
+        while decls:
+            first_k = next(iter(decls))
+            d, t = decls.pop(first_k)
             gen_struct(d, t)
 
     def visitProtocol(self, p):
@@ -2109,49 +2108,6 @@ class _ParamTraits:
         clsns = _putInNamespaces(clsdecl, namespaces)
         defns = _putInNamespaces(methoddefns, namespaces)
         return clsns, defns
-
-    @classmethod
-    def actorPickling(cls, actortype, side):
-        """Generates pickling for IPDL actors. This is a |nullable| deserializer.
-        Write and read callers will perform nullability validation."""
-
-        cxxtype = _cxxBareType(actortype, side, fq=True)
-        basetype = Type("mozilla::ipc::IProtocol", ptr=True)
-
-        # void Write(..) impl - Write actor as IProtocol*
-        write = cls.checkedWrite(
-            None,
-            ExprCast(cls.var, basetype, static=True),
-            cls.writervar,
-            sentinelKey=actortype.name(),
-        )
-
-        # bool Read(..) impl - Read actor as IProtocol*
-        read = StmtCode(
-            """
-            ${read}
-            if (actor && actor->GetProtocolId() != ${protocolid}) {
-                ${typeerror}
-                return {};
-            }
-            return static_cast<${cxxtype}>(actor);
-            """,
-            read=cls._checkedRead(
-                None,
-                basetype,
-                ExprVar("actor"),
-                sentinelKey=actortype.name(),
-                what="managed " + actortype.name() + " actor",
-            ),
-            protocolid=_protocolId(actortype),
-            typeerror=cls.fatalError(
-                cls.readervar,
-                "Unexpected actor type (expected " + actortype.name() + ")",
-            ),
-            cxxtype=cxxtype,
-        )
-
-        return cls.generateDecl(cxxtype, [write], [read])
 
     @classmethod
     def structPickling(cls, structtype):
@@ -3246,6 +3202,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
         self.cppfile = None
         self.ns = None
         self.cls = None
+        self.concreteActorType = None
         self.protocolCxxIncludes = []
         self.actorForwardDecls = []
         self.usingDecls = []
@@ -3351,22 +3308,34 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
             Whitespace.NL,
         ])
 
-        actortype = ActorType(tu.protocol.decl.type)
-        traitsdecl, traitsdefn = _ParamTraits.actorPickling(actortype, self.side)
-
-        self.hdrfile.addthings([traitsdecl, Whitespace.NL] + _includeGuardEnd(hf))
-
-        # If the implementation type is not overridden, add an implicit import
-        # for the default implementation header file. Explicit implementation
-        # types will specify their headers manually with `include`.
-        if self.protocol.implAttribute(self.side) is None:
-            assert self.protocol.name.startswith("P")
-            self.externalIncludes.add(
-                "".join(n.name + "/" for n in self.protocol.namespaces)
-                + self.protocol.name[1:]
-                + self.side.capitalize()
-                + ".h"
+        def makeActorTraits(qname):
+            return StmtCode(
+                """
+                namespace mozilla::ipc {
+                template <>
+                struct ActorTraits<${qname}> {
+                    static constexpr ProtocolId kProtocolId = ${protocolid};
+                    static constexpr Side kSide = ${side}Side;
+                };
+                }  // namespace mozilla::ipc
+                """,
+                qname=qname,
+                protocolid=_protocolId(self.protocol.decl.type),
+                side=self.side.title(),
             )
+
+        # Generate ActorTraits specializations for the generated actor type, as
+        # well as the single implementation type (if known).
+        # This will allow the type to be used by IProtocol::ActorCast to perform
+        # safe downcasting of actor types.
+        self.hdrfile.addthing(
+            makeActorTraits(_actorName(str(self.protocol.qname()), self.side))
+        )
+
+        if self.concreteActorType is not None:
+            self.hdrfile.addthing(makeActorTraits(self.concreteActorType))
+
+        self.hdrfile.addthings(_includeGuardEnd(hf))
 
         # make the .cpp file
         cf.addthings(
@@ -3403,8 +3372,6 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
             Whitespace.NL,
             Whitespace.NL,
         ])
-
-        cf.addthing(traitsdefn)
 
     def visitUsingStmt(self, using):
         if using.decl.fullname is not None:
@@ -3520,6 +3487,41 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
                 Whitespace.NL,
             ])
 
+        implAttr = self.protocol.implAttribute(self.side)
+        if implAttr is None:
+            assert self.protocol.name.startswith("P")
+            pqname = self.protocol.qname()
+            self.concreteActorType = ipdl.ast.QualifiedId(
+                pqname.loc, pqname.baseid[1:] + self.side.title(), pqname.quals
+            )
+
+            # If the implementation type is not overridden, add an implicit
+            # import for the default implementation header file. Explicit
+            # implementation types will specify their headers manually with
+            # `include`.
+            self.externalIncludes.add(
+                "/".join(
+                    self.concreteActorType.quals
+                    + [self.concreteActorType.baseid + ".h"]
+                )
+            )
+        elif implAttr != "virtual":
+            parts = implAttr.value.split("::")
+            self.concreteActorType = ipdl.ast.QualifiedId(
+                implAttr.loc, parts[-1], parts[:-1]
+            )
+
+        # Add a forward declaration to the header file for our actor's concrete
+        # type, if we have one.
+        if self.concreteActorType is not None:
+            self.hdrfile.addthings([
+                _makeForwardDeclForQClass(
+                    self.concreteActorType.baseid,
+                    self.concreteActorType.quals,
+                ),
+                Whitespace.NL,
+            ])
+
         self.cls = Class(self.clsname, inherits=inherits, abstract=True)
 
         self.cls.addstmt(Label.PRIVATE)
@@ -3604,7 +3606,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
                     defaultRecv = MethodDefn(recvDecl)
                     defaultRecv.addcode("return IPC_OK();\n")
                     self.cls.addstmt(defaultRecv)
-                elif self.protocol.implAttribute(self.side) == "virtual":
+                elif self.concreteActorType is None:
                     # If we're using virtual calls, we need the methods to be
                     # declared on the base class.
                     recvDecl.methodspec = MethodSpec.PURE
@@ -3612,7 +3614,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
 
         # If we're using virtual calls, we need the methods to be declared on
         # the base class.
-        if self.protocol.implAttribute(self.side) == "virtual":
+        if self.concreteActorType is None:
             for md in p.messageDecls:
                 managed = md.decl.type.constructedType()
                 if not ptype.isManagerOf(managed) or md.decl.type.isDtor():
@@ -4287,18 +4289,11 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
     ##
 
     def concreteThis(self):
-        implAttr = self.protocol.implAttribute(self.side)
-        if implAttr == "virtual":
+        if self.concreteActorType is None:
             return ExprVar.THIS
-
-        if implAttr is None:
-            assert self.protocol.name.startswith("P")
-            className = self.protocol.name[1:] + self.side.capitalize()
-        else:
-            assert isinstance(implAttr, ipdl.ast.StringLiteral)
-            className = implAttr.value
-
-        return ExprCode("static_cast<${className}*>(this)", className=className)
+        return ExprCast(
+            ExprVar.THIS, Type(str(self.concreteActorType), ptr=True), static=True
+        )
 
     def thisCall(self, function, args):
         return ExprCall(ExprSelect(self.concreteThis(), "->", function), args=args)

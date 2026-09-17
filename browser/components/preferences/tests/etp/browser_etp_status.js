@@ -78,7 +78,14 @@ add_task(async function test_status_categories() {
 });
 
 add_task(async function test_tracker_count_toggle() {
-  await SpecialPowers.pushPrefEnv({ set: [[TRACKER_COUNT_PREF, true]] });
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      // The feature gate ships disabled by default (bug 2065206); enable it so
+      // the toggle is shown.
+      ["browser.urlbar.trackerCount.featureGate", true],
+      [TRACKER_COUNT_PREF, true],
+    ],
+  });
   await openPreferencesViaOpenPreferencesAPI("privacy", { leaveOpen: true });
   let doc = gBrowser.contentDocument;
 

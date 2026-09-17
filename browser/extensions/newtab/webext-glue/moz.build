@@ -107,18 +107,9 @@ FINAL_TARGET_FILES.data.data.content["external-components"][
 # NEWTAB_XPI_LOCALES in locales.configure. See locales/gen_locales.py.
 # This doesn't need to be in sync with the addon-jar.mn file, as the locales
 # are only included when we build newtab as an XPI.
-# @backward-compat { version 155 }: en-US is generated rather than copied
-# verbatim so copy_en_us can restore the homepage strings Bug 2048379 moved out
-# of newtab.ftl into preferences.ftl, for the pre-155 fallback. Once 155 reaches
-# Release, revert this to a plain FINAL_TARGET_FILES copy of newtab.ftl.
-en_us_newtab_ftl = "locales/en-US/browser/newtab/newtab.ftl"
-GENERATED_FILES += [en_us_newtab_ftl]
-GENERATED_FILES[en_us_newtab_ftl].script = "locales/gen_locales.py:copy_en_us"
-GENERATED_FILES[en_us_newtab_ftl].inputs = [
+FINAL_TARGET_FILES.locales["en-US"].browser.newtab += [
     "/browser/locales/en-US/browser/newtab/newtab.ftl",
-    "/browser/locales/en-US/browser/preferences/preferences.ftl",
 ]
-FINAL_TARGET_FILES.locales["en-US"].browser.newtab += ["!" + en_us_newtab_ftl]
 
 newtab_locales = CONFIG["NEWTAB_XPI_LOCALES"] or []
 

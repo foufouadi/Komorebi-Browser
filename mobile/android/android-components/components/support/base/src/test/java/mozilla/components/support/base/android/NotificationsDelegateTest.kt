@@ -24,6 +24,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.Mockito.doNothing
+import org.mockito.Mockito.doThrow
 import org.mockito.Mockito.eq
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
@@ -68,6 +69,21 @@ class NotificationsDelegateTest {
     fun `hasPostNotificationsPermission returns false when notifications are disabled`() {
         `when`(notificationManagerCompat.areNotificationsEnabled()).thenReturn(false)
         assertFalse(notificationsDelegate.hasPostNotificationsPermission())
+    }
+
+    @Test
+    fun `notify swallows a SecurityException and still reports the permission as granted`() {
+        `when`(notificationManagerCompat.areNotificationsEnabled()).thenReturn(true)
+        doThrow(SecurityException("Unknown package")).`when`(notificationManagerCompat).notify(null, 1, notification)
+
+        var permissionGranted = false
+        notificationsDelegate.notify(
+            notificationId = 1,
+            notification = notification,
+            onPermissionGranted = { permissionGranted = true },
+        )
+
+        assertTrue(permissionGranted)
     }
 
     @Test

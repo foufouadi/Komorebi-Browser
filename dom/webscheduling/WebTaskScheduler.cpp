@@ -60,6 +60,13 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(WebTaskSchedulingState)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mAbortSource, mPrioritySource);
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
+NS_IMPL_CYCLE_COLLECTING_ADDREF(WebTaskSchedulingState)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(WebTaskSchedulingState)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(WebTaskSchedulingState)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+NS_INTERFACE_MAP_END
+
 NS_IMPL_CYCLE_COLLECTION_CLASS(WebTask)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(WebTask)
@@ -163,13 +170,13 @@ bool WebTask::Run() {
     return false;
   }
 
-  // 11.2.2 Set event loop’s current scheduling state to state.
-  global->SetWebTaskSchedulingState(mSchedulingState);
-
   AutoJSAPI jsapi;
   if (!jsapi.Init(global)) {
     return false;
   }
+
+  // 11.2.2 Set event loop’s current scheduling state to state.
+  global->SetWebTaskSchedulingState(mSchedulingState);
 
   JS::Rooted<JS::Value> returnVal(jsapi.cx());
 
@@ -177,9 +184,6 @@ bool WebTask::Run() {
 
   MOZ_KnownLive(mCallback)->Call(&returnVal, error, "WebTask",
                                  CallbackFunction::eRethrowExceptions);
-
-  // 11.2.4 Set event loop’s current scheduling state to null.
-  global->SetWebTaskSchedulingState(nullptr);
 
   error.WouldReportJSException();
 
@@ -201,6 +205,9 @@ bool WebTask::Run() {
   } else {
     mPromise->MaybeResolve(returnVal);
   }
+
+  // 11.2.4 Set event loop’s current scheduling state to null.
+  global->SetWebTaskSchedulingState(nullptr);
 
   MOZ_ASSERT(!isInList());
   return true;

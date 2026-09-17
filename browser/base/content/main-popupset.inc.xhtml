@@ -69,6 +69,9 @@
          in place of the #context_askChat submenu. Populated by
          GenAI.buildTabSummarizeItem; hidden by default. -->
     <menuitem id="context_askChatSummarize" hidden="true"/>
+    <menuitem id="context_createAITab"
+              hidden="true"
+              data-l10n-id="tab-context-create-aitab"/>
     <menuseparator id="context_aiSeparator"/>
     <menuitem id="context_bookmarkSelectedTabs"
               hidden="true"
@@ -802,8 +805,10 @@
 
   <menupopup id="userContext-indicator-menu">
     <menuitem data-l10n-id="user-context-add-container"
+              data-container-entrypoint="container_indicator_menu"
               command="Browser:AddContainer"/>
     <menuitem data-l10n-id="user-context-manage-containers"
+              data-container-entrypoint="container_indicator_menu"
               command="Browser:OpenAboutContainers"/>
   </menupopup>
 

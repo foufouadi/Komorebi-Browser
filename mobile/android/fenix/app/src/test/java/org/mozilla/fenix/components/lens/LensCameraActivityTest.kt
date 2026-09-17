@@ -19,6 +19,7 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import io.mockk.every
 import io.mockk.verify
+import java.io.ByteArrayInputStream
 import java.io.File
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
@@ -36,10 +37,14 @@ import org.mozilla.fenix.BuildConfig
 import org.mozilla.fenix.R
 import org.mozilla.fenix.components.AppStore
 import org.mozilla.fenix.ext.components
+import org.mozilla.fenix.helpers.SHADOW_HEIGHT
+import org.mozilla.fenix.helpers.SHADOW_WIDTH
+import org.mozilla.fenix.helpers.ShadowBoundsReportingBitmapFactory
 import org.mozilla.fenix.utils.Settings
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows
+import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowToast
 
 @RunWith(RobolectricTestRunner::class)
@@ -488,5 +493,20 @@ class LensCameraActivityTest {
         verify(exactly = 0) { settings.hasAcceptedGoogleLensFirstRun = true }
         assertEquals(Activity.RESULT_CANCELED, Shadows.shadowOf(activity).resultCode)
         assertTrue(activity.isFinishing)
+    }
+
+    @Test
+    @Config(sdk = [27], shadows = [ShadowBoundsReportingBitmapFactory::class])
+    fun `GIVEN a decodable image WHEN the legacy decoder reads it THEN the null from the bounds pass is not a failure`() {
+        val activity = Robolectric.buildActivity(LensCameraActivity::class.java).get()
+        val uri = Uri.parse("content://media/external/images/1")
+        Shadows.shadowOf(activity.contentResolver).registerInputStreamSupplier(uri) {
+            ByteArrayInputStream(ByteArray(16))
+        }
+
+        val bitmap = activity.decodeDownsampledStream(uri)
+
+        assertEquals(SHADOW_WIDTH, bitmap.width)
+        assertEquals(SHADOW_HEIGHT, bitmap.height)
     }
 }

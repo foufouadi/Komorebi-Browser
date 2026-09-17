@@ -93,55 +93,42 @@ static LogModule* GetPPMLog() {
 #endif
 
 namespace geckoprofiler::markers {
-struct SubProcessPriorityChange {
-  static constexpr Span<const char> MarkerTypeName() {
-    return MakeStringSpan("subprocessprioritychange");
-  }
-  static void StreamJSONMarkerData(baseprofiler::SpliceableJSONWriter& aWriter,
-                                   int32_t aPid,
-                                   const ProfilerString8View& aPreviousPriority,
-                                   const ProfilerString8View& aNewPriority) {
-    aWriter.IntProperty("pid", aPid);
-    aWriter.StringProperty("Before", aPreviousPriority);
-    aWriter.StringProperty("After", aNewPriority);
-  }
-  static MarkerSchema MarkerTypeDisplay() {
-    using MS = MarkerSchema;
-    MS schema{MS::Location::MarkerChart, MS::Location::MarkerTable};
-    schema.AddKeyFormat("pid", MS::Format::Integer);
-    schema.AddKeyFormat("Before", MS::Format::String);
-    schema.AddKeyFormat("After", MS::Format::String);
-    schema.SetAllLabels(
-        "priority of child {marker.data.pid}:"
-        " {marker.data.Before} -> {marker.data.After}");
-    return schema;
-  }
+struct SubProcessPriorityChange
+    : public BaseMarkerType<SubProcessPriorityChange> {
+  static constexpr const char* Name = "subprocessprioritychange";
+  using MS = MarkerSchema;
+  static constexpr MS::Location Locations[] = {
+      MS::Location::MarkerChart,
+      MS::Location::MarkerTable,
+  };
+  static constexpr MS::PayloadField PayloadFields[] = {
+      {"pid", MS::InputType::Int32, nullptr, MS::Format::String},
+      {"Before", MS::InputType::CString, nullptr,
+       MS::Format::UniqueString},  // TODO: Use enum encoding
+      {"After", MS::InputType::CString, nullptr,
+       MS::Format::UniqueString},  // TODO: Use enum encoding
+  };
+  static constexpr const char* AllLabels =
+      "priority of child {marker.data.pid}:"
+      " {marker.data.Before} -> {marker.data.After}";
 };
 
-struct SubProcessPriority {
-  static constexpr Span<const char> MarkerTypeName() {
-    return MakeStringSpan("subprocesspriority");
-  }
-  static void StreamJSONMarkerData(baseprofiler::SpliceableJSONWriter& aWriter,
-                                   int32_t aPid,
-                                   const ProfilerString8View& aPriority,
-                                   const ProfilingState& aProfilingState) {
-    aWriter.IntProperty("pid", aPid);
-    aWriter.StringProperty("Priority", aPriority);
-    aWriter.StringProperty("Marker cause",
-                           ProfilerString8View::WrapNullTerminatedString(
-                               ProfilingStateToString(aProfilingState)));
-  }
-  static MarkerSchema MarkerTypeDisplay() {
-    using MS = MarkerSchema;
-    MS schema{MS::Location::MarkerChart, MS::Location::MarkerTable};
-    schema.AddKeyFormat("pid", MS::Format::Integer);
-    schema.AddKeyFormat("Priority", MS::Format::String);
-    schema.AddKeyFormat("Marker cause", MS::Format::String);
-    schema.SetAllLabels(
-        "priority of child {marker.data.pid}: {marker.data.Priority}");
-    return schema;
-  }
+struct SubProcessPriority : public BaseMarkerType<SubProcessPriority> {
+  static constexpr const char* Name = "subprocesspriority";
+  using MS = MarkerSchema;
+  static constexpr MS::Location Locations[] = {
+      MS::Location::MarkerChart,
+      MS::Location::MarkerTable,
+  };
+  static constexpr MS::PayloadField PayloadFields[] = {
+      {"pid", MS::InputType::Int32, nullptr, MS::Format::String},
+      {"Priority", MS::InputType::CString, nullptr,
+       MS::Format::UniqueString},  // TODO: Use enum encoding
+      {"Marker cause", MS::InputType::CString, nullptr,
+       MS::Format::UniqueString},  // TODO: Use enum encoding
+  };
+  static constexpr const char* AllLabels =
+      "priority of child {marker.data.pid}: {marker.data.Priority}";
 };
 }  // namespace geckoprofiler::markers
 
@@ -583,7 +570,8 @@ ParticularProcessPriorityManager::ParticularProcessPriorityManager(
                         selfPtr->Pid(),
                         ProfilerString8View::WrapNullTerminatedString(
                             ProcessPriorityToString(selfPtr->mPriority)),
-                        aProfilingState);
+                        ProfilerString8View::WrapNullTerminatedString(
+                            ProfilingStateToString(aProfilingState)));
       },
       self);
 }
@@ -748,7 +736,7 @@ ProcessPriority ParticularProcessPriorityManager::CurrentPriority() {
 
 ProcessPriority ParticularProcessPriorityManager::ComputePriority() {
   if (!mHighPriorityBrowserParents.IsEmpty() ||
-      mContentParent->GetRemoteType() == EXTENSION_REMOTE_TYPE ||
+      mContentParent->GetRemoteType().IsExtension() ||
       mHoldsPlayingAudioWakeLock) {
     return PROCESS_PRIORITY_FOREGROUND;
   }
@@ -804,7 +792,7 @@ void ParticularProcessPriorityManager::SetPriorityNow(
 
   mPriority = aPriority;
 
-  // We skip incrementing the DOM_CONTENTPROCESS_OS_PRIORITY_RAISED if we're
+  // We skip incrementing the dom.contentprocess.os_priority_raised if we're
   // transitioning from the PROCESS_PRIORITY_UNKNOWN level, which is where
   // we initialize at.
   if (oldPriority < mPriority && oldPriority != PROCESS_PRIORITY_UNKNOWN) {

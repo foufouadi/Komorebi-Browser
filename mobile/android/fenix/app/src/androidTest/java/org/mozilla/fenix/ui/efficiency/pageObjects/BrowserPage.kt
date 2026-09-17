@@ -6,6 +6,7 @@ package org.mozilla.fenix.ui.efficiency.pageObjects
 
 import android.os.SystemClock
 import android.util.Log
+import android.view.WindowManager
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ComposeTimeoutException
@@ -34,11 +35,11 @@ import org.mozilla.fenix.helpers.TestHelper.packageName
 import org.mozilla.fenix.helpers.ext.waitNotNull
 import org.mozilla.fenix.ui.efficiency.helpers.BasePage
 import org.mozilla.fenix.ui.efficiency.helpers.Selector
-import org.mozilla.fenix.ui.efficiency.navigation.NavigationRegistry
+import org.mozilla.fenix.ui.efficiency.navigation.NavigationGraph
+import org.mozilla.fenix.ui.efficiency.navigation.NavigationOptions
 import org.mozilla.fenix.ui.efficiency.navigation.NavigationStep
 import org.mozilla.fenix.ui.efficiency.selectors.BrowserPageSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.DownloadsSelectors
-import org.mozilla.fenix.ui.efficiency.selectors.HomeSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.MainMenuSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.SearchBarSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.ToolbarSelectors
@@ -46,8 +47,8 @@ import org.mozilla.fenix.ui.efficiency.selectors.ToolbarSelectors
 class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule, *>) : BasePage(composeRule) {
     override val pageName = "BrowserPage"
 
-    init {
-        NavigationRegistry.register(
+    internal override fun registerNavigation(builder: NavigationGraph.Builder) {
+        builder.register(
             from = "HomePage",
             to = pageName,
             steps =
@@ -59,18 +60,18 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
         )
 
         // Use UIAutomator selector to avoid Compose sync hanging when GeckoView is active.
-        NavigationRegistry.register(
+        builder.register(
             from = pageName,
             to = pageName,
             steps =
                 listOf(
-                    NavigationStep.Click(ToolbarSelectors.TOOLBAR_URL_BOX_UIAUTOMATOR),
+                    NavigationStep.Click(ToolbarSelectors.TOOLBAR_URL_BOX_UIAUTOMATOR2),
                     NavigationStep.EnterText(SearchBarSelectors.TOOLBAR_IN_EDIT_MODE),
                     NavigationStep.PressEnter(SearchBarSelectors.TOOLBAR_IN_EDIT_MODE),
                 ),
         )
 
-        NavigationRegistry.register(
+        builder.register(
             from = "SearchBarComponent",
             to = pageName,
             steps =
@@ -81,14 +82,7 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
         )
 
         // Use UIAutomator selector to avoid Compose sync hanging when GeckoView is active.
-        NavigationRegistry.register(
-            from = pageName,
-            to = "MainMenuPage",
-            steps = listOf(NavigationStep.Click(HomeSelectors.MAIN_MENU_BUTTON_UIAUTOMATOR)),
-        )
-
-        // Use UIAutomator selector to avoid Compose sync hanging when GeckoView is active.
-        NavigationRegistry.register(
+        builder.register(
             from = pageName,
             to = "HomePage",
             steps =
@@ -98,7 +92,7 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
                 ),
         )
 
-        NavigationRegistry.register(
+        builder.register(
             from = pageName,
             to = "AddToHomeScreenComponent",
             steps =
@@ -108,26 +102,22 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
                     NavigationStep.Click(MainMenuSelectors.ADD_TO_HOMESCREEN_BUTTON),
                 ),
         )
-
-        // UIAutomator (Compose sync can hang while GeckoView is active) AND the content-description
-        // variant rather than the testTag: with shouldUseExpandedToolbar the counter moves to the bottom
-        // navigation bar, where it carries no tag. NOTE: TabDrawerPage registers this same edge — keep the
-        // two in step until the duplicate is removed.
-        NavigationRegistry.register(
-            from = pageName,
-            to = "TabDrawerPage",
-            steps = listOf(NavigationStep.Click(ToolbarSelectors.TAB_COUNTER_ANY_LAYOUT)),
-        )
     }
 
-    override fun navigateToPage(url: String, forceNavigation: Boolean): BrowserPage {
-        super.navigateToPage(url = url.ifBlank { "example.com" }, forceNavigation = forceNavigation)
+    override fun navigateToPage(
+        url: String,
+        forceNavigation: Boolean,
+        navigationOptions: NavigationOptions,
+    ): BrowserPage {
+        super.navigateToPage(
+            url = url.ifBlank { "example.com" },
+            forceNavigation = forceNavigation,
+            navigationOptions = navigationOptions,
+        )
         return this
     }
 
-    override fun mozGetSelectorsByGroup(group: String): List<Selector> {
-        return BrowserPageSelectors.all.filter { it.groups.contains(group) }
-    }
+    override val selectorCatalog = BrowserPageSelectors
 
     /**
      * Taps the Play control on a web media page (video or audio). The tap is confirmed by [verifyMediaPlaybackState],
@@ -192,7 +182,7 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
         // is a single-shot check, so firing it the instant the sheet animates in can miss the
         // dropdowns and fail spuriously. Gate on the last-rendered dropdown before the group check.
         mozVerify(BrowserPageSelectors.TRANSLATION_SHEET_TRANSLATE_TO, timeout = waitingTimeLong)
-        mozVerifyElementsByGroup("notTranslatedPageTranslationSheet")
+        mozVerifyElementsByGroup(BrowserPageSelectors.Group.NOT_TRANSLATED_PAGE_TRANSLATION_SHEET)
         return this
     }
 
@@ -692,6 +682,34 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
         return this
     }
 
+    /**
+     * Long-press the web-content link labelled [linkText] and wait for the context menu to offer [contextMenuItem],
+     * refreshing the page and retrying if it does not appear.
+     *
+     * Mirrors the legacy BrowserRobot.longClickPageObject, whose retry is load-bearing: mozLongClick is single-shot,
+     * and a long press that lands before GeckoView has settled opens no menu at all. The legacy fallback between
+     * attempts is a three-dot-menu Refresh, reproduced here rather than a swipe or a scroll. The caller still clicks
+     * the item; this only guarantees the menu is up.
+     */
+    fun longClickPageObjectUntilContextMenu(linkText: String, contextMenuItem: String): BrowserPage {
+        val link = BrowserPageSelectors.PAGE_LINK(linkText)
+        val menuItem = BrowserPageSelectors.CONTEXT_MENU_ITEM(contextMenuItem)
+        for (i in 1..CONTEXT_MENU_RETRY_COUNT) {
+            try {
+                mozVerify(link, timeout = waitingTime)
+                mozLongClick(link)
+                mozVerify(menuItem, timeout = waitingTimeShort)
+                return this
+            } catch (e: AssertionError) {
+                if (i == CONTEXT_MENU_RETRY_COUNT) throw e
+                mozClick(BrowserPageSelectors.MAIN_MENU_BUTTON)
+                mozClick(MainMenuSelectors.REFRESH_BUTTON)
+                mozVerify(BrowserPageSelectors.ENGINE_VIEW, timeout = waitingTime)
+            }
+        }
+        return this
+    }
+
     /** Pick the saved-card suggestion whose masked number ends in [lastDigits]. */
     fun clickCreditCardSuggestion(lastDigits: String): BrowserPage {
         val suggestion = BrowserPageSelectors.CREDIT_CARD_SUGGESTION(lastDigits)
@@ -706,6 +724,29 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
         return this
     }
 
+    /**
+     * Assert whether screenshots are currently permitted on the app window.
+     *
+     * Android blocks screen capture whenever the window carries [WindowManager.LayoutParams.FLAG_SECURE]. Fenix sets
+     * that flag on the activity window while a private tab is in the foreground and "Allow screenshots in private
+     * browsing" is off, and clears it otherwise. Asserting the flag is the deterministic equivalent of trying to take a
+     * screenshot, without depending on the flaky OS capture path.
+     *
+     * @param allowed true expects screenshots permitted (flag absent); false expects them blocked (flag present).
+     */
+    fun verifyScreenshotsAllowed(allowed: Boolean): BrowserPage {
+        val isSecure = composeRule.runOnUiThread {
+            (composeRule.activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE) != 0
+        }
+        assertTrue(
+            "Expected screenshots to be " +
+                (if (allowed) "allowed (FLAG_SECURE absent)" else "blocked (FLAG_SECURE present)") +
+                ", but FLAG_SECURE was ${if (isSecure) "present" else "absent"}",
+            isSecure != allowed,
+        )
+        return this
+    }
+
     private companion object {
         const val HTTPS_ERROR_GO_BACK = "Go Back (Recommended)"
         const val HTTPS_ERROR_CONTINUE = "Continue to HTTP Site"
@@ -713,5 +754,6 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
         const val FONT_SIZE_STEP_SIZE = 5
         const val FONT_SIZE_MIN_VALUE = 50
         const val FONT_SIZE_DECIMAL_CONVERSION = 100f
+        const val CONTEXT_MENU_RETRY_COUNT = 3
     }
 }

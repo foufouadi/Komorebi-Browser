@@ -385,6 +385,7 @@ pwmgr:
       Possible triggers include:
         "copy_logins" when a user copies a password in about:logins
         "copy_cpm" when a user copies a password in contextual password manager
+        "delete_autocomplete" when a user deletes a password from the form autocomplete dropdown
         "edit_logins" when a user edits a login in about:logins
         "edit_cpm" when a user edits a login in contextual password manager
         "export_logins" when a user exports all passwords in about:logins
@@ -413,6 +414,57 @@ pwmgr:
       result:
         description: >
           The result of the OS Authentication.
+        type: string
+
+  primary_password_prompt:
+    type: event
+    description: >
+      Recorded every time the password manager asks the user for their Primary
+      Password, together with the outcome of that prompt.
+      Possible sources, meaning the code path that put the dialog on screen, are:
+        "reauth" for the explicit re-authentication gate used by about:logins,
+          the contextual password manager and about:preferences.
+        "crypto_sdr" when the JSON store had to unlock the NSS key to encrypt
+          or decrypt a login.
+        "rust_storage" when the Rust store had to unlock the NSS key.
+      Possible results are:
+        "success" when the user entered the correct password.
+        "cancel" when the user dismissed the dialog.
+        "wrong_password" when the user entered an incorrect password and is
+          prompted again.
+        "error" when an unexpected exception was encountered.
+      Only "rust_storage" reports "wrong_password", because on the other two
+      paths NSS re-prompts internally without notifying us: an unlock in which
+      the user mistyped their password before succeeding or giving up is
+      recorded there as a single event holding the final outcome. For the same
+      reason "reauth" never reports "error", since NSS surfaces a dismissed
+      dialog and an internal failure identically. On "crypto_sdr", "error" can
+      also mean that the operation failed before a dialog was shown.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2070108
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2070108
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - passwords-dev@mozilla.org
+    expires: never
+    extra_keys:
+      source:
+        description: >
+          The code path that showed the prompt.
+        type: string
+      trigger:
+        description: >
+          For "reauth", which user interaction required the re-authentication,
+          using the same values as `prompt_shown_os_reauth.trigger`. For
+          "crypto_sdr", the operation that needed the key, "encrypt" or
+          "decrypt". Not set for "rust_storage", which does not know what the
+          key is used for.
+        type: string
+      result:
+        description: >
+          The outcome of the prompt.
         type: string
 
   require_os_reauth_toggle:
@@ -939,6 +991,199 @@ pwmgr:
           The error message or exception string from the failure.
         type: string
 
+  rust_restore_status:
+    type: event
+    description: >
+      One record per run that restores logins out of the deactivated Rust
+      store back into the JSON store, recording duration, login counts and
+      any fatal error.
+    bugs:
+      - https://bugzil.la/2065593
+    data_reviews:
+      - https://bugzil.la/2065593
+    data_sensitivity:
+      - technical
+    notification_emails:
+      - passwords-dev@mozilla.org
+    expires: never
+    extra_keys:
+      metric_version:
+        type: string
+        description: Identifier for rust migration telemetry version
+      run_id:
+        type: string
+        description: Unique identifier for the restore run.
+      duration_ms:
+        description: >
+          Duration of the restore in milliseconds, measured with a monotonic
+          clock.
+        type: quantity
+      restore_version:
+        description: >
+          The restore pass this record belongs to, from
+          signon.storage.rust.restoreTargetVersion. The attempt budget is
+          counted per version.
+        type: quantity
+      attempt:
+        description: >
+          Number of prior restore attempts across sessions (0 on the first
+          attempt). Restores stop being attempted once this reaches its
+          budget.
+        type: quantity
+      state:
+        description: >
+          Migrator state when the restore started: "RevertPending" the first
+          time the Rust backend is deactivated, "JSONPrimary" for a later
+          startup retrying a restore that did not complete.
+        type: string
+      number_of_logins_to_restore:
+        description: >
+          Number of logins found in the Rust store. Reported for every run,
+          including the ones that give up before reading the store, so
+          "TooManyLogins" says how many logins it left behind.
+        type: quantity
+      number_of_logins_added:
+        description: >
+          Number of logins that did not exist in the JSON store and were added.
+        type: quantity
+      number_of_logins_updated:
+        description: >
+          Number of logins whose credentials were newer in the Rust store and
+          were written back to the JSON store.
+        type: quantity
+      number_of_logins_skipped:
+        description: >
+          Number of logins left untouched because the JSON store already held
+          the same or newer credentials.
+        type: quantity
+      number_of_logins_failed:
+        description: >
+          Number of logins that could not be restored. The Rust store is kept
+          instead of wiped when this is non-zero, so the next startup retries.
+        type: quantity
+      end_state:
+        description: >
+          Outcome of the run: "Restored" when every login made it into the JSON
+          store, "Incomplete" when individual logins failed, "Deferred" when
+          the primary password was locked and the restore is waiting for the
+          unlock, "Aborted" when the browser shut down mid-run,
+          "TooManyLogins" when the Rust store held implausibly many logins,
+          "Failed" when a fatal error aborted the run. The Rust database is
+          never touched. "Restored" and "TooManyLogins" are final, the others
+          mean a later startup tries again.
+        type: string
+      primary_password_set:
+        description: >
+          Whether a Primary Password was set at the time of the run.
+        type: boolean
+      error_message:
+        description: >
+          The fatal error that aborted the run, or empty if the run completed.
+        type: string
+
+  rust_restore_login_error:
+    type: event
+    description: >
+      Records one event per login that could not be restored from the
+      deactivated Rust store, with the normalized error message.
+    bugs:
+      - https://bugzil.la/2065593
+    data_reviews:
+      - https://bugzil.la/2065593
+    data_sensitivity:
+      - technical
+    notification_emails:
+      - passwords-dev@mozilla.org
+    expires: never
+    extra_keys:
+      metric_version:
+        type: string
+        description: Identifier for rust migration telemetry version
+      run_id:
+        type: string
+        description: Unique identifier for the restore run
+      error_message:
+        description: >
+          The error message or exception string from the failure.
+        type: string
+
+  storage_operation_time:
+    type: event
+    description: >
+      One record per login storage operation performed through LoginManager,
+      with the backend that served it and how long the caller waited. Not
+      recorded when the operation fails, or when it starts while the primary
+      password is locked, since entering it mid-operation would put the user's
+      wait time into the duration. Event counts are therefore neither operation
+      counts nor success rates.
+    bugs:
+      - https://bugzil.la/2070146
+    data_reviews:
+      - https://bugzil.la/2070146
+    data_sensitivity:
+      - technical
+    notification_emails:
+      - passwords-dev@mozilla.org
+    expires: never
+    extra_keys:
+      backend:
+        type: string
+        description: >
+          The storage backend that served the call: "json", "rust" or
+          "geckoview".
+      operation:
+        type: string
+        description: >
+          "search", "list", "count" or "record_password_use".
+      duration_ms:
+        type: quantity
+        description: >
+          Duration of the call as seen by the caller, measured in LoginManager
+          around the delegation to the active backend.
+
+  rust_init_status:
+    type: event
+    description: >
+      One record per login storage initialization, with the duration of each
+      phase, the backend the migrator selected and any fatal error. Migration
+      traffic has its own event, rust_migration_status.
+    bugs:
+      - https://bugzil.la/2070152
+    data_reviews:
+      - https://bugzil.la/2070152
+    data_sensitivity:
+      - technical
+    notification_emails:
+      - passwords-dev@mozilla.org
+    expires: never
+    extra_keys:
+      init_rust_components_ms:
+        type: quantity
+        description: Duration of initializing the shared Rust components.
+      create_rust_store_ms:
+        type: quantity
+        description: >
+          Duration of creating/opening the Rust login store, including opening
+          the SQLite database and running schema initialization.
+      total_ms:
+        type: quantity
+        description: Duration of the complete initialization.
+      backend:
+        type: string
+        description: >
+          The backend the migrator selected as active for this session, "json"
+          or "rust". Both stores are initialized on every startup; this also
+          says which store number_of_logins was counted from.
+      result:
+        type: string
+        description: >
+          "ok", or "error" when initialization aborted with a fatal error.
+      error_kind:
+        type: string
+        description: >
+          Name of the error that aborted initialization, or empty when it
+          completed.
+
   saving_enabled:
     type: boolean
     lifetime: application
@@ -993,9 +1238,6 @@ pwmgr:
       submit; 1: safe page & unsafe submit; 2: safe page & unknown submit; 3:
       unsafe page & safe submit; 4: unsafe page & unsafe submit; 5: unsafe page
       & unknown submit)
-
-      This metric was generated to correspond to the Legacy Telemetry enumerated
-      histogram PWMGR_LOGIN_PAGE_SAFETY.
     range_min: 0
     range_max: 8
     bucket_count: 9
@@ -1003,6 +1245,7 @@ pwmgr:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1340021
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1545172
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2061373
     data_reviews:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1340021
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1545172
@@ -1010,7 +1253,6 @@ pwmgr:
       - seceng-telemetry@mozilla.com
       - loines@mozilla.com
     expires: never
-    telemetry_mirror: PWMGR_LOGIN_PAGE_SAFETY
     send_in_pings:
       - metrics
       - sync
@@ -1134,16 +1376,22 @@ form_autocomplete:
   show_logins:
     type: event
     description: >
-      An content form autocomplete popup was shown. Details on the timing
-      and context are provided.
+      A login autocomplete popup was shown, with the time from the start of
+      the search until the popup appeared and details on its contents.
+      Since bug 2070466 this is recorded once per input element per page
+      load, on the first opening of its popup, for all search string lengths;
+      before, it was recorded on every result update while the popup was
+      open, capped to search strings of length 0 and 1.
       This event was generated to correspond to the Legacy Telemetry event
       form_autocomplete.show#logins.
     bugs:
       - https://bugzil.la/1619498
       - https://bugzil.la/1628849
+      - https://bugzil.la/2070466
     data_reviews:
       - https://bugzil.la/1619498
       - https://bugzil.la/1628849
+      - https://bugzil.la/2070466
     notification_emails:
       - passwords-dev@mozilla.org
     expires: never

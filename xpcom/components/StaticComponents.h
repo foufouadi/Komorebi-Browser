@@ -94,6 +94,12 @@ struct StaticModule {
   StringOffset mContractID;
   Module::ProcessSelector mProcessSelector;
 
+  // Does the object returned by CreateInstance implement nsISerializable?
+  bool mIsSerializable;
+
+  // If this module is a singleton, don't allow CreateInstance.
+  bool mIsSingleton;
+
   const nsID& CID() const { return mCID; }
 
   ModuleID ID() const { return ModuleID(this - gStaticModules); }
@@ -134,6 +140,8 @@ struct StaticModule {
 
   nsISupports* ServiceInstance() const;
   void SetServiceInstance(already_AddRefed<nsISupports> aInst) const;
+
+  bool IsSingleton() const { return mIsSingleton; }
 };
 
 /**

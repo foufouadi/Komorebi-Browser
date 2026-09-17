@@ -21,10 +21,8 @@ import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
-import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withText
-import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiSelector
 import mozilla.components.compose.browser.toolbar.concept.BrowserToolbarTestTags.ADDRESSBAR_URL_BOX
 import mozilla.components.feature.customtabs.R as customtabsR
@@ -408,11 +406,6 @@ fun customTabScreen(composeTestRule: ComposeTestRule, interact: CustomTabRobot.(
     return CustomTabRobot.Transition(composeTestRule)
 }
 
-private fun mainMenuButton() = itemWithResId("$packageName:id/mozac_browser_toolbar_menu")
-
-private fun mainMenuButtonFromRedesignedToolbar() =
-    itemWithDescription(getStringResource(R.string.content_description_menu))
-
 private fun desktopSiteButton() = onView(withId(R.id.switchWidget))
 
 private fun findInPageButton() = onView(withText("Find in page"))
@@ -421,10 +414,6 @@ private fun openInBrowserButton() = onView(withText("Open in $appName"))
 
 private fun ComposeTestRule.openInBrowserButtonFromRedesignedToolbar() =
     onNodeWithContentDescription("Open in $appName")
-
-private fun closeButton() = onView(withContentDescription("Return to previous app"))
-
-private fun customTabToolbar() = mDevice.findObject(By.res("$packageName:id/toolbar"))
 
 private fun progressBar() =
     mDevice.findObject(UiSelector().resourceId("$packageName:id/mozac_browser_toolbar_progress"))

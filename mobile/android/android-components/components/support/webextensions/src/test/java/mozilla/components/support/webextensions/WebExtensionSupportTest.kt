@@ -508,7 +508,6 @@ class WebExtensionSupportTest {
         // Verify that we register action and tab handlers for all existing sessions on the extension
         val actionHandlerCaptor = argumentCaptor<ActionHandler>()
         val tabHandlerCaptor = argumentCaptor<TabHandler>()
-        val selectTabActionCaptor = argumentCaptor<TabListAction.SelectTabAction>()
         verify(ext).registerActionHandler(eq(customTabEngineSession), actionHandlerCaptor.capture())
         verify(ext).registerTabHandler(eq(customTabEngineSession), tabHandlerCaptor.capture())
         verify(ext).registerActionHandler(eq(engineSession), actionHandlerCaptor.capture())

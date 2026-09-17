@@ -167,18 +167,18 @@ browser/base/content/test/about/dummy_page.html
 browser/base/content/test/contextMenu/subtst_contextmenu.html
 browser/base/content/test/favicons/datauri-favicon.html
 browser/base/content/test/favicons/file_bug970276_popup1.html
-browser/base/content/test/fullscreen/open_and_focus_helper.html
+browser/base/content/test/browser-fullscreen/open_and_focus_helper.html
 browser/base/content/test/general/browser_tab_dragdrop_embed.html
 browser/base/content/test/general/dummy_page.html
 browser/base/content/test/general/file_documentnavigation_frameset.html
-browser/base/content/test/outOfProcess/file_base.html
-browser/base/content/test/outOfProcess/file_frame2.html
-browser/base/content/test/outOfProcess/file_innerframe.html
-browser/base/content/test/pageinfo/svg_image.html
+browser/base/content/test/browser-outOfProcess/file_base.html
+browser/base/content/test/browser-outOfProcess/file_frame2.html
+browser/base/content/test/browser-outOfProcess/file_innerframe.html
+browser/base/content/test/browser-pageinfo/svg_image.html
 browser/base/content/test/permissions/temporary_permissions_frame.html
 browser/base/content/test/permissions/temporary_permissions_subframe.html
-browser/base/content/test/plugins/plugin_bug797677.html
-browser/base/content/test/sanitize/dummy_page.html
+browser/base/content/test/browser-plugins/plugin_bug797677.html
+browser/base/content/test/browser-sanitize/dummy_page.html
 browser/base/content/test/siteIdentity/dummy_iframe_page.html
 browser/base/content/test/siteIdentity/dummy_page.html
 browser/base/content/test/siteIdentity/test-mixedcontent-securityerrors.html
@@ -1014,7 +1014,7 @@ browser/app/
 browser/branding/**/firefox-branding.js
 # Gzipped test file.
 browser/base/content/test/general/gZipOfflineChild.html
-browser/base/content/test/urlbar/file_blank_but_not_blank.html
+browser/components/urlbar/tests/browser/file_blank_but_not_blank.html
 # Test files that are really json not js, and don't need to be linted.
 browser/components/sessionstore/test/unit/data/sessionstore_valid.js
 browser/components/sessionstore/test/unit/data/sessionstore_invalid.js
@@ -1388,12 +1388,6 @@ dom/media/platforms/ffmpeg/libav55/
 dom/media/webaudio/test/blink/
 dom/media/webrtc/tests/mochitests/helpers_from_wpt/sdp.js
 dom/media/webrtc/transport/third_party/
-dom/media/webspeech/recognition/endpointer.cc
-dom/media/webspeech/recognition/endpointer.h
-dom/media/webspeech/recognition/energy_endpointer.cc
-dom/media/webspeech/recognition/energy_endpointer.h
-dom/media/webspeech/recognition/energy_endpointer_params.cc
-dom/media/webspeech/recognition/energy_endpointer_params.h
 dom/media/webvtt/vtt.sys.mjs
 dom/security/sanitizer/safe-default-configuration.json
 dom/tests/mochitest/ajax/

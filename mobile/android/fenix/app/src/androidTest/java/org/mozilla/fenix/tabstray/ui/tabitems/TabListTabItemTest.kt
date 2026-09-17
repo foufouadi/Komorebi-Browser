@@ -1,6 +1,11 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.fenix.tabstray.ui.tabitems
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -99,10 +104,34 @@ class TabListTabItemTest {
         }
     }
 
+    @Test
+    fun verifyMediaIndicatorVisible() {
+        composeTestRule.setContent {
+            ComposableUnderTest(isMediaActive = true)
+        }
+        composeTestRule
+            .onNodeWithTag(
+                TabsTrayTestTag.TAB_ITEM_MEDIA_INDICATOR,
+                useUnmergedTree = true,
+            )
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun verifyMediaIndicatorNotVisible() {
+        composeTestRule.setContent {
+            ComposableUnderTest(isMediaActive = false)
+        }
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_ITEM_MEDIA_INDICATOR).assertDoesNotExist()
+    }
+
     @Composable
-    private fun ComposableUnderTest(interactionState: TabItemInteractionState = TabItemInteractionState()) {
+    private fun ComposableUnderTest(
+        interactionState: TabItemInteractionState = TabItemInteractionState(),
+        isMediaActive: Boolean = false,
+    ) {
         TabListTabItem(
-            tab = createTab(url = "mozilla.org"),
+            tab = createTab(url = "mozilla.org", isMediaActive = isMediaActive),
             onCloseClick = { _ -> },
             onClick = { _ -> },
             onLongClick = { _ -> },

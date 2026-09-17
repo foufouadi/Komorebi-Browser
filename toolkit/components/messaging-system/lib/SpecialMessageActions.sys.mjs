@@ -44,7 +44,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "moz-src:///browser/components/customizableui/CustomizableUI.sys.mjs",
   ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
   FxAccounts: "resource://gre/modules/FxAccounts.sys.mjs",
-  GenAI: "resource:///modules/GenAI.sys.mjs",
+  GenAI: "moz-src:///browser/components/genai/GenAI.sys.mjs",
   ICON_CATALOG:
     // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
     "moz-src:///browser/components/shell/CustomIconManager.sys.mjs",
@@ -63,10 +63,12 @@ ChromeUtils.defineESModuleGetters(lazy, {
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
   // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
   Referrals: "resource:///modules/referrals/Referrals.sys.mjs",
+  ResetProfile: "resource://gre/modules/ResetProfile.sys.mjs",
   // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
   SelectableProfileService:
     "resource:///modules/profiles/SelectableProfileService.sys.mjs",
-  SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
+  SessionStore:
+    "moz-src:///browser/components/sessionstore/SessionStore.sys.mjs",
   // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
   Spotlight: "resource:///modules/asrouter/Spotlight.sys.mjs",
   // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
@@ -257,6 +259,18 @@ export const SpecialMessageActions = {
   },
 
   /**
+   * Set browser as the OS default browser via the "Open with" picker
+   * (IOpenWithLauncher), guaranteeing an OS-level prompt. Claiming the https
+   * protocol handler this way sets the whole web-browser default (http and
+   * https) with a single picker. Windows only.
+   *
+   * @param {Window} window Reference to a window object
+   */
+  async setDefaultBrowserViaOpenWith(window) {
+    await window.getShellService().setAsDefaultProtocolHandler("https");
+  },
+
+  /**
    * Reset browser homepage and newtab to default with a certain section configuration
    *
    * @param {"default"|null} home Value to set for browser homepage
@@ -398,7 +412,6 @@ export const SpecialMessageActions = {
       "browser.shell.setDefaultGuidanceNotifications",
       "browser.startup.homepage",
       "browser.startup.page",
-      "browser.startup.windowsLaunchOnLogin.disableLaunchOnLoginPrompt",
       "browser.privateWindowSeparation.enabled",
       "browser.firefox-view.feature-tour",
       "browser.pdfjs.feature-tour",
@@ -520,10 +533,15 @@ export const SpecialMessageActions = {
     }
     // In practice, all FxA signin flows will have a "service", because that param dictates the
     // UI shown by FxA. But to be extra cautious, this code treats it as optional.
-    let neededService = data?.extraParams?.service;
+    let extraParams = data?.extraParams;
+    let neededService = extraParams?.service;
+    if (neededService) {
+      delete extraParams.service;
+    }
     const url = await lazy.FxAccounts.config.promiseConnectAccountURI(
+      neededService || "sync",
       data?.entrypoint || "activity-stream-firstrun",
-      data?.extraParams || {}
+      extraParams || {}
     );
 
     let window = browser.documentGlobal;
@@ -943,6 +961,9 @@ export const SpecialMessageActions = {
       case "SET_DEFAULT_BROWSER":
         await this.setDefaultBrowser(window);
         break;
+      case "SET_DEFAULT_BROWSER_OPEN_WITH":
+        await this.setDefaultBrowserViaOpenWith(window);
+        break;
       case "SET_DEFAULT_PDF_HANDLER":
         await this.setDefaultPDFHandler(
           window,
@@ -1016,7 +1037,12 @@ export const SpecialMessageActions = {
           break;
         }
         const data = action.data;
+        const service = data?.extraParams?.service;
+        if (service) {
+          delete data.extraParams.service;
+        }
         const url = await lazy.FxAccounts.config.promiseConnectAccountURI(
+          service || "sync",
           data && data.entrypoint,
           (data && data.extraParams) || {}
         );
@@ -1033,7 +1059,11 @@ export const SpecialMessageActions = {
         return this.fxaSignInFlow(action.data, browser);
       case "FXA_AIWINDOW_SIGNIN_FLOW":
         /** @returns {Promise<boolean>} */
-        return lazy.AIWindow.launchWindow(browser);
+        return lazy.AIWindow.launchWindow(
+          browser,
+          false,
+          action.data?.source ?? "asrouter"
+        );
       case "OPEN_PROTECTION_PANEL": {
         let { gProtectionsHandler } = window;
         gProtectionsHandler.showProtectionsPopup({});
@@ -1063,8 +1093,8 @@ export const SpecialMessageActions = {
         Services.prefs.setStringPref(DOH_DOORHANGER_DECISION_PREF, "UIOk");
         break;
       case "CANCEL":
-        // A no-op used by CFRs that minimizes the notification but does not
-        // trigger a dismiss or block (it keeps the notification around)
+        // A no-op used by some surfaces that minimizes the notification but
+        // does not trigger a dismiss or block (it keeps the notification around)
         break;
       case "CONFIGURE_HOMEPAGE":
         this.configureHomepage(action.data);
@@ -1189,6 +1219,13 @@ export const SpecialMessageActions = {
           aboutPageURL.toString(),
           action.data.where || "tab"
         );
+        break;
+      }
+      case "RESET_PROFILE": {
+        if (!lazy.ResetProfile.resetSupported()) {
+          throw new Error("Profile reset is not supported for this profile.");
+        }
+        await lazy.ResetProfile.openConfirmationDialog(window);
         break;
       }
       default:

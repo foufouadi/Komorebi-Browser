@@ -1146,12 +1146,13 @@ bool nsLayoutUtils::IsAncestorFrameCrossDocInProcessConsideringContinuations(
     const nsIFrame* aCommonAncestor) {
   MOZ_ASSERT(aAncestorFrame);
   const nsIFrame* ancestorFirstContinuation =
-      aAncestorFrame->FirstContinuation();
+      FirstContinuationOrIBSplitSibling(aAncestorFrame);
   const nsIFrame* commonFirstContinuation =
-      aCommonAncestor ? aCommonAncestor->FirstContinuation() : nullptr;
+      aCommonAncestor ? FirstContinuationOrIBSplitSibling(aCommonAncestor)
+                      : nullptr;
 
   for (const nsIFrame* f = aFrame; f; f = GetCrossDocParentFrameInProcess(f)) {
-    auto* first = f->FirstContinuation();
+    auto* first = FirstContinuationOrIBSplitSibling(f);
     if (first == ancestorFirstContinuation) {
       return true;
     }
@@ -1395,6 +1396,21 @@ nsLayoutUtils::GetNearestScrollContainerFrameToScrollTowards(
         scrollContainerFrame->SidesToScrollForUserInputEvents().Intersects(
             aSideBits)) {
       return scrollContainerFrame;
+    }
+
+    // A frame fixed with respect to the viewport is a child of the viewport
+    // frame, so walking up from it would skip over the root scroll container
+    // frame. SCROLLABLE_FIXEDPOS_FINDS_ROOT exists for the same reason, but
+    // unlike it we keep walking when the root can't scroll toward aSideBits.
+    if (f->StyleDisplay()->mPosition == StylePositionProperty::Fixed &&
+        nsLayoutUtils::IsReallyFixedPos(f)) {
+      ScrollContainerFrame* rootScrollContainerFrame =
+          f->PresShell()->GetRootScrollContainerFrame();
+      if (rootScrollContainerFrame &&
+          rootScrollContainerFrame->SidesToScrollForUserInputEvents()
+              .Intersects(aSideBits)) {
+        return rootScrollContainerFrame;
+      }
     }
   }
   return nullptr;
@@ -6054,8 +6070,9 @@ struct SnappedImageDrawingParameters {
   // The default viewport size for SVG images, which we use unless a different
   // one has been explicitly specified. This is the same as |size| except that
   // it does not take into account any transformation on the gfxContext we're
-  // drawing to - for example, CSS transforms are not taken into account.
-  CSSIntSize svgViewportSize;
+  // drawing to - for example, CSS transforms are not taken into account, and
+  // it's not snapped.
+  CSSSize svgViewportSize;
   // Whether there's anything to draw at all.
   bool shouldDraw;
 
@@ -6065,7 +6082,7 @@ struct SnappedImageDrawingParameters {
   SnappedImageDrawingParameters(const gfxMatrix& aImageSpaceToDeviceSpace,
                                 const nsIntSize& aSize,
                                 const ImageRegion& aRegion,
-                                const CSSIntSize& aSVGViewportSize)
+                                const CSSSize& aSVGViewportSize)
       : imageSpaceToDeviceSpace(aImageSpaceToDeviceSpace),
         size(aSize),
         region(aRegion),
@@ -6183,20 +6200,8 @@ static SnappedImageDrawingParameters ComputeSnappedImageDrawingParameters(
       snappedDestSize, imgIContainer::FRAME_CURRENT, aSamplingFilter,
       aImageFlags);
 
-  nsIntSize svgViewportSize;
-  if (scaleFactors.xScale == 1.0 && scaleFactors.yScale == 1.0) {
-    // intImageSize is scaled by currentMatrix. But since there are no scale
-    // factors in currentMatrix, it is safe to assign intImageSize to
-    // svgViewportSize directly.
-    svgViewportSize = intImageSize;
-  } else {
-    // We should not take into account any transformation of currentMatrix
-    // when computing svg viewport size. Since currentMatrix contains scale
-    // factors, we need to recompute SVG viewport by unscaled devPixelDest.
-    svgViewportSize = aImage->OptimalImageSizeForDest(
-        devPixelDest.Size(), imgIContainer::FRAME_CURRENT, aSamplingFilter,
-        aImageFlags);
-  }
+  // The SVG viewport is the dest rect we're filling, not snapped.
+  const CSSSize svgViewportSize(devPixelDest.Width(), devPixelDest.Height());
 
   gfxSize imageSize(intImageSize.width, intImageSize.height);
 
@@ -6315,9 +6320,8 @@ static SnappedImageDrawingParameters ComputeSnappedImageDrawingParameters(
   ImageRegion region = ImageRegion::CreateWithSamplingRestriction(
       imageSpaceFill, subimage, extendMode);
 
-  return SnappedImageDrawingParameters(
-      transform, intImageSize, region,
-      CSSIntSize(svgViewportSize.width, svgViewportSize.height));
+  return SnappedImageDrawingParameters(transform, intImageSize, region,
+                                       svgViewportSize);
 }
 
 static ImgDrawResult DrawImageInternal(
@@ -6548,7 +6552,8 @@ IntSize nsLayoutUtils::ComputeImageContainerDrawingParameters(
     imgIContainer* aImage, nsIFrame* aForFrame,
     const LayoutDeviceRect& aDestRect, const LayoutDeviceRect& aFillRect,
     const StackingContextHelper& aSc, uint32_t aFlags,
-    SVGImageContext& aSVGContext, Maybe<ImageIntRegion>& aRegion) {
+    SVGImageContext& aSVGContext, Maybe<ImageIntRegion>& aRegion,
+    bool* aRasterizedForDest) {
   MOZ_ASSERT(aImage);
   MOZ_ASSERT(aForFrame);
 
@@ -6559,19 +6564,21 @@ IntSize nsLayoutUtils::ComputeImageContainerDrawingParameters(
   // Compute our SVG context parameters, if any. Don't replace the viewport
   // size if it was already set, prefer what the caller gave.
   SVGImageContext::MaybeStoreContextPaint(aSVGContext, aForFrame, aImage);
-  if ((scaleFactors.xScale != 1.0 || scaleFactors.yScale != 1.0) &&
-      aImage->GetType() == imgIContainer::TYPE_VECTOR &&
-      (!aSVGContext.GetViewportSize())) {
-    gfxSize gfxDestSize(aDestRect.Width(), aDestRect.Height());
-    IntSize viewportSize = aImage->OptimalImageSizeForDest(
-        gfxDestSize, imgIContainer::FRAME_CURRENT, samplingFilter, aFlags);
-
-    CSSIntSize cssViewportSize(viewportSize.width, viewportSize.height);
-    aSVGContext.SetViewportSize(Some(cssViewportSize));
+  if (aImage->GetType() == imgIContainer::TYPE_VECTOR &&
+      !aSVGContext.GetViewportSize()) {
+    aSVGContext.SetViewportSize(
+        Some(CSSSize(aDestRect.Width(), aDestRect.Height())));
   }
 
   const gfx::Matrix& itm = aSc.GetInheritedTransform();
   LayerIntRect destRect = SnapRectForImage(itm, scaleFactors, aDestRect);
+  const IntSize snappedDestSize = destRect.Size().ToUnknownSize();
+  auto setRasterizedForDest = [&](const IntSize& aSize) {
+    if (aRasterizedForDest) {
+      *aRasterizedForDest = aSize == snappedDestSize;
+    }
+    return aSize;
+  };
 
   // Since we always decode entire raster images, we only care about the
   // ImageIntRegion for vector images when we are recording blobs, for which we
@@ -6592,9 +6599,9 @@ IntSize nsLayoutUtils::ComputeImageContainerDrawingParameters(
       destRect.height = scaleHeight;
     }
 
-    return aImage->OptimalImageSizeForDest(
+    return setRasterizedForDest(aImage->OptimalImageSizeForDest(
         gfxSize(destRect.Width(), destRect.Height()),
-        imgIContainer::FRAME_CURRENT, samplingFilter, aFlags);
+        imgIContainer::FRAME_CURRENT, samplingFilter, aFlags));
   }
 
   // We only use the region rect with blob recordings. This is because when we
@@ -6628,7 +6635,7 @@ IntSize nsLayoutUtils::ComputeImageContainerDrawingParameters(
 
   // VectorImage::OptimalImageSizeForDest will just round up, but we already
   // have an integer size.
-  return destRect.Size().ToUnknownSize();
+  return setRasterizedForDest(destRect.Size().ToUnknownSize());
 }
 
 /* static */
@@ -6652,10 +6659,7 @@ ImgDrawResult nsLayoutUtils::DrawBackgroundImage(
   AUTO_PROFILER_LABEL("nsLayoutUtils::DrawBackgroundImage",
                       GRAPHICS_Rasterization);
 
-  CSSIntSize destCSSSize{nsPresContext::AppUnitsToIntCSSPixels(aDest.width),
-                         nsPresContext::AppUnitsToIntCSSPixels(aDest.height)};
-
-  SVGImageContext svgContext(Some(destCSSSize));
+  SVGImageContext svgContext(Some(CSSSize::FromAppUnits(aDest.Size())));
   SVGImageContext::MaybeStoreContextPaint(svgContext, aForFrame, aImage);
 
   /* Fast path when there is no need for image spacing */

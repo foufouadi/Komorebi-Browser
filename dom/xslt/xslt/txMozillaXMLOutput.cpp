@@ -16,7 +16,7 @@
 #include "mozilla/dom/DocumentFragment.h"
 #include "mozilla/dom/DocumentType.h"
 #include "mozilla/dom/Element.h"
-#include "mozilla/dom/FeaturePolicy.h"
+#include "mozilla/dom/PermissionsPolicy.h"
 #include "mozilla/dom/ProcessingInstruction.h"
 #include "mozilla/dom/ScriptLoader.h"
 #include "nsCharsetSource.h"
@@ -190,24 +190,13 @@ nsresult txMozillaXMLOutput::comment(const nsString& aData) {
   return error.StealNSResult();
 }
 
-nsresult txMozillaXMLOutput::endDocument(nsresult aResult) {
+nsresult txMozillaXMLOutput::endDocument(nsresult aResult)
+    MOZ_CAN_RUN_SCRIPT_BOUNDARY {
   TX_ENSURE_CURRENTNODE;
 
-  if (NS_FAILED(aResult)) {
-    if (mNotifier) {
-      mNotifier->OnTransformEnd(aResult);
-    }
-
-    return NS_OK;
-  }
-
-  nsresult rv = closePrevious(true);
-  if (NS_FAILED(rv)) {
-    if (mNotifier) {
-      mNotifier->OnTransformEnd(rv);
-    }
-
-    return rv;
+  nsresult rv = NS_OK;
+  if (NS_SUCCEEDED(aResult)) {
+    rv = closePrevious(true);
   }
 
   if (mCreatingNewDocument) {
@@ -215,19 +204,19 @@ nsresult txMozillaXMLOutput::endDocument(nsresult aResult) {
     MOZ_ASSERT(mDocument->GetReadyStateEnum() == Document::READYSTATE_LOADING,
                "Bad readyState");
     mDocument->SetReadyStateInternal(Document::READYSTATE_INTERACTIVE);
-    if (ScriptLoader* loader = mDocument->GetScriptLoader()) {
+    if (const RefPtr<ScriptLoader> loader = mDocument->GetScriptLoader()) {
       loader->ParsingComplete(false);
     }
   }
 
   if (mNotifier) {
-    mNotifier->OnTransformEnd();
+    mNotifier->OnTransformEnd(NS_FAILED(aResult) ? aResult : rv);
   }
 
-  return NS_OK;
+  return rv;
 }
 
-nsresult txMozillaXMLOutput::endElement() {
+nsresult txMozillaXMLOutput::endElement() MOZ_CAN_RUN_SCRIPT_BOUNDARY {
   TX_ENSURE_CURRENTNODE;
 
   if (mBadChildLevel) {
@@ -771,7 +760,7 @@ nsresult txMozillaXMLOutput::createResultDocument(const nsAString& aName,
 
   if (mNotifier) {
     MOZ_TRY(mNotifier->SetOutputDocument(mDocument));
-    MOZ_TRY(mDocument->InitFeaturePolicy(mDocument->GetChannel()));
+    MOZ_TRY(mDocument->InitPermissionsPolicy(mDocument->GetChannel()));
   }
 
   // Do this after calling OnDocumentCreated to ensure that the
@@ -923,7 +912,8 @@ void txTransformNotifier::SignalTransformEnd(nsresult aResult) {
   nsCOMPtr<nsIScriptLoaderObserver> kungFuDeathGrip(this);
 
   if (mDocument) {
-    if (dom::ScriptLoader* scriptLoader = mDocument->GetScriptLoader()) {
+    if (const RefPtr<dom::ScriptLoader> scriptLoader =
+            mDocument->GetScriptLoader()) {
       scriptLoader->DeferCheckpointReached();
       scriptLoader->RemoveObserver(this);
       // XXX Maybe we want to cancel script loads if NS_FAILED(rv)?

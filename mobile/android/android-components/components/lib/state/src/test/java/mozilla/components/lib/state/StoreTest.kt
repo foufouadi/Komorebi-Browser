@@ -347,7 +347,7 @@ class StoreTest {
                 )
 
             val storeJobs = mutableListOf<Job>()
-            for (i in 0..10_000) {
+            repeat(10_001) {
                 storeJobs += this.launch(storeDispatcher) { store.dispatch(TestAction.DecrementAction) }
             }
             storeJobs.joinAll()

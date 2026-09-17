@@ -52,6 +52,10 @@ var gExceptionPaths = [
   "chrome://browser/content/asrouter/assets/tabgroups/vert-animated-light.svg",
   "chrome://browser/content/asrouter/assets/tabgroups/vert-static-dark.svg",
   "chrome://browser/content/asrouter/assets/tabgroups/vert-static-light.svg",
+  "chrome://activity-stream/content/data/content/assets/backdrop-adaptive.svg",
+  "chrome://activity-stream/content/data/content/assets/kit-sit-look-up.svg",
+  "chrome://activity-stream/content/data/content/assets/pic-cursor.svg",
+  "chrome://activity-stream/content/data/content/assets/pic-shield.svg",
 
   // toolkit/components/pdfjs/content/build/pdf.js
   "resource://pdf.js/web/images/",
@@ -76,7 +80,6 @@ var gExceptionPaths = [
   // Points to theme preview images, which are defined in browser/ but only used
   // in toolkit/mozapps/extensions/content/aboutaddons.js.
   "resource://builtin-themes/",
-  "resource://extra-themes-previews/",
 
   // Page data schemas are referenced programmatically.
   "chrome://browser/content/pagedata/schemas/",
@@ -343,11 +346,6 @@ var allowlist = [
   {
     file: "resource://app/modules/backup/CookiesBackupResource.sys.mjs",
   },
-
-  // Referenced dynamically in newtab components via template literals:
-  // `chrome://global/skin/icons/shaft-arrow-${isRTL ? "right" : "left"}.svg`
-  { file: "chrome://global/skin/icons/shaft-arrow-left.svg" },
-  { file: "chrome://global/skin/icons/shaft-arrow-right.svg" },
 ];
 
 if (AppConstants.NIGHTLY_BUILD) {

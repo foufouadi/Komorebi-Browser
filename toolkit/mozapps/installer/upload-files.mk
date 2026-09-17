@@ -125,6 +125,11 @@ ifdef MOZ_STUB_INSTALLER
   UPLOAD_FILES += $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(PKG_STUB_BASENAME).exe)
 endif
 
+ifdef MOZ_APPSERVICES_IN_TREE
+# Upload `libmegazord.so` artifacts for use in artifact builds.
+UPLOAD_FILES += $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(LIBMEGAZORD_SO_ARTIFACTS_ARCHIVE_BASENAME).zip)
+endif
+
 # Upload `.xpt` artifacts for use in artifact builds.
 UPLOAD_FILES += $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(XPT_ARTIFACTS_ARCHIVE_BASENAME).zip)
 # Upload update-related macOS framework artifacts for use in artifact builds.

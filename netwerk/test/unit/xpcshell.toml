@@ -97,13 +97,13 @@ run-sequentially = ["true"] # node server exceptions dont replay well
 
 ["test_altsvc_lna.js"]
 
-["test_altsvc_proxy_dns_leak.js"]
-
 ["test_altsvc_pref.js"]
 skip-if = [
   "os == 'win' && os_version == '11.26100' && arch == 'x86_64' && msix",
   "os == 'win' && os_version == '11.26200' && arch == 'x86_64' && msix",
 ]
+
+["test_altsvc_proxy_dns_leak.js"]
 
 ["test_android_content_uri.js"]
 run-if = [
@@ -515,6 +515,14 @@ prefs = ["browser.cache.disk.encryption.enabled=true"]
 
 ["test_cache2-42-no_cache_writer_hang.js"]
 
+["test_cache2-43-purge-residual-folder.js"]
+
+["test_cache2-44-clear-origin-context-evictor.js"]
+
+["test_cache2-44-no-rewrite-unchanged-metadata.js"]
+
+["test_cache2-45-clear-base-domain-context-evictor.js"]
+
 ["test_cache2_clear_with_principal.js"]
 run-sequentially = ["true"] # httpd server
 
@@ -563,11 +571,22 @@ skip-if = [
 
 ["test_compareURIs.js"]
 
+["test_compressConv_offmainthread_js_listener.js"]
+prefs = [
+  "network.decompression_off_mainthread2=true",
+  "network.decompression_off_mainthread_min_size=0",
+  "network.http.encoding.trustworthy_is_https=false",
+]
+
 ["test_compressappend.js"]
 
 ["test_connection_based_auth.js"]
 
 ["test_connection_coalescing.js"]
+
+["test_connection_coalescing_hash_collision.js"]
+
+["test_connection_reuse_timings.js"]
 
 ["test_content_decoding_error_telemetry.js"]
 run-sequentially = ["true"]
@@ -641,6 +660,9 @@ prefs = ["content.cors.use_triggering_principal=true"] # See bug 1982916.
 ["test_dictionary_compression_dcb.js"]
 run-sequentially = ["true"]
 
+["test_dictionary_oa_isolation.js"]
+run-sequentially = ["true"]
+
 ["test_dictionary_replacement.js"]
 run-sequentially = ["true"]
 
@@ -651,6 +673,8 @@ run-sequentially = ["true"]
 run-sequentially = ["true"]
 
 ["test_dns_by_type_resolve.js"]
+
+["test_dns_cache_miss_telemetry.js"]
 
 ["test_dns_cancel.js"]
 skip-if = [
@@ -696,6 +720,8 @@ skip-if = [
 
 ["test_dns_service.js"]
 
+["test_dns_stale_zero_ttl.js"]
+
 ["test_dns_stress.js"]
 
 ["test_domain_eviction.js"]
@@ -736,6 +762,13 @@ run-if = [
 ["test_eviction.js"]
 
 ["test_extract_charset_from_content_type.js"]
+
+["test_fetch_streaming_upload.js"]
+run-sequentially = ["true"] # http3server + node servers
+prefs = ["dom.fetch.streaming_upload=true"] # nightly-only by default
+skip-if = [
+  "os == 'win' && msix",
+]
 
 ["test_file_protocol.js"]
 
@@ -778,6 +811,14 @@ skip-if = [
   "os == 'win'",
 ]
 
+["test_happy_eyeballs_all_addrs_unusable.js"]
+
+["test_happy_eyeballs_altsvc_h3_only_claim.js"]
+skip-if = [
+  "os == 'android'",
+  "os == 'win' && msix",
+]
+
 ["test_happy_eyeballs_cancel_and_reuse.js"]
 skip-if = [
   "os == 'android'",
@@ -794,28 +835,19 @@ skip-if = [
   "os == 'win' && msix",
 ]
 
-["test_happy_eyeballs_trr_connect_fallback.js"]
-skip-if = [
-  "os == 'android'",
-  "os == 'win' && msix",
-]
-
 ["test_happy_eyeballs_dns_prefetch_reuse.js"]
-run-sequentially = ["true"] # node server exceptions dont replay well
-
-["test_happy_eyeballs_https_rr_prefetch_reuse.js"]
 run-sequentially = ["true"] # node server exceptions dont replay well
 
 ["test_happy_eyeballs_h1_0rtt.js"]
 run-sequentially = ["true"] # TlsServer listens to the same port
 skip-if = [
-  "os == 'win' && appname == 'thunderbird' && msix", # Bug 2038668
+  "os == 'win' && msix", # Bug 1808049
 ]
 
 ["test_happy_eyeballs_h2_0rtt.js"]
 run-sequentially = ["true"] # TlsServer listens to the same port
 skip-if = [
-  "os == 'win' && appname == 'thunderbird' && msix", # Bug 2038668
+  "os == 'win' && msix", # Bug 1808049
 ]
 
 ["test_happy_eyeballs_h2_fallback.js"]
@@ -859,10 +891,20 @@ skip-if = [
   "os == 'win'",
 ]
 
+["test_happy_eyeballs_https_rr_prefetch_reuse.js"]
+run-sequentially = ["true"] # node server exceptions dont replay well
+
 ["test_happy_eyeballs_ip_preference.js"]
 run-sequentially = ["true"] # node server exceptions dont replay well
 
 ["test_happy_eyeballs_local_addr_retry.js"]
+skip-if = [
+  "os == 'android'",
+  "os == 'win' && msix",
+]
+
+["test_happy_eyeballs_optimistic_dns.js"]
+run-sequentially = ["true"] # node server exceptions dont replay well
 skip-if = [
   "os == 'android'",
   "os == 'win' && msix",
@@ -880,6 +922,12 @@ run-sequentially = ["true"] # node server exceptions dont replay well
 skip-if = [
   "os == 'android'",
   "os == 'win'",
+]
+
+["test_happy_eyeballs_trr_connect_fallback.js"]
+skip-if = [
+  "os == 'android'",
+  "os == 'win' && msix",
 ]
 
 ["test_happy_eyeballs_websocket_https_rr.js"]
@@ -1453,6 +1501,8 @@ skip-if = [
 
 ["test_network_connectivity_service.js"]
 
+["test_network_connectivity_service_idle_startup.js"]
+
 ["test_networking_over_socket_process.js"]
 run-sequentially = ["true"] # node server exceptions dont replay well
 run-if = [
@@ -1460,6 +1510,10 @@ run-if = [
 ]
 
 ["test_no_cookies_after_last_pb_exit.js"]
+
+["test_no_vary_search_memory_only.js"]
+
+["test_no_vary_search_revalidation.js"]
 
 ["test_no_vary_search_telemetry.js"]
 
@@ -1564,6 +1618,8 @@ skip-if = [
   "os == 'win' && os_version == '11.26200' && arch == 'x86' && socketprocess_networking",
   "os == 'win' && os_version == '11.26200' && arch == 'x86_64' && socketprocess_networking",
 ]
+
+["test_proxy_auth_securityInfo.js"]
 
 ["test_proxy_cancel.js"]
 run-sequentially = ["true"] # node server exceptions dont replay well
@@ -1830,6 +1886,9 @@ firefox-appdir = "browser"
 
 ["test_trackingProtection_annotateChannels.js"]
 
+["test_transaction_restart_activity.js"]
+run-sequentially = ["true"] # arranging the pooled retry is timing-sensitive
+
 ["test_transparent_redirect.js"]
 
 ["test_trr.js"]
@@ -1847,6 +1906,7 @@ run-if = [
 
 ["test_trr_bench.js"]
 skip-if = [
+  "os == 'android'", # intermittent ADB port exhaustion
   "verify",
 ]
 run-sequentially = ["true"] # We want to check performance
@@ -1944,6 +2004,8 @@ skip-if = [
 skip-if = [
   "true",
 ]
+
+["test_trr_proxy_channel_filter.js"]
 
 ["test_trr_strict_mode.js"]
 

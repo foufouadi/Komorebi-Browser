@@ -11,6 +11,33 @@
 #include "mozilla/ProfilerMarkers.h"
 #include "mozilla/StaticPrefs_network.h"
 #include "mozilla/glean/NetwerkDnsMetrics.h"
+#include "prio.h"
+
+static nsLiteralCString AddrFamilyLabel(uint16_t aAF) {
+  switch (aAF) {
+    case PR_AF_INET:
+      return "ipv4"_ns;
+    case PR_AF_INET6:
+      return "ipv6"_ns;
+    case PR_AF_UNSPEC:
+      return "unspec"_ns;
+    default:
+      return "other"_ns;
+  }
+}
+
+nsLiteralCString RecordFamilyLabel(nsHostRecord* aRec) {
+  switch (aRec->type) {
+    case nsIDNSService::RESOLVE_TYPE_DEFAULT:
+      return AddrFamilyLabel(aRec->af);
+    case nsIDNSService::RESOLVE_TYPE_HTTPSSVC:
+      return "https"_ns;
+    case nsIDNSService::RESOLVE_TYPE_TXT:
+      return "txt"_ns;
+    default:
+      return "other"_ns;
+  }
+}
 
 //----------------------------------------------------------------------------
 // this macro filters out any flags that are not used when constructing the
@@ -165,6 +192,12 @@ bool nsHostRecord::HasUsableResult(const mozilla::TimeStamp& now,
   }
 
   return HasUsableResultInternal(now, queryFlags);
+}
+
+nsresult nsHostRecord::GetFromStaleCache(bool* aResult) {
+  NS_ENSURE_ARG(aResult);
+  *aResult = mFromStaleCache;
+  return NS_OK;
 }
 
 //----------------------------------------------------------------------------

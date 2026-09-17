@@ -19,11 +19,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "moz-src:///browser/components/aiwindow/models/Utils.sys.mjs",
   indexInferenceResultsById:
     "moz-src:///browser/components/aiwindow/models/Utils.sys.mjs",
-  HISTORY:
-    "moz-src:///browser/components/aiwindow/models/memories/MemoriesConstants.sys.mjs",
   MEMORY_SENSITIVITY_CATEGORY_NOT_SENSITIVE:
-    "moz-src:///browser/components/aiwindow/models/memories/MemoriesConstants.sys.mjs",
-  SESSION:
     "moz-src:///browser/components/aiwindow/models/memories/MemoriesConstants.sys.mjs",
   MEMORY_FILTER_COMPARATOR:
     "moz-src:///browser/components/aiwindow/services/MemoryStoreConstants.sys.mjs",
@@ -55,6 +51,8 @@ ChromeUtils.defineLazyGetter(lazy, "console", () =>
     maxLogLevelPref: "browser.smartwindow.conversation.logLevel",
   })
 );
+
+const RESUME_ACTIVITY_SUPPORTED_LOCALES = ["en"];
 
 let _savedLoadPromptDescriptor = null;
 export function _setLoadPromptForTesting(fn) {
@@ -112,10 +110,8 @@ export function _setGetConversationsByIdForTesting(fn) {
 // Max number of memories to include in prompts
 const MAX_NUM_MEMORIES = 8;
 
-// Max number of memories to surface as "Pick up where you left off" pills.
-// The New Tab UI maintains a fixed pill count regardless; this only bounds how
-// many memory-backed candidates the models layer returns.
-export const MAX_NUM_MEMORIES_FOR_RESUME_ACTIVITY = 2;
+// Generate extra candidates so dismissals can reveal replacements.
+const MAX_NUM_MEMORIES_FOR_RESUME_ACTIVITY = 6;
 // Max number of URLs to include per memory in the "Pick up where you left off" prompt.
 export const MAX_NUM_URLS_PER_MEMORY = 10;
 
@@ -557,11 +553,6 @@ export async function getMemoriesForResumeActivityConversationStarter(
       comparator: lazy.MEMORY_FILTER_COMPARATOR.EQUAL_TO,
       value: lazy.MEMORY_SENSITIVITY_CATEGORY_NOT_SENSITIVE,
     },
-    {
-      field: "sources",
-      comparator: lazy.MEMORY_FILTER_COMPARATOR.SOME,
-      value: [lazy.HISTORY, lazy.SESSION],
-    },
   ];
   let memories = await MemoriesManager.getMemoriesByAttribute(attributeFilters);
 
@@ -576,11 +567,11 @@ export async function getMemoriesForResumeActivityConversationStarter(
     return hasHistory;
   });
 
-  // Re-sort by frecency (decreasing) and updated_at (most recent first)
+  // Re-sort by created_at (most recent first)
   memories.sort(
     (a, b) =>
-      (b.frecency ?? 0) - (a.frecency ?? 0) ||
-      (b.updated_at ?? 0) - (a.updated_at ?? 0)
+      (b.created_at ?? 0) - (a.created_at ?? 0) ||
+      (b.last_merged ?? 0) - (a.last_merged ?? 0)
   );
 
   // Slice to requested count
@@ -745,11 +736,17 @@ async function generateUncachedResumeActivityConversationStarters() {
     }
 
     const urlsByHash = await lazy.resolveUrlsForMemories(
-      memoriesWithPlaceHashes
+      memoriesWithPlaceHashes,
+      { filterBySummary: true }
     );
-    const memoriesWithUrlsAndTitles = memoriesWithPlaceHashes.map(memory =>
-      attachUrlsToMemory(memory, urlsByHash, MAX_NUM_URLS_PER_MEMORY)
-    );
+    const memoriesWithUrlsAndTitles = memoriesWithPlaceHashes
+      .map(memory =>
+        attachUrlsToMemory(memory, urlsByHash, MAX_NUM_URLS_PER_MEMORY)
+      )
+      .filter(s => !!s.urls.length);
+    if (!memoriesWithUrlsAndTitles.length) {
+      return [];
+    }
 
     // Load prompts and build the conversation for inference
     const conversation = await lazy.buildConversation(
@@ -824,14 +821,28 @@ async function generateUncachedResumeActivityConversationStarters() {
   }
 }
 
+function isResumeActivityLocaleSupported() {
+  const appLocale = Services.locale.appLocaleAsBCP47.toLowerCase();
+  return RESUME_ACTIVITY_SUPPORTED_LOCALES.some(
+    locale => appLocale === locale || appLocale.startsWith(`${locale}-`)
+  );
+}
+
 /**
  * Generates conversation starter prompts for suggestions to resume activity based
  * on user memories and associated browsing history.
+ *
+ * Only supported for English app locales; returns an empty list otherwise.
  *
  * @returns {Promise<Array<object>>} Array of objects containing memory and
  *   content with headline, status, and previewTabs
  */
 export async function generateResumeActivityConversationStarters() {
+  // Return an empty array for unsupported locales
+  if (!isResumeActivityLocaleSupported()) {
+    return [];
+  }
+
   const watermark = await MemoriesManager.getLastSessionMemoryTimestamp();
   const cached = _getCachedResumeActivity(watermark);
   if (cached !== undefined) {
@@ -861,10 +872,14 @@ export async function generateResumeActivityConversationStarters() {
  * @param {Array<object>} resumeActivitySuggestion.content.previewTabs - Array of preview tabs
  * @param {string} resumeActivitySuggestion.content.previewTabs[].url - URL of a preview tab
  * @param {string} resumeActivitySuggestion.content.previewTabs[].title - Title of a preview tab
+ * @param {string} [conversationId] - Id to reuse for the new conversation, so
+ *   telemetry keeps the chat_id of the conversation the pill was clicked in.
+ *   A new id is generated when omitted.
  * @returns {Promise<ChatConversation>} ChatConversation instance initialized with the resume activity context
  */
 export async function constructConversationToResumeActivity(
-  resumeActivitySuggestion
+  resumeActivitySuggestion,
+  conversationId
 ) {
   if (
     !resumeActivitySuggestion ||
@@ -893,8 +908,10 @@ export async function constructConversationToResumeActivity(
   }
 
   const conversation = new lazy.ChatConversation({
+    ...(conversationId ? { id: conversationId } : {}),
     title: resumeActivitySuggestion.content.headline,
   });
+  conversation.promptEmbeddedMemories = [resumeActivitySuggestion.memory];
 
   const [
     { prompt: chatSystemPrompt },

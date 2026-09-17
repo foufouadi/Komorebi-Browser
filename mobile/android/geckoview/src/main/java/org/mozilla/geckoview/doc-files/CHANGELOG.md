@@ -13,6 +13,34 @@ exclude: true
 
 ⚠️  breaking change and deprecation notices
 
+## v157
+- Added [`GeckoSession.getPdfViewerEditor`][157.1] and
+    [`PdfViewerController.SessionEditor.addSignature`][157.2] to place a signature on the PDF the
+    session is displaying. The PDF viewer side is a stub until bug 2069045.
+    ([bug 2069043]({{bugzilla}}2069043))
+- Added [`GeckoView.captureFullPage()`][157.3] and [`GeckoDisplay.captureFullPage`][157.4] to take screenshot of the full web page. Returns a [`GeckoResult`][65.25] that completes to a [`Bitmap`][67.17] containing a full scrollable screenshot of a web page.
+
+[157.1]: {{javadoc_uri}}/GeckoSession.html#getPdfViewerEditor()
+[157.2]: {{javadoc_uri}}/PdfViewerController.SessionEditor.html#addSignature(java.lang.String)
+[157.3]: {{javadoc_uri}}/GeckoView.html#captureFullPage()
+[157.4]: {{javadoc_uri}}/GeckoDisplay.html#capturePixels()
+
+## v156
+- Updated [`GeckoSession.saveAsPdf`][156.1] to identify if the currently displayed browser item is a PDF JS page, if so, then save using PDF JS machinery. Otherwise, save the PDF through the Gecko print framework. ([bug 2064162]({{bugzilla}}2064162))
+- ⚠️ Added [`ContentParams.useSimpleText`][156.2] to request plain prose from
+    [`SessionPageExtractor.getPageContent`][156.3] instead of markdown-annotated text. This adds a
+    parameter to the [`ContentParams`][156.4] constructor.
+- ⚠️ Added [`PageMetadata.isGated`][156.5] to report whether a page declares its content to be gated,
+    for example behind a paywall or a registration wall. This adds a parameter to the
+    [`PageMetadata`][156.6] constructor.
+
+[156.1]: {{javadoc_uri}}/GeckoSession.html#saveAsPdf()
+[156.2]: {{javadoc_uri}}/PageExtractionController.ContentParams.html#useSimpleText
+[156.3]: {{javadoc_uri}}/PageExtractionController.SessionPageExtractor.html#getPageContent(org.mozilla.geckoview.PageExtractionController.ContentParams)
+[156.4]: {{javadoc_uri}}/PageExtractionController.ContentParams.html#ContentParams(boolean,boolean)
+[156.5]: {{javadoc_uri}}/PageExtractionController.PageMetadata.html#isGated
+[156.6]: {{javadoc_uri}}/PageExtractionController.PageMetadata.html#PageMetadata(java.lang.String[],int,java.lang.String,boolean,boolean)
+
 ## v155
 - Added [WebRequestError.ERROR_LOCAL_NETWORK_ACCESS_DENIED] to indicate that a load failed because the user denied the local network access permission on Android 17+.
 - Added the [`IPProxyException.ERROR_CATASTROPHIC`][155.1] and [`IPProxyException.ERROR_VPN_UNAVAILABLE`][155.2]
@@ -2057,4 +2085,4 @@ to allow adding gecko profiler markers.
 [65.24]: {{javadoc_uri}}/CrashReporter.html#sendCrashReport(android.content.Context,android.os.Bundle,java.lang.String)
 [65.25]: {{javadoc_uri}}/GeckoResult.html
 
-[api-version]: 8746a786b9e9fd08dd61321d2973efc43d1ffefa
+[api-version]: 55cd455785615eb939cf804b61c033a5f1631a0c

@@ -54,6 +54,11 @@ class ContentClassifierRequest {
   nsCString mSchemelessSite;
   nsCString mSourceSchemelessSite;
   nsCString mTopWindowSchemelessSite;
+  // Full hosts handed to the engine for rule matching. The schemeless sites
+  // above only feed the third-party comparisons.
+  nsCString mHostname;
+  nsCString mSourceHostname;
+  nsCString mTopWindowHostname;
   nsCString mRequestType;
   bool mThirdParty = false;
   bool mThirdPartyToSource = false;

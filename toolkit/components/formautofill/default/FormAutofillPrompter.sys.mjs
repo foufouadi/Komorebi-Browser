@@ -885,6 +885,17 @@ export class CreditCardSaveDoorhanger extends AutofillDoorhanger {
   }
 
   /**
+   * Whether a security code came with the card that is about to be saved. The
+   * code is only part of the record once CVV capture is enabled, and is empty
+   * when the form asked for one but was submitted without it.
+   *
+   * @returns {boolean}
+   */
+  get hasSubmittedSecurityCode() {
+    return !!this.newRecord["cc-csc"];
+  }
+
+  /**
    * We have not yet sync address and credit card design. After syncing,
    * we should be able to use the same "class"
    */
@@ -1252,7 +1263,7 @@ CONTENT = {
           callbackState: "cancel",
         },
         {
-          l10nId: "address-capture-never-save-button",
+          l10nId: "address-capture-never-save-addresses-button",
           callbackState: "disable",
         },
       ],
@@ -1393,7 +1404,6 @@ CONTENT = {
       ],
     },
     options: {
-      autofocus: true,
       persistWhileVisible: true,
       hideClose: true,
 
@@ -1448,7 +1458,6 @@ CONTENT = {
       ],
     },
     options: {
-      autofocus: true,
       persistWhileVisible: true,
       hideClose: true,
     },
@@ -1720,7 +1729,7 @@ export let FormAutofillPrompter = {
     } else {
       changedGUID = await storage.add(newRecord);
     }
-    storage.notifyUsed(changedGUID);
+    await storage.notifyUsed(changedGUID);
 
     showConfirmation(
       browser,

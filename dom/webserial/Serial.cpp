@@ -10,8 +10,8 @@
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/Document.h"
-#include "mozilla/dom/FeaturePolicyUtils.h"
 #include "mozilla/dom/PSerialPort.h"
+#include "mozilla/dom/PermissionsPolicyUtils.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/SerialBinding.h"
 #include "mozilla/dom/SerialManagerChild.h"
@@ -230,7 +230,7 @@ static bool PortSecurityCheck(Promise& aPromise, nsIGlobalObject* aGlobal,
       return false;
     }
 
-    if (!FeaturePolicyUtils::IsFeatureAllowed(doc, u"serial"_ns)) {
+    if (!PermissionsPolicyUtils::IsFeatureAllowed(doc, u"serial"_ns)) {
       nsAutoString message;
       message.AssignLiteral("WebSerial access request was denied: ");
       message.Append(NS_ConvertUTF8toUTF16(aFunctionName));
@@ -386,10 +386,25 @@ already_AddRefed<Promise> Serial::RequestPort(
     }
   }
 
+  nsTArray<nsString> ipcAllowedBluetoothServiceClassIds;
+  if (aOptions.mAllowedBluetoothServiceClassIds.WasPassed()) {
+    for (const auto& uuid : aOptions.mAllowedBluetoothServiceClassIds.Value()) {
+      nsAutoString resolved;
+      if (!ResolveBluetoothServiceUUID(uuid, resolved)) {
+        promise->MaybeRejectWithTypeError(
+            "Invalid UUID in allowedBluetoothServiceClassIds");
+        return promise.forget();
+      }
+      ipcAllowedBluetoothServiceClassIds.AppendElement(resolved);
+    }
+  }
+
   bool autoselect =
       StaticPrefs::dom_webserial_testing_enabled() && mAutoselectPorts;
 
-  child->SendRequestPort(ipcFilters, autoselect)
+  child
+      ->SendRequestPort(ipcFilters, ipcAllowedBluetoothServiceClassIds,
+                        autoselect)
       ->Then(
           GetMainThreadSerialEventTarget(), __func__,
           [promise, self = RefPtr{this}](
@@ -779,13 +794,17 @@ void Serial::ForgetPort(const nsAString& aPortId) {
 
 already_AddRefed<Promise> Serial::SimulateDeviceConnection(
     const nsAString& aDeviceId, const nsAString& aDevicePath,
-    uint16_t aVendorId, uint16_t aProductId, ErrorResult& aRv) {
+    uint16_t aVendorId, uint16_t aProductId,
+    const nsAString& aBluetoothServiceClassId, ErrorResult& aRv) {
   return RunTestingIpc(
       this, aRv, nsLiteralCString("SimulateDeviceConnection IPC error"),
       [deviceId = nsString(aDeviceId), devicePath = nsString(aDevicePath),
-       aVendorId, aProductId](SerialManagerChild* aChild) {
+       aVendorId, aProductId,
+       bluetoothServiceClassId =
+           nsString(aBluetoothServiceClassId)](SerialManagerChild* aChild) {
         return aChild->SendSimulateDeviceConnection(deviceId, devicePath,
-                                                    aVendorId, aProductId);
+                                                    aVendorId, aProductId,
+                                                    bluetoothServiceClassId);
       });
 }
 

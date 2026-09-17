@@ -45,18 +45,18 @@ class ReportingHeader final : public nsIObserver,
   // https://w3c.github.io/reporting/#endpoint
   struct Endpoint {
     nsCOMPtr<nsIURI> mUrl;
-    nsString mEndpointName;
+    nsCString mEndpointName;
     uint32_t mPriority;
     uint32_t mWeight;
     uint32_t mFailures;
     static Endpoint Create(already_AddRefed<nsIURI> aURL,
-                           const nsAString& aEndpointName) {
-      return Endpoint{aURL, nsString{aEndpointName}, 1, 1, 0};
+                           const nsACString& aEndpointName) {
+      return Endpoint{aURL, nsCString{aEndpointName}, 1, 1, 0};
     }
   };
 
   struct Group {
-    nsString mName;
+    nsCString mName;
     bool mIncludeSubdomains;
     int32_t mTTL;
     TimeStamp mCreationTime;
@@ -75,7 +75,7 @@ class ReportingHeader final : public nsIObserver,
   // in https://www.w3.org/TR/reporting-1/#header
   static size_t ParseReportingEndpointsHeader(
       const nsACString& aHeaderValue, nsIURI* aURI,
-      std::function<void(const nsAString&, nsCOMPtr<nsIURI>)>&&
+      std::function<void(const nsACString&, nsCOMPtr<nsIURI>)>&&
           aOnParsedItemCallback);
 
   // [Deprecated] Parses the contents of a given header according to the
@@ -85,11 +85,11 @@ class ReportingHeader final : public nsIObserver,
                                                const nsACString& aHeaderValue);
 
   static void GetEndpointForReport(
-      const nsAString& aGroupName,
+      const nsACString& aGroupName,
       const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
       nsACString& aEndpointURI);
 
-  static void GetEndpointForReport(const nsAString& aGroupName,
+  static void GetEndpointForReport(const nsACString& aGroupName,
                                    nsIPrincipal* aPrincipal,
                                    nsACString& aEndpointURI);
 
@@ -97,12 +97,11 @@ class ReportingHeader final : public nsIObserver,
   // If no endpoint is found for aPrincipal and aIncludeSubdomains is true
   // we'll check all parent origins for groups that have mIncludeSubdomains
   // equal to true.
-  static void GetEndpointForReportIncludeSubdomains(const nsAString& aGroupName,
-                                                    nsIPrincipal* aPrincipal,
-                                                    bool aIncludeSubdomains,
-                                                    nsACString& aEndpointURI);
+  static void GetEndpointForReportIncludeSubdomains(
+      const nsACString& aGroupName, nsIPrincipal* aPrincipal,
+      bool aIncludeSubdomains, nsACString& aEndpointURI);
 
-  static void RemoveEndpoint(const nsAString& aGroupName,
+  static void RemoveEndpoint(const nsACString& aGroupName,
                              const nsACString& aEndpointURL,
                              nsIPrincipal* aPrincipal);
 
@@ -135,21 +134,21 @@ class ReportingHeader final : public nsIObserver,
   static void LogToConsoleInvalidJSON(nsIHttpChannel* aChannel, nsIURI* aURI);
 
   static void LogToConsoleDuplicateGroup(nsIHttpChannel* aChannel, nsIURI* aURI,
-                                         const nsAString& aName);
+                                         const nsACString& aName);
 
   static void LogToConsoleInvalidNameItem(nsIHttpChannel* aChannel,
                                           nsIURI* aURI);
 
   static void LogToConsoleIncompleteItem(nsIHttpChannel* aChannel, nsIURI* aURI,
-                                         const nsAString& aName);
+                                         const nsACString& aName);
 
   static void LogToConsoleIncompleteEndpoint(nsIHttpChannel* aChannel,
                                              nsIURI* aURI,
-                                             const nsAString& aName);
+                                             const nsACString& aName);
 
   static void LogToConsoleInvalidURLEndpoint(nsIHttpChannel* aChannel,
                                              nsIURI* aURI,
-                                             const nsAString& aName,
+                                             const nsACString& aName,
                                              const nsAString& aURL);
 
   static void LogToConsoleInternal(nsIHttpChannel* aChannel, nsIURI* aURI,
@@ -167,8 +166,8 @@ class ReportingHeader final : public nsIObserver,
 class EndpointsList {
  public:
   ReportingHeader::Endpoint* GetEndpointWithName(
-      const nsAString& aEndpointName);
-  void RemoveEndpoint(const nsAString& aEndpointName);
+      const nsACString& aEndpointName);
+  void RemoveEndpoint(const nsACString& aEndpointName);
 
   nsTArray<ReportingHeader::Endpoint> mData;
 };

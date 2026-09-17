@@ -149,7 +149,7 @@ document.addEventListener(
             switchToTabHavingURI("about:pdf", true);
             break;
           case "cmd_openReferrals":
-            lazy.Referrals.openReferralsTab(window);
+            lazy.Referrals.openReferralsTab(window, "app_menu");
             break;
           case "Browser:AddBookmarkAs":
             PlacesCommandHook.bookmarkPage();
@@ -246,10 +246,18 @@ document.addEventListener(
             openNewUserContextTab(event.sourceEvent);
             break;
           case "Browser:AddContainer":
-            lazy.ContainerCreationPanel.open(window);
+            lazy.ContainerCreationPanel.open(
+              window,
+              event.sourceEvent?.target?.dataset.containerEntrypoint
+            );
             break;
           case "Browser:OpenAboutContainers":
-            openPreferences("paneContainers");
+            openPreferences("paneContainers", {
+              urlParams: {
+                entrypoint:
+                  event.sourceEvent?.target?.dataset.containerEntrypoint,
+              },
+            });
             break;
           // deliberate fallthrough
           case "Profiles:CreateProfile":

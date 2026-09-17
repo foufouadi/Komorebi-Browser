@@ -64,11 +64,11 @@
 // - If the declaration is "inline", then the method definition(s) would be in
 //   the "-inl.h" variant of the same file(s).
 //
-// The script check_macroassembler_style.py (which runs on every build) is
-// used to verify that method definitions match the annotation on the method
-// declarations.  If there is any difference, then you either forgot to define
-// the method in one of the macro assembler, or you forgot to update the
-// annotation of the macro assembler declaration.
+// The `mach lint --linter spidermonkey` check is used to verify that method
+// definitions match the annotation on the method declarations.  If there is
+// any difference, then you either forgot to define the method in one of the
+// macro assembler, or you forgot to update the annotation of the macro
+// assembler declaration.
 //
 // Some convenient short-cuts are used to avoid repeating the same list of
 // architectures on each method declaration, such as PER_ARCH and
@@ -391,7 +391,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void Push(RegisterOrSP reg);
 #endif
 
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
   // `op` should be a shift operation. Return true if a variable-width shift
   // operation on this architecture should pre-mask the shift count, and if so,
   // return the mask in `*mask`.
@@ -563,6 +563,15 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void PopFlags() DEFINED_ON(x86_shared);
   void PopStackPtr()
       DEFINED_ON(arm, mips64, x86_shared, loong64, riscv64, wasm32);
+
+  // Push |regs| in argument order, storing the first at the highest address.
+  // Some backends may optimize this to use a single stack adjustment.
+  template <typename... Regs>
+  inline void PushRegs(const Regs&... regs);
+  // Pop |regs| in argument order, loading the first from the lowest address.
+  // Some backends may optimize this to use a single stack adjustment.
+  template <typename... Regs>
+  inline void PopRegs(const Regs&... regs);
 
   // Move the stack pointer based on the requested amount.
   void adjustStack(int amount);
@@ -1098,6 +1107,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void or64(const Operand& src, Register64 dest) DEFINED_ON(x64);
   inline void xor64(const Operand& src, Register64 dest) DEFINED_ON(x64);
 
+  inline void nor32(Imm32 imm, Register src, Register dest) PER_SHARED_ARCH;
+
   // ===============================================================
   // Swap instructions
 
@@ -1441,8 +1452,12 @@ class MacroAssembler : public MacroAssemblerSpecific {
                                   Register dest) PER_ARCH;
 
   inline void lshift64(Imm32 imm, Register64 dest) PER_ARCH;
+  inline void lshift64(Imm32 imm, Register64 src, Register64 dest) PER_ARCH;
   inline void rshift64(Imm32 imm, Register64 dest) PER_ARCH;
+  inline void rshift64(Imm32 imm, Register64 src, Register64 dest) PER_ARCH;
   inline void rshift64Arithmetic(Imm32 imm, Register64 dest) PER_ARCH;
+  inline void rshift64Arithmetic(Imm32 imm, Register64 src,
+                                 Register64 dest) PER_ARCH;
 
   // On x86_shared these have the constraint that shift must be in CL.
   inline void lshift32(Register shift, Register srcDest) PER_SHARED_ARCH;
@@ -3784,7 +3799,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void appendAndVerify(const wasm::MemoryAccessDesc& access,
                        wasm::TrapMachineInsn insn, FaultingCodeRange fcr);
 
-  void wasmTrap(wasm::Trap trap, const wasm::TrapSiteDesc& trapSiteDesc);
+  FaultingCodeRange wasmTrap(wasm::Trap trap,
+                             const wasm::TrapSiteDesc& trapSiteDesc);
 
   // Load all pinned regs via InstanceReg.  If the trapOffset is something,
   // give the first load a trap descriptor with type IndirectCallToNull, so that
@@ -3929,20 +3945,22 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void wasmTruncateDoubleToInt32(FloatRegister input, Register output,
                                  bool isSaturating,
                                  Label* oolEntry) PER_SHARED_ARCH;
-  void oolWasmTruncateCheckF64ToI32(FloatRegister input, Register output,
-                                    TruncFlags flags,
-                                    const wasm::TrapSiteDesc& trapSiteDesc,
-                                    Label* rejoin) PER_SHARED_ARCH;
+  void oolWasmTruncateCheckF64ToI32(
+      FloatRegister input, Register output, TruncFlags flags,
+      const wasm::TrapSiteDesc& trapSiteDesc, Label* rejoin,
+      wasm::StackMap* stackMapForTraps,
+      wasm::StackMapRegistry* stackMapRegistry) PER_SHARED_ARCH;
 
   void wasmTruncateFloat32ToUInt32(FloatRegister input, Register output,
                                    bool isSaturating, Label* oolEntry) PER_ARCH;
   void wasmTruncateFloat32ToInt32(FloatRegister input, Register output,
                                   bool isSaturating,
                                   Label* oolEntry) PER_SHARED_ARCH;
-  void oolWasmTruncateCheckF32ToI32(FloatRegister input, Register output,
-                                    TruncFlags flags,
-                                    const wasm::TrapSiteDesc& trapSiteDesc,
-                                    Label* rejoin) PER_SHARED_ARCH;
+  void oolWasmTruncateCheckF32ToI32(
+      FloatRegister input, Register output, TruncFlags flags,
+      const wasm::TrapSiteDesc& trapSiteDesc, Label* rejoin,
+      wasm::StackMap* stackMapForTraps,
+      wasm::StackMapRegistry* stackMapRegistry) PER_SHARED_ARCH;
 
   // The truncate-to-int64 methods will always bind the `oolRejoin` label
   // after the last emitted instruction.
@@ -3954,10 +3972,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
                                   bool isSaturating, Label* oolEntry,
                                   Label* oolRejoin, FloatRegister tempDouble)
       DEFINED_ON(arm64, x86, x64, mips64, loong64, riscv64, wasm32);
-  void oolWasmTruncateCheckF64ToI64(FloatRegister input, Register64 output,
-                                    TruncFlags flags,
-                                    const wasm::TrapSiteDesc& trapSiteDesc,
-                                    Label* rejoin) PER_SHARED_ARCH;
+  void oolWasmTruncateCheckF64ToI64(
+      FloatRegister input, Register64 output, TruncFlags flags,
+      const wasm::TrapSiteDesc& trapSiteDesc, Label* rejoin,
+      wasm::StackMap* stackMapForTraps,
+      wasm::StackMapRegistry* stackMapRegistry) PER_SHARED_ARCH;
 
   void wasmTruncateFloat32ToInt64(FloatRegister input, Register64 output,
                                   bool isSaturating, Label* oolEntry,
@@ -3967,10 +3986,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
                                    bool isSaturating, Label* oolEntry,
                                    Label* oolRejoin, FloatRegister tempDouble)
       DEFINED_ON(arm64, x86, x64, mips64, loong64, riscv64, wasm32);
-  void oolWasmTruncateCheckF32ToI64(FloatRegister input, Register64 output,
-                                    TruncFlags flags,
-                                    const wasm::TrapSiteDesc& trapSiteDesc,
-                                    Label* rejoin) PER_SHARED_ARCH;
+  void oolWasmTruncateCheckF32ToI64(
+      FloatRegister input, Register64 output, TruncFlags flags,
+      const wasm::TrapSiteDesc& trapSiteDesc, Label* rejoin,
+      wasm::StackMap* stackMapForTraps,
+      wasm::StackMapRegistry* stackMapRegistry) PER_SHARED_ARCH;
 
   // This function takes care of loading the callee's instance and pinned regs
   // but it is the caller's responsibility to save/restore instance or pinned
@@ -4313,10 +4333,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // ========================================================================
   // Primitive atomic operations.
   //
-  // If the access is from JS and the eventual destination of the result is a
-  // js::Value, it's probably best to use the JS-specific versions of these,
-  // see further below.
-  //
   // Temp registers must be defined unless otherwise noted in the per-function
   // constraints.
 
@@ -4442,6 +4458,34 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void atomicFetchOp(Scalar::Type type, Synchronization sync, AtomicOp op,
                      Register value, const BaseIndex& mem, Register valueTemp,
                      Register offsetTemp, Register maskTemp, Register output)
+      DEFINED_ON(mips64, loong64, riscv64);
+
+  // Read-modify-write with memory.  Return no value.
+
+  void atomicEffectOp(Scalar::Type arrayType, Synchronization sync, AtomicOp op,
+                      Register value, const Address& mem, Register temp)
+      DEFINED_ON(arm, arm64, x86_shared);
+
+  void atomicEffectOp(Scalar::Type arrayType, Synchronization sync, AtomicOp op,
+                      Register value, const BaseIndex& mem, Register temp)
+      DEFINED_ON(arm, arm64, x86_shared);
+
+  void atomicEffectOp(Scalar::Type arrayType, Synchronization sync, AtomicOp op,
+                      Imm32 value, const Address& mem, Register temp)
+      DEFINED_ON(x86_shared);
+
+  void atomicEffectOp(Scalar::Type arrayType, Synchronization sync, AtomicOp op,
+                      Imm32 value, const BaseIndex& mem, Register temp)
+      DEFINED_ON(x86_shared);
+
+  void atomicEffectOp(Scalar::Type arrayType, Synchronization sync, AtomicOp op,
+                      Register value, const Address& mem, Register valueTemp,
+                      Register offsetTemp, Register maskTemp)
+      DEFINED_ON(mips64, loong64, riscv64);
+
+  void atomicEffectOp(Scalar::Type arrayType, Synchronization sync, AtomicOp op,
+                      Register value, const BaseIndex& mem, Register valueTemp,
+                      Register offsetTemp, Register maskTemp)
       DEFINED_ON(mips64, loong64, riscv64);
 
   // x86:
@@ -4758,123 +4802,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   // ========================================================================
   // JS atomic operations.
-  //
-  // Here the arrayType must be a type that is valid for JS.  As of 2017 that
-  // is an 8-bit, 16-bit, or 32-bit integer type.
-  //
-  // If arrayType is Scalar::Uint32 then:
-  //
-  //   - `output` must be a float register
-  //   - if the operation takes one temp register then `temp` must be defined
-  //   - if the operation takes two temp registers then `temp2` must be defined.
-  //
-  // Otherwise `output` must be a GPR and `temp`/`temp2` should be InvalidReg.
-  // (`temp1` must always be valid.)
-  //
-  // For additional register constraints, see the primitive 32-bit operations
-  // and/or wasm operations above.
-
-  void compareExchangeJS(Scalar::Type arrayType, Synchronization sync,
-                         const Address& mem, Register expected,
-                         Register replacement, Register temp,
-                         AnyRegister output) DEFINED_ON(arm, arm64, x86_shared);
-
-  void compareExchangeJS(Scalar::Type arrayType, Synchronization sync,
-                         const BaseIndex& mem, Register expected,
-                         Register replacement, Register temp,
-                         AnyRegister output) DEFINED_ON(arm, arm64, x86_shared);
-
-  void compareExchangeJS(Scalar::Type arrayType, Synchronization sync,
-                         const Address& mem, Register expected,
-                         Register replacement, Register valueTemp,
-                         Register offsetTemp, Register maskTemp, Register temp,
-                         AnyRegister output)
-      DEFINED_ON(mips64, loong64, riscv64);
-
-  void compareExchangeJS(Scalar::Type arrayType, Synchronization sync,
-                         const BaseIndex& mem, Register expected,
-                         Register replacement, Register valueTemp,
-                         Register offsetTemp, Register maskTemp, Register temp,
-                         AnyRegister output)
-      DEFINED_ON(mips64, loong64, riscv64);
-
-  void atomicExchangeJS(Scalar::Type arrayType, Synchronization sync,
-                        const Address& mem, Register value, Register temp,
-                        AnyRegister output) DEFINED_ON(arm, arm64, x86_shared);
-
-  void atomicExchangeJS(Scalar::Type arrayType, Synchronization sync,
-                        const BaseIndex& mem, Register value, Register temp,
-                        AnyRegister output) DEFINED_ON(arm, arm64, x86_shared);
-
-  void atomicExchangeJS(Scalar::Type arrayType, Synchronization sync,
-                        const Address& mem, Register value, Register valueTemp,
-                        Register offsetTemp, Register maskTemp, Register temp,
-                        AnyRegister output)
-      DEFINED_ON(mips64, loong64, riscv64);
-
-  void atomicExchangeJS(Scalar::Type arrayType, Synchronization sync,
-                        const BaseIndex& mem, Register value,
-                        Register valueTemp, Register offsetTemp,
-                        Register maskTemp, Register temp, AnyRegister output)
-      DEFINED_ON(mips64, loong64, riscv64);
-
-  void atomicFetchOpJS(Scalar::Type arrayType, Synchronization sync,
-                       AtomicOp op, Register value, const Address& mem,
-                       Register temp1, Register temp2, AnyRegister output)
-      DEFINED_ON(arm, arm64, x86_shared);
-
-  void atomicFetchOpJS(Scalar::Type arrayType, Synchronization sync,
-                       AtomicOp op, Register value, const BaseIndex& mem,
-                       Register temp1, Register temp2, AnyRegister output)
-      DEFINED_ON(arm, arm64, x86_shared);
-
-  void atomicFetchOpJS(Scalar::Type arrayType, Synchronization sync,
-                       AtomicOp op, Imm32 value, const Address& mem,
-                       Register temp1, Register temp2, AnyRegister output)
-      DEFINED_ON(x86_shared);
-
-  void atomicFetchOpJS(Scalar::Type arrayType, Synchronization sync,
-                       AtomicOp op, Imm32 value, const BaseIndex& mem,
-                       Register temp1, Register temp2, AnyRegister output)
-      DEFINED_ON(x86_shared);
-
-  void atomicFetchOpJS(Scalar::Type arrayType, Synchronization sync,
-                       AtomicOp op, Register value, const Address& mem,
-                       Register valueTemp, Register offsetTemp,
-                       Register maskTemp, Register temp, AnyRegister output)
-      DEFINED_ON(mips64, loong64, riscv64);
-
-  void atomicFetchOpJS(Scalar::Type arrayType, Synchronization sync,
-                       AtomicOp op, Register value, const BaseIndex& mem,
-                       Register valueTemp, Register offsetTemp,
-                       Register maskTemp, Register temp, AnyRegister output)
-      DEFINED_ON(mips64, loong64, riscv64);
-
-  void atomicEffectOpJS(Scalar::Type arrayType, Synchronization sync,
-                        AtomicOp op, Register value, const Address& mem,
-                        Register temp) DEFINED_ON(arm, arm64, x86_shared);
-
-  void atomicEffectOpJS(Scalar::Type arrayType, Synchronization sync,
-                        AtomicOp op, Register value, const BaseIndex& mem,
-                        Register temp) DEFINED_ON(arm, arm64, x86_shared);
-
-  void atomicEffectOpJS(Scalar::Type arrayType, Synchronization sync,
-                        AtomicOp op, Imm32 value, const Address& mem,
-                        Register temp) DEFINED_ON(x86_shared);
-
-  void atomicEffectOpJS(Scalar::Type arrayType, Synchronization sync,
-                        AtomicOp op, Imm32 value, const BaseIndex& mem,
-                        Register temp) DEFINED_ON(x86_shared);
-
-  void atomicEffectOpJS(Scalar::Type arrayType, Synchronization sync,
-                        AtomicOp op, Register value, const Address& mem,
-                        Register valueTemp, Register offsetTemp,
-                        Register maskTemp) DEFINED_ON(mips64, loong64, riscv64);
-
-  void atomicEffectOpJS(Scalar::Type arrayType, Synchronization sync,
-                        AtomicOp op, Register value, const BaseIndex& mem,
-                        Register valueTemp, Register offsetTemp,
-                        Register maskTemp) DEFINED_ON(mips64, loong64, riscv64);
 
   void atomicIsLockFreeJS(Register value, Register output);
 
@@ -6011,6 +5938,13 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void timeClip(FloatRegister time, FloatRegister output);
   void timeClip(FloatRegister time, FloatRegister output, Register scratch,
                 const LiveRegisterSet& liveRegs);
+
+  // |temp| is only required on NUNBOX32 systems.
+  void unpackTime(ValueOperand packedVal, Register dest, Register temp,
+                  uint32_t shiftImm, uint32_t maskImm);
+
+  void epochMilliseconds(FloatRegister seconds, Register nanoseconds,
+                         FloatRegister output, Register temp);
 
   void computeImplicitThis(Register env, ValueOperand output, Label* slowPath);
 

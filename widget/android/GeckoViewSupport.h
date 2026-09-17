@@ -68,7 +68,7 @@ class GeckoViewSupport final
                    jni::String::Param aChromeURI, bool aPrivateMode);
 
   // Close and destroy the nsWindow.
-  void Close();
+  MOZ_CAN_RUN_SCRIPT void Close();
 
   // Transfer this nsWindow to new GeckoSession objects.
   void Transfer(const java::GeckoSession::Window::LocalRef& inst,
@@ -115,6 +115,18 @@ class GeckoViewSupport final
   MOZ_CAN_RUN_SCRIPT void PrintToPdf(
       const java::GeckoSession::Window::LocalRef& inst,
       jni::Object::Param aStream);
+
+  void RequestFullScreenshot(const java::GeckoSession::Window::LocalRef& inst,
+                             jni::Object::Param aResult,
+                             jni::Object::Param aTarget, int32_t aX, int32_t aY,
+                             int32_t aWidth, int32_t aHeight,
+                             float aRenderingScale);
+
+  // Query content for the top document's scroll size (in CSS pixels)
+  // and device pixel ratio (for calculating the size in device pixels)
+  void RequestContentMetrics(const java::GeckoSession::Window::LocalRef& inst,
+                             jni::Object::Param aResult,
+                             jni::Object::Param aMetrics);
 
   // See nsIHapticFeedback::HapticFeedbackType for available effects.
   void PerformHapticFeedback(int32_t aEffect);

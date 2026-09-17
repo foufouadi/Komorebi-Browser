@@ -77,6 +77,7 @@ struct SymbolicImageEntry {
 struct SymbolicImageCache final
     : public mozilla::MruCache<SymbolicImageKey, SymbolicImageEntry,
                                SymbolicImageCache, 8> {
+  static bool IsEmpty(const ValueType& aVal) { return !std::get<0>(aVal.mKey); }
   static HashNumber Hash(const KeyType& aKey) {
     return AddToHash(std::get<0>(aKey)->hash(),
                      HashGeneric(std::get<1>(aKey), std::get<2>(aKey)));
@@ -571,10 +572,12 @@ ImgDrawResult nsImageRenderer::Draw(nsPresContext* aPresContext,
     case StyleImage::Tag::Image: {
       const auto fill = LayoutDeviceRect::FromAppUnits(
           aFill, aPresContext->AppUnitsPerDevPixel());
-      ctx->GetDrawTarget()->FillRect(
-          fill.ToUnknownRect(),
-          ColorPattern(ToDeviceColor(mImage->AsImage()->CalcColor(mForFrame))),
-          DrawOptions(/* aAlpha = */ aOpacity));
+      nscolor color = mImage->AsImage()->CalcColor(mForFrame);
+      if (NS_GET_A(color)) {
+        ctx->GetDrawTarget()->FillRect(fill.ToUnknownRect(),
+                                       ColorPattern(ToDeviceColor(color)),
+                                       DrawOptions(/* aAlpha = */ aOpacity));
+      }
       break;
     }
     case StyleImage::Tag::Gradient: {
@@ -677,11 +680,7 @@ ImgDrawResult nsImageRenderer::BuildWebRenderDisplayItems(
         containerFlags |= imgIContainer::FLAG_RECORD_BLOB;
       }
 
-      CSSIntSize destCSSSize{
-          nsPresContext::AppUnitsToIntCSSPixels(aDest.width),
-          nsPresContext::AppUnitsToIntCSSPixels(aDest.height)};
-
-      SVGImageContext svgContext(Some(destCSSSize));
+      SVGImageContext svgContext(Some(CSSSize::FromAppUnits(aDest.Size())));
       Maybe<ImageIntRegion> region;
 
       const int32_t appUnitsPerDevPixel = aPresContext->AppUnitsPerDevPixel();
@@ -691,10 +690,11 @@ ImgDrawResult nsImageRenderer::BuildWebRenderDisplayItems(
           LayoutDeviceRect::FromAppUnits(aFill, appUnitsPerDevPixel);
       auto stretchSize = wr::ToLayoutSize(destRect.Size());
 
+      bool rasterizedForDest = false;
       gfx::IntSize decodeSize =
           nsLayoutUtils::ComputeImageContainerDrawingParameters(
               mImageContainer, mForFrame, destRect, clipRect, aSc,
-              containerFlags, svgContext, region);
+              containerFlags, svgContext, region, &rasterizedForDest);
 
       RefPtr<image::WebRenderImageProvider> provider;
       drawResult = mImageContainer->GetImageProvider(
@@ -720,7 +720,8 @@ ImgDrawResult nsImageRenderer::BuildWebRenderDisplayItems(
         // The image is not repeating. Just push as a regular image.
         aBuilder.PushImage(dest, clip, !aItem->BackfaceIsHidden(), false,
                            rendering, key.value(), true,
-                           wr::ColorF{1.0f, 1.0f, 1.0f, aOpacity});
+                           wr::ColorF{1.0f, 1.0f, 1.0f, aOpacity}, false, false,
+                           rasterizedForDest);
       } else {
         nsPoint firstTilePos = nsLayoutUtils::GetBackgroundFirstTilePos(
             aDest.TopLeft(), aFill.TopLeft(), aRepeatSize);
@@ -757,13 +758,16 @@ ImgDrawResult nsImageRenderer::BuildWebRenderDisplayItems(
       break;
     }
     case StyleImage::Tag::Image: {
-      const int32_t appUnitsPerDevPixel = aPresContext->AppUnitsPerDevPixel();
-      auto fillRect = wr::ToLayoutRect(
-          LayoutDeviceRect::FromAppUnits(aFill, appUnitsPerDevPixel));
-      aBuilder.PushRect(
-          fillRect, fillRect, !aItem->BackfaceIsHidden(),
-          /* aFoceAntiAliasing = */ false, /* aIsCheckerboard = */ false,
-          wr::ToColorF(ToDeviceColor(mImage->AsImage()->CalcColor(mForFrame))));
+      nscolor color = mImage->AsImage()->CalcColor(mForFrame);
+      if (NS_GET_A(color)) {
+        const int32_t appUnitsPerDevPixel = aPresContext->AppUnitsPerDevPixel();
+        auto fillRect = wr::ToLayoutRect(
+            LayoutDeviceRect::FromAppUnits(aFill, appUnitsPerDevPixel));
+        aBuilder.PushRect(fillRect, fillRect, !aItem->BackfaceIsHidden(),
+                          /* aFoceAntiAliasing = */ false,
+                          /* aIsCheckerboard = */ false,
+                          wr::ToColorF(ToDeviceColor(color)));
+      }
       break;
     }
     default:
@@ -959,7 +963,7 @@ ImgDrawResult nsImageRenderer::DrawBorderImageComponent(
     const nsRect& aDirtyRect, const nsRect& aFill, const CSSIntRect& aSrc,
     StyleBorderImageRepeatKeyword aHFill, StyleBorderImageRepeatKeyword aVFill,
     const nsSize& aUnitSize, uint8_t aIndex,
-    const Maybe<nsSize>& aSVGViewportSize, const bool aHasIntrinsicRatio) {
+    const Maybe<CSSSize>& aSVGViewportSize, const bool aHasIntrinsicRatio) {
   if (!IsReady()) {
     MOZ_ASSERT_UNREACHABLE(
         "Ensure PrepareImage() has returned true before "
@@ -1020,9 +1024,14 @@ ImgDrawResult nsImageRenderer::DrawBorderImageComponent(
         nsLayoutUtils::GetSamplingFilterForFrame(mForFrame);
 
     if (!RequiresScaling(aFill, aHFill, aVFill, aUnitSize)) {
+      SVGImageContext svgContext;
+      SVGImageContext::MaybeStoreContextPaint(svgContext, mForFrame, subImage);
+      if (aSVGViewportSize) {
+        svgContext.SetViewportSize(aSVGViewportSize);
+      }
       ImgDrawResult result = nsLayoutUtils::DrawSingleImage(
           aRenderingContext, aPresContext, subImage, samplingFilter, aFill,
-          aDirtyRect, SVGImageContext(), drawFlags);
+          aDirtyRect, svgContext, drawFlags);
 
       if (!mImage->IsComplete()) {
         result &= ImgDrawResult::SUCCESS_NOT_COMPLETE;

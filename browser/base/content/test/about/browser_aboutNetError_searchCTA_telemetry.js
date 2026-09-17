@@ -11,6 +11,14 @@
 const { SearchService } = ChromeUtils.importESModule(
   "moz-src:///toolkit/components/search/SearchService.sys.mjs"
 );
+const { SearchUITestUtils } = ChromeUtils.importESModule(
+  "resource://testing-common/SearchUITestUtils.sys.mjs"
+);
+SearchUITestUtils.init(this);
+
+const { TelemetryTestUtils } = ChromeUtils.importESModule(
+  "resource://testing-common/TelemetryTestUtils.sys.mjs"
+);
 
 const CTA_PREF = "browser.netError.searchCTA.enabled";
 
@@ -25,14 +33,30 @@ function stubEngineSupported(supported) {
 }
 
 add_setup(async function () {
-  await SearchTestUtils.installSearchExtension(
+  pinSearchCTADecisionDeadline();
+  await SearchTestUtils.updateRemoteSettingsConfig([
     {
-      name: "MozSearchCTATelemetry",
-      search_url: "https://example.com/",
-      search_url_get_params: "q={searchTerms}",
+      // Temporary conflict with a normal engine to check that the partner code is removed for now.
+      identifier: "google",
+      base: {
+        partnerCode: "foo",
+        classification: "general",
+        urls: {
+          search: {
+            base: "https://example.com/",
+            params: [
+              {
+                name: "client",
+                value: "{partnerCode}",
+              },
+            ],
+            searchTermParamName: "q",
+          },
+        },
+      },
     },
-    { setAsDefault: true }
-  );
+  ]);
+
   await SpecialPowers.pushPrefEnv({
     set: [
       [CTA_PREF, true],
@@ -130,6 +154,26 @@ add_task(async function test_blockedHostOutcome() {
   BrowserTestUtils.removeTab(tab);
 });
 
+// A private-use intranet suffix reaches the same reason label as .internal
+// (bug 2066447). recordSearchCTADecision() also reports action=none when no
+// engine is usable.
+add_task(async function test_intranetHostOutcome() {
+  Services.fog.testResetFOG();
+  const { tab, browser } = await loadDnsNotFoundPage(
+    "https://wiki.acme.corp/it-helpdesk"
+  );
+  await waitForCtaResolved(browser);
+
+  is(
+    action(SEARCH_CTA_ACTIONS.NONE),
+    1,
+    "action=none recorded for a private-use intranet TLD"
+  );
+  is(reason("host_unusable"), 1, "reason=host_unusable recorded");
+  is(shown(), null, "shown not recorded when no CTA is displayed");
+  BrowserTestUtils.removeTab(tab);
+});
+
 add_task(async function test_noEngineOutcome() {
   Services.fog.testResetFOG();
   const sandbox = sinon.createSandbox();
@@ -176,14 +220,74 @@ add_task(async function test_engineNotGeneralOutcome() {
   }
 });
 
+// A decision that misses the deadline is abandoned. The page renders in its
+// Reload-only form and the load is counted once, as decision_timed_out. The
+// decision that lands afterwards must add nothing, or a single page load would
+// report two reasons and the reason counts would stop summing to the action
+// counts (bug 2067882).
+add_task(async function test_decisionTimedOutOutcome() {
+  Services.fog.testResetFOG();
+  const sandbox = stubEngineSupported(true);
+  let releaseDecision;
+  const decisionHeld = new Promise(resolve => {
+    releaseDecision = resolve;
+  });
+  const realDecide = NetErrorParent.prototype.decideSearchCTA;
+  const decide = sandbox
+    .stub(NetErrorParent.prototype, "decideSearchCTA")
+    .callsFake(async function (failedURL) {
+      await decisionHeld;
+      return realDecide.call(this, failedURL);
+    });
+  // Short enough that the held decision always misses it.
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.netError.searchCTA.decisionTimeoutMs", 50]],
+  });
+  try {
+    const { tab, browser } = await loadDnsNotFoundPage(
+      "https://foo.wildernessgear-cta.com/"
+    );
+    await waitForCtaResolved(browser);
+
+    is(action(SEARCH_CTA_ACTIONS.NONE), 1, "action=none recorded");
+    is(reason("decision_timed_out"), 1, "reason=decision_timed_out recorded");
+    is(shown(), null, "nothing shown for an abandoned decision");
+    await SpecialPowers.spawn(browser, [], async () => {
+      const card =
+        content.document.querySelector("net-error-card").wrappedJSObject;
+      ok(card.reloadButton, "The page renders in its Reload-only form");
+      is(card.searchCTAButton, null, "No Search button past the deadline");
+    });
+
+    releaseDecision();
+    await decide.returnValues[0];
+    await Services.fog.testFlushAllChildren();
+
+    is(reason("decision_timed_out"), 1, "still one reason for the load");
+    is(reason("no_path"), null, "the late decision recorded no second reason");
+    is(action(SEARCH_CTA_ACTIONS.HOST), null, "and no second action");
+    is(shown(), null, "and showed nothing");
+    BrowserTestUtils.removeTab(tab);
+  } finally {
+    sandbox.restore();
+    await SpecialPowers.popPrefEnv();
+  }
+});
+
 add_task(async function test_clickedCount() {
+  TelemetryTestUtils.getAndClearKeyedHistogram("SEARCH_COUNTS");
   Services.fog.testResetFOG();
   const engineStub = stubEngineSupported(true);
   try {
     const { tab, browser } = await loadDnsNotFoundPage(
       "https://foo.wildernessgear-cta.com/"
     );
-    const newTabPromise = BrowserTestUtils.waitForNewTab(gBrowser, null, true);
+    const newTabPromise = BrowserTestUtils.waitForNewTab(
+      gBrowser,
+      // Should be no client field.
+      "https://example.com/?q=wildernessgear-cta.com",
+      true
+    );
     await waitForSettledNetErrorCard(browser, {
       clickQuery: "searchCTAButton",
     });
@@ -197,6 +301,14 @@ add_task(async function test_clickedCount() {
     );
     BrowserTestUtils.removeTab(searchTab);
     BrowserTestUtils.removeTab(tab);
+
+    await SearchUITestUtils.assertSAPTelemetry({
+      engineId: "google",
+      engineName: "google",
+      source: "errorpage",
+      count: 1,
+      telemetrySuffix: "-com-nocodes",
+    });
   } finally {
     engineStub.restore();
   }

@@ -19,7 +19,14 @@ A task's `kind` attribute gives the name of the kind that generated it, e.g.,
 ## run_on_repo_type
 
 The types of repositories where this task should be in the target task set. Typically
-"hg" (the default), "git" or both.
+"hg", "git" or both (the default).
+
+This attribute is temporary and will be used during the transition from hg.mozilla.org
+to Github.
+
+## clone_with
+
+The VCS a task uses to clone the checkout, either "hg" or "git".
 
 This attribute is temporary and will be used during the transition from hg.mozilla.org
 to Github.
@@ -540,6 +547,14 @@ Used by android browsertime tasks to track the path to the apk of the product un
 
 A list of the test manifests that run in this task.
 
+## test-manifests-restricted
+
+Set on a test task whose manifests were restricted to the test paths or test
+tags a try push asked for, meaning each of its chunks runs its own share of the
+request. Tasks without it keep the whole suite and rely on the harness to filter
+it down at run time, so all of their chunks would run the same tests and only
+the first one is scheduled.
+
 ## lull-schedule
 
 Used by performance tasks to schedule them at a specified frequency in a best-effort method. Schedules them when the overall CI load is low for a given platform. Use "w" for weeks, "d" for days, "h" for hours, and "m" for minutes in a string like so to specify the scheduling frequency: 1d, 1w 4h, 2w 4d 1h.
@@ -570,5 +585,11 @@ name of the built flatpak app (e.g. `org.mozilla.firefox`)
 The human-readable product name for the MSI installer (e.g. `Firefox Nightly`,
 `Firefox Beta`, `Firefox`). Used by downstream signing tasks to construct
 the Authenticode comment embedded in the installer signature.
+
+## duplicate-of
+
+The label of the task this one was copied from by the `duplicate` transforms.
+A downstream kind that names this task's kind in `duplicate.chain-from` makes
+its own copies depend on this task rather than on the one it was copied from.
 
 [primary one]: https://taskcluster-taskgraph.readthedocs.io/en/latest/reference/transforms/from_deps.html#primary-kind

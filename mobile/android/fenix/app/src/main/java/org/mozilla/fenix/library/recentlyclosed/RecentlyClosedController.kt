@@ -113,7 +113,7 @@ class DefaultRecentlyClosedController(
     override fun handleShare(tabs: Set<TabState>) {
         RecentlyClosedTabs.menuShare.record(NoExtras())
 
-        val shareData = tabs.map { ShareData(url = it.url, title = it.title) }
+        val shareData = tabs.map { ShareData(url = it.url, title = it.title, private = it.private) }
         shareUseCases.shareItems(
             items = shareData,
             source = ShareSource.RECENTLY_CLOSED,

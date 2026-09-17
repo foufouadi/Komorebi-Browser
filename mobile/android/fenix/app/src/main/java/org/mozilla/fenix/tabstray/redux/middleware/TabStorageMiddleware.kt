@@ -18,6 +18,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import mozilla.components.browser.state.state.TabSessionState
+import mozilla.components.feature.tabgroups.storage.data.TabGroup
+import mozilla.components.feature.tabgroups.storage.data.TabGroupData
+import mozilla.components.feature.tabgroups.storage.repository.TabGroupRepository
 import mozilla.components.feature.tabs.TabsUseCases.MoveTabsUseCase
 import mozilla.components.feature.tabs.TabsUseCases.RemoveTabsUseCase
 import mozilla.components.lib.state.Middleware
@@ -26,9 +29,6 @@ import mozilla.components.support.base.log.logger.Logger
 import mozilla.components.support.utils.DateTimeProvider
 import mozilla.components.support.utils.DefaultDateTimeProvider
 import org.mozilla.fenix.components.usecases.FenixBrowserUseCases
-import org.mozilla.fenix.tabgroups.storage.data.TabGroup
-import org.mozilla.fenix.tabgroups.storage.data.TabGroupData
-import org.mozilla.fenix.tabgroups.storage.repository.TabGroupRepository
 import org.mozilla.fenix.tabstray.data.TabData
 import org.mozilla.fenix.tabstray.data.TabGroupTheme
 import org.mozilla.fenix.tabstray.data.TabStorageUpdate
@@ -193,6 +193,9 @@ class TabStorageMiddleware(
             }
 
             is TabGroupAction.DeleteConfirmed -> handleDeleteClicked(action.group, store)
+
+            is TabGroupAction.UngroupConfirmed ->
+                scope.launch { tabGroupRepository.ungroupTabGroup(tabGroupId = action.group.id) }
 
             is TabGroupAction.DragAndDropInitiated -> {
                 handleDragAndDrop(action = action, store = store)
@@ -685,11 +688,9 @@ class TabStorageMiddleware(
                 title = name,
                 theme = theme.toStorageValue(),
                 lastModified = dateTimeProvider.currentTimeMillis(),
+                tabIds = listOf(newTabId),
             )
-        tabGroupRepository.createTabGroupWithTabs(
-            tabGroup = tabGroup,
-            tabIds = listOf(newTabId),
-        )
+        tabGroupRepository.createTabGroupWithTabs(tabGroup = tabGroup)
         mainScope.launch {
             store.dispatch(
                 TabGroupAction.OpenCreatedTabGroup(
@@ -755,11 +756,9 @@ class TabStorageMiddleware(
                 title = formState.name,
                 theme = formState.theme.toStorageValue(),
                 lastModified = dateTimeProvider.currentTimeMillis(),
+                tabIds = listOf(sourceId, destinationId),
             )
-        tabGroupRepository.createTabGroupWithTabs(
-            tabGroup = tabGroup,
-            tabIds = listOf(sourceId, destinationId),
-        )
+        tabGroupRepository.createTabGroupWithTabs(tabGroup = tabGroup)
         return tabGroup.id
     }
 
@@ -767,13 +766,15 @@ class TabStorageMiddleware(
         formState: TabGroupFormState,
         selectedTabIds: List<String>,
     ): String? {
+        val savedTabGroup =
+            TabGroup(
+                title = formState.name,
+                theme = formState.theme.toStorageValue(),
+                lastModified = dateTimeProvider.currentTimeMillis(),
+                tabIds = selectedTabIds,
+            )
+
         if (formState.tabGroupId == null) {
-            val newTabGroup =
-                TabGroup(
-                    title = formState.name,
-                    theme = formState.theme.toStorageValue(),
-                    lastModified = dateTimeProvider.currentTimeMillis(),
-                )
             if (selectedTabIds.isNotEmpty()) {
                 // Obtain the ID of the selected tab that appears sequentially first in the tab data to sequence
                 // the rest of the selected tabs against it.
@@ -788,24 +789,13 @@ class TabStorageMiddleware(
                     targetTabId = sequentiallyFirstTabId,
                 )
 
-                tabGroupRepository.createTabGroupWithTabs(
-                    tabGroup = newTabGroup,
-                    tabIds = selectedTabIds,
-                )
+                tabGroupRepository.createTabGroupWithTabs(tabGroup = savedTabGroup)
             } else {
-                tabGroupRepository.addNewTabGroup(newTabGroup)
+                tabGroupRepository.addNewTabGroup(savedTabGroup)
             }
-            return newTabGroup.id
+            return savedTabGroup.id
         } else {
-            tabGroupRepository.updateTabGroup(
-                tabGroup =
-                    TabGroup(
-                        id = formState.tabGroupId,
-                        title = formState.name,
-                        theme = formState.theme.toStorageValue(),
-                        lastModified = dateTimeProvider.currentTimeMillis(),
-                    )
-            )
+            tabGroupRepository.updateTabGroup(tabGroup = savedTabGroup.copy(id = formState.tabGroupId))
         }
         return null
     }
@@ -824,7 +814,7 @@ class TabStorageMiddleware(
 
             removeTabsUseCase.invoke(
                 ids = group.tabs.map { it.id },
-                excludedTabIds = inactiveTabIds,
+                excludedFallbackTabIds = inactiveTabIds,
             )
 
             tabGroupRepository.deleteTabGroupById(group.id)

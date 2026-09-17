@@ -6,21 +6,20 @@ such as system access, normal file I/O, and socket (network) I/O.
 For sample code that illustrates basic I/O operations, see {doc}`introduction_to_nspr`.
 For information about the types most
 commonly used with the functions described in this chapter, see [I/O
-Types](I%2fO_Types).
+Types](i_o_types.md).
 
 - [Functions that Operate on
-  Pathnames](#Functions_that_Operate_on_Pathnames)
+  Pathnames](#functions-that-operate-on-pathnames)
 - [Functions that Act on File
-  Descriptors](#Functions_that_Act_on_File_Descriptors)
-- [Directory I/O Functions](#Directory_I/O_Functions)
-- [Socket Manipulation Functions](#Socket_Manipulation_Functions)
+  Descriptors](#functions-that-act-on-file-descriptors)
+- [Directory I/O Functions](#directory-io-functions)
+- [Socket Manipulation Functions](#socket-manipulation-functions)
 - [Converting Between Host and Network
-  Addresses](#Converting_Between_Host_and_Network_Addresses)
-- [Memory-Mapped I/O Functions](#Memory-Mapped_I/O_Functions)
-- [Anonymous Pipe Function](#Anonymous_Pipe_Function)
-- [Polling Functions](#Polling_Functions)
-- [Pollable Events](#Pollable_Events)
-- [Manipulating Layers](#Manipulating_Layers)
+  Addresses](#converting-between-host-and-network-addresses)
+- [Memory-Mapped I/O Functions](#memory-mapped-io-functions)
+- [Anonymous Pipe Function](#anonymous-pipe-function)
+- [Polling Functions](#polling-functions)
+- [Manipulating Layers](#manipulating-layers)
 
 (functions-that-operate-on-pathnames)=
 
@@ -156,35 +155,6 @@ provided by NSPR:
 
 - {ref}`PR_Poll`
 - {ref}`PR_GetConnectStatus`
-
-(pollable-events)=
-
-## Pollable Events
-
-A pollable event is a special kind of file descriptor. The only I/O
-operation you can perform on a pollable event is to poll it with the
-`PR_POLL_READ` flag. You cannot read from or write to a pollable
-event.
-
-The purpose of a pollable event is to combine event waiting with I/O
-waiting in a single {ref}`PR_Poll` call. Pollable events are implemented
-using a pipe or a pair of TCP sockets connected via the loopback
-address, therefore setting and/or waiting for pollable events are
-expensive operating system calls. Do not use pollable events for general
-thread synchronization; use condition variables instead.
-
-A pollable event has two states: set and unset. Events are not queued,
-so there is no notion of an event count. A pollable event is either set
-or unset.
-
-- {ref}`PR_NewPollableEvent`
-- {ref}`PR_DestroyPollableEvent`
-- {ref}`PR_SetPollableEvent`
-- {ref}`PR_WaitForPollableEvent`
-
-One can call {ref}`PR_Poll` with the `PR_POLL_READ` flag on a pollable
-event. When the pollable event is set, {ref}`PR_Poll` returns the the
-`PR_POLL_READ` flag set in the out_flags.
 
 (manipulating-layers)=
 

@@ -2,6 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import annotations
+
 import argparse
 import ast
 import difflib
@@ -61,6 +63,9 @@ MACH_COMMANDS = {
     ),
     "awsy-test": MachCommandReference("testing/awsy/mach_commands.py"),
     "bhr-aggregate": MachCommandReference(
+        "toolkit/components/backgroundhangmonitor/mach_commands.py"
+    ),
+    "bhr-timeseries": MachCommandReference(
         "toolkit/components/backgroundhangmonitor/mach_commands.py"
     ),
     "bootstrap": MachCommandReference(
@@ -219,6 +224,9 @@ MACH_COMMANDS = {
     "run": MachCommandReference("python/mozbuild/mozbuild/mach_commands.py"),
     "run-condprofile": MachCommandReference("testing/condprofile/mach_commands.py"),
     "rusttests": MachCommandReference("testing/mach_commands.py"),
+    "sbom": MachCommandReference(
+        "python/mozbuild/mozbuild/licensing_commands.py",
+    ),
     "settings": MachCommandReference("python/mach/mach/commands/settings.py"),
     "shell-test": MachCommandReference("browser/installer/linux/mach_commands.py"),
     "show-log": MachCommandReference("python/mozbuild/mozbuild/mach_commands.py"),

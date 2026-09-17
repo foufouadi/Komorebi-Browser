@@ -5,6 +5,8 @@
 #ifndef jit_loong64_Assembler_loong64_h
 #define jit_loong64_Assembler_loong64_h
 
+#include <utility>
+
 #include "jit/CompactBuffer.h"
 #include "jit/JitCode.h"
 #include "jit/loong64/Architecture-loong64.h"
@@ -89,6 +91,7 @@ static constexpr FloatRegister InvalidFloatReg;
 
 static constexpr Register StackPointer = sp;
 static constexpr Register FramePointer = fp;
+static constexpr Register LinkRegister = ra;
 static constexpr Register ReturnReg = a0;
 static constexpr Register64 ReturnReg64(ReturnReg);
 static constexpr FloatRegister ReturnFloat32Reg{FloatRegisters::f0,
@@ -175,6 +178,10 @@ static constexpr Register RegExpExecTestStringReg = CallTempReg1;
 static constexpr Register RegExpSearcherRegExpReg = CallTempReg0;
 static constexpr Register RegExpSearcherStringReg = CallTempReg1;
 static constexpr Register RegExpSearcherLastIndexReg = CallTempReg2;
+
+// Register used by the bailout tail and bailout stubs during stack
+// reconstruction.
+static constexpr Register BailoutStubHandlerReg = CallTempReg0;
 
 static constexpr Register JSReturnReg_Type = a3;
 static constexpr Register JSReturnReg_Data = a2;
@@ -531,6 +538,14 @@ enum OpcodeField {
   op_fldx_d = 0x7068U << 15,
   op_fstx_s = 0x7070U << 15,
   op_fstx_d = 0x7078U << 15,
+  op_amcas_b = 0x70b0U << 15,
+  op_amcas_h = 0x70b1U << 15,
+  op_amcas_w = 0x70b2U << 15,
+  op_amcas_d = 0x70b3U << 15,
+  op_amcas_db_b = 0x70b4U << 15,
+  op_amcas_db_h = 0x70b5U << 15,
+  op_amcas_db_w = 0x70b6U << 15,
+  op_amcas_db_d = 0x70b7U << 15,
   op_amswap_b = 0x70b8U << 15,
   op_amswap_h = 0x70b9U << 15,
   op_amadd_b = 0x70baU << 15,
@@ -647,6 +662,18 @@ enum OpcodeField {
   op_movcf2gr = 0x114dcU << 8,
 };
 
+// int check.
+inline constexpr bool is_intN(int64_t x, unsigned n) {
+  MOZ_ASSERT((0 < n) && (n < 64));
+  int64_t limit = static_cast<int64_t>(1) << (n - 1);
+  return (-limit <= x) && (x < limit);
+}
+
+inline constexpr bool is_uintN(int64_t x, unsigned n) {
+  MOZ_ASSERT((0 < n) && (n < 64));
+  return !(x >> n);
+}
+
 class Operand;
 
 // A BOffImm16 is a 16 bit immediate that is used for branches.
@@ -660,7 +687,7 @@ class BOffImm16 {
   }
   int32_t decode() {
     MOZ_ASSERT(!isInvalid());
-    return (int32_t(data << 18) >> 16);
+    return (int32_t(data << 16) >> 14);
   }
 
   explicit BOffImm16(int offset) : data((offset) >> 2 & Imm16Mask) {
@@ -668,13 +695,7 @@ class BOffImm16 {
     MOZ_ASSERT(IsInRange(offset));
   }
   static bool IsInRange(int offset) {
-    if ((offset) < int(unsigned(INT16_MIN) << 2)) {
-      return false;
-    }
-    if ((offset) > (INT16_MAX << 2)) {
-      return false;
-    }
-    return true;
+    return is_intN(offset, 16 + /* 2'b0 */ 2);
   }
   static const uint32_t INVALID = 0x00020000;
   BOffImm16() : data(INVALID) {}
@@ -696,7 +717,7 @@ class JOffImm26 {
   }
   int32_t decode() {
     MOZ_ASSERT(!isInvalid());
-    return (int32_t(data << 8) >> 6);
+    return (int32_t(data << 6) >> 4);
   }
 
   explicit JOffImm26(int offset) : data((offset) >> 2 & Imm26Mask) {
@@ -704,13 +725,7 @@ class JOffImm26 {
     MOZ_ASSERT(IsInRange(offset));
   }
   static bool IsInRange(int offset) {
-    if ((offset) < -536870912) {
-      return false;
-    }
-    if ((offset) > 536870908) {
-      return false;
-    }
-    return true;
+    return is_intN(offset, 26 + /* 2'b0 */ 2);
   }
   static const uint32_t INVALID = 0x20000000;
   JOffImm26() : data(INVALID) {}
@@ -729,11 +744,8 @@ class Imm16 {
   int32_t decodeSigned() { return value; }
   uint32_t decodeUnsigned() { return value; }
 
-  static bool IsInSignedRange(int32_t imm) {
-    return imm >= INT16_MIN && imm <= INT16_MAX;
-  }
-
-  static bool IsInUnsignedRange(uint32_t imm) { return imm <= UINT16_MAX; }
+  static bool IsInSignedRange(int32_t imm) { return is_intN(imm, 16); }
+  static bool IsInUnsignedRange(uint32_t imm) { return is_uintN(imm, 16); }
 };
 
 class Imm8 {
@@ -745,10 +757,8 @@ class Imm8 {
   uint32_t encode(uint32_t shift) { return value << shift; }
   int32_t decodeSigned() { return value; }
   uint32_t decodeUnsigned() { return value; }
-  static bool IsInSignedRange(int32_t imm) {
-    return imm >= INT8_MIN && imm <= INT8_MAX;
-  }
-  static bool IsInUnsignedRange(uint32_t imm) { return imm <= UINT8_MAX; }
+  static bool IsInSignedRange(int32_t imm) { return is_intN(imm, 8); }
+  static bool IsInUnsignedRange(uint32_t imm) { return is_uintN(imm, 8); }
   static Imm8 Lower(Imm16 imm) { return Imm8(imm.decodeSigned() & 0xff); }
   static Imm8 Upper(Imm16 imm) {
     return Imm8((imm.decodeSigned() >> 8) & 0xff);
@@ -813,18 +823,6 @@ class Operand {
     return Register::FromCode(reg);
   }
 };
-
-// int check.
-inline constexpr bool is_intN(int64_t x, unsigned n) {
-  MOZ_ASSERT((0 < n) && (n < 64));
-  int64_t limit = static_cast<int64_t>(1) << (n - 1);
-  return (-limit <= x) && (x < limit);
-}
-
-inline constexpr bool is_uintN(int64_t x, unsigned n) {
-  MOZ_ASSERT((0 < n) && (n < 64));
-  return !(x >> n);
-}
 
 typedef js::jit::AssemblerBuffer<Instruction> LOONGBuffer;
 
@@ -1297,6 +1295,17 @@ class AssemblerLOONG64 : public AssemblerShared {
   BufferOffset as_amadd_db_b(Register rd, Register rj, Register rk);
   BufferOffset as_amadd_db_h(Register rd, Register rj, Register rk);
 
+  // Atomic instructions from LAMCAS extension
+  BufferOffset as_amcas_b(Register rd, Register rj, Register rk);
+  BufferOffset as_amcas_h(Register rd, Register rj, Register rk);
+  BufferOffset as_amcas_w(Register rd, Register rj, Register rk);
+  BufferOffset as_amcas_d(Register rd, Register rj, Register rk);
+
+  BufferOffset as_amcas_db_b(Register rd, Register rj, Register rk);
+  BufferOffset as_amcas_db_h(Register rd, Register rj, Register rk);
+  BufferOffset as_amcas_db_w(Register rd, Register rj, Register rk);
+  BufferOffset as_amcas_db_d(Register rd, Register rj, Register rk);
+
   // Barrier instructions
   BufferOffset as_dbar(int32_t hint);
   BufferOffset as_ibar(int32_t hint);
@@ -1467,6 +1476,17 @@ class AssemblerLOONG64 : public AssemblerShared {
 
   static bool HasRoundInstruction(RoundingMode mode) { return false; }
 
+  // Split an offset into the PCADDU18I si20 field and the JIRL offs16 byte
+  // offset suitable for jump36. Returns (si20, offs16).
+  static constexpr std::pair<int32_t, int32_t> SplitJump36Offset(int64_t d) {
+    MOZ_ASSERT((d & 0x3) == 0);
+    const int64_t hi = (d + (static_cast<int64_t>(1) << 17)) >> 18;
+    const int64_t lo = d - (hi << 18);
+    MOZ_ASSERT(is_intN(hi, 20));
+    MOZ_ASSERT(BOffImm16::IsInRange(static_cast<int32_t>(lo)));
+    return std::make_pair(static_cast<int32_t>(hi), static_cast<int32_t>(lo));
+  }
+
  protected:
   InstImm invertBranch(InstImm branch, BOffImm16 skipOffset);
   void addPendingJump(BufferOffset src, ImmPtr target, RelocationKind kind) {
@@ -1474,14 +1494,6 @@ class AssemblerLOONG64 : public AssemblerShared {
     if (kind == RelocationKind::JITCODE) {
       jumpRelocations_.writeUnsigned(src.getOffset());
     }
-  }
-
-  void addLongJump(BufferOffset src, BufferOffset dst) {
-    CodeLabel cl;
-    cl.patchAt()->bind(src.getOffset());
-    cl.target()->bind(dst.getOffset());
-    cl.setLinkMode(CodeLabel::JumpImmediate);
-    addCodeLabel(std::move(cl));
   }
 
  public:

@@ -6,7 +6,11 @@ import { actionCreators as ac } from "common/Actions.mjs";
 import { DSImage } from "../DSImage/DSImage.jsx";
 import { DSLinkMenu } from "../DSLinkMenu/DSLinkMenu";
 import { ImpressionStats } from "../../DiscoveryStreamImpressionStats/ImpressionStats";
-import { getActiveCardSize, getNovaColumnLayout } from "../../../lib/utils";
+import {
+  getActiveCardSize,
+  getCardColumn,
+  getNovaColumnLayout,
+} from "../../../lib/utils";
 import React from "react";
 import { SafeAnchor } from "../SafeAnchor/SafeAnchor";
 import {
@@ -294,6 +298,7 @@ export class _DSCard extends React.PureComponent {
 
   onLinkClick() {
     const matchesSelectedTopic = this.doesLinkTopicMatchSelectedTopic();
+    const cardColumn = getCardColumn(this.contextMenuButtonHostElement);
     if (this.props.dispatch) {
       this.props.dispatch(
         ac.DiscoveryStreamUserEvent({
@@ -311,11 +316,14 @@ export class _DSCard extends React.PureComponent {
             scheduled_corpus_item_id: this.props.scheduled_corpus_item_id,
             recommended_at: this.props.recommended_at,
             received_rank: this.props.received_rank,
+            variant_id: this.props.variant_id,
+            source_section_id: this.props.source_section_id,
             topic: this.props.topic,
             features: this.props.features,
             matches_selected_topic: matchesSelectedTopic,
             selected_topics: this.props.selectedTopics,
             attribution: this.props.attribution,
+            ...(cardColumn ? { card_column: cardColumn } : {}),
             ...(this.props.format
               ? { format: this.props.format }
               : {
@@ -682,16 +690,12 @@ export class _DSCard extends React.PureComponent {
           tabIndex={this.props.tabIndex}
           onFocus={this.props.onFocus}
         >
-          <div className="img-wrapper">
-            {images}
-            {this.props.isDailyBrief && this.props.topic && (
-              <span
-                className="ds-card-daily-brief-topic"
-                data-l10n-id={`newtab-topic-label-${this.props.topic}`}
-              />
-            )}
-          </div>
+          <div className="img-wrapper">{images}</div>
+          {/* Only the carousel passes isActive, and only its visible slide gets
+              true. This stays mounted while the slide is hidden, so a card that
+              is shown more than once still reports a single impression. */}
           <ImpressionStats
+            isActive={this.props.isActive !== false}
             flightId={this.props.flightId}
             rows={[
               {
@@ -704,9 +708,12 @@ export class _DSCard extends React.PureComponent {
                 scheduled_corpus_item_id: this.props.scheduled_corpus_item_id,
                 recommended_at: this.props.recommended_at,
                 received_rank: this.props.received_rank,
+                variant_id: this.props.variant_id,
+                source_section_id: this.props.source_section_id,
                 topic: this.props.topic,
                 features: this.props.features,
                 ...(format ? { format } : {}),
+                is_ad_eligible_position: this.props.is_ad_eligible_position,
                 category: this.props.category,
                 attribution: this.props.attribution,
                 ...(this.props.section

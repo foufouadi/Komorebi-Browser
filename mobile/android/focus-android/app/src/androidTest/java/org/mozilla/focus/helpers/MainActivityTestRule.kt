@@ -24,7 +24,6 @@ import org.mozilla.focus.state.Screen
 open class MainActivityFirstrunTestRule(
     launchActivity: Boolean = true,
     private val showFirstRun: Boolean,
-    private val showNewOnboarding: Boolean = true,
     private val showStartBrowsingCfrVisibility: Boolean = false,
 ) : ActivityTestRule<MainActivity>(MainActivity::class.java, launchActivity) {
     private val longTapUserPreference = getLongPressTimeout()

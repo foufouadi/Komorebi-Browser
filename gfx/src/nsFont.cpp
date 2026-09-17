@@ -150,11 +150,11 @@ void nsFont::AddFontFeaturesToStyle(gfxFontStyle* aStyle,
   setting.mTag = aVertical ? TRUETYPE_TAG('v', 'k', 'r', 'n')
                            : TRUETYPE_TAG('k', 'e', 'r', 'n');
   switch (kerning) {
-    case NS_FONT_KERNING_NONE:
+    case StyleFontKerning::None:
       setting.mValue = 0;
       aStyle->featureSettings.AppendElement(setting);
       break;
-    case NS_FONT_KERNING_NORMAL:
+    case StyleFontKerning::Normal:
       setting.mValue = 1;
       aStyle->featureSettings.AppendElement(setting);
       break;
@@ -242,8 +242,8 @@ void nsFont::AddFontFeaturesToStyle(gfxFontStyle* aStyle,
   // indicate common-path case when neither variantCaps or variantSubSuper are
   // set
   aStyle->noFallbackVariantFeatures =
-      (aStyle->variantCaps == NS_FONT_VARIANT_CAPS_NORMAL) &&
-      (variantPosition == NS_FONT_VARIANT_POSITION_NORMAL);
+      (aStyle->variantCaps == StyleFontVariantCaps::Normal) &&
+      (variantPosition == StyleFontVariantPosition::Normal);
 
   // If the feature list is not empty, we insert a "fake" feature with tag=0
   // as delimiter between the above "high-level" features from font-variant-*
@@ -258,7 +258,7 @@ void nsFont::AddFontFeaturesToStyle(gfxFontStyle* aStyle,
   aStyle->featureSettings.AppendElements(fontFeatureSettings);
 
   // enable grayscale antialiasing for text
-  if (smoothing == NS_FONT_SMOOTHING_GRAYSCALE) {
+  if (smoothing == StyleFontSmoothing::Grayscale) {
     aStyle->useGrayscaleAntialiasing = true;
   }
 }
@@ -273,7 +273,7 @@ void nsFont::AddFontVariationsToStyle(gfxFontStyle* aStyle) const {
     }
   };
   const uint32_t kTagOpsz = TRUETYPE_TAG('o', 'p', 's', 'z');
-  if (opticalSizing == NS_FONT_OPTICAL_SIZING_AUTO &&
+  if (opticalSizing == StyleFontOpticalSizing::Auto &&
       !fontVariationSettings.Contains(kTagOpsz, VariationTagComparator())) {
     aStyle->autoOpticalSize = size.ToCSSPixels();
   }

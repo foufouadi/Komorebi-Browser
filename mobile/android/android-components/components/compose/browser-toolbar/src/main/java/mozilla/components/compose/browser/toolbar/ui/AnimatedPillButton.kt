@@ -5,7 +5,6 @@
 package mozilla.components.compose.browser.toolbar.ui
 
 import android.graphics.drawable.Drawable
-import android.view.SoundEffectConstants
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
@@ -38,7 +37,6 @@ import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
@@ -71,6 +69,8 @@ const val ANIMATION_DELAY_MILLIS = 400L
  * @param onClick Interaction dispatched when the button is tapped.
  * @param onInteraction Callback for dispatching [BrowserToolbarEvent]s to the store.
  * @param testTag Optional test tag for this button.
+ * @param onAnimationFinished Optional [BrowserToolbarEvent] dispatched via [onInteraction] once the pill has fully
+ *   collapsed on screen (or immediately, if [animated] is false).
  */
 @Suppress("CognitiveComplexMethod")
 @Composable
@@ -84,9 +84,9 @@ internal fun AnimatedPillButton(
     onClick: BrowserToolbarInteraction,
     onInteraction: (BrowserToolbarEvent) -> Unit,
     testTag: String? = null,
+    onAnimationFinished: BrowserToolbarEvent? = null,
 ) {
     // refactoring planned in https://bugzilla.mozilla.org/show_bug.cgi?id=2030770
-    val view = LocalView.current
     val density = LocalDensity.current
     var fullWidthPx by remember { mutableIntStateOf(0) }
     val contractionProgress = remember { Animatable(if (animated) 1f else 0f) }
@@ -101,8 +101,12 @@ internal fun AnimatedPillButton(
 
     LaunchedEffect(fullWidthPx) {
         if (fullWidthPx == 0) return@LaunchedEffect
-        delay(ANIMATION_DELAY_MILLIS)
-        contractionProgress.animateTo(0f, tween(durationMillis = FADE_OUT_DURATION_MILLIS))
+        if (animated) {
+            delay(ANIMATION_DELAY_MILLIS)
+            contractionProgress.animateTo(0f, tween(durationMillis = FADE_OUT_DURATION_MILLIS))
+        }
+
+        onAnimationFinished?.let(onInteraction)
     }
 
     val animatedWidthDp = animatedWidth(fullWidthPx, COLLAPSED_WIDTH, contractionProgress.value, density)
@@ -119,7 +123,6 @@ internal fun AnimatedPillButton(
                 .clip(CircleShape)
                 .background(containerColor)
                 .clickable {
-                    view.playSoundEffect(SoundEffectConstants.CLICK)
                     if (onClick is BrowserToolbarEvent) {
                         onInteraction(onClick)
                     }

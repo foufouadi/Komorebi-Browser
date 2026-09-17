@@ -53,7 +53,7 @@ struct ScratchFloat32Scope : public AutoFloatRegisterScope {
       : AutoFloatRegisterScope(masm, ScratchFloat32Reg_) {}
 };
 
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
 static constexpr FloatRegister ReturnSimd128Reg = {FloatRegisters::v0,
                                                    FloatRegisters::Simd128};
 static constexpr FloatRegister ScratchSimd128Reg = {FloatRegisters::v31,
@@ -90,6 +90,7 @@ static constexpr Register ReturnReg{Registers::x0};
 static constexpr Register64 ReturnReg64(ReturnReg);
 static constexpr Register JSReturnReg{Registers::x2};
 static constexpr Register FramePointer{Registers::fp};
+static constexpr Register LinkRegister{Registers::x30};
 static constexpr ARMRegister FramePointer64{FramePointer, 64};
 static constexpr Register ZeroRegister{Registers::sp};
 static constexpr ARMRegister ZeroRegister64{Registers::sp, 64};
@@ -401,6 +402,10 @@ static constexpr Register RegExpExecTestStringReg = CallTempReg1;
 static constexpr Register RegExpSearcherRegExpReg = CallTempReg0;
 static constexpr Register RegExpSearcherStringReg = CallTempReg1;
 static constexpr Register RegExpSearcherLastIndexReg = CallTempReg2;
+
+// Register used by the bailout tail and bailout stubs during stack
+// reconstruction.
+static constexpr Register BailoutStubHandlerReg = CallTempReg0;
 
 static constexpr Register JSReturnReg_Type = r3;
 static constexpr Register JSReturnReg_Data = r2;

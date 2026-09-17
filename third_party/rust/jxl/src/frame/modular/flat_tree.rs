@@ -5,17 +5,14 @@
 
 use std::fmt::Debug;
 
-use super::{Predictor, predict::WeightedPredictorState};
-use crate::{
-    error::Result,
-    frame::modular::{
-        Tree,
-        predict::PredictionData,
-        tree::{PredictionResult, TreeNode, compute_properties},
-    },
-    image::Image,
-    util::NewWithCapacity,
-};
+use super::Predictor;
+use super::predict::WeightedPredictorState;
+use crate::error::Result;
+use crate::frame::modular::Tree;
+use crate::frame::modular::predict::PredictionData;
+use crate::frame::modular::tree::{PredictionResult, TreeNode, compute_properties};
+use crate::image::Image;
+use crate::util::NewWithCapacity;
 
 /// Flattened tree node for optimized traversal.
 /// Stores parent + info about both children to evaluate 3 nodes per iteration.
@@ -35,7 +32,7 @@ pub(super) enum FlatTreeNode {
 }
 
 #[inline(always)]
-#[allow(clippy::too_many_arguments, unsafe_code)]
+#[allow(clippy::too_many_arguments)]
 pub(super) fn predict_flat(
     flat_tree: &[FlatTreeNode],
     prediction_data: PredictionData,

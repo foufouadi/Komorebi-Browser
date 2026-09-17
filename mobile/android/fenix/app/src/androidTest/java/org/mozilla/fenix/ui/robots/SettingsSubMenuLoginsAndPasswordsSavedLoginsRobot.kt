@@ -28,7 +28,6 @@ import androidx.test.espresso.matcher.ViewMatchers.withEffectiveVisibility
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.Until
-import org.hamcrest.CoreMatchers
 import org.hamcrest.CoreMatchers.containsString
 import org.mozilla.fenix.R
 import org.mozilla.fenix.compose.snackbar.SNACKBAR_TEST_TAG
@@ -563,5 +562,3 @@ class SettingsSubMenuLoginsAndPasswordsSavedLoginsRobot(private val composeTestR
         }
     }
 }
-
-private fun goBackButton() = onView(CoreMatchers.allOf(ViewMatchers.withContentDescription("Navigate up")))

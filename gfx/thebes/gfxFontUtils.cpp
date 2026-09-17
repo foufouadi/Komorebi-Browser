@@ -1753,8 +1753,8 @@ void gfxFontUtils::GetVariationData(
       }
       instance.mValues.SetCapacity(axisCount);
       for (unsigned j = 0; j < axisCount; ++j) {
-        gfxFontVariationValue value = {axes[j].axisTag,
-                                       int32_t(coords[j]) / 65536.0f};
+        gfxFontVariation value = {axes[j].axisTag,
+                                  int32_t(coords[j]) / 65536.0f};
         instance.mValues.AppendElement(value);
       }
       aInstances->AppendElement(std::move(instance));

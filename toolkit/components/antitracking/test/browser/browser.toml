@@ -163,9 +163,6 @@ support-files = ["localStorageEvents.html"]
 ["browser_partitionedLockManager.js"]
 
 ["browser_partitionedMessaging.js"]
-skip-if = [
-  "true", # Bug 1588241
-]
 
 ["browser_partitionedServiceWorkers.js"]
 skip-if = [
@@ -354,9 +351,6 @@ skip-if = [
 support-files = ["file_stripping.html"]
 
 ["browser_urlQueryStringStripping_allowList.js"]
-support-files = ["file_stripping.html"]
-
-["browser_urlQueryStringStripping_nimbus.js"]
 support-files = ["file_stripping.html"]
 
 ["browser_urlQueryStringStripping_pbmode.js"]

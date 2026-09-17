@@ -17,6 +17,8 @@ ChromeUtils.defineESModuleGetters(this, {
   sinon: "resource://testing-common/Sinon.sys.mjs",
   SiteDataTestUtils: "resource://testing-common/SiteDataTestUtils.sys.mjs",
   UIState: "resource://services-sync/UIState.sys.mjs",
+  UrlClassifierTestUtils:
+    "resource://testing-common/UrlClassifierTestUtils.sys.mjs",
 });
 
 const { FX_MONITOR_OAUTH_CLIENT_ID: monitorClientId } =
@@ -31,6 +33,12 @@ ChromeUtils.defineLazyGetter(this, "fxAccounts", () => {
 const TRACKING_PAGE =
   // eslint-disable-next-line sdl/no-insecure-url
   "http://tracking.example.org/browser/browser/base/content/test/protectionsUI/trackingPage.html";
+
+// The http is required here so that the sub iframe is not blocked which prevents the
+// cookie test.
+const COOKIE_PAGE =
+  // eslint-disable-next-line sdl/no-insecure-url
+  "http://not-tracking.example.com/browser/browser/base/content/test/protectionsUI/cookiePage.html";
 
 const TEST_BREACH = {
   // Make sure the breach is a recent one, since breaches older than a year are not taken into account:
@@ -53,10 +61,9 @@ const INSECURE_ICON = 'url("chrome://browser/skin/trust-icon-insecure.svg")';
 const TEST_ORIGIN = "https://example.com";
 
 add_setup(async function setup() {
-  const db = RemoteSettings("fxmonitor-breaches").db;
-  await db.clear();
-  await db.create(TEST_BREACH, { useRecordId: true });
-  await db.importChanges({}, Date.now());
+  await RemoteSettings("fxmonitor-breaches").emit("sync", {
+    data: { current: [TEST_BREACH] },
+  });
   await SpecialPowers.pushPrefEnv({
     set: [
       ["browser.urlbar.trustPanel.breachAlerts", true],
@@ -66,8 +73,9 @@ add_setup(async function setup() {
   });
   registerCleanupFunction(async () => {
     await PlacesUtils.history.clear();
-    await db.clear();
-    await db.importChanges({}, Date.now());
+    await RemoteSettings("fxmonitor-breaches").emit("sync", {
+      data: { current: [] },
+    });
     const storage = new BreachAlertStorage();
     await storage.initialize();
     await storage.clearAllBreachAlertDismissals();
@@ -261,11 +269,22 @@ add_task(async function test_update() {
     "trustpanel-blocker-section-header"
   );
 
-  // With nothing blocked yet the section must be hidden rather than showing a
-  // misleading "0 trackers blocked" (Bug: intermittent 0-blocked state).
+  await TestUtils.waitForCondition(
+    () =>
+      // eslint-disable-next-line sdl/no-insecure-url
+      "http://trackertest.org" in
+        JSON.parse(gBrowser.selectedBrowser.getContentBlockingLog()) &&
+      blockerHeader.textContent.length,
+    "Waiting for the tracking iframe to be recorded and the count rendered"
+  );
+  Assert.equal(
+    parseInt(blockerHeader.textContent, 10),
+    0,
+    "Detected but unblocked trackers (i.e. the tracking iframe) are not counted"
+  );
   Assert.ok(
     blockerSection.hasAttribute("hidden"),
-    "Blocker section is hidden while no trackers have been blocked"
+    "Blocker section is hidden while nothing has been blocked"
   );
 
   await SpecialPowers.spawn(tab.linkedBrowser, [], function () {
@@ -295,77 +314,6 @@ add_task(async function test_update() {
   );
 
   BrowserTestUtils.removeTab(tab);
-});
-
-// Regression test: a slower/older content-blocking update must not overwrite a
-// fresher one's blocked count. Without the guard in #updateBlockerView, a stale
-// run that resolves last clobbers the header back to 0 ("0 trackers blocked"),
-// which QA hit intermittently on tracker-heavy sites like Meta.
-add_task(async function test_blocker_count_no_stale_overwrite() {
-  const tab = await BrowserTestUtils.openNewForegroundTab({
-    gBrowser,
-    opening: "https://example.com",
-    waitForLoad: true,
-  });
-
-  await UrlbarTestUtils.openTrustPanel(window);
-
-  let blockerSection = document.getElementById("trustpanel-blocker-section");
-  let blockerHeader = document.getElementById(
-    "trustpanel-blocker-section-header"
-  );
-
-  // Drive a single blocker and control when its async count resolves, so we can
-  // interleave two updates and force the stale one to resolve last.
-  let sandbox = sinon.createSandbox();
-  registerCleanupFunction(() => sandbox.restore());
-  let pendingCounts = [];
-  sandbox.stub(TrackingProtection, "isBlocking").returns(true);
-  sandbox
-    .stub(TrackingProtection, "getBlockerCount")
-    .callsFake(() => new Promise(resolve => pendingCounts.push(resolve)));
-
-  // Start the older update and let it park awaiting its blocker count.
-  gTrustPanelHandler.onContentBlockingEvent(0);
-  await TestUtils.waitForCondition(
-    () => pendingCounts.length == 1,
-    "Older update is awaiting its blocker count"
-  );
-
-  // Start the newer update and let it park too.
-  gTrustPanelHandler.onContentBlockingEvent(0);
-  await TestUtils.waitForCondition(
-    () => pendingCounts.length == 2,
-    "Newer update is awaiting its blocker count"
-  );
-
-  // Resolve the newer update first with the real count.
-  pendingCounts[1](3);
-  await TestUtils.waitForCondition(
-    () => parseInt(blockerHeader.textContent, 10) == 3,
-    "Fresh count is applied"
-  );
-  Assert.ok(
-    !blockerSection.hasAttribute("hidden"),
-    "Section is shown for the fresh non-zero count"
-  );
-
-  // Now resolve the older (stale) update with 0 — it must be ignored.
-  pendingCounts[0](0);
-  await new Promise(resolve => setTimeout(resolve, 0));
-  Assert.equal(
-    parseInt(blockerHeader.textContent, 10),
-    3,
-    "Stale update did not overwrite the fresh count with 0"
-  );
-  Assert.ok(
-    !blockerSection.hasAttribute("hidden"),
-    "Stale update did not hide the section"
-  );
-
-  sandbox.restore();
-  await UrlbarTestUtils.closeTrustPanel(window);
-  await BrowserTestUtils.removeTab(tab);
 });
 
 add_task(async function test_etld() {
@@ -625,13 +573,12 @@ add_task(async function test_breach_dismissal_via_dismiss_button() {
     Name: "UndismissedBreachForDismissalViaDismissButton",
   };
 
-  const db = RemoteSettings("fxmonitor-breaches").db;
   let tab;
 
   try {
-    await db.clear();
-    await db.create(undismissedBreach, { useRecordId: true });
-    await db.importChanges({}, Date.now());
+    await RemoteSettings("fxmonitor-breaches").emit("sync", {
+      data: { current: [undismissedBreach] },
+    });
     tab = await BrowserTestUtils.openNewForegroundTab({
       gBrowser,
       opening: "https://example.org",
@@ -685,9 +632,9 @@ add_task(async function test_breach_dismissal_via_dismiss_button() {
       await BrowserTestUtils.removeTab(tab);
     }
 
-    await db.clear();
-    await db.create(TEST_BREACH, { useRecordId: true });
-    await db.importChanges({}, Date.now());
+    await RemoteSettings("fxmonitor-breaches").emit("sync", {
+      data: { current: [TEST_BREACH] },
+    });
   }
 });
 
@@ -697,13 +644,12 @@ add_task(async function test_breach_dismissal_via_check_button() {
     Name: "UndismissedBreachForDismissalViaCheckButton",
   };
 
-  const db = RemoteSettings("fxmonitor-breaches").db;
   let tab;
 
   try {
-    await db.clear();
-    await db.create(undismissedBreach, { useRecordId: true });
-    await db.importChanges({}, Date.now());
+    await RemoteSettings("fxmonitor-breaches").emit("sync", {
+      data: { current: [undismissedBreach] },
+    });
     tab = await BrowserTestUtils.openNewForegroundTab({
       gBrowser,
       opening: "https://example.org",
@@ -767,9 +713,9 @@ add_task(async function test_breach_dismissal_via_check_button() {
       await BrowserTestUtils.removeTab(tab);
     }
 
-    await db.clear();
-    await db.create(TEST_BREACH, { useRecordId: true });
-    await db.importChanges({}, Date.now());
+    await RemoteSettings("fxmonitor-breaches").emit("sync", {
+      data: { current: [TEST_BREACH] },
+    });
   }
 });
 
@@ -1408,4 +1354,82 @@ add_task(async function test_close_on_tab_switch() {
 
   BrowserTestUtils.removeTab(tab2);
   BrowserTestUtils.removeTab(tab1);
+});
+
+add_task(async function test_closes_on_navigation() {
+  const tab = await BrowserTestUtils.openNewForegroundTab({
+    gBrowser,
+    opening: "https://example.com",
+    waitForLoad: true,
+  });
+  const popup = document.getElementById("trustpanel-popup");
+
+  await UrlbarTestUtils.openTrustPanel(window);
+  Assert.equal(popup.state, "open", "Trust Panel is open");
+
+  info("Navigate from the content page, without touching the panel");
+  let popupHidden = BrowserTestUtils.waitForEvent(popup, "popuphidden");
+  await SpecialPowers.spawn(tab.linkedBrowser, [], () => {
+    content.location = "https://example.org/";
+  });
+  await popupHidden;
+
+  Assert.equal(
+    popup.state,
+    "closed",
+    "Trust Panel closed for the new document"
+  );
+
+  BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_cookie_details_title() {
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      [
+        "network.cookie.cookieBehavior",
+        Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER,
+      ],
+    ],
+  });
+  await UrlClassifierTestUtils.addTestTrackers();
+
+  const tab = await BrowserTestUtils.openNewForegroundTab({
+    gBrowser,
+    opening: COOKIE_PAGE,
+    waitForLoad: true,
+  });
+
+  await UrlbarTestUtils.openTrustPanel(window);
+
+  let blockerShown = BrowserTestUtils.waitForEvent(
+    document.getElementById("trustpanel-blockerView"),
+    "ViewShown"
+  );
+  document.getElementById("trustpanel-blocker-see-all").click();
+  await blockerShown;
+
+  const COOKIE_BUTTON =
+    '#trustpanel-blocked [data-l10n-id="trustpanel-list-label-tracking-cookies"]';
+  await BrowserTestUtils.waitForMutationCondition(
+    document.getElementById("trustpanel-blocked"),
+    { childList: true, subtree: true },
+    () => document.querySelector(COOKIE_BUTTON),
+    "waiting for the blocked cookies entry"
+  );
+
+  let detailsView = document.getElementById("trustpanel-blockerDetailsView");
+  let detailsShown = BrowserTestUtils.waitForEvent(detailsView, "ViewShown");
+  document.querySelector(COOKIE_BUTTON).click();
+  await detailsShown;
+
+  Assert.equal(
+    detailsView.dataset.l10nId,
+    "protections-blocking-cookies-trackers",
+    "Cross-site tracking cookies are not titled as third-party cookies"
+  );
+
+  UrlClassifierTestUtils.cleanupTestTrackers();
+  BrowserTestUtils.removeTab(tab);
+  await SpecialPowers.popPrefEnv();
 });

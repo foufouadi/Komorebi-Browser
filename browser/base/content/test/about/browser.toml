@@ -11,8 +11,6 @@ support-files = [
 
 ["browser_aboutCertError_caInvalid.js"]
 
-["browser_aboutCertError_cca_telemetry.js"]
-
 ["browser_aboutCertError_clockSkew.js"]
 
 ["browser_aboutCertError_coep.js"]
@@ -100,6 +98,8 @@ support-files = [
 
 ["browser_aboutNetError_netInterrupt.js"]
 
+["browser_aboutNetError_netReset.js"]
+
 ["browser_aboutNetError_searchCTA.js"]
 
 ["browser_aboutNetError_searchCTA_connectivity.js"]
@@ -107,6 +107,8 @@ support-files = [
 ["browser_aboutNetError_searchCTA_derivation.js"]
 
 ["browser_aboutNetError_searchCTA_exit.js"]
+
+["browser_aboutNetError_searchCTA_frame.js"]
 
 ["browser_aboutNetError_searchCTA_pbm.js"]
 

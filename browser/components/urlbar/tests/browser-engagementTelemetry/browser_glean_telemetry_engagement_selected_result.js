@@ -39,7 +39,10 @@ add_task(async function selected_result_autofill_about() {
 
 add_task(async function selected_result_autofill_adaptive() {
   await SpecialPowers.pushPrefEnv({
-    set: [["browser.urlbar.autoFill.adaptiveHistory.enabled", true]],
+    set: [
+      ["browser.urlbar.autoFill.adaptiveHistory.enabled", true],
+      ["browser.urlbar.autoFill.adaptiveHistory.urlMinPicks", 1],
+    ],
   });
 
   await doTest(async () => {
@@ -70,6 +73,7 @@ add_task(async function selected_result_dismiss_autofill_adaptive_origin() {
       ["browser.urlbar.autoFill.adaptiveHistory.enabled", true],
       ["browser.urlbar.autoFill.adaptiveHistory.minCharsThreshold", 0],
       ["browser.urlbar.autoFill.adaptiveHistory.useCountThreshold", 0],
+      ["browser.urlbar.autoFill.adaptiveHistory.urlMinPicks", 1],
     ],
   });
 
@@ -109,6 +113,7 @@ add_task(async function selected_result_dismiss_autofill_adaptive_url() {
       ["browser.urlbar.autoFill.adaptiveHistory.enabled", true],
       ["browser.urlbar.autoFill.adaptiveHistory.minCharsThreshold", 0],
       ["browser.urlbar.autoFill.adaptiveHistory.useCountThreshold", 0],
+      ["browser.urlbar.autoFill.adaptiveHistory.urlMinPicks", 1],
     ],
   });
 
@@ -148,6 +153,7 @@ add_task(
         ["browser.urlbar.autoFill.adaptiveHistory.enabled", true],
         ["browser.urlbar.autoFill.adaptiveHistory.minCharsThreshold", 0],
         ["browser.urlbar.autoFill.adaptiveHistory.useCountThreshold", 0],
+        ["browser.urlbar.autoFill.adaptiveHistory.urlMinPicks", 1],
       ],
     });
 
@@ -183,6 +189,7 @@ add_task(async function selected_result_dismiss_autofill_origin() {
       ["browser.urlbar.autoFill.adaptiveHistory.enabled", true],
       ["browser.urlbar.autoFill.adaptiveHistory.minCharsThreshold", 0],
       ["browser.urlbar.autoFill.adaptiveHistory.useCountThreshold", 0],
+      ["browser.urlbar.autoFill.adaptiveHistory.urlMinPicks", 1],
     ],
   });
 
@@ -1312,17 +1319,15 @@ add_task(async function selected_result_rust_adm_nonsponsored() {
 
 add_task(async function selected_result_action() {
   await SpecialPowers.pushPrefEnv({
-    set: [["browser.urlbar.scotchBonnet.enableOverride", true]],
+    set: [
+      ["browser.urlbar.scotchBonnet.enableOverride", true],
+      ["browser.urlbar.quickactions.timesToShowOnboardingLabel", 0],
+    ],
   });
   await doTest(async () => {
     await openPopup("settings");
     EventUtils.synthesizeKey("KEY_Tab");
-    EventUtils.synthesizeKey("KEY_Enter");
-    await TestUtils.waitForCondition(
-      () =>
-        gBrowser.selectedTab.linkedBrowser.currentURI.spec ==
-        "about:preferences"
-    );
+    await doEnter();
 
     await assertEngagementTelemetry([
       {

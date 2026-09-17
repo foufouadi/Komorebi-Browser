@@ -5,6 +5,7 @@
 package org.mozilla.fenix.wallpapers
 
 import android.content.res.Configuration
+import android.util.Size
 import io.mockk.Runs
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -43,6 +44,12 @@ import org.mozilla.fenix.wallpapers.LegacyWallpaperMigration.Companion.TURNING_R
 class WallpapersUseCasesTest {
 
     @get:Rule val temporaryFolder = TemporaryFolder()
+
+    private val displaySize =
+        mockk<Size> {
+            every { width } returns 1080
+            every { height } returns 1920
+        }
 
     // initialize this once, so it can be shared throughout tests
     private val baseFakeDate = Date()
@@ -613,7 +620,8 @@ class WallpapersUseCasesTest {
                 every { name } returns "test"
             }
             val orientation = Configuration.ORIENTATION_PORTRAIT
-            val defaultLoadBitmapUseCase = spyk(WallpapersUseCases.DefaultLoadBitmapUseCase { mockFolder })
+            val defaultLoadBitmapUseCase =
+                spyk(WallpapersUseCases.DefaultLoadBitmapUseCase({ mockFolder }, { displaySize }))
             coEvery { defaultLoadBitmapUseCase.loadWallpaperFromDisk(wallpaper, orientation) } returns mockk()
 
             defaultLoadBitmapUseCase.invoke(wallpaper, orientation)
@@ -628,7 +636,8 @@ class WallpapersUseCasesTest {
                 every { name } returns "test"
             }
             val orientation = Configuration.ORIENTATION_LANDSCAPE
-            val defaultLoadBitmapUseCase = spyk(WallpapersUseCases.DefaultLoadBitmapUseCase { mockFolder })
+            val defaultLoadBitmapUseCase =
+                spyk(WallpapersUseCases.DefaultLoadBitmapUseCase({ mockFolder }, { displaySize }))
             coEvery { defaultLoadBitmapUseCase.loadWallpaperFromDisk(wallpaper, orientation) } returns mockk()
 
             defaultLoadBitmapUseCase.invoke(wallpaper, orientation)
@@ -642,12 +651,16 @@ class WallpapersUseCasesTest {
             val wallpaper: Wallpaper = mockk { every { name } returns "test" }
             val ioBlockEntered = CompletableDeferred<Unit>()
 
-            val useCase = WallpapersUseCases.DefaultLoadBitmapUseCase {
-                ioBlockEntered.complete(Unit)
-                suspendCancellableCoroutine {
-                    // never resumed; will be ended via cancellation
-                }
-            }
+            val useCase =
+                WallpapersUseCases.DefaultLoadBitmapUseCase(
+                    getFilesDir = {
+                        ioBlockEntered.complete(Unit)
+                        suspendCancellableCoroutine {
+                            // never resumed; will be ended via cancellation
+                        }
+                    },
+                    getDisplaySize = { displaySize },
+                )
 
             var codeAfterLoadRan = false
             val job = launch {

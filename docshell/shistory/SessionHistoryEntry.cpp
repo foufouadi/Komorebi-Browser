@@ -43,6 +43,14 @@ extern mozilla::LazyLogModule gSHLog;
 namespace mozilla {
 namespace dom {
 
+// Only store policy container for loads that can't carry it themselves
+// (about:blank, about:srcdoc, blob:, data:, ...)
+// bug 1867137, bug 2011236
+static nsIPolicyContainer* PolicyContainerToStore(
+    nsIURI* aURI, nsIPolicyContainer* aPolicyContainer) {
+  return CSP_ShouldURIInheritCSP(aURI) ? aPolicyContainer : nullptr;
+}
+
 SessionHistoryInfo::SessionHistoryInfo(nsDocShellLoadState* aLoadState,
                                        nsIChannel* aChannel)
     : mURI(aLoadState->URI()),
@@ -61,9 +69,18 @@ SessionHistoryInfo::SessionHistoryInfo(nsDocShellLoadState* aLoadState,
       mSharedState(SharedState::Create(
           aLoadState->TriggeringPrincipal(), aLoadState->PrincipalToInherit(),
           aLoadState->PartitionedPrincipalToInherit(),
-          aLoadState->PolicyContainer(),
+          PolicyContainerToStore(aLoadState->URI(),
+                                 aLoadState->PolicyContainer()),
           /* FIXME Is this correct? */
           aLoadState->TypeHint())) {
+  MOZ_DIAGNOSTIC_ASSERT(!mURI->SchemeIs("javascript"));
+
+  // Verify the documented purpose of mBaseURI.
+  MOZ_DIAGNOSTIC_ASSERT(
+      !mBaseURI || mSrcdocData ||
+      (aLoadState->TriggeringPrincipal() &&
+       aLoadState->TriggeringPrincipal()->IsSystemPrincipal()));
+
   // Pull the upload stream off of the channel instead of the load state, as
   // ownership has already been transferred from the load state to the channel.
   if (nsCOMPtr<nsIUploadChannel2> postChannel = do_QueryInterface(aChannel)) {
@@ -83,6 +100,7 @@ SessionHistoryInfo::SessionHistoryInfo(nsDocShellLoadState* aLoadState,
 SessionHistoryInfo::SessionHistoryInfo(
     const SessionHistoryInfo& aSharedStateFrom, nsIURI* aURI)
     : mURI(aURI), mSharedState(aSharedStateFrom.mSharedState) {
+  MOZ_DIAGNOSTIC_ASSERT(!mURI || !mURI->SchemeIs("javascript"));
   MaybeUpdateTitleFromURI();
   mHasUserInteraction = aSharedStateFrom.mHasUserInteraction;
 }
@@ -96,6 +114,7 @@ SessionHistoryInfo::SessionHistoryInfo(
       mSharedState(SharedState::Create(
           aTriggeringPrincipal, aPrincipalToInherit,
           aPartitionedPrincipalToInherit, aPolicyContainer, aContentType)) {
+  MOZ_DIAGNOSTIC_ASSERT(!mURI || !mURI->SchemeIs("javascript"));
   MaybeUpdateTitleFromURI();
 }
 
@@ -107,6 +126,7 @@ SessionHistoryInfo::SessionHistoryInfo(
     NS_WARNING("NS_GetFinalChannelURI somehow failed in SessionHistoryInfo?");
     aChannel->GetURI(getter_AddRefs(mURI));
   }
+  MOZ_DIAGNOSTIC_ASSERT(!mURI->SchemeIs("javascript"));
   mLoadType = aLoadType;
 
   nsCOMPtr<nsILoadInfo> loadInfo;
@@ -121,7 +141,8 @@ SessionHistoryInfo::SessionHistoryInfo(
 
   mSharedState.Get()->mPartitionedPrincipalToInherit =
       aPartitionedPrincipalToInherit;
-  mSharedState.Get()->mPolicyContainer = aPolicyContainer;
+  mSharedState.Get()->mPolicyContainer =
+      PolicyContainerToStore(mURI, aPolicyContainer);
   aChannel->GetContentType(mSharedState.Get()->mContentType);
   aChannel->GetOriginalURI(getter_AddRefs(mOriginalURI));
 
@@ -232,6 +253,7 @@ void SessionHistoryInfo::FillLoadInfo(nsDocShellLoadState& aLoadState) const {
   aLoadState.SetOriginalURI(mOriginalURI);
   aLoadState.SetMaybeResultPrincipalURI(Some(mResultPrincipalURI));
   aLoadState.SetUnstrippedURI(mUnstrippedURI);
+  aLoadState.SetBaseURI(mBaseURI);
   aLoadState.SetLoadReplace(mLoadReplace);
   nsCOMPtr<nsIInputStream> postData = GetPostData();
   aLoadState.SetPostDataStream(postData);
@@ -252,16 +274,13 @@ void SessionHistoryInfo::FillLoadInfo(nsDocShellLoadState& aLoadState) const {
   // the source browsing context that was used when the history entry was
   // first created. bug 947716 has been created to address this issue.
   nsAutoString srcdoc;
-  nsCOMPtr<nsIURI> baseURI;
   if (mSrcdocData) {
     srcdoc = mSrcdocData.value();
-    baseURI = mBaseURI;
     flags |= nsDocShell::InternalLoad::INTERNAL_LOAD_FLAGS_IS_SRCDOC;
   } else {
     srcdoc = VoidString();
   }
   aLoadState.SetSrcdocData(srcdoc);
-  aLoadState.SetBaseURI(baseURI);
   aLoadState.SetInternalLoadFlags(flags);
 
   aLoadState.SetFirstParty(true);
@@ -489,6 +508,7 @@ SessionHistoryEntry::GetURI(nsIURI** aURI) {
 
 NS_IMETHODIMP
 SessionHistoryEntry::SetURI(nsIURI* aURI) {
+  MOZ_DIAGNOSTIC_ASSERT(!aURI->SchemeIs("javascript"));
   mInfo->mURI = aURI;
   return NS_OK;
 }
@@ -1603,6 +1623,11 @@ bool ParamTraits<mozilla::dom::SessionHistoryInfo>::Read(
       !ReadParam(aReader, &aResult->mHasUserActivation) ||
       !ReadParam(aReader, &sharedId)) {
     aReader->FatalError("Error reading fields for SessionHistoryInfo");
+    return false;
+  }
+
+  if (aResult->mURI && aResult->mURI->SchemeIs("javascript")) {
+    aReader->FatalError("javascript: URIs should not enter session history");
     return false;
   }
 

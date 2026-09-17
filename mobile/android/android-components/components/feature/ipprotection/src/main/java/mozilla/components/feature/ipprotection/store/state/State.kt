@@ -26,8 +26,8 @@ const val BYTES_PER_GB = 1024 * 1024 * 1024f
  * @property resetDate ISO 8601 string for when the monthly allowance resets, or null if unavailable.
  * @property accountState The state of the authenticator being used.
  * @property lastError The last error received from the IPProtection service.
- * @property proxyActiveShown Whether the proxy-active status has been shown to the user.
- * @property activate To turn protection on or off.
+ * @property proxyActivation Tracks recent activation or deactivation state changes. See [ProxyActivation].
+ * @property pendingActivationRequest The activation state - handles activation and deactivation of the proxy.
  * @property locationState The location selection state.
  */
 data class IPProtectionState(
@@ -39,14 +39,25 @@ data class IPProtectionState(
     val resetDate: String? = null,
     val accountState: AccountState = AccountState(),
     val lastError: String? = null,
-    val proxyActiveShown: Boolean = false,
-    val activate: Boolean? = null,
+    val proxyActivation: ProxyActivation = ProxyActivation.Idle,
+    val pendingActivationRequest: PendingActivationRequest? = null,
     val locationState: LocationState = LocationState(),
 ) : State
 
 /** Convenience function for eligibility. */
 val IPProtectionState.isEligible
     get() = eligibilityStatus == EligibilityStatus.Eligible
+
+/**
+ * Whether we are waiting on the VPN to connect, either because it is being turned on or because the country is being
+ * changed.
+ *
+ * This is true from the moment we queue the request, which is earlier than [proxyStatus] becoming
+ * [Authorized.Activating] - that only happens once the engine replies. We cannot change where the VPN is connecting
+ * during that time, so anything that lets the user try should be disabled while this is true.
+ */
+val IPProtectionState.isActivationInFlight
+    get() = proxyStatus == Authorized.Activating || pendingActivationRequest is PendingActivationRequest.Activate
 
 /**
  * If we have negative values, then we haven't received new usage data yet.
@@ -82,10 +93,15 @@ data class AccountState(val status: AccountStatus = AccountStatus.Uninitialized)
  *
  * @property selectedLocation The location to use when connecting to VPN.
  * @property locations The list of locations for user to choose from.
+ * @property previousLocation Cached previous selection. Intended to be used as a rollback value in case switching to a
+ *   new locations fails.
+ * @property updateState the state of the location list update.
  */
 data class LocationState(
-    val selectedLocation: Location = Recommended(),
-    val locations: List<Location> = listOf(Recommended()),
+    val selectedLocation: Location = Recommended,
+    val locations: List<Location> = listOf(Recommended),
+    val previousLocation: Location? = null,
+    val updateState: LocationListUpdateState = LocationListUpdateState.NotRequested,
 )
 
 /**
@@ -98,26 +114,61 @@ sealed interface Location {
 }
 
 /** The "recommended" (default) location, letting the proxy pick the server automatically. */
-data class Recommended(override val countryCode: String? = null) : Location
+object Recommended : Location {
+    override val countryCode: String? = null
+}
 
 /**
  * A specific country from the IP protection proxy server list.
  *
  * @property countryCode ISO 3166-1 alpha-2 country code.
  * @property available Whether the country could be selected as the active proxy.
- * @property displayName The localized name for UI. If localization fails, returns raw [countryCode].
  */
 data class Country(
     override val countryCode: String,
     val available: Boolean,
 ) : Location {
-    val displayName: String
-        get() =
-            try {
-                Locale.Builder().setRegion(countryCode).build().getDisplayCountry(Locale.getDefault())
-            } catch (_: IllformedLocaleException) {
-                countryCode
-            }
+
+    /** Returns the country name localized for a [locale]. If localization fails, returns raw [countryCode]. */
+    fun displayName(locale: Locale): String =
+        try {
+            Locale.Builder().setRegion(countryCode).build().getDisplayCountry(locale)
+        } catch (_: IllformedLocaleException) {
+            countryCode
+        }
+}
+
+/** Represents the state of the location list update. */
+sealed class LocationListUpdateState {
+    /** The default, "no request yet", state. */
+    data object NotRequested : LocationListUpdateState()
+
+    /** A pending update request. */
+    data object Requested : LocationListUpdateState()
+
+    /** The location list has been updated. */
+    data object Updated : LocationListUpdateState()
+
+    /** The location list update failed. */
+    data object Failed : LocationListUpdateState()
+}
+
+/** Represents a pending proxy activation request. */
+sealed class PendingActivationRequest {
+    /**
+     * Requesting proxy activation.
+     *
+     * @property selectedLocationCode ISO 3166-1 alpha-2 country code for the desired proxy location, or null to use the
+     *   recommended default.
+     * @property isLocationSwitch Whether the proxy was already running, meaning a failure rolls the selection back.
+     */
+    data class Activate(
+        val selectedLocationCode: String?,
+        val isLocationSwitch: Boolean = false,
+    ) : PendingActivationRequest()
+
+    /** Requesting proxy deactivation. */
+    object Deactivate : PendingActivationRequest()
 }
 
 /**

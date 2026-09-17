@@ -144,7 +144,7 @@ export let StartupOSIntegration = {
   },
 
   checkForLaunchOnLogin() {
-    if (lazy.LaunchOnLogin.isSupported()) {
+    if (!lazy.LaunchOnLogin.isSupported()) {
       return;
     }
     let launchOnLoginPref = "browser.startup.windowsLaunchOnLogin.enabled";
@@ -153,12 +153,6 @@ export let StartupOSIntegration = {
       // likely sees the profile selector on launch.
       if (Services.prefs.getBoolPref(launchOnLoginPref)) {
         Glean.launchOnLogin.lastProfileDisableStartup.record();
-        // Disable launch on login messaging if we are disabling the
-        // feature.
-        Services.prefs.setBoolPref(
-          "browser.startup.windowsLaunchOnLogin.disableLaunchOnLoginPrompt",
-          true
-        );
       }
       // To reduce confusion when running multiple Gecko profiles,
       // delete launch on login shortcuts and registry keys so that
@@ -190,8 +184,12 @@ export let StartupOSIntegration = {
         safeCall(() => this.maybePinMSIXToStartMenu());
       }
       safeCall(() => this.ensurePrivateBrowsingShortcutExists());
-      safeCall(() => lazy.CustomIconManager.ensureAppliedOrRevert());
-      safeCall(() => lazy.CustomIconManager.ensureShortcutInPerUserStartMenu());
+      // Run these in order, not concurrently: otherwise ensureAppliedOrRevert
+      // can decide the shortcut was deleted while it is still being created.
+      safeCall(async () => {
+        await lazy.CustomIconManager.ensureAppliedOrRevert();
+        await lazy.CustomIconManager.maybeCreatePerUserStartMenuShortcut();
+      });
     }
   },
 

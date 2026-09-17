@@ -36,6 +36,7 @@ class DefaultReaderModeControllerTest {
     private lateinit var featureWrapper: ViewBoundFeatureWrapper<ReaderViewFeature>
     private lateinit var readerViewControlsBar: View
     private var onReaderModeChangedCount = 0
+    private val isListenToPageEnabled = false
     private val onReaderModeChanged: () -> Unit = { onReaderModeChangedCount++ }
 
     @Before
@@ -60,7 +61,7 @@ class DefaultReaderModeControllerTest {
 
         every { readerViewFeature.hideReaderView() } just Runs
         every { readerViewFeature.showReaderView() } just Runs
-        every { readerViewFeature.showControls() } just Runs
+        every { readerViewFeature.showControls(isListenToPageEnabled) } just Runs
         every { readerViewFeature.hideControls() } just Runs
     }
 
@@ -101,7 +102,7 @@ class DefaultReaderModeControllerTest {
             )
 
         controller.showControls()
-        verify { readerViewFeature.showControls() }
+        verify { readerViewFeature.showControls(isListenToPageEnabled) }
         verify { readerViewControlsBar wasNot Called }
     }
 
@@ -141,7 +142,7 @@ class DefaultReaderModeControllerTest {
         } returns sansSerif
 
         controller.showControls()
-        verify { readerViewFeature.showControls() }
+        verify { readerViewFeature.showControls(isListenToPageEnabled) }
         verifyAll {
             decrease.setTextColor(privateButtonColor)
             increase.setTextColor(privateButtonColor)

@@ -182,8 +182,9 @@ class ReaderViewFeatureTest {
         runTest(testDispatcher) {
             val view: ReaderViewControlsView = mock()
             val feature = spy(ReaderViewFeature(testContext, mock(), BrowserStore(), view))
+            val isListenToPageEnabled = false
 
-            feature.showControls()
+            feature.showControls(isListenToPageEnabled)
 
             verify(view).setColorScheme(any())
             verify(view).setFont(any())
@@ -739,7 +740,16 @@ class ReaderViewFeatureTest {
         }
         BuiltInWebExtensionController.installedBuiltInExtensions[READER_VIEW_EXTENSION_ID] = ext
 
-        val feature = ReaderViewFeature(testContext, engine, store, mock(), testDispatcher, createUUID)
+        val feature =
+            ReaderViewFeature(
+                testContext,
+                engine,
+                store,
+                mock(),
+                testDispatcher,
+                createUUID,
+            )
+        feature.start()
         if (controller != null) {
             feature.extensionController = controller
         }

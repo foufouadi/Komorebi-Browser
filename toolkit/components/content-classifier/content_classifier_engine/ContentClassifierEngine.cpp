@@ -9,6 +9,7 @@
 #include "mozilla/net/UrlClassifierCommon.h"
 #include "nsIEffectiveTLDService.h"
 #include "nsNetUtil.h"
+#include "nsContentUtils.h"
 #include "mozilla/Components.h"
 
 namespace mozilla {
@@ -38,15 +39,15 @@ ContentClassifierEngineResult ContentClassifierEngine::CheckNetworkRequest(
   bool important = false;
   nsCString exception;
 
-  const nsCString& sourceSite = mFeature.mUseTopWindowAsSource
-                                    ? aRequest.mTopWindowSchemelessSite
-                                    : aRequest.mSourceSchemelessSite;
+  const nsCString& sourceHostname = mFeature.mUseTopWindowAsSource
+                                        ? aRequest.mTopWindowHostname
+                                        : aRequest.mSourceHostname;
   const bool thirdParty = mFeature.mUseTopWindowAsSource
                               ? aRequest.mThirdParty
                               : aRequest.mThirdPartyToSource;
 
   nsresult rv = content_classifier_engine_check_network_request_preparsed(
-      mEngine, &aRequest.mUrl, &aRequest.mSchemelessSite, &sourceSite,
+      mEngine, &aRequest.mUrl, &aRequest.mHostname, &sourceHostname,
       &aRequest.mRequestType, thirdParty, aPreviouslyMatched, &matched,
       &important, &exception);
   return ContentClassifierEngineResult(matched, !exception.IsEmpty(), important,
@@ -127,6 +128,10 @@ ContentClassifierRequest::ContentClassifierRequest(nsIChannel* aChannel)
   nsCString host;
   rv = innermostURI->GetHost(host);
   if (NS_FAILED(rv)) return;
+  // The filtering rules expect brackets of an IPv6 literal. We ensure the
+  // brackets when getting the host.
+  mHostname = host;
+  nsContentUtils::MaybeFixIPv6Host(mHostname);
 
   nsCOMPtr<nsIEffectiveTLDService> eTLDService =
       components::EffectiveTLD::Service();
@@ -145,6 +150,8 @@ ContentClassifierRequest::ContentClassifierRequest(nsIChannel* aChannel)
     if (innermostTopURI) {
       nsCString topHost;
       if (NS_SUCCEEDED(innermostTopURI->GetHost(topHost))) {
+        mTopWindowHostname = topHost;
+        nsContentUtils::MaybeFixIPv6Host(mTopWindowHostname);
         rv = eTLDService->GetSchemelessSiteFromHost(topHost,
                                                     mTopWindowSchemelessSite);
         if (NS_FAILED(rv)) {
@@ -160,6 +167,10 @@ ContentClassifierRequest::ContentClassifierRequest(nsIChannel* aChannel)
   // check in CheckNetworkRequest.
   nsCOMPtr<nsIPrincipal> loadingPrincipal = loadInfo->GetLoadingPrincipal();
   if (loadingPrincipal) {
+    if (NS_FAILED(nsContentUtils::GetHostOrIPv6WithBrackets(loadingPrincipal,
+                                                            mSourceHostname))) {
+      mSourceHostname.Truncate();
+    }
     rv = loadingPrincipal->GetBaseDomain(mSourceSchemelessSite);
     if (NS_FAILED(rv)) return;
   }
@@ -212,6 +223,8 @@ ContentClassifierRequest::ContentClassifierRequest(
   nsCString host;
   rv = uri->GetHost(host);
   if (NS_FAILED(rv)) return;
+  mHostname = host;
+  nsContentUtils::MaybeFixIPv6Host(mHostname);
 
   nsCOMPtr<nsIEffectiveTLDService> eTLDService =
       components::EffectiveTLD::Service();
@@ -228,6 +241,8 @@ ContentClassifierRequest::ContentClassifierRequest(
     nsCString sourceHost;
     rv = sourceUri->GetHost(sourceHost);
     if (NS_FAILED(rv)) return;
+    mSourceHostname = sourceHost;
+    nsContentUtils::MaybeFixIPv6Host(mSourceHostname);
 
     rv = eTLDService->GetSchemelessSiteFromHost(sourceHost,
                                                 mSourceSchemelessSite);
@@ -244,6 +259,8 @@ ContentClassifierRequest::ContentClassifierRequest(
     nsCString topHost;
     rv = topUri->GetHost(topHost);
     if (NS_FAILED(rv)) return;
+    mTopWindowHostname = topHost;
+    nsContentUtils::MaybeFixIPv6Host(mTopWindowHostname);
 
     rv = eTLDService->GetSchemelessSiteFromHost(topHost,
                                                 mTopWindowSchemelessSite);

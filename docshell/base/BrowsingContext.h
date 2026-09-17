@@ -7,6 +7,7 @@
 
 #include <tuple>
 #include "GVAutoplayRequestUtils.h"
+#include "Units.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/HalScreenConfiguration.h"
 #include "mozilla/LinkedList.h"
@@ -94,13 +95,7 @@ struct EmbedderColorSchemes {
   PrefersColorSchemeOverride mUsed{};
   PrefersColorSchemeOverride mPreferred{};
 
-  bool operator==(const EmbedderColorSchemes& aOther) const {
-    return mUsed == aOther.mUsed && mPreferred == aOther.mPreferred;
-  }
-
-  bool operator!=(const EmbedderColorSchemes& aOther) const {
-    return !(*this == aOther);
-  }
+  bool operator==(const EmbedderColorSchemes& aOther) const = default;
 };
 
 // Fields are, by default, settable by any process and readable by any process.
@@ -133,8 +128,6 @@ struct EmbedderColorSchemes {
   /* Current opener for the BrowsingContext. Weak reference */                \
   FIELD(OpenerId, uint64_t)                                                   \
   FIELD(OnePermittedSandboxedNavigatorId, uint64_t)                           \
-  /* WindowID of the inner window which embeds this BC */                     \
-  FIELD(EmbedderInnerWindowId, uint64_t)                                      \
   FIELD(CurrentInnerWindowId, uint64_t)                                       \
   FIELD(HadOriginalOpener, bool)                                              \
   /* Was this window created by a webpage through window.open or an anchor    \
@@ -214,7 +207,7 @@ struct EmbedderColorSchemes {
   FIELD(CurrentOrientationType, mozilla::dom::OrientationType)                \
   FIELD(OrientationLock, mozilla::hal::ScreenOrientation)                     \
   FIELD(HasOrientationOverride, bool)                                         \
-  FIELD(UserAgentOverride, nsString)                                          \
+  FIELD(UserAgentOverride, nsCString)                                         \
   FIELD(TouchEventsOverrideInternal, mozilla::dom::TouchEventsOverride)       \
   FIELD(EmbedderElementType, Maybe<nsString>)                                 \
   FIELD(MessageManagerGroup, nsString)                                        \
@@ -245,6 +238,7 @@ struct EmbedderColorSchemes {
    * top BCs. */                                                              \
   FIELD(AuthorStyleDisabledDefault, bool)                                     \
   FIELD(ServiceWorkersTestingEnabled, bool)                                   \
+  FIELD(ServiceWorkersDisabledByPolicy, bool)                                 \
   FIELD(MediumOverride, nsString)                                             \
   /* DevTools override for prefers-color-scheme */                            \
   FIELD(PrefersColorSchemeOverride, dom::PrefersColorSchemeOverride)          \
@@ -259,6 +253,10 @@ struct EmbedderColorSchemes {
   /* prefers-color-scheme override based on the color-scheme style of our     \
    * <browser> embedder element. */                                           \
   FIELD(EmbedderColorSchemes, EmbedderColorSchemes)                           \
+  /* Content-area scrollbar insets forwarded from the <browser> embedder's    \
+   * -moz-scrollbar-inset-{block,inline}, so the top-level content viewport   \
+   * scrollbars clear the rounded content-area corners. */                    \
+  FIELD(EmbedderScrollbarInset, LayoutDeviceIntMargin)                        \
   FIELD(DisplayMode, dom::DisplayMode)                                        \
   /* The number of entries added to the session history because of this       \
    * browsing context. */                                                     \
@@ -867,7 +865,7 @@ class BrowsingContext : public nsILoadContext, public nsWrapperCache {
   BrowsingContext* Self() { return this; }
   void Location(JSContext* aCx, JS::MutableHandle<JSObject*> aLocation,
                 ErrorResult& aError);
-  void Close(CallerType aCallerType, ErrorResult& aError);
+  MOZ_CAN_RUN_SCRIPT void Close(CallerType aCallerType, ErrorResult& aError);
   bool GetClosed(ErrorResult&) { return GetClosed(); }
   void Focus(CallerType aCallerType, ErrorResult& aError);
   void Blur(CallerType aCallerType, ErrorResult& aError);
@@ -885,11 +883,11 @@ class BrowsingContext : public nsILoadContext, public nsWrapperCache {
                       const WindowPostMessageOptions& aOptions,
                       nsIPrincipal& aSubjectPrincipal, ErrorResult& aError);
 
-  void GetCustomUserAgent(nsAString& aUserAgent) {
+  void GetCustomUserAgent(nsACString& aUserAgent) {
     aUserAgent = Top()->GetUserAgentOverride();
   }
-  nsresult SetCustomUserAgent(const nsAString& aUserAgent);
-  void SetCustomUserAgent(const nsAString& aUserAgent, ErrorResult& aRv);
+  nsresult SetCustomUserAgent(const nsACString& aUserAgent);
+  void SetCustomUserAgent(const nsACString& aUserAgent, ErrorResult& aRv);
 
   void GetCustomPlatform(nsAString& aPlatform) {
     aPlatform = Top()->GetPlatformOverride();
@@ -1054,13 +1052,13 @@ class BrowsingContext : public nsILoadContext, public nsWrapperCache {
 
   bool ShouldUpdateSessionHistory(uint32_t aLoadType);
 
-  // Checks if we reached the rate limit for calls to Location and History API.
-  // The rate limit is controlled by the
-  // "dom.navigation.navigationRateLimit" prefs.
-  // Rate limit applies per BrowsingContext.
-  // Returns NS_OK if we are below the rate limit and increments the counter.
-  // Returns NS_ERROR_DOM_SECURITY_ERR if limit is reached.
-  nsresult CheckNavigationRateLimit(CallerType aCallerType);
+  // Checks if we reached the rate limit for navigations, which includes calls
+  // to the Location and History APIs.
+  // The rate limit is controlled by the "dom.navigation.navigationRateLimit"
+  // prefs. Rate limit applies per BrowsingContext. Returns true if we are below
+  // the rate limit and increments the counter. Returns false if the limit is
+  // reached
+  bool CheckNavigationRateLimit(CallerType aCallerType);
 
   void ResetNavigationRateLimit();
 
@@ -1088,6 +1086,10 @@ class BrowsingContext : public nsILoadContext, public nsWrapperCache {
 
   bool ServiceWorkersTestingEnabled() const {
     return GetServiceWorkersTestingEnabled();
+  }
+
+  bool ServiceWorkersDisabledByPolicy() const {
+    return GetServiceWorkersDisabledByPolicy();
   }
 
   void GetMediumOverride(nsAString& aOverride) const {
@@ -1305,8 +1307,13 @@ class BrowsingContext : public nsILoadContext, public nsWrapperCache {
               nsILoadInfo::CrossOriginOpenerPolicy, ContentParent*);
 
   bool CanSet(FieldIndex<IDX_ServiceWorkersTestingEnabled>, bool,
-              ContentParent*) {
-    return IsTop();
+              ContentParent* aSource) {
+    return XRE_IsParentProcess() && !aSource && IsTop();
+  }
+
+  bool CanSet(FieldIndex<IDX_ServiceWorkersDisabledByPolicy>, bool,
+              ContentParent* aSource) {
+    return XRE_IsParentProcess() && !aSource && IsTop();
   }
 
   bool CanSet(FieldIndex<IDX_LanguageOverride>, const nsCString&,
@@ -1325,6 +1332,11 @@ class BrowsingContext : public nsILoadContext, public nsWrapperCache {
 
   bool CanSet(FieldIndex<IDX_EmbedderColorSchemes>, const EmbedderColorSchemes&,
               ContentParent* aSource) {
+    return CheckOnlyEmbedderCanSet(aSource);
+  }
+
+  bool CanSet(FieldIndex<IDX_EmbedderScrollbarInset>,
+              const LayoutDeviceIntMargin&, ContentParent* aSource) {
     return CheckOnlyEmbedderCanSet(aSource);
   }
 
@@ -1360,6 +1372,9 @@ class BrowsingContext : public nsILoadContext, public nsWrapperCache {
 
   void DidSet(FieldIndex<IDX_EmbedderColorSchemes>,
               EmbedderColorSchemes&& aOldValue);
+
+  void DidSet(FieldIndex<IDX_EmbedderScrollbarInset>,
+              LayoutDeviceIntMargin&& aOldValue);
 
   void DidSet(FieldIndex<IDX_PrefersColorSchemeOverride>,
               dom::PrefersColorSchemeOverride aOldValue);
@@ -1439,9 +1454,6 @@ class BrowsingContext : public nsILoadContext, public nsWrapperCache {
               ContentParent* aSource);
   void DidSet(FieldIndex<IDX_OverrideDPPX>, float aOldValue);
 
-  bool CanSet(FieldIndex<IDX_EmbedderInnerWindowId>, const uint64_t& aValue,
-              ContentParent* aSource);
-
   CanSetResult CanSet(FieldIndex<IDX_CurrentInnerWindowId>,
                       const uint64_t& aValue, ContentParent* aSource);
 
@@ -1483,7 +1495,7 @@ class BrowsingContext : public nsILoadContext, public nsWrapperCache {
 
   void DidSet(FieldIndex<IDX_UserAgentOverride>);
   CanSetResult CanSet(FieldIndex<IDX_UserAgentOverride>,
-                      const nsString& aUserAgent, ContentParent* aSource);
+                      const nsCString& aUserAgent, ContentParent* aSource);
   bool CanSet(FieldIndex<IDX_OrientationLock>,
               const mozilla::hal::ScreenOrientation& aOrientationLock,
               ContentParent* aSource);

@@ -37,6 +37,10 @@ skip-if = [
 
 ["browser_selectpopup_navigation.js"]
 
+["browser_selectpopup_option_in_div.js"]
+
+["browser_selectpopup_option_list.js"]
+
 ["browser_selectpopup_searchfocus.js"]
 fail-if = [
   "a11y_checks", # Bug 1854233 input may not be labeled

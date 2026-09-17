@@ -51,6 +51,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <chrono>
+#include <time.h>
 
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -91,7 +93,9 @@
 void CleanupElevatedMacUpdate(bool aFailureOccurred);
 bool IsOwnedByGroupAdmin(const char* aAppBundle);
 bool IsRecursivelyWritable(const char* aPath);
-void LaunchMacApp(int argc, const char** argv);
+// Pass a valid pid as aWaitForPid to wait for that process to go away before
+// the app is launched.
+void LaunchMacApp(int argc, const char** argv, pid_t aWaitForPid);
 void LaunchMacPostProcess(const char* aAppBundle);
 bool ObtainUpdaterArguments(int* aArgc, char*** aArgv,
                             MARChannelStringTable* aMARStrings);
@@ -384,6 +388,13 @@ static const int kCallbackWorkingDirIndex = 7;
 // This indicates the entry in `argv` that is the callback binary path. All
 // arguments after this one are treated as arguments to the callback.
 static const int kCallbackIndex = 8;
+
+#if defined(XP_MACOSX)
+// The pid of the process that invoked us, when it asked us to wait for it. We
+// hand this to the callback launch so that the relaunched application does not
+// overlap with the process it replaces. See LaunchMacApp().
+static pid_t gCallbackWaitPid = 0;
+#endif
 
 // This string contains the MAR channel IDs that are later extracted by one of
 // the `ReadMARChannelIDsFrom` variants.
@@ -1374,7 +1385,7 @@ static int DoUpdate();
 
 class Action {
  public:
-  Action() : mProgressCost(1), mNext(nullptr) {}
+  Action() : mProgressCost(1), mNext(nullptr), mPrev(nullptr) {}
   virtual ~Action() = default;
 
   virtual int Parse(NS_tchar* line) = 0;
@@ -1401,6 +1412,7 @@ class Action {
 
  private:
   Action* mNext;
+  Action* mPrev;
 
   friend class ActionList;
 };
@@ -1800,7 +1812,8 @@ class PatchFileDecoder {
 
   virtual ~PatchFileDecoder() = default;
 
-  virtual unsigned int ComputeCrc32(const uint8_t* aBuf, size_t aBufSize) = 0;
+  [[nodiscard]] virtual int ComputeCrc32(const uint8_t* aBuf, size_t aBufSize,
+                                         unsigned int& aOutCrc32) = 0;
 
   virtual off_t SourceSize() = 0;
   virtual off_t DestinationSize() = 0;
@@ -1810,8 +1823,12 @@ class PatchFileDecoder {
   // aDstFile. aDstFile is never deleted, cleanup is up to the caller.
   // Assumes that the crc32 and size of aCheckedSrcBuf have been
   // checked by the caller.
-  virtual int Apply(const uint8_t* aCheckedSrcBuf, size_t aCheckedSrcBufSize,
-                    FILE* aDstFile) = 0;
+  [[nodiscard]] virtual int Apply(const uint8_t* aCheckedSrcBuf,
+                                  size_t aCheckedSrcBufSize,
+                                  FILE* aDstFile) = 0;
+
+  // Release resources early, returning a status code.
+  [[nodiscard]] virtual int Finalize() { return OK; }
 
  protected:
   virtual int Load(FILE* aPatchFile) = 0;
@@ -1822,7 +1839,8 @@ class BSPatchFileDecoder : public PatchFileDecoder {
  public:
   ~BSPatchFileDecoder() override = default;
 
-  unsigned int ComputeCrc32(const uint8_t* aBuf, size_t aBufSize) override;
+  [[nodiscard]] int ComputeCrc32(const uint8_t* aBuf, size_t aBufSize,
+                                 unsigned int& aOutCrc32) override;
 
   off_t SourceSize() override;
 
@@ -1830,8 +1848,8 @@ class BSPatchFileDecoder : public PatchFileDecoder {
 
   unsigned int SourceCrc32() override;
 
-  int Apply(const uint8_t* aSrcBuf, size_t aSrcBufSize,
-            FILE* aDstFile) override;
+  [[nodiscard]] int Apply(const uint8_t* aSrcBuf, size_t aSrcBufSize,
+                          FILE* aDstFile) override;
 
  protected:  // Comply with PatchFileDecoder::TryLoadAs requirements
   BSPatchFileDecoder() = default;
@@ -1845,16 +1863,16 @@ class BSPatchFileDecoder : public PatchFileDecoder {
 
 // This BZ2_crc32Table variable lives in libbz2. We just took the
 // data structure from bz2 and created crctables.h
-unsigned int BSPatchFileDecoder::ComputeCrc32(const uint8_t* aBuf,
-                                              size_t aBufSize) {
+int BSPatchFileDecoder::ComputeCrc32(const uint8_t* aBuf, size_t aBufSize,
+                                     unsigned int& aOutCrc32) {
   unsigned int crc = 0xffffffffL;
 
   const uint8_t* end = aBuf + aBufSize;
   for (; aBuf != end; ++aBuf)
     crc = (crc << 8) ^ BZ2_crc32Table[(crc >> 24) ^ *aBuf];
 
-  crc = ~crc;
-  return crc;
+  aOutCrc32 = ~crc;
+  return OK;
 }
 
 int BSPatchFileDecoder::Load(FILE* aPatchFile) {
@@ -1925,7 +1943,8 @@ class ZucchiniPatchFileDecoder : public PatchFileDecoder {
  public:
   ~ZucchiniPatchFileDecoder() override = default;
 
-  unsigned int ComputeCrc32(const uint8_t* aBuf, size_t aBufSize) override;
+  [[nodiscard]] int ComputeCrc32(const uint8_t* aBuf, size_t aBufSize,
+                                 unsigned int& aOutCrc32) override;
 
   off_t SourceSize() override;
 
@@ -1933,8 +1952,10 @@ class ZucchiniPatchFileDecoder : public PatchFileDecoder {
 
   unsigned int SourceCrc32() override;
 
-  int Apply(const uint8_t* aCheckedSrcBuf, size_t aCheckedSrcBufSize,
-            FILE* aDstFile) override;
+  [[nodiscard]] int Apply(const uint8_t* aCheckedSrcBuf,
+                          size_t aCheckedSrcBufSize, FILE* aDstFile) override;
+
+  [[nodiscard]] int Finalize() override;
 
  protected:  // Comply with PatchFileDecoder::TryLoadAs requirements
   ZucchiniPatchFileDecoder() = default;
@@ -1948,9 +1969,10 @@ class ZucchiniPatchFileDecoder : public PatchFileDecoder {
   uint32_t mSourceCrc32{};
 };
 
-unsigned int ZucchiniPatchFileDecoder::ComputeCrc32(const uint8_t* aBuf,
-                                                    size_t aBufSize) {
-  return zucchini::mozilla::ComputeCrc32(aBuf, aBufSize);
+int ZucchiniPatchFileDecoder::ComputeCrc32(const uint8_t* aBuf, size_t aBufSize,
+                                           unsigned int& aOutCrc32) {
+  return FromZucchiniStatus(
+      zucchini::mozilla::ComputeCrc32(aBuf, aBufSize, aOutCrc32));
 }
 
 int ZucchiniPatchFileDecoder::Load(FILE* aPatchFile) {
@@ -1977,6 +1999,10 @@ int ZucchiniPatchFileDecoder::Apply(const uint8_t* aCheckedSrcBuf,
   // of PatchFileDecoder::Apply.
   return FromZucchiniStatus(
       mMappedPatch.ApplyUnsafe(aCheckedSrcBuf, aCheckedSrcBufSize, aDstFile));
+}
+
+int ZucchiniPatchFileDecoder::Finalize() {
+  return FromZucchiniStatus(mMappedPatch.Finalize());
 }
 #endif  // defined(MOZ_ZUCCHINI)
 
@@ -2075,7 +2101,12 @@ int PatchFile::LoadSourceFile(FILE* ofile) {
 
   // Verify that the contents of the source file correspond to what we expect.
 
-  unsigned int crc = mPatchFileDecoder->ComputeCrc32(mBuf.get(), mBufSize);
+  unsigned int crc = 0;
+  rv = mPatchFileDecoder->ComputeCrc32(mBuf.get(), mBufSize, crc);
+  if (rv != OK) {
+    LOG(("LoadSourceFile: crc computation failed, err: %d", rv));
+    return rv;
+  }
   unsigned int expectedCrc = mPatchFileDecoder->SourceCrc32();
 
   if (crc != expectedCrc) {
@@ -2272,7 +2303,17 @@ int PatchFile::ApplyPatchTo(PatchDest aDest) {
 
 #if defined(HAVE_POSIX_FALLOCATE)
   AutoFile ofile(ensure_open(destPath, NS_T("wb+"), destMode));
-  posix_fallocate(fileno((FILE*)ofile), 0, dlen);
+  if (ofile != nullptr) {
+    // Preallocation is only an anti-fragmentation optimization; a failure here
+    // is not fatal because writing the patched contents will fail below if
+    // there really is no space. posix_fallocate returns the error number
+    // instead of setting errno.
+    int fallocateRv = posix_fallocate(fileno((FILE*)ofile), 0, dlen);
+    if (fallocateRv != 0) {
+      LOG(("failed to preallocate space for new file: " LOG_S ", err: %d",
+           mFileRelPath.get(), fallocateRv));
+    }
+  }
 #elif defined(XP_WIN)
   bool shouldTruncate = true;
 
@@ -2299,18 +2340,21 @@ int PatchFile::ApplyPatchTo(PatchDest aDest) {
       destPath, shouldTruncate ? NS_T("wb+") : NS_T("rb+"), destMode));
 #elif defined(XP_MACOSX)
   AutoFile ofile(ensure_open(destPath, NS_T("wb+"), destMode));
-  // Modified code from FileUtils.cpp
-  fstore_t store = {F_ALLOCATECONTIG, F_PEOFPOSMODE, 0, dlen};
-  // Try to get a continous chunk of disk space
-  rv = fcntl(fileno((FILE*)ofile), F_PREALLOCATE, &store);
-  if (rv == -1) {
-    // OK, perhaps we are too fragmented, allocate non-continuous
-    store.fst_flags = F_ALLOCATEALL;
+  if (ofile != nullptr) {
+    // Modified code from FileUtils.cpp
+    fstore_t store = {F_ALLOCATECONTIG, F_PEOFPOSMODE, 0, dlen};
+    // Try to get a continous chunk of disk space
     rv = fcntl(fileno((FILE*)ofile), F_PREALLOCATE, &store);
-  }
+    if (rv == -1) {
+      // OK, perhaps we are too fragmented, allocate non-continuous
+      store.fst_flags = F_ALLOCATEALL;
+      rv = fcntl(fileno((FILE*)ofile), F_PREALLOCATE, &store);
+    }
 
-  if (rv != -1) {
-    ftruncate(fileno((FILE*)ofile), dlen);
+    if (rv != -1 && ftruncate(fileno((FILE*)ofile), dlen) != 0) {
+      LOG(("failed to set the size of the new file: " LOG_S ", err: %d",
+           mFileRelPath.get(), errno));
+    }
   }
 #else
   AutoFile ofile(ensure_open(destPath, NS_T("wb+"), destMode));
@@ -2331,6 +2375,12 @@ int PatchFile::ApplyPatchTo(PatchDest aDest) {
   // SAFETY: We have manually checked that the size and crc32 of mBuf match with
   // the patch in PatchFile::LoadSourceFile.
   rv = mPatchFileDecoder->Apply(mBuf.get(), mBufSize, ofile);
+
+  if (rv == OK) {
+    // Manually release resources, and propagate any failure that could reflect
+    // process instability (e.g. OOM).
+    rv = mPatchFileDecoder->Finalize();
+  }
 
   // Go ahead and do a bit of cleanup now to minimize runtime overhead.
   // Release the patch decoder and any resources it holds (such as
@@ -2760,7 +2810,7 @@ static void LaunchCallbackApp(const NS_tchar* workingDir, int argc,
 #if defined(USE_EXECV)
   execv(argv[0], argv);
 #elif defined(XP_MACOSX)
-  LaunchMacApp(argc, (const char**)argv);
+  LaunchMacApp(argc, (const char**)argv, gCallbackWaitPid);
 #elif defined(XP_WIN)
   // Do not allow the callback to run when running an update through the
   // service as session 0.  The unelevated updater.exe will do the launching.
@@ -2778,6 +2828,26 @@ static void LaunchCallbackApp(const NS_tchar* workingDir, int argc,
 #  warning "Need implementaton of LaunchCallbackApp"
 #endif
 }
+
+#ifndef XP_MACOSX
+static void WriteUpdateTelemetry(const NS_tchar* aInstallDir) {
+  NS_tchar path[MAXPATHLEN];
+  NS_tsnprintf(path, sizeof(path) / sizeof(path[0]),
+               NS_T("%s/update_telemetry.json"), aInstallDir);
+
+  auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::system_clock::now().time_since_epoch())
+                   .count();
+  char content[128];
+  snprintf(content, sizeof(content) / sizeof(content[0]),
+           "{\"install_timestamp\":\"%lld\"}", (long long)nowMs);
+
+  AutoFile file(CreateAndOpenFile(path, true));
+  if (file != nullptr) {
+    fwrite(content, strlen(content), 1, file);
+  }
+}
+#endif
 
 static bool WriteToFile(const NS_tchar* aFilename, const char* aStatus) {
   LOG(("Writing status to file: %s", aStatus));
@@ -3254,6 +3324,9 @@ static int ProcessReplaceRequest() {
 #endif
 
   gSucceeded = true;
+#ifndef XP_MACOSX
+  WriteUpdateTelemetry(gInstallDirPath);
+#endif
 
   return 0;
 }
@@ -3450,6 +3523,11 @@ static void UpdateThreadFunc(void* param) {
         LOG(("Couldn't set access/modification time on application bundle."));
       }
 #endif
+#ifndef XP_MACOSX
+      if (!sStagedUpdate) {
+        WriteUpdateTelemetry(gInstallDirPath);
+      }
+#endif
       LOG(("succeeded"));
     }
     WriteStatusFile(rv);
@@ -3638,11 +3716,19 @@ int NS_main(int argc, NS_tchar** argv) {
 #ifdef XP_MACOSX
   if (argc > 2 && NS_tstrcmp(argv[1], NS_T("--openAppBundle")) == 0) {
     LogToOS(NS_T("Opening App Bundle"));
-    // We have been asked to open a .app bundle. The path to the .app bundle and
-    // any command line arguments have been passed to us as arguments after
-    // "--openAppBundle", so remove the first two arguments and launch the .app
-    // bundle.
-    LaunchMacApp(argc - 2, (const char**)argv + 2);
+    // We have been asked to open a .app bundle:
+    //
+    //   --openAppBundle [--wait-pid <pid>] <app bundle> [arguments...]
+    //
+    // The optional pid belongs to the process we are replacing. Drop the
+    // arguments we consume here and launch the .app bundle with the rest.
+    int appIndex = 2;
+    pid_t waitForPid = 0;
+    if (argc > 4 && NS_tstrcmp(argv[2], NS_T("--wait-pid")) == 0) {
+      waitForPid = static_cast<pid_t>(NS_tatoi(argv[3]));
+      appIndex = 4;
+    }
+    LaunchMacApp(argc - appIndex, (const char**)argv + appIndex, waitForPid);
     return 0;
   }
 
@@ -3910,6 +3996,13 @@ int NS_main(int argc, NS_tchar** argv) {
       // update.
       sReplaceRequest = true;
     }
+#if defined(XP_MACOSX)
+    if (pid > 0) {
+      // Remember the caller so that we can wait for it to go away before we
+      // relaunch the application on its behalf.
+      gCallbackWaitPid = static_cast<pid_t>(pid);
+    }
+#endif
   }
 
   if (!isDMGInstall) {
@@ -5047,6 +5140,7 @@ void ActionList::Append(Action* action) {
     mFirst = action;
   }
 
+  action->mPrev = mLast;
   mLast = action;
   mCount++;
 }
@@ -5131,7 +5225,13 @@ int ActionList::Execute() {
 }
 
 void ActionList::Finish(int status) {
-  Action* a = mFirst;
+  // On failure, rolling back requires unwinding the executed actions in
+  // reverse order to correctly handle multiple actions touching the same path.
+  // This is unsupported in the general case, but tolerated if the first action
+  // is a REMOVEFILE and the second an ADD like in non-staged complete updates.
+  // On success the order is preserved because RemoveDir removes directories
+  // here and needs to visit children before their parents.
+  Action* a = status == OK ? mFirst : mLast;
   int i = 0;
   while (a) {
     a->Finish(status);
@@ -5140,7 +5240,7 @@ void ActionList::Finish(int status) {
     UpdateProgressUI(PROGRESS_PREPARE_SIZE + PROGRESS_DRAFT_SIZE +
                      PROGRESS_EXECUTE_SIZE + PROGRESS_FINISH_SIZE * percent);
 
-    a = a->mNext;
+    a = status == OK ? a->mNext : a->mPrev;
   }
 
   if (status == OK) {
@@ -5585,15 +5685,13 @@ int DoUpdate() {
   NS_tchar* rb = buf;
 
 #if defined(MOZ_ZUCCHINI)
-#  if defined(TEST_UPDATER) && defined(XP_WIN)
-  // Crash recovery is only supported (and hence tested) on Windows for now.
-  // POSIX support is planned, see bug 2043122 for more information.
+#  if defined(TEST_UPDATER)
   zucchini::mozilla::TestOptions options;
   options.logDestructorMarker = EnvHasValue("MOZ_TEST_ZUCCHINI_DTOR_MARKER");
   options.triggerBadAlloc = EnvHasValue("MOZ_TEST_ZUCCHINI_BAD_ALLOC");
   options.triggerCheckFailure = EnvHasValue("MOZ_TEST_ZUCCHINI_CHECK_FAILURE");
   zucchini::mozilla::SetTestOptions(options);
-#  endif  // TEST_UPDATER && XP_WIN
+#  endif  // TEST_UPDATER
 
   zucchini::mozilla::SetLogFunction(LogZucchiniMessage);
 #endif  // defined(MOZ_ZUCCHINI)

@@ -51,6 +51,7 @@ class TabGroupCardTest {
             override val ungroupTabGroupEnabled: Boolean = true
             override val tabGroupsOnboardingEnabled: Boolean = false
             override val tabGroupsLiveReorderEnabled: Boolean = false
+            override val tabGroupsStripEnabled: Boolean = false
         }
 
     @Test
@@ -279,6 +280,30 @@ class TabGroupCardTest {
         assertEquals(group, clickedGroup)
     }
 
+    @Test
+    fun verifyUngroupTabGroupClick() {
+        val group = createTabGroup()
+        var ungroupClicked = false
+        var clickedGroup: TabsTrayItem.TabGroup? = null
+
+        composeTestRule.setContent {
+            FirefoxTheme {
+                ComposableUnderTest(
+                    group = group,
+                    onUngroupTabGroupClick = { arg ->
+                        ungroupClicked = true
+                        clickedGroup = arg
+                    },
+                )
+            }
+        }
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_THREE_DOT_BUTTON).performClick()
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.UNGROUP_TAB_GROUP).performClick()
+
+        assertTrue(ungroupClicked)
+        assertEquals(group, clickedGroup)
+    }
+
     private fun verifyThumbnailSizesSimilar() {
         val first =
             composeTestRule
@@ -382,6 +407,45 @@ class TabGroupCardTest {
         assertEquals("Undragged item opacity is 100%", 1f, undraggedAlpha)
     }
 
+    @Test
+    fun verifyMediaIndicatorVisible() {
+        composeTestRule.setContent {
+            FirefoxTheme {
+                ComposableUnderTest(
+                    group =
+                        TabsTrayItem.TabGroup(
+                            title = "Group 1",
+                            theme = TabGroupTheme.Yellow,
+                            tabs = mutableListOf(createTab(url = ABOUT_HOME_URL, isMediaActive = true)),
+                        )
+                )
+            }
+        }
+        composeTestRule
+            .onNodeWithTag(
+                TabsTrayTestTag.TAB_ITEM_MEDIA_INDICATOR,
+                useUnmergedTree = true,
+            )
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun verifyMediaIndicatorNotVisible() {
+        composeTestRule.setContent {
+            FirefoxTheme {
+                ComposableUnderTest(
+                    group =
+                        TabsTrayItem.TabGroup(
+                            title = "Group 1",
+                            theme = TabGroupTheme.Yellow,
+                            tabs = mutableListOf(createTab(url = ABOUT_HOME_URL, isMediaActive = false)),
+                        )
+                )
+            }
+        }
+        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_ITEM_MEDIA_INDICATOR).assertDoesNotExist()
+    }
+
     @Composable
     private fun ComposableUnderTest(
         modifier: Modifier = Modifier,
@@ -398,6 +462,7 @@ class TabGroupCardTest {
         onEditTabGroupClick: (TabsTrayItem.TabGroup) -> Unit = {},
         onCloseTabGroupClick: (TabsTrayItem.TabGroup) -> Unit = {},
         onShareTabGroupClick: (TabsTrayItem.TabGroup) -> Unit = {},
+        onUngroupTabGroupClick: (TabsTrayItem.TabGroup) -> Unit = {},
         featureHelper: TabManagementFeatureHelper = tabManagementFeatureHelper,
     ) {
         CompositionLocalProvider(LocalTabManagementFeatureHelper provides featureHelper) {
@@ -416,6 +481,7 @@ class TabGroupCardTest {
                 onEditTabGroupClick = { onEditTabGroupClick(group) },
                 onCloseTabGroupClick = { onCloseTabGroupClick(group) },
                 onShareTabGroupClick = { onShareTabGroupClick(group) },
+                onUngroupTabGroupClick = { onUngroupTabGroupClick(group) },
             )
         }
     }

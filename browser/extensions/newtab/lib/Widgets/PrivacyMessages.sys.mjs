@@ -16,6 +16,7 @@
  *
  * ZERO STATE
  *   No trackers blocked today → the empty state (shield icon, no count, no tip).
+ *   A zero *site* count is not a zero state; the component drops that line instead.
  *
  * MESSAGE FAMILIES (the `category` field)
  *   info          Education about tracking / Firefox protections. shield/planet/
@@ -108,7 +109,7 @@ const CAPS = {
 
 // The empty-state message (count 0). Fixed, not part of the rotation pool.
 export const EMPTY_MESSAGE = {
-  id: "newtab-privacy-empty",
+  id: "newtab-privacy-empty-state",
   category: CATEGORY.EMPTY,
   icon: "shield",
   countSource: "none",

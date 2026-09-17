@@ -50,29 +50,34 @@ add_task(async function test_meta_schema_catches_violations() {
         "x-category": "Miscellaneous",
         "x-compatibility": compat,
         examples: ["example"],
+        "x-restart-required": true,
       },
       ShortDescription: {
         description: "Too short.",
         "x-category": "Miscellaneous",
         "x-compatibility": compat,
         examples: ["example"],
+        "x-restart-required": true,
       },
       EmptyCategory: {
         description,
         "x-category": "",
         "x-compatibility": compat,
         examples: ["example"],
+        "x-restart-required": true,
       },
       EmptyExamples: {
         description,
         "x-category": "Miscellaneous",
         "x-compatibility": compat,
         examples: [],
+        "x-restart-required": true,
       },
       MissingCompatibility: {
         description,
         "x-category": "Miscellaneous",
         examples: ["example"],
+        "x-restart-required": true,
       },
       MissingChannel: {
         description,
@@ -82,12 +87,14 @@ add_task(async function test_meta_schema_catches_violations() {
           firefox_enterprise: { version_added: false },
         },
         examples: ["example"],
+        "x-restart-required": true,
       },
       MissingVersionAdded: {
         description,
         "x-category": "Miscellaneous",
         "x-compatibility": { ...compat, firefox: {} },
         examples: ["example"],
+        "x-restart-required": true,
       },
       BadVersionString: {
         description,
@@ -97,6 +104,7 @@ add_task(async function test_meta_schema_catches_violations() {
           firefox: { version_added: "fifty" },
         },
         examples: ["example"],
+        "x-restart-required": true,
       },
       BadVersionType: {
         description,
@@ -106,6 +114,24 @@ add_task(async function test_meta_schema_catches_violations() {
           firefox: { version_added: 2 },
         },
         examples: ["example"],
+        "x-restart-required": true,
+      },
+      EmptyNotes: {
+        description,
+        "x-category": "Miscellaneous",
+        "x-compatibility": {
+          ...compat,
+          firefox: { version_added: "60", notes: "" },
+        },
+        examples: ["example"],
+        "x-restart-required": true,
+      },
+      EmptyNotesArray: {
+        description,
+        "x-category": "Miscellaneous",
+        "x-compatibility": { ...compat, notes: [] },
+        examples: ["example"],
+        "x-restart-required": true,
       },
       UnknownChannel: {
         description,
@@ -115,6 +141,20 @@ add_task(async function test_meta_schema_catches_violations() {
           firefox_galactic_edition: { version_added: "60" },
         },
         examples: ["example"],
+        "x-restart-required": true,
+      },
+      MissingRestartRequired: {
+        description,
+        "x-category": "Miscellaneous",
+        "x-compatibility": compat,
+        examples: ["example"],
+      },
+      BadRestartRequiredType: {
+        description,
+        "x-category": "Miscellaneous",
+        "x-compatibility": compat,
+        examples: ["example"],
+        "x-restart-required": "true",
       },
     },
   };
@@ -133,7 +173,11 @@ add_task(async function test_meta_schema_catches_violations() {
     ["MissingVersionAdded", "required"],
     ["BadVersionString", "pattern"],
     ["BadVersionType", "type"],
+    ["EmptyNotes", "minLength"],
+    ["EmptyNotesArray", "minItems"],
     ["UnknownChannel", "additionalProperties"],
+    ["MissingRestartRequired", "required"],
+    ["BadRestartRequiredType", "type"],
   ]) {
     Assert.ok(
       result.errors.some(

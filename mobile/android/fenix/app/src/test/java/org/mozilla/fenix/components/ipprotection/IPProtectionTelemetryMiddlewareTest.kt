@@ -9,6 +9,7 @@ package org.mozilla.fenix.components.ipprotection
 import kotlin.test.assertNotNull
 import mozilla.components.ExperimentalAndroidComponentsApi
 import mozilla.components.concept.engine.ipprotection.ServiceState
+import mozilla.components.feature.ipprotection.store.ActivationOperation
 import mozilla.components.feature.ipprotection.store.IPProtectionAction
 import mozilla.components.feature.ipprotection.store.IPProtectionStore
 import mozilla.components.feature.ipprotection.store.state.AccountState
@@ -97,13 +98,42 @@ class IPProtectionTelemetryMiddlewareTest {
 
         val store = createStore(initialStatus = AccountStatus.EnrolledAndEntitled)
 
-        store.dispatch(IPProtectionAction.ToggleFailed())
-        store.dispatch(IPProtectionAction.ToggleFailed(RuntimeException("boom")))
+        store.dispatch(IPProtectionAction.ToggleFailed(ActivationOperation.Activate))
+        store.dispatch(IPProtectionAction.ToggleFailed(ActivationOperation.Activate, RuntimeException("boom")))
 
         val events = Vpn.errorEncountered.testGetValue()
         assertNotNull(events)
         assertEquals(2, events.size)
         assertTrue(events.all { it.extra?.get("error_code") == "null" })
+    }
+
+    @Test
+    fun `GIVEN the location switch failed with no or a non-proxy error THEN no error code is recorded`() {
+        assertNull(Vpn.locationSwitchError.testGetValue())
+
+        val store = createStore(initialStatus = AccountStatus.EnrolledAndEntitled)
+
+        store.dispatch(IPProtectionAction.LocationSwitchFailed())
+        store.dispatch(IPProtectionAction.LocationSwitchFailed(RuntimeException("It's a null-pointer!")))
+
+        val events = Vpn.locationSwitchError.testGetValue()
+        assertNotNull(events)
+        assertEquals(2, events.size)
+        assertTrue(events.all { it.extra?.get("error_code") == "null" })
+    }
+
+    @Test
+    fun `GIVEN the location list update failed THEN the error class name is recorded`() {
+        assertNull(Vpn.locationUpdateError.testGetValue())
+
+        val store = createStore(initialStatus = AccountStatus.EnrolledAndEntitled)
+
+        store.dispatch(IPProtectionAction.LocationUpdateFailed(RuntimeException("generic-error")))
+
+        val events = Vpn.locationUpdateError.testGetValue()
+        assertNotNull(events)
+        assertEquals(1, events.size)
+        assertEquals("RuntimeException", events.first().extra?.get("error_code"))
     }
 
     @Test
@@ -116,11 +146,66 @@ class IPProtectionTelemetryMiddlewareTest {
                 serviceStatus = ServiceState.Unauthenticated,
             )
 
-        store.dispatch(IPProtectionAction.ToggleFailed())
+        store.dispatch(IPProtectionAction.ToggleFailed(ActivationOperation.Activate))
 
         val events = Vpn.entitledAccountUnauthenticated.testGetValue()
         assertNotNull(events)
         assertEquals(1, events.size)
+    }
+
+    @Test
+    fun `GIVEN a failed activate THEN the operation is recorded as activate`() {
+        val store = createStore(initialStatus = AccountStatus.EnrolledAndEntitled)
+
+        store.dispatch(IPProtectionAction.ToggleFailed(ActivationOperation.Activate))
+
+        val events = Vpn.errorEncountered.testGetValue()
+        assertNotNull(events)
+        assertEquals("activate", events.single().extra?.get("operation"))
+    }
+
+    @Test
+    fun `GIVEN a failed deactivate THEN the operation is recorded as deactivate`() {
+        val store = createStore(initialStatus = AccountStatus.EnrolledAndEntitled)
+
+        store.dispatch(IPProtectionAction.ToggleFailed(ActivationOperation.Deactivate))
+
+        val events = Vpn.errorEncountered.testGetValue()
+        assertNotNull(events)
+        assertEquals("deactivate", events.single().extra?.get("operation"))
+    }
+
+    @Test
+    fun `GIVEN activate and deactivate both fail THEN each event keeps its own operation`() {
+        val store = createStore(initialStatus = AccountStatus.EnrolledAndEntitled)
+
+        store.dispatch(IPProtectionAction.ToggleFailed(ActivationOperation.Activate))
+        store.dispatch(IPProtectionAction.ToggleFailed(ActivationOperation.Deactivate))
+
+        val events = Vpn.errorEncountered.testGetValue()
+        assertNotNull(events)
+        assertEquals(2, events.size)
+        assertEquals(
+            listOf("activate", "deactivate"),
+            events.map { it.extra?.get("operation") },
+        )
+    }
+
+    @Test
+    fun `GIVEN a failed toggle THEN the state at failure time is recorded`() {
+        val store =
+            createStore(
+                initialStatus = AccountStatus.EnrolledAndEntitled,
+                serviceStatus = ServiceState.Ready,
+            )
+
+        store.dispatch(IPProtectionAction.ToggleFailed(ActivationOperation.Activate))
+
+        val extra = Vpn.errorEncountered.testGetValue()?.single()?.extra
+        assertNotNull(extra)
+        assertEquals("ready", extra["service_state"])
+        assertEquals("uninitialized", extra["proxy_state"])
+        assertEquals("enrolled_and_entitled", extra["account_state"])
     }
 
     private fun createStore(

@@ -10,9 +10,7 @@ use objc2_metal::{
 use wgt::{AstcBlock, AstcChannel};
 
 use alloc::{string::ToString as _, sync::Arc, vec::Vec};
-use core::sync::atomic;
-use parking_lot::Mutex;
-use std::sync::OnceLock;
+use wgpu_sync::{atomic, Mutex, OnceCell};
 
 use crate::metal::QueueShared;
 
@@ -117,7 +115,7 @@ impl crate::Adapter for super::Adapter {
                         command_buffer_created_not_submitted: atomic::AtomicUsize::new(0),
                         pending_waits: Mutex::new(Vec::new()),
                         pending_signals: Mutex::new(Vec::new()),
-                        relay: OnceLock::new(),
+                        relay: OnceCell::new(),
                     }),
                     timestamp_period,
                 },
@@ -471,7 +469,7 @@ impl crate::Adapter for super::Adapter {
             },
             composite_alpha_modes: vec![
                 wgt::CompositeAlphaMode::Opaque,
-                wgt::CompositeAlphaMode::PostMultiplied,
+                wgt::CompositeAlphaMode::PreMultiplied,
             ],
 
             current_extent: Some(surface.dimensions()),
@@ -505,7 +503,8 @@ impl crate::Adapter for super::Adapter {
     fn get_ordered_texture_usages(&self) -> wgt::TextureUses {
         wgt::TextureUses::INCLUSIVE
             | wgt::TextureUses::COLOR_TARGET
-            | wgt::TextureUses::DEPTH_STENCIL_WRITE
+            | wgt::TextureUses::DEPTH_WRITE
+            | wgt::TextureUses::STENCIL_WRITE
     }
 }
 
@@ -1134,7 +1133,7 @@ impl super::CapabilitiesQuery {
             // https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf#page=4
             mesh_shaders,
             max_task_workgroup_count: if mesh_shaders
-                && (metal4 || device.supportsFamily(MTLGPUFamily::Apple2))
+                && (metal4 || device.supportsFamily(MTLGPUFamily::Apple7))
             {
                 u32::MAX
             } else if mesh_shaders {
@@ -1180,6 +1179,10 @@ impl super::CapabilitiesQuery {
                 tvos = 16.0,
                 visionos = 1.0
             ),
+            texture_component_swizzle: family_check
+                && (metal3
+                    || device.supportsFamily(MTLGPUFamily::Mac2)
+                    || device.supportsFamily(MTLGPUFamily::Apple2)),
         }
     }
 
@@ -1201,6 +1204,7 @@ impl super::CapabilitiesQuery {
             | F::PASSTHROUGH_SHADERS
             | F::EXTERNAL_TEXTURE;
 
+        features.set(F::TEXTURE_COMPONENT_SWIZZLE, self.texture_component_swizzle);
         features.set(F::FLOAT32_FILTERABLE, self.supports_float_filtering);
         features.set(F::FLOAT32_BLENDABLE, true);
         features.set(F::INDIRECT_FIRST_INSTANCE, self.indirect_draw_dispatch);
@@ -1399,6 +1403,8 @@ impl super::CapabilitiesQuery {
             max_buffers_and_acceleration_structures_per_shader_stage = MAX_USABLE_BUFFERS;
         }
 
+        let (max_sampled_textures_per_shader_stage, max_storage_textures_per_shader_stage) =
+            self.max_textures_per_stage;
         let limits = crate::auxil::adjust_raw_limits(wgt::Limits {
             //
             // WebGPU LIMITS:
@@ -1420,9 +1426,13 @@ impl super::CapabilitiesQuery {
             max_dynamic_storage_buffers_per_pipeline_layout: max_storage_buffers_per_shader_stage,
             // "Maximum number of entries in the sampler state argument table, per graphics or kernel function"
             max_samplers_per_shader_stage: 16,
-            max_sampled_textures_per_shader_stage: self.max_textures_per_stage.0,
-            max_storage_textures_per_shader_stage: self.max_textures_per_stage.1,
+            max_sampled_textures_per_shader_stage,
             max_storage_buffers_per_shader_stage,
+            max_storage_buffers_in_vertex_stage: 0,
+            max_storage_buffers_in_fragment_stage: 0,
+            max_storage_textures_per_shader_stage,
+            max_storage_textures_in_vertex_stage: 0,
+            max_storage_textures_in_fragment_stage: 0,
             max_uniform_buffers_per_shader_stage,
             max_vertex_buffers,
             max_buffer_size: self.max_buffer_size,
@@ -1567,6 +1577,7 @@ impl super::CapabilitiesQuery {
             timestamp_query_support: self.timestamp_query_support,
             supports_memoryless_storage: self.supports_memoryless_storage,
             mesh_shaders: self.mesh_shaders,
+            texture_component_swizzle: self.texture_component_swizzle,
         }
     }
 

@@ -212,6 +212,9 @@ document.addEventListener(
         case "context-translate-selection":
           gContextMenu.openSelectTranslationsPanel(event);
           break;
+        case "context-create-aitab":
+          gContextMenu.createAITab();
+          break;
         case "context-showonlythisframe":
           gContextMenu.showOnlyThisFrame();
           break;

@@ -127,7 +127,8 @@ NS_IMPL_RELEASE_INHERITED(nsXMLContentSink, nsContentSink)
 
 NS_IMPL_CYCLE_COLLECTION_INHERITED(nsXMLContentSink, nsContentSink,
                                    mCurrentHead, mDocElement, mLastTextNode,
-                                   mContentStack, mDocumentChildren)
+                                   mContentStack, mDocumentChildren,
+                                   mXSLTResultDocument)
 
 // nsIContentSink
 NS_IMETHODIMP
@@ -329,7 +330,10 @@ nsresult nsXMLContentSink::OnDocumentCreated(Document* aSourceDocument,
   // Make sure that we haven't loaded a new document into the documentviewer
   // after starting the XSLT transform.
   if (viewer && viewer->GetDocument() == aSourceDocument) {
-    return viewer->SetDocumentInternal(aResultDocument, true);
+    nsresult rv = viewer->SetDocumentInternal(aResultDocument, true);
+    NS_ENSURE_SUCCESS(rv, rv);
+    mXSLTResultDocument = aResultDocument;
+    aResultDocument->BeginLoad();
   }
   return NS_OK;
 }
@@ -340,6 +344,7 @@ nsresult nsXMLContentSink::OnTransformDone(Document* aSourceDocument,
   MOZ_ASSERT(aResultDocument,
              "Don't notify about transform end without a document.");
 
+  RefPtr<Document> transformedDocument = mXSLTResultDocument.forget();
   mDocumentChildren.Clear();
 
   nsCOMPtr<nsIDocumentViewer> viewer;
@@ -407,6 +412,10 @@ nsresult nsXMLContentSink::OnTransformDone(Document* aSourceDocument,
     // This UnblockOnload call corresponds to the BlockOnload call in
     // nsContentSink::WillBuildModelImpl.
     originalDocument->UnblockOnload(true);
+  }
+  // On failure, aResultDocument is a separate error document.
+  if (transformedDocument && transformedDocument->IsExpectingEndLoad()) {
+    transformedDocument->EndLoad();
   }
 
   DropParserAndPerfHint();
@@ -562,7 +571,7 @@ nsresult nsXMLContentSink::CreateElement(
   // https://github.com/whatwg/html/pull/12000
   // Set null registry on elements with customelementregistry attribute.
   if (hasCustomElementRegistryAttr && element) {
-    element->SetKeepCustomElementRegistryNull();
+    element->SetNullCustomElementRegistry();
   }
 
   if (aNodeInfo->Equals(nsGkAtoms::script, kNameSpaceID_XHTML) ||
@@ -953,6 +962,9 @@ bool nsXMLContentSink::SetDocElement(int32_t aNameSpaceID, nsAtom* aTagName,
     }
     if (MOZ_UNLIKELY(child->GetParentNode())) {
       child->Remove();
+      if (MOZ_UNLIKELY(child->GetParentNode())) {
+        return false;
+      }
     }
     mDocument->AppendChildTo(child, false, IgnoreErrors());
     if (linkStyle) {
@@ -1069,6 +1081,9 @@ nsresult nsXMLContentSink::HandleStartElement(
 
       if (MOZ_UNLIKELY(content->GetParentNode())) {
         content->Remove();
+        if (MOZ_UNLIKELY(content->GetParentNode())) {
+          return NS_ERROR_UNEXPECTED;
+        }
       }
       parent->AppendChildTo(content, false, IgnoreErrors());
     }

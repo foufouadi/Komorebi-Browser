@@ -591,11 +591,7 @@ class AvailableLocalesEnumeration final {
       return result;
     }
 
-    bool operator==(const Iterator& aOther) const {
-      return mLocalesPos == aOther.mLocalesPos;
-    }
-
-    bool operator!=(const Iterator& aOther) const { return !(*this == aOther); }
+    bool operator==(const Iterator& aOther) const = default;
 
     value_type operator*() const {
       return mozilla::MakeStringSpan(GetAvailable(mLocalesPos));
@@ -678,11 +674,7 @@ class ICU4XEnumeration final {
       return result;
     }
 
-    bool operator==(const Iterator& aOther) const {
-      return mPos == aOther.mPos && mDelegate == aOther.mDelegate;
-    }
-
-    bool operator!=(const Iterator& aOther) const { return !(*this == aOther); }
+    bool operator==(const Iterator& aOther) const = default;
 
     value_type operator*() const {
       uintptr_t len;

@@ -11,7 +11,7 @@
  * https://w3c.github.io/page-visibility/#extensions-to-the-document-interface
  * https://drafts.csswg.org/cssom/#extensions-to-the-document-interface
  * https://drafts.csswg.org/cssom-view/#extensions-to-the-document-interface
- * https://wicg.github.io/feature-policy/#policy
+ * https://w3c.github.io/webappsec-permissions-policy/
  * https://wicg.github.io/scroll-to-text-fragment/#feature-detectability
  */
 
@@ -128,7 +128,7 @@ interface Document : Node {
 
 // https://html.spec.whatwg.org/multipage/dom.html#the-document-object
 partial interface Document {
-  [Throws, NeedsSubjectPrincipal=NonSystem]
+  [UseCounter, Throws, NeedsSubjectPrincipal=NonSystem]
   static Document parseHTMLUnsafe((TrustedHTML or DOMString) html, optional SetHTMLUnsafeOptions options = {});
 
   [PutForwards=href, LegacyUnforgeable] readonly attribute Location? location;
@@ -632,10 +632,11 @@ Document includes GeometryUtils;
 Document includes FontFaceSource;
 Document includes DocumentOrShadowRoot;
 
-// https://w3c.github.io/webappsec-feature-policy/#idl-index
+// https://w3c.github.io/webappsec-permissions-policy/#idl-index
 partial interface Document {
-    [SameObject, Pref="dom.security.featurePolicy.webidl.enabled"]
-    readonly attribute FeaturePolicy featurePolicy;
+    [SameObject, BinaryName="PermissionsPolicy",
+     Pref="dom.security.permissionsPolicy.webidl.enabled"]
+    readonly attribute PermissionsPolicy featurePolicy;
 };
 
 // Extension to give chrome JS the ability to specify a non-default keypress
@@ -796,17 +797,15 @@ dictionary StartViewTransitionOptions {
 
 // https://drafts.csswg.org/css-view-transitions-2/#idl-index
 partial interface Document {
-  [Pref="dom.viewTransitions.enabled"]
   ViewTransition startViewTransition(
     optional (ViewTransitionUpdateCallback or StartViewTransitionOptions) callbackOptions = {}
   );
-  [Pref="dom.viewTransitions.enabled"]
   readonly attribute ViewTransition? activeViewTransition;
 };
 
 // https://wicg.github.io/sanitizer-api/#sanitizer-api
 partial interface Document {
-  [Throws, Pref="dom.security.sanitizer.enabled"]
+  [UseCounter, Throws, Pref="dom.security.sanitizer.enabled"]
   static Document parseHTML(DOMString html, optional SetHTMLOptions options = {});
 };
 

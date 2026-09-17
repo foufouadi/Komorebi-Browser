@@ -1919,14 +1919,6 @@ export const FeatureManifest: {
                     pref: string;
                 };
             };
-            spocsClearEndpoint: {
-                description: string;
-                type: string;
-                setPref: {
-                    branch: string;
-                    pref: string;
-                };
-            };
             ctaButtonSponsors: {
                 description: string;
                 type: string;
@@ -5385,14 +5377,6 @@ export const FeatureManifest: {
                 };
                 description: string;
             };
-            sendP256: {
-                type: string;
-                setPref: {
-                    branch: string;
-                    pref: string;
-                };
-                description: string;
-            };
             dtlsWebRTCEnableMlkem: {
                 type: string;
                 setPref: {
@@ -6120,14 +6104,6 @@ export const FeatureManifest: {
         owner: string;
         hasExposure: boolean;
         variables: {
-            idle_period_cross_process_scheduling: {
-                description: string;
-                type: string;
-                setPref: {
-                    branch: string;
-                    pref: string;
-                };
-            };
             low_commit_space_threshold_mb: {
                 description: string;
                 type: string;

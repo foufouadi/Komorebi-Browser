@@ -36,6 +36,7 @@ import mozilla.components.feature.ipprotection.store.state.AccountStatus
 import mozilla.components.feature.ipprotection.store.state.Authorized
 import mozilla.components.feature.ipprotection.store.state.EligibilityStatus
 import mozilla.components.feature.ipprotection.store.state.IPProtectionState
+import mozilla.components.feature.ipprotection.store.state.PendingActivationRequest
 import mozilla.components.feature.ipprotection.store.state.usedDataGb
 import mozilla.components.lib.state.ext.observeAsComposableState
 
@@ -111,8 +112,13 @@ fun IPProtectionStateDebugContent(
 
             DebugSection(title = stringResource(R.string.mozac_feature_ipprotection_vpn_ui)) {
                 DebugRow(
-                    stringResource(R.string.mozac_feature_ipprotection_activate),
-                    state.activate?.toString() ?: "null",
+                    stringResource(R.string.mozac_feature_ipprotection_activation_state),
+                    state.pendingActivationRequest?.javaClass?.simpleName ?: "null",
+                )
+                DebugRow(
+                    stringResource(R.string.mozac_feature_ipprotection_selected_location_code),
+                    (state.pendingActivationRequest as? PendingActivationRequest.Activate)?.selectedLocationCode
+                        ?: "null",
                 )
             }
         }
@@ -209,7 +215,7 @@ private fun IPProtectionStateDebugPreview() {
                     resetDate = "2026-06-01",
                     accountState = AccountState(status = AccountStatus.EnrolledAndEntitled),
                     lastError = "invalid_response",
-                    activate = true,
+                    pendingActivationRequest = PendingActivationRequest.Activate(null),
                 )
         )
     }

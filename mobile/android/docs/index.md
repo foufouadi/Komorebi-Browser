@@ -19,9 +19,9 @@ To set up Mozilla Central, you can follow the general instructions provided in t
 
 - {ref}`Getting Set Up To Work On The Firefox Codebase <Getting Set Up To Work On The Firefox Codebase>`
 
-Additionally, to set up specifically for mozilla-central, you can refer to the following guide:
+Additionally, for writing, submitting and updating a patch with git, you can refer to the following guide:
 
-- {ref}`Quick Start Guide for Git Users <contribute-with-git>`
+- {ref}`Firefox Contributors' Quick Reference <firefox-contributors-quick-reference>`
 
 ## Bootstrap
 
@@ -309,6 +309,7 @@ shared/android/workmanager_faq
 
 adrs/0000-template
 adrs/0001-kotlin-test
+adrs/0002-global-organized-tab-data
 rfcs/0000-template
 rfcs/0015-android-rfc-process
 shared/rfc/wallpapers_v2_network_improvements

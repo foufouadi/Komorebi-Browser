@@ -102,6 +102,43 @@ internal open class ForeignBytes : Structure() {
 
     class ByValue : ForeignBytes(), Structure.ByValue
 }
+
+// Converter for `&[u8]` / `[ByRef] bytes` arguments.
+//
+// Only `lower` is valid — zero-copy byte buffers only flow foreign -> Rust,
+// and only in argument position. `lift`, `read`, `write`, and
+// `allocationSize` have no sound implementation here and all panic at
+// runtime. The `FfiConverter` interface is implemented so that the
+// compiler enforces the full method set (rather than relying on eyeball).
+//
+// The provided `ByteBuffer` MUST be direct — only direct buffers have a
+// stable native address that JNA can expose via `getDirectBufferPointer`.
+// The returned `ForeignBytes.ByValue` is only valid for the duration of
+// the FFI call; the Rust side treats it as a borrow.
+internal object FfiConverterByRefBytes : FfiConverter<java.nio.ByteBuffer, ForeignBytes.ByValue> {
+    override fun lower(value: java.nio.ByteBuffer): ForeignBytes.ByValue {
+        require(value.isDirect) { "UniFFI zero-copy &[u8] requires a direct ByteBuffer. Use ByteBuffer.allocateDirect()." }
+        val remaining = value.remaining()
+        val fb = ForeignBytes.ByValue()
+        fb.len = remaining
+        // Zero-length direct buffers: skip getDirectBufferPointer (platform-variable behavior)
+        // and pass null. The Rust side treats (null, 0) as &[].
+        fb.data = if (remaining == 0) null else com.sun.jna.Native.getDirectBufferPointer(value)
+        return fb
+    }
+
+    override fun lift(value: ForeignBytes.ByValue): java.nio.ByteBuffer =
+        error("ByRef bytes cannot be lifted: zero-copy &[u8] only flows foreign->Rust")
+
+    override fun read(buf: java.nio.ByteBuffer): java.nio.ByteBuffer =
+        error("ByRef bytes cannot be read from a buffer: zero-copy &[u8] is only supported in argument position, not nested in records/options/etc.")
+
+    override fun write(value: java.nio.ByteBuffer, buf: java.nio.ByteBuffer): Unit =
+        error("ByRef bytes cannot be written to a buffer: zero-copy &[u8] is only supported in argument position, not nested in records/options/etc.")
+
+    override fun allocationSize(value: java.nio.ByteBuffer): ULong =
+        error("ByRef bytes have no RustBuffer allocation size: zero-copy &[u8] is only supported in argument position, not nested in records/options/etc.")
+}
 /**
  * The FfiConverter interface handles converter types to and from the FFI
  *
@@ -639,57 +676,57 @@ internal object IntegrityCheckingUniffiLib {
         uniffiCheckContractApiVersion(this)
     }
     external fun uniffi_tabs_checksum_method_remotecommandstore_add_remote_command(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_method_remotecommandstore_add_remote_command_at(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_method_remotecommandstore_get_unsent_commands(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_method_remotecommandstore_remove_remote_command(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_method_remotecommandstore_set_pending_command_sent(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_method_tabsbridgedengine_apply(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_method_tabsbridgedengine_ensure_current_sync_id(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_method_tabsbridgedengine_last_sync(
-    ): Short
-    external fun uniffi_tabs_checksum_method_tabsbridgedengine_prepare_for_sync(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_method_tabsbridgedengine_reset(
-    ): Short
+    ): Int
+    external fun uniffi_tabs_checksum_method_tabsbridgedengine_reset_last_sync(
+    ): Int
     external fun uniffi_tabs_checksum_method_tabsbridgedengine_reset_sync_id(
-    ): Short
-    external fun uniffi_tabs_checksum_method_tabsbridgedengine_set_last_sync(
-    ): Short
+    ): Int
+    external fun uniffi_tabs_checksum_method_tabsbridgedengine_set_clients(
+    ): Int
     external fun uniffi_tabs_checksum_method_tabsbridgedengine_set_uploaded(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_method_tabsbridgedengine_store_incoming(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_method_tabsbridgedengine_sync_finished(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_method_tabsbridgedengine_sync_id(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_method_tabsbridgedengine_sync_started(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_method_tabsbridgedengine_wipe(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_method_tabsstore_bridged_engine(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_method_tabsstore_close_connection(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_method_tabsstore_get_all(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_method_tabsstore_new_remote_command_store(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_method_tabsstore_register_with_sync_manager(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_method_tabsstore_set_local_tabs(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_method_tabsstore_set_local_tabs_info(
-    ): Short
+    ): Int
     external fun uniffi_tabs_checksum_constructor_tabsstore_new(
-    ): Short
+    ): Int
     external fun ffi_tabs_uniffi_contract_version(
     ): Int
 
@@ -727,19 +764,19 @@ internal object UniffiLib {
     ): Long
     external fun uniffi_tabs_fn_free_tabsbridgedengine(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    external fun uniffi_tabs_fn_method_tabsbridgedengine_apply(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    external fun uniffi_tabs_fn_method_tabsbridgedengine_apply(`ptr`: Long,`serverModifiedMillis`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_tabs_fn_method_tabsbridgedengine_ensure_current_sync_id(`ptr`: Long,`newSyncId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_tabs_fn_method_tabsbridgedengine_last_sync(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
-    external fun uniffi_tabs_fn_method_tabsbridgedengine_prepare_for_sync(`ptr`: Long,`clientData`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): Unit
     external fun uniffi_tabs_fn_method_tabsbridgedengine_reset(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_tabs_fn_method_tabsbridgedengine_reset_last_sync(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_tabs_fn_method_tabsbridgedengine_reset_sync_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    external fun uniffi_tabs_fn_method_tabsbridgedengine_set_last_sync(`ptr`: Long,`lastSync`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    external fun uniffi_tabs_fn_method_tabsbridgedengine_set_clients(`ptr`: Long,`clientData`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_tabs_fn_method_tabsbridgedengine_set_uploaded(`ptr`: Long,`newTimestamp`: Long,`uploadedIds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -788,7 +825,7 @@ internal object UniffiLib {
     external fun ffi_tabs_rust_future_free_u8(`handle`: Long,
     ): Unit
     external fun ffi_tabs_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Byte
+    ): Int
     external fun ffi_tabs_rust_future_poll_i8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
     ): Unit
     external fun ffi_tabs_rust_future_cancel_i8(`handle`: Long,
@@ -804,7 +841,7 @@ internal object UniffiLib {
     external fun ffi_tabs_rust_future_free_u16(`handle`: Long,
     ): Unit
     external fun ffi_tabs_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Short
+    ): Int
     external fun ffi_tabs_rust_future_poll_i16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
     ): Unit
     external fun ffi_tabs_rust_future_cancel_i16(`handle`: Long,
@@ -1330,6 +1367,11 @@ open class RemoteCommandStore: Disposable, AutoCloseable, RemoteCommandStoreInte
     private val wasDestroyed = AtomicBoolean(false)
     private val callCounter = AtomicLong(1)
 
+    /**
+     * Whether the current object has been destroyed and its reference is gone in the Rust side.
+     */
+    val uniffiIsDestroyed: Boolean get() = wasDestroyed.get()
+
     override fun destroy() {
         // Only allow a single call to this method.
         // TODO: maybe we should log a warning if called more than once?
@@ -1405,7 +1447,9 @@ open class RemoteCommandStore: Disposable, AutoCloseable, RemoteCommandStoreInte
     uniffiRustCallWithError(TabsApiException) { _status ->
     UniffiLib.uniffi_tabs_fn_method_remotecommandstore_add_remote_command(
         it,
-        FfiConverterString.lower(`deviceId`),FfiConverterTypeRemoteCommand.lower(`command`),_status)
+        
+        FfiConverterString.lower(`deviceId`),
+        FfiConverterTypeRemoteCommand.lower(`command`),_status)
 }
     }
     )
@@ -1422,7 +1466,10 @@ open class RemoteCommandStore: Disposable, AutoCloseable, RemoteCommandStoreInte
     uniffiRustCallWithError(TabsApiException) { _status ->
     UniffiLib.uniffi_tabs_fn_method_remotecommandstore_add_remote_command_at(
         it,
-        FfiConverterString.lower(`deviceId`),FfiConverterTypeRemoteCommand.lower(`command`),FfiConverterTypeTimestamp.lower(`when`),_status)
+        
+        FfiConverterString.lower(`deviceId`),
+        FfiConverterTypeRemoteCommand.lower(`command`),
+        FfiConverterTypeTimestamp.lower(`when`),_status)
 }
     }
     )
@@ -1457,7 +1504,9 @@ open class RemoteCommandStore: Disposable, AutoCloseable, RemoteCommandStoreInte
     uniffiRustCallWithError(TabsApiException) { _status ->
     UniffiLib.uniffi_tabs_fn_method_remotecommandstore_remove_remote_command(
         it,
-        FfiConverterString.lower(`deviceId`),FfiConverterTypeRemoteCommand.lower(`command`),_status)
+        
+        FfiConverterString.lower(`deviceId`),
+        FfiConverterTypeRemoteCommand.lower(`command`),_status)
 }
     }
     )
@@ -1474,6 +1523,7 @@ open class RemoteCommandStore: Disposable, AutoCloseable, RemoteCommandStoreInte
     uniffiRustCallWithError(TabsApiException) { _status ->
     UniffiLib.uniffi_tabs_fn_method_remotecommandstore_set_pending_command_sent(
         it,
+        
         FfiConverterTypePendingCommand.lower(`command`),_status)
 }
     }
@@ -1616,27 +1666,29 @@ public object FfiConverterTypeRemoteCommandStore: FfiConverter<RemoteCommandStor
 
 
 /**
- * Note the canonical docs for this are in https://searchfox.org/mozilla-central/source/services/interfaces/mozIBridgedSyncEngine.idl
+ * The Desktop-facing bridged sync engine - a thin wrapper over the
+ * `sync15::engine::SyncEngine` implemented by this component (see
+ * `sync15::engine::BridgedEngineWrapper`).
  * It's only actually used in desktop, but it's fine to expose this everywhere.
  * NOTE: all timestamps here are milliseconds.
  */
 public interface TabsBridgedEngineInterface {
     
-    fun `apply`(): List<kotlin.String>
+    fun `apply`(`serverModifiedMillis`: kotlin.Long): List<kotlin.String>
     
     fun `ensureCurrentSyncId`(`newSyncId`: kotlin.String): kotlin.String
     
     fun `lastSync`(): kotlin.Long
     
-    fun `prepareForSync`(`clientData`: kotlin.String)
-    
     fun `reset`()
+    
+    fun `resetLastSync`()
     
     fun `resetSyncId`(): kotlin.String
     
-    fun `setLastSync`(`lastSync`: kotlin.Long)
+    fun `setClients`(`clientData`: kotlin.String)
     
-    fun `setUploaded`(`newTimestamp`: kotlin.Long, `uploadedIds`: List<TabsGuid>)
+    fun `setUploaded`(`newTimestamp`: kotlin.Long, `uploadedIds`: List<kotlin.String>)
     
     fun `storeIncoming`(`incomingEnvelopesAsJson`: List<kotlin.String>)
     
@@ -1652,7 +1704,9 @@ public interface TabsBridgedEngineInterface {
 }
 
 /**
- * Note the canonical docs for this are in https://searchfox.org/mozilla-central/source/services/interfaces/mozIBridgedSyncEngine.idl
+ * The Desktop-facing bridged sync engine - a thin wrapper over the
+ * `sync15::engine::SyncEngine` implemented by this component (see
+ * `sync15::engine::BridgedEngineWrapper`).
  * It's only actually used in desktop, but it's fine to expose this everywhere.
  * NOTE: all timestamps here are milliseconds.
  */
@@ -1686,6 +1740,11 @@ open class TabsBridgedEngine: Disposable, AutoCloseable, TabsBridgedEngineInterf
 
     private val wasDestroyed = AtomicBoolean(false)
     private val callCounter = AtomicLong(1)
+
+    /**
+     * Whether the current object has been destroyed and its reference is gone in the Rust side.
+     */
+    val uniffiIsDestroyed: Boolean get() = wasDestroyed.get()
 
     override fun destroy() {
         // Only allow a single call to this method.
@@ -1753,13 +1812,14 @@ open class TabsBridgedEngine: Disposable, AutoCloseable, TabsBridgedEngineInterf
     }
 
     
-    @Throws(TabsApiException::class)override fun `apply`(): List<kotlin.String> {
+    @Throws(TabsApiException::class)override fun `apply`(`serverModifiedMillis`: kotlin.Long): List<kotlin.String> {
             return FfiConverterSequenceString.lift(
     callWithHandle {
     uniffiRustCallWithError(TabsApiException) { _status ->
     UniffiLib.uniffi_tabs_fn_method_tabsbridgedengine_apply(
         it,
-        _status)
+        
+        FfiConverterLong.lower(`serverModifiedMillis`),_status)
 }
     }
     )
@@ -1773,6 +1833,7 @@ open class TabsBridgedEngine: Disposable, AutoCloseable, TabsBridgedEngineInterf
     uniffiRustCallWithError(TabsApiException) { _status ->
     UniffiLib.uniffi_tabs_fn_method_tabsbridgedengine_ensure_current_sync_id(
         it,
+        
         FfiConverterString.lower(`newSyncId`),_status)
 }
     }
@@ -1795,24 +1856,24 @@ open class TabsBridgedEngine: Disposable, AutoCloseable, TabsBridgedEngineInterf
     
 
     
-    @Throws(TabsApiException::class)override fun `prepareForSync`(`clientData`: kotlin.String)
+    @Throws(TabsApiException::class)override fun `reset`()
         = 
     callWithHandle {
     uniffiRustCallWithError(TabsApiException) { _status ->
-    UniffiLib.uniffi_tabs_fn_method_tabsbridgedengine_prepare_for_sync(
+    UniffiLib.uniffi_tabs_fn_method_tabsbridgedengine_reset(
         it,
-        FfiConverterString.lower(`clientData`),_status)
+        _status)
 }
     }
     
     
 
     
-    @Throws(TabsApiException::class)override fun `reset`()
+    @Throws(TabsApiException::class)override fun `resetLastSync`()
         = 
     callWithHandle {
     uniffiRustCallWithError(TabsApiException) { _status ->
-    UniffiLib.uniffi_tabs_fn_method_tabsbridgedengine_reset(
+    UniffiLib.uniffi_tabs_fn_method_tabsbridgedengine_reset_last_sync(
         it,
         _status)
 }
@@ -1835,26 +1896,29 @@ open class TabsBridgedEngine: Disposable, AutoCloseable, TabsBridgedEngineInterf
     
 
     
-    @Throws(TabsApiException::class)override fun `setLastSync`(`lastSync`: kotlin.Long)
+    @Throws(TabsApiException::class)override fun `setClients`(`clientData`: kotlin.String)
         = 
     callWithHandle {
     uniffiRustCallWithError(TabsApiException) { _status ->
-    UniffiLib.uniffi_tabs_fn_method_tabsbridgedengine_set_last_sync(
+    UniffiLib.uniffi_tabs_fn_method_tabsbridgedengine_set_clients(
         it,
-        FfiConverterLong.lower(`lastSync`),_status)
+        
+        FfiConverterString.lower(`clientData`),_status)
 }
     }
     
     
 
     
-    @Throws(TabsApiException::class)override fun `setUploaded`(`newTimestamp`: kotlin.Long, `uploadedIds`: List<TabsGuid>)
+    @Throws(TabsApiException::class)override fun `setUploaded`(`newTimestamp`: kotlin.Long, `uploadedIds`: List<kotlin.String>)
         = 
     callWithHandle {
     uniffiRustCallWithError(TabsApiException) { _status ->
     UniffiLib.uniffi_tabs_fn_method_tabsbridgedengine_set_uploaded(
         it,
-        FfiConverterLong.lower(`newTimestamp`),FfiConverterSequenceTypeTabsGuid.lower(`uploadedIds`),_status)
+        
+        FfiConverterLong.lower(`newTimestamp`),
+        FfiConverterSequenceString.lower(`uploadedIds`),_status)
 }
     }
     
@@ -1867,6 +1931,7 @@ open class TabsBridgedEngine: Disposable, AutoCloseable, TabsBridgedEngineInterf
     uniffiRustCallWithError(TabsApiException) { _status ->
     UniffiLib.uniffi_tabs_fn_method_tabsbridgedengine_store_incoming(
         it,
+        
         FfiConverterSequenceString.lower(`incomingEnvelopesAsJson`),_status)
 }
     }
@@ -2114,6 +2179,7 @@ open class TabsStore: Disposable, AutoCloseable, TabsStoreInterface
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_tabs_fn_constructor_tabsstore_new(
     
+        
         FfiConverterString.lower(`path`),_status)
 }
     )
@@ -2123,6 +2189,11 @@ open class TabsStore: Disposable, AutoCloseable, TabsStoreInterface
 
     private val wasDestroyed = AtomicBoolean(false)
     private val callCounter = AtomicLong(1)
+
+    /**
+     * Whether the current object has been destroyed and its reference is gone in the Rust side.
+     */
+    val uniffiIsDestroyed: Boolean get() = wasDestroyed.get()
 
     override fun destroy() {
         // Only allow a single call to this method.
@@ -2261,6 +2332,7 @@ open class TabsStore: Disposable, AutoCloseable, TabsStoreInterface
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_tabs_fn_method_tabsstore_set_local_tabs(
         it,
+        
         FfiConverterSequenceTypeRemoteTabRecord.lower(`remoteTabs`),_status)
 }
     }
@@ -2276,6 +2348,7 @@ open class TabsStore: Disposable, AutoCloseable, TabsStoreInterface
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_tabs_fn_method_tabsstore_set_local_tabs_info(
         it,
+        
         FfiConverterTypeLocalTabsInfo.lower(`info`),_status)
 }
     }
@@ -2697,7 +2770,7 @@ public object FfiConverterTypeRemoteCommand : FfiConverterRustBuffer<RemoteComma
         }
     }
 
-    override fun allocationSize(value: RemoteCommand) = when(value) {
+    override fun allocationSize(value: RemoteCommand): ULong = when(value) {
         is RemoteCommand.CloseTab -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -3039,34 +3112,6 @@ public object FfiConverterSequenceTypeRemoteTabRecord: FfiConverterRustBuffer<Li
 /**
  * @suppress
  */
-public object FfiConverterSequenceTypeTabsGuid: FfiConverterRustBuffer<List<TabsGuid>> {
-    override fun read(buf: ByteBuffer): List<TabsGuid> {
-        val len = buf.getInt()
-        return List<TabsGuid>(len) {
-            FfiConverterTypeTabsGuid.read(buf)
-        }
-    }
-
-    override fun allocationSize(value: List<TabsGuid>): ULong {
-        val sizeForLength = 4UL
-        val sizeForItems = value.map { FfiConverterTypeTabsGuid.allocationSize(it) }.sum()
-        return sizeForLength + sizeForItems
-    }
-
-    override fun write(value: List<TabsGuid>, buf: ByteBuffer) {
-        buf.putInt(value.size)
-        value.iterator().forEach {
-            FfiConverterTypeTabsGuid.write(it, buf)
-        }
-    }
-}
-
-
-
-
-/**
- * @suppress
- */
 public object FfiConverterMapStringTypeTabGroup: FfiConverterRustBuffer<Map<kotlin.String, TabGroup>> {
     override fun read(buf: ByteBuffer): Map<kotlin.String, TabGroup> {
         val len = buf.getInt()
@@ -3141,21 +3186,6 @@ public object FfiConverterMapStringTypeWindow: FfiConverterRustBuffer<Map<kotlin
 
 
 
-/**
- * Typealias from the type name used in the UDL file to the builtin type.  This
- * is needed because the UDL type name is used in function/method signatures.
- * It's also what we have an external type that references a custom type.
- */
-public typealias TabsGuid = kotlin.String
-public typealias FfiConverterTypeTabsGuid = FfiConverterString
-
-
-
-/**
- * Typealias from the type name used in the UDL file to the builtin type.  This
- * is needed because the UDL type name is used in function/method signatures.
- * It's also what we have an external type that references a custom type.
- */
 public typealias Timestamp = kotlin.Long
 public typealias FfiConverterTypeTimestamp = FfiConverterLong
 

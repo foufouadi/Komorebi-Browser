@@ -35,6 +35,11 @@ class nsFrameLoader;
 
 namespace mozilla {
 
+namespace a11y {
+class DocAccessibleParent;
+class PDocAccessibleParent;
+}  // namespace a11y
+
 namespace gfx {
 class CrossProcessPaint;
 }  // namespace gfx
@@ -84,15 +89,16 @@ class WindowGlobalParent final : public WindowContext,
     return GetByInnerWindowId(aInnerWindowId);
   }
 
+  static WindowGlobalParent* Cast(WindowContext* aContext);
+
   // The same as the corresponding methods on `WindowContext`, except that the
   // return types are already cast to their parent-process type variants, such
   // as `WindowGlobalParent` or `CanonicalBrowsingContext`.
   WindowGlobalParent* GetParentWindowContext() {
-    return static_cast<WindowGlobalParent*>(
-        WindowContext::GetParentWindowContext());
+    return Cast(WindowContext::GetParentWindowContext());
   }
   WindowGlobalParent* TopWindowContext() {
-    return static_cast<WindowGlobalParent*>(WindowContext::TopWindowContext());
+    return Cast(WindowContext::TopWindowContext());
   }
   CanonicalBrowsingContext* GetBrowsingContext() const {
     return CanonicalBrowsingContext::Cast(WindowContext::GetBrowsingContext());
@@ -265,7 +271,7 @@ class WindowGlobalParent final : public WindowContext,
   void AddSecurityState(uint32_t aStateFlags);
   uint32_t GetSecurityFlags() { return mSecurityState; }
 
-  const nsACString& GetRemoteType() const override;
+  const RemoteType& GetRemoteType() const override;
   void GetRemoteType(nsACString& aRemoteType) const;
 
   void NotifySessionStoreUpdatesComplete(Element* aEmbedder);
@@ -423,6 +429,14 @@ class WindowGlobalParent final : public WindowContext,
 
   already_AddRefed<dom::PDigitalCredentialParent>
   AllocPDigitalCredentialParent();
+
+#ifdef ACCESSIBILITY
+  already_AddRefed<a11y::PDocAccessibleParent> AllocPDocAccessibleParent(
+      const uint64_t&, const bool&);
+  mozilla::ipc::IPCResult RecvPDocAccessibleConstructor(
+      a11y::PDocAccessibleParent* aDoc, const uint64_t& aParentID,
+      const bool& aIsPrintDoc) override;
+#endif
 
   // Spec: https://wicg.github.io/nav-speculation/prefetch.html#prefetch-record
   already_AddRefed<dom::PPrefetchRecordParent> AllocPPrefetchRecordParent(
