@@ -6,14 +6,15 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-(function (global) {
-  "use strict";
+export interface AudioTrack {
+    data: Uint8Array;
+    loop: boolean;
+    mimeType: string;
+    startSilent: boolean;
+    title: string;
+    volume: number;
+}
 
-  class WebRenderer {
-    get supported() {
-      return false;
-    }
-  }
-
-  global.KomorebiWebRenderer = WebRenderer;
-})(this);
+export interface LoadedAudioTrack extends AudioTrack {
+    url: string;
+}

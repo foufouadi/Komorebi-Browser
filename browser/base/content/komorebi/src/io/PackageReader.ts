@@ -1,0 +1,97 @@
+/*
+ * Copyright (c) 2026 Foued Attar
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
+
+import { BinaryReader } from "./BinaryReader.js";
+
+export interface ParsedPackage {
+    entries: Map<string, Uint8Array>;
+    scene: unknown;
+    version: string;
+}
+
+const VERSION_PATTERN = /^PKGV\d{4}$/;
+
+export class PackageReader {
+    static parse(bytes: Uint8Array, sceneFile: string): ParsedPackage {
+        const reader = new BinaryReader(bytes);
+        let offset = 0;
+
+        const readUint32 = (): number => {
+            if (offset + 4 > bytes.length) {
+                throw new Error("Unexpected end of scene package");
+            }
+            const value = reader.view.getUint32(offset, true);
+            offset += 4;
+            return value;
+        };
+
+        const readString = (): string => {
+            const length = readUint32();
+            if (length > bytes.length - offset) {
+                throw new Error("Invalid scene package string");
+            }
+            const value = new TextDecoder().decode(
+                bytes.subarray(offset, offset + length)
+            );
+            offset += length;
+            return value;
+        };
+
+        const directVersion = new TextDecoder().decode(bytes.subarray(0, 8));
+        let version: string;
+        if (VERSION_PATTERN.test(directVersion)) {
+            version = directVersion;
+            offset = bytes[8] === 0 ? 9 : 8;
+        } else {
+            version = readString();
+        }
+        if (!VERSION_PATTERN.test(version)) {
+            throw new Error(`Unsupported scene package version: ${version}`);
+        }
+
+        const count = readUint32();
+        if (!count || count > 100000) {
+            throw new Error(`Invalid scene package entry count: ${count}`);
+        }
+
+        const entries: { name: string; offset: number; length: number }[] = [];
+        for (let index = 0; index < count; index++) {
+            entries.push({
+                name: readString(),
+                offset: readUint32(),
+                length: readUint32(),
+            });
+        }
+
+        const dataOffset = offset;
+        const files = new Map<string, Uint8Array>();
+        for (const entry of entries) {
+            if (
+                entry.offset > bytes.length - dataOffset ||
+                entry.length > bytes.length - dataOffset - entry.offset
+            ) {
+                throw new Error(`Invalid scene package entry: ${entry.name}`);
+            }
+            files.set(
+                entry.name,
+                bytes.slice(dataOffset + entry.offset, dataOffset + entry.offset + entry.length)
+            );
+        }
+
+        const sceneBytes = files.get(sceneFile);
+        if (!sceneBytes) {
+            throw new Error(`Scene package has no ${sceneFile}`);
+        }
+
+        return {
+            entries: files,
+            scene: JSON.parse(new TextDecoder().decode(sceneBytes)),
+            version,
+        };
+    }
+}
