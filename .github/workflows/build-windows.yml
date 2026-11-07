@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: build-windows
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: windows-latest
@@ -53,7 +57,8 @@ jobs:
           ./mach --no-interactive bootstrap --application-choice=browser
           ./mach build
           ./mach package
-          ls -la obj-komorebi/dist
+          ./mach build installer
+          ls -la obj-komorebi/dist obj-komorebi/dist/install/sea
           '@ | Set-Content -Encoding ascii build.sh
 
       - name: Bootstrap, build and package
@@ -62,16 +67,16 @@ jobs:
           set GITHUB_WORKSPACE_MSYS=%GITHUB_WORKSPACE:\=/%
           C:\mozilla-build\start-shell.bat -no-start-hg -here -c "bash build.sh"
 
-      - name: Collect package
+      - name: Collect installer
         shell: pwsh
         run: |
-          $zip = Get-ChildItem obj-komorebi\dist\*.zip | Select-Object -First 1
-          Copy-Item $zip.FullName Komorebi-Browser-win64.zip
+          $exe = Get-ChildItem obj-komorebi\dist\install\sea\*.exe | Select-Object -First 1
+          Copy-Item $exe.FullName Komorebi-Browser-Setup.exe
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Komorebi-Browser-win64
-          path: Komorebi-Browser-win64.zip
+          name: Komorebi-Browser-Setup
+          path: Komorebi-Browser-Setup.exe
           compression-level: 0
 
       - name: Publish release
@@ -80,4 +85,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "windows-build-$env:GITHUB_RUN_NUMBER"
-          gh release create $tag Komorebi-Browser-win64.zip --title "Komorebi Browser (Windows x64) #$env:GITHUB_RUN_NUMBER" --notes "Portable build: extract the zip and run firefox.exe." --target $env:GITHUB_SHA
+          gh release create $tag Komorebi-Browser-Setup.exe --title "Komorebi Browser (Windows x64) #$env:GITHUB_RUN_NUMBER" --notes "Download and run Komorebi-Browser-Setup.exe." --target $env:GITHUB_SHA
