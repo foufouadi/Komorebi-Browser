@@ -1,0 +1,83 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/windows-build]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Free disk space
+        shell: pwsh
+        run: |
+          Get-PSDrive C,D | Format-Table
+          Remove-Item -Recurse -Force "C:\Android", "C:\Program Files\dotnet", "C:\hostedtoolcache\windows\Java*" -ErrorAction SilentlyContinue
+
+      - name: Install MozillaBuild
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://ftp.mozilla.org/pub/mozilla/libraries/win32/MozillaBuildSetup-Latest.exe -OutFile $env:RUNNER_TEMP\mb.exe
+          Start-Process $env:RUNNER_TEMP\mb.exe -ArgumentList '/S' -Wait
+          Get-ChildItem C:\mozilla-build | Select-Object Name
+
+      - name: Write mozconfig and build script
+        shell: pwsh
+        run: |
+          @'
+          ac_add_options --enable-application=browser
+          ac_add_options --enable-optimize
+          ac_add_options --disable-debug
+          ac_add_options --disable-debug-symbols
+          ac_add_options --disable-tests
+          ac_add_options --disable-crashreporter
+          ac_add_options --disable-updater
+          ac_add_options --disable-maintenance-service
+          ac_add_options --disable-bits-download
+          ac_add_options --without-wasm-sandboxed-libraries
+          mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/obj-komorebi
+          '@ | Set-Content -Encoding ascii .mozconfig
+          @'
+          set -ex
+          cd "$GITHUB_WORKSPACE_MSYS"
+          export MOZCONFIG="$PWD/.mozconfig"
+          ./mach --no-interactive bootstrap --application-choice=browser
+          ./mach build
+          ./mach package
+          ls -la obj-komorebi/dist
+          '@ | Set-Content -Encoding ascii build.sh
+
+      - name: Bootstrap, build and package
+        shell: cmd
+        run: |
+          set GITHUB_WORKSPACE_MSYS=%GITHUB_WORKSPACE:\=/%
+          C:\mozilla-build\start-shell.bat -no-start-hg -here -c "bash build.sh"
+
+      - name: Collect package
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem obj-komorebi\dist\*.zip | Select-Object -First 1
+          Copy-Item $zip.FullName Komorebi-Browser-win64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Komorebi-Browser-win64
+          path: Komorebi-Browser-win64.zip
+          compression-level: 0
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "windows-build-$env:GITHUB_RUN_NUMBER"
+          gh release create $tag Komorebi-Browser-win64.zip --title "Komorebi Browser (Windows x64) #$env:GITHUB_RUN_NUMBER" --notes "Portable build: extract the zip and run firefox.exe." --target $env:GITHUB_SHA
