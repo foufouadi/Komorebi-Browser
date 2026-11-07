@@ -1,6 +1,8 @@
 name: Build Windows
 
 on:
+  push:
+    branches: [claude/windows-build]
   workflow_dispatch:
     inputs:
       build_run_id:
@@ -18,7 +20,7 @@ concurrency:
 
 jobs:
   build:
-    if: ${{ inputs.build_run_id == '' }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.build_run_id == '') || contains(github.event.head_commit.message, '[build]') }}
     runs-on: windows-latest
     timeout-minutes: 360
     steps:
@@ -95,7 +97,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: Komorebi-Browser-zip
-          run-id: ${{ inputs.build_run_id != '' && inputs.build_run_id || github.run_id }}
+          run-id: ${{ inputs.build_run_id != '' && inputs.build_run_id || (needs.build.result == 'skipped' && '42416862737' || github.run_id) }}
           github-token: ${{ github.token }}
 
       - name: Extract
