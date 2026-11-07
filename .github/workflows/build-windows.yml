@@ -7,8 +7,6 @@ on:
         description: "Reuse the compiled zip from this earlier run id (skips compilation)"
         required: false
         default: ""
-  push:
-    branches: [claude/windows-build]
 
 permissions:
   contents: write
@@ -104,7 +102,7 @@ jobs:
         shell: pwsh
         run: |
           Expand-Archive Komorebi-Browser-win64.zip -DestinationPath stage
-          Get-ChildItem stage | Select-Object Name
+          Get-ChildItem stage | Select-Object -First 20 Name
 
       - name: Install NSIS
         shell: pwsh
@@ -129,7 +127,7 @@ jobs:
 
           Section "Install"
             SetOutPath "$INSTDIR"
-            File /r "stage\firefox\*.*"
+            File /r "ROOTDIR\*.*"
             WriteUninstaller "$INSTDIR\Uninstall.exe"
             CreateShortcut "$DESKTOP\Komorebi Browser.lnk" "$INSTDIR\firefox.exe"
             CreateDirectory "$SMPROGRAMS\Komorebi Browser"
@@ -145,6 +143,10 @@ jobs:
             DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KomorebiBrowser"
           SectionEnd
           '@ | Set-Content -Encoding utf8 installer.nsi
+          $root = (Get-ChildItem stage -Recurse -Filter firefox.exe | Select-Object -First 1).DirectoryName
+          if (-not $root) { throw "firefox.exe not found in package" }
+          Write-Host "Package root: $root"
+          (Get-Content installer.nsi -Raw).Replace('ROOTDIR', $root) | Set-Content -Encoding utf8 installer.nsi
           & "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-Item Komorebi-Browser-Setup.exe | Select-Object Name, Length
