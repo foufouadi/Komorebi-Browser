@@ -62,10 +62,16 @@ jobs:
           '@ | Set-Content -Encoding ascii build.sh
 
       - name: Bootstrap, build and package
-        shell: cmd
+        shell: pwsh
         run: |
-          set GITHUB_WORKSPACE_MSYS=%GITHUB_WORKSPACE:\=/%
-          C:\mozilla-build\start-shell.bat -no-start-hg -here -c "bash build.sh"
+          $ws = ($env:GITHUB_WORKSPACE -replace '\\','/') -replace '^([A-Za-z]):','/$1'
+          $ws = $ws.Substring(0,2).ToLower() + $ws.Substring(2)
+          $env:MSYSTEM = 'MINGW64'
+          $env:MOZILLABUILD = 'C:\mozilla-build'
+          $env:MSYS2_PATH_TYPE = 'inherit'
+          $env:GITHUB_WORKSPACE_MSYS = $ws
+          & C:\mozilla-build\msys2\usr\bin\bash.exe -lc "cd '$ws' && bash ./build.sh"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Collect installer
         shell: pwsh
