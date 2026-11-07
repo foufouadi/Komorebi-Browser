@@ -2,11 +2,17 @@ name: Build Windows
 
 on:
   workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: "Reuse the compiled zip from this earlier run id (skips compilation)"
+        required: false
+        default: ""
   push:
     branches: [claude/windows-build]
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: build-windows
@@ -14,6 +20,7 @@ concurrency:
 
 jobs:
   build:
+    if: ${{ inputs.build_run_id == '' }}
     runs-on: windows-latest
     timeout-minutes: 360
     steps:
@@ -24,7 +31,6 @@ jobs:
       - name: Free disk space
         shell: pwsh
         run: |
-          Get-PSDrive C,D | Format-Table
           Remove-Item -Recurse -Force "C:\Android", "C:\Program Files\dotnet", "C:\hostedtoolcache\windows\Java*" -ErrorAction SilentlyContinue
 
       - name: Install MozillaBuild
@@ -32,7 +38,6 @@ jobs:
         run: |
           Invoke-WebRequest https://ftp.mozilla.org/pub/mozilla/libraries/win32/MozillaBuildSetup-Latest.exe -OutFile $env:RUNNER_TEMP\mb.exe
           Start-Process $env:RUNNER_TEMP\mb.exe -ArgumentList '/S' -Wait
-          Get-ChildItem C:\mozilla-build | Select-Object Name
 
       - name: Write mozconfig and build script
         shell: pwsh
@@ -57,8 +62,6 @@ jobs:
           ./mach --no-interactive bootstrap --application-choice=browser
           ./mach build
           ./mach package
-          ./mach build installer
-          ls -la obj-komorebi/dist obj-komorebi/dist/install/sea
           '@ | Set-Content -Encoding ascii build.sh
 
       - name: Bootstrap, build and package
@@ -73,11 +76,78 @@ jobs:
           & C:\mozilla-build\msys2\usr\bin\bash.exe -lc "cd '$ws' && bash ./build.sh"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Collect installer
+      - name: Collect zip
         shell: pwsh
         run: |
-          $exe = Get-ChildItem obj-komorebi\dist\install\sea\*.exe | Select-Object -First 1
-          Copy-Item $exe.FullName Komorebi-Browser-Setup.exe
+          $zip = Get-ChildItem obj-komorebi\dist\*.zip | Select-Object -First 1
+          Copy-Item $zip.FullName Komorebi-Browser-win64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Komorebi-Browser-zip
+          path: Komorebi-Browser-win64.zip
+          compression-level: 0
+
+  installer:
+    needs: build
+    if: ${{ !cancelled() && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Komorebi-Browser-zip
+          run-id: ${{ inputs.build_run_id != '' && inputs.build_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Extract
+        shell: pwsh
+        run: |
+          Expand-Archive Komorebi-Browser-win64.zip -DestinationPath stage
+          Get-ChildItem stage | Select-Object Name
+
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe")) { choco install nsis -y --no-progress }
+          Test-Path "C:\Program Files (x86)\NSIS\makensis.exe"
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          @'
+          Unicode true
+          Name "Komorebi Browser"
+          OutFile "Komorebi-Browser-Setup.exe"
+          InstallDir "$LOCALAPPDATA\Komorebi Browser"
+          RequestExecutionLevel user
+          SetCompressor /SOLID lzma
+          Page directory
+          Page instfiles
+          UninstPage uninstConfirm
+          UninstPage instfiles
+
+          Section "Install"
+            SetOutPath "$INSTDIR"
+            File /r "stage\firefox\*.*"
+            WriteUninstaller "$INSTDIR\Uninstall.exe"
+            CreateShortcut "$DESKTOP\Komorebi Browser.lnk" "$INSTDIR\firefox.exe"
+            CreateDirectory "$SMPROGRAMS\Komorebi Browser"
+            CreateShortcut "$SMPROGRAMS\Komorebi Browser\Komorebi Browser.lnk" "$INSTDIR\firefox.exe"
+            WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KomorebiBrowser" "DisplayName" "Komorebi Browser"
+            WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KomorebiBrowser" "UninstallString" "$INSTDIR\Uninstall.exe"
+          SectionEnd
+
+          Section "Uninstall"
+            Delete "$DESKTOP\Komorebi Browser.lnk"
+            RMDir /r "$SMPROGRAMS\Komorebi Browser"
+            RMDir /r "$INSTDIR"
+            DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KomorebiBrowser"
+          SectionEnd
+          '@ | Set-Content -Encoding utf8 installer.nsi
+          & "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Item Komorebi-Browser-Setup.exe | Select-Object Name, Length
 
       - uses: actions/upload-artifact@v4
         with:
@@ -91,4 +161,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "windows-build-$env:GITHUB_RUN_NUMBER"
-          gh release create $tag Komorebi-Browser-Setup.exe --title "Komorebi Browser (Windows x64) #$env:GITHUB_RUN_NUMBER" --notes "Download and run Komorebi-Browser-Setup.exe." --target $env:GITHUB_SHA
+          gh release create $tag Komorebi-Browser-Setup.exe --repo $env:GITHUB_REPOSITORY --title "Komorebi Browser (Windows x64) #$env:GITHUB_RUN_NUMBER" --notes "Download and run Komorebi-Browser-Setup.exe." --target $env:GITHUB_SHA
