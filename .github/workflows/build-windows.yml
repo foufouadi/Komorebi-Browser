@@ -79,7 +79,15 @@ jobs:
       - name: Collect zip
         shell: pwsh
         run: |
-          $zip = Get-ChildItem obj-komorebi\dist\*.zip | Select-Object -First 1
+          Get-ChildItem obj-komorebi\dist -File | Select-Object Name, Length
+          $zip = Get-ChildItem obj-komorebi\dist\firefox-*.win64.zip | Where-Object { $_.Name -notmatch 'xpt_artifacts|symbols|tests|mozinfo' } | Select-Object -First 1
+          if (-not $zip) { throw "package zip not found" }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z = [System.IO.Compression.ZipFile]::OpenRead($zip.FullName)
+          $hasExe = $z.Entries | Where-Object { $_.Name -eq 'firefox.exe' }
+          $z.Dispose()
+          if (-not $hasExe) { throw "$($zip.Name) does not contain firefox.exe" }
+          Write-Host "Using $($zip.Name)"
           Copy-Item $zip.FullName Komorebi-Browser-win64.zip
 
       - uses: actions/upload-artifact@v4
