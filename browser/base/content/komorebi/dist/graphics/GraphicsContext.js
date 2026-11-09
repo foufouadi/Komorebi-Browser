@@ -16,6 +16,8 @@ export class GraphicsContext {
     whiteTexture;
     layerQuad;
     screenQuad;
+    #uniformLocations = new WeakMap();
+    #attribLocations = new WeakMap();
     constructor(gl) {
         this.gl = gl;
         // WebGL1 needs this requested from JS too, not just declared in shader source, or fwidth/dFdx/dFdy report unsupported.
@@ -26,6 +28,12 @@ export class GraphicsContext {
         this.layerQuad = new LayerQuad(gl);
         this.screenQuad = new ScreenQuad(gl);
     }
+    uniform(program, name) {
+        return this.#lookup(this.#uniformLocations, program, name, (target, key) => this.gl.getUniformLocation(target, key));
+    }
+    attrib(program, name) {
+        return this.#lookup(this.#attribLocations, program, name, (target, key) => this.gl.getAttribLocation(target, key));
+    }
     dispose() {
         const gl = this.gl;
         this.programs.dispose();
@@ -33,6 +41,19 @@ export class GraphicsContext {
         gl.deleteBuffer(this.layerQuad.positionBuffer);
         gl.deleteBuffer(this.screenQuad.positionBuffer);
         gl.deleteBuffer(this.screenQuad.texCoordBuffer);
+    }
+    #lookup(cache, program, name, query) {
+        let locations = cache.get(program);
+        if (!locations) {
+            locations = new Map();
+            cache.set(program, locations);
+        }
+        let location = locations.get(name);
+        if (location === undefined) {
+            location = query(program, name);
+            locations.set(name, location);
+        }
+        return location;
     }
     #createWhiteTexture() {
         const gl = this.gl;

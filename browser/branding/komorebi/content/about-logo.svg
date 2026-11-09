@@ -1,0 +1,41 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="b" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B2E33"/>
+      <stop offset="1" stop-color="#1C7A63"/>
+    </linearGradient>
+    <linearGradient id="s" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFF0B3"/>
+      <stop offset="1" stop-color="#F8A91F"/>
+    </linearGradient>
+    <linearGradient id="l" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="256" y2="256">
+      <stop offset="0" stop-color="#CFF27A"/>
+      <stop offset="1" stop-color="#1E9E6A"/>
+    </linearGradient>
+    <filter id="g" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
+    <clipPath id="c">
+      <rect width="256" height="256" rx="58"/>
+    </clipPath>
+    <clipPath id="f">
+      <path d="M54 206C48 128 104 72 202 62C196 158 136 212 54 206Z"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#c)">
+    <rect width="256" height="256" fill="url(#b)"/>
+    <g fill="#FFF2C4" filter="url(#g)">
+      <path d="M176 34L212 60L92 256H20Z" opacity=".23"/>
+      <path d="M226 70L256 96L182 256H130Z" opacity=".16"/>
+    </g>
+    <circle cx="168" cy="86" r="56" fill="url(#s)"/>
+    <path d="M54 206C48 128 104 72 202 62C196 158 136 212 54 206Z" fill="url(#l)"/>
+    <g clip-path="url(#f)" fill="none" stroke="#0B2E33" stroke-opacity=".64" stroke-linecap="round">
+      <path d="M60 200L164 98" stroke-width="9"/>
+      <path d="M98 162L98 118M124 136L128 100M104 156L150 160M130 130L172 132" stroke-width="5"/>
+    </g>
+  </g>
+</svg>

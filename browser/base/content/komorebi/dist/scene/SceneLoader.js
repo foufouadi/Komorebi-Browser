@@ -17,18 +17,44 @@ function numberLines(source) {
         .map((line, index) => `${index + 1}: ${line}`)
         .join("\n");
 }
+const VIDEO_SIGNATURE_SAMPLES = 16;
+const VIDEO_SIGNATURE_SAMPLE_BYTES = 8;
+function videoSignature(data) {
+    const parts = [data.length];
+    for (let sample = 0; sample < VIDEO_SIGNATURE_SAMPLES; sample++) {
+        const offset = Math.floor(((data.length - VIDEO_SIGNATURE_SAMPLE_BYTES) * sample) /
+            (VIDEO_SIGNATURE_SAMPLES - 1));
+        const start = Math.max(0, offset);
+        parts.push(data.subarray(start, start + VIDEO_SIGNATURE_SAMPLE_BYTES).join(","));
+    }
+    return parts.join("|");
+}
 export class SceneLoader {
     #graphics;
     #entries = new Map();
+    #videos = new Map();
     constructor(graphics) {
         this.#graphics = graphics;
     }
     async load(packageSource, sceneFile, assetRoot, isCancelled) {
+        try {
+            return await this.#load(packageSource, sceneFile, assetRoot, isCancelled);
+        }
+        finally {
+            this.#entries = new Map();
+            this.#videos = new Map();
+        }
+    }
+    async #load(packageSource, sceneFile, assetRoot, isCancelled) {
         const pkg = await this.readPackage(packageSource, sceneFile);
         await this.loadExternalTextures(pkg, assetRoot);
         // Must complete before SceneModel/MaterialParser compile any shader (ShaderParser.compile is synchronous).
         await this.loadExternalShaders(pkg, assetRoot);
         this.#entries = pkg.entries;
+        if (isCancelled()) {
+            return null;
+        }
+        await new Promise(resolve => setTimeout(resolve));
         if (isCancelled()) {
             return null;
         }
@@ -203,34 +229,36 @@ export class SceneLoader {
         return null;
     }
     async prepareLayers(layers, isCancelled) {
-        const preparedLayers = [];
-        for (const layer of layers) {
-            const asset = await this.prepareTexture(layer.texture);
-            const preparedLayer = {
-                ...layer,
-                ...this.#graphics.textures.upload(asset),
-            };
-            this.preparePuppet(preparedLayer);
-            await this.prepareMaterialPasses(preparedLayer);
-            asset.bitmap?.close();
+        // Only the awaits (image decoding) overlap. Every GL call sits in a
+        // synchronous stretch that binds what it needs, and each layer owns
+        // its own texture cache, so interleaving layers is safe.
+        const preparedLayers = await Promise.all(layers.map(async (layer) => {
             if (isCancelled()) {
                 return null;
             }
-            preparedLayers.push(preparedLayer);
+            const preparedLayer = {
+                ...layer,
+                ...(await this.uploadTexture(layer.texture)),
+            };
+            delete preparedLayer.texture;
+            this.preparePuppet(preparedLayer);
+            await this.prepareMaterialPasses(preparedLayer);
+            return preparedLayer;
+        }));
+        if (isCancelled() || preparedLayers.includes(null)) {
+            return null;
         }
         return preparedLayers;
     }
     async prepareParticles(particles) {
-        const prepared = [];
-        for (const particle of particles) {
-            const asset = await this.prepareTexture(particle.texture);
-            prepared.push({
+        return Promise.all(particles.map(async (particle) => {
+            const prepared = {
                 ...particle,
-                ...this.#graphics.textures.upload(asset),
-            });
-            asset.bitmap?.close();
-        }
-        return prepared;
+                ...(await this.uploadTexture(particle.texture)),
+            };
+            delete prepared.texture;
+            return prepared;
+        }));
     }
     preparePuppet(layer) {
         if (!layer.puppet) {
@@ -275,9 +303,7 @@ export class SceneLoader {
                         if (!parsed) {
                             continue;
                         }
-                        const asset = await this.prepareTexture(parsed);
-                        texture = this.#graphics.textures.upload(asset);
-                        asset.bitmap?.close();
+                        texture = await this.uploadTexture(parsed);
                         textures.set(name, texture);
                     }
                     pass.resolvedTextures.set(index, texture);
@@ -342,14 +368,50 @@ export class SceneLoader {
         }
         return null;
     }
-    async prepareTexture(texture) {
+    async uploadTexture(texture) {
         if (texture.type === "video") {
-            return this.prepareVideoTexture(texture);
+            return this.uploadVideoTexture(texture);
         }
+        const asset = await this.prepareTexture(texture);
+        try {
+            return this.#graphics.textures.upload(asset);
+        }
+        finally {
+            asset.bitmap?.close();
+            texture.pixels = null;
+        }
+    }
+    async uploadVideoTexture(texture) {
+        const data = texture.data;
+        texture.data = null;
+        const signature = videoSignature(data);
+        let shared = this.#videos.get(signature);
+        if (!shared) {
+            shared = this.createSharedVideo(texture, data);
+            this.#videos.set(signature, shared);
+        }
+        const uploaded = await shared;
+        const width = texture.width || uploaded.textureWidth;
+        const height = texture.height || uploaded.textureHeight;
+        return {
+            ...uploaded,
+            height,
+            u: width / uploaded.textureWidth,
+            v: height / uploaded.textureHeight,
+            width,
+        };
+    }
+    async createSharedVideo(texture, data) {
+        const asset = await this.prepareVideoTexture(texture, data);
+        return this.#graphics.textures.upload(asset);
+    }
+    async prepareTexture(texture) {
         if (texture.type !== "image") {
             return texture;
         }
-        const bitmap = await createImageBitmap(new Blob([texture.data], { type: texture.mimeType }));
+        const data = texture.data;
+        texture.data = null;
+        const bitmap = await createImageBitmap(new Blob([data], { type: texture.mimeType }));
         return {
             bitmap,
             flags: texture.flags,
@@ -360,8 +422,8 @@ export class SceneLoader {
             width: bitmap.width,
         };
     }
-    async prepareVideoTexture(texture) {
-        const objectURL = URL.createObjectURL(new Blob([texture.data], { type: texture.mimeType }));
+    async prepareVideoTexture(texture, data) {
+        const objectURL = URL.createObjectURL(new Blob([data], { type: texture.mimeType }));
         const video = document.createElement("video");
         video.loop = true;
         video.muted = true;
@@ -399,6 +461,9 @@ export class SceneLoader {
         };
     }
     fetchPackage(source) {
+        if (globalThis.KomorebiHostBridge) {
+            return globalThis.KomorebiHostBridge.read(source);
+        }
         return new Promise((resolve, reject) => {
             const request = new XMLHttpRequest();
             request.open("GET", source, true);

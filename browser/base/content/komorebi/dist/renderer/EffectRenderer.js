@@ -9,9 +9,16 @@ import { Matrix4 } from "../math/Matrix4.js";
 import { compileProperty, sampleProperty, } from "../effects/AnimatedProperty.js";
 import { currentFrame } from "../graphics/SpriteFrame.js";
 const IDENTITY_MATRIX = Matrix4.identity().values;
+const TEXTURE_SLOTS = 8;
+const TEXTURE_SAMPLER_NAMES = Array.from({ length: TEXTURE_SLOTS }, (_, index) => `g_Texture${index}`);
+const TEXTURE_RESOLUTION_NAMES = TEXTURE_SAMPLER_NAMES.map(name => `${name}Resolution`);
+const TEXTURE_UNIFORM = /^g_Texture\d+(?:Resolution)?$/;
 export class EffectRenderer {
     #graphics;
     #animatedValues = new WeakMap();
+    #activePasses = new WeakMap();
+    #parsedStrings = new Map();
+    #uniformPlans = new WeakMap();
     #copyPositionBuffer;
     #copyTexCoordBuffer;
     constructor(graphics) {
@@ -28,7 +35,7 @@ export class EffectRenderer {
         this.#copyTexCoordBuffer = texCoordBuffer;
     }
     run(layer, elapsed, pointer, projection) {
-        const passes = layer.renderPasses.filter(pass => pass.program);
+        const passes = this.#passesOf(layer);
         if (!passes.length) {
             return layer.glTexture;
         }
@@ -60,7 +67,7 @@ export class EffectRenderer {
                     ? this.#prepareCopyTexCoordBuffer(layer.u, layer.v)
                     : this.#graphics.screenQuad.texCoordBuffer;
             this.#bindPassAttribute(pass.program, "a_TexCoord", texCoordBuffer, 2);
-            for (let index = 0; index < 8; index++) {
+            for (let index = 0; index < TEXTURE_SLOTS; index++) {
                 const bind = pass.binds[index] ?? pass.binds[String(index)];
                 // A named bind not yet registered in `targets` falls back to `effectInput`, not the live `previous`.
                 const source = bind === "previous"
@@ -71,11 +78,11 @@ export class EffectRenderer {
                             (index === 0 ? previous : this.#whiteTexture()));
                 gl.activeTexture(gl.TEXTURE0 + index);
                 gl.bindTexture(gl.TEXTURE_2D, source.texture);
-                const sampler = gl.getUniformLocation(pass.program, `g_Texture${index}`);
+                const sampler = this.#graphics.uniform(pass.program, TEXTURE_SAMPLER_NAMES[index]);
                 if (sampler !== null) {
                     gl.uniform1i(sampler, index);
                 }
-                const resolution = gl.getUniformLocation(pass.program, `g_Texture${index}Resolution`);
+                const resolution = this.#graphics.uniform(pass.program, TEXTURE_RESOLUTION_NAMES[index]);
                 if (resolution !== null) {
                     gl.uniform4f(resolution, source.textureWidth, source.textureHeight, source.width, source.height);
                 }
@@ -182,7 +189,7 @@ export class EffectRenderer {
     }
     #bindPassAttribute(program, name, buffer, size) {
         const gl = this.#graphics.gl;
-        const location = gl.getAttribLocation(program, name);
+        const location = this.#graphics.attrib(program, name);
         if (location < 0) {
             return;
         }
@@ -193,11 +200,7 @@ export class EffectRenderer {
     #setPassUniforms(pass, layer, elapsed, pointer, projection, firstPass) {
         const gl = this.#graphics.gl;
         const frame = currentFrame(layer.frames, elapsed * 1000, 0);
-        for (const [name, metadata] of pass.uniforms) {
-            const location = gl.getUniformLocation(pass.program, name);
-            if (location === null || /^g_Texture\d+(?:Resolution)?$/.test(name)) {
-                continue;
-            }
+        for (const { name, metadata, location } of this.#uniformPlan(pass)) {
             if (metadata.type === "mat4") {
                 const matrix = this.#matrixUniform(name, layer, firstPass);
                 gl.uniformMatrix4fv(location, false, matrix);
@@ -245,6 +248,44 @@ export class EffectRenderer {
             this.#setPassUniform(location, metadata.type, this.#sampleValue(value, metadata.type, elapsed));
         }
     }
+    #passesOf(layer) {
+        const source = layer.renderPasses;
+        let cached = this.#activePasses.get(layer);
+        if (!cached || cached.source !== source || cached.length !== source.length) {
+            cached = {
+                source,
+                length: source.length,
+                passes: source.filter(pass => pass.program),
+            };
+            this.#activePasses.set(layer, cached);
+        }
+        return cached.passes;
+    }
+    #uniformPlan(pass) {
+        let plan = this.#uniformPlans.get(pass);
+        if (!plan) {
+            plan = [];
+            for (const [name, metadata] of pass.uniforms) {
+                const location = this.#graphics.uniform(pass.program, name);
+                if (location !== null && !TEXTURE_UNIFORM.test(name)) {
+                    plan.push({ name, metadata, location });
+                }
+            }
+            this.#uniformPlans.set(pass, plan);
+        }
+        return plan;
+    }
+    #parseNumbers(text) {
+        let numbers = this.#parsedStrings.get(text);
+        if (!numbers) {
+            numbers = text.trim().split(/\s+/).map(Number);
+            if (this.#parsedStrings.size > 512) {
+                this.#parsedStrings.clear();
+            }
+            this.#parsedStrings.set(text, numbers);
+        }
+        return numbers;
+    }
     #matrixUniform(name, layer, firstPass) {
         if (name === "g_ModelViewProjectionMatrixInverse") {
             return firstPass
@@ -287,7 +328,7 @@ export class EffectRenderer {
         const values = Array.isArray(value)
             ? value.map(Number)
             : typeof value === "string"
-                ? value.trim().split(/\s+/).map(Number)
+                ? this.#parseNumbers(value)
                 : [Number(value)];
         const gl = this.#graphics.gl;
         if (type === "float")

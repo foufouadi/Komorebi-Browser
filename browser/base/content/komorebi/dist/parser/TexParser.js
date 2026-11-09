@@ -11,6 +11,7 @@ const TEX_FORMAT = {
     DXT3: 6,
     DXT1: 7,
 };
+const LZ4_BULK_COPY_BYTES = 64;
 export class TexParser {
     bytes;
     view;
@@ -379,7 +380,14 @@ export class TexParser {
                     literalLength += value;
                 } while (value === 255);
             }
-            output.set(source.subarray(inputOffset, inputOffset + literalLength), outputOffset);
+            if (literalLength < LZ4_BULK_COPY_BYTES) {
+                for (let index = 0; index < literalLength; index++) {
+                    output[outputOffset + index] = source[inputOffset + index];
+                }
+            }
+            else {
+                output.set(source.subarray(inputOffset, inputOffset + literalLength), outputOffset);
+            }
             inputOffset += literalLength;
             outputOffset += literalLength;
             if (inputOffset >= source.length) {
@@ -396,9 +404,15 @@ export class TexParser {
                 } while (value === 255);
             }
             matchLength += 4;
-            for (let index = 0; index < matchLength; index++) {
-                output[outputOffset] = output[outputOffset - matchOffset];
-                outputOffset++;
+            if (matchLength >= LZ4_BULK_COPY_BYTES && matchOffset >= matchLength) {
+                output.copyWithin(outputOffset, outputOffset - matchOffset, outputOffset - matchOffset + matchLength);
+                outputOffset += matchLength;
+            }
+            else {
+                for (let index = 0; index < matchLength; index++) {
+                    output[outputOffset] = output[outputOffset - matchOffset];
+                    outputOffset++;
+                }
             }
         }
         if (outputOffset !== outputLength) {

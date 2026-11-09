@@ -1,0 +1,551 @@
+/*
+ * Copyright (c) 2026 Foued Attar
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
+
+:root {
+  --komorebi-font-base: 15px;
+}
+
+#komorebi-onboarding {
+  position: fixed;
+  inset: 0;
+  display: none;
+  grid-template-rows: minmax(0, 1fr) auto;
+  box-sizing: border-box;
+  width: 100vw;
+  max-width: none;
+  height: 100vh;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--background-color-canvas);
+  color: var(--text-color);
+  font: menu;
+  font-size: var(--komorebi-font-base);
+}
+
+#komorebi-onboarding[open] {
+  display: grid;
+  animation: komorebi-backdrop-in var(--komorebi-duration-slow) var(--komorebi-ease);
+}
+
+#komorebi-onboarding.closing {
+  animation: komorebi-onb-out 220ms var(--komorebi-ease) forwards;
+}
+
+@keyframes komorebi-onb-out {
+  to {
+    opacity: 0;
+  }
+}
+
+#komorebi-onboarding::backdrop {
+  background: transparent;
+}
+
+.komorebi-onb-backdrop,
+.komorebi-onb-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+}
+
+.komorebi-onb-backdrop {
+  object-fit: cover;
+  opacity: 0;
+  transform: scale(1.04);
+  transition:
+    opacity var(--komorebi-duration-slow) var(--komorebi-ease),
+    transform 900ms var(--komorebi-ease);
+}
+
+.komorebi-onb-backdrop.shown {
+  opacity: 1;
+  transform: none;
+}
+
+.komorebi-onb-scrim {
+  background: color-mix(in srgb, var(--background-color-canvas) 68%, transparent);
+}
+
+.komorebi-onb-stage {
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  overflow-y: auto;
+  padding: var(--space-xxlarge) var(--space-xlarge);
+}
+
+.komorebi-onb-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-xlarge);
+  box-sizing: border-box;
+  width: min(100%, 860px);
+  text-align: center;
+  animation: komorebi-step-forward var(--komorebi-duration-slow) var(--komorebi-ease);
+}
+
+.komorebi-onb-step > * {
+  animation: komorebi-onb-rise var(--komorebi-duration-slow) var(--komorebi-ease) backwards;
+}
+
+.komorebi-onb-step > :nth-child(2) {
+  animation-delay: 70ms;
+}
+
+.komorebi-onb-step > :nth-child(3) {
+  animation-delay: 140ms;
+}
+
+.komorebi-onb-step > :nth-child(4) {
+  animation-delay: 210ms;
+}
+
+@keyframes komorebi-onb-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+.komorebi-onb-step[data-direction="back"] {
+  animation-name: komorebi-step-back;
+}
+
+
+@keyframes komorebi-step-forward {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+}
+
+@keyframes komorebi-step-back {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+}
+
+.komorebi-onb-title {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(32px, 4.4vw, 54px);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  outline: none;
+}
+
+#komorebi-onboarding[data-step="welcome"] .komorebi-onb-title {
+  font-size: clamp(48px, 7vw, 88px);
+}
+
+.komorebi-onb-subtitle {
+  margin: 0;
+  font-size: calc(var(--komorebi-font-base) * 1.5);
+  font-weight: var(--font-weight-semibold);
+}
+
+.komorebi-onb-lead {
+  max-width: 34em;
+  margin: 0;
+  color: var(--text-color-deemphasized);
+  font-size: calc(var(--komorebi-font-base) * 1.2);
+  line-height: 1.5;
+}
+
+.komorebi-onb-note {
+  margin: 0;
+  color: var(--text-color-deemphasized);
+}
+
+.komorebi-onb-logo {
+  width: 96px;
+  height: 96px;
+}
+
+.komorebi-onb-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-medium);
+}
+
+.komorebi-onb-wall-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-large);
+  align-self: stretch;
+}
+
+.komorebi-onb-wall-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--space-medium);
+  align-self: stretch;
+}
+
+.komorebi-onb-wall {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--border-radius-medium);
+  background: var(--background-color-box);
+  transition:
+    transform var(--komorebi-duration) var(--komorebi-ease),
+    box-shadow var(--komorebi-duration) var(--komorebi-ease),
+    opacity var(--komorebi-duration) var(--komorebi-ease);
+}
+
+.komorebi-onb-wall img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform var(--komorebi-duration-slow) var(--komorebi-ease);
+}
+
+.komorebi-onb-wall:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--box-shadow-level-2);
+}
+
+.komorebi-onb-wall:hover img {
+  transform: scale(1.05);
+}
+
+.komorebi-onb-wall.selected {
+  border-color: var(--color-accent-primary);
+  outline: var(--focus-outline-width) solid var(--color-accent-primary);
+  outline-offset: calc(-1 * var(--focus-outline-width));
+}
+
+.komorebi-onb-wall.loading {
+  opacity: 0.55;
+}
+
+.komorebi-onb-wall:focus-visible,
+.komorebi-onb-choice:focus-visible,
+.komorebi-onb-engine:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+}
+
+.komorebi-onb-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-large);
+  align-self: stretch;
+}
+
+.komorebi-onb-choice {
+  display: grid;
+  gap: var(--space-small);
+  padding: var(--space-large);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--border-radius-large);
+  background: var(--background-color-box);
+  color: inherit;
+  font: menu;
+  text-align: start;
+  transition:
+    background-color var(--komorebi-duration-fast) var(--komorebi-ease),
+    border-color var(--komorebi-duration) var(--komorebi-ease),
+    transform var(--komorebi-duration) var(--komorebi-ease);
+}
+
+.komorebi-onb-choice:hover {
+  background: var(--button-background-color-hover);
+  transform: translateY(-2px);
+}
+
+.komorebi-onb-choice[aria-checked="true"] {
+  border-color: var(--color-accent-primary);
+  background: color-mix(in srgb, var(--color-accent-primary) 16%, var(--background-color-box));
+}
+
+.komorebi-onb-choice-title {
+  font-size: var(--font-size-large);
+  font-weight: var(--font-weight-semibold);
+}
+
+.komorebi-onb-choice-description {
+  color: var(--text-color-deemphasized);
+}
+
+.komorebi-onb-schematic {
+  position: relative;
+  height: 72px;
+  border-radius: var(--border-radius-medium);
+  background: color-mix(in srgb, var(--text-color) 6%, transparent);
+}
+
+.komorebi-onb-schematic::before {
+  content: "";
+  position: absolute;
+  border-radius: var(--border-radius-small);
+  background: var(--color-accent-primary);
+  opacity: 0.7;
+}
+
+.komorebi-onb-schematic.top::before {
+  inset: 8px 8px auto;
+  height: 12px;
+}
+
+.komorebi-onb-schematic.side::before {
+  inset: 8px auto 8px 8px;
+  width: 24px;
+}
+
+.komorebi-onb-engines {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-medium);
+}
+
+.komorebi-onb-engine {
+  padding: var(--space-small) var(--space-xlarge);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--border-radius-circle);
+  background: var(--background-color-box);
+  color: inherit;
+  font: menu;
+  font-size: var(--font-size-large);
+  transition:
+    background-color var(--komorebi-duration-fast) var(--komorebi-ease),
+    border-color var(--komorebi-duration) var(--komorebi-ease);
+}
+
+.komorebi-onb-engine:hover {
+  background: var(--button-background-color-hover);
+}
+
+.komorebi-onb-engine[aria-checked="true"] {
+  border-color: var(--color-accent-primary);
+  background: color-mix(in srgb, var(--color-accent-primary) 16%, var(--background-color-box));
+}
+
+.komorebi-onb-footer {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: var(--space-large) var(--space-xlarge) var(--space-xlarge);
+}
+
+.komorebi-onb-footer moz-button {
+  --button-border-radius: var(--border-radius-medium);
+  --button-font-weight: var(--font-weight-semibold);
+  --button-min-height: var(--size-item-large);
+  --button-padding: var(--space-small) var(--space-xlarge);
+  --button-font-size: var(--komorebi-font-base);
+}
+
+.komorebi-onb-footer moz-button[type="ghost"] {
+  justify-self: start;
+}
+
+.komorebi-onb-nav {
+  display: flex;
+  justify-content: end;
+  gap: var(--space-medium);
+}
+
+.komorebi-onb-dots {
+  display: flex;
+  gap: var(--space-small);
+}
+
+.komorebi-onb-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--border-radius-circle);
+  background: color-mix(in srgb, var(--text-color) 22%, transparent);
+  transition:
+    width var(--komorebi-duration) var(--komorebi-ease),
+    background-color var(--komorebi-duration) var(--komorebi-ease);
+}
+
+.komorebi-onb-dot.done {
+  background: color-mix(in srgb, var(--color-accent-primary) 55%, transparent);
+}
+
+.komorebi-onb-dot.active {
+  width: 24px;
+  background: var(--color-accent-primary);
+}
+
+:root[komorebi-compact]:not([inDOMFullscreen]) #navigator-toolbox {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline: 0;
+  z-index: 100;
+  background-color: var(--background-color-canvas);
+  box-shadow: var(--box-shadow-level-3);
+  transform: translateY(-100%);
+  pointer-events: none;
+  transition: transform var(--komorebi-duration) var(--komorebi-ease);
+}
+
+:root[komorebi-compact][komorebi-compact-revealed]:not([inDOMFullscreen]) #navigator-toolbox {
+  transform: none;
+  pointer-events: auto;
+}
+
+#komorebi-compact-edge {
+  display: none;
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline: 0;
+  z-index: 101;
+  height: 4px;
+}
+
+:root[komorebi-compact]:not([inDOMFullscreen], [komorebi-compact-revealed]) #komorebi-compact-edge {
+  display: block;
+}
+
+#komorebi-spaces-button .toolbarbutton-text {
+  display: flex !important;
+  max-width: 9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#komorebi-tools-button {
+  list-style-image: url("chrome://browser/skin/history.svg");
+}
+
+.komorebi-tools-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-large);
+  box-sizing: border-box;
+  width: 22em;
+  padding: var(--space-large);
+}
+
+.komorebi-tools-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-medium);
+}
+
+.komorebi-tools-section h3 {
+  margin: 0;
+  font-size: var(--font-size-large);
+  font-weight: var(--font-weight-semibold);
+}
+
+.komorebi-tools-section textarea,
+.komorebi-tools-section select {
+  box-sizing: border-box;
+  border: var(--border-width) solid var(--input-border-color);
+  border-radius: var(--border-radius-medium);
+  background-color: var(--background-color-box);
+  color: var(--text-color);
+  font: menu;
+}
+
+.komorebi-tools-section textarea {
+  width: 100%;
+  padding: var(--space-medium);
+  resize: vertical;
+}
+
+.komorebi-tools-section select {
+  min-height: var(--size-item-large);
+}
+
+.komorebi-tools-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-medium);
+}
+
+.komorebi-timer-readout {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-medium);
+}
+
+.komorebi-timer-display {
+  font-size: calc(var(--komorebi-font-base) * 2.4);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-semibold);
+}
+
+.komorebi-timer-phase {
+  color: var(--text-color-deemphasized);
+}
+
+#komorebi-break-overlay {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xlarge);
+  background: radial-gradient(
+    circle at 50% 40%,
+    color-mix(in srgb, var(--color-accent-primary) 22%, var(--background-color-canvas)),
+    var(--background-color-canvas) 75%
+  );
+  color: var(--text-color);
+  font: menu;
+  animation: komorebi-backdrop-in var(--komorebi-duration-slow) var(--komorebi-ease);
+}
+
+.komorebi-break-title {
+  margin: 0;
+  color: var(--text-color-deemphasized);
+  font-size: calc(var(--komorebi-font-base) * 1.6);
+}
+
+.komorebi-break-countdown {
+  margin: 0;
+  font-size: calc(var(--komorebi-font-base) * 5);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-semibold);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #komorebi-onboarding[open],
+  .komorebi-onb-step,
+  .komorebi-onb-step > *,
+  .komorebi-onb-backdrop,
+  .komorebi-onb-wall,
+  .komorebi-onb-wall img,
+  .komorebi-onb-choice,
+  .komorebi-onb-engine,
+  .komorebi-onb-dot,
+  #komorebi-break-overlay,
+  :root[komorebi-compact] #navigator-toolbox {
+    animation: none;
+    transition: none;
+  }
+
+  .komorebi-onb-wall:hover,
+  .komorebi-onb-wall:hover img,
+  .komorebi-onb-choice:hover {
+    transform: none;
+  }
+}

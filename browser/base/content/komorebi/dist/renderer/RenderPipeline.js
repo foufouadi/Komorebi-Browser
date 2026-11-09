@@ -10,9 +10,23 @@ import { SCENE_FRAGMENT_SHADER } from "../graphics/shaders/SceneFragmentShader.j
 import { EffectRenderer } from "./EffectRenderer.js";
 import { LayerRenderer } from "./LayerRenderer.js";
 import { ParticleRenderer } from "./ParticleRenderer.js";
+export function computeSceneScale(fit, screenRatio, sceneRatio) {
+    if (fit === "stretch") {
+        return [1, 1];
+    }
+    const sceneIsWider = sceneRatio > screenRatio;
+    const wide = sceneRatio / screenRatio;
+    const tall = screenRatio / sceneRatio;
+    if (fit === "contain") {
+        return sceneIsWider ? [1, tall] : [wide, 1];
+    }
+    return sceneIsWider ? [wide, 1] : [1, tall];
+}
 export class RenderPipeline {
     #graphics;
     #canvasViewport;
+    #effectsEnabled = true;
+    #fit = "cover";
     #program;
     #layerRenderer;
     #effectRenderer;
@@ -27,7 +41,13 @@ export class RenderPipeline {
         this.#layerRenderer = new LayerRenderer(graphics, this.#program);
         this.#particleRenderer = new ParticleRenderer(graphics);
     }
-    render(layers, particles, projection, timestamp, animationStart) {
+    setEffectsEnabled(enabled) {
+        this.#effectsEnabled = enabled;
+    }
+    setFit(fit) {
+        this.#fit = fit;
+    }
+    render(layers, particles, projection, timestamp, animationStart, pointerTimestamp = timestamp) {
         if (!layers.length || this.#canvasViewport.canvas.hidden) {
             return;
         }
@@ -40,18 +60,19 @@ export class RenderPipeline {
         gl.enable(gl.BLEND);
         const screenRatio = width / height;
         const sceneRatio = projection[0] / projection[1];
-        const sceneScale = sceneRatio > screenRatio
-            ? [1, sceneRatio / screenRatio]
-            : [screenRatio / sceneRatio, 1];
-        gl.uniform2f(gl.getUniformLocation(this.#program, "uProjection"), projection[0], projection[1]);
-        gl.uniform2f(gl.getUniformLocation(this.#program, "uSceneScale"), sceneScale[0], sceneScale[1]);
+        const sceneScale = computeSceneScale(this.#fit, screenRatio, sceneRatio);
+        const graphics = this.#graphics;
+        gl.uniform2f(graphics.uniform(this.#program, "uProjection"), projection[0], projection[1]);
+        gl.uniform2f(graphics.uniform(this.#program, "uSceneScale"), sceneScale[0], sceneScale[1]);
         const elapsed = (timestamp - animationStart) / 1000;
-        gl.uniform1f(gl.getUniformLocation(this.#program, "uTime"), elapsed);
-        const pointer = this.#samplePointer(timestamp);
+        gl.uniform1f(graphics.uniform(this.#program, "uTime"), elapsed);
+        const pointer = this.#samplePointer(pointerTimestamp);
         const timing = { elapsed, timestamp, animationStart };
         for (const layer of layers) {
             this.#layerRenderer.updateVideoTexture(layer);
-            const sourceTexture = this.#effectRenderer.run(layer, elapsed, pointer, projection);
+            const sourceTexture = this.#effectsEnabled
+                ? this.#effectRenderer.run(layer, elapsed, pointer, projection)
+                : layer.glTexture;
             gl.bindFramebuffer(gl.FRAMEBUFFER, null);
             gl.viewport(0, 0, width, height);
             gl.useProgram(this.#program);

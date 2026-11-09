@@ -6,227 +6,201 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-(function (global) {
-  "use strict";
+const FPS_WINDOW_MS = 2000;
+const FIT_STYLES = new Map([
+  ["contain", "contain"],
+  ["cover", "cover"],
+  ["stretch", "fill"],
+]);
 
-  class VideoRenderer {
-    #animationFrame = null;
-    #canvas;
-    #context;
-    #fit = "cover";
-    #lastFrameTime = 0;
-    #loadGeneration = 0;
-    #maxFPS = 30;
-    #muted = false;
-    #objectUrl;
-    #pageActive = true;
-    #paused = false;
-    #resizeObserver;
-    #video;
-    #visible = true;
-    #volume = 0.5;
+export class VideoRenderer {
+  #audioAllowed = true;
+  #audioDucked = false;
+  #container;
+  #fit = "cover";
+  #frameSamples = [];
+  #loadGeneration = 0;
+  #muted = false;
+  #objectURL = null;
+  #pageActive = true;
+  #paused = false;
+  #running = true;
+  #speed = 1;
+  #video = null;
+  #visible = true;
+  #volume = 0.5;
 
-    init() {
-      const container = document.createElement("div");
-      container.id = "komorebi-container";
+  init() {
+    this.#container = document.createElement("div");
+    this.#container.id = "komorebi-container";
+    this.#container.hidden = true;
+    document.body.prepend(this.#container);
+  }
 
-      this.#canvas = document.createElement("canvas");
-      this.#canvas.id = "komorebi-canvas";
-      this.#context = this.#canvas.getContext("2d", { alpha: true });
-      container.appendChild(this.#canvas);
-      document.body.prepend(container);
-
-      this.#resizeCanvas();
-      this.#resizeObserver = new ResizeObserver(() => this.#resizeCanvas());
-      this.#resizeObserver.observe(document.documentElement);
+  /**
+   * Frames per second over the last FPS_WINDOW_MS, from the decoder's
+   * own frame counter.
+   */
+  get fps() {
+    if (!this.#video) {
+      return 0;
     }
-
-    async load(source) {
-      const generation = ++this.#loadGeneration;
-      const objectUrl = URL.createObjectURL(await this.#fetchVideo(source));
-      if (generation !== this.#loadGeneration) {
-        URL.revokeObjectURL(objectUrl);
-        return false;
-      }
-
-      const video = document.createElement("video");
-      video.id = "komorebi-video-pending";
-      video.src = objectUrl;
-      video.loop = true;
-      video.playsInline = true;
-      this.#applySettings(video);
-      try {
-        await new Promise((resolve, reject) => {
-          video.addEventListener("loadeddata", resolve, { once: true });
-          video.addEventListener(
-            "error",
-            () => reject(new Error("Video decoding failed")),
-            { once: true }
-          );
-          video.load();
-        });
-      } catch (error) {
-        URL.revokeObjectURL(objectUrl);
-        throw error;
-      }
-
-      if (generation !== this.#loadGeneration) {
-        URL.revokeObjectURL(objectUrl);
-        return false;
-      }
-
-      this.#releaseVideo();
-      this.#objectUrl = objectUrl;
-      this.#video = video;
-      this.#video.id = "komorebi-video";
-      document.body.appendChild(this.#video);
-      this.#animationFrame = requestAnimationFrame(time => this.#render(time));
-      await this.#updatePlayback();
-      return true;
+    const now = performance.now();
+    const total = this.#video.getVideoPlaybackQuality().totalVideoFrames;
+    this.#frameSamples.push({ frames: total, time: now });
+    while (
+      this.#frameSamples.length > 2 &&
+      now - this.#frameSamples[1].time >= FPS_WINDOW_MS
+    ) {
+      this.#frameSamples.shift();
     }
+    const first = this.#frameSamples[0];
+    const elapsed = now - first.time;
+    return elapsed > 0 ? ((total - first.frames) * 1000) / elapsed : 0;
+  }
 
-    updateSettings(settings) {
-      this.#fit = settings.fit;
-      this.#maxFPS = settings.maxFPS;
-      this.#muted = settings.muted;
-      this.#paused = settings.paused;
-      this.#volume = settings.volume;
-      this.#applySettings();
-      this.#updatePlayback();
-    }
-
-    setPageActive(active) {
-      this.#pageActive = active;
-      this.#updatePlayback();
-    }
-
-    setVisible(visible) {
-      this.#visible = visible;
-      this.#canvas.parentElement.hidden = !visible;
-      this.#updatePlayback();
-    }
-
-    destroy() {
-      this.#loadGeneration++;
-      this.#releaseVideo();
-      this.#resizeObserver?.disconnect();
-      this.#canvas?.parentElement?.remove();
-    }
-
-    #applySettings(video = this.#video) {
-      if (!video) {
-        return;
-      }
-      video.muted = this.#muted;
-      video.volume = this.#volume;
-    }
-
-    #fetchVideo(source) {
-      return new Promise((resolve, reject) => {
-        const request = new XMLHttpRequest();
-        request.open("GET", source, true);
-        request.responseType = "blob";
-        request.onload = () => {
-          if (request.status === 0 || request.status === 200) {
-            resolve(request.response);
-          } else {
-            reject(
-              new Error(`Video request failed: ${request.status} (${source})`)
-            );
-          }
-        };
-        // Fires for a network-level failure (bad/unreachable path, or a
-        // "video" project whose declared file isn't actually a single
-        // fetchable file — e.g. a "web" project's HTML entry point routed
-        // here as a fallback). Including `source` is what tells those two
-        // apart from the console instead of guessing.
-        request.onerror = () =>
-          reject(new Error(`Video request failed (${source})`));
-        request.send();
+  /**
+   * @param {Blob} source
+   */
+  async load(source) {
+    const generation = ++this.#loadGeneration;
+    const objectURL = URL.createObjectURL(source);
+    const video = document.createElement("video");
+    video.src = objectURL;
+    video.loop = true;
+    video.playsInline = true;
+    this.#applySettings(video);
+    try {
+      await new Promise((resolve, reject) => {
+        video.addEventListener("loadeddata", resolve, { once: true });
+        video.addEventListener(
+          "error",
+          () => reject(new Error("Video decoding failed")),
+          { once: true }
+        );
+        video.load();
       });
+    } catch (error) {
+      this.#discardVideo(video, objectURL);
+      throw error;
     }
 
-    #releaseVideo() {
-      if (this.#animationFrame !== null) {
-        cancelAnimationFrame(this.#animationFrame);
-        this.#animationFrame = null;
-      }
-      this.#video?.remove();
-      this.#video = null;
-      if (this.#objectUrl) {
-        URL.revokeObjectURL(this.#objectUrl);
-        this.#objectUrl = null;
-      }
+    if (generation !== this.#loadGeneration) {
+      this.#discardVideo(video, objectURL);
+      return false;
     }
 
-    #render(time) {
-      if (
-        this.#video &&
-        !this.#video.paused &&
-        time - this.#lastFrameTime >= 1000 / this.#maxFPS
-      ) {
-        this.#drawFrame();
-        this.#lastFrameTime = time;
-      }
-      this.#animationFrame = requestAnimationFrame(nextTime =>
-        this.#render(nextTime)
-      );
-    }
+    this.#releaseVideo();
+    this.#video = video;
+    this.#objectURL = objectURL;
+    this.#frameSamples = [];
+    this.#applyFit();
+    this.#container.appendChild(video);
+    this.#updateVisibility();
+    await this.#updatePlayback();
+    return true;
+  }
 
-    #drawFrame() {
-      const width = window.innerWidth;
-      const height = window.innerHeight;
-      this.#context.clearRect(0, 0, width, height);
+  updateSettings(settings) {
+    this.#fit = settings.fit;
+    this.#muted = settings.muted;
+    this.#paused = settings.paused;
+    this.#speed = settings.speed || 1;
+    this.#volume = settings.volume;
+    this.#applyFit();
+    this.#applySettings();
+    this.#updatePlayback();
+  }
 
-      if (this.#fit === "stretch") {
-        this.#context.drawImage(this.#video, 0, 0, width, height);
-        return;
-      }
+  setPageActive(active) {
+    this.#pageActive = active;
+    this.#updateVisibility();
+    this.#updatePlayback();
+  }
 
-      const scale =
-        this.#fit === "contain"
-          ? Math.min(
-              width / this.#video.videoWidth,
-              height / this.#video.videoHeight
-            )
-          : Math.max(
-              width / this.#video.videoWidth,
-              height / this.#video.videoHeight
-            );
-      const drawWidth = this.#video.videoWidth * scale;
-      const drawHeight = this.#video.videoHeight * scale;
-      this.#context.drawImage(
-        this.#video,
-        (width - drawWidth) / 2,
-        (height - drawHeight) / 2,
-        drawWidth,
-        drawHeight
-      );
-    }
+  setRunning(running) {
+    this.#running = running;
+    this.#updatePlayback();
+  }
 
-    #resizeCanvas() {
-      const scale = window.devicePixelRatio || 1;
-      this.#canvas.width = Math.round(window.innerWidth * scale);
-      this.#canvas.height = Math.round(window.innerHeight * scale);
-      this.#context.setTransform(scale, 0, 0, scale, 0, 0);
-    }
+  setAudioAllowed(allowed) {
+    this.#audioAllowed = allowed;
+    this.#applySettings();
+    this.#updatePlayback();
+  }
 
-    async #updatePlayback() {
-      if (!this.#video) {
-        return;
-      }
-      if (
-        this.#paused ||
-        !this.#pageActive ||
-        !this.#visible ||
-        window.windowState === window.STATE_MINIMIZED
-      ) {
-        this.#video.pause();
-      } else {
-        await this.#video.play().catch(() => {});
-      }
+  setAudioDucked(ducked) {
+    this.#audioDucked = ducked;
+    this.#applySettings();
+  }
+
+  setVisible(visible) {
+    this.#visible = visible;
+    this.#updateVisibility();
+    this.#updatePlayback();
+  }
+
+  destroy() {
+    this.#loadGeneration++;
+    this.#releaseVideo();
+    this.#container?.remove();
+  }
+
+  #applyFit() {
+    if (this.#video) {
+      this.#video.style.objectFit = FIT_STYLES.get(this.#fit) ?? "cover";
     }
   }
 
-  global.KomorebiVideoRenderer = VideoRenderer;
-})(this);
+  #applySettings(video = this.#video) {
+    if (!video) {
+      return;
+    }
+    video.muted = this.#isSilent();
+    video.volume = this.#volume;
+    video.playbackRate = this.#speed;
+  }
+
+  #isSilent() {
+    return (
+      this.#muted ||
+      !this.#audioAllowed ||
+      this.#audioDucked ||
+      this.#volume === 0
+    );
+  }
+
+  #discardVideo(video, objectURL) {
+    video.remove();
+    video.removeAttribute("src");
+    video.load();
+    URL.revokeObjectURL(objectURL);
+  }
+
+  #releaseVideo() {
+    if (this.#video) {
+      this.#discardVideo(this.#video, this.#objectURL);
+    }
+    this.#video = null;
+    this.#objectURL = null;
+    this.#frameSamples = [];
+  }
+
+  #updateVisibility() {
+    this.#container.hidden = !(this.#visible && this.#pageActive);
+  }
+
+  async #updatePlayback() {
+    if (!this.#video) {
+      return;
+    }
+    const showPicture =
+      !this.#paused && this.#pageActive && this.#visible && this.#running;
+    const playSound = !this.#paused && this.#visible && !this.#isSilent();
+    if (showPicture || playSound) {
+      await this.#video.play().catch(() => {});
+    } else {
+      this.#video.pause();
+    }
+  }
+}

@@ -6,69 +6,213 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-/* stylelint-disable stylelint-plugin-mozilla/use-design-tokens -- Firefox design tokens are not exposed to Google content documents. */
+/* stylelint-disable stylelint-plugin-mozilla/use-design-tokens, stylelint-plugin-mozilla/no-has-selector -- Firefox design tokens are not exposed to Google content documents, and Google offers no stable identifiers for these blocks. */
 
-html,
-body,
-#main,
-#cnt,
-#rcnt,
-#center_col,
-#rhs,
-#search,
-#searchform,
-#appbar,
-#top_nav,
-#botstuff,
-#foot,
-.sfbg,
-.appbar {
-  background: transparent !important;
-}
+:root[komorebi-wallpaper] {
+  --komorebi-glass: rgb(8 12 32 / var(--komorebi-glass-alpha, 70%));
+  --komorebi-glass-solid: rgb(8 12 32 / 86%);
+  --komorebi-glass-shadow: 0 8px 26px rgb(5 10 30 / 30%);
+  --komorebi-glass-text: #eef1f6;
 
-body {
-  background-color: transparent !important;
-}
-
-#center_col,
-#rhs {
-  box-sizing: border-box;
-  padding: 18px 22px !important;
-  border: 1px solid rgb(0 0 0 / 12%);
-  border-radius: 16px;
-  background: rgb(255 255 255 / 74%) !important;
-  backdrop-filter: blur(20px) saturate(125%);
-  box-shadow: 0 8px 28px rgb(20 30 50 / 14%);
-}
-
-#center_col > div,
-#center_col .MjjYud,
-#center_col .g,
-#center_col .ULSxyf,
-#center_col .Ww4FFb,
-#rhs > div,
-#rhs .kp-wholepage,
-#rhs .osrp-blk {
-  background-color: transparent !important;
-}
-
-#center_col:empty,
-#rhs:empty {
-  display: none;
-}
-
-/* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector -- The AI Mode tab has no stable parent identifier. */
-div[role="navigation"] div[role="list"] > div[role="listitem"]:has(a[href^="/search"][href*="udm=50"]),
-/* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector -- Google only identifies AI Overview reliably through its child marker. */
-div[data-mcpr]:has(.M8OgIe) {
-  display: none !important;
-}
-
-@media (prefers-color-scheme: dark) {
+  &,
+  body,
+  #main,
+  #cnt,
+  #rcnt,
+  #searchform,
+  #appbar,
+  #top_nav,
+  .sfbg,
+  .appbar,
+  #botstuff,
+  #foot,
   #center_col,
-  #rhs {
-    border-color: rgb(255 255 255 / 14%);
-    background: rgb(32 33 36 / 76%) !important;
-    box-shadow: 0 8px 30px rgb(0 0 0 / 28%);
+  #search,
+  #rso {
+    background: transparent !important;
   }
+
+  .zLSRge {
+    display: none !important;
+  }
+
+  #center_col *,
+  #rhs * {
+    border-color: rgb(255 255 255 / 14%) !important;
+    background-color: transparent !important;
+  }
+
+  #rhs *:not(img) {
+    background-image: none !important;
+  }
+
+  #center_col :not(img, svg, svg *),
+  #rhs :not(img, svg, svg *) {
+    color: var(--komorebi-glass-text) !important;
+  }
+
+  #center_col h3,
+  #rhs h3 {
+    color: #a8c7fa !important;
+  }
+
+  #center_col svg,
+  #rhs svg {
+    fill: #dfe6f2 !important;
+  }
+
+  #center_col {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  #rso > *:has(h3, img, video),
+  #botstuff > *:has(h3, a) {
+    box-sizing: border-box;
+    margin: 0 -20px 12px !important;
+    padding: 16px 20px !important;
+    border-radius: 18px;
+    background: var(--komorebi-glass) !important;
+    box-shadow: var(--komorebi-glass-shadow);
+  }
+
+  #rhs {
+    box-sizing: content-box;
+    align-self: start;
+    height: fit-content !important;
+    margin-inline-start: -22px !important;
+    padding: 18px 22px !important;
+    border-radius: 20px;
+    background: var(--komorebi-glass) !important;
+    box-shadow: var(--komorebi-glass-shadow);
+  }
+
+  #logo {
+    border-radius: 18px;
+    background: var(--komorebi-glass);
+    box-shadow: 0 0 0 9px var(--komorebi-glass);
+
+    > * {
+      filter: brightness(0) invert(1);
+    }
+  }
+
+  .RNNXgb {
+    border: 0 !important;
+    background: var(--komorebi-glass) !important;
+    box-shadow: var(--komorebi-glass-shadow) !important;
+
+    textarea {
+      color: #fff !important;
+    }
+
+    svg {
+      color: var(--komorebi-glass-text) !important;
+      fill: var(--komorebi-glass-text) !important;
+    }
+  }
+
+  #hdtb-sc {
+    * {
+      color: var(--komorebi-glass-text) !important;
+    }
+
+    a > div {
+      border-color: transparent !important;
+      background: var(--komorebi-glass) !important;
+    }
+  }
+
+  div[role="navigation"]:has(a[href*="udm="]) {
+    width: fit-content !important;
+    height: 44px;
+    margin-block-start: 4px;
+    padding-inline: 20px 8px !important;
+    border-radius: 999px;
+    background: var(--komorebi-glass) !important;
+
+    * {
+      color: var(--komorebi-glass-text) !important;
+    }
+  }
+
+  #gb {
+    margin-inline-end: 6px;
+    border-radius: 999px;
+    background: var(--komorebi-glass);
+
+    svg {
+      color: var(--komorebi-glass-text) !important;
+      fill: var(--komorebi-glass-text) !important;
+    }
+
+    a[href*="ServiceLogin"] {
+      background: #0b57d0 !important;
+      color: #fff !important;
+    }
+  }
+
+  #rcnt > div:not(#center_col, #rhs) {
+    :not(img, svg, svg *) {
+      border-color: rgb(255 255 255 / 18%) !important;
+      background-color: transparent !important;
+      background-image: none !important;
+      color: var(--komorebi-glass-text) !important;
+    }
+
+    a,
+    a * {
+      color: #a8c7fa !important;
+    }
+
+    svg {
+      fill: #dfe6f2 !important;
+    }
+
+    .Kevs9:has(#eKIzJc, .SePcAf, .h7Tj7e) {
+      box-sizing: content-box;
+      margin: 0 -20px 12px !important;
+      padding: 16px 20px 8px !important;
+      border-radius: 18px;
+      background: var(--komorebi-glass) !important;
+      box-shadow: var(--komorebi-glass-shadow);
+    }
+
+    .h7Tj7e:not(.zc75bb) {
+      display: flex !important;
+      flex-direction: column !important;
+
+      > .D5ad8b {
+        flex: 0 1 auto;
+        min-height: 0;
+        overflow: clip;
+        mask-image: linear-gradient(#000 calc(100% - 132px), transparent calc(100% - 56px));
+      }
+    }
+  }
+
+  #taw > div:has(a) {
+    box-sizing: border-box;
+    margin: 0 -20px 12px !important;
+    padding: 12px 20px !important;
+    border-radius: 18px;
+    background: var(--komorebi-glass) !important;
+  }
+
+  #searchform.minidiv .sfbg {
+    background: var(--komorebi-glass-solid) !important;
+  }
+
+  #fbar,
+  #footcnt {
+    background: var(--komorebi-glass) !important;
+
+    * {
+      color: var(--komorebi-glass-text) !important;
+    }
+  }
+}
+
+div[role="navigation"] div[role="list"] > div[role="listitem"]:has(a[href^="/search"][href*="udm=50"]) {
+  display: none !important;
 }

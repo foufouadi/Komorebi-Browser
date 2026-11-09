@@ -7,6 +7,10 @@ on:
         description: "Reuse the compiled zip from this earlier run id (skips compilation)"
         required: false
         default: ""
+      version:
+        description: "Release tag, for example v0.1.0 (empty uses the run number)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -51,6 +55,7 @@ jobs:
           ac_add_options --disable-maintenance-service
           ac_add_options --disable-bits-download
           ac_add_options --without-wasm-sandboxed-libraries
+          ac_add_options --with-branding=browser/branding/komorebi
           mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/obj-komorebi
           '@ | Set-Content -Encoding ascii .mozconfig
           @'
@@ -169,6 +174,13 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
-          $tag = "windows-build-$env:GITHUB_RUN_NUMBER"
-          gh release create $tag Komorebi-Browser-Setup.exe --repo $env:GITHUB_REPOSITORY --title "Komorebi Browser (Windows x64) #$env:GITHUB_RUN_NUMBER" --notes "Download and run Komorebi-Browser-Setup.exe." --target $env:GITHUB_SHA
+          if ($env:RELEASE_VERSION) {
+            $tag = $env:RELEASE_VERSION
+            $title = "Komorebi Browser $tag (Windows x64)"
+          } else {
+            $tag = "windows-build-$env:GITHUB_RUN_NUMBER"
+            $title = "Komorebi Browser (Windows x64) #$env:GITHUB_RUN_NUMBER"
+          }
+          gh release create $tag Komorebi-Browser-Setup.exe --repo $env:GITHUB_REPOSITORY --title $title --notes "Download and run Komorebi-Browser-Setup.exe." --target $env:GITHUB_SHA

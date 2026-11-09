@@ -9,11 +9,13 @@ import { PARTICLE_FRAGMENT_SHADER } from "../graphics/shaders/ParticleFragmentSh
 import { PARTICLE_VERTEX_SHADER } from "../graphics/shaders/ParticleVertexShader.js";
 export class ParticleRenderer {
     #gl;
+    #graphics;
     #program;
     #buffers;
     #states = new WeakMap();
     constructor(graphics) {
         this.#gl = graphics.gl;
+        this.#graphics = graphics;
         this.#program = graphics.programs.get(PARTICLE_VERTEX_SHADER, PARTICLE_FRAGMENT_SHADER);
         this.#buffers = Array.from({ length: 4 }, () => {
             const buffer = this.#gl.createBuffer();
@@ -25,9 +27,9 @@ export class ParticleRenderer {
     draw(systems, context) {
         const gl = this.#gl;
         gl.useProgram(this.#program);
-        gl.uniform2f(gl.getUniformLocation(this.#program, "uProjection"), context.projection[0], context.projection[1]);
-        gl.uniform2f(gl.getUniformLocation(this.#program, "uSceneScale"), context.sceneScale[0], context.sceneScale[1]);
-        gl.uniform1f(gl.getUniformLocation(this.#program, "uPixelScale"), (context.height / context.projection[1]) * context.sceneScale[1]);
+        gl.uniform2f(this.#graphics.uniform(this.#program, "uProjection"), context.projection[0], context.projection[1]);
+        gl.uniform2f(this.#graphics.uniform(this.#program, "uSceneScale"), context.sceneScale[0], context.sceneScale[1]);
+        gl.uniform1f(this.#graphics.uniform(this.#program, "uPixelScale"), (context.height / context.projection[1]) * context.sceneScale[1]);
         for (const system of systems) {
             const state = this.#state(system, context.timestamp);
             const dt = Math.min(0.1, Math.max(0, (context.timestamp - state.lastTimestamp) / 1000));
@@ -43,7 +45,7 @@ export class ParticleRenderer {
             this.#upload("aParticleTexRect", 4, this.#buffers[3], data.textureRects);
             gl.activeTexture(gl.TEXTURE0);
             gl.bindTexture(gl.TEXTURE_2D, system.glTexture);
-            gl.uniform1i(gl.getUniformLocation(this.#program, "uTexture"), 0);
+            gl.uniform1i(this.#graphics.uniform(this.#program, "uTexture"), 0);
             if (system.blending === "additive") {
                 gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE, gl.SRC_ALPHA, gl.ONE);
             }
@@ -265,7 +267,7 @@ export class ParticleRenderer {
             ((range.max[axis] ?? 0) - (range.min[axis] ?? 0)) * Math.random());
     }
     #upload(name, size, buffer, data) {
-        const location = this.#gl.getAttribLocation(this.#program, name);
+        const location = this.#graphics.attrib(this.#program, name);
         this.#gl.bindBuffer(this.#gl.ARRAY_BUFFER, buffer);
         this.#gl.bufferData(this.#gl.ARRAY_BUFFER, data, this.#gl.STREAM_DRAW);
         this.#gl.enableVertexAttribArray(location);

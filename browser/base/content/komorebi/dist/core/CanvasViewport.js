@@ -9,6 +9,7 @@ export class CanvasViewport {
     canvas;
     gl;
     #bounds = { height: 1, left: 0, top: 0, width: 1 };
+    #renderScale = 1;
     #resizeObserver;
     constructor(onResize) {
         this.canvas = this.#createCanvas();
@@ -26,10 +27,13 @@ export class CanvasViewport {
     refreshBounds() {
         this.#updateBounds();
     }
+    setRenderScale(scale) {
+        this.#renderScale = scale > 0 ? scale : 1;
+    }
     syncDrawingBufferSize() {
-        const scale = window.devicePixelRatio || 1;
-        const width = Math.round(window.innerWidth * scale);
-        const height = Math.round(window.innerHeight * scale);
+        const scale = (window.devicePixelRatio || 1) * this.#renderScale;
+        const width = Math.max(1, Math.round(window.innerWidth * scale));
+        const height = Math.max(1, Math.round(window.innerHeight * scale));
         if (this.canvas.width !== width || this.canvas.height !== height) {
             this.canvas.width = width;
             this.canvas.height = height;
@@ -59,7 +63,9 @@ export class CanvasViewport {
         return gl;
     }
     #updateBounds() {
-        const rect = window.windowUtils.getBoundsWithoutFlushing(this.canvas);
+        const rect = window.windowUtils
+            ? window.windowUtils.getBoundsWithoutFlushing(this.canvas)
+            : this.canvas.getBoundingClientRect();
         this.#bounds = {
             height: Math.max(1, rect.height),
             left: rect.x,

@@ -5,37 +5,50 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
-import { SceneAudioPlayer } from "../audio/SceneAudioPlayer.js";
 import { CanvasViewport } from "../core/CanvasViewport.js";
 import { FrameScheduler } from "../core/FrameScheduler.js";
 import { ResourceManager } from "../core/ResourceManager.js";
 import { GraphicsContext } from "../graphics/GraphicsContext.js";
 import { SceneLoader } from "../scene/SceneLoader.js";
 import { RenderPipeline } from "./RenderPipeline.js";
+const MAX_CLOCK_STEP_MS = 250;
+const MIN_SPEED = 0.25;
+const MAX_SPEED = 2;
 export class SceneRenderer {
-    #animationStart = 0;
+    #audioAllowed = true;
     #audioPlayer;
     #canvasViewport;
+    #clock = 0;
+    #effects = true;
+    #fit = "cover";
+    #lastTick = null;
+    #renderScale = 1;
+    #speed = 1;
     #frameScheduler;
     #graphics;
     #resourceManager;
     #sceneLoader;
     #renderPipeline;
     #loadGeneration = 0;
+    #paused = false;
     #pageActive = true;
     #particles = [];
+    #running = true;
     #selected = false;
     #layers = [];
     #projection = [1920, 1080];
-    init() {
+    init({ audioPlayer }) {
         this.#canvasViewport = new CanvasViewport(() => this.#draw(performance.now()));
-        this.#audioPlayer = new SceneAudioPlayer();
+        this.#audioPlayer = audioPlayer;
         this.#audioPlayer.init();
         this.#graphics = new GraphicsContext(this.#canvasViewport.gl);
         this.#resourceManager = new ResourceManager(this.#graphics.gl);
         this.#sceneLoader = new SceneLoader(this.#graphics);
         this.#renderPipeline = new RenderPipeline(this.#graphics, this.#canvasViewport);
-        this.#frameScheduler = new FrameScheduler(this.#canvasViewport.canvas, timestamp => this.#draw(timestamp));
+        this.#frameScheduler = new FrameScheduler(this.#canvasViewport.canvas, timestamp => this.#tick(timestamp));
+    }
+    get fps() {
+        return this.#frameScheduler?.fps ?? 0;
     }
     async load({ assetRoot, packageSource, sceneFile, }) {
         const generation = ++this.#loadGeneration;
@@ -44,12 +57,17 @@ export class SceneRenderer {
             return false;
         }
         this.#releaseScene();
+        const { audioTracks, projection } = scene.sceneModel;
         this.#layers = scene.layers;
         this.#particles = scene.particles;
-        this.#audioPlayer.load(scene.sceneModel.audioTracks);
-        this.#projection = scene.sceneModel.projection;
+        this.#audioPlayer.load(audioTracks);
+        for (const track of audioTracks) {
+            track.data = null;
+        }
+        this.#projection = projection;
         this.#selected = true;
-        this.#animationStart = performance.now();
+        this.#clock = 0;
+        this.#lastTick = null;
         this.#updateActivity();
         return true;
     }
@@ -61,8 +79,43 @@ export class SceneRenderer {
         this.#pageActive = active;
         this.#updateActivity();
     }
+    setRunning(running) {
+        this.#running = running;
+        this.#updateActivity();
+    }
+    setAudioAllowed(allowed) {
+        this.#audioAllowed = allowed;
+        this.#updateActivity();
+    }
+    setAudioDucked(ducked) {
+        this.#audioPlayer.setDucked(ducked);
+    }
     updateSettings(settings) {
+        this.#frameScheduler.setMaxFPS(settings.maxFPS);
         this.#audioPlayer.updateSettings(settings);
+        const effects = settings.effects !== false;
+        const fit = settings.fit ?? "cover";
+        const renderScale = settings.renderScale > 0 ? settings.renderScale : 1;
+        const speed = Math.min(MAX_SPEED, Math.max(MIN_SPEED, Number(settings.speed) || 1));
+        const redraw = effects !== this.#effects ||
+            fit !== this.#fit ||
+            renderScale !== this.#renderScale;
+        this.#effects = effects;
+        this.#fit = fit;
+        this.#renderScale = renderScale;
+        this.#speed = speed;
+        this.#renderPipeline.setEffectsEnabled(effects);
+        this.#renderPipeline.setFit(fit);
+        this.#canvasViewport.setRenderScale(renderScale);
+        this.#applyPlaybackRate();
+        const paused = Boolean(settings.paused);
+        if (this.#paused !== paused) {
+            this.#paused = paused;
+            this.#updateActivity();
+        }
+        else if (redraw && !this.#canvasViewport.canvas.hidden) {
+            this.#draw();
+        }
     }
     destroy() {
         this.#loadGeneration++;
@@ -72,17 +125,36 @@ export class SceneRenderer {
         this.#audioPlayer.destroy();
         this.#graphics.dispose();
     }
-    #draw(timestamp = performance.now()) {
-        this.#renderPipeline.render(this.#layers, this.#particles, this.#projection, timestamp, this.#animationStart);
+    #tick(timestamp) {
+        if (this.#lastTick !== null) {
+            const step = Math.min(MAX_CLOCK_STEP_MS, Math.max(0, timestamp - this.#lastTick));
+            this.#clock += step * this.#speed;
+        }
+        this.#lastTick = timestamp;
+        this.#draw(timestamp);
+    }
+    #draw(pointerTimestamp = performance.now()) {
+        this.#renderPipeline.render(this.#layers, this.#particles, this.#projection, this.#clock, 0, pointerTimestamp);
+    }
+    #applyPlaybackRate() {
+        for (const layer of this.#layers) {
+            if (layer.video) {
+                layer.video.playbackRate = this.#speed;
+            }
+        }
     }
     #updateActivity() {
         const active = this.#selected && this.#pageActive;
         this.#canvasViewport.canvas.hidden = !active;
-        this.#audioPlayer.setActive(active);
-        this.#setVideosActive(active);
+        this.#audioPlayer.setOverlayVisible(active);
+        this.#audioPlayer.setActive(this.#selected && this.#audioAllowed && !this.#paused);
+        const animate = active && this.#running && !this.#paused;
+        this.#setVideosActive(animate);
         if (active) {
             this.#canvasViewport.refreshBounds();
             this.#draw(performance.now());
+        }
+        if (animate) {
             this.#frameScheduler.start(() => this.#particles.length > 0 ||
                 this.#layers.some(layer => layer.animation.active ||
                     layer.frames ||
@@ -91,6 +163,7 @@ export class SceneRenderer {
         }
         else {
             this.#frameScheduler.stop();
+            this.#lastTick = null;
         }
     }
     #setVideosActive(active) {
@@ -99,6 +172,7 @@ export class SceneRenderer {
                 continue;
             }
             if (active) {
+                layer.video.playbackRate = this.#speed;
                 layer.video.play().catch(() => { });
             }
             else {

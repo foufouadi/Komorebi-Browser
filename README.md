@@ -1,204 +1,68 @@
 # Komorebi Browser
 
-> An experimental Firefox fork that transforms the browser into a GPU-rendered,
-> customizable desktop environment.
+> An experimental Firefox fork with animated wallpapers behind your tabs.
 
-Komorebi Browser explores a different vision of web browsing. Instead of treating
-the browser as a static application, it turns it into a real-time rendered
-environment capable of displaying animated wallpapers and interactive scenes
-behind browser content.
-
-Inspired by Wallpaper Engine, Rainmeter, and modern graphics engines, Komorebi
-integrates a native scene renderer directly into Firefox while remaining as
-isolated as possible from upstream.
+Komorebi runs Wallpaper Engine scenes and video wallpapers behind the browser
+interface and web pages. Scenes are not converted to video: their assets are
+parsed and rendered directly in the browser.
 
 ## Demo
 
 https://github.com/user-attachments/assets/434cdabe-d264-4f9e-99a4-db01065f25e5
 
----
+## Download
 
-# Features
+Get `Komorebi-Browser-Setup.exe` from the
+[latest release](https://github.com/foufouadi/Komorebi-Browser/releases/latest)
+and run it. It installs for the current user, with no administrator rights, and
+adds a desktop shortcut.
+
+The installer is not signed, so Windows SmartScreen may warn you the first time.
+Komorebi does not update itself: install a newer release over the old one.
+
+Windows x64 only.
+
+## Features
 
 ### Wallpapers
 
-- Native video wallpapers
-- Native Wallpaper Engine scene rendering
-- Wallpaper library
-- Search, tags and favorites
-- Per-wallpaper settings
-- Folder management
+- Video wallpapers and Wallpaper Engine scenes
+- Automatic detection of wallpapers from the Steam Workshop
+- Library with search, tags, favorites and folders
+- Per-wallpaper settings, and scene music with its own volume
+- Guided first launch to choose a wallpaper
 
-### Scene engine
+### Browser
 
-- WebGL1 renderer
-- Layer system
-- Particle systems
-- Sprite sheet animation
-- Scene audio playback
-- Wallpaper Engine shader support
-- HLSL → GLSL ES 1.00 shader transpiler
-- Built-in effect library
-- Binary asset parsers (`.pkg`, `.tex`, `.mdl`)
+- Wallpaper visible behind the Home page, New Tab and Google results
+- Readable Google results on translucent blocks, with adjustable opacity
+- Spaces to group tabs
+- Compact mode that hides the toolbar until needed
+- Unloading of tabs you have not used for a while
+- Notes, focus timer and break mode
 
-### Browser integration
+### Performance
 
-- Transparent browser pages
-- Transparent Home page
-- Transparent New Tab
-- Transparent Welcome page
-- Transparent Google search
-- Adaptive readability overlay
-- Light and dark appearance
+- The wallpaper runs in its own process, with hardware video decoding
+- Eco, Balanced, Performance and Custom power modes (15 to 60 FPS)
+- Pauses when the wallpaper is hidden, such as behind a fullscreen application
 
----
+## Known limitations
 
-# Current status
+- `web` and `application` Wallpaper Engine projects are not supported.
+- Scene effects that need WebGL2 (GLSL ES 3.00) are not supported.
+- No audio-reactive effects.
+- No skeletal animation for puppet-warp meshes.
+- No automatic camera projection or parallax.
+- The Google styling depends on Google's page structure, so some result pages
+  can look wrong until it is adapted.
+- Web page contents cannot blur the wallpaper behind them.
 
-Komorebi currently supports two rendering paths.
+## Build from source
 
-### Video wallpapers
-
-Native video playback rendered behind browser tabs.
-
-**Status:** Complete.
-
-### Wallpaper Engine scenes
-
-Native rendering of most 2D Wallpaper Engine projects, including:
-
-- layered rendering
-- shaders
-- particle systems
-- sprite animations
-- scene audio playback
-
-This is **not** a video conversion. Wallpaper Engine assets are parsed and
-rendered directly inside the browser.
-
-**Status:** Functional.
-
-See **Known limitations** for unsupported Wallpaper Engine features.
-
----
-
-# Vision
-
-Komorebi is an experimental research project exploring what a browser can become
-when real-time rendering is treated as a first-class feature rather than an
-afterthought.
-
-Current development focuses on improving Wallpaper Engine compatibility,
-rendering accuracy, performance, and browser integration while keeping the
-implementation as isolated as possible from Firefox itself.
-
-Future work may eventually explore native scene creation, widgets, and more
-advanced rendering technologies, but these are long-term research directions
-rather than planned features.
-
----
-
-# Performance
-
-Komorebi is designed to preserve browser responsiveness through:
-
-- GPU-accelerated rendering
-- adaptive quality
-- adaptive frame rate
-- progressive asset loading
-- automatic pausing during fullscreen applications
-- reduced battery usage
-- reduced background activity
-
----
-
-# Current architecture
-
-Komorebi is intentionally isolated from Firefox itself.
-
-Only two Firefox files are modified:
-
-1. `browser/base/content/browser.xhtml`
-2. `browser/base/jar.mn`
-
-Everything else lives inside:
-
-```
-browser/base/content/komorebi/
-```
-
-The renderer is written in TypeScript and compiled into JavaScript before
-Firefox is built.
-
-```
-Firefox
-│
-├── browser.xhtml
-├── jar.mn
-└── Komorebi
-    ├── Renderer
-    ├── Scene Engine
-    ├── Asset Parsers
-    ├── Wallpaper Library
-    └── UI
-```
-
-This architecture minimizes merge conflicts with future Firefox releases.
-
----
-
-# Roadmap
-
-Completed:
-
-- ✅ Browser transparency
-- ✅ Video wallpapers
-- ✅ Wallpaper Engine scene renderer
-- ✅ Wallpaper Engine asset parsers
-- ✅ Effect system
-- ✅ Wallpaper library
-
-Current priorities:
-
-- Improve Wallpaper Engine compatibility
-- Expand effect coverage
-- Improve rendering accuracy
-- Continue performance optimizations
-- Improve browser integration
-
----
-
-# Known limitations
-
-The current scene engine targets WebGL1 (GLSL ES 1.00) and does not implement
-every Wallpaper Engine feature.
-
-Current limitations include:
-
-- no audio-reactive effects
-- no skeletal animation for puppet-warp meshes
-- no `web` or `application` Wallpaper Engine projects
-- effects requiring GLSL ES 3.00 (WebGL2) are unsupported
-- no automatic camera projection
-- no automatic camera parallax
-
----
-
-## Build and run
-
-Follow Mozilla's
-[Firefox build instructions](https://firefox-source-docs.mozilla.org/setup/),
-then run:
-
-```powershell
-./mach build
-./mach run
-```
-
-For front-end-only changes to Komorebi, `./mach build faster` skips
-C++/Rust compilation. The scene engine itself is TypeScript, compiled
-separately with `npx tsc -p src/tsconfig.build.json` from
-`browser/base/content/komorebi`.
+Install [MozillaBuild](https://firefox-source-docs.mozilla.org/setup/), then
+run `./mach build` and `./mach run`. For changes to Komorebi's front-end files,
+`./mach build faster` is enough.
 
 ## License
 

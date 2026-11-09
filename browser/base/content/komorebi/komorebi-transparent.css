@@ -11,14 +11,86 @@
    navigateur, jamais le fond opaque (#F9F9FB clair / #2B2A33 sombre et
    le wallpaper) que la page Activity Stream peint elle-meme. Cette
    feuille auteur (injectee par komorebi-process.js) l'ecrase donc. */
-html,
-body,
-#root,
-.outer-wrapper,
-.nova-outer-wrapper,
-.onboardingContainer,
-.onboardingContainer > .screen,
-.onboardingContainer .section-main,
-.onboardingContainer .main-content {
-  background: transparent !important;
+:root[komorebi-wallpaper] {
+  &,
+  body,
+  #root,
+  .outer-wrapper,
+  .nova-outer-wrapper,
+  .onboardingContainer,
+  .onboardingContainer > .screen,
+  .onboardingContainer .section-main,
+  .onboardingContainer .main-content {
+    background: transparent !important;
+  }
+}
+
+:root[komorebi-scheme="dark"] {
+  --komorebi-page-text: #fbfbfe;
+  --komorebi-page-halo: black;
+}
+
+:root[komorebi-scheme="light"] {
+  --komorebi-page-text: #20123a;
+  --komorebi-page-halo: white;
+}
+
+:root[komorebi-scheme] .logo-and-wordmark .wordmark {
+  fill: var(--komorebi-page-text) !important;
+  filter: drop-shadow(0 0 1px var(--komorebi-page-halo))
+    drop-shadow(0 1px 5px var(--komorebi-page-halo));
+}
+
+:root[komorebi-scheme] .top-site-outer .title,
+:root[komorebi-scheme] .top-site-outer .title *,
+:root[komorebi-scheme] .ds-header,
+:root[komorebi-scheme] .ds-header *,
+:root[komorebi-scheme] .section-title,
+:root[komorebi-scheme] .section-title * {
+  color: var(--komorebi-page-text) !important;
+  text-shadow:
+    0 0 2px var(--komorebi-page-halo),
+    0 1px 5px var(--komorebi-page-halo);
+}
+
+.komorebi-customize-button {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 52px;
+  margin-block-end: var(--space-large, 16px);
+  padding-block: var(--space-small, 8px);
+  padding-inline: 46px var(--space-large, 16px);
+  border: var(--border-width, 1px) solid var(--border-color, ButtonBorder);
+  border-radius: var(--border-radius-large, 8px);
+  background-color: var(--background-color-box, ButtonFace);
+  background-image: url("chrome://branding/content/about-logo.svg");
+  background-repeat: no-repeat;
+  background-position: 14px center;
+  background-size: 22px;
+  color: var(--text-color, ButtonText);
+  font: inherit;
+  font-weight: var(--font-weight-semibold, 600);
+  text-align: start;
+  cursor: pointer;
+
+  &::after {
+    content: "";
+    width: 16px;
+    height: 16px;
+    margin-inline-start: auto;
+    background: url("chrome://global/skin/icons/arrow-right.svg") center / contain no-repeat;
+    -moz-context-properties: fill;
+    fill: currentColor;
+  }
+}
+
+.komorebi-customize-button:hover {
+  background-color: var(--button-background-color-hover, ButtonFace);
+}
+
+.komorebi-customize-button:focus-visible {
+  outline: var(--focus-outline, 2px solid Highlight);
+  outline-offset: var(--focus-outline-offset, 2px);
 }
