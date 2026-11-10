@@ -282,16 +282,12 @@ jobs:
           & "C:\Program Files (x86)\NSIS\makensis.exe" "/DAPP_VERSION=$version" installer.nsi
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-Item Komorebi-Browser-Setup.exe | Select-Object Name, Length
-          $hash = (Get-FileHash Komorebi-Browser-Setup.exe -Algorithm SHA256).Hash.ToLower()
-          [IO.File]::WriteAllText("$PWD/Komorebi-Browser-Setup.exe.sha256", "$hash  Komorebi-Browser-Setup.exe`n")
-          Get-Content Komorebi-Browser-Setup.exe.sha256
+          (Get-FileHash Komorebi-Browser-Setup.exe -Algorithm SHA256).Hash.ToLower()
 
       - uses: actions/upload-artifact@v4
         with:
           name: Komorebi-Browser-Setup
-          path: |
-            Komorebi-Browser-Setup.exe
-            Komorebi-Browser-Setup.exe.sha256
+          path: Komorebi-Browser-Setup.exe
           compression-level: 0
 
       - name: Publish release
@@ -311,4 +307,4 @@ jobs:
             $title = "Komorebi Browser (Windows x64) #$env:GITHUB_RUN_NUMBER"
             $flags += "--prerelease"
           }
-          gh release create $tag Komorebi-Browser-Setup.exe Komorebi-Browser-Setup.exe.sha256 --repo $env:GITHUB_REPOSITORY --title $title --notes "Download and run Komorebi-Browser-Setup.exe. Komorebi-Browser-Setup.exe.sha256 is its SHA-256." --target $env:GITHUB_SHA @flags
+          gh release create $tag Komorebi-Browser-Setup.exe --repo $env:GITHUB_REPOSITORY --title $title --notes "Download and run Komorebi-Browser-Setup.exe." --target $env:GITHUB_SHA @flags

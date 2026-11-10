@@ -10,8 +10,8 @@
 
 // The Firefox updater is disabled at build time (--disable-updater), so
 // Komorebi updates itself from its GitHub releases: it looks for a newer
-// release, downloads the installer, checks its SHA-256 against the checksum
-// published next to it, then hands over to the installer, which waits for
+// release, downloads the installer, checks its SHA-256 against the digest
+// GitHub publishes for that asset, then hands over to the installer, which waits for
 // this browser to exit, installs over the same folder and starts it again.
 
 (function (global) {
@@ -178,8 +178,12 @@
     }
     const asset = name =>
       release.assets?.find(item => item.name === name)?.browser_download_url;
+    const digest = release.assets?.find(item => item.name === INSTALLER_ASSET)?.digest;
+    const sha256 = /^sha256:([0-9a-f]{64})$/i.exec(digest ?? "")?.[1]?.toLowerCase() ?? null;
     return {
+      // Older releases had no asset digest, only a .sha256 file next to the installer.
       checksumUrl: asset(CHECKSUM_ASSET) ?? null,
+      sha256,
       installerUrl: asset(INSTALLER_ASSET) ?? null,
       pageUrl: release.html_url ?? null,
       tag: release.tag_name,
@@ -382,9 +386,8 @@
     try {
       if (
         !latest?.installerUrl ||
-        !latest.checksumUrl ||
         !isTrustedURL(latest.installerUrl) ||
-        !isTrustedURL(latest.checksumUrl)
+        (!latest.sha256 && (!latest.checksumUrl || !isTrustedURL(latest.checksumUrl)))
       ) {
         setState({ error: "assets", latest, phase: "error" });
         return state;
@@ -392,7 +395,7 @@
       setState({ latest, phase: "downloading" });
       let expected;
       try {
-        expected = await fetchChecksum(latest.checksumUrl);
+        expected = latest.sha256 ?? (await fetchChecksum(latest.checksumUrl));
       } catch (error) {
         console.error("Komorebi could not read the update checksum", error);
         setState({ error: "checksum-missing", latest, phase: "error" });
