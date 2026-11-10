@@ -20,7 +20,7 @@ Komorebi lets you use your Wallpaper Engine wallpapers directly in your browser.
 
 Wallpapers run behind your pages, with mouse interaction and audio support for compatible wallpapers. You can also add your own images and videos without having Wallpaper Engine installed.
 
-https://github.com/user-attachments/assets/434cdabe-d264-4f9e-99a4-db01065f25e5
+https://github.com/user-attachments/assets/5e8a068c-95b6-46c4-aac9-cbd538686232
 
 ## Features
 
