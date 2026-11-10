@@ -45,6 +45,11 @@ export class SceneModel {
         this.audioTracks = this.createAudioTracks();
         this.particles = this.createParticles();
     }
+    /** Drops the package files once the layers are built; the model stays alive for the scene's scripts, which only read its JSON. */
+    releasePackage() {
+        this.entries = new Map();
+        this.materialPasses = null;
+    }
     // The colour the frame is cleared to before the first layer; null when the scene turns clearing off.
     get clearColor() {
         const general = this.scene.general ?? {};
@@ -123,7 +128,9 @@ export class SceneModel {
                 }
                 tracks.push({
                     data,
+                    group: object.id ?? object.name,
                     loop: object.playbackmode === "loop",
+                    random: object.playbackmode === "random",
                     mimeType: this.audioMimeType(path),
                     startSilent: object.startsilent === true,
                     title: object.name || path.split("/").pop() || path,

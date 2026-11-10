@@ -345,6 +345,7 @@ export class SceneRenderer {
         this.#scripts = null;
         this.#resourceManager.releaseLayers(this.#layers);
         this.#resourceManager.releaseParticles(this.#particles);
+        this.#renderPipeline.releaseTargets();
         this.#layers = [];
         this.#textLayers = [];
         this.#puppetLayers = [];

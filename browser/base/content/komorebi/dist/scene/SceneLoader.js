@@ -114,6 +114,7 @@ export class SceneLoader {
                 userProperties[name] = value;
             }
         }
+        sceneModel.releasePackage();
         return { sceneModel, layers: preparedLayers, particles: preparedParticles, userProperties };
     }
     async readUserProperties(packageSource) {
@@ -470,6 +471,11 @@ export class SceneLoader {
         }
     }
     preparePassTarget(layer, pass) {
+        // Unnamed outputs are consumed within the frame, so EffectRenderer lends them from a shared pool; only named targets persist between frames.
+        if (!pass.target) {
+            pass.pooled = true;
+            return;
+        }
         const gl = this.#graphics.gl;
         const outputTexture = gl.createTexture();
         if (!outputTexture) {

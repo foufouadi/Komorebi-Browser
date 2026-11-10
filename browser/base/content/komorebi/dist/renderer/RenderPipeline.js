@@ -55,6 +55,9 @@ export class RenderPipeline {
         this.#layerRenderer = new LayerRenderer(graphics, this.#program);
         this.#particleRenderer = new ParticleRenderer(graphics);
     }
+    releaseTargets() {
+        this.#effectRenderer.releaseTargets();
+    }
     setEffectsEnabled(enabled) {
         this.#effectsEnabled = enabled;
     }

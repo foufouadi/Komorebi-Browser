@@ -32,6 +32,7 @@ export class EffectRenderer {
     #matrixPasses = new WeakMap();
     #frametime = 1 / 60;
     #blackTexture = null;
+    #targetPool = new Map();
     #copyPositionBuffer;
     #copyTexCoordBuffer;
     constructor(graphics) {
@@ -88,12 +89,19 @@ export class EffectRenderer {
                 effectInput = previous;
             }
             const firstPass = passIndex === 0;
-            gl.bindFramebuffer(gl.FRAMEBUFFER, pass.framebuffer ?? null);
-            gl.viewport(0, 0, pass.outputWidth ?? layer.width, pass.outputHeight ?? layer.height);
+            const outputWidth = pass.outputWidth ?? layer.width;
+            const outputHeight = pass.outputHeight ?? layer.height;
+            const lent = pass.pooled
+                ? this.#lendTarget(outputWidth, outputHeight, previous.texture, effectInput.texture)
+                : null;
+            const framebuffer = lent?.framebuffer ?? pass.framebuffer ?? null;
+            const outputTexture = lent?.texture ?? pass.outputTexture;
+            gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+            gl.viewport(0, 0, outputWidth, outputHeight);
             gl.clearColor(0, 0, 0, 0);
             gl.clear(gl.COLOR_BUFFER_BIT);
             gl.useProgram(pass.program ?? null);
-            this.#setPassState(pass);
+            this.#setPassState(pass, framebuffer);
             const positionBuffer = firstPass
                 ? (layer.puppetEffectPositionBuffer ??
                     this.#prepareCopyPositionBuffer(layer.width, layer.height, Boolean(layer.text) && !this.#usesMatrix(pass)))
@@ -133,13 +141,13 @@ export class EffectRenderer {
             else {
                 gl.drawArrays(gl.TRIANGLES, 0, 6);
             }
-            if (pass.outputTexture) {
+            if (outputTexture) {
                 const output = {
-                    texture: pass.outputTexture,
-                    width: pass.outputWidth ?? layer.width,
-                    height: pass.outputHeight ?? layer.height,
-                    textureWidth: pass.outputWidth ?? layer.width,
-                    textureHeight: pass.outputHeight ?? layer.height,
+                    texture: outputTexture,
+                    width: outputWidth,
+                    height: outputHeight,
+                    textureWidth: outputWidth,
+                    textureHeight: outputHeight,
                 };
                 // A pass that renders into a named target leaves the image flow alone: "previous" keeps meaning the last untargeted result (godrays' final pass blends its rays onto it).
                 if (pass.target) {
@@ -244,14 +252,53 @@ export class EffectRenderer {
             textureHeight: 1,
         };
     }
-    #setPassState(pass) {
+    releaseTargets() {
+        const gl = this.#graphics.gl;
+        for (const targets of this.#targetPool.values()) {
+            for (const { texture, framebuffer } of targets) {
+                gl.deleteTexture(texture);
+                gl.deleteFramebuffer(framebuffer);
+            }
+        }
+        this.#targetPool.clear();
+    }
+    /**
+     * A pooled target of the given size that holds neither `busy` texture: the chain may still read the previous result and the input of the current effect.
+     */
+    #lendTarget(width, height, ...busy) {
+        const key = width + "x" + height;
+        let targets = this.#targetPool.get(key);
+        if (!targets) {
+            targets = [];
+            this.#targetPool.set(key, targets);
+        }
+        const free = targets.find(target => !busy.includes(target.texture));
+        if (free) {
+            return free;
+        }
+        const gl = this.#graphics.gl;
+        const texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        const framebuffer = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+        const target = { texture, framebuffer };
+        targets.push(target);
+        return target;
+    }
+    #setPassState(pass, framebuffer) {
         const gl = this.#graphics.gl;
         if (pass.blending === "additive") {
             gl.enable(gl.BLEND);
             gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE, gl.SRC_ALPHA, gl.ONE);
         }
         // Blending onto a freshly cleared intermediate target would apply alpha twice: once here, once when the layer is composited.
-        else if (pass.blending === "translucent" && !pass.framebuffer) {
+        else if (pass.blending === "translucent" && !framebuffer) {
             gl.enable(gl.BLEND);
             gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
         }
