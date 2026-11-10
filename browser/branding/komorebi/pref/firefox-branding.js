@@ -58,6 +58,8 @@ pref("browser.newtabpage.activity-stream.showSponsoredTopSites", false);
 pref("browser.newtabpage.activity-stream.showSponsoredCheckboxes", false);
 pref("browser.newtabpage.activity-stream.showWeather", false);
 pref("browser.newtabpage.activity-stream.widgets.weather.enabled", false);
+pref("browser.newtabpage.activity-stream.widgets.enabled", false);
+pref("browser.newtabpage.activity-stream.widgets.system.enabled", false);
 pref("browser.newtabpage.activity-stream.newtabWallpapers.user.enabled", true);
 pref("browser.newtabpage.activity-stream.newtabWallpapers.wallpaper", "firefox-orange");
 pref("browser.newtabpage.activity-stream.hideLogo", true);
