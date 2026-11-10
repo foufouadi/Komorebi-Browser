@@ -37,13 +37,19 @@ export class SceneAudioPlayer {
             url: URL.createObjectURL(track.blob),
         }));
         this.#index = 0;
-        this.#autoplay =
-            this.#tracks.length === 1 && !this.#tracks[0]?.startSilent;
+        // Wallpaper Engine plays every sound object that does not start
+        // silent; the silent ones wait for a script. Start on the first
+        // audible object, at a random track when it plays in random order.
+        const audible = this.#tracks.findIndex(track => !track.startSilent);
+        this.#autoplay = audible !== -1;
         this.#overlay.hidden = this.#tracks.length < 2 || !this.#overlayVisible;
         if (!this.#tracks.length) {
             return;
         }
-        this.#selectTrack(0);
+        const first = this.#autoplay ? audible : 0;
+        this.#selectTrack(this.#tracks[first].random
+            ? this.#pickRandom(this.#groupOf(first), -1)
+            : first);
         if (this.#autoplay) {
             this.play();
         }
@@ -118,7 +124,36 @@ export class SceneAudioPlayer {
     #createAudio() {
         this.#audio = new Audio();
         this.#audio.preload = "auto";
-        this.#audio.addEventListener("ended", () => this.next());
+        this.#audio.addEventListener("ended", () => this.#onEnded());
+    }
+    // A track that ends stays inside its sound object: a random object picks
+    // another of its tracks, a looping one plays its tracks again in order,
+    // and a single-shot one stops.
+    #onEnded() {
+        const track = this.#tracks[this.#index];
+        if (!track) {
+            return;
+        }
+        const group = this.#groupOf(this.#index);
+        if (track.random) {
+            this.#selectTrack(this.#pickRandom(group, this.#index));
+            this.play();
+        }
+        else if (track.loop) {
+            this.#selectTrack(group[(group.indexOf(this.#index) + 1) % group.length]);
+            this.play();
+        }
+        else {
+            this.#updatePlayButton();
+        }
+    }
+    #groupOf(index) {
+        const group = this.#tracks[index].group;
+        return this.#tracks.flatMap((track, i) => (track.group === group ? [i] : []));
+    }
+    #pickRandom(group, current) {
+        const choices = group.length > 1 ? group.filter(i => i !== current) : group;
+        return choices[Math.floor(Math.random() * choices.length)];
     }
     #createOverlay() {
         this.#overlay = document.createElement("section");
