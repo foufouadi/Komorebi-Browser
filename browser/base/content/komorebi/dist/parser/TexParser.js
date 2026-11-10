@@ -5,6 +5,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
+import { decodeDXT, dxtByteLength } from "./DxtDecoder.js";
 const TEX_FORMAT = {
     RGBA8888: 0,
     DXT5: 4,
@@ -12,7 +13,7 @@ const TEX_FORMAT = {
     DXT1: 7,
 };
 const LZ4_BULK_COPY_BYTES = 64;
-// Atlas images past the first are only decoded while their RGBA size stays under this; a long GIF can span dozens of 8K images.
+// Atlas images past the first are only kept while their in-memory size (RGBA, or the DXT blocks) stays under this; a long GIF can span dozens of 8K images.
 const EXTRA_IMAGE_BUDGET = 640 * 1024 * 1024;
 export class TexParser {
     bytes;
@@ -91,9 +92,10 @@ export class TexParser {
                 let usable = true;
                 if (imageIndex > 0) {
                     // Only the base level of an extra image is ever used.
-                    usable = mipmapIndex === 0 && extraBytes + mipWidth * mipHeight * 4 <= EXTRA_IMAGE_BUDGET;
+                    const levelBytes = dxtByteLength(format, mipWidth, mipHeight) || mipWidth * mipHeight * 4;
+                    usable = mipmapIndex === 0 && extraBytes + levelBytes <= EXTRA_IMAGE_BUDGET;
                     if (usable) {
-                        extraBytes += mipWidth * mipHeight * 4;
+                        extraBytes += levelBytes;
                     }
                 }
                 const blocks = !usable
@@ -133,12 +135,20 @@ export class TexParser {
                 flags & 4 ? this.readSpriteSheet(primary.width, primary.height) : null;
             return result;
         }
+        // DXT stays compressed for the GPU (the uploader decodes it only when the S3TC extension is missing).
+        const isDXT = dxtByteLength(format, 1, 1) > 0;
+        if (isDXT && blocks.length !== dxtByteLength(format, primary.width, primary.height)) {
+            throw new Error(`Invalid DXT texture size: ${blocks.length}/${dxtByteLength(format, primary.width, primary.height)}`);
+        }
         const result = {
+            compressed: isDXT
+                ? { format, levels: images[0].filter(level => level.data.length) }
+                : null,
             flags,
             format,
             height,
             images,
-            pixels: this.decodePixels(format, primary.width, primary.height, blocks),
+            pixels: isDXT ? null : this.decodePixels(format, primary.width, primary.height, blocks),
             textureHeight: primary.height || textureHeight,
             textureWidth: primary.width || textureWidth,
             type: "pixels",
@@ -154,8 +164,13 @@ export class TexParser {
             const extras = [];
             for (const mipmaps of images.slice(1, decodedImages)) {
                 try {
+                    const level = mipmaps[0];
+                    if (isDXT && level.data.length !== dxtByteLength(format, level.width, level.height)) {
+                        throw new Error("Invalid DXT texture size");
+                    }
                     extras.push({
-                        pixels: this.decodePixels(format, mipmaps[0].width, mipmaps[0].height, mipmaps[0].data),
+                        compressed: isDXT ? { format, levels: [level] } : null,
+                        pixels: isDXT ? null : this.decodePixels(format, level.width, level.height, level.data),
                         textureHeight: mipmaps[0].height,
                         textureWidth: mipmaps[0].width,
                     });
@@ -291,22 +306,7 @@ export class TexParser {
             format !== TEX_FORMAT.DXT5) {
             throw new Error(`Unsupported TEX format: ${format}`);
         }
-        const pixels = new Uint8ClampedArray(width * height * 4);
-        const blockSize = format === TEX_FORMAT.DXT1 ? 8 : 16;
-        const expectedLength = Math.ceil(width / 4) * Math.ceil(height / 4) * blockSize;
-        if (data.length !== expectedLength) {
-            throw new Error(`Invalid DXT texture size: ${data.length}/${expectedLength}`);
-        }
-        let offset = 0;
-        for (let blockY = 0; blockY < Math.ceil(height / 4); blockY++) {
-            for (let blockX = 0; blockX < Math.ceil(width / 4); blockX++) {
-                const alpha = this.decodeAlpha(format, data, offset);
-                const colorOffset = offset + (format === TEX_FORMAT.DXT1 ? 0 : 8);
-                this.decodeColorBlock(data, colorOffset, pixels, width, height, blockX, blockY, alpha, format === TEX_FORMAT.DXT1);
-                offset += blockSize;
-            }
-        }
-        return pixels;
+        return decodeDXT(format, width, height, data);
     }
     decodeChannels(channelCount, width, height, data) {
         const expectedLength = width * height * channelCount;
@@ -323,88 +323,6 @@ export class TexParser {
             pixels[destination++] = 255;
         }
         return pixels;
-    }
-    decodeAlpha(format, data, offset) {
-        if (format === TEX_FORMAT.DXT1) {
-            return null;
-        }
-        const values = new Uint8Array(16);
-        if (format === TEX_FORMAT.DXT3) {
-            for (let index = 0; index < 16; index++) {
-                const nibble = (data[offset + Math.floor(index / 2)] >> ((index % 2) * 4)) & 15;
-                values[index] = nibble * 17;
-            }
-            return values;
-        }
-        const palette = new Uint8Array(8);
-        palette[0] = data[offset];
-        palette[1] = data[offset + 1];
-        if (palette[0] > palette[1]) {
-            for (let index = 1; index <= 6; index++) {
-                palette[index + 1] = Math.round(((7 - index) * palette[0] + index * palette[1]) / 7);
-            }
-        }
-        else {
-            for (let index = 1; index <= 4; index++) {
-                palette[index + 1] = Math.round(((5 - index) * palette[0] + index * palette[1]) / 5);
-            }
-            palette[6] = 0;
-            palette[7] = 255;
-        }
-        let bits = 0n;
-        for (let index = 0; index < 6; index++) {
-            bits |= BigInt(data[offset + 2 + index]) << BigInt(index * 8);
-        }
-        for (let index = 0; index < 16; index++) {
-            values[index] = palette[Number((bits >> BigInt(index * 3)) & 7n)];
-        }
-        return values;
-    }
-    decodeColorBlock(data, offset, pixels, width, height, blockX, blockY, alpha, allowTransparency) {
-        const color0 = data[offset] | (data[offset + 1] << 8);
-        const color1 = data[offset + 2] | (data[offset + 3] << 8);
-        const colors = [this.decode565(color0), this.decode565(color1)];
-        if (color0 > color1 || !allowTransparency) {
-            colors.push(this.mix(colors[0], colors[1], 2, 1, 3));
-            colors.push(this.mix(colors[0], colors[1], 1, 2, 3));
-        }
-        else {
-            colors.push(this.mix(colors[0], colors[1], 1, 1, 2));
-            colors.push([0, 0, 0, 0]);
-        }
-        const indices = data[offset + 4] |
-            (data[offset + 5] << 8) |
-            (data[offset + 6] << 16) |
-            (data[offset + 7] << 24);
-        for (let index = 0; index < 16; index++) {
-            const x = blockX * 4 + (index % 4);
-            const y = blockY * 4 + Math.floor(index / 4);
-            if (x >= width || y >= height) {
-                continue;
-            }
-            const color = colors[(indices >>> (index * 2)) & 3];
-            const destination = (y * width + x) * 4;
-            pixels[destination] = color[0];
-            pixels[destination + 1] = color[1];
-            pixels[destination + 2] = color[2];
-            pixels[destination + 3] = alpha ? alpha[index] : color[3];
-        }
-    }
-    decode565(value) {
-        return [
-            Math.round(((value >> 11) & 31) * (255 / 31)),
-            Math.round(((value >> 5) & 63) * (255 / 63)),
-            Math.round((value & 31) * (255 / 31)),
-            255,
-        ];
-    }
-    mix(first, second, firstWeight, secondWeight, divisor) {
-        return [
-            Math.round((first[0] * firstWeight + second[0] * secondWeight) / divisor),
-            Math.round((first[1] * firstWeight + second[1] * secondWeight) / divisor),
-            Math.round((first[2] * firstWeight + second[2] * secondWeight) / divisor),
-            255,
-        ];
     }
     decompressLZ4(source, outputLength) {
         const output = new Uint8Array(outputLength);

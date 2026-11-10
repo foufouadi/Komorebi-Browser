@@ -47,6 +47,7 @@
         content/browser/komorebi/dist/io/BinaryReader.js (content/komorebi/dist/io/BinaryReader.js)
         content/browser/komorebi/dist/io/PackageReader.js (content/komorebi/dist/io/PackageReader.js)
         content/browser/komorebi/dist/math/Matrix4.js (content/komorebi/dist/math/Matrix4.js)
+        content/browser/komorebi/dist/parser/DxtDecoder.js (content/komorebi/dist/parser/DxtDecoder.js)
         content/browser/komorebi/dist/parser/MaterialParser.js (content/komorebi/dist/parser/MaterialParser.js)
         content/browser/komorebi/dist/parser/MdlParser.js (content/komorebi/dist/parser/MdlParser.js)
         content/browser/komorebi/dist/parser/ShaderIncludes.js (content/komorebi/dist/parser/ShaderIncludes.js)

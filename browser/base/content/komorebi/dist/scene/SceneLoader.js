@@ -532,7 +532,10 @@ export class SceneLoader {
         }
         finally {
             asset.bitmap?.close();
+            // Drop the CPU copies (RGBA or DXT blocks, every mip level) so they can be collected.
             texture.pixels = null;
+            texture.compressed = null;
+            texture.images = null;
         }
     }
     async uploadVideoTexture(texture) {
