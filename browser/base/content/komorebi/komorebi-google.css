@@ -153,7 +153,9 @@
   }
 
   #rcnt > div:not(#center_col, #rhs) {
-    :not(img, svg, svg *) {
+    /* Google now nests #center_col in this block too: leave its result
+       cards alone, or their glass is wiped out. */
+    :not(img, svg, svg *, #center_col, #center_col *) {
       border-color: rgb(255 255 255 / 18%) !important;
       background-color: transparent !important;
       background-image: none !important;

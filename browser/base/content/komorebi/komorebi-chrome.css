@@ -73,7 +73,7 @@ body {
   box-shadow: var(--box-shadow-level-2);
   color: var(--komorebi-text, var(--text-color));
   font: menu;
-  opacity: 0.6;
+  opacity: 0.85;
   backdrop-filter: blur(16px);
   transition: opacity 150ms;
 }
@@ -126,19 +126,19 @@ body {
 }
 
 .komorebi-scene-audio-button[data-action="play"] {
-  --komorebi-audio-icon: url("chrome://global/skin/media/pause-fill.svg");
+  --komorebi-audio-icon: url("resource://content-accessible/media/pause-fill.svg");
 }
 
 .komorebi-scene-audio-button[data-action="play"][data-state="paused"] {
-  --komorebi-audio-icon: url("chrome://global/skin/media/play-fill.svg");
+  --komorebi-audio-icon: url("resource://content-accessible/media/play-fill.svg");
 }
 
 .komorebi-scene-audio-button[data-action="mute"] {
-  --komorebi-audio-icon: url("chrome://global/skin/media/audio.svg");
+  --komorebi-audio-icon: url("resource://content-accessible/media/audio.svg");
 }
 
 .komorebi-scene-audio-button[data-action="mute"][data-state="muted"] {
-  --komorebi-audio-icon: url("chrome://global/skin/media/audio-muted.svg");
+  --komorebi-audio-icon: url("resource://content-accessible/media/audio-muted.svg");
 }
 
 .komorebi-scene-audio-title {
@@ -192,7 +192,9 @@ body {
 }
 
 #komorebi-toolbar-button {
-  list-style-image: url("chrome://branding/content/icon32.png");
+  list-style-image: url("chrome://branding/content/komorebi-mark.svg");
+  -moz-context-properties: fill, fill-opacity;
+  fill: currentColor;
 }
 
 #browser,
@@ -448,7 +450,7 @@ body {
 }
 
 .komorebi-nav-item[data-page="sound"] .komorebi-nav-icon {
-  background-image: url("chrome://global/skin/media/audio.svg");
+  background-image: url("resource://content-accessible/media/audio.svg");
 }
 
 .komorebi-nav-item[data-page="appearance"] .komorebi-nav-icon {

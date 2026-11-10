@@ -1,0 +1,5 @@
+<!-- Copyright (c) 2026 Foued Attar
+   - This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-61 -86 864 864"><rect x="-61" y="-86" width="864" height="864" rx="196" fill="#1C1B22"/><g fill="#FFFFFF"><path d="M290 58 L290 396 C266 468 186 556 104 612 C100 612 99 610 99 606 L99 330 C99 196 178 92 290 58 Z"/><path d="M284 452 C300 290 360 150 650 112 C620 235 480 330 345 400 C318 410 296 426 284 452 Z"/><path d="M334 436 C440 372 604 402 656 640 C520 632 390 570 334 436 Z"/></g></svg>
