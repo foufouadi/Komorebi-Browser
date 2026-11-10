@@ -17,6 +17,9 @@ bitflags! {
         const TEXTURE_EXTERNAL_ESSL1 = 1 << 12;
         const TEXTURE_EXTERNAL_BT709 = 1 << 13;
         const DEBUG = 1 << 14;
+        /// Build the analytical variant of cs_path_tile in addition to the
+        /// ssaa4 and ssaa8 ones.
+        const PATH_AA_ALL_MODES = 1 << 15;
     }
 }
 
@@ -67,15 +70,27 @@ pub fn get_shader_features(flags: ShaderFeatureFlags) -> ShaderFeatures {
     // Cache shaders
     shaders.insert("cs_blur", vec!["ALPHA_TARGET".to_string(), "COLOR_TARGET".to_string()]);
 
-    shaders.insert("ps_quad_mask", vec![String::new(), "FAST_PATH".to_string()]);
+    shaders.insert("ps_quad_mask", vec![String::new(), "FAST_PATH".to_string(), "SUPERELLIPSE".to_string()]);
 
     for name in &[
         "cs_line_decoration",
-        "cs_border_segment",
-        "cs_border_solid",
         "cs_svg_filter_node",
     ] {
         shaders.insert(name, vec![String::new()]);
+    }
+
+    let mut path_tile_features = vec!["PATH_SSAA4".to_string(), "PATH_SSAA8".to_string()];
+    if flags.contains(ShaderFeatureFlags::PATH_AA_ALL_MODES) {
+        path_tile_features.push(String::new());
+    }
+    shaders.insert("ps_path_tile", path_tile_features.clone());
+    shaders.insert("cs_path_tile", path_tile_features);
+
+    for name in &[
+        "cs_border_segment",
+        "cs_border_solid",
+    ] {
+        shaders.insert(name, vec![String::new(), "SUPERELLIPSE".to_string()]);
     }
 
     let mut base_prim_features = FeatureList::new();
@@ -168,7 +183,7 @@ pub fn get_shader_features(flags: ShaderFeatureFlags) -> ShaderFeatures {
 
     shaders.insert("ps_quad_repeat", vec![base_prim_features.finish()]);
 
-    shaders.insert("ps_quad_box_shadow", vec![base_prim_features.finish()]);
+    shaders.insert("ps_quad_box_shadow", vec![base_prim_features.finish(), "SUPERELLIPSE".to_string()]);
 
     // Like ps_quad_textured, ps_quad_yuv needs per-texture-kind variants so that
     // the YUV planes are sampled with the correct sampler type.

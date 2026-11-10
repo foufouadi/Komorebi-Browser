@@ -23,6 +23,16 @@ SP3_CRITICAL_TESTS = [
     "test-android-hw-a55-14-0-aarch64-shippable/opt-browsertime-benchmark-speedometer3-mobile-fenix",
 ]
 
+# Tests that run on the Speedometer 3 harness, and therefore share its native
+# profiling setup, its power measurements and its longer run times.
+SPEEDOMETER_3_HARNESS_TEST_NAMES = ("speedometer3", "speedometer-experimental")
+
+
+def uses_speedometer_3_harness(test):
+    return any(
+        name in test.get("test-name", "") for name in SPEEDOMETER_3_HARNESS_TEST_NAMES
+    )
+
 
 class RaptorSchema(Schema, kw_only=True):
     activity: Optional[optionally_keyed_by("app", str, use_msgspec=True)] = None  # type: ignore
@@ -122,6 +132,7 @@ def split_apps(config, tests):
     }
 
     for test in tests:
+        resolve_keyed_by(test, "raptor.apps", item_name=test["test-name"])
         apps = test["raptor"].pop("apps", None)
         if not apps:
             yield test
@@ -180,7 +191,8 @@ def split_raptor_subtests(config, tests):
         subtests = test["raptor"].pop("subtests", None)
         if not subtests:
             if all(
-                p not in test["test-platform"] for p in ("macosx1400", "macosx1500")
+                p not in test["test-platform"]
+                for p in ("macosx1400", "macosx1500", "macosx2700")
             ):
                 yield test
             continue
@@ -284,8 +296,8 @@ def split_page_load_by_url(config, tests):
 
         if len(subtest_symbol) > 10 and "ytp" not in subtest_symbol:
             raise Exception(
-                "Treeherder symbol %s is larger than 10 char! Please use a different symbol."
-                % subtest_symbol
+                f"Treeherder symbol {subtest_symbol} is larger than 10 char! "
+                "Please use a different symbol."
             )
 
         if test["test-name"].startswith("browsertime-"):
@@ -410,15 +422,13 @@ def add_extra_options(config, tests):
                 )
 
         if (
-            ("android-hw-p6" in test_platform or "android-hw-s24" in test_platform)
-            and "speedometer2-" not in test["test-name"]
-            # Bug 1943674 resolve why --power-test causes permafails on certain mobile platforms and browsers
-        ):
-            # Bug 2037511 Temporarily disable power-test option for tp6m on a55s
-            if "--power-test" not in extra_options:
-                extra_options.append("--power-test")
-        elif "windows" in test_platform and any(
-            t in test["test-name"] for t in ("speedometer3", "tp6")
+            "android-hw-p6" in test_platform or "android-hw-s24" in test_platform
+        ) and not test["test-name"].startswith("browsertime-power-"):
+            # Bug 2089570 - USB power meters are disabled on p6 and s24
+            if "--power-test" in extra_options:
+                extra_options.remove("--power-test")
+        elif "windows" in test_platform and (
+            uses_speedometer_3_harness(test) or "tp6" in test["test-name"]
         ):
             extra_options.append("--power-test")
 
@@ -439,7 +449,7 @@ def modify_mozharness_configs(config, tests):
         if "mac" in test_platform:
             mozharness["config"] = ["raptor/mac_external_browser_config.py"]
         elif "windows" in test_platform:
-            mozharness["config"] = ["raptor/windows_external_browser_config.py"]
+            mozharness["config"] = ["raptor/windows_config.py"]
         elif "linux" in test_platform:
             mozharness["config"] = ["raptor/linux_external_browser_config.py"]
         elif "android" in test_platform:
@@ -467,7 +477,7 @@ def apply_raptor_device_optimization(config, tests):
     # For now, only change the back stop optimization strategy for A55 devices
     for test in tests:
         if test["test-platform"].startswith("android-hw-a55"):
-            test["optimization"] = {"skip-unless-backstop": None}
+            test["optimization"] = {"perf-cadence-backstop": None}
         yield test
 
 
@@ -513,6 +523,22 @@ def setup_autoland_retriggers(config, tasks):
 
 
 @task_transforms.add
+def setup_task_env(config, tasks):
+    """Sets up the env for the tasks."""
+    for task in tasks:
+        env = task.setdefault("worker", {}).setdefault("env", {})
+
+        # Tell the harness which task it is running as for critical alerting
+        env["RAPTOR_TASK_LABEL"] = task["label"]
+
+        # Prevent power meter reset on lambdatest tasks
+        if task["worker"]["os"] == "linux-lambda":
+            env["DISABLE_USB_POWER_METER_RESET"] = "1"
+
+        yield task
+
+
+@task_transforms.add
 def setup_internal_artifacts(config, tasks):
     for task in tasks:
         if (
@@ -531,87 +557,6 @@ def setup_internal_artifacts(config, tasks):
                 "type": "directory",
             })
         yield task
-
-
-@task_transforms.add
-def select_tasks_to_lambda(config, tasks):
-    """
-    all motionmark tests
-    speedometer3 test
-    unity-webgl test
-    all youtube-playback tests (including power)
-    all vpl (video-playback-latency) tests
-    all pageload tests (ideally fenix/CaR/ChR)
-    jetstream2/jetstream3 benchmarks
-    background/foreground resource tests (browsertime-power idle/idle-bg)
-    trr-* performance tests
-
-    """
-    tests_to_run_at_lambdatest = [
-        "motionmark-1-3",
-        "motionmark-htmlsuite-1-3",
-        "speedometer3",
-        "unity-webgl",
-        "video-playback-latency",
-        "youtube-playback-av1-sfr",
-        "youtube-playback-hfr",
-        "youtube-playback-vp9-sfr",
-        "youtube-playback-h264-sfr",
-        "youtube-playback-h264-720p60",
-        "youtube-playback-vp9-720p60",
-        "tp6m",
-        "jetstream2",
-        "jetstream3",
-        "browsertime-power",
-        "browsertime-trr-performance",
-    ]
-
-    # Bug 2017151 - newly-migrated tests run at tier 2 while stabilizing on LT
-    tests_to_force_tier2 = [
-        "youtube-playback-h264-sfr",
-        "youtube-playback-h264-720p60",
-        "youtube-playback-vp9-720p60",
-        "jetstream2",
-        "jetstream3",
-        "browsertime-power",
-        "browsertime-trr-performance",
-    ]
-
-    def redirect_to_lt(task):
-        task["tags"]["os"] = "linux-lambda"
-        task["worker"]["os"] = "linux-lambda"
-        task["worker-type"] = "t-lambda-perf-a55"
-        task["worker"]["env"]["TASKCLUSTER_WORKER_TYPE"] = "t-lambda-perf-a55"
-        cmds = []
-        for cmd in task["worker"]["command"]:
-            # Bug 1981862 - issues with condprof setup @ lambdatest
-            cmds.append([
-                c.replace(
-                    "/builds/taskcluster/script.py",
-                    "/home/ltuser/taskcluster/script.py",
-                )
-                for c in cmd
-                if not c.startswith("--conditioned-profile")
-            ])
-        task["worker"]["command"] = cmds
-        task["worker"]["env"]["DISABLE_USB_POWER_METER_RESET"] = "1"
-        # Bug 2017151 - newly-migrated tests run at tier 2 while stabilizing on LT
-        if any(t in task["label"] for t in tests_to_force_tier2):
-            th = task.setdefault("treeherder", {})
-            th["tier"] = max(th.get("tier", 1), 2)
-        return task
-
-    for task in tasks:
-        if not ("android" in task["label"] and "a55" in task["label"]):
-            yield task
-            continue
-        if not any(t in task["label"] for t in tests_to_run_at_lambdatest):
-            yield task
-            continue
-        if task["worker-type"] != "t-bitbar-gw-perf-a55":
-            yield task
-            continue
-        yield redirect_to_lt(task)
 
 
 @transforms.add
@@ -709,14 +654,14 @@ def add_etw_profile(config, tests):
             extra_options.extend([
                 "--browsertime-arg=chrome.args=--enable-features=EnableEtwExports",
                 "--browsertime-arg=chrome.args=--enable-benchmarking",
-                "--browsertime-arg=chrome.args=--js-flags=--perf-prof",
                 "--browsertime-arg=chrome.args=--js-flags=--enable-etw-stack-walking",
                 "--browsertime-arg=chrome.args=--js-flags=--interpreted-frames-native-stack",
                 "--browsertime-arg=chrome.args=--js-flags=--no-turbo-inlining",
+                "--browsertime-arg=chrome.args=--js-flags=--no-maglev-inlining",
                 "--browsertime-arg=chrome.args=--js-flags=--no-compact-code-space",
             ])
 
-        if "speedometer3" in test.get("test-name", ""):
+        if uses_speedometer_3_harness(test):
             test["max-run-time"] = 4200  # seconds
             if "--extra-profiler-run" in extra_options:
                 extra_options.remove("--extra-profiler-run")
@@ -735,9 +680,7 @@ def add_etw_profile(config, tests):
             })
 
     for test in tests:
-        if "win" in test.get("test-platform", "") and "speedometer3" in test.get(
-            "test-name", ""
-        ):
+        if "win" in test.get("test-platform", "") and uses_speedometer_3_harness(test):
             np_test = deepcopy(test)
             np_test["test-name"] += "-native-profiling"
             np_test["try-name"] += "-native-profiling"
@@ -765,7 +708,7 @@ def add_samply_profile(config, tests):
             "extra-options", []
         )
 
-        if "speedometer3" in test.get("test-name", ""):
+        if uses_speedometer_3_harness(test):
             test["max-run-time"] = 4200  # seconds
             if "--extra-profiler-run" in extra_options:
                 extra_options.remove("--extra-profiler-run")
@@ -804,7 +747,7 @@ def add_samply_profile(config, tests):
 
     for test in tests:
         if (
-            "speedometer3" in test.get("test-name", "")
+            uses_speedometer_3_harness(test)
             and "macos" in test.get("test-platform", "")
             and test.get("app") in ["firefox"]
         ):
@@ -835,7 +778,7 @@ def add_perf_profile(config, tests):
             "extra-options", []
         )
 
-        if "speedometer3" in test.get("test-name", ""):
+        if uses_speedometer_3_harness(test):
             test["max-run-time"] = 4200  # seconds
             if "--extra-profiler-run" in extra_options:
                 extra_options.remove("--extra-profiler-run")
@@ -860,7 +803,7 @@ def add_perf_profile(config, tests):
 
     for test in tests:
         if (
-            "speedometer3" in test.get("test-name", "")
+            uses_speedometer_3_harness(test)
             and "linux" in test.get("test-platform", "")
             and test.get("app") == "firefox"
         ):

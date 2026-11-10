@@ -181,8 +181,7 @@ std::unique_ptr<VCMTiming> CreateVCMTiming(
       config.video_jitter_timing_factory
           ? config.video_jitter_timing_factory->Create(env)
           : nullptr;
-  return std::make_unique<VCMTiming>(&env.clock(), env.field_trials(),
-                                     RenderingSimulator::kRenderDelay,
+  return std::make_unique<VCMTiming>(env, RenderingSimulator::kRenderDelay,
                                      std::move(video_jitter_timing));
 }
 
@@ -231,7 +230,7 @@ class RenderingSimulatorStream : public RtcEventLogDriver::StreamInterface {
     RenderingSimulator::Stream stream = collector_.GetStream();
     if (!stream.IsEmpty()) {
       RTC_DCHECK_NE(stream.ssrc, 0u);
-      results_.streams.push_back(stream);
+      results_.streams.push_back(std::move(stream));
     }
   }
 
@@ -246,7 +245,8 @@ class RenderingSimulatorStream : public RtcEventLogDriver::StreamInterface {
 
 }  // namespace
 
-RenderingSimulator::RenderingSimulator(Config config) : config_(config) {}
+RenderingSimulator::RenderingSimulator(Config config)
+    : config_(std::move(config)) {}
 
 RenderingSimulator::~RenderingSimulator() = default;
 

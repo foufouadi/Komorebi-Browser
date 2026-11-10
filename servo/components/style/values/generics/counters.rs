@@ -6,7 +6,6 @@
 
 use crate::counter_style::CounterStyle;
 use crate::derives::*;
-use crate::values::specified::Attr;
 use crate::values::CustomIdent;
 use std::fmt::{self, Write};
 use std::ops::Deref;
@@ -49,7 +48,7 @@ where
         self.name.to_css(dest)?;
         if self.is_reversed {
             dest.write_char(')')?;
-            if self.value == i32::min_value() {
+            if self.value == i32::MIN {
                 return Ok(());
             }
         }
@@ -306,16 +305,11 @@ pub enum GenericContentItem<I> {
     NoOpenQuote,
     /// `no-close-quote`.
     NoCloseQuote,
-    /// `-moz-alt-content`.
-    #[cfg(feature = "gecko")]
-    MozAltContent,
     /// `-moz-label-content`.
     /// This is needed to make `accesskey` work for XUL labels. It's basically
     /// attr(value) otherwise.
     #[cfg(feature = "gecko")]
     MozLabelContent,
-    /// `attr([namespace? `|`]? ident)`
-    Attr(Attr),
     /// image-set(url) | url(url)
     Image(I),
 }

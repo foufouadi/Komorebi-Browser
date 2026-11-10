@@ -38,7 +38,7 @@ class PreallocatedProcessManagerImpl final : public nsIObserver {
   // See comments on PreallocatedProcessManager for these methods.
   void AddBlocker(ContentParent* aParent);
   void RemoveBlocker(ContentParent* aParent);
-  UniqueContentParentKeepAlive Take(const nsACString& aRemoteType);
+  UniqueContentParentKeepAlive Take(const RemoteType& aRemoteType);
   void Erase(ContentParent* aParent);
 
   PreallocatedProcessManagerImpl(const PreallocatedProcessManagerImpl&) =
@@ -168,13 +168,6 @@ void PreallocatedProcessManagerImpl::RereadPrefs() {
     int32_t number = 1;
     if (mozilla::FissionAutostart()) {
       number = StaticPrefs::dom_ipc_processPrelaunch_fission_number();
-      // limit preallocated processes on low-mem machines
-      PRUint64 bytes = PR_GetPhysicalMemorySize();
-      if (bytes > 0 &&
-          bytes <=
-              StaticPrefs::dom_ipc_processPrelaunch_lowmem_mb() * 1024 * 1024) {
-        number = 1;
-      }
     }
     if (number >= 0) {
       Enable(number);
@@ -189,7 +182,7 @@ void PreallocatedProcessManagerImpl::RereadPrefs() {
 }
 
 UniqueContentParentKeepAlive PreallocatedProcessManagerImpl::Take(
-    const nsACString& aRemoteType) {
+    const RemoteType& aRemoteType) {
   if (!IsEnabled()) {
     return nullptr;
   }
@@ -269,8 +262,8 @@ void PreallocatedProcessManagerImpl::RemoveBlocker(ContentParent* aParent) {
 bool PreallocatedProcessManagerImpl::CanAllocate() {
   return IsEnabled() && sNumBlockers == 0 &&
          mPreallocatedProcesses.Length() < mNumberPreallocs && !IsShutdown() &&
-         (FissionAutostart() ||
-          !ContentParent::IsMaxProcessCountReached(DEFAULT_REMOTE_TYPE));
+         (FissionAutostart() || !ContentParent::IsMaxProcessCountReached(
+                                    RemoteType(RemoteType::Kind::WebContent)));
 }
 
 void PreallocatedProcessManagerImpl::AllocateAfterDelay() {
@@ -383,24 +376,23 @@ bool PreallocatedProcessManager::Enabled() {
 }
 
 /* static */
-void PreallocatedProcessManager::AddBlocker(const nsACString& aRemoteType,
+void PreallocatedProcessManager::AddBlocker(const RemoteType& aRemoteType,
                                             ContentParent* aParent) {
   MOZ_LOG(ContentParent::GetLog(), LogLevel::Debug,
-          ("AddBlocker: %s %p (sNumBlockers=%d)",
-           PromiseFlatCString(aRemoteType).get(), aParent,
-           PreallocatedProcessManagerImpl::sNumBlockers));
+          ("AddBlocker: %s %p (sNumBlockers=%d)", aRemoteType.Stringify().get(),
+           aParent, PreallocatedProcessManagerImpl::sNumBlockers));
   if (auto impl = GetPPMImpl()) {
     impl->AddBlocker(aParent);
   }
 }
 
 /* static */
-void PreallocatedProcessManager::RemoveBlocker(const nsACString& aRemoteType,
+void PreallocatedProcessManager::RemoveBlocker(const RemoteType& aRemoteType,
                                                ContentParent* aParent) {
-  MOZ_LOG(ContentParent::GetLog(), LogLevel::Debug,
-          ("RemoveBlocker: %s %p (sNumBlockers=%d)",
-           PromiseFlatCString(aRemoteType).get(), aParent,
-           PreallocatedProcessManagerImpl::sNumBlockers));
+  MOZ_LOG(
+      ContentParent::GetLog(), LogLevel::Debug,
+      ("RemoveBlocker: %s %p (sNumBlockers=%d)", aRemoteType.Stringify().get(),
+       aParent, PreallocatedProcessManagerImpl::sNumBlockers));
   if (auto impl = GetPPMImpl()) {
     impl->RemoveBlocker(aParent);
   }
@@ -408,7 +400,7 @@ void PreallocatedProcessManager::RemoveBlocker(const nsACString& aRemoteType,
 
 /* static */
 UniqueContentParentKeepAlive PreallocatedProcessManager::Take(
-    const nsACString& aRemoteType) {
+    const RemoteType& aRemoteType) {
   if (auto impl = GetPPMImpl()) {
     return impl->Take(aRemoteType);
   }

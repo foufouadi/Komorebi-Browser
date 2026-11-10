@@ -2,10 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/** @import {Store} from "resource://newtab/lib/Store.sys.mjs" */
+
 import {
   actionTypes as at,
   actionCreators as ac,
 } from "resource://newtab/common/Actions.mjs";
+import {
+  isSpaceOverridden,
+  SPACE_IDS,
+} from "resource://newtab/common/PageLayoutVariants.mjs";
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
@@ -30,7 +36,7 @@ const DEFAULT_SECTION_LAYOUT = [
         columnCount: 4,
         tiles: [
           {
-            size: "large",
+            size: "medium",
             position: 0,
             hasAd: false,
             hasExcerpt: true,
@@ -43,31 +49,37 @@ const DEFAULT_SECTION_LAYOUT = [
           },
           {
             size: "medium",
-            position: 1,
-            hasAd: true,
-            hasExcerpt: false,
-          },
-          {
-            size: "medium",
             position: 3,
             hasAd: false,
             hasExcerpt: false,
           },
           {
             size: "medium",
-            position: 5,
+            position: 1,
+            hasAd: true,
+            hasExcerpt: false,
+          },
+          {
+            size: "medium",
+            position: 4,
             hasAd: false,
             hasExcerpt: true,
           },
           {
             size: "medium",
-            position: 4,
+            position: 5,
             hasAd: true,
             hasExcerpt: true,
           },
           {
             size: "medium",
             position: 6,
+            hasAd: false,
+            hasExcerpt: true,
+          },
+          {
+            size: "medium",
+            position: 7,
             hasAd: false,
             hasExcerpt: true,
           },
@@ -85,13 +97,13 @@ const DEFAULT_SECTION_LAYOUT = [
           {
             size: "medium",
             position: 2,
-            hasAd: true,
+            hasAd: false,
             hasExcerpt: true,
           },
           {
             size: "medium",
             position: 1,
-            hasAd: false,
+            hasAd: true,
             hasExcerpt: false,
           },
           {
@@ -118,13 +130,19 @@ const DEFAULT_SECTION_LAYOUT = [
             hasAd: false,
             hasExcerpt: false,
           },
+          {
+            size: "medium",
+            position: 7,
+            hasAd: false,
+            hasExcerpt: true,
+          },
         ],
       },
       {
         columnCount: 2,
         tiles: [
           {
-            size: "large",
+            size: "medium",
             position: 0,
             hasAd: false,
             hasExcerpt: true,
@@ -162,6 +180,12 @@ const DEFAULT_SECTION_LAYOUT = [
           {
             size: "medium",
             position: 6,
+            hasAd: false,
+            hasExcerpt: true,
+          },
+          {
+            size: "medium",
+            position: 7,
             hasAd: false,
             hasExcerpt: true,
           },
@@ -209,6 +233,12 @@ const DEFAULT_SECTION_LAYOUT = [
           {
             size: "medium",
             position: 6,
+            hasAd: false,
+            hasExcerpt: true,
+          },
+          {
+            size: "medium",
+            position: 7,
             hasAd: false,
             hasExcerpt: true,
           },
@@ -681,6 +711,9 @@ export function maskLayoutAds(
 }
 
 export class SectionsLayoutFeed {
+  /** @type {Store} */
+  store = null;
+
   constructor() {
     this._layoutsClient = null;
     this._orderingClient = null;
@@ -706,7 +739,10 @@ export class SectionsLayoutFeed {
       prefs[PREF_SECTIONS_ORDERING] ??
       "";
     // Sync the collections only when a sections-ordering is selected.
-    const shouldSyncLayouts = prefs[PREF_TOPSTORIES_ENABLED] && !!orderingKey;
+    const shouldSyncLayouts =
+      (prefs[PREF_TOPSTORIES_ENABLED] ||
+        isSpaceOverridden(SPACE_IDS.STORIES, prefs)) &&
+      !!orderingKey;
 
     if (shouldSyncLayouts) {
       this._layoutsClient ??= this._connectClient(

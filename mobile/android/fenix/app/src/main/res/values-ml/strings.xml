@@ -71,9 +71,11 @@
   <string name="home_bookmarks_menu_item_remove">മാറ്റുക</string>
   <!-- About content. %1$s is the name of the app (for example "Firefox"). -->
   <string name="about_content" tools:ignore="BrandUsage">%1$s നിർമ്മിച്ചത് മോസില്ലയാണ്.</string>
-  <!-- Private Browsing -->
-  <string name="private_browsing_common_myths">സ്വകാര്യ തിരച്ചിലിനെക്കുറിച്ചുള്ള പൊതുവായ തെറ്റിദ്ധാരണങ്ങൾ</string>
-  <!-- Text to be announced by the accessibility service to inform the user that the private browsing mode is currently active. -->
+  <!--
+    Private Browsing
+
+    Text to be announced by the accessibility service to inform the user that the private browsing mode is currently active.
+  -->
   <string name="private_browsing_a11y_session_announcement">സ്വകാര്യ തിരച്ചിൽ നേരം</string>
   <!--
     True Private Browsing Mode
@@ -102,8 +104,6 @@
   <string name="open_in_app_cfr_positive_button_text">ക്രമീകരണങ്ങളിലേക്കു പോവുക</string>
   <!-- Text for the negative action button -->
   <string name="open_in_app_cfr_negative_button_text">കളയുക</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
   <!-- Text for the info dialog when camera permissions have been denied but user tries to access a camera feature. -->
   <string name="camera_permissions_needed_message">ക്യാമറ അനുമതി ആവശ്യമാണ്. ആണ്ട്രൊയിടു് ക്രമീകരണങ്ങളിലേക്ക് പോവുക, അനുമതികൾ അമർത്തുക, അനുവദിക്കുക എന്നു് അമർത്തുക.</string>
   <!-- Text for the positive action button to go to Android Settings to grant permissions. -->
@@ -141,16 +141,8 @@
   <string name="home_screen_shortcut_open_new_private_tab_2">പുതിയ സ്വകാര്യ ടാബ്</string>
   <!-- Shortcut action to open Passwords screen -->
   <string name="home_screen_shortcut_passwords">ഒളിവാക്കുകൾ</string>
-  <!--
-    Recent Tabs
-
-    Header text for jumping back into the recent tab in the home screen
-  -->
-  <string name="recent_tabs_header">തിരികെ കയറുക</string>
   <!-- Button text for showing all the tabs in the tabs tray -->
   <string name="recent_tabs_show_all">എല്ലാം കാണിക്കുക</string>
-  <!-- Content description for the button which navigates the user to show all recent tabs in the tabs tray. -->
-  <string name="recent_tabs_show_all_content_description_2">അടുത്തിടെയുള്ള എല്ലാ ടാബുകളും കാണിക്കുന്നതിനുള്ള ബട്ടൺ</string>
   <!-- Text for button in synced tab card that opens synced tabs tray -->
   <string name="recent_tabs_see_all_synced_tabs_button_text">എല്ല സമന്വയിപ്പിച്ച ടാബുകൾ കാണുക</string>
   <!-- Accessibility description for device icon used for recent synced tab -->
@@ -176,11 +168,7 @@
   <string name="recently_visited_menu_item_remove">കളയുക</string>
   <!-- Content description for the button which navigates the user to show all of their history. -->
   <string name="past_explorations_show_all_content_description_2">പഴയകാല ആരായലുകൾ</string>
-  <!--
-    Browser Fragment
-
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
-  -->
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">പുറകോട്ട്</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">മുന്നോട്ട്</string>
@@ -261,8 +249,6 @@
   <string name="browser_menu_syncing_paused_caption">സമന്വയിപ്പിക്കൽ താൽക്കാലികമായി നിർത്തി</string>
   <!-- Browser menu caption label for an authenticated user -->
   <string name="browser_menu_signed_in_caption">താങ്ങൾ എന്തിന്റെ കരുതൽപ്പകൎപ്പു് എടുക്കാൻ പോവുന്നു അല്ലെങ്കിൽ സമന്വയിപ്പിക്കാൻ പോവുന്നുയെന്നു കൈകാര്യം ചെയ്യുക</string>
-  <!-- Browser menu label that creates a private tab -->
-  <string name="browser_menu_new_private_tab">പുതിയ സ്വകാര്യ ടാബ്</string>
   <!-- Browser menu label that navigates to the Password screen -->
   <string name="browser_menu_passwords">ഒളിവാക്കുകൾ</string>
   <!-- Content description (not visible, for screen readers etc.) for the handle used to drag the main menu at the bottom of the screen. -->
@@ -303,8 +289,6 @@
   <string name="browser_menu_default_banner_title">%1$s-നെ തനിമട്ടാക്കുക</string>
   <!-- Label text within the set as default banner -->
   <string name="browser_menu_default_banner_subtitle_2">ഉടൻ, സ്വകാര്യം, താങ്ങൾക്കുവേണ്ടി\u0020</string>
-  <!-- Content description (not visible, for screen readers etc.) for the button that dismisses the set as default banner in the menu -->
-  <string name="browser_menu_default_banner_dismiss_promotion">പ്രചരണം നിരസിക്കുക</string>
   <!-- Content description (not visible, for screen readers etc.) for recommended extensions in main menu -->
   <string name="browser_menu_recommended_extensions_content_description">കൂടുതൽ വിവരങ്ങൾ</string>
   <!--
@@ -431,18 +415,6 @@
   <string name="onboarding_preferences_dialog_positive_button">ചെയ്തു</string>
   <!-- Terms of service onboarding title card label. 'Firefox' intentionally hardcoded here -->
   <string name="onboarding_welcome_to_firefox" tools:ignore="BrandUsage">ഫയര്‍ഫോക്സിലേക്കു് സ്വാഗതം</string>
-  <!-- Line one of the terms of service onboarding page. %1$s is replaced by an active link, using onboarding_term_of_service_line_one_link_text_2 as text (“Firefox Terms of Use”). -->
-  <string name="onboarding_term_of_service_line_one_2">തുടരുന്നതിലൂടെ, താങ്ങൾ %1$s അംഗീകരിക്കുന്നു.</string>
-  <!-- Used as text for the link in onboarding_term_of_service_line_one_2. -->
-  <string name="onboarding_term_of_service_line_one_link_text_2" tools:ignore="BrandUsage">Firefox ഉപയോഗനിബന്ധനകൾ</string>
-  <!-- Line two of the terms of service onboarding page. 'Firefox' is intentionally hardcoded. %1$s is replaced by an active link, using onboarding_term_of_service_line_two_link_text as text (“Privacy Notice”). -->
-  <string name="onboarding_term_of_service_line_two_2" tools:ignore="BrandUsage">താങ്ങളുടെ സ്വകാര്യതക്കു് ഫയർഫോക്സു് ശ്രദ്ധിക്കാരുണ്ടു്. ഞങ്ങളുടെ %1$s-ൽ കൂടുതൽ അറിയുക.</string>
-  <!-- Used as text for the link in onboarding_term_of_service_line_two. -->
-  <string name="onboarding_term_of_service_line_two_link_text">സ്വകാര്യതാ അറിയിപ്പ്</string>
-  <!-- Line three of the terms of service onboarding page. 'Firefox' and 'Mozilla' are intentionally hardcoded. %1$s is replaced by an active link using onboarding_term_of_service_line_three_link_text as text (“Manage”). -->
-  <string name="onboarding_term_of_service_line_three" tools:ignore="BrandUsage">അന്വേഷിയന്ത്രത്തിനെ മെച്ചപ്പെുടത്താൻ ഫയർഫോക്സു് മോസില്ലക്കു് നിദാനനിർണയനീയും ഇടപാടുനീയ ദത്ത അയയ്ക്കാരുണ്ടു്. %1$s</string>
-  <!-- Used as text for the link in onboarding_term_of_service_line_three. -->
-  <string name="onboarding_term_of_service_line_three_link_text">കൈകാര്യം ചെയ്യുക</string>
   <!-- Terms of use (ToU) first subheader. -->
   <string name="onboarding_redesign_tou_subheader_one" tools:ignore="UnusedResources">മിന്നൽ വിരവോടെ വെബ്ബിടങ്ങൾ ലഭ്യമാക്കുക</string>
   <!-- Terms of use (ToU) second subheader. -->
@@ -484,8 +456,6 @@
   <string name="onboarding_marketing_title_1" tools:ignore="UnusedResources">ഇനിയും ഒരു കാര്യം</string>
   <!-- Marketing onboarding page button label variant. Button to confirm choice and start browsing. -->
   <string name="onboarding_marketing_positive_button_1" tools:ignore="UnusedResources">തീൎച്ചപ്പെടുത്തിയിട്ടു് തിരയാൻ തുടങ്ങുവിൻ</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
   <!-- "Continue" onboarding button. -->
   <string name="nova_onboarding_continue_button">തുടരുക</string>
   <!-- "Continue browsing" onboarding button. -->
@@ -521,20 +491,6 @@
   <string name="nova_onboarding_set_to_default_title_2">ഉൾപ്പണിഞ്ഞ സ്വകാര്യതത്തോടെ എല്ലാ കണ്ണികളും തുറക്കുക</string>
   <!-- "Set to default" onboarding button. -->
   <string name="nova_onboarding_set_to_default_button">തനിമട്ടായ അന്വേഷിയായി വയ്ക്കുക</string>
-  <!-- Toolbar selection onboarding title. -->
-  <string name="nova_onboarding_toolbar_selection_title">വിലാസപ്പട്ട തിരഞ്ഞെടുക്കുക</string>
-  <!-- Toolbar selection onboarding "top" option label. -->
-  <string name="nova_onboarding_toolbar_selection_top_label">മുകള്‍ഭാഗം</string>
-  <!-- Toolbar selection onboarding "bottom" option label. -->
-  <string name="nova_onboarding_toolbar_selection_bottom_label">കീഴ്ഭാഗം</string>
-  <!-- Theme selection onboarding title. -->
-  <string name="nova_onboarding_theme_selection_title" tools:ignore="UnusedResources">അലങ്കാരം തിരഞ്ഞെടുക്കുക</string>
-  <!-- Theme selection onboarding "automatic" option label. -->
-  <string name="nova_onboarding_theme_selection_automatic_label" tools:ignore="UnusedResources">തന്നെത്താനെ</string>
-  <!-- Theme selection onboarding "light" option label. -->
-  <string name="nova_onboarding_theme_selection_light_label" tools:ignore="UnusedResources">തെളിച്ചം</string>
-  <!-- Theme selection onboarding "dark" option label. -->
-  <string name="nova_onboarding_theme_selection_dark_label" tools:ignore="UnusedResources">ഇരുളിമ</string>
   <!-- Sync onboarding title. -->
   <string name="nova_onboarding_sync_title">താങ്ങൾ നിറുത്തിയയിടത്തിൽ നിന്നു് ഉടൻ തുടങ്ങുക</string>
   <!-- Sync onboarding subtitle. -->
@@ -559,14 +515,10 @@
   <string name="nova_onboarding_notifications_title" tools:ignore="BrandUsage,UnusedResources">Firefox-ൽ സുരക്ഷിതമായി തുടരാൻ അറിയിപ്പുകൾ താങ്ങളെ സഹായിക്കുന്നു</string>
   <!-- Notifications onboarding button. -->
   <string name="nova_onboarding_notifications_button">അറിയിപ്പുകൾ തുടങ്ങിവയ്ക്കുക</string>
-  <!-- "Add search widget" onboarding title. -->
-  <string name="nova_onboarding_add_search_widget_title">ഓരോ തിരച്ചിലും ഇനിയും സ്വകാര്യമാക്കുക</string>
   <!-- Customize prompt onboarding positive button. -->
   <string name="nova_onboarding_customize_prompt_positive_button" tools:ignore="UnusedResources">ഇഷ്ടാനുസൃതമാക്കൽ തുടങ്ങുക</string>
   <!-- App icon onboarding title. -->
   <string name="nova_onboarding_app_icon_prompt_title" tools:ignore="UnusedResources">ഇഷ്ടാനുസൃത പ്രയോഗയടയാളം തിരഞ്ഞെടുക്കുക</string>
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!--
     Widget Picker
 
@@ -588,10 +540,8 @@
   <!--
     Preferences
 
-    Title for the settings page
+    Preference category for general settings
   -->
-  <string name="settings">ക്രമീകരണങ്ങൾ</string>
-  <!-- Preference category for general settings -->
   <string name="preferences_category_general">പൊതുവായവ</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">വിവരം</string>
@@ -646,8 +596,6 @@
   <string name="preferences_https_only_title">HTTPS-മാത്രം രീതി</string>
   <!-- Preference title for using the screen lock to hide tabs in private browsing -->
   <string name="preferences_pbm_lock_screen_title">സ്വകാര്യ തിരച്ചിലിൽ ടാബുകളെ മറയ്ക്കാൻ വേണ്ടി പ്രതലത്താഴു് ഉപയോഗിക്കുക</string>
-  <!-- Preference for removing cookie/consent banners from sites automatically in private mode. See reduce_cookie_banner_summary for additional context. -->
-  <string name="preferences_cookie_banner_reduction_private_mode">സ്വകാര്യ തിരച്ചിലിൽ കുക്കീ പൊന്തുവരൽ തടയൽ</string>
   <!-- Summary of https only preference if https only is set to off -->
   <string name="preferences_https_only_off">അണച്ചതു്</string>
   <!-- Summary of https only preference if https only is set to on in all tabs -->
@@ -819,8 +767,6 @@
     Title for the customize home screen section with privacy report.
   -->
   <string name="customize_toggle_privacy_report">സ്വകാര്യത അറിയിപ്പു്</string>
-  <!-- Header text for jumping back into the recent tab in customize the home screen -->
-  <string name="customize_toggle_jump_back_in">തിരികെ കയറുക</string>
   <!-- Title for the customize home screen section with bookmarks. -->
   <string name="customize_toggle_bookmarks">അടയാളക്കുറിപ്പുകള്‍</string>
   <!--
@@ -834,8 +780,6 @@
   <string name="customize_toggle_pocket_sponsored">പണം കൊണ്ടു് പ്രസരിപ്പിച്ച കഥകൾ</string>
   <!-- Title for the opening wallpaper settings screen -->
   <string name="customize_wallpapers">ചുവർകടലാസുകൾ</string>
-  <!-- Label for the menu item that opens the wallpaper settings screen. -->
-  <string name="browser_menu_change_wallpaper">ചുവൎക്കടലാസു മാറ്റുക</string>
   <!-- Title for the customize home screen section with sponsored shortcuts. -->
   <string name="customize_toggle_contile">പണം കൊണ്ടു് പ്രസരിപ്പിച്ച കുറുക്കുവഴികൾ</string>
   <!--
@@ -1076,8 +1020,6 @@
   <string name="preference_simple_toolbar">എളുപ്പം</string>
   <!-- Preference for using expanded toolbar -->
   <string name="preference_expanded_toolbar">വലുതാക്കിയതു്</string>
-  <!-- Preference description indicating the toolbar location preference is disabled when the tab strip is enabled -->
-  <string name="preference_toolbar_pref_disabled_explanation">ടാബു പട്ട കാണിക്കുമ്പോൾ വിലാസപ്പട്ട മുകളിലുണ്ടാവണം.</string>
   <!-- New tab shortcut in toolbar customization -->
   <string name="toolbar_customize_shortcut_new_tab">പുതിയ ടാവു തുറക്കുക</string>
   <!-- Share shortcut in toolbar customization -->
@@ -1194,8 +1136,6 @@
     Title of preference for tabs management
   -->
   <string name="preferences_tabs">ടാബുകള്‍</string>
-  <!-- Title of preference that allows a user to specify the tab view -->
-  <string name="preferences_tab_view">ടാബ് കാഴ്ച</string>
   <!-- Option for a list tab view -->
   <string name="tab_view_list">പട്ടിക</string>
   <!-- Option for a grid tab view -->
@@ -1240,13 +1180,7 @@
   <string name="opening_screen_last_tab_summary">അവസാന ടാബിൽ തുറക്കുക</string>
   <!-- Summary for homepage preference indicating opening the homepage when re-opening the app after four hours of inactivity -->
   <string name="opening_screen_after_four_hours_of_inactivity_summary">നാലു മണിക്കൂർ ശേഷം ആമുഖതാളിൽ തുറക്കുക</string>
-  <!--
-    Inactive tabs
-
-    Category header of a preference that allows a user to enable or disable the inactive tabs feature
-  -->
-  <string name="preferences_inactive_tabs">പഴയ ടാബുകൾ നിഷ്ക്രിയത അറായിലേക്കു് മാറ്റുക</string>
-  <!-- Title of inactive tabs preference -->
+  <!-- Summary of the preference that allows a user to enable or disable the inactive tabs feature. -->
   <string name="preferences_inactive_tabs_title">രണ്ടാഴ്ചയായി താങ്ങൾ കാണാത്ത ടാബുകൾ നിഷ്ക്രിയ വിഭാഗത്തിലേക്കു് മാറ്റും.</string>
   <!--
     Studies
@@ -1349,8 +1283,6 @@
   <string name="close_tab_title">%s ടാബ് അടയ്ക്കുക</string>
   <!-- Content description (not visible, for screen readers etc.): Opens the open tabs menu when pressed -->
   <string name="open_tabs_menu">ടാബുകളുടെ മെനു തുറക്കുക</string>
-  <!-- Open tabs menu item to save tabs to collection -->
-  <string name="tabs_menu_save_to_collection1">ശേഖരത്തിലേക്ക് ടാബുകൾ സംരക്ഷിക്കുക</string>
   <!-- Text for the menu button to delete a collection -->
   <string name="collection_delete">ശേഖരം നീക്കം ചെയ്യുക</string>
   <!-- Text for the menu button to rename a collection -->
@@ -1456,16 +1388,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">%1$d തിരഞ്ഞെടുത്തിരിക്കുന്നു</string>
-  <!-- Text for the header that groups the history for today -->
-  <string name="history_today">ഇന്ന്</string>
-  <!-- Text for the header that groups the history for yesterday -->
-  <string name="history_yesterday">ഇന്നലെ</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">കഴിഞ്ഞ 7 ദിവസം</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">കഴിഞ്ഞ 30 ദിവസം</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">പഴയത്</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">ഇവിടെ നാൾവഴിയൊന്നുമില്ല</string>
   <!--
@@ -1675,14 +1597,10 @@
   <string name="webcompat_reporter_label_url">യുആര്‍എല്‍</string>
   <!-- The error message of the URL text field when an invalid URL has been entered. -->
   <string name="webcompat_reporter_url_error_invalid">ശരിയായൊരു യുആര്‍എല്‍ നല്‍കുക</string>
-  <!-- The button text for the cancel button to leave the Web Compat Reporter feature. -->
-  <string name="webcompat_reporter_cancel">റദ്ദാക്കുക</string>
   <!-- Text for a snackbar to confirm the successful submission of a WebCompat report. -->
   <string name="webcompat_reporter_success_snackbar_text_2">അറിയിപ്പയച്ചു</string>
   <!-- The title shown at the top of the WebCompat Report preview panel. This appears after the user taps the “Preview” button before sending a report. -->
   <string name="webcompat_reporter_preview_bottom_sheet_header">റിപ്പോർട്ട് മുൻകാഴ്ച</string>
-  <!-- Label for the “Send” button shown in the WebCompat Report preview panel, which the user taps to submit the report. -->
-  <string name="webcompat_reporter_preview_bottom_sheet_send">അയയ്ക്കുക</string>
   <!-- Title for the Edit URL confirmation dialog in the WebCompatReporter -->
   <string name="webcompat_reporter_edit_url_dialog_title">വെബ്ബിടക്കണ്ണി തിരുത്തുക</string>
   <!-- Text shown on the save button for the Edit URL confirmation dialog in the WebCompatReporter. -->
@@ -2134,8 +2052,6 @@
   <string name="qr_scanner_dialog_invalid">ഈ വലവിലാസം സാധ്യമല്ല.</string>
   <!-- QR code scanner prompt dialog positive option when there is an error -->
   <string name="qr_scanner_dialog_invalid_ok">ശരി</string>
-  <!-- Tab collection deletion prompt dialog message. %1$s is the collection name. -->
-  <string name="tab_collection_dialog_message">%1$s നീക്കം ചെയ്യണമെന്ന് താങ്കൾക്ക് ഉറപ്പാണോ?</string>
   <!-- Sample text for accessibility font size -->
   <string name="accessibility_text_size_sample_text_1">ഇതൊരു ഉദാഹരണ വാചകമാണ്. നിങ്ങൾ അക്ഷരത്തിന്റെ വലുപ്പം കൂട്ടുകയോ കുറയ്ക്കുകയോ ചെയ്യുമ്പോൾ എങ്ങനെ ദൃശ്യമാകുമെന്ന് കാണിക്കാൻ ഇത് സഹായിക്കുന്നു.</string>
   <!-- Summary for Accessibility Text Size Scaling Preference -->
@@ -2487,12 +2403,8 @@
   <string name="add_to_homescreen_cancel">റദ്ദാക്കുക</string>
   <!-- Add button text for the Add to Homescreen dialog -->
   <string name="add_to_homescreen_add">ചേർക്കൂ</string>
-  <!-- Continue to website button text for the first-time Add to Homescreen dialog -->
-  <string name="add_to_homescreen_continue">വെബ്‌സൈറ്റിലേക്ക് തുടരുക</string>
   <!-- Placeholder text for the TextView in the Add to Homescreen dialog -->
   <string name="add_to_homescreen_text_placeholder">കുറുക്കുവഴിയുടെ പേര്</string>
-  <!-- Describes the add to homescreen functionality -->
-  <string name="add_to_homescreen_description_2">പെട്ടെന്ന് ലഭ്യമാവാനും ഒരു ആപ്പ്-പോലുള്ള അനുഭവത്തോടെ വേഗത്തിൽ പരതുകാൻ ഈ വെബ്സ്ഥാനത്തിനു് താങ്കളുടെ ഫോണിന്റെ പൂമുഖത്തേക്ക് എളുപ്പത്തിൽ ചേർക്കാവുന്നതാണ്.</string>
   <!-- Preference for managing the settings for logins and passwords in Fenix -->
   <string name="preferences_passwords_logins_and_passwords_2">ഒളിവാക്കുകൾ</string>
   <!-- Preference for managing the saving of logins and passwords in Fenix -->
@@ -2629,8 +2541,6 @@
   <string name="preferences_ip_protection_title_2">ഉൾപ്പണിഞ്ഞ വി.പി.എൻ</string>
   <!-- Label for the BETA badge for the browser VPN entry in the settings list -->
   <string name="preferences_ip_protection_beta_badge_label">ബീറ്റ</string>
-  <!-- Title for the browser VPN settings screen (displayed in the app bar) -->
-  <string name="ip_protection_title">വി.പി.എൻ</string>
   <!-- Label for the browser VPN toggle on the settings screen -->
   <string name="ip_protection_toggle_label">വി.പി.എൻ</string>
   <!-- Content description for the browser VPN settings screen top bar back button -->
@@ -2666,8 +2576,6 @@
   <string name="ip_protection_menu_paused">നിറുത്തി</string>
   <!-- Badge label shown in the menu item when the browser VPN has an error -->
   <string name="ip_protection_menu_error">പിഴവു്</string>
-  <!-- Badge label shown in the menu item when the user is eligible to use the browser VPN but should authenticate or authorize it first. -->
-  <string name="ip_protection_menu_auth_required">ഉപയോഗിച്ചു നോക്കൂ</string>
   <!-- Content description for the chevron button that opens the browser VPN settings screen -->
   <string name="ip_protection_navigate_settings">വി.പി.എൻ ക്രമീകരണങ്ങൾ</string>
   <!--
@@ -2687,8 +2595,6 @@
   <string name="ip_protection_onboarding_body_link_promo">കൂടുതലറിയുക</string>
   <!-- Label for the dismiss button on the onboarding bottom sheet. -->
   <string name="ip_protection_onboarding_not_now_button">ഇപ്പോഴല്ല</string>
-  <!-- Snackbar (in-app pop-up notification) action button text that takes the user to the VPN settings screen. -->
-  <string name="ip_protection_data_limit_reached_snackbar_action">ക്രമീകരണങ്ങള്‍</string>
   <!--
     Autofill
 
@@ -2907,10 +2813,6 @@
   <string name="browser_menu_remove_from_shortcuts">കുറുക്കുവഴികളിൽ നിന്നു് മാറ്റുക</string>
   <!-- Message in delete confirmation dialog for password -->
   <string name="login_deletion_confirmation_2">താങ്ങൾക്കു് ഉറപ്പായിട്ടു് ഈ ഒളിവാക്കു് മായ്ക്കണോ?</string>
-  <!-- Positive action of a dialog asking to delete -->
-  <string name="dialog_delete_positive">നീക്കം ചെയ്യുക</string>
-  <!-- Negative action of a dialog asking to delete login -->
-  <string name="dialog_delete_negative">റദ്ദാക്കുക</string>
   <!-- The page title for editing a saved password. -->
   <string name="edit_2">ഒളിവാക്കു് തിരുത്തുക</string>
   <!-- The page title for adding new password. -->
@@ -3092,8 +2994,6 @@
   <string name="a11y_action_label_expand">വലുതാക്കുക</string>
   <!-- Action label for links to a website containing documentation about a wallpaper collection. Talkback will append this to say "Double tap to open link to learn more about this collection". -->
   <string name="a11y_action_label_wallpaper_collection_learn_more">ഈ ശേഖരം കുറിച്ചു് കൂടുതലറിയാൻ ഈ കണ്ണി തുറക്കുക</string>
-  <!-- Translations feature -->
-
   <!--
     Translation request dialog
 
@@ -3371,11 +3271,6 @@
   <string name="protection_panel_etp_toggle_enabled_description_2">ഈ വെബ്ബിടത്തിൽ എന്തെങ്കിലും തകരാറുണ്ടെന്നു തോന്നുന്നുണ്ടെങ്കിൽ പരിരക്ഷകളെ അണച്ചു നോക്കൂ.</string>
   <!-- Description text for the Enhanced Tracking Protection toggle when tracking protection is disabled. -->
   <string name="protection_panel_etp_toggle_disabled_description_2">പിന്തുടൎച്ച പരിരക്ഷണം തുടങ്ങിവയ്ക്കുന്നതു ശുപാൎശചെയ്യപ്പെട്ടതാണു്.</string>
-  <!--
-    Text for displaying the total number of trackers blocked in the protection panel.
-    %d is a placeholder for the number of trackers blocked.
-  -->
-  <string name="protection_panel_num_trackers_blocked">തടഞ്ഞിരിക്കുന്ന പിന്തുടർച്ചായന്ത്രങ്ങൾ: %d</string>
   <!-- Text for when tracking protection is disabled and no trackers are blocked. -->
   <string name="protection_panel_etp_disabled_no_trackers_blocked">പിന്തുൎച്ചയന്ത്രങ്ങൾ തടഞ്ഞിട്ടില്ല</string>
   <!-- Link text to navigate to privacy and security settings from the protection panel. -->
@@ -3680,8 +3575,6 @@
   <string name="certificate_warning_push_notification_pnw2_message" tools:ignore="UnusedResources">ആഡ് ഓണുകളും മറ്റു് സവിശേഷതളും ഉപയോഗിച്ചതിരിക്കാൻ 14-൹ മാർച്ചിന്റെ മുമ്പു് പുതുക്കൽ ചെയ്യുക</string>
   <!-- Push notification message about old Firefox version -->
   <string name="certificate_warning_push_notification_pnw3_message" tools:ignore="UnusedResources">ചില സവിശേഷതകൾ നാളെ പ്രവർത്തിക്കാൻ നിർത്തും.</string>
-  <!-- TextField Design System Component -->
-
   <!--
     Setup checklist feature
 
@@ -3806,8 +3699,6 @@
   <string name="settings_search_no_results_message">വേറിട്ട തിരയലുരി പ്രയോഗിച്ചു നോക്കിയാലോ?</string>
   <!-- Content Description for the button to open Settings Search (to search through settings). -->
   <string name="settings_search_button_content_description">ക്രമീകരണ തിരയൽ കുടുക്കു്</string>
-  <!-- ==== Terms of use pop up prompt ==== -->
-
   <!-- Title for the pop up prompt -->
   <string name="terms_of_use_prompt_title">പുതുക്കൽ ലഭ്യം</string>
   <!--
@@ -3825,8 +3716,6 @@
   <string name="terms_of_use_prompt_accept">അംഗീകരിക്കുക</string>
   <!-- Label for a button to postpone accepting the terms of use -->
   <string name="terms_of_use_prompt_postpone">പിന്നീടു് ഓൎമ്മിപ്പിക്കുക</string>
-  <!-- ==== Experiment strings. ==== -->
-
   <!-- A title for the popup prompt. -->
   <string name="terms_of_use_prompt_title_option_a" tools:ignore="UnusedResources">ഉപയോഗനിബന്ധനകള്‍</string>
   <!--
@@ -3841,50 +3730,6 @@
   <string name="terms_of_use_prompt_body_line_two_alternative" tools:ignore="UnusedResources">%1$s-ൽ താങ്ങൾക്കു കൂടുതലറിയാം.</string>
   <!-- Link text for terms_of_use_prompt_body_line_two_alternative that links to a site with more information about the Terms of Use -->
   <string name="terms_of_use_prompt_body_line_two_alternative_link" tools:ignore="UnusedResources">ഇവിടെ</string>
-  <!-- Section header for the North America region in the sports widget country selector. -->
-  <string name="sports_widget_confederation_north_america">വടക്കേ അമേരിക്ക</string>
-  <!-- Section header for the Africa confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_africa">ആഫ്രിക്ക</string>
-  <!-- Section header for the Asia confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_asia">ഏഷ്യ</string>
-  <!-- Section header for the CONCACAF confederation group in the sports widget country selector. "CONCACAF" is the abbreviation for "Confederation of North, Central America and Caribbean Association Football". -->
-  <string name="sports_widget_confederation_concacaf">കോൺകാഫ്</string>
-  <!-- Section header for the Europe confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_europe">യൂറോപ്പ്</string>
-  <!-- Section header for the Oceania confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_oceania">ഓഷ്യാനിയ</string>
-  <!-- Section header for the South America confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_south_america">തെക്കേ അമേരിക്ക</string>
-  <!-- Country name for England in the sports widget. England cannot be resolved with the Android Intl APIs so it needs an explicit string. -->
-  <string name="sports_widget_country_england">ഇംഗ്ലണ്ട്</string>
-  <!-- Country name for Scotland in the sports widget. Scotland cannot be resolved with the Android Intl APIs so it needs an explicit string. -->
-  <string name="sports_widget_country_scotland">സ്കോട്ലാണ്ട്</string>
-  <!-- Label shown on the sports widget scoreboard when a match is currently being played live. -->
-  <string name="sports_widget_match_live">തത്സമയം</string>
-  <!-- Sports widget button label to see match results. -->
-  <string name="sports_widget_see_results" tools:ignore="UnusedResources">ഫലങ്ങൾ കാണുക</string>
-  <!-- Sports widget button label to view details of a soccer match results. -->
-  <string name="sports_widget_view_match_details" tools:ignore="UnusedResources">കളി വിവരങ്ങൾ കാണുക</string>
-  <!-- Sports widget section header for related soccer matches in the same group. -->
-  <string name="sports_widget_related_matches" tools:ignore="UnusedResources">ബന്ധപ്പെട്ട പൊരുത്തങ്ങൾ</string>
-  <!-- Sports widget menu item to remove the widget from the homepage. -->
-  <string name="sports_widget_remove">മാറ്റുക</string>
-  <!-- Sports widget button label that dismisses the step of choosing a team to follow. -->
-  <string name="sports_widget_skip">ഒഴിവാക്കുക</string>
-  <!-- Content description (for accessibility, not displayed) for the close button on the sports widget card. -->
-  <string name="sports_widget_close_content_description">അടയ്ക്കുക</string>
-  <!-- Content description (for accessibility, not displayed) for the overflow (more options) menu button on the sports widget card. -->
-  <string name="sports_widget_more_options_content_description">കൂടുതൽ സാധ്യതകൾ</string>
-  <!-- Title shown on the sports widget immediately after the user has followed a team. %s is the selected team (e.g., "USA"). -->
-  <string name="sports_widget_team_followed_title">പിന്തുടരുന്നു: %s</string>
-  <!-- Sports widget match status label shown during first half of a match. -->
-  <string name="sports_widget_first_half" tools:ignore="UnusedResources">ഒന്നാമ്പകുതി</string>
-  <!-- Sports widget match status label shown during second half of a match. -->
-  <string name="sports_widget_second_half" tools:ignore="UnusedResources">രണ്ടാമ്പകുതി</string>
-  <!-- Sports widget error card title shown when the user is offline. -->
-  <string name="sports_widget_error_connection_offline_title">താങ്ങൾ നിലവിൽ തത്സമയമല്ലെന്നു തോന്നുന്നു.</string>
-  <!-- ==== End of Terms of use popup prompt. ==== -->
-
   <!-- The first active link used in privacy_notice_updated_homepage_message -->
   <string name="privacy_notice_updated_homepage_message_privacy_notice" tools:ignore="UnusedResources">സ്വകാര്യത അറിയിപ്പു്</string>
   <!-- The second active link used in privacy_notice_updated_homepage_message -->

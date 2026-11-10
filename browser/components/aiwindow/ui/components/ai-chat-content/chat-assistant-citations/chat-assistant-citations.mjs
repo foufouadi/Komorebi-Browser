@@ -2,18 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import {
-  html,
-  nothing,
-  repeat,
-} from "chrome://global/content/vendor/lit.all.mjs";
+import { html, nothing } from "chrome://global/content/vendor/lit.all.mjs";
 import { MozLitElement } from "chrome://global/content/lit-utils.mjs";
 import { SmartwindowOverflowRowMixin } from "chrome://browser/content/aiwindow/components/SmartwindowOverflowRow.mjs";
-// eslint-disable-next-line import/no-unassigned-import
+// eslint-disable-next-line import-x/no-unassigned-import
 import "chrome://global/content/elements/moz-button.mjs";
-// eslint-disable-next-line import/no-unassigned-import
-import "chrome://browser/content/aiwindow/components/ai-website-chip.mjs";
-// eslint-disable-next-line import/no-unassigned-import
+// eslint-disable-next-line import-x/no-unassigned-import
+import "chrome://browser/content/aiwindow/components/smartwindow-chip.mjs";
+// eslint-disable-next-line import-x/no-unassigned-import
 import "chrome://browser/content/aiwindow/components/smartwindow-panel-list.mjs";
 
 /**
@@ -102,16 +98,15 @@ export class ChatAssistantCitations extends SmartwindowOverflowRowMixin(
   }
 
   #renderPill(citation, { itemRole, showTitle } = {}) {
-    return html`<ai-website-chip
-      type="context-chip"
-      size="small"
+    return html`<smartwindow-chip
+      type="source"
       role=${itemRole ? "presentation" : nothing}
       .itemRole=${itemRole ?? ""}
       title=${showTitle ? this.#titleText(citation) : nothing}
       .label=${this.#label(citation)}
       .href=${citation.url}
       .iconSrc=${this.#icon(citation)}
-    ></ai-website-chip>`;
+    ></smartwindow-chip>`;
   }
 
   render() {
@@ -155,10 +150,8 @@ export class ChatAssistantCitations extends SmartwindowOverflowRowMixin(
               @hidden=${() => (this.isPanelOpen = false)}
               @AIChatContent:OpenLink=${this.#onPanelOpenLink}
             >
-              ${repeat(
-                citationsOverflow,
-                citation => citation.url,
-                citation => this.#renderPill(citation, { itemRole: "menuitem" })
+              ${citationsOverflow.map(citation =>
+                this.#renderPill(citation, { itemRole: "menuitem" })
               )}
             </smartwindow-panel-list>`
           : nothing}

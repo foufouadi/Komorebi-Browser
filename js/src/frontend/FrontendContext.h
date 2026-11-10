@@ -6,6 +6,7 @@
 #define frontend_FrontendContext_h
 
 #include "mozilla/Assertions.h"  // MOZ_ASSERT
+#include "mozilla/Atomics.h"     // mozilla::Atomic, mozilla::Relaxed
 #include "mozilla/Attributes.h"  // MOZ_STACK_CLASS
 #include "mozilla/Maybe.h"       // mozilla::Maybe
 
@@ -13,6 +14,7 @@
 
 #include "js/AllocPolicy.h"  // SystemAllocPolicy, AllocFunction
 #include "js/ErrorReport.h"  // JSErrorCallback, JSErrorFormatString
+#include "js/experimental/CompileScript.h"  // JS::FrontendContextCreationOptions
 #include "js/Stack.h"  // JS::NativeStackSize, JS::NativeStackLimit, JS::NativeStackLimitMax
 #include "js/Vector.h"          // Vector
 #include "vm/ErrorReporting.h"  // CompileError
@@ -46,9 +48,12 @@ struct FrontendErrors {
   // See frontend::CompileGlobalScriptWithExtraBindings.
   bool extraBindingsAreNotUsed = false;
 
+  // Set when a cancellation request aborted the compilation.
+  bool cancelled = false;
+
   bool hadErrors() const {
     return outOfMemory || overRecursed || allocationOverflow ||
-           extraBindingsAreNotUsed || error;
+           extraBindingsAreNotUsed || cancelled || error;
   }
 
   void clearErrors();
@@ -91,7 +96,15 @@ class FrontendContext {
   // be called at each entry-point that might make use of this field.
   JS::NativeStackLimit stackLimit_ = JS::NativeStackLimitMax;
 
+  // Cancellation request from another thread, polled by
+  // checkCompilationCancellation.
+  mozilla::Atomic<bool, mozilla::Relaxed> compilationCancellationRequested_{
+      false};
+
 #ifdef DEBUG
+  // Whether cancellation may be requested, see JS::NewFrontendContext.
+  bool allowCancellingCompilation_ = false;
+
   // The thread ID where the native stack limit is set.
   mozilla::Maybe<size_t> stackLimitThreadId_;
 
@@ -113,10 +126,30 @@ class FrontendContext {
         nameCollectionPool_(nullptr),
         ownNameCollectionPool_(false),
         scriptDataTableHolder_(&js::globalSharedScriptDataTableHolder) {}
+
+  explicit FrontendContext(const JS::FrontendContextCreationOptions* options)
+      : alloc_(this),
+        nameCollectionPool_(nullptr),
+        ownNameCollectionPool_(false),
+        scriptDataTableHolder_(!options || options->shareScriptData
+                                   ? &js::globalSharedScriptDataTableHolder
+                                   : nullptr) {
+#ifdef DEBUG
+    if (options && options->allowCancellingCompilation) {
+      setAllowCancellingCompilation();
+    }
+#endif
+  }
+
   ~FrontendContext();
 
   void setStackQuota(JS::NativeStackSize stackSize);
   JS::NativeStackLimit stackLimit() const { return stackLimit_; }
+
+  void requestCompilationCancellation();
+  bool isCompilationCancellationRequested() const {
+    return compilationCancellationRequested_;
+  }
 
   bool allocateOwnedPool();
 
@@ -126,6 +159,8 @@ class FrontendContext {
         "Either allocateOwnedPool or setCurrentJSContext must be called");
     return *nameCollectionPool_;
   }
+
+  bool hasScriptDataTableHolder() const { return !!scriptDataTableHolder_; }
 
   js::SharedScriptDataTableHolder* scriptDataTableHolder() {
     MOZ_ASSERT(scriptDataTableHolder_);
@@ -174,6 +209,9 @@ class FrontendContext {
   void onOutOfMemory();
   void onOverRecursed();
 
+  // Returns false if a cancellation was requested, recording it as an error.
+  [[nodiscard]] bool checkCompilationCancellation();
+
   void recoverFromOutOfMemory();
 
   const JSErrorFormatString* gcSafeCallback(JSErrorCallback callback,
@@ -184,6 +222,7 @@ class FrontendContext {
   bool hadOutOfMemory() const { return errors_.outOfMemory; }
   bool hadOverRecursed() const { return errors_.overRecursed; }
   bool hadAllocationOverflow() const { return errors_.allocationOverflow; }
+  bool hadCancelled() const { return errors_.cancelled; }
   bool extraBindingsAreNotUsed() const {
     return errors_.extraBindingsAreNotUsed;
   }
@@ -206,6 +245,8 @@ class FrontendContext {
 #endif  // __wasi__
 
 #ifdef DEBUG
+  void setAllowCancellingCompilation() { allowCancellingCompilation_ = true; }
+
   void setNativeStackLimitThread();
   void assertNativeStackLimitThread();
 #endif
@@ -285,7 +326,8 @@ class ManualReportFrontendContext : public FrontendContext {
 
 // Create function for FrontendContext, which is manually allocated and
 // exclusively owned.
-extern FrontendContext* NewFrontendContext();
+extern FrontendContext* NewFrontendContext(
+    const JS::FrontendContextCreationOptions* options = nullptr);
 
 // Destroy function for FrontendContext, which was allocated with
 // NewFrontendContext.

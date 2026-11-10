@@ -13,7 +13,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   E10SUtils: "resource://gre/modules/E10SUtils.sys.mjs",
   RemoteSettingsCrashPull:
     "resource://gre/modules/RemoteSettingsCrashPull.sys.mjs",
-  SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
+  SessionStore:
+    "moz-src:///browser/components/sessionstore/SessionStore.sys.mjs",
   clearTimeout: "resource://gre/modules/Timer.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
 });
@@ -796,7 +797,7 @@ export var UnsubmittedCrashHandler = {
     this.initialized = true;
 
     this.log = console.createInstance({
-      prefix: "UnsubmittedCrashHandler",
+      logModule: "UnsubmittedCrashHandler",
       maxLogLevel: this.prefs.getStringPref("loglevel", "Error"),
     });
 
@@ -1284,7 +1285,7 @@ ChromeUtils.defineLazyGetter(lazy, "cleanerPrefs", () =>
 );
 ChromeUtils.defineLazyGetter(lazy, "cleanerLog", () =>
   console.createInstance({
-    prefix: "CrashFileCleaner",
+    logModule: "CrashFileCleaner",
     maxLogLevel: lazy.cleanerPrefs.getStringPref("loglevel", "Error"),
   })
 );

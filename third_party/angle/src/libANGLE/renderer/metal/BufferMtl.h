@@ -12,9 +12,12 @@
 
 #import <Metal/Metal.h>
 
+#include <deque>
+#include <memory>
 #include <optional>
 #include <utility>
 
+#include "common/base/anglebase/containers/mru_cache.h"
 #include "common/span.h"
 #include "libANGLE/Buffer.h"
 #include "libANGLE/Observer.h"
@@ -29,16 +32,20 @@ namespace rx
 
 struct DrawCommandRange
 {
+    DrawCommandRange(uint32_t count, size_t offset) : count(count), offset(offset) {}
+
     uint32_t count;
     size_t offset;
 };
 
-// Inclusive range of consecutive primitive restart value indexes.
-struct IndexRange
+// Inclusive range of consecutive draw indexes.
+// 1, 2, 3, 0xff, 1, 2, 3 produces DrawIndexRange(0, 2), DrawIndexRange(4, 6).
+struct DrawIndexRange
 {
-    IndexRange(size_t begin, size_t end) : restartBegin(begin), restartEnd(end) {}
-    size_t restartBegin;
-    size_t restartEnd;
+    DrawIndexRange(size_t begin, size_t end) : begin(begin), end(end) {}
+
+    size_t begin;
+    size_t end;
 };
 // Conversion buffers hold translated index and vertex data.
 struct ConversionBufferMtl
@@ -47,13 +54,12 @@ struct ConversionBufferMtl
     ~ConversionBufferMtl();
 
     // One state value determines if we need to re-stream vertex data.
-    bool dirty;
+    bool dirty{true};
 
     // The conversion is stored in a dynamic buffer.
-    mtl::BufferPool data;
-    // These properties are to be filled by user of this buffer conversion
-    mtl::BufferRef convertedBuffer;
-    size_t convertedOffset;
+    mtl::BufferPool bufferPool;
+    // The buffer is to be filled by user of this buffer conversion.
+    mtl::BufferSlice buffer;
 };
 
 struct VertexConversionBufferMtl : public ConversionBufferMtl
@@ -78,19 +84,37 @@ struct IndexConversionBufferMtl : public ConversionBufferMtl
     const gl::DrawElementsType elemType;
     const size_t offset;
     bool primitiveRestartEnabled;
-    IndexRange getRangeForConvertedBuffer(size_t count);
 };
 
 struct UniformConversionBufferMtl : public ConversionBufferMtl
 {
     UniformConversionBufferMtl(ContextMtl *context,
+                               uint64_t programSerialIdIn,
                                std::pair<size_t, size_t> offsetIn,
                                size_t blockSize);
 
     size_t initialSrcOffset() { return offset.second; }
 
+    const uint64_t programSerialId;
     const size_t uniformBufferBlockSize;
     const std::pair<size_t, size_t> offset;
+};
+
+// Identifies the draw whose indices a provoking vertex conversion rewrote.
+struct ProvokingVertexConversionKey
+{
+    struct Hash
+    {
+        size_t operator()(const ProvokingVertexConversionKey &key) const;
+    };
+
+    bool operator==(const ProvokingVertexConversionKey &other) const;
+
+    gl::PrimitiveMode mode;
+    gl::DrawElementsType elemType;
+    size_t firstIndex;
+    GLsizei count;
+    bool primitiveRestartEnabled;
 };
 
 class BufferHolderMtl
@@ -124,7 +148,8 @@ class BufferMtl : public BufferImpl, public BufferHolderMtl
                           const void *data,
                           size_t size,
                           gl::BufferUsage usage,
-                          BufferFeedback *feedback) override;
+                          BufferFeedback *feedback,
+                          gl::ZeroFillRequired zeroFillRequired) override;
     angle::Result setSubData(const gl::Context *context,
                              gl::BufferBinding target,
                              const void *data,
@@ -180,18 +205,24 @@ class BufferMtl : public BufferImpl, public BufferHolderMtl
                                                        size_t offset);
 
     ConversionBufferMtl *getUniformConversionBuffer(ContextMtl *context,
+                                                    uint64_t programSerialId,
                                                     std::pair<size_t, size_t> offset,
                                                     size_t blockSize);
 
     size_t size() const { return static_cast<size_t>(mState.getSize()); }
 
-    const std::vector<IndexRange> &getRestartIndices(ContextMtl *ctx,
-                                                     gl::DrawElementsType indexType);
+    ConversionBufferMtl *getProvokingVertexConversionBuffer(ContextMtl *context,
+                                                            gl::PrimitiveMode mode,
+                                                            gl::DrawElementsType elemType,
+                                                            size_t firstIndex,
+                                                            GLsizei count,
+                                                            bool primitiveRestartEnabled);
 
-    static const std::vector<IndexRange> getRestartIndicesFromClientData(
-        ContextMtl *ctx,
-        gl::DrawElementsType indexType,
-        const mtl::BufferRef clientBuffer);
+    const std::vector<DrawIndexRange> &getDrawIndexRanges(ContextMtl *ctx,
+                                                          gl::DrawElementsType indexType);
+
+    static const std::vector<DrawIndexRange>
+    GetDrawIndexRangesFromClientData(gl::DrawElementsType type, GLint count, const void *indices);
 
   private:
     angle::Result allocateNewMetalBuffer(ContextMtl *contextMtl,
@@ -246,18 +277,27 @@ class BufferMtl : public BufferImpl, public BufferHolderMtl
 
     std::vector<IndexConversionBufferMtl> mIndexConversionBuffers;
 
-    std::vector<UniformConversionBufferMtl> mUniformConversionBuffers;
+    // TODO(crbug.com/500942658): Consider using LRU cache
+    std::deque<UniformConversionBufferMtl> mUniformConversionBuffers;
 
-    struct RestartRangeCache
+    // Each entry owns its pool so that other conversions cannot overwrite indices in use.
+    using ProvokingVertexConversionCache =
+        angle::base::HashingMRUCache<ProvokingVertexConversionKey,
+                                     std::unique_ptr<ConversionBufferMtl>,
+                                     ProvokingVertexConversionKey::Hash>;
+    static constexpr size_t kMaxProvokingVertexConversionBuffers = 4;
+    ProvokingVertexConversionCache mProvokingVertexConversionBuffers{
+        kMaxProvokingVertexConversionBuffers};
+
+    struct DrawIndexRangeCache
     {
-        RestartRangeCache(std::vector<IndexRange> &&ranges_, gl::DrawElementsType indexType_)
+        DrawIndexRangeCache(std::vector<DrawIndexRange> &&ranges_, gl::DrawElementsType indexType_)
             : ranges(ranges_), indexType(indexType_)
         {}
-        const std::vector<IndexRange> ranges;
+        const std::vector<DrawIndexRange> ranges;
         const gl::DrawElementsType indexType;
     };
-    std::optional<RestartRangeCache> mRestartRangeCache;
-    std::vector<IndexRange> mRestartIndices;
+    std::optional<DrawIndexRangeCache> mDrawIndexRangeCache;
     size_t mGLSize        = 0;  // size GL asked for (vs size we actually allocated)
     size_t mRevisionCount = 0;  // for generating labels only
     gl::BufferUsage mUsage;

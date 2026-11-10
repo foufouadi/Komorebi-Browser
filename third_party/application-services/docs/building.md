@@ -59,30 +59,28 @@ a number of hours to complete.
                         export PATH="/opt/homebrew/opt/python@3.14/libexec/bin:$PATH"
                     ```
                
-        1. Install gyp:
+        1. Install [gyp-next](https://github.com/nodejs/gyp-next) into a virtualenv and put it on your path:
             ```shell
-            wget https://bootstrap.pypa.io/ez_setup.py -O - | python3 -
-            git clone https://chromium.googlesource.com/external/gyp.git ~/tools/gyp
-            cd ~/tools/gyp
-            pip install .
+            python3 -m venv ~/.local/venvs/gyp-next
+            ~/.local/venvs/gyp-next/bin/pip install gyp-next
+            mkdir -p ~/.local/bin
+            ln -sf ~/.local/venvs/gyp-next/bin/gyp ~/.local/bin/gyp
             ```
-            1. Add `~/tools/gyp` to your path:
+            1. Make sure `~/.local/bin` is on your path (add this to your bash/zsh profile if needed):
                ```shell
-               export PATH="~/tools/gyp:$PATH"
+               export PATH="$HOME/.local/bin:$PATH"
                ```
-            1. If you have additional questions, consult [this guide](https://github.com/mogemimi/pomdog/wiki/How-to-Install-GYP).
-            1. If you encounter a `ModuleNotFoundError`, try installing setuptools on your system. For example:
-                ```shell
-               brew install python-setuptools
-               ```
-            1. Similarly, recent brew installations may result in **externally-managed-environment** errors. This can be addressed with `brew install pipx` and replacing the last line with `pipx install .`
-
-
-
-        1. Make sure your homebrew python's bin folder is on your path by updating your bash/zsh profile with the following:
-            ```shell
-            export PATH="$PATH:$(brew --prefix)/opt/python@3.9/Frameworks/Python.framework/Versions/3.9/bin"
-            ```
+            1. The virtualenv path must not contain spaces: gyp writes its Python path unquoted into the
+               generated ninja files. This rules out `pipx`'s default location on macOS
+               (`~/Library/Application Support/pipx`).
+            1. Don't use the old Chromium gyp (`chromium.googlesource.com/external/gyp`). It is unmaintained
+               and fails on current Python and Xcode versions.
+    1. If linking fails with `tapi error: malformed file ... unknown architecture`, the selected macOS SDK is
+       newer than your Command Line Tools linker. Check `xcrun --show-sdk-path`, and either update the
+       Command Line Tools or pin a matching SDK in your bash/zsh profile, e.g.:
+        ```shell
+        export SDKROOT=$(xcrun --sdk macosx26.5 --show-sdk-path)
+        ```
     #### Windows
     *Install windows build tools*
 
@@ -120,7 +118,7 @@ The following instructions assume that you are building `application-services` f
       1. NDK (Side by side) version 29.0.14206865 [as configured](https://github.com/mozilla/application-services/blob/bb8cde8a5/taskcluster/docker/linux/Dockerfile#L25)
       1. Android SDK Command-line Tools (latest)
    1. Set environment variables based on the boostrapped code and the downloaded NDK. Add it to your rc file (either `.zshrc` or `.bashrc` depending on your shell) to make it permanent
-      1. Set `JAVA_HOME` to point to the bootstraped JDK 17 installation directory. Ex: `export JAVA_HOME=~/.mozbuild/jdk/jdk-17.0.18+8/` (or `export JAVA_HOME=~/.mozbuild/jdk/jdk-17.0.18+8/Contents/Home` on Mac).
+      1. Set `JAVA_HOME` to point to the bootstraped JDK 25 installation directory. Ex: `export JAVA_HOME=~/.mozbuild/jdk/jdk-25.0.5+8/` (or `export JAVA_HOME=~/.mozbuild/jdk/jdk-25.0.5+8/Contents/Home` on Mac).
       1. Set `ANDROID_HOME` to the bootstraped Android SDK. As an example:
             ```shell
             export ANDROID_HOME=~/.mozbuild/android-sdk-linux

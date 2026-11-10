@@ -99,6 +99,43 @@ internal open class ForeignBytes : Structure() {
 
     class ByValue : ForeignBytes(), Structure.ByValue
 }
+
+// Converter for `&[u8]` / `[ByRef] bytes` arguments.
+//
+// Only `lower` is valid — zero-copy byte buffers only flow foreign -> Rust,
+// and only in argument position. `lift`, `read`, `write`, and
+// `allocationSize` have no sound implementation here and all panic at
+// runtime. The `FfiConverter` interface is implemented so that the
+// compiler enforces the full method set (rather than relying on eyeball).
+//
+// The provided `ByteBuffer` MUST be direct — only direct buffers have a
+// stable native address that JNA can expose via `getDirectBufferPointer`.
+// The returned `ForeignBytes.ByValue` is only valid for the duration of
+// the FFI call; the Rust side treats it as a borrow.
+internal object FfiConverterByRefBytes : FfiConverter<java.nio.ByteBuffer, ForeignBytes.ByValue> {
+    override fun lower(value: java.nio.ByteBuffer): ForeignBytes.ByValue {
+        require(value.isDirect) { "UniFFI zero-copy &[u8] requires a direct ByteBuffer. Use ByteBuffer.allocateDirect()." }
+        val remaining = value.remaining()
+        val fb = ForeignBytes.ByValue()
+        fb.len = remaining
+        // Zero-length direct buffers: skip getDirectBufferPointer (platform-variable behavior)
+        // and pass null. The Rust side treats (null, 0) as &[].
+        fb.data = if (remaining == 0) null else com.sun.jna.Native.getDirectBufferPointer(value)
+        return fb
+    }
+
+    override fun lift(value: ForeignBytes.ByValue): java.nio.ByteBuffer =
+        error("ByRef bytes cannot be lifted: zero-copy &[u8] only flows foreign->Rust")
+
+    override fun read(buf: java.nio.ByteBuffer): java.nio.ByteBuffer =
+        error("ByRef bytes cannot be read from a buffer: zero-copy &[u8] is only supported in argument position, not nested in records/options/etc.")
+
+    override fun write(value: java.nio.ByteBuffer, buf: java.nio.ByteBuffer): Unit =
+        error("ByRef bytes cannot be written to a buffer: zero-copy &[u8] is only supported in argument position, not nested in records/options/etc.")
+
+    override fun allocationSize(value: java.nio.ByteBuffer): ULong =
+        error("ByRef bytes have no RustBuffer allocation size: zero-copy &[u8] is only supported in argument position, not nested in records/options/etc.")
+}
 /**
  * The FfiConverter interface handles converter types to and from the FFI
  *
@@ -628,9 +665,6 @@ internal interface UniffiCallbackInterfaceMozAdsTelemetryMethod3 : com.sun.jna.C
 internal interface UniffiCallbackInterfaceMozAdsTelemetryMethod4 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`label`: RustBuffer.ByValue,`value`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
 }
-internal interface UniffiCallbackInterfaceMozAdsContextIdProviderMethod0 : com.sun.jna.Callback {
-    fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
-}
 @Structure.FieldOrder("uniffiFree", "uniffiClone", "recordBuildCacheError", "recordClientError", "recordClientOperationTotal", "recordDeserializationError", "recordHttpCacheOutcome")
 internal open class UniffiVTableCallbackInterfaceMozAdsTelemetry(
     @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
@@ -662,25 +696,6 @@ internal open class UniffiVTableCallbackInterfaceMozAdsTelemetry(
     }
 
 }
-@Structure.FieldOrder("uniffiFree", "uniffiClone", "contextId")
-internal open class UniffiVTableCallbackInterfaceMozAdsContextIdProvider(
-    @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
-    @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
-    @JvmField internal var `contextId`: UniffiCallbackInterfaceMozAdsContextIdProviderMethod0? = null,
-) : Structure() {
-    class UniffiByValue(
-        `uniffiFree`: UniffiCallbackInterfaceFree? = null,
-        `uniffiClone`: UniffiCallbackInterfaceClone? = null,
-        `contextId`: UniffiCallbackInterfaceMozAdsContextIdProviderMethod0? = null,
-    ): UniffiVTableCallbackInterfaceMozAdsContextIdProvider(`uniffiFree`,`uniffiClone`,`contextId`,), Structure.ByValue
-
-   internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceMozAdsContextIdProvider) {
-        `uniffiFree` = other.`uniffiFree`
-        `uniffiClone` = other.`uniffiClone`
-        `contextId` = other.`contextId`
-    }
-
-}
 
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
@@ -703,46 +718,48 @@ internal object IntegrityCheckingUniffiLib {
         Native.register(IntegrityCheckingUniffiLib::class.java, findLibraryName(componentName = "ads_client"))
         uniffiCheckContractApiVersion(this)
     }
+
+    internal fun ensureInitialized() = Unit
     external fun uniffi_ads_client_checksum_method_mozadsclient_clear_cache(
-    ): Short
+    ): Int
     external fun uniffi_ads_client_checksum_method_mozadsclient_record_click(
-    ): Short
+    ): Int
     external fun uniffi_ads_client_checksum_method_mozadsclient_record_impression(
-    ): Short
+    ): Int
     external fun uniffi_ads_client_checksum_method_mozadsclient_report_ad(
-    ): Short
+    ): Int
     external fun uniffi_ads_client_checksum_method_mozadsclient_request_image_ads(
-    ): Short
+    ): Int
     external fun uniffi_ads_client_checksum_method_mozadsclient_request_spoc_ads(
-    ): Short
+    ): Int
+    external fun uniffi_ads_client_checksum_method_mozadsclient_request_spoc_or_image_ads(
+    ): Int
     external fun uniffi_ads_client_checksum_method_mozadsclient_request_tile_ads(
-    ): Short
+    ): Int
     external fun uniffi_ads_client_checksum_method_mozadsclient_shutdown(
-    ): Short
+    ): Int
     external fun uniffi_ads_client_checksum_method_mozadsclientbuilder_build(
-    ): Short
+    ): Int
     external fun uniffi_ads_client_checksum_method_mozadsclientbuilder_cache_config(
-    ): Short
-    external fun uniffi_ads_client_checksum_method_mozadsclientbuilder_context_id_provider(
-    ): Short
+    ): Int
     external fun uniffi_ads_client_checksum_method_mozadsclientbuilder_environment(
-    ): Short
+    ): Int
     external fun uniffi_ads_client_checksum_method_mozadsclientbuilder_telemetry(
-    ): Short
-    external fun uniffi_ads_client_checksum_method_mozadscontextidprovider_context_id(
-    ): Short
+    ): Int
+    external fun uniffi_ads_client_checksum_method_mozadsclientbuilder_user_agent(
+    ): Int
     external fun uniffi_ads_client_checksum_constructor_mozadsclientbuilder_new(
-    ): Short
+    ): Int
     external fun uniffi_ads_client_checksum_method_mozadstelemetry_record_build_cache_error(
-    ): Short
+    ): Int
     external fun uniffi_ads_client_checksum_method_mozadstelemetry_record_client_error(
-    ): Short
+    ): Int
     external fun uniffi_ads_client_checksum_method_mozadstelemetry_record_client_operation_total(
-    ): Short
+    ): Int
     external fun uniffi_ads_client_checksum_method_mozadstelemetry_record_deserialization_error(
-    ): Short
+    ): Int
     external fun uniffi_ads_client_checksum_method_mozadstelemetry_record_http_cache_outcome(
-    ): Short
+    ): Int
     external fun ffi_ads_client_uniffi_contract_version(
     ): Int
 
@@ -759,10 +776,11 @@ internal object UniffiLib {
 
     init {
         Native.register(UniffiLib::class.java, findLibraryName(componentName = "ads_client"))
-        uniffiCallbackInterfaceMozAdsContextIdProvider.register(this)
         uniffiCallbackInterfaceMozAdsTelemetry.register(this)
         
     }
+
+    internal fun ensureInitialized() = Unit
     external fun uniffi_ads_client_fn_clone_mozadsclient(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
     external fun uniffi_ads_client_fn_free_mozadsclient(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -779,6 +797,8 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_ads_client_fn_method_mozadsclient_request_spoc_ads(`ptr`: Long,`mozAdRequests`: RustBuffer.ByValue,`options`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_ads_client_fn_method_mozadsclient_request_spoc_or_image_ads(`ptr`: Long,`mozAdRequests`: RustBuffer.ByValue,`options`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_ads_client_fn_method_mozadsclient_request_tile_ads(`ptr`: Long,`mozAdRequests`: RustBuffer.ByValue,`options`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_ads_client_fn_method_mozadsclient_shutdown(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -793,20 +813,12 @@ internal object UniffiLib {
     ): Long
     external fun uniffi_ads_client_fn_method_mozadsclientbuilder_cache_config(`ptr`: Long,`cacheConfig`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
-    external fun uniffi_ads_client_fn_method_mozadsclientbuilder_context_id_provider(`ptr`: Long,`provider`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Long
     external fun uniffi_ads_client_fn_method_mozadsclientbuilder_environment(`ptr`: Long,`environment`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
     external fun uniffi_ads_client_fn_method_mozadsclientbuilder_telemetry(`ptr`: Long,`telemetry`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
-    external fun uniffi_ads_client_fn_clone_mozadscontextidprovider(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    external fun uniffi_ads_client_fn_method_mozadsclientbuilder_user_agent(`ptr`: Long,`userAgent`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
-    external fun uniffi_ads_client_fn_free_mozadscontextidprovider(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Unit
-    external fun uniffi_ads_client_fn_init_callback_vtable_mozadscontextidprovider(`vtable`: UniffiVTableCallbackInterfaceMozAdsContextIdProvider,
-    ): Unit
-    external fun uniffi_ads_client_fn_method_mozadscontextidprovider_context_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): RustBuffer.ByValue
     external fun uniffi_ads_client_fn_init_callback_vtable_mozadstelemetry(`vtable`: UniffiVTableCallbackInterfaceMozAdsTelemetry,
     ): Unit
     external fun ffi_ads_client_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -824,7 +836,7 @@ internal object UniffiLib {
     external fun ffi_ads_client_rust_future_free_u8(`handle`: Long,
     ): Unit
     external fun ffi_ads_client_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Byte
+    ): Int
     external fun ffi_ads_client_rust_future_poll_i8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
     ): Unit
     external fun ffi_ads_client_rust_future_cancel_i8(`handle`: Long,
@@ -840,7 +852,7 @@ internal object UniffiLib {
     external fun ffi_ads_client_rust_future_free_u16(`handle`: Long,
     ): Unit
     external fun ffi_ads_client_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Short
+    ): Int
     external fun ffi_ads_client_rust_future_poll_i16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
     ): Unit
     external fun ffi_ads_client_rust_future_cancel_i16(`handle`: Long,
@@ -931,10 +943,10 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
  * @suppress
  */
 public fun uniffiEnsureInitialized() {
-    IntegrityCheckingUniffiLib
-    // UniffiLib() initialized as objects are used, but we still need to explicitly
-    // reference it so initialization across crates works as expected.
-    UniffiLib
+    // Call arbitrary methods on IntegrityCheckingUniffiLib and UniffiLib to ensure that
+    // their init blocks run. This ensures initialization across crates works as expected.
+    IntegrityCheckingUniffiLib.ensureInitialized()
+    UniffiLib.ensureInitialized()
 }
 
 // Async support
@@ -1358,27 +1370,72 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
 //
 
 
+/**
+ * Requests ads from MARS and records their clicks, impressions and reports.
+ * Build it with [`MozAdsClientBuilder`], ideally once per app.
+ */
 public interface MozAdsClientInterface {
     
+    /**
+     * Deletes everything in the HTTP cache.
+     */
     fun `clearCache`()
     
+    /**
+     * Records a click on an ad, from its `callbacks.click` URL.
+     */
     fun `recordClick`(`clickUrl`: kotlin.String, `options`: MozAdsCallbackOptions? = null)
     
+    /**
+     * Records an impression of an ad, from its `callbacks.impression` URL.
+     */
     fun `recordImpression`(`impressionUrl`: kotlin.String, `options`: MozAdsCallbackOptions? = null)
     
+    /**
+     * Reports an ad, from its `callbacks.report` URL.
+     */
     fun `reportAd`(`reportUrl`: kotlin.String, `reason`: MozAdsReportReason, `options`: MozAdsCallbackOptions? = null)
     
+    /**
+     * Requests one image ad per placement. The result is keyed by
+     * `placement_id` and leaves out placements with no ad.
+     */
     fun `requestImageAds`(`mozAdRequests`: List<MozAdsPlacementRequest>, `options`: MozAdsRequestOptions? = null): Map<kotlin.String, MozAdsImage>
     
+    /**
+     * Requests `count` spocs per placement. The result is keyed by
+     * `placement_id` and leaves out placements with no ad.
+     */
     fun `requestSpocAds`(`mozAdRequests`: List<MozAdsPlacementRequestWithCount>, `options`: MozAdsRequestOptions? = null): Map<kotlin.String, List<MozAdsSpoc>>
     
+    /**
+     * Requests `count` ads per placement, for placements that can return
+     * either spocs or image ads. The result is keyed by `placement_id` and
+     * leaves out placements with no ad.
+     */
+    fun `requestSpocOrImageAds`(`mozAdRequests`: List<MozAdsPlacementRequestWithCount>, `options`: MozAdsRequestOptions? = null): Map<kotlin.String, List<MozAdsImageOrSpoc>>
+    
+    /**
+     * Requests one tile ad per placement. The result is keyed by
+     * `placement_id` and leaves out placements with no ad.
+     */
     fun `requestTileAds`(`mozAdRequests`: List<MozAdsPlacementRequest>, `options`: MozAdsRequestOptions? = null): Map<kotlin.String, MozAdsTile>
     
+    /**
+     * Allows the ads-client to unload some references and prepare for a safe shutdown.
+     * Other methods should not be called after this one.
+     * Currently, we shutdown (with no expected errors).
+     * However, future shutdowns may require an error to be logged, so we keep the Result.
+     */
     fun `shutdown`()
     
     companion object
 }
 
+/**
+ * Requests ads from MARS and records their clicks, impressions and reports.
+ * Build it with [`MozAdsClientBuilder`], ideally once per app.
+ */
 open class MozAdsClient: Disposable, AutoCloseable, MozAdsClientInterface
 {
 
@@ -1409,6 +1466,11 @@ open class MozAdsClient: Disposable, AutoCloseable, MozAdsClientInterface
 
     private val wasDestroyed = AtomicBoolean(false)
     private val callCounter = AtomicLong(1)
+
+    /**
+     * Whether the current object has been destroyed and its reference is gone in the Rust side.
+     */
+    val uniffiIsDestroyed: Boolean get() = wasDestroyed.get()
 
     override fun destroy() {
         // Only allow a single call to this method.
@@ -1476,6 +1538,9 @@ open class MozAdsClient: Disposable, AutoCloseable, MozAdsClientInterface
     }
 
     
+    /**
+     * Deletes everything in the HTTP cache.
+     */
     @Throws(MozAdsClientApiException::class)override fun `clearCache`()
         = 
     callWithHandle {
@@ -1489,52 +1554,74 @@ open class MozAdsClient: Disposable, AutoCloseable, MozAdsClientInterface
     
 
     
+    /**
+     * Records a click on an ad, from its `callbacks.click` URL.
+     */
     @Throws(MozAdsClientApiException::class)override fun `recordClick`(`clickUrl`: kotlin.String, `options`: MozAdsCallbackOptions?)
         = 
     callWithHandle {
     uniffiRustCallWithError(MozAdsClientApiException) { _status ->
     UniffiLib.uniffi_ads_client_fn_method_mozadsclient_record_click(
         it,
-        FfiConverterString.lower(`clickUrl`),FfiConverterOptionalTypeMozAdsCallbackOptions.lower(`options`),_status)
+        
+        FfiConverterString.lower(`clickUrl`),
+        FfiConverterOptionalTypeMozAdsCallbackOptions.lower(`options`),_status)
 }
     }
     
     
 
     
+    /**
+     * Records an impression of an ad, from its `callbacks.impression` URL.
+     */
     @Throws(MozAdsClientApiException::class)override fun `recordImpression`(`impressionUrl`: kotlin.String, `options`: MozAdsCallbackOptions?)
         = 
     callWithHandle {
     uniffiRustCallWithError(MozAdsClientApiException) { _status ->
     UniffiLib.uniffi_ads_client_fn_method_mozadsclient_record_impression(
         it,
-        FfiConverterString.lower(`impressionUrl`),FfiConverterOptionalTypeMozAdsCallbackOptions.lower(`options`),_status)
+        
+        FfiConverterString.lower(`impressionUrl`),
+        FfiConverterOptionalTypeMozAdsCallbackOptions.lower(`options`),_status)
 }
     }
     
     
 
     
+    /**
+     * Reports an ad, from its `callbacks.report` URL.
+     */
     @Throws(MozAdsClientApiException::class)override fun `reportAd`(`reportUrl`: kotlin.String, `reason`: MozAdsReportReason, `options`: MozAdsCallbackOptions?)
         = 
     callWithHandle {
     uniffiRustCallWithError(MozAdsClientApiException) { _status ->
     UniffiLib.uniffi_ads_client_fn_method_mozadsclient_report_ad(
         it,
-        FfiConverterString.lower(`reportUrl`),FfiConverterTypeMozAdsReportReason.lower(`reason`),FfiConverterOptionalTypeMozAdsCallbackOptions.lower(`options`),_status)
+        
+        FfiConverterString.lower(`reportUrl`),
+        FfiConverterTypeMozAdsReportReason.lower(`reason`),
+        FfiConverterOptionalTypeMozAdsCallbackOptions.lower(`options`),_status)
 }
     }
     
     
 
     
+    /**
+     * Requests one image ad per placement. The result is keyed by
+     * `placement_id` and leaves out placements with no ad.
+     */
     @Throws(MozAdsClientApiException::class)override fun `requestImageAds`(`mozAdRequests`: List<MozAdsPlacementRequest>, `options`: MozAdsRequestOptions?): Map<kotlin.String, MozAdsImage> {
             return FfiConverterMapStringTypeMozAdsImage.lift(
     callWithHandle {
     uniffiRustCallWithError(MozAdsClientApiException) { _status ->
     UniffiLib.uniffi_ads_client_fn_method_mozadsclient_request_image_ads(
         it,
-        FfiConverterSequenceTypeMozAdsPlacementRequest.lower(`mozAdRequests`),FfiConverterOptionalTypeMozAdsRequestOptions.lower(`options`),_status)
+        
+        FfiConverterSequenceTypeMozAdsPlacementRequest.lower(`mozAdRequests`),
+        FfiConverterOptionalTypeMozAdsRequestOptions.lower(`options`),_status)
 }
     }
     )
@@ -1542,13 +1629,19 @@ open class MozAdsClient: Disposable, AutoCloseable, MozAdsClientInterface
     
 
     
+    /**
+     * Requests `count` spocs per placement. The result is keyed by
+     * `placement_id` and leaves out placements with no ad.
+     */
     @Throws(MozAdsClientApiException::class)override fun `requestSpocAds`(`mozAdRequests`: List<MozAdsPlacementRequestWithCount>, `options`: MozAdsRequestOptions?): Map<kotlin.String, List<MozAdsSpoc>> {
             return FfiConverterMapStringSequenceTypeMozAdsSpoc.lift(
     callWithHandle {
     uniffiRustCallWithError(MozAdsClientApiException) { _status ->
     UniffiLib.uniffi_ads_client_fn_method_mozadsclient_request_spoc_ads(
         it,
-        FfiConverterSequenceTypeMozAdsPlacementRequestWithCount.lower(`mozAdRequests`),FfiConverterOptionalTypeMozAdsRequestOptions.lower(`options`),_status)
+        
+        FfiConverterSequenceTypeMozAdsPlacementRequestWithCount.lower(`mozAdRequests`),
+        FfiConverterOptionalTypeMozAdsRequestOptions.lower(`options`),_status)
 }
     }
     )
@@ -1556,13 +1649,40 @@ open class MozAdsClient: Disposable, AutoCloseable, MozAdsClientInterface
     
 
     
+    /**
+     * Requests `count` ads per placement, for placements that can return
+     * either spocs or image ads. The result is keyed by `placement_id` and
+     * leaves out placements with no ad.
+     */
+    @Throws(MozAdsClientApiException::class)override fun `requestSpocOrImageAds`(`mozAdRequests`: List<MozAdsPlacementRequestWithCount>, `options`: MozAdsRequestOptions?): Map<kotlin.String, List<MozAdsImageOrSpoc>> {
+            return FfiConverterMapStringSequenceTypeMozAdsImageOrSpoc.lift(
+    callWithHandle {
+    uniffiRustCallWithError(MozAdsClientApiException) { _status ->
+    UniffiLib.uniffi_ads_client_fn_method_mozadsclient_request_spoc_or_image_ads(
+        it,
+        
+        FfiConverterSequenceTypeMozAdsPlacementRequestWithCount.lower(`mozAdRequests`),
+        FfiConverterOptionalTypeMozAdsRequestOptions.lower(`options`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Requests one tile ad per placement. The result is keyed by
+     * `placement_id` and leaves out placements with no ad.
+     */
     @Throws(MozAdsClientApiException::class)override fun `requestTileAds`(`mozAdRequests`: List<MozAdsPlacementRequest>, `options`: MozAdsRequestOptions?): Map<kotlin.String, MozAdsTile> {
             return FfiConverterMapStringTypeMozAdsTile.lift(
     callWithHandle {
     uniffiRustCallWithError(MozAdsClientApiException) { _status ->
     UniffiLib.uniffi_ads_client_fn_method_mozadsclient_request_tile_ads(
         it,
-        FfiConverterSequenceTypeMozAdsPlacementRequest.lower(`mozAdRequests`),FfiConverterOptionalTypeMozAdsRequestOptions.lower(`options`),_status)
+        
+        FfiConverterSequenceTypeMozAdsPlacementRequest.lower(`mozAdRequests`),
+        FfiConverterOptionalTypeMozAdsRequestOptions.lower(`options`),_status)
 }
     }
     )
@@ -1570,6 +1690,12 @@ open class MozAdsClient: Disposable, AutoCloseable, MozAdsClientInterface
     
 
     
+    /**
+     * Allows the ads-client to unload some references and prepare for a safe shutdown.
+     * Other methods should not be called after this one.
+     * Currently, we shutdown (with no expected errors).
+     * However, future shutdowns may require an error to be logged, so we keep the Result.
+     */
     @Throws(MozAdsClientApiException::class)override fun `shutdown`()
         = 
     callWithHandle {
@@ -1716,21 +1842,46 @@ public object FfiConverterTypeMozAdsClient: FfiConverter<MozAdsClient, Long> {
 //
 
 
+/**
+ * Configures and builds a [`MozAdsClient`].
+ */
 public interface MozAdsClientBuilderInterface {
     
+    /**
+     * Builds the client. A telemetry instance set on the builder becomes the
+     * destination of every client's metrics in the process.
+     */
     fun `build`(): MozAdsClient
     
+    /**
+     * Enables the HTTP cache with this configuration. Without it, nothing is
+     * cached.
+     */
     fun `cacheConfig`(`cacheConfig`: MozAdsCacheConfig): MozAdsClientBuilder
     
-    fun `contextIdProvider`(`provider`: MozAdsContextIdProvider): MozAdsClientBuilder
-    
+    /**
+     * The MARS environment to send requests to. Defaults to production.
+     */
     fun `environment`(`environment`: MozAdsEnvironment): MozAdsClientBuilder
     
+    /**
+     * Where the client records its metrics. Telemetry is process-wide: see
+     * [`MozAdsTelemetry`].
+     */
     fun `telemetry`(`telemetry`: MozAdsTelemetry): MozAdsClientBuilder
+    
+    /**
+     * The browser's user agent, sent to MARS on OHTTP requests when the
+     * preflight returns none. Defaults to viaduct's global default user agent.
+     */
+    fun `userAgent`(`userAgent`: kotlin.String): MozAdsClientBuilder
     
     companion object
 }
 
+/**
+ * Configures and builds a [`MozAdsClient`].
+ */
 open class MozAdsClientBuilder: Disposable, AutoCloseable, MozAdsClientBuilderInterface
 {
 
@@ -1755,6 +1906,10 @@ open class MozAdsClientBuilder: Disposable, AutoCloseable, MozAdsClientBuilderIn
         this.handle = 0
         this.cleanable = null
     }
+    /**
+     * A builder with the defaults: the production environment, no cache and
+     * no telemetry.
+     */
     constructor() :
         this(UniffiWithHandle, 
     uniffiRustCall() { _status ->
@@ -1769,6 +1924,11 @@ open class MozAdsClientBuilder: Disposable, AutoCloseable, MozAdsClientBuilderIn
 
     private val wasDestroyed = AtomicBoolean(false)
     private val callCounter = AtomicLong(1)
+
+    /**
+     * Whether the current object has been destroyed and its reference is gone in the Rust side.
+     */
+    val uniffiIsDestroyed: Boolean get() = wasDestroyed.get()
 
     override fun destroy() {
         // Only allow a single call to this method.
@@ -1835,7 +1995,11 @@ open class MozAdsClientBuilder: Disposable, AutoCloseable, MozAdsClientBuilderIn
         }
     }
 
-    override fun `build`(): MozAdsClient {
+    
+    /**
+     * Builds the client. A telemetry instance set on the builder becomes the
+     * destination of every client's metrics in the process.
+     */override fun `build`(): MozAdsClient {
             return FfiConverterTypeMozAdsClient.lift(
     callWithHandle {
     uniffiRustCall() { _status ->
@@ -1848,12 +2012,17 @@ open class MozAdsClientBuilder: Disposable, AutoCloseable, MozAdsClientBuilderIn
     }
     
 
-    override fun `cacheConfig`(`cacheConfig`: MozAdsCacheConfig): MozAdsClientBuilder {
+    
+    /**
+     * Enables the HTTP cache with this configuration. Without it, nothing is
+     * cached.
+     */override fun `cacheConfig`(`cacheConfig`: MozAdsCacheConfig): MozAdsClientBuilder {
             return FfiConverterTypeMozAdsClientBuilder.lift(
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_ads_client_fn_method_mozadsclientbuilder_cache_config(
         it,
+        
         FfiConverterTypeMozAdsCacheConfig.lower(`cacheConfig`),_status)
 }
     }
@@ -1861,25 +2030,16 @@ open class MozAdsClientBuilder: Disposable, AutoCloseable, MozAdsClientBuilderIn
     }
     
 
-    override fun `contextIdProvider`(`provider`: MozAdsContextIdProvider): MozAdsClientBuilder {
-            return FfiConverterTypeMozAdsClientBuilder.lift(
-    callWithHandle {
-    uniffiRustCall() { _status ->
-    UniffiLib.uniffi_ads_client_fn_method_mozadsclientbuilder_context_id_provider(
-        it,
-        FfiConverterTypeMozAdsContextIdProvider.lower(`provider`),_status)
-}
-    }
-    )
-    }
     
-
-    override fun `environment`(`environment`: MozAdsEnvironment): MozAdsClientBuilder {
+    /**
+     * The MARS environment to send requests to. Defaults to production.
+     */override fun `environment`(`environment`: MozAdsEnvironment): MozAdsClientBuilder {
             return FfiConverterTypeMozAdsClientBuilder.lift(
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_ads_client_fn_method_mozadsclientbuilder_environment(
         it,
+        
         FfiConverterTypeMozAdsEnvironment.lower(`environment`),_status)
 }
     }
@@ -1887,13 +2047,36 @@ open class MozAdsClientBuilder: Disposable, AutoCloseable, MozAdsClientBuilderIn
     }
     
 
-    override fun `telemetry`(`telemetry`: MozAdsTelemetry): MozAdsClientBuilder {
+    
+    /**
+     * Where the client records its metrics. Telemetry is process-wide: see
+     * [`MozAdsTelemetry`].
+     */override fun `telemetry`(`telemetry`: MozAdsTelemetry): MozAdsClientBuilder {
             return FfiConverterTypeMozAdsClientBuilder.lift(
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_ads_client_fn_method_mozadsclientbuilder_telemetry(
         it,
+        
         FfiConverterTypeMozAdsTelemetry.lower(`telemetry`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The browser's user agent, sent to MARS on OHTTP requests when the
+     * preflight returns none. Defaults to viaduct's global default user agent.
+     */override fun `userAgent`(`userAgent`: kotlin.String): MozAdsClientBuilder {
+            return FfiConverterTypeMozAdsClientBuilder.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_ads_client_fn_method_mozadsclientbuilder_user_agent(
+        it,
+        
+        FfiConverterString.lower(`userAgent`),_status)
 }
     }
     )
@@ -1939,312 +2122,11 @@ public object FfiConverterTypeMozAdsClientBuilder: FfiConverter<MozAdsClientBuil
 }
 
 
-// This template implements a class for working with a Rust struct via a handle
-// to the live Rust struct on the other side of the FFI.
-//
-// There's some subtlety here, because we have to be careful not to operate on a Rust
-// struct after it has been dropped, and because we must expose a public API for freeing
-// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
-//
-//   * Each instance holds an opaque handle to the underlying Rust struct.
-//     Method calls need to read this handle from the object's state and pass it in to
-//     the Rust FFI.
-//
-//   * When an instance is no longer needed, its handle should be passed to a
-//     special destructor function provided by the Rust FFI, which will drop the
-//     underlying Rust struct.
-//
-//   * Given an instance, calling code is expected to call the special
-//     `destroy` method in order to free it after use, either by calling it explicitly
-//     or by using a higher-level helper like the `use` method. Failing to do so risks
-//     leaking the underlying Rust struct.
-//
-//   * We can't assume that calling code will do the right thing, and must be prepared
-//     to handle Kotlin method calls executing concurrently with or even after a call to
-//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
-//
-//   * We must never allow Rust code to operate on the underlying Rust struct after
-//     the destructor has been called, and must never call the destructor more than once.
-//     Doing so may trigger memory unsafety.
-//
-//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
-//     is implemented to call the destructor when the Kotlin object becomes unreachable.
-//     This is done in a background thread. This is not a panacea, and client code should be aware that
-//      1. the thread may starve if some there are objects that have poorly performing
-//     `drop` methods or do significant work in their `drop` methods.
-//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
-//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
-//
-// If we try to implement this with mutual exclusion on access to the handle, there is the
-// possibility of a race between a method call and a concurrent call to `destroy`:
-//
-//    * Thread A starts a method call, reads the value of the handle, but is interrupted
-//      before it can pass the handle over the FFI to Rust.
-//    * Thread B calls `destroy` and frees the underlying Rust struct.
-//    * Thread A resumes, passing the already-read handle value to Rust and triggering
-//      a use-after-free.
-//
-// One possible solution would be to use a `ReadWriteLock`, with each method call taking
-// a read lock (and thus allowed to run concurrently) and the special `destroy` method
-// taking a write lock (and thus blocking on live method calls). However, we aim not to
-// generate methods with any hidden blocking semantics, and a `destroy` method that might
-// block if called incorrectly seems to meet that bar.
-//
-// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
-// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
-// has been called. These are updated according to the following rules:
-//
-//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
-//      The initial value for the flag is false.
-//
-//    * At the start of each method call, we atomically check the counter.
-//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
-//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
-//
-//    * At the end of each method call, we atomically decrement and check the counter.
-//      If it has reached zero then we destroy the underlying Rust struct.
-//
-//    * When `destroy` is called, we atomically flip the flag from false to true.
-//      If the flag was already true we silently fail.
-//      Otherwise we atomically decrement and check the counter.
-//      If it has reached zero then we destroy the underlying Rust struct.
-//
-// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
-// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
-//
-// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
-// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
-// of the underlying Rust code.
-//
-// This makes a cleaner a better alternative to _not_ calling `destroy()` as
-// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
-// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
-// thread may be starved, and the app will leak memory.
-//
-// In this case, `destroy`ing manually may be a better solution.
-//
-// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
-// with Rust peers are reclaimed:
-//
-// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
-// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
-// 3. The memory is reclaimed when the process terminates.
-//
-// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
-//
-
-
-public interface MozAdsContextIdProvider {
-    
-    fun `contextId`(): kotlin.String
-    
-    companion object
-}
-
-open class MozAdsContextIdProviderImpl: Disposable, AutoCloseable, MozAdsContextIdProvider
-{
-
-    @Suppress("UNUSED_PARAMETER")
-    /**
-     * @suppress
-     */
-    constructor(withHandle: UniffiWithHandle, handle: Long) {
-        this.handle = handle
-        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
-    }
-
-    /**
-     * @suppress
-     *
-     * This constructor can be used to instantiate a fake object. Only used for tests. Any
-     * attempt to actually use an object constructed this way will fail as there is no
-     * connected Rust object.
-     */
-    @Suppress("UNUSED_PARAMETER")
-    constructor(noHandle: NoHandle) {
-        this.handle = 0
-        this.cleanable = null
-    }
-
-    protected val handle: Long
-    protected val cleanable: UniffiCleaner.Cleanable?
-
-    private val wasDestroyed = AtomicBoolean(false)
-    private val callCounter = AtomicLong(1)
-
-    override fun destroy() {
-        // Only allow a single call to this method.
-        // TODO: maybe we should log a warning if called more than once?
-        if (this.wasDestroyed.compareAndSet(false, true)) {
-            // This decrement always matches the initial count of 1 given at creation time.
-            if (this.callCounter.decrementAndGet() == 0L) {
-                cleanable?.clean()
-            }
-        }
-    }
-
-    @Synchronized
-    override fun close() {
-        this.destroy()
-    }
-
-    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
-        // Check and increment the call counter, to keep the object alive.
-        // This needs a compare-and-set retry loop in case of concurrent updates.
-        do {
-            val c = this.callCounter.get()
-            if (c == 0L) {
-                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
-            }
-            if (c == Long.MAX_VALUE) {
-                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
-            }
-        } while (! this.callCounter.compareAndSet(c, c + 1L))
-        // Now we can safely do the method call without the handle being freed concurrently.
-        try {
-            return block(this.uniffiCloneHandle())
-        } finally {
-            // This decrement always matches the increment we performed above.
-            if (this.callCounter.decrementAndGet() == 0L) {
-                cleanable?.clean()
-            }
-        }
-    }
-
-    // Use a static inner class instead of a closure so as not to accidentally
-    // capture `this` as part of the cleanable's action.
-    private class UniffiCleanAction(private val handle: Long) : Runnable {
-        override fun run() {
-            if (handle == 0.toLong()) {
-                // Fake object created with `NoHandle`, don't try to free.
-                return;
-            }
-            uniffiRustCall { status ->
-                UniffiLib.uniffi_ads_client_fn_free_mozadscontextidprovider(handle, status)
-            }
-        }
-    }
-
-    /**
-     * @suppress
-     */
-    fun uniffiCloneHandle(): Long {
-        if (handle == 0.toLong()) {
-            throw InternalException("uniffiCloneHandle() called on NoHandle object");
-        }
-        return uniffiRustCall() { status ->
-            UniffiLib.uniffi_ads_client_fn_clone_mozadscontextidprovider(handle, status)
-        }
-    }
-
-    override fun `contextId`(): kotlin.String {
-            return FfiConverterString.lift(
-    callWithHandle {
-    uniffiRustCall() { _status ->
-    UniffiLib.uniffi_ads_client_fn_method_mozadscontextidprovider_context_id(
-        it,
-        _status)
-}
-    }
-    )
-    }
-    
-
-    
-
-    
-
-
-    
-    
-    /**
-     * @suppress
-     */
-    companion object
-    
-}
-
-
-
-// Put the implementation in an object so we don't pollute the top-level namespace
-internal object uniffiCallbackInterfaceMozAdsContextIdProvider {
-    internal object `contextId`: UniffiCallbackInterfaceMozAdsContextIdProviderMethod0 {
-        override fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
-            val uniffiObj = FfiConverterTypeMozAdsContextIdProvider.handleMap.get(uniffiHandle)
-            val makeCall = { ->
-                uniffiObj.`contextId`(
-                )
-            }
-            val writeReturn = { value: kotlin.String -> uniffiOutReturn.setValue(FfiConverterString.lower(value)) }
-            uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
-        }
-    }
-
-    internal object uniffiFree: UniffiCallbackInterfaceFree {
-        override fun callback(handle: Long) {
-            FfiConverterTypeMozAdsContextIdProvider.handleMap.remove(handle)
-        }
-    }
-
-    internal object uniffiClone: UniffiCallbackInterfaceClone {
-        override fun callback(handle: Long): Long {
-            return FfiConverterTypeMozAdsContextIdProvider.handleMap.clone(handle)
-        }
-    }
-
-    internal var vtable = UniffiVTableCallbackInterfaceMozAdsContextIdProvider.UniffiByValue(
-        uniffiFree,
-        uniffiClone,
-        `contextId`,
-    )
-
-    // Registers the foreign callback with the Rust side.
-    // This method is generated for each callback interface.
-    internal fun register(lib: UniffiLib) {
-        lib.uniffi_ads_client_fn_init_callback_vtable_mozadscontextidprovider(vtable)
-    }
-}
 
 /**
- * @suppress
+ * The on-disk HTTP cache. `default_cache_ttl_seconds` defaults to 300 and
+ * `max_size_mib` to 10.
  */
-public object FfiConverterTypeMozAdsContextIdProvider: FfiConverter<MozAdsContextIdProvider, Long> {
-    internal val handleMap = UniffiHandleMap<MozAdsContextIdProvider>()
-
-    override fun lower(value: MozAdsContextIdProvider): Long {
-        if (value is MozAdsContextIdProviderImpl) {
-             // Rust-implemented object.  Clone the handle and return it
-            return value.uniffiCloneHandle()
-         } else {
-            // Kotlin object, generate a new vtable handle and return that.
-            return handleMap.insert(value)
-         }
-    }
-
-    override fun lift(value: Long): MozAdsContextIdProvider {
-        if ((value and 1.toLong()) == 0.toLong()) {
-            // Rust-generated handle, construct a new class that uses the handle to implement the
-            // interface
-            return MozAdsContextIdProviderImpl(UniffiWithHandle, value)
-        } else {
-            // Kotlin-generated handle, get the object from the handle map
-            return handleMap.remove(value)
-        }
-    }
-
-    override fun read(buf: ByteBuffer): MozAdsContextIdProvider {
-        return lift(buf.getLong())
-    }
-
-    override fun allocationSize(value: MozAdsContextIdProvider) = 8UL
-
-    override fun write(value: MozAdsContextIdProvider, buf: ByteBuffer) {
-        buf.putLong(lower(value))
-    }
-}
-
-
-
 data class MozAdsCacheConfig (
     var `dbPath`: kotlin.String
     , 
@@ -2288,6 +2170,10 @@ public object FfiConverterTypeMozAdsCacheConfig: FfiConverterRustBuffer<MozAdsCa
 
 
 
+/**
+ * How one request uses the cache. `ttl_seconds` overrides the client's
+ * default TTL; `0` does not cache the response.
+ */
 data class MozAdsCachePolicy (
     var `mode`: MozAdsCacheMode
     , 
@@ -2326,6 +2212,9 @@ public object FfiConverterTypeMozAdsCachePolicy: FfiConverterRustBuffer<MozAdsCa
 
 
 
+/**
+ * Options for a callback request (click, impression or report).
+ */
 data class MozAdsCallbackOptions (
     var `ohttp`: kotlin.Boolean = false 
     
@@ -2359,6 +2248,10 @@ public object FfiConverterTypeMozAdsCallbackOptions: FfiConverterRustBuffer<MozA
 
 
 
+/**
+ * The callback URLs of an ad: pass them to `record_click`,
+ * `record_impression` and `report_ad`.
+ */
 data class MozAdsCallbacks (
     var `click`: AdsClientUrl
     , 
@@ -2402,6 +2295,9 @@ public object FfiConverterTypeMozAdsCallbacks: FfiConverterRustBuffer<MozAdsCall
 
 
 
+/**
+ * IAB content categories, in one taxonomy version.
+ */
 data class MozAdsContentCategory (
     var `categories`: List<kotlin.String>
     , 
@@ -2440,6 +2336,9 @@ public object FfiConverterTypeMozAdsContentCategory: FfiConverterRustBuffer<MozA
 
 
 
+/**
+ * The IAB content classification of a placement, for targeting.
+ */
 data class MozAdsIabContent (
     var `categoryIds`: List<kotlin.String>
     , 
@@ -2478,6 +2377,9 @@ public object FfiConverterTypeMozAdsIABContent: FfiConverterRustBuffer<MozAdsIab
 
 
 
+/**
+ * An image ad returned by MARS.
+ */
 data class MozAdsImage (
     var `altText`: kotlin.String?
     , 
@@ -2487,9 +2389,9 @@ data class MozAdsImage (
     , 
     var `format`: kotlin.String
     , 
-    var `imageUrl`: kotlin.String
+    var `imageUrl`: AdsClientUrl
     , 
-    var `url`: kotlin.String
+    var `url`: AdsClientUrl
     
 ){
     
@@ -2510,8 +2412,8 @@ public object FfiConverterTypeMozAdsImage: FfiConverterRustBuffer<MozAdsImage> {
             FfiConverterString.read(buf),
             FfiConverterTypeMozAdsCallbacks.read(buf),
             FfiConverterString.read(buf),
-            FfiConverterString.read(buf),
-            FfiConverterString.read(buf),
+            FfiConverterTypeAdsClientUrl.read(buf),
+            FfiConverterTypeAdsClientUrl.read(buf),
         )
     }
 
@@ -2520,8 +2422,8 @@ public object FfiConverterTypeMozAdsImage: FfiConverterRustBuffer<MozAdsImage> {
             FfiConverterString.allocationSize(value.`blockKey`) +
             FfiConverterTypeMozAdsCallbacks.allocationSize(value.`callbacks`) +
             FfiConverterString.allocationSize(value.`format`) +
-            FfiConverterString.allocationSize(value.`imageUrl`) +
-            FfiConverterString.allocationSize(value.`url`)
+            FfiConverterTypeAdsClientUrl.allocationSize(value.`imageUrl`) +
+            FfiConverterTypeAdsClientUrl.allocationSize(value.`url`)
     )
 
     override fun write(value: MozAdsImage, buf: ByteBuffer) {
@@ -2529,13 +2431,17 @@ public object FfiConverterTypeMozAdsImage: FfiConverterRustBuffer<MozAdsImage> {
             FfiConverterString.write(value.`blockKey`, buf)
             FfiConverterTypeMozAdsCallbacks.write(value.`callbacks`, buf)
             FfiConverterString.write(value.`format`, buf)
-            FfiConverterString.write(value.`imageUrl`, buf)
-            FfiConverterString.write(value.`url`, buf)
+            FfiConverterTypeAdsClientUrl.write(value.`imageUrl`, buf)
+            FfiConverterTypeAdsClientUrl.write(value.`url`, buf)
     }
 }
 
 
 
+/**
+ * One placement to request a single ad for. `placement_id` must be unique
+ * within one request.
+ */
 data class MozAdsPlacementRequest (
     var `iabContent`: MozAdsIabContent? = null 
     , 
@@ -2574,6 +2480,10 @@ public object FfiConverterTypeMozAdsPlacementRequest: FfiConverterRustBuffer<Moz
 
 
 
+/**
+ * One placement to request `count` ads for. `placement_id` must be unique
+ * within one request.
+ */
 data class MozAdsPlacementRequestWithCount (
     var `count`: kotlin.UInt
     , 
@@ -2617,12 +2527,19 @@ public object FfiConverterTypeMozAdsPlacementRequestWithCount: FfiConverterRustB
 
 
 
+/**
+ * Options for one ad request. Every field has a default.
+ */
 data class MozAdsRequestOptions (
-    var `cachePolicy`: MozAdsCachePolicy?
+    var `blocks`: List<kotlin.String> = listOf() 
+    , 
+    var `cachePolicy`: MozAdsCachePolicy? = null 
     , 
     var `flags`: Map<kotlin.String, kotlin.Boolean> = mapOf() 
     , 
     var `ohttp`: kotlin.Boolean = false 
+    , 
+    var `relevance`: Map<kotlin.String, kotlin.Double> = mapOf() 
     
 ){
     
@@ -2639,27 +2556,36 @@ data class MozAdsRequestOptions (
 public object FfiConverterTypeMozAdsRequestOptions: FfiConverterRustBuffer<MozAdsRequestOptions> {
     override fun read(buf: ByteBuffer): MozAdsRequestOptions {
         return MozAdsRequestOptions(
+            FfiConverterSequenceString.read(buf),
             FfiConverterOptionalTypeMozAdsCachePolicy.read(buf),
             FfiConverterMapStringBoolean.read(buf),
             FfiConverterBoolean.read(buf),
+            FfiConverterMapStringDouble.read(buf),
         )
     }
 
     override fun allocationSize(value: MozAdsRequestOptions) = (
+            FfiConverterSequenceString.allocationSize(value.`blocks`) +
             FfiConverterOptionalTypeMozAdsCachePolicy.allocationSize(value.`cachePolicy`) +
             FfiConverterMapStringBoolean.allocationSize(value.`flags`) +
-            FfiConverterBoolean.allocationSize(value.`ohttp`)
+            FfiConverterBoolean.allocationSize(value.`ohttp`) +
+            FfiConverterMapStringDouble.allocationSize(value.`relevance`)
     )
 
     override fun write(value: MozAdsRequestOptions, buf: ByteBuffer) {
+            FfiConverterSequenceString.write(value.`blocks`, buf)
             FfiConverterOptionalTypeMozAdsCachePolicy.write(value.`cachePolicy`, buf)
             FfiConverterMapStringBoolean.write(value.`flags`, buf)
             FfiConverterBoolean.write(value.`ohttp`, buf)
+            FfiConverterMapStringDouble.write(value.`relevance`, buf)
     }
 }
 
 
 
+/**
+ * A sponsored content (spoc) ad returned by MARS.
+ */
 data class MozAdsSpoc (
     var `blockKey`: kotlin.String
     , 
@@ -2673,7 +2599,7 @@ data class MozAdsSpoc (
     , 
     var `format`: kotlin.String
     , 
-    var `imageUrl`: kotlin.String
+    var `imageUrl`: AdsClientUrl
     , 
     var `ranking`: MozAdsSpocRanking
     , 
@@ -2683,7 +2609,7 @@ data class MozAdsSpoc (
     , 
     var `title`: kotlin.String
     , 
-    var `url`: kotlin.String
+    var `url`: AdsClientUrl
     
 ){
     
@@ -2706,12 +2632,12 @@ public object FfiConverterTypeMozAdsSpoc: FfiConverterRustBuffer<MozAdsSpoc> {
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
-            FfiConverterString.read(buf),
+            FfiConverterTypeAdsClientUrl.read(buf),
             FfiConverterTypeMozAdsSpocRanking.read(buf),
             FfiConverterString.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterString.read(buf),
-            FfiConverterString.read(buf),
+            FfiConverterTypeAdsClientUrl.read(buf),
         )
     }
 
@@ -2722,12 +2648,12 @@ public object FfiConverterTypeMozAdsSpoc: FfiConverterRustBuffer<MozAdsSpoc> {
             FfiConverterString.allocationSize(value.`domain`) +
             FfiConverterString.allocationSize(value.`excerpt`) +
             FfiConverterString.allocationSize(value.`format`) +
-            FfiConverterString.allocationSize(value.`imageUrl`) +
+            FfiConverterTypeAdsClientUrl.allocationSize(value.`imageUrl`) +
             FfiConverterTypeMozAdsSpocRanking.allocationSize(value.`ranking`) +
             FfiConverterString.allocationSize(value.`sponsor`) +
             FfiConverterOptionalString.allocationSize(value.`sponsoredByOverride`) +
             FfiConverterString.allocationSize(value.`title`) +
-            FfiConverterString.allocationSize(value.`url`)
+            FfiConverterTypeAdsClientUrl.allocationSize(value.`url`)
     )
 
     override fun write(value: MozAdsSpoc, buf: ByteBuffer) {
@@ -2737,17 +2663,20 @@ public object FfiConverterTypeMozAdsSpoc: FfiConverterRustBuffer<MozAdsSpoc> {
             FfiConverterString.write(value.`domain`, buf)
             FfiConverterString.write(value.`excerpt`, buf)
             FfiConverterString.write(value.`format`, buf)
-            FfiConverterString.write(value.`imageUrl`, buf)
+            FfiConverterTypeAdsClientUrl.write(value.`imageUrl`, buf)
             FfiConverterTypeMozAdsSpocRanking.write(value.`ranking`, buf)
             FfiConverterString.write(value.`sponsor`, buf)
             FfiConverterOptionalString.write(value.`sponsoredByOverride`, buf)
             FfiConverterString.write(value.`title`, buf)
-            FfiConverterString.write(value.`url`, buf)
+            FfiConverterTypeAdsClientUrl.write(value.`url`, buf)
     }
 }
 
 
 
+/**
+ * Frequency capping information for a spoc.
+ */
 data class MozAdsSpocFrequencyCaps (
     var `capKey`: kotlin.String
     , 
@@ -2786,6 +2715,9 @@ public object FfiConverterTypeMozAdsSpocFrequencyCaps: FfiConverterRustBuffer<Mo
 
 
 
+/**
+ * Ranking and personalization information for a spoc.
+ */
 data class MozAdsSpocRanking (
     var `itemScore`: kotlin.Double
     , 
@@ -2829,6 +2761,45 @@ public object FfiConverterTypeMozAdsSpocRanking: FfiConverterRustBuffer<MozAdsSp
 
 
 
+/**
+ * The SQLite database the stateful client keeps its ads in.
+ */
+data class MozAdsStoreConfig (
+    var `dbPath`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeMozAdsStoreConfig: FfiConverterRustBuffer<MozAdsStoreConfig> {
+    override fun read(buf: ByteBuffer): MozAdsStoreConfig {
+        return MozAdsStoreConfig(
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: MozAdsStoreConfig) = (
+            FfiConverterString.allocationSize(value.`dbPath`)
+    )
+
+    override fun write(value: MozAdsStoreConfig, buf: ByteBuffer) {
+            FfiConverterString.write(value.`dbPath`, buf)
+    }
+}
+
+
+
+/**
+ * A tile ad returned by MARS.
+ */
 data class MozAdsTile (
     var `blockKey`: kotlin.String
     , 
@@ -2836,11 +2807,11 @@ data class MozAdsTile (
     , 
     var `format`: kotlin.String
     , 
-    var `imageUrl`: kotlin.String
+    var `imageUrl`: AdsClientUrl
     , 
     var `name`: kotlin.String
     , 
-    var `url`: kotlin.String
+    var `url`: AdsClientUrl
     
 ){
     
@@ -2860,9 +2831,9 @@ public object FfiConverterTypeMozAdsTile: FfiConverterRustBuffer<MozAdsTile> {
             FfiConverterString.read(buf),
             FfiConverterTypeMozAdsCallbacks.read(buf),
             FfiConverterString.read(buf),
+            FfiConverterTypeAdsClientUrl.read(buf),
             FfiConverterString.read(buf),
-            FfiConverterString.read(buf),
-            FfiConverterString.read(buf),
+            FfiConverterTypeAdsClientUrl.read(buf),
         )
     }
 
@@ -2870,23 +2841,26 @@ public object FfiConverterTypeMozAdsTile: FfiConverterRustBuffer<MozAdsTile> {
             FfiConverterString.allocationSize(value.`blockKey`) +
             FfiConverterTypeMozAdsCallbacks.allocationSize(value.`callbacks`) +
             FfiConverterString.allocationSize(value.`format`) +
-            FfiConverterString.allocationSize(value.`imageUrl`) +
+            FfiConverterTypeAdsClientUrl.allocationSize(value.`imageUrl`) +
             FfiConverterString.allocationSize(value.`name`) +
-            FfiConverterString.allocationSize(value.`url`)
+            FfiConverterTypeAdsClientUrl.allocationSize(value.`url`)
     )
 
     override fun write(value: MozAdsTile, buf: ByteBuffer) {
             FfiConverterString.write(value.`blockKey`, buf)
             FfiConverterTypeMozAdsCallbacks.write(value.`callbacks`, buf)
             FfiConverterString.write(value.`format`, buf)
-            FfiConverterString.write(value.`imageUrl`, buf)
+            FfiConverterTypeAdsClientUrl.write(value.`imageUrl`, buf)
             FfiConverterString.write(value.`name`, buf)
-            FfiConverterString.write(value.`url`, buf)
+            FfiConverterTypeAdsClientUrl.write(value.`url`, buf)
     }
 }
 
 
 
+/**
+ * Whether a request reads the cache before the network.
+ */
 
 enum class MozAdsCacheMode {
     
@@ -2923,6 +2897,9 @@ public object FfiConverterTypeMozAdsCacheMode: FfiConverterRustBuffer<MozAdsCach
 
 
 
+/**
+ * The error every ads client method can throw.
+ */
 sealed class MozAdsClientApiException: kotlin.Exception() {
     
     class Other(
@@ -2983,33 +2960,92 @@ public object FfiConverterTypeMozAdsClientApiError : FfiConverterRustBuffer<MozA
 
 
 
-
-enum class MozAdsEnvironment {
+/**
+ * The MARS environment the client sends requests to. Defaults to `Prod`.
+ *
+ * Variants are deliberately unsorted: UniFFI encodes them by index, and
+ * this mirrors `Environment`.
+ */
+sealed class MozAdsEnvironment {
     
-    PROD,
-    STAGING;
+    object Prod : MozAdsEnvironment()
+    
+    
+    object Staging : MozAdsEnvironment()
+    
+    
+    data class Custom(
+        val v1: mozilla.appservices.adsclient.AdsClientUrl) : MozAdsEnvironment()
+        
+    {
+        
 
+        companion object
+    }
+    
+
+    
+
+    
     
 
 
     companion object
 }
 
-
 /**
  * @suppress
  */
-public object FfiConverterTypeMozAdsEnvironment: FfiConverterRustBuffer<MozAdsEnvironment> {
-    override fun read(buf: ByteBuffer) = try {
-        MozAdsEnvironment.values()[buf.getInt() - 1]
-    } catch (e: IndexOutOfBoundsException) {
-        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+public object FfiConverterTypeMozAdsEnvironment : FfiConverterRustBuffer<MozAdsEnvironment>{
+    override fun read(buf: ByteBuffer): MozAdsEnvironment {
+        return when(buf.getInt()) {
+            1 -> MozAdsEnvironment.Prod
+            2 -> MozAdsEnvironment.Staging
+            3 -> MozAdsEnvironment.Custom(
+                FfiConverterTypeAdsClientUrl.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
     }
 
-    override fun allocationSize(value: MozAdsEnvironment) = 4UL
+    override fun allocationSize(value: MozAdsEnvironment): ULong = when(value) {
+        is MozAdsEnvironment.Prod -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is MozAdsEnvironment.Staging -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is MozAdsEnvironment.Custom -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeAdsClientUrl.allocationSize(value.v1)
+            )
+        }
+    }
 
     override fun write(value: MozAdsEnvironment, buf: ByteBuffer) {
-        buf.putInt(value.ordinal + 1)
+        when(value) {
+            is MozAdsEnvironment.Prod -> {
+                buf.putInt(1)
+                Unit
+            }
+            is MozAdsEnvironment.Staging -> {
+                buf.putInt(2)
+                Unit
+            }
+            is MozAdsEnvironment.Custom -> {
+                buf.putInt(3)
+                FfiConverterTypeAdsClientUrl.write(value.v1, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 }
 
@@ -3017,6 +3053,9 @@ public object FfiConverterTypeMozAdsEnvironment: FfiConverterRustBuffer<MozAdsEn
 
 
 
+/**
+ * The version of the IAB Content Taxonomy that category ids refer to.
+ */
 
 enum class MozAdsIabContentTaxonomy {
     
@@ -3054,12 +3093,104 @@ public object FfiConverterTypeMozAdsIABContentTaxonomy: FfiConverterRustBuffer<M
 
 
 
+/**
+ * An ad from a placement that can return either an image or a spoc.
+ */
+sealed class MozAdsImageOrSpoc {
+    
+    data class Image(
+        val v1: mozilla.appservices.adsclient.MozAdsImage) : MozAdsImageOrSpoc()
+        
+    {
+        
+
+        companion object
+    }
+    
+    data class Spoc(
+        val v1: mozilla.appservices.adsclient.MozAdsSpoc) : MozAdsImageOrSpoc()
+        
+    {
+        
+
+        companion object
+    }
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeMozAdsImageOrSpoc : FfiConverterRustBuffer<MozAdsImageOrSpoc>{
+    override fun read(buf: ByteBuffer): MozAdsImageOrSpoc {
+        return when(buf.getInt()) {
+            1 -> MozAdsImageOrSpoc.Image(
+                FfiConverterTypeMozAdsImage.read(buf),
+                )
+            2 -> MozAdsImageOrSpoc.Spoc(
+                FfiConverterTypeMozAdsSpoc.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: MozAdsImageOrSpoc): ULong = when(value) {
+        is MozAdsImageOrSpoc.Image -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeMozAdsImage.allocationSize(value.v1)
+            )
+        }
+        is MozAdsImageOrSpoc.Spoc -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterTypeMozAdsSpoc.allocationSize(value.v1)
+            )
+        }
+    }
+
+    override fun write(value: MozAdsImageOrSpoc, buf: ByteBuffer) {
+        when(value) {
+            is MozAdsImageOrSpoc.Image -> {
+                buf.putInt(1)
+                FfiConverterTypeMozAdsImage.write(value.v1, buf)
+                Unit
+            }
+            is MozAdsImageOrSpoc.Spoc -> {
+                buf.putInt(2)
+                FfiConverterTypeMozAdsSpoc.write(value.v1, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+/**
+ * Why the user reported an ad.
+ */
 
 enum class MozAdsReportReason {
     
     INAPPROPRIATE,
     NOT_INTERESTED,
-    SEEN_TOO_MANY_TIMES;
+    SEEN_TOO_MANY_TIMES,
+    SCAM,
+    MISLEADING,
+    OFFENSIVE;
 
     
 
@@ -3091,16 +3222,35 @@ public object FfiConverterTypeMozAdsReportReason: FfiConverterRustBuffer<MozAdsR
 
 
 
+/**
+ * Receives the ads client's metrics, for the app to record in Glean.
+ */
 public interface MozAdsTelemetry {
     
+    /**
+     * The HTTP cache could not be built (`ads_client.build_cache_error`).
+     */
     fun `recordBuildCacheError`(`label`: kotlin.String, `value`: kotlin.String)
     
+    /**
+     * A client operation failed (`ads_client.client_error`).
+     */
     fun `recordClientError`(`label`: kotlin.String, `value`: kotlin.String)
     
+    /**
+     * A client operation was attempted (`ads_client.client_operation_total`).
+     */
     fun `recordClientOperationTotal`(`label`: kotlin.String)
     
+    /**
+     * An ad in a MARS response could not be parsed and was skipped
+     * (`ads_client.deserialization_error`).
+     */
     fun `recordDeserializationError`(`label`: kotlin.String, `value`: kotlin.String)
     
+    /**
+     * The outcome of a read from the HTTP cache (`ads_client.http_cache_outcome`).
+     */
     fun `recordHttpCacheOutcome`(`label`: kotlin.String, `value`: kotlin.String)
     
     companion object
@@ -3553,6 +3703,34 @@ public object FfiConverterSequenceTypeMozAdsSpoc: FfiConverterRustBuffer<List<Mo
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeMozAdsImageOrSpoc: FfiConverterRustBuffer<List<MozAdsImageOrSpoc>> {
+    override fun read(buf: ByteBuffer): List<MozAdsImageOrSpoc> {
+        val len = buf.getInt()
+        return List<MozAdsImageOrSpoc>(len) {
+            FfiConverterTypeMozAdsImageOrSpoc.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<MozAdsImageOrSpoc>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeMozAdsImageOrSpoc.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<MozAdsImageOrSpoc>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeMozAdsImageOrSpoc.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterMapStringUInt: FfiConverterRustBuffer<Map<kotlin.String, kotlin.UInt>> {
     override fun read(buf: ByteBuffer): Map<kotlin.String, kotlin.UInt> {
         val len = buf.getInt()
@@ -3582,6 +3760,45 @@ public object FfiConverterMapStringUInt: FfiConverterRustBuffer<Map<kotlin.Strin
         value.forEach { (k, v) ->
             FfiConverterString.write(k, buf)
             FfiConverterUInt.write(v, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterMapStringDouble: FfiConverterRustBuffer<Map<kotlin.String, kotlin.Double>> {
+    override fun read(buf: ByteBuffer): Map<kotlin.String, kotlin.Double> {
+        val len = buf.getInt()
+        return buildMap<kotlin.String, kotlin.Double>(len) {
+            repeat(len) {
+                val k = FfiConverterString.read(buf)
+                val v = FfiConverterDouble.read(buf)
+                this[k] = v
+            }
+        }
+    }
+
+    override fun allocationSize(value: Map<kotlin.String, kotlin.Double>): ULong {
+        val spaceForMapSize = 4UL
+        val spaceForChildren = value.map { (k, v) ->
+            FfiConverterString.allocationSize(k) +
+            FfiConverterDouble.allocationSize(v)
+        }.sum()
+        return spaceForMapSize + spaceForChildren
+    }
+
+    override fun write(value: Map<kotlin.String, kotlin.Double>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        // The parens on `(k, v)` here ensure we're calling the right method,
+        // which is important for compatibility with older android devices.
+        // Ref https://blog.danlew.net/2017/03/16/kotlin-puzzler-whose-line-is-it-anyways/
+        value.forEach { (k, v) ->
+            FfiConverterString.write(k, buf)
+            FfiConverterDouble.write(v, buf)
         }
     }
 }
@@ -3744,11 +3961,45 @@ public object FfiConverterMapStringSequenceTypeMozAdsSpoc: FfiConverterRustBuffe
 
 
 
+
 /**
- * Typealias from the type name used in the UDL file to the builtin type.  This
- * is needed because the UDL type name is used in function/method signatures.
- * It's also what we have an external type that references a custom type.
+ * @suppress
  */
+public object FfiConverterMapStringSequenceTypeMozAdsImageOrSpoc: FfiConverterRustBuffer<Map<kotlin.String, List<MozAdsImageOrSpoc>>> {
+    override fun read(buf: ByteBuffer): Map<kotlin.String, List<MozAdsImageOrSpoc>> {
+        val len = buf.getInt()
+        return buildMap<kotlin.String, List<MozAdsImageOrSpoc>>(len) {
+            repeat(len) {
+                val k = FfiConverterString.read(buf)
+                val v = FfiConverterSequenceTypeMozAdsImageOrSpoc.read(buf)
+                this[k] = v
+            }
+        }
+    }
+
+    override fun allocationSize(value: Map<kotlin.String, List<MozAdsImageOrSpoc>>): ULong {
+        val spaceForMapSize = 4UL
+        val spaceForChildren = value.map { (k, v) ->
+            FfiConverterString.allocationSize(k) +
+            FfiConverterSequenceTypeMozAdsImageOrSpoc.allocationSize(v)
+        }.sum()
+        return spaceForMapSize + spaceForChildren
+    }
+
+    override fun write(value: Map<kotlin.String, List<MozAdsImageOrSpoc>>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        // The parens on `(k, v)` here ensure we're calling the right method,
+        // which is important for compatibility with older android devices.
+        // Ref https://blog.danlew.net/2017/03/16/kotlin-puzzler-whose-line-is-it-anyways/
+        value.forEach { (k, v) ->
+            FfiConverterString.write(k, buf)
+            FfiConverterSequenceTypeMozAdsImageOrSpoc.write(v, buf)
+        }
+    }
+}
+
+
+
 public typealias AdsClientUrl = kotlin.String
 public typealias FfiConverterTypeAdsClientUrl = FfiConverterString
 

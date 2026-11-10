@@ -7,8 +7,10 @@ import sys
 import textwrap
 import unittest
 from io import StringIO
+from pathlib import PurePosixPath
 
 from buildconfig import topsrcdir
+from mozboot.android import get_java_bin_path
 from mozpack import path as mozpath
 from mozshellutil import quote as shell_quote
 from mozunit import MockedOpen, main
@@ -592,7 +594,7 @@ class TestChecksConfigure(unittest.TestCase):
         javac = mozpath.abspath("/usr/bin/javac")
         paths = {java: None, javac: None}
         expected_error_message = (
-            "ERROR: Could not locate Java at /mozbuild/jdk/jdk-17.0.18+8/bin, "
+            f"ERROR: Could not locate Java at {get_java_bin_path('linux', PurePosixPath('/mozbuild'))}, "
             "please run ./mach bootstrap --no-system-changes\n"
         )
 
@@ -621,7 +623,7 @@ class TestChecksConfigure(unittest.TestCase):
             args=["--with-java-bin-path=%s" % mozpath.dirname(alt_java)],
         )
         self.assertEqual(status, 0)
-        self.assertEqual(config, {"JAVA": alt_java, "MOZ_JAVA_CODE_COVERAGE": False})
+        self.assertEqual(config, {"JAVA": alt_java})
         self.assertEqual(
             out,
             textwrap.dedent(
@@ -641,7 +643,7 @@ class TestChecksConfigure(unittest.TestCase):
             args=["--with-java-bin-path=%s" % mozpath.dirname(alt_java)],
         )
         self.assertEqual(status, 0)
-        self.assertEqual(config, {"JAVA": alt_java, "MOZ_JAVA_CODE_COVERAGE": False})
+        self.assertEqual(config, {"JAVA": alt_java})
         self.assertEqual(
             out,
             textwrap.dedent(
@@ -652,23 +654,11 @@ class TestChecksConfigure(unittest.TestCase):
             ),
         )
 
-        # --enable-java-coverage should set MOZ_JAVA_CODE_COVERAGE.
-        alt_java_home = mozpath.dirname(mozpath.dirname(java))
-        config, out, status = run_configure_java(
-            paths,
-            mock_java_home=alt_java_home,
-            mock_path=mozpath.dirname(java),
-            args=["--enable-java-coverage"],
-        )
-        self.assertEqual(status, 1)
-        self.assertEqual(config, {})
-
         # Any missing tool is fatal when these checks run.
         paths = {}
         config, out, status = run_configure_java(
             mock_fs_paths={},
             mock_path=mozpath.dirname(java),
-            args=["--enable-java-coverage"],
         )
         self.assertEqual(status, 1)
         self.assertEqual(config, {})

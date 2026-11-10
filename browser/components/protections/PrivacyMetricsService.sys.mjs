@@ -13,6 +13,15 @@ XPCOMUtils.defineLazyServiceGetter(
   Ci.nsITrackingDBService
 );
 
+export const privacyMetricsStatsCategories = {
+  [Ci.nsITrackingDBService.TRACKERS_ID]: "trackers",
+  [Ci.nsITrackingDBService.TRACKING_COOKIES_ID]: "cookies",
+  [Ci.nsITrackingDBService.FINGERPRINTERS_ID]: "fingerprinters",
+  [Ci.nsITrackingDBService.SUSPICIOUS_FINGERPRINTERS_ID]: "fingerprinters",
+  [Ci.nsITrackingDBService.CRYPTOMINERS_ID]: "cryptominers",
+  [Ci.nsITrackingDBService.SOCIAL_ID]: "socialTrackers",
+};
+
 /**
  * @typedef {object} PrivacyMetricsStats
  * @property {number} total - Total blocks this week
@@ -70,52 +79,59 @@ export const PrivacyMetricsService = {
   },
 
   /**
+   * Get the number of blocked trackers recorded since a date.
+   *
+   * The query cannot be cancelled, so a caller living in a window gets the
+   * result through a callback it can drop on unload: a promise reaction would
+   * keep the closed window alive until the query completes.
+   *
+   * @param {Date} dateFrom
+   * @param {(total: number) => void} callback
+   * @returns {() => void} Drops the callback.
+   */
+  getTotalSince(dateFrom, callback) {
+    lazy.TrackingDBService.getEventsByDateRange(dateFrom, Date.now()).then(
+      events => {
+        let total = events.reduce(
+          (acc, day) => acc + day.getResultByName("count"),
+          0
+        );
+        callback?.(total);
+      }
+    );
+    return () => {
+      callback = null;
+    };
+  },
+
+  /**
    * Aggregate TrackingDBService data by category.
    *
    * @param {Array} eventRows - Array of database rows from TrackingDBService
    * @returns {PrivacyMetricsStats}
    */
   _aggregateStats(eventRows) {
-    let trackers = 0;
-    let cookies = 0;
-    let fingerprinters = 0;
-    let cryptominers = 0;
-    let socialTrackers = 0;
+    const counts = {};
+    Object.values(privacyMetricsStatsCategories).forEach(category => {
+      counts[category] = 0;
+    });
 
     for (let row of eventRows) {
       const count = row.getResultByName("count");
       const type = row.getResultByName("type");
 
-      switch (type) {
-        case Ci.nsITrackingDBService.TRACKERS_ID:
-          trackers += count;
-          break;
-        case Ci.nsITrackingDBService.TRACKING_COOKIES_ID:
-          cookies += count;
-          break;
-        case Ci.nsITrackingDBService.FINGERPRINTERS_ID:
-        case Ci.nsITrackingDBService.SUSPICIOUS_FINGERPRINTERS_ID:
-          fingerprinters += count;
-          break;
-        case Ci.nsITrackingDBService.CRYPTOMINERS_ID:
-          cryptominers += count;
-          break;
-        case Ci.nsITrackingDBService.SOCIAL_ID:
-          socialTrackers += count;
-          break;
+      const category = privacyMetricsStatsCategories[type];
+      if (typeof category === "undefined") {
+        continue;
       }
+      counts[category] += count;
     }
 
-    const total =
-      trackers + cookies + cryptominers + fingerprinters + socialTrackers;
+    const total = Math.sumPrecise(Object.values(counts));
 
     return {
       total,
-      trackers,
-      cookies,
-      fingerprinters,
-      cryptominers,
-      socialTrackers,
+      ...counts,
       lastUpdated: Date.now(),
     };
   },

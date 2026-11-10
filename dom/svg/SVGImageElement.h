@@ -63,7 +63,7 @@ class SVGImageElement final : public SVGImageElementBase,
 
   void DestroyContent() override;
 
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* name) const override;
+  bool IsNoNamespaceAttrMapped(const nsAtom* name) const override;
 
   // SVGSVGElement methods:
   bool HasValidDimensions() const override;
@@ -92,6 +92,12 @@ class SVGImageElement final : public SVGImageElementBase,
   void GetFetchPriority(nsAString& aFetchPriority) const;
   void SetFetchPriority(const nsAString& aFetchPriority) {
     SetAttr(nsGkAtoms::fetchpriority, aFetchPriority, IgnoreErrors());
+  }
+  void SetReferrerPolicy(const nsAString& aPolicy, mozilla::ErrorResult& rv) {
+    SetAttr(nsGkAtoms::referrerpolicy, aPolicy, rv);
+  }
+  void GetReferrerPolicy(nsAString& aPolicy) {
+    GetEnumAttr(nsGkAtoms::referrerpolicy, "", aPolicy);
   }
 
   void SetDecoding(const nsAString& aDecoding, ErrorResult& aError) {

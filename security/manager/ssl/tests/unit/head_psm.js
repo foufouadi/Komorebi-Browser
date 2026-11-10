@@ -27,7 +27,7 @@ const { XPCOMUtils } = ChromeUtils.importESModule(
 );
 
 const { X509 } = ChromeUtils.importESModule(
-  "resource://gre/modules/psm/X509.sys.mjs"
+  "moz-src:///security/manager/ssl/X509.sys.mjs"
 );
 
 const gIsDebugBuild = Cc["@mozilla.org/xpcom/debug;1"].getService(
@@ -64,6 +64,7 @@ const SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE = SEC_ERROR_BASE + 30;
 const SEC_ERROR_CA_CERT_INVALID = SEC_ERROR_BASE + 36;
 const SEC_ERROR_UNKNOWN_CRITICAL_EXTENSION = SEC_ERROR_BASE + 41;
 const SEC_ERROR_PKCS7_BAD_SIGNATURE = SEC_ERROR_BASE + 47;
+const SEC_ERROR_UNSUPPORTED_KEYALG = SEC_ERROR_BASE + 48;
 const SEC_ERROR_INADEQUATE_KEY_USAGE = SEC_ERROR_BASE + 90;
 const SEC_ERROR_INADEQUATE_CERT_TYPE = SEC_ERROR_BASE + 91;
 const SEC_ERROR_CERT_NOT_IN_NAME_SPACE = SEC_ERROR_BASE + 112;
@@ -741,6 +742,19 @@ function _getBinaryUtil(binaryUtilName) {
   return utilBin;
 }
 
+// The test servers and GenerateOCSPResponse create an NSS database in the
+// certificate directory they are given, so give them a per-test copy.
+function getCertDirCopy(certsPath) {
+  let certDir = do_get_file(certsPath);
+  let copy = do_get_tempdir();
+  copy.append(certDir.leafName);
+  // The server, GenerateOCSPResponse and certutil calls of a test share a copy.
+  if (!copy.exists()) {
+    certDir.copyTo(copy.parent, null);
+  }
+  return copy;
+}
+
 async function asyncStartTLSTestServer(
   serverBinName,
   certsPath,
@@ -784,9 +798,7 @@ async function asyncStartTLSTestServer(
   let serverBin = _getBinaryUtil(serverBinName);
   let process = Cc["@mozilla.org/process/util;1"].createInstance(Ci.nsIProcess);
   process.init(serverBin);
-  let certDir = Services.dirsvc.get("CurWorkD", Ci.nsIFile);
-  certDir.append(`${certsPath}`);
-  Assert.ok(certDir.exists(), `certificate folder (${certsPath}) should exist`);
+  let certDir = getCertDirCopy(certsPath);
   // Using "sql:" causes the SQL DB to be used so we can run tests on Android.
   process.run(false, ["sql:" + certDir.path, Services.appinfo.processID], 2);
 
@@ -804,14 +816,16 @@ async function asyncStartTLSTestServer(
 function generateOCSPResponses(ocspRespArray, nssDBlocation) {
   let utilBinName = "GenerateOCSPResponse";
   let ocspGenBin = _getBinaryUtil(utilBinName);
+  let nssDBDir = getCertDirCopy(nssDBlocation);
   let retArray = [];
 
   for (let i = 0; i < ocspRespArray.length; i++) {
     let argArray = [];
-    let ocspFilepre = do_get_file(i.toString() + ".ocsp", true);
-    let filename = ocspFilepre.path;
+    let ocspFile = do_get_tempdir();
+    ocspFile.append(i.toString() + ".ocsp");
+    let filename = ocspFile.path;
     // Using "sql:" causes the SQL DB to be used so we can run tests on Android.
-    argArray.push("sql:" + nssDBlocation);
+    argArray.push("sql:" + nssDBDir.path);
     argArray.push(ocspRespArray[i][0]); // ocsRespType;
     argArray.push(ocspRespArray[i][1]); // nick;
     argArray.push(ocspRespArray[i][2]); // extranickname
@@ -825,7 +839,6 @@ function generateOCSPResponses(ocspRespArray, nssDBlocation) {
     process.init(ocspGenBin);
     process.run(true, argArray, argArray.length);
     Assert.equal(0, process.exitValue, "Process exit value should be 0");
-    let ocspFile = do_get_file(i.toString() + ".ocsp", false);
     retArray.push(readFile(ocspFile));
     ocspFile.remove(false);
   }
@@ -1012,6 +1025,23 @@ function add_cert_override_test(aHost, aExpectedError) {
   });
 }
 
+// The asynchronous version of `add_cert_override_test`. Preferred for new
+// code or for substantial changes to existing tests.
+async function certOverrideTest(aHost, aExpectedError) {
+  await asyncConnectTo(
+    aHost,
+    aExpectedError,
+    add_cert_override.bind(this, aHost)
+  );
+  await asyncConnectTo(aHost, PRErrorCodeSuccess, aSecurityInfo => {
+    Assert.ok(
+      aSecurityInfo.securityState &
+        Ci.nsIWebProgressListener.STATE_CERT_USER_OVERRIDDEN,
+      "Cert override flag should be set on the security state"
+    );
+  });
+}
+
 // Helper function for add_prevented_cert_override_test. This is much like
 // add_cert_override except it may not be the case that the connection has an
 // SecInfo set on it. In this case, the error was not overridable anyway, so
@@ -1040,6 +1070,17 @@ function add_prevented_cert_override_test(aHost, aExpectedError) {
     attempt_adding_cert_override.bind(this, aHost)
   );
   add_connection_test(aHost, aExpectedError);
+}
+
+// The asynchronous version of `add_prevented_cert_override_test`. Preferred
+// for new code or for substantial changes to existing tests.
+async function preventedCertOverrideTest(aHost, aExpectedError) {
+  await asyncConnectTo(
+    aHost,
+    aExpectedError,
+    attempt_adding_cert_override.bind(this, aHost)
+  );
+  await asyncConnectTo(aHost, aExpectedError);
 }
 
 // Helper for asyncTestCertificateUsages.
@@ -1342,7 +1383,7 @@ const CT_MODE_DISABLE = 0;
 const CT_MODE_COLLECT_TELEMETRY = 1;
 const CT_MODE_ENFORCE = 2;
 
-// Helper function for add_ct_test. Returns a function that checks that the
+// Helper function for ctTest. Returns a function that checks that the
 // nsITransportSecurityInfo of the connection has the expected CT and resumed
 // statuses.
 function expectCT(expectedCTValue, expectedResumed) {
@@ -1360,27 +1401,25 @@ function expectCT(expectedCTValue, expectedResumed) {
   };
 }
 
-// Helper function to add a certificate transparency test. The connection is
+// Helper function to run a certificate transparency test. The connection is
 // expected to succeed with the given CT status (see nsITransportSecurityInfo).
 // Additionally, if an additional connection is made, it is expected that TLS
 // resumption is used and that the CT status is the same with the resumed
 // connection.
-function add_ct_test(host, expectedCTValue, expectConnectionSuccess) {
-  add_connection_test(
+async function ctTest(host, expectedCTValue, expectConnectionSuccess) {
+  await asyncConnectTo(
     host,
     expectConnectionSuccess
       ? PRErrorCodeSuccess
       : MOZILLA_PKIX_ERROR_INSUFFICIENT_CERTIFICATE_TRANSPARENCY,
-    null,
     expectCT(expectedCTValue, false)
   );
   // Test that session resumption results in the same expected CT status for
   // successful connections.
   if (expectConnectionSuccess) {
-    add_connection_test(
+    await asyncConnectTo(
       host,
       PRErrorCodeSuccess,
-      null,
       expectCT(expectedCTValue, true)
     );
   }
@@ -1467,4 +1506,24 @@ function installWindowWatcherForProtectedAuth(prompt) {
   });
 
   return windowWatcher;
+}
+
+async function commonFindCertBy(propertyName, value) {
+  let certDB = Cc["@mozilla.org/security/x509certdb;1"].getService(
+    Ci.nsIX509CertDB
+  );
+  for (let cert of await certDB.getCerts()) {
+    if (cert[propertyName] == value) {
+      return cert;
+    }
+  }
+  return null;
+}
+
+async function findCertByCommonName(commonName) {
+  return commonFindCertBy("commonName", commonName);
+}
+
+async function findCertByEmailAddress(emailAddress) {
+  return commonFindCertBy("emailAddress", emailAddress);
 }

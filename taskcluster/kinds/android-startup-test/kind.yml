@@ -13,7 +13,6 @@ kind-dependencies:
     - signing-apk
 
 task-defaults:
-    run-on-repo-type: [hg]
     description: Runs UI tests for sanity checking startup on Nightly
     task-context:
         from-parameters:
@@ -37,7 +36,6 @@ task-defaults:
               type: directory
         retry-exit-status: [20]
     run:
-        clone-with: hg
         using: run-commands
     run-on-projects: []
     routes:
@@ -115,7 +113,6 @@ tasks:
                 - artifact: target.arm64-v8a.apk
                   extract: false
         run:
-            clone-with: hg
             secrets:
                 - name: project/gecko/level-any/firefox-android/fenix/firebase
                   key: firebaseToken
@@ -144,7 +141,6 @@ tasks:
                 - artifact: target.noarch.apk
                   extract: false
         run:
-            clone-with: hg
             secrets:
                 - name: project/gecko/level-any/firefox-android/fenix/firebase
                   key: firebaseToken
@@ -173,7 +169,6 @@ tasks:
                 - artifact: target.noarch.apk
                   extract: false
         run:
-            clone-with: hg
             secrets:
                 - name: project/gecko/level-any/firefox-android/fenix/firebase
                   key: firebaseToken
@@ -202,7 +197,6 @@ tasks:
                 - artifact: target.noarch.apk
                   extract: false
         run:
-            clone-with: hg
             secrets:
                 - name: project/gecko/level-any/firefox-android/focus-android/firebase
                   key: firebaseToken
@@ -231,7 +225,6 @@ tasks:
                 - artifact: target.noarch.apk
                   extract: false
         run:
-            clone-with: hg
             secrets:
                 - name: project/gecko/level-any/firefox-android/focus-android/firebase
                   key: firebaseToken
@@ -257,7 +250,6 @@ tasks:
                 - artifact: target.arm64-v8a.apk
                   extract: false
         run:
-            clone-with: hg
             secrets:
                 - name: project/gecko/level-any/firefox-android/focus-android/firebase
                   key: firebaseToken

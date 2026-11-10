@@ -367,6 +367,11 @@ void MacroAssembler::lshift64(Imm32 imm, Register64 dest) {
   ma_dsll(dest.reg, dest.reg, imm);
 }
 
+void MacroAssembler::lshift64(Imm32 imm, Register64 src, Register64 dest) {
+  MOZ_ASSERT(0 <= imm.value && imm.value < 64);
+  ma_dsll(dest.reg, src.reg, imm);
+}
+
 void MacroAssembler::lshift64(Register shift, Register64 dest) {
   ma_dsll(dest.reg, dest.reg, shift);
 }
@@ -387,6 +392,11 @@ void MacroAssembler::rshiftPtr(Register shift, Register dest) {
 void MacroAssembler::rshift64(Imm32 imm, Register64 dest) {
   MOZ_ASSERT(0 <= imm.value && imm.value < 64);
   ma_dsrl(dest.reg, dest.reg, imm);
+}
+
+void MacroAssembler::rshift64(Imm32 imm, Register64 src, Register64 dest) {
+  MOZ_ASSERT(0 <= imm.value && imm.value < 64);
+  ma_dsrl(dest.reg, src.reg, imm);
 }
 
 void MacroAssembler::rshift64(Register shift, Register64 dest) {
@@ -410,6 +420,12 @@ void MacroAssembler::rshiftPtrArithmetic(Register shift, Register dest) {
 void MacroAssembler::rshift64Arithmetic(Imm32 imm, Register64 dest) {
   MOZ_ASSERT(0 <= imm.value && imm.value < 64);
   ma_dsra(dest.reg, dest.reg, imm);
+}
+
+void MacroAssembler::rshift64Arithmetic(Imm32 imm, Register64 src,
+                                        Register64 dest) {
+  MOZ_ASSERT(0 <= imm.value && imm.value < 64);
+  ma_dsra(dest.reg, src.reg, imm);
 }
 
 void MacroAssembler::rshift64Arithmetic(Register shift, Register64 dest) {
@@ -451,6 +467,37 @@ void MacroAssembler::rotateRight64(Register count, Register64 src,
                                    Register64 dest, Register temp) {
   MOZ_ASSERT(temp == InvalidReg);
   ma_dror(dest.reg, src.reg, count);
+}
+
+// ===============================================================
+// Shift or rotate, then combine with another register
+
+void MacroAssembler::lshift32ThenAdd(Imm32 shift, Register rhs,
+                                     Register srcDest) {
+  MOZ_ASSERT(rhs != srcDest);
+  lshift32(shift, srcDest);
+  add32(rhs, srcDest);
+}
+
+void MacroAssembler::lshift32ThenOr(Imm32 shift, Register rhs,
+                                    Register srcDest) {
+  MOZ_ASSERT(rhs != srcDest);
+  lshift32(shift, srcDest);
+  or32(rhs, srcDest);
+}
+
+void MacroAssembler::rshiftPtrThenXor(Imm32 shift, Register rhs,
+                                      Register srcDest) {
+  MOZ_ASSERT(rhs != srcDest);
+  rshiftPtr(shift, srcDest);
+  xorPtr(rhs, srcDest);
+}
+
+void MacroAssembler::rotateLeft64ThenXor(Imm32 count, Register64 rhs,
+                                         Register64 srcDest) {
+  MOZ_ASSERT(rhs != srcDest);
+  rotateLeft64(count, srcDest, srcDest, InvalidReg);
+  xor64(rhs, srcDest);
 }
 
 // ===============================================================
@@ -753,6 +800,15 @@ void MacroAssembler::branchTestNull(Condition cond, const ValueOperand& value,
   Register scratch2 = temps.Acquire();
   splitTag(value, scratch2);
   branchTestNull(cond, scratch2, label);
+}
+
+void MacroAssembler::branchTestNullOrUndefined(Condition cond,
+                                               const ValueOperand& value,
+                                               Label* label) {
+  UseScratchRegisterScope temps(*this);
+  Register scratch2 = temps.Acquire();
+  splitTag(value, scratch2);
+  branchTestNullOrUndefined(cond, scratch2, label);
 }
 
 void MacroAssembler::branchTestObject(Condition cond, const ValueOperand& value,

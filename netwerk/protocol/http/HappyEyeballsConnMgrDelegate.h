@@ -37,11 +37,18 @@ class HappyEyeballsConnMgrDelegate {
                                        HttpConnectionBase* aConn) = 0;
   virtual void AddTransaction(nsHttpTransaction* aTrans, int32_t aPriority) = 0;
   virtual void ReportSpdyConnection(HttpConnectionBase* aConn, bool aUsingSpdy,
-                                    bool aDisallowHttp3) = 0;
+                                    bool aDisallowHttp3,
+                                    ConnectionEntry* aEntry) = 0;
   virtual void ReportHttp3Connection(HttpConnectionBase* aConn,
                                      ConnectionEntry* aEntry) = 0;
   virtual void ReclaimConnection(HttpConnectionBase* aConn) = 0;
   virtual void ProcessSpdyPendingQ(ConnectionEntry* aEntry) = 0;
+
+  // Move a finished h3-only attempt's connection into the origin's entry and
+  // re-key it; see HappyEyeballsConnectionAttempt::ProcessUDPConn. Returns the
+  // entry the connection now lives in, or nullptr if it did not move.
+  virtual already_AddRefed<ConnectionEntry> HandOffHttp3OnlyConnection(
+      HttpConnectionBase* aConn, ConnectionEntry* aFromEnt) = 0;
 
   // ConnectionEntry
   virtual void InsertIntoActiveConns(ConnectionEntry* aEntry,

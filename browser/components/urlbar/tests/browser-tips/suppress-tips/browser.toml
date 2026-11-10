@@ -5,9 +5,6 @@ tags = "urlbar"
 run-if = [
   "!msix", # Updater is disabled in MSIX builds
 ]
-skip-if = [
-  "verify", # This is a startup test. Verify runs tests multiple times after startup.
-]
 support-files = [
   "../head.js",
   "active-update.xml",
@@ -20,11 +17,10 @@ prefs = [
   "browser.aboutwelcome.enabled=false",
   "browser.startup.homepage_override.mstone='60.0'",
   "browser.startup.upgradeDialog.enabled=false",
-  # The search tip is only shown when nothing else is notifying the user, so the
-  # launch on login infobar (triggered by the about:newtab loads this test does,
-  # when Firefox is the default browser) would suppress it.
-  "browser.startup.windowsLaunchOnLogin.disableLaunchOnLoginPrompt=true",
   "browser.policies.alternatePath='<test-root>/browser/components/urlbar/tests/browser-tips/suppress-tips/config_localhost_update_url.json'",
 ]
 
 ["browser_suppressTips.js"]
+skip-if = [
+  "verify", # This is a startup test. Verify runs tests multiple times after startup.
+]

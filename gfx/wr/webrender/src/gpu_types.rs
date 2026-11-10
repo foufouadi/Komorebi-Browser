@@ -13,10 +13,10 @@ use crate::internal_types::{FrameVec, FrameMemory};
 use crate::render_task::RenderTaskAddress;
 use crate::render_task_graph::RenderTaskId;
 use crate::renderer::{GpuBufferAddress, GpuBufferBuilderF, GpuBufferHandle, GpuBufferWriterF, GpuBufferDataF, GpuBufferDataI, GpuBufferWriterI, ShaderColorMode};
-use std::i32;
 use crate::util::ScaleOffset;
 use glyph_rasterizer::SubpixelDirection;
 use crate::util::pack_as_float;
+use crate::path_tiler::PathTileInstance;
 
 
 // Contains type that must exactly match the same structures declared in GLSL.
@@ -194,14 +194,17 @@ pub struct BorderInstanceGpuData {
 }
 
 impl BorderInstanceGpuData {
-    pub fn write(&self, gpu_buffer_builder: &mut GpuBufferBuilderF) -> GpuBufferAddress {
-        let mut writer = gpu_buffer_builder.write_blocks(6);
+    pub fn write(&self, superellipse: bool, gpu_buffer_builder: &mut GpuBufferBuilderF) -> GpuBufferAddress {
+        let block_count = if superellipse { 6 } else { 4 };
+        let mut writer = gpu_buffer_builder.write_blocks(block_count);
         writer.push_one(self.local_rect);
         writer.push_one(self.color0);
         writer.push_one(self.color1);
         writer.push_one([self.widths.width, self.widths.height, self.radius.width, self.radius.height]);
-        writer.push_one([self.shape, self.shape_offset.width, self.shape_offset.height, 0.0]);
-        writer.push_one([self.inset.width, self.inset.height, 0.0, 0.0]);
+        if superellipse {
+            writer.push_one([self.shape, self.shape_offset.width, self.shape_offset.height, 0.0]);
+            writer.push_one([self.inset.width, self.inset.height, 0.0, 0.0]);
+        }
 
         writer.finish()
     }
@@ -587,6 +590,14 @@ pub struct QuadInstance {
     pub edge_flags: u8,
     pub part_index: u8,
     pub segment_index: u8,
+}
+
+impl From<PathTileInstance> for PrimitiveInstanceData {
+    fn from(instance: PathTileInstance) -> Self {
+        PrimitiveInstanceData {
+            data: instance.data.map(|v| v as i32),
+        }
+    }
 }
 
 impl From<QuadInstance> for PrimitiveInstanceData {

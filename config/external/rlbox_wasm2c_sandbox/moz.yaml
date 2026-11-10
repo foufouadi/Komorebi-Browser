@@ -7,10 +7,10 @@ bugzilla:
 origin:
   name: rlbox_wasm2c_sandbox
   description: rlbox integration for the wasm2c sandboxed code
-  url: https://github.com/PLSysSec/rlbox_wasm2c_sandbox/tree/upstream-wasm2c
+  url: https://github.com/PLSysSec/rlbox_wasm2c_sandbox/
 
-  release: 5f2573e2203169b1a3e728a6d612fb78429e1cb8 (2025-03-19T02:22:06Z).
-  revision: 5f2573e2203169b1a3e728a6d612fb78429e1cb8
+  release: 43e57d4ad7fa9b42d2c7fd8159b8c5b4d7da28a3 (2026-10-31T04:23:56Z).
+  revision: 43e57d4ad7fa9b42d2c7fd8159b8c5b4d7da28a3
 
   license: MIT
   license-file: LICENSE
@@ -23,6 +23,7 @@ vendoring:
   exclude:
     # dirs
     - test
+    - cmake
     # files
     - ".*"
     - AppSandbox.md
@@ -30,3 +31,6 @@ vendoring:
     - LibrarySandbox.md
     - README.md
     - build-wasiclang.sh
+
+  patches:
+    - old-wasm2c-support.patch

@@ -225,7 +225,7 @@ var FullPageTranslationsPanel = new (class {
       try {
         this.#console = console.createInstance({
           maxLogLevelPref: "browser.translations.logLevel",
-          prefix: "Translations",
+          logModule: "Translations",
         });
       } catch {
         // The console may not be initialized yet.
@@ -529,6 +529,12 @@ var FullPageTranslationsPanel = new (class {
   updateUIForReTranslation(isReTranslation) {
     const { restoreButton, fromLabel, fromMenuList, toLabel } = this.elements;
     restoreButton.hidden = !isReTranslation;
+    document.l10n.setAttributes(
+      toLabel,
+      isReTranslation
+        ? "translations-panel-revisit-to-label"
+        : "translations-panel-to-label"
+    );
     // When offering to re-translate a page, hide the "from" language so users don't
     // get confused.
     fromLabel.hidden = isReTranslation;
@@ -1476,7 +1482,11 @@ var FullPageTranslationsPanel = new (class {
       return;
     }
 
-    if (TranslationsParent.isFullPageTranslationsRestrictedForPage(gBrowser)) {
+    if (
+      TranslationsParent.isFullPageTranslationsRestrictedForPage(
+        gBrowser.selectedBrowser
+      )
+    ) {
       this.buttonElements.button.hidden = true;
     } else if (!TranslationsFeature.isEnabled) {
       // When the Translations feature is disabled, no actor instance is created, therefore no
@@ -1634,6 +1644,10 @@ var FullPageTranslationsPanel = new (class {
         if (
           // Only show the button if the Translations feature is enabled.
           TranslationsFeature.isEnabled &&
+          // Full-Page Translations is allowed for this page.
+          !TranslationsParent.isFullPageTranslationsRestrictedForPage(
+            gBrowser.selectedBrowser
+          ) &&
           // We've already requested to translate this page, so always show the icon.
           (requestedLanguagePair ||
             // There was an error translating, so always show the icon. This can happen

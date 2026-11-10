@@ -6,6 +6,7 @@
 #define nsHtml5StringParser_h
 
 #include "mozilla/UniquePtr.h"
+#include "nsContentUtils.h"
 #include "nsHtml5AtomTable.h"
 #include "nsParserBase.h"
 
@@ -19,6 +20,7 @@ class Maybe;
 namespace dom {
 class CustomElementRegistry;
 class Document;
+class Sanitizer;
 }  // namespace dom
 }  // namespace mozilla
 
@@ -47,13 +49,21 @@ class nsHtml5StringParser : public nsParserBase {
    * to tree.
    * @param aAllowDeclarativeShadowRoots allow the creation of declarative
    * shadow roots.
+   * @param aSanitizer the Sanitizer API configuration to apply while parsing
+   * (the spec's "parser sanitizer configuration"), or nullptr not to sanitize
+   * while parsing.
+   * @param aSanitizerMode whether to safely sanitize, i.e.
+   * "remove javascript navigation URLs".
    */
   nsresult ParseFragment(
       const nsAString& aSourceBuffer, nsIContent* aTargetNode,
       nsAtom* aContextLocalName, int32_t aContextNamespace, bool aQuirks,
       bool aPreventScriptExecution, bool aAllowDeclarativeShadowRoots,
       mozilla::Maybe<RefPtr<mozilla::dom::CustomElementRegistry>>
-          aCustomElementRegistry);
+          aCustomElementRegistry,
+      mozilla::dom::Sanitizer* aSanitizer = nullptr,
+      nsContentUtils::SanitizerMode aSanitizerMode =
+          nsContentUtils::SanitizerMode::Unsafe);
 
   /**
    * Parse an entire HTML document from a source string.
@@ -62,7 +72,9 @@ class nsHtml5StringParser : public nsParserBase {
    */
   nsresult ParseDocument(const nsAString& aSourceBuffer,
                          mozilla::dom::Document* aTargetDoc,
-                         bool aScriptingEnabledForNoscriptParsing);
+                         bool aScriptingEnabledForNoscriptParsing,
+                         mozilla::dom::Sanitizer* aSanitizer,
+                         nsContentUtils::SanitizerMode aSanitizerMode);
 
  private:
   virtual ~nsHtml5StringParser();

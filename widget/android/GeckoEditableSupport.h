@@ -128,7 +128,7 @@ class GeckoEditableSupport final
   void OnNotifyIMEOfCompositionEventHandled();
   void NotifyIMEContext(const InputContext& aContext,
                         const InputContextAction& aAction);
-  void EnsureEditableParent(uint64_t aContentId, uint64_t aTabId);
+  void EnsureEditableParent(uint64_t aTabId);
 
  public:
   template <typename Functor>
@@ -156,7 +156,7 @@ class GeckoEditableSupport final
         nsAppShell::LambdaEvent<Functor>::Run();
       }
     };
-    nsAppShell::PostEvent(mozilla::MakeUnique<IMEEvent>(std::move(aCall)));
+    nsAppShell::PostEvent(std::make_unique<IMEEvent>(std::move(aCall)));
   }
 
   static void SetOnBrowserChild(dom::BrowserChild* aBrowserChild);

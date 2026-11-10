@@ -7,10 +7,11 @@ package org.mozilla.fenix.ui
 import androidx.compose.ui.test.junit4.v2.AndroidComposeTestRule as AndroidComposeTestRuleV2
 import org.junit.Rule
 import org.junit.Test
-import org.mozilla.fenix.R
 import org.mozilla.fenix.customannotations.Converted
 import org.mozilla.fenix.customannotations.SmokeTest
+import org.mozilla.fenix.helpers.AppAndSystemHelper.isDefaultPinnedShortcutsOnHomepage
 import org.mozilla.fenix.helpers.AppAndSystemHelper.openAppFromExternalLink
+import org.mozilla.fenix.helpers.Constants.defaultPinnedShortcutTitles
 import org.mozilla.fenix.helpers.FenixTestRule
 import org.mozilla.fenix.helpers.HomeActivityIntentTestRule
 import org.mozilla.fenix.helpers.RetryTestRule
@@ -57,17 +58,13 @@ class SettingsHomepageTest {
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1564859
     @Test
     fun verifyShortcutOptionTest() {
-        // en-US defaults
-        val defaultTopSites =
-            arrayOf(
-                "Wikipedia",
-                "Google",
-            )
         val genericURL = mockWebServer.getGenericAsset(1)
 
         homeScreen(composeTestRule) {
-                defaultTopSites.forEach { item ->
-                    verifyExistingTopSitesTabs(item)
+                if (isDefaultPinnedShortcutsOnHomepage()) {
+                    defaultPinnedShortcutTitles.forEach { item ->
+                        verifyExistingTopSitesTabs(item)
+                    }
                 }
             }
             .openThreeDotMenu {}
@@ -77,7 +74,7 @@ class SettingsHomepageTest {
             }
             .goBack {}
             .goBack(composeTestRule) {
-                defaultTopSites.forEach { item ->
+                defaultPinnedShortcutTitles.forEach { item ->
                     verifyNotExistingTopSiteItem(item)
                 }
             }
@@ -116,28 +113,28 @@ class SettingsHomepageTest {
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1564999
     @Converted(
-        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.SettingsHomepageTest#jumpBackInOptionTest"],
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.SettingsHomepageTest#continueOptionTest"],
         bug = 2042363,
         since = "2026-05",
     )
     @SmokeTest
     @Test
-    fun jumpBackInOptionTest() {
+    fun continueOptionTest() {
         val genericURL = mockWebServer.getGenericAsset(1)
 
         navigationToolbar(composeTestRule) {}
             .enterURLAndEnterToBrowser(genericURL.url) {}
             .goToHomescreen {
-                verifyJumpBackInSectionIsDisplayed()
+                verifyContinueSectionIsDisplayed()
             }
             .openThreeDotMenu {}
             .clickSettingsButton {}
             .openHomepageSubMenu {
-                clickJumpBackInButton()
+                clickContinueButton()
             }
             .goBack {}
             .goBack(composeTestRule) {
-                verifyJumpBackInSectionIsNotDisplayed()
+                verifyContinueSectionIsNotDisplayed()
             }
     }
 
@@ -294,7 +291,7 @@ class SettingsHomepageTest {
             .goBack {}
             .goBack(retryableComposeTestRule.current) {
                 exitMenu()
-                verifyWindowBackgroundDrawable(retryableComposeTestRule.current, R.drawable.home_background_gradient)
+                verifyEdgeToEdgeWallpaperApplied(retryableComposeTestRule.current)
             }
 
         homeScreen(retryableComposeTestRule.current) {}
@@ -305,7 +302,7 @@ class SettingsHomepageTest {
             }
             .goBack {}
             .goBack(retryableComposeTestRule.current) {
-                verifyWindowBackgroundDrawable(retryableComposeTestRule.current, R.drawable.home_background_gradient)
+                verifyEdgeToEdgeWallpaperApplied(retryableComposeTestRule.current)
             }
             .togglePrivateBrowsingMode()
 

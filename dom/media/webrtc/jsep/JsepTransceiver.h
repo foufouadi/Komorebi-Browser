@@ -26,7 +26,7 @@ class JsepUuidGenerator {
 
 class JsepTransceiver {
  public:
-  explicit JsepTransceiver(SdpMediaSection::MediaType type,
+  explicit JsepTransceiver(const SdpMediaSection::MediaTypeInfo& type,
                            JsepUuidGenerator& aUuidGen,
                            SdpDirectionAttribute::Direction jsDirection =
                                SdpDirectionAttribute::kSendrecv)
@@ -46,7 +46,8 @@ class JsepTransceiver {
   ~JsepTransceiver() = default;
 
   void Rollback(JsepTransceiver& oldTransceiver, bool aRemote) {
-    MOZ_ASSERT(oldTransceiver.GetMediaType() == GetMediaType());
+    MOZ_ASSERT(
+        oldTransceiver.GetMediaTypeInfo().MatchesTypeOf(GetMediaTypeInfo()));
     MOZ_ASSERT(!oldTransceiver.IsNegotiated() || !oldTransceiver.HasLevel() ||
                !HasLevel() || oldTransceiver.GetLevel() == GetLevel());
     mTransport = oldTransceiver.mTransport;
@@ -133,6 +134,21 @@ class JsepTransceiver {
 
   void ClearBundleLevel() { mBundleLevel = SIZE_MAX; }
 
+  // Whether, as of the last SetLocalDescription() call, this transceiver's
+  // current transport owner for this round (the bundle tag it's grouped
+  // under, or itself if unbundled) had itself completed a prior negotiation
+  // round as a transport owner (HasOwnTransport()) -- ie; there's a live
+  // transport this transceiver could actually be using. Recomputed from
+  // scratch every SetLocalDescription() call; a stale value left over from
+  // a rolled-back round is harmless, since this is only ever consulted
+  // while in have-local-offer for the round that set it. Will need
+  // revisiting once bug 2065274 changes what "owns the transport" means.
+  bool CanUseExistingTransport() const { return mCanUseExistingTransport; }
+
+  void SetCanUseExistingTransport(bool aValue) {
+    mCanUseExistingTransport = aValue;
+  }
+
   size_t GetTransportLevel() const {
     MOZ_ASSERT(HasLevel());
     if (HasBundleLevel()) {
@@ -169,8 +185,16 @@ class JsepTransceiver {
 
   // Convenience function
   SdpMediaSection::MediaType GetMediaType() const {
-    MOZ_ASSERT(mRecvTrack.GetMediaType() == mSendTrack.GetMediaType());
+    MOZ_ASSERT(mRecvTrack.GetMediaTypeInfo().MatchesTypeOf(
+        mSendTrack.GetMediaTypeInfo()));
     return mRecvTrack.GetMediaType();
+  }
+
+  // Convenience function
+  SdpMediaSection::MediaTypeInfo GetMediaTypeInfo() const {
+    MOZ_ASSERT(mRecvTrack.GetMediaTypeInfo().MatchesTypeOf(
+        mSendTrack.GetMediaTypeInfo()));
+    return mRecvTrack.GetMediaTypeInfo();
   }
 
   bool HasTransport() const { return mTransport.mComponents != 0; }
@@ -203,6 +227,7 @@ class JsepTransceiver {
   size_t mLevel = SIZE_MAX;  // SIZE_MAX if no level
   // Is this track pair sharing a transport with another?
   size_t mBundleLevel = SIZE_MAX;  // SIZE_MAX if no bundle level
+  bool mCanUseExistingTransport = false;
   // The w3c and IETF specs have a lot of "magical" behavior that happens
   // when addTrack is used to create a transceiver. This was a deliberate
   // design choice. Sadface.

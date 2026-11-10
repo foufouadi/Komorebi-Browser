@@ -29,8 +29,8 @@ address-capture-save-button =
 address-capture-not-now-button =
     .label = Not now
     .accessKey = N
-address-capture-never-save-button =
-    .label = Never save
+address-capture-never-save-addresses-button =
+    .label = Never save addresses
     .accessKey = v
 address-capture-cancel-button =
     .label = Cancel
@@ -136,6 +136,12 @@ autofill-card-expires-year-2 =
     .label = Expires year
 autofill-card-billing-address-2 =
     .label = Billing address
+# Variables:
+#   $securityCode (String): The name of the card's security code, which depends
+#     on the card network (for example "CVV", or "Security code" when the
+#     network isn't known yet)
+autofill-card-security-code-optional-2 =
+    .label = { $securityCode } (optional)
 autofill-card-network = Card Type
 
 # This string is never actually displayed, but is used to make it easier to

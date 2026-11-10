@@ -39,14 +39,10 @@
   <string name="home_bookmarks_menu_item_remove">తొలగించు</string>
   <!-- About content. %1$s is the name of the app (for example "Firefox"). -->
   <string name="about_content" tools:ignore="BrandUsage">%1$s‌ని తయారుచేసినది మొజిల్లా.</string>
-  <!-- Private Browsing -->
-  <string name="private_browsing_common_myths">అంతరంగిక విహారణ గురించి సామాన్య అపోహలు</string>
   <!-- Text for the positive action button -->
   <string name="open_in_app_cfr_positive_button_text">అమరికలకు వెళ్లు</string>
   <!-- Text for the negative action button -->
   <string name="open_in_app_cfr_negative_button_text">విస్మరించు</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
   <!-- Text for the positive action button to go to Android Settings to grant permissions. -->
   <string name="camera_permissions_needed_positive_button_text">అమరికలకు వెళ్లు</string>
   <!-- Text for the negative action button to dismiss the dialog. -->
@@ -90,11 +86,7 @@
     in the Recently visited section
   -->
   <string name="recently_visited_menu_item_remove">తీసివేయి</string>
-  <!--
-    Browser Fragment
-
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
-  -->
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">వెనుకకు</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">ముందుకు</string>
@@ -178,10 +170,6 @@
   <string name="onboarding_preferences_dialog_positive_button">పూర్తయింది</string>
   <!-- Terms of service onboarding title card label. 'Firefox' intentionally hardcoded here -->
   <string name="onboarding_welcome_to_firefox" tools:ignore="BrandUsage">Firefoxకి స్వాగతం</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!--
     Search Widget
 
@@ -197,10 +185,8 @@
   <!--
     Preferences
 
-    Title for the settings page
+    Preference category for general settings
   -->
-  <string name="settings">అమరికలు</string>
-  <!-- Preference category for general settings -->
   <string name="preferences_category_general">సాధారణం</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">గురించి</string>
@@ -477,8 +463,6 @@
     Title of preference for tabs management
   -->
   <string name="preferences_tabs">ట్యాబులు</string>
-  <!-- Title of preference that allows a user to specify the tab view -->
-  <string name="preferences_tab_view">ట్యాబు వీక్షణ</string>
   <!-- Option for a list tab view -->
   <string name="tab_view_list">జాబితా</string>
   <!-- Option for a grid tab view -->
@@ -537,8 +521,6 @@
   <string name="close_tab_title">%s ట్యాబును మూసివేయి</string>
   <!-- Content description (not visible, for screen readers etc.): Opens the open tabs menu when pressed -->
   <string name="open_tabs_menu">తెరిచివున్న ట్యాబుల మెనూ</string>
-  <!-- Open tabs menu item to save tabs to collection -->
-  <string name="tabs_menu_save_to_collection1">ట్యాబులను సేకరణకు భద్రపరచు</string>
   <!-- Text for the menu button to delete a collection -->
   <string name="collection_delete">సేకరణను తొలగించు</string>
   <!-- Text for the menu button to rename a collection -->
@@ -564,16 +546,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">%1$d ఎంచుకున్నారు</string>
-  <!-- Text for the header that groups the history for today -->
-  <string name="history_today">ఈరోజు</string>
-  <!-- Text for the header that groups the history for yesterday -->
-  <string name="history_yesterday">నిన్న</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">గత 7 రోజులు</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">గత 30 రోజులు</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">పాతవి</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">ఇక్కడ చరిత్రేమీ లేదు</string>
   <!--
@@ -581,8 +553,6 @@
     %1$d is the number of downloads selected
   -->
   <string name="download_multi_select_title">%1$d ఎంచుకున్నారు</string>
-  <!-- The button text for the cancel button to leave the Web Compat Reporter feature. -->
-  <string name="webcompat_reporter_cancel">రద్దుచేయి</string>
   <!--
     Crashes
 
@@ -825,8 +795,6 @@
   <string name="qr_scanner_dialog_invalid">జాల చిరునామా సరైనది కాదు.</string>
   <!-- QR code scanner prompt dialog positive option when there is an error -->
   <string name="qr_scanner_dialog_invalid_ok">సరే</string>
-  <!-- Tab collection deletion prompt dialog message. %1$s is the collection name. -->
-  <string name="tab_collection_dialog_message">మీరు నిజంగానే %1$s‌ను తొలగించాలనుకుంటున్నారా?</string>
   <!-- Sample text for accessibility font size -->
   <string name="accessibility_text_size_sample_text_1">ఇది నమూనా పాఠ్యం. ఈ అమరిక‌తో మీరు పరిమాణాన్ని పెంచినప్పుడు లేదా తగ్గించినప్పుడు పాఠ్యం ఎలా కనిపిస్తుందో చూపించడానికి ఇది ఇక్కడ ఉంది.</string>
   <!-- Summary for Accessibility Text Size Scaling Preference -->
@@ -1034,8 +1002,6 @@
   <string name="add_to_homescreen_cancel">రద్దుచేయి</string>
   <!-- Add button text for the Add to Homescreen dialog -->
   <string name="add_to_homescreen_add">చేర్చు</string>
-  <!-- Continue to website button text for the first-time Add to Homescreen dialog -->
-  <string name="add_to_homescreen_continue">వెబ్‌సైట్‌కు కొనసాగు</string>
   <!-- Placeholder text for the TextView in the Add to Homescreen dialog -->
   <string name="add_to_homescreen_text_placeholder">సత్వరమార్గం పేరు</string>
   <!-- Preference for managing the settings for logins and passwords in Fenix -->
@@ -1190,10 +1156,6 @@
   <string name="confirm_clear_permission_site">నిజంగానే ఈ సైటుకున్న ఈ అనుమతిని తుడిచివేయాలనుకుంటున్నారా?</string>
   <!-- label shown when there are not site exceptions to show in the site exception settings -->
   <string name="no_site_exceptions">సైటు మినహాయింపులేమీ లేవు</string>
-  <!-- Positive action of a dialog asking to delete -->
-  <string name="dialog_delete_positive">తొలగించు</string>
-  <!-- Negative action of a dialog asking to delete login -->
-  <string name="dialog_delete_negative">రద్దుచేయి</string>
   <!-- Voice search button content description -->
   <string name="voice_search_content_description">స్వర శోధన</string>
   <!-- Voice search prompt description displayed after the user presses the voice search button -->
@@ -1242,8 +1204,6 @@
   <string name="radio_preference_info_content_description">మరిన్ని వివరాలకు నొక్కండి</string>
   <!-- Snackbar button text to navigate to telemetry settings. -->
   <string name="experiments_snackbar_button">అమరికలకు వెళ్ళు</string>
-  <!-- Translations feature -->
-
   <!-- Text that links to additional information about the Firefox translations feature. -->
   <string name="translations_bottom_sheet_info_message_learn_more">ఇంకా తెలుసుకోండి</string>
   <!-- Button text on the translations dialog to dismiss the dialog and return to the browser. -->
@@ -1323,11 +1283,4 @@
   <string name="certificate_warning_homepage_card_update_now_button" tools:ignore="UnusedResources">ఇప్పుడే తాజాకరించు</string>
   <!-- Push notification title about old Firefox version. Note: The word "Firefox" should NOT be translated. -->
   <string name="certificate_warning_push_notification_pnw2_title" tools:ignore="BrandUsage,UnusedResources">మీరు Firefox యొక్క పాత వెర్షన్ వాడుతున్నారు</string>
-  <!-- TextField Design System Component -->
-
-  <!-- ==== Terms of use pop up prompt ==== -->
-
-  <!-- ==== Experiment strings. ==== -->
-
-  <!-- ==== End of Terms of use popup prompt. ==== -->
 </resources>

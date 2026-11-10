@@ -475,6 +475,21 @@ class ReportBrokenSiteHelper {
   click(elem, options = {}) {
     return new Promise(r => {
       elem.scrollIntoView({ behavior: "instant" });
+      // An inline element wrapped across lines has a bounding box spanning
+      // every line it touches, whose center can land in the empty space
+      // beside the text. Aim at the first line box in that case.
+      const rects = elem.getClientRects();
+      if (rects.length > 1) {
+        const bounds = elem.getBoundingClientRect();
+        return EventUtils.synthesizeMouse(
+          elem,
+          rects[0].x - bounds.x + rects[0].width / 2,
+          rects[0].y - bounds.y + rects[0].height / 2,
+          options,
+          this.win,
+          r
+        );
+      }
       return EventUtils.synthesizeMouseAtCenter(elem, options, this.win, r);
     });
   }
@@ -548,10 +563,12 @@ class ReportBrokenSiteHelper {
     await Promise.all(promises);
   }
 
-  clickSend() {
-    const promise = this.waitForViewToShow(this.sentView);
-    this.sendButton.click();
-    return promise;
+  async clickSend() {
+    const { sendButton, sentView } = this;
+    const promise = this.waitForViewToShow(sentView);
+    sendButton.click();
+    await promise;
+    await isNotDisabled(sendButton, "send button should not be disabled");
   }
 
   clickCancel() {
@@ -1115,10 +1132,17 @@ function filterFrameworkDetectorFails(ping, expected) {
   }
 }
 
+async function setupBuiltInTestTrackers() {
+  await UrlClassifierTestUtils.addBuiltInTestTrackers();
+  registerCleanupFunction(async () => {
+    await UrlClassifierTestUtils.cleanupTestTrackers();
+  });
+}
+
 async function setupStrictETP() {
   await UrlClassifierTestUtils.addTestTrackers();
-  registerCleanupFunction(() => {
-    UrlClassifierTestUtils.cleanupTestTrackers();
+  registerCleanupFunction(async () => {
+    await UrlClassifierTestUtils.cleanupTestTrackers();
   });
 
   await SpecialPowers.pushPrefEnv({
@@ -1135,7 +1159,7 @@ async function setupStrictETP() {
   });
 }
 
-// copied from browser/base/content/test/protectionsUI/head.js
+// copied from browser/base/content/test/browser-protectionsUI/head.js
 function waitForContentBlockingEvent(numChanges, win = null) {
   if (!numChanges) {
     return Promise.resolve();

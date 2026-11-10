@@ -400,10 +400,13 @@ class AsyncPanZoomController {
 
   /**
    * Handler for events which should not be intercepted by the touch listener.
+   *
+   * FIXME: It seems that this method causes dispatching some DOM events. So,
+   * this method should be marked as MOZ_CAN_RUN_SCRIPT.
    */
-  nsEventStatus HandleInputEvent(
-      const InputData& aEvent,
-      const ScreenToParentLayerMatrix4x4& aTransformToApzc);
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY nsEventStatus
+  HandleInputEvent(const InputData& aEvent,
+                   const ScreenToParentLayerMatrix4x4& aTransformToApzc);
 
   /**
    * Handler for gesture events.
@@ -600,7 +603,8 @@ class AsyncPanZoomController {
   OuterCSSCoord ConvertScrollbarPoint(const ParentLayerPoint& aScrollbarPoint,
                                       const ScrollbarData& aThumbData) const;
 
-  void NotifyMozMouseScrollEvent(const nsString& aString) const;
+  MOZ_CAN_RUN_SCRIPT void NotifyMozMouseScrollEvent(
+      const nsString& aString) const;
 
   bool OverscrollBehaviorAllowsSwipe() const;
 
@@ -724,7 +728,8 @@ class AsyncPanZoomController {
   /**
    * Helper methods for handling scroll wheel events.
    */
-  nsEventStatus OnScrollWheel(const ScrollWheelInput& aEvent);
+  MOZ_CAN_RUN_SCRIPT nsEventStatus
+  OnScrollWheel(const ScrollWheelInput& aEvent);
 
   /**
    * Gets the scroll wheel delta's values in parent-layer pixels from the
@@ -1156,6 +1161,17 @@ class AsyncPanZoomController {
   // should be locked if STICKY axis locking is used. Should only by accessed
   // on the controller thread.
   RecentEventsBuffer<MultiTouchInput> mTouchScrollEventBuffer;
+
+  struct PanGestureDisplacement {
+    TimeStamp mTimeStamp;
+    ScreenPoint mDisplacement;
+  };
+
+  // Stores the physical displacements of pan gesture events that occurred
+  // within a given timeframe. Used to determine whether STICKY axis locking
+  // should be broken, since individual pan gesture events can have small
+  // deltas. Should only be accessed on the controller thread.
+  RecentEventsBuffer<PanGestureDisplacement> mPanGestureEventBuffer;
 
   // Most up-to-date constraints on zooming. These should always be reasonable
   // values; for example, allowing a min zoom of 0.0 can cause very bad things
@@ -1905,6 +1921,13 @@ class AsyncPanZoomController {
   bool IsOverscrollAnimationRunning() const {
     RecursiveMutexAutoLock lock(mRecursiveMutex);
     return mState == OVERSCROLL_ANIMATION;
+  }
+
+  // Returns whether an animation of any kind is currently running on this
+  // APZC.
+  bool IsAnimationRunning() const {
+    RecursiveMutexAutoLock lock(mRecursiveMutex);
+    return !!mAnimation;
   }
 
   // IsPhysicallyOverscrolled() checks whether the APZC is overscrolled

@@ -34,7 +34,9 @@
 #include "mozilla/dom/BlobBinding.h"
 #include "mozilla/dom/ContentList.h"
 #include "mozilla/dom/DOMCollectedFramesBinding.h"
+#include "mozilla/dom/DOMMozPromiseRequestHolder.h"
 #include "mozilla/dom/DOMRect.h"
+#include "mozilla/dom/DirectionalityUtils.h"
 #include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/DocumentTimeline.h"
 #include "mozilla/dom/Event.h"
@@ -58,7 +60,9 @@
 #include "nsError.h"
 #include "nsFocusManager.h"
 #include "nsFrameManager.h"
+#include "nsGlobalWindowInner.h"
 #include "nsGlobalWindowOuter.h"
+#include "nsHtml5FragmentFastPath.h"
 #include "nsIDocShell.h"
 #include "nsIFrame.h"
 #include "nsIObjectLoadingContent.h"
@@ -130,6 +134,7 @@
 #include "nsIBaseWindow.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIInterfaceRequestorUtils.h"
+#include "nsIMutableArray.h"
 #include "nsNetUtil.h"
 #include "nsROCSSPrimitiveValue.h"
 
@@ -754,6 +759,7 @@ nsDOMWindowUtils::SendWheelEvent(float aX, float aY, double aDeltaX,
   wheelEvent.mLineOrPageDeltaX = aLineOrPageDeltaX;
   wheelEvent.mLineOrPageDeltaY = aLineOrPageDeltaY;
   wheelEvent.mCallbackId = notifier.SaveCallback();
+  wheelEvent.mFlags.mIsSynthesizedForTests = true;
 
   nsPresContext* presContext = GetPresContext();
   NS_ENSURE_TRUE(presContext, NS_ERROR_FAILURE);
@@ -1162,6 +1168,12 @@ nsDOMWindowUtils::GetParsedStyleSheets(uint32_t* aSheets) {
 }
 
 NS_IMETHODIMP
+nsDOMWindowUtils::GetInnerHTMLFastPathCount(uint32_t* aCount) {
+  *aCount = nsHtml5FragmentFastPath::SuccessCount();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDOMWindowUtils::ActivateNativeMenuItemAt(const nsAString& indexString) {
   // get the widget to send the event to
   nsCOMPtr<nsIWidget> widget = GetWidget();
@@ -1177,6 +1189,26 @@ nsDOMWindowUtils::ForceUpdateNativeMenuAt(const nsAString& indexString) {
   if (!widget) return NS_ERROR_FAILURE;
 
   return widget->ForceUpdateNativeMenuAt(indexString);
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetNativeMenuItemKeyEquivalent(const nsAString& aElementId,
+                                                 nsAString& aResult) {
+  nsCOMPtr<nsIWidget> widget = GetWidget();
+  if (!widget) return NS_ERROR_FAILURE;
+
+  return widget->GetNativeMenuItemKeyEquivalent(aElementId, aResult);
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetNativeMenuItemTitle(const nsAString& aElementId,
+                                         nsAString& aResult) {
+  nsCOMPtr<nsIWidget> widget = GetWidget();
+  if (!widget) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return widget->GetNativeMenuItemTitle(aElementId, aResult);
 }
 
 NS_IMETHODIMP
@@ -1946,7 +1978,9 @@ nsDOMWindowUtils::NeedsFlush(int32_t aFlushType, bool* aResult) {
       return NS_ERROR_INVALID_ARG;
   }
 
-  *aResult = presShell->NeedFlush(flushType);
+  // FIXME(emilio): Some callers do care about aFlushAnimations and kinda work
+  // around it...
+  *aResult = presShell->NeedFlush(flushType, /* aFlushAnimations = */ true);
   return NS_OK;
 }
 
@@ -2374,23 +2408,24 @@ nsDOMWindowUtils::SendSelectionSetEvent(uint32_t aOffset, uint32_t aLength,
   *aResult = false;
 
   // get the widget to send the event to
-  nsCOMPtr<nsIWidget> widget = GetWidget();
-  if (!widget) {
+  const nsCOMPtr<nsIWidget> widget = GetWidget();
+  if (!widget) [[unlikely]] {
     return NS_ERROR_FAILURE;
   }
 
-  WidgetSelectionEvent selectionEvent(true, eSetSelection, widget);
-  InitEvent(selectionEvent);
+  const RefPtr<TextEventDispatcher> dispatcher =
+      widget->GetTextEventDispatcher();
+  if (NS_WARN_IF(!dispatcher)) [[unlikely]] {
+    return NS_ERROR_FAILURE;
+  }
 
-  selectionEvent.mOffset = aOffset;
-  selectionEvent.mLength = aLength;
-  selectionEvent.mReversed = (aAdditionalFlags & SELECTION_SET_FLAG_REVERSE);
-  selectionEvent.mExpandToClusterBoundary =
-      (aAdditionalFlags & SELECTION_EXPAND_TO_CLUSTER_BOUNDARY);
-
-  widget->DispatchEvent(&selectionEvent);
-
-  *aResult = selectionEvent.mSucceeded;
+  *aResult = dispatcher->DispatchSetSelectionEvent(
+      aOffset, aLength,
+      aAdditionalFlags & SELECTION_EXPAND_TO_CLUSTER_BOUNDARY
+          ? ExpandToClusterBoundary::Yes
+          : ExpandToClusterBoundary::No,
+      aAdditionalFlags & SELECTION_SET_FLAG_REVERSE ? RangeDirection::Reversed
+                                                    : RangeDirection::Normal);
   return NS_OK;
 }
 
@@ -2400,10 +2435,21 @@ nsDOMWindowUtils::SendContentCommandEvent(const nsAString& aType,
                                           const nsAString& aString,
                                           uint32_t aOffset,
                                           const nsAString& aReplaceSrcString,
-                                          uint32_t aAdditionalFlags) {
+                                          uint32_t aAdditionalFlags,
+                                          bool* aOutEnabled) {
+  MOZ_ASSERT(aOutEnabled);
+  *aOutEnabled = false;
+
   // get the widget to send the event to
-  nsCOMPtr<nsIWidget> widget = GetWidget();
-  if (!widget) return NS_ERROR_FAILURE;
+  const nsCOMPtr<nsIWidget> widget = GetWidget();
+  if (!widget) [[unlikely]] {
+    return NS_ERROR_FAILURE;
+  }
+  const RefPtr<TextEventDispatcher> dispatcher =
+      widget->GetTextEventDispatcher();
+  if (!dispatcher) [[unlikely]] {
+    return NS_ERROR_FAILURE;
+  }
 
   EventMessage msg;
   if (aType.EqualsLiteral("cut")) {
@@ -2436,12 +2482,15 @@ nsDOMWindowUtils::SendContentCommandEvent(const nsAString& aType,
     event.mSelection.mReplaceSrcString = aReplaceSrcString;
     event.mSelection.mOffset = aOffset;
     event.mSelection.mPreventSetSelection =
-        !!(aAdditionalFlags & CONTENT_COMMAND_FLAG_PREVENT_SET_SELECTION);
+        aAdditionalFlags & CONTENT_COMMAND_FLAG_PREVENT_SET_SELECTION
+            ? PreventSetSelection::Yes
+            : PreventSetSelection::No;
   } else if (msg == eContentCommandPasteTransferable) {
     event.mTransferable = aTransferable;
   }
 
-  widget->DispatchEvent(&event);
+  dispatcher->DispatchContentCommandEvent(event);
+  *aOutEnabled = event.mSucceeded && event.mIsEnabled;
   return NS_OK;
 }
 
@@ -2608,29 +2657,34 @@ nsDOMWindowUtils::DefaultDevicesRoundTripLatency(Promise** aOutPromise) {
     return err.StealNSResult();
   }
 
-  NS_ADDREF(promise.get());
-  void* p = reinterpret_cast<void*>(promise.get());
-  NS_DispatchBackgroundTask(
-      NS_NewRunnableFunction("DefaultDevicesRoundTripLatency", [p]() {
-        double mean, stddev;
-        bool success =
-            CubebUtils::EstimatedLatencyDefaultDevices(&mean, &stddev);
+  using LatencyPromise = MozPromise<nsTArray<double>, nsresult, true>;
+  auto holder =
+      MakeRefPtr<DOMMozPromiseRequestHolder<LatencyPromise>>(inner->AsGlobal());
+  nsCOMPtr<nsISerialEventTarget> taskQueue;
+  nsresult rv = NS_CreateBackgroundTaskQueue("DefaultDevicesRoundTripLatency",
+                                             getter_AddRefs(taskQueue));
+  NS_ENSURE_SUCCESS(rv, rv);
 
-        NS_DispatchToMainThread(NS_NewRunnableFunction(
-            "DefaultDevicesRoundTripLatency", [p, success, mean, stddev]() {
-              Promise* promise = reinterpret_cast<Promise*>(p);
-              if (!success) {
-                promise->MaybeReject(NS_ERROR_FAILURE);
-                NS_RELEASE(promise);
-                return;
-              }
-              nsTArray<double> a;
-              a.AppendElement(mean);
-              a.AppendElement(stddev);
-              promise->MaybeResolve(a);
-              NS_RELEASE(promise);
-            }));
-      }));
+  InvokeAsync(
+      taskQueue, __func__,
+      []() {
+        double mean, stddev;
+        if (!CubebUtils::EstimatedLatencyDefaultDevices(&mean, &stddev)) {
+          return LatencyPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
+        }
+        return LatencyPromise::CreateAndResolve(nsTArray<double>{mean, stddev},
+                                                __func__);
+      })
+      ->Then(GetMainThreadSerialEventTarget(), __func__,
+             [holder, promise](LatencyPromise::ResolveOrRejectValue&& aValue) {
+               holder->Complete();
+               if (aValue.IsResolve()) {
+                 promise->MaybeResolve(aValue.ResolveValue());
+               } else {
+                 promise->MaybeReject(aValue.RejectValue());
+               }
+             })
+      ->Track(*holder);
 
   promise.forget(aOutPromise);
   return NS_OK;
@@ -2770,6 +2824,12 @@ nsDOMWindowUtils::GetIsTestControllingRefreshes(bool* aResult) {
   *aResult =
       pc ? pc->RefreshDriver()->IsTestControllingRefreshesEnabled() : false;
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetIsMouseDown(bool* aResult) {
+  *aResult = nsGlobalWindowInner::sMouseDown;
   return NS_OK;
 }
 
@@ -4154,7 +4214,10 @@ nsDOMWindowUtils::GetRefreshDriverHasPendingTick(bool* aResult) {
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::EnterChaosMode() {
+nsDOMWindowUtils::EnterChaosMode(uint32_t aFeatures) {
+  if (aFeatures) {
+    ChaosMode::SetChaosFeature(static_cast<ChaosFeature>(aFeatures));
+  }
   ChaosMode::enterChaosMode();
   return NS_OK;
 }

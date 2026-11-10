@@ -32,6 +32,15 @@ void MoveEmitterLOONG64::breakCycle(const MoveOperand& to, MoveOp::Type type) {
           masm.moveDoubleToGPR64(to.floatReg(), Register64(cycleGeneralReg_));
         }
         break;
+      case MoveOp::SIMD128:
+        if (to.isMemory()) {
+          ScratchSimd128Scope scratch(masm);
+          masm.loadUnalignedSimd128(getAdjustedAddress(to), scratch);
+          masm.storeUnalignedSimd128(scratch, cycleSlot());
+        } else {
+          masm.storeUnalignedSimd128(to.floatReg(), cycleSlot());
+        }
+        break;
       case MoveOp::INT32:
         if (to.isMemory()) {
           masm.load32(getAdjustedAddress(to), cycleGeneralReg_);
@@ -67,6 +76,15 @@ void MoveEmitterLOONG64::breakCycle(const MoveOperand& to, MoveOp::Type type) {
           masm.storeDouble(fpscratch64, cycleSlot());
         } else {
           masm.storeDouble(to.floatReg(), cycleSlot());
+        }
+        break;
+      case MoveOp::SIMD128:
+        if (to.isMemory()) {
+          ScratchSimd128Scope scratch(masm);
+          masm.loadUnalignedSimd128(getAdjustedAddress(to), scratch);
+          masm.storeUnalignedSimd128(scratch, cycleSlot());
+        } else {
+          masm.storeUnalignedSimd128(to.floatReg(), cycleSlot());
         }
         break;
       case MoveOp::INT32:
@@ -120,6 +138,15 @@ void MoveEmitterLOONG64::completeCycle(const MoveOperand& from,
           masm.moveGPR64ToDouble(Register64(cycleGeneralReg_), to.floatReg());
         }
         break;
+      case MoveOp::SIMD128:
+        if (to.isMemory()) {
+          ScratchSimd128Scope scratch(masm);
+          masm.loadUnalignedSimd128(cycleSlot(), scratch);
+          masm.storeUnalignedSimd128(scratch, getAdjustedAddress(to));
+        } else {
+          masm.loadUnalignedSimd128(cycleSlot(), to.floatReg());
+        }
+        break;
       case MoveOp::INT32:
         if (to.isMemory()) {
           masm.store32(cycleGeneralReg_, getAdjustedAddress(to));
@@ -155,6 +182,15 @@ void MoveEmitterLOONG64::completeCycle(const MoveOperand& from,
           masm.storeDouble(fpscratch64, getAdjustedAddress(to));
         } else {
           masm.loadDouble(cycleSlot(), to.floatReg());
+        }
+        break;
+      case MoveOp::SIMD128:
+        if (to.isMemory()) {
+          ScratchSimd128Scope scratch(masm);
+          masm.loadUnalignedSimd128(cycleSlot(), scratch);
+          masm.storeUnalignedSimd128(scratch, getAdjustedAddress(to));
+        } else {
+          masm.loadUnalignedSimd128(cycleSlot(), to.floatReg());
         }
         break;
       case MoveOp::INT32:
@@ -198,11 +234,6 @@ void MoveEmitterLOONG64::emit(const MoveResolver& moves) {
       // We're lucky to have more than two spare scratch registers still
       // available. Grab another one as temporary storage for breaking cycles.
       cycleGeneralReg_ = temps.Acquire();
-    } else {
-      // Reserve stack for cycle resolution
-      static_assert(SpillSlotSize == 8);
-      masm.reserveStack(SpillSlotSize);
-      pushedAtCycle_ = masm.framePushed();
     }
   }
 
@@ -213,8 +244,18 @@ void MoveEmitterLOONG64::emit(const MoveResolver& moves) {
   cycleGeneralReg_ = InvalidReg;
 }
 
-Address MoveEmitterLOONG64::cycleSlot() const {
-  MOZ_ASSERT(pushedAtCycle_ != -1, "pushedAtCycle_ not initialized");
+Address MoveEmitterLOONG64::cycleSlot() {
+  // Allocate a slot for breaking cycles if we have not already
+  if (pushedAtCycle_ == -1) {
+#if defined(ENABLE_JIT_SIMD)
+    static_assert(SpillSlotSize == 16);
+#else
+    static_assert(SpillSlotSize == 8);
+#endif
+    masm.reserveStack(SpillSlotSize);
+    pushedAtCycle_ = masm.framePushed();
+  }
+
   const int32_t offset = masm.framePushed() - pushedAtCycle_;
   MOZ_ASSERT(is_intN(offset, 12));
   return Address(StackPointer, offset);
@@ -366,6 +407,27 @@ void MoveEmitterLOONG64::emitDoubleMove(const MoveOperand& from,
   }
 }
 
+void MoveEmitterLOONG64::emitSimd128Move(const MoveOperand& from,
+                                         const MoveOperand& to) {
+  if (from.isFloatReg()) {
+    if (to.isFloatReg()) {
+      masm.moveSimd128(from.floatReg(), to.floatReg());
+    } else {
+      MOZ_ASSERT(to.isMemory());
+      masm.storeUnalignedSimd128(from.floatReg(), getAdjustedAddress(to));
+    }
+  } else if (to.isFloatReg()) {
+    MOZ_ASSERT(from.isMemory());
+    masm.loadUnalignedSimd128(getAdjustedAddress(from), to.floatReg());
+  } else {
+    MOZ_ASSERT(from.isMemory());
+    MOZ_ASSERT(to.isMemory());
+    ScratchSimd128Scope scratch(masm);
+    masm.loadUnalignedSimd128(getAdjustedAddress(from), scratch);
+    masm.storeUnalignedSimd128(scratch, getAdjustedAddress(to));
+  }
+}
+
 void MoveEmitterLOONG64::emit(const MoveOp& move) {
   const MoveOperand& from = move.from();
   const MoveOperand& to = move.to();
@@ -389,6 +451,9 @@ void MoveEmitterLOONG64::emit(const MoveOp& move) {
       break;
     case MoveOp::DOUBLE:
       emitDoubleMove(from, to);
+      break;
+    case MoveOp::SIMD128:
+      emitSimd128Move(from, to);
       break;
     case MoveOp::INT32:
       emitInt32Move(from, to);

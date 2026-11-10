@@ -76,7 +76,9 @@ class RTCRtpSender : public nsISupports,
   static void GetCapabilities(const GlobalObject&, const nsAString& kind,
                               Nullable<dom::RTCRtpCapabilities>& result);
   already_AddRefed<Promise> SetParameters(
-      const dom::RTCRtpSendParameters& aParameters, ErrorResult& aError);
+      const dom::RTCRtpSendParameters& aParameters,
+      const dom::RTCSetParameterOptions& aSetParameterOptions,
+      ErrorResult& aError);
   // Not a simple getter, so not const
   // See https://w3c.github.io/webrtc-pc/#dom-rtcrtpsender-getparameters
   void GetParameters(RTCRtpSendParameters& aParameters);
@@ -173,7 +175,6 @@ class RTCRtpSender : public nsISupports,
   Sequence<RTCRtpEncodingParameters> ToSendEncodings(
       const std::vector<std::string>& aRids) const;
   void MaybeGetJsepRids();
-  void UpdateDtmfSender();
 
   void WarnAboutBadSetParameters(const nsCString& aError);
   nsCString GetEffectiveTLDPlus1() const;

@@ -211,7 +211,6 @@ class ConfigHelper {
         CreateEnvironment(&field_trials_, time_controller_.GetClock(),
                           time_controller_.GetTaskQueueFactory()),
         stream_config_, audio_state_, &rtp_transport_, &bitrate_allocator_,
-        std::nullopt,
         std::unique_ptr<voe::ChannelSendInterface>(channel_send_));
   }
 
@@ -282,10 +281,6 @@ class ConfigHelper {
   }
 
   void SetupMockForGetStats(bool use_null_audio_processing) {
-    using ::testing::DoAll;
-    using ::testing::SetArgPointee;
-    using ::testing::SetArgReferee;
-
     std::vector<ReportBlockData> report_blocks;
     ReportBlockData block;
     block.set_source_ssrc(780);

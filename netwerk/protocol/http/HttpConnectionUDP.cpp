@@ -30,6 +30,7 @@
 #include "nsINetAddr.h"
 #include "nsISocketProvider.h"
 #include "nsNetAddr.h"
+#include "nsSocketTransportService2.h"
 #include "nsStringStream.h"
 #include "nsThreadUtils.h"
 
@@ -201,6 +202,29 @@ HttpConnectionUDP::~HttpConnectionUDP() {
              "Should not have any queued transactions");
 }
 
+void HttpConnectionUDP::RekeyAfterHttp3OnlyHandOff(
+    nsHttpConnectionInfo* aConnInfo) {
+  MOZ_ASSERT(aConnInfo);
+  MOZ_ASSERT(mConnInfo);
+  MOZ_ASSERT(mConnInfo->GetHttp3Only(),
+             "only an h3-only connection info gets handed off");
+  MOZ_ASSERT(!aConnInfo->GetHttp3Only(),
+             "hand-off must relax the policy to Allowed");
+  MOZ_ASSERT(aConnInfo->GetOrigin().Equals(mConnInfo->GetOrigin()) &&
+                 aConnInfo->OriginPort() == mConnInfo->OriginPort(),
+             "hand-off must not change the origin");
+
+  LOG(("HttpConnectionUDP::RekeyAfterHttp3OnlyHandOff this=%p %s -> %s", this,
+       mConnInfo->HashKey().get(), aConnInfo->HashKey().get()));
+  mConnInfo = aConnInfo;
+
+  // The session holds its own clone and later resolves connection entries from
+  // it, so it has to be re-keyed too.
+  if (mHttp3Session) {
+    mHttp3Session->RekeyAfterHttp3OnlyHandOff(aConnInfo);
+  }
+}
+
 nsresult HttpConnectionUDP::Init(nsHttpConnectionInfo* info,
                                  nsIDNSRecord* dnsRecord, nsresult status,
                                  nsIInterfaceRequestor* callbacks,
@@ -211,7 +235,11 @@ nsresult HttpConnectionUDP::Init(nsHttpConnectionInfo* info,
 
   mConnInfo = info;
   MOZ_ASSERT(mConnInfo);
-  MOZ_ASSERT(mConnInfo->IsHttp3() || mConnInfo->IsHttp3ProxyConnection());
+  // Direct/alt-svc H3, a MASQUE proxy, or the outer H3 connection to an HTTPS
+  // CONNECT proxy (whose HTTPS RR advertised h3, so IsHttp3ProxyConnection() is
+  // false).
+  MOZ_ASSERT(mConnInfo->IsHttp3() || mConnInfo->IsHttp3ProxyConnection() ||
+             (mConnInfo->UsingHttpsProxy() && mConnInfo->UsingConnect()));
 
   mErrorBeforeConnect = status;
   mAlpnToken = mConnInfo->GetNPNToken();
@@ -229,11 +257,15 @@ nsresult HttpConnectionUDP::Init(nsHttpConnectionInfo* info,
   dnsAddrRecord->GetEffectiveTRRMode(&mEffectiveTRRMode);
   dnsAddrRecord->GetTrrSkipReason(&mTRRSkipReason);
   NetAddr peerAddr;
-  uint16_t port =
-      mConnInfo->IsHttp3ProxyConnection()
-          ? mConnInfo->ProxyPort()
-          : (!mConnInfo->GetRoutedHost().IsEmpty() ? mConnInfo->RoutedPort()
-                                                   : mConnInfo->OriginPort());
+  // An outer proxy CONNECT connection targets the proxy, so use the proxy port;
+  // otherwise it's a direct/alt-svc H3 connection to the origin.
+  bool outerProxyConn =
+      mConnInfo->IsHttp3ProxyConnection() ||
+      (mConnInfo->UsingHttpsProxy() && mConnInfo->UsingConnect());
+  uint16_t port = outerProxyConn ? mConnInfo->ProxyPort()
+                                 : (!mConnInfo->GetRoutedHost().IsEmpty()
+                                        ? mConnInfo->RoutedPort()
+                                        : mConnInfo->OriginPort());
 
   nsresult rv = dnsAddrRecord->GetNextAddr(port, &peerAddr);
   if (NS_FAILED(rv)) {
@@ -420,14 +452,8 @@ nsresult HttpConnectionUDP::Activate(nsAHttpTransaction* trans, uint32_t caps,
     if (!mExperienced && mHttp3Session && mHttp3Session->IsConnected()) {
       mExperienced = true;
     }
-    if (mBootstrappedTimingsSet) {
-      mBootstrappedTimingsSet = false;
-      if (hTrans) {
-        hTrans->BootstrapTimings(mBootstrappedTimings);
-      }
-    }
-    mBootstrappedTimings = TimingStruct();
   }
+  HandOffConnectPhase(trans);
 
   mTransactionCaps = caps;
   mPriority = pri;
@@ -454,6 +480,12 @@ nsresult HttpConnectionUDP::Activate(nsAHttpTransaction* trans, uint32_t caps,
   // Important: we must not reset the transaction while the outer connection
   // is still connecting. Resetting here could lead to opening another HTTP/3
   // connection.
+  //
+  // TODO: this is the legacy masque outer-proxy path (queue +
+  // ResetTransaction). Remove it once Happy Eyeballs establishes the outer
+  // proxy connection by default (network.http.happy_eyeballs_proxy_enabled); HE
+  // handles this via
+  // HappyEyeballsConnectionAttempt::MaybeDispatchOuterProxyConn.
   if (IsProxyConnectInProgress() && !mIsInTunnel && hTrans) {
     if (!mConnected) {
       mQueuedHttpConnectTransaction.AppendElement(hTrans);
@@ -480,7 +512,7 @@ nsresult HttpConnectionUDP::Activate(nsAHttpTransaction* trans, uint32_t caps,
             event.forget(), nsIRunnablePriority::PRIORITY_MEDIUMHIGH);
       }
 
-      NS_DispatchToCurrentThread(event);
+      DispatchToCurrent(event.forget());
     }
     return NS_OK;
   }
@@ -563,7 +595,7 @@ void HttpConnectionUDP::OnConnected() {
 
 already_AddRefed<nsIInputStream> HttpConnectionUDP::CreateProxyConnectStream(
     nsAHttpTransaction* trans) {
-  UniquePtr<nsHttpRequestHead> request = MakeUnique<nsHttpRequestHead>();
+  auto request = std::make_unique<nsHttpRequestHead>();
   nsAutoCString host;
   DebugOnly<nsresult> rv{};
   rv = nsHttpHandler::GenerateHostPort(
@@ -845,6 +877,11 @@ void HttpConnectionUDP::HandleTunnelResponse(
   }
 }
 
+// TODO: legacy masque outer-proxy path — converts the outer connection to a
+// wildcard proxy connection and resets the transaction so it re-dispatches
+// through a tunnel. Remove once Happy Eyeballs establishes the outer proxy
+// connection by default (network.http.happy_eyeballs_proxy_enabled); HE does
+// this in HappyEyeballsConnectionAttempt::MaybeDispatchOuterProxyConn.
 void HttpConnectionUDP::ResetTransaction(nsHttpTransaction* aHttpTransaction) {
   LOG(("HttpConnectionUDP::ResetTransaction [this=%p mState=%d]\n", this,
        static_cast<uint32_t>(mState)));
@@ -975,7 +1012,7 @@ nsresult HttpConnectionUDP::ResumeSend() {
                                       nsIRunnablePriority::PRIORITY_MEDIUMHIGH);
   }
 
-  NS_DispatchToCurrentThread(event);
+  DispatchToCurrent(event.forget());
   return NS_OK;
 }
 
@@ -986,7 +1023,7 @@ void HttpConnectionUDP::ForceSendIO(nsITimer* aTimer, void* aClosure) {
   HttpConnectionUDP* self = static_cast<HttpConnectionUDP*>(aClosure);
   MOZ_ASSERT(aTimer == self->mForceSendTimer);
   self->mForceSendTimer = nullptr;
-  NS_DispatchToCurrentThread(new HttpConnectionUDPForceIO(self, false));
+  DispatchToCurrent(do_AddRef(new HttpConnectionUDPForceIO(self, false)));
 }
 
 nsresult HttpConnectionUDP::MaybeForceSendIO() {
@@ -1014,7 +1051,7 @@ nsresult HttpConnectionUDP::ForceRecv() {
   LOG(("HttpConnectionUDP::ForceRecv [this=%p]\n", this));
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
 
-  return NS_DispatchToCurrentThread(new HttpConnectionUDPForceIO(this, true));
+  return DispatchToCurrent(do_AddRef(new HttpConnectionUDPForceIO(this, true)));
 }
 
 // trigger an asynchronous write

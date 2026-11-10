@@ -2,6 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this file,
 # You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import annotations
+
 import itertools
 import os
 from collections import defaultdict
@@ -1325,8 +1327,14 @@ def getAllTypes(descriptors, dictionaries, callbacks):
 
 # For sync value iterators, we use default array implementation, for async
 # iterators and sync pair iterators, we use AsyncIterableIterator or
-# IterableIterator instead.
+# IterableIterator instead, and ECMASetIterator or ECMAMapIterator for
+# [DOMBackedStorage] setlike and maplike.
 def iteratorNativeType(descriptor):
+    if descriptor.interface.isSetlike():
+        return f"mozilla::dom::binding_detail::ECMASetIterator<{descriptor.nativeType}>"
+    if descriptor.interface.isMaplike():
+        return f"mozilla::dom::binding_detail::ECMAMapIterator<{descriptor.nativeType}>"
+
     assert descriptor.interface.isIterable() or descriptor.interface.isAsyncIterable()
     iterableDecl = descriptor.interface.maplikeOrSetlikeOrIterable
     assert iterableDecl.isPairIterator() or descriptor.interface.isAsyncIterable()

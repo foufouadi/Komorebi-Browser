@@ -85,7 +85,6 @@ class nsILoadGroup;
 class nsIRunnable;
 class nsISerialEventTarget;
 class nsITimer;
-class nsRange;
 
 namespace mozilla::dom {
 
@@ -227,7 +226,7 @@ class HTMLMediaElement : public nsGenericHTMLElement,
                       nsAttrValue& aResult) override;
 
   nsresult BindToTree(BindContext&, nsINode& aParent) override;
-  void UnbindFromTree(UnbindContext&) override;
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY void UnbindFromTree(UnbindContext&) override;
   void DoneCreatingElement() override;
 
   bool IsHTMLFocusable(IsFocusableFlags, bool* aIsFocusable,
@@ -408,12 +407,13 @@ class HTMLMediaElement : public nsGenericHTMLElement,
 
   void GetEMEInfo(dom::EMEDebugInfo& aInfo);
 
-  // Update the visual size of the media. Called from the decoder on the
-  // main thread when/if the size changes.
-  virtual void UpdateMediaSize(const nsIntSize& aSize);
+  // Update the visual size and rotation of the media. Called from the
+  // decoder on the main thread when/if either changes.
+  virtual void UpdateMediaSize(const nsIntSize& aSize, VideoRotation aRotation);
 
   void Invalidate(ImageSizeChanged aImageSizeChanged,
                   const Maybe<nsIntSize>& aNewIntrinsicSize,
+                  const Maybe<VideoRotation>& aNewRotation,
                   ForceInvalidate aForceInvalidate) override;
 
   // Returns the CanPlayStatus indicating if we can handle the
@@ -588,6 +588,20 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   bool HasAudio() const { return mMediaInfo.HasAudio(); }
 
   virtual bool IsVideo() const { return false; }
+
+  bool IsLazyLoading() const { return mLazyLoading; }
+
+  enum class StartLoad : bool { No, Yes };
+
+  // Starts observing the element for lazy media loading.
+  void SetLazyLoading();
+
+  // Stops lazy media loading and optionally starts the deferred load.
+  void StopLazyLoading(StartLoad);
+
+  void SetLoading(const nsAString& aLoading, ErrorResult& aError) {
+    SetHTMLAttr(nsGkAtoms::loading, aLoading, aError);
+  }
 
   bool HasVideo() const { return mMediaInfo.HasVideo(); }
 
@@ -1436,11 +1450,10 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   // suspend-video-decoder is disabled.
   void MarkAsTainted();
 
-  virtual void AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
-                            const nsAttrValue* aValue,
-                            const nsAttrValue* aOldValue,
-                            nsIPrincipal* aMaybeScriptedPrincipal,
-                            bool aNotify) override;
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY void AfterSetAttr(
+      int32_t aNameSpaceID, nsAtom* aName, const nsAttrValue* aValue,
+      const nsAttrValue* aOldValue, nsIPrincipal* aMaybeScriptedPrincipal,
+      bool aNotify) override;
   virtual void OnAttrSetButNotChanged(int32_t aNamespaceID, nsAtom* aName,
                                       const nsAttrValueOrString& aValue,
                                       bool aNotify) override;
@@ -1725,8 +1738,8 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   bool mAttachingMediaKey = false;
   MozPromiseRequestHolder<SetCDMPromise> mSetCDMRequest;
 
-  // Stores the time at the start of the current 'played' range.
-  double mCurrentPlayRangeStart = 1.0;
+  // Stores the time at the start of the current 'played' range, if any.
+  Maybe<double> mCurrentPlayRangeStart;
 
   // True if loadeddata has been fired.
   bool mLoadedDataFired = false;
@@ -1768,6 +1781,13 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   // True if this element is suspended because the document is inactive or the
   // inactive docshell is not allowing media to play.
   bool mSuspendedByInactiveDocOrDocshell = false;
+
+#if defined(MOZ_WIDGET_ANDROID)
+  // Android-only state for the temporary background media playback probe (bug
+  // 2066141): true once we have recorded telemetry for the current background
+  // episode. Reset when the document becomes visible again.
+  bool mRecordedBackgroundAudioPlayback = false;
+#endif
 
   // True if we're running the "load()" method.
   bool mIsRunningLoadMethod = false;
@@ -1894,6 +1914,15 @@ class HTMLMediaElement : public nsGenericHTMLElement,
 
   Visibility mVisibilityState = Visibility::Untracked;
 
+  // Internal state for the media lazy-loading steps:
+  // https://html.spec.whatwg.org/multipage/media.html#lazy-loading-attributes
+  // True while the element is registered for lazy loading and its load is
+  // deferred.
+  bool mLazyLoading = false;
+  // True once lazy loading has been performed; prevents re-activation after
+  // seek or explicit load().
+  bool mLazyLoadingCompleted = false;
+
  public:
   // This function will be called whenever a text track that is in a media
   // element's list of text tracks has its text track mode change value
@@ -1966,7 +1995,7 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   // Runners whose Run() method is called remove themselves from this list.
   // We keep track of these because the load algorithm resolves/rejects all
   // already-dispatched pending play promises.
-  nsTArray<nsResolveOrRejectPendingPlayPromisesRunner*>
+  nsTArray<RefPtr<nsResolveOrRejectPendingPlayPromisesRunner>>
       mPendingPlayPromisesRunners;
 
   // A pending seek promise which is created at Seek() method call and is
@@ -2058,9 +2087,6 @@ class HTMLMediaElement : public nsGenericHTMLElement,
 
   MediaEventProducer<float> mEffectiveVolumeChangeEvent;
 };
-
-// Check if the context is chrome or has the debugger or tabs permission
-bool HasDebuggerOrTabsPrivilege(JSContext* aCx, JSObject* aObj);
 
 }  // namespace mozilla::dom
 

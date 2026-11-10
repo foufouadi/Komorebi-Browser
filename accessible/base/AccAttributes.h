@@ -30,21 +30,13 @@ namespace a11y {
 struct FontSize {
   int32_t mValue;
 
-  bool operator==(const FontSize& aOther) const {
-    return mValue == aOther.mValue;
-  }
-
-  bool operator!=(const FontSize& aOther) const {
-    return mValue != aOther.mValue;
-  }
+  bool operator==(const FontSize& aOther) const = default;
 };
 
 struct Color {
   nscolor mValue;
 
-  bool operator==(const Color& aOther) const { return mValue == aOther.mValue; }
-
-  bool operator!=(const Color& aOther) const { return mValue != aOther.mValue; }
+  bool operator==(const Color& aOther) const = default;
 };
 
 // A special type. If an entry has a value of this type, it instructs the
@@ -53,9 +45,8 @@ struct DeleteEntry {
   DeleteEntry() : mValue(true) {}
   bool mValue;
 
-  bool operator==(const DeleteEntry& aOther) const { return true; }
-
-  bool operator!=(const DeleteEntry& aOther) const { return false; }
+  bool operator==(const DeleteEntry& /*aOther*/) const { return true; }
+  bool operator!=(const DeleteEntry& /*aOther*/) const { return false; }
 };
 
 /**
@@ -129,14 +120,13 @@ class AccAttributes {
       static_assert(std::is_rvalue_reference_v<decltype(aAttrValue)>,
                     "Please only move strings into this function. To make a "
                     "copy, use SetAttributeStringCopy.");
-      UniquePtr<nsString> value =
-          MakeUnique<nsString>(std::forward<T>(aAttrValue));
+      auto value = std::make_unique<nsString>(std::forward<T>(aAttrValue));
       mData.InsertOrUpdate(aAttrName, AsVariant(std::move(value)));
     } else if constexpr (std::is_same_v<ValType, gfx::Matrix4x4>) {
-      UniquePtr<gfx::Matrix4x4> value = MakeUnique<gfx::Matrix4x4>(aAttrValue);
+      auto value = std::make_unique<gfx::Matrix4x4>(aAttrValue);
       mData.InsertOrUpdate(aAttrName, AsVariant(std::move(value)));
     } else if constexpr (std::is_same_v<ValType, nsRect>) {
-      UniquePtr<nsRect> value = MakeUnique<nsRect>(aAttrValue);
+      auto value = std::make_unique<nsRect>(aAttrValue);
       mData.InsertOrUpdate(aAttrName, AsVariant(std::move(value)));
     } else if constexpr (std::is_same_v<ValType, AccGroupInfo*>) {
       UniquePtr<AccGroupInfo> value(aAttrValue);

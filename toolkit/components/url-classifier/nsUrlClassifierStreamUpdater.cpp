@@ -348,7 +348,7 @@ nsUrlClassifierStreamUpdater::DownloadUpdates(
   urlUtil->GetTelemetryProvider(tables.SafeElementAt(0, ""_ns),
                                 mTelemetryProvider);
 
-  mCurrentRequest = MakeUnique<UpdateRequest>();
+  mCurrentRequest = std::make_unique<UpdateRequest>();
   BuildUpdateRequest(aRequestTables, aRequestPayload, aRequestQueryParameters,
                      aIsPostRequest, aProvider, aUpdateUrl, aSuccessCallback,
                      aUpdateErrorCallback, aDownloadErrorCallback,
@@ -500,7 +500,9 @@ nsUrlClassifierStreamUpdater::StreamFinished(nsresult status,
 }
 
 NS_IMETHODIMP
-nsUrlClassifierStreamUpdater::UpdateSuccess(uint32_t requestedTimeout) {
+nsUrlClassifierStreamUpdater::UpdateSuccess(
+    const nsTArray<nsCString>& aTables,
+    const nsTArray<uint32_t>& aWaitSeconds) {
   LOG(("nsUrlClassifierStreamUpdater::UpdateSuccess [this=%p]", this));
   if (mPendingUpdates.Length() != 0) {
     NS_WARNING("Didn't fetch all safebrowsing update redirects");
@@ -514,8 +516,18 @@ nsUrlClassifierStreamUpdater::UpdateSuccess(uint32_t requestedTimeout) {
 
   DownloadDone();
 
+  // Serialize the per-table wait durations as "table:seconds" pairs. Table
+  // names contain neither ':' nor ',', so the encoding is unambiguous.
   nsAutoCString strTimeout;
-  strTimeout.AppendInt(requestedTimeout);
+  for (size_t i = 0; i < aTables.Length(); i++) {
+    if (!strTimeout.IsEmpty()) {
+      strTimeout.Append(',');
+    }
+    strTimeout.Append(aTables[i]);
+    strTimeout.Append(':');
+    strTimeout.AppendInt(aWaitSeconds.SafeElementAt(i, 0));
+  }
+
   if (successCallback) {
     LOG(("nsUrlClassifierStreamUpdater::UpdateSuccess callback [this=%p]",
          this));
@@ -684,7 +696,7 @@ nsUrlClassifierStreamUpdater::OnStartRequest(nsIRequest* request) {
 }
 
 NS_IMETHODIMP
-nsUrlClassifierStreamUpdater::OnDataAvailable(nsIRequest* request,
+nsUrlClassifierStreamUpdater::OnDataAvailable(nsIRequest* /*request*/,
                                               nsIInputStream* aIStream,
                                               uint64_t aSourceOffset,
                                               uint32_t aLength) {
@@ -720,7 +732,7 @@ nsUrlClassifierStreamUpdater::OnDataAvailable(nsIRequest* request,
 }
 
 NS_IMETHODIMP
-nsUrlClassifierStreamUpdater::OnStopRequest(nsIRequest* request,
+nsUrlClassifierStreamUpdater::OnStopRequest(nsIRequest* /*request*/,
                                             nsresult aStatus) {
   if (!mDBService) return NS_ERROR_NOT_INITIALIZED;
 
@@ -785,8 +797,9 @@ nsUrlClassifierStreamUpdater::OnStopRequest(nsIRequest* request,
 // nsIObserver implementation
 
 NS_IMETHODIMP
-nsUrlClassifierStreamUpdater::Observe(nsISupports* aSubject, const char* aTopic,
-                                      const char16_t* aData) {
+nsUrlClassifierStreamUpdater::Observe(nsISupports* /*aSubject*/,
+                                      const char* aTopic,
+                                      const char16_t* /*aData*/) {
   if (nsCRT::strcmp(aTopic, gQuitApplicationMessage) == 0) {
     if (mIsUpdating && mChannel) {
       LOG(("Cancel download"));

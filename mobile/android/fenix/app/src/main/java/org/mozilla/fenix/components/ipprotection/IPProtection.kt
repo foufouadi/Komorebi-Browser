@@ -9,9 +9,12 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.concept.engine.Engine
 import mozilla.components.feature.ipprotection.IPProtectionFeature
-import mozilla.components.feature.ipprotection.IPProtectionStorageSynchronizer
 import mozilla.components.feature.ipprotection.auth.gpi.IPProtectionGpiProvider
+import mozilla.components.feature.ipprotection.storage.DefaultIPProtectionLocationRepository
+import mozilla.components.feature.ipprotection.storage.IPProtectionStorageSynchronizer
 import mozilla.components.feature.ipprotection.store.IPProtectionStore
+import mozilla.components.feature.ipprotection.store.middleware.IPProtectionEngineMiddleware
+import mozilla.components.feature.ipprotection.store.middleware.IPProtectionLocationMiddleware
 import mozilla.components.lib.integrity.googleplay.GooglePlayIntegrityClient
 import mozilla.components.service.fxa.manager.FxaAccountManager
 import mozilla.components.service.fxa.store.SyncStore
@@ -20,6 +23,13 @@ import org.mozilla.fenix.Config
 import org.mozilla.fenix.R
 import org.mozilla.fenix.components.AppStore
 import org.mozilla.fenix.components.LogMiddleware
+import org.mozilla.fenix.ipprotection.IPProtectionAccountObserver
+import org.mozilla.fenix.ipprotection.store.DefaultIPProtectionRepository
+import org.mozilla.fenix.ipprotection.store.FenixIPProtectionEligibilityStorage
+import org.mozilla.fenix.ipprotection.store.IPProtectionPreferencesMiddleware
+import org.mozilla.fenix.ipprotection.store.IPProtectionSnackbarMessages
+import org.mozilla.fenix.ipprotection.store.IPProtectionSnackbarMiddleware
+import org.mozilla.fenix.ipprotection.store.IPProtectionTelemetryMiddleware
 import org.mozilla.fenix.utils.Settings
 
 /**
@@ -32,7 +42,6 @@ data class IPProtectionAuthSources(
 )
 
 /** Provides access to IP Protection related components. */
-@Suppress("LongParameterList")
 class IPProtection(
     val engine: Engine,
     val browserStore: BrowserStore,
@@ -42,6 +51,8 @@ class IPProtection(
     val settings: Settings,
     val context: Context,
 ) {
+    val ipProtectionRepository by lazy { DefaultIPProtectionRepository(settings) }
+
     val store by lazy {
         IPProtectionStore(
             middleware =
@@ -56,7 +67,9 @@ class IPProtection(
                         messages = snackbarMessages,
                     ),
                     IPProtectionTelemetryMiddleware(),
-                    IPProtectionPreferencesMiddleware(DefaultIPProtectionRepository(settings)),
+                    IPProtectionPreferencesMiddleware(ipProtectionRepository),
+                    IPProtectionLocationMiddleware(repository = DefaultIPProtectionLocationRepository(context)),
+                    engineMiddleware,
                 )
         )
     }
@@ -79,6 +92,7 @@ class IPProtection(
             store = store,
             engine = engine,
             accountManager = authSources.fxaAccountManager.value,
+            engineMiddleware = engineMiddleware,
             extraAuthProvider = IPProtectionGpiProvider(authSources.integrityClient.value),
         )
     }
@@ -92,9 +106,21 @@ class IPProtection(
         )
     }
 
+    private val accountObserver by lazy { IPProtectionAccountObserver(ipProtectionRepository) }
+
+    private val engineMiddleware by lazy { IPProtectionEngineMiddleware() }
+
     private val snackbarMessages by lazy {
         IPProtectionSnackbarMessages(
-            connectionError = context.getString(R.string.ip_protection_connection_error_snackbar)
+            connectionError = context.getString(R.string.ip_protection_connection_error_snackbar),
+            locationSelectionReset = context.getString(R.string.ip_protection_location_selection_reset_snackbar),
         )
+    }
+
+    /** Initializes IP Protection related components. * */
+    fun initialize() {
+        feature.initialize()
+        storageSynchronizer.initialize()
+        authSources.fxaAccountManager.value.register(accountObserver)
     }
 }

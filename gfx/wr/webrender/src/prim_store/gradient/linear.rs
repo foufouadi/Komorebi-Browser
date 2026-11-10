@@ -9,37 +9,41 @@
 //! Linear gradients are rendered as quads with the gradient pattern (ps_quad_gradient).
 
 use euclid::approxeq::ApproxEq;
-use euclid::point2;
-use api::{ExtendMode, GradientStop};
+use euclid::vec2;
+use api::{AlphaMode, ExtendMode, GradientStop};
 use api::units::*;
 use crate::pattern::gradient::linear_gradient_pattern;
-use crate::pattern::{Pattern, PatternBuilder, PatternBuilderContext, PatternBuilderState};
-use crate::scene_building::IsVisible;
-use crate::intern::{Internable, InternDebug, Handle as InternHandle};
-use crate::internal_types::LayoutPrimitiveInfo;
-use crate::prim_store::{PrimitiveKind, PrimitiveOpacity};
-use crate::prim_store::{PrimTemplateCommonData, PrimitiveStore};
-use crate::prim_store::{NinePatchDescriptor, InternablePrimitive};
+use crate::pattern::{Pattern, PatternBuilder, PatternBuilderState};
+use crate::dl_interner::{DlResolve, DlResolveContext};
+use crate::prim_store::PrimitiveOpacity;
+use crate::prim_store::PrimTemplateCommonData;
+use crate::prim_store::NinePatchDescriptor;
 use crate::segment::EdgeMask;
 use super::stops_and_min_alpha;
 use std::ops::{Deref, DerefMut};
 use std::mem::swap;
 
 // `LinearGradient` (the interned value) and `LinearGradientKey` live in
-// `webrender_api::interned_prims` so the key can be built from api-resident
-// types. The frame-time `LinearGradientTemplate` and the interning glue stay here.
-pub use api::interned_prims::{LinearGradient, LinearGradientKey};
+// `webrender_api::interned_prims`, since the content display list builder
+// interns them. The frame-time `LinearGradientTemplate` stays here.
+pub use api::interned_prims::LinearGradientKey;
 
-impl InternDebug for LinearGradientKey {}
+impl crate::prim_store::PrimKeyCommon for LinearGradientKey {
+    fn key_common(&self) -> &crate::prim_store::PrimKeyCommonData {
+        &self.common
+    }
+}
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Debug, MallocSizeOf)]
+#[derive(Debug, MallocSizeOf, Clone)]
 pub struct LinearGradientTemplate {
     pub common: PrimTemplateCommonData,
     pub extend_mode: ExtendMode,
-    pub start_point: LayoutPoint,
-    pub end_point: LayoutPoint,
+    pub alpha_mode: AlphaMode,
+    // Relative to the primitive's pattern rect.
+    pub start_point: LayoutVector2D,
+    pub end_point: LayoutVector2D,
     /// Per-axis fraction of `common.prim_size` covered by one tile of the
     /// gradient pattern. Multiply by `common.prim_size` at use to recover the
     /// absolute stretch_size.
@@ -54,9 +58,7 @@ pub struct LinearGradientTemplate {
 impl PatternBuilder for LinearGradientTemplate {
     fn build(
         &self,
-        _sub_rect: Option<DeviceRect>,
-        offset: LayoutVector2D,
-        ctx: &PatternBuilderContext,
+        pattern_rect: &LayoutRect,
         state: &mut PatternBuilderState,
     ) -> Pattern {
         let (start, end) = if self.reverse_stops {
@@ -67,11 +69,11 @@ impl PatternBuilder for LinearGradientTemplate {
         // LinearGradientTemplate stores the start and end points relative to the
         // primitive origin, but the shader works with start/end points in "proper"
         // layout coordinates (relative to the primitive's spatial node).
-        let offset = offset + ctx.prim_origin.to_vector();
         linear_gradient_pattern(
-            start + offset,
-            end + offset,
+            pattern_rect.min + start,
+            pattern_rect.min + end,
             self.extend_mode,
+            self.alpha_mode,
             &self.stops,
             state.frame_gpu_data,
         )
@@ -91,21 +93,6 @@ impl DerefMut for LinearGradientTemplate {
     }
 }
 
-/// Perform a few optimizations to the gradient that are relevant to scene building.
-///
-/// Mutates `prim_rect`, `tile_size`, `start`, `end` to bake in the simplifications
-/// (repeated-tile collapse, equivalent-to-stretching on either axis, clip-induced
-/// offsets). Decomposition into per-segment quads is no longer done here -- the
-/// caller emits a single `LinearGradient` prim and prepare-time runs
-/// [`decompose_axis_aligned_gradient`] against the snapped prim_rect when the
-/// gradient is eligible. Doing the decomposition at frame-build keeps adjacent
-/// segments phase-aligned with the snapped outer prim, even when the frame-time
-/// snap pass nudges the outer rect.
-// `optimize_linear_gradient` now lives in `webrender_api::prim_geometry` so
-// content-process interning can share it. Re-exported here to keep existing
-// references working.
-pub use api::prim_geometry::optimize_linear_gradient;
-
 /// Whether a linear gradient is eligible for the fast-path two-stop-per-segment
 /// decomposition at prepare time. Inputs are the values produced by
 /// `optimize_linear_gradient` (i.e. already simplified and clip-adjusted).
@@ -113,8 +100,8 @@ pub fn linear_gradient_decomposes(
     prim_rect: &LayoutRect,
     tile_size: LayoutSize,
     tile_spacing: LayoutSize,
-    start: LayoutPoint,
-    end: LayoutPoint,
+    start: LayoutVector2D,
+    end: LayoutVector2D,
     extend_mode: ExtendMode,
     stops: &[GradientStop],
     enable_dithering: bool,
@@ -163,11 +150,11 @@ pub fn linear_gradient_decomposes(
 pub fn decompose_axis_aligned_gradient(
     prim_rect: &LayoutRect,
     tile_size: LayoutSize,
-    start: LayoutPoint,
-    end: LayoutPoint,
+    start: LayoutVector2D,
+    end: LayoutVector2D,
     stops: &[GradientStop],
     clip_rect: &LayoutRect,
-    mut callback: impl FnMut(&LayoutRect, LayoutPoint, LayoutPoint, [GradientStop; 2], EdgeMask),
+    mut callback: impl FnMut(&LayoutRect, LayoutVector2D, LayoutVector2D, [GradientStop; 2], EdgeMask),
 ) {
     debug_assert!(!stops.is_empty());
 
@@ -184,7 +171,7 @@ pub fn decompose_axis_aligned_gradient(
     let adjust_size = &mut |size: &mut LayoutSize| {
         if vertical { swap(&mut size.width, &mut size.height); }
     };
-    let adjust_point = &mut |p: &mut LayoutPoint| {
+    let adjust_vector = &mut |p: &mut LayoutVector2D| {
         if vertical { swap(&mut p.x, &mut p.y); }
     };
 
@@ -199,8 +186,8 @@ pub fn decompose_axis_aligned_gradient(
     let mut tile_size = tile_size;
 
     adjust_rect(&mut prim_rect);
-    adjust_point(&mut start);
-    adjust_point(&mut end);
+    adjust_vector(&mut start);
+    adjust_vector(&mut end);
     adjust_size(&mut tile_size);
 
     // `clip_rect` stays in the original (un-swapped) space — segment_rect
@@ -276,23 +263,29 @@ pub fn decompose_axis_aligned_gradient(
         // Segment_start and segment_end are in the gradient's pre-flip space
         // (relative to the prim's origin); the adjust_* helpers below restore
         // axis orientation when emitting.
-        let segment_start = start.x + prev_offset * length;
-        let segment_end = start.x + offset * length;
+        let segment_start = prev_offset * length;
+        let segment_end = offset * length;
         let segment_length = segment_end - segment_start;
 
         if segment_length <= 0.0 {
             continue;
         }
 
+        let rect_start = prim_rect.min.x + start.x + segment_start;
+        let rect_end = prim_rect.min.x + start.x + segment_end;
+        if rect_end <= rect_start {
+            continue;
+        }
+
         let mut segment_rect = prim_rect;
-        segment_rect.min.x += segment_start;
-        segment_rect.max.x = segment_rect.min.x + segment_length;
+        segment_rect.min.x = rect_start;
+        segment_rect.max.x = rect_end;
 
-        let mut seg_start = point2(0.0, 0.0);
-        let mut seg_end = point2(segment_length, 0.0);
+        let mut seg_start = vec2(0.0, 0.0);
+        let mut seg_end = vec2(segment_length, 0.0);
 
-        adjust_point(&mut seg_start);
-        adjust_point(&mut seg_end);
+        adjust_vector(&mut seg_start);
+        adjust_vector(&mut seg_end);
         adjust_rect(&mut segment_rect);
 
         let origin_before_clip = segment_rect.min;
@@ -326,9 +319,9 @@ pub fn decompose_axis_aligned_gradient(
     }
 }
 
-impl From<LinearGradientKey> for LinearGradientTemplate {
-    fn from(item: LinearGradientKey) -> Self {
-
+/// Nothing to validate: a gradient names no resource.
+impl DlResolve<LinearGradientKey> for LinearGradientTemplate {
+    fn resolve(item: &LinearGradientKey, _ctx: &DlResolveContext) -> Self {
         let common = PrimTemplateCommonData::with_key_common(item.common);
 
         let (stops, min_alpha) = stops_and_min_alpha(&item.stops);
@@ -338,57 +331,24 @@ impl From<LinearGradientKey> for LinearGradientTemplate {
         // should be drawn in.
         let stops_opacity = PrimitiveOpacity::from_alpha(min_alpha);
 
-        let start_point = LayoutPoint::new(item.start_point.x, item.start_point.y);
-        let end_point = LayoutPoint::new(item.end_point.x, item.end_point.y);
+        let start_point = LayoutVector2D::new(item.start_point.x, item.start_point.y);
+        let end_point = LayoutVector2D::new(item.end_point.x, item.end_point.y);
         let tile_spacing: LayoutSize = item.tile_spacing.into();
         let stretch_ratio: LayoutSize = item.stretch_ratio.into();
 
         LinearGradientTemplate {
             common,
             extend_mode: item.extend_mode,
+            alpha_mode: item.alpha_mode,
             start_point,
             end_point,
             stretch_ratio,
             tile_spacing,
             stops_opacity,
             stops,
-            border_nine_patch: item.nine_patch,
+            border_nine_patch: item.nine_patch.clone(),
             reverse_stops: item.reverse_stops,
         }
-    }
-}
-
-pub type LinearGradientDataHandle = InternHandle<LinearGradient>;
-
-impl Internable for LinearGradient {
-    type Key = LinearGradientKey;
-    type StoreData = LinearGradientTemplate;
-    type InternData = ();
-    const PROFILE_COUNTER: usize = crate::profiler::INTERNED_LINEAR_GRADIENTS;
-}
-
-impl InternablePrimitive for LinearGradient {
-    fn into_key(
-        self,
-        info: &LayoutPrimitiveInfo,
-    ) -> LinearGradientKey {
-        LinearGradientKey::new(info.into(), self)
-    }
-
-    fn make_instance_kind(
-        _key: LinearGradientKey,
-        data_handle: LinearGradientDataHandle,
-        _prim_store: &mut PrimitiveStore,
-    ) -> PrimitiveKind {
-        PrimitiveKind::LinearGradient {
-            data_handle,
-        }
-    }
-}
-
-impl IsVisible for LinearGradient {
-    fn is_visible(&self) -> bool {
-        true
     }
 }
 

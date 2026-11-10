@@ -68,13 +68,11 @@ struct default_delete<FcObjectSet> {
 
 class gfxFontconfigFontEntry final : public gfxFT2FontEntryBase {
   friend class gfxFcPlatformFontList;
-  using FTUserFontData = mozilla::gfx::FTUserFontData;
 
  public:
   // used for system fonts with explicit patterns
   explicit gfxFontconfigFontEntry(const nsACString& aFaceName,
-                                  FcPattern* aFontPattern,
-                                  bool aIgnoreFcCharmap);
+                                  FcPattern* aFontPattern);
 
   // used for data fonts where the fontentry takes ownership
   // of the font data and the FT_Face
@@ -95,21 +93,13 @@ class gfxFontconfigFontEntry final : public gfxFT2FontEntryBase {
   FcPattern* GetPattern() { return mFontPattern; }
 
   nsresult ReadCMAP(FontInfoData* aFontInfoData = nullptr) override;
-  bool TestCharacterMap(uint32_t aCh) override;
 
   mozilla::gfx::SharedFTFace* GetFTFace();
-  FTUserFontData* GetUserFontData() override;
+  FontData* GetUserFontData() override;
 
   FT_MM_Var* GetMMVar() override;
 
-  bool HasVariations() override;
-  void GetVariationAxes(nsTArray<gfxFontVariationAxis>& aAxes) override;
-  void GetVariationInstances(
-      nsTArray<gfxFontVariationInstance>& aInstances) override;
-
-  bool HasFontTable(uint32_t aTableTag) override;
   nsresult CopyFontTable(uint32_t aTableTag, nsTArray<uint8_t>&) override;
-  hb_blob_t* GetFontTable(uint32_t aTableTag) override;
   FontTableCache* GetFontTableCache(bool aCreate) override {
     return mFontTableCache;
   };
@@ -121,15 +111,21 @@ class gfxFontconfigFontEntry final : public gfxFT2FontEntryBase {
 
   gfxFont* CreateFontInstance(const gfxFontStyle* aFontStyle) override;
 
+  bool HasVariationsInternal() override;
+  void GetVariationAxesInternal(nsTArray<gfxFontVariationAxis>& aAxes) override;
+  void GetVariationInstancesInternal(
+      nsTArray<gfxFontVariationInstance>& aInstances) override;
+
+  bool HasFontTableInternal(uint32_t aTableTag) override;
+  hb_blob_t* GetFontTableInternal(uint32_t aTableTag) override;
+
   void GetUserFontFeatures(FcPattern* aPattern);
 
   // pattern for a single face of a family
   RefPtr<FcPattern> mFontPattern;
 
 #ifdef MOZ_FONTATIONS
-  void InitSkrifaFont(FcPattern* aPattern);
-  mozilla::Atomic<mozilla::gfx::SkrifaFontRef*> mSkrifaFontFace;
-  mozilla::MemoryMappedFile mSkrifaFontFile;
+  void InitSkrifaFontFace() override MOZ_REQUIRES(mLock);
 #endif
 
   // FTFace - initialized when needed. Once mFTFaceInitialized is true,
@@ -146,13 +142,6 @@ class gfxFontconfigFontEntry final : public gfxFT2FontEntryBase {
   // Font table cache, created only if we fail to create a hb_face_t that wraps
   // the complete font data.
   mozilla::Atomic<FontTableCache*> mFontTableCache;
-
-  // Whether TestCharacterMap should check the actual cmap rather than asking
-  // fontconfig about character coverage.
-  // We do this for app-bundled (rather than system) fonts, as they may
-  // include color glyphs that fontconfig would overlook, and for fonts
-  // loaded via @font-face.
-  bool mIgnoreFcCharmap;
 
   // Whether the face supports variations. For system-installed fonts, we
   // query fontconfig for this (so they will only work if fontconfig is
@@ -383,10 +372,11 @@ class gfxFcPlatformFontList final : public gfxPlatformFontList {
 
   // to avoid enumerating all fonts, maintain a mapping of local font
   // names to family
-  nsTHashMap<nsCString, RefPtr<FcPattern>> mLocalNames;
+  nsTHashMap<nsCString, RefPtr<FcPattern>> mLocalNames MOZ_GUARDED_BY(mLock);
 
   // caching generic/lang ==> font family list
-  nsClassHashtable<nsCStringHashKey, PrefFontList> mGenericMappings;
+  nsClassHashtable<nsCStringHashKey, PrefFontList> mGenericMappings
+      MOZ_GUARDED_BY(mLock);
 
   // Caching family lookups as found by FindAndAddFamilies after resolving
   // substitutions. The gfxFontFamily objects cached here are owned by the
@@ -394,7 +384,8 @@ class gfxFcPlatformFontList final : public gfxPlatformFontList {
   // font list is rebuilt (e.g. due to a fontconfig configuration change),
   // these pointers will be invalidated. InitFontList() flushes the cache
   // in this case.
-  nsTHashMap<nsCStringHashKey, nsTArray<FamilyAndGeneric>> mFcSubstituteCache;
+  nsTHashMap<nsCStringHashKey, nsTArray<FamilyAndGeneric>> mFcSubstituteCache
+      MOZ_GUARDED_BY(mLock);
 
   nsCOMPtr<nsITimer> mCheckFontUpdatesTimer;
   RefPtr<FcConfig> mLastConfig;
@@ -425,16 +416,16 @@ class gfxFcPlatformFontList final : public gfxPlatformFontList {
 
   // Cache for most recently used language code in FindAndAddFamiliesLocked,
   // and the result of checking whether to use lang-specific lookups.
-  RefPtr<nsAtom> mPrevLanguage;
-  nsCString mSampleLang;
-  bool mUseCustomLookups = false;
+  RefPtr<nsAtom> mPrevLanguage MOZ_GUARDED_BY(mLock);
+  nsCString mSampleLang MOZ_GUARDED_BY(mLock);
+  bool mUseCustomLookups MOZ_GUARDED_BY(mLock) = false;
 
   // By default, font prefs under Linux are set to simply lookup
   // via fontconfig the appropriate font for serif/sans-serif/monospace.
   // Rather than check each time a font pref is used, check them all at startup
   // and set a boolean to flag the case that non-default user font prefs exist
   // Note: langGroup == x-math is handled separately
-  bool mAlwaysUseFontconfigGenerics;
+  mozilla::Atomic<bool> mAlwaysUseFontconfigGenerics;
 
   static FT_Library sFTLibrary;
 };

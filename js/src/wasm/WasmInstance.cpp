@@ -31,6 +31,7 @@
 #include "jit/Registers.h"
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
 #include "js/Stack.h"                 // JS::NativeStackLimitMin
+#include "util/Denormals.h"
 #include "util/StringBuilder.h"
 #include "util/Text.h"
 #include "util/Unicode.h"
@@ -245,6 +246,7 @@ static bool UnpackResults(JSContext* cx, const ValTypeVector& resultTypes,
 bool Instance::callImport(JSContext* cx, uint32_t funcImportIndex,
                           unsigned argc, uint64_t* argv) {
   AssertRealmUnchanged aru(cx);
+  AutoAssertDenormalsEnabled denormals;
 
 #ifdef ENABLE_WASM_JSPI
   // We should not be on a cont stack.
@@ -439,8 +441,7 @@ static int32_t PerformWait(Instance* instance, uint32_t memoryIndex,
 
   mozilla::Maybe<mozilla::TimeDuration> timeout;
   if (timeout_ns >= 0) {
-    timeout = mozilla::Some(
-        mozilla::TimeDuration::FromMicroseconds(double(timeout_ns) / 1000));
+    timeout = mozilla::Some(mozilla::TimeDuration::FromNanoseconds(timeout_ns));
   }
 
   MOZ_ASSERT(byteOffset <= SIZE_MAX, "Bounds check is broken");
@@ -2459,6 +2460,9 @@ Instance::Instance(JSContext* cx, Handle<WasmInstanceObject*> object,
                    const SharedCode& code, SharedTableVector&& tables,
                    UniqueDebugState maybeDebug)
     : realm_(cx->realm()),
+#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
+      hasWasmMxcsr_(false),
+#endif
       allocSites_(nullptr),
       jsJitExceptionHandler_(
           cx->runtime()->jitRuntime()->getExceptionTail().value),
@@ -2472,7 +2476,12 @@ Instance::Instance(JSContext* cx, Handle<WasmInstanceObject*> object,
       debugFilter_(nullptr),
       callRefMetrics_(nullptr),
       maxInitializedGlobalsIndexPlus1_(0),
-      allocationMetadataBuilder_(nullptr),
+#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
+      ieeeMxcsr_(0),
+      wasmMxcsr_(0),
+#endif
+      hasAllocationMetadataBuilder_(
+          cx->realm()->hasAllocationMetadataBuilder()),
       addressOfLastBufferedWholeCell_(
           cx->runtime()->gc.addressOfLastBufferedWholeCell()) {
   std::fill(std::begin(baselineScratchWords_), std::end(baselineScratchWords_),
@@ -2517,6 +2526,22 @@ bool Instance::init(JSContext* cx, const JSObjectVector& funcImports,
   cx_ = cx;
   valueBoxClass_ = AnyRef::valueBoxClass();
   interrupt_ = false;
+#if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86)
+  // We should not be running with denormals disabled already.
+  MOZ_RELEASE_ASSERT(!DenormalsDisabled());
+
+  // Capture this thread's MXCSR once, so the wasm stubs can restore it with
+  // a single ldmxcsr each.
+  uint32_t mxcsr = mozilla::supports_sse() ? ReadMxcsr() : 0;
+  ieeeMxcsr_ = mxcsr;
+  if (CanDisableDenormals() && cx->options().wasmDisablesDenormals()) {
+    wasmMxcsr_ = mxcsr | MxcsrDenormalsDisabled;
+    hasWasmMxcsr_ = true;
+  } else {
+    wasmMxcsr_ = mxcsr;
+    hasWasmMxcsr_ = false;
+  }
+#endif
   jumpTable_ = code_->tieringJumpTable();
   debugFilter_ = nullptr;
   callRefMetrics_ = nullptr;
@@ -3353,9 +3378,33 @@ uintptr_t Instance::traceFrame(JSTracer* trc, const wasm::WasmFrameIter& wfi,
                                uint8_t* nextPC,
                                uintptr_t highestByteVisitedInPrevFrame) {
   const StackMap* map = code().lookupStackMap(nextPC);
+#ifdef DEBUG
+  if (maybeDebug_) {
+    // Every frame of a function compiled by the baseline compiler in debug
+    // mode should have a stackmap here, with two exceptions:
+    //
+    // * Import-function wrappers aren't compiled by the baseline compiler, and
+    //   have no stackmaps.
+    //
+    // * A frame at a ReturnStub call site has no stackmap.  It is the hidden
+    //   frame that MacroAssembler::wasmCollapseFrameSlow creates for a
+    //   return call to an import or to a function in another instance, and
+    //   it stays on the stack while the callee runs, so a GC can see it.  But
+    //   it holds only a wasm::Frame, the instance fields, shadow stack space
+    //   and alignment padding; there are no GC pointers in it.
+    const CodeRange* range = code().lookupFuncRange(nextPC);
+    CallSite site;
+    bool atReturnStub = code().lookupCallSite(nextPC, &site) &&
+                        site.kind() == CallSiteKind::ReturnStub;
+    MOZ_ASSERT_IF(
+        range && !codeMeta().funcIsImport(range->funcIndex()) && !atReturnStub,
+        map);
+  }
+#endif
   if (!map) {
     return 0;
   }
+
   Frame* frame = wfi.frame();
   uintptr_t* stackWords =
       GetFrameScanStartForStackMap(frame, map, &highestByteVisitedInPrevFrame);
@@ -3989,6 +4038,8 @@ bool Instance::getExportedFunction(JSContext* cx, uint32_t funcIndex,
 
 bool Instance::callExport(JSContext* cx, uint32_t funcIndex,
                           const CallArgs& args, CoercionLevel level) {
+  AutoAssertDenormalsEnabled denormals;
+
   if (memory0Base_) {
     // If there has been a moving grow, this Instance should have been notified.
     MOZ_RELEASE_ASSERT(memoryBase(0).unwrap() == memory0Base_);

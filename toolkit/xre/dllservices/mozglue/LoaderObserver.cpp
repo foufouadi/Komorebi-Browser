@@ -53,6 +53,10 @@ void LoaderObserver::OnEndDllLoad(void* aContext, NTSTATUS aNtStatus,
             utf8RequestedDllName.get()));
   }
 
+  if (!aModuleLoadInfo.HasCompatibleLayout()) {
+    return;
+  }
+
   // We want to record a denied DLL load regardless of |aNtStatus| because
   // |aNtStatus| is set to access-denied when DLL load was blocked.
   if ((!NT_SUCCESS(aNtStatus) && !aModuleLoadInfo.WasDenied()) ||
@@ -78,8 +82,7 @@ void LoaderObserver::OnEndDllLoad(void* aContext, NTSTATUS aNtStatus,
     mModuleLoads = new ModuleLoadInfoVec();
   }
 
-  (void)mModuleLoads->emplaceBack(
-      std::forward<ModuleLoadInfo>(aModuleLoadInfo));
+  (void)mModuleLoads->emplaceBack(std::move(aModuleLoadInfo));
 }
 
 void LoaderObserver::Forward(nt::LoaderObserver* aNext) {
@@ -124,6 +127,10 @@ void LoaderObserver::Disable() {
 }
 
 void LoaderObserver::OnForward(ModuleLoadInfoVec&& aInfo) {
+  if (aInfo.empty() || !aInfo.begin()->HasCompatibleLayout()) {
+    return;
+  }
+
   AutoExclusiveLock lock(mLock);
   if (!mModuleLoads) {
     mModuleLoads = new ModuleLoadInfoVec();

@@ -4,10 +4,12 @@
 
 
 import functools
+import json
 import logging
 import subprocess
 
 import requests
+from mozsystemmonitor.resourcemonitor import SystemResourceMonitor
 from redo import retry
 
 logger = logging.getLogger(__name__)
@@ -21,13 +23,17 @@ PUSHLOG_PUSHES_TMPL = (
 
 
 def _query_pushlog(url):
-    response = retry(
-        requests.get,
-        attempts=5,
-        sleeptime=10,
-        args=(url,),
-        kwargs={"timeout": 60, "headers": {"User-Agent": "TaskCluster"}},
-    )
+    SystemResourceMonitor.begin_marker("hg", url)
+    try:
+        response = retry(
+            requests.get,
+            attempts=5,
+            sleeptime=10,
+            args=(url,),
+            kwargs={"timeout": 60, "headers": {"User-Agent": "TaskCluster"}},
+        )
+    finally:
+        SystemResourceMonitor.end_marker("hg", url)
 
     return response.json()["pushes"]
 
@@ -53,12 +59,19 @@ def find_hg_revision_push_info(repository, revision):
 
 
 @functools.cache
-def get_push_data(repository, project, push_id_start, push_id_end):
+def get_push_data(repository, project, push_id_start, push_id_end, full=False):
+    """Return the pushlog entries of the pushes from ``push_id_start`` to
+    ``push_id_end`` (inclusive), keyed by pushlog id, or None on failure.
+
+    Each entry lists its changesets as nodes, or with ``full`` as objects
+    describing them (``node``, ``desc``, ``author``, ...)."""
     url = PUSHLOG_PUSHES_TMPL.format(
         repository=repository,
         push_id_start=push_id_start - 1,
         push_id_end=push_id_end,
     )
+    if full:
+        url += "&full=1"
 
     try:
         pushes = _query_pushlog(url)
@@ -103,27 +116,21 @@ def get_json_pushchangedfiles(repository, revision):
         response.raise_for_status()
         return response.json()
 
-    return retry(get_pushchangedfiles, attempts=10, sleeptime=10)
+    SystemResourceMonitor.begin_marker("hg", url)
+    try:
+        return retry(get_pushchangedfiles, attempts=10, sleeptime=10)
+    finally:
+        SystemResourceMonitor.end_marker("hg", url)
 
 
-def get_hg_revision_branch(root, revision):
-    """Given the parameters for a revision, find the hg_branch (aka
-    relbranch) of the revision."""
-    return get_hg_revision_info(root, revision, "branch")
-
-
-def get_hg_revision_info(root, revision, info):
-    return subprocess.check_output(
-        [
-            "hg",
-            "identify",
-            "-T",
-            f"{{{info}}}",
-            "--rev",
-            revision,
-        ],
-        cwd=root,
-        universal_newlines=True,
+def get_hg_revision_metadata(root, revision):
+    """Return a dict with the description ("desc"), branch (aka relbranch)
+    and extras of the given revision, using a single hg invocation."""
+    return json.loads(
+        subprocess.check_output(
+            ["hg", "log", "-r", revision, "-T", "{dict(desc, branch, extras)|json}"],
+            cwd=root,
+        )
     )
 
 

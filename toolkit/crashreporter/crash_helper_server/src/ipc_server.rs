@@ -4,7 +4,7 @@
 
 use anyhow::{bail, Context, Result};
 use crash_helper_common::{
-    messages::{self, Header, Message, ProcessRendezVous},
+    messages::{self, Header, Message, PathType, ProcessRendezVous},
     AncillaryData, GeckoChildId, IPCConnector, IPCConnectorKey, IPCEvent, IPCListener, IPCQueue,
     Pid, ProcessHandle,
 };
@@ -81,7 +81,6 @@ impl IPCServer {
         mut connector: IPCConnector,
         breakpad_data: BreakpadData,
         minidump_path: OsString,
-        build_id: String,
     ) -> Result<IPCServer> {
         // If the client process handle was not provided at launch then it will
         // be sent by the client using a regular `ProcessRendezVous` message.
@@ -97,7 +96,6 @@ impl IPCServer {
         let crash_generator = Box::new(Mutex::new(CrashGenerator::new(
             client_handle.clone(),
             minidump_path.clone(),
-            build_id,
         )));
 
         // SAFETY: We widen the lifetime of this crash generator reference
@@ -206,13 +204,15 @@ impl IPCServer {
 
         match connection.endpoint {
             IPCEndpoint::Parent => match header.kind {
-                messages::Kind::SetCrashReportPath => {
-                    let message = messages::SetCrashReportPath::decode(data, ancillary_data)?;
-                    self.generator
-                        .lock()
-                        .unwrap()
-                        .set_path(message.path.clone());
-                    self.breakpad_server.set_path(message.path);
+                messages::Kind::SetPath => {
+                    let message = messages::SetPath::decode(data, ancillary_data)?;
+                    self.handle_set_path(message);
+                }
+                messages::Kind::GetPath => {
+                    let message = messages::GetPath::decode(data, ancillary_data)?;
+                    let path = self.handle_get_path(message);
+                    let reply = messages::PathReply::new(path);
+                    connector.send_message(reply)?;
                 }
                 messages::Kind::TransferMinidump => {
                     let message = messages::TransferMinidump::decode(data, ancillary_data)?;
@@ -229,15 +229,33 @@ impl IPCServer {
                         }
                     };
 
-                    let reply = crash_report.map_or(
-                        messages::TransferMinidumpReply::new(OsString::new(), None),
-                        |cr| messages::TransferMinidumpReply::new(cr.path, cr.error),
-                    );
+                    let reply = crash_report
+                        .map_or(messages::MinidumpReply::new(OsString::new(), None), |cr| {
+                            messages::MinidumpReply::new(cr.path, cr.error)
+                        });
 
                     connector.send_message(reply)?;
                 }
                 messages::Kind::GenerateMinidump => {
-                    todo!("Implement all messages");
+                    let message = messages::GenerateMinidump::decode(data, ancillary_data)?;
+                    let crash_report = self.find_connection(message.id).and_then(|connection| {
+                        if let Some(process) = &connection.process {
+                            self.generator.lock().unwrap().generate_minidump(
+                                message.id,
+                                &process.handle,
+                                &message.target_thread,
+                            )
+                        } else {
+                            None
+                        }
+                    });
+
+                    let reply = crash_report
+                        .map_or(messages::MinidumpReply::new(OsString::new(), None), |cr| {
+                            messages::MinidumpReply::new(cr.path, cr.error)
+                        });
+
+                    connector.send_message(reply)?;
                 }
                 messages::Kind::RegisterChildProcess => {
                     let message = messages::RegisterChildProcess::decode(data, ancillary_data)?;
@@ -303,6 +321,23 @@ impl IPCServer {
         Ok(())
     }
 
+    fn handle_set_path(&mut self, message: messages::SetPath) {
+        let mut generator = self.generator.lock().unwrap();
+        match message.path_type {
+            PathType::CrashReports => {
+                generator.set_minidump_path(&message.path);
+                self.breakpad_server.set_path(message.path);
+            }
+        }
+    }
+
+    fn handle_get_path(&self, message: messages::GetPath) -> OsString {
+        let generator = self.generator.lock().unwrap();
+        match message.path_type {
+            PathType::CrashReports => generator.get_minidump_path(),
+        }
+    }
+
     fn register_child_process(&mut self, message: messages::RegisterChildProcess) -> Result<()> {
         let connector = IPCConnector::from_ancillary(message.ancillary_data)?;
 
@@ -349,5 +384,11 @@ impl IPCServer {
         }
 
         None
+    }
+
+    fn find_connection(&self, id: GeckoChildId) -> Option<&IPCConnection> {
+        self.connections
+            .values()
+            .find(|&connection| connection.id.is_some_and(|value| value == id))
     }
 }

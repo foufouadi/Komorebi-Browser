@@ -271,9 +271,13 @@ static void* obfsEncode(ObfsFile* p, /* File containing page to be obfuscated */
   MOZ_ASSERT(payloadLength > 0);
   // XXX I guess this can be done in-place as well, then we don't need the
   // temporary page at all, I guess?
-  p->encryptCipherStrategy->Cipher(
-      Span{aIv}, Span{a + i, static_cast<unsigned>(payloadLength)},
-      Span{pOut + i, static_cast<unsigned>(payloadLength)});
+  // On failure pOut still holds uninitialized or previously encoded content,
+  // which obfsWrite would write out under a nonce that never encrypted it.
+  if (NS_WARN_IF(NS_FAILED(p->encryptCipherStrategy->Cipher(
+          Span{aIv}, Span{a + i, static_cast<unsigned>(payloadLength)},
+          Span{pOut + i, static_cast<unsigned>(payloadLength)})))) {
+    return nullptr;
+  }
   memcpy(pOut + nByte - kReservedBytes, aIv, kIvBytes);
 
   return pOut;
@@ -845,14 +849,13 @@ static int obfsOpen(sqlite3_vfs* pVfs, const char* zName, sqlite3_file* pFile,
   p = (ObfsFile*)pFile;
   memset(p, 0, sizeof(*p));
 
-  auto encryptCipherStrategy = MakeUnique<IPCStreamCipherStrategy>();
-  auto decryptCipherStrategy = MakeUnique<IPCStreamCipherStrategy>();
+  auto encryptCipherStrategy = std::make_unique<IPCStreamCipherStrategy>();
+  auto decryptCipherStrategy = std::make_unique<IPCStreamCipherStrategy>();
 
   auto resetMethods = MakeScopeExit([pFile] { pFile->pMethods = nullptr; });
 
   if (NS_WARN_IF(NS_FAILED(encryptCipherStrategy->Init(
-          CipherMode::Encrypt, Span{aKey, sizeof(aKey)},
-          IPCStreamCipherStrategy::MakeBlockPrefix())))) {
+          CipherMode::Encrypt, Span{aKey, sizeof(aKey)})))) {
     return SQLITE_ERROR;
   }
 
@@ -995,7 +998,7 @@ UniquePtr<sqlite3_vfs> ConstructVFS(const char* aBaseVFSName) {
       obfsNextSystemCall    /* xNextSystemCall */
   };
 
-  return MakeUnique<sqlite3_vfs>(obfs_vfs);
+  return std::make_unique<sqlite3_vfs>(obfs_vfs);
 }
 
 already_AddRefed<QuotaObject> GetQuotaObjectForFile(sqlite3_file* pFile) {

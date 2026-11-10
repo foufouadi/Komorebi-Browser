@@ -62,7 +62,17 @@ data class WebsiteInfoState(
     val websiteTitle: String = "",
     val certificate: X509Certificate? = null,
     val qwac: X509Certificate? = null,
-)
+) {
+    /** The subject and issuer fields of [certificate], or null if there is no certificate. */
+    val certificateDetails: CertificateDetails? by lazy { certificate?.toCertificateDetails() }
+
+    /**
+     * Whether the current web page is known to present a QWAC. This is false whenever the QWAC status is not yet
+     * determined, is still being requested, or could not be determined.
+     */
+    val isQwac: Boolean
+        get() = qwac != null
+}
 
 /**
  * Wrapper over a website permission encompassing all its needed state to be rendered on the screen.

@@ -1,7 +1,7 @@
 [DEFAULT]
 head = ""
-skip-if = [
-  "os == 'android'",
+run-if = [
+  "os != 'android'", # the Android crash reporter needs the embedding app's crash handler
 ]
 support-files = [
   "!/toolkit/crashreporter/test/unit/crasher_subprocess_head.js",
@@ -21,6 +21,13 @@ skip-if = [
 ]
 
 ["test_content_oom_annotation.js"]
+
+["test_content_remote_executor.js"]
+run-if = ["os == 'linux'"]
+environment = [
+  "MOZ_CRASHREPORTER_FORCE_REMOTE_EXECUTOR=1",
+  "MOZ_DISABLE_CONTENT_SANDBOX=1",
+]
 
 ["test_content_rust_panic.js"]
 

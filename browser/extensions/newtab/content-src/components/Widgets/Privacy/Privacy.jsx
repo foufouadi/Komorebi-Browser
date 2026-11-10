@@ -5,12 +5,13 @@
 // eslint-disable-next-line no-unused-vars
 import React, {
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
 } from "react";
-import { useSelector, batch } from "react-redux";
+import { useSelector } from "react-redux";
 import { actionCreators as ac, actionTypes as at } from "common/Actions.mjs";
 import { useSizeSubmenu } from "../../../lib/utils";
 import {
@@ -19,26 +20,69 @@ import {
   resolvePrivacyDisplayCount,
 } from "common/WidgetsRegistry.mjs";
 import { MoveSubmenu } from "../MoveSubmenu";
+import { WidgetHideMenuItem } from "../WidgetPlacement";
 import { WidgetCelebration, CelebrationSparkles } from "../WidgetCelebration";
 import { useWidgetCelebration } from "../useWidgetCelebration";
 import { useCountUp } from "../useCountUp";
 import { usePageVisible } from "../usePageVisible";
 import { useWidgetTelemetry } from "../useWidgetTelemetry";
+import { SpaceActiveContext } from "content-src/lib/SpaceActiveContext";
+import { WidgetMenuButton } from "../WidgetMenuButton";
 
 const USER_ACTION_TYPES = {
   CHANGE_SIZE: "change_size",
   LEARN_MORE: "learn_more",
   MESSAGE_CTA_CLICK: "message_cta_click",
-  MESSAGE_IMPRESSION: "message_impression",
-  TRACKERS_BLOCKED_IMPRESSION: "trackers_blocked_impression",
   TRACKING_MESSAGE_CLICK: "tracking_message_click",
 };
 
-// action_value for the trackers-blocked impression: whether the widget was
-// shown with any tracking activity blocked today.
-const TRACKERS_BLOCKED_VALUE = {
-  BLOCKED: "blocked",
-  NONE: "none",
+// widget_variant values for the states that show no message (Bug 2079330).
+const WIDGET_VARIANT = {
+  ETP_OFF: "etp_off",
+  NO_TRACKERS_BLOCKED: "no_trackers_blocked",
+  COUNT_ONLY: "count_only",
+};
+
+// The message fields of a feed pick, the part a tab locks after its impression.
+const pickMessage = ({
+  variant,
+  messageId,
+  category,
+  icon,
+  countArg,
+  cta,
+}) => ({
+  variant,
+  messageId,
+  category,
+  icon,
+  countArg,
+  cta,
+});
+
+// What the widget is showing, for widget_variant. Undefined when nothing true
+// can be said yet: not loaded, or a count shown with no message.
+const privacyWidgetVariant = ({
+  initialized,
+  isEtpOff,
+  isEmptyState,
+  countOnly,
+  showsMessage,
+  ctaMessageId,
+}) => {
+  if (!initialized) {
+    return undefined;
+  }
+  if (isEtpOff) {
+    return WIDGET_VARIANT.ETP_OFF;
+  }
+  if (isEmptyState) {
+    return WIDGET_VARIANT.NO_TRACKERS_BLOCKED;
+  }
+  if (countOnly) {
+    return WIDGET_VARIANT.COUNT_ONLY;
+  }
+  return showsMessage ? ctaMessageId : undefined;
 };
 
 // Per design: the brief sparkle rides ordinary +10 count-ups and the smaller
@@ -53,9 +97,17 @@ const CELEBRATION_TIERS = {
 // readable while it climbs.
 const COUNT_UP_DURATION_MS = 1100;
 
+// How much of the widget must be in view to count as seen. Matches
+// useWidgetTelemetry's impression threshold.
+const ON_SCREEN_THRESHOLD = 0.3;
+
 const PRIVACY_ENTRY = WIDGET_REGISTRY.find(w => w.id === "privacy");
 
 const ICON_BASE_URL = "chrome://newtab/content/data/content/assets/";
+
+// Deep link to the Enhanced Tracking Protection section of the privacy pane.
+const ETP_SETTINGS_CATEGORY = "privacy-trackingprotection";
+const ETP_SETTINGS_URL = `about:preferences#${ETP_SETTINGS_CATEGORY}`;
 
 // Icon key (from the message decision / PrivacyMessages.sys.mjs) -> asset.
 const ICON_ASSETS = {
@@ -65,6 +117,7 @@ const ICON_ASSETS = {
   bolt: "widget-privacy-bolt.svg",
   star: "widget-privacy-star.svg",
   kit: "widget-privacy-kit.svg",
+  etpOff: "widget-privacy-etp-off.svg",
 };
 
 // The kit head-tilt loops on its own (CSS animation inside the SVG), so it is
@@ -127,7 +180,7 @@ function ctaDestination(action) {
   }
 }
 
-// eslint-disable-next-line max-statements
+// eslint-disable-next-line max-statements, complexity
 function Privacy({ dispatch, widgetsMayBeMaximized, widgetEnabledMap }) {
   const prefs = useSelector(state => state.Prefs.values);
   const privacyData = useSelector(state => state.PrivacyWidget);
@@ -136,33 +189,33 @@ function Privacy({ dispatch, widgetsMayBeMaximized, widgetEnabledMap }) {
   // > registry defaultSize. Never read the size pref directly.
   const widgetSize = resolveWidgetSize(PRIVACY_ENTRY, prefs);
 
-  // Flipped when the widget is actually scrolled into view (same trigger as
-  // widgets_impression), so the impression-time signals below line up with it
-  // and skip preloaded tabs that were never seen.
-  const [hasBeenSeen, setHasBeenSeen] = useState(false);
-  const { impressionRef, recordUserAction, recordEnabled } = useWidgetTelemetry(
-    {
-      dispatch,
-      widget: PRIVACY_ENTRY,
-      widgetSize,
-      onImpression: () => setHasBeenSeen(true),
-    }
-  );
+  // Whether the widget is scrolled into view right now, so the impression below
+  // only fires while it can actually be seen.
+  const [isOnScreen, setIsOnScreen] = useState(false);
+  // This tab's message, frozen at its impression so a later tab's pick can't
+  // swap it and break click attribution (Bug 2079330). Counts stay live.
+  const [lockedDecision, setLockedDecision] = useState(null);
 
   const trackersToday = privacyData?.trackersToday ?? 0;
   const sitesToday = privacyData?.sitesToday ?? 0;
-  // Gate the metric UI on a real feed update. Before the first broadcast — or
-  // when it's skipped (e.g. the backward-compat guard in PrivacyFeed on older
-  // platforms) — show no metric state rather than a misleading empty/zero one.
+  // Gate the metric UI on a real feed update: before the first broadcast, show
+  // no metric state rather than a misleading empty/zero one.
   const initialized = privacyData?.initialized ?? false;
 
+  const etpOff = privacyData?.etpOff;
   // Message decision chosen by PrivacyFeed's selector (Bug 2050954).
-  const { variant, messageId, category, icon, countArg, cta, countCeiling } =
-    privacyData ?? {};
+  const { variant, messageId, category, icon, countArg, cta } =
+    lockedDecision ?? privacyData ?? {};
+  // Left live so a count refresh can clear "100+", but only honored while the
+  // feed's pick is this tab's message, so another tab's daily cap can't leak in.
+  const countCeiling =
+    privacyData?.messageId === messageId ? privacyData?.countCeiling : null;
   const isLarge = widgetSize === "large";
+  // Small comes only from the trainhop sidebar config. Picking medium or large
+  // from the menu sets the pref, which outranks trainhop, so the menu has no
+  // way back to small, intentionally.
+  const isSmall = widgetSize === "small";
 
-  // impressionRef (from useWidgetTelemetry) is a callback ref for the impression
-  // observer, so the celebration keeps its own element ref for measurements.
   const celebrationRef = useRef(null);
   const {
     celebrationFrame,
@@ -180,6 +233,34 @@ function Privacy({ dispatch, widgetsMayBeMaximized, widgetEnabledMap }) {
   // A celebration is one-shot, so playing it on a preloaded tab would spend it
   // before the user could see it. Hold until the tab is actually shown.
   const isPageVisible = usePageVisible();
+  const spaceActive = useContext(SpaceActiveContext);
+
+  // Track the article element via state so the effect below re-runs whenever
+  // React mounts a new node. celebrationRef is a stable useRef and can't drive
+  // re-runs on its own.
+  const [rootEl, setRootEl] = useState(null);
+
+  // This tab's count was read while it was preloaded, so ask for a fresh one
+  // once the widget is on screen. PrivacyFeed decides how often to re-read.
+  useEffect(() => {
+    if (!rootEl || !isPageVisible) {
+      return undefined;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        // Ratio, not isIntersecting: that is true for any sliver on screen, and
+        // stays true on the way back out past the threshold.
+        const onScreen = entry.intersectionRatio >= ON_SCREEN_THRESHOLD;
+        setIsOnScreen(onScreen);
+        if (onScreen) {
+          dispatch(ac.OnlyToMain({ type: at.WIDGETS_PRIVACY_VISIBLE }));
+        }
+      },
+      { threshold: ON_SCREEN_THRESHOLD }
+    );
+    observer.observe(rootEl);
+    return () => observer.disconnect();
+  }, [dispatch, isPageVisible, rootEl]);
 
   // Normally show the real count, only ceiling the readout at "{cap}+"
   // (default 999) so it stays a tidy few characters. On the daily-cap render
@@ -193,24 +274,49 @@ function Privacy({ dispatch, widgetsMayBeMaximized, widgetEnabledMap }) {
     return value > displayCap ? `${displayCap}+` : `${value}`;
   };
   const displayCount = formatCount(displayValue);
-  // Same readout without the animation, for the screen-reader copy.
-  const stableCount = formatCount(trackersToday);
 
-  // trackersToday === 0 is the sole trigger for the empty layout. It must not
-  // also key off `variant === "empty"`: a SYSTEM_TICK refreshes the count
-  // without touching `variant`, so a tab opened at zero would stay empty even
-  // after its count climbs, until the next tab re-runs the selector.
+  // The user turned off every blocking option in about:preferences#privacy, so
+  // nothing is being counted (Bug 2063525). This outranks every layout below:
+  // the warning card replaces the readout, the empty state and any message.
+  const isEtpOff = etpOff === true;
+  // trackersToday === 0 is the sole trigger for the empty layout, so the widget
+  // agrees with about:protections: any blocked activity there shows a count
+  // here. sitesToday is only a Places history proxy, so it can read 0 while the
+  // count stands — that drops its own line below rather than blanking the count
+  // (Bug 2063207). It must not also key off `variant === "empty"`: a SYSTEM_TICK
+  // refreshes the count without touching `variant`, so a tab opened at zero
+  // would stay empty even after its count climbs, until the next tab re-runs
+  // the selector.
   const isEmptyState = trackersToday === 0;
+  // The count block and its secondary message only render when neither the
+  // ETP-off card nor the empty state has taken the body.
+  const showCount = !isEtpOff && !isEmptyState;
   // Streak and tip both use the count + divider + message layout; "blank"
-  // shows the count only (plus a CTA).
-  const isStreak = !isEmptyState && variant === "streak";
-  const isTip = !isEmptyState && variant === "tip";
-  const isBlank = !isEmptyState && variant === "blank";
+  // shows the count only (plus a CTA). None of them fit the small card.
+  const showSecondary = showCount && !isSmall;
+  const isStreak = showSecondary && variant === "streak";
+  const isTip = showSecondary && variant === "tip";
+  const isBlank = showSecondary && variant === "blank";
   const hasMessage = (isStreak || isTip) && messageId;
   // Telemetry id for a CTA click. The blank state has no messageId, so give it
   // a stable, distinguishable id — otherwise its clicks report null and the
   // most-shown state can't be attributed (Dré).
   const ctaMessageId = isBlank ? "newtab-privacy-blank" : messageId;
+  const widgetVariant = privacyWidgetVariant({
+    initialized,
+    isEtpOff,
+    isEmptyState,
+    countOnly: isSmall,
+    showsMessage: isBlank || Boolean(hasMessage),
+    ctaMessageId,
+  });
+  const { recordImpression, recordUserAction, recordEnabled } =
+    useWidgetTelemetry({
+      dispatch,
+      widget: PRIVACY_ENTRY,
+      widgetSize,
+      widgetVariant,
+    });
   // The single icon sits beside the count, except in the large tip layout where
   // it sits inside the tip.
   const iconBesideCount = !isEmptyState && !(isTip && isLarge);
@@ -264,7 +370,12 @@ function Privacy({ dispatch, widgetsMayBeMaximized, widgetEnabledMap }) {
     const isNewAward = awardedAt && playedCelebrationRef.current !== awardedAt;
     const isNewMoment = isEarnedMoment && playedMomentRef.current !== messageId;
 
-    if (!isNewAward && !isNewMoment) {
+    // The empty and ETP-off layouts render no count, so celebrating would burn
+    // the one-shot award on an animation nobody sees.
+    if (isEtpOff || isEmptyState || (!isNewAward && !isNewMoment)) {
+      if (!awardedAt) {
+        release();
+      }
       return;
     }
 
@@ -316,6 +427,8 @@ function Privacy({ dispatch, widgetsMayBeMaximized, widgetEnabledMap }) {
     dispatch,
     hold,
     isEarnedMoment,
+    isEmptyState,
+    isEtpOff,
     isMajorMoment,
     isPageVisible,
     messageId,
@@ -331,76 +444,72 @@ function Privacy({ dispatch, widgetsMayBeMaximized, widgetEnabledMap }) {
     completeCelebration();
   }, [completeCelebration]);
 
-  // Impression-time signals, logged once per mount. Gated on two things:
-  //   - hasBeenSeen: the widget actually scrolled into view, so these line up
-  //     with widgets_impression and don't fire on never-seen preloaded tabs.
+  // widgets_impression, once per mount. Gated on three things:
+  //   - the widget is visible right now: on screen, in a visible tab, and in
+  //     the active space (a peeked space doesn't count, as in useWidgetTelemetry).
+  //     Checked live, since the message can arrive after the user has moved on.
   //   - variant != null: the feed has picked a message. A counts-only refresh
   //     flips `initialized` before the decision is made, so gating on
-  //     `initialized` alone could burn the one-shot before the message renders,
-  //     losing its impression.
-  const impressionsLoggedRef = useRef(false);
+  //     `initialized` alone could burn the one-shot before the message renders.
+  //   - widgetVariant is defined, so a count shown with a stale empty pick
+  //     waits for a real pick instead of recording no value.
+  const isVisibleNow = isOnScreen && isPageVisible && spaceActive;
   useEffect(() => {
-    if (!hasBeenSeen || !variant || impressionsLoggedRef.current) {
+    if (
+      !isVisibleNow ||
+      !variant ||
+      widgetVariant === undefined ||
+      lockedDecision
+    ) {
       return;
     }
-    impressionsLoggedRef.current = true;
-    // A separate impression per view reporting whether the widget was shown
-    // with any tracking activity blocked today. The state rides action_value
-    // ("blocked" vs "none"). No count is recorded.
-    recordUserAction(USER_ACTION_TYPES.TRACKERS_BLOCKED_IMPRESSION, {
-      source: "widget",
-      value:
-        trackersToday > 0
-          ? TRACKERS_BLOCKED_VALUE.BLOCKED
-          : TRACKERS_BLOCKED_VALUE.NONE,
-    });
-    // Impression of the secondary message, keyed by ctaMessageId (blank ->
-    // "newtab-privacy-blank"). Gated on !isEmptyState: the selector sets
-    // messageId to "newtab-privacy-empty" in the empty state, so a bare
-    // ctaMessageId check would log a spurious impression for a state that shows
-    // no message/CTA. The blank state still logs, keeping its URL-valued CTA
-    // click attributable by joining to this impression on newtab_visit_id.
-    if (!isEmptyState && ctaMessageId) {
-      recordUserAction(USER_ACTION_TYPES.MESSAGE_IMPRESSION, {
-        source: "message",
-        value: ctaMessageId,
-      });
-    }
+    setLockedDecision(pickMessage(privacyData));
+    recordImpression();
   }, [
-    hasBeenSeen,
+    isVisibleNow,
+    widgetVariant,
+    lockedDecision,
     variant,
-    trackersToday,
-    isEmptyState,
-    ctaMessageId,
-    recordUserAction,
+    privacyData,
+    recordImpression,
   ]);
 
+  // Zero to a count is a real change, not rotation: a tab locked on the empty
+  // pick takes the feed's next real pick and locks onto that instead.
+  useEffect(() => {
+    if (
+      lockedDecision?.variant !== "empty" ||
+      isEmptyState ||
+      !privacyData?.variant ||
+      privacyData.variant === "empty"
+    ) {
+      return;
+    }
+    setLockedDecision(pickMessage(privacyData));
+  }, [lockedDecision, isEmptyState, privacyData]);
+
   function handlePrivacyHide() {
-    batch(() => {
-      dispatch(
-        ac.OnlyToMain({
-          type: at.SET_PREF,
-          data: { name: PRIVACY_ENTRY.enabledPref, value: false },
-        })
-      );
-      recordEnabled(false, { source: "context_menu" });
-    });
+    dispatch(
+      ac.OnlyToMain({
+        type: at.SET_PREF,
+        data: { name: PRIVACY_ENTRY.enabledPref, value: false },
+      })
+    );
+    recordEnabled(false, { source: "context_menu" });
   }
 
   const handleChangeSize = useCallback(
     size => {
-      batch(() => {
-        dispatch(
-          ac.OnlyToMain({
-            type: at.SET_PREF,
-            data: { name: PRIVACY_ENTRY.sizePref, value: size },
-          })
-        );
-        recordUserAction(USER_ACTION_TYPES.CHANGE_SIZE, {
-          source: "context_menu",
-          value: size,
-          size,
-        });
+      dispatch(
+        ac.OnlyToMain({
+          type: at.SET_PREF,
+          data: { name: PRIVACY_ENTRY.sizePref, value: size },
+        })
+      );
+      recordUserAction(USER_ACTION_TYPES.CHANGE_SIZE, {
+        source: "context_menu",
+        value: size,
+        size,
       });
     },
     [dispatch, recordUserAction]
@@ -409,18 +518,16 @@ function Privacy({ dispatch, widgetsMayBeMaximized, widgetEnabledMap }) {
   const sizeSubmenuRef = useSizeSubmenu(handleChangeSize);
 
   function handleLearnMore() {
-    batch(() => {
-      dispatch(
-        ac.OnlyToMain({
-          type: at.OPEN_LINK,
-          data: {
-            url: "https://support.mozilla.org/kb/firefox-new-tab-widgets",
-          },
-        })
-      );
-      recordUserAction(USER_ACTION_TYPES.LEARN_MORE, {
-        source: "context_menu",
-      });
+    dispatch(
+      ac.OnlyToMain({
+        type: at.OPEN_LINK,
+        data: {
+          url: "https://support.mozilla.org/kb/firefox-new-tab-widgets",
+        },
+      })
+    );
+    recordUserAction(USER_ACTION_TYPES.LEARN_MORE, {
+      source: "context_menu",
     });
   }
 
@@ -428,40 +535,55 @@ function Privacy({ dispatch, widgetsMayBeMaximized, widgetEnabledMap }) {
   // decision (`cta`); the parent (PrivacyFeed) executes it — content only
   // forwards it and logs the interaction.
   function handleCtaClick() {
-    batch(() => {
-      dispatch(
-        ac.OnlyToMain({
-          type: at.WIDGETS_PRIVACY_CTA,
-          data: { action: cta, message_id: ctaMessageId },
-        })
-      );
-      // action_value is the CTA destination (the click's endpoint, incl. the
-      // Bug 2061524 UTM params). Which message drove the click is recovered by
-      // joining to this visit's message_impression on newtab_visit_id.
-      recordUserAction(USER_ACTION_TYPES.MESSAGE_CTA_CLICK, {
-        source: "message",
-        value: ctaDestination(cta),
-      });
+    dispatch(
+      ac.OnlyToMain({
+        type: at.WIDGETS_PRIVACY_CTA,
+        data: { action: cta, message_id: ctaMessageId },
+      })
+    );
+    // action_value is the CTA destination (the click's endpoint, incl. the
+    // Bug 2061524 UTM params). widget_variant names the message clicked.
+    recordUserAction(USER_ACTION_TYPES.MESSAGE_CTA_CLICK, {
+      source: "message",
+      value: ctaDestination(cta),
     });
   }
 
   function handleViewProtections(event) {
     event.preventDefault();
-    batch(() => {
-      dispatch(
-        ac.OnlyToMain({
-          type: at.WIDGETS_PRIVACY_CTA,
-          data: {
-            action: {
-              type: "OPEN_ABOUT_PAGE",
-              data: { args: "protections", where: "tab" },
-            },
+    dispatch(
+      ac.OnlyToMain({
+        type: at.WIDGETS_PRIVACY_CTA,
+        data: {
+          action: {
+            type: "OPEN_ABOUT_PAGE",
+            data: { args: "protections", where: "tab" },
           },
-        })
-      );
-      recordUserAction(USER_ACTION_TYPES.TRACKING_MESSAGE_CLICK, {
-        source: "widget",
-      });
+        },
+      })
+    );
+    recordUserAction(USER_ACTION_TYPES.TRACKING_MESSAGE_CLICK, {
+      source: "widget",
+    });
+  }
+
+  // The ETP-off card sends the user where protection can be turned back on in about:preferences#privacy's Enhanced Tracking Protection section.
+  function handleOpenEtpSettings(event) {
+    event.preventDefault();
+    dispatch(
+      ac.OnlyToMain({
+        type: at.WIDGETS_PRIVACY_CTA,
+        data: {
+          action: {
+            type: "OPEN_PREFERENCES_PAGE",
+            data: { category: ETP_SETTINGS_CATEGORY },
+          },
+        },
+      })
+    );
+    recordUserAction(USER_ACTION_TYPES.TRACKING_MESSAGE_CLICK, {
+      source: "widget",
+      value: ETP_SETTINGS_URL,
     });
   }
 
@@ -483,7 +605,7 @@ function Privacy({ dispatch, widgetsMayBeMaximized, widgetEnabledMap }) {
         className="privacy-cta"
         data-l10n-id={`${messageId}-cta`}
         onClick={handleCtaClick}
-        size="small"
+        size={isLarge ? undefined : "small"}
         type="primary"
       />
     ) : null;
@@ -496,36 +618,38 @@ function Privacy({ dispatch, widgetsMayBeMaximized, widgetEnabledMap }) {
         className="privacy-cta"
         data-l10n-id="newtab-privacy-message-info-1-cta"
         onClick={handleCtaClick}
-        size="small"
+        size={isLarge ? undefined : "small"}
         type="primary"
       />
     ) : null;
 
   return (
     <article
+      data-l10n-id="newtab-privacy-widget-label"
       className={`privacy widget col-4 ${widgetSize}-widget${
-        initialized && isEmptyState ? " is-empty" : ""
-      }${initialized && isTip ? " has-tip-msg" : ""}${
-        initialized && isStreak ? " has-streak" : ""
+        initialized && isEtpOff ? " is-etp-off" : ""
+      }${initialized && !isEtpOff && isEmptyState ? " is-empty" : ""}${
+        initialized && isTip ? " has-tip-msg" : ""
+      }${initialized && isStreak ? " has-streak" : ""}${
+        initialized && showCount && !hasMessage ? " is-count-only" : ""
       }${
         isCelebrating && activeCelebration.isMajor
           ? " is-major-celebration"
           : ""
       }`}
       ref={el => {
-        impressionRef(el);
         celebrationRef.current = el;
+        setRootEl(el);
       }}
     >
       <div className="privacy-title-wrapper">
         <div className="privacy-context-menu-wrapper">
-          <moz-button
+          <WidgetMenuButton
             className="privacy-context-menu-button"
-            iconSrc="chrome://global/skin/icons/more.svg"
             menuId="privacy-context-menu"
-            type="ghost"
+            l10nId="newtab-privacy-widget-open-menu-button"
           />
-          <panel-list id="privacy-context-menu">
+          <panel-list className="panel-list-no-icons" id="privacy-context-menu">
             {widgetsMayBeMaximized && (
               <panel-item submenu="privacy-size-submenu">
                 <span data-l10n-id="newtab-widget-menu-change-size"></span>
@@ -552,10 +676,7 @@ function Privacy({ dispatch, widgetsMayBeMaximized, widgetEnabledMap }) {
               widgetEnabledMap={widgetEnabledMap}
             />
 
-            <panel-item
-              data-l10n-id="newtab-widget-menu-hide"
-              onClick={handlePrivacyHide}
-            />
+            <WidgetHideMenuItem widgetId="privacy" onHide={handlePrivacyHide} />
             <panel-item
               data-l10n-id="newtab-privacy-menu-learn-more"
               onClick={handleLearnMore}
@@ -565,7 +686,30 @@ function Privacy({ dispatch, widgetsMayBeMaximized, widgetEnabledMap }) {
       </div>
 
       <div className="privacy-body">
+        {/* Nothing is being blocked, so the warning replaces the readout. */}
+        {initialized && isEtpOff && (
+          <div className="privacy-etp-off">
+            {privacyImage("etpOff")}
+            <a
+              className="privacy-etp-off-details"
+              href={ETP_SETTINGS_URL}
+              onClick={handleOpenEtpSettings}
+            >
+              {!isSmall && (
+                <p
+                  className="privacy-etp-off-bold"
+                  data-l10n-id="newtab-privacy-etp-off-faster-browsing"
+                />
+              )}
+              <p
+                className="privacy-etp-off-message"
+                data-l10n-id="newtab-privacy-etp-off-turn-on-tracking"
+              />
+            </a>
+          </div>
+        )}
         {initialized &&
+          !isEtpOff &&
           (isEmptyState ? (
             <div className="privacy-empty">
               {/* Empty state always uses the shield icon — never the decision's
@@ -576,10 +720,24 @@ function Privacy({ dispatch, widgetsMayBeMaximized, widgetEnabledMap }) {
                 href="about:protections"
                 onClick={handleViewProtections}
               >
-                <p
-                  className="privacy-empty-message"
-                  data-l10n-id="newtab-privacy-empty"
-                />
+                <div className="privacy-empty-message-wrapper">
+                  <p
+                    data-l10n-id={
+                      isSmall
+                        ? "newtab-privacy-empty-state-small-title"
+                        : "newtab-privacy-empty-state"
+                    }
+                  />
+                  {/* Adding a string literal here to add spaces to the sentences in the medium widget */}{" "}
+                  <p
+                    className={isSmall ? undefined : "privacy-empty-message"}
+                    data-l10n-id={
+                      isSmall
+                        ? "newtab-privacy-empty-state-small-message"
+                        : "newtab-privacy-empty-state-tally"
+                    }
+                  />
+                </div>
               </a>
             </div>
           ) : (
@@ -594,17 +752,9 @@ function Privacy({ dispatch, widgetsMayBeMaximized, widgetEnabledMap }) {
                       tip layout where it moves into the tip. */}
                   {iconBesideCount &&
                     privacyImage(icon || "shieldCheck", tiltKit)}
-                  {/* The count-up mutates this text every frame, and
-                      newtab-privacy-trackers-blocked-today uses $count for
-                      plural selection only — so this span is the sole place
-                      the number exists. Hide the animating copy and expose a
-                      stable one, or AT can read a transient value. */}
-                  <span className="privacy-count-number" aria-hidden="true">
-                    {displayCount}
-                  </span>
-                  <span className="privacy-count-number-a11y">
-                    {stableCount}
-                  </span>
+                  {/* newtab-privacy-trackers-blocked-today uses $count for plural selection only,
+                  so this span is the sole place the number exists. */}
+                  <span className="privacy-count-number">{displayCount}</span>
                   {isCelebrating ? (
                     <CelebrationSparkles
                       classNamePrefix="privacy-celebration"
@@ -621,11 +771,13 @@ function Privacy({ dispatch, widgetsMayBeMaximized, widgetEnabledMap }) {
                     data-l10n-id="newtab-privacy-trackers-blocked-today"
                     data-l10n-args={JSON.stringify({ count: trackersToday })}
                   />
-                  <span
-                    className="privacy-count-sites"
-                    data-l10n-id="newtab-privacy-across-sites"
-                    data-l10n-args={JSON.stringify({ count: sitesToday })}
-                  />
+                  {sitesToday > 0 && (
+                    <span
+                      className="privacy-count-sites"
+                      data-l10n-id="newtab-privacy-across-sites"
+                      data-l10n-args={JSON.stringify({ count: sitesToday })}
+                    />
+                  )}
                 </div>
               </a>
               {isStreak && hasMessage && (

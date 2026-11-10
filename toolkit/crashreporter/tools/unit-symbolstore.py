@@ -82,7 +82,7 @@ class HelperMixin:
         symbolstore.vcsFileInfoCache = {}
 
         # Remove environment variables that can influence tests.
-        for e in ("MOZ_SOURCE_CHANGESET", "MOZ_SOURCE_REPO"):
+        for e in ("MOZ_SOURCE_CHANGESET", "MOZ_SOURCE_REPO", "GECKO_HEAD_REV"):
             try:
                 del os.environ[e]
             except KeyError:
@@ -278,6 +278,49 @@ class TestGetVCSFilename(HelperMixin, unittest.TestCase):
             symbolstore.GetVCSFilename(filename, [self.test_dir])[0],
         )
 
+    @patch("subprocess.Popen")
+    def testVCSFilenameGit(self, mock_Popen):
+        mock_Popen.return_value.communicate.return_value = ("abcd1234\n", "")
+        os.mkdir(os.path.join(self.test_dir, ".git"))
+        filename = os.path.join(self.test_dir, "foo.c")
+        self.assertEqual(
+            "git:github.com/mozilla-firefox/firefox:foo.c:abcd1234",
+            symbolstore.GetVCSFilename(filename, [self.test_dir])[0],
+        )
+        self.assertEqual(
+            ["git", "-C", self.test_dir, "rev-parse", "HEAD"],
+            list(mock_Popen.call_args.kwargs["args"]),
+        )
+
+    @patch("subprocess.Popen")
+    def testVCSFilenameGitWorktree(self, mock_Popen):
+        mock_Popen.return_value.communicate.return_value = ("abcd1234\n", "")
+        with open(os.path.join(self.test_dir, ".git"), "w") as fh:
+            fh.write("gitdir: /path/to/main/.git/worktrees/foo\n")
+        filename = os.path.join(self.test_dir, "foo.c")
+        self.assertEqual(
+            "git:github.com/mozilla-firefox/firefox:foo.c:abcd1234",
+            symbolstore.GetVCSFilename(filename, [self.test_dir])[0],
+        )
+
+    @patch("subprocess.Popen")
+    def testVCSFilenameGitEnv(self, mock_Popen):
+        os.environ["GECKO_HEAD_REV"] = "abcdef0123456"
+        os.mkdir(os.path.join(self.test_dir, ".git"))
+        filename = os.path.join(self.test_dir, "foo.c")
+        self.assertEqual(
+            "git:github.com/mozilla-firefox/firefox:foo.c:abcdef0123456",
+            symbolstore.GetVCSFilename(filename, [self.test_dir])[0],
+        )
+        mock_Popen.assert_not_called()
+
+    def testVCSFilenameUnknown(self):
+        filename = os.path.join(self.test_dir, "foo.c")
+        self.assertEqual(
+            filename,
+            symbolstore.GetVCSFilename(filename, [self.test_dir])[0],
+        )
+
 
 # SHA-512 of a zero-byte file
 EMPTY_SHA512 = (
@@ -391,6 +434,57 @@ if target_platform() == "WINNT":
             ]
             self.assertEqual(len(hgserver), 1)
             self.assertEqual(hgserver[0].split("=")[1], "http://example.com/repo")
+
+        @patch("subprocess.call")
+        @patch("subprocess.Popen")
+        @patch.dict("buildconfig.substs._dict", {"PDBSTR": "pdbstr"})
+        def test_pdb_next_to_binary(self, mock_Popen, mock_call):
+            """
+            Test that pdbstr is run against the PDB next to the binary rather
+            than against one in the current directory.
+            """
+            symbolpath = os.path.join(self.test_dir, "symbols")
+            os.makedirs(symbolpath)
+            srcdir = os.path.join(self.test_dir, "srcdir")
+            os.makedirs(os.path.join(srcdir, ".hg"))
+            sourcefile = os.path.join(srcdir, "foo.c")
+            test_files = add_extension([os.path.join("target", "release", "foo")])
+            self.add_test_files(test_files)
+            mock_Popen.return_value.stdout = iter([
+                f"MODULE os x86 {'X' * 33} foo.pdb",
+                f"FILE 0 {sourcefile}",
+                "PUBLIC xyz 123",
+            ])
+            mock_Popen.return_value.wait.return_value = 0
+            mock_Popen.return_value.communicate.side_effect = [
+                ("abcd1234", ""),
+                ("http://example.com/repo", ""),
+            ]
+            pdbstr_calls = []
+
+            def mock_pdbstr(args, cwd="", **kwargs):
+                pdbstr_calls.append((args, cwd))
+                return 0
+
+            mock_call.side_effect = mock_pdbstr
+            d = symbolstore.GetPlatformSpecificDumper(
+                dump_syms="dump_syms",
+                symbol_path=symbolpath,
+                srcdirs=[srcdir],
+                vcsinfo=True,
+                srcsrv=True,
+                copy_debug=True,
+            )
+            d.Process(os.path.join(self.test_dir, test_files[0]))
+            self.assertEqual(len(pdbstr_calls), 1)
+            args, cwd = pdbstr_calls[0]
+            pdb_arg = next(a[3:] for a in args if a.startswith("-p:"))
+            self.assertEqual(
+                os.path.normpath(os.path.join(cwd, pdb_arg)),
+                os.path.normpath(
+                    os.path.join(self.test_dir, "target", "release", "foo.pdb")
+                ),
+            )
 
 
 class TestInstallManifest(HelperMixin, unittest.TestCase):

@@ -9,6 +9,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -27,9 +28,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.snackbar.Snackbar
 import java.net.URLEncoder
-import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import mozilla.components.browser.state.selector.findTabOrCustomTab
 import mozilla.components.browser.state.selector.privateTabs
@@ -42,6 +41,7 @@ import mozilla.components.browser.state.state.createTab
 import mozilla.components.concept.engine.HitResult
 import mozilla.components.feature.app.links.AppLinksFeature
 import mozilla.components.feature.contextmenu.ContextMenuFeature
+import mozilla.components.feature.customtabs.CustomTabWindowFeature
 import mozilla.components.feature.downloads.DownloadsFeature
 import mozilla.components.feature.downloads.manager.FetchDownloadManager
 import mozilla.components.feature.downloads.temporary.ShareResourceFeature
@@ -50,6 +50,7 @@ import mozilla.components.feature.prompts.PromptFeature
 import mozilla.components.feature.prompts.file.AndroidPhotoPicker
 import mozilla.components.feature.session.PictureInPictureFeature
 import mozilla.components.feature.session.SessionFeature
+import mozilla.components.feature.sitepermissions.OnDiskSitePermissionsStorage
 import mozilla.components.feature.sitepermissions.SitePermissionsFeature
 import mozilla.components.feature.tabs.WindowFeature
 import mozilla.components.feature.toolbar.ToolbarFeature
@@ -76,8 +77,6 @@ import org.mozilla.focus.GleanMetrics.TrackingProtection
 import org.mozilla.focus.R
 import org.mozilla.focus.activity.FirefoxInstallationHelper
 import org.mozilla.focus.activity.MainActivity
-import org.mozilla.focus.browser.integration.BrowserMenuCallbacks
-import org.mozilla.focus.browser.integration.BrowserMenuController
 import org.mozilla.focus.browser.integration.BrowserToolbarIntegration
 import org.mozilla.focus.browser.integration.FindInPageIntegration
 import org.mozilla.focus.browser.integration.FullScreenIntegration
@@ -96,7 +95,7 @@ import org.mozilla.focus.ext.requireComponents
 import org.mozilla.focus.ext.settings
 import org.mozilla.focus.ext.showAsFixed
 import org.mozilla.focus.ext.titleOrDomain
-import org.mozilla.focus.menu.browser.DefaultBrowserMenu
+import org.mozilla.focus.menu.BrowserMenuCallbacks
 import org.mozilla.focus.open.OpenWithFragment
 import org.mozilla.focus.session.ui.TabsPopup
 import org.mozilla.focus.settings.permissions.permissionoptions.SitePermissionOptionsStorage
@@ -129,6 +128,7 @@ class BrowserFragment : BaseFragment(), UserInteractionHandler, AccessibilityMan
     private val downloadsFeature = ViewBoundFeatureWrapper<DownloadsFeature>()
     private val shareResourceFeature = ViewBoundFeatureWrapper<ShareResourceFeature>()
     private val windowFeature = ViewBoundFeatureWrapper<WindowFeature>()
+    private val customTabWindowFeature = ViewBoundFeatureWrapper<CustomTabWindowFeature>()
     private val appLinksFeature = ViewBoundFeatureWrapper<AppLinksFeature>()
     private val topSitesFeature = ViewBoundFeatureWrapper<TopSitesFeature>()
     private var sitePermissionsFeature = ViewBoundFeatureWrapper<SitePermissionsFeature>()
@@ -343,6 +343,11 @@ class BrowserFragment : BaseFragment(), UserInteractionHandler, AccessibilityMan
                         requireContext(),
                         singleMediaPicker,
                         multipleMediaPicker,
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            AndroidPhotoPicker.allHdrCapabilities()
+                        } else {
+                            null
+                        },
                     ),
             ),
             this,
@@ -419,7 +424,7 @@ class BrowserFragment : BaseFragment(), UserInteractionHandler, AccessibilityMan
                     store = components.store,
                     sessionId = tabId,
                     fragmentManager = parentFragmentManager,
-                    launchInApp = { requireContext().settings.openLinksInExternalApp },
+                    launchInApp = { _ -> requireContext().settings.openLinksInExternalApp },
                     loadUrlUseCase = requireContext().components.sessionUseCases.loadUrl,
                     failedToLaunchAction = { fallbackUrl ->
                         fallbackUrl?.let {
@@ -444,7 +449,7 @@ class BrowserFragment : BaseFragment(), UserInteractionHandler, AccessibilityMan
                     storage = components.topSitesStorage,
                     config = {
                         TopSitesConfig(
-                            totalSites = TOP_SITES_MAX_LIMIT,
+                            targetSitesCount = TOP_SITES_MAX_LIMIT,
                             frecencyConfig = null,
                             providerConfig = null,
                         )
@@ -463,11 +468,11 @@ class BrowserFragment : BaseFragment(), UserInteractionHandler, AccessibilityMan
                 requireContext().isAccessibilityEnabled(),
             )
 
-            // TODO Add custom tabs window feature support
-            // We to add support for Custom Tabs here, however in order to send the window request
-            // back to us through the intent system, we need to register a unique schema that we
-            // can handle. For example, Fenix Nighlyt does this today with `fenix-nightly://`.
-            // See https://bugzilla.mozilla.org/show_bug.cgi?id=1804556
+            customTabWindowFeature.set(
+                feature = CustomTabWindowFeature(requireActivity(), components.store, tab.id),
+                owner = this,
+                view = view,
+            )
         } else {
             initialiseNormalBrowserUi(requireContext().isAccessibilityEnabled())
 
@@ -496,6 +501,11 @@ class BrowserFragment : BaseFragment(), UserInteractionHandler, AccessibilityMan
             feature =
                 SitePermissionsFeature(
                     context = requireContext(),
+                    storage =
+                        OnDiskSitePermissionsStorage(
+                            requireContext(),
+                            coroutineScope = requireComponents.applicationScope,
+                        ),
                     fragmentManager = parentFragmentManager,
                     promptsStyling =
                         SitePermissionsFeature.PromptsStyling(
@@ -513,6 +523,7 @@ class BrowserFragment : BaseFragment(), UserInteractionHandler, AccessibilityMan
                         SitePermissionOptionsStorage(requireContext()).getSitePermissionsSettingsRules(),
                     sessionId = tabId,
                     store = requireComponents.store,
+                    coroutineScope = requireComponents.applicationScope,
                     shouldShowDoNotAskAgainCheckBox = false,
                 ),
             owner = this,
@@ -578,35 +589,7 @@ class BrowserFragment : BaseFragment(), UserInteractionHandler, AccessibilityMan
     }
 
     private fun customizeToolbar() {
-        val controller =
-            BrowserMenuController(
-                requireComponents.sessionUseCases,
-                requireComponents.appStore,
-                requireComponents.store,
-                requireComponents.topSitesUseCases,
-                tabId,
-                BrowserMenuCallbacks(
-                    shareCallback = ::shareCurrentUrl,
-                    requestDesktopCallback = ::toggleDesktopSite,
-                    addToHomeScreenCallback = ::showAddToHomescreenDialog,
-                    showFindInPageCallback = ::showFindInPageBar,
-                    openInCallback = ::openSelectBrowser,
-                    openInBrowser = ::openInBrowser,
-                    showShortcutAddedSnackBar = ::showShortcutAddedSnackBar,
-                ),
-            )
-
         val customTabSessionState = tab.ifCustomTab()
-        if (customTabSessionState?.config == null) {
-            val browserMenu =
-                DefaultBrowserMenu(
-                    context = requireContext(),
-                    appStore = requireComponents.appStore,
-                    store = requireComponents.store,
-                    onItemTapped = { controller.handleMenuInteraction(it) },
-                )
-            binding.browserToolbar.display.menuBuilder = browserMenu.menuBuilder
-        }
 
         val renderStyle =
             if (tab.isCustomTab()) {
@@ -620,7 +603,17 @@ class BrowserFragment : BaseFragment(), UserInteractionHandler, AccessibilityMan
                 requireComponents.store,
                 toolbar = binding.browserToolbar,
                 fragment = this,
-                controller = controller,
+                currentTabId = tabId,
+                menuCallbacks =
+                    BrowserMenuCallbacks(
+                        shareCallback = ::shareCurrentUrl,
+                        requestDesktopCallback = ::toggleDesktopSite,
+                        addToHomeScreenCallback = ::showAddToHomescreenDialog,
+                        showFindInPageCallback = ::showFindInPageBar,
+                        openInCallback = ::openSelectBrowser,
+                        openInBrowser = ::openInBrowser,
+                        showShortcutAddedSnackBar = ::showShortcutAddedSnackBar,
+                    ),
                 customTabId = tryGetCustomTabId(),
                 customTabsUseCases = requireComponents.customTabsUseCases,
                 sessionUseCases = requireComponents.sessionUseCases,
@@ -667,6 +660,9 @@ class BrowserFragment : BaseFragment(), UserInteractionHandler, AccessibilityMan
     override fun onDestroyView() {
         super.onDestroyView()
 
+        tabsPopup?.dismiss()
+        tabsPopup = null
+
         requireContext().accessibilityManager.removeAccessibilityStateChangeListener(this)
         binding.engineView.setActivityContext(null)
 
@@ -686,7 +682,6 @@ class BrowserFragment : BaseFragment(), UserInteractionHandler, AccessibilityMan
         promptFeature.withFeature { it.onActivityResult(requestCode, data, resultCode) }
     }
 
-    @OptIn(DelicateCoroutinesApi::class)
     private fun showCrashReporter(crash: Crash) {
         val fragmentManager = requireActivity().supportFragmentManager
 
@@ -702,7 +697,7 @@ class BrowserFragment : BaseFragment(), UserInteractionHandler, AccessibilityMan
             if (sendCrashReport) {
                 val crashReporter = requireComponents.crashReporter
 
-                GlobalScope.launch(Dispatchers.IO) { crashReporter.submitReport(crash) }
+                requireComponents.applicationScope.launch(Dispatchers.IO) { crashReporter.submitReport(crash) }
             }
 
             requireComponents.sessionUseCases.crashRecovery.invoke()
@@ -967,23 +962,26 @@ class BrowserFragment : BaseFragment(), UserInteractionHandler, AccessibilityMan
     }
 
     private fun tabCounterListener() {
+        if (tabsPopup?.isShowing == true) {
+            return
+        }
+
         val openedTabs = requireComponents.store.state.tabs.size
-
-        tabsPopup =
-            TabsPopup(
-                    binding.browserToolbar,
-                    requireComponents,
-                )
-                .also { currentTabsPopup ->
-                    currentTabsPopup.showAsDropDown(
-                        binding.browserToolbar,
-                        0,
-                        0,
-                        Gravity.END,
-                    )
-                }
-
         TabCount.sessionButtonTapped.record(TabCount.SessionButtonTappedExtra(openedTabs))
+
+        // We use post to avoid an ANR in HardwareRenderer.nSetName which can happen
+        // if we show the popup while the window is in transition (e.g. keyboard hiding).
+        binding.browserToolbar.post {
+            val toolbar = _binding?.browserToolbar ?: return@post
+            if (!isAdded || isRemoving || tabsPopup?.isShowing == true) {
+                return@post
+            }
+
+            tabsPopup =
+                TabsPopup(toolbar, requireComponents).also {
+                    it.showAsDropDown(toolbar, 0, 0, Gravity.END)
+                }
+        }
     }
 
     private fun showFindInPageBar() {

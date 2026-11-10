@@ -206,8 +206,7 @@ class GeckoThreadSupport final
     nsCOMPtr<nsIAppStartup> appStartup = components::AppStartup::Service();
 
     if (appStartup) {
-      bool userAllowedQuit = true;
-      appStartup->Quit(nsIAppStartup::eForceQuit, 0, &userAllowedQuit);
+      appStartup->Quit(nsIAppStartup::eForceQuit, 0);
     }
   }
 
@@ -354,7 +353,7 @@ class XPCOMEventTargetWrapper final
   static void CreateWrapper(mozilla::jni::String::Param aName,
                             nsCOMPtr<nsIEventTarget> aTarget) {
     auto java = java::XPCOMEventTarget::New();
-    auto native = MakeUnique<XPCOMEventTargetWrapper>(aTarget.forget());
+    auto native = std::make_unique<XPCOMEventTargetWrapper>(aTarget.forget());
     AttachNative(java, std::move(native));
 
     java::XPCOMEventTarget::SetTarget(aName, java);
@@ -398,7 +397,7 @@ nsAppShell::nsAppShell()
 
   if (jni::IsAvailable()) {
     ScreenManager& screenManager = ScreenManager::GetSingleton();
-    screenManager.SetHelper(mozilla::MakeUnique<ScreenHelperAndroid>());
+    screenManager.SetHelper(std::make_unique<ScreenHelperAndroid>());
 
     // Initialize JNI and Set the corresponding state in GeckoThread.
     AndroidBridge::ConstructBridge();
@@ -660,7 +659,7 @@ bool nsAppShell::SyncRunEvent(
   };
 
   UniquePtr<Event> runAndNotifyEvent =
-      mozilla::MakeUnique<LambdaEvent<decltype(runAndNotify)>>(
+      std::make_unique<LambdaEvent<decltype(runAndNotify)>>(
           std::move(runAndNotify));
 
   if (eventFactory) {

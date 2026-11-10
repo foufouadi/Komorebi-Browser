@@ -14,9 +14,6 @@ namespace mozilla {
 namespace dom {
 class SystemFontListEntry;
 };
-namespace gfx {
-class FTUserFontData;
-};
 };  // namespace mozilla
 
 class FontNameCache;
@@ -28,7 +25,6 @@ class FT2FontEntry final : public gfxFT2FontEntryBase {
   friend class gfxFT2FontList;
 
   using FontListEntry = mozilla::dom::SystemFontListEntry;
-  using FTUserFontData = mozilla::gfx::FTUserFontData;
 
  public:
   explicit FT2FontEntry(const nsACString& aFaceName)
@@ -64,16 +60,7 @@ class FT2FontEntry final : public gfxFT2FontEntryBase {
 
   nsresult ReadCMAP(FontInfoData* aFontInfoData = nullptr) override;
 
-  hb_blob_t* GetFontTable(uint32_t aTableTag) override;
-
-  bool HasFontTable(uint32_t aTableTag) override;
   nsresult CopyFontTable(uint32_t aTableTag, nsTArray<uint8_t>&) override;
-
-  bool HasVariations() override;
-  void GetVariationAxes(
-      nsTArray<gfxFontVariationAxis>& aVariationAxes) override;
-  void GetVariationInstances(
-      nsTArray<gfxFontVariationInstance>& aInstances) override;
 
   // Check for various kinds of brokenness, and set flags on the entry
   // accordingly so that we avoid using bad font tables
@@ -81,7 +68,7 @@ class FT2FontEntry final : public gfxFT2FontEntryBase {
   void CheckForBrokenFont(const nsACString& aFamilyKey);
 
   already_AddRefed<mozilla::gfx::SharedFTFace> GetFTFace(bool aCommit = false);
-  FTUserFontData* GetUserFontData() override;
+  FontData* GetUserFontData() override;
 
   FT_MM_Var* GetMMVar() override;
 
@@ -116,6 +103,16 @@ class FT2FontEntry final : public gfxFT2FontEntryBase {
   // Protected destructor, to discourage deletion outside of Release():
   ~FT2FontEntry();
 
+  bool HasVariationsInternal() override;
+  void GetVariationAxesInternal(
+      nsTArray<gfxFontVariationAxis>& aVariationAxes) override;
+  void GetVariationInstancesInternal(
+      nsTArray<gfxFontVariationInstance>& aInstances) override;
+
+  hb_blob_t* GetFontTableInternal(uint32_t aTableTag) override;
+
+  bool HasFontTableInternal(uint32_t aTableTag) override;
+
   FontTableCache* GetFontTableCache(bool aCreate) override;
 
   mozilla::Atomic<FontTableCache*> mFontTableCache;
@@ -128,7 +125,8 @@ class FT2FontEntry final : public gfxFT2FontEntryBase {
 
   FT_MM_Var* mMMVar = nullptr;
 
-  mozilla::ThreadSafeWeakPtr<mozilla::gfx::UnscaledFontFreeType> mUnscaledFont;
+  mozilla::ThreadSafeWeakPtr<mozilla::gfx::UnscaledFontFreeType> mUnscaledFont
+      MOZ_GUARDED_BY(mLock);
 
   nsTHashSet<uint32_t> mAvailableTables;
 

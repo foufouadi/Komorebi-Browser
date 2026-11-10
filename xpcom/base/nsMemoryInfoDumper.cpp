@@ -41,6 +41,9 @@
 
 #if defined(MOZ_SUPPORTS_RT_SIGNALS)
 #  include <fcntl.h>
+#  if defined(__FreeBSD__)
+#    include <signal.h>
+#  endif
 #  include <sys/stat.h>
 #  include <sys/types.h>
 #endif
@@ -570,7 +573,7 @@ static nsresult DumpMemoryInfoToFile(nsIFile* aReportsFile,
     return rv;
   }
   auto jsonWriter =
-      MakeUnique<JSONWriter>(MakeUnique<GZWriterWrapper>(gzWriter));
+      std::make_unique<JSONWriter>(std::make_unique<GZWriterWrapper>(gzWriter));
 
   nsCOMPtr<nsIMemoryReporterManager> mgr =
       do_GetService("@mozilla.org/memory-reporter-manager;1");
@@ -719,7 +722,7 @@ nsresult nsMemoryInfoDumper::DumpDMDToFile(FILE* aFile) {
   }
 
   // Dump DMD's memory reports analysis to the file.
-  dmd::Analyze(MakeUnique<GZWriterWrapper>(gzWriter));
+  dmd::Analyze(std::make_unique<GZWriterWrapper>(gzWriter));
 
   rv = gzWriter->Finish();
   NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Finish failed");

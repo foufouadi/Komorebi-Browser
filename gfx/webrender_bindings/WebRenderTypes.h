@@ -134,6 +134,7 @@ struct ImageDescriptor : public WrImageDescriptor {
     stride = 0;
     opacity = aOpacityType;
     prefer_compositor_surface = aPreferCompositorSurface;
+    is_drm_source = false;
   }
 
   ImageDescriptor(const gfx::IntSize& aSize, int32_t aByteStride,
@@ -145,6 +146,7 @@ struct ImageDescriptor : public WrImageDescriptor {
     stride = aByteStride;
     opacity = aOpacityType;
     prefer_compositor_surface = aPreferCompositorSurface;
+    is_drm_source = false;
   }
 };
 
@@ -629,7 +631,7 @@ static inline wr::WrExternalImage RawDataToWrExternalImage(const uint8_t* aBuff,
 }
 
 static inline wr::WrExternalImage NativeTextureToWrExternalImage(
-    uint32_t aHandle, float u0, float v0, float u1, float v1) {
+    uint64_t aHandle, float u0, float v0, float u1, float v1) {
   return wr::WrExternalImage{wr::WrExternalImageType::NativeTexture,
                              aHandle,
                              u0,
@@ -688,6 +690,8 @@ struct Vec<uint8_t> final {
     return ret;
   }
 
+  void Clear() { inner.length = 0; }
+
   void SetEmpty() {
     // We need to ensure that (data, capacity, length) always remain valid
     // to be passed to Vec::from_raw_parts. In particular, this requires that
@@ -707,9 +711,11 @@ struct Vec<uint8_t> final {
 
   size_t Capacity() { return inner.capacity; }
 
-  Range<uint8_t> GetRange() { return Range<uint8_t>(Data(), Length()); }
+  mozilla::Range<uint8_t> GetRange() {
+    return mozilla::Range<uint8_t>(Data(), Length());
+  }
 
-  void PushBytes(Range<uint8_t> aBytes) {
+  void PushBytes(mozilla::Range<uint8_t> aBytes) {
     wr_vec_u8_push_bytes(&inner, RangeToByteSlice(aBytes));
   }
 
@@ -775,11 +781,13 @@ struct ByteBuffer {
     }
   }
 
-  const Range<uint8_t> AsSlice() const {
-    return Range<uint8_t>(mData, mLength);
+  const mozilla::Range<uint8_t> AsSlice() const {
+    return mozilla::Range<uint8_t>(mData, mLength);
   }
 
-  Range<uint8_t> AsSlice() { return Range<uint8_t>(mData, mLength); }
+  mozilla::Range<uint8_t> AsSlice() {
+    return mozilla::Range<uint8_t>(mData, mLength);
+  }
 
   bool operator==(const ByteBuffer& other) const {
     return mLength == other.mLength && !(memcmp(mData, other.mData, mLength));
@@ -793,6 +801,9 @@ struct ByteBuffer {
 struct BuiltDisplayList {
   wr::VecU8 dl_items;
   wr::VecU8 dl_spatial_tree;
+  // Encoded delta for the items this display list's builder interned. See
+  // gfx/wr/webrender/doc/dl-builder-interning.md.
+  wr::VecU8 dl_interner_delta;
   wr::BuiltDisplayListDescriptor dl_desc;
 };
 
@@ -801,7 +812,7 @@ struct BuiltDisplayList {
 struct WrClipChainId {
   uint64_t id;
 
-  bool operator==(const WrClipChainId& other) const { return id == other.id; }
+  bool operator==(const WrClipChainId& other) const = default;
 
   static WrClipChainId Empty() {
     WrClipChainId id = {0};
@@ -824,6 +835,7 @@ enum class WebRenderError : int8_t {
   VIDEO_SW_OVERLAY,
   DCOMP_TEXTURE_OVERLAY,
   EXCESSIVE_RESETS,
+  SOFTWARE_D3D11,
 
   Sentinel /* this must be last for serialization purposes. */
 };

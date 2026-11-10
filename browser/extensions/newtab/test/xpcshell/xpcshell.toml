@@ -19,7 +19,11 @@ support-files = ["topstories.json"]
 
 ["test_AdsFeed.js"]
 
+["test_ExtensionWidgetsFeed.js"]
+
 ["test_ExternalComponentsFeed.js"]
+
+["test_FramedWidgetsFeed.js"]
 
 ["test_HighlightsFeed.js"]
 
@@ -30,6 +34,8 @@ support-files = ["topstories.json"]
 ["test_ListsFeed.js"]
 
 ["test_LocalInferredRanking.js"]
+
+["test_LocationInterestGrid.js"]
 
 ["test_NewTabAttributionFeed.js"]
 
@@ -47,6 +53,8 @@ support-files = ["topstories.json"]
 
 ["test_PrivacyFeed.js"]
 
+["test_RecentSearchesFeed.js"]
+
 ["test_RemoteRenderer.js"]
 prefs = [
   "browser.newtabpage.activity-stream.remote-renderer.log=true"
@@ -58,8 +66,6 @@ tags = "remote-settings"
 ["test_ShortcutRanker.js"]
 
 ["test_SmartShortcutsFeed.js"]
-
-["test_SportsFeed.js"]
 
 ["test_StartupCacheInit.js"]
 
@@ -82,7 +88,11 @@ support-files = ["../schemas/*.schema.json"]
 
 ["test_TopSitesFeed_glean.js"]
 
+["test_TravelFeed.js"]
+
 ["test_WallpaperFeed.js"]
 tags = "remote-settings"
+
+["test_WallpaperFileNames.js"]
 
 ["test_WeatherFeed.js"]

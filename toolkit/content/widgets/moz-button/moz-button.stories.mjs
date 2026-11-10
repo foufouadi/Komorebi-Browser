@@ -82,7 +82,6 @@ const Template = ({
   <moz-button
     @click=${clickHandler}
     data-l10n-id=${l10nId}
-    data-l10n-attrs="label"
     type=${type}
     size=${size}
     ?disabled=${disabled}
@@ -200,7 +199,8 @@ Toolbar.args = {
 export const Badged = Template.bind({});
 Badged.args = {
   ...Icon.args,
-  type: "icon",
+  type: "icon ghost",
+  iconSrc: "chrome://global/skin/icons/settings.svg",
   attention: true,
 };
 export const MenuButton = Template.bind({});

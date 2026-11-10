@@ -116,6 +116,9 @@ nsAtom* Gecko_Element_ImportedPart(const nsAttrValue*, nsAtom*);
 nsAtom** Gecko_Element_ExportedParts(const nsAttrValue*, nsAtom*,
                                      size_t* aOutLength);
 uint64_t Gecko_Element_GetSubtreeBloomFilter(const mozilla::dom::Element*);
+uint64_t Gecko_Element_GetRandomSeed(const mozilla::dom::Element*);
+void Gecko_Document_GetRandomHasherKey(const mozilla::dom::Document*,
+                                       uint64_t* aK0, uint64_t* aK1);
 
 NS_DECL_THREADSAFE_FFI_REFCOUNTING(mozilla::css::SheetLoadDataHolder,
                                    SheetLoadDataHolder);
@@ -151,8 +154,6 @@ bool Gecko_MatchLang(const mozilla::dom::Element*, nsAtom* override_lang,
 
 bool Gecko_MatchViewTransitionClass(const mozilla::dom::Element*,
                                     const nsTArray<mozilla::StyleAtom>*);
-
-nsAtom* Gecko_GetXMLLangValue(const mozilla::dom::Element*);
 
 const mozilla::PreferenceSheet::Prefs* Gecko_GetPrefSheetPrefs(
     const mozilla::dom::Document*);
@@ -196,8 +197,7 @@ const mozilla::StyleLockedDeclarationBlock* Gecko_GetViewTransitionDynamicRule(
     const mozilla::dom::Element* element);
 
 const mozilla::StyleLockedDeclarationBlock*
-Gecko_GetHTMLPresentationAttrDeclarationBlock(
-    const mozilla::dom::Element* element);
+Gecko_GetMappedAttributeDeclarations(const mozilla::dom::Element* element);
 
 const mozilla::StyleLockedDeclarationBlock*
 Gecko_GetExtraContentStyleDeclarations(const mozilla::dom::Element* element);
@@ -240,14 +240,17 @@ void Gecko_UpdateAnimations(const mozilla::dom::Element* aElementOrPseudo,
                             const mozilla::ComputedStyle* aComputedValues,
                             mozilla::UpdateAnimationsTasks aTasks);
 
+// Runs the named timeline lookups that Gecko_UpdateAnimations() deferred.
+// Called by the traversal of aRoot's subtree once its sequential tasks have
+// run, so every element of the traversal has registered its timelines.
+void Gecko_FlushPendingNamedTimelineUpdates(const mozilla::dom::Element* aRoot);
+
 size_t Gecko_GetAnimationEffectCount(
     const mozilla::dom::Element* aElementOrPseudo);
 bool Gecko_ElementHasAnimations(const mozilla::dom::Element* aElementOrPseudo);
 bool Gecko_ElementHasCSSAnimations(
     const mozilla::dom::Element* aElementOrPseudo);
 bool Gecko_ElementHasCSSTransitions(
-    const mozilla::dom::Element* aElementOrPseudo);
-bool Gecko_ElementHasWebAnimations(
     const mozilla::dom::Element* aElementOrPseudo);
 size_t Gecko_ElementTransitions_Length(
     const mozilla::dom::Element* aElementOrPseudo);
@@ -273,9 +276,6 @@ const mozilla::StyleAnimationValue* Gecko_AnimationGetBaseStyle(
     const RawServoAnimationValueTable* aBaseStyles,
     const mozilla::CSSPropertyId* aProperty);
 
-void Gecko_StyleTransition_SetUnsupportedProperty(
-    mozilla::StyleTransition* aTransition, nsAtom* aAtom);
-
 // Atoms.
 nsAtom* Gecko_Atomize(const char* aString, uint32_t aLength);
 nsAtom* Gecko_Atomize16(const nsAString* aString);
@@ -297,14 +297,6 @@ nsTArray<uint32_t>* Gecko_AppendFeatureValueHashEntry(
     gfxFontFeatureValueSet* value_set, nsAtom* family, uint32_t alternate,
     nsAtom* name);
 
-// Font variant alternates
-void Gecko_ClearAlternateValues(nsFont* font, size_t length);
-
-void Gecko_AppendAlternateValues(nsFont* font, uint32_t alternate_name,
-                                 nsAtom* atom);
-
-void Gecko_CopyAlternateValuesFrom(nsFont* dest, const nsFont* src);
-
 // The FontPaletteValueSet returned from this function has zero reference.
 mozilla::gfx::FontPaletteValueSet* Gecko_ConstructFontPaletteValueSet();
 
@@ -320,23 +312,6 @@ void Gecko_SetFontPaletteBase(
 void Gecko_SetFontPaletteOverride(
     mozilla::gfx::FontPaletteValueSet::PaletteValues* aValues, int32_t aIndex,
     mozilla::StyleAbsoluteColor* aColor);
-
-// Visibility style
-void Gecko_SetImageOrientation(nsStyleVisibility* aVisibility,
-                               uint8_t aOrientation, bool aFlip);
-
-void Gecko_SetImageOrientationAsFromImage(nsStyleVisibility* aVisibility);
-
-void Gecko_CopyImageOrientationFrom(nsStyleVisibility* aDst,
-                                    const nsStyleVisibility* aSrc);
-
-// list-style-image style.
-void Gecko_SetListStyleImageNone(nsStyleList* style_struct);
-
-void Gecko_SetListStyleImageImageValue(nsStyleList* style_struct,
-                                       const mozilla::StyleComputedUrl* url);
-
-void Gecko_CopyListStyleImageFrom(nsStyleList* dest, const nsStyleList* src);
 
 // Dirtiness tracking.
 void Gecko_NoteDirtyElement(const mozilla::dom::Element*);
@@ -424,19 +399,6 @@ mozilla::Keyframe* Gecko_GetOrCreateKeyframeForTimelineRangeOffset(
     const mozilla::dom::CompositeOperationOrAuto aComposition,
     size_t* aMatchedIdx);
 
-void Gecko_ResetFilters(nsStyleEffects* effects, size_t new_len);
-
-void Gecko_CopyFiltersFrom(nsStyleEffects* aSrc, nsStyleEffects* aDest);
-
-void Gecko_nsStyleSVG_SetDashArrayLength(nsStyleSVG* svg, uint32_t len);
-
-void Gecko_nsStyleSVG_CopyDashArray(nsStyleSVG* dst, const nsStyleSVG* src);
-
-void Gecko_nsStyleSVG_SetContextPropertiesLength(nsStyleSVG* svg, uint32_t len);
-
-void Gecko_nsStyleSVG_CopyContextProperties(nsStyleSVG* dst,
-                                            const nsStyleSVG* src);
-
 void Gecko_GetComputedURLSpec(const mozilla::StyleComputedUrl* url,
                               nsCString* spec);
 
@@ -461,11 +423,6 @@ bool Gecko_IsURIInList(const mozilla::URLExtraData* aData,
 void Gecko_FillAllImageLayers(nsStyleImageLayers* layers, uint32_t max_len);
 
 void Gecko_LoadData_Drop(mozilla::StyleLoadData*);
-
-void Gecko_nsStyleFont_SetLang(nsStyleFont* font, nsAtom* atom);
-
-void Gecko_nsStyleFont_CopyLangFrom(nsStyleFont* aFont,
-                                    const nsStyleFont* aSource);
 
 mozilla::Length Gecko_nsStyleFont_ComputeMinSize(const nsStyleFont*,
                                                  const mozilla::dom::Document*);
@@ -592,6 +549,7 @@ int32_t Gecko_GetNumStyleThreads();
 mozilla::StyleDisplayMode Gecko_MediaFeatures_GetDisplayMode(
     const mozilla::dom::Document*);
 
+void Gecko_GetSubmitString(const mozilla::dom::Document*, nsAString*);
 bool Gecko_MediaFeatures_UseOverlayScrollbars(const mozilla::dom::Document*);
 int32_t Gecko_MediaFeatures_GetColorDepth(const mozilla::dom::Document*);
 int32_t Gecko_MediaFeatures_GetMonochromeBitsPerPixel(
@@ -625,8 +583,6 @@ mozilla::PointerCapabilities Gecko_MediaFeatures_PrimaryPointerCapabilities(
 
 mozilla::PointerCapabilities Gecko_MediaFeatures_AllPointerCapabilities(
     const mozilla::dom::Document*);
-
-float Gecko_MediaFeatures_GetDevicePixelRatio(const mozilla::dom::Document*);
 
 bool Gecko_MediaFeatures_IsResourceDocument(const mozilla::dom::Document*);
 bool Gecko_MediaFeatures_InAndroidPipMode(const mozilla::dom::Document*);
@@ -666,6 +622,10 @@ bool Gecko_GetAnchorPosSize(const AnchorPosResolutionParams* aParams,
                             mozilla::StylePhysicalAxis aPropAxis,
                             mozilla::StyleAnchorSizeKeyword aAnchorSizeKeyword,
                             mozilla::Length* aOut);
+
+// Tries to schedule a function to run in the current thread at idle priority.
+// Returns true if it was successfully scheduled.
+bool Gecko_ScheduleIdle(void (*)(), uint32_t aTimeout);
 
 }  // extern "C"
 

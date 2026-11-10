@@ -8,13 +8,15 @@
 #include "gtest/gtest.h"
 #include "mozilla/gtest/ipc/TestUtilityProcess.h"
 #include "mozilla/gtest/WaitFor.h"
+#include "mozilla/SpinEventLoopUntil.h"
 #include "nsThreadUtils.h"
 
 #include "mozilla/ipc/UtilityProcessManager.h"
+#include "nsIProcessToolsService.h"
+#include "nsServiceManagerUtils.h"
 
 #if defined(MOZ_WIDGET_ANDROID) || defined(XP_MACOSX)
 #  include "nsIAppShellService.h"
-#  include "nsServiceManagerUtils.h"
 #endif  // defined(MOZ_WIDGET_ANDROID) || defined(XP_MACOSX)
 
 #if defined(XP_WIN)
@@ -112,6 +114,109 @@ TEST_F(TestUtilityProcess, LaunchAllKinds) {
   // Drain the event queue.
   NS_ProcessPendingEvents(nullptr);
 }
+
+// Android declares a single `utility` service, so it cannot keep several
+// utility processes alive at once.
+#ifndef ANDROID
+
+// A keep-alive whose process crashed turns inert: letting go of it must not
+// touch anything else.
+TEST_F(TestUtilityProcess, KeepAliveOutlivesCrashedProcess) {
+  auto manager = UtilityProcessManager::GetSingleton();
+  ASSERT_TRUE(manager);
+
+  // An unrelated process stays up throughout, so the crash cannot be confused
+  // with everything having gone away.
+  auto other = WaitFor(manager->LaunchProcess(SandboxingKind::GENERIC_UTILITY));
+  ASSERT_TRUE(other.isOk());
+
+  RefPtr<UtilityProcessKeepAlive> keepAlive =
+      manager->LaunchIndependentProcess(SandboxingKind::GENERIC_UTILITY);
+  ASSERT_TRUE(keepAlive);
+  auto res = WaitFor(keepAlive->GetLaunchPromise());
+  ASSERT_TRUE(res.isOk())
+  << "Launch LaunchError: " << res.inspectErr().FunctionName() << ", "
+  << res.inspectErr().ErrorCode();
+  ASSERT_EQ(manager->AliveProcesses(), 2u);
+
+  nsCOMPtr<nsIProcessToolsService> processTools =
+      do_GetService("@mozilla.org/processtools-service;1");
+  ASSERT_TRUE(processTools);
+  ASSERT_TRUE(NS_SUCCEEDED(
+      processTools->Kill(keepAlive->GetProcessParent()->OtherPid())));
+
+  ASSERT_TRUE(SpinEventLoopUntil("KeepAliveOutlivesCrashedProcess"_ns,
+                                 [&]() { return !keepAlive->IsAlive(); }));
+  ASSERT_FALSE(keepAlive->GetProcessParent());
+  ASSERT_EQ(manager->AliveProcesses(), 1u);
+
+  keepAlive = nullptr;
+  ASSERT_EQ(manager->AliveProcesses(), 1u);
+  ASSERT_TRUE(manager->ProcessPid(SandboxingKind::GENERIC_UTILITY).isSome());
+
+  manager->CleanShutdown(SandboxingKind::GENERIC_UTILITY);
+
+  // Drain the event queue.
+  NS_ProcessPendingEvents(nullptr);
+}
+
+// Independent processes are distinct from the shared process of their kind and
+// from each other, and each one lives exactly as long as its keep-alive.
+TEST_F(TestUtilityProcess, IndependentProcesses) {
+  auto manager = UtilityProcessManager::GetSingleton();
+  ASSERT_TRUE(manager);
+
+  auto shared =
+      WaitFor(manager->LaunchProcess(SandboxingKind::GENERIC_UTILITY));
+  ASSERT_TRUE(shared.isOk());
+  auto sharedPid = manager->ProcessPid(SandboxingKind::GENERIC_UTILITY);
+  ASSERT_TRUE(sharedPid.isSome());
+
+  RefPtr<UtilityProcessKeepAlive> first =
+      manager->LaunchIndependentProcess(SandboxingKind::GENERIC_UTILITY);
+  RefPtr<UtilityProcessKeepAlive> second =
+      manager->LaunchIndependentProcess(SandboxingKind::GENERIC_UTILITY);
+  ASSERT_TRUE(first);
+  ASSERT_TRUE(second);
+  ASSERT_NE(first.get(), second.get());
+  for (const auto& keepAlive : {first, second}) {
+    auto res = WaitFor(keepAlive->GetLaunchPromise());
+    ASSERT_TRUE(res.isOk())
+    << "Launch LaunchError: " << res.inspectErr().FunctionName() << ", "
+    << res.inspectErr().ErrorCode();
+  }
+
+  // Three processes of the same kind, all with distinct pids.
+  ASSERT_EQ(manager->AliveProcesses(), 3u);
+  nsTArray<base::ProcessId> pids;
+  for (const auto& parent : manager->GetAllProcessesProcessParent()) {
+    pids.AppendElement(parent->OtherPid());
+  }
+  ASSERT_EQ(pids.Length(), 3u);
+  ASSERT_TRUE(pids.Contains(*sharedPid));
+  pids.Sort();
+  ASSERT_TRUE(std::adjacent_find(pids.begin(), pids.end()) == pids.end());
+
+  // Only the process a keep-alive owns goes away with it; the shared one and
+  // the per-kind lookups are unaffected.
+  first = nullptr;
+  ASSERT_EQ(manager->AliveProcesses(), 2u);
+  ASSERT_TRUE(manager->ProcessPid(SandboxingKind::GENERIC_UTILITY) ==
+              sharedPid);
+
+  second = nullptr;
+  ASSERT_EQ(manager->AliveProcesses(), 1u);
+  ASSERT_TRUE(manager->ProcessPid(SandboxingKind::GENERIC_UTILITY) ==
+              sharedPid);
+
+  manager->CleanShutdown(SandboxingKind::GENERIC_UTILITY);
+  ASSERT_TRUE(manager->ProcessPid(SandboxingKind::GENERIC_UTILITY).isNothing());
+
+  // Drain the event queue.
+  NS_ProcessPendingEvents(nullptr);
+}
+
+#endif  // !ANDROID
 
 #if defined(XP_WIN)
 static void LoadLibraryCrash_Test() {

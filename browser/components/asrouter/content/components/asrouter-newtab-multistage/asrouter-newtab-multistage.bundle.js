@@ -1,8 +1,1349 @@
 /*! THIS FILE IS AUTO-GENERATED: webpack.base.config.js */
 /******/ (() => { // webpackBootstrap
-/******/ 	"use strict";
-/******/ 	// The require scope
-/******/ 	var __webpack_require__ = {};
+/******/ 	var __webpack_modules__ = ([
+/* 0 */,
+/* 1 */
+/***/ ((module) => {
+
+(function(f){if(true){module.exports=f()}else { var g; }})(function(){var define,module,exports;return (function(){function r(e,n,t){function o(i,f){if(!n[i]){if(!e[i]){var c=undefined;if(!f&&c)return require(i,!0);if(u)return u(i,!0);var a=new Error("Cannot find module '"+i+"'");throw a.code="MODULE_NOT_FOUND",a}var p=n[i]={exports:{}};e[i][0].call(p.exports,function(r){var n=e[i][1][r];return o(n||r)},p,p.exports,r,e,n,t)}return n[i].exports}for(var u=undefined,i=0;i<t.length;i++)o(t[i]);return o}return r})()({1:[function(require,module,exports){
+/**
+ * Copyright (c) 2013-present, Facebook, Inc.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+'use strict';
+
+var printWarning = function() {};
+
+if (true) {
+  var ReactPropTypesSecret = require('./lib/ReactPropTypesSecret');
+  var loggedTypeFailures = {};
+  var has = require('./lib/has');
+
+  printWarning = function(text) {
+    var message = 'Warning: ' + text;
+    if (typeof console !== 'undefined') {
+      console.error(message);
+    }
+    try {
+      // --- Welcome to debugging React ---
+      // This error was thrown as a convenience so that you can use this stack
+      // to find the callsite that caused this warning to fire.
+      throw new Error(message);
+    } catch (x) { /**/ }
+  };
+}
+
+/**
+ * Assert that the values match with the type specs.
+ * Error messages are memorized and will only be shown once.
+ *
+ * @param {object} typeSpecs Map of name to a ReactPropType
+ * @param {object} values Runtime values that need to be type-checked
+ * @param {string} location e.g. "prop", "context", "child context"
+ * @param {string} componentName Name of the component for error messages.
+ * @param {?Function} getStack Returns the component stack.
+ * @private
+ */
+function checkPropTypes(typeSpecs, values, location, componentName, getStack) {
+  if (true) {
+    for (var typeSpecName in typeSpecs) {
+      if (has(typeSpecs, typeSpecName)) {
+        var error;
+        // Prop type validation may throw. In case they do, we don't want to
+        // fail the render phase where it didn't fail before. So we log it.
+        // After these have been cleaned up, we'll let them throw.
+        try {
+          // This is intentionally an invariant that gets caught. It's the same
+          // behavior as without this statement except with a better message.
+          if (typeof typeSpecs[typeSpecName] !== 'function') {
+            var err = Error(
+              (componentName || 'React class') + ': ' + location + ' type `' + typeSpecName + '` is invalid; ' +
+              'it must be a function, usually from the `prop-types` package, but received `' + typeof typeSpecs[typeSpecName] + '`.' +
+              'This often happens because of typos such as `PropTypes.function` instead of `PropTypes.func`.'
+            );
+            err.name = 'Invariant Violation';
+            throw err;
+          }
+          error = typeSpecs[typeSpecName](values, typeSpecName, componentName, location, null, ReactPropTypesSecret);
+        } catch (ex) {
+          error = ex;
+        }
+        if (error && !(error instanceof Error)) {
+          printWarning(
+            (componentName || 'React class') + ': type specification of ' +
+            location + ' `' + typeSpecName + '` is invalid; the type checker ' +
+            'function must return `null` or an `Error` but returned a ' + typeof error + '. ' +
+            'You may have forgotten to pass an argument to the type checker ' +
+            'creator (arrayOf, instanceOf, objectOf, oneOf, oneOfType, and ' +
+            'shape all require an argument).'
+          );
+        }
+        if (error instanceof Error && !(error.message in loggedTypeFailures)) {
+          // Only monitor this failure once because there tends to be a lot of the
+          // same error.
+          loggedTypeFailures[error.message] = true;
+
+          var stack = getStack ? getStack() : '';
+
+          printWarning(
+            'Failed ' + location + ' type: ' + error.message + (stack != null ? stack : '')
+          );
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Resets warning cache when testing.
+ *
+ * @private
+ */
+checkPropTypes.resetWarningCache = function() {
+  if (true) {
+    loggedTypeFailures = {};
+  }
+}
+
+module.exports = checkPropTypes;
+
+},{"./lib/ReactPropTypesSecret":5,"./lib/has":6}],2:[function(require,module,exports){
+/**
+ * Copyright (c) 2013-present, Facebook, Inc.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+'use strict';
+
+var ReactPropTypesSecret = require('./lib/ReactPropTypesSecret');
+
+function emptyFunction() {}
+function emptyFunctionWithReset() {}
+emptyFunctionWithReset.resetWarningCache = emptyFunction;
+
+module.exports = function() {
+  function shim(props, propName, componentName, location, propFullName, secret) {
+    if (secret === ReactPropTypesSecret) {
+      // It is still safe when called from React.
+      return;
+    }
+    var err = new Error(
+      'Calling PropTypes validators directly is not supported by the `prop-types` package. ' +
+      'Use PropTypes.checkPropTypes() to call them. ' +
+      'Read more at http://fb.me/use-check-prop-types'
+    );
+    err.name = 'Invariant Violation';
+    throw err;
+  };
+  shim.isRequired = shim;
+  function getShim() {
+    return shim;
+  };
+  // Important!
+  // Keep this list in sync with production version in `./factoryWithTypeCheckers.js`.
+  var ReactPropTypes = {
+    array: shim,
+    bigint: shim,
+    bool: shim,
+    func: shim,
+    number: shim,
+    object: shim,
+    string: shim,
+    symbol: shim,
+
+    any: shim,
+    arrayOf: getShim,
+    element: shim,
+    elementType: shim,
+    instanceOf: getShim,
+    node: shim,
+    objectOf: getShim,
+    oneOf: getShim,
+    oneOfType: getShim,
+    shape: getShim,
+    exact: getShim,
+
+    checkPropTypes: emptyFunctionWithReset,
+    resetWarningCache: emptyFunction
+  };
+
+  ReactPropTypes.PropTypes = ReactPropTypes;
+
+  return ReactPropTypes;
+};
+
+},{"./lib/ReactPropTypesSecret":5}],3:[function(require,module,exports){
+/**
+ * Copyright (c) 2013-present, Facebook, Inc.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+'use strict';
+
+var ReactIs = require('react-is');
+var assign = require('object-assign');
+
+var ReactPropTypesSecret = require('./lib/ReactPropTypesSecret');
+var has = require('./lib/has');
+var checkPropTypes = require('./checkPropTypes');
+
+var printWarning = function() {};
+
+if (true) {
+  printWarning = function(text) {
+    var message = 'Warning: ' + text;
+    if (typeof console !== 'undefined') {
+      console.error(message);
+    }
+    try {
+      // --- Welcome to debugging React ---
+      // This error was thrown as a convenience so that you can use this stack
+      // to find the callsite that caused this warning to fire.
+      throw new Error(message);
+    } catch (x) {}
+  };
+}
+
+function emptyFunctionThatReturnsNull() {
+  return null;
+}
+
+module.exports = function(isValidElement, throwOnDirectAccess) {
+  /* global Symbol */
+  var ITERATOR_SYMBOL = typeof Symbol === 'function' && Symbol.iterator;
+  var FAUX_ITERATOR_SYMBOL = '@@iterator'; // Before Symbol spec.
+
+  /**
+   * Returns the iterator method function contained on the iterable object.
+   *
+   * Be sure to invoke the function with the iterable as context:
+   *
+   *     var iteratorFn = getIteratorFn(myIterable);
+   *     if (iteratorFn) {
+   *       var iterator = iteratorFn.call(myIterable);
+   *       ...
+   *     }
+   *
+   * @param {?object} maybeIterable
+   * @return {?function}
+   */
+  function getIteratorFn(maybeIterable) {
+    var iteratorFn = maybeIterable && (ITERATOR_SYMBOL && maybeIterable[ITERATOR_SYMBOL] || maybeIterable[FAUX_ITERATOR_SYMBOL]);
+    if (typeof iteratorFn === 'function') {
+      return iteratorFn;
+    }
+  }
+
+  /**
+   * Collection of methods that allow declaration and validation of props that are
+   * supplied to React components. Example usage:
+   *
+   *   var Props = require('ReactPropTypes');
+   *   var MyArticle = React.createClass({
+   *     propTypes: {
+   *       // An optional string prop named "description".
+   *       description: Props.string,
+   *
+   *       // A required enum prop named "category".
+   *       category: Props.oneOf(['News','Photos']).isRequired,
+   *
+   *       // A prop named "dialog" that requires an instance of Dialog.
+   *       dialog: Props.instanceOf(Dialog).isRequired
+   *     },
+   *     render: function() { ... }
+   *   });
+   *
+   * A more formal specification of how these methods are used:
+   *
+   *   type := array|bool|func|object|number|string|oneOf([...])|instanceOf(...)
+   *   decl := ReactPropTypes.{type}(.isRequired)?
+   *
+   * Each and every declaration produces a function with the same signature. This
+   * allows the creation of custom validation functions. For example:
+   *
+   *  var MyLink = React.createClass({
+   *    propTypes: {
+   *      // An optional string or URI prop named "href".
+   *      href: function(props, propName, componentName) {
+   *        var propValue = props[propName];
+   *        if (propValue != null && typeof propValue !== 'string' &&
+   *            !(propValue instanceof URI)) {
+   *          return new Error(
+   *            'Expected a string or an URI for ' + propName + ' in ' +
+   *            componentName
+   *          );
+   *        }
+   *      }
+   *    },
+   *    render: function() {...}
+   *  });
+   *
+   * @internal
+   */
+
+  var ANONYMOUS = '<<anonymous>>';
+
+  // Important!
+  // Keep this list in sync with production version in `./factoryWithThrowingShims.js`.
+  var ReactPropTypes = {
+    array: createPrimitiveTypeChecker('array'),
+    bigint: createPrimitiveTypeChecker('bigint'),
+    bool: createPrimitiveTypeChecker('boolean'),
+    func: createPrimitiveTypeChecker('function'),
+    number: createPrimitiveTypeChecker('number'),
+    object: createPrimitiveTypeChecker('object'),
+    string: createPrimitiveTypeChecker('string'),
+    symbol: createPrimitiveTypeChecker('symbol'),
+
+    any: createAnyTypeChecker(),
+    arrayOf: createArrayOfTypeChecker,
+    element: createElementTypeChecker(),
+    elementType: createElementTypeTypeChecker(),
+    instanceOf: createInstanceTypeChecker,
+    node: createNodeChecker(),
+    objectOf: createObjectOfTypeChecker,
+    oneOf: createEnumTypeChecker,
+    oneOfType: createUnionTypeChecker,
+    shape: createShapeTypeChecker,
+    exact: createStrictShapeTypeChecker,
+  };
+
+  /**
+   * inlined Object.is polyfill to avoid requiring consumers ship their own
+   * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/is
+   */
+  /*eslint-disable no-self-compare*/
+  function is(x, y) {
+    // SameValue algorithm
+    if (x === y) {
+      // Steps 1-5, 7-10
+      // Steps 6.b-6.e: +0 != -0
+      return x !== 0 || 1 / x === 1 / y;
+    } else {
+      // Step 6.a: NaN == NaN
+      return x !== x && y !== y;
+    }
+  }
+  /*eslint-enable no-self-compare*/
+
+  /**
+   * We use an Error-like object for backward compatibility as people may call
+   * PropTypes directly and inspect their output. However, we don't use real
+   * Errors anymore. We don't inspect their stack anyway, and creating them
+   * is prohibitively expensive if they are created too often, such as what
+   * happens in oneOfType() for any type before the one that matched.
+   */
+  function PropTypeError(message, data) {
+    this.message = message;
+    this.data = data && typeof data === 'object' ? data: {};
+    this.stack = '';
+  }
+  // Make `instanceof Error` still work for returned errors.
+  PropTypeError.prototype = Error.prototype;
+
+  function createChainableTypeChecker(validate) {
+    if (true) {
+      var manualPropTypeCallCache = {};
+      var manualPropTypeWarningCount = 0;
+    }
+    function checkType(isRequired, props, propName, componentName, location, propFullName, secret) {
+      componentName = componentName || ANONYMOUS;
+      propFullName = propFullName || propName;
+
+      if (secret !== ReactPropTypesSecret) {
+        if (throwOnDirectAccess) {
+          // New behavior only for users of `prop-types` package
+          var err = new Error(
+            'Calling PropTypes validators directly is not supported by the `prop-types` package. ' +
+            'Use `PropTypes.checkPropTypes()` to call them. ' +
+            'Read more at http://fb.me/use-check-prop-types'
+          );
+          err.name = 'Invariant Violation';
+          throw err;
+        } else if ( true && typeof console !== 'undefined') {
+          // Old behavior for people using React.PropTypes
+          var cacheKey = componentName + ':' + propName;
+          if (
+            !manualPropTypeCallCache[cacheKey] &&
+            // Avoid spamming the console because they are often not actionable except for lib authors
+            manualPropTypeWarningCount < 3
+          ) {
+            printWarning(
+              'You are manually calling a React.PropTypes validation ' +
+              'function for the `' + propFullName + '` prop on `' + componentName + '`. This is deprecated ' +
+              'and will throw in the standalone `prop-types` package. ' +
+              'You may be seeing this warning due to a third-party PropTypes ' +
+              'library. See https://fb.me/react-warning-dont-call-proptypes ' + 'for details.'
+            );
+            manualPropTypeCallCache[cacheKey] = true;
+            manualPropTypeWarningCount++;
+          }
+        }
+      }
+      if (props[propName] == null) {
+        if (isRequired) {
+          if (props[propName] === null) {
+            return new PropTypeError('The ' + location + ' `' + propFullName + '` is marked as required ' + ('in `' + componentName + '`, but its value is `null`.'));
+          }
+          return new PropTypeError('The ' + location + ' `' + propFullName + '` is marked as required in ' + ('`' + componentName + '`, but its value is `undefined`.'));
+        }
+        return null;
+      } else {
+        return validate(props, propName, componentName, location, propFullName);
+      }
+    }
+
+    var chainedCheckType = checkType.bind(null, false);
+    chainedCheckType.isRequired = checkType.bind(null, true);
+
+    return chainedCheckType;
+  }
+
+  function createPrimitiveTypeChecker(expectedType) {
+    function validate(props, propName, componentName, location, propFullName, secret) {
+      var propValue = props[propName];
+      var propType = getPropType(propValue);
+      if (propType !== expectedType) {
+        // `propValue` being instance of, say, date/regexp, pass the 'object'
+        // check, but we can offer a more precise error message here rather than
+        // 'of type `object`'.
+        var preciseType = getPreciseType(propValue);
+
+        return new PropTypeError(
+          'Invalid ' + location + ' `' + propFullName + '` of type ' + ('`' + preciseType + '` supplied to `' + componentName + '`, expected ') + ('`' + expectedType + '`.'),
+          {expectedType: expectedType}
+        );
+      }
+      return null;
+    }
+    return createChainableTypeChecker(validate);
+  }
+
+  function createAnyTypeChecker() {
+    return createChainableTypeChecker(emptyFunctionThatReturnsNull);
+  }
+
+  function createArrayOfTypeChecker(typeChecker) {
+    function validate(props, propName, componentName, location, propFullName) {
+      if (typeof typeChecker !== 'function') {
+        return new PropTypeError('Property `' + propFullName + '` of component `' + componentName + '` has invalid PropType notation inside arrayOf.');
+      }
+      var propValue = props[propName];
+      if (!Array.isArray(propValue)) {
+        var propType = getPropType(propValue);
+        return new PropTypeError('Invalid ' + location + ' `' + propFullName + '` of type ' + ('`' + propType + '` supplied to `' + componentName + '`, expected an array.'));
+      }
+      for (var i = 0; i < propValue.length; i++) {
+        var error = typeChecker(propValue, i, componentName, location, propFullName + '[' + i + ']', ReactPropTypesSecret);
+        if (error instanceof Error) {
+          return error;
+        }
+      }
+      return null;
+    }
+    return createChainableTypeChecker(validate);
+  }
+
+  function createElementTypeChecker() {
+    function validate(props, propName, componentName, location, propFullName) {
+      var propValue = props[propName];
+      if (!isValidElement(propValue)) {
+        var propType = getPropType(propValue);
+        return new PropTypeError('Invalid ' + location + ' `' + propFullName + '` of type ' + ('`' + propType + '` supplied to `' + componentName + '`, expected a single ReactElement.'));
+      }
+      return null;
+    }
+    return createChainableTypeChecker(validate);
+  }
+
+  function createElementTypeTypeChecker() {
+    function validate(props, propName, componentName, location, propFullName) {
+      var propValue = props[propName];
+      if (!ReactIs.isValidElementType(propValue)) {
+        var propType = getPropType(propValue);
+        return new PropTypeError('Invalid ' + location + ' `' + propFullName + '` of type ' + ('`' + propType + '` supplied to `' + componentName + '`, expected a single ReactElement type.'));
+      }
+      return null;
+    }
+    return createChainableTypeChecker(validate);
+  }
+
+  function createInstanceTypeChecker(expectedClass) {
+    function validate(props, propName, componentName, location, propFullName) {
+      if (!(props[propName] instanceof expectedClass)) {
+        var expectedClassName = expectedClass.name || ANONYMOUS;
+        var actualClassName = getClassName(props[propName]);
+        return new PropTypeError('Invalid ' + location + ' `' + propFullName + '` of type ' + ('`' + actualClassName + '` supplied to `' + componentName + '`, expected ') + ('instance of `' + expectedClassName + '`.'));
+      }
+      return null;
+    }
+    return createChainableTypeChecker(validate);
+  }
+
+  function createEnumTypeChecker(expectedValues) {
+    if (!Array.isArray(expectedValues)) {
+      if (true) {
+        if (arguments.length > 1) {
+          printWarning(
+            'Invalid arguments supplied to oneOf, expected an array, got ' + arguments.length + ' arguments. ' +
+            'A common mistake is to write oneOf(x, y, z) instead of oneOf([x, y, z]).'
+          );
+        } else {
+          printWarning('Invalid argument supplied to oneOf, expected an array.');
+        }
+      }
+      return emptyFunctionThatReturnsNull;
+    }
+
+    function validate(props, propName, componentName, location, propFullName) {
+      var propValue = props[propName];
+      for (var i = 0; i < expectedValues.length; i++) {
+        if (is(propValue, expectedValues[i])) {
+          return null;
+        }
+      }
+
+      var valuesString = JSON.stringify(expectedValues, function replacer(key, value) {
+        var type = getPreciseType(value);
+        if (type === 'symbol') {
+          return String(value);
+        }
+        return value;
+      });
+      return new PropTypeError('Invalid ' + location + ' `' + propFullName + '` of value `' + String(propValue) + '` ' + ('supplied to `' + componentName + '`, expected one of ' + valuesString + '.'));
+    }
+    return createChainableTypeChecker(validate);
+  }
+
+  function createObjectOfTypeChecker(typeChecker) {
+    function validate(props, propName, componentName, location, propFullName) {
+      if (typeof typeChecker !== 'function') {
+        return new PropTypeError('Property `' + propFullName + '` of component `' + componentName + '` has invalid PropType notation inside objectOf.');
+      }
+      var propValue = props[propName];
+      var propType = getPropType(propValue);
+      if (propType !== 'object') {
+        return new PropTypeError('Invalid ' + location + ' `' + propFullName + '` of type ' + ('`' + propType + '` supplied to `' + componentName + '`, expected an object.'));
+      }
+      for (var key in propValue) {
+        if (has(propValue, key)) {
+          var error = typeChecker(propValue, key, componentName, location, propFullName + '.' + key, ReactPropTypesSecret);
+          if (error instanceof Error) {
+            return error;
+          }
+        }
+      }
+      return null;
+    }
+    return createChainableTypeChecker(validate);
+  }
+
+  function createUnionTypeChecker(arrayOfTypeCheckers) {
+    if (!Array.isArray(arrayOfTypeCheckers)) {
+       true ? printWarning('Invalid argument supplied to oneOfType, expected an instance of array.') : 0;
+      return emptyFunctionThatReturnsNull;
+    }
+
+    for (var i = 0; i < arrayOfTypeCheckers.length; i++) {
+      var checker = arrayOfTypeCheckers[i];
+      if (typeof checker !== 'function') {
+        printWarning(
+          'Invalid argument supplied to oneOfType. Expected an array of check functions, but ' +
+          'received ' + getPostfixForTypeWarning(checker) + ' at index ' + i + '.'
+        );
+        return emptyFunctionThatReturnsNull;
+      }
+    }
+
+    function validate(props, propName, componentName, location, propFullName) {
+      var expectedTypes = [];
+      for (var i = 0; i < arrayOfTypeCheckers.length; i++) {
+        var checker = arrayOfTypeCheckers[i];
+        var checkerResult = checker(props, propName, componentName, location, propFullName, ReactPropTypesSecret);
+        if (checkerResult == null) {
+          return null;
+        }
+        if (checkerResult.data.hasOwnProperty('expectedType')) {
+          expectedTypes.push(checkerResult.data.expectedType);
+        }
+      }
+      var expectedTypesMessage = (expectedTypes.length > 0) ? ', expected one of type [' + expectedTypes.join(', ') + ']': '';
+      return new PropTypeError('Invalid ' + location + ' `' + propFullName + '` supplied to ' + ('`' + componentName + '`' + expectedTypesMessage + '.'));
+    }
+    return createChainableTypeChecker(validate);
+  }
+
+  function createNodeChecker() {
+    function validate(props, propName, componentName, location, propFullName) {
+      if (!isNode(props[propName])) {
+        return new PropTypeError('Invalid ' + location + ' `' + propFullName + '` supplied to ' + ('`' + componentName + '`, expected a ReactNode.'));
+      }
+      return null;
+    }
+    return createChainableTypeChecker(validate);
+  }
+
+  function invalidValidatorError(componentName, location, propFullName, key, type) {
+    return new PropTypeError(
+      (componentName || 'React class') + ': ' + location + ' type `' + propFullName + '.' + key + '` is invalid; ' +
+      'it must be a function, usually from the `prop-types` package, but received `' + type + '`.'
+    );
+  }
+
+  function createShapeTypeChecker(shapeTypes) {
+    function validate(props, propName, componentName, location, propFullName) {
+      var propValue = props[propName];
+      var propType = getPropType(propValue);
+      if (propType !== 'object') {
+        return new PropTypeError('Invalid ' + location + ' `' + propFullName + '` of type `' + propType + '` ' + ('supplied to `' + componentName + '`, expected `object`.'));
+      }
+      for (var key in shapeTypes) {
+        var checker = shapeTypes[key];
+        if (typeof checker !== 'function') {
+          return invalidValidatorError(componentName, location, propFullName, key, getPreciseType(checker));
+        }
+        var error = checker(propValue, key, componentName, location, propFullName + '.' + key, ReactPropTypesSecret);
+        if (error) {
+          return error;
+        }
+      }
+      return null;
+    }
+    return createChainableTypeChecker(validate);
+  }
+
+  function createStrictShapeTypeChecker(shapeTypes) {
+    function validate(props, propName, componentName, location, propFullName) {
+      var propValue = props[propName];
+      var propType = getPropType(propValue);
+      if (propType !== 'object') {
+        return new PropTypeError('Invalid ' + location + ' `' + propFullName + '` of type `' + propType + '` ' + ('supplied to `' + componentName + '`, expected `object`.'));
+      }
+      // We need to check all keys in case some are required but missing from props.
+      var allKeys = assign({}, props[propName], shapeTypes);
+      for (var key in allKeys) {
+        var checker = shapeTypes[key];
+        if (has(shapeTypes, key) && typeof checker !== 'function') {
+          return invalidValidatorError(componentName, location, propFullName, key, getPreciseType(checker));
+        }
+        if (!checker) {
+          return new PropTypeError(
+            'Invalid ' + location + ' `' + propFullName + '` key `' + key + '` supplied to `' + componentName + '`.' +
+            '\nBad object: ' + JSON.stringify(props[propName], null, '  ') +
+            '\nValid keys: ' + JSON.stringify(Object.keys(shapeTypes), null, '  ')
+          );
+        }
+        var error = checker(propValue, key, componentName, location, propFullName + '.' + key, ReactPropTypesSecret);
+        if (error) {
+          return error;
+        }
+      }
+      return null;
+    }
+
+    return createChainableTypeChecker(validate);
+  }
+
+  function isNode(propValue) {
+    switch (typeof propValue) {
+      case 'number':
+      case 'string':
+      case 'undefined':
+        return true;
+      case 'boolean':
+        return !propValue;
+      case 'object':
+        if (Array.isArray(propValue)) {
+          return propValue.every(isNode);
+        }
+        if (propValue === null || isValidElement(propValue)) {
+          return true;
+        }
+
+        var iteratorFn = getIteratorFn(propValue);
+        if (iteratorFn) {
+          var iterator = iteratorFn.call(propValue);
+          var step;
+          if (iteratorFn !== propValue.entries) {
+            while (!(step = iterator.next()).done) {
+              if (!isNode(step.value)) {
+                return false;
+              }
+            }
+          } else {
+            // Iterator will provide entry [k,v] tuples rather than values.
+            while (!(step = iterator.next()).done) {
+              var entry = step.value;
+              if (entry) {
+                if (!isNode(entry[1])) {
+                  return false;
+                }
+              }
+            }
+          }
+        } else {
+          return false;
+        }
+
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  function isSymbol(propType, propValue) {
+    // Native Symbol.
+    if (propType === 'symbol') {
+      return true;
+    }
+
+    // falsy value can't be a Symbol
+    if (!propValue) {
+      return false;
+    }
+
+    // 19.4.3.5 Symbol.prototype[@@toStringTag] === 'Symbol'
+    if (propValue['@@toStringTag'] === 'Symbol') {
+      return true;
+    }
+
+    // Fallback for non-spec compliant Symbols which are polyfilled.
+    if (typeof Symbol === 'function' && propValue instanceof Symbol) {
+      return true;
+    }
+
+    return false;
+  }
+
+  // Equivalent of `typeof` but with special handling for array and regexp.
+  function getPropType(propValue) {
+    var propType = typeof propValue;
+    if (Array.isArray(propValue)) {
+      return 'array';
+    }
+    if (propValue instanceof RegExp) {
+      // Old webkits (at least until Android 4.0) return 'function' rather than
+      // 'object' for typeof a RegExp. We'll normalize this here so that /bla/
+      // passes PropTypes.object.
+      return 'object';
+    }
+    if (isSymbol(propType, propValue)) {
+      return 'symbol';
+    }
+    return propType;
+  }
+
+  // This handles more types than `getPropType`. Only used for error messages.
+  // See `createPrimitiveTypeChecker`.
+  function getPreciseType(propValue) {
+    if (typeof propValue === 'undefined' || propValue === null) {
+      return '' + propValue;
+    }
+    var propType = getPropType(propValue);
+    if (propType === 'object') {
+      if (propValue instanceof Date) {
+        return 'date';
+      } else if (propValue instanceof RegExp) {
+        return 'regexp';
+      }
+    }
+    return propType;
+  }
+
+  // Returns a string that is postfixed to a warning about an invalid type.
+  // For example, "undefined" or "of type array"
+  function getPostfixForTypeWarning(value) {
+    var type = getPreciseType(value);
+    switch (type) {
+      case 'array':
+      case 'object':
+        return 'an ' + type;
+      case 'boolean':
+      case 'date':
+      case 'regexp':
+        return 'a ' + type;
+      default:
+        return type;
+    }
+  }
+
+  // Returns class name of the object, if any.
+  function getClassName(propValue) {
+    if (!propValue.constructor || !propValue.constructor.name) {
+      return ANONYMOUS;
+    }
+    return propValue.constructor.name;
+  }
+
+  ReactPropTypes.checkPropTypes = checkPropTypes;
+  ReactPropTypes.resetWarningCache = checkPropTypes.resetWarningCache;
+  ReactPropTypes.PropTypes = ReactPropTypes;
+
+  return ReactPropTypes;
+};
+
+},{"./checkPropTypes":1,"./lib/ReactPropTypesSecret":5,"./lib/has":6,"object-assign":7,"react-is":11}],4:[function(require,module,exports){
+/**
+ * Copyright (c) 2013-present, Facebook, Inc.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+if (true) {
+  var ReactIs = require('react-is');
+
+  // By explicitly using `prop-types` you are opting into new development behavior.
+  // http://fb.me/prop-types-in-prod
+  var throwOnDirectAccess = true;
+  module.exports = require('./factoryWithTypeCheckers')(ReactIs.isElement, throwOnDirectAccess);
+} else {}
+
+},{"./factoryWithThrowingShims":2,"./factoryWithTypeCheckers":3,"react-is":11}],5:[function(require,module,exports){
+/**
+ * Copyright (c) 2013-present, Facebook, Inc.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+'use strict';
+
+var ReactPropTypesSecret = 'SECRET_DO_NOT_PASS_THIS_OR_YOU_WILL_BE_FIRED';
+
+module.exports = ReactPropTypesSecret;
+
+},{}],6:[function(require,module,exports){
+module.exports = Function.call.bind(Object.prototype.hasOwnProperty);
+
+},{}],7:[function(require,module,exports){
+/*
+object-assign
+(c) Sindre Sorhus
+@license MIT
+*/
+
+'use strict';
+/* eslint-disable no-unused-vars */
+var getOwnPropertySymbols = Object.getOwnPropertySymbols;
+var hasOwnProperty = Object.prototype.hasOwnProperty;
+var propIsEnumerable = Object.prototype.propertyIsEnumerable;
+
+function toObject(val) {
+	if (val === null || val === undefined) {
+		throw new TypeError('Object.assign cannot be called with null or undefined');
+	}
+
+	return Object(val);
+}
+
+function shouldUseNative() {
+	try {
+		if (!Object.assign) {
+			return false;
+		}
+
+		// Detect buggy property enumeration order in older V8 versions.
+
+		// https://bugs.chromium.org/p/v8/issues/detail?id=4118
+		var test1 = new String('abc');  // eslint-disable-line no-new-wrappers
+		test1[5] = 'de';
+		if (Object.getOwnPropertyNames(test1)[0] === '5') {
+			return false;
+		}
+
+		// https://bugs.chromium.org/p/v8/issues/detail?id=3056
+		var test2 = {};
+		for (var i = 0; i < 10; i++) {
+			test2['_' + String.fromCharCode(i)] = i;
+		}
+		var order2 = Object.getOwnPropertyNames(test2).map(function (n) {
+			return test2[n];
+		});
+		if (order2.join('') !== '0123456789') {
+			return false;
+		}
+
+		// https://bugs.chromium.org/p/v8/issues/detail?id=3056
+		var test3 = {};
+		'abcdefghijklmnopqrst'.split('').forEach(function (letter) {
+			test3[letter] = letter;
+		});
+		if (Object.keys(Object.assign({}, test3)).join('') !==
+				'abcdefghijklmnopqrst') {
+			return false;
+		}
+
+		return true;
+	} catch (err) {
+		// We don't expect any of the above to throw, but better to be safe.
+		return false;
+	}
+}
+
+module.exports = shouldUseNative() ? Object.assign : function (target, source) {
+	var from;
+	var to = toObject(target);
+	var symbols;
+
+	for (var s = 1; s < arguments.length; s++) {
+		from = Object(arguments[s]);
+
+		for (var key in from) {
+			if (hasOwnProperty.call(from, key)) {
+				to[key] = from[key];
+			}
+		}
+
+		if (getOwnPropertySymbols) {
+			symbols = getOwnPropertySymbols(from);
+			for (var i = 0; i < symbols.length; i++) {
+				if (propIsEnumerable.call(from, symbols[i])) {
+					to[symbols[i]] = from[symbols[i]];
+				}
+			}
+		}
+	}
+
+	return to;
+};
+
+},{}],8:[function(require,module,exports){
+// shim for using process in browser
+var process = module.exports = {};
+
+// cached from whatever global is present so that test runners that stub it
+// don't break things.  But we need to wrap it in a try catch in case it is
+// wrapped in strict mode code which doesn't define any globals.  It's inside a
+// function because try/catches deoptimize in certain engines.
+
+var cachedSetTimeout;
+var cachedClearTimeout;
+
+function defaultSetTimout() {
+    throw new Error('setTimeout has not been defined');
+}
+function defaultClearTimeout () {
+    throw new Error('clearTimeout has not been defined');
+}
+(function () {
+    try {
+        if (typeof setTimeout === 'function') {
+            cachedSetTimeout = setTimeout;
+        } else {
+            cachedSetTimeout = defaultSetTimout;
+        }
+    } catch (e) {
+        cachedSetTimeout = defaultSetTimout;
+    }
+    try {
+        if (typeof clearTimeout === 'function') {
+            cachedClearTimeout = clearTimeout;
+        } else {
+            cachedClearTimeout = defaultClearTimeout;
+        }
+    } catch (e) {
+        cachedClearTimeout = defaultClearTimeout;
+    }
+} ())
+function runTimeout(fun) {
+    if (cachedSetTimeout === setTimeout) {
+        //normal enviroments in sane situations
+        return setTimeout(fun, 0);
+    }
+    // if setTimeout wasn't available but was latter defined
+    if ((cachedSetTimeout === defaultSetTimout || !cachedSetTimeout) && setTimeout) {
+        cachedSetTimeout = setTimeout;
+        return setTimeout(fun, 0);
+    }
+    try {
+        // when when somebody has screwed with setTimeout but no I.E. maddness
+        return cachedSetTimeout(fun, 0);
+    } catch(e){
+        try {
+            // When we are in I.E. but the script has been evaled so I.E. doesn't trust the global object when called normally
+            return cachedSetTimeout.call(null, fun, 0);
+        } catch(e){
+            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error
+            return cachedSetTimeout.call(this, fun, 0);
+        }
+    }
+
+
+}
+function runClearTimeout(marker) {
+    if (cachedClearTimeout === clearTimeout) {
+        //normal enviroments in sane situations
+        return clearTimeout(marker);
+    }
+    // if clearTimeout wasn't available but was latter defined
+    if ((cachedClearTimeout === defaultClearTimeout || !cachedClearTimeout) && clearTimeout) {
+        cachedClearTimeout = clearTimeout;
+        return clearTimeout(marker);
+    }
+    try {
+        // when when somebody has screwed with setTimeout but no I.E. maddness
+        return cachedClearTimeout(marker);
+    } catch (e){
+        try {
+            // When we are in I.E. but the script has been evaled so I.E. doesn't  trust the global object when called normally
+            return cachedClearTimeout.call(null, marker);
+        } catch (e){
+            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error.
+            // Some versions of I.E. have different rules for clearTimeout vs setTimeout
+            return cachedClearTimeout.call(this, marker);
+        }
+    }
+
+
+
+}
+var queue = [];
+var draining = false;
+var currentQueue;
+var queueIndex = -1;
+
+function cleanUpNextTick() {
+    if (!draining || !currentQueue) {
+        return;
+    }
+    draining = false;
+    if (currentQueue.length) {
+        queue = currentQueue.concat(queue);
+    } else {
+        queueIndex = -1;
+    }
+    if (queue.length) {
+        drainQueue();
+    }
+}
+
+function drainQueue() {
+    if (draining) {
+        return;
+    }
+    var timeout = runTimeout(cleanUpNextTick);
+    draining = true;
+
+    var len = queue.length;
+    while(len) {
+        currentQueue = queue;
+        queue = [];
+        while (++queueIndex < len) {
+            if (currentQueue) {
+                currentQueue[queueIndex].run();
+            }
+        }
+        queueIndex = -1;
+        len = queue.length;
+    }
+    currentQueue = null;
+    draining = false;
+    runClearTimeout(timeout);
+}
+
+process.nextTick = function (fun) {
+    var args = new Array(arguments.length - 1);
+    if (arguments.length > 1) {
+        for (var i = 1; i < arguments.length; i++) {
+            args[i - 1] = arguments[i];
+        }
+    }
+    queue.push(new Item(fun, args));
+    if (queue.length === 1 && !draining) {
+        runTimeout(drainQueue);
+    }
+};
+
+// v8 likes predictible objects
+function Item(fun, array) {
+    this.fun = fun;
+    this.array = array;
+}
+Item.prototype.run = function () {
+    this.fun.apply(null, this.array);
+};
+process.title = 'browser';
+process.browser = true;
+process.env = {};
+process.argv = [];
+process.version = ''; // empty string to avoid regexp issues
+process.versions = {};
+
+function noop() {}
+
+process.on = noop;
+process.addListener = noop;
+process.once = noop;
+process.off = noop;
+process.removeListener = noop;
+process.removeAllListeners = noop;
+process.emit = noop;
+process.prependListener = noop;
+process.prependOnceListener = noop;
+
+process.listeners = function (name) { return [] }
+
+process.binding = function (name) {
+    throw new Error('process.binding is not supported');
+};
+
+process.cwd = function () { return '/' };
+process.chdir = function (dir) {
+    throw new Error('process.chdir is not supported');
+};
+process.umask = function() { return 0; };
+
+},{}],9:[function(require,module,exports){
+(function (process){(function (){
+/** @license React v16.13.1
+ * react-is.development.js
+ *
+ * Copyright (c) Facebook, Inc. and its affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+'use strict';
+
+
+
+if (process.env.NODE_ENV !== "production") {
+  (function() {
+'use strict';
+
+// The Symbol used to tag the ReactElement-like types. If there is no native Symbol
+// nor polyfill, then a plain number is used for performance.
+var hasSymbol = typeof Symbol === 'function' && Symbol.for;
+var REACT_ELEMENT_TYPE = hasSymbol ? Symbol.for('react.element') : 0xeac7;
+var REACT_PORTAL_TYPE = hasSymbol ? Symbol.for('react.portal') : 0xeaca;
+var REACT_FRAGMENT_TYPE = hasSymbol ? Symbol.for('react.fragment') : 0xeacb;
+var REACT_STRICT_MODE_TYPE = hasSymbol ? Symbol.for('react.strict_mode') : 0xeacc;
+var REACT_PROFILER_TYPE = hasSymbol ? Symbol.for('react.profiler') : 0xead2;
+var REACT_PROVIDER_TYPE = hasSymbol ? Symbol.for('react.provider') : 0xeacd;
+var REACT_CONTEXT_TYPE = hasSymbol ? Symbol.for('react.context') : 0xeace; // TODO: We don't use AsyncMode or ConcurrentMode anymore. They were temporary
+// (unstable) APIs that have been removed. Can we remove the symbols?
+
+var REACT_ASYNC_MODE_TYPE = hasSymbol ? Symbol.for('react.async_mode') : 0xeacf;
+var REACT_CONCURRENT_MODE_TYPE = hasSymbol ? Symbol.for('react.concurrent_mode') : 0xeacf;
+var REACT_FORWARD_REF_TYPE = hasSymbol ? Symbol.for('react.forward_ref') : 0xead0;
+var REACT_SUSPENSE_TYPE = hasSymbol ? Symbol.for('react.suspense') : 0xead1;
+var REACT_SUSPENSE_LIST_TYPE = hasSymbol ? Symbol.for('react.suspense_list') : 0xead8;
+var REACT_MEMO_TYPE = hasSymbol ? Symbol.for('react.memo') : 0xead3;
+var REACT_LAZY_TYPE = hasSymbol ? Symbol.for('react.lazy') : 0xead4;
+var REACT_BLOCK_TYPE = hasSymbol ? Symbol.for('react.block') : 0xead9;
+var REACT_FUNDAMENTAL_TYPE = hasSymbol ? Symbol.for('react.fundamental') : 0xead5;
+var REACT_RESPONDER_TYPE = hasSymbol ? Symbol.for('react.responder') : 0xead6;
+var REACT_SCOPE_TYPE = hasSymbol ? Symbol.for('react.scope') : 0xead7;
+
+function isValidElementType(type) {
+  return typeof type === 'string' || typeof type === 'function' || // Note: its typeof might be other than 'symbol' or 'number' if it's a polyfill.
+  type === REACT_FRAGMENT_TYPE || type === REACT_CONCURRENT_MODE_TYPE || type === REACT_PROFILER_TYPE || type === REACT_STRICT_MODE_TYPE || type === REACT_SUSPENSE_TYPE || type === REACT_SUSPENSE_LIST_TYPE || typeof type === 'object' && type !== null && (type.$$typeof === REACT_LAZY_TYPE || type.$$typeof === REACT_MEMO_TYPE || type.$$typeof === REACT_PROVIDER_TYPE || type.$$typeof === REACT_CONTEXT_TYPE || type.$$typeof === REACT_FORWARD_REF_TYPE || type.$$typeof === REACT_FUNDAMENTAL_TYPE || type.$$typeof === REACT_RESPONDER_TYPE || type.$$typeof === REACT_SCOPE_TYPE || type.$$typeof === REACT_BLOCK_TYPE);
+}
+
+function typeOf(object) {
+  if (typeof object === 'object' && object !== null) {
+    var $$typeof = object.$$typeof;
+
+    switch ($$typeof) {
+      case REACT_ELEMENT_TYPE:
+        var type = object.type;
+
+        switch (type) {
+          case REACT_ASYNC_MODE_TYPE:
+          case REACT_CONCURRENT_MODE_TYPE:
+          case REACT_FRAGMENT_TYPE:
+          case REACT_PROFILER_TYPE:
+          case REACT_STRICT_MODE_TYPE:
+          case REACT_SUSPENSE_TYPE:
+            return type;
+
+          default:
+            var $$typeofType = type && type.$$typeof;
+
+            switch ($$typeofType) {
+              case REACT_CONTEXT_TYPE:
+              case REACT_FORWARD_REF_TYPE:
+              case REACT_LAZY_TYPE:
+              case REACT_MEMO_TYPE:
+              case REACT_PROVIDER_TYPE:
+                return $$typeofType;
+
+              default:
+                return $$typeof;
+            }
+
+        }
+
+      case REACT_PORTAL_TYPE:
+        return $$typeof;
+    }
+  }
+
+  return undefined;
+} // AsyncMode is deprecated along with isAsyncMode
+
+var AsyncMode = REACT_ASYNC_MODE_TYPE;
+var ConcurrentMode = REACT_CONCURRENT_MODE_TYPE;
+var ContextConsumer = REACT_CONTEXT_TYPE;
+var ContextProvider = REACT_PROVIDER_TYPE;
+var Element = REACT_ELEMENT_TYPE;
+var ForwardRef = REACT_FORWARD_REF_TYPE;
+var Fragment = REACT_FRAGMENT_TYPE;
+var Lazy = REACT_LAZY_TYPE;
+var Memo = REACT_MEMO_TYPE;
+var Portal = REACT_PORTAL_TYPE;
+var Profiler = REACT_PROFILER_TYPE;
+var StrictMode = REACT_STRICT_MODE_TYPE;
+var Suspense = REACT_SUSPENSE_TYPE;
+var hasWarnedAboutDeprecatedIsAsyncMode = false; // AsyncMode should be deprecated
+
+function isAsyncMode(object) {
+  {
+    if (!hasWarnedAboutDeprecatedIsAsyncMode) {
+      hasWarnedAboutDeprecatedIsAsyncMode = true; // Using console['warn'] to evade Babel and ESLint
+
+      console['warn']('The ReactIs.isAsyncMode() alias has been deprecated, ' + 'and will be removed in React 17+. Update your code to use ' + 'ReactIs.isConcurrentMode() instead. It has the exact same API.');
+    }
+  }
+
+  return isConcurrentMode(object) || typeOf(object) === REACT_ASYNC_MODE_TYPE;
+}
+function isConcurrentMode(object) {
+  return typeOf(object) === REACT_CONCURRENT_MODE_TYPE;
+}
+function isContextConsumer(object) {
+  return typeOf(object) === REACT_CONTEXT_TYPE;
+}
+function isContextProvider(object) {
+  return typeOf(object) === REACT_PROVIDER_TYPE;
+}
+function isElement(object) {
+  return typeof object === 'object' && object !== null && object.$$typeof === REACT_ELEMENT_TYPE;
+}
+function isForwardRef(object) {
+  return typeOf(object) === REACT_FORWARD_REF_TYPE;
+}
+function isFragment(object) {
+  return typeOf(object) === REACT_FRAGMENT_TYPE;
+}
+function isLazy(object) {
+  return typeOf(object) === REACT_LAZY_TYPE;
+}
+function isMemo(object) {
+  return typeOf(object) === REACT_MEMO_TYPE;
+}
+function isPortal(object) {
+  return typeOf(object) === REACT_PORTAL_TYPE;
+}
+function isProfiler(object) {
+  return typeOf(object) === REACT_PROFILER_TYPE;
+}
+function isStrictMode(object) {
+  return typeOf(object) === REACT_STRICT_MODE_TYPE;
+}
+function isSuspense(object) {
+  return typeOf(object) === REACT_SUSPENSE_TYPE;
+}
+
+exports.AsyncMode = AsyncMode;
+exports.ConcurrentMode = ConcurrentMode;
+exports.ContextConsumer = ContextConsumer;
+exports.ContextProvider = ContextProvider;
+exports.Element = Element;
+exports.ForwardRef = ForwardRef;
+exports.Fragment = Fragment;
+exports.Lazy = Lazy;
+exports.Memo = Memo;
+exports.Portal = Portal;
+exports.Profiler = Profiler;
+exports.StrictMode = StrictMode;
+exports.Suspense = Suspense;
+exports.isAsyncMode = isAsyncMode;
+exports.isConcurrentMode = isConcurrentMode;
+exports.isContextConsumer = isContextConsumer;
+exports.isContextProvider = isContextProvider;
+exports.isElement = isElement;
+exports.isForwardRef = isForwardRef;
+exports.isFragment = isFragment;
+exports.isLazy = isLazy;
+exports.isMemo = isMemo;
+exports.isPortal = isPortal;
+exports.isProfiler = isProfiler;
+exports.isStrictMode = isStrictMode;
+exports.isSuspense = isSuspense;
+exports.isValidElementType = isValidElementType;
+exports.typeOf = typeOf;
+  })();
+}
+
+}).call(this)}).call(this,require('_process'))
+},{"_process":8}],10:[function(require,module,exports){
+/** @license React v16.13.1
+ * react-is.production.min.js
+ *
+ * Copyright (c) Facebook, Inc. and its affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+'use strict';var b="function"===typeof Symbol&&Symbol.for,c=b?Symbol.for("react.element"):60103,d=b?Symbol.for("react.portal"):60106,e=b?Symbol.for("react.fragment"):60107,f=b?Symbol.for("react.strict_mode"):60108,g=b?Symbol.for("react.profiler"):60114,h=b?Symbol.for("react.provider"):60109,k=b?Symbol.for("react.context"):60110,l=b?Symbol.for("react.async_mode"):60111,m=b?Symbol.for("react.concurrent_mode"):60111,n=b?Symbol.for("react.forward_ref"):60112,p=b?Symbol.for("react.suspense"):60113,q=b?
+Symbol.for("react.suspense_list"):60120,r=b?Symbol.for("react.memo"):60115,t=b?Symbol.for("react.lazy"):60116,v=b?Symbol.for("react.block"):60121,w=b?Symbol.for("react.fundamental"):60117,x=b?Symbol.for("react.responder"):60118,y=b?Symbol.for("react.scope"):60119;
+function z(a){if("object"===typeof a&&null!==a){var u=a.$$typeof;switch(u){case c:switch(a=a.type,a){case l:case m:case e:case g:case f:case p:return a;default:switch(a=a&&a.$$typeof,a){case k:case n:case t:case r:case h:return a;default:return u}}case d:return u}}}function A(a){return z(a)===m}exports.AsyncMode=l;exports.ConcurrentMode=m;exports.ContextConsumer=k;exports.ContextProvider=h;exports.Element=c;exports.ForwardRef=n;exports.Fragment=e;exports.Lazy=t;exports.Memo=r;exports.Portal=d;
+exports.Profiler=g;exports.StrictMode=f;exports.Suspense=p;exports.isAsyncMode=function(a){return A(a)||z(a)===l};exports.isConcurrentMode=A;exports.isContextConsumer=function(a){return z(a)===k};exports.isContextProvider=function(a){return z(a)===h};exports.isElement=function(a){return"object"===typeof a&&null!==a&&a.$$typeof===c};exports.isForwardRef=function(a){return z(a)===n};exports.isFragment=function(a){return z(a)===e};exports.isLazy=function(a){return z(a)===t};
+exports.isMemo=function(a){return z(a)===r};exports.isPortal=function(a){return z(a)===d};exports.isProfiler=function(a){return z(a)===g};exports.isStrictMode=function(a){return z(a)===f};exports.isSuspense=function(a){return z(a)===p};
+exports.isValidElementType=function(a){return"string"===typeof a||"function"===typeof a||a===e||a===m||a===g||a===f||a===p||a===q||"object"===typeof a&&null!==a&&(a.$$typeof===t||a.$$typeof===r||a.$$typeof===h||a.$$typeof===k||a.$$typeof===n||a.$$typeof===w||a.$$typeof===x||a.$$typeof===y||a.$$typeof===v)};exports.typeOf=z;
+
+},{}],11:[function(require,module,exports){
+(function (process){(function (){
+'use strict';
+
+if (process.env.NODE_ENV === 'production') {
+  module.exports = require('./cjs/react-is.production.min.js');
+} else {
+  module.exports = require('./cjs/react-is.development.js');
+}
+
+}).call(this)}).call(this,require('_process'))
+},{"./cjs/react-is.development.js":9,"./cjs/react-is.production.min.js":10,"_process":8}]},{},[4])(4)
+});
+
+
+/***/ })
+/******/ 	]);
+/************************************************************************/
+/******/ 	// The module cache
+/******/ 	var __webpack_module_cache__ = {};
+/******/ 	
+/******/ 	// The require function
+/******/ 	function __webpack_require__(moduleId) {
+/******/ 		// Check if module is in cache
+/******/ 		var cachedModule = __webpack_module_cache__[moduleId];
+/******/ 		if (cachedModule !== undefined) {
+/******/ 			return cachedModule.exports;
+/******/ 		}
+/******/ 		// Create a new module (and put it into the cache)
+/******/ 		var module = __webpack_module_cache__[moduleId] = {
+/******/ 			// no module.id needed
+/******/ 			// no module.loaded needed
+/******/ 			exports: {}
+/******/ 		};
+/******/ 	
+/******/ 		// Execute the module function
+/******/ 		__webpack_modules__[moduleId](module, module.exports, __webpack_require__);
+/******/ 	
+/******/ 		// Return the exports of the module
+/******/ 		return module.exports;
+/******/ 	}
 /******/ 	
 /************************************************************************/
 /******/ 	/* webpack/runtime/compat get default export */
@@ -35,6 +1376,9 @@
 /******/ 	})();
 /******/ 	
 /************************************************************************/
+// This entry needs to be wrapped in an IIFE because it needs to be in strict mode.
+(() => {
+"use strict";
 
 ;// external "React"
 const external_React_namespaceObject = React;
@@ -47,7 +1391,7 @@ const external_ReactDOM_namespaceObject = ReactDOM;
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
-const CONFIGURABLE_STYLES = ["background", "color", "display", "fontSize", "fontWeight", "letterSpacing", "lineHeight", "marginBlock", "marginBlockStart", "marginBlockEnd", "marginInline", "paddingBlock", "paddingBlockStart", "paddingBlockEnd", "paddingInline", "paddingInlineStart", "paddingInlineEnd", "textAlign", "whiteSpace", "width", "height", "borderBlockStart", "borderBlockEnd", "top", "bottom", "left", "right", "inset", "insetBlock", "insetInline", "minHeight", "minWidth"];
+const CONFIGURABLE_STYLES = ["background", "color", "display", "fontSize", "fontWeight", "letterSpacing", "lineHeight", "marginBlock", "marginBlockStart", "marginBlockEnd", "marginInline", "paddingBlock", "paddingBlockStart", "paddingBlockEnd", "paddingInline", "paddingInlineStart", "paddingInlineEnd", "textAlign", "whiteSpace", "width", "height", "border", "borderBlockStart", "borderBlockEnd", "top", "bottom", "left", "right", "inset", "insetBlock", "insetInline", "minHeight", "minWidth", "maxWidth"];
 const ZAP_SIZE_THRESHOLD = 160;
 
 /**
@@ -323,6 +1667,9 @@ const MultiStageUtils = {
   },
 };
 
+// EXTERNAL MODULE: ./node_modules/prop-types/prop-types.js
+var prop_types = __webpack_require__(1);
+var prop_types_default = /*#__PURE__*/__webpack_require__.n(prop_types);
 ;// ./content-src/components/LanguageSwitcher.jsx
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -588,6 +1935,7 @@ const CTAParagraph = props => {
     handleAction(event);
     event.preventDefault();
   }, [handleAction]);
+  const keyPressedRef = external_React_default().useRef(false);
   return /*#__PURE__*/external_React_default().createElement("h2", {
     className: `cta-paragraph ${content?.info_tile ? "info-tile" : ""}`,
     style: {
@@ -604,7 +1952,15 @@ const CTAParagraph = props => {
   }, content.text.string_name && typeof handleAction === "function" ? /*#__PURE__*/external_React_default().createElement("span", {
     "data-l10n-id": content.text.string_id,
     onClick: onClick,
-    onKeyUp: event => ["Enter", " "].includes(event.key) ? onClick(event) : null,
+    onKeyDown: event => {
+      keyPressedRef.current = ["Enter", " "].includes(event.key);
+    },
+    onKeyUp: event => {
+      if (keyPressedRef.current && ["Enter", " "].includes(event.key)) {
+        onClick(event);
+      }
+      keyPressedRef.current = false;
+    },
     value: "cta_paragraph"
   }, " ", /*#__PURE__*/external_React_default().createElement("a", {
     "data-l10n-name": content.text.string_name,
@@ -923,6 +2279,28 @@ function renderSegment(segment, index, handleAction) {
       style: pickConfigurableStyles(segment)
     });
   }
+  if (segment?.action) {
+    return /*#__PURE__*/external_React_default().createElement("a", {
+      key: index,
+      href: segment.href,
+      value: segment.id,
+      role: segment.href ? null : "link",
+      className: "text-link",
+      tabIndex: "0",
+      onClick: event => {
+        event.preventDefault();
+        handleAction(event, segment.action);
+      },
+      onKeyPress: event => {
+        if (event.key === "Enter" && !event.repeat) {
+          event.preventDefault();
+          handleAction(event, segment.action);
+        }
+      }
+    }, /*#__PURE__*/external_React_default().createElement(Localized, {
+      text: segment
+    }, /*#__PURE__*/external_React_default().createElement("span", null)));
+  }
   if (segment?.href) {
     const action = {
       type: "OPEN_URL",
@@ -1220,7 +2598,8 @@ const TileButton = props => {
   const {
     content,
     handleAction,
-    inputName
+    inputName,
+    inert
   } = props;
   const ref = (0,external_React_namespaceObject.useRef)(null);
   if (!content) {
@@ -1230,7 +2609,6 @@ const TileButton = props => {
     let mockEvent = {
       currentTarget: ref.current,
       source: event.target.id,
-      name: "command",
       action: content.action
     };
     handleAction(mockEvent);
@@ -1242,6 +2620,7 @@ const TileButton = props => {
     onClick: onClick,
     value: "tile_button",
     ref: ref,
+    inert: inert ? "" : undefined,
     className: `${content.style} tile-button slim`
   }));
 };
@@ -1260,15 +2639,17 @@ const TileList = props => {
   if (!content) {
     return null;
   }
-  const CONFIGURABLE_STYLES = ["background", "borderRadius", "height", "marginBlock", "marginBlockStart", "marginBlockEnd", "marginInline", "paddingBlock", "paddingBlockStart", "paddingBlockEnd", "paddingInline", "paddingInlineStart", "paddingInlineEnd", "width"];
+  const CONFIGURABLE_STYLES = ["background", "borderRadius", "color", "display", "height", "listStyle", "marginBlock", "marginBlockStart", "marginBlockEnd", "marginInline", "marginInlineStart", "paddingBlock", "paddingBlockStart", "paddingBlockEnd", "paddingInline", "paddingInlineStart", "paddingInlineEnd", "width"];
   return /*#__PURE__*/external_React_default().createElement("div", {
     className: "tile-list-container"
   }, content.items.map(({
     icon,
-    text
+    text,
+    style
   }, index) => /*#__PURE__*/external_React_default().createElement("div", {
     key: index,
-    className: "tile-list-item"
+    className: "tile-list-item",
+    style: MultiStageUtils.getValidStyle(style, CONFIGURABLE_STYLES)
   }, /*#__PURE__*/external_React_default().createElement("div", {
     className: "tile-list-icon-wrapper"
   }, /*#__PURE__*/external_React_default().createElement("div", {
@@ -1282,10 +2663,208 @@ const TileList = props => {
     className: "text body-text"
   }))))));
 };
+;// ./content-src/components/CarouselNav.jsx
+function _extends() { return _extends = Object.assign ? Object.assign.bind() : function (n) { for (var e = 1; e < arguments.length; e++) { var t = arguments[e]; for (var r in t) ({}).hasOwnProperty.call(t, r) && (n[r] = t[r]); } return n; }, _extends.apply(null, arguments); }
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+
+
+// Matches --carousel-resize-duration, so the card finishes growing and
+// arriving at the same moment.
+const CAROUSEL_SCROLL_MS = 500;
+
+/**
+ * Centres the selected carousel card and reports which layout the row is in.
+ * Belongs in the component that owns the row, since it needs the scroller and
+ * every card element; the pill row only says which card to centre.
+ */
+function useCarouselScroll(activeId, isCarousel) {
+  const cardRefs = (0,external_React_namespaceObject.useRef)(new Map());
+  const scrollerRef = (0,external_React_namespaceObject.useRef)(null);
+  const glidingRef = (0,external_React_namespaceObject.useRef)(false);
+  const [isSmallLayout, setIsSmallLayout] = (0,external_React_namespaceObject.useState)(false);
+  const registerCard = (0,external_React_namespaceObject.useCallback)((id, el) => {
+    if (el) {
+      cardRefs.current.set(id, el);
+    } else {
+      cardRefs.current.delete(id);
+    }
+  }, []);
+
+  // The scroll position that centres a card. Measured such that
+  // it holds regardless of text direction, padding or offset parent.
+  const centredScrollLeft = (0,external_React_namespaceObject.useCallback)(id => {
+    const card = cardRefs.current.get(id);
+    const scroller = scrollerRef.current;
+    if (!card || !scroller) {
+      return null;
+    }
+    const cardRect = card.getBoundingClientRect();
+    const rowRect = scroller.getBoundingClientRect();
+    const offset = cardRect.left + cardRect.width / 2 - (rowRect.left + rowRect.width / 2);
+    return {
+      scroller,
+      left: scroller.scrollLeft + offset
+    };
+  }, []);
+  const settle = (0,external_React_namespaceObject.useCallback)(id => {
+    const end = centredScrollLeft(id);
+    end?.scroller.scrollTo({
+      left: end.left,
+      behavior: "auto"
+    });
+  }, [centredScrollLeft]);
+
+  // Glide the selected card to the centre, re-measures the destination each
+  // frame because the card is still growing. Progress comes from elapsed time
+  // so the journey takes the same duration whatever its length or the display
+  // refresh rate.
+  (0,external_React_namespaceObject.useEffect)(() => {
+    if (!isCarousel || !activeId) {
+      return undefined;
+    }
+    let frame;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches || !window.performance) {
+      frame = window.requestAnimationFrame(() => settle(activeId));
+      return () => window.cancelAnimationFrame(frame);
+    }
+    const start = window.performance.now();
+    let easedBefore = 0;
+    glidingRef.current = true;
+    const step = now => {
+      const elapsed = Math.max(0, now - start);
+      const progress = Math.min(1, elapsed / CAROUSEL_SCROLL_MS);
+      if (progress >= 1) {
+        settle(activeId);
+        glidingRef.current = false;
+        return;
+      }
+      const target = centredScrollLeft(activeId);
+      if (target) {
+        const eased = 1 - Math.pow(1 - progress, 3);
+        // Cover this frame's share of whatever distance is left.
+        // Both follow the same curve, but this one still
+        // converges if something else scrolls the row.
+        const share = (eased - easedBefore) / (1 - easedBefore);
+        easedBefore = eased;
+        const current = target.scroller.scrollLeft;
+        target.scroller.scrollTo({
+          left: current + (target.left - current) * share,
+          behavior: "auto"
+        });
+      }
+      frame = window.requestAnimationFrame(step);
+    };
+    frame = window.requestAnimationFrame(step);
+    return () => {
+      glidingRef.current = false;
+      window.cancelAnimationFrame(frame);
+    };
+  }, [activeId, isCarousel, centredScrollLeft, settle]);
+  (0,external_React_namespaceObject.useEffect)(() => {
+    const scroller = scrollerRef.current;
+    if (!isCarousel || !scroller || !activeId || !window.ResizeObserver) {
+      return undefined;
+    }
+    let frame = 0;
+    // Which layout the row is in is decided by a container query, read the
+    // marker it sets rather than duplicating the breakpoint here.
+    const readLayout = () => setIsSmallLayout(window.getComputedStyle(scroller).getPropertyValue("--carousel-layout").trim() === "small");
+    readLayout();
+    // Re-centre the card when the row is resized.
+    // Initialize a observer to watch for size changes and ignore callbacks
+    // that do not reflect an actual change.
+    let {
+      width,
+      height
+    } = scroller.getBoundingClientRect();
+    const observer = new window.ResizeObserver(() => {
+      readLayout();
+      const box = scroller.getBoundingClientRect();
+      if (glidingRef.current || box.width === width && box.height === height) {
+        return;
+      }
+      ({
+        width,
+        height
+      } = box);
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        settle(activeId);
+        // Crossing the breakpoint restarts the card's size transition which causes the
+        // centre keeps moving after this frame so settle again once it stops.
+        const running = cardRefs.current.get(activeId)?.getAnimations?.() ?? [];
+        if (running.length) {
+          Promise.allSettled(running.map(anim => anim.finished)).then(() => settle(activeId));
+        }
+      });
+    });
+    observer.observe(scroller, {
+      box: "border-box"
+    });
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(frame);
+    };
+  }, [activeId, isCarousel, settle]);
+  return {
+    scrollerRef,
+    registerCard,
+    isSmallLayout
+  };
+}
+const CarouselNav = ({
+  items = [],
+  activeId,
+  onSelect,
+  navLabel,
+  compact
+}) => {
+  const groupRef = (0,external_React_namespaceObject.useRef)(null);
+  const onSelectRef = (0,external_React_namespaceObject.useRef)(onSelect);
+  onSelectRef.current = onSelect;
+  (0,external_React_namespaceObject.useEffect)(() => {
+    const group = groupRef.current;
+    if (!group) {
+      return undefined;
+    }
+    const handleChange = () => onSelectRef.current?.(group.value);
+    group.addEventListener("change", handleChange);
+    return () => group.removeEventListener("change", handleChange);
+  }, []);
+  const pillItems = items.filter(item => item?.pill && item.id);
+  if (pillItems.length < 2) {
+    return null;
+  }
+  const labelProps = navLabel?.raw ? {
+    "aria-label": navLabel.raw
+  } : {
+    "data-l10n-id": navLabel?.string_id ?? "onboarding-carousel-nav"
+  };
+  return /*#__PURE__*/external_React_default().createElement("div", {
+    className: "carousel-nav"
+  }, /*#__PURE__*/external_React_default().createElement("moz-segmented-control", _extends({
+    ref: groupRef,
+    value: activeId
+  }, labelProps), pillItems.map(({
+    id,
+    pill
+  }) => /*#__PURE__*/external_React_default().createElement("moz-segmented-control-item", {
+    key: id,
+    value: id,
+    size: "small",
+    label: pill.label?.raw,
+    "data-l10n-id": pill.label?.string_id,
+    iconsrc: compact ? undefined : pill.icon
+  }))));
+};
 ;// ./content-src/components/SingleSelect.jsx
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 
 
 
@@ -1300,11 +2879,22 @@ const SingleSelect = ({
   activeTheme,
   content,
   handleAction,
+  messageId,
   setActiveSingleSelectSelection,
   singleSelectId
 }) => {
   const category = content.tiles?.category?.type || content.tiles?.type;
   const isSingleSelect = category === "single-select";
+  const isCarousel = isSingleSelect && content.tiles?.layout === "carousel";
+  const {
+    scrollerRef,
+    registerCard,
+    isSmallLayout
+  } = useCarouselScroll(activeSingleSelectSelections[singleSelectId], isCarousel);
+  const handlePillSelect = id => {
+    setActiveSingleSelectSelection(id, singleSelectId);
+    MultiStageUtils.sendActionTelemetry(messageId, `carousel-pill-${id}`, "CLICK_BUTTON");
+  };
   const autoTriggerAllowed = itemAction => {
     // Currently only enabled for sidebar experiment prefs
     const allowedActions = ["SET_PREF"];
@@ -1346,9 +2936,18 @@ const SingleSelect = ({
 
   const CONFIGURABLE_STYLES = ["background", "border", "borderRadius", "height", "marginBlock", "marginBlockStart", "marginBlockEnd", "marginInline", "paddingBlock", "paddingBlockStart", "paddingBlockEnd", "paddingInline", "paddingInlineStart", "paddingInlineEnd", "width"];
   return /*#__PURE__*/external_React_default().createElement("div", {
-    className: `tiles-single-select-container`
-  }, /*#__PURE__*/external_React_default().createElement("div", null, /*#__PURE__*/external_React_default().createElement("fieldset", {
-    className: `tiles-single-select-section ${category}`
+    className: `tiles-single-select-container ${isCarousel ? "carousel" : ""}`
+  }, isCarousel ? /*#__PURE__*/external_React_default().createElement(CarouselNav, {
+    items: content.tiles?.data,
+    activeId: activeSingleSelectSelections[singleSelectId],
+    onSelect: handlePillSelect,
+    navLabel: content.tiles?.pill_nav_label,
+    compact: isSmallLayout
+  }) : null, /*#__PURE__*/external_React_default().createElement("div", {
+    className: "tiles-single-select-wrapper"
+  }, /*#__PURE__*/external_React_default().createElement("fieldset", {
+    className: `tiles-single-select-section ${category} ${isCarousel ? "carousel" : ""}`,
+    ref: scrollerRef
   }, /*#__PURE__*/external_React_default().createElement(Localized, {
     text: content.tiles?.subtitle || content.subtitle
   }, /*#__PURE__*/external_React_default().createElement("legend", {
@@ -1375,6 +2974,15 @@ const SingleSelect = ({
     }
     const selected = theme && theme === activeTheme || isSingleSelect && activeSingleSelectSelections[singleSelectId] === value;
     const valOrObj = val => typeof val === "object" ? val : {};
+    const iconStyle = MultiStageUtils.getValidStyle(icon, CONFIGURABLE_STYLES);
+    if (icon?.darkModeBackground) {
+      iconStyle["--single-select-icon-background"] = icon.background;
+      iconStyle["--single-select-icon-background-dark"] = icon.darkModeBackground;
+      delete iconStyle.background;
+    }
+    if (isCarousel && iconStyle) {
+      iconStyle.backgroundSize = "100% 100%";
+    }
     const handleClick = evt => {
       if (isSingleSelect) {
         setActiveSingleSelectSelection(value, singleSelectId); // Update selection for the specific component
@@ -1392,7 +3000,8 @@ const SingleSelect = ({
       key: value + (isSingleSelect ? "" : label),
       text: valOrObj(tooltip)
     }, /*#__PURE__*/external_React_default().createElement("label", {
-      className: `select-item ${type}`,
+      className: `select-item ${type} ${selected ? " selected" : ""}`,
+      ref: el => registerCard(value, el),
       onKeyDown: e => handleKeyDown(e),
       style: {
         ...MultiStageUtils.getValidStyle(style, CONFIGURABLE_STYLES),
@@ -1415,8 +3024,8 @@ const SingleSelect = ({
       disabled: inert,
       onClick: e => handleClick(e)
     })), /*#__PURE__*/external_React_default().createElement("div", {
-      className: `icon ${selected ? " selected" : ""} ${value}`,
-      style: MultiStageUtils.getValidStyle(icon, CONFIGURABLE_STYLES)
+      className: `icon ${icon?.darkModeBackground ? " has-dark-background" : ""} ${selected ? " selected" : ""} ${value}`,
+      style: iconStyle
     }), /*#__PURE__*/external_React_default().createElement(Localized, {
       text: label
     }, /*#__PURE__*/external_React_default().createElement("div", {
@@ -1434,7 +3043,8 @@ const SingleSelect = ({
     })) : "", tilebutton ? /*#__PURE__*/external_React_default().createElement(TileButton, {
       content: tilebutton,
       handleAction: handleAction,
-      inputName: inputName
+      inputName: inputName,
+      inert: isCarousel && !selected
     }) : ""));
   }))));
 };
@@ -1446,23 +3056,6 @@ const SingleSelect = ({
 
 
 
-const MarketplaceButtons = props => {
-  return /*#__PURE__*/external_React_default().createElement("ul", {
-    className: "mobile-download-buttons"
-  }, props.buttons.includes("ios") ? /*#__PURE__*/external_React_default().createElement("li", {
-    className: "ios"
-  }, /*#__PURE__*/external_React_default().createElement("button", {
-    "data-l10n-id": "spotlight-ios-marketplace-button",
-    value: "ios",
-    onClick: props.handleAction
-  })) : null, props.buttons.includes("android") ? /*#__PURE__*/external_React_default().createElement("li", {
-    className: "android"
-  }, /*#__PURE__*/external_React_default().createElement("button", {
-    "data-l10n-id": "spotlight-android-marketplace-button",
-    value: "android",
-    onClick: props.handleAction
-  })) : null);
-};
 const MobileDownloads = props => {
   const {
     QR_code: QRCode
@@ -1482,10 +3075,7 @@ const MobileDownloads = props => {
     className: "email-link",
     value: "email_link",
     onClick: props.handleAction
-  }))) : null, props.data.marketplace_buttons ? /*#__PURE__*/external_React_default().createElement(MarketplaceButtons, {
-    buttons: props.data.marketplace_buttons,
-    handleAction: props.handleAction
-  }) : null);
+  }))) : null);
 };
 ;// ./content-src/components/MultiSelect.jsx
 /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1505,6 +3095,52 @@ for (let i = MULTI_SELECT_STYLES.length - 1; i >= 0; i--) {
   }
 }
 const MULTI_SELECT_ICON_STYLES = [...CONFIGURABLE_STYLES, "width", "height", "background", "backgroundColor", "backgroundImage", "backgroundSize", "backgroundPosition", "backgroundRepeat", "backgroundOrigin", "backgroundClip", "border", "borderRadius", "appearance", "fill", "stroke", "outline", "outlineOffset", "boxShadow"];
+
+/**
+ * A note shown beneath a multi select item while that item is unchecked, used
+ * to explain what the user gives up by leaving it unchecked.
+ *
+ * The live region wrapper is always rendered, even when the notice is hidden,
+ * so that assistive technology announces the notice when it later appears.
+ *
+ * The notice is laid out as a full-width row beneath its item, so it is not
+ * compatible with `multiSelectItemDesign: "picker"`, whose items are
+ * pill-shaped chips.
+ *
+ * @param {object} notice the item's `uncheckedNotice` config
+ * @param {boolean} isShown whether the notice content should be rendered
+ */
+const UncheckedNotice = ({
+  notice,
+  isShown
+}) => {
+  const {
+    title,
+    subtitle,
+    iconURL
+  } = notice;
+  return /*#__PURE__*/external_React_default().createElement("div", {
+    className: "multi-select-notice-region",
+    role: "status"
+  }, isShown ? /*#__PURE__*/external_React_default().createElement("div", {
+    className: "multi-select-notice"
+  }, /*#__PURE__*/external_React_default().createElement("div", {
+    className: "multi-select-notice-icon",
+    style: iconURL ? {
+      backgroundImage: `url("${iconURL}")`
+    } : null
+  }), /*#__PURE__*/external_React_default().createElement("div", {
+    className: "multi-select-notice-content"
+  }, title ? /*#__PURE__*/external_React_default().createElement(Localized, {
+    text: title
+  }, /*#__PURE__*/external_React_default().createElement("p", {
+    className: "multi-select-notice-title"
+  })) : null, subtitle ? /*#__PURE__*/external_React_default().createElement(Localized, {
+    text: subtitle
+  }, /*#__PURE__*/external_React_default().createElement("p", {
+    className: "multi-select-notice-subtitle"
+  })) : null)) : null);
+};
 const MultiSelect = ({
   content,
   screenMultiSelects,
@@ -1626,43 +3262,56 @@ const MultiSelect = ({
     group,
     style,
     pickerEmoji,
-    pickerEmojiBackgroundColor
-  }) => /*#__PURE__*/external_React_default().createElement("div", {
-    key: id + label,
-    className: "checkbox-container multi-select-item",
-    style: MultiStageUtils.getValidStyle(style, MULTI_SELECT_STYLES),
-    tabIndex: isPicker ? "0" : null,
-    onClick: isPicker ? handleCheckboxContainerInteraction : null,
-    onKeyDown: isPicker ? handleCheckboxContainerInteraction : null,
-    role: isPicker ? "checkbox" : null,
-    "aria-checked": isPicker ? activeMultiSelect?.includes(id) : null
-  }, /*#__PURE__*/external_React_default().createElement("input", {
-    type: type // checkbox or radio
-    ,
-    id: id,
-    value: id,
-    name: group,
-    checked: activeMultiSelect?.includes(id),
-    style: MultiStageUtils.getValidStyle(icon?.style, MULTI_SELECT_ICON_STYLES),
-    onChange: handleChange,
-    ref: el => refs.current[id] = el,
-    "aria-describedby": description ? `${id}-description` : null,
-    "aria-labelledby": description ? `${id}-label` : null,
-    tabIndex: isPicker ? "-1" : "0"
-  }), isPicker && /*#__PURE__*/external_React_default().createElement(PickerIcon, {
-    emoji: pickerEmoji,
-    bgColor: pickerEmojiBackgroundColor,
-    isChecked: activeMultiSelect?.includes(id)
-  }), label ? /*#__PURE__*/external_React_default().createElement(Localized, {
-    text: label
-  }, /*#__PURE__*/external_React_default().createElement("label", {
-    id: `${id}-label`,
-    htmlFor: id
-  })) : null, description ? /*#__PURE__*/external_React_default().createElement(Localized, {
-    text: description
-  }, /*#__PURE__*/external_React_default().createElement("p", {
-    id: `${id}-description`
-  })) : null)), content.tiles.footer ? /*#__PURE__*/external_React_default().createElement(Localized, {
+    pickerEmojiBackgroundColor,
+    uncheckedNotice
+  }) => {
+    const checkboxContainer = /*#__PURE__*/external_React_default().createElement("div", {
+      key: id + label,
+      className: "checkbox-container multi-select-item",
+      style: MultiStageUtils.getValidStyle(style, MULTI_SELECT_STYLES),
+      tabIndex: isPicker ? "0" : null,
+      onClick: isPicker ? handleCheckboxContainerInteraction : null,
+      onKeyDown: isPicker ? handleCheckboxContainerInteraction : null,
+      role: isPicker ? "checkbox" : null,
+      "aria-checked": isPicker ? activeMultiSelect?.includes(id) : null
+    }, /*#__PURE__*/external_React_default().createElement("input", {
+      type: type // checkbox or radio
+      ,
+      id: id,
+      value: id,
+      name: group,
+      checked: activeMultiSelect?.includes(id),
+      style: MultiStageUtils.getValidStyle(icon?.style, MULTI_SELECT_ICON_STYLES),
+      onChange: handleChange,
+      ref: el => refs.current[id] = el,
+      "aria-describedby": description ? `${id}-description` : null,
+      "aria-labelledby": description ? `${id}-label` : null,
+      tabIndex: isPicker ? "-1" : "0"
+    }), isPicker && /*#__PURE__*/external_React_default().createElement(PickerIcon, {
+      emoji: pickerEmoji,
+      bgColor: pickerEmojiBackgroundColor,
+      isChecked: activeMultiSelect?.includes(id)
+    }), label ? /*#__PURE__*/external_React_default().createElement(Localized, {
+      text: label
+    }, /*#__PURE__*/external_React_default().createElement("label", {
+      id: `${id}-label`,
+      htmlFor: id
+    })) : null, description ? /*#__PURE__*/external_React_default().createElement(Localized, {
+      text: description
+    }, /*#__PURE__*/external_React_default().createElement("p", {
+      id: `${id}-description`
+    })) : null);
+    if (!uncheckedNotice) {
+      return checkboxContainer;
+    }
+    return /*#__PURE__*/external_React_default().createElement("div", {
+      className: "multi-select-item-group",
+      key: id + label
+    }, checkboxContainer, /*#__PURE__*/external_React_default().createElement(UncheckedNotice, {
+      notice: uncheckedNotice,
+      isShown: !activeMultiSelect?.includes(id)
+    }));
+  }), content.tiles.footer ? /*#__PURE__*/external_React_default().createElement(Localized, {
     text: items.some(i => activeMultiSelect?.includes(i.id)) ? content.tiles.footer.checkedLabel : content.tiles.footer.unCheckAllLabel
   }, /*#__PURE__*/external_React_default().createElement("h2", {
     id: "multi-stage-multi-select-footer-label"
@@ -1803,7 +3452,7 @@ const EmbeddedMigrationWizard = ({
     "force-show-import-all": options?.force_show_import_all || "false",
     "auto-request-state": "",
     ref: ref,
-    "option-expander-title-string": options?.option_expander_title_string || "",
+    "option-expander-title-string": options?.option_expander_title_string,
     "hide-option-expander-subtitle": options?.hide_option_expander_subtitle || false,
     "data-import-complete-success-string": options?.data_import_complete_success_string || "",
     "selection-header-string": options?.selection_header_string || "",
@@ -1827,8 +3476,24 @@ const EmbeddedMigrationWizard = ({
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
-const EmbeddedThemePicker = () => {
-  return /*#__PURE__*/external_React_default().createElement("theme-picker", null);
+const EmbeddedThemePicker = ({
+  installSource
+}) => {
+  const themePickerRef = (0,external_React_namespaceObject.useRef)(null);
+  (0,external_React_namespaceObject.useEffect)(() => {
+    if (installSource !== "about:welcome") {
+      return;
+    }
+    // The widget may not be upgraded from a plain element yet when this
+    // mounts, so wait for its class definition before calling `shown()`.
+    customElements.whenDefined("theme-picker").then(() => {
+      themePickerRef.current?.shown();
+    });
+  }, [installSource]);
+  return /*#__PURE__*/external_React_default().createElement("theme-picker", {
+    ref: themePickerRef,
+    installsource: installSource
+  });
 };
 ;// ./content-src/components/EmbeddedFxBackupOptIn.jsx
 /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -2283,9 +3948,8 @@ const PinnableSitesList = ({
     ...prev,
     [id]: state
   }));
-  const handlePin = async (event, item) => {
+  const handlePin = async (event, item, position) => {
     setItemState(item.id, PENDING);
-    MultiStageUtils.sendActionTelemetry(messageId, item.id, "CLICK_BUTTON");
     const result = await handleAction(event, {
       type: "PIN_TASKBAR_TAB",
       needsAwait: true,
@@ -2304,7 +3968,9 @@ const PinnableSitesList = ({
       pinResultLabel = "failure";
     }
     MultiStageUtils.sendActionTelemetry(messageId, item.id, "PIN_SITE", {
-      result: pinResultLabel
+      result: pinResultLabel,
+      position,
+      personalized: !!item.personalized
     });
 
     // Re-enable the button only on explicit failure so the user can retry.
@@ -2318,7 +3984,7 @@ const PinnableSitesList = ({
   };
   return /*#__PURE__*/external_React_default().createElement("ul", {
     className: `pinnable-sites-list${alwaysShow ? " always-visible" : ""}`
-  }, items.map(item => {
+  }, items.map((item, index) => {
     const nameId = `pinnable-site-name-${item.id}`;
     const state = itemStates[item.id] ?? IDLE;
     const isPendingOrPinned = state === PENDING || state === PINNED;
@@ -2342,8 +4008,9 @@ const PinnableSitesList = ({
       className: "pinnable-sites-description"
     }))), /*#__PURE__*/external_React_default().createElement("button", {
       className: "pinnable-sites-pin-button primary",
+      value: item.id,
       disabled: isPendingOrPinned,
-      onClick: e => handlePin(e, item),
+      onClick: e => handlePin(e, item, index + 1),
       "aria-describedby": nameId
     }, pinButtonLabel && /*#__PURE__*/external_React_default().createElement(Localized, {
       text: pinButtonLabel
@@ -2403,7 +4070,7 @@ const TextBoxTile = ({
   }, activeContent ?? ""));
 };
 ;// ./content-src/components/ContentTiles.jsx
-function _extends() { return _extends = Object.assign ? Object.assign.bind() : function (n) { for (var e = 1; e < arguments.length; e++) { var t = arguments[e]; for (var r in t) ({}).hasOwnProperty.call(t, r) && (n[r] = t[r]); } return n; }, _extends.apply(null, arguments); }
+function ContentTiles_extends() { return ContentTiles_extends = Object.assign ? Object.assign.bind() : function (n) { for (var e = 1; e < arguments.length; e++) { var t = arguments[e]; for (var r in t) ({}).hasOwnProperty.call(t, r) && (n[r] = t[r]); } return n; }, ContentTiles_extends.apply(null, arguments); }
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -2426,9 +4093,25 @@ function _extends() { return _extends = Object.assign ? Object.assign.bind() : f
 
 
 
+
 const HEADER_STYLES = ["backgroundColor", "border", "padding", "margin", "width", "height"];
 const ContentTiles_TILE_STYLES = ["border", "borderRadius", "marginBlock", "marginInline", "paddingBlock", "paddingInline"];
 const CONTAINER_STYLES = ["padding", "margin", "marginBlock", "marginInline", "paddingBlock", "paddingInline", "flexDirection", "flexWrap", "flexFlow", "flexGrow", "flexShrink", "justifyContent", "alignItems", "gap"];
+
+/**
+ * @param {object|object[]} tiles - The tiles of the screen being shown.
+ * @returns {object} Impression context, if any.
+ */
+function getTileImpressionContext(tiles) {
+  const pinnableSites = (Array.isArray(tiles) ? tiles : [tiles]).find(tile => tile?.type === "pinnable_sites" && Array.isArray(tile.data));
+  if (!pinnableSites) {
+    return {};
+  }
+  return {
+    total_sites: pinnableSites.data.length,
+    personalized_sites: pinnableSites.data.filter(item => item?.personalized).length
+  };
+}
 const ContentTiles = props => {
   const {
     content
@@ -2596,8 +4279,8 @@ const ContentTiles = props => {
       key: index,
       className: `content-tile ${header ? "has-header" : ""}`,
       style: MultiStageUtils.getTileStyle(tile, ContentTiles_TILE_STYLES)
-    }, header?.title && /*#__PURE__*/external_React_default().createElement("button", _extends({
-      className: "tile-header secondary",
+    }, header?.title && /*#__PURE__*/external_React_default().createElement("button", ContentTiles_extends({
+      className: `tile-header secondary${header.linkStyle ? " link-style" : ""}`,
       onClick: () => toggleTile(index, tile)
     }, tileHeaderProps, {
       style: MultiStageUtils.getValidStyle(header.style, HEADER_STYLES)
@@ -2644,7 +4327,8 @@ const ContentTiles = props => {
       handleAction: props.handleAction,
       activeSingleSelectSelections: props.activeSingleSelectSelections,
       setActiveSingleSelectSelection: props.setActiveSingleSelectSelection,
-      singleSelectId: `single-select-${index}`
+      singleSelectId: `single-select-${index}`,
+      messageId: props.messageId
     }), tile.type === "mobile_downloads" && tile.data && /*#__PURE__*/external_React_default().createElement(MobileDownloads, {
       data: tile.data,
       handleAction: props.handleAction
@@ -2670,7 +4354,8 @@ const ContentTiles = props => {
         tiles: tile
       }
     }), tile.type === "theme-picker" && /*#__PURE__*/external_React_default().createElement(EmbeddedThemePicker, {
-      handleAction: props.handleAction
+      handleAction: props.handleAction,
+      installSource: tile.data?.installSource
     }), tile.type === "action_checklist" && tile.data && /*#__PURE__*/external_React_default().createElement(ActionChecklist, {
       content: content,
       message_id: props.messageId,
@@ -2713,6 +4398,9 @@ const ContentTiles = props => {
         tiles: tile
       },
       contentToggled: props.contentToggleChecked
+    }), tile.type === "text" && tile.text && /*#__PURE__*/external_React_default().createElement(LinkParagraph, {
+      text_content: tile,
+      handleAction: props.handleAction
     })) : null);
   };
   const renderContentTiles = () => {
@@ -2760,7 +4448,73 @@ const ContentTiles = props => {
 
 
 
+
 const DEFAULT_AUTO_ADVANCE_MS = 20000;
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+const CORNER_IMAGE_POSITIONS = new Set(["bottom-left", "bottom-right", "top-left", "top-right"]);
+const DEFAULT_CORNER_IMAGE_POSITION = "bottom-right";
+const CORNER_IMAGE_ENTRANCE_ANIMATIONS = new Set(["none", "fade", "slide-block", "slide-inline", "slide-corner", "zoom"]);
+const DEFAULT_CORNER_IMAGE_ENTRANCE_ANIMATION = "none";
+// Direction-relative aliases for the positions above, mapped to [ltr, rtl] so
+// that `*-end` follows the reading direction the way inset-inline-end would.
+const CORNER_IMAGE_LOGICAL_POSITIONS = new Map([["bottom-start", ["bottom-left", "bottom-right"]], ["bottom-end", ["bottom-right", "bottom-left"]], ["top-start", ["top-left", "top-right"]], ["top-end", ["top-right", "top-left"]]]);
+
+/**
+ * Resolves a corner_image position to one of CORNER_IMAGE_POSITIONS, so the
+ * rendered class is always a physical corner. Unsupported values fall back
+ * to bottom-right.
+ */
+function resolveCornerImagePosition(position) {
+  const logical = CORNER_IMAGE_LOGICAL_POSITIONS.get(position);
+  if (logical) {
+    const isRTL = typeof document !== "undefined" && document.documentElement.matches(":dir(rtl)");
+    return logical[isRTL ? 1 : 0];
+  }
+  return CORNER_IMAGE_POSITIONS.has(position) ? position : DEFAULT_CORNER_IMAGE_POSITION;
+}
+
+/**
+ * Applies an image's `rtl` overrides when the document is right-to-left.
+ */
+function resolveDirectionalImage(image) {
+  const isRTL = typeof document !== "undefined" && document.documentElement.matches(":dir(rtl)");
+  return isRTL && image?.rtl ? {
+    ...image,
+    ...image.rtl
+  } : image;
+}
+
+/**
+ * Dismisses the message once the screen has been shown for `autoDismiss.after`
+ * milliseconds. The countdown only runs while the page is visible and restarts
+ * when it becomes visible again, so the screen can't time out while invisible
+ * in the background.
+ */
+function useAutoDismiss(autoDismiss, messageId) {
+  const after = autoDismiss?.after;
+  (0,external_React_namespaceObject.useEffect)(() => {
+    if (!Number.isFinite(after) || after < 0 || after > MAX_TIMEOUT_MS) {
+      return undefined;
+    }
+    let timer = null;
+    let dismissed = false;
+    const dismiss = () => {
+      dismissed = true;
+      MultiStageUtils.sendActionTelemetry(messageId, "auto_dismiss", "AUTO_DISMISS");
+      window.AWFinish();
+    };
+    const restartCountdown = () => {
+      clearTimeout(timer);
+      timer = !dismissed && document.visibilityState === "visible" ? setTimeout(dismiss, after) : null;
+    };
+    restartCountdown();
+    document.addEventListener("visibilitychange", restartCountdown);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", restartCountdown);
+    };
+  }, [after, messageId]);
+}
 const MultiStageProtonScreen = props => {
   const {
     autoAdvance,
@@ -2770,6 +4524,7 @@ const MultiStageProtonScreen = props => {
     navigate,
     order
   } = props;
+  useAutoDismiss(props.autoDismiss, messageId);
   (0,external_React_namespaceObject.useEffect)(() => {
     if (!autoAdvance && !advanceOnExperimentLoad) {
       return () => {};
@@ -2887,6 +4642,7 @@ const MultiStageProtonScreen = props => {
     id: props.id,
     order: props.order,
     activeTheme: props.activeTheme,
+    activeThemeId: props.activeThemeId,
     installedAddons: props.installedAddons,
     screenMultiSelects: props.screenMultiSelects,
     setScreenMultiSelects: props.setScreenMultiSelects,
@@ -3114,19 +4870,22 @@ class ProtonScreen extends (external_React_default()).PureComponent {
       ref: titleRef
     }));
   }
-  renderPicture({
-    imageURL = "chrome://branding/content/about-logo.svg",
-    darkModeImageURL,
-    reducedMotionImageURL,
-    darkModeReducedMotionImageURL,
-    alt = "",
-    width,
-    height,
-    marginBlock,
-    marginInline,
-    style,
-    className = "logo-container"
-  }) {
+  renderPicture(image) {
+    const {
+      imageURL = "chrome://branding/content/about-logo.svg",
+      darkModeImageURL,
+      reducedMotionImageURL,
+      darkModeReducedMotionImageURL,
+      videoURL,
+      alt = "",
+      width,
+      height,
+      marginBlock,
+      marginInline,
+      style,
+      imgStyle,
+      className = "logo-container"
+    } = resolveDirectionalImage(image);
     function getLoadingStrategy() {
       for (let url of [imageURL, darkModeImageURL, reducedMotionImageURL, darkModeReducedMotionImageURL]) {
         if (MultiStageUtils.getLoadingStrategyFor(url) === "lazy") {
@@ -3135,14 +4894,41 @@ class ProtonScreen extends (external_React_default()).PureComponent {
       }
       return "eager";
     }
-    const pictureStyle = {
+    const containerStyle = {
       marginInline,
       marginBlock,
       ...style
     };
+
+    // videoURL lets this render a one-shot animation instead of a static image.
+    // It plays once and holds its last frame. Users who prefer reduced motion
+    // fall through to the static <picture>/<img> below.
+    const prefersReducedMotion = typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (videoURL && !prefersReducedMotion) {
+      return /*#__PURE__*/external_React_default().createElement("div", {
+        className: className,
+        style: containerStyle
+      }, /*#__PURE__*/external_React_default().createElement(Localized, {
+        text: alt
+      }, /*#__PURE__*/external_React_default().createElement("div", {
+        className: "sr-only logo-alt"
+      })), /*#__PURE__*/external_React_default().createElement("video", {
+        className: "brand-logo",
+        style: {
+          height,
+          width,
+          ...imgStyle
+        },
+        src: videoURL,
+        autoPlay: true,
+        muted: true,
+        playsInline: true,
+        role: alt ? null : "presentation"
+      }));
+    }
     return /*#__PURE__*/external_React_default().createElement("picture", {
       className: className,
-      style: pictureStyle
+      style: containerStyle
     }, darkModeReducedMotionImageURL ? /*#__PURE__*/external_React_default().createElement("source", {
       srcset: darkModeReducedMotionImageURL,
       media: "(prefers-color-scheme: dark) and (prefers-reduced-motion: reduce)"
@@ -3160,7 +4946,8 @@ class ProtonScreen extends (external_React_default()).PureComponent {
       className: "brand-logo",
       style: {
         height,
-        width
+        width,
+        ...imgStyle
       },
       src: imageURL,
       alt: "",
@@ -3179,6 +4966,72 @@ class ProtonScreen extends (external_React_default()).PureComponent {
       className: "noodle outline-L"
     }), /*#__PURE__*/external_React_default().createElement("div", {
       className: "noodle yellow-circle"
+    }));
+  }
+  renderLastCardImage(content) {
+    const {
+      width,
+      height,
+      marginBlock,
+      marginInline,
+      ...image
+    } = content.center_image ?? {};
+    return /*#__PURE__*/external_React_default().createElement("div", {
+      className: "last-card-image",
+      style: {
+        "--last-card-image-width": width,
+        "--last-card-image-height": height,
+        "--last-card-picture-margin-block": marginBlock,
+        "--last-card-picture-margin-inline": marginInline
+      }
+    }, content.center_image ? this.renderPicture({
+      ...image,
+      className: "center-image"
+    }) : null);
+  }
+
+  // Draws the front card plus one back card for each screen still to come, up
+  // to two.
+  renderCardStackLayers() {
+    const {
+      order = 0,
+      totalNumberOfScreens = 1
+    } = this.props;
+    const cardsBehind = totalNumberOfScreens - order - 1;
+    return /*#__PURE__*/external_React_default().createElement((external_React_default()).Fragment, null, /*#__PURE__*/external_React_default().createElement("div", {
+      className: "card-stack-front"
+    }), cardsBehind >= 1 ? /*#__PURE__*/external_React_default().createElement("div", {
+      className: "card-stack-layer-1"
+    }) : null, cardsBehind >= 2 ? /*#__PURE__*/external_React_default().createElement("div", {
+      className: "card-stack-layer-2"
+    }) : null);
+  }
+  renderCornerImage(anchor) {
+    const cornerImage = this.props.content.corner_image;
+    const position = resolveCornerImagePosition(cornerImage.position);
+    const entranceAnimation = cornerImage.entrance_animation ?? {};
+    const entranceType = CORNER_IMAGE_ENTRANCE_ANIMATIONS.has(entranceAnimation.type) ? entranceAnimation.type : DEFAULT_CORNER_IMAGE_ENTRANCE_ANIMATION;
+    return /*#__PURE__*/external_React_default().createElement("div", {
+      className: "corner-image-container"
+    }, this.renderPicture({
+      imageURL: cornerImage.imageURL,
+      darkModeImageURL: cornerImage.darkModeImageURL,
+      reducedMotionImageURL: cornerImage.reducedMotionImageURL,
+      darkModeReducedMotionImageURL: cornerImage.darkModeReducedMotionImageURL,
+      rtl: cornerImage.rtl,
+      height: cornerImage.height,
+      width: cornerImage.width,
+      marginBlock: cornerImage.marginBlock,
+      marginInline: cornerImage.marginInline,
+      style: {
+        // Read indirectly by _multistage.scss, so reduced motion can
+        // override them. Undefined values fall through to its defaults.
+        "--corner-image-entrance-distance": entranceAnimation.distance,
+        "--corner-image-entrance-duration": entranceAnimation.duration,
+        "--corner-image-entrance-delay": entranceAnimation.delay,
+        ...cornerImage.style
+      },
+      className: `corner-image ${position}${anchor === "screen" ? ` entrance-${entranceType}` : ""}`
     }));
   }
   renderLanguageSwitcher() {
@@ -3260,9 +5113,10 @@ class ProtonScreen extends (external_React_default()).PureComponent {
     return !!(content.background && content.background_static || content.hero_image?.url && content.hero_image?.static_url);
   }
   getEffectiveBackground(content) {
-    if (content.position !== "split") {
-      const combinedBackground = content.background && content.zap_border ? `linear-gradient(96deg, #B89CFF 20.68%, #FF9565 79.34%) border-box border-area, image(${content.background}) padding-box` : content.background;
-      const combinedBackgroundStatic = content.background_static && content.zap_border ? `linear-gradient(96deg, #B89CFF 20.68%, #FF9565 79.34%) border-box border-area, image(${content.background_static}) padding-box` : content.background_static;
+    if (!["split", "card-stack"].includes(content.position)) {
+      const gradient = content.zap_border_gradient || "linear-gradient(96deg, #B89CFF 20.68%, #FF9565 79.34%)";
+      const combinedBackground = content.background && content.zap_border ? `${gradient} border-box border-area, image(${content.background}) padding-box` : content.background;
+      const combinedBackgroundStatic = content.background_static && content.zap_border ? `${gradient} border-box border-area, image(${content.background_static}) padding-box` : content.background_static;
       return this.props.animationsPaused && content.background_static ? combinedBackgroundStatic : combinedBackground;
     }
     return this.props.animationsPaused && content.background_static ? content.background_static : content.background;
@@ -3290,17 +5144,31 @@ class ProtonScreen extends (external_React_default()).PureComponent {
   renderSecondarySection(content) {
     const background = this.getEffectiveBackground(content);
     const heroImageUrl = this.getEffectiveHeroImageUrl(content);
-    // pinnable_sites exposes its background through a custom property so the
-    // stylesheet can swap the wide-layout image for a narrow gradient without
-    // overriding an inline `background` shorthand.
+    const cardStackImageClass = content.card_stack_image ? `card-stack-image-${content.card_stack_image.type ?? "float"}` : "";
     const tiles = Array.isArray(content.tiles) ? content.tiles : [content.tiles];
     const isPinnableSites = tiles.some(tile => tile?.type === "pinnable_sites");
-    return /*#__PURE__*/external_React_default().createElement("div", {
-      className: `section-secondary ${content.hide_secondary_section ? "with-secondary-section-hidden" : ""}`,
-      style: background ? {
+    let style = {};
+    // compute the style prop depending on the message type
+    if (content.position === "card-stack" && content.card_stack_image) {
+      // set variables to use in the CSS
+      style = {
+        "--card-stack-bkg": background,
+        "--card-stack-bkg-uncropped": content.card_stack_image.background_uncropped ?? background,
+        "--card-stack-bkg-medium": content.card_stack_image.background_medium ?? background,
+        "--card-stack-bkg-small": content.card_stack_image.background_small ?? background
+      };
+    } else {
+      // pinnable_sites exposes its background through a custom property so the
+      // stylesheet can swap the wide-layout image for a narrow gradient without
+      // overriding an inline `background` shorthand.
+      style = background ? {
         [isPinnableSites ? "--pinnable-sites-bkg" : "background"]: background,
         "--mr-secondary-background-position-y": content.split_narrow_bkg_position
-      } : {}
+      } : {};
+    }
+    return /*#__PURE__*/external_React_default().createElement("div", {
+      className: `section-secondary ${content.hide_secondary_section ? "with-secondary-section-hidden" : ""} ${cardStackImageClass}`,
+      style: style
     }, content.dismiss_button && content.reverse_split ? this.renderDismissButton() : null, /*#__PURE__*/external_React_default().createElement(Localized, {
       text: content.image_alt_text
     }, /*#__PURE__*/external_React_default().createElement("div", {
@@ -3345,16 +5213,19 @@ class ProtonScreen extends (external_React_default()).PureComponent {
   }
   renderOrderedContent(content) {
     const elements = [];
-    for (const item of content) {
+    for (const [index, item] of content.entries()) {
       switch (item.type) {
         case "text":
           elements.push(/*#__PURE__*/external_React_default().createElement(LinkParagraph, {
+            key: index,
             text_content: item,
             handleAction: this.props.handleAction
           }));
           break;
         case "image":
-          elements.push(this.renderPicture({
+          elements.push(/*#__PURE__*/external_React_default().createElement((external_React_default()).Fragment, {
+            key: index
+          }, this.renderPicture({
             imageURL: item.url,
             darkModeImageURL: item.darkModeImageURL,
             height: item.height,
@@ -3362,7 +5233,7 @@ class ProtonScreen extends (external_React_default()).PureComponent {
             alt: item.alt_text,
             marginInline: item.marginInline,
             className: "inline-image"
-          }));
+          })));
       }
     }
     return /*#__PURE__*/external_React_default().createElement((external_React_default()).Fragment, null, elements);
@@ -3379,9 +5250,9 @@ class ProtonScreen extends (external_React_default()).PureComponent {
     }));
   }
   getCombinedInnerStyles(content, isWideScreen) {
-    const CONFIGURABLE_STYLES = ["overflow", "display", "paddingInline", "paddingInlineStart", "paddingInlineEnd", "paddingBlock", "paddingBlockStart", "paddingBlockEnd"];
+    const INNER_CONTENT_CONFIGURABLE_STYLES = ["overflow", "display", "paddingInline", "paddingInlineStart", "paddingInlineEnd", "paddingBlock", "paddingBlockStart", "paddingBlockEnd", "width", "minHeight", "flexGrow"];
     const innerContentStyles = isWideScreen ? content.main_content_style || {} : content.main_content_style_narrow || {};
-    const validInnerStyles = MultiStageUtils.getValidStyle(innerContentStyles, CONFIGURABLE_STYLES) || {};
+    const validInnerStyles = MultiStageUtils.getValidStyle(innerContentStyles, INNER_CONTENT_CONFIGURABLE_STYLES) || {};
     return {
       ...validInnerStyles,
       justifyContent: content.split_content_justify_content
@@ -3429,10 +5300,24 @@ class ProtonScreen extends (external_React_default()).PureComponent {
       isWideScreen
     } = this.props;
     const includeNoodles = content.has_noodles;
+    const isCenterLargeFullscreen = content.position === "center-large" && !!content.fullscreen;
+    // Where the corner image is anchored, which decides where it gets rendered.
+    // The fullscreen FRO layout anchors to the window, so its container stays a
+    // child of .screen. Every other layout anchors to the card instead, which
+    // means rendering inside .section-main (the positioned card wrapper).
+    let cornerImageAnchor = null;
+    if (content.corner_image) {
+      cornerImageAnchor = isCenterLargeFullscreen ? "screen" : "card";
+    }
+    const secondaryCTATop = content.secondary_button_top ? /*#__PURE__*/external_React_default().createElement(SecondaryCTA, {
+      content: content,
+      handleAction: this.props.handleAction,
+      position: "top"
+    }) : null;
     const hasZapBorder = content.zap_border;
     const hasZapShadow = content.zap_shadow;
     // The default screen position is "center"
-    const isCenterPosition = content.position === "center" || !content.position;
+    const isCenterPosition = ["center", "center-large"].includes(content.position) || !content.position;
     const hideStepsIndicator = autoAdvance || content?.video_container || isSingleScreen || forceHideStepsIndicator;
     const textColorClass = content.text_color ? `${content.text_color}-text` : "";
     // Assign proton screen style 'screen-1' or 'screen-2' to centered screens
@@ -3441,15 +5326,27 @@ class ProtonScreen extends (external_React_default()).PureComponent {
     const isEmbeddedMigration = content.tiles?.type === "migration-wizard";
     const isSystemPromptStyleSpotlight = content.isSystemPromptStyleSpotlight === true;
     const combinedStyles = this.getCombinedInnerStyles(content, isWideScreen);
+    // content.screen_style is a shared mix of screen-level layout tweaks
+    // consumed by three different elements below (.screen, .section-main,
+    // .main-content), each pulling its own allowlisted subset of it.
+    const screenStyleJustifyContent = content.screen_style && MultiStageUtils.getValidStyle(content.screen_style, ["justifyContent"]).justifyContent;
     return /*#__PURE__*/external_React_default().createElement("main", {
       className: `screen ${this.props.id || ""}
           ${screenClassName} ${textColorClass}`,
       "reverse-split": content.reverse_split ? "" : null,
       fullscreen: content.fullscreen ? "" : null,
-      style: content.screen_style && MultiStageUtils.getValidStyle(content.screen_style, ["overflow", "display"]),
+      style: {
+        ...(content.screen_style && MultiStageUtils.getValidStyle(content.screen_style, ["overflow", "display"])),
+        // center-large-fullscreen renders its background here, at the
+        // full-viewport screen level, rather than on .main-content, so it
+        // isn't confined to that inset card and can show behind the
+        // blurred glow (see .main-content below).
+        background: isCenterLargeFullscreen ? this.getEffectiveBackground(content) : null
+      },
       role: ariaRole ?? "alertdialog",
       layout: content.layout,
       pos: content.position || "center",
+      "data-theme": content.position === "card-stack" && this.props.activeThemeId ? this.props.activeThemeId : null,
       tabIndex: "-1",
       "aria-labelledby": `mainContentHeader${content.subtitle ? " mainContentSubheader" : ""}`,
       "aria-describedby": "mainContentInner",
@@ -3457,31 +5354,31 @@ class ProtonScreen extends (external_React_default()).PureComponent {
         this.mainContentHeader = input;
       },
       "no-rdm": content.no_rdm ? "" : null
-    }, isCenterPosition ? null : this.renderSecondarySection(content), /*#__PURE__*/external_React_default().createElement("div", {
+      // eslint-disable-next-line react/no-unknown-property
+      ,
+      "initial-card": content.position === "card-stack" && this.props.isFirstScreen && this.props.previousOrder < 0 ? "" : null
+    }, content.position === "card-stack" ? this.renderCardStackLayers() : null, cornerImageAnchor === "screen" ? this.renderCornerImage("screen") : null, isCenterPosition ? null : this.renderSecondarySection(content), /*#__PURE__*/external_React_default().createElement("div", {
       className: `section-main ${isEmbeddedMigration ? "embedded-migration" : ""}${isSystemPromptStyleSpotlight ? "system-prompt-spotlight" : ""}`,
       "hide-secondary-section": content.hide_secondary_section ? String(content.hide_secondary_section) : null,
       role: "document",
       style: content.screen_style && MultiStageUtils.getValidStyle(content.screen_style, ["width", "padding", "height"])
-    }, content.secondary_button_top ? /*#__PURE__*/external_React_default().createElement(SecondaryCTA, {
-      content: content,
-      handleAction: this.props.handleAction,
-      position: "top"
-    }) : null, includeNoodles ? this.renderNoodles() : null, content.more_button ? this.renderMoreButton() : null, content.dismiss_button && !content.reverse_split ? this.renderDismissButton() : null, /*#__PURE__*/external_React_default().createElement("div", {
+    }, cornerImageAnchor === "card" ? this.renderCornerImage("card") : null, isCenterLargeFullscreen ? null : secondaryCTATop, includeNoodles ? this.renderNoodles() : null, content.more_button ? this.renderMoreButton() : null, content.dismiss_button && !content.reverse_split ? this.renderDismissButton() : null, /*#__PURE__*/external_React_default().createElement("div", {
       className: `main-content ${hideStepsIndicator ? "no-steps" : ""}`,
       style: {
-        background: isCenterPosition && this.getEffectiveBackground(content) ? this.getEffectiveBackground(content) : null,
-        width: content.width && content.position !== "split" ? content.width : null,
+        background: isCenterPosition && !isCenterLargeFullscreen && this.getEffectiveBackground(content) ? this.getEffectiveBackground(content) : null,
+        width: content.width && !["split", "card-stack"].includes(content.position) ? content.width : null,
         paddingBlock: content.split_content_padding_block ? content.split_content_padding_block : null,
-        paddingInline: content.split_content_padding_inline ? content.split_content_padding_inline : null
+        paddingInline: content.split_content_padding_inline ? content.split_content_padding_inline : null,
+        justifyContent: screenStyleJustifyContent
       }
-    }, isCenterPosition && this.hasAnimatedContent(content) ? this.renderAnimationPlayPauseButton() : null, content.logo && !content.fullscreen ? this.renderPicture(content.logo) : null, isRtamo && !content.fullscreen ? this.renderRTAMOIcon(addonType, this.props.themeScreenshots, this.props.addonIconURL) : null, /*#__PURE__*/external_React_default().createElement("div", {
+    }, isCenterLargeFullscreen ? secondaryCTATop : null, isCenterPosition && this.hasAnimatedContent(content) ? this.renderAnimationPlayPauseButton() : null, content.logo && !content.fullscreen ? this.renderPicture(content.logo) : null, isRtamo && !content.fullscreen ? this.renderRTAMOIcon(addonType, this.props.themeScreenshots, this.props.addonIconURL) : null, /*#__PURE__*/external_React_default().createElement("div", {
       className: "main-content-inner",
       id: "mainContentInner",
       style: combinedStyles
     }, content.logo && content.fullscreen ? this.renderPicture(content.logo) : null, isRtamo && content.fullscreen ? this.renderRTAMOIcon(addonType, this.props.themeScreenshots, this.props.addonIconURL) : null, content.title || content.subtitle ? /*#__PURE__*/external_React_default().createElement("div", {
       id: "multi-stage-message-welcome-text",
       className: `welcome-text ${content.title_style || ""}`
-    }, content.title ? this.renderTitle(content) : null, content.subtitle ? /*#__PURE__*/external_React_default().createElement(Localized, {
+    }, content.title ? this.renderTitle(content) : null, content.layout === "last-card" ? this.renderLastCardImage(content) : null, content.subtitle ? /*#__PURE__*/external_React_default().createElement(Localized, {
       text: content.subtitle
     }, /*#__PURE__*/external_React_default().createElement("h2", {
       "data-l10n-args": JSON.stringify({
@@ -3507,6 +5404,573 @@ class ProtonScreen extends (external_React_default()).PureComponent {
     })));
   }
 }
+const localizableThingPropTypes = prop_types_default().oneOfType([(prop_types_default()).string, prop_types_default().exact({
+  // A raw, untranslated string or a $l10n object.
+  raw: prop_types_default().oneOfType([(prop_types_default()).string, (prop_types_default()).object]),
+  // Fluent string identifier from a .ftl file.
+  string_id: (prop_types_default()).string,
+  // Arguments for Fluent strings that have variables.
+  args: (prop_types_default()).object,
+  // A string to use as the element's aria-label attribute value.
+  aria_label: (prop_types_default()).string,
+  // CSS overrides for configurable styles.
+  ...Object.fromEntries(CONFIGURABLE_STYLES.map(key => [key, prop_types_default().oneOfType([(prop_types_default()).string, (prop_types_default()).number])]))
+})]);
+const actionPropTypes = prop_types_default().exact({
+  // The special message action id.
+  type: (prop_types_default()).string,
+  // The data to pass to the action if needed.
+  data: (prop_types_default()).object,
+  // If true, dismisses the screen. Can be used in addition to or instead of
+  // a special message action type. If set to 'actionResult', the callout
+  // will only be dismissed after the special message action has resolved
+  // successfully, will only take effect for certain special message ids, and
+  // requires setting 'needsAwait' to true.
+  dismiss: prop_types_default().oneOfType([(prop_types_default()).string, (prop_types_default()).bool]),
+  // If true, the action needs to be awaited. Must be true if 'dismiss' is
+  // set to 'actionResult'.
+  needsAwait: (prop_types_default()).bool,
+  // If true, navigates to the next step.
+  navigate: prop_types_default().oneOfType([(prop_types_default()).string, (prop_types_default()).bool]),
+  // If true, go back to the previous step.
+  goBack: prop_types_default().oneOfType([(prop_types_default()).string, (prop_types_default()).bool]),
+  // If true, the actions for selected checkbox/radio selections are
+  // performed in series. Set to true if this action is for the primary
+  // button and the 'multiselect' tile is used.
+  collectSelect: (prop_types_default()).bool,
+  // If true, collects all text input on action.
+  collectTextInput: (prop_types_default()).bool,
+  // If true, collects content toggle state on action.
+  collectContentToggleState: (prop_types_default()).bool,
+  // Indicates that the action should navigate to a different screen.
+  advance_screens: prop_types_default().shape({
+    // The behavior of the screen navigation. Behaves like 'dismiss'.
+    behavior: prop_types_default().oneOfType([(prop_types_default()).string, (prop_types_default()).bool]),
+    // How many screens and in which direction to advance. Positive integers
+    // advance forward while negative integers advance backward.
+    direction: (prop_types_default()).number,
+    // The id of the screen to advance to. Id takes priority if both id and
+    // direction are provided.
+    id: (prop_types_default()).string
+  })
+});
+const buttonPropTypes = prop_types_default().exact({
+  // The text to show inside the button.
+  label: localizableThingPropTypes,
+  // The JEXL targeting for conditional button display.
+  targeting: (prop_types_default()).string,
+  // The special message action invoked if the button is clicked.
+  action: actionPropTypes,
+  // If true, shows an arrow icon next to the label.
+  has_arrow_icon: (prop_types_default()).bool,
+  // If true, disables the button. If set to 'hasActiveMultiSelect', disables
+  // the button until the user selects something in the multiselect tiles. If
+  // set to 'hasTextInput', disables the button while the textarea tile is
+  // empty or exceeds the character limit. If set to 'hasActiveSingleSelect',
+  // disables the button until the user selects an option in the single-select
+  // tile.
+  disabled: prop_types_default().oneOfType([(prop_types_default()).string, (prop_types_default()).bool]),
+  // Overrides the style of the primary or secondary button.
+  style: prop_types_default().oneOf(["primary", "secondary", "link"]),
+  // The text for the RTAMO install button, provided in the primary_button.
+  install_complete_label: localizableThingPropTypes,
+  // If true, the primary_button will be focused when the screen is displayed.
+  should_focus_button: (prop_types_default()).bool,
+  // If there are several buttons, this property of an additional_button can
+  // control the orientation of all the buttons.
+  flow: prop_types_default().oneOf(["row", "column"]),
+  // Extra text to show before a secondary button.
+  text: localizableThingPropTypes,
+  // If there are several buttons, this property of an additional_button can
+  // control the justification and alignment of the buttons row/column.
+  // Defaults to 'end'.
+  alignment: prop_types_default().oneOf(["end", "start", "space-between"]),
+  // The size of the dismiss_button (20px, 24px, 32px). Defaults to 32px.
+  size: prop_types_default().oneOf(["x-small", "small", "large"]),
+  // If true, adds a background to the dismiss_button.
+  background: (prop_types_default()).bool,
+  // CSS override for the marginBlock property.
+  marginBlock: (prop_types_default()).string,
+  // CSS override for the marginInline property.
+  marginInline: (prop_types_default()).string
+});
+const screenContentShape = {
+  // The layout position of the screen.
+  position: prop_types_default().oneOf(["center", "center-large", "split", "callout", "card-stack"]),
+  // If true, the screens are displayed in fullscreen.
+  fullscreen: (prop_types_default()).bool,
+  // If true, the progress bar will be shown. Defaults to true.
+  progress_bar: prop_types_default().oneOfType([(prop_types_default()).bool, (prop_types_default()).string]),
+  // The default CSS background for the screen.
+  background: (prop_types_default()).string,
+  // The static CSS background for the screen, provided if the default
+  // background has any animated content.
+  background_static: (prop_types_default()).string,
+  // The hero image in the content.
+  hero_image: prop_types_default().shape({
+    // The default URL of the hero image.
+    static_url: (prop_types_default()).string,
+    // The URL of the static hero image, provided if the default hero image
+    // has animated content.
+    url: (prop_types_default()).string
+  }),
+  // The image to insert into the secondary section background
+  // if the screen is a card stack. "Float" is the default
+  // and uses the "background" property under the hood, so no
+  // extra URLs are needed.
+  card_stack_image: prop_types_default().shape({
+    // The image type; 'float' is a centered floating image (default),
+    // 'bleed' is an image designed to bleed over the bottom edge of the
+    // card, and 'banner' is a wider image that will bleed over two edges,
+    // and convert to a centered image at smaller widths.
+    type: prop_types_default().oneOf(["float", "bleed", "banner"]),
+    // The static CSS background to use with the 'bleed' image type
+    background_uncropped: (prop_types_default()).string,
+    // The static CSS background to use at the middle breakpoint
+    // for the 'banner' image type
+    background_medium: (prop_types_default()).string,
+    // The static CSS background to use at the smallest breakpoint
+    // for the 'banner' image type
+    background_small: (prop_types_default()).string
+  }),
+  // A single checkbox action.
+  checkbox: prop_types_default().shape({
+    // The text to show next to the checkbox.
+    label: localizableThingPropTypes,
+    // The default value of the checkbox.
+    defaultValue: (prop_types_default()).bool,
+    // The special message action invoked if the checkbox is selected.
+    action: actionPropTypes
+  }),
+  // The primary button.
+  primary_button: buttonPropTypes,
+  // The secondary button.
+  secondary_button: buttonPropTypes,
+  // The secondary button(s) that are displayed at the top of the screen, above
+  // the main content.
+  secondary_button_top: prop_types_default().oneOfType([(prop_types_default()).object, (prop_types_default()).array]),
+  // The additional button.
+  additional_button: buttonPropTypes,
+  // The dismiss button.
+  dismiss_button: buttonPropTypes,
+  // A submenu button that can be attached to another button.
+  submenu_button: prop_types_default().shape({
+    // Optionally used to control the aria label and can be used to override
+    // CSS styles.
+    label: localizableThingPropTypes,
+    // Overrides the style of the button. Should be set to the same style as
+    // the button it's attached to.
+    style: prop_types_default().oneOf(["primary", "secondary"]),
+    // The dropdown menu that appears when the user clicks the split button.
+    submenu: prop_types_default().arrayOf(prop_types_default().shape({
+      // Submenu can have 3 types of items.
+      type: prop_types_default().oneOf(["action", "menu", "separator"]),
+      // The id used to identify the submenu item in telemetry.
+      id: (prop_types_default()).string,
+      // The text to show inside the submenu item.
+      label: localizableThingPropTypes,
+      // Used only for type 'action'. The special message action invoked if
+      // the submenu item is clicked.
+      action: actionPropTypes,
+      // An optional URL specifying an icon to show next to the label.
+      icon: (prop_types_default()).string,
+      // Used only for type 'menu'. The submenu items to show when the user
+      // hovers over this item. Recursive.
+      submenu: prop_types_default().arrayOf((prop_types_default()).object)
+    })),
+    // The button that the submenu split button is attached to.
+    attached_to: prop_types_default().oneOf(["secondary_button", "additional_button"])
+  }),
+  // Hides the secondary section.
+  hide_secondary_section: (prop_types_default()).string,
+  // The background position for narrow split layouts.
+  split_narrow_bkg_position: (prop_types_default()).string,
+  // If true, the callout hides on outside clicks.
+  autohide: (prop_types_default()).bool,
+  // The callout card width as a CSS value.
+  width: (prop_types_default()).string,
+  // The callout card padding as a CSS value.
+  padding: prop_types_default().oneOfType([(prop_types_default()).string, (prop_types_default()).number]),
+  // A layout variant for the screen. 'inline' is a single row layout that
+  // works well in tandem with title_logo. 'last-card' is the final card-stack
+  // screen, with the title and subtitle split around a centered image slot.
+  layout: (prop_types_default()).string,
+  // If true, adds a colorful gradient border to the screen. This is only
+  // supported for screens with 'hide_arrow' set to true. There is no effect
+  // if HCM or a custom theme add-on is enabled.
+  zap_border: (prop_types_default()).bool,
+  // If true, adds a colorful gradient shadow to the screen. This is only
+  // supported for screens with 'hide_arrow' set to true and either
+  // 'absolute_position' or 'arrow_position'. There is no effect if HCM or a
+  // custom theme add-on is enabled.
+  zap_shadow: (prop_types_default()).bool,
+  // If present, a custom gradient to use in conjuction with the
+  // 'background' and 'zap_border' properties. Only applied if
+  // both other properties are present.
+  zap_border_gradient: (prop_types_default()).string,
+  // An optional object representing a large illustration to show above other
+  // content.
+  logo: prop_types_default().shape({
+    // The image URL.
+    imageURL: (prop_types_default()).string,
+    // The dark mode image URL.
+    darkModeImageURL: (prop_types_default()).string,
+    // The reduced motion image URL.
+    reducedMotionImageURL: (prop_types_default()).string,
+    // The dark mode reduced motion image URL.
+    darkModeReducedMotionImageURL: (prop_types_default()).string,
+    // A video URL, played once, rendered instead of the image ones above.
+    // Ignored (falls back to the image URLs above) for users who prefer reduced
+    // motion.
+    videoURL: (prop_types_default()).string,
+    // Right-to-left replacements for any of the URLs above, applied over them
+    // when the document is RTL. Omitted keys keep their base value.
+    rtl: prop_types_default().shape({
+      imageURL: (prop_types_default()).string,
+      darkModeImageURL: (prop_types_default()).string,
+      reducedMotionImageURL: (prop_types_default()).string,
+      darkModeReducedMotionImageURL: (prop_types_default()).string,
+      videoURL: (prop_types_default()).string
+    }),
+    // The <img> alt text.
+    alt: prop_types_default().oneOfType([(prop_types_default()).string, (prop_types_default()).object]),
+    // The CSS style overriding the width property.
+    width: (prop_types_default()).string,
+    // The CSS style overriding the height property.
+    height: (prop_types_default()).string
+  }),
+  // An optional object representing an illustration anchored to a corner of the
+  // screen. The fullscreen center-large layout anchors it to the window; every
+  // other layout anchors it to the card.
+  corner_image: prop_types_default().shape({
+    // The image URL.
+    imageURL: (prop_types_default()).string,
+    // The dark mode image URL.
+    darkModeImageURL: (prop_types_default()).string,
+    // The reduced motion image URL.
+    reducedMotionImageURL: (prop_types_default()).string,
+    // The dark mode reduced motion image URL.
+    darkModeReducedMotionImageURL: (prop_types_default()).string,
+    // Right-to-left replacements for any of the URLs above, applied over them
+    // when the document is RTL. Omitted keys keep their base value.
+    rtl: prop_types_default().shape({
+      imageURL: (prop_types_default()).string,
+      darkModeImageURL: (prop_types_default()).string,
+      reducedMotionImageURL: (prop_types_default()).string,
+      darkModeReducedMotionImageURL: (prop_types_default()).string
+    }),
+    // The corner the illustration is anchored to. Defaults to 'bottom-right'.
+    // The -start/-end values are direction-relative and resolve against the
+    // text direction, so they mirror in RTL; the left/right values are always
+    // that physical corner.
+    position: prop_types_default().oneOf(["bottom-left", "bottom-right", "top-left", "top-right", "bottom-start", "bottom-end", "top-start", "top-end"]),
+    // The CSS style overriding the width property.
+    width: (prop_types_default()).string,
+    // The CSS style overriding the height property.
+    height: (prop_types_default()).string,
+    // The CSS style overriding the marginBlock property.
+    marginBlock: (prop_types_default()).string,
+    // The CSS style overriding the marginInline property.
+    marginInline: (prop_types_default()).string,
+    // CSS overrides applied to the illustration container. Avoid 'translate'
+    // and 'scale' when using 'entrance_animation', which animates those two
+    // properties and would be overridden by them. 'transform' is unaffected.
+    style: (prop_types_default()).object,
+    // How the illustration animates in each time the screen is entered. The
+    // direction is derived from 'position', so a 'bottom-left' illustration
+    // rises and a 'top-left' one descends. Every type degrades to an
+    // opacity-only fade for users who prefer reduced motion.
+    entrance_animation: prop_types_default().shape({
+      // The animation to run. Defaults to 'none'.
+      type: prop_types_default().oneOf(["none", "fade", "slide-block", "slide-inline", "slide-corner", "zoom"]),
+      // The CSS length the illustration travels, for the 'slide-*' types.
+      distance: (prop_types_default()).string,
+      // The CSS time the animation takes.
+      duration: (prop_types_default()).string,
+      // The CSS time to wait before starting, for staggering the illustration
+      // against the screen's other content.
+      delay: (prop_types_default()).string
+    })
+  }),
+  // An optional image shown in the center image slot of the 'last-card'
+  // layout, revealed once the text split animation completes.
+  center_image: prop_types_default().shape({
+    // The image URL.
+    imageURL: (prop_types_default()).string,
+    // The dark mode image URL.
+    darkModeImageURL: (prop_types_default()).string,
+    // The reduced motion image URL.
+    reducedMotionImageURL: (prop_types_default()).string,
+    // The dark mode reduced motion image URL.
+    darkModeReducedMotionImageURL: (prop_types_default()).string,
+    // Right-to-left replacements for any of the URLs above, applied over them
+    // when the document is RTL. Any keys ommitted keep their base values.
+    rtl: prop_types_default().shape({
+      imageURL: (prop_types_default()).string,
+      darkModeImageURL: (prop_types_default()).string,
+      reducedMotionImageURL: (prop_types_default()).string,
+      darkModeReducedMotionImageURL: (prop_types_default()).string
+    }),
+    // The <img> alt text.
+    alt: prop_types_default().oneOfType([(prop_types_default()).string, (prop_types_default()).object]),
+    // The CSS width of the image slot. The split animation and margins adapt
+    // to it. Defaults to 120px.
+    width: (prop_types_default()).string,
+    // The CSS height of the image slot. Defaults to 120px.
+    height: (prop_types_default()).string,
+    // The CSS style overriding the marginBlock property. Useful for aligning
+    // the image's focal point with the text. Only applies when the text is
+    // split around the image, not when stacked at narrow breakpoints.
+    marginBlock: (prop_types_default()).string,
+    // The CSS style overriding the marginInline property. Only applies when
+    // the text is split around the image, not when stacked at narrow breakpoints.
+    marginInline: (prop_types_default()).string
+  }),
+  // The text for the headline.
+  title: localizableThingPropTypes,
+  // An optional object representing an icon to show next to the title.
+  title_logo: prop_types_default().shape({
+    // The image URL.
+    imageURL: (prop_types_default()).string,
+    // The dark mode image URL.
+    darkModeImageURL: (prop_types_default()).string,
+    // The reduced motion image URL.
+    reducedMotionImageURL: (prop_types_default()).string,
+    // The dark mode reduced motion image URL.
+    darkModeReducedMotionImageURL: (prop_types_default()).string,
+    // The <img> alt text.
+    alt: prop_types_default().oneOfType([(prop_types_default()).string, (prop_types_default()).object]),
+    // The CSS style overriding the width property.
+    width: (prop_types_default()).string,
+    // The CSS style overriding the height property.
+    height: (prop_types_default()).string,
+    // The logo alignment relative to the title.
+    alignment: prop_types_default().oneOf(["top", "center", "bottom"])
+  }),
+  // Optional styling for the title.
+  title_style: (prop_types_default()).string,
+  // The text to show below the title.
+  subtitle: localizableThingPropTypes,
+  // An extra block of configurable content below the title/subtitle but above
+  // the main buttons. Can be placed above the 'tiles' by setting
+  // 'tiles_container.position' to 'after_supporting_content'.
+  above_button_content: prop_types_default().arrayOf(prop_types_default().shape({
+    // The type of content.
+    type: prop_types_default().oneOf(["text", "image"]),
+    // The paragraph text. Can be either a localizableThing that can be
+    // combined with 'link_key's to attach actions to the
+    // `<a data-l10n-name='...'> or an array of either raw strings or a
+    // localizableThing with 'href'/'link_key'/neither.
+    text: prop_types_default().oneOfType([localizableThingPropTypes, (prop_types_default()).array]),
+    // A list of the link keys that exist in screen.content. The value of
+    // that key must be an object with an 'action' property and the
+    // 'string_id' in the 'text' object must refer to a Fluent string that
+    // contains an anchor element with `data-l10n-name='LINK_KEY_NAME'`.
+    link_keys: prop_types_default().arrayOf((prop_types_default()).string),
+    // Optional paragraph style.
+    font_styles: (prop_types_default()).string
+  })),
+  // Optionally used to override the aria attributes or tooltip of the steps
+  // indicator. Not recommended.
+  steps_indicator: prop_types_default().shape({
+    string_id: (prop_types_default()).string
+  }),
+  // Tile object(s) to display in the screen.
+  tiles: prop_types_default().oneOfType([(prop_types_default()).array, prop_types_default().shape({
+    // The type of tile. More details can be found in ContentTiles.jsx.
+    type: prop_types_default().oneOf(["link", "textbox", "multiselect", "single-select", "theme", "backup_restore", "addons-picker", "migration-wizard", "mobile_downloads", "textarea", "theme-picker", "embedded_browser", "fx_backup_file_path", "fx_backup_password", "confirmation-checklist", "pinnable_sites", "content-toggle", "action_checklist"]).isRequired,
+    // CSS overrides of the tile container. Any CSS properties starting with
+    // '--' are also allowed.
+    style: (prop_types_default()).object,
+    // Optional, currently for single-select tiles only. Visual layout for
+    // the tile's items.
+    layout: prop_types_default().oneOf(["carousel"]),
+    // Optional, currently for single-select tiles only. Accessible name for
+    // the carousel pill navigation.
+    pill_nav_label: localizableThingPropTypes,
+    // Array of tile configurations needed for the tile type.
+    data: prop_types_default().oneOfType([(prop_types_default()).array, (prop_types_default()).object])
+  })]),
+  // The tiles container.
+  tiles_container: prop_types_default().shape({
+    // The position of the tiles container relative to supporting content like
+    // 'above_button_content'. By default, it comes before the supporting
+    // content.
+    position: (prop_types_default()).string,
+    // CSS overrides.
+    style: (prop_types_default()).object
+  }),
+  // The header for a tiles container.
+  tiles_header: prop_types_default().exact({
+    title: localizableThingPropTypes
+  }),
+  // If true, applies the reverse split layout onto the screen (i.e. inverts
+  // the visual order of the split screens).
+  reverse_split: (prop_types_default()).bool,
+  // The <img> alt text.
+  image_alt_text: localizableThingPropTypes,
+  // The hero text.
+  hero_text: prop_types_default().oneOfType([localizableThingPropTypes, prop_types_default().shape({
+    title: localizableThingPropTypes,
+    subtitle: localizableThingPropTypes
+  })]),
+  // CSS overrides for the main content style on wide screens.
+  main_content_style: (prop_types_default()).object,
+  // CSS overrides for the main content style on narrow screens.
+  main_content_style_narrow: (prop_types_default()).object,
+  // A CSS override allowing custom justify content on split screens.
+  split_content_justify_content: (prop_types_default()).string,
+  // The action button position.
+  action_buttons_position: prop_types_default().oneOf(["after_subtitle", "after_supporting_content", "end"]),
+  // If true, displays action buttons above main content.
+  action_buttons_above_content: prop_types_default().oneOfType([(prop_types_default()).bool, (prop_types_default()).string]),
+  // If true, adds noodle illustrations that peek out behind the screen.
+  has_noodles: (prop_types_default()).bool,
+  // If true, sets narrow attribute to the outer element of the screen.
+  narrow: (prop_types_default()).bool,
+  // The language switcher component that appears of there is a language
+  // mismatch screen.
+  languageSwitcher: prop_types_default().exact({
+    downloading: localizableThingPropTypes,
+    cancel: localizableThingPropTypes,
+    waiting: localizableThingPropTypes,
+    skip: localizableThingPropTypes,
+    switch: localizableThingPropTypes,
+    continue: localizableThingPropTypes,
+    action: actionPropTypes
+  }),
+  // Displays the OnboardingVideo component.
+  video_container: (prop_types_default()).object,
+  // Overrides all text color of the screen.
+  text_color: prop_types_default().oneOf(["light", "dark"]),
+  // If true, overrides the spotlight screen styling to look like the system
+  // prompt style.
+  isSystemPromptStyleSpotlight: (prop_types_default()).bool,
+  // CSS overrides for the screen style.
+  screen_style: prop_types_default().exact({
+    overflow: (prop_types_default()).string,
+    display: (prop_types_default()).string,
+    height: (prop_types_default()).string,
+    width: (prop_types_default()).string,
+    padding: (prop_types_default()).string
+  }),
+  // If true, prevents the spotlight from entering responsive design mode at
+  // widths less than 800px.
+  no_rdm: (prop_types_default()).bool,
+  // The CSS override for the paddingBlock styling for split layout contents.
+  split_content_padding_block: (prop_types_default()).string,
+  // The CSS override for the paddingInline styling for split layout contents.
+  split_content_padding_inline: (prop_types_default()).string,
+  // Text below the subtitle that can include hyperlinks.
+  cta_paragraph: prop_types_default().shape({
+    text: prop_types_default().shape({
+      // The Fluent string id for the paragraph text.
+      string_id: (prop_types_default()).string,
+      // The name of the '<a data-l10n-name'=''></a>' marker inside the
+      // string_id.
+      string_name: (prop_types_default()).string
+    }),
+    // The special message action to be invoked when the cta text is clicked.
+    action: actionPropTypes
+  }),
+  // Info text displayed at the bottom of the screen.
+  info_text: localizableThingPropTypes,
+  // If true, displays the encrypted backup method as part of the
+  // 'fx_backup_file_path' or 'fx_backup_password' tile type.
+  isEncryptedBackup: (prop_types_default()).bool,
+  // The action for the migration start event as part of the embedded migration
+  // wizard component within about:welcome.
+  migrate_start: prop_types_default().shape({
+    action: actionPropTypes
+  }),
+  // The action for the migration close event as part of the embedded migration
+  // wizard component within about:welcome.
+  migrate_close: prop_types_default().shape({
+    action: actionPropTypes
+  }),
+  // The subtitle text for the action checklist.
+  action_checklist_subtitle: localizableThingPropTypes,
+  // The remove checklist button in the action checklist.
+  remove_checklist_button: prop_types_default().shape({
+    // The text inside the remove checklist button.
+    label: localizableThingPropTypes,
+    // The id used to identify the button in telemetry.
+    source_id: (prop_types_default()).string,
+    // The special message action to invoke when the button is clicked.
+    action: actionPropTypes
+  }),
+  // A submenu button with a button type of 'more'.
+  more_button: prop_types_default().shape({
+    // Submenu can have 3 types of items.
+    type: prop_types_default().oneOf(["action", "menu", "separator"]),
+    // The id used to identify the submenu item in telemetry.
+    id: (prop_types_default()).string,
+    // The text to show inside the submenu item.
+    label: localizableThingPropTypes,
+    // Used only for type 'action'. The special message action invoked if
+    // the submenu item is clicked.
+    action: actionPropTypes,
+    // An optional URL specifying an icon to show next to the label.
+    icon: (prop_types_default()).string,
+    // Used only for type 'menu'. The submenu items to show when the user
+    // hovers over this item. Recursive.
+    submenu: prop_types_default().arrayOf((prop_types_default()).object)
+  }),
+  // An optional array of event listeners to add to the page where the screen
+  // is shown.
+  page_event_listeners: prop_types_default().arrayOf(prop_types_default().shape({
+    params: prop_types_default().shape({
+      // The event type string. Supports any DOM event type, timeout and
+      // interval for timers, internal feature callout events 'touradvance'
+      // and 'tourend'.
+      type: (prop_types_default()).string,
+      // The target selector.
+      selector: (prop_types_default()).string,
+      options: prop_types_default().shape({
+        // If true, handles events in capturing phase.
+        capture: (prop_types_default()).bool,
+        // If true, removes listener after first event.
+        once: (prop_types_default()).bool,
+        // If true, prevents default action in event handler.
+        preventDefault: (prop_types_default()).bool,
+        // Used only for timeout and interval event types to invoke the action
+        // on a timer.
+        interval: (prop_types_default()).number,
+        // If true, extends addEventListener to all windows.
+        every_window: (prop_types_default()).bool
+      })
+    }),
+    action: actionPropTypes
+  })),
+  // Add any `link_key` properties that are used in messages in
+  //    OnboardingMessageProvider.sys.mjs
+  //    FeatureCalloutMessages.sys.mjs
+  //    PanelTestProvider.sys.mjs
+  // to prevent the propTypes validation unit test from throwing an invalid
+  // prop error.
+  here: (prop_types_default()).object,
+  settings: (prop_types_default()).object,
+  ios: (prop_types_default()).object,
+  android: (prop_types_default()).object,
+  terms_of_use: (prop_types_default()).object,
+  privacy_notice: (prop_types_default()).object,
+  "learn-more": (prop_types_default()).object,
+  email_link: (prop_types_default()).object
+};
+const screenContentPropTypes = prop_types_default().exact(screenContentShape);
+
+// Update PropTypes here and in `screenContentShape` whenever any content
+// properties are added/removed. See MultiStageProtonScreenSchemas.json for a
+// more detailed, non-enforcing schema of the multistage screen content
+// properties.
+MultiStageProtonScreen.propTypes = {
+  // The unique identifier of the screen content. Each screen in a
+  // message should have a different ID, which can be referenced in
+  // actions to update the tour pref and advance screens.
+  id: (prop_types_default()).string.isRequired,
+  // The main content of this screen.
+  content: screenContentPropTypes
+};
 ;// ./content-src/lib/addUtmParams.mjs
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -3556,8 +6020,11 @@ function addUtmParams(url, utmTerm) {
 
 
 
+
 // Amount of milliseconds for all transitions to complete (including delays).
 const TRANSITION_OUT_TIME = 1000;
+// Keep in sync with --card-stack-duration in _multistage.scss.
+const CARD_STACK_TRANSITION_OUT_TIME = 400;
 const LANGUAGE_MISMATCH_SCREEN_ID = "AW_LANGUAGE_MISMATCH";
 const MultiStageAboutWelcome = props => {
   const gateInitialPaint = props.gateInitialPaint ?? false;
@@ -3621,7 +6088,8 @@ const MultiStageAboutWelcome = props => {
             screen_family: props.message_id,
             screen_index: order,
             screen_id: screen.id,
-            screen_initials: screenInitials
+            screen_initials: screenInitials,
+            ...getTileImpressionContext(screen.content?.tiles)
           });
 
           // Impression actions should be fired before recording the
@@ -3661,14 +6129,24 @@ const MultiStageAboutWelcome = props => {
   const [transition, setTransition] = (0,external_React_namespaceObject.useState)(props.transitions ? "in" : "");
   (0,external_React_namespaceObject.useEffect)(() => {
     if (transition === "in") {
-      requestAnimationFrame(() => requestAnimationFrame(() => setTransition("")));
+      // Don't clobber an "out" transition started in the meantime.
+      requestAnimationFrame(() => requestAnimationFrame(() => setTransition(prev => prev === "in" ? "" : prev)));
     }
   }, [transition]);
+  const isCardStack = defaultScreens?.[0]?.content?.position === "card-stack";
+  const transitionOutTime = isCardStack ? CARD_STACK_TRANSITION_OUT_TIME : TRANSITION_OUT_TIME;
 
   // Transition to next screen, opening about:home on last screen button CTA
   const handleTransition = goBack => {
     // Only handle transitioning out from a screen once.
     if (transition === "out") {
+      return;
+    }
+
+    // The card stack plays a single exit animation on teardown, so finishing
+    // from its last screen would otherwise wait for that twice.
+    if (isCardStack && !goBack && index >= screens.length - 1) {
+      window.AWFinish();
       return;
     }
 
@@ -3686,7 +6164,7 @@ const MultiStageAboutWelcome = props => {
       } else {
         window.AWFinish();
       }
-    }, props.transitions ? TRANSITION_OUT_TIME : 0);
+    }, props.transitions ? transitionOutTime : 0);
   };
   (0,external_React_namespaceObject.useEffect)(() => {
     // When about:welcome loads (on refresh or pressing back button
@@ -3707,7 +6185,7 @@ const MultiStageAboutWelcome = props => {
         setTimeout(() => {
           setTransition(props.transitions ? "in" : "");
           setScreenIndex(Math.min(state, screens.length - 1));
-        }, props.transitions ? TRANSITION_OUT_TIME : 0);
+        }, props.transitions ? transitionOutTime : 0);
       };
 
       // Handle page load, e.g., going back to about:welcome from about:home
@@ -3723,7 +6201,9 @@ const MultiStageAboutWelcome = props => {
       window.addEventListener("popstate", handler);
       return () => window.removeEventListener("popstate", handler);
     }
-    return false;
+    // React calls a non-undefined return value on unmount, so `false` here
+    // throws when the message is torn down.
+    return undefined;
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [multiSelects, setMultiSelects] = (0,external_React_namespaceObject.useState)({});
@@ -3768,6 +6248,22 @@ const MultiStageAboutWelcome = props => {
       setInitialTheme(theme);
       setActiveTheme(theme);
     })();
+  }, []);
+  const [activeThemeId, setActiveThemeId] = (0,external_React_namespaceObject.useState)(null);
+  (0,external_React_namespaceObject.useEffect)(() => {
+    let mounted = true;
+    const refreshActiveThemeId = async () => {
+      let themeId = await window.AWGetActiveThemeId?.();
+      if (mounted) {
+        setActiveThemeId(themeId);
+      }
+    };
+    refreshActiveThemeId();
+    window.addEventListener("LightweightTheme:Set", refreshActiveThemeId);
+    return () => {
+      mounted = false;
+      window.removeEventListener("LightweightTheme:Set", refreshActiveThemeId);
+    };
   }, []);
   const {
     negotiatedLanguage,
@@ -3866,11 +6362,13 @@ const MultiStageAboutWelcome = props => {
       content: currentScreen.content,
       navigate: handleTransition,
       autoAdvance: currentScreen.auto_advance,
+      autoDismiss: currentScreen.auto_dismiss,
       advanceOnExperimentLoad: currentScreen.advance_on_experiment_load,
       messageId: `${props.message_id}_${order}_${currentScreen.id}`,
       UTMTerm: props.utm_term,
       flowParams: flowParams,
       activeTheme: activeTheme,
+      activeThemeId: activeThemeId,
       initialTheme: initialTheme,
       setActiveTheme: setActiveTheme,
       setInitialTheme: setInitialTheme,
@@ -3919,7 +6417,7 @@ const renderSingleSecondaryCTAButton = ({
 }) => {
   let buttonStyling = button?.has_arrow_icon ? `secondary arrow-icon` : `secondary`;
   const isPrimary = button?.style === "primary";
-  const isTextLink = !["split", "callout"].includes(content.position) && content.tiles?.type !== "addons-picker" && !isPrimary;
+  const isTextLink = !["split", "callout", "center-large", "card-stack"].includes(content.position) && content.tiles?.type !== "addons-picker" && !isPrimary;
   const isSplitButton = content.submenu_button?.attached_to === targetElement;
   let className = "secondary-cta";
   if (position) {
@@ -4394,6 +6892,7 @@ class WelcomeScreen extends (external_React_default()).PureComponent {
       order: this.props.order,
       previousOrder: this.props.previousOrder,
       activeTheme: this.props.activeTheme,
+      activeThemeId: this.props.activeThemeId,
       installedAddons: this.props.installedAddons,
       screenMultiSelects: this.props.screenMultiSelects,
       setScreenMultiSelects: this.props.setScreenMultiSelects,
@@ -4418,6 +6917,7 @@ class WelcomeScreen extends (external_React_default()).PureComponent {
       isSingleScreen: this.props.isSingleScreen,
       startsWithCorner: this.props.startsWithCorner,
       autoAdvance: this.props.autoAdvance,
+      autoDismiss: this.props.autoDismiss,
       advanceOnExperimentLoad: this.props.advanceOnExperimentLoad,
       navigate: this.props.navigate,
       forceHideStepsIndicator: this.props.forceHideStepsIndicator,
@@ -4436,11 +6936,10 @@ class WelcomeScreen extends (external_React_default()).PureComponent {
     });
   }
 }
-;// ./content-src/asrouter-newtab-multistage.jsx
+;// ./content-src/components/MultistageWithDismiss.jsx
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
-
 
 
 
@@ -4454,12 +6953,45 @@ function MultistageWithDismiss({
     handleBlock?.();
     handleDismiss?.();
   }
+
+  // The card-stack template has its own inline dismiss button, so it doesn't
+  // need the corner one.
+  const isCardStack = config.screens?.[0]?.content?.position === "card-stack";
+  const transitions = config.transitions ?? false;
+  const animateCardStack = isCardStack && transitions;
+  const [isExiting, setIsExiting] = (0,external_React_namespaceObject.useState)(false);
+  const exitTimeout = (0,external_React_namespaceObject.useRef)(null);
+  (0,external_React_namespaceObject.useEffect)(() => {
+    if (!animateCardStack) {
+      return undefined;
+    }
+    const finish = window.AWFinish;
+    window.AWFinish = () => {
+      if (exitTimeout.current) {
+        return;
+      }
+      setIsExiting(true);
+      exitTimeout.current = setTimeout(finish, CARD_STACK_TRANSITION_OUT_TIME);
+    };
+    return () => {
+      window.AWFinish = finish;
+      clearTimeout(exitTimeout.current);
+      exitTimeout.current = null;
+    };
+  }, [animateCardStack]);
+  const wrapperClasses = ["multistage-newtab-wrapper"];
+  if (animateCardStack) {
+    wrapperClasses.push("card-stack-animated");
+  }
+  if (isExiting) {
+    wrapperClasses.push("card-stack-exiting");
+  }
   return /*#__PURE__*/external_React_default().createElement("div", {
-    className: "multistage-newtab-wrapper",
+    className: wrapperClasses.join(" "),
     style: config.wrapper_content_style ? MultiStageUtils.getValidStyle(config.wrapper_content_style, ["height"]) : {
       height: "500px"
     }
-  }, /*#__PURE__*/external_React_default().createElement("moz-button", {
+  }, isCardStack ? null : /*#__PURE__*/external_React_default().createElement("moz-button", {
     type: "icon ghost",
     size: "small",
     iconsrc: "chrome://global/skin/icons/close.svg",
@@ -4468,27 +7000,102 @@ function MultistageWithDismiss({
   }), /*#__PURE__*/external_React_default().createElement(MultiStageAboutWelcome, {
     defaultScreens: config.screens,
     message_id: config.id,
-    transitions: config.transitions ?? false,
+    transitions: transitions,
     backdrop: config.backdrop,
+    ariaRole: "dialog",
     startScreen: 0,
     updateHistory: false
   }));
 }
+;// ./content-src/asrouter-newtab-multistage.jsx
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+
+
+
 window.mountMultistageMessage = function mountMultistageMessage(container, props) {
   const {
     messageData,
     handleDismiss,
     handleBlock,
-    handleClick
+    handleClose
   } = props;
   const config = messageData.content;
+  const impressionListeners = new AbortController();
+  // Outcome of each screen that has a primary button, keyed by screen id:
+  // "completed" (primary button clicked)
+  // "skipped" (secondary button clicked)
+  // "expired" (dismissed without either)
+  const completionStatus = {};
+  let currentScreenId = null;
+  let dismissSent = false;
+  const sendTelemetry = data => window.ASRouterMessage({
+    type: "AS_ROUTER_TELEMETRY_USER_EVENT",
+    data: {
+      ...data,
+      action: "newtab_message_user_event"
+    }
+  });
+  const trackCards = (screens, shownScreens) => {
+    const shownIds = new Set(shownScreens.map(({
+      id
+    }) => id));
+    for (const {
+      id,
+      content
+    } of screens) {
+      if (!shownIds.has(id)) {
+        delete completionStatus[id];
+      } else if (content?.primary_button) {
+        completionStatus[id] ??= "expired";
+      }
+    }
+  };
+  const trackTelemetry = data => {
+    if (data.event === "IMPRESSION") {
+      currentScreenId = data.event_context?.screen_id ?? null;
+    } else if (data.event === "CLICK_BUTTON" && currentScreenId in completionStatus) {
+      if (data.event_context?.source === "primary_button") {
+        completionStatus[currentScreenId] = "completed";
+      } else if (data.event_context?.source === "secondary_button") {
+        completionStatus[currentScreenId] = "skipped";
+      }
+    }
+  };
+  const sendDismissTelemetry = () => {
+    if (dismissSent) {
+      return;
+    }
+    dismissSent = true;
+    const completionCount = Object.values(completionStatus).filter(cardStatus => cardStatus === "completed").length;
+    sendTelemetry({
+      event: "DISMISS",
+      event_context: {
+        source: "newtab",
+        page: "about:newtab",
+        reason: completionCount ? "engaged" : "not_engaged",
+        completion_status: completionStatus,
+        completion_count: completionCount
+      },
+      message_id: messageData.id
+    });
+  };
   const awHandlers = {
-    AWEvaluateScreenTargeting: screens => window.ASRouterMessage({
-      type: "AW_EVALUATE_SCREEN_TARGETING",
-      data: screens
-    }),
+    AWEvaluateScreenTargeting: async screens => {
+      const filtered = await window.ASRouterMessage({
+        type: "AW_EVALUATE_SCREEN_TARGETING",
+        data: screens
+      });
+      trackCards(screens, filtered ?? screens);
+      return filtered;
+    },
     AWGetFeatureConfig: () => config,
-    AWFinish: () => handleDismiss(),
+    AWFinish: () => {
+      sendDismissTelemetry();
+      handleClose();
+    },
     AWSendToParent: (handlerName, data) => window.ASRouterMessage({
       type: "USER_ACTION",
       data
@@ -4500,12 +7107,30 @@ window.mountMultistageMessage = function mountMultistageMessage(container, props
       });
     },
     AWSendEventTelemetry: data => {
-      if (data.event !== "IMPRESSION") {
-        handleClick(data.event);
+      trackTelemetry(data);
+      if (data.event !== "IMPRESSION" || document.visibilityState === "visible") {
+        sendTelemetry(data);
+      } else {
+        document.addEventListener("visibilitychange", () => sendTelemetry(data), {
+          once: true,
+          signal: impressionListeners.signal
+        });
       }
     },
     AWGetSelectedTheme: () => Promise.resolve(),
-    AWGetInstalledAddons: () => Promise.resolve()
+    AWGetActiveThemeId: async () => {
+      try {
+        return await window.ASRouterMessage({
+          type: "AW_GET_ACTIVE_THEME_ID"
+        });
+      } catch {
+        return "";
+      }
+    },
+    AWGetInstalledAddons: () => Promise.resolve(),
+    AWWaitForMigrationClose: () => window.ASRouterMessage({
+      type: "AW_WAIT_FOR_MIGRATION_CLOSE"
+    })
   };
   for (const [handlerName, fn] of Object.entries(awHandlers)) {
     window[handlerName] = fn;
@@ -4517,11 +7142,14 @@ window.mountMultistageMessage = function mountMultistageMessage(container, props
     handleBlock: handleBlock
   }));
   return function cleanup() {
+    impressionListeners.abort();
     root.unmount();
     for (const handlerName of Object.keys(awHandlers)) {
       delete window[handlerName];
     }
   };
 };
+})();
+
 /******/ })()
 ;

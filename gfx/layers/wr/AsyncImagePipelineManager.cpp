@@ -88,13 +88,13 @@ wr::ExternalImageId AsyncImagePipelineManager::GetNextExternalImageId() {
 }
 
 void AsyncImagePipelineManager::SetWillGenerateFrame() {
-  MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
+  MOZ_RELEASE_ASSERT(CompositorThreadHolder::IsInCompositorThread());
 
   mWillGenerateFrame = true;
 }
 
 bool AsyncImagePipelineManager::GetAndResetWillGenerateFrame() {
-  MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
+  MOZ_RELEASE_ASSERT(CompositorThreadHolder::IsInCompositorThread());
 
   bool ret = mWillGenerateFrame;
   mWillGenerateFrame = false;
@@ -119,7 +119,7 @@ void AsyncImagePipelineManager::AddPipeline(const wr::PipelineId& aPipelineId,
           return;
         }
 
-        holder.Insert(MakeUnique<PipelineTexturesHolder>())->mWrBridge =
+        holder.Insert(std::make_unique<PipelineTexturesHolder>())->mWrBridge =
             aWrBridge;
       });
 }
@@ -168,7 +168,7 @@ void AsyncImagePipelineManager::AddAsyncImagePipeline(
   uint64_t id = wr::AsUint64(aPipelineId);
 
   MOZ_ASSERT(!mAsyncImagePipelines.Contains(id));
-  auto holder = MakeUnique<AsyncImagePipeline>(
+  auto holder = std::make_unique<AsyncImagePipeline>(
       aPipelineId, mApi->GetCapabilities().mBackendType, aImageHost);
   mAsyncImagePipelines.InsertOrUpdate(id, std::move(holder));
   AddPipeline(aPipelineId, /* aWrBridge */ nullptr);
@@ -467,20 +467,17 @@ void AsyncImagePipelineManager::ApplyAsyncImageForPipeline(
       float(aPipeline->mCurrentTexture->GetSize().width),
       float(aPipeline->mCurrentTexture->GetSize().height)};
   computedTransform.rotation = aPipeline->mRotation;
-  params.computed_transform = &computedTransform;
 
-  Maybe<wr::WrSpatialId> referenceFrameId =
-      aPipeline->mDLBuilder.PushStackingContext(
-          params, wr::ToLayoutRect(aPipeline->mScBounds),
-          // This is fine to do unconditionally because we only push images
-          // here.
-          wr::RasterSpace::Screen());
+  wr::WrSpatialId referenceFrameId = aPipeline->mDLBuilder.DefineComputedFrame(
+      wr::ToLayoutPoint(aPipeline->mScBounds.TopLeft()), computedTransform);
+  aPipeline->mDLBuilder.PushStackingContext(
+      params,
+      // This is fine to do unconditionally because we only push images
+      // here.
+      wr::RasterSpace::Screen(), Some(referenceFrameId));
 
   Maybe<wr::SpaceAndClipChainHelper> spaceAndClipChainHelper;
-  if (referenceFrameId) {
-    spaceAndClipChainHelper.emplace(aPipeline->mDLBuilder,
-                                    referenceFrameId.ref());
-  }
+  spaceAndClipChainHelper.emplace(aPipeline->mDLBuilder, referenceFrameId);
 
   if (aPipeline->mCurrentTexture && !keys.IsEmpty()) {
     LayoutDeviceRect rect(0, 0, aPipeline->mCurrentTexture->GetSize().width,
@@ -514,13 +511,14 @@ void AsyncImagePipelineManager::ApplyAsyncImageForPipeline(
   }
 
   spaceAndClipChainHelper.reset();
-  aPipeline->mDLBuilder.PopStackingContext(referenceFrameId.isSome());
+  aPipeline->mDLBuilder.PopStackingContext();
 
   wr::BuiltDisplayList dl;
   aPipeline->mDLBuilder.End(dl);
 
   aSceneBuilderTxn.SetDisplayList(aEpoch, mIdNamespace, aPipelineId, dl.dl_desc,
-                                  dl.dl_items, dl.dl_spatial_tree);
+                                  dl.dl_items, dl.dl_spatial_tree,
+                                  dl.dl_interner_delta);
 }
 
 void AsyncImagePipelineManager::ApplyAsyncImageForPipeline(
@@ -615,7 +613,7 @@ void AsyncImagePipelineManager::SetEmptyDisplayList(
   wr::BuiltDisplayList dl;
   builder.End(dl);
   txn.SetDisplayList(epoch, mIdNamespace, aPipelineId, dl.dl_desc, dl.dl_items,
-                     dl.dl_spatial_tree);
+                     dl.dl_spatial_tree, dl.dl_interner_delta);
 }
 
 void AsyncImagePipelineManager::HoldExternalImage(
@@ -635,7 +633,7 @@ void AsyncImagePipelineManager::HoldExternalImage(
   if (aTexture->NeedsDeferredDeletion()) {
     // Hold WebRenderTextureHost until rendering completed.
     holder->mTextureHostsUntilRenderCompleted.emplace_back(
-        MakeUnique<ForwardingTextureHost>(aEpoch, aTexture));
+        std::make_unique<ForwardingTextureHost>(aEpoch, aTexture));
   } else {
     // Hold WebRenderTextureHost until submitted for rendering.
     holder->mTextureHostsUntilRenderSubmitted.emplace_back(aEpoch, aTexture);
@@ -659,14 +657,14 @@ void AsyncImagePipelineManager::HoldExternalImage(
   }
 
   holder->mExternalImages.emplace_back(
-      MakeUnique<ForwardingExternalImage>(aEpoch, aImageId));
+      std::make_unique<ForwardingExternalImage>(aEpoch, aImageId));
 }
 
 void AsyncImagePipelineManager::NotifyPipelinesUpdated(
     RefPtr<const wr::WebRenderPipelineInfo> aInfo,
     wr::RenderedFrameId aLatestFrameId,
-    wr::RenderedFrameId aLastCompletedFrameId, RefPtr<Fence>&& aFence) {
-  MOZ_ASSERT(wr::RenderThread::IsInRenderThread());
+    wr::RenderedFrameId aLastCompletedFrameId, RefPtr<Fence>&& aReadFence) {
+  MOZ_RELEASE_ASSERT(wr::RenderThread::IsInRenderThread());
   MOZ_ASSERT(mLastCompletedFrameId <= aLastCompletedFrameId.mId);
   MOZ_ASSERT(aLatestFrameId.IsValid());
 
@@ -680,7 +678,7 @@ void AsyncImagePipelineManager::NotifyPipelinesUpdated(
     // Move the pending updates into the submitted ones.
     mRenderSubmittedUpdates.emplace_back(
         aLatestFrameId,
-        WebRenderPipelineInfoHolder(std::move(aInfo), std::move(aFence)));
+        WebRenderPipelineInfoHolder(std::move(aInfo), std::move(aReadFence)));
   }
 
   // Queue a runnable on the compositor thread to process the updates.
@@ -691,7 +689,7 @@ void AsyncImagePipelineManager::NotifyPipelinesUpdated(
 }
 
 void AsyncImagePipelineManager::ProcessPipelineUpdates() {
-  MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
+  MOZ_RELEASE_ASSERT(CompositorThreadHolder::IsInCompositorThread());
 
   if (mDestroyed) {
     return;
@@ -712,7 +710,7 @@ void AsyncImagePipelineManager::ProcessPipelineUpdates() {
     auto& holder = update.second;
     const auto& info = holder.mInfo->Raw();
 
-    mReadFence = std::move(holder.mFence);
+    mReadFence = std::move(holder.mReadFence);
 
     for (auto& epoch : info.epochs) {
       ProcessPipelineRendered(epoch.pipeline_id, epoch.epoch, update.first);
@@ -841,8 +839,8 @@ wr::Epoch AsyncImagePipelineManager::GetNextImageEpoch() {
 
 AsyncImagePipelineManager::WebRenderPipelineInfoHolder::
     WebRenderPipelineInfoHolder(RefPtr<const wr::WebRenderPipelineInfo>&& aInfo,
-                                RefPtr<Fence>&& aFence)
-    : mInfo(aInfo), mFence(std::move(aFence)) {}
+                                RefPtr<Fence>&& aReadFence)
+    : mInfo(aInfo), mReadFence(std::move(aReadFence)) {}
 
 AsyncImagePipelineManager::WebRenderPipelineInfoHolder::
     ~WebRenderPipelineInfoHolder() = default;

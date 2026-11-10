@@ -951,6 +951,28 @@ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
   return NS_ERROR_DOM_BAD_URI;
 }
 
+// Whether aSourceURI is one of our own unprivileged about: pages, pdf.js, or a
+// privileged extension, which can load non-content-accessible chrome: and
+// resource: URIs.
+static bool IsTrustedUISource(nsIURI* aSourceURI, nsIURI* aSourceBaseURI) {
+  if (aSourceURI->SchemeIs("about")) {
+    return !NS_IsContentAccessibleAboutURI(aSourceURI);
+  }
+  nsAutoCString host;
+  if (aSourceBaseURI->SchemeIs("resource")) {
+    return NS_SUCCEEDED(aSourceBaseURI->GetHost(host)) &&
+           host.EqualsLiteral("pdf.js");
+  }
+  if (aSourceBaseURI->SchemeIs("moz-extension")) {
+    if (NS_FAILED(aSourceBaseURI->GetHost(host))) {
+      return false;
+    }
+    auto* policy = ExtensionPolicyService::GetSingleton().GetByHost(host);
+    return policy && policy->IsPrivileged();
+  }
+  return false;
+}
+
 /**
  * Helper method to check whether the target URI and its innermost ("base") URI
  * has protocol flags that should stop it from being loaded by the source URI
@@ -1032,7 +1054,7 @@ nsresult nsScriptSecurityManager::CheckLoadURIFlags(
       }
 
       if (targetScheme.EqualsLiteral("resource")) {
-        if (StaticPrefs::security_all_resource_uri_content_accessible()) {
+        if (IsTrustedUISource(aSourceURI, aSourceBaseURI)) {
           return NS_OK;
         }
 
@@ -1054,7 +1076,10 @@ nsresult nsScriptSecurityManager::CheckLoadURIFlags(
           return NS_OK;
         }
       } else if (targetScheme.EqualsLiteral("chrome")) {
-        // Allow the load only if the chrome package is allowlisted.
+        if (IsTrustedUISource(aSourceURI, aSourceBaseURI)) {
+          return NS_OK;
+        }
+        // Otherwise allow the load only if the chrome package is allowlisted.
         nsCOMPtr<nsIXULChromeRegistry> reg(
             do_GetService(NS_CHROMEREGISTRY_CONTRACTID));
         if (reg) {
@@ -1073,7 +1098,7 @@ nsresult nsScriptSecurityManager::CheckLoadURIFlags(
         }
 
         auto& remoteType = dom::ContentChild::GetSingleton()->GetRemoteType();
-        if (remoteType == PRIVILEGEDABOUT_REMOTE_TYPE) {
+        if (remoteType.IsPrivilegedAbout()) {
           return NS_OK;
         }
       }

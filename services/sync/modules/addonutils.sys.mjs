@@ -37,6 +37,8 @@ AddonUtilsInternal.prototype = {
     // of sourceURI rewriting, we can avoid having to reconstruct the
     // AddonInstall.
     return lazy.AddonManager.getInstallForURL(addon.sourceURI.spec, {
+      id: addon.id,
+      type: addon.type,
       name: addon.name,
       icons: addon.iconURL,
       version: addon.version,
@@ -76,6 +78,7 @@ AddonUtilsInternal.prototype = {
     try {
       this._log.info("Installing " + addon.id);
       let log = this._log;
+      let self = this;
 
       return new Promise((res, rej) => {
         let listener = {
@@ -93,7 +96,11 @@ AddonUtilsInternal.prototype = {
 
             // We only need to change userDisabled if it is disabled because
             // enabled is the default.
-            if ("enabled" in options && !options.enabled) {
+            if (
+              "enabled" in options &&
+              !options.enabled &&
+              self.canDisableAddon(install.addon.id)
+            ) {
               log.info(
                 "Marking add-on as disabled for install: " + install.name
               );
@@ -115,7 +122,7 @@ AddonUtilsInternal.prototype = {
               try {
                 addon.enable();
               } catch (e) {
-                this._log.error("Failed to enable the incoming theme", e);
+                log.error("Failed to enable the incoming theme", e);
               } finally {
                 // If something went wrong with enabling the theme, we don't have a good
                 // way to retry -- so we'll clear it rather than keeping the pref around
@@ -153,6 +160,10 @@ AddonUtilsInternal.prototype = {
    *        Addon instance to uninstall.
    */
   async uninstallAddon(addon) {
+    if (!this.canUninstallAddon(addon.id)) {
+      return addon;
+    }
+
     return new Promise(res => {
       let listener = {
         onUninstalling(uninstalling, needsRestart) {
@@ -385,6 +396,42 @@ AddonUtilsInternal.prototype = {
   },
 
   /**
+   * Returns true if enterprise policy allows the add-on to be disabled. Other
+   * clients sharing the account aren't subject to this client's policies, so
+   * their records must never be able to disable a locked add-on.
+   *
+   * @param id
+   *        (string) ID of the add-on to check.
+   */
+  canDisableAddon(id) {
+    if (
+      Services.policies &&
+      !Services.policies.isAllowed(`disable-extension:${id}`)
+    ) {
+      this._log.info(`Skipping disable of "${id}" due to enterprise policy`);
+      return false;
+    }
+    return true;
+  },
+
+  /**
+   * Returns true if enterprise policy allows the add-on to be uninstalled.
+   *
+   * @param id
+   *        (string) ID of the add-on to check.
+   */
+  canUninstallAddon(id) {
+    if (
+      Services.policies &&
+      !Services.policies.isAllowed(`uninstall-extension:${id}`)
+    ) {
+      this._log.info(`Skipping uninstall of "${id}" due to enterprise policy`);
+      return false;
+    }
+    return true;
+  },
+
+  /**
    * Update the user disabled flag for an add-on.
    *
    * If the new flag matches the existing or if the add-on
@@ -397,6 +444,10 @@ AddonUtilsInternal.prototype = {
    */
   updateUserDisabled(addon, value) {
     if (addon.userDisabled == value) {
+      return;
+    }
+
+    if (value && !this.canDisableAddon(addon.id)) {
       return;
     }
 

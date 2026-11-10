@@ -62,9 +62,9 @@ def build_uniffi_targets(command_context):
             sys.executable,
             mach_path,
             "build",
-            "pre-export",
-            "export",
-            "recurse_uniffi-target",
+            "--no-completion-messages",
+            "rust-prereqs",
+            "uniffi-target",
         ],
         env=env,
         cwd=command_context.topsrcdir,
@@ -105,10 +105,9 @@ def build_uniffi_targets(command_context):
     )
 
     # Read the staticlib, not the cdylib: bindgen extracts the `UNIFFI_META_*`
-    # statics, but the cdylib (linked from the staticlib via megazord_stub.c)
-    # drops any that the stub doesn't reference. The staticlib keeps them all.
+    # statics from the archive.
     # Like "$uniffi_objdir/aarch64-apple-darwin/release-megazord/libmegazord.a".
-    megazord_build_kind = get_rust_build_kind(substs, megazord=True)
+    megazord_build_kind = get_rust_build_kind(substs, profile_suffix="megazord")
     megazord_path = mozpath.join(
         uniffi_objdir,
         substs["RUST_TARGET"],
@@ -129,6 +128,7 @@ COMPONENT_MAPPING = {
     "mozilla/appservices/adsclient": "components/ads-client",
     "mozilla/appservices/autofill": "components/autofill",
     "mozilla/appservices/crashtest": "components/crashtest",
+    "mozilla/appservices/db_crypto": "components/db-crypto",
     "mozilla/appservices/errorsupport": "components/errorsupport",
     "mozilla/appservices/fxaclient": "components/fxaclient",
     "mozilla/appservices/init_rust_components": "components/init_rust_components",
@@ -186,12 +186,11 @@ def generate_android(command_context, uniffi_targets):
         for p, f in FileFinder(source_base).find("**"):
             copier.add(mozpath.join(target_base, p), f)
 
-    copier.copy(
-        mozpath.join(
-            command_context.topsrcdir,
-            "toolkit/components/uniffi-bindgen-gecko-js/android",
-        ),
-    )
+    android_reldir = "toolkit/components/uniffi-bindgen-gecko-js/android"
+    copier.copy(mozpath.join(command_context.topsrcdir, android_reldir))
+
+    for p in sorted(copier.paths()):
+        print(f"Generated: {android_reldir}/{p}")
 
 
 @Command(
@@ -232,6 +231,13 @@ def generate_command(command_context):
     subprocess.check_call(cmdline, cwd=command_context.topsrcdir)
 
     generate_android(command_context, uniffi_targets)
+
+    command_context.log(
+        logging.INFO,
+        "uniffi-generate",
+        {},
+        "UniFFI bindings generated successfully.",
+    )
 
     return 0
 

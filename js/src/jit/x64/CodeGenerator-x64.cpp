@@ -183,7 +183,7 @@ void CodeGenerator::visitMulI64(LMulI64* lir) {
       default: {
         // Use shift if constant is power of 2.
         int32_t shift = mozilla::FloorLog2(uint64_t(constant));
-        if (constant > 0 && (1 << shift) == constant) {
+        if (constant > 0 && std::has_single_bit(uint64_t(constant))) {
           if (lhs != out) {
             masm.movq(lhs, out);
           }
@@ -975,16 +975,6 @@ void CodeGenerator::visitWasmCompareAndSelect(LWasmCompareAndSelect* ins) {
   }
 }
 
-void CodeGenerator::visitWasmUint32ToDouble(LWasmUint32ToDouble* lir) {
-  masm.convertUInt32ToDouble(ToRegister(lir->input()),
-                             ToFloatRegister(lir->output()));
-}
-
-void CodeGenerator::visitWasmUint32ToFloat32(LWasmUint32ToFloat32* lir) {
-  masm.convertUInt32ToFloat32(ToRegister(lir->input()),
-                              ToFloatRegister(lir->output()));
-}
-
 void CodeGeneratorX64::wasmStore(const wasm::MemoryAccessDesc& access,
                                  const LAllocation* value, Operand dstAddr) {
   if (value->isConstant()) {
@@ -1514,7 +1504,7 @@ void CodeGenerator::visitMulIntPtr(LMulIntPtr* ins) {
 
     // Use shift if constant is a power of 2.
     if (constant > 0 && std::has_single_bit(uintptr_t(constant))) {
-      uint32_t shift = mozilla::FloorLog2(uintptr_t(constant));
+      uint32_t shift = std::countr_zero(uintptr_t(constant));
       masm.lshiftPtr(Imm32(shift), lhs);
       return;
     }

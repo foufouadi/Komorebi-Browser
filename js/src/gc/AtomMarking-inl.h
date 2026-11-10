@@ -8,7 +8,6 @@
 #include "gc/AtomMarking.h"
 
 #include "mozilla/Assertions.h"
-#include "mozilla/Maybe.h"
 
 #include <type_traits>
 
@@ -16,6 +15,7 @@
 #include "vm/StringType.h"
 #include "vm/SymbolType.h"
 
+#include "gc/GC-inl.h"
 #include "gc/Heap-inl.h"
 
 namespace js {
@@ -30,9 +30,9 @@ inline size_t AtomRefRuntime::getAtomBit(TenuredCell* thing) {
   return arena->atomBitmapStart() * JS_BITS_PER_WORD + arenaBit;
 }
 
-template <typename T, bool Fallible>
-MOZ_ALWAYS_INLINE bool AtomRefRuntime::inlinedRecordRefInternal(Zone* zone,
-                                                                T* thing) {
+template <typename T>
+MOZ_ALWAYS_INLINE bool AtomRefRuntime::inlinedRecordRefInternal(
+    Zone* zone, T* thing, const AutoMarkingLock& lock) {
   static_assert(std::is_same_v<T, JSAtom> || std::is_same_v<T, JS::Symbol>,
                 "Should only be called with JSAtom* or JS::Symbol* argument");
 
@@ -42,6 +42,10 @@ MOZ_ALWAYS_INLINE bool AtomRefRuntime::inlinedRecordRefInternal(Zone* zone,
   MOZ_ASSERT(thing);
   js::gc::TenuredCell* cell = &thing->asTenured();
   MOZ_ASSERT(cell->zoneFromAnyThread()->isAtomsZone());
+
+  if constexpr (std::is_same_v<T, JS::Symbol>) {
+    MOZ_ASSERT(thing->isShared());
+  }
 
   if (thing->isPermanentAndMayBeShared()) {
     return true;
@@ -58,64 +62,30 @@ MOZ_ALWAYS_INLINE bool AtomRefRuntime::inlinedRecordRefInternal(Zone* zone,
   size_t grayOrBlackBit = bit + size_t(ColorBit::GrayOrBlackBit);
   MOZ_ASSERT(grayOrBlackBit / JS_BITS_PER_WORD < allocatedWords);
 
-  {
-    mozilla::Maybe<AutoEnterOOMUnsafeRegion> oomUnsafe;
-    if constexpr (!Fallible) {
-      oomUnsafe.emplace();
-    }
-
-    SparseBitmap& bitmap = zone->referencedAtoms();
-    if (!bitmap.ensureBitExists(grayOrBlackBit)) {
-      if constexpr (!Fallible) {
-        oomUnsafe->crash("AtomRefRuntime::inlinedRecordRefInternal");
-      } else {
-        return false;
-      }
-      return false;
-    }
+  SparseBitmap& bitmap = zone->referencedAtoms();
+  if (!bitmap.ensureBitExists(grayOrBlackBit)) {
+    return false;
+  }
 
 #ifdef JS_GC_CONCURRENT_MARKING
-    bitmap.atomicSetExistingBit(blackBit);
-    if constexpr (std::is_same_v<T, JS::Symbol>) {
-      bitmap.atomicSetExistingBit(grayOrBlackBit);
-    }
+  bitmap.atomicSetExistingBit(blackBit);
 #else
-    MOZ_ALWAYS_TRUE(bitmap.setBit(blackBit));
-    if constexpr (std::is_same_v<T, JS::Symbol>) {
-      MOZ_ALWAYS_TRUE(bitmap.setBit(grayOrBlackBit));
-    }
+  MOZ_ALWAYS_TRUE(bitmap.setBit(blackBit));
 #endif
-  }
 
   // Children of the thing also need to be marked in the context's zone.
   // We don't have a JSTracer for this so manually handle the cases in which
   // an atom can reference other atoms.
-  recordChildren(zone, thing);
-
-  return true;
-}
-
-inline void AtomRefRuntime::maybeUnmarkGrayAtomically(Zone* zone,
-                                                      JS::Symbol* symbol) {
-  MOZ_ASSERT(zone);
-  MOZ_ASSERT(!zone->isAtomsZone());
-  MOZ_ASSERT(symbol);
-  MOZ_ASSERT(symbol->zoneFromAnyThread()->isAtomsZone());
-
-  if (symbol->isPermanentAndMayBeShared()) {
-    return;
+  if constexpr (std::is_same_v<T, JS::Symbol>) {
+    MOZ_ASSERT(thing->isShared());
+    if (JSAtom* description = thing->description()) {
+      if (!inlinedRecordRefInternal(zone, description, lock)) {
+        return false;
+      }
+    }
   }
 
-  // The atom is currently referred to with a black or gray reference.
-  MOZ_ASSERT(hasRef(zone, symbol));
-
-  // Set the black bit. This has the effect of making the mark black if it was
-  // previously gray.
-  size_t blackBit = getAtomBit(symbol) + size_t(ColorBit::BlackBit);
-  MOZ_ASSERT(blackBit / JS_BITS_PER_WORD < allocatedWords);
-  zone->referencedAtoms().atomicSetExistingBit(blackBit);
-
-  MOZ_ASSERT(getRefColor(zone, symbol) == CellColor::Black);
+  return true;
 }
 
 template <typename T>
@@ -139,6 +109,10 @@ inline void GCRuntime::maybeMarkWeaklyHeldAtom(T* atom) {
   // the reference.
 
   static_assert(std::is_same_v<T, JSAtom> || std::is_same_v<T, JS::Symbol>);
+  if constexpr (std::is_same_v<T, JS::Symbol>) {
+    MOZ_ASSERT(atom->isShared());
+    MOZ_ASSERT(!atom->isUnique());
+  }
 
   Zone* zone = atom->zoneFromAnyThread();
   MOZ_ASSERT(zone->isAtomsZone());
@@ -146,29 +120,27 @@ inline void GCRuntime::maybeMarkWeaklyHeldAtom(T* atom) {
     return;
   }
 
-  CellColor refColor = isAtomReferencedByUncollectedZone(&atom->asTenured());
-  if (refColor == CellColor::White) {
+  bool hasRef = isAtomReferencedByUncollectedZone(&atom->asTenured());
+  if (!hasRef) {
     return;
   }
 
   // Set the mark bits directly since this may be called after normal marking
   // has finished. Implicitly marked edges are handled via weakmap marking which
   // happens after this.
-  MarkColor color = AsMarkColor(refColor);
-  (void)atom->asTenured().markIfUnmarked(color);
+  (void)atom->asTenured().markIfUnmarkedThreadSafe(MarkColor::Black);
   if constexpr (std::is_same_v<T, JS::Symbol>) {
     if (JSAtom* description = atom->description()) {
-      (void)description->asTenured().markIfUnmarked(color);
+      (void)description->asTenured().markIfUnmarkedThreadSafe(MarkColor::Black);
     }
   }
 }
 
-inline CellColor GCRuntime::isAtomReferencedByUncollectedZone(
-    TenuredCell* atom) {
+inline bool GCRuntime::isAtomReferencedByUncollectedZone(TenuredCell* atom) {
   MOZ_ASSERT(atom->zoneFromAnyThread()->isAtomsZone());
 
   if (!atomsUsedByUncollectedZones.ref()) {
-    return CellColor::White;
+    return false;
   }
 
   MOZ_ASSERT(atomsZone()->wasGCStarted());
@@ -180,37 +152,56 @@ inline CellColor GCRuntime::isAtomReferencedByUncollectedZone(
 
   const DenseBitmap& bitmap = *atomsUsedByUncollectedZones.ref();
   if (grayOrBlackBit >= bitmap.count()) {
-    return CellColor::White;  // Atom created during collection.
+    return false;  // Atom created during collection.
   }
 
-  if (bitmap.getBit(blackBit)) {
-    return CellColor::Black;
-  }
-
-  if (bitmap.getBit(grayOrBlackBit)) {
-    return CellColor::Gray;
-  }
-
-  return CellColor::White;
-}
-
-void AtomRefRuntime::recordChildren(Zone* zone, JSAtom*) {}
-
-void AtomRefRuntime::recordChildren(Zone* zone, JS::Symbol* symbol) {
-  if (JSAtom* description = symbol->description()) {
-    inlinedRecordRef(zone, description);
-  }
+  MOZ_ASSERT(!bitmap.getBit(grayOrBlackBit));
+  return bitmap.getBit(blackBit);
 }
 
 template <typename T>
-MOZ_ALWAYS_INLINE void AtomRefRuntime::inlinedRecordRef(Zone* zone, T* thing) {
-  MOZ_ALWAYS_TRUE((inlinedRecordRefInternal<T, false>(zone, thing)));
+MOZ_ALWAYS_INLINE void AtomRefRuntime::inlinedRecordRefInfallible(Zone* zone,
+                                                                  T* thing) {
+  if constexpr (std::is_same_v<T, JS::Symbol>) {
+    if (thing->isLocal()) {
+      return;
+    }
+  }
+
+  // TODO: The main thread only needs to take the lock (here and in the next
+  // method) if it expands the bitmap but that's hard to arrange currently. This
+  // only affects concurrent marking builds.
+  AutoMarkingLock lock(zone->runtimeFromMainThread(), atomRefLock);
+
+  AutoEnterOOMUnsafeRegion oomUnsafe;
+  if (!inlinedRecordRefInternal(zone, thing, lock)) {
+    oomUnsafe.crash("AtomRefRuntime::inlinedRecordRefInfallible");
+  }
 }
 
 template <typename T>
 MOZ_ALWAYS_INLINE bool AtomRefRuntime::inlinedRecordRefFallible(Zone* zone,
                                                                 T* thing) {
-  return inlinedRecordRefInternal<T, true>(zone, thing);
+  if constexpr (std::is_same_v<T, JS::Symbol>) {
+    if (thing->isLocal()) {
+      return true;
+    }
+  }
+
+  AutoMarkingLock lock(zone->runtimeFromMainThread(), atomRefLock);
+
+  return inlinedRecordRefInternal(zone, thing, lock);
+}
+
+template <typename T>
+void AtomRefRuntime::recordRef(JSContext* cx, T* thing) {
+  // Trigger a read barrier on the atom, in case there is an incremental
+  // GC in progress. This is necessary if the atom is being marked
+  // because a reference to it was obtained from another zone which is
+  // not being collected by the incremental GC.
+  ReadBarrier(thing);
+
+  inlinedRecordRefInfallible(cx->zone(), thing);
 }
 
 }  // namespace gc

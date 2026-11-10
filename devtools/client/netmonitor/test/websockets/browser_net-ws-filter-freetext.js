@@ -33,18 +33,18 @@ add_task(async function () {
   is(requests.length, 2, "There should be two requests");
 
   // Wait for all sent/received messages to be displayed in DevTools
-  const wait = waitForDOM(
+  const onDomUpdated = waitForDOM(
     document,
     "#messages-view .message-list-table .message-list-item",
     6
   );
 
   // Select the first request
-  EventUtils.sendMouseEvent({ type: "mousedown" }, requests[0]);
+  clickOnRequestRow(requests[0]);
 
   // Click on the "Response" panel
   clickOnSidebarTab(document, "response");
-  await wait;
+  await onDomUpdated;
 
   // Get all messages present in the "Response" panel
   const frames = document.querySelectorAll(
@@ -70,7 +70,7 @@ add_task(async function () {
   is(filteredFrames.length, 2, "There should be two frames");
 
   // Select the second request and check that the filter input is cleared
-  EventUtils.sendMouseEvent({ type: "mousedown" }, requests[1]);
+  clickOnRequestRow(requests[1]);
   // Wait till the text filter is applied. There should be two frames rendered
   await waitUntil(
     () =>

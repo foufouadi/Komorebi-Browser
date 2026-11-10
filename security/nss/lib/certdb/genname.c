@@ -213,7 +213,8 @@ CERT_DestroyGeneralNameList(CERTGeneralNameList *list)
     if (list != NULL) {
         lock = list->lock;
         PR_Lock(lock);
-        if (--list->refCount <= 0 && list->arena != NULL) {
+        PORT_ReleaseAssert(list->refCount > 0);
+        if (--list->refCount == 0 && list->arena != NULL) {
             PORT_FreeArena(list->arena, PR_FALSE);
             PR_Unlock(lock);
             PR_DestroyLock(lock);
@@ -827,17 +828,6 @@ loser:
     return SECFailure;
 }
 
-CERTGeneralNameList *
-CERT_DupGeneralNameList(CERTGeneralNameList *list)
-{
-    if (list != NULL) {
-        PR_Lock(list->lock);
-        list->refCount++;
-        PR_Unlock(list->lock);
-    }
-    return list;
-}
-
 /* Allocate space and copy CERTNameConstraint from src to dest */
 CERTNameConstraint *
 CERT_CopyNameConstraint(PLArenaPool *arena, CERTNameConstraint *dest,
@@ -1069,8 +1059,8 @@ cert_ExtractDNEmailAddrs(CERTGeneralName *name, PLArenaPool *arena)
                     goto loser;
                 nameList = cert_CombineNamesLists(nameList, newName);
             } /* handle one email AVA */
-        }     /* loop over AVAs */
-    }         /* loop over RDNs */
+        } /* loop over AVAs */
+    } /* loop over RDNs */
     /* combine new names with old one. */
     (void)cert_CombineNamesLists(name, nameList);
     /* TODO: unmark arena */
@@ -1286,6 +1276,76 @@ compareRFC822N2C(const SECItem *name, const SECItem *constraint)
     return SECFailure;
 }
 
+/* Returns SECSuccess if name is inside the permitted directoryName subtree
+** constraint, per RFC 5280 section 4.2.1.10: the constraint is a prefix of
+** name, i.e. name has at least as many RDNs as the constraint, and each RDN
+** of the constraint is equal to the RDN at the same position in name.  A
+** constraint with no RDNs matches every name.  An empty name (an empty
+** subject) is not subject to directoryName constraints and matches too.
+** SECFailure otherwise.
+*/
+static SECStatus
+comparePermittedDirectoryNameN2C(const CERTName *name,
+                                 const CERTName *constraint)
+{
+    CERTRDN **nRDNs = name->rdns;
+    CERTRDN **cRDNs = constraint->rdns;
+
+    if (!nRDNs || !*nRDNs) {
+        return SECSuccess;
+    }
+    while (cRDNs && *cRDNs) {
+        if (!nRDNs || !*nRDNs) {
+            return SECFailure; /* name is shorter than the constraint */
+        }
+        if (CERT_CompareRDN(*cRDNs++, *nRDNs++) != SECEqual) {
+            return SECFailure;
+        }
+    }
+    return SECSuccess;
+}
+
+/* Returns SECSuccess if name is inside the excluded directoryName subtree
+** constraint.  This match is broader than the prefix match above: RDNs are
+** compared only as far as both names go, and a name RDN matches when it holds
+** every attribute of the constraint RDN.  It covers every name the prefix
+** match covers, so an excluded subtree never lets out a name that is inside
+** it.  SECFailure otherwise.
+*/
+static SECStatus
+compareExcludedDirectoryNameN2C(const CERTName *name,
+                                const CERTName *constraint)
+{
+    /* status defaults to SECEqual, so that a constraint with
+    ** no AVAs will be a wildcard, matching all directory names.
+    */
+    SECComparison status = SECEqual;
+    const CERTRDN **cRDNs = (const CERTRDN **)constraint->rdns;
+    const CERTRDN **nRDNs = (const CERTRDN **)name->rdns;
+    while (cRDNs && *cRDNs && nRDNs && *nRDNs) {
+        /* loop over name RDNs and constraint RDNs in lock step
+         */
+        const CERTRDN *cRDN = *cRDNs++;
+        const CERTRDN *nRDN = *nRDNs++;
+        CERTAVA **cAVAs = cRDN->avas;
+        while (cAVAs && *cAVAs) { /* loop over constraint AVAs */
+            CERTAVA *cAVA = *cAVAs++;
+            CERTAVA **nAVAs = nRDN->avas;
+            while (nAVAs && *nAVAs) { /* loop over name AVAs */
+                CERTAVA *nAVA = *nAVAs++;
+                status = CERT_CompareAVA(cAVA, nAVA);
+                if (status == SECEqual)
+                    break;
+            } /* loop over name AVAs */
+            if (status != SECEqual)
+                break;
+        } /* loop over constraint AVAs */
+        if (status != SECEqual)
+            break;
+    } /* loop over name RDNs and constraint RDNs */
+    return (status == SECEqual) ? SECSuccess : SECFailure;
+}
+
 /* name contains either a 4 byte IPv4 address or a 16 byte IPv6 address.
 ** constraint contains an address of the same length, and a subnet mask
 ** of the same length.  Compare name's address to the constraint's
@@ -1415,43 +1475,13 @@ cert_CompareNameWithConstraints(const CERTGeneralName *name,
             } break;
 
             case certDirectoryName:
-                /* Determine if the constraint directory name is a "prefix"
-                ** for the directory name being tested.
-                */
-                {
-                    /* status defaults to SECEqual, so that a constraint with
-                    ** no AVAs will be a wildcard, matching all directory names.
-                    */
-                    SECComparison status = SECEqual;
-                    const CERTRDN **cRDNs =
-                        (const CERTRDN **)current->name.name.directoryName.rdns;
-                    const CERTRDN **nRDNs =
-                        (const CERTRDN **)name->name.directoryName.rdns;
-                    while (cRDNs && *cRDNs && nRDNs && *nRDNs) {
-                        /* loop over name RDNs and constraint RDNs in lock step
-                         */
-                        const CERTRDN *cRDN = *cRDNs++;
-                        const CERTRDN *nRDN = *nRDNs++;
-                        CERTAVA **cAVAs = cRDN->avas;
-                        while (cAVAs &&
-                               *cAVAs) { /* loop over constraint AVAs */
-                            CERTAVA *cAVA = *cAVAs++;
-                            CERTAVA **nAVAs = nRDN->avas;
-                            while (nAVAs && *nAVAs) { /* loop over name AVAs */
-                                CERTAVA *nAVA = *nAVAs++;
-                                status = CERT_CompareAVA(cAVA, nAVA);
-                                if (status == SECEqual)
-                                    break;
-                            } /* loop over name AVAs */
-                            if (status != SECEqual)
-                                break;
-                        } /* loop over constraint AVAs */
-                        if (status != SECEqual)
-                            break;
-                    } /* loop over name RDNs and constraint RDNs */
-                    matched = (status == SECEqual) ? SECSuccess : SECFailure;
-                    break;
-                }
+                matched = excluded ? compareExcludedDirectoryNameN2C(
+                                         &name->name.directoryName,
+                                         &current->name.name.directoryName)
+                                   : comparePermittedDirectoryNameN2C(
+                                         &name->name.directoryName,
+                                         &current->name.name.directoryName);
+                break;
 
             case certIPAddress: /* type 8 */
                 matched = compareIPaddrN2C(&name->name.other,
@@ -1510,51 +1540,6 @@ cert_CompareNameWithConstraints(const CERTGeneralName *name,
     return SECFailure;
 }
 
-/* Add and link a CERTGeneralName to a CERTNameConstraint list. Most
-** likely the CERTNameConstraint passed in is either the permitted
-** list or the excluded list of a CERTNameConstraints.
-*/
-SECStatus
-CERT_AddNameConstraintByGeneralName(PLArenaPool *arena,
-                                    CERTNameConstraint **constraints,
-                                    CERTGeneralName *name)
-{
-    SECStatus rv;
-    CERTNameConstraint *current = NULL;
-    CERTNameConstraint *first = *constraints;
-    void *mark = NULL;
-
-    mark = PORT_ArenaMark(arena);
-
-    current = PORT_ArenaZNew(arena, CERTNameConstraint);
-    if (current == NULL) {
-        rv = SECFailure;
-        goto done;
-    }
-
-    rv = cert_CopyOneGeneralName(arena, &current->name, name);
-    if (rv != SECSuccess) {
-        goto done;
-    }
-
-    current->name.l.prev = current->name.l.next = &(current->name.l);
-
-    if (first == NULL) {
-        *constraints = current;
-        PR_INIT_CLIST(&current->l);
-    } else {
-        PR_INSERT_BEFORE(&current->l, &first->l);
-    }
-
-done:
-    if (rv == SECFailure) {
-        PORT_ArenaRelease(arena, mark);
-    } else {
-        PORT_ArenaUnmark(arena, mark);
-    }
-    return rv;
-}
-
 /*
  * Here we define a list of name constraints to be imposed on
  * certain certificates, most importantly root certificates.
@@ -1581,11 +1566,10 @@ done:
         siBuffer, (unsigned char *)str, sizeof(str) - 1 \
     }
 
-#define NAME_CONSTRAINTS_ENTRY(CA)                   \
-    {                                                \
-        STRING_TO_SECITEM(CA##_SUBJECT_DN)           \
-        ,                                            \
-            STRING_TO_SECITEM(CA##_NAME_CONSTRAINTS) \
+#define NAME_CONSTRAINTS_ENTRY(CA)               \
+    {                                            \
+        STRING_TO_SECITEM(CA##_SUBJECT_DN),      \
+        STRING_TO_SECITEM(CA##_NAME_CONSTRAINTS) \
     }
 
 /* clang-format off */

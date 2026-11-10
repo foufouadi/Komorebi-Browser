@@ -72,6 +72,7 @@ class CoalescedInputFlusher : public nsARefreshObserver {
  public:
   explicit CoalescedInputFlusher(BrowserChild* aBrowserChild);
 
+  MOZ_CAN_RUN_SCRIPT
   virtual void WillRefresh(mozilla::TimeStamp aTime) override = 0;
 
   NS_INLINE_DECL_REFCOUNTING(CoalescedInputFlusher, override)
@@ -88,6 +89,8 @@ class CoalescedInputFlusher : public nsARefreshObserver {
  protected:
   virtual ~CoalescedInputFlusher();
 
+  // BrowserChild owns us and unregisters us from the refresh driver in
+  // DestroyWindow() before it can go away.
   BrowserChild* mBrowserChild;
   // A refresh driver which this instance waits for the next refresh of.
   RefPtr<nsRefreshDriver> mRefreshDriver;

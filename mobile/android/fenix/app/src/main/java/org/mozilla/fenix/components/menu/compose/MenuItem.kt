@@ -186,6 +186,7 @@ internal fun MenuItem(
  * @param label The label in the menu item.
  * @param modifier [Modifier] to be applied to the layout.
  * @param description An optional description text below the label.
+ * @param maxDescriptionLines An optional maximum number of lines for the description text to span.
  * @param iconPainter [Painter] used to display an [Icon] after the list item.
  * @param enabled Controls the enabled state of the list item. When `false`, the list item will not be clickable.
  * @param onClick Invoked when the user clicks on the item.
@@ -195,6 +196,7 @@ internal fun MenuTextItem(
     label: String,
     modifier: Modifier = Modifier,
     description: String? = null,
+    maxDescriptionLines: Int = 1,
     iconPainter: Painter? = null,
     enabled: Boolean = true,
     onClick: (() -> Unit)? = null,
@@ -203,6 +205,7 @@ internal fun MenuTextItem(
         label = label,
         maxLabelLines = 2,
         description = description,
+        maxDescriptionLines = maxDescriptionLines,
         enabled = enabled,
         minHeight =
             if (description != null) {
@@ -227,10 +230,12 @@ internal fun MenuTextItem(
  * @param iconTint Tint color to be applied on the [Icon].
  * @param enabled Controls the enabled state of the list item. When `false`, the list item will not be clickable.
  * @param badgeText WebExtension badge text.
+ * @param description Second line under the label, shown in the error color.
  * @param index The index of the item within the column.
  * @param onClick Called when the user clicks on the item.
  * @param onSettingsClick Called when the user clicks on the settings icon.
  */
+@Suppress("LongParameterList")
 @Composable
 internal fun WebExtensionMenuItem(
     label: String,
@@ -238,12 +243,15 @@ internal fun WebExtensionMenuItem(
     iconTint: Color = Color.Unspecified,
     enabled: Boolean?,
     badgeText: String?,
+    description: String? = null,
     index: Int = 0,
     onClick: (() -> Unit)? = null,
     onSettingsClick: (() -> Unit)? = null,
 ) {
     IconListItem(
         label = label,
+        colors = ListItemDefaults.colors(supportingColor = MaterialTheme.colorScheme.error),
+        description = description,
         enabled = enabled == true,
         beforeIconTint = iconTint,
         beforeIconPainter = iconPainter,
@@ -252,7 +260,7 @@ internal fun WebExtensionMenuItem(
             Modifier.testTag(WEB_EXTENSION_ITEM)
                 .clearAndSetSemantics {
                     onClick?.let { role = Role.Button }
-                    contentDescription = label
+                    contentDescription = listOfNotNull(label, description).joinToString(separator = ", ")
                     collectionItemInfo =
                         CollectionItemInfo(
                             rowIndex = index,
@@ -359,11 +367,13 @@ internal fun MenuBadgeItem(
 @Composable
 internal fun Badge(
     badgeText: String,
+    modifier: Modifier = Modifier,
     state: MenuItemState = MenuItemState.ENABLED,
 ) {
     Column(
         modifier =
-            Modifier.clip(CircleShape)
+            modifier
+                .clip(CircleShape)
                 .background(color = getBadgeColor(state))
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,

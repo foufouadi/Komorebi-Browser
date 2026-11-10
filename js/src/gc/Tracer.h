@@ -111,6 +111,11 @@ typename PtrBaseGCType<T>::type* ConvertToBase(T* thingp) {
 JS_FOR_EACH_TRACEKIND(DEFINE_TRACE_FUNCTION)
 #undef DEFINE_TRACE_FUNCTION
 
+MOZ_ALWAYS_INLINE JSTracer::TraceBufferResult TraceBufferEdgeInternal(
+    JSTracer* trc, void** bufferp, const char* name) {
+  return trc->onBufferEdge(bufferp, name);
+}
+
 bool TraceEdgeInternal(JSTracer* trc, Value* thingp, const char* name);
 bool TraceEdgeInternal(JSTracer* trc, jsid* thingp, const char* name);
 bool TraceEdgeInternal(JSTracer* trc, TaggedProto* thingp, const char* name);
@@ -200,16 +205,18 @@ inline void TraceRoot(JSTracer* trc, const HeapPtr<T>* thingp,
 // Buffers are typically owned by other GC things. Permit creation of 'tenured
 // owned' buffers as part of creating the owning GC thing.
 template <typename T>
-void TraceBufferRoot(JSTracer* trc, JS::Zone* zone, T** bufferp,
-                     const char* name) {
+void TraceBufferRoot(JSTracer* trc, T** bufferp, const char* name) {
+  gc::AssertRootMarkingPhase(trc);
   void** ptrp = reinterpret_cast<void**>(bufferp);
-  gc::TraceBufferEdgeInternal(trc, ptrp, name);
+  auto result = gc::TraceBufferEdgeInternal(trc, ptrp, name);
+  MOZ_ASSERT(result.liveOrNull);
+  (void)result;
 }
 
 template <typename T>
 void BufferHolder<T>::trace(JSTracer* trc) {
   if (buffer) {
-    TraceBufferRoot(trc, zone, &buffer, "BufferHolder buffer");
+    TraceBufferRoot(trc, &buffer, "BufferHolder buffer");
     JS::GCPolicy<T>::trace(trc, buffer, "BufferHolder data");
   }
 }
@@ -317,15 +324,17 @@ void TraceRootRange(JSTracer* trc, size_t len, T* vec, const char* name) {
 template <typename T>
 T* TraceBufferEdge(JSTracer* trc, T** bufferp, const char* name) {
   void** ptrp = reinterpret_cast<void**>(bufferp);
-  void* ptr = gc::TraceBufferEdgeInternal(trc, ptrp, name);
-  return static_cast<T*>(ptr);
+  auto result = gc::TraceBufferEdgeInternal(trc, ptrp, name);
+  MOZ_ASSERT(result.liveOrNull);
+  return static_cast<T*>(result.buffer);
 }
 template <typename T>
 void TraceEdgeAndBuffer(JSTracer* trc, GCBuffer<T>* bufferp, const char* name) {
   static_assert(std::is_pointer_v<T>);
-  T ptr = TraceBufferEdge(trc, bufferp->unbarrieredAddress(), name);
-  if (ptr) {
-    ptr->trace(trc);
+  T* addr = bufferp->unbarrieredAddress();
+  T buffer = TraceBufferEdge(trc, addr, name);
+  if (buffer) {
+    buffer->trace(trc);
   }
 }
 

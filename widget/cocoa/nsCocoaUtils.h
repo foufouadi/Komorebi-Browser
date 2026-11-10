@@ -243,7 +243,7 @@ class nsCocoaUtils {
   // Hides the Menu bar and the Dock. Multiple hide/show requests can be nested.
   static void HideOSChromeOnScreen(bool aShouldHide);
 
-  static nsIWidget* GetHiddenWindowWidget();
+  static already_AddRefed<nsIWidget> GetHiddenWindowWidget();
 
   /**
    * Should the application restore its state because it was launched by the OS
@@ -418,6 +418,15 @@ class nsCocoaUtils {
   static uint32_t ConvertGeckoKeyCodeToMacCharCode(uint32_t aKeyCode);
 
   /**
+   * Converts a Cocoa key equivalent character without a printable form (a
+   * function key, Delete, Return, ...) to the Gecko key name (like "VK_F13")
+   * that a XUL key element takes in its keycode attribute. Returns false if
+   * there is no such name.
+   */
+  static bool GetGeckoKeyCodeNameForMacCharCode(uint32_t aCharCode,
+                                                nsAString& aKeyCodeName);
+
+  /**
    * Converts Gecko native modifier flags for `nsIWidget::SynthesizeNative*()`
    * to native modifier flags of macOS.
    */
@@ -444,16 +453,11 @@ class nsCocoaUtils {
   static mozilla::TimeStamp GetEventTimeStamp(NSTimeInterval aEventTime);
 
   /**
-   * Check whether double clicking on the titlebar should cause the window to
-   * zoom (maximize).
+   * Run the action that the "Double-click a window's title bar to" system
+   * setting asks for on aWindow. Called when a double click lands in one of
+   * our own draggable regions, which stand in for the titlebar that we hide.
    */
-  static bool ShouldZoomOnTitlebarDoubleClick();
-
-  /**
-   * Check whether double clicking on the titlebar should cause the window to
-   * minimize.
-   */
-  static bool ShouldMinimizeOnTitlebarDoubleClick();
+  static void PerformTitlebarDoubleClickAction(NSWindow* aWindow);
 
   /**
    * Get the current video capture permission status.

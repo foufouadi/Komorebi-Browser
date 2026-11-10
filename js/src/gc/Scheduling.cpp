@@ -5,6 +5,7 @@
 #include "gc/Scheduling.h"
 
 #include "mozilla/CheckedInt.h"
+#include "mozilla/glue/Debug.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/TimeStamp.h"
 
@@ -45,7 +46,7 @@ static constexpr double MinHeapGrowthFactor =
 
 // Limit various parameters to reasonable levels to catch errors.
 static constexpr double MaxHeapGrowthFactor = 100;
-static constexpr size_t MaxNurseryBytesParam = 128 * 1024 * 1024;
+static constexpr size_t MaxNurseryBytesParam = Nursery::MaxNurseryBytesParam;
 
 namespace {
 
@@ -616,19 +617,18 @@ void MemoryTracker::checkEmptyOnDestroy() {
 
   if (!gcMap.empty()) {
     ok = false;
-    fprintf(stderr, "Missing calls to JS::RemoveAssociatedMemory:\n");
+    printf_stderr("Missing calls to JS::RemoveAssociatedMemory:\n");
     for (auto iter = gcMap.iter(); !iter.done(); iter.next()) {
-      fprintf(stderr, "  %p 0x%zx %s\n", iter.get().key().ptr(),
-              iter.get().value(), MemoryUseName(iter.get().key().use()));
+      printf_stderr("  %p 0x%zx %s\n", iter.get().key().ptr(),
+                    iter.get().value(), MemoryUseName(iter.get().key().use()));
     }
   }
 
   if (!nonGCMap.empty()) {
     ok = false;
-    fprintf(stderr, "Missing calls to Zone::decNonGCMemory:\n");
+    printf_stderr("Missing calls to Zone::decNonGCMemory:\n");
     for (auto iter = nonGCMap.iter(); !iter.done(); iter.next()) {
-      fprintf(stderr, "  %p 0x%zx\n", iter.get().key().ptr(),
-              iter.get().value());
+      printf_stderr("  %p 0x%zx\n", iter.get().key().ptr(), iter.get().value());
     }
   }
 

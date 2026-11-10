@@ -6,11 +6,10 @@ import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 import { BrowserUtils } from "resource://gre/modules/BrowserUtils.sys.mjs";
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-const APPLE_COPY_LINK = "com.apple.share.CopyLink.invite";
-
 let lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
   QRCodeGenerator:
     "moz-src:///browser/components/qrcode/QRCodeGenerator.sys.mjs",
 });
@@ -27,6 +26,26 @@ Object.defineProperty(lazy, "MacSharingService", {
     );
   },
 });
+
+Object.defineProperty(lazy, "ExternalProtocolService", {
+  configurable: true,
+  get() {
+    return Cc["@mozilla.org/uriloader/external-protocol-service;1"].getService(
+      Ci.nsIExternalProtocolService
+    );
+  },
+});
+// Build a JS object satisfying nsIMacShareCustomItem. The `handler` arrow
+// function is wrapped by XPConnect into an nsIMacShareCustomItemHandler.
+const sMacShareCustomItemQI = ChromeUtils.generateQI(["nsIMacShareCustomItem"]);
+function makeMacShareCustomItem({ label, icon = "", handler }) {
+  return {
+    label,
+    icon,
+    handler,
+    QueryInterface: sMacShareCustomItemQI,
+  };
+}
 
 /**
  * Class that populates and handles various sharing options
@@ -90,6 +109,7 @@ class SharingUtilsCls {
 
     let menu = document.createXULElement("menu");
     let menuPopup = document.createXULElement("menupopup");
+    menuPopup.setAttribute("accesskey-conflicts-bug", "2073899");
     menuPopup.addEventListener("popupshowing", this);
     menu.appendChild(menuPopup);
 
@@ -114,12 +134,24 @@ class SharingUtilsCls {
       // "real" tabs are. Clamp to 1 so the localized string is correct.
       count: Math.max(1, shareableCount),
     });
-    item.classList.add("menuitem-iconic", "share-copy-link");
-    item.setAttribute("image", "chrome://global/skin/icons/link.svg");
+    item.classList.add("share-copy-link");
     return item;
   }
 
-  async #showQRCodePanel(win, browser, url) {
+  /**
+   * Show the QR code panel for the shareable URL carried by a DOM node.
+   *
+   * @param {Node} node Carries contextBrowserToShare.
+   */
+  showQRCode(node) {
+    let { urlToShare } = this.getLinkToShare(node);
+    let browser = node.contextBrowserToShare?.get();
+    if (urlToShare && browser) {
+      this.showQRCodePanel(node.documentGlobal, browser, urlToShare);
+    }
+  }
+
+  async showQRCodePanel(win, browser, url) {
     let tab = win.gBrowser.getTabForBrowser(browser);
     if (tab && win.gBrowser.selectedTab !== tab) {
       let wait = null;
@@ -140,6 +172,8 @@ class SharingUtilsCls {
       return;
     }
 
+    Glean.qrcode.opened.add(1);
+
     let qrCodeDataURI = null;
     try {
       qrCodeDataURI = await lazy.QRCodeGenerator.generateQRCode(url);
@@ -152,13 +186,16 @@ class SharingUtilsCls {
       qrCodeDataURI,
     };
 
-    win.gBrowser
+    let { closedPromise, dialog } = win.gBrowser
       .getTabDialogBox(browser)
       .open(
         "chrome://browser/content/qrcode/qrcode-dialog.html",
         { features: "resizable=no", allowDuplicateDialogs: false },
         params
       );
+    if (dialog) {
+      await closedPromise;
+    }
   }
 
   #waitForTabRestored(tab) {
@@ -248,9 +285,7 @@ class SharingUtilsCls {
 
     let { urlToShare } = this.getLinkToShare(node);
 
-    // If we can't share the current URL, we display the items disabled,
-    // but enable the "more..." item at the bottom on macOS, to allow the
-    // user to change sharing preferences in the system dialog.
+    // If we can't share the current URL, we display the items disabled.
     let shouldEnable = !!urlToShare;
 
     let shareableCount;
@@ -261,67 +296,21 @@ class SharingUtilsCls {
     }
     let copyLinkEnabled = shareableCount > 0;
 
-    // On macOS, query native services. We need this list to check whether
-    // Apple already provides a "Copy Link" service.
-    let services = [];
-    if (AppConstants.platform == "macosx") {
-      if (!urlToShare) {
-        // Fake it so we can ask the sharing service for services:
-        urlToShare = "https://mozilla.org/";
-      }
-      services = lazy.MacSharingService.getSharingProviders(urlToShare);
+    let copyItem = this.#createCopyLinkMenuItem(document, shareableCount);
+    if (!copyLinkEnabled) {
+      copyItem.setAttribute("disabled", "true");
     }
+    menuPopup.appendChild(copyItem);
 
-    // Copy Link(s) - all platforms. Apple seems reluctant to provide copy
-    // link as a feature, so add it if it's not already in the services list.
-    if (
-      AppConstants.platform != "macosx" ||
-      !services.some(s => s.name == APPLE_COPY_LINK)
-    ) {
-      let copyItem = this.#createCopyLinkMenuItem(document, shareableCount);
-      if (!copyLinkEnabled) {
-        copyItem.setAttribute("disabled", "true");
-      }
-      menuPopup.appendChild(copyItem);
-    }
-
-    // QR code - all platforms
+    // QR code
     if (Services.prefs.getBoolPref("browser.shareqrcode.enabled", false)) {
       let qrCodeItem = document.createXULElement("menuitem");
-      qrCodeItem.classList.add("menuitem-iconic", "share-qrcode-item");
-      document.l10n.setAttributes(qrCodeItem, "menu-file-share-qrcode");
-      qrCodeItem.setAttribute("image", "chrome://browser/skin/qrcode.svg");
+      qrCodeItem.classList.add("share-qrcode-item");
+      document.l10n.setAttributes(qrCodeItem, "menu-file-share-qrcode3");
       if (!shouldEnable || isMultiTab) {
         qrCodeItem.setAttribute("disabled", "true");
       }
       menuPopup.appendChild(qrCodeItem);
-    }
-
-    // macOS: native sharing services + "More..."
-    if (AppConstants.platform == "macosx") {
-      if (services.length) {
-        menuPopup.appendChild(document.createXULElement("menuseparator"));
-      }
-      // Share service items
-      services.forEach(share => {
-        let item = document.createXULElement("menuitem");
-        item.classList.add("menuitem-iconic");
-        item.setAttribute("label", share.menuItemTitle);
-        item.setAttribute("data-share-name", share.name);
-        item.setAttribute("image", ChromeUtils.encodeURIForSrcset(share.image));
-        if (!shouldEnable) {
-          item.setAttribute("disabled", "true");
-        }
-        menuPopup.appendChild(item);
-      });
-      menuPopup.appendChild(document.createXULElement("menuseparator"));
-
-      // More item
-      let moreItem = document.createXULElement("menuitem");
-      document.l10n.setAttributes(moreItem, "menu-share-more");
-      moreItem.classList.add("menuitem-iconic", "share-more-button");
-      moreItem.setAttribute("data-share-name", "share_macosx_more");
-      menuPopup.appendChild(moreItem);
     }
 
     // Windows: native share dialog
@@ -335,25 +324,36 @@ class SharingUtilsCls {
       }
       menuPopup.appendChild(winShareItem);
     }
+
+    if (AppConstants.platform == "macosx") {
+      menuPopup.appendChild(document.createXULElement("menuseparator"));
+      let macPickerItem = document.createXULElement("menuitem");
+      macPickerItem.classList.add("share-mac-picker-item");
+      document.l10n.setAttributes(
+        macPickerItem,
+        shareableCount > 1
+          ? "menu-share-mac-picker-multiple"
+          : "menu-share-mac-picker-single"
+      );
+      if (!shouldEnable) {
+        macPickerItem.setAttribute("disabled", "true");
+      }
+      menuPopup.appendChild(macPickerItem);
+    }
   }
 
   #onCommand(event) {
-    let node = event.currentTarget.parentNode;
-    if (event.target.classList.contains("share-qrcode-item")) {
-      let { urlToShare: url } = this.getLinkToShare(node);
-      let browser = node.contextBrowserToShare?.get();
-      if (url && browser) {
-        Glean.qrcode.opened.add(1);
-        this.#showQRCodePanel(node.documentGlobal, browser, url);
-      }
-    } else if (event.target.classList.contains("share-more-button")) {
-      this.openMacSharePreferences();
-    } else if (event.target.classList.contains("share-copy-link")) {
+    let target = event.target;
+    let node =
+      target.closest(".share-tab-url-item") ?? event.currentTarget.parentNode;
+    if (target.classList.contains("share-qrcode-item")) {
+      this.showQRCode(node);
+    } else if (target.classList.contains("share-copy-link")) {
       this.copyLink(node);
-    } else if (event.target.classList.contains("share-windows-item")) {
+    } else if (target.classList.contains("share-windows-item")) {
       this.shareOnWindows(node);
-    } else if (event.target.dataset.shareName) {
-      this.shareOnMac(node, event.target.dataset.shareName);
+    } else if (target.classList.contains("share-mac-picker-item")) {
+      this.shareOnMacPicker(node);
     }
   }
 
@@ -395,6 +395,37 @@ class SharingUtilsCls {
     }
   }
 
+  openPairingFlow(window) {
+    window.gSync.openPairDevice(null, "share-panel");
+  }
+
+  sendToDevice(panel, deviceId) {
+    let window = panel.documentGlobal;
+    let target = window.gSync
+      .getSendTabTargets()
+      .find(device => device.id == deviceId);
+    if (!target) {
+      return;
+    }
+
+    let browser = panel.contextBrowserToShare?.get();
+    let uri = browser && BrowserUtils.getShareableURL(browser.currentURI);
+    if (!uri) {
+      return;
+    }
+
+    window.gSync.sendTabsAndConfirm(
+      [
+        {
+          url: uri.spec,
+          title: browser.contentTitle,
+          private: lazy.PrivateBrowsingUtils.isBrowserPrivate(browser),
+        },
+      ],
+      [target]
+    );
+  }
+
   shareOnWindows(node) {
     let { urlToShare, titleToShare } = this.getLinkToShare(node);
     if (!urlToShare) {
@@ -404,17 +435,122 @@ class SharingUtilsCls {
     lazy.WindowsUIUtils.shareUrl(urlToShare, titleToShare);
   }
 
-  shareOnMac(node, serviceName) {
+  sendEmail(node) {
     let { urlToShare, titleToShare } = this.getLinkToShare(node);
     if (!urlToShare) {
       return;
     }
 
-    lazy.MacSharingService.shareUrl(serviceName, urlToShare, titleToShare);
+    let mailtoUrl =
+      "mailto:?body=" +
+      encodeURIComponent(urlToShare) +
+      "&subject=" +
+      encodeURIComponent(titleToShare ?? "");
+
+    lazy.ExternalProtocolService.loadURI(
+      Services.io.newURI(mailtoUrl),
+      Services.scriptSecurityManager.getSystemPrincipal()
+    );
   }
 
-  openMacSharePreferences() {
-    lazy.MacSharingService.openSharingPreferences();
+  /**
+   * Open the macOS system share picker.
+   *
+   * @param {Node} node - Carries contextBrowserToShare and browsersToShare.
+   * @param {object} [options]
+   * @param {boolean} [options.injectQR] - Prepend a QR Code entry inside the
+   *   picker.
+   */
+  async shareOnMacPicker(node, { injectQR = false } = {}) {
+    let anchor = this.#resolvePickerAnchor(node);
+    if (!anchor) {
+      return;
+    }
+
+    let isMultiTab = node.browsersToShare !== null;
+    let links;
+    let customItems = [];
+
+    if (isMultiTab) {
+      links = this.getLinksToShare(node);
+    } else {
+      let { urlToShare, titleToShare } = this.getLinkToShare(node);
+      links = urlToShare ? [{ url: urlToShare, title: titleToShare }] : [];
+      if (
+        injectQR &&
+        links.length &&
+        Services.prefs.getBoolPref("browser.shareqrcode.enabled", false)
+      ) {
+        customItems.push(await this.#makeQRCodeCustomItem(node, links[0].url));
+      }
+    }
+    if (!links.length) {
+      return;
+    }
+
+    let urls = links.map(l => l.url);
+    let titles = links.map(l => l.title ?? "");
+    let shareTitle = isMultiTab
+      ? await this.#formatLabel(node, "menu-share-links", {
+          count: links.length,
+        })
+      : titles[0];
+
+    // Override Apple's Copy Link service so it copies our multiple
+    // clipboard representations and shows the correct "Copy Link" /
+    // "Copy N Links" label, while keeping Apple's native icon/identity.
+    let copyItem = makeMacShareCustomItem({
+      label: await this.#formatLabel(node, "menu-share-copy-links", {
+        count: links.length,
+      }),
+      handler: () => BrowserUtils.copyLinks(links),
+    });
+
+    lazy.MacSharingService.shareUrlWithPicker(
+      anchor,
+      urls,
+      titles,
+      shareTitle,
+      customItems,
+      copyItem
+    );
+  }
+
+  async #formatLabel(node, l10nId, args) {
+    let [msg] = await node.ownerDocument.l10n.formatMessages([
+      { id: l10nId, args },
+    ]);
+    return msg?.attributes?.find(a => a.name === "label")?.value ?? "";
+  }
+
+  async #makeQRCodeCustomItem(node, url) {
+    let label = await this.#formatLabel(node, "menu-file-share-qrcode3");
+    let win = node.documentGlobal;
+    let browser = node.contextBrowserToShare?.get();
+    return makeMacShareCustomItem({
+      label,
+      icon: "qrcode",
+      handler: () => this.showQRCodePanel(win, browser, url),
+    });
+  }
+
+  #resolvePickerAnchor(node) {
+    // Resolve gBrowser/gURLBar through the menu's own chrome window
+    // rather than browser.ownerGlobal, which can be null for remote browsers
+    // during menu teardown.
+    let win = node.documentGlobal;
+    if (node.classList.contains("share-toolbar-picker")) {
+      return node;
+    }
+    // Tab right-click: anchor to the tab that was right-clicked.
+    if (node.closest("#tabContextMenu")) {
+      let browser = node.contextBrowserToShare?.get();
+      let tab = browser && win.gBrowser?.getTabForBrowser(browser);
+      if (tab) {
+        return tab;
+      }
+    }
+    return win.gURLBar?.inputField ?? null;
   }
 
   testOnlyMockUIUtils(mock) {
@@ -430,6 +566,24 @@ class SharingUtilsCls {
         return Cc["@mozilla.org/windows-ui-utils;1"].getService(
           Ci.nsIWindowsUIUtils
         );
+      },
+    });
+  }
+
+  testOnlyMockExternalProtocolService(mock) {
+    if (!Cu.isInAutomation) {
+      throw new Error("Can only mock utils in automation.");
+    }
+    // eslint-disable-next-line mozilla/valid-lazy
+    Object.defineProperty(lazy, "ExternalProtocolService", {
+      configurable: true,
+      get() {
+        if (mock) {
+          return mock;
+        }
+        return Cc[
+          "@mozilla.org/uriloader/external-protocol-service;1"
+        ].getService(Ci.nsIExternalProtocolService);
       },
     });
   }

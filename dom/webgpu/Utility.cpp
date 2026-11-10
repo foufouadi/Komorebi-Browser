@@ -60,7 +60,7 @@ ffi::WGPUCompareFunction ConvertCompareFunction(
 
 ffi::WGPUTextureFormat ConvertTextureFormat(
     const dom::GPUTextureFormat& aFormat) {
-  ffi::WGPUTextureFormat result = {ffi::WGPUTextureFormat_Sentinel};
+  ffi::WGPUTextureFormat result = {};
   switch (aFormat) {
     case dom::GPUTextureFormat::R8unorm:
       result.tag = ffi::WGPUTextureFormat_R8Unorm;
@@ -405,17 +405,12 @@ ffi::WGPUTextureFormat ConvertTextureFormat(
       break;
   }
 
-  // Clang will check for us that the switch above is exhaustive,
-  // but not if we add a 'default' case. So, check this here.
-  MOZ_RELEASE_ASSERT(result.tag != ffi::WGPUTextureFormat_Sentinel,
-                     "unexpected texture format enum");
-
   return result;
 }
 
 ffi::WGPUTextureAspect ConvertTextureAspect(
     const dom::GPUTextureAspect& aAspect) {
-  ffi::WGPUTextureAspect result = ffi::WGPUTextureAspect_Sentinel;
+  ffi::WGPUTextureAspect result;
   switch (aAspect) {
     case dom::GPUTextureAspect::All:
       result = ffi::WGPUTextureAspect_All;
@@ -428,16 +423,40 @@ ffi::WGPUTextureAspect ConvertTextureAspect(
       break;
   }
 
-  // Clang will check for us that the switch above is exhaustive,
-  // but not if we add a 'default' case. So, check this here.
-  MOZ_RELEASE_ASSERT(result != ffi::WGPUTextureAspect_Sentinel,
-                     "unexpected texture aspect enum");
-
   return result;
 }
 
+ConvertTextureDescriptor::ConvertTextureDescriptor(
+    const dom::GPUTextureDescriptor& aDesc)
+    : mLabel(aDesc.mLabel) {
+  if (aDesc.mSize.IsRangeEnforcedUnsignedLongSequence()) {
+    const auto& seq = aDesc.mSize.GetAsRangeEnforcedUnsignedLongSequence();
+    mDesc.size.width = seq.Length() > 0 ? seq[0] : 1;
+    mDesc.size.height = seq.Length() > 1 ? seq[1] : 1;
+    mDesc.size.depth_or_array_layers = seq.Length() > 2 ? seq[2] : 1;
+  } else if (aDesc.mSize.IsGPUExtent3DDict()) {
+    const auto& dict = aDesc.mSize.GetAsGPUExtent3DDict();
+    mDesc.size.width = dict.mWidth;
+    mDesc.size.height = dict.mHeight;
+    mDesc.size.depth_or_array_layers = dict.mDepthOrArrayLayers;
+  } else {
+    MOZ_CRASH("Unexpected union");
+  }
+  mDesc.label = mLabel.Get();
+  mDesc.mip_level_count = aDesc.mMipLevelCount;
+  mDesc.sample_count = aDesc.mSampleCount;
+  mDesc.dimension = ffi::WGPUTextureDimension(aDesc.mDimension);
+  mDesc.format = ConvertTextureFormat(aDesc.mFormat);
+  mDesc.usage = aDesc.mUsage;
+
+  for (auto format : aDesc.mViewFormats) {
+    mViewFormats.AppendElement(ConvertTextureFormat(format));
+  }
+  mDesc.view_formats = {mViewFormats.Elements(), mViewFormats.Length()};
+}
+
 ffi::WGPUVertexFormat ConvertVertexFormat(const dom::GPUVertexFormat& aFormat) {
-  ffi::WGPUVertexFormat result = ffi::WGPUVertexFormat_Sentinel;
+  ffi::WGPUVertexFormat result;
   switch (aFormat) {
     case dom::GPUVertexFormat::Uint8:
       result = ffi::WGPUVertexFormat_Uint8;
@@ -564,11 +583,6 @@ ffi::WGPUVertexFormat ConvertVertexFormat(const dom::GPUVertexFormat& aFormat) {
       break;
   }
 
-  // Clang will check for us that the switch above is exhaustive,
-  // but not if we add a 'default' case. So, check this here.
-  MOZ_RELEASE_ASSERT(result != ffi::WGPUVertexFormat_Sentinel,
-                     "unexpected texture format enum");
-
   return result;
 }
 
@@ -634,7 +648,7 @@ ffi::WGPUDepthStencilState ConvertDepthStencilState(
 
 ffi::WGPUPredefinedColorSpace ConvertPredefinedColorSpace(
     const dom::PredefinedColorSpace& aColorSpace) {
-  ffi::WGPUPredefinedColorSpace result = ffi::WGPUPredefinedColorSpace_Sentinel;
+  ffi::WGPUPredefinedColorSpace result;
   switch (aColorSpace) {
     case dom::PredefinedColorSpace::Srgb:
       result = ffi::WGPUPredefinedColorSpace_Srgb;
@@ -643,11 +657,6 @@ ffi::WGPUPredefinedColorSpace ConvertPredefinedColorSpace(
       result = ffi::WGPUPredefinedColorSpace_DisplayP3;
       break;
   }
-
-  // Clang will check for us that the switch above is exhaustive,
-  // but not if we add a 'default' case. So, check this here.
-  MOZ_RELEASE_ASSERT(result != ffi::WGPUPredefinedColorSpace_Sentinel,
-                     "unexpected predefined color space enum");
 
   return result;
 }

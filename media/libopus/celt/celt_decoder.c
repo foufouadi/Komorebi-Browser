@@ -281,11 +281,27 @@ void opus_custom_decoder_destroy(CELTDecoder *st)
 }
 #endif /* CUSTOM_MODES */
 
-#if !defined(CUSTOM_MODES) && !defined(ENABLE_OPUS_CUSTOM_API) && !defined(ENABLE_QEXT)
+/* Single-channel de-emphasis scalar reference (mono, downsample==1, !accum).
+   Matches the inner loop used inside deemphasis() below; non-static so the
+   runtime dispatch table can take its address. */
+opus_val32 celt_deemphasis_c(opus_res *y, const opus_val32 *x, opus_val16 coef0,
+      opus_val32 m, int N)
+{
+   int j;
+   for (j=0;j<N;j++)
+   {
+      celt_sig tmp = SATURATE(x[j] + VERY_SMALL + m, SIG_SAT);
+      m = MULT16_32_Q15(coef0, tmp);
+      y[j] = SIG2RES(tmp);
+   }
+   return m;
+}
+
 /* Special case for stereo with no downsampling and no accumulation. This is
    quite common and we can make it faster by processing both channels in the
-   same loop, reducing overhead due to the dependency loop in the IIR filter. */
-static void deemphasis_stereo_simple(celt_sig *in[], opus_res *pcm, int N, const opus_val16 coef0,
+   same loop, reducing overhead due to the dependency loop in the IIR filter.
+   Non-static so the runtime dispatch table can take its address. */
+void deemphasis_stereo_simple_c(celt_sig *in[], opus_res *pcm, int N, opus_val16 coef0,
       celt_sig *mem)
 {
    celt_sig * OPUS_RESTRICT x0;
@@ -310,13 +326,12 @@ static void deemphasis_stereo_simple(celt_sig *in[], opus_res *pcm, int N, const
    mem[0] = m0;
    mem[1] = m1;
 }
-#endif
 
 #ifndef RESYNTH
 static
 #endif
 void deemphasis(celt_sig *in[], opus_res *pcm, int N, int C, int downsample, const opus_val16 *coef,
-      celt_sig *mem, int accum)
+      celt_sig *mem, int accum, int arch)
 {
    int c;
    int Nd;
@@ -328,10 +343,11 @@ void deemphasis(celt_sig *in[], opus_res *pcm, int N, int C, int downsample, con
    /* Short version for common case. */
    if (downsample == 1 && C == 2 && !accum)
    {
-      deemphasis_stereo_simple(in, pcm, N, coef[0], mem);
+      deemphasis_stereo_simple(in, pcm, N, coef[0], mem, arch);
       return;
    }
 #endif
+   (void)arch;
    ALLOC(scratch, N, celt_sig);
    coef0 = coef[0];
    Nd = N/downsample;
@@ -378,6 +394,11 @@ void deemphasis(celt_sig *in[], opus_res *pcm, int N, int C, int downsample, con
                m = MULT16_32_Q15(coef0, tmp);
                y[j*C] = ADD_RES(y[j*C], SIG2RES(tmp));
             }
+         } else if (C == 1)
+         {
+            /* Mono: contiguous output, dispatch through celt_deemphasis()
+               so the ARM NEON kernel can be used on aarch64. */
+            m = celt_deemphasis(y, x, coef0, m, N, arch);
          } else
          {
             for (j=0;j<N;j++)
@@ -606,7 +627,7 @@ static void prefilter_and_fold(CELTDecoder * OPUS_RESTRICT st, int N)
       comb_filter(etmp, decode_mem[c]+decode_buffer_size-N,
          st->postfilter_period_old, st->postfilter_period, overlap,
          -st->postfilter_gain_old, -st->postfilter_gain,
-         st->postfilter_tapset_old, st->postfilter_tapset, NULL, 0, st->arch);
+         st->postfilter_tapset_old, st->postfilter_tapset, NULL, 0, st->arch ARG_QEXT(qext_scale));
 
       /* Simulate TDAC on the concealed audio so that it blends with the
          MDCT of the next frame. */
@@ -795,11 +816,11 @@ static void celt_decode_lost(CELTDecoder * OPUS_RESTRICT st, int N, int LM
          st->postfilter_period_old=IMAX(st->postfilter_period_old, COMBFILTER_MINPERIOD);
          comb_filter(out_syn[c], out_syn[c], st->postfilter_period_old, st->postfilter_period, mode->shortMdctSize,
                st->postfilter_gain_old, st->postfilter_gain, st->postfilter_tapset_old, st->postfilter_tapset,
-               mode->window, overlap, st->arch);
+               mode->window, overlap, st->arch ARG_QEXT(qext_scale));
          if (LM!=0)
             comb_filter(out_syn[c]+mode->shortMdctSize, out_syn[c]+mode->shortMdctSize, st->postfilter_period, st->postfilter_period, N-mode->shortMdctSize,
                   st->postfilter_gain, st->postfilter_gain, st->postfilter_tapset, st->postfilter_tapset,
-                  mode->window, overlap, st->arch);
+                  mode->window, overlap, st->arch ARG_QEXT(qext_scale));
 
       } while (++c<C);
       st->postfilter_period_old = st->postfilter_period;
@@ -1190,7 +1211,8 @@ int celt_decode_with_ec_dred(CELTDecoder * OPUS_RESTRICT st, const unsigned char
    backgroundLogE = oldLogE2 + 2*nbEBands;
 
 #ifdef ENABLE_QEXT
-   if (qext_payload) {
+   /* Ignore absurdly large payloads (see QEXT_PAYLOAD_SIZE_CAP). */
+   if (qext_payload && qext_payload_len <= QEXT_PAYLOAD_SIZE_CAP) {
       ec_dec_init(&ext_dec, (unsigned char*)qext_payload, qext_payload_len);
       qext_bytes = qext_payload_len;
    } else {
@@ -1237,7 +1259,7 @@ int celt_decode_with_ec_dred(CELTDecoder * OPUS_RESTRICT st, const unsigned char
             if (len <= 0 || padding<0) return OPUS_INVALID_PACKET;
 #ifdef ENABLE_QEXT
             qext_bytes = padding;
-            if (data[len] != QEXT_EXTENSION_ID<<1)
+            if (data[len] != QEXT_EXTENSION_ID<<1 || qext_bytes > QEXT_PAYLOAD_SIZE_CAP)
                qext_bytes=0;
             ec_dec_init(&ext_dec, (unsigned char*)data+len+1, qext_bytes);
 #endif
@@ -1285,7 +1307,7 @@ int celt_decode_with_ec_dred(CELTDecoder * OPUS_RESTRICT st, const unsigned char
       , lpcnet
 #endif
                       );
-      deemphasis(out_syn, pcm, N, CC, st->downsample, mode->preemph, st->preemph_memD, accum);
+      deemphasis(out_syn, pcm, N, CC, st->downsample, mode->preemph, st->preemph_memD, accum, st->arch);
       RESTORE_STACK;
       return frame_size/st->downsample;
    }
@@ -1543,11 +1565,11 @@ int celt_decode_with_ec_dred(CELTDecoder * OPUS_RESTRICT st, const unsigned char
       st->postfilter_period_old=IMAX(st->postfilter_period_old, COMBFILTER_MINPERIOD);
       comb_filter(out_syn[c], out_syn[c], st->postfilter_period_old, st->postfilter_period, mode->shortMdctSize,
             st->postfilter_gain_old, st->postfilter_gain, st->postfilter_tapset_old, st->postfilter_tapset,
-            mode->window, overlap, st->arch);
+            mode->window, overlap, st->arch ARG_QEXT(qext_scale));
       if (LM!=0)
          comb_filter(out_syn[c]+mode->shortMdctSize, out_syn[c]+mode->shortMdctSize, st->postfilter_period, postfilter_pitch, N-mode->shortMdctSize,
                st->postfilter_gain, postfilter_gain, st->postfilter_tapset, postfilter_tapset,
-               mode->window, overlap, st->arch);
+               mode->window, overlap, st->arch ARG_QEXT(qext_scale));
 
    } while (++c<CC);
    st->postfilter_period_old = st->postfilter_period;
@@ -1599,7 +1621,7 @@ int celt_decode_with_ec_dred(CELTDecoder * OPUS_RESTRICT st, const unsigned char
    if (qext_bytes) st->rng = st->rng ^ ext_dec.rng;
 #endif
 
-   deemphasis(out_syn, pcm, N, CC, st->downsample, mode->preemph, st->preemph_memD, accum);
+   deemphasis(out_syn, pcm, N, CC, st->downsample, mode->preemph, st->preemph_memD, accum, st->arch);
    st->loss_duration = 0;
    st->plc_duration = 0;
    st->last_frame_type = FRAME_NORMAL;

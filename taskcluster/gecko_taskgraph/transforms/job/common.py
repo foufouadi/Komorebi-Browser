@@ -134,6 +134,7 @@ def support_vcs_checkout(config, job, taskdesc, repo_configs):
     # Re-write repo configs to point to head_git_repository / head_git_rev if requested
     # and available
     clone_with = clone_type(config, job)
+    taskdesc.setdefault("attributes", {})["clone_with"] = clone_with
     if config.params["repository_type"] == "hg" and clone_with == "git":
         repo_configs = _rewrite_repo_configs_for_git_mirror(config, repo_configs)
 
@@ -242,6 +243,21 @@ def add_tooltool(config, job, taskdesc, internal=False):
         taskdesc["scopes"].extend([
             "project:releng:services/tooltool/api/download/internal",
         ])
+
+
+def add_gradle(config, job, taskdesc, mode):
+    gradle_user_home = "{workdir}/gradle-user-home".format(**job["run"])
+    flags = ["--daemon"]
+    if mode == "offline":
+        flags.insert(0, "--offline")
+    taskdesc["worker"].setdefault("env", {}).update({
+        "GRADLE_FLAGS": " ".join(flags),
+        "GRADLE_USER_HOME": gradle_user_home,
+    })
+    if job.get("use-gradle-cache"):
+        if mode != "offline":
+            raise Exception("use-gradle-cache requires use-gradle: offline")
+        add_cache(job, taskdesc, "gradle-user-home", gradle_user_home)
 
 
 def get_expiration(config, policy="default"):

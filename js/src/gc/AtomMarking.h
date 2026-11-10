@@ -33,8 +33,8 @@ class AtomRefRuntime {
   js::GCLockData<Vector<size_t, 0, SystemAllocPolicy>> pendingFreeArenaIndexes;
   mozilla::Atomic<bool, mozilla::Relaxed> hasPendingFreeArenaIndexes;
 
-  inline void recordChildren(Zone* zone, JSAtom*);
-  inline void recordChildren(Zone* zone, JS::Symbol* symbol);
+  // Synchronize access during concurrent marking.
+  AtomRefLock atomRefLock;
 
  public:
   // The extent of all allocated and free words in atom reference bitmaps. This
@@ -64,12 +64,6 @@ class AtomRefRuntime {
   void markAtomsUsedByUncollectedZones(GCRuntime* gc,
                                        UniquePtr<DenseBitmap> markedUnion);
 
-  // If gray unmarking fails or GC marking is aborted then the gray bits may end
-  // up in an invalid state. This updates all reference bitmaps to treat
-  // (possibly incorrectly) gray references as black references. This is always
-  // safe but loses information.
-  void unmarkAllGrayReferences(GCRuntime* gc);
-
   // Get the index into the atom reference bitmaps for the first bit associated
   // with an atom.
   // This is public for testing access.
@@ -88,46 +82,29 @@ class AtomRefRuntime {
   // As above but called per-arena and using the mark bits directly.
   void refineZoneBitmapForCollectedZone(Zone* zone, Arena* arena);
 
+  template <typename T>
+  MOZ_ALWAYS_INLINE bool inlinedRecordRefInternal(Zone* zone, T* thing,
+                                                  const AutoMarkingLock& lock);
+
  public:
   // Record a reference from the context's zone to an atom or id.
   template <typename T>
   void recordRef(JSContext* cx, T* thing);
 
-  // Version of recordRef that's always inlined, for performance-sensitive
+  // Versions of recordRef that are always inlined, for performance-sensitive
   // callers.
-  template <typename T, bool Fallible>
-  MOZ_ALWAYS_INLINE bool inlinedRecordRefInternal(Zone* zone, T* thing);
   template <typename T>
-  MOZ_ALWAYS_INLINE void inlinedRecordRef(Zone* zone, T* thing);
+  MOZ_ALWAYS_INLINE void inlinedRecordRefInfallible(Zone* zone, T* thing);
   template <typename T>
   [[nodiscard]] MOZ_ALWAYS_INLINE bool inlinedRecordRefFallible(Zone* zone,
                                                                 T* thing);
-
-  void recordRefToId(JSContext* cx, jsid id);
-  void recordRefToValue(JSContext* cx, const Value& value);
-
-  // Get the reference color of |thing| in the atom reference bitmap for |zone|.
-  template <typename T>
-  CellColor getRefColor(Zone* zone, T* thing);
-
   // Return whether |zone| has a reference to the |thing/id|.
   template <typename T>
-  bool hasRef(Zone* zone, T* thing) {
-    return getRefColor(zone, thing) != CellColor::White;
-  }
+  bool hasRef(Zone* zone, T* thing);
 
-  // For testing purposes, get the color associated with |bitIndex| in the
-  // atom reference bitmap for |zone|.
-  CellColor getRefColorForIndex(Zone* zone, size_t bitIndex);
-
-  // Called during (possibly parallel) marking to unmark possibly-gray symbols.
-  // CONSIDER: maybePromoteGrayRefsAtomically
-  void maybeUnmarkGrayAtomically(Zone* zone, JS::Symbol* symbol);
-
-#ifdef DEBUG
-  bool hasRefToId(Zone* zone, jsid id);
-  bool hasRefToValue(Zone* zone, const Value& value);
-#endif
+  // For testing purposes, check whether the bit at |bitIndex| in the atom
+  // reference bitmap is set for |zone|.
+  bool getBitByIndex(Zone* zone, size_t bitIndex);
 };
 
 }  // namespace gc

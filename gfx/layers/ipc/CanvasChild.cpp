@@ -203,7 +203,9 @@ class SourceSurfaceCanvasRecording final : public gfx::SourceSurface {
       mRecorder->RecordEvent(RecordedAddExportSurface(mExportID, this));
     }
     aDesc = SurfaceDescriptorCanvasSurface(
-        static_cast<gfx::CanvasManagerChild*>(mCanvasChild->Manager())->Id(),
+        mozilla::ipc::ActorCast<gfx::CanvasManagerChild>(
+            mCanvasChild->Manager())
+            ->Id(),
         mCanvasChild->Id(), uintptr_t(mExportID));
     return true;
   }
@@ -243,7 +245,7 @@ class SourceSurfaceCanvasRecording final : public gfx::SourceSurface {
                                   RefPtr<gfx::SourceSurface> aAliasedSurface,
                                   RefPtr<CanvasChild> aCanvasChild,
                                   ReferencePtr aExportID) {
-    MOZ_ASSERT(NS_IsMainThread());
+    MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
     aRecorder->RemoveStoredObject(aSurfaceAlias);
     aRecorder->RecordEvent(RecordedRemoveSurfaceAlias(aSurfaceAlias));
@@ -419,7 +421,7 @@ bool CanvasChild::EnsureRecorder(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
         gfxPlatform::GetPlatform()->GetPreferredCanvasBackend();
     auto recorder = MakeRefPtr<CanvasDrawEventRecorder>(mWorkerRef);
     if (!recorder->Init(aTextureType, aWebglTextureType, backendType,
-                        MakeUnique<RecorderHelpers>(this))) {
+                        std::make_unique<RecorderHelpers>(this))) {
       return false;
     }
 
@@ -533,7 +535,7 @@ already_AddRefed<gfx::DrawTargetRecording> CanvasChild::CreateDrawTarget(
     const RemoteTextureOwnerId& aTextureOwnerId, gfx::IntSize aSize,
     gfx::SurfaceFormat aFormat) {
   NS_ASSERT_OWNINGTHREAD(CanvasChild);
-  MOZ_ASSERT(mTextureInfo.find(aTextureOwnerId) == mTextureInfo.end());
+  MOZ_RELEASE_ASSERT(mTextureInfo.find(aTextureOwnerId) == mTextureInfo.end());
 
   if (!mRecorder) {
     return nullptr;
@@ -600,7 +602,7 @@ bool CanvasChild::EnsureDataSurfaceShmem(size_t aSizeRequired) {
     mDataSurfaceShmemAvailable = true;
   }
 
-  MOZ_ASSERT(mDataSurfaceShmemAvailable);
+  MOZ_RELEASE_ASSERT(mDataSurfaceShmemAvailable);
   return true;
 }
 
@@ -634,7 +636,7 @@ already_AddRefed<gfx::DataSourceSurface> CanvasChild::GetDataSurface(
     const RemoteTextureOwnerId aTextureOwnerId,
     const gfx::SourceSurface* aSurface, bool aDetached, bool& aMayInvalidate) {
   NS_ASSERT_OWNINGTHREAD(CanvasChild);
-  MOZ_ASSERT(aSurface);
+  MOZ_RELEASE_ASSERT(aSurface);
 
   // mTransactionsSinceGetDataSurface is used to determine if we want to prepare
   // a DataSourceSurface in the GPU process up front at the end of the
@@ -669,7 +671,7 @@ already_AddRefed<gfx::DataSourceSurface> CanvasChild::GetDataSurface(
     if (it != mTextureInfo.end() && it->second.mSnapshotShmem &&
         !NS_WARN_IF(sizeRequired > it->second.mSnapshotShmem->Size())) {
       const auto* shmemPtr = it->second.mSnapshotShmem->DataAs<uint8_t>();
-      MOZ_ASSERT(shmemPtr);
+      MOZ_RELEASE_ASSERT(shmemPtr);
       mRecorder->RecordEvent(RecordedPrepareShmem(aTextureOwnerId));
       auto checkpoint = CreateCheckpoint();
       if (NS_WARN_IF(!mRecorder->WaitForCheckpoint(checkpoint))) {
@@ -746,7 +748,7 @@ void CanvasChild::ReturnDataSurfaceShmem(
     std::shared_ptr<ipc::ReadOnlySharedMemoryMapping>&& aDataSurfaceShmem) {
   // We can only reuse the latest data surface shmem.
   if (aDataSurfaceShmem == mDataSurfaceShmem) {
-    MOZ_ASSERT(!mDataSurfaceShmemAvailable);
+    MOZ_RELEASE_ASSERT(!mDataSurfaceShmemAvailable);
     mDataSurfaceShmemAvailable = true;
   }
 }
@@ -811,7 +813,7 @@ ipc::IPCResult CanvasChild::RecvNotifyTextureDestruction(
     const RemoteTextureOwnerId aTextureOwnerId) {
   auto it = mTextureInfo.find(aTextureOwnerId);
   if (it == mTextureInfo.end()) {
-    MOZ_ASSERT(!CanSend());
+    MOZ_RELEASE_ASSERT(!CanSend());
     return IPC_OK();
   }
 
@@ -833,7 +835,8 @@ already_AddRefed<gfx::SourceSurface> CanvasChild::SnapshotExternalCanvas(
     return nullptr;
   }
 
-  uint32_t managerId = static_cast<gfx::CanvasManagerChild*>(Manager())->Id();
+  uint32_t managerId =
+      mozilla::ipc::ActorCast<gfx::CanvasManagerChild>(Manager())->Id();
   ActorId canvasId = aActor->Id();
 
   gfx::SurfaceFormat format = aCanvas->GetIsOpaque()

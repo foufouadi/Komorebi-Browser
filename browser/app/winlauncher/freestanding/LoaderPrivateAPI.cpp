@@ -125,7 +125,8 @@ void DefaultLoaderObserver::OnEndDllLoad(void* aContext, NTSTATUS aNtStatus,
                                          ModuleLoadInfo&& aModuleLoadInfo) {
   // If the DLL load failed, or if the DLL was loaded by a previous request
   // and thus was not mapped by this request, we do not save the ModuleLoadInfo.
-  if (!NT_SUCCESS(aNtStatus) || !aModuleLoadInfo.WasMapped()) {
+  if (!aModuleLoadInfo.HasCompatibleLayout() || !NT_SUCCESS(aNtStatus) ||
+      !aModuleLoadInfo.WasMapped()) {
     return;
   }
 
@@ -188,10 +189,15 @@ bool LoaderPrivateAPIImp::SubstituteForLSP(PCUNICODE_STRING aLSPLeafName,
 void LoaderPrivateAPIImp::NotifyEndDllLoad(void* aContext,
                                            NTSTATUS aLoadNtStatus,
                                            ModuleLoadInfo&& aModuleLoadInfo) {
-  aModuleLoadInfo.SetEndLoadTimeStamp();
+  // If the ModuleLoadInfo came from an incompatible mozglue.dll then don't use
+  // it.  Note that the OnEndDllLoad method is in the mozglue's DLL, so using
+  // it there is fine.
+  if (aModuleLoadInfo.HasCompatibleLayout()) {
+    aModuleLoadInfo.SetEndLoadTimeStamp();
 
-  if (NT_SUCCESS(aLoadNtStatus)) {
-    aModuleLoadInfo.CaptureBacktrace();
+    if (NT_SUCCESS(aLoadNtStatus)) {
+      aModuleLoadInfo.CaptureBacktrace();
+    }
   }
 
   // This method should only be called after a matching call to
@@ -204,6 +210,8 @@ void LoaderPrivateAPIImp::NotifyEndDllLoad(void* aContext,
   gLoaderObserver->OnEndDllLoad(aContext, aLoadNtStatus,
                                 std::move(aModuleLoadInfo));
 
+  // Prevent the wake being lost between SetObserver's check and sleep.
+  nt::AutoSharedLock lock(gLoaderObserverLock);
   auto previousValue = gLoaderObserverOngoingLoadsCount--;
   MOZ_RELEASE_ASSERT(previousValue);
   if (previousValue == 1) {

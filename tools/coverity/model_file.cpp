@@ -168,6 +168,7 @@ class Buffer {
     if (!CheckBounds(n_bytes)) {
       return false;
     }
+    __coverity_writeall__(static_cast<void*>(buf));
     __coverity_tainted_data_sanitize__(static_cast<void*>(buf));
     return true;
   }
@@ -276,6 +277,8 @@ void* moz_xmemalign(size_t boundary, size_t size) {
 /// Model the copy operations of the string classes as trivial so that
 /// COPY_INSTEAD_OF_MOVE stops reporting copies where std::move() brings no
 /// benefit (CID 1697195 and friends).
+/// The assignments across string classes (`nsCString = nsAutoCString`, as in
+/// CID 1700142) go through the substring overloads, so model those too.
 template <typename T>
 class nsTSubstring {
  public:
@@ -287,15 +290,49 @@ template <typename T>
 class nsTString : public nsTSubstring<T> {
  public:
   nsTString(const nsTString& aStr) {}
+  nsTString(const nsTSubstring<T>& aStr) {}
   nsTString& operator=(const nsTString& aStr) { return *this; }
+  nsTString& operator=(const nsTSubstring<T>& aStr) { return *this; }
 };
 
 template <typename T, size_t N>
 class nsTAutoStringN : public nsTString<T> {
  public:
   nsTAutoStringN(const nsTAutoStringN& aStr) {}
+  nsTAutoStringN(const nsTSubstring<T>& aStr) {}
   nsTAutoStringN& operator=(const nsTAutoStringN& aStr) { return *this; }
+  nsTAutoStringN& operator=(const nsTSubstring<T>& aStr) { return *this; }
 };
+
+/// mozilla::Atomic
+/// A pointer stored with exchange() or compareExchange() is owned by the
+/// atomic and freed by whoever later swaps it out, as in the lazily created
+/// caches of gfxFont (CIDs 1505160, 1505322, 1680871). Mark the stored value
+/// as escaping so RESOURCE_LEAK stops reporting it.
+namespace mozilla {
+enum MemoryOrdering : uint8_t {
+  Relaxed,
+  ReleaseAcquire,
+  SequentiallyConsistent
+};
+namespace detail {
+template <typename T, MemoryOrdering Order>
+class AtomicBase {
+ public:
+  T exchange(T aVal) {
+    __coverity_escape__(aVal);
+    T old;
+    return old;
+  }
+
+  bool compareExchange(T aOldValue, T aNewValue) {
+    __coverity_escape__(aNewValue);
+    bool exchanged;
+    return exchanged;
+  }
+};
+}  // namespace detail
+}  // namespace mozilla
 
 /// usrsctp defines all its usrsctp_sysctl_set_* setters with this macro, whose
 /// lower bound check is `value < <PREFIX>_MIN` with value a uint32_t and most
@@ -319,3 +356,31 @@ class nsTAutoStringN : public nsTString<T> {
 /// Avoid false-positives like CID 1302578 where the reinterpretation of assert
 /// is not understood by Coverity
 #define GOOGLE_CHECK(expr) assert(!!(expr))
+
+/// NSS
+/// These functions take a new reference on a refcounted object and return the
+/// same pointer. Each caller then owns its own reference and releases it on
+/// its own, so wrapping both pointers in smart pointers is correct. Return an
+/// unknown pointer instead of the argument so MULTIPLE_INIT_SMART_PTRS stops
+/// treating them as one object owned twice (CIDs 1600983, 1601181, 1690208,
+/// 1695041 and friends).
+typedef struct CERTCertificateStr CERTCertificate;
+typedef struct PK11SlotInfoStr PK11SlotInfo;
+typedef struct SECMODModuleStr SECMODModule;
+
+extern "C" {
+CERTCertificate* CERT_DupCertificate(CERTCertificate* c) {
+  CERTCertificate* reference;
+  return reference;
+}
+
+PK11SlotInfo* PK11_ReferenceSlot(PK11SlotInfo* slot) {
+  PK11SlotInfo* reference;
+  return reference;
+}
+
+SECMODModule* SECMOD_ReferenceModule(SECMODModule* module) {
+  SECMODModule* reference;
+  return reference;
+}
+}

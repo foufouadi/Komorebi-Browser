@@ -144,7 +144,12 @@ def initialize(topsrcdir, args=()):
         )
     ]
 
-    from mach.util import get_state_dir, get_virtualenv_base_dir, setenv
+    from mach.util import (
+        get_state_dir,
+        get_virtualenv_base_dir,
+        resource_marker,
+        setenv,
+    )
 
     state_dir = _create_state_dir()
 
@@ -160,11 +165,12 @@ def initialize(topsrcdir, args=()):
         quiet = False
 
     # normpath state_dir to normalize msys-style slashes.
-    _activate_python_environment(
-        topsrcdir,
-        lambda: os.path.normpath(get_state_dir(True, topsrcdir=topsrcdir)),
-        quiet=quiet,
-    )
+    with resource_marker("Mach", "activate mach site"):
+        _activate_python_environment(
+            topsrcdir,
+            lambda: os.path.normpath(get_state_dir(True, topsrcdir=topsrcdir)),
+            quiet=quiet,
+        )
     _maybe_activate_mozillabuild_environment()
 
     from concurrent.futures import ThreadPoolExecutor
@@ -176,7 +182,11 @@ def initialize(topsrcdir, args=()):
 
         try:
             repo = mozversioncontrol.get_repository_object(path=topsrcdir)
-        except (mozversioncontrol.InvalidRepoPath, mozversioncontrol.MissingVCSTool):
+        except (
+            mozversioncontrol.InvalidRepoPath,
+            mozversioncontrol.MissingVCSTool,
+            mozversioncontrol.StaleWorkspaceError,
+        ):
             repo = None
         if repo == "SOURCE":
             return False
@@ -367,9 +377,7 @@ def initialize(topsrcdir, args=()):
         distro, distro_version = get_distro_and_version()
         vscode_terminal, ssh_connection = get_shell_info()
         vscode_running = get_vscode_running()
-        is_employee = resolve_is_employee(
-            Path(topsrcdir), Path(state_dir), driver.settings
-        )
+        is_employee = resolve_is_employee(Path(topsrcdir), driver.settings)
         fleet_running = get_fleet_running() if is_employee else None
         crowdstrike_running = get_crowdstrike_running() if is_employee else None
         psutil_stats = get_psutil_stats()
@@ -451,7 +459,8 @@ def initialize(topsrcdir, args=()):
             quiet=quiet,
         )
 
-        command_site_manager.activate()
+        with resource_marker("Mach", f"activate {site_name} site"):
+            command_site_manager.activate()
 
     for category, meta in CATEGORIES.items():
         driver.define_category(category, meta["short"], meta["long"], meta["priority"])
@@ -496,9 +505,10 @@ def initialize(topsrcdir, args=()):
         }
 
     driver.command_site_manager = command_site_manager
-    load_commands_from_spec(
-        command_modules_to_load, topsrcdir, missing_ok=missing_ok_future.result()
-    )
+    with resource_marker("Mach", "load commands"):
+        load_commands_from_spec(
+            command_modules_to_load, topsrcdir, missing_ok=missing_ok_future.result()
+        )
 
     return driver
 

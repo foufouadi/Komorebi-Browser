@@ -12,7 +12,7 @@ add_task(
     await openPreferencesViaOpenPreferencesAPI("privacy", { leaveOpen: true });
 
     let historyMode = gBrowser.contentDocument.querySelector(
-      "setting-group[groupid='history2'] #historyMode"
+      "setting-group[groupid='history'] #historyMode"
     );
     ok(historyMode, "historyMode element is rendered");
 
@@ -31,6 +31,8 @@ add_task(
         `search-l10n-ids on historyMode includes ${id}`
       );
     }
+
+    await assertRadioGroupAccessibleName(historyMode);
 
     BrowserTestUtils.removeTab(gBrowser.selectedTab);
   }

@@ -11,10 +11,9 @@ import {
   UrlbarProvider,
   UrlbarUtils,
 } from "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs";
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-const lazy = {};
-
-ChromeUtils.defineESModuleGetters(lazy, {
+const lazy = XPCOMUtils.declareLazy({
   UrlbarResult: "chrome://browser/content/urlbar/UrlbarResult.mjs",
   UrlbarSearchUtils:
     "moz-src:///browser/components/urlbar/UrlbarSearchUtils.sys.mjs",
@@ -55,16 +54,20 @@ export class UrlbarProviderAliasEngines extends UrlbarProvider {
    * @param {UrlbarQueryContext} queryContext
    * @param {(provider: UrlbarProvider, result: UrlbarResult) => void} addCallback
    *   Callback invoked by the provider to add a new result.
+   * @param {UrlbarParentController} controller The controller instance.
    */
-  async startQuery(queryContext, addCallback) {
+  async startQuery(queryContext, addCallback, controller) {
     let instance = this.queryInstance;
     let alias = queryContext.tokens[0]?.value;
     let engine = await lazy.UrlbarSearchUtils.engineForAlias(
       alias,
       queryContext.searchString
     );
-    let icon = await engine?.getIconURL();
     if (!engine || instance != this.queryInstance) {
+      return;
+    }
+    let icon = await UrlbarUtils.getEngineIconUrl(engine, controller);
+    if (instance != this.queryInstance) {
       return;
     }
     let query = UrlbarUtils.substringAfter(

@@ -31,7 +31,7 @@ const lazy = {};
 ChromeUtils.defineLazyGetter(lazy, "console", () => {
   return console.createInstance({
     maxLogLevel: _logLevel, // we can't use maxLogLevelPref in workers.
-    prefix: "ML:OpenAIPipeline",
+    logModule: "GeckoMLOpenAIPipeline",
   });
 });
 ChromeUtils.defineESModuleGetters(
@@ -54,6 +54,7 @@ const TOOL_CALL_DRAIN_TIMEOUT_MS = 2000;
 export class OpenAIPipeline {
   #errorFactory = null;
   #options = null;
+  #abortControllers = new Map();
   OpenAILib = null;
 
   constructor(options, errorFactory) {
@@ -222,10 +223,13 @@ export class OpenAIPipeline {
       requestId,
       inferenceProgressCallback,
       port,
+      signal,
     } = args;
 
     const createStartTime = ChromeUtils.now();
-    const stream = await client.chat.completions.create(completionParams);
+    const stream = await client.chat.completions.create(completionParams, {
+      signal,
+    });
     let lastChunkTime = ChromeUtils.now();
     ChromeUtils.addProfilerMarker(
       "MLEngine:OpenAI",
@@ -356,10 +360,13 @@ export class OpenAIPipeline {
       requestId,
       inferenceProgressCallback,
       port,
+      signal,
     } = args;
 
     const createStartTime = ChromeUtils.now();
-    const completion = await client.chat.completions.create(completionParams);
+    const completion = await client.chat.completions.create(completionParams, {
+      signal,
+    });
     ChromeUtils.addProfilerMarker(
       "MLEngine:OpenAI",
       createStartTime,
@@ -368,6 +375,10 @@ export class OpenAIPipeline {
     const message = completion.choices[0].message;
     const output = message.content || "";
     const toolCalls = message.tool_calls || null;
+    // Backend-specific data carried alongside the message, e.g. the `citations`
+    // Exa returns on its answer service. Only surfaced here: it has no
+    // equivalent on the streaming path, where the deltas carry content alone.
+    const providerSpecificFields = message.provider_specific_fields || null;
 
     this.#sendProgress({
       content: output,
@@ -382,6 +393,7 @@ export class OpenAIPipeline {
       finalOutput: output,
       metrics: [],
       ...(toolCalls ? { toolCalls } : {}),
+      ...(providerSpecificFields ? { providerSpecificFields } : {}),
     };
   }
 
@@ -404,6 +416,8 @@ export class OpenAIPipeline {
     port = null
   ) {
     lazy.console.debug("Running OpenAI pipeline");
+    const controller = new AbortController();
+    this.#abortControllers.set(requestId, controller);
     try {
       const {
         baseURL,
@@ -413,21 +427,24 @@ export class OpenAIPipeline {
         purpose,
         extraHeaders,
         engineId,
+        maxRetries,
       } = this.#options;
-      const fxAccountToken = request.fxAccountToken
-        ? request.fxAccountToken
-        : null;
+      const token = request.token ?? null;
       const chatId = request.chatId;
 
       const userAgent = navigator.userAgent;
       const client = new OpenAIPipeline.OpenAILib.OpenAI({
         baseURL: baseURL ? baseURL : "http://localhost:11434/v1",
-        apiKey: apiKey || fxAccountToken || "apiKey",
+        apiKey: apiKey || token || "apiKey",
+        maxRetries,
         defaultHeaders: {
           "user-agent": userAgent,
           ...extraHeaders,
           "service-type": serviceType || "ai",
-          purpose: purpose || "chat",
+          // Omitted when unset rather than defaulted to "chat": a service that
+          // enumerates the purposes it accepts rejects the ones it does not
+          // know, and every feature with a purpose passes one explicitly.
+          ...(purpose ? { purpose } : {}),
           "x-engine-id": engineId,
           "chat-id": chatId,
         },
@@ -435,12 +452,15 @@ export class OpenAIPipeline {
       const stream = request.streamOptions?.enabled || false;
       const tools = request.tools || [];
 
+      // `stream` and `tools` are omitted rather than sent falsy/empty: absent
+      // means the same thing to a chat completion, and services that do not
+      // offer streaming or tools at all reject the keys outright.
       const completionParams = {
         ...request.inferenceParams,
         model: modelId,
         messages: request.args,
-        stream,
-        tools,
+        ...(stream ? { stream } : {}),
+        ...(tools.length ? { tools } : {}),
       };
       if (stream) {
         completionParams.stream_options = { include_usage: true };
@@ -451,6 +471,7 @@ export class OpenAIPipeline {
         requestId,
         inferenceProgressCallback,
         port,
+        signal: controller.signal,
       };
 
       return stream
@@ -473,6 +494,12 @@ export class OpenAIPipeline {
       });
 
       throw backendError;
+    } finally {
+      this.#abortControllers.delete(requestId);
     }
+  }
+
+  async cancel(requestId) {
+    this.#abortControllers.get(requestId)?.abort();
   }
 }

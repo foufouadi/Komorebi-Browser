@@ -44,9 +44,17 @@ const std::string TlsAgent::kServerEcdsa521 = "ecdsa521";
 const std::string TlsAgent::kServerEcdhRsa = "ecdh_rsa";
 const std::string TlsAgent::kServerEcdhEcdsa = "ecdh_ecdsa";
 const std::string TlsAgent::kServerDsa = "dsa";
+const std::string TlsAgent::kServerMlDsa44 = "mldsa44";
+const std::string TlsAgent::kServerMlDsa65 = "mldsa65";
+const std::string TlsAgent::kServerMlDsa87 = "mldsa87";
+const std::string TlsAgent::kServerUnknownExt = "unknown_ext";
+const std::string TlsAgent::kServerUnknownCriticalExt = "unknown_critical_ext";
 const std::string TlsAgent::kDelegatorEcdsa256 = "delegator_ecdsa256";
 const std::string TlsAgent::kDelegatorRsae2048 = "delegator_rsae2048";
 const std::string TlsAgent::kDelegatorRsaPss2048 = "delegator_rsa_pss2048";
+const std::string TlsAgent::kDelegatorMlDsa44 = "delegator_mldsa44";
+const std::string TlsAgent::kDelegatorMlDsa65 = "delegator_mldsa65";
+const std::string TlsAgent::kDelegatorMlDsa87 = "delegator_mldsa87";
 
 static const uint8_t kCannedTls13ServerHello[] = {
     0x03, 0x03, 0x9c, 0xbc, 0x14, 0x9b, 0x0e, 0x2e, 0xfa, 0x0d, 0xf3,
@@ -442,22 +450,21 @@ bool TlsAgent::CheckClientAuthCallbacksCompleted(uint8_t expected) {
 }
 
 bool TlsAgent::GetPeerChainLength(size_t* count) {
-  SECItemArray* chain = nullptr;
-  SECStatus rv = SSL_PeerCertificateChainDER(ssl_fd(), &chain);
+  SECItemArray* rawChain = nullptr;
+  SECStatus rv = SSL_PeerCertificateChainDER(ssl_fd(), &rawChain);
+  ScopedSECItemArray chain(rawChain);
   if (rv != SECSuccess) return false;
 
   *count = chain->len;
-
-  SECITEM_FreeArray(chain, true);
-
   return true;
 }
 
 void TlsAgent::CheckPeerChainFunctionConsistency() {
-  SECItemArray* derChain = nullptr;
-  SECStatus rv = SSL_PeerCertificateChainDER(ssl_fd(), &derChain);
+  SECItemArray* rawDerChain = nullptr;
+  SECStatus rv = SSL_PeerCertificateChainDER(ssl_fd(), &rawDerChain);
+  ScopedSECItemArray derChain(rawDerChain);
   PRErrorCode err1 = PR_GetError();
-  CERTCertList* chain = SSL_PeerCertificateChain(ssl_fd());
+  ScopedCERTCertList chain(SSL_PeerCertificateChain(ssl_fd()));
   PRErrorCode err2 = PR_GetError();
   if (rv != SECSuccess) {
     ASSERT_EQ(nullptr, chain);
@@ -479,9 +486,6 @@ void TlsAgent::CheckPeerChainFunctionConsistency() {
     ++count;
   }
   ASSERT_EQ(count, derChain->len);
-
-  SECITEM_FreeArray(derChain, true);
-  CERT_DestroyCertList(chain);
 }
 
 void TlsAgent::CheckCipherSuite(uint16_t suite) {
@@ -528,9 +532,6 @@ const std::vector<SSLNamedGroup> kAllDHEGroups = {
     ssl_grp_ffdhe_4096,
     ssl_grp_ffdhe_6144,
     ssl_grp_ffdhe_8192,
-#ifndef NSS_DISABLE_KYBER
-    ssl_grp_kem_xyber768d00,
-#endif
     ssl_grp_kem_mlkem768x25519,
     ssl_grp_kem_secp256r1mlkem768,
     ssl_grp_kem_secp384r1mlkem1024,
@@ -546,9 +547,6 @@ const std::vector<SSLNamedGroup> kNonPQDHEGroups = {
 const std::vector<SSLNamedGroup> kECDHEGroups = {
     ssl_grp_ec_curve25519,          ssl_grp_ec_secp256r1,
     ssl_grp_ec_secp384r1,           ssl_grp_ec_secp521r1,
-#ifndef NSS_DISABLE_KYBER
-    ssl_grp_kem_xyber768d00,
-#endif
     ssl_grp_kem_mlkem768x25519,     ssl_grp_kem_secp256r1mlkem768,
     ssl_grp_kem_secp384r1mlkem1024,
 };
@@ -564,9 +562,6 @@ const std::vector<SSLNamedGroup> kFasterDHEGroups = {
     ssl_grp_ec_secp384r1,
     ssl_grp_ffdhe_2048,
     ssl_grp_ffdhe_3072,
-#ifndef NSS_DISABLE_KYBER
-    ssl_grp_kem_xyber768d00,
-#endif
     ssl_grp_kem_mlkem768x25519,
     ssl_grp_kem_secp256r1mlkem768,
     ssl_grp_kem_secp384r1mlkem1024,
@@ -574,9 +569,6 @@ const std::vector<SSLNamedGroup> kFasterDHEGroups = {
 };
 
 const std::vector<SSLNamedGroup> kEcdhHybridGroups = {
-#ifndef NSS_DISABLE_KYBER
-    ssl_grp_kem_xyber768d00,
-#endif
     ssl_grp_kem_mlkem768x25519,
     ssl_grp_kem_secp256r1mlkem768,
     ssl_grp_kem_secp384r1mlkem1024,
@@ -618,7 +610,9 @@ void TlsAgent::EnableGroupsByKeyExchange(SSLKEAType kea) {
 
 void TlsAgent::EnableGroupsByAuthType(SSLAuthType authType) {
   if (authType == ssl_auth_ecdh_rsa || authType == ssl_auth_ecdh_ecdsa ||
-      authType == ssl_auth_ecdsa || authType == ssl_auth_tls13_any) {
+      authType == ssl_auth_ecdsa || authType == ssl_auth_tls13_any ||
+      authType == ssl_auth_mldsa44 || authType == ssl_auth_mldsa65 ||
+      authType == ssl_auth_mldsa87) {
     ConfigNamedGroups(kECDHEGroups);
   }
 }
@@ -747,7 +741,6 @@ void TlsAgent::CheckKEA(SSLKEAType kea, SSLNamedGroup kea_group,
   if (kea_size == 0) {
     switch (kea_group) {
       case ssl_grp_ec_curve25519:
-      case ssl_grp_kem_xyber768d00:
       case ssl_grp_kem_mlkem768x25519:
         kea_size = 255;
         break;
@@ -1037,14 +1030,14 @@ void TlsAgent::ValidateCipherSpecs() {
   // We use one ciphersuite in each direction.
   PRInt32 expected = 2;
   if (variant_ == ssl_variant_datagram) {
-    // For DTLS 1.3, the client retains the cipher spec for early data and the
-    // handshake so that it can retransmit EndOfEarlyData and its final flight.
-    // It also retains the handshake read cipher spec so that it can read ACKs
-    // from the server. The server retains the handshake read cipher spec so it
-    // can read the client's retransmitted Finished.
+    // For DTLS 1.3, the client retains the cipher spec for the handshake so
+    // that it can retransmit its final flight. It also retains the handshake
+    // read cipher spec so that it can read ACKs from the server. The server
+    // retains the handshake read cipher spec so it can read the client's
+    // retransmitted Finished.
     if (expected_version_ >= SSL_LIBRARY_VERSION_TLS_1_3) {
       if (role_ == CLIENT) {
-        expected = info_.earlyDataAccepted ? 5 : 4;
+        expected = 4;
       } else {
         expected = 3;
       }

@@ -18,7 +18,7 @@
 #include "mozilla/StaticPrefs_layout.h"
 #include "mozilla/StaticPrefs_ui.h"
 #include "mozilla/ToString.h"
-#include "mozilla/layers/APZInputBridge.h"
+#include "mozilla/layers/APZBridge.h"
 #include "mozilla/layers/APZThreadUtils.h"
 
 static mozilla::LazyLogModule sApzInpLog("apz.inputqueue");
@@ -238,7 +238,44 @@ APZEventResult InputQueue::ReceiveTouchInput(
       result.SetStatusForTouchEvent(*block, aFlags, consumableFlags, target);
     }
   }
-  mQueuedInputs.AppendElement(MakeUnique<QueuedInput>(aEvent, *block));
+
+  if (aEvent.mMayTriggerSwipe) {
+    switch (aEvent.mType) {
+      case MultiTouchInput::MULTITOUCH_START:
+        // Do not wait for a browser gesture response on touchstart. The widget
+        // only records the swipable directions here; it needs a move outside
+        // slop to decide whether to start a swipe and send a response. Moves
+        // within slop are suppressed, and ending or cancelling a touch before
+        // that decision does not send a response either. Waiting on touchstart
+        // would therefore leave a tap or stationary press queued indefinitely.
+        // APZ must also process touchstart to begin tap/long-press recognition.
+        // TODO: Handle the case in which the target is not confirmed or touch
+        // action is not confirmed.
+        if (block->IsTargetConfirmed() && block->HasAllowedTouchBehaviors() &&
+            block->TouchActionAllowsPanningX()) {
+          MOZ_ASSERT(target, "A confirmed target should be non-null here");
+          result.mSwipableDirectionsForTouch =
+              block->GetOverscrollHandoffChain()->GetSwipableDirections(
+                  *target);
+        }
+        break;
+      case MultiTouchInput::MULTITOUCH_MOVE:
+        // Wait before ProcessQueue() so that APZ cannot pan before widget
+        // decides if it triggers swipe. Moves whose status is set as
+        // eConsumeNoDefault never reach the widget and they get no response, so
+        // they must not wait. Note that the widget clears mMayTriggerSwipe
+        // after the first swipe decision, so later moves, which don't set
+        // browser gesture response, do not wait.
+        if (result.GetStatus() != nsEventStatus_eConsumeNoDefault) {
+          block->SetNeedsToWaitForBrowserGestureResponse(true);
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  mQueuedInputs.AppendElement(std::make_unique<QueuedInput>(aEvent, *block));
   ProcessQueue();
 
   // If this block just started and is waiting for a content response, but
@@ -328,7 +365,7 @@ APZEventResult InputQueue::ReceiveMouseInput(
 
   result.mInputBlockId = block->GetBlockId();
 
-  mQueuedInputs.AppendElement(MakeUnique<QueuedInput>(aEvent, *block));
+  mQueuedInputs.AppendElement(std::make_unique<QueuedInput>(aEvent, *block));
   ProcessQueue();
 
   if (DragTracker::EndsDrag(aEvent)) {
@@ -377,7 +414,7 @@ APZEventResult InputQueue::ReceiveScrollWheelInput(
   // null) should take priority. This is equivalent to just always using the
   // target (confirmed or not) from the block, which is what
   // ProcessQueue() does.
-  mQueuedInputs.AppendElement(MakeUnique<QueuedInput>(aEvent, *block));
+  mQueuedInputs.AppendElement(std::make_unique<QueuedInput>(aEvent, *block));
 
   // The WheelBlockState needs to affix a counter to the event before we process
   // it. Note that the counter is affixed to the copy in the queue rather than
@@ -415,7 +452,7 @@ APZEventResult InputQueue::ReceiveKeyboardInput(
 
   result.mInputBlockId = block->GetBlockId();
 
-  mQueuedInputs.AppendElement(MakeUnique<QueuedInput>(aEvent, *block));
+  mQueuedInputs.AppendElement(std::make_unique<QueuedInput>(aEvent, *block));
 
   ProcessQueue();
 
@@ -435,7 +472,7 @@ static bool CanScrollTargetHorizontally(const PanGestureInput& aInitialEvent,
   horizontalComponent.mPanDisplacement.y = 0;
   ScrollDirections allowedScrollDirections;
   RefPtr<AsyncPanZoomController> horizontallyScrollableAPZC =
-      aBlock->GetOverscrollHandoffChain()->FindFirstScrollable(
+      aBlock->GetOverscrollHandoffChain()->FindScrollTarget(
           horizontalComponent, &allowedScrollDirections,
           OverscrollHandoffChain::IncludeOverscroll::No);
   return horizontallyScrollableAPZC &&
@@ -450,7 +487,8 @@ APZEventResult InputQueue::ReceivePanGestureInput(
 
   if (aEvent.mType == PanGestureInput::PANGESTURE_INTERRUPTED) {
     if (RefPtr<PanGestureBlockState> block = mActivePanGestureBlock.get()) {
-      mQueuedInputs.AppendElement(MakeUnique<QueuedInput>(aEvent, *block));
+      mQueuedInputs.AppendElement(
+          std::make_unique<QueuedInput>(aEvent, *block));
       ProcessQueue();
     }
     result.SetStatusAsIgnore();
@@ -487,6 +525,23 @@ APZEventResult InputQueue::ReceivePanGestureInput(
       return result;
     }
     if (!startsNewBlock) {
+      // A zero-delta pan-end has nothing to scroll and the gesture it stands
+      // for is already over, so drop it rather than synthesizing a block whose
+      // OnPanBegin would cancel animations. Only do so while an animation is
+      // running though: that animation will relieve any overscroll when it
+      // ends, whereas otherwise the synthesized block is the only thing left
+      // that can snap back overscroll an interrupted gesture caused.
+      if (event.mType == PanGestureInput::PANGESTURE_END &&
+          event.mPanDisplacement == ScreenPoint{}) {
+        RefPtr<const OverscrollHandoffChain> handoffChain =
+            aTarget->BuildOverscrollHandoffChain();
+        if (handoffChain && handoffChain->HasAnimatingApzc()) {
+          INPQ_LOG(
+              "dropping a received zero-delta pan-end while an animation is "
+              "running\n");
+          return result;
+        }
+      }
       // Only PANGESTURE_MAYSTART or PANGESTURE_START events are allowed to
       // start a new pan gesture block, but we really want to start a new block
       // here, so we magically turn this input into a PANGESTURE_START.
@@ -551,7 +606,7 @@ APZEventResult InputQueue::ReceivePanGestureInput(
   // null) should take priority. This is equivalent to just always using the
   // target (confirmed or not) from the block, which is what
   // ProcessQueue() does.
-  mQueuedInputs.AppendElement(MakeUnique<QueuedInput>(event, *block));
+  mQueuedInputs.AppendElement(std::make_unique<QueuedInput>(event, *block));
   if (terminateSynthesizedBlock) {
     // Immediately end the block we just synthesized from a pan-end so OnPanEnd
     // runs and snaps back any overscroll, rather than leaving the block active.
@@ -559,7 +614,12 @@ APZEventResult InputQueue::ReceivePanGestureInput(
     terminator.mType = PanGestureInput::PANGESTURE_END;
     terminator.mPanDisplacement = ScreenPoint{};
     terminator.mLocalPanDisplacement = ParentLayerPoint{};
-    mQueuedInputs.AppendElement(MakeUnique<QueuedInput>(terminator, *block));
+    mQueuedInputs.AppendElement(
+        std::make_unique<QueuedInput>(terminator, *block));
+    // The gesture is over, so momentum events that follow belong to the
+    // interrupted gesture and should be discarded rather than added to this
+    // block.
+    mActivePanGestureBlock = nullptr;
   }
   ProcessQueue();
 
@@ -608,7 +668,7 @@ APZEventResult InputQueue::ReceivePinchGestureInput(
   // null) should take priority. This is equivalent to just always using the
   // target (confirmed or not) from the block, which is what
   // ProcessQueue() does.
-  mQueuedInputs.AppendElement(MakeUnique<QueuedInput>(aEvent, *block));
+  mQueuedInputs.AppendElement(std::make_unique<QueuedInput>(aEvent, *block));
   ProcessQueue();
 
   return result;
@@ -1027,13 +1087,12 @@ void InputQueue::SetAllowedTouchBehavior(
 
 void InputQueue::SetBrowserGestureResponse(uint64_t aInputBlockId,
                                            BrowserGestureResponse aResponse) {
-  InputBlockState* inputBlock = FindBlockForId(aInputBlockId, nullptr);
-
-  if (inputBlock && inputBlock->AsPanGestureBlock()) {
-    PanGestureBlockState* block = inputBlock->AsPanGestureBlock();
-    block->SetBrowserGestureResponse(aResponse);
-  } else if (inputBlock) {
-    NS_WARNING("input block is not a pan gesture block");
+  if (auto* inputBlock = FindBlockForId(aInputBlockId, nullptr)) {
+    if (auto* block = inputBlock->AsBrowserGesturableBlock()) {
+      block->SetBrowserGestureResponse(aResponse);
+    } else {
+      NS_WARNING("input block should be browser gesturable here");
+    }
   }
   ProcessQueue();
 }
@@ -1081,9 +1140,11 @@ bool InputQueue::ProcessQueue() {
         if (curBlock->AsTouchBlock()) {
           // touch
           additionalLog.AppendPrintf(
-              "waiting-long-tap-result: %d allowed-touch-behaviors: %d",
+              "waiting-long-tap-result: %d allowed-touch-behaviors: %d "
+              "waiting-browser-gesture-response: %d",
               curBlock->AsTouchBlock()->IsWaitingLongTapResult(),
-              curBlock->AsTouchBlock()->HasAllowedTouchBehaviors());
+              curBlock->AsTouchBlock()->HasAllowedTouchBehaviors(),
+              curBlock->AsTouchBlock()->IsWaitingForBrowserGestureResponse());
         } else if (curBlock->AsPanGestureBlock()) {
           // pan gesture
           additionalLog.AppendPrintf(
@@ -1146,6 +1207,10 @@ bool InputQueue::ProcessQueue() {
       if (mLastActiveApzc && mLastActiveApzc != target &&
           mTouchCounter.GetActiveTouchCount() > 0) {
         mLastActiveApzc->ResetTouchInputState();
+      }
+      if (TouchBlockState* touchBlock = curBlock->AsTouchBlock()) {
+        touchBlock->UpdateTouchCounter(
+            mQueuedInputs[0]->Input()->AsMultiTouchInput());
       }
       if (curBlock->ShouldDropEvents()) {
         if (curBlock->AsTouchBlock()) {

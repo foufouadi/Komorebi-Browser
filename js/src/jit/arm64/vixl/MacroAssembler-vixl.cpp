@@ -70,12 +70,14 @@ int MacroAssembler::MoveImmediateHelper(MacroAssembler* masm,
   //
   // The code below supports all five initial value generators, and
   // applying move-keep operations to move-zero and move-inverted initial
-  // values.
+  // values. It also applies a single move-keep to the other initial values.
 
   // Try to move the immediate in one instruction, and if that fails, switch to
   // using multiple instructions.
   if (OneInstrMoveImmediateHelper(masm, rd, imm)) {
     return 1;
+  } else if (!rd.IsSP() && TwoInstrMoveImmediateHelper(masm, rd, imm)) {
+    return 2;
   } else {
     int instruction_count = 0;
     unsigned reg_size = rd.size();
@@ -170,6 +172,54 @@ bool MacroAssembler::OneInstrMoveImmediateHelper(MacroAssembler* masm,
           dst, AppropriateZeroRegFor(dst), n, imm_s, imm_r, ORR);
     }
     return true;
+  }
+  return false;
+}
+
+
+bool MacroAssembler::TwoInstrMoveImmediateHelper(MacroAssembler* masm,
+                                                 const Register& dst,
+                                                 uint64_t imm) {
+  bool emit_code = masm != NULL;
+
+  // Move-zero or move-inverted and one move-keep is just as short.
+  if (!dst.Is64Bits() || CountClearHalfWords(imm, kXRegSize) >= 2 ||
+      CountClearHalfWords(~imm, kXRegSize) >= 2) {
+    return false;
+  }
+
+  // A 32-bit move, which clears the upper word, followed by a move-keep for
+  // the only non-zero halfword of the upper word.
+  for (unsigned shift = kWRegSize; shift < kXRegSize; shift += 16) {
+    uint64_t halfword = imm & (UINT64_C(0xffff) << shift);
+    if ((imm & ~kWRegMask) == halfword &&
+        OneInstrMoveImmediateHelper(masm, dst.W(), imm & kWRegMask)) {
+      if (emit_code) masm->movk(dst, halfword >> shift, shift);
+      return true;
+    }
+  }
+
+  // A logical immediate which matches all but one halfword, followed by a
+  // move-keep for that halfword. Try filling the halfword with zeroes, with
+  // ones, and with the halfword 32 bits away, where a logical immediate with
+  // an element size of 32 bits or less repeats.
+  for (unsigned shift = 0; shift < kXRegSize; shift += 16) {
+    uint64_t mask = UINT64_C(0xffff) << shift;
+    uint64_t candidates[] = {
+        imm & ~mask, imm | mask,
+        (imm & ~mask) | (RotateLeft(imm, 32, kXRegSize) & mask)};
+    for (uint64_t candidate : candidates) {
+      unsigned n, imm_s, imm_r;
+      if (IsImmLogical(candidate, kXRegSize, &n, &imm_s, &imm_r)) {
+        VIXL_ASSERT(!dst.IsZero());
+        if (emit_code) {
+          masm->LogicalImmediate(dst, AppropriateZeroRegFor(dst), n, imm_s,
+                                 imm_r, ORR);
+          masm->movk(dst, (imm & mask) >> shift, shift);
+        }
+        return true;
+      }
+    }
   }
   return false;
 }
@@ -1257,11 +1307,22 @@ js::wasm::FaultingCodeRange MacroAssembler::LoadStoreMacro(
     Register temp = temps.AcquireSameSizeAs(addr.base());
     VIXL_ASSERT(!temp.Is(rt));
     VIXL_ASSERT(!temp.Is(addr.base()));
-    Mov(temp, offset);
+    // Prefer adding the high bits of the offset to the base and encoding the
+    // low bits in the access, which avoids materializing the whole offset.
+    int64_t high = offset & ~int64_t(0xfff);
+    int64_t low = offset - high;
+    MemOperand mem(addr.base(), temp);
+    if ((IsImmAddSub(high) || IsImmAddSub(-high)) &&
+        (IsImmLSScaled(low, access_size) || IsImmLSUnscaled(low))) {
+      Add(temp, addr.base(), Operand(high));
+      mem = MemOperand(temp, low);
+    } else {
+      Mov(temp, offset);
+    }
     {
       js::jit::AutoForbidPoolsAndNops afp(this, 1);
       fcr = js::wasm::FaultingCodeRange(currentOffset());
-      LoadStore(rt, MemOperand(addr.base(), temp), op);
+      LoadStore(rt, mem, op);
     }
     if (!recycle0.Is(NoReg)) {
       temps.Exclude(recycle0, recycle1);

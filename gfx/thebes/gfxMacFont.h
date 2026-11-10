@@ -56,15 +56,13 @@ class gfxMacFont final : public gfxFont {
  protected:
   ~gfxMacFont() override;
 
-  const Metrics& GetHorizontalMetrics() const override { return mMetrics; }
-
   // override to prefer CoreText shaping with fonts that depend on AAT
   bool ShapeText(const char16_t* aText, uint32_t aOffset, uint32_t aLength,
                  Script aScript, nsAtom* aLanguage, bool aVertical,
                  RoundingFlags aRounding, gfxShapedText* aShapedText) override;
 
-  void InitMetrics();
-  void InitMetricsFromPlatform();
+  bool InitMetricsFromPlatform() override;
+  void FinishInitFontMetrics() override;
 
   // Get width and glyph ID for a character; uses aConvFactor
   // to convert font units as returned by CG to actual dimensions
@@ -79,8 +77,6 @@ class gfxMacFont final : public gfxFont {
   CTFontRef mCTFont;
 
   mozilla::UniquePtr<gfxFontShaper> mCoreTextShaper;
-
-  Metrics mMetrics;
 
   bool mVariationFont;  // true if font has OpenType variations
 };

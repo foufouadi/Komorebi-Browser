@@ -51,9 +51,6 @@ class DeviceRunner(BaseRunner):
         stdout = codecs.getwriter("utf-8")(sys.stdout.buffer)
         process_args = {
             "stream": stdout,
-            "processOutputLine": self.on_output,
-            "onFinish": self.on_finish,
-            "onTimeout": self.on_timeout,
         }
         process_args.update(kwargs.get("process_args") or {})
 
@@ -69,6 +66,7 @@ class DeviceRunner(BaseRunner):
         return None
 
     def start(self, *args, **kwargs):
+        self.cleanup_ran = False
         if isinstance(self.device, BaseEmulator) and not self.device.connected:
             self.device.start()
         self.device.connect()
@@ -167,7 +165,10 @@ class DeviceRunner(BaseRunner):
             timeout = self.output_timeout
             msg = "%s with no output" % msg
 
-        print(msg % (self.last_test, timeout))
+        if self.logger:
+            self.logger.error(msg % (self.last_test, timeout))
+        else:
+            print(msg % (self.last_test, timeout))
         self.check_for_crashes()
 
     def on_finish(self):

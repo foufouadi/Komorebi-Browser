@@ -147,10 +147,9 @@ UniquePtr<CustomElementCallback> CustomElementCallback::Create(
       if (aDefinition->mCallbacks->mConnectedMoveCallback.WasPassed()) {
         func = aDefinition->mCallbacks->mConnectedMoveCallback.Value();
       } else if (aDefinition->mCallbacks->mDisconnectedCallback.WasPassed()) {
-        UniquePtr<CustomElementCallback> callback =
-            MakeUnique<CustomElementCallback>(
-                aCustomElement, ElementCallbackType::eDisconnected,
-                aDefinition->mCallbacks->mDisconnectedCallback.Value(), aArgs);
+        auto callback = std::make_unique<CustomElementCallback>(
+            aCustomElement, ElementCallbackType::eDisconnected,
+            aDefinition->mCallbacks->mDisconnectedCallback.Value(), aArgs);
         if (aDefinition->mCallbacks->mConnectedCallback.WasPassed()) {
           callback->SetSecondaryCallback(
               ElementCallbackType::eConnected,
@@ -158,7 +157,7 @@ UniquePtr<CustomElementCallback> CustomElementCallback::Create(
         }
         return callback;
       } else if (aDefinition->mCallbacks->mConnectedCallback.WasPassed()) {
-        return MakeUnique<CustomElementCallback>(
+        return std::make_unique<CustomElementCallback>(
             aCustomElement, ElementCallbackType::eConnected,
             aDefinition->mCallbacks->mConnectedCallback.Value(), aArgs);
       }
@@ -213,7 +212,8 @@ UniquePtr<CustomElementCallback> CustomElementCallback::Create(
   }
 
   // Add CALLBACK to ELEMENT's callback queue.
-  return MakeUnique<CustomElementCallback>(aCustomElement, aType, func, aArgs);
+  return std::make_unique<CustomElementCallback>(aCustomElement, aType, func,
+                                                 aArgs);
 }
 
 void CustomElementCallback::Invoke(Element* aElement, ErrorResult& aRv) {
@@ -514,8 +514,10 @@ CustomElementRegistry::RunCustomElementCreationCallback::Run() {
   ErrorResult er;
   nsDependentAtomString value(mAtom);
   mCallback->Call(value, er);
-  MOZ_ASSERT(NS_SUCCEEDED(er.StealNSResult()),
-             "chrome JavaScript error in the callback.");
+  if (er.Failed()) {
+    mRegistry->mElementCreationCallbacksUpgradeCandidatesMap.Remove(mAtom);
+    return er.StealNSResult();
+  }
 
   RefPtr<CustomElementDefinition> definition =
       mRegistry->mCustomDefinitions.Get(mAtom);
@@ -710,6 +712,33 @@ using ScopedRegistryMap =
 
 static StaticAutoPtr<ScopedRegistryMap> gScopedRegistryMap;
 
+// The per-node flag mirrors gScopedRegistryMap membership; only
+// SetScopedRegistry and RemoveScopedRegistry may flip it.
+static bool HasScopedRegistryFlag(const nsINode& aNode) {
+  if (const Element* element = Element::FromNode(aNode)) {
+    return element->GetCustomElementRegistryState() ==
+           CustomElementRegistryState::Scoped;
+  }
+  if (const ShadowRoot* shadowRoot = ShadowRoot::FromNode(aNode)) {
+    return shadowRoot->GetCustomElementRegistryState() ==
+           CustomElementRegistryState::Scoped;
+  }
+  return aNode.IsDocument() &&
+         aNode.AsDocument()->HasScopedCustomElementRegistry();
+}
+
+static void SetScopedRegistryFlag(nsINode& aNode, bool aScoped) {
+  const auto state = aScoped ? CustomElementRegistryState::Scoped
+                             : CustomElementRegistryState::Global;
+  if (Element* element = Element::FromNode(aNode)) {
+    element->SetCustomElementRegistryState(state);
+  } else if (ShadowRoot* shadowRoot = ShadowRoot::FromNode(aNode)) {
+    shadowRoot->SetCustomElementRegistryState(state);
+  } else {
+    aNode.AsDocument()->SetHasScopedCustomElementRegistry(aScoped);
+  }
+}
+
 /* static */
 already_AddRefed<CustomElementRegistry>
 CustomElementRegistry::GetScopedRegistry(const nsINode& aNode) {
@@ -727,18 +756,29 @@ CustomElementRegistry::GetScopedRegistry(const nsINode& aNode) {
 void CustomElementRegistry::SetScopedRegistry(
     nsINode& aNode, CustomElementRegistry& aRegistry) {
   MOZ_ASSERT(aRegistry.IsScoped());
+  MOZ_ASSERT(!HasScopedRegistryFlag(aNode),
+             "We shouldn't override an already assigned scoped registry");
+  MOZ_ASSERT(!IsInScopedRegistryMap(aNode),
+             "Registry map entry without the scoped flag");
   if (!gScopedRegistryMap) {
     gScopedRegistryMap = new ScopedRegistryMap();
     ClearOnShutdown(&gScopedRegistryMap);
   }
   gScopedRegistryMap->InsertOrUpdate(&aNode, &aRegistry);
+  SetScopedRegistryFlag(aNode, true);
 }
 
 /* static */
 void CustomElementRegistry::RemoveScopedRegistry(nsINode& aNode) {
+  if (!HasScopedRegistryFlag(aNode)) {
+    return;
+  }
+  MOZ_ASSERT(!gScopedRegistryMap || gScopedRegistryMap->Contains(&aNode),
+             "Scoped flag without a registry map entry");
   if (gScopedRegistryMap) {
     gScopedRegistryMap->Remove(&aNode);
   }
+  SetScopedRegistryFlag(aNode, false);
 }
 
 /* static */
@@ -1094,9 +1134,9 @@ void CustomElementRegistry::Define(
     return;
   }
 
-  auto callbacksHolder = MakeUnique<LifecycleCallbacks>();
+  auto callbacksHolder = std::make_unique<LifecycleCallbacks>();
   auto formAssociatedCallbacksHolder =
-      MakeUnique<FormAssociatedLifecycleCallbacks>();
+      std::make_unique<FormAssociatedLifecycleCallbacks>();
   nsTArray<RefPtr<nsAtom>> observedAttributes;
   AutoTArray<RefPtr<nsAtom>, 2> disabledFeatures;
   bool formAssociated = false;
@@ -1377,8 +1417,7 @@ void CustomElementRegistry::Initialize(nsINode& aRoot, ErrorResult& aRv) {
   if (aRoot.IsDocument()) {
     Document* doc = aRoot.AsDocument();
     if (!doc->GetCustomElementRegistry()) {
-      doc->SetHasScopedCustomElementRegistry(true);
-      CustomElementRegistry::SetScopedRegistry(*doc, *this);
+      SetScopedRegistry(*doc, *this);
     }
   } else if (ShadowRoot* shadowRoot = ShadowRoot::FromNode(aRoot)) {
     if (!shadowRoot->GetCustomElementRegistry()) {
@@ -1753,7 +1792,7 @@ void CustomElementReactionsStack::CreateAndPushElementQueue() {
     MOZ_ASSERT(mCachedElementQueue->IsEmpty());
     mReactionsStack.AppendElement(std::move(mCachedElementQueue));
   } else {
-    mReactionsStack.AppendElement(MakeUnique<ElementQueue>());
+    mReactionsStack.AppendElement(std::make_unique<ElementQueue>());
   }
   mIsElementQueuePushedForCurrentRecursionDepth = true;
 }

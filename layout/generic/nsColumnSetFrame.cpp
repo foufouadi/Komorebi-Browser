@@ -43,7 +43,7 @@ class nsDisplayColumnRule final : public nsPaintedDisplayItem {
     return mFrame->InkOverflowRect() + ToReferenceFrame();
   }
 
-  bool CreateWebRenderCommands(
+  WebRenderCommandsResult CreateWebRenderCommands(
       mozilla::wr::DisplayListBuilder& aBuilder,
       mozilla::wr::IpcResourceUpdateQueue& aResources,
       const StackingContextHelper& aSc,
@@ -68,7 +68,7 @@ void nsDisplayColumnRule::Paint(nsDisplayListBuilder* aBuilder,
   }
 }
 
-bool nsDisplayColumnRule::CreateWebRenderCommands(
+WebRenderCommandsResult nsDisplayColumnRule::CreateWebRenderCommands(
     mozilla::wr::DisplayListBuilder& aBuilder,
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc,
@@ -76,7 +76,7 @@ bool nsDisplayColumnRule::CreateWebRenderCommands(
     nsDisplayListBuilder* aDisplayListBuilder) {
   RefPtr dt = gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget();
   if (!dt || !dt->IsValid()) {
-    return false;
+    return Err("no valid screen reference draw target");
   }
   gfxContext screenRefCtx(dt);
 
@@ -86,14 +86,14 @@ bool nsDisplayColumnRule::CreateWebRenderCommands(
       ToReferenceFrame());
 
   if (mBorderRenderers.IsEmpty()) {
-    return true;
+    return Ok();
   }
 
   for (auto& renderer : mBorderRenderers) {
     renderer.CreateWebRenderCommands(this, aBuilder, aResources, aSc);
   }
 
-  return true;
+  return Ok();
 }
 
 // The maximum number of columns we support.
@@ -111,7 +111,7 @@ nsContainerFrame* NS_NewColumnSetFrame(PresShell* aPresShell,
                                        ComputedStyle* aStyle,
                                        nsFrameState aStateFlags) {
   nsColumnSetFrame* it =
-      new (aPresShell) nsColumnSetFrame(aStyle, aPresShell->GetPresContext());
+      new nsColumnSetFrame(aStyle, aPresShell->GetPresContext());
   it->AddStateBits(aStateFlags);
   return it;
 }
@@ -954,10 +954,9 @@ nsColumnSetFrame::ColumnBalanceData nsColumnSetFrame::ReflowColumns(
 void nsColumnSetFrame::DrainOverflowColumns() {
   // First grab the prev-in-flows overflows and reparent them to this
   // frame.
-  nsPresContext* presContext = PresContext();
   nsColumnSetFrame* prev = static_cast<nsColumnSetFrame*>(GetPrevInFlow());
   if (prev) {
-    AutoFrameListPtr overflows(presContext, prev->StealOverflowFrames());
+    AutoFrameListPtr overflows(prev->StealOverflowFrames());
     if (overflows) {
       mFrames.InsertFrames(this, nullptr, std::move(*overflows));
     }
@@ -965,7 +964,7 @@ void nsColumnSetFrame::DrainOverflowColumns() {
 
   // Now pull back our own overflows and append them to our children.
   // We don't need to reparent them since we're already their parent.
-  AutoFrameListPtr overflows(presContext, StealOverflowFrames());
+  AutoFrameListPtr overflows(StealOverflowFrames());
   if (overflows) {
     // We're already the parent for these frames, so no need to set
     // their parent again.

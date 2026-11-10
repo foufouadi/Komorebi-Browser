@@ -112,7 +112,7 @@ class OptionsPanel extends EventEmitter {
     await this.populatePreferences();
     this.#setupLocalMode();
     this.setupNetworkBodySizeLimit();
-
+    this.#setUpExperimentalFeatures();
     return this;
   }
 
@@ -245,6 +245,18 @@ class OptionsPanel extends EventEmitter {
     }
   }
 
+  #setUpExperimentalFeatures() {
+    this.panelDoc
+      .getElementById("devtools-debugger-features-stylesheets-in-debugger")
+      .addEventListener("change", event => {
+        if (event.target.checked) {
+          Glean.devtoolsDebuggerStylesheets.stylesheetPrefEnabledCount.add(1);
+        } else {
+          Glean.devtoolsDebuggerStylesheets.stylesheetPrefDisabledCount.add(1);
+        }
+      });
+  }
+
   setupToolsList() {
     const defaultToolsBox = this.panelDoc.getElementById("default-tools-box");
     const additionalToolsBox = this.panelDoc.getElementById(
@@ -336,7 +348,7 @@ class OptionsPanel extends EventEmitter {
 
     // Populating the default tools lists
     const toggleableTools = gDevTools.getDefaultTools().filter(tool => {
-      return tool.visibilityswitch && !tool.hiddenInOptions;
+      return tool.visibilityswitch;
     });
 
     const fragment = this.panelDoc.createDocumentFragment();
@@ -519,6 +531,9 @@ class OptionsPanel extends EventEmitter {
     for (const prefCheckbox of prefCheckboxes) {
       if (GetPref(prefCheckbox.getAttribute("data-pref"))) {
         prefCheckbox.setAttribute("checked", true);
+      }
+      if (Services.prefs.prefIsLocked(prefCheckbox.getAttribute("data-pref"))) {
+        prefCheckbox.disabled = true;
       }
       prefCheckbox.addEventListener("change", e => {
         const checkbox = e.target;

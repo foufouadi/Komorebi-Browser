@@ -4,6 +4,7 @@
 #include "RemoteDecoderModule.h"
 
 #include "AOMDecoder.h"
+#include "MediaCodecsSupport.h"
 #include "RemoteAudioDecoder.h"
 #include "RemoteMediaDataDecoder.h"
 #include "RemoteMediaManagerChild.h"
@@ -71,10 +72,30 @@ media::DecodeSupportSet RemoteDecoderModule::Supports(
   }
 #endif
 #ifdef ANDROID
-  if ((aParams.mCDM && mLocation != RemoteMediaIn::RddProcess) ||
-      (!aParams.mCDM && aParams.mConfig.IsAudio() &&
-       mLocation != RemoteMediaIn::UtilityProcess_Generic)) {
+  // Decoders using a CDM must be in the same process as the CDM. Otherwise
+  // audio is only decoded in the utility process.
+  if (aParams.mCDM) {
+    if (aParams.mCDM->GetLocation() != mLocation) {
+      support = {};
+    }
+  } else if (aParams.mConfig.IsAudio() &&
+             mLocation != RemoteMediaIn::UtilityProcess_Generic) {
     support = {};
+  } else if (mLocation == RemoteMediaIn::RddProcess &&
+             RemoteMediaManagerChild::IsGpuProcessDecodingAvailable()) {
+    // Platform decoders must be used in the GPU process, unless it is disabled.
+    // Pure software decoding may still be performed in the RDD process since it
+    // is not permitted in the GPU process.
+    support -= media::DecodeSupport::HardwareDecode;
+  }
+  if (const auto* videoInfo = aParams.mConfig.GetAsVideoInfo()) {
+    const media::MediaCodec codec =
+        media::MCSInfo::GetMediaCodecFromMimeType(aParams.MimeType());
+    support = media::MCSInfo::GetMediaCodecDecodeSupportForSize(
+        codec,
+        media::MCSInfo::GetMediaCodecDecodeSupportForColorDepth(
+            codec, support, videoInfo->mColorDepth),
+        videoInfo->mImage);
   }
 #endif
   MOZ_LOG_FMT(
@@ -82,6 +103,36 @@ media::DecodeSupportSet RemoteDecoderModule::Supports(
       RemoteMediaInToStr(mLocation), support.isEmpty() ? "rejects" : "supports",
       aParams.MimeType().get());
   return support;
+}
+
+RefPtr<RemoteDecoderModule::SupportsDecoderPromise>
+RemoteDecoderModule::SupportsAsync(const SupportDecoderParams& aParams) const {
+  // The media engine CDM process only creates decoders for media engine
+  // playback, so don't wait for it to report support for other queries.
+  if (mLocation == RemoteMediaIn::UtilityProcess_MFMediaEngineCDM &&
+      !aParams.mMediaEngineId) {
+    return SupportsDecoderPromise::CreateAndResolve(media::DecodeSupportSet{},
+                                                    __func__);
+  }
+
+  // SupportDecoderParams is stack-only and holds a reference to its config, so
+  // clone the bits we need to survive the asynchronous wait below.
+  UniquePtr<TrackInfo> config = aParams.mConfig.Clone();
+  const media::VideoFrameRate rate = aParams.mRate;
+  const Maybe<uint64_t> mediaEngineId = aParams.mMediaEngineId;
+
+  RefPtr<const RemoteDecoderModule> self = this;
+  return RemoteMediaManagerChild::EnsureCodecSupportFor(mLocation)->Then(
+      GetCurrentSerialEventTarget(), __func__,
+      [self, config = std::move(config), rate, mediaEngineId](bool) {
+        SupportDecoderParams params{*config, rate};
+        params.mMediaEngineId = mediaEngineId;
+        return SupportsDecoderPromise::CreateAndResolve(
+            self->Supports(params, nullptr), __func__);
+      },
+      [](nsresult aRv) {
+        return SupportsDecoderPromise::CreateAndReject(aRv, __func__);
+      });
 }
 
 RefPtr<RemoteDecoderModule::CreateDecoderPromise>

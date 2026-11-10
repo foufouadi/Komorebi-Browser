@@ -19,11 +19,19 @@ const { getL10nIdForThemeProp, themeIdPrefix } = ChromeUtils.importESModule(
 
 AddonTestUtils.initMochitest(this);
 
-const PREF_NOVA_ENABLED = "browser.nova.enabled";
 const PREF_NOVA_THEMES_PICKER = "browser.aboutaddons.novaThemesPickerEnabled";
 const PREF_ACTIVE_THEME_ID = "extensions.activeThemeID";
+const PREF_SYSTEM_USES_DARK_THEME = "ui.systemUsesDarkTheme";
+// Website Appearance setting exposed in about:preferences, which only
+// overrides prefers-color-scheme for content documents and must not
+// affect the (chrome-only) theme preview color scheme.
+const PREF_CONTENT_COLOR_SCHEME_OVERRIDE =
+  "layout.css.prefers-color-scheme.content-override";
+const PREF_LINK_PARAMETERS_ENABLED = "layout.css.link-parameters.enabled";
 
 const DEFAULT_THEME_ID = "default-theme@mozilla.org";
+const LIGHT_THEME_ID = "firefox-compact-light@mozilla.org";
+const DARK_THEME_ID = "firefox-compact-dark@mozilla.org";
 const NOVA_SUN_ID = "nova-sun@mozilla.org";
 const DEFAULT_THEME_ID_PREFIX = "default-theme";
 const NOVA_SUN_ID_PREFIX = "nova-sun";
@@ -32,8 +40,13 @@ const DEFAULT_THEME_PREVIEW_URL =
   "chrome://mozapps/content/extensions/default-theme/preview.svg";
 const DEFAULT_THEME_PREVIEW_NOVA_URL =
   "chrome://mozapps/content/extensions/default-theme/preview-nova.svg";
+const RTL_FLIP_PARAM = "param(--rtl-flip, var(--theme-preview-rtl-flip))";
+
+const CLASSIC_PROTON_ID = "proton-theme@mozilla.org";
+const CLASSIC_BLUE_ID = "{4223a94a-d3f9-40e9-95dd-99aca80ea04b}";
 
 let ALL_THEME_IDS;
+let CLASSIC_THEME_IDS;
 
 add_setup(async function () {
   const themesListManager = await getThemesList({
@@ -41,6 +54,9 @@ add_setup(async function () {
   });
   ALL_THEME_IDS = themesListManager
     .getThemesInfo()
+    .map(themeInfo => themeInfo.id);
+  CLASSIC_THEME_IDS = themesListManager
+    .getClassicThemesInfo()
     .map(themeInfo => themeInfo.id);
 });
 
@@ -50,14 +66,60 @@ function getThemeCard(picker, idPrefix) {
   return [...picker.themeCards].find(card => card.dataset.theme === idPrefix);
 }
 
+const getClassicThemesPicker = doc =>
+  doc.querySelector(
+    'aboutaddons-themes-picker[themes-collection-name="classic"]'
+  );
+
+function getClassicThemeCard(picker, themeId) {
+  return [...picker.themeCards].find(
+    card => card.dataset.theme === themeIdPrefix(themeId)
+  );
+}
+
 function getThemeButton(card) {
   return card.querySelector(".theme-card-footer moz-button");
 }
 
-async function getThemePreviewSrc(card) {
+async function getThemePreviewImage(card) {
   const themePreview = card.querySelector("theme-preview");
   await themePreview.updateComplete;
-  return card.querySelector(".card-heading-image")?.src;
+  return card.querySelector(".card-heading-image");
+}
+
+async function getThemePreviewSrc(card) {
+  return (await getThemePreviewImage(card))?.src;
+}
+
+// Asserts that the given card reuses the default theme Nova preview image,
+// recolored through link-parameters for the given (non default) theme.
+async function assertNovaThemePreview(card, themeId, themesListManager) {
+  const img = await getThemePreviewImage(card);
+  Assert.equal(
+    img.src,
+    DEFAULT_THEME_PREVIEW_NOVA_URL,
+    `"${themeId}" card reuses the default theme Nova preview image`
+  );
+  let expectedLinkParameters =
+    themeId === DEFAULT_THEME_ID
+      ? ""
+      : themesListManager.getThemePreviewLinkParameters(themeId);
+  if (themeId !== DEFAULT_THEME_ID) {
+    Assert.ok(
+      expectedLinkParameters.includes("param(--tabbar-background, light-dark("),
+      `"${themeId}" has link-parameters for the Nova preview image`
+    );
+  }
+  expectedLinkParameters = expectedLinkParameters
+    ? `${expectedLinkParameters}, ${RTL_FLIP_PARAM}`
+    : RTL_FLIP_PARAM;
+  Assert.equal(
+    img.style.linkParameters,
+    expectedLinkParameters,
+    `"${themeId}" preview image has the expected link-parameters`
+  );
+
+  return img;
 }
 
 async function waitForThemesPickerReady(picker) {
@@ -136,10 +198,7 @@ function setupAddonRepoServer(themeId, themeName, xpi) {
 // picker).
 add_task(async function test_picker_hidden_when_pref_disabled() {
   await SpecialPowers.pushPrefEnv({
-    set: [
-      [PREF_NOVA_ENABLED, true],
-      [PREF_NOVA_THEMES_PICKER, false],
-    ],
+    set: [[PREF_NOVA_THEMES_PICKER, false]],
   });
 
   const win = await loadInitialView("theme");
@@ -155,45 +214,13 @@ add_task(async function test_picker_hidden_when_pref_disabled() {
   await SpecialPowers.popPrefEnv();
 });
 
-// Verifies that on builds where Nova isn't enabled yet the Nova themes picker
-// stays hidden, and the default theme falls back to its non-Nova preview
-// image in the regular themes list.
-add_task(async function test_picker_hidden_when_nova_disabled() {
-  await SpecialPowers.pushPrefEnv({
-    set: [
-      [PREF_NOVA_ENABLED, false],
-      [PREF_NOVA_THEMES_PICKER, true],
-    ],
-  });
-
-  const win = await loadInitialView("theme");
-  const picker = getThemesPicker(win.document);
-  Assert.ok(
-    !BrowserTestUtils.isVisible(picker),
-    "Themes grid should be hidden when browser.nova.enabled is false"
-  );
-
-  const defaultAddonCard = getAddonCard(win, DEFAULT_THEME_ID);
-  Assert.equal(
-    await getThemePreviewSrc(defaultAddonCard),
-    DEFAULT_THEME_PREVIEW_URL,
-    "default theme uses the non-Nova preview image when browser.nova.enabled is false"
-  );
-
-  await closeView(win);
-  await SpecialPowers.popPrefEnv();
-});
-
 // Verifies that all the Nova themes are shown in the Nova Themes grid
 // moz-card, they are all localized as expected, and the theme preview
 // svg images bundled into the Firefox build are being used for all
 // the AMO-hosted Nova themes shown in the grid.
 add_task(async function test_picker_renders_all_known_themes() {
   await SpecialPowers.pushPrefEnv({
-    set: [
-      [PREF_NOVA_ENABLED, true],
-      [PREF_NOVA_THEMES_PICKER, true],
-    ],
+    set: [[PREF_NOVA_THEMES_PICKER, true]],
   });
 
   // Make sure the default theme is the active theme.
@@ -209,6 +236,9 @@ add_task(async function test_picker_renders_all_known_themes() {
   picker.expandToggle.click();
   await picker.updateComplete;
 
+  const themesListManager = await getThemesList({
+    installSource: "about:addons",
+  });
   for (const themeId of ALL_THEME_IDS) {
     const idPrefix = themeIdPrefix(themeId);
     const card = getThemeCard(picker, idPrefix);
@@ -219,15 +249,7 @@ add_task(async function test_picker_renders_all_known_themes() {
       `"${idPrefix}" card has the expected name l10n-id`
     );
 
-    const expectedPreviewSrc =
-      themeId === DEFAULT_THEME_ID
-        ? DEFAULT_THEME_PREVIEW_NOVA_URL
-        : `resource://extra-themes-previews/${themeId}-preview.svg`;
-    Assert.equal(
-      await getThemePreviewSrc(card),
-      expectedPreviewSrc,
-      `"${idPrefix}" card shows the expected bundled preview image`
-    );
+    await assertNovaThemePreview(card, themeId, themesListManager);
   }
   Assert.equal(
     picker.themeCards.length,
@@ -253,14 +275,257 @@ add_task(async function test_picker_renders_all_known_themes() {
   await SpecialPowers.popPrefEnv();
 });
 
+// Verifies that the built-in Light and Dark themes reuse the default theme
+// Nova preview image, forced to the matching color scheme.
+add_task(async function test_light_dark_themes_preview() {
+  await SpecialPowers.pushPrefEnv({
+    set: [[PREF_NOVA_THEMES_PICKER, true]],
+  });
+
+  const win = await loadInitialView("theme");
+
+  for (const [themeId, colorScheme] of [
+    [LIGHT_THEME_ID, "light"],
+    [DARK_THEME_ID, "dark"],
+  ]) {
+    const img = await getThemePreviewImage(getAddonCard(win, themeId));
+    Assert.equal(
+      img.src,
+      DEFAULT_THEME_PREVIEW_NOVA_URL,
+      `${themeId} uses the expected preview image`
+    );
+    Assert.equal(
+      img.style.colorScheme,
+      colorScheme,
+      `${themeId} preview image has the expected forced color scheme`
+    );
+  }
+
+  await closeView(win);
+  await SpecialPowers.popPrefEnv();
+});
+
+// Verifies that for the default theme and the curated AMO hosted extra Nova themes
+// their theme preview SVGs color scheme are:
+// - being forced to match the aboutaddons-themes-mode selector
+// - falling back to the current OS dark/light color scheme when the appearance
+//   mode is set to "device"
+// - are not affected by the "Website Appearance" setting from about:settings
+//   (or the underlying layout.css.prefers-color-scheme.content-override pref).
+add_task(async function test_default_and_extra_themes_preview_color_scheme() {
+  await SpecialPowers.pushPrefEnv({
+    set: [[PREF_NOVA_THEMES_PICKER, true]],
+  });
+
+  const win = await loadInitialView("theme");
+  const themesListManager = await getThemesList({
+    installSource: "about:addons",
+  });
+
+  const picker = getThemesPicker(win.document);
+  await waitForThemesPickerReady(picker);
+
+  const systemDarkThemeQuery = win.matchMedia("(-moz-system-dark-theme)");
+
+  for (const [prefValue, expectedColorScheme] of [
+    [0, "light"],
+    [1, "dark"],
+    [undefined, systemDarkThemeQuery.matches ? "dark" : "light"],
+  ]) {
+    // If the color scheme we expect is the same as the color scheme already active
+    // then we expect no "change" event to be emitted by the -moz-system-dark-theme
+    // media query after we set or clear the ui.systemUsesDarkTheme about:config pref.
+    const expectedSystemDarkMatch = expectedColorScheme === "dark";
+    const promiseMediaQueryChangeEvent =
+      systemDarkThemeQuery.matches === expectedSystemDarkMatch
+        ? Promise.resolve()
+        : new Promise(resolve => {
+            info("Wait for matchMedia -moz-system-dark-theme change event");
+            systemDarkThemeQuery.addEventListener("change", resolve, {
+              once: true,
+            });
+          });
+
+    await SpecialPowers.pushPrefEnv(
+      prefValue === undefined
+        ? { clear: [[PREF_SYSTEM_USES_DARK_THEME]] }
+        : { set: [[PREF_SYSTEM_USES_DARK_THEME, prefValue]] }
+    );
+
+    // ui.systemUsesDarkTheme changes propagate to -moz-system-dark-theme
+    // asynchronously.
+    await promiseMediaQueryChangeEvent;
+
+    // Force the opposite color scheme for content documents' "Website Appearance"
+    // (about:preferences), to explicitly verify the theme preview is not
+    // affected by it.
+    await SpecialPowers.pushPrefEnv({
+      set: [
+        [
+          PREF_CONTENT_COLOR_SCHEME_OVERRIDE,
+          expectedColorScheme == "dark" ? 1 : 0,
+        ],
+      ],
+    });
+
+    const defaultThemeImg = await assertNovaThemePreview(
+      getAddonCard(win, DEFAULT_THEME_ID),
+      DEFAULT_THEME_ID,
+      themesListManager
+    );
+    Assert.equal(
+      defaultThemeImg.style.colorScheme,
+      expectedColorScheme,
+      `default-theme preview has the expected forced color scheme (pref: ${prefValue})`
+    );
+
+    const novaSunImg = await assertNovaThemePreview(
+      getThemeCard(picker, NOVA_SUN_ID_PREFIX),
+      NOVA_SUN_ID,
+      themesListManager
+    );
+    Assert.equal(
+      novaSunImg.style.colorScheme,
+      expectedColorScheme,
+      `nova-sun preview has the expected forced color scheme (pref: ${prefValue})`
+    );
+
+    await SpecialPowers.popPrefEnv();
+    await SpecialPowers.popPrefEnv();
+  }
+
+  await closeView(win);
+  await SpecialPowers.popPrefEnv();
+});
+
+// Verifies that in RTL locales the Nova preview svg is asked to mirror its UI
+// elements through link-parameters (so that its tabbar background gradient
+// is not mirrored), instead of being mirrored as a whole by the page like the
+// other theme preview images.
+add_task(async function test_themes_preview_rtl() {
+  const TEST_THEME_ID = "rtl-test-theme@mochi.test";
+
+  // link-parameters is enabled in chrome on all channels, and so it applies to
+  // about:addons everywhere, but getComputedStyle only exposes properties that
+  // are enabled for all content (see nsComputedDOMStyle's Entry::IsEnabled).
+  // Enable the pref so that the computed link-parameters assertions below can
+  // also inspect the resolved param values on non-Nightly channels.
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      [PREF_NOVA_THEMES_PICKER, true],
+      [PREF_LINK_PARAMETERS_ENABLED, true],
+    ],
+  });
+
+  const themesListManager = await getThemesList({
+    installSource: "about:addons",
+  });
+
+  const testTheme = ExtensionTestUtils.loadExtension({
+    manifest: {
+      name: "RTL test theme",
+      theme: { colors: {} },
+      browser_specific_settings: { gecko: { id: TEST_THEME_ID } },
+    },
+    files: { "preview.png": "" },
+    useAddonManager: "temporary",
+  });
+  await testTheme.startup();
+
+  async function assertThemesPreviews(win, { isRTL }) {
+    const picker = getThemesPicker(win.document);
+    await waitForThemesPickerReady(picker);
+
+    for (const [themeId, card] of [
+      [DEFAULT_THEME_ID, getAddonCard(win, DEFAULT_THEME_ID)],
+      [LIGHT_THEME_ID, getAddonCard(win, LIGHT_THEME_ID)],
+      [NOVA_SUN_ID, getThemeCard(picker, NOVA_SUN_ID_PREFIX)],
+    ]) {
+      const img = await getThemePreviewImage(card);
+      Assert.equal(
+        img.src,
+        DEFAULT_THEME_PREVIEW_NOVA_URL,
+        `"${themeId}" card uses the Nova preview image`
+      );
+      const themeLinkParameters =
+        themesListManager.getThemePreviewLinkParameters(themeId);
+      const expectedLinkParameters = [];
+      if (themeLinkParameters) {
+        expectedLinkParameters.push(themeLinkParameters);
+      }
+      expectedLinkParameters.push(RTL_FLIP_PARAM);
+      Assert.equal(
+        img.style.linkParameters,
+        expectedLinkParameters.join(", "),
+        `"${themeId}" preview image has the expected link-parameters`
+      );
+      const expectedRtlFlip = isRTL ? "scaleX(-1)" : "none";
+      Assert.equal(
+        win
+          .getComputedStyle(img)
+          .getPropertyValue("--theme-preview-rtl-flip")
+          .trim(),
+        expectedRtlFlip,
+        `"${themeId}" preview image inherits the expected --theme-preview-rtl-flip value (RTL: ${isRTL})`
+      );
+      Assert.ok(
+        win
+          .getComputedStyle(img)
+          .linkParameters.includes(`param(--rtl-flip, ${expectedRtlFlip})`),
+        `"${themeId}" preview image has the expected computed --rtl-flip link-parameter (RTL: ${isRTL})`
+      );
+      Assert.equal(
+        win.getComputedStyle(img).transform,
+        "none",
+        `"${themeId}" preview image is not mirrored by the page (RTL: ${isRTL})`
+      );
+    }
+
+    // The other theme preview images are still expected to be mirrored as a
+    // whole by the page in RTL locales.
+    const img = await getThemePreviewImage(getAddonCard(win, TEST_THEME_ID));
+    // Sanity check (test theme have its own preview image as expected).
+    Assert.ok(
+      img.src.endsWith("/preview.png"),
+      "test theme card uses its own preview image"
+    );
+    Assert.equal(
+      img.style.linkParameters,
+      "",
+      `test theme preview image has no link-parameters (RTL: ${isRTL})`
+    );
+    Assert.equal(
+      win.getComputedStyle(img).transform,
+      isRTL ? "matrix(-1, 0, 0, 1, 0, 0)" : "none",
+      `test theme preview image has the expected transform (RTL: ${isRTL})`
+    );
+  }
+
+  // Sanity check (the test starts in LTR).
+  Assert.ok(
+    !Services.locale.isAppLocaleRTL,
+    "Expect isAppLocaleRTL to be initially false"
+  );
+  let win = await loadInitialView("theme");
+  await assertThemesPreviews(win, { isRTL: false });
+  await closeView(win);
+
+  info("Switch to an RTL locale without reloading about:addons");
+  await SpecialPowers.pushPrefEnv({ set: [["intl.l10n.pseudo", "bidi"]] });
+  Assert.ok(Services.locale.isAppLocaleRTL, "App locale is RTL");
+  win = await loadInitialView("theme");
+  await assertThemesPreviews(win, { isRTL: true });
+  await closeView(win);
+
+  await testTheme.unload();
+  await SpecialPowers.popPrefEnv();
+});
+
 // Verifies that the Nova themes picker can be expanded and collapsed as
 // expected.
 add_task(async function test_picker_show_more_show_less() {
   await SpecialPowers.pushPrefEnv({
-    set: [
-      [PREF_NOVA_ENABLED, true],
-      [PREF_NOVA_THEMES_PICKER, true],
-    ],
+    set: [[PREF_NOVA_THEMES_PICKER, true]],
   });
 
   const win = await loadInitialView("theme");
@@ -322,10 +587,7 @@ add_task(async function test_picker_show_more_show_less() {
 // a different theme).
 add_task(async function test_picker_default_theme_button_state() {
   await SpecialPowers.pushPrefEnv({
-    set: [
-      [PREF_NOVA_ENABLED, true],
-      [PREF_NOVA_THEMES_PICKER, true],
-    ],
+    set: [[PREF_NOVA_THEMES_PICKER, true]],
   });
 
   // Make sure the default theme has been enabled.
@@ -371,10 +633,10 @@ add_task(async function test_picker_default_theme_button_state() {
     NOVA_SUN_ID
   );
 
-  Assert.equal(
-    await getThemePreviewSrc(activeNovaThemeAddonCard),
-    `resource://extra-themes-previews/${NOVA_SUN_ID}-preview.svg`,
-    `addon-card should shows the expected bundled preview image`
+  await assertNovaThemePreview(
+    activeNovaThemeAddonCard,
+    NOVA_SUN_ID,
+    await getThemesList({ installSource: "about:addons" })
   );
 
   await sunAddon.uninstall();
@@ -388,10 +650,7 @@ add_task(async function test_picker_default_theme_button_state() {
 // "Enable" and "Disable" based on the currently active theme.
 add_task(async function test_picker_amo_hosted_themes_button() {
   await SpecialPowers.pushPrefEnv({
-    set: [
-      [PREF_NOVA_ENABLED, true],
-      [PREF_NOVA_THEMES_PICKER, true],
-    ],
+    set: [[PREF_NOVA_THEMES_PICKER, true]],
   });
 
   Assert.ok(
@@ -461,10 +720,7 @@ add_task(async function test_picker_amo_hosted_themes_button() {
 // active theme is changing as expected.
 add_task(async function test_picker_button_click_updates_active_theme() {
   await SpecialPowers.pushPrefEnv({
-    set: [
-      [PREF_NOVA_ENABLED, true],
-      [PREF_NOVA_THEMES_PICKER, true],
-    ],
+    set: [[PREF_NOVA_THEMES_PICKER, true]],
   });
 
   const xpi = createNovaThemeXPI(NOVA_SUN_ID, "Nova Sun");
@@ -477,6 +733,9 @@ add_task(async function test_picker_button_click_updates_active_theme() {
 
   const sunCard = getThemeCard(picker, NOVA_SUN_ID_PREFIX);
   const defaultCard = getThemeCard(picker, DEFAULT_THEME_ID_PREFIX);
+
+  await Services.fog.testFlushAllChildren();
+  Services.fog.testResetFOG();
 
   let promiseActiveThemePrefChanged = TestUtils.waitForPrefChange(
     PREF_ACTIVE_THEME_ID,
@@ -491,6 +750,12 @@ add_task(async function test_picker_button_click_updates_active_theme() {
   await promiseActiveThemePrefChanged;
 
   await picker.updateComplete;
+  await Services.fog.testFlushAllChildren();
+  const events = Glean.themePicker.change.testGetValue();
+  Assert.equal(events?.length, 1, "theme_picker.change is recorded once");
+  Assert.equal(events[0].extra.property, "theme", "property is theme");
+  Assert.equal(events[0].extra.layout, "full", "layout is full");
+
   Assert.equal(
     getThemeButton(sunCard).getAttribute("data-l10n-id"),
     "aboutaddons-themes-picker-disable-button",
@@ -530,10 +795,7 @@ add_task(async function test_picker_button_click_updates_active_theme() {
 // hosted on AMO.
 add_task(async function test_picker_install_button_downloads_and_activates() {
   await SpecialPowers.pushPrefEnv({
-    set: [
-      [PREF_NOVA_ENABLED, true],
-      [PREF_NOVA_THEMES_PICKER, true],
-    ],
+    set: [[PREF_NOVA_THEMES_PICKER, true]],
   });
 
   const xpi = createNovaThemeXPI(NOVA_SUN_ID, "Nova Sun");
@@ -589,10 +851,7 @@ add_task(async function test_picker_install_button_downloads_and_activates() {
 // bar is cleared again on dismiss.
 add_task(async function test_picker_shows_error_on_install_failure() {
   await SpecialPowers.pushPrefEnv({
-    set: [
-      [PREF_NOVA_ENABLED, true],
-      [PREF_NOVA_THEMES_PICKER, true],
-    ],
+    set: [[PREF_NOVA_THEMES_PICKER, true]],
   });
 
   // No xpi passed: the resolved XPI url 404s, simulating a broken download.
@@ -639,10 +898,7 @@ add_task(async function test_picker_shows_error_on_install_failure() {
 // tab).
 add_task(async function test_picker_reflects_external_addon_install() {
   await SpecialPowers.pushPrefEnv({
-    set: [
-      [PREF_NOVA_ENABLED, true],
-      [PREF_NOVA_THEMES_PICKER, true],
-    ],
+    set: [[PREF_NOVA_THEMES_PICKER, true]],
   });
 
   const win = await loadInitialView("theme");
@@ -678,6 +934,280 @@ add_task(async function test_picker_reflects_external_addon_install() {
   );
 
   await sunAddon.uninstall();
+  await closeView(win);
+  await SpecialPowers.popPrefEnv();
+});
+
+// The theme preview box is not a whole number of device pixels tall, so
+// painting snaps it and an SVG used as an image is laid out at the snapped
+// size. A preview that relies on the default preserveAspectRatio is therefore
+// letterboxed by a varying amount and appears to jiggle while scrolling, see
+// bug 2059917. Guard against a new preview reintroducing that.
+add_task(async function test_theme_preview_svgs_ignore_aspect_ratio() {
+  const previewUrls = [
+    DEFAULT_THEME_PREVIEW_URL,
+    DEFAULT_THEME_PREVIEW_NOVA_URL,
+    "resource://builtin-themes/dark/preview.svg",
+    "resource://builtin-themes/light/preview.svg",
+    "resource://builtin-themes/alpenglow/preview.svg",
+  ];
+
+  for (const url of previewUrls) {
+    const response = await fetch(url);
+    Assert.ok(
+      response.ok,
+      `Expect ${url} to be available as bundled in the omnijar`
+    );
+    const svgRoot = new DOMParser().parseFromString(
+      await response.text(),
+      "image/svg+xml"
+    ).documentElement;
+
+    Assert.equal(
+      svgRoot.getAttribute("preserveAspectRatio"),
+      "none",
+      `Expect ${url} to set preserveAspectRatio="none"`
+    );
+    // preserveAspectRatio only has an effect when a viewBox maps the drawing
+    // onto the viewport, and without one the preview is cropped to the snapped
+    // size instead of being scaled to it.
+    Assert.equal(
+      svgRoot.getAttribute("viewBox"),
+      "0 0 680 92",
+      `Expect ${url} to declare a viewBox set to the expected value`
+    );
+    // Sanity and consistency checks (to make sure that all SVG images for the bundled
+    // theme previews have the width and height properties set consistently with
+    // the viewBox attribute).
+    Assert.ok(
+      svgRoot.hasAttribute("width"),
+      `Expect ${url} to declare an explicit width`
+    );
+    Assert.ok(
+      svgRoot.hasAttribute("height"),
+      `Expect ${url} to declare an explicit height`
+    );
+    Assert.equal(
+      svgRoot.getAttribute("viewBox"),
+      `0 0 ${svgRoot.getAttribute("width")} ${svgRoot.getAttribute("height")}`
+    );
+  }
+});
+
+// Verifies that opening the Nova themes picker records a theme_picker.shown
+// event, and that navigating away and back to the Themes view records it
+// again.
+add_task(async function test_picker_shown_recorded_on_each_theme_view_load() {
+  await SpecialPowers.pushPrefEnv({
+    set: [[PREF_NOVA_THEMES_PICKER, true]],
+  });
+
+  Services.fog.testResetFOG();
+
+  const win = await loadInitialView("extension");
+
+  // Sanity check: until the theme view is loaded, the theme_picker.shown
+  // event should not have been recorded yet.
+  let events = Glean.themePicker.shown.testGetValue();
+  Assert.equal(events, undefined, "theme_picker.shown is NOT recorded yet");
+
+  await switchView(win, "theme");
+  let picker = getThemesPicker(win.document);
+  await waitForThemesPickerReady(picker);
+
+  events = Glean.themePicker.shown.testGetValue();
+  Assert.equal(events?.length, 1, "theme_picker.shown is recorded once");
+  Assert.deepEqual(
+    {
+      source: events[0].extra.source,
+      layout: events[0].extra.layout,
+    },
+    { source: "about:addons", layout: "full" },
+    "theme_picker.shown event has the expected source and layout"
+  );
+
+  await switchView(win, "extension");
+  await switchView(win, "theme");
+  picker = getThemesPicker(win.document);
+  await waitForThemesPickerReady(picker);
+
+  events = Glean.themePicker.shown.testGetValue();
+  Assert.equal(
+    events?.length,
+    2,
+    "theme_picker.shown is recorded again when navigating back to the theme view"
+  );
+  Assert.deepEqual(
+    {
+      source: events[1].extra.source,
+      layout: events[1].extra.layout,
+    },
+    { source: "about:addons", layout: "full" },
+    "second theme_picker.shown event has the expected source and layout"
+  );
+
+  await closeView(win);
+  await SpecialPowers.popPrefEnv();
+});
+
+// Verifies that theme_picker.shown is not recorded when the Nova themes
+// picker doesn't render any visible content.
+add_task(async function test_picker_shown_not_recorded_when_pref_disabled() {
+  await SpecialPowers.pushPrefEnv({
+    set: [[PREF_NOVA_THEMES_PICKER, false]],
+  });
+
+  Services.fog.testResetFOG();
+
+  const win = await loadInitialView("theme");
+  const picker = getThemesPicker(win.document);
+  await picker.updateComplete;
+
+  Assert.equal(
+    Glean.themePicker.shown.testGetValue(),
+    undefined,
+    "theme_picker.shown is not recorded when the picker isn't shown"
+  );
+
+  await closeView(win);
+  await SpecialPowers.popPrefEnv();
+});
+
+// Verifies that the classic themes are shown in their own moz-card, with its
+// own expand toggle, with the expected names and recolored Nova preview images,
+// and that their button reflects whether they are installed or active.
+add_task(async function test_picker_classic_themes() {
+  await SpecialPowers.pushPrefEnv({
+    set: [[PREF_NOVA_THEMES_PICKER, true]],
+  });
+
+  const win = await loadInitialView("theme");
+  const picker = getThemesPicker(win.document);
+  const classicPicker = getClassicThemesPicker(win.document);
+  await waitForThemesPickerReady(picker);
+  await TestUtils.waitForCondition(
+    () => classicPicker.themeCards.length,
+    "Waiting for the classic themes cards"
+  );
+
+  const pickers = win.document.querySelector("aboutaddons-themes-pickers");
+  Assert.ok(pickers, "wrapper element is rendered in the themes list view");
+  Assert.equal(
+    win.getComputedStyle(pickers).display,
+    "contents",
+    "wrapper element does not participate in the page layout"
+  );
+  Assert.ok(classicPicker.pickerCard, "classic themes moz-card is rendered");
+  Assert.equal(
+    classicPicker.pickerCard.getAttribute("data-l10n-id"),
+    "aboutaddons-classic-themes-heading",
+    "classic themes card has the expected heading"
+  );
+  const expectedCollapsedCount = picker.visibleRows * 2;
+  Assert.equal(
+    classicPicker.themeCards.length,
+    expectedCollapsedCount,
+    "Only the first classic theme cards are shown initially"
+  );
+  Assert.ok(
+    BrowserTestUtils.isVisible(classicPicker.expandToggle),
+    "classic themes card shows its expand toggle"
+  );
+  Assert.equal(
+    classicPicker.expandToggle.getAttribute("data-l10n-id"),
+    "aboutaddons-themes-picker-see-more",
+    "While collapsed, classic toggle button shows the 'Show More' string"
+  );
+  Assert.equal(
+    picker.themeCards.length,
+    expectedCollapsedCount,
+    "Firefox themes card is unaffected by the classic themes toggle"
+  );
+
+  classicPicker.expandToggle.click();
+  await classicPicker.updateComplete;
+  Assert.equal(
+    classicPicker.themeCards.length,
+    CLASSIC_THEME_IDS.length,
+    "Expect a card for each classic theme after expanding"
+  );
+  Assert.equal(
+    classicPicker.expandToggle.getAttribute("data-l10n-id"),
+    "aboutaddons-themes-picker-see-less",
+    "While expanded, classic toggle button shows the 'Show Less' string"
+  );
+  Assert.equal(
+    picker.themeCards.length,
+    expectedCollapsedCount,
+    "Firefox themes card stays collapsed when expanding the classic themes"
+  );
+
+  const themesListManager = await getThemesList({
+    installSource: "about:addons",
+  });
+  for (const themeId of CLASSIC_THEME_IDS) {
+    const card = getClassicThemeCard(classicPicker, themeId);
+    Assert.ok(card, `classic theme card for "${themeId}" is rendered`);
+    Assert.equal(
+      card.querySelector(".theme-name").getAttribute("data-l10n-id"),
+      getL10nIdForThemeProp(themeId, "name"),
+      `"${themeId}" card has the expected name l10n-id`
+    );
+    Assert.equal(
+      getThemeButton(card).getAttribute("data-l10n-id"),
+      "aboutaddons-themes-picker-install-button",
+      `"${themeId}" card shows an Install button while not installed`
+    );
+    await assertNovaThemePreview(card, themeId, themesListManager);
+  }
+  for (const themeId of CLASSIC_THEME_IDS) {
+    Assert.ok(
+      !getThemeCard(picker, themeIdPrefix(themeId)),
+      `"${themeId}" is not in the Firefox themes card`
+    );
+  }
+
+  const xpi = createNovaThemeXPI(CLASSIC_BLUE_ID, "Blue");
+  const blueAddon = await AddonManager.installTemporaryAddon(xpi);
+  await blueAddon.disable();
+  await classicPicker.updateComplete;
+  const blueCard = getClassicThemeCard(classicPicker, CLASSIC_BLUE_ID);
+  Assert.equal(
+    getThemeButton(blueCard).getAttribute("data-l10n-id"),
+    "aboutaddons-themes-picker-enable-button",
+    "installed but inactive classic theme shows an Enable button"
+  );
+
+  const promiseActiveThemePrefChanged = TestUtils.waitForPrefChange(
+    PREF_ACTIVE_THEME_ID,
+    value => value === CLASSIC_BLUE_ID
+  );
+  await blueAddon.enable();
+  await promiseActiveThemePrefChanged;
+  await classicPicker.updateComplete;
+  Assert.equal(
+    getThemeButton(blueCard).getAttribute("data-l10n-id"),
+    "aboutaddons-themes-picker-disable-button",
+    "active classic theme shows a Disable button"
+  );
+  Assert.equal(
+    getThemeButton(
+      getClassicThemeCard(classicPicker, CLASSIC_PROTON_ID)
+    ).getAttribute("data-l10n-id"),
+    "aboutaddons-themes-picker-install-button",
+    "other classic themes are unaffected"
+  );
+
+  await blueAddon.uninstall();
+
+  classicPicker.expandToggle.click();
+  await classicPicker.updateComplete;
+  Assert.equal(
+    classicPicker.themeCards.length,
+    expectedCollapsedCount,
+    "Classic themes collapse back to the initial card count"
+  );
+
   await closeView(win);
   await SpecialPowers.popPrefEnv();
 });

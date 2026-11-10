@@ -10,7 +10,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import mozilla.components.concept.storage.CreditCard
-import mozilla.components.concept.storage.CreditCardNumber
 import mozilla.components.concept.storage.CreditCardsAddressesStorage
 import mozilla.components.concept.storage.NewCreditCardFields
 import mozilla.components.concept.storage.UpdatableCreditCardFields
@@ -121,11 +120,11 @@ class CreditCardEditorStoreTest {
                 "Expected that a card is updated with the right fields",
                 UpdatableCreditCardFields(
                     billingName = "Jane Doe",
-                    cardNumber = CreditCardNumber.Plaintext(validMasterCard),
-                    cardNumberLast4 = "1111",
+                    cardNumber = validMasterCard,
                     expiryMonth = 1,
                     expiryYear = 2026L,
                     cardType = "mastercard",
+                    cardCvv = null,
                 ),
                 updatedCardFields,
             )
@@ -156,11 +155,11 @@ class CreditCardEditorStoreTest {
                 "Expected that a card is successfully saved with the right values",
                 NewCreditCardFields(
                     billingName = "Jane Doe",
-                    plaintextCardNumber = CreditCardNumber.Plaintext(validMasterCard),
-                    cardNumberLast4 = "1111",
+                    cardNumber = validMasterCard,
                     expiryMonth = 1,
                     expiryYear = 2026L,
                     cardType = "mastercard",
+                    cardCvv = null,
                 ),
                 creditCardsStorage.newAddedCard,
             )
@@ -302,17 +301,13 @@ class CreditCardEditorStoreTest {
         runTest(testDispatcher) {
             calendarDataProvider.expectedMonths = listOf("January", "February", "March")
             calendarDataProvider.expectedYears = listOf("2025", "2026")
-            val expectedEncryptedCardNumber = "encryptedCard"
             val expectedPlainCardNumber = "5555444433331111"
-
-            creditCardsStorage.expectedPlainCardNumber = expectedPlainCardNumber
-            creditCardsStorage.expectedEncryptedCardNumber = expectedEncryptedCardNumber
 
             val creditCard =
                 CreditCard(
                     guid = "id",
                     billingName = "Banana Apple",
-                    encryptedCardNumber = CreditCardNumber.Encrypted(expectedEncryptedCardNumber),
+                    cardNumber = expectedPlainCardNumber,
                     cardNumberLast4 = "1111",
                     expiryMonth = 2,
                     expiryYear = 2025,
@@ -321,6 +316,7 @@ class CreditCardEditorStoreTest {
                     timeLastUsed = 1L,
                     timeLastModified = 1L,
                     timesUsed = 1L,
+                    cardCvv = null,
                 )
 
             val store = makeStore(state = CreditCardEditorState.Default, scope = this)

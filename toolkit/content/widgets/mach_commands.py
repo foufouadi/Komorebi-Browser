@@ -15,6 +15,8 @@ LICENSE_HEADER = """/* This Source Code Form is subject to the terms of the Mozi
 """
 
 JS_HEADER = """{license}
+/// <reference path="./{element_name}.tagmap.d.ts" />
+
 import {{ html }} from "../vendor/lit.all.mjs";
 import {{ MozLitElement }} from "../lit-utils.mjs";
 
@@ -24,7 +26,7 @@ import {{ MozLitElement }} from "../lit-utils.mjs";
  * @tagname {element_name}
  * @property {{string}} variant - Property description goes here
  */
-export default class {class_name} extends MozLitElement {{
+export class {class_name} extends MozLitElement {{
   static properties = {{
     variant: {{ type: String }},
   }};
@@ -42,6 +44,16 @@ export default class {class_name} extends MozLitElement {{
   }}
 }}
 customElements.define("{element_name}", {class_name});
+"""
+
+TAGMAP_HEADER = """{license}
+import type {{ {class_name} }} from "./{element_name}.mjs";
+
+declare global {{
+  interface HTMLElementTagNameMap {{
+    "{element_name}": {class_name};
+  }}
+}}
 """
 
 STORY_HEADER = """{license}
@@ -166,6 +178,15 @@ def addwidget(command_context, names):
                 )
             )
 
+        with open(f"{component_dir}/{name}.tagmap.d.ts", "w", newline="\n") as f:
+            f.write(
+                TAGMAP_HEADER.format(
+                    license=LICENSE_HEADER,
+                    element_name=name,
+                    class_name=class_name,
+                )
+            )
+
         with open(f"{component_dir}/{name}.css", "w", newline="\n") as f:
             f.write(LICENSE_HEADER)
 
@@ -281,12 +302,46 @@ def addstory(command_context, name, project_name, path):
     description="Build the design tokens CSS files",
 )
 @CommandArgument(
+    "--import-figma",
+    action="store_true",
+    dest="import_figma",
+    help="Import Nova design tokens from the committed figma-variables-all.json "
+    "(no network or token needed), then build. Add --remote to fetch a fresh "
+    "export from Figma first.",
+)
+@CommandArgument(
+    "--remote",
+    action="store_true",
+    help="With --import-figma, fetch a fresh export from the Figma API before "
+    "importing. Requires a valid FIGMA_ACCESS_TOKEN in your environment.",
+)
+@CommandArgument(
     "--fetch-figma",
     action="store_true",
-    help="Fetch the current Nova design tokens from Figma before building. "
-    "Requires a valid FIGMA_ACCESS_TOKEN in your environment.",
+    help="Alias for `--import-figma --remote`.",
 )
-def buildtokens(command_context, fetch_figma):
+@CommandArgument(
+    "--match",
+    action="append",
+    dest="match",
+    default=None,
+    metavar="SUBSTRING",
+    help="Only import changed tokens whose path contains SUBSTRING. May be "
+    "passed multiple times. Requires --import-figma.",
+)
+@CommandArgument(
+    "--all",
+    action="store_true",
+    dest="import_all",
+    help="Import every changed token without prompting for a selection. "
+    "Requires --import-figma.",
+)
+def buildtokens(command_context, import_figma, remote, fetch_figma, match, import_all):
+    # `--fetch-figma` is an alias for `--import-figma --remote`.
+    do_import = import_figma or fetch_figma
+    do_remote = remote or fetch_figma
+    if (match or import_all or remote) and not do_import:
+        raise UserError("--match, --all, and --remote require --import-figma.")
     if run_mach(
         command_context,
         "npm",
@@ -297,20 +352,26 @@ def buildtokens(command_context, fetch_figma):
             "npm",
             args=["ci", "--prefix=toolkit/themes/shared/design-system"],
         )
-    if fetch_figma:
-        failed = run_mach(
-            command_context,
-            "npm",
-            args=[
-                "run",
-                "fetch-figma-nova",
-                "--prefix=toolkit/themes/shared/design-system",
-            ],
-        )
+    if do_import:
+        fetch_args = [
+            "run",
+            "import-figma-nova",
+            "--prefix=toolkit/themes/shared/design-system",
+            "--",
+        ]
+        if do_remote:
+            fetch_args.append("--remote")
+        for substring in match or []:
+            fetch_args.append(f"--match={substring}")
+        if import_all:
+            fetch_args.append("--all")
+        failed = run_mach(command_context, "npm", args=fetch_args)
         if failed:
-            raise UserError(
-                "Failed to access Figma API, is FIGMA_ACCESS_TOKEN set and valid?"
-            )
+            if do_remote:
+                raise UserError(
+                    "Failed to access Figma API, is FIGMA_ACCESS_TOKEN set and valid?"
+                )
+            raise UserError("Failed to import tokens from figma-variables-all.json.")
     run_mach(
         command_context,
         "npm",
@@ -323,7 +384,21 @@ def buildtokens(command_context, fetch_figma):
     run_mach(
         command_context,
         "npm",
+        args=[
+            "run",
+            "build-web",
+            "--prefix=toolkit/themes/shared/design-system",
+            "--",
+            "--override=nova",
+        ],
+    )
+    run_mach(
+        command_context,
+        "npm",
+        args=["run", "format-web", "--prefix=toolkit/themes/shared/design-system"],
+    )
+    run_mach(
+        command_context,
+        "npm",
         args=["run", "build", "--prefix=toolkit/themes/shared/design-system"],
     )
-    run_mach(command_context, "newtab", subcommand="install")
-    run_mach(command_context, "newtab", subcommand="bundle")

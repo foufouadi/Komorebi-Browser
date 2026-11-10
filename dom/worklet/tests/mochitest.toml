@@ -9,6 +9,7 @@ support-files = ["worklet_audioWorklet.js"]
 support-files = ["worklet_test_audioWorkletGlobalScopeRegisterProcessor.js"]
 skip-if = [
   "os == 'android' && os_version == '14' && arch == 'x86_64' && opt", # Bug 1990938
+  "os == 'android' && os_version == '14' && arch == 'x86_64' && ccov", # Bug 1990938
 ]
 
 ["test_audioWorklet_WASM.html"]
@@ -26,6 +27,9 @@ skip-if = [
   "http2",
   "http3",
 ]
+
+["test_audioWorklet_mimeType.html"]
+support-files = ["server_mime_type.sjs"]
 
 ["test_audioWorklet_options.html"]
 run-if = [
@@ -52,6 +56,9 @@ support-files = [
 
 ["test_fetch_failed.html"]
 support-files = ["specifier_with_user.mjs"]
+
+["test_import_same_url_twice.html"]
+support-files = ["import_same_url_twice_target.mjs"]
 
 ["test_import_with_cache.html"]
 support-files = ["server_import_with_cache.sjs"]

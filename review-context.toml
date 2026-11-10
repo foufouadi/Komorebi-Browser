@@ -33,6 +33,20 @@ load = [
   { type = "file", path = ".claude/skills/firefox-desktop-frontend/SKILL.md" },
 ]
 
+[[rules]]
+name = "Reusable components and design system"
+description = "Component APIs, consumer compatibility, design tokens, CSS, and review evidence for shared widgets and the design system."
+when = { any_file = { include = [
+  "toolkit/content/widgets/**",
+  "toolkit/content/tests/widgets/**",
+  "toolkit/themes/shared/design-tokens-*.css",
+  "toolkit/themes/shared/design-system/**",
+] } }
+load = [
+  { type = "file", path = ".claude/skills/recomp-frontend-review/SKILL.md" },
+  { type = "file", path = ".claude/skills/recomp-frontend-review/references/runsheet.md" },
+]
+
 # Web-standard implementation: native code behind WebIDL interfaces. Triggered
 # when a patch touches both a .webidl file and at least one native (.h/.cpp) file.
 [[rules]]
@@ -49,4 +63,98 @@ when = { all = [
 ] }
 load = [
   { type = "file", path = ".claude/skills/gecko-web-standard-implementation/SKILL.md" },
+]
+
+# JavaScript Engine: Triggered when doing work in the JavaScript Engine.
+[[rules]]
+name = "JavaScript Engine"
+description = "Guidance for reviewing JavaScript engine code"
+when = { any_file = { include = [
+  "js/**",
+], ext = [
+  ".js",
+  ".cpp",
+  ".h",
+] } }
+load = [
+  { type = "file", path = ".claude/skills/js-review/SKILL.md" },
+]
+
+# WebRender: Triggered when a patch touches WebRender source code.
+[[rules]]
+name = "WebRender"
+description = "Guidance for reviewing WebRender code"
+when = { any_file = { include = [
+  "gfx/wr/**",
+], ext = [
+  ".rs",
+] } }
+load = [
+  { type = "file", path = "gfx/wr/webrender/doc/code-review.md" },
+]
+
+# Necko: Triggered when a patch touches Necko source code.
+[[rules]]
+name = "Necko"
+description = "Guidance for reviewing Necko code"
+when = { any_file = { include = [
+  "netwerk/**",
+], ext = [
+  ".h",
+  ".cpp",
+  ".rs",
+  ".idl",
+  ".ipdl",
+  ".ipdlh",
+  ".js",
+  ".mjs",
+  ".toml",
+] } }
+load = [
+  { type = "file", path = ".claude/skills/necko-review/SKILL.md" },
+]
+
+[[rules]]
+name = "Android"
+description = "Android conventions and principles"
+when = { any_file = { include = [
+  "mobile/android/**",
+], ext = [
+  ".kt",
+  ".java",
+  ".xml",
+  ".yaml",
+] } }
+load = [
+  { type = "file", path = ".agents/skills/android/SKILL.md" },
+]
+
+# Media: Triggered when a patch touches dom/media source code.
+[[rules]]
+name = "dom/media"
+description = "dom/media review checklists: threading, async lifecycle, IPC, memory safety and spec correctness"
+when = { any_file = { include = [
+  "dom/media/**",
+], exclude = [
+  "dom/media/gmp/rlz/**",
+  "dom/media/gmp/widevine-adapter/content_decryption_module*",
+  "dom/media/platforms/ffmpeg/ffmpeg[0-9]*/**",
+  "dom/media/platforms/ffmpeg/libav[0-9]*/**",
+  "dom/media/webrtc/transport/third_party/**",
+], ext = [
+  ".c",
+  ".cc",
+  ".cpp",
+  ".h",
+  ".ipdl",
+  ".ipdlh",
+  ".mm",
+  ".rs",
+] } }
+load = [
+  { type = "file", path = "dom/media/docs/review/threading.md" },
+  { type = "file", path = "dom/media/docs/review/async-lifecycle.md" },
+  { type = "file", path = "dom/media/docs/review/ipc.md" },
+  { type = "file", path = "dom/media/docs/review/memory-safety.md" },
+  { type = "file", path = "dom/media/docs/review/spec-correctness.md" },
 ]

@@ -66,7 +66,7 @@ using namespace mozilla::ipc;
  *
  * When the content process detects a hang, it posts a task to its hang thread,
  * which sends an IPC message to the hang thread in the parent. The parent
- * cancels any ongoing CPOW requests and then posts a runnable to the main
+ * cancels any ongoing reply requests and then posts a runnable to the main
  * thread that notifies Firefox frontend code of the hang. The frontend code is
  * passed an nsIHangReport, which can be used to terminate the hang.
  *
@@ -101,8 +101,6 @@ class HangMonitorChild : public PProcessHangMonitorChild,
   void NotifySlowScriptAsync(TabId aTabId, const nsCString& aFileName,
                              const nsString& aAddonId, const double aDuration);
 
-  bool IsDebuggerStartupComplete();
-
   void ClearHang();
   void ClearHangAsync();
   void ClearPaintWhileInterruptingJS();
@@ -116,8 +114,6 @@ class HangMonitorChild : public PProcessHangMonitorChild,
 
   mozilla::ipc::IPCResult RecvTerminateScript() override;
   mozilla::ipc::IPCResult RecvRequestContentJSInterrupt() override;
-  mozilla::ipc::IPCResult RecvBeginStartingDebugger() override;
-  mozilla::ipc::IPCResult RecvEndStartingDebugger() override;
 
   mozilla::ipc::IPCResult RecvPaintWhileInterruptingJS(
       const TabId& aTabId) override;
@@ -181,8 +177,6 @@ class HangMonitorChild : public PProcessHangMonitorChild,
 
   // These fields must be accessed with mMonitor held.
   bool mTerminateScript MOZ_GUARDED_BY(mMonitor);
-  bool mStartDebugger MOZ_GUARDED_BY(mMonitor);
-  bool mFinishedStartingDebugger MOZ_GUARDED_BY(mMonitor);
 
   // this variable is used to paint/unload layers
   // if not set, no action required
@@ -287,8 +281,6 @@ class HangMonitorParent : public PProcessHangMonitorParent {
   void SetMainThreadQoSPriority(nsIThread::QoSPriority aQoSPriority);
 
   void TerminateScript();
-  void BeginStartingDebugger();
-  void EndStartingDebugger();
 
   nsresult Dispatch(already_AddRefed<nsIRunnable> aRunnable) {
     return mHangMonitor->Dispatch(std::move(aRunnable));
@@ -343,8 +335,6 @@ HangMonitorChild::HangMonitorChild(ProcessHangMonitor* aMonitor)
       mMonitor("HangMonitorChild lock"),
       mSentReport(false),
       mTerminateScript(false),
-      mStartDebugger(false),
-      mFinishedStartingDebugger(false),
       mCancelContentJS(false),
       mCancelContentJSNavigationType(nsIRemoteTab::NAVIGATE_BACK),
       mCancelContentJSNavigationIndex(0),
@@ -571,22 +561,6 @@ mozilla::ipc::IPCResult HangMonitorChild::RecvRequestContentJSInterrupt() {
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult HangMonitorChild::RecvBeginStartingDebugger() {
-  MOZ_RELEASE_ASSERT(IsOnThread());
-
-  MonitorAutoLock lock(mMonitor);
-  mStartDebugger = true;
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult HangMonitorChild::RecvEndStartingDebugger() {
-  MOZ_RELEASE_ASSERT(IsOnThread());
-
-  MonitorAutoLock lock(mMonitor);
-  mFinishedStartingDebugger = true;
-  return IPC_OK();
-}
-
 mozilla::ipc::IPCResult HangMonitorChild::RecvPaintWhileInterruptingJS(
     const TabId& aTabId) {
   PROFILER_MARKER_UNTYPED("PaintWhileInterruptingJS", DOM, {});
@@ -737,11 +711,6 @@ HangMonitorChild::SlowScriptAction HangMonitorChild::NotifySlowScript(
       mTerminateScript = false;
       return SlowScriptAction::Terminate;
     }
-
-    if (mStartDebugger) {
-      mStartDebugger = false;
-      return SlowScriptAction::StartDebugger;
-    }
   }
 
   TabId id;
@@ -759,19 +728,6 @@ HangMonitorChild::SlowScriptAction HangMonitorChild::NotifySlowScript(
   return SlowScriptAction::Continue;
 }
 
-bool HangMonitorChild::IsDebuggerStartupComplete() {
-  MOZ_RELEASE_ASSERT(NS_IsMainThread());
-
-  MonitorAutoLock lock(mMonitor);
-
-  if (mFinishedStartingDebugger) {
-    mFinishedStartingDebugger = false;
-    return true;
-  }
-
-  return false;
-}
-
 void HangMonitorChild::ClearHang() {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -784,8 +740,6 @@ void HangMonitorChild::ClearHang() {
     MonitorAutoLock lock(mMonitor);
     mSentReport = false;
     mTerminateScript = false;
-    mStartDebugger = false;
-    mFinishedStartingDebugger = false;
   }
 }
 
@@ -1004,7 +958,7 @@ mozilla::ipc::IPCResult HangMonitorParent::RecvHangEvidence(
   // browser minidump.
   nsAutoString crashId;
 
-  mHangMonitor->InitiateCPOWTimeout();
+  mHangMonitor->InitiateReplyTimeout();
 
   MonitorAutoLock lock(mMonitor);
 
@@ -1022,7 +976,7 @@ mozilla::ipc::IPCResult HangMonitorParent::RecvClearHang() {
     return IPC_OK();
   }
 
-  mHangMonitor->InitiateCPOWTimeout();
+  mHangMonitor->InitiateReplyTimeout();
 
   MonitorAutoLock lock(mMonitor);
 
@@ -1037,22 +991,6 @@ void HangMonitorParent::TerminateScript() {
 
   if (mIPCOpen) {
     (void)SendTerminateScript();
-  }
-}
-
-void HangMonitorParent::BeginStartingDebugger() {
-  MOZ_RELEASE_ASSERT(IsOnThread());
-
-  if (mIPCOpen) {
-    (void)SendBeginStartingDebugger();
-  }
-}
-
-void HangMonitorParent::EndStartingDebugger() {
-  MOZ_RELEASE_ASSERT(IsOnThread());
-
-  if (mIPCOpen) {
-    (void)SendEndStartingDebugger();
   }
 }
 
@@ -1118,32 +1056,6 @@ HangMonitoredProcess::TerminateScript() {
 }
 
 NS_IMETHODIMP
-HangMonitoredProcess::BeginStartingDebugger() {
-  MOZ_RELEASE_ASSERT(NS_IsMainThread());
-  if (!mActor) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  ProcessHangMonitor::Get()->Dispatch(NewNonOwningRunnableMethod(
-      "HangMonitorParent::BeginStartingDebugger", mActor,
-      &HangMonitorParent::BeginStartingDebugger));
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-HangMonitoredProcess::EndStartingDebugger() {
-  MOZ_RELEASE_ASSERT(NS_IsMainThread());
-  if (!mActor) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  ProcessHangMonitor::Get()->Dispatch(NewNonOwningRunnableMethod(
-      "HangMonitorParent::EndStartingDebugger", mActor,
-      &HangMonitorParent::EndStartingDebugger));
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 HangMonitoredProcess::IsReportForBrowserOrChildren(nsFrameLoader* aFrameLoader,
                                                    bool* aResult) {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
@@ -1198,7 +1110,7 @@ static bool InterruptCallback(JSContext* cx) {
 
 ProcessHangMonitor* ProcessHangMonitor::sInstance;
 
-ProcessHangMonitor::ProcessHangMonitor() : mCPOWTimeout(false) {
+ProcessHangMonitor::ProcessHangMonitor() : mReplyTimeout(false) {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
   if (XRE_IsContentProcess()) {
@@ -1262,24 +1174,19 @@ ProcessHangMonitor::SlowScriptAction ProcessHangMonitor::NotifySlowScript(
                                                    aAddonId, aDuration);
 }
 
-bool ProcessHangMonitor::IsDebuggerStartupComplete() {
-  ReleaseAssertIsOnMainThread();
-  return HangMonitorChild::Get()->IsDebuggerStartupComplete();
-}
-
-bool ProcessHangMonitor::ShouldTimeOutCPOWs() {
+bool ProcessHangMonitor::ShouldTimeOutReplies() {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
-  if (mCPOWTimeout) {
-    mCPOWTimeout = false;
+  if (mReplyTimeout) {
+    mReplyTimeout = false;
     return true;
   }
   return false;
 }
 
-void ProcessHangMonitor::InitiateCPOWTimeout() {
+void ProcessHangMonitor::InitiateReplyTimeout() {
   MOZ_RELEASE_ASSERT(IsOnThread());
-  mCPOWTimeout = true;
+  mReplyTimeout = true;
 }
 
 static already_AddRefed<PProcessHangMonitorParent> CreateHangMonitorParent(

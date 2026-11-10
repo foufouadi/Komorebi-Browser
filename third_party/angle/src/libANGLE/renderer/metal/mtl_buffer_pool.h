@@ -22,6 +22,12 @@ class ContextMtl;
 namespace mtl
 {
 
+enum class TrackBufferInContext
+{
+    No,
+    Yes,
+};
+
 // A buffer pool is conceptually an infinitely long buffer. Each time you write to the buffer,
 // you will always write to a previously unused portion. After a series of writes, you must flush
 // the buffer data to the device. Buffer lifetime currently assumes that each new allocation will
@@ -44,24 +50,25 @@ class BufferPool
 
     // Init is called after the buffer creation so that the alignment can be specified later.
     void initialize(Context *context, size_t initialSize, size_t alignment, size_t maxBuffers);
-    // Calling this without initialize() will have same effect as calling initialize().
-    // If called after initialize(), the old pending buffers will be flushed and might be re-used if
-    // their size are big enough for the requested initialSize parameter.
-    angle::Result reset(ContextMtl *contextMtl,
-                        size_t initialSize,
-                        size_t alignment,
-                        size_t maxBuffers);
+    // If trackInContext is TrackBufferInContext::Yes, the pool must be tied to contextMtl's
+    // lifetime and will be registered with it for trimming on glTrimMemoryANGLE().
+    void initialize(ContextMtl *contextMtl,
+                    size_t initialSize,
+                    size_t alignment,
+                    size_t maxBuffers,
+                    TrackBufferInContext trackInContext);
 
     // This call will allocate a new region at the end of the buffer. It internally may trigger
     // a new buffer to be created (which is returned in the optional parameter
-    // `newBufferAllocatedOut`).  The new region will be in the returned buffer at given offset. If
-    // a memory pointer is given, the buffer will be automatically map()ed.
-    angle::Result allocate(ContextMtl *contextMtl,
-                           size_t sizeInBytes,
-                           uint8_t **ptrOut            = nullptr,
-                           BufferRef *bufferOut        = nullptr,
-                           size_t *offsetOut           = nullptr,
-                           bool *newBufferAllocatedOut = nullptr);
+    // `newBufferAllocatedOut`).  The new region will be in the returned BufferSlice.
+
+    angle::Result allocate(ContextMtl *contextMtl, size_t sizeInBytes, BufferSlice *outBuffer);
+
+    // The buffer will be automatically mapped and the mapped region returned in outMappedData.
+    angle::Result allocateAndMap(ContextMtl *contextMtl,
+                                 size_t sizeInBytes,
+                                 angle::Span<uint8_t> *outMappedData,
+                                 BufferSlice *outBuffer);
 
     // After a sequence of CPU writes, call commit to ensure the data is visible to the GPU.
     // Note: the data will only be made visible to the GPU if the buffer's storage mode is not
@@ -71,6 +78,9 @@ class BufferPool
 
     // This releases all the buffers that have been allocated since this was last called.
     void releaseInFlightBuffers(ContextMtl *contextMtl);
+
+    // Releases in-flight buffers and marks all idle free buffers as purgeable (volatile).
+    void trim(ContextMtl *contextMtl);
 
     // This frees resources immediately.
     void destroy(ContextMtl *contextMtl);
@@ -87,23 +97,33 @@ class BufferPool
     void setAlwaysAllocateNewBuffer(bool e) { mAlwaysAllocateNewBuffer = e; }
 
   private:
+    enum class BufferListType
+    {
+        InFlight,
+        NonVolatileFree,
+        VolatileFree,
+    };
+
     MTLStorageMode storageMode(ContextMtl *contextMtl) const;
     void reset();
     angle::Result allocateNewBuffer(ContextMtl *contextMtl);
-    void destroyBufferList(ContextMtl *contextMtl, std::deque<BufferRef> *buffers);
+    BufferRef popFreeBuffer(ContextMtl *contextMtl);
+    void clearFreeLists();
+    void destroyBufferList(std::deque<BufferRef> *buffers, BufferListType listType);
     angle::Result finalizePendingBuffer(ContextMtl *contextMtl);
-    size_t mInitialSize;
-    BufferRef mBuffer;
-    uint32_t mNextAllocationOffset;
-    uint32_t mLastFlushOffset;
-    size_t mSize;
-    size_t mAlignment;
 
+    ContextMtl *mContext{nullptr};
+    BufferRef mBuffer;
     std::deque<BufferRef> mInFlightBuffers;
     std::deque<BufferRef> mBufferFreeList;
-
-    size_t mBuffersAllocated;
-    size_t mMaxBuffers;
+    std::deque<BufferRef> mVolatileBufferFreeList;
+    size_t mInitialSize{0};
+    size_t mNextAllocationOffset{0};
+    size_t mLastFlushOffset{0};
+    size_t mSize{0};
+    size_t mAlignment{1};
+    size_t mBuffersAllocated{0};
+    size_t mMaxBuffers{0};
     bool mAlwaysAllocateNewBuffer;
 };
 

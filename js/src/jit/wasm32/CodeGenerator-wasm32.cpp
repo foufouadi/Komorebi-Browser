@@ -169,6 +169,9 @@ void CodeGenerator::visitWasmPermuteSimd128(LWasmPermuteSimd128* ins) {
 void CodeGenerator::visitWasmReplaceLaneSimd128(LWasmReplaceLaneSimd128* ins) {
   MOZ_CRASH();
 }
+void CodeGenerator::visitWasmMoveLaneSimd128(LWasmMoveLaneSimd128* ins) {
+  MOZ_CRASH();
+}
 void CodeGenerator::visitWasmReplaceInt64LaneSimd128(
     LWasmReplaceInt64LaneSimd128* ins) {
   MOZ_CRASH();
@@ -200,12 +203,6 @@ void CodeGenerator::visitWasmStoreLaneSimd128(LWasmStoreLaneSimd128* ins) {
   MOZ_CRASH();
 }
 void CodeGenerator::visitUnbox(LUnbox* unbox) { MOZ_CRASH(); }
-void CodeGenerator::visitWasmUint32ToDouble(LWasmUint32ToDouble* lir) {
-  MOZ_CRASH();
-}
-void CodeGenerator::visitWasmUint32ToFloat32(LWasmUint32ToFloat32* lir) {
-  MOZ_CRASH();
-}
 void CodeGenerator::visitDivI(LDivI* ins) { MOZ_CRASH(); }
 void CodeGenerator::visitModI(LModI* ins) { MOZ_CRASH(); }
 void CodeGenerator::visitDivPowTwoI(LDivPowTwoI* ins) { MOZ_CRASH(); }

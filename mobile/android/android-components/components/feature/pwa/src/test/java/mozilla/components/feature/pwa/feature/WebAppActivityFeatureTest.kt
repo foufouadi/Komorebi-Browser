@@ -6,6 +6,8 @@ package mozilla.components.feature.pwa.feature
 
 import android.app.Activity
 import android.content.pm.ActivityInfo
+import android.content.pm.ApplicationInfo
+import android.os.Build.VERSION_CODES
 import android.os.Looper.getMainLooper
 import android.view.View
 import android.view.Window
@@ -18,6 +20,7 @@ import mozilla.components.browser.icons.Icon
 import mozilla.components.concept.engine.manifest.WebAppManifest
 import mozilla.components.support.test.any
 import mozilla.components.support.test.mock
+import mozilla.components.support.test.robolectric.testContext
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -50,6 +53,11 @@ class WebAppActivityFeatureTest {
         `when`(activity.window).thenReturn(window)
         `when`(window.decorView).thenReturn(decorView)
         `when`(window.attributes).thenReturn(layoutParams)
+
+        // Reads behind isEdgeToEdgeDisabled(), used when entering immersive mode.
+        `when`(activity.applicationInfo)
+            .thenReturn(ApplicationInfo().apply { targetSdkVersion = VERSION_CODES.VANILLA_ICE_CREAM })
+        `when`(activity.theme).thenReturn(testContext.theme)
 
         `when`(icons.loadIcon(any())).thenReturn(CompletableDeferred(mock<Icon>()))
     }

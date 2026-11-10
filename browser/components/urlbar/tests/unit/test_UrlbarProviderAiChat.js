@@ -58,7 +58,7 @@ add_task(async function test_isActive() {
     .stub(lazy.AIWindow, "isAIWindowActiveAndEnabled")
     .returns(false);
   const provider = new lazy.UrlbarProviderAiChat();
-  let controller = UrlbarTestUtils.newMockController();
+  let controller = UrlbarTestUtils.mockChildController();
 
   Assert.ok(
     !(await provider.isActive(createContext("hello"), controller)),
@@ -71,14 +71,15 @@ add_task(async function test_isActive() {
     "Provider is active"
   );
 
-  Assert.ok(
-    !(await provider.isActive(
+  Assert.equal(
+    await provider.isActive(
       createContext("hello world", {
         searchMode: { engineName: "testEngine" },
       }),
       controller
-    )),
-    "Provider is not active as we're in Search Mode"
+    ),
+    UrlbarPrefs.get("unifiedSearchButton.historyInSearchMode"),
+    "Provider is only active in engine Search Mode with historyInSearchMode"
   );
 
   Assert.ok(

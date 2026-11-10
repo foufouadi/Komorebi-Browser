@@ -4,7 +4,7 @@
 
 /**
  * @import { SearchEngine } from "moz-src:///toolkit/components/search/SearchEngine.sys.mjs";
- * @import { UrlbarInput } from "moz-src:///browser/components/urlbar/content/UrlbarInput.mjs";
+ * @import { UrlbarInputBase } from "moz-src:///browser/components/urlbar/content/UrlbarInputBase.mjs";
  */
 
 const lazy = {};
@@ -106,11 +106,13 @@ class _OpenSearchManager {
         ? this.#hiddenEngines.get(browser)
         : this.#offeredEngines.get(browser)) || [];
 
+    // Caching open search data in sys modules must not keep the browser alive.
+    let browserRef = new WeakRef(browser);
     engines.push({
       uri: engine.href,
       title: engine.title,
       get icon() {
-        return browser.mIconURL;
+        return browserRef.deref()?.mIconURL;
       },
     });
 
@@ -135,8 +137,8 @@ class _OpenSearchManager {
    */
   updateOpenSearchBadge(win) {
     let engines = this.getInstallableEngines(win.gBrowser.selectedBrowser);
-    for (let urlbar of /** @type {NodeListOf<UrlbarInput>} */ (
-      win.document.querySelectorAll("moz-urlbar")
+    for (let urlbar of /** @type {NodeListOf<UrlbarInputBase>} */ (
+      win.document.querySelectorAll(".urlbar")
     )) {
       if (!urlbar.controller) {
         // This means it is not initialized and happens
@@ -147,9 +149,7 @@ class _OpenSearchManager {
         win.gBrowser.selectedBrowser,
         engines || []
       );
-      if (urlbar.sapName == "searchbar") {
-        urlbar.searchModeSwitcher.toggleAddEnginesBadge(!!engines?.length);
-      }
+      urlbar.searchModeSwitcher.toggleAddEnginesBadge(!!engines?.length);
     }
 
     let searchBar = win.document.getElementById("searchbar");

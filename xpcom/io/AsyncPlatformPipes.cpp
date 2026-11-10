@@ -33,7 +33,8 @@ class PlatformPipeLink
     : public MessageLoopForIO::Watcher
 #endif
 {
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(PlatformPipeLink)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING_WITH_DELETE_ON_EVENT_TARGET(
+      PlatformPipeLink, mIOThread.GetEventTarget())
 
  public:
   PlatformPipeLink(UniqueFileHandle aHandle, uint32_t aBufferSize);
@@ -115,7 +116,7 @@ PlatformPipeLink::PlatformPipeLink(UniqueFileHandle aHandle,
                                    uint32_t aBufferSize)
     : mIOThread(XRE_GetAsyncIOEventTarget()),
       mHandle(std::move(aHandle)),
-      mBuffer(MakeUnique<char[]>(aBufferSize)),
+      mBuffer(std::make_unique<char[]>(aBufferSize)),
       mBufferSize(aBufferSize) {
   MOZ_ASSERT(aBufferSize > 1, "invalid buffer size");
   MOZ_ASSERT(mHandle, "invalid handle");

@@ -112,8 +112,6 @@ button:disabled {
 
 .advanced-panel {
   margin: 48px auto;
-  min-width: var(--in-content-container-min-width);
-  max-width: var(--in-content-container-max-width);
 }
 
 .custom-net-error-card h3,
@@ -146,7 +144,7 @@ button:disabled {
 /* Search call-to-action on the online dnsNotFound error page (bug 2055637). */
 /* Not moz-button-group: it reorders its slotted children by moving them in the
    light DOM, which breaks Lit's markers for the button slot this page swaps
-   between a spinner, the Search button, and an offline message. */
+   between the Search button and an offline message. */
 .search-cta-buttons {
   display: flex;
   flex-flow: row wrap;
@@ -154,25 +152,6 @@ button:disabled {
   align-items: center;
   gap: var(--space-small);
   margin-block: var(--space-large) var(--space-xxlarge);
-}
-
-.search-cta-loading {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-xsmall);
-  min-width: 2.5em;
-  min-height: 2em;
-}
-
-/* loading.svg owns its own rotation and its own prefers-reduced-motion
-   fallback, and tracks the text color, so it stays visible in High Contrast
-   Mode without a forced-colors override of our own. */
-.search-cta-loading-icon {
-  width: 1em;
-  height: 1em;
-  -moz-context-properties: fill;
-  fill: currentColor;
 }
 
 .search-cta-offline {
@@ -251,11 +230,6 @@ button:disabled {
   }
 
   net-error-card {
-    width: min(100%, 720px);
-    min-width: min-content;
-    margin-top: calc(150px - var(--error-page-padding, 0px));
-    padding-block-end: var(--space-xxlarge);
-
     @media (max-width: 640px) {
       /* min-content holds the card wider than a narrow viewport, which is what
          forces a horizontal scrollbar. */
@@ -288,6 +262,16 @@ button:disabled {
 
     > .container {
       width: 100%;
+    }
+
+    /* Without the illustration, shrink the text to its widest line and center
+       it, so short messages do not sit left of center in the full-width card. */
+    @media not -moz-pref("browser.netError.illustration.enabled") {
+      justify-content: center;
+
+      > .container {
+        width: fit-content;
+      }
     }
 
     /* Stack the illustration above the text, both left aligned. */

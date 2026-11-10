@@ -57,6 +57,8 @@ private val EXPECTED_RUNBLOCKING_RANGE = 0..2 // CI has +1 counts compared to lo
  * layouts (if they're not too expensive to measure/layout). If the view hierarchy uses Jetpack Compose, switching to
  * that is also an option.
  */
+// Used by the assertions disabled below.
+@Suppress("UnusedPrivateProperty")
 private val EXPECTED_RECYCLER_VIEW_CONSTRAINT_LAYOUT_CHILDREN =
     4..6 // The messaging framework is not deterministic and could add to the count.
 
@@ -69,14 +71,19 @@ private val EXPECTED_RECYCLER_VIEW_CONSTRAINT_LAYOUT_CHILDREN =
  * inflating more layouts may slow down start up. Ideally, layouts would be merged such that there is one inflation that
  * includes all of the views needed on start up.
  */
+// Used by the assertions disabled below.
+@Suppress("UnusedPrivateProperty")
 private val EXPECTED_NUMBER_OF_INFLATION =
     13..14 // The messaging framework is not deterministic and could add a +1 to the count
 
 private val failureMsgStrictMode = getErrorMessage("StrictMode suppression")
 private val failureMsgRunBlocking = getErrorMessage("runBlockingIncrement")
+// Used by the assertions disabled below.
+@Suppress("UnusedPrivateProperty")
 private val failureMsgRecyclerViewConstraintLayoutChildren =
     getErrorMessage("ConstraintLayout being a common direct descendant of a RecyclerView")
-private val failureMsgNumberOfInflation = getErrorMessage("start up inflation")
+// Used by the assertions disabled below.
+@Suppress("UnusedPrivateProperty") private val failureMsgNumberOfInflation = getErrorMessage("start up inflation")
 
 /**
  * A performance test that attempts to minimize start up performance regressions using heuristics rather than

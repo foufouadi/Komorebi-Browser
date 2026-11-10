@@ -9,10 +9,9 @@ test -n "${VCS_PATH}"
 # builds write to the source dir (and its parent), so move the source trees to
 # our workspace from the (cached) checkout dir
 cp -a "${VCS_PATH}/nss" .
-[ -d nspr ] || git clone https://github.com/mozilla/nspr nspr
+"$(dirname "$0")/clone_nspr.sh"
 
 pushd nspr
-git checkout -- .
 if [ -f "../nss/nspr.patch" ] && [ "$ALLOW_NSPR_PATCH" = "1" ]; then
   patch -p1 < ../nss/nspr.patch
 fi
@@ -23,9 +22,8 @@ popd
 # The setup is hardcoded and can't be changed easily.
 # This part is a helper We install dependencies manually to help.
 if [ "$(uname)" = "Darwin" ]; then
-  python3 -m pip install --user gyp-next
-  python3 -m pip install --user ninja
-  export PATH="$(python3 -m site --user-base)/bin:${PATH}"
+  . "$(dirname "$0")/install_gyp.sh"
+  install_gyp gyp-env ninja
 fi
 
 # Build.

@@ -3,9 +3,13 @@ subsuite = "raptor"
 
 ["test_addon_utils.py"]
 
+["test_benchmark.py"]
+
 ["test_chrome_trace.py"]
 
 ["test_cmdline.py"]
+
+["test_filters.py"]
 
 ["test_gecko_profile.py"]
 
@@ -16,5 +20,7 @@ subsuite = "raptor"
 ["test_print_tests.py"]
 
 ["test_raptor.py"]
+
+["test_raptor_profiling.py"]
 
 ["test_utils.py"]

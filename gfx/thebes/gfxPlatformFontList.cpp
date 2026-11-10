@@ -156,8 +156,12 @@ const gfxFontEntry::ScriptRange gfxPlatformFontList::sComplexScriptRanges[] = {
 };
 
 static const char* kObservedPrefs[] = {
-    "font.", "font.name-list.", "intl.accept_languages",  // hmmmm...
-    "browser.display.use_document_fonts.icon_font_allowlist", nullptr};
+    "font.",
+    "font.name-list.",
+    "intl.accept_languages",  // hmmmm...
+    "browser.display.use_document_fonts.icon_font_allowlist",
+    "gfx.font_rendering.fontations.enabled",
+    nullptr};
 
 static const char kFontSystemWhitelistPref[] = "font.system.whitelist";
 
@@ -190,9 +194,14 @@ class gfxFontListPrefObserver final : public nsIObserver {
 static void FontListPrefChanged(const char* aPref, void* aData = nullptr) {
   // XXX this could be made to only clear out the cache for the prefs that were
   // changed but it probably isn't that big a deal.
-  gfxPlatformFontList::PlatformFontList()->ClearLangGroupPrefFonts();
-  gfxPlatformFontList::PlatformFontList()->LoadIconFontOverrideList();
-  gfxFontCache::GetCache()->Flush();
+  auto* pfl = gfxPlatformFontList::PlatformFontList();
+  if (aPref && !strcmp(aPref, "gfx.font_rendering.fontations.enabled")) {
+    pfl->UpdateFontList(true);
+  } else {
+    pfl->ClearLangGroupPrefFonts();
+    pfl->LoadIconFontOverrideList();
+    gfxFontCache::GetCache()->Flush();
+  }
 }
 
 static gfxFontListPrefObserver* gFontListPrefObserver = nullptr;
@@ -287,7 +296,6 @@ bool gfxPlatformFontList::Initialize(gfxPlatformFontList* aList) {
   sPlatformFontList = aList;
   if (XRE_IsParentProcess() &&
       StaticPrefs::gfx_font_list_omt_enabled_AtStartup() &&
-      StaticPrefs::gfx_e10s_font_list_shared_AtStartup() &&
       !gfxPlatform::InSafeMode()) {
     // We call nsRFPService::CalculateFontLocaleAllowlist so that it reads
     // intl.accept_languages while we are still on the main thread.
@@ -310,7 +318,7 @@ gfxPlatformFontList::gfxPlatformFontList(bool aNeedFullnamePostscriptNames)
       mOtherFamilyNames(16),
       mSharedCmaps(8) {
   if (aNeedFullnamePostscriptNames) {
-    mExtraNames = MakeUnique<ExtraNames>();
+    mExtraNames = std::make_unique<ExtraNames>();
   }
 
   mLangService = nsLanguageAtomService::GetService();
@@ -318,7 +326,7 @@ gfxPlatformFontList::gfxPlatformFontList(bool aNeedFullnamePostscriptNames)
   LoadBadUnderlineList();
   LoadIconFontOverrideList();
 
-  mFontPrefs = MakeUnique<FontPrefs>();
+  mFontPrefs = std::make_unique<FontPrefs>();
 
   gfxFontUtils::GetPrefsFontList(kFontSystemWhitelistPref, mEnabledFontsList);
   mFontFamilyWhitelistActive = !mEnabledFontsList.IsEmpty();
@@ -783,43 +791,41 @@ bool gfxPlatformFontList::InitFontList() {
 
   InitializeCodepointsWithNoFonts();
 
-  // Try to initialize the cross-process shared font list if enabled by prefs.
-  if (StaticPrefs::gfx_e10s_font_list_shared_AtStartup()) {
-    for (const auto& entry : mFontEntries.Values()) {
-      if (!entry) {
-        continue;
-      }
-      AutoWriteLock lock(entry->mLock);
-      entry->mShmemCharacterMap = nullptr;
-      entry->mShmemFace = nullptr;
-      entry->mFamilyName.Truncate();
+  // Try to initialize the cross-process shared font list.
+  for (const auto& entry : mFontEntries.Values()) {
+    if (!entry) {
+      continue;
     }
-    mFontEntries.Clear();
-    mShmemCharMaps.Clear();
-    bool oldSharedList = SharedFontList() != nullptr;
-    delete mSharedFontList.exchange(new fontlist::FontList(mFontlistInitCount));
-    InitSharedFontListForPlatform();
-    auto* newList = SharedFontList();
-    if (newList && newList->Initialized()) {
-      if (mLocalNameTable.Count()) {
-        newList->SetLocalNames(mLocalNameTable);
-        mLocalNameTable.Clear();
-      }
+    AutoWriteLock lock(entry->mLock);
+    entry->mShmemCharacterMap = nullptr;
+    entry->mShmemFace = nullptr;
+    entry->mFamilyName.Truncate();
+  }
+  mFontEntries.Clear();
+  mShmemCharMaps.Clear();
+  bool oldSharedList = SharedFontList() != nullptr;
+  delete mSharedFontList.exchange(new fontlist::FontList(mFontlistInitCount));
+  InitSharedFontListForPlatform();
+  auto* newList = SharedFontList();
+  if (newList && newList->Initialized()) {
+    if (mLocalNameTable.Count()) {
+      newList->SetLocalNames(mLocalNameTable);
+      mLocalNameTable.Clear();
+    }
+  } else {
+    // something went wrong, fall back to in-process list
+    gfxCriticalNote << "Failed to initialize shared font list, "
+                       "falling back to in-process list.";
+    delete mSharedFontList.exchange(nullptr);
+  }
+  if (oldSharedList && XRE_IsParentProcess()) {
+    // notify all children of the change
+    if (NS_IsMainThread()) {
+      dom::ContentParent::NotifyUpdatedFonts(true);
     } else {
-      // something went wrong, fall back to in-process list
-      gfxCriticalNote << "Failed to initialize shared font list, "
-                         "falling back to in-process list.";
-      delete mSharedFontList.exchange(nullptr);
-    }
-    if (oldSharedList && XRE_IsParentProcess()) {
-      // notify all children of the change
-      if (NS_IsMainThread()) {
-        dom::ContentParent::NotifyUpdatedFonts(true);
-      } else {
-        NS_DispatchToMainThread(NS_NewRunnableFunction(
-            "NotifyUpdatedFonts callback",
-            [] { dom::ContentParent::NotifyUpdatedFonts(true); }));
-      }
+      NS_DispatchToMainThread(NS_NewRunnableFunction(
+          "NotifyUpdatedFonts callback",
+          [] { dom::ContentParent::NotifyUpdatedFonts(true); }));
     }
   }
 
@@ -1044,7 +1050,7 @@ gfxFontEntry* gfxPlatformFontList::LookupInFaceNameLists(
     // names not completely initialized, so keep track of lookup misses
     if (!mFaceNameListsInitialized) {
       if (!mFaceNamesMissed) {
-        mFaceNamesMissed = MakeUnique<nsTHashSet<nsCString>>(2);
+        mFaceNamesMissed = std::make_unique<nsTHashSet<nsCString>>(2);
       }
       mFaceNamesMissed->Insert(aFaceName);
     }
@@ -1572,19 +1578,7 @@ void gfxPlatformFontList::StartCmapLoadingFromFamily(uint32_t aStartIndex) {
   }
 }
 
-class LoadCmapsRunnable final : public IdleRunnable,
-                                public nsIObserver,
-                                public nsSupportsWeakReference {
-  NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIOBSERVER
-
- private:
-  virtual ~LoadCmapsRunnable() {
-    if (nsCOMPtr<nsIObserverService> obs = services::GetObserverService()) {
-      obs->RemoveObserver(this, NS_XPCOM_WILL_SHUTDOWN_OBSERVER_ID);
-    }
-  }
-
+class LoadCmapsRunnable final : public IdleRunnable {
  public:
   LoadCmapsRunnable(uint32_t aGeneration, uint32_t aFamilyIndex)
       : IdleRunnable("gfxPlatformFontList::LoadCmapsRunnable"),
@@ -1608,10 +1602,8 @@ class LoadCmapsRunnable final : public IdleRunnable,
     }
   }
 
-  void Cancel() { mIsCanceled = true; }
-
   NS_IMETHOD Run() override {
-    if (mIsCanceled) {
+    if (AppShutdown::IsInOrBeyond(ShutdownPhase::AppShutdownConfirmed)) {
       return NS_OK;
     }
     auto* pfl = gfxPlatformFontList::PlatformFontList();
@@ -1659,30 +1651,16 @@ class LoadCmapsRunnable final : public IdleRunnable,
   }
 
  private:
+  ~LoadCmapsRunnable() override = default;
+
   uint32_t mGeneration;
   uint32_t mStartIndex;
   uint32_t mIndex;
   TimeStamp mDeadline;
-  bool mIsCanceled = false;
 };
 
-NS_IMPL_ISUPPORTS_INHERITED(LoadCmapsRunnable, IdleRunnable, nsIObserver,
-                            nsISupportsWeakReference);
-
-NS_IMETHODIMP
-LoadCmapsRunnable::Observe(nsISupports* aSubject, const char* aTopic,
-                           const char16_t* aData) {
-  MOZ_ASSERT(!nsCRT::strcmp(aTopic, NS_XPCOM_WILL_SHUTDOWN_OBSERVER_ID),
-             "unexpected topic");
-  Cancel();
-  return NS_OK;
-}
-
 void gfxPlatformFontList::CancelLoadCmapsTask() {
-  if (mLoadCmapsRunnable) {
-    mLoadCmapsRunnable->Cancel();
-    mLoadCmapsRunnable = nullptr;
-  }
+  mLoadCmapsRunnable = nullptr;
 }
 
 void gfxPlatformFontList::StartCmapLoading(uint32_t aGeneration,
@@ -1701,10 +1679,6 @@ void gfxPlatformFontList::StartCmapLoading(uint32_t aGeneration,
     return;
   }
   mLoadCmapsRunnable = new LoadCmapsRunnable(aGeneration, aStartIndex);
-  if (nsCOMPtr<nsIObserverService> obs = services::GetObserverService()) {
-    obs->AddObserver(mLoadCmapsRunnable, NS_XPCOM_WILL_SHUTDOWN_OBSERVER_ID,
-                     /* ownsWeak = */ true);
-  }
   NS_DispatchToMainThreadQueue(do_AddRef(mLoadCmapsRunnable),
                                EventQueuePriority::Idle);
 }
@@ -1925,7 +1899,7 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
 
 void gfxPlatformFontList::AddToMissedNames(const nsCString& aKey) {
   if (!mOtherNamesMissed) {
-    mOtherNamesMissed = MakeUnique<nsTHashSet<nsCString>>(2);
+    mOtherNamesMissed = std::make_unique<nsTHashSet<nsCString>>(2);
   }
   mOtherNamesMissed->Insert(aKey);
 }
@@ -2398,10 +2372,9 @@ void gfxPlatformFontList::AddGenericFonts(
   AutoLock lock(mLock);
 
   // TODO(eri): For now the math generic language uses the legacy
-  // "serif.x-math" configuration font list to avoid excesive
+  // "serif.x-math" configuration font list to avoid excessive
   // repetition until a better font preference system can be found.
-  if (StaticPrefs::mathml_font_family_math_enabled() &&
-      aGenericType == StyleGenericFontFamily::Math) {
+  if (aGenericType == StyleGenericFontFamily::Math) {
     aGenericType = StyleGenericFontFamily::Serif;
     aLanguage = nsGkAtoms::x_math;
   }
@@ -2984,7 +2957,7 @@ void gfxPlatformFontList::ClearLangGroupPrefFontsLocked() {
   mEmojiPrefFont = nullptr;
 
   // Create a new FontPrefs and replace the existing one.
-  mFontPrefs = MakeUnique<FontPrefs>();
+  mFontPrefs = std::make_unique<FontPrefs>();
 }
 
 // Support for memory reporting

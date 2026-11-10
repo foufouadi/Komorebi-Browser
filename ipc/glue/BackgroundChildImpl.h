@@ -133,12 +133,6 @@ class BackgroundChildImpl : public PBackgroundChild {
   virtual already_AddRefed<dom::cache::PCacheStreamControlChild>
   AllocPCacheStreamControlChild() override;
 
-  virtual PMessagePortChild* AllocPMessagePortChild(
-      const nsID& aUUID, const nsID& aDestinationUUID,
-      const uint32_t& aSequenceID) override;
-
-  virtual bool DeallocPMessagePortChild(PMessagePortChild* aActor) override;
-
   already_AddRefed<PServiceWorkerChild> AllocPServiceWorkerChild(
       const IPCServiceWorkerDescriptor&);
 
@@ -151,7 +145,7 @@ class BackgroundChildImpl : public PBackgroundChild {
 };
 
 class BackgroundChildImpl::ThreadLocal final {
-  friend mozilla::DefaultDelete<ThreadLocal>;
+  friend std::default_delete<ThreadLocal>;
 
  public:
   mozilla::UniquePtr<mozilla::dom::indexedDB::ThreadLocal>

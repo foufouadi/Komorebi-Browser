@@ -41,8 +41,16 @@ gfx::IntSize RenderAndroidImageReaderImageTextureHost::GetSize() const {
   return mSize;
 }
 
+void RenderAndroidImageReaderImageTextureHost::SetReadFenceFd(
+    UniqueFileHandle&& aFenceFd) {
+  if (!mAndroidImageConsumer) {
+    return;
+  }
+  mAndroidImageConsumer->SetReadFenceFd(std::move(aFenceFd));
+}
+
 bool RenderAndroidImageReaderImageTextureHost::EnsureLockable() {
-  MOZ_ASSERT(mGL);
+  MOZ_RELEASE_ASSERT(mGL);
 
   if (!mAndroidImageConsumer) {
     auto* imageReaderMap = layers::GpuProcessAndroidImageReaderMap::Get();
@@ -62,11 +70,39 @@ bool RenderAndroidImageReaderImageTextureHost::EnsureLockable() {
   mAndroidImageConsumer->UpdateTexImage(mFrameId);
 
   if (!mAndroidImageConsumer->HasImage()) {
-    // XXX
     return false;
   }
 
-  MOZ_RELEASE_ASSERT(mAndroidImageConsumer->GetSize() == mSize);
+  auto writeFenceFd = mAndroidImageConsumer->CloneWriteFenceFd();
+  if (writeFenceFd) {
+    const auto& gle = gl::GLContextEGL::Cast(mGL);
+    const auto& egl = gle->mEgl;
+
+    // eglCreateSyncKHR takes ownership of the fd even on failure.
+    // Release it here to avoid closing the fd again.
+    const EGLint attribs[] = {LOCAL_EGL_SYNC_NATIVE_FENCE_FD_ANDROID,
+                              writeFenceFd.release(), LOCAL_EGL_NONE};
+
+    EGLSync sync =
+        egl->fCreateSyncKHR(LOCAL_EGL_SYNC_NATIVE_FENCE_ANDROID, attribs);
+    if (sync) {
+      if (egl->IsExtensionSupported(gl::EGLExtension::KHR_wait_sync)) {
+        egl->fWaitSync(sync, 0);
+      } else {
+        egl->fClientWaitSync(sync, 0, LOCAL_EGL_FOREVER);
+      }
+      egl->fDestroySync(sync);
+    } else {
+      gfxCriticalNote << "Failed to create EGLSync from acquire fence fd";
+    }
+  }
+
+  if (mAndroidImageConsumer->GetSize() != mSize) {
+    gfxCriticalNoteOnce << "AndroidImageReader size mismatch: actual="
+                        << mAndroidImageConsumer->GetSize()
+                        << ", expected=" << mSize;
+  }
+  MOZ_ASSERT(mAndroidImageConsumer->GetSize() == mSize);
   MOZ_RELEASE_ASSERT(mAndroidImageConsumer->GetFormat() == mFormat);
 
   const auto handle = mAndroidImageConsumer->GetGlTextureHandle();
@@ -110,7 +146,21 @@ size_t RenderAndroidImageReaderImageTextureHost::Bytes() {
 }
 
 gfx::SurfaceFormat RenderAndroidImageReaderImageTextureHost::GetFormat() const {
-  return mFormat;
+  MOZ_ASSERT(mFormat == gfx::SurfaceFormat::R8G8B8A8 ||
+             mFormat == gfx::SurfaceFormat::R8G8B8X8);
+
+  if (mFormat == gfx::SurfaceFormat::R8G8B8A8) {
+    return gfx::SurfaceFormat::B8G8R8A8;
+  }
+
+  if (mFormat == gfx::SurfaceFormat::R8G8B8X8) {
+    return gfx::SurfaceFormat::B8G8R8X8;
+  }
+
+  gfxCriticalNoteOnce
+      << "Unexpected color format of RenderAndroidImageReaderImageTextureHost";
+
+  return gfx::SurfaceFormat::UNKNOWN;
 }
 
 already_AddRefed<gfx::DataSourceSurface>

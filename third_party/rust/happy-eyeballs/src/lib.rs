@@ -41,7 +41,7 @@
 //!
 //! // Later pass results as input back to the state machine, e.g. a DNS
 //! // response arrives:
-//! # let dns_result = DnsResult::Aaaa(Ok(vec![Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)]));
+//! # let dns_result = DnsResult::Aaaa(Ok(vec![Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1).into()]));
 //! he.process_input(Input::DnsResult { id: dns_id.unwrap(), result: dns_result, stale: false }, Instant::now());
 //! ```
 //!
@@ -49,12 +49,12 @@
 
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fmt::Debug;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
-use log::trace;
 use thiserror::Error;
+use tracing::{debug, trace};
 use url::Host as UrlHost;
 
 mod id;
@@ -78,7 +78,7 @@ pub const CONNECTION_ATTEMPT_DELAY: Duration = Duration::from_millis(250);
 pub const CONNECTION_ATTEMPT_DELAY_MULTIPLIER: NonZeroU32 = NonZeroU32::MIN;
 
 /// Input events to the Happy Eyeballs state machine
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Input {
     /// DNS query result received.
     ///
@@ -109,7 +109,8 @@ pub enum Input {
 pub struct EchConfig(Vec<u8>);
 
 impl EchConfig {
-    pub fn new(bytes: Vec<u8>) -> Self {
+    #[must_use]
+    pub const fn new(bytes: Vec<u8>) -> Self {
         Self(bytes)
     }
 }
@@ -121,7 +122,7 @@ impl AsRef<[u8]> for EchConfig {
 }
 
 /// Result of a connection attempt.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectionResult {
     /// Connection succeeded.
     Success,
@@ -141,10 +142,66 @@ pub enum ConnectionResult {
     EchRetry(EchConfig),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+/// An IPv6 address with its scope id (zone index, [RFC 4007]).
+///
+/// A link-local address is only usable together with its scope id, which
+/// identifies the interface. `None` for an address without a zone.
+///
+/// [RFC 4007]: https://datatracker.ietf.org/doc/html/rfc4007
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ScopedIpv6Addr {
+    pub ip: Ipv6Addr,
+    pub scope_id: Option<NonZeroU32>,
+}
+
+impl ScopedIpv6Addr {
+    #[must_use]
+    pub const fn new(ip: Ipv6Addr, scope_id: Option<NonZeroU32>) -> Self {
+        Self { ip, scope_id }
+    }
+}
+
+impl From<Ipv6Addr> for ScopedIpv6Addr {
+    fn from(ip: Ipv6Addr) -> Self {
+        Self::new(ip, None)
+    }
+}
+
+/// A resolved address, before the endpoint's port is known.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResolvedAddr {
+    V4(Ipv4Addr),
+    V6(ScopedIpv6Addr),
+}
+
+impl ResolvedAddr {
+    const fn with_port(self, port: u16) -> SocketAddr {
+        match self {
+            Self::V4(ip) => SocketAddr::new(IpAddr::V4(ip), port),
+            Self::V6(addr) => {
+                let scope_id = match addr.scope_id {
+                    Some(id) => id.get(),
+                    None => 0,
+                };
+                SocketAddr::V6(SocketAddrV6::new(addr.ip, port, 0, scope_id))
+            }
+        }
+    }
+}
+
+impl From<IpAddr> for ResolvedAddr {
+    fn from(ip: IpAddr) -> Self {
+        match ip {
+            IpAddr::V4(ip) => Self::V4(ip),
+            IpAddr::V6(ip) => Self::V6(ip.into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DnsResult {
     Https(Result<Vec<ServiceInfo>, ()>),
-    Aaaa(Result<Vec<Ipv6Addr>, ()>),
+    Aaaa(Result<Vec<ScopedIpv6Addr>, ()>),
     A(Result<Vec<Ipv4Addr>, ()>),
 }
 
@@ -153,28 +210,28 @@ impl DnsResult {
     /// non-empty AAAA/A records or HTTPS records with IP hints.
     fn has_addrs(&self) -> bool {
         match self {
-            DnsResult::Aaaa(Ok(v)) => !v.is_empty(),
-            DnsResult::A(Ok(v)) => !v.is_empty(),
-            DnsResult::Https(Ok(infos)) => infos
+            Self::Aaaa(Ok(v)) => !v.is_empty(),
+            Self::A(Ok(v)) => !v.is_empty(),
+            Self::Https(Ok(infos)) => infos
                 .iter()
                 .any(|i| !i.ipv4_hints.is_empty() || !i.ipv6_hints.is_empty()),
             _ => false,
         }
     }
 
-    fn ip_addrs(&self) -> impl Iterator<Item = IpAddr> + '_ {
+    fn addrs(&self) -> impl Iterator<Item = ResolvedAddr> {
         let v6 = match self {
-            DnsResult::Aaaa(Ok(addrs)) => addrs.as_slice(),
+            Self::Aaaa(Ok(addrs)) => addrs.as_slice(),
             _ => &[],
         };
         let v4 = match self {
-            DnsResult::A(Ok(addrs)) => addrs.as_slice(),
+            Self::A(Ok(addrs)) => addrs.as_slice(),
             _ => &[],
         };
         v6.iter()
             .copied()
-            .map(IpAddr::V6)
-            .chain(v4.iter().copied().map(IpAddr::V4))
+            .map(ResolvedAddr::V6)
+            .chain(v4.iter().copied().map(ResolvedAddr::V4))
     }
 }
 
@@ -183,7 +240,7 @@ pub struct TargetName(String);
 
 impl From<&str> for TargetName {
     fn from(s: &str) -> Self {
-        TargetName(s.to_string())
+        Self(s.to_string())
     }
 }
 
@@ -205,8 +262,32 @@ impl Debug for TargetName {
     }
 }
 
+/// The port of the "https" scheme, whose HTTPS records carry no prefix labels.
+const HTTPS_DEFAULT_PORT: u16 = 443;
+
+/// The name under which the HTTPS record for `host` at `port` is published.
+///
+/// An HTTPS record is scoped to one port: the record for
+/// `https://example.com:8443` lives at `_8443._https.example.com`, so it cannot
+/// be confused with the record of whatever else the host serves on another
+/// port. Only port 443 uses the bare hostname.
+///
+/// > The HTTPS RR uses Port Prefix Naming (Section 2.3), with one modification:
+/// > if the scheme is "https" and the port is 443, then the client's original
+/// > QNAME is equal to the service name (i.e., the origin's hostname), without
+/// > any prefix labels.
+///
+/// <https://www.rfc-editor.org/rfc/rfc9460#section-9.1>
+fn https_query_name(host: &str, port: u16) -> TargetName {
+    if port == HTTPS_DEFAULT_PORT {
+        host.into()
+    } else {
+        TargetName(format!("_{port}._https.{host}"))
+    }
+}
+
 /// Output events from the Happy Eyeballs state machine
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
 pub enum Output {
     /// Send a DNS query.
@@ -252,7 +333,7 @@ pub enum Output {
 }
 
 /// Reason for a connection failure.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FailureReason {
     /// All DNS resolutions failed.
     DnsResolution,
@@ -261,9 +342,10 @@ pub enum FailureReason {
 }
 
 impl Output {
+    #[must_use]
     pub fn attempt(self) -> Option<Endpoint> {
         match self {
-            Output::AttemptConnection { endpoint, .. } => Some(endpoint),
+            Self::AttemptConnection { endpoint, .. } => Some(endpoint),
             _ => None,
         }
     }
@@ -278,7 +360,7 @@ pub enum DnsRecordType {
 }
 
 /// Service information from HTTPS records
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ServiceInfo {
     pub priority: u16,
     pub target_name: TargetName,
@@ -289,6 +371,7 @@ pub struct ServiceInfo {
     pub port: Option<u16>,
 }
 
+#[expect(clippy::missing_fields_in_debug, reason = "empty fields are omitted")]
 impl Debug for ServiceInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut debug_struct = f.debug_struct("ServiceInfo");
@@ -325,13 +408,60 @@ impl ServiceInfo {
         // for a negative answer.
         ipv4_addrs: Option<Result<&[Ipv4Addr], ()>>,
         // As `ipv4_addrs`, but for the AAAA query.
-        ipv6_addrs: Option<Result<&[Ipv6Addr], ()>>,
-        // The HTTP versions the client allows; used to filter this record's own
-        // ALPNs.
-        enabled_http_versions: &HttpVersions,
-        ech_enabled: bool,
+        ipv6_addrs: Option<Result<&[ScopedIpv6Addr], ()>>,
+        // Filters this record's ALPNs, ECH and IP hints.
+        network_config: &NetworkConfig,
+        // When `Some(origin_host)`, build by-name endpoints
+        // ([`EndpointTarget::Name`]) to this record's target name instead of
+        // address endpoints, ignoring the IP hints. Used by
+        // [`ResolutionMode::NameWithHttpsRr`]. The origin host is the fallback
+        // for a record whose target name is the root (".").
+        by_name: Option<&str>,
     ) -> Vec<Endpoint> {
         let port = self.port.unwrap_or(port);
+        let ech_enabled = network_config.ech;
+
+        // Each ServiceMode record's ALPN SvcParam lists the protocols available
+        // at its own TargetName, so use only this record's ALPNs, never another
+        // record's. Assembling the "SVCB ALPN set" -- including adding the
+        // scheme default ("http/1.1" for "https") when no "alpn" is present --
+        // is the caller's responsibility when interpreting the record (RFC 9460
+        // Section 7.1.1). A record that still carries no ALPN here is not usable
+        // (a "no-default-alpn" record without "alpn" is not even self-consistent,
+        // Section 2.4.3) and yields no endpoints.
+        //
+        // <https://www.rfc-editor.org/rfc/rfc9460#section-7.1.1>
+        let mut versions = self.alpn_http_versions.clone();
+        network_config.http_versions.filter_disabled(&mut versions);
+        let http_versions = ConnectionAttemptHttpVersions::from_http_versions(&versions);
+
+        // By-name mode: connect to the record's target name over each advertised
+        // ALPN, carrying its ECH. Everything below is address racing, which does
+        // not apply: the IP hints are ignored.
+        if let Some(origin_host) = by_name {
+            let ech_config = ech_enabled.then(|| self.ech_config.clone()).flatten();
+            // The target name is a DNS name, but this is a connect host (SNI, or
+            // a proxy's CONNECT target), so drop the root label's trailing dot.
+            // A ServiceMode target of "." denotes the owner name, which is the
+            // origin.
+            let target = self.target_name.as_str().trim_end_matches('.');
+            let host = if target.is_empty() {
+                origin_host
+            } else {
+                target
+            };
+            return http_versions
+                .iter()
+                .map(|&http_version| Endpoint {
+                    target: EndpointTarget::Name {
+                        host: host.to_string(),
+                        port,
+                    },
+                    http_version,
+                    ech_config: ech_config.clone(),
+                })
+                .collect();
+        }
 
         // > ServiceMode records can contain address hints via ipv6hint and
         // > ipv4hint parameters. When these are received, they SHOULD be
@@ -362,54 +492,37 @@ impl ServiceInfo {
         let hint_v6: &[Ipv6Addr] = self.ipv6_hints.as_slice();
         let hint_v4: &[Ipv4Addr] = self.ipv4_hints.as_slice();
 
-        // Each ServiceMode record's ALPN SvcParam lists the protocols available
-        // at its own TargetName, so use only this record's ALPNs, never another
-        // record's. Assembling the "SVCB ALPN set" -- including adding the
-        // scheme default ("http/1.1" for "https") when no "alpn" is present --
-        // is the caller's responsibility when interpreting the record (RFC 9460
-        // Section 7.1.1). A record that still carries no ALPN here is not usable
-        // (a "no-default-alpn" record without "alpn" is not even self-consistent,
-        // Section 2.4.3) and yields no endpoints.
-        //
-        // <https://www.rfc-editor.org/rfc/rfc9460#section-7.1.1>
-        let mut versions = self.alpn_http_versions.clone();
-        enabled_http_versions.filter_disabled(&mut versions);
-        let http_versions = ConnectionAttemptHttpVersions::from_http_versions(&versions);
-
         let hints = hint_v6
             .iter()
-            .cloned()
+            .copied()
             .map(IpAddr::V6)
-            .chain(hint_v4.iter().cloned().map(IpAddr::V4))
+            .chain(hint_v4.iter().copied().map(IpAddr::V4))
+            // Hints come from the DNS answer whatever the configured address
+            // family. On a single-stack network drop those of the disabled
+            // family, which is never queried either.
+            .filter(|&ip| network_config.ip.allows(ip))
             .flat_map(|ip| {
                 // TODO: way around allocation?
                 let ech_config = ech_enabled.then(|| self.ech_config.clone()).flatten();
                 http_versions.iter().map(move |&http_version| Endpoint {
-                    address: SocketAddr::new(ip, port),
+                    target: EndpointTarget::Address(SocketAddr::new(ip, port)),
                     http_version,
                     ech_config: ech_config.clone(),
                 })
             });
 
-        let addrs = ipv6_addrs
-            .and_then(Result::ok)
-            .unwrap_or(&[])
+        let v6 = ipv6_addrs.and_then(Result::ok).unwrap_or(&[]);
+        let v4 = ipv4_addrs.and_then(Result::ok).unwrap_or(&[]);
+        let addrs = v6
             .iter()
-            .cloned()
-            .map(IpAddr::V6)
-            .chain(
-                ipv4_addrs
-                    .and_then(Result::ok)
-                    .unwrap_or(&[])
-                    .iter()
-                    .cloned()
-                    .map(IpAddr::V4),
-            )
-            .flat_map(|ip| {
+            .copied()
+            .map(ResolvedAddr::V6)
+            .chain(v4.iter().copied().map(ResolvedAddr::V4))
+            .flat_map(|addr| {
                 // TODO: way around allocation?
                 let ech_config = ech_enabled.then(|| self.ech_config.clone()).flatten();
                 http_versions.iter().map(move |v| Endpoint {
-                    address: SocketAddr::new(ip, port),
+                    target: EndpointTarget::Address(addr.with_port(port)),
                     http_version: *v,
                     ech_config: ech_config.clone(),
                 })
@@ -443,28 +556,26 @@ pub enum ConnectionAttemptHttpVersions {
 impl From<HttpVersion> for ConnectionAttemptHttpVersions {
     fn from(v: HttpVersion) -> Self {
         match v {
-            HttpVersion::H3 => ConnectionAttemptHttpVersions::H3,
-            HttpVersion::H2 => ConnectionAttemptHttpVersions::H2,
-            HttpVersion::H1 => ConnectionAttemptHttpVersions::H1,
+            HttpVersion::H3 => Self::H3,
+            HttpVersion::H2 => Self::H2,
+            HttpVersion::H1 => Self::H1,
         }
     }
 }
 
 impl ConnectionAttemptHttpVersions {
     /// [`HttpVersion::H2`] and [`HttpVersion::H1`] into [`ConnectionAttemptHttpVersions::H2OrH1`].
-    fn from_http_versions(
-        http_versions: &HashSet<HttpVersion>,
-    ) -> HashSet<ConnectionAttemptHttpVersions> {
+    fn from_http_versions(http_versions: &HashSet<HttpVersion>) -> HashSet<Self> {
         let mut combinations = HashSet::new();
         if http_versions.contains(&HttpVersion::H3) {
-            combinations.insert(ConnectionAttemptHttpVersions::H3);
+            combinations.insert(Self::H3);
         }
         if http_versions.contains(&HttpVersion::H2) && http_versions.contains(&HttpVersion::H1) {
-            combinations.insert(ConnectionAttemptHttpVersions::H2OrH1);
+            combinations.insert(Self::H2OrH1);
         } else if http_versions.contains(&HttpVersion::H2) {
-            combinations.insert(ConnectionAttemptHttpVersions::H2);
+            combinations.insert(Self::H2);
         } else if http_versions.contains(&HttpVersion::H1) {
-            combinations.insert(ConnectionAttemptHttpVersions::H1);
+            combinations.insert(Self::H1);
         }
         combinations
     }
@@ -505,20 +616,20 @@ enum Refresh {
 }
 
 impl DnsQuery {
-    fn response(&self) -> Option<&DnsResult> {
+    const fn response(&self) -> Option<&DnsResult> {
         match &self.state {
             DnsQueryState::InProgress => None,
             DnsQueryState::Completed { response, .. } => Some(response),
         }
     }
 
-    fn is_completed(&self) -> bool {
+    const fn is_completed(&self) -> bool {
         matches!(self.state, DnsQueryState::Completed { .. })
     }
 }
 
 /// Configuration for supported HTTP versions.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpVersions {
     /// Whether HTTP/1.1 is enabled.
     pub h1: bool,
@@ -555,7 +666,7 @@ impl Default for HttpVersions {
 }
 
 /// IP connectivity and preference mode.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IpPreference {
     /// Dual-stack available, prefer IPv6 over IPv4.
     DualStackPreferV6,
@@ -571,19 +682,26 @@ impl IpPreference {
     fn address_record_types(&self) -> impl Iterator<Item = DnsRecordType> {
         let aaaa = matches!(
             self,
-            IpPreference::DualStackPreferV6
-                | IpPreference::DualStackPreferV4
-                | IpPreference::Ipv6Only
+            Self::DualStackPreferV6 | Self::DualStackPreferV4 | Self::Ipv6Only
         )
         .then_some(DnsRecordType::Aaaa);
         let a = matches!(
             self,
-            IpPreference::DualStackPreferV6
-                | IpPreference::DualStackPreferV4
-                | IpPreference::Ipv4Only
+            Self::DualStackPreferV6 | Self::DualStackPreferV4 | Self::Ipv4Only
         )
         .then_some(DnsRecordType::A);
         aaaa.into_iter().chain(a)
+    }
+
+    /// Whether an address of `ip`'s family may be attempted. On a single-stack
+    /// network that is only the enabled family, matching the record types
+    /// queried per [`Self::address_record_types`].
+    const fn allows(&self, ip: IpAddr) -> bool {
+        match self {
+            Self::DualStackPreferV6 | Self::DualStackPreferV4 => true,
+            Self::Ipv6Only => ip.is_ipv6(),
+            Self::Ipv4Only => ip.is_ipv4(),
+        }
     }
 }
 
@@ -653,7 +771,7 @@ pub struct NetworkConfig {
     ///
     /// When `false`, ECH configs from HTTPS records are ignored: endpoints
     /// always get `ech_config: None` and the ECH-based filtering (skip
-    /// non-ECH ServiceInfos, skip origin fallback) does not apply.
+    /// non-ECH `ServiceInfos`, skip origin fallback) does not apply.
     ///
     /// Defaults to `true`.
     pub ech: bool,
@@ -676,11 +794,65 @@ pub struct NetworkConfig {
     /// Defaults to `true`, matching
     /// <https://www.ietf.org/archive/id/draft-ietf-happy-happyeyeballs-v3-02.html#section-4.2>.
     pub wait_for_preferred_address: bool,
+    /// How the origin host is resolved before connecting.
+    ///
+    /// Defaults to [`ResolutionMode::Ip`], the normal Happy Eyeballs path.
+    pub resolution: ResolutionMode,
+}
+
+/// How the origin host is turned into connection attempts.
+///
+/// Happy Eyeballs normally resolves the target host and races the resulting
+/// IPs. That is wrong when the host should not (or cannot) be resolved
+/// client-side, e.g. when a proxy resolves the hostname for us, or when
+/// establishing an inner proxy connection. In those cases the client has no IPs
+/// to race and should connect by hostname instead. The two by-name variants
+/// cover that, differing only in whether the HTTPS (SVCB) record is fetched for
+/// its ALPN.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ResolutionMode {
+    /// Resolve the origin (A, AAAA, and HTTPS records) and race the resulting
+    /// IPs. The default Happy Eyeballs behavior.
+    #[default]
+    Ip,
+    /// Connect to the origin by name with no client-side DNS whatsoever: neither
+    /// the HTTPS record nor A/AAAA are queried.
+    ///
+    /// The state machine emits no [`Output::SendDnsQuery`] and produces by-name
+    /// connection attempts ([`EndpointTarget::Name`]) for the origin host and
+    /// port over the enabled H2/H1 versions, attempting immediately. Alt-svc
+    /// entries are attempted by name too, over their advertised protocol.
+    ///
+    /// Use this when even a single leaked DNS query is unacceptable, e.g. when
+    /// the resolver is the operating system's and every query must stay inside
+    /// the proxy connection.
+    Name,
+    /// Connect to the origin by name, but first fetch the origin's HTTPS (SVCB)
+    /// record to learn its ALPN.
+    ///
+    /// Only the HTTPS query is sent; no A or AAAA query is emitted and no
+    /// address-family racing happens. The state machine waits for the HTTPS
+    /// answer, then produces one by-name connection attempt
+    /// ([`EndpointTarget::Name`]) per advertised ALPN version (so a record
+    /// advertising h3 yields a by-name h3 attempt), using the record's target
+    /// name when it aliases (otherwise the origin host) and its port, and
+    /// carrying its ECH config. The record's `ipv4hint`/`ipv6hint` are ignored:
+    /// they are never used to race IPs. If the HTTPS query fails, is empty, or
+    /// is negative, the machine falls back to the by-name origin over the
+    /// enabled H2/H1 versions.
+    ///
+    /// Alt-svc entries are attempted by name too, over their advertised
+    /// protocol, so an alt-svc that advertises h3 is raced over h3.
+    ///
+    /// Use this when the resolver is trusted not to leak the query (e.g. `DoH`),
+    /// so the ALPN (and thus HTTP/3) can be honored while still connecting by
+    /// name.
+    NameWithHttpsRr,
 }
 
 impl Default for NetworkConfig {
     fn default() -> Self {
-        NetworkConfig {
+        Self {
             http_versions: HttpVersions::default(),
             ip: IpPreference::DualStackPreferV6,
             alt_svc: Vec::new(),
@@ -689,26 +861,27 @@ impl Default for NetworkConfig {
             connection_attempt_delay_multiplier: CONNECTION_ATTEMPT_DELAY_MULTIPLIER,
             ech: true,
             wait_for_preferred_address: true,
+            resolution: ResolutionMode::Ip,
         }
     }
 }
 
 impl NetworkConfig {
-    fn prefer_v6(&self) -> bool {
+    const fn prefer_v6(&self) -> bool {
         match self.ip {
             IpPreference::DualStackPreferV6 | IpPreference::Ipv6Only => true,
             IpPreference::DualStackPreferV4 | IpPreference::Ipv4Only => false,
         }
     }
 
-    fn preferred_dns_record_type(&self) -> DnsRecordType {
+    const fn preferred_dns_record_type(&self) -> DnsRecordType {
         match self.ip {
             IpPreference::DualStackPreferV6 | IpPreference::Ipv6Only => DnsRecordType::Aaaa,
             IpPreference::DualStackPreferV4 | IpPreference::Ipv4Only => DnsRecordType::A,
         }
     }
 
-    fn is_http_version_disabled(&self, http_version: HttpVersion) -> bool {
+    const fn is_http_version_disabled(&self, http_version: HttpVersion) -> bool {
         match http_version {
             HttpVersion::H3 => !self.http_versions.h3,
             HttpVersion::H2 => !self.http_versions.h2,
@@ -717,7 +890,7 @@ impl NetworkConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectionState {
     InProgress,
     Succeeded,
@@ -731,8 +904,8 @@ pub struct ConnectionAttempt {
     pub endpoint: Endpoint,
     pub started: Instant,
     pub state: ConnectionState,
-    /// Whether this attempt was initiated by an ECH retry_config.
-    /// Per RFC 9849 Section 6.1.6, a second EchRetry on such an attempt
+    /// Whether this attempt was initiated by an ECH `retry_config`.
+    /// Per RFC 9849 Section 6.1.6, a second `EchRetry` on such an attempt
     /// must be treated as a failure.
     pub is_ech_retry: bool,
 }
@@ -743,12 +916,44 @@ impl ConnectionAttempt {
     }
 }
 
-/// All information (IP, HTTP version, ...) needed to attempt a connection to a specific endpoint.
+/// What an [`Endpoint`] connects to: either a resolved socket address (the
+/// normal Happy Eyeballs path) or a bare hostname and port to connect to
+/// without client-side resolution.
+///
+/// The by-name variant exists for cases where the host's address should not (or
+/// cannot) be resolved client-side, e.g. when a proxy resolves the hostname for
+/// us, or when establishing an inner proxy connection. See
+/// [`NetworkConfig::resolution`] and [`ResolutionMode`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum EndpointTarget {
+    /// A resolved socket address to connect to directly.
+    Address(SocketAddr),
+    /// A hostname and port to connect to by name, leaving *address* resolution
+    /// to a downstream party (e.g. a proxy), so there is no address family to
+    /// race. This does not imply that no DNS happens at all:
+    /// [`ResolutionMode::NameWithHttpsRr`] still queries the origin's HTTPS
+    /// record for its ALPN.
+    Name { host: String, port: u16 },
+}
+
+/// All information (target, HTTP version, ...) needed to attempt a connection to a specific endpoint.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Endpoint {
-    pub address: SocketAddr,
+    pub target: EndpointTarget,
     pub http_version: ConnectionAttemptHttpVersions,
     pub ech_config: Option<EchConfig>,
+}
+
+impl Endpoint {
+    /// The resolved socket address for this endpoint, or [`None`] for a by-name
+    /// target (see [`EndpointTarget::Name`]).
+    #[must_use]
+    pub const fn address(&self) -> Option<SocketAddr> {
+        match self.target {
+            EndpointTarget::Address(address) => Some(address),
+            EndpointTarget::Name { .. } => None,
+        }
+    }
 }
 
 /// Interleave a group's endpoints across protocol variants and address
@@ -762,12 +967,12 @@ pub struct Endpoint {
 ///
 /// 1. v6a / H3 (most preferred)
 /// 2. v4 / H3 (next address family)
-/// 3. v6a / H2OrH1 (next protocol)
-/// 4. v4 / H2OrH1
+/// 3. v6a / `H2OrH1` (next protocol)
+/// 4. v4 / `H2OrH1`
 /// 5. v6b / H3 (second round)
-/// 6. v6b / H2OrH1
+/// 6. v6b / `H2OrH1`
 /// 7. v6c / H3
-/// 8. v6c / H2OrH1
+/// 8. v6c / `H2OrH1`
 ///
 /// so IPv4 (the other family) and HTTP/2 (the other protocol) are both reached
 /// within the first few attempts, rather than after every IPv6 HTTP/3 attempt.
@@ -791,8 +996,6 @@ pub struct Endpoint {
 ///
 /// <https://www.ietf.org/archive/id/draft-ietf-happy-happyeyeballs-v3-03.html#section-5.1.1>
 fn interleave_endpoints(endpoints: Vec<Endpoint>, prefer_v6: bool) -> Vec<Endpoint> {
-    let total = endpoints.len();
-
     // Where an address family sits relative to the preference; `Preferred` sorts
     // before `Other`, which orders the preferred family first.
     #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -800,6 +1003,8 @@ fn interleave_endpoints(endpoints: Vec<Endpoint>, prefer_v6: bool) -> Vec<Endpoi
         Preferred,
         Other,
     }
+
+    let total = endpoints.len();
 
     // Group endpoints into a queue per (protocol, address family), keeping DNS
     // order. The `BTreeMap` orders the queues most preferred first: by protocol
@@ -809,10 +1014,17 @@ fn interleave_endpoints(endpoints: Vec<Endpoint>, prefer_v6: bool) -> Vec<Endpoi
         VecDeque<Endpoint>,
     > = BTreeMap::new();
     for endpoint in endpoints {
-        let family = if endpoint.address.is_ipv6() == prefer_v6 {
-            FamilyPreference::Preferred
-        } else {
-            FamilyPreference::Other
+        let family = match &endpoint.target {
+            EndpointTarget::Address(address) => {
+                if address.is_ipv6() == prefer_v6 {
+                    FamilyPreference::Preferred
+                } else {
+                    FamilyPreference::Other
+                }
+            }
+            // A by-name target has no address family to alternate with, so it
+            // groups on its own as the preferred family and is dealt promptly.
+            EndpointTarget::Name { .. } => FamilyPreference::Preferred,
         };
         groups
             .entry((endpoint.http_version, family))
@@ -824,12 +1036,12 @@ fn interleave_endpoints(endpoints: Vec<Endpoint>, prefer_v6: bool) -> Vec<Endpoi
     // empty, until none are left.
     let mut ordered = Vec::with_capacity(total);
     while !groups.is_empty() {
-        for queue in groups.values_mut() {
+        groups.retain(|_, queue| {
             if let Some(endpoint) = queue.pop_front() {
                 ordered.push(endpoint);
             }
-        }
-        groups.retain(|_, queue| !queue.is_empty());
+            !queue.is_empty()
+        });
     }
     ordered
 }
@@ -843,9 +1055,9 @@ enum Host {
 impl From<UrlHost> for Host {
     fn from(host: UrlHost) -> Self {
         match host {
-            UrlHost::Ipv4(v4) => Host::Ip(IpAddr::V4(v4)),
-            UrlHost::Ipv6(v6) => Host::Ip(IpAddr::V6(v6)),
-            UrlHost::Domain(d) => Host::Domain(d),
+            UrlHost::Ipv4(v4) => Self::Ip(IpAddr::V4(v4)),
+            UrlHost::Ipv6(v6) => Self::Ip(IpAddr::V6(v6)),
+            UrlHost::Domain(d) => Self::Domain(d),
         }
     }
 }
@@ -853,8 +1065,8 @@ impl From<UrlHost> for Host {
 impl std::fmt::Display for Host {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Host::Ip(ip) => write!(f, "{ip}"),
-            Host::Domain(d) => write!(f, "{d}"),
+            Self::Ip(ip) => write!(f, "{ip}"),
+            Self::Domain(d) => write!(f, "{d}"),
         }
     }
 }
@@ -891,7 +1103,8 @@ enum ConstructorErrorInner {
     InvalidHost(#[from] url::ParseError),
 }
 
-impl std::fmt::Debug for HappyEyeballs {
+#[expect(clippy::missing_fields_in_debug, reason = "empty fields are omitted")]
+impl Debug for HappyEyeballs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut ds = f.debug_struct("HappyEyeballs");
 
@@ -917,11 +1130,19 @@ impl std::fmt::Debug for HappyEyeballs {
 
 impl HappyEyeballs {
     /// Create a new Happy Eyeballs state machine with default network config
+    ///
+    /// # Errors
+    ///
+    /// When `host` is not a valid host.
     pub fn new(host: &str, port: u16) -> Result<Self, ConstructorError> {
         Self::new_with_network_config(host, port, NetworkConfig::default())
     }
 
     /// Create a new Happy Eyeballs state machine with custom network configuration
+    ///
+    /// # Errors
+    ///
+    /// When `host` is not a valid host.
     pub fn new_with_network_config(
         host: &str,
         port: u16,
@@ -945,7 +1166,7 @@ impl HappyEyeballs {
             host,
             port,
         };
-        trace!("new_with_network_config: {:?}", s);
+        trace!("new_with_network_config: {s:?}");
         Ok(s)
     }
 
@@ -955,7 +1176,7 @@ impl HappyEyeballs {
     ///
     /// After calling this, call [`HappyEyeballs::process_output`] to get any pending outputs.
     pub fn process_input(&mut self, input: Input, now: Instant) {
-        trace!("target={} input={:?}", self.host, input);
+        trace!("target={} input={input:?}", self.host);
 
         match input {
             Input::DnsResult { id, result, stale } => {
@@ -977,7 +1198,7 @@ impl HappyEyeballs {
     #[must_use]
     pub fn process_output(&mut self, now: Instant) -> Option<Output> {
         let output = self.process_output_inner(now);
-        trace!("target={} process_output: {:?}", self.host, output);
+        trace!("target={} process_output: {output:?}", self.host);
         output
     }
 
@@ -992,21 +1213,41 @@ impl HappyEyeballs {
             return Some(o);
         }
 
-        // Send DNS queries.
-        if let Some(o) = self.send_dns_request() {
-            return Some(o);
-        }
+        // Send DNS queries. Which ones depends on the resolution mode.
+        match self.network_config.resolution {
+            // Resolve everything and race the addresses: the origin's HTTPS and
+            // A/AAAA records, plus any HTTPS target name and alt-svc host.
+            ResolutionMode::Ip => {
+                if let Some(o) = self.send_dns_request() {
+                    return Some(o);
+                }
 
-        if let Some(o) = self.send_dns_request_for_target_name() {
-            return Some(o);
-        }
+                if let Some(o) = self.send_dns_request_for_target_name() {
+                    return Some(o);
+                }
 
-        if let Some(o) = self.send_dns_request_for_alt_svc() {
-            return Some(o);
-        }
+                if let Some(o) = self.send_dns_request_for_alt_svc() {
+                    return Some(o);
+                }
 
-        if let Some(o) = self.send_dns_refresh() {
-            return Some(o);
+                if let Some(o) = self.send_dns_refresh() {
+                    return Some(o);
+                }
+            }
+            // Only the origin HTTPS record, for its ALPN (A/AAAA are gated off
+            // inside `send_dns_request`). The target name and alt-svc hosts are
+            // attempted by name, so neither is resolved.
+            ResolutionMode::NameWithHttpsRr => {
+                if let Some(o) = self.send_dns_request() {
+                    return Some(o);
+                }
+
+                if let Some(o) = self.send_dns_refresh() {
+                    return Some(o);
+                }
+            }
+            // No client-side DNS whatsoever.
+            ResolutionMode::Name => {}
         }
 
         if let Some(o) = self.delay(now) {
@@ -1065,11 +1306,9 @@ impl HappyEyeballs {
             .max()
             .and_then(|started| {
                 let elapsed = now.duration_since(*started);
-                if elapsed < connection_attempt_delay {
-                    Some(connection_attempt_delay - elapsed)
-                } else {
-                    None
-                }
+                connection_attempt_delay
+                    .checked_sub(elapsed)
+                    .filter(|d| !d.is_zero())
             })
         {
             return Some(Output::Timer {
@@ -1090,16 +1329,15 @@ impl HappyEyeballs {
             .iter()
             .filter_map(|q| match &q.state {
                 DnsQueryState::Completed { completed, .. } => Some(completed),
-                _ => None,
+                DnsQueryState::InProgress => None,
             })
             .min()
             .and_then(|completed| {
                 let elapsed = now.duration_since(*completed);
-                if elapsed < self.network_config.resolution_delay {
-                    Some(self.network_config.resolution_delay - elapsed)
-                } else {
-                    None
-                }
+                self.network_config
+                    .resolution_delay
+                    .checked_sub(elapsed)
+                    .filter(|d| !d.is_zero())
             })
             .map(|duration| Output::Timer { duration })
     }
@@ -1114,8 +1352,14 @@ impl HappyEyeballs {
         }
         .into();
 
-        let record_types = std::iter::once(DnsRecordType::Https)
-            .chain(self.network_config.ip.address_record_types());
+        // `ResolutionMode::NameWithHttpsRr` fetches only the HTTPS record for
+        // its ALPN; it must never emit an A or AAAA query.
+        let address_record_types = (self.network_config.resolution
+            != ResolutionMode::NameWithHttpsRr)
+            .then(|| self.network_config.ip.address_record_types())
+            .into_iter()
+            .flatten();
+        let record_types = std::iter::once(DnsRecordType::Https).chain(address_record_types);
         for record_type in record_types {
             if !self
                 .dns_queries
@@ -1123,16 +1367,23 @@ impl HappyEyeballs {
                 .any(|q| q.record_type == record_type)
             {
                 let id = self.id_generator.next_id();
+                // The HTTPS record is published per port, so a non-443 origin
+                // has to ask for the port-prefixed name. Address records are
+                // never prefixed.
+                let query_name = match record_type {
+                    DnsRecordType::Https => https_query_name(target_name.as_str(), self.port),
+                    DnsRecordType::Aaaa | DnsRecordType::A => target_name,
+                };
                 self.dns_queries.push(DnsQuery {
                     id,
-                    target_name: target_name.clone(),
+                    target_name: query_name.clone(),
                     record_type,
                     state: DnsQueryState::InProgress,
                     refresh: Refresh::Idle,
                 });
                 return Some(Output::SendDnsQuery {
                     id,
-                    hostname: target_name,
+                    hostname: query_name,
                     record_type,
                     allow_stale: true,
                 });
@@ -1304,7 +1555,7 @@ impl HappyEyeballs {
         match attempt.state {
             ConnectionState::InProgress => {}
             ConnectionState::Cancelled => {
-                log::debug!("ignoring connection result for cancelled attempt {id:?}: {result:?}");
+                debug!("ignoring connection result for cancelled attempt {id:?}: {result:?}");
                 return;
             }
             ConnectionState::Succeeded | ConnectionState::Failed => {
@@ -1345,7 +1596,7 @@ impl HappyEyeballs {
                 //
                 // https://datatracker.ietf.org/doc/html/rfc9849#section-6.1.6
                 if attempt.is_ech_retry {
-                    log::debug!("ignoring EchRetry on attempt {id:?} that is itself an ECH retry");
+                    debug!("ignoring EchRetry on attempt {id:?} that is itself an ECH retry");
                     return;
                 }
 
@@ -1400,6 +1651,10 @@ impl HappyEyeballs {
         move_on |= self.move_on_without_timeout();
         move_on |= self.move_on_with_timeout(now);
         move_on |= matches!(self.host, Host::Ip(_));
+        // `ResolutionMode::Name` has no DNS to wait for at all: move on
+        // immediately. `ResolutionMode::NameWithHttpsRr` instead waits for the
+        // origin HTTPS answer, which `move_on_without_timeout` keys on.
+        move_on |= self.network_config.resolution == ResolutionMode::Name;
         if !move_on {
             return None;
         }
@@ -1509,17 +1764,17 @@ impl HappyEyeballs {
                         response: DnsResult::A(result),
                         ..
                     } if q.target_name == info.target_name => {
-                        Some(result.as_deref().map_err(|_| ()))
+                        Some(result.as_deref().map_err(|&()| ()))
                     }
                     _ => None,
                 });
-            let ipv6_addrs: Option<Result<&[Ipv6Addr], ()>> =
+            let ipv6_addrs: Option<Result<&[ScopedIpv6Addr], ()>> =
                 self.dns_queries.iter().find_map(|q| match &q.state {
                     DnsQueryState::Completed {
                         response: DnsResult::Aaaa(result),
                         ..
                     } if q.target_name == info.target_name => {
-                        Some(result.as_deref().map_err(|_| ()))
+                        Some(result.as_deref().map_err(|&()| ()))
                     }
                     _ => None,
                 });
@@ -1527,8 +1782,10 @@ impl HappyEyeballs {
                 self.port,
                 ipv4_addrs,
                 ipv6_addrs,
-                &self.network_config.http_versions,
-                self.network_config.ech,
+                &self.network_config,
+                (self.network_config.resolution == ResolutionMode::NameWithHttpsRr)
+                    .then(|| self.origin_host_str())
+                    .flatten(),
             );
             endpoints.extend(interleave_endpoints(bucket, prefer_v6));
         }
@@ -1564,6 +1821,9 @@ impl HappyEyeballs {
                 .connection_attempts
                 .iter()
                 .any(|a| a.state == ConnectionState::Failed)
+                // Without a single DNS query (e.g. `ResolutionMode::Name`)
+                // there is no resolution that could have failed.
+                || self.dns_queries.is_empty()
             {
                 FailureReason::Connection
             } else {
@@ -1572,7 +1832,7 @@ impl HappyEyeballs {
         )
     }
 
-    /// ServiceInfos from all completed HTTPS responses.
+    /// `ServiceInfos` from all completed HTTPS responses.
     fn completed_service_infos(&self) -> impl Iterator<Item = &ServiceInfo> {
         self.dns_queries
             .iter()
@@ -1624,6 +1884,10 @@ impl HappyEyeballs {
     ///
     /// ECH is never applied: an alt-svc target may differ from the origin, so
     /// the origin's HTTPS-record ECH config does not apply to it.
+    ///
+    /// In a by-name mode (see [`ResolutionMode`]) a domain alt-svc target is
+    /// attempted by name instead of being resolved; an IP-literal target still
+    /// takes the address path.
     fn alt_svc_endpoints(&self) -> Vec<Endpoint> {
         let mut endpoints = Vec::new();
         for alt_svc in &self.network_config.alt_svc {
@@ -1635,11 +1899,33 @@ impl HappyEyeballs {
             }
             let port = alt_svc.port.unwrap_or(self.port);
             let http_version: ConnectionAttemptHttpVersions = alt_svc.http_version.into();
-            endpoints.extend(self.alt_svc_addrs(alt_svc).into_iter().map(|ip| Endpoint {
-                address: SocketAddr::new(ip, port),
-                http_version,
-                ech_config: None,
-            }));
+
+            // By-name mode: attempt the alt-svc target by name over its
+            // advertised protocol (so an h3 alt-svc is raced over h3), unless the
+            // target is an IP literal, which needs no resolution and takes the
+            // address path below.
+            if matches!(
+                self.network_config.resolution,
+                ResolutionMode::Name | ResolutionMode::NameWithHttpsRr
+            ) && let Some(host) = self.alt_svc_by_name_host(alt_svc)
+            {
+                endpoints.push(Endpoint {
+                    target: EndpointTarget::Name { host, port },
+                    http_version,
+                    ech_config: None,
+                });
+                continue;
+            }
+
+            endpoints.extend(
+                self.alt_svc_addrs(alt_svc)
+                    .into_iter()
+                    .map(|addr| Endpoint {
+                        target: EndpointTarget::Address(addr.with_port(port)),
+                        http_version,
+                        ech_config: None,
+                    }),
+            );
         }
         endpoints
     }
@@ -1649,11 +1935,34 @@ impl HappyEyeballs {
     /// (interleaved by the caller).
     fn origin_fallback_endpoints(&self) -> Vec<Endpoint> {
         let http_versions = self.fallback_http_versions();
+
+        // By-name mode: connect to a domain origin by name, with no resolved
+        // address (and thus no address-family racing). An IP-literal origin
+        // needs no resolution regardless, so it keeps the normal address path
+        // below.
+        if matches!(
+            self.network_config.resolution,
+            ResolutionMode::Name | ResolutionMode::NameWithHttpsRr
+        ) && let Some(host) = self.origin_host_str()
+        {
+            return http_versions
+                .iter()
+                .map(|&http_version| Endpoint {
+                    target: EndpointTarget::Name {
+                        host: host.to_string(),
+                        port: self.port,
+                    },
+                    http_version,
+                    ech_config: None,
+                })
+                .collect();
+        }
+
         self.origin_addrs()
             .into_iter()
-            .flat_map(|ip| {
+            .flat_map(|addr| {
                 http_versions.iter().map(move |&http_version| Endpoint {
-                    address: SocketAddr::new(ip, self.port),
+                    target: EndpointTarget::Address(addr.with_port(self.port)),
                     http_version,
                     ech_config: None,
                 })
@@ -1661,24 +1970,55 @@ impl HappyEyeballs {
             .collect()
     }
 
+    /// The origin host as a connect name, or [`None`] when the origin is an IP
+    /// literal, which is connected to by address rather than by name.
+    ///
+    /// The root label's trailing dot is stripped: an origin may legitimately be
+    /// given fully qualified (`example.com.`), but a connect name (SNI, or a
+    /// proxy's CONNECT target) must not carry it.
+    fn origin_host_str(&self) -> Option<&str> {
+        match &self.host {
+            Host::Domain(domain) => Some(domain.trim_end_matches('.')),
+            Host::Ip(_) => None,
+        }
+    }
+
+    /// The hostname to connect to by name for an alt-svc entry in a by-name mode:
+    /// the alt-svc's own host when it is a domain, or the origin host when the
+    /// alt-svc omits a host. Returns [`None`] when the effective host is an IP
+    /// literal, which needs no resolution and uses the address path instead.
+    fn alt_svc_by_name_host(&self, alt_svc: &AltSvc) -> Option<String> {
+        alt_svc.host.as_ref().map_or_else(
+            || self.origin_host_str().map(ToString::to_string),
+            |host| {
+                host.parse::<IpAddr>()
+                    .is_err()
+                    .then(|| host.trim_end_matches('.').to_string())
+            },
+        )
+    }
+
     /// Addresses for an alt-svc entry's effective host: its own host when set,
     /// or the origin host otherwise.
-    fn alt_svc_addrs(&self, alt_svc: &AltSvc) -> Vec<IpAddr> {
-        match &alt_svc.host {
+    fn alt_svc_addrs(&self, alt_svc: &AltSvc) -> Vec<ResolvedAddr> {
+        alt_svc.host.as_ref().map_or_else(
+            || self.origin_addrs(),
             // An alt-svc host is a raw string that may be an IP literal.
-            Some(host) => match host.parse::<IpAddr>() {
-                Ok(ip) => vec![ip],
+            |host| match host.parse::<IpAddr>() {
+                Ok(ip) if self.network_config.ip.allows(ip) => vec![ip.into()],
+                // A literal of the address family disabled on a single-stack
+                // network, for which a domain would not be resolved either.
+                Ok(_) => Vec::new(),
                 Err(_) => self.dns_resolved_addrs(host),
             },
-            None => self.origin_addrs(),
-        }
+        )
     }
 
     /// Addresses for the origin host: the literal when it is an IP, otherwise
     /// the addresses received for the origin's A/AAAA queries.
-    fn origin_addrs(&self) -> Vec<IpAddr> {
+    fn origin_addrs(&self) -> Vec<ResolvedAddr> {
         match &self.host {
-            Host::Ip(ip) => vec![*ip],
+            Host::Ip(ip) => vec![(*ip).into()],
             // A `Host::Domain` is never an IP literal (the constructor already
             // classified it), so resolve it directly.
             Host::Domain(domain) => self.dns_resolved_addrs(domain),
@@ -1686,12 +2026,12 @@ impl HappyEyeballs {
     }
 
     /// Addresses received for `host`'s completed A/AAAA queries.
-    fn dns_resolved_addrs(&self, host: &str) -> Vec<IpAddr> {
+    fn dns_resolved_addrs(&self, host: &str) -> Vec<ResolvedAddr> {
         self.dns_queries
             .iter()
             .filter(|q| q.target_name.as_str() == host)
             .filter_map(DnsQuery::response)
-            .flat_map(DnsResult::ip_addrs)
+            .flat_map(DnsResult::addrs)
             .collect()
     }
 
@@ -1704,6 +2044,24 @@ impl HappyEyeballs {
                 return false;
             }
         };
+
+        // The origin's HTTPS query carries the port-prefixed name on a non-443
+        // origin, so match on that rather than the bare hostname.
+        let https_name = https_query_name(hostname, self.port);
+
+        // `ResolutionMode::NameWithHttpsRr` queries only the origin HTTPS
+        // record and never any address, so there are no addresses to wait for:
+        // move on once that HTTPS query has completed, whether its answer is
+        // positive, empty, or negative. A non-positive answer simply yields no
+        // HTTPS endpoints and falls back to the by-name origin.
+        if self.network_config.resolution == ResolutionMode::NameWithHttpsRr {
+            return self
+                .dns_queries
+                .iter()
+                .filter(|q| q.target_name == https_name)
+                .filter(|q| q.is_completed())
+                .any(|q| q.record_type == DnsRecordType::Https);
+        }
 
         // > Some positive (non-empty) address answers have been received AND
         //
@@ -1723,12 +2081,21 @@ impl HappyEyeballs {
         // Skipped when `wait_for_preferred_address` is disabled, letting the
         // state machine move on with the non-preferred family rather than
         // waiting out the resolution delay for the preferred one.
+        //
+        // An HTTPS record hint of the preferred family also counts:
+        //
+        // > When these are received, they SHOULD be considered as positive
+        // > non-empty answers for the purpose of the algorithm when A and AAAA
+        // > records corresponding to the TargetName are not available yet.
+        //
+        // <https://www.ietf.org/archive/id/draft-ietf-happy-happyeyeballs-v3-02.html#section-4.2.1>
         if self.network_config.wait_for_preferred_address
             && !self
                 .dns_queries
                 .iter()
                 .filter(|q| q.is_completed())
                 .any(|q| q.record_type == self.network_config.preferred_dns_record_type())
+            && !self.has_preferred_family_hint()
         {
             return false;
         }
@@ -1739,7 +2106,7 @@ impl HappyEyeballs {
         if !self
             .dns_queries
             .iter()
-            .filter(|q| q.target_name.as_str() == hostname)
+            .filter(|q| q.target_name == https_name)
             .filter(|q| q.is_completed())
             .any(|q| q.record_type == DnsRecordType::Https)
         {
@@ -1747,6 +2114,19 @@ impl HappyEyeballs {
         }
 
         true
+    }
+
+    /// Whether a completed HTTPS record carries an IP hint of the preferred
+    /// address family.
+    fn has_preferred_family_hint(&self) -> bool {
+        let prefer_v6 = self.network_config.prefer_v6();
+        self.completed_service_infos().any(|i| {
+            if prefer_v6 {
+                !i.ipv6_hints.is_empty()
+            } else {
+                !i.ipv4_hints.is_empty()
+            }
+        })
     }
 
     /// Whether to move on to the connection attempt phase based on a timeout.
@@ -1762,7 +2142,7 @@ impl HappyEyeballs {
             .dns_queries
             .iter()
             .filter_map(|q| q.response())
-            .any(|r| r.has_addrs())
+            .any(DnsResult::has_addrs)
         {
             return false;
         }
@@ -1779,8 +2159,6 @@ impl HappyEyeballs {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{Ipv4Addr, Ipv6Addr};
-
     use super::*;
 
     #[test]
@@ -1795,7 +2173,7 @@ mod tests {
         ] {
             assert!(!result.has_addrs());
         }
-        assert!(DnsResult::Aaaa(Ok(vec![Ipv6Addr::LOCALHOST])).has_addrs());
+        assert!(DnsResult::Aaaa(Ok(vec![Ipv6Addr::LOCALHOST.into()])).has_addrs());
         assert!(DnsResult::A(Ok(vec![Ipv4Addr::LOCALHOST])).has_addrs());
     }
 

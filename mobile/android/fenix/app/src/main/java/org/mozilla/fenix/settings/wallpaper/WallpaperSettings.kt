@@ -5,6 +5,7 @@
 package org.mozilla.fenix.settings.wallpaper
 
 import android.graphics.Bitmap
+import android.util.Size
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -37,6 +38,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.stringResource
@@ -52,11 +54,11 @@ import androidx.core.graphics.createBitmap
 import mozilla.components.compose.base.annotation.FlexibleWindowPreview
 import mozilla.components.compose.base.modifier.debouncedClickable
 import mozilla.components.compose.base.modifier.thenConditional
+import mozilla.components.compose.base.theme.PreviewThemeProvider
+import mozilla.components.compose.base.theme.Theme
 import org.mozilla.fenix.R
 import org.mozilla.fenix.compose.ClickableSubstringLink
 import org.mozilla.fenix.theme.FirefoxTheme
-import org.mozilla.fenix.theme.PreviewThemeProvider
-import org.mozilla.fenix.theme.Theme
 import org.mozilla.fenix.wallpapers.Wallpaper
 
 /**
@@ -73,7 +75,7 @@ import org.mozilla.fenix.wallpapers.Wallpaper
 @Composable
 fun WallpaperSettings(
     wallpaperGroups: Map<Wallpaper.Collection, List<Wallpaper>>,
-    loadWallpaperResource: suspend (Wallpaper) -> Bitmap?,
+    loadWallpaperResource: suspend (Wallpaper, Size) -> Bitmap?,
     selectedWallpaper: Wallpaper,
     onSelectWallpaper: (Wallpaper) -> Unit,
     onLearnMoreClick: (String, String) -> Unit,
@@ -127,6 +129,12 @@ private fun WallpaperGroupHeading(
             color = MaterialTheme.colorScheme.onSurface,
             style = FirefoxTheme.typography.subtitle2,
         )
+    } else if (collection.name == Wallpaper.WREXHAM_FIREFOX_COLLECTION) {
+        Text(
+            text = stringResource(R.string.wallpaper_wrexham_title),
+            color = MaterialTheme.colorScheme.onSurface,
+            style = FirefoxTheme.typography.subtitle2,
+        )
     } else {
         val label = stringResource(id = R.string.a11y_action_label_wallpaper_collection_learn_more)
         val headingSemantics: SemanticsPropertyReceiver.() -> Unit =
@@ -177,6 +185,12 @@ private fun WallpaperGroupHeading(
 }
 
 /**
+ * The ratio of width to height a wallpaper thumbnail is rendered at, as [Modifier.aspectRatio] reads it. Shared so that
+ * code decoding a thumbnail can size it to match what is drawn.
+ */
+internal const val WALLPAPER_THUMBNAIL_ASPECT_RATIO = 1.1f
+
+/**
  * A grid of selectable wallpaper thumbnails.
  *
  * @param wallpapers Wallpapers to add to grid.
@@ -188,7 +202,7 @@ private fun WallpaperGroupHeading(
 fun WallpaperThumbnails(
     wallpapers: List<Wallpaper>,
     selectedWallpaper: Wallpaper,
-    loadWallpaperResource: suspend (Wallpaper) -> Bitmap?,
+    loadWallpaperResource: suspend (Wallpaper, Size) -> Bitmap?,
     onSelectWallpaper: (Wallpaper) -> Unit,
 ) {
     FlowRow(
@@ -211,10 +225,10 @@ fun WallpaperThumbnails(
  * A single wallpaper thumbnail.
  *
  * @param wallpaper The wallpaper to display.
- * @param loadWallpaperResource Callback to handle loading a wallpaper bitmap.
+ * @param loadWallpaperResource Callback to handle loading a wallpaper bitmap at the size it is drawn at.
  * @param isSelected Whether the wallpaper is currently selected.
  * @param isLoading Whether the wallpaper is currently downloading.
- * @param aspectRatio The ratio of height to width of the thumbnail.
+ * @param aspectRatio The ratio of width to height of the thumbnail.
  * @param loadingOpacity Opacity of the currently downloading wallpaper.
  * @param onSelect Action to take when a new wallpaper is selected.
  */
@@ -222,16 +236,25 @@ fun WallpaperThumbnails(
 @Suppress("CognitiveComplexMethod")
 private fun WallpaperThumbnailItem(
     wallpaper: Wallpaper,
-    loadWallpaperResource: suspend (Wallpaper) -> Bitmap?,
+    loadWallpaperResource: suspend (Wallpaper, Size) -> Bitmap?,
     isSelected: Boolean,
     isLoading: Boolean,
-    aspectRatio: Float = 1.1f,
+    aspectRatio: Float = WALLPAPER_THUMBNAIL_ASPECT_RATIO,
     loadingOpacity: Float = 0.5f,
     onSelect: (Wallpaper) -> Unit,
 ) {
-    var bitmap: Bitmap? by remember { mutableStateOf(null) }
-    LaunchedEffect(LocalConfiguration.current.orientation) {
-        bitmap = loadWallpaperResource(wallpaper)
+    val thumbnailWidth = FirefoxTheme.layout.size.static1000
+    val density = LocalDensity.current
+    val targetSize =
+        remember(thumbnailWidth, aspectRatio, density) {
+            with(density) {
+                val widthPx = thumbnailWidth.roundToPx()
+                Size(widthPx, (widthPx / aspectRatio).toInt())
+            }
+        }
+    var bitmap: Bitmap? by remember(wallpaper.name) { mutableStateOf(null) }
+    LaunchedEffect(wallpaper.name, LocalConfiguration.current.orientation, targetSize) {
+        bitmap = loadWallpaperResource(wallpaper, targetSize)
     }
     val border =
         if (isSelected) {
@@ -267,7 +290,7 @@ private fun WallpaperThumbnailItem(
             }
         Surface(
             modifier =
-                Modifier.width(width = FirefoxTheme.layout.size.static1000)
+                Modifier.width(width = thumbnailWidth)
                     .aspectRatio(aspectRatio)
                     .debouncedClickable { onSelect(wallpaper) }
                     .then(contentDescriptionModifier)
@@ -384,7 +407,7 @@ private fun WallpaperThumbnailsPreview(@PreviewParameter(PreviewThemeProvider::c
 
     FirefoxTheme(theme) {
         WallpaperSettings(
-            loadWallpaperResource = { wallpaper ->
+            loadWallpaperResource = { wallpaper, _ ->
                 if (wallpaper == Wallpaper.Default) {
                     null
                 } else {

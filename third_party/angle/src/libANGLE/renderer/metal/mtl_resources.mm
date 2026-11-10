@@ -7,10 +7,6 @@
 //    Implements wrapper classes for Metal's MTLTexture and MTLBuffer.
 //
 
-#ifdef UNSAFE_BUFFERS_BUILD
-#    pragma allow_unsafe_buffers
-#endif
-
 #include "libANGLE/renderer/metal/mtl_resources.h"
 
 #include <TargetConditionals.h>
@@ -687,11 +683,11 @@ void Texture::getBytes(ContextMtl *context,
 
     if (region.size.depth > 1)
     {
-        CHECK(dataOut.size() == bytesPer2DImage * region.size.depth);
+        RELEASE_ASSERT(dataOut.size() == bytesPer2DImage * region.size.depth);
     }
     else
     {
-        CHECK(dataOut.size() == bytesPerRow * region.size.height);
+        RELEASE_ASSERT(dataOut.size() == bytesPerRow * region.size.height);
     }
     [get() getBytes:dataOut.data()
           bytesPerRow:bytesPerRow
@@ -1112,8 +1108,14 @@ angle::Result Buffer::MakeBufferWithStorageMode(ContextMtl *context,
                                                 size_t size,
                                                 BufferRef *bufferOut)
 {
-    bufferOut->reset(new Buffer(context, storageMode, size));
-    ANGLE_CHECK_GL_ALLOC(context, *bufferOut && (*bufferOut)->get());
+    // Allocate into a temporary BufferRef first and only populate *bufferOut after verifying that
+    // the underlying id<MTLBuffer> creation succeeded. Otherwise, *bufferOut (e.g.
+    // BufferPool::mBuffer) would be left with a non-null BufferRef wrapping a nil id<MTLBuffer>
+    // when ANGLE_CHECK_GL_ALLOC returns GL_OUT_OF_MEMORY, breaking callers that assume a non-null
+    // BufferRef holds a valid allocated buffer.
+    BufferRef newBuffer(new Buffer(context, storageMode, size));
+    ANGLE_CHECK_GL_ALLOC(context, newBuffer && newBuffer->get());
+    *bufferOut = std::move(newBuffer);
     return angle::Result::Continue;
 }
 

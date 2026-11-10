@@ -110,12 +110,12 @@ bool nsXRemoteServer::HandleNewProperty(XID aWindowId, Display* aDisplay,
 
     // Failed to get property off the window or
     // got a part only
-    if (result != Success || bytes_after != 0) {
+    if (result != X11Success || bytes_after != 0) {
       return false;
     }
 
     // Failed to get the data off the window or it was the wrong type?
-    if (!data || !TO_LITTLE_ENDIAN32(*reinterpret_cast<int32_t*>(data))) {
+    if (!data) {
       return false;
     }
 

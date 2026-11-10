@@ -340,12 +340,9 @@ add_task(async function testPreferencesCert() {
     { gBrowser, url },
     async function (browser) {
       tabsCount = gBrowser.tabs.length;
-      if (
-        Services.prefs.getBoolPref("browser.settings-redesign.enabled", false)
-      ) {
-        await browser.contentWindow.gotoPref("connectionSecurity");
-        await new Promise(r => browser.contentWindow.requestAnimationFrame(r));
-      }
+
+      await browser.contentWindow.gotoPref("connectionSecurity");
+      await new Promise(r => browser.contentWindow.requestAnimationFrame(r));
       checkAndClickButton(browser.contentDocument, "viewCertificatesButton");
 
       let certDialogLoaded = promiseLoadSubDialog(
@@ -357,6 +354,10 @@ add_task(async function testPreferencesCert() {
 
       doc.getElementById("certmanagertabs").selectedTab =
         doc.getElementById("mine_tab");
+      await TestUtils.waitForCondition(
+        () => !!doc.getElementById("user-tree").view.rowCount,
+        "cert list populated"
+      );
       let treeView = doc.getElementById("user-tree").view;
       let selectedCert;
       // See https://searchfox.org/mozilla-central/rev/40ef22080910c2e2c27d9e2120642376b1d8b8b2/browser/components/preferences/in-content/tests/browser_cert_export.js#41

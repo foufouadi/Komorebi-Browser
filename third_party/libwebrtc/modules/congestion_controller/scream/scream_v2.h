@@ -50,10 +50,10 @@ class ScreamV2 {
   DataRate pacing_rate() const {
     if (received_rate_.IsFinite()) {
       return std::max(
-          target_rate_ * params_.pacing_factor.Get(),
+          target_rate() * params_.pacing_factor.Get(),
           params_.pacing_rate_received_factor.Get() * received_rate_);
     }
-    return target_rate_ * params_.pacing_factor.Get();
+    return target_rate() * params_.pacing_factor.Get();
   }
 
   TimeDelta rtt() const { return delay_based_congestion_control_.rtt(); }
@@ -131,9 +131,16 @@ class ScreamV2 {
  private:
   void UpdateL4SAlpha(const ScreamFeedback& parsed);
   void UpdateRefWindow(const ScreamFeedback& parsed);
-  void UpdateFeedbackHoldTime(const ScreamFeedback& parsed);
+  void UpdateFeedbackHoldTime(TimeDelta feedback_hold_time);
+  void UpdateFeedbackInterval(Timestamp feedback_time);
   void UpdateTargetRate(const ScreamFeedback& parsed);
   void UpdateReceiveRate(const ScreamFeedback& parsed);
+  // Minimum interval between congestion backoff reactions.
+  TimeDelta ReactionInterval() const;
+  // Scales `backoff` so a full reduction is applied immediately, and a new
+  // backoff cycle only starts one RTT after `data_in_flight <= ref_window_`.
+  // Until then, only increases in `backoff` above `last_backoff_` are applied.
+  double ScaleBackoff(const ScreamFeedback& parsed, double backoff);
 
   const Environment env_;
   const ScreamV2Parameters params_;
@@ -154,6 +161,8 @@ class ScreamV2 {
   bool allow_ref_window_i_update_ = true;
 
   double last_ref_window_increase_scale_factor_ = 1.0;
+  double last_backoff_ = 0.0;
+  Timestamp last_backoff_rtt_start_time_ = Timestamp::MinusInfinity();
 
   // `l4s_alpha_` tracks the average fraction of ECN-CE marked data units per
   // Round-Trip Time.
@@ -163,14 +172,17 @@ class ScreamV2 {
   LossEstimator loss_estimator_;
 
   TimeDelta feedback_hold_time_ = TimeDelta::Zero();
+  Timestamp last_feedback_time_ = Timestamp::MinusInfinity();
+  TimeDelta feedback_interval_ = TimeDelta::Zero();
 
   // Per-RTT stats
   Timestamp last_data_in_flight_update_ = Timestamp::MinusInfinity();
   DataSize max_data_in_flight_this_rtt_ = DataSize::Zero();
   DataSize max_data_in_flight_prev_rtt_ = DataSize::Zero();
+  bool allow_initial_ref_window_clamping_ = true;
   DataRate received_rate_ = DataRate::Zero();
   DataSize accumulated_received_bytes_ = DataSize::Zero();
-  Timestamp last_received_rate_update_time_ = Timestamp::MinusInfinity();
+  Timestamp last_window_receive_time_ = Timestamp::MinusInfinity();
 
   // `last_reaction_to_congestion_time` is called
   // `last_congestion_detected_time` in 4.2.2. Reference Window Update.

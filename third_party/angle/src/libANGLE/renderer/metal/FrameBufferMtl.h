@@ -90,12 +90,13 @@ class FramebufferMtl : public FramebufferImpl
                                     size_t index,
                                     GLfloat *xy) const override;
 
+    void onAttachmentDetached(const gl::Context *context, size_t dirtyBit) override;
+
     RenderTargetMtl *getColorReadRenderTarget(const gl::Context *context) const;
     RenderTargetMtl *getDepthRenderTarget() const { return mDepthRenderTarget; }
     RenderTargetMtl *getStencilRenderTarget() const { return mStencilRenderTarget; }
 
-    void setFlipY(bool flipY) { mFlipY = flipY; }
-    bool flipY() const { return mFlipY; }
+    bool getFlipY() const;
 
     gl::Rectangle getCompleteRenderArea() const;
     int getSamples() const;
@@ -124,7 +125,7 @@ class FramebufferMtl : public FramebufferImpl
                                  const PackPixelsParams &packPixelsParams,
                                  const RenderTargetMtl *renderTarget,
                                  uint8_t *pixels) const;
-    void setBackbuffer(WindowSurfaceMtl *backbuffer) { mBackbuffer = backbuffer; }
+    void setBackbuffer(WindowSurfaceMtl *backbuffer, bool flipY);
     WindowSurfaceMtl *getBackbuffer() const { return mBackbuffer; }
 
   private:
@@ -212,6 +213,7 @@ class FramebufferMtl : public FramebufferImpl
     RenderTargetMtl *mDepthRenderTarget   = nullptr;
     RenderTargetMtl *mStencilRenderTarget = nullptr;
     mtl::RenderPassDesc mRenderPassDesc;
+    bool mRenderPassDescChangedBeforeSyncState = false;
 
     const mtl::Format *mRenderPassFirstColorAttachmentFormat = nullptr;
     bool mRenderPassAttachmentsSameColorType                 = false;
@@ -221,7 +223,7 @@ class FramebufferMtl : public FramebufferImpl
     bool mRenderPassCleanStart = false;
 
     WindowSurfaceMtl *mBackbuffer = nullptr;
-    bool mFlipY                   = false;
+    bool mBackbufferFlipY         = false;
 
     mtl::BufferRef mReadPixelBuffer;
 

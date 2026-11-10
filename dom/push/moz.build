@@ -9,7 +9,7 @@ EXTRA_COMPONENTS += [
     "Push.manifest",
 ]
 
-EXTRA_JS_MODULES += [
+MOZ_SRC_FILES += [
     "ChromePushSubscription.sys.mjs",
     "Push.sys.mjs",
     "PushBroadcastService.sys.mjs",
@@ -22,7 +22,7 @@ EXTRA_JS_MODULES += [
 
 if CONFIG["MOZ_BUILD_APP"] != "mobile/android":
     # Everything but GeckoView.
-    EXTRA_JS_MODULES += [
+    MOZ_SRC_FILES += [
         "PushServiceWebSocket.sys.mjs",
     ]
 
@@ -42,11 +42,16 @@ MOCHITEST_MANIFESTS += [
     "test/mochitest.toml",
 ]
 
+BROWSER_CHROME_MANIFESTS += [
+    "test/browser/browser.toml",
+]
+
 XPCSHELL_TESTS_MANIFESTS += [
     "test/xpcshell/xpcshell.toml",
 ]
 
 EXPORTS.mozilla.dom += [
+    "Declarative.h",
     "PushManager.h",
     "PushNotifier.h",
     "PushSubscription.h",
@@ -54,6 +59,7 @@ EXPORTS.mozilla.dom += [
 ]
 
 UNIFIED_SOURCES += [
+    "Declarative.cpp",
     "PushManager.cpp",
     "PushNotifier.cpp",
     "PushSubscription.cpp",
@@ -68,5 +74,14 @@ LOCAL_INCLUDES += [
     "../base",
     "../ipc",
 ]
+
+if CONFIG["COMPILE_ENVIRONMENT"]:
+    CbindgenHeader(
+        "dom_push_rust_generated.h",
+        inputs=["/dom/push/rust"],
+    )
+    EXPORTS.mozilla.dom += [
+        "!dom_push_rust_generated.h",
+    ]
 
 FINAL_LIBRARY = "xul"

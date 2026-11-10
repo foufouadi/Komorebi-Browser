@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <functional>
 #include <tuple>
+#include <utility>
 
 #include "ErrorList.h"
 #include "Units.h"
@@ -48,6 +49,7 @@
 #include "nsINode.h"
 #include "nsIScriptError.h"
 #include "nsIThread.h"
+#include "nsIWeakReferenceUtils.h"
 #include "nsLiteralString.h"
 #include "nsMargin.h"
 #include "nsPIDOMWindow.h"
@@ -132,6 +134,7 @@ class PropertyDescriptor;
 }  // namespace JS
 
 namespace mozilla {
+class CycleCollectedJSContext;
 class Dispatcher;
 class EditorBase;
 class ErrorResult;
@@ -175,6 +178,7 @@ class DataTransfer;
 enum class DeprecatedOperations : uint16_t;
 class Document;
 class DocumentFragment;
+class Sanitizer;
 class DOMArena;
 class Element;
 class Event;
@@ -278,6 +282,39 @@ enum class PropertiesFile : uint8_t {
 namespace mozilla::dom {
 enum JSONBehavior { UndefinedIsNullStringLiteral, UndefinedIsVoidString };
 }  // namespace mozilla::dom
+
+/**
+ * Declares the nsContentUtils::Dispatch*Event() overloads which don't take a
+ * `Document`, but retrieve it from the event target or from a window instead.
+ * The remaining arguments are forwarded to the overload taking a `Document`,
+ * so its default arguments keep working.
+ *
+ * The `Document` is only used for creating the DOM event before dispatching
+ * the event, i.e., it's not referred after that.  Therefore, the caller does
+ * not need to hold it and using `MOZ_KnownLive()` here is safe, while doing so
+ * at the callers may look like the `Document` won't be changed.
+ */
+#define NS_INLINE_DECL_DISPATCH_EVENT_OVERLOADS(aMethodName)               \
+  template <typename... Args>                                              \
+  MOZ_CAN_RUN_SCRIPT static nsresult aMethodName(                          \
+      nsINode* aTarget, const nsAString& aEventName, Args&&... aArgs) {    \
+    return aMethodName(MOZ_KnownLive(DocumentForEventDispatch(aTarget)),   \
+                       aTarget, aEventName, std::forward<Args>(aArgs)...); \
+  }                                                                        \
+  template <typename... Args>                                              \
+  MOZ_CAN_RUN_SCRIPT static nsresult aMethodName(                          \
+      nsPIDOMWindowInner* aWindow, mozilla::dom::EventTarget* aTarget,     \
+      const nsAString& aEventName, Args&&... aArgs) {                      \
+    return aMethodName(MOZ_KnownLive(DocumentForEventDispatch(aWindow)),   \
+                       aTarget, aEventName, std::forward<Args>(aArgs)...); \
+  }                                                                        \
+  template <typename... Args>                                              \
+  MOZ_CAN_RUN_SCRIPT static nsresult aMethodName(                          \
+      nsPIDOMWindowOuter* aWindow, mozilla::dom::EventTarget* aTarget,     \
+      const nsAString& aEventName, Args&&... aArgs) {                      \
+    return aMethodName(MOZ_KnownLive(DocumentForEventDispatch(aWindow)),   \
+                       aTarget, aEventName, std::forward<Args>(aArgs)...); \
+  }
 
 class nsContentUtils {
   friend class nsAutoScriptBlockerSuppressNodeRemoved;
@@ -738,6 +775,11 @@ class nsContentUtils {
    *  Pass a cache object as aIndexCache if you expect to repeatedly call this
    * function with the same value as aBoundary1 or aBoundary2.
    *
+   *  If aAncestorLimiter is non-null, it must be an inclusive ancestor of both
+   * containers in aKind.  Ancestor walks stop there.  Same-container
+   * comparisons only assert containment in debug builds.  Differing-container
+   * comparisons return Nothing if a chain misses the limiter.
+   *
    *  @return -1 if point1 < point2,
    *          1 if point1 > point2,
    *          0 if point1 == point2.
@@ -748,7 +790,8 @@ class nsContentUtils {
   static mozilla::Maybe<int32_t> ComparePoints(
       const mozilla::RangeBoundaryBase<PT1, RT1>& aBoundary1,
       const mozilla::RangeBoundaryBase<PT2, RT2>& aBoundary2,
-      NodeIndexCache* aIndexCache = nullptr);
+      NodeIndexCache* aIndexCache = nullptr,
+      const nsINode* aAncestorLimiter = nullptr);
 
   /**
    * DO NOT USE this method for comparing the points in new code.  this method
@@ -1383,11 +1426,14 @@ class nsContentUtils {
    *   @param aOperation The deprecated operation being reported.
    *   @param aLocation Source location of the operation. Pass the empty
    *          location to omit line and column information.
+   *   @param aParams Parameters for the warning message, as passed to
+   *          Document::WarnOnceAbout.
    */
-  static void ReportDeprecation(nsIGlobalObject* aGlobal, const Document* aDoc,
-                                nsIURI* aURI,
-                                mozilla::dom::DeprecatedOperations aOperation,
-                                const mozilla::JSCallingLocation& aLocation);
+  static void ReportDeprecation(
+      nsIGlobalObject* aGlobal, const Document* aDoc, nsIURI* aURI,
+      mozilla::dom::DeprecatedOperations aOperation,
+      const mozilla::JSCallingLocation& aLocation,
+      const nsTArray<nsString>& aParams = nsTArray<nsString>());
 
   static void ReportEmptyGetElementByIdArg(const Document* aDoc);
 
@@ -1617,18 +1663,17 @@ class nsContentUtils {
    * @param aCopmosed      Is the event composed.
    * @param aDefaultAction Set to true if default action should be taken,
    *                       see EventTarget::DispatchEvent.
+   *
+   * The overloads which do not take a `Document` compute it from the event
+   * target or from the given window, see `DocumentForEventDispatch()`.
    */
-  // TODO: annotate with `MOZ_CAN_RUN_SCRIPT`
-  // (https://bugzilla.mozilla.org/show_bug.cgi?id=1625902).
-  static nsresult DispatchTrustedEvent(
+  MOZ_CAN_RUN_SCRIPT static nsresult DispatchTrustedEvent(
       Document* aDoc, mozilla::dom::EventTarget* aTarget,
       const nsAString& aEventName, CanBubble, Cancelable,
       Composed aComposed = Composed::eDefault, bool* aDefaultAction = nullptr,
       SystemGroupOnly aSystemGroupOnly = SystemGroupOnly::eNo);
 
-  // TODO: annotate with `MOZ_CAN_RUN_SCRIPT`
-  // (https://bugzilla.mozilla.org/show_bug.cgi?id=1625902).
-  static nsresult DispatchTrustedEvent(
+  MOZ_CAN_RUN_SCRIPT static nsresult DispatchTrustedEvent(
       Document* aDoc, mozilla::dom::EventTarget* aTarget,
       const nsAString& aEventName, CanBubble aCanBubble, Cancelable aCancelable,
       bool* aDefaultAction,
@@ -1638,9 +1683,10 @@ class nsContentUtils {
                                 aSystemGroupOnly);
   }
 
+  NS_INLINE_DECL_DISPATCH_EVENT_OVERLOADS(DispatchTrustedEvent)
+
   /**
    * This method creates and dispatches a trusted event using an event message.
-   * @param aDoc           The document which will be used to create the event.
    * @param aTarget        The target of the event.
    * @param aEventMessage  The event message.
    * @param aCanBubble     Whether the event can bubble.
@@ -1649,16 +1695,15 @@ class nsContentUtils {
    *                       see EventTarget::DispatchEvent.
    */
   template <class WidgetEventType>
-  static nsresult DispatchTrustedEvent(
-      Document* aDoc, mozilla::dom::EventTarget* aTarget,
-      EventMessage aEventMessage, CanBubble aCanBubble, Cancelable aCancelable,
+  MOZ_CAN_RUN_SCRIPT static nsresult DispatchTrustedEvent(
+      mozilla::dom::EventTarget* aTarget, EventMessage aEventMessage,
+      CanBubble aCanBubble, Cancelable aCancelable,
       bool* aDefaultAction = nullptr,
       ChromeOnlyDispatch aOnlyChromeDispatch = ChromeOnlyDispatch::eNo) {
     WidgetEventType event(true, aEventMessage);
     MOZ_ASSERT(GetEventClassIDFromMessage(aEventMessage) == event.mClass);
-    return DispatchEvent(aDoc, aTarget, event, aEventMessage, aCanBubble,
-                         aCancelable, Trusted::eYes, aDefaultAction,
-                         aOnlyChromeDispatch);
+    return DispatchEvent(aTarget, event, aEventMessage, aCanBubble, aCancelable,
+                         Trusted::eYes, aDefaultAction, aOnlyChromeDispatch);
   }
 
   /**
@@ -1709,12 +1754,16 @@ class nsContentUtils {
    * @param aCancelable    Is the event cancelable.
    * @param aDefaultAction Set to true if default action should be taken,
    *                       see EventTarget::DispatchEvent.
+   *
+   * The overloads which do not take a `Document` compute it from the event
+   * target or from the given window, see `DocumentForEventDispatch()`.
    */
-  static nsresult DispatchUntrustedEvent(Document* aDoc,
-                                         mozilla::dom::EventTarget* aTarget,
-                                         const nsAString& aEventName, CanBubble,
-                                         Cancelable,
-                                         bool* aDefaultAction = nullptr);
+  MOZ_CAN_RUN_SCRIPT static nsresult DispatchUntrustedEvent(
+      Document* aDoc, mozilla::dom::EventTarget* aTarget,
+      const nsAString& aEventName, CanBubble, Cancelable,
+      bool* aDefaultAction = nullptr);
+
+  NS_INLINE_DECL_DISPATCH_EVENT_OVERLOADS(DispatchUntrustedEvent)
 
   /**
    * This method creates and dispatches a untrusted event using an event
@@ -1728,16 +1777,15 @@ class nsContentUtils {
    *                       see EventTarget::DispatchEvent.
    */
   template <class WidgetEventType>
-  static nsresult DispatchUntrustedEvent(
-      Document* aDoc, mozilla::dom::EventTarget* aTarget,
-      EventMessage aEventMessage, CanBubble aCanBubble, Cancelable aCancelable,
+  MOZ_CAN_RUN_SCRIPT static nsresult DispatchUntrustedEvent(
+      mozilla::dom::EventTarget* aTarget, EventMessage aEventMessage,
+      CanBubble aCanBubble, Cancelable aCancelable,
       bool* aDefaultAction = nullptr,
       ChromeOnlyDispatch aOnlyChromeDispatch = ChromeOnlyDispatch::eNo) {
     WidgetEventType event(false, aEventMessage);
     MOZ_ASSERT(GetEventClassIDFromMessage(aEventMessage) == event.mClass);
-    return DispatchEvent(aDoc, aTarget, event, aEventMessage, aCanBubble,
-                         aCancelable, Trusted::eNo, aDefaultAction,
-                         aOnlyChromeDispatch);
+    return DispatchEvent(aTarget, event, aEventMessage, aCanBubble, aCancelable,
+                         Trusted::eNo, aDefaultAction, aOnlyChromeDispatch);
   }
 
   /**
@@ -1757,12 +1805,16 @@ class nsContentUtils {
    * @param aCancelable    Is the event cancelable.
    * @param aDefaultAction Set to true if default action should be taken,
    *                       see EventTarget::DispatchEvent.
+   *
+   * The overloads which do not take a `Document` compute it from the event
+   * target or from the given window, see `DocumentForEventDispatch()`.
    */
-  static nsresult DispatchChromeEvent(Document* aDoc,
-                                      mozilla::dom::EventTarget* aTarget,
-                                      const nsAString& aEventName, CanBubble,
-                                      Cancelable,
-                                      bool* aDefaultAction = nullptr);
+  MOZ_CAN_RUN_SCRIPT static nsresult DispatchChromeEvent(
+      Document* aDoc, mozilla::dom::EventTarget* aTarget,
+      const nsAString& aEventName, CanBubble, Cancelable,
+      bool* aDefaultAction = nullptr);
+
+  NS_INLINE_DECL_DISPATCH_EVENT_OVERLOADS(DispatchChromeEvent)
 
   /**
    * Helper to dispatch a "framefocusrequested" event to chrome, which will only
@@ -1789,22 +1841,25 @@ class nsContentUtils {
    * @param aComposed      Is the event composed.
    * @param aDefaultAction Set to true if default action should be taken,
    *                       see EventTarget::DispatchEvent.
+   *
+   * The overloads which do not take a `Document` compute it from the event
+   * target or from the given window, see `DocumentForEventDispatch()`.
    */
-  static nsresult DispatchEventOnlyToChrome(
+  MOZ_CAN_RUN_SCRIPT static nsresult DispatchEventOnlyToChrome(
       Document* aDoc, mozilla::dom::EventTarget* aTarget,
       const nsAString& aEventName, CanBubble, Cancelable,
       Composed aComposed = Composed::eDefault, bool* aDefaultAction = nullptr);
 
-  static nsresult DispatchEventOnlyToChrome(Document* aDoc,
-                                            mozilla::dom::EventTarget* aTarget,
-                                            const nsAString& aEventName,
-                                            CanBubble aCanBubble,
-                                            Cancelable aCancelable,
-                                            bool* aDefaultAction) {
+  MOZ_CAN_RUN_SCRIPT static nsresult DispatchEventOnlyToChrome(
+      Document* aDoc, mozilla::dom::EventTarget* aTarget,
+      const nsAString& aEventName, CanBubble aCanBubble, Cancelable aCancelable,
+      bool* aDefaultAction) {
     return DispatchEventOnlyToChrome(aDoc, aTarget, aEventName, aCanBubble,
                                      aCancelable, Composed::eDefault,
                                      aDefaultAction);
   }
+
+  NS_INLINE_DECL_DISPATCH_EVENT_OVERLOADS(DispatchEventOnlyToChrome)
 
   /**
    * Determines if an event attribute name (such as onclick) is valid for
@@ -1876,19 +1931,6 @@ class nsContentUtils {
                                         mozilla::EventClassID aEventClassID,
                                         EventMessage* aEventMessage);
 
-  /**
-   * Adds aManager to the list of the managers nodes own, which is used for
-   * unmarking gray JS listeners during cycle collection.
-   */
-  static void AddNodeListenerManager(mozilla::EventListenerManager* aManager);
-
-  /**
-   * Removes aManager from that list, if it's in it.  Only for
-   * ~EventListenerManager.
-   */
-  static void RemoveNodeListenerManager(
-      mozilla::EventListenerManager* aManager);
-
   static void AddEntryToDOMArenaTable(nsINode* aNode,
                                       mozilla::dom::DOMArena* aDOMArena);
 
@@ -1897,8 +1939,6 @@ class nsContentUtils {
 
   static already_AddRefed<mozilla::dom::DOMArena> TakeEntryFromDOMArenaTable(
       const nsINode* aNode);
-
-  static void UnmarkGrayJSListenersInCCGenerationDocuments();
 
   static bool IsInitialized() { return sInitialized; }
 
@@ -1964,6 +2004,20 @@ class nsContentUtils {
   static const int32_t kParseFragmentNoSanitization = -2;
 
   /**
+   * Whether ParseFragmentHTML() and ParseFragmentXML() sanitize a fragment
+   * parsed for a node with aPrincipal, given their aFlags.
+   */
+  static bool ShouldSanitizeFragment(nsIPrincipal* aPrincipal, int32_t aFlags);
+
+  /**
+   * Whether ParseFragmentHTML(), ParseDocumentHTML() or ParseFragmentXML() is
+   * running, which they don't allow to be reentered.
+   */
+  static bool IsFragmentParsingActive() { return sFragmentParsingActive; }
+
+  enum class SanitizerMode { Safe, Unsafe };
+
+  /**
    * Invoke the fragment parsing algorithm (innerHTML) using the HTML parser.
    *
    * Please note that for safety reasons, if the node principal of aTargetNode
@@ -1987,6 +2041,11 @@ class nsContentUtils {
    * for setHTML(), which already does its own sanitization.
    * @param aCustomElementRegistry the (scoped) registry to use for custom
    * element definitions.
+   * @param aSanitizer the Sanitizer API configuration to apply while parsing
+   * (the spec's "parser sanitizer configuration"), or nullptr not to sanitize
+   * while parsing.
+   * @param aSanitizerMode whether to safely sanitize, i.e.
+   * "remove javascript navigation URLs".
    * @return NS_ERROR_DOM_INVALID_STATE_ERR if a re-entrant attempt to parse
    *         fragments is made, NS_ERROR_OUT_OF_MEMORY if aSourceBuffer is too
    *         long and NS_OK otherwise.
@@ -1996,7 +2055,9 @@ class nsContentUtils {
       nsAtom* aContextLocalName, int32_t aContextNamespace, bool aQuirks,
       bool aPreventScriptExecution, int32_t aFlags,
       mozilla::Maybe<RefPtr<mozilla::dom::CustomElementRegistry>>
-          aCustomElementRegistry);
+          aCustomElementRegistry,
+      mozilla::dom::Sanitizer* aSanitizer = nullptr,
+      SanitizerMode aSanitizerMode = SanitizerMode::Unsafe);
 
   /**
    * Invoke the fragment parsing algorithm (innerHTML) using the XML parser.
@@ -2034,13 +2095,20 @@ class nsContentUtils {
    *                        child nodes.
    * @param aScriptingEnabledForNoscriptParsing whether <noscript> is parsed
    *                                            as if scripting was enabled
+   * @param aSanitizer the Sanitizer API configuration to apply while parsing
+   * (the spec's "parser sanitizer configuration"), or nullptr not to sanitize
+   * while parsing.
+   * @param aSanitizerMode whether to safely sanitize, i.e.
+   * "remove javascript navigation URLs".
    * @return NS_ERROR_DOM_INVALID_STATE_ERR if a re-entrant attempt to parse
    *         fragments is made, NS_ERROR_OUT_OF_MEMORY if aSourceBuffer is too
    *         long and NS_OK otherwise.
    */
-  static nsresult ParseDocumentHTML(const nsAString& aSourceBuffer,
-                                    Document* aTargetDocument,
-                                    bool aScriptingEnabledForNoscriptParsing);
+  static nsresult ParseDocumentHTML(
+      const nsAString& aSourceBuffer, Document* aTargetDocument,
+      bool aScriptingEnabledForNoscriptParsing,
+      mozilla::dom::Sanitizer* aSanitizer = nullptr,
+      SanitizerMode aSanitizerMode = SanitizerMode::Unsafe);
 
   /**
    * Converts HTML source to plain text by parsing the source and using the
@@ -2118,15 +2186,20 @@ class nsContentUtils {
   [[nodiscard]] static bool GetNodeTextContent(const nsINode* aNode, bool aDeep,
                                                nsAString& aResult,
                                                const mozilla::fallible_t&);
-
   static void GetNodeTextContent(const nsINode* aNode, bool aDeep,
                                  nsAString& aResult);
-
-  /**
-   * Same as GetNodeTextContents but appends the result rather than sets it.
-   */
+  // Same as GetNodeTextContents but appends the result rather than sets it.
   static bool AppendNodeTextContent(const nsINode* aNode, bool aDeep,
                                     nsAString& aResult,
+                                    const mozilla::fallible_t&);
+  // Same as above, but returning utf-8.
+  static void GetNodeTextContent(const nsINode* aNode, bool aDeep,
+                                 nsACString& aResult);
+  [[nodiscard]] static bool GetNodeTextContent(const nsINode* aNode, bool aDeep,
+                                               nsACString& aResult,
+                                               const mozilla::fallible_t&);
+  static bool AppendNodeTextContent(const nsINode* aNode, bool aDeep,
+                                    nsACString& aResult,
                                     const mozilla::fallible_t&);
 
   /**
@@ -2235,10 +2308,8 @@ class nsContentUtils {
    *
    * @param aContent the node on which a link was triggered.
    * @param aLinkURI the URI of the link, must be non-null.
-   * @param aTargetSpec the target (like target=, may be empty).
    */
-  static void TriggerLinkMouseOver(nsIContent* aContent, nsIURI* aLinkURI,
-                                   const nsString& aTargetSpec);
+  static void TriggerLinkMouseOver(nsIContent* aContent, nsIURI* aLinkURI);
 
   /**
    * Get the link location.
@@ -2533,6 +2604,9 @@ class nsContentUtils {
    */
   static already_AddRefed<mozilla::dom::ContentList> GetElementsByClassName(
       nsINode* aRootNode, const nsAString& aClasses);
+
+  static bool MatchClassNames(mozilla::dom::Element* aElement,
+                              int32_t aNamespaceID, nsAtom* aAtom, void* aData);
 
   /**
    * Returns a presshell for this document, if there is one. This will be
@@ -3133,12 +3207,12 @@ class nsContentUtils {
       const mozilla::dom::Optional<
           mozilla::OwningNonNull<mozilla::dom::VoidFunction>>& aCallback);
 
-  static void FirePageShowEventForFrameLoaderSwap(
+  MOZ_CAN_RUN_SCRIPT static void FirePageShowEventForFrameLoaderSwap(
       nsIDocShellTreeItem* aItem,
       mozilla::dom::EventTarget* aChromeEventHandler, bool aFireIfShowing,
       bool aOnlySystemGroup = false);
 
-  static void FirePageHideEventForFrameLoaderSwap(
+  MOZ_CAN_RUN_SCRIPT static void FirePageHideEventForFrameLoaderSwap(
       nsIDocShellTreeItem* aItem,
       mozilla::dom::EventTarget* aChromeEventHandler,
       bool aOnlySystemGroup = false);
@@ -3197,8 +3271,6 @@ class nsContentUtils {
    * @param aUri the URI to match, e.g. "about:feeds"
    */
   static bool IsSpecificAboutPage(JSObject* aGlobal, const char* aUri);
-
-  static void SetScrollbarsVisibility(nsIDocShell* aDocShell, bool aVisible);
 
   /*
    * Try to find the docshell corresponding to the given event target.
@@ -3412,7 +3484,14 @@ class nsContentUtils {
    * Split an id generated by GenerateProcessSpecificId back into the process id
    * and the serial number it was composed from, returned in that order.
    */
-  static std::tuple<uint64_t, uint64_t> SplitProcessSpecificId(uint64_t aId);
+  static std::tuple<GeckoChildID, uint64_t> SplitProcessSpecificId(
+      uint64_t aId);
+
+  /**
+   * Check if the given ID generated with `GenerateProcessSpecificId` is from
+   * the given GeckoChildID.
+   */
+  static bool IsProcessSpecificIdFrom(uint64_t aId, GeckoChildID aChildId);
 
   /**
    * Generate a window ID which is unique across processes and will never be
@@ -3678,27 +3757,36 @@ class nsContentUtils {
                              JS::MutableHandle<JS::Value> vp,
                              bool aAllowWrapping);
 
-  // TODO: Convert this to MOZ_CAN_RUN_SCRIPT (bug 1415230)
-  MOZ_CAN_RUN_SCRIPT_BOUNDARY static nsresult DispatchEvent(
+  // Used by NS_INLINE_DECL_DISPATCH_EVENT_OVERLOADS().  Note that after
+  // dispatching the event, the returned `Document` may have been destroyed
+  // and/or the event target may be owned by a different `Document`.
+  static Document* DocumentForEventDispatch(nsINode* aTarget) {
+    return aTarget->OwnerDoc();
+  }
+  static Document* DocumentForEventDispatch(nsPIDOMWindowInner* aWindow) {
+    return aWindow->GetExtantDoc();
+  }
+  static Document* DocumentForEventDispatch(nsPIDOMWindowOuter* aWindow) {
+    return aWindow->GetExtantDoc();
+  }
+
+  MOZ_CAN_RUN_SCRIPT static nsresult DispatchEvent(
       Document* aDoc, mozilla::dom::EventTarget* aTarget,
       const nsAString& aEventName, CanBubble, Cancelable, Composed, Trusted,
       bool* aDefaultAction = nullptr,
       ChromeOnlyDispatch = ChromeOnlyDispatch::eNo,
       SystemGroupOnly = SystemGroupOnly::eNo);
 
-  // TODO: Convert this to MOZ_CAN_RUN_SCRIPT (bug 1415230)
-  MOZ_CAN_RUN_SCRIPT_BOUNDARY static nsresult DispatchEvent(
-      Document* aDoc, mozilla::dom::EventTarget* aTarget,
-      mozilla::WidgetEvent& aWidgetEvent, EventMessage aEventMessage, CanBubble,
-      Cancelable, Trusted, bool* aDefaultAction = nullptr,
+  MOZ_CAN_RUN_SCRIPT static nsresult DispatchEvent(
+      mozilla::dom::EventTarget* aTarget, mozilla::WidgetEvent& aWidgetEvent,
+      EventMessage aEventMessage, CanBubble, Cancelable, Trusted,
+      bool* aDefaultAction = nullptr,
       ChromeOnlyDispatch = ChromeOnlyDispatch::eNo);
 
   static void InitializeModifierStrings();
 
   static void DropFragmentParsers();
 
-  static bool MatchClassNames(mozilla::dom::Element* aElement,
-                              int32_t aNamespaceID, nsAtom* aAtom, void* aData);
   static void DestroyClassNameArray(void* aData);
   static void* AllocClassMatchingInfo(nsINode* aRootNode,
                                       const nsString* aClasses);
@@ -3796,7 +3884,8 @@ class nsContentUtils {
   template <TreeKind aKind>
   static mozilla::Maybe<int32_t> ComparePointsWithIndices(
       const nsINode* aParent1, uint32_t aOffset1, const nsINode* aParent2,
-      uint32_t aOffset2, NodeIndexCache* aIndexCache = nullptr);
+      uint32_t aOffset2, NodeIndexCache* aIndexCache = nullptr,
+      const nsINode* aAncestorLimiter = nullptr);
 
   /**
    * Helper method for ComparePoints() and ComparePointsWithIndices(). This
@@ -3872,6 +3961,8 @@ class nsContentUtils {
   static uint32_t sInnerOrOuterWindowSerialCounter;
 };
 
+#undef NS_INLINE_DECL_DISPATCH_EVENT_OVERLOADS
+
 /* static */ inline ExtContentPolicyType
 nsContentUtils::InternalContentPolicyTypeToExternal(nsContentPolicyType aType) {
   switch (aType) {
@@ -3929,6 +4020,7 @@ nsContentUtils::InternalContentPolicyTypeToExternal(nsContentPolicyType aType) {
       return ExtContentPolicy::TYPE_FETCH;
 
     case nsIContentPolicy::TYPE_INTERNAL_EXTERNAL_RESOURCE:
+    case nsIContentPolicy::TYPE_INTERNAL_SPECULATION_RULES:
       return ExtContentPolicy::TYPE_OTHER;
 
     case nsIContentPolicy::TYPE_INTERNAL_JSON_PRELOAD:
@@ -3994,6 +4086,20 @@ class MOZ_STACK_CLASS nsAutoScriptBlockerSuppressNodeRemoved
   }
 };
 
+// Like nsAutoMicroTask, but doesn't perform a checkpoint for a document
+// without an inner window (e.g. an SVG image): such documents can't run
+// script, so a checkpoint from them would only run other documents'
+// microtasks.
+class MOZ_STACK_CLASS nsAutoMicroTaskForDocument {
+ public:
+  explicit nsAutoMicroTaskForDocument(const mozilla::dom::Document* aDocument);
+  MOZ_CAN_RUN_SCRIPT ~nsAutoMicroTaskForDocument();
+
+ private:
+  // Null when the checkpoint is skipped.
+  mozilla::CycleCollectedJSContext* const mContext;
+};
+
 namespace mozilla::dom {
 
 class TreeOrderComparator {
@@ -4011,14 +4117,23 @@ class TreeOrderComparator {
 #define NS_INTERFACE_MAP_ENTRY_TEAROFF(_interface, _allocator) \
   NS_INTERFACE_MAP_ENTRY_TEAROFF_AMBIGUOUS(_interface, _interface, _allocator)
 
-#define NS_INTERFACE_MAP_ENTRY_TEAROFF_AMBIGUOUS(_interface, _implClass, \
-                                                 _allocator)             \
-  if (aIID.Equals(NS_GET_IID(_interface))) {                             \
-    foundInterface = static_cast<_implClass*>(_allocator);               \
-    if (!foundInterface) {                                               \
-      *aInstancePtr = nullptr;                                           \
-      return NS_ERROR_OUT_OF_MEMORY;                                     \
-    }                                                                    \
+#define NS_INTERFACE_MAP_ENTRY_TEAROFF_AMBIGUOUS(_interface, _implClass,      \
+                                                 _allocator)                  \
+  if (aIID.Equals(NS_GET_IID(_interface))) {                                  \
+    static_assert(                                                          \
+        /* Check the interface correctly defines HasWeakReferenceTearoff */ \
+        /* This is needed for do_GetWeakReference static checks          */ \
+        /* (see do_GetWeakReference and GetCheckedWeakReference)         */ \
+        !std::is_same_v<_interface, nsISupportsWeakReference> ||            \
+            mozilla::detail::ProvidesWeakReferenceTearoff<                  \
+                std::remove_pointer_t<decltype(this)>>,                     \
+        "declare `static constexpr bool kHasWeakReferenceTearoff = true;` " \
+        "in the class that tears off nsISupportsWeakReference"); \
+    foundInterface = static_cast<_implClass*>(_allocator);                    \
+    if (!foundInterface) {                                                    \
+      *aInstancePtr = nullptr;                                                \
+      return NS_ERROR_OUT_OF_MEMORY;                                          \
+    }                                                                         \
   } else
 
 /*

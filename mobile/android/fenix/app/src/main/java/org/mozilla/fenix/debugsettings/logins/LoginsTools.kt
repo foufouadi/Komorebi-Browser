@@ -34,6 +34,8 @@ import mozilla.components.browser.state.state.BrowserState
 import mozilla.components.browser.state.state.createTab
 import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.compose.base.button.FilledButton
+import mozilla.components.compose.base.theme.PreviewThemeProvider
+import mozilla.components.compose.base.theme.Theme
 import mozilla.components.concept.storage.Login
 import mozilla.components.concept.storage.LoginEntry
 import mozilla.components.concept.storage.LoginsStorage
@@ -44,8 +46,6 @@ import org.mozilla.fenix.R
 import org.mozilla.fenix.compose.list.TextListItem
 import org.mozilla.fenix.debugsettings.ui.DebugDrawer
 import org.mozilla.fenix.theme.FirefoxTheme
-import org.mozilla.fenix.theme.PreviewThemeProvider
-import org.mozilla.fenix.theme.Theme
 
 /**
  * Logins UI for [DebugDrawer] that displays existing logins for the current domain and allows deleting logins or adding
@@ -94,11 +94,9 @@ fun LoginsTools(
             },
             onDeleteLogin = { entry ->
                 scope.launch {
-                    loginsStorage.delete(entry.guid).also { isSuccess ->
-                        if (isSuccess) {
-                            existingLogins -= entry
-                        }
-                    }
+                    loginsStorage.delete(entry.guid)
+                    // may or may not have been deleted (eg, not on exception etc), so always rebuild.
+                    origin?.let { existingLogins = loginsStorage.getByBaseDomain(it) }
                 }
             },
         )
@@ -157,7 +155,9 @@ internal class FakeLoginsStorage : LoginsStorage {
 
     override suspend fun wipeLocal() = Unit
 
-    override suspend fun delete(guid: String): Boolean = loginsByGuid.remove(guid) != null
+    override suspend fun delete(guid: String) {
+        loginsByGuid.remove(guid)
+    }
 
     override suspend fun get(guid: String): Login? = null
 

@@ -13,6 +13,25 @@ Please note that some targeting attributes require stricter controls on the tele
 :depth: 1
 ```
 
+### `activeWebPushSubscriptionCount`
+
+The number of unexpired web push subscriptions. System subscriptions, such as the one held by Firefox Accounts, are not counted.
+
+The value is 0 when push is disabled. Until the push service starts, the value is the count saved the last time this attribute was evaluated while push was running, which may be out of date, or 0 if no count has been saved yet.
+
+Nimbus recipes that target on this attribute should also include the `includeForWebPush` feature, so that they are re-evaluated with the current count once the push service starts.
+
+#### Examples
+* Does the user have any active web push subscription?
+```java
+activeWebPushSubscriptionCount > 0
+```
+
+#### Definition
+```ts
+declare const activeWebPushSubscriptionCount: number;
+```
+
 ### `addonsInfo`
 Provides information about the add-ons the user has installed.
 
@@ -59,6 +78,28 @@ interface AddonsInfoResponse {
   hasInstalledAddons: boolean;
 }
 ```
+### `allowedNotificationOrigins`
+
+The number of origins the user has allowed to send web notifications. Origins the
+user has explicitly blocked are not counted. A count rather than a boolean, so it
+can also be used to distinguish users with a single allowed site from those with
+many.
+
+#### Examples
+* Has the user allowed any site to send notifications?
+```java
+allowedNotificationOrigins > 0
+```
+* Has the user allowed five or more sites?
+```java
+allowedNotificationOrigins >= 5
+```
+
+#### Definition
+```ts
+declare const allowedNotificationOrigins: number;
+```
+
 ### `attributionData`
 
 An object containing information on exactly how Firefox was downloaded
@@ -165,6 +206,59 @@ declare const currentDate; ECMA262DateString;
 type ECMA262DateString = string;
 ```
 
+### `currentTabPageCategory`
+
+Category of the page in the selected tab of the most recent non-private
+window, or `null` if it doesn't match any category. With multiple windows
+open, this isn't necessarily the window the message is evaluated for, or the
+tab that fired the trigger.
+
+* `"product-detail"`: a product page on Amazon, Walmart, Best Buy or Sephora,
+  US (`.com`) only.
+* `"shopping-home"`: the home page of a US or Canadian retailer.
+* `"news-home"`: the home page of a US or Canadian news site.
+
+Matching is done on the URL only, against a list of hosts and paths. Page
+content isn't read. US and Canadian sites share one list, so use `region` if
+you only want users in one market.
+
+```{note}
+  Only the category is exposed, never the URL, and it must not be recorded in
+  telemetry. Always `null` in private windows, including permanent private
+  browsing.
+```
+
+The host lists live in
+`browser/components/aiwindow/ui/modules/AgentPageDetector.sys.mjs` and ship
+with the build. They can't be changed through Nimbus or Remote Settings, so
+adding or fixing a site needs a patch on the trains.
+
+#### Triggers
+
+Targeting is only evaluated when a message is requested, so this needs a
+trigger. Use `openURL` with `params`, `patterns` or `regexPatterns` covering
+the same sites. `openURL` also exposes `url` and `host` for the tab that fired
+it, if you need the exact page.
+
+#### Examples
+* Is the selected tab on a shopping home page?
+```java
+currentTabPageCategory == "shopping-home"
+```
+* Is the selected tab on a news home page, in Canada?
+```java
+currentTabPageCategory == "news-home" && region == "CA"
+```
+
+#### Definition
+```ts
+declare const currentTabPageCategory:
+  | "product-detail"
+  | "shopping-home"
+  | "news-home"
+  | null;
+```
+
 ### `devToolsOpenedCount`
 Number of usages of the web console.
 
@@ -177,6 +271,32 @@ devToolsOpenedCount > 10
 #### Definition
 ```ts
 declare const devToolsOpenedCount: number;
+```
+
+### `recentSearchCount`
+
+Number of distinct search terms submitted from a Search Access Point (SAP) in the last 28 days based on form history. Excludes private-browsing searches.
+
+#### Definition
+
+```ts
+declare const recentSearchCount: Promise<number>;
+```
+
+#### Examples
+* Has the user performed more than one SAP search in the last 28 days?
+```ts
+recentSearchCount > 1
+```
+
+* Has the user performed no SAP searches in the last 28 days?
+```ts
+recentSearchCount == 0
+```
+
+* Has the user performed between 1 to 10 SAP searches in the last 28 days?
+```ts
+recentSearchCount >= 1 && recentSearchCount <= 10
 ```
 
 ### `isDefaultBrowser`
@@ -192,6 +312,17 @@ declare const isDefaultBrowser: boolean;
 ### `isDefaultBrowserUncached`
 
 Behaves the same as `isDefaultBrowser`, but retrieves the current value directly from shell service instead of using the cached value. This may not be as performant.
+
+### `hasAttemptedSetDefault`
+
+Has the user asked Firefox to make itself the default browser during this session. True as soon as the request is made, whether or not the OS honours it.
+Does not persist across restarts.
+
+#### Definition
+
+```ts
+declare const hasAttemptedSetDefault: boolean;
+```
 
 ### `isOneClickSetDefaultEnabled`
 
@@ -472,6 +603,25 @@ declare const profileAgeReset: undefined | UnixEpochNumber;
 type UnixEpochNumber = number;
 ```
 
+### `profileLastUse`
+
+The date the profile was last used before the current session, as a UNIX Epoch
+timestamp. This is the more recent of the previous session's lock file time and
+the `prefs.js` modification time, and is `0` when neither is available.
+
+#### Examples
+* Has the profile been unused for at least 60 days?
+```java
+profileLastUse && currentDate|date - profileLastUse >= 5184000000
+```
+
+#### Definition
+```ts
+declare const profileLastUse: UnixEpochNumber;
+// UnixEpochNumber is UNIX Epoch timestamp, e.g. 1522843725924
+type UnixEpochNumber = number;
+```
+
 ### `providerCohorts`
 
 Information about cohort settings (from prefs, including shield studies) for each provider.
@@ -654,6 +804,16 @@ Is the user signed in to a Firefox Account?
 
 ```ts
 declare const isFxASignedIn: Promise<boolean>
+```
+
+### `isFxASignedInMozilla`
+
+Is the user signed in to a Firefox Account with an @mozilla.com email?
+
+#### Definition
+
+```ts
+declare const isFxASignedInMozilla: Promise<boolean>
 ```
 
 ### `creditCardsSaved`
@@ -1037,25 +1197,25 @@ or equivalently
 (isAIWindow || !isAIWindow)
 ```
 
-### `isSmartTabGroupingAllowed`
+### `isAutoTabGroupingAvailable`
 
-Whether Smart Tab Grouping is available to this user, delegating to
-`SmartTabGroupingManager.isAllowed`. Smart Tab Grouping is currently gated on an
-English application locale, but that rule lives in the feature itself, so prefer
-this attribute over a hand-written locale check: messages that depend on the
-feature then stay in sync when the gate changes.
+Whether Smart Window's Organize Tabs (Auto Tab Grouping) can run for this user,
+delegating to `AutoTabGroupingSuggestions.isAvailable`: the feature is enabled
+(`browser.smartwindow.autoTabGrouping.enabled`), on-device ML is allowed, the app
+locale is listed in `browser.smartwindow.autoTabGrouping.supportedLocales`, and
+the machine has enough memory.
 
 #### Definition
 
 ```ts
-declare const isSmartTabGroupingAllowed: boolean;
+declare const isAutoTabGroupingAvailable: boolean;
 ```
 
 #### Examples
 
-* Only show a message when the feature can actually run:
+* Only show the Organize Tabs callout when the feature can run:
 ```javascript
-isSmartTabGroupingAllowed
+isAIWindow && isAutoTabGroupingAvailable
 ```
 
 ### `userId`
@@ -1071,7 +1231,7 @@ declare const userId: string;
 ### `profileRestartCount`
 
 A session counter that shows how many times the browser was started.
-More info about the details in [the telemetry docs](https://firefox-source-docs.mozilla.org/toolkit/components/telemetry/concepts/sessions.html).
+More info about the details in {doc}`the telemetry docs </toolkit/components/telemetry/concepts/sessions>`.
 
 #### Definition
 
@@ -1286,6 +1446,10 @@ A string of the name of the container where the Firefox View button is shown, nu
 
 A string of the name of the container where the Tab Overflow button (or All Tabs button) is shown, null if the button has been removed.
 
+### `forgetButtonAreaType`
+
+A string of the name of the container where the Forget button is shown, null if the button is not in the toolbar or overflow menu (it is in the customization palette by default).
+
 ### `hasMigratedBookmarks`
 
 A boolean. `true` if the user ever used the Migration Wizard to migrate bookmarks since Firefox 113 released. Available in Firefox 113+; will not be true if the user had only ever migrated bookmarks prior to Firefox 113 being released.
@@ -1334,6 +1498,16 @@ restore the previous session on startup; `false` otherwise.
 
 A boolean. `true` when both the current install and current profile support creating additional profiles using the `SelectableProfileService`; `false` otherwise.
 
+### `canResetProfile`
+
+A boolean. `true` when the current profile can be refreshed.
+
+Any message using the `RESET_PROFILE` action should include this in its targeting.
+
+### `isFirefoxReinstalled`
+
+Windows-only. A boolean. `true` when Firefox was uninstalled and then reinstalled over an existing profile since the previous run; `false` otherwise.
+
 ### `hasSelectableProfiles`
 
 A boolean. `true` when the `toolkit.profiles.storeID` pref has a value. Indicates that the profile is part of a profile group managed by the `SelectableProfileService`, and the user has used the multiple profiles feature. `false` otherwise.
@@ -1356,7 +1530,7 @@ An array that maps about:welcome screen IDs to their most recent impression time
 #### Definition
 
 ```
-declare const screenImpressions: { [key: string]: Array<UnixEpochNumber> };
+declare const screenImpressions: { [key: string]: UnixEpochNumber };
 ```
 
 ### `systemArch`
@@ -1433,30 +1607,11 @@ Indicates whether a user has selected an encrypted or non-encrypted backup metho
 
 A boolean. `true` when a user downloads Firefox from a Smart Window marketing campaign (ie. `attributionData.campaign == "smart_window"`), `false` otherwise.
 
-### `isFirstRun`
-
-`true` on the first time Normandy runs on a new profile. Normandy sets the
-`app.normandy.first_run` pref to `false` after its first run, so this will be
-`true` exactly once per profile regardless of installation mechanism.
-
-> ⚠ **NOTE:** This targeting attribute is only available for the JEXL expressions
-> of experiments' advanced targeting configs, which are defined in the
-> [experimenter repository](https://experimenter.info). Targeting expressions for
-> messages do not have access to this attribute.
-
-#### Definition
-
-```ts
-declare const isFirstRun: boolean;
-```
-
-[Source](https://searchfox.org/mozilla-central/source/toolkit/components/normandy/lib/ClientEnvironment.sys.mjs#121)
-
 ### `isFirstStartup`
 
 `true` while Firefox is running through its first-startup sequence (i.e., when
-`FirstStartup` is in the `IN_PROGRESS` state). Unlike `isFirstRun`, which tracks
-the first Normandy run, this tracks the first startup of the browser itself.
+`FirstStartup` is in the `IN_PROGRESS` state). This tracks the first startup
+of the browser itself.
 
 > ⚠ **NOTE:** This targeting attribute is only available for the JEXL expressions
 > of experiments' advanced targeting configs, which are defined in the
@@ -1502,7 +1657,7 @@ Boolean that's true once Nimbus has loaded remote experiments from Remote Settin
 
 ### `crashCount`
 
-The total number of crashes the user has experienced, as recorded in the [dump files corresponding to submitted crashes](https://searchfox.org/firefox-main/source/toolkit/components/crashes/CrashManager.in.sys.mjs#297-322). This targeting is only available for Mac and Windows users; Linux users will always return a `crashCount` of 0.
+The total number of crashes per 180 days the user has experienced, as recorded by the [crash manager](https://searchfox.org/firefox-main/source/toolkit/components/crashes/CrashManager.in.sys.mjs#1006-1016) at crash time, independent of whether a crash report was submitted.
 
 #### Definition
 
@@ -1512,7 +1667,7 @@ declare const crashCount: Promise<number>;
 
 ### `daysSinceLastCrash`
 
-The number of days since the most recent crash, as recorded in the [dump files corresponding to submitted crashes](https://searchfox.org/firefox-main/source/toolkit/components/crashes/CrashManager.in.sys.mjs#297-322). If there are no recorded crashes, returns `null`. This targeting is only available for Mac and Windows users; Linux users will always return null for `daysSinceLastCrash`.
+The number of days since the most recent crash, as recorded by the [crash manager](https://searchfox.org/firefox-main/source/toolkit/components/crashes/CrashManager.in.sys.mjs#1006-1016) at crash time, independent of whether a crash report was submitted. If there are no recorded crashes, returns `null`.
 
 #### Definition
 
@@ -1522,7 +1677,7 @@ declare const daysSinceLastCrash: Promise<number|null>;
 
 ### `crashCountInLastDay`
 
-The number of crashes the user has experienced in the last 24 hours, as recorded in the [dump files corresponding to submitted crashes](https://searchfox.org/firefox-main/source/toolkit/components/crashes/CrashManager.in.sys.mjs#297-322). This targeting is only available for Mac and Windows users; Linux users will always return a `crashCountInLastDay` of 0.
+The number of crashes the user has experienced in the last 24 hours, as recorded by the [crash manager](https://searchfox.org/firefox-main/source/toolkit/components/crashes/CrashManager.in.sys.mjs#1006-1016) at crash time, independent of whether a crash report was submitted.
 
 #### Definition
 
@@ -1532,12 +1687,22 @@ declare const crashCountInLastDay: Promise<number>;
 
 ### `crashCountInLastWeek`
 
-The number of crashes the user has experienced in the last 7 days, as recorded in the [dump files corresponding to submitted crashes](https://searchfox.org/firefox-main/source/toolkit/components/crashes/CrashManager.in.sys.mjs#297-322). This targeting is only available for Mac and Windows users; Linux users will always return a `crashCountInLastWeek` of 0.
+The number of crashes the user has experienced in the last 7 days, as recorded by the [crash manager](https://searchfox.org/firefox-main/source/toolkit/components/crashes/CrashManager.in.sys.mjs#1006-1016) at crash time, independent of whether a crash report was submitted.
 
 #### Definition
 
 ```ts
 declare const crashCountInLastWeek: Promise<number>;
+```
+
+### `previousSessionCrashed`
+
+`true` if the previous browser session ended in a crash, as reported by [`SessionStartup`](https://searchfox.org/firefox-main/source/browser/components/sessionstore/SessionStartup.sys.mjs#437).
+
+#### Definition
+
+```ts
+declare const previousSessionCrashed: boolean;
 ```
 
 ### `isLaunchOnLogin`

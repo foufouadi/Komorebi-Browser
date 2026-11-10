@@ -5,9 +5,10 @@
 #include "fs/FileSystemShutdownBlocker.h"
 
 #include "MainThreadUtils.h"
-#include "mozilla/Services.h"
+#include "mozilla/Components.h"
 #include "mozilla/dom/quota/QuotaCommon.h"
 #include "mozilla/dom/quota/ResultExtensions.h"
+#include "nsCRTGlue.h"
 #include "nsComponentManagerUtils.h"
 #include "nsIAsyncShutdown.h"
 #include "nsISupportsImpl.h"
@@ -82,7 +83,7 @@ NS_IMETHODIMP FileSystemWritableBlocker::Unblock() {
 
 Result<already_AddRefed<nsIAsyncShutdownClient>, nsresult>
 FileSystemWritableBlocker::GetBarrier() const {
-  nsCOMPtr<nsIAsyncShutdownService> svc = services::GetAsyncShutdownService();
+  nsCOMPtr<nsIAsyncShutdownService> svc = components::AsyncShutdown::Service();
   QM_TRY(OkIf(svc), Err(NS_ERROR_FAILURE));
 
   nsCOMPtr<nsIAsyncShutdownClient> barrier;

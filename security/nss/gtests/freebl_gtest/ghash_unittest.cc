@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this file,
 // You can obtain one at http://mozilla.org/MPL/2.0/.
 
-#include "testvectors/gcm-vectors.h"
+#include "testvectors_base/test-structs.h"
+#include "testvectors_base/gcm-vectors_base.h"
 #include "gtest/gtest.h"
 #include "util.h"
 
@@ -30,10 +31,10 @@ class GHashTest : public ::testing::TestWithParam<AesGcmKatValue> {
 
     // Hash additional_data, cipher_text.
     gcmHash_Reset(&ghashCtx,
-                  const_cast<const unsigned char *>(additional_data.data()),
+                  const_cast<const unsigned char*>(additional_data.data()),
                   additional_data.size());
     gcmHash_Update(&ghashCtx,
-                   const_cast<const unsigned char *>(cipher_text.data()),
+                   const_cast<const unsigned char*>(cipher_text.data()),
                    cipher_text.size());
 
     // Finalise (hash in the length).

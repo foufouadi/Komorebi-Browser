@@ -7,11 +7,14 @@ Templates provide a way of modifying the task definition of selected tasks.
 They are added to 'try_task_config.json' and processed by the transforms.
 """
 
+import calendar
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
+import time
 from abc import ABCMeta, abstractmethod
 from argparse import SUPPRESS, Action
 from textwrap import dedent
@@ -21,6 +24,7 @@ import requests
 from mozbuild.base import BuildEnvironmentNotFoundException, MozbuildObject
 from mozbuild.util import set_taskcluster_root_url
 
+from . import push
 from .tasks import resolve_tests_by_suite
 from .util.ssh import get_ssh_user
 
@@ -29,6 +33,68 @@ build = MozbuildObject.from_environment(cwd=str(here))
 
 # Set from mach settings in mach_commands.init()
 SKIP_ARTIFACT_BUILD_CHECK = False
+
+# Suffixes of files that are never compiled, so a patch touching only files
+# with these suffixes can safely be tested with artifact builds.
+NON_COMPILED_SUFFIXES = (
+    "^headers^",
+    ".build",
+    ".cjs",
+    ".css",
+    ".headers",
+    ".html",
+    ".ico",
+    ".js",
+    ".json",
+    ".jsx",
+    ".mjs",
+    ".mn",
+    ".png",
+    ".scss",
+    ".sjs",
+    ".svg",
+    ".toml",
+    ".ts",
+    ".tsx",
+    ".xhtml",
+)
+
+# `./mach try` is often left unattended, so the artifact build prompt below
+# only blocks for this long before falling back to not using artifact builds.
+ARTIFACT_PROMPT_TIMEOUT = 30
+
+
+def prompt_with_timeout(message, timeout):
+    """Ask a question on stdin, waiting at most `timeout` seconds for an answer.
+
+    Returns the answer, or None if stdin isn't interactive or nothing was
+    entered in time. Callers should then fall back to a default, so that
+    scripted and unattended pushes are never blocked on an answer.
+    """
+    if not sys.stdin or not sys.stdin.isatty():
+        return None
+
+    print(message, end="", flush=True)
+
+    if sys.platform == "win32":
+        import msvcrt
+
+        deadline = time.monotonic() + timeout
+        while not msvcrt.kbhit():
+            if time.monotonic() > deadline:
+                print()
+                return None
+            time.sleep(0.05)
+    else:
+        # `select` can wait on stdin on POSIX platforms, but on Windows it only
+        # supports sockets, hence the `msvcrt` polling above.
+        import select
+
+        if not select.select([sys.stdin], [], [], timeout)[0]:
+            print()
+            return None
+
+    return sys.stdin.readline().strip()
 
 
 class ParameterConfig:
@@ -66,6 +132,36 @@ class TargetTasksMethod(ParameterConfig):
     def get_parameters(self, target_tasks_method: str, **kwargs):
         if target_tasks_method:
             return {"target_tasks_method": target_tasks_method}
+
+
+class PushDate(ParameterConfig):
+    arguments = [
+        [
+            ["--pushdate"],
+            {
+                "default": None,
+                "help": "Override the build date (format: YYYYMMDDHHMMSS) used for this try push.",
+            },
+        ],
+    ]
+
+    def get_parameters(self, pushdate: str, **kwargs):
+        if pushdate is not None:
+            try:
+                build_date = int(
+                    calendar.timegm(time.strptime(pushdate, "%Y%m%d%H%M%S"))
+                )
+            except ValueError:
+                print(
+                    f"error: --pushdate must be in YYYYMMDDHHMMSS format, got: {pushdate}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            return {
+                "build_date": build_date,
+                "moz_build_date": pushdate,
+                "pushdate": build_date,
+            }
 
 
 class TryConfig(ParameterConfig):
@@ -106,6 +202,17 @@ class Artifact(TryConfig):
         except BuildEnvironmentNotFoundException:
             return False
 
+    @classmethod
+    def is_non_compiled_patch(cls):
+        try:
+            changed_files = list(push.vcs.get_outgoing_files())
+        except Exception:
+            return False
+
+        return bool(changed_files) and all(
+            f.endswith(NON_COMPILED_SUFFIXES) for f in changed_files
+        )
+
     def try_config(self, artifact, no_artifact, **kwargs):
         if artifact:
             return {"use-artifact-builds": True, "disable-pgo": True}
@@ -121,6 +228,25 @@ class Artifact(TryConfig):
         if self.is_artifact_build():
             print("Artifact builds enabled, pass --no-artifact to disable")
             return {"use-artifact-builds": True, "disable-pgo": True}
+
+        if self.is_non_compiled_patch():
+            while True:
+                answer = prompt_with_timeout(
+                    "This patch only touches files that don't require a "
+                    "compiled build (JS/TS/TOML/...). Use artifact builds? "
+                    f"[Y/n] (no answer within {ARTIFACT_PROMPT_TIMEOUT}s "
+                    "means 'n'): ",
+                    ARTIFACT_PROMPT_TIMEOUT,
+                )
+                if answer is None:
+                    print("No answer, not using artifact builds.")
+                    break
+                answer = answer.lower()
+                if answer in ("", "y", "yes"):
+                    return {"use-artifact-builds": True, "disable-pgo": True}
+                if answer in ("n", "no"):
+                    break
+                print(f"Invalid answer: '{answer}'")
 
 
 class Pernosco(TryConfig):
@@ -419,12 +545,56 @@ class ExistingTasks(ParameterConfig):
                     Use existing tasks from a previous push. Without args this
                 uses your most recent try push. You may also specify
                 `rev=<revision>` where <revision> is the head revision of the
-                try push or `task-id=<task id>` where <task id> is the Decision
-                task id of the push. This last method even works for non-try
-                branches.
+                try push, `project=<project>` to use the latest push to
+                <project> (e.g. mozilla-central), or `task-id=<task id>` where
+                <task id> is the Decision task id of the push. These last two
+                methods even work for non-try branches.
                 """,
             },
-        ]
+        ],
+        [
+            ["--use-indexed-tasks"],
+            {
+                "action": "append",
+                "dest": "use_indexed_tasks",
+                "default": [],
+                "metavar": "LABEL=INDEX_PATH",
+                "help": """
+                    Use the task at INDEX_PATH in place of the task LABEL, e.g.
+                the latest signed mozilla-central build. Only completed tasks
+                are indexed. Unlike --use-existing-tasks, which reuses every
+                task of a push, this only replaces LABEL. Can be specified
+                multiple times.
+                """,
+            },
+        ],
+        [
+            ["--existing-tasks-include"],
+            {
+                "action": "append",
+                "dest": "existing_tasks_include",
+                "default": [],
+                "metavar": "REGEX",
+                "help": """
+                    Only reuse tasks from --use-existing-tasks whose label
+                matches REGEX, e.g. '^(docker-image|fetch|toolchain)-'. Can be
+                specified multiple times.
+                """,
+            },
+        ],
+        [
+            ["--existing-tasks-exclude"],
+            {
+                "action": "append",
+                "dest": "existing_tasks_exclude",
+                "default": [],
+                "metavar": "REGEX",
+                "help": """
+                    Don't reuse tasks from --use-existing-tasks whose label
+                matches REGEX. Can be specified multiple times.
+                """,
+            },
+        ],
     ]
 
     def find_decision_task(self, use_existing_tasks):
@@ -447,29 +617,82 @@ class ExistingTasks(ParameterConfig):
         elif use_existing_tasks.startswith("rev="):
             revision = use_existing_tasks[len("rev=") :]
 
+        elif use_existing_tasks.startswith("project="):
+            project = use_existing_tasks[len("project=") :]
+            index_path = f"gecko.v2.{project}.latest.taskgraph.decision"
+            task_id = taskcluster.find_task_id(index_path)
+            print(
+                f"Using existing tasks from the latest {project} push "
+                f"(decision task {task_id})"
+            )
+            return task_id
+
         else:
-            raise Exception("Unable to parse '{use_existing_tasks}'!")
+            raise Exception(f"Unable to parse '{use_existing_tasks}'!")
 
         url = self.TREEHERDER_PUSH_URL.format(branch=branch, revision=revision)
         print(f"Using existing tasks from: {url}")
         index_path = f"gecko.v2.{branch}.revision.{revision}.taskgraph.decision"
         return taskcluster.find_task_id(index_path)
 
-    def get_parameters(self, use_existing_tasks, **kwargs):
-        if not use_existing_tasks:
+    def get_parameters(
+        self,
+        use_existing_tasks,
+        use_indexed_tasks,
+        existing_tasks_include=(),
+        existing_tasks_exclude=(),
+        **kwargs,
+    ):
+        if (existing_tasks_include or existing_tasks_exclude) and not (
+            use_existing_tasks
+        ):
+            print(
+                "error: --existing-tasks-include and --existing-tasks-exclude "
+                "require --use-existing-tasks",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        if not use_existing_tasks and not use_indexed_tasks:
             return
 
         from taskgraph.util import taskcluster
 
         set_taskcluster_root_url()
 
-        if use_existing_tasks.startswith("task-id="):
-            tid = use_existing_tasks[len("task-id=") :]
-        else:
-            tid = self.find_decision_task(use_existing_tasks)
+        existing_tasks = {}
+        if use_existing_tasks:
+            if use_existing_tasks.startswith("task-id="):
+                decision_task_id = use_existing_tasks[len("task-id=") :]
+            else:
+                decision_task_id = self.find_decision_task(use_existing_tasks)
 
-        label_to_task_id = taskcluster.get_artifact(tid, "public/label-to-taskid.json")
-        return {"existing_tasks": label_to_task_id}
+            existing_tasks = taskcluster.get_artifact(
+                decision_task_id, "public/label-to-taskid.json"
+            )
+            include = [re.compile(r) for r in existing_tasks_include]
+            exclude = [re.compile(r) for r in existing_tasks_exclude]
+            existing_tasks = {
+                label: task_id
+                for label, task_id in existing_tasks.items()
+                if (not include or any(r.search(label) for r in include))
+                and not any(r.search(label) for r in exclude)
+            }
+
+        for label_and_index in use_indexed_tasks:
+            label, sep, index_path = label_and_index.partition("=")
+            if not sep or not label or not index_path:
+                print(
+                    "error: --use-indexed-tasks must be LABEL=INDEX_PATH, "
+                    f"got '{label_and_index}'",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            task_id = taskcluster.find_task_id(index_path)
+            print(f"Using indexed task {task_id} for {label} (via {index_path})")
+            existing_tasks[label] = task_id
+
+        return {"existing_tasks": existing_tasks}
 
 
 class RangeAction(Action):
@@ -745,7 +968,7 @@ class BuildCar(ParameterConfig):
     CUSTOM_CAR_LABELS = [
         "toolchain-linux64-custom-car",
         "toolchain-win64-custom-car",
-        "toolchain-macosx-arm64-custom-car",
+        "toolchain-macosx64-aarch64-custom-car",
         "toolchain-android-custom-car",
     ]
 
@@ -878,6 +1101,7 @@ all_task_configs = {
     "gecko-profile": GeckoProfile,
     "new-test-config": NewConfig,
     "path": Path,
+    "pushdate": PushDate,
     "test-tag": Tag,
     "pernosco": Pernosco,
     "rebuild": Rebuild,

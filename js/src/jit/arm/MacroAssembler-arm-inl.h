@@ -286,6 +286,11 @@ void MacroAssembler::xorPtr(Imm32 imm, Register src, Register dest) {
   ma_eor(imm, src, dest, scratch);
 }
 
+void MacroAssembler::nor32(Imm32 imm, Register src, Register dest) {
+  or32(imm, src, dest);
+  not32(dest);
+}
+
 // ===============================================================
 // Swap instructions
 
@@ -754,6 +759,15 @@ void MacroAssembler::lshift64(Imm32 imm, Register64 dest) {
   }
 }
 
+void MacroAssembler::lshift64(Imm32 imm, Register64 src, Register64 dest) {
+  MOZ_ASSERT(0 <= imm.value && imm.value < 64);
+  MOZ_ASSERT(dest.low != src.high);
+  if (src != dest) {
+    move64(src, dest);
+  }
+  lshift64(imm, dest);
+}
+
 void MacroAssembler::lshift64(Register unmaskedShift, Register64 dest) {
   // dest.high = dest.high << shift | dest.low << shift - 32 | dest.low >> 32 -
   // shift Note: one of the two dest.low shift will always yield zero due to
@@ -865,6 +879,16 @@ void MacroAssembler::rshift64Arithmetic(Imm32 imm, Register64 dest) {
   }
 }
 
+void MacroAssembler::rshift64Arithmetic(Imm32 imm, Register64 src,
+                                        Register64 dest) {
+  MOZ_ASSERT(0 <= imm.value && imm.value < 64);
+  MOZ_ASSERT(dest.low != src.high);
+  if (src != dest) {
+    move64(src, dest);
+  }
+  rshift64Arithmetic(imm, dest);
+}
+
 void MacroAssembler::rshift64Arithmetic(Register unmaskedShift,
                                         Register64 dest) {
   Label proceed;
@@ -928,6 +952,15 @@ void MacroAssembler::rshift64(Imm32 imm, Register64 dest) {
     ma_lsr(Imm32(imm.value - 32), dest.high, dest.low);
     ma_mov(Imm32(0), dest.high);
   }
+}
+
+void MacroAssembler::rshift64(Imm32 imm, Register64 src, Register64 dest) {
+  MOZ_ASSERT(0 <= imm.value && imm.value < 64);
+  MOZ_ASSERT(dest.low != src.high);
+  if (src != dest) {
+    move64(src, dest);
+  }
+  rshift64(imm, dest);
 }
 
 void MacroAssembler::rshift64(Register unmaskedShift, Register64 dest) {
@@ -1118,6 +1151,37 @@ void MacroAssembler::rotateRight64(Register shift, Register64 src,
   as_orr(dest.low, dest.low, lsr(temp, shift_value));
 
   bind(&done);
+}
+
+// ===============================================================
+// Shift or rotate, then combine with another register
+
+void MacroAssembler::lshift32ThenAdd(Imm32 shift, Register rhs,
+                                     Register srcDest) {
+  MOZ_ASSERT(rhs != srcDest);
+  lshift32(shift, srcDest);
+  add32(rhs, srcDest);
+}
+
+void MacroAssembler::lshift32ThenOr(Imm32 shift, Register rhs,
+                                    Register srcDest) {
+  MOZ_ASSERT(rhs != srcDest);
+  lshift32(shift, srcDest);
+  or32(rhs, srcDest);
+}
+
+void MacroAssembler::rshiftPtrThenXor(Imm32 shift, Register rhs,
+                                      Register srcDest) {
+  MOZ_ASSERT(rhs != srcDest);
+  rshiftPtr(shift, srcDest);
+  xorPtr(rhs, srcDest);
+}
+
+void MacroAssembler::rotateLeft64ThenXor(Imm32 count, Register64 rhs,
+                                         Register64 srcDest) {
+  MOZ_ASSERT(rhs != srcDest);
+  rotateLeft64(count, srcDest, srcDest, InvalidReg);
+  xor64(rhs, srcDest);
 }
 
 // ===============================================================
@@ -2286,6 +2350,26 @@ void MacroAssembler::branchTestNull(Condition cond, const ValueOperand& value,
   branchTestNullImpl(cond, value, label);
 }
 
+void MacroAssembler::branchTestNullOrUndefined(Condition cond, Register tag,
+                                               Label* label) {
+  MOZ_ASSERT(cond == Equal || cond == NotEqual);
+  if (cond == Equal) {
+    branchTestNull(Equal, tag, label);
+    branchTestUndefined(Equal, tag, label);
+    return;
+  }
+  Label done;
+  branchTestNull(Equal, tag, &done);
+  branchTestUndefined(NotEqual, tag, label);
+  bind(&done);
+}
+
+void MacroAssembler::branchTestNullOrUndefined(Condition cond,
+                                               const ValueOperand& value,
+                                               Label* label) {
+  branchTestNullOrUndefined(cond, value.typeReg(), label);
+}
+
 template <typename T>
 void MacroAssembler::branchTestNullImpl(Condition cond, const T& t,
                                         Label* label) {
@@ -2318,6 +2402,11 @@ void MacroAssembler::branchTestObjectImpl(Condition cond, const T& t,
                                           Label* label) {
   Condition c = testObject(cond, t);
   ma_b(label, c);
+}
+
+void MacroAssembler::branchTestGCThing(Condition cond, Register tag,
+                                       Label* label) {
+  branchTestGCThingImpl(cond, tag, label);
 }
 
 void MacroAssembler::branchTestGCThing(Condition cond, const Address& address,

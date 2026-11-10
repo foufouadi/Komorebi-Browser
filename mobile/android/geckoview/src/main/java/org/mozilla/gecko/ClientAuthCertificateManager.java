@@ -217,6 +217,8 @@ public class ClientAuthCertificateManager {
   // where "unsuitable" means that the implementation couldn't gather the
   // information necessary for the rest of gecko to use it.
   private static class UnsuitableCertificateException extends Exception {
+    private static final long serialVersionUID = 1L;
+
     public UnsuitableCertificateException(final String message) {
       super(message);
     }
@@ -232,9 +234,9 @@ public class ClientAuthCertificateManager {
   // identifying the curve of the key.
   private static class ClientAuthCertificate extends JNIObject {
     private static final String LOGTAG = "ClientAuthCertificate";
-    // Mirrors kIPCClientCertsObjectTypeRSAKey in nsNSSIOLayer.h
+    // Object type value for RSA keys
     private static int sRSAKey = 2;
-    // Mirrors kIPCClientCertsObjectTypeECKey in nsNSSIOLayer.h
+    // Object type value for EC keys
     private static int sECKey = 3;
 
     private String mAlias;

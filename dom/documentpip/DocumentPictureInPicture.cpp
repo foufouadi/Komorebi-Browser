@@ -78,8 +78,10 @@ void DocumentPictureInPicture::OnPiPResized() {
 
   int x = innerWindow->GetScreenLeft(CallerType::System, IgnoreErrors());
   int y = innerWindow->GetScreenTop(CallerType::System, IgnoreErrors());
-  int width = static_cast<int>(innerWindow->GetInnerWidth(IgnoreErrors()));
-  int height = static_cast<int>(innerWindow->GetInnerHeight(IgnoreErrors()));
+  int width = static_cast<int>(std::round(
+      innerWindow->GetInnerWidth(dom::CallerType::System, IgnoreErrors())));
+  int height = static_cast<int>(std::round(
+      innerWindow->GetInnerHeight(dom::CallerType::System, IgnoreErrors())));
 
   mPreviousExtent = Some(CSSIntRect(x, y, width, height));
 
@@ -118,6 +120,7 @@ nsGlobalWindowInner* DocumentPictureInPicture::GetWindow() const {
 const CSSIntSize DocumentPictureInPicture::sDefaultSize = {400, 300};
 const CSSIntSize DocumentPictureInPicture::sMinSize = {240, 50};
 
+MOZ_CAN_RUN_SCRIPT
 static nsresult OpenPiPWindowUtility(nsPIDOMWindowOuter* aParent,
                                      const CSSIntRect& aExtent, bool aPrivate,
                                      bool aDisallowReturnToOpener,
@@ -150,7 +153,7 @@ static nsresult OpenPiPWindowUtility(nsPIDOMWindowOuter* aParent,
     features += ",disallow_return_to_opener";
   }
 
-  rv = pww->OpenWindow2(aParent, uri, "_blank"_ns, features,
+  rv = pww->OpenWindow2(aParent, uri, u"_blank"_ns, features,
                         mozilla::dom::UserActivation::Modifiers::None(), false,
                         false, true, nullptr, false, false, false,
                         nsPIWindowWatcher::PrintKind::PRINT_NONE, loadState,
@@ -259,7 +262,7 @@ already_AddRefed<Promise> DocumentPictureInPicture::RequestWindow(
   }
 
   // 2. Throw if not top-level
-  BrowsingContext* bc = ownerWin->GetBrowsingContext();
+  RefPtr<BrowsingContext> bc = ownerWin->GetBrowsingContext();
   if (!bc || !bc->IsTop()) {
     aRv.ThrowNotAllowedError(
         "Document Picture-in-Picture is only available in top-level contexts");
@@ -327,13 +330,22 @@ already_AddRefed<Promise> DocumentPictureInPicture::RequestWindow(
   // 15. aOptions.mDisallowReturnToOpener
   // 16. Configure PIP to float on top via window features
   RefPtr<BrowsingContext> pipTraversable;
-  rv = OpenPiPWindowUtility(
-      ownerWin->GetOuterWindow(), extent, bc->UsePrivateBrowsing(),
-      aOptions.mDisallowReturnToOpener, getter_AddRefs(pipTraversable));
+  RefPtr outer = ownerWin->GetOuterWindow();
+  rv = OpenPiPWindowUtility(outer, extent, bc->UsePrivateBrowsing(),
+                            aOptions.mDisallowReturnToOpener,
+                            getter_AddRefs(pipTraversable));
   if (NS_FAILED(rv)) {
     rv = bc->SetControlsDocumentPiP(false);
     MOZ_ASSERT(NS_SUCCEEDED(rv));
     aRv.ThrowUnknownError("Failed to create PIP window");
+    return nullptr;
+  }
+
+  // Opening a window is MOZ_CAN_RUN_SCRIPT, we might be going away.
+  if (!ownerWin->IsFullyActive()) {
+    pipTraversable->Close(CallerType::System, IgnoreErrors());
+    (void)bc->SetControlsDocumentPiP(false);
+    aRv.ThrowNotAllowedError("Document is not fully active");
     return nullptr;
   }
 

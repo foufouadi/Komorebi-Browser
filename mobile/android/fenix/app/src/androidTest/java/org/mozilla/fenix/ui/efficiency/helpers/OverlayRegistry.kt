@@ -142,11 +142,42 @@ object OverlayRegistry {
                 ),
         )
 
+    /**
+     * "Secure your saved passwords" dialog: an AppCompat AlertDialog raised in its own (APPLICATION-type, focus-
+     * stealing) window when the saved-passwords screen is opened on a device with no secure lock set, prompting the
+     * user to "Set up now" or "Later". It is composed asynchronously after the screen loads, so a fixed-position
+     * ClickIfPresent in the navigation path races it and usually misses; the dialog then covers the screen and the
+     * arrival anchor never resolves (bug 2062748: verifyUpdatedLoginIsSavedTest flaky).
+     *
+     * Dismiss with "Later" (res-id `button2`), the neutral choice: it closes the prompt without launching device
+     * security setup ("Set up now"/`button1` would). Matched on the title text, which is stable across the generic
+     * `alertTitle`/`button2` res-ids an AlertDialog shares with every other system dialog.
+     */
+    val SECURE_YOUR_SAVED_PASSWORDS_DIALOG =
+        BlockingOverlay(
+            name = "Secure your saved passwords dialog",
+            presence =
+                Selector(
+                    strategy = SelectorStrategy.UIAUTOMATOR_WITH_TEXT_CONTAINS,
+                    value = "Secure your saved passwords",
+                    description = "Secure saved passwords dialog title",
+                ),
+            dismiss =
+                listOf(
+                    Selector(
+                        strategy = SelectorStrategy.UIAUTOMATOR_WITH_TEXT,
+                        value = "Later",
+                        description = "Secure saved passwords dialog Later button",
+                    )
+                ),
+        )
+
     val known: List<BlockingOverlay> =
         listOf(
             STYLUS_HANDWRITING_PROMPT,
             ADD_TO_HOME_SCREEN_PROMPT,
             OPEN_LINK_IN_APP_PROMPT,
             SET_DEFAULT_BROWSER_SYSTEM_DIALOG,
+            SECURE_YOUR_SAVED_PASSWORDS_DIALOG,
         )
 }

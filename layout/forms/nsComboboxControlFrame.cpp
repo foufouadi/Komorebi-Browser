@@ -37,8 +37,7 @@ using namespace mozilla::gfx;
 
 nsComboboxControlFrame* NS_NewComboboxControlFrame(PresShell* aPresShell,
                                                    ComputedStyle* aStyle) {
-  return new (aPresShell)
-      nsComboboxControlFrame(aStyle, aPresShell->GetPresContext());
+  return new nsComboboxControlFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsComboboxControlFrame)
@@ -112,7 +111,7 @@ nscoord nsComboboxControlFrame::GetLongestOptionISize(
   auto textTransform = textStyle->mTextTransform.IsNone()
                            ? Nothing()
                            : Some(textStyle->mTextTransform);
-  nsAtom* language = StyleFont()->mLanguage;
+  nsAtom* language = StyleFont()->GetLangAtom();
   AutoTArray<bool, 50> charsToMergeArray;
   AutoTArray<bool, 50> deletedCharsArray;
   auto GetOptionSize = [&](uint32_t aIndex) -> nscoord {
@@ -281,15 +280,15 @@ void ComboboxLabelFrame::Reflow(nsPresContext* aPresContext,
 
 nsIFrame* NS_NewComboboxLabelFrame(PresShell* aPresShell,
                                    ComputedStyle* aStyle) {
-  return new (aPresShell)
-      ComboboxLabelFrame(aStyle, aPresShell->GetPresContext());
+  return new ComboboxLabelFrame(aStyle, aPresShell->GetPresContext());
 }
 
 void nsComboboxControlFrame::Destroy(DestroyContext& aContext) {
   auto& select = Select();
   if (select.OpenInParentProcess()) {
     nsContentUtils::AddScriptRunner(NS_NewRunnableFunction(
-        "nsComboboxControlFrame::Destroy", [element = RefPtr{&select}] {
+        "nsComboboxControlFrame::Destroy",
+        [element = RefPtr{&select}]() MOZ_CAN_RUN_SCRIPT_BOUNDARY_LAMBDA {
           // Don't hide the dropdown if the element has another frame already,
           // this prevents closing dropdowns on reframe, see bug 1440506.
           //
@@ -297,9 +296,9 @@ void nsComboboxControlFrame::Destroy(DestroyContext& aContext) {
           // from DOM node removal. But perhaps we can be a bit smarter here.
           if (!element->IsCombobox() ||
               !element->GetPrimaryFrame(FlushType::Frames)) {
-            nsContentUtils::DispatchChromeEvent(
-                element->OwnerDoc(), element, u"mozhidedropdown"_ns,
-                CanBubble::eYes, Cancelable::eNo);
+            nsContentUtils::DispatchChromeEvent(element, u"mozhidedropdown"_ns,
+                                                CanBubble::eYes,
+                                                Cancelable::eNo);
           }
         }));
   }

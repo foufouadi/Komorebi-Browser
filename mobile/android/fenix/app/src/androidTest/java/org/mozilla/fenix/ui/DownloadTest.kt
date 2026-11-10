@@ -13,6 +13,7 @@ import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.mozilla.fenix.customannotations.Converted
+import org.mozilla.fenix.customannotations.Critical
 import org.mozilla.fenix.customannotations.SkipLeaks
 import org.mozilla.fenix.customannotations.SmokeTest
 import org.mozilla.fenix.helpers.AppAndSystemHelper.assertExternalAppOpens
@@ -26,6 +27,7 @@ import org.mozilla.fenix.helpers.FenixTestRule
 import org.mozilla.fenix.helpers.HomeActivityTestRule
 import org.mozilla.fenix.helpers.TestAssetHelper.downloadPageAsset
 import org.mozilla.fenix.helpers.TestAssetHelper.loremIpsumAsset
+import org.mozilla.fenix.helpers.TestHelper.appName
 import org.mozilla.fenix.helpers.TestHelper.clickSnackbarButton
 import org.mozilla.fenix.helpers.TestHelper.mDevice
 import org.mozilla.fenix.helpers.TestHelper.verifySnackBarText
@@ -102,8 +104,13 @@ class DownloadTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2298616
+    @Converted(
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.DownloadTest#verifyDownloadCompleteNotificationTest"],
+        bug = 2083770,
+        since = "2026-10",
+    )
     @SkipLeaks(reasons = ["https://bugzilla.mozilla.org/show_bug.cgi?id=2006672"])
-    @Ignore("https://bugzilla.mozilla.org/show_bug.cgi?id=1999369")
+    @Critical
     @Test
     fun verifyDownloadCompleteNotificationTest() {
         downloadRobot(composeTestRule) {
@@ -118,15 +125,7 @@ class DownloadTest {
                 assertExternalAppOpens(GOOGLE_APPS_PHOTOS)
                 mDevice.pressBack()
                 mDevice.openNotification()
-                verifySystemNotificationExists("Download completed")
-                swipeDownloadNotification(
-                    composeTestRule,
-                    direction = "Left",
-                    shouldDismissNotification = true,
-                    canExpandNotification = false,
-                    notificationItem = "png_image.png",
-                )
-                verifySystemNotificationDoesNotExist("Firefox Fenix")
+                verifySystemNotificationDoesNotExist("Download completed")
             }
             .closeNotificationTray(composeTestRule) {}
     }
@@ -158,7 +157,7 @@ class DownloadTest {
         browserScreen(composeTestRule) {}
             .openThreeDotMenu {}
             .clickDownloadsButton {
-                verifyEmptyDownloadsList()
+                verifyEmptyDownloadsListAfterCancel()
             }
     }
 
@@ -180,6 +179,12 @@ class DownloadTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1114970
+    @Converted(
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.DownloadTest#deleteDownloadedFileTest"],
+        bug = 2071272,
+        since = "2026-09",
+    )
+    @Critical
     @Test
     @SkipLeaks(reasons = ["https://bugzilla.mozilla.org/show_bug.cgi?id=2004099"])
     fun deleteDownloadedFileTest() {
@@ -319,7 +324,7 @@ class DownloadTest {
                     canExpandNotification = true,
                     notificationItem = "1GB.zip",
                 )
-                verifySystemNotificationDoesNotExist("Firefox Fenix")
+                verifySystemNotificationDoesNotExist(appName)
             }
     }
 
@@ -343,9 +348,9 @@ class DownloadTest {
                     // On API 34 we first need to expand the system notification before verifying that the app name is
                     // displayed
                     expandNotificationMessage("3GB.zip")
-                    verifySystemNotificationExists("Firefox Fenix")
+                    verifySystemNotificationExists(appName)
                 } else {
-                    verifySystemNotificationExists("Firefox Fenix")
+                    verifySystemNotificationExists(appName)
                 }
             }
     }
@@ -366,7 +371,7 @@ class DownloadTest {
                 clickCancelPrivateDownloadsPromptButton()
             }
             .openNotificationShade {
-                verifySystemNotificationDoesNotExist("Firefox Fenix")
+                verifySystemNotificationDoesNotExist(appName)
             }
     }
 
@@ -392,7 +397,7 @@ class DownloadTest {
             .openThreeDotMenu {}
             .clickShareButton {}
             .clickSaveAsPDF(composeTestRule) {
-                verifyDownloadPrompt(composeTestRule, downloadFile)
+                verifyDownloadPrompt(composeTestRule)
             }
             .clickDownload(composeTestRule) {
                 verifyDownloadCompleteSnackbar(fileName = downloadFile)

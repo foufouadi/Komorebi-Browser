@@ -29,6 +29,7 @@
 #include "vm/JSFunction.h"
 #include "vm/JSObject.h"
 #include "vm/JSScript.h"
+#include "vm/SavedFrame.h"
 #include "vm/Stack.h"  // js::ResumeFrameArgs
 #include "wasm/WasmBuiltins.h"
 #include "wasm/WasmInstance.h"
@@ -82,6 +83,20 @@ static uint32_t NumArgAndLocalSlots(const InlineFrameIterator& frame) {
   JSScript* script = frame.script();
   return CountArgSlots(script, frame.maybeCalleeTemplate()) + script->nfixed();
 }
+
+#ifdef JS_HW_SHADOW_STACK
+// Advance the tracked shadow stack pointer by one entry if it matches the
+// native JIT frame. This ensures that we unwind the shadow stack only for
+// native stack frames corresponding to real calls.
+static void MaybeUnwindShadowStackEntry(CommonFrameLayout* frame,
+                                        ResumeFromException* rfe) {
+  if (rfe->shadowStackPointer &&
+      *rfe->shadowStackPointer ==
+          reinterpret_cast<uintptr_t>(frame->returnAddress())) {
+    rfe->shadowStackPointer++;
+  }
+}
+#endif
 
 static TrampolineNative TrampolineNativeForFrame(
     JSRuntime* rt, TrampolineNativeFrameLayout* layout) {
@@ -216,9 +231,7 @@ static bool ShouldBailoutForDebugger(JSContext* cx,
 
 static void OnLeaveIonFrame(JSContext* cx, const InlineFrameIterator& frame,
                             ResumeFromException* rfe) {
-  bool returnFromThisFrame =
-      cx->isPropagatingForcedReturn() || cx->isClosingGenerator();
-  if (!returnFromThisFrame) {
+  if (!cx->isPropagatingForcedReturn()) {
     return;
   }
 
@@ -235,11 +248,7 @@ static void OnLeaveIonFrame(JSContext* cx, const InlineFrameIterator& frame,
 
   MOZ_ASSERT(!frame.more());
 
-  if (cx->isClosingGenerator()) {
-    HandleClosingGeneratorReturn(cx, rematFrame, /*frameOk=*/true);
-  } else {
-    cx->clearPropagatingForcedReturn();
-  }
+  cx->clearPropagatingForcedReturn();
 
   Value& rval = rematFrame->returnValue();
   MOZ_RELEASE_ASSERT(!rval.isMagic());
@@ -272,7 +281,6 @@ static void HandleExceptionIon(JSContext* cx, const InlineFrameIterator& frame,
   // try/catch blocks, but OOM is implementation-defined so that's acceptable.
   if (frame.frame().jsFrame()->isResumingGenerator()) {
     MOZ_ASSERT(!frame.more(), "the resume path has no calls to inline");
-    MOZ_ASSERT(!cx->isClosingGenerator());
     return;
   }
 
@@ -310,11 +318,6 @@ static void HandleExceptionIon(JSContext* cx, const InlineFrameIterator& frame,
         break;
 
       case TryNoteKind::Catch:
-        // If we're closing a generator, we have to skip catch blocks.
-        if (cx->isClosingGenerator()) {
-          break;
-        }
-
         if (cx->isExceptionPending()) {
           // Ion can compile try-catch, but bailing out to catch
           // exceptions is slow. Reset the warm-up counter so that if we
@@ -389,8 +392,6 @@ static void HandleExceptionIon(JSContext* cx, const InlineFrameIterator& frame,
       case TryNoteKind::Loop:
         break;
 
-      // TryNoteKind::ForOfIterclose is handled internally by the try note
-      // iterator.
       default:
         MOZ_CRASH("Unexpected try note");
     }
@@ -507,11 +508,6 @@ static bool ProcessTryNotesBaseline(JSContext* cx, const JSJitFrameIter& frame,
     MOZ_ASSERT(cx->isExceptionPending());
     switch (tn->kind()) {
       case TryNoteKind::Catch: {
-        // If we're closing a generator, we have to skip catch blocks.
-        if (cx->isClosingGenerator()) {
-          break;
-        }
-
         SettleOnTryNote(cx, tn, frame, ei, rfe, pc);
 
         // Ion can compile try-catch, but bailing out to catch
@@ -592,8 +588,6 @@ static bool ProcessTryNotesBaseline(JSContext* cx, const JSJitFrameIter& frame,
       case TryNoteKind::Loop:
         break;
 
-      // TryNoteKind::ForOfIterClose is handled internally by the try note
-      // iterator.
       default:
         MOZ_CRASH("Invalid try note");
     }
@@ -617,6 +611,7 @@ static void HandleExceptionBaseline(JSContext* cx, JSJitFrameIter& frame,
     // JSOp::AfterYield) and the environment chain is the suspended generator's
     // environment, so it must not be unwound here. Just pop the frame.
     MOZ_ASSERT(pc == frame.baselineFrame()->script()->code());
+    MOZ_ASSERT(!frame.baselineFrame()->hasPendingDebugModeOSRReturn());
     EnsureUnwoundJitExitFrame(cx->activation()->asJit(),
                               frame.baselineFrame()->framePrefix());
     return;
@@ -629,16 +624,25 @@ static void HandleExceptionBaseline(JSContext* cx, JSJitFrameIter& frame,
   // address. We could set the return address to nullptr to ensure it's never
   // used, but the profiler expects a non-null return value for its JitCode map
   // lookup so we have to use an address in the interpreter code instead.
-  if (!frame.baselineFrame()->runningInInterpreter()) {
+  BaselineFrame* baselineFrame = frame.baselineFrame();
+  if (!baselineFrame->runningInInterpreter() ||
+      baselineFrame->hasPendingDebugModeOSRReturn()) {
     const BaselineInterpreter& interp =
         cx->runtime()->jitRuntime()->baselineInterpreter();
     uint8_t* retAddr = interp.codeRaw();
-    BaselineFrame* baselineFrame = frame.baselineFrame();
-
     // Suppress profiler sampling while we fix up the frame to ensure the
     // sampler thread doesn't see an inconsistent state.
     AutoSuppressProfilerSampling suppressProfilerSampling(cx);
-    baselineFrame->switchFromJitToInterpreterForExceptionHandler(cx, pc);
+    if (!baselineFrame->runningInInterpreter()) {
+      baselineFrame->switchFromJitToInterpreterForExceptionHandler(cx, pc);
+    }
+    if (baselineFrame->hasPendingDebugModeOSRReturn()) {
+      auto* site = cx->runtime()->jitRuntime()->lookupDebugModeOSRReturnSite(
+          prevFrame->returnAddress());
+      MOZ_RELEASE_ASSERT(site);
+      baselineFrame->clearPendingDebugModeOSRReturn();
+      cx->runtime()->jitRuntime()->releaseDebugModeOSRReturnSite(site);
+    }
     prevFrame->setReturnAddress(retAddr);
 
     // Ensure the current iterator's resumePCInCurrentFrame_ isn't used
@@ -662,16 +666,14 @@ static void HandleExceptionBaseline(JSContext* cx, JSJitFrameIter& frame,
 
 again:
   if (cx->isExceptionPending()) {
-    if (!cx->isClosingGenerator()) {
-      if (!DebugAPI::onExceptionUnwind(cx, frame.baselineFrame())) {
-        if (!cx->isExceptionPending()) {
-          goto again;
-        }
+    if (!DebugAPI::onExceptionUnwind(cx, frame.baselineFrame())) {
+      if (!cx->isExceptionPending()) {
+        goto again;
       }
-      // Ensure that the debugger hasn't returned 'true' while clearing the
-      // exception state.
-      MOZ_ASSERT(cx->isExceptionPending());
     }
+    // Ensure that the debugger hasn't returned 'true' while clearing the
+    // exception state.
+    MOZ_ASSERT(cx->isExceptionPending());
 
     if (hasTryNotes) {
       EnvironmentIter ei(cx, frame.baselineFrame(), pc);
@@ -685,8 +687,6 @@ again:
         return;
       }
     }
-
-    frameOk = HandleClosingGeneratorReturn(cx, frame.baselineFrame(), frameOk);
   } else {
     if (hasTryNotes) {
       CloseLiveIteratorsBaselineForUncatchableException(cx, frame, pc);
@@ -772,9 +772,6 @@ void HandleException(ResumeFromException* rfe) {
   }
 #endif
 
-  JitFrameIter iter(cx->activation()->asJit(),
-                    /* mustUnwindActivation = */ true);
-
   // Live wasm code on the stack is kept alive (in TraceJitActivation) by
   // marking the instance of every wasm::Frame found by WasmFrameIter.
   // However, we're going to pop frames while iterating which means that a GC
@@ -785,9 +782,25 @@ void HandleException(ResumeFromException* rfe) {
   // jump to the JIT's exception handling trampoline. However, we must keep the
   // throw stub alive itself which is owned by the innermost instance.
   Rooted<WasmInstanceObject*> keepAlive(cx);
-  if (iter.isWasm()) {
-    keepAlive = iter.asWasm().instance()->object();
+  if (activation->hasWasmExitFP() && !activation->isWasmTrapping()) {
+    keepAlive = activation->wasmExitInstance()->object();
   }
+
+  JitFrameIter iter(activation, /* mustUnwindActivation = */ true);
+
+#ifdef JS_HW_SHADOW_STACK
+  if (rfe->shadowStackPointer && iter.isJSJit() &&
+      iter.asJSJit().isUnwoundJitExit()) {
+    uintptr_t returnAddress =
+        reinterpret_cast<uintptr_t>(iter.asJSJit().current()->returnAddress());
+    if (*rfe->shadowStackPointer != returnAddress) {
+      // An already-unwound frame can leave one extra shadow stack entry, for
+      // example when DebugEpilogue discards its VM exit frame.
+      MOZ_RELEASE_ASSERT(rfe->shadowStackPointer[1] == returnAddress);
+      rfe->shadowStackPointer++;
+    }
+  }
+#endif
 
   CommonFrameLayout* prevJitFrame = nullptr;
   while (!iter.done()) {
@@ -884,6 +897,13 @@ void HandleException(ResumeFromException* rfe) {
 
     prevJitFrame = frame.current();
     ++iter;
+#ifdef JS_HW_SHADOW_STACK
+    if (!iter.done()) {
+      // Unwind the topmost entry on the shadow stack if it corresponds to the
+      // native-stack frame we just processed.
+      MaybeUnwindShadowStackEntry(prevJitFrame, rfe);
+    }
+#endif
   }
 
   // Return to C++ code by returning to the activation's JS or Wasm entry frame.
@@ -1299,6 +1319,7 @@ static void TraceJitExitFrame(JSTracer* trc, const JSJitFrameIter& frame) {
     size_t len = native->argc() + 2;
     Value* vp = native->vp();
     TraceRootRange(trc, len, vp, "ion-native-args");
+    TraceRoot(trc, native->savedCallee(), "ion-native-saved-callee");
     if (frame.isExitFrameLayout<ConstructNativeExitFrameLayout>()) {
       TraceRoot(trc, vp + len, "ion-native-new-target");
     }
@@ -1310,6 +1331,7 @@ static void TraceJitExitFrame(JSTracer* trc, const JSJitFrameIter& frame) {
         frame.exitFrame()->as<IonOOLNativeExitFrameLayout>();
     TraceRoot(trc, oolnative->stubCode(), "ion-ool-native-code");
     TraceRoot(trc, oolnative->vp(), "iol-ool-native-vp");
+    TraceRoot(trc, oolnative->savedCallee(), "ion-ool-native-saved-callee");
     size_t len = oolnative->argc() + 1;
     TraceRootRange(trc, len, oolnative->thisp(), "ion-ool-native-thisargs");
     return;
@@ -1520,6 +1542,15 @@ void TraceJitFrames(JSTracer* trc, JitActivation* activation) {
       uint8_t* nextPC = frames.resumePCinCurrentFrame();
       MOZ_ASSERT(nextPC != nullptr);
       wasm::WasmFrameIter& wasmFrameIter = frames.asWasm();
+
+      // At the start of a wasm segment, keep alive the instance owning the
+      // exit stub we entered wasm through. Forget it afterwards so we only
+      // trace it once per segment.
+      if (wasm::Instance* exitInstance = wasmFrameIter.exitInstance()) {
+        wasm::TraceInstanceEdge(trc, exitInstance,
+                                "WasmFrameIter exit instance");
+        wasmFrameIter.resetExitInstance();
+      }
 #ifdef ENABLE_WASM_JSPI
       if (wasmFrameIter.currentFrameStackSwitched()) {
         highestByteVisitedInPrevWasmFrame = 0;
@@ -1527,6 +1558,14 @@ void TraceJitFrames(JSTracer* trc, JitActivation* activation) {
           // Trace the fields on the continuation stack itself. The frames on
           // the stack will be traced below.
           wasmFrameIter.contStack()->traceFields(trc);
+        }
+        // Trace the initial function's instance, which the base-frame stub
+        // stashed in the crossed base frame; no stack map covers it, and a
+        // return_call may have collapsed the frame that otherwise held it.
+        if (wasm::Instance* contBaseInstance =
+                wasmFrameIter.contBaseInstance()) {
+          wasm::TraceInstanceEdge(trc, contBaseInstance,
+                                  "cont base frame instance");
         }
       }
 #endif
@@ -1650,8 +1689,14 @@ RInstructionResults::RInstructionResults(JitFrameLayout* fp)
 RInstructionResults::RInstructionResults(RInstructionResults&& src)
     : results_(std::move(src.results_)),
       fp_(src.fp_),
-      initialized_(src.initialized_) {
+      initialized_(src.initialized_),
+      failureStatus_(src.failureStatus_),
+      exception_(src.exception_),
+      exceptionStack_(src.exceptionStack_) {
   src.initialized_ = false;
+  src.failureStatus_.reset();
+  src.exception_ = UndefinedValue();
+  src.exceptionStack_ = nullptr;
 }
 
 RInstructionResults& RInstructionResults::operator=(RInstructionResults&& rhs) {
@@ -1688,6 +1733,21 @@ bool RInstructionResults::isInitialized() const { return initialized_; }
 
 size_t RInstructionResults::length() const { return results_->length(); }
 
+void RInstructionResults::saveFailure(JSContext* cx) {
+  MOZ_ASSERT(!hasFailure());
+  failureStatus_.emplace(cx->exceptionStatus());
+  if (JS::IsCatchableExceptionStatus(*failureStatus_)) {
+    exception_ = cx->getPendingExceptionUnwrapped();
+    exceptionStack_ = cx->getPendingExceptionStack();
+  }
+}
+
+void RInstructionResults::restoreFailure(JSContext* cx) const {
+  MOZ_ASSERT(hasFailure());
+  cx->restorePendingExceptionState(*failureStatus_, exception_,
+                                   exceptionStack_);
+}
+
 JitFrameLayout* RInstructionResults::frame() const {
   MOZ_ASSERT(fp_);
   return fp_;
@@ -1698,9 +1758,12 @@ HeapPtr<Value>& RInstructionResults::operator[](size_t index) {
 }
 
 void RInstructionResults::trace(JSTracer* trc) {
-  // Note: The vector necessary exists, otherwise this object would not have
-  // been stored on the activation from where the trace function is called.
-  TraceRange(trc, results_->length(), results_->begin(), "ion-recover-results");
+  if (results_) {
+    TraceRange(trc, results_->length(), results_->begin(),
+               "ion-recover-results");
+  }
+  TraceEdge(trc, &exception_, "ion-recover-exception");
+  TraceEdge(trc, &exceptionStack_, "ion-recover-exception-stack");
 }
 
 SnapshotIterator::SnapshotIterator(const JSJitFrameIter& iter,
@@ -2260,7 +2323,15 @@ bool SnapshotIterator::initInstructionResults(MaybeReadFallback& fallback) {
 
   JitFrameLayout* fp = fallback.frame->jsFrame();
   RInstructionResults* results = fallback.activation->maybeIonFrameRecovery(fp);
-  if (!results) {
+  if (results) {
+    // If a previous attempt failed, report the same failure. RObjectState and
+    // RArrayState may have already written to objects allocated by Ion, and we
+    // must not run them again.
+    if (results->hasFailure()) {
+      results->restoreFailure(cx);
+      return false;
+    }
+  } else {
     AutoRealm ar(cx, fallback.frame->script());
 
     // We are going to run recover instructions. To avoid problems where recover
@@ -2293,14 +2364,12 @@ bool SnapshotIterator::initInstructionResults(MaybeReadFallback& fallback) {
     MachineState machine = fallback.frame->machineState();
     SnapshotIterator s(*fallback.frame, &machine);
     if (!s.computeInstructionResults(cx, results)) {
-      // If the evaluation failed because of OOMs, then we discard the
-      // current set of result that we collected so far.
-      fallback.activation->removeIonFrameRecovery(fp);
+      results->saveFailure(cx);
       return false;
     }
   }
 
-  MOZ_ASSERT(results->isInitialized());
+  MOZ_RELEASE_ASSERT(results->isInitialized());
   MOZ_RELEASE_ASSERT(results->length() == recover_.numInstructions() - 1);
   instructionResults_ = results;
   return true;

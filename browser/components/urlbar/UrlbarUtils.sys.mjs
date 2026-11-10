@@ -8,9 +8,9 @@
  */
 
 /**
- * @import {URIFixupPrimitives} from "chrome://browser/content/urlbar/UrlbarShared.mjs"
+ * @import {UrlbarLoadRequest, URIFixupPrimitives} from "chrome://browser/content/urlbar/UrlbarShared.mjs"
  * @import {Query} from "./UrlbarProvidersManager.sys.mjs"
- * @import {SearchEngine} from "moz-src:///toolkit/components/search/SearchEngine.sys.mjs"
+ * @import {SearchEngine, SearchSubmissionData} from "moz-src:///toolkit/components/search/SearchEngine.sys.mjs"
  * @import {SmartbarInput} from "chrome://browser/content/urlbar/SmartbarInput.mjs"
  */
 
@@ -38,6 +38,7 @@ const lazy = XPCOMUtils.declareLazy({
     "moz-src:///toolkit/components/search/SearchSuggestionController.sys.mjs",
   UrlbarPrefs: "moz-src:///browser/components/urlbar/UrlbarPrefs.sys.mjs",
   UrlUtils: "resource://gre/modules/UrlUtils.sys.mjs",
+  blobAsDataURL: "moz-src:///toolkit/modules/FaviconUtils.sys.mjs",
   clearTimeout: "resource://gre/modules/Timer.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
 
@@ -46,6 +47,19 @@ const lazy = XPCOMUtils.declareLazy({
     default: true,
   },
 });
+
+/**
+ * Data URLs of engine icons, keyed by the blob URL they were read from.
+ *
+ * @type {Map<string, Promise<string|undefined>>}
+ */
+const gEngineIconDataUrls = new Map();
+
+/*
+ * Factor applied to the previous `moz_inputhistory.use_count` each time a
+ * (url, input) tuple is picked.
+ */
+export const INPUT_HISTORY_USE_DECAY = 0.9;
 
 /**
  * Parses a URL and returns the origin parts needed for moz_origins lookups.
@@ -184,105 +198,19 @@ export var UrlbarUtils = {
   },
 
   /**
-   * Returns the group for a result.
+   * Converts nsIInputStream to string. Throws unless the stream is a MIME
+   * stream wrapping a string stream, as built by `getPostDataStream` and by
+   * search engine submissions.
    *
-   * @param {UrlbarResult} result
-   *   The result.
-   * @returns {Values<typeof UrlbarShared.RESULT_GROUP>}
-   *   The result's group.
+   * @param {nsIInputStream} postData
+   *   The stream to unwrap.
+   * @returns {string}
+   *  The wrapped post data.
    */
-  getResultGroup(result) {
-    // Used for test_suggestedIndexRelativeToGroup.js to make it simpler
-    if (result.group) {
-      return result.group;
-    }
-
-    if (result.hasSuggestedIndex && !result.isSuggestedIndexRelativeToGroup) {
-      return UrlbarShared.RESULT_GROUP.SUGGESTED_INDEX;
-    }
-    if (result.heuristic) {
-      switch (result.providerName) {
-        case "UrlbarProviderAiChat":
-          return UrlbarShared.RESULT_GROUP.HEURISTIC_AI_CHAT;
-        case "UrlbarProviderAliasEngines":
-          return UrlbarShared.RESULT_GROUP.HEURISTIC_ENGINE_ALIAS;
-        case "UrlbarProviderAutofill":
-          return UrlbarShared.RESULT_GROUP.HEURISTIC_AUTOFILL;
-        case "UrlbarProviderBookmarkKeywords":
-          return UrlbarShared.RESULT_GROUP.HEURISTIC_BOOKMARK_KEYWORD;
-        case "UrlbarProviderHeuristicFallback":
-          return UrlbarShared.RESULT_GROUP.HEURISTIC_FALLBACK;
-        case "UrlbarProviderHistoryUrlHeuristic":
-          return UrlbarShared.RESULT_GROUP.HEURISTIC_HISTORY_URL;
-        case "UrlbarProviderOmnibox":
-          return UrlbarShared.RESULT_GROUP.HEURISTIC_OMNIBOX;
-        case "UrlbarProviderRestrictKeywordsAutofill":
-          return UrlbarShared.RESULT_GROUP.HEURISTIC_RESTRICT_KEYWORD_AUTOFILL;
-        case "UrlbarProviderTokenAliasEngines":
-          return UrlbarShared.RESULT_GROUP.HEURISTIC_TOKEN_ALIAS_ENGINE;
-        case "UrlbarProviderSearchTips":
-          return UrlbarShared.RESULT_GROUP.HEURISTIC_SEARCH_TIP;
-        default:
-          if (result.providerName.startsWith("TestProvider")) {
-            return UrlbarShared.RESULT_GROUP.HEURISTIC_TEST;
-          }
-          break;
-      }
-      if (result.providerType == UrlbarShared.PROVIDER_TYPE.EXTENSION) {
-        return UrlbarShared.RESULT_GROUP.HEURISTIC_EXTENSION;
-      }
-      console.error(
-        "Returning HEURISTIC_FALLBACK for unrecognized heuristic result: ",
-        result
-      );
-      return UrlbarShared.RESULT_GROUP.HEURISTIC_FALLBACK;
-    }
-
-    switch (result.providerName) {
-      case "UrlbarProviderAboutPages":
-        return UrlbarShared.RESULT_GROUP.ABOUT_PAGES;
-      case "UrlbarProviderInputHistory":
-        return UrlbarShared.RESULT_GROUP.INPUT_HISTORY;
-      case "UrlbarProviderQuickSuggest":
-        return UrlbarShared.RESULT_GROUP.GENERAL_PARENT;
-      default:
-        break;
-    }
-
-    switch (result.type) {
-      case UrlbarShared.RESULT_TYPE.SEARCH:
-        if (result.source == UrlbarShared.RESULT_SOURCE.HISTORY) {
-          return result.providerName == "UrlbarProviderRecentSearches"
-            ? UrlbarShared.RESULT_GROUP.RECENT_SEARCH
-            : UrlbarShared.RESULT_GROUP.FORM_HISTORY;
-        }
-        if (result.payload.tail && !result.isRichSuggestion) {
-          return UrlbarShared.RESULT_GROUP.TAIL_SUGGESTION;
-        }
-        if (result.payload.suggestion) {
-          return UrlbarShared.RESULT_GROUP.REMOTE_SUGGESTION;
-        }
-        break;
-      case UrlbarShared.RESULT_TYPE.OMNIBOX:
-        return UrlbarShared.RESULT_GROUP.OMNIBOX;
-      case UrlbarShared.RESULT_TYPE.REMOTE_TAB:
-        return UrlbarShared.RESULT_GROUP.REMOTE_TAB;
-      case UrlbarShared.RESULT_TYPE.RESTRICT:
-        return UrlbarShared.RESULT_GROUP.RESTRICT_SEARCH_KEYWORD;
-      case UrlbarShared.RESULT_TYPE.AI_CHAT:
-        return UrlbarShared.RESULT_GROUP.AI;
-    }
-    // When enabled, semantic history results (both history URLs and
-    // switch-to-tab results) get their own group so they fill only the space
-    // left after, and never evict, the plain (non-semantic) results that would
-    // otherwise share the general group.
-    if (
-      result.providerName == "UrlbarProviderSemanticHistorySearch" &&
-      lazy.UrlbarPrefs.get("suggest.semanticHistory.separateGroup")
-    ) {
-      return UrlbarShared.RESULT_GROUP.SEMANTIC_HISTORY;
-    }
-    return UrlbarShared.RESULT_GROUP.GENERAL;
+  getPostDataString(postData) {
+    return postData
+      .QueryInterface(Ci.nsIMIMEInputStream)
+      .data.QueryInterface(Ci.nsISupportsCString).data;
   },
 
   /**
@@ -296,35 +224,54 @@ export var UrlbarUtils = {
    *   The element associated with the result that was selected or picked, if
    *   available. For results that have multiple selectable children, the URL
    *   may be taken from a child element rather than the result.
-   * @returns {object}
-   *   An object: `{ url, postData }`
+   * @returns {{url: ?string, postData: ?nsIInputStream}}
    *   `url` will be null if the result doesn't have a URL. `postData` will be
    *   null if the result doesn't have post data.
    */
   getUrlFromResult(result, { element = null } = {}) {
-    if (
-      result.payload.engine &&
-      (result.type == UrlbarShared.RESULT_TYPE.SEARCH ||
-        result.type == UrlbarShared.RESULT_TYPE.DYNAMIC)
-    ) {
-      let query =
-        element?.dataset.query ||
-        result.payload.suggestion ||
-        result.payload.query;
-      if (query) {
-        const engine = lazy.SearchService.getEngineByName(
-          result.payload.engine
-        );
-        let [url, postData] = this.getSearchQueryUrl(engine, query);
-        return { url, postData };
+    let loadRequest = UrlbarShared.getLoadRequestFromResult(result, {
+      element,
+    });
+    if (!loadRequest) {
+      return { url: null, postData: null };
+    }
+
+    return this.loadRequestToUrl(loadRequest);
+  },
+
+  /**
+   * Resolves a load request to the url and post data to load.
+   *
+   * @param {UrlbarLoadRequest} loadRequest
+   *   What to load.
+   * @param {string} [sapSource]
+   *   The search access point, used to select the partner code for an engine
+   *   search.
+   * @returns {{url: ?string, postData: ?nsIInputStream, submission: ?SearchSubmissionData}}
+   *   `url` will be null when the search engine wasn't found. `submission` is
+   *   only set for engine searches.
+   */
+  loadRequestToUrl(loadRequest, sapSource) {
+    if (loadRequest.engineSearch) {
+      let { engineName, query } = loadRequest.engineSearch;
+      let engine = lazy.SearchService.getEngineByName(engineName);
+      if (!engine) {
+        return { url: null, postData: null, submission: null };
       }
+      let [url, postData, submission] = this.getSearchQueryUrl(
+        engine,
+        query,
+        sapSource
+      );
+      return { url, postData, submission };
     }
 
     return {
-      url: result.payload.url ?? null,
-      postData: result.payload.postData
-        ? this.getPostDataStream(result.payload.postData)
+      url: loadRequest.urlLoad.url,
+      postData: loadRequest.urlLoad.postData
+        ? this.getPostDataStream(loadRequest.urlLoad.postData)
         : null,
+      submission: null,
     };
   },
 
@@ -335,13 +282,15 @@ export var UrlbarUtils = {
    *   The engine to generate the query for.
    * @param {string} query
    *   The query string to search for.
-   * @returns {Array}
-   *   Returns an array containing the query url (string) and the
-   *    post data (object).
+   * @param {string} [sapSource]
+   *   The search access point, used to select the partner code.
+   * @returns {[string, ?nsIInputStream, SearchSubmissionData]}
+   *   Returns an array containing the query url, the post data and the
+   *   submission they were taken from.
    */
-  getSearchQueryUrl(engine, query) {
-    let submission = engine.getSubmission(query);
-    return [submission.uri.spec, submission.postData];
+  getSearchQueryUrl(engine, query, sapSource) {
+    let submission = engine.getSubmission(query, null, sapSource);
+    return [submission.uri.spec, submission.postData, submission];
   },
 
   /**
@@ -359,38 +308,96 @@ export var UrlbarUtils = {
   },
 
   /**
-   * Converts a given icon URL to a remote icon URL if it's not a trusted
-   * protocol.
+   * Converts a given image URL to a remote image URL if it's not a trusted
+   * protocol, which keeps the decode out of the parent process (bug 2012436).
    *
-   * @param {string} iconUrl The URL of the icon.
-   * @param {number} size The desired size of the icon (currently ignored).
-   * @param {Window} win The window context.
-   * @returns {string|null} The URL of the remote icon or null if not available.
+   * @param {object} options
+   * @param {string} options.url
+   *   The URL of the image.
+   * @param {UrlbarParentController} options.controller
+   *   The controller the query runs on. It supplies the window the image
+   *   renders in, and whether that window is in a content process, which
+   *   decodes what it displays itself and can't load the wrapper's scheme.
+   *   Tests may omit this but otherwise it should always be passed in.
+   * @param {number} [options.size]
+   *   This param is relevant only if `url` is remote; it's unused otherwise. It
+   *   specifies the desired maximum width and height of the decoded image.
+   *   Leave undefined to decode the image at its intrinsic size no matter how
+   *   big it is. Note that SVGs without a `width` and `height` on their `<svg>`
+   *   have no intrinsic size, and not specifying a size will cause those image
+   *   loads to fail. See `getMozRemoteImageURL`.
+   * @returns {string|null}
+   *   A remote image URL or `url` itself if it uses a trusted protocol. Returns
+   *   null if `url` isn't a valid URL.
    */
-  getRemoteIconUrl(iconUrl, size, win) {
-    let url = URL.parse(iconUrl);
-    if (!url) {
+  getRemoteImageUrl({ url, controller, size = undefined }) {
+    let parsedUrl = URL.parse(url);
+    if (!parsedUrl) {
       return null;
     }
-    if (!lazy.FaviconUtils.TRUSTED_FAVICON_SCHEMES.includes(url.protocol)) {
-      if (Services.env.exists("XPCSHELL_TEST_PROFILE_DIR")) {
-        // XPCShell tests don't have a real window, just use fallback values.
-        return lazy.FaviconUtils.getMozRemoteImageURL(iconUrl, {
-          size,
-          colorScheme: "light",
-        });
-      }
-      return lazy.FaviconUtils.getMozRemoteImageURL(iconUrl, {
-        // TODO Bug 2035971: Restore the size property once `FaviconUtils` and
-        // `moz-remote-image` handle the image aspect ratio correctly.
-        //
-        // size: Math.floor(size * win.devicePixelRatio),
-        colorScheme: win.matchMedia("(prefers-color-scheme: dark)").matches
+    let scheme = parsedUrl.protocol.slice(0, -1);
+    if (
+      !controller?.rendersInContentProcess &&
+      !lazy.FaviconUtils.TRUSTED_FAVICON_SCHEMES.includes(scheme)
+    ) {
+      // XPCShell tests don't have a real window, just use fallback values.
+      let opts = {
+        stretch: false,
+        colorScheme: controller?.browserWindow?.matchMedia?.(
+          "(prefers-color-scheme: dark)"
+        ).matches
           ? "dark"
           : "light",
-      });
+      };
+      if (size) {
+        opts.size = Math.floor(
+          size * (controller?.browserWindow?.devicePixelRatio ?? 1)
+        );
+      }
+      return lazy.FaviconUtils.getMozRemoteImageURL(url, opts);
     }
-    return iconUrl;
+    return url;
+  },
+
+  /**
+   * Returns an engine's icon URL in a form the view can load. A config
+   * engine's icon is a blob URL, which only resolves in the process that
+   * created it, and an add-on engine's is a moz-extension URL, which a content
+   * document may not load, so a view in a content process gets a data URL.
+   *
+   * @param {SearchEngine} engine The engine whose icon to return.
+   * @param {UrlbarParentController} [controller]
+   *   The controller the query runs on. It supplies whether the view renders in
+   *   a content process. Omitted in unit tests.
+   * @returns {Promise<string|undefined>}
+   *   The icon URL, or undefined if the engine has no icon or its icon could
+   *   not be read.
+   */
+  async getEngineIconUrl(engine, controller) {
+    let url = await engine.getIconURL();
+    if (
+      !controller?.rendersInContentProcess ||
+      !/^(?:blob|moz-extension):/.test(url ?? "")
+    ) {
+      return url;
+    }
+    // A config engine keeps one blob URL per icon size, so it's a stable cache
+    // key that a new icon invalidates by itself.
+    let dataUrl = gEngineIconDataUrls.get(url);
+    if (!dataUrl) {
+      dataUrl = (async () => {
+        try {
+          let response = await fetch(url);
+          return await lazy.blobAsDataURL(await response.blob());
+        } catch (ex) {
+          console.error(`Could not read the icon of engine ${engine.id}`, ex);
+          gEngineIconDataUrls.delete(url);
+          return undefined;
+        }
+      })();
+      gEngineIconDataUrls.set(url, dataUrl);
+    }
+    return dataUrl;
   },
 
   /**
@@ -401,7 +408,7 @@ export var UrlbarUtils = {
    *
    * @param {SearchEngine|nsIURI|URL|string} urlOrEngine
    *   The entity to initiate a speculative connection for.
-   * @param {window} window
+   * @param {BrowserWindow} window
    *   The window from where the connection is initialized.
    */
   setupSpeculativeConnection(urlOrEngine, window) {
@@ -533,6 +540,44 @@ export var UrlbarUtils = {
   },
 
   /**
+   * Retrieves clipboard data as text.
+   *
+   * @param {number} threshold
+   *   The approximate byte size past which the clipboard is left unread. The
+   *   count is platform-dependent; see `nsIClipboard.getDataIfSmallerThan`.
+   * @param {Window} win
+   *   The window reading the clipboard.
+   * @returns {Promise<?string>}
+   *   The text, or null if it exceeds the threshold or can't be read.
+   */
+  async getClipboardTextIfSmallerThan(threshold, win) {
+    let transferable = Cc["@mozilla.org/widget/transferable;1"].createInstance(
+      Ci.nsITransferable
+    );
+    transferable.init(win.docShell.QueryInterface(Ci.nsILoadContext));
+    transferable.addDataFlavor("text/plain");
+
+    try {
+      if (
+        !(await Services.clipboard.getDataIfSmallerThan(
+          transferable,
+          threshold,
+          Services.clipboard.kGlobalClipboard,
+          win.browsingContext.currentWindowContext
+        ))
+      ) {
+        return null;
+      }
+
+      let data = {};
+      transferable.getTransferData("text/plain", data);
+      return data.value.QueryInterface(Ci.nsISupportsString).data;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  /**
    * Add a (url, input) tuple to the input history table that drives adaptive
    * results.
    *
@@ -553,13 +598,18 @@ export var UrlbarUtils = {
         return db.executeCached(
           `
           INSERT OR REPLACE INTO moz_inputhistory
-          SELECT h.id, IFNULL(i.input, :input), IFNULL(i.use_count, 0) * .9 + 1
+          SELECT h.id, IFNULL(i.input, :input),
+                 IFNULL(i.use_count, 0) * :useDecay + 1
           FROM moz_places h
           LEFT JOIN moz_inputhistory i ON i.place_id = h.id AND i.input = :input
           WHERE url_hash = hash(:url) AND url = :url
           RETURNING place_id
           `,
-          { url, input: input.toLowerCase() }
+          {
+            url,
+            input: input.toLowerCase(),
+            useDecay: INPUT_HISTORY_USE_DECAY,
+          }
         );
       }
     );
@@ -954,8 +1004,8 @@ export var UrlbarUtils = {
    *
    * @param {string} url
    *   The URL whose block is being cleared.
-   * @returns {?{blockedAt: number, level: "origin" | "url"}}
-   *   The matching timestamp and level if a fresh block existed,
+   * @returns {?{blockedAt: number}}
+   *   The matching timestamp if a fresh block existed,
    *   null otherwise.
    */
   getBackspaceBlock(url) {
@@ -977,9 +1027,7 @@ export var UrlbarUtils = {
     if (ageHours > this._BACKSPACE_BLOCK_MAX_AGE_HOURS) {
       return null;
     }
-    /** @type {"origin" | "url"} */
-    let level = UrlbarShared.isOriginUrl(url) ? "origin" : "url";
-    return { blockedAt: entry.blockedAt, level };
+    return { blockedAt: entry.blockedAt };
   },
 
   /**
@@ -1029,7 +1077,7 @@ export var UrlbarUtils = {
    *
    * @param {string} url
    *   The URL being re-integrated.
-   * @returns {Promise<{wasBlocked: boolean, level: "origin" | "url", backspaceBlock: ?{blockedAt: number, level: "origin" | "url"}}>}
+   * @returns {Promise<{wasBlocked: boolean, level: "origin" | "url", backspaceBlock: ?{blockedAt: number}}>}
    *   `wasBlocked` is whether a database block was actually cleared, `level`
    *   the scope it was cleared at, and `backspaceBlock` the consumed backspace
    *   block, if the URL had one.
@@ -1175,88 +1223,6 @@ export var UrlbarUtils = {
   },
 
   /**
-   * Extracts a group for search engagement telemetry from a result.
-   *
-   * @param {UrlbarResult} result The result to analyze.
-   * @returns {string} Group name as string.
-   */
-  searchEngagementTelemetryGroup(result) {
-    if (!result) {
-      return "unknown";
-    }
-    if (result.isBestMatch) {
-      return "top_pick";
-    }
-    if (result.providerName === "UrlbarProviderTopSites") {
-      return "top_site";
-    }
-
-    switch (this.getResultGroup(result)) {
-      case UrlbarShared.RESULT_GROUP.INPUT_HISTORY: {
-        return "adaptive_history";
-      }
-      case UrlbarShared.RESULT_GROUP.RECENT_SEARCH: {
-        return "recent_search";
-      }
-      case UrlbarShared.RESULT_GROUP.FORM_HISTORY: {
-        return "search_history";
-      }
-      case UrlbarShared.RESULT_GROUP.TAIL_SUGGESTION:
-      case UrlbarShared.RESULT_GROUP.REMOTE_SUGGESTION: {
-        let group = result.payload.trending
-          ? "trending_search"
-          : "search_suggest";
-        if (result.isRichSuggestion) {
-          group += "_rich";
-        }
-        return group;
-      }
-      case UrlbarShared.RESULT_GROUP.REMOTE_TAB: {
-        return "remote_tab";
-      }
-      case UrlbarShared.RESULT_GROUP.HEURISTIC_EXTENSION:
-      case UrlbarShared.RESULT_GROUP.HEURISTIC_OMNIBOX:
-      case UrlbarShared.RESULT_GROUP.OMNIBOX: {
-        return "addon";
-      }
-      // Semantic history results have their own group for sorting purposes but
-      // are reported as "general" results, as they were before the group split.
-      case UrlbarShared.RESULT_GROUP.GENERAL:
-      case UrlbarShared.RESULT_GROUP.SEMANTIC_HISTORY: {
-        return "general";
-      }
-      // Group of UrlbarProviderQuickSuggest is GENERAL_PARENT.
-      case UrlbarShared.RESULT_GROUP.GENERAL_PARENT: {
-        return "suggest";
-      }
-      case UrlbarShared.RESULT_GROUP.ABOUT_PAGES: {
-        return "about_page";
-      }
-      case UrlbarShared.RESULT_GROUP.SUGGESTED_INDEX: {
-        return "suggested_index";
-      }
-      case UrlbarShared.RESULT_GROUP.RESTRICT_SEARCH_KEYWORD: {
-        return "restrict_keyword";
-      }
-      case UrlbarShared.RESULT_GROUP.AI: {
-        return "ai";
-      }
-    }
-
-    return result.heuristic ? "heuristic" : "unknown";
-  },
-
-  searchEngagementTelemetryAction(result, pickedActionKey = null) {
-    if (result.providerName != "UrlbarProviderGlobalActions") {
-      return result.payload.action?.key ?? "none";
-    }
-    if (pickedActionKey) {
-      return pickedActionKey;
-    }
-    return result.payload.actionsResults.map(({ key }) => key).join(",");
-  },
-
-  /**
    * For use when we want to hash a pair of items in a dictionary
    *
    * @param {string[]} tokens
@@ -1375,7 +1341,7 @@ export var UrlbarUtils = {
    * Returns window.gURLBar for regular browser windows, or the smartbar
    * for AI windows in immersive view.
    *
-   * @param {Window} window
+   * @param {BrowserWindow} window
    *   The window to get the URL bar for.
    * @returns {UrlbarInput | SmartbarInput }
    *   The URL bar element that should be focused.
@@ -1518,6 +1484,9 @@ UrlbarUtils.RESULT_PAYLOAD_SCHEMA = {
         type: "boolean",
       },
       lastVisit: {
+        type: "number",
+      },
+      semanticDistance: {
         type: "number",
       },
       tabGroup: {
@@ -1687,8 +1656,8 @@ UrlbarUtils.RESULT_PAYLOAD_SCHEMA = {
       requestId: {
         type: "string",
       },
-      sendAttributionRequest: {
-        type: "boolean",
+      semanticDistance: {
+        type: "number",
       },
       shouldShowUrl: {
         type: "boolean",
@@ -1919,6 +1888,14 @@ UrlbarUtils.RESULT_PAYLOAD_SCHEMA = {
       dynamicType: {
         type: "string",
       },
+      // Set by UrlbarProvidersManager when the result is finalized,
+      // so they're not present initially.
+      viewTemplate: {
+        type: "object",
+      },
+      viewUpdate: {
+        type: "object",
+      },
     },
   },
   [UrlbarShared.RESULT_TYPE.RESTRICT]: {
@@ -2023,18 +2000,17 @@ export class UrlbarProvider {
   }
 
   /**
-   * @type {Query}
-   *   This can be used by the provider to check the query is still running
-   *   after executing async tasks:
+   * This can be used by the provider to check the query is still running
+   * after executing async tasks::
    *
-   * ```
    *   let instance = this.queryInstance;
    *   await ...
    *   if (instance != this.queryInstance) {
    *     // Query was canceled or a new one started.
    *     return;
    *   }
-   * ```
+   *
+   * @type {Query}
    */
   queryInstance;
 
@@ -2044,8 +2020,8 @@ export class UrlbarProvider {
    * overridden.
    *
    * @param {string} methodName The name of the method to call.
-   * @param {*} args The method arguments.
-   * @returns {*} The return value of the method, or undefined if the method
+   * @param {any} args The method arguments.
+   * @returns {any} The return value of the method, or undefined if the method
    *          throws an error.
    * @abstract
    */
@@ -2162,7 +2138,9 @@ export class UrlbarProvider {
    *
    *   For "abandonment", only `searchString` is defined.
    *
-   * onEngagement(_queryContext, _controller, _details) {}
+   * @function onEngagement
+   * @memberof UrlbarProvider
+   * @instance
    */
 
   /**
@@ -2177,7 +2155,9 @@ export class UrlbarProvider {
    * @param {UrlbarParentController} _controller
    * The associated controller.
    *
-   * onAbandonment(_queryContext, _controller) {}
+   * @function onAbandonment
+   * @memberof UrlbarProvider
+   * @instance
    */
 
   /**
@@ -2196,7 +2176,7 @@ export class UrlbarProvider {
    *    The current query context.
    * @param {UrlbarParentController} _controller
    *    The associated controller.
-   * @param {Array} _providerVisibleResults
+   * @param {Array<{index: number, result: UrlbarResult}>} _providerVisibleResults
    *    Array of visible results at the time of either an engagement or
    *    abandonment event relevant to the provider. Each object in the array
    *    contains:
@@ -2208,8 +2188,9 @@ export class UrlbarProvider {
    *    object that's also passed to `onEngagement()`. Otherwise it will be
    *    null. See `onEngagement()` documentation for info.
    *
-   * onImpression(_state, _queryContext, _controller, _providerVisibleResults, _details)
-   * {}
+   * @function onImpression
+   * @memberof UrlbarProvider
+   * @instance
    */
 
   /**
@@ -2222,7 +2203,9 @@ export class UrlbarProvider {
    * @param {UrlbarParentController} _controller
    *    The associated controller.
    *
-   * onSearchSessionEnd(_queryContext, _controller) {}
+   * @function onSearchSessionEnd
+   * @memberof UrlbarProvider
+   * @instance
    */
 
   /**
@@ -2230,12 +2213,10 @@ export class UrlbarProvider {
    * for details on what that means.
    *
    * @param {UrlbarResult} _result
-   *   The result that was selected.
-   * @param {Element} _element
-   *   The element in the result's view that was selected.
+   *   The result being selected.
    * @abstract
    */
-  onBeforeSelection(_result, _element) {}
+  onBeforeSelection(_result) {}
 
   /**
    * Called when a result from the provider is selected. "Selected" refers to
@@ -2246,11 +2227,9 @@ export class UrlbarProvider {
    *
    * @param {UrlbarResult} _result
    *   The result that was selected.
-   * @param {Element} _element
-   *   The element in the result's view that was selected.
    * @abstract
    */
-  onSelection(_result, _element) {}
+  onSelection(_result) {}
 
   /**
    * @typedef {object} ViewTemplate
@@ -2300,8 +2279,7 @@ export class UrlbarProvider {
    *   An optional mapping from attribute names to values.  For each
    *   name-value pair, an attribute is added to the element created for the
    *   object. The `id` attribute is reserved and cannot be set by the
-   *   provider. Element IDs are passed back to the provider in getViewUpdate
-   *   if they are needed.
+   *   provider.
    *
    * @property {ViewTemplateElement[]} [children]
    *   An optional list of children.  Each item in the array must be an object
@@ -2315,11 +2293,13 @@ export class UrlbarProvider {
    * @property {boolean} [overflowable]
    *   If true, the element's overflow status will be tracked in order to
    *   fade it out when needed.
+   *
+   * @property {object} [style]
+   *   An optional mapping from CSS property names to values.
    */
 
   /**
-   * This is called only for dynamic result types, when the urlbar view creates
-   * the view of one of the results of the provider.
+   * This is called only for dynamic result types.
    *
    * @param {UrlbarResult} _result
    *   The result whose view will be created.
@@ -2332,9 +2312,8 @@ export class UrlbarProvider {
   }
 
   /**
-   * This is called only for dynamic result types, when the urlbar view updates
-   * the view of one of the results of the provider.  It should return an object
-   * describing the view update that looks like this:
+   * This is called only for dynamic result types by the providers manager. It
+   * should return an object describing the view update that looks like this::
    *
    *   {
    *     nodeNameFoo: {
@@ -2371,12 +2350,8 @@ export class UrlbarProvider {
    *
    * @param {UrlbarResult} _result
    *   The result whose view will be updated.
-   * @param {Map} _idsByName
-   *   A Map from an element's name, as defined by the provider; to its ID in
-   *   the DOM, as defined by the browser. The browser manages element IDs for
-   *   dynamic results to prevent collisions. However, a provider may need to
-   *   access the IDs of the elements created for its results. For example, to
-   *   set various `aria` attributes.
+   * @param {UrlbarParentController} _controller
+   *   The controller.
    * @returns {object}
    *   A view update object as described above.  The names of properties are the
    *   the names of elements declared in the view template.  The values of
@@ -2405,7 +2380,7 @@ export class UrlbarProvider {
    *   {string} [textContent]
    *     A string that will be set as `element.textContent`.
    */
-  getViewUpdate(_result, _idsByName) {
+  getViewUpdate(_result, _controller) {
     return null;
   }
 
@@ -2434,7 +2409,6 @@ export class UrlbarProvider {
    *
    * @returns {boolean} Whether the provider wants to defer user selection
    *          events.
-   * @see {@link UrlbarEventBufferer}
    */
   get deferUserSelection() {
     return false;

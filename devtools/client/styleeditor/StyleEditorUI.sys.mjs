@@ -345,9 +345,7 @@ export class StyleEditorUI extends EventEmitter {
       eventListenersConfig
     );
 
-    this.#shortcuts = new KeyShortcuts({
-      window: this.#window,
-    });
+    this.#shortcuts = new KeyShortcuts(this.#window);
     this.#shortcuts.on(
       `CmdOrCtrl+${getString("focusFilterInput.commandkey")}`,
       this.#onFocusFilterInputKeyboardShortcut
@@ -739,17 +737,7 @@ export class StyleEditorUI extends EventEmitter {
 
     this.editors.push(editor);
 
-    try {
-      await editor.fetchSource();
-    } catch (e) {
-      // if the editor was destroyed while fetching dependencies, we don't want to go further.
-      if (!this.editors.includes(editor)) {
-        return null;
-      }
-      throw e;
-    }
-
-    this.#sourceLoaded(editor);
+    this.#addEditorToUI(editor);
 
     if (resource.fileName) {
       this.emit("test:editor-updated", editor);
@@ -916,13 +904,14 @@ export class StyleEditorUI extends EventEmitter {
   }
 
   /**
-   * Called when a StyleSheetEditor's source has been fetched.
-   * Add new sidebar item and editor to the UI
+   * Add new sidebar item and editor to the UI.
+   *  - summary is the entry in the left sidebar
+   *  - details contains the editor + at rules
    *
    * @param  {StyleSheetEditor} editor
    *         Editor to create UI for.
    */
-  #sourceLoaded(editor) {
+  #addEditorToUI(editor) {
     // Create the detail and summary nodes from the templates node (declared in index.xhtml)
     const details = this.#tplDetails.cloneNode(true);
     details.id = "";
@@ -1844,7 +1833,7 @@ export class StyleEditorUI extends EventEmitter {
       editor.onShow(options);
 
       this.#updatePrettyPrintButton();
-
+      Glean.devtoolsStyleeditorStylesheets.stylesheetsOpenedCount.add(1);
       this.emit("editor-selected", editor);
     } catch (e) {
       console.error(e);

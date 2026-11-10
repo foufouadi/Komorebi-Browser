@@ -17,7 +17,6 @@ use api::ColorF;
 
 use crate::render_task_graph::RenderTaskId;
 use crate::renderer::{BlendMode, GpuBufferBuilder};
-use crate::spatial_tree::SpatialTree;
 use crate::transform::TransformPalette;
 
 #[repr(u32)]
@@ -31,32 +30,33 @@ pub enum PatternKind {
 
     Mask = 3,
     BoxShadow = 4,
+    BoxShadowSuperellipse = 5,
     // Variants of ColorOrTexture that use a non-default sampler type
     // (samplerExternalOES / __samplerExternal2DY2YEXT / sampler2DRect). The
     // quad shader is compiled in matching per-kind variants; see
     // ps_quad_textured.glsl.
-    TextureExternal = 5,
-    TextureExternalBT709 = 6,
-    TextureRect = 7,
+    TextureExternal = 6,
+    TextureExternalBT709 = 7,
+    TextureRect = 8,
     // Samples up to three planes (sColor0/1/2) and converts from YUV to RGB.
     // Like ColorOrTexture, the YUV pattern comes in sampler-type-specific
     // variants so that the planes are sampled with the matching sColor
     // declaration; see ps_quad_yuv.glsl. `Yuv` is the default (TEXTURE_2D).
-    Yuv = 8,
-    YuvTextureExternal = 9,
-    YuvTextureExternalBT709 = 10,
-    YuvTextureRect = 11,
+    Yuv = 9,
+    YuvTextureExternal = 10,
+    YuvTextureExternalBT709 = 11,
+    YuvTextureRect = 12,
     // Samples a captured backdrop texture using a (bilerp) 4-corner uv quad.
-    Backdrop = 12,
+    Backdrop = 13,
     // Applies a filter to a sampled source texture; see ps_quad_blend.glsl.
-    Blend = 13,
+    Blend = 14,
     // Composites a picture over its backdrop with a software mix-blend-mode;
     // samples two textures (backdrop + source). See ps_quad_mix_blend.glsl.
-    MixBlend = 14,
+    MixBlend = 15,
     // When adding patterns, don't forget to update the NUM_PATTERNS constant.
 }
 
-pub const NUM_PATTERNS: u32 = 15;
+pub const NUM_PATTERNS: u32 = 16;
 
 impl PatternKind {
     pub fn from_u32(val: u32) -> Self {
@@ -136,11 +136,6 @@ impl PatternTextureInput {
     }
 }
 
-pub struct PatternBuilderContext<'a> {
-    pub spatial_tree: &'a SpatialTree,
-    pub prim_origin: LayoutPoint,
-}
-
 pub struct PatternBuilderState<'a> {
     pub frame_gpu_data: &'a mut GpuBufferBuilder,
     #[allow(unused)]
@@ -150,9 +145,7 @@ pub struct PatternBuilderState<'a> {
 pub trait PatternBuilder {
     fn build(
         &self,
-        sub_rect: Option<DeviceRect>,
-        offset: LayoutVector2D,
-        ctx: &PatternBuilderContext,
+        pattern_rect: &LayoutRect,
         state: &mut PatternBuilderState,
     ) -> Pattern;
 }
@@ -231,9 +224,7 @@ pub const TEXTURED_SHADER_MAP_TO_SEGMENT: i32 = 1;
 impl PatternBuilder for ColorF {
     fn build(
         &self,
-        _sub_rect: Option<DeviceRect>,
-        _offset: LayoutVector2D,
-        _ctx: &PatternBuilderContext,
+        _pattern_rect: &LayoutRect,
         _state: &mut PatternBuilderState,
     ) -> Pattern {
         Pattern::color(*self)

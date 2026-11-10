@@ -5,11 +5,9 @@
 #ifndef nsLayoutModule_h
 #define nsLayoutModule_h
 
-#include "mozilla/AlreadyAddRefed.h"
 #include "nsID.h"
 #include "nscore.h"
 
-class nsIPresentationService;
 class nsISupports;
 
 // This function initializes various layout statics, as well as XPConnect.
@@ -23,7 +21,6 @@ nsresult CreateXMLContentSerializer(const nsID& aIID, void** aResult);
 nsresult CreateHTMLContentSerializer(const nsID& aIID, void** aResult);
 nsresult CreateXHTMLContentSerializer(const nsID& aIID, void** aResult);
 nsresult CreatePlainTextSerializer(const nsID& aIID, void** aResult);
-nsresult CreateContentPolicy(const nsID& aIID, void** aResult);
 nsresult CreateGlobalMessageManager(const nsID& aIID, void** aResult);
 nsresult CreateParentMessageManager(const nsID& aIID, void** aResult);
 nsresult CreateChildMessageManager(const nsID& aIID, void** aResult);
@@ -31,7 +28,5 @@ nsresult CreateChildMessageManager(const nsID& aIID, void** aResult);
 nsresult Construct_nsIScriptSecurityManager(const nsIID& aIID, void** aResult);
 nsresult LocalStorageManagerConstructor(const nsIID& aIID, void** aResult);
 nsresult SessionStorageManagerConstructor(const nsIID& aIID, void** aResult);
-
-already_AddRefed<nsIPresentationService> NS_CreatePresentationService();
 
 #endif  // nsLayoutModule_h

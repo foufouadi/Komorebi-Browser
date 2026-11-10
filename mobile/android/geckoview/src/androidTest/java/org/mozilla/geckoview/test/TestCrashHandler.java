@@ -3,6 +3,9 @@ http://creativecommons.org/publicdomain/zero/1.0/ */
 
 package org.mozilla.geckoview.test;
 
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.app.Service;
 import android.content.ComponentName;
 import android.content.Context;
@@ -118,25 +121,18 @@ public class TestCrashHandler extends Service {
         final String expectedProcessType,
         final String expectedRemoteType) {
       setEvalResult(null);
-      mReceiver.post(
-          new Runnable() {
-            @Override
-            public void run() {
-              final Bundle bundle = new Bundle();
-              bundle.putString(
-                  GeckoRuntime.EXTRA_CRASH_PROCESS_VISIBILITY, expectedProcessVisibility);
-              bundle.putString(GeckoRuntime.EXTRA_CRASH_PROCESS_TYPE, expectedProcessType);
-              bundle.putString(GeckoRuntime.EXTRA_CRASH_REMOTE_TYPE, expectedRemoteType);
-              final Message msg = Message.obtain(null, MSG_EVAL_NEXT_CRASH_DUMP, bundle);
-              msg.replyTo = mMessenger;
+      final Bundle bundle = new Bundle();
+      bundle.putString(GeckoRuntime.EXTRA_CRASH_PROCESS_VISIBILITY, expectedProcessVisibility);
+      bundle.putString(GeckoRuntime.EXTRA_CRASH_PROCESS_TYPE, expectedProcessType);
+      bundle.putString(GeckoRuntime.EXTRA_CRASH_REMOTE_TYPE, expectedRemoteType);
+      final Message msg = Message.obtain(null, MSG_EVAL_NEXT_CRASH_DUMP, bundle);
+      msg.replyTo = mMessenger;
 
-              try {
-                mService.send(msg);
-              } catch (final RemoteException e) {
-                throw new RuntimeException(e.getMessage());
-              }
-            }
-          });
+      try {
+        mService.send(msg);
+      } catch (final RemoteException e) {
+        throw new RuntimeException(e.getMessage());
+      }
     }
 
     public boolean connect(final long timeoutMillis) {
@@ -189,7 +185,9 @@ public class TestCrashHandler extends Service {
     private String mExpectedProcessType;
     private String mExpectedRemoteType;
 
-    MessageHandler() {}
+    MessageHandler() {
+      super(Looper.myLooper());
+    }
 
     @Override
     public void handleMessage(final Message msg) {
@@ -254,6 +252,16 @@ public class TestCrashHandler extends Service {
     return new JSONObject(contents);
   }
 
+  private static boolean hasMinidumpHeader(final File file) {
+    final byte[] signature = new byte[4];
+    try (FileInputStream inputStream = new FileInputStream(file)) {
+      return inputStream.read(signature) == signature.length
+          && new String(signature, "US-ASCII").equals("MDMP");
+    } catch (final IOException e) {
+      return false;
+    }
+  }
+
   private EvalResult evalCrashInfo(final Intent intent) {
     if (!intent.getAction().equals(GeckoRuntime.ACTION_CRASHED)) {
       return new EvalResult(false, "Action should match");
@@ -261,16 +269,26 @@ public class TestCrashHandler extends Service {
 
     final File dumpFile = new File(intent.getStringExtra(GeckoRuntime.EXTRA_MINIDUMP_PATH));
     final boolean dumpFileExists = dumpFile.exists();
+    final boolean dumpFileValid = hasMinidumpHeader(dumpFile);
     dumpFile.delete();
 
     final File extrasFile = new File(intent.getStringExtra(GeckoRuntime.EXTRA_EXTRAS_PATH));
     final boolean extrasFileExists = extrasFile.exists();
+    final boolean expectAnnotations;
     try {
       final JSONObject annotations = readExtraFile(extrasFile.getPath());
-      final String moz_crash_reason = annotations.getString("MozCrashReason");
 
-      if (!moz_crash_reason.startsWith("MOZ_CRASH(")) {
+      // TODO: remove this when bug 2082922 is fixed
+      expectAnnotations = !annotations.optString("MinidumpRemoteExecutorForTesting").equals("1");
+
+      if (expectAnnotations && !annotations.getString("MozCrashReason").startsWith("MOZ_CRASH(")) {
         return new EvalResult(false, "Missing or invalid child crash annotations");
+      }
+
+      final String dumperError = annotations.optString("DumperError");
+      if (!dumperError.isEmpty()
+          && (expectAnnotations || !dumperError.equals("MissingChildProcessAnnotations"))) {
+        return new EvalResult(false, "Minidump writer error: " + dumperError);
       }
 
       extrasFile.delete();
@@ -280,6 +298,10 @@ public class TestCrashHandler extends Service {
 
     if (!dumpFileExists) {
       return new EvalResult(false, "Dump file should exist");
+    }
+
+    if (!dumpFileValid) {
+      return new EvalResult(false, "Dump file should be a minidump");
     }
 
     if (!extrasFileExists) {
@@ -313,7 +335,7 @@ public class TestCrashHandler extends Service {
 
     final String expectedRemoteType = mMsgHandler.getExpectedRemoteType();
     final String remoteType = intent.getStringExtra(GeckoRuntime.EXTRA_CRASH_REMOTE_TYPE);
-    if ((remoteType == null && expectedRemoteType != null)
+    if ((remoteType == null && expectedRemoteType != null && expectAnnotations)
         || (remoteType != null && !remoteType.equals(expectedRemoteType))) {
       return new EvalResult(
           false, "Expected remote type " + expectedRemoteType + ", found " + remoteType);
@@ -324,6 +346,16 @@ public class TestCrashHandler extends Service {
 
   @Override
   public synchronized int onStartCommand(final Intent intent, final int flags, final int startId) {
+    final NotificationManager manager = getSystemService(NotificationManager.class);
+    manager.createNotificationChannel(
+        new NotificationChannel(LOGTAG, LOGTAG, NotificationManager.IMPORTANCE_LOW));
+    startForeground(
+        1,
+        new Notification.Builder(this, LOGTAG)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(LOGTAG)
+            .build());
+
     if (mMsgHandler != null) {
       mMsgHandler.reportResult(evalCrashInfo(intent));
       // We must manually call stopSelf() here to ensure the Service gets killed once the client

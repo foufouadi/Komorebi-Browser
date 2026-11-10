@@ -67,12 +67,21 @@ float DOMSVGPoint::X() {
   if (mIsAnimValItem && IsInList()) {
     Element()->FlushAnimations();  // May make IsInList() == false
   }
+  if (mIsTranslatePoint && SVGSVGElement::FromNode(Element())->IsInner()) {
+    // currentTranslate values return zero on inner svg elements
+    return 0.f;
+  }
   return InternalItem().X();
 }
 
 void DOMSVGPoint::SetX(float aX, ErrorResult& aRv) {
   if (mIsAnimValItem) {
     aRv.ThrowNoModificationAllowedError("Animated values cannot be set");
+    return;
+  }
+  if (mIsTranslatePoint && SVGSVGElement::FromNode(Element())->IsInner()) {
+    aRv.ThrowNoModificationAllowedError(
+        "currentTranslate values cannot be set on inner svg elements");
     return;
   }
 
@@ -92,6 +101,10 @@ float DOMSVGPoint::Y() {
   if (mIsAnimValItem && IsInList()) {
     Element()->FlushAnimations();  // May make IsInList() == false
   }
+  if (mIsTranslatePoint && SVGSVGElement::FromNode(Element())->IsInner()) {
+    // currentTranslate values return zero on inner svg elements
+    return 0.f;
+  }
   return InternalItem().Y();
 }
 
@@ -100,6 +113,12 @@ void DOMSVGPoint::SetY(float aY, ErrorResult& aRv) {
     aRv.ThrowNoModificationAllowedError("Animated values cannot be set");
     return;
   }
+  if (mIsTranslatePoint && SVGSVGElement::FromNode(Element())->IsInner()) {
+    aRv.ThrowNoModificationAllowedError(
+        "currentTranslate values cannot be set on inner svg elements");
+    return;
+  }
+
   auto& val = InternalItem();
 
   if (val.Y() == aY) {
@@ -196,6 +215,8 @@ void DOMSVGPoint::CleanupWeakRefs() {
   // cycle collected), so we that don't leave behind a pointer to
   // free / soon-to-be-free memory.
   if (nsCOMPtr<DOMSVGPointList> pointList = do_QueryInterface(mOwner)) {
+    // The slot we clear must really be ours; otherwise we'd leave our own
+    // slot holding a dangling pointer (use-after-free).
     MOZ_RELEASE_ASSERT(pointList->mItems[mListIndex] == this,
                        "Clearing out the wrong list index...?");
     pointList->mItems[mListIndex] = nullptr;

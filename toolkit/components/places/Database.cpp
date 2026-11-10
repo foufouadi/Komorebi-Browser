@@ -34,6 +34,7 @@
 #include "prenv.h"
 #include "prsystem.h"
 #include "nsPrintfCString.h"
+#include "mozilla/Components.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "mozIStorageService.h"
@@ -431,7 +432,7 @@ Database::Database()
 already_AddRefed<nsIAsyncShutdownClient>
 Database::GetProfileChangeTeardownPhase() {
   nsCOMPtr<nsIAsyncShutdownService> asyncShutdownSvc =
-      services::GetAsyncShutdownService();
+      components::AsyncShutdown::Service();
   MOZ_ASSERT(asyncShutdownSvc);
   if (NS_WARN_IF(!asyncShutdownSvc)) {
     return nullptr;
@@ -448,7 +449,7 @@ Database::GetProfileChangeTeardownPhase() {
 already_AddRefed<nsIAsyncShutdownClient>
 Database::GetProfileBeforeChangePhase() {
   nsCOMPtr<nsIAsyncShutdownService> asyncShutdownSvc =
-      services::GetAsyncShutdownService();
+      components::AsyncShutdown::Service();
   MOZ_ASSERT(asyncShutdownSvc);
   if (NS_WARN_IF(!asyncShutdownSvc)) {
     return nullptr;
@@ -1424,6 +1425,13 @@ nsresult Database::InitSchema(bool* aDatabaseMigrated) {
       }
 
       // Firefox 155 uses schema version 87
+
+      if (currentSchemaVersion < 88) {
+        rv = MigrateV88Up();
+        NS_ENSURE_SUCCESS(rv, rv);
+      }
+
+      // Firefox 160 uses schema version 88
 
       // Schema Upgrades must add migration code here.
       // >>> IMPORTANT! <<<
@@ -2452,6 +2460,19 @@ nsresult Database::MigrateV87Up() {
   rv = mMainConn->ExecuteSimpleSQL("DROP TABLE moz_origins_stash_temp"_ns);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  return NS_OK;
+}
+
+nsresult Database::MigrateV88Up() {
+  nsCOMPtr<mozIStorageStatement> stmt;
+  nsresult rv = mMainConn->CreateStatement(
+      "SELECT userContextId FROM moz_historyvisits"_ns, getter_AddRefs(stmt));
+  if (NS_FAILED(rv)) {
+    rv = mMainConn->ExecuteSimpleSQL(
+        "ALTER TABLE moz_historyvisits "
+        "ADD COLUMN userContextId INTEGER NOT NULL DEFAULT 0"_ns);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
   return NS_OK;
 }
 

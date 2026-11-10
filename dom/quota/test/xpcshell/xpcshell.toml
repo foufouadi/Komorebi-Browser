@@ -79,7 +79,15 @@ run-if = [
 
 ["test_clientDirectoryOpeningStarted.js"]
 
+["test_corruptStorageSqlite.js"]
+prefs = [
+  "dom.storage.testing=true",
+  "dom.storage.client_validation=false",
+]
+
 ["test_createLocalStorage.js"]
+
+["test_estimateGroupUsage.js"]
 
 ["test_estimateOrigin.js"]
 
@@ -178,6 +186,14 @@ skip-if = [
   "inc_origin_init",
 ]
 
+["test_shutdownDuringRepositoryInitialization.js"]
+# The test explicitly disables lazy origin initialization and relies on
+# initTemporaryStorage performing full per-origin initialization via
+# InitializeRepository.
+skip-if = [
+  "inc_origin_init",
+]
+
 ["test_simpledb.js"]
 
 ["test_specialOrigins.js"]
@@ -222,6 +238,14 @@ run-if = [
 ["test_temporaryStorageRFP.js"]
 
 ["test_unaccessedOrigins.js"]
+
+["test_underflowStoragePressure.js"]
+# The underflow trips the QM_ASSERT_NOT_NEGATIVE assertions.
+skip-if = ["debug"]
+prefs = [
+  "dom.storage.testing=true",
+  "dom.storage.client_validation=false",
+]
 
 ["test_underflowedCacheRescan.js"]
 # The rescan logic is gated on NIGHTLY_BUILD || DEBUG in C++.

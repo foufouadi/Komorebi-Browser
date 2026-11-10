@@ -11,6 +11,7 @@ class nsILoadInfo;
 namespace mozilla {
 
 class ContentClassifierRequest;
+enum class ClassifyMode;
 
 namespace extensions {
 class WebExtensionPolicy;
@@ -18,9 +19,21 @@ class WebExtensionPolicy;
 
 class ContentClassifierFeatureUtils final {
  public:
-  static bool IsThirdPartyRequest(const ContentClassifierRequest& aRequest);
+  // Request filter for the ETP features and their exception lists. Returns
+  // whether |aRequest| should be classified in |aMode|:
+  // - Annotate: every request, including first-party ones, which get the
+  //   first-party tracking flag.
+  // - Cancel: third-party requests only, except those the loading extension
+  //   has explicit host permission for (see
+  //   UrlClassifierCommon::AddonMayLoad).
+  static bool ShouldClassifyForETP(const ContentClassifierRequest& aRequest,
+                                   ClassifyMode aMode);
+  // Same as ShouldClassifyForETP, but skips passive content (images and
+  // media) in every mode.
+  static bool ShouldClassifyNonPassiveForETP(
+      const ContentClassifierRequest& aRequest, ClassifyMode aMode);
   static bool IsNonRecommendedAddonRequest(
-      const ContentClassifierRequest& aRequest);
+      const ContentClassifierRequest& aRequest, ClassifyMode aMode);
   static void HarmfulAddonCancelChannelCallback(nsIChannel* aChannel);
 
   // Returns the WebExtensionPolicy associated with the triggering or loading

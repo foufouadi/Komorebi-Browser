@@ -34,8 +34,19 @@ XPCOMUtils.defineLazyPreferenceGetter(
   false
 );
 
+const DISABLED_THEMES_EXPANDED_PREF =
+  "extensions.htmlaboutaddons.themes-listview.disabled-themes-expanded";
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "disabledThemesExpanded",
+  DISABLED_THEMES_EXPANDED_PREF,
+  false
+);
+
 const L10N_ID_MAPPING = {
-  "theme-disabled-heading": "theme-disabled-heading2",
+  "theme-disabled-heading": "theme-disabled-heading3",
+  "theme-enabled-heading": "theme-enabled-heading2",
 };
 
 function getL10nIdMapping(id) {
@@ -54,7 +65,7 @@ gViewController.defineView("list", async type => {
 
   let sections = [
     {
-      headingId: type + "-enabled-heading",
+      headingId: getL10nIdMapping(`${type}-enabled-heading`),
       sectionClass: `${type}-enabled-section`,
       filterFn: addon =>
         !addon.hidden && addon.isActive && !isPending(addon, "uninstall"),
@@ -68,14 +79,23 @@ gViewController.defineView("list", async type => {
     headingId: getL10nIdMapping(`${type}-disabled-heading`),
     sectionClass: `${type}-disabled-section`,
     filterFn: disabledAddonsFilterFn,
+    accordion: {
+      expanded: lazy.disabledThemesExpanded,
+      ontoggle(e) {
+        if (e.target !== e.currentTarget) {
+          return;
+        }
+        Services.prefs.setBoolPref(
+          DISABLED_THEMES_EXPANDED_PREF,
+          e.newState === "open"
+        );
+      },
+    },
   });
 
-  // Show the colorway, forced-colors and smart window theme notices only
+  // Show the forced-colors and smart window theme notices only
   // in themes list view.
   if (type === "theme") {
-    const colorwayNotice = document.createElement("colorway-removal-notice");
-    frag.appendChild(colorwayNotice);
-
     const forcedColorsNotice = document.createElement("forced-colors-notice");
     frag.appendChild(forcedColorsNotice);
 

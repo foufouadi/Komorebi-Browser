@@ -6,7 +6,7 @@ const lazy = {};
 
 ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
   return console.createInstance({
-    prefix: "BackupService::ArchiveEncryption",
+    logModule: "BackupService.ArchiveEncryption",
     maxLogLevel: Services.prefs.getBoolPref("browser.backup.log", false)
       ? "Debug"
       : "Warn",
@@ -14,9 +14,9 @@ ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
 });
 
 ChromeUtils.defineESModuleGetters(lazy, {
-  ArchiveUtils: "resource:///modules/backup/ArchiveUtils.sys.mjs",
+  ArchiveUtils: "moz-src:///browser/components/backup/ArchiveUtils.sys.mjs",
   OSKeyStore: "resource://gre/modules/OSKeyStore.sys.mjs",
-  BackupError: "resource:///modules/backup/BackupError.mjs",
+  BackupError: "moz-src:///browser/components/backup/BackupError.mjs",
   ERRORS: "chrome://browser/content/backup/backup-constants.mjs",
 });
 

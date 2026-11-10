@@ -17,6 +17,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <algorithm>
+#include <array>
 #include <vector>
 
 #include "common/mathutil.h"
@@ -263,7 +264,7 @@ size_t TIntermLoop::getChildCount() const
 
 TIntermNode *TIntermLoop::getChildNode(size_t index) const
 {
-    TIntermNode *children[4];
+    std::array<TIntermNode *, 4> children;
     unsigned int childIndex = 0;
     if (mInit)
     {
@@ -555,9 +556,9 @@ TIntermDeclaration::TIntermDeclaration(const TIntermDeclaration &node)
 
 bool TIntermAggregateBase::replaceChildNodeInternal(TIntermNode *original, TIntermNode *replacement)
 {
-    for (size_t ii = 0; ii < getSequence()->size(); ++ii)
+    for (TIntermNode *&child : *getSequence())
     {
-        REPLACE_IF_IS((*getSequence())[ii], getAsNode, original, replacement);
+        REPLACE_IF_IS(child, getAsNode, original, replacement);
     }
     return false;
 }
@@ -876,7 +877,11 @@ const TConstantUnion *TIntermAggregate::getConstantValue() const
     if (isArray())
     {
         size_t elementSize = mArguments.front()->getAsTyped()->getType().getObjectSize();
-        constArray         = new TConstantUnion[elementSize * getOutermostArraySize()];
+        // Overflow should never happen due to parser validation, but hardened here just in case.
+        // http://crbug.com/498400132
+        angle::base::CheckedNumeric<size_t> checkedArraySize = elementSize;
+        checkedArraySize *= getOutermostArraySize();
+        constArray = new TConstantUnion[static_cast<size_t>(checkedArraySize.ValueOrDie())];
 
         size_t elementOffset = 0u;
         for (TIntermNode *constructorArg : mArguments)
@@ -1014,6 +1019,22 @@ bool TIntermAggregate::hasSideEffects() const
     return false;
 }
 
+bool TIntermAggregate::isSafeToExecuteInShortCircuit() const
+{
+    if (mOp == EOpConstruct)
+    {
+        for (TIntermNode *component : mArguments)
+        {
+            if (!component->isSafeToExecuteInShortCircuit())
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
 void TIntermBlock::appendStatement(TIntermNode *statement)
 {
     // Declaration nodes with no children can appear if it was an empty declaration or if all the
@@ -1119,7 +1140,11 @@ bool TIntermSwitch::replaceChildNode(TIntermNode *original, TIntermNode *replace
     return false;
 }
 
-TIntermCase::TIntermCase(const TIntermCase &node) : TIntermCase(node.mCondition->deepCopy()) {}
+TIntermCase::TIntermCase(const TIntermCase &node)
+    : TIntermCase(node.mCondition ? node.mCondition->deepCopy() : nullptr)
+{
+    setLine(node.getLine());
+}
 
 size_t TIntermCase::getChildCount() const
 {
@@ -1292,6 +1317,17 @@ bool TIntermOperator::isFunctionCall() const
         default:
             return false;
     }
+}
+
+bool TIntermOperator::isShortCircuitNeeded() const
+{
+    if (mOp != EOpLogicalAnd && mOp != EOpLogicalOr)
+    {
+        return false;
+    }
+
+    ASSERT(getChildCount() == 2);
+    return !getChildNode(1)->isSafeToExecuteInShortCircuit();
 }
 
 TOperator TIntermBinary::GetMulOpBasedOnOperands(const TType &left, const TType &right)
@@ -1750,7 +1786,7 @@ bool TIntermSwizzle::hasDuplicateOffsets() const
     {
         return true;
     }
-    uint32_t offsetCount[4] = {0u, 0u, 0u, 0u};
+    std::array<uint32_t, 4> offsetCount = {0u, 0u, 0u, 0u};
     for (const uint32_t offset : mSwizzleOffsets)
     {
         offsetCount[offset]++;
@@ -1770,6 +1806,11 @@ void TIntermSwizzle::setHasFoldedDuplicateOffsets(bool hasFoldedDuplicateOffsets
 bool TIntermSwizzle::offsetsMatch(uint32_t offset) const
 {
     return mSwizzleOffsets.size() == 1 && mSwizzleOffsets[0] == offset;
+}
+
+bool TIntermSwizzle::isSafeToExecuteInShortCircuit() const
+{
+    return mOperand->isSafeToExecuteInShortCircuit();
 }
 
 ImmutableString TIntermSwizzle::getOffsetsAsXYZW() const
@@ -2315,6 +2356,12 @@ const ImmutableString &TIntermBinary::getIndexStructFieldName() const
     const int index             = mRight->getAsConstantUnion()->getIConst(0);
 
     return structure->fields()[index]->name();
+}
+
+bool TIntermBinary::isSafeToExecuteInShortCircuit() const
+{
+    return (mOp == EOpIndexDirectInterfaceBlock || mOp == EOpIndexDirectStruct) &&
+           mLeft->isSafeToExecuteInShortCircuit();
 }
 
 TIntermTyped *TIntermUnary::fold(TDiagnostics *diagnostics)
@@ -2978,7 +3025,7 @@ TConstantUnion *TIntermConstantUnion::foldUnaryNonComponentWise(TOperator op)
         {
             ASSERT(getType().getBasicType() == EbtUInt);
             resultArray = new TConstantUnion[4];
-            float f[4];
+            std::array<float, 4> f;
             gl::UnpackUnorm4x8(operandArray[0].getUConst(), f);
             for (size_t i = 0; i < 4; ++i)
             {
@@ -2990,7 +3037,7 @@ TConstantUnion *TIntermConstantUnion::foldUnaryNonComponentWise(TOperator op)
         {
             ASSERT(getType().getBasicType() == EbtUInt);
             resultArray = new TConstantUnion[4];
-            float f[4];
+            std::array<float, 4> f;
             gl::UnpackSnorm4x8(operandArray[0].getUConst(), f);
             for (size_t i = 0; i < 4; ++i)
             {

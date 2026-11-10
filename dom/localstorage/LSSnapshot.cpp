@@ -13,6 +13,7 @@
 
 // Global includes
 #include <cstdint>
+#include <memory>
 #include <new>
 #include <utility>
 
@@ -24,12 +25,12 @@
 #include "mozilla/RefPtr.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/StaticPrefs_dom.h"
-#include "mozilla/UniquePtr.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/LSValue.h"
 #include "mozilla/dom/PBackgroundLSDatabase.h"
 #include "mozilla/dom/PBackgroundLSSharedTypes.h"
 #include "mozilla/dom/PBackgroundLSSnapshot.h"
+#include "mozilla/dom/quota/Assertions.h"
 #include "mozilla/dom/quota/QuotaCommon.h"
 #include "mozilla/dom/quota/ResultExtensions.h"
 #include "nsBaseHashtable.h"
@@ -132,6 +133,7 @@ void SnapshotWriteOptimizer::Enumerate(nsTArray<LSWriteInfo>& aWriteInfos) {
 LSSnapshot::LSSnapshot(LSDatabase* aDatabase)
     : mDatabase(aDatabase),
       mActor(nullptr),
+      mKeyCursorIndex(0),
       mInitLength(0),
       mLength(0),
       mUsage(0),
@@ -226,9 +228,9 @@ nsresult LSSnapshot::Init(const nsAString& aKey,
 #endif
 
   if (mHasOtherProcessObservers) {
-    mWriteAndNotifyInfos = MakeUnique<nsTArray<LSWriteAndNotifyInfo>>();
+    mWriteAndNotifyInfos = std::make_unique<nsTArray<LSWriteAndNotifyInfo>>();
   } else {
-    mWriteOptimizer = MakeUnique<SnapshotWriteOptimizer>();
+    mWriteOptimizer = std::make_unique<SnapshotWriteOptimizer>();
   }
 
   if (!mExplicit) {
@@ -271,14 +273,27 @@ nsresult LSSnapshot::GetKey(uint32_t aIndex, nsAString& aResult) {
     return rv;
   }
 
-  aResult.SetIsVoid(true);
-  for (auto iter = mValues.ConstIter(); !iter.Done(); iter.Next()) {
-    if (aIndex == 0) {
-      aResult = iter.Key();
-      return NS_OK;
-    }
-    aIndex--;
+  if (aIndex >= mValues.Count()) {
+    aResult.SetIsVoid(true);
+    return NS_OK;
   }
+
+  // The iterator only moves forward, so a request for something before
+  // the cursor has to start over. Walking the keys in order, which is what
+  // this is for, then costs one step per call instead of aIndex of them.
+  if (mKeyCursor.isNothing() || aIndex < mKeyCursorIndex) {
+    InvalidateKeyCursor();
+    mKeyCursor.emplace(&mValues);
+  }
+
+  while (mKeyCursorIndex < aIndex) {
+    mKeyCursor->Next();
+    mKeyCursorIndex++;
+  }
+
+  MOZ_ASSERT(!mKeyCursor->Done());
+
+  aResult = mKeyCursor->Key();
 
   return NS_OK;
 }
@@ -344,6 +359,8 @@ nsresult LSSnapshot::SetItem(const nsAString& aKey, const nsAString& aValue,
     changed = true;
 
     auto autoRevertValue = MakeScopeExit([&] {
+      InvalidateKeyCursor();
+
       if (oldValue.IsVoid()) {
         mValues.Remove(aKey);
       } else {
@@ -382,14 +399,7 @@ nsresult LSSnapshot::SetItem(const nsAString& aKey, const nsAString& aValue,
       QM_TRY(MOZ_TO_RESULT(UpdateUsage(delta)), QM_PROPAGATE, QM_NO_CLEANUP,
              ([]() {
                static uint32_t counter = 0u;
-               // To not flood the product maintenance diagnostics,
-               // this predicate qualifies an error by returning true
-               // only when counter and 1 + counter bits are like
-               // 0111... and 1000... , i.e. when counter is one less
-               // than a power of two.
-               const bool result = 0u == (counter & (1u + counter));
-               ++counter;
-               return result;
+               return quota::ThrottleCounter(counter);
              }));
     }
 
@@ -450,6 +460,7 @@ nsresult LSSnapshot::RemoveItem(const nsAString& aKey,
 
     auto autoRevertValue = MakeScopeExit([&] {
       MOZ_ASSERT(!oldValue.IsVoid());
+      InvalidateKeyCursor();
       mValues.InsertOrUpdate(aKey, oldValue);
     });
 
@@ -538,6 +549,8 @@ nsresult LSSnapshot::Clear(LSNotifyInfo& aNotifyInfo) {
 
     DebugOnly<nsresult> rv = UpdateUsage(delta);
     MOZ_ASSERT(NS_SUCCEEDED(rv));
+
+    InvalidateKeyCursor();
 
     mValues.Clear();
 
@@ -673,6 +686,8 @@ nsresult LSSnapshot::GetItemInternal(const nsAString& aKey,
       } else if (mLoadedItems.Contains(aKey) || mUnknownItems.Contains(aKey)) {
         result.SetIsVoid(true);
       } else {
+        InvalidateKeyCursor();
+
         LSValue value;
         nsTArray<LSItemInfo> itemInfos;
         if (NS_WARN_IF(!mActor->SendLoadValueAndMoreItems(
@@ -707,6 +722,8 @@ nsresult LSSnapshot::GetItemInternal(const nsAString& aKey,
       }
 
       if (aValue.WasPassed()) {
+        InvalidateKeyCursor();
+
         const nsString& value = aValue.Value();
         if (!value.IsVoid()) {
           mValues.InsertOrUpdate(aKey, value);
@@ -721,6 +738,8 @@ nsresult LSSnapshot::GetItemInternal(const nsAString& aKey,
     case LoadState::AllOrderedKeys: {
       if (mValues.Get(aKey, &result)) {
         if (result.IsVoid()) {
+          InvalidateKeyCursor();
+
           LSValue value;
           nsTArray<LSItemInfo> itemInfos;
           if (NS_WARN_IF(!mActor->SendLoadValueAndMoreItems(
@@ -755,6 +774,8 @@ nsresult LSSnapshot::GetItemInternal(const nsAString& aKey,
       }
 
       if (aValue.WasPassed()) {
+        InvalidateKeyCursor();
+
         const nsString& value = aValue.Value();
         if (!value.IsVoid()) {
           mValues.InsertOrUpdate(aKey, value);
@@ -769,6 +790,8 @@ nsresult LSSnapshot::GetItemInternal(const nsAString& aKey,
     case LoadState::AllUnorderedItems:
     case LoadState::AllOrderedItems: {
       if (aValue.WasPassed()) {
+        InvalidateKeyCursor();
+
         const nsString& value = aValue.Value();
         if (!value.IsVoid()) {
           mValues.WithEntryHandle(aKey, [&](auto&& entry) {
@@ -904,6 +927,8 @@ nsresult LSSnapshot::EnsureAllKeys() {
       iter.Data() = std::move(value);
     }
   }
+
+  InvalidateKeyCursor();
 
   mValues.SwapElements(newValues);
 

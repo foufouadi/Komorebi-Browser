@@ -16,6 +16,7 @@ package org.mozilla.fenix.ui.efficiency.generation.behavior
  */
 object BehaviorRuntimeStateSetup {
 
+    @Suppress("UnusedParameter")
     fun apply(
         runtime: BehaviorRuntime,
         context: BehaviorContextVariant,

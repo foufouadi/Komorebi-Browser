@@ -15,9 +15,21 @@ profiler-node-tools:
     treeherder:
         symbol: TL(profiler-node-tools)
     run:
-        clone-with: hg
         script: build-profiler-node-tools.sh
         toolchain-artifact: public/build/profiler-node-tools.tar.zst
+    fetches:
+        fetch:
+            - firefox-profiler
+        toolchain:
+            - linux64-node-24
+
+profiler-cli:
+    description: "profiler-cli from firefox profiler"
+    treeherder:
+        symbol: TL(profiler-cli)
+    run:
+        script: build-profiler-cli.sh
+        toolchain-artifact: public/build/profiler-cli.tar.zst
     fetches:
         fetch:
             - firefox-profiler

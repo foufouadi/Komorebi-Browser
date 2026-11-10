@@ -5,6 +5,7 @@
  */
 
 import { openAIEngine } from "moz-src:///browser/components/aiwindow/models/openAIEngine.sys.mjs";
+import { clearTimeout, setTimeout } from "resource://gre/modules/Timer.sys.mjs";
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
 // Re-exported for back-compat with existing tests that import openAIEngine
@@ -14,8 +15,6 @@ export { openAIEngine };
 export const MODEL_PREF = "browser.smartwindow.model";
 export const GENERIC_MODEL_NAME = "generic";
 const MODEL_CHOICE_PREF = "browser.smartwindow.firstrun.modelChoice";
-// TODO Bug 2053495: remove with mistral release pref
-const MISTRAL_RELEASE_PREF = "browser.smartwindow.mistralRelease";
 
 const RS_AI_WINDOW_COLLECTION = "ai-window-prompts";
 
@@ -24,6 +23,32 @@ const lazy = XPCOMUtils.declareLazy({
 });
 
 let _remoteClient = null;
+
+/** @type {Promise<object[]>|null} */
+let _recordsPromise = null;
+let _recordsIdleTimer = null;
+
+// The repeat reads worth collapsing all happen within one chat turn, so the
+// cache is released once idle rather than held for the session.
+const RECORDS_IDLE_MS = 15_000;
+let _recordsIdleMs = RECORDS_IDLE_MS;
+
+function dropRecordsCache() {
+  if (_recordsIdleTimer) {
+    clearTimeout(_recordsIdleTimer);
+    _recordsIdleTimer = null;
+  }
+  _recordsPromise = null;
+}
+
+// Re-armed on every read, so the window tracks idleness rather than age and a
+// long turn can't have the records dropped out from under it mid-flight.
+function touchRecordsCache() {
+  if (_recordsIdleTimer) {
+    clearTimeout(_recordsIdleTimer);
+  }
+  _recordsIdleTimer = setTimeout(dropRecordsCache, _recordsIdleMs);
+}
 
 /**
  * Gets the Remote Settings client for AI window configurations. Subscribes
@@ -40,6 +65,8 @@ export function getRemoteClient() {
     bucketName: "main",
   });
   client.on("sync", async () => {
+    // Dropped before the models refresh below, which reads records back.
+    dropRecordsCache();
     try {
       await refreshModelsDataCache();
     } catch (e) {
@@ -51,6 +78,36 @@ export function getRemoteClient() {
 }
 
 /**
+ * Every record in the AI window collection, memoized until idle and dropped on
+ * sync. `client.get()` is not a cheap repeat read: each call lists the whole
+ * collection out of IndexedDB and re-runs the JEXL filter over every record,
+ * and a single chat submit resolves records three to five times (model config,
+ * system prompt assembly, per-turn browser context).
+ *
+ * @returns {Promise<object[]>}
+ */
+export function getRemoteRecords() {
+  if (_recordsPromise) {
+    touchRecordsCache();
+    return _recordsPromise;
+  }
+  const promise = getRemoteClient()
+    .get()
+    .catch(error => {
+      // Never leave a failed read cached, or one transient error would be
+      // served for the rest of the session. Guarded so a sync that landed
+      // while this read was in flight keeps its fresher entry.
+      if (_recordsPromise === promise) {
+        dropRecordsCache();
+      }
+      throw error;
+    });
+  _recordsPromise = promise;
+  touchRecordsCache();
+  return promise;
+}
+
+/**
  * Test-only seam: install a fake client. Subsequent `getRemoteClient()` calls
  * return it until cleared.
  *
@@ -58,6 +115,7 @@ export function getRemoteClient() {
  */
 export function _setRemoteClientForTesting(client) {
   _remoteClient = client;
+  dropRecordsCache();
 }
 
 /**
@@ -65,6 +123,26 @@ export function _setRemoteClientForTesting(client) {
  */
 export function _clearRemoteClientForTesting() {
   _remoteClient = null;
+  dropRecordsCache();
+}
+
+/**
+ * Test-only seam: drops memoized records without replacing the client, for
+ * tests that mutate a fake client's data between reads.
+ */
+export function _clearRecordsCacheForTesting() {
+  dropRecordsCache();
+}
+
+/**
+ * Test-only seam: shortens the idle window so a test can observe the release
+ * without waiting it out. Pass null to restore the default.
+ *
+ * @param {number|null} ms
+ */
+export function _setRecordsIdleMsForTesting(ms) {
+  _recordsIdleMs = ms ?? RECORDS_IDLE_MS;
+  dropRecordsCache();
 }
 
 const modelPrefObserver = {
@@ -74,6 +152,7 @@ const modelPrefObserver = {
         "Model preference changed, invalidating Remote Settings cache"
       );
       _remoteClient = null;
+      dropRecordsCache();
     }
   },
 };
@@ -93,6 +172,7 @@ export const MODEL_FEATURES = Object.freeze({
   CHAT: "chat",
   SMART_FORM_FILL: "smart-form-fill",
   TITLE_GENERATION: "title-generation",
+  TAB_GROUP_NAMING: "tab-group-naming",
   CONVERSATION_STARTERS_SIDEBAR_SYSTEM: "conversation-starters-sidebar-system",
   CONVERSATION_SUGGESTIONS_SIDEBAR_STARTER:
     "conversation-suggestions-sidebar-starter",
@@ -118,11 +198,21 @@ export const MODEL_FEATURES = Object.freeze({
   REAL_TIME_CONTEXT_DATE: "real-time-context-date",
   REAL_TIME_CONTEXT_TAB: "real-time-context-tab",
   REAL_TIME_CONTEXT_MENTIONS: "real-time-context-mentions",
-  MEMORIES_RELEVANT_CONTEXT: "memories-relevant-context",
+  // per-turn active tab and @mention fragments
+  BROWSER_CONTEXT: "browser-context",
+  MEMORIES_CONTEXT: "memories-context",
   // agents
   AGENT_MONITOR: "agent-monitor",
   // search agent
   SEARCH_ANSWER_GENERATION: "search-answer-generation",
+  // Exa /answers service. Not Remote Settings-backed — the model and service
+  // type are pinned by the search flow — so it has no FEATURE_MAJOR_VERSIONS
+  // entry; it only names the engine and its telemetry.
+  SEARCH_ANSWERS: "search-answers",
+  // aitab structured-page generation
+  AITAB: "aitab",
+  // widget generation
+  WIDGET_GENERATION: "widget-generation",
 });
 
 /** @typedef {(typeof MODEL_FEATURES)[keyof typeof MODEL_FEATURES]} ModelFeature */
@@ -134,6 +224,8 @@ export const SERVICE_TYPES = Object.freeze({
   AI: "ai",
   MEMORIES: "memories",
   AGENT: "agent",
+  SW_ANSWER: "sw-answer",
+  WIDGET_GENERATION: "widget-generation",
 });
 
 /**
@@ -143,10 +235,14 @@ export const PURPOSES = Object.freeze({
   CHAT: "chat",
   SMART_FORM_FILL: "smart-form-fill",
   TITLE_GENERATION: "title-generation",
+  TAB_GROUP_NAMING: "auto-tab-grouping",
   CONVERSATION_STARTERS_SIDEBAR: "convo-starters-sidebar",
   MEMORY_GENERATION: "memory-generation",
   // agents
   MONITOR: "monitor",
+  // aitab structured-page generation
+  AITAB: "aitab",
+  WIDGET_GENERATION: "widget-generation",
 });
 
 /**
@@ -159,12 +255,10 @@ export const PURPOSES = Object.freeze({
  * Keep ui/test/browser/head.js MOCK_RS_RECORDS aligned with this table.
  */
 export const FEATURE_MAJOR_VERSIONS = Object.freeze({
-  // TODO Bug 2053495: remove with mistral release pref (CHAT becomes 11)
-  get [MODEL_FEATURES.CHAT]() {
-    return Services.prefs.getBoolPref(MISTRAL_RELEASE_PREF, false) ? 11 : 10;
-  },
+  [MODEL_FEATURES.CHAT]: 12,
   [MODEL_FEATURES.SMART_FORM_FILL]: 1,
-  [MODEL_FEATURES.TITLE_GENERATION]: 1,
+  [MODEL_FEATURES.TITLE_GENERATION]: 2,
+  [MODEL_FEATURES.TAB_GROUP_NAMING]: 2,
   [MODEL_FEATURES.CONVERSATION_STARTERS_SIDEBAR_SYSTEM]: 1,
   [MODEL_FEATURES.CONVERSATION_SUGGESTIONS_SIDEBAR_STARTER]: 3,
   [MODEL_FEATURES.CONVERSATION_SUGGESTIONS_FOLLOWUP]: 1,
@@ -181,15 +275,20 @@ export const FEATURE_MAJOR_VERSIONS = Object.freeze({
   // memories usage feature versions
   [MODEL_FEATURES.MEMORIES_MESSAGE_CLASSIFICATION_SYSTEM]: 1,
   [MODEL_FEATURES.MEMORIES_MESSAGE_CLASSIFICATION_USER]: 1,
-  [MODEL_FEATURES.MEMORIES_RELEVANT_CONTEXT]: 2,
+  [MODEL_FEATURES.MEMORIES_CONTEXT]: 1,
   // real-time-context fragments
   [MODEL_FEATURES.REAL_TIME_CONTEXT_DATE]: 1,
   [MODEL_FEATURES.REAL_TIME_CONTEXT_TAB]: 1,
   [MODEL_FEATURES.REAL_TIME_CONTEXT_MENTIONS]: 1,
+  [MODEL_FEATURES.BROWSER_CONTEXT]: 1,
   // agents
-  [MODEL_FEATURES.AGENT_MONITOR]: 1,
+  [MODEL_FEATURES.AGENT_MONITOR]: 2,
   // search agent
   [MODEL_FEATURES.SEARCH_ANSWER_GENERATION]: 1,
+  // aitab structured-page generation. Paired with the `version` major in
+  // models/aitab/component_schema.json (AITab.loadAssets rejects a mismatch).
+  // Bump both, plus the aitab records in the packaged dump, in one patch.
+  [MODEL_FEATURES.AITAB]: 1,
 });
 
 /**
@@ -264,30 +363,8 @@ export function checkMajorVersion(recordVersion, comparisonVersion) {
 /*
  * Fallback model data - matches Remote Settings shape
  * Used when Remote Settings lookup fails
- *
- * TODO Bug 2053495: remove with mistral release pref (delete FALLBACK_MODELS,
- * keep FALLBACK_MODELS_V2)
  */
 export const FALLBACK_MODELS = {
-  0: { model: "custom-model", ownerName: "", labelId: "custom" },
-  1: {
-    model: "gemini-3.1-flash-lite",
-    ownerName: "Google",
-    labelId: "fast",
-  },
-  2: {
-    model: "qwen3-235b-a22b-instruct-2507-maas",
-    ownerName: "Alibaba",
-    labelId: "allpurpose",
-  },
-  3: {
-    model: "gpt-oss-120b",
-    ownerName: "OpenAI",
-    labelId: "personal",
-  },
-};
-
-export const FALLBACK_MODELS_V2 = {
   0: { model: "custom-model", ownerName: "", labelId: "custom" },
   1: {
     model: "gemini-3.1-flash-lite",
@@ -311,6 +388,16 @@ export const FALLBACK_MODELS_V2 = {
     brandName: "Mistral",
   },
 };
+
+/**
+ * Checks if the modelChoiceId points at a custom model selection.
+ *
+ * @param {string} modelChoiceId
+ * @returns {boolean}
+ */
+function isCustomModelChoice(modelChoiceId) {
+  return modelChoiceId === "0" || modelChoiceId === "";
+}
 
 /**
  * Selects the main configuration for a feature based on version and model preferences.
@@ -344,11 +431,12 @@ export function selectMainConfig(
     return null;
   }
 
-  // We only allow customization of main assistant model ("chat" feature)
+  // Only the main assistant model ("chat" feature) is selectable per model
+  // choice; other features always use their default config.
   // We figure out which model the user wants and load prompts for that model
   // If we can't find a config for the user selection, we load the generic one
   if (feature === MODEL_FEATURES.CHAT) {
-    if (modelChoiceId !== "0" && modelChoiceId !== "") {
+    if (!isCustomModelChoice(modelChoiceId)) {
       // First check the choice ID. If it's not 0, use the model associated with that ID
 
       // Look for config based on model choice ID
@@ -394,10 +482,13 @@ export function selectMainConfig(
   }
 
   // **For all features other than "chat"**
-  // If no user model pref OR user's model not found: use default
+  // If no user model pref OR user's model not found: use default, swapping in
+  // the userModel if needed
   const defaultConfig = sameMajor.find(config => config.is_default === true);
   if (defaultConfig) {
-    return defaultConfig;
+    return userModel && isCustomModelChoice(modelChoiceId)
+      ? { ...defaultConfig, model: userModel }
+      : defaultConfig;
   }
 
   // No default found - this shouldn't happen with proper Remote Settings data
@@ -453,12 +544,11 @@ export async function resolveChatModelChoice(
   if (choiceId === "0") {
     // Custom model - no RS lookup needed. Return the complete custom entry from
     // the fallback so it carries its label like every other choice.
-    return getActiveFallbackModels()[choiceId];
+    return FALLBACK_MODELS[choiceId];
   }
 
   try {
-    const client = getRemoteClient();
-    const allRecords = await client.get();
+    const allRecords = await getRemoteRecords();
 
     const record = selectMainConfig(
       // CHAT model+params live in v2 kind:"params" records.
@@ -493,18 +583,6 @@ export async function resolveChatModelChoice(
 }
 
 /**
- * Returns the active fallback models based on the mistral release pref.
- *
- * @returns {typeof FALLBACK_MODELS}
- */
-function getActiveFallbackModels() {
-  // TODO Bug 2053495: remove with mistral release pref (always FALLBACK_MODELS_V2)
-  return Services.prefs.getBoolPref(MISTRAL_RELEASE_PREF, false)
-    ? FALLBACK_MODELS_V2
-    : FALLBACK_MODELS;
-}
-
-/**
  * Single source of truth for the order model choices are shown in across the
  * UI (smartbar selector, settings, onboarding). Choice IDs keep their
  * server-defined identity; only the display position lives here. Change this
@@ -513,10 +591,7 @@ function getActiveFallbackModels() {
  * @returns {string[]} Choice IDs in display order.
  */
 export function getModelDisplayOrder() {
-  // TODO Bug 2053495: remove with mistral release pref (always ["3", "1", "2"])
-  return Services.prefs.getBoolPref(MISTRAL_RELEASE_PREF, false)
-    ? ["3", "1", "2"]
-    : ["1", "2", "3"];
+  return ["3", "1", "2"];
 }
 
 /**
@@ -535,7 +610,7 @@ export async function getModelForChoice(choiceId = getCurrentModelChoiceId()) {
     return resolved;
   }
 
-  const fallbackModels = getActiveFallbackModels();
+  const fallbackModels = FALLBACK_MODELS;
   if (choiceId in fallbackModels) {
     return fallbackModels[choiceId];
   }
@@ -560,13 +635,6 @@ export async function getModelForChoice(choiceId = getCurrentModelChoiceId()) {
  */
 let _modelsDataCache = null;
 
-// The active model set depends on the mistral release pref. If it changes at
-// runtime, drop the cached data so the next read rebuilds against the new pref.
-// TODO Bug 2053495: remove with mistral release pref
-Services.prefs.addObserver(MISTRAL_RELEASE_PREF, () => {
-  _modelsDataCache = null;
-});
-
 export async function refreshModelsDataCache() {
   _modelsDataCache = null;
   await getAllModelsData();
@@ -581,7 +649,7 @@ export async function getAllModelsData() {
   if (_modelsDataCache) {
     return _modelsDataCache;
   }
-  const fallbackModels = getActiveFallbackModels();
+  const fallbackModels = FALLBACK_MODELS;
   const modelData = { ...fallbackModels };
   // RS reads from a local dump. Only the first call sets up RS state,
   // subsequent calls are cached
@@ -606,7 +674,7 @@ export async function getAllModelsData() {
  * @returns {{[key: string]: ModelChoiceData}}
  */
 export function getCachedModelsData() {
-  return _modelsDataCache ?? getActiveFallbackModels();
+  return _modelsDataCache ?? FALLBACK_MODELS;
 }
 
 export function getCurrentModelName() {
@@ -624,15 +692,39 @@ export function _clearModelsDataCacheForTesting() {
   _modelsDataCache = null;
 }
 
+// `{#key}...{/key}` alone on its line(s), with its indent and line end, so a
+// dropped section takes its line with it. The body stops at the nearest
+// `{/key}`, so a section followed by other text is never paired with a later
+// one's closing tag.
+const PROMPT_STANDALONE_SECTION_REGEX =
+  /^([ \t]*)\{#(\w+)\}((?:(?!\{\/\2\})[\s\S])*?)\{\/\2\}([ \t]*(?:\r?\n|$))/gm;
+const PROMPT_INLINE_SECTION_REGEX = /\{#(\w+)\}([\s\S]*?)\{\/\1\}/g;
+
 /**
  * Renders a prompt from a string, replacing placeholders with provided strings.
+ *
+ * `{key}` is replaced with the value of `key`. `{#key}...{/key}` keeps its
+ * content only when `key` has a non-empty value; otherwise the section is
+ * removed, along with its whole line when nothing else is on that line.
  *
  * @param {string} rawPromptContent               The raw prompt as a string
  * @param {Map<string, string>} stringsToReplace  A map of placeholder strings to their replacements
  * @returns {Promise<string>}                     The rendered prompt
  */
 export function renderPrompt(rawPromptContent, stringsToReplace = {}) {
-  let finalPromptContent = rawPromptContent;
+  const hasValue = key => {
+    const value = stringsToReplace[key];
+    return Boolean(value) || value === 0;
+  };
+  let finalPromptContent = rawPromptContent
+    .replace(
+      PROMPT_STANDALONE_SECTION_REGEX,
+      (match, indent, key, content, lineEnd) =>
+        hasValue(key) ? indent + content + lineEnd : ""
+    )
+    .replace(PROMPT_INLINE_SECTION_REGEX, (match, key, content) =>
+      hasValue(key) ? content : ""
+    );
 
   for (const [orig, repl] of Object.entries(stringsToReplace)) {
     const regex = new RegExp(`{${orig}}`, "g");

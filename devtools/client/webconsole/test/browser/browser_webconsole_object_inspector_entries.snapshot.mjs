@@ -535,7 +535,7 @@ export default [
     "      ▶︎  <value>: Highlight { priority: 0, type: \"highlight\", size: 0 }",
     "    ▶︎  1: glow → Highlight { priority: 0, type: \"highlight\", size: 0 }",
     "    ▶︎  2: anchor → Highlight { priority: 0, type: \"highlight\", size: 0 }",
-    "  ▶︎  <prototype>: HighlightRegistryPrototype { set: set(), clear: clear(), delete: delete(), … }"
+    "  ▶︎  <prototype>: HighlightRegistryPrototype { highlightsFromPoint: highlightsFromPoint(), entries: entries(), keys: keys(), … }"
   ],
 
   // new URLSearchParams([
@@ -652,6 +652,7 @@ export default [
     "  ├ clientWidth: 0",
     "  ├ contentEditable: \"inherit\"",
     "  ├ currentCSSZoom: 1",
+    "  ▶︎  customElementRegistry: CustomElementRegistry {  }",
     "  ▶︎  dataset: DOMStringMap(0)",
     "  ├ dir: \"\"",
     "  ├ draggable: false",
@@ -832,6 +833,7 @@ export default [
     "  ├ contentType: \"application/xml\"",
     "  ├ cookie: \"\"",
     "  ├ currentScript: null",
+    "  ├ customElementRegistry: null",
     "  ├ defaultView: null",
     "  ├ designMode: \"off\"",
     "  ├ dir: \"\"",

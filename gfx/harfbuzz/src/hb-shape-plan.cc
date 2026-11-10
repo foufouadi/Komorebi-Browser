@@ -52,6 +52,20 @@
  * Most client programs will not need to deal with shape plans directly.
  **/
 
+#ifdef HAVE_HARFRUST
+extern "C" void _hb_harfrust_shape_plan_destroy_rs (void *data);
+#endif
+
+hb_shape_plan_t::~hb_shape_plan_t ()
+{
+#ifdef HAVE_HARFRUST
+  void *data = harfrust_data.get_relaxed ();
+  if (data)
+    _hb_harfrust_shape_plan_destroy_rs (data);
+#endif
+  key.fini ();
+}
+
 
 /*
  * hb_shape_plan_key_t
@@ -89,7 +103,8 @@ hb_shape_plan_key_t::init (bool                           copy,
   this->shaper_func = nullptr;
   this->shaper_name = nullptr;
 #ifndef HB_NO_OT_SHAPE
-  this->ot.init (face, coords, num_coords);
+  if (unlikely (!this->ot.init (face, coords, num_coords)))
+    goto bail;
 #endif
 
   /*
@@ -115,6 +130,7 @@ hb_shape_plan_key_t::init (bool                           copy,
       else if (0 == strcmp (*shaper_list, #shaper)) \
 	HB_SHAPER_PLAN (shaper);
 #include "hb-shaper-list.hh"
+
 #undef HB_SHAPER_IMPLEMENT
   }
   else
@@ -132,6 +148,9 @@ hb_shape_plan_key_t::init (bool                           copy,
 #undef HB_SHAPER_PLAN
 
 bail:
+#ifndef HB_NO_OT_SHAPE
+  this->ot.fini ();
+#endif
   ::hb_free (features);
   return false;
 }
@@ -409,10 +428,15 @@ _hb_shape_plan_execute_internal (hb_shape_plan_t    *shape_plan,
   assert (shape_plan->face_unsafe == font->face);
   assert (hb_segment_properties_equal (&shape_plan->key.props, &buffer->props));
 
+  /* Install the per-text work limits (max_len, max_ops) around the actual
+   * shaping, so that hb_shape_plan_execute() is as bounded as hb_shape(). */
 #define HB_SHAPER_EXECUTE(shaper) \
 	HB_STMT_START { \
-	  return font->data.shaper && \
-		 _hb_##shaper##_shape (shape_plan, font, buffer, features, num_features); \
+	  buffer->enter (); \
+	  bool ret = font->data.shaper && \
+		     _hb_##shaper##_shape (shape_plan, font, buffer, features, num_features); \
+	  buffer->leave (); \
+	  return ret; \
 	} HB_STMT_END
 
   if (false)
@@ -543,10 +567,18 @@ retry:
 		   shaper_list))
       return hb_shape_plan_get_empty ();
 
+    hb_face_t::plan_node_t *cached = face->last_shape_plan.get_acquire ();
+    if (cached && cached->shape_plan->key.equal (&key))
+    {
+      DEBUG_MSG_FUNC (SHAPE_PLAN, cached->shape_plan, "fulfilled from last-plan cache");
+      return hb_shape_plan_reference (cached->shape_plan);
+    }
+
     for (hb_face_t::plan_node_t *node = cached_plan_nodes; node; node = node->next)
       if (node->shape_plan->key.equal (&key))
       {
 	DEBUG_MSG_FUNC (SHAPE_PLAN, node->shape_plan, "fulfilled from cache");
+	face->last_shape_plan.set_release (node);
 	return hb_shape_plan_reference (node->shape_plan);
       }
   }
@@ -573,6 +605,7 @@ retry:
     goto retry;
   }
   DEBUG_MSG_FUNC (SHAPE_PLAN, shape_plan, "inserted into cache");
+  face->last_shape_plan.set_release (node);
 
   return hb_shape_plan_reference (shape_plan);
 }

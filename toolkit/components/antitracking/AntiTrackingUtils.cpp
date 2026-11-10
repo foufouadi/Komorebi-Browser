@@ -11,6 +11,7 @@
 #include "mozilla/Components.h"
 #include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/CanonicalBrowsingContext.h"
+#include "mozilla/net/ChannelClassifierUtils.h"
 #include "mozilla/net/CookieJarSettings.h"
 #include "mozilla/LoadInfo.h"
 #include "mozilla/dom/Document.h"
@@ -18,10 +19,12 @@
 #include "mozilla/dom/WindowContext.h"
 #include "mozilla/net/NeckoChannelParams.h"
 #include "mozilla/PermissionManager.h"
+#include "mozilla/StaticPrefs_privacy.h"
 #include "mozIThirdPartyUtil.h"
 #include "nsGlobalWindowInner.h"
 #include "nsHttpChannel.h"
 #include "nsIChannel.h"
+#include "nsIClassifiedChannel.h"
 #include "nsICookieService.h"
 #include "nsIEffectiveTLDService.h"
 #include "nsIHttpChannel.h"
@@ -556,12 +559,6 @@ AntiTrackingUtils::GetStoragePermissionStateInParent(nsIChannel* aChannel) {
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return nsILoadInfo::NoStoragePermission;
     }
-    bool triggeringWindowHasStorageAccess;
-    rv =
-        loadInfo->GetTriggeringStorageAccess(&triggeringWindowHasStorageAccess);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return nsILoadInfo::NoStoragePermission;
-    }
 
     nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
     RefPtr<nsIPrincipal> channelResultPrincipal;
@@ -572,6 +569,7 @@ AntiTrackingUtils::GetStoragePermissionStateInParent(nsIChannel* aChannel) {
     }
     RefPtr<net::HttpBaseChannel> httpChannel = do_QueryObject(aChannel);
     bool crossSiteInitiated = false;
+    bool triggeringWindowHasStorageAccess = false;
     if (bc && bc->GetParent()->GetCurrentWindowContext()) {
       RefPtr<WindowGlobalParent> triggeringWGP =
           WindowGlobalParent::GetByInnerWindowId(triggeringWindowId);
@@ -581,6 +579,8 @@ AntiTrackingUtils::GetStoragePermissionStateInParent(nsIChannel* aChannel) {
         if (NS_FAILED(rv)) {
           crossSiteInitiated = false;
         }
+        triggeringWindowHasStorageAccess =
+            triggeringWGP->GetUsingStorageAccess();
       }
     }
 
@@ -1101,6 +1101,51 @@ bool AntiTrackingUtils::IsThirdPartyChannel(nsIChannel* aChannel) {
 }
 
 /* static */
+bool AntiTrackingUtils::IsThirdPartyTrackingChannel(nsIChannel* aChannel) {
+  nsCOMPtr<nsIClassifiedChannel> classifiedChannel =
+      do_QueryInterface(aChannel);
+  return classifiedChannel && classifiedChannel->IsThirdPartyTrackingResource();
+}
+
+/* static */
+bool AntiTrackingUtils::IsFirstPartyTrackingChannel(nsIChannel* aChannel) {
+  nsCOMPtr<nsIClassifiedChannel> classifiedChannel =
+      do_QueryInterface(aChannel);
+  return classifiedChannel &&
+         net::ChannelClassifierUtils::IsTrackingClassificationFlag(
+             classifiedChannel->GetFirstPartyClassificationFlags(),
+             NS_UsePrivateBrowsing(aChannel));
+}
+
+/* static */
+net::ClassificationFlags AntiTrackingUtils::GetClassificationFlags(
+    nsIChannel* aChannel) {
+  nsCOMPtr<nsIClassifiedChannel> classifiedChannel =
+      do_QueryInterface(aChannel);
+  if (!classifiedChannel) {
+    return {0, 0};
+  }
+  return {classifiedChannel->GetFirstPartyClassificationFlags(),
+          classifiedChannel->GetThirdPartyClassificationFlags()};
+}
+
+/* static */
+bool AntiTrackingUtils::IsThirdPartySocialTrackingChannel(
+    nsIChannel* aChannel) {
+  nsCOMPtr<nsIClassifiedChannel> classifiedChannel =
+      do_QueryInterface(aChannel);
+  return classifiedChannel &&
+         classifiedChannel->IsThirdPartySocialTrackingResource();
+}
+
+/* static */
+bool AntiTrackingUtils::IsTrackingProtectionEnabled(bool aIsPrivate) {
+  return StaticPrefs::privacy_trackingprotection_enabled() ||
+         (aIsPrivate &&
+          StaticPrefs::privacy_trackingprotection_pbmode_enabled());
+}
+
+/* static */
 bool AntiTrackingUtils::IsThirdPartyWindow(nsPIDOMWindowInner* aWindow,
                                            nsIURI* aURI) {
   MOZ_ASSERT(aWindow);
@@ -1268,8 +1313,6 @@ void AntiTrackingUtils::UpdateAntiTrackingInfoForChannel(nsIChannel* aChannel) {
   if (!XRE_IsParentProcess()) {
     return;
   }
-
-  MOZ_DIAGNOSTIC_ASSERT(XRE_IsParentProcess());
 
   AntiTrackingUtils::ComputeIsThirdPartyToTopWindow(aChannel);
 

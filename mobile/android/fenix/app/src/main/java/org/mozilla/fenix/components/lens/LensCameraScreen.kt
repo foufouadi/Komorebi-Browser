@@ -57,13 +57,13 @@ import org.mozilla.fenix.theme.FirefoxTheme
 private val ShutterButtonSize = 64.dp
 private val ButtonSize = 48.dp
 private val TopBarPadding = 24.dp
+private val TopBarSpacing = 12.dp
 private val CloseButtonStartPadding = 12.dp
 private val TitleHorizontalPadding = ButtonSize + CloseButtonStartPadding
 private val ShutterBorderWidth = 3.dp
 private val ShutterBorderColor = Color.White.copy(alpha = 0.5f)
 
 private val BottomBarPadding = 24.dp
-private val BottomBarSpacing = 12.dp
 
 private val BottomControlsTopPadding = 24.dp
 private val BottomControlsHorizontalPadding = 32.dp
@@ -88,11 +88,13 @@ private const val VIEWFINDER_WIDTH_FRACTION = 0.7f
  * @property mode Active capture mode; controls which controls and overlays are shown.
  * @property previewAspectRatio Display-oriented width/height ratio for the camera preview, or null if not yet
  *   determined.
+ * @property showModeToggle Whether the toggle for switching between Lens and QR modes is shown.
  */
 data class LensCameraState(
     val showError: Boolean,
     val mode: CameraMode,
     val previewAspectRatio: Float?,
+    val showModeToggle: Boolean = true,
 )
 
 /**
@@ -143,32 +145,39 @@ fun LensCameraScreen(
             QrViewfinderOverlay()
         }
 
-        CameraTopBar(
-            mode = state.mode,
-            onClose = onClose,
-            modifier = Modifier.align(Alignment.TopStart),
-        )
-
         Column(
-            modifier =
-                Modifier.align(Alignment.BottomCenter)
-                    .windowInsetsPadding(WindowInsets.navigationBars)
-                    .padding(bottom = BottomBarPadding),
+            modifier = Modifier.align(Alignment.TopCenter),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(BottomBarSpacing),
+            verticalArrangement = Arrangement.spacedBy(TopBarSpacing),
         ) {
-            when (state.mode) {
-                CameraMode.LENS ->
-                    BottomControls(
-                        onShutter = onShutter,
-                        onGallery = onGallery,
-                    )
-                CameraMode.QR -> QrBottomControls(onGallery = onGallery)
-            }
-            ModeToggle(
+            CameraTopBar(
                 mode = state.mode,
-                onModeChange = onModeChange,
+                onClose = onClose,
             )
+            if (state.showModeToggle) {
+                ModeToggle(
+                    mode = state.mode,
+                    onModeChange = onModeChange,
+                )
+            }
+        }
+
+        val bottomControlsModifier =
+            Modifier.align(Alignment.BottomCenter)
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .padding(bottom = BottomBarPadding)
+        when (state.mode) {
+            CameraMode.LENS ->
+                BottomControls(
+                    onShutter = onShutter,
+                    onGallery = onGallery,
+                    modifier = bottomControlsModifier,
+                )
+            CameraMode.QR ->
+                QrBottomControls(
+                    onGallery = onGallery,
+                    modifier = bottomControlsModifier,
+                )
         }
     }
 }

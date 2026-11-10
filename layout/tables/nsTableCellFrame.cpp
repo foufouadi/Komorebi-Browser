@@ -209,7 +209,10 @@ void nsTableCellFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle) {
     uint32_t rowIndex = RowIndex();
     // row span needs to be clamped as we do not create rows in the cellmap
     // which do not have cells originating in them
-    TableArea damageArea(colIndex, rowIndex, GetColSpan(),
+    // col span needs to be clamped as the cellmap may not reflect it yet
+    TableArea damageArea(colIndex, rowIndex,
+                         std::min(static_cast<uint32_t>(GetColSpan()),
+                                  tableFrame->GetColCount() - colIndex),
                          std::min(static_cast<uint32_t>(GetRowSpan()),
                                   tableFrame->GetRowCount() - rowIndex));
     tableFrame->AddBCDamageArea(damageArea);
@@ -665,23 +668,24 @@ static nscoord CalcUnpaginatedBSize(nsTableCellFrame& aCellFrame,
       static_cast<nsTableFrame*>(aTableFrame.FirstInFlow());
   nsTableRowFrame* row =
       static_cast<nsTableRowFrame*>(firstCellInFlow->GetParent());
-  nsTableRowGroupFrame* firstRGInFlow =
-      static_cast<nsTableRowGroupFrame*>(row->GetParent());
+  MOZ_ASSERT(!row->GetPrevInFlow(),
+             "First-in-flow cell should be in a first-in-flow row");
 
-  uint32_t rowIndex = firstCellInFlow->RowIndex();
-  int32_t rowSpan = aTableFrame.GetEffectiveRowSpan(*firstCellInFlow);
+  const uint32_t rowIndex = firstCellInFlow->RowIndex();
+  const int32_t rowSpan = aTableFrame.GetEffectiveRowSpan(*firstCellInFlow);
 
   nscoord computedBSize =
       firstTableInFlow->GetRowSpacing(rowIndex, rowIndex + rowSpan - 1);
   computedBSize -= aBlockDirBorderPadding;
-  uint32_t rowX;
-  for (row = firstRGInFlow->GetFirstRow(), rowX = 0; row;
-       row = row->GetNextRow(), rowX++) {
-    if (rowX > rowIndex + rowSpan - 1) {
-      break;
-    } else if (rowX >= rowIndex) {
-      computedBSize += row->GetUnpaginatedBSize();
+
+  // Only first-in-flow rows store their unpaginated bsize.
+  for (int32_t spanned = 0; row && spanned < rowSpan;
+       row = row->GetNextRowAcrossFragments()) {
+    if (row->GetPrevInFlow()) {
+      continue;
     }
+    computedBSize += row->GetUnpaginatedBSize();
+    spanned++;
   }
   return computedBSize;
 }
@@ -939,9 +943,9 @@ nsTableCellFrame* NS_NewTableCellFrame(PresShell* aPresShell,
                                        ComputedStyle* aStyle,
                                        nsTableFrame* aTableFrame) {
   if (aTableFrame->IsBorderCollapse()) {
-    return new (aPresShell) nsBCTableCellFrame(aStyle, aTableFrame);
+    return new nsBCTableCellFrame(aStyle, aTableFrame);
   }
-  return new (aPresShell) nsTableCellFrame(aStyle, aTableFrame);
+  return new nsTableCellFrame(aStyle, aTableFrame);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsBCTableCellFrame)
@@ -1042,7 +1046,7 @@ class nsDisplayTableCellSelection final : public nsPaintedDisplayItem {
   }
   NS_DISPLAY_DECL_NAME("TableCellSelection", TYPE_TABLE_CELL_SELECTION)
 
-  bool CreateWebRenderCommands(
+  WebRenderCommandsResult CreateWebRenderCommands(
       mozilla::wr::DisplayListBuilder& aBuilder,
       mozilla::wr::IpcResourceUpdateQueue& aResources,
       const StackingContextHelper& aSc,
@@ -1050,7 +1054,10 @@ class nsDisplayTableCellSelection final : public nsPaintedDisplayItem {
       nsDisplayListBuilder* aDisplayListBuilder) override {
     RefPtr<nsFrameSelection> frameSelection =
         mFrame->PresShell()->FrameSelection();
-    return !frameSelection->IsInTableSelectionMode();
+    if (frameSelection->IsInTableSelectionMode()) {
+      return Err("table selection decoration needs the fallback paint path");
+    }
+    return Ok();
   }
 };
 

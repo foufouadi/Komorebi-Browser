@@ -7,6 +7,10 @@
 
 #include <cstdint>
 
+#ifndef MOZ_GECKOVIEW_HISTORY
+#  include "mozilla/TimeStamp.h"
+#endif
+
 #include "nsCOMPtr.h"
 #include "nsString.h"
 
@@ -30,8 +34,8 @@ struct PageLoadDomainExtra;
   _(dnsLookupTime, uint32_t)                   \
   _(documentFeatures, uint32_t)                \
   _(fcpTime, uint32_t)                         \
-  _(hasSsd, bool)                              \
   _(httpVer, uint32_t)                         \
+  _(isActiveClient, bool)                      \
   _(jsExecTime, uint32_t)                      \
   _(delazifyTime, uint32_t)                    \
   _(lcpTime, uint32_t)                         \
@@ -41,11 +45,12 @@ struct PageLoadDomainExtra;
   _(redirectTime, uint32_t)                    \
   _(responseTime, uint32_t)                    \
   _(sameOriginNav, bool)                       \
+  _(loadedInForeground, bool)                  \
   _(timeToRequestStart, uint32_t)              \
+  _(timeToConnectStart, uint32_t)              \
   _(tlsHandshakeTime, uint32_t)                \
   _(trrDomain, nsCString)                      \
   _(userFeatures, uint32_t)                    \
-  _(usingWebdriver, bool)                      \
   _(cacheDisposition, uint32_t)                \
   _(scriptFromNeckoText, uint32_t)             \
   _(scriptFromNeckoSerialized, uint32_t)       \
@@ -70,7 +75,13 @@ namespace mozilla::performance::pageload_event {
  */
 enum UserFeature : uint32_t { USING_A11Y = 1 << 0 };
 
-enum DocumentFeature : uint32_t { FETCH_PRIORITY_IMAGES = 1 << 0 };
+enum DocumentFeature : uint32_t {
+  FETCH_PRIORITY_IMAGES = 1 << 0,
+  // Navigation was served a Speculation Rules prefetch.
+  NAVIGATIONAL_PREFETCH = 1 << 1,
+  // A prefetch candidate covered this navigation, in either experiment branch.
+  NAVIGATIONAL_PREFETCH_ELIGIBLE = 1 << 2,
+};
 
 enum AndroidIsolationCategory : uint32_t {
   OTHER = 0,
@@ -89,6 +100,19 @@ enum class PageloadEventType { kNormal, kDomain, kNone };
 
 // Randomly decides what type of pageload event to send.
 extern PageloadEventType GetPageloadEventType();
+
+#ifndef MOZ_GECKOVIEW_HISTORY
+// Signals derived from the in-process Places history. Parent process only, and
+// desktop only: GeckoView history lives in the embedding app.
+
+// Whether aDomain (an ETLD+1) was unvisited today, until aNavigationStartTime.
+extern bool FirstDailyLoadFromPlaces(const nsACString& aDomain,
+                                     const TimeStamp& aNavigationStartTime);
+
+// Whether this profile looks like it belongs to a legitimate client rather than
+// to automation. Cached, since the answer only ever flips from false to true.
+extern bool IsActiveClient();
+#endif
 
 // Pageload event data is stored in this struct and converted to the
 // glean representation when submitted.

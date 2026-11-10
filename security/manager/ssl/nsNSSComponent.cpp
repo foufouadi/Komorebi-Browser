@@ -125,15 +125,7 @@ void TruncateFromLastDirectorySeparator(nsCString& path) {
   path.Truncate(index);
 }
 
-bool LoadIPCClientCerts() {
-  if (!LoadIPCClientCertsModule()) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("failed to load ipcclientcerts"));
-    return false;
-  }
-  return true;
-}
-
-// This function can be called from chrome or content or socket processes
+// This function can be called from chrome or content processes
 // to ensure that NSS is initialized.
 bool EnsureNSSInitializedChromeOrContent() {
   static Atomic<bool> initialized(false);
@@ -177,18 +169,6 @@ bool EnsureNSSInitializedChromeOrContent() {
 
   if (NSS_NoDB_Init(nullptr) != SECSuccess) {
     return false;
-  }
-
-  if (XRE_IsSocketProcess()) {
-    if (NS_FAILED(CommonInit())) {
-      return false;
-    }
-    // If ipcclientcerts fails to load, client certificate authentication won't
-    // work (if networking is done on the socket process). This is preferable
-    // to stopping the program entirely, so treat this as best-effort.
-    (void)NS_WARN_IF(!LoadIPCClientCerts());
-    initialized = true;
-    return true;
   }
 
   if (NS_FAILED(mozilla::psm::InitializeCipherSuite())) {
@@ -498,6 +478,15 @@ LoadLoadableCertsTask::Run() {
              success ? "succeeded" : "failed"));
   }
 
+#if defined(NIGHTLY_BUILD) && !defined(MOZ_NO_SMART_CARDS)
+  if (PKCS11ModuleDB::UtilityProcessEnabled() && !GetInSafeMode()) {
+    bool success = LoadRemoteCertsModule();
+    MOZ_LOG(
+        gPIPNSSLog, LogLevel::Debug,
+        ("loading remote certs module %s", success ? "succeeded" : "failed"));
+  }
+#endif  // NIGHTLY_BUILD && !MOZ_NO_SMART_CARDS
+
   {
     MonitorAutoLock rootsLoadedLock(mNSSComponent->mLoadableCertsLoadedMonitor);
     mNSSComponent->mLoadableCertsLoaded = true;
@@ -571,8 +560,7 @@ nsresult CheckForSmartCardChanges() {
 #  ifdef NIGHTLY_BUILD
   // If this is the parent process and PKCS#11 modules are loaded in the
   // utility process, this is a no-op.
-  if (XRE_IsParentProcess() &&
-      StaticPrefs::security_utility_pkcs11_module_process_enabled()) {
+  if (XRE_IsParentProcess() && PKCS11ModuleDB::UtilityProcessEnabled()) {
     return NS_OK;
   }
 #  endif
@@ -581,8 +569,7 @@ nsresult CheckForSmartCardChanges() {
     StaticMutexAutoLock lock(sCheckForSmartCardChangesMutex);
     // Do this at most once every 3 seconds.
     TimeStamp now = TimeStamp::Now();
-    if (now - sLastCheckedForSmartCardChanges <
-        TimeDuration::FromSeconds(3.0)) {
+    if (now - sLastCheckedForSmartCardChanges < TimeDuration::FromSeconds(3)) {
       return NS_OK;
     }
     sLastCheckedForSmartCardChanges = now;
@@ -882,14 +869,8 @@ nsresult CommonInit() {
   DisableMD5();
 
   mozilla::pkix::RegisterErrorTable();
-  nsSSLIOLayerHelpers::GlobalInit();
 
   return NS_OK;
-}
-
-void PrepareForShutdownInSocketProcess() {
-  MOZ_ASSERT(XRE_IsSocketProcess());
-  nsSSLIOLayerHelpers::GlobalCleanup();
 }
 
 bool HandleTLSPrefChange(const nsCString& prefName) {
@@ -1008,7 +989,8 @@ bool SetDeprecatedTLS1CipherPrefs(const char* aPref = nullptr) {
 // static
 bool SetKyberPolicy(const char* aPref = nullptr) {
   if (aPref != nullptr && strcmp(aPref, "security.tls.enable_kyber") != 0 &&
-      strcmp(aPref, "security.tls.enable_mlkem1024") != 0) {
+      strcmp(aPref, "security.tls.enable_mlkem1024") != 0 &&
+      strcmp(aPref, "security.tls.enable_mldsa") != 0) {
     return false;
   }
   if (StaticPrefs::security_tls_enable_kyber()) {
@@ -1020,6 +1002,15 @@ bool SetKyberPolicy(const char* aPref = nullptr) {
     NSS_SetAlgorithmPolicy(SEC_OID_ML_KEM_1024, NSS_USE_ALG_IN_SSL_KX, 0);
   } else {
     NSS_SetAlgorithmPolicy(SEC_OID_ML_KEM_1024, 0, NSS_USE_ALG_IN_SSL_KX);
+  }
+  if (StaticPrefs::security_tls_enable_mldsa()) {
+    NSS_SetAlgorithmPolicy(SEC_OID_ML_DSA_44, NSS_USE_ALG_IN_SSL_KX, 0);
+    NSS_SetAlgorithmPolicy(SEC_OID_ML_DSA_65, NSS_USE_ALG_IN_SSL_KX, 0);
+    NSS_SetAlgorithmPolicy(SEC_OID_ML_DSA_87, NSS_USE_ALG_IN_SSL_KX, 0);
+  } else {
+    NSS_SetAlgorithmPolicy(SEC_OID_ML_DSA_44, 0, NSS_USE_ALG_IN_SSL_KX);
+    NSS_SetAlgorithmPolicy(SEC_OID_ML_DSA_65, 0, NSS_USE_ALG_IN_SSL_KX);
+    NSS_SetAlgorithmPolicy(SEC_OID_ML_DSA_87, 0, NSS_USE_ALG_IN_SSL_KX);
   }
   return true;
 }
@@ -1545,9 +1536,6 @@ nsresult nsNSSComponent::InitializeNSS() {
   SetNSSDatabaseCacheModeAsAppropriate();
 #endif
 
-  // `always`-mirrored, not `_AtStartup` (see the pref definition): NSS can be
-  // initialized before user prefs are read, where a `once` read would snapshot
-  // every once-mirrored pref at its default too early.
   bool nocertdb = StaticPrefs::security_nocertdb();
   bool inSafeMode = GetInSafeMode();
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("inSafeMode: %u\n", inSafeMode));
@@ -1574,6 +1562,8 @@ nsresult nsNSSComponent::InitializeNSS() {
   if (NS_FAILED(rv)) {
     return NS_ERROR_UNEXPECTED;
   }
+
+  nsSSLIOLayerHelpers::GlobalInit();
 
   nsCOMPtr<nsICertOverrideService> certOverrideService(
       do_GetService(NS_CERTOVERRIDE_CONTRACTID));
@@ -1765,7 +1755,7 @@ nsNSSComponent::Observe(nsISupports* aSubject, const char* aTopic,
     // in this context.
     SSL_ClearSessionCache();
     // SSLTokensCache observes this notification itself and clears PBM
-    // token-cache entries and forwards a scoped clear to the socket process.
+    // token-cache entries.
     return NS_OK;
   }
 
@@ -1901,33 +1891,110 @@ nsNSSComponent::GetNssTaskQueue(nsISerialEventTarget** result) {
   return NS_OK;
 }
 
-Atomic<bool> sSearchingForClientAuthCertificates{false};
+struct SearchState {
+  PRThread* mCurrentThread;
+  nsTArray<uint64_t> mSlotsThatHaveSearched;
+
+  bool IsForCurrentThread() { return mCurrentThread == PR_GetCurrentThread(); }
+};
+
+MOZ_RUNINIT StaticDataMutex<Maybe<SearchState>> sCertificateSearchState(
+    "sCertificateSearchState");
+MOZ_RUNINIT StaticDataMutex<Maybe<SearchState>> sClientCertificateSearchState(
+    "sClientCertificateSearchState");
+
+bool IsGeckoSearchingForCertificatesWithState(
+    StaticDataMutex<Maybe<SearchState>>& searchStateMutex,
+    uint64_t uniqueSlotID) {
+  auto searchState = searchStateMutex.Lock();
+  if (searchState.ref().isNothing()) {
+    return false;
+  }
+  if (!searchState.ref()->IsForCurrentThread()) {
+    return false;
+  }
+  if (searchState.ref()->mSlotsThatHaveSearched.Contains(uniqueSlotID)) {
+    return false;
+  }
+  searchState.ref()->mSlotsThatHaveSearched.AppendElement(uniqueSlotID);
+  return true;
+}
 
 extern "C" {
-// Returns true once if gecko is searching for client authentication
-// certificates (i.e., if some thread has an
-// AutoSearchingForClientAuthCertificates on the stack).
-// The idea is when gecko instantiates an
-// AutoSearchingForClientAuthCertificates, sSearchingForClientAuthCertificates
-// will get set to true. Some thread running some NSS code will result in a
-// call to IsGeckoSearchingForClientAuthCertificates(), which will essentially
-// claim the search by swapping the value for false. The search will happen,
-// but for the rest of the lifetime of the
-// AutoSearchingForClientAuthCertificates, this function will return false,
-// meaning no other threads will also cause searches to happen.
-bool IsGeckoSearchingForClientAuthCertificates() {
-  return sSearchingForClientAuthCertificates.exchange(false);
+// Returns true once for any given slot if gecko is searching for certificates
+// on the current thread (i.e., if this thread has an
+// AutoSearchingForCertificates on the stack). The idea is when gecko
+// instantiates an AutoSearchingForCertificates, sCertificateSearchState will
+// be initialized with an empty set of slots that have searched on that thread.
+// NSS code running on that thread may result in a call to
+// IsGeckoSearchingForCertificates() for a number of slots on internal PKCS#11
+// modules (in particular, the remote certs module). The first time any
+// particular slot makes the call, it will be informed that gecko is in fact
+// searching for client certificates.
+// Subsequent calls for that particular slot will return false, but other slots
+// will each get their opportunity to search.
+bool IsGeckoSearchingForCertificates(uint64_t uniqueSlotID) {
+  return IsGeckoSearchingForCertificatesWithState(sCertificateSearchState,
+                                                  uniqueSlotID);
 }
+
+// Similarly, but just for client authentication certificates.
+bool IsGeckoSearchingForClientAuthCertificates(uint64_t uniqueSlotID) {
+  return IsGeckoSearchingForCertificatesWithState(sClientCertificateSearchState,
+                                                  uniqueSlotID);
+}
+}
+
+AutoSearchingForCertificates::AutoSearchingForCertificates() {
+  // Cache remote cryptoki objects before acquiring the lock, so that it's not
+  // held while doing that work (which may involve waiting on a dispatch to the
+  // main thread).
+  // Also, doing this work first ensures that the results are already there
+  // when a call to IsGeckoSearchingForCertificates eventually returns true.
+#if defined(NIGHTLY_BUILD) && !defined(MOZ_NO_SMART_CARDS)
+  CacheRemoteCryptokiObjects(SearchingFor::CACertificates);
+#endif  // NIGHTLY_BUILD && !MOZ_NO_SMART_CARDS
+
+  auto certificateSearchState = sCertificateSearchState.Lock();
+  // If some other thread is already searching, there's no point in updating
+  // any state here.
+  if (certificateSearchState.ref().isSome()) {
+    return;
+  }
+  certificateSearchState.ref() = Some(SearchState{PR_GetCurrentThread()});
+}
+
+AutoSearchingForCertificates::~AutoSearchingForCertificates() {
+  auto certificateSearchState = sCertificateSearchState.Lock();
+  if (certificateSearchState.ref().isSome() &&
+      certificateSearchState.ref()->IsForCurrentThread()) {
+    certificateSearchState.ref().reset();
+  }
 }
 
 AutoSearchingForClientAuthCertificates::
     AutoSearchingForClientAuthCertificates() {
-  sSearchingForClientAuthCertificates = true;
+  // See the comment for the corresponding CacheRemoteCryptokiObjects call in
+  // AutoSearchingForCertificates::AutoSearchingForCertificates().
+#if defined(NIGHTLY_BUILD) && !defined(MOZ_NO_SMART_CARDS)
+  CacheRemoteCryptokiObjects(SearchingFor::ClientCertificates);
+#endif  // NIGHTLY_BUILD && !MOZ_NO_SMART_CARDS
+  auto clientCertificateSearchState = sClientCertificateSearchState.Lock();
+  // If some other thread is already searching, there's no point in updating
+  // any state here.
+  if (clientCertificateSearchState.ref().isSome()) {
+    return;
+  }
+  clientCertificateSearchState.ref() = Some(SearchState{PR_GetCurrentThread()});
 }
 
 AutoSearchingForClientAuthCertificates::
     ~AutoSearchingForClientAuthCertificates() {
-  sSearchingForClientAuthCertificates = false;
+  auto clientCertificateSearchState = sClientCertificateSearchState.Lock();
+  if (clientCertificateSearchState.ref().isSome() &&
+      clientCertificateSearchState.ref()->IsForCurrentThread()) {
+    clientCertificateSearchState.ref().reset();
+  }
 }
 
 namespace mozilla {

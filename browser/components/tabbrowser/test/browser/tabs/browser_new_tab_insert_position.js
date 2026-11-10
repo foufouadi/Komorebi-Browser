@@ -5,8 +5,10 @@
 requestLongerTimeout(2);
 
 ChromeUtils.defineESModuleGetters(this, {
-  SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
-  TabStateFlusher: "resource:///modules/sessionstore/TabStateFlusher.sys.mjs",
+  SessionStore:
+    "moz-src:///browser/components/sessionstore/SessionStore.sys.mjs",
+  TabStateFlusher:
+    "moz-src:///browser/components/sessionstore/TabStateFlusher.sys.mjs",
 });
 
 const triggeringPrincipal_base64 = E10SUtils.SERIALIZED_SYSTEMPRINCIPAL;
@@ -186,7 +188,7 @@ async function doTest(
     "Middle click should open site to correct url."
   );
   is(
-    openTab._tPos,
+    openTab.index,
     openTabIndex,
     kDescription +
       "Middle click should open site in a new tab " +
@@ -210,7 +212,7 @@ async function doTest(
   }
   let secondOpenTab = await openRelatedTab(openerTab);
   is(
-    secondOpenTab._tPos,
+    secondOpenTab.index,
     secondOpenTabIndex,
     kDescription +
       "A second middle click should open site in a new tab at position " +
@@ -234,7 +236,7 @@ async function doTest(
     pageURL
   );
   is(
-    unrelatedMidTab._tPos,
+    unrelatedMidTab.index,
     unrelatedMidIndex,
     kDescription +
       "An unrelated tab between related tabs should open at position " +
@@ -246,7 +248,7 @@ async function doTest(
       : gBrowser.tabs.length;
   let thirdOpenTab = await openRelatedTab(openerTab);
   is(
-    thirdOpenTab._tPos,
+    thirdOpenTab.index,
     thirdOpenTabIndex,
     kDescription +
       "A middle click after a tab switch should open site in a new tab at position " +
@@ -287,7 +289,7 @@ async function doTest(
     `${kDescription} ${urlbarURL} should be loaded in the current tab.`
   );
   is(
-    unrelatedTab._tPos,
+    unrelatedTab.index,
     openTabIndex,
     `${kDescription} Alt+Enter in the URL bar should open page in a new tab ${openTabDescription}`
   );
@@ -329,7 +331,7 @@ async function doTest(
       : gBrowser.tabs.length;
   let relatedTab = await openRelatedTab(pinnedTab);
   is(
-    relatedTab._tPos,
+    relatedTab.index,
     relatedIndex,
     kDescription +
       "A related tab from a pinned opener should open at position " +
@@ -339,7 +341,7 @@ async function doTest(
   // A second related tab from the pinned opener, without switching in between.
   let secondRelatedIndex;
   if (aInsertRelatedAfterCurrent) {
-    secondRelatedIndex = relatedTab._tPos + 1;
+    secondRelatedIndex = relatedTab.index + 1;
   } else if (aInsertAfterCurrent && !aInsertAfterCurrentExceptPinned) {
     secondRelatedIndex = pinnedIndex + 1;
   } else {
@@ -347,7 +349,7 @@ async function doTest(
   }
   let secondRelatedTab = await openRelatedTab(pinnedTab);
   is(
-    secondRelatedTab._tPos,
+    secondRelatedTab.index,
     secondRelatedIndex,
     kDescription +
       "A second related tab from a pinned opener should open at position " +
@@ -391,7 +393,7 @@ async function doTest(
   );
   // loadTabs will insertAfterCurrent
   let nextTab = aInsertAfterCurrent
-    ? gBrowser.selectedTab._tPos + 1
+    ? gBrowser.selectedTab.index + 1
     : gBrowser.tabs.length;
 
   gBrowser.loadTabs(bulkLoad, {
@@ -419,12 +421,6 @@ async function doTest(
   // Restore pre-test state for next test.
   await promiseBrowserStateRestored(oldState);
 }
-
-add_setup(async function () {
-  await SpecialPowers.pushPrefEnv({
-    set: [["test.wait300msAfterTabSwitch", true]],
-  });
-});
 
 add_task(async function test_settings_insertRelatedAfter() {
   // Firefox default settings.

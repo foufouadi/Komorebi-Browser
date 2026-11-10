@@ -72,14 +72,11 @@ bool LoadLoadableRootsFromXul();
 bool LoadOSClientCertsModule();
 
 /**
- * Loads the IPC client certs module.
+ * Loads the remote certs module.
  *
- * @param dir
- *        The path to the directory containing the module. This should be the
- *        same as where all of the other gecko libraries live.
  * @return true if the module was successfully loaded, false otherwise.
  */
-bool LoadIPCClientCertsModule();
+bool LoadRemoteCertsModule();
 
 nsresult DefaultServerNicknameForCert(const CERTCertificate* cert,
                                       /*out*/ nsCString& nickname);

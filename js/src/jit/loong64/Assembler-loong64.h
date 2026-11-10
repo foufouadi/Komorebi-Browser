@@ -5,7 +5,13 @@
 #ifndef jit_loong64_Assembler_loong64_h
 #define jit_loong64_Assembler_loong64_h
 
+#include <cstdint>
+#include <optional>
+#include <tuple>
+#include <utility>
+
 #include "jit/CompactBuffer.h"
+#include "jit/IonTypes.h"
 #include "jit/JitCode.h"
 #include "jit/loong64/Architecture-loong64.h"
 #include "jit/shared/Assembler-shared.h"
@@ -15,6 +21,32 @@
 
 namespace js {
 namespace jit {
+
+// For LSX type safety in assembler.
+struct VRegister {
+  using Codes = FloatRegisters;
+  using Encoding = Codes::Encoding;
+
+  constexpr Encoding encoding() const { return Encoding(encoding_); }
+
+  static constexpr VRegister FromEncoding(Encoding encoding) {
+    return VRegister(encoding);
+  }
+
+ private:
+  uint8_t encoding_;
+
+  explicit constexpr VRegister(Encoding encoding) : encoding_(encoding) {}
+};
+
+inline VRegister FloatRegister::toV() const {
+#if defined(ENABLE_JIT_SIMD)
+  MOZ_ASSERT(!invalid_);
+  return VRegister::FromEncoding(encoding());
+#else
+  MOZ_CRASH("ENABLE_JIT_SIMD not set");
+#endif
+}
 
 using LabelDoc = DisassemblerSpew::LabelDoc;
 
@@ -89,12 +121,16 @@ static constexpr FloatRegister InvalidFloatReg;
 
 static constexpr Register StackPointer = sp;
 static constexpr Register FramePointer = fp;
+static constexpr Register LinkRegister = ra;
 static constexpr Register ReturnReg = a0;
 static constexpr Register64 ReturnReg64(ReturnReg);
 static constexpr FloatRegister ReturnFloat32Reg{FloatRegisters::f0,
                                                 FloatRegisters::Single};
 static constexpr FloatRegister ReturnDoubleReg = f0;
-static constexpr FloatRegister ReturnSimd128Reg = InvalidFloatReg;
+#if defined(ENABLE_JIT_SIMD)
+static constexpr FloatRegister ReturnSimd128Reg{FloatRegisters::f0,
+                                                FloatRegisters::Simd128};
+#endif
 
 // Scratch register used for runtime call patching.
 // See MacroAssembler::patchNopToCall and MacroAssembler::PatchWrite_NearCall.
@@ -103,7 +139,15 @@ static constexpr Register SavedScratchRegister = s8;
 static constexpr FloatRegister ScratchFloat32Reg{FloatRegisters::f23,
                                                  FloatRegisters::Single};
 static constexpr FloatRegister ScratchDoubleReg = f23;
-static constexpr FloatRegister ScratchSimd128Reg = InvalidFloatReg;
+static constexpr FloatRegister ScratchFloat32Reg2{FloatRegisters::f22,
+                                                  FloatRegisters::Single};
+static constexpr FloatRegister ScratchDoubleReg2 = f22;
+#if defined(ENABLE_JIT_SIMD)
+static constexpr FloatRegister ScratchSimd128Reg{FloatRegisters::f23,
+                                                 FloatRegisters::Simd128};
+static constexpr FloatRegister ScratchSimd128Reg2{FloatRegisters::f22,
+                                                  FloatRegisters::Simd128};
+#endif
 
 struct ScratchFloat32Scope : public AutoFloatRegisterScope {
   explicit ScratchFloat32Scope(MacroAssembler& masm)
@@ -114,6 +158,42 @@ struct ScratchDoubleScope : public AutoFloatRegisterScope {
   explicit ScratchDoubleScope(MacroAssembler& masm)
       : AutoFloatRegisterScope(masm, ScratchDoubleReg) {}
 };
+
+struct ScratchFloat32Scope2 : public AutoFloatRegisterScope {
+  explicit ScratchFloat32Scope2(MacroAssembler& masm)
+      : AutoFloatRegisterScope(masm, ScratchFloat32Reg2) {}
+};
+
+struct ScratchDoubleScope2 : public AutoFloatRegisterScope {
+  explicit ScratchDoubleScope2(MacroAssembler& masm)
+      : AutoFloatRegisterScope(masm, ScratchDoubleReg2) {}
+};
+
+#if defined(ENABLE_JIT_SIMD)
+struct ScratchSimd128Scope : public AutoFloatRegisterScope {
+  explicit ScratchSimd128Scope(MacroAssembler& masm)
+      : AutoFloatRegisterScope(masm, ScratchSimd128Reg) {}
+  operator VRegister() const { return ScratchSimd128Reg.toV(); }
+};
+
+struct ScratchSimd128Scope2 : public AutoFloatRegisterScope {
+  explicit ScratchSimd128Scope2(MacroAssembler& masm)
+      : AutoFloatRegisterScope(masm, ScratchSimd128Reg2) {}
+  operator VRegister() const { return ScratchSimd128Reg2.toV(); }
+};
+#else
+struct ScratchSimd128Scope : public AutoFloatRegisterScope {
+  explicit ScratchSimd128Scope(MacroAssembler& masm)
+      : AutoFloatRegisterScope(masm, InvalidFloatReg) {}
+  operator VRegister() const { MOZ_CRASH("ENABLE_JIT_SIMD not set"); }
+};
+
+struct ScratchSimd128Scope2 : public AutoFloatRegisterScope {
+  explicit ScratchSimd128Scope2(MacroAssembler& masm)
+      : AutoFloatRegisterScope(masm, InvalidFloatReg) {}
+  operator VRegister() const { MOZ_CRASH("ENABLE_JIT_SIMD not set"); }
+};
+#endif
 
 class Assembler;
 
@@ -175,6 +255,10 @@ static constexpr Register RegExpExecTestStringReg = CallTempReg1;
 static constexpr Register RegExpSearcherRegExpReg = CallTempReg0;
 static constexpr Register RegExpSearcherStringReg = CallTempReg1;
 static constexpr Register RegExpSearcherLastIndexReg = CallTempReg2;
+
+// Register used by the bailout tail and bailout stubs during stack
+// reconstruction.
+static constexpr Register BailoutStubHandlerReg = CallTempReg0;
 
 static constexpr Register JSReturnReg_Type = a3;
 static constexpr Register JSReturnReg_Data = a2;
@@ -238,8 +322,6 @@ static_assert(JitStackAlignment % sizeof(Value) == 0 &&
                   JitStackValueAlignment >= 1,
               "Stack alignment should be a non-zero multiple of sizeof(Value)");
 
-// TODO(loong64): this is just a filler to prevent a build failure. The
-// LoongArch SIMD alignment requirements still need to be explored.
 static constexpr uint32_t SimdMemoryAlignment = 16;
 
 static_assert(CodeAlignment % SimdMemoryAlignment == 0,
@@ -362,6 +444,10 @@ uint32_t FJ(FloatRegister r);
 uint32_t FK(FloatRegister r);
 uint32_t FD(FloatRegister r);
 uint32_t FA(FloatRegister r);
+uint32_t VJ(VRegister r);
+uint32_t VK(VRegister r);
+uint32_t VD(VRegister r);
+uint32_t VA(VRegister r);
 uint32_t SA2(uint32_t value);
 uint32_t SA2(FloatRegister r);
 uint32_t SA3(uint32_t value);
@@ -531,6 +617,14 @@ enum OpcodeField {
   op_fldx_d = 0x7068U << 15,
   op_fstx_s = 0x7070U << 15,
   op_fstx_d = 0x7078U << 15,
+  op_amcas_b = 0x70b0U << 15,
+  op_amcas_h = 0x70b1U << 15,
+  op_amcas_w = 0x70b2U << 15,
+  op_amcas_d = 0x70b3U << 15,
+  op_amcas_db_b = 0x70b4U << 15,
+  op_amcas_db_h = 0x70b5U << 15,
+  op_amcas_db_w = 0x70b6U << 15,
+  op_amcas_db_d = 0x70b7U << 15,
   op_amswap_b = 0x70b8U << 15,
   op_amswap_h = 0x70b9U << 15,
   op_amadd_b = 0x70baU << 15,
@@ -645,7 +739,316 @@ enum OpcodeField {
   op_frint_d = 0x4792U << 10,
   op_movcf2fr = 0x114d4U << 8,
   op_movcf2gr = 0x114dcU << 8,
+
+  op_vfmadd_s = 0x91U << 20,
+  op_vfmadd_d = 0x92U << 20,
+  op_vfnmsub_s = 0x9dU << 20,
+  op_vfnmsub_d = 0x9eU << 20,
+  op_vfcmp_cond_s = 0xc5U << 20,
+  op_vfcmp_cond_d = 0xc6U << 20,
+  op_vbitsel_v = 0xd1U << 20,
+  op_vshuf_b = 0xd5U << 20,
+  op_vld = 0xb0U << 22,
+  op_vst = 0xb1U << 22,
+  op_vldrepl_d = 0x602U << 19,
+  op_vldrepl_w = 0x302U << 20,
+  op_vldrepl_h = 0x182U << 21,
+  op_vldrepl_b = 0xc2U << 22,
+  op_vstelm_d = 0x622U << 19,
+  op_vstelm_w = 0x312U << 20,
+  op_vstelm_h = 0x18aU << 21,
+  op_vstelm_b = 0xc6U << 22,
+  op_vldx = 0x7080U << 15,
+  op_vstx = 0x7088U << 15,
+  op_vseq_b = 0xe000U << 15,
+  op_vseq_h = 0xe001U << 15,
+  op_vseq_w = 0xe002U << 15,
+  op_vseq_d = 0xe003U << 15,
+  op_vsle_b = 0xe004U << 15,
+  op_vsle_h = 0xe005U << 15,
+  op_vsle_w = 0xe006U << 15,
+  op_vsle_d = 0xe007U << 15,
+  op_vsle_bu = 0xe008U << 15,
+  op_vsle_hu = 0xe009U << 15,
+  op_vsle_wu = 0xe00aU << 15,
+  op_vslt_b = 0xe00cU << 15,
+  op_vslt_h = 0xe00dU << 15,
+  op_vslt_w = 0xe00eU << 15,
+  op_vslt_d = 0xe00fU << 15,
+  op_vslt_bu = 0xe010U << 15,
+  op_vslt_hu = 0xe011U << 15,
+  op_vslt_wu = 0xe012U << 15,
+  op_vadd_b = 0xe014U << 15,
+  op_vadd_h = 0xe015U << 15,
+  op_vadd_w = 0xe016U << 15,
+  op_vadd_d = 0xe017U << 15,
+  op_vsub_b = 0xe018U << 15,
+  op_vsub_h = 0xe019U << 15,
+  op_vsub_w = 0xe01aU << 15,
+  op_vsub_d = 0xe01bU << 15,
+  op_vsadd_b = 0xe08cU << 15,
+  op_vsadd_h = 0xe08dU << 15,
+  op_vssub_b = 0xe090U << 15,
+  op_vssub_h = 0xe091U << 15,
+  op_vsadd_bu = 0xe094U << 15,
+  op_vsadd_hu = 0xe095U << 15,
+  op_vssub_bu = 0xe098U << 15,
+  op_vssub_hu = 0xe099U << 15,
+  op_vhaddw_h_b = 0xe0a8U << 15,
+  op_vhaddw_w_h = 0xe0a9U << 15,
+  op_vhaddw_hu_bu = 0xe0b0U << 15,
+  op_vhaddw_wu_hu = 0xe0b1U << 15,
+  op_vadda_b = 0xe0b8U << 15,
+  op_vadda_h = 0xe0b9U << 15,
+  op_vadda_w = 0xe0baU << 15,
+  op_vadda_d = 0xe0bbU << 15,
+  op_vavgr_bu = 0xe0d4U << 15,
+  op_vavgr_hu = 0xe0d5U << 15,
+  op_vmax_b = 0xe0e0U << 15,
+  op_vmax_h = 0xe0e1U << 15,
+  op_vmax_w = 0xe0e2U << 15,
+  op_vmin_b = 0xe0e4U << 15,
+  op_vmin_h = 0xe0e5U << 15,
+  op_vmin_w = 0xe0e6U << 15,
+  op_vmax_bu = 0xe0e8U << 15,
+  op_vmax_hu = 0xe0e9U << 15,
+  op_vmax_wu = 0xe0eaU << 15,
+  op_vmin_bu = 0xe0ecU << 15,
+  op_vmin_hu = 0xe0edU << 15,
+  op_vmin_wu = 0xe0eeU << 15,
+  op_vmul_h = 0xe109U << 15,
+  op_vmul_w = 0xe10aU << 15,
+  op_vmul_d = 0xe10bU << 15,
+  op_vmulwev_h_b = 0xe120U << 15,
+  op_vmulwev_w_h = 0xe121U << 15,
+  op_vmulwev_d_w = 0xe122U << 15,
+  op_vmulwod_h_b = 0xe124U << 15,
+  op_vmulwod_w_h = 0xe125U << 15,
+  op_vmulwod_d_w = 0xe126U << 15,
+  op_vmulwev_h_bu = 0xe130U << 15,
+  op_vmulwev_w_hu = 0xe131U << 15,
+  op_vmulwev_d_wu = 0xe132U << 15,
+  op_vmulwod_h_bu = 0xe134U << 15,
+  op_vmulwod_w_hu = 0xe135U << 15,
+  op_vmulwod_d_wu = 0xe136U << 15,
+  op_vmaddwev_w_h = 0xe159U << 15,
+  op_vmaddwod_w_h = 0xe15dU << 15,
+  op_vsll_b = 0xe1d0U << 15,
+  op_vsll_h = 0xe1d1U << 15,
+  op_vsll_w = 0xe1d2U << 15,
+  op_vsll_d = 0xe1d3U << 15,
+  op_vsrl_b = 0xe1d4U << 15,
+  op_vsrl_h = 0xe1d5U << 15,
+  op_vsrl_w = 0xe1d6U << 15,
+  op_vsrl_d = 0xe1d7U << 15,
+  op_vsra_b = 0xe1d8U << 15,
+  op_vsra_h = 0xe1d9U << 15,
+  op_vsra_w = 0xe1daU << 15,
+  op_vsra_d = 0xe1dbU << 15,
+  op_vpackev_b = 0xe22cU << 15,
+  op_vpackev_h = 0xe22dU << 15,
+  op_vpackev_w = 0xe22eU << 15,
+  op_vpackod_b = 0xe230U << 15,
+  op_vpackod_h = 0xe231U << 15,
+  op_vpackod_w = 0xe232U << 15,
+  op_vilvl_b = 0xe234U << 15,
+  op_vilvl_h = 0xe235U << 15,
+  op_vilvl_w = 0xe236U << 15,
+  op_vilvl_d = 0xe237U << 15,
+  op_vilvh_b = 0xe238U << 15,
+  op_vilvh_h = 0xe239U << 15,
+  op_vilvh_w = 0xe23aU << 15,
+  op_vilvh_d = 0xe23bU << 15,
+  op_vpickev_b = 0xe23cU << 15,
+  op_vpickev_h = 0xe23dU << 15,
+  op_vpickev_w = 0xe23eU << 15,
+  op_vpickod_b = 0xe240U << 15,
+  op_vpickod_h = 0xe241U << 15,
+  op_vpickod_w = 0xe242U << 15,
+  op_vand_v = 0xe24cU << 15,
+  op_vor_v = 0xe24dU << 15,
+  op_vxor_v = 0xe24eU << 15,
+  op_vnor_v = 0xe24fU << 15,
+  op_vandn_v = 0xe250U << 15,
+  op_vorn_v = 0xe251U << 15,
+  op_vsigncov_b = 0xe25cU << 15,
+  op_vsigncov_h = 0xe25dU << 15,
+  op_vsigncov_w = 0xe25eU << 15,
+  op_vsigncov_d = 0xe25fU << 15,
+  op_vfadd_s = 0xe261U << 15,
+  op_vfadd_d = 0xe262U << 15,
+  op_vfsub_s = 0xe265U << 15,
+  op_vfsub_d = 0xe266U << 15,
+  op_vfmul_s = 0xe271U << 15,
+  op_vfmul_d = 0xe272U << 15,
+  op_vfdiv_s = 0xe275U << 15,
+  op_vfdiv_d = 0xe276U << 15,
+  op_vfmax_s = 0xe279U << 15,
+  op_vfmax_d = 0xe27aU << 15,
+  op_vfmin_s = 0xe27dU << 15,
+  op_vfmin_d = 0xe27eU << 15,
+  op_vfcvt_s_d = 0xe28dU << 15,
+  op_vftintrz_w_d = 0xe296U << 15,
+  op_vshuf_w = 0xe2f6U << 15,
+  op_vseqi_b = 0xe500U << 15,
+  op_vseqi_h = 0xe501U << 15,
+  op_vseqi_w = 0xe502U << 15,
+  op_vseqi_d = 0xe503U << 15,
+  op_vslei_b = 0xe504U << 15,
+  op_vslei_h = 0xe505U << 15,
+  op_vslei_w = 0xe506U << 15,
+  op_vslei_d = 0xe507U << 15,
+  op_vslei_bu = 0xe508U << 15,
+  op_vslei_hu = 0xe509U << 15,
+  op_vslei_wu = 0xe50aU << 15,
+  op_vslei_du = 0xe50bU << 15,
+  op_vslti_b = 0xe50cU << 15,
+  op_vslti_h = 0xe50dU << 15,
+  op_vslti_w = 0xe50eU << 15,
+  op_vslti_d = 0xe50fU << 15,
+  op_vslti_bu = 0xe510U << 15,
+  op_vslti_hu = 0xe511U << 15,
+  op_vslti_wu = 0xe512U << 15,
+  op_vslti_du = 0xe513U << 15,
+  op_vaddi_bu = 0xe514U << 15,
+  op_vaddi_hu = 0xe515U << 15,
+  op_vaddi_wu = 0xe516U << 15,
+  op_vaddi_du = 0xe517U << 15,
+  op_vbsll_v = 0xe51cU << 15,
+  op_vbsrl_v = 0xe51dU << 15,
+  op_vpcnt_b = 0x1ca708U << 10,
+  op_vpcnt_h = 0x1ca709U << 10,
+  op_vpcnt_w = 0x1ca70aU << 10,
+  op_vpcnt_d = 0x1ca70bU << 10,
+  op_vneg_b = 0x1ca70cU << 10,
+  op_vneg_h = 0x1ca70dU << 10,
+  op_vneg_w = 0x1ca70eU << 10,
+  op_vneg_d = 0x1ca70fU << 10,
+  op_vmskltz_b = 0x1ca710U << 10,
+  op_vmskltz_h = 0x1ca711U << 10,
+  op_vmskltz_w = 0x1ca712U << 10,
+  op_vmskltz_d = 0x1ca713U << 10,
+  op_vmskgez_b = 0x1ca714U << 10,
+  op_vmsknz_b = 0x1ca718U << 10,
+  op_vsetnez_v = 0x1ca727U << 10,
+  op_vsetallnez_b = 0x1ca72cU << 10,
+  op_vsetallnez_h = 0x1ca72dU << 10,
+  op_vsetallnez_w = 0x1ca72eU << 10,
+  op_vsetallnez_d = 0x1ca72fU << 10,
+  op_vfsqrt_s = 0x1ca739U << 10,
+  op_vfsqrt_d = 0x1ca73aU << 10,
+  op_vfrecip_s = 0x1ca73dU << 10,
+  op_vfrsqrt_s = 0x1ca741U << 10,
+  op_vfrintrm_s = 0x1ca751U << 10,
+  op_vfrintrm_d = 0x1ca752U << 10,
+  op_vfrintrp_s = 0x1ca755U << 10,
+  op_vfrintrp_d = 0x1ca756U << 10,
+  op_vfrintrz_s = 0x1ca759U << 10,
+  op_vfrintrz_d = 0x1ca75aU << 10,
+  op_vfrintrne_s = 0x1ca75dU << 10,
+  op_vfrintrne_d = 0x1ca75eU << 10,
+  op_vfcvtl_d_s = 0x1ca77cU << 10,
+  op_vffint_s_w = 0x1ca780U << 10,
+  op_vffint_s_wu = 0x1ca781U << 10,
+  op_vffint_d_l = 0x1ca782U << 10,
+  op_vffint_d_lu = 0x1ca783U << 10,
+  op_vffintl_d_w = 0x1ca784U << 10,
+  op_vftintrz_w_s = 0x1ca792U << 10,
+  op_vftintrz_l_d = 0x1ca793U << 10,
+  op_vftintrz_wu_s = 0x1ca79cU << 10,
+  op_vftintrz_lu_d = 0x1ca79dU << 10,
+  op_vexth_h_b = 0x1ca7b8U << 10,
+  op_vexth_w_h = 0x1ca7b9U << 10,
+  op_vexth_d_w = 0x1ca7baU << 10,
+  op_vexth_hu_bu = 0x1ca7bcU << 10,
+  op_vexth_wu_hu = 0x1ca7bdU << 10,
+  op_vexth_du_wu = 0x1ca7beU << 10,
+  op_vreplgr2vr_b = 0x1ca7c0U << 10,
+  op_vreplgr2vr_h = 0x1ca7c1U << 10,
+  op_vreplgr2vr_w = 0x1ca7c2U << 10,
+  op_vreplgr2vr_d = 0x1ca7c3U << 10,
+  op_vinsgr2vr_b = 0x1cbaeU << 14,
+  op_vinsgr2vr_h = 0x3975eU << 13,
+  op_vinsgr2vr_w = 0x72ebeU << 12,
+  op_vinsgr2vr_d = 0xe5d7eU << 11,
+  op_vpickve2gr_b = 0x1cbbeU << 14,
+  op_vpickve2gr_h = 0x3977eU << 13,
+  op_vpickve2gr_w = 0x72efeU << 12,
+  op_vpickve2gr_d = 0xe5dfeU << 11,
+  op_vpickve2gr_bu = 0x1cbceU << 14,
+  op_vpickve2gr_hu = 0x3979eU << 13,
+  op_vpickve2gr_wu = 0x72f3eU << 12,
+  op_vreplvei_b = 0x1cbdeU << 14,
+  op_vreplvei_h = 0x397beU << 13,
+  op_vreplvei_w = 0x72f7eU << 12,
+  op_vreplvei_d = 0xe5efeU << 11,
+  op_vsllwil_h_b = 0x39841U << 13,
+  op_vsllwil_w_h = 0x1cc21U << 14,
+  op_vsllwil_d_w = 0xe611U << 15,
+  op_vsllwil_hu_bu = 0x39861U << 13,
+  op_vsllwil_wu_hu = 0x1cc31U << 14,
+  op_vsllwil_du_wu = 0xe619U << 15,
+  op_vbitclri_w = 0xe621U << 15,
+  op_vbitclri_d = 0x7311U << 16,
+  op_vbitseti_w = 0xe629U << 15,
+  op_vbitrevi_w = 0xe631U << 15,
+  op_vbitrevi_d = 0x7319U << 16,
+  op_vsat_h = 0x1cc91U << 14,
+  op_vsat_w = 0xe649U << 15,
+  op_vsat_d = 0x7325U << 16,
+  op_vsat_hu = 0x1cca1U << 14,
+  op_vsat_wu = 0xe651U << 15,
+  op_vsat_du = 0x7329U << 16,
+  op_vslli_b = 0x39961U << 13,
+  op_vslli_h = 0x1ccb1U << 14,
+  op_vslli_w = 0xe659U << 15,
+  op_vslli_d = 0x732dU << 16,
+  op_vsrli_b = 0x39981U << 13,
+  op_vsrli_h = 0x1ccc1U << 14,
+  op_vsrli_w = 0xe661U << 15,
+  op_vsrli_d = 0x7331U << 16,
+  op_vsrai_b = 0x399a1U << 13,
+  op_vsrai_h = 0x1ccd1U << 14,
+  op_vsrai_w = 0xe669U << 15,
+  op_vsrai_d = 0x7335U << 16,
+  op_vssrani_b_h = 0x1cd81U << 14,
+  op_vssrani_h_w = 0xe6c1U << 15,
+  op_vssrani_bu_h = 0x1cd91U << 14,
+  op_vssrani_hu_w = 0xe6c9U << 15,
+  op_vextrins_d = 0x1ce0U << 18,
+  op_vextrins_w = 0x1ce1U << 18,
+  op_vextrins_h = 0x1ce2U << 18,
+  op_vextrins_b = 0x1ce3U << 18,
+  op_vshuf4i_b = 0x1ce4U << 18,
+  op_vshuf4i_h = 0x1ce5U << 18,
+  op_vshuf4i_w = 0x1ce6U << 18,
+  op_vshuf4i_d = 0x1ce7U << 18,
+  op_vori_b = 0x1cf5U << 18,
+  op_vldi = 0x1cf8U << 18,
 };
+
+// int check.
+inline constexpr bool is_intN(int64_t x, unsigned n) {
+  MOZ_ASSERT((0 < n) && (n < 64));
+  int64_t limit = static_cast<int64_t>(1) << (n - 1);
+  return (-limit <= x) && (x < limit);
+}
+
+inline constexpr bool is_uintN(int64_t x, unsigned n) {
+  MOZ_ASSERT((0 < n) && (n < 64));
+  return !(x >> n);
+}
+
+/// Sign-extend the number in the bottom B bits of X to a 64-bit integer.
+/// Requires B <= 64.
+template <unsigned B>
+static constexpr int64_t SignExtend64(uint64_t x) {
+  static_assert(B <= 64, "Bit width out of range.");
+  if constexpr (B == 0) {
+    return 0;
+  }
+  return int64_t(x << (64 - B)) >> (64 - B);
+}
 
 class Operand;
 
@@ -660,7 +1063,7 @@ class BOffImm16 {
   }
   int32_t decode() {
     MOZ_ASSERT(!isInvalid());
-    return (int32_t(data << 18) >> 16);
+    return (int32_t(data << 16) >> 14);
   }
 
   explicit BOffImm16(int offset) : data((offset) >> 2 & Imm16Mask) {
@@ -668,13 +1071,7 @@ class BOffImm16 {
     MOZ_ASSERT(IsInRange(offset));
   }
   static bool IsInRange(int offset) {
-    if ((offset) < int(unsigned(INT16_MIN) << 2)) {
-      return false;
-    }
-    if ((offset) > (INT16_MAX << 2)) {
-      return false;
-    }
-    return true;
+    return is_intN(offset, 16 + /* 2'b0 */ 2);
   }
   static const uint32_t INVALID = 0x00020000;
   BOffImm16() : data(INVALID) {}
@@ -683,6 +1080,36 @@ class BOffImm16 {
   Instruction* getDest(Instruction* src) const;
 
   explicit BOffImm16(InstImm inst);
+};
+
+// A BOffImm21 is a 21-bit immediate that is used for beqz, bnez, bceqz, and
+// bcnez.
+class BOffImm21 {
+  uint32_t data;
+
+ public:
+  uint32_t encode() {
+    MOZ_ASSERT(!isInvalid());
+    return data;
+  }
+  int32_t decode() {
+    MOZ_ASSERT(!isInvalid());
+    return (int32_t(data << 11) >> 9);
+  }
+
+  explicit BOffImm21(int offset) : data((offset) >> 2 & Imm21Mask) {
+    MOZ_ASSERT((offset & 0x3) == 0);
+    MOZ_ASSERT(IsInRange(offset));
+  }
+  static bool IsInRange(int offset) {
+    return is_intN(offset, 21 + /* 2'b0 */ 2);
+  }
+  static const uint32_t INVALID = 0x00200000;
+  BOffImm21() : data(INVALID) {}
+
+  bool isInvalid() { return data == INVALID; }
+
+  explicit BOffImm21(InstImm inst);
 };
 
 // A JOffImm26 is a 26 bit immediate that is used for unconditional jumps.
@@ -696,7 +1123,7 @@ class JOffImm26 {
   }
   int32_t decode() {
     MOZ_ASSERT(!isInvalid());
-    return (int32_t(data << 8) >> 6);
+    return (int32_t(data << 6) >> 4);
   }
 
   explicit JOffImm26(int offset) : data((offset) >> 2 & Imm26Mask) {
@@ -704,13 +1131,7 @@ class JOffImm26 {
     MOZ_ASSERT(IsInRange(offset));
   }
   static bool IsInRange(int offset) {
-    if ((offset) < -536870912) {
-      return false;
-    }
-    if ((offset) > 536870908) {
-      return false;
-    }
-    return true;
+    return is_intN(offset, 26 + /* 2'b0 */ 2);
   }
   static const uint32_t INVALID = 0x20000000;
   JOffImm26() : data(INVALID) {}
@@ -729,11 +1150,8 @@ class Imm16 {
   int32_t decodeSigned() { return value; }
   uint32_t decodeUnsigned() { return value; }
 
-  static bool IsInSignedRange(int32_t imm) {
-    return imm >= INT16_MIN && imm <= INT16_MAX;
-  }
-
-  static bool IsInUnsignedRange(uint32_t imm) { return imm <= UINT16_MAX; }
+  static bool IsInSignedRange(int32_t imm) { return is_intN(imm, 16); }
+  static bool IsInUnsignedRange(uint32_t imm) { return is_uintN(imm, 16); }
 };
 
 class Imm8 {
@@ -745,10 +1163,8 @@ class Imm8 {
   uint32_t encode(uint32_t shift) { return value << shift; }
   int32_t decodeSigned() { return value; }
   uint32_t decodeUnsigned() { return value; }
-  static bool IsInSignedRange(int32_t imm) {
-    return imm >= INT8_MIN && imm <= INT8_MAX;
-  }
-  static bool IsInUnsignedRange(uint32_t imm) { return imm <= UINT8_MAX; }
+  static bool IsInSignedRange(int32_t imm) { return is_intN(imm, 8); }
+  static bool IsInUnsignedRange(uint32_t imm) { return is_uintN(imm, 8); }
   static Imm8 Lower(Imm16 imm) { return Imm8(imm.decodeSigned() & 0xff); }
   static Imm8 Upper(Imm16 imm) {
     return Imm8((imm.decodeSigned() >> 8) & 0xff);
@@ -813,18 +1229,6 @@ class Operand {
     return Register::FromCode(reg);
   }
 };
-
-// int check.
-inline constexpr bool is_intN(int64_t x, unsigned n) {
-  MOZ_ASSERT((0 < n) && (n < 64));
-  int64_t limit = static_cast<int64_t>(1) << (n - 1);
-  return (-limit <= x) && (x < limit);
-}
-
-inline constexpr bool is_uintN(int64_t x, unsigned n) {
-  MOZ_ASSERT((0 < n) && (n < 64));
-  return !(x >> n);
-}
 
 typedef js::jit::AssemblerBuffer<Instruction> LOONGBuffer;
 
@@ -1080,11 +1484,14 @@ class AssemblerLOONG64 : public AssemblerShared {
   BufferOffset as_jirl(Register rd, Register rj, BOffImm16 off);
   BufferOffset as_jirl(Register rd, Register rj, BOffImm16 off, LabelDoc doc);
 
-  InstImm getBranchCode(JumpOrCall jumpOrCall);  // b, bl
-  InstImm getBranchCode(Register rd, Register rj,
-                        Condition c);  // beq, bne, bge, bgeu, blt, bltu
-  InstImm getBranchCode(Register rj, Condition c);  // beqz, bnez
-  InstImm getBranchCode(FPConditionBit cj);         // bceqz, bcnez
+  // For b, bl
+  InstImm getBranchCode(JumpOrCall jumpOrCall);
+  // For beq, bne, bge, bgeu, blt, bltu
+  InstImm getBranchCode(Register rj, Register rd, Condition c);
+  // For beq $zero, bne $zero, blt $zero, bge $zero
+  InstImm getBranchCode(Register rj, Condition c);
+  // For bceqz, bcnez
+  InstImm getBranchCode(FPConditionBit cj, Condition c = NonZero);
 
   // Arithmetic instructions
   BufferOffset as_add_w(Register rd, Register rj, Register rk);
@@ -1297,6 +1704,17 @@ class AssemblerLOONG64 : public AssemblerShared {
   BufferOffset as_amadd_db_b(Register rd, Register rj, Register rk);
   BufferOffset as_amadd_db_h(Register rd, Register rj, Register rk);
 
+  // Atomic instructions from LAMCAS extension
+  BufferOffset as_amcas_b(Register rd, Register rj, Register rk);
+  BufferOffset as_amcas_h(Register rd, Register rj, Register rk);
+  BufferOffset as_amcas_w(Register rd, Register rj, Register rk);
+  BufferOffset as_amcas_d(Register rd, Register rj, Register rk);
+
+  BufferOffset as_amcas_db_b(Register rd, Register rj, Register rk);
+  BufferOffset as_amcas_db_h(Register rd, Register rj, Register rk);
+  BufferOffset as_amcas_db_w(Register rd, Register rj, Register rk);
+  BufferOffset as_amcas_db_d(Register rd, Register rj, Register rk);
+
   // Barrier instructions
   BufferOffset as_dbar(int32_t hint);
   BufferOffset as_ibar(int32_t hint);
@@ -1440,6 +1858,334 @@ class AssemblerLOONG64 : public AssemblerShared {
   BufferOffset as_fstx_s(FloatRegister fd, Register rj, Register rk);
   BufferOffset as_fstx_d(FloatRegister fd, Register rj, Register rk);
 
+  // LSX (128-bit SIMD) instructions
+  BufferOffset as_vfmadd_s(VRegister vd, VRegister vj, VRegister vk,
+                           VRegister va);
+  BufferOffset as_vfmadd_d(VRegister vd, VRegister vj, VRegister vk,
+                           VRegister va);
+  BufferOffset as_vfnmsub_s(VRegister vd, VRegister vj, VRegister vk,
+                            VRegister va);
+  BufferOffset as_vfnmsub_d(VRegister vd, VRegister vj, VRegister vk,
+                            VRegister va);
+  BufferOffset as_vfcmp_cond_s(FPUCondition cond, VRegister vd, VRegister vj,
+                               VRegister vk);
+  BufferOffset as_vfcmp_cond_d(FPUCondition cond, VRegister vd, VRegister vj,
+                               VRegister vk);
+  BufferOffset as_vbitsel_v(VRegister vd, VRegister vj, VRegister vk,
+                            VRegister va);
+  BufferOffset as_vshuf_b(VRegister vd, VRegister vj, VRegister vk,
+                          VRegister va);
+  BufferOffset as_vld(VRegister vd, Register rj, uint32_t imm12);
+  BufferOffset as_vst(VRegister vd, Register rj, uint32_t imm12);
+  BufferOffset as_vldrepl_d(VRegister vd, Register rj, uint32_t imm9);
+  BufferOffset as_vldrepl_w(VRegister vd, Register rj, uint32_t imm10);
+  BufferOffset as_vldrepl_h(VRegister vd, Register rj, uint32_t imm11);
+  BufferOffset as_vldrepl_b(VRegister vd, Register rj, uint32_t imm12);
+  BufferOffset as_vstelm_d(VRegister vd, Register rj, int32_t si8,
+                           uint32_t lane);
+  BufferOffset as_vstelm_w(VRegister vd, Register rj, int32_t si8,
+                           uint32_t lane);
+  BufferOffset as_vstelm_h(VRegister vd, Register rj, int32_t si8,
+                           uint32_t lane);
+  BufferOffset as_vstelm_b(VRegister vd, Register rj, int32_t si8,
+                           uint32_t lane);
+  BufferOffset as_vldx(VRegister vd, Register rj, Register rk);
+  BufferOffset as_vstx(VRegister vd, Register rj, Register rk);
+  BufferOffset as_vseq_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vseq_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vseq_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vseq_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsle_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsle_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsle_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsle_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsle_bu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsle_hu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsle_wu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vslt_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vslt_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vslt_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vslt_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vslt_bu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vslt_hu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vslt_wu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vadd_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vadd_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vadd_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vadd_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsub_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsub_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsub_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsub_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsadd_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsadd_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vssub_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vssub_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsadd_bu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsadd_hu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vssub_bu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vssub_hu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vhaddw_h_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vhaddw_w_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vhaddw_hu_bu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vhaddw_wu_hu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vadda_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vadda_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vadda_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vadda_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vavgr_bu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vavgr_hu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmax_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmax_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmax_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmin_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmin_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmin_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmax_bu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmax_hu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmax_wu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmin_bu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmin_hu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmin_wu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmul_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmul_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmul_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmulwev_h_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmulwev_w_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmulwev_d_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmulwod_h_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmulwod_w_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmulwod_d_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmulwev_h_bu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmulwev_w_hu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmulwev_d_wu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmulwod_h_bu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmulwod_w_hu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmulwod_d_wu(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmaddwev_w_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vmaddwod_w_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsll_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsll_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsll_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsll_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsrl_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsrl_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsrl_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsrl_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsra_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsra_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsra_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsra_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vpackev_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vpackev_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vpackev_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vpackod_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vpackod_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vpackod_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vilvl_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vilvl_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vilvl_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vilvl_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vilvh_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vilvh_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vilvh_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vilvh_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vpickev_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vpickev_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vpickev_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vpickod_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vpickod_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vpickod_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vand_v(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vor_v(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vxor_v(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vnor_v(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vandn_v(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vorn_v(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsigncov_b(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsigncov_h(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsigncov_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vsigncov_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vfadd_s(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vfadd_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vfsub_s(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vfsub_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vfmul_s(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vfmul_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vfdiv_s(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vfdiv_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vfmax_s(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vfmax_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vfmin_s(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vfmin_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vfcvt_s_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vftintrz_w_d(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vshuf_w(VRegister vd, VRegister vj, VRegister vk);
+  BufferOffset as_vslei_b(VRegister vd, VRegister vj, int32_t imm5);
+  BufferOffset as_vslei_h(VRegister vd, VRegister vj, int32_t imm5);
+  BufferOffset as_vslei_w(VRegister vd, VRegister vj, int32_t imm5);
+  BufferOffset as_vslei_d(VRegister vd, VRegister vj, int32_t imm5);
+  BufferOffset as_vslei_bu(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vslei_hu(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vslei_wu(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vslei_du(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vaddi_bu(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vseqi_b(VRegister vd, VRegister vj, int32_t imm5);
+  BufferOffset as_vseqi_h(VRegister vd, VRegister vj, int32_t imm5);
+  BufferOffset as_vseqi_w(VRegister vd, VRegister vj, int32_t imm5);
+  BufferOffset as_vseqi_d(VRegister vd, VRegister vj, int32_t imm5);
+  BufferOffset as_vslti_b(VRegister vd, VRegister vj, int32_t imm5);
+  BufferOffset as_vslti_h(VRegister vd, VRegister vj, int32_t imm5);
+  BufferOffset as_vslti_w(VRegister vd, VRegister vj, int32_t imm5);
+  BufferOffset as_vslti_d(VRegister vd, VRegister vj, int32_t imm5);
+  BufferOffset as_vslti_bu(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vslti_hu(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vslti_wu(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vslti_du(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vaddi_hu(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vaddi_wu(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vaddi_du(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vbsll_v(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vbsrl_v(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vpcnt_b(VRegister vd, VRegister vj);
+  BufferOffset as_vpcnt_h(VRegister vd, VRegister vj);
+  BufferOffset as_vpcnt_w(VRegister vd, VRegister vj);
+  BufferOffset as_vpcnt_d(VRegister vd, VRegister vj);
+  BufferOffset as_vneg_b(VRegister vd, VRegister vj);
+  BufferOffset as_vneg_h(VRegister vd, VRegister vj);
+  BufferOffset as_vneg_w(VRegister vd, VRegister vj);
+  BufferOffset as_vneg_d(VRegister vd, VRegister vj);
+  BufferOffset as_vmskltz_b(VRegister vd, VRegister vj);
+  BufferOffset as_vmskltz_h(VRegister vd, VRegister vj);
+  BufferOffset as_vmskltz_w(VRegister vd, VRegister vj);
+  BufferOffset as_vmskltz_d(VRegister vd, VRegister vj);
+  BufferOffset as_vmskgez_b(VRegister vd, VRegister vj);
+  BufferOffset as_vmsknz_b(VRegister vd, VRegister vj);
+  BufferOffset as_vsetnez_v(FPConditionBit cd, VRegister vj);
+  BufferOffset as_vsetallnez_b(FPConditionBit cd, VRegister vj);
+  BufferOffset as_vsetallnez_h(FPConditionBit cd, VRegister vj);
+  BufferOffset as_vsetallnez_w(FPConditionBit cd, VRegister vj);
+  BufferOffset as_vsetallnez_d(FPConditionBit cd, VRegister vj);
+  BufferOffset as_vfsqrt_s(VRegister vd, VRegister vj);
+  BufferOffset as_vfsqrt_d(VRegister vd, VRegister vj);
+  BufferOffset as_vfrecip_s(VRegister vd, VRegister vj);
+  BufferOffset as_vfrsqrt_s(VRegister vd, VRegister vj);
+  BufferOffset as_vfrintrm_s(VRegister vd, VRegister vj);
+  BufferOffset as_vfrintrm_d(VRegister vd, VRegister vj);
+  BufferOffset as_vfrintrp_s(VRegister vd, VRegister vj);
+  BufferOffset as_vfrintrp_d(VRegister vd, VRegister vj);
+  BufferOffset as_vfrintrz_s(VRegister vd, VRegister vj);
+  BufferOffset as_vfrintrz_d(VRegister vd, VRegister vj);
+  BufferOffset as_vfrintrne_s(VRegister vd, VRegister vj);
+  BufferOffset as_vfrintrne_d(VRegister vd, VRegister vj);
+  BufferOffset as_vfcvtl_d_s(VRegister vd, VRegister vj);
+  BufferOffset as_vffint_s_w(VRegister vd, VRegister vj);
+  BufferOffset as_vffint_s_wu(VRegister vd, VRegister vj);
+  BufferOffset as_vffint_d_l(VRegister vd, VRegister vj);
+  BufferOffset as_vffint_d_lu(VRegister vd, VRegister vj);
+  BufferOffset as_vffintl_d_w(VRegister vd, VRegister vj);
+  BufferOffset as_vftintrz_w_s(VRegister vd, VRegister vj);
+  BufferOffset as_vftintrz_l_d(VRegister vd, VRegister vj);
+  BufferOffset as_vftintrz_wu_s(VRegister vd, VRegister vj);
+  BufferOffset as_vftintrz_lu_d(VRegister vd, VRegister vj);
+  BufferOffset as_vexth_h_b(VRegister vd, VRegister vj);
+  BufferOffset as_vexth_w_h(VRegister vd, VRegister vj);
+  BufferOffset as_vexth_d_w(VRegister vd, VRegister vj);
+  BufferOffset as_vexth_hu_bu(VRegister vd, VRegister vj);
+  BufferOffset as_vexth_wu_hu(VRegister vd, VRegister vj);
+  BufferOffset as_vexth_du_wu(VRegister vd, VRegister vj);
+  BufferOffset as_vreplgr2vr_b(VRegister vd, Register rj);
+  BufferOffset as_vreplgr2vr_h(VRegister vd, Register rj);
+  BufferOffset as_vreplgr2vr_w(VRegister vd, Register rj);
+  BufferOffset as_vreplgr2vr_d(VRegister vd, Register rj);
+  BufferOffset as_vinsgr2vr_b(VRegister vd, Register rj, uint32_t imm4);
+  BufferOffset as_vinsgr2vr_h(VRegister vd, Register rj, uint32_t imm3);
+  BufferOffset as_vinsgr2vr_w(VRegister vd, Register rj, uint32_t imm2);
+  BufferOffset as_vinsgr2vr_d(VRegister vd, Register rj, uint32_t imm1);
+  BufferOffset as_vpickve2gr_b(Register rd, VRegister vj, uint32_t imm4);
+  BufferOffset as_vpickve2gr_h(Register rd, VRegister vj, uint32_t imm3);
+  BufferOffset as_vpickve2gr_w(Register rd, VRegister vj, uint32_t imm2);
+  BufferOffset as_vpickve2gr_d(Register rd, VRegister vj, uint32_t imm1);
+  BufferOffset as_vpickve2gr_bu(Register rd, VRegister vj, uint32_t imm4);
+  BufferOffset as_vpickve2gr_hu(Register rd, VRegister vj, uint32_t imm3);
+  BufferOffset as_vpickve2gr_wu(Register rd, VRegister vj, uint32_t imm2);
+  BufferOffset as_vreplvei_b(VRegister vd, VRegister vj, uint32_t imm4);
+  BufferOffset as_vreplvei_h(VRegister vd, VRegister vj, uint32_t imm3);
+  BufferOffset as_vreplvei_w(VRegister vd, VRegister vj, uint32_t imm2);
+  BufferOffset as_vreplvei_d(VRegister vd, VRegister vj, uint32_t imm1);
+  BufferOffset as_vsllwil_h_b(VRegister vd, VRegister vj, uint32_t imm3);
+  BufferOffset as_vsllwil_w_h(VRegister vd, VRegister vj, uint32_t imm4);
+  BufferOffset as_vsllwil_d_w(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vsllwil_hu_bu(VRegister vd, VRegister vj, uint32_t imm3);
+  BufferOffset as_vsllwil_wu_hu(VRegister vd, VRegister vj, uint32_t imm4);
+  BufferOffset as_vsllwil_du_wu(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vbitclri_w(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vbitclri_d(VRegister vd, VRegister vj, uint32_t imm6);
+  BufferOffset as_vbitseti_w(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vbitrevi_w(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vbitrevi_d(VRegister vd, VRegister vj, uint32_t imm6);
+  BufferOffset as_vsat_h(VRegister vd, VRegister vj, uint32_t imm4);
+  BufferOffset as_vsat_w(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vsat_d(VRegister vd, VRegister vj, uint32_t imm6);
+  BufferOffset as_vsat_hu(VRegister vd, VRegister vj, uint32_t imm4);
+  BufferOffset as_vsat_wu(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vsat_du(VRegister vd, VRegister vj, uint32_t imm6);
+  BufferOffset as_vslli_b(VRegister vd, VRegister vj, uint32_t imm3);
+  BufferOffset as_vslli_h(VRegister vd, VRegister vj, uint32_t imm4);
+  BufferOffset as_vslli_w(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vslli_d(VRegister vd, VRegister vj, uint32_t imm6);
+  BufferOffset as_vsrli_b(VRegister vd, VRegister vj, uint32_t imm3);
+  BufferOffset as_vsrli_h(VRegister vd, VRegister vj, uint32_t imm4);
+  BufferOffset as_vsrli_w(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vsrli_d(VRegister vd, VRegister vj, uint32_t imm6);
+  BufferOffset as_vsrai_b(VRegister vd, VRegister vj, uint32_t imm3);
+  BufferOffset as_vsrai_h(VRegister vd, VRegister vj, uint32_t imm4);
+  BufferOffset as_vsrai_w(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vsrai_d(VRegister vd, VRegister vj, uint32_t imm6);
+  BufferOffset as_vssrani_b_h(VRegister vd, VRegister vj, uint32_t imm4);
+  BufferOffset as_vssrani_h_w(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vssrani_bu_h(VRegister vd, VRegister vj, uint32_t imm4);
+  BufferOffset as_vssrani_hu_w(VRegister vd, VRegister vj, uint32_t imm5);
+  BufferOffset as_vextrins_d(VRegister vd, VRegister vj, uint32_t imm8);
+  BufferOffset as_vextrins_w(VRegister vd, VRegister vj, uint32_t imm8);
+  BufferOffset as_vextrins_h(VRegister vd, VRegister vj, uint32_t imm8);
+  BufferOffset as_vextrins_b(VRegister vd, VRegister vj, uint32_t imm8);
+  BufferOffset as_vshuf4i_b(VRegister vd, VRegister vj, uint32_t imm8);
+  BufferOffset as_vshuf4i_h(VRegister vd, VRegister vj, uint32_t imm8);
+  BufferOffset as_vshuf4i_w(VRegister vd, VRegister vj, uint32_t imm8);
+  BufferOffset as_vshuf4i_d(VRegister vd, VRegister vj, uint32_t imm8);
+  BufferOffset as_vori_b(VRegister vd, VRegister vj, uint32_t imm8);
+  BufferOffset as_vldi(VRegister vd, int32_t imm13);
+
+  // Try to encode |v| into the si13 field of vldi instruction. The result is
+  // returned as the lower 13 bits.
+  static std::optional<uint16_t> EncodeVldiImmediate(const SimdConstant& v);
+
+  // Check if |value| can be encoded directly as an immediate in the emitted
+  // instruction for |op|, without needing an extra scratch register.
+  static bool CanEncodeSimdCompareImmediateFor(wasm::SimdOp op,
+                                               const SimdConstant& value);
+
+  // Try to encode |rhs| into the [su]i5 field of vs{le,lt}i.[bhdw]{,u} and
+  // vseqi.[bhdw], iff |rhs| is a splat to all lanes.
+  template <typename T>
+  static std::optional<int64_t> EncodeSimdCompareImmediate(
+      const SimdConstant& rhs, Condition cond);
+
+  // Convert a true offset into VLDREPL.[BHDW]'s si{9,10,11,12} field. For each
+  // siN, the instruction loads address |rj + (siN << (12-N))|. The template
+  // argument |Scale| equals 12-N.
+  // <https://jia.je/unofficial-loongarch-intrinsics-guide/lsx/memory/#__m128i-__lsx_vldrepl_b-void-addr-imm_n2048_2047-offset>
+  template <uint32_t Scale>
+  static std::optional<int32_t> EncodeVldreplImmediate(int64_t offset);
+
+  // Convert a true offset into VSTELM.[BHDW]'s si8 offset field. For each N,
+  // the instruction stores into address |rj + (si8 << N)|. The template
+  // argument |Scale| equals N.
+  // <https://jia.je/unofficial-loongarch-intrinsics-guide/lsx/memory/#void-__lsx_vstelm_b-__m128i-data-void-addr-imm_n128_127-offset-imm0_15-lane>
+  template <uint32_t Scale>
+  static std::optional<int32_t> EncodeVstelmOffsetImmediate(int64_t offset);
+
   // label operations
   void bind(Label* label, BufferOffset boff = BufferOffset());
   virtual void bind(InstImm* inst, uintptr_t branch, uintptr_t target) = 0;
@@ -1453,6 +2199,7 @@ class AssemblerLOONG64 : public AssemblerShared {
   void as_break(uint32_t code);
 
  public:
+  static bool HasLSX() { return LOONG64Flags::HasLsxExtension(); };
   static bool SupportsFloatingPoint() {
 #if defined(__loongarch_hard_float) || defined(JS_SIMULATOR_LOONG64)
     return true;
@@ -1462,26 +2209,39 @@ class AssemblerLOONG64 : public AssemblerShared {
   }
   static bool SupportsUnalignedAccesses() { return true; }
   static bool SupportsFastUnalignedFPAccesses() { return true; }
+  static bool SupportsWasmSimd() { return LOONG64Flags::HasLsxExtension(); }
   static bool SupportsFloat64To16() { return false; }
   static bool SupportsFloat32To16() { return false; }
 
-  static bool HasRoundInstruction(RoundingMode mode) { return false; }
+  static bool HasRoundInstruction(RoundingMode mode) {
+    switch (mode) {
+      case RoundingMode::Up:
+      case RoundingMode::Down:
+      case RoundingMode::NearestTiesToEven:
+      case RoundingMode::TowardsZero:
+        return true;
+    }
+    MOZ_CRASH("unexpected mode");
+  }
+
+  // Split an offset into the PCADDU18I si20 field and the JIRL offs16 byte
+  // offset suitable for jump36. Returns (si20, offs16).
+  static constexpr std::pair<int32_t, int32_t> SplitJump36Offset(int64_t d) {
+    MOZ_ASSERT((d & 0x3) == 0);
+    const int64_t hi = (d + (static_cast<int64_t>(1) << 17)) >> 18;
+    const int64_t lo = d - (hi << 18);
+    MOZ_ASSERT(is_intN(hi, 20));
+    MOZ_ASSERT(BOffImm16::IsInRange(static_cast<int32_t>(lo)));
+    return std::make_pair(static_cast<int32_t>(hi), static_cast<int32_t>(lo));
+  }
 
  protected:
-  InstImm invertBranch(InstImm branch, BOffImm16 skipOffset);
+  InstImm invertBranch(InstImm branch, int32_t skipOffset);
   void addPendingJump(BufferOffset src, ImmPtr target, RelocationKind kind) {
     enoughMemory_ &= jumps_.append(RelativePatch(src, target.value, kind));
     if (kind == RelocationKind::JITCODE) {
       jumpRelocations_.writeUnsigned(src.getOffset());
     }
-  }
-
-  void addLongJump(BufferOffset src, BufferOffset dst) {
-    CodeLabel cl;
-    cl.patchAt()->bind(src.getOffset());
-    cl.target()->bind(dst.getOffset());
-    cl.setLinkMode(CodeLabel::JumpImmediate);
-    addCodeLabel(std::move(cl));
   }
 
  public:
@@ -1546,14 +2306,13 @@ class Instruction {
   }
 
   // Extract the one particular bit.
-  uint32_t extractBit(uint32_t bit) { return (encode() >> bit) & 1; }
+  uint32_t extractBit(uint32_t bit) const { return (encode() >> bit) & 1; }
   // Extract a bit field out of the instruction
-  uint32_t extractBitField(uint32_t hi, uint32_t lo) {
+  uint32_t extractBitField(uint32_t hi, uint32_t lo) const {
     return (encode() >> lo) & ((2 << (hi - lo)) - 1);
   }
 
   // Get the next instruction in the instruction stream.
-  // This does neat things like ignoreconstant pools and their guards.
   Instruction* next();
 
   // Sometimes, an api wants a uint32_t (or a pointer to it) rather than
@@ -1640,19 +2399,40 @@ class InstReg : public Instruction {
     MOZ_ASSERT(is_uintN(cond, 5));
   }
 
-  uint32_t extractRK() {
+  InstReg(OpcodeField op, int32_t cond, VRegister vk, VRegister vj,
+          VRegister vd)
+      : Instruction(op | (cond & CONDMask) << CONDShift | VK(vk) | VJ(vj) |
+                    VD(vd)) {
+    MOZ_ASSERT(is_uintN(cond, 5));
+  }
+
+  InstReg(OpcodeField op, VRegister vj, VRegister vd)
+      : Instruction(op | VJ(vj) | VD(vd)) {}
+  InstReg(OpcodeField op, Register rj, VRegister vd)
+      : Instruction(op | RJ(rj) | VD(vd)) {}
+  InstReg(OpcodeField op, VRegister vk, VRegister vj, VRegister vd)
+      : Instruction(op | VK(vk) | VJ(vj) | VD(vd)) {}
+  InstReg(OpcodeField op, Register rk, Register rj, VRegister vd)
+      : Instruction(op | RK(rk) | RJ(rj) | VD(vd)) {}
+  InstReg(OpcodeField op, VRegister va, VRegister vk, VRegister vj,
+          VRegister vd)
+      : Instruction(op | VA(va) | VK(vk) | VJ(vj) | VD(vd)) {}
+  InstReg(OpcodeField op, VRegister vj, AssemblerLOONG64::FPConditionBit cd)
+      : Instruction(op | VJ(vj) | cd) {}
+
+  uint32_t extractRK() const {
     return extractBitField(RKShift + RKBits - 1, RKShift);
   }
-  uint32_t extractRJ() {
+  uint32_t extractRJ() const {
     return extractBitField(RJShift + RJBits - 1, RJShift);
   }
-  uint32_t extractRD() {
+  uint32_t extractRD() const {
     return extractBitField(RDShift + RDBits - 1, RDShift);
   }
-  uint32_t extractSA2() {
+  uint32_t extractSA2() const {
     return extractBitField(SAShift + SA2Bits - 1, SAShift);
   }
-  uint32_t extractSA3() {
+  uint32_t extractSA3() const {
     return extractBitField(SAShift + SA3Bits - 1, SAShift);
   }
 };
@@ -1660,8 +2440,7 @@ class InstReg : public Instruction {
 // Class for branch, load and store instructions with immediate offset.
 class InstImm : public Instruction {
  public:
-  void extractImm16(BOffImm16* dest);
-  uint32_t genImm(int32_t value, uint32_t value_bits) {
+  static uint32_t genImm(int32_t value, uint32_t value_bits) {
     uint32_t imm = value & Imm5Mask;
     if (value_bits == 6) {
       imm = value & Imm6Mask;
@@ -1670,8 +2449,96 @@ class InstImm : public Instruction {
     } else if (value_bits == 14) {
       imm = value & Imm14Mask;
     }
-
     return imm;
+  }
+
+  // For LSX (128-bit SIMD) immediates.  The immediate always starts at bit
+  // 10; its width varies per instruction format (2RI1 .. 2RI12).
+  static uint32_t genSimdImm(uint32_t value, uint32_t bits) {
+    MOZ_ASSERT(bits >= 1 && bits <= 21);
+    return value & ((uint32_t(1) << bits) - 1);
+  }
+
+  void setOpcode(OpcodeField op, uint32_t opBits) {
+    // opBits not greater than 24.
+    MOZ_ASSERT(opBits < 25);
+    uint32_t OpcodeShift = 32 - opBits;
+    uint32_t OpcodeMask = ((1 << opBits) - 1) << OpcodeShift;
+    data = (data & ~OpcodeMask) | op;
+  }
+  uint32_t extractRK() const {
+    return extractBitField(RKShift + RKBits - 1, RKShift);
+  }
+  uint32_t extractRJ() const {
+    return extractBitField(RJShift + RJBits - 1, RJShift);
+  }
+  void setRJ(uint32_t rj) {
+    data = (data & ~(RJMask << RJShift)) | (rj << RJShift);
+  }
+  uint32_t extractRD() const {
+    return extractBitField(RDShift + RDBits - 1, RDShift);
+  }
+  BOffImm16 extractImm16() const { return BOffImm16(*this); }
+  uint32_t extractImm16Value() const {
+    return extractBitField(Imm16Shift + Imm16Bits - 1, Imm16Shift);
+  }
+  void setBOffImm16(BOffImm16 off) {
+    // Reset immediate field and replace it
+    data = (data & ~BOffImm16Mask) | (off.encode() << Imm16Shift);
+  }
+  bool hasBOffImm16() const {
+    switch (extractBitField(31, 26)) {
+      case static_cast<uint32_t>(op_beq) >> 26:
+      case static_cast<uint32_t>(op_bne) >> 26:
+      case static_cast<uint32_t>(op_blt) >> 26:
+      case static_cast<uint32_t>(op_bge) >> 26:
+      case static_cast<uint32_t>(op_bltu) >> 26:
+      case static_cast<uint32_t>(op_bgeu) >> 26:
+      case static_cast<uint32_t>(op_jirl) >> 26:
+        return true;
+      default:
+        return false;
+    }
+  }
+  void setBOffImm21(BOffImm21 off) {
+    // Reset immediate field and replace it
+    uint32_t value = off.encode();
+    uint32_t fcc_info = (data >> 5) & 0x1F;
+    data = (data & ~BOffImm26Mask) | ((value & Imm16Mask) << Imm16Shift) |
+           (value >> 16) | (fcc_info << 5);
+  }
+  bool hasBOffImm21() const {
+    switch (extractBitField(31, 26)) {
+      case static_cast<uint32_t>(op_beqz) >> 26:
+      case static_cast<uint32_t>(op_bnez) >> 26:
+      case static_cast<uint32_t>(op_bcz) >> 26:
+        return true;
+      default:
+        return false;
+    }
+  }
+  bool isShortJump() const { return hasBOffImm21() || hasBOffImm16(); }
+  bool isShortJumpInRange(int32_t offset) const {
+    if (hasBOffImm21()) {
+      return BOffImm21::IsInRange(offset);
+    }
+    MOZ_ASSERT(hasBOffImm16());
+    return BOffImm16::IsInRange(offset);
+  }
+  int32_t extractShortJumpOffset() const {
+    if (hasBOffImm21()) {
+      return BOffImm21(*this).decode();
+    }
+    MOZ_ASSERT(hasBOffImm16());
+    return BOffImm16(*this).decode();
+  }
+  void setShortJumpOffset(int32_t offset) {
+    if (hasBOffImm21()) {
+      setBOffImm21(BOffImm21(offset));
+      return;
+    }
+    MOZ_ASSERT(hasBOffImm16());
+    setBOffImm16(BOffImm16(offset));
   }
 
   InstImm(OpcodeField op, int32_t value, Register rj, Register rd,
@@ -1717,7 +2584,6 @@ class InstImm : public Instruction {
       : Instruction(op | (bit15 & Imm15Mask)) {
     MOZ_ASSERT(is_uintN(bit15, 15));
   }
-
   InstImm(OpcodeField op, int32_t bit26, bool jump)
       : Instruction(op | (bit26 & Imm16Mask) << Imm16Shift |
                     (bit26 & Imm26Mask) >> 16) {
@@ -1750,39 +2616,214 @@ class InstImm : public Instruction {
     MOZ_ASSERT(is_intN(si12, 12));
   }
 
-  void setOpcode(OpcodeField op, uint32_t opBits) {
-    // opBits not greater than 24.
-    MOZ_ASSERT(opBits < 25);
-    uint32_t OpcodeShift = 32 - opBits;
-    uint32_t OpcodeMask = ((1 << opBits) - 1) << OpcodeShift;
-    data = (data & ~OpcodeMask) | op;
+  // For SIMD
+  InstImm(OpcodeField op, uint32_t imm, VRegister vj, VRegister vd,
+          uint32_t imm_bits)
+      : Instruction(op | genSimdImm(imm, imm_bits) << RKShift | VJ(vj) |
+                    VD(vd)) {
+    // (signed, width)
+    mozilla::DebugOnly<std::optional<std::tuple<bool, uint32_t>>> imm_format;
+    switch (op) {
+      // ui1 formats.
+      case op_vreplvei_d:
+        imm_format = std::make_tuple(false, 1);
+        break;
+      // ui2 formats.
+      case op_vreplvei_w:
+        imm_format = std::make_tuple(false, 2);
+        break;
+      // ui3 formats.
+      case op_vslli_b:
+      case op_vsrli_b:
+      case op_vsrai_b:
+      case op_vsllwil_h_b:
+      case op_vsllwil_hu_bu:
+      case op_vreplvei_h:
+        imm_format = std::make_tuple(false, 3);
+        break;
+      // ui4 formats.
+      case op_vslli_h:
+      case op_vsrli_h:
+      case op_vsrai_h:
+      case op_vsllwil_w_h:
+      case op_vsllwil_wu_hu:
+      case op_vsat_h:
+      case op_vsat_hu:
+      case op_vssrani_b_h:
+      case op_vssrani_bu_h:
+      case op_vreplvei_b:
+        imm_format = std::make_tuple(false, 4);
+        break;
+      // ui5 formats.
+      case op_vaddi_bu:
+      case op_vaddi_hu:
+      case op_vaddi_wu:
+      case op_vaddi_du:
+      case op_vslei_bu:
+      case op_vslei_hu:
+      case op_vslei_wu:
+      case op_vslei_du:
+      case op_vslti_bu:
+      case op_vslti_hu:
+      case op_vslti_wu:
+      case op_vslti_du:
+      case op_vslli_w:
+      case op_vsrli_w:
+      case op_vsrai_w:
+      case op_vsllwil_d_w:
+      case op_vsllwil_du_wu:
+      case op_vsat_w:
+      case op_vsat_wu:
+      case op_vbitclri_w:
+      case op_vbitrevi_w:
+      case op_vbitseti_w:
+      case op_vbsll_v:
+      case op_vbsrl_v:
+      case op_vssrani_h_w:
+      case op_vssrani_hu_w:
+        imm_format = std::make_tuple(false, 5);
+        break;
+      // si5 formats.
+      case op_vseqi_b:
+      case op_vseqi_h:
+      case op_vseqi_w:
+      case op_vseqi_d:
+      case op_vslei_b:
+      case op_vslei_h:
+      case op_vslei_w:
+      case op_vslei_d:
+      case op_vslti_b:
+      case op_vslti_h:
+      case op_vslti_w:
+      case op_vslti_d:
+        imm_format = std::make_tuple(true, 5);
+        break;
+      // ui6 formats.
+      case op_vslli_d:
+      case op_vsrli_d:
+      case op_vsrai_d:
+      case op_vsat_d:
+      case op_vsat_du:
+      case op_vbitclri_d:
+      case op_vbitrevi_d:
+        imm_format = std::make_tuple(false, 6);
+        break;
+      // ui8 formats.
+      case op_vori_b:
+      case op_vextrins_b:
+      case op_vextrins_h:
+      case op_vextrins_w:
+      case op_vextrins_d:
+      case op_vshuf4i_b:
+      case op_vshuf4i_h:
+      case op_vshuf4i_w:
+      case op_vshuf4i_d:
+        imm_format = std::make_tuple(false, 8);
+        break;
+      default:
+        break;
+    }
+#ifdef DEBUG
+    MOZ_ASSERT(imm_format.value.has_value(),
+               "unknown VdVj[SU]k${imm_bits} instruction");
+    const auto& [is_signed, width] = *imm_format.value;
+    MOZ_ASSERT(width == imm_bits);
+    MOZ_ASSERT_IF(is_signed, is_intN(static_cast<int32_t>(imm), width));
+    MOZ_ASSERT_IF(!is_signed, is_uintN(imm, width));
+#endif
   }
-  uint32_t extractRK() {
-    return extractBitField(RKShift + RKBits - 1, RKShift);
+  InstImm(OpcodeField op, uint32_t imm, Register rj, VRegister vd,
+          uint32_t imm_bits)
+      : Instruction(op | genSimdImm(imm, imm_bits) << RKShift | RJ(rj) |
+                    VD(vd)) {
+    // (signed, width)
+    mozilla::DebugOnly<std::optional<std::tuple<bool, uint32_t>>> imm_format;
+    switch (op) {
+      case op_vinsgr2vr_d:
+        imm_format = std::make_tuple(false, 1);
+        break;
+      case op_vinsgr2vr_w:
+        imm_format = std::make_tuple(false, 2);
+        break;
+      case op_vinsgr2vr_h:
+        imm_format = std::make_tuple(false, 3);
+        break;
+      case op_vinsgr2vr_b:
+        imm_format = std::make_tuple(false, 4);
+        break;
+      case op_vldrepl_d:
+        imm_format = std::make_tuple(true, 9);
+        break;
+      case op_vldrepl_w:
+        imm_format = std::make_tuple(true, 10);
+        break;
+      case op_vldrepl_h:
+        imm_format = std::make_tuple(true, 11);
+        break;
+      case op_vldrepl_b:
+      case op_vld:
+      case op_vst:
+        imm_format = std::make_tuple(true, 12);
+        break;
+      default:
+        break;
+    }
+#ifdef DEBUG
+    MOZ_ASSERT(imm_format.value.has_value(),
+               "unknown VdJ[SU]k${imm_bits} instruction");
+    const auto& [is_signed, width] = *imm_format.value;
+    MOZ_ASSERT(width == imm_bits);
+    MOZ_ASSERT_IF(is_signed, is_intN(static_cast<int32_t>(imm), width));
+    MOZ_ASSERT_IF(!is_signed, is_uintN(imm, width));
+#endif
   }
-  uint32_t extractRJ() {
-    return extractBitField(RJShift + RJBits - 1, RJShift);
+  InstImm(OpcodeField op, uint32_t imm, VRegister vj, Register rd,
+          uint32_t imm_bits)
+      : Instruction(op | genSimdImm(imm, imm_bits) << RKShift | VJ(vj) |
+                    RD(rd)) {
+    // (signed, width)
+    mozilla::DebugOnly<std::optional<std::tuple<bool, uint32_t>>> imm_format;
+    switch (op) {
+      case op_vpickve2gr_d:
+        imm_format = std::make_tuple(false, 1);
+        break;
+      case op_vpickve2gr_w:
+      case op_vpickve2gr_wu:
+        imm_format = std::make_tuple(false, 2);
+        break;
+      case op_vpickve2gr_h:
+      case op_vpickve2gr_hu:
+        imm_format = std::make_tuple(false, 3);
+        break;
+      case op_vpickve2gr_b:
+      case op_vpickve2gr_bu:
+        imm_format = std::make_tuple(false, 4);
+        break;
+      default:
+        break;
+    }
+#ifdef DEBUG
+    MOZ_ASSERT(imm_format.value.has_value(),
+               "unknown DVjUk${imm_bits} instruction");
+    const auto& [is_signed, width] = *imm_format.value;
+    MOZ_ASSERT(width == imm_bits);
+    MOZ_ASSERT_IF(is_signed, is_intN(static_cast<int32_t>(imm), width));
+    MOZ_ASSERT_IF(!is_signed, is_uintN(imm, width));
+#endif
   }
-  void setRJ(uint32_t rj) {
-    data = (data & ~(RJMask << RJShift)) | (rj << RJShift);
+  // vldi: si13 at bits 17:5.
+  InstImm(OpcodeField op, int32_t si13, VRegister vd)
+      : Instruction(op | (uint32_t(si13) & 0x1FFFU) << 5 | VD(vd)) {
+    MOZ_ASSERT(is_intN(si13, 13));
   }
-  uint32_t extractRD() {
-    return extractBitField(RDShift + RDBits - 1, RDShift);
-  }
-  uint32_t extractImm16Value() {
-    return extractBitField(Imm16Shift + Imm16Bits - 1, Imm16Shift);
-  }
-  void setBOffImm16(BOffImm16 off) {
-    // Reset immediate field and replace it
-    data = (data & ~BOffImm16Mask) | (off.encode() << Imm16Shift);
-  }
-  void setImm21(int32_t off) {
-    // Reset immediate field and replace it
-    uint32_t low16 = (off >> 2) & Imm16Mask;
-    int32_t high5 = (off >> 18) & Imm5Mask;
-    uint32_t fcc_info = (data >> 5) & 0x1F;
-    data = (data & ~BOffImm26Mask) | (low16 << Imm16Shift) | high5 |
-           (fcc_info << 5);
+  // vstelm.*: si8 at bits 17:10, the lane index at bits 21:18.
+  InstImm(OpcodeField op, int32_t si8, uint32_t lane, uint32_t lane_bits,
+          Register rj, VRegister vd)
+      : Instruction(op | (uint32_t(si8) & 0xFFU) << 10 |
+                    ((lane & ((uint32_t(1) << lane_bits) - 1)) << 18) | RJ(rj) |
+                    VD(vd)) {
+    MOZ_ASSERT(is_intN(si8, 8));
+    MOZ_ASSERT(is_uintN(lane, lane_bits));
   }
 };
 
@@ -1801,7 +2842,7 @@ class InstJump : public Instruction {
            ((off.encode() & Imm16Mask) << Imm16Shift) |
            ((off.encode() >> 16) & 0x3ff);
   }
-  uint32_t extractImm26Value() {
+  uint32_t extractImm26Value() const {
     return extractBitField(Imm26Shift + Imm26Bits - 1, Imm26Shift);
   }
 };

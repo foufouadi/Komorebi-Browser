@@ -5,6 +5,13 @@
 
 requestLongerTimeout(3);
 
+const { sinon } = ChromeUtils.importESModule(
+  "resource://testing-common/Sinon.sys.mjs"
+);
+const { LinkPreview } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/genai/LinkPreview.sys.mjs"
+);
+
 describe("settings ai features", () => {
   let doc, win;
 
@@ -28,6 +35,18 @@ describe("settings ai features", () => {
   }
 
   describe("AI Controls visibility on General pane", () => {
+    let canRunOnDeviceStub;
+
+    beforeEach(() => {
+      canRunOnDeviceStub = sinon
+        .stub(LinkPreview, "canRunOnDevice")
+        .get(() => true);
+    });
+
+    afterEach(() => {
+      canRunOnDeviceStub.restore();
+    });
+
     it("hides Link Preview setting when globally blocked via AI Controls toggle", async () => {
       await SpecialPowers.pushPrefEnv({
         set: [
@@ -44,12 +63,14 @@ describe("settings ai features", () => {
       let generalTab = gBrowser.selectedTab;
       let generalDoc = gBrowser.selectedBrowser.contentDocument;
       let generalWin = generalDoc.documentGlobal;
-      const linkPreviewPane = srdAwarePane("general", "tabsBrowsing");
-      await maybeNavigateToPane(linkPreviewPane, generalWin);
+      await maybeNavigateToPane("tabsBrowsing", generalWin);
 
-      let linkPreviewSetting =
-        generalWin.Preferences.getSetting("linkPreviewEnabled");
-      let linkPreviewControl = generalDoc.getElementById("linkPreviewEnabled");
+      let linkPreviewSetting = generalWin.Preferences.getSetting(
+        "linkPreviewKeyPoints"
+      );
+      let linkPreviewControl = generalDoc.getElementById(
+        "linkPreviewKeyPoints"
+      );
       Assert.ok(
         BrowserTestUtils.isVisible(linkPreviewControl),
         "Link Preview control is visible"
@@ -74,6 +95,12 @@ describe("settings ai features", () => {
       Assert.ok(
         !BrowserTestUtils.isVisible(linkPreviewControl),
         "Link Preview control is hidden after blocking"
+      );
+      Assert.ok(
+        BrowserTestUtils.isVisible(
+          generalDoc.getElementById("linkPreviewEnabled")
+        ),
+        "Link Preview toggle is still visible after blocking"
       );
 
       // Explicitly enable Link Preview while globally blocked
@@ -131,8 +158,7 @@ describe("settings ai features", () => {
       let generalTab = gBrowser.selectedTab;
       let generalDoc = gBrowser.selectedBrowser.contentDocument;
       let generalWin = generalDoc.documentGlobal;
-      const tabGroupPane = srdAwarePane("general", "tabsBrowsing");
-      await maybeNavigateToPane(tabGroupPane, generalWin);
+      await maybeNavigateToPane("tabsBrowsing", generalWin);
 
       let tabGroupSetting = generalWin.Preferences.getSetting(
         "tabGroupSuggestions"
@@ -183,18 +209,13 @@ describe("settings ai features", () => {
       let generalTab = gBrowser.selectedTab;
       let generalDoc = gBrowser.selectedBrowser.contentDocument;
       let generalWin = generalDoc.documentGlobal;
-      const translationsPane = srdAwarePane("general", "languages");
-      await maybeNavigateToPane(translationsPane, generalWin);
+      await maybeNavigateToPane("languages", generalWin);
 
-      const srdEnabled = Services.prefs.getBoolPref(
-        "browser.settings-redesign.enabled"
+      let translationsSetting =
+        generalWin.Preferences.getSetting("offerTranslations");
+      let translationsGroup = generalDoc.querySelector(
+        'setting-group[groupid="translations"]'
       );
-      let translationsSetting = generalWin.Preferences.getSetting(
-        srdEnabled ? "offerTranslations" : "legacyTranslationsVisible"
-      );
-      let translationsGroup = srdEnabled
-        ? generalDoc.querySelector('setting-group[groupid="translations"]')
-        : generalDoc.getElementById("translationsGroup");
       Assert.ok(
         BrowserTestUtils.isVisible(translationsGroup),
         "Translations group is visible"
@@ -269,12 +290,14 @@ describe("settings ai features", () => {
       let generalTab = gBrowser.selectedTab;
       let generalDoc = gBrowser.selectedBrowser.contentDocument;
       let generalWin = generalDoc.documentGlobal;
-      const linkPreviewPane = srdAwarePane("general", "tabsBrowsing");
-      await maybeNavigateToPane(linkPreviewPane, generalWin);
+      await maybeNavigateToPane("tabsBrowsing", generalWin);
 
-      let linkPreviewSetting =
-        generalWin.Preferences.getSetting("linkPreviewEnabled");
-      let linkPreviewControl = generalDoc.getElementById("linkPreviewEnabled");
+      let linkPreviewSetting = generalWin.Preferences.getSetting(
+        "linkPreviewKeyPoints"
+      );
+      let linkPreviewControl = generalDoc.getElementById(
+        "linkPreviewKeyPoints"
+      );
       Assert.ok(
         !BrowserTestUtils.isVisible(linkPreviewControl),
         "Link Preview control is hidden when blocked"

@@ -17,8 +17,8 @@ const { ForgetAboutSite } = ChromeUtils.importESModule(
 
 const TEST_URIs = [
   { title: "0", uri: "https://example.com" },
-  { title: "1", uri: "https://www.mozilla.org/test1" },
-  { title: "2", uri: "https://www.mozilla.org/test2" },
+  { title: "1", uri: "https://www.example.org/test1" },
+  { title: "2", uri: "https://www.example.org/test2" },
   { title: "3", uri: "https://192.168.200.1/login.html" },
 ];
 
@@ -83,20 +83,11 @@ async function testForgetAboutThisSite(
   let contextmenu = doc.getElementById("placesContext");
   let popupShown = promisePopupShown(contextmenu);
 
-  // Get cell coordinates.
-  let rect = tree.getCoordsForCellItem(
-    sitesToSelect[0],
-    tree.columns[0],
-    "text"
-  );
   // Initiate a context menu for the selected cell.
-  EventUtils.synthesizeMouse(
-    tree.body,
-    rect.x + rect.width / 2,
-    rect.y + rect.height / 2,
-    { type: "contextmenu", button: 2 },
-    organizer
-  );
+  await synthesizeClickOnSelectedTreeCell(tree, {
+    type: "contextmenu",
+    button: 2,
+  });
   await popupShown;
 
   let forgetThisSite = doc.getElementById("placesContext_deleteHost");
@@ -232,7 +223,7 @@ add_task(async function selectMultiple() {
   await testForgetAboutThisSite([0, 1]);
 });
 
-// This test makes sure that forgetting "https://www.mozilla.org/test2" also removes "https://www.mozilla.org/test1"
+// This test makes sure that forgetting "https://www.example.org/test2" also removes "https://www.example.org/test1"
 add_task(async function forgettingBasedomain() {
   await testForgetAboutThisSite([1], true, TEST_URIs.slice(1, 3));
 });

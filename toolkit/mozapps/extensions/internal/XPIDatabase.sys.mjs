@@ -158,7 +158,8 @@ const PROP_JSON_FIELDS = [
   "rootURI",
 ];
 
-const SIGNED_TYPES = new Set(["extension", "locale", "theme"]);
+// Keep in sync with ALL_XPI_TYPES in XPIProvider.sys.mjs.
+const SIGNED_TYPES = new Set(["extension", "locale", "theme", "dictionary"]);
 
 // Time to wait before async save of XPI JSON database, in milliseconds
 const ASYNC_SAVE_DELAY_MS = 20;
@@ -331,14 +332,6 @@ export class AddonInternal {
   get resolvedRootURI() {
     return XPIExports.XPIInternal.maybeResolveURI(
       Services.io.newURI(this.rootURI)
-    );
-  }
-
-  get isBuiltinColorwayTheme() {
-    return (
-      this.type === "theme" &&
-      this.location.isBuiltin &&
-      this.id.endsWith("-colorway@mozilla.org")
     );
   }
 
@@ -711,6 +704,15 @@ export class AddonInternal {
       // re-enable them.
       if (this.location.isSystem && !allowSystemAddons) {
         throw new Error(`Cannot disable system add-on ${this.id}`);
+      }
+      if (
+        val &&
+        Services.policies &&
+        !Services.policies.isAllowed(`disable-extension:${this.id}`)
+      ) {
+        throw new Error(
+          `Cannot disable add-on ${this.id}: disallowed by enterprise policy`
+        );
       }
       await XPIDatabase.updateAddonDisabledState(this, { userDisabled: val });
     } else {
@@ -1591,7 +1593,6 @@ function defineAddonWrapperProperty(name, getter) {
   "signedState",
   "signedTypes",
   "isCorrectlySigned",
-  "isBuiltinColorwayTheme",
 ].forEach(function (aProp) {
   defineAddonWrapperProperty(aProp, function () {
     let addon = addonFor(this);

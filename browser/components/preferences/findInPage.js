@@ -9,7 +9,7 @@
 // inside the button, which allows the text to be highlighted when the user
 // is searching.
 
-/** @import MozInputSearch from "chrome://global/content/elements/moz-input-search.mjs" */
+/** @import { MozInputSearch } from "chrome://global/content/elements/moz-input-search.mjs" */
 
 const MozButtonClass = customElements.get("button");
 class HighlightableButton extends MozButtonClass {
@@ -593,8 +593,7 @@ var gSearchResultsPane = {
           Array.prototype.every.call(nodeObject.children, this._isAnchor)) ||
         forceSearch ||
         this.searchableNodes.has(nodeObject.localName) ||
-        (nodeObject.localName?.startsWith("moz-") &&
-          nodeObject.localName !== "moz-input-box"))
+        nodeObject.localName?.startsWith("moz-"))
     ) {
       let simpleTextNodes = this.textNodeDescendants(nodeObject);
       for (let node of simpleTextNodes) {
@@ -726,9 +725,8 @@ var gSearchResultsPane = {
         keywordsResult;
     }
 
-    // Should not search unselected child nodes of a <xul:deck> element
-    // except the "historyPane" <xul:deck> element.
-    if (nodeObject.localName == "deck" && nodeObject.id != "historyPane") {
+    // Should not search unselected child nodes of a <xul:deck> element.
+    if (nodeObject.localName == "deck") {
       let index = nodeObject.selectedIndex;
       if (index != -1) {
         let result = await this.searchChildNodeIfVisible(
@@ -779,13 +777,10 @@ var gSearchResultsPane = {
         this.listSearchTooltips.add(nodeObject);
       }
 
-      // If this is a node for an experimental feature option or a Mozilla product item,
-      // add it to the list of subitems. The items that don't match the search term
-      // will be hidden.
+      // Track experimental feature options so nonmatching options can be hidden.
       if (
         Element.isInstance(child) &&
-        (child.classList.contains("featureGate") ||
-          child.classList.contains("mozilla-product-item"))
+        child.classList.contains("featureGate")
       ) {
         this.subItems.set(child, result);
       }

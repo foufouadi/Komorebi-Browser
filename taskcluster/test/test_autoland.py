@@ -8,10 +8,7 @@ pytestmark = pytest.mark.slow
 PARAMS = {
     "head_repository": "https://hg.mozilla.org/integration/autoland",
     "project": "autoland",
-    # These ensure this isn't considered a backstop. The pushdate must
-    # be slightly higher than the one in data/pushes.json, and
-    # pushlog_id must not be a multiple of 10.
-    "pushdate": 1593029536,
+    # Not a multiple of 10, so this isn't an "expanded" push.
     "pushlog_id": "2",
 }
 
@@ -25,7 +22,6 @@ def test_tasks_have_optimization(full_task_graph, filter_tasks):
         "hazard",
         "instrumented-build",
         "spidermonkey",
-        "static-analysis-autotest",
         "test",
         "valgrind",
     )

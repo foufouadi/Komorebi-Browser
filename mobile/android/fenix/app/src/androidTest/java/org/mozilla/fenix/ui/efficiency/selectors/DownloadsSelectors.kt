@@ -7,19 +7,48 @@ package org.mozilla.fenix.ui.efficiency.selectors
 import mozilla.components.feature.downloads.R as downloadsR
 import org.mozilla.fenix.R
 import org.mozilla.fenix.compose.snackbar.SNACKBAR_BUTTON_TEST_TAG
+import org.mozilla.fenix.downloads.DownloadsScreenTestTag
 import org.mozilla.fenix.downloads.listscreen.DownloadsListTestTag
+import org.mozilla.fenix.helpers.DataGenerationHelper.getPluralStringResource
 import org.mozilla.fenix.helpers.DataGenerationHelper.getStringResource
+import org.mozilla.fenix.ui.efficiency.helpers.PageReadinessProfiles
 import org.mozilla.fenix.ui.efficiency.helpers.Selector
+import org.mozilla.fenix.ui.efficiency.helpers.SelectorContainer
+import org.mozilla.fenix.ui.efficiency.helpers.SelectorGroup
 import org.mozilla.fenix.ui.efficiency.helpers.SelectorStrategy
 
-object DownloadsSelectors {
+object DownloadsSelectors : SelectorContainer {
+    enum class Group : SelectorGroup {
+        EMPTY_DOWNLOADS,
+        DOWNLOAD_DIALOG,
+        DOWNLOAD_COMPLETE_SNACKBAR,
+        DOWNLOAD_IN_PROGRESS_SNACKBAR,
+        DOWNLOAD_LINKS,
+        DOWNLOADS_LIST,
+        DELETE_DOWNLOADED_ITEM_DIALOG,
+    }
+
+    val DOWNLOADS_TOOLBAR_TITLE =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TEXT,
+            value = getStringResource(R.string.library_downloads),
+            description = "Downloads toolbar title",
+            readiness = PageReadinessProfiles.IDENTITY_ANCHOR,
+        )
+
+    val DOWNLOADS_SETTINGS_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION,
+            value = getStringResource(R.string.download_navigate_settings_description),
+            description = "Downloads settings button",
+            readiness = PageReadinessProfiles.IDENTITY_ANCHOR,
+        )
 
     val NAVIGATE_BACK_TOOLBAR_BUTTON =
         Selector(
             strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION,
             value = getStringResource(R.string.download_navigate_back_description),
             description = "Navigate back toolbar button",
-            groups = listOf("requiredForPage"),
         )
 
     val EMPTY_DOWNLOADS_MESSAGE =
@@ -27,7 +56,7 @@ object DownloadsSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TEXT,
             value = getStringResource(R.string.download_empty_message_2),
             description = "No downloads yet message",
-            groups = listOf("emptyDownloads"),
+            groups = setOf(Group.EMPTY_DOWNLOADS),
         )
 
     val EMPTY_DOWNLOADS_DESCRIPTION =
@@ -35,7 +64,7 @@ object DownloadsSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TEXT,
             value = getStringResource(R.string.download_empty_description),
             description = "Files you download will appear here description",
-            groups = listOf("emptyDownloads"),
+            groups = setOf(Group.EMPTY_DOWNLOADS),
         )
 
     val DOWNLOAD_DIALOG_TITLE =
@@ -43,7 +72,7 @@ object DownloadsSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TEXT_SUBSTRING,
             value = getStringResource(downloadsR.string.mozac_feature_downloads_dialog_title_with_unknown_size),
             description = "Download dialog title",
-            groups = listOf("downloadDialog"),
+            groups = setOf(Group.DOWNLOAD_DIALOG),
         )
 
     // Device-level tap, not a Compose click. The confirm control is a FilledButton with no testTag
@@ -56,7 +85,7 @@ object DownloadsSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR2_BY_TEXT,
             value = getStringResource(downloadsR.string.mozac_feature_downloads_dialog_download),
             description = "Download dialog confirm button",
-            groups = listOf("downloadDialog"),
+            groups = setOf(Group.DOWNLOAD_DIALOG),
         )
 
     val DOWNLOAD_DIALOG_CANCEL_BUTTON =
@@ -64,7 +93,7 @@ object DownloadsSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TEXT,
             value = getStringResource(downloadsR.string.mozac_feature_downloads_dialog_cancel),
             description = "Download dialog cancel button",
-            groups = listOf("downloadDialog"),
+            groups = setOf(Group.DOWNLOAD_DIALOG),
         )
 
     val DOWNLOAD_COMPLETE_SNACKBAR =
@@ -72,7 +101,7 @@ object DownloadsSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TEXT,
             value = getStringResource(R.string.download_completed_snackbar),
             description = "Download complete snackbar",
-            groups = listOf("downloadCompleteSnackbar"),
+            groups = setOf(Group.DOWNLOAD_COMPLETE_SNACKBAR),
         )
 
     // Shown after starting a large download that keeps transferring, instead of the completion
@@ -82,7 +111,7 @@ object DownloadsSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TEXT,
             value = getStringResource(R.string.download_in_progress_snackbar),
             description = "Download in progress snackbar",
-            groups = listOf("downloadInProgressSnackbar"),
+            groups = setOf(Group.DOWNLOAD_IN_PROGRESS_SNACKBAR),
         )
 
     val DOWNLOAD_SNACK_BAR_OPEN_BUTTON =
@@ -90,7 +119,7 @@ object DownloadsSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TAG,
             value = SNACKBAR_BUTTON_TEST_TAG,
             description = "Download complete snackbar Open button",
-            groups = listOf("downloadCompleteSnackbar"),
+            groups = setOf(Group.DOWNLOAD_COMPLETE_SNACKBAR),
         )
 
     // The tag above proves "the snackbar has an action button"; legacy also asserted the action READS
@@ -100,7 +129,7 @@ object DownloadsSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TEXT,
             value = getStringResource(R.string.download_completed_snackbar_action_open),
             description = "Download complete snackbar 'Open' action label",
-            groups = listOf("downloadCompleteSnackbar"),
+            groups = setOf(Group.DOWNLOAD_COMPLETE_SNACKBAR),
         )
 
     /**
@@ -121,7 +150,7 @@ object DownloadsSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR2_BY_DESCRIPTION_CONTAINS,
             value = fileName,
             description = "Download link for: $fileName",
-            groups = listOf("downloadLinks"),
+            groups = setOf(Group.DOWNLOAD_LINKS),
         )
 
     // --- Downloads list rows (Compose; keyed off DownloadsListTestTag in main source) ---
@@ -133,7 +162,7 @@ object DownloadsSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TAG,
             value = "${DownloadsListTestTag.DOWNLOADS_LIST_ITEM}.$fileName",
             description = "Downloads list row: $fileName",
-            groups = listOf("downloadsList"),
+            groups = setOf(Group.DOWNLOADS_LIST),
         )
 
     /**
@@ -147,20 +176,104 @@ object DownloadsSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_TEXT_CONTAINS,
             value = fileName,
             description = "Text containing the file name: $fileName",
-            groups = listOf("downloadCompleteSnackbar"),
+            groups = setOf(Group.DOWNLOAD_COMPLETE_SNACKBAR),
         )
 
-    val all =
-        listOf(
-            NAVIGATE_BACK_TOOLBAR_BUTTON,
-            EMPTY_DOWNLOADS_MESSAGE,
-            EMPTY_DOWNLOADS_DESCRIPTION,
-            DOWNLOAD_DIALOG_TITLE,
-            DOWNLOAD_DIALOG_CONFIRM_BUTTON,
-            DOWNLOAD_DIALOG_CANCEL_BUTTON,
-            DOWNLOAD_COMPLETE_SNACKBAR,
-            DOWNLOAD_IN_PROGRESS_SNACKBAR,
-            DOWNLOAD_SNACK_BAR_OPEN_BUTTON,
-            DOWNLOAD_SNACK_BAR_OPEN_ACTION_LABEL,
+    /** The row overflow ("...") menu button for [fileName] in the Downloads list. */
+    @Suppress("FunctionName")
+    fun DOWNLOADED_FILE_LIST_ITEM_MENU(fileName: String = "") =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TAG,
+            value = "${DownloadsListTestTag.DOWNLOADS_LIST_ITEM_MENU}.$fileName",
+            description = "Downloads list row overflow menu: $fileName",
+            groups = setOf(Group.DOWNLOADS_LIST),
+        )
+
+    val DELETE_DOWNLOAD_ITEM_MENU_OPTION =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TEXT,
+            value = getStringResource(R.string.download_delete_item),
+            description = "Delete option in a download row's overflow menu",
+        )
+
+    // Some delete flows raise a confirmation dialog and some do not, so this is clicked via
+    // mozClickIfPresent -- mirroring legacy DownloadRobot.confirmDeleteDownloadDialogIfDisplayed.
+    val DELETE_DOWNLOAD_DIALOG_CONFIRM_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TAG,
+            value = DownloadsScreenTestTag.DELETE_DIALOG_CONFIRM_BUTTON,
+            description = "Delete download confirmation dialog Confirm button",
+        )
+
+    // The snackbar action button carries SNACKBAR_BUTTON_TEST_TAG, like the download-complete "Open"
+    // button; only one snackbar is on screen during the undo step, so the tag is unambiguous. Clicking
+    // the tagged button (not its inner text node) avoids the disabled/enabled text-node click trap.
+    val UNDO_DELETE_SNACKBAR_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TAG,
+            value = SNACKBAR_BUTTON_TEST_TAG,
+            description = "Undo delete download snackbar button",
+        )
+
+    @Suppress("FunctionName")
+    fun DELETE_DOWNLOAD_SNACKBAR_MESSAGE(fileName: String = "") =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TEXT,
+            value = getStringResource(R.string.download_delete_single_item_snackbar_2, fileName),
+            description = "Deleted download snackbar for: $fileName",
+        )
+
+    val MORE_OPTIONS_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION,
+            value = "More options",
+            description = "More options button",
+        )
+
+    val MORE_OPTIONS_DELETE_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TEXT,
+            value = getStringResource(R.string.download_delete_item),
+            description = "More options delete button",
+        )
+
+    val DELETE_FILE_DIALOG_TITLE =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TEXT,
+            value = getPluralStringResource(R.plurals.downloads_delete_dialog_title, 1),
+            description = "Delete file dialog title",
+            groups = setOf(Group.DELETE_DOWNLOADED_ITEM_DIALOG),
+        )
+
+    val DELETE_FILE_DIALOG_DELETE_FROM_DEVICE_OPTION =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TEXT,
+            value = getStringResource(R.string.download_delete_dialog_from_device),
+            description = "Delete file dialog delete from device option",
+            groups = setOf(Group.DELETE_DOWNLOADED_ITEM_DIALOG),
+        )
+
+    val DELETE_FILE_DIALOG_ONLY_REMOVE_FROM_DOWNLOAD_HISTORY_OPTION =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TEXT,
+            value = getStringResource(R.string.download_delete_dialog_from_history),
+            description = "Delete file dialog only remove from download history option",
+            groups = setOf(Group.DELETE_DOWNLOADED_ITEM_DIALOG),
+        )
+
+    val DELETE_FILE_DIALOG_CANCEL_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TEXT,
+            value = getStringResource(R.string.download_delete_dialog_cancel),
+            description = "Delete file dialog cancel button",
+            groups = setOf(Group.DELETE_DOWNLOADED_ITEM_DIALOG),
+        )
+
+    val DELETE_FILE_DIALOG_CONFIRM_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TEXT,
+            value = getStringResource(R.string.download_delete_dialog_confirm),
+            description = "Delete file dialog confirm button",
+            groups = setOf(Group.DELETE_DOWNLOADED_ITEM_DIALOG),
         )
 }

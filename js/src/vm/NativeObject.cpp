@@ -9,6 +9,7 @@
 
 #include "gc/MaybeRooted.h"
 #include "gc/StableCellHasher.h"
+#include "jit/JitRuntime.h"
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
 #include "js/friend/StackLimits.h"    // js::AutoCheckRecursionLimit
 #include "js/Printer.h"               // js::GenericPrinter
@@ -16,8 +17,10 @@
 #include "vm/EqualityOperations.h"  // js::SameValue
 #include "vm/GetterSetter.h"        // js::GetterSetter
 #include "vm/Interpreter.h"         // js::CallGetter, js::CallSetter
+#include "vm/Iteration.h"           // js::ClassCanHaveExtraEnumeratedProperties
 #include "vm/JSONPrinter.h"         // js::JSONPrinter
 #include "vm/PlainObject.h"         // js::PlainObject
+#include "vm/Realm.h"               // js::PlainObjectCopyPropsCache
 #include "vm/TypedArrayObject.h"
 #include "vm/Watchtower.h"
 
@@ -349,15 +352,17 @@ bool NativeObject::growSlots(JSContext* cx, uint32_t oldCapacity,
       new (allocation) ObjectSlots(newCapacity, dictionarySpan, uid);
 
   HeapSlot* newSlots = newHeaderSlots->slots();
-#ifdef JS_GC_CONCURRENT_MARKING
-  InitializeSlotRange(newSlots + oldCapacity, newSlots + newCapacity);
-#else
   Debug_SetSlotRangeToCrashOnTouch(newSlots + oldCapacity,
                                    newCapacity - oldCapacity);
-#endif
 
   gc::MemoryReleaseFence(zone());
   slots_ = newSlots;
+
+  if (cx->runtime()->hasJitRuntime() &&
+      MOZ_UNLIKELY(cx->runtime()->jitRuntime()->inPureCall()) &&
+      is<GlobalObject>()) {
+    cx->runtime()->jitRuntime()->handleGrowSlotsForPureCall(cx);
+  }
 
   MOZ_ASSERT(hasDynamicSlots());
   return true;
@@ -393,13 +398,7 @@ bool NativeObject::allocateInitialSlots(JSContext* cx, uint32_t capacity) {
       ObjectSlots(capacity, 0, ObjectSlots::NoUniqueIdInDynamicSlots);
   HeapSlot* slots = headerSlots->slots();
 
-#ifdef JS_GC_CONCURRENT_MARKING
-  // TODO: This (and the other uses of InitializeSlotRange in this file) may
-  // unnecessarily initialize slots that get explicitly initialized later.
-  InitializeSlotRange(slots, slots + capacity);
-#else
   Debug_SetSlotRangeToCrashOnTouch(slots, capacity);
-#endif
 
   // Fence between initializing slot data and writing the slots_ pointer ensure
   // marking doesn't observe uninitialized memory.
@@ -430,11 +429,7 @@ bool NativeObject::allocateSlots(Nursery& nursery, uint32_t newCapacity) {
       newCapacity, dictionarySpan, ObjectSlots::NoUniqueIdInDynamicSlots);
 
   HeapSlot* newSlots = newHeaderSlots->slots();
-#ifdef JS_GC_CONCURRENT_MARKING
-  InitializeSlotRange(newSlots, newSlots + newCapacity);
-#else
   Debug_SetSlotRangeToCrashOnTouch(newSlots, newCapacity);
-#endif
 
   gc::MemoryReleaseFence(zone());
   slots_ = newSlots;
@@ -468,10 +463,19 @@ bool NativeObject::addDenseElementPure(JSContext* cx, NativeObject* obj) {
   MOZ_ASSERT_IF(obj->is<ArrayObject>(),
                 obj->as<ArrayObject>().lengthIsWritable());
 
+  // We can't call Watchtower::watchFirstDenseElementAdd here because it can pop
+  // fuses, so fall back to the VM. This can only happen until the fuse is
+  // popped, which the VM does when it adds the element, so it's very rare in
+  // practice.
+  uint32_t oldCapacity = obj->getDenseCapacity();
+  if (MOZ_UNLIKELY(oldCapacity == 0 &&
+                   Watchtower::watchesFirstDenseElementAdd(obj))) {
+    return false;
+  }
+
   // growElements will report OOM also if the number of dense elements will
   // exceed MAX_DENSE_ELEMENTS_COUNT. See goodElementsAllocationAmount.
-  uint32_t oldCapacity = obj->getDenseCapacity();
-  if (MOZ_UNLIKELY(!obj->growElements(cx, oldCapacity + 1))) {
+  if (MOZ_UNLIKELY(!obj->growElementsNoWatchtowerCheck(cx, oldCapacity + 1))) {
     cx->recoverFromOutOfMemory();
     return false;
   }
@@ -495,7 +499,7 @@ void NativeObject::shrinkSlots(JSContext* cx, uint32_t oldCapacity,
   uint32_t oldAllocated = ObjectSlots::allocCount(oldCapacity);
 
   if (newCapacity == 0 && uid == 0) {
-    if (gc::IsBufferAlloc(oldHeaderSlots)) {
+    if (gc::IsGCPointerBufferAlloc(oldHeaderSlots)) {
       gc::FreeBuffer(zone(), oldHeaderSlots);
     }
     // dictionarySlotSpan is initialized to the correct value by the callers.
@@ -524,6 +528,15 @@ void NativeObject::shrinkSlots(JSContext* cx, uint32_t oldCapacity,
 
   auto* newHeaderSlots =
       new (allocation) ObjectSlots(newCapacity, dictionarySpan, uid);
+
+#ifdef JS_GC_CONCURRENT_MARKING
+  // Clear any unused slots up to the end of the allocation in case we end up
+  // marking them.
+  // TODO: Not required for correctness. Could be removed.
+  InitializeSlotRange(newHeaderSlots->slots() + newCapacity,
+                      allocation + newAllocated);
+#endif
+
   gc::MemoryReleaseFence(zone());
   slots_ = newHeaderSlots->slots();
 }
@@ -576,15 +589,15 @@ bool NativeObject::willBeSparseElements(uint32_t requiredCapacity,
 }
 
 /* static */
-DenseElementResult NativeObject::maybeDensifySparseElements(
-    JSContext* cx, Handle<NativeObject*> obj) {
+bool NativeObject::maybeDensifySparseElements(JSContext* cx,
+                                              Handle<NativeObject*> obj) {
   /*
    * Wait until after the object goes into dictionary mode, which must happen
    * when sparsely packing any array with more than MIN_SPARSE_INDEX elements
    * (see PropertyTree::MAX_HEIGHT).
    */
   if (!obj->inDictionaryMode()) {
-    return DenseElementResult::Incomplete;
+    return true;
   }
 
   /*
@@ -593,12 +606,12 @@ DenseElementResult NativeObject::maybeDensifySparseElements(
    */
   uint32_t slotSpan = obj->slotSpan();
   if (slotSpan != RoundUpPow2(slotSpan)) {
-    return DenseElementResult::Incomplete;
+    return true;
   }
 
   /* Watch for conditions under which an object's elements cannot be dense. */
   if (!obj->isExtensible()) {
-    return DenseElementResult::Incomplete;
+    return true;
   }
 
   /*
@@ -616,7 +629,7 @@ DenseElementResult NativeObject::maybeDensifySparseElements(
     if (iter->flags() != PropertyFlags::defaultDataPropFlags) {
       // For simplicity, only densify the object if all indexed properties can
       // be converted to dense elements.
-      return DenseElementResult::Incomplete;
+      return true;
     }
     MOZ_ASSERT(iter->isDataProperty());
     numDenseElements++;
@@ -624,11 +637,11 @@ DenseElementResult NativeObject::maybeDensifySparseElements(
   }
 
   if (numDenseElements * SPARSE_DENSITY_RATIO < newInitializedLength) {
-    return DenseElementResult::Incomplete;
+    return true;
   }
 
   if (newInitializedLength > MAX_DENSE_ELEMENTS_COUNT) {
-    return DenseElementResult::Incomplete;
+    return true;
   }
 
   /*
@@ -638,23 +651,11 @@ DenseElementResult NativeObject::maybeDensifySparseElements(
 
   if (newInitializedLength > obj->getDenseCapacity()) {
     if (!obj->growElements(cx, newInitializedLength)) {
-      return DenseElementResult::Failure;
+      return false;
     }
   }
 
-  obj->ensureDenseInitializedLength(newInitializedLength, 0);
-
-  if (obj->compartment()->objectMaybeInIteration(obj)) {
-    // Mark the densified elements as maybe-in-iteration. See also the comment
-    // in GetIterator.
-    obj->markDenseElementsMaybeInIteration();
-  }
-
-  if (!NativeObject::densifySparseElements(cx, obj)) {
-    return DenseElementResult::Failure;
-  }
-
-  return DenseElementResult::Success;
+  return NativeObject::densifySparseElements(cx, obj, newInitializedLength);
 }
 
 void NativeObject::moveShiftedElements() {
@@ -891,6 +892,14 @@ bool NativeObject::goodElementsAllocationAmount(JSContext* cx,
 }
 
 bool NativeObject::growElements(JSContext* cx, uint32_t reqCapacity) {
+  if (getDenseCapacity() == 0) {
+    Watchtower::watchFirstDenseElementAdd(cx, this);
+  }
+  return growElementsNoWatchtowerCheck(cx, reqCapacity);
+}
+
+bool NativeObject::growElementsNoWatchtowerCheck(JSContext* cx,
+                                                 uint32_t reqCapacity) {
   MOZ_ASSERT(isExtensible());
   MOZ_ASSERT(canHaveNonEmptyElements());
 
@@ -1200,8 +1209,8 @@ static bool CallJSAddPropertyOp(JSContext* cx, JSAddPropertyOp op,
   return op(cx, obj, id, v);
 }
 
-static MOZ_ALWAYS_INLINE bool PreserveAnyUnpreservedWrapper(
-    JSContext* cx, Handle<NativeObject*> obj) {
+bool js::PreserveAnyUnpreservedWrapper(JSContext* cx,
+                                       Handle<NativeObject*> obj) {
   if (MOZ_LIKELY(!obj->hasUnpreservedWrapper())) {
     return true;
   }
@@ -1457,36 +1466,12 @@ static MOZ_ALWAYS_INLINE bool AddOrChangeProperty(
 
   MOZ_ASSERT(slot < obj->slotSpan());
 
-  // Clear any existing dense index after adding a sparse indexed property,
-  // and investigate converting the object to dense indexes.
+  // Clear any existing dense index after adding a sparse indexed property.
   if (id.isInt()) {
-    uint32_t index = id.toInt();
     if constexpr (AddOrChange == IsAddOrChange::Add) {
-      MOZ_ASSERT(!obj->containsDenseElement(index));
+      MOZ_ASSERT(!obj->containsDenseElement(id.toInt()));
     } else {
-      obj->removeDenseElementForSparseIndex(index);
-    }
-    // Only try to densify sparse elements if the property we just added/changed
-    // is in the last slot. This avoids a perf cliff in pathological cases: in
-    // maybeDensifySparseElements we densify if the slot span is a power-of-two,
-    // but if we get slots from the free list, the slot span will stay the same
-    // until the free list is empty. This means we'd get quadratic behavior by
-    // trying to densify for each sparse element we add. See bug 1782487.
-    if (slot == obj->slotSpan() - 1) {
-      DenseElementResult edResult =
-          NativeObject::maybeDensifySparseElements(cx, obj);
-      if (edResult == DenseElementResult::Failure) {
-        return false;
-      }
-      if (edResult == DenseElementResult::Success) {
-        MOZ_ASSERT(!desc.isAccessorDescriptor());
-        if constexpr (AddOrChange == IsAddOrChange::Add) {
-          if (!CallAddPropertyHookDense(cx, obj, index, desc.value())) {
-            return false;
-          }
-        }
-        return true;
-      }
+      obj->removeDenseElementForSparseIndex(id.toInt());
     }
   }
 
@@ -1499,6 +1484,21 @@ static MOZ_ALWAYS_INLINE bool AddOrChangeProperty(
       if (!CallAddPropertyHook(cx, obj, id, UndefinedHandleValue)) {
         return false;
       }
+    }
+  }
+
+  // Investigate converting the object to dense indexes. This is fallible so we
+  // do this after the add-property hook.
+  //
+  // Only try to densify sparse elements if the property we just added/changed
+  // is in the last slot. This avoids a perf cliff in pathological cases: in
+  // maybeDensifySparseElements we densify if the slot span is a power-of-two,
+  // but if we get slots from the free list, the slot span will stay the same
+  // until the free list is empty. This means we'd get quadratic behavior by
+  // trying to densify for each sparse element we add. See bug 1782487.
+  if (id.isInt() && slot == obj->slotSpan() - 1) {
+    if (!NativeObject::maybeDensifySparseElements(cx, obj)) {
+      return false;
     }
   }
 
@@ -2956,21 +2956,48 @@ bool js::CopyDataPropertiesNative(JSContext* cx, Handle<PlainObject*> target,
 
   // Don't use the fast path if |from| may have extra indexed or lazy
   // properties.
-  if (from->getDenseInitializedLength() > 0 || from->isIndexed() ||
-      from->is<TypedArrayObject>() || from->getClass()->getNewEnumerate() ||
-      from->getClass()->getEnumerate()) {
+  if (from->getDenseInitializedLength() > 0 || from->isIndexed()) {
     return true;
   }
+  const bool fromIsPlain = from->is<PlainObject>();
+  if (fromIsPlain) {
+    MOZ_ASSERT(!ClassCanHaveExtraEnumeratedProperties(from->getClass()));
+  } else {
+    if (ClassCanHaveExtraEnumeratedProperties(from->getClass())) {
+      return true;
+    }
+  }
+
+  // Check the plainObjectSpreadCache.
+  if (!excludedItems) {
+    const PlainObjectCopyPropsCache& cache =
+        cx->realm()->plainObjectSpreadCache;
+    if (SharedShape* newShape = cache.lookup(target->shape(), from->shape())) {
+      *optimized = true;
+      return CopyPropertiesWithNewShape(cx, target, &from->as<PlainObject>(),
+                                        newShape, newShape->slotSpan());
+    }
+  }
+
+  // If |target| contains no own properties, we can directly call
+  // AddDataPropertyToNativeObjectNoHooks.
+  const bool targetHadNoOwnProperties = target->empty();
+
+  // If |target| is empty and every property of |from| is a plain enumerable
+  // data property, we try to reuse |from|'s Shape or PropMap.
+  bool canReuseFromShape = !excludedItems && targetHadNoOwnProperties &&
+                           fromIsPlain &&
+                           !Watchtower::watchesPropertyAdd(target);
 
   // Collect all enumerable data properties.
   Rooted<PropertyInfoWithKeyVector> props(cx, PropertyInfoWithKeyVector(cx));
 
-  Rooted<NativeShape*> fromShape(cx, from->shape());
-  for (ShapePropertyIter<NoGC> iter(fromShape); !iter.done(); iter++) {
+  for (ShapePropertyIter<NoGC> iter(from->shape()); !iter.done(); iter++) {
     jsid id = iter->key();
     MOZ_ASSERT(!id.isInt());
 
     if (!iter->enumerable()) {
+      canReuseFromShape = false;
       continue;
     }
     if (excludedItems && excludedItems->contains(cx, id)) {
@@ -2986,6 +3013,10 @@ bool js::CopyDataPropertiesNative(JSContext* cx, Handle<PlainObject*> target,
       return true;
     }
 
+    if (iter->flags() != PropertyFlags::defaultDataPropFlags) {
+      canReuseFromShape = false;
+    }
+
     if (!props.append(*iter)) {
       return false;
     }
@@ -2993,12 +3024,27 @@ bool js::CopyDataPropertiesNative(JSContext* cx, Handle<PlainObject*> target,
 
   *optimized = true;
 
-  // If |target| contains no own properties, we can directly call
-  // AddDataPropertyNonPrototype.
-  const bool targetHadNoOwnProperties = target->empty();
+  if (canReuseFromShape && !props.empty()) {
+    Rooted<Shape*> origTargetShape(cx, target->shape());
+    Handle<PlainObject*> fromPlain = Handle<JSObject*>(from).as<PlainObject>();
+    bool copied;
+    if (!TryCopyPropertiesReusingShapeOrPropMap(cx, target, fromPlain,
+                                                props.length(), &copied)) {
+      return false;
+    }
+    if (copied) {
+      cx->realm()->plainObjectSpreadCache.fill(&origTargetShape->asShared(),
+                                               fromPlain->sharedShape(),
+                                               target->sharedShape());
+      return true;
+    }
+  }
 
   RootedId key(cx);
   RootedValue value(cx);
+#ifdef DEBUG
+  Rooted<NativeShape*> fromShape(cx, from->shape());
+#endif
   for (size_t i = props.length(); i > 0; i--) {
     PropertyInfoWithKey prop = props[i - 1];
     MOZ_ASSERT(prop.isDataProperty());

@@ -17,6 +17,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/TelemetryHistogramEnums.h"
 #include "mozilla/glean/NetwerkCache2Metrics.h"
+#include "nsCRTGlue.h"
 #include "nsComponentManagerUtils.h"
 #include "nsICacheEntry.h"
 #include "nsProxyRelease.h"
@@ -646,6 +647,9 @@ nsresult CacheFile::OnMetadataRead(nsresult aResult) {
                         (mAltDataOffset > mDataSize))) {
           // alt-metadata cannot be parsed or alt-data offset is invalid
           mMetadata->InitEmptyMetadata();
+          // InitEmptyMetadata() invalidates and truncates the file, so the
+          // reset metadata has to be written back out.
+          mMetadata->MarkDirty();
           isNew = true;
           mAltDataOffset = -1;
           mAltDataType.Truncate();
@@ -1179,8 +1183,16 @@ nsresult CacheFile::SetElement(const char* aKey, const char* aValue) {
     return NS_ERROR_FAILURE;
   }
 
-  PostWriteTimer();
-  return mMetadata->SetElement(aKey, aValue);
+  nsresult rv = mMetadata->SetElement(aKey, aValue);
+
+  // Only schedule a write when the metadata actually changed. Re-storing an
+  // element with the value it already holds is a no-op and must not rewrite the
+  // entry file.
+  if (mMetadata->IsDirty()) {
+    PostWriteTimer();
+  }
+
+  return rv;
 }
 
 nsresult CacheFile::VisitMetaData(nsICacheEntryMetaDataVisitor* aVisitor) {
@@ -1613,7 +1625,8 @@ nsresult CacheFile::GetChunkLocked(uint32_t aIndex, ECallerType aCaller,
         if (startChunk != aIndex) {
           // Make sure the file contains zeroes at the end of the file
           rv = CacheFileIOManager::TruncateSeekSetEOF(
-              mHandle, startChunk * kChunkSize, aIndex * kChunkSize, nullptr);
+              mHandle, int64_t(startChunk) * kChunkSize,
+              int64_t(aIndex) * kChunkSize, nullptr);
           NS_ENSURE_SUCCESS(rv, rv);
         }
 
@@ -1941,7 +1954,7 @@ int64_t CacheFile::BytesFromChunk(uint32_t aIndex, bool aAlternativeData) {
   // theoretic bytes in advance
   int64_t advance = int64_t(i - aIndex) * kChunkSize;
   // real bytes till the end of the file
-  int64_t tail = dataSize - (aIndex * kChunkSize);
+  int64_t tail = dataSize - (int64_t(aIndex) * kChunkSize);
 
   return std::min(advance, tail);
 }
@@ -2178,16 +2191,12 @@ void CacheFile::RemoveOutput(CacheFileOutputStream* aOutput, nsresult aStatus) {
 
   mOutput = nullptr;  // XXX should this be after NotifyCloseListener?
 
-  // Cancel all queued chunk and update listeners that cannot be satisfied
-  NotifyListenersAboutOutputRemoval();
-
-  if (!mMemoryOnly) WriteMetadataIfNeededLocked();
+  bool failed = NS_FAILED(aStatus) && aStatus != NS_BASE_STREAM_CLOSED;
 
   // Make sure the CacheFile status is set to a failure when the output stream
   // is closed with a fatal error.  This way we propagate correctly and w/o any
   // windows the failure state of this entry to end consumers.
-  if (NS_SUCCEEDED(mStatus) && NS_FAILED(aStatus) &&
-      aStatus != NS_BASE_STREAM_CLOSED) {
+  if (NS_SUCCEEDED(mStatus) && failed) {
     if (aOutput->IsAlternativeData()) {
       MOZ_ASSERT(mAltDataOffset != -1);
       // If there is no alt-data input stream truncate only alt-data, otherwise
@@ -2218,6 +2227,25 @@ void CacheFile::RemoveOutput(CacheFileOutputStream* aOutput, nsresult aStatus) {
     } else {
       SetError(aStatus);
     }
+  }
+
+  // Propagate the failure to alt-data readers.
+  if (failed && aOutput->IsAlternativeData() && NS_FAILED(mStatus)) {
+    for (CacheFileInputStream* input : mInputs) {
+      if (input->IsAlternativeData()) {
+        // Closing may drop the last outside reference to an input; keep it
+        // alive until the lock is released so RemoveInput() isn't reentered.
+        ReleaseOutsideLock(RefPtr<nsIInputStream>(input));
+        input->CloseWithStatusLocked(mStatus);
+      }
+    }
+  }
+
+  // Cancel all queued chunk and update listeners that cannot be satisfied
+  NotifyListenersAboutOutputRemoval();
+
+  if (!mMemoryOnly) {
+    WriteMetadataIfNeededLocked();
   }
 
   // Notify close listener as the last action
@@ -2561,12 +2589,13 @@ void CacheFile::SetError(nsresult aStatus) {
 void CacheFile::SetupEncryption() {
   AssertOwnsLock();
 
-  // Only brand-new, disk-backed entries with no data yet are marked: this fixes
-  // an entry's encryption state at creation and never flips an existing
+  // Only brand-new, disk-backed entries with nothing on disk yet are marked:
+  // An entry's encryption state is fixed at creation and never flips a
   // plaintext entry. Existing entries read from disk carry their flag in the
   // metadata header. The cipher uses a per-block random nonce and a per-block
   // derived key, so no per-entry key material needs to be generated here.
-  if (mMemoryOnly || !mMetadata || mMetadata->IsEncrypted() || mDataSize != 0) {
+  if (mMemoryOnly || !mMetadata || mMetadata->IsEncrypted() ||
+      mMetadata->Offset() != 0) {
     return;
   }
 

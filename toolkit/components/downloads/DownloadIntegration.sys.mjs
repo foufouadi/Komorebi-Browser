@@ -29,6 +29,13 @@ ChromeUtils.defineESModuleGetters(lazy, {
   NetUtil: "resource://gre/modules/NetUtil.sys.mjs",
 });
 
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "startDownloadsInTmpDir",
+  "browser.download.start_downloads_in_tmp_dir",
+  false
+);
+
 XPCOMUtils.defineLazyServiceGetter(
   lazy,
   "gDownloadPlatform",
@@ -625,7 +632,7 @@ export var DownloadIntegration = {
               // Use the path to the part-file if a part file is involved.
               // We haven't moved it yet.
               filePath: download.target.partFilePath || download.target.path,
-              sha256Digest: download.saver.getSha256Hash(),
+              sha256Digest: download.saver.getSha256HashHex(),
             }
           ),
         ],
@@ -683,6 +690,11 @@ export var DownloadIntegration = {
    * @rejects JavaScript exception if any of the operations failed.
    */
   async downloadDone(aDownload) {
+    // For PDF files loaded in pdf.js the originalUrl is the original URL
+    // where the PDF was loaded from, and the url is a blob URL: the former is
+    // the one worth recording in the file metadata.
+    const sourceUrl = aDownload.source.originalUrl ?? aDownload.source.url;
+
     try {
       // On Windows, this will mark any file saved to the file system as coming
       // from the Internet security zone unless Group Policy disables the
@@ -695,7 +707,7 @@ export var DownloadIntegration = {
       // This currently does nothing on other platforms.
       await lazy.gDownloadPlatform.maybeWriteDownloadOriginInformation(
         new lazy.FileUtils.File(aDownload.target.path),
-        lazy.NetUtil.newURI(aDownload.source.url),
+        lazy.NetUtil.newURI(sourceUrl),
         aDownload.source.referrerInfo,
         aDownload.source.isPrivate
       );
@@ -710,16 +722,19 @@ export var DownloadIntegration = {
     // this is a permanently downloaded file or a temporary download to be
     // opened read-only with an external application.
     try {
+      // Private downloads opened with an external app are only marked read-only
+      // when they are stored in the OS temporary directory, so that helper apps
+      // prompt to save modified versions elsewhere. Files in the Downloads
+      // folder or in a user-chosen directory stay writable, since the user can
+      // find and manage them.
+      // Note: for simplicity this intentionally ignores a browsing context's
+      // `downloadFolderOverride`, which is only used by automation
+      // (WebDriver BiDi).
       let isTemporaryDownload =
-        aDownload.launchWhenSucceeded && aDownload.source.isPrivate;
-      // Permanently downloaded files are made accessible by other users on
-      // this system, while temporary downloads are marked as read-only.
-      let unixMode;
-      if (isTemporaryDownload) {
-        unixMode = 0o400;
-      } else {
-        unixMode = 0o666;
-      }
+        aDownload.launchWhenSucceeded &&
+        aDownload.source.isPrivate &&
+        lazy.startDownloadsInTmpDir;
+      let unixMode = isTemporaryDownload ? 0o400 : 0o666;
       // On Unix, the umask of the process is respected.
       await IOUtils.setPermissions(aDownload.target.path, unixMode);
     } catch (ex) {
@@ -743,7 +758,7 @@ export var DownloadIntegration = {
     }
 
     await lazy.gDownloadPlatform.downloadDone(
-      lazy.NetUtil.newURI(aDownload.source.url),
+      lazy.NetUtil.newURI(sourceUrl),
       aReferrer,
       new lazy.FileUtils.File(aDownload.target.path),
       aDownload.contentType,

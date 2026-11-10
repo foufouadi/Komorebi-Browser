@@ -27,6 +27,7 @@
 #include "mozilla/StaticPrefs_bidi.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/StaticPrefs_layout.h"
+#include "mozilla/TextControlElement.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/intl/BidiEmbeddingLevel.h"
 #include "nsBidiPresUtils.h"
@@ -44,7 +45,6 @@
 #include "nsITableCellLayout.h"
 #include "nsLayoutUtils.h"
 #include "nsPresContext.h"
-#include "nsRange.h"
 #include "nsString.h"
 #include "nsTArray.h"
 #include "nsTableCellFrame.h"
@@ -61,6 +61,7 @@
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Highlight.h"
+#include "mozilla/dom/Range.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/SelectionBinding.h"
 #include "mozilla/dom/ShadowRoot.h"
@@ -152,7 +153,7 @@ static nsresult MaybeUpdateSelectionCacheOnRepaintSelection(Selection* aSel);
 #endif  // RUN_MAYBE_UPDATE_SELECTION_CACHE_REPAINT_SELECTION
 
 #ifdef PRINT_RANGE
-static void printRange(nsRange* aDomRange);
+static void printRange(dom::Range* aDomRange);
 #  define DEBUG_OUT_RANGE(x) printRange(x)
 #else
 #  define DEBUG_OUT_RANGE(x)
@@ -281,8 +282,8 @@ struct MOZ_RAII AutoPrepareFocusRange {
       // Scripted command or the user is starting a new explicit multi-range
       // selection.
       for (const auto& range : ranges) {
-        MOZ_ASSERT(range->IsDynamicRange());
-        range->AsDynamicRange()->SetIsGenerated(false);
+        MOZ_ASSERT(range->IsRange());
+        range->AsRange()->SetIsGenerated(false);
       }
       return;
     }
@@ -296,7 +297,7 @@ struct MOZ_RAII AutoPrepareFocusRange {
     // represents the focus in a multi-range selection.  The anchor from a user
     // perspective is the most distant generated range on the opposite side.
     // Find that range and make it the mAnchorFocusRange.
-    nsRange* const newAnchorFocusRange =
+    dom::Range* const newAnchorFocusRange =
         FindGeneratedRangeMostDistantFromAnchor(*aSelection);
 
     if (!newAnchorFocusRange) {
@@ -320,7 +321,7 @@ struct MOZ_RAII AutoPrepareFocusRange {
   }
 
  private:
-  static nsRange* FindGeneratedRangeMostDistantFromAnchor(
+  static dom::Range* FindGeneratedRangeMostDistantFromAnchor(
       const Selection& aSelection) {
     const Span ranges = aSelection.mStyledRanges.Ranges();
     // This function is only called for selections with type == eNormal.
@@ -328,14 +329,14 @@ struct MOZ_RAII AutoPrepareFocusRange {
     // Therefore, all ranges must be dynamic.
     if (aSelection.GetDirection() == eDirNext) {
       for (const auto& range : ranges) {
-        if (range->AsDynamicRange()->IsGenerated()) {
-          return range->AsDynamicRange();
+        if (range->AsRange()->IsGenerated()) {
+          return range->AsRange();
         }
       }
     } else {
       for (const auto& range : Reversed(ranges)) {
-        if (range->AsDynamicRange()->IsGenerated()) {
-          return range->AsDynamicRange();
+        if (range->AsRange()->IsGenerated()) {
+          return range->AsRange();
         }
       }
     }
@@ -351,10 +352,10 @@ struct MOZ_RAII AutoPrepareFocusRange {
       // This function is only called for selections with type == eNormal.
       // (see MOZ_ASSERT in constructor).
       // Therefore, all ranges must be dynamic.
-      if (!ranges[i]->IsDynamicRange()) {
+      if (!ranges[i]->IsRange()) {
         continue;
       }
-      nsRange* range = ranges[i]->AsDynamicRange();
+      dom::Range* range = ranges[i]->AsRange();
       if (range->IsGenerated()) {
         range->UnregisterSelection(aSelection);
         aSelection.SelectFrames(presContext, *range, false);
@@ -382,7 +383,7 @@ struct MOZ_RAII AutoPrepareFocusRange {
 
 ////////////BEGIN nsFrameSelection methods
 
-template Result<RefPtr<nsRange>, nsresult>
+template Result<RefPtr<dom::Range>, nsresult>
 nsFrameSelection::CreateRangeExtendedToSomewhere(
     PresShell& aPresShell,
     const mozilla::LimitersAndCaretData& aLimitersAndCaretData,
@@ -400,9 +401,8 @@ nsFrameSelection::CreateRangeExtendedToSomewhere(
 nsFrameSelection::nsFrameSelection(
     PresShell* aPresShell, const bool aAccessibleCaretEnabled,
     Element* aEditorRootAnonymousDiv /* = nullptr */) {
-  for (size_t i = 0; i < std::size(mDomSelections); i++) {
-    mDomSelections[i] = new Selection(kPresentSelectionTypes[i], this);
-  }
+  // The other selection types are created on demand, see GetSelection().
+  mDomSelections[0] = new Selection(SelectionType::eNormal, this);
 
   Selection& sel = NormalSelection();
   if (AutoCopyListener::IsEnabled()) {
@@ -477,6 +477,16 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsFrameSelection)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLimiters.mIndependentSelectionRootElement)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLimiters.mAncestorLimiter)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+nsISelectionController* nsFrameSelection::GetSelectionController() const {
+  if (IsIndependentSelection()) {
+    auto* const textControlElement = TextControlElement::FromNodeOrNull(
+        GetIndependentSelectionRootParentElement());
+    return textControlElement ? textControlElement->GetSelectionController()
+                              : nullptr;
+  }
+  return mPresShell;
+}
 
 // static
 void nsFrameSelection::WillFocusDocument(PresShell& aPresShell,
@@ -715,7 +725,7 @@ void nsFrameSelection::UndefineCaretBidiLevel() {
 }
 
 #ifdef PRINT_RANGE
-void printRange(nsRange* aDomRange) {
+void printRange(Range* aDomRange) {
   if (!aDomRange) {
     printf("NULL Range\n");
   }
@@ -790,7 +800,7 @@ nsresult nsFrameSelection::MoveCaret(nsDirection aDirection,
   }
 
   const RefPtr<Selection> sel = &NormalSelection();
-  if (const nsRange* anchorFocusRange = sel->GetAnchorFocusRange()) {
+  if (const dom::Range* anchorFocusRange = sel->GetAnchorFocusRange()) {
     if (NS_WARN_IF(!anchorFocusRange->IsPositioned())) {
       return NS_ERROR_FAILURE;
     }
@@ -879,7 +889,7 @@ nsresult nsFrameSelection::MoveCaret(nsDirection aDirection,
   }
 
   if (doCollapse) {
-    const nsRange* anchorFocusRange = sel->GetAnchorFocusRange();
+    const dom::Range* anchorFocusRange = sel->GetAnchorFocusRange();
     if (anchorFocusRange) {
       RefPtr<nsINode> node;
       uint32_t offset;
@@ -1214,8 +1224,10 @@ void nsFrameSelection::MaintainedRange::AdjustNormalSelection(
   if ((*relToStart <= 0 && *relToEnd >= 0) ||
       (*relToStart > 0 && aNormalSelection.GetDirection() == eDirNext) ||
       (*relToEnd < 0 && aNormalSelection.GetDirection() == eDirPrevious)) {
+    // Ensure we hold a strong ref to the range across ReplaceAnchorFocusRange.
+    const RefPtr range = mRange;
     // Set the current range to the maintained range.
-    aNormalSelection.ReplaceAnchorFocusRange(mRange);
+    aNormalSelection.ReplaceAnchorFocusRange(range);
     // Set the direction of the selection so that the anchor will be on the
     // far side of the maintained selection, relative to aContent/aOffset.
     aNormalSelection.SetDirection(*relToStart > 0 ? eDirPrevious : eDirNext);
@@ -1283,7 +1295,7 @@ void nsFrameSelection::MaintainedRange::MaintainAnchorFocusRange(
 
   mAmount = aAmount;
 
-  const nsRange* anchorFocusRange = aNormalSelection.GetAnchorFocusRange();
+  const dom::Range* anchorFocusRange = aNormalSelection.GetAnchorFocusRange();
   if (anchorFocusRange && aAmount != eSelectNoAmount) {
     mRange = anchorFocusRange->CloneRange();
     return;
@@ -1490,7 +1502,7 @@ nsresult nsFrameSelection::TakeFocus(nsIContent& aNewFocus,
         selection->RemoveCollapsedRanges();
 
         ErrorResult error;
-        RefPtr<nsRange> newRange = nsRange::Create(
+        RefPtr<dom::Range> newRange = dom::Range::Create(
             &aNewFocus, aContentOffset, &aNewFocus, aContentOffset, error);
         if (NS_WARN_IF(error.Failed())) {
           return error.StealNSResult();
@@ -1615,11 +1627,12 @@ UniquePtr<SelectionDetails> nsFrameSelection::LookUpSelection(
   UniquePtr<SelectionDetails> details;
   for (size_t j = aIgnoreNormalSelection == IgnoreNormalSelection::Yes ? 1 : 0;
        j < std::size(mDomSelections); j++) {
-    MOZ_ASSERT(mDomSelections[j]);
-    details = mDomSelections[j]->LookUpSelection(
-        aContent, static_cast<uint32_t>(aContentOffset),
-        static_cast<uint32_t>(aContentLength), std::move(details),
-        kPresentSelectionTypes[j]);
+    if (Selection* selection = mDomSelections[j]) {
+      details = selection->LookUpSelection(
+          aContent, static_cast<uint32_t>(aContentOffset),
+          static_cast<uint32_t>(aContentLength), std::move(details),
+          kPresentSelectionTypes[j]);
+    }
   }
 
   // This may seem counter intuitive at first. Highlight selections need to be
@@ -1661,13 +1674,24 @@ void nsFrameSelection::SetDragState(bool aState) {
   }
 }
 
+Selection* nsFrameSelection::GetExistingSelection(
+    SelectionType aSelectionType) const {
+  int8_t index = GetIndexFromSelectionType(aSelectionType);
+  return index < 0 ? nullptr : mDomSelections[index].get();
+}
+
 Selection* nsFrameSelection::GetSelection(SelectionType aSelectionType) const {
   int8_t index = GetIndexFromSelectionType(aSelectionType);
   if (index < 0) {
     return nullptr;
   }
-  MOZ_ASSERT(mDomSelections[index]);
-  return mDomSelections[index];
+  RefPtr<Selection>& selection = mDomSelections[index];
+  // Don't recreate selections after the cycle collector unlinked them.
+  if (!selection && IsAvailable()) {
+    selection =
+        new Selection(aSelectionType, const_cast<nsFrameSelection*>(this));
+  }
+  return selection;
 }
 
 void nsFrameSelection::PopulateHighlightSelection(
@@ -1676,13 +1700,11 @@ void nsFrameSelection::PopulateHighlightSelection(
   AutoFrameSelectionBatcher selectionBatcher(__FUNCTION__);
   selectionBatcher.AddFrameSelection(this);
   const Document* doc = GetPresShell()->GetDocument();
-  for (const RefPtr<AbstractRange>& range : aHighlight.Ranges()) {
+  for (const auto& entry : aHighlight.Setlike()) {
+    const RefPtr<AbstractRange> range = entry;
     const Document* rangeDoc = range->GetComposedDocOfContainers();
     if (!rangeDoc || rangeDoc == doc) {
-      // since this is run in a context guarded by a selection batcher,
-      // no strong reference is needed to keep `range` alive.
-      aSelection.AddHighlightRangeAndSelectFramesAndNotifyListeners(
-          MOZ_KnownLive(*range));
+      aSelection.AddHighlightRangeAndSelectFramesAndNotifyListeners(*range);
     }
   }
 }
@@ -1804,9 +1826,9 @@ nsresult nsFrameSelection::ScrollSelectionIntoView(SelectionType aSelectionType,
 }
 
 nsresult nsFrameSelection::RepaintSelection(SelectionType aSelectionType) {
-  RefPtr<Selection> sel = GetSelection(aSelectionType);
+  RefPtr<Selection> sel = GetExistingSelection(aSelectionType);
   if (!sel) {
-    return NS_ERROR_INVALID_ARG;
+    return NS_OK;
   }
   if (!mPresShell) {
     return NS_ERROR_UNEXPECTED;
@@ -2274,7 +2296,8 @@ void nsFrameSelection::EndBatchChanges(const char* aRequesterFuncName,
 
 nsresult nsFrameSelection::NotifySelectionListeners(
     SelectionType aSelectionType, IsBatchingEnd aEndBatching) {
-  if (RefPtr<Selection> selection = GetSelection(aSelectionType)) {
+  // Selections that weren't created yet have nothing to notify about.
+  if (RefPtr<Selection> selection = GetExistingSelection(aSelectionType)) {
     if (aEndBatching == IsBatchingEnd::Yes &&
         !selection->ChangesDuringBatching()) {
       return NS_OK;
@@ -2307,7 +2330,7 @@ nsresult nsFrameSelection::ClearNormalSelection() {
   return err.StealNSResult();
 }
 
-static nsIContent* GetFirstSelectedContent(const nsRange* aRange) {
+static nsIContent* GetFirstSelectedContent(const dom::Range* aRange) {
   if (!aRange) {
     return nullptr;
   }
@@ -2653,7 +2676,7 @@ nsresult nsFrameSelection::TableSelection::HandleMouseUpOrDown(
         MOZ_ASSERT(aNormalSelection.RangeCount() == rangeCount);
         // Strong reference, because sometimes we want to remove
         // this range, and then we might be the only owner.
-        RefPtr<nsRange> range = aNormalSelection.GetRangeAt(i);
+        RefPtr<dom::Range> range = aNormalSelection.GetRangeAt(i);
         if (MOZ_UNLIKELY(!range)) {
           return NS_ERROR_NULL_POINTER;
         }
@@ -2760,8 +2783,13 @@ nsresult nsFrameSelection::TableSelection::UnselectCells(
     bool aRemoveOutsideOfCellRange, mozilla::dom::Selection& aNormalSelection) {
   MOZ_ASSERT(aNormalSelection.Type() == SelectionType::eNormal);
 
-  nsTableWrapperFrame* tableFrame =
+  // This is needed as an nsTableWrapperFrame as we use this to know we can
+  // static cast tableFrame to nsTableWrapperFrame.
+  nsTableWrapperFrame* tableFrameCast =
       do_QueryFrame(aTableContent->GetPrimaryFrame());
+  // Declared as weak frame, as the frame may be freed during a call to a
+  // listener.
+  AutoWeakFrame tableFrame(tableFrameCast);
   if (!tableFrame) {
     return NS_ERROR_FAILURE;
   }
@@ -2772,7 +2800,7 @@ nsresult nsFrameSelection::TableSelection::UnselectCells(
   int32_t maxColIndex = std::max(aStartColumnIndex, aEndColumnIndex);
 
   // Strong reference because we sometimes remove the range
-  RefPtr<nsRange> range = GetFirstCellRange(aNormalSelection);
+  RefPtr<dom::Range> range = GetFirstCellRange(aNormalSelection);
   nsIContent* cellNode = GetFirstSelectedContent(range);
   MOZ_ASSERT(!range || cellNode, "Must have cellNode if had a range");
 
@@ -2793,6 +2821,9 @@ nsresult nsFrameSelection::TableSelection::UnselectCells(
             curColIndex < minColIndex || curColIndex > maxColIndex) {
           aNormalSelection.RemoveRangeAndUnselectFramesAndNotifyListeners(
               *range, IgnoreErrors());
+          if (!tableFrame.IsAlive()) {
+            return NS_OK;
+          }
           // Since we've removed the range, decrement pointer to next range
           mSelectedCellIndex--;
         }
@@ -2800,15 +2831,22 @@ nsresult nsFrameSelection::TableSelection::UnselectCells(
       } else {
         // Remove cell from selection if it belongs to the given cells range or
         // it is spanned onto the cells range.
+
+        MOZ_ASSERT(tableFrame.IsAlive());
+        // In general, static casting to another table type is not a good idea,
+        // but it is valid here due to the earlier do_QueryFrame() that
+        // established that tableFrame is an nsTableWrapperFrame*.
+        auto tempTableFrame =
+            static_cast<nsTableWrapperFrame*>(tableFrame.GetFrame());
         nsTableCellFrame* cellFrame =
-            tableFrame->GetCellFrameAt(curRowIndex, curColIndex);
+            tempTableFrame->GetCellFrameAt(curRowIndex, curColIndex);
 
         uint32_t origRowIndex = cellFrame->RowIndex();
         uint32_t origColIndex = cellFrame->ColIndex();
         uint32_t actualRowSpan =
-            tableFrame->GetEffectiveRowSpanAt(origRowIndex, origColIndex);
+            tempTableFrame->GetEffectiveRowSpanAt(origRowIndex, origColIndex);
         uint32_t actualColSpan =
-            tableFrame->GetEffectiveColSpanAt(curRowIndex, curColIndex);
+            tempTableFrame->GetEffectiveColSpanAt(curRowIndex, curColIndex);
         if (origRowIndex <= static_cast<uint32_t>(maxRowIndex) &&
             maxRowIndex >= 0 &&
             origRowIndex + actualRowSpan - 1 >=
@@ -2819,6 +2857,9 @@ nsresult nsFrameSelection::TableSelection::UnselectCells(
                 static_cast<uint32_t>(minColIndex)) {
           aNormalSelection.RemoveRangeAndUnselectFramesAndNotifyListeners(
               *range, IgnoreErrors());
+          if (!tableFrame.IsAlive()) {
+            return NS_OK;
+          }
           // Since we've removed the range, decrement pointer to next range
           mSelectedCellIndex--;
         }
@@ -2853,8 +2894,13 @@ static nsresult AddCellsToSelection(const nsIContent* aTableContent,
                                     Selection& aNormalSelection) {
   MOZ_ASSERT(aNormalSelection.Type() == SelectionType::eNormal);
 
-  nsTableWrapperFrame* tableFrame =
+  // This is needed as an nsTableWrapperFrame as we use this to know we can
+  // static cast tableFrame to nsTableWrapperFrame.
+  nsTableWrapperFrame* tableFrameCast =
       do_QueryFrame(aTableContent->GetPrimaryFrame());
+  // Declared as weak frame, as the frame may be freed during a call to a
+  // listener.
+  AutoWeakFrame tableFrame(tableFrameCast);
   if (!tableFrame) {  // Check that |table| is a table.
     return NS_ERROR_FAILURE;
   }
@@ -2864,7 +2910,12 @@ static nsresult AddCellsToSelection(const nsIContent* aTableContent,
   while (true) {
     uint32_t col = aStartColumnIndex;
     while (true) {
-      nsTableCellFrame* cellFrame = tableFrame->GetCellFrameAt(row, col);
+      MOZ_ASSERT(tableFrame.IsAlive());
+      // In general, static casting to another table type is not a good idea,
+      // but it is valid here due to the earlier do_QueryFrame() that
+      // established that tableFrame is an nsTableWrapperFrame*.
+      auto cellFrame = static_cast<nsTableWrapperFrame*>(tableFrame.GetFrame())
+                           ->GetCellFrameAt(row, col);
 
       // Skip cells that are spanned from previous locations or are already
       // selected
@@ -2873,7 +2924,7 @@ static nsresult AddCellsToSelection(const nsIContent* aTableContent,
         uint32_t origCol = cellFrame->ColIndex();
         if (origRow == row && origCol == col && !cellFrame->IsSelected()) {
           result = SelectCellElement(cellFrame->GetContent(), aNormalSelection);
-          if (NS_FAILED(result)) {
+          if (NS_FAILED(result) || !tableFrame.IsAlive()) {
             return result;
           }
         }
@@ -3065,7 +3116,8 @@ nsresult nsFrameSelection::TableSelection::SelectRowOrColumn(
 }
 
 // static
-nsIContent* nsFrameSelection::GetFirstCellNodeInRange(const nsRange* aRange) {
+nsIContent* nsFrameSelection::GetFirstCellNodeInRange(
+    const dom::Range* aRange) {
   if (!aRange) {
     return nullptr;
   }
@@ -3082,11 +3134,11 @@ nsIContent* nsFrameSelection::GetFirstCellNodeInRange(const nsRange* aRange) {
   return childContent;
 }
 
-nsRange* nsFrameSelection::TableSelection::GetFirstCellRange(
+dom::Range* nsFrameSelection::TableSelection::GetFirstCellRange(
     const mozilla::dom::Selection& aNormalSelection) {
   MOZ_ASSERT(aNormalSelection.Type() == SelectionType::eNormal);
 
-  nsRange* firstRange = aNormalSelection.GetRangeAt(0);
+  dom::Range* firstRange = aNormalSelection.GetRangeAt(0);
   if (!GetFirstCellNodeInRange(firstRange)) {
     return nullptr;
   }
@@ -3097,11 +3149,11 @@ nsRange* nsFrameSelection::TableSelection::GetFirstCellRange(
   return firstRange;
 }
 
-nsRange* nsFrameSelection::TableSelection::GetNextCellRange(
+dom::Range* nsFrameSelection::TableSelection::GetNextCellRange(
     const mozilla::dom::Selection& aNormalSelection) {
   MOZ_ASSERT(aNormalSelection.Type() == SelectionType::eNormal);
 
-  nsRange* range =
+  dom::Range* range =
       aNormalSelection.GetRangeAt(AssertedCast<uint32_t>(mSelectedCellIndex));
 
   // Get first node in next range of selection - test if it's a cell
@@ -3179,8 +3231,8 @@ nsresult CreateAndAddRange(nsINode* aContainer, int32_t aOffset,
 
   // Set range around child at given offset
   ErrorResult error;
-  RefPtr<nsRange> range =
-      nsRange::Create(aContainer, aOffset, aContainer, aOffset + 1, error);
+  RefPtr<dom::Range> range =
+      dom::Range::Create(aContainer, aOffset, aContainer, aOffset + 1, error);
   if (NS_WARN_IF(error.Failed())) {
     return error.StealNSResult();
   }
@@ -3249,8 +3301,9 @@ void nsFrameSelection::DisconnectFromPresShell() {
 
   StopAutoScrollTimer();
   for (size_t i = 0; i < std::size(mDomSelections); i++) {
-    MOZ_ASSERT(mDomSelections[i]);
-    mDomSelections[i]->Clear(nullptr);
+    if (RefPtr<Selection> selection = mDomSelections[i]) {
+      selection->Clear(nullptr);
+    }
   }
 
   if (auto* presshell = mPresShell) {

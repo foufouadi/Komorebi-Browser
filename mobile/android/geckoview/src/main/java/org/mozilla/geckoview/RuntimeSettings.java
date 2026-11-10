@@ -27,11 +27,14 @@ public abstract class RuntimeSettings implements Parcelable {
    * Base class for (nested) runtime settings builders.
    *
    * <p>Please extend this class when adding nested settings builders for GeckoRuntimeSettings.
+   *
+   * @param <Settings> The type of settings this builder creates.
    */
   public abstract static class Builder<Settings extends RuntimeSettings> {
     private final Settings mSettings;
 
     /** Create a new Builder instance. */
+    @SuppressWarnings("this-escape")
     public Builder() {
       mSettings = newSettings(null);
     }
@@ -240,6 +243,7 @@ public abstract class RuntimeSettings implements Parcelable {
    *
    * @param parent The parent settings, specify in case of nested settings.
    */
+  @SuppressWarnings("this-escape")
   protected RuntimeSettings(final @Nullable RuntimeSettings parent) {
     mPrefs = new ArrayList<Pref<?>>();
     mChildren = new ArrayList<RuntimeSettings>();

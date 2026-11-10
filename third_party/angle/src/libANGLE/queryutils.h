@@ -132,7 +132,9 @@ void QueryInternalFormativ(const Context *context,
                            GLsizei count,
                            GLint *params);
 
-void QueryFramebufferParameteriv(const Framebuffer *framebuffer, GLenum pname, GLint *params);
+void QueryFramebufferParameteriv(const Framebuffer *framebuffer,
+                                 FramebufferParameter pnamePacked,
+                                 GLint *params);
 
 void QueryFramebufferPixelLocalStorageParameterfv(Context *context,
                                                   GLint plane,
@@ -185,7 +187,7 @@ void SetSamplerParameterIuiv(Context *context,
 
 void SetFramebufferParameteri(const Context *context,
                               Framebuffer *framebuffer,
-                              GLenum pname,
+                              FramebufferParameter pnamePacked,
                               GLint param);
 
 void SetProgramParameteri(const Context *context, Program *program, GLenum pname, GLint value);
@@ -307,6 +309,7 @@ namespace egl
 {
 struct Config;
 class Display;
+class ThreadSafeDisplay;
 class Surface;
 class Sync;
 
@@ -314,14 +317,17 @@ void QueryConfigAttrib(const Config *config, EGLint attribute, EGLint *value);
 
 void QueryContextAttrib(const gl::Context *context, EGLint attribute, EGLint *value);
 
-egl::Error QuerySurfaceAttrib(const Display *display,
+egl::Error QuerySurfaceAttrib(const ThreadSafeDisplay *display,
                               const gl::Context *context,
                               Surface *surface,
                               EGLint attribute,
                               EGLint *value);
 egl::Error SetSurfaceAttrib(Surface *surface, EGLint attribute, EGLint value);
-Error GetSyncAttrib(Display *display, SyncID sync, EGLint attribute, EGLint *value);
-egl::Error QuerySurfaceAttrib64KHR(const Display *display,
+Error GetSyncAttrib(const ThreadSafeDisplay *display,
+                    const Sync *syncObject,
+                    EGLint attribute,
+                    EGLint *value);
+egl::Error QuerySurfaceAttrib64KHR(const ThreadSafeDisplay *display,
                                    const gl::Context *context,
                                    Surface *surface,
                                    EGLint attribute,

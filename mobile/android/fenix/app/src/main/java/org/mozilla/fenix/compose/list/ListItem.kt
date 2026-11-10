@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItemColors
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.LocalContentColor
@@ -66,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import mozilla.components.compose.base.Switch
 import mozilla.components.compose.base.badge.BADGE_SIZE_SMALL
 import mozilla.components.compose.base.badge.BadgedIcon
+import mozilla.components.compose.base.button.IconButton
 import mozilla.components.compose.base.button.RadioButton
 import mozilla.components.compose.base.modifier.thenConditional
 import mozilla.components.compose.base.theme.information
@@ -139,11 +139,12 @@ fun TextListItem(
         } else {
             IconButton(
                 onClick = onIconClick,
+                contentDescription = null,
                 modifier = Modifier.size(ICON_SIZE).clearAndSetSemantics {},
             ) {
                 Icon(
                     painter = iconPainter,
-                    contentDescription = iconDescription,
+                    contentDescription = null,
                     tint = iconTint,
                 )
             }
@@ -223,11 +224,12 @@ fun FaviconListItem(
 
             IconButton(
                 onClick = onIconClick,
+                contentDescription = iconDescription,
                 modifier = iconButtonModifier.then(Modifier.size(ICON_SIZE)),
             ) {
                 Icon(
                     painter = iconPainter,
-                    contentDescription = iconDescription,
+                    contentDescription = null,
                 )
             }
         },
@@ -380,15 +382,13 @@ private fun IconListItemAfterIcon(
     } else {
         IconButton(
             onClick = onClick,
-            modifier =
-                Modifier.size(ICON_SIZE).semantics {
-                    this.role = Role.Button
-                },
+            contentDescription = description,
+            modifier = Modifier.size(ICON_SIZE),
             enabled = enabled,
         ) {
             Icon(
                 painter = painter,
-                contentDescription = description,
+                contentDescription = null,
                 tint = tint,
             )
         }
@@ -575,11 +575,12 @@ fun SelectableFaviconListItem(
                 iconPainter != null && onIconClick != null -> {
                     IconButton(
                         onClick = onIconClick,
+                        contentDescription = iconDescription,
                         modifier = Modifier.size(ICON_SIZE),
                     ) {
                         Icon(
                             painter = iconPainter,
-                            contentDescription = iconDescription,
+                            contentDescription = null,
                             tint = ListItemDefaults.colors().trailingIconColor,
                         )
                     }
@@ -689,12 +690,13 @@ fun SelectableIconListItem(
                     } else {
                         IconButton(
                             onClick = onAfterIconClick,
+                            contentDescription = afterIconDescription,
                             modifier = Modifier.size(ICON_SIZE),
                             enabled = enabled,
                         ) {
                             Icon(
                                 painter = afterIconPainter,
-                                contentDescription = afterIconDescription,
+                                contentDescription = null,
                                 tint = tint,
                             )
                         }
@@ -1117,7 +1119,7 @@ private fun IconListItemWithAfterListActionPreview() {
                 label = "IconListItem + right icon + clicks",
                 beforeIconPainter = painterResource(iconsR.drawable.mozac_ic_folder_24),
                 beforeIconDescription = null,
-                afterIconPainter = painterResource(iconsR.drawable.mozac_ic_ellipsis_vertical_24),
+                afterIconPainter = painterResource(iconsR.drawable.mozac_ic_more_vertical_round_24),
                 afterIconDescription = "click me",
                 onAfterIconClick = { Toast.makeText(context, "icon click", TOAST_LENGTH).show() },
             )
@@ -1139,7 +1141,7 @@ private fun FaviconListItemPreview() {
                 url = "",
                 description = "Description text",
                 onClick = { Toast.makeText(context, "list item click", TOAST_LENGTH).show() },
-                iconPainter = painterResource(iconsR.drawable.mozac_ic_ellipsis_vertical_24),
+                iconPainter = painterResource(iconsR.drawable.mozac_ic_more_vertical_round_24),
                 onIconClick = { Toast.makeText(context, "icon click", TOAST_LENGTH).show() },
                 showDivider = true,
             )
@@ -1236,18 +1238,18 @@ private class SelectableFaviconListItemParameterProvider :
                 SelectableFaviconListItemPreviewState(
                     label = "Favicon + right icon",
                     faviconRes = iconsR.drawable.mozac_ic_collection_24,
-                    iconRes = iconsR.drawable.mozac_ic_ellipsis_vertical_24,
+                    iconRes = iconsR.drawable.mozac_ic_more_vertical_round_24,
                 ),
                 SelectableFaviconListItemPreviewState(
                     label = "Favicon + right icon + overline",
                     faviconRes = iconsR.drawable.mozac_ic_collection_24,
-                    iconRes = iconsR.drawable.mozac_ic_ellipsis_vertical_24,
+                    iconRes = iconsR.drawable.mozac_ic_more_vertical_round_24,
                 ),
                 SelectableFaviconListItemPreviewState(
                     label = "Selected favicon + right icon",
                     isSelected = true,
                     faviconRes = iconsR.drawable.mozac_ic_collection_24,
-                    iconRes = iconsR.drawable.mozac_ic_ellipsis_vertical_24,
+                    iconRes = iconsR.drawable.mozac_ic_more_vertical_round_24,
                 ),
                 SelectableFaviconListItemPreviewState(
                     label = "Favicon + painter",
@@ -1412,10 +1414,11 @@ private fun SelectableListItemPreview() {
                 afterListItemAction = {
                     IconButton(
                         onClick = {},
+                        contentDescription = null,
                         modifier = Modifier.size(ICON_SIZE),
                     ) {
                         Icon(
-                            painter = painterResource(iconsR.drawable.mozac_ic_ellipsis_vertical_24),
+                            painter = painterResource(iconsR.drawable.mozac_ic_more_vertical_round_24),
                             contentDescription = null,
                         )
                     }
@@ -1430,10 +1433,11 @@ private fun SelectableListItemPreview() {
                 afterListItemAction = {
                     IconButton(
                         onClick = {},
+                        contentDescription = null,
                         modifier = Modifier.size(ICON_SIZE),
                     ) {
                         Icon(
-                            painter = painterResource(iconsR.drawable.mozac_ic_ellipsis_vertical_24),
+                            painter = painterResource(iconsR.drawable.mozac_ic_more_vertical_round_24),
                             contentDescription = null,
                         )
                     }

@@ -7,10 +7,7 @@
 // FramebufferD3D.cpp: Implements the DefaultAttachmentD3D and FramebufferD3D classes.
 
 #include "libANGLE/renderer/d3d/FramebufferD3D.h"
-
-#ifdef UNSAFE_BUFFERS_BUILD
-#    pragma allow_unsafe_buffers
-#endif
+#include "common/unsafe_buffers.h"
 
 #include "common/bitset_utils.h"
 #include "libANGLE/Context.h"
@@ -37,7 +34,7 @@ namespace
 ClearParameters GetClearParameters(const gl::State &state, GLbitfield mask)
 {
     ClearParameters clearParams;
-    memset(&clearParams, 0, sizeof(ClearParameters));
+    ANGLE_UNSAFE_TODO(memset(&clearParams, 0, sizeof(ClearParameters)));
 
     clearParams.colorF           = state.getColorClearValue();
     clearParams.colorType        = GL_FLOAT;
@@ -128,7 +125,8 @@ angle::Result FramebufferD3D::clearBufferfv(const gl::Context *context,
         {
             clearParams.clearColor[i] = (drawbuffer == static_cast<int>(i));
         }
-        clearParams.colorF    = gl::ColorF(values[0], values[1], values[2], values[3]);
+        clearParams.colorF =
+            ANGLE_UNSAFE_TODO(gl::ColorF(values[0], values[1], values[2], values[3]));
         clearParams.colorType = GL_FLOAT;
     }
 
@@ -152,7 +150,8 @@ angle::Result FramebufferD3D::clearBufferuiv(const gl::Context *context,
     {
         clearParams.clearColor[i] = (drawbuffer == static_cast<int>(i));
     }
-    clearParams.colorUI   = gl::ColorUI(values[0], values[1], values[2], values[3]);
+    clearParams.colorUI =
+        ANGLE_UNSAFE_TODO(gl::ColorUI(values[0], values[1], values[2], values[3]));
     clearParams.colorType = GL_UNSIGNED_INT;
 
     return clearImpl(context, clearParams);
@@ -172,7 +171,8 @@ angle::Result FramebufferD3D::clearBufferiv(const gl::Context *context,
         {
             clearParams.clearColor[i] = (drawbuffer == static_cast<int>(i));
         }
-        clearParams.colorI    = gl::ColorI(values[0], values[1], values[2], values[3]);
+        clearParams.colorI =
+            ANGLE_UNSAFE_TODO(gl::ColorI(values[0], values[1], values[2], values[3]));
         clearParams.colorType = GL_INT;
     }
 
@@ -224,18 +224,15 @@ angle::Result FramebufferD3D::readPixels(const gl::Context *context,
     ContextD3D *contextD3D = GetImplAs<ContextD3D>(context);
 
     GLuint outputPitch = 0;
-    ANGLE_CHECK_GL_MATH(contextD3D,
-                        sizedFormatInfo.computeRowPitch(type, area.width, pack.alignment,
-                                                        pack.rowLength, &outputPitch));
-
     GLuint outputSkipBytes = 0;
-    ANGLE_CHECK_GL_MATH(contextD3D, sizedFormatInfo.computeSkipBytes(type, outputPitch, 0, pack,
-                                                                     false, &outputSkipBytes));
+
+    ANGLE_CHECK_GL_MATH(contextD3D, sizedFormatInfo.computeRowSkipBytes(
+                                        type, area.width, pack, &outputPitch, &outputSkipBytes));
     outputSkipBytes += (clippedArea.x - area.x) * sizedFormatInfo.pixelBytes +
                        (clippedArea.y - area.y) * outputPitch;
 
     return readPixelsImpl(context, clippedArea, format, type, outputPitch, pack, packBuffer,
-                          static_cast<uint8_t *>(pixels) + outputSkipBytes);
+                          ANGLE_UNSAFE_TODO(static_cast<uint8_t *>(pixels) + outputSkipBytes));
 }
 
 angle::Result FramebufferD3D::blit(const gl::Context *context,
@@ -266,9 +263,9 @@ gl::FramebufferStatus FramebufferD3D::checkStatus(const gl::Context *context) co
     }
 
     // D3D11 does not allow for overlapping RenderTargetViews.
-    // If WebGL compatibility is enabled, this has already been checked at a higher level.
-    ASSERT(!context->isWebGL() || mState.colorAttachmentsAreUniqueImages());
-    if (!context->isWebGL())
+    // If WebGL compatibility (or hardened context) is enabled, this has already been checked at a
+    // higher level.
+    if (!context->isHardenedContext())
     {
         if (!mState.colorAttachmentsAreUniqueImages())
         {
@@ -277,6 +274,7 @@ gl::FramebufferStatus FramebufferD3D::checkStatus(const gl::Context *context) co
                 gl::err::kFramebufferIncompleteUnsupportedNonUniqueAttachments);
         }
     }
+    ASSERT(mState.colorAttachmentsAreUniqueImages());
 
     // D3D requires all render targets to have the same dimensions.
     if (!mState.attachmentsHaveSameDimensions())
@@ -284,6 +282,42 @@ gl::FramebufferStatus FramebufferD3D::checkStatus(const gl::Context *context) co
         return gl::FramebufferStatus::Incomplete(
             GL_FRAMEBUFFER_UNSUPPORTED,
             gl::err::kFramebufferIncompleteUnsupportedMissmatchedDimensions);
+    }
+
+    // D3D11's OMSetRenderTargets requires all bound RenderTargetViews and the DepthStencilView to
+    // have matching resource dimensions; otherwise the call fails and leaves the previously bound
+    // targets active on the device context. 3D texture color attachments use
+    // D3D11_RTV_DIMENSION_TEXTURE3D, so they cannot be mixed with non-3D color attachments (such
+    // as 2D textures, 2D array textures, cube maps, or renderbuffers).
+    bool has3DAttachment    = false;
+    bool hasNon3DAttachment = false;
+    for (const gl::FramebufferAttachment &attachment : mState.getColorAttachments())
+    {
+        if (attachment.isAttached())
+        {
+            if (attachment.type() == GL_TEXTURE &&
+                attachment.getTextureImageIndex().getType() == gl::TextureType::_3D)
+            {
+                has3DAttachment = true;
+            }
+            else
+            {
+                hasNon3DAttachment = true;
+            }
+        }
+    }
+    // D3D11 does not support 3D depth/stencil views (D3D11_DSV_DIMENSION_TEXTURE3D does not
+    // exist), so any depth or stencil attachment is always non-3D and cannot be bound alongside a
+    // 3D texture color attachment in OMSetRenderTargets.
+    if (mState.getDepthAttachment() != nullptr || mState.getStencilAttachment() != nullptr)
+    {
+        hasNon3DAttachment = true;
+    }
+    if (has3DAttachment && hasNon3DAttachment)
+    {
+        return gl::FramebufferStatus::Incomplete(
+            GL_FRAMEBUFFER_UNSUPPORTED,
+            gl::err::kFramebufferIncompleteUnsupportedMixed3DAndNon3DAttachments);
     }
 
     return gl::FramebufferStatus::Complete();

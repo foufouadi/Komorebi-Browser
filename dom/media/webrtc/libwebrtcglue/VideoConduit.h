@@ -8,6 +8,7 @@
 #include "MediaConduitInterface.h"
 #include "RtpRtcpConfig.h"
 #include "RunningStat.h"
+#include "modules/rtp_rtcp/source/source_tracker.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/DataMutex.h"
@@ -254,6 +255,7 @@ class WebrtcVideoConduit : public VideoSessionConduit,
   void RequestKeyFrame(FrameTransformerProxy* aProxy) override;
   void GenerateKeyFrame(const Maybe<std::string>& aRid,
                         FrameTransformerProxy* aProxy) override;
+  void GenerateKeyFrames(std::vector<std::string> aRids) override;
 
  private:
   // Utility function to dump recv codec database
@@ -404,6 +406,10 @@ class WebrtcVideoConduit : public VideoSessionConduit,
   // Written only on the Call thread. Guarded by mMutex, except for reads on the
   // Call thread.
   webrtc::VideoReceiveStreamInterface* mRecvStream = nullptr;
+
+  // Fed by mRecvStreamConfig.on_frame_delivered_callback. Call thread only,
+  // since webrtc::SourceTracker itself is not thread-safe.
+  webrtc::SourceTracker mSourceTracker;
 
   // Must call webrtc::Call::DestroyVideoReceive/SendStream to delete this.
   webrtc::VideoSendStream* mSendStream = nullptr;

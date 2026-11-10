@@ -35,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat.Type.systemBars
 import androidx.fragment.compose.content
@@ -57,6 +58,7 @@ import mozilla.components.browser.state.selector.findTabOrCustomTab
 import mozilla.components.browser.state.state.SessionState
 import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.feature.ipprotection.store.IPProtectionAction
+import mozilla.components.feature.ipprotection.store.state.IPProtectionStatus
 import mozilla.components.feature.ipprotection.store.state.isEligible
 import mozilla.components.lib.state.ext.consumeFlow
 import mozilla.components.lib.state.ext.observeAsComposableState
@@ -73,7 +75,6 @@ import org.mozilla.fenix.components.menu.IPProtectionMenuBinding
 import org.mozilla.fenix.components.menu.compose.MenuDialogBottomSheet
 import org.mozilla.fenix.components.menu.compose.MenuHandleState
 import org.mozilla.fenix.components.menu.store.IPProtectionMenuState
-import org.mozilla.fenix.components.menu.store.IPProtectionMenuStatus
 import org.mozilla.fenix.ext.requireComponents
 import org.mozilla.fenix.ext.runIfFragmentIsAttached
 import org.mozilla.fenix.ipprotection.ui.IPProtectionSnackbarBinding
@@ -111,6 +112,7 @@ class TrustPanelFragment : BottomSheetDialogFragment() {
     private val trackersBlockedFeature = ViewBoundFeatureWrapper<TrackersBlockedFeature>()
     private val ipProtectionMenuBinding = ViewBoundFeatureWrapper<IPProtectionMenuBinding>()
     private val ipProtectionSnackbarBinding = ViewBoundFeatureWrapper<IPProtectionSnackbarBinding>()
+    private val securityInfoBinding = ViewBoundFeatureWrapper<SecurityInfoBinding>()
     private val snackbarHostState = SnackbarHostState()
     private lateinit var permissionsCallback: ((Map<String, Boolean>) -> Unit)
     private val requestPermissionsLauncher =
@@ -456,21 +458,33 @@ class TrustPanelFragment : BottomSheetDialogFragment() {
         recordIPProtectionTelemetry(ipProtectionMenuState.status)
 
         when (ipProtectionMenuState.status) {
-            IPProtectionMenuStatus.AuthRequired -> store.dispatch(TrustPanelAction.Navigate.IPProtectionSettings)
+            IPProtectionStatus.AuthRequired,
+            IPProtectionStatus.AwaitingService -> store.dispatch(TrustPanelAction.Navigate.IPProtectionSettings)
 
-            else -> components.ipProtection.store.dispatch(IPProtectionAction.Toggle)
+            IPProtectionStatus.Disabled,
+            IPProtectionStatus.Activating,
+            IPProtectionStatus.Enabled,
+            IPProtectionStatus.ConnectionError ->
+                components.ipProtection.store.dispatch(IPProtectionAction.ActivationAction.Toggle)
+
+            IPProtectionStatus.DataLimitReached,
+            IPProtectionStatus.Unavailable,
+            IPProtectionStatus.Uninitialized -> Unit
         }
     }
 
-    private fun recordIPProtectionTelemetry(status: IPProtectionMenuStatus) {
+    private fun recordIPProtectionTelemetry(status: IPProtectionStatus) {
         when (status) {
-            IPProtectionMenuStatus.Disabled -> Vpn.trustPanelTurnedOn.record()
-            IPProtectionMenuStatus.Enabled -> Vpn.trustPanelTurnedOff.record()
-            IPProtectionMenuStatus.AuthRequired -> Vpn.trustPanelTryItTapped.record()
+            IPProtectionStatus.Disabled -> Vpn.trustPanelTurnedOn.record()
+            IPProtectionStatus.Enabled -> Vpn.trustPanelTurnedOff.record()
+            IPProtectionStatus.AuthRequired -> Vpn.trustPanelTryItTapped.record()
 
-            IPProtectionMenuStatus.DataLimitReached,
-            IPProtectionMenuStatus.ConnectionError,
-            IPProtectionMenuStatus.Activating -> Unit
+            IPProtectionStatus.Unavailable,
+            IPProtectionStatus.Uninitialized,
+            IPProtectionStatus.AwaitingService,
+            IPProtectionStatus.DataLimitReached,
+            IPProtectionStatus.ConnectionError,
+            IPProtectionStatus.Activating -> Unit
         }
     }
 
@@ -507,6 +521,8 @@ class TrustPanelFragment : BottomSheetDialogFragment() {
             feature =
                 IPProtectionSnackbarBinding(
                     appStore = requireComponents.appStore,
+                    context = requireContext(),
+                    navController = findNavController(),
                     snackbarDelegate =
                         FenixSnackbarDelegate(
                             snackbarHostState = snackbarHostState,
@@ -515,6 +531,19 @@ class TrustPanelFragment : BottomSheetDialogFragment() {
                         ),
                 ),
             owner = this,
+            view = view,
+        )
+
+        securityInfoBinding.set(
+            feature =
+                SecurityInfoBinding(
+                    browserStore = requireComponents.core.store,
+                    sessionId = args.sessionId,
+                    urlHost = args.url.toUri().host,
+                    onSecurityInfoUpdate = { store.dispatch(it) },
+                    onHostChange = { dismissAllowingStateLoss() },
+                ),
+            owner = viewLifecycleOwner,
             view = view,
         )
     }

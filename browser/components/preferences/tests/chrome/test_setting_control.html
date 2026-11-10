@@ -258,6 +258,24 @@
         });
       });
 
+      add_task(async function testHeadingLevel() {
+        const SETTING = "setting-control-heading-level";
+        Preferences.addSetting({
+          id: SETTING,
+          get: () => true,
+        });
+
+        const headingLevel = 3;
+        const control = await renderTemplate({
+          id: SETTING,
+          control: "moz-fieldset",
+          headingLevel,
+        });
+        const fieldset = control.querySelector("moz-fieldset");
+
+        is(fieldset.headingLevel, headingLevel + 1, "sets headingLevel");
+      });
+
       add_task(async function testSupportLinkSubcategory() {
         const SETTING = "setting-control-subcategory";
         Preferences.addSetting({

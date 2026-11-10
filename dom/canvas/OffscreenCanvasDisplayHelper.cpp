@@ -24,9 +24,11 @@ namespace mozilla::dom {
 
 OffscreenCanvasDisplayHelper::OffscreenCanvasDisplayHelper(
     HTMLCanvasElement* aCanvasElement, uint32_t aWidth, uint32_t aHeight)
-    : mMutex("mozilla::dom::OffscreenCanvasDisplayHelper"),
+    : mPlaceholderSize(aWidth, aHeight),
+      mMutex("mozilla::dom::OffscreenCanvasDisplayHelper"),
       mCanvasElement(aCanvasElement),
       mImageProducerID(layers::ImageContainer::AllocateProducerID()) {
+  MOZ_ASSERT(NS_IsMainThread());
   mData.mSize.width = aWidth;
   mData.mSize.height = aHeight;
 }
@@ -117,6 +119,34 @@ RefPtr<layers::ImageContainer> OffscreenCanvasDisplayHelper::GetImageContainer()
   return mImageContainer;
 }
 
+bool OffscreenCanvasDisplayHelper::MayUpdateContext(WorkerPrivate* aWorker,
+                                                    ErrorResult& aRv) {
+  MutexAutoLock lock(mMutex);
+  if (!mOffscreenCanvas) {
+    // There is no offscreen canvas, either because it was not created yet or
+    // it was destroyed.
+    if (mCreatedOnMainThread) {
+      // Allow context update on main thread as long as it stays there.
+      if (!aWorker) {
+        return true;
+      }
+    } else if (!mCreatedOnWorker) {
+      // Updating a worker needs to be more strict in case there any resources
+      // associated with the old worker.
+      return true;
+    }
+  } else if (aWorker) {
+    if (mWorkerRef && mWorkerRef->Private() == aWorker) {
+      return true;
+    }
+  } else if (!mWorkerRef) {
+    return true;
+  }
+  aRv.ThrowInvalidStateError(
+      "Cannot update created context to different thread");
+  return false;
+}
+
 void OffscreenCanvasDisplayHelper::UpdateContext(
     OffscreenCanvas* aOffscreenCanvas, RefPtr<ThreadSafeWorkerRef>&& aWorkerRef,
     CanvasContextType aType, const Maybe<mozilla::ipc::ActorId>& aChildId) {
@@ -135,6 +165,14 @@ void OffscreenCanvasDisplayHelper::UpdateContext(
   mType = aType;
   mContextChildId = aChildId;
 
+  if (mOffscreenCanvas) {
+    if (mWorkerRef) {
+      mCreatedOnWorker = true;
+    } else {
+      mCreatedOnMainThread = true;
+    }
+  }
+
   if (aChildId) {
     mContextManagerId = Some(gfx::CanvasManagerChild::Get()->Id());
   } else {
@@ -142,6 +180,16 @@ void OffscreenCanvasDisplayHelper::UpdateContext(
   }
 
   MaybeQueueInvalidateElement();
+}
+
+already_AddRefed<OffscreenCanvas>
+OffscreenCanvasDisplayHelper::GetCanvasForWorker(WorkerPrivate* aWorker) {
+  MutexAutoLock lock(mMutex);
+  // A runnable queued to a worker somehow got assigned to another thread.
+  if (NS_WARN_IF(!mWorkerRef) || NS_WARN_IF(mWorkerRef->Private() != aWorker)) {
+    return nullptr;
+  }
+  return do_AddRef(mOffscreenCanvas);
 }
 
 void OffscreenCanvasDisplayHelper::FlushForDisplay() {
@@ -171,17 +219,14 @@ void OffscreenCanvasDisplayHelper::FlushForDisplay() {
         : MainThreadWorkerRunnable("FlushWorkerRunnable"),
           mDisplayHelper(aDisplayHelper) {}
 
-    bool WorkerRun(JSContext*, WorkerPrivate*) override {
+    bool WorkerRun(JSContext*, WorkerPrivate* aWorkerPrivate) override {
       // The OffscreenCanvas can only be freed on the worker thread, so we
       // cannot be racing with an OffscreenCanvas::DestroyCanvas call and its
       // destructor. We just need to make sure we don't call into
       // OffscreenCanvas while holding the lock since it calls back into the
       // OffscreenCanvasDisplayHelper.
-      RefPtr<OffscreenCanvas> canvas;
-      {
-        MutexAutoLock lock(mDisplayHelper->mMutex);
-        canvas = mDisplayHelper->mOffscreenCanvas;
-      }
+      RefPtr<OffscreenCanvas> canvas =
+          mDisplayHelper->GetCanvasForWorker(aWorkerPrivate);
 
       if (canvas) {
         canvas->CommitFrameToCompositor();
@@ -197,6 +242,25 @@ void OffscreenCanvasDisplayHelper::FlushForDisplay() {
   // on a worker thread.
   auto task = MakeRefPtr<FlushWorkerRunnable>(this);
   task->Dispatch(mWorkerRef->Private());
+}
+
+void OffscreenCanvasDisplayHelper::SetPresentationEnabled(bool aEnabled) {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  bool needsFlush;
+  {
+    MutexAutoLock lock(mMutex);
+    if (mPresentationEnabled == aEnabled) {
+      return;
+    }
+    mPresentationEnabled = aEnabled;
+    needsFlush = aEnabled && mPendingPresent;
+    mPendingPresent = false;
+  }
+
+  if (needsFlush) {
+    FlushForDisplay();
+  }
 }
 
 bool OffscreenCanvasDisplayHelper::CommitFrameToCompositor(
@@ -225,6 +289,15 @@ bool OffscreenCanvasDisplayHelper::CommitFrameToCompositor(
   }
 
   if (!mImageContainer) {
+    return false;
+  }
+
+  if (!mPresentationEnabled) {
+    // Nothing on the other end is going to composite what we produce, so
+    // presenting the front buffer would just pile up textures the compositor
+    // never consumes. The context keeps the drawn content in its own buffers
+    // and we present the latest of it once we are visible again.
+    mPendingPresent = true;
     return false;
   }
 
@@ -363,19 +436,21 @@ void OffscreenCanvasDisplayHelper::InvalidateElement() {
   MOZ_ASSERT(NS_IsMainThread());
 
   HTMLCanvasElement* canvasElement;
-  gfx::IntSize size;
+  CSSIntSize size;
 
   {
     MutexAutoLock lock(mMutex);
     MOZ_ASSERT(mPendingInvalidate);
     mPendingInvalidate = false;
     canvasElement = mCanvasElement;
-    size = mData.mSize;
+    size = CSSIntSize(mData.mSize.width, mData.mSize.height);
   }
 
   if (canvasElement) {
+    const bool hasSizeChanged = size != mPlaceholderSize;
+    mPlaceholderSize = size;
     SVGObserverUtils::InvalidateDirectRenderingObservers(canvasElement);
-    canvasElement->InvalidateCanvasPlaceholder(size.width, size.height);
+    canvasElement->InvalidateCanvasPlaceholder(hasSizeChanged);
     canvasElement->InvalidateCanvasContent(nullptr);
   }
 }
@@ -467,17 +542,14 @@ OffscreenCanvasDisplayHelper::GetSurfaceSnapshot() {
           mMonitor("SnapshotWorkerRunnable::mMonitor"),
           mDisplayHelper(aDisplayHelper) {}
 
-    bool WorkerRun(JSContext*, WorkerPrivate*) override {
+    bool WorkerRun(JSContext*, WorkerPrivate* aWorkerPrivate) override {
       // The OffscreenCanvas can only be freed on the worker thread, so we
       // cannot be racing with an OffscreenCanvas::DestroyCanvas call and its
       // destructor. We just need to make sure we don't call into
       // OffscreenCanvas while holding the lock since it calls back into the
       // OffscreenCanvasDisplayHelper.
-      RefPtr<OffscreenCanvas> canvas;
-      {
-        MutexAutoLock lock(mDisplayHelper->mMutex);
-        canvas = mDisplayHelper->mOffscreenCanvas;
-      }
+      RefPtr<OffscreenCanvas> canvas =
+          mDisplayHelper->GetCanvasForWorker(aWorkerPrivate);
 
       // Now that we are on the correct thread, we can extract the snapshot. If
       // it is a Skia surface, perform a copy to threading issues.

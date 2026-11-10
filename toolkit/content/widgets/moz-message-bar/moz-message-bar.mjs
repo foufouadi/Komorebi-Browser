@@ -2,9 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/// <reference path="./moz-message-bar.tagmap.d.ts" />
+
 import { html, ifDefined, when } from "../vendor/lit.all.mjs";
 import { MozLitElement } from "../lit-utils.mjs";
-// eslint-disable-next-line import/no-unassigned-import
+// eslint-disable-next-line import-x/no-unassigned-import
 import "chrome://global/content/elements/moz-button.mjs";
 
 window.MozXULElement?.insertFTLIfNeeded("toolkit/global/mozMessageBar.ftl");
@@ -47,7 +49,7 @@ const messageTypeToIconData = {
  *  Custom event indicating that message bar was dismissed by the user.
  */
 
-export default class MozMessageBar extends MozLitElement {
+export class MozMessageBar extends MozLitElement {
   static queries = {
     actionsSlot: "slot[name=actions]",
     actionsEl: ".actions",
@@ -236,7 +238,7 @@ export default class MozMessageBar extends MozLitElement {
                     ${this.message}
                   </span>
                 </slot>
-                <span class="link"> ${this.supportLinkTemplate()} </span>
+                <span class="link">${this.supportLinkTemplate()}</span>
               </div>
             </div>
           </div>

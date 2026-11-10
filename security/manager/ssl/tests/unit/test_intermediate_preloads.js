@@ -6,7 +6,7 @@
 do_get_profile(); // must be called before getting nsIX509CertDB
 
 const { RemoteSecuritySettings } = ChromeUtils.importESModule(
-  "resource://gre/modules/psm/RemoteSecuritySettings.sys.mjs"
+  "moz-src:///security/manager/ssl/RemoteSecuritySettings.sys.mjs"
 );
 const { TestUtils } = ChromeUtils.importESModule(
   "resource://testing-common/TestUtils.sys.mjs"
@@ -311,13 +311,11 @@ add_task(async function test_preload_basic() {
   );
   // This ensures the test server doesn't include the intermediate in the
   // handshake.
-  let certDir = Services.dirsvc.get("CurWorkD", Ci.nsIFile);
-  certDir.append("test_intermediate_preloads");
-  Assert.ok(certDir.exists(), "test_intermediate_preloads should exist");
   let args = ["-D", "-n", "int"];
-  // If the certdb is cached from a previous run, the intermediate will have
-  // already been deleted, so this may "fail".
-  run_certutil_on_directory(certDir.path, args, false);
+  run_certutil_on_directory(
+    getCertDirCopy("test_intermediate_preloads").path,
+    args
+  );
 
   await checkCertErrorGeneric(
     certDB,
@@ -430,10 +428,14 @@ add_task(async function test_bug1966632() {
     Ci.nsIX509CertDB
   );
 
-  constructCertFromFile("test_intermediate_preloads/bug1966632-int1.pem", ",,");
+  addCertFromFile(
+    certDB,
+    "test_intermediate_preloads/bug1966632-int1.pem",
+    ",,"
+  );
   await checkRootOfBuiltChain(
     certDB,
-    constructCertFromFile("test_intermediate_preloads/bug1966632-ee.pem", ",,"),
+    constructCertFromFile("test_intermediate_preloads/bug1966632-ee.pem"),
     "G/ANXI8TwJTdF+AFBM8IiIUPEv0Gf6H5LA/b9guG4yE=",
     new Date("2025-05-21T00:00:00Z").getTime() / 1000,
     undefined,

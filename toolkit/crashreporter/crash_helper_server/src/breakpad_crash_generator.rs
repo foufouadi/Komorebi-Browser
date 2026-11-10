@@ -13,24 +13,29 @@ use super::crash_generation::get_auxv_info;
 
 use anyhow::{bail, Result};
 use cfg_if::cfg_if;
-use crash_helper_common::{BreakpadChar, BreakpadData, BreakpadString, ExtraCrashData, Pid};
+use crash_helper_common::{
+    BreakpadChar, BreakpadData, BreakpadString, ExtraCrashData, GeckoChildId, Pid,
+    RawProcessHandle, RawThreadHandle,
+};
 #[cfg(any(target_os = "android", target_os = "linux"))]
 use minidump_writer::minidump_writer::DirectAuxvDumpInfo;
 #[cfg(any(target_os = "android", target_os = "linux"))]
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::{
     ffi::{c_void, OsString},
+    marker::{PhantomData, PhantomPinned},
+    path::PathBuf,
     ptr::NonNull,
     sync::Mutex,
 };
 
 #[cfg(target_os = "windows")]
-type BreakpadInitType = *const u16;
+type BreakpadInitType = std::os::windows::io::RawHandle;
 #[cfg(target_os = "windows")]
 type NativeProcessId = windows_sys::Win32::Foundation::HANDLE;
 
 #[cfg(target_os = "macos")]
-type BreakpadInitType = *const crate::c_char;
+type BreakpadInitType = *const std::ffi::c_char;
 #[cfg(target_os = "macos")]
 type NativeProcessId = u32;
 
@@ -62,20 +67,22 @@ impl BreakpadProcessId {
     }
 }
 
-// Note that the `generator` field and function parameter should be of type
-// `*const Mutex<CrashGenerator>` but that doesn't work because `Mutex<>` is
-// not FFI-safe. We don't care about that because the C code only ever sees the
-// pointer and all the manipulation is done in Rust, so we just morph the type
-// when we need it to avoid the warning.
+// Opaque type masking a `Mutex<CrashGenerator>`, which is not FFI-safe.
+#[repr(C)]
+pub struct OpaqueCrashGenerator {
+    _private: [u8; 0],
+    _marker: PhantomData<(*mut u8, PhantomPinned)>,
+}
+
 #[repr(C)]
 pub struct BreakpadContext {
     callback: unsafe extern "C" fn(
-        *const c_void,
+        *const OpaqueCrashGenerator,
         BreakpadProcessId,
         Option<&ExtraCrashData>,
         *const BreakpadChar,
     ),
-    generator: *const Mutex<CrashGenerator>,
+    generator: *const OpaqueCrashGenerator,
 }
 
 extern "C" {
@@ -92,6 +99,19 @@ extern "C" {
     ) -> *mut c_void;
     fn CrashGenerationServer_shutdown(server: *mut c_void);
     fn CrashGenerationServer_set_path(server: *mut c_void, path: *const BreakpadChar);
+    fn WriteMinidumpForProcess(
+        aId: GeckoChildId,
+        aPid: RawProcessHandle,
+        aBlamedThread: RawThreadHandle,
+        #[cfg(any(target_os = "android", target_os = "linux"))] auxv_cb: extern "C" fn(
+            crash_helper_common::Pid,
+            *mut DirectAuxvDumpInfo,
+        )
+            -> bool,
+        aDumpPath: *const BreakpadChar,
+        aResultPath: *mut BreakpadChar,
+        aResultLen: usize,
+    ) -> bool;
 }
 
 pub(crate) struct BreakpadCrashGenerator {
@@ -125,7 +145,7 @@ impl BreakpadCrashGenerator {
         path: OsString,
         generator: &'static Mutex<CrashGenerator>,
         finalize_callback: unsafe extern "C" fn(
-            *const c_void,
+            *const OpaqueCrashGenerator,
             BreakpadProcessId,
             Option<&ExtraCrashData>,
             *const BreakpadChar,
@@ -135,7 +155,7 @@ impl BreakpadCrashGenerator {
         let path_ptr = path.into_raw();
         let mut context = Box::new(BreakpadContext {
             callback: finalize_callback,
-            generator: generator as *const Mutex<CrashGenerator>,
+            generator: (generator as *const Mutex<CrashGenerator>).cast(),
         });
 
         // SAFETY: Calling into breakpad code with parameters that have been previously validated.
@@ -151,7 +171,7 @@ impl BreakpadCrashGenerator {
 
         // Retake ownership of the raw data & strings so we don't leak them.
         cfg_if! {
-            if #[cfg(any(target_os = "macos", target_os = "windows"))] {
+            if #[cfg(target_os = "macos")] {
                 // SAFETY: We've allocated this object within this same block.
                 let _breakpad_data = unsafe { BreakpadData::new(breakpad_raw_data) };
             }
@@ -182,6 +202,48 @@ impl BreakpadCrashGenerator {
             let path = path.into_raw();
             CrashGenerationServer_set_path(self.ptr.as_ptr(), path);
         };
+    }
+
+    pub(crate) fn generate_minidump(
+        id: GeckoChildId,
+        process: RawProcessHandle,
+        thread: RawThreadHandle,
+        dump_path: PathBuf,
+    ) -> Option<PathBuf> {
+        // VVVVVVVV-WWWW-XXXX-YYYY-ZZZZZZZZ.dmp
+        const MINIDUMP_FILENAME_LEN: usize = 40;
+
+        let dump_path = dump_path.into_os_string();
+        // Full path, plus separator, plus minidump filename, plus terminator.
+        let output_path_len =
+            <OsString as BreakpadString>::len(&dump_path) + 1 + MINIDUMP_FILENAME_LEN + 1;
+        let mut output_path = Vec::<BreakpadChar>::with_capacity(output_path_len);
+        let raw_path = <OsString as BreakpadString>::into_raw(dump_path);
+        output_path.fill(0);
+
+        let res = unsafe {
+            WriteMinidumpForProcess(
+                id,
+                process,
+                thread,
+                #[cfg(any(target_os = "android", target_os = "linux"))]
+                get_auxv_info,
+                raw_path,
+                output_path.as_mut_ptr(),
+                output_path_len,
+            )
+        };
+
+        // SAFETY: We allocated this string in this block.
+        let _raw_path = unsafe { <OsString as BreakpadString>::from_raw(raw_path) };
+
+        if res {
+            Some(PathBuf::from(unsafe {
+                <OsString as BreakpadString>::from_ptr(output_path.as_ptr())
+            }))
+        } else {
+            None
+        }
     }
 }
 

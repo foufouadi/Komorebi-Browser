@@ -2,17 +2,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import {
-  ActionsProvider,
-  ActionsResult,
-} from "moz-src:///browser/components/urlbar/ActionsProvider.sys.mjs";
+import { ActionsProvider } from "moz-src:///browser/components/urlbar/ActionsProvider.sys.mjs";
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-const lazy = {};
-ChromeUtils.defineESModuleGetters(lazy, {
+/**
+ * @import {ActionsResult} from "moz-src:///browser/components/urlbar/ActionsProvider.sys.mjs"
+ */
+
+const lazy = XPCOMUtils.declareLazy({
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   UrlbarPrefs: "moz-src:///browser/components/urlbar/UrlbarPrefs.sys.mjs",
   UrlbarShared: "chrome://browser/content/urlbar/UrlbarShared.mjs",
-  SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
+  SessionStore:
+    "moz-src:///browser/components/sessionstore/SessionStore.sys.mjs",
   TabMetrics: "moz-src:///browser/components/tabbrowser/TabMetrics.sys.mjs",
 });
 
@@ -26,9 +28,15 @@ class ProviderTabGroups extends ActionsProvider {
     return "ActionsProviderTabGroups";
   }
 
-  isActive(queryContext) {
+  /**
+   * @param {UrlbarQueryContext} queryContext
+   * @param {UrlbarParentController} _controller
+   * @returns {boolean}
+   */
+  isActive(queryContext, _controller) {
     return (
-      queryContext.sapName == "urlbar" &&
+      (queryContext.sapName == "urlbar" ||
+        queryContext.sapName == "smartbar") &&
       Services.prefs.getBoolPref("browser.tabs.groups.enabled") &&
       (!queryContext.restrictSource ||
         queryContext.restrictSource == lazy.UrlbarShared.RESULT_SOURCE.TABS) &&
@@ -38,7 +46,12 @@ class ProviderTabGroups extends ActionsProvider {
     );
   }
 
-  async queryActions(queryContext) {
+  /**
+   * @param {UrlbarQueryContext} queryContext
+   * @param {UrlbarParentController} _controller
+   * @returns {Promise<ActionsResult[]>}
+   */
+  async queryActions(queryContext, _controller) {
     // We need a non-private window here to call gBrowser.getAllTabGroups()
     // on, and it's OK if it's not on the current workspace.
     let window = lazy.BrowserWindowTracker.getTopWindow({
@@ -101,7 +114,7 @@ class ProviderTabGroups extends ActionsProvider {
     return results;
   }
 
-  onPick(_queryContext, controller, action) {
+  onPick(_queryContext, controller, action, _details) {
     let group;
     if (action.dataset.savedGroupId) {
       group = lazy.SessionStore.openSavedTabGroup(
@@ -134,22 +147,20 @@ class ProviderTabGroups extends ActionsProvider {
   }
 
   #makeResult({ key, l10nId, l10nArgs, color, dataset }) {
-    return new ActionsResult({
+    return /** @type {ActionsResult} */ ({
       providerName: this.name,
       key,
       l10nId,
       l10nArgs,
       icon: "chrome://browser/skin/tabbrowser/tab-groups.svg",
-      dataset: {
-        ...dataset,
-        style: {
-          "--tab-group-color": `var(--tab-group-${color})`,
-          "--tab-group-color-invert": `var(--tab-group-${color}-invert)`,
-          "--tab-group-color-pale": `var(--tab-group-${color}-pale)`,
-          "--tab-group-background-color": `var(--tab-group-${color})`,
-          "--tab-group-text-color": `var(--tab-group-${color}-text)`,
-          "--tab-group-background-color-hover": `var(--tab-group-${color}-hover)`,
-        },
+      dataset,
+      style: {
+        "--tab-group-color": `var(--tab-group-${color})`,
+        "--tab-group-color-invert": `var(--tab-group-${color}-invert)`,
+        "--tab-group-color-pale": `var(--tab-group-${color}-pale)`,
+        "--tab-group-background-color": `var(--tab-group-${color})`,
+        "--tab-group-text-color": `var(--tab-group-${color}-text)`,
+        "--tab-group-background-color-hover": `var(--tab-group-${color}-hover)`,
       },
     });
   }

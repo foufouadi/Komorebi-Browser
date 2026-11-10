@@ -23,6 +23,7 @@
 #include "jstypes.h"
 
 #include "frontend/ScriptIndex.h"  // ScriptIndex
+#include "gc/Allocator.h"
 #include "gc/Barrier.h"
 #include "js/ColumnNumber.h"  // JS::LimitedColumnNumberOneOrigin, JS::LimitedColumnNumberOneOrigin
 #include "js/CompileOptions.h"
@@ -205,9 +206,7 @@ struct ScriptSourceChunk {
 
   bool valid() const { return sourceData != nullptr; }
 
-  bool operator==(const ScriptSourceChunk& other) const {
-    return sourceData == other.sourceData && chunk == other.chunk;
-  }
+  bool operator==(const ScriptSourceChunk& other) const = default;
 };
 
 struct ScriptSourceChunkHasher {
@@ -1584,8 +1583,9 @@ static_assert(sizeof(ScriptWarmUpData) == sizeof(uintptr_t),
 //
 // Accessing this array just requires calling the appropriate public
 // Span-computing function.
-class alignas(uintptr_t) PrivateScriptData final
-    : public TrailingArray<PrivateScriptData> {
+class MOZ_EMPTY_BASES alignas(uintptr_t) PrivateScriptData final
+    : public TrailingArray<PrivateScriptData>,
+      public gc::Buffer {
   uint32_t ngcthings = 0;
 
   // Note: This is only defined for scripts with an enclosing scope. This

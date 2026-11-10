@@ -99,7 +99,7 @@ void ContextPrivateLineWidth(PrivateState *privateState,
                              GLfloat width);
 void ContextPrivatePixelStorei(PrivateState *privateState,
                                PrivateStateCache *privateStateCache,
-                               GLenum pname,
+                               PackUnpackParameter pnamePacked,
                                GLint param);
 void ContextPrivatePolygonOffset(PrivateState *privateState,
                                  PrivateStateCache *privateStateCache,
@@ -646,9 +646,6 @@ void ContextPrivatePolygonMode(PrivateState *privateState,
 void ContextPrivateProvokingVertex(PrivateState *privateState,
                                    PrivateStateCache *privateStateCache,
                                    ProvokingVertexConvention provokeModePacked);
-void ContextPrivateCoverageModulation(PrivateState *privateState,
-                                      PrivateStateCache *privateStateCache,
-                                      GLenum components);
 void ContextPrivateClipControl(PrivateState *privateState,
                                PrivateStateCache *privateStateCache,
                                ClipOrigin originPacked,
@@ -665,10 +662,6 @@ void ContextPrivatePolygonOffsetClamp(PrivateState *privateState,
                                       GLfloat factor,
                                       GLfloat units,
                                       GLfloat clamp);
-void ContextPrivatePolygonModeNV(PrivateState *privateState,
-                                 PrivateStateCache *privateStateCache,
-                                 GLenum face,
-                                 PolygonMode modePacked);
 void ContextPrivateShadingRateQCOM(PrivateState *privateState,
                                    PrivateStateCache *privateStateCache,
                                    ShadingRate ratePacked);

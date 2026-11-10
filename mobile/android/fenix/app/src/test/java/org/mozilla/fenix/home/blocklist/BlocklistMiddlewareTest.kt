@@ -10,18 +10,23 @@ import io.mockk.just
 import io.mockk.mockk
 import io.mockk.slot
 import mozilla.components.browser.state.state.createTab
+import mozilla.components.feature.top.sites.TopSite
 import mozilla.components.support.test.middleware.CaptureActionsMiddleware
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mozilla.fenix.components.AppStore
 import org.mozilla.fenix.components.appstate.AppAction
+import org.mozilla.fenix.components.appstate.AppAction.ShortcutAction
 import org.mozilla.fenix.components.appstate.AppState
 import org.mozilla.fenix.home.bookmarks.Bookmark
 import org.mozilla.fenix.home.recentsyncedtabs.RecentSyncedTab
 import org.mozilla.fenix.home.recentsyncedtabs.RecentSyncedTabState
 import org.mozilla.fenix.home.recenttabs.RecentTab
+import org.mozilla.fenix.home.topsites.AddShortcutEntryPoint
+import org.mozilla.fenix.home.topsites.AddShortcutSource
 import org.mozilla.fenix.utils.Settings
 import org.robolectric.RobolectricTestRunner
 
@@ -452,5 +457,96 @@ class BlocklistMiddlewareTest {
             currentTabs[1],
             (appStore.state.recentSyncedTabState as RecentSyncedTabState.Success).tabs.firstOrNull(),
         )
+    }
+
+    @Test
+    fun `WHEN a top site is removed and should be blocked THEN its url is added to the blocklist`() {
+        val url = "https://www.mozilla.org/"
+        val topSite = TopSite.Default(id = null, title = "Mozilla", url = url, createdAt = null)
+
+        val updateSlot = slot<Set<String>>()
+        every { mockSettings.homescreenBlocklist } returns setOf()
+        every { mockSettings.homescreenBlocklist = capture(updateSlot) } just Runs
+        every { mockSettings.frecencyFilterQuery } returns ""
+        val appStore =
+            AppStore(
+                AppState(topSites = listOf(topSite)),
+                middlewares = listOf(BlocklistMiddleware(blocklistHandler)),
+            )
+
+        appStore.dispatch(AppAction.RemoveTopSite(topSite = topSite, shouldBlock = true))
+
+        assertEquals(setOf(url.stripAndHash()), updateSlot.captured)
+    }
+
+    @Test
+    fun `WHEN a top site is removed and should not be blocked THEN its url is not added to the blocklist`() {
+        val url = "https://www.firefox.com/"
+        val topSite = TopSite.DefaultPinned(id = null, title = "Firefox", url = url, createdAt = null)
+
+        val updateSlot = slot<Set<String>>()
+        every { mockSettings.homescreenBlocklist } returns setOf()
+        every { mockSettings.homescreenBlocklist = capture(updateSlot) } just Runs
+        every { mockSettings.frecencyFilterQuery } returns ""
+        val appStore =
+            AppStore(
+                AppState(topSites = listOf(topSite)),
+                middlewares = listOf(BlocklistMiddleware(blocklistHandler)),
+            )
+
+        appStore.dispatch(AppAction.RemoveTopSite(topSite = topSite, shouldBlock = false))
+
+        assertFalse(updateSlot.isCaptured)
+    }
+
+    @Test
+    fun `WHEN a shortcut is added THEN its url is removed from the blocklist`() {
+        val addedUrl = "https://www.mozilla.org/"
+        val blockedUrl = "https://www.firefox.com/"
+
+        val updateSlot = slot<Set<String>>()
+        every { mockSettings.homescreenBlocklist } returns setOf(addedUrl.stripAndHash(), blockedUrl.stripAndHash())
+        every { mockSettings.homescreenBlocklist = capture(updateSlot) } just Runs
+        val appStore = AppStore(middlewares = listOf(BlocklistMiddleware(blocklistHandler)))
+
+        appStore.dispatch(
+            ShortcutAction.ShortcutAdded(
+                url = addedUrl,
+                source = AddShortcutSource.MANUAL,
+                entryPoint = AddShortcutEntryPoint.PAGE_MENU,
+            )
+        )
+
+        assertEquals(setOf(blockedUrl.stripAndHash()), updateSlot.captured)
+    }
+
+    @Test
+    fun `WHEN a frecent top site is promoted to a pinned site THEN its url is removed from the blocklist`() {
+        val promotedUrl = "https://www.mozilla.org/"
+        val blockedUrl = "https://www.firefox.com/"
+
+        val updateSlot = slot<Set<String>>()
+        every { mockSettings.homescreenBlocklist } returns setOf(promotedUrl.stripAndHash(), blockedUrl.stripAndHash())
+        every { mockSettings.homescreenBlocklist = capture(updateSlot) } just Runs
+        val appStore = AppStore(middlewares = listOf(BlocklistMiddleware(blocklistHandler)))
+
+        appStore.dispatch(ShortcutAction.FrecencyTopSitePromoted(url = promotedUrl))
+
+        assertEquals(setOf(blockedUrl.stripAndHash()), updateSlot.captured)
+    }
+
+    @Test
+    fun `WHEN a default top site is promoted to pinned site THEN its url is removed from the blocklist`() {
+        val promotedUrl = "https://www.mozilla.org/"
+        val blockedUrl = "https://www.firefox.com/"
+
+        val updateSlot = slot<Set<String>>()
+        every { mockSettings.homescreenBlocklist } returns setOf(promotedUrl.stripAndHash(), blockedUrl.stripAndHash())
+        every { mockSettings.homescreenBlocklist = capture(updateSlot) } just Runs
+        val appStore = AppStore(middlewares = listOf(BlocklistMiddleware(blocklistHandler)))
+
+        appStore.dispatch(ShortcutAction.DefaultTopSitePromoted(url = promotedUrl))
+
+        assertEquals(setOf(blockedUrl.stripAndHash()), updateSlot.captured)
     }
 }

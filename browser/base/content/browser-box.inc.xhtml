@@ -3,13 +3,13 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 <hbox flex="1" id="browser">
-  <box context="sidebar-context-menu" id="sidebar-container" class="chrome-block" hidden="true">
+  <box context="sidebar-context-menu" id="sidebar-container" hidden="true">
     <html:sidebar-main flex="1">
       <box id="vertical-tabs" slot="tabstrip" customizable="true" contextmenu="toolbar-context-menu"></box>
     </html:sidebar-main>
   </box>
   <splitter id="sidebar-launcher-splitter" class="chromeclass-extrachrome sidebar-splitter" resizebefore="sibling" resizeafter="none" hidden="true"/>
-  <vbox id="sidebar-box" hidden="true" class="chromeclass-extrachrome chrome-block">
+  <vbox id="sidebar-box" hidden="true" class="chromeclass-extrachrome">
     <box id="sidebar-header" align="center">
       <toolbarbutton id="sidebar-switcher-target" class="tabbable" aria-expanded="false">
         <image id="sidebar-icon" consumeanchor="sidebar-switcher-target"/>
@@ -20,6 +20,7 @@
       <spacer id="sidebar-spacer"/>
       <toolbarbutton id="sidebar-close" class="close-icon tabbable" data-l10n-id="sidebar-close-button"/>
     </box>
+    <html:sidebar-panel-header id="sidebar-panel-header"/>
     <stack class="sidebar-browser-stack">
       <browser id="sidebar" autoscroll="false" disablehistory="true" disablefullscreen="true" tooltip="aHTMLTooltip"/>
     </stack>

@@ -33,6 +33,7 @@
 #include "mozilla/SVGObserverUtils.h"
 #include "mozilla/SVGOuterSVGFrame.h"
 #include "mozilla/SVGTextFrame.h"
+#include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/StaticPrefs_svg.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/SVGClipPathElement.h"
@@ -42,6 +43,7 @@
 #include "mozilla/dom/SVGViewportElement.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/PatternHelpers.h"
+#include "mozilla/gfx/gfxVars.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsDisplayList.h"
 #include "nsFrameList.h"
@@ -378,6 +380,12 @@ float SVGUtils::ComputeOpacity(const nsIFrame* aFrame, bool aHandleOpacity) {
   return styleEffects->mOpacity;
 }
 
+bool SVGUtils::UseWebRenderPaths() {
+  return gfxVars::UseSoftwareWebRender()
+             ? StaticPrefs::gfx_webrender_paths_swgl()
+             : StaticPrefs::gfx_webrender_paths();
+}
+
 SVGUtils::MaskUsage SVGUtils::DetermineMaskUsage(const nsIFrame* aFrame,
                                                  bool aHandleOpacity) {
   MaskUsage usage;
@@ -401,11 +409,26 @@ SVGUtils::MaskUsage SVGUtils::DetermineMaskUsage(const nsIFrame* aFrame,
   SVGObserverUtils::GetAndObserveClipPath(firstFrame, &clipPathFrame);
   MOZ_ASSERT(!clipPathFrame || svgReset->mClipPath.IsUrl());
 
+  const bool fragmented =
+      firstFrame != aFrame ||
+      nsLayoutUtils::GetNextContinuationOrIBSplitSibling(aFrame);
+
   switch (svgReset->mClipPath.tag) {
     case ClipPathType::Url:
       if (clipPathFrame) {
         if (clipPathFrame->IsTrivial()) {
           usage.mShouldApplyClipPath = true;
+          // clipPathUnits="objectBoundingBox" resolves against the union of a
+          // fragmented box's fragments, which a single clip shape positioned
+          // relative to one fragment cannot describe.
+          if (StaticPrefs::gfx_webrender_svg_simple_clips() &&
+              !usage.mShouldGenerateMaskLayer && !fragmented) {
+            usage.mIsSimpleClipShape =
+                clipPathFrame
+                    ->GetSimpleClipShape(const_cast<nsIFrame*>(aFrame),
+                                         UseWebRenderPaths())
+                    .isSome();
+          }
         } else {
           usage.mShouldGenerateClipMaskLayer = true;
         }
@@ -414,9 +437,14 @@ SVGUtils::MaskUsage SVGUtils::DetermineMaskUsage(const nsIFrame* aFrame,
     case ClipPathType::Shape: {
       usage.mShouldApplyBasicShapeOrPath = true;
       const auto& shape = svgReset->mClipPath.AsShape()._0;
+      // These are rendered with WebRender clips rather than mask images.
+      // Paths are positioned relative to one fragment, while the mask clips
+      // every fragment with the first fragment's reference box.
       usage.mIsSimpleClipShape =
           !usage.mShouldGenerateMaskLayer &&
-          (shape->IsRect() || shape->IsCircle() || shape->IsEllipse());
+          (shape->IsRect() || shape->IsCircle() || shape->IsEllipse() ||
+           ((shape->IsPathOrShape() || shape->IsPolygon()) &&
+            UseWebRenderPaths() && !fragmented));
       break;
     }
     case ClipPathType::Box:
@@ -812,7 +840,8 @@ gfxRect SVGUtils::GetBBox(nsIFrame* aFrame, SVGBBoxFlags aFlags,
     aFrame = aFrame->GetParent();
   }
 
-  if (aFrame->IsInSVGTextSubtree()) {
+  if (aFrame->IsInSVGTextSubtree() &&
+      !aFlags.contains(SVGBBoxFlag::TextContentBounds)) {
     // It is possible to apply a gradient, pattern, clipping path, mask or
     // filter to text. When one of these facilities is applied to text
     // the bounding box is the entire text element in all cases.
@@ -822,10 +851,23 @@ gfxRect SVGUtils::GetBBox(nsIFrame* aFrame, SVGBBoxFlags aFlags,
 
   ISVGDisplayableFrame* svg = do_QueryFrame(aFrame);
   const bool hasSVGLayout = aFrame->HasAnyStateBits(NS_FRAME_SVG_LAYOUT);
-  if (hasSVGLayout && !svg) {
-    // An SVG frame, but not one that can be displayed directly (for
-    // example, nsGradientFrame). These can't contribute to the bbox.
-    return gfxRect();
+  if (!svg) {
+    if (hasSVGLayout) {
+      // An SVG frame, but not one that can be displayed directly (for
+      // example, nsGradientFrame). These can't contribute to the bbox.
+      return gfxRect();
+    }
+    if (aFrame->IsInSVGTextSubtree()) {
+      SVGTextFrame* text =
+          static_cast<SVGTextFrame*>(nsLayoutUtils::GetClosestFrameOfType(
+              aFrame->GetParent(), LayoutFrameType::SVGText));
+
+      if (text->HasAnyStateBits(NS_FRAME_IS_NONDISPLAY)) {
+        return gfxRect();
+      }
+
+      return ThebesRect(text->GetSubtreeBBox(aFrame, {}, aFlags));
+    }
   }
 
   const bool isOuterSVG = svg && !hasSVGLayout;
@@ -934,12 +976,12 @@ gfxRect SVGUtils::GetBBox(nsIFrame* aFrame, SVGBBoxFlags aFlags,
         }
         matrix *= SVGUtils::GetTransformMatrixInUserSpace(clipPathFrame);
 
-        bbox = clipPathFrame->GetBBoxForClipPathFrame(bbox, matrix, aFlags)
+        const SVGBBox clipTo(bbox);
+        bbox = clipPathFrame->GetBBoxForClipPathFrame(matrix, &clipTo)
                    .ToThebesRect();
       }
 
-      if (hasClip && !aFlags.contains(
-                         SVGBBoxFlag::DoNotClipToBBoxOfContentInsideClipPath)) {
+      if (hasClip) {
         bbox = bbox.Intersect(clipRect);
       }
 
@@ -960,18 +1002,16 @@ gfxRect SVGUtils::GetBBox(nsIFrame* aFrame, SVGBBoxFlags aFlags,
   return bbox;
 }
 
-gfxPoint SVGUtils::FrameSpaceInCSSPxToUserSpaceOffset(const nsIFrame* aFrame) {
+CSSPoint SVGUtils::FrameSpaceInCSSPxToUserSpaceOffset(const nsIFrame* aFrame) {
   if (!aFrame->HasAnyStateBits(NS_FRAME_SVG_LAYOUT)) {
     // The user space for non-SVG frames is defined as the bounding box of the
     // frame's border-box rects over all continuations.
-    return gfxPoint();
+    return {};
   }
 
   // Leaf frames apply their own offset inside their user space.
   if (FrameDoesNotIncludePositionInTM(aFrame)) {
-    return nsLayoutUtils::RectToGfxRect(aFrame->GetRect(),
-                                        AppUnitsPerCSSPixel())
-        .TopLeft();
+    return CSSRect::FromAppUnits(aFrame->GetRect()).TopLeft();
   }
 
   // For foreignObject frames, SVGUtils::GetBBox applies their local
@@ -981,10 +1021,11 @@ gfxPoint SVGUtils::FrameSpaceInCSSPxToUserSpaceOffset(const nsIFrame* aFrame) {
                               ->ChildToUserSpaceTransform();
     NS_ASSERTION(!transform.HasNonTranslation(),
                  "we're relying on this being an offset-only transform");
-    return transform.GetTranslation();
+    auto translation = transform.GetTranslation();
+    return CSSPoint(translation.x, translation.y);
   }
 
-  return gfxPoint();
+  return {};
 }
 
 static gfxRect GetBoundingBoxRelativeRect(const SVGAnimatedLength* aXYWH,
@@ -1552,7 +1593,7 @@ gfxMatrix SVGUtils::GetTransformMatrixInUserSpace(const nsIFrame* aFrame) {
     trans = nsStyleTransformMatrix::ReadTransforms(
         properties.mTranslate, properties.mRotate, properties.mScale,
         properties.mMotion.ptrOr(nullptr), properties.mTransform, refBox,
-        AppUnitsPerCSSPixel(), aFrame->Style()->EffectiveZoom());
+        AppUnitsPerCSSPixel(), nsStyleTransformMatrix::Zoomed::Yes);
   }
 
   trans.ChangeBasis(svgTransformOrigin);

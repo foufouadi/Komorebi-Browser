@@ -18,14 +18,14 @@ using namespace mozilla;
 class nsLayoutHistoryState final : public nsILayoutHistoryState,
                                    public nsSupportsWeakReference {
  public:
-  nsLayoutHistoryState() : mScrollPositionOnly(false) {}
+  nsLayoutHistoryState() = default;
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSILAYOUTHISTORYSTATE
 
  private:
   ~nsLayoutHistoryState() = default;
-  bool mScrollPositionOnly;
+  bool mScrollPositionOnly = false;
 
   nsTHashMap<nsCString, UniquePtr<PresState>> mStates;
 };
@@ -161,11 +161,11 @@ void nsLayoutHistoryState::Reset() {
 
 namespace mozilla {
 UniquePtr<PresState> NewPresState() {
-  return MakeUnique<PresState>(
+  return std::make_unique<PresState>(
       /* contentData */ mozilla::void_t(),
-      /* scrollState */ nsPoint(0, 0),
-      /* allowScrollOriginDowngrade */ true,
+      /* scrollState */ nsPoint(),
       /* resolution */ 1.0,
+      /* allowScrollOriginDowngrade */ true,
       /* disabledSet */ false,
       /* disabled */ false,
       /* droppedDown */ false);

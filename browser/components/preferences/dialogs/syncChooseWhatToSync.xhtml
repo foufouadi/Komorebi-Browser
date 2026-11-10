@@ -22,10 +22,12 @@
     <linkset>
       <html:link rel="stylesheet" href="chrome://global/skin/global.css" />
 
+      <html:link rel="localization" href="branding/brand.ftl" />
       <html:link
         rel="localization"
         href="browser/preferences/preferences.ftl"
       />
+      <html:link rel="localization" href="toolkit/global/mozSupportLink.ftl" />
     </linkset>
     <script src="chrome://global/content/preferencesBindings.js" />
     <script src="chrome://browser/content/preferences/dialogs/syncChooseWhatToSync.js" />
@@ -47,7 +49,7 @@
       <html:div class="sync-engine-tabs">
         <checkbox
           id="syncEngineTabs"
-          data-l10n-id="sync-engine-tabs"
+          data-l10n-id="sync-engine-tabs2"
           preference="services.sync.engine.tabs"
         />
       </html:div>
@@ -61,31 +63,47 @@
       <html:div class="sync-engine-addresses">
         <checkbox
           id="syncEngineAddresses"
-          data-l10n-id="sync-engine-addresses"
+          data-l10n-id="sync-engine-addresses2"
           preference="services.sync.engine.addresses"
         />
       </html:div>
       <html:div class="sync-engine-creditcards">
         <checkbox
           id="syncEngineCreditcards"
-          data-l10n-id="sync-engine-payment-methods2"
+          data-l10n-id="sync-engine-payment-methods3"
           preference="services.sync.engine.creditcards"
         />
       </html:div>
       <html:div class="sync-engine-addons">
         <checkbox
           id="syncEngineAddons"
-          data-l10n-id="sync-engine-addons"
+          data-l10n-id="sync-engine-addons2"
           preference="services.sync.engine.addons"
         />
       </html:div>
       <html:div class="sync-engine-prefs">
         <checkbox
           id="syncEnginePrefs"
-          data-l10n-id="sync-engine-settings"
+          data-l10n-id="sync-engine-settings2"
           preference="services.sync.engine.prefs"
         />
       </html:div>
+    </html:div>
+    <html:div id="syncCwtsMigrationNotificationContainer">
+      <html:moz-message-bar
+        id="syncCwtsMigrationNotification"
+        data-l10n-id="sync-cwts-migration-notification"
+        role="status"
+        data-l10n-attrs="message"
+      >
+        <html:a
+          id="syncCwtsMigrationNotificationLearnMore"
+          slot="support-link"
+          is="moz-support-link"
+          support-page="how-do-i-choose-what-information-sync-firefox"
+          data-l10n-id="moz-support-link-text"
+        ></html:a>
+      </html:moz-message-bar>
     </html:div>
   </dialog>
 </window>

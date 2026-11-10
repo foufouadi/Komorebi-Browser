@@ -6,14 +6,12 @@
 
 #include <stdlib.h>
 
-#include <new>  // for placement new
+#include <memory>
 
 #include "LogModulePrefWatcher.h"
 #include "ManifestParser.h"
 #include "StaticComponents.h"
 #include "mozilla/DebugOnly.h"
-#include "mozilla/FileUtils.h"
-#include "mozilla/GenericFactory.h"
 #include "mozilla/Logging.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Omnijar.h"
@@ -22,11 +20,9 @@
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Services.h"
 #include "mozilla/URLPreloader.h"
-#include "mozilla/UniquePtr.h"
 #include "mozilla/Variant.h"
 #include "nsArray.h"
 #include "nsCOMPtr.h"
-#include "nsCRT.h"  // for atoll
 #include "nsCategoryManager.h"
 #include "nsDirectoryService.h"
 #include "nsDirectoryServiceDefs.h"
@@ -34,23 +30,12 @@
 #include "nsIObserverService.h"
 #include "nsIStringEnumerator.h"
 #include "nsISupports.h"
-#include "nsISupportsPrimitives.h"
 #include "nsLayoutModule.h"
-#include "nsLocalFile.h"
 #include "nsNetUtil.h"
-#include "nsReadableUtils.h"
 #include "nsString.h"
-#include "nsSupportsPrimitives.h"
 #include "nsTArray.h"
-#include "nsThreadManager.h"
-#include "nsThreadUtils.h"
 #include "nsXPCOM.h"
-#include "nsXPCOMPrivate.h"
 #include "nscore.h"
-#include "nspr.h"
-#include "prcmon.h"
-#include "prio.h"
-#include "private/pprthred.h"
 #include "prthread.h"
 #include "xpcpublic.h"
 
@@ -58,11 +43,6 @@ using namespace mozilla;
 using namespace mozilla::xpcom;
 
 static LazyLogModule nsComponentManagerLog("nsComponentManager");
-
-#if 0
-#  define SHOW_DENIED_ON_SHUTDOWN
-#  define SHOW_CI_ON_EXISTING_SERVICE
-#endif
 
 namespace {
 
@@ -92,10 +72,6 @@ bool ProcessSelectorMatches(ProcessSelector aSelector) {
 
   if (type == GeckoProcessType_RDD) {
     return !!(aSelector & Module::ALLOW_IN_RDD_PROCESS);
-  }
-
-  if (type == GeckoProcessType_Socket) {
-    return !!(aSelector & (Module::ALLOW_IN_SOCKET_PROCESS));
   }
 
   if (type == GeckoProcessType_VR) {
@@ -156,6 +132,10 @@ class MOZ_STACK_CLASS EntryWrapper final {
 
   already_AddRefed<nsIFactory> GetFactory() const {
     return mEntry.match([](const auto* e) { return e->GetFactory(); });
+  }
+
+  bool IsSingleton() const {
+    return mEntry.match([](const auto* e) { return e->IsSingleton(); });
   }
 
   /**
@@ -270,8 +250,6 @@ nsresult nsComponentManagerImpl::Init() {
         ProcessSelectorMatches(ProcessSelector::ALLOW_IN_GPU_PROCESS);
     gProcessMatchTable[size_t(ProcessSelector::ALLOW_IN_VR_PROCESS)] =
         ProcessSelectorMatches(ProcessSelector::ALLOW_IN_VR_PROCESS);
-    gProcessMatchTable[size_t(ProcessSelector::ALLOW_IN_SOCKET_PROCESS)] =
-        ProcessSelectorMatches(ProcessSelector::ALLOW_IN_SOCKET_PROCESS);
     gProcessMatchTable[size_t(ProcessSelector::ALLOW_IN_RDD_PROCESS)] =
         ProcessSelectorMatches(ProcessSelector::ALLOW_IN_RDD_PROCESS);
     gProcessMatchTable[size_t(ProcessSelector::ALLOW_IN_GMPLUGIN_PROCESS)] =
@@ -280,40 +258,16 @@ nsresult nsComponentManagerImpl::Init() {
         ProcessSelectorMatches(ProcessSelector::ALLOW_IN_GPU_AND_MAIN_PROCESS);
     gProcessMatchTable[size_t(ProcessSelector::ALLOW_IN_GPU_AND_VR_PROCESS)] =
         ProcessSelectorMatches(ProcessSelector::ALLOW_IN_GPU_AND_VR_PROCESS);
+    gProcessMatchTable[size_t(ProcessSelector::ALLOW_IN_GPU_AND_RDD_PROCESS)] =
+        ProcessSelectorMatches(ProcessSelector::ALLOW_IN_GPU_AND_RDD_PROCESS);
     gProcessMatchTable[size_t(
-        ProcessSelector::ALLOW_IN_GPU_AND_SOCKET_PROCESS)] =
+        ProcessSelector::ALLOW_IN_GPU_RDD_VR_AND_UTILITY_PROCESS)] =
         ProcessSelectorMatches(
-            ProcessSelector::ALLOW_IN_GPU_AND_SOCKET_PROCESS);
+            ProcessSelector::ALLOW_IN_GPU_RDD_VR_AND_UTILITY_PROCESS);
     gProcessMatchTable[size_t(
-        ProcessSelector::ALLOW_IN_GPU_VR_AND_SOCKET_PROCESS)] =
+        ProcessSelector::ALLOW_IN_GPU_RDD_VR_UTILITY_AND_GMPLUGIN_PROCESS)] =
         ProcessSelectorMatches(
-            ProcessSelector::ALLOW_IN_GPU_VR_AND_SOCKET_PROCESS);
-    gProcessMatchTable[size_t(
-        ProcessSelector::ALLOW_IN_RDD_AND_SOCKET_PROCESS)] =
-        ProcessSelectorMatches(
-            ProcessSelector::ALLOW_IN_RDD_AND_SOCKET_PROCESS);
-    gProcessMatchTable[size_t(
-        ProcessSelector::ALLOW_IN_GPU_RDD_AND_SOCKET_PROCESS)] =
-        ProcessSelectorMatches(
-            ProcessSelector::ALLOW_IN_GPU_RDD_AND_SOCKET_PROCESS);
-    gProcessMatchTable[size_t(
-        ProcessSelector::ALLOW_IN_GPU_RDD_SOCKET_AND_UTILITY_PROCESS)] =
-        ProcessSelectorMatches(
-            ProcessSelector::ALLOW_IN_GPU_RDD_SOCKET_AND_UTILITY_PROCESS);
-    gProcessMatchTable[size_t(
-        ProcessSelector::ALLOW_IN_GPU_RDD_VR_AND_SOCKET_PROCESS)] =
-        ProcessSelectorMatches(
-            ProcessSelector::ALLOW_IN_GPU_RDD_VR_AND_SOCKET_PROCESS);
-    gProcessMatchTable[size_t(
-        ProcessSelector::ALLOW_IN_GPU_RDD_VR_SOCKET_AND_UTILITY_PROCESS)] =
-        ProcessSelectorMatches(
-            ProcessSelector::ALLOW_IN_GPU_RDD_VR_SOCKET_AND_UTILITY_PROCESS);
-    gProcessMatchTable[size_t(
-        ProcessSelector::
-            ALLOW_IN_GPU_RDD_VR_SOCKET_UTILITY_AND_GMPLUGIN_PROCESS)] =
-        ProcessSelectorMatches(
-            ProcessSelector::
-                ALLOW_IN_GPU_RDD_VR_SOCKET_UTILITY_AND_GMPLUGIN_PROCESS);
+            ProcessSelector::ALLOW_IN_GPU_RDD_VR_UTILITY_AND_GMPLUGIN_PROCESS);
   }
 
   MOZ_ASSERT(NOT_INITIALIZED == mStatus);
@@ -574,87 +528,6 @@ Maybe<EntryWrapper> nsComponentManagerImpl::LookupByContractID(
   return Nothing();
 }
 
-already_AddRefed<nsIFactory> nsComponentManagerImpl::FindFactory(
-    const nsCID& aClass) {
-  Maybe<EntryWrapper> e = LookupByCID(aClass);
-  if (!e) {
-    return nullptr;
-  }
-
-  return e->GetFactory();
-}
-
-already_AddRefed<nsIFactory> nsComponentManagerImpl::FindFactory(
-    const char* aContractID, uint32_t aContractIDLen) {
-  Maybe<EntryWrapper> entry =
-      LookupByContractID(nsDependentCString(aContractID, aContractIDLen));
-  if (!entry) {
-    return nullptr;
-  }
-
-  return entry->GetFactory();
-}
-
-/**
- * GetClassObject()
- *
- * Given a classID, this finds the singleton ClassObject that implements the
- * CID. Returns an interface of type aIID off the singleton classobject.
- */
-NS_IMETHODIMP
-nsComponentManagerImpl::GetClassObject(const nsCID& aClass, const nsIID& aIID,
-                                       void** aResult) {
-  nsresult rv;
-
-  if (MOZ_LOG_TEST(nsComponentManagerLog, LogLevel::Debug)) {
-    char buf[NSID_LENGTH];
-    aClass.ToProvidedString(buf);
-    PR_LogPrint("nsComponentManager: GetClassObject(%s)", buf);
-  }
-
-  MOZ_ASSERT(aResult != nullptr);
-
-  nsCOMPtr<nsIFactory> factory = FindFactory(aClass);
-  if (!factory) {
-    return NS_ERROR_FACTORY_NOT_REGISTERED;
-  }
-
-  rv = factory->QueryInterface(aIID, aResult);
-
-  MOZ_LOG(
-      nsComponentManagerLog, LogLevel::Warning,
-      ("\t\tGetClassObject() %s", NS_SUCCEEDED(rv) ? "succeeded" : "FAILED"));
-
-  return rv;
-}
-
-NS_IMETHODIMP
-nsComponentManagerImpl::GetClassObjectByContractID(const char* aContractID,
-                                                   const nsIID& aIID,
-                                                   void** aResult) {
-  if (NS_WARN_IF(!aResult) || NS_WARN_IF(!aContractID)) {
-    return NS_ERROR_INVALID_ARG;
-  }
-
-  nsresult rv;
-
-  MOZ_LOG(nsComponentManagerLog, LogLevel::Debug,
-          ("nsComponentManager: GetClassObjectByContractID(%s)", aContractID));
-
-  nsCOMPtr<nsIFactory> factory = FindFactory(aContractID, strlen(aContractID));
-  if (!factory) {
-    return NS_ERROR_FACTORY_NOT_REGISTERED;
-  }
-
-  rv = factory->QueryInterface(aIID, aResult);
-
-  MOZ_LOG(nsComponentManagerLog, LogLevel::Warning,
-          ("\t\tGetClassObjectByContractID() %s",
-           NS_SUCCEEDED(rv) ? "succeeded" : "FAILED"));
-
-  return rv;
-}
-
 /**
  * CreateInstance()
  *
@@ -665,17 +538,10 @@ nsComponentManagerImpl::GetClassObjectByContractID(const char* aContractID,
 NS_IMETHODIMP
 nsComponentManagerImpl::CreateInstance(const nsCID& aClass, const nsIID& aIID,
                                        void** aResult) {
-  // test this first, since there's no point in creating a component during
-  // shutdown -- whether it's available or not would depend on the order it
-  // occurs in the list
   if (gXPCOMShuttingDown) {
-    // When processing shutdown, don't process new GetService() requests
-#ifdef SHOW_DENIED_ON_SHUTDOWN
-    fprintf(stderr,
-            "Creating new instance on shutdown. Denied.\n"
-            "         CID: %s\n         IID: %s\n",
-            AutoIDString(aClass).get(), AutoIDString(aIID).get());
-#endif /* SHOW_DENIED_ON_SHUTDOWN */
+    MOZ_LOG(nsComponentManagerLog, LogLevel::Warning,
+            ("Can't CreateInstance during shutdown. CID: %s; IID: %s",
+             AutoIDString(aClass).get(), AutoIDString(aIID).get()));
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -690,14 +556,12 @@ nsComponentManagerImpl::CreateInstance(const nsCID& aClass, const nsIID& aIID,
     return NS_ERROR_FACTORY_NOT_REGISTERED;
   }
 
-#ifdef SHOW_CI_ON_EXISTING_SERVICE
-  if (entry->ServiceInstance()) {
-    nsAutoCString message;
-    message = "You are calling CreateInstance \""_ns + AutoIDString(aClass) +
-              "\" when a service for this CID already exists!"_ns;
-    NS_ERROR(message.get());
+  if (NS_WARN_IF(entry->IsSingleton())) {
+    MOZ_LOG(nsComponentManagerLog, LogLevel::Error,
+            ("Not allowed to CreateInstance for singleton %s",
+             AutoIDString(aClass).get()));
+    return NS_ERROR_NOT_IMPLEMENTED;
   }
-#endif
 
   nsresult rv;
   nsCOMPtr<nsIFactory> factory = entry->GetFactory();
@@ -712,13 +576,10 @@ nsComponentManagerImpl::CreateInstance(const nsCID& aClass, const nsIID& aIID,
     rv = NS_ERROR_FACTORY_NOT_REGISTERED;
   }
 
-  if (MOZ_LOG_TEST(nsComponentManagerLog, LogLevel::Warning)) {
-    char buf[NSID_LENGTH];
-    aClass.ToProvidedString(buf);
-    MOZ_LOG(nsComponentManagerLog, LogLevel::Warning,
-            ("nsComponentManager: CreateInstance(%s) %s", buf,
-             NS_SUCCEEDED(rv) ? "succeeded" : "FAILED"));
-  }
+  MOZ_LOG(
+      nsComponentManagerLog, LogLevel::Warning,
+      ("nsComponentManager: CreateInstance(%s) %s", AutoIDString(aClass).get(),
+       NS_SUCCEEDED(rv) ? "succeeded" : "FAILED"));
 
   return rv;
 }
@@ -741,17 +602,11 @@ nsComponentManagerImpl::CreateInstanceByContractID(const char* aContractID,
     return NS_ERROR_INVALID_ARG;
   }
 
-  // test this first, since there's no point in creating a component during
-  // shutdown -- whether it's available or not would depend on the order it
-  // occurs in the list
   if (gXPCOMShuttingDown) {
-    // When processing shutdown, don't process new GetService() requests
-#ifdef SHOW_DENIED_ON_SHUTDOWN
-    fprintf(stderr,
-            "Creating new instance on shutdown. Denied.\n"
-            "  ContractID: %s\n         IID: %s\n",
-            aContractID, AutoIDString(aIID).get());
-#endif /* SHOW_DENIED_ON_SHUTDOWN */
+    MOZ_LOG(nsComponentManagerLog, LogLevel::Warning,
+            ("Can't CreateInstanceByContractID during shutdown. ContractID: "
+             "%s; IID: %s",
+             aContractID, AutoIDString(aIID).get()));
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -767,18 +622,12 @@ nsComponentManagerImpl::CreateInstanceByContractID(const char* aContractID,
     return NS_ERROR_FACTORY_NOT_REGISTERED;
   }
 
-#ifdef SHOW_CI_ON_EXISTING_SERVICE
-  if (entry->ServiceInstance()) {
-    nsAutoCString message;
-    message =
-        "You are calling CreateInstance \""_ns +
-        nsDependentCString(aContractID) +
-        nsLiteralCString(
-            "\" when a service for this CID already exists! "
-            "Add it to abusedContracts to track down the service consumer.");
-    NS_ERROR(message.get());
+  if (NS_WARN_IF(entry->IsSingleton())) {
+    MOZ_LOG(nsComponentManagerLog, LogLevel::Error,
+            ("Not allowed to CreateInstanceByContractID for singleton %s",
+             aContractID));
+    return NS_ERROR_NOT_IMPLEMENTED;
   }
-#endif
 
   nsresult rv;
   nsCOMPtr<nsIFactory> factory = entry->GetFactory();
@@ -951,17 +800,10 @@ nsresult nsComponentManagerImpl::GetServiceLocked(Maybe<MonitorAutoLock>& aLock,
 NS_IMETHODIMP
 nsComponentManagerImpl::GetService(const nsCID& aClass, const nsIID& aIID,
                                    void** aResult) {
-  // test this first, since there's no point in returning a service during
-  // shutdown -- whether it's available or not would depend on the order it
-  // occurs in the list
   if (gXPCOMShuttingDown) {
-    // When processing shutdown, don't process new GetService() requests
-#ifdef SHOW_DENIED_ON_SHUTDOWN
-    fprintf(stderr,
-            "Getting service on shutdown. Denied.\n"
-            "         CID: %s\n         IID: %s\n",
-            AutoIDString(aClass).get(), AutoIDString(aIID).get());
-#endif /* SHOW_DENIED_ON_SHUTDOWN */
+    MOZ_LOG(nsComponentManagerLog, LogLevel::Warning,
+            ("Can't GetService during shutdown. CID: %s; IID: %s",
+             AutoIDString(aClass).get(), AutoIDString(aIID).get()));
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -978,18 +820,10 @@ nsComponentManagerImpl::GetService(const nsCID& aClass, const nsIID& aIID,
 nsresult nsComponentManagerImpl::GetService(ModuleID aId, const nsIID& aIID,
                                             void** aResult) {
   const auto& entry = gStaticModules[size_t(aId)];
-
-  // test this first, since there's no point in returning a service during
-  // shutdown -- whether it's available or not would depend on the order it
-  // occurs in the list
   if (gXPCOMShuttingDown) {
-    // When processing shutdown, don't process new GetService() requests
-#ifdef SHOW_DENIED_ON_SHUTDOWN
-    fprintf(stderr,
-            "Getting service on shutdown. Denied.\n"
-            "         CID: %s\n         IID: %s\n",
-            AutoIDString(entry.CID()).get(), AutoIDString(aIID).get());
-#endif /* SHOW_DENIED_ON_SHUTDOWN */
+    MOZ_LOG(nsComponentManagerLog, LogLevel::Warning,
+            ("Can't GetService during shutdown. CID: %s; IID: %s",
+             AutoIDString(entry.CID()).get(), AutoIDString(aIID).get()));
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -1015,20 +849,11 @@ NS_IMETHODIMP
 nsComponentManagerImpl::IsServiceInstantiated(const nsCID& aClass,
                                               const nsIID& aIID,
                                               bool* aResult) {
-  // Now we want to get the service if we already got it. If not, we don't want
-  // to create an instance of it. mmh!
-
-  // test this first, since there's no point in returning a service during
-  // shutdown -- whether it's available or not would depend on the order it
-  // occurs in the list
   if (gXPCOMShuttingDown) {
-    // When processing shutdown, don't process new GetService() requests
-#ifdef SHOW_DENIED_ON_SHUTDOWN
-    fprintf(stderr,
-            "Checking for service on shutdown. Denied.\n"
-            "         CID: %s\n         IID: %s\n",
-            AutoIDString(aClass).get(), AutoIDString(aIID).get());
-#endif /* SHOW_DENIED_ON_SHUTDOWN */
+    MOZ_LOG(
+        nsComponentManagerLog, LogLevel::Warning,
+        ("Can't call IsServiceInstantiated during shutdown. CID: %s; IID: %s",
+         AutoIDString(aClass).get(), AutoIDString(aIID).get()));
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -1048,20 +873,11 @@ nsComponentManagerImpl::IsServiceInstantiated(const nsCID& aClass,
 NS_IMETHODIMP
 nsComponentManagerImpl::IsServiceInstantiatedByContractID(
     const char* aContractID, const nsIID& aIID, bool* aResult) {
-  // Now we want to get the service if we already got it. If not, we don't want
-  // to create an instance of it. mmh!
-
-  // test this first, since there's no point in returning a service during
-  // shutdown -- whether it's available or not would depend on the order it
-  // occurs in the list
   if (gXPCOMShuttingDown) {
-    // When processing shutdown, don't process new GetService() requests
-#ifdef SHOW_DENIED_ON_SHUTDOWN
-    fprintf(stderr,
-            "Checking for service on shutdown. Denied.\n"
-            "  ContractID: %s\n         IID: %s\n",
-            aContractID, AutoIDString(aIID).get());
-#endif /* SHOW_DENIED_ON_SHUTDOWN */
+    MOZ_LOG(nsComponentManagerLog, LogLevel::Warning,
+            ("Can't call IsServiceInstantiatedByContractID during shutdown. "
+             "ContractID: %s; IID: %s",
+             aContractID, AutoIDString(aIID).get()));
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -1083,17 +899,11 @@ NS_IMETHODIMP
 nsComponentManagerImpl::GetServiceByContractID(const char* aContractID,
                                                const nsIID& aIID,
                                                void** aResult) {
-  // test this first, since there's no point in returning a service during
-  // shutdown -- whether it's available or not would depend on the order it
-  // occurs in the list
   if (gXPCOMShuttingDown) {
-    // When processing shutdown, don't process new GetService() requests
-#ifdef SHOW_DENIED_ON_SHUTDOWN
-    fprintf(stderr,
-            "Getting service on shutdown. Denied.\n"
-            "  ContractID: %s\n         IID: %s\n",
-            aContractID, AutoIDString(aIID).get());
-#endif /* SHOW_DENIED_ON_SHUTDOWN */
+    MOZ_LOG(nsComponentManagerLog, LogLevel::Warning,
+            ("Can't call GetServiceByContractID during shutdown. "
+             "ContractID: %s; IID: %s",
+             aContractID, AutoIDString(aIID).get()));
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -1143,7 +953,7 @@ nsComponentManagerImpl::RegisterFactory(const nsCID& aClass, const char* aName,
     return NS_ERROR_FACTORY_NOT_REGISTERED;
   }
 
-  auto f = MakeUnique<nsFactoryEntry>(aClass, aFactory);
+  auto f = std::make_unique<nsFactoryEntry>(aClass, aFactory);
 
   MonitorAutoLock lock(mLock);
   return mFactories.WithEntryHandle(&f->mCID, [&](auto&& entry) {
@@ -1263,8 +1073,10 @@ nsComponentManagerImpl::CollectReports(nsIHandleReportCallback* aHandleReport,
 }
 
 size_t nsComponentManagerImpl::SizeOfIncludingThis(
-    mozilla::MallocSizeOf aMallocSizeOf) const {
+    mozilla::MallocSizeOf aMallocSizeOf) {
   size_t n = aMallocSizeOf(this);
+
+  MonitorAutoLock lock(mLock);
 
   n += mFactories.ShallowSizeOfExcludingThis(aMallocSizeOf);
   for (const auto& data : mFactories.Values()) {

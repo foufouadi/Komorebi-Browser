@@ -69,6 +69,12 @@ bool CheckContextLost(const GLContext* gl);
 #define LOCAL_EGL_PLATFORM_ANGLE_DEVICE_TYPE_REFERENCE_ANGLE  0x320C
 #define LOCAL_EGL_PLATFORM_ANGLE_ENABLE_AUTOMATIC_TRIM_ANGLE  0x320F
 
+// EGL_ANGLE_platform_angle_opengl
+#define LOCAL_EGL_PLATFORM_ANGLE_TYPE_OPENGLES_ANGLE          0x320E
+
+// EGL_ANGLE_platform_angle_display_key
+#define LOCAL_EGL_PLATFORM_ANGLE_DISPLAY_KEY_ANGLE            0x34DC
+
 // EGL_ANGLE_platform_angle_metal
 #define LOCAL_EGL_PLATFORM_ANGLE_TYPE_METAL_ANGLE             0x3489
 
@@ -88,7 +94,6 @@ bool CheckContextLost(const GLContext* gl);
 #define LOCAL_EGL_EXPERIMENTAL_PRESENT_PATH_COPY_ANGLE        0x33AA
 
 // EGL_ANGLE_direct3d_display
-#define LOCAL_EGL_D3D11_ELSE_D3D9_DISPLAY_ANGLE         ((EGLNativeDisplayType)-2)
 #define LOCAL_EGL_D3D11_ONLY_DISPLAY_ANGLE              ((EGLNativeDisplayType)-3)
 
 // EGL_ANGLE_feature_control

@@ -66,7 +66,6 @@
 #include "pc/rtp_transport_internal.h"
 #include "pc/sctp_data_channel.h"
 #include "pc/session_description.h"
-#include "pc/stream_collection.h"
 #include "pc/test/enable_fake_media.h"
 #include "pc/test/fake_codec_lookup_helper.h"
 #include "pc/test/fake_data_channel_controller.h"
@@ -311,18 +310,14 @@ class FakePeerConnectionForStats : public FakePeerConnectionBase,
  public:
   explicit FakePeerConnectionForStats(
       const Environment& env,
-      Thread* worker_thread = Thread::Current(),
       Thread* network_thread = Thread::Current())
       : FakePeerConnectionBase(env),
         network_thread_(network_thread),
-        worker_thread_(worker_thread),
+        worker_thread_(network_thread_),
         signaling_thread_(Thread::Current()),
         // TODO(hta): remove separate thread variables and use context.
-        dependencies_(
-            MakeDependencies(signaling_thread_, worker_thread, network_thread)),
+        dependencies_(MakeDependencies(signaling_thread_, network_thread_)),
         context_(ConnectionContext::Create(env, &dependencies_)),
-        local_streams_(StreamCollection::Create()),
-        remote_streams_(StreamCollection::Create()),
         data_channel_controller_(network_thread_),
         codec_lookup_helper_(context_.get(), env.field_trials()),
         ice_transport_factory_(std::make_unique<FakeIceTransportFactory>()) {
@@ -353,22 +348,12 @@ class FakePeerConnectionForStats : public FakePeerConnectionBase,
 
   static PeerConnectionFactoryDependencies MakeDependencies(
       Thread* signaling_thread,
-      Thread* worker_thread,
       Thread* network_thread) {
     PeerConnectionFactoryDependencies dependencies;
     dependencies.network_thread = network_thread;
-    dependencies.worker_thread = worker_thread;
     dependencies.signaling_thread = signaling_thread;
     EnableFakeMedia(dependencies);
     return dependencies;
-  }
-
-  scoped_refptr<StreamCollection> mutable_local_streams() {
-    return local_streams_;
-  }
-
-  scoped_refptr<StreamCollection> mutable_remote_streams() {
-    return remote_streams_;
   }
 
   PLAN_B_ONLY scoped_refptr<RtpSenderInterface> AddSender(
@@ -548,16 +533,6 @@ class FakePeerConnectionForStats : public FakePeerConnectionBase,
 
   // PeerConnectionInterface overrides.
 
-  PLAN_B_ONLY scoped_refptr<StreamCollectionInterface> local_streams()
-      override {
-    return local_streams_;
-  }
-
-  PLAN_B_ONLY scoped_refptr<StreamCollectionInterface> remote_streams()
-      override {
-    return remote_streams_;
-  }
-
   std::vector<scoped_refptr<RtpSenderInterface>> GetSenders() const override {
     std::vector<scoped_refptr<RtpSenderInterface>> senders;
     for (auto transceiver : transceivers_) {
@@ -600,8 +575,10 @@ class FakePeerConnectionForStats : public FakePeerConnectionBase,
     return transceivers_;
   }
 
+  // Matches PeerConnection::GetDataChannelStats() and
+  // DataChannelController::GetDataChannelStats() which run on network_thread.
   std::vector<DataChannelStats> GetDataChannelStats() const override {
-    RTC_DCHECK_RUN_ON(signaling_thread());
+    RTC_DCHECK_RUN_ON(network_thread());
     std::vector<DataChannelStats> stats;
     for (const auto& channel : sctp_data_channels_)
       stats.push_back(channel->GetStats());
@@ -774,9 +751,6 @@ class FakePeerConnectionForStats : public FakePeerConnectionBase,
 
   PeerConnectionFactoryDependencies dependencies_;
   scoped_refptr<ConnectionContext> context_;
-
-  scoped_refptr<StreamCollection> local_streams_;
-  scoped_refptr<StreamCollection> remote_streams_;
 
   std::vector<scoped_refptr<RtpTransceiverProxyWithInternal<RtpTransceiver>>>
       transceivers_;

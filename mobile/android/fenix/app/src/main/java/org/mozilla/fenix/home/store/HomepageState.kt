@@ -4,20 +4,19 @@
 
 package org.mozilla.fenix.home.store
 
-import android.content.res.Configuration
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalConfiguration
 import org.mozilla.fenix.browser.browsingmode.BrowsingMode
 import org.mozilla.fenix.browser.browsingmode.BrowsingModeManager
 import org.mozilla.fenix.components.appstate.AppState
 import org.mozilla.fenix.components.appstate.setup.checklist.SetupChecklistState
+import org.mozilla.fenix.components.appstate.sports.SportsWidgetState
 import org.mozilla.fenix.components.components
 import org.mozilla.fenix.components.toolbar.ToolbarPosition
 import org.mozilla.fenix.ext.shouldShowRecentSyncedTabs
 import org.mozilla.fenix.ext.shouldShowRecentTabs
 import org.mozilla.fenix.home.bookmarks.Bookmark
 import org.mozilla.fenix.home.collections.CollectionsState
-import org.mozilla.fenix.home.pocket.PocketState
+import org.mozilla.fenix.home.collections.migration.CollectionsMigrationCardState
 import org.mozilla.fenix.home.recentsyncedtabs.RecentSyncedTab
 import org.mozilla.fenix.home.recentsyncedtabs.RecentSyncedTabState
 import org.mozilla.fenix.home.recenttabs.RecentTab
@@ -32,6 +31,9 @@ internal sealed class HomepageState {
     /** Data related to the header of the homepage. */
     abstract val headerState: HeaderState
 
+    /** State of the middle search bar on the homepage. */
+    abstract val middleSearchState: MiddleSearchState
+
     /** Flag indicating whether the first frame of the homescreen has been drawn. */
     abstract val firstFrameDrawn: Boolean
 
@@ -42,11 +44,13 @@ internal sealed class HomepageState {
      * State type corresponding with private browsing mode.
      *
      * @property headerState State related to the header of the homepage.
+     * @property middleSearchState State of the middle search bar on the homepage.
      * @property firstFrameDrawn Flag indicating whether the first frame of the homescreen has been drawn.
      * @property isSearchInProgress Whether search is currently active on the homepage.
      */
     internal data class Private(
         override val headerState: HeaderState,
+        override val middleSearchState: MiddleSearchState = MiddleSearchState(),
         override val firstFrameDrawn: Boolean = false,
         override val isSearchInProgress: Boolean,
     ) : HomepageState()
@@ -63,7 +67,6 @@ internal sealed class HomepageState {
      * @property recentlyVisited List of [RecentlyVisitedItem] to display, or null when the recent history section is
      *   hidden.
      * @property collectionsState State of the collections section to display.
-     * @property pocketState State of the pocket section to display, or null when the section is hidden.
      * @property showTopSitesHeader Whether to show the shortcuts section header and "show all" button.
      * @property showPrivacyReport Whether to show the privacy report section.
      * @property longfoxEnabled Whether the longfox game is enabled.
@@ -75,6 +78,7 @@ internal sealed class HomepageState {
      * @property setupChecklistState Optional state of the setup checklist feature.
      * @property isSearchInProgress Whether search is currently active on the homepage.
      * @property bottomPadding Amount of padding to display at the bottom of the homepage.
+     * @property sportsWidgetState State of the sports widget on the homepage.
      */
     internal data class Normal(
         val shouldShowPrivacyNoticeBanner: Boolean,
@@ -85,18 +89,18 @@ internal sealed class HomepageState {
         val bookmarks: List<Bookmark>? = null,
         val recentlyVisited: List<RecentlyVisitedItem>? = null,
         val collectionsState: CollectionsState,
-        val pocketState: PocketState? = null,
         val showTopSitesHeader: Boolean,
         val showPrivacyReport: Boolean,
         val longfoxEnabled: Boolean,
         val showLongfoxAnimation: Boolean,
         val trackersBlockedCount: Int,
         override val headerState: HeaderState,
-        val middleSearchState: MiddleSearchState = MiddleSearchState(),
+        override val middleSearchState: MiddleSearchState = MiddleSearchState(),
         override val firstFrameDrawn: Boolean = false,
         val setupChecklistState: SetupChecklistState?,
         override val isSearchInProgress: Boolean,
         val bottomPadding: Int,
+        val sportsWidgetState: SportsWidgetState = SportsWidgetState(),
     ) : HomepageState()
 
     val browsingMode: BrowsingMode
@@ -105,20 +109,6 @@ internal sealed class HomepageState {
                 is Normal -> BrowsingMode.Normal
                 is Private -> BrowsingMode.Private
             }
-
-    /**
-     * Returns whether the homepage is in the "Minimal Layout" state, where only the shortcuts and stories are visible
-     * (but both or either can be hidden). This is for the purpose of adding a weighted spacer in between so the stories
-     * are anchored to the bottom.
-     */
-    internal fun isMinimalLayout(): Boolean {
-        return (this as? Normal)?.run {
-            recentTabs == null &&
-                recentSyncedTabSectionState is RecentSyncedTabSectionState.Gone &&
-                bookmarks == null &&
-                recentlyVisited == null
-        } ?: false
-    }
 
     companion object {
         private const val BOTTOM_PADDING_TOP_TOOLBAR = 68
@@ -129,6 +119,7 @@ internal sealed class HomepageState {
          *
          * @param appState State to build the [HomepageState] from.
          * @param privacyNoticeBannerState State of the privacy notice banner.
+         * @param collectionsMigrationCardState State of the collections migration card.
          * @param browsingModeManager Manager holding current state of whether the browser is in private mode or not.
          * @param settings [Settings] corresponding to how the homepage should be displayed.
          */
@@ -136,6 +127,7 @@ internal sealed class HomepageState {
         internal fun build(
             appState: AppState,
             privacyNoticeBannerState: PrivacyNoticeBannerState,
+            collectionsMigrationCardState: CollectionsMigrationCardState,
             browsingModeManager: BrowsingModeManager,
             settings: Settings,
         ): HomepageState {
@@ -148,6 +140,7 @@ internal sealed class HomepageState {
                 buildNormalState(
                     appState = appState,
                     privacyNoticeBannerState = privacyNoticeBannerState,
+                    collectionsMigrationCardState = collectionsMigrationCardState,
                     settings = settings,
                 )
             }
@@ -169,6 +162,7 @@ internal sealed class HomepageState {
                     headerState = buildPrivateHeaderState(settings = settings),
                     firstFrameDrawn = firstFrameDrawn,
                     isSearchInProgress = searchState.isSearchActive,
+                    middleSearchState = buildMiddleSearchState(appState = appState, settings = settings),
                 )
             }
 
@@ -177,12 +171,14 @@ internal sealed class HomepageState {
          *
          * @param appState State to build the [HomepageState.Normal] from.
          * @param privacyNoticeBannerState State of the privacy notice banner.
+         * @param collectionsMigrationCardState State of the collections migration card.
          * @param settings [Settings] corresponding to how the homepage should be displayed.
          */
         @Composable
         private fun buildNormalState(
             appState: AppState,
             privacyNoticeBannerState: PrivacyNoticeBannerState,
+            collectionsMigrationCardState: CollectionsMigrationCardState,
             settings: Settings,
         ) =
             with(appState) {
@@ -198,34 +194,19 @@ internal sealed class HomepageState {
                             settings.historyMetadataUIFeature && it.isNotEmpty()
                         },
                     collectionsState =
-                        if (settings.collections) {
-                            CollectionsState.build(
-                                appState = appState,
-                                browserState = components.core.store.state,
-                            )
-                        } else {
-                            CollectionsState.Gone
-                        },
-                    pocketState =
-                        PocketState.build(appState = appState).takeIf {
-                            settings.showPocketRecommendationsFeature &&
-                                recommendationState.pocketStories.isNotEmpty() &&
-                                !settings.privateModeAndStoriesEntryPointEnabled
-                        },
-                    showTopSitesHeader = !(settings.privateModeAndStoriesEntryPointEnabled && topSites.size < 8),
+                        CollectionsState.build(
+                            appState = appState,
+                            browserState = components.core.store.state,
+                            showCollections = settings.collections,
+                            shouldShowCollectionsMigrationCard = collectionsMigrationCardState.visible,
+                        ),
+                    showTopSitesHeader = !settings.showMoreShortcuts,
                     showPrivacyReport = settings.showPrivacyReportFeature,
                     longfoxEnabled = settings.longfoxEnabled,
                     showLongfoxAnimation = settings.longfoxEnabled && longfoxEntryPointReady,
                     trackersBlockedCount = blockedTrackersState.trackersBlockedCount,
                     headerState = buildHeaderState(settings = settings),
-                    middleSearchState =
-                        MiddleSearchState(
-                            searchBarVisible = shouldShowSearchBar(appState = appState),
-                            searchBarEnabled =
-                                settings.enableHomepageSearchBar &&
-                                    settings.toolbarPosition == ToolbarPosition.TOP &&
-                                    LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT,
-                        ),
+                    middleSearchState = buildMiddleSearchState(appState = appState, settings = settings),
                     firstFrameDrawn = firstFrameDrawn,
                     setupChecklistState = setupChecklistState,
                     isSearchInProgress = searchState.isSearchActive,
@@ -235,57 +216,42 @@ internal sealed class HomepageState {
                         } else {
                             BOTTOM_PADDING_BOTTOM_TOOLBAR
                         },
+                    sportsWidgetState = sportsWidgetState,
                 )
             }
     }
 }
 
-private fun buildHeaderState(settings: Settings): HeaderState {
-    return if (settings.privateModeAndStoriesEntryPointEnabled) {
-        HeaderState.Experimental.Normal(
-            showButtonAnimation = settings.shouldShowNewsButtonAnimation(),
-            showStoriesButton = settings.showPocketRecommendationsFeature,
-        )
-    } else {
-        HeaderState.Normal
-    }
-}
+private fun buildHeaderState(settings: Settings) =
+    HeaderState(
+        showStoriesButton = settings.showPocketRecommendationsFeature,
+        showButtons = !settings.isHomepageMiddleSearchEnabled,
+    )
 
-private fun buildPrivateHeaderState(settings: Settings): HeaderState {
-    return if (settings.privateModeAndStoriesEntryPointEnabled) {
-        HeaderState.Experimental.Private
-    } else {
-        HeaderState.Normal
-    }
-}
+@Composable
+private fun buildMiddleSearchState(appState: AppState, settings: Settings) =
+    MiddleSearchState(
+        searchBarVisible = shouldShowSearchBar(appState = appState),
+        searchBarEnabled = settings.isHomepageMiddleSearchEnabled,
+    )
 
-/** A simple wrapper around state required for the homepage header. */
-internal sealed class HeaderState {
+private fun buildPrivateHeaderState(settings: Settings) =
+    HeaderState(
+        showStoriesButton = false,
+        showButtons = !settings.isHomepageMiddleSearchEnabled,
+    )
 
-    /**
-     * Represents the non-experimental header state for both normal and private mode. The header's colors are derived
-     * from the wallpaper at render time (see `HomepageHeader`), so no colors are held here.
-     */
-    data object Normal : HeaderState()
-
-    /** Represents the experimental states for the entry points experiment. */
-    sealed class Experimental : HeaderState() {
-
-        /**
-         * Represents the header in normal mode for the entry points experiment.
-         *
-         * @property showStoriesButton Whether to show the stories button.
-         * @property showButtonAnimation Whether to animate the news button label.
-         */
-        data class Normal(
-            val showStoriesButton: Boolean,
-            val showButtonAnimation: Boolean,
-        ) : Experimental()
-
-        /** Represents the header in private mode for the entry points experiment. */
-        data object Private : Experimental()
-    }
-}
+/**
+ * State required for the homepage header in both normal and private mode. The header's colors are derived from the
+ * wallpaper at render time (see `HomepageHeader`), so no colors are held here.
+ *
+ * @property showStoriesButton Whether to show the stories button.
+ * @property showButtons Whether to show the stories and private browsing buttons.
+ */
+internal data class HeaderState(
+    val showStoriesButton: Boolean,
+    val showButtons: Boolean = true,
+)
 
 /**
  * State of the middle search bar on the homepage.

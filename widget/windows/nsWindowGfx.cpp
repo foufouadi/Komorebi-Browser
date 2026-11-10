@@ -377,33 +377,16 @@ void nsWindow::MaybeEnableWindowOcclusion(bool aEnable) {
   }
 }
 
-// This override of CreateCompositor is to add support for sending the IPC
-// call for RequesetFxrOutput as soon as the compositor for this widget is
-// available.
 void nsWindow::CreateCompositor() {
   nsIWidget::CreateCompositor();
 
   MaybeEnableWindowOcclusion(/* aEnable */ true);
-
-  if (mRequestFxrOutputPending) {
-    GetRemoteRenderer()->SendRequestFxrOutput();
-  }
 }
 
 void nsWindow::DestroyCompositor() {
   MaybeEnableWindowOcclusion(/* aEnable */ false);
 
   nsIWidget::DestroyCompositor();
-}
-
-void nsWindow::RequestFxrOutput() {
-  if (GetRemoteRenderer() != nullptr) {
-    MOZ_CRASH("RequestFxrOutput should happen before Compositor is created.");
-  } else {
-    // The compositor isn't ready, so indicate to make the IPC call when
-    // it is available.
-    mRequestFxrOutputPending = true;
-  }
 }
 
 LayoutDeviceIntSize nsWindowGfx::GetIconMetrics(IconSizeType aSizeType) {
@@ -504,7 +487,7 @@ nsresult nsWindowGfx::CreateIcon(imgIContainer* aContainer,
       NS_ENSURE_TRUE(mappedOK, NS_ERROR_FAILURE);
 
       RefPtr<DrawTarget> dt = Factory::CreateDrawTargetForData(
-          BackendType::CAIRO, map.mData, dataSurface->GetSize(), map.mStride,
+          BackendType::SKIA, map.mData, dataSurface->GetSize(), map.mStride,
           SurfaceFormat::B8G8R8A8);
       if (!dt) {
         gfxWarning()

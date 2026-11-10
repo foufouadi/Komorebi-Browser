@@ -1,13 +1,13 @@
 "use strict";
 
 const { SessionWriter } = ChromeUtils.importESModule(
-  "resource:///modules/sessionstore/SessionWriter.sys.mjs"
+  "moz-src:///browser/components/sessionstore/SessionWriter.sys.mjs"
 );
 
 // Make sure that we have a profile before initializing SessionFile.
 const profd = do_get_profile();
 const { SessionFile } = ChromeUtils.importESModule(
-  "resource:///modules/sessionstore/SessionFile.sys.mjs"
+  "moz-src:///browser/components/sessionstore/SessionFile.sys.mjs"
 );
 const Paths = SessionFile.Paths;
 
@@ -38,9 +38,7 @@ function promise_check_exist(path, shouldExist) {
 function promise_check_contents(path, expect) {
   return (async function () {
     info("Checking whether " + path + " has the right contents");
-    let actual = await IOUtils.readJSON(path, {
-      decompress: true,
-    });
+    let actual = await IOUtils.readJSON(path, sessionStoreReadOptions());
     Assert.deepEqual(
       actual,
       expect,

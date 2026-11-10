@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import { AUTH_ERRORS } from "moz-src:///toolkit/components/ipprotection/IPPAuthProvider.sys.mjs";
 import { IPPFxaActivateAuthProviderSingleton } from "moz-src:///toolkit/components/ipprotection/fxa/IPPFxaActivateAuthProvider.sys.mjs";
 import { IPPAndroidSignInWatcher } from "moz-src:///toolkit/components/ipprotection/fxa/IPPAndroidSignInWatcher.sys.mjs";
 
@@ -44,14 +45,15 @@ class IPPAndroidFxAAuthProviderSingleton extends IPPFxaActivateAuthProviderSingl
     } else {
       response = await request;
     }
-    // The Java handler rejects empty/null tokens with "no-token" before reaching
-    // here, so this is defensive against contract drift; keep the same string so
-    // both paths surface a single canonical error.
+    // IPProtectionController.java already rejects an empty or missing token, so
+    // this only guards against that contract changing.
     const token = response?.token;
     if (!token) {
-      throw new Error("no-token");
+      throw AUTH_ERRORS.LOGIN_NEEDED;
     }
-    return { token, [Symbol.dispose]: () => {} };
+    // The Android layer owns the token's lifetime, so there is nothing for
+    // Gecko to invalidate if Guardian rejects it.
+    return { token };
   }
 }
 

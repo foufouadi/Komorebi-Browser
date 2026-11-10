@@ -279,7 +279,7 @@ static gfxFloat LinearGradientStopPositionForPoint(
    *   denominator = d.x^2 + d.y^2
    *   t = numerator/denominator
    *
-   * In nsCSSRendering::PaintGradient we know the length of d
+   * In nsCSSGradientRenderer::Paint we know the length of d
    * is not zero.
    */
   double numerator = d.x.value * p.x.value + d.y.value * p.y.value;
@@ -1364,8 +1364,8 @@ void nsCSSGradientRenderer::BuildWebRenderDisplayItems(
     aBuilder.PushLinearGradient(
         mozilla::wr::ToLayoutRect(gradientBounds),
         mozilla::wr::ToLayoutRect(clipBounds), aIsBackfaceVisible,
-        mozilla::wr::ToLayoutPoint(lineStart),
-        mozilla::wr::ToLayoutPoint(lineEnd), stops, extendMode,
+        mozilla::wr::ToLayoutVector2D(lineStart),
+        mozilla::wr::ToLayoutVector2D(lineEnd), stops, extendMode,
         mozilla::wr::ToLayoutSize(firstTileBounds.Size()),
         mozilla::wr::ToLayoutSize(tileSpacing));
   } else if (mGradient->IsRadial()) {
@@ -1375,7 +1375,7 @@ void nsCSSGradientRenderer::BuildWebRenderDisplayItems(
     aBuilder.PushRadialGradient(
         mozilla::wr::ToLayoutRect(gradientBounds),
         mozilla::wr::ToLayoutRect(clipBounds), aIsBackfaceVisible,
-        mozilla::wr::ToLayoutPoint(lineStart),
+        mozilla::wr::ToLayoutVector2D(lineStart),
         mozilla::wr::ToLayoutSize(gradientRadius), stops, extendMode,
         mozilla::wr::ToLayoutSize(firstTileBounds.Size()),
         mozilla::wr::ToLayoutSize(tileSpacing));
@@ -1384,7 +1384,7 @@ void nsCSSGradientRenderer::BuildWebRenderDisplayItems(
     aBuilder.PushConicGradient(
         mozilla::wr::ToLayoutRect(gradientBounds),
         mozilla::wr::ToLayoutRect(clipBounds), aIsBackfaceVisible,
-        mozilla::wr::ToLayoutPoint(gradientCenter), gradientAngle, stops,
+        mozilla::wr::ToLayoutVector2D(gradientCenter), gradientAngle, stops,
         extendMode, mozilla::wr::ToLayoutSize(firstTileBounds.Size()),
         mozilla::wr::ToLayoutSize(tileSpacing));
   }

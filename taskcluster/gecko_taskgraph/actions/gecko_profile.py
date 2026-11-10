@@ -16,7 +16,14 @@ from .util import combine_task_graph_files, create_tasks, fetch_graph_and_labels
 
 PUSHLOG_TMPL = "{}/json-pushes?version=2&startID={}&endID={}"
 INDEX_TMPL = "gecko.v2.{}.pushlog-id.{}.decision"
-SIMPLEPERF_COMPATIBLE_TESTS = ["-homeview-", "-applink-", "-restore-"]
+SIMPLEPERF_COMPATIBLE_TESTS = [
+    "-homeview-",
+    "-applink-",
+    "-restore-",
+    "-background-resource-",
+    "-foreground-resource-",
+]
+RESOURCE_TESTS = ["-background-resource-", "-foreground-resource-"]
 
 SIMPLEPERF_DEPENDENCY = {
     "artifact": "project/gecko/android-simpleperf/android-simpleperf.tar.zst",
@@ -37,6 +44,11 @@ SYMBOLS_DEPENDENCY = {
     "artifact": "public/build/target.crashreporter-symbols.zip",
     "extract": False,
     "task": "<build-android-aarch64-shippable/opt>",
+}
+BUILD_SYMBOLS_DEPENDENCY = {
+    "artifact": "public/build/target.crashreporter-symbols.zip",
+    "extract": False,
+    "task": "<build>",
 }
 
 DEPENDANCY_TO_ADD_FOR_TASK_REFERENCE = [
@@ -164,9 +176,16 @@ def geckoprofile_action(parameters, graph_config, input, task_group_id, task_id)
                 profiling_command_flags = ["--gecko-profile"]
 
                 if task_kind == "perftest":
+                    is_resource_test = any(test in label for test in RESOURCE_TESTS)
+                    if is_resource_test:
+                        env["PERF_FLAGS"] = (
+                            perf_flags
+                            + " simpleperf simpleperf-path=$MOZ_FETCHES_DIR/android-simpleperf"
+                        ).strip()
+                        profiling_command_flags = []
                     # Add "gecko-profile" to PERF_FLAGS if missing and then add remaining
                     # Gecko Profiler customizations via MOZ_PROFILER_STARTUP_* env overrides.
-                    if "gecko-profile" not in perf_flags:
+                    elif "gecko-profile" not in perf_flags:
                         env["PERF_FLAGS"] = (perf_flags + " gecko-profile").strip()
 
                     if interval is not None:
@@ -175,7 +194,9 @@ def geckoprofile_action(parameters, graph_config, input, task_group_id, task_id)
                         env["MOZ_PROFILER_STARTUP_FEATURES"] = features
                     if threads is not None:
                         env["MOZ_PROFILER_STARTUP_FILTERS"] = threads
-                    if any(test in label for test in SIMPLEPERF_COMPATIBLE_TESTS):
+                    if not is_resource_test and any(
+                        test in label for test in SIMPLEPERF_COMPATIBLE_TESTS
+                    ):
                         #  We will need to unify the options for enabling gecko_profiling across test harnesses, see bug 2000281
                         env["PERF_FLAGS"] = (
                             perf_flags
@@ -222,6 +243,10 @@ def geckoprofile_action(parameters, graph_config, input, task_group_id, task_id)
                         cmd, profiling_command_flags
                     )
 
+                # A single profile is enough, don't inherit the retrigger count
+                # of the task being profiled.
+                task.attributes["task_duplicates"] = 1
+
                 task.task["extra"]["treeherder"]["symbol"] += "-p"
                 task.task["extra"]["treeherder"]["groupName"] += " (profiling)"
                 return task
@@ -257,17 +282,17 @@ def geckoprofile_action(parameters, graph_config, input, task_group_id, task_id)
                     "test_platform", ""
                 )
                 if "macosx" in test_platform and "aarch64" in test_platform:
-                    samply_platform_toolchain = "toolchain-macosx64-aarch64-samply"
-                    node_toolchain = "toolchain-macosx64-aarch64-node-22"
+                    toolchain_platform = "macosx64-aarch64"
                 elif "macosx" in test_platform:
-                    samply_platform_toolchain = "toolchain-macosx64-samply"
-                    node_toolchain = "toolchain-macosx64-node-22"
+                    toolchain_platform = "macosx64"
                 elif "win" in test_platform:
-                    samply_platform_toolchain = "toolchain-win64-samply"
-                    node_toolchain = "toolchain-win64-node-22"
+                    toolchain_platform = "win64"
                 else:
-                    samply_platform_toolchain = "toolchain-linux64-samply"
-                    node_toolchain = "toolchain-linux64-node-22"
+                    toolchain_platform = "linux64"
+                samply_platform_toolchain = f"toolchain-{toolchain_platform}-samply"
+                node_toolchain = find_node_toolchain(
+                    full_task_graph, toolchain_platform
+                )
 
                 samply_platform_dependency = {
                     "artifact": "public/build/samply.tar.zst",
@@ -304,6 +329,11 @@ def geckoprofile_action(parameters, graph_config, input, task_group_id, task_id)
                     PROFILER_NODE_TOOLS_DEPENDENCY,
                     samply_platform_dependency,
                 ])
+                if "build" in dependencies and not any(
+                    fetch["artifact"].endswith("target.crashreporter-symbols.zip")
+                    for fetch in task_reference_full_taskgraph
+                ):
+                    task_reference_full_taskgraph.append(BUILD_SYMBOLS_DEPENDENCY)
                 full_task_graph.tasks[label].task["payload"]["env"]["MOZ_FETCHES"][
                     "task-reference"
                 ] = json.dumps(task_reference_full_taskgraph)
@@ -322,6 +352,24 @@ def geckoprofile_action(parameters, graph_config, input, task_group_id, task_id)
         else:
             logger.info(f"Could not find {label} on {push}. Skipping.")
     combine_task_graph_files(backfill_pushes)
+
+
+def find_node_toolchain(full_task_graph, toolchain_platform):
+    """
+    Return the label of the node toolchain for `toolchain_platform`. The label
+    is resolved from the given graph instead of being hardcoded, as backfilled
+    pushes may predate a node upgrade.
+    """
+    alias = f"{toolchain_platform}-node"
+    for task in full_task_graph.tasks.values():
+        if task.kind != "toolchain":
+            continue
+        aliases = task.attributes.get("toolchain-alias", [])
+        if isinstance(aliases, str):
+            aliases = [aliases]
+        if alias in aliases:
+            return task.label
+    raise Exception(f"Could not find the {alias} toolchain in the task graph")
 
 
 def add_args_to_perf_command(payload_commands, extra_args=()):

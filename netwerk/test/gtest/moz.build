@@ -3,6 +3,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 UNIFIED_SOURCES += [
+    "TestAuthModuleInitAsync.cpp",
     "TestBase64Stream.cpp",
     "TestBind.cpp",
     "TestBufferedInputStream.cpp",
@@ -18,10 +19,11 @@ UNIFIED_SOURCES += [
     "TestHostRecordQueue.cpp",
     "TestHttp2WebTransport.cpp",
     "TestHttp3ConnectUDPStream.cpp",
-    "TestHttpAtom.cpp",
+    "TestHttp3WebTransportSession.cpp",
     "TestHttpAuthUtils.cpp",
     "TestHttpChannel.cpp",
     "TestHttpResponseHead.cpp",
+    "TestHttpTransactionRestart.cpp",
     "TestIDNA.cpp",
     "TestInputStreamTransport.cpp",
     "TestIsValidIp.cpp",
@@ -35,12 +37,14 @@ UNIFIED_SOURCES += [
     "TestPollableEvent.cpp",
     "TestProtocolProxyService.cpp",
     "TestReadStreamToString.cpp",
+    "TestSanitizedSpec.cpp",
     "TestServerTimingHeader.cpp",
     "TestSFV.cpp",
     "TestSocketTransportService.cpp",
     "TestSSLTokensCache.cpp",
     "TestStandardURL.cpp",
     "TestStorageAccessHeader.cpp",
+    "TestSyncStreamListener.cpp",
     "TestUDPSocket.cpp",
     "TestURIMutator.cpp",
     "TestUriTemplate.cpp",
@@ -57,8 +61,11 @@ UNIFIED_SOURCES += [
 SOURCES += [
     "TestCacheCrypto.cpp",
     "TestCacheEntryWriterHang.cpp",
-    "TestDiagnosticRWLock.cpp",
     "TestHappyEyeballsConnectionAttempt.cpp",
+    "TestHappyEyeballsNetAddrArray.cpp",
+    "TestHttpAtom.cpp",
+    "TestLinkServiceCommon.cpp",
+    "TestSOCKSProxyLookup.cpp",
 ]
 
 if CONFIG["OS_TARGET"] == "WINNT":
@@ -66,10 +73,21 @@ if CONFIG["OS_TARGET"] == "WINNT":
         "TestNamedPipeService.cpp",
         "TestNetworkLinkIdHashingWindows.cpp",
     ]
+    # Not unified: windows headers define a GetAddrInfo macro.
+    SOURCES += ["TestPlatformDNSWin.cpp"]
 
 # run the test on mac only
 if CONFIG["TARGET_OS"] == "OSX":
     UNIFIED_SOURCES += ["TestNetworkLinkIdHashingDarwin.cpp"]
+
+    if CONFIG["MOZ_ENTERPRISE"]:
+        UNIFIED_SOURCES += ["TestNetworkInterfaceDarwin.cpp"]
+
+if CONFIG["MOZ_WIDGET_TOOLKIT"] == "cocoa":
+    SOURCES += ["TestPlatformDNSMac.cpp"]
+elif CONFIG["OS_TARGET"] in ("Linux", "FreeBSD"):
+    # Not unified: resolv.h defines many macros.
+    SOURCES += ["TestPlatformDNSUnix.cpp"]
 
 TEST_HARNESS_FILES.gtest += [
     "urltestdata.json",
@@ -86,6 +104,7 @@ LOCAL_INCLUDES += [
     "/netwerk/cookie",
     "/netwerk/dns",
     "/netwerk/protocol/http",
+    "/netwerk/system",
     "/toolkit/components/jsoncpp/include",
     "/xpcom/tests/gtest",
 ]
@@ -107,3 +126,7 @@ include("/ipc/chromium/chromium-config.mozbuild")
 FINAL_LIBRARY = "xul-gtest"
 
 LOCAL_INCLUDES += ["!/xpcom", "/xpcom/components"]
+
+SOURCE_HEADERS += [
+    "TestCommon.h",
+]

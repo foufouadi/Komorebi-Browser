@@ -9,6 +9,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import androidx.work.WorkManager
 import mozilla.components.lib.crash.CrashReporter
 import mozilla.components.lib.crash.runtimetagproviders.BuildRuntimeTagProvider
 import mozilla.components.lib.crash.runtimetagproviders.EnvironmentRuntimeProvider
@@ -22,6 +23,7 @@ import mozilla.components.lib.crash.service.socorro.MozillaSocorroService
 import mozilla.components.lib.crash.store.CrashReportOption
 import mozilla.components.support.ktx.android.content.isMainProcess
 import mozilla.components.support.utils.Browsers
+import mozilla.components.support.utils.BuildMetadata
 import mozilla.components.support.utils.RunWhenReadyQueue
 import mozilla.components.support.utils.ext.packageManagerCompatHelper
 import org.mozilla.fenix.BuildConfig
@@ -36,13 +38,14 @@ import org.mozilla.fenix.components.metrics.GleanMetricsService
 import org.mozilla.fenix.components.metrics.GleanProfileIdPreferenceStore
 import org.mozilla.fenix.components.metrics.GleanUsageReportingMetricsService
 import org.mozilla.fenix.components.metrics.InstallReferrerMetricsService
+import org.mozilla.fenix.components.metrics.InstallationMetricsService
 import org.mozilla.fenix.components.metrics.MetricController
 import org.mozilla.fenix.components.metrics.MetricsStorage
 import org.mozilla.fenix.crashes.CrashFactCollector
 import org.mozilla.fenix.crashes.NimbusExperimentDataProvider
 import org.mozilla.fenix.crashes.ReleaseRuntimeTagProvider
 import org.mozilla.fenix.crashes.crashReportOption
-import org.mozilla.fenix.perf.lazyMonitored
+import org.mozilla.fenix.ext.getCustomGleanServerUrlIfAvailable
 import org.mozilla.fenix.utils.Settings
 import org.mozilla.geckoview.BuildConfig.MOZ_APP_BUILDID
 import org.mozilla.geckoview.BuildConfig.MOZ_APP_VENDOR
@@ -55,20 +58,13 @@ class Analytics(
     private val settings: Settings,
     private val nimbusComponents: NimbusComponents,
     private val runWhenReadyQueue: RunWhenReadyQueue,
+    val buildMetadata: BuildMetadata,
 ) {
-    val crashReporter: CrashReporter by lazyMonitored {
+    val crashReporter: CrashReporter by lazy {
         val services = mutableListOf<CrashReporterService>()
         val distributionId = "Mozilla"
 
         if (isSentryEnabled()) {
-            // We treat caught exceptions similar to debug logging.
-            // On the release channel volume of these is too high for our Sentry instances, and
-            // we get most value out of nightly/beta logging anyway.
-            val shouldSendCaughtExceptions =
-                when (Config.channel) {
-                    ReleaseChannel.Release -> false
-                    else -> true
-                }
             val sentryService =
                 SentryService(
                     context,
@@ -80,7 +76,8 @@ class Analytics(
                         ),
                     environment = BuildConfig.BUILD_TYPE,
                     sendEventForNativeCrashes = false, // Do not send native crashes to Sentry
-                    sendCaughtExceptions = shouldSendCaughtExceptions,
+                    // Do not send diagnostic logs until we have a better way to toggle this from user settings.
+                    sendCaughtExceptions = false,
                     sentryProjectUrl = getSentryProjectUrl(),
                     crashMetadataEventProcessor = CrashMetadataEventProcessor(),
                 )
@@ -125,6 +122,14 @@ class Analytics(
                 crashReportingIntentFlags,
             )
 
+        val gleanServerEndpoint =
+            if (Config.channel.isNightlyOrDebug) {
+                // for testing, if custom glean server url is set in the secret menu, use it to initialize Glean
+                getCustomGleanServerUrlIfAvailable(context)
+            } else {
+                null
+            }
+
         CrashReporter(
             context = context,
             services = services,
@@ -136,6 +141,7 @@ class Analytics(
                         appVersion = MOZ_APP_VERSION,
                         appBuildId = MOZ_APP_BUILDID,
                         isUploadEnabled = settings.isTelemetryEnabled,
+                        serverEndpoint = gleanServerEndpoint,
                     )
                 ),
             shouldPrompt = CrashReporter.Prompt.ALWAYS,
@@ -153,17 +159,17 @@ class Analytics(
                     BuildRuntimeTagProvider(context.versionInfoProvider),
                     EnvironmentRuntimeProvider(),
                     ExperimentDataRuntimeTagProvider(
-                        NimbusExperimentDataProvider(nimbusApi = lazyMonitored { nimbusComponents.sdk })
+                        NimbusExperimentDataProvider(getEnrollments = nimbusComponents::getEnrollmentsForCrashReporter)
                     ),
                 ),
         )
     }
 
-    val crashFactCollector: CrashFactCollector by lazyMonitored {
+    val crashFactCollector: CrashFactCollector by lazy {
         CrashFactCollector(crashReporter)
     }
 
-    val metricsStorage: MetricsStorage by lazyMonitored {
+    val metricsStorage: MetricsStorage by lazy {
         DefaultMetricsStorage(
             context = context,
             settings = settings,
@@ -171,7 +177,7 @@ class Analytics(
         )
     }
 
-    val metrics: MetricController by lazyMonitored {
+    val metrics: MetricController by lazy {
         MetricController.create(
             listOf(
                 GleanMetricsService(context),
@@ -183,6 +189,7 @@ class Analytics(
                 FirstSessionMetricsService(context),
                 InstallReferrerMetricsService(context, settings),
                 GleanUsageReportingMetricsService(gleanProfileIdStore = GleanProfileIdPreferenceStore(context)),
+                InstallationMetricsService(runWhenReadyQueue, { WorkManager.getInstance(context) }),
             ),
             isDataTelemetryEnabled = { settings.isTelemetryEnabled },
             isMarketingDataTelemetryEnabled = {

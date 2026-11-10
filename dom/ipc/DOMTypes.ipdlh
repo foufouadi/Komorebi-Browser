@@ -26,6 +26,8 @@ using struct mozilla::void_t from "mozilla/ipc/IPCCore.h";
 
 using struct mozilla::dom::LoadingSessionHistoryInfo
   from "mozilla/dom/SessionHistoryEntry.h";
+using class mozilla::dom::SessionHistoryInfo
+  from "mozilla/dom/SessionHistoryEntry.h";
 
 using mozilla::net::ClassOfService from "mozilla/net/ClassOfService.h";
 
@@ -45,7 +47,7 @@ using mozilla::ScrollbarPreference from "mozilla/ScrollbarPreferences.h";
 using mozilla::gfx::SurfaceFormat from "mozilla/gfx/Types.h";
 using nsILoadInfo::HTTPSUpgradeTelemetryType from "nsILoadInfo.h";
 using nsILoadInfo::SchemelessInputType from "nsILoadInfo.h";
-[RefCounted] using class nsIPrincipal from "nsIPrincipal.h";
+[RefCounted, Tainted] using class nsIPrincipal from "nsIPrincipal.h";
 using mozilla::dom::MaybeDiscardedBrowsingContext from "mozilla/dom/BrowsingContext.h";
 [RefCounted] using class nsIURI from "nsIURI.h";
 [RefCounted] using class nsIPolicyContainer from "nsIPolicyContainer.h";
@@ -62,6 +64,7 @@ using mozilla::dom::ForceMediaDocument from "mozilla/dom/LoadURIOptionsBinding.h
 using mozilla::dom::NavigationHistoryBehavior from "mozilla/dom/NavigationBinding.h";
 [RefCounted] using class mozilla::dom::ipc::StructuredCloneData from "mozilla/dom/ipc/StructuredCloneData.h";
 [RefCounted] using class nsStructuredCloneContainer from "nsStructuredCloneContainer.h";
+using struct mozilla::dom::RemoteType from "mozilla/dom/RemoteType.h";
 
 namespace mozilla {
 namespace dom {
@@ -78,6 +81,13 @@ struct NavigationEntriesTruncation
 {
   MaybeDiscardedBrowsingContext context;
   uint32_t newLength;
+};
+
+struct NavigationReactivationData
+{
+  MaybeDiscardedBrowsingContext context;
+  SessionHistoryInfo reactivatedEntry;
+  SessionHistoryInfo[] newSHEs;
 };
 
 struct ScreenDetails {
@@ -156,13 +166,13 @@ struct DocShellLoadStateInit
 
   // The provided remote type of the process responsible for causing the load to
   // occur. Validated in the parent process.
-  nsCString TriggeringRemoteType;
+  RemoteType TriggeringRemoteType;
 
   nsString SrcdocData; // useless without sourcedocshell
 
   nsCString? OriginalURIString;
 
-  nsCString? RemoteTypeOverride;
+  RemoteType? RemoteTypeOverride;
 
   LoadingSessionHistoryInfo? loadingSessionHistoryInfo;
 
@@ -177,7 +187,6 @@ struct DocShellLoadStateInit
   // responsible for causing the load to occur.
   uint32_t TriggeringSandboxFlags;
   uint64_t TriggeringWindowId;
-  bool TriggeringStorageAccess;
   ClassificationFlags TriggeringClassificationFlags;
   int32_t? CancelContentJSEpoch;
 
@@ -187,6 +196,7 @@ struct DocShellLoadStateInit
   bool InheritPrincipal;
   bool PrincipalIsExplicit;
   bool NotifiedBeforeUnloadListeners;
+  bool PageSwapFired;
   bool ForceAllowDataURI;
   bool IsExemptFromHTTPSFirstMode;
   bool OriginalFrameSrc;
@@ -214,7 +224,7 @@ struct DocShellLoadStateInit
   // nsIChannel pendingRedirectedChannel; // sent through other mechanism
   // DocumentLoadListener mSpeculativeListener; // parent-process only
 
-  bool HasSpeculativeListener;
+  uint64_t? SpeculativeChannelId;
 
   bool TryToReplaceWithSessionHistoryLoad;
 
@@ -259,6 +269,7 @@ struct ReplacementChannelConfigInit
   TimedChannelInfo? timedChannelInfo;
   nullable RemoteLazyInputStream uploadStream;
   uint64_t uploadStreamLength;
+  bool uploadStreamIsStreaming;
   nsCString? contentType;
   nsCString? contentLength;
 };
@@ -330,6 +341,7 @@ struct IPCImage {
 struct IPCNotificationAction {
   nsString name;
   nsString title;
+  nullable nsIURI navigate;
 };
 
 // Mostly same as NotificationOptions except:
@@ -344,6 +356,7 @@ struct IPCNotificationOptions {
   nsString body;
   nsString tag;
   nullable nsIURI icon;
+  nullable nsIURI navigate;
   bool requireInteraction;
   bool silent;
   uint32_t[] vibrate;

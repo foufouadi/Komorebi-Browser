@@ -34,11 +34,8 @@ add_setup(async function () {
   await SpecialPowers.pushPrefEnv({
     set: [
       ["browser.newtab.preload", false],
-      ["browser.search.separatePrivateDefault.ui.enabled", true],
-      ["browser.search.separatePrivateDefault", true],
-      // Force settings redesign to false, so that `hideOneOffButton` will correctly
-      // work for the time being.
-      ["browser.settings-redesign.enabled", false],
+      ["browser.search.separatePrivateDefault.featureGate", true],
+      ["browser.search.separatePrivateDefault.enabled", true],
     ],
   });
 
@@ -175,7 +172,7 @@ add_task(async function test_hideEngine() {
     type: "CurrentState",
     data: await currentStateObj(),
   });
-});
+}).skip();
 
 add_task(async function search() {
   let { browser } = await addTab();

@@ -37,6 +37,9 @@ class gfxDWriteFont final : public gfxFont {
 
   static void SystemTextQualityChanged();
 
+  bool InitMetricsFromPlatform() override;
+  void FinishInitFontMetrics() override;
+
   gfxFont* CopyWithAntialiasOption(AntialiasOption anAAOption) const override;
 
   bool AllowSubpixelAA() const override { return mAllowManualShowGlyphs; }
@@ -73,11 +76,7 @@ class gfxDWriteFont final : public gfxFont {
  protected:
   ~gfxDWriteFont() override;
 
-  const Metrics& GetHorizontalMetrics() const override { return mMetrics; }
-
   bool GetFakeMetricsForArialBlack(DWRITE_FONT_METRICS* aFontMetrics);
-
-  void ComputeMetrics(AntialiasOption anAAOption);
 
   bool HasBitmapStrikeForSize(uint32_t aSize);
 
@@ -90,8 +89,6 @@ class gfxDWriteFont final : public gfxFont {
 
   RefPtr<IDWriteFontFace> mFontFace;
   RefPtr<IDWriteFontFace1> mFontFace1;  // may be unavailable on older DWrite
-
-  Metrics mMetrics;
 
   // cache of glyph widths in 16.16 fixed-point pixels
   mozilla::UniquePtr<nsTHashMap<nsUint32HashKey, int32_t>> mGlyphWidths;

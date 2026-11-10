@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/** @import {Store} from "resource://newtab/lib/Store.sys.mjs" */
+
 // We use importESModule here instead of static import so that
 // the Karma test environment won't choke on this module. This
 // is because the Karma test environment already stubs out
@@ -14,11 +16,10 @@ import {
 } from "resource://newtab/common/Actions.mjs";
 import { TippyTopProvider } from "resource:///modules/topsites/TippyTopProvider.sys.mjs";
 import { insertPinned } from "resource:///modules/topsites/TopSites.sys.mjs";
-import { TOP_SITES_MAX_SITES_PER_ROW } from "resource:///modules/topsites/constants.mjs";
-// @backward-compat { version 154 }
-// Sourced from Reducers for its fallback shim. When 154 hits Release, import
-// TOP_SITES_MAX_ROWS from the constants.mjs import above instead.
-import { TOP_SITES_MAX_ROWS } from "resource://newtab/common/Reducers.sys.mjs";
+import {
+  TOP_SITES_MAX_ROWS,
+  TOP_SITES_MAX_SITES_PER_ROW,
+} from "resource:///modules/topsites/constants.mjs";
 import { Dedupe } from "resource:///modules/Dedupe.sys.mjs";
 
 import {
@@ -166,6 +167,7 @@ function getTopSitesCount(prefValues) {
 // Smart shortcuts
 import { RankShortcutsProvider } from "resource://newtab/lib/SmartShortcutsRanker/RankShortcuts.mjs";
 import { FrecencyBoostProvider } from "resource://newtab/lib/FrecencyBoostProvider/FrecencyBoostProvider.mjs";
+import { SponsoredTopSitesScoreProvider } from "resource://newtab/lib/SponsoredTopSitesScoreProvider/SponsoredTopSitesScoreProvider.mjs";
 
 const PREF_SYSTEM_SHORTCUTS_PERSONALIZATION =
   "discoverystream.shortcuts.personalization.enabled";
@@ -521,18 +523,32 @@ export class ContileIntegration {
   }
 
   /**
-   * Normalize new Unified Ads API response into
-   * previous Contile ads response
+   * Normalize new Unified Ads API response into previous Contile ads response shape.
+   *
+   * @param {object} data
+   *   Tiles keyed by placement ID, as returned by MARS or the ads client.
+   *   Each value should be an array of 0 or 1 items.
+   * @param {Array<string>} placementIds
+   *   Placement IDs in the order tiles should appear.
+   *   IDs absent from this list are emitted last, keeping their iteration order from `data`.
    */
-  _normalizeTileData(data) {
+  _normalizeTileData(data, placementIds) {
+    // Requested placement ids are in iteration order from placementIds
+    const requestedPlacementIds = placementIds.filter(id =>
+      Object.hasOwn(data, id)
+    );
+    // Extra placement ids are in iteration order from data
+    const extraPlacementIds = Object.keys(data).filter(
+      id => !placementIds.includes(id)
+    );
+
     const formattedTileData = [];
-    const responseTilesData = Object.values(data);
-
-    for (const tileData of responseTilesData) {
-      if (tileData?.length) {
-        // eslint-disable-next-line prefer-destructuring
-        const tile = tileData[0];
-
+    for (const placementId of [
+      ...requestedPlacementIds,
+      ...extraPlacementIds,
+    ]) {
+      const [tile] = data[placementId] ?? [];
+      if (tile) {
         const formattedData = {
           id: tile.block_key,
           block_key: tile.block_key,
@@ -642,6 +658,7 @@ export class ContileIntegration {
       // Search engines unavailable; the search-hostname filter is skipped.
     }
 
+    let placementsArray = [];
     let response;
     let body;
 
@@ -660,7 +677,7 @@ export class ContileIntegration {
         // Fetch tiles via UAPI service directly from TopSitesFeed.sys.mjs
         if (unifiedAdsTilesEnabled) {
           // Shared set up for manual MARS call and ads-client calls
-          const placementsArray = state.Prefs.values[
+          placementsArray = state.Prefs.values[
             PREF_UNIFIED_ADS_PLACEMENTS
           ]?.split(`,`)
             .map(s => s.trim())
@@ -672,22 +689,31 @@ export class ContileIntegration {
             .filter(item => item)
             .map(item => parseInt(item, 10));
 
+          const marsOhttpEnabled = Services.prefs.getBoolPref(
+            "browser.newtabpage.activity-stream.unifiedAds.ohttp.enabled",
+            false
+          );
+          const ohttpRelayURL = Services.prefs.getStringPref(
+            "browser.newtabpage.activity-stream.discoverystream.ohttp.relayURL",
+            ""
+          );
+          const ohttpConfigURL = Services.prefs.getStringPref(
+            "browser.newtabpage.activity-stream.discoverystream.ohttp.configURL",
+            ""
+          );
+          const useOhttp = marsOhttpEnabled && ohttpConfigURL && ohttpRelayURL;
+
+          const relevance = useOhttp
+            ? await SponsoredTopSitesScoreProvider.getScores()
+            : {};
+
           if (this._topSitesFeed.adsClient) {
-            body = await this._fetchSitesWithAdsClient(placementsArray);
+            body = await this._fetchSitesWithAdsClient(
+              placementsArray,
+              relevance
+            );
           } else {
             let fetchPromise;
-            const marsOhttpEnabled = Services.prefs.getBoolPref(
-              "browser.newtabpage.activity-stream.unifiedAds.ohttp.enabled",
-              false
-            );
-            const ohttpRelayURL = Services.prefs.getStringPref(
-              "browser.newtabpage.activity-stream.discoverystream.ohttp.relayURL",
-              ""
-            );
-            const ohttpConfigURL = Services.prefs.getStringPref(
-              "browser.newtabpage.activity-stream.discoverystream.ohttp.configURL",
-              ""
-            );
             const headers = new Headers();
             headers.append("content-type", "application/json");
 
@@ -741,23 +767,28 @@ export class ContileIntegration {
 
             const adsBackendConfig = state.Prefs.values?.adsBackendConfig || {};
 
+            const hasRelevance = !!Object.keys(relevance).length;
+
             const options = {
               method: "POST",
               headers,
               body: JSON.stringify({
-                context_id: await lazy.ContextId.request(),
+                ...(!hasRelevance && {
+                  context_id: await lazy.ContextId.request(),
+                }),
                 flags: adsBackendConfig,
                 placements: placementsArray.map((placement, index) => ({
                   placement,
                   count: countsArray[index],
                 })),
                 blocks: blocksList,
+                ...(hasRelevance && { relevance }),
               }),
               credentials: "omit",
               signal,
             };
 
-            if (marsOhttpEnabled && ohttpConfigURL && ohttpRelayURL) {
+            if (useOhttp) {
               const config =
                 await lazy.ObliviousHTTP.getOHTTPConfig(ohttpConfigURL);
               if (!config) {
@@ -770,20 +801,12 @@ export class ContileIntegration {
               }
 
               // ObliviousHTTP.ohttpRequest only accepts a key/value object, and not
-              // a Headers instance. We normalize any headers to a key/value object.
-              //
-              // We use instanceof here since isInstance isn't available for
-              // Headers, it seems.
-              // eslint-disable-next-line mozilla/use-isInstance
-              if (options.headers && options.headers instanceof Headers) {
-                options.headers = Object.fromEntries(options.headers);
-              }
-
+              // a Headers instance.
               fetchPromise = lazy.ObliviousHTTP.ohttpRequest(
                 ohttpRelayURL,
                 config,
                 fetchUrl,
-                options
+                { ...options, headers: Object.fromEntries(headers) }
               );
             } else {
               fetchPromise = this._topSitesFeed.fetch(fetchUrl, options);
@@ -846,7 +869,7 @@ export class ContileIntegration {
           body = { tiles };
         } else {
           // Converts UAPI response into normalized tiles[] array
-          body = this._normalizeTileData(body);
+          body = this._normalizeTileData(body, placementsArray);
         }
       }
 
@@ -917,8 +940,14 @@ export class ContileIntegration {
     return false;
   }
 
-  async _fetchSitesWithAdsClient(placements) {
-    const options = lazy.AdsClient.requestOptions();
+  async _fetchSitesWithAdsClient(placements, relevance) {
+    const options = lazy.AdsClient.requestOptions(
+      this._topSitesFeed.store.getState().Prefs.values,
+      // Also block the user's current default search engine hostname so
+      // MARS returns a substitute sponsor instead of leaving us short.
+      this._topSitesFeed._currentSearchHostname || [],
+      relevance
+    );
 
     const requests = placements.map(
       placementId =>
@@ -963,12 +992,17 @@ ContileIntegration.prototype.PersistentCache = (...args) => {
 };
 
 export class TopSitesFeed {
+  /** @type {Store} */
+  store = null;
+
   constructor() {
     this._telemetryUtility = new TopSitesTelemetry();
     this._contile = new ContileIntegration(this);
     this._tippyTopProvider = new TippyTopProvider();
     this._refreshGeneration = 0;
+    this._broadcastPending = false;
     this._latestRefreshPromise = Promise.resolve();
+    this._uninitialized = false;
     ChromeUtils.defineLazyGetter(
       this,
       "_currentSearchHostname",
@@ -1023,9 +1057,31 @@ export class TopSitesFeed {
     Services.prefs.addObserver(DEFAULT_SITES_EXPERIMENTS_PREF_BRANCH, this);
     lazy.NimbusFeatures.newtab.onUpdate(this._nimbusChangeListener);
     this.frecencyBoostProvider.init();
+    this._updateSponsoredScoring();
+  }
+
+  /**
+   * Starts the sponsored top sites scoring when shortcuts and sponsored
+   * shortcuts are both shown, and otherwise stops it and clears its data.
+   */
+  _updateSponsoredScoring() {
+    const { values } = this.store.getState().Prefs;
+    if (values[SHOWN_ON_NEWTAB_PREF] && values[SHOW_SPONSORED_PREF]) {
+      // init() only initializes if initialization has not already occurred,
+      // so it is safe to call while the scoring is running.
+      SponsoredTopSitesScoreProvider.init(
+        () => this.store.getState().Prefs.values.adsBackendConfig
+      );
+    } else {
+      SponsoredTopSitesScoreProvider.clearData().catch(e =>
+        lazy.log.error(`Failed to clear sponsored scoring data: ${e}`)
+      );
+      SponsoredTopSitesScoreProvider.uninit();
+    }
   }
 
   uninit() {
+    this._uninitialized = true;
     lazy.PageThumbs.removeExpirationFilter(this);
     Services.obs.removeObserver(this, "browser-search-engine-modified");
     Services.obs.removeObserver(this, "browser-region-updated");
@@ -1034,6 +1090,7 @@ export class TopSitesFeed {
     Services.prefs.removeObserver(DEFAULT_SITES_EXPERIMENTS_PREF_BRANCH, this);
     lazy.NimbusFeatures.newtab.offUpdate(this._nimbusChangeListener);
     this.frecencyBoostProvider.uninit();
+    SponsoredTopSitesScoreProvider.uninit();
   }
 
   observe(subj, topic, data) {
@@ -1078,18 +1135,7 @@ export class TopSitesFeed {
    * _readContile - sets DEFAULT_TOP_SITES with contile
    */
   _readContile() {
-    // Keep the number of positions in the array in sync with CONTILE_MAX_NUM_SPONSORED.
-    // sponsored_position is a 1-based index, and contilePositions is a 0-based index,
-    // so we need to add 1 to each of these.
-    // Also currently this does not work with SOV.
-    let contilePositions = lazy.NimbusFeatures.pocketNewtab
-      .getVariable(NIMBUS_VARIABLE_CONTILE_POSITIONS)
-      ?.split(",")
-      .map(item => parseInt(item, 10) + 1)
-      .filter(item => !Number.isNaN(item));
-    if (!contilePositions || contilePositions.length === 0) {
-      contilePositions = [1, 2];
-    }
+    const contilePositions = this._contilePositions;
 
     let hasContileTiles = false;
 
@@ -1109,7 +1155,6 @@ export class TopSitesFeed {
         isDefault: true,
         url: site.url,
         hostname,
-        sendAttributionRequest: false,
         label: site.name,
         show_sponsored_label: hostname !== "yandex",
         sponsored_position: contilePositions[contilePositionIndex++],
@@ -1212,7 +1257,6 @@ export class TopSitesFeed {
         isDefault: true,
         url: siteData.url,
         hostname,
-        sendAttributionRequest: !!siteData.send_attribution_request,
       };
       if (siteData.url_urlbar_override) {
         link.url_urlbar = siteData.url_urlbar_override;
@@ -1247,6 +1291,58 @@ export class TopSitesFeed {
     }
 
     this.refresh({ broadcast: true, isStartup });
+  }
+
+  /**
+   * The 1-based tile positions Contile ads are configured to fill.
+   *
+   * Keep the number of positions in the array in sync with
+   * CONTILE_MAX_NUM_SPONSORED. The Nimbus variable is 0-based, so we need to
+   * add 1 to each of these. Also currently this does not work with SOV.
+   */
+  get _contilePositions() {
+    const configured = lazy.NimbusFeatures.pocketNewtab
+      .getVariable(NIMBUS_VARIABLE_CONTILE_POSITIONS)
+      ?.split(",")
+      .map(item => parseInt(item, 10) + 1)
+      .filter(item => !Number.isNaN(item));
+    return configured?.length ? configured : [1, 2];
+  }
+
+  /**
+   * The maximum number of sponsored top sites that can be displayed.
+   */
+  get _maxSponsored() {
+    return (
+      lazy.NimbusFeatures.pocketNewtab.getVariable(
+        NIMBUS_VARIABLE_MAX_SPONSORED
+      ) ?? MAX_NUM_SPONSORED
+    );
+  }
+
+  /**
+   * The 1-based tile positions an ad is allowed to fill, whether or not an ad
+   * was available for them. Positions past the display maximum can never be
+   * filled, so they are not eligible.
+   *
+   * @returns {number[]} Ascending 1-based positions.
+   */
+  _adEligiblePositions() {
+    const state = this.store.getState();
+    if (
+      !lazy.NimbusFeatures.newtab.getVariable(
+        NIMBUS_VARIABLE_CONTILE_ENABLED
+      ) ||
+      !state.Prefs.values[SHOW_SPONSORED_PREF]
+    ) {
+      return [];
+    }
+    const { positions, ready } = state.TopSites.sov || {};
+    const eligible =
+      this._contile.sov && ready
+        ? positions.map(allocation => allocation.position)
+        : this._contilePositions;
+    return eligible.slice(0, this._maxSponsored);
   }
 
   refreshDefaults(sites, { isStartup = false } = {}) {
@@ -1370,7 +1466,7 @@ export class TopSitesFeed {
    * shouldFilterSearchTile - is default filtering enabled and does a given hostname match the user's default search engine?
    *
    * @param {string} hostname a top site hostname, such as "amazon" or "foo"
-   * @returns {bool}
+   * @returns {boolean}
    */
   shouldFilterSearchTile(hostname) {
     if (
@@ -1388,7 +1484,7 @@ export class TopSitesFeed {
    * needed.
    *
    * @param {Array} plainPinnedSites (from the pinnedSitesCache)
-   * @returns {boolean} Did we insert any search shortcuts?
+   * @returns {Promise<boolean>} Did we insert any search shortcuts?
    */
   async _maybeInsertSearchShortcuts(plainPinnedSites) {
     // Only insert shortcuts if the experiment is running
@@ -1471,6 +1567,8 @@ export class TopSitesFeed {
   /**
    * This thin wrapper around global.fetch makes it easier for us to write
    * automated tests that simulate responses from this fetch.
+   *
+   * @param {Parameters<typeof fetch>} args
    */
   fetch(...args) {
     return fetch(...args);
@@ -1479,7 +1577,7 @@ export class TopSitesFeed {
   /**
    * Fetch topsites spocs that are frecency boosted.
    *
-   * @returns {Array} An array of sponsored tile objects.
+   * @returns {Promise<Array>} An array of sponsored tile objects.
    */
   async fetchFrecencyBoostedSpocs() {
     let candidates = [];
@@ -1839,7 +1937,7 @@ export class TopSitesFeed {
         sampledSites = await this.ranker.rankTopSites(
           checkedAdult,
           prefValues,
-          isStartup
+          { isStartup }
         );
       } catch (error) {
         lazy.log.warn(`Smart shortcuts ranking failed: ${error.message}`);
@@ -1878,6 +1976,21 @@ export class TopSitesFeed {
     // Remove excess items after we inserted sponsored ones.
     withPinned = withPinned.slice(0, numItems);
 
+    // These positions are ad-eligible even when no ad was available to fill
+    // them, so flag whichever tile ended up in each one for telemetry.
+    // Clear any stale references as well.
+    const adEligible = new Set(this._adEligiblePositions());
+    withPinned.forEach((link, index) => {
+      if (!link) {
+        return;
+      }
+      if (adEligible.has(index + 1)) {
+        link.is_ad_eligible_position = true;
+      } else {
+        delete link.is_ad_eligible_position;
+      }
+    });
+
     // Now, get a tippy top icon, a rich icon, or screenshot for every item
     for (const link of withPinned) {
       if (link) {
@@ -1912,10 +2025,7 @@ export class TopSitesFeed {
    */
   _maybeCapSponsoredLinks(links) {
     // Set maximum sponsored top sites
-    const maxSponsored =
-      lazy.NimbusFeatures.pocketNewtab.getVariable(
-        NIMBUS_VARIABLE_MAX_SPONSORED
-      ) ?? MAX_NUM_SPONSORED;
+    const maxSponsored = this._maxSponsored;
     if (links.length > maxSponsored) {
       links.length = maxSponsored;
     }
@@ -2018,10 +2128,16 @@ export class TopSitesFeed {
   /**
    * Refresh the top sites data for content.
    *
-   * @param {bool} options.broadcast Should the update be broadcasted.
-   * @param {bool} options.isStartup Being called while TopSitesFeed is initting.
+   * @param {object} [options]
+   * @param {boolean} [options.broadcast] Should the update be broadcasted.
+   * @param {boolean} [options.isStartup] Being called while TopSitesFeed is initting.
    */
   async refresh(options = {}) {
+    if (this._uninitialized) {
+      // The store has already dropped this feed, and may hold a newer instance.
+      // An in-flight Contile fetch can still get here, through _readDefaults().
+      return;
+    }
     if (!this._startedUp && !options.isStartup) {
       // Initial refresh still pending.
       return;
@@ -2029,18 +2145,19 @@ export class TopSitesFeed {
     this._startedUp = true;
 
     const refreshId = ++this._refreshGeneration;
+    // Only the newest refresh dispatches, so a refresh started while a
+    // broadcasting one is in flight has to broadcast on its behalf.
+    this._broadcastPending ||= !!options.broadcast;
     const refreshPromise = (async () => {
       if (!this._tippyTopProvider.initialized) {
         await this._tippyTopProvider.init();
       }
 
       const links = await this.getLinksWithDefaults(
-        {
-          isStartup: options.isStartup,
-        },
+        options.isStartup,
         refreshId
       );
-      if (refreshId !== this._refreshGeneration) {
+      if (this._uninitialized || refreshId !== this._refreshGeneration) {
         return;
       }
 
@@ -2052,7 +2169,8 @@ export class TopSitesFeed {
         };
       }
 
-      if (options.broadcast) {
+      if (this._broadcastPending) {
+        this._broadcastPending = false;
         // Broadcast an update to all open content pages
         this.store.dispatch(ac.BroadcastToContent(newAction));
       } else {
@@ -2279,8 +2397,12 @@ export class TopSitesFeed {
   /**
    * Pin a site at a specific position saving only the desired keys.
    *
-   * @param customScreenshotURL {string} User set URL of preview image for site
-   * @param label {string} User set string of custom site name
+   * @param {object} site
+   * @param {string} [site.customScreenshotURL] User set URL of preview image for site
+   * @param {string} [site.label] User set string of custom site name
+   * @param {string} site.url
+   * @param {boolean} [site.searchTopSite]
+   * @param {number} index
    */
   async _pinSiteAt({ customScreenshotURL, label, url, searchTopSite }, index) {
     if (this._groupedPinsEnabled) {
@@ -2383,6 +2505,17 @@ export class TopSitesFeed {
     index = this._adjustPinIndexForSponsoredLinks(site, index);
     // If valid index provided, pin at that position
     if (index >= 0) {
+      const currentSite = this._linksWithDefaults?.[requestedIndex];
+      if (
+        this._groupedPinsEnabled &&
+        currentSite?.isPinned &&
+        currentSite.url !== site.url
+      ) {
+        // Bug 2073040: an edit changed a pin's URL, so swap it in place.
+        lazy.NewTabUtils.pinnedLinks.replace(currentSite.url, {
+          url: site.url,
+        });
+      }
       const prefs = this.store.getState().Prefs.values;
       // Classic add button on a full row: replace the last visible frecency tile,
       // matching how a grouped pin pushes the trailing frecency tile off the grid.
@@ -2718,7 +2851,13 @@ export class TopSitesFeed {
             if (!action.data.value) {
               this._contile._resetContileCache();
             }
+            if (action.data.name === SHOW_SPONSORED_PREF) {
+              this._updateSponsoredScoring();
+            }
 
+            break;
+          case SHOWN_ON_NEWTAB_PREF:
+            this._updateSponsoredScoring();
             break;
           case SEARCH_SHORTCUTS_EXPERIMENT:
             if (action.data.value) {

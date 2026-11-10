@@ -12,7 +12,7 @@ class APZScrollbarDraggingTester : public APZCTreeManagerTester {
 
  protected:
   UniquePtr<ScopedLayerTreeRegistration> registration;
-  ScrollableLayerGuid::ViewID scrollId = ScrollableLayerGuid::START_SCROLL_ID;
+  ViewID scrollId = START_SCROLL_ID;
   TestAsyncPanZoomController* apzc = nullptr;
 
   ParentLayerCoord ScrollY() const {
@@ -35,7 +35,8 @@ class APZScrollbarDraggingTester : public APZCTreeManagerTester {
                                        LayerIntRect(50, 0, 50, 10)};
     CreateScrollData(treeShape, layerVisibleRect);
     SetScrollableFrameMetrics(layers[1], scrollId, CSSRect(0, 0, 50, 1000));
-    registration = MakeUnique<ScopedLayerTreeRegistration>(LayersId{0}, mcc);
+    registration =
+        std::make_unique<ScopedLayerTreeRegistration>(LayersId{0}, mcc);
     layers[2]->SetScrollbarData(ScrollbarData::CreateForThumb(
         ScrollDirection::eVertical, 0.1, 0, 10, 10, true, 0, 100, scrollId));
     UpdateHitTestingTree();

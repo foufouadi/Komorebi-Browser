@@ -275,6 +275,8 @@ const tests = [
 ];
 
 add_setup(async function () {
+  UrlbarTestUtils.registerZeroPrefixProvider();
+
   gURLBar.inputField.style.font = "14px monospace";
   registerCleanupFunction(() => {
     gURLBar.inputField.style.font = null;

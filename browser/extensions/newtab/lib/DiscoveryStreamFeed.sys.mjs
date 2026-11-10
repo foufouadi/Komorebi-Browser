@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/** @import {Store} from "resource://newtab/lib/Store.sys.mjs" */
+
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   AdsClient: "resource://newtab/lib/AdsClient.sys.mjs",
@@ -33,11 +35,21 @@ ChromeUtils.defineESModuleGetters(lazy, {
 const { setTimeout, clearTimeout } = ChromeUtils.importESModule(
   "resource://gre/modules/Timer.sys.mjs"
 );
+// eslint-disable-next-line mozilla/use-static-import
+const { AppConstants } = ChromeUtils.importESModule(
+  "resource://gre/modules/AppConstants.sys.mjs"
+);
 import {
   actionTypes as at,
   actionCreators as ac,
 } from "resource://newtab/common/Actions.mjs";
+import {
+  isSpaceOverridden,
+  isSpacesAssigned,
+  SPACE_IDS,
+} from "resource://newtab/common/PageLayoutVariants.mjs";
 
+import { isPlausibleSurfaceId } from "resource://newtab/common/SurfaceId.mjs";
 import { scoreItemInferred } from "resource://newtab/lib/InferredModel/GreedyContentRanker.mjs";
 
 const LOCAL_POPULAR_RERANK = false; // default behavior for local re-ranking
@@ -60,10 +72,12 @@ const TOPIC_SELECTION_LAST_DISPLAYED =
 const TOPIC_SELECTION_DISPLAY_TIMEOUT =
   "discoverystream.topicSelection.onboarding.displayTimeout";
 
+// Decommissioned, and no longer in the `discoverystream.endpoints` allowlist,
+// so fetchFromEndpoint rejects it. It only remains because loadLayout keys the
+// spocs placement update off a truthy layout spocs URL.
 const SPOCS_URL = "https://spocs.getpocket.com/spocs";
 const PREF_CONFIG = "discoverystream.config";
 const PREF_ENDPOINTS = "discoverystream.endpoints";
-const PREF_IMPRESSION_ID = "browser.newtabpage.activity-stream.impressionId";
 // const PREF_LAYOUT_EXPERIMENT_A = "newtabLayouts.variant-a";
 // const PREF_LAYOUT_EXPERIMENT_B = "newtabLayouts.variant-b";
 const PREF_CONTEXTUAL_SPOC_PLACEMENTS =
@@ -87,7 +101,6 @@ const PREF_UNIFIED_ADS_SPOCS_ENABLED = "unifiedAds.spocs.enabled";
 const PREF_UNIFIED_ADS_ADSFEED_ENABLED = "unifiedAds.adsFeed.enabled";
 const PREF_UNIFIED_ADS_ENDPOINT = "unifiedAds.endpoint";
 const PREF_UNIFIED_ADS_OHTTP = "unifiedAds.ohttp.enabled";
-const PREF_SPOCS_CLEAR_ENDPOINT = "discoverystream.endpointSpocsClear";
 const PREF_SHOW_SPONSORED = "showSponsored";
 const PREF_SYSTEM_SHOW_SPONSORED = "system.showSponsored";
 const PREF_SPOC_IMPRESSIONS = "discoverystream.spoc.impressions";
@@ -145,6 +158,9 @@ ChromeUtils.defineLazyGetter(lazy, "userAgent", () => {
 });
 
 export class DiscoveryStreamFeed {
+  /** @type {Store} */
+  store = null;
+
   constructor() {
     // Internal state for checking if we've intialized all our data
     this.loaded = false;
@@ -152,7 +168,6 @@ export class DiscoveryStreamFeed {
     // Persistent cache for remote endpoint data.
     this.cache = new lazy.PersistentCache(CACHE_KEY, true);
     this.locale = Services.locale.appLocaleAsBCP47;
-    this._impressionId = this.getOrCreateImpressionId();
     // Internal in-memory cache for parsing json prefs.
     this._prefCache = {};
     this.adsClient = null;
@@ -175,15 +190,6 @@ export class DiscoveryStreamFeed {
         type: at.INFERRED_PERSONALIZATION_CLEAR_INTEREST_VECTOR,
       })
     );
-  }
-
-  getOrCreateImpressionId() {
-    let impressionId = Services.prefs.getCharPref(PREF_IMPRESSION_ID, "");
-    if (!impressionId) {
-      impressionId = String(Services.uuid.generateUUID());
-      Services.prefs.setCharPref(PREF_IMPRESSION_ID, impressionId);
-    }
-    return impressionId;
   }
 
   get config() {
@@ -280,9 +286,11 @@ export class DiscoveryStreamFeed {
 
   get showStories() {
     // Combine user-set stories opt-out with Mozilla-set config
+    const prefs = this.store.getState().Prefs.values;
     return (
-      this.store.getState().Prefs.values[PREF_SYSTEM_TOPSTORIES] &&
-      this.store.getState().Prefs.values[PREF_USER_TOPSTORIES]
+      prefs[PREF_SYSTEM_TOPSTORIES] &&
+      (prefs[PREF_USER_TOPSTORIES] ||
+        isSpaceOverridden(SPACE_IDS.STORIES, prefs))
     );
   }
 
@@ -629,7 +637,9 @@ export class DiscoveryStreamFeed {
   }
 
   async _fetchSpocsWithAdsClient(placements) {
-    const options = lazy.AdsClient.requestOptions();
+    const options = lazy.AdsClient.requestOptions(
+      this.store.getState().Prefs.values
+    );
 
     const requests = [];
     for (let { placement: placementId, count, content } of placements) {
@@ -656,37 +666,66 @@ export class DiscoveryStreamFeed {
       );
     }
 
-    const spocs = await this.adsClient.requestSpocAds(requests, options);
+    /**
+     * @backward-compat { version 161 }
+     * `requestSpocOrImageAds` can return images and spocs (with similar structures) unlike `requestSpocAds`
+     * which invalidly drops would-be images returned from MARS. This requires a vendor of A-S
+     * for the function to exist, and another for it to behave correctly (using the latter).
+     */
+    const adsClientUpdated =
+      Services.vc.compare(AppConstants.MOZ_APP_VERSION, "161.0a1") >= 0;
+    let spocs;
+    if (adsClientUpdated) {
+      spocs = await this.adsClient.requestSpocOrImageAds(requests, options);
+    } else {
+      spocs = await this.adsClient.requestSpocAds(requests, options);
+    }
 
-    return Object.fromEntries(
-      spocs.entries().map(([placementId, placementSpocs]) => [
-        placementId,
-        placementSpocs.map(spoc => ({
-          format: spoc.format,
-          url: spoc.url,
-          callbacks: spoc.callbacks,
-          image_url: spoc.imageUrl,
-          title: spoc.title,
-          domain: spoc.domain,
-          excerpt: spoc.excerpt,
-          sponsor: spoc.sponsor,
-          sponsored_by_override: spoc.sponsoredByOverride,
-          block_key: spoc.blockKey,
-          caps: spoc.caps
-            ? { cap_key: spoc.caps.capKey, day: spoc.caps.day }
-            : undefined,
-          ranking: spoc.ranking
-            ? {
-                item_score: spoc.ranking.itemScore,
-                personalization_models: Object.fromEntries(
-                  spoc.ranking.personalizationModels ?? []
-                ),
-                priority: spoc.ranking.priority,
+    // The ads-client omits placements it has no ads for; MARS returns them as
+    // empty arrays, and loadSpocs concats by placement, so a missing key folds
+    // an undefined into the spocs list.
+    // `requestSpocOrImageAds` returns wrapped spocs (under field 'v0').
+    return {
+      ...Object.fromEntries(placements.map(p => [p.placement, []])),
+      ...Object.fromEntries(
+        spocs.entries().map(([placementId, placementSpocs]) => [
+          placementId,
+          placementSpocs
+            .map(spocWrapped => {
+              if (adsClientUpdated) {
+                return spocWrapped.v0;
               }
-            : undefined,
-        })),
-      ])
-    );
+              return spocWrapped;
+            })
+            .filter(Boolean)
+            .map(spoc => ({
+              alt_text: spoc.altText,
+              format: spoc.format,
+              url: spoc.url,
+              callbacks: spoc.callbacks,
+              image_url: spoc.imageUrl,
+              title: spoc.title,
+              domain: spoc.domain,
+              excerpt: spoc.excerpt,
+              sponsor: spoc.sponsor,
+              sponsored_by_override: spoc.sponsoredByOverride,
+              block_key: spoc.blockKey,
+              caps: spoc.caps
+                ? { cap_key: spoc.caps.capKey, day: spoc.caps.day }
+                : undefined,
+              ranking: spoc.ranking
+                ? {
+                    item_score: spoc.ranking.itemScore,
+                    personalization_models: Object.fromEntries(
+                      spoc.ranking.personalizationModels ?? []
+                    ),
+                    priority: spoc.ranking.priority,
+                  }
+                : undefined,
+            })),
+        ])
+      ),
+    };
   }
 
   get spocsOnDemand() {
@@ -734,10 +773,11 @@ export class DiscoveryStreamFeed {
   /**
    * Returns true if data in the cache for a particular key has expired or is missing.
    *
-   * @param {object} cachedData data returned from cache.get()
-   * @param {string} key a cache key
-   * @param {string?} url for "feed" only, the URL of the feed.
-   * @param {boolean} is this check done at initial browser load
+   * @param {object} options
+   * @param {object} options.cachedData data returned from cache.get()
+   * @param {string} options.key a cache key
+   * @param {string} [options.url] for "feed" only, the URL of the feed.
+   * @param {boolean} [options.isStartup] is this check done at initial browser load
    */
   isExpired({ cachedData, key, url, isStartup }) {
     const { spocs, feeds } = cachedData;
@@ -1118,9 +1158,6 @@ export class DiscoveryStreamFeed {
       return;
     }
 
-    // Reset the flag that indicates whether or not at least one API request
-    // was issued to fetch the component feed in `getComponentFeed()`.
-    this.componentFeedFetched = false;
     const { newFeedsPromises, newFeeds } = this.buildFeedPromises(
       DiscoveryStream.layout,
       isStartup,
@@ -1160,6 +1197,10 @@ export class DiscoveryStreamFeed {
   // We want to maintain both implementations until we're done rollout out,
   // so for now we are going to normlaize the new data to match the old data props,
   // so we can change as little as possible. Once we commit to one, we can remove all this.
+  /**
+   * @param {object} spocs
+   * @returns {{items: Array, title?: string, context?: string, sponsor?: string, sponsored_by_override?: string, flight_id?: string}}
+   */
   normalizeSpocsItems(spocs) {
     const unifiedAdsEnabled =
       this.store.getState().Prefs.values[PREF_UNIFIED_ADS_SPOCS_ENABLED];
@@ -1358,7 +1399,7 @@ export class DiscoveryStreamFeed {
 
   // eslint-disable-next-line max-statements
   async loadSpocs(sendUpdate, isStartup) {
-    const cachedData = (await this.cache.get()) || {};
+    const cachedData = this.adsClient ? {} : (await this.cache.get()) || {};
     const unifiedAdsEnabled =
       this.store.getState().Prefs.values[PREF_UNIFIED_ADS_SPOCS_ENABLED];
 
@@ -1379,8 +1420,8 @@ export class DiscoveryStreamFeed {
         headers.append("content-type", "application/json");
         const state = this.store.getState();
         let endpoint = state.DiscoveryStream.spocs.spocs_endpoint;
+        /** @type {object} */
         let body = {
-          pocket_id: this._impressionId,
           version: 2,
           ...(placements.length ? { placements } : {}),
         };
@@ -1578,12 +1619,16 @@ export class DiscoveryStreamFeed {
             lastUpdated: Date.now(),
             spocs: {},
           };
-    await this.cache.set("spocs", {
-      lastUpdated: spocsState.lastUpdated,
-      spocs: spocsState.spocs,
-      spocsOnDemand: this.spocsOnDemand,
-      spocsCacheUpdateTime: this.spocsCacheUpdateTime,
-    });
+    // The ads-client has its own HTTP response cache, so it is the only cache
+    // on that path.
+    if (!this.adsClient) {
+      await this.cache.set("spocs", {
+        lastUpdated: spocsState.lastUpdated,
+        spocs: spocsState.spocs,
+        spocsOnDemand: this.spocsOnDemand,
+        spocsCacheUpdateTime: this.spocsCacheUpdateTime,
+      });
+    }
 
     sendUpdate({
       type: at.DISCOVERY_STREAM_SPOCS_UPDATE,
@@ -1601,52 +1646,41 @@ export class DiscoveryStreamFeed {
 
   async clearSpocs() {
     const state = this.store.getState();
-    let endpoint = state.Prefs.values[PREF_SPOCS_CLEAR_ENDPOINT];
 
-    const unifiedAdsEnabled =
-      state.Prefs.values[PREF_UNIFIED_ADS_SPOCS_ENABLED];
-
-    let body = {
-      pocket_id: this._impressionId,
-    };
-
-    if (unifiedAdsEnabled) {
-      const adsFeedEnabled =
-        state.Prefs.values[PREF_UNIFIED_ADS_ADSFEED_ENABLED];
-
-      const endpointBaseUrl = state.Prefs.values[PREF_UNIFIED_ADS_ENDPOINT];
-
-      // Exit if there no DELETE endpoint or AdsFeed is enabled (which will handle the DELETE request)
-      if (!endpointBaseUrl || adsFeedEnabled) {
-        return;
-      }
-
-      // If rotation is enabled, then the module is going to take care of
-      // sending the request to MARS to delete the context_id. Otherwise,
-      // we do it manually here.
-      if (lazy.ContextId.rotationEnabled) {
-        await lazy.ContextId.forceRotation();
-      } else {
-        endpoint = `${endpointBaseUrl}v1/delete_user`;
-        body = {
-          context_id: await lazy.ContextId.request(),
-        };
-      }
-    }
-
-    if (!endpoint) {
+    // The legacy Pocket ad server this used to delete from is decommissioned,
+    // so there is nothing to clear unless we are talking to MARS.
+    if (!state.Prefs.values[PREF_UNIFIED_ADS_SPOCS_ENABLED]) {
       return;
     }
+
+    const adsFeedEnabled = state.Prefs.values[PREF_UNIFIED_ADS_ADSFEED_ENABLED];
+    const endpointBaseUrl = state.Prefs.values[PREF_UNIFIED_ADS_ENDPOINT];
+
+    // Exit if there no DELETE endpoint or AdsFeed is enabled (which will handle the DELETE request)
+    if (!endpointBaseUrl || adsFeedEnabled) {
+      return;
+    }
+
+    // If rotation is enabled, then the module is going to take care of
+    // sending the request to MARS to delete the context_id. Otherwise,
+    // we do it manually here.
+    if (lazy.ContextId.rotationEnabled) {
+      await lazy.ContextId.forceRotation();
+      return;
+    }
+
     const headers = new Headers();
     headers.append("content-type", "application/json");
     const marsOhttpEnabled = state.Prefs.values[PREF_UNIFIED_ADS_OHTTP];
 
     await this.fetchFromEndpoint(
-      endpoint,
+      `${endpointBaseUrl}v1/delete_user`,
       {
         method: "DELETE",
         headers,
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          context_id: await lazy.ContextId.request(),
+        }),
       },
       marsOhttpEnabled
     );
@@ -1889,6 +1923,10 @@ export class DiscoveryStreamFeed {
 
     let feed = feeds ? feeds[feedUrl] : null;
     if (this.isExpired({ cachedData, key: "feed", url: feedUrl, isStartup })) {
+      // Read before the awaits below, alongside the request body, so the
+      // surfaceId is checked against what Merino was sent even if the region
+      // changes while the fetch is in flight.
+      const { locale, region } = this;
       const options = this.formatComponentFeedRequest(
         cachedData.sectionPersonalization
       );
@@ -1921,30 +1959,11 @@ export class DiscoveryStreamFeed {
         }));
 
         if (sectionsEnabled) {
-          const dailyBriefEnabled =
-            prefs.trainhopConfig?.dailyBriefing?.enabled ||
-            this.store.getState().Prefs.values[
-              "discoverystream.dailyBrief.enabled"
-            ];
-          const dailyBriefSectionId =
-            prefs.trainhopConfig?.dailyBriefing?.sectionId ||
-            prefs["discoverystream.dailyBrief.sectionId"] ||
-            "top_stories_section";
-
           for (const [sectionKey, sectionData] of Object.entries(
             feedResponse.feeds
           )) {
             if (sectionData) {
-              let headlineCount = 0;
-              const shouldMarkHeadlines =
-                dailyBriefEnabled && sectionKey === dailyBriefSectionId;
-
               for (const item of sectionData.recommendations) {
-                const isHeadline = shouldMarkHeadlines && headlineCount < 3;
-                if (isHeadline) {
-                  headlineCount++;
-                }
-
                 recommendations.push({
                   id:
                     item.corpusItemId ||
@@ -1963,9 +1982,10 @@ export class DiscoveryStreamFeed {
                   server_score: item.serverScore,
                   recommended_at: feedResponse.recommendedAt,
                   section: sectionKey,
+                  variant_id: item.variantId === undefined ? 0 : item.variantId,
+                  source_section_id: item.sourceSectionId,
                   icon_src: item.iconUrl,
                   isTimeSensitive: item.isTimeSensitive,
-                  isHeadline,
                 });
               }
 
@@ -2036,10 +2056,15 @@ export class DiscoveryStreamFeed {
         // Rotate is also the only place that uses these impressions.
         await this.cleanUpTopRecImpressions();
         const rotatedItems = await this.rotate(scoredItems);
-
         const { data: filteredResults } =
           await this.filterBlocked(rotatedItems);
-        this.componentFeedFetched = true;
+        let { surfaceId = "" } = feedResponse;
+        if (surfaceId && !isPlausibleSurfaceId(surfaceId, locale, region)) {
+          console.warn(`Ignoring implausible surfaceId: ${surfaceId}`);
+          // @ts-expect-error tools/@types/generated/lib.gecko.glean.d.ts predates this metric.
+          Glean.newtabContent.surfaceIdRejected.record();
+          surfaceId = "";
+        }
         feed = {
           lastUpdated: Date.now(),
           personalized,
@@ -2049,7 +2074,7 @@ export class DiscoveryStreamFeed {
             sections,
             interestPicker: feedResponse.interestPicker || {},
             recommendations: filteredResults,
-            surfaceId: feedResponse.surfaceId || "",
+            surfaceId,
             status: "success",
           },
         };
@@ -2064,8 +2089,12 @@ export class DiscoveryStreamFeed {
     }
 
     // Still gated: this pref feeds utc_offset on the Merino request
-    if (prefs[PREF_PRIVATE_PING_ENABLED] && feed?.data?.surfaceId) {
-      this.store.dispatch(ac.SetPref(PREF_SURFACE_ID, feed.data.surfaceId));
+    if (prefs[PREF_PRIVATE_PING_ENABLED] && feed?.data) {
+      this.store.dispatch(
+        feed.data.surfaceId
+          ? ac.SetPref(PREF_SURFACE_ID, feed.data.surfaceId)
+          : { type: at.CLEAR_PREF, data: { name: PREF_SURFACE_ID } }
+      );
     }
 
     // If we have no feed at this point, both fetch and cache failed for some reason.
@@ -2114,9 +2143,14 @@ export class DiscoveryStreamFeed {
 
     let inferredInterests = null;
     if (inferredPersonalization && merinoOhttpEnabled) {
-      inferredInterests =
-        this.store.getState().InferredPersonalization
-          ?.coarsePrivateInferredInterests || {};
+      const personalization = this.store.getState().InferredPersonalization;
+      const useLocationVector =
+        prefs?.trainhopConfig?.locationInitInferred?.enabled &&
+        personalization?.shouldUseLocationVector &&
+        personalization.locationPrivateInferredInterests;
+      inferredInterests = useLocationVector
+        ? personalization.locationPrivateInferredInterests
+        : personalization?.coarsePrivateInferredInterests || {};
       if (prefs[PREF_INFERRED_INTERESTS_OVERRIDE]) {
         try {
           inferredInterests = JSON.parse(
@@ -2129,13 +2163,16 @@ export class DiscoveryStreamFeed {
     }
 
     const requestMetadata = {
-      utc_offset: prefs.inferredPersonalizationConfig
-        ?.normalized_time_zone_offset
-        ? lazy.NewTabUtils.getUtcOffset(prefs[PREF_SURFACE_ID])
-        : undefined,
+      // Without a surface, getUtcOffset would return the unclamped offset.
+      utc_offset:
+        prefs.inferredPersonalizationConfig?.normalized_time_zone_offset &&
+        prefs[PREF_SURFACE_ID]
+          ? lazy.NewTabUtils.getUtcOffset(prefs[PREF_SURFACE_ID])
+          : undefined,
       inferredInterests,
     };
     headers.append("content-type", "application/json");
+    /** @type {{[key: string]: any}} */
     let body = {
       ...(prefMerinoFeedExperiment ? this.getExperimentInfo() : {}),
       ...requestMetadata,
@@ -2214,12 +2251,17 @@ export class DiscoveryStreamFeed {
 
   /**
    * @typedef {object} RefreshAll
-   * @property {boolean} updateOpenTabs - Sends updates to open tabs immediately if true,
+   * @property {boolean} [updateOpenTabs] - Sends updates to open tabs immediately if true,
    *                                      updates in background if false
-   * @property {boolean} isStartup - When the function is called at browser startup
-   *
+   * @property {boolean} [isStartup] - When the function is called at browser startup
+   * @property {boolean} [isSystemTick] - When the function is called by the system tick,
+   *                                      so that it can check whether spocs are on demand
+   */
+
+  /**
    * Refreshes component feeds, and spocs in order if caches have expired.
-   * @param {RefreshAll} options
+   *
+   * @param {RefreshAll} [options]
    */
   async refreshAll(options = {}) {
     const { updateOpenTabs, isStartup, isSystemTick } = options;
@@ -2600,6 +2642,13 @@ export class DiscoveryStreamFeed {
 
   async onTrainhopConfigChanged() {
     this.resetSpocsOnDemand();
+    // The spaces experiment turns stories on without the user pref changing, so
+    // the config arriving is what starts the feed. Scoped to the experiment, so
+    // an unrelated train-hop config does not trigger a refresh.
+    const prefs = this.store.getState().Prefs.values;
+    if (isSpacesAssigned(prefs) && this.showStories) {
+      this.enableStories();
+    }
   }
 
   async onPrefChangedAction(action) {
@@ -2609,7 +2658,6 @@ export class DiscoveryStreamFeed {
       case PREF_HARDCODED_BASIC_LAYOUT:
       case PREF_SPOCS_ENDPOINT:
       case PREF_SPOCS_ENDPOINT_QUERY:
-      case PREF_SPOCS_CLEAR_ENDPOINT:
       case PREF_ENDPOINTS:
       case PREF_SPOC_POSITIONS:
       case PREF_UNIFIED_ADS_SPOCS_ENABLED:
@@ -2686,7 +2734,7 @@ export class DiscoveryStreamFeed {
       this.setupPrefs(false /* isStartup */);
     }
     if (action.data.name === "trainhopConfig") {
-      await this.onTrainhopConfigChanged(action);
+      await this.onTrainhopConfigChanged();
     }
   }
 
@@ -2714,12 +2762,12 @@ export class DiscoveryStreamFeed {
         lazy.NimbusFeatures.pocketNewtab.onUpdate(
           this.onPocketExperimentUpdated
         );
+        if (lazy.AdsClient.isEnabled(this.store.getState().Prefs.values)) {
+          this.adsClient = lazy.AdsClient.getClient();
+        }
         // 2. If config.enabled is true, start loading data.
         if (this.config.enabled) {
           await this.enable({ updateOpenTabs: true, isStartup: true });
-        }
-        if (lazy.AdsClient.isEnabled(this.store.getState().Prefs.values)) {
-          this.adsClient = lazy.AdsClient.getClient();
         }
         // This function is async but just for devtools,
         // so we don't need to wait for it.

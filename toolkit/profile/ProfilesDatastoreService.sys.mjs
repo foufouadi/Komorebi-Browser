@@ -23,7 +23,7 @@ ChromeUtils.defineLazyGetter(lazy, "MigrationUtils", () => {
   try {
     let { MigrationUtils } = ChromeUtils.importESModule(
       // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
-      "resource:///modules/MigrationUtils.sys.mjs"
+      "moz-src:///browser/components/migration/MigrationUtils.sys.mjs"
     );
     return MigrationUtils;
   } catch (e) {
@@ -187,7 +187,7 @@ class ProfilesDatastoreServiceClass {
   async createTables() {
     // TODO: (Bug 1902320) Handle exceptions on connection opening
     let currentVersion = await this.#connection.getSchemaVersion();
-    if (currentVersion == 7) {
+    if (currentVersion == 8) {
       return;
     }
 
@@ -322,6 +322,27 @@ class ProfilesDatastoreServiceClass {
       });
 
       await this.#connection.setSchemaVersion(7);
+    }
+
+    if (currentVersion < 8) {
+      await this.#connection.executeTransaction(async () => {
+        const createStatusesTable = `
+          CREATE TABLE IF NOT EXISTS "NimbusEnrollmentStatuses" (
+            id                  INTEGER NOT NULL,
+            profileId           TEXT NOT NULL,
+            slug                TEXT NOT NULL,
+            timestamp           TEXT NOT NULL,
+            entryIndex          INTEGER NOT NULL,
+            status              JSONB NOT NULL,
+            PRIMARY KEY(id),
+            UNIQUE (profileId, slug, entryIndex) ON CONFLICT FAIL
+          );
+        `;
+
+        await this.#connection.execute(createStatusesTable);
+
+        await this.#connection.setSchemaVersion(8);
+      });
     }
   }
 
@@ -481,7 +502,7 @@ class ProfilesDatastoreServiceClass {
     } catch (e) {
       console.error(e);
 
-      await this.uninit();
+      await this.#uninit();
       return;
     }
 
@@ -499,6 +520,14 @@ class ProfilesDatastoreServiceClass {
   }
 
   async uninit() {
+    if (this.#initPromise) {
+      await this.#initPromise;
+    }
+
+    await this.#uninit();
+  }
+
+  async #uninit() {
     if (this.#asyncShutdownBarrier) {
       await this.#asyncShutdownBarrier.wait();
     }
@@ -516,6 +545,10 @@ class ProfilesDatastoreServiceClass {
     }
 
     await this.closeConnection();
+
+    this.#asyncShutdownBarrier = new lazy.AsyncShutdown.Barrier(
+      "ProfilesDatastoreService: waiting for clients to finish pending writes"
+    );
 
     this.#storeID = null;
 

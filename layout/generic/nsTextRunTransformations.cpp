@@ -155,6 +155,10 @@ void MergeCharactersInTextRun(gfxTextRun* aDest, gfxTextRun* aSrc,
   for (gfxTextRun::GlyphRunIterator iter(aSrc, gfxTextRun::Range(aSrc));
        !iter.AtEnd(); iter.NextRun()) {
     const gfxTextRun::GlyphRun* run = iter.GlyphRun();
+    if (offset >= aDest->GetLength()) {
+      MOZ_ASSERT_UNREACHABLE("bad offset in transformed textrun");
+      break;
+    }
     aDest->AddGlyphRun(run->mFont, run->mMatchType, offset, false,
                        run->mOrientation, run->mIsCJK);
 
@@ -164,6 +168,10 @@ void MergeCharactersInTextRun(gfxTextRun* aDest, gfxTextRun* aSrc,
     gfxTextRun::CompressedGlyph mergedGlyph = srcGlyphs[mergeRunStart];
     uint32_t stringEnd = iter.StringEnd();
     for (uint32_t k = iter.StringStart(); k < stringEnd; ++k) {
+      if (offset >= aDest->GetLength()) {
+        MOZ_ASSERT_UNREACHABLE("bad offset in transformed textrun");
+        break;
+      }
       const gfxTextRun::CompressedGlyph g = srcGlyphs[k];
       if (g.IsSimpleGlyph()) {
         if (!anyMissing) {
@@ -244,7 +252,8 @@ void MergeCharactersInTextRun(gfxTextRun* aDest, gfxTextRun* aSrc,
                  "Leftover glyphs, don't request merging of the last character "
                  "with its next!");
   }
-  NS_ASSERTION(offset == aDest->GetLength(), "Bad offset calculations");
+  MOZ_DIAGNOSTIC_ASSERT(offset == aDest->GetLength(),
+                        "Bad offset calculation in MergeCharactersInTextRun");
 }
 
 gfxTextRunFactory::Parameters GetParametersForInner(
@@ -386,10 +395,10 @@ bool nsCaseTransformTextRunFactory::TransformString(
 
     // Skip case transform if we're masking current character.
     if (!maskPassword) {
-      switch ((style & StyleTextTransform::CASE_TRANSFORMS)._0) {
-        case StyleTextTransform::NONE._0:
+      switch (Servo_TextTransform_Case(style)) {
+        case StyleTextTransformCase::None:
           break;
-        case StyleTextTransform::LOWERCASE._0:
+        case StyleTextTransformCase::Lowercase:
           if (languageSpecificCasing == eLSCB_Turkish) {
             if (ch == 'I') {
               ch = LATIN_SMALL_LETTER_DOTLESS_I;
@@ -554,7 +563,7 @@ bool nsCaseTransformTextRunFactory::TransformString(
           ch = ToLowerCase(ch);
           break;
 
-        case StyleTextTransform::UPPERCASE._0:
+        case StyleTextTransformCase::Uppercase:
           if (languageSpecificCasing == eLSCB_Turkish && ch == 'i') {
             ch = LATIN_CAPITAL_LETTER_I_WITH_DOT_ABOVE;
             break;
@@ -688,7 +697,7 @@ bool nsCaseTransformTextRunFactory::TransformString(
           ch = ToUpperCase(ch);
           break;
 
-        case StyleTextTransform::CAPITALIZE._0: {
+        case StyleTextTransformCase::Capitalize: {
           if (capitalizeDutchIJ && ch == 'j') {
             ch = 'J';
             capitalizeDutchIJ = false;
@@ -753,7 +762,7 @@ bool nsCaseTransformTextRunFactory::TransformString(
           break;
         }
 
-        case StyleTextTransform::MATH_AUTO._0:
+        case StyleTextTransformCase::MathAuto:
           // text-transform: math-auto is used for automatic italicization of
           // single-char <mi> elements. However, some legacy cases (italic style
           // fallback and <mi> with leading/trailing whitespace) are still

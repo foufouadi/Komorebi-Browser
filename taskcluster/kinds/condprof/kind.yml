@@ -14,14 +14,12 @@ transforms:
     - gecko_taskgraph.transforms.task:transforms
 
 task-defaults:
-    run-on-repo-type: [hg]
     treeherder:
         kind: other
         tier: 2
     scenarios:
         - settled
     run:
-        clone-with: hg
         using: run-task
         cwd: fetches/condprofile
         checkout: false
@@ -55,12 +53,12 @@ tasks:
             toolchain:
                 - win64-geckodriver
         run:
-            clone-with: hg
             command: >-
                 python3.exe condprof/main.py
                 ${EXTRA_ARGS}
                 --geckodriver ${MOZ_FETCHES_DIR}/geckodriver.exe
                 --firefox ${MOZ_FETCHES_DIR}/firefox/firefox.exe
+                --force-new
                 --scenario ${SCENARIO}
                 ../../archive
         worker:
@@ -90,13 +88,13 @@ tasks:
             toolchain:
                 - linux64-geckodriver
         run:
-            clone-with: hg
             command: >-
                 python3 -m venv . &&
                 bin/python3 condprof/main.py
                 ${EXTRA_ARGS}
                 --geckodriver ${MOZ_FETCHES_DIR}/geckodriver
                 --firefox ${MOZ_FETCHES_DIR}/firefox/firefox-bin
+                --force-new
                 --scenario ${SCENARIO}
                 ../../archive
         worker:
@@ -128,13 +126,13 @@ tasks:
             toolchain:
                 - macosx64-geckodriver
         run:
-            clone-with: hg
             command: >-
                 python3 -m venv . &&
                 bin/python3 condprof/main.py
                 ${EXTRA_ARGS}
                 --geckodriver ${MOZ_FETCHES_DIR}/geckodriver
                 --firefox ${MOZ_FETCHES_DIR}/target.dmg
+                --force-new
                 --scenario ${SCENARIO}
                 ../../archive
         worker:

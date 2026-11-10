@@ -65,6 +65,7 @@ void nsDOMNavigationTiming::Clear() {
   }
 
   mDocShellHasBeenActiveSinceNavigationStart = false;
+  mForegroundAtLoadEventStart = Nothing();
 }
 
 void nsDOMNavigationTiming::Anonymize(nsIURI* aFinalURI) {
@@ -144,6 +145,7 @@ void nsDOMNavigationTiming::NotifyLoadEventStart() {
     return;
   }
   mLoadEventStart = TimeStamp::Now();
+  mForegroundAtLoadEventStart = Some(DocShellIsActive());
 
   PROFILER_MARKER("Load", NETWORK,
                   MarkerOptions(MarkerTiming::IntervalStart(),
@@ -450,11 +452,6 @@ void nsDOMNavigationTiming::NotifyContentfulCompositeForRootContentDocument(
                                        TTI_WINDOW_SIZE_MS,
                                        nsITimer::TYPE_ONE_SHOT_LOW_PRIORITY,
                                        "nsDOMNavigationTiming::TTITimeout"_ns);
-
-  if (mDocShellHasBeenActiveSinceNavigationStart) {
-    glean::performance_time::to_first_contentful_paint.AccumulateRawDuration(
-        mContentfulComposite - mNavigationStart);
-  }
 }
 
 void nsDOMNavigationTiming::NotifyLargestContentfulRenderForRootContentDocument(
@@ -565,6 +562,14 @@ mozilla::TimeStamp nsDOMNavigationTiming::GetUnloadEventEndTimeStamp() const {
   return mozilla::TimeStamp();
 }
 
+bool nsDOMNavigationTiming::DocShellIsActive() const {
+  if (!mDocShell) {
+    return false;
+  }
+  auto* bc = mDocShell->GetBrowsingContext();
+  return bc && bc->IsActive();
+}
+
 bool nsDOMNavigationTiming::IsTopLevelContentDocumentInContentProcess() const {
   if (!mDocShell) {
     return false;
@@ -599,7 +604,10 @@ nsDOMNavigationTiming::nsDOMNavigationTiming(nsDocShell* aDocShell,
       mDOMComplete(aOther->mDOMComplete),
       mTTFI(aOther->mTTFI),
       mDocShellHasBeenActiveSinceNavigationStart(
-          aOther->mDocShellHasBeenActiveSinceNavigationStart) {}
+          aOther->mDocShellHasBeenActiveSinceNavigationStart),
+      mWasActivatedFromNavigationalPrefetch(
+          aOther->mWasActivatedFromNavigationalPrefetch),
+      mForegroundAtLoadEventStart(aOther->mForegroundAtLoadEventStart) {}
 
 /* static */
 void IPC::ParamTraits<nsDOMNavigationTiming*>::Write(
@@ -632,6 +640,7 @@ void IPC::ParamTraits<nsDOMNavigationTiming*>::Write(
   WriteParam(aWriter, aParam->mTTFI);
   WriteParam(aWriter, aParam->mDocShellHasBeenActiveSinceNavigationStart);
   WriteParam(aWriter, aParam->mWasActivatedFromNavigationalPrefetch);
+  WriteParam(aWriter, aParam->mForegroundAtLoadEventStart);
 }
 
 /* static */
@@ -669,7 +678,8 @@ bool IPC::ParamTraits<nsDOMNavigationTiming*>::Read(
       !ReadParam(aReader, &timing->mTTFI) ||
       !ReadParam(aReader,
                  &timing->mDocShellHasBeenActiveSinceNavigationStart) ||
-      !ReadParam(aReader, &timing->mWasActivatedFromNavigationalPrefetch)) {
+      !ReadParam(aReader, &timing->mWasActivatedFromNavigationalPrefetch) ||
+      !ReadParam(aReader, &timing->mForegroundAtLoadEventStart)) {
     return false;
   }
   timing->mNavigationType = nsDOMNavigationTiming::Type(type);

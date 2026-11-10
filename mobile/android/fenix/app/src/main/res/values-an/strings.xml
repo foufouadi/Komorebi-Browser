@@ -31,8 +31,6 @@
   <string name="tab_tray_close_multiselect_content_description">Salir d\'o modo de selección multiple</string>
   <!-- About content. %1$s is the name of the app (for example "Firefox"). -->
   <string name="about_content" tools:ignore="BrandUsage">%1$s ye produciu per Mozilla.</string>
-  <!-- Private Browsing -->
-  <string name="private_browsing_common_myths">Mitos comuns sobre la navegación privada</string>
   <!--
     Open in App "contextual feature recommendation" (CFR)
 
@@ -43,8 +41,6 @@
   <string name="open_in_app_cfr_positive_button_text">Ir ta los achustes</string>
   <!-- Text for the negative action button -->
   <string name="open_in_app_cfr_negative_button_text">Descartar</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
   <!-- Text for the info dialog when camera permissions have been denied but user tries to access a camera feature. -->
   <string name="camera_permissions_needed_message">La camara precisa acceso. Ves ta los achustes d\'Android, toca \"permisos\" y toca \"permitir\".</string>
   <!-- Text for the positive action button to go to Android Settings to grant permissions. -->
@@ -80,16 +76,8 @@
   <string name="home_screen_shortcut_open_new_tab_2">Nueva pestanya</string>
   <!-- Shortcut action to open new private tab -->
   <string name="home_screen_shortcut_open_new_private_tab_2">Nueva pestanya privada</string>
-  <!--
-    Recent Tabs
-
-    Header text for jumping back into the recent tab in the home screen
-  -->
-  <string name="recent_tabs_header">Tornar ta la pestanya</string>
   <!-- Button text for showing all the tabs in the tabs tray -->
   <string name="recent_tabs_show_all">Amostrar-lo tot</string>
-  <!-- Content description for the button which navigates the user to show all recent tabs in the tabs tray. -->
-  <string name="recent_tabs_show_all_content_description_2">Amostrar lo botón de totas as pestanyas recients</string>
   <!--
     Text for the menu button to remove a grouped highlight from the user's browsing history
     in the Recently visited section
@@ -109,11 +97,7 @@
   <string name="recently_visited_menu_item_remove">Borrar</string>
   <!-- Content description for the button which navigates the user to show all of their history. -->
   <string name="past_explorations_show_all_content_description_2">Amostrar totas las exploracions pasadas</string>
-  <!--
-    Browser Fragment
-
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
-  -->
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">Dezaga</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">Siguient</string>
@@ -181,10 +165,6 @@
   <string name="search_engine_suggestions_title">Mirar %s</string>
   <!-- Search engine suggestion description text -->
   <string name="search_engine_suggestions_description">Mirar directament d’a barra d’adrezas</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!--
     Search Widget
 
@@ -200,10 +180,8 @@
   <!--
     Preferences
 
-    Title for the settings page
+    Preference category for general settings
   -->
-  <string name="settings">Achustes</string>
-  <!-- Preference category for general settings -->
   <string name="preferences_category_general">Cheneral</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">Sobre</string>
@@ -286,8 +264,6 @@
   <string name="customize_addon_collection_hint">Nombre d’a colección</string>
   <!-- Hint displayed on input field for custom collection user ID -->
   <string name="customize_addon_collection_user_hint">Propietario d’a colección (ID d’usuario)</string>
-  <!-- Header text for jumping back into the recent tab in customize the home screen -->
-  <string name="customize_toggle_jump_back_in">Tornar ta la pestanya</string>
   <!--
     Title for the customize home screen section with recently visited. Recently visited is
     a section where users see a list of tabs that they have visited in the past few days
@@ -437,8 +413,6 @@
     Title of preference for tabs management
   -->
   <string name="preferences_tabs">Pestanyas</string>
-  <!-- Title of preference that allows a user to specify the tab view -->
-  <string name="preferences_tab_view">Vista de pestanyas</string>
   <!-- Option for a list tab view -->
   <string name="tab_view_list">Lista</string>
   <!-- Option for a grid tab view -->
@@ -469,7 +443,7 @@
   <string name="close_tabs_after_one_week_summary">Tancar dimpués d’una semana</string>
   <!-- Summary for tabs preference when auto closing tabs setting is set to auto close tabs after one month -->
   <string name="close_tabs_after_one_month_summary">Tancar dimpués d’un mes</string>
-  <!-- Title of inactive tabs preference -->
+  <!-- Summary of the preference that allows a user to enable or disable the inactive tabs feature. -->
   <string name="preferences_inactive_tabs_title">Las pestanyas que no has visto dende fa dos semanas se mueven ta la sección inactiva.</string>
   <!--
     Studies
@@ -505,8 +479,6 @@
   <string name="close_tab_title">Zarrar pestanya %s</string>
   <!-- Content description (not visible, for screen readers etc.): Opens the open tabs menu when pressed -->
   <string name="open_tabs_menu">Ubrir menú de pestanyas</string>
-  <!-- Open tabs menu item to save tabs to collection -->
-  <string name="tabs_menu_save_to_collection1">Alzar pestanyas en a colección</string>
   <!-- Text for the menu button to delete a collection -->
   <string name="collection_delete">Borrar colección</string>
   <!-- Text for the menu button to rename a collection -->
@@ -538,16 +510,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">%1$d triau(s)</string>
-  <!-- Text for the header that groups the history for today -->
-  <string name="history_today">Hue</string>
-  <!-- Text for the header that groups the history for yesterday -->
-  <string name="history_yesterday">Ahiere</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">Zaguers 7 días</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">Zaguers 30 días</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">Mas antigo</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">No i hai garra historial</string>
   <!--
@@ -773,8 +735,6 @@
   <string name="qr_scanner_dialog_invalid">L’adreza web no ye valida.</string>
   <!-- QR code scanner prompt dialog positive option when there is an error -->
   <string name="qr_scanner_dialog_invalid_ok">Aceptar</string>
-  <!-- Tab collection deletion prompt dialog message. %1$s is the collection name. -->
-  <string name="tab_collection_dialog_message">Seguro que quiers borrar %1$s?</string>
   <!-- Sample text for accessibility font size -->
   <string name="accessibility_text_size_sample_text_1">Este ye un texto d’eixemplo. Ye aquí pa amostrar cómo va a amaneixer lo texto quan aumentes u disminuigas la grandaria con esta configuración.</string>
   <!-- Summary for Accessibility Text Size Scaling Preference -->
@@ -968,8 +928,6 @@
   <string name="add_to_homescreen_cancel">Cancelar</string>
   <!-- Add button text for the Add to Homescreen dialog -->
   <string name="add_to_homescreen_add">Anyadir</string>
-  <!-- Continue to website button text for the first-time Add to Homescreen dialog -->
-  <string name="add_to_homescreen_continue">Continar a lo puesto web</string>
   <!-- Placeholder text for the TextView in the Add to Homescreen dialog -->
   <string name="add_to_homescreen_text_placeholder">Nombre d’acceso directo</string>
   <!-- Preference option for asking to save passwords in Fenix -->
@@ -1052,8 +1010,6 @@
   <string name="confirm_clear_permission_site">Seguro que quiers eliminar este permiso pa este puesto?</string>
   <!-- label shown when there are not site exceptions to show in the site exception settings -->
   <string name="no_site_exceptions">Sin excepcions pa lo puesto</string>
-  <!-- Positive action of a dialog asking to delete -->
-  <string name="dialog_delete_positive">Borrar</string>
   <!-- Voice search button content description -->
   <string name="voice_search_content_description">Busqueda per voz</string>
   <!-- Voice search prompt description displayed after the user presses the voice search button -->
@@ -1080,13 +1036,4 @@
   <string name="synced_tabs_no_open_tabs">No i hai garra pestanya ubierta</string>
   <!-- Confirmation dialog button text when top sites limit is reached. -->
   <string name="top_sites_max_limit_confirmation_button">Vale, entendiu</string>
-  <!-- Translations feature -->
-
-  <!-- TextField Design System Component -->
-
-  <!-- ==== Terms of use pop up prompt ==== -->
-
-  <!-- ==== Experiment strings. ==== -->
-
-  <!-- ==== End of Terms of use popup prompt. ==== -->
 </resources>

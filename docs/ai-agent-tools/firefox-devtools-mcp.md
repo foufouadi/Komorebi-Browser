@@ -18,7 +18,7 @@ monitoring, console logs, user input simulation, and Firefox logging. It isn't
 complete yet, but can already be useful.
 
 This documentation refers to the official Mozilla MCP for
-Firefox development: https://github.com/mozilla/firefox-devtools-mcp
+Firefox development: <https://github.com/mozilla/firefox-devtools-mcp>
 
 ### Key Features
 
@@ -47,6 +47,15 @@ Firefox development: https://github.com/mozilla/firefox-devtools-mcp
 The Firefox DevTools MCP server is **automatically configured** when using
 Claude Code in the Firefox repository, via the `.mcp.json` file at the root
 of the repository.
+
+On Windows, the server is started with the Python interpreter found as
+`python3` on the `PATH`, which the MozillaBuild shell provides. If Claude Code
+is started outside of the MozillaBuild shell, set `MACH_PYTHON` to the
+MozillaBuild Python before starting it, for instance:
+
+```powershell
+$env:MACH_PYTHON = "C:\mozilla-build\python3\python3.exe"
+```
 
 For installation in other projects or at user scope, Claude Code can configure
 the MCP server with a single command:
@@ -148,7 +157,7 @@ path: it isn't necessary to configure it.
 
 **Network & Console:**
 `list_network_requests`, `get_network_request`, `list_console_messages`,
-`clear_console`
+`clear_console_messages`
 
 **Screenshots:**
 `screenshot_page`, `screenshot_by_uid`
@@ -160,10 +169,11 @@ path: it isn't necessary to configure it.
 `get_firefox_info`, `get_firefox_output`, `restart_firefox`
 
 **Script Evaluation:**
-`evaluate_script` (content), `evaluate_chrome_script` (privileged)
+`evaluate_script` (content), `evaluate_privileged_script` (privileged)
 
-**Chrome Context (privileged code):**
-`list_chrome_contexts`, `select_chrome_context`, `evaluate_chrome_script`
+**Privileged Contexts (chrome/XUL code):**
+`list_privileged_contexts`, `select_privileged_context`,
+`evaluate_privileged_script`
 
 ## Working with MOZ_LOG
 
@@ -185,7 +195,7 @@ For a useful list of available MOZ_LOG modules and their descriptions, see
 `toolkit/content/aboutLogging/aboutLogging.mjs` in the Firefox repository, or search
 searchfox.org with something like this [searchfox query](https://searchfox.org/firefox-main/search?q=LazyLogModule.*%5C%28%22&path=&case=false&regexp=true).
 
-## Chrome Context Access
+## Privileged Context Access
 
 For debugging privileged Firefox code (chrome/XUL), enable system access:
 
@@ -193,8 +203,8 @@ For debugging privileged Firefox code (chrome/XUL), enable system access:
 restart_firefox(env=["MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1"])
 ```
 
-Then use `list_chrome_contexts`, `select_chrome_context`, and
-`evaluate_chrome_script` to access `gBrowser`, `Components`, and other
+Then use `list_privileged_contexts`, `select_privileged_context`, and
+`evaluate_privileged_script` to access `gBrowser`, `Components`, and other
 privileged APIs.
 
 At the moment, the MCP relies on WebDriver Classic (Marionette) for Chrome
@@ -217,4 +227,8 @@ then quit when seeing "Ready to accept tool requests".
 
 1. Verify the `.mcp.json` at the root of the repository is present.
 2. Verify Node.js is available via `./mach npx --version`.
-3. Ask in #ai4dev or #developers on chat.mozilla.org
+3. On Windows, if the server fails to start with only a `CONNECTION_CLOSED`
+   error, `python3` is likely not on the `PATH`. Either start Claude Code from
+   the MozillaBuild shell, or set `MACH_PYTHON` as described in
+   [Installation and Configuration](#installation-and-configuration).
+4. Ask in #ai4dev or #developers on chat.mozilla.org

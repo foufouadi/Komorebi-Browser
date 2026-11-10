@@ -227,10 +227,10 @@ struct HBInt<BE, Type, 4>
       __builtin_bswap32 ((uint32_t) *((const hb_packed_t<uint32_t> *) v))
     ;
 #else
-    return (BE ? (v[0] << 24) : (v[0]      ))
-	 + (BE ? (v[1] << 16) : (v[1] <<  8))
-	 + (BE ? (v[2] <<  8) : (v[2] << 16))
-	 + (BE ? (v[3]      ) : (v[3] << 24));
+    return (BE ? (uint32_t (v[0]) << 24) : (uint32_t (v[0])      ))
+	 + (BE ? (uint32_t (v[1]) << 16) : (uint32_t (v[1]) <<  8))
+	 + (BE ? (uint32_t (v[2]) <<  8) : (uint32_t (v[2]) << 16))
+	 + (BE ? (uint32_t (v[3])      ) : (uint32_t (v[3]) << 24));
 #endif
   }
   private: uint8_t v[4];
@@ -345,7 +345,7 @@ static inline double
 _hb_roundf (double x) { return floor (x + .5); }
 
 static inline float
-_hb_roundf (float x) { return floorf (x + .5f); }
+_hb_roundf (float x) { return floor ((double) x + .5); }
 
 #define roundf(x) _hb_roundf(x)
 
@@ -890,16 +890,92 @@ struct
 }
 HB_FUNCOBJ (hb_clamp);
 
+/* Signed saturating arithmetic. */
+template <typename T>
+static HB_ALWAYS_INLINE T
+hb_saturate_add (T a, T b)
+{
+  static_assert (std::is_integral<T>::value && std::is_signed<T>::value, "");
+
+#if hb_has_builtin(__builtin_add_overflow)
+  T result;
+  if (likely (!__builtin_add_overflow (a, b, &result)))
+    return result;
+#else
+  if (b > 0)
+  {
+    if (likely (a <= hb_int_max (T) - b))
+      return a + b;
+  }
+  else if (likely (a >= hb_int_min (T) - b))
+    return a + b;
+#endif
+
+  return a < 0 ? hb_int_min (T) : hb_int_max (T);
+}
+
+template <typename T>
+static HB_ALWAYS_INLINE T
+hb_saturate_sub (T a, T b)
+{
+  static_assert (std::is_integral<T>::value && std::is_signed<T>::value, "");
+
+#if hb_has_builtin(__builtin_sub_overflow)
+  T result;
+  if (likely (!__builtin_sub_overflow (a, b, &result)))
+    return result;
+#else
+  if (b > 0)
+  {
+    if (likely (a >= hb_int_min (T) + b))
+      return a - b;
+  }
+  else if (likely (a <= hb_int_max (T) + b))
+    return a - b;
+#endif
+
+  return b < 0 ? hb_int_max (T) : hb_int_min (T);
+}
+
+template <typename T>
+static HB_ALWAYS_INLINE T
+hb_saturate_neg (T a)
+{
+  static_assert (std::is_integral<T>::value && std::is_signed<T>::value, "");
+
+  return hb_saturate_sub ((T) 0, a);
+}
+
 /* Convert a floating-point value to integer type T, saturating to T's
  * range instead of relying on the undefined behavior of an out-of-range
  * float-to-int conversion.  NaN saturates to the minimum of T. */
 template <typename T>
-static inline T
+static HB_ALWAYS_INLINE T
 hb_clamp_to (double v)
 {
   return (T) hb_clamp (v,
 		       (double) hb_int_min (T),
 		       (double) hb_int_max (T));
+}
+
+template <typename T>
+static HB_ALWAYS_INLINE T
+hb_clamp_to (float v)
+{
+  /* Widen explicitly: float cannot represent all integer bounds exactly,
+   * so the clamp itself is done in double. */
+  return hb_clamp_to<T> ((double) v);
+}
+
+template <typename T>
+static HB_ALWAYS_INLINE T
+hb_clamp_to (int64_t v)
+{
+  static_assert (std::is_integral<T>::value && std::is_signed<T>::value, "");
+
+  return (T) hb_clamp (v,
+		       (int64_t) hb_int_min (T),
+		       (int64_t) hb_int_max (T));
 }
 
 /*
@@ -1146,12 +1222,14 @@ static inline unsigned int DIV_CEIL (const unsigned int a, unsigned int b)
 { return (a + (b - 1)) / b; }
 
 
-#undef  ARRAY_LENGTH
-template <typename Type, unsigned int n>
-static inline unsigned int ARRAY_LENGTH (const Type (&)[n]) { return n; }
-/* A const version, but does not detect erratically being called on pointers. */
-#define ARRAY_LENGTH_CONST(__array) ((signed int) (sizeof (__array) / sizeof (__array[0])))
+/* ARRAY_LENGTH (array) is a constant expression even for reference parameters,
+ * and does not evaluate array. */
+template <typename Type> struct hb_array_length;
+template <typename Type, size_t n>
+struct hb_array_length<Type[n]> : std::integral_constant<size_t, n> {};
 
+#undef  ARRAY_LENGTH
+#define ARRAY_LENGTH(array) (hb_array_length<hb_remove_reference<decltype (array)>>::value)
 
 static inline void *
 hb_memcpy (void *__restrict dst, const void *__restrict src, size_t len)
@@ -1386,6 +1464,39 @@ hb_bsearch (const K& key, V* base,
 }
 
 
+/* Heapsort: O(n log n) worst case.  Used by hb_qsort_loop below
+ * as the fallback when quicksort partitioning degenerates. */
+template <typename T, typename Compar>
+static inline void
+hb_heapsort_sift_down (T *base, size_t root, size_t end, Compar compar)
+{
+  for (size_t child; (child = 2 * root + 1) < end; root = child)
+  {
+    if (child + 1 < end && compar (base[child], base[child + 1]) < 0)
+      child++;
+    if (compar (base[root], base[child]) >= 0)
+      break;
+    hb_swap (base[root], base[child]);
+  }
+}
+template <typename T, typename Compar>
+static inline void
+hb_heapsort_inline (T *base, size_t nel, Compar compar)
+{
+  if (nel < 2) return;
+
+  /* Build a max-heap. */
+  for (size_t i = nel / 2; i--;)
+    hb_heapsort_sift_down (base, i, nel, compar);
+
+  /* Pop the maximum to the end, one at a time. */
+  for (size_t end = nel; --end;)
+  {
+    hb_swap (base[0], base[end]);
+    hb_heapsort_sift_down (base, 0, end, compar);
+  }
+}
+
 /* Quicksort partitioning loop: median-of-three pivot, two-way
  * Hoare partition, tail-call elimination on the larger side.
  * Stops partitioning when subranges shrink below the threshold;
@@ -1399,15 +1510,26 @@ hb_bsearch (const K& key, V* base,
  * Stops partitioning when subranges shrink below the threshold;
  * a single insertion-sort pass over the whole array (run by
  * hb_qsort_inline below) finishes the job.  Same shape libstdc++
- * uses for std::sort.
+ * uses for std::sort, including the introsort depth limit: once
+ * a range has been partitioned depth_limit times without
+ * finishing, it is handed to heapsort instead.  Without that an
+ * input ordered against the pivot selection (which a font can
+ * arrange, e.g. the lookup indices of a Feature) costs O(n^2).
  *
  * Not stable; equivalent values may be swapped. */
 template <typename T, typename Compar>
 static inline void
-hb_qsort_loop (T *base, size_t nel, Compar compar)
+hb_qsort_loop (T *base, size_t nel, Compar compar, unsigned depth_limit)
 {
   while (nel > 24)
   {
+    if (unlikely (!depth_limit))
+    {
+      hb_heapsort_inline (base, nel, compar);
+      return;
+    }
+    depth_limit--;
+
     T *last = base + nel - 1;
     T *mid = base + nel / 2;
 
@@ -1440,13 +1562,13 @@ hb_qsort_loop (T *base, size_t nel, Compar compar)
     size_t right = nel - left - 1;
     if (left < right)
     {
-      hb_qsort_loop (base, left, compar);
+      hb_qsort_loop (base, left, compar, depth_limit);
       base = i + 1;
       nel  = right;
     }
     else
     {
-      hb_qsort_loop (i + 1, right, compar);
+      hb_qsort_loop (i + 1, right, compar, depth_limit);
       nel  = left;
     }
   }
@@ -1456,7 +1578,7 @@ template <typename T, typename Compar>
 static inline void
 hb_qsort_inline (T *base, size_t nel, Compar compar)
 {
-  hb_qsort_loop (base, nel, compar);
+  hb_qsort_loop (base, nel, compar, 2 * hb_bit_storage (nel));
 
   /* Single final insertion sort over the whole array.  After
    * the partitioning loop, every element is within the threshold

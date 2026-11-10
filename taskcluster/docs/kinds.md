@@ -72,7 +72,7 @@ This kind performs a standalone bootstrap of a Firefox build from various system
 
 Hazard builds are similar to "regular' builds, but use a compiler extension to
 extract a bunch of data from the build and then analyze that data looking for
-hazardous behaviors. See <https://firefox-source-docs.mozilla.org/js/HazardAnalysis/index.html>
+hazardous behaviors. See {doc}`/js/HazardAnalysis/index`
 
 ## l10n
 
@@ -84,17 +84,21 @@ to exercise the localized repack logic in CI.
 Tests the Firefox Linux installer script (``browser/installer/linux/script/install-firefox.sh``)
 across distros, install methods, channels, locales, and architectures.
 
+## install-script-signing
+
+Signs ``install-firefox.sh`` with autograph GPG, producing a detached ``.asc`` signature.
+
 ## shippable-l10n
 
 The nightly l10n kind repacks a shippable build (from the same source code)
 in order to provide localized versions of the same source.
 
-## shippable-l10n-signing
+## l10n-signing
 
-The shippable l10n signing kind takes artifacts from the shippable-l10n kind and
+The l10n signing kind takes artifacts from the shippable-l10n and l10n kinds and
 passes them to signing servers to have their contents signed appropriately, based
-on an appropriate signing format. One signing job is created for each shippable-l10n
-job (usually chunked).
+on an appropriate signing format. One signing job is created for each upstream l10n
+job (the shippable-l10n jobs are usually chunked; the l10n jobs are not).
 
 ## shippable-l10n-mac-signing
 
@@ -114,12 +118,25 @@ endpoint for notarizing apps.
 Downstream tasks switch to build-mac-signing in non-shippable builds or level 1
 environments.
 
+## source-artifact
+
+Exposes files from the source tree as artifacts for other tasks. Each task fetches
+its files from GitHub at the revision being built, without a checkout, and publishes
+them under ``public/build`` so downstream tasks can sign, test or publish them.
+
+For example, ``install-firefox.sh`` is fetched here, then signed by
+``install-script-signing`` and published by ``beetmover-install-script``.
+
 ## source-test
 
 Source-tests are tasks that run directly from the Gecko source. This can include linting,
 unit tests, source-code analysis, or measurement work. While source-test tasks run from
 a source checkout, it is still possible for them to depend on a build artifact, though
 often they do not.
+
+## source-test-appservices
+
+Copies of source-test tasks that build application-services in tree.
 
 ## code-review
 
@@ -155,21 +172,18 @@ Valgrind tasks produce builds instrumented by valgrind.
 
 Searchfox builds generate C++ index data for Searchfox.
 
-## static-analysis-autotest
-
-Static analysis autotest utility in order to be sure that there is no regression
-when upgrading utilities that impact static-analysis.
-
 ## toolchain
 
 Toolchain builds create the compiler toolchains used to build Firefox. These
 will eventually be dependencies of the builds themselves, but for the moment
 are run manually via try pushes and the results uploaded to tooltool.
 
-## toolchain-dxc-upload
+## toolchain-symbols-upload
 
-Upload Windows symbols for `DirectXShaderCompiler` to tecken, based on builds in `toolchain-dxc`.
-Maintained by Firefox's WebGPU team.
+Upload symbols to tecken for the libraries built by `toolchain` tasks, which the
+Gecko build copies into `dist/bin` rather than building itself and so never dumps
+symbols for. Pairs with each toolchain task setting `enable-full-crashsymbols`:
+currently `dxcompiler.dll` and `onnxruntime`.
 
 ## spidermonkey
 
@@ -281,6 +295,12 @@ promotion.
 ## beetmover-source
 
 Beetmover-source publishes release source. This is part of release promotion.
+
+## beetmover-install-script
+
+Publishes the signed ``install-firefox.sh`` (and its detached signature) to the
+bucket backing ``linux.firefox.com``. Runs automatically on mozilla-central; the
+staging variant only runs via an explicit try selection.
 
 ## beetmover-geckoview
 
@@ -514,7 +534,7 @@ Sets up bouncer products for partners.
 
 ## release-early-tagging
 
-Utilises treescript to perform tagging that should happen near the start of a release.
+Utilises landoscript to perform tagging that should happen near the start of a release.
 
 ## release-eme-free-repack
 
@@ -858,13 +878,25 @@ used for verifying third party Rust code is consistent.
 
 Build android-components.
 
+## build-components-appservices
+
+Copies of build-components tasks that build application-services in tree.
+
 ## build-bundle
 
 Build Focus, Klar, and Fenix android app bundles.
 
+## build-bundle-appservices
+
+Copies of build-bundle tasks that build application-services in tree.
+
 ## build-apk
 
 Build Focus, Klar, and Fenix apks.
+
+## build-apk-appservices
+
+Copies of build-apk tasks that build application-services in tree.
 
 ## build-samples-browser
 
@@ -882,17 +914,33 @@ Sign Focus, Klar, and Fenix android app bundles.
 
 Sign Focus, Klar, and Fenix apks.
 
+## signing-apk-appservices
+
+Sign the apks built by build-apk-appservices.
+
 ## test-components
 
 Test android-components
+
+## test-components-appservices
+
+Copies of test-components tasks that build application-services in tree.
 
 ## test-apk
 
 Test Focus, Klar, and Fenix apks.
 
+## test-apk-appservices
+
+Copies of test-apk tasks that build application-services in tree.
+
 ## ui-test-apk
 
 User interface tests for Focus, Klar, and Fenix apks.
+
+## ui-test-apk-appservices
+
+User interface tests for the apks signed by signing-apk-appservices.
 
 ## android-browsertime
 
@@ -914,13 +962,11 @@ A beetmover task for android components.
 
 A beetmover task for android APKs and AABs.
 
-## push-apks
+## push-android
 
-Push Focus and Fenix APKs to the Samsung Galaxy Store.
-
-## push-bundle
-
-Push Focus and Fenix AABs to Google Play.
+Push Focus, Klar and Fenix to the Android app stores: AABs to Google Play,
+Focus and Fenix APKs to the Samsung Galaxy Store, Fenix APKs to the Huawei
+AppGallery, and the Fenix universal APK to the vivo App Store.
 
 ## android-l10n
 
@@ -937,6 +983,10 @@ Generate instrumented apks used to generate Baseline Profile for Android apps.
 ## generate-baseline-profile-firebase
 
 Run baseline profile generation for Android on Firebase TestLab.
+
+## dte-test
+
+Send payload for DTE testing Github Actions.
 
 ## update-test
 

@@ -2,8 +2,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { IPPAuthProvider } from "moz-src:///toolkit/components/ipprotection/IPPAuthProvider.sys.mjs";
+import {
+  AUTH_ERRORS,
+  IPPAuthProvider,
+} from "moz-src:///toolkit/components/ipprotection/IPPAuthProvider.sys.mjs";
 import { GuardianClient } from "moz-src:///toolkit/components/ipprotection/fxa/GuardianClient.sys.mjs";
+
+/**
+ * Type Imports
+ *
+ * @typedef {import("../GuardianTypes.sys.mjs").TokenHandle} TokenHandle
+ */
 
 const lazy = {};
 
@@ -20,6 +29,15 @@ ChromeUtils.defineESModuleGetters(lazy, {
   IPPStartupCache:
     "moz-src:///toolkit/components/ipprotection/IPPStartupCache.sys.mjs",
 });
+
+ChromeUtils.defineLazyGetter(lazy, "logConsole", () =>
+  console.createInstance({
+    logModule: "IPP_FxaActivateAuthProvider",
+    maxLogLevel: Services.prefs.getBoolPref("browser.ipProtection.log", false)
+      ? "Debug"
+      : "Warn",
+  })
+);
 
 /**
  * FxA implementation of IPPAuthProvider that uses the direct token activation
@@ -113,7 +131,7 @@ class IPPFxaActivateAuthProviderSingleton extends IPPAuthProvider {
 
   async getEntitlement() {
     try {
-      using tokenHandle = await this.getToken();
+      const tokenHandle = await this.getToken();
       const { status, entitlement, error } =
         await this.guardian.fetchUserInfo(tokenHandle);
       if (error || status != 200) {
@@ -121,7 +139,7 @@ class IPPFxaActivateAuthProviderSingleton extends IPPAuthProvider {
       }
       return { entitlement: entitlement ?? null };
     } catch (error) {
-      return { error: error.message };
+      return { error: error?.message ?? error };
     }
   }
 
@@ -150,7 +168,7 @@ class IPPFxaActivateAuthProviderSingleton extends IPPAuthProvider {
   }
 
   async checkForUpgrade() {
-    using tokenHandle = await this.getToken();
+    const tokenHandle = await this.getToken();
     const { entitlement } = await this.guardian.fetchUserInfo(tokenHandle);
     if (entitlement) {
       this._setEntitlement(entitlement);
@@ -165,10 +183,18 @@ class IPPFxaActivateAuthProviderSingleton extends IPPAuthProvider {
   }
 
   async enroll() {
+    if (!this.signInWatcher.isSignedIn) {
+      // The token request below fails if the account is genuinely signed out,
+      // so a stale watcher is reported rather than treated as fatal.
+      lazy.logConsole.warn(
+        "enroll() called while the sign-in watcher reports signed out."
+      );
+      Glean.ipprotection.error.record({ source: "AuthProvider:SignInDesync" });
+    }
     this.#isEnrolling = true;
     this.dispatchEvent(new CustomEvent("IPPAuthProvider:StateChanged"));
     try {
-      using tokenHandle = await this.getToken();
+      const tokenHandle = await this.getToken();
       const { ok, entitlement, error } =
         await this.guardian.activate(tokenHandle);
       if (!ok) {
@@ -177,7 +203,11 @@ class IPPFxaActivateAuthProviderSingleton extends IPPAuthProvider {
       this._setEntitlement(entitlement ?? null);
       return { isEnrolledAndEntitled: true, error: null };
     } catch (error) {
-      return { isEnrolledAndEntitled: false, error: error?.message ?? null };
+      lazy.logConsole.error("Enrollment failed:", error);
+      return {
+        isEnrolledAndEntitled: false,
+        error: AUTH_ERRORS.ENROLLMENT_FAILED,
+      };
     } finally {
       this.#isEnrolling = false;
       lazy.IPProtectionService.updateState();
@@ -186,23 +216,23 @@ class IPPFxaActivateAuthProviderSingleton extends IPPAuthProvider {
   }
 
   /**
-   * Retrieves an FxA OAuth token and returns a disposable handle that revokes
-   * it on disposal.
+   * Retrieves an FxA OAuth token and returns a handle that revokes it if
+   * Guardian rejects it.
    *
    * @param {AbortSignal} [abortSignal]
-   * @returns {Promise<{token: string} & Disposable>}
+   * @returns {Promise<TokenHandle|null>}
    */
   async getToken(abortSignal = null) {
-    let tasks = [
-      lazy.fxAccounts.getOAuthToken({
-        scope: ["profile", "https://identity.mozilla.com/apps/vpn"],
-      }),
-    ];
+    let tasks = [lazy.fxAccounts.getOAuthToken({ service: "vpn" })];
     if (abortSignal) {
       abortSignal.throwIfAborted();
       tasks.push(
         new Promise((_, rej) => {
-          abortSignal?.addEventListener("abort", rej, { once: true });
+          abortSignal?.addEventListener(
+            "abort",
+            () => rej(abortSignal.reason),
+            { once: true }
+          );
         })
       );
     }
@@ -212,19 +242,18 @@ class IPPFxaActivateAuthProviderSingleton extends IPPAuthProvider {
     }
     return {
       token,
-      [Symbol.dispose]: () => {
-        lazy.fxAccounts.removeCachedOAuthToken({ token });
-      },
+      // Evicts our cache entry and revokes the token server side.
+      onTokenRejected: () => lazy.fxAccounts.removeCachedOAuthToken({ token }),
     };
   }
 
   async fetchProxyPass(abortSignal = null) {
-    using tokenHandle = await this.getToken(abortSignal);
+    const tokenHandle = await this.getToken(abortSignal);
     return await this.#guardian.fetchProxyPass(tokenHandle, abortSignal);
   }
 
   async fetchProxyUsage(abortSignal = null) {
-    using tokenHandle = await this.getToken(abortSignal);
+    const tokenHandle = await this.getToken(abortSignal);
     return await this.#guardian.fetchProxyUsage(tokenHandle, abortSignal);
   }
 

@@ -37,6 +37,9 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
   /** Settings builder used to construct the settings object. */
   @AnyThread
   public static final class Builder extends RuntimeSettings.Builder<GeckoRuntimeSettings> {
+    /** Public constructor for Builder. */
+    public Builder() {}
+
     @Override
     protected @NonNull GeckoRuntimeSettings newSettings(
         final @Nullable GeckoRuntimeSettings settings) {
@@ -81,6 +84,18 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
      */
     public @NonNull Builder configFilePath(final @Nullable String configFilePath) {
       getSettings().mConfigFilePath = configFilePath;
+      return this;
+    }
+
+    /**
+     * Set the UUID of the R8/ProGuard mapping file of the embedding app's build, if it is minified.
+     * It is recorded in Gecko profiles so that Java frames can be matched with the mapping.
+     *
+     * @param proguardUuid The mapping UUID, or <code>null</code> if not available.
+     * @return This Builder instance.
+     */
+    public @NonNull Builder proguardUuid(final @Nullable String proguardUuid) {
+      getSettings().mProguardUuid = proguardUuid;
       return this;
     }
 
@@ -718,6 +733,7 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
   /* package */ String[] mArgs;
   /* package */ Bundle mExtras;
   /* package */ String mConfigFilePath;
+  /* package */ String mProguardUuid;
 
   /* package */ ContentBlocking.Settings mContentBlocking;
 
@@ -802,8 +818,6 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
       new Pref<Boolean>("privacy.globalprivacycontrol.enabled", false);
   /* package */ final Pref<Boolean> mGlobalPrivacyControlEnabledPrivateMode =
       new Pref<Boolean>("privacy.globalprivacycontrol.pbmode.enabled", true);
-  /* package */ final Pref<Boolean> mGlobalPrivacyControlFunctionalityEnabled =
-      new Pref<Boolean>("privacy.globalprivacycontrol.functionality.enabled", true);
   /* package */ final PrefWithoutDefault<Boolean> mFingerprintingProtection =
       new PrefWithoutDefault<Boolean>("privacy.fingerprintingProtection");
   /* package */ final PrefWithoutDefault<Boolean> mFingerprintingProtectionPrivateMode =
@@ -914,6 +928,7 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
     mCrashHandler = settings.mCrashHandler;
     mRequestedLocales = settings.mRequestedLocales;
     mConfigFilePath = settings.mConfigFilePath;
+    mProguardUuid = settings.mProguardUuid;
     mExperimentDelegate = settings.mExperimentDelegate;
   }
 
@@ -953,6 +968,15 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
   }
 
   /**
+   * Get the UUID of the R8/ProGuard mapping file of the embedding app's build.
+   *
+   * @return The mapping UUID, or <code>null</code> if not set.
+   */
+  public @Nullable String getProguardUuid() {
+    return mProguardUuid;
+  }
+
+  /**
    * Get whether JavaScript support is enabled.
    *
    * @return Whether JavaScript support is enabled.
@@ -984,7 +1008,6 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
     mGlobalPrivacyControlEnabled.commit(enabled);
     // Global Privacy Control Feature is enabled by default in private browsing.
     mGlobalPrivacyControlEnabledPrivateMode.commit(true);
-    mGlobalPrivacyControlFunctionalityEnabled.commit(true);
     return this;
   }
 
@@ -2578,6 +2601,7 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
     out.writeString(mCrashHandler != null ? mCrashHandler.getName() : null);
     out.writeStringArray(mRequestedLocales);
     out.writeString(mConfigFilePath);
+    out.writeString(mProguardUuid);
   }
 
   // AIDL code may call readFromParcel even though it's not part of Parcelable.
@@ -2600,17 +2624,14 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
     final String crashHandlerName = source.readString();
     if (crashHandlerName != null) {
       try {
-        @SuppressWarnings("unchecked")
-        final Class<? extends Service> handler =
-            (Class<? extends Service>) Class.forName(crashHandlerName);
-
-        mCrashHandler = handler;
-      } catch (final ClassNotFoundException e) {
+        mCrashHandler = Class.forName(crashHandlerName).asSubclass(Service.class);
+      } catch (final ClassNotFoundException | ClassCastException e) {
       }
     }
 
     mRequestedLocales = source.createStringArray();
     mConfigFilePath = source.readString();
+    mProguardUuid = source.readString();
   }
 
   /** Parcelable creator for GeckoRuntimeSettings instances. */

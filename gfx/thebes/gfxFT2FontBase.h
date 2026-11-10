@@ -13,13 +13,11 @@
 #include "nsHashKeys.h"
 #include "nsTHashMap.h"
 
-class gfxFT2FontBase;
+#ifdef MOZ_FONTATIONS
+#  include "mozilla/gfx/fontations_glue_generated.h"
+#endif
 
-namespace mozilla {
-namespace gfx {
-class FTUserFontData;
-}
-}  // namespace mozilla
+class gfxFT2FontBase;
 
 class gfxFT2FontEntryBase : public gfxFontEntry {
  public:
@@ -31,7 +29,7 @@ class gfxFT2FontEntryBase : public gfxFontEntry {
   static nsresult CopyFaceTable(mozilla::gfx::SharedFTFace*, uint32_t aTableTag,
                                 nsTArray<uint8_t>&);
 
-  virtual mozilla::gfx::FTUserFontData* GetUserFontData() = 0;
+  virtual FontData* GetUserFontData() = 0;
 
   size_t ComputedSizeOfExcludingThis(
       mozilla::MallocSizeOf aMallocSizeOf) override;
@@ -57,6 +55,12 @@ class gfxFT2FontBase : public gfxFont {
       const gfxFontStyle* aFontStyle, int aLoadFlags, bool aEmbolden);
 
   uint32_t GetGlyph(uint32_t aCharCode) {
+    using namespace mozilla::gfx;
+#ifdef MOZ_FONTATIONS
+    if (const SkrifaFontRef* font = mFontEntry->GetSkrifaFont()) {
+      return skrifa_font_map_char_to_glyph(font, aCharCode);
+    }
+#endif
     auto* entry = static_cast<gfxFT2FontEntryBase*>(mFontEntry.get());
     return entry->GetGlyph(aCharCode, this);
   }
@@ -95,13 +99,17 @@ class gfxFT2FontBase : public gfxFont {
 
  protected:
   ~gfxFT2FontBase() override;
-  void InitMetrics();
-  const Metrics& GetHorizontalMetrics() const override { return mMetrics; }
+
+  // Called during font initialization, not yet shared with other threads.
+  bool InitMetricsFromPlatform() MOZ_NO_THREAD_SAFETY_ANALYSIS override;
+  void FinishInitFontMetrics() override;
+
+  void InitExtraMetrics(gfxFloat aEmHeight, gfxFloat aLineHeight);
+
   FT_Vector GetEmboldenStrength(FT_Face aFace) const;
 
   RefPtr<mozilla::gfx::SharedFTFace> mFTFace;
 
-  Metrics mMetrics;
   int mFTLoadFlags;
   bool mEmbolden;
   gfxFloat mFTSize;

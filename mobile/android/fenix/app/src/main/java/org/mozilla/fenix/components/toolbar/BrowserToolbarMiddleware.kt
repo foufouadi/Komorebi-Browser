@@ -6,6 +6,7 @@ package org.mozilla.fenix.components.toolbar
 
 import android.content.Context
 import android.os.Build
+import android.text.TextUtils
 import androidx.annotation.VisibleForTesting
 import androidx.navigation.NavController
 import kotlinx.coroutines.CoroutineDispatcher
@@ -26,6 +27,7 @@ import mozilla.components.browser.state.state.SecurityInfo
 import mozilla.components.browser.state.state.selectedOrDefaultSearchEngine
 import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.browser.thumbnails.BrowserThumbnails
+import mozilla.components.browser.thumbnails.facts.BrowserThumbnailsFacts
 import mozilla.components.browser.toolbar.R as toolbarR
 import mozilla.components.compose.browser.toolbar.concept.Action
 import mozilla.components.compose.browser.toolbar.concept.Action.ActionButton
@@ -68,6 +70,9 @@ import mozilla.components.concept.storage.BookmarksStorage
 import mozilla.components.feature.ipprotection.store.IPProtectionAction
 import mozilla.components.feature.ipprotection.store.IPProtectionStore
 import mozilla.components.feature.ipprotection.store.state.Authorized
+import mozilla.components.feature.ipprotection.store.state.ProxyActivation
+import mozilla.components.feature.listentopage.settings.ListenSettings
+import mozilla.components.feature.listentopage.settings.shouldShow
 import mozilla.components.feature.session.SessionUseCases
 import mozilla.components.feature.session.TrackingProtectionUseCases
 import mozilla.components.feature.summarize.R as summariesR
@@ -113,6 +118,7 @@ import org.mozilla.fenix.components.appstate.SupportedMenuNotifications.NotDefau
 import org.mozilla.fenix.components.appstate.snackbar.SnackbarState
 import org.mozilla.fenix.components.menu.MenuAccessPoint
 import org.mozilla.fenix.components.metrics.MetricsUtils
+import org.mozilla.fenix.components.metrics.toSearchAccessPoint
 import org.mozilla.fenix.components.share.ShareSource
 import org.mozilla.fenix.components.toolbar.BrowserToolbarTestTags.SITE_INFO_INSECURE_CONNECTION
 import org.mozilla.fenix.components.toolbar.BrowserToolbarTestTags.SITE_INFO_LOCAL_FILE
@@ -192,6 +198,8 @@ internal sealed class DisplayActions(override val source: Source) : BrowserToolb
 @VisibleForTesting
 internal sealed class StartPageActions(override val source: Source) : BrowserToolbarEvent {
     data object SiteInfoClicked : StartPageActions(Source.AddressBar.PageStart)
+
+    data object ProxyActivationAnimationFinished : StartPageActions(Source.AddressBar.PageStart)
 }
 
 @VisibleForTesting
@@ -246,6 +254,7 @@ internal object BrowserToolbarTestTags {
  * @param settings [Settings] for accessing user preferences.
  * @param summarizationFeatureSettings Web content summarization settings.
  * @param translationsFeatureSettings Web content translations availability status.
+ * @param listenSettings Listen to Page availability status.
  * @param navController [NavController] to use for navigating to other in-app destinations.
  * @param summarizationNavigator [SummarizationNavigator] used to navigate to the summarization screen.
  * @param browsingModeManager [BrowsingModeManager] for querying the current browsing mode.
@@ -275,6 +284,7 @@ class BrowserToolbarMiddleware(
     private val settings: Settings,
     private val summarizationFeatureSettings: SummarizationFeatureDiscoveryConfiguration,
     private val translationsFeatureSettings: TranslationsEnabledSettings,
+    private val listenSettings: ListenSettings,
     private val navController: NavController,
     private val summarizationNavigator: SummarizationNavigator,
     private val browsingModeManager: BrowsingModeManager,
@@ -323,6 +333,8 @@ class BrowserToolbarMiddleware(
                 observePageSecurityUpdates(store)
                 observePermissionHighlightsUpdates(store)
                 observeIPProtectionUpdates(store)
+                observeTabReloadCoverUpdates(store)
+                observeListenToPageUpdates(store)
             }
 
             is StartPageActions.SiteInfoClicked -> {
@@ -330,17 +342,32 @@ class BrowserToolbarMiddleware(
                 next(action)
             }
 
+            is StartPageActions.ProxyActivationAnimationFinished -> {
+                ipProtectionStore.dispatch(IPProtectionAction.ActivationAction.ProxyActivationShown)
+                next(action)
+            }
+
             is MenuClicked -> {
                 navController.nav(
                     R.id.browserFragment,
-                    BrowserFragmentDirections.actionGlobalMenuDialogFragment(accesspoint = MenuAccessPoint.Browser),
+                    when (settings.isMenuCustomizationEnabled) {
+                        true ->
+                            BrowserFragmentDirections.actionBrowserFragmentToMenuFragment(
+                                accessPoint = MenuAccessPoint.Browser
+                            )
+                        else ->
+                            BrowserFragmentDirections.actionGlobalMenuDialogFragment(
+                                accesspoint = MenuAccessPoint.Browser
+                            )
+                    },
                 )
 
                 next(action)
             }
 
             is TabCounterClicked -> {
-                thumbnailsFeature()?.requestScreenshot()
+                thumbnailsFeature()
+                    ?.requestScreenshot(trigger = BrowserThumbnailsFacts.CaptureAttemptedTriggers.TAB_COUNTER_CLICK)
 
                 navController.nav(
                     R.id.browserFragment,
@@ -411,7 +438,9 @@ class BrowserToolbarMiddleware(
                         )
                     )
                 } else {
-                    store.dispatch(SearchQueryUpdated(BrowserToolbarQuery(searchTerms), true))
+                    if (!settings.showAddressBarInFocusMode) {
+                        store.dispatch(SearchQueryUpdated(BrowserToolbarQuery(searchTerms), true))
+                    }
                     appStore.dispatch(SearchStarted(selectedTab.id))
                 }
             }
@@ -445,6 +474,7 @@ class BrowserToolbarMiddleware(
                 clipboard.extractURL()?.let {
                     val searchEngine = reconcileSelectedEngine()
                     val selectedTabId = browserStore.state.selectedTabId ?: return
+                    val searchAccessPoint = MetricsUtils.Source.ACTION
                     if (it.isUrl() || searchEngine == null) {
                         browserStore.dispatch(
                             ContentAction.UpdateSearchTermsAction(
@@ -460,7 +490,6 @@ class BrowserToolbarMiddleware(
                                 it,
                             )
                         )
-                        val searchAccessPoint = MetricsUtils.Source.ACTION
                         MetricsUtils.recordSearchMetrics(
                             engine = searchEngine,
                             isDefault = true,
@@ -474,6 +503,7 @@ class BrowserToolbarMiddleware(
                         newTab = false,
                         searchEngine = searchEngine,
                         private = browsingModeManager.mode == Private,
+                        accessPoint = searchAccessPoint.toSearchAccessPoint(),
                     )
                 }
                     ?: run {
@@ -637,6 +667,7 @@ class BrowserToolbarMiddleware(
                                         ShareData(
                                             url = selectedTab.content.url,
                                             title = selectedTab.content.title,
+                                            private = selectedTab.content.private,
                                         )
                                     ),
                                 showPage = true,
@@ -981,7 +1012,9 @@ class BrowserToolbarMiddleware(
 
     private fun observeIPProtectionUpdates(store: Store<BrowserToolbarState, BrowserToolbarAction>) {
         ipProtectionStore.observeWhileActive {
-            distinctUntilChangedBy { it.proxyStatus }
+            // Includes proxyActivation so start page actions rebuild once the pending pill
+            // animation is consumed (ProxyActivationShown), dropping the pill again.
+            distinctUntilChangedBy { it.proxyStatus to it.proxyActivation }
                 .collect {
                     updateStartPageActions(store)
                 }
@@ -1010,7 +1043,7 @@ class BrowserToolbarMiddleware(
             }
         val searchTerms = browserStore.state.selectedTab?.content?.searchTerms ?: ""
 
-        val displayUrl = url?.let { originalUrl ->
+        val baseDisplayUrl = url?.let { originalUrl ->
             if (originalUrl.toString() == ABOUT_HOME_URL) {
                 // Default to showing the toolbar hint when the URL is ABOUT_HOME.
                 ""
@@ -1020,6 +1053,16 @@ class BrowserToolbarMiddleware(
                 URLStringUtils.toDisplayUrl(originalUrl)
             }
         }
+        val displayUrl =
+            if (browserScreenStore.state.isShowingTabReloadCover && !baseDisplayUrl.isNullOrEmpty()) {
+                TextUtils.concat(
+                    uiContext.getText(R.string.browser_toolbar_cached_page_indicator),
+                    " | ",
+                    baseDisplayUrl,
+                )
+            } else {
+                baseDisplayUrl
+            }
 
         store.dispatch(
             BrowserDisplayToolbarAction.PageOriginUpdated(
@@ -1060,6 +1103,26 @@ class BrowserToolbarMiddleware(
                 .collect {
                     updateStartPageActions(store)
                     updateEndPageActions(store)
+                }
+        }
+    }
+
+    private fun observeListenToPageUpdates(store: Store<BrowserToolbarState, BrowserToolbarAction>) {
+        if (!listenSettings.available) return
+        scope.launch {
+            listenSettings.enabled.collect {
+                updateStartPageActions(store)
+                updateEndPageActions(store)
+            }
+        }
+    }
+
+    private fun observeTabReloadCoverUpdates(store: Store<BrowserToolbarState, BrowserToolbarAction>) {
+        browserScreenStore.observeWhileActive {
+            distinctUntilChangedBy { it.isShowingTabReloadCover }
+                .collect {
+                    updateStartPageActions(store)
+                    updateCurrentPageOrigin(store)
                 }
         }
     }
@@ -1241,7 +1304,7 @@ class BrowserToolbarMiddleware(
 
             ToolbarAction.Menu ->
                 ActionButtonRes(
-                    drawableResId = iconsR.drawable.mozac_ic_ellipsis_vertical_24,
+                    drawableResId = iconsR.drawable.mozac_ic_more_vertical_round_24,
                     contentDescription = R.string.content_description_menu,
                     highlighted =
                         appStore.state.supportedMenuNotifications.filterNot { it == NotDefaultBrowser }.isNotEmpty(),
@@ -1252,15 +1315,27 @@ class BrowserToolbarMiddleware(
                 ActionButtonRes(
                     drawableResId =
                         if (browserScreenStore.state.readerModeStatus.isActive) {
-                            iconsR.drawable.mozac_ic_reader_view_fill_24
+                            if (listenSettings.shouldShow()) {
+                                iconsR.drawable.mozac_ic_reader_view_headphones_fill_24
+                            } else {
+                                iconsR.drawable.mozac_ic_reader_view_fill_24
+                            }
                         } else {
-                            iconsR.drawable.mozac_ic_reader_view_24
+                            if (listenSettings.shouldShow()) {
+                                iconsR.drawable.mozac_ic_reader_view_headphones_24
+                            } else {
+                                iconsR.drawable.mozac_ic_reader_view_24
+                            }
                         },
                     contentDescription =
                         if (browserScreenStore.state.readerModeStatus.isActive) {
                             R.string.browser_menu_read_close
                         } else {
-                            R.string.browser_menu_read
+                            if (listenSettings.shouldShow()) {
+                                R.string.browser_menu_read_or_listen
+                            } else {
+                                R.string.browser_menu_read
+                            }
                         },
                     state =
                         if (browserScreenStore.state.readerModeStatus.isActive) {
@@ -1309,7 +1384,16 @@ class BrowserToolbarMiddleware(
                     (browserStore.state.selectedTab?.content?.permissionHighlights?.permissionsChanged == true) ||
                         (browserStore.state.selectedTab?.trackingProtection?.ignoredOnTrackingProtection == true)
                 val selectedTab = browserStore.state.selectedTab
-                if (selectedTab?.content?.url?.isContentUrl() == true) {
+                if (browserScreenStore.state.isShowingTabReloadCover) {
+                    // Placeholder warning shield while a cached thumbnail is covering the engine view.
+                    buildSiteInfoAction(
+                        drawableResId = iconsR.drawable.mozac_ic_shield_exclamation_mark_24,
+                        contentDescription = toolbarR.string.mozac_browser_toolbar_content_description_site_info,
+                        highlighted = highlight,
+                        onClick = StartPageActions.SiteInfoClicked,
+                        testTag = SITE_INFO_INSECURE_CONNECTION,
+                    )
+                } else if (selectedTab?.content?.url?.isContentUrl() == true) {
                     ActionButtonRes(
                         drawableResId = iconsR.drawable.mozac_ic_page_portrait_24,
                         contentDescription = toolbarR.string.mozac_browser_toolbar_content_description_site_info,
@@ -1415,28 +1499,42 @@ class BrowserToolbarMiddleware(
         onClick: BrowserToolbarInteraction,
         testTag: String? = null,
     ): Action {
-        return if (ipProtectionStore.state.proxyStatus == Authorized.Active) {
-            Action.AnimatedPillActionRes(
-                iconResId = drawableResId,
-                overlayResId = iconsR.drawable.mozac_ic_globe_24,
-                textResId = R.string.ip_protection_toolbar_pill_label,
-                contentDescriptionResId = R.string.ip_protection_toolbar_pill_description,
-                animated = !ipProtectionStore.state.proxyActiveShown,
-                highlighted = highlighted,
-                onClick = onClick,
-                testTag = testTag,
-                onAnimationStarted = {
-                    ipProtectionStore.dispatch(IPProtectionAction.ProxyActiveShown)
-                },
-            )
-        } else {
-            ActionButtonRes(
-                drawableResId = drawableResId,
-                contentDescription = contentDescription,
-                highlighted = highlighted,
-                onClick = onClick,
-                testTag = testTag,
-            )
+        val ipProtectionState = ipProtectionStore.state
+        return when {
+            ipProtectionState.proxyStatus == Authorized.Active ->
+                Action.AnimatedPillActionRes(
+                    iconResId = drawableResId,
+                    overlayResId = iconsR.drawable.mozac_ic_globe_24,
+                    textResId = R.string.ip_protection_toolbar_pill_label,
+                    contentDescriptionResId = R.string.ip_protection_toolbar_pill_description,
+                    animated = ipProtectionState.proxyActivation == ProxyActivation.TurningOn,
+                    highlighted = highlighted,
+                    onClick = onClick,
+                    testTag = testTag,
+                    onAnimationFinished = StartPageActions.ProxyActivationAnimationFinished,
+                )
+
+            ipProtectionState.proxyActivation == ProxyActivation.TurningOff ->
+                Action.AnimatedPillActionRes(
+                    iconResId = drawableResId,
+                    overlayResId = iconsR.drawable.mozac_ic_globe_24,
+                    textResId = R.string.ip_protection_toolbar_pill_label_off,
+                    contentDescriptionResId = R.string.ip_protection_toolbar_pill_description_off,
+                    animated = true,
+                    highlighted = highlighted,
+                    onClick = onClick,
+                    testTag = testTag,
+                    onAnimationFinished = StartPageActions.ProxyActivationAnimationFinished,
+                )
+
+            else ->
+                ActionButtonRes(
+                    drawableResId = drawableResId,
+                    contentDescription = contentDescription,
+                    highlighted = highlighted,
+                    onClick = onClick,
+                    testTag = testTag,
+                )
         }
     }
 

@@ -580,6 +580,11 @@ export class RemoteSettingsClient extends EventEmitter {
       ) {
         // If consumer requested an empty list fallback, no need to raise attention if no data in DB.
         lazy.console.debug(e);
+      } else if (Services.startup.shuttingDown) {
+        lazy.console.debug(
+          `${this.identifier} read interrupted by shutdown`,
+          e
+        );
       } else {
         // Report error, and continue with trying to load the binary dump.
         lazy.console.error(e);
@@ -728,6 +733,7 @@ export class RemoteSettingsClient extends EventEmitter {
     const startedAt = new Date();
     let reportStatus = null;
     let thrownError = null;
+    let ageSeconds;
     try {
       // If network is offline, we can't synchronize.
       if (lazy.Utils.isOffline) {
@@ -777,10 +783,11 @@ export class RemoteSettingsClient extends EventEmitter {
           // we fetch them and validate the signature immediately.
           if (this.verifySignature && lazy.ObjectUtils.isEmpty(localMetadata)) {
             lazy.console.debug(`${this.identifier} pull collection metadata`);
-            const { metadata } = await this._fetchChangeset(
+            let metadata;
+            ({ metadata, ageSeconds } = await this._fetchChangeset(
               expectedTimestamp,
               expectedTimestamp
-            );
+            ));
             await this.db.importChanges(metadata);
             // We don't bother validating the signature if the dump was just loaded. We do
             // if the dump was loaded at some other point (eg. from .get()).
@@ -811,12 +818,12 @@ export class RemoteSettingsClient extends EventEmitter {
           // Local data is either outdated or tampered.
           // In both cases we will fetch changes from server,
           // and make sure we overwrite local data.
-          syncResult = await this._importChanges(
+          ({ syncResult, ageSeconds } = await this._importChanges(
             localRecords,
             collectionLastModified,
             localMetadata,
             expectedTimestamp
-          );
+          ));
           if (sendEvents && this.hasListeners("sync")) {
             // If we have listeners for the "sync" event, then compute the lists of changes.
             // The records imported from the dump should be considered as "created" for the
@@ -867,13 +874,13 @@ export class RemoteSettingsClient extends EventEmitter {
             lazy.console.warn(
               `${this.identifier} Signature verified failed. Retry from scratch`
             );
-            syncResult = await this._importChanges(
+            ({ syncResult, ageSeconds } = await this._importChanges(
               localRecords,
               collectionLastModified,
               localMetadata,
               expectedTimestamp,
               { retry: true }
-            );
+            ));
           } catch (ex) {
             // If the signature fails again, or if an error occured during wiping out the
             // local data, then we report it as a *signature retry* error.
@@ -947,6 +954,9 @@ export class RemoteSettingsClient extends EventEmitter {
         trigger,
         duration: durationMilliseconds,
       };
+      if (ageSeconds !== undefined) {
+        reportArgs.age = ageSeconds;
+      }
       // In Bug 1617133, we will try to break down specific errors into
       // more precise statuses by reporting the JavaScript error name
       // ("TypeError", etc.) to Telemetry.
@@ -1117,9 +1127,9 @@ export class RemoteSettingsClient extends EventEmitter {
       );
     }
 
-    // We now that the list of signature is not empty, so if we are here
-    // it means that none was valid.
-    throw thrownErrors[0];
+    // We know that the list of signatures is not empty, so if we are here
+    // it means that none was valid, or that none was usable at all.
+    throw thrownErrors[0] ?? new MissingSignatureError(this.identifier);
   }
 
   /**
@@ -1138,6 +1148,8 @@ export class RemoteSettingsClient extends EventEmitter {
    * @param {object} [options]
    * @param {boolean} [options.retry]
    *   Whether this method is called in the retry situation.
+   * @returns {Promise<{syncResult: object, ageSeconds: number}>}
+   *   the synchronization result and the age of the pulled data in seconds.
    */
   async _importChanges(
     localRecords,
@@ -1181,7 +1193,7 @@ export class RemoteSettingsClient extends EventEmitter {
     lazy.console.debug(
       `${this.identifier} Fetch changes from server (expected=${expectedTimestamp}, since=${since})`
     );
-    const { metadata, remoteTimestamp, remoteRecords } =
+    const { metadata, remoteTimestamp, remoteRecords, ageSeconds } =
       await this._fetchChangeset(expectedTimestamp, since);
 
     lazy.console.debug(
@@ -1191,14 +1203,25 @@ export class RemoteSettingsClient extends EventEmitter {
     if (remoteTimestamp < localTimestamp) {
       // This should never happen. Unless the CDN serves stale data.
       // If the local data is valid, then we can safely ignore this stage remote changeset.
-      const localTrustworthy = await new Promise(verifySignatureLocalData);
+      let localTrustworthy = false;
+      try {
+        localTrustworthy = await new Promise(verifySignatureLocalData);
+      } catch (exc) {
+        // Verifying the local data failed for another reason than an invalid
+        // signature (eg. its cert chain could not be fetched). Consider it
+        // untrustworthy and carry on with reset/import.
+        lazy.console.error(exc);
+      }
       if (localTrustworthy) {
         lazy.console.info(`${this.identifier} CDN served staled data, ignore.`);
         return {
-          current: localRecords,
-          created: [],
-          updated: [],
-          deleted: [],
+          syncResult: {
+            current: localRecords,
+            created: [],
+            updated: [],
+            deleted: [],
+          },
+          ageSeconds,
         };
       }
       // Otherwise, continue with importing, since we prefer stale data over corrupt/tempered.
@@ -1239,14 +1262,26 @@ export class RemoteSettingsClient extends EventEmitter {
           try {
             localTrustworthy = await new Promise(verifySignatureLocalData);
           } catch (_) {
-            // We either throw a CorruptedDataError below which will lead to a
-            // telemetry event, or we have retried already and this is the second
-            // failure. We will reset to dump, clear everything, and throw the error
-            // so that the caller can report the sync status.
+            // Verifying the data we had before syncing failed for another
+            // reason than an invalid signature (eg. its cert chain could not
+            // be fetched). Consider it untrustworthy, and fall back to the
+            // dump or an empty database below.
           }
         }
 
-        if (!localTrustworthy && !retry) {
+        if (localTrustworthy) {
+          // The data we had before syncing is valid: restore it, dropping the
+          // unverified records imported above.
+          lazy.console.debug(`${this.identifier} restore previous local data`);
+          await this.db.importChanges(
+            localMetadata,
+            localTimestamp,
+            localRecords,
+            {
+              clear: true, // clear before importing.
+            }
+          );
+        } else if (!retry) {
           // Signature failed, clear local DB because it contains
           // bad data (local + remote changes).
           lazy.console.debug(`${this.identifier} clear local data`);
@@ -1254,26 +1289,14 @@ export class RemoteSettingsClient extends EventEmitter {
           // Local data was tampered, throw and it will retry from empty DB.
           lazy.console.error(`${this.identifier} local data was corrupted`);
           throw new CorruptedDataError(this.identifier);
-        } else if (retry) {
-          // We retried already, we will restore the previous local data
-          // before throwing eventually.
-          if (localTrustworthy) {
-            await this.db.importChanges(
-              localMetadata,
-              localTimestamp,
-              localRecords,
-              {
-                clear: true, // clear before importing.
-              }
-            );
-          } else {
-            // Restore the dump if available (no-op if no dump)
-            const imported = await this._importJSONDump();
-            // _importJSONDump() only clears DB if dump is available,
-            // therefore do it here!
-            if (imported < 0) {
-              await this.db.clear();
-            }
+        } else {
+          // We retried already and have nothing trustworthy to restore.
+          // Restore the dump if available (no-op if no dump)
+          const imported = await this._importJSONDump();
+          // _importJSONDump() only clears DB if dump is available,
+          // therefore do it here!
+          if (imported < 0) {
+            await this.db.clear();
           }
         }
         throw e;
@@ -1315,7 +1338,7 @@ export class RemoteSettingsClient extends EventEmitter {
       );
     }
 
-    return syncResult;
+    return { syncResult, ageSeconds };
   }
 
   /**
@@ -1327,9 +1350,8 @@ export class RemoteSettingsClient extends EventEmitter {
   async _fetchChangeset(expectedTimestamp, since) {
     const client = this.httpClient();
     const {
-      metadata,
-      timestamp: remoteTimestamp,
-      changes: remoteRecords,
+      headers,
+      json: { metadata, timestamp: remoteTimestamp, changes: remoteRecords },
     } = await client.execute(
       {
         path: `/buckets/${this.bucketName}/collections/${this.collectionName}/changeset`,
@@ -1339,12 +1361,18 @@ export class RemoteSettingsClient extends EventEmitter {
           _expected: expectedTimestamp,
           _since: since,
         },
+        raw: true,
       }
     );
+    const ageSeconds =
+      (lazy.Utils.serverTimeMillis(headers) - remoteTimestamp) / 1000;
     return {
       remoteTimestamp,
       metadata,
-      remoteRecords,
+      remoteRecords: this.localFields.length
+        ? remoteRecords.map(r => this._cleanLocalFields(r))
+        : remoteRecords,
+      ageSeconds,
     };
   }
 

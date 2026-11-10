@@ -27,7 +27,6 @@ UNIFIED_SOURCES += [
     "AppWindow.cpp",
     "nsAppShellService.cpp",
     "nsAppShellWindowEnumerator.cpp",
-    "nsChromeTreeOwner.cpp",
     "nsContentTreeOwner.cpp",
     "nsWindowMediator.cpp",
 ]
@@ -44,3 +43,11 @@ LOCAL_INCLUDES += [
 FINAL_LIBRARY = "xul"
 
 include("/ipc/chromium/chromium-config.mozbuild")
+
+SOURCE_HEADERS += [
+    "AppWindow.h",
+    "nsAppShellService.h",
+    "nsAppShellWindowEnumerator.h",
+    "nsContentTreeOwner.h",
+    "nsWindowMediator.h",
+]

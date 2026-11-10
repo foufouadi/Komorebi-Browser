@@ -104,13 +104,15 @@ class FileSystemDatabaseManagerVersion001 : public FileSystemDatabaseManager {
   nsresult MergeFileId(const EntryId& aEntryId, const FileId& aFileId,
                        bool aAbort) override;
 
+  nsresult RemoveFileIdsWithoutMainFile() override;
+
   void Close() override;
 
   nsresult BeginUsageTracking(const FileId& aFileId) override;
 
   nsresult EndUsageTracking(const FileId& aFileId) override;
 
-  virtual ~FileSystemDatabaseManagerVersion001() = default;
+  virtual ~FileSystemDatabaseManagerVersion001();
 
  protected:
   virtual Result<bool, QMResult> DoesFileIdExist(const FileId& aFileId) const;

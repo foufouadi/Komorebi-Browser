@@ -66,6 +66,36 @@ def _run_task_suffix(repo_type):
     return hash_path(str(RUN_TASK_GIT))[0:20]
 
 
+# As an additional mechanism to force the use of different caches, this
+# string literal can be changed. This is preferred to changing run-task
+# because it doesn't require images to be rebuilt.
+RUN_TASK_CACHE_VERSION = "v3"
+
+
+def _run_task_cache_suffix(config, task, uses_run_task):
+    if not uses_run_task:
+        return RUN_TASK_CACHE_VERSION
+    repo_type = task["attributes"].get("clone_with", config.params["repository_type"])
+    return f"{RUN_TASK_CACHE_VERSION}-{_run_task_suffix(repo_type)}"
+
+
+def _uses_run_task(command, mounts):
+    main_command = command[0] if command and isinstance(command[0], str) else ""
+    return is_run_task(main_command) or any(
+        mount.get("file") == "./run-task" for mount in mounts
+    )
+
+
+def _run_task_arguments(command):
+    arguments = []
+    for part in command:
+        if isinstance(part, list):
+            arguments.extend(p for p in part if isinstance(p, str))
+        elif isinstance(part, str):
+            arguments.extend(part.split())
+    return arguments
+
+
 def _compute_geckoview_version(app_version, moz_build_date):
     """Geckoview version string that matches geckoview gradle configuration"""
     # Must be synchronized with /mobile/android/geckoview/build.gradle computeVersionCode(...)
@@ -204,7 +234,9 @@ class TaskDescriptionSchema(Schema, kw_only=True):
     # information specific to the worker implementation that will run this task
     worker: Optional[TaskWorkerSchema] = None
     # Override the default priority for the project
-    priority: Optional[str] = None
+    priority: Optional[  # type: ignore
+        optionally_keyed_by("project", str, use_msgspec=True)
+    ] = None
     # Override the default 5 retries
     retries: Optional[int] = None
 
@@ -385,10 +417,21 @@ def get_treeherder_link(config) -> str:
     return f"{TREEHERDER_ROOT_URL}/#/jobs?repo={th_project}&revision={branch_rev}&selectedTaskRun=<self>"
 
 
+def get_task_source_url(config, task):
+    clone_with = task.get("attributes", {}).get("clone_with")
+    if config.params["repository_type"] == "hg" and clone_with == "git":
+        repo = config.params["head_git_repository"].rstrip("/")
+        rev = config.params["head_git_rev"]
+        return f"{repo}/blob/{rev}/{config.path}"
+    return config.params.file_url(config.path, pretty=True)
+
+
 @functools.cache
-def get_default_priority(graph_config, project):
+def get_default_priority(graph_config, project, shipping):
     return evaluate_keyed_by(
-        graph_config["task-priority"], "Graph Config", {"project": project}
+        graph_config["task-priority"],
+        "Graph Config",
+        {"project": project, "shipping": str(shipping).lower()},
     )
 
 
@@ -656,25 +699,10 @@ def build_docker_worker_payload(config, task, task_def):
         # the mechanism whereby changing run-task results in new caches
         # everywhere.
 
-        # As an additional mechanism to force the use of different caches, the
-        # string literal in the variable below can be changed. This is
-        # preferred to changing run-task because it doesn't require images
-        # to be rebuilt.
-        cache_version = "v3"
-
-        if run_task:
-            suffix = (
-                f"{cache_version}-{_run_task_suffix(config.params['repository_type'])}"
-            )
-
-            if out_of_tree_image:
-                name_hash = hashlib.sha256(
-                    out_of_tree_image.encode("utf-8")
-                ).hexdigest()
-                suffix += name_hash[0:12]
-
-        else:
-            suffix = cache_version
+        suffix = _run_task_cache_suffix(config, task, run_task)
+        if run_task and out_of_tree_image:
+            name_hash = hashlib.sha256(out_of_tree_image.encode("utf-8")).hexdigest()
+            suffix += name_hash[0:12]
 
         for cache in worker["caches"]:
             # Some caches aren't enabled in environments where we can't
@@ -844,12 +872,16 @@ def build_generic_worker_payload(config, task, task_def):
     #   * 'task-id'    -> 'taskId'
     # All other key names are already suitable, and don't need renaming.
     mounts = deepcopy(worker.get("mounts", []))
+    uses_run_task = _uses_run_task(worker["command"], mounts)
     for mount in mounts:
         if "cache-name" in mount:
+            name = mount.pop("cache-name")
+            if uses_run_task:
+                name = f"{name}-{_run_task_cache_suffix(config, task, True)}"
             mount["cacheName"] = "{trust_domain}-level-{level}-{name}".format(
                 trust_domain=config.graph_config["trust-domain"],
                 level=config.params["level"],
-                name=mount.pop("cache-name"),
+                name=name,
             )
             task_def["scopes"].append(
                 "generic-worker:cache:{}".format(mount["cacheName"])
@@ -1459,189 +1491,6 @@ def build_push_addons_payload(config, task, task_def):
     }
 
 
-class L10nBumpPlatformConfigSchema(Schema, forbid_unknown_fields=False, kw_only=True):
-    platforms: list[str]
-    path: str
-    format: Optional[str] = None
-
-
-class AndroidL10nTomlInfoSchema(Schema, forbid_unknown_fields=False, kw_only=True):
-    toml_path: str
-    dest_path: str
-
-
-class AndroidL10nSyncTomlInfoSchema(Schema, forbid_unknown_fields=False, kw_only=True):
-    toml_path: str
-
-
-class TreescriptL10nBumpInfoSchema(Schema, forbid_unknown_fields=False, kw_only=True):
-    name: str
-    path: str
-    version_path: str
-    l10n_repo_url: Optional[str] = None
-    l10n_repo_target_branch: Optional[str] = None
-    ignore_config: Optional[object] = None
-    platform_configs: list[L10nBumpPlatformConfigSchema]
-
-
-class TreescriptAndroidL10nImportInfoSchema(
-    Schema, forbid_unknown_fields=False, kw_only=True
-):
-    from_repo_url: str
-    toml_info: list[AndroidL10nTomlInfoSchema]
-
-
-class TreescriptAndroidL10nSyncInfoSchema(
-    Schema, forbid_unknown_fields=False, kw_only=True
-):
-    from_repo_url: str
-    toml_info: list[AndroidL10nSyncTomlInfoSchema]
-
-
-class TreescriptSchema(Schema, forbid_unknown_fields=False, kw_only=True):
-    tags: list[Optional[Literal["buildN", "release"]]]
-    bump: bool
-    bump_files: Optional[list[str]] = None
-    repo_param_prefix: Optional[str] = None
-    dontbuild: Optional[bool] = None
-    ignore_closed_tree: Optional[bool] = None
-    force_dry_run: Optional[bool] = None
-    push: Optional[bool] = None
-    source_repo: Optional[str] = None
-    ssh_user: Optional[str] = None
-    l10n_bump_info: Optional[list[TreescriptL10nBumpInfoSchema]] = None
-    actions: Optional[object] = None
-    merge_info: Optional[object] = None
-    android_l10n_import_info: Optional[TreescriptAndroidL10nImportInfoSchema] = None
-    android_l10n_sync_info: Optional[TreescriptAndroidL10nSyncInfoSchema] = None
-
-
-@payload_builder("treescript", schema=TreescriptSchema)
-def build_treescript_payload(config, task, task_def):
-    worker = task["worker"]
-    release_config = get_release_config(config)
-
-    task_def["payload"] = {"actions": []}
-    actions = task_def["payload"]["actions"]
-    if worker["tags"]:
-        tag_names = []
-        product = task["shipping-product"].upper()
-        version = release_config["version"].replace(".", "_")
-        buildnum = release_config["build_number"]
-        if "buildN" in worker["tags"]:
-            tag_names.extend([
-                f"{product}_{version}_BUILD{buildnum}",
-            ])
-        if "release" in worker["tags"]:
-            tag_names.extend([f"{product}_{version}_RELEASE"])
-        tag_info = {
-            "tags": tag_names,
-            "revision": config.params[
-                "{}head_rev".format(worker.get("repo-param-prefix", ""))
-            ],
-        }
-        task_def["payload"]["tag_info"] = tag_info
-        actions.append("tag")
-
-    if worker["bump"]:
-        if not worker["bump-files"]:
-            raise Exception("Version Bump requested without bump-files")
-
-        bump_info = {}
-        bump_info["next_version"] = release_config["next_version"]
-        bump_info["files"] = worker["bump-files"]
-        task_def["payload"]["version_bump_info"] = bump_info
-        actions.append("version_bump")
-
-    if worker.get("l10n-bump-info"):
-        l10n_bump_info = []
-        l10n_repo_urls = set()
-        for lbi in worker["l10n-bump-info"]:
-            new_lbi = {}
-            if "l10n-repo-url" in lbi:
-                l10n_repo_urls.add(lbi["l10n-repo-url"])
-            for k, v in lbi.items():
-                new_lbi[k.replace("-", "_")] = v
-            l10n_bump_info.append(new_lbi)
-
-        task_def["payload"]["l10n_bump_info"] = l10n_bump_info
-        if len(l10n_repo_urls) > 1:
-            raise Exception(
-                "Must use the same l10n-repo-url for all files in the same task!"
-            )
-        elif len(l10n_repo_urls) == 1:
-            if "github.com" in l10n_repo_urls.pop():
-                actions.append("l10n_bump_github")
-            else:
-                actions.append("l10n_bump")
-
-    if worker.get("merge-info"):
-        merge_info = {
-            merge_param_name.replace("-", "_"): merge_param_value
-            for merge_param_name, merge_param_value in worker["merge-info"].items()
-            if merge_param_name != "version-files"
-        }
-        merge_info["version_files"] = [
-            {
-                file_param_name.replace("-", "_"): file_param_value
-                for file_param_name, file_param_value in file_entry.items()
-            }
-            for file_entry in worker["merge-info"]["version-files"]
-        ]
-        task_def["payload"]["merge_info"] = merge_info
-        actions.append("merge_day")
-
-    if worker.get("android-l10n-import-info"):
-        android_l10n_import_info = {}
-        for k, v in worker["android-l10n-import-info"].items():
-            android_l10n_import_info[k.replace("-", "_")] = worker[
-                "android-l10n-import-info"
-            ][k]
-        android_l10n_import_info["toml_info"] = [
-            {
-                param_name.replace("-", "_"): param_value
-                for param_name, param_value in entry.items()
-            }
-            for entry in worker["android-l10n-import-info"]["toml-info"]
-        ]
-        task_def["payload"]["android_l10n_import_info"] = android_l10n_import_info
-        actions.append("android_l10n_import")
-
-    if worker.get("android-l10n-sync-info"):
-        android_l10n_sync_info = {}
-        for k, v in worker["android-l10n-sync-info"].items():
-            android_l10n_sync_info[k.replace("-", "_")] = worker[
-                "android-l10n-sync-info"
-            ][k]
-        android_l10n_sync_info["toml_info"] = [
-            {
-                param_name.replace("-", "_"): param_value
-                for param_name, param_value in entry.items()
-            }
-            for entry in worker["android-l10n-sync-info"]["toml-info"]
-        ]
-        task_def["payload"]["android_l10n_sync_info"] = android_l10n_sync_info
-        actions.append("android_l10n_sync")
-
-    if worker["push"]:
-        actions.append("push")
-
-    if worker.get("force-dry-run"):
-        task_def["payload"]["dry_run"] = True
-
-    if worker.get("dontbuild"):
-        task_def["payload"]["dontbuild"] = True
-
-    if worker.get("ignore-closed-tree") is not None:
-        task_def["payload"]["ignore_closed_tree"] = worker["ignore-closed-tree"]
-
-    if worker.get("source-repo"):
-        task_def["payload"]["source_repo"] = worker["source-repo"]
-
-    if worker.get("ssh-user"):
-        task_def["payload"]["ssh_user"] = worker["ssh-user"]
-
-
 # -- scriptworker-lando schemas --
 
 
@@ -1711,6 +1560,7 @@ class EsrBumpConfig(Schema):
     fetch_version_from: str
     version_files: list[VersionFileStrict]
     to_revision: str = ""
+    update_clobber_file: Optional[bool] = None
 
 
 class MainBumpConfig(Schema):
@@ -1721,6 +1571,7 @@ class MainBumpConfig(Schema):
     replacements: Optional[list[list[str]]] = None
     regex_replacements: Optional[list[list[str]]] = None
     end_tag: Optional[str] = None
+    update_clobber_file: Optional[bool] = None
 
 
 class UpliftConfig(Schema):
@@ -1734,6 +1585,7 @@ class UpliftConfig(Schema):
     base_tag: Optional[str] = None
     end_tag: Optional[str] = None
     l10n_bump_info: Optional[list[L10nBumpInfo]] = None
+    update_clobber_file: Optional[bool] = None
 
 
 class MergeDayConfig(Schema):
@@ -2057,11 +1909,28 @@ def validate_shipping_product(config, product):
         raise Exception(UNSUPPORTED_SHIPPING_PRODUCT_ERROR.format(product=product))
 
 
+@functools.cache
+def _get_worker_validation_schema(implementation):
+    worker_schema = payload_builders[implementation].schema
+    if isinstance(worker_schema, dict):
+        from voluptuous import ALLOW_EXTRA
+
+        worker_schema = LegacySchema(worker_schema, extra=ALLOW_EXTRA)
+    elif isinstance(worker_schema, type) and issubclass(worker_schema, msgspec.Struct):
+        worker_schema = type(
+            worker_schema.__name__,
+            (worker_schema,),
+            {},
+            forbid_unknown_fields=False,
+            kw_only=True,
+        )
+    return worker_schema
+
+
 @transforms.add
 def validate(config, tasks):
     # Schema validation is a no-op in fast mode (see validate_schema), so skip
-    # this whole transform, including the costly per-task worker schema
-    # construction whose result would only be discarded.
+    # this whole transform.
     if taskgraph.fast:
         yield from tasks
         return
@@ -2072,21 +1941,7 @@ def validate(config, tasks):
             task,
             "In task {!r}:".format(task.get("label", "?no-label?")),
         )
-        worker_schema = payload_builders[task["worker"]["implementation"]].schema
-        if isinstance(worker_schema, dict):
-            from voluptuous import ALLOW_EXTRA
-
-            worker_schema = LegacySchema(worker_schema, extra=ALLOW_EXTRA)
-        elif isinstance(worker_schema, type) and issubclass(
-            worker_schema, msgspec.Struct
-        ):
-            worker_schema = type(
-                worker_schema.__name__,
-                (worker_schema,),
-                {},
-                forbid_unknown_fields=False,
-                kw_only=True,
-            )
+        worker_schema = _get_worker_validation_schema(task["worker"]["implementation"])
         validate_schema(
             worker_schema,
             task["worker"],
@@ -2349,7 +2204,8 @@ def add_github_checks_route(config, tasks):
         return
 
     for task in tasks:
-        if task.get("attributes", {}).get("code-review"):
+        attrs = task.get("attributes", {})
+        if attrs.get("code-review") or attrs.get("code-review-build-test"):
             routes = task.setdefault("routes", [])
             tier = task.get("treeherder", {}).get("tier", 3)
             if "checks" not in routes and tier == 1:
@@ -2376,7 +2232,18 @@ def try_task_config_env(config, tasks):
     }
     for task in tasks:
         if task["worker"]["implementation"] in implementations:
-            task["worker"]["env"].update(env)
+            task_env = task["worker"]["env"]
+            # A test task whose manifests were restricted to what try asked for
+            # holds the share of the request that its own chunk runs, which is
+            # narrower than the request itself. Every other task needs the
+            # request, as the harness is what filters the suite down for it.
+            attributes = task.get("attributes") or {}
+            keep_test_paths = attributes.get("test-manifests-restricted", False)
+            task_env.update({
+                name: value
+                for name, value in env.items()
+                if name != "MOZHARNESS_TEST_PATHS" or not keep_test_paths
+            })
         yield task
 
 
@@ -2449,7 +2316,7 @@ def _variant_symbols():
         [
             (
                 v,
-                TEST_VARIANTS[v]["suffix"],
+                TEST_VARIANTS[v].get("treeherder-suffix") or TEST_VARIANTS[v]["suffix"],
                 TEST_VARIANTS[v].get("description", "{description}"),
             )
             for v in TEST_VARIANTS
@@ -2551,13 +2418,29 @@ def build_task(config, tasks):
         if "deadline-after" not in task:
             task["deadline-after"] = "1 day"
 
-        if "priority" not in task:
+        resolve_keyed_by(
+            task,
+            "priority",
+            item_name=task["label"],
+            **{"project": config.params["project"]},
+        )
+
+        if task.get("priority") is None:
             task["priority"] = get_default_priority(
-                config.graph_config, config.params["project"]
+                config.graph_config,
+                config.params["project"],
+                config.params["shipping"],
             )
 
         tags = task.get("tags", {})
         attributes = task.get("attributes", {})
+
+        # Expose the yml file the task was defined in (relative to the
+        # topsrcdir), so consumers of the resolved task graph (e.g. lints
+        # auditing taskcluster/kinds/*) can point back to a specific file
+        # without needing to re-parse the kind's yml files themselves.
+        if task.get("task-from"):
+            attributes["task-from"] = os.path.join(config.path, task["task-from"])
 
         tags.update({
             "createdForUser": config.params["owner"],
@@ -2580,7 +2463,7 @@ def build_task(config, tasks):
                 "description": task["description"],
                 "name": task["label"],
                 "owner": config.params["owner"],
-                "source": config.params.file_url(config.path, pretty=True),
+                "source": get_task_source_url(config, task),
             },
             "extra": extra,
             "tags": tags,
@@ -2664,6 +2547,14 @@ def build_task(config, tasks):
                     "MOZ_SOURCE_CHANGESET": get_branch_rev(config),
                     "MOZ_SOURCE_REPO": get_branch_repo(config),
                 })
+                prefix = config.graph_config["project-repo-param-prefix"]
+                git_repo = config.params.get(f"{prefix}head_git_repository")
+                git_rev = config.params.get(f"{prefix}head_git_rev")
+                if git_repo and git_rev:
+                    env.update({
+                        "MOZ_SOURCE_GIT_REPO": git_repo,
+                        "MOZ_SOURCE_GIT_CHANGESET": git_rev,
+                    })
 
         dependencies = task.get("dependencies", {})
         if_dependencies = task.get("if-dependencies", [])
@@ -2740,19 +2631,6 @@ def check_task_dependencies(config, tasks):
         yield task
 
 
-@transforms.add
-def check_perf_task_fission_filtering(config, tasks):
-    for task in tasks:
-        if (
-            ("chrome-m" in task["label"] or "cstm-car-m" in task["label"])
-            and "nofis" not in task["label"]
-            and "android" in task["label"]
-            and "startup" not in task["label"]
-        ):
-            continue
-        yield task
-
-
 def check_caches_are_volumes(task):
     """Ensures that all cache paths are defined as volumes.
 
@@ -2823,6 +2701,7 @@ def check_run_task_caches(config, tasks):
 
     re_checkout_cache = re.compile("^checkouts")
     re_sparse_checkout_cache = re.compile("^checkouts-sparse")
+    re_git_checkout_cache = re.compile("^checkouts-git")
     re_shallow_checkout_cache = re.compile("^checkouts-git-shallow")
 
     cache_prefix = "{trust_domain}-level-{level}-".format(
@@ -2830,14 +2709,16 @@ def check_run_task_caches(config, tasks):
         level=config.params["level"],
     )
 
-    suffix = _run_task_suffix(config.params["repository_type"])
-
     for task in tasks:
         payload = task["task"].get("payload", {})
         command = payload.get("command") or [""]
+        mounts = payload.get("mounts", [])
+        repo_type = task["attributes"].get(
+            "clone_with", config.params["repository_type"]
+        )
+        suffix = _run_task_suffix(repo_type)
 
-        main_command = command[0] if isinstance(command[0], str) else ""
-        run_task = is_run_task(main_command)
+        run_task = _uses_run_task(command, mounts)
 
         require_sparse_cache = False
         require_shallow_cache = False
@@ -2846,10 +2727,7 @@ def check_run_task_caches(config, tasks):
         have_shallow_cache = False
 
         if run_task:
-            for arg in command[1:]:
-                if not isinstance(arg, str):
-                    continue
-
+            for arg in _run_task_arguments(command)[1:]:
                 if arg == "--":
                     break
 
@@ -2868,13 +2746,14 @@ def check_run_task_caches(config, tasks):
                             )
                         )
                     require_sparse_cache = True
-                    break
 
                 if arg == "--gecko-shallow-clone":
                     require_shallow_cache = True
-                    break
 
-        for cache in payload.get("cache", {}):
+        caches = list(payload.get("cache", {})) + [
+            mount["cacheName"] for mount in mounts if "cacheName" in mount
+        ]
+        for cache in caches:
             if not cache.startswith(cache_prefix):
                 raise Exception(
                     "{} is using a cache ({}) which is not appropriate "
@@ -2888,7 +2767,9 @@ def check_run_task_caches(config, tasks):
             if re_checkout_cache.match(cache):
                 have_checkout_cache = True
 
-            if re_sparse_checkout_cache.match(cache):
+            if re_sparse_checkout_cache.match(cache) or (
+                repo_type == "git" and re_git_checkout_cache.match(cache)
+            ):
                 have_sparse_cache = True
 
             if re_shallow_checkout_cache.match(cache):

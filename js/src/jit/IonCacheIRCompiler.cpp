@@ -584,6 +584,7 @@ bool IonCacheIRCompiler::init() {
 JitCode* IonCacheIRCompiler::compile(IonICStub* stub) {
   AutoCreatedBy acb(masm, "IonCacheIRCompiler::compile");
 
+  masm.indirectTarget(TargetKind::Jump);
   masm.setFramePushed(ionScript_->frameSize());
   if (cx_->runtime()->geckoProfiler().enabled()) {
     masm.enableProfilingInstrumentation();
@@ -1211,6 +1212,7 @@ bool IonCacheIRCompiler::emitCallNativeGetterResult(
   masm.moveStackPtrTo(argVp.get());
 
   // Push marking data for later use.
+  masm.Push(ImmGCPtr(target));
   masm.Push(argUintN);
   pushStubCodePointer();
 
@@ -1401,11 +1403,9 @@ bool IonCacheIRCompiler::emitCompareStringResult(JSOp op, StringOperandId lhsId,
   // - |left <= right| is implemented as |right >= left|.
   // - |left > right| is implemented as |right < left|.
   if (op == JSOp::Le || op == JSOp::Gt) {
-    masm.Push(left);
-    masm.Push(right);
+    masm.PushRegs(left, right);
   } else {
-    masm.Push(right);
-    masm.Push(left);
+    masm.PushRegs(right, left);
   }
 
   using Fn = bool (*)(JSContext*, HandleString, HandleString, bool*);
@@ -1727,6 +1727,7 @@ bool IonCacheIRCompiler::emitCallNativeSetter(ObjOperandId receiverId,
   masm.move32(Imm32(1), argUintN);
 
   // Push marking data for later use.
+  masm.Push(ImmGCPtr(target));
   masm.Push(argUintN);
   pushStubCodePointer();
 
@@ -1915,8 +1916,7 @@ bool IonCacheIRCompiler::emitCallAddOrUpdateSparseElementHelper(
 
   masm.Push(Imm32(strict));
   masm.Push(val);
-  masm.Push(id);
-  masm.Push(obj);
+  masm.PushRegs(id, obj);
 
   using Fn = bool (*)(JSContext* cx, Handle<NativeObject*> obj, int32_t int_id,
                       HandleValue v, bool strict);
@@ -2021,7 +2021,7 @@ void IonIC::attachCacheIRStub(JSContext* cx, const CacheIRWriter& writer,
     return;
   }
 
-  JitZone* jitZone = cx->zone()->jitZone();
+  JitRealm& jitRealm = script()->realm()->jitRealm();
 
   constexpr uint32_t stubDataOffset = sizeof(IonICStub);
   static_assert(stubDataOffset % sizeof(uint64_t) == 0,
@@ -2030,7 +2030,7 @@ void IonIC::attachCacheIRStub(JSContext* cx, const CacheIRWriter& writer,
   // Try to reuse a previously-allocated CacheIRStubInfo.
   CacheIRStubKey::Lookup lookup(kind, ICStubEngine::IonIC, writer.codeStart(),
                                 writer.codeLength());
-  CacheIRStubInfo* stubInfo = jitZone->getIonCacheIRStubInfo(lookup);
+  CacheIRStubInfo* stubInfo = jitRealm.getIonCacheIRStubInfo(lookup);
   if (!stubInfo) {
     // Allocate the shared CacheIRStubInfo. Note that the
     // putIonCacheIRStubInfo call below will transfer ownership to
@@ -2046,7 +2046,7 @@ void IonIC::attachCacheIRStub(JSContext* cx, const CacheIRWriter& writer,
     }
 
     CacheIRStubKey key(stubInfo);
-    if (!jitZone->putIonCacheIRStubInfo(lookup, key)) {
+    if (!jitRealm.putIonCacheIRStubInfo(lookup, key)) {
       return;
     }
   }
@@ -2068,12 +2068,12 @@ void IonIC::attachCacheIRStub(JSContext* cx, const CacheIRWriter& writer,
 
   size_t bytesNeeded = stubInfo->stubDataOffset() + stubInfo->stubDataSize();
 
-  // Allocate the IonICStub in the JitZone's stub space. Ion stubs and
+  // Allocate the IonICStub in the realm's stub space. Ion stubs and
   // CacheIRStubInfo instances for Ion stubs can be purged on GC. That's okay
   // because the stub code is rooted separately when we make a VM call, and
   // stub code should never access the IonICStub after making a VM call. The
   // IonICStub::poison method poisons the stub to catch bugs in this area.
-  ICStubSpace* stubSpace = cx->zone()->jitZone()->stubSpace();
+  ICStubSpace* stubSpace = jitRealm.stubSpace();
   void* newStubMem = stubSpace->alloc(bytesNeeded);
   if (!newStubMem) {
     return;
@@ -2303,6 +2303,12 @@ bool IonCacheIRCompiler::emitCallClassHook(ObjOperandId calleeId,
                                            Int32OperandId argcId,
                                            CallFlags flags, uint32_t argcFixed,
                                            uint32_t targetOffset) {
+  MOZ_CRASH("Call ICs not used in ion");
+}
+
+bool IonCacheIRCompiler::emitCallInlinedBoundFunction(
+    ObjOperandId calleeId, ObjOperandId targetId, Int32OperandId argcId,
+    CallFlags flags, uint32_t icScriptOffset, uint32_t numBoundArgs) {
   MOZ_CRASH("Call ICs not used in ion");
 }
 

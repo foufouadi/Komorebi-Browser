@@ -36,6 +36,8 @@ const { BANDWIDTH } = ChromeUtils.importESModule(
 const FEATURE_PREF = "browser.ipProtection.enabled";
 const SITE_EXCEPTIONS_FEATURE_PREF =
   "browser.ipProtection.features.siteExceptions";
+const SITE_INCLUSIONS_FEATURE_PREF =
+  "browser.ipProtection.features.siteInclusions";
 const AUTOSTART_FEATURE_ENABLED_PREF =
   "browser.ipProtection.features.autoStart";
 const BANDWIDTH_FEATURE_ENABLED_PREF = "browser.ipProtection.bandwidth.enabled";
@@ -68,6 +70,7 @@ add_setup(async function ippSetup() {
 async function setupVpnPrefs({
   feature = false,
   siteExceptions = false,
+  siteInclusions = false,
   autostartFeatureEnabled = false,
   bandwidth = false,
   autostart = false,
@@ -79,6 +82,7 @@ async function setupVpnPrefs({
   let prefs = [
     [FEATURE_PREF, feature],
     [SITE_EXCEPTIONS_FEATURE_PREF, siteExceptions],
+    [SITE_INCLUSIONS_FEATURE_PREF, siteInclusions],
     [AUTOSTART_FEATURE_ENABLED_PREF, autostartFeatureEnabled],
     [BANDWIDTH_FEATURE_ENABLED_PREF, bandwidth],
     [AUTOSTART_PREF, autostart],
@@ -564,6 +568,7 @@ add_task(async function test_not_opted_in_section_visible_when_empty() {
   await setupVpnPrefs({
     feature: true,
     entitlementCache: "",
+    siteInclusions: false,
   });
 
   await BrowserTestUtils.withNewTab(
@@ -586,6 +591,39 @@ add_task(async function test_not_opted_in_section_visible_when_empty() {
     }
   );
 });
+
+// Tests that the not opted in section shows with the correct copy once site inclusions is enabled
+add_task(
+  async function test_not_opted_in_section_visible_with_site_inclusions_enabled() {
+    await setupVpnPrefs({
+      feature: true,
+      entitlementCache: "",
+      siteInclusions: true,
+    });
+
+    await BrowserTestUtils.withNewTab(
+      { gBrowser, url: "about:preferences#privacy" },
+      async function (browser) {
+        let settingGroup = testSettingsGroupVisible(browser);
+        let notOptedInSection = settingGroup?.querySelector(
+          "#ipProtectionNotOptedInV2"
+        );
+        is_element_visible(
+          notOptedInSection,
+          "Not opted in section version two is shown"
+        );
+
+        let getStartedButton = settingGroup?.querySelector(
+          "#getStartedButtonV2"
+        );
+        is_element_visible(
+          getStartedButton,
+          "Get started button version two is shown"
+        );
+      }
+    );
+  }
+);
 
 // Test that clicking the "Get started" button start the optin flow.
 add_task(async function test_get_started_button() {
@@ -771,6 +809,7 @@ add_task(async function test_not_opted_in_section_hidden_when_opted_in() {
   await setupVpnPrefs({
     feature: true,
     entitlementCache: '{"some":"data"}',
+    siteInclusions: false,
   });
 
   await BrowserTestUtils.withNewTab(
@@ -1064,3 +1103,56 @@ add_task(
     );
   }
 );
+
+// Test the site exclusions section shows when site inclusions is false
+add_task(async function test_site_rules_hidden_without_inclusions_feature() {
+  await setupVpnPrefs({
+    feature: true,
+    siteExceptions: true,
+    siteInclusions: false,
+    entitlementCache: '{"some":"data"}',
+  });
+
+  await BrowserTestUtils.withNewTab(
+    { gBrowser, url: "about:preferences#privacy" },
+    async function (browser) {
+      let settingGroup = testSettingsGroupVisible(browser);
+
+      is_element_visible(
+        settingGroup?.querySelector("#ipProtectionExceptions"),
+        "Site exceptions group is shown"
+      );
+      is_element_hidden(
+        settingGroup?.querySelector("#ipProtectionSiteRules"),
+        "Site rules button is hidden"
+      );
+    }
+  );
+
+  await SpecialPowers.popPrefEnv();
+});
+
+// Test the site rules section stays hidden for users who have not opted in,
+// even with the site inclusions feature on.
+add_task(async function test_site_rules_hidden_when_not_opted_in() {
+  await setupVpnPrefs({
+    feature: true,
+    siteExceptions: true,
+    siteInclusions: true,
+    entitlementCache: "",
+  });
+
+  await BrowserTestUtils.withNewTab(
+    { gBrowser, url: "about:preferences#privacy" },
+    async function (browser) {
+      let settingGroup = testSettingsGroupVisible(browser);
+
+      is_element_hidden(
+        settingGroup?.querySelector("#ipProtectionSiteRules"),
+        "Site rules button is hidden when not opted in"
+      );
+    }
+  );
+
+  await SpecialPowers.popPrefEnv();
+});

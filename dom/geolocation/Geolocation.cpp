@@ -74,7 +74,7 @@ class nsGeolocationRequest final : public ContentPermissionRequestBase,
   // nsIContentPermissionRequest
   MOZ_CAN_RUN_SCRIPT NS_IMETHOD Cancel(void) override;
   MOZ_CAN_RUN_SCRIPT NS_IMETHOD Allow(JS::Handle<JS::Value> choices) override;
-  NS_IMETHOD GetTypes(nsIArray** aTypes) override;
+  void GetPermissionOptions(nsTArray<nsString>& aOptions) const override;
 
   void Shutdown();
 
@@ -90,8 +90,6 @@ class nsGeolocationRequest final : public ContentPermissionRequestBase,
   void StopTimeoutTimer();
   MOZ_CAN_RUN_SCRIPT
   void NotifyErrorAndShutdown(uint16_t);
-  using ContentPermissionRequestBase::GetPrincipal;
-  nsIPrincipal* GetPrincipal();
 
   bool IsWatch() { return mIsWatchPositionRequest; }
   int32_t WatchId() { return mWatchId; }
@@ -151,7 +149,7 @@ class nsGeolocationRequest final : public ContentPermissionRequestBase,
 
 static UniquePtr<PositionOptions> CreatePositionOptionsCopy(
     const PositionOptions& aOptions) {
-  UniquePtr<PositionOptions> geoOptions = MakeUnique<PositionOptions>();
+  auto geoOptions = std::make_unique<PositionOptions>();
 
   geoOptions->mEnableHighAccuracy = aOptions.mEnableHighAccuracy;
   geoOptions->mMaximumAge = aOptions.mMaximumAge;
@@ -193,6 +191,36 @@ static nsPIDOMWindowInner* ConvertWeakReferenceToWindow(
   return raw;
 }
 
+static void RecordUserActivationOnRequest(nsPIDOMWindowInner* aWindow) {
+  if (!aWindow) {
+    return;
+  }
+  WindowContext* context = aWindow->GetWindowContext();
+  if (!context) {
+    return;
+  }
+  UserActivation::State state = context->GetUserActivationState();
+  auto label = glean::geolocation::RequestActivationLabel::eNone;
+  switch (state) {
+    case UserActivation::State::FullActivated:
+      label = glean::geolocation::RequestActivationLabel::eFullActivated;
+      break;
+    case UserActivation::State::HasBeenActivated:
+      label = glean::geolocation::RequestActivationLabel::eHasBeenActivated;
+      break;
+    case UserActivation::State::None:
+      label = glean::geolocation::RequestActivationLabel::eNone;
+      break;
+    default:
+      MOZ_CRASH("Unknown user activation label");
+      break;
+  }
+  MOZ_LOG(gGeolocationLog, LogLevel::Debug,
+          ("nsGeolocationRequest triggered with user activation state %d",
+           static_cast<uint8_t>(state)));
+  glean::geolocation::request_activation.EnumGet(label).Add();
+}
+
 nsGeolocationRequest::nsGeolocationRequest(
     Geolocation* aLocator, GeoPositionCallback aCallback,
     GeoPositionErrorCallback aErrorCallback,
@@ -211,7 +239,9 @@ nsGeolocationRequest::nsGeolocationRequest(
       mWatchId(aWatchId),
       mShutdown(false),
       mMainThreadSerialEventTarget(aMainThreadSerialEventTarget),
-      mBehavior(SystemGeolocationPermissionBehavior::NoPrompt) {}
+      mBehavior(SystemGeolocationPermissionBehavior::NoPrompt) {
+  RecordUserActivationOnRequest(mWindow);
+}
 
 nsGeolocationRequest::~nsGeolocationRequest() { StopTimeoutTimer(); }
 
@@ -438,9 +468,8 @@ nsGeolocationRequest::Allow(JS::Handle<JS::Value> aChoices) {
     }
   }
 
-  // Enforce using cache in case the geolocation override server is set,
-  // since this server can return only cached values.
-  if (!canUseCache && gs != GeolocationService::sService.get()) {
+  // The override service only supplies a single cached position.
+  if (!canUseCache && gs->IsOverride()) {
     canUseCache = true;
   }
 
@@ -587,13 +616,6 @@ void nsGeolocationRequest::SendLocation(nsIDOMGeoPosition* aPosition) {
              "non-shutdown getCurrentPosition request after callback!");
 }
 
-nsIPrincipal* nsGeolocationRequest::GetPrincipal() {
-  if (!mLocator) {
-    return nullptr;
-  }
-  return mLocator->GetPrincipal();
-}
-
 NS_IMETHODIMP
 nsGeolocationRequest::Update(nsIDOMGeoPosition* aPosition) {
   if (!mSeenAnySignal) {
@@ -657,22 +679,18 @@ void nsGeolocationRequest::Shutdown() {
   }
 }
 
-NS_IMETHODIMP
-nsGeolocationRequest::GetTypes(nsIArray** aTypes) {
-  AutoTArray<nsString, 2> options;
-
+void nsGeolocationRequest::GetPermissionOptions(
+    nsTArray<nsString>& aOptions) const {
   switch (mBehavior) {
     case SystemGeolocationPermissionBehavior::SystemWillPromptUser:
-      options.AppendElement(u"sysdlg"_ns);
+      aOptions.AppendElement(u"sysdlg"_ns);
       break;
     case SystemGeolocationPermissionBehavior::GeckoWillPromptUser:
-      options.AppendElement(u"syssetting"_ns);
+      aOptions.AppendElement(u"syssetting"_ns);
       break;
     default:
       break;
   }
-  return nsContentPermissionUtils::CreatePermissionArray(mType, options,
-                                                         aTypes);
 }
 
 ////////////////////////////////////////////////////
@@ -1176,6 +1194,15 @@ Geolocation::GetLocationOSPermission() {
 }
 
 void Geolocation::RequestIfPermitted(nsGeolocationRequest* request) {
+  // The override service never reaches the platform, so the system
+  // geolocation permission does not apply to it.
+  RefPtr<GeolocationService> gs =
+      GeolocationService::GetGeolocationService(mBrowsingContext);
+  if (gs && gs->IsOverride()) {
+    RegisterRequestWithPrompt(request);
+    return;
+  }
+
   auto getPermission = [request = RefPtr{request}](auto aPermission) {
     switch (aPermission) {
       case geolocation::SystemGeolocationPermissionBehavior::

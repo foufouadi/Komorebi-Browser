@@ -4,24 +4,39 @@
 
 package org.mozilla.fenix.ui.efficiency.selectors
 
+import mozilla.components.compose.browser.toolbar.R as browserToolbarR
 import mozilla.components.compose.browser.toolbar.concept.BrowserToolbarTestTags.ADDRESSBAR_URL_BOX
 import mozilla.components.compose.browser.toolbar.concept.BrowserToolbarTestTags.TABS_COUNTER
+import mozilla.components.feature.summarize.R as summarizeR
+import mozilla.components.ui.tabcounter.R as tabcounterR
 import org.mozilla.fenix.R
 import org.mozilla.fenix.components.toolbar.BrowserToolbarTestTags.SITE_INFO_INSECURE_CONNECTION
 import org.mozilla.fenix.components.toolbar.BrowserToolbarTestTags.SITE_INFO_SECURE
 import org.mozilla.fenix.components.toolbar.BrowserToolbarTestTags.SITE_INFO_TRACKING_PROTECTION_OFF
 import org.mozilla.fenix.components.toolbar.BrowserToolbarTestTags.SITE_INFO_UNKNOWN
 import org.mozilla.fenix.helpers.DataGenerationHelper.getStringResource
+import org.mozilla.fenix.ui.efficiency.helpers.PageReadinessProfiles
 import org.mozilla.fenix.ui.efficiency.helpers.Selector
+import org.mozilla.fenix.ui.efficiency.helpers.SelectorContainer
+import org.mozilla.fenix.ui.efficiency.helpers.SelectorGroup
 import org.mozilla.fenix.ui.efficiency.helpers.SelectorStrategy
 
-object ToolbarSelectors {
+object ToolbarSelectors : SelectorContainer {
+    enum class Group : SelectorGroup {
+        EXPANDED_TOOLBAR_ITEM,
+        EXPANDED_TOOLBAR_IN_LANDSCAPE_ITEM,
+        HOME_SCREEN_TOOLBAR,
+        BROWSER_VIEW_TOOLBAR_ITEMS,
+        TAB_COUNTER_SHORTCUT_MENU,
+        SIMPLE_TOOLBAR_NONE_SHORTCUT_ITEMS,
+    }
+
     val TOOLBAR =
         Selector(
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_RES_ID,
             value = "composable_toolbar",
             description = "Toolbar",
-            groups = listOf("requiredForPage"),
+            readiness = PageReadinessProfiles.IDENTITY_ANCHOR,
         )
 
     val TAB_COUNTER =
@@ -29,7 +44,16 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TAG,
             value = TABS_COUNTER,
             description = "Tab counter button",
-            groups = listOf("requiredForPage"),
+            readiness = PageReadinessProfiles.READY_CONTENT,
+            groups = setOf(Group.SIMPLE_TOOLBAR_NONE_SHORTCUT_ITEMS),
+        )
+
+    val MAIN_MENU_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.UIAUTOMATOR_WITH_DESCRIPTION_CONTAINS,
+            value = getStringResource(R.string.content_description_menu),
+            description = "Three dot menu button",
+            groups = setOf(Group.SIMPLE_TOOLBAR_NONE_SHORTCUT_ITEMS),
         )
 
     val TOOLBAR_URL_BOX =
@@ -37,7 +61,7 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.COMPOSE_ON_ALL_NODES_BY_TAG_ON_FIRST,
             value = ADDRESSBAR_URL_BOX,
             description = "URL box",
-            groups = listOf("requiredForPage"),
+            readiness = PageReadinessProfiles.READY_CONTENT,
         )
 
     // Use UIAutomator when navigating from BrowserPage — avoids Compose sync hanging when GeckoView is active.
@@ -46,7 +70,13 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_COMPOSE_TAG,
             value = ADDRESSBAR_URL_BOX,
             description = "URL box",
-            groups = listOf(),
+        )
+
+    val TOOLBAR_URL_BOX_UIAUTOMATOR2 =
+        Selector(
+            strategy = SelectorStrategy.UIAUTOMATOR2_BY_RAW_RES,
+            value = ADDRESSBAR_URL_BOX,
+            description = "URL box",
         )
 
     val TAB_COUNTER_UIAUTOMATOR =
@@ -54,7 +84,6 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_COMPOSE_TAG,
             value = TABS_COUNTER,
             description = "Tab counter button",
-            groups = listOf(),
         )
 
     // Layout-agnostic tab counter. The TABS_COUNTER testTag only exists on the address-bar counter: with
@@ -68,7 +97,6 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_DESCRIPTION_CONTAINS,
             value = "Tabs Open:",
             description = "Tab counter button (either toolbar layout)",
-            groups = listOf(),
         )
 
     val NEW_TAB_BUTTON =
@@ -76,7 +104,6 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_DESCRIPTION_CONTAINS,
             value = "New tab",
             description = "New tab button",
-            groups = listOf(),
         )
 
     val NEW_PRIVATE_TAB_BUTTON =
@@ -84,7 +111,39 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_DESCRIPTION_CONTAINS,
             value = "New private tab",
             description = "New private tab button",
-            groups = listOf(),
+        )
+
+    // Items in the shortcut menu raised by long-pressing the tab counter: Compose text nodes, distinct
+    // from the NEW_TAB_BUTTON / NEW_PRIVATE_TAB_BUTTON toolbar buttons matched by content-description.
+    val TAB_COUNTER_SHORTCUT_NEW_TAB =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TEXT,
+            value = getStringResource(tabcounterR.string.mozac_browser_menu_new_tab),
+            description = "Tab counter shortcut menu 'New tab' item",
+            groups = setOf(Group.TAB_COUNTER_SHORTCUT_MENU),
+        )
+
+    val TAB_COUNTER_SHORTCUT_NEW_PRIVATE_TAB =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TEXT,
+            value = getStringResource(tabcounterR.string.mozac_browser_menu_new_private_tab),
+            description = "Tab counter shortcut menu 'New private tab' item",
+            groups = setOf(Group.TAB_COUNTER_SHORTCUT_MENU),
+        )
+
+    val TAB_COUNTER_SHORTCUT_CLOSE_TAB =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_TEXT,
+            value = getStringResource(tabcounterR.string.mozac_close_tab),
+            description = "Tab counter shortcut menu 'Close tab' item",
+            groups = setOf(Group.TAB_COUNTER_SHORTCUT_MENU),
+        )
+
+    val EXPANDED_TOOLBAR_HOMEPAGE_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION,
+            value = "Homepage",
+            description = "Simple toolbar homepage button",
         )
 
     val EXPANDED_TOOLBAR_ADD_BOOKMARK_BUTTON =
@@ -92,7 +151,7 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_DESCRIPTION_CONTAINS,
             value = getStringResource(R.string.browser_menu_bookmark_this_page_2),
             description = "Expanded toolbar bookmark page button",
-            groups = listOf("expandedToolbarItem"),
+            groups = setOf(Group.EXPANDED_TOOLBAR_ITEM),
         )
 
     val EXPANDED_TOOLBAR_EDIT_BOOKMARK_BUTTON =
@@ -100,7 +159,7 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_DESCRIPTION_CONTAINS,
             value = getStringResource(R.string.browser_menu_edit_bookmark),
             description = "Expanded toolbar edit bookmark button",
-            groups = listOf("expandedToolbarItem"),
+            groups = setOf(Group.EXPANDED_TOOLBAR_ITEM),
         )
 
     val EXPANDED_TOOLBAR_SHARE_BUTTON =
@@ -108,7 +167,7 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_DESCRIPTION_CONTAINS,
             value = getStringResource(R.string.browser_menu_share),
             description = "Expanded toolbar share button",
-            groups = listOf("expandedToolbarItem"),
+            groups = setOf(Group.EXPANDED_TOOLBAR_ITEM),
         )
 
     val EXPANDED_TOOLBAR_BACK_BUTTON =
@@ -116,7 +175,7 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_DESCRIPTION_CONTAINS,
             value = getStringResource(R.string.browser_menu_back),
             description = "Expanded toolbar back button",
-            groups = listOf("expandedToolbarInLandscapeItem"),
+            groups = setOf(Group.EXPANDED_TOOLBAR_IN_LANDSCAPE_ITEM),
         )
 
     val EXPANDED_TOOLBAR_FORWARD_BUTTON =
@@ -124,7 +183,7 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_DESCRIPTION_CONTAINS,
             value = getStringResource(R.string.browser_menu_forward),
             description = "Expanded toolbar forward button",
-            groups = listOf("expandedToolbarInLandscapeItem"),
+            groups = setOf(Group.EXPANDED_TOOLBAR_IN_LANDSCAPE_ITEM),
         )
 
     val EXPANDED_TOOLBAR_REFRESH_BUTTON =
@@ -132,7 +191,49 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_DESCRIPTION_CONTAINS,
             value = getStringResource(R.string.browser_menu_refresh),
             description = "Expanded toolbar refresh button",
-            groups = listOf("expandedToolbarInLandscapeItem"),
+            groups = setOf(Group.EXPANDED_TOOLBAR_IN_LANDSCAPE_ITEM),
+        )
+
+    val SIMPLE_TOOLBAR_SHARE_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION,
+            value = "Share",
+            description = "Simple toolbar share button",
+        )
+
+    val SIMPLE_TOOLBAR_HOMEPAGE_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION,
+            value = "Homepage",
+            description = "Simple toolbar homepage button",
+        )
+
+    val SIMPLE_TOOLBAR_BACK_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION,
+            value = "Back",
+            description = "Simple toolbar back button",
+        )
+
+    val SIMPLE_TOOLBAR_SUMMARIZE_PAGES_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION,
+            value = getStringResource(summarizeR.string.mozac_summarize_settings_summarize_pages),
+            description = "Simple toolbar summarize pages button",
+        )
+
+    val SIMPLE_TOOLBAR_NEW_TAB_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION,
+            value = getStringResource(R.string.home_screen_shortcut_open_new_tab_2),
+            description = "Simple toolbar new tab button",
+        )
+
+    val EDIT_SHORTCUT_BUTTON =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION,
+            value = getStringResource(R.string.toolbar_shortcut_menu_edit_option),
+            description = "Edit shortcut button",
         )
 
     val SITE_INFO_BUTTON =
@@ -140,19 +241,30 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_DESCRIPTION_CONTAINS,
             value = "Site information",
             description = "Site information button",
-            groups = listOf(),
         )
 
-    // An item in the context menu shown after long-pressing the display-mode (browser) URL box, e.g.
-    // "Copy", "Paste", "Paste & Go". Mirrors the legacy clickDisplayModeToolbarContextMenuItem, which
-    // matched these by content description on the Compose toolbar.
-    @Suppress("FunctionName")
-    fun DISPLAY_MODE_TOOLBAR_MENU_ITEM(contentDescription: String = "") =
+    // Items in the context menu shown after long-pressing the display-mode (browser) URL box, matched by content
+    // description on the Compose toolbar. Strings come from the browser-toolbar component (see
+    // PageOriginContextualMenuBuilder); Paste/Paste & Go only appear when the clipboard holds text/a URL.
+    val DISPLAY_MODE_TOOLBAR_COPY =
         Selector(
             strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION,
-            value = contentDescription,
-            description = "Display-mode toolbar context menu item '$contentDescription'",
-            groups = listOf(),
+            value = getStringResource(browserToolbarR.string.mozac_browser_toolbar_long_press_popup_copy),
+            description = "Display-mode toolbar 'Copy' menu item",
+        )
+
+    val DISPLAY_MODE_TOOLBAR_PASTE =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION,
+            value = getStringResource(browserToolbarR.string.mozac_browser_toolbar_long_press_popup_paste),
+            description = "Display-mode toolbar 'Paste' menu item",
+        )
+
+    val DISPLAY_MODE_TOOLBAR_PASTE_AND_GO =
+        Selector(
+            strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION,
+            value = getStringResource(browserToolbarR.string.mozac_browser_toolbar_long_press_popup_paste_and_go),
+            description = "Display-mode toolbar 'Paste & Go' menu item",
         )
 
     @Suppress("FunctionName")
@@ -161,15 +273,15 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION,
             value = getStringResource(R.string.search_engine_selector_content_description, searchEngineName),
             description = "Search engine selector icon",
-            groups = listOf("homeScreenToolbar"),
+            groups = setOf(Group.HOME_SCREEN_TOOLBAR),
         )
 
+    // Substring to support selecting Reader View whether "Listen to Page" is enabled or disabled.
     val READER_VIEW_BUTTON =
         Selector(
-            strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION,
+            strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION_SUBSTRING,
             value = getStringResource(R.string.browser_menu_read),
             description = "Reader view toolbar button",
-            groups = listOf(),
         )
 
     val READER_VIEW_CLOSE_BUTTON =
@@ -177,7 +289,6 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION,
             value = getStringResource(R.string.browser_menu_read_close),
             description = "Close reader view toolbar button",
-            groups = listOf(),
         )
 
     // UIAutomator rather than Compose: this is asserted on BrowserPage with GeckoView active, where
@@ -188,7 +299,6 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_DESCRIPTION_CONTAINS,
             value = "Non-private Tabs Open: $openTabs",
             description = "Tab counter showing $openTabs open tab(s)",
-            groups = listOf(),
         )
 
     // UIAutomator rather than Compose: asserted on BrowserPage with GeckoView active (see
@@ -200,7 +310,6 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_DESCRIPTION_CONTAINS,
             value = "Private Tabs Open: $openTabs",
             description = "Private tab counter showing $openTabs open tab(s)",
-            groups = listOf(),
         )
 
     @Suppress("FunctionName")
@@ -209,7 +318,6 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION,
             value = "Non-private Tabs Open: $openTabs. Tap to switch tabs.",
             description = "Tab strip tab counter showing $openTabs open tab(s)",
-            groups = listOf(),
         )
 
     // Compose (content-description) variants of the toolbar tab counter. Prefer these over the
@@ -224,7 +332,6 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION,
             value = "Non-private Tabs Open: $openTabs. Tap to switch tabs.",
             description = "Tab counter showing $openTabs open tab(s)",
-            groups = listOf(),
         )
 
     @Suppress("FunctionName")
@@ -233,7 +340,6 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_CONTENT_DESCRIPTION,
             value = "Private Tabs Open: $openTabs. Tap to switch tabs.",
             description = "Private tab counter showing $openTabs open tab(s)",
-            groups = listOf(),
         )
 
     @Suppress("FunctionName")
@@ -242,7 +348,6 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_TEXT,
             value = tabTitle,
             description = "Tab strip tab '$tabTitle'",
-            groups = listOf(),
         )
 
     @Suppress("FunctionName")
@@ -251,7 +356,6 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.UIAUTOMATOR_WITH_DESCRIPTION_CONTAINS,
             value = "Close tab $tabTitle",
             description = "Tab strip close button for '$tabTitle'",
-            groups = listOf(),
         )
 
     val INSECURE_CONNECTION_INFORMATION_BUTTON =
@@ -259,7 +363,7 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TAG,
             value = SITE_INFO_INSECURE_CONNECTION,
             description = "Insecure connection information button",
-            groups = listOf("browserViewToolbarItems"),
+            groups = setOf(Group.BROWSER_VIEW_TOOLBAR_ITEMS),
         )
 
     val SECURE_SITE_INFORMATION_BUTTON =
@@ -267,7 +371,7 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TAG,
             value = SITE_INFO_SECURE,
             description = "Secure site information button",
-            groups = listOf("browserViewToolbarItems"),
+            groups = setOf(Group.BROWSER_VIEW_TOOLBAR_ITEMS),
         )
 
     val TRACKING_PROTECTION_OFF_INFORMATION_BUTTON =
@@ -275,7 +379,7 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TAG,
             value = SITE_INFO_TRACKING_PROTECTION_OFF,
             description = "Tracking protection off information button",
-            groups = listOf("browserViewToolbarItems"),
+            groups = setOf(Group.BROWSER_VIEW_TOOLBAR_ITEMS),
         )
 
     val UNKNOWN_SITE_INFORMATION_BUTTON =
@@ -283,40 +387,6 @@ object ToolbarSelectors {
             strategy = SelectorStrategy.COMPOSE_BY_TAG,
             value = SITE_INFO_UNKNOWN,
             description = "Unknown-state site information button",
-            groups = listOf("browserViewToolbarItems"),
-        )
-
-    val all =
-        listOf(
-            TOOLBAR,
-            TAB_COUNTER,
-            TAB_COUNTER_UIAUTOMATOR,
-            TAB_COUNTER_ANY_LAYOUT,
-            TOOLBAR_URL_BOX,
-            TOOLBAR_URL_BOX_UIAUTOMATOR,
-            NEW_TAB_BUTTON,
-            NEW_PRIVATE_TAB_BUTTON,
-            EXPANDED_TOOLBAR_ADD_BOOKMARK_BUTTON,
-            EXPANDED_TOOLBAR_EDIT_BOOKMARK_BUTTON,
-            EXPANDED_TOOLBAR_SHARE_BUTTON,
-            EXPANDED_TOOLBAR_BACK_BUTTON,
-            EXPANDED_TOOLBAR_FORWARD_BUTTON,
-            EXPANDED_TOOLBAR_REFRESH_BUTTON,
-            SITE_INFO_BUTTON,
-            DISPLAY_MODE_TOOLBAR_MENU_ITEM(),
-            READER_VIEW_BUTTON,
-            READER_VIEW_CLOSE_BUTTON,
-            SEARCH_ENGINE_SELECTOR_ICON(),
-            TAB_COUNTER_WITH_COUNT(),
-            PRIVATE_TAB_COUNTER_WITH_COUNT(),
-            TAB_STRIP_TAB_COUNTER_WITH_COUNT(),
-            TAB_COUNTER_COMPOSE_WITH_COUNT(),
-            PRIVATE_TAB_COUNTER_COMPOSE_WITH_COUNT(),
-            TAB_STRIP_TAB(),
-            TAB_STRIP_CLOSE_TAB_BUTTON(),
-            INSECURE_CONNECTION_INFORMATION_BUTTON,
-            SECURE_SITE_INFORMATION_BUTTON,
-            TRACKING_PROTECTION_OFF_INFORMATION_BUTTON,
-            UNKNOWN_SITE_INFORMATION_BUTTON,
+            groups = setOf(Group.BROWSER_VIEW_TOOLBAR_ITEMS),
         )
 }

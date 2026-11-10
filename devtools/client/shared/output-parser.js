@@ -361,6 +361,40 @@ class OutputParser {
         case "Dimension": {
           if (angleOK(tokenText)) {
             this.#appendAngle(tokenText, options, token);
+          } else if (
+            options.cssExplainersEnabled &&
+            token.unit !== "px" &&
+            // we only want to handle lengths (e.g. not angles, frequency, …)
+            InspectorUtils.valueMatchesSyntax(
+              this.#doc,
+              this.parsedPropertyName,
+              `1${token.unit}`,
+              "<length>"
+            )
+          ) {
+            this.#appendNode(
+              "span",
+              {
+                "data-length-expression": tokenText,
+              },
+              tokenText,
+              token
+            );
+          } else {
+            this.#appendTextNode(tokenText, token);
+          }
+          break;
+        }
+        case "Percentage": {
+          if (options.cssExplainersEnabled) {
+            this.#appendNode(
+              "span",
+              {
+                "data-length-expression": tokenText,
+              },
+              tokenText,
+              token
+            );
           } else {
             this.#appendTextNode(tokenText, token);
           }
@@ -578,8 +612,13 @@ class OutputParser {
     if (
       options.cssExplainersEnabled &&
       CSS_EXPLAINERS_SUPPORTED_FUNCTIONS.has(lowerCaseFunctionName) &&
-      stackEntry.nestedFunctions.every(fn =>
-        CSS_EXPLAINERS_SUPPORTED_FUNCTIONS.has(fn)
+      stackEntry.nestedFunctions.every(
+        fn =>
+          CSS_EXPLAINERS_SUPPORTED_FUNCTIONS.has(fn) ||
+          // type() isn't directly supported for explainers (i.e. we won't have it underlined)
+          // but it shouldn't prevent functions using it to have explainers
+          // (e.g. in `attr(x type(*))`, `attr` should be underlined).
+          fn === "type"
       )
     ) {
       const functionNode = this.#createNode("span", {
@@ -924,7 +963,12 @@ class OutputParser {
 
         if (
           token.text !== "raw-string" &&
-          !InspectorUtils.valueMatchesSyntax(this.#doc, attrValue, "<number>")
+          !InspectorUtils.valueMatchesSyntax(
+            this.#doc,
+            this.parsedPropertyName,
+            attrValue,
+            "<number>"
+          )
         ) {
           fallbackValueIsUsed = true;
           attrTypeMismatchText = STYLE_INSPECTOR_L10N.getFormatStr(
@@ -947,7 +991,19 @@ class OutputParser {
             -1
           )
           .trim();
-        if (!InspectorUtils.valueMatchesSyntax(this.#doc, attrValue, syntax)) {
+        if (
+          // For now, let's skip attribute value using substitution functions.
+          // Those guards should be removed as part of Bug 2070443.
+          !attrValue.includes("var(") &&
+          !attrValue.includes("attr(") &&
+          !attrValue.includes("env(") &&
+          !InspectorUtils.valueMatchesSyntax(
+            this.#doc,
+            this.parsedPropertyName,
+            attrValue,
+            syntax
+          )
+        ) {
           fallbackValueIsUsed = true;
           attrTypeMismatchText = STYLE_INSPECTOR_L10N.getFormatStr(
             "rule.attributeUnmatchedType",

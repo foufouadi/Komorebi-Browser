@@ -12,6 +12,7 @@
 #include "ScriptLoader.h"
 #include "ScriptTrace.h"
 #include "js/Transcoding.h"
+#include "js/loader/LoadedScript.h"
 #include "js/loader/ModuleLoadRequest.h"
 #include "js/loader/ScriptLoadRequest.h"
 #include "mozilla/Assertions.h"
@@ -236,7 +237,8 @@ ScriptLoadHandler::OnIncrementalData(nsIIncrementalStreamLoader* aLoader,
       return channelRequest->Cancel(mScriptLoader->RestartLoad(mRequest));
     }
     if (sriLength) {
-      mRequest->SetSRILength(sriLength);
+      uint32_t alignedSRILength = JS::AlignTranscodingBytecodeOffset(sriLength);
+      mRequest->SetAlignedSRILength(alignedSRILength);
     }
   }
 
@@ -251,10 +253,13 @@ bool ScriptLoadHandler::TrySetDecoder(nsIChannel* aChannel,
 
   // JavaScript modules are always UTF-8.
   if (mRequest->IsModuleRequest()) {
-    mDecoder = MakeUnique<ScriptDecoder>(UTF_8_ENCODING,
-                                         ScriptDecoder::BOMHandling::Remove);
+    MOZ_ASSERT(!mRequest->getLoadedScript()->ClassicScriptEncoding());
+    mDecoder = std::make_unique<ScriptDecoder>(
+        UTF_8_ENCODING, ScriptDecoder::BOMHandling::Remove);
     return true;
   }
+
+  MOZ_ASSERT(mRequest->IsClassicScript());
 
   // Determine if BOM check should be done.  This occurs either
   // if end-of-stream has been reached, or at least 3 bytes have
@@ -267,8 +272,9 @@ bool ScriptLoadHandler::TrySetDecoder(nsIChannel* aChannel,
   const Encoding* encoding;
   std::tie(encoding, std::ignore) = Encoding::ForBOM(Span(aData, aDataLength));
   if (encoding) {
-    mDecoder =
-        MakeUnique<ScriptDecoder>(encoding, ScriptDecoder::BOMHandling::Remove);
+    mRequest->getLoadedScript()->SetClassicScriptEncodingFromBOM(encoding);
+    mDecoder = std::make_unique<ScriptDecoder>(
+        encoding, ScriptDecoder::BOMHandling::Remove);
     return true;
   }
 
@@ -276,45 +282,17 @@ bool ScriptLoadHandler::TrySetDecoder(nsIChannel* aChannel,
   nsAutoCString label;
   if (NS_SUCCEEDED(aChannel->GetContentCharset(label)) &&
       (encoding = Encoding::ForLabel(label))) {
-    mDecoder =
-        MakeUnique<ScriptDecoder>(encoding, ScriptDecoder::BOMHandling::Ignore);
+    mRequest->getLoadedScript()->SetClassicScriptEncodingFromCharsetParameter(
+        encoding);
+    mDecoder = std::make_unique<ScriptDecoder>(
+        encoding, ScriptDecoder::BOMHandling::Ignore);
     return true;
   }
 
-  // Check the hint charset from the script element or preload
-  // request.
-  nsAutoString hintCharset;
-  if (!mRequest->GetScriptLoadContext()->IsPreload()) {
-    mRequest->GetScriptLoadContext()->GetHintCharset(hintCharset);
-  } else {
-    nsTArray<ScriptLoader::PreloadInfo>::index_type i =
-        mScriptLoader->mPreloads.IndexOf(
-            mRequest, 0, ScriptLoader::PreloadRequestComparator());
-
-    NS_ASSERTION(i != mScriptLoader->mPreloads.NoIndex,
-                 "Incorrect preload bookkeeping");
-    hintCharset = mScriptLoader->mPreloads[i].mCharset;
-  }
-
-  if ((encoding = Encoding::ForLabel(hintCharset))) {
-    mDecoder =
-        MakeUnique<ScriptDecoder>(encoding, ScriptDecoder::BOMHandling::Ignore);
-    return true;
-  }
-
-  // Get the charset from the charset of the document.
-  if (mScriptLoader->mDocument) {
-    encoding = mScriptLoader->mDocument->GetDocumentCharacterSet();
-    mDecoder =
-        MakeUnique<ScriptDecoder>(encoding, ScriptDecoder::BOMHandling::Ignore);
-    return true;
-  }
-
-  // Curiously, there are various callers that don't pass aDocument. The
-  // fallback in the old code was ISO-8859-1, which behaved like
-  // windows-1252.
-  mDecoder = MakeUnique<ScriptDecoder>(WINDOWS_1252_ENCODING,
-                                       ScriptDecoder::BOMHandling::Ignore);
+  encoding = mScriptLoader->GetClassicScriptFallbackEncoding(mRequest);
+  mRequest->getLoadedScript()->SetClassicScriptEncodingFromFallback(encoding);
+  mDecoder = std::make_unique<ScriptDecoder>(
+      encoding, ScriptDecoder::BOMHandling::Ignore);
   return true;
 }
 
@@ -404,8 +382,8 @@ nsresult ScriptLoadHandler::EnsureKnownDataType(nsIChannel* aChannel) {
 NS_IMETHODIMP
 ScriptLoadHandler::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
                                     nsISupports* aContext, nsresult aStatus,
-                                    uint32_t aDataLength,
-                                    const uint8_t* aData) {
+                                    uint32_t aDataLength, const uint8_t* aData)
+    MOZ_CAN_RUN_SCRIPT_BOUNDARY {
   nsCOMPtr<nsIRequest> channelRequest;
   aLoader->GetRequest(getter_AddRefs(channelRequest));
   nsCOMPtr<nsIChannel> channel = do_QueryInterface(channelRequest);
@@ -450,7 +428,7 @@ ScriptLoadHandler::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
       GetCurrentSerialEventTarget(), __func__,
       [self = RefPtr{this}, channel = std::move(channel),
        integrity = RefPtr{integrity}, computedHash = std::move(computedHash),
-       aStatus, aDataLength, aData](bool) {
+       aStatus, aDataLength, aData](bool) MOZ_CAN_RUN_SCRIPT_BOUNDARY {
         MOZ_LOG_FMT(gWaictLog, LogLevel::Debug,
                     "ScriptLoadHandler::OnStreamComplete: WaitForManifestLoad "
                     "promise resolved");
@@ -545,44 +523,74 @@ nsresult ScriptLoadHandler::DoOnStreamComplete(nsIChannel* aChannel,
       }
     } else {
       MOZ_ASSERT(mRequest->IsRetrievedAsSerializedStencil());
-      JS::TranscodeBuffer& buf = mRequest->SRIAndSerializedStencil();
-      if (!buf.append(aData, aDataLength)) {
-        return NS_ERROR_OUT_OF_MEMORY;
-      }
 
-      LOG(("ScriptLoadRequest (%p): SRIAndSerializedStencil length = %u",
-           mRequest.get(), unsigned(buf.length())));
+      if (NS_SUCCEEDED(aStatus)) {
+        JS::TranscodeBuffer& buf = mRequest->SRIAndSerializedStencil();
+        if (!buf.append(aData, aDataLength)) {
+          return NS_ERROR_OUT_OF_MEMORY;
+        }
 
-      // If we abort while decoding the SRI, we fallback on explicitly
-      // requesting the source. Thus, we should not continue in
-      // ScriptLoader::OnStreamComplete, which removes the request from the
-      // waiting lists.
-      //
-      // We calculate the SRI length below.
-      uint32_t unused;
-      rv = MaybeDecodeSRI(&unused);
-      if (NS_FAILED(rv)) {
-        return aChannel->Cancel(mScriptLoader->RestartLoad(mRequest));
-      }
+        LOG(("ScriptLoadRequest (%p): SRIAndSerializedStencil length = %u",
+             mRequest.get(), unsigned(buf.length())));
 
-      // The serialized stencil always starts with the SRI hash, thus even if
-      // there is no SRI data verifier instance, we still want to skip the hash.
-      uint32_t sriLength;
-      rv = SRICheckDataVerifier::DataSummaryLength(buf.length(), buf.begin(),
-                                                   &sriLength);
-      if (NS_FAILED(rv)) {
-        return aChannel->Cancel(mScriptLoader->RestartLoad(mRequest));
-      }
+        // If we abort while decoding the SRI, we fallback on explicitly
+        // requesting the source. Thus, we should not continue in
+        // ScriptLoader::OnStreamComplete, which removes the request from the
+        // waiting lists.
+        //
+        // We calculate the SRI length below.
+        uint32_t unused;
+        rv = MaybeDecodeSRI(&unused);
+        if (NS_FAILED(rv)) {
+          return aChannel->Cancel(mScriptLoader->RestartLoad(mRequest));
+        }
 
-      mRequest->SetSRILength(sriLength);
+        // The serialized stencil always starts with the SRI hash, thus even if
+        // there is no SRI data verifier instance, we still want to skip the
+        // hash.
+        uint32_t sriLength;
+        rv = SRICheckDataVerifier::DataSummaryLength(buf.length(), buf.begin(),
+                                                     &sriLength);
+        if (NS_FAILED(rv)) {
+          return aChannel->Cancel(mScriptLoader->RestartLoad(mRequest));
+        }
 
-      Vector<uint8_t> compressed;
-      // mRequest has the compressed data, but will be filled with the
-      // uncompressed data
-      compressed.swap(buf);
-      if (!JS::loader::ScriptBytecodeDecompress(
-              compressed, mRequest->GetSRILength(), buf)) {
-        return NS_ERROR_UNEXPECTED;
+        uint32_t alignedSRILength =
+            JS::AlignTranscodingBytecodeOffset(sriLength);
+        if (alignedSRILength > buf.length() ||
+            buf.length() - alignedSRILength <
+                JS::loader::LoadedScript::EncodingHeaderSize) {
+          return aChannel->Cancel(mScriptLoader->RestartLoad(mRequest));
+        }
+
+        mRequest->SetAlignedSRILength(alignedSRILength);
+
+        const JS::loader::LoadedScript::EncodingHeader* header =
+            reinterpret_cast<const JS::loader::LoadedScript::EncodingHeader*>(
+                buf.begin() + alignedSRILength);
+        if (!mRequest->getLoadedScript()->ReadFromEncodingHeader(header)) {
+          // Corrupted data.
+          return aChannel->Cancel(mScriptLoader->RestartLoad(mRequest));
+        }
+
+        if (mRequest->IsClassicScript() &&
+            mRequest->getLoadedScript()->DependsOnClassicScriptHintEncoding()) {
+          const Encoding* fallbackEncoding =
+              mScriptLoader->GetClassicScriptFallbackEncoding(mRequest);
+          if (mRequest->getLoadedScript()->ClassicScriptEncoding() !=
+              fallbackEncoding) {
+            return aChannel->Cancel(mScriptLoader->RestartLoad(mRequest));
+          }
+        }
+
+        Vector<uint8_t> compressed;
+        // mRequest has the compressed data, but will be filled with the
+        // uncompressed data
+        compressed.swap(buf);
+        if (!JS::loader::ScriptBytecodeDecompress(
+                compressed, mRequest->GetSerializedStencilOffset(), buf)) {
+          return NS_ERROR_UNEXPECTED;
+        }
       }
     }
   }
@@ -590,8 +598,10 @@ nsresult ScriptLoadHandler::DoOnStreamComplete(nsIChannel* aChannel,
   // Everything went well, keep the CacheInfoChannel alive such that we can
   // later save the serialized stencil on the cache entry.
   // we have to mediate and use mRequest.
-  rv = mScriptLoader->OnStreamComplete(aChannel, mRequest, aStatus, mSRIStatus,
-                                       mSRIDataVerifier.get());
+  const RefPtr<ScriptLoader> scriptLoader = mScriptLoader;
+  const RefPtr<JS::loader::ScriptLoadRequest> request = mRequest;
+  rv = scriptLoader->OnStreamComplete(aChannel, request, aStatus, mSRIStatus,
+                                      mSRIDataVerifier.get());
 
   return rv;
 }
@@ -608,6 +618,7 @@ ScriptLoadHandler::GetInterface(const nsIID& aIID, void** aResult) {
 nsresult ScriptLoadHandler::AsyncOnChannelRedirect(
     nsIChannel* aOld, nsIChannel* aNew, uint32_t aFlags,
     nsIAsyncVerifyRedirectCallback* aCallback) {
+  mRequest->SetHadRedirected();
   mRequest->SetMinimumExpirationTime(
       nsContentUtils::GetSubresourceCacheExpirationTime(aOld, mRequest->URI()));
 

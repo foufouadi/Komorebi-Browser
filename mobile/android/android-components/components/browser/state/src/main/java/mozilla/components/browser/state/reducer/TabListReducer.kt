@@ -9,7 +9,6 @@ import mozilla.components.browser.state.action.TabListAction
 import mozilla.components.browser.state.selector.findTab
 import mozilla.components.browser.state.selector.selectedTab
 import mozilla.components.browser.state.state.BrowserState
-import mozilla.components.browser.state.state.TabPartition
 import mozilla.components.browser.state.state.TabSessionState
 import mozilla.components.browser.state.state.recover.toTabSessionStates
 
@@ -118,7 +117,7 @@ internal object TabListReducer {
                                     tabs = updatedTabList,
                                     isPrivate = tabToRemove.content.private,
                                     previousIndex = previousIndex,
-                                    excludedTabIds = action.excludedTabIds,
+                                    excludedTabIds = action.excludedFallbackTabIds,
                                 )
                             }
                             else -> {
@@ -130,7 +129,6 @@ internal object TabListReducer {
                     state.copy(
                         tabs = updatedTabList,
                         selectedTabId = updatedSelection,
-                        tabPartitions = state.tabPartitions.removeTabs(setOf(action.tabId)),
                     )
                 }
             }
@@ -158,7 +156,7 @@ internal object TabListReducer {
                                 updatedTabList,
                                 removedSelectedTab.content.private,
                                 previousIndex,
-                                action.excludedTabIds,
+                                action.excludedFallbackTabIds,
                             )
                         } else {
                             // The selected tab is not affected and can stay the same
@@ -168,7 +166,6 @@ internal object TabListReducer {
                     state.copy(
                         tabs = updatedTabList,
                         selectedTabId = updatedSelection,
-                        tabPartitions = state.tabPartitions.removeTabs(action.tabIds.toSet()),
                     )
                 }
             }
@@ -203,15 +200,8 @@ internal object TabListReducer {
                             }
                     }
 
-                val combinedTabPartitions =
-                    mergeTabPartitions(
-                        currentTabPartitions = state.tabPartitions,
-                        restoredTabPartitions = action.tabPartitions,
-                    )
-
                 state.copy(
                     tabs = combinedTabList,
-                    tabPartitions = combinedTabPartitions,
                     selectedTabId =
                         if (action.selectedTabId != null && state.selectedTabId == null) {
                             // We only want to update the selected tab if none has been already selected. Otherwise we
@@ -229,7 +219,6 @@ internal object TabListReducer {
                 state.copy(
                     tabs = emptyList(),
                     selectedTabId = null,
-                    tabPartitions = state.tabPartitions.removeAllTabs(),
                 )
             }
 
@@ -247,7 +236,6 @@ internal object TabListReducer {
                         } else {
                             state.selectedTabId
                         },
-                    tabPartitions = state.tabPartitions.removeTabs(partition.first.map { it.id }.toSet()),
                 )
             }
 
@@ -265,7 +253,6 @@ internal object TabListReducer {
                         } else {
                             state.selectedTabId
                         },
-                    tabPartitions = state.tabPartitions.removeTabs(partition.second.map { it.id }.toSet()),
                 )
             }
         }
@@ -358,60 +345,4 @@ private fun requireUniqueTab(state: BrowserState, tab: TabSessionState) {
     require(state.tabs.find { it.id == tab.id } == null) {
         "Tab with same ID already exists"
     }
-}
-
-/** Removes references to the provided tabs from all [TabPartition]s. */
-private fun Map<String, TabPartition>.removeTabs(removedTabIds: Set<String>) = mapValues {
-    val partition = it.value
-    partition.copy(
-        tabGroups =
-            partition.tabGroups.map { group ->
-                group.copy(tabIds = group.tabIds - removedTabIds)
-            }
-    )
-}
-
-/** Removes references to the provided tabs from all [TabPartition]s. */
-private fun Map<String, TabPartition>.removeAllTabs() = mapValues {
-    val partition = it.value
-    partition.copy(tabGroups = partition.tabGroups.map { group -> group.copy(tabIds = emptySet()) })
-}
-
-private fun mergeTabPartitions(
-    currentTabPartitions: Map<String, TabPartition>,
-    restoredTabPartitions: Map<String, TabPartition>,
-): Map<String, TabPartition> {
-    val combinedTabPartitions = currentTabPartitions.toMutableMap()
-
-    restoredTabPartitions.forEach { (id, restoredPartition) ->
-        val existingPartition = combinedTabPartitions[id]
-        combinedTabPartitions[id] =
-            if (existingPartition != null) {
-                mergeTabGroups(existingPartition, restoredPartition)
-            } else {
-                restoredPartition
-            }
-    }
-
-    return combinedTabPartitions
-}
-
-private fun mergeTabGroups(
-    currentTabPartition: TabPartition,
-    restoredTabPartition: TabPartition,
-): TabPartition {
-    val combinedTabGroups = currentTabPartition.tabGroups.toMutableList()
-
-    restoredTabPartition.tabGroups.forEach { restoredGroup ->
-        val existingGroupIndex = combinedTabGroups.indexOfFirst { it.id == restoredGroup.id }
-        if (existingGroupIndex != -1) {
-            val existingGroup = combinedTabGroups[existingGroupIndex]
-            combinedTabGroups[existingGroupIndex] =
-                existingGroup.copy(tabIds = existingGroup.tabIds + restoredGroup.tabIds)
-        } else {
-            combinedTabGroups.add(restoredGroup)
-        }
-    }
-
-    return currentTabPartition.copy(tabGroups = combinedTabGroups)
 }

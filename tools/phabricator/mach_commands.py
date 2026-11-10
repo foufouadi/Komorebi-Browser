@@ -29,9 +29,15 @@ def _find_moz_phab(tool_dir: Path) -> Optional[Path]:
     "--force",
     "-f",
     action="store_true",
-    help="Force installation even if already installed.",
+    help="Force installation even if already installed. This also recreates the "
+    "tool environment, which is needed after a Python version upgrade.",
 )
-def install_moz_phab(command_context, force=False):
+@CommandArgument(
+    "--no-system-changes",
+    action="store_true",
+    help="Skip Watchman configuration during VCS setup.",
+)
+def install_moz_phab(command_context, force=False, no_system_changes=False):
     import logging
     import subprocess
     import sys
@@ -46,6 +52,12 @@ def install_moz_phab(command_context, force=False):
             {},
             f"moz-phab is already installed in {moz_phab_executable}.",
         )
+        command_context.log(
+            logging.INFO,
+            "already_installed",
+            {},
+            "If you wish to reinstall moz-phab, use --force option.",
+        )
         sys.exit(0)
 
     # moz-phab requires user.email to be configured, so check and run `./mach vcs-setup` if needed
@@ -58,13 +70,18 @@ def install_moz_phab(command_context, force=False):
             'user.email is not configured. Running "./mach vcs-setup" first...',
         )
         mach = Path(command_context.topsrcdir) / "mach"
-        subprocess.check_call([sys.executable, str(mach), "vcs-setup"])
+        args = [sys.executable, str(mach), "vcs-setup"]
+        if no_system_changes:
+            args.append("--no-system-changes")
+        subprocess.check_call(args)
 
     command_context.log(logging.INFO, "run", {}, "Installing moz-phab using uv")
 
-    install_cmd = ["uv", "tool", "install", "MozPhab"]
+    # Pin the tool environment to the interpreter mach runs with, so an
+    # existing environment created with an older Python gets recreated.
+    install_cmd = ["uv", "tool", "install", "--python", sys.executable, "MozPhab"]
     if force:
-        install_cmd.append("--force")
+        install_cmd.extend(["--force", "--reinstall"])
 
     result = subprocess.run(install_cmd, check=False, text=True)
 
@@ -113,7 +130,7 @@ def install_moz_phab(command_context, force=False):
                 "shim_missing",
                 {},
                 f"moz-phab shim is missing from {tool_dir} even after a --force "
-                f"reinstall. Please run 'uv tool install MozPhab --force' manually.",
+                f"reinstall. Please run './mach install-moz-phab --force' manually.",
             )
             sys.exit(1)
 

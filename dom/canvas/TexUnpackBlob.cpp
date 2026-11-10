@@ -307,12 +307,28 @@ static bool SDIsRGBBuffer(const layers::SurfaceDescriptor& sd) {
 // Check if the surface descriptor describes a GPUVideo texture for which we
 // only have an opaque source/handle from SurfaceDescriptorRemoteDecoder to
 // derive the actual texture from.
-static bool SDIsNullRemoteDecoder(const layers::SurfaceDescriptor& sd) {
+static bool SDIsRemoteDecoderBuffer(const layers::SurfaceDescriptor& sd) {
   return sd.type() == layers::SurfaceDescriptor::TSurfaceDescriptorGPUVideo &&
          sd.get_SurfaceDescriptorGPUVideo()
                  .get_SurfaceDescriptorRemoteDecoder()
-                 .subdesc()
-                 .type() == layers::RemoteDecoderVideoSubDescriptor::Tnull_t;
+                 .videoType() == layers::RemoteDecoderVideoType::Buffer;
+}
+
+static bool SDIsRemoteDecoderDirectUpload(const layers::SurfaceDescriptor& sd) {
+  if (sd.type() != layers::SurfaceDescriptor::TSurfaceDescriptorGPUVideo) {
+    return false;
+  }
+  const auto& sdv = sd.get_SurfaceDescriptorGPUVideo();
+  if (sdv.type() !=
+      layers::SurfaceDescriptorGPUVideo::TSurfaceDescriptorRemoteDecoder) {
+    return false;
+  }
+  const auto& sdrd = sdv.get_SurfaceDescriptorRemoteDecoder();
+  if (sdrd.videoType() == layers::RemoteDecoderVideoType::TypeNone ||
+      sdrd.videoType() == layers::RemoteDecoderVideoType::Buffer) {
+    return false;
+  }
+  return true;
 }
 
 // Check if the surface descriptor describes an ExternalImage surface for which
@@ -383,7 +399,7 @@ bool TexUnpackBlob::ConvertIfNeeded(
     const size_t rowCount, WebGLTexelFormat srcFormat,
     const uint8_t* const srcBegin, const ptrdiff_t srcStride,
     WebGLTexelFormat dstFormat, const ptrdiff_t dstStride,
-    const uint8_t** const out_begin,
+    const bool applyUnpackColorSpace, const uint8_t** const out_begin,
     UniqueBuffer* const out_anchoredBuffer) const {
   *out_begin = srcBegin;
 
@@ -437,8 +453,9 @@ bool TexUnpackBlob::ConvertIfNeeded(
   // TODO (Bug 754256): Figure out the source colorSpace.
   dom::PredefinedColorSpace srcColorSpace = dom::PredefinedColorSpace::Srgb;
   dom::PredefinedColorSpace dstColorSpace =
-      webgl->mUnpackColorSpace ? *webgl->mUnpackColorSpace
-                               : dom::PredefinedColorSpace::Srgb;
+      applyUnpackColorSpace && webgl->mUnpackColorSpace
+          ? *webgl->mUnpackColorSpace
+          : srcColorSpace;
 
   if (srcFormat != dstFormat) {
     webgl->GeneratePerfWarning(
@@ -573,11 +590,14 @@ bool TexUnpackBytes::TexOrSubImage(bool isSubImage, bool needsRespec,
     MOZ_RELEASE_ASSERT(unpackingRes.isOk());
     const auto& unpacking = unpackingRes.inspect();
     const auto stride = unpacking.metrics.bytesPerRowStride;
+    // unpackColorSpace only applies to TexImageSource uploads.
     // clang-format off
     if (!ConvertIfNeeded(webgl, unpacking.metrics.usedPixelsPerRow,
                          unpacking.metrics.totalRows,
                          format, uploadPtr, AutoAssertCast(stride),
-                         format, AutoAssertCast(stride), &uploadPtr, &tempBuffer)) {
+                         format, AutoAssertCast(stride),
+                         /* applyUnpackColorSpace */ false,
+                         &uploadPtr, &tempBuffer)) {
       return false;
     }
     // clang-format on
@@ -991,7 +1011,7 @@ bool TexUnpackSurface::BlitSd(
     }
     if (!gl->BlitHelper()->BlitSdToFramebuffer(
             sd, {xOffset, yOffset, size.x, size.y}, dstOrigin, fbSize,
-            convertAlpha)) {
+            convertAlpha, mDesc.destFormat)) {
       gfxCriticalNote << "BlitSdToFramebuffer failed for type "
                       << int(sd.type());
       if (allowFallback) {
@@ -1121,7 +1141,7 @@ bool TexUnpackSurface::TexOrSubImage(bool isSubImage, bool needsRespec,
       }
       surf = gfx::Factory::CreateWrappingDataSourceSurface(
           shmem.get<uint8_t>(), stride.value(), rgb.size(), rgb.format());
-    } else if (SDIsNullRemoteDecoder(sd)) {
+    } else if (SDIsRemoteDecoderBuffer(sd)) {
       const auto& sdrd = sd.get_SurfaceDescriptorGPUVideo()
                              .get_SurfaceDescriptorRemoteDecoder();
       RefPtr<layers::VideoBridgeParent> parent =
@@ -1148,6 +1168,51 @@ bool TexUnpackSurface::TexOrSubImage(bool isSubImage, bool needsRespec,
         gfxCriticalNote << "TexUnpackSurface failed to get ExternalImage";
         return false;
       }
+    } else if (SDIsRemoteDecoderDirectUpload(sd)) {
+      const auto& sdrd = sd.get_SurfaceDescriptorGPUVideo()
+                             .get_SurfaceDescriptorRemoteDecoder();
+      RefPtr<layers::VideoBridgeParent> parent =
+          layers::VideoBridgeParent::GetSingleton(sdrd.source());
+      if (!parent) {
+        gfxCriticalNote << "TexUnpackSurface failed to get VideoBridgeParent";
+        MOZ_ASSERT_UNREACHABLE("unexpected to be called");
+        return false;
+      }
+      RefPtr<layers::TextureHost> textureHost =
+          parent->LookupTexture(webgl->GetContentId(), sdrd.handle());
+      if (!textureHost) {
+        gfxCriticalNote << "TexUnpackSurface failed to get TextureHost";
+        MOZ_ASSERT_UNREACHABLE("unexpected to be called");
+        return false;
+      }
+
+      auto hostSd = textureHost->GetSurfaceDescriptor();
+      if (hostSd.type() == layers::SurfaceDescriptor::T__None) {
+        gfxCriticalNote
+            << "TexUnpackSurface failed to get actual SurfaceDescriptor";
+        MOZ_ASSERT_UNREACHABLE("unexpected to be called");
+        return false;
+      }
+
+      if (!webgl->IsUploadableSdType(hostSd)) {
+        MOZ_ASSERT_UNREACHABLE("unexpected to be called");
+        return false;
+      }
+
+      if (!AllowBlitSd(webgl, mDesc.imageTarget, level,
+                       {xOffset, yOffset, zOffset}, dui->internalFormat, dstPI,
+                       false, true, true, true)) {
+        MOZ_ASSERT_UNREACHABLE("unexpected to be called");
+        return false;
+      }
+
+      if (!BlitSd(hostSd, isSubImage, needsRespec, tex, level, dui, xOffset,
+                  yOffset, zOffset, dstPI, out_error)) {
+        MOZ_ASSERT_UNREACHABLE("unexpected to be called");
+        return false;
+      }
+
+      return true;
     } else if (webgl->IsUploadableSdType(sd) &&
                AllowBlitSd(webgl, mDesc.imageTarget, level,
                            {xOffset, yOffset, zOffset}, dui->internalFormat,
@@ -1243,8 +1308,8 @@ bool TexUnpackSurface::TexOrSubImage(bool isSubImage, bool needsRespec,
   // clang-format off
   if (!ConvertIfNeeded(webgl, surfSize.width, surfSize.height,
                        srcFormat, srcBegin, AutoAssertCast(srcStride),
-                       dstFormat, AutoAssertCast(dstUnpacking.metrics.bytesPerRowStride), &dstBegin,
-                       &tempBuffer)) {
+                       dstFormat, AutoAssertCast(dstUnpacking.metrics.bytesPerRowStride),
+                       /* applyUnpackColorSpace */ true, &dstBegin, &tempBuffer)) {
     return false;
   }
   // clang-format on

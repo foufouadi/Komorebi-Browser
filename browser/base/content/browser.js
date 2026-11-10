@@ -24,7 +24,6 @@ ChromeUtils.defineESModuleGetters(this, {
   BrowserUIUtils: "resource:///modules/BrowserUIUtils.sys.mjs",
   BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.sys.mjs",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
-  CFRPageActions: "resource:///modules/asrouter/CFRPageActions.sys.mjs",
   Color: "resource://gre/modules/Color.sys.mjs",
   ContentAnalysis:
     "moz-src:///browser/components/contentanalysis/content/ContentAnalysis.sys.mjs",
@@ -46,7 +45,8 @@ ChromeUtils.defineESModuleGetters(this, {
     "resource://gre/modules/LightweightThemeConsumer.sys.mjs",
   LoginHelper: "resource://gre/modules/LoginHelper.sys.mjs",
   LoginManagerParent: "resource://gre/modules/LoginManagerParent.sys.mjs",
-  MigrationUtils: "resource:///modules/MigrationUtils.sys.mjs",
+  MigrationUtils:
+    "moz-src:///browser/components/migration/MigrationUtils.sys.mjs",
   NetUtil: "resource://gre/modules/NetUtil.sys.mjs",
   NewTabPagePreloading:
     "moz-src:///browser/components/tabbrowser/NewTabPagePreloading.sys.mjs",
@@ -77,7 +77,7 @@ ChromeUtils.defineESModuleGetters(this, {
     "moz-src:///toolkit/profile/ProfilesDatastoreService.sys.mjs",
   PromptUtils: "resource://gre/modules/PromptUtils.sys.mjs",
   ReaderMode: "moz-src:///toolkit/components/reader/ReaderMode.sys.mjs",
-  Referrals: "resource:///modules/referrals/Referrals.sys.mjs",
+  Referrals: "moz-src:///browser/components/referrals/Referrals.sys.mjs",
   ResetPBMPanel:
     "moz-src:///browser/components/privatebrowsing/ResetPBMPanel.sys.mjs",
   SafeBrowsing: "resource://gre/modules/SafeBrowsing.sys.mjs",
@@ -87,9 +87,12 @@ ChromeUtils.defineESModuleGetters(this, {
   SearchUIUtils: "moz-src:///browser/components/search/SearchUIUtils.sys.mjs",
   SelectableProfileService:
     "resource:///modules/profiles/SelectableProfileService.sys.mjs",
-  SessionStartup: "resource:///modules/sessionstore/SessionStartup.sys.mjs",
-  SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
-  SessionWindowUI: "resource:///modules/sessionstore/SessionWindowUI.sys.mjs",
+  SessionStartup:
+    "moz-src:///browser/components/sessionstore/SessionStartup.sys.mjs",
+  SessionStore:
+    "moz-src:///browser/components/sessionstore/SessionStore.sys.mjs",
+  SessionWindowUI:
+    "moz-src:///browser/components/sessionstore/SessionWindowUI.sys.mjs",
   SharingUtils: "moz-src:///browser/components/sharing/SharingUtils.sys.mjs",
   ShortcutUtils: "resource://gre/modules/ShortcutUtils.sys.mjs",
   SiteDataManager: "resource:///modules/SiteDataManager.sys.mjs",
@@ -97,10 +100,11 @@ ChromeUtils.defineESModuleGetters(this, {
   SubDialog: "resource://gre/modules/SubDialog.sys.mjs",
   SubDialogManager: "resource://gre/modules/SubDialog.sys.mjs",
   TabCrashHandler: "resource:///modules/ContentCrashHandlers.sys.mjs",
+  Tabbrowser: "moz-src:///browser/components/tabbrowser/Tabbrowser.sys.mjs",
   TabsSetupFlowManager:
     "resource:///modules/firefox-view-tabs-setup-manager.sys.mjs",
   TaskbarTabsChrome:
-    "resource:///modules/taskbartabs/TaskbarTabsChrome.sys.mjs",
+    "moz-src:///browser/components/taskbartabs/TaskbarTabsChrome.sys.mjs",
   TelemetryEnvironment: "resource://gre/modules/TelemetryEnvironment.sys.mjs",
   ToolbarContextMenu:
     "moz-src:///browser/components/customizableui/ToolbarContextMenu.sys.mjs",
@@ -108,6 +112,7 @@ ChromeUtils.defineESModuleGetters(this, {
     "moz-src:///browser/components/customizableui/ToolbarDropHandler.sys.mjs",
   ToolbarIconColor: "moz-src:///browser/themes/ToolbarIconColor.sys.mjs",
   TranslationsParent: "resource://gre/actors/TranslationsParent.sys.mjs",
+  UIDensityTelemetry: "moz-src:///browser/modules/UIDensityTelemetry.sys.mjs",
   UITour: "moz-src:///browser/components/uitour/UITour.sys.mjs",
   UpdateUtils: "resource://gre/modules/UpdateUtils.sys.mjs",
   URILoadingHelper: "resource:///modules/URILoadingHelper.sys.mjs",
@@ -121,7 +126,6 @@ ChromeUtils.defineESModuleGetters(this, {
   Weave: "resource://services-sync/main.sys.mjs",
   WebNavigationFrames: "resource://gre/modules/WebNavigationFrames.sys.mjs",
   webrtcUI: "resource:///modules/webrtcUI.sys.mjs",
-  WebsiteFilter: "resource:///modules/policies/WebsiteFilter.sys.mjs",
   ZoomUI: "resource:///modules/ZoomUI.sys.mjs",
 });
 
@@ -471,7 +475,11 @@ ChromeUtils.defineLazyGetter(this, "PopupNotifications", () => {
       anchorElement?.dispatchEvent(
         new CustomEvent("PopupNotificationsBeforeAnchor", { bubbles: true })
       );
-      if (anchorElement?.checkVisibility()) {
+      if (
+        anchorElement?.checkVisibility(
+          PopupNotifications.CHECK_VISIBILITY_OPTIONS
+        )
+      ) {
         return anchorElement;
       }
       let fallback = [
@@ -480,7 +488,11 @@ ChromeUtils.defineLazyGetter(this, "PopupNotifications", () => {
         document.getElementById("identity-icon"),
         document.getElementById("remote-control-icon"),
       ];
-      return fallback.find(element => element?.checkVisibility()) ?? null;
+      return (
+        fallback.find(element =>
+          element?.checkVisibility(PopupNotifications.CHECK_VISIBILITY_OPTIONS)
+        ) ?? null
+      );
     };
 
     return new PopupNotifications(
@@ -505,38 +517,39 @@ ChromeUtils.defineLazyGetter(this, "MacUserActivityUpdater", () => {
   );
 });
 
+// Returns an object even when unavailable so it can be a category consumer.
 ChromeUtils.defineLazyGetter(this, "Win7Features", () => {
-  if (AppConstants.platform != "win") {
-    return null;
-  }
-
+  let aeroPeek = null;
   const WINTASKBAR_CONTRACTID = "@mozilla.org/windows-taskbar;1";
   if (
+    AppConstants.platform == "win" &&
     WINTASKBAR_CONTRACTID in Cc &&
     Cc[WINTASKBAR_CONTRACTID].getService(Ci.nsIWinTaskbar).available
   ) {
-    let { AeroPeek } = ChromeUtils.importESModule(
+    aeroPeek = ChromeUtils.importESModule(
       "resource:///modules/WindowsPreviewPerTab.sys.mjs"
-    );
-    return {
-      onOpenWindow() {
-        AeroPeek.onOpenWindow(window);
-        this.handledOpening = true;
-      },
-      onCloseWindow() {
-        if (this.handledOpening) {
-          AeroPeek.onCloseWindow(window);
-        }
-      },
-      handledOpening: false,
-    };
+    ).AeroPeek;
   }
-  return null;
+  return {
+    available: !!aeroPeek,
+    handledOpening: false,
+    onOpenWindow() {
+      if (aeroPeek) {
+        aeroPeek.onOpenWindow(window);
+        this.handledOpening = true;
+      }
+    },
+    onCloseWindow() {
+      if (this.handledOpening) {
+        aeroPeek.onCloseWindow(window);
+      }
+    },
+  };
 });
 
 ChromeUtils.defineLazyGetter(this, "gRestoreLastSessionObserver", () => {
   let { RestoreLastSessionObserver } = ChromeUtils.importESModule(
-    "resource:///modules/sessionstore/SessionWindowUI.sys.mjs"
+    "moz-src:///browser/components/sessionstore/SessionWindowUI.sys.mjs"
   );
   return new RestoreLastSessionObserver(window);
 });
@@ -647,6 +660,15 @@ customElements.setElementCreationCallback(
   }
 );
 
+// The "Tasks" panel (Smart Window) renders its content with this custom
+// element, which pulls in agent-monitor-item for the create form.
+customElements.setElementCreationCallback("agent-monitor-panel", () => {
+  ChromeUtils.importESModule(
+    "chrome://browser/content/aiwindow/components/agent-monitor-panel.mjs",
+    { global: "current" }
+  );
+});
+
 // The "Group my tabs" panel and flyout (Smart Window) render their content with
 // these light-DOM custom elements; both live in one module.
 for (const smartwindowGroupTabsTag of [
@@ -681,13 +703,28 @@ Object.defineProperty(this, "gReduceMotion", {
   get() {
     return typeof gReduceMotionOverride == "boolean"
       ? gReduceMotionOverride
-      : gReduceMotionSetting;
+      : gReduceMotionManager.setting;
   },
 });
-// Reduce motion during startup. The setting will be reset later.
-let gReduceMotionSetting = true;
 // This is for tests to set.
 var gReduceMotionOverride;
+
+// TODO bug 2056447: read the media query directly instead of caching.
+var gReduceMotionManager = {
+  // Reduce motion during startup. The setting will be reset later.
+  setting: true,
+
+  init() {
+    let reduceMotionQuery = window.matchMedia(
+      "(prefers-reduced-motion: reduce)"
+    );
+    let readSetting = () => {
+      this.setting = reduceMotionQuery.matches;
+    };
+    reduceMotionQuery.addListener(readSetting);
+    readSetting();
+  },
+};
 
 // Smart getter for the findbar.  If you don't wish to force the creation of
 // the findbar, check gFindBarInitialized first.
@@ -805,11 +842,17 @@ function updateFxaToolbarMenu(enable, isInitialUpdate = false) {
   const taskbarTab = mainWindowEl.hasAttribute("taskbartab");
 
   // To minimize the toolbar button flickering or appearing/disappearing during startup,
-  // we use this pref to anticipate the likely FxA status.
-  const statusGuess = !!Services.prefs.getStringPref(
-    "identity.fxaccounts.account.device.name",
-    ""
-  );
+  // we use this pref to anticipate the likely FxA status. Only guess a signed-in
+  // state when accounts are enabled: a device name can be persisted without ever
+  // signing in (e.g. it is written on first read or when creating a backup), so
+  // without gating on syncEnabled a profile with accounts disabled would
+  // incorrectly report "signed_in".
+  const statusGuess =
+    syncEnabled &&
+    !!Services.prefs.getStringPref(
+      "identity.fxaccounts.account.device.name",
+      ""
+    );
   mainWindowEl.setAttribute(
     "fxastatus",
     statusGuess ? "signed_in" : "not_configured"
@@ -1531,8 +1574,8 @@ function CreateContainerTabMenu(event) {
     return;
   }
   createUserContextMenu(event, {
-    useAccessKeys: false,
     showDefaultTab: true,
+    containerSource: "new_tab_button",
   });
 }
 
@@ -1701,11 +1744,7 @@ function toOpenWindowByType(inType, uri, features) {
   } else if (features) {
     window.open(uri, "_blank", features);
   } else {
-    window.open(
-      uri,
-      "_blank",
-      "chrome,extrachrome,menubar,resizable,scrollbars,status,toolbar"
-    );
+    window.open(uri, "_blank", "chrome,resizable,toolbar");
   }
 }
 /**
@@ -1866,11 +1905,14 @@ let gFileMenu = {
    * when applicable.
    */
   updateTabCloseCountState() {
-    document.l10n.setAttributes(
-      document.getElementById("menu_close"),
-      "menu-file-close-tab",
-      { tabCount: gBrowser.selectedTabs.length }
-    );
+    let closeTab = document.getElementById("menu_close");
+    if (document.getElementById("menu_closeWindow").hidden) {
+      document.l10n.setAttributes(closeTab, "menu-file-close");
+    } else {
+      document.l10n.setAttributes(closeTab, "menu-file-close-tab", {
+        tabCount: gBrowser.selectedTabs.length,
+      });
+    }
   },
 
   onPopupShowing(event) {
@@ -1915,6 +1957,9 @@ let gFileMenu = {
 function openNewUserContextTab(event) {
   openTrustedLinkIn(BROWSER_NEW_TAB_URL, "tab", {
     userContextId: parseInt(event.target.getAttribute("data-usercontextid")),
+    eventDetail: {
+      containerSource: event.target.dataset.containerEntrypoint,
+    },
   });
 }
 
@@ -2420,7 +2465,11 @@ var XULBrowserWindow = {
       }
     }
 
-    if (TranslationsParent.isFullPageTranslationsRestrictedForPage(gBrowser)) {
+    if (
+      TranslationsParent.isFullPageTranslationsRestrictedForPage(
+        gBrowser.selectedBrowser
+      )
+    ) {
       this._menuItemForTranslations.setAttribute("disabled", "true");
     } else {
       this._menuItemForTranslations.removeAttribute("disabled");
@@ -3189,6 +3238,7 @@ var gUIDensity = {
 
   init() {
     this.update();
+    UIDensityTelemetry.init(window);
     Services.obs.addObserver(this, "tablet-mode-change");
     Services.prefs.addObserver(this.uiDensityPref, this);
     Services.prefs.addObserver(this.autoTouchModePref, this);
@@ -3298,22 +3348,37 @@ var gUIDensity = {
     if (!(threshold > 0)) {
       return false;
     }
+    const { width, height } = this._densityReferenceSize();
     if (
-      window.innerHeight &&
-      this.AUTO_COMPACT_REFERENCE_TABSTRIP_HEIGHT / window.innerHeight >
-        threshold
+      height &&
+      this.AUTO_COMPACT_REFERENCE_TABSTRIP_HEIGHT / height > threshold
     ) {
       return true;
     }
     if (
-      window.innerWidth &&
+      width &&
       this._isSidebarLauncherCollapsed() &&
-      this.AUTO_COMPACT_REFERENCE_SIDEBAR_LAUNCHER_WIDTH / window.innerWidth >
-        threshold
+      this.AUTO_COMPACT_REFERENCE_SIDEBAR_LAUNCHER_WIDTH / width > threshold
     ) {
       return true;
     }
     return false;
+  },
+
+  // This function returns our window size, for the purpose of judging whether we
+  // should auto-compact. If we're maximized (as indicated by "sizemode"), we don't
+  // trust window.inner{Width,Height} as authoritative, because we might be a
+  // newly-spawned window, waiting on the OS to tell us our correct size. Hence: for
+  // maximized windows, we use the screen size (if it's larger), since it doesn't
+  // change as often and is likely to be close to the maximized window-size.
+  _densityReferenceSize() {
+    if (document.documentElement.getAttribute("sizemode") == "maximized") {
+      return {
+        width: Math.max(window.screen.availWidth, window.innerWidth),
+        height: Math.max(window.screen.availHeight, window.innerHeight),
+      };
+    }
+    return { width: window.innerWidth, height: window.innerHeight };
   },
 
   // Whether the sidebar.revamp launcher is currently visible (sidebar is
@@ -3424,6 +3489,9 @@ var gUIDensity = {
     if (mode == this._appliedMode) {
       return;
     }
+    // The first call applies the density the window opened with, which isn't
+    // a change worth reporting to telemetry.
+    let isInitialUpdate = this._appliedMode === undefined;
     this._appliedMode = mode;
 
     if (sidebarContentDoc) {
@@ -3437,6 +3505,10 @@ var gUIDensity = {
     }
 
     window.dispatchEvent(new CustomEvent("uidensitychanged"));
+
+    if (!isInitialUpdate) {
+      UIDensityTelemetry.onDensityChanged(window);
+    }
   },
 };
 
@@ -3896,7 +3968,7 @@ function WindowIsClosing(event) {
     "resource:///modules/asrouter/ASRouter.sys.mjs"
   );
   const { TaskbarTabsUtils } = ChromeUtils.importESModule(
-    "resource:///modules/taskbartabs/TaskbarTabsUtils.sys.mjs"
+    "moz-src:///browser/components/taskbartabs/TaskbarTabsUtils.sys.mjs"
   );
   if (gLastWindowCloseTriggerHandled) {
     // The user is closing this window again while a message from a previous
@@ -3906,10 +3978,12 @@ function WindowIsClosing(event) {
     Glean.messagingSystem.lastWindowCloseTriggerBypassed.add(1);
   } else if (
     isLastWindow &&
-    // Web app (Taskbar Tabs) windows aren't a normal browsing window this
-    // trigger targets, even though they keep the toolbar visible and don't
-    // change windowtype, so they otherwise look like one to the checks here.
+    // Web app (Taskbar Tabs) and mini windows aren't a normal browsing window
+    // this trigger targets, even though they keep the toolbar visible and
+    // don't change windowtype, so they otherwise look like one to the checks
+    // here.
     !TaskbarTabsUtils.isTaskbarTabWindow(window) &&
+    !document.documentElement.hasAttribute("mini-window") &&
     !shouldWarnForTabs &&
     ASRouter.initialized &&
     // Pre-check for messages so we don't hold up every last-window close when
@@ -3966,7 +4040,7 @@ function warnAboutClosingWindow() {
   if (!isPBWindow && !toolbar.visible) {
     return gBrowser.warnAboutClosingTabs(
       gBrowser.openTabs.length,
-      gBrowser.closingTabsEnum.ALL
+      Tabbrowser.closingTabsEnum.ALL
     );
   }
 
@@ -4006,7 +4080,7 @@ function warnAboutClosingWindow() {
       isPBWindow ||
       gBrowser.warnAboutClosingTabs(
         gBrowser.openTabs.length,
-        gBrowser.closingTabsEnum.ALL
+        Tabbrowser.closingTabsEnum.ALL
       )
     );
   }
@@ -4031,7 +4105,7 @@ function warnAboutClosingWindow() {
     isPBWindow ||
     gBrowser.warnAboutClosingTabs(
       gBrowser.openTabs.length,
-      gBrowser.closingTabsEnum.ALL
+      Tabbrowser.closingTabsEnum.ALL
     )
   );
 }
@@ -4138,38 +4212,8 @@ const gRemoteControl = {
 };
 
 /**
- * Switch to a tab that has a given URI, and focuses its browser window.
- * If a matching tab is in this window, it will be switched to. Otherwise, other
- * windows will be searched.
- *
- * @param aURI
- *        URI to search for
- * @param aOpenNew
- *        True to open a new tab and switch to it, if no existing tab is found.
- *        If no suitable window is found, a new one will be opened.
- * @param aOpenParams
- *        If switching to this URI results in us opening a tab, aOpenParams
- *        will be the parameter object that gets passed to openTrustedLinkIn. Please
- *        see the documentation for openTrustedLinkIn to see what parameters can be
- *        passed via this object.
- *        This object also allows:
- *        - 'ignoreFragment' property to be set to true to exclude fragment-portion
- *        matching when comparing URIs.
- *          If set to "whenComparing", the fragment will be unmodified.
- *          If set to "whenComparingAndReplace", the fragment will be replaced.
- *        - 'ignoreQueryString' boolean property to be set to true to exclude query string
- *        matching when comparing URIs.
- *        - 'replaceQueryString' boolean property to be set to true to exclude query string
- *        matching when comparing URIs and overwrite the initial query string with
- *        the one from the new URI.
- *        - 'adoptIntoActiveWindow' boolean property to be set to true to adopt the tab
- *        into the current window.
- * @param aUserContextId
- *        If not null, will switch to the first found tab having the provided
- *        userContextId.
- * @param aSplitView
- *        If not null, will move the tab to the active split view instead of switching to tab
- * @return True if an existing tab was found, false otherwise
+ * Forwards to URILoadingHelper.switchToTabHavingURI, which documents the
+ * parameters and the return value.
  */
 function switchToTabHavingURI(
   aURI,
@@ -4483,6 +4527,8 @@ class TabDialogBox {
    * (among other protection mechanisms, that are not handled here, see the bug for reference).
    * @param {nsIWebProgress} [aOptions.webProgress] - If passed, use to detect when a site is being
    * navigated to in order to close the dialog. By default, this.browser.webProgress is used.
+   * @param {Event} [aOptions.triggeringEvent] - The event that made the user
+   * open the dialog, see SubDialog.open().
    * @returns {object} [result] Returns an object { closedPromise, dialog }.
    * @returns {Promise} [result.closedPromise] Resolves once the dialog has been closed.
    * @returns {SubDialog} [result.dialog] A reference to the opened SubDialog.
@@ -4498,6 +4544,7 @@ class TabDialogBox {
       allowFocusCheckbox = false,
       hideContent = false,
       webProgress = undefined,
+      triggeringEvent,
     } = {},
     ...aParams
   ) {
@@ -4541,6 +4588,7 @@ class TabDialogBox {
         closingCallback,
         closedCallback: resolveClosed,
         hideContent,
+        triggeringEvent,
       },
       ...aParams
     );
@@ -4703,6 +4751,10 @@ TabDialogBox.prototype.QueryInterface = ChromeUtils.generateQI([
   "nsISupportsWeakReference",
 ]);
 
+// A class declaration is a lexical binding, not a window property, so callers
+// outside this window's scripts can't reach it without this.
+window.TabDialogBox = TabDialogBox;
+
 // Handle window-modal prompts that we want to display with the same style as
 // tab-modal prompts.
 var gDialogBox = {
@@ -4737,7 +4789,13 @@ var gDialogBox = {
     this._nextOpenJumpsQueue = true;
   },
 
-  async open(uri, args) {
+  /**
+   * @param {string} uri - URI of the dialog document.
+   * @param {object} args - Arguments for the dialog.
+   * @param {Event} [triggeringEvent] - The event that made the user open the
+   * dialog, see SubDialog.open().
+   */
+  async open(uri, args, triggeringEvent) {
     // If we need to queue, some callers indicate they should go first.
     const queueMethod = this._nextOpenJumpsQueue ? "unshift" : "push";
     this._nextOpenJumpsQueue = false;
@@ -4746,7 +4804,13 @@ var gDialogBox = {
     // queue the next one to be opened later.
     if (this.isOpen) {
       return new Promise((resolve, reject) => {
-        this._queued[queueMethod]({ resolve, reject, uri, args });
+        this._queued[queueMethod]({
+          resolve,
+          reject,
+          uri,
+          args,
+          triggeringEvent,
+        });
       });
     }
 
@@ -4769,17 +4833,13 @@ var gDialogBox = {
     // Bring the window to the front in case we're minimized or occluded:
     window.focus();
 
-    try {
-      // Prevent moz-urlbars from showing on top of modal
-      for (let mozUrlbar of document.querySelectorAll("moz-urlbar")) {
-        mozUrlbar.incrementBreakoutBlockerCount();
-      }
-    } catch (ex) {
-      console.error(ex);
+    // Prevent urlbar views from showing on top of the modal.
+    for (let urlbar of document.querySelectorAll(".urlbar")) {
+      urlbar.view?.close();
     }
 
     try {
-      await this._open(uri, args);
+      await this._open(uri, args, triggeringEvent);
     } catch (ex) {
       console.error(ex);
     } finally {
@@ -4801,10 +4861,6 @@ var gDialogBox = {
       this._updateMenuAndCommandState(true /* to enable */);
       this._dialog = null;
       UpdatePopupNotificationsVisibility();
-      // Restore moz-urlbar breakout if needed
-      for (let mozUrlbar of document.querySelectorAll("moz-urlbar")) {
-        mozUrlbar.decrementBreakoutBlockerCount();
-      }
     }
     if (this._queued.length) {
       setTimeout(() => this._openNextDialog(), 0);
@@ -4814,8 +4870,9 @@ var gDialogBox = {
 
   _openNextDialog() {
     if (!this.isOpen) {
-      let { resolve, reject, uri, args } = this._queued.shift();
-      this.open(uri, args).then(resolve, reject);
+      let { resolve, reject, uri, args, triggeringEvent } =
+        this._queued.shift();
+      this.open(uri, args, triggeringEvent).then(resolve, reject);
     }
   },
 
@@ -4831,7 +4888,7 @@ var gDialogBox = {
     }
   },
 
-  _open(uri, args) {
+  _open(uri, args, triggeringEvent) {
     // Get this offset before we touch style below, as touching style seems
     // to reset the cached layout bounds.
     let offset = window.windowUtils.getBoundsWithoutFlushing(
@@ -4878,6 +4935,7 @@ var gDialogBox = {
         closedCallback: () => {
           this._closedCallback();
         },
+        triggeringEvent,
       },
       args
     );
@@ -4942,6 +5000,8 @@ if (window.location.href != AppConstants.BROWSER_CHROME_URL) {
 
 var ConfirmationHint = {
   _timerID: null,
+  _duration: 0,
+  _pendingShow: null,
 
   /**
    * Shows a transient, non-interactive confirmation hint anchored to an
@@ -4964,7 +5024,19 @@ var ConfirmationHint = {
    *         - l10nArgs (object): l10n arguments for the messageId.
    *         - hideCheckmark: Whether to hide the animated checkmark
    */
-  show(
+  show(anchor, messageId, options = {}) {
+    if (this._panel.state == "hiding") {
+      // openPopup does nothing while the panel is hiding.
+      this._pendingShow = [anchor, messageId, options];
+      return;
+    }
+    this._show(anchor, messageId, options);
+  },
+
+  /**
+   * Does the work of show(). Called internally to handle queued hints not counting twice.
+   */
+  _show(
     anchor,
     messageId,
     {
@@ -4984,7 +5056,9 @@ var ConfirmationHint = {
     // IP Protection strings are still in preview (see Bug 2011776).
     // Only insert the preview file if we're showing a hint for IP Protection.
     if (
-      messageId === "confirmation-hint-ipprotection-navigated-to-excluded-site"
+      messageId ===
+        "confirmation-hint-ipprotection-navigated-to-excluded-site" ||
+      messageId === "confirmation-hint-ipprotection-navigated-to-included-site"
     ) {
       MozXULElement.insertFTLIfNeeded("browser/ipProtection.ftl");
     }
@@ -5008,38 +5082,48 @@ var ConfirmationHint = {
     // The timeout value used here allows the panel to stay open for
     // 3s after the text transition (duration=120ms) has finished.
     // If there is a description, we show for 6s after the text transition.
-    const DURATION = showDescription ? 6000 : 3000;
-    let startAutoHideTimer = () => {
-      this._animationBox.setAttribute("animate", "true");
-      this._timerID = setTimeout(() => {
-        this._panel.hidePopup(true);
-      }, DURATION + 120);
-    };
+    this._duration = showDescription ? 6000 : 3000;
 
     if (this._panel.state == "open") {
       // A hint is already showing: openPopup below would be a no-op and no
       // popupshown event would fire to restart the timer _reset just cleared.
-      startAutoHideTimer();
+      this._startAutoHideTimer();
       return;
     }
-
-    this._panel.addEventListener("popupshown", startAutoHideTimer, {
-      once: true,
-    });
-
-    this._panel.addEventListener(
-      "popuphidden",
-      () => {
-        // reset the timerId in case our timeout wasn't the cause of the popup being hidden
-        this._reset();
-      },
-      { once: true }
-    );
 
     this._panel.openPopup(anchor, {
       position: position ?? "bottomleft topleft",
       triggerEvent: event,
     });
+  },
+
+  handleEvent(event) {
+    switch (event.type) {
+      case "popupshown":
+        this._startAutoHideTimer();
+        break;
+      case "popuphidden": {
+        // reset the timerId in case our timeout wasn't the cause of the popup being hidden
+        this._reset();
+        let pending = this._pendingShow;
+        this._pendingShow = null;
+        if (pending) {
+          this._show(...pending);
+        }
+        break;
+      }
+    }
+  },
+
+  /**
+   * Shows the hint's message and hides the hint after `_duration` ms, plus
+   * the length of the message's text transition.
+   */
+  _startAutoHideTimer() {
+    this._animationBox.setAttribute("animate", "true");
+    this._timerID = setTimeout(() => {
+      this._panel.hidePopup(true);
+    }, this._duration + 120);
   },
 
   _reset() {
@@ -5088,6 +5172,8 @@ var ConfirmationHint = {
       let wrapper = document.getElementById("confirmation-hint-wrapper");
       wrapper.replaceWith(wrapper.content);
       this.__panel = document.getElementById("confirmation-hint");
+      this.__panel.addEventListener("popupshown", this);
+      this.__panel.addEventListener("popuphidden", this);
     }
   },
 };
@@ -5123,9 +5209,13 @@ var FirefoxViewHandler = {
     if (section) {
       viewURL = `${viewURL}#${section}`;
     }
-    // Need to account for navigation to Firefox View pages
+    // Need to account for navigation to Firefox View pages, but keep a tab
+    // that hasn't committed its first load yet, e.g. when a click follows the
+    // mousedown that opened it.
     if (
       this.tab &&
+      !this.tab.linkedBrowser.browsingContext.currentWindowGlobal
+        .isInitialDocument &&
       this.tab.linkedBrowser.currentURI.spec.split("#")[0] != viewURL
     ) {
       gBrowser.removeTab(this.tab);

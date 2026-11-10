@@ -12,23 +12,26 @@
 #include "NSSCertDBTrustDomain.h"
 #include "NSSErrorsService.h"
 #include "NSSSocketControl.h"
+#include "PKCS11ModuleDB.h"
 #include "SSLServerCertVerification.h"
 #include "ScopedNSSTypes.h"
 #include "TLSClientAuthCertSelection.h"
 #include "brotli/decode.h"
 #include "keyhi.h"
 #include "mozilla/Base64.h"
+#include "mozilla/BaseProfiler.h"
 #include "mozilla/Logging.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/RandomNum.h"
 #include "mozilla/ScopeExit.h"
+#include "mozilla/Services.h"
 #include "mozilla/StaticPrefs_security.h"
+#include "mozilla/TimeStamp.h"
 #include "mozilla/glean/SecurityManagerSslMetrics.h"
 #include "mozilla/net/SSLTokensCache.h"
-#include "mozilla/net/SocketProcessChild.h"
 #include "mozilla/psm/EnabledSignatureSchemes.h"
-#include "mozilla/psm/IPCClientCertsChild.h"
-#include "mozilla/psm/PIPCClientCertsChild.h"
+#include "mozilla/psm/PSMIPCTypes.h"
+#include "mozilla/psm/PSMIPCUtils.h"
 #include "mozilla/psm/mozilla_abridged_certs_generated.h"
 #include "mozpkix/pkixnss.h"
 #include "mozpkix/pkixtypes.h"
@@ -39,6 +42,7 @@
 #include "nsCharSeparatedTokenizer.h"
 #include "nsClientAuthRemember.h"
 #include "nsContentUtils.h"
+#include "nsIObserverService.h"
 #include "nsISocketProvider.h"
 #include "nsIWebProgressListener.h"
 #include "nsNSSComponent.h"
@@ -819,7 +823,9 @@ static int32_t PSMRecv(PRFileDesc* fd, void* buf, int32_t amount, int flags,
 static int32_t PSMSend(PRFileDesc* fd, const void* buf, int32_t amount,
                        int flags, PRIntervalTime timeout) {
   NSSSocketControl* socketInfo = getSocketInfoIfRunning(fd, writing);
-  if (!socketInfo) return -1;
+  if (!socketInfo) {
+    return -1;
+  }
 
   if (flags != 0) {
     PR_SetError(PR_INVALID_ARGUMENT_ERROR, 0);
@@ -831,15 +837,13 @@ static int32_t PSMSend(PRFileDesc* fd, const void* buf, int32_t amount,
 #endif
 
   if (socketInfo->IsShortWritePending() && amount > 0) {
-    // We got "SSL short write" last time, try to flush the pending byte.
-#ifdef DEBUG
-    socketInfo->CheckShortWrittenBuffer(static_cast<const unsigned char*>(buf),
-                                        amount);
-#endif
-
-    buf = socketInfo->GetShortWritePendingByteRef();
+    // We got a "short write" last time, try to flush the pending byte.
+    buf = socketInfo->CheckShortWriteBuffer(buf, amount);
+    if (!buf) {
+      PR_SetError(PR_INVALID_ARGUMENT_ERROR, 0);
+      return -1;
+    }
     amount = 1;
-
     MOZ_LOG(gPIPNSSLog, LogLevel::Verbose,
             ("[%p] pushing 1 byte after SSL short write", fd));
   }
@@ -860,6 +864,10 @@ static int32_t PSMSend(PRFileDesc* fd, const void* buf, int32_t amount,
   // in the previous call. We then return the total number of bytes written,
   // which is the number that caused the short write plus the additional byte
   // we just wrote out.
+  // Note that the layer above *must* retry sending the exact same data. To do
+  // otherwise is a violation of NSS's expectations and is an error.
+  // Because early data can be truncated by libssl, only perform this
+  // optimization after the handshake has completed.
 
   // The 16384 value is based on libssl's maximum buffer size:
   //    MAX_FRAGMENT_LENGTH - 1
@@ -867,12 +875,11 @@ static int32_t PSMSend(PRFileDesc* fd, const void* buf, int32_t amount,
   // It's in a private header, though, filed bug 1394822 to expose it.
   static const int32_t kShortWrite16k = 16383;
 
-  if ((amount > 1 && bytesWritten == (amount - 1)) ||
-      (amount > kShortWrite16k && bytesWritten == kShortWrite16k)) {
-    // This is indication of an "SSL short write", block to force retry.
-    socketInfo->SetShortWritePending(
-        bytesWritten + 1,  // The amount to return after the flush
-        *(static_cast<const unsigned char*>(buf) + bytesWritten));
+  if (socketInfo->IsHandshakeCompleted() &&
+      ((amount > 1 && bytesWritten == (amount - 1)) ||
+       (amount > kShortWrite16k && bytesWritten == kShortWrite16k))) {
+    // This indicates a "short write", so block to force a retry.
+    socketInfo->SetShortWritePending(buf, bytesWritten + 1);
 
     MOZ_LOG(
         gPIPNSSLog, LogLevel::Verbose,
@@ -881,24 +888,17 @@ static int32_t PSMSend(PRFileDesc* fd, const void* buf, int32_t amount,
 
     bytesWritten = -1;
     PR_SetError(PR_WOULD_BLOCK_ERROR, 0);
-
-#ifdef DEBUG
-    socketInfo->RememberShortWrittenBuffer(
-        static_cast<const unsigned char*>(buf));
-#endif
-
   } else if (socketInfo->IsShortWritePending() && bytesWritten == 1) {
-    // We have now flushed all pending data in the SSL socket
-    // after the indicated short write.  Tell the upper layer
-    // it has sent all its data now.
+    // We have now flushed all pending data in the SSL socket after the
+    // indicated short write. Tell the upper layer it has sent all the data
+    // from that write now.
     MOZ_LOG(gPIPNSSLog, LogLevel::Verbose,
             ("[%p] finished SSL short write", fd));
-
     bytesWritten = socketInfo->ResetShortWritePending();
   }
 
   MOZ_LOG(gPIPNSSLog, LogLevel::Verbose,
-          ("[%p] wrote %d bytes\n", fd, bytesWritten));
+          ("[%p] wrote %d bytes", fd, bytesWritten));
 
   return checkHandshake(bytesWritten, false, fd, socketInfo);
 }
@@ -1002,6 +1002,14 @@ static int32_t PlaintextRecv(PRFileDesc* fd, void* buf, int32_t amount,
   return bytesRead;
 }
 
+static int16_t PlaintextPoll(PRFileDesc* fd, int16_t in_flags,
+                             int16_t* out_flags) {
+  // This thread may sleep as a result of this poll call - let the profiler
+  // know about it.
+  AutoProfilerThreadSleep _;
+  return fd->lower->methods->poll(fd->lower, in_flags, out_flags);
+}
+
 nsSSLIOLayerHelpers::~nsSSLIOLayerHelpers() {
   // Pref observers must have been removed before destruction, since the
   // destructor may run off the main thread.
@@ -1079,6 +1087,7 @@ nsresult nsSSLIOLayerHelpers::Init() {
     nsSSLPlaintextLayerIdentity = PR_GetUniqueIdentity("Plaintxext PSM layer");
     nsSSLPlaintextLayerMethods = *PR_GetDefaultIOMethods();
     nsSSLPlaintextLayerMethods.recv = PlaintextRecv;
+    nsSSLPlaintextLayerMethods.poll = PlaintextPoll;
   }
 
   loadVersionFallbackLimit();
@@ -1578,8 +1587,7 @@ static nsresult nsSSLIOLayerSetOptions(PRFileDesc* fd, bool forSTARTTLS,
   // Include a modest set of named groups in supported_groups and determine how
   // many key shares to send. Please change getKeaGroupName in
   // nsNSSCallbacks.cpp when changing the lists here.
-  unsigned int additional_shares =
-      StaticPrefs::security_tls_client_hello_send_p256_keyshare();
+  unsigned int additional_shares = 1;
   bool tls13 = range.max >= SSL_LIBRARY_VERSION_TLS_1_3;
 
   AutoTArray<SSLNamedGroup, 8> namedGroups;
@@ -1591,8 +1599,14 @@ static nsresult nsSSLIOLayerSetOptions(PRFileDesc* fd, bool forSTARTTLS,
   namedGroups.AppendElement(ssl_grp_ec_secp256r1);
   namedGroups.AppendElement(ssl_grp_ec_secp384r1);
   namedGroups.AppendElement(ssl_grp_ec_secp521r1);
-  namedGroups.AppendElement(ssl_grp_ffdhe_2048);
-  namedGroups.AppendElement(ssl_grp_ffdhe_3072);
+
+  // Only include named FFDHE shares if ciphersuites that can use FFDHE are
+  // enabled.
+  if (StaticPrefs::security_ssl3_dhe_rsa_aes_128_sha() ||
+      StaticPrefs::security_ssl3_dhe_rsa_aes_256_sha()) {
+    namedGroups.AppendElement(ssl_grp_ffdhe_2048);
+    namedGroups.AppendElement(ssl_grp_ffdhe_3072);
+  }
 
   if (StaticPrefs::security_tls_enable_mlkem1024() && tls13) {
     namedGroups.AppendElement(ssl_grp_kem_mlkem1024);
@@ -1604,8 +1618,7 @@ static nsresult nsSSLIOLayerSetOptions(PRFileDesc* fd, bool forSTARTTLS,
   }
 
   // If additional_shares == 2, send mlkem768x25519, x25519, and p256.
-  // If additional_shares == 1, send {mlkem768x25519, x25519} or {x25519, p256}.
-  // If additional_shares == 0, send x25519.
+  // If additional_shares == 1, send x25519 and p256.
   if (SECSuccess != SSL_SendAdditionalKeyShares(fd, additional_shares)) {
     return NS_ERROR_FAILURE;
   }
@@ -1761,6 +1774,9 @@ nsresult nsSSLIOLayerAddToSocket(int32_t family, const char* host, int32_t port,
                      originAttributes.IsPrivateBrowsing();
     sslIOLayerHelpers =
         isPrivate ? PrivateSSLIOLayerHelpers() : PublicSSLIOLayerHelpers();
+    if (!sslIOLayerHelpers) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
   }
 
   RefPtr<NSSSocketControl> infoObject(new NSSSocketControl(
@@ -1876,89 +1892,110 @@ nsresult nsSSLIOLayerAddToSocket(int32_t family, const char* host, int32_t port,
   return NS_OK;
 }
 
-extern "C" {
+#if defined(NIGHTLY_BUILD) && !defined(MOZ_NO_SMART_CARDS)
+struct RemoteCryptokiState {
+  TimeStamp mLastUpdate;
+  nsTArray<CryptokiObject> mCryptokiObjects;
+};
 
-const uint8_t kIPCClientCertsObjectTypeCert = 1;
-const uint8_t kIPCClientCertsObjectTypeRSAKey = 2;
-const uint8_t kIPCClientCertsObjectTypeECKey = 3;
+constinit static StaticDataMutex<Maybe<RemoteCryptokiState>>
+    sRemoteClientCertificatesState("sRemoteClientCertificatesState");
 
-// This function is provided to the IPC client certs module so it can cause the
-// parent process to find certificates and keys and send identifying
-// information about them over IPC.
-void DoFindObjects(FindObjectsCallback cb, void* ctx) {
-  net::SocketProcessChild* socketChild =
-      net::SocketProcessChild::GetSingleton();
-  if (!socketChild) {
+constinit static StaticDataMutex<Maybe<RemoteCryptokiState>>
+    sRemoteCACertificatesState("sRemoteCACertificatesState");
+
+auto LockRemoteCryptokiState(SearchingFor searchingFor) {
+  switch (searchingFor) {
+    case SearchingFor::ClientCertificates:
+      return sRemoteClientCertificatesState.Lock();
+    case SearchingFor::CACertificates:
+      return sRemoteCACertificatesState.Lock();
+  }
+  MOZ_RELEASE_ASSERT(false);
+}
+
+void CacheRemoteCryptokiObjects(SearchingFor searchingFor) {
+  if (!PKCS11ModuleDB::UtilityProcessEnabled()) {
     return;
   }
 
-  RefPtr<IPCClientCertsChild> ipcClientCertsActor(
-      socketChild->GetIPCClientCertsActor());
-  if (!ipcClientCertsActor) {
+  MOZ_ASSERT(!NS_IsMainThread());
+  if (NS_IsMainThread()) {
     return;
   }
-  nsTArray<IPCClientCertObject> objects;
-  if (!ipcClientCertsActor->SendFindObjects(&objects)) {
+
+  // If a search of the desired type has been performed within the last scan
+  // delay, use the cached results.
+  auto remoteCryptokiState(LockRemoteCryptokiState(searchingFor));
+  if (remoteCryptokiState->isSome() &&
+      TimeStamp::Now() - (*remoteCryptokiState)->mLastUpdate <
+          TimeDuration::FromMilliseconds(
+              StaticPrefs::
+                  security_utility_pkcs11_module_process_scan_delay_ms())) {
     return;
   }
-  for (const auto& object : objects) {
-    switch (object.type()) {
-      case IPCClientCertObject::TECKey:
-        cb(kIPCClientCertsObjectTypeECKey, object.get_ECKey().params().Length(),
-           object.get_ECKey().params().Elements(),
-           object.get_ECKey().cert().Length(),
-           object.get_ECKey().cert().Elements(), ctx);
-        break;
-      case IPCClientCertObject::TRSAKey:
-        cb(kIPCClientCertsObjectTypeRSAKey,
-           object.get_RSAKey().modulus().Length(),
-           object.get_RSAKey().modulus().Elements(),
-           object.get_RSAKey().cert().Length(),
-           object.get_RSAKey().cert().Elements(), ctx);
-        break;
-      case IPCClientCertObject::TCertificate:
-        cb(kIPCClientCertsObjectTypeCert,
-           object.get_Certificate().der().Length(),
-           object.get_Certificate().der().Elements(), 0, nullptr, ctx);
-        break;
-      default:
-        MOZ_ASSERT_UNREACHABLE("unhandled IPCClientCertObject type");
-        break;
+
+  Monitor monitor{__func__};
+  bool done = false;
+  nsTArray<CryptokiObject> objects;
+  nsresult rv = NS_DispatchToMainThread(NS_NewRunnableFunction(
+      __func__, [searchingFor, &monitor, &done, &objects] {
+        RefPtr<PKCS11ModuleDB> pkcs11ModuleDB(PKCS11ModuleDB::GetSingleton());
+        if (!pkcs11ModuleDB) {
+          MonitorAutoLock lock(monitor);
+          done = true;
+          lock.Notify();
+          return;
+        }
+        pkcs11ModuleDB->FindObjects(searchingFor)
+            ->Then(GetCurrentSerialEventTarget(), __func__,
+                   [&monitor, &done,
+                    &objects](const PKCS11ModuleDB::FindObjectsPromise::
+                                  ResolveOrRejectValue& value) {
+                     MonitorAutoLock lock(monitor);
+                     if (value.IsResolve()) {
+                       objects.Assign(value.ResolveValue());
+                     }
+                     done = true;
+                     lock.Notify();
+                   });
+      }));
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  {
+    MonitorAutoLock lock(monitor);
+    while (!done) {
+      lock.Wait();
     }
   }
-}
 
-// This function is provided to the IPC client certs module so it can cause the
-// parent process to sign the given data using the key corresponding to the
-// given certificate, using the given parameters.
-void DoSign(size_t cert_len, const uint8_t* cert, size_t data_len,
-            const uint8_t* data, size_t params_len, const uint8_t* params,
-            SignCallback cb, void* ctx) {
-  net::SocketProcessChild* socketChild =
-      net::SocketProcessChild::GetSingleton();
-  if (!socketChild) {
-    return;
-  }
-
-  RefPtr<IPCClientCertsChild> ipcClientCertsActor(
-      socketChild->GetIPCClientCertsActor());
-  if (!ipcClientCertsActor) {
-    return;
-  }
-  ByteArray certBytes(nsTArray<uint8_t>(cert, cert_len));
-  ByteArray dataBytes(nsTArray<uint8_t>(data, data_len));
-  ByteArray paramsBytes(nsTArray<uint8_t>(params, params_len));
-  ByteArray signature;
-  if (!ipcClientCertsActor->SendSign(certBytes, dataBytes, paramsBytes,
-                                     &signature)) {
-    return;
-  }
-  cb(signature.data().Length(), signature.data().Elements(), ctx);
+  remoteCryptokiState->reset();
+  remoteCryptokiState->emplace(
+      RemoteCryptokiState{TimeStamp::Now(), std::move(objects)});
 }
+#endif  // NIGHTLY_BUILD && !MOZ_NO_SMART_CARDS
+
+extern "C" {
+
+#if defined(MOZ_WIDGET_ANDROID) || \
+    (defined(NIGHTLY_BUILD) && !defined(MOZ_NO_SMART_CARDS))
+const uint8_t kCryptokiObjectTypeCert = 1;
+#endif
+#if defined(NIGHTLY_BUILD) && !defined(MOZ_NO_SMART_CARDS)
+const uint8_t kCryptokiObjectTypeRSAKey = 2;
+const uint8_t kCryptokiObjectTypeECKey = 3;
+#endif  // NIGHTLY_BUILD && !MOZ_NO_SMART_CARDS
+
+using FindObjectsCallback = void (*)(uint8_t type, size_t id_len,
+                                     const uint8_t* id, size_t data_len,
+                                     const uint8_t* data, void* ctx);
+using SignCallback = void (*)(size_t data_len, const uint8_t* data, void* ctx);
 
 #ifdef MOZ_WIDGET_ANDROID
-// Similar to `DoFindObjects`, this function implements searching for client
-// authentication certificates on Android. When a TLS server requests a client
+// This function implements searching for client authentication certificates on
+// Android. When a TLS server requests a client
 // auth certificate, the backend will forward that request to the frontend,
 // which calls KeyChain.choosePrivateKeyAlias. The user can choose a
 // certificate, which causes it to become available for use. The
@@ -1980,7 +2017,7 @@ void AndroidDoFindObjects(FindObjectsCallback cb, void* ctx) {
     jni::ByteArray::LocalRef der = clientAuthCertificate->GetCertificateBytes();
     jni::ByteArray::LocalRef keyParameters =
         clientAuthCertificate->GetKeyParameters();
-    cb(kIPCClientCertsObjectTypeCert, der->Length(),
+    cb(kCryptokiObjectTypeCert, der->Length(),
        reinterpret_cast<uint8_t*>(der->GetElements().Elements()), 0, nullptr,
        ctx);
     cb(clientAuthCertificate->GetType(), keyParameters->Length(),
@@ -1992,7 +2029,7 @@ void AndroidDoFindObjects(FindObjectsCallback cb, void* ctx) {
     if (issuersBytes) {
       for (size_t i = 0; i < issuersBytes->Length(); i++) {
         jni::ByteArray::LocalRef issuer = issuersBytes->GetElement(i);
-        cb(kIPCClientCertsObjectTypeCert, issuer->Length(),
+        cb(kCryptokiObjectTypeCert, issuer->Length(),
            reinterpret_cast<uint8_t*>(issuer->GetElements().Elements()), 0,
            nullptr, ctx);
       }
@@ -2000,7 +2037,7 @@ void AndroidDoFindObjects(FindObjectsCallback cb, void* ctx) {
   }
 }
 
-// Similar to `DoSign`, this function implements signing for client
+// This function implements signing for client
 // authentication certificates on Android. `ClientAuthCertificateManager` keeps
 // track of any available client auth certificates and does the actual work of
 // signing - this function just passes in the appropriate parameters.
@@ -2025,4 +2062,103 @@ void AndroidDoSign(size_t certLen, const uint8_t* cert, size_t dataLen,
   }
 }
 #endif  // MOZ_WIDGET_ANDROID
+
+// This function implements searching for certificates stored on remote PKCS#11
+// tokens.
+void RemoteCertsDoFindObjects(SearchingFor searchingFor, FindObjectsCallback cb,
+                              void* ctx) {
+#if defined(NIGHTLY_BUILD) && !defined(MOZ_NO_SMART_CARDS)
+  nsTArray<CryptokiObject> objects;
+  {
+    auto remoteCryptokiState(LockRemoteCryptokiState(searchingFor));
+    // CacheRemoteCryptokiObjects should have run at least once at this point.
+    MOZ_ASSERT(remoteCryptokiState->isSome());
+    if (remoteCryptokiState->isSome()) {
+      objects.Assign((*remoteCryptokiState)->mCryptokiObjects.Clone());
+    }
+  }
+  for (const auto& object : objects) {
+    switch (object.type()) {
+      case CryptokiObject::TECKey:
+        cb(kCryptokiObjectTypeECKey, object.get_ECKey().params().Length(),
+           object.get_ECKey().params().Elements(),
+           object.get_ECKey().cert().Length(),
+           object.get_ECKey().cert().Elements(), ctx);
+        break;
+      case CryptokiObject::TRSAKey:
+        cb(kCryptokiObjectTypeRSAKey, object.get_RSAKey().modulus().Length(),
+           object.get_RSAKey().modulus().Elements(),
+           object.get_RSAKey().cert().Length(),
+           object.get_RSAKey().cert().Elements(), ctx);
+        break;
+      case CryptokiObject::TCertificate: {
+        uint8_t serverAuthTrustAnchor =
+            object.get_Certificate().serverAuthTrustAnchor() ? 1 : 0;
+        cb(kCryptokiObjectTypeCert, object.get_Certificate().der().Length(),
+           object.get_Certificate().der().Elements(), 1, &serverAuthTrustAnchor,
+           ctx);
+        break;
+      }
+      default:
+        MOZ_ASSERT_UNREACHABLE("unhandled CryptokiObject type");
+        break;
+    }
+  }
+#endif  // NIGHTLY_BUILD && !MOZ_NO_SMART_CARDS
+}
+
+// This function implements signing using private keys stored on remote PKCS#11
+// tokens.
+void RemoteCertsDoSign(size_t certLen, const uint8_t* cert, size_t dataLen,
+                       const uint8_t* data, size_t paramsLen,
+                       const uint8_t* params, SignCallback cb, void* ctx) {
+#if defined(NIGHTLY_BUILD) && !defined(MOZ_NO_SMART_CARDS)
+  MOZ_ASSERT(!NS_IsMainThread());
+  if (NS_IsMainThread()) {
+    return;
+  }
+
+  nsTArray<uint8_t> certificate(cert, certLen);
+  nsTArray<uint8_t> dataArray(data, dataLen);
+  nsTArray<uint8_t> paramsArray(params, paramsLen);
+
+  Monitor monitor{__func__};
+  bool done = false;
+  nsTArray<uint8_t> signature;
+  nsresult rv = NS_DispatchToMainThread(NS_NewRunnableFunction(
+      __func__,
+      [certificate(std::move(certificate)), data(std::move(dataArray)),
+       params(std::move(paramsArray)), &monitor, &done, &signature]() mutable {
+        RefPtr<PKCS11ModuleDB> pkcs11ModuleDB(PKCS11ModuleDB::GetSingleton());
+        if (!pkcs11ModuleDB) {
+          MonitorAutoLock lock(monitor);
+          done = true;
+          lock.Notify();
+          return;
+        }
+        pkcs11ModuleDB
+            ->Sign(std::move(certificate), std::move(data), std::move(params))
+            ->Then(GetCurrentSerialEventTarget(), __func__,
+                   [&monitor, &done, &signature](
+                       const PKCS11ModuleDB::SignPromise::ResolveOrRejectValue&
+                           value) {
+                     MonitorAutoLock lock(monitor);
+                     if (value.IsResolve()) {
+                       signature.Assign(value.ResolveValue());
+                     }
+                     done = true;
+                     lock.Notify();
+                   });
+      }));
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  MonitorAutoLock lock(monitor);
+  while (!done) {
+    lock.Wait();
+  }
+  cb(signature.Length(), signature.Elements(), ctx);
+#endif  // NIGHTLY_BUILD && !MOZ_NO_SMART_CARDS
+}
 }  // extern "C"

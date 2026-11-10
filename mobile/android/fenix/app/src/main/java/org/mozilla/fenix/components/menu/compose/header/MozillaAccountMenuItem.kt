@@ -38,9 +38,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.dp
+import mozilla.components.compose.base.theme.ThemedValue
+import mozilla.components.compose.base.theme.ThemedValueProvider
 import mozilla.components.service.fxa.manager.AccountState
 import mozilla.components.service.fxa.manager.AccountState.Authenticated
-import mozilla.components.service.fxa.manager.AccountState.Authenticating
 import mozilla.components.service.fxa.manager.AccountState.AuthenticationProblem
 import mozilla.components.service.fxa.manager.AccountState.NotAuthenticated
 import mozilla.components.service.fxa.manager.AccountState.Unknown
@@ -49,8 +50,6 @@ import mozilla.components.ui.icons.R as iconsR
 import org.mozilla.fenix.R
 import org.mozilla.fenix.compose.Image
 import org.mozilla.fenix.theme.FirefoxTheme
-import org.mozilla.fenix.theme.ThemedValue
-import org.mozilla.fenix.theme.ThemedValueProvider
 
 private val BUTTON_HEIGHT = 56.dp
 private val AVATAR_SIZE = 24.dp
@@ -64,7 +63,7 @@ internal fun MozillaAccountMenuItem(
     modifier: Modifier = Modifier,
 ) {
     val label: String
-    val description: String?
+    val description: String
     val contentDescription: String
 
     when (accountState) {
@@ -87,14 +86,9 @@ internal fun MozillaAccountMenuItem(
                 account?.displayName ?: account?.email ?: stringResource(id = R.string.browser_menu_account_settings)
             description = stringResource(id = R.string.browser_menu_signed_in_caption)
         }
-
-        is Authenticating -> {
-            label = ""
-            description = null
-        }
     }
 
-    contentDescription = if (description != null) "$label $description" else label
+    contentDescription = "$label $description"
 
     Row(
         modifier =
@@ -131,20 +125,18 @@ internal fun MozillaAccountMenuItem(
                     maxLines = 2,
                 )
 
-                description?.let {
-                    Text(
-                        text = description,
-                        color =
-                            if (accountState is AuthenticationProblem) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        overflow = TextOverflow.Ellipsis,
-                        maxLines = 2,
-                        style = FirefoxTheme.typography.caption,
-                    )
-                }
+                Text(
+                    text = description,
+                    color =
+                        if (accountState is AuthenticationProblem) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    overflow = TextOverflow.Ellipsis,
+                    maxLines = 2,
+                    style = FirefoxTheme.typography.caption,
+                )
             }
         }
     }

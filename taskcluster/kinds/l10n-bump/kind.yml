@@ -9,7 +9,6 @@ transforms:
     - gecko_taskgraph.transforms.task:transforms
 
 task-defaults:
-    run-on-repo-type: [hg]
     worker-type: lando
     worker:
         implementation: scriptworker-lando
@@ -97,7 +96,7 @@ task-defaults:
                                         "path": "mobile/android/locales/all-locales",
                                     },
                                 ]
-                release:
+                (release|esr153):
                     - l10n-bump:
                           - name: Firefox l10n changesets
                             path: browser/locales/l10n-changesets.json

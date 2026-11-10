@@ -22,27 +22,10 @@ nsinstall$(HOST_BIN_SUFFIX): $(HOST_PROGRAM)
 	cp $^ $@.tmp
 	mv $@.tmp $@
 
-NSINSTALL_EXECUTABLES := nsinstall$(HOST_BIN_SUFFIX)
-NSINSTALL_DEST := $(DIST)/bin
-NSINSTALL_TARGET := host
-INSTALL_TARGETS += NSINSTALL
+host:: nsinstall$(HOST_BIN_SUFFIX)
 endif
 endif
 
 include $(topsrcdir)/config/rules.mk
 
 FORCE:
-
-ifndef JS_STANDALONE
-check-preqs += check-jar-mn
-endif
-
-check:: $(check-preqs)
-
-check-jar-mn::
-	$(MAKE) -C tests/src-simple check-jar
-	$(MAKE) -C tests/src-simple check-flat
-	$(MAKE) -C tests/src-simple check-flat USE_EXTENSION_MANIFEST=1
-ifneq (,$(filter-out WINNT,$(OS_ARCH)))
-	$(MAKE) -C tests/src-simple check-symlink
-endif

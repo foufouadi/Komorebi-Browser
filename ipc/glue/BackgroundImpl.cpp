@@ -421,7 +421,7 @@ class ChildImpl final : public BackgroundChildImpl {
                                         PR_GetThreadPrivate(mThreadLocalIndex));
 
       if (!threadLocalInfo) {
-        auto newInfo = MakeUnique<ThreadLocalInfo>();
+        auto newInfo = std::make_unique<ThreadLocalInfo>();
 
         if (NS_IsMainThread()) {
           mMainThreadInfo = newInfo.get();
@@ -677,10 +677,12 @@ uint64_t BackgroundParent::GetChildID(PBackgroundParent* aBackgroundActor) {
 }
 
 // static
-nsCString BackgroundParent::GetRemoteType(PBackgroundParent* aBackgroundActor) {
+mozilla::dom::RemoteType BackgroundParent::GetRemoteType(
+    PBackgroundParent* aBackgroundActor) {
   ThreadsafeContentParentHandle* handle =
       GetContentParentHandle(aBackgroundActor);
-  return handle ? handle->GetRemoteType() : NOT_REMOTE_TYPE;
+  return handle ? handle->GetRemoteType()
+                : mozilla::dom::RemoteType::NotRemote();
 }
 
 // static
@@ -1010,7 +1012,7 @@ void ParentImpl::ShutdownBackgroundThread() {
 }
 
 // static
-void ParentImpl::ShutdownTimerCallback(nsITimer* aTimer, void* aClosure) {
+void ParentImpl::ShutdownTimerCallback(nsITimer* /*aTimer*/, void* aClosure) {
   AssertIsInMainProcess();
   AssertIsOnMainThread();
   MOZ_ASSERT(sShutdownHasStarted);
@@ -1096,8 +1098,9 @@ void ParentImpl::ActorDestroy(ActorDestroyReason aWhy) {
 NS_IMPL_ISUPPORTS(ParentImpl::ShutdownObserver, nsIObserver)
 
 NS_IMETHODIMP
-ParentImpl::ShutdownObserver::Observe(nsISupports* aSubject, const char* aTopic,
-                                      const char16_t* aData) {
+ParentImpl::ShutdownObserver::Observe(nsISupports* /*aSubject*/,
+                                      const char* aTopic,
+                                      const char16_t* /*aData*/) {
   AssertIsInMainProcess();
   AssertIsOnMainThread();
   MOZ_ASSERT(!sShutdownHasStarted);
@@ -1164,7 +1167,7 @@ IPCResult BackgroundStarterParent::RecvInitBackground(
   return IPC_OK();
 }
 
-void BackgroundStarterParent::ActorDestroy(ActorDestroyReason aReason) {
+void BackgroundStarterParent::ActorDestroy(ActorDestroyReason /*aReason*/) {
   AssertIsOnBackgroundThread();
 
   if (mLiveActorArray) {
@@ -1244,6 +1247,10 @@ PBackgroundChild* ChildImpl::GetForCurrentThread() {
 
 /* static */
 PBackgroundChild* ChildImpl::GetOrCreateForCurrentThread() {
+  MOZ_ASSERT(!ParentImpl::IsOnBackgroundThread(),
+             "Creating a PBackgroundChild on the PBackground thread makes a "
+             "same-thread connection that "
+             "ParentImpl::ShutdownBackgroundThread waits on forever");
   return sParentAndContentProcessThreadInfo.GetOrCreateForCurrentThread();
 }
 
@@ -1274,7 +1281,7 @@ BackgroundChildImpl::ThreadLocal* ChildImpl::GetThreadLocalForCurrentThread() {
 
   if (!threadLocalInfo->mConsumerThreadLocal) {
     threadLocalInfo->mConsumerThreadLocal =
-        MakeUnique<BackgroundChildImpl::ThreadLocal>();
+        std::make_unique<BackgroundChildImpl::ThreadLocal>();
   }
 
   return threadLocalInfo->mConsumerThreadLocal.get();
@@ -1315,8 +1322,9 @@ void ChildImpl::ActorDestroy(ActorDestroyReason aWhy) {
 NS_IMPL_ISUPPORTS(ChildImpl::ShutdownObserver, nsIObserver)
 
 NS_IMETHODIMP
-ChildImpl::ShutdownObserver::Observe(nsISupports* aSubject, const char* aTopic,
-                                     const char16_t* aData) {
+ChildImpl::ShutdownObserver::Observe(nsISupports* /*aSubject*/,
+                                     const char* aTopic,
+                                     const char16_t* /*aData*/) {
   AssertIsOnMainThread();
   MOZ_ASSERT(!strcmp(aTopic, NS_XPCOM_SHUTDOWN_THREADS_OBSERVER_ID));
 

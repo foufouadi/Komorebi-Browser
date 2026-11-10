@@ -15,7 +15,7 @@ Talos tests are run in a similar manner to xpcshell and mochitests. They are sta
 the command {code}`mach talos-test`. A {searchfox}`python script <testing/talos>`
 then launches Firefox, which runs the tests via JavaScript special powers. The test timing
 information is recorded in a text log file, e.g. {code}`browser_output.txt`, and then processed
-into the {searchfox}`JSON format supported by Perfherder <testing/mozharness/external_tools/performance-artifact-schema.json>`.
+into the {searchfox}`JSON format supported by Perfherder <testing/performance/common/performance-artifact-schema.json>`.
 
 Talos bugs can be filed in [Testing::Talos](https://bugzilla.mozilla.org/enter_bug.cgi?product=Testing&component=Talos).
 
@@ -173,8 +173,7 @@ Different tests measure different things:
 
 ### Startup
 
-[Startup
-tests](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/startup_test)
+{searchfox}`Startup tests <testing/talos/talos/startup_test>`
 launch Firefox and measure the time to the onload or paint events. We
 run this in a series of cycles (default is 20) to generate a full set of
 data. Tests that currently are startup tests are:
@@ -201,7 +200,7 @@ https://www.mozilla.com
 ```
 
 Example:
-[svgx.manifest](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/svgx/svgx.manifest)
+{searchfox}`svgx.manifest <testing/talos/talos/tests/svgx/svgx.manifest>`
 
 Manifests may also specify that a test computes its own data by
 prepending a `%` in front of the line:
@@ -212,10 +211,10 @@ prepending a `%` in front of the line:
 ```
 
 Example:
-[v8.manifest](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/v8_7/v8.manifest)
+{searchfox}`v8.manifest <testing/talos/talos/tests/v8_7/v8.manifest>`
 
 The file you created should be referenced in your test config inside of
-[test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l607).
+{searchfox}`test.py <testing/talos/talos/test.py>`.
 For example, open test.py, and look for the line referring to the test
 you want to run:
 
@@ -315,7 +314,8 @@ Tests which are imported benchmarks are:
 - [dromaeo](#dromaeo)
 - [JetStream](#jetstream)
 - [kraken](#kraken)
-- [motionmark](#motionmark)
+- motionmark ([animometer](#motionmark_animometer),
+  [htmlsuite](#motionmark_htmlsuite), [webgl](#motionmark_webgl))
 - [stylebench](#stylebench)
 
 ### Row major vs. column major
@@ -366,10 +366,10 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :jandem and SpiderMonkey Team
-* source: [ARES-6](https://searchfox.org/firefox-main/source/third_party/webkit/PerformanceTests/ARES-6)
+* source: {searchfox}`ARES-6 <third_party/webkit/PerformanceTests/ARES-6>`
 * type: [Page load]
 * data: 6 cycles of the entire benchmark
-  * [geometric mean](https://searchfox.org/firefox-main/source/testing/talos/talos/output.py#259) self reported from the benchmark
+  * {searchfox}`geometric mean <testing/talos/talos/output.py>` self reported from the benchmark
 * **Lower is better**
 * unit: geometric mean / benchmark score
 * lower_is_better: True
@@ -377,7 +377,7 @@ For the sample commands found below, note that the capitalization used is import
 * tppagecycles: 1
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -394,7 +394,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -411,7 +411,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -442,13 +442,12 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :jandem and SpiderMonkey Team
-* source: [jetstream.manifest](https://searchfox.org/firefox-main/source/testing/talos/talos/tests/jetstream/jetstream.manifest) and jetstream.zip from tooltool
+* source: {searchfox}`jetstream.manifest <testing/talos/talos/tests/jetstream/jetstream.manifest>` and jetstream.zip from tooltool
 * type: [Page load]
 * measuring: JavaScript performance
 * reporting: geometric mean from the benchmark
 * data: internal benchmark
-  * suite: [geometric
-        mean](https://searchfox.org/firefox-main/source/testing/talos/talos/output.py#259)
+  * suite: {searchfox}`geometric mean <testing/talos/talos/output.py>`
         provided by the benchmark
 * description:
       | This is the [JetStream](http://browserbench.org/JetStream/in-depth.html)
@@ -458,7 +457,7 @@ For the sample commands found below, note that the capitalization used is import
 * tppagecycles: 1
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -475,7 +474,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -492,7 +491,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -523,13 +522,12 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :jamie and accessibility team
-* source: [a11y.manifest](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/a11y)
+* source: {searchfox}`a11y.manifest <testing/talos/talos/tests/a11y>`
 * type: [Page load]
 * measuring: ???
 * data: we load 2 pages 25 times each, collect 2 sets of 25 data points
 * summarization:
-  * subtest: [ignore first] data point, then take the [median] of the remaining 24; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l627)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 24; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 2 subtest results.
 * reporting: test time in ms (lower is better)
 * description:
@@ -553,7 +551,7 @@ For the sample commands found below, note that the capitalization used is import
 * unit: ms
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -563,11 +561,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ✅
   - ✅
   - ❌
@@ -585,7 +578,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -595,11 +588,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ❌
   - ❌
   - ❌
@@ -612,7 +600,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -626,7 +614,29 @@ For the sample commands found below, note that the capitalization used is import
   - ✅
   - ❌
   - ❌
-* - **talos-other-no-nv**
+* - **talos-other-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-other-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-other**
   - ✅
   - ✅
   - ❌
@@ -644,7 +654,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -654,43 +664,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ❌
   - ❌
   - ❌
@@ -717,12 +690,12 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :jaws and :gijs
-* source: [about_preferences_basic.manifest](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/about-preferences/about_preferences_basic.manifest)
+* source: {searchfox}`about_preferences_basic.manifest <testing/talos/talos/tests/about-preferences/about_preferences_basic.manifest>`
 * type: [Page load]
 * measuring: first-non-blank-paint
 * data: We load 5 urls 1 time each, and repeat for 25 cycles; collecting 25 sets of 5 data points
 * summarization:
-  * subtest: [ignore first] five data points, then take the [median] of the rest; [source: test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l627)
+  * subtest: [ignore first] five data points, then take the [median] of the rest; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the the subtest results.
 * reporting: test time in ms (lower is better)
 * description:
@@ -765,7 +738,7 @@ For the sample commands found below, note that the capitalization used is import
 * unit: ms
 * **Test Task**:
 
-:::{list-table} **test-linux1804-64-qr/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -775,82 +748,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-chrome**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-chrome-no-nv**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-chrome-swr**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-linux1804-64-shippable-qr/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-chrome**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-chrome-no-nv**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-chrome-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-linux2404-64-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-chrome-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-macosx1470-64-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-chrome**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-chrome-no-nv**
   - ✅
   - ✅
   - ❌
@@ -868,7 +765,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -878,11 +775,28 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-chrome**
-  - ✅
-  - ✅
   - ❌
   - ❌
-* - **talos-chrome-no-nv**
+  - ❌
+  - ❌
+* - **talos-chrome-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-chrome**
   - ✅
   - ✅
   - ❌
@@ -900,7 +814,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -910,11 +824,33 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-chrome**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-chrome-profiling**
   - ❌
   - ❌
   - ❌
   - ❌
-* - **talos-chrome-no-nv**
+* - **talos-chrome-swr**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-chrome**
   - ❌
   - ❌
   - ❌
@@ -941,11 +877,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :b0bh00d, :jeffm, and gfx
-* source: [video](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/video)
+* source: {searchfox}`video <testing/talos/talos/tests/video>`
 * type: [Page load]
 * data: 12 cycles of the entire benchmark, each subtest will have 12 data points (see below)
 * summarization:
-  * subtest: [ignore first] data point, then take the [median] of the remaining 11; [source: test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l522)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 11; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 24 subtest results.
 * **Lower is better**
 * **Example Data**
@@ -988,7 +924,7 @@ For the sample commands found below, note that the capitalization used is import
 * unit: ms/frame
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1015,7 +951,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1037,34 +973,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-bcv**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-bcv-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-bcv-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1091,7 +1000,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-bcv**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-bcv-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-bcv-swr**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1127,12 +1063,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :aosmond and gfx
-* source: [canvas2dvideo](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/canvas2d/benchmarks/video)
+* source: {searchfox}`canvas2dvideo <testing/talos/talos/tests/canvas2d/benchmarks/video>`
 * type: [Page load]
 * data: 5 cycles of the entire benchmark, each subtest will have 5 data points (see below)
 * summarization: Canvas2D video texture update with 1080p video. Measures mean tick time across 100 ticks.
-  * subtest: [ignore first] data point, then take the [median] of the remaining 4; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l522)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 4; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 4 subtest results.
 * **Lower is better**
 * **Example Data**
@@ -1147,7 +1082,7 @@ For the sample commands found below, note that the capitalization used is import
         ticks to measure how much time it will spend for a video texture upload
         to be a Canvas2D texture (ctx.drawImage). We run it for 5 times and ignore
         the first found. Lower results are better.
-* gecko_profile_extra_threads: CanvasRenderer,CanvasWorker,MediaSupervisor
+* gecko_profile_extra_threads: CanvasRenderer,MediaSupervisor
 * gecko_profile_interval: 2
 * linux_counters: None
 * mac_counters: None
@@ -1162,7 +1097,7 @@ For the sample commands found below, note that the capitalization used is import
 * win_counters: None
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1189,7 +1124,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1211,7 +1146,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-webgl**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-webgl-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-webgl-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1238,34 +1200,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-webgl**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-webgl-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-webgl-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1302,7 +1237,7 @@ For the sample commands found below, note that the capitalization used is import
 
 * contact: :mconley, Firefox Desktop Front-end team, Gijs, fqueze, and dthayer
 * measuring: Time from opening a new tab (which creates a new content process) to having that new content process be ready to load URLs.
-* source: [cpstartup](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/cpstartup)
+* source: {searchfox}`cpstartup <testing/talos/talos/tests/cpstartup>`
 * type: [Page load]
 * bug: [bug 1336389](https://bugzilla.mozilla.org/show_bug.cgi?id=1336389)
 * data: 20 cycles of the entire benchmark
@@ -1322,7 +1257,7 @@ For the sample commands found below, note that the capitalization used is import
 * unit: ms
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1332,11 +1267,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ✅
   - ✅
   - ❌
@@ -1354,7 +1284,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1364,11 +1294,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ❌
   - ❌
   - ❌
@@ -1381,7 +1306,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1395,7 +1320,29 @@ For the sample commands found below, note that the capitalization used is import
   - ✅
   - ❌
   - ❌
-* - **talos-other-no-nv**
+* - **talos-other-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-other-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-other**
   - ✅
   - ✅
   - ❌
@@ -1413,7 +1360,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1423,43 +1370,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ❌
   - ❌
   - ❌
@@ -1487,7 +1397,7 @@ For the sample commands found below, note that the capitalization used is import
 
 * contact: :sefeng, :jesup, and perf eng team
 * measuring: The time it takes to load a page which has 20 cross origin iframes
-* source: [cross_origin_pageload](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/cross_origin_pageload)
+* source: {searchfox}`cross_origin_pageload <testing/talos/talos/tests/cross_origin_pageload>`
 * type: [Page load]
 * bug: [bug 1701989](https://bugzilla.mozilla.org/show_bug.cgi?id=1701989)
 * data: 10 cycles of the entire benchmark
@@ -1507,7 +1417,7 @@ For the sample commands found below, note that the capitalization used is import
 * unit: ms
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1517,11 +1427,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ✅
   - ✅
   - ❌
@@ -1539,7 +1444,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1549,11 +1454,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ❌
   - ❌
   - ❌
@@ -1566,7 +1466,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1580,7 +1480,29 @@ For the sample commands found below, note that the capitalization used is import
   - ✅
   - ❌
   - ❌
-* - **talos-other-no-nv**
+* - **talos-other-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-other-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-other**
   - ✅
   - ✅
   - ❌
@@ -1598,7 +1520,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1608,43 +1530,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ❌
   - ❌
   - ❌
@@ -1671,14 +1556,14 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :ochameau and devtools team
-* source: [damp](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/devtools)
+* source: {searchfox}`damp <testing/talos/talos/tests/devtools>`
 * type: [Page load]
 * measuring: Developer Tools toolbox performance. Split in test suites covering different DevTools areas (inspector, webconsole, other).
 * reporting: intervals in ms (lower is better)
 * see below for details
 * data: there are 36 reported subtests from DAMP which we load 25 times, resulting in 36 sets of 25 data points.
 * summarization:
-  * subtest: [ignore first] data point, then take the [median] of the remaining 24 data points; [source: test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l356)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 24 data points; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: No value for the suite, only individual subtests are relevant.
 * description:
       | To run this locally, you'll need to pull down the [tp5 page
@@ -1743,85 +1628,7 @@ For the sample commands found below, note that the capitalization used is import
 * win_counters: None
 * **Test Task**:
 
-:::{list-table} **test-linux1804-64-qr/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-damp-inspector**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-damp-webconsole**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-linux1804-64-shippable-qr/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-damp-inspector**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-damp-webconsole**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-linux2404-64-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-damp-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-linux2404-64/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-damp-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1848,7 +1655,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-damp-inspector**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-damp-other**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-damp-webconsole**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1875,7 +1709,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-damp-inspector**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-damp-other**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-damp-webconsole**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1916,11 +1777,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :miko and gfx
-* source: [displaylist_mutate.html](https://searchfox.org/firefox-main/source/testing/talos/talos/tests/layout/benchmarks/displaylist_mutate.html)
+* source: {searchfox}`displaylist_mutate.html <testing/talos/talos/tests/layout/benchmarks/displaylist_mutate.html>`
 * type: [Page load]
 * data: we load the displaylist_mutate.html page five times, measuring pageload each time, generating 5 data points.
 * summarization:
-  * subtest: [ignore first] data point, then take the [median] of the remaining 4; [source: test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l986)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 4; {searchfox}`source: test.py <testing/talos/talos/test.py>`
 * description:
       | This measures the amount of time it takes to render a page after
         changing its display list. The page has a large number of display list
@@ -1945,7 +1806,7 @@ For the sample commands found below, note that the capitalization used is import
 * win_counters: None
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1972,7 +1833,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -1994,7 +1855,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-g4**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-g4-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-g4-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2021,34 +1909,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-g4**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-g4-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-g4-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2110,7 +1971,7 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :emilio, and css/layout team
-* source: [css.manifest](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/dromaeo)
+* source: {searchfox}`css.manifest <testing/talos/talos/tests/dromaeo>`
 * type: [Page load]
 * reporting: speed in test runs per second (higher is better)
 * data: Dromaeo has 6 subtests which run internal benchmarks, each benchmark reports about 180 raw data points each
@@ -2123,8 +1984,7 @@ For the sample commands found below, note that the capitalization used is import
         for each 5 data points we take the mean, leaving 36 data points to
         represent the subtest (assuming 180 points). These 36 micro test
         means, are then run through a geometric_mean to produce a single
-        number for the dromaeo subtest. [source:
-        filter.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l527)
+        number for the dromaeo subtest. {searchfox}`source: filter.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 6 subtest results.
 * description:
       | Each page in the manifest is part of the dromaeo css benchmark. Each
@@ -2147,7 +2007,7 @@ For the sample commands found below, note that the capitalization used is import
 * unit: score
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2169,7 +2029,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2186,29 +2046,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-dromaeojs**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-dromaeojs-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2230,7 +2068,29 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-dromaeojs**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-dromaeojs-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2261,7 +2121,7 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :peterv and dom team
-* source: [dom.manifest](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/dromaeo)
+* source: {searchfox}`dom.manifest <testing/talos/talos/tests/dromaeo>`
 * type: [Page load]
 * data: see Dromaeo DOM
 * reporting: speed in test runs per second (higher is better)
@@ -2293,7 +2153,7 @@ For the sample commands found below, note that the capitalization used is import
 * unit: score
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2320,7 +2180,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2342,7 +2202,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2359,7 +2219,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2390,12 +2250,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :jgilbert and gfx
-* source: [glterrain](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/webgl/benchmarks/terrain)
+* source: {searchfox}`glterrain <testing/talos/talos/tests/webgl/benchmarks/terrain>`
 * type: [Page load]
 * data: we load the perftest.html page (which generates 4 metrics to track) 25 times, resulting in 4 sets of 25 data points
 * summarization: Measures average frames interval while animating a simple WebGL scene
-  * subtest: [ignore first] data point, then take the [median] of the remaining 24; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l381)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 24; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 4 subtest results.
 * description:
       | This tests animates a simple WebGL scene (static textured landscape, one
@@ -2428,7 +2287,7 @@ For the sample commands found below, note that the capitalization used is import
 * win_counters: None
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2455,7 +2314,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2477,7 +2336,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-webgl**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-webgl-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-webgl-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2504,34 +2390,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-webgl**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-webgl-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-webgl-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2567,12 +2426,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :jgilbert and gfx
-* source: [glvideo](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/webgl/benchmarks/video)
+* source: {searchfox}`glvideo <testing/talos/talos/tests/webgl/benchmarks/video>`
 * type: [Page load]
 * data: 5 cycles of the entire benchmark, each subtest will have 5 data points (see below)
 * summarization: WebGL video texture update with 1080p video. Measures mean tick time across 100 ticks.
-  * subtest: [ignore first] data point, then take the [median] of the remaining 4; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l522)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 4; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 4 subtest results.
 * **Lower is better**
 * **Example Data**
@@ -2587,7 +2445,7 @@ For the sample commands found below, note that the capitalization used is import
         ticks to measure how much time it will spend for a video texture upload
         to be a WebGL texture (gl.texImage2D). We run it for 5 times and ignore
         the first found. Lower results are better.
-* gecko_profile_extra_threads: CanvasRenderer,CanvasWorker,MediaSupervisor
+* gecko_profile_extra_threads: CanvasRenderer,MediaSupervisor
 * gecko_profile_interval: 2
 * linux_counters: None
 * mac_counters: None
@@ -2602,7 +2460,7 @@ For the sample commands found below, note that the capitalization used is import
 * win_counters: None
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2629,7 +2487,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2651,7 +2509,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-webgl**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-webgl-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-webgl-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2678,34 +2563,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-webgl**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-webgl-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-webgl-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2741,7 +2599,7 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :sdetar, jandem, and SpiderMonkey Team
-* source: [kraken.manifest](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/kraken)
+* source: {searchfox}`kraken.manifest <testing/talos/talos/tests/kraken>`
 * type: [Page load]
 * measuring: JavaScript performance
 * reporting: Total time for all tests, in ms (lower is better)
@@ -2784,7 +2642,7 @@ For the sample commands found below, note that the capitalization used is import
 * unit: score
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2806,7 +2664,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2823,29 +2681,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-dromaeojs**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-dromaeojs-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2867,7 +2703,29 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-dromaeojs**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-dromaeojs-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2898,7 +2756,7 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :b0bh00d, :jeffm, and gfx
-* source: [source](https://searchfox.org/firefox-main/source/third_party/webkit/PerformanceTests/MotionMark) [manifests](https://searchfox.org/firefox-main/source/testing/talos/talos/tests/motionmark)
+* source: {searchfox}`source <third_party/webkit/PerformanceTests/MotionMark>` {searchfox}`manifests <testing/talos/talos/tests/motionmark>`
 * type: [Page load]
 * measuring: benchmark measuring the time to animate complex scenes
 * summarization:
@@ -2909,7 +2767,7 @@ For the sample commands found below, note that the capitalization used is import
 * tpmanifest: ${talos}/tests/motionmark/animometer.manifest
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2926,7 +2784,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2943,7 +2801,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2977,7 +2835,7 @@ For the sample commands found below, note that the capitalization used is import
 * tpmanifest: ${talos}/tests/motionmark/htmlsuite.manifest
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -2994,7 +2852,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3011,7 +2869,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3042,7 +2900,7 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :jgilbert and gfx
-* source: [source](https://searchfox.org/firefox-main/source/third_party/webkit/PerformanceTests/MotionMark) [manifest](https://searchfox.org/firefox-main/source/testing/talos/talos/tests/motionmark/webgl.manifest)
+* source: {searchfox}`source <third_party/webkit/PerformanceTests/MotionMark>` {searchfox}`manifest <testing/talos/talos/tests/motionmark/webgl.manifest>`
 * type: [Page load]
 * measuring: Draw call performance in WebGL
 * summarization:
@@ -3054,7 +2912,7 @@ For the sample commands found below, note that the capitalization used is import
 * unit: fps
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3081,7 +2939,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3103,7 +2961,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-webgl**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-webgl-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-webgl-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3130,34 +3015,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-webgl**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-webgl-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-webgl-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3193,12 +3051,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :aosmond and gfx
-* source: [offscreencanvas_webcodecs_main_2d_av1](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/offscreencanvas/benchmarks/video)
+* source: {searchfox}`offscreencanvas_webcodecs_main_2d_av1 <testing/talos/talos/tests/offscreencanvas/benchmarks/video>`
 * type: [Page load]
 * data: 5 cycles of the entire benchmark, each subtest will have 5 data points (see below)
 * summarization: OffscreenCanvas 2D video texture update with WebCodecs and 1080p AV1 video on the main thread. Measures mean frame time across 100 frames.
-  * subtest: [ignore first] data point, then take the [median] of the remaining 4; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l843)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 4; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 4 subtest results.
 * **Lower is better**
 * **Example Data**
@@ -3213,7 +3070,7 @@ For the sample commands found below, note that the capitalization used is import
         across 100 frames to measure how much time it will spend for a video texture upload to be a
         Canvas2D texture (ctx.drawImage). We run it for 5 times and ignore the first found. Lower
         results are better.
-* gecko_profile_extra_threads: CanvasRenderer,CanvasWorker,MediaSupervisor
+* gecko_profile_extra_threads: CanvasRenderer,MediaSupervisor
 * gecko_profile_interval: 2
 * linux_counters: None
 * mac_counters: None
@@ -3228,7 +3085,7 @@ For the sample commands found below, note that the capitalization used is import
 * win_counters: None
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3255,7 +3112,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3277,7 +3134,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-webgl**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-webgl-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-webgl-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3304,34 +3188,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-webgl**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-webgl-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-webgl-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3367,12 +3224,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :aosmond and gfx
-* source: [offscreencanvas_webcodecs_main_2d_h264](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/offscreencanvas/benchmarks/video)
+* source: {searchfox}`offscreencanvas_webcodecs_main_2d_h264 <testing/talos/talos/tests/offscreencanvas/benchmarks/video>`
 * type: [Page load]
 * data: 5 cycles of the entire benchmark, each subtest will have 5 data points (see below)
 * summarization: OffscreenCanvas 2D video texture update with WebCodecs and 1080p H264 video on the main thread. Measures mean frame time across 100 frames.
-  * subtest: [ignore first] data point, then take the [median] of the remaining 4; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l795)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 4; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 4 subtest results.
 * **Lower is better**
 * **Example Data**
@@ -3387,7 +3243,7 @@ For the sample commands found below, note that the capitalization used is import
         across 100 frames to measure how much time it will spend for a video texture upload to be a
         Canvas2D texture (ctx.drawImage). We run it for 5 times and ignore the first found. Lower
         results are better.
-* gecko_profile_extra_threads: CanvasRenderer,CanvasWorker,MediaSupervisor
+* gecko_profile_extra_threads: CanvasRenderer,MediaSupervisor
 * gecko_profile_interval: 2
 * linux_counters: None
 * mac_counters: None
@@ -3414,12 +3270,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :aosmond and gfx
-* source: [offscreencanvas_webcodecs_main_2d_vp9](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/offscreencanvas/benchmarks/video)
+* source: {searchfox}`offscreencanvas_webcodecs_main_2d_vp9 <testing/talos/talos/tests/offscreencanvas/benchmarks/video>`
 * type: [Page load]
 * data: 5 cycles of the entire benchmark, each subtest will have 5 data points (see below)
 * summarization: OffscreenCanvas 2D video texture update with WebCodecs and 1080p VP9 video on the main thread. Measures mean frame time across 100 frames.
-  * subtest: [ignore first] data point, then take the [median] of the remaining 4; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l819)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 4; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 4 subtest results.
 * **Lower is better**
 * **Example Data**
@@ -3434,7 +3289,7 @@ For the sample commands found below, note that the capitalization used is import
         across 100 frames to measure how much time it will spend for a video texture upload to be a
         Canvas2D texture (ctx.drawImage). We run it for 5 times and ignore the first found. Lower
         results are better.
-* gecko_profile_extra_threads: CanvasRenderer,CanvasWorker,MediaSupervisor
+* gecko_profile_extra_threads: CanvasRenderer,MediaSupervisor
 * gecko_profile_interval: 2
 * linux_counters: None
 * mac_counters: None
@@ -3449,7 +3304,7 @@ For the sample commands found below, note that the capitalization used is import
 * win_counters: None
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3476,7 +3331,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3498,7 +3353,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-webgl**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-webgl-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-webgl-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3525,34 +3407,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-webgl**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-webgl-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-webgl-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3588,12 +3443,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :aosmond and gfx
-* source: [offscreencanvas_webcodecs_main_webgl_av1](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/offscreencanvas/benchmarks/video)
+* source: {searchfox}`offscreencanvas_webcodecs_main_webgl_av1 <testing/talos/talos/tests/offscreencanvas/benchmarks/video>`
 * type: [Page load]
 * data: 5 cycles of the entire benchmark, each subtest will have 5 data points (see below)
 * summarization: OffscreenCanvas WebGL video texture update with WebCodecs and 1080p AV1 video on the main thread. Measures mean frame time across 100 frames.
-  * subtest: [ignore first] data point, then take the [median] of the remaining 4; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l795)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 4; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 4 subtest results.
 * **Lower is better**
 * **Example Data**
@@ -3623,7 +3477,7 @@ For the sample commands found below, note that the capitalization used is import
 * win_counters: None
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3650,7 +3504,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3672,7 +3526,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-webgl**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-webgl-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-webgl-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3699,34 +3580,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-webgl**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-webgl-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-webgl-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3762,12 +3616,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :aosmond and gfx
-* source: [offscreencanvas_webcodecs_main_webgl_h264](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/offscreencanvas/benchmarks/video)
+* source: {searchfox}`offscreencanvas_webcodecs_main_webgl_h264 <testing/talos/talos/tests/offscreencanvas/benchmarks/video>`
 * type: [Page load]
 * data: 5 cycles of the entire benchmark, each subtest will have 5 data points (see below)
 * summarization: OffscreenCanvas WebGL video texture update with WebCodecs and 1080p H264 video on the main thread. Measures mean frame time across 100 frames.
-  * subtest: [ignore first] data point, then take the [median] of the remaining 4; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l795)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 4; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 4 subtest results.
 * **Lower is better**
 * **Example Data**
@@ -3797,7 +3650,7 @@ For the sample commands found below, note that the capitalization used is import
 * win_counters: None
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3824,7 +3677,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3846,7 +3699,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-webgl**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-webgl-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-webgl-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3873,34 +3753,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-webgl**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-webgl-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-webgl-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3936,12 +3789,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :aosmond and gfx
-* source: [offscreencanvas_webcodecs_main_webgl_vp9](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/offscreencanvas/benchmarks/video)
+* source: {searchfox}`offscreencanvas_webcodecs_main_webgl_vp9 <testing/talos/talos/tests/offscreencanvas/benchmarks/video>`
 * type: [Page load]
 * data: 5 cycles of the entire benchmark, each subtest will have 5 data points (see below)
 * summarization: OffscreenCanvas WebGL video texture update with WebCodecs and 1080p VP9 video on the main thread. Measures mean frame time across 100 frames.
-  * subtest: [ignore first] data point, then take the [median] of the remaining 4; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l795)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 4; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 4 subtest results.
 * **Lower is better**
 * **Example Data**
@@ -3971,7 +3823,7 @@ For the sample commands found below, note that the capitalization used is import
 * win_counters: None
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -3998,7 +3850,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4020,7 +3872,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-webgl**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-webgl-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-webgl-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4047,34 +3926,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-webgl**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-webgl-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-webgl-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4110,12 +3962,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :aosmond and gfx
-* source: [offscreencanvas_webcodecs_worker_2d_av1](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/offscreencanvas/benchmarks/video)
+* source: {searchfox}`offscreencanvas_webcodecs_worker_2d_av1 <testing/talos/talos/tests/offscreencanvas/benchmarks/video>`
 * type: [Page load]
 * data: 5 cycles of the entire benchmark, each subtest will have 5 data points (see below)
 * summarization: OffscreenCanvas 2D video texture update with WebCodecs and 1080p AV1 video on a DOM worker thread. Measures mean frame time across 100 frames.
-  * subtest: [ignore first] data point, then take the [median] of the remaining 4; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l795)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 4; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 4 subtest results.
 * **Lower is better**
 * **Example Data**
@@ -4130,7 +3981,7 @@ For the sample commands found below, note that the capitalization used is import
         across 100 frames to measure how much time it will spend for a video texture upload to be a
         Canvas2D texture (ctx.drawImage). We run it for 5 times and ignore the first found. Lower
         results are better.
-* gecko_profile_extra_threads: DOM Worker,CanvasRenderer,CanvasWorker,MediaSupervisor
+* gecko_profile_extra_threads: DOM Worker,CanvasRenderer,MediaSupervisor
 * gecko_profile_interval: 2
 * linux_counters: None
 * mac_counters: None
@@ -4145,7 +3996,7 @@ For the sample commands found below, note that the capitalization used is import
 * win_counters: None
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4172,7 +4023,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4194,7 +4045,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-webgl**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-webgl-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-webgl-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4221,34 +4099,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-webgl**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-webgl-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-webgl-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4284,12 +4135,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :aosmond and gfx
-* source: [offscreencanvas_webcodecs_worker_2d_h264](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/offscreencanvas/benchmarks/video)
+* source: {searchfox}`offscreencanvas_webcodecs_worker_2d_h264 <testing/talos/talos/tests/offscreencanvas/benchmarks/video>`
 * type: [Page load]
 * data: 5 cycles of the entire benchmark, each subtest will have 5 data points (see below)
 * summarization: OffscreenCanvas 2D video texture update with WebCodecs and 1080p H264 video on a DOM worker thread. Measures mean frame time across 100 frames.
-  * subtest: [ignore first] data point, then take the [median] of the remaining 4; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l795)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 4; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 4 subtest results.
 * **Lower is better**
 * **Example Data**
@@ -4304,7 +4154,7 @@ For the sample commands found below, note that the capitalization used is import
         across 100 frames to measure how much time it will spend for a video texture upload to be a
         Canvas2D texture (ctx.drawImage). We run it for 5 times and ignore the first found. Lower
         results are better.
-* gecko_profile_extra_threads: DOM Worker,CanvasRenderer,CanvasWorker,MediaSupervisor
+* gecko_profile_extra_threads: DOM Worker,CanvasRenderer,MediaSupervisor
 * gecko_profile_interval: 2
 * linux_counters: None
 * mac_counters: None
@@ -4331,12 +4181,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :aosmond and gfx
-* source: [offscreencanvas_webcodecs_worker_2d_vp9](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/offscreencanvas/benchmarks/video)
+* source: {searchfox}`offscreencanvas_webcodecs_worker_2d_vp9 <testing/talos/talos/tests/offscreencanvas/benchmarks/video>`
 * type: [Page load]
 * data: 5 cycles of the entire benchmark, each subtest will have 5 data points (see below)
 * summarization: OffscreenCanvas 2D video texture update with WebCodecs and 1080p VP9 video on a DOM worker thread. Measures mean frame time across 100 frames.
-  * subtest: [ignore first] data point, then take the [median] of the remaining 4; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l795)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 4; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 4 subtest results.
 * **Lower is better**
 * **Example Data**
@@ -4351,7 +4200,7 @@ For the sample commands found below, note that the capitalization used is import
         across 100 frames to measure how much time it will spend for a video texture upload to be a
         Canvas2D texture (ctx.drawImage). We run it for 5 times and ignore the first found. Lower
         results are better.
-* gecko_profile_extra_threads: DOM Worker,CanvasRenderer,CanvasWorker,MediaSupervisor
+* gecko_profile_extra_threads: DOM Worker,CanvasRenderer,MediaSupervisor
 * gecko_profile_interval: 2
 * linux_counters: None
 * mac_counters: None
@@ -4366,7 +4215,7 @@ For the sample commands found below, note that the capitalization used is import
 * win_counters: None
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4393,7 +4242,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4415,7 +4264,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-webgl**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-webgl-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-webgl-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4442,34 +4318,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-webgl**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-webgl-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-webgl-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4505,12 +4354,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :aosmond and gfx
-* source: [offscreencanvas_webcodecs_worker_webgl_av1](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/offscreencanvas/benchmarks/video)
+* source: {searchfox}`offscreencanvas_webcodecs_worker_webgl_av1 <testing/talos/talos/tests/offscreencanvas/benchmarks/video>`
 * type: [Page load]
 * data: 5 cycles of the entire benchmark, each subtest will have 5 data points (see below)
 * summarization: OffscreenCanvas WebGL video texture update with WebCodecs and 1080p AV1 video on a DOM worker thread. Measures mean frame time across 100 frames.
-  * subtest: [ignore first] data point, then take the [median] of the remaining 4; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l795)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 4; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 4 subtest results.
 * **Lower is better**
 * **Example Data**
@@ -4540,7 +4388,7 @@ For the sample commands found below, note that the capitalization used is import
 * win_counters: None
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4567,7 +4415,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4589,7 +4437,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-webgl**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-webgl-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-webgl-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4616,34 +4491,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-webgl**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-webgl-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-webgl-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4679,12 +4527,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :aosmond and gfx
-* source: [offscreencanvas_webcodecs_worker_webgl_h264](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/offscreencanvas/benchmarks/video)
+* source: {searchfox}`offscreencanvas_webcodecs_worker_webgl_h264 <testing/talos/talos/tests/offscreencanvas/benchmarks/video>`
 * type: [Page load]
 * data: 5 cycles of the entire benchmark, each subtest will have 5 data points (see below)
 * summarization: OffscreenCanvas WebGL video texture update with WebCodecs and 1080p H264 video on a DOM worker thread. Measures mean frame time across 100 frames.
-  * subtest: [ignore first] data point, then take the [median] of the remaining 4; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l795)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 4; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 4 subtest results.
 * **Lower is better**
 * **Example Data**
@@ -4714,7 +4561,7 @@ For the sample commands found below, note that the capitalization used is import
 * win_counters: None
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4741,7 +4588,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4763,7 +4610,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-webgl**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-webgl-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-webgl-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4790,34 +4664,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-webgl**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-webgl-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-webgl-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4853,12 +4700,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :aosmond and gfx
-* source: [offscreencanvas_webcodecs_worker_webgl_vp9](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/offscreencanvas/benchmarks/video)
+* source: {searchfox}`offscreencanvas_webcodecs_worker_webgl_vp9 <testing/talos/talos/tests/offscreencanvas/benchmarks/video>`
 * type: [Page load]
 * data: 5 cycles of the entire benchmark, each subtest will have 5 data points (see below)
 * summarization: OffscreenCanvas WebGL video texture update with WebCodecs and 1080p VP9 video on a DOM worker thread. Measures mean frame time across 100 frames.
-  * subtest: [ignore first] data point, then take the [median] of the remaining 4; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l795)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 4; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 4 subtest results.
 * **Lower is better**
 * **Example Data**
@@ -4888,7 +4734,7 @@ For the sample commands found below, note that the capitalization used is import
 * win_counters: None
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4915,7 +4761,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4937,7 +4783,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-webgl**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-webgl-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-webgl-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -4964,34 +4837,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-webgl**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-webgl-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-webgl-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -5029,25 +4875,31 @@ For the sample commands found below, note that the capitalization used is import
 * contact: :calixte and CI and Quality Tools team
 * source:
 * type: [Page load]
-* reporting: time from *performance.timing.navigationStart* to *pagerendered* event in ms (lower is better)
-* data: loads a PDF 5 times
+* reporting: time taken by *PDFPageProxy.render* for the first page in ms (lower is better)
+* data: loads each PDF 15 times
 * description:
-      | Runs through a set of chunks. Each chunk runs 100 PDFs with 5 iterations each.
-        If --pdfPaintChunk is not used when running the test locally, all PDFs will be tested
-        by default with only 1 cycle each. The PDFs that are run are found in the Mozilla pdf.js
-        repository, and this test pulls those in for testing locally through a toolchain artifact
-        called talos-pdfs.
+      | Runs PDFs marked with "talos": true in the pdf.js test manifest, fetched through
+        the talos-pdfs toolchain artifact. All of them run in one task, and
+        --pdfPaintName runs a single PDF locally.
+        The PDFs that are run are found in a private Mozilla repository. Locally, the
+        artifact from the toolchain task in CI needs to be downloaded and installed manually
+        to run this test. Running the test locally with outdated/non-existent PDFs will
+        provide a link to the latest artifact that needs to be downloaded and installed.
+        Times PDFPageProxy.render for the first page after loading the document and
+        initializing the renderer worker. Requests worker rendering and canvas
+        acceleration (pdfjs.disableWorkerRendering=false, pdfjs.enableHWA=true).
 * alert_threshold: 6.0
 * pdfpaint: True
+* preferences: {'pdfjs.disableWorkerRendering': False, 'pdfjs.enableHWA': True}
 * subtest_alerts: True
 * timeout: 2000
 * tpmanifest: ${talos}/tests/pdfpaint/pdfpaint.manifest
-* tppagecycles: 1
+* tppagecycles: 15
 * tptimeout: 60000
 * unit: ms
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -5056,102 +4908,7 @@ For the sample commands found below, note that the capitalization used is import
   - autoland
   - mozilla-release
   - mozilla-beta
-* - **talos-pdfpaint-1**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-1-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-10**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-10-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-2**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-2-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-3**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-3-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-4**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-4-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-5**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-5-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-6**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-6-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-7**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-7-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-8**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-8-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-9**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-9-swr**
+* - **talos-pdfpaint**
   - ✅
   - ✅
   - ❌
@@ -5159,7 +4916,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -5168,102 +4925,7 @@ For the sample commands found below, note that the capitalization used is import
   - autoland
   - mozilla-release
   - mozilla-beta
-* - **talos-pdfpaint-1**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-1-swr**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-10**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-10-swr**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-2**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-2-swr**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-3**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-3-swr**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-4**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-4-swr**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-5**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-5-swr**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-6**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-6-swr**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-7**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-7-swr**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-8**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-8-swr**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-9**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-9-swr**
+* - **talos-pdfpaint**
   - ❌
   - ❌
   - ❌
@@ -5271,7 +4933,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -5280,102 +4942,7 @@ For the sample commands found below, note that the capitalization used is import
   - autoland
   - mozilla-release
   - mozilla-beta
-* - **talos-pdfpaint-1**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-1-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-10**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-10-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-2**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-2-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-3**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-3-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-4**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-4-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-5**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-5-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-6**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-6-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-7**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-7-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-8**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-8-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-9**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-9-swr**
+* - **talos-pdfpaint**
   - ✅
   - ✅
   - ❌
@@ -5383,7 +4950,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -5392,102 +4959,7 @@ For the sample commands found below, note that the capitalization used is import
   - autoland
   - mozilla-release
   - mozilla-beta
-* - **talos-pdfpaint-1**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-1-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-10**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-10-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-2**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-2-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-3**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-3-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-4**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-4-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-5**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-5-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-6**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-6-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-7**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-7-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-8**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-8-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-9**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-pdfpaint-9-swr**
+* - **talos-pdfpaint**
   - ✅
   - ✅
   - ❌
@@ -5495,7 +4967,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -5504,102 +4976,226 @@ For the sample commands found below, note that the capitalization used is import
   - autoland
   - mozilla-release
   - mozilla-beta
-* - **talos-pdfpaint-1**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-1-swr**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-10**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-10-swr**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-2**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-2-swr**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-3**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-3-swr**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-4**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-4-swr**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-5**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-5-swr**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-6**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-6-swr**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-7**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-7-swr**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-8**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-8-swr**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-9**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-pdfpaint-9-swr**
+* - **talos-pdfpaint**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+::::
+
+(pdfpaint_main_hwa)=
+
+::::{dropdown} pdfpaint_main_hwa
+:class-container: anchor-id-pdfpaint_main_hwa
+
+* **Command to Run Locally**
+
+  ```
+  ./mach talos-test -a pdfpaint_main_hwa
+  ```
+
+* contact: :calixte and CI and Quality Tools team
+* source:
+* type: [Page load]
+* reporting: time taken by *PDFPageProxy.render* for the first page in ms (lower is better)
+* data: loads each PDF 15 times
+* description:
+      | Same as pdfpaint, with main-thread rendering and canvas acceleration enabled
+        (pdfjs.disableWorkerRendering=true, pdfjs.enableHWA=true).
+        Acceleration depends on platform support.
+* preferences: {'pdfjs.disableWorkerRendering': True, 'pdfjs.enableHWA': True}
+* **Test Task**:
+
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-pdfpaint-main-hwa**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-pdfpaint-main-hwa**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-pdfpaint-main-hwa**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-pdfpaint-main-hwa**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-pdfpaint-main-hwa**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+::::
+
+(pdfpaint_main_sw)=
+
+::::{dropdown} pdfpaint_main_sw
+:class-container: anchor-id-pdfpaint_main_sw
+
+* **Command to Run Locally**
+
+  ```
+  ./mach talos-test -a pdfpaint_main_sw
+  ```
+
+* contact: :calixte and CI and Quality Tools team
+* source:
+* type: [Page load]
+* reporting: time taken by *PDFPageProxy.render* for the first page in ms (lower is better)
+* data: loads each PDF 15 times
+* description:
+      | Same as pdfpaint, with main-thread rendering and a software canvas
+        (pdfjs.disableWorkerRendering=true, pdfjs.enableHWA=false).
+* preferences: {'pdfjs.disableWorkerRendering': True, 'pdfjs.enableHWA': False}
+* **Test Task**:
+
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-pdfpaint-main-sw**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-pdfpaint-main-sw**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-pdfpaint-main-sw**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-pdfpaint-main-sw**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-pdfpaint-main-sw**
   - ❌
   - ❌
   - ❌
@@ -5621,13 +5217,12 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :emilio and css/layout team
-* source: [perf-reftest](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/perf-reftest)
+* source: {searchfox}`perf-reftest <testing/talos/talos/tests/perf-reftest>`
 * type: [Page load]
 * reporting: intervals in ms (lower is better)
 * data: each test loads 25 times
 * summarization:
-  * subtest: [ignore first] 5 data points, then take the [median] of the remaining 20 data points; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l734)
+  * subtest: [ignore first] 5 data points, then take the [median] of the remaining 20 data points; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: identical to subtest
 * description:
       | **Important note:** This test now requires an 'opt' build. If the
@@ -5682,7 +5277,7 @@ For the sample commands found below, note that the capitalization used is import
 * unit: ms
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -5709,7 +5304,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -5731,7 +5326,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-perf-reftest**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-perf-reftest-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-perf-reftest-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -5758,34 +5380,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-perf-reftest**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-perf-reftest-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-perf-reftest-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -5821,13 +5416,12 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :emilio and Layout team
-* source: [perf-reftest-singletons](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/perf-reftest-singletons)
+* source: {searchfox}`perf-reftest-singletons <testing/talos/talos/tests/perf-reftest-singletons>`
 * type: [Page load]
 * reporting: intervals in ms (lower is better)
 * data: each test loads 25 times
 * summarization:
-  * subtest: [ignore first] 5 data points, then take the [median] of the remaining 20 data points; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l734)
+  * subtest: [ignore first] 5 data points, then take the [median] of the remaining 20 data points; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: identical to subtest
 * description:
       | Individual style system performance tests. The perf-reftest-singletons
@@ -5858,7 +5452,7 @@ For the sample commands found below, note that the capitalization used is import
 * unit: ms
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -5880,7 +5474,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -5897,29 +5491,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-perf-reftest-singletons**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-perf-reftest-singletons-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -5941,7 +5513,29 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-perf-reftest-singletons**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-perf-reftest-singletons-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -5972,12 +5566,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :jrmuizel, :jimm, and gfx
-* source: [rasterflood_gradient.html](https://searchfox.org/firefox-main/source/testing/talos/talos/tests/gfx/benchmarks/rasterflood_gradient.html)
+* source: {searchfox}`rasterflood_gradient.html <testing/talos/talos/tests/gfx/benchmarks/rasterflood_gradient.html>`
 * type: [Page load]
 * data: we load the rasterflood_gradient.html page ten times, computing a score each time, generating 10 data points.
 * summarization:
-  * subtest: [ignore first] data point, then take the [median] of the remaining 9; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l986)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 9; {searchfox}`source: test.py <testing/talos/talos/test.py>`
 * description:
       | This page animates some complex gradient patterns in a
         requestAnimationFrame callback. However, it also churns the CPU during
@@ -6007,7 +5600,7 @@ For the sample commands found below, note that the capitalization used is import
 * win_counters: None
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6034,7 +5627,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6056,7 +5649,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-g4**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-g4-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-g4-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6083,34 +5703,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-g4**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-g4-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-g4-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6146,12 +5739,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :jrmuizel, :jimm, and gfx
-* source: [rasterflood_svg.html](https://searchfox.org/firefox-main/source/testing/talos/talos/tests/gfx/benchmarks/rasterflood_svg.html)
+* source: {searchfox}`rasterflood_svg.html <testing/talos/talos/tests/gfx/benchmarks/rasterflood_svg.html>`
 * type: [Page load]
 * data: we load the rasterflood_svg.html page ten times, measuring pageload each time, generating 10 data points.
 * summarization:
-  * subtest: [ignore first] data point, then take the [median] of the remaining 9; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l986)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 9; {searchfox}`source: test.py <testing/talos/talos/test.py>`
 * description:
       | This page animates some complex SVG patterns in a requestAnimationFrame
         callback. However, it also churns the CPU during each callback, spinning
@@ -6179,7 +5771,7 @@ For the sample commands found below, note that the capitalization used is import
 * win_counters: None
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6206,7 +5798,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6228,7 +5820,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-g4**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-g4-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-g4-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6255,34 +5874,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-g4**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-g4-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-g4-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6318,7 +5910,7 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :dale, :dao, :farre, session restore module owners/peers, and DOM team
-* source: [talos/sessionrestore](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/startup_test/sessionrestore)
+* source: {searchfox}`talos/sessionrestore <testing/talos/talos/startup_test/sessionrestore>`
 * bug: [bug 936630](https://bugzilla.mozilla.org/show_bug.cgi?id=936630),
      [bug 1331937](https://bugzilla.mozilla.org/show_bug.cgi?id=1331937),
      [bug 1531520](https://bugzilla.mozilla.org/show_bug.cgi?id=1531520)
@@ -6327,8 +5919,7 @@ For the sample commands found below, note that the capitalization used is import
 * reporting: interval in ms (lower is better).
 * data: we load the session restore index page 10 times to collect 1 set of 10 data points.
 * summarization:
-  * subtest: [ignore first] data point, then take the [median] of the remaining 9 data points; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l305)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 9 data points; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: identical to subtest
 * description:
       | Three tests measure the time spent reading and restoring the session
@@ -6362,7 +5953,7 @@ For the sample commands found below, note that the capitalization used is import
 * url: about:home
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6372,11 +5963,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ✅
   - ✅
   - ❌
@@ -6394,7 +5980,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6404,11 +5990,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ❌
   - ❌
   - ❌
@@ -6421,7 +6002,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6435,7 +6016,29 @@ For the sample commands found below, note that the capitalization used is import
   - ✅
   - ❌
   - ❌
-* - **talos-other-no-nv**
+* - **talos-other-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-other-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-other**
   - ✅
   - ✅
   - ❌
@@ -6453,7 +6056,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6463,43 +6066,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ❌
   - ❌
   - ❌
@@ -6529,7 +6095,7 @@ For the sample commands found below, note that the capitalization used is import
 * profile_path: ${talos}/startup_test/sessionrestore/profile-manywindows
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6539,11 +6105,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-sessionrestore-many-windows**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-sessionrestore-many-windows-no-nv**
   - ✅
   - ✅
   - ❌
@@ -6561,7 +6122,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6571,11 +6132,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-sessionrestore-many-windows**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-sessionrestore-many-windows-no-nv**
   - ❌
   - ❌
   - ❌
@@ -6588,7 +6144,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6602,7 +6158,29 @@ For the sample commands found below, note that the capitalization used is import
   - ✅
   - ❌
   - ❌
-* - **talos-sessionrestore-many-windows-no-nv**
+* - **talos-sessionrestore-many-windows-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-sessionrestore-many-windows-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-sessionrestore-many-windows**
   - ✅
   - ✅
   - ❌
@@ -6620,7 +6198,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6630,43 +6208,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-sessionrestore-many-windows**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-sessionrestore-many-windows-no-nv**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-sessionrestore-many-windows-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-sessionrestore-many-windows-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-sessionrestore-many-windows**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-sessionrestore-many-windows-no-nv**
   - ❌
   - ❌
   - ❌
@@ -6697,7 +6238,7 @@ For the sample commands found below, note that the capitalization used is import
 * timeout: 300
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6707,11 +6248,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ✅
   - ✅
   - ❌
@@ -6729,7 +6265,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6739,11 +6275,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ❌
   - ❌
   - ❌
@@ -6756,7 +6287,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6770,7 +6301,29 @@ For the sample commands found below, note that the capitalization used is import
   - ✅
   - ❌
   - ❌
-* - **talos-other-no-nv**
+* - **talos-other-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-other-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-other**
   - ✅
   - ✅
   - ❌
@@ -6788,7 +6341,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6798,43 +6351,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ❌
   - ❌
   - ❌
@@ -6881,7 +6397,7 @@ For the sample commands found below, note that the capitalization used is import
 * url: None
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6891,11 +6407,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ✅
   - ✅
   - ❌
@@ -6913,7 +6424,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6923,11 +6434,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ❌
   - ❌
   - ❌
@@ -6940,7 +6446,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6954,7 +6460,29 @@ For the sample commands found below, note that the capitalization used is import
   - ✅
   - ❌
   - ❌
-* - **talos-other-no-nv**
+* - **talos-other-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-other-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-other**
   - ✅
   - ✅
   - ❌
@@ -6972,7 +6500,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -6982,43 +6510,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ❌
   - ❌
   - ❌
@@ -7056,7 +6547,7 @@ For the sample commands found below, note that the capitalization used is import
 * url: None
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7066,11 +6557,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ✅
   - ✅
   - ❌
@@ -7088,7 +6574,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7098,11 +6584,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ❌
   - ❌
   - ❌
@@ -7115,7 +6596,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7129,7 +6610,29 @@ For the sample commands found below, note that the capitalization used is import
   - ✅
   - ❌
   - ❌
-* - **talos-other-no-nv**
+* - **talos-other-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-other-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-other**
   - ✅
   - ✅
   - ❌
@@ -7147,7 +6650,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7157,43 +6660,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ❌
   - ❌
   - ❌
@@ -7240,7 +6706,7 @@ For the sample commands found below, note that the capitalization used is import
 * webextensions_folder: ${talos}/webextensions
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7262,7 +6728,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7279,7 +6745,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7301,7 +6767,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7323,7 +6789,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7354,7 +6820,7 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :emilio and Layout team
-* source: [stylebench.manifest](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/stylebench/stylebench.manifest)
+* source: {searchfox}`stylebench.manifest <testing/talos/talos/tests/stylebench/stylebench.manifest>`
 * type: [Page load]
 * measuring: speed of dynamic style recalculation
 * reporting: runs/minute score
@@ -7373,7 +6839,7 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :mconley, Firefox Desktop Front-end team, :gijs, :fqueze, and :dthayer
-* source: [tabpaint](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/tabpaint)
+* source: {searchfox}`tabpaint <testing/talos/talos/tests/tabpaint>`
 * bug: https://bugzilla.mozilla.org/show_bug.cgi?id=1253382
 * type: [Page load]
 * measuring:
@@ -7407,7 +6873,7 @@ For the sample commands found below, note that the capitalization used is import
 * unit: ms
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7417,11 +6883,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ✅
   - ✅
   - ❌
@@ -7439,7 +6900,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7449,11 +6910,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ❌
   - ❌
   - ❌
@@ -7466,7 +6922,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7480,7 +6936,29 @@ For the sample commands found below, note that the capitalization used is import
   - ✅
   - ❌
   - ❌
-* - **talos-other-no-nv**
+* - **talos-other-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-other-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-other**
   - ✅
   - ✅
   - ❌
@@ -7498,7 +6976,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7508,43 +6986,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ❌
   - ❌
   - ❌
@@ -7571,7 +7012,7 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :mconley, Firefox Desktop Front-end team, :gijs, :fqueze, and :dthayer
-* source: [tabswitch](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/tabswitch)
+* source: {searchfox}`tabswitch <testing/talos/talos/tests/tabswitch>`
 * bug: https://bugzilla.mozilla.org/show_bug.cgi?id=1166132
 * type: [Page load]
 * measuring:
@@ -7580,8 +7021,7 @@ For the sample commands found below, note that the capitalization used is import
 * data: we load 50 web pages 5 times each, resulting in 50 sets of 5 data points.
 * **To run it locally**, you'd need [tp5n.zip](#page-sets).
 * summarization:
-  * subtest: [ignore first] data point, then take the [median] of the remaining 4 data points; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l305)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 4 data points; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 50 subtest results.
 * **Example Data**
 
@@ -7647,7 +7087,7 @@ For the sample commands found below, note that the capitalization used is import
 * unit: ms
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7657,11 +7097,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-tabswitch**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-tabswitch-no-nv**
   - ❌
   - ❌
   - ❌
@@ -7679,7 +7114,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7689,11 +7124,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-tabswitch**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-tabswitch-no-nv**
   - ❌
   - ❌
   - ❌
@@ -7706,7 +7136,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7716,11 +7146,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-tabswitch**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-tabswitch-no-nv**
   - ❌
   - ❌
   - ❌
@@ -7738,7 +7163,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7748,11 +7173,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-tabswitch**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-tabswitch-no-nv**
   - ❌
   - ❌
   - ❌
@@ -7770,7 +7190,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7780,11 +7200,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-tabswitch**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-tabswitch-no-nv**
   - ❌
   - ❌
   - ❌
@@ -7811,15 +7226,14 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :mconley, Firefox Desktop Front-end team, :gijs, :fqueze, and :dthayer
-* source: [tart](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/tart)
+* source: {searchfox}`tart <testing/talos/talos/tests/tart>`
 * type: [Page load]
 * measuring: Desktop Firefox UI animation speed and smoothness
 * reporting: intervals in ms (lower is better)
 * see below for details
 * data: there are 30 reported subtests from TART which we load 25 times, resulting in 30 sets of 25 data points.
 * summarization:
-  * subtest: [ignore first] data point, then take the [median] of the remaining 24 data points; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l305)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 24 data points; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 30 subtest results.
 * TART is the **Tab Animation Regression Test**.
 * TART tests tab animation on these cases:
@@ -7887,7 +7301,7 @@ For the sample commands found below, note that the capitalization used is import
 * win_counters: None
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7914,7 +7328,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7936,7 +7350,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-svgr**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-svgr-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-svgr-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -7963,34 +7404,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-svgr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-svgr-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-svgr-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -8069,7 +7483,7 @@ For the sample commands found below, note that the capitalization used is import
 * xperf_user_providers: ['Mozilla Generic Provider', 'Microsoft-Windows-TCPIP']
 * **Test Task**:
 
-:::{list-table} **test-windows11-64-25h2-shippable/opt**
+:::{list-table} **{ref}`test-windows11-64-25h2-shippable/opt <hardware-azure-standard-f8alds-v7>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -8091,7 +7505,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-25h2/opt**
+:::{list-table} **{ref}`test-windows11-64-25h2/opt <hardware-azure-standard-f8alds-v7>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -8132,8 +7546,7 @@ For the sample commands found below, note that the capitalization used is import
 * data: we load each of the 51 tp5o pages 25 times, resulting in 51 sets of 25 data points.
 * **To run it locally**, you'd need [tp5n.zip](#page-sets).
 * summarization: tp5 with limited pageset (48 pages as others have too much noise)
-  * subtest: [ignore first] **5** data points, then take the [median] of the remaining 20; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l449)
+  * subtest: [ignore first] **5** data points, then take the [median] of the remaining 20; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 51 subtest results.
 * description:
       | Tests the time it takes Firefox to load the [tp5 web page test
@@ -8231,7 +7644,7 @@ For the sample commands found below, note that the capitalization used is import
 * win_counters: ['% Processor Time']
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -8258,7 +7671,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -8280,7 +7693,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-tp5o**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-tp5o-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-tp5o-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -8307,34 +7747,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-tp5o**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-tp5o-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-tp5o-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -8375,8 +7788,7 @@ For the sample commands found below, note that the capitalization used is import
 * data: we load each of the 51 tp5o pages 12 times, resulting in 51 sets of 12 data points.
 * **To run it locally**, you'd need [tp5n.zip](#page-sets).
 * summarization: Measures average frames interval while scrolling the pages of the tp5o set
-  * subtest: [ignore first] data point, then take the [median] of the remaining 11; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l470)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 11; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 51 subtest results.
 * description:
       | This test is identical to tscrollx, but it scrolls the 50 pages of the
@@ -8461,7 +7873,7 @@ For the sample commands found below, note that the capitalization used is import
 * unit: 1/FPS
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -8488,7 +7900,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -8510,34 +7922,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-g1**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-g1-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-g1-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -8564,7 +7949,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-g1**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-g1-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-g1-swr**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -8604,7 +8016,7 @@ For the sample commands found below, note that the capitalization used is import
 * webextensions: ${talos}/webextensions/dummy/dummy.xpi
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -8631,7 +8043,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -8653,7 +8065,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-g5**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-g5-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-g5-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -8680,34 +8119,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-g5**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-g5-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-g5-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -8743,13 +8155,12 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :gcp and platform integration
-* source: [tresize-test.html](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/startup_test/tresize/addon/content/tresize-test.html)
+* source: {searchfox}`tresize-test.html <testing/talos/talos/tests/tresize/addon/chrome/tresize-test.html>`
 * type: Startup_
 * measuring: Time to do XUL resize, in ms (lower is better).
 * data: we run the tresize test page 20 times, resulting in 1 set of 20 data points.
 * summarization:
-  * subtest: [ignore first] **5** data points, then take the [median] of the remaining 15 data points; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l205)
+  * subtest: [ignore first] **5** data points, then take the [median] of the remaining 15 data points; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: same as subtest result
 * description:
       | A purer form of paint measurement than tpaint. This test opens a single
@@ -8782,7 +8193,7 @@ For the sample commands found below, note that the capitalization used is import
 * unit: ms
 * **Test Task**:
 
-:::{list-table} **test-linux1804-64-qr/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -8792,82 +8203,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-chrome**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-chrome-no-nv**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-chrome-swr**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-linux1804-64-shippable-qr/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-chrome**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-chrome-no-nv**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-chrome-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-linux2404-64-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-chrome-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-macosx1470-64-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-chrome**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-chrome-no-nv**
   - ✅
   - ✅
   - ❌
@@ -8885,7 +8220,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -8895,11 +8230,28 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-chrome**
-  - ✅
-  - ✅
   - ❌
   - ❌
-* - **talos-chrome-no-nv**
+  - ❌
+  - ❌
+* - **talos-chrome-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-chrome**
   - ✅
   - ✅
   - ❌
@@ -8917,7 +8269,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -8927,11 +8279,33 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-chrome**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-chrome-profiling**
   - ❌
   - ❌
   - ❌
   - ❌
-* - **talos-chrome-no-nv**
+* - **talos-chrome-swr**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-chrome**
   - ❌
   - ❌
   - ❌
@@ -8958,15 +8332,14 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :mconley, Firefox Desktop Front-end team,
-* source: [tspaint_test.html](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/startup_test/tspaint_test.html)
+* source: {searchfox}`tspaint_test.html <testing/talos/talos/startup_test/tspaint_test.html>`
 * Perfomatic: "Ts, Paint"
 * type: Startup_
 * data: 20 times we start the browser and time how long it takes to
      paint the startup test page, resulting in 1 set of 20 data points.
 * summarization:
   * subtest: identical to suite
-  * suite: [ignore first] data point, then take the [median] of the remaining 19 data points; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l135)
+  * suite: [ignore first] data point, then take the [median] of the remaining 19 data points; {searchfox}`source: test.py <testing/talos/talos/test.py>`
 * description:
       | Starts the browser to display tspaint_test.html with the start time in
         the url, waits for [MozAfterPaint and onLoad](#paint) to fire, then
@@ -8992,7 +8365,7 @@ For the sample commands found below, note that the capitalization used is import
 * xperf_counters: []
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9002,11 +8375,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ✅
   - ✅
   - ❌
@@ -9024,7 +8392,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9034,11 +8402,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ❌
   - ❌
   - ❌
@@ -9051,7 +8414,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9065,7 +8428,29 @@ For the sample commands found below, note that the capitalization used is import
   - ✅
   - ❌
   - ❌
-* - **talos-other-no-nv**
+* - **talos-other-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-other-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-other**
   - ✅
   - ✅
   - ❌
@@ -9083,7 +8468,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9093,43 +8478,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ❌
   - ❌
   - ❌
@@ -9176,7 +8524,7 @@ For the sample commands found below, note that the capitalization used is import
 * webextensions: ${talos}/webextensions/dummy/dummy.xpi
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9203,7 +8551,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9225,7 +8573,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-g5**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-g5-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-g5-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9252,34 +8627,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-g5**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-g5-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-g5-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9315,14 +8663,13 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :jrmuizel and gfx
-* source: [scroll.manifest](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/scroll)
+* source: {searchfox}`scroll.manifest <testing/talos/talos/tests/scroll>`
 * type: [Page load]
 * measuring: Scroll performance
 * reporting: Average frame interval (1 ÷ fps). Lower is better.
 * data: we load 6 pages 25 times each, collecting 6 sets of 25 data points
 * summarization: [Replacing tscroll,tsvg with tscrollx,tsvgx](https://groups.google.com/d/topic/mozilla.dev.platform/RICw5SJhNMo/discussion)
-  * subtest: [ignore first] data point, then take the [median] of the remaining 24; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l623)
+  * subtest: [ignore first] data point, then take the [median] of the remaining 24; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 6 subtest results.
 * description:
       | This test scrolls several pages where each represent a different known
@@ -9357,7 +8704,7 @@ For the sample commands found below, note that the capitalization used is import
 * unit: ms
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9384,7 +8731,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9406,7 +8753,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-svgr**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-svgr-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-svgr-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9433,34 +8807,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-svgr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-svgr-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-svgr-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9495,11 +8842,24 @@ For the sample commands found below, note that the capitalization used is import
   ./mach talos-test -a tscrollx_paint_skip
   ```
 
-* TODO: Add a description. See this bug: https://bugzilla.mozilla.org/show_bug.cgi?id=2036344
+* contact: :hiro, :botond, and layout team
+* source: {searchfox}`scroll.manifest <testing/talos/talos/tests/scroll>`
+* type: [Page load]
+* measuring: Scroll performance with APZ paint skipping enabled
+* reporting: Average frame interval (1 ÷ fps). Lower is better.
+* data: we load 6 pages 25 times each, collecting 6 sets of 25 data points
+* summarization:
+  * subtest: [ignore first] **5** data points, then take the [median] of the remaining 20
+  * suite: [geometric mean] of the 6 subtest results.
+* description:
+      | This is a variant of [tscrollx](#tscrollx) that runs the same pages in
+        ASAP mode, but with APZ paint skipping enabled
+        (``apz.paint_skipping.enabled = true``). Comparing it with tscrollx shows
+        the effect of paint skipping on scroll throughput.
 * preferences: {'layout.frame_rate': 0, 'docshell.event_starvation_delay_hint': 1, 'dom.send_after_paint_to_content': True, 'apz.paint_skipping.enabled': True, 'layout.css.scroll-snap.spring-constant': "'10'", 'layout.css.scroll-behavior.same-physics-as-user-input': False, 'toolkit.framesRecording.bufferSize': 10000}
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9526,7 +8886,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9548,7 +8908,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-svgr**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-svgr-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-svgr-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9575,34 +8962,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-svgr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-svgr-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-svgr-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9638,12 +8998,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :jwatt, :dholbert
-* source: [svg_static](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/svg_static/)
+* source: {searchfox}`svg_static <testing/talos/talos/tests/svg_static>`
 * type: [Page load]
 * data: we load the 5 svg pages 25 times, resulting in 5 sets of 25 data points
 * summarization: An svg-only number that measures SVG rendering performance of some complex (but static) SVG content.
-  * subtest: [ignore first] **5** data points, then take the [median] of the remaining 20; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l623)
+  * subtest: [ignore first] **5** data points, then take the [median] of the remaining 20; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 5 subtest results.
 * **Example Data**
 
@@ -9665,7 +9024,7 @@ For the sample commands found below, note that the capitalization used is import
 * unit: ms
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9692,7 +9051,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9714,7 +9073,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-svgr**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-svgr-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-svgr-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9741,34 +9127,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-svgr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-svgr-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-svgr-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9828,12 +9187,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :jwatt, :dholbert
-* source: [svg_opacity.manifest](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/svg_opacity/svg_opacity.manifest)
+* source: {searchfox}`svg_opacity.manifest <testing/talos/talos/tests/svg_opacity/svg_opacity.manifest>`
 * type: [Page load]
 * data: we load the 2 svg opacity pages 25 times, resulting in 2 sets of 25 data points
 * summarization: [Row Major](#row-major-vs-column-major) and 25 cycles/page.
-  * subtest: [ignore first] **5** data points, then take the [median] of the remaining 20; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l623)
+  * subtest: [ignore first] **5** data points, then take the [median] of the remaining 20; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 2 subtest results.
 * description:
       | Renders many semi-transparent, partially overlapping SVG rectangles, and
@@ -9865,7 +9223,7 @@ For the sample commands found below, note that the capitalization used is import
 * unit: ms
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9892,7 +9250,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9914,7 +9272,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-svgr**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-svgr-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-svgr-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -9941,34 +9326,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-svgr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-svgr-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-svgr-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -10004,12 +9362,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :jwatt, :dholbert
-* source: [svgx](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/svgx)
+* source: {searchfox}`svgx <testing/talos/talos/tests/svgx>`
 * type: [Page load]
 * data: we load the 7 svg pages 25 times, resulting in 7 sets of 25 data points
 * summarization: [Replacing tscroll,tsvg with tscrollx,tsvgx](https://groups.google.com/d/topic/mozilla.dev.platform/RICw5SJhNMo/discussion)
-  * subtest: [ignore first] **5** data points, then take the [median] of the remaining 20; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l623)
+  * subtest: [ignore first] **5** data points, then take the [median] of the remaining 20; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: [geometric mean] of the 7 subtest results.
 * description:
       | An svg-only number that measures SVG rendering performance, with
@@ -10051,7 +9408,7 @@ For the sample commands found below, note that the capitalization used is import
 * unit: ms
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -10078,7 +9435,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -10100,7 +9457,34 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-svgr**
+  - ✅
+  - ✅
+  - ❌
+  - ❌
+* - **talos-svgr-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-svgr-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -10127,34 +9511,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-svgr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-svgr-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-svgr-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -10190,12 +9547,11 @@ For the sample commands found below, note that the capitalization used is import
   ```
 
 * contact: :gcp and platform integration
-* source: [twinopen](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/tests/twinopen)
+* source: {searchfox}`twinopen <testing/talos/talos/tests/twinopen>`
 * type: Startup_
 * data: we open a new browser window 20 times, resulting in 1 set of 20 data points.
 * summarization: Time from calling OpenBrowserWindow until the chrome of the new window has [painted](https://developer.mozilla.org/en-US/docs/Web/Events#MozAfterPaint).
-  * subtest: [ignore first] **5** data points, then take the [median] of the remaining 15; [source:
-        test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l190)
+  * subtest: [ignore first] **5** data points, then take the [median] of the remaining 15; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   * suite: identical to subtest
 * description:
       | Tests the amount of time it takes the open a new window from a currently
@@ -10219,7 +9575,7 @@ For the sample commands found below, note that the capitalization used is import
 * unit: ms
 * **Test Task**:
 
-:::{list-table} **test-linux2404-64-shippable/opt**
+:::{list-table} **{ref}`test-linux2404-64-shippable/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -10229,11 +9585,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ✅
   - ✅
   - ❌
@@ -10251,7 +9602,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-linux2404-64/opt**
+:::{list-table} **{ref}`test-linux2404-64/opt <hardware-hpe-moonshot>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -10261,11 +9612,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ❌
   - ❌
   - ❌
@@ -10278,7 +9624,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-macosx1470-64-shippable/opt**
+:::{list-table} **{ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -10292,7 +9638,29 @@ For the sample commands found below, note that the capitalization used is import
   - ✅
   - ❌
   - ❌
-* - **talos-other-no-nv**
+* - **talos-other-profiling**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+* - **talos-other-swr**
+  - ❌
+  - ❌
+  - ❌
+  - ❌
+:::
+
+
+:::{list-table} **{ref}`test-windows11-64-24h2-shippable/opt <hardware-nuc13-windows11>`**
+:widths: 30 15 15 15 15
+:header-rows: 1
+
+* - **Test Name**
+  - mozilla-central
+  - autoland
+  - mozilla-release
+  - mozilla-beta
+* - **talos-other**
   - ✅
   - ✅
   - ❌
@@ -10310,7 +9678,7 @@ For the sample commands found below, note that the capitalization used is import
 :::
 
 
-:::{list-table} **test-windows11-64-24h2-shippable/opt**
+:::{list-table} **{ref}`test-windows11-64-24h2/opt <hardware-nuc13-windows11>`**
 :widths: 30 15 15 15 15
 :header-rows: 1
 
@@ -10320,43 +9688,6 @@ For the sample commands found below, note that the capitalization used is import
   - mozilla-release
   - mozilla-beta
 * - **talos-other**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-* - **talos-other-profiling**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-swr**
-  - ✅
-  - ✅
-  - ❌
-  - ❌
-:::
-
-
-:::{list-table} **test-windows11-64-24h2/opt**
-:widths: 30 15 15 15 15
-:header-rows: 1
-
-* - **Test Name**
-  - mozilla-central
-  - autoland
-  - mozilla-release
-  - mozilla-beta
-* - **talos-other**
-  - ❌
-  - ❌
-  - ❌
-  - ❌
-* - **talos-other-no-nv**
   - ❌
   - ❌
   - ❌
@@ -10406,24 +9737,6 @@ For the sample commands found below, note that the capitalization used is import
 :local: true
 ```
 
-### File IO
-
-File IO is tested using the tp5 test set in the [xperf]
-test.
-
-#### Possible regression causes
-
-- **nonmain_startup_fileio opt (with or without e10s) windows7-32** –
-  [bug
-  1274018](https://bugzilla.mozilla.org/show_bug.cgi?id=1274018)
-  This test seems to consistently report a higher result for
-  mozilla-central compared to Try even for an identical revision due to
-  extension signing checks. In other words, if you are comparing Try
-  and Mozilla-Central you may see a false-positive regression on
-  perfherder. Graphs:
-  [non-e10s](https://treeherder.mozilla.org/perf.html#/graphs?timerange=604800&series=%5Bmozilla-central,e5f5eaa174ef22fdd6b6e150e8c450aa827c2ff6,1,1%5D&series=%5Btry,e5f5eaa174ef22fdd6b6e150e8c450aa827c2ff6,1,1%5D)
-  [e10s](https://treeherder.mozilla.org/perf.html#/graphs?series=%5B%22mozilla-central%22,%222f3af3833d55ff371ecf01c41aeee1939ef3a782%22,1,1%5D&series=%5B%22try%22,%222f3af3833d55ff371ecf01c41aeee1939ef3a782%22,1,1%5D&timerange=604800)
-
 ### Xres (X Resource Monitoring)
 
 A memory metric tracked during tp5 test runs. This metric is sampled
@@ -10445,7 +9758,7 @@ This test no longer exists
 - contact: :davidb
 
 - source:
-  [tpaint-window.html](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/startup_test/tpaint.html)
+  {searchfox}`tpaint-window.html <testing/talos/talos/startup_test/tpaint.html>`
 
 - type: [Startup]
 
@@ -10454,8 +9767,7 @@ This test no longer exists
 
 - summarization:
 
-  - subtest: [ignore first] **5** data points, then take the [median] of the remaining 15; [source:
-    test.py](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/test.py#l190)
+  - subtest: [ignore first] **5** data points, then take the [median] of the remaining 15; {searchfox}`source: test.py <testing/talos/talos/test.py>`
   - suite: identical to subtest
 
 ```{eval-rst}
@@ -10487,8 +9799,7 @@ create and display a window in the running instance of the browser.
 ### xperf
 
 - contact: perftest team
-- source: [xperf
-  instrumentation](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/xtalos)
+- source: {searchfox}`xperf instrumentation <testing/talos/talos/xtalos>`
 - type: [Page load] (tp5n) / [Startup]
 - measuring: IO counters from windows (currently, only startup IO is in
   scope)
@@ -10511,7 +9822,7 @@ is not found, use the following on the query page:
 
 Talos will turn orange for 'x' jobs on windows 7 if your changeset
 accesses files which are not predefined in the
-[allowlist](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/xtalos/xperf_allowlist.json)
+{searchfox}`allowlist <testing/talos/talos/xtalos/xperf_allowlist.json>`
 during startup; specifically, before the
 "[sessionstore-windows-restored](https://hg.mozilla.org/mozilla-central/file/0eebc33d8593/toolkit/components/startup/nsAppStartup.cpp#l631)"
 Firefox event. If your job turns orange, you will see a list of files in
@@ -10534,13 +9845,11 @@ by your changeset, then we can add them to the
 Xperf runs tp5 while collecting xperf metrics for disk IO and network
 IO. The providers we listen for are:
 
-- ['PROC_THREAD', 'LOADER', 'HARD_FAULTS', 'FILENAME', 'FILE_IO',
-  'FILE_IO_INIT'](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/xperf.config#l10)
+- {searchfox}`'PROC_THREAD', 'LOADER', 'HARD_FAULTS', 'FILENAME', 'FILE_IO', 'FILE_IO_INIT' <testing/talos/talos/test.py>`
 
 The values we collect during stackwalk are:
 
-- ['FileRead', 'FileWrite',
-  'FileFlush'](https://dxr.mozilla.org/mozilla-central/source/testing/talos/talos/xperf.config#l11)
+- {searchfox}`'FileRead', 'FileWrite', 'FileFlush' <testing/talos/talos/test.py>`
 
 Notes:
 
@@ -10550,6 +9859,19 @@ Notes:
   large variability. At least 30 runs are likely to be needed to get
   stable statistics (xref [bug
   1616236](https://bugzilla.mozilla.org/show_bug.cgi?id=1616236))
+
+#### Possible regression causes
+
+- **nonmain_startup_fileio opt (with or without e10s) windows7-32** –
+  [bug
+  1274018](https://bugzilla.mozilla.org/show_bug.cgi?id=1274018)
+  This test seems to consistently report a higher result for
+  mozilla-central compared to Try even for an identical revision due to
+  extension signing checks. In other words, if you are comparing Try
+  and Mozilla-Central you may see a false-positive regression on
+  perfherder. Graphs:
+  [non-e10s](https://treeherder.mozilla.org/perf.html#/graphs?timerange=604800&series=%5Bmozilla-central,e5f5eaa174ef22fdd6b6e150e8c450aa827c2ff6,1,1%5D&series=%5Btry,e5f5eaa174ef22fdd6b6e150e8c450aa827c2ff6,1,1%5D)
+  [e10s](https://treeherder.mozilla.org/perf.html#/graphs?series=%5B%22mozilla-central%22,%222f3af3833d55ff371ecf01c41aeee1939ef3a782%22,1,1%5D&series=%5B%22try%22,%222f3af3833d55ff371ecf01c41aeee1939ef3a782%22,1,1%5D&timerange=604800)
 
 ## Build metrics
 
@@ -10574,12 +9896,11 @@ optimizations](https://blog.mozilla.org/tglek/2010/05/27/startup-backward-constr
 
 - contact: :hsivonen
 - source:
-  [TestStrings.cpp](https://dxr.mozilla.org/mozilla-central/source/xpcom/tests/gtest/TestStrings.cpp)
+  {searchfox}`TestStrings.cpp <xpcom/tests/gtest/TestStrings.cpp>`
 - type: [Microbench]
 - reporting: intervals in ms (lower is better)
 - data: each test is run and measured 5 times
-- summarization: take the [median] of the 5 data points; [source:
-  MozGTestBench.cpp](https://dxr.mozilla.org/mozilla-central/source/testing/gtest/mozilla/MozGTestBench.cpp#43-46)
+- summarization: take the [median] of the 5 data points; {searchfox}`source: MozGTestBench.cpp <testing/gtest/mozilla/MozGTestBench.cpp>`
 
 Test whose name starts with PerfIsASCII test the performance of the
 XPCOM string IsASCII function with ASCII inputs if different lengths.
@@ -10598,7 +9919,7 @@ string IsUTF8 function with ASCII inputs if different lengths.
 
 - contact: :bholley
 - source:
-  [MozGTestBench.cpp](https://dxr.mozilla.org/mozilla-central/source/testing/gtest/mozilla/MozGTestBench.cpp)
+  {searchfox}`MozGTestBench.cpp <testing/gtest/mozilla/MozGTestBench.cpp>`
 - type: Custom GTest micro-benchmarking
 - data: Time taken for a GTest function to execute
 - summarization: Not a Talos test. This suite is provides a way to add
@@ -10609,7 +9930,7 @@ string IsUTF8 function with ASCII inputs if different lengths.
 
 - contact: :davidb
 - source:
-  <https://dxr.mozilla.org/mozilla-central/source/xpcom/tests/gtest/TestStrings.cpp>
+  {searchfox}`xpcom/tests/gtest/TestStrings.cpp`
 - type: [Microbench]
 - reporting: execution time in ms (lower is better) for 100k function
   calls
@@ -10632,12 +9953,11 @@ PerfStripCharsCRLF() - call StripChars("rn") on 5 different test cases
 
 - contact: :bholley, :SimonSapin
 - source:
-  [gtest](https://dxr.mozilla.org/mozilla-central/source/layout/style/test/gtest)
+  {searchfox}`gtest <layout/style/test/gtest>`
 - type: [Microbench]
 - reporting: intervals in ms (lower is better)
 - data: each test is run and measured 5 times
-- summarization: take the [median] of the 5 data points; [source:
-  MozGTestBench.cpp](https://dxr.mozilla.org/mozilla-central/source/testing/gtest/mozilla/MozGTestBench.cpp#43-46)
+- summarization: take the [median] of the 5 data points; {searchfox}`source: MozGTestBench.cpp <testing/gtest/mozilla/MozGTestBench.cpp>`
 
 Servo_StyleSheet_FromUTF8Bytes_Bench parses a sample stylesheet 20 times
 with Stylo’s CSS parser that is written in Rust. It starts from an

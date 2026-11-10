@@ -44,6 +44,9 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.rememberNestedScrollInteropConnection
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.tooling.preview.PreviewParameterProvider
 import androidx.compose.ui.unit.dp
@@ -54,17 +57,17 @@ import mozilla.components.compose.base.theme.AcornTheme
 import mozilla.components.concept.llm.AttestationFailure
 import mozilla.components.concept.llm.LlmProvider
 import mozilla.components.concept.llm.RequestTooLarge
+import mozilla.components.feature.summarize.content.PaywalledContentException
 import mozilla.components.feature.summarize.settings.SettingsAppBar
 import mozilla.components.feature.summarize.settings.SummarizeSettingsContent
 import mozilla.components.feature.summarize.settings.SummarizeSettingsState
-import mozilla.components.feature.summarize.settings.SummarizeSettingsStore
-import mozilla.components.feature.summarize.settings.summarizeSettingsReducer
 import mozilla.components.feature.summarize.ui.ContentTooLongError
 import mozilla.components.feature.summarize.ui.DownloadError
 import mozilla.components.feature.summarize.ui.FxaSignInContent
 import mozilla.components.feature.summarize.ui.InfoError
 import mozilla.components.feature.summarize.ui.OffDeviceSummarizationConsent
 import mozilla.components.feature.summarize.ui.OnDeviceSummarizationConsent
+import mozilla.components.feature.summarize.ui.PaywalledContentError
 import mozilla.components.feature.summarize.ui.SummarizingContent
 import mozilla.components.feature.summarize.ui.SummaryContentLoaded
 import mozilla.components.feature.summarize.ui.gradient.summaryLoadingGradient
@@ -85,7 +88,6 @@ private const val DRAG_HANDLE_CORNER_RATIO = 50
 fun SummarizationUi(
     productName: String,
     store: SummarizationStore,
-    settingsStore: SummarizeSettingsStore? = null,
     resolveError: (Throwable) -> Int,
 ) {
     LaunchedEffect(Unit) {
@@ -96,7 +98,6 @@ fun SummarizationUi(
         SummarizationScreen(
             modifier = Modifier.fillMaxWidth(),
             store = store,
-            settingsStore = settingsStore,
             errorCodeFor = resolveError,
         )
     }
@@ -110,7 +111,6 @@ internal val LocalProductName = compositionLocalOf { ProductName("Firefox Debug"
 private fun SummarizationScreen(
     modifier: Modifier = Modifier,
     store: SummarizationStore,
-    settingsStore: SummarizeSettingsStore? = null,
     errorCodeFor: (Throwable) -> Int,
 ) {
     val state by store.stateFlow.collectAsStateWithLifecycle()
@@ -142,7 +142,7 @@ private fun SummarizationScreen(
                 .nestedScroll(rememberNestedScrollInteropConnection()),
         color = MaterialTheme.colorScheme.surface.copy(alpha = 1f - loadingAlpha),
     ) {
-        SummarizationScreenContent(store, settingsStore, errorCodeFor)
+        SummarizationScreenContent(store, errorCodeFor)
     }
 }
 
@@ -163,7 +163,6 @@ private fun Modifier.summaryLoadingGradientCompat(loadingAlpha: Float): Modifier
 @Composable
 private fun SummarizationScreenContent(
     store: SummarizationStore,
-    settingsStore: SummarizeSettingsStore? = null,
     errorCodeFor: (Throwable) -> Int,
 ) {
     val state by store.stateFlow.collectAsStateWithLifecycle()
@@ -208,14 +207,17 @@ private fun SummarizationScreenContent(
                 info = state.info,
                 document = state.document,
                 onSettingsClicked = { store.dispatch(SettingsClicked) },
+                feedback = state.feedback,
+                onFeedbackClicked = { store.dispatch(SummaryFeedbackProvided(it)) },
             )
 
         is SummarizationState.Settings -> {
             SettingsAppBar(onBackClicked = { store.dispatch(SettingsBackClicked) })
 
-            if (settingsStore != null) {
-                SummarizeSettingsContent(store = settingsStore)
-            }
+            SummarizeSettingsContent(
+                state = state.settingsState,
+                dispatch = { store.dispatch(SummarizeSettingsActionWrapper(it)) },
+            )
         }
 
         is SummarizationState.SignInRequired -> {
@@ -249,9 +251,14 @@ private fun SummarizationErrorContent(
         is SummarizationError.SummarizationFailed ->
             when (error.exception) {
                 is RequestTooLarge -> ContentTooLongError(onDismiss = { dispatch(ErrorAction.ErrorDismissed) })
+
+                is PaywalledContentException ->
+                    PaywalledContentError(onDismiss = { dispatch(ErrorAction.ErrorDismissed) })
+
                 is AttestationFailure -> {
                     FxaSignInContent(dispatchAction = { dispatch(it) })
                 }
+
                 else ->
                     InfoError(
                         errorCode = errorCodeFor(error.exception),
@@ -324,7 +331,13 @@ private fun SummarizationScreenScaffold(
             modifier =
                 Modifier.fillMaxWidth().wrapContentHeight().padding(horizontal = AcornTheme.layout.space.static200)
         ) {
-            DragHandle(modifier = Modifier.fillMaxWidth())
+            DragHandle(
+                modifier =
+                    Modifier.fillMaxWidth().semantics {
+                        testTagsAsResourceId = true
+                        testTag = "shake.to.summarize.bottom.sheet.drag.handle"
+                    }
+            )
             Spacer(Modifier.height(AcornTheme.layout.space.static200))
             content()
             Spacer(Modifier.height(AcornTheme.layout.space.static400))
@@ -370,7 +383,11 @@ private class SummarizationStatePreviewProvider : PreviewParameterProvider<Summa
         sequenceOf(
             SummarizationState.Summarizing(info = info),
             SummarizationState.Summarized(info = info, document = parser.parse(previewSummarizedText)),
-            SummarizationState.Settings(info = info, document = RichDocument(listOf())),
+            SummarizationState.Settings(
+                info = info,
+                document = RichDocument(listOf()),
+                settingsState = SummarizeSettingsState(isFeatureEnabled = true, isGestureEnabled = true),
+            ),
             SummarizationState.ShakeConsentRequired,
             SummarizationState.ShakeConsentWithDownloadRequired,
             SummarizationState.Error(SummarizationError.SummarizationFailed(NullPointerException("preview failure"))),
@@ -388,16 +405,6 @@ private fun SummarizationScreenPreview(
                 SummarizationStore(
                     initialState = state,
                     reducer = ::summarizationReducer,
-                    middleware = listOf(),
-                ),
-            settingsStore =
-                SummarizeSettingsStore(
-                    initialState =
-                        SummarizeSettingsState(
-                            isFeatureEnabled = true,
-                            isGestureEnabled = true,
-                        ),
-                    reducer = ::summarizeSettingsReducer,
                     middleware = listOf(),
                 ),
             errorCodeFor = { 9999 },

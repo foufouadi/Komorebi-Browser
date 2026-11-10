@@ -2713,8 +2713,23 @@ def availableNamedTimeZoneIdentifiers(tzdataDir, ignoreFactory):
     zones = set()
     links = dict()
 
+    # tzdata 2026d made these zones again, but they must not be exposed as
+    # canonical time zone identifiers.
+    # See <https://github.com/tc39/ecma402/issues/1103>.
+    legacyPOSIXZoneTargets = {
+        "CST6CDT": "America/Chicago",
+        "EST5EDT": "America/New_York",
+        "MST7MDT": "America/Denver",
+        "PST8PDT": "America/Los_Angeles",
+    }
+
     # Step 5. (Partial, only zones)
     for zone in ianaZones:
+        if zone.name in legacyPOSIXZoneTargets:
+            assert zone not in links
+            links[zone] = legacyPOSIXZoneTargets[zone.name]
+            continue
+
         # Step 5.a.
         primary = zone
 
@@ -4047,7 +4062,7 @@ if __name__ == "__main__":
         return v
 
     parser = argparse.ArgumentParser(description="Update intl data.")
-    subparsers = parser.add_subparsers(help="Select update mode")
+    subparsers = parser.add_subparsers(help="Select update mode", required=True)
 
     parser_cldr_tags = subparsers.add_parser(
         "langtags", help="Update CLDR language tags data"

@@ -4,20 +4,20 @@
 
 /** @import {OptInEntry} from "./lib/ExperimentManager.sys.mjs" */
 
-const lazy = {};
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-ChromeUtils.defineESModuleGetters(lazy, {
+const lazy = XPCOMUtils.declareLazy({
   ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
   NimbusTelemetry: "resource://nimbus/lib/Telemetry.sys.mjs",
   UnenrollmentCause: "resource://nimbus/lib/ExperimentManager.sys.mjs",
-});
 
-ChromeUtils.defineLazyGetter(lazy, "log", () => {
-  const { Logger } = ChromeUtils.importESModule(
-    "resource://messaging-system/lib/Logger.sys.mjs"
-  );
+  log: () => {
+    const { Logger } = ChromeUtils.importESModule(
+      "resource://messaging-system/lib/Logger.sys.mjs"
+    );
 
-  return new Logger("FirefoxLabs");
+    return new Logger("FirefoxLabs");
+  },
 });
 
 const IS_MAIN_PROCESS =
@@ -60,8 +60,10 @@ export class FirefoxLabs {
    *
    * @param {string} slug The slug of the opt-in to enroll.
    * @param {string} branchSlug The slug of the branch to enroll in.
+   * @param {object} options
+   * @param {Map<string, unknown> | undefined} options.originalPrefValues
    */
-  async enroll(slug, branchSlug) {
+  async enroll(slug, branchSlug, { originalPrefValues } = {}) {
     if (!slug || !branchSlug) {
       throw new TypeError("enroll: slug and branchSlug are required");
     }
@@ -84,6 +86,7 @@ export class FirefoxLabs {
     try {
       await lazy.ExperimentAPI.manager.enroll(recipe, source, {
         branchSlug,
+        originalPrefValues,
       });
     } catch (e) {
       lazy.log.error(`Failed to enroll in ${slug} (branch ${branchSlug})`, e);

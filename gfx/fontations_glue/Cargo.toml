@@ -1,7 +1,7 @@
 [package]
 name = "fontations_glue"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 authors = ["AlaskanEmily <emcdonough@mozilla.com>"]
 description = "Rust glue for using Fontations in Gecko."
 license = "MPL-2.0"
@@ -17,4 +17,5 @@ harness = false
 [dependencies]
 nsstring = { path = "../../xpcom/rust/nsstring/" }
 skrifa = { version = "0.44.0" }
+style = { path = "../../servo/components/style", features = ["gecko"] }
 thin-vec = { version = "0.2.1" }

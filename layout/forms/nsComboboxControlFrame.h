@@ -33,8 +33,6 @@ class nsComboboxControlFrame final : public mozilla::ButtonControlFrame {
 
   nscoord IntrinsicISize(const mozilla::IntrinsicSizeInput& aInput,
                          mozilla::IntrinsicISizeType aType) final;
-  void GetLabelText(nsAString&);
-  void UpdateLabelText();
 
   void Reflow(nsPresContext* aCX, ReflowOutput& aDesiredSize,
               const ReflowInput& aReflowInput, nsReflowStatus& aStatus) final;
@@ -46,7 +44,7 @@ class nsComboboxControlFrame final : public mozilla::ButtonControlFrame {
 
   void Init(nsIContent* aContent, nsContainerFrame* aParent,
             nsIFrame* aPrevInFlow) final;
-  void Destroy(DestroyContext&) final;
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY void Destroy(DestroyContext&) final;
 
 #ifdef DEBUG_FRAME_DUMP
   nsresult GetFrameName(nsAString& aResult) const final {

@@ -23,13 +23,14 @@ import requests
 from mozbuild.base import MozbuildObject
 from mozbuild.vendor.host_base import TagNotFound
 from mozbuild.vendor.rewrite_mozbuild import (
+    MozBuildFileNotListedException,
     MozBuildRewriteException,
     add_file_to_moz_build_file,
     remove_file_from_moz_build_file,
 )
 
 DEFAULT_EXCLUDE_FILES = [".git*", ".git*/**", "**/.cvsignore"]
-DEFAULT_KEEP_FILES = ["**/moz.build", "**/moz.yaml"]
+DEFAULT_KEEP_FILES = ["**/moz.build", "**/moz.yaml", "**/LICENSE-NOTICE.txt"]
 DEFAULT_INCLUDE_FILES = []
 
 
@@ -494,6 +495,7 @@ class VendorManifest(MozbuildObject):
                         tmptarfile.write(tarinput.read())
                 else:
                     req = requests.get(url, stream=True)
+                    req.raise_for_status()
                     for data in req.iter_content(4096):
                         tmptarfile.write(data)
                 tmptarfile.seek(0)
@@ -515,10 +517,10 @@ class VendorManifest(MozbuildObject):
 
                 self.logInfo({"vd": vendor_dir}, "Cleaning {vd} to import changes.")
                 # We use double asterisk wildcard here to get complete list of recursive contents
-                for file in self.convert_patterns_to_paths(vendor_dir, ["**"]):
-                    file = mozpath.normsep(file)
-                    if file not in to_keep:
-                        mozfile.remove(file)
+                for path in self.convert_patterns_to_paths(vendor_dir, ["**"]):
+                    norm_path = mozpath.normsep(path)
+                    if norm_path not in to_keep:
+                        mozfile.remove(norm_path)
 
                 self.logInfo({"vd": vendor_dir}, "Unpacking upstream files for {vd}.")
 
@@ -919,6 +921,11 @@ class VendorManifest(MozbuildObject):
         for f in files_removed:
             try:
                 remove_file_from_moz_build_file(f, moz_yaml_dir, vendoring_dir)
+            except MozBuildFileNotListedException:
+                self.logInfo(
+                    {"f": f},
+                    "{f} is not listed in any moz.build file, nothing to remove",
+                )
             except MozBuildRewriteException:
                 self.log(
                     logging.ERROR,

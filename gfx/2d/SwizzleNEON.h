@@ -40,7 +40,7 @@ static MOZ_ALWAYS_INLINE xsimd::batch<uint8_t, Arch> LoadRemainder_SIMD(
     // Load single pixel
     dst32 = vld1q_lane_u32(src32, vdupq_n_u32(0), 0);
   }
-  return vreinterpretq_u16_u32(dst32);
+  return vreinterpretq_u8_u32(dst32);
 }
 
 template <class Arch>
@@ -48,7 +48,7 @@ template <class Arch>
 static MOZ_ALWAYS_INLINE void StoreRemainder_SIMD(
     uint8_t* aDst, size_t aLength, const xsimd::batch<uint8_t, Arch>& aSrc) {
   uint32_t* dst32 = reinterpret_cast<uint32_t*>(aDst);
-  uint32x4_t src32 = vreinterpretq_u32_u16(aSrc);
+  uint32x4_t src32 = vreinterpretq_u32_u8(aSrc);
   if (aLength >= 2) {
     // Store first 2 pixels
     vst1_u32(dst32, vget_low_u32(src32));
@@ -72,26 +72,17 @@ static MOZ_ALWAYS_INLINE xsimd::batch<uint16_t, Arch> ExtractAlpha_SIMD(
   return vtrnq_u16(aGreenAlpha, aGreenAlpha).val[1];
 }
 
-// arm devices perform better with the original specialization as aarch64,
-// because there is no xsimd::swizzle vectorization.
-template <class Arch, bool aSwapRB, bool aOpaqueAlpha>
+// arm devices perform better with this than the xsimd::shuffle the generic
+// version uses, because there is no xsimd::swizzle vectorization for neon.
+template <class Arch>
   requires std::same_as<Arch, xsimd::neon>
-static MOZ_ALWAYS_INLINE xsimd::batch<uint8_t, Arch> SwizzleVector_SIMD(
-    const xsimd::batch<uint8_t, Arch>& aSrc) {
-  if constexpr (aSwapRB) {
-    // Swap R and B, then add to G and A (forced to 255):
-    // (((src>>16) | (src << 16)) & 0x00FF00FF) |
-    //   ((src | 0xFF000000) & ~0x00FF00FF)
-    return vbslq_u16(
-        vdupq_n_u16(0x00FF), vrev32q_u16(aSrc),
-        aOpaqueAlpha
-            ? vorrq_u16(aSrc, vreinterpretq_u16_u32(vdupq_n_u32(0xFF000000)))
-            : aSrc.data);
-  }
-  if constexpr (aOpaqueAlpha) {
-    return vorrq_u16(aSrc, vreinterpretq_u16_u32(vdupq_n_u32(0xFF000000)));
-  }
-  return aSrc;
+static MOZ_ALWAYS_INLINE xsimd::batch<uint8_t, Arch> SwapRB8_SIMD(
+    const xsimd::batch<uint8_t, Arch>& aPx) {
+  // Swap R and B, leaving G and A alone:
+  // (((px >> 16) | (px << 16)) & 0x00FF00FF) | (px & ~0x00FF00FF)
+  uint16x8_t px16 = vreinterpretq_u16_u8(aPx);
+  return vreinterpretq_u8_u16(
+      vbslq_u16(vdupq_n_u16(0x00FF), vrev32q_u16(px16), px16));
 }
 
 template <class Arch>
@@ -106,7 +97,7 @@ static MOZ_ALWAYS_INLINE xsimd::batch<uint32_t, Arch> UnpremultiplyLookup_SIMD(
 
   // Load all of the interleaved low and high portions of the reciprocals
   // and combine them a single vector as lo1 hi1 lo2 hi2 lo3 hi3 lo4 hi4
-  return vreinterpretq_u16_u32(vld1q_lane_u32(
+  return vld1q_lane_u32(
       &sUnpremultiplyTable_NEON[alphaBuf[7]],
       vld1q_lane_u32(
           &sUnpremultiplyTable_NEON[alphaBuf[5]],
@@ -115,7 +106,7 @@ static MOZ_ALWAYS_INLINE xsimd::batch<uint32_t, Arch> UnpremultiplyLookup_SIMD(
                                         vdupq_n_u32(0), 0),
                          1),
           2),
-      3));
+      3);
 }
 
 template <class Arch>
@@ -128,7 +119,8 @@ static MOZ_ALWAYS_INLINE xsimd::batch<uint8_t, Arch> UnpremultiplyReverse_SIMD(
   // Transpose the interleaved low/high portions so that we produce
   // two separate duplicated vectors for the low and high portions respectively:
   // lo1 lo1 lo2 lo2 lo3 lo3 lo4 lo4 and hi1 hi1 hi2 hi2 hi3 hi3 hi4 hi4
-  uint16x8x2_t q1234lohi = vtrnq_u16(aRecip, aRecip);
+  uint16x8_t recip16 = vreinterpretq_u16_u32(aRecip);
+  uint16x8x2_t q1234lohi = vtrnq_u16(recip16, recip16);
 
   // VQDMULH is a signed multiply that doubles (*2) the result, then takes the
   // high word.  To work around the signedness and the doubling, the low
@@ -137,28 +129,29 @@ static MOZ_ALWAYS_INLINE xsimd::batch<uint8_t, Arch> UnpremultiplyReverse_SIMD(
   // by 2 as a side-effect of being shifted for storage. Thus the output scale
   // of doing a normal multiply by the high portion and the VQDMULH by the low
   // portion are both doubled and can be safely added together. The resulting
-  // sum just needs to be halved (via VHADD) to thus cancel out the doubling.
-  // All this combines to produce a reciprocal multiply of the form:
-  // rb = ((rb * hi) + ((rb * lo * 2) >> 16)) / 2
-  auto rb = vhaddq_u16(vmulq_u16(aRb, q1234lohi.val[1]),
-                       vreinterpretq_u16_s16(vqdmulhq_s16(
-                           vreinterpretq_s16_u16(aRb),
-                           vreinterpretq_s16_u16(q1234lohi.val[0]))));
+  // sum just needs to be rounded and halved (via VRHADD) to cancel the
+  // doubling. All this combines to produce a reciprocal multiply of the form:
+  // rb = ((rb * hi) + ((rb * lo * 2) >> 16) + 1) / 2
+  auto rb = vrhaddq_u16(vmulq_u16(aRb, q1234lohi.val[1]),
+                        vreinterpretq_u16_s16(vqdmulhq_s16(
+                            vreinterpretq_s16_u16(aRb),
+                            vreinterpretq_s16_u16(q1234lohi.val[0]))));
 
-  // ga = ((ga * hi) + ((ga * lo * 2) >> 16)) / 2
-  auto ga = vhaddq_u16(vmulq_u16(aGa, q1234lohi.val[1]),
-                       vreinterpretq_u16_s16(vqdmulhq_s16(
-                           vreinterpretq_s16_u16(aGa),
-                           vreinterpretq_s16_u16(q1234lohi.val[0]))));
+  // ga = ((ga * hi) + ((ga * lo * 2) >> 16) + 1) / 2
+  auto ga = vrhaddq_u16(vmulq_u16(aGa, q1234lohi.val[1]),
+                        vreinterpretq_u16_s16(vqdmulhq_s16(
+                            vreinterpretq_s16_u16(aGa),
+                            vreinterpretq_s16_u16(q1234lohi.val[0]))));
 
   // Combine to the final pixel with ((rb | (ga << 8)) & ~0xFF000000) | (aSrc &
   // 0xFF000000), which inserts back in the original alpha value unchanged.
-  return vbslq_u16(vreinterpretq_u16_u32(vdupq_n_u32(0xFF000000)), aSrc,
-                   vsliq_n_u16(rb, ga, 8));
+  return vreinterpretq_u8_u16(
+      vbslq_u16(vreinterpretq_u16_u32(vdupq_n_u32(0xFF000000)),
+                vreinterpretq_u16_u8(aSrc), vsliq_n_u16(rb, ga, 8)));
 }
 
 template <class Arch>
-  requires std::same_as<Arch, xsimd::neon> || std::same_as<Arch, xsimd::neon64>
+  requires std::same_as<Arch, xsimd::neon64>
 static MOZ_ALWAYS_INLINE xsimd::batch<uint8_t, Arch> LoadRemainderRGB_SIMD(
     const uint8_t* aSrc, size_t aLength) {
   // Load aLength (1-4) packed RGB pixels (3-12 bytes) without reading past the

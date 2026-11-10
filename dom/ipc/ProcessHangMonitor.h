@@ -65,7 +65,6 @@ class ProcessHangMonitor final : public nsIObserver {
   enum SlowScriptAction {
     Continue,
     Terminate,
-    StartDebugger,
   };
   SlowScriptAction NotifySlowScript(nsIBrowserChild* aBrowserChild,
                                     const char* aFileName,
@@ -74,10 +73,8 @@ class ProcessHangMonitor final : public nsIObserver {
 
   void NotifyPluginHang(uint32_t aPluginId);
 
-  bool IsDebuggerStartupComplete();
-
-  void InitiateCPOWTimeout();
-  bool ShouldTimeOutCPOWs();
+  void InitiateReplyTimeout();
+  bool ShouldTimeOutReplies();
 
   nsresult Dispatch(already_AddRefed<nsIRunnable> aRunnable);
   bool IsOnThread();
@@ -85,7 +82,7 @@ class ProcessHangMonitor final : public nsIObserver {
  private:
   static ProcessHangMonitor* sInstance;
 
-  Atomic<bool> mCPOWTimeout;
+  Atomic<bool> mReplyTimeout;
 
   nsCOMPtr<nsIThread> mThread;
 };

@@ -164,6 +164,23 @@
     get disableUserActions() {
       return this.getAttribute("disableUserActions") == "true";
     }
+
+    /**
+     * overriding
+     *
+     * With the noentertoggle attribute, Enter only commits an inline edit and
+     * otherwise reaches the containing panel or dialog.
+     *
+     * @param {KeyboardEvent} event
+     * @returns {boolean} Whether the tree handled the key.
+     */
+    _handleEnter(event) {
+      if (this.hasAttribute("noentertoggle") && !this._editingColumn) {
+        return false;
+      }
+      return super._handleEnter(event);
+    }
+
     /**
      * overriding
      *
@@ -310,7 +327,24 @@
     }
 
     get draggableSelection() {
-      return this.selectedNodes;
+      // Exclude nodes that have a selected container ancestor, however far
+      // up the tree: dragging a container already carries its descendants
+      // along, so including one of them separately would move it to the
+      // drop target's level instead of keeping it nested under its
+      // ancestor. Ancestors are checked directly (rather than relying on
+      // encountering them while iterating the selection, as
+      // removableSelectionRanges above does) since an intermediate
+      // ancestor may not itself be selected, e.g. selecting a grandparent
+      // and a grandchild but not the container in between.
+      let selectedNodes = new Set(this.selectedNodes);
+      return [...selectedNodes].filter(node => {
+        for (let ancestor = node.parent; ancestor; ancestor = ancestor.parent) {
+          if (selectedNodes.has(ancestor)) {
+            return false;
+          }
+        }
+        return true;
+      });
     }
 
     get selectedNode() {

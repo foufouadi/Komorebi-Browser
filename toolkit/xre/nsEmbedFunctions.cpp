@@ -24,7 +24,6 @@
 #  endif
 #  include "mozilla/ScopeExit.h"
 #  include "mozilla/WinDllServices.h"
-#  include "mozilla/WindowsBCryptInitialization.h"
 #  include "WinUtils.h"
 #endif
 
@@ -82,7 +81,6 @@
 
 #include "GMPProcessChild.h"
 #include "mozilla/gfx/GPUProcessImpl.h"
-#include "mozilla/net/SocketProcessImpl.h"
 
 #include "ProfilerControl.h"
 
@@ -155,7 +153,7 @@ const char* XRE_GeckoProcessTypeToString(GeckoProcessType aProcessType) {
                            webidl_typename, allcaps_name)                     \
   case GeckoProcessType::GeckoProcessType_##enum_name:                        \
     return string_name;
-#include "mozilla/GeckoProcessTypes.h"
+#include "mozilla/GeckoProcessTypes.inc"
 #undef GECKO_PROCESS_TYPE
     default:
       return "invalid";
@@ -471,7 +469,6 @@ nsresult XRE_InitChildProcess(int aArgc, char* aArgv[],
     case GeckoProcessType_IPDLUnitTest:
     case GeckoProcessType_VR:
     case GeckoProcessType_RDD:
-    case GeckoProcessType_Socket:
     case GeckoProcessType_Utility:
       // Content processes need the XPCOM/chromium frankenventloop
       uiLoopType = MessageLoop::TYPE_MOZILLA_CHILD;
@@ -486,13 +483,6 @@ nsresult XRE_InitChildProcess(int aArgc, char* aArgv[],
       uiLoopType = MessageLoop::TYPE_UI;
       break;
   }
-
-#if defined(XP_WIN)
-  {
-    DebugOnly<bool> result = mozilla::WindowsBCryptInitialization();
-    MOZ_ASSERT(result);
-  }
-#endif  // defined(XP_WIN)
 
   {
     // This is a lexical scope for the MessageLoop below.  We want it
@@ -513,8 +503,8 @@ nsresult XRE_InitChildProcess(int aArgc, char* aArgv[],
 
         case GeckoProcessType_Content:
           ioInterposerGuard.Init();
-          process = MakeUnique<ContentProcess>(std::move(*clientChannel),
-                                               *parentPID, messageChannelId);
+          process = std::make_unique<ContentProcess>(
+              std::move(*clientChannel), *parentPID, messageChannelId);
           break;
 
         case GeckoProcessType_IPDLUnitTest:
@@ -525,33 +515,27 @@ nsresult XRE_InitChildProcess(int aArgc, char* aArgv[],
           break;
 
         case GeckoProcessType_GMPlugin:
-          process = MakeUnique<gmp::GMPProcessChild>(
+          process = std::make_unique<gmp::GMPProcessChild>(
               std::move(*clientChannel), *parentPID, messageChannelId);
           break;
 
         case GeckoProcessType_GPU:
-          process = MakeUnique<gfx::GPUProcessImpl>(
+          process = std::make_unique<gfx::GPUProcessImpl>(
               std::move(*clientChannel), *parentPID, messageChannelId);
           break;
 
         case GeckoProcessType_VR:
-          process = MakeUnique<gfx::VRProcessChild>(
+          process = std::make_unique<gfx::VRProcessChild>(
               std::move(*clientChannel), *parentPID, messageChannelId);
           break;
 
         case GeckoProcessType_RDD:
-          process = MakeUnique<RDDProcessImpl>(std::move(*clientChannel),
-                                               *parentPID, messageChannelId);
-          break;
-
-        case GeckoProcessType_Socket:
-          ioInterposerGuard.Init();
-          process = MakeUnique<net::SocketProcessImpl>(
+          process = std::make_unique<RDDProcessImpl>(
               std::move(*clientChannel), *parentPID, messageChannelId);
           break;
 
         case GeckoProcessType_Utility:
-          process = MakeUnique<ipc::UtilityProcessImpl>(
+          process = std::make_unique<ipc::UtilityProcessImpl>(
               std::move(*clientChannel), *parentPID, messageChannelId);
           break;
 
@@ -692,8 +676,8 @@ already_AddRefed<TestShellParent> GetOrCreateTestShellParent() {
     // this and you're sure you wouldn't be better off writing a "browser"
     // chrome mochitest where you can have multiple types of content
     // processes.
-    TestShellContentParent() =
-        ContentParent::GetNewOrUsedBrowserProcess(DEFAULT_REMOTE_TYPE);
+    TestShellContentParent() = ContentParent::GetNewOrUsedBrowserProcess(
+        mozilla::dom::RemoteType::SharedWeb({}));
   } else if (TestShellContentParent()->IsShuttingDown()) {
     return nullptr;
   }

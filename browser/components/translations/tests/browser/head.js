@@ -8,6 +8,10 @@ Services.scriptloader.loadSubScript(
   this
 );
 
+const { LanguageDetector: PageLanguageDetector } = ChromeUtils.importESModule(
+  "resource://gre/modules/translations/LanguageDetector.sys.mjs"
+);
+
 /**
  * Converts milliseconds to seconds.
  *
@@ -1167,6 +1171,69 @@ class TranslationsBencher {
  */
 class SharedTranslationsTestUtils {
   /**
+   * Loads or reloads a PDF and waits for its first page's text layer to render.
+   *
+   * @param {object} options
+   * @param {MozBrowser} options.browser - The browser containing the PDF viewer.
+   * @param {string} options.url - The PDF URL.
+   * @param {boolean} [options.reload=false] - Whether to reload the current PDF.
+   * @returns {Promise<void>}
+   */
+  static async loadPdfPage({ browser, url, reload = false }) {
+    const rendered = BrowserTestUtils.waitForContentEvent(
+      browser,
+      "textlayerrendered",
+      false,
+      event => {
+        const document = event.target.ownerDocument || event.target;
+
+        return Boolean(
+          document.querySelector(
+            ".page[data-page-number='1'] .textLayer .endOfContent"
+          )
+        );
+      },
+      true
+    );
+    const loaded = BrowserTestUtils.browserLoaded(browser, { wantLoad: url });
+
+    if (reload) {
+      browser.reload();
+    } else {
+      BrowserTestUtils.startLoadingURIString(browser, url);
+    }
+
+    await Promise.all([loaded, rendered]);
+  }
+
+  /**
+   * Asserts the detected page language and confidence.
+   *
+   * @param {object} options
+   * @param {MozBrowser} options.browser - The browser containing the document.
+   * @param {string} options.language - The expected BCP-47 language tag.
+   * @param {boolean} options.confident - The expected confidence.
+   * @returns {Promise<void>}
+   */
+  static async assertDetectedPageLanguage({ browser, language, confident }) {
+    const metadata = await requestDocumentLanguageMetadata(browser);
+    const detected = await PageLanguageDetector.detectLanguage(
+      metadata.textSample
+    );
+
+    is(
+      detected.language,
+      language,
+      "The document text has the expected language"
+    );
+    is(
+      detected.confident,
+      confident,
+      "The document language detection has the expected confidence"
+    );
+  }
+
+  /**
    * Asserts that the specified element currently has focus.
    *
    * @param {Element} element - The element to check for focus.
@@ -1333,6 +1400,58 @@ class SharedTranslationsTestUtils {
  */
 class FullPageTranslationsTestUtils {
   /**
+   * Asserts that a page cannot offer or start full-page translations.
+   *
+   * @param {object} options
+   * @param {MozBrowser} options.browser - The browser containing the restricted page.
+   * @param {LanguagePair} options.languagePair - The translation to attempt.
+   * @returns {Promise<void>}
+   */
+  static async assertPageTranslationIsRestricted({ browser, languagePair }) {
+    const actor = TranslationsParent.getTranslationsActor(browser);
+
+    await actor.maybeOfferTranslations();
+
+    is(
+      actor.languageState.requestedLanguagePair,
+      null,
+      "The restricted page is not automatically translated"
+    );
+    await FullPageTranslationsTestUtils.assertTranslationsButton(
+      { button: false },
+      "The URL-bar translations button is hidden on the restricted page"
+    );
+
+    await actor.translate(languagePair, false);
+    is(
+      actor.languageState.requestedLanguagePair,
+      null,
+      "Explicit full-page translation requests are restricted"
+    );
+
+    const shown = BrowserTestUtils.waitForEvent(
+      window.PanelUI.mainView,
+      "ViewShown"
+    );
+    window.PanelUI.show();
+    await shown;
+
+    try {
+      ok(
+        document.getElementById("appMenu-translate-button").disabled,
+        "The app-menu translate button is disabled on the restricted page"
+      );
+    } finally {
+      const hidden = BrowserTestUtils.waitForEvent(
+        window.PanelUI.panel,
+        "popuphidden"
+      );
+      window.PanelUI.hide();
+      await hidden;
+    }
+  }
+
+  /**
    * A collection of element visibility expectations for the default panel view.
    */
   static #defaultViewVisibilityExpectations = {
@@ -1345,6 +1464,165 @@ class FullPageTranslationsTestUtils {
     toLabel: true,
     translateButton: true,
   };
+
+  /**
+   * Verifies that newly intersecting and mutated content recovers from repeated
+   * engine idle timeouts.
+   *
+   * @param {object} options
+   * @param {boolean} options.keepProcessAlive
+   * @returns {Promise<void>}
+   */
+  static async assertIntersectionsAfterEngineIdleTimeouts({
+    keepProcessAlive,
+  }) {
+    const { cleanup, resolveDownloads, runInPage } = await loadTestPage({
+      page: SPANISH_PAGE_URL,
+      languagePairs: LANGUAGE_PAIRS,
+      prefs: keepProcessAlive ? [["browser.ml.enable", true]] : [],
+    });
+    let processKeepAlive = null;
+
+    try {
+      processKeepAlive = keepProcessAlive
+        ? await TranslationsEngineTestUtils.keepInferenceProcessAlive()
+        : null;
+      const waitForEngineIdleTimeout = keepProcessAlive
+        ? () =>
+            TranslationsEngineTestUtils.waitForIdleTimeoutWithProcessAlive(
+              processKeepAlive.engineParent,
+              { sourceLanguage: "es", targetLanguage: "en" }
+            )
+        : () =>
+            TranslationsEngineTestUtils.waitForIdleTimeout({
+              sourceLanguage: "es",
+              targetLanguage: "en",
+            });
+
+      await FullPageTranslationsTestUtils.assertTranslationsButton(
+        { button: true },
+        "The translations button is visible."
+      );
+
+      await FullPageTranslationsTestUtils.assertPageIsNotTranslated(runInPage);
+
+      await FullPageTranslationsTestUtils.openPanel({
+        expectedFromLanguage: "es",
+        expectedToLanguage: "en",
+        onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewIntro,
+      });
+
+      await FullPageTranslationsTestUtils.clickTranslateButton({
+        downloadHandler: resolveDownloads,
+      });
+
+      await FullPageTranslationsTestUtils.assertOnlyIntersectingNodesAreTranslated(
+        {
+          fromLanguage: "es",
+          toLanguage: "en",
+          runInPage,
+        }
+      );
+
+      info("Wait for the initial engine to shut down after its idle timeout.");
+      await waitForEngineIdleTimeout();
+
+      await scrollToBottomOfPage(runInPage);
+      await resolveDownloads(1);
+      await FullPageTranslationsTestUtils.waitForAllPendingTranslationsToComplete(
+        runInPage
+      );
+      await scrollToBottomOfPage(runInPage);
+
+      await FullPageTranslationsTestUtils.assertPageFinalParagraphContentIsTranslated(
+        {
+          fromLanguage: "es",
+          toLanguage: "en",
+          runInPage,
+          message:
+            "The newly intersecting final paragraph is translated after the first idle timeout.",
+        }
+      );
+
+      info(
+        "Wait for the replacement engine to shut down after its idle timeout."
+      );
+      await waitForEngineIdleTimeout();
+
+      info("Mutate the out-of-range H1 before scrolling back to the top.");
+      await runInPage(async TranslationsTest => {
+        const { getH1 } = TranslationsTest.getSelectors();
+        getH1().innerText =
+          "Este contenido se modificó después del tiempo de espera.";
+      });
+
+      await FullPageTranslationsTestUtils.waitForAllPendingTranslationsToComplete(
+        runInPage
+      );
+
+      await runInPage(async TranslationsTest => {
+        const { getH1 } = TranslationsTest.getSelectors();
+        await TranslationsTest.assertTranslationResult(
+          "The out-of-range H1 remains untranslated.",
+          getH1,
+          "Este contenido se modificó después del tiempo de espera."
+        );
+      });
+
+      await scrollToTopOfPage(runInPage);
+      await resolveDownloads(1);
+      await FullPageTranslationsTestUtils.waitForAllPendingTranslationsToComplete(
+        runInPage
+      );
+
+      await runInPage(async TranslationsTest => {
+        const { getH1 } = TranslationsTest.getSelectors();
+        await TranslationsTest.assertTranslationResult(
+          "The H1 is translated after intersecting following the second idle timeout.",
+          getH1,
+          "ESTE CONTENIDO SE MODIFICÓ DESPUÉS DEL TIEMPO DE ESPERA. [es to en]"
+        );
+      });
+
+      info(
+        "Wait for the replacement engine to shut down after its idle timeout."
+      );
+      await waitForEngineIdleTimeout();
+
+      info("Mutate the H1 while it is within the viewport.");
+      const { promise: animationPromise, resolve } = Promise.withResolvers();
+      requestAnimationFrame(() => {
+        requestAnimationFrame(resolve);
+      });
+
+      await runInPage(async TranslationsTest => {
+        const { getH1 } = TranslationsTest.getSelectors();
+        getH1().innerText =
+          "Este contenido visible se modificó después del tiempo de espera.";
+      });
+
+      await animationPromise;
+      await resolveDownloads(1);
+      await FullPageTranslationsTestUtils.waitForAllPendingTranslationsToComplete(
+        runInPage
+      );
+
+      await runInPage(async TranslationsTest => {
+        const { getH1 } = TranslationsTest.getSelectors();
+        await TranslationsTest.assertTranslationResult(
+          "The mutated in-range H1 is translated after the third idle timeout.",
+          getH1,
+          "ESTE CONTENIDO VISIBLE SE MODIFICÓ DESPUÉS DEL TIEMPO DE ESPERA. [es to en]"
+        );
+      });
+    } finally {
+      try {
+        await processKeepAlive?.release();
+      } finally {
+        await cleanup();
+      }
+    }
+  }
 
   /**
    * Asserts that the state of a checkbox with a given dataL10nId is
@@ -2322,10 +2600,10 @@ class FullPageTranslationsTestUtils {
     let callback;
     if (endToEndTest) {
       callback = async TranslationsTest => {
-        const { getFinalParagraph } = TranslationsTest.getSelectors();
+        const { getLastOfTypeParagraph } = TranslationsTest.getSelectors();
         await TranslationsTest.assertTranslationResult(
           "The page's final paragraph is translated.",
-          getFinalParagraph,
+          getLastOfTypeParagraph,
           [
             // TODO (Bug 1967764) We need to investigate why some machines may produce
             // a different translated output, given the same models and the same WASM binary.
@@ -2336,10 +2614,10 @@ class FullPageTranslationsTestUtils {
       };
     } else {
       callback = async (TranslationsTest, { fromLang, toLang }) => {
-        const { getFinalParagraph } = TranslationsTest.getSelectors();
+        const { getLastOfTypeParagraph } = TranslationsTest.getSelectors();
         await TranslationsTest.assertTranslationResult(
           "The page's final paragraph is translated.",
-          getFinalParagraph,
+          getLastOfTypeParagraph,
           `— PUES, AUNQUE MOVÁIS MÁS BRAZOS QUE LOS DEL GIGANTE BRIAREO, ME LO HABÉIS DE PAGAR. [${fromLang} to ${toLang}]`
         );
       };
@@ -2366,10 +2644,10 @@ class FullPageTranslationsTestUtils {
 
     info("Checking that the page's final paragraph is not translated");
     await runInPage(async TranslationsTest => {
-      const { getFinalParagraph } = TranslationsTest.getSelectors();
+      const { getLastOfTypeParagraph } = TranslationsTest.getSelectors();
       await TranslationsTest.assertTranslationResult(
         "The page's final paragraph is not translated and is in the original Spanish.",
-        getFinalParagraph,
+        getLastOfTypeParagraph,
         "— Pues, aunque mováis más brazos que los del gigante Briareo, me lo habéis de pagar."
       );
     });
@@ -2400,19 +2678,19 @@ class FullPageTranslationsTestUtils {
     let callback;
     if (endToEndTest) {
       callback = async TranslationsTest => {
-        const { getFinalParagraphTitle } = TranslationsTest.getSelectors();
+        const { getLastOfTypeParagraph } = TranslationsTest.getSelectors();
         await TranslationsTest.assertTranslationResult(
           "The final paragraph's title attribute is translated.",
-          getFinalParagraphTitle,
+          () => getLastOfTypeParagraph()?.getAttribute("title"),
           "This is the title of the final paragraph"
         );
       };
     } else {
       callback = async (TranslationsTest, { fromLang, toLang }) => {
-        const { getFinalParagraphTitle } = TranslationsTest.getSelectors();
+        const { getLastOfTypeParagraph } = TranslationsTest.getSelectors();
         await TranslationsTest.assertTranslationResult(
           "The final paragraph's title attribute is translated.",
-          getFinalParagraphTitle,
+          () => getLastOfTypeParagraph()?.getAttribute("title"),
           `ESTE ES EL TÍTULO DEL ÚLTIMO PÁRRAFO [${fromLang} to ${toLang}]`
         );
       };
@@ -2441,10 +2719,10 @@ class FullPageTranslationsTestUtils {
       "Checking that the final paragraph's title attribute is not translated"
     );
     await runInPage(async TranslationsTest => {
-      const { getFinalParagraphTitle } = TranslationsTest.getSelectors();
+      const { getLastOfTypeParagraph } = TranslationsTest.getSelectors();
       await TranslationsTest.assertTranslationResult(
         "The final paragraph's title attribute is not translated and is in the original Spanish.",
-        getFinalParagraphTitle,
+        () => getLastOfTypeParagraph()?.getAttribute("title"),
         "Este es el título del último párrafo"
       );
     });
@@ -2626,6 +2904,16 @@ class FullPageTranslationsTestUtils {
   }
 
   /**
+   * Asserts that the FullPageTranslationsPanel target-language label has the expected l10nId.
+   *
+   * @param {string} l10nId - The expected data-l10n-id of the target-language label.
+   */
+  static #assertPanelToLabelL10nId(l10nId) {
+    const { toLabel } = FullPageTranslationsPanel.elements;
+    SharedTranslationsTestUtils._assertL10nId(toLabel, l10nId);
+  }
+
+  /**
    * Asserts that the FullPageTranslationsPanel error has the expected l10nId.
    *
    * @param {string} l10nId - The expected data-l10n-id of the error.
@@ -2667,6 +2955,9 @@ class FullPageTranslationsTestUtils {
     });
     FullPageTranslationsTestUtils.#assertPanelHeaderL10nId(
       "translations-panel-header"
+    );
+    FullPageTranslationsTestUtils.#assertPanelToLabelL10nId(
+      "translations-panel-to-label"
     );
   }
 
@@ -2787,6 +3078,9 @@ class FullPageTranslationsTestUtils {
     });
     FullPageTranslationsTestUtils.#assertPanelHeaderL10nId(
       "translations-panel-revisit-header"
+    );
+    FullPageTranslationsTestUtils.#assertPanelToLabelL10nId(
+      "translations-panel-revisit-to-label"
     );
   }
 
@@ -3484,6 +3778,92 @@ class FullPageTranslationsTestUtils {
  */
 class SelectTranslationsTestUtils {
   /**
+   * Waits for a completed Select Translations request to release its port.
+   *
+   * @returns {Promise<void>}
+   */
+  static async waitForPortToClose() {
+    const engineParent = await EngineProcess.getTranslationsEngineParent();
+
+    await waitForCondition(
+      async () =>
+        (await engineParent.getEngineStateForTests()).activePortCount === 0,
+      "Waiting for Select Translations to release its client port."
+    );
+  }
+
+  /**
+   * Verifies that Select Translations can translate another selection after an
+   * idle timeout.
+   *
+   * @param {object} options
+   * @param {boolean} options.keepProcessAlive
+   * @returns {Promise<void>}
+   */
+  static async assertTranslationAfterEngineIdleTimeout({ keepProcessAlive }) {
+    const { cleanup, runInPage, resolveDownloads } = await loadTestPage({
+      page: SELECT_TEST_PAGE_URL,
+      languagePairs: LANGUAGE_PAIRS,
+      prefs: [
+        ["browser.translations.select.enable", true],
+        ...(keepProcessAlive ? [["browser.ml.enable", true]] : []),
+      ],
+    });
+    let processKeepAlive = null;
+
+    try {
+      processKeepAlive = keepProcessAlive
+        ? await TranslationsEngineTestUtils.keepInferenceProcessAlive()
+        : null;
+
+      await SelectTranslationsTestUtils.openPanel(runInPage, {
+        selectFrenchSection: true,
+        openAtFrenchSection: true,
+        expectedFromLanguage: "fr",
+        expectedToLanguage: "en",
+        expectedDownloads: 1,
+        downloadHandler: resolveDownloads,
+        onOpenPanel: SelectTranslationsTestUtils.assertPanelViewTranslated,
+      });
+      await SelectTranslationsTestUtils.waitForPortToClose();
+
+      await SelectTranslationsTestUtils.clickDoneButton();
+
+      info("Wait for the engine to shut down after its idle timeout.");
+      if (keepProcessAlive) {
+        await TranslationsEngineTestUtils.waitForIdleTimeoutWithProcessAlive(
+          processKeepAlive.engineParent,
+          { sourceLanguage: "fr", targetLanguage: "en" }
+        );
+      } else {
+        await TranslationsEngineTestUtils.waitForIdleTimeout({
+          sourceLanguage: "fr",
+          targetLanguage: "en",
+        });
+      }
+
+      await SelectTranslationsTestUtils.openPanel(runInPage, {
+        selectFrenchSentence: true,
+        openAtFrenchSentence: true,
+        expectedFromLanguage: "fr",
+        expectedToLanguage: "en",
+        expectedDownloads: 1,
+        downloadHandler: resolveDownloads,
+        onOpenPanel: SelectTranslationsTestUtils.assertPanelViewTranslated,
+      });
+      await SelectTranslationsTestUtils.waitForPortToClose();
+
+      await SelectTranslationsTestUtils.clickDoneButton();
+    } finally {
+      try {
+        await processKeepAlive?.release();
+      } finally {
+        await cleanup();
+      }
+    }
+  }
+
+  /**
    * Opens the context menu then asserts properties of the translate-selection item in the context menu.
    *
    * @param {Function} runInPage - A content-exposed function to run within the context of the page.
@@ -3781,7 +4161,9 @@ class SelectTranslationsTestUtils {
       "The textarea should not have the translating class."
     );
     const isFullPageTranslationsRestrictedForPage =
-      TranslationsParent.isFullPageTranslationsRestrictedForPage(gBrowser);
+      TranslationsParent.isFullPageTranslationsRestrictedForPage(
+        gBrowser.selectedBrowser
+      );
     SelectTranslationsTestUtils.#assertPanelElementVisibility({
       copyButton: true,
       doneButtonPrimary: true,
@@ -4036,7 +4418,9 @@ class SelectTranslationsTestUtils {
   static async assertPanelViewActivelyTranslating() {
     const { textArea } = SelectTranslationsPanel.elements;
     const isFullPageTranslationsRestrictedForPage =
-      TranslationsParent.isFullPageTranslationsRestrictedForPage(gBrowser);
+      TranslationsParent.isFullPageTranslationsRestrictedForPage(
+        gBrowser.selectedBrowser
+      );
     await SelectTranslationsTestUtils.waitForPanelState("translating");
     ok(
       textArea.classList.contains("translating"),
@@ -4072,7 +4456,9 @@ class SelectTranslationsTestUtils {
       "select-translations-panel-translating-placeholder-text"
     );
     const isFullPageTranslationsRestrictedForPage =
-      TranslationsParent.isFullPageTranslationsRestrictedForPage(gBrowser);
+      TranslationsParent.isFullPageTranslationsRestrictedForPage(
+        gBrowser.selectedBrowser
+      );
     is(
       textArea.value,
       expected,
@@ -4100,7 +4486,9 @@ class SelectTranslationsTestUtils {
     const fromLanguage = fromMenuList.value;
     const toLanguage = toMenuList.value;
     const isFullPageTranslationsRestrictedForPage =
-      TranslationsParent.isFullPageTranslationsRestrictedForPage(gBrowser);
+      TranslationsParent.isFullPageTranslationsRestrictedForPage(
+        gBrowser.selectedBrowser
+      );
 
     SelectTranslationsTestUtils.#assertPanelTextAreaDirection(toLanguage);
     SelectTranslationsTestUtils.#assertConditionalUIEnabled({

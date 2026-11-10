@@ -23,6 +23,11 @@ prefs = [
   "network.xhr.block_sync_system_requests=false",
 ]
 
+["test_TextEventDispatcherBatch.xhtml"]
+support-files = [
+  "window_TextEventDispatcherBatch.xhtml",
+]
+
 ["test_bug120684.xhtml"]
 
 ["test_bug206691.xhtml"]
@@ -67,6 +72,8 @@ support-files = ["../file_bug357450.js"]
 ["test_bug752226-4.xhtml"]
 
 ["test_bug765993.html"]
+
+["test_bug2084355.html"]
 
 ["test_bug780199.xhtml"]
 
@@ -119,12 +126,17 @@ support-files = [
 
 ["test_input_value_set_preserve_undo.xhtml"]
 
+["test_intersectionobserver_popup.xhtml"]
+support-files = [
+  "file_intersectionobserver_popup.xhtml",
+  "file_intersectionobserver_popup_container.xhtml",
+]
+
 ["test_nsITextInputProcessor.xhtml"]
 
 ["test_nsITextInputProcessorCallback_at_changing_default_value_of_textarea.html"]
 
 ["test_permission_hasValidTransientUserActivation.xhtml"]
-support-files = ["../dummy.html"]
 
 ["test_range_getClientRectsAndTexts.html"]
 

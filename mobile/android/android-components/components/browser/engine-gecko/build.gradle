@@ -17,7 +17,6 @@ buildscript {
 plugins {
     id 'com.android.library'
     alias(libs.plugins.dependency.analysis)
-    alias(libs.plugins.python.envs.plugin)
     id 'org.mozilla.nimbus-gradle-plugin'
 }
 
@@ -92,11 +91,6 @@ nimbus {
     // The path to the Nimbus feature manifest file
     manifestFile = "geckoview.fml.yaml"
 
-    channels = [
-            debug: "debug",
-            release: "release",
-    ]
-
     // This is an optional value, and updates the plugin to use a copy of application
     // services. The path should be relative to the root project directory.
     // *NOTE*: This example will not work for all projects, but should work for Fenix, Focus, and Android Components
@@ -157,7 +151,9 @@ def computeArtifactId() {
 
 def getGeckoViewDependency() {
     // on try, relax geckoview version pin to allow for --use-existing-task
-    if ('https://hg.mozilla.org/try' == System.env.GECKO_HEAD_REPOSITORY) {
+    // (MOZ_SOURCE_REPO names the push's repository even when the task clones
+    // it from the git mirror, GECKO_HEAD_REPOSITORY then names the mirror)
+    if ('https://hg.mozilla.org/try' == System.env.MOZ_SOURCE_REPO) {
         rootProject.logger.lifecycle("Getting geckoview on try: ${computeArtifactId()}:+")
         return "org.mozilla.geckoview:${computeArtifactId()}:+"
     }

@@ -33,8 +33,16 @@ EXTRA_JS_MODULES += [
     "ContentClassifierRemoteSettingsClient.sys.mjs",
 ]
 
+TESTING_JS_MODULES += [
+    "test/ContentClassifierTestUtils.sys.mjs",
+]
+
 XPCOM_MANIFESTS += [
     "components.conf",
+]
+
+XPCSHELL_TESTS_MANIFESTS += [
+    "test/unit/xpcshell.toml",
 ]
 
 BROWSER_CHROME_MANIFESTS += [
@@ -44,3 +52,8 @@ BROWSER_CHROME_MANIFESTS += [
 FINAL_LIBRARY = "xul"
 
 include("/ipc/chromium/chromium-config.mozbuild")
+
+SOURCE_HEADERS += [
+    "ContentClassifierFeatureUtils.h",
+    "ContentClassifierPrefMirror.h",
+]

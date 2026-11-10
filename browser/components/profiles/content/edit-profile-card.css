@@ -17,14 +17,13 @@
 
   #profile-avatar-selector-button {
     position: absolute;
-    bottom: 0;
+    inset-block-end: 0;
     inset-inline-end: 0;
   }
 
   profile-avatar-selector {
     position: absolute;
     inset-inline-start: -140px;
-    z-index: 1;
   }
 }
 
@@ -34,7 +33,15 @@
 }
 
 #profile-name-area label {
-  margin-bottom: var(--space-xsmall);
+  margin-block-end: var(--space-xsmall);
+}
+
+#theme-group::part(label) {
+  font-weight: var(--font-weight);
+}
+
+#theme-group::part(inputs) {
+  margin-block-start: var(--space-xsmall);
 }
 
 #profile-name {
@@ -42,16 +49,16 @@
   margin: 0;
   padding-inline: var(--space-medium);
   padding-block: 1px;
-  min-height: var(--input-text-min-height);
-  border: var(--input-text-border);
+  min-height: var(--input-min-height);
+  border: var(--input-border);
 
   &:focus-visible {
-    outline: var(--focus-outline);
-    outline-offset: var(--focus-outline-offset);
+    outline-offset: unset;
   }
 
   &:invalid {
     border-color: var(--border-color-error);
+    accent-color: var(--border-color-error);
 
     &:not(:focus-visible) {
       outline: none;

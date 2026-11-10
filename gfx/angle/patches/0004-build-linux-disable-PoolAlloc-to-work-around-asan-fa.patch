@@ -1,4 +1,4 @@
-From df25c5bcf1e91df209e03d08259e17ab3fb18e80 Mon Sep 17 00:00:00 2001
+From 3c1e944291ea2dfafe9c6fa91680ac0c585cdcd4 Mon Sep 17 00:00:00 2001
 From: Erich Gubler <erichdongubler@gmail.com>
 Date: Thu, 19 Jan 2023 00:20:06 -0500
 Subject: [PATCH] build(linux): disable `PoolAlloc` to work around `asan`
@@ -12,12 +12,12 @@ We noticed this causing problems in [Firefox CI][failing-ci].
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/BUILD.gn b/BUILD.gn
-index 25b4724b81..4767e34614 100644
+index d6969b427..f6227af7a 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -554,7 +554,7 @@ template("angle_common_lib") {
-       ":includes",
-     ]
+@@ -584,7 +584,7 @@ template("angle_common_lib") {
+       public_deps += [ ":angle_libperfetto" ]
+     }
      public_configs += [ ":angle_common_config" ]
 -    if (angle_has_build && use_fuzzing_engine) {
 +    if (angle_has_build) {
@@ -25,5 +25,5 @@ index 25b4724b81..4767e34614 100644
      }
  
 -- 
-2.54.0
+2.43.0
 

@@ -1,0 +1,46 @@
+schema: 1
+
+bugzilla:
+  product: Core
+  component: "Machine Learning: On Device"
+
+origin:
+  name: parakeet.cpp
+  description: Parakeet (FastConformer) speech recognition in C++ with ggml, incl. cache-aware streaming
+
+  url: https://github.com/mudler/parakeet.cpp
+
+  release: 623a968bccbd2214588df398fcce687cd4218dea (2026-09-29T16:18:01Z).
+  revision: 623a968bccbd2214588df398fcce687cd4218dea
+
+  license: MIT
+
+vendoring:
+  url: https://github.com/mudler/parakeet.cpp
+  source-hosting: github
+  tracking: commit
+
+  skip-vendoring-steps:
+    - update-moz-build
+
+  keep:
+    - moz-overrides.h
+
+  exclude:
+    - "**"
+
+  include:
+    - LICENSE
+    - src
+    - include/parakeet.h
+    - include/parakeet_capi.h
+
+  patches:
+    - parakeet-fd-loading.patch # load a model from an fd (sandboxed process)
+    - parakeet-no-drwav.patch # drop the vendored dr_wav.h dependency (unused: Firefox only feeds PCM)
+    - parakeet-stream-words.patch # typed per-word drain (timing + confidence)
+    - parakeet-no-exceptions.patch # include moz-overrides.h, to build with -fno-exceptions
+    - parakeet-weights-bytes.patch # expose the weights' size, for about:memory
+    - parakeet-chunk-samples.patch # expose the encoder chunk length, to feed one at a time
+    - parakeet-end-utterance.patch # let the host close an utterance (models with no <EOU>)
+    - parakeet-eou-reset-encoder.patch # drop the encoder cache at an <EOU>, as NeMo does

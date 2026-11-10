@@ -71,11 +71,11 @@ async function do_test_script_cache(enableCache) {
       requestData.details
     );
 
-    EventUtils.sendMouseEvent({ type: "mousedown" }, request);
+    clickOnRequestRow(request);
 
-    const wait = waitForDOM(document, "#responseHeaders");
+    const onDomUpdated = waitForDOM(document, "#responseHeaders");
     clickOnSidebarTab(document, "headers");
-    await wait;
+    await onDomUpdated;
 
     const responseScope = document.querySelectorAll(
       "#headers-panel .accordion tr[id^='/responseHeaders']"
@@ -203,11 +203,11 @@ async function do_test_module_cache(enableCache) {
     requestData.details
   );
 
-  EventUtils.sendMouseEvent({ type: "mousedown" }, request);
+  clickOnRequestRow(request);
 
-  const wait = waitForDOM(document, "#responseHeaders");
+  const onDomUpdated = waitForDOM(document, "#responseHeaders");
   clickOnSidebarTab(document, "headers");
-  await wait;
+  await onDomUpdated;
 
   const responseScope = document.querySelectorAll(
     "#headers-panel .accordion tr[id^='/responseHeaders']"

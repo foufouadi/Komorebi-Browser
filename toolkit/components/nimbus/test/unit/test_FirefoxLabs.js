@@ -42,13 +42,13 @@ add_task(async function test_all() {
 
   const { cleanup } = await setupTest({
     init: false,
-    storePath: await NimbusTestUtils.createStoreWith(async store => {
-      await NimbusTestUtils.addEnrollmentForRecipe(preexisting, { store });
-      await NimbusTestUtils.addEnrollmentForRecipe(alreadyEnrolled, { store });
-      await NimbusTestUtils.addEnrollmentForRecipe(preexistingPaused, {
+    populateStore: store => {
+      NimbusTestUtils.addEnrollmentForRecipe(preexisting, { store });
+      NimbusTestUtils.addEnrollmentForRecipe(alreadyEnrolled, { store });
+      NimbusTestUtils.addEnrollmentForRecipe(preexistingPaused, {
         store,
       });
-    }),
+    },
     experiments: [
       NimbusTestUtils.factories.recipe("opt-in-rollout", {
         isFirefoxLabsOptIn: true,
@@ -57,10 +57,9 @@ add_task(async function test_all() {
       {
         ...NimbusTestUtils.factories.recipe("opt-in-experiment", {
           branches: [
-            {
-              ...NimbusTestUtils.factories.recipe.branches[0],
+            NimbusTestUtils.factories.branch("control", {
               firefoxLabsTitle: "title",
-            },
+            }),
           ],
         }),
         isFirefoxLabsOptIn: true,
@@ -76,10 +75,9 @@ add_task(async function test_all() {
         targeting: "false",
       }),
       NimbusTestUtils.factories.recipe("bucketing-fail", {
-        bucketConfig: {
-          ...NimbusTestUtils.factories.recipe.bucketConfig,
+        bucketConfig: NimbusTestUtils.factories.bucketConfig({
           count: 0,
-        },
+        }),
         isFirefoxLabsOptIn: true,
         isRollout: true,
       }),
@@ -194,7 +192,10 @@ add_task(async function test_enroll() {
 
   await labs.enroll(recipe.slug, recipe.branches[0].slug);
   Assert.ok(
-    enrollSpy.calledOnceWith(recipe, "rs-loader", { branchSlug: "control" }),
+    enrollSpy.calledOnceWithExactly(recipe, "rs-loader", {
+      branchSlug: "control",
+      originalPrefValues: undefined,
+    }),
     "ExperimentManager.enroll called"
   );
 

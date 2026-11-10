@@ -15,10 +15,6 @@
   <string name="content_description_menu">Altre opsion</string>
   <!-- Placeholder text shown in the search bar before a user enters text for the default engine -->
   <string name="search_hint">Serca o scrìvi on indiriso</string>
-  <!-- Private Browsing -->
-  <string name="private_browsing_common_myths">Miti da sfatare so ƚa navigasion anonima</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
   <!--
     Home screen icons - Long press shortcuts
 
@@ -27,11 +23,7 @@
   <string name="home_screen_shortcut_open_new_tab_2">Nova scheda</string>
   <!-- Shortcut action to open new private tab -->
   <string name="home_screen_shortcut_open_new_private_tab_2">Nova scheda anonima</string>
-  <!--
-    Browser Fragment
-
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
-  -->
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">Indrio</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">Vanti</string>
@@ -89,10 +81,6 @@
   <string name="search_suggestions_onboarding_title">Parmetare sugerimenti de reserca in sesion anonime?</string>
   <!-- Search suggestion onboarding hint description text, %s is the name of the app (for example "Firefox"). -->
   <string name="search_suggestions_onboarding_text">Cualsiasi testo digità ne ƚa bara degli indirisi de %s el vegnerà condivixo co’l motore de reserca predefinìo.</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!-- Text preview for smaller sized widgets -->
   <string name="search_widget_text_short">Serca</string>
   <!-- Text preview for larger sized widgets -->
@@ -102,10 +90,8 @@
   <!--
     Preferences
 
-    Title for the settings page
+    Preference category for general settings
   -->
-  <string name="settings">Inpostasion</string>
-  <!-- Preference category for general settings -->
   <string name="preferences_category_general">Generaƚe</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">Informasion</string>
@@ -287,12 +273,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">%1$d seƚesionà</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">Ùltimi 7 dì</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">Ùltimi 30 dì</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">Pì veci</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">Nisuna cronoƚogìa disponibiƚe.</string>
   <!--
@@ -487,8 +467,6 @@
   <string name="qr_scanner_dialog_positive">PARMETI</string>
   <!-- QR code scanner prompt dialog positive option to deny navigation to scanned link -->
   <string name="qr_scanner_dialog_negative">NEGA</string>
-  <!-- Tab collection deletion prompt dialog message. %1$s is the collection name. -->
-  <string name="tab_collection_dialog_message">Scanseƚare %1$s?</string>
   <!-- Sample text for accessibility font size -->
   <string name="accessibility_text_size_sample_text_1">Sto cua el xe on testo de exenpio. Mostra n’anteprima de cofà aparirà el testo cò te aumenti o riduxi ƚe dimension de i caratari co sta inpostasion.</string>
   <!-- Summary for Accessibility Text Size Scaling Preference -->
@@ -721,15 +699,4 @@
   <string name="confirm_clear_permission_site">Scanseƚare sto parmeso par sto sito?</string>
   <!-- label shown when there are not site exceptions to show in the site exception settings -->
   <string name="no_site_exceptions">Nisuna ecesion par i siti</string>
-  <!-- Positive action of a dialog asking to delete -->
-  <string name="dialog_delete_positive">Rimovi</string>
-  <!-- Translations feature -->
-
-  <!-- TextField Design System Component -->
-
-  <!-- ==== Terms of use pop up prompt ==== -->
-
-  <!-- ==== Experiment strings. ==== -->
-
-  <!-- ==== End of Terms of use popup prompt. ==== -->
 </resources>

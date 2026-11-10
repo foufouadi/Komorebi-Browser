@@ -38,18 +38,8 @@
       width: 100%;
     }
 
-    h2 {
-      margin-block: 0;
-      font-weight: var(--font-weight);
-      font-size: var(--font-size-root);
-    }
-
     .location-input-wrapper {
       padding-block: 0;
-
-      input {
-        width: 100%;
-      }
     }
   }
 
@@ -267,6 +257,12 @@
       content: url('chrome://browser/skin/weather/night-mostly-cloudy-with-flurries.svg');
     }
   }
+
+  hr {
+    border: 0;
+    border-block-start: 1px solid var(--border-color);
+    width: 100%;
+  }
 }
 
 .weather-info-column {
@@ -314,12 +310,6 @@
       background-image: url('chrome://global/skin/icons/shaft-arrow-down.svg');
     }
   }
-}
-
-hr {
-  border: 0;
-  border-block-start: 1px solid var(--border-color);
-  width: 100%;
 }
 
 .forecast-row {

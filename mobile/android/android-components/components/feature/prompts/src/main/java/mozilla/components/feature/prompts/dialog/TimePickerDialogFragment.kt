@@ -20,6 +20,7 @@ import androidx.annotation.VisibleForTesting
 import androidx.annotation.VisibleForTesting.Companion.PRIVATE
 import androidx.appcompat.app.AlertDialog
 import com.google.android.material.datepicker.CalendarConstraints
+import com.google.android.material.datepicker.CompositeDateValidator
 import com.google.android.material.datepicker.DateValidatorPointBackward
 import com.google.android.material.datepicker.DateValidatorPointForward
 import com.google.android.material.datepicker.MaterialDatePicker
@@ -34,6 +35,7 @@ import mozilla.components.feature.prompts.ext.millisecond
 import mozilla.components.feature.prompts.ext.minute
 import mozilla.components.feature.prompts.ext.second
 import mozilla.components.feature.prompts.ext.toCalendar
+import mozilla.components.feature.prompts.ext.toLocalDayStartAsUtcMillis
 import mozilla.components.feature.prompts.widget.MonthAndYearPicker
 import mozilla.components.feature.prompts.widget.TimePrecisionPicker
 import mozilla.components.support.utils.TimePicker.shouldShowSecondsPicker
@@ -152,12 +154,20 @@ internal class TimePickerDialogFragment :
         timePicker.show(parentFragmentManager, timePicker.toString())
     }
 
+    @VisibleForTesting
+    internal fun buildCalendarConstraints(): CalendarConstraints {
+        val validators = buildList {
+            minimumDate?.let { add(DateValidatorPointForward.from(it.toLocalDayStartAsUtcMillis())) }
+            maximumDate?.let { add(DateValidatorPointBackward.before(it.toLocalDayStartAsUtcMillis())) }
+        }
+        val builder = CalendarConstraints.Builder()
+        if (validators.isNotEmpty()) {
+            builder.setValidator(CompositeDateValidator.allOf(validators))
+        }
+        return builder.build()
+    }
+
     private fun createMaterialDatePickerDialog(isDateTimePicker: Boolean = false) {
-        val constraintsBuilder =
-            CalendarConstraints.Builder().apply {
-                minimumDate?.let { setValidator(DateValidatorPointForward.from(it.time)) }
-                maximumDate?.let { setValidator(DateValidatorPointBackward.before(it.time)) }
-            }
         val initialUtcTime = initialDate.time + TimeZone.getDefault().getOffset(initialDate.time)
 
         val datePicker =
@@ -165,7 +175,7 @@ internal class TimePickerDialogFragment :
                 .setSelection(initialUtcTime)
                 .setPositiveButtonText(R.string.mozac_feature_prompts_set_date)
                 .setNegativeButtonText(R.string.mozac_feature_prompts_cancel)
-                .setCalendarConstraints(constraintsBuilder.build())
+                .setCalendarConstraints(buildCalendarConstraints())
                 .build()
 
         datePicker.addOnPositiveButtonClickListener { selection ->

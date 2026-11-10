@@ -7,12 +7,11 @@ package mozilla.components.browser.session.storage
 import androidx.core.net.toUri
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlin.test.assertNotNull
+import kotlinx.coroutines.test.runTest
 import mozilla.components.browser.state.ext.getUrl
 import mozilla.components.browser.state.state.BrowserState
 import mozilla.components.browser.state.state.EngineState
 import mozilla.components.browser.state.state.ReaderState
-import mozilla.components.browser.state.state.TabGroup
-import mozilla.components.browser.state.state.TabPartition
 import mozilla.components.browser.state.state.TabSessionState
 import mozilla.components.browser.state.state.createTab
 import mozilla.components.browser.state.state.recover.RecoverableTab
@@ -33,7 +32,7 @@ import org.mockito.Mockito.verify
 @RunWith(AndroidJUnit4::class)
 class SessionStorageTest {
     @Test
-    fun `Restored browser state should contain tabs and tab partitions of saved state`() {
+    fun `Restored browser state should contain tabs of saved state`() = runTest {
         // Build the state
 
         val engineSessionState1 = FakeEngineSessionState("engineState1")
@@ -44,22 +43,17 @@ class SessionStorageTest {
         val tab2 = createTab("https://getpocket.com", id = "tab2", contextId = "context2")
         val tab3 = createTab("https://www.firefox.com", id = "tab3", parent = tab1)
 
-        val tabGroup = TabGroup(id = "group1", name = "Group 1", tabIds = setOf("a"))
-        val tabPartition = TabPartition(id = "testFeaturePartition1", tabGroups = listOf(tabGroup))
-        val tabPartitions = mapOf("testFeaturePartition1" to tabPartition)
-
         val state =
             BrowserState(
                 tabs = listOf(tab1, tab2, tab3),
                 selectedTabId = tab1.id,
-                tabPartitions = tabPartitions,
             )
 
         // Persist the state
 
         val engine = FakeEngine()
 
-        val storage = SessionStorage(testContext, engine)
+        val storage = SessionStorage(testContext, engine, applicationScope = this)
         val persisted = storage.save(state)
         assertTrue(persisted)
 
@@ -70,7 +64,6 @@ class SessionStorageTest {
 
         assertEquals(3, restoredState.tabs.size)
         assertEquals("tab1", restoredState.selectedTabId)
-        assertEquals(tabPartitions, restoredState.tabPartitions)
 
         tab1.assertSameAs(restoredState.tabs[0])
         tab2.assertSameAs(restoredState.tabs[1])
@@ -78,7 +71,7 @@ class SessionStorageTest {
     }
 
     @Test
-    fun `Predicate is applied when restoring browser state`() {
+    fun `Predicate is applied when restoring browser state`() = runTest {
         // Build the state
 
         val engineSessionState1 = FakeEngineSessionState("engineState1")
@@ -106,7 +99,7 @@ class SessionStorageTest {
 
         val engine = FakeEngine()
 
-        val storage = SessionStorage(testContext, engine)
+        val storage = SessionStorage(testContext, engine, applicationScope = this)
         val persisted = storage.save(state)
         assertTrue(persisted)
 
@@ -127,7 +120,7 @@ class SessionStorageTest {
     }
 
     @Test
-    fun `Tabs with unreadable URI are not restored when restoring browser state`() {
+    fun `Tabs with unreadable URI are not restored when restoring browser state`() = runTest {
         // Build the state
 
         val engineSessionState1 = FakeEngineSessionState("engineState1")
@@ -148,7 +141,7 @@ class SessionStorageTest {
         val engine = FakeEngine()
         val context = testContext
 
-        val storage = spy(SessionStorage(context, engine))
+        val storage = spy(SessionStorage(context, engine, applicationScope = this))
         doReturn(true).`when`(storage).isUriReadable(tab1.getUrl()!!.toUri())
         doReturn(false).`when`(storage).isUriReadable(tab2.getUrl()!!.toUri())
         val persisted = storage.save(state)
@@ -168,10 +161,10 @@ class SessionStorageTest {
     }
 
     @Test
-    fun `Saving empty state`() {
+    fun `Saving empty state`() = runTest {
         val engine = FakeEngine()
 
-        val storage = spy(SessionStorage(testContext, engine))
+        val storage = spy(SessionStorage(testContext, engine, applicationScope = this))
         storage.save(BrowserState())
 
         verify(storage).clear()
@@ -180,7 +173,7 @@ class SessionStorageTest {
     }
 
     @Test
-    fun `Should return empty browser state after clearing`() {
+    fun `Should return empty browser state after clearing`() = runTest {
         val engine = FakeEngine()
 
         val tab1 = createTab("https://www.mozilla.org", id = "tab1")
@@ -194,7 +187,7 @@ class SessionStorageTest {
 
         // Persist the state
 
-        val storage = SessionStorage(testContext, engine)
+        val storage = SessionStorage(testContext, engine, applicationScope = this)
         val persisted = storage.save(state)
         assertTrue(persisted)
 
@@ -215,7 +208,7 @@ class SessionStorageTest {
      * test input to make the test pass since such an input does exist on actual devices too.
      */
     @Test
-    fun deserializeVersion2BrowsingSessionLegacyOrgJson() {
+    fun deserializeVersion2BrowsingSessionLegacyOrgJson() = runTest {
         // Do not change this string! (See comment above)
         val json =
             """
@@ -227,7 +220,7 @@ class SessionStorageTest {
 
         assertTrue(getFileForEngine(testContext, engine).writeString { json })
 
-        val storage = SessionStorage(testContext, engine)
+        val storage = SessionStorage(testContext, engine, applicationScope = this)
         val browsingSession = storage.restore()
 
         assertNotNull(browsingSession)
@@ -266,7 +259,7 @@ class SessionStorageTest {
      * test input to make the test pass since such an input does exist on actual devices too.
      */
     @Test
-    fun deserializeVersion2BrowsingSessionJsonWriter() {
+    fun deserializeVersion2BrowsingSessionJsonWriter() = runTest {
         // Do not change this string! (See comment above)
         val json =
             """
@@ -278,7 +271,7 @@ class SessionStorageTest {
 
         assertTrue(getFileForEngine(testContext, engine).writeString { json })
 
-        val storage = SessionStorage(testContext, engine)
+        val storage = SessionStorage(testContext, engine, applicationScope = this)
         val browsingSession = storage.restore()
 
         assertNotNull(browsingSession)
@@ -316,7 +309,7 @@ class SessionStorageTest {
     }
 
     @Test
-    fun `Restored browsing session contains all expected session properties`() {
+    fun `Restored browsing session contains all expected session properties`() = runTest {
         val firstTab =
             createTab(
                     id = "first-tab",
@@ -354,7 +347,7 @@ class SessionStorageTest {
 
         val engine = FakeEngine()
 
-        val storage = SessionStorage(testContext, engine)
+        val storage = SessionStorage(testContext, engine, applicationScope = this)
         val persisted = storage.save(state)
         assertTrue(persisted)
 
@@ -388,7 +381,7 @@ class SessionStorageTest {
     }
 
     @Test
-    fun `Saving state with selected tab id for a tab that does not exist`() {
+    fun `Saving state with selected tab id for a tab that does not exist`() = runTest {
         val state =
             BrowserState(
                 tabs =
@@ -401,7 +394,7 @@ class SessionStorageTest {
 
         val engine = FakeEngine()
 
-        val storage = SessionStorage(testContext, engine)
+        val storage = SessionStorage(testContext, engine, applicationScope = this)
         val persisted = storage.save(state)
         assertTrue(persisted)
 
@@ -419,7 +412,7 @@ class SessionStorageTest {
     }
 
     @Test
-    fun `WHEN saving state with crash parent tab THEN don't save tab`() {
+    fun `WHEN saving state with crash parent tab THEN don't save tab`() = runTest {
         val state =
             BrowserState(
                 tabs =
@@ -432,7 +425,7 @@ class SessionStorageTest {
 
         val engine = FakeEngine()
 
-        val storage = SessionStorage(testContext, engine)
+        val storage = SessionStorage(testContext, engine, applicationScope = this)
         val persisted = storage.save(state)
         assertTrue(persisted)
 

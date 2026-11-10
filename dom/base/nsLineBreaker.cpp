@@ -26,11 +26,16 @@ using mozilla::intl::UnicodeProperties;
 using mozilla::intl::WordBreakRule;
 
 // There is no break opportunity between any pair of characters that has line
-// break class of either AL (Alphabetic), IS (Infix Numeric Separator), NU
-// (Numeric), or QU (Quotation). See
-// https://www.unicode.org/Public/UCD/latest/ucd/LineBreak.txt for Unicode code
-// point and line break class mapping.
-static constexpr uint8_t kNonBreakableASCII[] = {
+// break class of either AI (Ambiguous), AL (Alphabetic), IS (Infix Numeric
+// Separator), NU (Numeric), or QU (Quotation). This is based on UAX #14,
+// Unicode Version 15.1.0. See
+// https://www.unicode.org/Public/15.1.0/ucd/LineBreak.txt for Unicode code
+// point and line break class mapping. If upgrading ICU4X, we have to match
+// with Unicode version.
+//
+// TODO(m_kato):
+// We should generate this table by a script (Bug 2081587).
+static constexpr uint8_t kNonBreakableLatin1[] = {
     // clang-format off
 // 0x20-0x2f
 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0,
@@ -44,15 +49,31 @@ static constexpr uint8_t kNonBreakableASCII[] = {
 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
 // 0x70-0x7f
 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0,
+// 0x80-0x8f
+0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+// 0x90-0x9f
+0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+// 0xa0-0xaf
+0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1,
+// 0xb0-0xbf
+0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+// 0xc0-0xcf
+1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+// 0xd0-0xdf
+1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+// 0xe0-0xef
+1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+// 0xf0-0xff
+1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     // clang-format on
 };
 
 template <typename T>
 static constexpr bool IsNonBreakableChar(T aChar) {
-  if (aChar < 0x20 || aChar > 0x7f) {
+  if (aChar < 0x20 || aChar > 0xff) {
     return false;
   }
-  return !!kNonBreakableASCII[aChar - 0x20];
+  return !!kNonBreakableLatin1[aChar - 0x20];
 }
 
 nsLineBreaker::~nsLineBreaker() {
@@ -245,16 +266,18 @@ nsresult nsLineBreaker::AppendText(nsAtom* aHyphenationLanguage,
                  "These should not be set");
 
     while (offset < aLength && !IsSegmentSpace(aText[offset])) {
-      mCurrentWord.AppendElement(aText[offset]);
       if (!mCurrentWordMightBeBreakable &&
           !IsNonBreakableChar<char16_t>(aText[offset])) {
         mCurrentWordMightBeBreakable = true;
       }
-      UpdateCurrentWordLanguage(aHyphenationLanguage);
       ++offset;
     }
 
     if (offset > 0) {
+      if (!mCurrentWord.AppendElements(aText, offset, mozilla::fallible)) {
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
+      UpdateCurrentWordLanguage(aHyphenationLanguage);
       mTextItems.AppendElement(TextItem(aSink, 0, offset, aFlags));
     }
 
@@ -313,6 +336,12 @@ nsresult nsLineBreaker::AppendText(nsAtom* aHyphenationLanguage,
         nsHyphenationManager::Instance()->GetHyphenator(aHyphenationLanguage);
   }
 
+  const uint8_t interiorBreakState =
+      mWordBreak == WordBreakRule::BreakAll ||
+              mLineBreak == LineBreakRule::Anywhere
+          ? gfxTextRun::CompressedGlyph::FLAG_BREAK_TYPE_NORMAL
+          : gfxTextRun::CompressedGlyph::FLAG_BREAK_TYPE_NONE;
+
   for (;;) {
     char16_t ch = aText[offset];
     bool isSpace = IsSegmentSpace(ch);
@@ -370,6 +399,15 @@ nsresult nsLineBreaker::AppendText(nsAtom* aHyphenationLanguage,
       wordMightBeBreakable = true;
     }
     ++offset;
+    const uint32_t runStart = offset;
+    while (offset < aLength && IsNonBreakableChar<char16_t>(aText[offset])) {
+      ++offset;
+    }
+    if (offset > runStart && !noBreaksNeeded) {
+      // Word interiors have no whitespace or boundary state to update.
+      memset(breakState.Elements() + runStart, interiorBreakState,
+             offset - runStart);
+    }
     if (offset >= aLength) {
       // Save this word
       mCurrentWordMightBeBreakable = wordMightBeBreakable;
@@ -523,7 +561,6 @@ nsresult nsLineBreaker::AppendText(nsAtom* aHyphenationLanguage,
                  "These should not be set");
 
     while (offset < aLength && !IsSegmentSpace(aText[offset])) {
-      mCurrentWord.AppendElement(aText[offset]);
       if (!mCurrentWordMightBeBreakable &&
           !IsNonBreakableChar<uint8_t>(aText[offset])) {
         mCurrentWordMightBeBreakable = true;
@@ -532,6 +569,9 @@ nsresult nsLineBreaker::AppendText(nsAtom* aHyphenationLanguage,
     }
 
     if (offset > 0) {
+      if (!mCurrentWord.AppendElements(aText, offset, mozilla::fallible)) {
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
       mTextItems.AppendElement(TextItem(aSink, 0, offset, aFlags));
     }
 
@@ -573,6 +613,12 @@ nsresult nsLineBreaker::AppendText(nsAtom* aHyphenationLanguage,
   }
   uint32_t wordStart = offset;
   bool wordMightBeBreakable = false;
+
+  const uint8_t interiorBreakState =
+      mWordBreak == WordBreakRule::BreakAll ||
+              mLineBreak == LineBreakRule::Anywhere
+          ? gfxTextRun::CompressedGlyph::FLAG_BREAK_TYPE_NORMAL
+          : gfxTextRun::CompressedGlyph::FLAG_BREAK_TYPE_NONE;
 
   for (;;) {
     uint8_t ch = aText[offset];
@@ -624,6 +670,14 @@ nsresult nsLineBreaker::AppendText(nsAtom* aHyphenationLanguage,
       wordMightBeBreakable = true;
     }
     ++offset;
+    const uint32_t runStart = offset;
+    while (offset < aLength && IsNonBreakableChar<uint8_t>(aText[offset])) {
+      ++offset;
+    }
+    if (offset > runStart && aSink) {
+      memset(breakState.Elements() + runStart, interiorBreakState,
+             offset - runStart);
+    }
     if (offset >= aLength) {
       // Save this word
       mCurrentWordMightBeBreakable = wordMightBeBreakable;

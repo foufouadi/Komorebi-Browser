@@ -7,6 +7,8 @@ export PATH=$MOZ_FETCHES_DIR/clang-tidy/bin:$PATH
 # Use toolchain clang
 export LD_LIBRARY_PATH=$MOZ_FETCHES_DIR/clang/lib
 
+export MOZ_OBJDIR=$HOME/workspace/obj-static-analysis
+
 # Write custom mozconfig
 export MOZCONFIG=$GECKO_PATH/mozconfig
 
@@ -14,8 +16,6 @@ export MOZCONFIG=$GECKO_PATH/mozconfig
 cat <<EOT >> $MOZCONFIG
 # Enable debug mode
 ac_add_options --enable-debug
-# Enable clang-plugin in order to have all defines activated for static-analysis
-ac_add_options --enable-clang-plugin
 # Enable GC zeal, a testing and debugging feature that helps find GC-related bugs in JSAPI applications.
 ac_add_options --enable-gczeal
 # Do not treat warnings as errors
@@ -24,6 +24,10 @@ ac_add_options --disable-warnings-as-errors
 ac_add_options --disable-unified-build
 # We don't want to analyse tests
 ac_add_options --disable-tests
+# Generate the static-analysis compilation database during configure instead
+# of in a separate config.status pass, and skip the unused FasterMake and
+# Clangd backends
+ac_add_options --build-backends=RecursiveMake,StaticAnalysis
 EOT
 
 # Mach lookup clang-tidy in clang-tools

@@ -12,10 +12,8 @@ import copy
 import json
 import os
 import pathlib
-import re
 import sys
 import time
-import uuid
 from datetime import datetime
 
 import yaml
@@ -23,17 +21,14 @@ from yaml import YAMLError
 
 from mozharness.base.config import DEFAULT_CONFIG_PATH, BaseConfig, parse_config_file
 from mozharness.base.errors import MakefileErrorList
-from mozharness.base.log import ERROR, FATAL, OutputParser
+from mozharness.base.log import FATAL
 from mozharness.base.python import PerfherderResourceOptionsMixin, VirtualenvMixin
 from mozharness.base.script import PostScriptRun
 from mozharness.base.vcs.vcsbase import MercurialScript
 from mozharness.mozilla.automation import (
     EXIT_STATUS_DICT,
     TBPL_FAILURE,
-    TBPL_RETRY,
     TBPL_STATUS_DICT,
-    TBPL_SUCCESS,
-    TBPL_WORST_LEVEL_TUPLE,
     AutomationMixin,
 )
 from mozharness.mozilla.secrets import SecretsMixin
@@ -49,48 +44,6 @@ because it was a forced build.',
     "tooltool_manifest_undetermined": '"tooltool_manifest_src" not set, \
 Skipping run_tooltool...',
 }
-
-
-# Output Parsers
-
-TBPL_UPLOAD_ERRORS = [
-    {
-        "regex": re.compile("Connection timed out"),
-        "level": TBPL_RETRY,
-    },
-    {
-        "regex": re.compile("Connection reset by peer"),
-        "level": TBPL_RETRY,
-    },
-    {
-        "regex": re.compile("Connection refused"),
-        "level": TBPL_RETRY,
-    },
-]
-
-
-class MakeUploadOutputParser(OutputParser):
-    tbpl_error_list = TBPL_UPLOAD_ERRORS
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.tbpl_status = TBPL_SUCCESS
-
-    def parse_single_line(self, line):
-        # let's check for retry errors which will give log levels:
-        # tbpl status as RETRY and mozharness status as WARNING
-        for error_check in self.tbpl_error_list:
-            if error_check["regex"].search(line):
-                self.num_warnings += 1
-                self.warning(line)
-                self.tbpl_status = self.worst_level(
-                    error_check["level"],
-                    self.tbpl_status,
-                    levels=TBPL_WORST_LEVEL_TUPLE,
-                )
-                break
-        else:
-            self.info(line)
 
 
 class MozconfigPathError(Exception):
@@ -116,7 +69,6 @@ def get_mozconfig_path(script, config, dirs):
     have_composite_mozconfig = COMPOSITE_KEYS <= set(config.keys())
     have_partial_composite_mozconfig = len(COMPOSITE_KEYS & set(config.keys())) > 0
     have_src_mozconfig = "src_mozconfig" in config
-    have_src_mozconfig_manifest = "src_mozconfig_manifest" in config
 
     # first determine the mozconfig path
     if have_partial_composite_mozconfig and not have_composite_mozconfig:
@@ -127,16 +79,6 @@ def get_mozconfig_path(script, config, dirs):
     elif have_composite_mozconfig and have_src_mozconfig:
         raise MozconfigPathError(
             "'src_mozconfig' or 'mozconfig_variant' must be "
-            "in the config but not both in order to determine the mozconfig."
-        )
-    elif have_composite_mozconfig and have_src_mozconfig_manifest:
-        raise MozconfigPathError(
-            "'src_mozconfig_manifest' or 'mozconfig_variant' must be "
-            "in the config but not both in order to determine the mozconfig."
-        )
-    elif have_src_mozconfig and have_src_mozconfig_manifest:
-        raise MozconfigPathError(
-            "'src_mozconfig' or 'src_mozconfig_manifest' must be "
             "in the config but not both in order to determine the mozconfig."
         )
     elif have_composite_mozconfig:
@@ -150,25 +92,10 @@ def get_mozconfig_path(script, config, dirs):
         abs_mozconfig_path = os.path.join(
             dirs["abs_src_dir"], config.get("src_mozconfig")
         )
-    elif have_src_mozconfig_manifest:
-        manifest = os.path.join(dirs["abs_work_dir"], config["src_mozconfig_manifest"])
-        if not os.path.exists(manifest):
-            raise MozconfigPathError(
-                'src_mozconfig_manifest: "%s" not found. Does it exist?' % (manifest,)
-            )
-        else:
-            with script.opened(manifest, error_level=ERROR) as (fh, err):
-                if err:
-                    raise MozconfigPathError(
-                        "%s exists but coud not read properties" % manifest
-                    )
-                abs_mozconfig_path = os.path.join(
-                    dirs["abs_src_dir"], json.load(fh)["gecko_path"]
-                )
     else:
         raise MozconfigPathError(
             "Must provide 'app_name', 'mozconfig_platform' and 'mozconfig_variant'; "
-            "or one of 'src_mozconfig' or 'src_mozconfig_manifest' in the config "
+            "or 'src_mozconfig' in the config "
             "in order to determine the mozconfig."
         )
 
@@ -273,10 +200,9 @@ class BuildOptionParser:
         "x86-lite": path_base + "%s_x86_lite.py",
         "x86-profile-generate": path_base + "%s_x86_profile_generate.py",
         "x86_64": path_base + "%s_x86_64.py",
+        "x86_64-ccov": path_base + "%s_x86_64_ccov.py",
         "x86_64-lite": path_base + "%s_x86_64_lite.py",
         "x86_64-debug": path_base + "%s_x86_64_debug.py",
-        "x86_64-debug-isolated-process": path_base
-        + "%s_x86_64_debug_isolated_process.py",
         "x86_64-profile-generate": path_base + "%s_x86_64_profile_generate.py",
         "aarch64": path_base + "%s_aarch64.py",
         "aarch64-lite": path_base + "%s_aarch64_lite.py",
@@ -495,14 +421,6 @@ BUILD_BASE_CONFIG_OPTIONS = [
 ]
 
 
-def generate_build_ID():
-    return time.strftime("%Y%m%d%H%M%S", time.localtime(time.time()))
-
-
-def generate_build_UID():
-    return uuid.uuid4().hex
-
-
 class BuildScript(
     AutomationMixin,
     VirtualenvMixin,
@@ -524,12 +442,8 @@ class BuildScript(
         # separate each build
         self.epoch_timestamp = int(time.mktime(datetime.now().timetuple()))
         self.branch = self.config.get("branch")
-        self.stage_platform = self.config.get("stage_platform")
-        if not self.branch or not self.stage_platform:
-            if not self.branch:
-                self.error("'branch' not determined and is required")
-            if not self.stage_platform:
-                self.error("'stage_platform' not determined and is required")
+        if not self.branch:
+            self.error("'branch' not determined and is required")
             self.fatal("Please add missing items to your config")
         self.client_id = None
         self.access_token = None
@@ -591,11 +505,6 @@ items from that key's value."
         self.objdir = self.config["objdir"]
         return self.objdir
 
-    def query_is_nightly_promotion(self):
-        platform_enabled = self.config.get("enable_nightly_promotion")
-        branch_enabled = self.branch in self.config.get("nightly_promotion_branches")
-        return platform_enabled and branch_enabled
-
     def query_build_env(self, **kwargs):
         c = self.config
 
@@ -603,7 +512,7 @@ items from that key's value."
         # as we don't always want every key below added to the same dict
         env = copy.deepcopy(super().query_env(**kwargs))
 
-        if self.query_is_nightly() or self.query_is_nightly_promotion():
+        if self.query_is_nightly():
             # taskcluster sets the update channel for shipping builds
             # explicitly
             if c.get("update_channel"):
@@ -635,29 +544,16 @@ items from that key's value."
         """assign mozconfig."""
         dirs = self.query_abs_dirs()
 
-        try:
-            abs_mozconfig_path = get_mozconfig_path(
-                script=self, config=self.config, dirs=dirs
-            )
-        except MozconfigPathError as e:
-            self.fatal(e.msg)
+        src_mozconfig = os.environ.get("MOZCONFIG")
+        if not src_mozconfig:
+            self.fatal("MOZCONFIG is not set in the environment")
+        abs_mozconfig_path = os.path.join(dirs["abs_src_dir"], src_mozconfig)
 
         self.info(f"Use mozconfig: {abs_mozconfig_path}")
 
         # print its contents
-        content = self.read_from_file(abs_mozconfig_path, error_level=FATAL)
-
-        extra_content = self.config.get("extra_mozconfig_content")
-        if extra_content:
-            content += "\n".join(extra_content)
-
         self.info("mozconfig content:")
-        self.info(content)
-
-        # finally, copy the mozconfig to a path that 'mach build' expects it to
-        # be
-        with open(os.path.join(dirs["abs_src_dir"], ".mozconfig"), "w") as fh:
-            fh.write(content)
+        self.info(self.read_from_file(abs_mozconfig_path, error_level=FATAL))
 
     def _run_tooltool(self):
         env = self.query_build_env()
@@ -719,16 +615,6 @@ items from that key's value."
 
         self._generate_build_stats()
 
-    def static_analysis_autotest(self):
-        """Run mach static-analysis autotest, in order to make sure we dont regress"""
-        self.preflight_build()
-        self._run_mach_command_in_build_env(["configure"])
-        self._run_mach_command_in_build_env([
-            "static-analysis",
-            "autotest",
-            "--intree-tool",
-        ])
-
     def _query_mach(self):
         return [sys.executable, "mach"]
 
@@ -768,7 +654,6 @@ items from that key's value."
         dirs = self.query_abs_dirs()
         base_work_dir = dirs["base_work_dir"]
         work_dir = dirs["abs_work_dir"]
-        objdir = dirs["abs_obj_dir"]
         branch = self.branch
 
         # Building a nightly with the try repository fails because a
@@ -800,43 +685,18 @@ items from that key's value."
             cmd, env=self.query_build_env(), cwd=base_work_dir, halt_on_failure=True
         )
 
-        package_cmd = [
-            "make",
-            "echo-variable-PACKAGE",
-            "AB_CD=multi",
+        upload_cmd = self._query_mach() + [
+            "--log-no-times",
+            "package-multi-locale",
+            "upload",
         ]
-        package_filename = self.get_output_from_command(
-            package_cmd,
-            cwd=objdir,
-        )
-        if not package_filename:
-            self.fatal(
-                "Unable to determine the package filename for the multi-l10n build. "
-                "Was trying to run: %s" % package_cmd
-            )
-
-        self.info("Multi-l10n package filename is: %s" % package_filename)
-
-        parser = MakeUploadOutputParser(
-            config=self.config,
-            log_obj=self.log_obj,
-        )
-        upload_cmd = ["make", "upload", "AB_CD=multi"]
+        env = self.query_build_env()
+        env.update(self.query_mach_build_env(multiLocale=False))
         self.run_command(
             upload_cmd,
-            partial_env=self.query_mach_build_env(multiLocale=False),
-            cwd=objdir,
+            env=env,
+            cwd=dirs["abs_src_dir"],
             halt_on_failure=True,
-            output_parser=parser,
-        )
-        upload_files_cmd = [
-            "make",
-            "echo-variable-UPLOAD_FILES",
-            "AB_CD=multi",
-        ]
-        self.get_output_from_command(
-            upload_files_cmd,
-            cwd=objdir,
         )
 
     def postflight_build(self):
@@ -950,6 +810,7 @@ items from that key's value."
             "value": duration,
             "extraOptions": self.perfherder_resource_options(),
             "shouldAlert": should_alert,
+            "alertNotifyEmails": ["ahochheiden@mozilla.com"],
             "subtests": [],
         }
 

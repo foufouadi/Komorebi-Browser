@@ -5,7 +5,6 @@
 package mozilla.components.feature.tabs.tabstray
 
 import androidx.annotation.VisibleForTesting
-import mozilla.components.browser.state.state.TabPartition
 import mozilla.components.browser.state.state.TabSessionState
 import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.browser.tabstray.TabsTray
@@ -16,14 +15,12 @@ import mozilla.components.support.base.feature.LifecycleAwareFeature
  * Feature implementation for connecting a tabs tray implementation with the session module.
  *
  * @param defaultTabsFilter A tab filter that is used for the initial presenting of tabs.
- * @param defaultTabPartitionsFilter A tab partition filter that is used for the initial presenting of tabs.
  * @param onCloseTray a callback invoked when the last tab is closed.
  */
 class TabsFeature(
     private val tabsTray: TabsTray,
     private val store: BrowserStore,
     private val onCloseTray: () -> Unit = {},
-    private val defaultTabPartitionsFilter: (Map<String, TabPartition>) -> TabPartition? = { null },
     private val defaultTabsFilter: (TabSessionState) -> Boolean = { true },
 ) : LifecycleAwareFeature {
     @VisibleForTesting
@@ -32,7 +29,6 @@ class TabsFeature(
             tabsTray,
             store,
             defaultTabsFilter,
-            defaultTabPartitionsFilter,
             closeTabsTray = onCloseTray,
         )
 
@@ -56,6 +52,6 @@ class TabsFeature(
         val state = store.state
         val (tabs, selectedTabId) = state.toTabList(tabsFilter)
 
-        tabsTray.updateTabs(tabs, null, selectedTabId)
+        tabsTray.updateTabs(tabs, selectedTabId)
     }
 }

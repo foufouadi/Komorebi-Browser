@@ -4,15 +4,12 @@
 // found in the LICENSE file.
 //
 
-#ifdef UNSAFE_BUFFERS_BUILD
-#    pragma allow_unsafe_buffers
-#endif
-
 #if defined(_MSC_VER)
 #    pragma warning(disable : 4718)
 #endif
 
 #include "compiler/translator/Types.h"
+#include "common/unsafe_buffers.h"
 #include "compiler/translator/ImmutableString.h"
 #include "compiler/translator/InfoSink.h"
 #include "compiler/translator/IntermNode.h"
@@ -144,8 +141,6 @@ const char *getBasicString(TBasicType t)
             return "uimageBuffer";
         case EbtAtomicCounter:
             return "atomic_uint";
-        case EbtSamplerVideoWEBGL:
-            return "samplerVideoWEBGL";
         case EbtPixelLocalANGLE:
             return "pixelLocalANGLE";
         case EbtIPixelLocalANGLE:
@@ -459,10 +454,12 @@ const char *TType::buildMangledName() const
     if (basicMangledName[0] != '{')
     {
         mangledName += basicMangledName[0];
-        mangledName += basicMangledName[1];
+        mangledName += ANGLE_UNSAFE_TODO(basicMangledName[1]);
     }
     else
     {
+        constexpr char kStructMangledNameSeparator = ':';
+
         ASSERT(type == EbtStruct || type == EbtInterfaceBlock);
         switch (type)
         {
@@ -472,12 +469,14 @@ const char *TType::buildMangledName() const
                 {
                     mangledName += mStructure->name().data();
                 }
+                mangledName += kStructMangledNameSeparator;
                 mangledName += mStructure->mangledFieldList();
                 mangledName += '}';
                 break;
             case EbtInterfaceBlock:
                 mangledName += "{i";
                 mangledName += mInterfaceBlock->name().data();
+                mangledName += kStructMangledNameSeparator;
                 mangledName += mInterfaceBlock->mangledFieldList();
                 mangledName += '}';
                 break;
@@ -513,8 +512,10 @@ size_t TType::getObjectSize() const
 
     for (size_t arraySize : mArraySizes)
     {
-        if (arraySize > INT_MAX / totalSize)
-            totalSize = INT_MAX;
+        if (arraySize > std::numeric_limits<size_t>::max() / totalSize)
+        {
+            totalSize = std::numeric_limits<size_t>::max();
+        }
         else
             totalSize *= arraySize;
     }
@@ -754,47 +755,6 @@ void TType::realize()
     getMangledName();
 }
 
-void TType::createSamplerSymbols(const ImmutableString &namePrefix,
-                                 const TString &apiNamePrefix,
-                                 TVector<const TVariable *> *outputSymbols,
-                                 TMap<const TVariable *, TString> *outputSymbolsToAPINames,
-                                 TSymbolTable *symbolTable) const
-{
-    if (isStructureContainingSamplers())
-    {
-        if (isArray())
-        {
-            TType elementType(*this);
-            elementType.toArrayElementType();
-            for (unsigned int arrayIndex = 0u; arrayIndex < getOutermostArraySize(); ++arrayIndex)
-            {
-                std::stringstream elementName = sh::InitializeStream<std::stringstream>();
-                elementName << namePrefix << "_" << arrayIndex;
-                TStringStream elementApiName;
-                elementApiName << apiNamePrefix << "[" << arrayIndex << "]";
-                elementType.createSamplerSymbols(ImmutableString(elementName.str()),
-                                                 elementApiName.str(), outputSymbols,
-                                                 outputSymbolsToAPINames, symbolTable);
-            }
-        }
-        else
-        {
-            mStructure->createSamplerSymbols(namePrefix.data(), apiNamePrefix, outputSymbols,
-                                             outputSymbolsToAPINames, symbolTable);
-        }
-        return;
-    }
-
-    ASSERT(IsSampler(type));
-    TVariable *variable =
-        new TVariable(symbolTable, namePrefix, new TType(*this), SymbolType::AngleInternal);
-    outputSymbols->push_back(variable);
-    if (outputSymbolsToAPINames)
-    {
-        (*outputSymbolsToAPINames)[variable] = apiNamePrefix;
-    }
-}
-
 TFieldListCollection::TFieldListCollection(const TFieldList *fields)
     : mFields(fields), mObjectSize(0), mDeepestNesting(0)
 {}
@@ -873,8 +833,10 @@ size_t TFieldListCollection::calculateObjectSize() const
     for (const TField *field : *mFields)
     {
         size_t fieldSize = field->type()->getObjectSize();
-        if (fieldSize > INT_MAX - size)
-            size = INT_MAX;
+        if (fieldSize > std::numeric_limits<size_t>::max() - size)
+        {
+            size = std::numeric_limits<size_t>::max();
+        }
         else
             size += fieldSize;
     }
@@ -923,8 +885,10 @@ const TString &TFieldListCollection::mangledFieldList() const
 int TFieldListCollection::calculateDeepestNesting() const
 {
     int maxNesting = 0;
-    for (size_t i = 0; i < mFields->size(); ++i)
-        maxNesting = std::max(maxNesting, (*mFields)[i]->type()->getDeepestStructNesting());
+    for (const TField *field : *mFields)
+    {
+        maxNesting = std::max(maxNesting, field->type()->getDeepestStructNesting());
+    }
     return 1 + maxNesting;
 }
 

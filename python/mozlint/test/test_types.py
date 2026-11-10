@@ -80,5 +80,38 @@ def test_global_skipped(lint, lintdir, files):
     assert len(result.issues) == 0
 
 
+def test_global_skipped_directory(lint, lintdir, filedir):
+    lint.read(os.path.join(lintdir, "global_skipped.yml"))
+    result = lint.roll([filedir])
+    assert result.failed == set()
+    assert len(result.issues) == 0
+
+
+def test_global_directory_without_extensions(lint, lintdir, filedir, path):
+    # A linter that declares no extensions has nothing to filter a directory
+    # by, which is not the same as having nothing to lint. The payload lints
+    # what it is handed, so these issues also show the directory was expanded.
+    lint.read(os.path.join(lintdir, "global_no_extensions.yml"))
+    result = lint.roll([filedir])
+    assert result.failed == set()
+    assert path("foobar.js") in result.issues
+    assert path("foobar.py") in result.issues
+    assert path("no_foobar.js") not in result.issues
+
+
+def test_line_type_directory_extensions(lint, lintdir, filedir, path, tmp_path):
+    (tmp_path / "foobar.d.ts").write_text("foobar\n")
+    (tmp_path / "foobar.ts").write_text("foobar\n")
+    lint.read(os.path.join(lintdir, "string.yml"))
+    lint.linters[0]["extensions"] = ["js", "py", "d.ts"]
+    lint.linters[0]["include"] = [".", str(tmp_path)]
+    result = lint.roll([filedir, str(tmp_path)])
+    assert path("foobar.js") in result.issues
+    assert path("foobar.py") in result.issues
+    assert mozpath.join(tmp_path, "foobar.d.ts") in result.issues
+    assert path("irrelevant/file.txt") not in result.issues
+    assert all(p.endswith((".js", ".py", ".d.ts")) for p in result.issues)
+
+
 if __name__ == "__main__":
     mozunit.main()

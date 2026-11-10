@@ -38,12 +38,8 @@ EXPORTS.mozilla.net += [
     "DNSServiceBase.h",
     "HTTPSSVC.h",
     "IDNBlocklistUtils.h",
-    "NativeDNSResolverOverrideChild.h",
-    "NativeDNSResolverOverrideParent.h",
     "TRRService.h",
     "TRRServiceBase.h",
-    "TRRServiceChild.h",
-    "TRRServiceParent.h",
 ]
 
 SOURCES += [
@@ -56,8 +52,11 @@ if CONFIG["MOZ_WIDGET_TOOLKIT"] == "windows":
 elif CONFIG["OS_TARGET"] == "Linux":
     SOURCES += ["PlatformDNSUnix.cpp"]
     OS_LIBS += ["resolv"]
+elif CONFIG["OS_TARGET"] == "FreeBSD":
+    SOURCES += ["PlatformDNSUnix.cpp"]
 elif CONFIG["MOZ_WIDGET_TOOLKIT"] == "cocoa":
     SOURCES += ["PlatformDNSMac.cpp"]
+    SOURCE_HEADERS += ["PlatformDNSMac.h"]
 elif CONFIG["MOZ_WIDGET_TOOLKIT"] == "android":
     SOURCES += ["PlatformDNSAndroid.cpp"]
 else:
@@ -76,8 +75,6 @@ UNIFIED_SOURCES += [
     "HostRecordQueue.cpp",
     "HTTPSSVC.cpp",
     "IDNBlocklistUtils.cpp",
-    "NativeDNSResolverOverrideChild.cpp",
-    "NativeDNSResolverOverrideParent.cpp",
     "nsDNSService2.cpp",
     "nsHostRecord.cpp",
     "nsHostResolver.cpp",
@@ -86,15 +83,11 @@ UNIFIED_SOURCES += [
     "TRRQuery.cpp",
     "TRRService.cpp",
     "TRRServiceBase.cpp",
-    "TRRServiceChild.cpp",
-    "TRRServiceParent.cpp",
 ]
 
 IPDL_SOURCES = [
     "PDNSRequest.ipdl",
     "PDNSRequestParams.ipdlh",
-    "PNativeDNSResolverOverride.ipdl",
-    "PTRRService.ipdl",
 ]
 
 include("/ipc/chromium/chromium-config.mozbuild")
@@ -113,3 +106,28 @@ LOCAL_INCLUDES += [
 ]
 
 USE_LIBS += ["icu"]
+
+LICENSES += ["jpnic"]
+LICENSES["jpnic"].title = "Japan Network Information Center License"
+LICENSES["jpnic"].text = "LICENSE-NOTICE.txt"
+LICENSES["jpnic"].notice = """
+<p>This license applies to certain files in the directory <code>netwerk/dns/</code>.</p>
+"""
+
+LICENSED_UNDER += [
+    "jpnic",
+]
+
+SOURCE_HEADERS += [
+    "DNSAdditionalInfo.h",
+    "DNSLogging.h",
+    "DNSUtils.h",
+    "GetAddrInfo.h",
+    "HostRecordQueue.h",
+    "nsDNSService2.h",
+    "nsHostRecord.h",
+    "nsHostResolver.h",
+    "nsIDNService.h",
+    "TRR.h",
+    "TRRQuery.h",
+]

@@ -77,7 +77,7 @@ fieldset,
 .search-wrapper {
   border: var(--table-border-inner);
   border-radius: var(--border-radius-small);
-  height: var(--input-text-min-height);
+  height: var(--input-min-height);
   display: inline-flex;
   align-items: center;
 }
@@ -278,6 +278,7 @@ td:first-of-type {
   height: 50px;
   width: 100px;
   background-color: var(--button-background-color);
+  color: var(--button-text-color);
   border: var(--table-border-inner);
   border-radius: var(--border-radius-small);
 }
@@ -317,6 +318,55 @@ td:first-of-type {
   &.outline {
     outline: var(--link-outline-demo);
     outline-offset: var(--link-focus-outline-offset);
+  }
+}
+
+/** Motion **/
+
+.motion-preview {
+  display: flex;
+  align-items: center;
+  height: 50px;
+  width: 75%;
+  padding-inline: var(--space-small);
+  background-color: var(--background-color-space-demo);
+  border-radius: var(--border-radius-small);
+
+  & .item {
+    height: var(--size-item-small);
+    width: var(--size-item-small);
+    background-color: var(--background-color-padding-demo);
+    border-radius: var(--border-radius-circle);
+    animation: motion-preview-slide 1.5s infinite alternate;
+  }
+}
+
+@keyframes motion-preview-slide {
+  to {
+    margin-inline-start: calc(100% - var(--size-item-small));
+  }
+}
+
+/* The scale and translate tokens are the state a panel animates out of, so
+ * they preview as that transform being applied to a panel-like surface. */
+.motion-preview .surface {
+  height: var(--size-item-large);
+  width: 100%;
+  background-color: var(--background-color-padding-demo);
+  border-radius: var(--border-radius-small);
+  animation: motion-preview-transform 1.5s infinite alternate;
+}
+
+@keyframes motion-preview-transform {
+  to {
+    transform: var(--motion-preview-transform);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-preview .item,
+  .motion-preview .surface {
+    animation: none;
   }
 }
 

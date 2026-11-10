@@ -217,7 +217,7 @@ std::ostream &FmtHex(std::ostream &os, T value)
 
 // A macro to log a performance event around a scope.
 #if defined(ANGLE_TRACE_ENABLED)
-#    if defined(_MSC_VER)
+#    if defined(_MSC_VER) && !defined(__clang__)
 #        define EVENT(context, entryPoint, message, ...)                                     \
             gl::ScopedPerfEventHelper scopedPerfEventHelper##__LINE__(                       \
                 context, angle::EntryPoint::entryPoint);                                     \
@@ -231,19 +231,19 @@ std::ostream &FmtHex(std::ostream &os, T value)
                 }                                                                            \
             } while (0)
 #    else
-#        define EVENT(context, entryPoint, message, ...)                                          \
-            gl::ScopedPerfEventHelper scopedPerfEventHelper(context,                              \
-                                                            angle::EntryPoint::entryPoint);       \
-            do                                                                                    \
-            {                                                                                     \
-                if (gl::ShouldBeginScopedEvent(context))                                          \
-                {                                                                                 \
-                    scopedPerfEventHelper.begin("%s(" message ")",                                \
-                                                GetEntryPointName(angle::EntryPoint::entryPoint), \
-                                                ##__VA_ARGS__);                                   \
-                }                                                                                 \
+#        define EVENT(context, entryPoint, message, ...)                                     \
+            gl::ScopedPerfEventHelper scopedPerfEventHelper(context,                         \
+                                                            angle::EntryPoint::entryPoint);  \
+            do                                                                               \
+            {                                                                                \
+                if (gl::ShouldBeginScopedEvent(context))                                     \
+                {                                                                            \
+                    ANGLE_UNSAFE_BUFFERS(scopedPerfEventHelper.begin(                        \
+                        "%s(" message ")", GetEntryPointName(angle::EntryPoint::entryPoint), \
+                        ##__VA_ARGS__));                                                     \
+                }                                                                            \
             } while (0)
-#    endif  // _MSC_VER
+#    endif
 #else
 #    define EVENT(message, ...) (void(0))
 #endif
@@ -305,6 +305,11 @@ std::ostream &FmtHex(std::ostream &os, T value)
             ASSERT(false); \
         } while (0)
 #endif  // defined(ANGLE_TRACE_ENABLED) || defined(ANGLE_ENABLE_ASSERTS)
+
+#define RELEASE_ASSERT(expression)                                                                \
+    (expression ? static_cast<void>(0)                                                            \
+                : (FATAL() << "\t! Release assert failed in " << __FUNCTION__ << " (" << __FILE__ \
+                           << ":" << __LINE__ << "): " << #expression))
 
 #if defined(ANGLE_PLATFORM_WINDOWS)
 #    define ANGLE_FUNCTION __FUNCTION__

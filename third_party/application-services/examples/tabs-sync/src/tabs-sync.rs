@@ -63,7 +63,7 @@ fn do_sync(
 
     // Since we are syncing without the sync manager, there's no
     // command processor, therefore no clients engine, and in
-    // consequence `TabsStore::prepare_for_sync` is never called
+    // consequence `TabsEngine::set_clients` is never called
     // which means our `local_id` will never be set.
     // Do it here.
     *engine.local_id.write().unwrap() = local_id;
@@ -95,7 +95,7 @@ fn do_sync(
 
 fn main() -> Result<()> {
     nss_as::ensure_initialized();
-    viaduct_hyper::viaduct_init_backend_hyper();
+    viaduct_backend_rust::viaduct_init_backend_rust();
     cli_support::init_logging();
     let opts = Opts::parse();
 

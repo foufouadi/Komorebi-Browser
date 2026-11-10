@@ -23,9 +23,11 @@ UniquePtr<SharedSurface_DMABUF> SharedSurface_DMABUF::Create(
       DMABUF_SCANOUT | DMABUF_TEXTURE | DMABUF_USE_MODIFIERS | DMABUF_ALPHA);
   surface = DMABufSurfaceRGBA::CreateDMABufSurface(desc.gl, desc.size.width,
                                                    desc.size.height, flags);
-  if (!surface || !surface->CreateTexture(desc.gl)) {
+  if (!surface || !surface->CreateTextures(desc.gl)) {
     return nullptr;
   }
+  surface->SetColorPrimaries(desc.colorSpace);
+  surface->SetTransferFunction(desc.transferFunction);
   const auto tex = surface->GetTexture();
   fb = MozFramebuffer::CreateForBacking(desc.gl, desc.size, 0, false, false,
                                         LOCAL_GL_TEXTURE_2D, tex);
@@ -63,7 +65,7 @@ UniquePtr<SurfaceFactory_DMABUF> SurfaceFactory_DMABUF::Create(GLContext& gl) {
     return nullptr;
   }
 
-  auto dmabufFactory = MakeUnique<SurfaceFactory_DMABUF>(gl);
+  auto dmabufFactory = std::make_unique<SurfaceFactory_DMABUF>(gl);
   if (dmabufFactory->CanCreateSurface(gl)) {
     return dmabufFactory;
   }
@@ -96,7 +98,7 @@ bool SurfaceFactory_DMABUF::CanCreateSurface(GLContext& gl) {
         "SurfaceFactory_DMABUF::CanCreateSurface() failed to import surface."));
     return false;
   }
-  if (!importedSurface->CreateTexture(&gl)) {
+  if (!importedSurface->CreateTextures(&gl)) {
     LOGDMABUF(
         ("SurfaceFactory_DMABUF::CanCreateSurface() failed to create texture "
          "over surface."));

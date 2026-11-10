@@ -11,8 +11,12 @@ add_task(async function () {
       #testid {
         /* Invalid property */
         something: random;
-        /* Invalid value */
+        /* Invalid values */
         color: orang;
+        -a: red;
+        --b: var();
+        /* Invalid at computed-value time, but valid at parse time */
+        --c: var(-a);
         /* Override */
         background-color: blue;
         background-color: #f06;
@@ -24,49 +28,34 @@ add_task(async function () {
   const { inspector, view } = await openRuleView();
   await selectNode("#testid", inspector);
 
-  const elementStyle = view.elementStyle;
-
-  const expected = [
+  await checkRuleViewContent(view, [
     {
-      name: "something",
-      overridden: false,
-      isNameValid: false,
-      isValid: false,
-    },
-    { name: "color", overridden: false, isNameValid: true, isValid: false },
-    {
-      name: "background-color",
-      overridden: true,
-      isNameValid: true,
-      isValid: true,
+      selector: "element",
+      selectorEditable: false,
+      declarations: [],
     },
     {
-      name: "background-color",
-      overridden: false,
-      isNameValid: true,
-      isValid: true,
+      selector: "#testid",
+      declarations: [
+        {
+          name: "something",
+          value: "random",
+          valid: false,
+        },
+        { name: "color", value: "orang", valid: false },
+        { name: "-a", value: "red", valid: false },
+        { name: "--b", value: "var()", valid: false },
+        { name: "--c", value: "var(-a)" },
+        {
+          name: "background-color",
+          value: "blue",
+          overridden: true,
+        },
+        {
+          name: "background-color",
+          value: "#f06",
+        },
+      ],
     },
-  ];
-
-  const rule = elementStyle.rules[1];
-
-  for (let i = 0; i < expected.length; ++i) {
-    const prop = rule.textProps[i];
-    is(prop.name, expected[i].name, "Check name for prop " + i);
-    is(
-      prop.overridden,
-      expected[i].overridden,
-      "Check overridden for prop " + i
-    );
-    is(
-      prop.isNameValid(),
-      expected[i].isNameValid,
-      "Check if property name is valid for prop " + i
-    );
-    is(
-      prop.isValid(),
-      expected[i].isValid,
-      "Check if whole declaration is valid for prop " + i
-    );
-  }
+  ]);
 });

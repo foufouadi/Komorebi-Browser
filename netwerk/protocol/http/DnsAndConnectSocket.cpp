@@ -14,7 +14,7 @@
 #include "mozilla/StaticPrefs_network.h"
 #include "mozilla/SyncRunnable.h"
 #include "mozilla/glean/NetwerkProtocolHttpMetrics.h"
-#include "mozilla/net/NeckoChannelParams.h"  // For HttpActivityArgs.
+#include "mozilla/net/HttpActivityArgs.h"
 #include "nsDNSService2.h"
 #include "nsHttpConnection.h"
 #include "nsHttpConnectionMgr.h"
@@ -57,8 +57,9 @@ static void NotifyActivity(nsHttpConnectionInfo* aConnInfo, uint32_t aSubtype) {
       aConnInfo->HashKey(), aConnInfo->GetOrigin(), aConnInfo->OriginPort(),
       aConnInfo->EndToEndSSL(), !aConnInfo->GetEchConfig().IsEmpty(),
       aConnInfo->IsHttp3());
-  gHttpHandler->ObserveHttpActivityWithArgs(
-      activity, NS_ACTIVITY_TYPE_HTTP_CONNECTION, aSubtype, PR_Now(), 0, ""_ns);
+  gHttpHandler->ObserveHttpActivityWithArgs(HttpActivityArgs(activity),
+                                            NS_ACTIVITY_TYPE_HTTP_CONNECTION,
+                                            aSubtype, PR_Now(), 0, ""_ns);
 }
 
 DnsAndConnectSocket::DnsAndConnectSocket(nsHttpConnectionInfo* ci,
@@ -418,6 +419,7 @@ DnsAndConnectSocket::OnLookupComplete(nsICancelable* request, nsIDNSRecord* rec,
   }
 
   if (IsPrimary(request) && NS_SUCCEEDED(status)) {
+    mObservedTimings.domainLookupEnd = TimeStamp::Now();
     mTransaction->OnTransportStatus(nullptr, NS_NET_STATUS_RESOLVED_HOST, 0);
   }
 
@@ -729,7 +731,8 @@ nsresult DnsAndConnectSocket::SetupConn(bool isPrimary, nsresult status) {
         // idle queue.
         if (connTCP && NS_SUCCEEDED(ent->RemoveIdleConnection(connTCP))) {
           RefPtr<nsAHttpTransaction> trans;
-          if (mTransaction->IsNullTransaction() && !mDispatchedMTransaction) {
+          if (mTransaction && mTransaction->IsNullTransaction() &&
+              !mDispatchedMTransaction) {
             mDispatchedMTransaction = true;
             trans = mTransaction;
           } else {
@@ -808,6 +811,13 @@ DnsAndConnectSocket::OnTransportStatus(nsITransport* trans, nsresult status,
       // send NS_NET_STATUS_CONNECTED_TO.
       // mBackupTransport must be connected before mSocketTransport(e.g.
       // mPrimaryTransport.mSocketTransport != nullpttr).
+      if (status == NS_NET_STATUS_CONNECTING_TO) {
+        mObservedTimings.connectStart = TimeStamp::Now();
+      } else if (status == NS_NET_STATUS_CONNECTED_TO &&
+                 mObservedTimings.tcpConnectEnd.IsNull()) {
+        mObservedTimings.tcpConnectEnd = TimeStamp::Now();
+        mObservedTimings.connectEnd = mObservedTimings.tcpConnectEnd;
+      }
       mTransaction->OnTransportStatus(trans, status, progress);
     }
   }
@@ -864,12 +874,22 @@ bool DnsAndConnectSocket::IsBackup(nsICancelable* dnsRequest) {
   return dnsRequest == mBackupTransport.mDNSRequest;
 }
 
+void DnsAndConnectSocket::ForgetRealTransaction() {
+  MutexAutoLock lock(mTransactionLock);
+  mTransaction = nullptr;
+}
+
 // method for nsIInterfaceRequestor
 NS_IMETHODIMP
 DnsAndConnectSocket::GetInterface(const nsIID& iid, void** result) {
-  if (mTransaction) {
+  RefPtr<nsAHttpTransaction> transaction;
+  {
+    MutexAutoLock lock(mTransactionLock);
+    transaction = mTransaction;
+  }
+  if (transaction) {
     nsCOMPtr<nsIInterfaceRequestor> callbacks;
-    mTransaction->GetSecurityCallbacks(getter_AddRefs(callbacks));
+    transaction->GetSecurityCallbacks(getter_AddRefs(callbacks));
     if (callbacks) {
       return callbacks->GetInterface(iid, result);
     }
@@ -1114,10 +1134,13 @@ nsresult DnsAndConnectSocket::TransportSetup::SetupConn(
        "Created new nshttpconnection %p %s\n",
        conn.get(), dnsAndSock->mIsHttp3 ? "using http3" : ""));
 
+  // Record the connect phase on the connection, which hands it to the
+  // transaction it gets activated with. The transaction we were started for may
+  // end up on a different connection, in which case this connection is the only
+  // remaining owner of these timings (bug 2046698).
   NullHttpTransaction* nullTrans = transaction->QueryNullTransaction();
-  if (nullTrans) {
-    conn->BootstrapTimings(nullTrans->Timings());
-  }
+  conn->BootstrapTimings(nullTrans ? nullTrans->Timings()
+                                   : dnsAndSock->mObservedTimings);
 
   // Some capabilities are needed before a transaction actually gets
   // scheduled (e.g. how to negotiate false start)
@@ -1378,6 +1401,7 @@ nsresult DnsAndConnectSocket::TransportSetup::ResolveHost(
   }
 
   if (!mIsBackup) {
+    dnsAndSock->mObservedTimings.domainLookupStart = TimeStamp::Now();
     dnsAndSock->mTransaction->OnTransportStatus(
         nullptr, NS_NET_STATUS_RESOLVING_HOST, 0);
   }

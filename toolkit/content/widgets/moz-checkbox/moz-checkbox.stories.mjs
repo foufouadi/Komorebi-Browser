@@ -20,7 +20,7 @@ export default {
     },
   },
   parameters: {
-    status: "in-development",
+    status: "stable",
     handles: ["click", "input", "change"],
     fluent: `
 moz-checkbox-label =
@@ -47,6 +47,7 @@ const Template = ({
   hasSlottedDescription,
   accesskey,
   supportPage,
+  title,
   hasSlottedSupportLink,
   nestedFields,
   ellipsized,
@@ -62,6 +63,7 @@ const Template = ({
       ?disabled=${disabled}
       accesskey=${ifDefined(accesskey)}
       support-page=${ifDefined(supportPage)}
+      title=${ifDefined(title || null)}
       value=${ifDefined(value)}
       class=${classMap({ "text-truncated-ellipsis": ellipsized })}
     >
@@ -97,6 +99,7 @@ Default.args = {
   disabled: false,
   iconSrc: "",
   description: "",
+  title: "",
   label: "",
   accesskey: "",
   supportPage: "",

@@ -9,6 +9,7 @@
 #include <d3d11_4.h>
 #include <dxgi1_6.h>
 
+#include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/gfx/Logging.h"
 
 namespace mozilla {
@@ -72,6 +73,12 @@ RefPtr<FenceD3D11> FenceD3D11::CreateFromHandle(
 
 /* static */
 bool FenceD3D11::IsSupported(ID3D11Device* aDevice) {
+  return StaticPrefs::gfx_direct3d11_fences_enabled_AtStartup() &&
+         IsSupportedByDevice(aDevice);
+}
+
+/* static */
+bool FenceD3D11::IsSupportedByDevice(ID3D11Device* aDevice) {
   MOZ_ASSERT(aDevice);
 
   if (!aDevice) {
@@ -85,8 +92,8 @@ bool FenceD3D11::IsSupported(ID3D11Device* aDevice) {
 
   // Check for IDXGIAdapter4:
   RefPtr<IDXGIDevice> dxgiDevice;
-  aDevice->QueryInterface((IDXGIDevice**)getter_AddRefs(dxgiDevice));
-  if (FAILED(hr)) {
+  hr = aDevice->QueryInterface((IDXGIDevice**)getter_AddRefs(dxgiDevice));
+  if (FAILED(hr) || !dxgiDevice) {
     return false;
   }
 
@@ -97,8 +104,9 @@ bool FenceD3D11::IsSupported(ID3D11Device* aDevice) {
   }
 
   RefPtr<IDXGIAdapter4> dxgiAdapter4;
-  dxgiAdapter->QueryInterface((IDXGIAdapter4**)getter_AddRefs(dxgiAdapter4));
-  if (FAILED(hr)) {
+  hr = dxgiAdapter->QueryInterface(
+      (IDXGIAdapter4**)getter_AddRefs(dxgiAdapter4));
+  if (FAILED(hr) || !dxgiAdapter4) {
     gfxCriticalNoteOnce << "Failed to get IDXGIAdapter4: " << gfx::hexa(hr);
     return false;
   }
@@ -237,6 +245,40 @@ bool FenceD3D11::Wait(ID3D11Device* aDevice) {
   }
 
   return true;
+}
+
+/* static */
+bool FenceD3D11::WaitD3D11Fence(RefPtr<Fence>& aFence, ID3D11Device* aDevice) {
+  if (!aFence) {
+    return true;
+  }
+  auto* fenceD3D11 = aFence->AsFenceD3D11();
+  if (!fenceD3D11) {
+    MOZ_ASSERT_UNREACHABLE("Unexpected fence type");
+    return false;
+  }
+  return fenceD3D11->Wait(aDevice);
+}
+
+/* static */
+void FenceD3D11::WaitD3D11Fences(const std::vector<RefPtr<Fence>>& aFences,
+                                 ID3D11Device* aDevice) {
+  MOZ_ASSERT(aDevice);
+
+  for (const auto& fence : aFences) {
+    if (!fence) {
+      MOZ_ASSERT_UNREACHABLE("unexpected to be called");
+      continue;
+    }
+
+    auto* fenceD3D11 = fence->AsFenceD3D11();
+    if (!fenceD3D11) {
+      MOZ_ASSERT_UNREACHABLE("Unexpected fence type");
+      continue;
+    }
+
+    fenceD3D11->Wait(aDevice);
+  }
 }
 
 }  // namespace layers

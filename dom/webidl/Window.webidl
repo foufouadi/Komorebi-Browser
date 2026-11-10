@@ -298,7 +298,7 @@ partial interface Window {
   //[Throws, NewObject, NeedsCallerType] MediaQueryList matchMedia(DOMString query);
   [Throws, NewObject, NeedsCallerType] MediaQueryList? matchMedia(UTF8String query);
 
-  [SameObject, Replaceable] readonly attribute Screen screen;
+  [Replaceable] readonly attribute Screen screen;
 
   // browsing context
   //[Throws] undefined moveTo(double x, double y);
@@ -312,8 +312,8 @@ partial interface Window {
   [Throws, ChromeOnly] undefined moveResize(long x, long y, long w, long h);
 
   // viewport
-  [Replaceable, Throws] readonly attribute double innerWidth;
-  [Replaceable, Throws] readonly attribute double innerHeight;
+  [Replaceable, Throws, NeedsCallerType] readonly attribute double innerWidth;
+  [Replaceable, Throws, NeedsCallerType] readonly attribute double innerHeight;
 
   // viewport scrolling
   undefined scroll(unrestricted double x, unrestricted double y);
@@ -396,6 +396,10 @@ dictionary SynthesizeMouseEventData : SynthesizeEventData {
   short inputSource = 1;
   // Modifiers pressed, using constants defined as MODIFIER_* in nsIDOMWindowUtils.
   long modifiers = 0;
+  // Raw movement delta, standing in for the raw delta a platform widget
+  // reports while the native pointer is locked. Must be specified together.
+  long movementX;
+  long movementY;
 };
 
 // Mozilla-specific stuff
@@ -962,3 +966,5 @@ partial interface Window {
   [SameObject, SecureContext, Pref="dom.documentpip.enabled"]
   readonly attribute DocumentPictureInPicture documentPictureInPicture;
 };
+
+Window includes PushManagerAttribute;

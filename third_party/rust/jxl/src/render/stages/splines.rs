@@ -3,16 +3,16 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-use std::{any::Any, sync::Arc};
-
-use crate::{features::spline::Splines, render::RenderPipelineInPlaceStage, util::AtomicRefCell};
+use crate::features::spline::Splines;
+use crate::render::{ErasedLocalState, RenderPipelineInPlaceStage};
+use crate::util::sync::{Arc, RwLock};
 
 pub struct SplinesStage {
-    splines: Arc<AtomicRefCell<Splines>>,
+    splines: Arc<RwLock<Splines>>,
 }
 
 impl SplinesStage {
-    pub fn new(splines: Arc<AtomicRefCell<Splines>>) -> Self {
+    pub fn new(splines: Arc<RwLock<Splines>>) -> Self {
         SplinesStage { splines }
     }
 }
@@ -35,9 +35,10 @@ impl RenderPipelineInPlaceStage for SplinesStage {
         position: (usize, usize),
         xsize: usize,
         row: &mut [&mut [f32]],
-        _state: Option<&mut dyn Any>,
+        _state: Option<&mut ErasedLocalState>,
+        _previous_call_was_previous_row: bool,
     ) {
-        let splines = self.splines.borrow();
+        let splines = self.splines.try_read().unwrap();
         if splines.splines.is_empty() {
             return;
         }
@@ -48,13 +49,13 @@ impl RenderPipelineInPlaceStage for SplinesStage {
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
+    use test_log::test;
 
+    use crate::error::Result;
     use crate::features::spline::{Point, QuantizedSpline, Splines};
     use crate::frame::color_correlation_map::ColorCorrelationParams;
-    use crate::util::AtomicRefCell;
-    use crate::{error::Result, render::stages::splines::SplinesStage};
-    use test_log::test;
+    use crate::render::stages::splines::SplinesStage;
+    use crate::util::sync::{Arc, RwLock};
 
     #[ignore = "spline rendering is not fully consistent due to sqrt precision differences"]
     #[test]
@@ -92,11 +93,11 @@ mod test {
         );
 
         splines
-            .initialize_draw_cache(500, 500, &ColorCorrelationParams::default(), false)
+            .initialize_draw_cache(500, 500, &ColorCorrelationParams::default(), false, true)
             .unwrap();
 
         crate::render::test::test_stage_consistency(
-            || SplinesStage::new(Arc::new(AtomicRefCell::new(splines.clone()))),
+            || SplinesStage::new(Arc::new(RwLock::new(splines.clone()))),
             (500, 500),
             6,
         )

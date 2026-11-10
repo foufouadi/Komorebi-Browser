@@ -2,7 +2,7 @@ schema: 1
 
 bugzilla:
   product: Core
-  component: Networking
+  component: "WebRTC: Networking"
 
 origin:
   name: sctp
@@ -10,10 +10,11 @@ origin:
 
   url: https://github.com/sctplab/usrsctp/blob/master/Manual.md
 
-  release: 1330843b6ffd0c5c2d7483b07050049eedda8077 (2024-08-03T12:00:29Z).
-  revision: 1330843b6ffd0c5c2d7483b07050049eedda8077
+  release: c625e21950600460cb5c6075616eb1622df2b06a (2026-10-07T14:32:40Z).
+  revision: c625e21950600460cb5c6075616eb1622df2b06a
 
   license: BSD-3-Clause
+  license-file: LICENSE.md
 
 vendoring:
   url: https://github.com/sctplab/usrsctp
@@ -51,8 +52,9 @@ vendoring:
       cwd: '{yaml_dir}'
 
   patches:
-    - win32-rands.patch
-    - win32-free.patch
+    - tsn-gap-check.patch
+    - flush-before-process-init.patch
+    - interleaving-supported-define.patch
 
 updatebot:
   maintainer-phab: "#webrtc-reviewers"

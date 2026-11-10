@@ -11,6 +11,12 @@ ChromeUtils.defineLazyGetter(this, "SidebarTestUtils", () => {
   utils.init(this);
   return utils;
 });
+ChromeUtils.defineLazyGetter(this, "BookmarksSidebarTestUtils", () => {
+  const { BookmarksSidebarTestUtils: utils } = ChromeUtils.importESModule(
+    "resource://testing-common/BookmarksSidebarTestUtils.sys.mjs"
+  );
+  return utils;
+});
 
 const imageBuffer = imageBufferFromDataURI(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQImWNgYGBgAAAABQABh6FO1AAAAABJRU5ErkJggg=="
@@ -24,6 +30,8 @@ function imageBufferFromDataURI(encodedImageData) {
 const SIDEBAR_VISIBILITY_PREF = "sidebar.visibility";
 const POSITION_SETTING_PREF = "sidebar.position_start";
 const VERTICAL_TABS_PREF = "sidebar.verticalTabs";
+const HOVER_PREVIEW_PREF = "sidebar.openTabsPanel.hoverPreview.enabled";
+const BOOKMARKS_TEST_URL = "https://example.com/";
 const kPrefCustomizationState = "browser.uiCustomization.state";
 const kPrefCustomizationHorizontalTabstrip =
   "browser.uiCustomization.horizontalTabstrip";
@@ -206,6 +214,24 @@ async function waitForRepaint() {
   );
 }
 
+/**
+ * Asserts the tooltip of a sidebar row once Fluent has translated it, so that
+ * a localized title would have replaced the expected one.
+ *
+ * @param {SidebarTabRow} row
+ * @param {string} expected
+ * @param {string} message
+ */
+async function assertRowTooltip(row, expected, message) {
+  await row.updateComplete;
+  await row.ownerDocument.l10n.translateFragment(row.mainEl);
+  Assert.ok(
+    !row.mainEl.hasAttribute("data-l10n-id"),
+    "Row link has no Fluent ID that could override its tooltip."
+  );
+  Assert.equal(row.mainEl.title, expected, message);
+}
+
 function cleanUpExtraTabs() {
   while (window.gBrowser.tabs.length > 1) {
     BrowserTestUtils.removeTab(window.gBrowser.tabs.at(-1));
@@ -263,14 +289,83 @@ async function populateHistory() {
   return { URLs, dates };
 }
 
-async function showBookmarksSidebar() {
-  if (SidebarController.currentID !== "viewBookmarksSidebar") {
-    await SidebarTestUtils.showPanel(window, "viewBookmarksSidebar");
+async function addBookmark({
+  url = BOOKMARKS_TEST_URL,
+  title = "Test Bookmark",
+  parentGuid,
+} = {}) {
+  return PlacesUtils.bookmarks.insert({
+    url,
+    title,
+    parentGuid: parentGuid ?? PlacesUtils.bookmarks.toolbarGuid,
+  });
+}
+
+async function addFolder(title = "Test Folder", parentGuid) {
+  return PlacesUtils.bookmarks.insert({
+    type: PlacesUtils.bookmarks.TYPE_FOLDER,
+    title,
+    parentGuid: parentGuid ?? PlacesUtils.bookmarks.toolbarGuid,
+  });
+}
+
+/**
+ * Opens a bookmark's ancestor folders and returns its containing list.
+ *
+ * @param {SidebarBookmarkList} tabList - The sidebar's root bookmark list.
+ * @param {string} parentGuid - The GUID of the containing Places folder.
+ * @returns {SidebarBookmarkList} The list containing the requested bookmark or folder.
+ */
+async function getBookmarkList(tabList, parentGuid) {
+  const path = [];
+  while (parentGuid !== PlacesUtils.bookmarks.rootGuid) {
+    path.unshift(parentGuid);
+    parentGuid = (await PlacesUtils.bookmarks.fetch(parentGuid)).parentGuid;
   }
-  const { contentDocument, contentWindow } = SidebarController.browser;
-  const component = contentDocument.querySelector("sidebar-bookmarks");
-  await component.updateComplete;
-  return { component, contentWindow };
+
+  let list = tabList;
+  for (const guid of path) {
+    const folder = await BookmarksSidebarTestUtils.findBookmarkItemByGuid(
+      list,
+      "folderEls",
+      guid
+    );
+    await BookmarksSidebarTestUtils.openFolder(folder);
+    list = folder.querySelector("sidebar-bookmark-list");
+  }
+  return list;
+}
+
+/**
+ * Finds a bookmark row, expanding its ancestor folders as needed.
+ *
+ * @param {SidebarBookmarkList} tabList - The sidebar's root bookmark list.
+ * @param {object} bookmark - The bookmark returned by Places insertion.
+ * @returns {SidebarBookmarkRow} The matching rendered bookmark row.
+ */
+async function getBookmarkRow(tabList, bookmark) {
+  const list = await getBookmarkList(tabList, bookmark.parentGuid);
+  return BookmarksSidebarTestUtils.findBookmarkItemByGuid(
+    list,
+    "rowEls",
+    bookmark.guid
+  );
+}
+
+/**
+ * Finds a bookmark folder, expanding its ancestor folders as needed.
+ *
+ * @param {SidebarBookmarkList} tabList - The sidebar's root bookmark list.
+ * @param {object} folder - The folder returned by Places insertion.
+ * @returns {HTMLDetailsElement} The matching rendered folder.
+ */
+async function getBookmarkFolder(tabList, folder) {
+  const list = await getBookmarkList(tabList, folder.parentGuid);
+  return BookmarksSidebarTestUtils.findBookmarkItemByGuid(
+    list,
+    "folderEls",
+    folder.guid
+  );
 }
 
 async function expandToolbarFolder(tabList) {

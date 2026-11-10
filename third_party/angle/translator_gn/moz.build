@@ -25,7 +25,7 @@ LOCAL_INCLUDES += [
     "/third_party/angle/include/",
     "/third_party/angle/src/",
     "/third_party/angle/src/common/base/",
-    "/third_party/angle/src/common/third_party/xxhash/",
+    "/third_party/angle/src/common/third_party/xxhash/src/",
     "/tools/profiler/public"
 ]
 
@@ -37,7 +37,6 @@ SOURCES += [
     "/third_party/angle/src/compiler/translator/glslang_tab_autogen.cpp",
     "/third_party/angle/src/compiler/translator/tree_ops/RewriteStructSamplers.cpp",
     "/third_party/angle/src/compiler/translator/tree_ops/RewriteTexelFetchOffset.cpp",
-    "/third_party/angle/src/compiler/translator/tree_ops/SeparateStructFromUniformDeclarations.cpp",
     "/third_party/angle/src/compiler/translator/VariablePacker.cpp"
 ]
 
@@ -94,11 +93,14 @@ UNIFIED_SOURCES += [
     "/third_party/angle/src/compiler/translator/tree_ops/DeferGlobalInitializers.cpp",
     "/third_party/angle/src/compiler/translator/tree_ops/EmulateGLFragColorBroadcast.cpp",
     "/third_party/angle/src/compiler/translator/tree_ops/EmulateMultiDrawShaderBuiltins.cpp",
+    "/third_party/angle/src/compiler/translator/tree_ops/EnsureLoopForwardProgress.cpp",
+    "/third_party/angle/src/compiler/translator/tree_ops/ExpandFragmentOutputsToVec4.cpp",
+    "/third_party/angle/src/compiler/translator/tree_ops/FoldConstantSwitch.cpp",
     "/third_party/angle/src/compiler/translator/tree_ops/FoldExpressions.cpp",
     "/third_party/angle/src/compiler/translator/tree_ops/GatherDefaultUniforms.cpp",
-    "/third_party/angle/src/compiler/translator/tree_ops/glsl/RegenerateStructNames.cpp",
     "/third_party/angle/src/compiler/translator/tree_ops/glsl/RewriteRepeatedAssignToSwizzled.cpp",
     "/third_party/angle/src/compiler/translator/tree_ops/glsl/UseInterfaceBlockFields.cpp",
+    "/third_party/angle/src/compiler/translator/tree_ops/glsl/WrapStructConstructors.cpp",
     "/third_party/angle/src/compiler/translator/tree_ops/InitializeVariables.cpp",
     "/third_party/angle/src/compiler/translator/tree_ops/MonomorphizeUnsupportedFunctions.cpp",
     "/third_party/angle/src/compiler/translator/tree_ops/PreTransformTextureCubeGradDerivatives.cpp",
@@ -121,6 +123,7 @@ UNIFIED_SOURCES += [
     "/third_party/angle/src/compiler/translator/tree_ops/SeparateDeclarations.cpp",
     "/third_party/angle/src/compiler/translator/tree_ops/SimplifyLoopConditions.cpp",
     "/third_party/angle/src/compiler/translator/tree_ops/SplitSequenceOperator.cpp",
+    "/third_party/angle/src/compiler/translator/tree_ops/UseGeneratedNamesForAnonymousStructs.cpp",
     "/third_party/angle/src/compiler/translator/tree_util/DriverUniform.cpp",
     "/third_party/angle/src/compiler/translator/tree_util/FindFunction.cpp",
     "/third_party/angle/src/compiler/translator/tree_util/FindMain.cpp",
@@ -136,7 +139,6 @@ UNIFIED_SOURCES += [
     "/third_party/angle/src/compiler/translator/tree_util/RewriteSampleMaskVariable.cpp",
     "/third_party/angle/src/compiler/translator/tree_util/RunAtTheBeginningOfShader.cpp",
     "/third_party/angle/src/compiler/translator/tree_util/RunAtTheEndOfShader.cpp",
-    "/third_party/angle/src/compiler/translator/tree_util/SpecializationConstant.cpp",
     "/third_party/angle/src/compiler/translator/Types.cpp",
     "/third_party/angle/src/compiler/translator/util.cpp",
     "/third_party/angle/src/compiler/translator/ValidateAST.cpp",
@@ -171,6 +173,7 @@ if CONFIG["OS_TARGET"] == "Android":
     DEFINES["ANDROID_NDK_VERSION_ROLL"] = "r27_1"
     DEFINES["ANGLE_ENABLE_GLOBAL_MUTEX_LOAD_TIME_ALLOCATE"] = "1"
     DEFINES["ANGLE_USE_ANDROID_TLS_SLOT"] = "1"
+    DEFINES["EGL_NO_X11"] = True
     DEFINES["HAVE_SYS_UIO_H"] = True
     DEFINES["_GNU_SOURCE"] = True
     DEFINES["__ANDROID_UNAVAILABLE_SYMBOLS_ARE_WEAK__"] = True
@@ -178,11 +181,13 @@ if CONFIG["OS_TARGET"] == "Android":
     DEFINES["__STDC_FORMAT_MACROS"] = True
 
     OS_LIBS += [
-        "log"
+        "log",
+        "nativewindow"
     ]
 
 if CONFIG["OS_TARGET"] == "Darwin":
 
+    DEFINES["EGL_NO_X11"] = True
     DEFINES["__STDC_CONSTANT_MACROS"] = True
     DEFINES["__STDC_FORMAT_MACROS"] = True
 
@@ -217,6 +222,7 @@ if CONFIG["OS_TARGET"] == "Linux":
 
 if CONFIG["OS_TARGET"] == "OpenBSD":
 
+    DEFINES["EGL_NO_X11"] = True
     DEFINES["USE_GLIB"] = "1"
     DEFINES["USE_OZONE"] = "1"
     DEFINES["_FILE_OFFSET_BITS"] = "64"
@@ -230,6 +236,7 @@ if CONFIG["OS_TARGET"] == "WINNT":
     DEFINES["ANGLE_ENABLE_HLSL"] = True
     DEFINES["ANGLE_IS_WIN"] = True
     DEFINES["CERT_CHAIN_PARA_HAS_EXTRA_FIELDS"] = True
+    DEFINES["EGL_NO_X11"] = True
     DEFINES["NOMINMAX"] = True
     DEFINES["NTDDI_VERSION"] = "0x0A000000"
     DEFINES["PSAPI_VERSION"] = "2"
@@ -286,7 +293,7 @@ if CONFIG["OS_TARGET"] == "WINNT":
         "/third_party/angle/src/compiler/translator/tree_ops/hlsl/WrapSwitchStatementsInBlocks.cpp"
     ]
 
-if CONFIG["OS_TARGET"] == "Darwin" and CONFIG["TARGET_OS"] == "OSX":
+if CONFIG["TARGET_OS"] == "OSX":
 
     DEFINES["ANGLE_ENABLE_METAL"] = True
 
@@ -320,7 +327,6 @@ if CONFIG["OS_TARGET"] == "Darwin" and CONFIG["TARGET_OS"] == "OSX":
         "/third_party/angle/src/compiler/translator/msl/TranslatorMSL.cpp",
         "/third_party/angle/src/compiler/translator/msl/UtilsMSL.cpp",
         "/third_party/angle/src/compiler/translator/tree_ops/msl/ConvertUnsupportedConstructorsToFunctionCalls.cpp",
-        "/third_party/angle/src/compiler/translator/tree_ops/msl/EnsureLoopForwardProgress.cpp",
         "/third_party/angle/src/compiler/translator/tree_ops/msl/FixTypeConstructors.cpp",
         "/third_party/angle/src/compiler/translator/tree_ops/msl/RescopeGlobalVariables.cpp",
         "/third_party/angle/src/compiler/translator/tree_ops/msl/RewriteInterpolants.cpp",

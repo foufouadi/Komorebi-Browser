@@ -5,11 +5,6 @@ prefs = ["browser.search.log=true"]
 
 ["browser_search_glean_serp_event_telemetry_categorization_enabled_by_pref.js"]
 support-files = ["searchTelemetryDomainCategorizationReporting.html"]
-skip-if = [
-  "os == 'mac' && os_version == '10.15' && arch == 'x86_64'", # Bug 1943499 - Frequent intermittent failure on Mac.
-  "os == 'mac' && os_version == '14.70' && arch == 'x86_64'", # Bug 1943499 - Frequent intermittent failure on Mac.
-  "os == 'mac' && os_version == '15.30' && arch == 'aarch64'", # Bug 1943499 - Frequent intermittent failure on Mac.
-]
 
 ["browser_search_telemetry_abandonment.js"]
 support-files = [
@@ -41,11 +36,9 @@ support-files = ["searchTelemetryAd_searchbox_with_content.html", "serp.css"]
 ["browser_search_telemetry_adblock_count.js"]
 
 ["browser_search_telemetry_app_provided_and_overridden.js"]
+tags = "urlbar"
 
 ["browser_search_telemetry_categorization_experiment_info.js"]
-skip-if = [
-  "artifact", # Bug 1883857 - experimentInfo object is not accessible in artifact builds
-]
 support-files = ["searchTelemetryDomainCategorizationReporting.html"]
 
 ["browser_search_telemetry_categorization_missing_impression.js"]
@@ -116,6 +109,9 @@ support-files = ["searchTelemetryAd_searchbox_with_content.html", "serp.css"]
 ["browser_search_telemetry_engagement_eventListeners_parent.js"]
 support-files = ["searchTelemetryAd_searchbox_with_content.html", "serp.css"]
 
+["browser_search_telemetry_engagement_fast_ad_click.js"]
+support-files = ["searchTelemetry.html", "searchTelemetryAd.html"]
+
 ["browser_search_telemetry_engagement_ignoreLinkRegexps.js"]
 support-files = ["searchTelemetryAd_searchbox_with_content.html", "serp.css"]
 
@@ -174,19 +170,35 @@ support-files = ["searchTelemetryAd_components_text.html", "serp.css"]
 
 ["browser_search_telemetry_impressionAttributes.js"]
 
+["browser_search_telemetry_impression_interrupted_load.js"]
+support-files = [
+  "searchTelemetry.html",
+  "slow_loading_page_with_ads.html",
+  "slow_loading_page_with_ads.sjs",
+  "slow_loading_page_with_ads_on_load_event.html",
+]
+
+["browser_search_telemetry_impression_scan.js"]
+support-files = [
+  "searchTelemetry.html",
+  "searchTelemetryAd.html",
+  "slow_loading_page_with_ads.html",
+  "slow_loading_page_with_ads.sjs",
+]
+
+["browser_search_telemetry_keyword_fixup.js"]
+support-files = ["searchTelemetry.html"]
+
 ["browser_search_telemetry_post_engine.js"]
 support-files = ["searchTelemetryAd_post_result.sjs"]
 
 ["browser_search_telemetry_new_window.js"]
-skip-if = [
-  "os == 'win' && os_version == '11.26200' && asan", # Bug 2019745
-]
 support-files = ["searchTelemetry.html", "searchTelemetryAd.html"]
 
+["browser_search_telemetry_newtab_non_handoff.js"]
+support-files = ["searchTelemetry.html"]
+
 ["browser_search_telemetry_private.js"]
-skip-if = [
-  "os == 'win' && os_version == '11.26200' && asan", # Bug 2019745
-]
 support-files = ["searchTelemetry.html", "searchTelemetryAd.html", "serp.css"]
 
 ["browser_search_telemetry_remote_settings_sync.js"]
@@ -195,15 +207,14 @@ support-files = ["searchTelemetryAd.html", "serp.css"]
 ["browser_search_telemetry_searchbar.js"]
 https_first_disabled = true
 support-files = [
+  "searchTelemetry.html",
   "telemetrySearchSuggestions.sjs",
   "telemetrySearchSuggestions.xml",
-]
-skip-if = [
-  "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && display == 'x11' && opt && a11y_checks", # Bug 1873335
 ]
 
 
 ["browser_search_telemetry_searchform.js"]
+tags = "urlbar"
 
 ["browser_search_telemetry_shopping.js"]
 support-files = ["searchTelemetryAd_shopping.html"]
@@ -212,13 +223,18 @@ support-files = ["searchTelemetryAd_shopping.html"]
 support-files = ["searchTelemetry.html"]
 
 ["browser_search_telemetry_sources.js"]
+tags = "urlbar"
 support-files = ["searchTelemetry.html", "searchTelemetryAd.html"]
 
 ["browser_search_telemetry_sources_ads.js"]
 support-files = ["searchTelemetry.html", "searchTelemetryAd.html"]
 
 ["browser_search_telemetry_sources_ads_clicks.js"]
-support-files = ["searchTelemetryAd.html"]
+support-files = [
+  "searchTelemetryAd.html",
+  "redirect_ad.sjs",
+  "redirect_final.sjs",
+]
 
 ["browser_search_telemetry_sources_ads_data_attributes.js"]
 support-files = [
@@ -238,6 +254,7 @@ support-files = [
 support-files = ["searchTelemetryAd_searchbox_with_content.html"]
 
 ["browser_search_telemetry_sources_navigation.js"]
+tags = "urlbar"
 support-files = ["searchTelemetry.html", "searchTelemetryAd.html"]
 
 ["browser_search_telemetry_sources_webextension.js"]

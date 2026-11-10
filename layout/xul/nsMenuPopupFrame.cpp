@@ -89,8 +89,7 @@ extern mozilla::LazyLogModule gWidgetPopupLog;
 #endif
 
 nsIFrame* NS_NewMenuPopupFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell)
-      nsMenuPopupFrame(aStyle, aPresShell->GetPresContext());
+  return new nsMenuPopupFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMenuPopupFrame)
@@ -302,7 +301,7 @@ void nsMenuPopupFrame::CreateWidget() {
 
   const bool remote = HasRemoteContent();
 
-  const auto mode = nsLayoutUtils::GetFrameTransparency(this, this);
+  const auto mode = WidgetTransparencyMode();
   widgetData.mHasRemoteContent = remote;
   widgetData.mTransparencyMode = mode;
   widgetData.mPopupLevel = GetPopupLevel();
@@ -324,6 +323,15 @@ void nsMenuPopupFrame::CreateWidget() {
   PropagateStyleToWidget();
 }
 
+TransparencyMode nsMenuPopupFrame::WidgetTransparencyMode() const {
+#ifdef MOZ_WIDGET_GTK
+  if (!LookAndFeel::GetInt(LookAndFeel::IntID::GTKCSDTransparencyAvailable)) {
+    return TransparencyMode::Opaque;
+  }
+#endif
+  return nsLayoutUtils::GetFrameTransparency(this, this);
+}
+
 LayoutDeviceIntRect nsMenuPopupFrame::CalcWidgetBounds() const {
   auto a2d = PresContext()->AppUnitsPerDevPixel();
   nsPoint offset;
@@ -341,7 +349,7 @@ LayoutDeviceIntRect nsMenuPopupFrame::CalcWidgetBounds() const {
   // We use outside pixels for transparent windows if possible, so that we
   // don't truncate the contents. For opaque popups, we use nearest pixels
   // which prevents having pixels not drawn by the frame.
-  const auto transparency = nsLayoutUtils::GetFrameTransparency(this, this);
+  const auto transparency = WidgetTransparencyMode();
   const bool opaque = transparency == TransparencyMode::Opaque;
   const auto idealBounds = LayoutDeviceIntRect::FromUnknownRect(
       opaque ? bounds.ToNearestPixels(a2d) : bounds.ToOutsidePixels(a2d));
@@ -1142,20 +1150,24 @@ void nsMenuPopupFrame::SchedulePendingWidgetMoveResize() {
   SchedulePaint();
 }
 
+void nsMenuPopupFrame::FlipAnchorForRTL(int8_t& aPopupAnchor,
+                                        int8_t& aPopupAlignment) {
+  // no need to flip the centered anchor types vertically
+  if (aPopupAnchor <= POPUPALIGNMENT_LEFTCENTER) {
+    aPopupAnchor = -aPopupAnchor;
+  }
+  if (aPopupAlignment <= POPUPALIGNMENT_LEFTCENTER) {
+    aPopupAlignment = -aPopupAlignment;
+  }
+}
+
 nsPoint nsMenuPopupFrame::AdjustPositionForAnchorAlign(
     nsRect& anchorRect, const nsSize& aPrefSize, FlipStyle& aHFlip,
     FlipStyle& aVFlip) const {
-  // flip the anchor and alignment for right-to-left
   int8_t popupAnchor(mPopupAnchor);
   int8_t popupAlign(mPopupAlignment);
   if (IsDirectionRTL()) {
-    // no need to flip the centered anchor types vertically
-    if (popupAnchor <= POPUPALIGNMENT_LEFTCENTER) {
-      popupAnchor = -popupAnchor;
-    }
-    if (popupAlign <= POPUPALIGNMENT_LEFTCENTER) {
-      popupAlign = -popupAlign;
-    }
+    FlipAnchorForRTL(popupAnchor, popupAlign);
   }
 
   nsRect originalAnchorRect(anchorRect);
@@ -2309,8 +2321,10 @@ void nsMenuPopupFrame::MoveTo(const CSSPoint& aPos, bool aUpdateAttrs,
     nsAutoString left, top;
     left.AppendInt(RoundedToInt(aPos).x);
     top.AppendInt(RoundedToInt(aPos).y);
-    popup->SetAttr(kNameSpaceID_None, nsGkAtoms::left, left, false);
-    popup->SetAttr(kNameSpaceID_None, nsGkAtoms::top, top, false);
+    popup->SetAttr(kNameSpaceID_None, nsGkAtoms::left, left, false,
+                   dom::IsKnownNewAttr::No);
+    popup->SetAttr(kNameSpaceID_None, nsGkAtoms::top, top, false,
+                   dom::IsKnownNewAttr::No);
   }
 }
 
@@ -2550,8 +2564,10 @@ void nsMenuPopupFrame::WindowResized(nsIWidget* aWidget,
   nsAutoString width, height;
   width.AppendInt(newCSS.width);
   height.AppendInt(newCSS.height);
-  popup->SetAttr(kNameSpaceID_None, nsGkAtoms::width, width, true);
-  popup->SetAttr(kNameSpaceID_None, nsGkAtoms::height, height, true);
+  popup->SetAttr(kNameSpaceID_None, nsGkAtoms::width, width, true,
+                 dom::IsKnownNewAttr::No);
+  popup->SetAttr(kNameSpaceID_None, nsGkAtoms::height, height, true,
+                 dom::IsKnownNewAttr::No);
 }
 
 bool nsMenuPopupFrame::RequestWindowClose(nsIWidget* aWidget) {

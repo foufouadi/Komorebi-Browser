@@ -20,8 +20,7 @@ using namespace mozilla;
 
 nsIFrame* NS_NewMathMLmpaddedFrame(PresShell* aPresShell,
                                    ComputedStyle* aStyle) {
-  return new (aPresShell)
-      nsMathMLmpaddedFrame(aStyle, aPresShell->GetPresContext());
+  return new nsMathMLmpaddedFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMathMLmpaddedFrame)
@@ -262,11 +261,11 @@ void nsMathMLmpaddedFrame::UpdateValue(const Attribute& aAttribute,
     }
 
     if (eCSSUnit_Number == unit) {
-      amount =
-          NSToCoordRound(float(scaler) * aAttribute.mValue.GetFloatValue());
+      amount = NSToCoordRoundWithClamp(float(scaler) *
+                                       aAttribute.mValue.GetFloatValue());
     } else if (eCSSUnit_Percent == unit) {
-      amount =
-          NSToCoordRound(float(scaler) * aAttribute.mValue.GetPercentValue());
+      amount = NSToCoordRoundWithClamp(float(scaler) *
+                                       aAttribute.mValue.GetPercentValue());
     } else {
       amount = CalcLength(aAttribute.mValue, aFontSizeInflation, this);
     }

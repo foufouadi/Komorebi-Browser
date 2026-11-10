@@ -83,17 +83,8 @@ def GXX(version):
 
 GCC_7 = GCC("7.3.0") + DEFAULT_C11
 GXX_7 = GXX("7.3.0") + DEFAULT_CXX_14 + SUPPORTS_GNUXX17 + SUPPORTS_CXX17
-GCC_10 = GCC("10.2.1") + DEFAULT_C17
-GXX_10 = (
-    GXX("10.2.1")
-    + DEFAULT_CXX_14
-    + SUPPORTS_GNUXX17
-    + SUPPORTS_CXX17
-    + {
-        "-std=gnu++20": {"__cplusplus": "201709L"},
-        "-std=c++20": {"__cplusplus": "201709L"},
-    }
-)
+GCC_11 = GCC("11.2.1") + DEFAULT_C17
+GXX_11 = GXX("11.2.1") + DEFAULT_CXX_17 + SUPPORTS_GNUXX20 + SUPPORTS_CXX20
 GCC_14 = GCC("14.3.0") + DEFAULT_C17
 GXX_14 = GXX("14.3.0") + DEFAULT_CXX_17 + SUPPORTS_GNUXX20 + SUPPORTS_CXX20
 
@@ -334,7 +325,7 @@ class BaseToolchainTest(BaseConfigureTest):
         del self.out
         super().tearDown()
 
-    def do_toolchain_test(self, paths, results, args=[], environ={}):
+    def do_toolchain_test(self, paths, results, args=[], environ={}, overrides={}):
         """Helper to test the toolchain checks from toolchain.configure.
 
         - `paths` is a dict associating compiler paths to FakeCompiler
@@ -347,6 +338,8 @@ class BaseToolchainTest(BaseConfigureTest):
           When the results for host_c_compiler are identical to c_compiler,
           they can be omitted. Likewise for host_cxx_compiler vs.
           cxx_compiler.
+        - `overrides` is a dict associating names of `@depends` functions to
+          values they should return instead of being evaluated.
         """
         environ = dict(environ)
         if "PATH" not in environ:
@@ -357,6 +350,8 @@ class BaseToolchainTest(BaseConfigureTest):
         args = args + ["--enable-release", "--disable-bootstrap"]
 
         sandbox = self.get_sandbox(paths, {}, args, environ, logger=self.logger)
+        for name, value in overrides.items():
+            sandbox._dependency_overrides[sandbox._depends[sandbox[name]]] = value
 
         for var in (
             "c_compiler",
@@ -414,7 +409,7 @@ class BaseToolchainTest(BaseConfigureTest):
 
 
 def old_gcc_message(old_ver):
-    return f"Only GCC 10.1 or newer is supported (found version {old_ver})."
+    return f"Only GCC 11.1 or newer is supported (found version {old_ver})."
 
 
 class LinuxToolchainTest(BaseToolchainTest):
@@ -423,8 +418,8 @@ class LinuxToolchainTest(BaseToolchainTest):
         "/usr/bin/g++": DEFAULT_GXX + GCC_PLATFORM_X86_64_LINUX,
         "/usr/bin/gcc-7": GCC_7 + GCC_PLATFORM_X86_64_LINUX,
         "/usr/bin/g++-7": GXX_7 + GCC_PLATFORM_X86_64_LINUX,
-        "/usr/bin/gcc-10": GCC_10 + GCC_PLATFORM_X86_64_LINUX,
-        "/usr/bin/g++-10": GXX_10 + GCC_PLATFORM_X86_64_LINUX,
+        "/usr/bin/gcc-11": GCC_11 + GCC_PLATFORM_X86_64_LINUX,
+        "/usr/bin/g++-11": GXX_11 + GCC_PLATFORM_X86_64_LINUX,
         "/usr/bin/gcc-14": GCC_14 + GCC_PLATFORM_X86_64_LINUX,
         "/usr/bin/g++-14": GXX_14 + GCC_PLATFORM_X86_64_LINUX,
         "/usr/bin/clang": DEFAULT_CLANG + CLANG_PLATFORM_X86_64_LINUX,
@@ -437,21 +432,21 @@ class LinuxToolchainTest(BaseToolchainTest):
 
     GCC_7_RESULT = old_gcc_message("7.3.0")
     GXX_7_RESULT = GCC_7_RESULT
-    GCC_10_RESULT = CompilerResult(
-        # gcc 10 defaults to C17, so no there's need to add -std=gnu17.
-        version="10.2.1",
+    GCC_11_RESULT = CompilerResult(
+        # gcc 11 defaults to C17, so there's no need to add -std=gnu17.
+        version="11.2.1",
         type="gcc",
-        compiler="/usr/bin/gcc-10",
+        compiler="/usr/bin/gcc-11",
         language="C",
     )
-    GXX_10_RESULT = CompilerResult(
-        flags=["-std=gnu++20", "-U__cplusplus", "-D__cplusplus=202002L"],
-        version="10.2.1",
+    GXX_11_RESULT = CompilerResult(
+        flags=["-std=gnu++20"],
+        version="11.2.1",
         type="gcc",
-        compiler="/usr/bin/g++-10",
+        compiler="/usr/bin/g++-11",
         language="C++",
     )
-    GCC_14_RESULT = GCC_10_RESULT + {"compiler": "/usr/bin/gcc-14", "version": "14.3.0"}
+    GCC_14_RESULT = GCC_11_RESULT + {"compiler": "/usr/bin/gcc-14", "version": "14.3.0"}
     GXX_14_RESULT = CompilerResult(
         flags=["-std=gnu++20"],
         version="14.3.0",
@@ -544,11 +539,11 @@ class LinuxToolchainTest(BaseToolchainTest):
                 "c_compiler": self.DEFAULT_GCC_RESULT,
                 "cxx_compiler": (
                     "The target C compiler is version 14.3.0, while the target "
-                    "C++ compiler is version 10.2.1. Need to use the same compiler "
+                    "C++ compiler is version 11.2.1. Need to use the same compiler "
                     "version."
                 ),
             },
-            environ={"CC": "gcc", "CXX": "g++-10"},
+            environ={"CC": "gcc", "CXX": "g++-11"},
         )
 
         self.do_toolchain_test(
@@ -559,11 +554,11 @@ class LinuxToolchainTest(BaseToolchainTest):
                 "host_c_compiler": self.DEFAULT_GCC_RESULT,
                 "host_cxx_compiler": (
                     "The host C compiler is version 14.3.0, while the host "
-                    "C++ compiler is version 10.2.1. Need to use the same compiler "
+                    "C++ compiler is version 11.2.1. Need to use the same compiler "
                     "version."
                 ),
             },
-            environ={"CC": "gcc", "HOST_CXX": "g++-10"},
+            environ={"CC": "gcc", "HOST_CXX": "g++-11"},
         )
 
     def test_mismatched_compiler(self):
@@ -807,8 +802,8 @@ class OSXToolchainTest(BaseToolchainTest):
     PATHS = {
         "/usr/bin/gcc-7": GCC_7 + GCC_PLATFORM_X86_64_OSX,
         "/usr/bin/g++-7": GXX_7 + GCC_PLATFORM_X86_64_OSX,
-        "/usr/bin/gcc-10": GCC_10 + GCC_PLATFORM_X86_64_OSX,
-        "/usr/bin/g++-10": GXX_10 + GCC_PLATFORM_X86_64_OSX,
+        "/usr/bin/gcc-11": GCC_11 + GCC_PLATFORM_X86_64_OSX,
+        "/usr/bin/g++-11": GXX_11 + GCC_PLATFORM_X86_64_OSX,
         "/usr/bin/clang": XCODE_CLANG_19 + CLANG_PLATFORM_X86_64_OSX,
         "/usr/bin/clang++": XCODE_CLANGXX_19 + CLANG_PLATFORM_X86_64_OSX,
         "/usr/bin/clang-14": XCODE_CLANG_14 + CLANG_PLATFORM_X86_64_OSX,
@@ -837,8 +832,8 @@ class OSXToolchainTest(BaseToolchainTest):
     )
     GCC_7_RESULT = LinuxToolchainTest.GCC_7_RESULT
     GXX_7_RESULT = LinuxToolchainTest.GXX_7_RESULT
-    GCC_10_RESULT = LinuxToolchainTest.GCC_10_RESULT
-    GXX_10_RESULT = LinuxToolchainTest.GXX_10_RESULT
+    GCC_11_RESULT = LinuxToolchainTest.GCC_11_RESULT
+    GXX_11_RESULT = LinuxToolchainTest.GXX_11_RESULT
     SYSROOT_FLAGS = {
         "flags": PrependFlags([
             "-isysroot",
@@ -883,10 +878,10 @@ class OSXToolchainTest(BaseToolchainTest):
         self.do_toolchain_test(
             self.PATHS,
             {
-                "c_compiler": self.GCC_10_RESULT + self.SYSROOT_FLAGS,
-                "cxx_compiler": self.GXX_10_RESULT + self.SYSROOT_FLAGS,
+                "c_compiler": self.GCC_11_RESULT + self.SYSROOT_FLAGS,
+                "cxx_compiler": self.GXX_11_RESULT + self.SYSROOT_FLAGS,
             },
-            environ={"CC": "gcc-10", "CXX": "g++-10"},
+            environ={"CC": "gcc-11", "CXX": "g++-11"},
         )
 
     def test_forced_unsupported_gcc(self):
@@ -910,8 +905,8 @@ class WindowsToolchainTest(BaseToolchainTest):
         "/usr/bin/g++": DEFAULT_GXX + GCC_PLATFORM_X86_WIN + MINGW32,
         "/usr/bin/gcc-7": GCC_7 + GCC_PLATFORM_X86_WIN + MINGW32,
         "/usr/bin/g++-7": GXX_7 + GCC_PLATFORM_X86_WIN + MINGW32,
-        "/usr/bin/gcc-10": GCC_10 + GCC_PLATFORM_X86_WIN + MINGW32,
-        "/usr/bin/g++-10": GXX_10 + GCC_PLATFORM_X86_WIN + MINGW32,
+        "/usr/bin/gcc-11": GCC_11 + GCC_PLATFORM_X86_WIN + MINGW32,
+        "/usr/bin/g++-11": GXX_11 + GCC_PLATFORM_X86_WIN + MINGW32,
         "/usr/bin/clang": DEFAULT_CLANG + CLANG_PLATFORM_X86_WIN,
         "/usr/bin/clang++": DEFAULT_CLANGXX + CLANG_PLATFORM_X86_WIN,
         "/usr/bin/clang-14": CLANG_14 + CLANG_PLATFORM_X86_WIN,
@@ -996,6 +991,85 @@ class WindowsToolchainTest(BaseToolchainTest):
             environ={"CC": "clang-14", "CXX": "clang++-14"},
         )
 
+    VC_COMPILER_PATH = ["/vc/14.38.33130/bin/Hostx64/x64"]
+    WINDOWS_SDK = ReadOnlyNamespace(
+        path="/sdk",
+        include="/sdk/Include/10.0.22621.0",
+        lib="/sdk/Lib/10.0.22621.0",
+    )
+    VC_SDK_CL_FLAGS = [
+        "-vctoolsdir",
+        "/vc/14.38.33130",
+        "-winsdkdir",
+        "/sdk",
+        "-winsdkversion",
+        "10.0.22621.0",
+    ]
+
+    def get_msvc_sysroot_flags(self, overrides):
+        sandbox = self.get_sandbox(self.PATHS, {}, ["--disable-bootstrap"], {})
+        for name, value in overrides.items():
+            sandbox._dependency_overrides[sandbox._depends[sandbox[name]]] = value
+        return sandbox._value_for(sandbox["msvc_sysroot_flags"])
+
+    def test_msvc_sysroot_flags(self):
+        self.assertIsNone(self.get_msvc_sysroot_flags({"vc_compiler_path": None}))
+        self.assertIsNone(
+            self.get_msvc_sysroot_flags({
+                "vc_compiler_path": self.VC_COMPILER_PATH,
+                "valid_windows_sdk_dir": None,
+            })
+        )
+
+        flags = self.get_msvc_sysroot_flags({
+            "winsysroot": None,
+            "vc_compiler_path": self.VC_COMPILER_PATH,
+            "valid_windows_sdk_dir": self.WINDOWS_SDK,
+        })
+        self.assertEqual(flags.cl, self.VC_SDK_CL_FLAGS)
+        self.assertEqual(
+            flags.clang,
+            [
+                "-Xmicrosoft-visualc-tools-root",
+                "/vc/14.38.33130",
+                "-Xmicrosoft-windows-sdk-root",
+                "/sdk",
+                "-Xmicrosoft-windows-sdk-version",
+                "10.0.22621.0",
+            ],
+        )
+
+        flags = self.get_msvc_sysroot_flags({
+            "winsysroot": "/winsysroot",
+            "vc_compiler_path": self.VC_COMPILER_PATH,
+            "valid_windows_sdk_dir": self.WINDOWS_SDK,
+        })
+        self.assertEqual(flags.cl, ["-winsysroot", "/winsysroot"])
+        self.assertEqual(flags.clang, ["-Xmicrosoft-windows-sys-root", "/winsysroot"])
+
+    def test_clang_cl_msvc_sysroot_flags(self):
+        for winsysroot, sysroot_flags in (
+            (None, self.VC_SDK_CL_FLAGS),
+            ("/winsysroot", ["-winsysroot", "/winsysroot"]),
+        ):
+            with self.subTest(winsysroot=winsysroot):
+                version_flags = ["-fms-compatibility-version=19.38"]
+                self.do_toolchain_test(
+                    self.PATHS,
+                    {
+                        "c_compiler": self.CLANG_CL_19_RESULT
+                        + {"flags": version_flags + sysroot_flags},
+                        "cxx_compiler": self.CLANGXX_CL_19_RESULT
+                        + {"flags": PrependFlags(version_flags)}
+                        + {"flags": sysroot_flags},
+                    },
+                    overrides={
+                        "winsysroot": winsysroot,
+                        "vc_compiler_path": self.VC_COMPILER_PATH,
+                        "valid_windows_sdk_dir": self.WINDOWS_SDK,
+                    },
+                )
+
 
 class Windows64ToolchainTest(WindowsToolchainTest):
     HOST = "x86_64-pc-windows-msvc"
@@ -1008,8 +1082,8 @@ class Windows64ToolchainTest(WindowsToolchainTest):
         "/usr/bin/g++": DEFAULT_GXX + GCC_PLATFORM_X86_64_WIN + MINGW32,
         "/usr/bin/gcc-7": GCC_7 + GCC_PLATFORM_X86_64_WIN + MINGW32,
         "/usr/bin/g++-7": GXX_7 + GCC_PLATFORM_X86_64_WIN + MINGW32,
-        "/usr/bin/gcc-10": GCC_10 + GCC_PLATFORM_X86_64_WIN + MINGW32,
-        "/usr/bin/g++-10": GXX_10 + GCC_PLATFORM_X86_64_WIN + MINGW32,
+        "/usr/bin/gcc-11": GCC_11 + GCC_PLATFORM_X86_64_WIN + MINGW32,
+        "/usr/bin/g++-11": GXX_11 + GCC_PLATFORM_X86_64_WIN + MINGW32,
         "/usr/bin/clang": DEFAULT_CLANG + CLANG_PLATFORM_X86_64_WIN,
         "/usr/bin/clang++": DEFAULT_CLANGXX + CLANG_PLATFORM_X86_64_WIN,
         "/usr/bin/clang-14": CLANG_14 + CLANG_PLATFORM_X86_64_WIN,
@@ -1859,8 +1933,6 @@ class RustTest(BaseConfigureTest):
             "i686-pc-windows-msvc",
             "x86_64-pc-windows-msvc",
             "aarch64-pc-windows-msvc",
-            "i686-pc-windows-gnu",
-            "x86_64-pc-windows-gnu",
         ):
             self.assertEqual(self.get_rust_target(straightforward), straightforward)
 
@@ -1875,9 +1947,13 @@ class RustTest(BaseConfigureTest):
             ("i386-unknown-linux-android", "i686-linux-android"),
             ("i686-unknown-linux-android21", "i686-linux-android"),
             ("i686-pc-linux-gnu", "i686-unknown-linux-gnu"),
+            ("i686-pc-windows-gnu", "i686-pc-windows-gnullvm"),
+            ("x86_64-pc-windows-gnu", "x86_64-pc-windows-gnullvm"),
             ("x86_64-unknown-linux-android", "x86_64-linux-android"),
             ("x86_64-unknown-linux-android21", "x86_64-linux-android"),
             ("x86_64-pc-linux-gnu", "x86_64-unknown-linux-gnu"),
+            ("aarch64-pld-linux-gnu", "aarch64-unknown-linux-gnu"),
+            ("x86_64-pld-linux-gnu", "x86_64-unknown-linux-gnu"),
             ("riscv64-unknown-linux-gnu", "riscv64gc-unknown-linux-gnu"),
             ("sparcv9-sun-solaris2", "sparcv9-sun-solaris"),
             ("x86_64-sun-solaris2", "x86_64-pc-solaris"),
@@ -1941,6 +2017,16 @@ class RustTest(BaseConfigureTest):
                 "armv7-unknown-linux-gnueabihf",
                 arm_target=ReadOnlyNamespace(
                     arm_arch=7, fpu="vfpv2", thumb2=True, float_abi="hard"
+                ),
+            ),
+            "armv7-unknown-linux-gnueabihf",
+        )
+
+        self.assertEqual(
+            self.get_rust_target(
+                "armv7-pld-linux-gnueabihf",
+                arm_target=ReadOnlyNamespace(
+                    arm_arch=7, fpu="neon", thumb2=False, float_abi="hard"
                 ),
             ),
             "armv7-unknown-linux-gnueabihf",

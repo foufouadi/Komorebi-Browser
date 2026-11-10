@@ -14,6 +14,8 @@ import org.robolectric.annotation.Implements
 
 /** Shadow for [PixelCopy] API. */
 @Implements(PixelCopy::class)
+// Robolectric instantiates shadows, so this has to stay a class.
+@Suppress("UtilityClassWithPublicConstructor")
 class PixelCopyShadow {
 
     companion object {

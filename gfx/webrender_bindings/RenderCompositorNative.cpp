@@ -14,8 +14,10 @@
 #include "mozilla/gfx/Logging.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/layers/CompositionRecorder.h"
-#include "mozilla/layers/GpuFence.h"
 #include "mozilla/layers/NativeLayer.h"
+#if defined(MOZ_WAYLAND)
+#  include "mozilla/layers/NativeLayerWayland.h"
+#endif
 #include "mozilla/layers/ProfilerScreenshots.h"
 #include "mozilla/layers/SurfacePool.h"
 #include "mozilla/webrender/RenderTextureHost.h"
@@ -34,6 +36,12 @@ RenderCompositorNative::RenderCompositorNative(
   LOG("RenderCompositorNative::RenderCompositorNative()");
 
   MOZ_ASSERT(mNativeLayerRoot);
+
+#if defined(MOZ_WAYLAND)
+  if (auto* rootWayland = mNativeLayerRoot->AsNativeLayerRootWayland()) {
+    rootWayland->SetGLContext(aGL);
+  }
+#endif
 
 #if defined(XP_DARWIN) || defined(MOZ_WAYLAND)
   auto pool = RenderThread::Get()->SharedSurfacePool();
@@ -245,7 +253,15 @@ void RenderCompositorNative::WaitUntilPresentationFlushed() {
   mNativeLayerRoot->WaitUntilCommitToScreenHasBeenProcessed();
 }
 
+// Without the native compositor, WebRender's only swapchain is
+// mNativeLayerForEntireWindow, which BeginFrame and EndFrame manage, so the
+// base class implementations apply.
+
 void RenderCompositorNative::CompositorBeginFrame() {
+  if (!ShouldUseNativeCompositor()) {
+    RenderCompositor::CompositorBeginFrame();
+    return;
+  }
   mAddedLayers.Clear();
   mAddedTilePixelCount = 0;
   mAddedClippedPixelCount = 0;
@@ -255,6 +271,10 @@ void RenderCompositorNative::CompositorBeginFrame() {
 }
 
 void RenderCompositorNative::CompositorEndFrame() {
+  if (!ShouldUseNativeCompositor()) {
+    RenderCompositor::CompositorEndFrame();
+    return;
+  }
   if (profiler_thread_is_being_profiled_for_markers()) {
     auto bufferSize = GetBufferSize();
     uint64_t windowPixelCount = uint64_t(bufferSize.width) * bufferSize.height;
@@ -315,7 +335,6 @@ void RenderCompositorNative::UnbindNativeLayer() {
 }
 
 void RenderCompositorNative::CreateSurface(wr::NativeSurfaceId aId,
-                                           wr::DeviceIntPoint aVirtualOffset,
                                            wr::DeviceIntSize aTileSize,
                                            bool aIsOpaque) {
   MOZ_RELEASE_ASSERT(mSurfaces.find(aId) == mSurfaces.end());
@@ -324,6 +343,7 @@ void RenderCompositorNative::CreateSurface(wr::NativeSurfaceId aId,
 
 void RenderCompositorNative::CreateExternalSurface(wr::NativeSurfaceId aId,
                                                    bool aIsOpaque) {
+  MOZ_RELEASE_ASSERT(ShouldUseNativeCompositor());
   MOZ_RELEASE_ASSERT(mSurfaces.find(aId) == mSurfaces.end());
 
   RefPtr<layers::NativeLayer> layer =
@@ -373,12 +393,20 @@ void RenderCompositorNativeOGL::AttachExternalImage(
   // image->Lock only uses the channel index to populate the returned
   // `WrExternalImage`. Since we don't use that, it doesn't matter
   // what channel index we pass.
-  image->Lock(0, mGL);
+  // A DMABUF buffer is attached to the wl_surface as-is and is never sampled
+  // here, so locking it without a GL context skips a per-frame EGLImage import
+  // and BO mapping. Every other backend still requires a context (e.g.
+  // RenderMacIOSurfaceTextureHost).
+  image->Lock(0, image->AsRenderDMABUFTextureHost() ? nullptr : mGL.get());
 
   RenderCompositorNative::AttachExternalImage(aId, aExternalImage);
 }
 
 void RenderCompositorNative::DestroySurface(NativeSurfaceId aId) {
+  if (!ShouldUseNativeCompositor()) {
+    RenderCompositor::DestroySurface(aId);
+    return;
+  }
   auto surfaceCursor = mSurfaces.find(aId);
   MOZ_RELEASE_ASSERT(surfaceCursor != mSurfaces.end());
 
@@ -440,6 +468,11 @@ void RenderCompositorNative::AddSurface(
     wr::NativeSurfaceId aId, const wr::CompositorSurfaceTransform& aTransform,
     wr::DeviceIntRect aClipRect, wr::ImageRendering aImageRendering,
     wr::DeviceIntRect aRoundedClipRect, wr::ClipRadius aClipRadius) {
+  if (!ShouldUseNativeCompositor()) {
+    RenderCompositor::AddSurface(aId, aTransform, aClipRect, aImageRendering,
+                                 aRoundedClipRect, aClipRadius);
+    return;
+  }
   MOZ_RELEASE_ASSERT(!mCurrentlyBoundNativeLayer);
 
   auto surfaceCursor = mSurfaces.find(aId);
@@ -507,7 +540,7 @@ UniquePtr<RenderCompositor> RenderCompositorNativeOGL::Create(
                     << gfx::hexa(gl.get());
     return nullptr;
   }
-  return MakeUnique<RenderCompositorNativeOGL>(aWidget, std::move(gl));
+  return std::make_unique<RenderCompositorNativeOGL>(aWidget, std::move(gl));
 }
 
 RenderCompositorNativeOGL::RenderCompositorNativeOGL(
@@ -582,7 +615,7 @@ void RenderCompositorNativeOGL::InsertFrameDoneSync() {
     mGL->fDeleteSync(mThisFrameDoneFences->mSync);
   }
   mThisFrameDoneFences =
-      MakeUnique<BackPressureFences>(std::move(mPendingGpuFences));
+      std::make_unique<BackPressureFences>(std::move(mPendingGpuFences));
   mThisFrameDoneFences->mSync =
       mGL->fFenceSync(LOCAL_GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 #endif
@@ -610,7 +643,7 @@ bool RenderCompositorNativeOGL::WaitForGPU() {
 
 void RenderCompositorNativeOGL::Bind(wr::NativeTileId aId,
                                      wr::DeviceIntPoint* aOffset,
-                                     uint32_t* aFboId,
+                                     uint64_t* aSurfaceHandle,
                                      wr::DeviceIntRect aDirtyRect,
                                      wr::DeviceIntRect aValidRect) {
   gfx::IntRect validRect(aValidRect.min.x, aValidRect.min.y, aValidRect.width(),
@@ -623,7 +656,7 @@ void RenderCompositorNativeOGL::Bind(wr::NativeTileId aId,
   Maybe<GLuint> fbo = mCurrentlyBoundNativeLayer->NextSurfaceAsFramebuffer(
       validRect, dirtyRect, true);
 
-  *aFboId = *fbo;
+  *aSurfaceHandle = *fbo;
   *aOffset = wr::DeviceIntPoint{0, 0};
 }
 
@@ -641,7 +674,7 @@ UniquePtr<RenderCompositor> RenderCompositorNativeSWGL::Create(
     gfxCriticalNote << "Failed SWGL context creation for WebRender";
     return nullptr;
   }
-  return MakeUnique<RenderCompositorNativeSWGL>(aWidget, ctx);
+  return std::make_unique<RenderCompositorNativeSWGL>(aWidget, ctx);
 }
 
 RenderCompositorNativeSWGL::RenderCompositorNativeSWGL(

@@ -657,13 +657,17 @@ function _maybeSynthesizeDragOver(left, top, aEvent, aWindow) {
  * @property {boolean} [isWidgetEventSynthesized] - Controls WidgetMouseEvent.mReason value.
  * @property {boolean} [metaKey] - If set to `true`, the Meta key will
  *     be considered pressed.
+ * @property {number} [movementX] - Raw movement delta, standing in for the delta a
+ *     platform widget reports while the native pointer is locked. Must be specified
+ *     together with `movementY`.
+ * @property {number} [movementY] - See `movementX`.
  * @property {number} [pressure=0] - Touch input pressure (0.0 -> 1.0).
  * @property {boolean} [shiftKey] - If set to `true`, the Shift key will
  *     be considered pressed.
  * @property {string} [type] - Event type to synthesize. If not specified
  *     a `mousedown` followed by a `mouseup` are performed.
  *
- * @see nsIDOMWindowUtils.sendMouseEvent
+ * @see SynthesizeMouseEventData defined in Window.webidl
  */
 
 /**
@@ -793,6 +797,8 @@ function synthesizeMouseAtPoint(
           modifiers,
           pressure: aEvent.pressure,
           inputSource,
+          movementX: aEvent.movementX,
+          movementY: aEvent.movementY,
         },
         {
           isDOMEventSynthesized,
@@ -814,6 +820,8 @@ function synthesizeMouseAtPoint(
           modifiers,
           pressure: aEvent.pressure,
           inputSource,
+          movementX: aEvent.movementX,
+          movementY: aEvent.movementY,
         },
         {
           isDOMEventSynthesized,
@@ -834,6 +842,8 @@ function synthesizeMouseAtPoint(
           modifiers,
           pressure: aEvent.pressure,
           inputSource,
+          movementX: aEvent.movementX,
+          movementY: aEvent.movementY,
         },
         {
           isDOMEventSynthesized,
@@ -1810,7 +1820,7 @@ function synthesizeAndWaitNativeMouseMove(
  * @param {number} [aEvent.repeat]
  *        If you emulate auto-repeat, you should set the count of repeat.
  *        This method will automatically synthesize keydown (and keypress).
- * @param {*} aEvent.location
+ * @param {any} aEvent.location
  *        If you want to specify this, you can specify this explicitly.
  *        However, if you don't specify this value, it will be computed
  *        from code value.
@@ -2226,6 +2236,28 @@ function synthesizeNativeKey(
     aCallback
   );
   return true;
+}
+
+/**
+ * Check whether 106 keyboard layout for Japanese is loaded or not.
+ * If this returns false, synthesizeNativeKey cannot work with JIS
+ * keyboard layout.
+ */
+function isJapanese106KeyboardDriverLoaded() {
+  if (!_EU_isWin) {
+    throw new Error("This is not available on the platform");
+  }
+
+  const { WindowsRegistry } = _EU_ChromeUtils.importESModule(
+    "resource://gre/modules/WindowsRegistry.sys.mjs"
+  );
+  const driverName = WindowsRegistry.readRegKey(
+    _EU_Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
+    "SYSTEM\\CurrentControlSet\\Services\\i8042prt\\Parameters",
+    "LayerDriver JPN",
+    _EU_Ci.nsIWindowsRegKey.WOW64_64
+  );
+  return driverName == "kbd106.dll";
 }
 
 var _gSeenEvent = false;
@@ -3167,13 +3199,15 @@ function synthesizeQueryCaretRect(aOffset, aWindow) {
  * @param aReverse If true, the selection is from |aOffset + aLength| to
  *                 |aOffset|.  Otherwise, from |aOffset| to |aOffset + aLength|.
  * @param aWindow  Optional (If null, current |window| will be used)
+ * @param aFlags   Additional eSetSelection event flags.
  * @return         True, if succeeded.  Otherwise false.
  */
 async function synthesizeSelectionSet(
   aOffset,
   aLength,
   aReverse,
-  aWindow = window
+  aWindow = window,
+  aFlags = 0
 ) {
   const utils = _getDOMWindowUtils(aWindow);
   if (!utils) {
@@ -3185,7 +3219,7 @@ async function synthesizeSelectionSet(
   await new Promise(resolve =>
     aWindow.requestAnimationFrame(() => aWindow.requestAnimationFrame(resolve))
   );
-  const flags = aReverse ? SELECTION_SET_FLAG_REVERSE : 0;
+  const flags = aFlags | (aReverse ? SELECTION_SET_FLAG_REVERSE : 0);
   return utils.sendSelectionSetEvent(aOffset, aLength, flags);
 }
 
@@ -3466,7 +3500,7 @@ function synthesizeDragOver(
  * Emulate the drop event and mouseup event.
  * This should be called after synthesizeDragOver.
  *
- * @param {*} aResult
+ * @param {any} aResult
  *        The first element of the array returned from ``synthesizeDragOver``.
  * @param {DataTransfer} aDataTransfer
  *        The second element of the array returned from ``synthesizeDragOver``.
@@ -3506,14 +3540,16 @@ function synthesizeDropAfterDragOver(
     );
     sendDragEvent(event, aDestElement, aDestWindow);
   }
-  // Don't run accessibility checks for this click, since we're not actually
+  // Don't run the click checks for this click, since we're not actually
   // clicking. It's just generated as part of the drop.
-  // this.AccessibilityUtils might not be set if this isn't a browser test or
-  // if a browser test has loaded its own copy of EventUtils for some reason.
-  // In the latter case, the test probably shouldn't do that.
+  // this.ClickChecks and this.AccessibilityUtils might not be set if this isn't
+  // a browser test or if a browser test has loaded its own copy of EventUtils
+  // for some reason. In the latter case, the test probably shouldn't do that.
   this.AccessibilityUtils?.suppressClickHandling(true);
+  this.ClickChecks?.suppressClickHandling(true);
   synthesizeMouse(aDestElement, 2, 2, { type: "mouseup" }, aDestWindow);
   this.AccessibilityUtils?.suppressClickHandling(false);
+  this.ClickChecks?.suppressClickHandling(false);
 
   return effect;
 }
@@ -3549,7 +3585,16 @@ function startDragSession(aWindow, aDropEffect) {
       throw new Error(`${aDropEffect} is an invalid drop effect value`);
   }
 
-  ds.startDragSessionForTests(aWindow, dropAction);
+  try {
+    ds.startDragSessionForTests(aWindow, dropAction);
+  } catch (e) {
+    if (e.name == "NS_ERROR_NOT_AVAILABLE") {
+      throw new Error(
+        "Cannot start a drag session: the drag service is suppressed; a previous test may have left the mouse button pressed"
+      );
+    }
+    throw e;
+  }
 }
 
 /**
@@ -3957,6 +4002,7 @@ async function synthesizePlainDragAndDrop(aParams) {
     let srcSession = srcWindowUtils.dragSession;
     if (!srcSession) {
       if (expectCancelDragStart) {
+        this.AccessibilityUtils?.suppressClickHandling(true);
         synthesizeMouse(
           srcElement,
           finalX,
@@ -3964,6 +4010,7 @@ async function synthesizePlainDragAndDrop(aParams) {
           { type: "mouseup", id },
           srcWindow
         );
+        this.AccessibilityUtils?.suppressClickHandling(false);
         return;
       }
       throw new Error("drag hasn't been started by the operation");

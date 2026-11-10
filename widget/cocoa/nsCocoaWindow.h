@@ -23,6 +23,7 @@
 class nsCocoaWindow;
 class nsChildView;
 class nsMenuBarX;
+class nsMenuItemX;
 @class ChildView;
 
 namespace mozilla {
@@ -129,6 +130,11 @@ class TextInputHandler;
 // (and its subclasses) to find out which NSFrameView subclass to instantiate
 // to create its "frame view".
 + (Class)frameViewClassForStyleMask:(NSUInteger)styleMask;
+
+// Sanitizes a style mask before AppKit stores it. NSWindow clears the
+// non-activating panel bit here; NSPanel keeps it. Both -initWithContentRect:
+// and -setStyleMask: go through it.
++ (NSUInteger)_validateStyleMask:(NSUInteger)aStyleMask;
 
 @end
 
@@ -317,6 +323,8 @@ class nsCocoaWindow final : public nsIWidget {
   void DispatchAPZWheelInputEvent(mozilla::InputData& aEvent);
   nsEventStatus DispatchAPZInputEvent(mozilla::InputData& aEvent);
 
+  void PerformHapticFeedback(mozilla::HapticFeedbackType aType) override;
+
   void DispatchDoubleTapGesture(mozilla::TimeStamp aEventTimeStamp,
                                 LayoutDeviceIntPoint aScreenPosition,
                                 mozilla::Modifiers aModifiers);
@@ -443,6 +451,10 @@ class nsCocoaWindow final : public nsIWidget {
   void PostHandleKeyEvent(mozilla::WidgetKeyboardEvent* aEvent) override;
   nsresult ActivateNativeMenuItemAt(const nsAString& indexString) override;
   nsresult ForceUpdateNativeMenuAt(const nsAString& indexString) override;
+  nsresult GetNativeMenuItemKeyEquivalent(const nsAString& aElementId,
+                                          nsAString& aResult) override;
+  nsresult GetNativeMenuItemTitle(const nsAString& aElementId,
+                                  nsAString& aResult) override;
   [[nodiscard]] nsresult GetSelectionAsPlaintext(nsAString& aResult) override;
   TextEventDispatcherListener* GetNativeTextEventDispatcherListener() override;
   [[nodiscard]] nsresult AttachNativeKeyEvent(
@@ -474,11 +486,14 @@ class nsCocoaWindow final : public nsIWidget {
 
   bool HasModalDescendants() const { return mNumModalDescendants > 0; }
   bool IsModal() const { return mModal; }
+  bool IsMediaPiPWindow() const {
+    return mPiPType == mozilla::widget::PiPType::MediaPiP;
+  }
 
   NSWindow* GetCocoaWindow() { return [[mWindow retain] autorelease]; }
 
   void SetMenuBar(RefPtr<nsMenuBarX>&& aMenuBar);
-  nsMenuBarX* GetMenuBar();
+  already_AddRefed<nsMenuBarX> GetMenuBar();
 
   void SetInputContext(const InputContext& aContext,
                        const InputContextAction& aAction) override;
@@ -497,6 +512,7 @@ class nsCocoaWindow final : public nsIWidget {
   void CocoaWindowWillEnterFullscreen(bool aFullscreen);
   void CocoaWindowDidEnterFullscreen(bool aFullscreen);
   void CocoaWindowDidResize();
+  void SaveRestoredBounds();
   void CocoaSendToplevelActivateEvents();
   void CocoaSendToplevelDeactivateEvents();
 
@@ -540,7 +556,7 @@ class nsCocoaWindow final : public nsIWidget {
   CGFloat ComputeBackingScaleFactor() const;
 
   void DoResize(double aX, double aY, double aWidth, double aHeight,
-                bool aRepaint, bool aConstrainToCurrentScreen);
+                bool aRepaint);
 
   // If the window's NSWindow frame doesn't intersect any currently-attached
   // NSScreen, relocate the window onto the main screen so the user can reach
@@ -660,6 +676,7 @@ class nsCocoaWindow final : public nsIWidget {
   // period, we presume the window is visible, which prevents us from sending
   // unnecessary OcclusionStateChanged events.
   bool mHasStartedNativeFullscreen;
+  bool mIsWaitingForFullscreenVisibility = false;
 
   bool mModal = false;
   bool mIsAnimationSuppressed = false;
@@ -698,6 +715,10 @@ class nsCocoaWindow final : public nsIWidget {
       nullptr;
 
  private:
+  // Finds the item in this window's native menu bar that was built from the
+  // element with id aElementId. Only used by native menu test hooks.
+  nsMenuItemX* FindMenuBarItemByElementId(const nsAString& aElementId);
+
   // This is class state for tracking which nsCocoaWindow, if any, is in the
   // middle of a native fullscreen transition.
   static nsCocoaWindow* sWindowInNativeTransition;

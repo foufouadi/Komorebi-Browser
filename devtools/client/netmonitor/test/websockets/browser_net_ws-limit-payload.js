@@ -33,18 +33,18 @@ add_task(async function () {
   is(requests.length, 1, "There should be one request");
 
   // Wait for all sent/received messages to be displayed in DevTools
-  const wait = waitForDOM(
+  const onDomUpdated = waitForDOM(
     document,
     "#messages-view .message-list-table .message-list-item",
     2
   );
 
   // Select the first request
-  EventUtils.sendMouseEvent({ type: "mousedown" }, requests[0]);
+  clickOnRequestRow(requests[0]);
 
   // Click on the "Response" panel
   clickOnSidebarTab(document, "response");
-  await wait;
+  await onDomUpdated;
 
   // Get all messages present in the "Response" panel
   const frames = document.querySelectorAll(
@@ -56,7 +56,7 @@ add_task(async function () {
 
   // Wait for next tick to do async stuff (The MessagePayload component uses the async function getMessagePayload)
   await waitForTick();
-  EventUtils.sendMouseEvent({ type: "mousedown" }, frames[0]);
+  clickInView(frames[0]);
 
   await waitForDOM(document, "#messages-view .truncated-data-message");
 

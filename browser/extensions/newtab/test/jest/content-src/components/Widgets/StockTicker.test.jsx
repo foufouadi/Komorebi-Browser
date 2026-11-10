@@ -2,7 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { render } from "@testing-library/react";
+import { render, fireEvent, act } from "@testing-library/react";
+import { useState } from "react";
 import {
   StockTicker,
   getDirection,
@@ -185,6 +186,9 @@ describe("StockTicker", () => {
     expect(
       container.querySelector("li.stock-ticker").getAttribute("aria-hidden")
     ).toBe("true");
+    expect(container.querySelector("li.stock-ticker").className).toContain(
+      "stock-ticker--loading"
+    );
   });
 
   it("falls back to the ticker symbol as the screen-reader subject when name is missing, and is not aria-hidden", () => {
@@ -241,5 +245,332 @@ describe("StockTicker", () => {
       change: "+2.1%",
       price: "$559.44",
     });
+  });
+
+  it.each(["medium", "large"])(
+    "gives a %s quote row a tooltip with the full name",
+    size => {
+      const { container } = render(
+        <StockTicker
+          size={size}
+          name="SPDR Dow Jones Industrial Average ETF Trust"
+          ticker="DIA"
+          price="$559.44 USD"
+          changePercent="-0.11"
+        />
+      );
+      const name = "SPDR Dow Jones Industrial Average ETF Trust";
+      expect(
+        container.querySelector(".stock-indicator").getAttribute("title")
+      ).toBe(name);
+      expect(
+        container.querySelector(".stock-ticker-label").getAttribute("title")
+      ).toBe(name);
+      // The li is what screen readers read; a title there would be announced
+      // as a description after the spoken summary.
+      expect(container.querySelector("li").hasAttribute("title")).toBe(false);
+    }
+  );
+
+  it("gives small, loading and search rows no tooltip", () => {
+    const hasTooltip = container =>
+      !![...container.querySelectorAll("[title]")].length;
+    const small = render(
+      <StockTicker
+        size="small"
+        name="Apple Inc"
+        ticker="AAPL"
+        price="$1 USD"
+        changePercent="+0.1"
+      />
+    );
+    expect(hasTooltip(small.container)).toBe(false);
+    const loading = render(<StockTicker size="large" loading={true} />);
+    expect(hasTooltip(loading.container)).toBe(false);
+    const result = render(
+      <StockTicker
+        size="large"
+        variant="search"
+        name="Apple Inc"
+        ticker="AAPL"
+        exchange="NASDAQ"
+      />
+    );
+    expect(hasTooltip(result.container)).toBe(false);
+  });
+});
+
+describe("StockTicker watchlist control (large only)", () => {
+  const base = {
+    size: "large",
+    name: "Vanguard S&P 500 ETF",
+    ticker: "VOO",
+    price: "$559.44 USD",
+    changePercent: "-0.11",
+  };
+  const renderRow = props =>
+    render(
+      <ul>
+        <StockTicker {...base} {...props} />
+      </ul>
+    );
+
+  it("add: shows '+' with the add label, fires the toggle, not aria-hidden", () => {
+    const onToggle = jest.fn();
+    const { container } = renderRow({
+      watchlistState: "add",
+      onWatchlistToggle: onToggle,
+    });
+    const btn = container.querySelector("moz-button.stock-ticker-action");
+    expect(btn.getAttribute("iconSrc")).toContain("plus.svg");
+    expect(btn.getAttribute("data-l10n-id")).toBe(
+      "newtab-stocks-add-to-watchlist"
+    );
+    expect(JSON.parse(btn.getAttribute("data-l10n-args"))).toEqual({
+      name: "Vanguard S&P 500 ETF",
+    });
+    expect(btn.closest("[aria-hidden='true']")).toBeNull();
+    fireEvent.click(btn);
+    expect(onToggle).toHaveBeenCalledWith("VOO", "Vanguard S&P 500 ETF");
+  });
+
+  it("remove: shows '-' with the remove label and fires the toggle", () => {
+    const onToggle = jest.fn();
+    const { container } = renderRow({
+      watchlistState: "remove",
+      onWatchlistToggle: onToggle,
+    });
+    const btn = container.querySelector("moz-button.stock-ticker-action");
+    expect(btn.getAttribute("iconSrc")).toContain("minus.svg");
+    expect(btn.getAttribute("data-l10n-id")).toBe(
+      "newtab-stocks-remove-from-watchlist"
+    );
+    expect(JSON.parse(btn.getAttribute("data-l10n-args"))).toEqual({
+      name: "Vanguard S&P 500 ETF",
+    });
+    fireEvent.click(btn);
+    expect(onToggle).toHaveBeenCalledWith("VOO", "Vanguard S&P 500 ETF");
+  });
+
+  it("added: a persistent decorative checkmark + visually-hidden in-watchlist text, no button", () => {
+    const onToggle = jest.fn();
+    const { container } = renderRow({
+      watchlistState: "added",
+      onWatchlistToggle: onToggle,
+    });
+    expect(
+      container.querySelector("moz-button.stock-ticker-action")
+    ).toBeNull();
+    expect(
+      container.querySelector(".stock-ticker-added[aria-hidden='true']")
+    ).toBeTruthy();
+    const sr = container.querySelector(".stock-ticker-in-watchlist");
+    expect(sr.getAttribute("data-l10n-id")).toBe("newtab-stocks-in-watchlist");
+    expect(JSON.parse(sr.getAttribute("data-l10n-args"))).toEqual({
+      name: "Vanguard S&P 500 ETF",
+    });
+  });
+
+  it("added renders even without a handler (it is just an indicator)", () => {
+    const { container } = renderRow({ watchlistState: "added" });
+    expect(container.querySelector(".stock-ticker-added")).toBeTruthy();
+  });
+
+  it("renders no actionable control for add/remove without a handler", () => {
+    const add = renderRow({ watchlistState: "add" });
+    expect(
+      add.container.querySelector("moz-button.stock-ticker-action")
+    ).toBeNull();
+    const remove = renderRow({ watchlistState: "remove" });
+    expect(
+      remove.container.querySelector("moz-button.stock-ticker-action")
+    ).toBeNull();
+  });
+
+  it("renders no control without watchlistState", () => {
+    const { container } = renderRow({});
+    expect(
+      container.querySelector("moz-button.stock-ticker-action")
+    ).toBeNull();
+    expect(container.querySelector(".stock-ticker-added")).toBeNull();
+  });
+
+  it("renders no control in medium", () => {
+    const { container } = renderRow({
+      size: "medium",
+      watchlistState: "add",
+      onWatchlistToggle: jest.fn(),
+    });
+    expect(
+      container.querySelector("moz-button.stock-ticker-action")
+    ).toBeNull();
+  });
+
+  it("after adding, marks the checkmark as confirming for a moment, then clears it", () => {
+    jest.useFakeTimers();
+    function ControlledRow() {
+      const [state, setState] = useState("add");
+      return (
+        <ul>
+          <StockTicker
+            {...base}
+            watchlistState={state}
+            onWatchlistToggle={() => setState("added")}
+          />
+        </ul>
+      );
+    }
+    const { container } = render(<ControlledRow />);
+    fireEvent.click(container.querySelector("moz-button.stock-ticker-action"));
+    expect(
+      container.querySelector(".stock-ticker-added--confirming")
+    ).toBeTruthy();
+    act(() => {
+      jest.advanceTimersByTime(1999);
+    });
+    expect(
+      container.querySelector(".stock-ticker-added--confirming")
+    ).toBeTruthy();
+    act(() => {
+      jest.advanceTimersByTime(1);
+    });
+    expect(container.querySelector(".stock-ticker-added")).toBeTruthy();
+    expect(
+      container.querySelector(".stock-ticker-added--confirming")
+    ).toBeNull();
+    jest.useRealTimers();
+  });
+
+  it("disables the add button when disabled is set", () => {
+    const { container } = renderRow({
+      watchlistState: "add",
+      onWatchlistToggle: jest.fn(),
+      disabled: true,
+    });
+    expect(
+      container
+        .querySelector("moz-button.stock-ticker-action")
+        .getAttribute("disabled")
+    ).not.toBeNull();
+  });
+});
+
+describe("StockTicker search variant", () => {
+  const base = {
+    size: "large",
+    variant: "search",
+    name: "Vanguard S&P 500 ETF",
+    ticker: "VOO",
+    exchange: "NYSE",
+  };
+  const renderRow = props =>
+    render(
+      <ul>
+        <StockTicker {...base} {...props} />
+      </ul>
+    );
+
+  it("marks the row with the result class", () => {
+    const { container } = renderRow();
+    expect(container.querySelector("li.stock-ticker--result")).toBeTruthy();
+  });
+
+  it("shows name, symbol and exchange with no quote parts", () => {
+    const { container } = renderRow({
+      watchlistState: "add",
+      onWatchlistToggle: jest.fn(),
+    });
+    expect(container.querySelector(".stock-ticker-name").textContent).toBe(
+      "Vanguard S&P 500 ETF"
+    );
+    expect(container.querySelector(".stock-ticker-symbol").textContent).toBe(
+      "VOO"
+    );
+    expect(container.querySelector(".stock-ticker-exchange").textContent).toBe(
+      "NYSE"
+    );
+    expect(container.querySelector(".stock-indicator")).toBeNull();
+    expect(container.querySelector(".stock-ticker-price")).toBeNull();
+    expect(container.querySelector(".stock-ticker-change")).toBeNull();
+    // Only saved rows carry a second .stock-ticker-sr (the in-watchlist span).
+    expect(container.querySelector(".stock-ticker-sr")).toBeNull();
+    expect(
+      container.querySelector(".stock-ticker-label").getAttribute("aria-hidden")
+    ).toBeNull();
+    expect(
+      container.querySelector("moz-button.stock-ticker-action")
+    ).toBeTruthy();
+  });
+
+  it("omits the second line when the exchange is empty", () => {
+    const { container } = renderRow({ exchange: "" });
+    expect(container.querySelectorAll(".stock-ticker-line")).toHaveLength(1);
+    expect(container.querySelector(".stock-ticker-exchange")).toBeNull();
+  });
+});
+
+describe("StockTicker small size", () => {
+  const base = {
+    size: "small",
+    name: "Vanguard S&P 500 ETF",
+    ticker: "VOO",
+    price: "$559.44 USD",
+    changePercent: "-0.11",
+  };
+  const renderSmall = props =>
+    render(
+      <ul>
+        <StockTicker {...base} {...props} />
+      </ul>
+    );
+
+  it("renders the indicator, change and price, and no name/symbol line", () => {
+    const { container } = renderSmall();
+    expect(container.querySelector(".stock-indicator")).toBeTruthy();
+    expect(container.querySelector(".stock-ticker-change").textContent).toBe(
+      "-0.11%"
+    );
+    expect(container.querySelector(".stock-ticker-price").textContent).toBe(
+      "$559.44"
+    );
+    expect(container.querySelector(".stock-ticker-name")).toBeNull();
+    expect(container.querySelector(".stock-ticker-symbol")).toBeNull();
+    expect(container.querySelector(".stock-ticker-dot")).toBeNull();
+  });
+
+  it("keeps the screen-reader status text (name / change / price, no symbol)", () => {
+    const { container } = renderSmall();
+    const sr = container.querySelector(".stock-ticker-sr");
+    expect(sr.getAttribute("data-l10n-id")).toBe(
+      "newtab-stocks-ticker-status-down"
+    );
+    expect(JSON.parse(sr.getAttribute("data-l10n-args"))).toEqual({
+      name: "Vanguard S&P 500 ETF",
+      change: "-0.11%",
+      price: "$559.44",
+    });
+  });
+
+  it("renders no add/remove button and no added indicator at small", () => {
+    const add = renderSmall({
+      watchlistState: "add",
+      onWatchlistToggle: jest.fn(),
+    });
+    expect(
+      add.container.querySelector("moz-button.stock-ticker-action")
+    ).toBeNull();
+    // "added" would show the indicator at large; small must suppress it too.
+    const added = renderSmall({ watchlistState: "added" });
+    expect(added.container.querySelector(".stock-ticker-added")).toBeNull();
+    expect(
+      added.container.querySelector(".stock-ticker-in-watchlist")
+    ).toBeNull();
+  });
+
+  it("renders a hidden placeholder when loading", () => {
+    const { container } = renderSmall({ loading: true });
+    const li = container.querySelector(".stock-ticker--small");
+    expect(li.getAttribute("aria-hidden")).toBe("true");
+    expect(container.querySelector(".stock-ticker-sr")).toBeNull();
   });
 });

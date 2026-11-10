@@ -55,12 +55,12 @@ import mozilla.components.compose.base.snackbar.Snackbar
 import mozilla.components.compose.base.snackbar.displaySnackbar
 import mozilla.components.compose.base.text.Text
 import mozilla.components.compose.base.textfield.TextField
+import mozilla.components.compose.base.theme.PreviewThemeProvider
+import mozilla.components.compose.base.theme.Theme
 import mozilla.components.ui.icons.R as iconsR
 import org.mozilla.fenix.R
 import org.mozilla.fenix.ext.simplifiedUrl
 import org.mozilla.fenix.theme.FirefoxTheme
-import org.mozilla.fenix.theme.PreviewThemeProvider
-import org.mozilla.fenix.theme.Theme
 
 @Composable
 internal fun LoginDetailsScreen(store: LoginsStore) {
@@ -154,7 +154,7 @@ private fun LoginDetailTopBar(
                     contentDescription = stringResource(R.string.login_detail_menu_button_content_description),
                 ) {
                     Icon(
-                        painter = painterResource(iconsR.drawable.mozac_ic_ellipsis_vertical_24),
+                        painter = painterResource(iconsR.drawable.mozac_ic_more_vertical_round_24),
                         contentDescription = null,
                     )
                 }

@@ -120,7 +120,7 @@ class SVGElement : public SVGElementBase  // nsIContent
    */
   void NodeInfoChanged(Document* aOldDoc) override;
 
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* aAttribute) const override;
+  bool IsNoNamespaceAttrMapped(const nsAtom* aAttribute) const override;
   void UpdateMappedDeclarationBlock();
 
   NS_IMPL_FROMNODE(SVGElement, kNameSpaceID_SVG)
@@ -154,8 +154,9 @@ class SVGElement : public SVGElementBase  // nsIContent
     const nsStaticAtom* name = GetLengthInfo().mInfos[aAttrEnum].mName;
     return name == nsGkAtoms::width || name == nsGkAtoms::height ||
            name == nsGkAtoms::r || name == nsGkAtoms::rx ||
-           name == nsGkAtoms::ry || name == nsGkAtoms::markerWidth ||
-           name == nsGkAtoms::markerHeight || name == nsGkAtoms::textLength;
+           name == nsGkAtoms::ry || name == nsGkAtoms::fr ||
+           name == nsGkAtoms::markerWidth || name == nsGkAtoms::markerHeight ||
+           name == nsGkAtoms::textLength;
   }
   bool NumberAttrAllowsPercentage(uint8_t aAttrEnum) {
     return IsSVGElement(nsGkAtoms::stop) &&

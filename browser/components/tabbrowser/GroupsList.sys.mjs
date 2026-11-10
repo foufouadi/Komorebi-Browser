@@ -3,18 +3,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 import { PrivateBrowsingUtils } from "resource://gre/modules/PrivateBrowsingUtils.sys.mjs";
+import { SessionStore } from "moz-src:///browser/components/sessionstore/SessionStore.sys.mjs";
 import { TabMetrics } from "moz-src:///browser/components/tabbrowser/TabMetrics.sys.mjs";
-import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
 const MAX_INITIAL_ITEMS = 5;
-
-const lazy = {};
-XPCOMUtils.defineLazyPreferenceGetter(
-  lazy,
-  "tabGroupsAlternateMenu",
-  "browser.tabs.groups.alternateMenu",
-  false
-);
 
 export class GroupsPanel {
   constructor({ view, containerNode, showAll = false }) {
@@ -87,7 +79,7 @@ export class GroupsPanel {
       }
 
       case "allTabsGroupView_restoreGroup":
-        this.win.SessionStore.openSavedTabGroup(tabGroupId, this.win, {
+        SessionStore.openSavedTabGroup(tabGroupId, this.win, {
           source: TabMetrics.METRIC_SOURCE.TAB_OVERFLOW_MENU,
         });
         break;
@@ -106,12 +98,6 @@ export class GroupsPanel {
 
   #showAll;
   #populate() {
-    if (lazy.tabGroupsAlternateMenu) {
-      this.containerNode.replaceChildren();
-      this.#setupListeners();
-      return;
-    }
-
     let fragment = this.doc.createDocumentFragment();
 
     let openGroups = this.win.gBrowser.getAllTabGroups({
@@ -119,7 +105,7 @@ export class GroupsPanel {
     });
     let savedGroups = [];
     if (!PrivateBrowsingUtils.isWindowPrivate(this.win)) {
-      savedGroups = this.win.SessionStore.savedGroups.toSorted(
+      savedGroups = SessionStore.savedGroups.toSorted(
         (group1, group2) => group2.closedAt - group1.closedAt
       );
     }
@@ -127,6 +113,7 @@ export class GroupsPanel {
     let totalItemCount = savedGroups.length + openGroups.length;
     if (totalItemCount && !this.#showAll) {
       let header = this.doc.createElement("h2");
+      header.setAttribute("id", "allTabsMenu-groupsView-header");
       header.setAttribute("class", "subview-subheader");
       this.doc.l10n.setAttributes(
         header,
@@ -170,7 +157,7 @@ export class GroupsPanel {
   }
 
   /**
-   * @param {TabGroupStateData} group
+   * @param {MozTabbrowserTabGroup|SavedTabGroupStateData} group
    * @param {object} [options]
    * @param {boolean} [options.isOpen]
    *   Set to true if the group is currently open, and false if it's saved
@@ -218,7 +205,7 @@ export class GroupsPanel {
     button.setAttribute("crop", "end");
 
     let setName = tabGroupName => {
-      if (group.saved) {
+      if (!isOpen) {
         doc.l10n.setAttributes(button, "tabbrowser-manager-closed-tab-group", {
           tabGroupName,
         });
@@ -230,6 +217,8 @@ export class GroupsPanel {
 
     if (group.name) {
       setName(group.name);
+    } else if (isOpen) {
+      setName(/** @type {MozTabbrowserTabGroup} */ (group).defaultGroupName);
     } else {
       doc.l10n
         .formatValues([{ id: "tab-group-name-default" }])

@@ -14,7 +14,6 @@
 #
 # tests implemented:
 #    pk12util
-#    signtool
 #
 # special strings
 # ---------------
@@ -96,26 +95,18 @@ tools_init()
 
   TOOLSDIR=${HOSTDIR}/tools
   COPYDIR=${TOOLSDIR}/copydir
-  SIGNDIR=${TOOLSDIR}/signdir
 
   PKCS12POLICY=${QADIR}/tools/pkcs12policy.txt
 
   R_TOOLSDIR=../tools
   R_COPYDIR=../tools/copydir
-  R_SIGNDIR=../tools/signdir
   P_R_COPYDIR=${R_COPYDIR}
-  P_R_SIGNDIR=${R_SIGNDIR}
   if [ -n "${MULTIACCESS_DBM}" ]; then
       P_R_COPYDIR="multiaccess:Tools.$version"
-      P_R_SIGNDIR="multiaccess:Tools.sign.$version"
   fi
 
   mkdir -p ${TOOLSDIR}
   mkdir -p ${COPYDIR}
-  mkdir -p ${SIGNDIR}
-  cp ${ALICEDIR}/* ${SIGNDIR}/
-  mkdir -p ${TOOLSDIR}/html
-  cp ${QADIR}/tools/sign*.html ${TOOLSDIR}/html
   mkdir -p ${TOOLSDIR}/data
   cp ${QADIR}/tools/TestOldCA.p12 ${TOOLSDIR}/data
   cp ${QADIR}/tools/TestOldAES128CA.p12 ${TOOLSDIR}/data
@@ -128,12 +119,25 @@ tools_init()
   cp ${QADIR}/tools/pbmac1-invalid-bad-salt.p12 ${TOOLSDIR}/data
   cp ${QADIR}/tools/pbmac1-invalid-no-length.p12 ${TOOLSDIR}/data
   cp ${QADIR}/tools/corrupted_cert_bag.p12 ${TOOLSDIR}/data
+  cp ${QADIR}/tools/openssl-ed25519.p12 ${TOOLSDIR}/data
+  cp ${QADIR}/tools/openssl-ml-kem-512-seed.p12 ${TOOLSDIR}/data
+  cp ${QADIR}/tools/openssl-ml-kem-512-priv.p12 ${TOOLSDIR}/data
+  cp ${QADIR}/tools/openssl-ml-kem-512-both.p12 ${TOOLSDIR}/data
   cp ${QADIR}/tools/openssl-ml-kem-768-seed.p12 ${TOOLSDIR}/data
   cp ${QADIR}/tools/openssl-ml-kem-768-priv.p12 ${TOOLSDIR}/data
   cp ${QADIR}/tools/openssl-ml-kem-768-both.p12 ${TOOLSDIR}/data
   cp ${QADIR}/tools/openssl-ml-kem-1024-seed.p12 ${TOOLSDIR}/data
   cp ${QADIR}/tools/openssl-ml-kem-1024-priv.p12 ${TOOLSDIR}/data
   cp ${QADIR}/tools/openssl-ml-kem-1024-both.p12 ${TOOLSDIR}/data
+  cp ${QADIR}/tools/ietf-ml-dsa-44-both.p12 ${TOOLSDIR}/data
+  cp ${QADIR}/tools/ietf-ml-dsa-44-key.p12 ${TOOLSDIR}/data
+  cp ${QADIR}/tools/ietf-ml-dsa-65-both.p12 ${TOOLSDIR}/data
+  cp ${QADIR}/tools/ietf-ml-dsa-65-key.p12 ${TOOLSDIR}/data
+  cp ${QADIR}/tools/ietf-ml-dsa-87-both.p12 ${TOOLSDIR}/data
+  cp ${QADIR}/tools/ietf-ml-dsa-87-key.p12 ${TOOLSDIR}/data
+  cp ${QADIR}/tools/openssl-ml-dsa-44.p12 ${TOOLSDIR}/data
+  cp ${QADIR}/tools/openssl-ml-dsa-65.p12 ${TOOLSDIR}/data
+  cp ${QADIR}/tools/openssl-ml-dsa-87.p12 ${TOOLSDIR}/data
 
 
   cd ${TOOLSDIR}
@@ -488,6 +492,30 @@ tools_p12_export_list_import_with_default_ciphers()
   ret=$?
   html_msg $ret 0 "Listing Alice's pk12 EC file with long pw (pk12util -l)"
   check_tmpfile
+
+  echo "$SCRIPTNAME: Exporting Alice's ML-DSA cert & key---------------"
+  echo "pk12util -o Alice-mldsa.p12 -n \"Alice-ml-dsa-44\" -d ${P_R_ALICEDIR} -k ${R_PWFILE} \\"
+  echo "         -w ${R_PWFILE}"
+  ${BINDIR}/pk12util -o Alice-mldsa.p12 -n "Alice-ml-dsa-44" -d ${P_R_ALICEDIR} -k ${R_PWFILE} \
+       -w ${R_PWFILE} 2>&1
+  ret=$?
+  html_msg $ret 0 "Exporting Alice's ML-DSA cert & key (pk12util -o)"
+  check_tmpfile
+  verify_p12 Alice-mldsa.p12 "default" "default" "default"
+
+ echo "$SCRIPTNAME: Importing Alice's ML-DSA cert & key --------------"
+  echo "pk12util -i Alice-mldsa.p12 -d ${P_R_COPYDIR} -k ${R_PWFILE} -w ${R_PWFILE}"
+  ${BINDIR}/pk12util -i Alice-mldsa.p12 -d ${P_R_COPYDIR} -k ${R_PWFILE} -w ${R_PWFILE} 2>&1
+  ret=$?
+  html_msg $ret 0 "Importing Alice's ML-DSA cert & key (pk12util -i)"
+  check_tmpfile
+
+  echo "$SCRIPTNAME: Listing Alice's pk12 ML-DSA file -----------------"
+  echo "pk12util -l Alice-mldsa.p12 -w ${R_PWFILE}"
+  ${BINDIR}/pk12util -l Alice-mldsa.p12 -w ${R_PWFILE} 2>&1
+  ret=$?
+  html_msg $ret 0 "Listing Alice's pk12 ML-DSA file (pk12util -l)"
+  check_tmpfile
 }
 
 tools_p12_import_old_files()
@@ -536,10 +564,21 @@ tools_p12_import_rsa_pss_private_key()
   return $ret
 }
 
+tools_p12_import_ed25519_private_key()
+{
+  echo "$SCRIPTNAME: Importing ED25519 private key from PKCS#12 file --------------"
+  ${BINDIR}/pk12util -i ${TOOLSDIR}/data/openssl-ed25519.p12 -d ${P_R_COPYDIR} -k ${R_PWFILE} -W 'test' 2>&1
+  ret=$?
+  html_msg $ret 0 "Importing ED25519 private key from PKCS#12 file"
+  check_tmpfile
+
+  return $ret
+}
+
 tools_p12_ml_kem_import()
 {
   echo "$SCRIPTNAME: Testing ml-kem compatibility with pkcs12 --------------"
-  for i in 768 1024
+  for i in 512 768 1024
   do
     for j in 'seed' 'priv' 'both'
     do
@@ -548,6 +587,33 @@ tools_p12_ml_kem_import()
        ret=$?
        check_tmpfile
        html_msg $ret 0 "Importing open encoded ml-kem-$i-$j private key from PKCS#12 file"
+    done
+  done
+}
+
+tools_p12_ml_dsa_import()
+{
+  echo "$SCRIPTNAME: Testing ml-dsa compatibility with pkcs12 --------------"
+  for i in 44 65 87
+  do
+    echo "${BINDIR}/pk12util -i ${TOOLSDIR}/data/openssl-ml-dsa-$i.p12 -d ${P_R_COPYDIR} -k ${R_PWFILE} -W 'test' 2>&1"
+    ${BINDIR}/pk12util -i ${TOOLSDIR}/data/openssl-ml-dsa-$i.p12 -d ${P_R_COPYDIR} -k ${R_PWFILE} -W 'test' 2>&1
+    ret=$?
+    html_msg $ret 0 "Importing openssl encoded ml-dsa-$i private key from PKCS#12 file"
+    check_tmpfile
+    for j in 'key' 'both'
+    do
+       echo "${BINDIR}/pk12util -i ${TOOLSDIR}/data/ietf-ml-dsa-$i-$j.p12 -d ${P_R_COPYDIR} -k ${R_PWFILE} -W 'test' 2>&1"
+       ${BINDIR}/pk12util -i ${TOOLSDIR}/data/ietf-ml-dsa-$i-$j.p12 -d ${P_R_COPYDIR} -k ${R_PWFILE} -W 'test' 2>&1
+       ret=$?
+       html_msg $ret 0 "Importing openssl encoded ml-dsa-$i private key from PKCS#12 file"
+       check_tmpfile
+       html_msg $ret 0 "Importing ietf sample ml-dsa-$i-$j private key from PKCS#12 file"
+
+       # each cert has the same issuer/sn, so we can't hold more than one in
+       # the data base
+       echo "${BINDIR}/certutil -F -n "ietf ml-dsa-$i-$j sample" -d ${P_R_COPYDIR} -f ${R_PWFILE}"
+       ${BINDIR}/certutil -F -n "ietf ml-dsa-$i-$j sample" -d ${P_R_COPYDIR} -f ${R_PWFILE}
     done
   done
 }
@@ -606,7 +672,7 @@ tools_p12()
   # we can run.
   iteration_count=$(pp -t p12 -i Alice-ec.p12 | grep "Iterations: " | sed -e 's;.*Iterations: ;;' -e 's;(.*).*;;')
   echo "Iteration count=${iteration_count}"
-  if [ -n "${iteration_count}" -a  ${iteration_count} -le 10000 ]; then
+  if [-z "${NSS_PK12_SHORT_TESTS}" -a  -n "${iteration_count}" -a  ${iteration_count} -le 10000 ]; then
       tools_p12_export_list_import_all_pkcs5v2_ciphers
       tools_p12_export_list_import_all_pkcs12v2pbe_ciphers
   else
@@ -616,9 +682,11 @@ tools_p12()
   tools_p12_export_with_invalid_ciphers
   tools_p12_import_old_files
   tools_p12_import_pbmac1_samples
-  tools_p12_ml_kem_import
   if using_sql; then
     tools_p12_import_rsa_pss_private_key
+    tools_p12_ml_kem_import
+    tools_p12_ml_dsa_import
+    tools_p12_import_ed25519_private_key
     tools_p12_policy
   fi
 }
@@ -811,61 +879,6 @@ map_cipher()
    echo "${1}"
 }
 
-############################## tools_sign ##############################
-# local shell function to test basic functionality of signtool
-########################################################################
-tools_sign()
-{
-  echo "$SCRIPTNAME: Create objsign cert -------------------------------"
-  echo "signtool -G \"objectsigner\" -d ${P_R_SIGNDIR} -p \"nss\""
-  ${BINDIR}/signtool -G "objsigner" -d ${P_R_SIGNDIR} -p "nss" 2>&1 <<SIGNSCRIPT
-y
-TEST
-MOZ
-NSS
-NY
-US
-liz
-liz@moz.org
-SIGNSCRIPT
-  html_msg $? 0 "Create objsign cert (signtool -G)"
-
-  echo "$SCRIPTNAME: Signing a jar of files ----------------------------"
-  echo "signtool -Z nojs.jar -d ${P_R_SIGNDIR} -p \"nss\" -k objsigner \\"
-  echo "         ${R_TOOLSDIR}/html"
-  ${BINDIR}/signtool -Z nojs.jar -d ${P_R_SIGNDIR} -p "nss" -k objsigner \
-           ${R_TOOLSDIR}/html
-  html_msg $? 0 "Signing a jar of files (signtool -Z)"
-
-  echo "$SCRIPTNAME: Listing signed files in jar ----------------------"
-  echo "signtool -v nojs.jar -d ${P_R_SIGNDIR} -p nss -k objsigner"
-  ${BINDIR}/signtool -v nojs.jar -d ${P_R_SIGNDIR} -p nss -k objsigner
-  html_msg $? 0 "Listing signed files in jar (signtool -v)"
-
-  echo "$SCRIPTNAME: Show who signed jar ------------------------------"
-  echo "signtool -w nojs.jar -d ${P_R_SIGNDIR}"
-  ${BINDIR}/signtool -w nojs.jar -d ${P_R_SIGNDIR}
-  html_msg $? 0 "Show who signed jar (signtool -w)"
-
-  echo "$SCRIPTNAME: Signing a xpi of files ----------------------------"
-  echo "signtool -Z nojs.xpi -X -d ${P_R_SIGNDIR} -p \"nss\" -k objsigner \\"
-  echo "         ${R_TOOLSDIR}/html"
-  ${BINDIR}/signtool -Z nojs.xpi -X -d ${P_R_SIGNDIR} -p "nss" -k objsigner \
-           ${R_TOOLSDIR}/html
-  html_msg $? 0 "Signing a xpi of files (signtool -Z -X)"
-
-  echo "$SCRIPTNAME: Listing signed files in xpi ----------------------"
-  echo "signtool -v nojs.xpi -d ${P_R_SIGNDIR} -p nss -k objsigner"
-  ${BINDIR}/signtool -v nojs.xpi -d ${P_R_SIGNDIR} -p nss -k objsigner
-  html_msg $? 0 "Listing signed files in xpi (signtool -v)"
-
-  echo "$SCRIPTNAME: Show who signed xpi ------------------------------"
-  echo "signtool -w nojs.xpi -d ${P_R_SIGNDIR}"
-  ${BINDIR}/signtool -w nojs.xpi -d ${P_R_SIGNDIR}
-  html_msg $? 0 "Show who signed xpi (signtool -w)"
-
-}
-
 tools_modutil()
 {
   echo "$SCRIPTNAME: Test if DB created by modutil -create is initialized"
@@ -896,7 +909,6 @@ tools_cleanup()
 
 tools_init
 tools_p12
-tools_sign
 tools_modutil
 tools_cleanup
 

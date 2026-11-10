@@ -7,6 +7,7 @@
 
 #include <ostream>
 
+#include "fmt/ostream.h"
 #include "mozilla/ComputedStyle.h"
 #include "mozilla/EnumSet.h"
 #include "mozilla/intl/BidiEmbeddingLevel.h"
@@ -512,7 +513,6 @@ class WritingMode {
    * Compare two WritingModes for equality.
    */
   bool operator==(const WritingMode&) const = default;
-  bool operator!=(const WritingMode&) const = default;
 
   /**
    * Check whether two modes are orthogonal to each other.
@@ -743,6 +743,9 @@ class LogicalPoint {
     }
   }
 
+  // We don't allow construction of a LogicalPoint with no writing mode.
+  LogicalPoint() = delete;
+
   /**
    * Read-only (const) access to the logical coordinates.
    */
@@ -865,7 +868,6 @@ class LogicalPoint {
     CHECK_WRITING_MODE(aOther.GetWritingMode());
     return mPoint == aOther.mPoint;
   }
-  bool operator!=(const LogicalPoint&) const = default;
 
   LogicalPoint operator+(const LogicalPoint& aOther) const {
     CHECK_WRITING_MODE(aOther.GetWritingMode());
@@ -924,9 +926,6 @@ class LogicalPoint {
 #else
   WritingMode GetWritingMode() const { return WritingMode::Unknown(); }
 #endif
-
-  // We don't allow construction of a LogicalPoint with no writing mode.
-  LogicalPoint() = delete;
 
   // Accessors that don't take or check a WritingMode value.
   // These are for internal use only; they are called by methods that have
@@ -994,6 +993,8 @@ class LogicalSize {
       BSize() = aPhysicalSize.height;
     }
   }
+
+  LogicalSize() = delete;
 
   void SizeTo(WritingMode aWritingMode, nscoord aISize, nscoord aBSize) {
     CHECK_WRITING_MODE(aWritingMode);
@@ -1088,7 +1089,6 @@ class LogicalSize {
     CHECK_WRITING_MODE(aOther.GetWritingMode());
     return mSize == aOther.mSize;
   }
-  bool operator!=(const LogicalSize&) const = default;
 
   LogicalSize operator+(const LogicalSize& aOther) const {
     CHECK_WRITING_MODE(aOther.GetWritingMode());
@@ -1121,8 +1121,6 @@ class LogicalSize {
 
  private:
   friend class LogicalRect;
-
-  LogicalSize() = delete;
 
 #ifdef DEBUG
   WritingMode GetWritingMode() const { return mWritingMode; }
@@ -1204,7 +1202,6 @@ struct LogicalSides final {
     CHECK_WRITING_MODE(aOther.GetWritingMode());
     return mSides == aOther.mSides;
   }
-  bool operator!=(const LogicalSides&) const = default;
 
 #ifdef DEBUG
   WritingMode GetWritingMode() const { return mWritingMode; }
@@ -1273,6 +1270,8 @@ class LogicalMargin {
       }
     }
   }
+
+  LogicalMargin() = delete;
 
   nscoord IStart(WritingMode aWritingMode) const  // inline-start margin
   {
@@ -1510,7 +1509,6 @@ class LogicalMargin {
     CHECK_WRITING_MODE(aMargin.GetWritingMode());
     return mMargin == aMargin.mMargin;
   }
-  bool operator!=(const LogicalMargin&) const = default;
 
   LogicalMargin operator+(const LogicalMargin& aMargin) const {
     CHECK_WRITING_MODE(aMargin.GetWritingMode());
@@ -1539,8 +1537,6 @@ class LogicalMargin {
 
  private:
   friend class LogicalRect;
-
-  LogicalMargin() = delete;
 
 #ifdef DEBUG
   WritingMode GetWritingMode() const { return mWritingMode; }
@@ -1663,6 +1659,8 @@ class LogicalRect {
       mBSize = aRect.Height();
     }
   }
+
+  LogicalRect() = delete;
 
   /**
    * Inline- and block-dimension geometry.
@@ -2041,8 +2039,6 @@ class LogicalRect {
   }
 
  private:
-  LogicalRect() = delete;
-
 #ifdef DEBUG
   WritingMode GetWritingMode() const { return mWritingMode; }
 #else
@@ -2179,6 +2175,18 @@ template <>
 inline bool StyleMaxSize::BehavesLikeInitialValue(LogicalAxis aAxis) const {
   return aAxis == LogicalAxis::Inline ? IsNone()
                                       : BehavesLikeInitialValueOnBlockAxis();
+}
+
+template <>
+inline bool StyleSize::BehavesLikeStretch(LogicalAxis aAxis) const {
+  return aAxis == LogicalAxis::Inline ? BehavesLikeStretchOnInlineAxis()
+                                      : BehavesLikeStretchOnBlockAxis();
+}
+
+template <>
+inline bool StyleMaxSize::BehavesLikeStretch(LogicalAxis aAxis) const {
+  return aAxis == LogicalAxis::Inline ? BehavesLikeStretchOnInlineAxis()
+                                      : BehavesLikeStretchOnBlockAxis();
 }
 
 }  // namespace mozilla
@@ -2319,6 +2327,14 @@ inline bool nsStyleMargin::HasAuto(
                                                : HasBlockAxisAuto(aWM, aParams);
 }
 
+inline mozilla::LogicalMargin nsStyleDisplay::GetScrollbarInset(
+    mozilla::WritingMode aWM) const {
+  return mozilla::LogicalMargin(aWM, mScrollbarInsetBlock.start.ToAppUnits(),
+                                mScrollbarInsetInline.end.ToAppUnits(),
+                                mScrollbarInsetBlock.end.ToAppUnits(),
+                                mScrollbarInsetInline.start.ToAppUnits());
+}
+
 inline AnchorResolvedMargin nsStyleMargin::GetMargin(
     mozilla::LogicalSide aSide, mozilla::WritingMode aWM,
     const AnchorPosResolutionParams& aParams) const {
@@ -2388,5 +2404,16 @@ inline mozilla::UsedClear nsStyleDisplay::UsedClear(
   MOZ_ASSERT_UNREACHABLE("all cases are handled above!");
   return mozilla::UsedClear::None;
 }
+
+template <>
+struct fmt::formatter<mozilla::WritingMode> : fmt::ostream_formatter {};
+template <>
+struct fmt::formatter<mozilla::LogicalPoint> : fmt::ostream_formatter {};
+template <>
+struct fmt::formatter<mozilla::LogicalSize> : fmt::ostream_formatter {};
+template <>
+struct fmt::formatter<mozilla::LogicalMargin> : fmt::ostream_formatter {};
+template <>
+struct fmt::formatter<mozilla::LogicalRect> : fmt::ostream_formatter {};
 
 #endif  // WritingModes_h_

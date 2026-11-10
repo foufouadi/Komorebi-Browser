@@ -4,16 +4,19 @@
 
 import os
 import shutil
-import signal
 import subprocess
 import time
 import zipfile
 from pathlib import Path
-from urllib.parse import unquote
 
 from mozbuild.nodeutil import find_node_executable
 
 from mozperftest.layers import Layer
+from mozperftest.system.geckoprofiler import (
+    GECKO_MARKERS_PROFILE_PREFIX,
+    browser_package_id,
+    perf_spew_dir,
+)
 from mozperftest.utils import (
     ON_TRY,
     archive_files,
@@ -26,8 +29,14 @@ from mozperftest.utils import (
 """
 DEFAULT_SIMPLEPERF_OPTS = "-g --duration 30 -f 1000 --trace-offcpu -e cpu-clock -a"
 
+"""When Gecko writes jitdump files, frame pointer unwinding gives us JS stacks and
+   deeper native stacks, but no Java stacks.
+"""
+JIT_FRAMES_SIMPLEPERF_OPTS = (
+    "--call-graph fp --duration 30 -f 1000 --trace-offcpu -e cpu-clock -a"
+)
+
 BREAKPAD_SYMBOL_SERVER = "https://symbols.mozilla.org/"
-SYMBOL_SERVER_TIMEOUT = 60  # seconds
 
 
 class SimpleperfError(Exception):
@@ -66,13 +75,6 @@ class SimpleperfBinaryNotFoundError(SimpleperfError):
     pass
 
 
-class SimpleperfSymbolicationTimeoutError(SimpleperfError):
-    """Raised when starting the samply server required for symbolicating
-    simpleperf profiles execeeds the specified time time limit."""
-
-    pass
-
-
 class SimpleperfSymbolicationError(SimpleperfError):
     """Raised when symbolication paths are missing or invalid."""
 
@@ -80,9 +82,27 @@ class SimpleperfSymbolicationError(SimpleperfError):
 
 
 class SimpleperfController:
-    def __init__(self):
+    def __init__(self, jit_frames=False):
         self.device = get_adb_device_or_emu()
         self.profiler_process = None
+        self.jit_frames = jit_frames
+        self.package_id = None
+
+    def _list_jit_files(self):
+        """List the jitdump files that Gecko wrote for simpleperf."""
+        if not self.jit_frames or not self.package_id:
+            return []
+        spew_dir = perf_spew_dir(self.package_id)
+        output = self.device.shell_output(f"ls {spew_dir} 2>/dev/null || true")
+        return [
+            f"{spew_dir}/{name}"
+            for name in output.split()
+            if name.startswith("jit-") and name.endswith(".dump")
+        ]
+
+    def _remove_jit_files(self, files):
+        if files:
+            self.device.shell("rm -f " + " ".join(files))
 
     def start(self, simpleperf_opts):
         """Starts the simpleperf profiler asynchronously if the layer is enabled.
@@ -95,11 +115,26 @@ class SimpleperfController:
         root access.
         """
         if simpleperf_opts is None:
-            simpleperf_opts = DEFAULT_SIMPLEPERF_OPTS
+            simpleperf_opts = (
+                JIT_FRAMES_SIMPLEPERF_OPTS
+                if self.jit_frames
+                else DEFAULT_SIMPLEPERF_OPTS
+            )
 
         assert SimpleperfProfiler.is_enabled()
         if self.profiler_process:
             raise SimpleperfAlreadyRunningError("simpleperf already running")
+
+        if self.jit_frames:
+            self.package_id = browser_package_id()
+            if not self.package_id:
+                print(
+                    "Warning: the browser package id is unknown, so the jitdump "
+                    "files can't be collected and the profile won't have JS frames"
+                )
+
+        # Remove the files of earlier app launches, which aren't profiled.
+        self._remove_jit_files(self._list_jit_files())
 
         cmd = f"/data/local/tmp/simpleperf record {simpleperf_opts} -o /data/local/tmp/perf.data"
 
@@ -137,7 +172,13 @@ class SimpleperfController:
         # Pull profiler data directly to the given output path.
         self.device.pull("/data/local/tmp/perf.data", str(profile_path))
         self.device.shell("rm -f /data/local/tmp/perf.data")
-        return Path(output_path, f"perf-{index}.data")
+
+        # samply import looks for the jitdump files next to the perf.data file.
+        jit_files = self._list_jit_files()
+        for jit_file in jit_files:
+            self.device.pull(jit_file, str(Path(output_path, Path(jit_file).name)))
+        self._remove_jit_files(jit_files)
+        return profile_path
 
 
 class SimpleperfProfiler(Layer):
@@ -157,21 +198,23 @@ class SimpleperfProfiler(Layer):
         "profiler-node-tools-path": {
             "type": str,
             "default": None,
-            "help": "Path to directory containing profiler-node-tools build.",
+            "help": "Path to directory containing profiler-node-tools build. "
+            "Needed for merging the markers of Gecko profiles from the same run.",
         },
     }
 
     def __init__(self, env, mach_cmd):
         super().__init__(env, mach_cmd)
         self.device = get_adb_device_or_emu()
+        self.package_id = None
 
     @staticmethod
     def is_enabled():
         return os.environ.get("MOZPERFTEST_SIMPLEPERF", "0") == "1"
 
     @staticmethod
-    def get_controller():
-        return SimpleperfController()
+    def get_controller(jit_frames=False):
+        return SimpleperfController(jit_frames=jit_frames)
 
     def setup_simpleperf_path(self):
         """Sets up and verifies that the simpleperf NDK exists.
@@ -241,8 +284,8 @@ class SimpleperfProfiler(Layer):
         for symbolication are valid.
 
         :param symbol_dir_arg str: Path to the Breakpad symbol directory
-        :param profiler_node_tools_dir_arg str: Path to the profiler-node-tools directory
-        :return tuple[pathlib.Path, pathlib.Path]: Returns a tuple containing validated (breakpad_symbol_dir, profiler_node_tools_dir).
+        :param profiler_node_tools_dir_arg str: Optional path to the profiler-node-tools directory
+        :return tuple[pathlib.Path, pathlib.Path | None]: Returns a tuple containing validated (breakpad_symbol_dir, profiler_node_tools_dir).
         :raises SimpleperfSymbolicationError: If validation fails
         """
 
@@ -258,9 +301,7 @@ class SimpleperfProfiler(Layer):
             )
 
         if not profiler_node_tools_dir_arg:
-            raise SimpleperfSymbolicationError(
-                "Profiler-node-tools directory not provided."
-            )
+            return breakpad_symbol_dir, None
 
         profiler_node_tools_dir = Path(profiler_node_tools_dir_arg)
         if not profiler_node_tools_dir.exists():
@@ -299,133 +340,107 @@ class SimpleperfProfiler(Layer):
                 )
             )
 
-    def _convert_perf_to_json(self, perf_data, work_dir):
-        """Convert perf.data files into .json files into the Firefox Profiler's
-        processed profile format.
+    def _run_and_log(self, tool_name, cmd):
+        """Run a blocking command and forward its output to self.info().
+
+        :return int: The exit code of the command.
+        """
+        with subprocess.Popen(
+            [str(arg) for arg in cmd],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        ) as process:
+            for line in process.stdout:
+                self.info(f"{tool_name} {line.strip()}")
+        return process.returncode
+
+    def _import_perf_data(self, perf_data, work_dir):
+        """Convert perf.data files into symbolicated profiles in the Firefox
+        Profiler's processed profile format.
+
+        If the Gecko profiler ran at the same time, its markers-only profile is
+        next to the perf.data file. Its markers are merged into the profile,
+        and only the browser's processes are kept.
 
         :param perf_data list[pathlib.Path]: list of paths to perf.data files
         :param work_dir pathlib.Path: working directory for output files
         :return list[pathlib.Path]: Returns list of paths to .json profiles
         """
 
-        unsymbolicated_profiles = []
+        profiles = []
 
-        # Convert perf.data to unsymbolicated .json profiles
         for file_path in perf_data:
-            filename = file_path.stem
-            number = filename.split("-")[-1]
+            number = file_path.stem.split("-")[-1]
 
             # Preserve parent folder structure for cleaner archive output.
             parent_folder = file_path.parent.name
             output_dir = Path(work_dir if work_dir else self.output_dir) / parent_folder
             output_dir.mkdir(parents=True, exist_ok=True)
-            output_path = output_dir / f"profile-{number}-unsymbolicated.json"
+            output_path = output_dir / f"profile-{number}.json"
 
-            # Run samply import as a blocking command to ensure perf.data
-            # is processed to profile.json before proceeding
-            with subprocess.Popen(
-                [
-                    str(self.samply_path),
-                    "import",
-                    str(file_path),
-                    "--save-only",
-                    "-o",
-                    str(output_path),
-                ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            ) as samply_process:
-                # Stream and forward to self.info()
-                for line in samply_process.stdout:
-                    self.info(f"samply {line.strip()}")
-
-            unsymbolicated_profiles.append(output_path)
-
-        return unsymbolicated_profiles
-
-    def _symbolicate_profiles(self, unsymbolicated_profiles, work_dir):
-        """Symbolicate .json profiles. This involves loading the profiles with
-        samply, capturing the symbol server url, and processing the files with
-        symbolicator-cli.
-
-        :param unsymbolicated_profiles list[pathlib.Path]: list of paths to unsymbolicated
-            profile.json files in processed profile format.
-        :param work_dir pathlib.Path: working directory for output files
-
-        :raises SimpleperfSymbolicationTimeoutError: Error if obtaining the symbol server URL
-            from the samply process exceeds SYMBOL_SERVER_TIMEOUT seconds.
-        :return list[pathlib.Path]: Returns list of paths to symbolicated profiles
-            in processed profile format.
-        """
-
-        symbolicated_profiles = []
-
-        for file_path in unsymbolicated_profiles:
-            # Load unsymbolicated profile with samply
-            samply_process = subprocess.Popen(
-                [
-                    str(self.samply_path),
-                    "load",
-                    str(file_path),
-                    "--no-open",
-                    "--breakpad-symbol-dir",
-                    str(self.breakpad_symbol_dir),
-                    "--breakpad-symbol-server",
-                    BREAKPAD_SYMBOL_SERVER,
-                ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
+            gecko_markers_path = (
+                file_path.parent / f"{GECKO_MARKERS_PROFILE_PREFIX}{number}.json"
+            )
+            merge_markers = gecko_markers_path.exists()
+            if merge_markers and self.profiler_node_tools_dir is None:
+                self.warning(
+                    "No profiler-node-tools directory provided, "
+                    f"not merging the markers from {gecko_markers_path}"
+                )
+                merge_markers = False
+            # The name of the unmerged profile mustn't match the profile-*.json
+            # pattern, which the geckoprofiler layer archives.
+            samply_output_path = (
+                output_dir / f"unmerged-{number}.json" if merge_markers else output_path
             )
 
-            # Tail output for timeout seconds to obtain symbol server url
-            server_url = ""
-            start = time.time()
-            with samply_process.stdout:
-                for line in iter(samply_process.stdout.readline, b""):
-                    if line.startswith("http"):
-                        url = unquote(line)
-                        server_url = str(url.split("symbolServer=", 1)[-1])
-                        break
-
-                    if (time.time() - start) > SYMBOL_SERVER_TIMEOUT:
-                        raise SimpleperfSymbolicationTimeoutError(
-                            f"Timed out after {SYMBOL_SERVER_TIMEOUT} seconds while waiting for samply server to start"
-                        )
-
-            # Symbolicate profiles with a blocking symbolicator-cli call
-            input_profile_path = file_path
-            filename = file_path.stem.replace("-unsymbolicated", "")
-            output_profile_path = file_path.parent / f"{filename}.json"
-            with subprocess.Popen(
+            returncode = self._run_and_log(
+                "samply",
                 [
-                    str(self.node_path),
-                    str(Path(self.profiler_node_tools_dir, "profiler-edit.js")),
-                    "-i",
-                    str(input_profile_path),
+                    self.samply_path,
+                    "import",
+                    file_path,
+                    "--presymbolicate",
+                    "--breakpad-symbol-dir",
+                    self.breakpad_symbol_dir,
+                    "--breakpad-symbol-server",
+                    BREAKPAD_SYMBOL_SERVER,
+                    "--save-only",
                     "-o",
-                    str(output_profile_path),
-                    "--symbolicate-with-server",
-                    server_url,
+                    samply_output_path,
                 ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            ) as profiler_edit_process:
-                # Stream and forward to self.info()
-                for line in profiler_edit_process.stdout:
-                    self.info(f"profiler-edit {line.strip()}")
+            )
+            if returncode != 0:
+                self.warning(f"samply import failed for {file_path}")
+                continue
 
-            symbolicated_profiles.append(output_profile_path)
+            if merge_markers:
+                cmd = [
+                    self.node_path,
+                    Path(self.profiler_node_tools_dir, "profiler-edit.js"),
+                    "-i",
+                    samply_output_path,
+                    "--merge-markers-from",
+                    gecko_markers_path,
+                ]
+                if self.package_id:
+                    cmd += ["--only-keep-processes-with-name-prefix", self.package_id]
+                cmd += ["-o", output_path]
+                returncode = self._run_and_log("profiler-edit", cmd)
+                if returncode == 0:
+                    samply_output_path.unlink()
+                else:
+                    self.warning(
+                        f"Failed to merge the markers into {output_path}, "
+                        "keeping the unmerged profile"
+                    )
+                    samply_output_path.replace(output_path)
 
-            # Terminate samply server
-            samply_process.send_signal(signal.SIGINT)
-            samply_process.wait()
+            profiles.append(output_path)
 
-        return symbolicated_profiles
+        return profiles
 
     def _archive_profiles(self, symbolicated_profiles, base_dir):
         """Archive all symbolicated profiles into a compressed .zip file
@@ -449,10 +464,10 @@ class SimpleperfProfiler(Layer):
 
         This method works for tests run locally and in CI. When run
         locally, it assumes that samply is already
-        installed on the system. Additionally, local paths to
-        the directories containing Breakpad symbols and a build of
-        profiler-node-tools must be provided via command-line arguments for
-        local symbolication.
+        installed on the system. Additionally, the local path to
+        the directory containing Breakpad symbols must be provided via
+        command-line arguments for local symbolication, and the path to a
+        build of profiler-node-tools for merging the Gecko profiler markers.
         """
         work_dir = None
         try:
@@ -466,25 +481,16 @@ class SimpleperfProfiler(Layer):
 
             # For local runs, work_dir will be None,
 
-            self.info("Converting perf.data files to profile.json files")
-            unsymbolicated_profiles = self._convert_perf_to_json(perf_data, work_dir)
+            self.info("Converting perf.data files to symbolicated profile.json files")
+            symbolicated_profiles = self._import_perf_data(perf_data, work_dir)
 
-            self.info("Symbolicating profile.json files")
-            symbolicated_profiles = self._symbolicate_profiles(
-                unsymbolicated_profiles, work_dir
-            )
-
-            self.info("Archiving symbolicated profile.json files")
-            self._archive_profiles(symbolicated_profiles, search_dir)
+            if symbolicated_profiles:
+                self.info("Archiving symbolicated profile.json files")
+                self._archive_profiles(symbolicated_profiles, search_dir)
         except SimpleperfSymbolicationError as e:
             # If flags are not provided / invalid, skip this symbolication step completely
             self.warning(
                 f"Failed to prepare symbolication environment. Skipping profile symbolication: {e}"
-            )
-
-        except SimpleperfSymbolicationTimeoutError as e:
-            self.warning(
-                f"Timed out after while waiting for samply server. Skipping profile symbolication: {e}"
             )
 
         finally:
@@ -502,6 +508,7 @@ class SimpleperfProfiler(Layer):
         the start/stop controls are manually called through the ProfilerMediator.
         """
         self.test_name = metadata.script["name"]
+        self.package_id = getattr(metadata, "binary", None)
 
         metadata.add_extra_options(["simpleperf"])
         return metadata

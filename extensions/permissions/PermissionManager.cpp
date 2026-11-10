@@ -255,6 +255,33 @@ bool IsExpirablePermission(const nsACString& aType,
   return false;
 }
 
+static uint32_t GetOriginAttributesStripFlags(bool aForceStrip) {
+  uint32_t flags = 0;
+
+  if (aForceStrip || !StaticPrefs::permissions_isolateBy_privateBrowsing()) {
+    flags |= OriginAttributes::STRIP_PRIVATE_BROWSING_ID;
+  }
+
+  if (aForceStrip || !StaticPrefs::permissions_isolateBy_userContext()) {
+    flags |= OriginAttributes::STRIP_USER_CONTEXT_ID;
+  }
+
+  return flags;
+}
+
+// Reset the pattern fields that permissions are not isolated by, so that the
+// pattern matches stored permission keys.
+static void MaybeStripOriginAttributesPattern(
+    OriginAttributesPattern& aPattern) {
+  uint32_t flags = GetOriginAttributesStripFlags(false);
+  if (flags & OriginAttributes::STRIP_PRIVATE_BROWSING_ID) {
+    aPattern.mPrivateBrowsingId.Reset();
+  }
+  if (flags & OriginAttributes::STRIP_USER_CONTEXT_ID) {
+    aPattern.mUserContextId.Reset();
+  }
+}
+
 // Apply MaybeStripOriginAttributes to a raw origin string (parse OA suffix,
 // strip fields, rebuild).
 static bool StripOriginString(const nsACString& aOrigin, bool aForceStripOA,
@@ -827,9 +854,12 @@ nsresult PermissionManager::Init() {
     // sent permissions as we need them by our parent process.
     mState = eReady;
 
-    // We use ClearOnShutdown on the content process only because on the parent
+    // We use RunOnShutdown in the content process only because in the parent
     // process we need to block the shutdown for the final closeDB() call.
-    ClearOnShutdown(&sInstanceHolder);
+    RunOnShutdown([] {
+      StaticMutexAutoLock lock(sCreationMutex);
+      sInstanceHolder = nullptr;
+    });
     return NS_OK;
   }
 
@@ -2143,14 +2173,23 @@ nsresult PermissionManager::AddInternal(
       PermissionEntry oldPermissionEntry = entry->GetPermissions()[index];
       id = oldPermissionEntry.mID;
 
-      // If the type we want to remove is EXPIRE_POLICY, we need to reject
-      // attempts to change the permission.
-      if (entry->GetPermissions()[index].mExpireType == EXPIRE_POLICY) {
-        NS_WARNING("Attempting to remove EXPIRE_POLICY permission");
+      // EXPIRE_POLICY permissions can only be removed by a caller that passes
+      // EXPIRE_POLICY, which is what the enterprise policy engine does.
+      if (entry->GetPermissions()[index].mExpireType == EXPIRE_POLICY &&
+          aExpireType != EXPIRE_POLICY) {
+        NS_WARNING(
+            "Ignoring removal of EXPIRE_POLICY permission by a caller that "
+            "did not pass EXPIRE_POLICY");
         break;
       }
 
       entry->GetPermissions().RemoveElementAt(index);
+
+      // If there are no more permissions stored for that entry, clear it.
+      if (entry->GetPermissions().IsEmpty()) {
+        mPermissionTable.RemoveEntry(entry);
+      }
+      entry = nullptr;
 
       if (aDBOperation == eWriteToDB) {
         // We care only about the id here so we pass dummy values for all other
@@ -2164,11 +2203,6 @@ nsresult PermissionManager::AddInternal(
             aPrincipal, mTypeArray[typeIndex], oldPermissionEntry.mPermission,
             oldPermissionEntry.mExpireType, oldPermissionEntry.mExpireTime,
             oldPermissionEntry.mModificationTime, u"deleted"_ns);
-      }
-
-      // If there are no more permissions stored for that entry, clear it.
-      if (entry->GetPermissions().IsEmpty()) {
-        mPermissionTable.RemoveEntry(entry);
       }
 
       // If the entry we are removing is not a default, restore the potential
@@ -2909,6 +2943,37 @@ NS_IMETHODIMP PermissionManager::GetAllByTypes(
         return aTypes.Contains(mTypeArray[aPermEntry.mType]);
       },
       aResult);
+}
+
+NS_IMETHODIMP PermissionManager::GetAllForOriginAttributesPattern(
+    const nsAString& aPattern, const nsTArray<nsCString>& aTypes,
+    nsTArray<RefPtr<nsIPermission>>& aResult) {
+  OriginAttributesPattern pattern;
+  if (!pattern.Init(aPattern)) {
+    return NS_ERROR_INVALID_ARG;
+  }
+  MaybeStripOriginAttributesPattern(pattern);
+
+  {
+    MonitorAutoLock lock{mMonitor};
+    nsresult rv = GetPermissionEntries(
+        [&](const PermissionEntry& aPermEntry) MOZ_REQUIRES(mMonitor) {
+          return aTypes.IsEmpty() ||
+                 aTypes.Contains(mTypeArray[aPermEntry.mType]);
+        },
+        aResult);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  aResult.RemoveElementsBy([&](const RefPtr<nsIPermission>& aPermission) {
+    nsCOMPtr<nsIPrincipal> principal;
+    if (NS_FAILED(aPermission->GetPrincipal(getter_AddRefs(principal)))) {
+      return true;
+    }
+    return !pattern.Matches(principal->OriginAttributesRef());
+  });
+
+  return NS_OK;
 }
 
 nsresult PermissionManager::ShouldHandlePrincipalForPermission(
@@ -3814,7 +3879,7 @@ nsresult PermissionManager::GetKeyForOrigin(const nsACString& aOrigin,
   nsCOMPtr<nsIPrincipal> dbgPrincipal;
   MOZ_ALWAYS_SUCCEEDS(GetPrincipalFromOrigin(aOrigin, aForceStripOA,
                                              getter_AddRefs(dbgPrincipal)));
-  MOZ_ASSERT(dbgPrincipal->SchemeIs("http") || dbgPrincipal->SchemeIs("https"));
+  MOZ_ASSERT(net::SchemeIsHttpOrHttps(dbgPrincipal));
   MOZ_ASSERT(dbgPrincipal->OriginAttributesRef() == attrs);
 #endif
 
@@ -4373,16 +4438,7 @@ nsCOMPtr<nsIAsyncShutdownClient> PermissionManager::GetAsyncShutdownBarrier()
 
 void PermissionManager::MaybeStripOriginAttributes(
     bool aForceStrip, OriginAttributes& aOriginAttributes) {
-  uint32_t flags = 0;
-
-  if (aForceStrip || !StaticPrefs::permissions_isolateBy_privateBrowsing()) {
-    flags |= OriginAttributes::STRIP_PRIVATE_BROWSING_ID;
-  }
-
-  if (aForceStrip || !StaticPrefs::permissions_isolateBy_userContext()) {
-    flags |= OriginAttributes::STRIP_USER_CONTEXT_ID;
-  }
-
+  uint32_t flags = GetOriginAttributesStripFlags(aForceStrip);
   if (flags != 0) {
     aOriginAttributes.StripAttributes(flags);
   }
@@ -4459,6 +4515,34 @@ void PermissionManager::ForwardBrowserPermissionToChild(
     uint64_t aBrowserId, bool aIsRemoval) {
   MOZ_ASSERT(XRE_IsParentProcess());
 
+  nsAutoCString origin;
+  nsresult rv = aPrincipal->GetOrigin(origin);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  // A removal has to reach every process that may still hold a copy, not only
+  // the tab's current one: out-of-process iframes, and processes left behind by
+  // a process switch, are seeded by TransmitBrowserPermissionsForPrincipal.
+  // Select them by permission key, as regular permission updates do, so the
+  // origin only reaches processes that were already given it. The key has no
+  // tab dimension, so a process holding this origin for a different tab is
+  // notified too, where the removal is a no-op.
+  if (aIsRemoval) {
+    nsAutoCString permissionKey;
+    GetKeyForPermission(aPrincipal, aType, permissionKey);
+
+    nsTArray<dom::ContentParent*> cplist;
+    dom::ContentParent::GetAll(cplist);
+    for (dom::ContentParent* cp : cplist) {
+      if (cp->NeedsPermissionsUpdate(permissionKey)) {
+        (void)cp->SendSetBrowserPermission(origin, nsCString(aType), aAction,
+                                           aBrowserId, aIsRemoval);
+      }
+    }
+    return;
+  }
+
   RefPtr<dom::BrowsingContext> bc =
       dom::BrowsingContext::GetCurrentTopByBrowserId(aBrowserId);
   if (!bc) {
@@ -4467,12 +4551,6 @@ void PermissionManager::ForwardBrowserPermissionToChild(
 
   dom::ContentParent* cp = bc->Canonical()->GetContentParent();
   if (!cp) {
-    return;
-  }
-
-  nsAutoCString origin;
-  nsresult rv = aPrincipal->GetOrigin(origin);
-  if (NS_FAILED(rv)) {
     return;
   }
 
@@ -4555,7 +4633,7 @@ nsresult PermissionManager::AddBrowserPermissionInternal(
   // Look up or create the map for this BC.
   UniquePtr<BrowserPermissionMap>& mapPtr =
       mBrowserPermissionTable.LookupOrInsert(
-          aBrowserId, MakeUnique<BrowserPermissionMap>());
+          aBrowserId, std::make_unique<BrowserPermissionMap>());
   BrowserPermissionMap* map = mapPtr.get();
 
   // If switching between DENY and non-DENY for the same type, remove old entry
@@ -4634,6 +4712,7 @@ void PermissionManager::RemoveBrowserPermissionInternal(
   }
   BrowserPermissionMap* map = bcMapEntry->get();
 
+  nsCOMPtr<nsIPermission> permission;
   for (bool siteScoped : {false, true}) {
     nsCString compositeKey = BrowserCompositeKey(aPrincipal, aType, siteScoped);
     if (compositeKey.IsEmpty()) {
@@ -4646,18 +4725,18 @@ void PermissionManager::RemoveBrowserPermissionInternal(
       }
       entry.Remove();
 
-      nsCOMPtr<nsIPermission> permission =
-          Permission::Create(aPrincipal, aType, UNKNOWN_ACTION,
-                             EXPIRE_SESSION_TAB, 0, 0, aBrowserId);
-      if (permission) {
-        NotifyBrowserObservers(permission, u"deleted"_ns);
-      }
+      permission = Permission::Create(aPrincipal, aType, UNKNOWN_ACTION,
+                                      EXPIRE_SESSION_TAB, 0, 0, aBrowserId);
       break;
     }
   }
 
   if (map->IsEmpty()) {
     bcMapEntry.Remove();
+  }
+
+  if (permission) {
+    NotifyBrowserObservers(permission, u"deleted"_ns);
   }
 }
 
@@ -4716,19 +4795,16 @@ void PermissionManager::ForwardClearBrowserPermissionsToChild(
     uint64_t aBrowserId, uint32_t aActionFilter) {
   MOZ_ASSERT(XRE_IsParentProcess());
 
-  RefPtr<dom::BrowsingContext> bc =
-      dom::BrowsingContext::GetCurrentTopByBrowserId(aBrowserId);
-  if (!bc) {
-    return;
-  }
-
-  dom::ContentParent* cp = bc->Canonical()->GetContentParent();
-  if (!cp) {
-    return;
-  }
-
-  if (!cp->SendClearBrowserPermissions(aBrowserId, aActionFilter)) {
-    NS_WARNING("Failed to send ClearBrowserPermissions to child");
+  // The BrowserId cannot be resolved back to a BrowsingContext here: the main
+  // caller is tab teardown, and BrowsingContext::Detach unregisters the
+  // BrowserId before it fires "browsing-context-discarded". Broadcast instead.
+  // Unlike SetBrowserPermission this message names no origin, so it discloses
+  // nothing to processes that never held the entry, and clearing a browserId a
+  // process knows nothing about is a no-op.
+  nsTArray<dom::ContentParent*> cplist;
+  dom::ContentParent::GetAll(cplist);
+  for (dom::ContentParent* cp : cplist) {
+    (void)cp->SendClearBrowserPermissions(aBrowserId, aActionFilter);
   }
 }
 
@@ -4756,14 +4832,14 @@ nsCOMPtr<nsITimer> PermissionManager::ScheduleBrowserPermissionExpiry(
               return;
             }
             permEntry.Remove();
+            if (innerMap->IsEmpty()) {
+              mapEntry.Remove();
+            }
             nsCOMPtr<nsIPermission> permission =
                 Permission::Create(principalCopy, typeCopy, aPermission,
                                    EXPIRE_SESSION_TAB, 0, 0, aBrowserId);
             if (permission) {
               self->NotifyBrowserObservers(permission, u"deleted"_ns);
-            }
-            if (innerMap->IsEmpty()) {
-              mapEntry.Remove();
             }
           }),
       delayMS, nsITimer::TYPE_ONE_SHOT,
@@ -5321,7 +5397,7 @@ PermissionManager::CopyBrowserPermissions(uint64_t aSrcBrowserId,
 
   UniquePtr<BrowserPermissionMap>& destMapPtr =
       mBrowserPermissionTable.LookupOrInsert(
-          aDestBrowserId, MakeUnique<BrowserPermissionMap>());
+          aDestBrowserId, std::make_unique<BrowserPermissionMap>());
   BrowserPermissionMap* destMap = destMapPtr.get();
 
   // Cancel any existing timers in the destination.

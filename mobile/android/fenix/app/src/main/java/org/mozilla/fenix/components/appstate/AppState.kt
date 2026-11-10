@@ -20,6 +20,7 @@ import org.mozilla.fenix.components.appstate.recommendations.ContentRecommendati
 import org.mozilla.fenix.components.appstate.search.SearchState
 import org.mozilla.fenix.components.appstate.setup.checklist.SetupChecklistState
 import org.mozilla.fenix.components.appstate.snackbar.SnackbarState
+import org.mozilla.fenix.components.appstate.sports.SportsWidgetState
 import org.mozilla.fenix.components.appstate.webcompat.WebCompatState
 import org.mozilla.fenix.home.HomeFragment
 import org.mozilla.fenix.home.bookmarks.Bookmark
@@ -67,6 +68,9 @@ import org.mozilla.fenix.wallpapers.WallpaperState
  * @property wallpaperState The [WallpaperState] to display in the [HomeFragment].
  * @property standardSnackbarError A snackbar error message to display.
  * @property readerViewState The [ReaderViewState] to display.
+ * @property isPowerSavingModeActive Whether Power Saving Mode is currently active.
+ * @property powerSavingModeReaderViewTabIds The IDs of the tabs whose current reader view was forced by Power Saving
+ *   Mode.
  * @property snackbarState The [SnackbarState] to display.
  * @property supportedMenuNotifications The set of currently active [SupportedMenuNotifications].
  * @property showFindInPage Whether or not to show the find in page feature.
@@ -86,6 +90,7 @@ import org.mozilla.fenix.wallpapers.WallpaperState
  * @property blockedTrackersState The [BlockedTrackersState] with data about blocked trackers.
  * @property longfoxEntryPointReady Whether the fox peek animation should play on the next homepage view.
  * @property isTabsTrayVisible Whether TabsTray is shown.
+ * @property sportsWidgetState The [SportsWidgetState] of the Wrexham widget on the homepage.
  */
 data class AppState(
     val isForeground: Boolean = true,
@@ -109,6 +114,8 @@ data class AppState(
     val wallpaperState: WallpaperState = WallpaperState.default,
     val standardSnackbarError: StandardSnackbarError? = null,
     val readerViewState: ReaderViewState = ReaderViewState.None,
+    val isPowerSavingModeActive: Boolean = false,
+    val powerSavingModeReaderViewTabIds: Set<String> = emptySet(),
     val snackbarState: SnackbarState = SnackbarState.None(),
     val supportedMenuNotifications: Set<SupportedMenuNotifications> = emptySet(),
     val showFindInPage: Boolean = false,
@@ -127,4 +134,5 @@ data class AppState(
     val blockedTrackersState: BlockedTrackersState = BlockedTrackersState(),
     val longfoxEntryPointReady: Boolean = false,
     val isTabsTrayVisible: Boolean = false,
+    val sportsWidgetState: SportsWidgetState = SportsWidgetState(),
 ) : State

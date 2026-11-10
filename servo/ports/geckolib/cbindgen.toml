@@ -48,7 +48,9 @@ include = ["style", "app_units", "cssparser", "style_traits", "servo_arc"]
 [struct]
 associated_constants_in_body = true
 derive_eq = true
-derive_neq = true
+# Since C++20, `a != b` is rewritten as `!(a == b)` when no viable operator!= is
+# found, so a derived operator!= is redundant.
+derive_neq = false
 
 [defines]
 # These will actually never be defined, but is handy to avoid cbindgen
@@ -122,6 +124,8 @@ include = [
   "CaptionSide",
   "ColorGamut",
   "DominantBaseline",
+  "FontFeatureSettings",
+  "FontVariationSettings",
   "FontSizeAdjust",
   "FontPalette",
   "FontLanguageOverride",
@@ -188,6 +192,7 @@ include = [
   "ViewTimelineInset",
   "OverflowAnchor",
   "OverflowClipMargin",
+  "ScrollbarInset",
   "Resize",
   "Overflow",
   "LengthPercentage",
@@ -198,6 +203,7 @@ include = [
   "LineHeight",
   "NonNegativeLengthPercentageOrAuto",
   "NonNegativeLengthPercentageOrNormal",
+  "FitTolerance",
   "LengthOrAuto",
   "NonNegativeLengthOrAuto",
   "TextBoxEdge",
@@ -246,11 +252,9 @@ include = [
   "TouchAction",
   "WillChange",
   "TextDecorationLine",
-  "MasonryAutoFlow",
-  "MasonryPlacement",
-  "MasonryItemOrder",
   "TextUnderlinePosition",
   "TextTransform",
+  "TextTransformCase",
   "TextJustify",
   "TextOverflow",
   "TextIndent",
@@ -319,6 +323,7 @@ include = [
   "ClipPath",
   "ShapeOutside",
   "GridAutoFlow",
+  "FlexWrap",
   "Cursor",
   "SVGStrokeDashArray",
   "SVGLength",
@@ -366,6 +371,68 @@ include = [
   "AllowAnchorPosResolutionInCalcPercentage",
   "ListStyleType",
   "LinkParameters",
+  "BoxDecorationBreak",
+  "ImageLayerAttachment",
+  "FloatEdge",
+  "TopLayer",
+  "ScrollBehavior",
+  "Isolation",
+  "BackfaceVisibility",
+  "Orient",
+  "ColumnFill",
+  "ColumnSpan",
+  "MathShift",
+  "Visibility",
+  "BoxCollapse",
+  "TextOrientation",
+  "ImageOrientation",
+  "TextAnchor",
+  "ShapeRendering",
+  "StrokeLinecap",
+  "StrokeLinejoin",
+  "BorderCollapse",
+  "EmptyCells",
+  "Hyphens",
+  "TextSizeAdjust",
+  "RubyAlign",
+  "TextCombineUpright",
+  "TextRendering",
+  "TextSecurity",
+  "TextWrapMode",
+  "TextWrapStyle",
+  "ListStylePosition",
+  "FlexDirection",
+  "BoxSizing",
+  "ObjectFit",
+  "MaskType",
+  "MaskMode",
+  "MaskComposite",
+  "TableLayout",
+  "UnicodeBidi",
+  "ImeMode",
+  "ScrollbarWidth",
+  "WindowDragging",
+  "WindowShadow",
+  "FieldSizing",
+  "BoxAlign",
+  "BoxDirection",
+  "BoxOrient",
+  "BoxPack",
+  "Blend",
+  "MathStyle",
+  "MathVariant",
+  "FontVariantEmoji",
+  "DirectionProperty",
+  "TextDecorationStyle",
+  "ColorInterpolation",
+  "FontOpticalSizing",
+  "FontKerning",
+  "FontSmoothing",
+  "FontVariantPosition",
+  "FontVariantCaps",
+  "WhiteSpaceCollapse",
+  "BackgroundOrigin",
+  "XLang",
 ]
 item_types = [
   "enums",
@@ -379,6 +446,7 @@ renaming_overrides_prefixing = true
 
 # Prevent some renaming for Gecko types that cbindgen doesn't otherwise understand.
 [export.rename]
+"DirectionProperty" = "StyleDirection"
 "nscolor" = "nscolor"
 "nsAtom" = "nsAtom"
 "nsIURI" = "nsIURI"
@@ -413,11 +481,9 @@ renaming_overrides_prefixing = true
 "FontFaceDescriptorId" = "FontFaceDescriptorId"
 "CounterStyleDescriptorId" = "CounterStyleDescriptorId"
 "nsresult" = "nsresult"
-"gfxFontFeature" = "gfxFontFeature"
 "gfxFontFeatureValueSet" = "gfxFontFeatureValueSet"
 "GeckoFontMetrics" = "GeckoFontMetrics"
 "SeenPtrs" = "SeenPtrs"
-"gfxFontVariation" = "gfxFontVariation"
 "URLExtraData" = "URLExtraData"
 "Keyframe" = "Keyframe"
 "nsChangeHint" = "nsChangeHint"
@@ -427,6 +493,7 @@ renaming_overrides_prefixing = true
 "ServoTraversalFlags" = "ServoTraversalFlags"
 "ServoStyleSetSizes" = "ServoStyleSetSizes"
 "BeforeFlag" = "StyleEasingBeforeFlag"
+"Leaf" = "StyleSpecifiedLeaf"
 "FontPaletteValueSet" = "gfx::FontPaletteValueSet"
 "PaletteValues" = "gfx::FontPaletteValueSet::PaletteValues"
 "ThinVec" = "CopyableTArray"
@@ -468,7 +535,6 @@ renaming_overrides_prefixing = true
   inline Self& operator=(const Self&);
 
   inline bool operator==(const Self& aOther) const;
-  inline bool operator!=(const Self& aOther) const;
 
   inline bool IsLengthOrPercentage() const;
   inline bool IsLength() const;
@@ -532,6 +598,7 @@ renaming_overrides_prefixing = true
   inline bool HasLengthAndPercentage() const;
   inline bool BehavesLikeStretchOnInlineAxis() const;
   inline bool BehavesLikeStretchOnBlockAxis() const;
+  inline bool BehavesLikeStretch(LogicalAxis) const;
   inline bool BehavesLikeInitialValueOnBlockAxis() const;
   inline bool BehavesLikeInitialValue(LogicalAxis) const;
   inline bool HasAnchorPositioningFunction() const;
@@ -552,6 +619,7 @@ renaming_overrides_prefixing = true
   inline bool HasLengthAndPercentage() const;
   inline bool BehavesLikeStretchOnInlineAxis() const;
   inline bool BehavesLikeStretchOnBlockAxis() const;
+  inline bool BehavesLikeStretch(LogicalAxis) const;
   inline bool BehavesLikeInitialValueOnBlockAxis() const;
   inline bool BehavesLikeInitialValue(LogicalAxis) const;
   inline bool HasAnchorPositioningFunction() const;
@@ -741,10 +809,6 @@ renaming_overrides_prefixing = true
   bool operator==(const StyleOwnedArray& other) const {
     return AsSpan() == other.AsSpan();
   }
-
-  bool operator!=(const StyleOwnedArray& other) const {
-    return !(*this == other);
-  }
 """
 
 "OwnedSlice" = """
@@ -778,10 +842,6 @@ renaming_overrides_prefixing = true
   bool operator==(const StyleOwnedSlice& other) const {
     return AsSpan() == other.AsSpan();
   }
-
-  bool operator!=(const StyleOwnedSlice& other) const {
-    return !(*this == other);
-  }
 """
 
 "ArcInner" = """
@@ -797,7 +857,6 @@ renaming_overrides_prefixing = true
 
   inline ~StyleHeaderSlice();
   inline bool operator==(const StyleHeaderSlice& other) const;
-  inline bool operator!=(const StyleHeaderSlice& other) const;
 
   inline Span<const T> AsSpan() const;
   inline size_t Length() const { return len; }
@@ -836,9 +895,6 @@ renaming_overrides_prefixing = true
   }
   bool operator==(const StyleArc& other) const {
     return p == other.p || *(*this) == *other;
-  }
-  bool operator!=(const StyleArc& other) const {
-    return !(*this == other);
   }
 """
 
@@ -970,9 +1026,6 @@ renaming_overrides_prefixing = true
 "CssUrlData" = """
   // Implemented in nsStyleStruct.cpp
   bool operator==(const StyleCssUrlData& other) const;
-  bool operator!=(const StyleCssUrlData& other) const {
-    return !(*this == other);
-  }
 """
 
 "LoadData" = """
@@ -998,6 +1051,7 @@ renaming_overrides_prefixing = true
   inline bool IsLocalRef() const;
   inline bool HasRef() const;
   inline StyleCorsMode CorsMode() const;
+  inline StyleUrlInitiator Initiator() const;
 
   // Only relevant for images.
   inline bool IsImageResolved() const;
@@ -1035,7 +1089,7 @@ renaming_overrides_prefixing = true
   inline Maybe<size_t> RepeatAutoIndex() const;
   inline const StyleGenericTrackRepeat<L, I>* GetRepeatAutoValue() const;
   inline bool HasRepeatAuto() const;
-  inline Span<const StyleOwnedSlice<StyleCustomIdent>> LineNameLists(bool aIsSubgrid) const;
+  inline Span<const StyleOwnedSlice<StyleCustomIdent>> LineNameLists() const;
   inline Span<const StyleGenericTrackListValue<L, I>> TrackListValues() const;
 """
 

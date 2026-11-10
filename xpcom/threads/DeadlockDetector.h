@@ -81,7 +81,7 @@ class DeadlockDetector {
           ,
           mExternalRefs(),
           mResource(aResource) {}
-    ~OrderingEntry() {}
+    ~OrderingEntry() = default;
 
     size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const {
       size_t n = aMallocSizeOf(this);
@@ -142,6 +142,9 @@ class DeadlockDetector {
     return n;
   }
 
+  DeadlockDetector(const DeadlockDetector& aDD) = delete;
+  DeadlockDetector& operator=(const DeadlockDetector& aDD) = delete;
+
   /**
    * Add
    * Make the deadlock detector aware of |aResource|.
@@ -154,7 +157,8 @@ class DeadlockDetector {
    */
   void Add(const T* aResource) {
     PRAutoLock _(mLock);
-    mOrdering.InsertOrUpdate(aResource, MakeUnique<OrderingEntry>(aResource));
+    mOrdering.InsertOrUpdate(aResource,
+                             std::make_unique<OrderingEntry>(aResource));
   }
 
   void Remove(const T* aResource) {
@@ -339,10 +343,6 @@ class DeadlockDetector {
    * detector.
    */
   PRLock* mLock;
-
- private:
-  DeadlockDetector(const DeadlockDetector& aDD) = delete;
-  DeadlockDetector& operator=(const DeadlockDetector& aDD) = delete;
 };
 
 template <typename T>

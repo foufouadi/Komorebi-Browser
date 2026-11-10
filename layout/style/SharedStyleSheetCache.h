@@ -51,7 +51,7 @@ class SharedStyleSheetCache final
   // This has to be static because it's also called for loaders that don't have
   // a sheet cache (loaders that are not owned by a document).
   static void LoadCompleted(SharedStyleSheetCache*, css::SheetLoadData&,
-                            nsresult);
+                            nsresult, css::Loader::TriggeringPendingLoad);
   using Base::LoadCompleted;
   static void LoadCompletedInternal(SharedStyleSheetCache*, css::SheetLoadData&,
                                     nsTArray<RefPtr<css::SheetLoadData>>&);
@@ -81,8 +81,8 @@ class SharedStyleSheetCache final
   using InlineSheetCandidates = nsTArray<InlineSheetEntry>;
 
   template <class F>
-  void WithInlineEntryHandle(nsIPrincipal* aPrincipal, const nsAString& aBuffer,
-                             F&& aFunc) {
+  void WithInlineEntryHandle(nsIPrincipal* aPrincipal,
+                             const nsACString& aBuffer, F&& aFunc) {
     auto& principalMap = mInlineSheets.LookupOrInsert(aPrincipal);
     return principalMap.WithEntryHandle(aBuffer, std::forward<F>(aFunc));
   }
@@ -94,7 +94,7 @@ class SharedStyleSheetCache final
   void GC();
 
   nsTHashMap<PrincipalHashKey,
-             nsTHashMap<nsStringHashKey, InlineSheetCandidates>>
+             nsTHashMap<nsCStringHashKey, InlineSheetCandidates>>
       mInlineSheets;
   nsCOMPtr<nsITimer> mGCTimer;
   bool mGCScheduled : 1 = false;

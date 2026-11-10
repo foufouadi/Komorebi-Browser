@@ -18,7 +18,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
 
 ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
   return console.createInstance({
-    prefix: "InteractionsManager",
+    logModule: "InteractionsManager",
     maxLogLevel: Services.prefs.getBoolPref(
       "browser.places.interactions.log",
       false
@@ -175,7 +175,7 @@ class _Interactions {
    * Maps a browser to its interactions which are less than
    * RECENT_BROWSER_INTERACTION_EXPIRY_TIME_MS old.
    *
-   * @type {WeakMap<browser, InteractionInfo>}
+   * @type {WeakMap<browser, InteractionInfo[]>}
    */
   #recentInteractions = new WeakMap();
 

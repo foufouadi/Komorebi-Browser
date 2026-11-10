@@ -235,11 +235,12 @@ void ScriptPreloader::InitContentChild(ContentParent& parent) {
   }
 }
 
-ProcessType ScriptPreloader::GetChildProcessType(const nsACString& remoteType) {
-  if (remoteType == EXTENSION_REMOTE_TYPE) {
+ProcessType ScriptPreloader::GetChildProcessType(
+    const dom::RemoteType& remoteType) {
+  if (remoteType.IsExtension()) {
     return ProcessType::Extension;
   }
-  if (remoteType == PRIVILEGEDABOUT_REMOTE_TYPE) {
+  if (remoteType.IsPrivilegedAbout()) {
     return ProcessType::PrivilegedAbout;
   }
   return ProcessType::Web;
@@ -638,7 +639,7 @@ Result<Ok, nsresult> ScriptPreloader::InitCacheInternal(
 
     size_t offset = 0;
     while (!buf.finished()) {
-      auto script = MakeUnique<CachedStencil>(*this, buf);
+      auto script = std::make_unique<CachedStencil>(*this, buf);
       MOZ_RELEASE_ASSERT(script);
 
       auto scriptData = data + script->mOffset;
@@ -996,8 +997,7 @@ void ScriptPreloader::NoteStencil(const nsCString& url,
     MOZ_ASSERT(!script->HasArray());
 
     script->mSize = xdrData.Length();
-    script->mXDRData.construct<nsTArray<uint8_t>>(
-        std::forward<nsTArray<uint8_t>>(xdrData));
+    script->mXDRData.construct<nsTArray<uint8_t>>(std::move(xdrData));
 
     auto& data = script->Array();
     script->mXDRRange.emplace(data.Elements(), data.Length());

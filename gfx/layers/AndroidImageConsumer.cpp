@@ -42,8 +42,8 @@ AndroidImageConsumer::AndroidImageConsumer(AndroidImageReader* aImageReader,
       mGL(aGL),
       mTextureHandle(aTextureHandle),
       mImageReader(aImageReader) {
-  MOZ_ASSERT(mImageReader);
-  MOZ_ASSERT(mGL);
+  MOZ_RELEASE_ASSERT(mImageReader);
+  MOZ_RELEASE_ASSERT(mGL);
 }
 
 AndroidImageConsumer::~AndroidImageConsumer() {
@@ -80,6 +80,20 @@ gfx::IntSize AndroidImageConsumer::GetSize() {
     return gfx::IntSize();
   }
   return mCurrentImage->mSize;
+}
+
+mozilla::UniqueFileHandle AndroidImageConsumer::CloneWriteFenceFd() {
+  if (!mCurrentImage) {
+    return nullptr;
+  }
+  return mCurrentImage->CloneWriteFenceFd();
+}
+
+void AndroidImageConsumer::SetReadFenceFd(UniqueFileHandle&& aFenceFd) {
+  if (!mCurrentImage) {
+    return;
+  }
+  mCurrentImage->SetReadFenceFd(std::move(aFenceFd));
 }
 
 }  // namespace layers

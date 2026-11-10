@@ -14,7 +14,7 @@ var { AppConstants } = ChromeUtils.importESModule(
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
-  Referrals: "resource:///modules/referrals/Referrals.sys.mjs",
+  Referrals: "moz-src:///browser/components/referrals/Referrals.sys.mjs",
 });
 
 if (AppConstants.MOZ_UPDATER) {
@@ -129,6 +129,25 @@ function init() {
   );
   contributeDescReferrals.hidden = !referralsEnabled;
 
+  // An element named directly by aria-describedby is still read out while it
+  // is hidden, so the list has to name whichever blurb is shown. Rewrite
+  // either id to the shown one so this holds whatever state we started from.
+  let shownContributeDescId = referralsEnabled
+    ? "contributeDescReferrals"
+    : "contributeDesc";
+  let describedBy = document.documentElement
+    .getAttribute("aria-describedby")
+    .split(" ")
+    .map(id =>
+      id == "contributeDesc" || id == "contributeDescReferrals"
+        ? shownContributeDescId
+        : id
+    );
+  document.documentElement.setAttribute(
+    "aria-describedby",
+    [...new Set(describedBy)].join(" ")
+  );
+
   if (referralsEnabled) {
     contributeDescReferrals.addEventListener(
       "click",
@@ -137,7 +156,7 @@ function init() {
           event.target.closest('[data-l10n-name="helpus-shareFirefoxLink"]')
         ) {
           event.preventDefault();
-          lazy.Referrals.openReferralsTab(window);
+          lazy.Referrals.openReferralsTab(window, "about_dialog");
         }
       },
       true

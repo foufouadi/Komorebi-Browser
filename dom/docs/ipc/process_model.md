@@ -2,7 +2,7 @@
 
 The complete set of recognized process types is defined in {searchfox}`GeckoProcessTypes <xpcom/geckoprocesstypes_generator/geckoprocesstypes/__init__.py>`.
 
-For more details on how process types are added and managed by IPC, see the process creation documentation {ref}`Gecko Processes`.
+For more details on how process types are added and managed by IPC, see the process creation documentation {doc}`/ipc/processes`.
 
 ## Diagram
 
@@ -60,7 +60,6 @@ For more details on how process types are added and managed by IPC, see the proc
                     <TR><TD BORDER="1">GPU Process</TD></TR>
                     <TR><TD BORDER="1">VR Process</TD></TR>
                     <TR><TD BORDER="1">Data Decoder (RDD) Process</TD></TR>
-                    <TR><TD BORDER="1">Network (Socket) Process</TD></TR>
                     <TR><TD BORDER="1">Utility Process</TD></TR>
                     <TR><TD BORDER="1">Fork Server</TD></TR>
                 </TABLE>
@@ -309,18 +308,6 @@ This process is in the process of being restructured into a generic "utility" pr
 For more details about the planned utility process architecture changes, see [the planning document](https://docs.google.com/document/d/1WDEY5fQetK_YE5oxGxXK9BzC1A8kJP3q6F1gAPc2UGE).
 :::
 
-(network-socket-process)=
-
-## Network (Socket) Process
-
-```{eval-rst}
-
-:primary protocol: :searchfox:`PSocketProcess <netwerk/ipc/PSocketProcess.ipdl>`
-:sandboxed?: yes (socket sandbox policy)
-```
-
-The socket process is used to separate certain networking operations from the parent process, allowing them to be performed more directly in a partially sandboxed process. The eventual goal is to move all TCP/UDP network operations into this dedicated process, and is being tracked in [Bug 1322426](https://bugzilla.mozilla.org/show_bug.cgi?id=1322426).
-
 (fork-server)=
 
 ## Fork Server
@@ -365,4 +352,4 @@ This test-only process type is intended for use when writing IPDL unit tests. Ho
 :sandboxed?: yes, customizable
 ```
 
-The utility process is used to provide a simple way to implement IPC actor with some more specific sandboxing properties, in case where you don't need or want to deal with the extra complexity of adding a whole new process type but you just want to apply different sandboxing policies. Details can be found in {ref}`Utility Process`.
+The utility process is used to provide a simple way to implement IPC actor with some more specific sandboxing properties, in case where you don't need or want to deal with the extra complexity of adding a whole new process type but you just want to apply different sandboxing policies. Details can be found in {doc}`/ipc/utility_process`.

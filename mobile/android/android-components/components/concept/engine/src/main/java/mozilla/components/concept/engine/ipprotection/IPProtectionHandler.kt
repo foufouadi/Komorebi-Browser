@@ -42,8 +42,13 @@ interface IPProtectionHandler {
     /** Request for the current [ServiceState]. */
     fun getState(onResult: (ServiceState) -> Unit)
 
-    /** Requests an update for the list of countries available in the proxy server-list. */
-    fun updateCountryList()
+    /**
+     * Requests an update for the list of countries available in the proxy server-list.
+     *
+     * @param onResult Invoked once the update request resolves. Receives `null` on success or the [Throwable] that
+     *   caused the failure.
+     */
+    fun updateCountryList(onResult: (Throwable?) -> Unit = {})
 
     /** Initializes the proxy state machine. */
     fun init()
@@ -105,45 +110,6 @@ interface IPProtectionHandler {
         fun getToken(onComplete: (String?) -> Unit)
     }
 
-    /** Holds the current IP protection service and proxy state along with usage information. */
-    // refactor to enum in https://bugzilla.mozilla.org/show_bug.cgi?id=2030410
-    data class StateInfo(
-        val serviceState: ServiceState = ServiceState.Uninitialized,
-        val proxyState: Int = PROXY_STATE_NOT_READY,
-        val lastError: String? = null,
-        val remaining: Long = -1L,
-        val max: Long = -1L,
-        val resetTime: String? = null,
-    ) {
-        val isEnrollmentNeeded: Boolean
-            get() = serviceState == ServiceState.Unauthenticated
-
-        companion object {
-            const val PROXY_STATE_NOT_READY = 0
-            const val PROXY_STATE_READY = 1
-            const val PROXY_STATE_ACTIVATING = 2
-            const val PROXY_STATE_ACTIVE = 3
-            const val PROXY_STATE_ERROR = 4
-            const val PROXY_STATE_PAUSED = 5
-        }
-
-        override fun toString(): String {
-            val proxy =
-                when (proxyState) {
-                    PROXY_STATE_NOT_READY -> "NOT_READY"
-                    PROXY_STATE_READY -> "READY"
-                    PROXY_STATE_ACTIVATING -> "ACTIVATING"
-                    PROXY_STATE_ACTIVE -> "ACTIVE"
-                    PROXY_STATE_ERROR -> "ERROR"
-                    PROXY_STATE_PAUSED -> "PAUSED"
-                    else -> "UNKNOWN($proxyState)"
-                }
-            return "StateInfo(serviceState=$serviceState, proxyState=$proxy," +
-                " remaining=$remaining, max=$max, resetTime=$resetTime," +
-                " lastError=$lastError)"
-        }
-    }
-
     /**
      * Represents a country from the IP protection proxy server list.
      *
@@ -154,6 +120,31 @@ interface IPProtectionHandler {
         val code: String,
         val available: Boolean,
     )
+}
+
+/** The possible states of the IP protection proxy. */
+@ExperimentalAndroidComponentsApi
+enum class ProxyState {
+    /** The proxy is not ready. */
+    NOT_READY,
+
+    /** The proxy is ready to be activated. */
+    READY,
+
+    /** The proxy is in the process of activating. */
+    ACTIVATING,
+
+    /** The proxy is active. */
+    ACTIVE,
+
+    /** The proxy encountered an error. */
+    ERROR,
+
+    /** The proxy is paused (e.g. bandwidth limit reached). */
+    PAUSED,
+
+    /** The engine reported a proxy state that this version does not know. */
+    UNKNOWN,
 }
 
 /** The possible states of the IP protection service. */
@@ -168,9 +159,6 @@ enum class ServiceState {
 
     /** The user is signed out but eligible. */
     Unauthenticated,
-
-    /** The user has opted out from using VPN. */
-    OptedOut,
 
     /** The service is ready to be activated. */
     Ready,

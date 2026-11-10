@@ -7,14 +7,16 @@
 
 #include "mozilla/gfx/Point.h"
 #include "mozilla/layers/LayersSurfaces.h"
+#include "mozilla/webgpu/FrontBufferSnapshot.h"
 #include "mozilla/webgpu/WebGPUTypes.h"
 #include "mozilla/webgpu/ffi/wgpu.h"
+#include "nsTArray.h"
 
 namespace mozilla {
 
-namespace ipc {
-class Shmem;
-}
+namespace layers {
+class TextureHost;
+}  // namespace layers
 
 namespace webgpu {
 
@@ -40,7 +42,7 @@ class SharedTexture {
 
   virtual Maybe<layers::SurfaceDescriptor> ToSurfaceDescriptor() = 0;
 
-  virtual void GetSnapshot(const ipc::Shmem& aDestShmem, size_t aDestStride) {}
+  virtual FrontBufferSnapshot GetSnapshot() { return {}; }
 
   virtual SharedTextureDMABuf* AsSharedTextureDMABuf() { return nullptr; }
 
@@ -63,11 +65,19 @@ class SharedTexture {
     return mOwnerId;
   }
 
-  virtual void onBeforeQueueSubmit(RawId aQueueId) {}
+  virtual void onBeforeQueueSubmit(
+      const ffi::WGPUGlobal* aContext, RawId aQueueId,
+      nsTArray<ffi::WGPUVkSemaphoreHandle>& aSignalSemaphores) {}
 
   virtual void CleanForRecycling() { mSubmissionIndex = 0; }
 
   virtual bool IsSubmitted() { return mSubmissionIndex > 0; }
+
+  RefPtr<layers::TextureHost> GetTextureHost();
+
+  void SetTextureHost(layers::TextureHost* aTextureHost);
+
+  void ClearTextureHost();
 
   const uint32_t mWidth;
   const uint32_t mHeight;
@@ -77,6 +87,7 @@ class SharedTexture {
  protected:
   uint64_t mSubmissionIndex = 0;
   layers::RemoteTextureOwnerId mOwnerId;
+  RefPtr<layers::TextureHost> mTextureHost;
 };
 
 // Dummy class

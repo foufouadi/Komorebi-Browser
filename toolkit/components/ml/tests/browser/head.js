@@ -1,6 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+/* global TextGenerator */
+
 /// <reference path="../../../../../toolkit/components/translations/tests/browser/shared-head.js" />
 
 // Load the shared-head file first.
@@ -13,7 +15,7 @@ Services.scriptloader.loadSubScript(
  * @type {import("../../actors/MLEngineParent.sys.mjs")}
  */
 const { MLEngineParent, MLEngine } = ChromeUtils.importESModule(
-  "resource://gre/actors/MLEngineParent.sys.mjs"
+  "moz-src:///toolkit/components/ml/actors/MLEngineParent.sys.mjs"
 );
 
 const { ModelHub, TestIndexedDBCache } = ChromeUtils.importESModule(
@@ -39,7 +41,6 @@ const {
   PipelineOptions,
   QuantizationLevel,
   ExecutionPriority,
-  InferenceDevice,
   LogLevel,
 } = ChromeUtils.importESModule(
   "chrome://global/content/ml/EngineProcess.sys.mjs"
@@ -78,6 +79,7 @@ async function setup({
       ["browser.ml.checkForMemory", false],
       ["browser.ml.queueWaitTimeout", 2],
       ["javascript.options.wasm_lazy_tiering", true],
+      ...hwInferencePrefs(),
       ...prefs,
     ],
   });
@@ -95,6 +97,13 @@ async function setup({
       await SpecialPowers.popPrefEnv();
     },
   };
+}
+
+function setupNativeOnnxRuntimeAvailabilityTest() {
+  EngineProcess.resetNativeOnnxRuntimeAvailabilityForTests();
+  registerCleanupFunction(() => {
+    EngineProcess.resetNativeOnnxRuntimeAvailabilityForTests();
+  });
 }
 
 function getDefaultWasmRecords(backend) {
@@ -369,7 +378,16 @@ async function initializeEngine(pipelineOptions, prefs = null) {
   });
   info("Get the engine process");
   const startTime = performance.now();
-  const engine = await createEngine(new PipelineOptions(pipelineOptions));
+  let engine;
+  try {
+    engine = await createEngine(new PipelineOptions(pipelineOptions));
+  } catch (error) {
+    // A failed init would otherwise leak the engine process and the pushed
+    // prefs into the file's remaining runs.
+    await EngineProcess.destroyMLEngine();
+    await cleanup();
+    throw error;
+  }
   const e2eInitTime = performance.now() - startTime;
 
   info("Get Pipeline Options");
@@ -404,6 +422,7 @@ async function perfSetup({ disabled = false, prefs = [], backend } = {}) {
     ["browser.ml.modelCacheTimeout", 1000],
     ["browser.ml.checkForMemory", false],
     ["javascript.options.wasm_lazy_tiering", true],
+    ...hwInferencePrefs(),
     ...prefs,
   ];
 
@@ -500,11 +519,41 @@ async function perfSetup({ disabled = false, prefs = [], backend } = {}) {
   };
 }
 
+// The CI tasks in taskcluster/kinds/perftest/*.yml (e.g. linux.yml) set
+// MOZ_ML_LLAMA_HWINFERENCE=1 to run the llama.cpp tests in the HWInference
+// process; setup() maps it to the browser.ml.llama.hwInference pref.
+const LLAMA_HW_INFERENCE_ENV = "MOZ_ML_LLAMA_HWINFERENCE";
+const LLAMA_HW_INFERENCE_PREF = "browser.ml.llama.hwInference";
+
+function usesHWInferenceProcess() {
+  return (
+    Services.env.get(LLAMA_HW_INFERENCE_ENV) === "1" ||
+    Services.prefs.getBoolPref(LLAMA_HW_INFERENCE_PREF, false)
+  );
+}
+
+function hwInferencePrefs() {
+  return Services.env.get(LLAMA_HW_INFERENCE_ENV) === "1"
+    ? [[LLAMA_HW_INFERENCE_PREF, true]]
+    : [];
+}
+
+/**
+ * Perfherder name suffix for the HWInference process, kept short because
+ * perfherder caps subtest names at 80 characters. Empty in the inference
+ * content process so its existing series stay continuous.
+ */
+function hwInferenceSuffix() {
+  return usesHWInferenceProcess() ? "_hwinf" : "";
+}
+
 /**
  * Returns the current total physical memory usage in MiB for the inference process
  */
 async function getTotalMemoryUsage() {
-  const procInfo = await getInferenceProcessInfo();
+  const procInfo = await getInferenceProcessInfo(
+    usesHWInferenceProcess() ? "hwInference" : "inference"
+  );
   return Math.round(procInfo.memory / ONE_MIB);
 }
 
@@ -584,6 +633,15 @@ async function runInference({
     const res = await run();
     runEndTime = performance.now();
     const decodingTime = runEndTime - startTime;
+    if (!numGeneratedTokens && res.metrics?.outputTokens) {
+      numGeneratedTokens = res.metrics.outputTokens;
+    }
+    if (!numPromptTokens && res.metrics?.inputTokens) {
+      numPromptTokens = res.metrics.inputTokens;
+    }
+    if (!numPromptCharacters && res.metrics?.inputCharacters) {
+      numPromptCharacters = res.metrics.inputCharacters;
+    }
     metrics = fetchMetrics(res.metrics?.runTimestamps || [], isFirstRun);
     metrics[`${isFirstRun ? COLD_START_PREFIX : ""}${TOTAL_MEMORY_USAGE}`] =
       await getTotalMemoryUsage();
@@ -626,7 +684,9 @@ class PeakMemoryTracker {
   }
 
   async collectPeakMemory() {
-    const procInfo = await getInferenceProcessInfo();
+    const procInfo = await getInferenceProcessInfo(
+      usesHWInferenceProcess() ? "hwInference" : "inference"
+    );
     if (procInfo.memory && procInfo.memory > this._memory) {
       this._memory = procInfo.memory;
     }
@@ -655,11 +715,126 @@ class PeakMemoryTracker {
   }
 }
 /**
+ * Tags used in per-backend metric names, decoupled from the backend
+ * identifiers so perfherder series survive a backend rename.
+ *
+ * @type {Record<string, string>}
+ */
+const BACKEND_TAGS = {
+  "onnx-native": "NATIVE",
+  onnx: "WASM",
+};
+
+/**
+ * Resolves which ONNX backends a perf test should measure. The
+ * MOZ_ML_BACKENDS environment variable (comma separated, set per CI task in
+ * taskcluster/kinds/perftest/*.yml) overrides everything, including
+ * test-provided candidates; without it, this returns the most preferred
+ * candidate that can run here.
+ *
+ * @param {object} [opts]
+ * @param {string[]} [opts.candidates] - Backends to consider, most preferred
+ *   first. Defaults to the full ONNX matrix.
+ * @returns {Promise<string[]>} Concrete backends to measure, never empty.
+ */
+async function resolveBackendMatrix({
+  candidates = ["onnx-native", "onnx"],
+} = {}) {
+  const override = Services.env.get("MOZ_ML_BACKENDS");
+  if (override) {
+    const requested = override
+      .split(",")
+      .map(s => s.trim())
+      .filter(Boolean);
+    info(`Backend matrix pinned by MOZ_ML_BACKENDS: ${requested.join(", ")}`);
+    return requested;
+  }
+
+  const nativeAvailable =
+    await EngineProcess.requestIsNativeOnnxRuntimeAvailable();
+
+  const matrix = candidates
+    .filter(backend => backend !== "onnx-native" || nativeAvailable)
+    .slice(0, 1);
+
+  info(
+    `Backend matrix: ${matrix.join(", ")} ` +
+      `(native onnxruntime ${nativeAvailable ? "available" : "unavailable"})`
+  );
+
+  if (!matrix.length) {
+    throw new Error(
+      `No backend to measure: none of [${candidates.join(", ")}] can run here`
+    );
+  }
+
+  return matrix;
+}
+
+/**
+ * Runs a performance test on every applicable ONNX backend, tagging metric
+ * names per backend (e.g. "SMART-TAB-TOPIC-model-run-latency-NATIVE") so each
+ * is its own perfherder series. The tag is appended after the metric name so
+ * the names declared in perfMetadata stay substrings of the reported names.
+ * The tag is applied even when a single backend runs, keeping series names
+ * platform-independent.
+ *
+ * @param {object} config - See runMLPerfTestOnBackend, plus:
+ * @param {string[]} [config.backends] - Backend candidates for runs where
+ *   MOZ_ML_BACKENDS is not set. Pass an explicit list for tests whose backend
+ *   is not negotiable (e.g. llama.cpp).
+ */
+async function runMLPerfTest({ backends, ...config }) {
+  await runMLPerfTestForEachBackend({
+    name: config.name,
+    backends,
+    run: ({ backend, tag }) =>
+      runMLPerfTestOnBackend({
+        ...config,
+        tag,
+        options: { ...config.options, backend },
+      }),
+  });
+}
+
+/**
+ * Runs `run` once per applicable ONNX backend, for tests that own their
+ * engine creation and metric naming: they pass `backend` into the options
+ * they build and append `tag` to their metric names. A backend that cannot
+ * run fails the test.
+ *
+ * @param {object} config
+ * @param {string} config.name - Feature name, used for logging.
+ * @param {string[]} [config.backends] - Backend candidates for runs where
+ *   MOZ_ML_BACKENDS is not set, most preferred first. Defaults to the full
+ *   ONNX matrix.
+ * @param {function({backend: string, tag: string}): Promise} config.run -
+ *   Runs and reports the measurements for one backend.
+ */
+async function runMLPerfTestForEachBackend({ name, backends, run }) {
+  const matrix = await resolveBackendMatrix(
+    backends ? { candidates: backends } : {}
+  );
+
+  for (const backend of matrix) {
+    const tag = BACKEND_TAGS[backend] ?? backend.toUpperCase();
+    info(`Running ${name} on backend ${backend}`);
+    await run({ backend, tag });
+  }
+
+  Assert.ok(
+    true,
+    `${name} measured every backend in the matrix (${matrix.join(", ")})`
+  );
+}
+
+/**
  * Runs a performance test for the given name, options, and arguments and
  * reports the results for perfherder.
  */
-async function perfTest({
+async function runMLPerfTestOnBackend({
   name,
+  tag,
   options,
   request,
   iterations = ITERATIONS,
@@ -670,33 +845,34 @@ async function perfTest({
 }) {
   info(`is request null | ${request === null || request === undefined}`);
   name = name.toUpperCase();
+  const taggedMetric = metric => `${name}-${metric}-${tag}`;
 
   let METRICS;
 
   // When tracking peak memory we only do this because we're
   // stressing the system with 500ms callbacks so other netrics are impacted
   if (trackPeakMemory) {
-    METRICS = [`${name}-${PEAK_MEMORY_USAGE}`];
+    METRICS = [PEAK_MEMORY_USAGE];
   } else {
     METRICS = [
-      `${name}-${PIPELINE_READY_LATENCY}`,
-      `${name}-${INITIALIZATION_LATENCY}`,
-      `${name}-${MODEL_RUN_LATENCY}`,
-      `${name}-${TOTAL_MEMORY_USAGE}`,
-      `${name}-${E2E_RUN_LATENCY}`,
-      `${name}-${E2E_INIT_LATENCY}`,
-      `${name}-${FIRST_TOKEN_LATENCY}`,
-      `${name}-${DECODING_LATENCY}`,
-      `${name}-${DECODING_CHARACTERS_SPEED}`,
-      `${name}-${DECODING_TOKEN_SPEED}`,
-      `${name}-${PROMPT_CHARACTERS_SPEED}`,
-      `${name}-${PROMPT_TOKEN_SPEED}`,
+      PIPELINE_READY_LATENCY,
+      INITIALIZATION_LATENCY,
+      MODEL_RUN_LATENCY,
+      TOTAL_MEMORY_USAGE,
+      E2E_RUN_LATENCY,
+      E2E_INIT_LATENCY,
+      FIRST_TOKEN_LATENCY,
+      DECODING_LATENCY,
+      DECODING_CHARACTERS_SPEED,
+      DECODING_TOKEN_SPEED,
+      PROMPT_CHARACTERS_SPEED,
+      PROMPT_TOKEN_SPEED,
       ...(addColdStart
         ? [
-            `${name}-${COLD_START_PREFIX}${PIPELINE_READY_LATENCY}`,
-            `${name}-${COLD_START_PREFIX}${INITIALIZATION_LATENCY}`,
-            `${name}-${COLD_START_PREFIX}${MODEL_RUN_LATENCY}`,
-            `${name}-${COLD_START_PREFIX}${TOTAL_MEMORY_USAGE}`,
+            `${COLD_START_PREFIX}${PIPELINE_READY_LATENCY}`,
+            `${COLD_START_PREFIX}${INITIALIZATION_LATENCY}`,
+            `${COLD_START_PREFIX}${MODEL_RUN_LATENCY}`,
+            `${COLD_START_PREFIX}${TOTAL_MEMORY_USAGE}`,
           ]
         : []),
     ];
@@ -704,7 +880,7 @@ async function perfTest({
 
   const journal = {};
   for (let metric of METRICS) {
-    journal[metric] = [];
+    journal[taggedMetric(metric)] = [];
   }
 
   const pipelineOptions = new PipelineOptions(options);
@@ -724,17 +900,17 @@ async function perfTest({
       browserPrefs,
     });
     if (trackPeakMemory) {
-      journal[`${name}-${PEAK_MEMORY_USAGE}`].push(tracker.stop());
+      journal[taggedMetric(PEAK_MEMORY_USAGE)].push(tracker.stop());
     } else {
       for (let [metricName, metricVal] of Object.entries(metrics)) {
         if (!Number.isFinite(metricVal) || metricVal < 0) {
           metricVal = 0;
         }
         // Add the metric if it wasn't there
-        if (journal[`${name}-${metricName}`] === undefined) {
-          journal[`${name}-${metricName}`] = [];
+        if (journal[taggedMetric(metricName)] === undefined) {
+          journal[taggedMetric(metricName)] = [];
         }
-        journal[`${name}-${metricName}`].push(metricVal);
+        journal[taggedMetric(metricName)].push(metricVal);
       }
     }
   }
@@ -800,15 +976,22 @@ function readRequestBody(request) {
  * @param {boolean} [options.holdStreamOpenAfterFinish] - When true, the
  *   streaming tool-call turn stops talking after finish_reason and never closes
  *   the connection, so the client is the only thing that can end the turn.
+ * @param {{status: number, body: object}|null} [options.errorResponse] - When
+ *   set, every request is answered with this HTTP status and JSON body instead
+ *   of a completion.
+ * @param {boolean} [options.holdResponses] - Holds requests without sending
+ *   a response until resumeResponses() is called.
  */
 function startMockOpenAI({
   echo = "This gets echoed.",
   onRequest = null,
   holdStreamOpenAfterFinish = false,
+  errorResponse = null,
+  holdResponses = false,
 } = {}) {
   const server = new HttpServer();
 
-  // Tracked so a test using holdStreamOpenAfterFinish can still stop the server.
+  // Tracked so tests that hold responses can still stop the server.
   const heldResponses = [];
 
   server.registerPathHandler("/v1/chat/completions", (request, response) => {
@@ -819,6 +1002,18 @@ function startMockOpenAI({
       onRequest(request);
     }
 
+    if (errorResponse) {
+      info("[openai] Answering with error status " + errorResponse.status);
+      response.setStatusLine(request.httpVersion, errorResponse.status, "");
+      response.setHeader(
+        "Content-Type",
+        "application/json; charset=utf-8",
+        false
+      );
+      response.write(JSON.stringify(errorResponse.body));
+      return;
+    }
+
     let bodyText = "";
     if (request.method === "POST") {
       try {
@@ -826,6 +1021,12 @@ function startMockOpenAI({
       } catch (_) {}
     }
     info("[openai] bodyText: " + bodyText);
+
+    if (holdResponses) {
+      response.processAsync();
+      heldResponses.push(response);
+      return;
+    }
 
     let body;
     try {
@@ -1184,10 +1385,15 @@ function startMockOpenAI({
     }
   }
 
+  function resumeResponses() {
+    holdResponses = false;
+    releaseHeldStreams();
+  }
+
   // -1 tells it to pick an ephemeral port
   server.start(-1);
   const port = server.identity.primaryPort;
-  return { server, port, releaseHeldStreams };
+  return { server, port, releaseHeldStreams, resumeResponses };
 }
 
 function stopMockOpenAI(server) {
@@ -1248,6 +1454,14 @@ function generateFloat16Numpy(vocabSize, dimensions) {
   return { numbers, encoding };
 }
 
+// Marks a utility process crash as expected for the debug leak checker,
+// which otherwise fails on the dead process's incomplete bloat log.
+function noteIntentionalUtilityCrash(pid) {
+  Cc["@mozilla.org/utility-process-test;1"]
+    .createInstance(Ci.nsIUtilityProcessTest)
+    .noteIntentionalCrash(pid);
+}
+
 /**
  * Checks that a process exists.
  *
@@ -1261,4 +1475,113 @@ async function checkForRemoteType(remoteType) {
     }
   }
   return false;
+}
+
+// Bound off the namespace rather than destructuring MLTestUtils, which some
+// tests in this directory declare themselves.
+const { runOnBothInferenceProcesses } = ChromeUtils.importESModule(
+  "resource://testing-common/MLTestUtils.sys.mjs"
+).MLTestUtils;
+
+// top-k only filters; the final dist sampler selects a token.
+const TINYSTORIES_GREEDY_SAMPLERS = [
+  { type: "top-k", topK: 1 },
+  { type: "dist" },
+];
+
+const TINYSTORIES_STORYTELLER_PROMPT = [
+  { role: "system", content: "You are a friendly storyteller." },
+  { role: "user", content: "Once upon a time there was a small mouse who" },
+];
+
+const TINYSTORIES_CONTEXT_SIZE = 512;
+// Chaos mode confines the utility process to CPU 0, where every ggml barrier
+// costs a scheduler slice: 74 ms per token with two threads, 2 s with the
+// default pool. One thread there, the default pool everywhere else.
+const TINYSTORIES_CHAOS_THREADS = parseInt(
+  Services.env.get("MOZ_CHAOSMODE"),
+  16
+)
+  ? { numThreads: 1 }
+  : {};
+const TINYSTORIES_ENGINE_OPTIONS = {
+  backend: "llama.cpp",
+  taskName: "text-generation",
+  modelId: "Mozilla/test-llama",
+  modelFile: "TinyStories-656K.Q8_0.gguf",
+  modelRevision: "main",
+  numContext: 256,
+  ...TINYSTORIES_CHAOS_THREADS,
+};
+
+async function createTinyStoriesGenerator(options = {}) {
+  const modelFile = await File.createFromFileName(
+    getTestFilePath("data/Mozilla/test-llama/main/TinyStories-656K.Q8_0.gguf")
+  );
+  return TextGenerator.create(modelFile, {
+    contextSize: TINYSTORIES_CONTEXT_SIZE,
+    ...TINYSTORIES_CHAOS_THREADS,
+    ...options,
+  });
+}
+
+async function collectGeneratedText(generator) {
+  let text = "";
+  for await (const chunk of generator) {
+    text += chunk.text;
+  }
+  return text;
+}
+
+function mockModelHubModel(
+  sandbox,
+  { id, model, filePath, headers = {}, error }
+) {
+  const { Progress } = ChromeUtils.importESModule(
+    "chrome://global/content/ml/Utils.sys.mjs"
+  );
+  return sandbox
+    .stub(ModelHub.prototype, "getModelDataAsFile")
+    .callsFake(async function ({ progressCallback }) {
+      const statusInfo = {
+        metadata: { model },
+        ok: true,
+        id,
+      };
+      progressCallback(
+        new Progress.ProgressAndStatusCallbackParams({
+          ...statusInfo,
+          type: Progress.ProgressType.DOWNLOAD,
+          statusText: Progress.ProgressStatusText.INITIATE,
+        })
+      );
+      progressCallback(
+        new Progress.ProgressAndStatusCallbackParams({
+          ...statusInfo,
+          type: Progress.ProgressType.DOWNLOAD,
+          statusText: Progress.ProgressStatusText.IN_PROGRESS,
+          progress: 25,
+          totalLoaded: 256,
+          currentLoaded: 256,
+          total: 1024,
+          units: "bytes",
+        })
+      );
+      progressCallback(
+        new Progress.ProgressAndStatusCallbackParams({
+          ...statusInfo,
+          type: Progress.ProgressType.DOWNLOAD,
+          statusText: Progress.ProgressStatusText.DONE,
+          progress: 100,
+          totalLoaded: 1024,
+          currentLoaded: 768,
+          total: 1024,
+          units: "bytes",
+        })
+      );
+      if (error) {
+        throw error;
+      }
+      return [filePath, headers];
+    });
 }

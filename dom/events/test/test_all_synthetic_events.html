@@ -280,6 +280,8 @@ const kEventConstructors = {
                                                           }
                                                         : null,
                                              },
+  PageRevealEvent: { create (aName, aProps) { return new PageRevealEvent(aName, aProps); } },
+  PageSwapEvent: { create (aName, aProps) { return new PageSwapEvent(aName, aProps); } },
   PageTransitionEvent:                       { create (aName, aProps) {
                                                          return new PageTransitionEvent(aName, aProps);
                                                        },
@@ -337,8 +339,8 @@ const kEventConstructors = {
   ScrollAreaEvent:                           { create: null
                                                // Cannot create untrusted event from JS
                                              },
-  SpeechRecognitionError:                    { create (aName, aProps) {
-                                                         return new SpeechRecognitionError(aName, aProps);
+  SpeechRecognitionErrorEvent:               { create (aName, aProps) {
+                                                         return new SpeechRecognitionErrorEvent(aName, { error: "no-speech", ...aProps });
                                                        },
                                              },
   SpeechRecognitionEvent:                    { create (aName, aProps) {

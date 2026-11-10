@@ -19,6 +19,7 @@ DEFINES["ANGLE_PLATFORM_EXPORT"] = ""
 DEFINES["ANGLE_SKIP_DXGI_1_2_CHECK"] = True
 DEFINES["EGL_EGLEXT_PROTOTYPES"] = True
 DEFINES["EGL_EGL_PROTOTYPES"] = "1"
+DEFINES["EGL_NO_X11"] = True
 DEFINES["GL_GLES_PROTOTYPES"] = "1"
 DEFINES["GL_GLEXT_PROTOTYPES"] = True
 DEFINES["LIBANGLE_IMPLEMENTATION"] = True
@@ -26,12 +27,11 @@ DEFINES["LIBGLESV2_IMPLEMENTATION"] = True
 
 LOCAL_INCLUDES += [
     "!/ipc/ipdl/_ipdlheaders",
-    "!/third_party/angle/gen",
     "/ipc/chromium/src",
     "/third_party/angle/include/",
     "/third_party/angle/src/",
     "/third_party/angle/src/common/base/",
-    "/third_party/angle/src/common/third_party/xxhash/",
+    "/third_party/angle/src/common/third_party/xxhash/src/",
     "/tools/profiler/public"
 ]
 
@@ -70,6 +70,35 @@ if CONFIG["MOZ_DEBUG"] == "1":
     DEFINES["ANGLE_DEBUG_LAYERS_ENABLED"] = True
     DEFINES["DYNAMIC_ANNOTATIONS_ENABLED"] = "1"
 
+if CONFIG["OS_TARGET"] == "Android":
+
+    DEFINES["ANDROID"] = True
+    DEFINES["ANDROID_NDK_VERSION_ROLL"] = "r27_1"
+    DEFINES["ANGLE_ENABLE_GLOBAL_MUTEX_LOAD_TIME_ALLOCATE"] = "1"
+    DEFINES["ANGLE_ENABLE_OPENGL"] = True
+    DEFINES["ANGLE_USE_ANDROID_TLS_SLOT"] = "1"
+    DEFINES["GL_API"] = "__attribute__((visibility(\"default\")))"
+    DEFINES["GL_APICALL"] = "__attribute__((visibility(\"default\")))"
+    DEFINES["HAVE_SYS_UIO_H"] = True
+    DEFINES["_GNU_SOURCE"] = True
+    DEFINES["__ANDROID_UNAVAILABLE_SYMBOLS_ARE_WEAK__"] = True
+    DEFINES["__STDC_CONSTANT_MACROS"] = True
+    DEFINES["__STDC_FORMAT_MACROS"] = True
+
+    LOCAL_INCLUDES += [
+        "/third_party/angle/src/third_party/khronos/"
+    ]
+
+    OS_LIBS += [
+        "dl",
+        "log",
+        "m",
+        "nativewindow"
+    ]
+
+    SHARED_LIBRARY_NAME = "GLESv2_angle"
+
+
 if CONFIG["OS_TARGET"] == "Darwin":
 
     DEFINES["ANGLE_ENABLE_METAL"] = True
@@ -77,6 +106,10 @@ if CONFIG["OS_TARGET"] == "Darwin":
     DEFINES["GL_APICALL"] = "__attribute__((visibility(\"default\")))"
     DEFINES["__STDC_CONSTANT_MACROS"] = True
     DEFINES["__STDC_FORMAT_MACROS"] = True
+
+    LOCAL_INCLUDES += [
+        "!/third_party/angle/gen"
+    ]
 
     OS_LIBS += [
         "-framework Cocoa",
@@ -97,7 +130,6 @@ if CONFIG["OS_TARGET"] == "WINNT":
 
 
     DEFINES["ANGLE_ENABLE_D3D11"] = True
-    DEFINES["ANGLE_ENABLE_D3D9"] = True
     DEFINES["ANGLE_IS_WIN"] = True
     DEFINES["ANGLE_PRELOADED_D3DCOMPILER_MODULE_NAMES"] = "{ \"d3dcompiler_47.dll\", \"d3dcompiler_46.dll\", \"d3dcompiler_43.dll\" }"
     DEFINES["CERT_CHAIN_PARA_HAS_EXTRA_FIELDS"] = True
@@ -126,10 +158,13 @@ if CONFIG["OS_TARGET"] == "WINNT":
     DEFINES["_WINSOCK_DEPRECATED_NO_WARNINGS"] = True
     DEFINES["__STD_C"] = True
 
+    LOCAL_INCLUDES += [
+        "!/third_party/angle/gen"
+    ]
+
     OS_LIBS += [
         "advapi32",
         "comdlg32",
-        "d3d9",
         "dbghelp",
         "delayimp",
         "dnsapi",
@@ -169,6 +204,10 @@ if CONFIG["OS_TARGET"] == "WINNT":
 if CONFIG["TARGET_CPU"] == "aarch64":
 
     DEFINES["__ARM_NEON__"] = "1"
+
+if CONFIG["MOZ_DEBUG"] == "1" and CONFIG["OS_TARGET"] == "Android":
+
+    DEFINES["_DEBUG"] = True
 
 if CONFIG["MOZ_DEBUG"] == "1" and CONFIG["OS_TARGET"] == "Darwin":
 

@@ -43,6 +43,9 @@ class BrowsertimeAndroid(PerftestAndroid, Browsertime):
     """
 
     def __init__(self, app, binary, activity=None, intent=None, **kwargs):
+        # Building a conditioned profile in super().__init__ initializes the
+        # device before run_tests() sets the test names.
+        self._test_names = None
         super().__init__(
             app,
             binary,
@@ -206,16 +209,7 @@ class BrowsertimeAndroid(PerftestAndroid, Browsertime):
         chrome_args += ["--enable-benchmarking"]
 
         if test.get("playback", False):
-            pb_args = [
-                f"--proxy-server={self.playback.host}:{self.playback.port}",
-                "--proxy-bypass-list=localhost;127.0.0.1",
-                "--ignore-certificate-errors",
-            ]
-
-            if not self.is_localhost:
-                pb_args[0] = pb_args[0].replace("127.0.0.1", self.config["host"])
-
-            chrome_args.extend(pb_args)
+            chrome_args.extend(self.playback_chrome_args())
 
         if self.debug_mode:
             chrome_args.extend(["--auto-open-devtools-for-tabs"])
@@ -285,22 +279,21 @@ class BrowsertimeAndroid(PerftestAndroid, Browsertime):
     def run_test_setup(self, test):
         super().run_test_setup(test)
 
-        self.set_reverse_ports()
+        self.set_reverse_ports(test)
 
         if self.config["app"] in FIREFOX_ANDROID_APPS:
-            if self.playback:
+            if self.playback and self.playback.playback_mode != "direct":
                 self.turn_on_android_app_proxy()
             self.remove_mozprofile_delimiters_from_profile()
 
-    def run_tests(self, tests, test_names):
-        self._test_names = test_names
+    def run_tests(self, tests):
         self.setup_adb_device()
 
         if self.config["app"] in CHROME_ANDROID_APPS:
             # Make sure that chrome is enabled on the device
             self.device.shell_output("pm enable com.android.chrome")
 
-        return super().run_tests(tests, test_names)
+        return super().run_tests(tests)
 
     def run_test_teardown(self, test):
         LOG.info("removing reverse socket connections")

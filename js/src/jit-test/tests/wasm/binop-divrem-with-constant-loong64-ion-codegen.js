@@ -36,10 +36,8 @@ const i32_div_s = [
   {
     divisor: -1,
     expected: `lu12i\\.w     \\$t6, -524288
-               bne           \\$a0, \\$t6, 24 -> ${HEX}+
-               ${NopIns}
-               bge           \\$zero, \\$zero, 12 -> ${HEX}+
-               ${NopIns}
+               bne           \\$a0, \\$t6, 16 -> ${HEX}+
+               bge           \\$zero, \\$zero, 8 -> ${HEX}+
                ${NopIns}
                ${WasmTrapIns}
                sub\\.w       \\$a0, \\$zero, \\$a0`,
@@ -204,11 +202,13 @@ const i64_div_s = [
                ${WasmTrapIns}`,
   },
 
-  // Power of two divisor
+  // Division by 1 yields no code.
   {
     divisor: 1,
-    expected: `or            \\$a0, \\$a0, \\$zero`,
+    expected: ``,
   },
+
+  // Power of two divisor
   {
     divisor: 2,
     expected: `srli\\.d      \\$t6, \\$a0, 0x3f
@@ -234,10 +234,8 @@ const i64_div_s = [
   {
     divisor: -1,
     expected: `lu52i\\.d     \\$t6, \\$zero, -2048
-               bne           \\$a0, \\$t6, 24 -> ${HEX}+
-               ${NopIns}
-               bge           \\$zero, \\$zero, 12 -> ${HEX}+
-               ${NopIns}
+               bne           \\$a0, \\$t6, 16 -> ${HEX}+
+               bge           \\$zero, \\$zero, 8 -> ${HEX}+
                ${NopIns}
                ${WasmTrapIns}
                sub\\.d       \\$a0, \\$zero, \\$a0`,
@@ -337,11 +335,13 @@ const i64_div_u = [
                ${WasmTrapIns}`,
   },
 
-  // Power of two divisor
+  // Division by 1 yields no code.
   {
     divisor: 1,
-    expected: `or            \\$a0, \\$a0, \\$zero`,
+    expected: ``,
   },
+
+  // Power of two divisor
   {
     divisor: 2,
     expected: `srli\\.d      \\$a0, \\$a0, 0x1`,
@@ -616,9 +616,9 @@ const i64_rem_s = [
                srai\\.d      \\$a0, \\$a0, 0x1f
                srai\\.d      \\$t6, \\$a1, 0x3f
                sub\\.d       \\$a0, \\$a0, \\$t6
-               lu12i\\.w     \\$t6, 0
-               lu32i\\.d     \\$t6, 3
-               mul\\.d       \\$a0, \\$a0, \\$t6
+               slli\\.d      \\$t6, \\$a0, 0x1
+               add\\.d       \\$a0, \\$t6, \\$a0
+               slli\\.d      \\$a0, \\$a0, 0x20
                sub\\.d       \\$a0, \\$a1, \\$a0`,
     negative: `or            \\$a2, \\$a0, \\$zero
                or            \\$a1, \\$a2, \\$zero
@@ -707,9 +707,9 @@ const i64_rem_u = [
                ori           \\$t6, \\$t6, 0xaab
                mulh\\.du     \\$a0, \\$a1, \\$t6
                srli\\.d      \\$a0, \\$a0, 0x21
-               lu12i\\.w     \\$t6, 0
-               lu32i\\.d     \\$t6, 3
-               mul\\.d       \\$a0, \\$a0, \\$t6
+               slli\\.d      \\$t6, \\$a0, 0x1
+               add\\.d       \\$a0, \\$t6, \\$a0
+               slli\\.d      \\$a0, \\$a0, 0x20
                sub\\.d       \\$a0, \\$a1, \\$a0`,
   },
 ];

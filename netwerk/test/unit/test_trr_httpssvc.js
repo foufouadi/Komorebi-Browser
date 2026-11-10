@@ -4,10 +4,6 @@
 
 "use strict";
 
-const { TestUtils } = ChromeUtils.importESModule(
-  "resource://testing-common/TestUtils.sys.mjs"
-);
-
 let h2Port;
 let trrServer;
 
@@ -60,11 +56,6 @@ add_setup(async function setup() {
     trr_clear_prefs();
     Services.prefs.clearUserPref("network.dns.port_prefixed_qname_https_rr");
   });
-
-  if (mozinfo.socketprocess_networking) {
-    Services.dns; // Needed to trigger socket process.
-    await TestUtils.waitForCondition(() => Services.io.socketProcessLaunched);
-  }
 });
 
 add_task(async function testHTTPSSVC() {
@@ -869,6 +860,81 @@ add_task(async function test_aliasform_cname_chain_no_record() {
     "record should be AliasMode (priority 0)"
   );
   Assert.equal(answer[0].name, "cchain-c.com", "record carries final target");
+});
+
+// A plain CNAME chain is not an HTTPS AliasMode chain: when the CNAME target
+// has no HTTPS record, the lookup must fail instead of synthesizing an
+// AliasMode record. Regression test for bug 2066852.
+add_task(async function test_plain_cname_chain_no_record() {
+  await setTRRURI(`https://foo.example.com:${trrServer.port()}/dns-query`);
+  await clearCache();
+
+  await trrServer.registerDoHAnswers("pcname-a.com", "HTTPS", {
+    answers: [
+      {
+        name: "pcname-a.com",
+        type: "CNAME",
+        ttl: 55,
+        class: "IN",
+        flush: false,
+        data: "pcname-b.com",
+      },
+    ],
+  });
+  // pcname-b.com resolves but has no HTTPS record (NODATA).
+  await trrServer.registerDoHAnswers("pcname-b.com", "HTTPS", { answers: [] });
+
+  let { inStatus } = await new TRRDNSListener("pcname-a.com", {
+    type: Ci.nsIDNSService.RESOLVE_TYPE_HTTPSSVC,
+    expectedSuccess: false,
+  });
+  Assert.ok(
+    !Components.isSuccessCode(inStatus),
+    `${inStatus} cname->no-record must not synthesize an AliasMode record`
+  );
+});
+
+// Same as above, but the CNAME response has the Recursion-Available flag set.
+// A recursive resolver inlines the CNAME target's HTTPS records, so their
+// absence is definitive and we must not re-query the target. Bug 2066852.
+add_task(async function test_plain_cname_chain_recursion_available() {
+  await setTRRURI(`https://foo.example.com:${trrServer.port()}/dns-query`);
+  await clearCache();
+
+  // RECURSION_AVAILABLE flag (1 << 7) as encoded by dns-packet.
+  const RECURSION_AVAILABLE = 1 << 7;
+
+  await trrServer.registerDoHAnswers("racname-a.com", "HTTPS", {
+    flags: RECURSION_AVAILABLE,
+    answers: [
+      {
+        name: "racname-a.com",
+        type: "CNAME",
+        ttl: 55,
+        class: "IN",
+        flush: false,
+        data: "racname-b.com",
+      },
+    ],
+  });
+  await trrServer.registerDoHAnswers("racname-b.com", "HTTPS", {
+    flags: RECURSION_AVAILABLE,
+    answers: [],
+  });
+
+  let { inStatus } = await new TRRDNSListener("racname-a.com", {
+    type: Ci.nsIDNSService.RESOLVE_TYPE_HTTPSSVC,
+    expectedSuccess: false,
+  });
+  Assert.ok(
+    !Components.isSuccessCode(inStatus),
+    `${inStatus} cname->no-record with RA must fail`
+  );
+  Assert.equal(
+    await trrServer.requestCount("racname-b.com", "HTTPS"),
+    0,
+    "must not query the CNAME target when recursion is available"
+  );
 });
 
 add_task(async function testNegativeResponse() {

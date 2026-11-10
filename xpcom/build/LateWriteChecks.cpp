@@ -10,6 +10,7 @@
 #include "mozilla/StaticPtr.h"
 #include "mozilla/Telemetry.h"
 #include "nsAppDirectoryServiceDefs.h"
+#include "nsCRTGlue.h"
 #include "nsDirectoryServiceUtils.h"
 #include "nsLocalFile.h"
 #include "nsPrintfCString.h"
@@ -166,7 +167,8 @@ void LateWriteObserver::Observe(
   size_t numModules = stack.GetNumModules();
   sha1Stream.Printf("%u\n", (unsigned)numModules);
   for (size_t i = 0; i < numModules; ++i) {
-    mozilla::Telemetry::ProcessedStack::Module module = stack.GetModule(i);
+    const mozilla::Telemetry::ProcessedStack::Module& module =
+        stack.GetModule(i);
     sha1Stream.Printf("%s %s\n", module.mBreakpadId.get(),
                       NS_ConvertUTF16toUTF8(module.mName).get());
   }

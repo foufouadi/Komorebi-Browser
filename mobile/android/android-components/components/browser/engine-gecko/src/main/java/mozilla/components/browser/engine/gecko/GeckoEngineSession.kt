@@ -28,8 +28,8 @@ import mozilla.components.browser.engine.gecko.permission.GeckoPermissionRequest
 import mozilla.components.browser.engine.gecko.prompt.GeckoPromptDelegate
 import mozilla.components.browser.engine.gecko.translate.GeckoTranslateSessionDelegate
 import mozilla.components.browser.engine.gecko.translate.GeckoTranslationUtils.intoTranslationError
+import mozilla.components.browser.engine.gecko.util.makePdfDownloadFilename
 import mozilla.components.browser.engine.gecko.window.GeckoWindowRequest
-import mozilla.components.browser.errorpages.ErrorType
 import mozilla.components.concept.engine.DownloadDelegate
 import mozilla.components.concept.engine.EngineSession
 import mozilla.components.concept.engine.EngineSession.LoadUrlFlags.Companion.ALLOW_ADDITIONAL_HEADERS
@@ -45,6 +45,7 @@ import mozilla.components.concept.engine.manifest.WebAppManifestParser
 import mozilla.components.concept.engine.pageextraction.ContentParams
 import mozilla.components.concept.engine.pageextraction.PageExtractionError
 import mozilla.components.concept.engine.pageextraction.PageMetadata
+import mozilla.components.concept.engine.request.ErrorType
 import mozilla.components.concept.engine.request.RequestInterceptor
 import mozilla.components.concept.engine.request.RequestInterceptor.InterceptionResponse
 import mozilla.components.concept.engine.translate.TranslationError
@@ -119,6 +120,7 @@ class GeckoEngineSession(
     internal var currentUrl: String? = null
     internal var currentTitle: String? = null
     internal var lastLoadRequestUri: String? = null
+    internal var lastLoadRequestIsFromDirectNavigation: Boolean = false
     internal var pageLoadingUrl: String? = null
     internal var appRedirectUrl: String? = null
     internal var scrollY: Int = 0
@@ -242,24 +244,26 @@ class GeckoEngineSession(
 
     /** See [EngineSession.requestPdfToDownload] */
     override fun requestPdfToDownload() {
-        geckoSession
-            .saveAsPdf()
+        pdfToDownload()
             .then(
-                { inputStream ->
+                { webResponse ->
+                    val inputStream = webResponse?.body
                     if (inputStream == null) {
                         logger.error("No input stream available for Save to PDF.")
                         return@then GeckoResult<Void>()
                     }
 
-                    val url = this.currentUrl ?: ""
+                    val url = webResponse.uri
                     val contentType = "application/pdf"
-                    val disposition = currentTitle?.let { makePdfContentDisposition(it) }
-                    // A successful status code suffices because the PDF is generated on device.
+                    // A successful status code suffices because the PDF bytes are either generated
+                    // for the page or directly pulled from the PDF.
                     val responseStatus = RESPONSE_CODE_SUCCESS
                     // We do not know the size at this point; send 0 so consumers do not display it.
                     val contentLength = 0L
-                    // NB: If the title is an empty string, there is a chance the PDF will not have a name.
-                    // See https://github.com/mozilla-mobile/android-components/issues/12276
+                    // Update the content disposition to ensure we have proper file naming for both viewed or generated
+                    // PDFs
+                    val disposition = contentDispositionForPdf(webResponse)
+                    // Ensures the name is properly sanitized for the filesystem
                     val fileName =
                         settings.downloadDelegate?.guessFileName(
                             contentDisposition = disposition,
@@ -302,6 +306,79 @@ class GeckoEngineSession(
                 },
             )
     }
+
+    /** See [EngineSession.requestPdfToShare] */
+    override fun requestPdfToShare(
+        onResult: (Response) -> Unit,
+        onException: (Throwable) -> Unit,
+    ) {
+        pdfToDownload()
+            .then(
+                { webResponse ->
+                    val body = webResponse?.body
+                    if (body == null) {
+                        onException(IllegalStateException("No PDF available"))
+                        return@then GeckoResult<Void>()
+                    }
+
+                    onResult(
+                        Response(
+                            url = webResponse.uri,
+                            status = RESPONSE_CODE_SUCCESS,
+                            headers =
+                                MutableHeaders(
+                                    CONTENT_TYPE to "application/pdf",
+                                    CONTENT_DISPOSITION to contentDispositionForPdf(webResponse),
+                                ),
+                            body = Response.Body(body),
+                        )
+                    )
+                    GeckoResult()
+                },
+                { throwable ->
+                    onException(throwable)
+                    GeckoResult()
+                },
+            )
+    }
+
+    /**
+     * Ensures a proper Content-Disposition is available to guarantee PDFs have reasonable names for downloading or
+     * sharing.
+     *
+     * @param webResponse The PDF response. May come either from the PDF viewer or from generating a PDF from browser
+     *   content.
+     * @return The Content-Disposition to download or share the PDF with.
+     */
+    private fun contentDispositionForPdf(webResponse: WebResponse): String {
+        val pdfFilename =
+            DownloadUtils.extractFileNameFromUrlOrNull(
+                    contentDisposition = webResponse.headers[CONTENT_DISPOSITION],
+                    url = null,
+                )
+                ?.sanitizeFileName()
+        // Ensures content disposition is set up properly for downloading a PDF
+        return makePdfContentDisposition(makePdfDownloadFilename(filename = pdfFilename, title = currentTitle))
+    }
+
+    /**
+     * Determines the correct PDF bytes to download. If the tab is showing a PDF, then the bytes should come directly
+     * from that PDF, else they should be generated for the page.
+     */
+    private fun pdfToDownload(): GeckoResult<WebResponse> =
+        geckoSession.isPdfJs.then(
+            { isPdfJs -> if (isPdfJs == true) visiblePdfDocument() else pageSavedAsPdf() },
+            { pageSavedAsPdf() },
+        )
+
+    /** Method to get the bytes from the shown PDF document. */
+    private fun visiblePdfDocument(): GeckoResult<WebResponse> = geckoSession.pdfFileSaver.save()
+
+    /** Method to generate a PDF from the content. */
+    private fun pageSavedAsPdf(): GeckoResult<WebResponse> =
+        geckoSession.saveAsPdf().map { inputStream ->
+            inputStream?.let { WebResponse.Builder(this.currentUrl ?: "").body(it).build() }
+        }
 
     /** See [EngineSession.requestPrintContent] */
     override fun requestPrintContent() {
@@ -615,6 +692,35 @@ class GeckoEngineSession(
     }
 
     /**
+     * When on a PDF, this will ask the PDF viewer to add a signature. If not on a PDF, then an exception will occur.
+     *
+     * @param text The signature the user typed.
+     * @param onResult Callback invoked once the PDF viewer has been given the signature.
+     * @param onException Callback invoked if the signature could not be handed to the PDF viewer, which includes the
+     *   session not displaying a PDF.
+     */
+    @OptIn(ExperimentalGeckoViewApi::class)
+    override fun addSignatureToPdf(
+        text: String,
+        onResult: () -> Unit,
+        onException: (Throwable) -> Unit,
+    ) {
+        geckoSession.pdfViewerEditor
+            .addSignature(text)
+            .then(
+                {
+                    onResult()
+                    GeckoResult<Void>()
+                },
+                { throwable ->
+                    logger.error("Request for adding a signature to the PDF failed: ", throwable)
+                    onException(throwable)
+                    GeckoResult()
+                },
+            )
+    }
+
+    /**
      * Send the broken site report using Glean.
      *
      * @param details The {@link JSONObject} returned by getBrokenSiteReport.
@@ -861,7 +967,11 @@ class GeckoEngineSession(
         onResult: (String) -> Unit,
         onException: (Throwable) -> Unit,
     ) {
-        val geckoViewOptions = PageExtractionController.ContentParams(options.removeBoilerplate)
+        val geckoViewOptions =
+            PageExtractionController.ContentParams(
+                options.removeBoilerplate,
+                options.useSimpleText,
+            )
         geckoSession.sessionPageExtractor
             .getPageContent(geckoViewOptions)
             .then(
@@ -898,6 +1008,7 @@ class GeckoEngineSession(
                         wordCount = metadata.wordCount,
                         language = metadata.language,
                         isReaderable = metadata.isReaderable,
+                        isGated = metadata.isGated,
                     )
                 )
                 GeckoResult<Unit>()
@@ -1090,6 +1201,9 @@ class GeckoEngineSession(
                     lastLoadRequestUri = ""
                 }
 
+                val isFromDirectNavigation =
+                    request.isDirectNavigation || (request.isRedirect && lastLoadRequestIsFromDirectNavigation)
+
                 val interceptor = settings.requestInterceptor
                 val interceptionResponse =
                     if (
@@ -1101,6 +1215,7 @@ class GeckoEngineSession(
                         val engineSession = this@GeckoEngineSession
                         val isSameDomain =
                             engineSession.currentUrl?.tryGetHostFromUrl() == request.uri.tryGetHostFromUrl()
+                        val sourceUrl = if (isFromDirectNavigation) null else engineSession.currentUrl
                         interceptor
                             .onLoadRequest(
                                 engineSession,
@@ -1122,6 +1237,7 @@ class GeckoEngineSession(
                                                 appIntent = appIntent,
                                                 fallbackUrl = fallbackUrl,
                                                 appName = appName,
+                                                sourceUrl = sourceUrl,
                                             )
                                         }
                                     }
@@ -1145,6 +1261,7 @@ class GeckoEngineSession(
                 }
 
                 lastLoadRequestUri = request.uri
+                lastLoadRequestIsFromDirectNavigation = isFromDirectNavigation
                 return interceptionResponse
             }
         }
@@ -1416,7 +1533,7 @@ class GeckoEngineSession(
                             url = url,
                             contentLength = contentLength,
                             contentType = DownloadUtils.sanitizeMimeType(contentType),
-                            fileName = fileName?.sanitizeFileName(),
+                            fileName = fileName,
                             response = response,
                             isPrivate = privateMode,
                             openInApp = webResponse.requestExternalApp,
@@ -1689,7 +1806,7 @@ class GeckoEngineSession(
                 }
             GeckoSession.ContentDelegate.ContextElement.TYPE_IMAGE -> {
                 when {
-                    elementSrc != null && uri != null -> HitResult.IMAGE_SRC(elementSrc, uri)
+                    elementSrc != null && uri != null -> HitResult.IMAGE_SRC(elementSrc, uri, title)
                     elementSrc != null -> HitResult.IMAGE(elementSrc, title)
                     else -> HitResult.UNKNOWN("")
                 }

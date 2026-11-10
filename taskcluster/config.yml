@@ -90,6 +90,7 @@ treeherder:
         'DTbc': 'DevTools remote debugging backward compatibility tests'
         'Fetch': 'Fetch and store content'
         'Fxfn': 'Firefox functional tests'
+        'gv-junit': 'GeckoView junit tests'
         'l10n-bump': 'L10n Bumper'
         'M': 'Mochitests'
         'M-f': 'Mochitest failures'
@@ -124,6 +125,8 @@ treeherder:
         'W-pb': 'Web platform tests with private browsing enabled'
         'W-ioi': 'Web platform tests tagged with inc-origin-init'
         'W-ioi-cf': 'Web platform tests tagged with inc-origin-init for confirm failure'
+        'W-oh264': 'Web platform tests with OpenH264 preferred'
+        'W-oh264-cf': 'Web platform tests with OpenH264 preferred for confirm failure'
         'W-pb-ioi': 'Web platform tests with private browsing enabled and tagged with inc-origin-init'
         'X': 'Xpcshell tests'
         'X-f': 'Xpcshell tests that fail on a given config'
@@ -161,10 +164,11 @@ treeherder:
         'TLA64': 'Toolchain builds for Linux AArch64'
         'TM': 'Toolchain builds for OSX'
         'TMA64': 'Toolchain builds for OSX Aarch64'
-        'TMW': 'Toolchain builds for Windows MinGW'
         'TW32': 'Toolchain builds for Windows 32-bits'
         'TW64': 'Toolchain builds for Windows 64-bits'
         'TWA64': 'Toolchain builds for Windows AArch64'
+        'TWM': 'Toolchain builds for Windows MinGW'
+        'WASI': 'Toolchain builds for WASI'
         'WMC32': 'MinGW-Clang builds for Windows 32-bits'
         'WMC64': 'MinGW-Clang builds for Windows 64-bits'
         'Searchfox': 'Searchfox builds'
@@ -201,18 +205,21 @@ treeherder:
         'Wgpu': 'WebGPU standalone'
         'cpp': 'C/C++ checks'
         'pedantic': 'pedantic checks'
+        'legal': 'Licensing and legal checks'
         'text': 'Check on texts'
         'misc': 'Misc checks'
         'js': 'JavaScript checks'
         'py': 'Python checks'
         'java': 'Java checks'
         'rust': 'Rust checks'
+        'vendor': 'Vendoring checks'
         'tests': 'Test verification'
         'android': 'Android checks'
         'Static-Analysis': 'Full tree static-analysis'
         'SS': 'Shadow scheduler'
         'Sentry': 'Sentry synchronization'
         'test-info': 'Test manifest skip/fail information'
+        'testrail': 'TestRail release milestone creation'
         'condprof': 'Conditioned Profile Builder'
         'doc': 'Documentation'
         'perftest': 'Performance tests'
@@ -251,7 +258,9 @@ treeherder:
         'fenix-beta': 'Fenix beta-related tasks'
         'fenix-debug': 'Fenix builds made for testing'
         'fenix-nightly': 'Fenix nightly-related tasks'
+        'fenix-nightly-nobp': 'Fenix nightly builds without baseline profiles'
         'fenix-nightlySim': 'Nightly-related tasks that run on each github push'
+        'fenix-nightlyAsReleaseSim': 'Fenix nightly-as-release performance tasks (nightly built against release-milestone GeckoView)'
         'fenix-release': 'Fenix production-related tasks'
 
         # This list is based on mobile/android/android-components/.buildconfig.yml except the exceptions down below
@@ -271,22 +280,22 @@ treeherder:
         'compose-awesomebar': 'compose-engine'
         'compose-browser-toolbar': 'awesomebar-browser-toolbar'
         'compose-engine': 'compose-engine'
+        'compose-menu': 'compose-menu'
         'compose-tabstray': 'compose-tabstray'
         'concept-accelerometer': 'concept-accelerometer'
         'concept-ai-controls': 'concept-ai-controls'
         'concept-integrity': 'concept-integrity'
         'concept-awesomebar': 'concept-awesomebar'
         'concept-base': 'concept-base'
-        'concept-bookmarks-file': 'concept-bookmarks-file'
         'compose-base': 'compose-base'
-        'concept-bookmarks-parser': 'concept-bookmarks-parser'
         'compose-cfr': 'compose-cfr'
+        'compose-draggable': 'compose-draggable'
         'concept-engine': 'concept-engine'
         'concept-fetch': 'concept-fetch'
+        'concept-file-importer': 'concept-file-importer'
+        'concept-file-parser': 'concept-file-parser'
         'concept-llm': 'concept-llm'
         'concept-menu': 'concept-menu'
-        'concept-passwords-file': 'concept-passwords-file'
-        'concept-passwords-parser': 'concept-passwords-parser'
         'concept-push': 'concept-push'
         'concept-storage': 'concept-storage'
         'concept-storage-bookmarks': 'concept-storage-bookmarks'
@@ -298,6 +307,7 @@ treeherder:
         'feature-addons': 'feature-addons'
         'feature-app-links': 'feature-app-links'
         'feature-autofill': 'feature-autofill'
+        'feature-automotive': 'feature-automotive'
         'feature-awesomebar': 'feature-awesomebar'
         'feature-containers': 'feature-containers'
         'feature-contextmenu': 'feature-contextmenu'
@@ -307,7 +317,7 @@ treeherder:
         'feature-findinpage': 'feature-findinpage'
         'feature-fxsuggest': 'feature-fxsuggest'
         'feature-importer': 'feature-importer'
-        'feature-password-importer': 'feature-password-importer'
+        'feature-listentopage': 'feature-listentopage'
         'feature-intent': 'feature-intent'
         'feature-ipprotection': 'feature-ipprotection'
         'feature-logins': 'feature-logins'
@@ -328,6 +338,7 @@ treeherder:
         'feature-summarize': 'feature-summarize'
         'feature-syncedtabs': 'feature-syncedtabs'
         'feature-tab-collections': 'feature-tab-collections'
+        'feature-tabgroups-storage': 'feature-tabgroups-storage'
         'feature-tabs': 'feature-tabs'
         'feature-toolbar': 'feature-toolbar'
         'feature-top-sites': 'feature-top-sites'
@@ -373,6 +384,7 @@ treeherder:
         'service-location': 'service-location'
         'service-mars': 'service-mars'
         'service-merino-manifest': 'service-merino-manifest'
+        'service-merino-sports': 'service-merino-sports'
         'service-merino-weather': 'service-merino-weather'
         'service-nimbus': 'service-nimbus'
         'service-pocket': 'service-pocket'
@@ -415,6 +427,8 @@ treeherder:
         'lib-fetch-httpurlconnecti': 'lib-fetch-httpurlconnection'
         'feature-webcompat-reporte': 'feature-webcompat-reporter'
         'feature-protection-dashbo': 'feature-protection-dashboard'
+        'feature-tabdata-coordinat': 'feature-tabdata-coordinator'
+        'lib-installation-blocksto': 'lib-installation-blockstore'
 
         # Groups aren't generated off buildconfig.yml:
         'samples-browser': 'samples-browser'
@@ -466,7 +480,6 @@ try:
 release-promotion:
     products:
         - 'devedition'
-        - 'fennec'
         - 'firefox'
         - 'firefox-android'
     rebuild-kinds:
@@ -577,12 +590,34 @@ partner-urls:
 
 task-priority:
     by-project:
-        'mozilla-release': 'highest'
-        'mozilla-esr.*': 'very-high'
-        'mozilla-beta': 'high'
-        'mozilla-central': 'medium'
-        'autoland': 'low'
-        'mozilla-inbound': 'low'
+        # Release is an integration branch with relatively few commits that
+        # do not need to be tested urgently, so by default their tasks run at
+        # low priority. Release managers landing an uplift they intend to ship
+        # set the "SHIPPING" flag in Lando, which adds "SHIPPING" to the
+        # commit message and raises the priority to get results as quickly as
+        # possible.
+        'mozilla-release':
+            by-shipping:
+                'true': 'highest'
+                'default': 'low'
+        # Beta and ESR are the same as Release, except even when they are
+        # flagged for SHIPPING they are still slightly lower priority than
+        # it.
+        'mozilla-esr.*':
+            by-shipping:
+                'true': 'very-high'
+                'default': 'low'
+        'mozilla-beta':
+            by-shipping:
+                'true': 'very-high'
+                'default': 'low'
+        # mozilla-central builds are in the critical path to shipping Nightly,
+        # so we treat it as a relatively high priority.
+        'mozilla-central': 'high'
+        # autoland is a critical bottleneck for getting new work into Nightly,
+        # so it is treated as a higher priority than non-shipping pushes to
+        # release branches
+        'autoland': 'medium'
         'default': 'very-low'
 
 taskgraph:
@@ -594,7 +629,7 @@ taskgraph:
 
 workers:
     aliases:
-        b-linux(|-docker(|-x?large|-updatebot)-amd|-medium|-aarch64|-xlarge|-kvm):
+        b-linux(|-docker(|-x?large|-updatebot)-amd|-medium|-aarch64|-x?large|-kvm):
             provisioner: '{trust-domain}-{level}'
             implementation: docker-worker
             os: linux
@@ -604,7 +639,7 @@ workers:
             implementation: generic-worker
             os: windows
             worker-type: '{alias}-azure'
-        b-win2022(|-xxlarge|-updatebot):
+        b-win2022(|-xxlarge):
             provisioner: '{trust-domain}-{level}'
             implementation: generic-worker
             os: windows
@@ -725,30 +760,6 @@ workers:
                 by-release-level:
                     staging: '{trust-domain}-1-pushmsix'
                     production: '{trust-domain}-3-pushmsix'
-        tree:
-            provisioner: scriptworker-k8s
-            implementation: treescript
-            os: linux
-            worker-type:
-                by-project:
-                    # Autoland is treated specially here because any treescript
-                    # tasks that run on it must be done on level 3 workers
-                    # (so they can actually push changes). On other projects
-                    # `release-level` would handle this just fine, but
-                    # `autoland` is considered a "staging" release level for
-                    # historical reasons.
-                    # https://bugzilla.mozilla.org/show_bug.cgi?id=1960918
-                    # seeks to improve this situation.
-                    autoland: '{trust-domain}-3-tree'
-                    default:
-                        by-release-level:
-                            production: '{trust-domain}-3-tree'
-                            staging: '{trust-domain}-1-tree'
-        tree-dev:
-            provisioner: scriptworker-k8s
-            implementation: treescript
-            os: linux
-            worker-type: '{trust-domain}-1-tree-dev'
         lando:
             provisioner: scriptworker-k8s
             implementation: landoscript
@@ -788,7 +799,7 @@ workers:
             implementation: docker-worker
             os: linux
             worker-type: 't-linux-docker-kvm'
-        t-linux-(talos|netperf)(-1804|-2404)?:
+        t-linux-(talos|netperf)-2404:
             provisioner: releng-hardware
             implementation: generic-worker
             os: linux
@@ -834,6 +845,11 @@ workers:
             os: macosx
             worker-type: 'gecko-{alias}'
         t-osx-1500-m-vms:
+            provisioner: releng-hardware
+            implementation: generic-worker
+            os: macosx
+            worker-type: 'gecko-{alias}'
+        t-osx-2700-m4:
             provisioner: releng-hardware
             implementation: generic-worker
             os: macosx

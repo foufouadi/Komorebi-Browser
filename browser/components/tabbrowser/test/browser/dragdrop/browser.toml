@@ -4,9 +4,6 @@ support-files = [
 ]
 
 ["browser_drag_horizontal_overflow.js"]
-skip-if = [
-  "os == 'mac' && os_version == '15.30' && arch == 'aarch64' && opt", # Bug 2057860
-]
 
 ["browser_drag_multiselected_splitview.js"]
 
@@ -17,6 +14,8 @@ skip-if = [
 ["browser_drag_tab_group_overflow.js"]
 
 ["browser_drag_to_pin.js"]
+
+["browser_drop_animation.js"]
 
 ["browser_drop_link_splitview_unselected.js"]
 

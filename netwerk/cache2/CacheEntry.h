@@ -19,6 +19,7 @@
 #include "nsIOutputStream.h"
 #include "nsIRunnable.h"
 #include "nsITransportSecurityInfo.h"
+#include "nsIURI.h"
 #include "nsRefPtrHashtable.h"
 #include "nsString.h"
 #include "nsThreadUtils.h"
@@ -51,7 +52,7 @@ class CacheEntry final : public nsIRunnable,
 
   static uint64_t GetNextId();
 
-  CacheEntry(const nsACString& aStorageID, const nsACString& aURI,
+  CacheEntry(const nsACString& aStorageID, nsIURI* aURI,
              const nsACString& aEnhanceID, bool aUseDisk, bool aSkipSizeCheck,
              bool aPin);
 
@@ -113,10 +114,10 @@ class CacheEntry final : public nsIRunnable,
   uint32_t GetMetadataMemoryConsumption();
   nsCString const& GetStorageID() const { return mStorageID; }
   nsCString const& GetEnhanceID() const { return mEnhanceID; }
-  nsCString const& GetURI() const { return mURI; }
+  nsIURI* GetURI() const { return mURI; }
   // Accessible at any time
   bool IsUsingDisk() const { return mUseDisk; }
-  bool IsReferenced() const MOZ_NO_THREAD_SAFETY_ANALYSIS;
+  bool IsReferenced() const;
   bool IsFileDoomed();
   bool IsDoomed() const { return mIsDoomed; }
   bool IsPinned() const { return mPinned; }
@@ -300,10 +301,10 @@ class CacheEntry final : public nsIRunnable,
  private:
   friend class CacheEntryHandle;
   // Increment/decrements the number of handles keeping this entry.
-  void AddHandleRef() MOZ_REQUIRES(mLock) { ++mHandlesCount; }
-  void ReleaseHandleRef() MOZ_REQUIRES(mLock) { --mHandlesCount; }
+  void AddHandleRef() { ++mHandlesCount; }
+  void ReleaseHandleRef() { --mHandlesCount; }
   // Current number of handles keeping this entry.
-  uint32_t HandlesCount() const MOZ_REQUIRES(mLock) { return mHandlesCount; }
+  uint32_t HandlesCount() const { return mHandlesCount; }
 
  private:
   friend class CacheOutputCloseListener;
@@ -328,8 +329,10 @@ class CacheEntry final : public nsIRunnable,
 
   mozilla::Mutex mLock{"CacheEntry"};
 
-  // Reflects the number of existing handles for this entry
-  ::mozilla::ThreadSafeAutoRefCnt mHandlesCount MOZ_GUARDED_BY(mLock);
+  // Reflects the number of existing handles for this entry.  Atomic, and
+  // modified from any thread without mLock; it may only go from zero to one
+  // under CacheStorageService::sLock, see IsReferenced().
+  ::mozilla::ThreadSafeAutoRefCnt mHandlesCount;
 
   nsTArray<Callback> mCallbacks MOZ_GUARDED_BY(mLock);
   nsCOMPtr<nsICacheEntryDoomCallback> mDoomCallback MOZ_GUARDED_BY(mLock);
@@ -342,8 +345,9 @@ class CacheEntry final : public nsIRunnable,
   // When mFileStatus is read and found success it is ensured there is mFile and
   // that it is after a successful call to Init().
   Atomic<nsresult, ReleaseAcquire> mFileStatus{NS_ERROR_NOT_INITIALIZED};
-  // Set in constructor
-  nsCString const mURI;
+  // Set in constructor. nsIURI is immutable and thread-safe, so this can be
+  // read from any thread without a lock.
+  nsCOMPtr<nsIURI> const mURI;
   nsCString const mEnhanceID;
   nsCString const mStorageID;
 
@@ -442,6 +446,10 @@ class CacheEntry final : public nsIRunnable,
 
   nsCOMPtr<nsITransportSecurityInfo> mSecurityInfo;
   mozilla::TimeStamp mLoadStart;
+  // Set when mState transitions to REVALIDATING, cleared when it leaves that
+  // state.  Used to self-heal an entry whose revalidating writer went away
+  // without ever calling OnHandleClosed (see bug 2062281).
+  mozilla::TimeStamp mRevalidatingSince MOZ_GUARDED_BY(mLock);
   uint32_t mUseCount{0};
 
   RefPtr<DictionaryCacheEntry> mDict;

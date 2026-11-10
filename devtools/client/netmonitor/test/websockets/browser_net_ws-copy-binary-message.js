@@ -34,14 +34,14 @@ add_task(async function () {
   const requests = document.querySelectorAll(".request-list-item");
 
   // Wait for all sent/received messages to be displayed in DevTools
-  const wait = waitForDOM(
+  const onDomUpdated = waitForDOM(
     document,
     "#messages-view .message-list-table .message-list-item",
     2
   );
 
   // Select the websocket request
-  EventUtils.sendMouseEvent({ type: "mousedown" }, requests[0]);
+  clickOnRequestRow(requests[0]);
 
   // Test that 'Save Response As' is not in the context menu
   EventUtils.sendMouseEvent({ type: "contextmenu" }, requests[0]);
@@ -64,7 +64,7 @@ add_task(async function () {
 
   // Click on the "Response" panel
   clickOnSidebarTab(document, "response");
-  await wait;
+  await onDomUpdated;
 
   // Get all messages present in the "Response" panel
   const messages = document.querySelectorAll(

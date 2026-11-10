@@ -8,11 +8,8 @@
 //   shader variables.
 //
 
-#ifdef UNSAFE_BUFFERS_BUILD
-#    pragma allow_unsafe_buffers
-#endif
-
 #include "common/CompiledShaderState.h"
+#include "common/unsafe_buffers.h"
 
 #include <cstring>
 
@@ -154,6 +151,7 @@ void WriteShInterfaceBlock(gl::BinaryOutputStream *stream, const sh::InterfaceBl
     stream->writeString(block.instanceName);
     stream->writeInt(block.arraySize);
     stream->writeEnum(block.layout);
+    stream->writeBool(block.isRowMajorLayout);
     stream->writeInt(block.binding);
     stream->writeBool(block.staticUse);
     stream->writeBool(block.active);
@@ -174,6 +172,7 @@ void LoadShInterfaceBlock(gl::BinaryInputStream *stream, sh::InterfaceBlock *blo
     block->instanceName     = stream->readString();
     block->arraySize        = stream->readInt<unsigned int>();
     block->layout           = stream->readEnum<sh::BlockLayoutType>();
+    block->isRowMajorLayout = stream->readBool();
     block->binding          = stream->readInt<int>();
     block->staticUse        = stream->readBool();
     block->active           = stream->readBool();
@@ -208,13 +207,13 @@ std::string JoinShaderSources(GLsizei count, const char *const *string, const GL
     // First pass, calculate the total length of the joined string
     for (GLsizei i = 0; i < count; ++i)
     {
-        if (length == nullptr || length[i] < 0)
+        if (length == nullptr || ANGLE_UNSAFE_TODO(length[i]) < 0)
         {
-            totalLength += std::strlen(string[i]);
+            totalLength += std::strlen(ANGLE_UNSAFE_TODO(string[i]));
         }
         else
         {
-            totalLength += static_cast<size_t>(length[i]);
+            totalLength += static_cast<size_t>(ANGLE_UNSAFE_TODO(length[i]));
         }
     }
 
@@ -224,13 +223,14 @@ std::string JoinShaderSources(GLsizei count, const char *const *string, const GL
     joinedString.reserve(totalLength);
     for (GLsizei i = 0; i < count; ++i)
     {
-        if (length == nullptr || length[i] < 0)
+        if (length == nullptr || ANGLE_UNSAFE_TODO(length[i]) < 0)
         {
-            joinedString.append(string[i]);
+            joinedString.append(ANGLE_UNSAFE_TODO(string[i]));
         }
         else
         {
-            joinedString.append(string[i], static_cast<size_t>(length[i]));
+            joinedString.append(ANGLE_UNSAFE_TODO(string[i]),
+                                static_cast<size_t>(ANGLE_UNSAFE_TODO(length[i])));
         }
     }
 
@@ -283,7 +283,6 @@ void CompiledShaderState::buildCompiledShaderState(const ShHandle compilerHandle
     uniformBlocks       = GetShaderVariables(sh::GetUniformBlocks(compilerHandle));
     shaderStorageBlocks = GetShaderVariables(sh::GetShaderStorageBlocks(compilerHandle));
     metadataFlags       = sh::CompilerMetadataFlags(sh::GetMetadataFlags(compilerHandle));
-    specConstUsageBits  = SpecConstUsageBits(sh::GetShaderSpecConstUsageBits(compilerHandle));
 
     switch (shaderType)
     {
@@ -396,7 +395,6 @@ void CompiledShaderState::serialize(gl::BinaryOutputStream &stream) const
     }
 
     stream.writeInt(metadataFlags.bits());
-    stream.writeInt(specConstUsageBits.bits());
 
     switch (shaderType)
     {
@@ -562,7 +560,6 @@ void CompiledShaderState::deserialize(gl::BinaryInputStream &stream)
     }
 
     metadataFlags      = sh::CompilerMetadataFlags(stream.readInt<uint32_t>());
-    specConstUsageBits = SpecConstUsageBits(stream.readInt<uint32_t>());
 
     switch (shaderType)
     {

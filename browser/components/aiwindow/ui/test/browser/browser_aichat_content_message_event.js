@@ -150,7 +150,15 @@ add_task(async function test_completed_assistant_message_announced() {
     await typeInSmartbar(browser, "Hello");
     await waitForSmartbarAction(browser, "chat");
     await stubLoadURL(browser);
+    await stubOpenSERP(browser);
     await submitSmartbar(browser);
+
+    // The action can still resolve to "search" between the check above and
+    // Enter, which submits a real SERP navigation instead of a chat message.
+    Assert.ok(
+      !(await getStubOpenSERPResult(browser)).called,
+      "Submitting should ask the assistant, not run a search"
+    );
 
     const aiWindowEl = browser.contentDocument?.querySelector("ai-window");
     const aichatBrowser = await TestUtils.waitForCondition(
@@ -406,11 +414,11 @@ add_task(async function test_messageEvent_user_context_mentions() {
         chipContainer.shadowRoot,
         { childList: true, subtree: true },
         () => {
-          chip = chipContainer.shadowRoot?.querySelector("ai-website-chip");
+          chip = chipContainer.shadowRoot?.querySelector("smartwindow-chip");
           return chip;
         }
       );
-      Assert.ok(chip, "ai-website-chip should be rendered");
+      Assert.ok(chip, "smartwindow-chip should be rendered");
 
       const chipJS = chip.wrappedJSObject || chip;
       Assert.equal(chipJS.label, "Example", "Chip should have correct label");

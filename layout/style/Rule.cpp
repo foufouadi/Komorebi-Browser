@@ -91,6 +91,10 @@ void Rule::SetCssText(const nsACString& aCssText) {
 
 Rule* Rule::GetParentRule() const { return mParentRule; }
 
+already_AddRefed<Rule> Rule::GetParentRuleForBindings() const {
+  return do_AddRef(mParentRule);
+}
+
 #ifdef DEBUG
 void Rule::AssertParentRuleType() {
   // Would be nice to check that this->Type() is StyleCssRuleType::Keyframe
@@ -126,7 +130,8 @@ bool Rule::IsIncompleteImportRule() const {
   if (Type() != StyleCssRuleType::Import) {
     return false;
   }
-  auto* sheet = static_cast<const dom::CSSImportRule*>(this)->GetStyleSheet();
+  auto* sheet =
+      static_cast<const dom::CSSImportRule*>(this)->GetImportedSheet();
   return !sheet || !sheet->IsComplete();
 }
 
@@ -141,6 +146,10 @@ auto Rule::GetContainingRuleStateForParsing() const -> ContainingRuleState {
     }
   }
   return result;
+}
+
+bool Rule::SupportsDeclarations() {
+  return Servo_RuleType_Supports_Declarations(Type());
 }
 
 }  // namespace mozilla::css

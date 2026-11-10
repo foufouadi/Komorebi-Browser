@@ -104,6 +104,9 @@ add_task(async function test_edit_profile_theme() {
   let uninstallSun = await installNovaTheme(NOVA_SUN_ID);
   let uninstallSpark = await installNovaTheme(NOVA_SPARK_ID);
 
+  await Services.fog.testFlushAllChildren();
+  Services.fog.testResetFOG();
+
   await BrowserTestUtils.withNewTab(
     {
       gBrowser,
@@ -132,6 +135,19 @@ add_task(async function test_edit_profile_theme() {
         );
 
         Assert.ok(themePicker, "Theme picker should exist");
+
+        let themeGroup =
+          editProfileCard.shadowRoot.getElementById("theme-group");
+        Assert.ok(
+          themeGroup.contains(themePicker),
+          "Theme picker should be inside the theme group"
+        );
+        await themeGroup.updateComplete;
+        Assert.equal(
+          themeGroup.shadowRoot.querySelector("legend")?.textContent.trim(),
+          "Theme",
+          "Theme group should be labelled"
+        );
 
         const EventUtils = ContentTaskUtils.getEventUtils(content);
 
@@ -164,6 +180,9 @@ add_task(async function test_edit_profile_theme() {
       let sunAddon = await lazy.AddonManager.getAddonByID(NOVA_SUN_ID);
       Assert.ok(sunAddon, "Nova Sun theme should be installed");
       Assert.ok(sunAddon.isActive, "Nova Sun theme should be active");
+
+      await assertThemePickerThemeChange(NOVA_SUN_ID);
+      Services.fog.testResetFOG();
 
       profileUpdated = TestUtils.topicObserved("sps-profiles-updated");
 
@@ -209,6 +228,8 @@ add_task(async function test_edit_profile_theme() {
       let sparkAddon = await lazy.AddonManager.getAddonByID(NOVA_SPARK_ID);
       Assert.ok(sparkAddon, "Nova Spark theme should be installed");
       Assert.ok(sparkAddon.isActive, "Nova Spark theme should be active");
+
+      await assertThemePickerThemeChange(NOVA_SPARK_ID);
     }
   );
 
@@ -486,6 +507,49 @@ add_task(async function test_avatar_colors_update_with_theme() {
           "Avatar stroke color should change when theme changes"
         );
       });
+
+      // Re-enable the default theme programmatically to verify colors are still set
+      let defaultTheme = await lazy.AddonManager.getAddonByID(DEFAULT_THEME_ID);
+      await defaultTheme.enable();
+
+      await TestUtils.waitForCondition(
+        () =>
+          SelectableProfileService.currentProfile.theme.themeId ===
+          DEFAULT_THEME_ID,
+        "Waiting for default theme to be set in profile"
+      );
+
+      // Verify avatar still has colors with default theme re-enabled
+      await SpecialPowers.spawn(browser, [], async () => {
+        let card =
+          content.document.querySelector("edit-profile-card").wrappedJSObject;
+
+        await ContentTaskUtils.waitForCondition(
+          () => card.headerAvatar.style.fill && card.headerAvatar.style.stroke,
+          "Waiting for avatar colors to be set"
+        );
+
+        let avatarFill = card.headerAvatar.style.fill;
+        let avatarStroke = card.headerAvatar.style.stroke;
+
+        Assert.ok(
+          avatarFill.startsWith("rgb"),
+          `Avatar fill should be a valid color value, got: ${avatarFill}`
+        );
+        Assert.ok(
+          avatarStroke.startsWith("rgb"),
+          `Avatar stroke should be a valid color value, got: ${avatarStroke}`
+        );
+      });
+
+      Assert.ok(
+        SelectableProfileService.currentProfile.theme.themeFg,
+        "Profile should have theme foreground color with default theme"
+      );
+      Assert.ok(
+        SelectableProfileService.currentProfile.theme.themeBg,
+        "Profile should have theme background color with default theme"
+      );
     }
   );
 
@@ -621,6 +685,9 @@ add_task(async function test_theme_picker_responds_to_external_theme_change() {
   let initialThemeFg = SelectableProfileService.currentProfile.theme.themeFg;
   let initialThemeBg = SelectableProfileService.currentProfile.theme.themeBg;
 
+  await Services.fog.testFlushAllChildren();
+  Services.fog.testResetFOG();
+
   await BrowserTestUtils.withNewTab(
     {
       gBrowser,
@@ -695,9 +762,18 @@ add_task(async function test_theme_picker_responds_to_external_theme_change() {
         initialThemeBg,
         "Profile theme background color should change"
       );
+
+      await Services.fog.testFlushAllChildren();
+      Assert.equal(
+        Glean.themePicker.change.testGetValue(),
+        null,
+        "External theme changes should not record theme telemetry"
+      );
     }
   );
 
+  let profileUpdated = TestUtils.topicObserved("sps-profiles-updated");
   await uninstallSun();
+  await profileUpdated;
   await SpecialPowers.popPrefEnv();
 });

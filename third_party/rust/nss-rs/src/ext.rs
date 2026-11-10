@@ -11,7 +11,6 @@
 
 use std::{
     cell::RefCell,
-    convert::TryFrom as _,
     fmt::{self, Debug, Formatter},
     os::raw::{c_uint, c_void},
     pin::Pin,
@@ -32,19 +31,20 @@ use crate::{
     },
 };
 
-experimental_api!(SSL_InstallExtensionHooks(
-    fd: *mut PRFileDesc,
-    extension: u16,
-    writer: SSLExtensionWriter,
-    writer_arg: *mut c_void,
-    handler: SSLExtensionHandler,
-    handler_arg: *mut c_void,
-));
-
-experimental_api!(SSL_CallExtensionWriterOnEchInner(
-    fd: *mut PRFileDesc,
-    enabled: PRBool,
-));
+experimental_api! {
+    SSL_InstallExtensionHooks(
+        fd: *mut PRFileDesc,
+        extension: u16,
+        writer: SSLExtensionWriter,
+        writer_arg: *mut c_void,
+        handler: SSLExtensionHandler,
+        handler_arg: *mut c_void,
+    );
+    SSL_CallExtensionWriterOnEchInner(
+        fd: *mut PRFileDesc,
+        enabled: PRBool,
+    );
+}
 
 pub enum ExtensionWriterResult {
     Write(usize),
@@ -129,7 +129,9 @@ impl ExtensionTracker {
         unsafe {
             Self::wrap_handler_call(arg, |handler| match handler.write(msg, ch_outer, d) {
                 ExtensionWriterResult::Write(sz) => {
-                    *len = c_uint::try_from(sz).expect("integer overflow from extension writer");
+                    let sz = c_uint::try_from(sz).expect("integer overflow from extension writer");
+                    assert!(sz <= max_len, "extension writer wrote past the buffer");
+                    *len = sz;
                     1
                 }
                 ExtensionWriterResult::Skip => 0,

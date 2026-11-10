@@ -374,18 +374,18 @@ class ObjectElements {
 
   uint32_t getInitializedLength() const { return initializedLength; }
 
-  static int offsetOfFlags() {
+  static constexpr int offsetOfFlags() {
     return int(offsetof(ObjectElements, flags)) - int(sizeof(ObjectElements));
   }
-  static int offsetOfInitializedLength() {
+  static constexpr int offsetOfInitializedLength() {
     return int(offsetof(ObjectElements, initializedLength)) -
            int(sizeof(ObjectElements));
   }
-  static int offsetOfCapacity() {
+  static constexpr int offsetOfCapacity() {
     return int(offsetof(ObjectElements, capacity)) -
            int(sizeof(ObjectElements));
   }
-  static int offsetOfLength() {
+  static constexpr int offsetOfLength() {
     return int(offsetof(ObjectElements, length)) - int(sizeof(ObjectElements));
   }
 
@@ -592,12 +592,7 @@ class TaggedSlotOffset {
   uint32_t offset() const { return bits_ >> OffsetShift; }
   bool isFixedSlot() const { return bits_ & IsFixedSlotFlag; }
 
-  bool operator==(const TaggedSlotOffset& other) const {
-    return bits_ == other.bits_;
-  }
-  bool operator!=(const TaggedSlotOffset& other) const {
-    return !(*this == other);
-  }
+  bool operator==(const TaggedSlotOffset& other) const = default;
 };
 
 enum class CanReuseShape {
@@ -666,6 +661,49 @@ inline uint32_t NumNativeObjectUsedFixedSlotsForTracing(
   uint32_t minSlots =
       NativeObjectSmallSlotSpanForTracing(shapeFlags, slotsHeader);
   return std::min(nfixed, minSlots);
+}
+
+inline size_t NativeObjectSlotSpanForTracing(Shape* shape,
+                                             Shape::ImmutableFlags shapeFlags,
+                                             HeapSlot* slots) {
+  ObjectSlots* slotsHeader = ObjectSlots::fromSlots(slots);
+
+  Shape::Kind kind = Shape::kindFromImmutableFlags(shapeFlags);
+  if (kind == Shape::Kind::Dictionary) {
+    return slotsHeader->dictionarySlotSpanForTracing();
+  }
+
+  MOZ_ASSERT(shape->isShared());
+  uint32_t span = SharedShape::smallSlotSpanFromImmutableFlags(shapeFlags);
+  if (MOZ_LIKELY(span < Shape::SMALL_SLOTSPAN_MAX)) {
+    return span;
+  }
+
+  // Get the class. The base shape and class pointer are immutable so these
+  // reads do not need to be atomic.
+  const JSClass* clasp = shape->getObjectClass();
+
+  // For shared shapes the prop map is immutable so this doesn't need to be
+  // atomic.
+  SharedPropMap* propMap = shape->asShared().propMap();
+
+  uint32_t propMapLength = shapeFlags & Shape::MAP_LENGTH_MASK;
+
+  // The data read by SharedPropMap::lastUsedSlot is immutable so this doesn't
+  // need to be atomic.
+  return SharedPropMap::slotSpan(clasp, propMap, propMapLength);
+}
+
+inline size_t NumNativeObjectUsedDynamicSlotsForTracing(Shape* shape,
+                                                        HeapSlot* slots) {
+  Shape::ImmutableFlags shapeFlags = shape->immutableFlagsForTracing();
+  uint32_t nfixed = NumNativeObjectFixedSlots(shapeFlags);
+  uint32_t nslots = NativeObjectSlotSpanForTracing(shape, shapeFlags, slots);
+  if (nslots < nfixed) {
+    return 0;
+  }
+
+  return nslots - nfixed;
 }
 
 inline bool IsNativeObjectDynamicSlots(HeapSlot* slots) {
@@ -748,6 +786,11 @@ class TypedSlot {
 #define JS_DEFINE_TYPED_SLOT(index, slotName, ...)                       \
   static constexpr auto slotName = js::TypedSlot<MOZ_FOR_EACH_SEPARATED( \
       JS_DEFINE_TYPED_SLOT_TYPE_, (, ), (), (__VA_ARGS__))>(index)
+
+// Use alongside JS_DEFINE_TYPED_SLOT to name a slot that can hold a value of
+// any type, and so can't be declared as a TypedSlot.
+#define JS_DEFINE_UNTYPED_SLOT(index, slotName) \
+  static constexpr uint32_t slotName = (index)
 
 namespace detail {
 template <class C>
@@ -1604,18 +1647,6 @@ class NativeObject : public JSObject {
     return v.isUndefined() ? nullptr : static_cast<T*>(v.toPrivate());
   }
 
-  // Returns the address of a reserved fixed slot that stores a T* as
-  // PrivateValue. Be very careful when using this because the object might be
-  // moved in memory!
-  template <typename T>
-  T** addressOfFixedSlotPrivatePtr(size_t slot) {
-    MOZ_ASSERT(slot < JSCLASS_RESERVED_SLOTS(getClass()));
-    MOZ_ASSERT(slotIsFixed(slot));
-    MOZ_ASSERT(getReservedSlot(slot).isDouble());
-    void* addr = &getFixedSlotRef(slot);
-    return reinterpret_cast<T**>(addr);
-  }
-
   /*
    * Calculate the number of dynamic slots to allocate to cover the properties
    * in an object with the given number of fixed slots and slot span.
@@ -1699,6 +1730,9 @@ class NativeObject : public JSObject {
   void shrinkElements(JSContext* cx, uint32_t cap);
 
  private:
+  // Like growElements, but doesn't call Watchtower::watchFirstDenseElementAdd.
+  bool growElementsNoWatchtowerCheck(JSContext* cx, uint32_t newcap);
+
   // Run a post write barrier that encompasses multiple contiguous elements in a
   // single step.
   inline void elementsRangePostWriteBarrier(uint32_t start, uint32_t count);
@@ -1860,9 +1894,10 @@ class NativeObject : public JSObject {
    * After adding a sparse index to obj, see if it should be converted to use
    * dense elements.
    */
-  static DenseElementResult maybeDensifySparseElements(
-      JSContext* cx, Handle<NativeObject*> obj);
-  static bool densifySparseElements(JSContext* cx, Handle<NativeObject*> obj);
+  static bool maybeDensifySparseElements(JSContext* cx,
+                                         Handle<NativeObject*> obj);
+  static bool densifySparseElements(JSContext* cx, Handle<NativeObject*> obj,
+                                    uint32_t newInitializedLength);
 
   inline HeapSlot* fixedElements() const {
     static_assert(2 * sizeof(Value) == sizeof(ObjectElements),
@@ -2185,6 +2220,8 @@ inline void TraceBufferSlot(JSTracer* trc, NativeObject* obj, uint32_t slot,
     obj->setSlot(slot, PrivateValue(buffer));
   }
 }
+
+bool PreserveAnyUnpreservedWrapper(JSContext* cx, Handle<NativeObject*> obj);
 
 }  // namespace js
 

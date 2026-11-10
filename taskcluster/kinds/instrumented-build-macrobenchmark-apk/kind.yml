@@ -16,6 +16,7 @@ kind-dependencies:
 
 task-defaults:
     run-on-repo-type: [hg]
+    use-gradle-cache: true
     fetches:
         toolchain:
             - linux64-android-sdk-linux-repack
@@ -43,7 +44,6 @@ tasks:
                   dest: baselineProfiles
         source-project-name: "fenix"
         run:
-            clone-with: hg
             gradle-package-command: ":benchmark:assembleBenchmark :app:assembleBenchmark"
             baseline-profile-path: /builds/worker/fetches/baselineProfiles
         treeherder:

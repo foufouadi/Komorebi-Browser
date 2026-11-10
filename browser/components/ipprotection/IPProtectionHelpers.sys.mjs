@@ -13,10 +13,12 @@ import { IPProtectionActivator } from "moz-src:///toolkit/components/ipprotectio
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
-  IPPExceptionsManager:
-    "moz-src:///toolkit/components/ipprotection/IPPExceptionsManager.sys.mjs",
+  IPPAutoActivation:
+    "moz-src:///toolkit/components/ipprotection/IPPAutoActivation.sys.mjs",
   IPProtection:
     "moz-src:///browser/components/ipprotection/IPProtection.sys.mjs",
+  IPProtectionPanel:
+    "moz-src:///browser/components/ipprotection/IPProtectionPanel.sys.mjs",
   IPProtectionService:
     "moz-src:///toolkit/components/ipprotection/IPProtectionService.sys.mjs",
   IPProtectionStates:
@@ -61,7 +63,6 @@ class UIHelper {
       this.handleEvent
     );
     lazy.IPProtection.uninit();
-    lazy.IPPExceptionsManager.uninit();
   }
 
   #handleEvent(_event) {
@@ -73,7 +74,6 @@ class UIHelper {
       state !== lazy.IPProtectionStates.UNAVAILABLE
     ) {
       lazy.IPProtection.init();
-      lazy.IPPExceptionsManager.init();
     }
 
     if (
@@ -82,7 +82,6 @@ class UIHelper {
         state === lazy.IPProtectionStates.UNAVAILABLE)
     ) {
       lazy.IPProtection.uninit();
-      lazy.IPPExceptionsManager.uninit();
     }
   }
 }
@@ -108,5 +107,9 @@ IPProtectionActivator.addHelpers([
 ]);
 
 IPProtectionActivator.setAuthProvider(authProvider);
+
+if (!AppConstants.MOZ_ENTERPRISE) {
+  lazy.IPPAutoActivation.isPremium = () => lazy.IPProtectionPanel.isPremium();
+}
 
 export { IPProtectionActivator };

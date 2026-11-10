@@ -12,6 +12,10 @@ const {
   "moz-src:///toolkit/components/ipprotection/IPProtectionServerlist.sys.mjs"
 );
 
+const { IPPStartupCache } = ChromeUtils.importESModule(
+  "moz-src:///toolkit/components/ipprotection/IPPStartupCache.sys.mjs"
+);
+
 const COLLECTION_NAME = "vpn-serverlist";
 
 const TEST_SERVER_1 = {
@@ -331,6 +335,47 @@ add_task(async function test_selectServer() {
   };
   selected = IPProtectionServerlist.selectServer(cityWithNoServers);
   Assert.equal(selected, null, "No server should be selected");
+});
+
+add_task(async function test_fetches_once_startup_completed_and_ready() {
+  // Reopens the startup cache window the manifest closes for every test. Both
+  // getters are shadowed: the real `state` throws once startup has completed.
+  Object.defineProperty(IPPStartupCache, "isStartupCompleted", {
+    get: () => false,
+    configurable: true,
+  });
+  Object.defineProperty(IPPStartupCache, "state", {
+    get: () => IPProtectionStates.READY,
+    configurable: true,
+  });
+  setupStubs();
+
+  const serverList = new RemoteSettingsServerlist();
+  serverList.init();
+  await initServiceToReady();
+
+  Assert.ok(
+    !serverList.hasList,
+    "A READY carried over from last session should not fetch the list"
+  );
+
+  delete IPPStartupCache.isStartupCompleted;
+  delete IPPStartupCache.state;
+  const listChanged = waitForEvent(
+    serverList,
+    "IPProtectionServerlist:ListChanged"
+  );
+  serverList.initOnStartupCompleted();
+  await listChanged;
+
+  Assert.equal(
+    serverList.getLocation("US")?.country?.code,
+    "US",
+    "The list should be fetched once startup has completed with the service ready"
+  );
+
+  serverList.uninit();
+  IPProtectionService.uninit();
 });
 
 add_task(async function test_syncRespected() {

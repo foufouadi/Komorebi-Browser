@@ -41,7 +41,6 @@ class ShaderConstants11 : angle::NonCopyable
     void onViewportChange(const gl::Rectangle &glViewport,
                           const D3D11_VIEWPORT &dxViewport,
                           const gl::Offset &glFragCoordOffset,
-                          bool is9_3,
                           bool presentPathFast);
     bool onFirstVertexChange(GLint firstVertex);
     void onImageLayerChange(gl::ShaderType shaderType, unsigned int imageIndex, int layer);
@@ -65,8 +64,6 @@ class ShaderConstants11 : angle::NonCopyable
     {
         Vertex()
             : depthRange{.0f},
-              viewAdjust{.0f},
-              viewCoords{.0f},
               viewScale{.0f},
               clipControlOrigin{-1.0f},
               clipControlZeroToOne{.0f},
@@ -76,8 +73,6 @@ class ShaderConstants11 : angle::NonCopyable
         {}
 
         float depthRange[4];
-        float viewAdjust[4];
-        float viewCoords[4];
         float viewScale[2];
 
         // EXT_clip_control
@@ -175,7 +170,7 @@ class StateManager11 final : angle::NonCopyable
     // The Context is allowed to be nullptr for these methods, when called in EGL init code.
     void invalidateRenderTarget();
 
-    // Called by instanced point sprite emulation.
+    // Invalidates all current vertex buffer bindings.
     void invalidateVertexBuffer();
 
     // Called by Framebuffer11::syncState for the default sized viewport.
@@ -207,6 +202,7 @@ class StateManager11 final : angle::NonCopyable
 
     void onBeginQuery(Query11 *query);
     void onDeleteQueryObject(Query11 *query);
+    void onReleaseBuffer(ID3D11Buffer *buffer);
     angle::Result onMakeCurrent(const gl::Context *context);
 
     void setInputLayout(const d3d11::InputLayout *inputLayout);
@@ -251,10 +247,6 @@ class StateManager11 final : angle::NonCopyable
     void setScissorRectD3D(const D3D11_RECT &d3dRect);
 
     void setIndexBuffer(ID3D11Buffer *buffer, DXGI_FORMAT indexFormat, unsigned int offset);
-
-    angle::Result updateVertexOffsetsForPointSpritesEmulation(const gl::Context *context,
-                                                              GLint startVertex,
-                                                              GLsizei emulatedInstanceId);
 
     // Only used in testing.
     InputLayoutCache *getInputLayoutCache() { return &mInputLayoutCache; }
@@ -344,10 +336,6 @@ class StateManager11 final : angle::NonCopyable
                                    const gl::ImageUnit &imageUnit,
                                    UAVList *uavList);
 
-    angle::Result syncCurrentValueAttribs(
-        const gl::Context *context,
-        const std::vector<gl::VertexAttribCurrentValueData> &currentValues);
-
     angle::Result generateSwizzle(const gl::Context *context, gl::Texture *texture);
     angle::Result generateSwizzlesForShader(const gl::Context *context, gl::ShaderType type);
     angle::Result generateSwizzles(const gl::Context *context);
@@ -434,6 +422,11 @@ class StateManager11 final : angle::NonCopyable
 
     using DirtyBits = angle::BitSet<DIRTY_BIT_MAX>;
 
+    angle::Result syncCurrentValueAttribs(
+        const gl::Context *context,
+        const std::vector<gl::VertexAttribCurrentValueData> &currentValues,
+        DirtyBits::Iterator &iter);
+
     Renderer11 *mRenderer;
 
     // Internal dirty bits.
@@ -475,7 +468,6 @@ class StateManager11 final : angle::NonCopyable
     ShaderConstants11 mShaderConstants;
 
     // Render target variables
-    gl::Extents mViewportBounds;
     bool mRenderTargetIsDirty;
 
     // EGL_ANGLE_experimental_present_path variables

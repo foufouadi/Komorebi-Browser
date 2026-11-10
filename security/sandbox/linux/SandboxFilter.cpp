@@ -21,6 +21,9 @@
 #include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
+#ifdef MOZ_ENABLE_VULKAN_VIDEO
+#  include <sys/timerfd.h>
+#endif
 #include <sys/un.h>
 #include <sys/utsname.h>
 #include <time.h>
@@ -69,6 +72,10 @@ using namespace sandbox::bpf_dsl;
 // Added in Linux 4.5; see bug 1303813.
 #ifndef MADV_FREE
 #  define MADV_FREE 8
+#endif
+
+#ifndef MADV_COLLAPSE
+#  define MADV_COLLAPSE 25
 #endif
 
 #ifndef PR_SET_PTRACER
@@ -820,8 +827,7 @@ class SandboxPolicyCommon : public SandboxPolicyBase {
 
     // These don't appear to be used in our code at the moment, but
     // they seem low-risk enough to allow to avoid the possibility of
-    // breakage.  (Necko might use MSG_PEEK, but the socket process
-    // overrides this method.)
+    // breakage.  (Necko might use MSG_PEEK.)
     static constexpr int kHarmless = MSG_PEEK | MSG_WAITALL | MSG_TRUNC;
 
     static constexpr int kAllowed = kNeeded | kHarmless;
@@ -1812,7 +1818,8 @@ class ContentSandboxPolicy : public SandboxPolicyCommon {
 
 UniquePtr<sandbox::bpf_dsl::Policy> GetContentSandboxPolicy(
     SandboxBrokerClient* aMaybeBroker, ContentProcessSandboxParams&& aParams) {
-  return MakeUnique<ContentSandboxPolicy>(aMaybeBroker, std::move(aParams));
+  return std::make_unique<ContentSandboxPolicy>(aMaybeBroker,
+                                                std::move(aParams));
 }
 
 // The GeckoMediaPlugin seccomp-bpf policy is more delicate than the others,
@@ -1916,6 +1923,9 @@ class GMPSandboxPolicy : public SandboxPolicyCommon {
       case __NR_sched_get_priority_min:
       case __NR_sched_get_priority_max:
         return Allow();
+      // The OpenH264 plugin needs sched_getaffinity() in multithreaded mode;
+      // bug 2071378.
+      case __NR_sched_getaffinity:
       case __NR_sched_getparam:
       case __NR_sched_getscheduler:
       case __NR_sched_setscheduler: {
@@ -1976,6 +1986,62 @@ UniquePtr<sandbox::bpf_dsl::Policy> GetMediaSandboxPolicy(
 // a plugin file).  However, it does directly create shared memory
 // segments, so it may need file brokering.
 class RDDSandboxPolicy final : public SandboxPolicyCommon {
+#ifdef MOZ_ENABLE_VULKAN_VIDEO
+  static bool IsCudaUvmFdBindAddr(const sockaddr* aAddr, socklen_t aLen) {
+    static constexpr char kPrefix[] = "cuda-uvmfd-";
+    static constexpr size_t kPrefixLen = sizeof(kPrefix) - 1;
+    if (!aAddr || aAddr->sa_family != AF_UNIX) {
+      return false;
+    }
+    const size_t minLen = offsetof(sockaddr_un, sun_path) + 1 + kPrefixLen;
+    if (static_cast<size_t>(aLen) < minLen) {
+      return false;
+    }
+    const auto* un = reinterpret_cast<const sockaddr_un*>(aAddr);
+    return un->sun_path[0] == '\0' &&
+           memcmp(un->sun_path + 1, kPrefix, kPrefixLen) == 0;
+  }
+
+  static intptr_t CudaUvmFdTrap(ArgsRef aArgs, void* aux) {
+    switch (aArgs.nr) {
+      case __NR_bind: {
+        if (!IsCudaUvmFdBindAddr(
+                reinterpret_cast<const sockaddr*>(aArgs.args[1]),
+                static_cast<socklen_t>(aArgs.args[2]))) {
+          return -EPERM;
+        }
+        const int fd = static_cast<int>(aArgs.args[0]);
+        // FakeSocketTrap leaves a hung-up socketpair half; poll never
+        // sleeps. A live peer would leak an fd per bind and still wake
+        // on POLLOUT. Use an unarmed timerfd (never readable/writable)
+        // and do not publish the cuda-uvmfd name.
+        const int oldFlags = fcntl(fd, F_GETFL);
+        if (oldFlags == -1) {
+          return -errno;
+        }
+        const int tfd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
+        if (tfd < 0) {
+          return -errno;
+        }
+        if (fcntl(tfd, F_SETFL, oldFlags & O_NONBLOCK) != 0 ||
+            dup2(tfd, fd) < 0) {
+          const int err = errno;
+          close(tfd);
+          return -err;
+        }
+        close(tfd);
+        return 0;
+      }
+      case __NR_listen:
+        return 0;
+      case __NR_accept4:
+        return -EAGAIN;
+      default:
+        return -ENOSYS;
+    }
+  }
+#endif
+
  public:
   explicit RDDSandboxPolicy(SandboxBrokerClient* aBroker) {
     mBroker = aBroker;
@@ -2030,12 +2096,19 @@ class RDDSandboxPolicy final : public SandboxPolicyCommon {
         return Some(Allow());
 
 #ifdef MOZ_ENABLE_VULKAN_VIDEO
-      // GPU drivers may call bind() while probing display sockets; this does
-      // not enable any connections (no MAY_CONNECT targets in RDD policy) and
-      // is not needed for Vulkan video decode — only avoids seccomp noise
-      // (bug 2021722).
+      // GPU drivers may call bind() while probing display sockets; those
+      // still get EPERM (bug 2021722). ICDs may also load CUDA, which we
+      // do not need for Vulkan video. Replace cuda-uvmfd bind with an
+      // unarmed timerfd so init does not SIGSYS, without a real socket.
+      // listen/accept4 stay stubbed.
       case SYS_BIND:
-        return Some(Error(EPERM));
+      case SYS_LISTEN:
+      case SYS_ACCEPT4:
+        return Some(Trap(CudaUvmFdTrap, nullptr));
+      // Some Vulkan ICDs may also load CUDA, which calls setsockopt.
+      case SYS_GETSOCKOPT:
+      case SYS_SETSOCKOPT:
+        return Some(Allow());
 #endif
 
       case SYS_SOCKET:
@@ -2096,6 +2169,10 @@ class RDDSandboxPolicy final : public SandboxPolicyCommon {
         // export.
         static constexpr unsigned long kUdmabufType =
             static_cast<unsigned long>('u') << _IOC_TYPESHIFT;
+        // NVIDIA UVM ioctl cmds: INIT/DEINIT plus unencoded 0..2047.
+        static constexpr unsigned long kNvidiaUvmInitialize = 0x30000001ul;
+        static constexpr unsigned long kNvidiaUvmDeinitialize = 0x30000002ul;
+        static constexpr unsigned long kNvidiaUvmUnencodedMask = ~0x7FFul;
 #endif
         // nvidia non-tegra uses some ioctls from this range (but not actual
         // fbdev ioctls; nvidia uses values >= 200 for the NR field
@@ -2118,6 +2195,10 @@ class RDDSandboxPolicy final : public SandboxPolicyCommon {
 #ifdef MOZ_ENABLE_VULKAN_VIDEO
             .ElseIf(shifted_type == kNvidiaRmType, Allow())
             .ElseIf(shifted_type == kUdmabufType, Allow())
+            .ElseIf(AnyOf(request == kNvidiaUvmInitialize,
+                          request == kNvidiaUvmDeinitialize,
+                          (request & kNvidiaUvmUnencodedMask) == 0),
+                    Allow())
 #endif
 #ifdef MOZ_ENABLE_V4L2
             .ElseIf(shifted_type == kVideoType, Allow())
@@ -2189,8 +2270,33 @@ class RDDSandboxPolicy final : public SandboxPolicyCommon {
         return Error(ENOSYS);
 #endif
 #ifdef MOZ_ENABLE_VULKAN_VIDEO
+      CASES_FOR_getrlimit:
       CASES_FOR_getresuid:
       CASES_FOR_getresgid:
+        return Allow();
+
+      case __NR_prlimit64: {
+        // Allow only the getrlimit() use case.  (glibc seems to use
+        // only pid 0 to indicate the current process; pid == getpid()
+        // is equivalent and could also be allowed if needed.)
+        Arg<pid_t> pid(0);
+        // This is really a const struct ::rlimit*, but Arg<> doesn't
+        // work with pointers, only integer types.
+        Arg<uintptr_t> new_limit(2);
+        return If(AllOf(pid == 0, new_limit == 0), Allow())
+            .Else(InvalidSyscall());
+      }
+
+      case __NR_madvise: {
+        Arg<int> advice(2);
+        return If(advice == MADV_COLLAPSE, Allow())
+            .Else(SandboxPolicyCommon::EvaluateSyscall(sysno));
+      }
+
+      // CUDA timerfd during vkCreateDevice; default action kills RDD.
+      case __NR_timerfd_create:
+      case __NR_timerfd_settime:
+      case __NR_timerfd_gettime:
         return Allow();
       CASES_FOR_fcntl: {
         Arg<int> cmd(1);
@@ -2220,173 +2326,6 @@ UniquePtr<sandbox::bpf_dsl::Policy> GetDecoderSandboxPolicy(
     SandboxBrokerClient* aMaybeBroker) {
   return UniquePtr<sandbox::bpf_dsl::Policy>(
       new RDDSandboxPolicy(aMaybeBroker));
-}
-
-// Basically a clone of RDDSandboxPolicy until we know exactly what
-// the SocketProcess sandbox looks like.
-class SocketProcessSandboxPolicy final : public SandboxPolicyCommon {
- private:
-  SocketProcessSandboxParams mParams;
-
-  bool BelowLevel(int aLevel) const { return mParams.mLevel < aLevel; }
-
- public:
-  explicit SocketProcessSandboxPolicy(SandboxBrokerClient* aBroker,
-                                      SocketProcessSandboxParams&& aParams)
-      : mParams(std::move(aParams)) {
-    mBroker = aBroker;
-    mMayCreateShmem = true;
-  }
-
-  static intptr_t FcntlTrap(const arch_seccomp_data& aArgs, void* aux) {
-    const auto cmd = static_cast<int>(aArgs.args[1]);
-    switch (cmd) {
-        // This process can't exec, so the actual close-on-exec flag
-        // doesn't matter; have it always read as true and ignore writes.
-      case F_GETFD:
-        return O_CLOEXEC;
-      case F_SETFD:
-        return 0;
-      default:
-        return -ENOSYS;
-    }
-  }
-
-  BoolExpr MsgFlagsAllowed(const Arg<int>& aFlags) const override {
-    // Necko might use advanced networking features, and the sandbox
-    // is relatively permissive compared to content, so this is a
-    // default-allow policy.
-    //
-    // However, `MSG_OOB` has historically been buggy, and the way it
-    // maps to TCP is notoriously broken (see RFC 6093), so it should
-    // be safe to block.
-    return (aFlags & MSG_OOB) == 0;
-  }
-
-  Maybe<ResultExpr> EvaluateSocketCall(int aCall,
-                                       bool aHasArgs) const override {
-    switch (aCall) {
-      case SYS_SOCKET:
-      case SYS_CONNECT:
-      case SYS_BIND:
-        return Some(Allow());
-
-      // sendmsg and recvmmsg needed for HTTP3/QUIC UDP IO. Note sendmsg is
-      // allowed in SandboxPolicyCommon.
-      case SYS_RECVMMSG:
-      // Required for the DNS Resolver thread.
-      case SYS_SENDMMSG:
-        if (aHasArgs) {
-          Arg<int> flags(3);
-          return Some(
-              If(MsgFlagsAllowed(flags), Allow()).Else(InvalidSyscall()));
-        }
-        return Some(UnpackSocketcallOrAllow());
-
-      case SYS_GETSOCKOPT:
-      case SYS_SETSOCKOPT:
-      case SYS_GETSOCKNAME:
-      case SYS_GETPEERNAME:
-      case SYS_SHUTDOWN:
-      case SYS_ACCEPT:
-      case SYS_ACCEPT4:
-        return Some(Allow());
-
-      default:
-        return SandboxPolicyCommon::EvaluateSocketCall(aCall, aHasArgs);
-    }
-  }
-
-  ResultExpr PrctlPolicy() const override {
-    Arg<int> op(0);
-    Arg<int> arg2(1);
-    return Switch(op)
-        .Case(PR_SET_VMA,  // Tagging of anonymous memory mappings
-              If(arg2 == PR_SET_VMA_ANON_NAME, Allow()).Else(InvalidSyscall()))
-        .Cases({PR_SET_NAME,      // Thread creation
-                PR_SET_DUMPABLE,  // Crash reporting
-                PR_SET_PTRACER},  // Debug-mode crash handling
-               Allow())
-#if defined(MOZ_PROFILE_GENERATE)
-        .Case(PR_GET_PDEATHSIG, Allow())
-#endif  // defined(MOZ_PROFILE_GENERATE)
-        .Default(InvalidSyscall());
-  }
-
-  ResultExpr EvaluateSyscall(int sysno) const override {
-    switch (sysno) {
-      case __NR_getrusage:
-        return Allow();
-
-      case __NR_ioctl: {
-        Arg<unsigned long> request(1);
-        auto shifted_type = request & kIoctlTypeMask;
-
-        // Rust's stdlib seems to use FIOCLEX instead of equivalent fcntls.
-        return Switch(request)
-            .Case(FIOCLEX, Allow())
-            // Rust's stdlib also uses FIONBIO instead of equivalent fcntls.
-            .Case(FIONBIO, Allow())
-            // This is used by PR_Available in nsSocketInputStream::Available.
-            .Case(FIONREAD, Allow())
-            // WebRTC needs interface information (bug 1975576)
-            .Cases({SIOCGIFNAME, SIOCGIFFLAGS, SIOCETHTOOL, SIOCGIWRATE},
-                   Allow())
-            .Default(
-                // Allow anything that isn't a tty ioctl (if level < 2)
-                If(BelowLevel(2) ? shifted_type != kTtyIoctls
-                                 : BoolConst(false),
-                   Allow())
-                    .Else(SandboxPolicyCommon::EvaluateSyscall(sysno)));
-      }
-
-      CASES_FOR_fcntl: {
-        Arg<int> cmd(1);
-        return Switch(cmd)
-            .Case(F_DUPFD_CLOEXEC, Allow())
-            // Nvidia GL and fontconfig (newer versions) use fcntl file locking.
-            .Case(F_SETLK, Allow())
-#ifdef F_SETLK64
-            .Case(F_SETLK64, Allow())
-#endif
-            // Pulseaudio uses F_SETLKW, as does fontconfig.
-            .Case(F_SETLKW, Allow())
-#ifdef F_SETLKW64
-            .Case(F_SETLKW64, Allow())
-#endif
-            .Default(SandboxPolicyCommon::EvaluateSyscall(sysno));
-      }
-
-#ifdef DESKTOP
-      // This section is borrowed from ContentSandboxPolicy
-      CASES_FOR_getrlimit:
-      CASES_FOR_getresuid:
-      CASES_FOR_getresgid:
-        return Allow();
-
-      case __NR_prlimit64: {
-        // Allow only the getrlimit() use case.  (glibc seems to use
-        // only pid 0 to indicate the current process; pid == getpid()
-        // is equivalent and could also be allowed if needed.)
-        Arg<pid_t> pid(0);
-        // This is really a const struct ::rlimit*, but Arg<> doesn't
-        // work with pointers, only integer types.
-        Arg<uintptr_t> new_limit(2);
-        return If(AllOf(pid == 0, new_limit == 0), Allow())
-            .Else(InvalidSyscall());
-      }
-#endif  // DESKTOP
-
-      default:
-        return SandboxPolicyCommon::EvaluateSyscall(sysno);
-    }
-  }
-};
-
-UniquePtr<sandbox::bpf_dsl::Policy> GetSocketProcessSandboxPolicy(
-    SandboxBrokerClient* aMaybeBroker, SocketProcessSandboxParams&& aParams) {
-  return UniquePtr<sandbox::bpf_dsl::Policy>(
-      new SocketProcessSandboxPolicy(aMaybeBroker, std::move(aParams)));
 }
 
 class UtilitySandboxPolicy : public SandboxPolicyCommon {

@@ -379,8 +379,8 @@ struct cff1_cs_opset_extents_t : cff1_cs_opset_t<cff1_cs_opset_extents_t, cff1_e
 
     bounds_t  base_bounds, accent_bounds;
     if (likely (!env.in_seac && base && accent
-	       && _get_bounds (param.cff, base, base_bounds, true)
-	       && _get_bounds (param.cff, accent, accent_bounds, true)))
+	       && _get_bounds (param.cff, base, base_bounds, true, env.get_budget ())
+	       && _get_bounds (param.cff, accent, accent_bounds, true, env.get_budget ())))
     {
       param.bounds.merge (base_bounds);
       accent_bounds.offset (delta);
@@ -416,6 +416,9 @@ bool OT::cff1::accelerator_t::get_extents (hb_font_t *font, hb_codepoint_t glyph
 
   bounds_t bounds;
 
+  int64_t stack_budget = HB_BUDGET_GLYPH;
+  if (!budget) budget = &stack_budget;
+
   if (!_get_bounds (this, glyph, bounds, false, budget))
     return false;
 
@@ -426,8 +429,9 @@ bool OT::cff1::accelerator_t::get_extents (hb_font_t *font, hb_codepoint_t glyph
   }
   else
   {
-    extents->x_bearing = roundf (bounds.min.x.to_real ());
-    extents->width = roundf (bounds.max.x.to_real () - extents->x_bearing);
+    double x_bearing = roundf (bounds.min.x.to_real ());
+    extents->x_bearing = hb_clamp_to<hb_position_t> (x_bearing);
+    extents->width = hb_clamp_to<hb_position_t> ((double) roundf (bounds.max.x.to_real ()) - x_bearing);
   }
   if (bounds.min.y >= bounds.max.y)
   {
@@ -436,8 +440,9 @@ bool OT::cff1::accelerator_t::get_extents (hb_font_t *font, hb_codepoint_t glyph
   }
   else
   {
-    extents->y_bearing = roundf (bounds.max.y.to_real ());
-    extents->height = roundf (bounds.min.y.to_real () - extents->y_bearing);
+    double y_bearing = roundf (bounds.max.y.to_real ());
+    extents->y_bearing = hb_clamp_to<hb_position_t> (y_bearing);
+    extents->height = hb_clamp_to<hb_position_t> ((double) roundf (bounds.min.y.to_real ()) - y_bearing);
   }
 
   font->scale_glyph_extents (extents);
@@ -533,8 +538,8 @@ struct cff1_cs_opset_path_t : cff1_cs_opset_t<cff1_cs_opset_path_t, cff1_path_pa
     hb_codepoint_t accent = param.cff->std_code_to_glyph (env.argStack[n-1].to_int ());
 
     if (unlikely (!(!env.in_seac && base && accent
-		    && _get_path (param.cff, param.font, base, *param.draw_session, true)
-		    && _get_path (param.cff, param.font, accent, *param.draw_session, true, &delta))))
+		    && _get_path (param.cff, param.font, base, *param.draw_session, true, nullptr, env.get_budget ())
+		    && _get_path (param.cff, param.font, accent, *param.draw_session, true, &delta, env.get_budget ()))))
       env.set_error ();
   }
 };
@@ -566,6 +571,9 @@ bool OT::cff1::accelerator_t::get_path (hb_font_t *font, hb_codepoint_t glyph, h
   return true;
 #endif
 
+  int64_t stack_budget = HB_BUDGET_GLYPH;
+  if (!budget) budget = &stack_budget;
+
   return _get_path (this, font, glyph, draw_session, false, nullptr, budget);
 }
 
@@ -593,12 +601,76 @@ struct cff1_cs_opset_seac_t : cff1_cs_opset_t<cff1_cs_opset_seac_t, get_seac_par
   }
 };
 
+static bool
+_cff1_subrs_may_end_in_seac (const CFF1Subrs &subrs)
+{
+  for (unsigned int i = 0; i < subrs.count; i++)
+    for (const auto byte : subrs[i])
+      if (byte == OpCode_endchar)
+        return true;
+  return false;
+}
+
+OT::cff1::accelerator_subset_t::accelerator_subset_t (hb_face_t *face) : SUPER (face)
+{
+  if (unlikely (!is_valid ())) return;
+
+  subrs_may_end_in_seac = _cff1_subrs_may_end_in_seac (*globalSubrs);
+  for (unsigned int fd = 0; !subrs_may_end_in_seac && fd < fdCount; fd++)
+    subrs_may_end_in_seac =
+      _cff1_subrs_may_end_in_seac (*privateDicts[fd].localSubrs);
+}
+
+static bool
+_cff1_charstring_may_end_in_seac (const hb_ubytes_t &str,
+                                  bool subrs_may_end_in_seac)
+{
+  if (subrs_may_end_in_seac)
+    /* A subroutine can terminate the glyph with endchar, even when the glyph
+     * has no endchar of its own or has unreachable bytes after the call.
+     * False positives from operands and masks are safe. */
+    for (const auto byte : str)
+      if (byte == OpCode_callsubr || byte == OpCode_callgsubr)
+        return true;
+
+  if (unlikely (!str.length || str[str.length - 1] != OpCode_endchar))
+    return false;
+
+  unsigned int end = str.length - 1;
+  if (!end) return false;
+
+  unsigned int last = str[end - 1];
+
+  /* Type 2 numbers are not self-synchronizing when read backwards.
+   * Keep interpreting if any number encoding could end at endchar. */
+  if (OpCode_OneByteIntFirst <= last && last <= OpCode_OneByteIntLast)
+    return true;
+  if (end >= 2 &&
+      OpCode_TwoBytePosInt0 <= str[end - 2] &&
+      str[end - 2] <= OpCode_TwoByteNegInt3)
+    return true;
+  if (end >= 3 && str[end - 3] == OpCode_shortint)
+    return true;
+  if (end >= 5 && str[end - 5] == OpCode_fixedcs)
+    return true;
+
+  /* A subroutine can leave the seac operands on the shared stack. */
+  if (last == OpCode_callsubr || last == OpCode_callgsubr)
+    return true;
+
+  /* Escaped operators include stack-preserving dotsection. */
+  return end >= 2 && str[end - 2] == OpCode_escape;
+}
+
 bool OT::cff1::accelerator_subset_t::get_seac_components (hb_codepoint_t glyph, hb_codepoint_t *base, hb_codepoint_t *accent) const
 {
   if (unlikely (!is_valid () || (glyph >= num_glyphs))) return false;
+  /* seac uses StandardEncoding names and is not defined in CID-keyed fonts. */
+  if (is_CID ()) return false;
 
   unsigned int fd = fdSelect->get_fd (glyph);
   const hb_ubytes_t str = (*charStrings)[glyph];
+  if (unlikely (!_cff1_charstring_may_end_in_seac (str, subrs_may_end_in_seac))) return false;
   cff1_cs_interp_env_t env (str, *this, fd);
   cff1_cs_interpreter_t<cff1_cs_opset_seac_t, get_seac_param_t> interp (env);
   get_seac_param_t  param (this);

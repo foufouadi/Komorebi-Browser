@@ -9,7 +9,6 @@
 #include "gfxFontUtils.h"
 #include "gfxPlatformFontList.h"
 #include "mozilla/ServoCSSParser.h"
-#include "mozilla/StaticPrefs_layout.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/FontFaceBinding.h"
 #include "mozilla/dom/FontFaceSetImpl.h"
@@ -353,7 +352,7 @@ void FontFaceImpl::DoLoad() {
 }
 
 void FontFaceImpl::SetStatus(FontFaceLoadStatus aStatus) {
-  gfxFontUtils::AssertSafeThreadOrServoFontMetricsLocked();
+  gfxFontUtils::AssertSafeThreadOrServoFFILocked();
 
   if (mStatus == aStatus) {
     return;

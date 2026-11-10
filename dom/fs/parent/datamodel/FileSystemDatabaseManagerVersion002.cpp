@@ -16,6 +16,7 @@
 #include "ResultStatement.h"
 #include "StartedTransaction.h"
 #include "mozStorageHelper.h"
+#include "mozilla/FunctionRef.h"
 #include "mozilla/dom/FileSystemDataManager.h"
 #include "mozilla/dom/FileSystemHandle.h"
 #include "mozilla/dom/FileSystemLog.h"
@@ -42,7 +43,7 @@ Result<FileId, QMResult> GetFileId002(const FileSystemConnection& aConnection,
   QM_TRY(QM_TO_RESULT(stmt.BindEntryIdByName("entryId"_ns, aEntryId)));
   QM_TRY_UNWRAP(bool moreResults, stmt.ExecuteStep());
 
-  if (!moreResults) {
+  if (!moreResults || stmt.IsNullByColumn(/* Column */ 0u)) {
     return Err(QMResult(NS_ERROR_DOM_NOT_FOUND_ERR));
   }
 
@@ -94,7 +95,11 @@ nsresult RehashFile(const FileSystemConnection& aConnection,
                                        : insertNewFileAndTypeQuery;
 
   const nsLiteralCString updateFileMappingsQuery =
-      "UPDATE FileIds SET handle = :newId WHERE handle = :handle ;"_ns;
+      "UPDATE FileIds SET handle = :newId "
+      "FROM MainFiles WHERE MainFiles.handle = :handle "
+      "AND FileIds.fileId = MainFiles.fileId "
+      "AND FileIds.handle = :handle "
+      ";"_ns;
 
   const nsLiteralCString updateMainFilesQuery =
       "UPDATE MainFiles SET handle = :newId WHERE handle = :handle ;"_ns;
@@ -203,14 +208,14 @@ nsresult RehashDirectory(const FileSystemConnection& aConnection,
 
   const nsLiteralCString updateFileMappingsQuery =
       "UPDATE FileIds "
-      "SET handle = CASE WHEN replacement.isMain IS NULL THEN NULL "
-      "ELSE replacement.hash END "
+      "SET handle = replacement.hash "
       "FROM ( SELECT ParentChildHash.handle AS handle, "
       "ParentChildHash.hash AS hash, "
-      "MainFiles.handle AS isMain "
-      "FROM ParentChildHash LEFT JOIN MainFiles "
+      "MainFiles.fileId AS mainFileId "
+      "FROM ParentChildHash INNER JOIN MainFiles "
       "ON ParentChildHash.handle = MainFiles.handle ) AS replacement "
       "WHERE FileIds.handle = replacement.handle "
+      "AND FileIds.fileId = replacement.mainFileId "
       ";"_ns;
 
   const nsLiteralCString updateMainFilesQuery =
@@ -433,14 +438,81 @@ Result<Usage, QMResult> GetKnownUsage(const FileSystemConnection& aConnection,
   QM_TRY_RETURN(stmt.GetUsageByColumn(/* Column */ 0u));
 }
 
+Result<Ok, QMResult> RemoveOrphanedFiles(
+    const FileSystemConnection& aConnection,
+    FileSystemFileManager& aFileManager,
+    FunctionRef<void(Usage)> aOnUsageRemoved) {
+  nsTArray<FileId> orphans;
+  {
+    QM_TRY_UNWRAP(ResultStatement stmt,
+                  ResultStatement::Create(
+                      aConnection,
+                      "SELECT fileId FROM FileIds UNION SELECT handle FROM "
+                      "Usages EXCEPT SELECT fileId FROM MainFiles "
+                      "WHERE fileId IS NOT NULL;"_ns));
+    while (true) {
+      QM_TRY_UNWRAP(bool moreResults, stmt.ExecuteStep());
+      if (!moreResults) {
+        break;
+      }
+      QM_TRY_UNWRAP(FileId fileId, stmt.GetFileIdByColumn(0));
+      orphans.AppendElement(std::move(fileId));
+    }
+  }
+
+  for (const auto& fileId : orphans) {
+    auto removeOrphan = [&]() -> Result<Ok, QMResult> {
+      QM_TRY_UNWRAP(const Usage usage, GetKnownUsage(aConnection, fileId));
+      QM_TRY(aFileManager.RemoveFile(fileId).map([](Usage) { return Ok{}; }));
+      QM_TRY_UNWRAP(auto transaction, StartedTransaction::Create(aConnection));
+
+      QM_TRY_UNWRAP(
+          ResultStatement stmt,
+          ResultStatement::Create(
+              aConnection, "DELETE FROM FileIds WHERE fileId = :fileId;"_ns));
+      QM_TRY(QM_TO_RESULT(stmt.BindFileIdByName("fileId"_ns, fileId)));
+      QM_TRY(QM_TO_RESULT(stmt.Execute()));
+
+      // Also handle old Usages rows that have no FileIds parent to cascade.
+      QM_TRY_UNWRAP(
+          ResultStatement usageStmt,
+          ResultStatement::Create(
+              aConnection, "DELETE FROM Usages WHERE handle = :fileId;"_ns));
+      QM_TRY(QM_TO_RESULT(usageStmt.BindFileIdByName("fileId"_ns, fileId)));
+      QM_TRY(QM_TO_RESULT(usageStmt.Execute()));
+      QM_TRY(QM_TO_RESULT(transaction.Commit()));
+      if (usage > 0) {
+        aOnUsageRemoved(usage);
+      }
+      return Ok{};
+    };
+    QM_WARNONLY_TRY(removeOrphan());
+  }
+
+  return Ok{};
+}
+
 }  // namespace
 
 /* static */
 nsresult FileSystemDatabaseManagerVersion002::RescanTrackedUsages(
     const FileSystemConnection& aConnection,
     const quota::OriginMetadata& aOriginMetadata) {
+  QM_TRY_UNWRAP(
+      auto fileManager,
+      FileSystemFileManager::CreateFileSystemFileManager(aOriginMetadata));
+  QM_TRY(RemoveOrphanedFiles(aConnection, *fileManager, [](Usage) {
+         }).mapErr(toNSResult));
   return FileSystemDatabaseManagerVersion001::RescanTrackedUsages(
       aConnection, aOriginMetadata);
+}
+
+nsresult FileSystemDatabaseManagerVersion002::RemoveFileIdsWithoutMainFile() {
+  MOZ_ASSERT(mConnection);
+  QM_TRY(RemoveOrphanedFiles(mConnection, *mFileManager, [this](Usage aUsage) {
+           DecreaseCachedQuotaUsage(aUsage);
+         }).mapErr(toNSResult));
+  return NS_OK;
 }
 
 /* static */
@@ -665,6 +737,7 @@ Result<FileId, QMResult> FileSystemDatabaseManagerVersion002::EnsureFileId(
                     })));
 
   if (maybeMainFileId) {
+    MOZ_ASSERT(!maybeMainFileId->IsEmpty());
     return *maybeMainFileId;
   }
 
@@ -725,7 +798,21 @@ nsresult FileSystemDatabaseManagerVersion002::MergeFileId(
       return NS_OK;
     }
 
-    // Removal failed
+    // Removal failed: abandon the blob and release the quota reservation.
+    const nsLiteralCString removeUsageQuery =
+        "DELETE FROM Usages WHERE handle = :fileId ;"_ns;
+
+    QM_TRY_UNWRAP(ResultStatement removeUsageStmt,
+                  ResultStatement::Create(mConnection, removeUsageQuery)
+                      .mapErr(toNSResult));
+    QM_TRY(MOZ_TO_RESULT(
+        removeUsageStmt.BindFileIdByName("fileId"_ns, aCleanable)));
+    QM_TRY(MOZ_TO_RESULT(removeUsageStmt.Execute()));
+
+    if (usage > 0) {
+      DecreaseCachedQuotaUsage(usage);
+    }
+
     const nsLiteralCString forgetCleanable =
         "UPDATE FileIds SET handle = NULL WHERE fileId = :fileId ; "_ns;
 
@@ -818,7 +905,14 @@ nsresult FileSystemDatabaseManagerVersion002::RemoveFileId(
 
   QM_TRY(MOZ_TO_RESULT(stmt.BindEntryIdByName("fileId"_ns, aFileId.Value())));
 
-  return stmt.Execute();
+  QM_TRY(MOZ_TO_RESULT(stmt.Execute()));
+
+  if (const RefPtr<FileSystemCipherKeyManager> cipherKeyManager =
+          mDataManager->MaybeCipherKeyManager()) {
+    cipherKeyManager->Remove(aFileId.Value());
+  }
+
+  return NS_OK;
 }
 
 /**

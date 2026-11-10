@@ -324,8 +324,12 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   // WebIDL StyleSheet API
   void GetType(nsAString& aType);
   void GetHref(nsAString& aHref, ErrorResult& aRv);
-  // GetOwnerNode is defined above.
-  StyleSheet* GetParentStyleSheet() const { return GetParentSheet(); }
+  already_AddRefed<nsINode> GetOwnerNodeForBindings() const {
+    return do_AddRef(GetOwnerNode());
+  }
+  already_AddRefed<StyleSheet> GetParentStyleSheet() const {
+    return do_AddRef(GetParentSheet());
+  }
   void GetTitle(nsAString& aTitle);
   dom::MediaList* Media();
   bool Disabled() const { return bool(mState & State::Disabled); }
@@ -339,7 +343,7 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   // Can't be inline because we can't include ImportRule here.  And can't be
   // called GetOwnerRule because that would be ambiguous with the ImportRule
   // version.
-  css::Rule* GetDOMOwnerRule() const;
+  already_AddRefed<css::Rule> GetDOMOwnerRule() const;
   dom::CSSRuleList* GetCssRules(nsIPrincipal& aSubjectPrincipal, ErrorResult&);
   uint32_t InsertRule(const nsACString& aRule, uint32_t aIndex,
                       nsIPrincipal& aSubjectPrincipal, ErrorResult& aRv);
@@ -533,9 +537,6 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   // Called when a rule is added to the sheet from CSSOM.
   void RuleRemoved(css::Rule&);
 
-  // Called when a stylesheet is cloned.
-  void StyleSheetCloned(StyleSheet&);
-
   // Notifies that the applicable state changed.
   // aApplicable is the value that we expect to get from IsApplicable().
   // assertion will fail if the expectation does not match reality.
@@ -556,9 +557,6 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   void UnlinkInner();
   // Traverse our inner, if needed, for cycle collection
   void TraverseInner(nsCycleCollectionTraversalCallback&);
-
-  // Return whether the given @import rule has pending child sheet.
-  static bool RuleHasPendingChildSheet(css::Rule* aRule);
 
   StyleSheet* mParentSheet;  // weak ref
 

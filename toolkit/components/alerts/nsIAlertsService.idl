@@ -42,6 +42,12 @@ interface nsIAlertAction : nsISupports
   readonly attribute AString iconURL;
 
   /**
+   * Returns the URI to navigate to if this action is chosen, or null if it
+   * wasn't set. https://notifications.spec.whatwg.org/#notification-navigation-url
+   */
+  readonly attribute nsIURI navigate;
+
+  /**
    * On Windows, chrome-privileged notifications -- i.e., those with a
    * non-actionable principal -- can have actions that are activated by Windows
    * and not processed by Firefox.  When `windowsSystemActivationType` is true,
@@ -105,6 +111,14 @@ interface nsIAlertNotification : nsISupports
    * Notifications will replace previous notifications with the same name.
    */
   readonly attribute AString name;
+
+  /**
+   * An identifier unique across notification instances within the process,
+   * regardless of the name. Backends can use it to track individual show
+   * requests, e.g. to route asynchronous events correctly after a same-name
+   * notification has been replaced.
+   */
+  readonly attribute unsigned long long countId;
 
   /**
    * A URL identifying the image to put in the alert. The OS X backend limits
@@ -246,10 +260,23 @@ interface nsIAlertCallbacks : nsISupports
   // Called when the alert is shown.
   void onAlertShow();
 
+  cenum ApplicationState : 8 {
+    // The application state could not be determined
+    UNKNOWN,
+    // Application was in the foreground
+    FOREGROUND,
+    // Application was in the background with browser windows open
+    BACKGROUND_WINDOWS,
+    // Application had no browser windows open
+    BACKGROUND_NO_WINDOWS
+  };
+
   // Called when the alert is clicked.
   //
   // @param aAction The action that was clicked, if any.
-  void onAlertClick([optional] in nsIAlertAction aAction);
+  // @param aState The state of the application before the alert was clicked.
+  void onAlertClick([optional] in nsIAlertAction aAction,
+                    [optional] in nsIAlertCallbacks_ApplicationState aState);
 
   // Called when the alert is dismissed from the foreground and entered the
   // notification center.

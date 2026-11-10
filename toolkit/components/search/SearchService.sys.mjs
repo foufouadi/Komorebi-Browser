@@ -39,7 +39,7 @@ const lazy = XPCOMUtils.declareLazy({
     "moz-src:///toolkit/components/search/UserSearchEngine.sys.mjs",
   logConsole: () =>
     console.createInstance({
-      prefix: "SearchService",
+      logModule: "SearchService",
       maxLogLevel: lazy.SearchUtils.loggingEnabled ? "Debug" : "Warn",
     }),
   timerManager: {
@@ -62,7 +62,9 @@ const lazy = XPCOMUtils.declareLazy({
  * @import {SearchEngineSelector} from "./SearchEngineSelector.sys.mjs"
  * @import {
  *   RefinedSearchConfig,
+ *   RefinedSearchConfigV3,
  *   SearchEngineDefinition,
+ *   SearchEngineDefinitionV3,
  * } from "../uniffi-bindgen-gecko-js/components/generated/RustSearch.sys.mjs";
  * @import {UserSearchEngine, FormInfo} from "./UserSearchEngine.sys.mjs"
  */
@@ -94,6 +96,9 @@ const ENGINES_SEEN_FOR_PROMPT = 1;
  */
 export const SearchService = new (class SearchService {
   constructor() {
+    if (Services.appinfo.processType != Services.appinfo.PROCESS_TYPE_DEFAULT) {
+      throw new Error("Search Service should only run in the main process.");
+    }
     this._settings = new lazy.SearchSettings(this);
   }
 
@@ -218,7 +223,7 @@ export const SearchService = new (class SearchService {
     await this.init();
     if (!this.#lazyPrefs.separatePrivateDefaultPrefValue) {
       Services.prefs.setBoolPref(
-        lazy.SearchUtils.BROWSER_SEARCH_PREF + "separatePrivateDefault",
+        "browser.search.separatePrivateDefault.enabled",
         true
       );
     }
@@ -504,23 +509,23 @@ export const SearchService = new (class SearchService {
    *   Whether or not to show the prompt.
    */
   async shouldShowInstallPrompt(engine) {
-    let identifer = engine._loadPath;
+    let identifier = engine._loadPath;
     let seenEngines =
       this._settings.getMetaDataAttribute(ENGINES_SEEN_KEY) ?? {};
 
-    if (!(identifer in seenEngines)) {
-      seenEngines[identifer] = 1;
+    if (!(identifier in seenEngines)) {
+      seenEngines[identifier] = 1;
       this._settings.setMetaDataAttribute(ENGINES_SEEN_KEY, seenEngines);
       return false;
     }
 
-    let value = seenEngines[identifer];
+    let value = seenEngines[identifier];
     if (value == DONT_SHOW_PROMPT) {
       return false;
     }
 
     if (value == ENGINES_SEEN_FOR_PROMPT) {
-      seenEngines[identifer] = DONT_SHOW_PROMPT;
+      seenEngines[identifier] = DONT_SHOW_PROMPT;
       this._settings.setMetaDataAttribute(ENGINES_SEEN_KEY, seenEngines);
       return true;
     }
@@ -1541,12 +1546,12 @@ export const SearchService = new (class SearchService {
 
   #lazyPrefs = XPCOMUtils.declareLazy({
     separatePrivateDefaultPrefValue: {
-      pref: "browser.search.separatePrivateDefault",
+      pref: "browser.search.separatePrivateDefault.enabled",
       default: false,
       onUpdate: this.#onSeparateDefaultPrefChanged.bind(this),
     },
     separatePrivateDefaultEnabledPrefValue: {
-      pref: "browser.search.separatePrivateDefault.ui.enabled",
+      pref: "browser.search.separatePrivateDefault.featureGate",
       default: false,
       onUpdate: this.#onSeparateDefaultPrefChanged.bind(this),
     },
@@ -1792,9 +1797,15 @@ export const SearchService = new (class SearchService {
     let logIgnored = (name, url, type) => {
       lazy.logConsole.warn("Search engine", name, `matches ${type}`, url);
       Services.prefs.setCharPref(
-        lazy.SearchUtils.BROWSER_SEARCH_PREF + "lastEngineIgnored",
+        "browser.search.lastEngineIgnored",
         // Limit length of url to avoid storing too much in prefs.
-        `${Math.trunc(Date.now() / 1000)} Search engine '${name}' matches ${type} ignore list ${url.substring(0, 200)}`
+        `${Math.trunc(Date.now() / 1000)} Search engine matches ${type} ignore list ${url.substring(0, 200)}`
+      );
+      // Kept separate from lastEngineIgnored so the engine name isn't
+      // included if that preference is displayed, e.g. on about:support.
+      Services.prefs.setStringPref(
+        "browser.search.lastEngineIgnored.name",
+        name
       );
     };
 
@@ -1890,7 +1901,7 @@ export const SearchService = new (class SearchService {
    *
    * @param {object} settings
    *   An object representing the search engine settings.
-   * @param {RefinedSearchConfig} refinedConfig
+   * @param {RefinedSearchConfig|RefinedSearchConfigV3} refinedConfig
    *   The refined search configuration for this user.
    */
   async #loadEngines(settings, refinedConfig) {
@@ -1903,7 +1914,8 @@ export const SearchService = new (class SearchService {
     lazy.logConsole.debug("#loadEngines: start");
     this.#setDefaultFromSelector(refinedConfig);
 
-    this.#loadEnginesFromConfig(refinedConfig.engines, settings);
+    let configEngines = this.#filterDeprecatedEngines(refinedConfig.engines);
+    this.#loadEnginesFromConfig(configEngines, settings);
 
     await this.#loadStartupEngines(settings);
 
@@ -1914,7 +1926,7 @@ export const SearchService = new (class SearchService {
     // override, then we don't want to show the notification box.
     let skipDefaultChangedNotification = await this.#loadEnginesFromSettings(
       settings,
-      refinedConfig.engines
+      configEngines
     );
 
     // If #loadEnginesFromSettings changed the default engine, then we don't
@@ -2042,10 +2054,23 @@ export const SearchService = new (class SearchService {
   }
 
   /**
+   * Returns the engine configurations that are not deprecated.
+   *
+   * @param {(SearchEngineDefinition|SearchEngineDefinitionV3)[]} engineConfigs
+   *   An array of engines configurations based on the schema.
+   * @returns {(SearchEngineDefinition|SearchEngineDefinitionV3)[]}
+   */
+  #filterDeprecatedEngines(engineConfigs) {
+    return engineConfigs.filter(
+      config => !("deprecated" in config && config.deprecated)
+    );
+  }
+
+  /**
    * Loads engines as specified by the configuration. We only expect
    * configured engines here, user engines should not be listed.
    *
-   * @param {SearchEngineDefinition[]} engineConfigs
+   * @param {(SearchEngineDefinition|SearchEngineDefinitionV3)[]} engineConfigs
    *   An array of engines configurations based on the schema.
    * @param {object} [settings]
    *   The saved settings for the user.
@@ -2254,7 +2279,9 @@ export const SearchService = new (class SearchService {
 
     let refinedConfig = await this._fetchEngineSelectorEngines();
 
-    let availableConfigEngines = [...refinedConfig.engines];
+    let availableConfigEngines = this.#filterDeprecatedEngines(
+      refinedConfig.engines
+    );
     let oldEngineList = [...this._engines.values()];
 
     for (let engine of oldEngineList) {
@@ -2647,7 +2674,7 @@ export const SearchService = new (class SearchService {
    *
    * @param {object} [settings]
    *   The saved settings for the user.
-   * @param {SearchEngineDefinition[]} [engines]
+   * @param {(SearchEngineDefinition|SearchEngineDefinitionV3)[]} [engines]
    *   The saved settings for the user.
    * @returns {Promise<boolean>}
    *   Returns true if the default engine was changed.
@@ -3467,7 +3494,7 @@ export const SearchService = new (class SearchService {
     this._cachedSortedEngines = null;
 
     if (
-      prefName === "browser.search.separatePrivateDefault" &&
+      prefName === "browser.search.separatePrivateDefault.enabled" &&
       !previousValue &&
       currentValue
     ) {
@@ -3501,7 +3528,7 @@ export const SearchService = new (class SearchService {
       );
     }
 
-    let eventReason = prefName.endsWith("separatePrivateDefault.ui.enabled")
+    let eventReason = prefName.endsWith("separatePrivateDefault.featureGate")
       ? this.CHANGE_REASON.USER_PRIVATE_PREF_ENABLED
       : this.CHANGE_REASON.USER_PRIVATE_SPLIT;
     if (!previousValue && currentValue) {
@@ -3604,8 +3631,9 @@ export const SearchService = new (class SearchService {
   }
 
   /**
+   * Records the previous changed event details that were sent on telemetry.
+   *
    * @type { Record<"private"|"normal", ?Parameters<typeof Glean.searchEngineDefault.changed.record>[0]>}
-   *   Records the previous changed event details that were sent on telemetry.
    */
   #previousEngineChangedEvent = { private: null, normal: null };
 
@@ -4065,10 +4093,7 @@ export const SearchService = new (class SearchService {
   #maybeStartOpenSearchUpdateTimer() {
     if (
       this.#openSearchUpdateTimerStarted ||
-      !Services.prefs.getBoolPref(
-        lazy.SearchUtils.BROWSER_SEARCH_PREF + "update",
-        true
-      )
+      !Services.prefs.getBoolPref("browser.search.update", true)
     ) {
       return;
     }

@@ -10,12 +10,13 @@
 
 namespace mozilla::dom {
 
+class HTMLOptGroupElement;
 class HTMLSelectElement;
 
 class HTMLOptionElement final : public nsGenericHTMLElement {
  public:
-  explicit HTMLOptionElement(
-      already_AddRefed<mozilla::dom::NodeInfo> aNodeInfo);
+  explicit HTMLOptionElement(already_AddRefed<mozilla::dom::NodeInfo> aNodeInfo,
+                             FromParser = NOT_FROM_PARSER);
 
   static already_AddRefed<HTMLOptionElement> Option(
       const GlobalObject& aGlobal, const nsAString& aText,
@@ -114,21 +115,13 @@ class HTMLOptionElement final : public nsGenericHTMLElement {
    */
   HTMLSelectElement* GetSelect() const;
 
-  // https://html.spec.whatwg.org/#concept-select-option-list
-  // Elements whose children are excluded from the select's option list.
-  // Callers handle optgroup separately (context-dependent behavior).
-  static bool IsOptionListBoundary(const nsINode& aNode) {
-    return aNode.IsAnyOfHTMLElements(nsGkAtoms::select, nsGkAtoms::hr,
-                                     nsGkAtoms::option, nsGkAtoms::datalist);
-  }
-
-  // https://html.spec.whatwg.org/#concept-option-nearest-ancestor-select
-  HTMLSelectElement* ComputeNearestAncestorSelect() const;
-
   // https://html.spec.whatwg.org/#update-an-options-nearest-ancestor-select
   // NOTE: PR https://github.com/whatwg/html/pull/12263 modifies this algorithm
   // to also update descendant selectedcontent elements.
   void UpdateNearestAncestorSelect();
+
+  void DoneAddingChildren(bool) override;
+  bool IsDoneAddingChildren() const { return mIsDoneAddingChildren; }
 
  protected:
   virtual ~HTMLOptionElement();
@@ -136,6 +129,7 @@ class HTMLOptionElement final : public nsGenericHTMLElement {
   JSObject* WrapNode(JSContext*, JS::Handle<JSObject*> aGivenProto) override;
 
   bool mSelectedChanged = false;
+  bool mIsDoneAddingChildren = false;
 
   // https://html.spec.whatwg.org/#concept-option-cached-nearest-ancestor-select
   // Safe as a raw pointer: the option is always unbound from the tree before

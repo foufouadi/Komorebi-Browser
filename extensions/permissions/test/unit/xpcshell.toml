@@ -10,13 +10,12 @@ head = "head.js"
 ["test_permmanager_defaults.js"]
 
 ["test_permmanager_expiration.js"]
-skip-if = [
-  "os == 'win' && os_version == '10.2009' && arch == 'x86_64'", # Bug 1718292
-]
 
 ["test_permmanager_getAllByTypeSince.js"]
 
 ["test_permmanager_getAllByTypes.js"]
+
+["test_permmanager_getAllForOriginAttributesPattern.js"]
 
 ["test_permmanager_getAllForPrincipal.js"]
 
@@ -94,6 +93,10 @@ run-if = [
 ["test_permmanager_notifications.js"]
 
 ["test_permmanager_oa_strip.js"]
+
+["test_permmanager_policy.js"]
+
+["test_permmanager_reentrant_removal.js"]
 
 ["test_permmanager_remote.js"]
 prefs = ["security.storage.encryption.sqlite.enabled=false"]

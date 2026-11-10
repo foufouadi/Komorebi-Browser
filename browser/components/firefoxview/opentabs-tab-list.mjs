@@ -13,7 +13,7 @@ import {
   FxviewTabListBase,
   FxviewTabRowBase,
 } from "chrome://browser/content/firefoxview/fxview-tab-list.mjs";
-// eslint-disable-next-line import/no-unassigned-import
+// eslint-disable-next-line import-x/no-unassigned-import
 import "chrome://global/content/elements/moz-button.mjs";
 
 /**
@@ -514,6 +514,14 @@ export class OpenTabsTabRow extends FxviewTabRowBase {
       >
         ${this.#faviconTemplate()}
       </moz-button>
+      ${when(
+        this.containerObj,
+        () =>
+          html`<span
+            class="fxview-tab-row-pinned-context-line identity-color-${this
+              .containerObj.color}"
+          ></span>`
+      )}
     `;
   }
 

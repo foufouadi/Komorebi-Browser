@@ -1,7 +1,4 @@
 [DEFAULT]
-skip-if = [
-  "os == 'android'",
-]
 
 ["browser_ensure_frame_is_on_screen.js"]
 run-if = [
@@ -43,6 +40,21 @@ run-if = [
 ["browser_test_fullscreen_size.js"]
 
 ["browser_test_gtk_telemetry.js"]
+
+["browser_test_ime_focus_after_synthesize_composition_caused_moving_focus.js"]
+support-files = ["../file_ime_state_test_helper.js"]
+
+["browser_test_ime_request_commit_async.js"]
+support-files = [
+  "../file_ime_state_test_helper.js",
+  "../file_test_ime_request_commit.js",
+]
+
+["browser_test_ime_request_commit_sync.js"]
+support-files = [
+  "../file_ime_state_test_helper.js",
+  "../file_test_ime_request_commit.js",
+]
 
 ["browser_test_ime_state_after_body_removed_and_reconnected_in_designMode.js"]
 support-files = [ "../file_ime_state_test_helper.js" ]
@@ -104,6 +116,16 @@ support-files = [
   "../file_test_ime_state_on_readonly_change.js",
 ]
 
+["browser_test_menu_key_equivalent_update.js"]
+run-if = [
+  "os == 'mac'",
+]
+
+["browser_test_menu_label_truncation.js"]
+run-if = [
+  "os == 'mac'",
+]
+
 ["browser_test_scrollbar_colors.js"]
 support-files = ["helper_scrollbar_colors.html"]
 
@@ -119,4 +141,59 @@ support-files = [
 skip-if = [
   "os == 'linux' && os_version == '22.04' && arch == 'x86_64' && display == 'wayland' && opt", # Bug 2059565
   "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && display == 'x11'", # Bug 1784772
+]
+
+["browser_test_touchscreen_swipe_gesture.js"]
+support-files = [
+  "helper_swipe_gesture.html",
+  "helper_touchscreen_swipe_navigation.html",
+  "!/gfx/layers/apz/test/mochitest/apz_test_native_event_utils.js",
+  "!/gfx/layers/apz/test/mochitest/apz_test_utils.js",
+]
+skip-if = [
+  "os == 'linux'" # TODO: Support Linux.
+]
+
+["browser_test_touchscreen_swipe_gesture_events.js"]
+support-files = [
+  "helper_swipe_gesture.html",
+  "!/gfx/layers/apz/test/mochitest/apz_test_native_event_utils.js",
+  "!/gfx/layers/apz/test/mochitest/apz_test_utils.js",
+]
+skip-if = [
+  "os == 'linux'", # TODO: Support Linux.
+]
+
+["browser_test_touchscreen_swipe_gesture_with_css.js"]
+support-files = [
+  "helper_swipe_gesture.html",
+  "helper_touchscreen_swipe_overscroll.html",
+  "!/gfx/layers/apz/test/mochitest/apz_test_native_event_utils.js",
+  "!/gfx/layers/apz/test/mochitest/apz_test_utils.js",
+]
+skip-if = [
+  "os == 'linux'", # TODO: Support Linux.
+]
+
+["browser_test_touchscreen_swipe_gesture_with_multitouch.js"]
+support-files = [
+  "helper_swipe_gesture.html",
+  "!/gfx/layers/apz/test/mochitest/apz_test_native_event_utils.js",
+  "!/gfx/layers/apz/test/mochitest/apz_test_utils.js",
+]
+skip-if = [
+  "os == 'linux'", # TODO: Support Linux.
+]
+
+["browser_test_touchscreen_swipe_gesture_with_pan_gesture.js"]
+support-files = [
+  "helper_swipe_gesture.html",
+  "!/gfx/layers/apz/test/mochitest/apz_test_native_event_utils.js",
+  "!/gfx/layers/apz/test/mochitest/apz_test_utils.js",
+]
+skip-if = [
+  "os == 'linux'", # TODO: Support Linux.
+  # HeadlessWidget::SynthesizeNativeTouchpadPan in widget/headless/HeadlessWidget.cpp
+  # calls DispatchPanGestureInput directly, bypassing the widget's swipe tracker.
+  "headless",
 ]

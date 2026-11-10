@@ -110,9 +110,9 @@ size_t ConfigSet::size() const
 
 bool ConfigSet::contains(const Config *config) const
 {
-    for (auto i = mConfigs.begin(); i != mConfigs.end(); i++)
+    for (const auto &entry : mConfigs)
     {
-        const Config &item = i->second;
+        const Config &item = entry.second;
         if (config == &item)
         {
             return true;
@@ -230,8 +230,10 @@ std::vector<const Config *> ConfigSet::filter(const AttributeMap &attributeMap) 
 {
     std::vector<const Config *> result;
 
-    // If EGL_CONFIG_ID is included, all other attributes should be ignored.
-    if (attributeMap.contains(EGL_CONFIG_ID))
+    // If EGL_CONFIG_ID is included and is not EGL_DONT_CARE, all other attributes should be
+    // ignored.  EGL_DONT_CARE means the attribute should not be used for filtering, so fall
+    // through to the normal path where EGL_DONT_CARE values are properly skipped.
+    if (attributeMap.contains(EGL_CONFIG_ID) && attributeMap.get(EGL_CONFIG_ID) != EGL_DONT_CARE)
     {
         result.push_back(&ConfigSet::get(attributeMap.getAsInt(EGL_CONFIG_ID)));
         return result;
@@ -239,15 +241,15 @@ std::vector<const Config *> ConfigSet::filter(const AttributeMap &attributeMap) 
 
     result.reserve(mConfigs.size());
 
-    for (auto configIter = mConfigs.begin(); configIter != mConfigs.end(); configIter++)
+    for (const auto &entry : mConfigs)
     {
-        const Config &config = configIter->second;
+        const Config &config = entry.second;
         bool match           = true;
 
-        for (auto attribIter = attributeMap.begin(); attribIter != attributeMap.end(); attribIter++)
+        for (const auto &attrib : attributeMap)
         {
-            EGLAttrib attributeKey   = attribIter->first;
-            EGLAttrib attributeValue = attribIter->second;
+            EGLAttrib attributeKey   = attrib.first;
+            EGLAttrib attributeValue = attrib.second;
 
             if (attributeValue == EGL_DONT_CARE)
             {

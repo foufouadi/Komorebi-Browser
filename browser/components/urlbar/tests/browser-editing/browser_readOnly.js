@@ -3,6 +3,10 @@
 
 "use strict";
 
+add_setup(function () {
+  UrlbarTestUtils.registerZeroPrefixProvider();
+});
+
 add_task(async function toggle_readOnly() {
   gURLBar.focus();
   Assert.ok(gURLBar.hasAttribute("focused"), "Gets focused attribute");
@@ -32,5 +36,26 @@ add_task(async function toggle_readOnly() {
   });
   await UrlbarTestUtils.promisePopupClose(window, () => {
     gURLBar.blur();
+  });
+});
+
+add_task(async function copy_url_in_popup_window() {
+  await BrowserTestUtils.withNewTab("about:blank", async browser => {
+    let url = "https://example.com/";
+    let windowOpenedPromise = BrowserTestUtils.waitForNewWindow({ url });
+    await SpecialPowers.spawn(browser, [url], u => {
+      content.window.open(u, "_blank", "width=320,height=320");
+    });
+    let popup = await windowOpenedPromise;
+    Assert.ok(popup.gURLBar.readOnly);
+
+    popup.gURLBar.focus();
+    popup.gURLBar.select();
+    await SimpleTest.promiseClipboardChange(url, () =>
+      popup.goDoCommand("cmd_copy")
+    );
+    Assert.ok(true, "Copied value includes the scheme");
+
+    await BrowserTestUtils.closeWindow(popup);
   });
 });

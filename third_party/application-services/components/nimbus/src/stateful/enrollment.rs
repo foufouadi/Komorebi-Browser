@@ -79,27 +79,25 @@ impl EnrollmentsEvolver<'_> {
 }
 
 /// Return information about all enrolled experiments.
-/// Note this does not include rollouts
-pub fn get_enrollments<'r>(
-    db: &Database,
-    reader: &'r impl Readable<'r>,
+pub fn get_enrolled_experiments(
+    enrollments: &[ExperimentEnrollment],
+    experiments: &[Experiment],
 ) -> Result<Vec<EnrolledExperiment>> {
-    let enrollments: Vec<ExperimentEnrollment> =
-        db.get_store(StoreId::Enrollments).collect_all(reader)?;
     let mut result = Vec::with_capacity(enrollments.len());
     for enrollment in enrollments {
         debug!("Have enrollment: {:?}", enrollment);
         if let EnrollmentStatus::Enrolled { branch, .. } = &enrollment.status {
-            match db
-                .get_store(StoreId::Experiments)
-                .get::<Experiment, _>(reader, &enrollment.slug)?
-            {
+            let experiment = experiments
+                .iter()
+                .find(|experiment| experiment.slug == enrollment.slug);
+
+            match experiment {
                 Some(experiment) => {
                     result.push(EnrolledExperiment {
                         feature_ids: experiment.get_feature_ids(),
-                        slug: experiment.slug,
-                        user_facing_name: experiment.user_facing_name,
-                        user_facing_description: experiment.user_facing_description,
+                        slug: experiment.slug.clone(),
+                        user_facing_name: experiment.user_facing_name.clone(),
+                        user_facing_description: experiment.user_facing_description.clone(),
                         branch_slug: branch.to_string(),
                         is_rollout: experiment.is_rollout,
                     });
@@ -439,14 +437,22 @@ pub fn set_experiment_participation(
     db: &Database,
     writer: &mut Writer,
     opt_in: bool,
-) -> Result<()> {
+) -> Result<bool> {
+    let old_value =
+        get_experiment_participation(db, writer).unwrap_or(DEFAULT_EXPERIMENT_PARTICIPATION);
+
     let store = db.get_store(StoreId::Meta);
-    store.put(writer, DB_KEY_EXPERIMENT_PARTICIPATION, &opt_in)
+    store.put(writer, DB_KEY_EXPERIMENT_PARTICIPATION, &opt_in)?;
+
+    Ok(old_value)
 }
 
-pub fn set_rollout_participation(db: &Database, writer: &mut Writer, opt_in: bool) -> Result<()> {
+pub fn set_rollout_participation(db: &Database, writer: &mut Writer, opt_in: bool) -> Result<bool> {
+    let old_value = get_rollout_participation(db, writer).unwrap_or(DEFAULT_ROLLOUT_PARTICIPATION);
     let store = db.get_store(StoreId::Meta);
-    store.put(writer, DB_KEY_ROLLOUT_PARTICIPATION, &opt_in)
+    store.put(writer, DB_KEY_ROLLOUT_PARTICIPATION, &opt_in)?;
+
+    Ok(old_value)
 }
 
 /// Reset unique identifiers in response to application-level telemetry reset.

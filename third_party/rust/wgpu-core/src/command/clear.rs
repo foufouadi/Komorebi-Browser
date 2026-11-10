@@ -5,10 +5,7 @@ use crate::{
     api_log,
     command::{encoder::EncodingState, ArcCommand, EncoderStateError},
     device::{DeviceError, MissingFeatures},
-    get_lowest_common_denom,
-    global::Global,
-    hal_label,
-    id::{BufferId, CommandEncoderId, TextureId},
+    get_lowest_common_denom, hal_label,
     init_tracker::{MemoryInitKind, TextureInitRange},
     resource::{
         Buffer, DestroyedResourceError, InvalidOrDestroyedResourceError, InvalidResourceError,
@@ -58,6 +55,11 @@ pub enum ClearError {
         texture_format: wgt::TextureFormat,
         subresource_range_aspects: TextureAspect,
     },
+    #[error("Unable to selectively clear aspect {aspect:?} of format {format:?}. All aspects must be cleared.")]
+    InvalidClearAspect {
+        format: wgt::TextureFormat,
+        aspect: TextureAspect,
+    },
     #[error("Image subresource level range is outside of the texture's level range. texture range is {texture_level_range:?},  \
 whereas subesource range specified start {subresource_base_mip_level} and count {subresource_mip_level_count:?}")]
     InvalidTextureLevelRange {
@@ -104,6 +106,7 @@ impl WebGpuError for ClearError {
             | Self::OffsetPlusSizeExceeds64BitBounds { .. }
             | Self::BufferOverrun { .. }
             | Self::MissingTextureAspect { .. }
+            | Self::InvalidClearAspect { .. }
             | Self::InvalidTextureLevelRange { .. }
             | Self::InvalidTextureLayerRange { .. } => ErrorType::Validation,
         }
@@ -111,7 +114,7 @@ impl WebGpuError for ClearError {
 }
 
 impl super::CommandEncoder {
-    pub fn clear_buffer(
+    fn clear_buffer_inner(
         self: &Arc<Self>,
         dst: Arc<Buffer>,
         offset: BufferAddress,
@@ -128,7 +131,19 @@ impl super::CommandEncoder {
         })
     }
 
-    pub fn clear_texture(
+    pub fn clear_buffer(
+        self: &Arc<Self>,
+        dst: Arc<Buffer>,
+        offset: BufferAddress,
+        size: Option<BufferAddress>,
+    ) {
+        if let Err(err) = self.clear_buffer_inner(dst, offset, size) {
+            self.device
+                .handle_error(err, Some(self.label()), "CommandEncoder::clear_buffer");
+        }
+    }
+
+    fn clear_texture_inner(
         self: &Arc<Self>,
         dst: Arc<Texture>,
         subresource_range: &ImageSubresourceRange,
@@ -146,33 +161,16 @@ impl super::CommandEncoder {
             })
         })
     }
-}
 
-impl Global {
-    pub fn command_encoder_clear_buffer(
-        &self,
-        command_encoder_id: CommandEncoderId,
-        dst: BufferId,
-        offset: BufferAddress,
-        size: Option<BufferAddress>,
-    ) -> Result<(), EncoderStateError> {
-        let hub = &self.hub;
-
-        let cmd_enc = hub.command_encoders.get(command_encoder_id);
-        cmd_enc.clear_buffer(hub.buffers.get(dst), offset, size)
-    }
-
-    pub fn command_encoder_clear_texture(
-        &self,
-        command_encoder_id: CommandEncoderId,
-        dst: TextureId,
+    pub fn clear_texture(
+        self: &Arc<Self>,
+        dst: Arc<Texture>,
         subresource_range: &ImageSubresourceRange,
-    ) -> Result<(), EncoderStateError> {
-        let hub = &self.hub;
-
-        let cmd_enc = hub.command_encoders.get(command_encoder_id);
-
-        cmd_enc.clear_texture(hub.textures.get(dst), subresource_range)
+    ) {
+        if let Err(err) = self.clear_texture_inner(dst, subresource_range) {
+            self.device
+                .handle_error(err, Some(self.label()), "CommandEncoder::clear_texture");
+        }
     }
 }
 
@@ -259,14 +257,21 @@ pub(super) fn clear_texture_cmd(
         .device
         .require_features(wgt::Features::CLEAR_TEXTURE)?;
 
-    // Check if subresource aspects are valid.
+    // Check that the clear targets all aspects, and no invalid aspects.
     let clear_aspects = hal::FormatAspects::new(dst_texture.desc.format, subresource_range.aspect);
+    let all_aspects = hal::FormatAspects::new(dst_texture.desc.format, TextureAspect::All);
     if clear_aspects.is_empty() {
         return Err(ClearError::MissingTextureAspect {
             texture_format: dst_texture.desc.format,
             subresource_range_aspects: subresource_range.aspect,
         });
-    };
+    }
+    if clear_aspects != all_aspects {
+        return Err(ClearError::InvalidClearAspect {
+            format: dst_texture.desc.format,
+            aspect: subresource_range.aspect,
+        });
+    }
 
     // Check if subresource level range is valid
     let subresource_mip_range = subresource_range.mip_range(dst_texture.full_range.mips.end);
@@ -297,6 +302,7 @@ pub(super) fn clear_texture_cmd(
             mip_range: subresource_mip_range,
             layer_range: subresource_layer_range,
         },
+        None,
         state.raw_encoder,
         &mut state.tracker.textures,
         &state.device.alignments,
@@ -315,9 +321,15 @@ pub(super) fn clear_texture_cmd(
 /// [`clear_texture_cmd`], which does the validation. This function is also
 /// called directly from various places within wgpu that need to clear a
 /// texture.
+///
+/// For a 3D texture:
+/// - If `depth_slice` is `Some`, clear only that depth slice (in this case,
+///   `range.mip_range` must be a single mip level).
+/// - If `depth_slice` is `None`, clear entire mip level(s).
 pub(crate) fn clear_texture<T: TextureTrackerSetSingle>(
     dst_texture: &Arc<Texture>,
     range: TextureInitRange,
+    depth_slice: Option<u32>,
     encoder: &mut dyn hal::DynCommandEncoder,
     texture_tracker: &mut T,
     alignments: &hal::Alignments,
@@ -332,7 +344,7 @@ pub(crate) fn clear_texture<T: TextureTrackerSetSingle>(
         TextureClearMode::BufferCopy => wgt::TextureUses::COPY_DST,
         TextureClearMode::RenderPass {
             is_color: false, ..
-        } => wgt::TextureUses::DEPTH_STENCIL_WRITE,
+        } => wgt::TextureUses::DEPTH_WRITE | wgt::TextureUses::STENCIL_WRITE,
         TextureClearMode::Surface { .. } | TextureClearMode::RenderPass { is_color: true, .. } => {
             wgt::TextureUses::COLOR_TARGET
         }
@@ -377,6 +389,7 @@ pub(crate) fn clear_texture<T: TextureTrackerSetSingle>(
             alignments,
             zero_buffer,
             range,
+            depth_slice,
             encoder,
             dst_raw,
         ),
@@ -402,87 +415,112 @@ fn clear_texture_via_buffer_copies(
     alignments: &hal::Alignments,
     zero_buffer: &dyn hal::DynBuffer, // Buffer of size device::ZERO_BUFFER_SIZE
     range: TextureInitRange,
+    depth_slice: Option<u32>,
     encoder: &mut dyn hal::DynCommandEncoder,
     dst_raw: &dyn hal::DynTexture,
 ) {
+    // These preconditions should apply to `clear_texture` as a whole, but since they're
+    // currently only serving this function, seems clearer to keep them here.
     assert!(!texture_desc.format.is_depth_stencil_format());
+    assert!(
+        depth_slice.is_none() || texture_desc.dimension == wgt::TextureDimension::D3,
+        "depth_slice is only applicable to 3D textures",
+    );
+    assert!(
+        depth_slice.is_none() || range.mip_range.len() == 1,
+        "must target a single depth slice when clearing a mip level",
+    );
 
-    if texture_desc.format == wgt::TextureFormat::NV12
-        || texture_desc.format == wgt::TextureFormat::P010
-    {
-        // TODO: Currently COPY_DST for NV12 and P010 textures is unsupported.
-        return;
-    }
+    let aspects = if texture_desc.format.is_multi_planar_format() {
+        [
+            (hal::FormatAspects::PLANE_0, TextureAspect::Plane0),
+            (hal::FormatAspects::PLANE_1, TextureAspect::Plane1),
+            (hal::FormatAspects::PLANE_2, TextureAspect::Plane2),
+        ]
+        .as_slice()
+    } else {
+        &[(hal::FormatAspects::COLOR, TextureAspect::All)]
+    };
 
-    // Gather list of zero_buffer copies and issue a single command then to perform them
     let mut zero_buffer_copy_regions = Vec::new();
-    let buffer_copy_pitch = alignments.buffer_copy_pitch.get() as u32;
-    let (block_width, block_height) = texture_desc.format.block_dimensions();
-    let block_size = texture_desc.format.block_copy_size(None).unwrap();
+    for &(hal_aspect, aspect) in aspects {
+        let Some(aspect_format) = texture_desc.format.aspect_specific_format(aspect) else {
+            break;
+        };
+        // Gather list of zero_buffer copies and issue a single command then to perform them
+        let buffer_copy_pitch = alignments.buffer_copy_pitch.get() as u32;
+        let (block_width, block_height) = aspect_format.block_dimensions();
+        let block_size = aspect_format.block_copy_size(None).unwrap();
 
-    let bytes_per_row_alignment = get_lowest_common_denom(buffer_copy_pitch, block_size);
+        let bytes_per_row_alignment = get_lowest_common_denom(buffer_copy_pitch, block_size);
 
-    for mip_level in range.mip_range {
-        let mut mip_size = texture_desc.mip_level_size(mip_level).unwrap();
-        // Round to multiple of block size
-        mip_size.width = align_to(mip_size.width, block_width);
-        mip_size.height = align_to(mip_size.height, block_height);
+        for mip_level in range.mip_range.clone() {
+            let mut mip_size = texture_desc.mip_level_size(mip_level).unwrap();
+            // Subsample for multi-planar formats (e.g. NV12/P010 chroma plane is half-res).
+            let (w_sub, h_sub) = texture_desc.format.subsampling_factors(aspect.to_plane());
+            (mip_size.width, mip_size.height) = (mip_size.width / w_sub, mip_size.height / h_sub);
+            // Round to multiple of block size
+            mip_size.width = align_to(mip_size.width, block_width);
+            mip_size.height = align_to(mip_size.height, block_height);
 
-        let bytes_per_row = align_to(
-            mip_size.width / block_width * block_size,
-            bytes_per_row_alignment,
-        );
+            let bytes_per_row = align_to(
+                mip_size.width / block_width * block_size,
+                bytes_per_row_alignment,
+            );
 
-        let max_rows_per_copy = crate::device::ZERO_BUFFER_SIZE as u32 / bytes_per_row;
-        // round down to a multiple of rows needed by the texture format
-        let max_rows_per_copy = max_rows_per_copy / block_height * block_height;
-        assert!(
-            max_rows_per_copy > 0,
-            "Zero buffer size is too small to fill a single row \
+            let max_rows_per_copy = crate::device::ZERO_BUFFER_SIZE as u32 / bytes_per_row;
+            // round down to a multiple of rows needed by the texture format
+            let max_rows_per_copy = max_rows_per_copy / block_height * block_height;
+            assert!(
+                max_rows_per_copy > 0,
+                "Zero buffer size is too small to fill a single row \
             of a texture with format {:?} and desc {:?}",
-            texture_desc.format,
-            texture_desc.size
-        );
+                texture_desc.format,
+                texture_desc.size
+            );
 
-        let z_range = 0..(if texture_desc.dimension == wgt::TextureDimension::D3 {
-            mip_size.depth_or_array_layers
-        } else {
-            1
-        });
+            let z_range = if let Some(depth_slice) = depth_slice {
+                depth_slice..depth_slice + 1
+            } else if texture_desc.dimension == wgt::TextureDimension::D3 {
+                0..mip_size.depth_or_array_layers
+            } else {
+                0..1
+            };
 
-        for array_layer in range.layer_range.clone() {
-            // TODO: Only doing one layer at a time for volume textures right now.
-            for z in z_range.clone() {
-                // May need multiple copies for each subresource! However, we
-                // assume that we never need to split a row.
-                let mut num_rows_left = mip_size.height;
-                while num_rows_left > 0 {
-                    let num_rows = num_rows_left.min(max_rows_per_copy);
+            for array_layer in range.layer_range.clone() {
+                // TODO: Only doing one layer at a time for volume textures right now.
+                for z in z_range.clone() {
+                    // May need multiple copies for each subresource! However, we
+                    // assume that we never need to split a row.
+                    let mut num_rows_left = mip_size.height;
+                    while num_rows_left > 0 {
+                        let num_rows = num_rows_left.min(max_rows_per_copy);
 
-                    zero_buffer_copy_regions.push(hal::BufferTextureCopy {
-                        buffer_layout: wgt::TexelCopyBufferLayout {
-                            offset: 0,
-                            bytes_per_row: Some(bytes_per_row),
-                            rows_per_image: None,
-                        },
-                        texture_base: hal::TextureCopyBase {
-                            mip_level,
-                            array_layer,
-                            origin: wgt::Origin3d {
-                                x: 0, // Always full rows
-                                y: mip_size.height - num_rows_left,
-                                z,
+                        zero_buffer_copy_regions.push(hal::BufferTextureCopy {
+                            buffer_layout: wgt::TexelCopyBufferLayout {
+                                offset: 0,
+                                bytes_per_row: Some(bytes_per_row),
+                                rows_per_image: None,
                             },
-                            aspect: hal::FormatAspects::COLOR,
-                        },
-                        size: hal::CopyExtent {
-                            width: mip_size.width, // full row
-                            height: num_rows,
-                            depth: 1, // Only single slice of volume texture at a time right now
-                        },
-                    });
+                            texture_base: hal::TextureCopyBase {
+                                mip_level,
+                                array_layer,
+                                origin: wgt::Origin3d {
+                                    x: 0, // Always full rows
+                                    y: mip_size.height - num_rows_left,
+                                    z,
+                                },
+                                aspect: hal_aspect,
+                            },
+                            size: hal::CopyExtent {
+                                width: mip_size.width, // full row
+                                height: num_rows,
+                                depth: 1, // Only single slice of volume texture at a time right now
+                            },
+                        });
 
-                    num_rows_left -= num_rows;
+                        num_rows_left -= num_rows;
+                    }
                 }
             }
         }
@@ -542,11 +580,13 @@ fn clear_texture_via_render_passes(
                                 mip_level,
                                 depth_or_layer,
                             ),
-                            usage: wgt::TextureUses::DEPTH_STENCIL_WRITE,
+                            usage: wgt::TextureUses::DEPTH_WRITE | wgt::TextureUses::STENCIL_WRITE,
                         },
                         depth_ops: hal::AttachmentOps::STORE | hal::AttachmentOps::LOAD_CLEAR,
                         stencil_ops: hal::AttachmentOps::STORE | hal::AttachmentOps::LOAD_CLEAR,
                         clear_value: (0.0, 0),
+                        depth_read_only: false,
+                        stencil_read_only: false,
                     }),
                 )
             };

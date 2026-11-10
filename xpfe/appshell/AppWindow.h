@@ -7,7 +7,6 @@
 #define mozilla_AppWindow_h_
 
 // Local Includes
-#include "nsChromeTreeOwner.h"
 #include "nsContentTreeOwner.h"
 
 // Helper classes
@@ -15,18 +14,14 @@
 #include "nsTArray.h"
 #include "nsString.h"
 #include "nsWeakReference.h"
-#include "nsCOMArray.h"
 #include "nsDocShell.h"
-#include "nsRect.h"
 #include "Units.h"
 #include "mozilla/Maybe.h"
-#include "mozilla/Mutex.h"
 
 // Interfaces needed
 #include "nsIBaseWindow.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsIInterfaceRequestor.h"
-#include "nsIInterfaceRequestorUtils.h"
 #include "nsIAppWindow.h"
 #include "nsIPrompt.h"
 #include "nsIAuthPrompt.h"
@@ -71,7 +66,6 @@ class AppWindow final : public nsIBaseWindow,
                         public nsIAppWindow,
                         public nsSupportsWeakReference,
                         public nsIWebProgressListener {
-  friend class ::nsChromeTreeOwner;
   friend class ::nsContentTreeOwner;
 
  public:
@@ -96,6 +90,8 @@ class AppWindow final : public nsIBaseWindow,
     bool RequestWindowClose(nsIWidget* aWidget) override;
     MOZ_CAN_RUN_SCRIPT_BOUNDARY
     void SizeModeChanged(nsSizeMode sizeMode) override;
+    MOZ_CAN_RUN_SCRIPT_BOUNDARY
+    void FullscreenChangeFailed(bool aInFullscreen) override;
     MOZ_CAN_RUN_SCRIPT_BOUNDARY
     void MacFullscreenMenubarOverlapChanged(
         mozilla::DesktopCoord aOverlapAmount) override;
@@ -150,6 +146,7 @@ class AppWindow final : public nsIBaseWindow,
   void WindowResized(nsIWidget*, const mozilla::LayoutDeviceIntSize&);
   MOZ_CAN_RUN_SCRIPT bool RequestWindowClose(nsIWidget* aWidget);
   MOZ_CAN_RUN_SCRIPT void SizeModeChanged(nsSizeMode aSizeMode);
+  MOZ_CAN_RUN_SCRIPT void FullscreenChangeFailed(bool aInFullscreen);
   MOZ_CAN_RUN_SCRIPT void FullscreenWillChange(bool aInFullscreen);
   MOZ_CAN_RUN_SCRIPT void FullscreenChanged(bool aInFullscreen);
   MOZ_CAN_RUN_SCRIPT void MacFullscreenMenubarOverlapChanged(
@@ -184,35 +181,30 @@ class AppWindow final : public nsIBaseWindow,
   void SetPersistenceTimer(uint32_t aDirtyFlags);
   void FirePersistenceTimer();
 
-  NS_IMETHOD EnsureChromeTreeOwner();
   NS_IMETHOD EnsureContentTreeOwner();
-  NS_IMETHOD EnsurePrimaryContentTreeOwner();
   NS_IMETHOD EnsurePrompter();
   NS_IMETHOD EnsureAuthPrompter();
   NS_IMETHOD ForceRoundedDimensions();
-  NS_IMETHOD GetAvailScreenSize(int32_t* aAvailWidth, int32_t* aAvailHeight);
+  Maybe<CSSIntSize> GetAvailScreenSize();
 
-  void FinishFullscreenChange(bool aInFullscreen);
+  MOZ_CAN_RUN_SCRIPT void FinishFullscreenChange(bool aInFullscreen);
 
-  void ApplyChromeFlags();
   MOZ_CAN_RUN_SCRIPT_BOUNDARY void SizeShell();
   void OnChromeLoaded();
   void StaggerPosition(int32_t& aRequestedX, int32_t& aRequestedY,
                        int32_t aSpecWidth, int32_t aSpecHeight);
   bool LoadPositionFromXUL(int32_t aSpecWidth, int32_t aSpecHeight);
   bool LoadSizeFromXUL(int32_t& aSpecWidth, int32_t& aSpecHeight);
-  void SetSpecifiedSize(int32_t aSpecWidth, int32_t aSpecHeight);
-  bool UpdateWindowStateFromMiscXULAttributes();
-  void SyncAttributesToWidget();
+  void SetSpecifiedSize(const CSSIntSize&);
+  MOZ_CAN_RUN_SCRIPT bool UpdateWindowStateFromMiscXULAttributes();
+  void SyncOneShotAttributesToWidget();
   void SavePersistentAttributes(PersistentAttributes);
   void MaybeSavePersistentPositionAndSize(PersistentAttributes,
                                           dom::Element& aRootElement,
-                                          const nsAString& aPersistString,
-                                          bool aShouldPersist);
+                                          const nsAString& aPersistString);
   void MaybeSavePersistentMiscAttributes(PersistentAttributes,
                                          dom::Element& aRootElement,
-                                         const nsAString& aPersistString,
-                                         bool aShouldPersist);
+                                         const nsAString& aPersistString);
   void SavePersistentAttributes() {
     SavePersistentAttributes(mPersistentAttributesDirty);
   }
@@ -227,33 +219,28 @@ class AppWindow final : public nsIBaseWindow,
   // See nsIDocShellTreeOwner for docs on next two methods
   nsresult ContentShellAdded(nsIDocShellTreeItem* aContentShell, bool aPrimary);
   nsresult ContentShellRemoved(nsIDocShellTreeItem* aContentShell);
-  NS_IMETHOD GetPrimaryContentSize(int32_t* aWidth, int32_t* aHeight);
-  NS_IMETHOD SetPrimaryContentSize(int32_t aWidth, int32_t aHeight);
-  nsresult GetRootShellSize(int32_t* aWidth, int32_t* aHeight);
-  nsresult SetRootShellSize(int32_t aWidth, int32_t aHeight);
 
-  NS_IMETHOD SizeShellTo(nsIDocShellTreeItem* aShellItem, int32_t aCX,
-                         int32_t aCY);
   NS_IMETHOD ExitModalLoop(nsresult aStatus);
+  MOZ_CAN_RUN_SCRIPT
   NS_IMETHOD CreateNewChromeWindow(int32_t aChromeFlags,
                                    nsIAppWindow** _retval);
+  MOZ_CAN_RUN_SCRIPT
   NS_IMETHOD CreateNewContentWindow(int32_t aChromeFlags,
                                     nsIOpenWindowInfo* aOpenWindowInfo,
                                     nsIAppWindow** _retval);
-  NS_IMETHOD GetHasPrimaryContent(bool* aResult);
 
   void EnableParent(bool aEnable);
   void PlaceWindowLayersBehind(uint32_t aLowLevel, uint32_t aHighLevel,
                                nsIAppWindow* aBehind);
-  void SetContentScrollbarVisibility(bool aVisible);
 
   enum PersistentAttributeUpdate { Sync, Async };
   void PersistentAttributesDirty(PersistentAttributes,
                                  PersistentAttributeUpdate);
 
+  bool ShouldSavePersistentValues() const;
   void LoadPersistentWindowState();
   nsresult GetPersistentValue(const nsAtom* aAttr, nsAString& aValue);
-  nsresult SetPersistentValue(const nsAtom* aAttr, const nsAString& aValue);
+  void MaybeSetPersistentValue(const nsAtom* aAttr, const nsAString& aValue);
 
   // Saves window size and positioning values in order to display a very early
   // skeleton UI. This has to happen before we can reasonably initialize the
@@ -306,9 +293,7 @@ class AppWindow final : public nsIBaseWindow,
     WidgetExitedFullscreen,
   };
 
-  nsChromeTreeOwner* mChromeTreeOwner;
   nsContentTreeOwner* mContentTreeOwner;
-  nsContentTreeOwner* mPrimaryContentTreeOwner;
   nsCOMPtr<nsIWidget> mWindow;
   RefPtr<nsDocShell> mDocShell;
   nsCOMPtr<nsPIDOMWindowOuter> mDOMWindow;
@@ -335,17 +320,16 @@ class AppWindow final : public nsIBaseWindow,
   // otherwise happen due to script running as we tear down various things.
   bool mDestroying;
   bool mRegistered;
-  // Indicator for whether the client size, instead of the window size, should
-  // be maintained in case of a change in their relation.
-  bool mDominantClientSize;
   PersistentAttributes mPersistentAttributesDirty;
   PersistentAttributes mPersistentAttributesMask;
   uint32_t mChromeFlags;
   nsCOMPtr<nsIOpenWindowInfo> mInitialOpenWindowInfo;
   nsString mTitle;
 
+  // Client size requested via SetRootShellSize().
+  DesktopSize mRequestedClientSize;
   // The screen rect of the opener.
-  mozilla::DesktopIntRect mOpenerScreenRect;
+  DesktopIntRect mOpenerScreenRect;
 
   nsCOMPtr<nsIRemoteTab> mPrimaryBrowserParent;
 
@@ -356,6 +340,11 @@ class AppWindow final : public nsIBaseWindow,
   MOZ_CAN_RUN_SCRIPT void IntrinsicallySizeShell(const CSSIntSize& aWindowDiff,
                                                  int32_t& aSpecWidth,
                                                  int32_t& aSpecHeight);
+
+  // Whether we are currently sized to a particular client size.
+  bool IsClientSizedWindow() const {
+    return mRequestedClientSize != DesktopSize();
+  }
 
   // GetPrimaryBrowserParentSize is called from xpidl methods and we don't have
   // a good way to annotate those with MOZ_CAN_RUN_SCRIPT yet.  It takes no

@@ -10,4 +10,4 @@ permissions:
 
 jobs:
   mutants:
-    uses: mozilla/actions/.github/workflows/mutants.yml@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+    uses: mozilla/actions/.github/workflows/mutants.yml@42622e57e54d96514373f5234c0220b014e64740 # v3.1.1

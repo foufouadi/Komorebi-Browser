@@ -1595,6 +1595,7 @@ class PromptFeatureTest {
                     expiryMonth = "5",
                     expiryYear = "2030",
                     cardType = "amex",
+                    cardCvv = null,
                 )
             var onDismissCalled = false
             var onConfirmCalled = false
@@ -2359,6 +2360,7 @@ class PromptFeatureTest {
                     expiryMonth = "5",
                     expiryYear = "2030",
                     cardType = "",
+                    cardCvv = null,
                 )
             val selectCreditCardRequest = PromptRequest.SelectCreditCard(listOf(creditCard), onConfirm, onDismiss)
 
@@ -2402,7 +2404,7 @@ class PromptFeatureTest {
             feature.start()
             testDispatcher.scheduler.advanceUntilIdle()
 
-            val promptRequest = PromptRequest.Share(ShareData("Title", "Text", null), {}, {}, {})
+            val promptRequest = PromptRequest.Share(ShareData("Title", "Text", null, private = false), {}, {}, {})
             store.dispatch(ContentAction.UpdatePromptRequestAction("custom-tab", promptRequest))
             testDispatcher.scheduler.advanceUntilIdle()
 
@@ -2632,6 +2634,7 @@ class PromptFeatureTest {
                     expiryMonth = "5",
                     expiryYear = "2030",
                     cardType = "",
+                    cardCvv = null,
                 )
             val promptRequest =
                 spy(
@@ -2674,6 +2677,7 @@ class PromptFeatureTest {
                     expiryMonth = "5",
                     expiryYear = "2030",
                     cardType = "",
+                    cardCvv = null,
                 )
             val promptRequest =
                 spy(
@@ -2718,6 +2722,7 @@ class PromptFeatureTest {
                     expiryMonth = invalidMonth,
                     expiryYear = invalidYear,
                     cardType = "",
+                    cardCvv = null,
                 )
             val promptRequest =
                 spy(
@@ -2773,7 +2778,7 @@ class PromptFeatureTest {
 
             val shareRequest =
                 PromptRequest.Share(
-                    ShareData("Title", "Text", null),
+                    ShareData("Title", "Text", null, private = false),
                     onSuccess = { onSuccessCalled = true },
                     onFailure = {},
                     onDismiss = {},
@@ -2812,7 +2817,7 @@ class PromptFeatureTest {
 
             val shareRequest =
                 PromptRequest.Share(
-                    ShareData("Title", "Text", null),
+                    ShareData("Title", "Text", null, private = false),
                     onSuccess = {},
                     onFailure = {},
                     onDismiss = { onDismissCalled = true },
@@ -2851,7 +2856,7 @@ class PromptFeatureTest {
 
             val shareRequest =
                 PromptRequest.Share(
-                    ShareData("Title", "Text", null),
+                    ShareData("Title", "Text", null, private = false),
                     onSuccess = {},
                     onFailure = {},
                     onDismiss = {},
@@ -2904,7 +2909,7 @@ class PromptFeatureTest {
 
             val shareRequest =
                 PromptRequest.Share(
-                    ShareData("Title", "Text", null),
+                    ShareData("Title", "Text", null, private = false),
                     onSuccess = {},
                     onFailure = {},
                     onDismiss = {},
@@ -2950,7 +2955,7 @@ class PromptFeatureTest {
 
             val shareRequest =
                 PromptRequest.Share(
-                    ShareData("Title", "Text", null),
+                    ShareData("Title", "Text", null, private = false),
                     onSuccess = {},
                     onFailure = {},
                     onDismiss = {},
@@ -2992,7 +2997,7 @@ class PromptFeatureTest {
 
             val shareRequest =
                 PromptRequest.Share(
-                    ShareData("Title", "Text", null),
+                    ShareData("Title", "Text", null, private = false),
                     onSuccess = {},
                     onFailure = {},
                     onDismiss = {},
@@ -3159,7 +3164,7 @@ class PromptFeatureTest {
 
             val shareRequest =
                 PromptRequest.Share(
-                    ShareData("Title", "Text", null),
+                    ShareData("Title", "Text", null, private = false),
                     onSuccess = {},
                     onFailure = {},
                     onDismiss = {},
@@ -3361,6 +3366,7 @@ class PromptFeatureTest {
                     expiryMonth = "5",
                     expiryYear = "2030",
                     cardType = "",
+                    cardCvv = null,
                 )
 
             val request =
@@ -3397,6 +3403,7 @@ class PromptFeatureTest {
                     expiryMonth = "5",
                     expiryYear = "2030",
                     cardType = "",
+                    cardCvv = null,
                 )
             var onDismissCalled = false
             var onConfirmCalled = false
@@ -3452,6 +3459,7 @@ class PromptFeatureTest {
                     expiryMonth = "5",
                     expiryYear = "2030",
                     cardType = "",
+                    cardCvv = null,
                 )
             val request =
                 PromptRequest.SaveCreditCard(
@@ -3490,6 +3498,7 @@ class PromptFeatureTest {
                     expiryMonth = "5",
                     expiryYear = "2030",
                     cardType = "",
+                    cardCvv = null,
                 )
             val promptRequest =
                 PromptRequest.SaveCreditCard(
@@ -3553,6 +3562,7 @@ class PromptFeatureTest {
                     expiryMonth = "5",
                     expiryYear = "2030",
                     cardType = "",
+                    cardCvv = null,
                 )
             val request =
                 PromptRequest.SaveCreditCard(

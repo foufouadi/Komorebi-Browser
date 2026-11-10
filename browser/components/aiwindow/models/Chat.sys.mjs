@@ -4,7 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-import { openAIEngine } from "moz-src:///browser/components/aiwindow/models/openAIEngine.sys.mjs";
+import { AuthProvider } from "moz-src:///browser/components/aiwindow/models/AuthProvider.sys.mjs";
 import { MESSAGE_ROLE } from "moz-src:///browser/components/aiwindow/models/Conversation.sys.mjs";
 import {
   toolsConfig,
@@ -18,20 +18,22 @@ import {
   GET_USER_MEMORIES,
   GET_NAVIGATION_INFO,
   MANAGE_TABS,
-  WORLD_CUP_MATCHES,
-  WORLD_CUP_LIVE,
-  WORLD_CUP_TOOLS,
-  WORLD_CUP_PREF,
+  AITAB_PREF,
+  AITAB_TOOLS,
+  INCLUDE_CHAT_TAB_PREF,
+  GENERATE_AITAB,
   ADD_MEMORY,
   SEARCH_THE_WEB,
-  SEARCH_THE_WEB_FAST_PREF,
-  SEARCH_THE_WEB_TOOL_CONFIG_FAST,
+  SEARCH_THE_WEB_PATH,
+  searchTheWebToolConfig,
+  selectSearchTheWebPath,
   GET_SKILL,
 } from "moz-src:///browser/components/aiwindow/models/Tools.sys.mjs";
 import { runSearchTheWeb } from "moz-src:///browser/components/aiwindow/models/search/SearchWorkflow.sys.mjs";
 
 import { expandUrlTokensInToolParams } from "moz-src:///browser/components/aiwindow/models/ChatUtils.sys.mjs";
 import { runLLMaJTelemetry } from "moz-src:///browser/components/aiwindow/models/TelemetryUtils.sys.mjs";
+import { getSmartPageName } from "chrome://browser/content/aiwindow/modules/TrustedInternalURLs.mjs";
 
 /**
  * Execute a specific tool and return the result
@@ -43,7 +45,8 @@ import { runLLMaJTelemetry } from "moz-src:///browser/components/aiwindow/models
  * @param {ChatConversation} conversation - The conversation context
  * @param {BrowsingContext} browsingContext - The browsing context (can be null for some tools)
  * @param {string} mode - The mode of operation (e.g., "fullpage", "sidebar", "urlbar")
- * @returns {Promise<object>} The result of the tool execution
+ * @returns {Promise<object>} The result of the tool execution, or
+ *   `{ toolResult, cardShown }` for manage_tabs
  * @private
  */
 export async function executeToolByName(
@@ -58,7 +61,10 @@ export async function executeToolByName(
   switch (toolName) {
     case GET_PAGE_CONTENT: {
       const startTime = new Date();
-      result = await GetPageContent.getPageContent(toolParams, conversation);
+      result = await GetPageContent.getPageContentText(
+        toolParams,
+        conversation
+      );
       Glean.smartWindow.getPageContent.record({
         location: mode,
         chat_id: conversation.id,
@@ -85,7 +91,7 @@ export async function executeToolByName(
       break;
     }
     case GET_OPEN_TABS:
-      result = await toolFns.getOpenTabs(conversation);
+      result = await toolFns.getOpenTabs(toolParams, conversation);
       break;
     case SEARCH_BROWSING_HISTORY:
       result = await toolFns.searchBrowsingHistory(toolParams, conversation);
@@ -113,7 +119,7 @@ export async function executeToolByName(
       if (uiData) {
         conversation.addUIToolToCurrentMessage(toolCallId, uiData);
       }
-      result = toolResult;
+      result = { toolResult, cardShown: !!uiData };
       break;
     }
     case ADD_MEMORY: {
@@ -134,41 +140,178 @@ export async function executeToolByName(
  * added or removed independently of the main tool dispatch. Lookups happen
  * before the main switch so each new gated tool does not grow
  * fetchWithHistory's cyclomatic complexity.
+ *
  */
 const FEATURE_GATED_HANDLERS = new Map([
-  [WORLD_CUP_MATCHES, toolFns.worldCupMatches],
-  [WORLD_CUP_LIVE, toolFns.worldCupLive],
   [SEARCH_THE_WEB, runSearchTheWeb],
+  [GENERATE_AITAB, runGenerateAiTab],
 ]);
 
 /**
- * Slow tools that surface the action log's pending row before their handler
- * resolves (not the same as feature-gating). Only list tools whose action log
- * row is body-independent, since the pending row uses a placeholder body.
+ * @typedef {object} GenerateAiTabFailure
+ * @property {false} success - If the AITab was generated successfully
+ * @property {string} toolResult - A tool result message
  */
-const TOOLS_WITH_PENDING_ACTION_LOG = new Set([SEARCH_THE_WEB]);
+
+/**
+ * @typedef {object} GenerateAiTabToolUI
+ * @property {"aitab"} uiType - The ToolUI type
+ * @property {{
+ *  state: "choose",
+ *  viewerURL: string,
+ *  title: string
+ * }} properties - The ToolUI update data for the AITab progress card
+ */
+
+/**
+ * @typedef {object} GenerateAiTabSuccess
+ * @property {true} success - If the AITab was generated successfully
+ * @property {{message: string, page: {slug: string}}} toolResult - The
+ *   model response and the stored page's slug
+ * @property {GenerateAiTabToolUI} [uiData] - Data to update the ToolUI,
+ *   absent for a modification
+ */
+
+/**
+ * @typedef {object} GenerateAiTabResult
+ * @property {boolean} success - If the AITab was generated successfully
+ * @property {GenerateAiTabSuccess["toolResult"] | string} toolResult - The
+ *   tool result for the model
+ * @property {boolean} endsTurn - Whether the ToolUI card is the response, so
+ *   the model gets no follow-up turn
+ */
+
+/**
+ * Tool entrypoint for generate_aitab. Attaches the AITab options
+ * after the page has been generated and saved.
+ *
+ * @param {object} params
+ * @param {string[]} [params.url_list] - List of URLs to use to generate the AITab
+ * @param {string} [params.focus] - A focus string used to generate the AITab
+ * @param {ChatConversation} conversation - ChatConversation that initiated AITab
+ * @param {AbortSignal} [signal] - Cancels in-flight page extractions.
+ * @param {any} _mode - Operation mode, unused
+ * @param {string} [toolCallId] - The tool call's ID
+ * @param {BrowsingContext} [browsingContext] - The chat's browsing context,
+ *   used to find the selected tab of its window
+ *
+ * @returns {Promise<GenerateAiTabResult>} The tool response after attaching
+ *   its UI data to the conversation.
+ */
+async function runGenerateAiTab(
+  params,
+  conversation,
+  signal,
+  _mode,
+  toolCallId,
+  browsingContext
+) {
+  const { success, toolResult, uiData } = await toolFns.createAITab(
+    params,
+    conversation,
+    signal
+  );
+
+  if (toolCallId && uiData) {
+    conversation.addUIToolToCurrentMessage(toolCallId, uiData);
+  } else if (success) {
+    reloadSelectedSmartPage(browsingContext, toolResult.page.slug);
+  }
+
+  return { success, toolResult, endsTurn: success && !!uiData };
+}
+
+/**
+ * Reloads the selected tab of the chat's window when it shows the page with
+ * `slug`, so a modified page displays its new version.
+ *
+ * @param {BrowsingContext} [browsingContext]
+ * @param {string} slug
+ */
+function reloadSelectedSmartPage(browsingContext, slug) {
+  const browser = browsingContext?.topChromeWindow?.gBrowser?.selectedBrowser;
+  const url = browser?.currentURI && URL.parse(browser.currentURI.spec);
+  if (getSmartPageName(url) === slug) {
+    browser.reload();
+  }
+}
+
+/**
+ * Slow tools that surface the action log's pending row before their handler
+ * resolves (not the same as feature-gating). Pending rows use a placeholder
+ * body, so tools with body-dependent labels must provide a pendingLabel.
+ */
+const TOOLS_WITH_PENDING_ACTION_LOG = new Set([SEARCH_THE_WEB, GENERATE_AITAB]);
+
+/**
+ * Splits a tool result into the reply the tool is writing for the user, if any,
+ * and the body that stays in the conversation. Only the answers path of
+ * search_the_web sets `directAnswerStream`; it is lifted out both because a
+ * generator is not something to serialize into a tool message, and because the
+ * prose it carries becomes the assistant turn rather than history the model
+ * answers from.
+ *
+ * Requiring an async-iterable `directAnswerStream` is the whole guard: it
+ * already excludes every other result shape a tool returns, including the
+ * arrays and strings the rest-destructure below would otherwise mangle.
+ *
+ * @param {unknown} result
+ * @returns {{directAnswerStream: AsyncGenerator<object>|null, toolBody: unknown}}
+ */
+function splitDirectAnswerStream(result) {
+  if (
+    typeof result?.directAnswerStream?.[Symbol.asyncIterator] !== "function"
+  ) {
+    return { directAnswerStream: null, toolBody: result };
+  }
+  const { directAnswerStream, ...toolBody } = result;
+  return { directAnswerStream, toolBody };
+}
 
 /**
  * Removes any feature-gated tools whose enable pref is currently off, so the
  * model is never offered tools the build is not configured to support, and
  * swaps in pref-selected variants of a tool's config.
  *
+ * Treats `tools` as read-only: it only ever drops or substitutes whole entries,
+ * so every operation here must be non-mutating (`filter`/`map`/`toSorted`, never
+ * `splice`/`sort`/index assignment). Callers pass the shared `toolsConfig`
+ * constant, and when no gate applies it is returned by identity.
+ *
  * @param {object[]} tools
+ * @param {ChatConversation} conversation
  * @returns {object[]}
  */
-function filterFeatureGatedTools(tools) {
+function filterFeatureGatedTools(tools, conversation) {
   let filtered = tools;
-  if (!Services.prefs.getBoolPref(WORLD_CUP_PREF, false)) {
-    filtered = filtered.filter(t => !WORLD_CUP_TOOLS.has(t.function?.name));
-  }
-  // The two search_the_web paths return different shapes, so the description
-  // and parameters the model sees have to match the path that will run.
-  if (Services.prefs.getBoolPref(SEARCH_THE_WEB_FAST_PREF, false)) {
+  // The three search_the_web paths return different shapes, so the description
+  // and parameters the model sees have to match the path that will run. Both
+  // this and runSearchTheWeb's dispatch read the same selectSearchTheWebPath,
+  // so they cannot disagree about which one that is.
+  const searchTheWebConfig = searchTheWebToolConfig(conversation);
+  if (searchTheWebConfig) {
     filtered = filtered.map(t =>
-      t.function?.name === SEARCH_THE_WEB
-        ? structuredClone(SEARCH_THE_WEB_TOOL_CONFIG_FAST)
-        : t
+      t.function?.name === SEARCH_THE_WEB ? searchTheWebConfig : t
     );
+  }
+  if (!Services.prefs.getBoolPref(AITAB_PREF, false)) {
+    filtered = filtered.filter(t => !AITAB_TOOLS.has(t.function?.name));
+  }
+  if (!Services.prefs.getBoolPref(INCLUDE_CHAT_TAB_PREF, false)) {
+    filtered = filtered.map(t => {
+      if (t.function.name !== MANAGE_TABS) {
+        return t;
+      }
+      const properties = { ...t.function.parameters.properties };
+      delete properties.include_chat_tab;
+      return {
+        ...t,
+        function: {
+          ...t.function,
+          parameters: { ...t.function.parameters, properties },
+        },
+      };
+    });
   }
   return filtered;
 }
@@ -182,7 +325,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
 
 ChromeUtils.defineLazyGetter(lazy, "console", () =>
   console.createInstance({
-    prefix: "Conversation",
+    logModule: "Conversation",
     maxLogLevelPref: "browser.smartwindow.conversation.logLevel",
   })
 );
@@ -225,6 +368,17 @@ function recordToolCallEvent({ toolName, mode, conversation, error }) {
     error,
   });
 }
+
+/**
+ * Work performed by a successfully completed chat turn.
+ *
+ * @typedef {object} ChatTurnResult
+ * @property {number | null} outputTokens - Backend completion tokens across chat
+ *   model responses, excluding direct tool answer streams, or null if any chat
+ *   model response omitted usage.
+ * @property {number} toolCallCount - Model-requested tool executions attempted,
+ *   including execution failures but excluding calls rejected before execution.
+ */
 
 /**
  * Chat
@@ -283,9 +437,31 @@ function logConversationStream(turn, action, data = null, extraText = "") {
   }
 }
 
+/** @typedef {{modify_slug: string | undefined}} AITabToolUIArgs */
+/** @typedef {AITabToolUIArgs | undefined} ToolUIArgs */
+
+/**
+ * Gets the necessary ToolUI args for a particular ToolUI
+ * so it can add the args to the tool message
+ *
+ * @param {string} toolName
+ * @param {object} toolParams
+ *
+ * @returns {ToolUIArgs}
+ */
+function getToolUIArgs(toolName, toolParams) {
+  switch (toolName) {
+    case GENERATE_AITAB:
+      return { modify_slug: toolParams.modify_slug };
+    default:
+      return undefined;
+  }
+}
+
 Object.assign(Chat, {
   lastUsage: null,
 
+  /* eslint-disable complexity -- TODO Bug 2075083 - complexity 58/54 over limit */
   /**
    * Stream assistant output with tool-call support.
    * Yields assistant text chunks as they arrive. If the model issues tool calls,
@@ -297,8 +473,19 @@ Object.assign(Chat, {
    * @param {BrowsingContext} options.browsingContext - Omitted for tests only.
    * @param {"fullpage" | "sidebar" | "urlbar"} options.mode - See the MODE in ai-window.mjs
    * @param {AbortSignal} [options.signal]
+   * @param {Promise<string|null>} [options.tokenPromise] - A token
+   *   fetch the caller already started, so a cold or expired token resolves
+   *   alongside prompt construction rather than after it. Omit to fetch here.
+   * @returns {Promise<ChatTurnResult | null>} Completed-turn work counts, or null
+   *   if the turn was stopped early or handed off to another surface.
    */
-  async fetchWithHistory({ conversation, browsingContext, mode, signal }) {
+  async fetchWithHistory({
+    conversation,
+    browsingContext,
+    mode,
+    signal,
+    tokenPromise,
+  }) {
     if (!browsingContext && !Cu.isInAutomation) {
       const err = new Error(
         "The browsingContext must exist for fetchWithHistory unless we're in automation."
@@ -306,12 +493,12 @@ Object.assign(Chat, {
       err.clientReason = "missingBrowsingContext";
       throw err;
     }
-    const fxAccountToken = await openAIEngine.getFxAccountToken();
-    if (!fxAccountToken) {
+    const token = await (tokenPromise ?? AuthProvider.getToken());
+    if (!token) {
       console.error("fetchWithHistory Account Token null or undefined");
-      const fxaError = new Error("FxA token unavailable");
-      fxaError.clientReason = "fxaTokenUnavailable";
-      throw fxaError;
+      const tokenError = new Error("Token unavailable");
+      tokenError.clientReason = "fxaTokenUnavailable";
+      throw tokenError;
     }
 
     const currentTurn = conversation.currentTurnIndex();
@@ -322,9 +509,11 @@ Object.assign(Chat, {
      * comment above tool execution for further details.
      */
     const isVerbatimQuery = currentTurn === 0;
-    let chatToolsConfig = filterFeatureGatedTools(structuredClone(toolsConfig));
+    const chatToolsConfig = filterFeatureGatedTools(toolsConfig, conversation);
 
     let fullResponseText = "";
+    /** @type {ChatTurnResult} */
+    const turnResult = { outputTokens: 0, toolCallCount: 0 };
 
     // A search handoff sets `_searchExecutedTurn` (in executeToolByName). If a
     // later re-entry on the same turn (openSidebarAndContinue -> fetchWithHistory)
@@ -335,6 +524,20 @@ Object.assign(Chat, {
     const streamModelResponse = () => {
       const snapshot = conversation.compactChatCompletions();
 
+      const stream = conversation.runWithGenerator({
+        streamOptions: { enabled: true },
+        token,
+        chatId: conversation.id,
+        tools: chatToolsConfig,
+        args: snapshot,
+        inferenceParams: { tool_choice: "auto" },
+        signal,
+      });
+
+      // Logged after runWithGenerator, which is what commits the flags, so the
+      // ones printed are the ones this request is actually governed by. The
+      // generator body does not run until it is iterated, so nothing has been
+      // sent yet.
       lazy.console.log(
         `Request (${conversation.securityProperties.getLogText()})`,
         snapshot.at(-1)
@@ -343,15 +546,7 @@ Object.assign(Chat, {
       // Debug logging: Record only the latest message being sent to the model
       logConversationStream(currentTurn, "CHAT SEND", snapshot.at(-1));
 
-      return conversation.runWithGenerator({
-        streamOptions: { enabled: true },
-        fxAccountToken,
-        chatId: conversation.id,
-        tools: chatToolsConfig,
-        args: snapshot,
-        inferenceParams: { tool_choice: "auto" },
-        signal,
-      });
+      return stream;
     };
 
     while (true) {
@@ -371,6 +566,11 @@ Object.assign(Chat, {
         );
         fullResponseText = response.fullResponseText;
         pendingToolCalls = response.pendingToolCalls;
+        turnResult.outputTokens =
+          turnResult.outputTokens !== null &&
+          response.usage?.completion_tokens != null
+            ? turnResult.outputTokens + response.usage.completion_tokens
+            : null;
 
         // Debug logging: Record the raw text and requested tool calls from the model
         logConversationStream(currentTurn, "CHAT RECV", {
@@ -401,105 +601,41 @@ Object.assign(Chat, {
           // We only run telemetry on our own endpoints
           runLLMaJTelemetry(conversation);
         }
-        return;
+
+        return signal?.aborted ? null : turnResult;
       }
 
       if (signal?.aborted) {
         logConversationStream(currentTurn, "STREAM END", null, "aborted");
-        return;
+
+        return null;
       }
 
-      const firstPending = pendingToolCalls[0]?.function;
-      // A search handoff already ran this turn (a prior fetchWithHistory that
-      // openSidebarAndContinue re-entered on the same turn). Block a repeat
-      // search_the_web and force a text-only turn so the assistant wraps up
-      // rather than re-triggering the handoff, which would loop indefinitely.
-      if (firstPending?.name === SEARCH_THE_WEB && searchExecuted) {
-        for (const tc of pendingToolCalls.slice(0, 1)) {
-          // Append the tool_call before the error result so the message order
-          // satisfies OpenAI's assistant-then-tool sequence.
-          conversation.addAssistantMessage("function", {
-            tool_calls: [
-              {
-                id: tc.id,
-                type: "function",
-                function: {
-                  name: tc.function.name,
-                  arguments: tc.function.arguments || "{}",
-                },
-              },
-            ],
-          });
-          conversation.addToolCallMessage({
-            tool_call_id: tc.id,
-            body: "ERROR: search_the_web tool call error: You have already searched this turn. Respond to the user with what you found and ask if they want you to search again.",
-            name: tc.function.name,
-          });
-          recordToolCallEvent({
-            toolName: tc.function.name,
-            mode,
-            conversation,
-            error: "duplicate_search",
-          });
+      // Ensure all serialized tool calls have arguments and expand URL tokens.
+      const toolCalls = structuredClone(pendingToolCalls);
+      for (const toolCall of toolCalls) {
+        if (!toolCall.function.arguments) {
+          toolCall.function.arguments = "{}";
         }
-        continue;
+        expandUrlTokensInToolParams(toolCall.function, conversation.tokenToUrl);
       }
-      // If the user disabled memories in the last message, the assistant
-      // should not be able to retrieve them using the get_user_memories tool
-      else if (firstPending?.name === GET_USER_MEMORIES) {
-        const lastUserMessage =
-          conversation.messages.findLast(m => m.role === MESSAGE_ROLE.USER) ??
-          null;
-        if (lastUserMessage.memoriesEnabled === false) {
-          for (const tc of pendingToolCalls.slice(0, 1)) {
-            const content = {
-              tool_call_id: tc.id,
-              body: "ERROR: get_user_memories tool call error: inform the user that they have disabled memories, so they cannot be retrieved.",
-              name: tc.function.name,
-            };
-            // Append the tool_call BEFORE the error result so the message order
-            // satisfies OpenAI's assistant-then-tool sequence.
-            conversation.addAssistantMessage("function", {
-              tool_calls: [
-                {
-                  id: tc.id,
-                  type: "function",
-                  function: {
-                    name: tc.function.name,
-                    arguments: tc.function.arguments || "{}",
-                  },
-                },
-              ],
-            });
-            conversation.addToolCallMessage(content);
-            recordToolCallEvent({
-              toolName: tc.function.name,
-              mode,
-              conversation,
-              error: "memories_disabled",
-            });
-          }
-          continue;
-        }
-      }
-
-      // @todo Bug 2006159 - Implement parallel tool calling
-
-      // Take the last tool call and ensure the serialized tool calls expand any
-      // URL tokens.
-      const lastToolCall = structuredClone(pendingToolCalls[0]);
-      if (!lastToolCall.function.arguments) {
-        // Ensure that the arguments are always present.
-        lastToolCall.function.arguments = "{}";
-      }
-      expandUrlTokensInToolParams(
-        lastToolCall.function,
-        conversation.tokenToUrl
-      );
 
       conversation.addAssistantMessage("function", {
-        tool_calls: [lastToolCall],
+        tool_calls: toolCalls,
       });
+
+      const toolMessages = new Map(
+        pendingToolCalls.map(toolCall => [
+          toolCall.id,
+          conversation.addToolCallMessage({
+            tool_call_id: toolCall.id,
+            body: { pending: true },
+          }),
+        ])
+      );
+      const unresolvedToolCalls = new Set(pendingToolCalls);
+      let activeToolCall = null;
+      let isSearchHandoff = false;
 
       lazy.AIWindow.chatStore?.updateConversation(conversation).catch(() => {});
 
@@ -509,10 +645,137 @@ Object.assign(Chat, {
         `chat-tools-detected(${pendingToolCalls.length})`
       );
 
-      for (const toolCall of pendingToolCalls) {
+      const resolveToolCall = (toolCall, content) => {
+        if (!unresolvedToolCalls.delete(toolCall)) {
+          return false;
+        }
+        conversation.updateToolCallMessage(
+          toolMessages.get(toolCall.id),
+          content
+        );
+        if (!unresolvedToolCalls.size) {
+          signal?.removeEventListener("abort", abortToolCalls);
+        }
+        return true;
+      };
+
+      // Resolve skipped calls in place so they stay with their original batch.
+      const resolveToolCalls = (calls, body, error) => {
+        for (const remaining of calls) {
+          const content = {
+            tool_call_id: remaining.id,
+            body: { error: body },
+          };
+          const { name, args } = toolMessages.get(remaining.id).content;
+          if (name) {
+            content.name = name;
+            content.args = args;
+          }
+          if (!resolveToolCall(remaining, content)) {
+            continue;
+          }
+          recordToolCallEvent({
+            toolName: remaining.function?.name || "",
+            mode,
+            conversation,
+            error,
+          });
+        }
+      };
+
+      const abortToolCalls = () => {
+        if (isSearchHandoff) {
+          return;
+        }
+        resolveToolCalls(
+          [...unresolvedToolCalls].filter(tc => tc !== activeToolCall),
+          "Tool call skipped because the response was stopped.",
+          "aborted"
+        );
+        lazy.AIWindow.chatStore
+          ?.updateConversation(conversation)
+          .catch(() => {});
+      };
+      signal?.addEventListener("abort", abortToolCalls, { once: true });
+
+      // runSearchTheWeb escalates to a search handoff once a search has run
+      // this turn. The calls in one batch are a single model round, so each
+      // search sees the state from before the batch; the handoff waits for
+      // the next round.
+      const shouldSearchHandoff =
+        conversation._searchTheWebTurn === currentTurn;
+      const answersToolCall =
+        !searchExecuted &&
+        !shouldSearchHandoff &&
+        selectSearchTheWebPath(conversation) === SEARCH_THE_WEB_PATH.ANSWERS
+          ? (pendingToolCalls.find(tc => {
+              if (tc.function?.name !== SEARCH_THE_WEB) {
+                return false;
+              }
+              try {
+                const query = JSON.parse(tc.function.arguments || "{}")?.query;
+                return typeof query === "string" && Boolean(query.trim());
+              } catch {
+                return false;
+              }
+            }) ?? null)
+          : null;
+      const orderedToolCalls = answersToolCall
+        ? [
+            answersToolCall,
+            ...pendingToolCalls.filter(tc => tc !== answersToolCall),
+          ]
+        : pendingToolCalls;
+
+      for (const toolCall of orderedToolCalls) {
+        if (signal?.aborted) {
+          abortToolCalls();
+          logConversationStream(currentTurn, "STREAM END", null, "aborted");
+
+          return null;
+        }
+
+        activeToolCall = null;
+        isSearchHandoff = false;
+
         const { id, function: functionSpec } = toolCall;
         const toolName = functionSpec?.name || "";
         let toolParams = {};
+
+        let blockedError = "";
+        let blockedBody;
+        // A search handoff already ran this turn. Block a repeat search so
+        // openSidebarAndContinue cannot re-trigger the handoff in a loop.
+        if (toolName === SEARCH_THE_WEB && searchExecuted) {
+          blockedError = "duplicate_search";
+          blockedBody =
+            "ERROR: search_the_web tool call error: You have already searched this turn. Respond to the user with what you found and ask if they want you to search again.";
+        } else if (toolName === GET_USER_MEMORIES) {
+          // If the user disabled memories in the last message, the assistant
+          // should not be able to retrieve them using the get_user_memories tool.
+          const lastUserMessage = conversation.messages.findLast(
+            m => m.role === MESSAGE_ROLE.USER
+          );
+          if (lastUserMessage?.memoriesEnabled === false) {
+            blockedError = "memories_disabled";
+            blockedBody =
+              "ERROR: get_user_memories tool call error: inform the user that they have disabled memories, so they cannot be retrieved.";
+          }
+        }
+        if (blockedError) {
+          resolveToolCall(toolCall, {
+            tool_call_id: id,
+            body: blockedBody,
+            name: toolName,
+          });
+          recordToolCallEvent({
+            toolName,
+            mode,
+            conversation,
+            error: blockedError,
+          });
+          continue;
+        }
 
         ChromeUtils.addProfilerMarker(
           "SmartWindow",
@@ -537,7 +800,7 @@ Object.assign(Chat, {
             tool_call_id: id,
             body: { error: "Invalid JSON arguments" },
           };
-          conversation.addToolCallMessage(content);
+          resolveToolCall(toolCall, content);
           recordToolCallEvent({
             toolName,
             mode,
@@ -554,8 +817,12 @@ Object.assign(Chat, {
         // Dispatch the required arguments to different tool calls. Wrap this in a
         // try/catch so the conversation can be updated for failed calls.
         let result;
+        let aiTabEndsTurn = false;
+        let tabCardShown = false;
         let toolCallError = "";
-        let isSearchHandoff = false;
+        // Set when the tool is writing the user-facing reply itself, in which
+        // case it is delivered below and the model gets no follow-up turn.
+        let directAnswerStream = null;
         const featureGatedHandler = FEATURE_GATED_HANDLERS.get(toolName);
         const dispatchTool = name =>
           executeToolByName(
@@ -570,29 +837,42 @@ Object.assign(Chat, {
         // Emit the tool message up front with a `pending`-marked placeholder
         // body so the action log renders its pending row while the slow work
         // runs; the real result is reconciled into the same row below.
-        let pendingToolMessage = null;
+        // Show the action log's pending row when the slow tool starts.
+        const toolUIArgs = getToolUIArgs(toolName, toolParams);
+        activeToolCall = toolCall;
+        const pendingToolMessage = toolMessages.get(id);
         if (TOOLS_WITH_PENDING_ACTION_LOG.has(toolName)) {
-          pendingToolMessage = conversation.addToolCallMessage({
+          conversation.updateToolCallMessage(pendingToolMessage, {
             tool_call_id: id,
             body: { pending: true },
             name: toolName,
+            args: toolUIArgs,
           });
         }
+
+        turnResult.toolCallCount++;
 
         try {
           if (featureGatedHandler) {
             result = await featureGatedHandler(
               toolParams,
               conversation,
-              signal
+              signal,
+              mode,
+              toolName === SEARCH_THE_WEB ? shouldSearchHandoff : id,
+              browsingContext
             );
+            if (toolName === GENERATE_AITAB) {
+              aiTabEndsTurn = result.endsTurn;
+              result = result.toolResult;
+            }
             /**
              * On the first invocation of search_the_web, SearchProvider-powered
              * web search is done. On the second invocation, search handoff (previously
              * run_search tool) is called. The logic for run_search is maintained, including
              * the instruction to use the user's original query if this is the first turn
              */
-            if (result.requiresSearchHandoff) {
+            if (!signal?.aborted && result.requiresSearchHandoff) {
               isSearchHandoff = true;
               // Mark the turn as having handed off, so a re-entry on the same
               // turn (via openSidebarAndContinue) blocks a repeat search.
@@ -604,6 +884,10 @@ Object.assign(Chat, {
             }
           } else {
             result = await dispatchTool(toolName);
+            if (toolName === MANAGE_TABS) {
+              tabCardShown = result.cardShown;
+              result = result.toolResult;
+            }
           }
 
           // Debug logging: Record the data returned by the tool before feeding it to the model
@@ -620,9 +904,17 @@ Object.assign(Chat, {
             `chat-run-tool-complete(${toolName})`
           );
 
-          const content = { tool_call_id: id, body: result, name: toolName };
-          conversation.updateToolCallMessage(pendingToolMessage, content);
+          const split = splitDirectAnswerStream(result);
+          directAnswerStream = split.directAnswerStream;
+          const content = {
+            tool_call_id: id,
+            body: split.toolBody,
+            name: toolName,
+            args: toolUIArgs,
+          };
+          resolveToolCall(toolCall, content);
         } catch (error) {
+          isSearchHandoff = false;
           console.error(error);
           toolCallError = "execution_failed";
           result = { error: `Tool execution failed: ${String(error)}` };
@@ -634,11 +926,32 @@ Object.assign(Chat, {
           // Only carry `name` (which drives the action-log card) when we
           // already showed a pending row, so it resolves. Otherwise a failed
           // call renders nothing, as before.
-          const content = { tool_call_id: id, body: result };
-          if (pendingToolMessage) {
+          const content = { tool_call_id: id, body: result, args: toolUIArgs };
+          if (pendingToolMessage.content.name) {
             content.name = toolName;
           }
-          conversation.updateToolCallMessage(pendingToolMessage, content);
+          resolveToolCall(toolCall, content);
+        } finally {
+          if (toolName === GENERATE_AITAB && !aiTabEndsTurn) {
+            const message = conversation.messages.findLast(
+              m => m.toolUIData?.toolCallId === id
+            );
+            if (message) {
+              await conversation.updateToolUI(message, {}, null);
+            }
+          }
+        }
+
+        // A failed search returns an error-bearing result rather than
+        // throwing, which would otherwise count as a success. The precise
+        // category is on the search_the_web event.
+        if (
+          !toolCallError &&
+          !isSearchHandoff &&
+          toolName === SEARCH_THE_WEB &&
+          result?.error
+        ) {
+          toolCallError = "execution_failed";
         }
 
         recordToolCallEvent({
@@ -648,47 +961,74 @@ Object.assign(Chat, {
           error: toolCallError,
         });
 
+        if (signal?.aborted && !isSearchHandoff) {
+          abortToolCalls();
+          logConversationStream(currentTurn, "STREAM END", null, "aborted");
+
+          return null;
+        }
+
+        const endsTurn =
+          tabCardShown ||
+          aiTabEndsTurn ||
+          directAnswerStream ||
+          isSearchHandoff;
+        if (endsTurn) {
+          resolveToolCalls(
+            [...unresolvedToolCalls],
+            "Tool call skipped because another tool ended the turn.",
+            "skipped"
+          );
+        }
+
         lazy.AIWindow.chatStore
           ?.updateConversation(conversation)
           .catch(() => {});
 
-        // MANAGE_TABS is terminal - UI handles the interaction.
-        if (toolName === MANAGE_TABS) {
+        // These successful tools finish their turns in the UI.
+        if (tabCardShown || aiTabEndsTurn) {
+          // These tool calls need to return early so any staged
+          // security flags that have accumulated up to this point
+          // need to be committed before returning since the commit
+          // at the end of the loop will not be reached.
           conversation.securityProperties.commit();
-          return;
+
+          return signal?.aborted ? null : turnResult;
+        }
+
+        // Also terminal: the tool is writing the reply itself (the answers path
+        // of search_the_web), so stream it into the assistant message rather
+        // than spending another model turn rewriting prose we already have.
+        // Same receiveResponse the model's own output goes through, so it picks
+        // up the streaming updates, citations, persistence and completion.
+        if (directAnswerStream) {
+          await conversation.receiveResponse(directAnswerStream);
+          logConversationStream(currentTurn, "STREAM END", null, toolName);
+
+          return signal?.aborted ? null : turnResult;
         }
 
         // Perform the search handoff if the RUN_SEARCH tool was run.
         if (isSearchHandoff) {
-          // Commit here because we return early below and never reach the
-          // post-loop commit.
-          conversation.securityProperties.commit();
-          lazy.console.log(
-            `Security commit ${conversation.securityProperties.getLogText()}`
-          );
-
           const win = originalEmbedderElement?.documentGlobal;
           if (!win || win.closed) {
             console.error(
               "search_the_web: Associated window not available or closed, aborting search handoff"
             );
-            return;
+
+            return null;
           }
 
           lazy.AIWindow.openSidebarAndContinue(win, conversation);
-          return;
+
+          return null;
         }
-
-        // @todo Bug 2006159 - Implement parallel tool calling
-        break;
       }
+      if (signal?.aborted) {
+        logConversationStream(currentTurn, "STREAM END", null, "aborted");
 
-      // Commit flags once all tool calls in this batch have finished so that
-      // no tool call can observe flags staged by a sibling call.
-      conversation.securityProperties.commit();
-      lazy.console.log(
-        `Security commit ${conversation.securityProperties.getLogText()}`
-      );
+        return null;
+      }
     }
   },
 });

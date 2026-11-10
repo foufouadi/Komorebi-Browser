@@ -12,7 +12,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   DoHController: "moz-src:///toolkit/components/doh/DoHController.sys.mjs",
   EventDispatcher: "resource://gre/modules/Messaging.sys.mjs",
   PdfJs: "resource://pdf.js/PdfJs.sys.mjs",
-  GeckoViewPreferences: "resource://gre/modules/GeckoViewPreferences.sys.mjs",
+  GeckoViewPreferences:
+    "moz-src:///mobile/shared/components/geckoview/GeckoViewPreferences.sys.mjs",
 });
 
 const { debug, warn } = GeckoViewUtils.initLogging("Startup");
@@ -99,12 +100,12 @@ const JSWINDOWACTORS = {
     messageManagerGroups: ["browsers"],
     safeForUntrustedWebProcess: true,
   },
-  GeckoViewPdfjs: {
+  GeckoViewPdfJs: {
     parent: {
-      esModuleURI: "resource://pdf.js/GeckoViewPdfjsParent.sys.mjs",
+      esModuleURI: "resource://pdf.js/GeckoViewPdfJsParent.sys.mjs",
     },
     child: {
-      esModuleURI: "resource://pdf.js/GeckoViewPdfjsChild.sys.mjs",
+      esModuleURI: "resource://pdf.js/GeckoViewPdfJsChild.sys.mjs",
     },
     allFrames: true,
     safeForUntrustedWebProcess: true,
@@ -273,6 +274,7 @@ export class GeckoViewStartup {
             module: "resource://gre/modules/ChildCrashHandler.sys.mjs",
             observers: [
               "compositor:process-aborted",
+              "gmp-plugin-crash",
               "ipc:content-created",
               "ipc:content-shutdown",
               "process-type-set",

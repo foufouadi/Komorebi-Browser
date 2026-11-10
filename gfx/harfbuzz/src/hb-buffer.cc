@@ -328,14 +328,22 @@ hb_buffer_t::enter ()
   deallocate_var_all ();
   serial = 0;
   scratch_flags = HB_BUFFER_SCRATCH_FLAG_DEFAULT;
+  /* enter() now runs on every shape, including hb_shape_plan_execute().
+   * Compute the per-text limit as before, but if internal code has already
+   * narrowed a limit below the idle default (e.g. the fault injection in
+   * test-graphite2-buffer), keep the stricter value.  Public paths always
+   * arrive at the defaults (from hb_buffer_create() / leave()), so they get
+   * the computed per-text limit unchanged. */
   unsigned mul;
   if (likely (!hb_unsigned_mul_overflows (len, HB_BUFFER_MAX_LEN_FACTOR, &mul)))
   {
-    max_len = hb_max (mul, (unsigned) HB_BUFFER_MAX_LEN_MIN);
+    unsigned limit = hb_max (mul, (unsigned) HB_BUFFER_MAX_LEN_MIN);
+    max_len = max_len < HB_BUFFER_MAX_LEN_DEFAULT ? hb_min (max_len, limit) : limit;
   }
   if (likely (!hb_unsigned_mul_overflows (len, HB_BUFFER_MAX_OPS_FACTOR, &mul)))
   {
-    max_ops = hb_max (mul, (unsigned) HB_BUFFER_MAX_OPS_MIN);
+    int limit = (int) hb_max (mul, (unsigned) HB_BUFFER_MAX_OPS_MIN);
+    max_ops = max_ops < HB_BUFFER_MAX_OPS_DEFAULT ? hb_min (max_ops, limit) : limit;
   }
 }
 void
@@ -484,6 +492,13 @@ hb_buffer_t::move_to (unsigned int i)
     unsigned int count = i - out_len;
     if (unlikely (!make_room_for (count, count))) return false;
 
+    max_ops -= count;
+    if (unlikely (max_ops < 0))
+    {
+      successful = false;
+      return false;
+    }
+
     memmove (out_info + out_len, info + idx, count * sizeof (out_info[0]));
     idx += count;
     out_len += count;
@@ -503,6 +518,13 @@ hb_buffer_t::move_to (unsigned int i)
     if (unlikely (idx < count && !shift_forward (count - idx))) return false;
 
     assert (idx >= count);
+
+    max_ops -= count;
+    if (unlikely (max_ops < 0))
+    {
+      successful = false;
+      return false;
+    }
 
     idx -= count;
     out_len -= count;
@@ -547,29 +569,39 @@ void
 hb_buffer_t::merge_clusters_impl (unsigned int start,
 				  unsigned int end)
 {
-  max_ops -= end - start;
-  if (unlikely (max_ops < 0))
-    successful = false;
-
   unsigned int cluster = info[start].cluster;
 
   for (unsigned int i = start + 1; i < end; i++)
     cluster = hb_min (cluster, info[i].cluster);
 
-  /* Extend end */
-  if (cluster != info[end - 1].cluster)
-    while (end < len && info[end - 1].cluster == info[end].cluster)
-      end++;
+  /* Extending over neighboring same-cluster runs is work the font or
+   * text controls, so charge it to max_ops and stop once the budget is
+   * gone.  Callers keep calling after the buffer has failed. */
+  if (likely (successful))
+  {
+    /* Extend end */
+    if (cluster != info[end - 1].cluster)
+      while (end < len && info[end - 1].cluster == info[end].cluster)
+	end++;
 
-  /* Extend start */
-  if (cluster != info[start].cluster)
-    while (idx < start && info[start - 1].cluster == info[start].cluster)
-      start--;
+    /* Extend start */
+    if (cluster != info[start].cluster)
+      while (idx < start && info[start - 1].cluster == info[start].cluster)
+	start--;
 
-  /* If we hit the start of buffer, continue in out-buffer. */
-  if (idx == start && info[start].cluster != cluster)
-    for (unsigned int i = out_len; i && out_info[i - 1].cluster == info[start].cluster; i--)
-      set_cluster (out_info[i - 1], cluster);
+    /* If we hit the start of buffer, continue in out-buffer. */
+    if (idx == start && info[start].cluster != cluster)
+    {
+      unsigned int i;
+      for (i = out_len; i && out_info[i - 1].cluster == info[start].cluster; i--)
+	set_cluster (out_info[i - 1], cluster);
+      max_ops -= out_len - i;
+    }
+  }
+
+  max_ops -= end - start;
+  if (unlikely (max_ops < 0))
+    successful = false;
 
   for (unsigned int i = start; i < end; i++)
     set_cluster (info[i], cluster);
@@ -578,27 +610,40 @@ void
 hb_buffer_t::merge_out_clusters_impl (unsigned int start,
 				      unsigned int end)
 {
-  max_ops -= end - start;
-  if (unlikely (max_ops < 0))
-    successful = false;
-
   unsigned int cluster = out_info[start].cluster;
 
   for (unsigned int i = start + 1; i < end; i++)
     cluster = hb_min (cluster, out_info[i].cluster);
 
-  /* Extend start */
-  while (start && out_info[start - 1].cluster == out_info[start].cluster)
-    start--;
+  /* Same as merge_clusters_impl(): charge the extension, and skip it once
+   * the buffer has failed.  The cluster != ... guards also avoid walking a
+   * run that already holds the merged value; set_cluster() is a no-op on
+   * such a glyph, so output is unchanged. */
+  if (likely (successful))
+  {
+    /* Extend start */
+    if (cluster != out_info[start].cluster)
+      while (start && out_info[start - 1].cluster == out_info[start].cluster)
+	start--;
 
-  /* Extend end */
-  while (end < out_len && out_info[end - 1].cluster == out_info[end].cluster)
-    end++;
+    /* Extend end */
+    if (cluster != out_info[end - 1].cluster)
+      while (end < out_len && out_info[end - 1].cluster == out_info[end].cluster)
+	end++;
 
-  /* If we hit the end of out-buffer, continue in buffer. */
-  if (end == out_len)
-    for (unsigned int i = idx; i < len && info[i].cluster == out_info[end - 1].cluster; i++)
-      set_cluster (info[i], cluster);
+    /* If we hit the end of out-buffer, continue in buffer. */
+    if (end == out_len && out_info[end - 1].cluster != cluster)
+    {
+      unsigned int i;
+      for (i = idx; i < len && info[i].cluster == out_info[end - 1].cluster; i++)
+	set_cluster (info[i], cluster);
+      max_ops -= i - idx;
+    }
+  }
+
+  max_ops -= end - start;
+  if (unlikely (max_ops < 0))
+    successful = false;
 
   for (unsigned int i = start; i < end; i++)
     set_cluster (out_info[i], cluster);
@@ -619,12 +664,17 @@ hb_buffer_t::delete_glyph ()
   if (out_len)
   {
     /* Merge cluster backward. */
-    if (cluster < out_info[out_len - 1].cluster)
+    if (cluster < out_info[out_len - 1].cluster && likely (successful))
     {
       unsigned int mask = info[idx].mask;
       unsigned int old_cluster = out_info[out_len - 1].cluster;
-      for (unsigned i = out_len; i && out_info[i - 1].cluster == old_cluster; i--)
+      unsigned int i;
+      for (i = out_len; i && out_info[i - 1].cluster == old_cluster; i--)
 	set_cluster (out_info[i - 1], cluster, mask);
+
+      max_ops -= out_len - i;
+      if (unlikely (max_ops < 0))
+	successful = false;
     }
     goto done;
   }
@@ -661,12 +711,17 @@ hb_buffer_t::delete_glyphs_inplace (bool (*filter) (const hb_glyph_info_t *info)
       if (j)
       {
 	/* Merge cluster backward. */
-	if (cluster < info[j - 1].cluster)
+	if (cluster < info[j - 1].cluster && likely (successful))
 	{
 	  unsigned int mask = info[i].mask;
 	  unsigned int old_cluster = info[j - 1].cluster;
-	  for (unsigned k = j; k && info[k - 1].cluster == old_cluster; k--)
+	  unsigned int k;
+	  for (k = j; k && info[k - 1].cluster == old_cluster; k--)
 	    set_cluster (info[k - 1], cluster, mask);
+
+	  max_ops -= j - k;
+	  if (unlikely (max_ops < 0))
+	    successful = false;
 	}
 	continue;
       }
@@ -793,6 +848,9 @@ hb_buffer_create_similar (const hb_buffer_t *src)
 {
   hb_buffer_t *buffer = hb_buffer_create ();
 
+  if (unlikely (hb_object_is_immutable (buffer)))
+    return buffer;
+
   buffer->similar (*src);
 
   return buffer;
@@ -802,8 +860,12 @@ hb_buffer_create_similar (const hb_buffer_t *src)
  * hb_buffer_reset:
  * @buffer: An #hb_buffer_t
  *
- * Resets the buffer to its initial status, as if it was just newly created
- * with hb_buffer_create().
+ * Clears the buffer contents and segment properties, and restores the
+ * default Unicode functions and buffer settings.
+ *
+ * The message callback, its associated data, and any attached user data are
+ * preserved. To remove the message callback, call
+ * hb_buffer_set_message_func() with a `NULL` function.
  *
  * Since: 0.9.2
  **/
@@ -1410,6 +1472,9 @@ void
 hb_buffer_set_not_found_variation_selector_glyph (hb_buffer_t    *buffer,
 						  hb_codepoint_t  not_found_variation_selector)
 {
+  if (unlikely (hb_object_is_immutable (buffer)))
+    return;
+
   buffer->not_found_variation_selector = not_found_variation_selector;
 }
 
@@ -1478,8 +1543,12 @@ hb_buffer_get_random_state (const hb_buffer_t *buffer)
  * hb_buffer_clear_contents:
  * @buffer: An #hb_buffer_t
  *
- * Similar to hb_buffer_reset(), but does not clear the Unicode functions and
- * the replacement code point.
+ * Clears the buffer contents and segment properties (direction, script,
+ * language), and resets the random state to its default value of 1.
+ *
+ * Unlike hb_buffer_reset(), this function preserves the Unicode functions,
+ * flags, cluster level, replacement code point, and invisible and not-found
+ * glyphs. The message callback and attached user data are also preserved.
  *
  * Since: 0.9.11
  **/
@@ -1788,6 +1857,9 @@ hb_buffer_reverse_clusters (hb_buffer_t *buffer)
 void
 hb_buffer_guess_segment_properties (hb_buffer_t *buffer)
 {
+  if (unlikely (hb_object_is_immutable (buffer)))
+    return;
+
   buffer->guess_segment_properties ();
 }
 
@@ -2103,18 +2175,18 @@ normalize_glyphs_cluster (hb_buffer_t *buffer,
   hb_position_t total_x_advance = 0, total_y_advance = 0;
   for (unsigned int i = start; i < end; i++)
   {
-    total_x_advance += pos[i].x_advance;
-    total_y_advance += pos[i].y_advance;
+    total_x_advance = hb_saturate_add (total_x_advance, pos[i].x_advance);
+    total_y_advance = hb_saturate_add (total_y_advance, pos[i].y_advance);
   }
 
   hb_position_t x_advance = 0, y_advance = 0;
   for (unsigned int i = start; i < end; i++)
   {
-    pos[i].x_offset += x_advance;
-    pos[i].y_offset += y_advance;
+    pos[i].x_offset = hb_saturate_add (pos[i].x_offset, x_advance);
+    pos[i].y_offset = hb_saturate_add (pos[i].y_offset, y_advance);
 
-    x_advance += pos[i].x_advance;
-    y_advance += pos[i].y_advance;
+    x_advance = hb_saturate_add (x_advance, pos[i].x_advance);
+    y_advance = hb_saturate_add (y_advance, pos[i].y_advance);
 
     pos[i].x_advance = 0;
     pos[i].y_advance = 0;
@@ -2129,11 +2201,11 @@ normalize_glyphs_cluster (hb_buffer_t *buffer,
     hb_stable_sort (buffer->info + start, end - start - 1, compare_info_codepoint, buffer->pos + start);
   } else {
     /* Transfer all cluster advance to the first glyph. */
-    pos[start].x_advance += total_x_advance;
-    pos[start].y_advance += total_y_advance;
+    pos[start].x_advance = hb_saturate_add (pos[start].x_advance, total_x_advance);
+    pos[start].y_advance = hb_saturate_add (pos[start].y_advance, total_y_advance);
     for (unsigned int i = start + 1; i < end; i++) {
-      pos[i].x_offset -= total_x_advance;
-      pos[i].y_offset -= total_y_advance;
+      pos[i].x_offset = hb_saturate_sub (pos[i].x_offset, total_x_advance);
+      pos[i].y_offset = hb_saturate_sub (pos[i].y_offset, total_y_advance);
     }
     hb_stable_sort (buffer->info + start + 1, end - start - 1, compare_info_codepoint, buffer->pos + start + 1);
   }
@@ -2258,15 +2330,20 @@ hb_buffer_diff (hb_buffer_t *buffer,
 
   if (buffer->content_type == HB_BUFFER_CONTENT_TYPE_GLYPHS)
   {
+    auto position_diff = [] (hb_position_t a, hb_position_t b) -> uint64_t
+    {
+      int64_t diff = (int64_t) a - b;
+      return diff < 0 ? -diff : diff;
+    };
     assert (buffer->have_positions);
     const hb_glyph_position_t *buf_pos = buffer->pos;
     const hb_glyph_position_t *ref_pos = reference->pos;
     for (unsigned int i = 0; i < count; i++)
     {
-      if ((unsigned int) abs (buf_pos->x_advance - ref_pos->x_advance) > position_fuzz ||
-	  (unsigned int) abs (buf_pos->y_advance - ref_pos->y_advance) > position_fuzz ||
-	  (unsigned int) abs (buf_pos->x_offset - ref_pos->x_offset) > position_fuzz ||
-	  (unsigned int) abs (buf_pos->y_offset - ref_pos->y_offset) > position_fuzz)
+      if (position_diff (buf_pos->x_advance, ref_pos->x_advance) > position_fuzz ||
+	  position_diff (buf_pos->y_advance, ref_pos->y_advance) > position_fuzz ||
+	  position_diff (buf_pos->x_offset, ref_pos->x_offset) > position_fuzz ||
+	  position_diff (buf_pos->y_offset, ref_pos->y_offset) > position_fuzz)
       {
 	result |= HB_BUFFER_DIFF_FLAG_POSITION_MISMATCH;
 	break;
@@ -2309,6 +2386,9 @@ hb_buffer_t::changed ()
  * @destroy: (nullable): The function to call when @user_data is not needed anymore
  *
  * Sets the implementation function for #hb_buffer_message_func_t.
+ * The callback and its associated data are preserved by hb_buffer_reset()
+ * and hb_buffer_clear_contents(). The @destroy function is called when the
+ * callback is replaced or removed, or when @buffer is destroyed.
  *
  * Since: 1.1.3
  **/

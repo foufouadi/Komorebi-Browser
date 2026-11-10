@@ -13,14 +13,81 @@ exclude: true
 
 ⚠️  breaking change and deprecation notices
 
+## v161
+- Added [`Autocomplete.CreditCard.securityCode`][161.1] and
+    [`Autocomplete.CreditCard.Builder.securityCode`][161.2] so the credit card security code (CVV)
+    can be passed to and from the [`Autocomplete.StorageDelegate`][161.3].
+    ([bug 2085419]({{bugzilla}}2085419))
+- Added [`GeckoRuntimeSettings.Builder.proguardUuid`][161.4] and
+    [`GeckoRuntimeSettings.getProguardUuid`][161.5] to set the UUID of the embedding app's
+    R8/ProGuard mapping file. It is recorded as `meta.proguardUuid` in Gecko profiles.
+    ([bug 2064150]({{bugzilla}}2064150))
+
+[161.1]: {{javadoc_uri}}/Autocomplete.CreditCard.html#securityCode
+[161.2]: {{javadoc_uri}}/Autocomplete.CreditCard.Builder.html#securityCode(java.lang.String)
+[161.3]: {{javadoc_uri}}/Autocomplete.StorageDelegate.html
+[161.4]: {{javadoc_uri}}/GeckoRuntimeSettings.Builder.html#proguardUuid(java.lang.String)
+[161.5]: {{javadoc_uri}}/GeckoRuntimeSettings.html#getProguardUuid()
+
+## v160
+- The `content-disposition` header of the [`WebResponse`][65.15] passed to
+    [`ContentDelegate.onExternalResponse`][160.1] now contains a filename validated with the same
+    rules desktop applies when saving a download, instead of the header sent by the server.
+    ([bug 1822968]({{bugzilla}}1822968))
+- Added [`GeckoSessionSettings.Builder.pictureInPictureToken`][160.2] so the session created for a picture-in-picture request is opened in the browsing context group and content process of the video it clones. ([bug 2065579]({{bugzilla}}2065579))
+- Added experimental [`PictureInPictureController.SessionPictureInPicture.Delegate`][160.3], registered with [`GeckoSession.setPictureInPictureDelegate`][160.4], which is notified via [`onEnterPictureInPicture`][160.5] when Gecko wants a picture-in-picture window opened for a video. Added [`GeckoSession.getSessionPictureInPicture`][160.7], whose [`request`][160.6] asks Gecko for a window for the video the session last started playing. ([bug 2065581]({{bugzilla}}2065581))
+- Added experimental [`onExitPictureInPicture`][160.8] so the application is told when the picture-in-picture window it opened should be closed. ([bug 2065581]({{bugzilla}}2065581))
+- Added experimental [`setKeepActive`][160.9] so the application can keep a session active while a picture-in-picture window shows one of its videos. ([bug 2065581]({{bugzilla}}2065581))
+- ⚠️ Removed `IPProtectionController.SERVICE_STATE_OPTED_OUT`. Gecko does not report an opted-out IP Protection service state. ([bug 2082578]({{bugzilla}}2082578))
+- Added implementation of `ScrollCaptureCallback` to [`GeckoView`][70.5]. Now GeckoView apps will support the built-in Android OS functionality for taking scrollable screenshots. ([bug 2053909]({{bugzilla}}2053909))
+
+[160.1]: {{javadoc_uri}}/GeckoSession.ContentDelegate.html#onExternalResponse(org.mozilla.geckoview.GeckoSession,org.mozilla.geckoview.WebResponse)
+[160.2]: {{javadoc_uri}}/GeckoSessionSettings.Builder.html#pictureInPictureToken(java.lang.String)
+[160.3]: {{javadoc_uri}}/PictureInPictureController.SessionPictureInPicture.Delegate.html
+[160.4]: {{javadoc_uri}}/GeckoSession.html#setPictureInPictureDelegate(org.mozilla.geckoview.PictureInPictureController.SessionPictureInPicture.Delegate)
+[160.5]: {{javadoc_uri}}/PictureInPictureController.SessionPictureInPicture.Delegate.html#onEnterPictureInPicture(org.mozilla.geckoview.GeckoSession,java.lang.String)
+[160.6]: {{javadoc_uri}}/PictureInPictureController.SessionPictureInPicture.html#request()
+[160.7]: {{javadoc_uri}}/GeckoSession.html#getSessionPictureInPicture()
+[160.8]: {{javadoc_uri}}/PictureInPictureController.SessionPictureInPicture.Delegate.html#onExitPictureInPicture(org.mozilla.geckoview.GeckoSession)
+[160.9]: {{javadoc_uri}}/PictureInPictureController.SessionPictureInPicture.html#setKeepActive(boolean)
+
+## v157
+- Added [`GeckoSession.getPdfViewerEditor`][157.1] and
+    [`PdfViewerController.SessionEditor.addSignature`][157.2] to place a signature on the PDF the
+    session is displaying. The PDF viewer side is a stub until bug 2069045.
+    ([bug 2069043]({{bugzilla}}2069043))
+- Added [`GeckoView.captureFullPage()`][157.3] and [`GeckoDisplay.captureFullPage`][157.4] to take screenshot of the full web page. Returns a [`GeckoResult`][65.25] that completes to a [`Bitmap`][67.17] containing a full scrollable screenshot of a web page.
+
+[157.1]: {{javadoc_uri}}/GeckoSession.html#getPdfViewerEditor()
+[157.2]: {{javadoc_uri}}/PdfViewerController.SessionEditor.html#addSignature(java.lang.String)
+[157.3]: {{javadoc_uri}}/GeckoView.html#captureFullPage()
+[157.4]: {{javadoc_uri}}/GeckoDisplay.html#capturePixels()
+
+## v156
+- Updated [`GeckoSession.saveAsPdf`][156.1] to identify if the currently displayed browser item is a PDF JS page, if so, then save using PDF JS machinery. Otherwise, save the PDF through the Gecko print framework. ([bug 2064162]({{bugzilla}}2064162))
+- ⚠️ Added [`ContentParams.useSimpleText`][156.2] to request plain prose from
+    [`SessionPageExtractor.getPageContent`][156.3] instead of markdown-annotated text. This adds a
+    parameter to the [`ContentParams`][156.4] constructor.
+- ⚠️ Added [`PageMetadata.isGated`][156.5] to report whether a page declares its content to be gated,
+    for example behind a paywall or a registration wall. This adds a parameter to the
+    [`PageMetadata`][156.6] constructor.
+
+[156.1]: {{javadoc_uri}}/GeckoSession.html#saveAsPdf()
+[156.2]: {{javadoc_uri}}/PageExtractionController.ContentParams.html#useSimpleText
+[156.3]: {{javadoc_uri}}/PageExtractionController.SessionPageExtractor.html#getPageContent(org.mozilla.geckoview.PageExtractionController.ContentParams)
+[156.4]: {{javadoc_uri}}/PageExtractionController.ContentParams.html#ContentParams(boolean,boolean)
+[156.5]: {{javadoc_uri}}/PageExtractionController.PageMetadata.html#isGated
+[156.6]: {{javadoc_uri}}/PageExtractionController.PageMetadata.html#PageMetadata(java.lang.String[],int,java.lang.String,boolean,boolean)
+
 ## v155
-- Added [WebRequestError.ERROR_LOCAL_NETWORK_ACCESS_DENIED] to indicate that a load failed because the user denied the local network access permission on Android 17+.
+- Added [`WebRequestError.ERROR_LOCAL_NETWORK_ACCESS_DENIED`][155.4] to indicate that a load failed because the user denied the local network access permission on Android 17+.
 - Added the [`IPProxyException.ERROR_CATASTROPHIC`][155.1] and [`IPProxyException.ERROR_VPN_UNAVAILABLE`][155.2]
   error codes for the [`IPProtectioController.activate`][155.3].
 
 [155.1]: {{javadoc_uri}}/IPProtectionController.IPProxyException.html#ERROR_CATASTROPHIC
 [155.2]: {{javadoc_uri}}/IPProtectionController.IPProxyException.html#ERROR_VPN_UNAVAILABLE
 [155.3]: {{javadoc_uri}}/IPProtectionController.html#activate(boolean,boolean,java.lang.String)
+[155.4]: {{javadoc_uri}}/WebRequestError.html#ERROR_LOCAL_NETWORK_ACCESS_DENIED
 
 ## v154
 - Added [`Autofill.Node.getDatalist`][154.1] to expose predefined values by [`datalist`][154.2] elements for input fields.
@@ -2057,4 +2124,4 @@ to allow adding gecko profiler markers.
 [65.24]: {{javadoc_uri}}/CrashReporter.html#sendCrashReport(android.content.Context,android.os.Bundle,java.lang.String)
 [65.25]: {{javadoc_uri}}/GeckoResult.html
 
-[api-version]: 8746a786b9e9fd08dd61321d2973efc43d1ffefa
+[api-version]: c87f638c6c41018ef267c4136185d8d9c48bbdd7

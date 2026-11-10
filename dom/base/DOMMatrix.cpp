@@ -390,12 +390,12 @@ already_AddRefed<DOMMatrix> DOMMatrixReadOnly::FlipX() const {
   if (mMatrix3D) {
     gfx::Matrix4x4Double m;
     m._11 = -1;
-    retval->mMatrix3D = MakeUnique<gfx::Matrix4x4Double>(m * *mMatrix3D);
+    retval->mMatrix3D = std::make_unique<gfx::Matrix4x4Double>(m * *mMatrix3D);
   } else {
     gfx::MatrixDouble m;
     m._11 = -1;
     retval->mMatrix2D =
-        MakeUnique<gfx::MatrixDouble>(mMatrix2D ? m * *mMatrix2D : m);
+        std::make_unique<gfx::MatrixDouble>(mMatrix2D ? m * *mMatrix2D : m);
   }
 
   return retval.forget();
@@ -406,12 +406,12 @@ already_AddRefed<DOMMatrix> DOMMatrixReadOnly::FlipY() const {
   if (mMatrix3D) {
     gfx::Matrix4x4Double m;
     m._22 = -1;
-    retval->mMatrix3D = MakeUnique<gfx::Matrix4x4Double>(m * *mMatrix3D);
+    retval->mMatrix3D = std::make_unique<gfx::Matrix4x4Double>(m * *mMatrix3D);
   } else {
     gfx::MatrixDouble m;
     m._22 = -1;
     retval->mMatrix2D =
-        MakeUnique<gfx::MatrixDouble>(mMatrix2D ? m * *mMatrix2D : m);
+        std::make_unique<gfx::MatrixDouble>(mMatrix2D ? m * *mMatrix2D : m);
   }
 
   return retval.forget();
@@ -793,10 +793,29 @@ already_AddRefed<DOMMatrix> DOMMatrix::ReadStructuredClone(
 
 void DOMMatrixReadOnly::Ensure3DMatrix() {
   if (!mMatrix3D) {
-    mMatrix3D = MakeUnique<gfx::Matrix4x4Double>(
+    mMatrix3D = std::make_unique<gfx::Matrix4x4Double>(
         gfx::Matrix4x4Double::From2D(*mMatrix2D));
     mMatrix2D = nullptr;
   }
+}
+
+DOMMatrix* DOMMatrix::MultiplySelf(const DOMMatrix& aOther) {
+  if (aOther.IsIdentity()) {
+    return this;
+  }
+
+  if (aOther.Is2D()) {
+    if (mMatrix3D) {
+      *mMatrix3D = gfx::Matrix4x4Double::From2D(*aOther.mMatrix2D) * *mMatrix3D;
+    } else {
+      *mMatrix2D = *aOther.mMatrix2D * *mMatrix2D;
+    }
+  } else {
+    Ensure3DMatrix();
+    *mMatrix3D = *aOther.mMatrix3D * *mMatrix3D;
+  }
+
+  return this;
 }
 
 DOMMatrix* DOMMatrix::MultiplySelf(const DOMMatrixInit& aOtherInit,
@@ -805,23 +824,9 @@ DOMMatrix* DOMMatrix::MultiplySelf(const DOMMatrixInit& aOtherInit,
   if (aRv.Failed()) {
     return nullptr;
   }
+
   MOZ_ASSERT(other);
-  if (other->IsIdentity()) {
-    return this;
-  }
-
-  if (other->Is2D()) {
-    if (mMatrix3D) {
-      *mMatrix3D = gfx::Matrix4x4Double::From2D(*other->mMatrix2D) * *mMatrix3D;
-    } else {
-      *mMatrix2D = *other->mMatrix2D * *mMatrix2D;
-    }
-  } else {
-    Ensure3DMatrix();
-    *mMatrix3D = *other->mMatrix3D * *mMatrix3D;
-  }
-
-  return this;
+  return MultiplySelf(*other);
 }
 
 DOMMatrix* DOMMatrix::PreMultiplySelf(const DOMMatrixInit& aOtherInit,
@@ -988,6 +993,26 @@ DOMMatrix* DOMMatrix::RotateAxisAngleSelf(double aX, double aY, double aZ,
   return this;
 }
 
+DOMMatrix* DOMMatrix::SkewSelf(double aSx, double aSy) {
+  if (fmod(aSx, 360) == 0 && fmod(aSy, 360) == 0) {
+    return this;
+  }
+
+  if (mMatrix3D) {
+    gfx::Matrix4x4Double m;
+    m._21 = tan(aSx * kRadPerDegree);
+    m._12 = tan(aSy * kRadPerDegree);
+    *mMatrix3D = m * *mMatrix3D;
+  } else {
+    gfx::MatrixDouble m;
+    m._21 = tan(aSx * kRadPerDegree);
+    m._12 = tan(aSy * kRadPerDegree);
+    *mMatrix2D = m * *mMatrix2D;
+  }
+
+  return this;
+}
+
 DOMMatrix* DOMMatrix::SkewXSelf(double aSx) {
   if (fmod(aSx, 360) == 0) {
     return this;
@@ -1024,6 +1049,13 @@ DOMMatrix* DOMMatrix::SkewYSelf(double aSy) {
   return this;
 }
 
+DOMMatrix* DOMMatrix::PerspectiveSelf(double aDepth) {
+  Ensure3DMatrix();
+  mMatrix3D->Perspective(aDepth);
+
+  return this;
+}
+
 DOMMatrix* DOMMatrix::InvertSelf() {
   if (mMatrix3D) {
     if (!mMatrix3D->Invert()) {
@@ -1032,7 +1064,7 @@ DOMMatrix* DOMMatrix::InvertSelf() {
   } else if (!mMatrix2D->Invert()) {
     mMatrix2D = nullptr;
 
-    mMatrix3D = MakeUnique<gfx::Matrix4x4Double>();
+    mMatrix3D = std::make_unique<gfx::Matrix4x4Double>();
     mMatrix3D->SetNAN();
   }
 
@@ -1057,7 +1089,7 @@ DOMMatrixReadOnly* DOMMatrixReadOnly::SetMatrixValue(
   if (!contains3dTransform) {
     mMatrix3D = nullptr;
     if (!mMatrix2D) {
-      mMatrix2D = MakeUnique<gfx::MatrixDouble>();
+      mMatrix2D = std::make_unique<gfx::MatrixDouble>();
     }
 
     SetA(transform._11);
@@ -1067,7 +1099,7 @@ DOMMatrixReadOnly* DOMMatrixReadOnly::SetMatrixValue(
     SetE(transform._41);
     SetF(transform._42);
   } else {
-    mMatrix3D = MakeUnique<gfx::Matrix4x4Double>(transform);
+    mMatrix3D = std::make_unique<gfx::Matrix4x4Double>(transform);
     mMatrix2D = nullptr;
   }
 

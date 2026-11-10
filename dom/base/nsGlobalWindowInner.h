@@ -111,11 +111,13 @@ class ContentMediaController;
 enum class ImageBitmapFormat : uint8_t;
 class IdleRequest;
 class IdleRequestCallback;
+class IdleRequestMap;
 class IntlUtils;
 class MediaQueryList;
 class OwningExternalOrWindowProxy;
 class Promise;
 class PostMessageEvent;
+class PushManager;
 struct RequestInit;
 class RequestOrUTF8String;
 class SharedWorker;
@@ -383,7 +385,8 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
 
   void NoteDOMContentLoaded();
 
-  virtual nsresult FireDelayedDOMEvents(bool aIncludeSubWindows) override;
+  MOZ_CAN_RUN_SCRIPT virtual nsresult FireDelayedDOMEvents(
+      bool aIncludeSubWindows) override;
 
   virtual void MaybeUpdateTouchState() override;
 
@@ -451,8 +454,8 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   // frame.
   mozilla::ScrollContainerFrame* GetScrollContainerFrame();
 
-  nsresult Observe(nsISupports* aSubject, const char* aTopic,
-                   const char16_t* aData);
+  MOZ_CAN_RUN_SCRIPT nsresult Observe(nsISupports* aSubject, const char* aTopic,
+                                      const char16_t* aData);
 
   void ObserveStorageNotification(mozilla::dom::StorageEvent* aEvent,
                                   const char16_t* aStorageType,
@@ -465,6 +468,11 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   static void Init();
   static void ShutDown();
   static bool IsCallerChrome();
+
+  // Called on a trusted mouseup or dragend, and when a drag session ends, as
+  // the mouse button is up even if no dragend was dispatched. Lifts the drag
+  // service suppression that CanMoveResizeWindows added while it was down.
+  static void MouseButtonReleased();
 
   friend class WindowStateHolder;
 
@@ -620,9 +628,9 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   mozilla::dom::BarProp* GetToolbar(mozilla::ErrorResult& aError);
   void GetStatus(nsAString& aStatus, mozilla::ErrorResult& aError);
   void SetStatus(const nsAString& aStatus, mozilla::ErrorResult& aError);
-  void Close(mozilla::dom::CallerType aCallerType,
-             mozilla::ErrorResult& aError);
-  nsresult Close() override;
+  MOZ_CAN_RUN_SCRIPT void Close(mozilla::dom::CallerType aCallerType,
+                                mozilla::ErrorResult& aError);
+  MOZ_CAN_RUN_SCRIPT nsresult Close() override;
   bool GetClosed(mozilla::ErrorResult& aError);
   void Stop(mozilla::ErrorResult& aError);
   void Focus(mozilla::dom::CallerType aCallerType,
@@ -653,6 +661,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   nsPIDOMWindowOuter* GetInProcessScriptableParent() override;
   mozilla::dom::Element* GetFrameElement(nsIPrincipal& aSubjectPrincipal,
                                          mozilla::ErrorResult& aError);
+  MOZ_CAN_RUN_SCRIPT
   mozilla::dom::Nullable<mozilla::dom::WindowProxyHolder> Open(
       const nsAString& aUrl, const nsAString& aName, const nsAString& aOptions,
       mozilla::ErrorResult& aError);
@@ -669,6 +678,8 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   }
 
   mozilla::dom::DocumentPictureInPicture* DocumentPictureInPicture();
+  mozilla::dom::PushManager* GetPushManager(JSContext* aCx,
+                                            mozilla::ErrorResult& aRv);
 
   // https://w3c.github.io/webappsec-secure-contexts/#dom-window-issecurecontext
   bool IsSecureContext() const;
@@ -873,8 +884,9 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   bool GetFullScreen(mozilla::dom::CallerType aCallerType,
                      mozilla::ErrorResult& aError);
   bool GetFullScreen() override;
-  void SetFullScreen(bool aFullscreen, mozilla::dom::CallerType aCallerType,
-                     mozilla::ErrorResult& aError);
+  MOZ_CAN_RUN_SCRIPT void SetFullScreen(bool aFullscreen,
+                                        mozilla::dom::CallerType aCallerType,
+                                        mozilla::ErrorResult& aError);
   bool Find(const nsAString& aString, bool aCaseSensitive, bool aBackwards,
             bool aWrapAround, bool aWholeWord, bool aSearchInFrames,
             bool aShowDialog, mozilla::ErrorResult& aError);
@@ -882,6 +894,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   bool DidFireDocElemInserted() const { return mDidFireDocElemInserted; }
   void SetDidFireDocElemInserted() { mDidFireDocElemInserted = true; }
 
+  MOZ_CAN_RUN_SCRIPT
   mozilla::dom::Nullable<mozilla::dom::WindowProxyHolder> OpenDialog(
       JSContext* aCx, const nsAString& aUrl, const nsAString& aName,
       const nsAString& aOptions,
@@ -972,12 +985,6 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   bool OriginAgentCluster() const;
 
   mozilla::dom::WebTaskScheduler* Scheduler();
-  void SetWebTaskSchedulingState(
-      mozilla::dom::WebTaskSchedulingState* aState) override;
-  mozilla::dom::WebTaskSchedulingState* GetWebTaskSchedulingState()
-      const override {
-    return mWebTaskSchedulingState;
-  }
 
   MOZ_CAN_RUN_SCRIPT bool SynthesizeMouseEvent(
       const nsAString& aType, float aOffsetX, float aOffsetY,
@@ -1006,12 +1013,16 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
                         JS::Handle<JS::Value> aValue,
                         mozilla::ErrorResult& aError);
 
-  MOZ_CAN_RUN_SCRIPT nsresult GetInnerWidth(double* aWidth) override;
-  MOZ_CAN_RUN_SCRIPT nsresult GetInnerHeight(double* aHeight) override;
+  MOZ_CAN_RUN_SCRIPT nsresult
+  GetInnerWidth(mozilla::dom::CallerType aCallerType, double* aWidth) override;
+  MOZ_CAN_RUN_SCRIPT nsresult GetInnerHeight(
+      mozilla::dom::CallerType aCallerType, double* aHeight) override;
 
  public:
-  MOZ_CAN_RUN_SCRIPT double GetInnerWidth(mozilla::ErrorResult& aError);
-  MOZ_CAN_RUN_SCRIPT double GetInnerHeight(mozilla::ErrorResult& aError);
+  MOZ_CAN_RUN_SCRIPT double GetInnerWidth(mozilla::dom::CallerType aCallerType,
+                                          mozilla::ErrorResult& aError);
+  MOZ_CAN_RUN_SCRIPT double GetInnerHeight(mozilla::dom::CallerType aCallerType,
+                                           mozilla::ErrorResult& aError);
   int32_t GetScreenX(mozilla::dom::CallerType aCallerType,
                      mozilla::ErrorResult& aError);
   int32_t GetScreenY(mozilla::dom::CallerType aCallerType,
@@ -1113,7 +1124,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   already_AddRefed<nsIWebBrowserChrome> GetWebBrowserChrome();
   bool IsPrivateBrowsing();
 
-  void FireOfflineStatusEventIfChanged();
+  MOZ_CAN_RUN_SCRIPT void FireOfflineStatusEventIfChanged();
 
  public:
   // Inner windows only.
@@ -1310,11 +1321,14 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
     return mClientSource.get();
   }
 
+  void HoldOldPrincipal(nsIPrincipal* aPrincipal);
+
  private:
+  void ClearOldPrincipalsIfNotNestedEventLoop();
+
   RefPtr<mozilla::dom::ContentMediaController> mContentMediaController;
 
   RefPtr<mozilla::dom::WebTaskSchedulerMainThread> mWebTaskScheduler;
-  RefPtr<mozilla::dom::WebTaskSchedulingState> mWebTaskSchedulingState;
 
   RefPtr<mozilla::dom::TrustedTypePolicyFactory> mTrustedTypePolicyFactory;
 
@@ -1412,6 +1426,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   RefPtr<mozilla::dom::DocumentPictureInPicture> mDocumentPiP;
   RefPtr<mozilla::dom::Worklet> mPaintWorklet;
   RefPtr<mozilla::dom::External> mExternal;
+  RefPtr<mozilla::dom::PushManager> mPushManager;
 
   RefPtr<mozilla::dom::Storage> mLocalStorage;
   RefPtr<mozilla::dom::Storage> mSessionStorage;
@@ -1461,6 +1476,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   // The current idle request callback handle
   uint32_t mIdleRequestCallbackCounter;
   IdleRequests mIdleRequestCallbacks;
+  RefPtr<mozilla::dom::IdleRequestMap> mIdleRequestCallbacksByHandle;
   RefPtr<IdleRequestExecutor> mIdleRequestExecutor;
 
 #ifdef DEBUG
@@ -1524,6 +1540,12 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   RefPtr<mozilla::dom::DataTransfer> mCurrentPasteDataTransfer;
 
   nsTArray<nsCString> mMediaSourceURLs;
+
+  // Holder for past principals to keep them alive so that we need to refcount
+  // them only when we actually swap principals and we don't need to refcount
+  // them on hot code paths in bindings that use raw pointers and must not
+  // get the principal deleted from underneath them.
+  nsTArray<nsCOMPtr<nsIPrincipal>> mOldPrincipals;
 
   // These fields are used by the inner and outer windows to prevent
   // programatically moving the window while the mouse is down.

@@ -12,6 +12,8 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
 
+#include <type_traits>
+
 #include "jstypes.h"  // JS_PUBLIC_API
 
 #include "builtin/AtomicsObject.h"
@@ -50,6 +52,7 @@ class AutoAllocInAtomsZone;
 class AutoMaybeLeaveAtomsZone;
 class AutoRealm;
 struct PortableBaselineStack;
+struct TestingFunctionData;
 
 #ifdef MOZ_EXECUTION_TRACING
 class ExecutionTracer;
@@ -146,16 +149,83 @@ enum class ShouldCaptureStack { Maybe, Always };
 
 // A wrapper type to allow customization of tracing of
 // MicroTaskElements.
-struct MicroTaskQueueElement {
-  MOZ_IMPLICIT
-  MicroTaskQueueElement(const JS::Value& val) : value(val) {}
+class MicroTaskQueueElement {
+ public:
+  // This is distinct from the JS::MicroTask::Kind, as we add more
+  // internal allowable kinds between FirstJSKind and EndJSKind
+  enum class Kind : uint8_t {
+    Embedder = JS::MicroTask::Kind::Embedder,
 
-  operator JS::Value() const { return value; }
+    // A PromiseReactionRecord, run by PromiseReactionJob.
+    PromiseReactionObject = JS::MicroTask::Kind::FirstJSKind,
+    // A settled, same-realm promise reaction held inline in the task's payload
+    // rather than allocated as a PromiseReactionRecord.
+    InlinePromiseReaction,
+    // A same-realm thenable job held inline in the task's payload rather than
+    // allocated as a ThenableJobObject. jsBits_ holds one of the thenable job
+    // kinds below.
+    InlineThenable,
+
+    // A ThenableJobObject; the kind selects which resolution routine it runs.
+    //
+    // Start ThenableJobKinds
+    ResolveThenable,
+    ResolveBuiltinThenable,
+    // Used by JS::SafeResolve: runs PerformPromiseResolution on the job's
+    // promise with the resolution value stored in the Thenable slot.
+    DeferredResolve,
+    // End ThenableJobKinds -- must be contiguous for the range check in
+    // IsThenableJobKind.
+
+    // New task kinds go here.
+
+    // LastQueueElementKind gets auto incremented as we add new kinds
+    // and powers the below static assert that ensures we
+    // don't blow our kind allocation.
+    LastQueueElementKind
+  };
+
+  static_assert(static_cast<uint8_t>(Kind::LastQueueElementKind) <
+                JS::MicroTask::Kind::EndJSKind);
+
+  // Arguments are forwarded to a JS::MicroTask constructor, so the task is
+  // built in place in the slot the queue allocated for this entry rather than
+  // copied from a temporary.
+  template <typename... Args>
+  explicit MicroTaskQueueElement(Kind kind, Args&&... args)
+      : microTask_(static_cast<JS::MicroTask::Kind>(kind),
+                   std::forward<Args>(args)...) {}
+
+  explicit MicroTaskQueueElement(const JS::MicroTask& microTask)
+      : microTask_(microTask) {}
+
+  // Build a JS::MicroTask of a JS kind, for engine code which can't reach the
+  // private JS::MicroTask constructors.
+  template <typename... Args>
+  static JS::MicroTask MakeMicroTask(Kind kind, Args&&... args) {
+    return JS::MicroTask(static_cast<JS::MicroTask::Kind>(kind),
+                         std::forward<Args>(args)...);
+  }
+
+  // Accessors for the private fields of a JS::MicroTask of a JS kind.
+  static constexpr size_t ExtraCount =
+      std::extent_v<decltype(JS::MicroTask::extra_)>;
+  static uint8_t kind(const JS::MicroTask& task) { return task.kind_; }
+  static uint32_t jsBits(const JS::MicroTask& task) { return task.jsBits_; }
+  static const JS::Value& value(const JS::MicroTask& task) {
+    return task.value_;
+  }
+  static const JS::Value& extra(const JS::MicroTask& task, size_t index) {
+    MOZ_ASSERT(index < ExtraCount);
+    return task.extra_[index];
+  }
+
+  const JS::MicroTask& toMicroTask() const { return microTask_; }
 
   void trace(JSTracer* trc);
 
  private:
-  JS::Value value;
+  JS::MicroTask microTask_;
 };
 
 // Use TempAllocPolicy to report OOM
@@ -178,13 +248,28 @@ struct MicroTaskQueueSet {
   MicroTaskQueueSet(const MicroTaskQueueSet&) = delete;
   MicroTaskQueueSet& operator=(const MicroTaskQueueSet&) = delete;
 
-  bool enqueueRegularMicroTask(JSContext* cx, const JS::GenericMicroTask&);
-  bool enqueueDebugMicroTask(JSContext* cx, const JS::GenericMicroTask&);
-  bool prependRegularMicroTask(JSContext* cx, const JS::GenericMicroTask&);
+  template <typename... Args>
+  bool enqueueRegularMicroTask(JSContext* cx, MicroTaskQueueElement::Kind kind,
+                               Args&&... args) {
+    JS_LOG(mtq, Verbose, "JS: Enqueue Regular MT");
+    JS::JobQueueMayNotBeEmpty(cx);
+    return microTaskQueue.emplaceBack(kind, std::forward<Args>(args)...);
+  }
+  bool enqueueRegularMicroTask(JSContext* cx, const JS::MicroTask&);
 
-  JS::GenericMicroTask popFront();
-  JS::GenericMicroTask popDebugFront();
-  JS::GenericMicroTask peekFront();
+  template <typename... Args>
+  bool enqueueDebugMicroTask(JSContext* cx, MicroTaskQueueElement::Kind kind,
+                             Args&&... args) {
+    JS_LOG(mtq, Verbose, "JS: Enqueue Debug MT");
+    return debugMicroTaskQueue.emplaceBack(kind, std::forward<Args>(args)...);
+  }
+  bool enqueueDebugMicroTask(JSContext* cx, const JS::MicroTask&);
+
+  bool prependRegularMicroTask(JSContext* cx, const JS::MicroTask&);
+
+  mozilla::Maybe<JS::MicroTask> popFront();
+  mozilla::Maybe<JS::MicroTask> popDebugFront();
+  mozilla::Maybe<JS::MicroTask> peekFront();
 
   bool empty() { return microTaskQueue.empty() && debugMicroTaskQueue.empty(); }
 
@@ -384,14 +469,11 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
   js::gc::AtomRefRuntime& atomReferences() {
     return runtime_->gc.atomReferences;
   }
-  void recordRef(JSAtom* atom) { atomReferences().recordRef(this, atom); }
-  void recordRef(JS::Symbol* symbol) {
-    atomReferences().recordRef(this, symbol);
-  }
-  void recordRefToId(jsid id) { atomReferences().recordRefToId(this, id); }
-  void recordRefToValue(const js::Value& value) {
-    atomReferences().recordRefToValue(this, value);
-  }
+
+  void recordRef(JSAtom* atom);
+  bool wrapOrRecordRef(JS::MutableHandle<JS::Symbol*> symbol);
+  bool wrapOrRecordRefToId(JS::MutableHandle<jsid> id);
+  bool wrapOrRecordRefToValue(JS::MutableHandle<JS::Value> value);
 
   // Interface for recording telemetry metrics.
   js::Metrics metrics() { return js::Metrics(runtime_); }
@@ -723,6 +805,28 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
 #endif
   }
 
+  // Used by irregexp code to delay calling ReportOverRecursed until we can
+  // allocate.
+ private:
+  js::ContextData<bool> hasDelayedOverRecursed;
+
+ public:
+  void noteDelayedOverRecursed() {
+    MOZ_ASSERT(!hasDelayedOverRecursed);
+    hasDelayedOverRecursed = true;
+  }
+  bool maybeReportDelayedOverRecursed() {
+    if (hasDelayedOverRecursed) {
+      hasDelayedOverRecursed = false;
+      ReportOverRecursed(this);
+      return false;
+    }
+    return true;
+  }
+  static constexpr size_t offsetOfHasDelayedOverRecursed() {
+    return offsetof(JSContext, hasDelayedOverRecursed);
+  }
+
   // OOM stack trace buffer management
   void unsetOOMStackTrace();
   const char* getOOMStackTrace() const;
@@ -843,15 +947,12 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
    */
   js::SavedFrame* getPendingExceptionStack();
 
-#ifdef DEBUG
   /**
    * Return the pending exception (without wrapping).
    */
   const JS::Value& getPendingExceptionUnwrapped();
-#endif
 
   bool isThrowingDebuggeeWouldRun();
-  bool isClosingGenerator();
 
   void setPendingException(JS::HandleValue v,
                            JS::Handle<js::SavedFrame*> stack);
@@ -862,6 +963,17 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
     status = JS::ExceptionStatus::None;
     unwrappedException().setUndefined();
     unwrappedExceptionStack() = nullptr;
+  }
+
+  JS::ExceptionStatus exceptionStatus() const { return status; }
+
+  // Set the pending exception state to values saved earlier.
+  void restorePendingExceptionState(JS::ExceptionStatus newStatus,
+                                    const JS::Value& exception,
+                                    js::SavedFrame* stack) {
+    status = newStatus;
+    unwrappedException() = exception;
+    unwrappedExceptionStack() = stack;
   }
 
   bool isThrowingOutOfMemory() const {
@@ -1122,6 +1234,21 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
 #endif
 
   JS::PersistentRooted<js::UniquePtr<js::MicroTaskQueueSet>> microTaskQueues;
+
+ private:
+  js::ContextData<js::UniquePtr<js::TestingFunctionData>> testingFunctionData_;
+
+ public:
+  js::TestingFunctionData* getOrCreateTestingFunctionData();
+
+  js::TestingFunctionData* maybeTestingFunctionData() {
+    return testingFunctionData_.ref().get();
+  }
+
+  js::TestingFunctionData& testingFunctionData() {
+    MOZ_ASSERT(testingFunctionData_.ref());
+    return *testingFunctionData_.ref();
+  }
 }; /* struct JSContext */
 
 inline JSContext* JSRuntime::mainContextFromOwnThread() {

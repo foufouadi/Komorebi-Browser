@@ -18,19 +18,19 @@ projects:
     - components:compose-base
     - components:compose-browser-toolbar
     - components:compose-cfr
+    - components:compose-draggable
+    - components:compose-menu
     - components:concept-accelerometer
     - components:concept-ai-controls
     - components:concept-awesomebar
     - components:concept-base
-    - components:concept-bookmarks-file
-    - components:concept-bookmarks-parser
     - components:concept-engine
     - components:concept-fetch
+    - components:concept-file-importer
+    - components:concept-file-parser
     - components:concept-integrity
     - components:concept-llm
     - components:concept-menu
-    - components:concept-passwords-file
-    - components:concept-passwords-parser
     - components:concept-push
     - components:concept-storage
     - components:concept-storage-bookmarks
@@ -42,6 +42,7 @@ projects:
     - components:feature-addons
     - components:feature-app-links
     - components:feature-autofill
+    - components:feature-automotive
     - components:feature-awesomebar
     - components:feature-contextmenu
     - components:feature-customtabs
@@ -51,9 +52,9 @@ projects:
     - components:feature-importer
     - components:feature-intent
     - components:feature-ipprotection
+    - components:feature-listentopage
     - components:feature-logins
     - components:feature-media
-    - components:feature-password-importer
     - components:feature-privatemode
     - components:feature-prompts
     - components:feature-protection-dashboard
@@ -69,6 +70,8 @@ projects:
     - components:feature-summarize
     - components:feature-syncedtabs
     - components:feature-tab-collections
+    - components:feature-tabdata-coordinator
+    - components:feature-tabgroups-storage
     - components:feature-tabs
     - components:feature-toolbar
     - components:feature-top-sites
@@ -83,6 +86,7 @@ projects:
     - components:lib-crash
     - components:lib-crash-sentry
     - components:lib-dataprotect
+    - components:lib-installation-blockstore
     - components:lib-integrity-googleplay
     - components:lib-llm-mlpa
     - components:lib-password-parser-csv

@@ -84,8 +84,16 @@ HTMLImageElement::~HTMLImageElement() {
   }
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED(HTMLImageElement, nsGenericHTMLElement,
-                                   mResponsiveSelector)
+NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLImageElement)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLImageElement,
+                                                nsGenericHTMLElement)
+  tmp->ClearForm(true);
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mResponsiveSelector)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLImageElement,
+                                                  nsGenericHTMLElement)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mForm, mResponsiveSelector)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(HTMLImageElement,
                                              nsGenericHTMLElement,
@@ -130,11 +138,12 @@ bool HTMLImageElement::Complete() const {
     return true;
   }
 
-  if (mPendingRequest || HasPendingAlwaysLoadImageTask()) {
+  if ((mImageLoadData && mImageLoadData->mPendingRequest) ||
+      HasPendingAlwaysLoadImageTask()) {
     return false;
   }
 
-  if (!mCurrentRequest) {
+  if (!mImageLoadData || !mImageLoadData->mCurrentRequest) {
     // mCurrentRequest can be null in the following two cases:
     //   * This image has loading="lazy" attribute and the request hasn't yet
     //     started
@@ -146,7 +155,7 @@ bool HTMLImageElement::Complete() const {
   }
 
   uint32_t status;
-  mCurrentRequest->GetImageStatus(&status);
+  mImageLoadData->mCurrentRequest->GetImageStatus(&status);
   return (status &
           (imgIRequest::STATUS_LOAD_COMPLETE | imgIRequest::STATUS_ERROR)) != 0;
 }
@@ -196,6 +205,9 @@ bool HTMLImageElement::ParseAttribute(int32_t aNamespaceID, nsAtom* aAttribute,
       ParseFetchPriority(aValue, aResult);
       return true;
     }
+    if (aAttribute == nsGkAtoms::referrerpolicy) {
+      return ParseReferrerAttribute(aValue, aResult);
+    }
     if (ParseImageAttribute(aAttribute, aValue, aResult)) {
       return true;
     }
@@ -228,8 +240,7 @@ nsChangeHint HTMLImageElement::GetAttributeChangeHint(
   return retval;
 }
 
-NS_IMETHODIMP_(bool)
-HTMLImageElement::IsAttributeMapped(const nsAtom* aAttribute) const {
+bool HTMLImageElement::IsNoNamespaceAttrMapped(const nsAtom* aAttribute) const {
   static const MappedAttributeEntry* const map[] = {
       sCommonAttributeMap, sImageMarginSizeAttributeMap,
       sImageBorderAttributeMap, sImageAlignAttributeMap};
@@ -482,7 +493,12 @@ void HTMLImageElement::UnbindFromTree(UnbindContext& aContext) {
   nsImageLoadingContent::UnbindFromTree();
   nsGenericHTMLElement::UnbindFromTree(aContext);
 
-  UpdateAutoSizeObserver();
+  if (!aContext.IsMove()) {
+    // https://html.spec.whatwg.org/#the-img-element:html-element-removing-steps
+    // 2. Set removedNode's last auto-sizes width to null.
+    // (We also stop observing it for resizes at this point.)
+    UpdateAutoSizeObserver();
+  }
 
   if (wasInPicture != IsInPicture()) {
     MOZ_ASSERT(wasInPicture);
@@ -619,9 +635,6 @@ void HTMLImageElement::SetForm(HTMLFormElement* aForm) {
 }
 
 void HTMLImageElement::ClearForm(bool aRemoveFromForm) {
-  NS_ASSERTION((mForm != nullptr) == HasFlag(ADDED_TO_FORM),
-               "Form control should have had flag set correctly");
-
   if (!mForm) {
     return;
   }

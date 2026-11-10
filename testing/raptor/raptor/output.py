@@ -372,13 +372,13 @@ class PerftestOutput(metaclass=ABCMeta):
         if testname.startswith("raptor-v8_7"):
             return 100 * filters.geometric_mean(_filter(vals))
 
-        if testname == "speedometer3":
+        if testname in ("speedometer3", "speedometer-experimental"):
             score = None
             for val, name in vals:
                 if name == "score":
                     score = val
             if score is None:
-                raise Exception("Unable to find score for Speedometer 3")
+                raise Exception(f"Unable to find score for {testname}")
             return score
 
         if "speedometer" in testname:
@@ -2032,6 +2032,15 @@ class BrowsertimeOutput(PerftestOutput):
             # Bug 1874690 - Add a verification step to prevent the suites
             # from conflicting during Perfherder ingestion.
             test.get("support_class").summarize_suites(suites)
+
+        # Mark the replicates lists as ordered by trial run so that the
+        # ordering analysis techniques can be applied to this data.
+        for suite in suites:
+            if suite.get("replicates") is not None:
+                suite["orderedTrials"] = True
+            for subtest in suite["subtests"]:
+                if subtest.get("replicates") is not None:
+                    subtest["orderedTrials"] = True
 
         suites.sort(key=lambda suite: suite["name"])
 

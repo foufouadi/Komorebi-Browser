@@ -15,7 +15,7 @@ static const uint32_t sMaxTouchMoveIdentifiers = 10;
 void CoalescedTouchData::CreateCoalescedTouchEvent(
     const WidgetTouchEvent& aEvent) {
   MOZ_ASSERT(IsEmpty());
-  mCoalescedInputEvent = MakeUnique<WidgetTouchEvent>(aEvent);
+  mCoalescedInputEvent = std::make_unique<WidgetTouchEvent>(aEvent);
   for (size_t i = 0; i < mCoalescedInputEvent->mTouches.Length(); i++) {
     const RefPtr<Touch>& touch = mCoalescedInputEvent->mTouches[i];
     touch->mCoalescedWidgetEvents = MakeAndAddRef<WidgetPointerEventHolder>();
@@ -134,7 +134,8 @@ Touch* CoalescedTouchData::GetTouch(int32_t aIdentifier) {
 
 void CoalescedTouchMoveFlusher::WillRefresh(mozilla::TimeStamp aTime) {
   MOZ_ASSERT(mRefreshDriver);
-  mBrowserChild->ProcessPendingCoalescedTouchData();
+  RefPtr<BrowserChild> browserChild(mBrowserChild);
+  browserChild->ProcessPendingCoalescedTouchData();
 }
 
 CoalescedTouchMoveFlusher::CoalescedTouchMoveFlusher(

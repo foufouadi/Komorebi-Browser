@@ -76,7 +76,12 @@ class MOZ_CAPABILITY("mutex") TraceLogMutex
   }
 };
 
+#ifdef XP_WIN
+// The Windows futex mutex supports constant initialization.
+constinit static TraceLogMutex gTraceLog;
+#else
 MOZ_RUNINIT static TraceLogMutex gTraceLog;
+#endif
 
 class MOZ_RAII AutoTraceLogLock {
  public:
@@ -114,7 +119,9 @@ static StaticAutoPtr<IntPtrSet> gObjectsToLog;
 static StaticAutoPtr<SerialHash> gSerialNumbers;
 
 static intptr_t gNextSerialNumber;
+#ifdef DEBUG
 static bool gDumpedStatistics = false;
+#endif
 static bool gLogJSStacks = false;
 
 // By default, debug builds only do bloat logging. Bloat logging
@@ -179,7 +186,7 @@ struct SerialNumberRecord {
                                              /*showLocals=*/false,
                                              /*showThisProps=*/false);
     size_t len = strlen(chars.get());
-    jsStack = mozilla::MakeUnique<char[]>(len + 1);
+    jsStack = std::make_unique<char[]>(len + 1);
     memcpy(jsStack.get(), chars.get(), len + 1);
   }
 };
@@ -317,7 +324,7 @@ static BloatEntry* GetBloatEntry(const char* aTypeName,
   BloatEntry* entry = gBloatView->Get(aTypeName);
   if (!entry && aInstanceSize > 0) {
     entry = gBloatView
-                ->InsertOrUpdate(aTypeName, mozilla::MakeUnique<BloatEntry>(
+                ->InsertOrUpdate(aTypeName, std::make_unique<BloatEntry>(
                                                 aTypeName, aInstanceSize))
                 .get();
   } else {
@@ -398,10 +405,12 @@ nsresult nsTraceRefcnt::DumpStatistics() {
 
   AutoTraceLogLock lock(gTraceLog);
 
+#ifdef DEBUG
   MOZ_ASSERT(!gDumpedStatistics,
              "Calling DumpStatistics more than once may result in "
              "bogus positive or negative leaks being reported");
   gDumpedStatistics = true;
+#endif
 
   // Don't try to log while we hold the lock, we'd deadlock.
   AutoRestore<LoggingType> saveLogging(gLogging);
@@ -474,7 +483,7 @@ static intptr_t GetSerialNumber(void* aPtr, bool aCreate, void* aFirstFramePC) {
           "it.");
     }
 
-    auto& record = entry.Insert(mozilla::MakeUnique<SerialNumberRecord>());
+    auto& record = entry.Insert(std::make_unique<SerialNumberRecord>());
     WalkTheStackSavingLocations(record->allocationStack, aFirstFramePC);
     if (gLogJSStacks) {
       record->SaveJSStack();

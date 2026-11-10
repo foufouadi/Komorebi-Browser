@@ -387,6 +387,11 @@ class ImportRowProcessor {
 const OS_AUTH_FOR_PASSWORDS_BOOL_PREF =
   "signon.management.page.os-auth.locked.enabled";
 
+// Removed by bug 2067167. Nesting depth of requestReauth() calls holding the
+// internal key token logged out; a counter and not a boolean because
+// token.login() spins a nested event loop a second requestReauth() can run in.
+let gPrimaryPasswordReauthDepth = 0;
+
 /**
  * Contains functions shared by different Login Manager components.
  */
@@ -416,6 +421,13 @@ export const LoginHelper = {
   userInputRequiredToCapture: null,
   captureInputChanges: null,
   OS_AUTH_FOR_PASSWORDS_BOOL_PREF,
+
+  // Removed by bug 2067167, with gPrimaryPasswordReauthDepth. True while
+  // requestReauth() has the token logged out and is prompting, so logins
+  // storage can decline to prompt on top of it.
+  get primaryPasswordReauthInProgress() {
+    return gPrimaryPasswordReauthDepth > 0;
+  },
 
   init() {
     // Watch for pref changes to update cached pref values.
@@ -539,7 +551,7 @@ export const LoginHelper = {
     // Create a new instance of the ConsoleAPI so we can control the maxLogLevel with a pref.
     let consoleOptions = {
       maxLogLevel: getMaxLogLevel(),
-      prefix: aLogPrefix,
+      logModule: aLogPrefix,
     };
     let logger = console.createInstance(consoleOptions);
 
@@ -1219,7 +1231,8 @@ export const LoginHelper = {
   },
 
   /**
-   * Open the password manager window.
+   * Open the password manager in a new tab and bring the browser window
+   * containing it to the foreground.
    *
    * @param {Window} window
    *                 the window from where we want to open the dialog
@@ -1260,6 +1273,10 @@ export const LoginHelper = {
     });
 
     tab.setAttribute("preselect-login", preselectedLogin);
+
+    // The caller may live in a different window (e.g. Page Info), so bring
+    // the browser window showing about:logins to the foreground.
+    browser.documentGlobal.focus();
   },
 
   /**
@@ -1343,7 +1360,7 @@ export const LoginHelper = {
     const expr = /username/i;
 
     let ac = element.getAutocompleteInfo()?.fieldName;
-    if (ac && ac == "username") {
+    if (ac && (ac == "username" || ac == "webauthn")) {
       return true;
     }
 
@@ -1710,28 +1727,44 @@ export const LoginHelper = {
         telemetryEvent,
       };
     }
-    // We'll attempt to re-auth via Primary Password, so log out.
-    await token.logout();
-
-    // If a primary password prompt is already open, just exit early and return false.
-    // The user can re-trigger it after responding to the already open dialog.
-    if (Services.logins.uiBusy) {
-      isAuthorized = false;
-      return {
-        isAuthorized,
-        telemetryEvent,
-      };
-    }
-
+    // Removed by bug 2067167: this counter, and the try/finally around the
+    // logout/login that maintains it, exist only so logins storage can tell
+    // that the token is deliberately logged out and decline to prompt.
+    gPrimaryPasswordReauthDepth++;
     try {
-      // Log in again, which prompts for the primary password.
-      await token.login();
-    } catch (e) {
-      // An exception will be thrown if the user cancels the login prompt
-      // dialog. The user will still be logged out of Software Security Device
-      // in this case.
+      // We'll attempt to re-auth via Primary Password, so log out.
+      await token.logout();
+
+      // If a primary password prompt is already open, just exit early and return false.
+      // The user can re-trigger it after responding to the already open dialog.
+      if (Services.logins.uiBusy) {
+        isAuthorized = false;
+        return {
+          isAuthorized,
+          telemetryEvent,
+        };
+      }
+
+      try {
+        // Log in again, which prompts for the primary password.
+        await token.login();
+      } catch (e) {
+        // An exception will be thrown if the user cancels the login prompt
+        // dialog. The user will still be logged out of Software Security Device
+        // in this case.
+      }
+    } finally {
+      gPrimaryPasswordReauthDepth--;
     }
     isAuthorized = token.isLoggedIn;
+    // NSS keeps re-prompting until the password is right or the user gives up,
+    // so a single event can stand for more than one dialog, and a dismissal is
+    // indistinguishable from an internal failure.
+    Glean.pwmgr.primaryPasswordPrompt.record({
+      source: "reauth",
+      trigger: reason ?? "",
+      result: isAuthorized ? "success" : "cancel",
+    });
     telemetryEvent = {
       name: "reauthenticateMasterPassword",
       value: isAuthorized ? "success" : "fail",
@@ -1740,6 +1773,26 @@ export const LoginHelper = {
       isAuthorized,
       telemetryEvent,
     };
+  },
+
+  /**
+   * Records the event returned by `requestReauth`. There is none when the
+   * re-authentication was not attempted, for example because a primary
+   * password prompt was already open.
+   *
+   * @param {?object} telemetryEvent
+   *        The `telemetryEvent` of a `requestReauth` result.
+   */
+  recordReauthTelemetryEvent(telemetryEvent) {
+    if (!telemetryEvent) {
+      return;
+    }
+
+    let { name, extra = {}, value = null } = telemetryEvent;
+    if (value) {
+      extra.value = value;
+    }
+    Glean.pwmgr[name].record(extra);
   },
 
   /**
@@ -1833,7 +1886,7 @@ export const LoginHelper = {
       // disabled, and if so use the opener window. But if the window
       // has been used to visit other pages (ie, has a history),
       // assume it'll stick around and *don't* use the opener.
-      if (chromeDoc.getAttribute("chromehidden") && !browser.canGoBack) {
+      if (chromeDoc.hasAttribute("popup-window") && !browser.canGoBack) {
         lazy.log.debug("Using opener window for prompt.");
         return openerBrowser;
       }
@@ -1848,7 +1901,7 @@ ChromeUtils.defineLazyGetter(lazy, "log", () => {
     Services.appinfo.processType === Services.appinfo.PROCESS_TYPE_DEFAULT
       ? "Main"
       : "Content";
-  return LoginHelper.createLogger(`LoginHelper(${processName})`);
+  return LoginHelper.createLogger(`LoginHelper.${processName}`);
 });
 
 LoginHelper.init();

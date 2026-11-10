@@ -22,14 +22,17 @@ import org.hamcrest.Matchers.equalTo
 import org.junit.After
 import org.junit.Assert.assertTrue
 import org.junit.Before
-import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 import org.mozilla.geckoview.Autofill
+import org.mozilla.geckoview.GeckoResult
+import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.GeckoViewPrintDocumentAdapter
+import org.mozilla.geckoview.WebRequestError
+import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.AssertCalled
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.NullDelegate
 
 @RunWith(AndroidJUnit4::class)
@@ -161,7 +164,6 @@ class PdfCreationTest : BaseSessionTest() {
         }
     }
 
-    @Ignore // TODO: Re-enable it in bug 1846296.
     @NullDelegate(Autofill.Delegate::class)
     @Test
     fun saveAPdfDocument() {
@@ -198,6 +200,26 @@ class PdfCreationTest : BaseSessionTest() {
 
     @NullDelegate(Autofill.Delegate::class)
     @Test
+    fun saveAContentPdfDocumentWithSaveAsPdf() {
+        activityRule.scenario.onActivity {
+            val originalBytes = getTestBytes(HELLO_PDF_WORLD_PDF_PATH)
+            TestContentProvider.setTestData(originalBytes, "application/pdf")
+            mainSession.loadUri("content://org.mozilla.geckoview.test.provider/pdf")
+            mainSession.waitForPageStop()
+
+            val pdfInputStream = mainSession.saveAsPdf()
+            sessionRule.waitForResult(pdfInputStream).let {
+                assertThat(
+                    "The PDF File must the same as the original one.",
+                    it!!.readBytes(),
+                    equalTo(originalBytes),
+                )
+            }
+        }
+    }
+
+    @NullDelegate(Autofill.Delegate::class)
+    @Test
     fun dontTryToOpenNullContent() {
         activityRule.scenario.onActivity {
             TestContentProvider.setNullTestData("application/pdf")
@@ -221,6 +243,31 @@ class PdfCreationTest : BaseSessionTest() {
             val topHalfPixel = scaledScreenshot[scaledWidth / 2, scaledHeight / 5]
             val toolbarColor = rgb(249, 249, 251)
             assertTrue("The PDF toolbar rendered as the correct size.", topHalfPixel == toolbarColor)
+        }
+    }
+
+    @NullDelegate(Autofill.Delegate::class)
+    @Test
+    fun authorityHasUserId() {
+        activityRule.scenario.onActivity {
+            val originalBytes = getTestBytes(HELLO_PDF_WORLD_PDF_PATH)
+            TestContentProvider.setTestData(originalBytes, "application/pdf")
+            mainSession.loadUri("content://0@org.mozilla.geckoview.test.provider/pdf")
+
+            sessionRule.waitUntilCalled(
+                object : GeckoSession.ProgressDelegate, GeckoSession.NavigationDelegate {
+                    @AssertCalled(false)
+                    override fun onLoadError(
+                        session: GeckoSession,
+                        uri: String?,
+                        error: WebRequestError,
+                    ): GeckoResult<String>? {
+                        return null
+                    }
+
+                    @AssertCalled(count = 1) override fun onPageStop(session: GeckoSession, success: Boolean) {}
+                }
+            )
         }
     }
 }

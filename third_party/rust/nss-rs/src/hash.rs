@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::convert::TryFrom as _;
-
 use crate::{
     Error,
     err::IntoResult as _,
@@ -17,6 +15,7 @@ use crate::{
 // Constants
 //
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum HashAlgorithm {
     SHA2_256,
     SHA2_384,

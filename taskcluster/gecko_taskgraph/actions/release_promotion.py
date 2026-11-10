@@ -4,6 +4,7 @@
 
 
 import json
+import logging
 import os
 
 from mozilla_taskgraph.util.attributes import release_level
@@ -27,6 +28,8 @@ from gecko_taskgraph.util.taskgraph import (
     find_existing_tasks_from_previous_kinds,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def is_release_promotion_available(parameters):
     return parameters["project"] in RELEASE_PROMOTION_PROJECTS
@@ -38,6 +41,17 @@ def get_partner_config(partner_url_config, github_token):
         if url:
             partner_config[kind] = get_partner_config_by_url(url, kind, github_token)
     return partner_config
+
+
+def get_previous_partner_config(previous_graph_ids):
+    # The rightmost graph wins, as with the combined full task graphs below.
+    for graph_id in reversed(previous_graph_ids):
+        previous_parameters = get_artifact(graph_id, "public/parameters.yml")
+        partner_config = previous_parameters.get("release_partner_config")
+        if partner_config:
+            logger.info("Re-using the partner config resolved by %s", graph_id)
+            return partner_config
+    return None
 
 
 def get_flavors(graph_config, param):
@@ -229,9 +243,7 @@ def get_flavors(graph_config, param):
         "required": ["release_promotion_flavor", "build_number"],
     },
 )
-def release_promotion_action(
-    push_parameters, graph_config, input, task_group_id, task_id
-):
+def release_promotion_action(parameters, graph_config, input, task_group_id, task_id):
     release_promotion_flavor = input["release_promotion_flavor"]
     promotion_config = graph_config["release-promotion"]["flavors"][
         release_promotion_flavor
@@ -252,7 +264,7 @@ def release_promotion_action(
         partial_updates = input.get("partial_updates", {})
         if (
             not partial_updates
-            and release_level(graph_config["release-branches"], push_parameters)
+            and release_level(graph_config["release-branches"], parameters)
             == "production"
         ):
             raise Exception(
@@ -262,11 +274,11 @@ def release_promotion_action(
         balrog_prefix = product.title()
         os.environ["PARTIAL_UPDATES"] = json.dumps(partial_updates, sort_keys=True)
         release_history = populate_release_history(
-            balrog_prefix, push_parameters["project"], partial_updates=partial_updates
+            balrog_prefix, parameters["project"], partial_updates=partial_updates
         )
 
     target_tasks_method = promotion_config["target-tasks-method"].format(
-        project=push_parameters["project"]
+        project=parameters["project"]
     )
     rebuild_kinds = input.get(
         "rebuild_kinds", promotion_config.get("rebuild-kinds", [])
@@ -292,25 +304,22 @@ def release_promotion_action(
     # Build previous_graph_ids from ``previous_graph_ids``, ``revision``,
     # or the action parameters.
     previous_graph_ids = input.get("previous_graph_ids")
-    head_rev_param = "{}head_rev".format(graph_config["project-repo-param-prefix"])
     if not previous_graph_ids:
         revision = input.get("revision")
         if revision:
-            push_parameters[head_rev_param] = revision
+            head_rev_param = "{}head_rev".format(
+                graph_config["project-repo-param-prefix"]
+            )
+            push_parameters = {
+                head_rev_param: revision,
+                "project": parameters["project"],
+            }
+        else:
+            push_parameters = parameters
         previous_graph_ids = [find_decision_task(push_parameters, graph_config)]
 
     # Download parameters from the first decision task
     parameters = get_artifact(previous_graph_ids[0], "public/parameters.yml")
-    # Override `head_rev` - this should always be the revision that this action
-    # task was fired from. If the first `previous_graph_id` given was from an
-    # earlier revision, it will end up being wrong. This will cause any created
-    # tasks to have the wrong revision set, which causes problems such as showing
-    # up in the wrong place on Treeherder, and associated cached task digests
-    # with unmatched sources.
-    parameters["head_rev"] = push_parameters["head_rev"]
-    # If no `project-repo-param-prefix' is set this will end up doing the same
-    # as the above...but that's no harm.
-    parameters[head_rev_param] = push_parameters[head_rev_param]
 
     # Download and combine full task graphs from each of the previous_graph_ids.
     # Sometimes previous relpro action tasks will add tasks, like partials,
@@ -335,20 +344,31 @@ def release_promotion_action(
     # When doing staging releases on try, we still want to re-use tasks from
     # previous graphs.
     parameters["optimize_target_tasks"] = True
+    # Always mark release graphs as shipping, so tasks get top priority
+    # See https://bugzilla.mozilla.org/show_bug.cgi?id=2083781
+    parameters["shipping"] = True
 
     if release_promotion_flavor == "promote_firefox_partner_repack":
         release_enable_partner_repack = True
         release_enable_partner_attribution = False
         release_enable_emefree = False
+        # An off-cycle respin starts here, and picking up partner config changes
+        # is the point of it, so resolve the config afresh rather than inherit.
+        # An off-cycle push or ship flavor (bug 1943594) must not join this
+        # branch: it has to inherit from the off-cycle promote, or it would ship
+        # a different partner set than was repacked.
+        reuse_partner_config = False
     elif release_promotion_flavor == "promote_firefox_partner_attribution":
         release_enable_partner_repack = False
         release_enable_partner_attribution = True
         release_enable_emefree = False
+        reuse_partner_config = False
     else:
         # for promotion or ship phases, we use the action input to turn the repacks/attribution off
         release_enable_partner_repack = input["release_enable_partner_repack"]
         release_enable_partner_attribution = input["release_enable_partner_attribution"]
         release_enable_emefree = input["release_enable_emefree"]
+        reuse_partner_config = True
 
     partner_url_config = get_partner_url_config(parameters, graph_config)
     if (
@@ -375,8 +395,11 @@ def release_promotion_action(
         release_enable_partner_attribution,
         release_enable_emefree,
     ]):
-        github_token = get_token(parameters)
-        partner_config = get_partner_config(partner_url_config, github_token)
+        if reuse_partner_config:
+            partner_config = get_previous_partner_config(previous_graph_ids)
+        if not partner_config:
+            github_token = get_token(parameters)
+            partner_config = get_partner_config(partner_url_config, github_token)
     if partner_config:
         parameters["release_partner_config"] = fix_partner_config(partner_config)
     parameters["release_partners"] = input.get("release_partners")

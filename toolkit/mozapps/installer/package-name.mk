@@ -31,7 +31,9 @@ LANGPACK = $(PKG_LANGPACK_PATH)$(PKG_LANGPACK_BASENAME).xpi
 
 # Symbol package naming
 SYMBOL_FULL_ARCHIVE_BASENAME = $(PKG_BASENAME).crashreporter-symbols-full
+SYMBOL_GTEST_FULL_ARCHIVE_BASENAME = $(PKG_BASENAME).crashreporter-symbols-gtest-full
 SYMBOL_ARCHIVE_BASENAME = $(PKG_BASENAME).crashreporter-symbols
+SYMBOL_GTEST_ARCHIVE_BASENAME = $(PKG_BASENAME).crashreporter-symbols-gtest
 
 # Generated file package naming
 GENERATED_SOURCE_FILE_PACKAGE = $(PKG_BASENAME).generated-files.tar.gz
@@ -48,6 +50,8 @@ MOZSEARCH_JAVA_INDEX_BASENAME = $(PKG_BASENAME).mozsearch-java-index
 # Mozharness naming
 MOZHARNESS_PACKAGE = mozharness.zip
 
+# `libmegazord.so` artifacts: for use in Android unit tests run on host.
+LIBMEGAZORD_SO_ARTIFACTS_ARCHIVE_BASENAME = $(PKG_BASENAME).libmegazord_so_artifacts
 # `.xpt` artifacts: for use in artifact builds.
 XPT_ARTIFACTS_ARCHIVE_BASENAME = $(PKG_BASENAME).xpt_artifacts
 ifeq (Darwin, $(OS_ARCH))

@@ -19,25 +19,26 @@
 #include "testvectors/ike-sha384-vectors.h"
 #include "testvectors/ike-sha512-vectors.h"
 #include "testvectors/ike-aesxcbc-vectors.h"
+#include "pk11_import.h"
 
 namespace nss_test {
 
 class Pkcs11IkeTest : public ::testing::TestWithParam<
                           std::tuple<IkeTestVector, CK_MECHANISM_TYPE>> {
  protected:
-  ScopedPK11SymKey ImportKey(SECItem &ikm_item) {
+  ScopedPK11SymKey ImportKey(SECItem& ikm_item) {
     ScopedPK11SlotInfo slot(PK11_GetInternalSlot());
     if (!slot) {
       ADD_FAILURE() << "Can't get slot";
       return nullptr;
     }
-    ScopedPK11SymKey ikm(
-        PK11_ImportSymKey(slot.get(), CKM_GENERIC_SECRET_KEY_GEN,
-                          PK11_OriginUnwrap, CKA_DERIVE, &ikm_item, nullptr));
+    ScopedPK11SymKey ikm(nss_test::ImportSymKey(
+        slot.get(), CKM_GENERIC_SECRET_KEY_GEN, PK11_OriginUnwrap, CKA_DERIVE,
+        &ikm_item, nullptr));
     return ikm;
   }
 
-  void RunVectorTest(const IkeTestVector &vec, CK_MECHANISM_TYPE prf_mech) {
+  void RunVectorTest(const IkeTestVector& vec, CK_MECHANISM_TYPE prf_mech) {
     std::string msg = "Test #" + std::to_string(vec.id) + " failed";
     std::vector<uint8_t> vec_ikm = hex_string_to_bytes(vec.ikm);
     std::vector<uint8_t> vec_okm = hex_string_to_bytes(vec.okm);
@@ -91,7 +92,7 @@ class Pkcs11IkeTest : public ::testing::TestWithParam<
         prf_mech, CK_FALSE, CK_INVALID_HANDLE, vec_seed_data.data(),
         static_cast<CK_ULONG>(vec_seed_data.size())};
 
-    SECItem params_item = {siBuffer, (unsigned char *)&ike_prf_params,
+    SECItem params_item = {siBuffer, (unsigned char*)&ike_prf_params,
                            sizeof(ike_prf_params)};
 
     switch (vec.test_type) {
@@ -107,7 +108,7 @@ class Pkcs11IkeTest : public ::testing::TestWithParam<
         break;
       case IkeTestType::ikeV1:
         derive_mech = CKM_IKE1_PRF_DERIVE;
-        params_item.data = (unsigned char *)&ike_v1_prf_params;
+        params_item.data = (unsigned char*)&ike_v1_prf_params;
         params_item.len = sizeof(ike_v1_prf_params);
         gxy_key = ImportKey(gxykm_item);
         ike_v1_prf_params.hKeygxy = PK11_GetSymKeyHandle(gxy_key.get());
@@ -119,12 +120,12 @@ class Pkcs11IkeTest : public ::testing::TestWithParam<
         break;
       case IkeTestType::ikeV1AppB:
         derive_mech = CKM_IKE1_EXTENDED_DERIVE;
-        params_item.data = (unsigned char *)&ike1_extended_derive_params;
+        params_item.data = (unsigned char*)&ike1_extended_derive_params;
         params_item.len = sizeof(ike1_extended_derive_params);
         break;
       case IkeTestType::ikeV1AppBQuick:
         derive_mech = CKM_IKE1_EXTENDED_DERIVE;
-        params_item.data = (unsigned char *)&ike1_extended_derive_params_quick;
+        params_item.data = (unsigned char*)&ike1_extended_derive_params_quick;
         params_item.len = sizeof(ike1_extended_derive_params_quick);
         if (gxykm_item.len != 0) {
           gxy_key = ImportKey(gxykm_item);
@@ -135,7 +136,7 @@ class Pkcs11IkeTest : public ::testing::TestWithParam<
         break;
       case IkeTestType::ikePlus:
         derive_mech = CKM_IKE2_PRF_PLUS_DERIVE;
-        params_item.data = (unsigned char *)&ike2_prf_plus_params;
+        params_item.data = (unsigned char*)&ike2_prf_plus_params;
         params_item.len = sizeof(ike2_prf_plus_params);
         break;
       default:
@@ -149,13 +150,14 @@ class Pkcs11IkeTest : public ::testing::TestWithParam<
                     CKM_GENERIC_SECRET_KEY_GEN, CKA_DERIVE, vec.size));
     if (vec.valid) {
       ASSERT_NE(nullptr, okm.get()) << msg;
-      ASSERT_EQ(SECSuccess, PK11_ExtractKeyValue(okm.get())) << msg;
-      SECItem *outItem = PK11_GetKeyData(okm.get());
+      ASSERT_EQ(SECSuccess, nss_test::ExtractKeyValue(okm.get())) << msg;
+      SECItem* outItem = nss_test::GetKeyData(okm.get());
       SECItem nullItem = {siBuffer, NULL, 0};
       if (outItem == NULL) {
         outItem = &nullItem;
       }
-      ASSERT_EQ(0, SECITEM_CompareItem(&okm_item, PK11_GetKeyData(okm.get())))
+      ASSERT_EQ(0,
+                SECITEM_CompareItem(&okm_item, nss_test::GetKeyData(okm.get())))
           << msg << std::endl
           << " expect:" << DataBuffer(okm_item.data, okm_item.len) << std::endl
           << " calc'd:" << DataBuffer(outItem->data, outItem->len) << std::endl;

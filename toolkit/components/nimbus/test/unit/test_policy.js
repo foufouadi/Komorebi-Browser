@@ -44,6 +44,7 @@ async function doTest({
   existingEnrollments = [],
   expectedEnrollments,
   expectedOptIns,
+  readyBeforeInit = false,
 }) {
   info("Enabling policy");
   await EnterprisePolicyTesting.setupPolicyEngineWithJson({ policies });
@@ -57,20 +58,30 @@ async function doTest({
 
   const { cleanup, loader } = await NimbusTestUtils.setupTest({
     init: false,
-    storePath: await NimbusTestUtils.createStoreWith(store => {
+    populateStore: store => {
       for (const slug of existingEnrollments) {
         NimbusTestUtils.addEnrollmentForRecipe(
           RECIPES.find(e => e.slug === slug),
           { store }
         );
       }
-    }),
+    },
     experiments: RECIPES,
     migrationState: NimbusTestUtils.migrationState.UNMIGRATED,
   });
 
   sinon.spy(loader, "updateRecipes");
   sinon.spy(loader, "setTimer");
+
+  if (readyBeforeInit) {
+    await ExperimentAPI.ready();
+
+    Assert.equal(
+      ExperimentAPI.enabled,
+      false,
+      "ready() computes Nimbus as disabled before init()"
+    );
+  }
 
   await ExperimentAPI.init();
 
@@ -186,5 +197,21 @@ add_task(async function testDisableRolloutPolicyCausesUnenrollments() {
     expectedEnrollments: ["experiment"],
     existingEnrollments: ["rollout"],
     expectedOptIns: ["optin"],
+  });
+});
+
+add_task(async function testNimbusDisabled() {
+  await doTest({
+    policies: {
+      DisableRemoteImprovements: true,
+      DisableFirefoxStudies: true,
+      UserMessaging: { FirefoxLabs: false },
+    },
+    labsEnabled: false,
+    rolloutsEnabled: false,
+    studiesEnabled: false,
+    expectedEnrollments: [],
+    expectedOptIns: [],
+    readyBeforeInit: true,
   });
 });

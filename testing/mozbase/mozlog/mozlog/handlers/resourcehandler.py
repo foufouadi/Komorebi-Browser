@@ -31,16 +31,19 @@ class ResourceHandler(LogHandler):
             poll_interval=0.1,
         )
         self.resources.start()
-        self.resources.start_streaming(self.build_resources_profile_path)
-        print(
-            f"Streaming resource usage profile to: {self.build_resources_profile_path}"
-        )
+        if not self.resources.forwarding:
+            self.resources.start_streaming(self.build_resources_profile_path)
+            print(
+                f"Streaming resource usage profile to: {self.build_resources_profile_path}"
+            )
 
     def shutdown(self, data):
         if not self.resources:
             return
 
         self.resources.stop()
+        if self.resources.forwarding:
+            return
         with open(
             self.build_resources_profile_path, "w", encoding="utf-8", newline="\n"
         ) as fh:
@@ -86,6 +89,12 @@ class ResourceHandler(LogHandler):
 
     def tsan_error(self, data):
         self.resources.tsan_error(data)
+
+    def assertion_failure(self, data):
+        self.resources.assertion_failure(data)
+
+    def ubsan_error(self, data):
+        self.resources.ubsan_error(data)
 
     def mozleak_object(self, data):
         self.resources.mozleak_object(data)

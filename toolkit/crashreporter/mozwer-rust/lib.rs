@@ -66,7 +66,7 @@ type PDWORD = *mut DWORD;
 #[allow(non_camel_case_types)]
 type PWER_RUNTIME_EXCEPTION_INFORMATION = *mut WER_RUNTIME_EXCEPTION_INFORMATION;
 
-// This value comes from GeckoProcessTypes.h
+// This value comes from GeckoProcessTypes.inc
 static MAIN_PROCESS_TYPE: u32 = 0;
 
 /// # Safety
@@ -273,9 +273,6 @@ fn handle_child_process_crash(
         unsafe { BorrowedHandle::borrow_raw((*exception_information).hThread as RawHandle) };
     let parent_process = get_parent_process(process)?;
     let parent_pid = get_process_id(parent_process.as_handle())?;
-
-    let process = process.try_clone_to_owned().map_err(|_e| ())?;
-    let thread = thread.try_clone_to_owned().map_err(|_e| ())?;
 
     // SAFETY: All the pointers going into this function are guaranteed to be
     // valid and will only be read from.

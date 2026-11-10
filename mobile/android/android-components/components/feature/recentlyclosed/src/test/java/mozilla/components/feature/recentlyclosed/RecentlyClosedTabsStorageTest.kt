@@ -34,7 +34,7 @@ class RecentlyClosedTabsStorageTest {
     private lateinit var database: RecentlyClosedTabsDatabase
     private lateinit var crashReporting: CrashReporting
 
-    private class TestEngineSessionStateStorage() : EngineSessionStateStorage {
+    private class TestEngineSessionStateStorage : EngineSessionStateStorage {
         val data: MutableMap<String, EngineSessionState?> = mutableMapOf()
         var throwsOutOfMemoryOnWrite: Boolean = false
 

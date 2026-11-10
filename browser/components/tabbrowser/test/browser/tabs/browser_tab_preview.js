@@ -16,7 +16,7 @@ const { sinon } = ChromeUtils.importESModule(
 );
 
 const { TabStateFlusher } = ChromeUtils.importESModule(
-  "resource:///modules/sessionstore/TabStateFlusher.sys.mjs"
+  "moz-src:///browser/components/sessionstore/TabStateFlusher.sys.mjs"
 );
 
 const TabHoverPanelSet = ChromeUtils.importESModule(
@@ -29,6 +29,18 @@ const { TabNotes } = ChromeUtils.importESModule(
 
 const TAB_PREVIEW_PANEL_ID = "tab-preview-panel";
 const TAB_GROUP_PREVIEW_PANEL_ID = "tabgroup-preview-panel";
+
+async function parkNativePointer(win = window) {
+  const browserEl = win.gBrowser.selectedBrowser;
+  const { width, height } = browserEl.getBoundingClientRect();
+  await EventUtils.promiseNativeMouseEvent({
+    type: "mousemove",
+    target: browserEl,
+    offsetX: width - 10,
+    offsetY: height - 10,
+    win,
+  });
+}
 
 async function openTabPreview(tab, win = window) {
   const panel = win.document.getElementById(TAB_PREVIEW_PANEL_ID);
@@ -188,6 +200,18 @@ add_setup(async function () {
       ["test.wait300msAfterTabSwitch", true],
       ["ui.tooltip.delay_ms", 0],
     ],
+  });
+
+  // The hover states in these tests are controlled by synthesized events. There
+  // has been a history of problems in these tests caused by improper
+  // interaction between the synthesized event and the position of the OS
+  // pointer. To resolve this, disable all non test events and ensure the OS
+  // pointer is not positioned over the browser chrome at the start of each
+  // test.
+  await parkNativePointer();
+  EventUtils.disableNonTestMouseEvents(true);
+  registerCleanupFunction(() => {
+    EventUtils.disableNonTestMouseEvents(false);
   });
 
   await resetState();
@@ -554,7 +578,7 @@ add_task(async function tabWireframeTests() {
 
   // Discard the first tab so it can't provide a thumbnail image
   await TabStateFlusher.flush(tab1.linkedBrowser);
-  gBrowser.discardBrowser(tab1, true);
+  gBrowser.discardBrowser(tab1, { forceDiscard: true });
 
   const previewPanel = document.getElementById(TAB_PREVIEW_PANEL_ID);
 
@@ -1179,22 +1203,14 @@ add_task(async function tabGroupPanelHorizontalOffsetOptions() {
 
   const testCases = [
     {
-      prefs: [["browser.nova.enabled", false]],
-      expected: { position: "bottomleft topleft", x: 0, y: 0 },
-      message: "Without Nova there is no offset",
-    },
-    {
-      prefs: [["browser.nova.enabled", true]],
+      prefs: [],
       expected: { position: "bottomleft topleft", x: -16, y: 0 },
-      message: "LTR Nova anchors to the left edge and offsets by -16px",
+      message: "LTR anchors to the left edge and offsets by -16px",
     },
     {
-      prefs: [
-        ["browser.nova.enabled", true],
-        ["intl.l10n.pseudo", "bidi"],
-      ],
+      prefs: [["intl.l10n.pseudo", "bidi"]],
       expected: { position: "bottomright topright", x: 16, y: 0 },
-      message: "RTL Nova anchors to the right edge and offsets by +16px",
+      message: "RTL anchors to the right edge and offsets by +16px",
     },
   ];
 
@@ -1211,10 +1227,7 @@ add_task(async function tabGroupPanelHorizontalOffsetOptions() {
 add_task(async function tabGroupPanelHorizontalOpensWithOffset() {
   // The vertical-tabs variant enables sidebar.verticalTabs for the whole run.
   await SpecialPowers.pushPrefEnv({
-    set: [
-      ["sidebar.verticalTabs", false],
-      ["browser.nova.enabled", true],
-    ],
+    set: [["sidebar.verticalTabs", false]],
   });
 
   await withGroupPanel(async (groupPanel, group) => {
@@ -1226,7 +1239,7 @@ add_task(async function tabGroupPanelHorizontalOpensWithOffset() {
         group.labelContainerElement,
         sinon.match({ position: "bottomleft topleft", x: -16, y: 0 })
       ),
-      "openPopup is called anchored to the label with the Nova offset"
+      "openPopup is called anchored to the label with the correct offset"
     );
 
     await closeGroupPreviews();
@@ -1239,28 +1252,14 @@ add_task(async function tabGroupPanelHorizontalOpensWithOffset() {
 add_task(async function tabGroupPanelVerticalOffsetOptions() {
   const testCases = [
     {
-      nova: false,
-      start: true,
-      expected: { position: "topright topleft", x: 0, y: -5 },
-      message: "Nova off, sidebar at start: keeps the 5px upward offset",
-    },
-    {
-      nova: false,
-      start: false,
-      expected: { position: "topleft topright", x: 0, y: -5 },
-      message: "Nova off, sidebar at end: 5px offset, anchor mirrored",
-    },
-    {
-      nova: true,
       start: true,
       expected: { position: "topright topleft", x: 0, y: -16 },
-      message: "Nova on, sidebar at start: 16px upward offset",
+      message: "Sidebar at start: 16px upward offset",
     },
     {
-      nova: true,
       start: false,
       expected: { position: "topleft topright", x: 0, y: -16 },
-      message: "Nova on, sidebar at end: 16px offset, anchor mirrored",
+      message: "Sidebar at end: 16px offset, anchor mirrored",
     },
   ];
   await withGroupPanel(async groupPanel => {
@@ -1275,12 +1274,9 @@ add_task(async function tabGroupPanelVerticalOffsetOptions() {
       "Tabs are in vertical mode"
     );
 
-    for (const { nova, start, expected, message } of testCases) {
+    for (const { start, expected, message } of testCases) {
       await assertPopupOptions(groupPanel, {
-        prefs: [
-          ["browser.nova.enabled", nova],
-          ["sidebar.position_start", start],
-        ],
+        prefs: [["sidebar.position_start", start]],
         expected,
         message,
       });
@@ -1389,7 +1385,7 @@ add_task(async function tabGroupPanelUpdatesTests() {
   info("Test that moving tabs within the group updates the panel");
   let tabMoveEvent = BrowserTestUtils.waitForEvent(group, "TabMove");
   let tabToMove = group.tabs[1];
-  gBrowser.moveTabTo(tabToMove, { tabIndex: tabToMove._tPos - 1 });
+  gBrowser.moveTabTo(tabToMove, { tabIndex: tabToMove.index - 1 });
   await tabMoveEvent;
 
   Assert.equal(

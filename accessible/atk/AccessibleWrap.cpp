@@ -289,7 +289,9 @@ static uint16_t CreateMaiInterfaces(Accessible* aAccessible) {
     interfaces |= 1 << MAI_INTERFACE_TABLE_CELL;
   }
 
-  if (aAccessible->IsImage()) {
+  const nsRoleMapEntry* roleMapEntry = aAccessible->ARIARoleMap();
+  if (aAccessible->IsImage() ||
+      (roleMapEntry && roleMapEntry->role == roles::GRAPHIC)) {
     interfaces |= 1 << MAI_INTERFACE_IMAGE;
   }
 
@@ -621,6 +623,9 @@ AtkRole getRoleCB(AtkObject* aAtkObj) {
               aAtkObj->role == ATK_ROLE_CONTENT_INSERTION) &&
              !IsAtkVersionAtLeast(2, 34)) {
     aAtkObj->role = ATK_ROLE_SECTION;
+  } else if (aAtkObj->role == ATK_ROLE_DIALOG &&
+             acc->IsARIARole(nsGkAtoms::alertdialog)) {
+    aAtkObj->role = ATK_ROLE_ALERT;
   }
 
   return aAtkObj->role;
@@ -746,11 +751,19 @@ gint getIndexInParentCB(AtkObject* aAtkObj) {
 
 static void TranslateStates(uint64_t aState, roles::Role aRole,
                             AtkStateSet* aStateSet) {
-  // atk doesn't have a read only state so read only things shouldn't be
-  // editable. However, we don't do this for list items because Gecko always
-  // exposes those as read only.
-  if ((aState & states::READONLY) && aRole != roles::LISTITEM) {
-    aState &= ~states::EDITABLE;
+  // https://w3c.github.io/aria/core-aam/#ariaReadonlyTrue
+  if ((aState & states::READONLY)) {
+    // If an accessible is read-only it should not have an editable state.
+    if (aRole != roles::LISTITEM) {
+      // ...however, we don't do this for list items because Gecko always
+      // exposes those as read only.
+      aState &= ~states::EDITABLE;
+    } else {
+      aState &= ~states::READONLY;
+    }
+
+    // A read-only accessible should not be checkable either.
+    aState &= ~states::CHECKABLE;
   }
 
   // Convert every state to an entry in AtkStateMap
@@ -1020,8 +1033,9 @@ void a11y::PlatformFocusEvent(Accessible* aTarget) {
 }
 
 void a11y::PlatformCaretMoveEvent(Accessible* aTarget, int32_t aOffset,
-                                  bool aIsSelectionCollapsed,
-                                  int32_t aGranularity, bool aFromUser) {
+                                  bool /*aIsSelectionCollapsed*/,
+                                  int32_t /*aGranularity*/,
+                                  bool /*aFromUser*/) {
   AtkObject* wrapper = GetWrapperFor(aTarget);
   g_signal_emit_by_name(wrapper, "text_caret_moved", aOffset);
 }
@@ -1058,6 +1072,11 @@ void MaiAtkObject::FireStateChangeEvent(uint64_t aState, bool aEnabled) {
 void a11y::PlatformTextChangeEvent(Accessible* aTarget, const nsAString& aStr,
                                    int32_t aStart, uint32_t aLen,
                                    bool aIsInsert, bool aFromUser) {
+  // The text change signals are defined by AtkText, which is only implemented
+  // by objects with a text role.
+  if (!aTarget->IsTextRole()) {
+    return;
+  }
   MaiAtkObject* atkObj = MAI_ATK_OBJECT(GetWrapperFor(aTarget));
   atkObj->FireTextChangeEvent(aStr, aStart, aLen, aIsInsert, aFromUser);
 }

@@ -1,7 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-#![cfg(feature = "rkv-safe-mode")]
+#![cfg(feature = "stateful")]
 
 // utilities shared between tests
 
@@ -45,8 +45,15 @@ impl MetricsHandler for NoopMetricsHandler {
         // do nothing
     }
 
-    #[cfg(feature = "stateful")]
     fn submit_targeting_context(&self) {
+        // do nothing
+    }
+
+    fn record_rollouts_opt_out(&self) {
+        // do nothing
+    }
+
+    fn record_studies_opt_out(&self) {
         // do nothing
     }
 }

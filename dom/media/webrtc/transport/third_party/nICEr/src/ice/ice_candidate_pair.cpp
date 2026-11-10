@@ -41,6 +41,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 static const char *nr_ice_cand_pair_states[]={"UNKNOWN","FROZEN","WAITING","IN_PROGRESS","FAILED","SUCCEEDED","CANCELLED"};
 
+static void nr_ice_candidate_pair_restart_stun_nominated_cb(NR_SOCKET s, int how, void *cb_arg);
 static void nr_ice_candidate_pair_restart_stun_role_change_cb(NR_SOCKET s, int how, void *cb_arg);
 static void nr_ice_candidate_pair_compute_codeword(nr_ice_cand_pair *pair,
   nr_ice_candidate *lcand, nr_ice_candidate *rcand);
@@ -210,6 +211,7 @@ static void nr_ice_candidate_pair_stun_cb(NR_SOCKET s, int how, void *cb_arg)
   {
     int r,_status;
     nr_ice_cand_pair *pair=(nr_ice_cand_pair*)cb_arg;
+    int use_candidate=pair->stun_client->mode==NR_ICE_CLIENT_MODE_USE_CANDIDATE;
     nr_ice_cand_pair *actual_pair=0;
     nr_ice_candidate *cand=0;
     nr_stun_message *sres;
@@ -218,8 +220,6 @@ static void nr_ice_candidate_pair_stun_cb(NR_SOCKET s, int how, void *cb_arg)
     nr_transport_addr *response_src;
     nr_transport_addr response_dst;
     nr_stun_message_attribute *attr;
-
-    pair->stun_cb_timer=0;
 
     r_log(LOG_ICE,LOG_DEBUG,"ICE-PEER(%s)/STREAM(%s)/CAND-PAIR(%s): STUN cb on pair addr = %s",
       pair->pctx->label,pair->local->stream->label,pair->codeword,pair->as_string);
@@ -297,6 +297,11 @@ static void nr_ice_candidate_pair_stun_cb(NR_SOCKET s, int how, void *cb_arg)
           nr_ice_candidate_pair_set_state(pair->pctx,pair,NR_ICE_PAIR_STATE_SUCCEEDED);
         }
         else if(pair->stun_client->state == NR_STUN_CLIENT_STATE_DONE) {
+          if (pair->local->stream->obsolete) {
+            r_log(LOG_ICE,LOG_DEBUG,"ICE-PEER(%s)/CAND-PAIR(%s): ignore mapped address %s for obsolete stream on pair %s",pair->pctx->label,pair->codeword,pair->stun_client->results.ice_binding_response.mapped_addr.as_string,pair->as_string);
+            goto done;
+          }
+
           /* OK, this didn't correspond to a pair on the check list, but
              it probably matches one of our candidates */
 
@@ -337,6 +342,10 @@ static void nr_ice_candidate_pair_stun_cb(NR_SOCKET s, int how, void *cb_arg)
             if(r=nr_ice_candidate_pair_create(pair->pctx,cand,pair->remote, &actual_pair))
               ABORT(r);
 
+            if(r=nr_ice_socket_register_stun_client(actual_pair->local->isock,
+              actual_pair->stun_client,&actual_pair->stun_client_handle))
+              ABORT(r);
+
             if(r=nr_ice_component_insert_pair(actual_pair->remote->component,actual_pair))
               ABORT(r);
 
@@ -356,7 +365,7 @@ static void nr_ice_candidate_pair_stun_cb(NR_SOCKET s, int how, void *cb_arg)
 
         /* Should we set nominated? */
         if(pair->pctx->controlling){
-          if(pair->pctx->ctx->flags & NR_ICE_CTX_FLAGS_AGGRESSIVE_NOMINATION)
+          if(use_candidate)
             pair->nominated=1;
         }
         else{
@@ -386,12 +395,8 @@ static void nr_ice_candidate_pair_stun_cb(NR_SOCKET s, int how, void *cb_arg)
 
     /* If we're controlling but in regular mode, ask the handler
        if he wants to nominate something and stop... */
-    if(pair->pctx->controlling && !(pair->pctx->ctx->flags & NR_ICE_CTX_FLAGS_AGGRESSIVE_NOMINATION)){
-
-      if(r=nr_ice_component_select_pair(pair->pctx,pair->remote->component)){
-        if(r!=R_NOT_FOUND)
-          ABORT(r);
-      }
+    if(pair->pctx->controlling && !nr_ice_peer_ctx_aggressive_nomination(pair->pctx)){
+      nr_ice_component_maybe_select_pair(pair->pctx,pair->remote->component);
     }
 
   done:
@@ -406,6 +411,14 @@ static void nr_ice_candidate_pair_stun_cb(NR_SOCKET s, int how, void *cb_arg)
     return;
   }
 
+static void nr_ice_candidate_pair_stun_timer_cb(NR_SOCKET s, int how, void *cb_arg)
+  {
+    nr_ice_cand_pair *pair=(nr_ice_cand_pair*)cb_arg;
+
+    pair->stun_cb_timer=0;
+    nr_ice_candidate_pair_stun_cb(s,how,cb_arg);
+  }
+
 static void nr_ice_candidate_pair_restart(nr_ice_peer_ctx *pctx, nr_ice_cand_pair *pair)
   {
     int r,_status;
@@ -414,7 +427,7 @@ static void nr_ice_candidate_pair_restart(nr_ice_peer_ctx *pctx, nr_ice_cand_pai
     nr_ice_candidate_pair_set_state(pctx,pair,NR_ICE_PAIR_STATE_IN_PROGRESS);
 
     /* Start STUN */
-    if(pair->pctx->controlling && (pair->pctx->ctx->flags & NR_ICE_CTX_FLAGS_AGGRESSIVE_NOMINATION))
+    if(pair->pctx->controlling && nr_ice_peer_ctx_aggressive_nomination(pair->pctx))
       mode=NR_ICE_CLIENT_MODE_USE_CANDIDATE;
     else
       mode=NR_ICE_CLIENT_MODE_BINDING_REQUEST;
@@ -435,8 +448,9 @@ static void nr_ice_candidate_pair_restart(nr_ice_peer_ctx *pctx, nr_ice_cand_pai
   abort:
     if(_status){
       /* Don't fire the CB, but schedule it to fire ASAP */
-      assert(!pair->stun_cb_timer);
-      NR_ASYNC_TIMER_SET(0,nr_ice_candidate_pair_stun_cb,pair, &pair->stun_cb_timer);
+      NR_async_timer_cancel(pair->stun_cb_timer);
+      pair->stun_cb_timer=0;
+      NR_ASYNC_TIMER_SET(0,nr_ice_candidate_pair_stun_timer_cb,pair, &pair->stun_cb_timer);
       _status=0;
     }
   }
@@ -551,6 +565,11 @@ int nr_ice_candidate_pair_do_triggered_check(nr_ice_peer_ctx *pctx, nr_ice_cand_
 
 void nr_ice_candidate_pair_cancel(nr_ice_peer_ctx *pctx,nr_ice_cand_pair *pair, int move_to_wait_state)
   {
+    if(pair->restart_nominated_cb_timer){
+      NR_async_timer_cancel(pair->restart_nominated_cb_timer);
+      pair->restart_nominated_cb_timer=0;
+    }
+
     if(pair->state != NR_ICE_PAIR_STATE_FAILED){
       /* If it's already running we need to terminate the stun */
       if(pair->state==NR_ICE_PAIR_STATE_IN_PROGRESS){
@@ -637,12 +656,53 @@ void nr_ice_candidate_pair_insert(nr_ice_cand_pair_head *head,nr_ice_cand_pair *
     if(!c1) TAILQ_INSERT_TAIL(head,pair,check_queue_entry);
   }
 
-void nr_ice_candidate_pair_restart_stun_nominated_cb(NR_SOCKET s, int how, void *cb_arg)
+int nr_ice_candidate_pair_nominate(nr_ice_cand_pair *pair, UINT4 delay)
+  {
+    nr_ice_cand_pair *pending;
+    nr_ice_component *component=pair->remote->component;
+    bool already_nominated=false;
+
+    if(pair->state != NR_ICE_PAIR_STATE_SUCCEEDED)
+      return(R_BAD_ARGS);
+
+    if(component->nominated)
+      return(R_ALREADY);
+
+    TAILQ_FOREACH(pending,&pair->remote->stream->check_list,check_queue_entry){
+      if(pending->remote->component != component)
+        continue;
+
+      if(pending->nominated ||
+         (pending->state == NR_ICE_PAIR_STATE_IN_PROGRESS &&
+          pending->stun_client->mode == NR_ICE_CLIENT_MODE_USE_CANDIDATE))
+        already_nominated=true;
+
+      /* Replace pending nominations, or cancel them if one already started. */
+      if(pending->restart_nominated_cb_timer){
+        NR_async_timer_cancel(pending->restart_nominated_cb_timer);
+        pending->restart_nominated_cb_timer=0;
+      }
+    }
+
+    if(already_nominated)
+      return(R_ALREADY);
+
+    return(NR_ASYNC_TIMER_SET(delay,nr_ice_candidate_pair_restart_stun_nominated_cb,
+      pair,&pair->restart_nominated_cb_timer));
+  }
+
+static void nr_ice_candidate_pair_restart_stun_nominated_cb(NR_SOCKET s, int how, void *cb_arg)
   {
     nr_ice_cand_pair *pair=(nr_ice_cand_pair*)cb_arg;
     int r,_status;
 
     pair->restart_nominated_cb_timer=0;
+
+    if(pair->state != NR_ICE_PAIR_STATE_SUCCEEDED ||
+       !pair->pctx->controlling || pair->local->stream->obsolete)
+      return;
+
+    nr_ice_candidate_pair_set_state(pair->pctx,pair,NR_ICE_PAIR_STATE_IN_PROGRESS);
 
     r_log(LOG_ICE,LOG_INFO,"ICE-PEER(%s)/STREAM(%s)/CAND-PAIR(%s)/COMP(%d): Restarting pair as nominated: %s",pair->pctx->label,pair->local->stream->label,pair->codeword,pair->remote->component->component_id,pair->as_string);
 
@@ -651,8 +711,8 @@ void nr_ice_candidate_pair_restart_stun_nominated_cb(NR_SOCKET s, int how, void 
     if(r=nr_stun_client_start(pair->stun_client,NR_ICE_CLIENT_MODE_USE_CANDIDATE,nr_ice_candidate_pair_stun_cb,pair))
       ABORT(r);
 
-    if(r=nr_ice_ctx_remember_id(pair->pctx->ctx, pair->stun_client->request))
-      ABORT(r);
+    if((r=nr_ice_ctx_remember_id(pair->pctx->ctx, pair->stun_client->request)))
+      assert(0);
 
     _status=0;
   abort:
@@ -661,6 +721,14 @@ void nr_ice_candidate_pair_restart_stun_nominated_cb(NR_SOCKET s, int how, void 
       // This also quiets the unused variable warnings.
       r_log(LOG_ICE,LOG_DEBUG,"ICE-PEER(%s)/STREAM(%s)/CAND-PAIR(%s)/COMP(%d): STUN nominated cb pair as nominated: %s abort with status: %d",
         pair->pctx->label,pair->local->stream->label,pair->codeword,pair->remote->component->component_id,pair->as_string, _status);
+      if(pair->state==NR_ICE_PAIR_STATE_IN_PROGRESS){
+        nr_ice_candidate_pair_set_state(pair->pctx,pair,NR_ICE_PAIR_STATE_FAILED);
+        if(pair->pctx->controlling &&
+           !nr_ice_peer_ctx_aggressive_nomination(pair->pctx)){
+          r_log(LOG_ICE,LOG_ERR,"ICE-PEER(%s)/STREAM(%s)/CAND-PAIR(%s)/COMP(%d): Nomination failed to start; asking the application to select another pair",pair->pctx->label,pair->local->stream->label,pair->codeword,pair->remote->component->component_id);
+          nr_ice_component_maybe_select_pair(pair->pctx,pair->remote->component);
+        }
+      }
     }
     return;
   }

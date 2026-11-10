@@ -6,11 +6,8 @@
 
 // system_utils_linux.cpp: Implementation of OS-specific functions for Linux
 
-#ifdef UNSAFE_BUFFERS_BUILD
-#    pragma allow_unsafe_buffers
-#endif
-
 #include "common/debug.h"
+#include "common/unsafe_buffers.h"
 #include "system_utils.h"
 
 #include <string.h>
@@ -20,6 +17,11 @@
 #include <unistd.h>
 
 #include <array>
+
+#ifndef CLOCK_MONOTONIC_RAW
+// CLOCK_MONOTONIC_RAW is undefined on Solaris.
+#    define CLOCK_MONOTONIC_RAW CLOCK_MONOTONIC
+#endif
 
 namespace angle
 {
@@ -35,7 +37,7 @@ std::string GetExecutablePath()
         return "";
     }
 
-    path[result] = '\0';
+    ANGLE_UNSAFE_TODO(path[result]) = '\0';
     return path;
 }
 
@@ -54,8 +56,15 @@ const char *GetSharedLibraryExtension()
 double GetCurrentSystemTime()
 {
     struct timespec currentTime;
-    clock_gettime(CLOCK_MONOTONIC, &currentTime);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &currentTime);
     return currentTime.tv_sec + currentTime.tv_nsec * 1e-9;
+}
+
+uint64_t GetCurrentSystemTimeNs()
+{
+    struct timespec currentTime;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &currentTime);
+    return static_cast<uint64_t>(currentTime.tv_sec) * 1000'000'000 + currentTime.tv_nsec;
 }
 
 void SetCurrentThreadName(const char *name)

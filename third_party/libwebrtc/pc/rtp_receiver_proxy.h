@@ -47,7 +47,7 @@ PROXY_METHOD1(void, SetObserver, RtpReceiverObserverInterface*)
 PROXY_SECONDARY_METHOD1(void,
                         SetJitterBufferMinimumDelay,
                         std::optional<double>)
-PROXY_SECONDARY_CONSTMETHOD0(std::vector<RtpSource>, GetSources)
+PROXY_CONSTMETHOD0(std::vector<RtpSource>, GetSources)
 // TODO(bugs.webrtc.org/12772): Remove.
 PROXY_SECONDARY_METHOD1(void,
                         SetFrameDecryptor,
@@ -58,9 +58,10 @@ PROXY_SECONDARY_CONSTMETHOD0(scoped_refptr<FrameDecryptorInterface>,
 PROXY_SECONDARY_METHOD1(void,
                         SetFrameTransformer,
                         scoped_refptr<FrameTransformerInterface>)
-PROXY_METHOD1(RTCErrorOr<scoped_refptr<SframeDecryptorInterface>>,
+PROXY_METHOD2(RTCErrorOr<scoped_refptr<SframeDecryptorInterface>>,
               CreateSframeDecryptorOrError,
-              SframeCipherSuite)
+              SframeCipherSuite,
+              SframeDecryptErrorCallback)
 END_PROXY_MAP(RtpReceiver)
 
 }  // namespace webrtc

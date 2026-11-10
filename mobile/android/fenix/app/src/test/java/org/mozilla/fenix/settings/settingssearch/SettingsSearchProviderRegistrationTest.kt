@@ -71,8 +71,7 @@ class SettingsSearchProviderRegistrationTest {
             summarizationFeatureConfiguration =
                 FakeSummarizationFeatureConfiguration().apply {
                     isFeatureAvailable = true
-                },
-            isFirefoxLabsEnabled = { true },
+                }
         )
 
     /** Builds the index the way production does, returning the screens that contributed items. */
@@ -110,7 +109,9 @@ class SettingsSearchProviderRegistrationTest {
     @Test
     fun `GIVEN the XML indexer list WHEN inspecting entries THEN every entry points at a real XML resource`() {
         val entriesWithoutXml =
-            DefaultFenixSettingsIndexer.defaultPreferenceFileInformationList.filter { it.xmlResourceId == null }
+            DefaultFenixSettingsIndexer.defaultPreferenceFileInformationList(includeAutofillPreferences = true).filter {
+                it.xmlResourceId == null
+            }
 
         assertEquals(
             expected = emptyList(),
@@ -125,7 +126,11 @@ class SettingsSearchProviderRegistrationTest {
     fun `GIVEN XML-backed screens WHEN checking the indexer list THEN each one is registered for XML indexing`() {
         (xmlScreens - intentionallyNotIndexed).forEach { screen ->
             assertTrue(
-                actual = screen in DefaultFenixSettingsIndexer.defaultPreferenceFileInformationList,
+                actual =
+                    screen in
+                        DefaultFenixSettingsIndexer.defaultPreferenceFileInformationList(
+                            includeAutofillPreferences = true
+                        ),
                 message =
                     "$screen has a backing XML file but is not in " +
                         "defaultPreferenceFileInformationList, so none of its preferences are searchable. " +
@@ -138,7 +143,11 @@ class SettingsSearchProviderRegistrationTest {
     fun `GIVEN screens opted out of indexing WHEN checking the indexer list THEN the opt-out list is not stale`() {
         intentionallyNotIndexed.forEach { screen ->
             assertTrue(
-                actual = screen !in DefaultFenixSettingsIndexer.defaultPreferenceFileInformationList,
+                actual =
+                    screen !in
+                        DefaultFenixSettingsIndexer.defaultPreferenceFileInformationList(
+                            includeAutofillPreferences = true
+                        ),
                 message =
                     "$screen is registered for XML indexing but still listed in " +
                         "intentionallyNotIndexed. Remove it from intentionallyNotIndexed.",

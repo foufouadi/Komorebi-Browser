@@ -6,6 +6,8 @@
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
+  CreditCard: "resource://gre/modules/CreditCard.sys.mjs",
+  FormAutofill: "resource://autofill/FormAutofill.sys.mjs",
   FormAutofillUtils: "resource://gre/modules/shared/FormAutofillUtils.sys.mjs",
 });
 
@@ -121,13 +123,61 @@ export class EditCreditCard extends EditAutofillForm {
       ),
       month: this._elements.form.querySelector("#cc-exp-month"),
       year: this._elements.form.querySelector("#cc-exp-year"),
+      securityCode: this._elements.form.querySelector("#cc-csc"),
+      securityCodeContainer:
+        this._elements.form.querySelector("#cc-csc-container"),
       billingAddress: this._elements.form.querySelector("#billingAddressGUID"),
       billingAddressRow:
         this._elements.form.querySelector(".billingAddressRow"),
     });
 
+    this.#setupSecurityCodeField();
     this.attachEventListeners();
     this.loadRecord(record, addresses);
+  }
+
+  /**
+   * The security code field is behind a pref. Take it out of the form entirely
+   * while the pref is off so that it can't contribute to the record we save.
+   */
+  #setupSecurityCodeField() {
+    let securityCode = this._elements.securityCode;
+    if (!lazy.FormAutofill.isAutofillCreditCardCVVEnabled) {
+      securityCode.remove();
+      this._elements.securityCode = null;
+      return;
+    }
+    this._elements.securityCodeContainer.hidden = false;
+    this._elements.form.classList.add("has-security-code");
+
+    // The security code is optional, but must be 3 or 4 digits when provided.
+    // The constraints are applied as soon as the inner input exists rather than
+    // in setupValidation() so that the length is enforced while typing.
+    securityCode.updateComplete.then(() => {
+      securityCode.inputEl.pattern = "[0-9]{3,4}";
+      securityCode.inputEl.maxLength = 4;
+    });
+    this.#updateSecurityCodeLabel();
+  }
+
+  /**
+   * Name the security code field the way the card's network does, following
+   * the card number as it is typed.
+   */
+  #updateSecurityCodeLabel() {
+    const securityCode = this._elements.securityCode;
+    if (!securityCode) {
+      return;
+    }
+    document.l10n.setAttributes(
+      securityCode,
+      "autofill-card-security-code-optional-2",
+      {
+        securityCode: lazy.CreditCard.formatSecurityCodeName({
+          "cc-number": this._elements.ccNumber.value,
+        }),
+      }
+    );
   }
 
   loadRecord(record, addresses, preserveFieldValues) {
@@ -146,6 +196,7 @@ export class EditCreditCard extends EditAutofillForm {
       // once the options are processed. Re-apply the selected values after the
       // elements have finished updating.
       this.#applySelectValues(record);
+      this.#updateSecurityCodeLabel();
     }
   }
 
@@ -280,6 +331,9 @@ export class EditCreditCard extends EditAutofillForm {
       }
     }
     super.handleInput(event);
+    if (event.target == this._elements.ccNumber) {
+      this.#updateSecurityCodeLabel();
+    }
   }
 
   /**

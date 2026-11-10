@@ -14,6 +14,10 @@ ChromeUtils.defineESModuleGetters(lazy, {
   ContextDescriptorType:
     "chrome://remote/content/shared/messagehandler/MessageHandler.sys.mjs",
   error: "chrome://remote/content/shared/webdriver/Errors.sys.mjs",
+  isBrowsingContextCompatible:
+    "chrome://remote/content/shared/BrowsingContextUtils.sys.mjs",
+  isPrivilegedContext:
+    "chrome://remote/content/shared/BrowsingContextUtils.sys.mjs",
   Log: "chrome://remote/content/shared/Log.sys.mjs",
   NavigableManager: "chrome://remote/content/shared/NavigableManager.sys.mjs",
   pprint: "chrome://remote/content/shared/Format.sys.mjs",
@@ -22,6 +26,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   setDownloadFolderOverrideForBrowsingContext:
     "chrome://remote/content/webdriver-bidi/modules/root/browser.sys.mjs",
   setLocaleOverrideForBrowsingContext:
+    "chrome://remote/content/webdriver-bidi/modules/root/emulation.sys.mjs",
+  setMediaFeaturesOverrideForBrowsingContext:
     "chrome://remote/content/webdriver-bidi/modules/root/emulation.sys.mjs",
   setNetworkConditionsForBrowsingContext:
     "chrome://remote/content/webdriver-bidi/modules/root/emulation.sys.mjs",
@@ -56,10 +62,12 @@ ChromeUtils.defineLazyGetter(lazy, "logger", () =>
 const NULL = Symbol("NULL");
 
 // Apply here only the configurations that will be initialized in the parent process,
-// except from `viewport-override` which is handled separately.
+// except from `device-pixel-ratio-override` and `viewport-override` which are
+// handled separately.
 const CONFIGURATIONS_TO_APPLY = [
   SessionDataCategory.DownloadBehaviorOverride,
   SessionDataCategory.LocaleOverride,
+  SessionDataCategory.MediaFeaturesOverride,
   SessionDataCategory.NetworkConditions,
   SessionDataCategory.ScreenOrientationOverride,
   SessionDataCategory.ScreenSettingsOverride,
@@ -96,11 +104,11 @@ class _ConfigurationModule extends RootBiDiModule {
         [lazy.ContextDescriptorType.UserContext]: null,
       };
 
-      // User agent override also supports a global setting.
-      // see https://www.w3.org/TR/webdriver-bidi/#command-emulation-setUserAgentOverride.
+      // Add storage for configurations which support a global override.
       if (
         configuration === SessionDataCategory.UserAgentOverride ||
-        configuration === SessionDataCategory.DownloadBehaviorOverride
+        configuration === SessionDataCategory.DownloadBehaviorOverride ||
+        configuration === SessionDataCategory.MediaFeaturesOverride
       ) {
         this.#configurationMap[configuration][lazy.ContextDescriptorType.All] =
           null;
@@ -134,19 +142,14 @@ class _ConfigurationModule extends RootBiDiModule {
         }
       );
 
-      if (!sessionData.length) {
+      // setViewport replaces the previous item, so there is at most one item
+      // per user context. Its value is null if the viewport was reset.
+      const viewport = sessionData[0]?.value;
+      if (!viewport) {
         return;
       }
 
-      const lastViewportItem = sessionData.findLast(
-        item => item.value.viewport !== undefined
-      );
-
-      if (!lastViewportItem || !lastViewportItem.value.viewport) {
-        return;
-      }
-
-      const { height, width } = lastViewportItem.value.viewport;
+      const { height, width } = viewport;
       subject.style.setProperty("height", height + "px");
       subject.style.setProperty("width", width + "px");
 
@@ -216,15 +219,13 @@ class _ConfigurationModule extends RootBiDiModule {
     for (const { category, contextDescriptor, value } of sessionDataItems) {
       if (
         !CONFIGURATIONS_TO_APPLY.includes(category) &&
-        category !== SessionDataCategory.ViewportOverride
+        category !== SessionDataCategory.DevicePixelRatioOverride
       ) {
         continue;
       }
 
-      if (category === SessionDataCategory.ViewportOverride) {
-        if (value.devicePixelRatio !== undefined) {
-          devicePixelRatioOverride = value.devicePixelRatio;
-        }
+      if (category === SessionDataCategory.DevicePixelRatioOverride) {
+        devicePixelRatioOverride = value;
       } else {
         configurationMap[category][contextDescriptor.type] = value;
       }
@@ -260,6 +261,17 @@ class _ConfigurationModule extends RootBiDiModule {
       lazy.setLocaleOverrideForBrowsingContext({
         context: browsingContext,
         value: localeOverride,
+      });
+    }
+
+    const mediaFeaturesOverride = this.#findCorrectConfigurationValue(
+      configurationMap[SessionDataCategory.MediaFeaturesOverride],
+      "object"
+    );
+    if (mediaFeaturesOverride !== null) {
+      lazy.setMediaFeaturesOverrideForBrowsingContext({
+        context: browsingContext,
+        value: mediaFeaturesOverride,
       });
     }
 
@@ -455,6 +467,8 @@ class _ConfigurationModule extends RootBiDiModule {
         return this.#applyGeolocationOverride(commandArgs);
       case SessionDataCategory.LocaleOverride:
         return this.#applyLocaleOverride(commandArgs);
+      case SessionDataCategory.MediaFeaturesOverride:
+        return this.#applyMediaFeaturesOverride(commandArgs);
       case SessionDataCategory.NetworkConditions:
         return lazy.setNetworkConditionsForBrowsingContext(commandArgs);
       case SessionDataCategory.ScreenOrientationOverride:
@@ -509,6 +523,40 @@ class _ConfigurationModule extends RootBiDiModule {
         locale: value,
       },
     });
+  }
+
+  async #applyMediaFeaturesOverride(options) {
+    lazy.setMediaFeaturesOverrideForBrowsingContext(options);
+
+    // Flush ancestors first so descendants receive their embedder's color scheme.
+    for (const context of options.context.getAllBrowsingContextsInSubtree()) {
+      if (
+        context.isDiscarded ||
+        !lazy.isBrowsingContextCompatible(context) ||
+        lazy.isPrivilegedContext(context)
+      ) {
+        continue;
+      }
+
+      try {
+        await this.messageHandler.handleCommand({
+          moduleName: "emulation",
+          commandName: "_flushMediaFeatures",
+          destination: {
+            type: lazy.WindowGlobalMessageHandler.type,
+            id: context.id,
+          },
+          retryOnAbort: true,
+        });
+      } catch (e) {
+        if (
+          e.name !== "DiscardedBrowsingContextError" ||
+          !context.isDiscarded
+        ) {
+          throw e;
+        }
+      }
+    }
   }
 
   async #applyTimezoneOverride(options) {
@@ -660,14 +708,7 @@ class _ConfigurationModule extends RootBiDiModule {
           lazy.pprint`Expected elements of "userContexts" to be a string, got ${userContextId}`
         );
 
-        const internalId =
-          lazy.UserContextManager.getInternalIdById(userContextId);
-
-        if (internalId === null) {
-          throw new lazy.error.NoSuchUserContextError(
-            `User context with id: ${userContextId} doesn't exist`
-          );
-        }
+        const internalId = this._getUserContextInternalId(userContextId);
 
         userContexts.add(internalId);
 

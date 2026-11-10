@@ -28,6 +28,8 @@ import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.WithDisplay
 class OrientationDelegateTest : BaseSessionTest() {
     val activityRule = ActivityScenarioRule(GeckoViewTestActivity::class.java)
 
+    private val iframeOrientation = "document.querySelector('iframe').contentWindow.screen.orientation"
+
     @get:Rule override val rules: RuleChain = RuleChain.outerRule(activityRule).around(sessionRule)
 
     @Before
@@ -36,10 +38,14 @@ class OrientationDelegateTest : BaseSessionTest() {
     }
 
     private fun goFullscreen() {
-        sessionRule.setPrefsUntilTestEnd(mapOf("full-screen-api.allow-trusted-requests-only" to false))
         mainSession.loadTestPath(FULLSCREEN_PATH)
         mainSession.waitForPageStop()
-        val promise = mainSession.evaluatePromiseJS("document.querySelector('#fullscreen').requestFullscreen()")
+        enterFullscreen()
+    }
+
+    private fun enterFullscreen(doc: String = "document") {
+        sessionRule.setPrefsUntilTestEnd(mapOf("full-screen-api.allow-trusted-requests-only" to false))
+        val promise = mainSession.evaluatePromiseJS("$doc.querySelector('#fullscreen').requestFullscreen()")
         sessionRule.waitUntilCalled(
             object : ContentDelegate {
                 @AssertCalled(count = 1)
@@ -51,72 +57,47 @@ class OrientationDelegateTest : BaseSessionTest() {
         promise.value
     }
 
-    private fun lockPortrait() {
-        val promise = mainSession.evaluatePromiseJS("screen.orientation.lock('portrait-primary')")
-        sessionRule.delegateDuringNextWait(
-            object : OrientationController.OrientationDelegate {
+    private fun goFullscreenInIframe() {
+        mainSession.loadTestPath(FULLSCREEN_PATH)
+        mainSession.waitForPageStop()
+        mainSession
+            .evaluatePromiseJS(
+                """
+                new Promise(resolve => {
+                    const iframe = document.createElement('iframe');
+                    iframe.allowFullscreen = true;
+                    iframe.onload = resolve;
+                    iframe.src = '$FULLSCREEN_PATH';
+                    document.body.append(iframe);
+                })
+                """
+                    .trimIndent()
+            )
+            .value
+        enterFullscreen("document.querySelector('iframe').contentDocument")
+    }
+
+    private fun exitFullscreenAndWaitForUnlock(doc: String = "document") {
+        val promise = mainSession.evaluatePromiseJS("$doc.exitFullscreen()")
+        sessionRule.waitUntilCalled(
+            object : ContentDelegate, OrientationController.OrientationDelegate {
                 @AssertCalled(count = 1)
-                override fun onOrientationLock(aOrientation: Int): GeckoResult<AllowOrDeny> {
-                    assertThat(
-                        "The orientation should be portrait",
-                        aOrientation,
-                        equalTo(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT),
-                    )
+                override fun onFullScreen(session: GeckoSession, fullScreen: Boolean) {
+                    assertThat("Exited fullscreen", fullScreen, equalTo(false))
+                }
+
+                @AssertCalled(count = 1)
+                override fun onOrientationUnlock() {
                     activityRule.scenario.onActivity { activity ->
-                        activity.requestedOrientation = aOrientation
+                        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                     }
-                    return GeckoResult.allow()
                 }
             }
         )
-        sessionRule.runtime.orientationChanged(Configuration.ORIENTATION_PORTRAIT)
         promise.value
-        // Remove previous delegate
-        mainSession.waitForRoundTrip()
     }
 
-    private fun lockLandscape() {
-        val promise = mainSession.evaluatePromiseJS("screen.orientation.lock('landscape-primary')")
-        sessionRule.delegateDuringNextWait(
-            object : OrientationController.OrientationDelegate {
-                @AssertCalled(count = 1)
-                override fun onOrientationLock(aOrientation: Int): GeckoResult<AllowOrDeny> {
-                    assertThat(
-                        "The orientation should be landscape",
-                        aOrientation,
-                        equalTo(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE),
-                    )
-                    activityRule.scenario.onActivity { activity ->
-                        activity.requestedOrientation = aOrientation
-                    }
-                    return GeckoResult.allow()
-                }
-            }
-        )
-        sessionRule.runtime.orientationChanged(Configuration.ORIENTATION_LANDSCAPE)
-        promise.value
-        // Remove previous delegate
-        mainSession.waitForRoundTrip()
-    }
-
-    @Test
-    fun orientationLock() {
-        goFullscreen()
-        activityRule.scenario.onActivity { activity ->
-            // If the orientation is landscape, lock to portrait and wait for delegate. If portrait, lock to landscape
-            // instead.
-            if (activity.resources.configuration.orientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE) {
-                lockPortrait()
-            } else if (activity.resources.configuration.orientation == ActivityInfo.SCREEN_ORIENTATION_PORTRAIT) {
-                lockLandscape()
-            }
-        }
-    }
-
-    @Test
-    fun orientationUnlock() {
-        goFullscreen()
-        mainSession.evaluateJS("screen.orientation.unlock()")
+    private fun waitForUnlock() {
         sessionRule.waitUntilCalled(
             object : OrientationController.OrientationDelegate {
                 @AssertCalled(count = 1)
@@ -127,6 +108,57 @@ class OrientationDelegateTest : BaseSessionTest() {
                 }
             }
         )
+    }
+
+    private fun lock(type: String, expected: Int, configuration: Int, orientation: String = "screen.orientation") {
+        sessionRule.delegateDuringNextWait(
+            object : OrientationController.OrientationDelegate {
+                @AssertCalled(count = 1)
+                override fun onOrientationLock(aOrientation: Int): GeckoResult<AllowOrDeny> {
+                    assertThat("The orientation should be $type", aOrientation, equalTo(expected))
+                    activityRule.scenario.onActivity { activity ->
+                        activity.requestedOrientation = aOrientation
+                    }
+                    return GeckoResult.allow()
+                }
+            }
+        )
+        val promise = mainSession.evaluatePromiseJS("$orientation.lock('$type')")
+        sessionRule.waitUntilCalled(OrientationController.OrientationDelegate::class, "onOrientationLock")
+        sessionRule.runtime.orientationChanged(configuration)
+        promise.value
+    }
+
+    private fun lockPortrait() =
+        lock("portrait-primary", ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, Configuration.ORIENTATION_PORTRAIT)
+
+    private fun lockLandscape(orientation: String = "screen.orientation") =
+        lock(
+            "landscape-primary",
+            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+            Configuration.ORIENTATION_LANDSCAPE,
+            orientation,
+        )
+
+    @Test
+    fun orientationLock() {
+        goFullscreen()
+        activityRule.scenario.onActivity { activity ->
+            // If the orientation is landscape, lock to portrait and wait for delegate. If portrait, lock to landscape
+            // instead.
+            if (activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                lockPortrait()
+            } else if (activity.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
+                lockLandscape()
+            }
+        }
+    }
+
+    @Test
+    fun orientationUnlock() {
+        goFullscreen()
+        mainSession.evaluateJS("screen.orientation.unlock()")
+        waitForUnlock()
     }
 
     @Test
@@ -179,27 +211,7 @@ class OrientationDelegateTest : BaseSessionTest() {
     fun orientationLockUnlock() {
         goFullscreen()
 
-        val promise = mainSession.evaluatePromiseJS("screen.orientation.lock('landscape-primary')")
-        sessionRule.delegateDuringNextWait(
-            object : OrientationController.OrientationDelegate {
-                @AssertCalled(count = 1)
-                override fun onOrientationLock(aOrientation: Int): GeckoResult<AllowOrDeny> {
-                    assertThat(
-                        "The orientation value is as expected",
-                        aOrientation,
-                        equalTo(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE),
-                    )
-                    activityRule.scenario.onActivity { activity ->
-                        activity.requestedOrientation = aOrientation
-                    }
-                    return GeckoResult.allow()
-                }
-            }
-        )
-        sessionRule.runtime.orientationChanged(Configuration.ORIENTATION_LANDSCAPE)
-        promise.value
-        // Remove previous delegate
-        mainSession.waitForRoundTrip()
+        lockLandscape()
 
         // after locking to orientation landscape, unlock to default
         mainSession.evaluateJS("screen.orientation.unlock()")
@@ -264,30 +276,58 @@ class OrientationDelegateTest : BaseSessionTest() {
         activityRule.scenario.onActivity { activity ->
             // If the orientation is landscape, lock to portrait and wait for delegate. If portrait, lock to landscape
             // instead.
-            if (activity.resources.configuration.orientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE) {
+            if (activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
                 lockPortrait()
-            } else if (activity.resources.configuration.orientation == ActivityInfo.SCREEN_ORIENTATION_PORTRAIT) {
+            } else if (activity.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
                 lockLandscape()
             }
         }
 
-        val promise = mainSession.evaluatePromiseJS("document.exitFullscreen()")
-        sessionRule.waitUntilCalled(
-            object : ContentDelegate, OrientationController.OrientationDelegate {
-                @AssertCalled(count = 1)
-                override fun onFullScreen(session: GeckoSession, fullScreen: Boolean) {
-                    assertThat("Exited fullscreen", fullScreen, equalTo(false))
-                }
+        exitFullscreenAndWaitForUnlock()
+    }
 
-                @AssertCalled(count = 1)
-                override fun onOrientationUnlock() {
-                    activityRule.scenario.onActivity { activity ->
-                        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                    }
-                }
+    @Test
+    fun orientationUnlockByRemovingFullscreenIframe() {
+        goFullscreenInIframe()
+        lockLandscape(iframeOrientation)
+        mainSession.evaluateJS("document.querySelector('iframe').remove()")
+        waitForUnlock()
+    }
+
+    @Test
+    fun orientationUnlockByNavigatingFullscreenIframe() {
+        goFullscreenInIframe()
+        lockLandscape(iframeOrientation)
+        mainSession.evaluateJS("document.querySelector('iframe').src = '$HELLO_HTML_PATH'")
+        waitForUnlock()
+    }
+
+    @WithDisplay(width = 300, height = 200)
+    @Test
+    fun orientationLockKeptWhenUnlockedIframeIsRemoved() {
+        goFullscreenInIframe()
+        lockLandscape(iframeOrientation)
+        exitFullscreenAndWaitForUnlock("document.querySelector('iframe').contentDocument")
+
+        enterFullscreen()
+        lockPortrait()
+        sessionRule.delegateDuringNextWait(
+            object : OrientationController.OrientationDelegate {
+                @AssertCalled(false) override fun onOrientationUnlock() {}
             }
         )
-        promise.value
+        mainSession.evaluateJS("document.querySelector('iframe').remove()")
+        mainSession.waitForRoundTrip()
+
+        exitFullscreenAndWaitForUnlock()
+    }
+
+    @Test
+    fun orientationUnlockByClosingSession() {
+        goFullscreen()
+        lockLandscape()
+        mainSession.close()
+        waitForUnlock()
     }
 
     @WithDisplay(width = 200, height = 300)

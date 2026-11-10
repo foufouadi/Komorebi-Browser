@@ -7,30 +7,30 @@
 use super::{
     rule::Descriptors as PropertyDescriptors,
     syntax::{
-        data_type::DataType, Component as SyntaxComponent, ComponentName, Descriptor, Multiplier,
+        Component as SyntaxComponent, ComponentName, Descriptor, Multiplier, data_type::DataType,
     },
 };
-use crate::custom_properties::{AttrTaint, ComputedValue as ComputedPropertyValue};
+use crate::custom_properties::ComputedValue as ComputedPropertyValue;
 use crate::derives::*;
 use crate::parser::{Parse, ParserContext};
 use crate::properties;
-use crate::properties::{CSSWideKeyword, CustomDeclarationValue};
+use crate::properties::{CSSWideKeyword, CustomDeclarationValue, PropertyIdRef};
 use crate::stylesheets::{CssRuleType, Origin, UrlExtraData};
+use crate::substitution::AttrTaint;
 use crate::values::{
+    CustomIdent,
     animated::{self, Animate, Procedure},
     computed::{self, ToComputedValue},
-    specified, CustomIdent,
+    specified,
 };
-use crate::{Namespace, Prefix};
 use cssparser::{BasicParseErrorKind, ParseErrorKind, Parser as CSSParser, TokenSerializationType};
-use rustc_hash::FxHashMap;
 use selectors::matching::QuirksMode;
 use servo_arc::Arc;
 use smallvec::SmallVec;
 use std::fmt::{self, Write};
 use style_traits::{
-    owned_str::OwnedStr, CssWriter, ParseError as StyleParseError, ParsingMode,
-    PropertySyntaxParseError, StyleParseErrorKind, ToCss,
+    CssWriter, ParseError as StyleParseError, ParsingMode, PropertySyntaxParseError,
+    StyleParseErrorKind, ToCss, owned_str::OwnedStr,
 };
 
 /// A single component of the computed value.
@@ -218,11 +218,9 @@ pub struct Value<Component> {
 }
 
 impl<Component: PartialEq> PartialEq for Value<Component> {
-    // Ignore the url_data field when comparing values for equality.
-    // attr_tainted is compared so the cascade doesn't treat a tainted
-    // value as equal to an untainted one, which could lose the taint.
+    // Ignore the url_data and tainting fields when comparing values for equality.
     fn eq(&self, other: &Self) -> bool {
-        self.v == other.v && self.attr_tainted == other.attr_tainted
+        self.v == other.v
     }
 }
 
@@ -315,14 +313,14 @@ pub type ComputedValue = Value<ComputedValueComponent>;
 impl SpecifiedValue {
     /// Convert a registered custom property to a Computed custom property value, given input and a
     /// property registration.
-    pub fn compute<'i, 't>(
-        input: &mut CSSParser<'i, 't>,
+    pub fn compute(
+        input: &mut CSSParser,
         registration: &PropertyDescriptors,
-        namespaces: Option<&FxHashMap<Prefix, Namespace>>,
         url_data: &UrlExtraData,
         context: &computed::Context,
         allow_computationally_dependent: AllowComputationallyDependent,
         attr_taint: AttrTaint,
+        property_id: Option<PropertyIdRef>,
     ) -> Result<ComputedValue, ()> {
         debug_assert!(!registration.is_universal(), "Shouldn't be needed");
         let Some(ref syntax) = registration.syntax else {
@@ -332,9 +330,9 @@ impl SpecifiedValue {
             input,
             syntax,
             url_data,
-            namespaces,
             allow_computationally_dependent,
             attr_taint,
+            property_id,
         ) else {
             return Err(());
         };
@@ -344,16 +342,33 @@ impl SpecifiedValue {
 
     /// Parse and validate a registered custom property value according to its syntax descriptor,
     /// and check for computational independence.
-    pub fn parse<'i, 't>(
-        mut input: &mut CSSParser<'i, 't>,
+    pub fn parse(
+        input: &mut CSSParser,
         syntax: &Descriptor,
         url_data: &UrlExtraData,
-        namespaces: Option<&FxHashMap<Prefix, Namespace>>,
         allow_computationally_dependent: AllowComputationallyDependent,
         attr_taint: AttrTaint,
-    ) -> Result<Self, StyleParseError<'i>> {
+        property_id: Option<PropertyIdRef>,
+    ) -> Result<Self, StyleParseError> {
+        let parsing_mode = match allow_computationally_dependent {
+            AllowComputationallyDependent::No => ParsingMode::DISALLOW_COMPUTATIONALLY_DEPENDENT,
+            AllowComputationallyDependent::Yes => ParsingMode::DEFAULT,
+        };
+        let context = ParserContext::new_with_property_id(
+            Origin::Author,
+            url_data,
+            Some(CssRuleType::Style),
+            parsing_mode,
+            QuirksMode::NoQuirks,
+            /* namespaces = */ Default::default(),
+            None,
+            None,
+            attr_taint,
+            property_id,
+        );
+
         if syntax.is_universal() {
-            let parsed = ComputedPropertyValue::parse(&mut input, namespaces, url_data)?;
+            let parsed = ComputedPropertyValue::parse(&context, input)?;
             return Ok(Self::new(
                 ValueInner::Universal(Arc::new(parsed)),
                 url_data.clone(),
@@ -364,12 +379,7 @@ impl SpecifiedValue {
         let mut multiplier = None;
         {
             let mut parser = Parser::new(syntax, &mut values, &mut multiplier);
-            parser.parse(
-                &mut input,
-                url_data,
-                allow_computationally_dependent,
-                attr_taint,
-            )?;
+            parser.parse(&context, input)?;
         }
         let v = if let Some(multiplier) = multiplier {
             ValueInner::List(ComponentList {
@@ -387,6 +397,18 @@ impl ComputedValue {
     /// Uncomputes the value so that it can go back into the cascade.
     pub fn to_declared_value(&self) -> properties::CustomDeclarationValue {
         if let ValueInner::Universal(ref var) = self.v {
+            // The attr()-taint of the wrapper must survive the round-trip through the declared
+            // value, otherwise re-cascading the reference-free inner value
+            // would launder the taint and allow attribute-derived URLs to be fetched.
+            // This is necessary because we currently reimplement the cascade for animations in
+            // Servo_GetComputedKeyframeValues. We should instead just use the 'normal' path for
+            // animated values. For more information see Bug 1883255.
+            // https://drafts.csswg.org/css-values-5/#attr-security
+            if self.attr_tainted && !var.is_attr_tainted() {
+                let mut tainted = (**var).clone();
+                tainted.explicitly_attr_tainted = true;
+                return properties::CustomDeclarationValue::Unparsed(Arc::new(tainted));
+            }
             return properties::CustomDeclarationValue::Unparsed(Arc::clone(var));
         }
         properties::CustomDeclarationValue::Parsed(Arc::new(ToComputedValue::from_computed_value(
@@ -436,29 +458,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse<'i, 't>(
+    fn parse(
         &mut self,
-        input: &mut CSSParser<'i, 't>,
-        url_data: &UrlExtraData,
-        allow_computationally_dependent: AllowComputationallyDependent,
-        attr_taint: AttrTaint,
-    ) -> Result<(), StyleParseError<'i>> {
-        use self::AllowComputationallyDependent::*;
-        let parsing_mode = match allow_computationally_dependent {
-            No => ParsingMode::DISALLOW_COMPUTATIONALLY_DEPENDENT,
-            Yes => ParsingMode::DEFAULT,
-        };
-        let ref context = ParserContext::new(
-            Origin::Author,
-            url_data,
-            Some(CssRuleType::Style),
-            parsing_mode,
-            QuirksMode::NoQuirks,
-            /* namespaces = */ Default::default(),
-            None,
-            None,
-            attr_taint,
-        );
+        context: &ParserContext,
+        input: &mut CSSParser,
+    ) -> Result<(), StyleParseError> {
         for component in self.syntax.components.iter() {
             let result = input.try_parse(|input| {
                 input.parse_entirely(|input| {
@@ -471,16 +475,18 @@ impl<'a> Parser<'a> {
             break;
         }
         if self.output.is_empty() {
-            return Err(input.new_error(BasicParseErrorKind::EndOfInput));
+            return Err(StyleParseError::from_basic_kind(
+                BasicParseErrorKind::EndOfInput,
+            ));
         }
         Ok(())
     }
 
-    fn parse_value<'i, 't>(
+    fn parse_value(
         context: &ParserContext,
-        input: &mut CSSParser<'i, 't>,
+        input: &mut CSSParser,
         component: &SyntaxComponent,
-    ) -> Result<SmallComponentVec, StyleParseError<'i>> {
+    ) -> Result<SmallComponentVec, StyleParseError> {
         let mut values = SmallComponentVec::new();
         values.push(Self::parse_component_without_multiplier(
             context, input, component,
@@ -501,17 +507,19 @@ impl<'a> Parser<'a> {
         Ok(values)
     }
 
-    fn parse_component_without_multiplier<'i, 't>(
+    fn parse_component_without_multiplier(
         context: &ParserContext,
-        input: &mut CSSParser<'i, 't>,
+        input: &mut CSSParser,
         component: &SyntaxComponent,
-    ) -> Result<SpecifiedValueComponent, StyleParseError<'i>> {
+    ) -> Result<SpecifiedValueComponent, StyleParseError> {
         let data_type = match component.name() {
             ComponentName::DataType(ty) => ty,
-            ComponentName::Ident(ref name) => {
+            ComponentName::Ident(name) => {
                 let ident = CustomIdent::parse(input, &[])?;
                 if ident != *name {
-                    return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError));
+                    return Err(StyleParseError::custom(
+                        StyleParseErrorKind::UnspecifiedError,
+                    ));
                 }
                 return Ok(SpecifiedValueComponent::CustomIdent(ident));
             },
@@ -562,11 +570,11 @@ impl<'a> Parser<'a> {
                 let mut values = vec![];
                 let Some(multiplier) = component.unpremultiplied().multiplier() else {
                     debug_assert!(false, "Unpremultiplied <transform-list> had no multiplier?");
-                    return Err(
-                        input.new_custom_error(StyleParseErrorKind::PropertySyntaxField(
+                    return Err(StyleParseError::custom(
+                        StyleParseErrorKind::PropertySyntaxField(
                             PropertySyntaxParseError::UnexpectedEOF,
-                        )),
-                    );
+                        ),
+                    ));
                 };
                 debug_assert_eq!(multiplier, Multiplier::Space);
                 loop {
@@ -593,7 +601,7 @@ impl<'a> Parser<'a> {
         Ok(value)
     }
 
-    fn expect_multiplier_yielded_eof_error<'i>(result: &Result<(), StyleParseError<'i>>) -> bool {
+    fn expect_multiplier_yielded_eof_error(result: &Result<(), StyleParseError>) -> bool {
         matches!(
             result,
             Err(StyleParseError {
@@ -603,16 +611,18 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn expect_multiplier<'i, 't>(
-        input: &mut CSSParser<'i, 't>,
+    fn expect_multiplier(
+        input: &mut CSSParser,
         multiplier: &Multiplier,
-    ) -> Result<(), StyleParseError<'i>> {
+    ) -> Result<(), StyleParseError> {
         match multiplier {
             Multiplier::Space => {
                 input.expect_whitespace()?;
                 if input.is_exhausted() {
                     // If there was trailing whitespace, do not interpret it as a multiplier
-                    return Err(input.new_error(BasicParseErrorKind::EndOfInput));
+                    return Err(StyleParseError::from_basic_kind(
+                        BasicParseErrorKind::EndOfInput,
+                    ));
                 }
                 Ok(())
             },
@@ -672,28 +682,19 @@ impl CustomAnimatedValue {
                     .get_custom_property_registration(&declaration.name);
                 if registration.is_universal() {
                     // FIXME: Do we need to perform substitution here somehow?
-                    ComputedValue::new(
-                        ValueInner::Universal(Arc::clone(value)),
-                        value.url_data.clone(),
-                    )
+                    ComputedValue::universal(Arc::clone(value))
                 } else {
-                    let mut input = cssparser::ParserInput::new(&value.css);
-                    let mut input = CSSParser::new(&mut input);
+                    let mut input = CSSParser::new(&value.css);
                     SpecifiedValue::compute(
                         &mut input,
                         registration,
-                        None,
                         &value.url_data,
                         context,
                         AllowComputationallyDependent::Yes,
                         /* attr_taint */ Default::default(),
+                        Some(PropertyIdRef::from(&declaration.name)),
                     )
-                    .unwrap_or_else(|_| {
-                        ComputedValue::new(
-                            ValueInner::Universal(Arc::clone(value)),
-                            value.url_data.clone(),
-                        )
-                    })
+                    .unwrap_or_else(|_| ComputedValue::universal(Arc::clone(value)))
                 }
             }),
             properties::CustomDeclarationValue::Parsed(ref v) => Some(v.to_computed_value(context)),

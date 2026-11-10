@@ -50,8 +50,8 @@ add_setup(async function () {
     set: [
       ["browser.urlbar.suggest.searches", true],
       ["browser.urlbar.scotchBonnet.enableOverride", false],
-      ["browser.search.separatePrivateDefault.ui.enabled", true],
-      ["browser.search.separatePrivateDefault", true],
+      ["browser.search.separatePrivateDefault.featureGate", true],
+      ["browser.search.separatePrivateDefault.enabled", true],
     ],
   });
 
@@ -834,6 +834,10 @@ add_task(async function multipleMatchingEngines() {
 
 // Tests that UrlbarProviderTokenAliasEngines is disabled in search mode.
 add_task(async function doNotShowInSearchMode() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.urlbar.unifiedSearchButton.historyInSearchMode", false]],
+  });
+
   // Do a search for "@" to show all the @ aliases.
   await UrlbarTestUtils.promiseAutocompleteResultPopup({
     window,
@@ -889,6 +893,7 @@ add_task(async function doNotShowInSearchMode() {
   await UrlbarTestUtils.promisePopupClose(window, () =>
     EventUtils.synthesizeKey("KEY_Escape")
   );
+  await SpecialPowers.popPrefEnv();
 });
 
 /**
@@ -1171,10 +1176,13 @@ async function doSelectionTest(value, { find, normal }) {
   let findSelection = gURLBar.editor.selectionController.getSelection(
     Ci.nsISelectionController.SELECTION_FIND
   );
-  await TestUtils.waitForCondition(
-    () => findSelection.rangeCount == (find ? 1 : 0),
-    `Waiting for the expected find selection for "${value}"`
-  );
+  await TestUtils.waitForCondition(() => {
+    if (find) {
+      return findSelection.rangeCount == 1;
+    }
+    return findSelection.isCollapsed;
+  }, `Waiting for the expected find selection for "${value}"`);
+
   if (find) {
     let range = findSelection.getRangeAt(0);
     Assert.equal(range.startOffset, find.start, `Find start for "${value}"`);

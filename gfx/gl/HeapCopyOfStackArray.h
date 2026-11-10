@@ -21,18 +21,18 @@ class HeapCopyOfStackArray {
  public:
   template <size_t N>
   MOZ_IMPLICIT HeapCopyOfStackArray(const ElemType (&array)[N])
-      : mArrayLength(N), mArrayData(MakeUnique<ElemType[]>(N)) {
+      : mArrayLength(N), mArrayData(std::make_unique<ElemType[]>(N)) {
     memcpy(mArrayData.get(), &array[0], N * sizeof(ElemType));
   }
+
+  HeapCopyOfStackArray() = delete;
+  HeapCopyOfStackArray(const HeapCopyOfStackArray&) = delete;
 
   ElemType* Data() const { return mArrayData.get(); }
   size_t ArrayLength() const { return mArrayLength; }
   size_t ByteLength() const { return mArrayLength * sizeof(ElemType); }
 
  private:
-  HeapCopyOfStackArray() = delete;
-  HeapCopyOfStackArray(const HeapCopyOfStackArray&) = delete;
-
   const size_t mArrayLength;
   UniquePtr<ElemType[]> const mArrayData;
 };

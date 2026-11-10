@@ -74,7 +74,8 @@ enum class State {
   D(YieldBeforeSweepingPropMapTrees, 23) \
   D(CheckWeakMapMarking, 24)             \
   D(YieldWhileGrayMarking, 25)           \
-  D(CheckHeapBeforeMinorGC, 26)
+  D(CheckHeapBeforeMinorGC, 26)          \
+  D(ConcurrentMarkingDelays, 27)
 
 enum class ZealMode {
 #define ZEAL_MODE(name, value) name = value,
@@ -83,6 +84,15 @@ enum class ZealMode {
       Count,
   Limit = Count - 1
 };
+
+/*
+ * For methods that mark pointers that cross compartment boundaries.
+ *
+ * These are called in per-zone GCs to prevent the wrappers' outgoing edges
+ * from dangling (full GCs naturally follow pointers across compartments) and
+ * when compacting to update cross-compartment pointers.
+ */
+enum EdgeSelector { AllEdges, NonGrayEdges, GrayEdges, BlackEdges };
 
 } /* namespace gc */
 

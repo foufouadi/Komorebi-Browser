@@ -58,9 +58,11 @@ using namespace dom;
 
 ManualNACPtr HTMLEditor::CreateResizer(int16_t aLocation,
                                        nsIContent& aParentContent) {
+  // <span> won't create a UA shadow, so, CreateAnonymousElement() won't run
+  // script actually. (That asserts in this method call.)
   ManualNACPtr resizer = CreateAnonymousElement(nsGkAtoms::span, aParentContent,
                                                 u"mozResizer"_ns, false);
-  if (!resizer) {
+  if (!resizer) [[unlikely]] {
     NS_WARNING(
         "HTMLEditor::CreateAnonymousElement(nsGkAtoms::span, mozResizer) "
         "failed");
@@ -104,13 +106,13 @@ ManualNACPtr HTMLEditor::CreateResizer(int16_t aLocation,
   }
 
   if (NS_FAILED(resizer->SetAttr(kNameSpaceID_None, nsGkAtoms::anonlocation,
-                                 locationStr, true))) {
+                                 locationStr, true, IsKnownNewAttr::Yes))) {
     NS_WARNING("Element::SetAttr(nsGkAtoms::anonlocation) failed");
     return nullptr;
   }
   nsAutoString cursor = u"cursor: "_ns + locationStr + u"-resize"_ns;
   if (NS_FAILED(resizer->SetAttr(kNameSpaceID_None, nsGkAtoms::style, cursor,
-                                 true))) {
+                                 true, IsKnownNewAttr::Yes))) {
     NS_WARNING("Element::SetAttr(nsGkAtoms::style) failed");
     return nullptr;
   }
@@ -127,12 +129,18 @@ ManualNACPtr HTMLEditor::CreateShadow(nsIContent& aParentContent,
     name = nsGkAtoms::span;
   }
 
+  // Neither <span> nor <img> will create a UA shadow, so,
+  // CreateAnonymousElement() won't run script actually. (This method asserts
+  // that.)
   return CreateAnonymousElement(name, aParentContent, u"mozResizingShadow"_ns,
                                 true);
 }
 
 ManualNACPtr HTMLEditor::CreateResizingInfo(nsIContent& aParentContent) {
   // let's create an info box through the element factory
+
+  // <span> won't create a UA shadow, so, CreateAnonymousElement()
+  // won't run script actually. (This method asserts that.)
   return CreateAnonymousElement(nsGkAtoms::span, aParentContent,
                                 u"mozResizingInfo"_ns, true);
 }
@@ -634,14 +642,14 @@ nsresult HTMLEditor::HideResizersInternal() {
 void HTMLEditor::HideShadowAndInfo() {
   if (mResizingShadow) {
     DebugOnly<nsresult> rvIgnored = mResizingShadow->SetAttr(
-        kNameSpaceID_None, nsGkAtoms::hidden, u""_ns, true);
+        kNameSpaceID_None, nsGkAtoms::hidden, u""_ns, true, IsKnownNewAttr::No);
     NS_WARNING_ASSERTION(
         NS_SUCCEEDED(rvIgnored),
         "Element::SetAttr(nsGkAtoms::hidden) failed, but ignored");
   }
   if (mResizingInfo) {
     DebugOnly<nsresult> rvIgnored = mResizingInfo->SetAttr(
-        kNameSpaceID_None, nsGkAtoms::hidden, u""_ns, true);
+        kNameSpaceID_None, nsGkAtoms::hidden, u""_ns, true, IsKnownNewAttr::No);
     NS_WARNING_ASSERTION(
         NS_SUCCEEDED(rvIgnored),
         "Element::SetAttr(nsGkAtoms::hidden, hidden) failed, but ignored");
@@ -821,8 +829,9 @@ nsresult HTMLEditor::StopDraggingResizerOrGrabberAt(
     }
 
     if (mIsMoving) {
-      DebugOnly<nsresult> rvIgnored = mPositioningShadow->SetAttr(
-          kNameSpaceID_None, nsGkAtoms::hidden, u""_ns, true);
+      DebugOnly<nsresult> rvIgnored =
+          mPositioningShadow->SetAttr(kNameSpaceID_None, nsGkAtoms::hidden,
+                                      u""_ns, true, IsKnownNewAttr::No);
       NS_WARNING_ASSERTION(NS_SUCCEEDED(rvIgnored),
                            "Element::SetAttr(nsGkAtoms::hidden) failed");
       if (rv != NS_ERROR_EDITOR_ACTION_CANCELED) {
@@ -993,7 +1002,7 @@ nsresult HTMLEditor::SetShadowPosition(Element& aShadowElement,
   nsAutoString imageSource;
   aElement.GetAttr(nsGkAtoms::src, imageSource);
   nsresult rv = aShadowElement.SetAttr(kNameSpaceID_None, nsGkAtoms::src,
-                                       imageSource, true);
+                                       imageSource, true, IsKnownNewAttr::No);
   if (NS_WARN_IF(Destroyed())) {
     return NS_ERROR_EDITOR_DESTROYED;
   }

@@ -525,44 +525,56 @@ static float ParsePrefFloat(const nsCString& aString, nsresult* aError) {
   return result;
 }
 
-struct PreferenceMarker {
-  static constexpr Span<const char> MarkerTypeName() {
-    return MakeStringSpan("Preference");
-  }
+struct PreferenceMarker : public BaseMarkerType<PreferenceMarker> {
+  static constexpr const char* Name = "Preference";
+  // "Preference Read" and "Preference Write" both use this type.
+  static constexpr bool ETWStoreName = true;
+  using MS = MarkerSchema;
+  static constexpr MS::Location Locations[] = {
+      MS::Location::MarkerChart,
+      MS::Location::MarkerTable,
+  };
+  static constexpr MS::PayloadField PayloadFields[] = {
+      {"prefName", MS::InputType::CString, "Name", MS::Format::UniqueString},
+      {"prefKind", MS::InputType::CString, "Kind", MS::Format::UniqueString},
+      {"prefType", MS::InputType::CString, "Type", MS::Format::UniqueString},
+      {"prefValue", MS::InputType::CString, "Value", MS::Format::UniqueString},
+  };
+  static constexpr const char* TableLabel =
+      "{marker.data.prefName}: {marker.data.prefValue} "
+      "({marker.data.prefType})";
   static void StreamJSONMarkerData(baseprofiler::SpliceableJSONWriter& aWriter,
                                    const ProfilerString8View& aPrefName,
                                    const Maybe<PrefValueKind>& aPrefKind,
                                    PrefType aPrefType,
                                    const ProfilerString8View& aPrefValue) {
-    aWriter.StringProperty("prefName", aPrefName);
-    aWriter.StringProperty("prefKind", PrefValueKindToString(aPrefKind));
-    aWriter.StringProperty("prefType", PrefTypeToString(aPrefType));
-    aWriter.StringProperty("prefValue", aPrefValue);
+    StreamJSONMarkerDataImpl(aWriter, aPrefName,
+                             PrefValueKindToString(aPrefKind),
+                             PrefTypeToString(aPrefType), aPrefValue);
   }
-  static MarkerSchema MarkerTypeDisplay() {
-    using MS = MarkerSchema;
-    MS schema{MS::Location::MarkerChart, MS::Location::MarkerTable};
-    schema.AddKeyLabelFormat("prefName", "Name", MS::Format::String);
-    schema.AddKeyLabelFormat("prefKind", "Kind", MS::Format::String);
-    schema.AddKeyLabelFormat("prefType", "Type", MS::Format::String);
-    schema.AddKeyLabelFormat("prefValue", "Value", MS::Format::String);
-    schema.SetTableLabel(
-        "{marker.data.prefName}: {marker.data.prefValue} "
-        "({marker.data.prefType})");
-    return schema;
+
+  static void TranslateMarkerInputToSchema(
+      void* aContext, const ProfilerString8View& aPrefName,
+      const Maybe<PrefValueKind>& aPrefKind, PrefType aPrefType,
+      const ProfilerString8View& aPrefValue) {
+    ETW::OutputMarkerSchema(aContext, PreferenceMarker{}, aPrefName,
+                            PrefValueKindToString(aPrefKind),
+                            PrefTypeToString(aPrefType), aPrefValue);
   }
 
  private:
-  static Span<const char> PrefValueKindToString(
+  static ProfilerString8View PrefValueKindToString(
       const Maybe<PrefValueKind>& aKind) {
     if (aKind) {
-      return *aKind == PrefValueKind::Default ? MakeStringSpan("Default")
-                                              : MakeStringSpan("User");
+      if (*aKind == PrefValueKind::Default) {
+        return "Default";
+      }
+      return "User";
     }
     return "Shared";
   }
 
-  static Span<const char> PrefTypeToString(PrefType type) {
+  static ProfilerString8View PrefTypeToString(PrefType type) {
     switch (type) {
       case PrefType::None:
         return "None";
@@ -880,6 +892,12 @@ class Pref {
 
   nsresult SetDefaultValue(PrefType aType, PrefValue aValue, bool aIsSticky,
                            bool aIsLocked, bool* aValueChanged) {
+    // A typeless pref is an entry that shadows a deleted shared pref, so it
+    // holds no value whose type could conflict.
+    if (IsTypeNone()) {
+      SetType(aType);
+    }
+
     // Types must always match when setting the default value.
     if (!IsType(aType)) {
       return NS_ERROR_UNEXPECTED;
@@ -1421,6 +1439,21 @@ static nsCString CopyStrippingTrailingDot(const nsACString& aDomain) {
   return nsCString(aDomain);
 }
 
+// A single trailing dot is normalized away; more than one is rejected since
+// only one would be stripped, leaving an empty trailing segment.
+static bool DomainEndsWithMultipleDots(const nsACString& aDomain) {
+  return StringEndsWith(aDomain, ".."_ns);
+}
+
+static bool DomainEndsWithMultipleDots(const char* const* aDomains) {
+  for (const char* const* p = aDomains; *p; ++p) {
+    if (DomainEndsWithMultipleDots(nsDependentCString(*p))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // The fire-time payload of a pref-change callback: the function and its
 // closure. Shared base of the trie's refcounted CallbackNode and the mirror
 // list's inline entries (see MirrorCallbackList), so the notify, sweep and
@@ -1603,8 +1636,9 @@ struct CallbackTrieNode {
       return *mChildren[idx].mNode;
     }
     return *mChildren
-                .InsertElementAt(idx, Child{nsCString(aSegment),
-                                            MakeUnique<CallbackTrieNode>()})
+                .InsertElementAt(idx,
+                                 Child{nsCString(aSegment),
+                                       std::make_unique<CallbackTrieNode>()})
                 ->mNode;
   }
 
@@ -3461,11 +3495,11 @@ nsPrefBranch::AddObserverImpl(const nsACString& aDomain, nsIObserver* aObserver,
     }
 
     // Construct a PrefCallback with a weak reference to the observer.
-    pCallback = MakeUnique<PrefCallback>(prefName, weakRefFactory, this);
+    pCallback = std::make_unique<PrefCallback>(prefName, weakRefFactory, this);
 
   } else {
     // Construct a PrefCallback with a strong reference to the observer.
-    pCallback = MakeUnique<PrefCallback>(prefName, aObserver, this);
+    pCallback = std::make_unique<PrefCallback>(prefName, aObserver, this);
   }
 
   // Since weak and strong PrefCallbacks hash differently, WithEntryHandle
@@ -3484,30 +3518,37 @@ nsPrefBranch::AddObserverImpl(const nsACString& aDomain, nsIObserver* aObserver,
       mozilla::UniquePtr<PrefCallback> existing;
       mObservers.Remove(&weakKey, &existing);
       if (existing) {
-        Preferences::UnregisterCallback(NotifyObserver, prefName,
-                                        existing.get(),
-                                        /* aPrefixMatch */ true);
+        nsresult rv = Preferences::UnregisterCallback(NotifyObserver, prefName,
+                                                      existing.get(),
+                                                      /* aPrefixMatch */ true);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          // The trie still points at the weak PrefCallback; keep it alive and
+          // leave the weak registration in place.
+          mObservers.InsertOrUpdate(&weakKey, std::move(existing));
+          return rv;
+        }
       }
     }
   }
 
+  nsresult rv = NS_OK;
   mObservers.WithEntryHandle(pCallback.get(), [&](auto&& p) {
     if (p) {
       NS_WARNING(
           nsPrintfCString("Ignoring duplicate observer: %s", prefName.get())
               .get());
     } else {
-      // We must pass a fully qualified preference name to the callback
-      // aDomain == nullptr is the only possible failure, and we trapped it with
-      // NS_ENSURE_ARG above.
-      Preferences::RegisterCallback(NotifyObserver, prefName, pCallback.get(),
-                                    /* aPrefixMatch */ true);
-
-      p.Insert(std::move(pCallback));
+      // We must pass a fully qualified preference name to the callback.
+      rv = Preferences::RegisterCallback(NotifyObserver, prefName,
+                                         pCallback.get(),
+                                         /* aPrefixMatch */ true);
+      if (NS_SUCCEEDED(rv)) {
+        p.Insert(std::move(pCallback));
+      }
     }
   });
 
-  return NS_OK;
+  return rv;
 }
 
 NS_IMETHODIMP
@@ -3529,8 +3570,9 @@ nsPrefBranch::RemoveObserverImpl(const nsACString& aDomain,
   }
 
   // Remove the relevant PrefCallback from mObservers and get an owning pointer
-  // to it. Unregister the callback first, and then let the owning pointer go
-  // out of scope and destroy the callback.
+  // to it. If unregistering the trie callback fails (e.g. because mObservers
+  // and the trie have drifted out of sync), the CallbackNode in the trie still
+  // holds Data() == this PrefCallback, so put it back.
   const nsCString& prefName = GetPrefName(aDomain);
   PrefCallback key(prefName, aObserver, this);
   mozilla::UniquePtr<PrefCallback> pCallback;
@@ -3551,6 +3593,10 @@ nsPrefBranch::RemoveObserverImpl(const nsACString& aDomain,
     rv = Preferences::UnregisterCallback(NotifyObserver, prefName,
                                          pCallback.get(),
                                          /* aPrefixMatch */ true);
+    if (NS_FAILED(rv)) {
+      PrefCallback* raw = pCallback.get();
+      mObservers.InsertOrUpdate(raw, std::move(pCallback));
+    }
   }
 
   return rv;
@@ -3802,8 +3848,11 @@ nsPrefOverrideMap::GetEntry(const nsACString& aPrefName, JSContext* aCx,
           return JS::Int32Value(it->value()->GetPrefValue().Get<int32_t>());
         case PrefType::String: {
           auto str = it->value()->GetPrefValue().Get<nsDependentCString>();
-          return JS::StringValue(
-              JS_NewStringCopyN(aCx, str.get(), str.Length()));
+          JSString* jsStr = JS_NewStringCopyN(aCx, str.get(), str.Length());
+          if (NS_WARN_IF(!jsStr)) {
+            return Err(NS_ERROR_OUT_OF_MEMORY);
+          }
+          return JS::StringValue(jsStr);
         }
         default:
           // Do not expect type NONE
@@ -4303,6 +4352,13 @@ Preferences::CallbackTrieStats Preferences::GetCallbackTrieStatsForTesting() {
   stats.mNodeCount = nodeCount;
   stats.mCallbackCount = callbackCount;
   return stats;
+}
+
+/* static */
+void Preferences::ReapCallbacksForTesting() {
+  if (sPImpl) {
+    nsPrefBranch::ReapAndCompactCallbacks();
+  }
 }
 
 class PreferenceServiceReporter final : public nsIMemoryReporter {
@@ -5168,7 +5224,8 @@ Preferences::BackupPrefFile(nsIFile* aFile, nsIPrefOverrideMap* aJSOverrideMap,
                                          promise));
 
   using WritePrefFilePromise = PreferencesImpl::WritePrefFilePromise;
-  auto mozPromiseHolder = MakeUnique<MozPromiseHolder<WritePrefFilePromise>>();
+  auto mozPromiseHolder =
+      std::make_unique<MozPromiseHolder<WritePrefFilePromise>>();
   RefPtr<WritePrefFilePromise> writePrefPromise =
       mozPromiseHolder->Ensure(__func__);
 
@@ -5257,13 +5314,12 @@ void Preferences::SetPreference(const dom::Pref& aDomPref) {
 /* static */
 void Preferences::GetPreference(dom::Pref* aDomPref,
                                 const GeckoProcessType aDestinationProcessType,
-                                const nsACString& aDestinationRemoteType) {
+                                const dom::RemoteType& aDestinationRemoteType) {
   MOZ_ASSERT(XRE_IsParentProcess());
   bool destIsWebContent =
       aDestinationProcessType == GeckoProcessType_Content &&
-      (StringBeginsWith(aDestinationRemoteType, WEB_REMOTE_TYPE) ||
-       StringBeginsWith(aDestinationRemoteType, PREALLOC_REMOTE_TYPE) ||
-       StringBeginsWith(aDestinationRemoteType, PRIVILEGEDMOZILLA_REMOTE_TYPE));
+      (aDestinationRemoteType.IsWeb() || aDestinationRemoteType.IsPrealloc() ||
+       aDestinationRemoteType.IsPrivilegedMozilla());
 
   Pref* pref = pref_HashTableLookup(aDomPref->name().get());
   if (pref && pref->HasAdvisablySizedValues()) {
@@ -5572,8 +5628,7 @@ nsresult PreferencesImpl::WritePrefFile(
   AUTO_PROFILER_LABEL("PreferencesImpl::WritePrefFile", OTHER);
 
   if (Preferences::sPreferences->AllowOffMainThreadSave()) {
-    UniquePtr<PrefSaveData> prefs =
-        MakeUnique<PrefSaveData>(SavePrefs(aPrefOverrideMap));
+    auto prefs = std::make_unique<PrefSaveData>(SavePrefs(aPrefOverrideMap));
 
     nsresult rv = NS_OK;
     bool writingToCurrent = false;
@@ -5588,16 +5643,30 @@ nsresult PreferencesImpl::WritePrefFile(
       }
     }
 
-    // Backups target a different file with a filtered pref set and must settle
-    // their promise, so they can't share the single-slot sPendingWriteData
-    // coalescing. Dispatch a standalone write instead.
-    if (aPromiseHolder) {
-      MOZ_ASSERT(aSaveMethod == SaveMethod::Asynchronous,
+    if (mCurrentFile) {
+      rv = mCurrentFile->Equals(aFile, &writingToCurrent);
+      if (NS_FAILED(rv)) {
+        REJECT_IF_PROMISE_HOLDER_EXISTS(rv);
+      }
+    }
+
+    bool async = aSaveMethod == SaveMethod::Asynchronous;
+
+    // The sPendingWriteData coalescing below only works when every writer
+    // targets the same file with an equivalent snapshot, which is only true of
+    // writes to mCurrentFile.
+    if (!writingToCurrent) {
+      MOZ_ASSERT(!aPromiseHolder || async,
                  "Backup writes are always asynchronous");
       PreferencesWriter::sPendingWriteCount++;
-      rv = mAsyncTarget->Dispatch(
-          new PWRunnable(aFile, std::move(prefs), std::move(aPromiseHolder)),
-          nsIEventTarget::DISPATCH_EVENT_MAY_BLOCK);
+      RefPtr<nsIRunnable> runnable =
+          new PWRunnable(aFile, std::move(prefs), std::move(aPromiseHolder));
+      if (async) {
+        rv = mAsyncTarget->Dispatch(runnable,
+                                    nsIEventTarget::DISPATCH_EVENT_MAY_BLOCK);
+      } else {
+        rv = SyncRunnable::DispatchToThread(mAsyncTarget, runnable, true);
+      }
       if (NS_FAILED(rv)) {
         PreferencesWriter::sPendingWriteCount--;
         // The PWRunnable rejected the holder in its destructor.
@@ -5606,28 +5675,10 @@ nsresult PreferencesImpl::WritePrefFile(
       return NS_OK;
     }
 
-    if (mCurrentFile) {
-      rv = mCurrentFile->Equals(aFile, &writingToCurrent);
-      if (NS_FAILED(rv)) {
-        REJECT_IF_PROMISE_HOLDER_EXISTS(rv);
-      }
-    }
-
     // Put the newly constructed preference data into sPendingWriteData
-    // for the next request to pick up
+    // for the next request to pick up. Any data already in the slot is a
+    // superseded snapshot of mCurrentFile, so dropping it is fine.
     prefs.reset(PreferencesWriter::sPendingWriteData.exchange(prefs.release()));
-    if (prefs && !writingToCurrent) {
-      MOZ_ASSERT(!aPromiseHolder,
-                 "Shouldn't be able to enter here if aPromiseHolder is set");
-      // There was a previous request writing to the default location that
-      // hasn't been processed. It will do the work of eventually writing this
-      // latest batch of data to disk.
-      return NS_OK;
-    }
-
-    // There were no previous requests. Dispatch one since sPendingWriteData has
-    // the up to date information.
-    bool async = aSaveMethod == SaveMethod::Asynchronous;
 
     // Increment sPendingWriteCount, even though it's redundant to track this
     // in the case of a sync runnable; it just makes it easier to simply
@@ -5945,6 +5996,7 @@ nsresult PreferencesImpl::RegisterCallbackImpl(PrefChangedFunc aCallback,
                                                bool aIsPrefix) {
   MOZ_ASSERT(NS_IsMainThread());
   NS_ENSURE_ARG(aCallback);
+  NS_ENSURE_FALSE(DomainEndsWithMultipleDots(aPrefNode), NS_ERROR_INVALID_ARG);
   NS_ENSURE_TRUE(Preferences::InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
 
   RefPtr<CallbackNode> node =
@@ -5974,6 +6026,7 @@ nsresult PreferencesImpl::UnregisterCallbackImpl(PrefChangedFunc aCallback,
                                                  bool aIsPrefix) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aCallback);
+  NS_ENSURE_FALSE(DomainEndsWithMultipleDots(aPrefNode), NS_ERROR_INVALID_ARG);
   if (Preferences::sShutdown) {
     MOZ_ASSERT(!Preferences::sPreferences);
     return NS_OK;
@@ -6986,7 +7039,7 @@ static void ShutdownAlwaysPrefs() {
 
 [[maybe_unused]] static void SaveOncePrefToSharedMap(
     SharedPrefMapBuilder& aBuilder, const nsACString& aName, bool aValue) {
-  auto oncePref = MakeUnique<Pref>(aName);
+  auto oncePref = std::make_unique<Pref>(aName);
   oncePref->SetType(PrefType::Bool);
   oncePref->SetIsSkippedByIteration(true);
   bool valueChanged = false;
@@ -6999,7 +7052,7 @@ static void ShutdownAlwaysPrefs() {
 
 [[maybe_unused]] static void SaveOncePrefToSharedMap(
     SharedPrefMapBuilder& aBuilder, const nsACString& aName, int32_t aValue) {
-  auto oncePref = MakeUnique<Pref>(aName);
+  auto oncePref = std::make_unique<Pref>(aName);
   oncePref->SetType(PrefType::Int);
   oncePref->SetIsSkippedByIteration(true);
   bool valueChanged = false;
@@ -7017,7 +7070,7 @@ static void ShutdownAlwaysPrefs() {
 
 [[maybe_unused]] static void SaveOncePrefToSharedMap(
     SharedPrefMapBuilder& aBuilder, const nsACString& aName, float aValue) {
-  auto oncePref = MakeUnique<Pref>(aName);
+  auto oncePref = std::make_unique<Pref>(aName);
   oncePref->SetType(PrefType::String);
   oncePref->SetIsSkippedByIteration(true);
   nsAutoCString value;
@@ -7295,7 +7348,6 @@ static const PrefListEntry sDynamicPrefOverrideList[]{
     PREF_LIST_ENTRY("media.peerconnection.nat_simulator.redirect_targets"),
     PREF_LIST_ENTRY("media.peerconnection.nat_simulator.network_delay_ms"),
     PREF_LIST_ENTRY("media.video_loopback_dev"),
-    PREF_LIST_ENTRY("media.webspeech.service.endpoint"),
     PREF_LIST_ENTRY("network.protocol-handler.external."),
     PREF_LIST_ENTRY("network.security.ports.banned"),
     PREF_LIST_ENTRY("nimbus.syncdatastore."),

@@ -2,6 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+import gc
 import os
 import sys
 from pathlib import Path
@@ -37,19 +38,22 @@ sys.path.insert(0, str(OUR_DIR))
 extensions = [
     "myst_parser",
     "sphinx.ext.autodoc",
-    "sphinx.ext.autosectionlabel",
     "sphinx.ext.doctest",
     "sphinx.ext.graphviz",
     "sphinx.ext.napoleon",
     "sphinx.ext.todo",
     "mozbuild.sphinx",
     "sphinx_js",
+    "js_typedef",
     "sphinxcontrib.jquery",
     "sphinxcontrib.mermaid",
     "sphinx_copybutton",
     "sphinx_design",
     "bzlink",
     "etp_matrix",
+    "staging_paths",
+    "dark_mode",
+    "mermaid_wrapped_option",
 ]
 
 myst_enable_extensions = [
@@ -59,6 +63,49 @@ myst_enable_extensions = [
     "html_admonition",
     "fieldlist",
 ]
+
+# A diagram renders at the size mermaid laid it out at, which needs both
+# halves: useMaxWidth below gives the SVG an intrinsic size, without which a
+# content-sized box collapses to the CSS default object size of 300px, and
+# custom_theme.css overrides the extension's own stylesheet, which stretches
+# the SVG to the width of its container. A diagram wider than the column
+# scrolls there.
+mermaid_width = "fit-content"
+mermaid_height = "auto"
+
+mermaid_version = "12.2.0"
+
+# sphinxcontrib-mermaid always hands Mermaid a theme for the page's color
+# scheme, "default" or "dark" unless set here, which overrides Mermaid's own
+# default of "redux-color".
+mermaid_light_theme = "redux-color"
+mermaid_dark_theme = "redux-dark-color"
+
+# startOnLoad must stay off: the extension renders via mermaid.run() itself.
+# Only theme-neutral values belong here, as this config is shared by the light
+# and dark themes.
+mermaid_init_config = {
+    "startOnLoad": False,
+    # The page font. Mermaid applies this both to the SVG and to the temporary
+    # wrapper it measures the text in; themeVariables.fontFamily would reach
+    # only the SVG, and the text would be laid out in the wrapper's font.
+    "fontFamily": "inherit",
+    # useMaxWidth is configured per diagram type; these are the types the tree
+    # uses. Mermaid gives flowchart and state nodes a 120px minimum width and
+    # wrapping width, and the docs size nodes to their labels.
+    "flowchart": {"useMaxWidth": False, "wrappingWidth": 200, "minNodeWidth": 0},
+    "sequence": {"useMaxWidth": False},
+    "class": {"useMaxWidth": False},
+    "state": {"useMaxWidth": False, "wrappingWidth": 200, "minNodeWidth": 0},
+    # Without an explicit useWidth, gantt charts take the width of the element
+    # Mermaid renders them in, which is shrink-to-fit.
+    "gantt": {"useMaxWidth": False, "useWidth": 800},
+    "er": {"useMaxWidth": False},
+}
+
+# ZenUML sequence diagrams. The plugin is fetched only on a page that has one.
+mermaid_include_zenuml = True
+mermaid_zenuml_version = "1.0.1"
 
 # The paths are loaded from config.yml so they can be shared with a CI
 # optimization strategy that ensures the doc task runs when these files change.
@@ -70,7 +117,10 @@ root_for_relative_js_paths = ".."
 jsdoc_config_path = "jsdoc.json"
 
 templates_path = ["_templates"]
-source_suffix = [".rst", ".md"]
+source_suffix = [".md"]
+autodoc_preserve_defaults = True
+# sphinx_js loads autosummary, whose stub generation only supports .rst.
+autosummary_generate = False
 master_doc = "index"
 project = "Firefox Source Docs"
 
@@ -87,7 +137,9 @@ html_sidebars = {
         "searchbox.html",
     ]
 }
-html_logo = str(topsrcdir / "browser/branding/nightly/content/firefox-wordmark.svg")
+html_logo = str(
+    topsrcdir / "browser/components/aboutwelcome/assets/kit-sit-look-up.svg"
+)
 html_favicon = str(topsrcdir / "browser/branding/nightly/firefox.ico")
 
 exclude_patterns = ["_build", "_staging", "_venv", "**security/nss/legacy/**"]
@@ -122,6 +174,7 @@ htmlhelp_basename = "FirefoxTreeDocs"
 moz_project_name = "main"
 
 html_show_copyright = False
+html_copy_source = False
 
 # GitHub integration for "View page source" links
 html_context = {
@@ -130,13 +183,6 @@ html_context = {
     "github_repo": "firefox",
     "github_version": "main",
 }
-
-# Only run autosection for the page title.
-# Otherwise, we have a huge number of duplicate links.
-# For example, the page https://firefox-source-docs.mozilla.org/code-quality/lint/
-# is called "Linting"
-# just like https://firefox-source-docs.mozilla.org/remote/CodeStyle.html
-autosectionlabel_maxdepth = 1
 
 
 def install_sphinx_design(app, pagename, templatename, context, doctree):
@@ -154,7 +200,7 @@ def add_github_source_link(app, pagename, templatename, context, doctree):
     """
     from moztreedocs import manager
 
-    if not manager.trees:
+    if not manager.trees or pagename not in app.env.all_docs:
         return
 
     source_suffix = context.get("page_source_suffix", "")
@@ -163,11 +209,11 @@ def add_github_source_link(app, pagename, templatename, context, doctree):
     # manager.trees maps staging prefixes to source prefixes,
     # e.g. {"gfx": "gfx/docs", "js": "js/src/doc"}.
     # Replace the staging prefix with the original source prefix to recover
-    # the real repo path, e.g. "gfx/Silk.rst" -> "gfx/docs/Silk.rst".
+    # the real repo path, e.g. "gfx/Silk.md" -> "gfx/docs/Silk.md".
     for staging_prefix, original_prefix in manager.trees.items():
         if staging_relpath.startswith(staging_prefix + "/"):
             # Strip the staging prefix and re-attach the original source prefix.
-            # e.g. "gfx/Silk.rst" -> strip "gfx" -> "Silk.rst" -> "gfx/docs/Silk.rst"
+            # e.g. "gfx/Silk.md" -> strip "gfx" -> "Silk.md" -> "gfx/docs/Silk.md"
             rel = staging_relpath[len(staging_prefix) + 1 :]
             context["github_source_path"] = original_prefix + "/" + rel
             return
@@ -213,7 +259,61 @@ def make_sphinx_js_skip_missing_objects():
 make_sphinx_js_skip_missing_objects()
 
 
+def freeze_gc(app, *args):
+    # Sphinx forks a worker per chunk of documents. Collect before that and
+    # freeze the survivors so that later collections don't touch them, which
+    # keeps their pages shared between the main process and the workers.
+    gc.collect()
+    gc.freeze()
+
+
+def reattach_nested_rst_nodes(app, doctree):
+    """Point nodes parsed from eval-rst blocks back at their own doctree.
+
+    MyST parses each eval-rst block into a temporary document sharing the
+    original settings object, and the moved nodes keep a reference to it. Sphinx
+    clears settings.env only on a copy, so without this every such doctree
+    pickle would carry the whole build environment.
+    """
+    for node in doctree.findall():
+        if node.document is not doctree:
+            node.document = doctree
+
+
+def disable_gc(app, *args):
+    """Turn off the cyclic garbage collector for the rest of the build.
+
+    Automatic full collections over the growing environment and doctrees took
+    a large share of the build, and the worker processes forked afterwards
+    inherit the setting. collect_garbage() reclaims the cycles left by merging
+    the environments of the parallel readers.
+    """
+    gc.disable()
+
+
+def collect_garbage(app, env):
+    gc.collect()
+
+
+def enable_gc(app, exception):
+    gc.enable()
+
+
 def setup(app):
+    app.connect("env-before-read-docs", freeze_gc)
+    app.connect("write-started", freeze_gc)
+    # sphinx-js does not declare it, but it only reads the jsdoc analysis that
+    # runs once before the sources are read. `mach doc --no-autodoc` doesn't
+    # load it.
+    if sphinx_js := app.extensions.get("sphinx_js"):
+        sphinx_js.parallel_read_safe = True
+        sphinx_js.parallel_write_safe = True
     app.add_css_file("custom_theme.css")
+    app.add_js_file("scrollable_regions.js")
+    app.add_js_file("mermaid_fixups.js")
     app.connect("html-page-context", install_sphinx_design)
     app.connect("html-page-context", add_github_source_link)
+    app.connect("doctree-read", reattach_nested_rst_nodes)
+    app.connect("env-before-read-docs", disable_gc, priority=900)
+    app.connect("env-updated", collect_garbage)
+    app.connect("build-finished", enable_gc)

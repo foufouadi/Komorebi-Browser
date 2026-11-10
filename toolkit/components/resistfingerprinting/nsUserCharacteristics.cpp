@@ -101,7 +101,6 @@ static void CollectMathMLPrefs() {
       {"mathml.mathvariant_styling_fallback.disabled", "var"},
       {"mathml.operator_dictionary_accent.disabled", "acc"},
       {"mathml.legacy_mathvariant_attribute.disabled", "leg"},
-      {"mathml.font_family_math.enabled", "fnt"},
   };
   for (const auto& p : kMathMLPrefs) {
     if (Preferences::HasUserValue(p.pref)) {
@@ -1299,7 +1298,7 @@ const RefPtr<PopulatePromise>& TimoutPromise(
 // metric is set, this variable should be incremented. It'll be a lot. It's
 // okay. We're going to need it to know (including during development) what is
 // the source of the data we are looking at.
-const int kSubmissionSchema = 49;
+const int kSubmissionSchema = 50;
 
 const auto* const kUUIDPref =
     "toolkit.telemetry.user_characteristics_ping.uuid";

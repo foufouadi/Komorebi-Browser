@@ -161,7 +161,7 @@ nsresult ChannelMediaResource::OnStartRequest(nsIRequest* aRequest,
 
   MediaDecoderOwner* owner = mCallback->GetMediaOwner();
   MOZ_DIAGNOSTIC_ASSERT(owner);
-  dom::HTMLMediaElement* element = owner->GetMediaElement();
+  RefPtr<dom::HTMLMediaElement> element = owner->GetMediaElement();
   MOZ_DIAGNOSTIC_ASSERT(element);
 
   nsresult status;
@@ -307,10 +307,15 @@ nsresult ChannelMediaResource::OnStartRequest(nsIRequest* aRequest,
   // Update principals before OnDataAvailable() putting the data in the cache.
   // This is important, we want to make sure all principals are updated before
   // any consumer can see the new data.
+  nsCOMPtr<nsIChannel> originalChannel = mChannel;
   UpdatePrincipal();
-  if (owner->HasError()) {
+  if (element->HasError()) {
     // Updating the principal resulted in an error. Abort the load.
     CloseChannel();
+    return NS_OK;
+  }
+  if (mChannel != originalChannel) {
+    LOG("Channel closed or replaced while updating the principal");
     return NS_OK;
   }
 
@@ -323,7 +328,7 @@ nsresult ChannelMediaResource::OnStartRequest(nsIRequest* aRequest,
   mSuspendAgent.Delegate(mChannel);
 
   // Fires an initial progress event.
-  owner->DownloadProgressed();
+  element->DownloadProgressed();
 
   nsCOMPtr<nsIThreadRetargetableRequest> retarget;
   if ((retarget = do_QueryInterface(aRequest))) {
@@ -490,7 +495,7 @@ nsresult ChannelMediaResource::CopySegmentToCache(
 
   RefPtr<ChannelMediaResource> self = closure->mResource;
   uint32_t loadID = closure->mLoadID;
-  UniquePtr<uint8_t[]> data = MakeUnique<uint8_t[]>(aCount);
+  auto data = std::make_unique<uint8_t[]>(aCount);
   memcpy(data.get(), aFromSegment, aCount);
   cacheStream->OwnerThread()->Dispatch(NS_NewRunnableFunction(
       "MediaCacheStream::NotifyDataReceived",
@@ -526,7 +531,8 @@ int64_t ChannelMediaResource::CalculateStreamLength() const {
 
   nsCOMPtr<nsIHttpChannel> hc = do_QueryInterface(mChannel);
   if (!hc) {
-    return -1;
+    int64_t length = -1;
+    return NS_SUCCEEDED(mChannel->GetContentLength(&length)) ? length : -1;
   }
 
   bool succeeded = false;
@@ -891,10 +897,12 @@ void ChannelMediaResource::UpdatePrincipal() {
                                                   getter_AddRefs(principal));
   if (nsContentUtils::CombineResourcePrincipals(&mSharedInfo->mPrincipal,
                                                 principal)) {
+    nsCOMPtr<nsIChannel> originalChannel = mChannel;
     for (auto* r : mSharedInfo->mResources) {
       r->CacheClientNotifyPrincipalChanged();
     }
-    if (!mChannel) {  // Sometimes cleared during NotifyPrincipalChanged()
+    // Sometimes cleared or replaced during CacheClientNotifyPrincipalChanged().
+    if (mChannel != originalChannel) {
       return;
     }
   }

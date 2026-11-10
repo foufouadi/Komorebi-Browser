@@ -39,21 +39,10 @@ ai-window-smart-cursor-in-smart-window =
 smart-window-model-section =
     .label = Assistant model
     .description = Choose a model based on what’s important to you.
+
+smart-window-model-radio-group =
+    .aria-label = Assistant model
 smart-window-model-learn-link = Learn about models
-
-## Variables:
-##   $model (string) - The name of the AI model
-##   $ownerName (String) - The name of owner of the AI model
-
-smart-window-model-fast =
-    .label = Fast: Answers quickly
-    .description = Model { $model } by { $ownerName }
-smart-window-model-flexible =
-    .label = Flexible: Solid fit for most needs
-    .description = Model { $model } by { $ownerName }
-smart-window-model-personal =
-    .label = Personal: Most tailored answers
-    .description = Model { $model } by { $ownerName }
 
 ## Full name indicates the full version name of the model currently listed along with its publisher
 ##   $shortName (string) - The display name of the model collection

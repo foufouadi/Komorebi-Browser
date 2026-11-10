@@ -30,15 +30,12 @@
   #navigator-toolbox {
     will-change: background-color;
     transition: background-color var(--inactive-window-transition);
-    margin-block-end: var(--chrome-window-gap);
     overflow: clip;
-    border-radius: 0;
   }
 
   #browser {
     display: flex;
     box-sizing: border-box;
-    gap: var(--chrome-window-gap);
   }
 
   #tabbrowser-tabbox {
@@ -51,62 +48,88 @@
    * dissolved, and the suspended state — where #tabbrowser-tabpanels still
    * has [splitview] (because suspended split-view panels remain in the
    * tabbox) but the currently-selected tab is a non-split-view one. Without
-   * this, the visible tab loses its rounded corners until split-view is
-   * fully dissolved. */
+   * this, the visible tab would keep the split-view panel decoration until
+   * split-view is fully dissolved. */
   #tabbrowser-tabpanels > :not(.split-view-panel) .browserContainer {
-    border-radius: var(--chrome-block-radius) 0 0;
-    overflow: clip;
+    --content-area-start-radius: var(--border-radius-medium);
+
+    @media (-moz-platform: macos) {
+      --content-scrollbar-inset-block: 0 var(--border-radius-medium);
+      --content-scrollbar-inset-inline-start: var(--border-radius-medium);
+      --content-scrollbar-inset-inline-end: var(--border-radius-medium);
+
+      :root[macOSNativeFullscreen] & {
+        --content-scrollbar-inset-block: 0;
+        --content-scrollbar-inset-inline-start: 0;
+        --content-scrollbar-inset-inline-end: 0;
+      }
+    }
+
     outline: none;
     box-shadow: none;
-    /* The separator border only belongs on a side that faces other chrome.
-     * Against a window edge it would read as a stray line hugging the window,
-     * and the block-end edge always meets one. */
-    border: 1px solid var(--chrome-content-separator-color);
-    border-block-end: none;
+    border-block-start: var(--border-width) solid var(--chrome-content-separator-color);
 
-    #tabbrowser-tabbox[sidebar-positionend] & {
-      border-radius: 0 var(--chrome-block-radius) 0 0;
-      border-inline-start: none;
+    /* Fullscreen slides the toolbox off-screen (and DOM fullscreen hides the
+     * chrome outright), so the block-start edge then meets the screen and the
+     * corners on it have nothing left to round away from. */
+    :root:is([inDOMFullscreen], [fullscreenNavToolboxHidden]) & {
+      --content-area-start-radius: 0;
+
+      border-block-start: none;
     }
 
-    /* Nothing sits against the inline-end edge unless the sidebar or the AI
-     * window is docked there. */
-    #tabbrowser-tabbox:not([sidebar-positionend], [ai-window-open]) & {
-      border-inline-end: none;
+    /* A .browserContainer edge is only separated and rounded when it faces chrome.
+     * SidebarController.setPosition updates the order of all of #browser's
+     * (flex) children according to the sidebar.position_start pref.
+     * The AI sidebar always docks opposite the browser sidebar. */
+    :root:not([inDOMFullscreen]) #tabbrowser-tabbox:not([sidebar-positionend]):is([sidebar-shown], [sidebar-panel-open]) &,
+    :root:not([inDOMFullscreen]) #tabbrowser-tabbox[sidebar-positionend][ai-window-open] & {
+      border-inline-start: var(--border-width) solid var(--chrome-content-separator-color);
+      border-start-start-radius: var(--content-area-start-radius);
+
+      @media (-moz-platform: macos) {
+        --content-scrollbar-inset-block: 0 var(--content-area-start-radius);
+        --content-scrollbar-inset-inline-start: 0;
+        :root:dir(rtl) & {
+          --content-scrollbar-inset-block: var(--content-area-start-radius) 0;
+        }
+
+        :root:is([macOSNativeFullscreen]) #tabbrowser-tabbox & {
+          --content-scrollbar-inset-block: 0;
+        }
+      }
     }
 
-    /* With no sidebar next to it, the content area meets the window edge on
-     * both sides, so it keeps square corners. */
-    #tabbrowser-tabbox:not([sidebar-shown], [sidebar-panel-open]) & {
-      border-radius: 0;
-      border-inline-start: none;
+    :root:not([inDOMFullscreen]) #tabbrowser-tabbox:is([sidebar-positionend]:is([sidebar-shown], [sidebar-panel-open]), [ai-window-open]) & {
+      border-inline-end: var(--border-width) solid var(--chrome-content-separator-color);
+      border-start-end-radius: var(--content-area-start-radius);
+
+      @media (-moz-platform: macos) {
+        --content-scrollbar-inset-inline-end: 0;
+
+        :root:dir(ltr) & {
+          --content-scrollbar-inset-block: var(--content-area-start-radius) 0;
+        }
+      }
     }
 
-    /* Remove the border and rounded corners against the screen edge in
-     * DOM fullscreen. */
-    :root:is([inDOMFullscreen], [inFullscreen]) & {
-      border-radius: 0;
-      border: none;
-    }
+    :root:not([inDOMFullscreen], [macOSNativeFullscreen]) #tabbrowser-tabbox[sidebar-positionend][ai-window-open]:not([sidebar-shown], [sidebar-panel-open]) & {
+      @media (-moz-platform: macos) {
+        --content-scrollbar-inset-inline-end: var(--border-radius-medium);
 
-    :root[uidensity="compact"] & {
-      border-radius: 0;
-      border-start-start-radius: var(--chrome-block-radius);
-    }
-
-    /* When the sidebar is positioned at the inline-end the content area sits at
-     * the inline-start, so round its inline-end corner instead. */
-    :root[uidensity="compact"] #tabbrowser-tabbox[sidebar-positionend] & {
-      border-start-start-radius: 0;
-      border-start-end-radius: var(--chrome-block-radius);
+        :root:dir(ltr) & {
+          --content-scrollbar-inset-block: var(--content-area-start-radius) var(--border-radius-medium);
+        }
+      }
     }
   }
 
-  /* Splitter between split-view panels. The active panel's 2px focus outline
-   * extends into the splitter margin on the active panel's side, so we widen
-   * that side's margin to 3px (2px outline + 1px clear) and keep the other
-   * side at 1px. See the [splitview-selected-column] rules below for the
-   * asymmetric overrides. */
+  /* Splitter between split-view panels. The active panel's focus outline
+   * (--focus-outline-width minus the panel border already inside its box)
+   * extends 1px into the splitter margin on the active panel's side, so we
+   * widen that side's margin to 2px (1px outline + 1px clear) and keep the
+   * other side at 1px. See the [splitview-selected-column] rules below for
+   * the asymmetric overrides. */
   #tabbrowser-tabpanels[splitview] .split-view-splitter {
     background-color: transparent;
     border: none;
@@ -127,15 +150,15 @@
   }
 
   /* When column-0 is selected, its right outline extends into the splitter's
-   * inline-start margin: widen that side to 3px (2px outline + 1px clear). */
+   * inline-start margin: widen that side to 2px (1px outline + 1px clear). */
   :root[splitview-selected-column="0"] #tabbrowser-tabpanels[splitview] .split-view-splitter {
-    margin-inline-start: 3px;
+    margin-inline-start: 2px;
   }
 
   /* When column-1 is selected, its left outline extends into the splitter's
-   * inline-end margin: widen that side to 3px (2px outline + 1px clear). */
+   * inline-end margin: widen that side to 2px (1px outline + 1px clear). */
   :root[splitview-selected-column="1"] #tabbrowser-tabpanels[splitview] .split-view-splitter {
-    margin-inline-end: 3px;
+    margin-inline-end: 2px;
   }
 }
 
@@ -147,12 +170,8 @@
     border-bottom-color: var(--toolbar-background-color);
   }
 
-  @media -moz-pref("sidebar.verticalTabs") {
+  @media -moz-pref("sidebar.verticalTabs") or -moz-pref("browser.nova.enabled") {
     border-bottom-style: none;
-  }
-
-  @media -moz-pref("browser.nova.enabled") {
-    border-bottom: 1px solid var(--chrome-content-separator-color);
   }
 }
 
@@ -170,7 +189,7 @@
   min-height: 0;
 }
 
-@media (not -moz-pref("sidebar.verticalTabs")) and (not -moz-pref("browser.nova.enabled")) {
+@media (not -moz-pref("sidebar.verticalTabs")) {
   #browser {
     background-color: var(--toolbar-background-color);
     color: var(--toolbar-text-color);
@@ -192,6 +211,17 @@
  * it's on the side it's a sibling of browserContainer.
  */
 .browserContainer {
+  /* This container rounds and clips the content area, but the scrollbar being
+     clipped belongs to the content document inside <browser>. Every rule below
+     that sets a border-radius here must set the matching inset, which
+     browser[type="content"] forwards into the content document. */
+
+  @media (-moz-platform: macos) {
+    --content-scrollbar-inset-block: 0;
+    --content-scrollbar-inset-inline-start: 0;
+    --content-scrollbar-inset-inline-end: 0;
+  }
+
   flex: 10000 10000;
   /* To contain the status panel */
   position: relative;
@@ -201,7 +231,7 @@
   min-width: 0;
 
   /* We want to be able to show the frame color behind the clipped radiused corner */
-  background: var(--tabpanel-background-color);
+  background: var(--tabpanel-background-color) padding-box;
 
   display: grid;
   /**
@@ -369,6 +399,15 @@
   flex: 1;
 }
 
+/* Used to position .dialogStack on top of the <browser> showing the dialog, for
+   browsers in #tabbrowser-tabpanels (so it doesn't overlap the DevTools toolbox) as
+   well as for browsers elements that belong to the extension popup panelss and the
+   AI chat sidebar. */
+:is(#tabbrowser-tabpanels, .sidebar-browser-stack, .webextension-popup-stack) browser[tabDialogShowing] {
+  -moz-user-focus: none !important;
+  anchor-name: --browser-with-dialog;
+}
+
 .browserStack {
   flex: 10000 10000;
   /* Prevent shrinking the page content to 0 height and width */
@@ -393,17 +432,17 @@
     opacity: 0;
   }
 
+  @media (-moz-platform: macos) {
+    browser[type="content"] {
+      -moz-scrollbar-inset-block: var(--content-scrollbar-inset-block);
+      -moz-scrollbar-inset-inline: var(--content-scrollbar-inset-inline-start) var(--content-scrollbar-inset-inline-end);
+    }
+  }
+
   /* Exclude browsers with smartwindow-content attribute which inherit
      color-scheme from chrome to follow the browser theme */
   browser[type="content"]:not([smartwindow-content]) {
     color-scheme: env(-moz-content-preferred-color-scheme);
-  }
-
-  browser[tabDialogShowing] {
-    -moz-user-focus: none !important;
-    /* Used to position .dialogStack on top of this <browser> element so it doesn't overlap
-       the DevTools toolbox */
-    anchor-name: --browser-with-dialog;
   }
 
   .split-view-panel {
@@ -426,15 +465,18 @@
       margin: var(--space-xsmall);
       position: relative;
       width: unset;
-
-      @media -moz-pref("browser.nova.enabled") and -moz-pref("sidebar.revamp") {
-        margin: var(--chrome-window-gap);
-      }
     }
 
     /* Ensure any dialogs are clipped in an inactive/not-selected panel. */
     :root:not([inDOMFullscreen]) & > .split-view-panel:not(.deck-selected) {
       overflow: clip;
+
+      /* Match the .browserContainer's radius so its card box-shadow (added
+       * under nova) gets clipped along the same rounded shape instead of
+       * leaving unclipped shadow in the square corners of this ancestor. */
+      @media -moz-pref("browser.nova.enabled") {
+        border-radius: var(--border-radius-medium);
+      }
     }
 
     /* Ensure split view panels can display in fullscreen mode */
@@ -454,10 +496,25 @@
 
       & > .browserContainer {
         border-radius: 0;
+        border: none;
+        outline: none;
       }
     }
 
     .split-view-panel {
+      @media (-moz-platform: macos) {
+        .browserContainer {
+          --content-scrollbar-inset-block: var(--border-radius-medium);
+          --content-scrollbar-inset-inline-start: var(--border-radius-medium);
+          --content-scrollbar-inset-inline-end: var(--border-radius-medium);
+        }
+        :root[inDOMFullscreen] &.split-view-panel-active.deck-selected > .browserContainer {
+          --content-scrollbar-inset-block: 0;
+          --content-scrollbar-inset-inline-start: 0;
+          --content-scrollbar-inset-inline-end: 0;
+        }
+      }
+
       .browserContainer {
         border-radius: var(--border-radius-medium);
         overflow: clip;
@@ -477,32 +534,6 @@
       @media not (-moz-platform: macos) {
         z-index: 1;
       }
-
-      @media -moz-pref("browser.nova.enabled") {
-        /* Outer (inline-start) edge faces the window: the panel carries the
-         * full 2px gap, plus 2px for the selected panel's focus outline. */
-        :root[uidensity="compact"] & {
-          margin-inline-start: 2px;
-        }
-
-        :root[uidensity="compact"] &.deck-selected {
-          margin-inline-start: 4px;
-        }
-
-        #tabbrowser-tabbox:is([sidebar-shown], [sidebar-panel-open]) & {
-          margin-inline-start: 0;
-        }
-
-        /* With the sidebar shown the #browser gap supplies the 2px, so only
-         * the selected panel needs margin for its outline. */
-        :root[uidensity="compact"] #tabbrowser-tabbox:is([sidebar-shown], [sidebar-panel-open]) & {
-          margin-inline-start: 0;
-        }
-
-        :root[uidensity="compact"] #tabbrowser-tabbox:is([sidebar-shown], [sidebar-panel-open]) &.deck-selected {
-          margin-inline-start: 2px;
-        }
-      }
     }
 
     .split-view-splitter {
@@ -519,18 +550,6 @@
     .split-view-panel[column="1"] {
       order: 2;
       margin-inline-start: 0;
-
-      @media -moz-pref("browser.nova.enabled") {
-        /* Outer (inline-end) edge faces the window: the panel carries the
-         * full 2px gap, plus 2px for the selected panel's focus outline. */
-        :root[uidensity="compact"] & {
-          margin-inline-end: 2px;
-        }
-
-        :root[uidensity="compact"] &.deck-selected {
-          margin-inline-end: 4px;
-        }
-      }
     }
 
     /* Panels with a custom width shouldn't grow. */
@@ -554,33 +573,28 @@
 }
 
 @media -moz-pref("browser.nova.enabled") {
-  /* Match the corner radius and separator border of unsplit panels.
-   * Skip the border on the active panel so its focus outline can sit flush
-   * against the content without a visible gap. */
+  /* Match the corner radius and separator border of unsplit panels. */
   #tabbrowser-tabpanels[splitview] .split-view-panel > .browserContainer {
-    border-radius: var(--chrome-block-radius);
+    border-radius: var(--border-radius-medium);
+
+    @media (-moz-platform: macos) {
+      --content-scrollbar-inset-block: var(--border-radius-medium);
+      --content-scrollbar-inset-inline-start: var(--border-radius-medium);
+      --content-scrollbar-inset-inline-end: var(--border-radius-medium);
+    }
   }
 
-  #tabbrowser-tabpanels[splitview] .split-view-panel:not(.deck-selected) > .browserContainer {
+  /* Maintain border around panels to avoid content box changing when activated */
+  #tabbrowser-tabpanels[splitview] .split-view-panel > .browserContainer {
     border: var(--border-width) solid var(--chrome-content-separator-color);
   }
 
-  /* Align split-view panels with the sidebar's block edges. The surrounding
-   * #browser already supplies --chrome-window-gap of padding on the
-   * top/bottom, so the panel itself shouldn't add more. */
-  #tabbrowser-tabpanels[splitview] .split-view-panel.split-view-panel-active {
-    margin-block: 0;
-
-    /* Compact: 2px gap around panels. #browser already supplies the gap above
-     * the panels, so only the block-end needs a margin. */
-    :root[uidensity="compact"] & {
-      margin-block-end: 2px;
-    }
-
-    :root[uidensity="compact"] &.deck-selected {
-      margin-block-start: 2px;
-      margin-block-end: 4px;
-    }
+  /* Set active panel border color to match the focus outline, and reduce the
+   * outline width by the border width so the two combined still total
+   * --focus-outline-width, keeping the same expected ring size. */
+  #tabbrowser-tabpanels[splitview] .split-view-panel.deck-selected > .browserContainer {
+    border-color: var(--focus-outline-color);
+    outline-width: calc(var(--focus-outline-width) - var(--border-width));
   }
 
   /* In split view the notification box is inside the panel's browserContainer.
@@ -590,6 +604,13 @@
     border-block-start: none;
     border-block-end: var(--border-width) solid var(--chrome-content-separator-color);
     --info-bar-background-color: var(--toolbar-background-color);
+  }
+
+  /* Make sure the split-view-footer aligns with the true outer edge after
+   * factoring in the browserContainer's border width. */
+  #tabbrowser-tabpanels[splitview] .split-view-panel:not(.deck-selected) > .browserContainer split-view-footer {
+    inset-block-end: calc(-1 * var(--border-width));
+    inset-inline-end: calc(-1 * var(--border-width));
   }
 }
 
@@ -734,7 +755,7 @@ split-view-footer {
   padding-block-start: 2px;
   /* Avoid clipping by a large window corner radius by adding proportional
      bottom padding */
-  padding-block-end: max(2px, calc(var(--chrome-block-radius, 0px) / 5));
+  padding-block-end: max(2px, var(--window-border-radius) / 5);
 
   border-width: 1px;
   border-style: none;
@@ -744,7 +765,7 @@ split-view-footer {
     border-right-style: solid;
     /* When the label is on the left, avoid clipping from a large window corner radius
        by adding proportional left padding */
-    padding-left: max(4px, calc(var(--chrome-block-radius, 0px) / 2));
+    padding-left: max(4px, var(--window-border-radius) / 2);
     padding-right: 4px;
 
     /* disabled on Windows for triggering grayscale AA (bug 659213): */
@@ -760,7 +781,7 @@ split-view-footer {
     /* When the label is on the right, avoid clipping from a large window corner radius
        by adding proportional right padding */
     padding-left: 4px;
-    padding-right: max(4px, calc(var(--chrome-block-radius, 0px) / 2));
+    padding-right: max(4px, var(--window-border-radius) / 2);
 
     /* disabled on Windows for triggering grayscale AA (bug 659213): */
     @media not (-moz-platform: windows) {
@@ -774,8 +795,6 @@ split-view-footer {
 
 #clipboardReadPasteMenuPopup,
 #contentAreaContextMenu,
-#DateTimePickerPanel,
-#PopupAutoComplete,
 #remoteBrowserTooltip,
 #aHTMLTooltip[contenttooltip] {
   color-scheme: env(-moz-content-preferred-color-scheme);
@@ -792,22 +811,390 @@ split-view-footer {
 
 #selection-shortcut-action-panel {
   --panel-subview-body-padding: 0;
+
+  /* panel-subview-body stacks its children, but the actions sit in a row. */
+  & > .panel-subview-body {
+    flex-direction: row;
+  }
+
+  &[ime-hiding] {
+    opacity: 0;
+    pointer-events: none;
+    -moz-window-shadow: none;
+  }
+
+  &[copy-fading] {
+    opacity: 0;
+    transition: opacity 240ms ease-out;
+
+    @media (prefers-reduced-motion: reduce) {
+      transition: none;
+    }
+  }
+
+  moz-button {
+    --button-min-height: 34px;
+    --button-size-icon: 34px;
+    --button-border-radius: 7px;
+    margin: 1px;
+
+    @media -moz-pref("browser.nova.enabled") {
+      --button-border-radius: var(--border-radius-xlarge);
+    }
+  }
+
+  .more-actions-separator {
+    align-self: center;
+    width: 1px;
+    height: 18px;
+    margin-inline: var(--space-xsmall);
+    background-color: var(--border-color);
+  }
+
+  #ai-action-button::part(button) {
+    --button-background-color-selected: var(--button-background-color);
+    --button-border-color-selected: var(--button-border-color);
+    --button-text-color-selected: var(--button-text-color);
+
+    width: auto;
+    padding-inline: calc((var(--button-size-icon) - var(--icon-size)) / 2) var(--space-small);
+  }
+
+  #ai-action-button::part(button)::after {
+    content: "";
+    width: var(--icon-size-xsmall);
+    height: var(--icon-size-xsmall);
+    margin-inline-start: var(--space-small);
+    background-image: url("chrome://global/skin/icons/arrow-down-12.svg");
+    background-position: center;
+    background-repeat: no-repeat;
+    -moz-context-properties: fill;
+    fill: var(--button-icon-fill);
+  }
+
+  .copy-action-confirmation {
+    display: flex;
+    align-items: center;
+    flex: none;
+    block-size: var(--icon-size-xlarge);
+    margin-block: 2px;
+    white-space: nowrap;
+
+    &[copied] {
+      margin-inline-end: 2px;
+      padding-inline-end: var(--space-medium);
+      border-radius: var(--border-radius-circle);
+      background-color: var(--color-accent-primary);
+      color: var(--button-text-color-primary);
+      font-size: var(--font-size-root);
+      font-weight: var(--font-weight-semibold);
+    }
+  }
+
+  .copy-action-confirmation-icon {
+    display: none;
+    flex: none;
+    inline-size: var(--icon-size-xlarge);
+    block-size: var(--icon-size-xlarge);
+    background-image: url("chrome://global/skin/icons/check.svg");
+    background-size: var(--icon-size-default);
+    background-position: center;
+    background-repeat: no-repeat;
+    -moz-context-properties: fill;
+    fill: currentColor;
+  }
+
+  .copy-action-confirmation[copied] .copy-action-confirmation-icon {
+    display: block;
+  }
+
+  &[copied] #more-actions-button {
+    display: none;
+  }
 }
 
-#ai-action-button {
-  --button-min-height: 34px;
-  --button-size-icon: 34px;
-  --button-border-radius: 7px;
-  margin: 1px;
+@media -moz-pref("browser.highlightToSearch.featureGate") {
+  #selection-shortcut-action-panel {
+    --selection-button-size: 36px;
+    --panel-subview-body-padding: 1px;
 
-  @media -moz-pref("browser.nova.enabled") {
-    --button-border-radius: var(--border-radius-xlarge);
+    moz-button {
+      --button-min-height: var(--selection-button-size);
+      --button-size-icon: var(--selection-button-size);
+    }
+
+    #ai-action-button::part(button)::after {
+      margin-inline-start: var(--space-xsmall);
+    }
+
+    .copy-action-confirmation {
+      block-size: var(--selection-button-size);
+      margin-block: 1px;
+    }
+
+    .copy-action-confirmation-icon {
+      inline-size: var(--selection-button-size);
+      block-size: var(--selection-button-size);
+    }
   }
+
+  #selection-more-actions-panel > .panel-subview-body {
+    font: menu;
+  }
+}
+
+#selection-more-actions-panel {
+  --selection-row-icon-inset: calc((var(--size-item-large) - var(--icon-size)) / 2);
+  --selection-row-switch-inset: calc((var(--size-item-large) - var(--size-item-small)) / 2);
+
+  &::part(content) {
+    padding: var(--space-small);
+  }
+
+  > .panel-subview-body {
+    gap: 0;
+    padding-block: 0;
+  }
+
+  moz-toggle {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: var(--size-item-large);
+    padding-inline: var(--selection-row-icon-inset) var(--selection-row-switch-inset);
+    border-radius: var(--button-border-radius);
+    --space-small: var(--selection-row-icon-inset);
+
+    &:hover {
+      background-color: var(--button-background-color-ghost-hover);
+      color: var(--button-text-color-ghost-hover);
+    }
+  }
+}
+
+#more-actions-manage-settings {
+  --manage-settings-start: calc(var(--selection-row-icon-inset) - var(--border-width));
+  --manage-settings-end: calc(var(--selection-row-switch-inset) + var(--size-item-large) + var(--space-medium));
+  --button-padding: var(--space-xsmall) var(--manage-settings-end) var(--space-xsmall) var(--manage-settings-start);
+  --button-font-weight: normal;
+  --space-small: var(--selection-row-icon-inset);
+
+  &:dir(rtl) {
+    --button-padding: var(--space-xsmall) var(--manage-settings-start) var(--space-xsmall) var(--manage-settings-end);
+  }
+}
+
+.more-actions-notice {
+  /* Take the width of the rows instead of stretching the panel. */
+  width: 0;
+  min-width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 var(--space-xsmall);
+  padding: var(--space-small) var(--space-medium);
+  border-radius: var(--border-radius-large);
+  background-color: var(--background-color-warning);
+}
+
+.more-actions-notice-chevron {
+  display: inline-block;
+  inline-size: var(--icon-size-xsmall);
+  block-size: var(--icon-size-xsmall);
+  vertical-align: middle;
+  background-color: currentColor;
+  mask-image: url("chrome://global/skin/icons/arrow-right-12.svg");
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-position: center;
+
+  &:dir(rtl) {
+    scale: -1 1;
+  }
+}
+
+#selection-callout-panel {
+  --panel-background-color: inherit;
+  --panel-text-color: inherit;
+  --panel-border-radius: 20px;
+  --panel-box-shadow: none;
+  --panel-box-shadow-margin: 0px;
+  --selection-callout-caret-room: 16px;
+  --panel-padding: var(--selection-callout-caret-room) 0;
+  --selection-callout-edge-fill: var(--panel-background-color);
+  --selection-callout-edge-start: var(--color-violet-30);
+  --selection-callout-edge-end: var(--color-orange-30);
+  --selection-callout-link-hit-size: 26px;
+
+  @media (forced-colors) {
+    --selection-callout-edge-fill: Canvas;
+  }
+
+  @media (-moz-platform: macos) {
+    appearance: none;
+    background-color: transparent;
+    -moz-window-shadow: none;
+  }
+
+  &::part(content) {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--panel-text-color);
+    overflow: visible;
+  }
+
+  & > .panel-subview-body {
+    position: relative;
+    box-sizing: border-box;
+    width: 288px;
+    overflow: visible;
+    padding: 12px 15px;
+    border-radius: var(--panel-border-radius);
+
+    > :not(.selection-callout-shape) {
+      position: relative;
+      z-index: 1;
+    }
+  }
+
+  .selection-callout-shape {
+    position: absolute;
+    inset-inline-start: 0;
+    top: calc(var(--selection-callout-caret-room) * -1);
+    z-index: 0;
+    overflow: visible;
+    pointer-events: none;
+    filter: drop-shadow(0 3px 12px var(--box-shadow-color-lighter-layer-2)) drop-shadow(0 0.375px 1.5px var(--box-shadow-color-lighter-layer-1));
+  }
+
+  .selection-callout-gradient-start {
+    stop-color: var(--selection-callout-edge-start);
+  }
+
+  .selection-callout-gradient-end {
+    stop-color: var(--selection-callout-edge-end);
+  }
+
+  .selection-callout-edge {
+    fill: var(--selection-callout-edge-fill);
+    stroke: url("#selection-callout-edge");
+    stroke-width: 1;
+
+    @media (prefers-contrast) {
+      stroke: var(--border-color);
+    }
+
+    @media (forced-colors) {
+      stroke: CanvasText;
+    }
+  }
+
+  .selection-callout-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .selection-callout-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: var(--font-weight-semibold);
+    line-height: 1.25;
+  }
+
+  .selection-callout-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .selection-callout-mark-column {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .selection-callout-mark {
+    width: 39px;
+    height: 39px;
+  }
+
+  .selection-callout-new-badge {
+    margin-block-start: calc(var(--space-xsmall) * -1);
+  }
+
+  .selection-callout-message {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.3;
+  }
+
+  .selection-callout-more-link {
+    position: relative;
+    z-index: 0;
+    display: inline-block;
+    inline-size: var(--icon-size);
+    block-size: var(--icon-size);
+    margin-inline: 1px;
+    vertical-align: middle;
+    font-size: 0;
+
+    &::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-color: currentColor;
+      mask-image: url("chrome://global/skin/icons/more.svg");
+      mask-size: contain;
+      mask-repeat: no-repeat;
+      mask-position: center;
+    }
+
+    &::before {
+      content: "";
+      position: absolute;
+      z-index: -1;
+      inset-block-start: calc(50% - var(--selection-callout-link-hit-size) / 2);
+      inset-inline-start: calc(50% - var(--selection-callout-link-hit-size) / 2);
+      width: var(--selection-callout-link-hit-size);
+      height: var(--selection-callout-link-hit-size);
+      border-radius: 50%;
+    }
+
+    &:hover::before {
+      background-color: var(--button-background-color-ghost-hover);
+    }
+
+    &:hover:active::before {
+      background-color: var(--button-background-color-ghost-active);
+    }
+
+    &:focus-visible::before {
+      outline: var(--focus-outline);
+    }
+  }
+}
+
+#more-actions-button[highlighted]::part(button) {
+  background-color: var(--button-background-color-ghost-hover);
+  color: var(--button-text-color-ghost-hover);
 }
 
 #ask-chat-shortcuts {
   font: menu;
   max-width: 345px;
+}
+
+@media -moz-pref("browser.highlightToSearch.featureGate") {
+  #ask-chat-shortcuts {
+    min-width: 240px;
+    max-width: 320px;
+
+    toolbarbutton.subviewbutton {
+      min-height: var(--size-item-large);
+      padding-block: 0;
+    }
+  }
 }
 
 .ask-chat-shortcut-warning {
@@ -837,9 +1224,14 @@ split-view-footer {
      be defined when DevTools is not visible/docked to a different position so we need
      to provide meaningful fallback in those cases.
   */
+  /* physical left/right are more appropriate than the equivalent logical properties here */
   left: max(anchor(--browser-with-dialog left), anchor(--devtools-left-host right, 0));
   right: max(anchor(--browser-with-dialog right), anchor(--devtools-right-host left, 0));
   bottom: max(anchor(--browser-with-dialog bottom), anchor(--devtools-bottom-host top, 0));
+
+  &.content-prompt-dialog {
+    color-scheme: env(-moz-content-preferred-color-scheme);
+  }
 
   /* Hide tab-modal dialogs when a window-modal one is up. */
   :root[window-modal-open] .browserStack > &,
@@ -874,7 +1266,7 @@ split-view-footer {
   display: flex;
   padding: 0;
   overflow-x: auto;
-  outline: 0.5px solid var(--card-border-color);
+  outline: 0.5px solid var(--dialog-border-color);
 
   /* Ensure that dialog boxes are pixel-snapped, to keep their internal layout
    * consistent, regardless of whether the surrounding layout places them at a
@@ -884,8 +1276,9 @@ split-view-footer {
   will-change: transform;
 
   &:not(.spotlightBox) {
-    box-shadow: var(--popup-box-shadow);
-    border-radius: var(--border-radius-medium);
+    box-shadow: var(--dialog-box-shadow);
+    border-radius: var(--dialog-border-radius);
+    background-color: var(--dialog-background-color);
   }
 
   /*
@@ -924,7 +1317,7 @@ split-view-footer {
     margin-top: -5px;
 
     /* When the dialog is in a splitview, the offset is a little larger */
-    .deck-selected.split-view-panel & {
+    .split-view-panel & {
       margin-top: -8px;
     }
   }
@@ -969,6 +1362,8 @@ split-view-footer {
     width: auto;
     max-height: none;
     max-width: none;
+    border-radius: inherit;
+    overflow: clip;
 
     > .dialogOverlay {
       width: 100%;
@@ -986,9 +1381,6 @@ split-view-footer {
 
 /* Radius the backdrop so it doesnt occlude the radiused .browserContainer below it */
 @media not -moz-pref("browser.nova.enabled") {
-  /* The border radius on those dialog is set in the next top-level rule (`.dialogOverlay[topmost="true"]`),
-     and uses the --chrome-block-radius, which is only set when Nova is enabled.
-     So here we only need to handle the case where Nova isn't enabled */
   :root:not([inDOMFullscreen]) #tabbrowser-tabbox[sidebar-shown] .browserSidebarContainer:not(.responsive-mode) .dialogOverlay[topmost="true"] {
     border-start-end-radius: var(--border-radius-medium);
 
@@ -1002,27 +1394,39 @@ split-view-footer {
 .dialogOverlay[topmost="true"],
 #window-modal-dialog::backdrop {
   background-color: var(--background-color-overlay);
-  border-radius: var(--chrome-block-radius);
+}
 
-  .browserSidebarContainer.responsive-mode & {
+@media -moz-pref("browser.nova.enabled") {
+  #tabbrowser-tabpanels > :not(.split-view-panel) .dialogOverlay[topmost="true"] {
     border-radius: 0;
   }
 
-  .browserSidebarContainer:not(.responsive-mode)[devtools-host-type="bottom"] > .dialogStack > & {
-    border-end-start-radius: 0;
-    border-end-end-radius: 0;
+  :root:not([inDOMFullscreen], [inFullscreen]) {
+    #tabbrowser-tabbox:is([sidebar-shown], [sidebar-panel-open]):not([sidebar-positionend])
+      #tabbrowser-tabpanels
+      > :not(.split-view-panel)
+      .dialogOverlay[topmost="true"] {
+      border-start-start-radius: calc(var(--border-radius-medium) - var(--border-width));
+    }
+
+    #tabbrowser-tabbox:is([sidebar-positionend]:is([sidebar-shown], [sidebar-panel-open]), [ai-window-open])
+      #tabbrowser-tabpanels
+      > :not(.split-view-panel)
+      .dialogOverlay[topmost="true"] {
+      border-start-end-radius: calc(var(--border-radius-medium) - var(--border-width));
+    }
+
+    #tabbrowser-tabpanels[splitview] .split-view-panel .dialogOverlay[topmost="true"] {
+      border-radius: calc(var(--border-radius-medium) - var(--border-width));
+    }
+
+    #tabbrowser-tabpanels[splitview] .split-view-panel.deck-selected .dialogOverlay[topmost="true"] {
+      border-radius: var(--border-radius-medium);
+    }
   }
 
-  .browserSidebarContainer:not(.responsive-mode)[devtools-host-type="right"] > .dialogStack > & {
-    /* Use physical properties as devtools docking side is physical (left/right), and not logical */
-    border-top-right-radius: 0;
-    border-bottom-right-radius: 0;
-  }
-
-  .browserSidebarContainer:not(.responsive-mode)[devtools-host-type="left"] > .dialogStack > & {
-    /* Use physical properties as devtools docking side is physical (left/right), and not logical */
-    border-top-left-radius: 0;
-    border-bottom-left-radius: 0;
+  :root:is([inDOMFullscreen], [inFullscreen]) .dialogOverlay[topmost="true"] {
+    border-radius: 0;
   }
 }
 

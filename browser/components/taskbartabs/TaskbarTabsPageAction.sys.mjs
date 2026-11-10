@@ -10,13 +10,15 @@ let lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
-  TaskbarTabs: "resource:///modules/taskbartabs/TaskbarTabs.sys.mjs",
-  TaskbarTabsUtils: "resource:///modules/taskbartabs/TaskbarTabsUtils.sys.mjs",
+  ShellService: "moz-src:///browser/components/shell/ShellService.sys.mjs",
+  TaskbarTabs: "moz-src:///browser/components/taskbartabs/TaskbarTabs.sys.mjs",
+  TaskbarTabsUtils:
+    "moz-src:///browser/components/taskbartabs/TaskbarTabsUtils.sys.mjs",
 });
 
 ChromeUtils.defineLazyGetter(lazy, "logConsole", () => {
   return console.createInstance({
-    prefix: "TaskbarTabs",
+    logModule: "TaskbarTabs",
     maxLogLevel: "Warn",
   });
 });
@@ -128,6 +130,15 @@ function initVisibilityChanges(aWindow, aElement) {
       return false;
     }
 
+    // Technically, we should also observe this, but since it's probably being
+    // set on an about page it wouldn't show there anyways.
+    if (
+      AppConstants.platform === "linux" &&
+      !lazy.ShellService.desktopEntryApi
+    ) {
+      return false;
+    }
+
     // Forcefully initialize Taskbar Tabs. At some point, this will also affect
     // the page action; in the meantime, ensures that telemetry info is
     // prepared whenever the pref is enabled.
@@ -140,7 +151,7 @@ function initVisibilityChanges(aWindow, aElement) {
       return false;
     }
 
-    return ["http", "https"].includes(aLocation.scheme);
+    return ["http", "https", "moz-extension"].includes(aLocation.scheme);
   };
 
   aWindow.gBrowser.addProgressListener({

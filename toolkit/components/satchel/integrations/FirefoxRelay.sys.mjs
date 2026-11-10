@@ -20,7 +20,6 @@ const gConfig = (function () {
     undefined
   );
   return {
-    scope: ["profile", "https://identity.mozilla.com/apps/relay"],
     addressesUrl: baseUrl + `relayaddresses/`,
     acceptTermsUrl: baseUrl + `terms-accepted-user/`,
     profilesUrl: baseUrl + `profiles/`,
@@ -89,7 +88,7 @@ const RELAY_PROFILE_CACHE_TS_PREF =
 
 async function getRelayTokenAsync() {
   try {
-    return await lazy.fxAccounts.getOAuthToken({ scope: gConfig.scope });
+    return await lazy.fxAccounts.getOAuthToken({ service: "relay" });
   } catch (e) {
     console.error(`There was an error getting the user's token: ${e.message}`);
     return undefined;
@@ -741,12 +740,8 @@ class RelayOffered {
         `failed to notify server that terms are accepted : ${response?.status}:${response?.statusText}`
       );
 
-      let error;
-      try {
-        error = await response?.json();
-      } catch {}
       await showErrorAsync(browser, "firefox-relay-mask-generation-failed", {
-        status: error?.detail || response.status,
+        status: response.status,
       });
       return false;
     }
@@ -865,9 +860,9 @@ class RelayOffered {
         // Open tab to sign up for FxA and Relay
         const fxaUrl =
           await lazy.fxAccounts.constructor.config.promiseConnectAccountURI(
+            "relay",
             "relay_integration",
             {
-              service: "relay",
               utm_source: "relay-integration",
               utm_medium: "firefox-desktop",
             }

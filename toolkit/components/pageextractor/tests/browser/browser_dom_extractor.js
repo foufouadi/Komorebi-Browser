@@ -455,7 +455,7 @@ add_task(async function test_dom_extractor_link_anchors() {
       "Reach us via [Email](mailto:user@mozilla.org).",
       "[New Tab Link](https://example.com/external)",
       "[Download Attribute](https://example.com/files/report.pdf)",
-      "Card Title",
+      "[Card Title](https://example.com/card)",
       "Card description.",
       "[Read bold text and italic text inside.](https://example.com/mixed)",
       "[Company Logo](https://example.com/with-alt)",
@@ -616,7 +616,7 @@ add_task(async function test_extractor_edge_cases() {
     [
       "[Link with \\[Brackets\\]](https://example.com/1) [Link with \\(Parens\\)](https://example.com/2) [URL with Parens](https://en.wikipedia.org/wiki/HTML_%28standard%29)",
       "[Multiline Href](https://example.com/messy)",
-      "Card Title",
+      "[Card Title](https://example.com/card)",
       "Description",
     ],
     "Text output matches expected markdown format with escaped characters"
@@ -938,7 +938,7 @@ add_task(async function test_canvas_snapshot_crossorigin() {
     <canvas id="crossorigin" width="200" height="200"></canvas>
     <img
       id="crossorigin-img"
-      src="https://example.com/browser/browser/base/content/test/general/moz.png"
+      src="https://example.com/browser/browser/base/content/test/browser-general/moz.png"
     />
     <script>
       window.drawCrossOriginImage = () => {
@@ -1121,6 +1121,411 @@ add_task(async function test_canvas_snapshot_with_text_extraction() {
   ok(text.includes("Some text content"), "Paragraph text extracted");
   Assert.deepEqual(links, [], "No links on page");
   is(canvasSnapshots.length, 1, "Canvas captured alongside text");
+
+  return cleanup();
+});
+
+// useSimpleText
+
+add_task(async function test_dom_extractor_simple_text_anchors() {
+  const { html } = await MLTestUtils.serveHTMLInTab({ browser: gBrowser });
+  // The same markup as test_dom_extractor_link_anchors, so this asserts the
+  // simplified form of an output that is already pinned down above.
+  const { getPageExtractor, cleanup } = await html`
+    <article>
+      <h1>Comprehensive Anchor Test</h1>
+
+      <p>Reach us via <a href="mailto:user@mozilla.org">Email</a>.</p>
+
+      <p>Literal text with [name](value).</p>
+
+      <p>
+        <a href="https://example.com/external" target="_blank">New Tab Link</a>
+      </p>
+
+      <a href="https://example.com/card" id="card-link">
+        <div class="card">
+          <h2>Card Title</h2>
+          <p>Card description.</p>
+        </div>
+      </a>
+
+      <p>
+        <a href="https://example.com/mixed">
+          Read <strong>bold text</strong> and <em>italic text</em> inside.
+        </a>
+      </p>
+
+      <p>
+        <a href="https://example.com/with-alt"
+          ><img src="logo.png" alt="Company Logo"
+        /></a>
+      </p>
+    </article>
+  `;
+
+  const { text, links } = await getPageExtractor().getText({
+    useSimpleText: true,
+  });
+
+  const actualLines = text
+    .split("\n")
+    .map(line => line.trim())
+    .filter(line => !!line.length);
+
+  Assert.deepEqual(
+    actualLines,
+    [
+      "Comprehensive Anchor Test",
+      "Reach us via Email.",
+      "Literal text with [name](value).",
+      "New Tab Link",
+      "Card Title",
+      "Card description.",
+      "Read bold text and italic text inside.",
+      "Company Logo",
+    ],
+    "Anchors keep their text and lose their target."
+  );
+
+  Assert.deepEqual(
+    links,
+    [
+      "mailto:user@mozilla.org",
+      "https://example.com/external",
+      "https://example.com/card",
+      "https://example.com/mixed",
+      "https://example.com/with-alt",
+    ],
+    "Every href is still reported even though none appear in the text."
+  );
+
+  return cleanup();
+});
+
+add_task(async function test_dom_extractor_simple_text_whitespace() {
+  const { html } = await MLTestUtils.serveHTMLInTab({ browser: gBrowser });
+  // The same markup as test_dom_extractor_normalize_whitespace, which asserts
+  // this document extracts as "aaaa aaaa\nbbbb cccc\ndddd      dddd\neeee\n\n\nffff".
+  // prettier-ignore
+  const { getPageExtractor, cleanup } = await html`
+    <p>aaaa      aaaa</p>
+    <p>bbbb\n\n\ncccc</p>
+
+    <pre>dddd      dddd</pre>
+    <pre>eeee\n\n\nffff</pre>
+  `;
+
+  is(
+    (await getPageExtractor().getText({ useSimpleText: true })).text,
+
+    [
+      "aaaa aaaa",
+      "bbbb cccc",
+      // Runs of spaces preserved by <pre> collapse, since they are within a block.
+      "dddd dddd",
+      // The blank lines between these collapse to a single paragraph break.
+      "eeee",
+      "ffff",
+    ].join("\n"),
+    "Whitespace collapses within a block while paragraph breaks survive."
+  );
+
+  return cleanup();
+});
+
+add_task(async function test_dom_extractor_simple_text_with_site_strategy() {
+  const { html } = await MLTestUtils.serveHTMLInTab({ browser: gBrowser });
+  const { getPageExtractor, cleanup } = await html`
+    <div>
+      <a href="https://example.com/result">
+        <div>
+          <h3>Result Title</h3>
+          <cite>https://example.com › path</cite>
+        </div>
+      </a>
+    </div>
+  `;
+
+  const { text } = await getPageExtractor().getText({
+    useSimpleText: true,
+    sourceUrl: "https://www.google.com/search?q=test",
+  });
+
+  ok(
+    text.includes("Result Title"),
+    `The block text survives simplification: ${JSON.stringify(text)}`
+  );
+  ok(
+    !text.includes("›"),
+    `The site strategy's cite filter still applies: ${JSON.stringify(text)}`
+  );
+  ok(
+    !text.includes("]("),
+    `Markdown from formatBlockAnchorsAsMarkdown is flattened: ${JSON.stringify(text)}`
+  );
+
+  return cleanup();
+});
+
+add_task(async function test_dom_extractor_block_anchor_links() {
+  const { html } = await MLTestUtils.serveHTMLInTab({ browser: gBrowser });
+  const { getPageExtractor, cleanup } = await html`
+    <article>
+      <h1>Hotels</h1>
+      <a href="https://example.com/hotel-a">
+        <div>
+          <h2>Hotel A</h2>
+          <p>Scored 8.9</p>
+        </div>
+      </a>
+      <a href="https://example.com/hotel-b">
+        <div>
+          <div>Scored 9.1</div>
+          <h3>Hotel B</h3>
+          <p>Free cancellation</p>
+        </div>
+      </a>
+      <a href="https://example.com/hotel-c">
+        <div>
+          <p>Hotel C</p>
+          <p>Scored 7.6</p>
+        </div>
+      </a>
+      <p>See <a href="https://example.com/all">all hotels</a>.</p>
+    </article>
+  `;
+  const actor = getPageExtractor();
+  const lines = text =>
+    text
+      .split("\n")
+      .map(line => line.trim())
+      .filter(line => !!line.length);
+
+  const { text, links } = await actor.getText();
+  Assert.deepEqual(
+    lines(text),
+    [
+      "Hotels",
+      "[Hotel A](https://example.com/hotel-a)",
+      "Scored 8.9",
+      "Scored 9.1",
+      "[Hotel B](https://example.com/hotel-b)",
+      "Free cancellation",
+      "[Hotel C](https://example.com/hotel-c)",
+      "Scored 7.6",
+      "See [all hotels](https://example.com/all).",
+    ],
+    "Each anchor around block content links its heading, or else its first block."
+  );
+  Assert.deepEqual(
+    links,
+    [
+      "https://example.com/hotel-a",
+      "https://example.com/hotel-b",
+      "https://example.com/hotel-c",
+      "https://example.com/all",
+    ],
+    "Every anchor is collected once."
+  );
+
+  Assert.deepEqual(
+    lines((await actor.getText({ useSimpleText: true })).text),
+    [
+      "Hotels",
+      "Hotel A",
+      "Scored 8.9",
+      "Scored 9.1",
+      "Hotel B",
+      "Free cancellation",
+      "Hotel C",
+      "Scored 7.6",
+      "See all hotels.",
+    ],
+    "useSimpleText keeps the text of block anchors without their URLs."
+  );
+
+  return cleanup();
+});
+
+/**
+ * Lines of extracted text, trimmed, without empty lines.
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+function textLines(text) {
+  return text
+    .split("\n")
+    .map(line => line.trim())
+    .filter(line => !!line.length);
+}
+
+/**
+ * Append a card, an anchor around a div, to the page's article. The HTML is
+ * parsed inside the div, so an inner anchor stays nested in the card's anchor,
+ * which the HTML parser would not allow in page markup.
+ *
+ * @param {string} href
+ * @param {string} innerHTML
+ */
+async function appendCard(href, innerHTML) {
+  await SpecialPowers.spawn(
+    gBrowser.selectedBrowser,
+    [href, innerHTML],
+    (cardHref, cardHTML) => {
+      const doc = content.document;
+      const anchor = doc.createElement("a");
+      anchor.href = cardHref;
+      const div = doc.createElement("div");
+      anchor.appendChild(div);
+      doc.querySelector("article").appendChild(anchor);
+      div.innerHTML = cardHTML;
+    }
+  );
+}
+
+add_task(async function test_dom_extractor_link_target_length() {
+  const { html } = await MLTestUtils.serveHTMLInTab({ browser: gBrowser });
+  const tracking = "?tracking=" + "x".repeat(200);
+  const { getPageExtractor, cleanup } = await html`
+    <article>
+      <p><a href="https://example.com/a${tracking}">Hotel A</a></p>
+      <p><a href="https://example.com/b${tracking}">Hotel B</a></p>
+      <p><a href="https://example.com/c${tracking}">Hotel C</a></p>
+      <p>Filler after the links that the budget does not reach.</p>
+    </article>
+  `;
+  // Each link counts as about 50 characters, so 3 links reach the budget. At
+  // their real length, the first URL alone would use it up.
+  const { text } = await getPageExtractor().getText({ sufficientLength: 140 });
+
+  Assert.deepEqual(
+    textLines(text),
+    [
+      `[Hotel A](https://example.com/a${tracking})`,
+      `[Hotel B](https://example.com/b${tracking})`,
+      `[Hotel C](https://example.com/c${tracking})`,
+    ],
+    "Link URLs count as a fixed length, and the text stops at the budget."
+  );
+
+  return cleanup();
+});
+
+add_task(async function test_dom_extractor_block_anchor_inner_link() {
+  const { html } = await MLTestUtils.serveHTMLInTab({ browser: gBrowser });
+  const { getPageExtractor, cleanup } = await html`<article></article>`;
+  await appendCard(
+    "https://example.com/card",
+    `<h3>Hotel A</h3>
+     <p>Read the <a href="https://example.com/review">review</a></p>`
+  );
+
+  Assert.deepEqual(
+    textLines((await getPageExtractor().getText()).text),
+    [
+      "[Hotel A](https://example.com/card)",
+      "Read the [review](https://example.com/review)",
+    ],
+    "The heading links the card, and the inner link keeps its own URL."
+  );
+
+  return cleanup();
+});
+
+add_task(
+  async function test_dom_extractor_block_anchor_inner_link_no_heading() {
+    const { html } = await MLTestUtils.serveHTMLInTab({ browser: gBrowser });
+    const { getPageExtractor, cleanup } = await html`<article></article>`;
+    await appendCard(
+      "https://example.com/card",
+      `<p>Read the <a href="https://example.com/review">review</a></p>
+     <p>Hotel B</p>`
+    );
+
+    Assert.deepEqual(
+      textLines((await getPageExtractor().getText()).text),
+      [
+        "Read the [review](https://example.com/review)",
+        "[Hotel B](https://example.com/card)",
+      ],
+      "Without a heading, the first block with no link of its own links the card."
+    );
+
+    return cleanup();
+  }
+);
+
+add_task(async function test_dom_extractor_block_anchor_linked_heading() {
+  const { html } = await MLTestUtils.serveHTMLInTab({ browser: gBrowser });
+  const { getPageExtractor, cleanup } = await html`<article></article>`;
+  await appendCard(
+    "https://example.com/card",
+    `<h2><a href="https://example.com/hotel">Hotel C</a></h2>
+     <p>Scored 8.9</p>`
+  );
+
+  Assert.deepEqual(
+    textLines((await getPageExtractor().getText()).text),
+    [
+      "[Hotel C](https://example.com/hotel)",
+      "[Scored 8.9](https://example.com/card)",
+    ],
+    "A heading with its own link is not the label, so no link is nested."
+  );
+
+  return cleanup();
+});
+
+add_task(async function test_dom_extractor_block_anchor_hidden_heading() {
+  const { html } = await MLTestUtils.serveHTMLInTab({ browser: gBrowser });
+  const { getPageExtractor, cleanup } = await html`<article></article>`;
+  await appendCard(
+    "https://example.com/card-1",
+    `<h2 hidden>Hotel D</h2>
+     <p>Hotel D, Lisbon</p>`
+  );
+  await appendCard(
+    "https://example.com/card-2",
+    `<div style="display: none"><h2>Hotel E</h2></div>
+     <p>Hotel E, Porto</p>`
+  );
+
+  Assert.deepEqual(
+    textLines((await getPageExtractor().getText()).text),
+    [
+      "[Hotel D, Lisbon](https://example.com/card-1)",
+      "[Hotel E, Porto](https://example.com/card-2)",
+    ],
+    "A hidden heading is not the label, so the card's URL is still in the text."
+  );
+
+  return cleanup();
+});
+
+add_task(async function test_dom_extractor_block_anchor_without_text() {
+  const { html } = await MLTestUtils.serveHTMLInTab({ browser: gBrowser });
+  const { getPageExtractor, cleanup } = await html`
+    <article>
+      <a href="https://example.com/empty"
+        ><div><img src="spacer.png" /></div
+      ></a>
+      <p>After the empty card.</p>
+    </article>
+  `;
+  const { text, links } = await getPageExtractor().getText();
+
+  Assert.deepEqual(
+    textLines(text),
+    ["After the empty card."],
+    "A card with no text adds no line."
+  );
+  Assert.deepEqual(
+    links,
+    [],
+    "Like any block with no text, the empty card is skipped, so its URL is not collected."
+  );
 
   return cleanup();
 });

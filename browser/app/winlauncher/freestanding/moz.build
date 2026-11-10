@@ -15,6 +15,7 @@ UNIFIED_SOURCES += [
     "DllBlocklist.cpp",
     "LoaderPrivateAPI.cpp",
     "ModuleLoadFrame.cpp",
+    "NativeNtBlockSet.cpp",
     "SharedSection.cpp",
 ]
 
@@ -36,6 +37,7 @@ else:
 CXXFLAGS += [SRCDIR + "/Freestanding.h"]
 
 OS_LIBS += [
+    "advapi32",
     "ntdll",
     "ntdll_freestanding",
 ]
@@ -52,3 +54,14 @@ DisableStlWrapping()
 
 with Files("**"):
     BUG_COMPONENT = ("Firefox", "Launcher Process")
+
+SOURCE_HEADERS += [
+    "CheckForCaller.h",
+    "DllBlocklist.h",
+    "Freestanding.h",
+    "LoaderPrivateAPI.h",
+    "ModuleLoadFrame.h",
+    "NativeNtBlockSet.h",
+    "SafeThreadLocal.h",
+    "SharedSection.h",
+]

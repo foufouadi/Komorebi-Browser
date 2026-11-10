@@ -14,6 +14,7 @@ export const LEGACY_PANE_MAPPINGS = new Map([
 
   ["privacy-sitedata", { category: "privacy", subcategory: "sitedata" }],
   ["privacy-vpn", { category: "privacy", subcategory: "vpn" }],
+  ["privacy-vpnsiterules", { category: "vpnSiteRules" }],
   [
     "privacy-trackingprotection",
     { category: "privacy", subcategory: "etpStatus" },
@@ -39,11 +40,19 @@ export const LEGACY_PANE_MAPPINGS = new Map([
     "general-link-preview",
     { category: "tabsBrowsing", subcategory: "link-preview" },
   ],
+  [
+    "general-highlight-to-search",
+    { category: "tabsBrowsing", subcategory: "highlight-to-search" },
+  ],
 
   ["general-migrate", { category: "sync", subcategory: "migrate" }],
   [
     "general-migrate-autoclose",
     { category: "sync", subcategory: "migrate-autoclose" },
+  ],
+  [
+    "general-importBrowserData",
+    { category: "sync", subcategory: "importBrowserData" },
   ],
 
   ["general-drm", { category: "tabsBrowsing", subcategory: "drm" }],

@@ -301,10 +301,7 @@ add_task(async function testFxViewNotMultiselect() {
 
     info("We multi-select a visible tab with ctrl key down");
     await triggerClickOn(tab2, { ctrlKey: true });
-    Assert.ok(
-      tab2.multiselected && gBrowser._multiSelectedTabsSet.has(tab2),
-      "Second visible tab is (multi) selected"
-    );
+    Assert.ok(tab2.multiselected, "Second visible tab is (multi) selected");
     Assert.equal(gBrowser.multiSelectedTabsCount, 1, "One tab is selected.");
     Assert.notEqual(
       fxViewBtn,
@@ -317,10 +314,7 @@ add_task(async function testFxViewNotMultiselect() {
 
     info("We multi-select visible tabs with shift key down");
     await triggerClickOn(tab2, { shiftKey: true });
-    Assert.ok(
-      tab2.multiselected && gBrowser._multiSelectedTabsSet.has(tab2),
-      "Second visible tab is (multi) selected"
-    );
+    Assert.ok(tab2.multiselected, "Second visible tab is (multi) selected");
     Assert.equal(gBrowser.multiSelectedTabsCount, 2, "Two tabs are selected.");
     Assert.notEqual(
       fxViewBtn,
@@ -392,4 +386,21 @@ add_task(async function testFxViewEntryPointsInPrivateBrowsing() {
   });
   await checkEntryPointsInWindow(privateWin, false);
   await BrowserTestUtils.closeWindow(privateWin);
+});
+
+add_task(async function click_opens_a_single_tab() {
+  let win = await BrowserTestUtils.openNewBrowserWindow();
+  let openedTabs = 0;
+  win.gBrowser.tabContainer.addEventListener("TabOpen", () => openedTabs++);
+  EventUtils.synthesizeMouseAtCenter(win.FirefoxViewHandler.button, {}, win);
+  let tab = win.FirefoxViewHandler.tab;
+  Assert.equal(openedTabs, 1, "The click opened a single tab");
+  Assert.ok(tab.selected, "Firefox View tab is selected");
+  await BrowserTestUtils.browserLoaded(tab.linkedBrowser);
+  Assert.equal(
+    win.FirefoxViewHandler.tab,
+    tab,
+    "The Firefox View tab wasn't replaced"
+  );
+  await BrowserTestUtils.closeWindow(win);
 });

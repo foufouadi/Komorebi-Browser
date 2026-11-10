@@ -16,6 +16,7 @@
 #include "base/basictypes.h"
 #include "buildid_section.h"
 #include "jsapi.h"
+#include "mozilla/AppShutdown.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/ContentPrincipal.h"
@@ -101,6 +102,7 @@
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIURI.h"
+#include "nsIWebBrowserPrint.h"
 #include "nsIWebNavigation.h"
 #include "nsIWebProgress.h"
 #include "nsIWidget.h"
@@ -119,10 +121,6 @@
 #include "nsXPCOMPrivate.h"  // for XUL_DLL
 #include "nsXULPopupManager.h"
 #include "prenv.h"
-
-#ifdef NS_PRINTING
-#  include "nsIWebBrowserPrint.h"
-#endif
 
 #if defined(MOZ_TELEMETRY_REPORTING)
 #  include "mozilla/glean/DomMetrics.h"
@@ -148,9 +146,9 @@ using PrintPreviewResolver = std::function<void(const PrintPreviewResultInfo&)>;
 // we'd need to re-institute a fixed version of bug 98158.
 #define MAX_DEPTH_CONTENT_FRAMES 10
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsFrameLoader, mPendingBrowsingContext,
-                                      mMessageManager, mChildMessageManager,
-                                      mRemoteBrowser, mSessionStoreChild)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_WEAK_PTR(
+    nsFrameLoader, mPendingBrowsingContext, mMessageManager,
+    mChildMessageManager, mRemoteBrowser, mSessionStoreChild)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsFrameLoader)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsFrameLoader)
 
@@ -167,7 +165,7 @@ nsFrameLoader::nsFrameLoader(Element* aOwner, BrowsingContext* aBrowsingContext,
       mOwnerContent(aOwner),
       mPendingSwitchID(0),
       mChildID(0),
-      mRemoteType(NOT_REMOTE_TYPE),
+      mRemoteType(RemoteType::NotRemote()),
       mInitialized(false),
       mDepthTooGreat(false),
       mIsTopLevelContent(false),
@@ -417,24 +415,30 @@ already_AddRefed<nsFrameLoader> nsFrameLoader::Create(
   }
 
   bool isRemoteFrame = InitialLoadIsRemote(aOwner);
-  RefPtr<nsFrameLoader> fl =
-      new nsFrameLoader(aOwner, context, isRemoteFrame, aNetworkCreated);
-  fl->mOpenWindowInfo = aOpenWindowInfo;
 
   // If this is a toplevel initial remote frame, we're looking at a browser
   // loaded in the parent process. Pull the remote type attribute off of the
   // <browser> element to determine which remote type it should be loaded in, or
   // use a shared web remote type if we can't tell.
+  RemoteType remoteType;
   if (isRemoteFrame) {
     MOZ_ASSERT(XRE_IsParentProcess());
-    nsAutoString remoteType;
-    if (aOwner->GetAttr(nsGkAtoms::RemoteType, remoteType) &&
-        !remoteType.IsEmpty()) {
-      CopyUTF16toUTF8(remoteType, fl->mRemoteType);
+    nsAutoString remoteTypeAttr;
+    if (aOwner->GetAttr(nsGkAtoms::RemoteType, remoteTypeAttr) &&
+        !remoteTypeAttr.IsEmpty()) {
+      remoteType = RemoteType::Parse(NS_ConvertUTF16toUTF8(remoteTypeAttr));
+      NS_ENSURE_TRUE(remoteType, nullptr);
     } else {
-      fl->mRemoteType = SharedWebRemoteType(context->OriginAttributesRef());
+      remoteType = RemoteType::SharedWeb(context->OriginAttributesRef());
     }
+  } else {
+    remoteType = RemoteType::NotRemote();
   }
+
+  RefPtr<nsFrameLoader> fl =
+      new nsFrameLoader(aOwner, context, isRemoteFrame, aNetworkCreated);
+  fl->mOpenWindowInfo = aOpenWindowInfo;
+  fl->mRemoteType = remoteType;
   return fl.forget();
 }
 
@@ -540,7 +544,7 @@ void nsFrameLoader::LoadFrame(bool aOriginalSrc,
   }
 }
 
-void nsFrameLoader::ConfigRemoteProcess(const nsACString& aRemoteType,
+void nsFrameLoader::ConfigRemoteProcess(const RemoteType& aRemoteType,
                                         ContentParent* aContentParent) {
   MOZ_DIAGNOSTIC_ASSERT(IsRemoteFrame(), "Must be a remote frame");
   MOZ_DIAGNOSTIC_ASSERT(!mRemoteBrowser, "Must not have a browser yet");
@@ -688,7 +692,6 @@ nsresult nsFrameLoader::ReallyStartLoadingInternal() {
 
     Document* ownerDoc = mOwnerContent->OwnerDoc();
     if (ownerDoc) {
-      loadState->SetTriggeringStorageAccess(ownerDoc->UsingStorageAccess());
       loadState->SetTriggeringWindowId(ownerDoc->InnerWindowID());
       loadState->SetTriggeringClassificationFlags(
           ownerDoc->GetScriptTrackingFlags());
@@ -702,6 +705,11 @@ nsresult nsFrameLoader::ReallyStartLoadingInternal() {
         NS_IsAboutBlank(mURIToLoad) &&
         loadState->TriggeringPrincipal()->IsSystemPrincipal()) {
       loadState->SetRemoteTypeOverride(mRemoteType);
+    }
+
+    if (StaticPrefs::dom_navigation_new_frame_load_behavior_enabled()) {
+      loadState->SetHistoryBehavior(NavigationHistoryBehavior::Auto);
+      loadState->SetNeedsCompletelyLoadedDocument(true);
     }
   }
 
@@ -1066,7 +1074,10 @@ bool nsFrameLoader::ShowRemoteFrame(nsSubDocumentFrame* aFrame) {
                "ShowRemote only makes sense on remote frames.");
 
   if (!EnsureRemoteBrowser()) {
-    NS_ERROR("Couldn't create child process.");
+    // We know that creation of a browser will fail past shutdown, so we only
+    // assert before shutdown, to avoid failures on debug builds (bug 2055827).
+    NS_ASSERTION(AppShutdown::IsInOrBeyond(ShutdownPhase::AppShutdownConfirmed),
+                 "Couldn't create child process.");
     return false;
   }
 
@@ -1100,8 +1111,11 @@ bool nsFrameLoader::ShowRemoteFrame(nsSubDocumentFrame* aFrame) {
     baseWindow->GetMainWidget(getter_AddRefs(mainWidget));
     nsSizeMode sizeMode =
         mainWidget ? mainWidget->SizeMode() : nsSizeMode_Normal;
-    const auto size =
-        hasSize ? aFrame->GetSubdocumentSize() : LayoutDeviceIntSize();
+    const auto size = aFrame
+                          ? aFrame->GetSubdocumentSize()
+                          : LayoutDeviceIntSize::Round(
+                                CSSSize::FromAppUnits(kFallbackIntrinsicSize) *
+                                widget->GetDefaultScale());
     OwnerShowInfo info(size, GetScrollbarPreference(mOwnerContent), sizeMode);
     if (!mRemoteBrowser->Show(info)) {
       return false;
@@ -1397,11 +1411,12 @@ nsresult nsFrameLoader::SwapWithOtherRemoteLoader(
 
 class MOZ_RAII AutoResetInFrameSwap final {
  public:
-  AutoResetInFrameSwap(nsFrameLoader* aThisFrameLoader,
-                       nsFrameLoader* aOtherFrameLoader,
-                       nsDocShell* aThisDocShell, nsDocShell* aOtherDocShell,
-                       EventTarget* aThisEventTarget,
-                       EventTarget* aOtherEventTarget)
+  MOZ_CAN_RUN_SCRIPT AutoResetInFrameSwap(nsFrameLoader* aThisFrameLoader,
+                                          nsFrameLoader* aOtherFrameLoader,
+                                          nsDocShell* aThisDocShell,
+                                          nsDocShell* aOtherDocShell,
+                                          EventTarget* aThisEventTarget,
+                                          EventTarget* aOtherEventTarget)
       : mThisFrameLoader(aThisFrameLoader),
         mOtherFrameLoader(aOtherFrameLoader),
         mThisDocShell(aThisDocShell),
@@ -1426,7 +1441,7 @@ class MOZ_RAII AutoResetInFrameSwap final {
                                                         mOtherEventTarget);
   }
 
-  ~AutoResetInFrameSwap() {
+  MOZ_CAN_RUN_SCRIPT ~AutoResetInFrameSwap() {
     nsContentUtils::FirePageShowEventForFrameLoaderSwap(mThisDocShell,
                                                         mThisEventTarget, true);
     nsContentUtils::FirePageShowEventForFrameLoaderSwap(
@@ -1448,12 +1463,12 @@ class MOZ_RAII AutoResetInFrameSwap final {
   }
 
  private:
-  RefPtr<nsFrameLoader> mThisFrameLoader;
-  RefPtr<nsFrameLoader> mOtherFrameLoader;
-  RefPtr<nsDocShell> mThisDocShell;
-  RefPtr<nsDocShell> mOtherDocShell;
-  nsCOMPtr<EventTarget> mThisEventTarget;
-  nsCOMPtr<EventTarget> mOtherEventTarget;
+  MOZ_KNOWN_LIVE const RefPtr<nsFrameLoader> mThisFrameLoader;
+  MOZ_KNOWN_LIVE const RefPtr<nsFrameLoader> mOtherFrameLoader;
+  MOZ_KNOWN_LIVE const RefPtr<nsDocShell> mThisDocShell;
+  MOZ_KNOWN_LIVE const RefPtr<nsDocShell> mOtherDocShell;
+  MOZ_KNOWN_LIVE const nsCOMPtr<EventTarget> mThisEventTarget;
+  MOZ_KNOWN_LIVE const nsCOMPtr<EventTarget> mOtherEventTarget;
 };
 
 nsresult nsFrameLoader::SwapWithOtherLoader(nsFrameLoader* aOther,
@@ -2682,11 +2697,11 @@ bool nsFrameLoader::TryRemoteBrowserInternal() {
   RefPtr<BrowserParent> nextRemoteBrowser =
       mOpenWindowInfo ? mOpenWindowInfo->GetNextRemoteBrowser() : nullptr;
   if (nextRemoteBrowser) {
-    mRemoteBrowser = new BrowserHost(nextRemoteBrowser);
-    if (nextRemoteBrowser->GetOwnerElement()) {
-      MOZ_ASSERT_UNREACHABLE("Shouldn't have an owner element before");
+    if (nextRemoteBrowser->IsEmbedded()) {
+      MOZ_ASSERT_UNREACHABLE("Shouldn't have an embedder before");
       return false;
     }
+    mRemoteBrowser = new BrowserHost(nextRemoteBrowser);
     nextRemoteBrowser->SetOwnerElement(ownerElement);
   } else {
     RefPtr<ContentParent> contentParent;
@@ -2705,6 +2720,8 @@ bool nsFrameLoader::TryRemoteBrowserInternal() {
     return false;
   }
 
+  GetBrowserParent()->SetOwnerFrameLoader(this);
+
   MOZ_DIAGNOSTIC_ASSERT(mPendingBrowsingContext ==
                         mRemoteBrowser->GetBrowsingContext());
 
@@ -2714,11 +2731,13 @@ bool nsFrameLoader::TryRemoteBrowserInternal() {
   // Grab the reference to the actor
   RefPtr<BrowserParent> browserParent = GetBrowserParent();
 
-  MOZ_ASSERT(browserParent->CanSend(), "BrowserParent cannot send?");
-
   // We no longer need the remoteType attribute on the frame element.
   // The remoteType can be queried by asking the message manager instead.
   ownerElement->UnsetAttr(kNameSpaceID_None, nsGkAtoms::RemoteType, false);
+
+  if (NS_WARN_IF(!browserParent->CanSend())) {
+    return false;
+  }
 
   // Now that browserParent is set, we can initialize graphics
   browserParent->InitRendering();
@@ -3254,10 +3273,6 @@ already_AddRefed<Promise> nsFrameLoader::PrintPreview(
     return nullptr;
   }
 
-#ifndef NS_PRINTING
-  promise->MaybeRejectWithNotSupportedError("Build does not support printing");
-  return promise.forget();
-#else
   auto resolve = [promise](PrintPreviewResultInfo aInfo) {
     using Orientation = dom::PrintPreviewOrientation;
     if (aInfo.sheetCount() > 0) {
@@ -3382,11 +3397,9 @@ already_AddRefed<Promise> nsFrameLoader::PrintPreview(
   }
 
   return promise.forget();
-#endif
 }
 
 void nsFrameLoader::ExitPrintPreview() {
-#ifdef NS_PRINTING
   if (auto* browserParent = GetBrowserParent()) {
     (void)browserParent->SendExitPrintPreview();
     return;
@@ -3400,7 +3413,6 @@ void nsFrameLoader::ExitPrintPreview() {
     return;
   }
   webBrowserPrint->ExitPrintPreview();
-#endif
 }
 
 already_AddRefed<nsIRemoteTab> nsFrameLoader::GetRemoteTab() {
@@ -3679,6 +3691,16 @@ void nsFrameLoader::MaybeNotifyCrashed(BrowsingContext* aBrowsingContext,
     mTabProcessCrashFired = true;
   }
 
+  // Check our owner element still references us. If it's moved on,
+  // notifications and events don't need to be fired.
+  RefPtr<nsFrameLoaderOwner> owner = do_QueryObject(mOwnerContent);
+  if (owner) {
+    RefPtr<nsFrameLoader> currentFrameLoader = owner->GetFrameLoader();
+    if (currentFrameLoader != this) {
+      return;
+    }
+  }
+
   // Fire the crashed observer notification.
   nsCOMPtr<nsIObserverService> os = services::GetObserverService();
   if (!os) {
@@ -3687,15 +3709,7 @@ void nsFrameLoader::MaybeNotifyCrashed(BrowsingContext* aBrowsingContext,
 
   os->NotifyObservers(ToSupports(this), "oop-frameloader-crashed", nullptr);
 
-  // Check our owner element still references us. If it's moved, on, events
-  // don't need to be fired.
-  RefPtr<nsFrameLoaderOwner> owner = do_QueryObject(mOwnerContent);
   if (!owner) {
-    return;
-  }
-
-  RefPtr<nsFrameLoader> currentFrameLoader = owner->GetFrameLoader();
-  if (currentFrameLoader != this) {
     return;
   }
 

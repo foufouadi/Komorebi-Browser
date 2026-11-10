@@ -12,6 +12,8 @@ support-files = [
   "iframe_main_bug1022229.html",
   "iframe_sandbox_bug1022229.html",
   "file_empty.html",
+  "file_domcontentloaded_document_open.html",
+  "file_domcontentloaded_terminated_parse.html",
   "iframe_postMessage_solidus.html",
   "file_setname.html",
   "345339_iframe.html",
@@ -72,6 +74,7 @@ support-files = [
   "file_bug1091883_frame.html",
   "file_bug1091883_subframe.html",
   "file_bug1091883_target.html",
+  "file_bug2084355.html",
   "file_bug28293.sjs",
   "file_bug326337.xml",
   "file_bug326337_inner.html",
@@ -261,6 +264,8 @@ skip-if = [
 
 ["test_anonymousContent_api.html"]
 
+["test_anonymousContent_id_table.html"]
+
 ["test_anonymousContent_append_after_reflow.html"]
 
 ["test_anonymousContent_canvas.html"]
@@ -352,6 +357,10 @@ skip-if = [
   "http3",
 ]
 
+["test_domcontentloaded_document_open.html"]
+
+["test_domcontentloaded_terminated_parse.html"]
+
 ["test_domparser_null_char.html"]
 
 ["test_domparsing.html"]
@@ -405,9 +414,6 @@ skip-if = [
 ["test_explicit_user_agent.html"]
 
 ["test_find.html"]
-skip-if = [
-  "os == 'win' && opt && standalone", # Bug 2026600
-]
 
 ["test_find_bug1601118.html"]
 
@@ -432,6 +438,8 @@ skip-if = [
   "http2",
   "http3",
 ]
+
+["test_focus_move_during_composition.html"]
 
 ["test_focus_radio.html"]
 
@@ -465,6 +473,8 @@ skip-if = [
 
 ["test_html_colors_standards.html"]
 
+["test_htmlcollection_spread_duplicate_keys.html"]
+
 ["test_iframe_event_listener_leaks.html"]
 
 ["test_iframe_referrer.html"]
@@ -484,6 +494,10 @@ skip-if = [
   "http2",
   "http3",
 ]
+
+["test_innerHTML_fast_path.html"]
+
+["test_innerHTML_fast_path_csp.html"]
 
 ["test_innersize_scrollport.html"]
 
@@ -532,8 +546,6 @@ skip-if = [
   "headless",
   "os == 'linux' && os_version == '22.04' && arch == 'x86_64' && display == 'wayland'",
   "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && display == 'x11'",
-  "os == 'mac' && os_version == '10.15' && arch == 'x86_64'",
-  "os == 'mac' && os_version == '14.70' && arch == 'x86_64'", # Bug 1929448
   "os == 'mac' && os_version == '15.30' && arch == 'aarch64'", # Bug 2019401
 ]
 
@@ -564,6 +576,8 @@ skip-if = [
 ["test_navigator_language.html"]
 
 ["test_nested_event_loop_spin_and_idle_tasks.html"]
+
+["test_node_selected_flag_after_splitText.html"]
 
 ["test_nodelist_holes.html"]
 
@@ -620,9 +634,6 @@ skip-if = [
 ["test_processing_instruction_update_stylesheet.xhtml"]
 
 ["test_progress_events_for_gzip_data.html"]
-skip-if = [
-  "tsan", # Bug 1621323
-]
 
 ["test_pushState_structuredclone.html"]
 scheme = "https"
@@ -645,15 +656,12 @@ support-files = ["file_sandbox_and_document_uri.html"]
 ["test_selection_change_null_presshell.html"]
 support-files = ["file_selection_change_null_presshell.html"]
 
+["test_selection_cross_shadow_boundary_offset_after_mutation.html"]
+
 ["test_setInterval_from_start.html"]
 
 ["test_setInterval_uncatchable_exception.html"]
-skip-if = [
-  "asan",
-  "ccov",
-  "opt",
-  "tsan",
-]
+run-if = ["debug"]
 
 ["test_setTimeoutWith0.html"]
 
@@ -701,10 +709,7 @@ skip-if = [
 
 ["test_suppressed_microtasks.html"]
 skip-if = [
-  "asan",
-  "debug",
   "os == 'android'", # The test needs to run reasonably fast.
-  "tsan",
 ]
 
 ["test_text-fragments-create-text-directive-no-reveal.html"]
@@ -756,6 +761,14 @@ skip-if = [
   "http3",
 ]
 
+["test_wasm_offthread_compile.html"]
+support-files = [
+  "file_wasm_offthread_module.sjs",
+]
+skip-if = [
+  "!nightly_build",
+]
+
 ["test_window_close.html"]
 
 ["test_window_constructor.html"]
@@ -795,6 +808,8 @@ skip-if = [
 
 ["test_window_proto.html"]
 
+["test_window_proxy_unlinked_inner.html"]
+
 ["test_writable-replaceable.html"]
 
 ["test_x-frame-options.html"]
@@ -809,8 +824,6 @@ skip-if = [
 skip-if = [
   "http2",
   "http3",
-  "os == 'linux' && os_version == '22.04' && arch == 'x86_64' && display == 'wayland' && debug", # Bug 1870499 and other bugs with crashes after this test start
-  "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && display == 'x11' && debug", # Bug 1870499 and other bugs with crashes after this test start
 ]
 
 ["test_ze_srcdoc.html"]

@@ -103,8 +103,6 @@ class nsRefreshDriver final : public mozilla::layers::TransactionIdAllocator,
   bool RemoveRefreshObserver(nsARefreshObserver* aObserver,
                              mozilla::FlushType aFlushType);
 
-  MOZ_CAN_RUN_SCRIPT void FlushLayoutOnPendingDocsAndFixUpFocus();
-
   /**
    * Add an observer that will be called after each refresh. The caller
    * must remove the observer before it is deleted. This does not trigger
@@ -198,6 +196,10 @@ class nsRefreshDriver final : public mozilla::layers::TransactionIdAllocator,
    * corresponding presshell is hidden or shown.
    */
   void SetActivity(bool aIsActive);
+
+  // Called when our pres shell gets attached to a widget, so that we can switch
+  // to its vsync source if we started ticking before the widget was available.
+  void NotifyWidgetAttached();
 
   /**
    * Return the prescontext we were initialized with
@@ -426,8 +428,6 @@ class nsRefreshDriver final : public mozilla::layers::TransactionIdAllocator,
   };
   void EnsureTimerStarted(EnsureTimerStartedFlags aFlags = eNone);
   void StopTimer();
-
-  void UpdateThrottledState();
 
   bool HasObservers() const;
   void AppendObserverDescriptionsToString(nsACString& aStr) const;

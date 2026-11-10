@@ -78,7 +78,8 @@ ContainStyleScope& ContainStyleScopeManager::GetOrCreateScopeForContent(
     auto& parentScope =
         GetOrCreateScopeForContent(aContent->GetFlattenedTreeParent());
     return *mScopes.InsertOrUpdate(
-        aContent, MakeUnique<ContainStyleScope>(this, &parentScope, aContent));
+        aContent,
+        std::make_unique<ContainStyleScope>(this, &parentScope, aContent));
   }
 
   return GetRootScope();
@@ -139,6 +140,10 @@ bool ContainStyleScopeManager::DestroyCounterNodesFor(nsIFrame* aFrame) {
 }
 
 bool ContainStyleScopeManager::AddCounterChanges(nsIFrame* aNewFrame) {
+  if (!nsCounterManager::HasCounterChanges(aNewFrame)) {
+    MOZ_ASSERT(!aNewFrame->HasAnyStateBits(NS_FRAME_HAS_CSS_COUNTER_STYLE));
+    return false;
+  }
   return GetOrCreateScopeForContent(
              aNewFrame->GetContent()->GetFlattenedTreeParent())
       .GetCounterManager()

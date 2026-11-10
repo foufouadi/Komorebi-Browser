@@ -6,16 +6,22 @@
 const { SmartWindowTelemetry } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/ui/modules/SmartWindowTelemetry.sys.mjs"
 );
+const { FxaSignedInWatcher } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/aiwindow/models/auth/FxaSignedInWatcher.sys.mjs"
+);
 
 describe("SmartWindowSwitcherTelemetry", () => {
   let sb;
   let win;
+  let fxaSignedIn;
 
   beforeEach(async () => {
     sb = sinon.createSandbox();
 
     Services.fog.testResetFOG();
-    sb.stub(AIWindowAccountAuth, "isSignedIn").resolves(true);
+    sb.stub(AuthProvider, "isSignedIn").resolves(true);
+    fxaSignedIn = true;
+    sb.stub(FxaSignedInWatcher, "signedIn").get(() => fxaSignedIn);
   });
 
   afterEach(async () => {
@@ -24,6 +30,156 @@ describe("SmartWindowSwitcherTelemetry", () => {
       win = null;
     }
     sb.restore();
+  });
+
+  describe("launch_command_invoked event", () => {
+    it("records launch_command_invoked when switching the current window", async () => {
+      sb.stub(AuthProvider, "maybeSignIn").resolves(true);
+      win = await BrowserTestUtils.openNewBrowserWindow();
+
+      const launched = await AIWindow.launchWindow(
+        win.gBrowser.selectedBrowser,
+        false,
+        "menu"
+      );
+      Assert.ok(launched, "Smart Window was launched");
+
+      await TestUtils.waitForCondition(
+        () => Glean.smartWindow.launchCommandInvoked.testGetValue()?.length > 0,
+        "Wait for launch_command_invoked event"
+      );
+
+      const events = Glean.smartWindow.launchCommandInvoked.testGetValue();
+      Assert.equal(events.length, 1, "One launch_command_invoked was recorded");
+      Assert.equal(events[0].extra.trigger, "menu", "trigger is correct");
+      Assert.equal(events[0].extra.fxa, "true", "fxa is correct");
+      Assert.equal(
+        events[0].extra.new_window,
+        "false",
+        "new_window is false when switching the current window"
+      );
+      Assert.equal(
+        events[0].extra.auth_provider,
+        "fxa",
+        "auth_provider is correct"
+      );
+    });
+
+    it("records launch_command_invoked when opening a new window", async () => {
+      sb.stub(AuthProvider, "hasToUConsent").get(() => true);
+      win = await BrowserTestUtils.openNewBrowserWindow();
+
+      const newWinPromise = BrowserTestUtils.waitForNewWindow();
+      const launched = await AIWindow.launchWindow(
+        win.gBrowser.selectedBrowser,
+        true,
+        "keyboard_shortcut"
+      );
+      const newWin = await newWinPromise;
+
+      try {
+        Assert.ok(launched, "Smart Window was launched");
+
+        await TestUtils.waitForCondition(
+          () =>
+            Glean.smartWindow.launchCommandInvoked.testGetValue()?.length > 0,
+          "Wait for launch_command_invoked event"
+        );
+
+        const events = Glean.smartWindow.launchCommandInvoked.testGetValue();
+        Assert.equal(
+          events[0].extra.trigger,
+          "keyboard_shortcut",
+          "trigger is correct"
+        );
+        Assert.equal(
+          events[0].extra.new_window,
+          "true",
+          "new_window is true when opening a new window"
+        );
+      } finally {
+        await BrowserTestUtils.closeWindow(newWin);
+      }
+    });
+
+    it("records fxa=false when the user is not signed in", async () => {
+      AuthProvider.isSignedIn.resolves(false);
+      fxaSignedIn = false;
+      sb.stub(AuthProvider, "maybeSignIn").resolves(false);
+      win = await BrowserTestUtils.openNewBrowserWindow();
+
+      const launched = await AIWindow.launchWindow(
+        win.gBrowser.selectedBrowser,
+        false,
+        "menu"
+      );
+      Assert.ok(!launched, "Smart Window was not launched");
+
+      await TestUtils.waitForCondition(
+        () => Glean.smartWindow.launchCommandInvoked.testGetValue()?.length > 0,
+        "Wait for launch_command_invoked event"
+      );
+
+      const events = Glean.smartWindow.launchCommandInvoked.testGetValue();
+      Assert.equal(events.length, 1, "One launch_command_invoked was recorded");
+      Assert.equal(events[0].extra.fxa, "false", "fxa is false");
+      Assert.equal(
+        Glean.smartWindow.openWindow.testGetValue() ?? null,
+        null,
+        "No open_window event was recorded"
+      );
+    });
+
+    it("records launch_command_invoked when the first window is promoted at startup", async () => {
+      await SpecialPowers.pushPrefEnv({
+        set: [["browser.smartwindow.isDefaultWindow", true]],
+      });
+      sb.stub(AuthProvider, "maybeSignIn").resolves(true);
+      win = await BrowserTestUtils.openNewBrowserWindow();
+
+      await AIWindow.onFirstWindowReady(win);
+
+      await TestUtils.waitForCondition(
+        () => Glean.smartWindow.launchCommandInvoked.testGetValue()?.length > 0,
+        "Wait for launch_command_invoked event"
+      );
+
+      const events = Glean.smartWindow.launchCommandInvoked.testGetValue();
+      Assert.equal(events.length, 1, "One launch_command_invoked was recorded");
+      Assert.equal(events[0].extra.trigger, "startup", "trigger is startup");
+      Assert.equal(
+        events[0].extra.new_window,
+        "false",
+        "new_window is false when promoting the first window"
+      );
+
+      await SpecialPowers.popPrefEnv();
+    });
+
+    it("does not record when Smart Window is blocked by AI controls", async () => {
+      await SpecialPowers.pushPrefEnv({
+        set: [["browser.ai.control.smartWindow", "blocked"]],
+      });
+      win = await BrowserTestUtils.openNewBrowserWindow();
+
+      const launched = await AIWindow.launchWindow(
+        win.gBrowser.selectedBrowser,
+        false,
+        "menu"
+      );
+      Assert.ok(!launched, "Smart Window was not launched");
+
+      // Yield to give any async telemetry recording a chance to occur.
+      await new Promise(resolve => Services.tm.dispatchToMainThread(resolve));
+
+      Assert.equal(
+        Glean.smartWindow.launchCommandInvoked.testGetValue() ?? null,
+        null,
+        "No launch_command_invoked event was recorded"
+      );
+
+      await SpecialPowers.popPrefEnv();
+    });
   });
 
   describe("open_window event", () => {
@@ -41,9 +197,35 @@ describe("SmartWindowSwitcherTelemetry", () => {
       Assert.equal(events[0].extra.trigger, "menu", "trigger is correct");
       Assert.equal(events[0].extra.fxa, "true", "fxa is correct");
       Assert.equal(
+        events[0].extra.auth_provider,
+        "fxa",
+        "auth_provider is correct"
+      );
+      Assert.equal(
         events[0].extra.opened_tabs,
         String(win.gBrowser.tabs.length),
         "opened_tabs reflects tab count at open"
+      );
+    });
+
+    it("records fxa=false and provider=guest for a guest user", async () => {
+      fxaSignedIn = false;
+      sb.stub(AuthProvider, "getProviderName").resolves("guest");
+      win = await BrowserTestUtils.openNewBrowserWindow();
+      AIWindow.toggleAIWindow(win, true, "menu");
+
+      await TestUtils.waitForCondition(
+        () => Glean.smartWindow.openWindow.testGetValue()?.length > 0,
+        "Wait for open_window event"
+      );
+
+      const events = Glean.smartWindow.openWindow.testGetValue();
+      Assert.equal(events?.length, 1, "One open_window event was recorded");
+      Assert.equal(events[0].extra.fxa, "false", "fxa is false for guest user");
+      Assert.equal(
+        events[0].extra.auth_provider,
+        "guest",
+        "auth_provider is guest"
       );
     });
 

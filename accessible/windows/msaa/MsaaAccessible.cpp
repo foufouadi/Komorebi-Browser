@@ -71,9 +71,19 @@ MsaaAccessible* MsaaAccessible::Create(Accessible* aAcc) {
     return new ia2AccessibleImage(aAcc);
   }
   if (LocalAccessible* localAcc = aAcc->AsLocal()) {
-    if (localAcc->GetContent() &&
-        localAcc->GetContent()->IsXULElement(nsGkAtoms::menuitem)) {
-      return new MsaaXULMenuitemAccessible(aAcc);
+    if (nsIContent* content = localAcc->GetContent()) {
+      if (content->IsXULElement(nsGkAtoms::menuitem)) {
+        return new MsaaXULMenuitemAccessible(aAcc);
+      }
+      if (content->IsXULElement(nsGkAtoms::box) ||
+          content->IsXULElement(nsGkAtoms::hbox)) {
+        // Bug 2069276: Exposing text interfaces for XUL boxes causes problems
+        // for some clients; e.g. NVDA mouse tracking on address bar action
+        // buttons. Generally, XUL is more like desktop UI anyway, which usually
+        // doesn't expose text interfaces for buttons. Therefore, don't use
+        // ia2AccessibleHypertext for these.
+        return new MsaaAccessible(aAcc);
+      }
     }
   }
   if (aAcc->IsHyperText()) {
@@ -382,6 +392,10 @@ already_AddRefed<IAccessible> MsaaAccessible::GetIAccessibleFor(
         return nullptr;
       }
       for (DocAccessibleParent* remoteDoc : *remoteDocs) {
+        if (remoteDoc->IsPrintDoc()) {
+          // Print documents aren't exposed to platform accessibility APIs.
+          continue;
+        }
         LocalAccessible* outerDoc = remoteDoc->OuterDocOfRemoteBrowser();
         if (!outerDoc ||
             !IsInclusiveDescendantOf(localDoc, outerDoc->Document())) {

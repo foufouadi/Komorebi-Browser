@@ -3,9 +3,6 @@ head = "head.js"
 support-files = ["../shared-head.js"]
 
 ["test_active_configuration.js"]
-skip-if = [
-  "tsan", # Intermittent timeouts, bug 1781449
-]
 
 ["test_addProfilerMarker.js"]
 
@@ -18,13 +15,11 @@ skip-if = [
 
 ["test_enterjit_osr_disabling.js"]
 skip-if = [
-  "opt",
   "tsan",
 ]
 
 ["test_enterjit_osr_enabling.js"]
 skip-if = [
-  "opt",
   "tsan",
 ]
 
@@ -52,17 +47,13 @@ skip-if = [
 
 ["test_feature_mainthreadio.js"]
 skip-if = [
-  "os == 'win' && socketprocess_networking",
   "release_or_beta",
   "tsan", # bug 1885381
 ]
 
 ["test_feature_nativeallocations.js"]
 skip-if = [
-  "asan",
   "os == 'android' && verify", # bug 1757528
-  "socketprocess_networking",
-  "tsan",
 ]
 
 ["test_feature_posix_signals.js"]
@@ -98,9 +89,6 @@ skip-if = [
   "os == 'android' && release_or_beta", # Bug 1992989
   "os == 'linux' && os_version == '22.04' && arch == 'x86_64' && display == 'wayland' && opt && release_or_beta",
   "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && display == 'x11' && opt && release_or_beta",
-  "os == 'mac' && os_version == '10.15' && arch == 'x86_64'",
-  "os == 'mac' && os_version == '14.70' && arch == 'x86_64'",
-  "os == 'mac' && os_version == '15.30' && arch == 'aarch64' && release_or_beta",
   "tsan",
 ]
 
@@ -119,9 +107,6 @@ skip-if = [
   "os == 'android' && release_or_beta", # Bug 1992989
   "os == 'linux' && os_version == '22.04' && arch == 'x86_64' && display == 'wayland' && opt && release_or_beta",
   "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && display == 'x11' && opt && release_or_beta",
-  "os == 'mac' && os_version == '10.15' && arch == 'x86_64'",
-  "os == 'mac' && os_version == '14.70' && arch == 'x86_64'",
-  "os == 'mac' && os_version == '15.30' && arch == 'aarch64' && release_or_beta",
   "tsan",
 ]
 
@@ -129,6 +114,8 @@ skip-if = [
 skip-if = [
   "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && display == 'x11' && tsan", # bug 1783179, frequent failure since GCP machine type change from n2-standard- to c2-standard-4
 ]
+
+["test_profiler_counter.js"]
 
 ["test_responsiveness.js"]
 skip-if = [

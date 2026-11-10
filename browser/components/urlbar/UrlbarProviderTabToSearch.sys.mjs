@@ -11,10 +11,9 @@ import {
   UrlbarProvider,
   UrlbarUtils,
 } from "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs";
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-const lazy = {};
-
-ChromeUtils.defineESModuleGetters(lazy, {
+const lazy = XPCOMUtils.declareLazy({
   ActionsProviderContextualSearch:
     "moz-src:///browser/components/urlbar/ActionsProviderContextualSearch.sys.mjs",
   UrlbarPrefs: "moz-src:///browser/components/urlbar/UrlbarPrefs.sys.mjs",
@@ -113,8 +112,9 @@ export class UrlbarProviderTabToSearch extends UrlbarProvider {
    * with this provider, to save on resources.
    *
    * @param {UrlbarQueryContext} queryContext The query context object
+   * @param {UrlbarParentController} controller
    */
-  async isActive(queryContext) {
+  async isActive(queryContext, controller) {
     return (
       queryContext.searchString &&
       queryContext.tokens.length == 1 &&
@@ -124,7 +124,7 @@ export class UrlbarProviderTabToSearch extends UrlbarProvider {
         (await this.queryInstance
           .getProvider(lazy.UrlbarProviderGlobalActions.name)
           ?.isActive(queryContext)) &&
-        lazy.ActionsProviderContextualSearch.isActive(queryContext)
+        lazy.ActionsProviderContextualSearch.isActive(queryContext, controller)
       )
     );
   }
@@ -143,9 +143,7 @@ export class UrlbarProviderTabToSearch extends UrlbarProvider {
   }
 
   /**
-   * This is called only for dynamic result types, when the urlbar view updates
-   * the view of one of the results of the provider.  It should return an object
-   * describing the view update.
+   * This is called only for dynamic result types.
    *
    * @param {UrlbarResult} result The result whose view will be updated.
    * @returns {object} An object describing the view update.

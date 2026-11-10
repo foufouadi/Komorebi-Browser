@@ -59,6 +59,7 @@ class MozAdsClientBuilder {
     func environment(environment: MozAdsEnvironment) -> MozAdsClientBuilder
     func cacheConfig(cacheConfig: MozAdsCacheConfig) -> MozAdsClientBuilder
     func telemetry(telemetry: MozAdsTelemetry) -> MozAdsClientBuilder
+    func userAgent(userAgent: String) -> MozAdsClientBuilder
     func build() -> MozAdsClient
 }
 ```
@@ -69,19 +70,21 @@ class MozAdsClientBuilder {
 - **`environment(environment: MozAdsEnvironment)`** - Sets the MARS environment (Prod, Staging, or Test)
 - **`cacheConfig(cacheConfig: MozAdsCacheConfig)`** - Sets the cache configuration
 - **`telemetry(telemetry: MozAdsTelemetry)`** - Sets the telemetry implementation
+- **`userAgent(userAgent: String)`** - Sets the browser's user agent
 - **`build()`** - Builds and returns the configured client
 
 | Configuration  | Type                  | Description                                                                                            |
 | -------------- | --------------------- | ------------------------------------------------------------------------------------------------------ |
 | `environment`  | `MozAdsEnvironment`   | Selects which MARS environment to connect to. Unless in a dev build, this value can only ever be Prod. Defaults to Prod. |
 | `cacheConfig`  | `MozAdsCacheConfig?`  | Optional configuration for the internal cache.                                                         |
-| `telemetry`    | `MozAdsTelemetry?`    | Optional telemetry instance for recording metrics. If not provided, a no-op implementation is used.    |
+| `telemetry`    | `MozAdsTelemetry?`    | Optional telemetry instance for recording metrics. Telemetry is process-wide: the most recently built client's instance receives metrics from every client.    |
+| `userAgent`    | `String?`             | The browser's user agent, for OHTTP requests (see the OHTTP note). |
 
 ---
 
 ## `MozAdsTelemetry`
 
-Telemetry protocol for recording ads client metrics. You must provide an implementation of this protocol to the `MozAdsClientBuilder` to enable telemetry collection. If no telemetry instance is provided, a no-op implementation is used and no metrics will be recorded.
+Telemetry protocol for recording ads client metrics. You must provide an implementation of this protocol to the `MozAdsClientBuilder` to enable telemetry collection. Telemetry is process-wide and meant to be set up once: building a client with a telemetry instance makes it the destination for metrics from every client in the process, replacing any instance installed before it. It is dropped when any client shuts down. Until an instance is installed, no metrics are recorded.
 
 ```swift
 protocol MozAdsTelemetry {
@@ -222,6 +225,7 @@ struct MozAdsRequestOptions {
     let cachePolicy: MozAdsRequestCachePolicy?
     let flags: [String: Bool]  // default: [:]
     let ohttp: Bool  // default: false
+    let relevance: [String: Double] // default: [:]
 }
 ```
 
@@ -230,6 +234,7 @@ struct MozAdsRequestOptions {
 | `cachePolicy` | `MozAdsRequestCachePolicy?`   | Per-request caching policy. If `nil`, uses the client's default TTL with a `cacheFirst` mode.                                              |
 | `flags`       | `[String: Bool]`              | Request-level flags forwarded verbatim as the `flags` object on the wire. An empty dictionary omits it. e.g. `["contextual_placement": true]`. Defaults to `[:]`. |
 | `ohttp`       | `Bool`                        | Whether to route this request through OHTTP. Defaults to `false`.                                                                          |
+| `relevance`   | `[String: Double]`            | Per client calculated relevance scores. An empty object omits it.Defaults to `[:]`.                                                          |
 
 ---
 
@@ -260,7 +265,7 @@ try client.recordClick(clickUrl: ad.callbacks.click, options: MozAdsCallbackOpti
 try client.recordImpression(impressionUrl: ad.callbacks.impression, options: MozAdsCallbackOptions(ohttp: true))
 ```
 
-> **Note:** OHTTP must be configured at the viaduct level before use. When `ohttp` is `true`, the client automatically performs a preflight request to obtain geo-location and user-agent headers, which are injected into the MARS request.
+> **Note:** OHTTP must be configured at the viaduct level before use. When `ohttp` is `true`, the client automatically performs a preflight request to obtain geo-location and user-agent headers, which are injected into the MARS request. If the preflight returns no user agent, the client sends `userAgent`, else viaduct's global default user agent, else the request fails.
 
 ---
 

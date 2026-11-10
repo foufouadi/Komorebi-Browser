@@ -24,7 +24,6 @@
 )]
 
 
-pub extern crate crossbeam_channel;
 pub extern crate euclid;
 
 extern crate app_units;
@@ -51,6 +50,7 @@ mod display_list;
 mod font;
 mod gradient_builder;
 mod image;
+pub mod path;
 /// Internal: hashable building blocks for interning keys, shared with the
 /// `webrender` crate. Not part of the public API surface.
 #[doc(hidden)]
@@ -59,6 +59,10 @@ pub mod key_types;
 /// `webrender` crate. Not part of the public API surface.
 #[doc(hidden)]
 pub mod interned_prims;
+/// Internal: content-side interning for the display list builder. Not part of
+/// the public API surface.
+#[doc(hidden)]
+pub mod interning;
 /// Internal: primitive geometry simplification / gradient optimization helpers,
 /// shared with the `webrender` crate. Not part of the public API surface.
 #[doc(hidden)]
@@ -75,6 +79,7 @@ pub use crate::gradient_builder::*;
 pub use crate::image::*;
 pub use crate::tile_pool::*;
 pub use crate::fast_transform::*;
+pub use crate::path::*;
 
 use crate::units::*;
 use crate::channel::Receiver;
@@ -82,6 +87,8 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::os::raw::c_void;
 use peek_poke::PeekPoke;
+
+pub(crate) type FastHashMap<K, V> = rustc_hash::FxHashMap<K, V>;
 
 /// Defined here for cbindgen
 pub const MAX_RENDER_TASK_SIZE: i32 = 16384;
@@ -199,6 +206,28 @@ impl PipelineId {
     }
 
     pub const INVALID: Self = PipelineId(!0, !0);
+}
+
+/// The pipelines that a pipeline's display list may embed with iframe items.
+///
+/// Only enforced in documents where enforcement is enabled, see
+/// `Transaction::set_embed_policy_enforcement`. There, a pipeline without a
+/// policy may not embed anything.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum EmbedPolicy {
+    /// Any pipeline may be embedded.
+    Unrestricted,
+    /// Only the pipelines whose `PipelineSourceId` is in the list may be embedded.
+    Restricted(Vec<PipelineSourceId>),
+}
+
+impl EmbedPolicy {
+    pub fn allows(&self, pipeline_id: PipelineId) -> bool {
+        match *self {
+            EmbedPolicy::Unrestricted => true,
+            EmbedPolicy::Restricted(ref namespaces) => namespaces.contains(&pipeline_id.0),
+        }
+    }
 }
 
 #[repr(C)]
@@ -636,6 +665,10 @@ pub enum BoolParameter {
 #[repr(u32)]
 pub enum IntParameter {
     BatchedUploadThreshold = 0,
+    /// The number of samples per pixel used to rasterize path tiles: 0 for
+    /// analytical anti-aliasing, 1 to 4 for 4 samples, 8 otherwise. Software
+    /// WebRender always uses 4 samples.
+    PathAaSamples = 1,
 }
 
 /// Floating point configuration option.
@@ -804,6 +837,17 @@ bitflags! {
         /// which has no quad-shader path to fall back to: dropping that clip
         /// would not reroute it, it would lose it.
         const DISABLE_COMPOSITOR_CLIPS = (1 as u64) << 37;
+        /// Never draw frames: Renderer::render only applies pending resource
+        /// updates, and frames that are replaced or rendered offscreen are
+        /// dropped. The persistent targets (texture cache render tasks and
+        /// picture cache tiles) are left with stale content, so rendering is
+        /// incorrect after the flag is cleared until they are invalidated.
+        /// Useful to benchmark frame building on its own.
+        const SKIP_RENDERING = (1 as u64) << 38;
+        /// Don't fill solid color primitives clipped by a path directly in
+        /// their destination target. They go through an intermediate target
+        /// and a path clip mask instead.
+        const DISABLE_DIRECT_PATH_FILL = (1 as u64) << 39;
     }
 }
 

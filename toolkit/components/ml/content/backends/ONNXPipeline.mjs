@@ -45,7 +45,7 @@ const lazy = {};
 ChromeUtils.defineLazyGetter(lazy, "console", () => {
   return console.createInstance({
     maxLogLevel: _logLevel, // we can't use maxLogLevelPref in workers.
-    prefix: "GeckoMLONNXPipeline",
+    logModule: "GeckoMLONNXPipeline",
   });
 });
 
@@ -583,25 +583,6 @@ function isMultiThreadSupported() {
 }
 
 /**
- * Copied over from ONNX see https://github.com/microsoft/onnxruntime
- *
- * This is the code used by the lib to detect GPU support.
- *
- */
-async function checkGPUSupport() {
-  if (!navigator?.gpu) {
-    return false;
-  }
-
-  const adapter = await navigator.gpu.requestAdapter({
-    powerPreference: "high-performance",
-    forceFallbackAdapter: false,
-  });
-
-  return !!adapter;
-}
-
-/**
  * Represents a pipeline for processing machine learning tasks.
  */
 export class ONNXPipeline {
@@ -622,7 +603,7 @@ export class ONNXPipeline {
    *
    * @param {object} mlEngineWorker - Implements the Cache interface and used to get models
    * @param {object} config - The configuration options
-   * @param {*} errorFactory - error class passed by the backend factory.
+   * @param {any} errorFactory - error class passed by the backend factory.
    */
   constructor(mlEngineWorker, config, errorFactory) {
     this.#errorFactory = errorFactory;
@@ -675,10 +656,7 @@ export class ONNXPipeline {
           break;
       }
       lazy.console.debug("Transformers.js env", transformers.env);
-      if (config.device === "cpu") {
-        config.device = "wasm";
-      }
-      device = config.device || "wasm";
+      device = "wasm";
     } else {
       device = "cpu";
       session_options.intraOpNumThreads = config.numThreads;
@@ -794,7 +772,7 @@ export class ONNXPipeline {
    * @param {object} mlEngineWorker - Implements the Cache interface and used to get models
    * @param {ArrayBuffer} runtime - The runtime wasm file.
    * @param {PipelineOptions} options - The options for initialization.
-   * @param {*} errorFactory - error class passed by the backend factory.
+   * @param {any} errorFactory - error class passed by the backend factory.
    * @returns {Promise<Pipeline>} The initialized pipeline instance.
    */
   static async initialize(mlEngineWorker, runtime, options, errorFactory) {
@@ -865,13 +843,6 @@ export class ONNXPipeline {
    */
   async ensurePipelineIsReady() {
     if (!this.#isReady) {
-      if (this.#config.device === "gpu") {
-        if (!(await checkGPUSupport())) {
-          lazy.console.warn(
-            "GPU not supported. ONNX will fallback to CPU instead."
-          );
-        }
-      }
       // deactive console.warn, see https://bugzilla.mozilla.org/show_bug.cgi?id=1891003
       const originalWarn = console.warn;
       await this.#metricsSnapShot({ name: "ensurePipelineIsReadyStart" });

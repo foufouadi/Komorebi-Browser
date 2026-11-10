@@ -6,6 +6,7 @@
 
 #include "LayoutConstants.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/OwningNonNull.h"
 #include "mozilla/StateWatching.h"
 #include "mozilla/WeakPtr.h"
 #include "mozilla/dom/CanvasRenderingContextHelper.h"
@@ -19,6 +20,7 @@
 
 class nsICanvasRenderingContextInternal;
 class nsIInputStream;
+class nsIOutputStream;
 class nsITimerCallback;
 enum class gfxAlphaType;
 enum class FrameCaptureState : uint8_t;
@@ -40,6 +42,7 @@ class WebRenderCanvasData;
 }  // namespace layers
 namespace gfx {
 class DrawTarget;
+class PrintTarget;
 class SourceSurface;
 class VRLayerChild;
 }  // namespace gfx
@@ -163,6 +166,11 @@ class HTMLCanvasElement final : public nsGenericHTMLElement,
   PrintCallback* GetMozPrintCallback() const;
   void SetMozPrintCallback(PrintCallback* aCallback);
 
+  MOZ_CAN_RUN_SCRIPT static void PrintToPDF(
+      const GlobalObject& aGlobal,
+      const Sequence<OwningNonNull<HTMLCanvasElement>>& aCanvases,
+      nsIOutputStream* aStream, ErrorResult& aRv);
+
   already_AddRefed<CanvasCaptureMediaStream> CaptureStream(
       const Optional<double>& aFrameRate, nsIPrincipal& aSubjectPrincipal,
       ErrorResult& aRv);
@@ -192,7 +200,7 @@ class HTMLCanvasElement final : public nsGenericHTMLElement,
   /**
    * Notify the placeholder offscreen canvas of an updated size.
    */
-  void InvalidateCanvasPlaceholder(uint32_t aWidth, uint32_t aHeight);
+  void InvalidateCanvasPlaceholder(bool aHasSizeChanged);
 
   /**
    * Notify that some canvas content has changed and the window may
@@ -265,13 +273,15 @@ class HTMLCanvasElement final : public nsGenericHTMLElement,
                               const nsAString& aValue,
                               nsIPrincipal* aMaybeScriptedPrincipal,
                               nsAttrValue& aResult) override;
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* aAttribute) const override;
+  bool IsNoNamespaceAttrMapped(const nsAtom* aAttribute) const override;
   nsChangeHint GetAttributeChangeHint(const nsAtom* aAttribute,
                                       AttrModType aModType) const override;
   nsMapRuleToAttributesFunc GetAttributeMappingFunction() const override;
 
   virtual nsresult Clone(dom::NodeInfo*, nsINode** aResult) const override;
   nsresult CopyInnerTo(HTMLCanvasElement* aDest);
+
+  void DestroyContent() override;
 
   static void MapAttributesIntoRule(MappedDeclarationsBuilder&);
 
@@ -323,9 +333,7 @@ class HTMLCanvasElement final : public nsGenericHTMLElement,
   virtual already_AddRefed<nsICanvasRenderingContextInternal> CreateContext(
       CanvasContextType aContextType) override;
 
-  nsresult UpdateContext(JSContext* aCx,
-                         JS::Handle<JS::Value> aNewContextOptions,
-                         ErrorResult& aRvForDictionaryInit) override;
+  void AfterUpdateContext() override;
 
   nsresult ExtractData(JSContext* aCx, nsIPrincipal& aSubjectPrincipal,
                        nsAString& aType, const nsAString& aOptions,
@@ -340,6 +348,10 @@ class HTMLCanvasElement final : public nsGenericHTMLElement,
 
   MOZ_CAN_RUN_SCRIPT void CallPrintCallback(
       RefPtr<HTMLCanvasPrintState> aPrintState);
+
+  // Draw one canvas-sized PDF page using mozPrintCallback.
+  MOZ_CAN_RUN_SCRIPT void PrintPageToPDF(gfx::PrintTarget& aTarget,
+                                         ErrorResult& aRv);
 
   virtual void AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
                             const nsAttrValue* aValue,
@@ -357,6 +369,12 @@ class HTMLCanvasElement final : public nsGenericHTMLElement,
   bool IsOffscreen() const { return !!mOffscreenCanvas; }
   OffscreenCanvas* GetOffscreenCanvas() const { return mOffscreenCanvas; }
   void FlushOffscreenCanvas();
+
+  // Only canvases which have been transferred to an OffscreenCanvas observe
+  // the document activity, to let the display helper know whether the frames
+  // it produces would end up on the screen at all.
+  void NotifyOwnerDocumentActivityChanged();
+  void NodeInfoChanged(Document* aOldDoc) override;
 
   layers::ImageContainer* GetImageContainer() const { return mImageContainer; }
 

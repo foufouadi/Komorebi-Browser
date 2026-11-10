@@ -183,9 +183,11 @@ def test_build_kwargs_with_address(build_kwargs_using, address):
 def test_build_kwargs_with_binary_or_address(
     expected_driver_args, build_kwargs_using, binary, address
 ):
-    built_kwargs = build_kwargs_using(
-        {"binary": binary, "address": address, "emulator": None}
-    )
+    built_kwargs = build_kwargs_using({
+        "binary": binary,
+        "address": address,
+        "emulator": None,
+    })
     if binary:
         expected_driver_args["bin"] = binary
         if address:
@@ -287,6 +289,44 @@ def test_increment_crash_count_in_run_test_set(runner, has_crashed, mock_marione
         _check_crash_counts(has_crashed, runner, runner.marionette)
 
 
+def test_run_test_set_sets_test_group(runner, mock_marionette):
+    mock_marionette.check_for_crash.return_value = False
+    fake_tests = [
+        {"filepath": "a", "expected": "pass", "group": "manifest1.toml"},
+        {"filepath": "b", "expected": "pass", "group": "manifest2.toml"},
+    ]
+    groups_at_run = []
+    groups_at_crash_check = []
+
+    def run_test(*args, **kwargs):
+        groups_at_run.append(mock_marionette.test_group)
+
+    mock_marionette.check_for_crash.side_effect = lambda: (
+        groups_at_crash_check.append(mock_marionette.test_group) or False
+    )
+
+    with patch.multiple(runner, run_test=run_test, marionette=mock_marionette):
+        runner.run_test_set(fake_tests)
+
+    expected = [runner._fix_test_path(t["group"]) for t in fake_tests]
+    assert groups_at_run == expected
+    assert groups_at_crash_check == expected
+    assert mock_marionette.test_group is None
+
+
+def test_run_test_set_resets_test_group_on_error(runner, mock_marionette):
+    def run_test(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    with patch.multiple(runner, run_test=run_test, marionette=mock_marionette):
+        with pytest.raises(KeyboardInterrupt):
+            runner.run_test_set([
+                {"filepath": "a", "expected": "pass", "group": "manifest1.toml"}
+            ])
+
+    assert mock_marionette.test_group is None
+
+
 @pytest.mark.parametrize("has_crashed", [True, False])
 def test_record_crash(runner, has_crashed, mock_marionette):
     with patch.object(runner, "marionette", mock_marionette):
@@ -378,15 +418,17 @@ def test_manifest_basic_args(mock_runner, manifest, monkeypatch):
     assert "mozinfo_key" in kwargs and kwargs["mozinfo_key"] == "mozinfo_val"
 
 
-@pytest.mark.parametrize("test_tags", (None, ["tag", "tag2"]))
+@pytest.mark.parametrize("test_tags", (None, [], ["tag"], ["tag", "tag2"]))
 def test_manifest_with_test_tags(mock_runner, manifest, monkeypatch, test_tags):
     kwargs = get_kwargs_passed_to_manifest(
         mock_runner, manifest, monkeypatch, test_tags=test_tags
     )
-    if test_tags is None:
+    if not test_tags:
         assert kwargs["filters"] == []
     else:
-        assert len(kwargs["filters"]) == 1 and kwargs["filters"][0].tags == test_tags
+        assert len(kwargs["filters"]) == 1
+        assert isinstance(kwargs["filters"][0], manifestparser.filters.tags)
+        assert kwargs["filters"][0].tags == test_tags
 
 
 def test_cleanup_with_manifest(mock_runner, manifest_with_tests, monkeypatch):

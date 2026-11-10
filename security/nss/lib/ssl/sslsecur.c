@@ -169,12 +169,11 @@ SSL_ResetHandshake(PRFileDesc *s, PRBool asServer)
 
     ss->firstHsDone = PR_FALSE;
     ss->enoughFirstHsDone = PR_FALSE;
+    ss->sec.isServer = asServer;
     if (asServer) {
         ss->handshake = ssl_BeginServerHandshake;
-        ss->handshaking = sslHandshakingAsServer;
     } else {
         ss->handshake = ssl_BeginClientHandshake;
-        ss->handshaking = sslHandshakingAsClient;
     }
 
     ssl_GetRecvBufLock(ss);
@@ -196,9 +195,6 @@ SSL_ResetHandshake(PRFileDesc *s, PRBool asServer)
     ssl_ResetSecurityInfo(&ss->sec, PR_TRUE);
     status = ssl_CreateSecurityInfo(ss);
     ssl_ReleaseXmitBufLock(ss);
-
-    ssl_ReleaseSSL3HandshakeLock(ss);
-    ssl_Release1stHandshakeLock(ss);
 
     ssl3_DestroyRemoteExtensions(&ss->ssl3.hs.remoteExtensions);
     ssl3_DestroyRemoteExtensions(&ss->ssl3.hs.echOuterExtensions);
@@ -222,6 +218,9 @@ SSL_ResetHandshake(PRFileDesc *s, PRBool asServer)
     tls13_ClientGreaseDestroy(ss);
 
     tls_ClientHelloExtensionPermutationDestroy(ss);
+
+    ssl_ReleaseSSL3HandshakeLock(ss);
+    ssl_Release1stHandshakeLock(ss);
 
     if (!ss->TCPconnected)
         ss->TCPconnected = (PR_SUCCESS == ssl_DefGetpeername(ss, &addr));
@@ -633,9 +632,12 @@ ssl_CopySecurityInfo(sslSocket *ss, sslSocket *os)
 {
     ss->sec.isServer = os->sec.isServer;
 
-    ss->sec.peerCert = CERT_DupCertificate(os->sec.peerCert);
-    if (os->sec.peerCert && !ss->sec.peerCert)
-        goto loser;
+    if (os->sec.peerCertDER.data) {
+        if (ssl_SetPeerCertificate(&ss->sec, &os->sec.peerCertDER) !=
+            SECSuccess) {
+            goto loser;
+        }
+    }
 
     return SECSuccess;
 
@@ -653,10 +655,7 @@ ssl_ResetSecurityInfo(sslSecurityInfo *sec, PRBool doMemset)
         CERT_DestroyCertificate(sec->localCert);
         sec->localCert = NULL;
     }
-    if (sec->peerCert) {
-        CERT_DestroyCertificate(sec->peerCert);
-        sec->peerCert = NULL;
-    }
+    ssl_ClearPeerCertificate(sec);
     if (sec->peerKey) {
         SECKEY_DestroyPublicKey(sec->peerKey);
         sec->peerKey = NULL;
@@ -696,12 +695,11 @@ ssl_SecureConnect(sslSocket *ss, const PRNetAddr *sa)
     PRFileDesc *osfd = ss->fd->lower;
     int rv;
 
+    ss->sec.isServer = ss->opt.handshakeAsServer ? PR_TRUE : PR_FALSE;
     if (ss->opt.handshakeAsServer) {
         ss->handshake = ssl_BeginServerHandshake;
-        ss->handshaking = sslHandshakingAsServer;
     } else {
         ss->handshake = ssl_BeginClientHandshake;
-        ss->handshaking = sslHandshakingAsClient;
     }
 
     /* connect to server */

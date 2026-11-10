@@ -35,6 +35,7 @@
 #include "nsCOMPtr.h"
 #include "nsFrameLoader.h"
 #include "nsFrameLoaderOwner.h"
+#include "nsGlobalWindowInner.h"
 #include "nsIContent.h"
 #include "nsIContentInlines.h"
 #include "nsIFrame.h"
@@ -684,6 +685,7 @@ NS_IMETHODIMP nsBaseDragService::StartDragSessionForTests(
     nsISupports* aWidgetProvider, uint32_t aAllowedEffect) {
   // This method must set mSessionIsSynthesizedForTests
   MOZ_ASSERT(!mNeverAllowSessionIsSynthesizedForTests);
+  NS_ENSURE_TRUE(mSuppressLevel == 0, NS_ERROR_NOT_AVAILABLE);
 
   RefPtr<nsIDragSession> session = StartDragSession(aWidgetProvider);
   MOZ_ASSERT(session);
@@ -756,6 +758,8 @@ nsresult nsBaseDragSession::EndDragSessionImpl(bool aDoneDrag,
     FireDragEventAtSource(eDragEnd, aKeyModifiers);
   }
 
+  nsGlobalWindowInner::MouseButtonReleased();
+
   if (mDragPopup) {
     nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
     if (pm) {
@@ -768,8 +772,8 @@ nsresult nsBaseDragSession::EndDragSessionImpl(bool aDoneDrag,
     dropEffect = mDataTransfer->DropEffectInt();
   }
 
-  for (nsWeakPtr& browser : mBrowsers) {
-    nsCOMPtr<BrowserParent> bp = do_QueryReferent(browser);
+  for (const WeakPtr<BrowserParent>& browser : mBrowsers) {
+    RefPtr<BrowserParent> bp = browser.get();
     if (NS_WARN_IF(!bp)) {
       continue;
     }
@@ -1107,20 +1111,12 @@ nsresult nsBaseDragSession::DrawDragForImage(
 
     aScreenDragRect->SizeTo(aPresContext->CSSPixelsToDevPixels(imageWidth),
                             aPresContext->CSSPixelsToDevPixels(imageHeight));
-  } else {
-    // Bug 1907668: The canvas size should be converted to dev pixels.
-    NS_ASSERTION(aCanvas, "both image and canvas are null");
-    CSSIntSize sz = aCanvas->GetSize();
-    aScreenDragRect->SizeTo(sz.width, sz.height);
-  }
 
-  nsIntSize destSize;
-  destSize.width = aScreenDragRect->Width();
-  destSize.height = aScreenDragRect->Height();
-  if (destSize.width == 0 || destSize.height == 0) return NS_ERROR_FAILURE;
+    nsIntSize destSize(aScreenDragRect->Width(), aScreenDragRect->Height());
+    if (destSize.IsEmpty()) {
+      return NS_ERROR_FAILURE;
+    }
 
-  nsresult result = NS_OK;
-  if (aImageLoader) {
     RefPtr<DrawTarget> dt =
         gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(
             destSize, SurfaceFormat::B8G8R8A8);
@@ -1138,11 +1134,25 @@ nsresult nsBaseDragSession::DrawDragForImage(
       return NS_ERROR_FAILURE;
     }
     *aSurface = dt->Snapshot();
-  } else {
-    *aSurface = aCanvas->GetSurfaceSnapshot();
+    return NS_OK;
   }
 
-  return result;
+  NS_ASSERTION(aCanvas, "both image and canvas are null");
+  *aSurface = aCanvas->GetSurfaceSnapshot();
+  if (!*aSurface) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // The snapshot can differ from the canvas element's size.
+  const IntSize size = (*aSurface)->GetSize();
+  if (size.IsEmpty()) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // Bug 1907668: The canvas size should be converted to dev pixels.
+  aScreenDragRect->SizeTo(size.width, size.height);
+
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1161,6 +1171,13 @@ nsBaseDragService::Suppress() {
 
 NS_IMETHODIMP
 nsBaseDragService::Unsuppress() {
+  MOZ_ASSERT(mSuppressLevel > 0, "Unbalanced call to unsuppress()");
+  if (!mSuppressLevel) {
+    // Decrementing here would wrap the level around and leave drag and drop
+    // disabled for the rest of the session.
+    return NS_ERROR_UNEXPECTED;
+  }
+
   --mSuppressLevel;
   LOGI(
       "[%p] %s | mSuppressLevel (after decrement): %u | "
@@ -1168,6 +1185,8 @@ nsBaseDragService::Unsuppress() {
       this, __FUNCTION__, mSuppressLevel);
   return NS_OK;
 }
+
+bool nsBaseDragService::GetIsSuppressed() { return mSuppressLevel > 0; }
 
 NS_IMETHODIMP
 nsBaseDragSession::UserCancelled() {
@@ -1199,14 +1218,15 @@ nsBaseDragSession::DragEventDispatchedToChildProcess() {
   return NS_OK;
 }
 
-static bool MaybeAddBrowser(nsTArray<nsWeakPtr>& aBrowsers,
+static bool MaybeAddBrowser(nsTArray<WeakPtr<BrowserParent>>& aBrowsers,
                             BrowserParent* aBP) {
-  nsWeakPtr browser = do_GetWeakReference(aBP);
+  WeakPtr<BrowserParent> browser(aBP);
 
   // Equivalent to `InsertElementSorted`, avoiding inserting a duplicate
   // element. See bug 1896166.
-  size_t index = aBrowsers.IndexOfFirstElementGt(browser);
-  if (index == 0 || aBrowsers[index - 1] != browser) {
+  WeakPtr<BrowserParent>::StableOrdering comparator;
+  size_t index = aBrowsers.IndexOfFirstElementGt(browser, comparator);
+  if (index == 0 || !comparator.Equals(aBrowsers[index - 1], browser)) {
     LOGD("%s | adding PBrowser %p to drag session", __FUNCTION__, aBP);
     aBrowsers.InsertElementAt(index, browser);
     return true;
@@ -1214,9 +1234,9 @@ static bool MaybeAddBrowser(nsTArray<nsWeakPtr>& aBrowsers,
   return false;
 }
 
-static bool RemoveAllBrowsers(nsTArray<nsWeakPtr>& aBrowsers) {
-  for (auto& weakBrowser : aBrowsers) {
-    nsCOMPtr<BrowserParent> browser = do_QueryReferent(weakBrowser);
+static bool RemoveAllBrowsers(nsTArray<WeakPtr<BrowserParent>>& aBrowsers) {
+  for (const auto& weakBrowser : aBrowsers) {
+    RefPtr<BrowserParent> browser = weakBrowser.get();
     if (NS_WARN_IF(!browser)) {
       continue;
     }
@@ -1486,7 +1506,7 @@ nsBaseDragSession::DispatchToDropTargetAndResumeEndDragSession(
 
   nsEventStatus status = nsEventStatus_eIgnore;
   RefPtr<PresShell> ps = delayedDropFrame->PresContext()->GetPresShell();
-  auto event = MakeUnique<WidgetDragEvent>(
+  auto event = std::make_unique<WidgetDragEvent>(
       true, aShouldDrop ? eDrop : eDragExit, aWidget);
   event->mRefPoint = aPt;
   ps->HandleEventWithTarget(event.get(), delayedDropFrame, delayedDropTarget,

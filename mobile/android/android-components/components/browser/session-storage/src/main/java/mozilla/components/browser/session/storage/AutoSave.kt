@@ -15,10 +15,9 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -28,16 +27,34 @@ import kotlinx.coroutines.launch
 import mozilla.components.browser.state.selector.normalTabs
 import mozilla.components.browser.state.selector.selectedTab
 import mozilla.components.browser.state.state.BrowserState
-import mozilla.components.browser.state.state.TabPartition
 import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.lib.state.ext.flow
 import mozilla.components.support.base.log.logger.Logger
 import mozilla.components.support.base.utils.NamedThreadFactory
 
+/**
+ * Automatically saves the current state of a [BrowserStore] to a provided [Storage] backend.
+ *
+ * This class provides configurable triggers for persisting the browser session, such as periodic foreground saving,
+ * saving when the application moves to the background, or saving when specific session changes occur (e.g., tabs
+ * added/removed or navigation completed).
+ *
+ * To prevent excessive disk I/O, it enforces a [minimumIntervalMs] between save operations.
+ *
+ * @property store The [BrowserStore] whose state should be observed and saved.
+ * @property sessionStorage The [Storage] implementation used to persist the state.
+ * @property minimumIntervalMs The minimum time in milliseconds that must pass between save operations.
+ * @property applicationScope The [CoroutineScope] used for performing the save operations on a background thread. This
+ *   scope should outlive individual Activities and survive configuration changes; it is the caller's responsibility to
+ *   cancel it when the application is destroyed.
+ * @property ioDispatcher The [CoroutineDispatcher] used to execute the save operations. Defaults to [Dispatchers.IO].
+ */
 class AutoSave(
     private val store: BrowserStore,
     private val sessionStorage: Storage,
     private val minimumIntervalMs: Long,
+    private val applicationScope: CoroutineScope,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     interface Storage {
         /**
@@ -51,6 +68,8 @@ class AutoSave(
 
     internal val logger = Logger("SessionStorage/AutoSave")
     internal var saveJob: Job? = null
+
+    @VisibleForTesting internal var monitoringJob: Job? = null
     private var lastSaveTimestamp: Long = now()
 
     /**
@@ -84,11 +103,12 @@ class AutoSave(
     }
 
     /** Saves the state automatically when the sessions change, e.g. sessions get added and removed. */
-    fun whenSessionsChange(scope: CoroutineScope = CoroutineScope(Dispatchers.IO)): AutoSave {
-        scope.launch {
-            val monitoring = StateMonitoring(this@AutoSave)
-            monitoring.monitor(store.flow())
-        }
+    fun whenSessionsChange(scope: CoroutineScope = applicationScope): AutoSave {
+        monitoringJob =
+            scope.launch(ioDispatcher) {
+                val monitoring = StateMonitoring(this@AutoSave)
+                monitoring.monitor(store.flow())
+            }
         return this
     }
 
@@ -113,8 +133,8 @@ class AutoSave(
         val delayMs = lastSaveTimestamp + minimumIntervalMs - now
         lastSaveTimestamp = now
 
-        @OptIn(DelicateCoroutinesApi::class)
-        GlobalScope.launch(Dispatchers.IO) {
+        applicationScope
+            .launch(ioDispatcher) {
                 if (delaySave && delayMs > 0) {
                     logger.debug("Delaying save (${delayMs}ms)")
                     delay(delayMs)
@@ -194,7 +214,6 @@ private class StateMonitoring(private val autoSave: AutoSave) {
                     selectedTabId = state.selectedTabId,
                     tabs = state.normalTabs.size,
                     loading = state.selectedTab?.content?.loading,
-                    tabPartitions = state.tabPartitions,
                 )
             }
             .distinctUntilChanged()
@@ -219,9 +238,6 @@ private class StateMonitoring(private val autoSave: AutoSave) {
             } else if (lastObservation!!.loading != observation.loading && observation.loading == false) {
                 autoSave.logger.info("Save: Load finished")
                 true
-            } else if (lastObservation!!.tabPartitions != observation.tabPartitions) {
-                autoSave.logger.info("Save: Tab partitions changed")
-                true
             } else {
                 false
             }
@@ -237,6 +253,5 @@ private class StateMonitoring(private val autoSave: AutoSave) {
         val selectedTabId: String?,
         val tabs: Int,
         val loading: Boolean?,
-        val tabPartitions: Map<String, TabPartition>,
     )
 }

@@ -147,8 +147,9 @@ static inline size_t GetChunkOffsetForPtr(const void* aPtr) {
   return (size_t)(uintptr_t(aPtr) & kChunkSizeMask);
 }
 
-// Maximum number of dirty pages per arena.
-#define DIRTY_MAX_DEFAULT (1U << 8)
+// Default maximum amount of dirty memory per arena. Converted to a page
+// count in malloc_init_hard() once the page size is known.
+#define DIRTY_MAX_DEFAULT_BYTES 1_MiB
 
 enum PoisonType {
   NONE,
@@ -160,7 +161,7 @@ extern size_t opt_dirty_max;
 
 #define OPT_JUNK_DEFAULT false
 #define OPT_ZERO_DEFAULT false
-#ifdef EARLY_BETA_OR_EARLIER
+#ifdef NIGHTLY_BUILD
 #  define OPT_POISON_DEFAULT ALL
 #else
 #  define OPT_POISON_DEFAULT SOME

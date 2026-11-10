@@ -2,9 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_SpeechSynthesisChild_h
-#define mozilla_dom_SpeechSynthesisChild_h
+#ifndef DOM_MEDIA_WEBSPEECH_SYNTH_IPC_SPEECHSYNTHESISCHILD_H_
+#define DOM_MEDIA_WEBSPEECH_SYNTH_IPC_SPEECHSYNTHESISCHILD_H_
 
+#include "mozilla/dom/AudioFocusInterrupt.h"
 #include "mozilla/dom/PSpeechSynthesisChild.h"
 #include "mozilla/dom/PSpeechSynthesisRequestChild.h"
 #include "nsSpeechTask.h"
@@ -103,9 +104,11 @@ class SpeechTaskChild : public nsSpeechTask {
   void SetAudioOutputVolume(float aVolume) override;
 
   // Pause/resume driven by an audio-focus interruption. ResumeFromMediaControl
-  // only resumes a task the interruption itself paused; if the page called
+  // only resumes a task a transient interruption paused; if the page called
   // pause()/resume() in the meantime it has taken over and we leave it alone.
-  void PauseFromMediaControl();
+  // A permanent interruption leaves its pause, and any resume() the page asked
+  // for during the interruption, to the page.
+  void PauseFromMediaControl(AudioSessionInterruptKind aKind);
   void ResumeFromMediaControl();
 
  protected:
@@ -128,4 +131,4 @@ class SpeechTaskChild : public nsSpeechTask {
 
 }  // namespace mozilla::dom
 
-#endif
+#endif  // DOM_MEDIA_WEBSPEECH_SYNTH_IPC_SPEECHSYNTHESISCHILD_H_

@@ -18,6 +18,7 @@
 #include "mozilla/UniquePtr.h"          // for UniquePtr
 #include "mozilla/dom/AbstractRange.h"  // for AbstractRange
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/Range.h"  // for Range
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/StaticRange.h"  // for StaticRange
 #include "mozilla/dom/Text.h"
@@ -38,7 +39,6 @@
 #include "nsISelectionController.h"  // for nsISelectionController, etc
 #include "nsISupports.h"             // for nsISupports
 #include "nsISupportsUtils.h"        // for NS_IF_ADDREF, NS_ADDREF, etc
-#include "nsRange.h"                 // for nsRange
 #include "nsString.h"                // for nsString, nsAutoString
 #include "nscore.h"                  // for nsresult, NS_IMETHODIMP, etc
 
@@ -225,7 +225,7 @@ nsresult TextServicesDocument::SetExtent(const AbstractRange* aAbstractRange) {
 
   // We need to store a copy of aAbstractRange since we don't know where it
   // came from.
-  mExtent = nsRange::Create(aAbstractRange, IgnoreErrors());
+  mExtent = dom::Range::Create(aAbstractRange, IgnoreErrors());
   if (NS_WARN_IF(!mExtent)) {
     return NS_ERROR_FAILURE;
   }
@@ -467,7 +467,7 @@ nsresult TextServicesDocument::LastSelectedBlock(
     return NS_ERROR_FAILURE;
   }
 
-  RefPtr<const nsRange> range;
+  RefPtr<const dom::Range> range;
   nsCOMPtr<nsINode> parent;
 
   if (selection->IsCollapsed()) {
@@ -1192,9 +1192,9 @@ nsresult TextServicesDocument::OffsetEntryArray::DidInsertText(
     } else {
       // Insert an inserted text offset entry before the current
       // entry!
-      UniquePtr<OffsetEntry> newInsertedTextEntry =
-          MakeUnique<OffsetEntry>(entry->mTextNode, entry->mOffsetInTextInBlock,
-                                  aInsertedString.Length());
+      auto newInsertedTextEntry = std::make_unique<OffsetEntry>(
+          entry->mTextNode, entry->mOffsetInTextInBlock,
+          aInsertedString.Length());
       newInsertedTextEntry->mIsInsertedText = true;
       newInsertedTextEntry->mOffsetInTextNode = entry->mOffsetInTextNode;
       // XXX(Bug 1631371) Check if this should use a fallible operation as it
@@ -1227,7 +1227,7 @@ nsresult TextServicesDocument::OffsetEntryArray::DidInsertText(
     if (!insertedTextEntry) {
       // We didn't find an inserted text offset entry, so
       // create one.
-      UniquePtr<OffsetEntry> newInsertedTextEntry = MakeUnique<OffsetEntry>(
+      auto newInsertedTextEntry = std::make_unique<OffsetEntry>(
           entry->mTextNode, mSelection.StartOffsetInTextInBlock(), 0);
       newInsertedTextEntry->mOffsetInTextNode = entry->EndOffsetInTextNode();
       newInsertedTextEntry->mIsInsertedText = true;
@@ -1277,9 +1277,9 @@ nsresult TextServicesDocument::OffsetEntryArray::DidInsertText(
     // pretended earlier.
     UniquePtr<OffsetEntry>& insertedTextEntry = *InsertElementAt(
         mSelection.StartIndex() + 1,
-        MakeUnique<OffsetEntry>(entry->mTextNode,
-                                mSelection.StartOffsetInTextInBlock(),
-                                aInsertedString.Length()));
+        std::make_unique<OffsetEntry>(entry->mTextNode,
+                                      mSelection.StartOffsetInTextInBlock(),
+                                      aInsertedString.Length()));
     LockOffsetEntryArrayLengthInDebugBuild(observer, *this);
     insertedTextEntry->mIsInsertedText = true;
     insertedTextEntry->mOffsetInTextNode = entry->EndOffsetInTextNode();
@@ -1460,20 +1460,21 @@ Element* TextServicesDocument::GetDocumentContentRootNode() const {
   return mDocument->GetDocumentElement();
 }
 
-already_AddRefed<nsRange> TextServicesDocument::CreateDocumentContentRange() {
+already_AddRefed<dom::Range>
+TextServicesDocument::CreateDocumentContentRange() {
   nsCOMPtr<nsINode> node = GetDocumentContentRootNode();
   if (NS_WARN_IF(!node)) {
     return nullptr;
   }
 
-  RefPtr<nsRange> range = nsRange::Create(node);
+  RefPtr<dom::Range> range = dom::Range::Create(node);
   IgnoredErrorResult ignoredError;
   range->SelectNodeContents(*node, ignoredError);
   NS_WARNING_ASSERTION(!ignoredError.Failed(), "SelectNodeContents() failed");
   return range.forget();
 }
 
-already_AddRefed<nsRange>
+already_AddRefed<dom::Range>
 TextServicesDocument::CreateDocumentContentRootToNodeOffsetRange(
     nsINode* aParent, uint32_t aOffset, bool aToStart) {
   if (NS_WARN_IF(!aParent)) {
@@ -1505,10 +1506,10 @@ TextServicesDocument::CreateDocumentContentRootToNodeOffsetRange(
     endOffset = endNode ? endNode->GetChildCount() : 0;
   }
 
-  RefPtr<nsRange> range = nsRange::Create(startNode, startOffset, endNode,
-                                          endOffset, IgnoreErrors());
+  RefPtr<dom::Range> range = dom::Range::Create(startNode, startOffset, endNode,
+                                                endOffset, IgnoreErrors());
   NS_WARNING_ASSERTION(range,
-                       "nsRange::Create() failed to create new valid range");
+                       "Range::Create() failed to create new valid range");
   return range.forget();
 }
 
@@ -1516,7 +1517,7 @@ nsresult TextServicesDocument::CreateDocumentContentIterator(
     FilteredContentIterator** aFilteredIter) {
   NS_ENSURE_TRUE(aFilteredIter, NS_ERROR_NULL_POINTER);
 
-  RefPtr<nsRange> range = CreateDocumentContentRange();
+  RefPtr<dom::Range> range = CreateDocumentContentRange();
   if (NS_WARN_IF(!range)) {
     *aFilteredIter = nullptr;
     return NS_ERROR_FAILURE;
@@ -1829,7 +1830,7 @@ nsresult TextServicesDocument::GetCollapsedSelection(
       tableCount > 1 ? mOffsetTable[tableCount - 1] : eStart;
   LockOffsetEntryArrayLengthInDebugBuild(observer, mOffsetTable);
 
-  const nsRange* const selectionRange = selection->GetRangeAt(0);
+  const dom::Range* const selectionRange = selection->GetRangeAt(0);
   NS_ENSURE_STATE(selectionRange);
 
   const Maybe<int32_t> e1s1 =
@@ -1881,8 +1882,8 @@ nsresult TextServicesDocument::GetCollapsedSelection(
   // child of this non-text node. Then look for the closest text
   // node.
 
-  const RefPtr<const nsRange> range =
-      nsRange::Create(eStart->StartRef(), eEnd->EndRef(), IgnoreErrors());
+  const RefPtr<const dom::Range> range =
+      dom::Range::Create(eStart->StartRef(), eEnd->EndRef(), IgnoreErrors());
   if (NS_WARN_IF(!range)) {
     return NS_ERROR_FAILURE;
   }
@@ -2017,7 +2018,7 @@ nsresult TextServicesDocument::GetUncollapsedSelection(
   // the current text block.
   Maybe<int32_t> e1s2;
   Maybe<int32_t> e2s1;
-  const nsRange* selectionRange = nullptr;
+  const dom::Range* selectionRange = nullptr;
   for (const uint32_t i : IntegerRange(rangeCount)) {
     MOZ_ASSERT(selection->RangeCount() == rangeCount);
     selectionRange = selection->GetRangeAt(i);
@@ -2113,8 +2114,8 @@ nsresult TextServicesDocument::GetUncollapsedSelection(
     o2 = selectionRange->EndOffset();
   }
 
-  const RefPtr<const nsRange> range =
-      nsRange::Create(p1, o1, p2, o2, IgnoreErrors());
+  const RefPtr<const dom::Range> range =
+      dom::Range::Create(p1, o1, p2, o2, IgnoreErrors());
   if (NS_WARN_IF(!range)) {
     return NS_ERROR_FAILURE;
   }
@@ -2448,7 +2449,7 @@ nsresult TextServicesDocument::GetFirstTextNodeInNextBlock(
 Result<TextServicesDocument::IteratorStatus, nsresult>
 TextServicesDocument::OffsetEntryArray::Init(
     FilteredContentIterator& aFilteredIter, IteratorStatus aIteratorStatus,
-    nsRange* aIterRange, nsAString* aAllTextInBlock /* = nullptr */) {
+    dom::Range* aIterRange, nsAString* aAllTextInBlock /* = nullptr */) {
   Clear();
 
   if (aAllTextInBlock) {
@@ -2513,8 +2514,9 @@ TextServicesDocument::OffsetEntryArray::Init(
 
         // Add an entry for this text node into the offset table:
 
-        UniquePtr<OffsetEntry>& entry = *AppendElement(
-            MakeUnique<OffsetEntry>(*content->AsText(), offset, str.Length()));
+        UniquePtr<OffsetEntry>& entry =
+            *AppendElement(std::make_unique<OffsetEntry>(*content->AsText(),
+                                                         offset, str.Length()));
         LockOffsetEntryArrayLengthInDebugBuild(observer, *this);
 
         // If one or both of the endpoints of the iteration range
@@ -2624,9 +2626,9 @@ nsresult TextServicesDocument::OffsetEntryArray::SplitElementAt(
   // pretended earlier.
   UniquePtr<OffsetEntry>& rightEntry = *InsertElementAt(
       aIndex + 1,
-      MakeUnique<OffsetEntry>(leftEntry->mTextNode,
-                              leftEntry->mOffsetInTextInBlock + oldLength,
-                              aOffsetInTextNode));
+      std::make_unique<OffsetEntry>(leftEntry->mTextNode,
+                                    leftEntry->mOffsetInTextInBlock + oldLength,
+                                    aOffsetInTextNode));
   LockOffsetEntryArrayLengthInDebugBuild(observer, *this);
   leftEntry->mLength = oldLength;
   rightEntry->mOffsetInTextNode = leftEntry->mOffsetInTextNode + oldLength;
@@ -2776,7 +2778,7 @@ TextServicesDocument::WillDeleteText(CharacterData* aTextNode, int32_t aOffset,
 
 NS_IMETHODIMP
 TextServicesDocument::WillDeleteRanges(
-    const nsTArray<RefPtr<nsRange>>& aRangesToDelete) {
+    const nsTArray<RefPtr<dom::Range>>& aRangesToDelete) {
   return NS_OK;
 }
 

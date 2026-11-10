@@ -2,7 +2,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-import copy
 import hashlib
 import re
 from typing import Literal, Optional
@@ -111,25 +110,6 @@ def setup_talos(config, tasks):
 
         if config.params.get("project", None):
             extra_options.append("--project=%s" % config.params["project"])
-
-        if "pdfpaint" in task["try-name"]:
-            max_chunks = 10
-            for chunk in range(1, max_chunks + 1):
-                new_task = copy.deepcopy(task)
-                new_task["mozharness"]["extra-options"].append(
-                    f"--pdfPaintChunk={chunk}"
-                )
-                new_task["test-name"] = task["test-name"].replace(
-                    "pdfpaint", f"pdfpaint-{chunk}"
-                )
-                new_task["try-name"] = task["try-name"].replace(
-                    "pdfpaint", f"pdfpaint-{chunk}"
-                )
-                new_task["treeherder-symbol"] = task["treeherder-symbol"].replace(
-                    "pdfpaint", f"pdfpaint-{chunk}"
-                )
-                yield new_task
-            continue
 
         yield task
 
@@ -242,6 +222,8 @@ def handle_keyed_by(config, tasks):
         "virtualization",
         "fetches.fetch",
         "fetches.toolchain",
+        "fetches.openh264-plugin",
+        "dependencies.openh264-plugin",
         "target",
         "webrender-run-on-projects",
         "mozharness.extra-options",
@@ -258,6 +240,19 @@ def handle_keyed_by(config, tasks):
                 enforce_single_match=False,
                 project=config.params["project"],
                 variant=task["attributes"].get("unittest_variant"),
+            )
+        yield task
+
+
+@transforms.add
+def add_dmg_tools(config, tasks):
+    """Let mozinstall extract the DMG without mounting it."""
+    for task in tasks:
+        test_platform = task["test-platform"]
+        if test_platform.startswith("macosx"):
+            intel = test_platform.startswith(("macosx1015", "macosx1470"))
+            task.setdefault("fetches", {}).setdefault("toolchain", []).append(
+                "macosx64-dmg" if intel else "macosx64-aarch64-dmg"
             )
         yield task
 
@@ -362,10 +357,15 @@ def setup_browsertime(config, tasks):
                     "macosx64-geckodriver",
                     "macosx64-aarch64-node",
                 ],
+                "macosx2700.*": [
+                    "browsertime",
+                    "macosx64-geckodriver",
+                    "macosx64-aarch64-node",
+                ],
                 "windows.*aarch64.*": [
                     "browsertime",
                     "win32-geckodriver",
-                    "win32-node",
+                    "win64-aarch64-node",
                 ],
                 "windows.*-64.*": ["browsertime", "win64-geckodriver", "win64-node"],
             },
@@ -383,6 +383,7 @@ def setup_browsertime(config, tasks):
                 "macosx1470.*": ["mac64-ffmpeg-7.1"],
                 "macosx1400.*": ["mac64-ffmpeg-7.1"],
                 "macosx1500.*": ["mac64-ffmpeg-7.1"],
+                "macosx2700.*": ["mac64-ffmpeg-7.1"],
                 "windows.*aarch64.*": ["win64-ffmpeg-7.1"],
                 "windows.*-64.*": ["win64-ffmpeg-7.1"],
             },
@@ -434,10 +435,12 @@ def setup_browsertime(config, tasks):
             "android-(?!em-14-arm64).*": ["linux64-cft-cd-canary"],
         }
 
+        # Stable, Beta and backup chromedrivers are extracted into directories prefixed
+        # with their major version, which raptor fills in from the Chrome being tested.
         cd_extracted_name = {
-            "windows": "{}chromedriver.exe",
-            "mac": "{}chromedriver",
-            "default": "{}chromedriver",
+            "windows": "{}cft-chromedriver-win64/chromedriver.exe",
+            "mac": "{}cft-chromedriver-mac/chromedriver",
+            "default": "{}cft-chromedriver-linux/chromedriver",
         }
 
         if "--app=chrome" in extra_options or "--app=chrome-m" in extra_options:
@@ -581,16 +584,6 @@ def enable_code_coverage(config, tasks):
                 task["run-on-projects"] = []
                 continue
 
-            # Skip this transform for android code coverage builds.
-            if "android" in task["build-platform"]:
-                task.setdefault("fetches", {}).setdefault("toolchain", []).append(
-                    "linux64-grcov"
-                )
-                task["mozharness"].setdefault("extra-options", []).append(
-                    "--java-code-coverage"
-                )
-                yield task
-                continue
             task["mozharness"].setdefault("extra-options", []).append("--code-coverage")
             task["instance-size"] = "xlarge-noscratch"
             if "jittest" in task["test-name"]:
@@ -612,13 +605,15 @@ def enable_code_coverage(config, tasks):
             task["optimization"] = None
 
             # Add a toolchain and a fetch task for the grcov binary.
-            if any(p in task["build-platform"] for p in ("linux", "osx", "win")):
+            if any(
+                p in task["build-platform"] for p in ("linux", "osx", "win", "android")
+            ):
                 task.setdefault("fetches", {})
                 task["fetches"].setdefault("fetch", [])
                 task["fetches"].setdefault("toolchain", [])
                 task["fetches"].setdefault("build", [])
 
-            if "linux" in task["build-platform"]:
+            if any(p in task["build-platform"] for p in ("linux", "android")):
                 task["fetches"]["toolchain"].append("linux64-grcov")
             elif "osx" in task["build-platform"]:
                 task["fetches"]["toolchain"].append("macosx64-grcov")
@@ -661,6 +656,11 @@ def handle_tier(config, tasks):
     """Set the tier based on policy for all test descriptions that do not
     specify a tier otherwise."""
     for task in tasks:
+        if "-appservices/" in task["test-platform"]:
+            task["tier"] = 3
+            yield task
+            continue
+
         if "tier" in task:
             resolve_keyed_by(
                 task,
@@ -723,7 +723,6 @@ def handle_tier(config, tasks):
                 "android-em-14-x86_64-shippable-lite/opt",
                 "android-em-14-x86_64-lite/opt",
                 "android-em-14-x86_64/debug",
-                "android-em-14-x86_64/debug-isolated-process",
                 "android-em-14-x86-shippable/opt",
                 "android-em-14-x86/opt",
             ]:
@@ -759,9 +758,9 @@ def apply_raptor_tier_optimization(config, tasks):
             continue
 
         if not task["test-platform"].startswith("android-hw"):
-            task["optimization"] = {"skip-unless-expanded": None}
+            task["optimization"] = {"perf-cadence-expanded": None}
             if task["tier"] > 1:
-                task["optimization"] = {"skip-unless-backstop": None}
+                task["optimization"] = {"perf-cadence-backstop": None}
 
         if task["attributes"].get("unittest_variant"):
             task["tier"] = max(task["tier"], 2)
@@ -805,34 +804,6 @@ def disable_try_only_platforms(config, tasks):
         yield task
 
 
-@transforms.add
-def ensure_spi_disabled_on_all_but_spi(config, tasks):
-    for task in tasks:
-        variant = task["attributes"].get("unittest_variant") or ""
-        has_no_setpref = (
-            "gtest",
-            "cppunit",
-            "jittest",
-            "junit",
-            "raptor",
-            "reftest",
-            "web-platform-tests",
-        )
-
-        if (
-            all(s not in task["suite"] for s in has_no_setpref)
-            and "socketprocess" not in variant
-        ):
-            task["mozharness"]["extra-options"].append(
-                "--setpref=media.peerconnection.mtransport_process=false"
-            )
-            task["mozharness"]["extra-options"].append(
-                "--setpref=network.process.enabled=false"
-            )
-
-        yield task
-
-
 class PlatformOSSchema(Schema, kw_only=True):
     """Platform OS configuration schema."""
 
@@ -854,7 +825,7 @@ class PlatformSchema(Schema, kw_only=True):
 class BuildSchema(Schema, kw_only=True, forbid_unknown_fields=False):
     """Build configuration schema."""
 
-    type: Literal["opt", "debug", "debug-isolated-process"]
+    type: Literal["opt", "debug"]
     asan: Optional[bool] = None
     ccov: Optional[bool] = None
     clang_trunk: Optional[bool] = None
@@ -1124,23 +1095,28 @@ def add_gecko_profile_symbolication_deps(config, tasks):
 
     try_task_config = config.params.get("try_task_config", {})
     gecko_profile_from_try = try_task_config.get("gecko-profile", False)
-    startup_profile = try_task_config.get("env", {}).get("MOZ_PROFILER_STARTUP") == "1"
 
     for task in tasks:
         extra_options = task.get("mozharness", {}).get("extra-options", [])
-        has_gecko_profile_option = any(
-            "--gecko-profile" in option for option in extra_options
+        has_profiling_option = any(
+            "--gecko-profile" in option or "--extra-profiler-run" in option
+            for option in extra_options
         )
-        gecko_profile = gecko_profile_from_try or has_gecko_profile_option
+        gecko_profile = gecko_profile_from_try or has_profiling_option
 
-        if (gecko_profile and task["suite"] in ["talos", "raptor"]) or (
-            startup_profile and "mochitest" in task["suite"]
-        ):
+        if gecko_profile and task["suite"] in ["talos", "raptor"]:
             fetches = task.setdefault("fetches", {})
             fetch_toolchains = fetches.setdefault("toolchain", [])
 
             if "profiler-node-tools" not in fetch_toolchains:
                 fetch_toolchains.append("profiler-node-tools")
+
+            # Unless we're running an "external browser" (e.g. Chrome), fetch Firefox symbols.
+            if not is_external_browser(task["try-name"]):
+                symbols_zip = "target.crashreporter-symbols.zip"
+                fetch_builds = fetches.setdefault("build", [])
+                if not any(f.get("artifact") == symbols_zip for f in fetch_builds):
+                    fetch_builds.append({"artifact": symbols_zip, "extract": False})
 
             test_platform = task["test-platform"]
 
@@ -1171,16 +1147,6 @@ def add_gecko_profile_symbolication_deps(config, tasks):
                 if node_toolchain not in fetch_toolchains:
                     fetch_toolchains.append(node_toolchain)
 
-        yield task
-
-
-@transforms.add
-def set_tag(config, tasks):
-    """Set test for a specific tag."""
-    tag = None
-    for task in tasks:
-        if tag:
-            task["mozharness"]["extra-options"].extend(["--tag", tag])
         yield task
 
 
@@ -1252,4 +1218,107 @@ def set_webgpu_ignore_blocklist(config, tasks):
             extra_options = task["mozharness"].setdefault("extra-options", [])
             extra_options.append("--setpref=gfx.webgpu.ignore-blocklist=true")
 
+        yield task
+
+
+@transforms.add
+def add_symbols_to_xpcshell_mochitest(config, tests):
+    for test in tests:
+        name = test.get("test-name", "").lower()
+        if "xpcshell" in name or "mochitest" in name:
+            test_platform = test.get("test-platform", "")
+            if not any(san in test_platform for san in ("asan", "tsan")):
+                fetches = test.setdefault("fetches", {})
+                fetches.setdefault("build", []).append({
+                    "artifact": "target.crashreporter-symbols.zip",
+                    "extract": False,
+                })
+        yield test
+
+
+SYMBOLS_ARTIFACTS = (
+    "target.crashreporter-symbols.zip",
+    "target.crashreporter-symbols-gtest.zip",
+)
+
+
+def get_single_arch_build_label(config, task):
+    """Return the label of the build for the test platform's architecture, if
+    the task's build is a macOS universal build that unifies two single-arch
+    builds. Return None otherwise."""
+    build_label = task.get("dependencies", {}).get("build", task["build-label"])
+    build_task = config.kind_dependencies_tasks.get(build_label)
+    if not build_task:
+        return None
+    builds_by_arch = {}
+    for dep_label in build_task.dependencies.values():
+        dep = config.kind_dependencies_tasks.get(dep_label)
+        if not dep or dep.kind != "build":
+            continue
+        build_platform = dep.attributes.get("build_platform", "")
+        if "aarch64" in build_platform:
+            builds_by_arch["aarch64"] = dep_label
+        elif "-x64-" in build_platform:
+            builds_by_arch["x86_64"] = dep_label
+    if len(builds_by_arch) != 2:
+        return None
+    arch = "aarch64" if "aarch64" in task["test-platform"] else "x86_64"
+    return builds_by_arch[arch]
+
+
+@transforms.add
+def fetch_single_arch_symbols(config, tests):
+    """The symbols of a macOS universal build contain the symbols for both
+    architectures. A test only runs one of them, so fetch the symbols of the
+    matching single-arch build instead, which are half the size."""
+    for test in tests:
+        build_fetches = test.get("fetches", {}).get("build", [])
+        symbols_fetches = [
+            f for f in build_fetches if f.get("artifact") in SYMBOLS_ARTIFACTS
+        ]
+        if symbols_fetches and "macosx" in test["test-platform"]:
+            label = get_single_arch_build_label(config, test)
+            if label:
+                build_fetches = [f for f in build_fetches if f not in symbols_fetches]
+                if build_fetches:
+                    test["fetches"]["build"] = build_fetches
+                else:
+                    del test["fetches"]["build"]
+                test["fetches"]["build-symbols"] = symbols_fetches
+                test.setdefault("dependencies", {})["build-symbols"] = label
+        yield test
+
+
+@transforms.add
+def resolve_openh264_version(config, tasks):
+    """Substitute the OpenH264 version into openh264-plugin fetch paths.
+
+    The version lives on the fetch-openh264-source task, so the artifact
+    names do not have to be updated by hand when it changes.
+    """
+    version = None
+    for task in tasks:
+        fetches = task.get("fetches", {}).get("openh264-plugin")
+        if fetches:
+            if version is None:
+                dep = config.kind_dependencies_tasks.get("fetch-openh264-source")
+                if not dep:
+                    raise Exception("fetch-openh264-source not in kind dependencies")
+                version = dep.attributes["openh264_version"]
+            for fetch in fetches:
+                for key in ("artifact", "dest"):
+                    if key in fetch:
+                        fetch[key] = fetch[key].format(openh264_version=version)
+        yield task
+
+
+@transforms.add
+def set_perfherder_extra_options(config, tasks):
+    for task in tasks:
+        options = [task["attributes"]["unittest_suite"]]
+        variant = task["attributes"].get("unittest_variant")
+        if variant:
+            options.append(variant)
+        env = task.setdefault("worker", {}).setdefault("env", {})
+        env.setdefault("PERFHERDER_EXTRA_OPTIONS", " ".join(options))
         yield task

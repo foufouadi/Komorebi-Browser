@@ -13,9 +13,12 @@ const AUTH_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
-  LoginBreaches: "resource:///modules/LoginBreaches.sys.mjs",
-  MigrationUtils: "resource:///modules/MigrationUtils.sys.mjs",
+  LoginBreaches:
+    "moz-src:///browser/components/aboutlogins/LoginBreaches.sys.mjs",
+  MigrationUtils:
+    "moz-src:///browser/components/migration/MigrationUtils.sys.mjs",
   UIState: "resource://services-sync/UIState.sys.mjs",
+  Weave: "resource://services-sync/main.sys.mjs",
 });
 
 XPCOMUtils.defineLazyPreferenceGetter(
@@ -332,6 +335,9 @@ export class LoginDataSource extends DataSourceBase {
         },
         executeReveal: {
           value() {
+            if (!Services.policies.isAllowed("passwordReveal")) {
+              return;
+            }
             this.concealed = false;
             clearTimeout(this.concealPasswordTimeout);
             this.concealPasswordTimeout = setTimeout(
@@ -509,21 +515,39 @@ export class LoginDataSource extends DataSourceBase {
     return state.syncEnabled && lazy.PASSWORD_SYNC_ENABLED;
   }
 
+  #isPerDeviceSyncEnabled() {
+    return !!(
+      this.#isPasswordSyncEnabled() && lazy.Weave.perDeviceEngineChoices
+    );
+  }
+
   async #removeAllPasswords() {
     const { total } = this.#header.value;
-    const messageId = this.#isPasswordSyncEnabled()
-      ? "contextual-manager-passwords-remove-all-message-sync"
-      : "contextual-manager-passwords-remove-all-message";
+    const passwordSyncEnabled = this.#isPasswordSyncEnabled();
+    const perDeviceSyncEnabled = this.#isPerDeviceSyncEnabled();
+    const titleId = perDeviceSyncEnabled
+      ? "contextual-manager-passwords-delete-all-title"
+      : "contextual-manager-passwords-remove-all-title";
+    let messageId = "contextual-manager-passwords-remove-all-message";
+    if (perDeviceSyncEnabled) {
+      messageId = "contextual-manager-passwords-delete-all-message-sync";
+    } else if (passwordSyncEnabled) {
+      messageId = "contextual-manager-passwords-remove-all-message-sync";
+    }
 
     const { confirmed, checked } = await this.#showWindowPrompt(
-      { id: "contextual-manager-passwords-remove-all-title", args: { total } },
+      { id: titleId, args: { total } },
       { id: messageId, args: { total } },
       {
-        id: "contextual-manager-passwords-remove-all-confirm-button",
+        id: perDeviceSyncEnabled
+          ? "contextual-manager-passwords-delete-all-confirm-button"
+          : "contextual-manager-passwords-remove-all-confirm-button",
         args: { total },
       },
       {
-        id: "contextual-manager-passwords-remove-all-passwords-checkbox",
+        id: perDeviceSyncEnabled
+          ? "contextual-manager-passwords-delete-all-passwords-checkbox"
+          : "contextual-manager-passwords-remove-all-passwords-checkbox",
         args: { total },
       }
     );
@@ -570,11 +594,7 @@ export class LoginDataSource extends DataSourceBase {
       reason
     );
 
-    let { name, extra = {}, value = null } = telemetryEvent;
-    if (value) {
-      extra.value = value;
-    }
-    Glean.pwmgr[name].record(extra);
+    LoginHelper.recordReauthTelemetryEvent(telemetryEvent);
 
     if (!isAuthorized) {
       return;
@@ -899,6 +919,7 @@ export class LoginDataSource extends DataSourceBase {
 
     this.#header.value.total = logins.length;
     this.#header.value.alerts = loginsWithAlerts.length;
+    this.#header.value.perDeviceSyncEnabled = this.#isPerDeviceSyncEnabled();
     this.afterReloadingDataSource();
   }
 

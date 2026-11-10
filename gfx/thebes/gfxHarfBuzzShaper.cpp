@@ -179,8 +179,6 @@ hb_codepoint_t gfxHarfBuzzShaper::GetVariationGlyph(
     return mFont->GetGlyph(unicode, variation_selector);
   }
 
-  NS_ASSERTION(mFont->GetFontEntry()->HasCmapTable(),
-               "we cannot be using this font!");
   NS_ASSERTION(mCmapTable && (mCmapFormat > 0) && (mSubtableOffset > 0),
                "cmap data not correctly set up, expect disaster");
 
@@ -431,7 +429,10 @@ void gfxHarfBuzzShaper::GetGlyphHAdvances(unsigned int count,
 
 hb_position_t gfxHarfBuzzShaper::GetGlyphVAdvance(hb_codepoint_t glyph) {
   if (!mVerticalInitialized) {
-    InitializeVertical();
+    RecursiveMutexAutoLock lock(mMutex);
+    if (!mVerticalInitialized) {  // re-check in case we're racing another call
+      InitializeVertical();
+    }
   }
 
   if (!mVmtxTable) {
@@ -1215,10 +1216,10 @@ bool gfxHarfBuzzShaper::Initialize() {
     mNumGlyphs = uint16_t(maxp->numGlyphs);
   }
 
-  mCmapCache = MakeUnique<CmapCache>();
+  mCmapCache = std::make_unique<CmapCache>();
 
   if (mUseFontGlyphWidths) {
-    mWidthCache = MakeUnique<WidthCache>();
+    mWidthCache = std::make_unique<WidthCache>();
   } else {
     // If font doesn't implement GetGlyphWidth, we will be reading
     // the metrics table directly, so make sure we can load it.
@@ -1268,8 +1269,8 @@ hb_font_t* gfxHarfBuzzShaper::CreateHBFont(gfxFont* aFont,
     // gfxFontVariation, so we can simply cast here.
     static_assert(
         sizeof(gfxFontVariation) == sizeof(hb_variation_t) &&
-            offsetof(gfxFontVariation, mTag) == offsetof(hb_variation_t, tag) &&
-            offsetof(gfxFontVariation, mValue) ==
+            offsetof(gfxFontVariation, tag) == offsetof(hb_variation_t, tag) &&
+            offsetof(gfxFontVariation, value) ==
                 offsetof(hb_variation_t, value),
         "Gecko vs HarfBuzz struct mismatch!");
     auto hbVars = reinterpret_cast<const hb_variation_t*>(vars.Elements());
@@ -1315,8 +1316,7 @@ bool gfxHarfBuzzShaper::LoadHmtxTable() {
 void gfxHarfBuzzShaper::InitializeVertical() {
   // We only do this once. If we don't have a mHmtxTable after that,
   // we'll be making up fallback metrics.
-  RecursiveMutexAutoLock lock(mMutex);
-
+  // The caller must be already holding mMutex.
   mVerticalInitialized = true;
 
   if (!mHmtxTable) {
@@ -1377,30 +1377,14 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
                                   nsAtom* aLanguage, bool aVertical,
                                   RoundingFlags aRounding,
                                   gfxShapedText* aShapedText) {
-  // gfxFont (and hence this shaper) may be shared across threads via the
-  // global font cache; serialize ShapeText so that mBuffer and other mutable
-  // per-call state cannot be touched concurrently.
-  RecursiveMutexAutoLock lock(mMutex);
-
-  mUseVerticalPresentationForms = false;
-  if (aVertical) {
-    if (!mVerticalInitialized) {
-      InitializeVertical();
-    }
-    if (!mFont->GetFontEntry()->SupportsOpenTypeFeature(
-            aScript, HB_TAG('v', 'e', 'r', 't'))) {
-      mUseVerticalPresentationForms = true;
-    }
-  }
-
   const gfxFontStyle* style = mFont->GetStyle();
 
   // determine whether petite-caps falls back to small-caps
   bool addSmallCaps = false;
-  if (style->variantCaps != NS_FONT_VARIANT_CAPS_NORMAL) {
+  if (style->variantCaps != StyleFontVariantCaps::Normal) {
     switch (style->variantCaps) {
-      case NS_FONT_VARIANT_CAPS_ALL_PETITE_CAPS:
-      case NS_FONT_VARIANT_CAPS_PETITE_CAPS:
+      case StyleFontVariantCaps::AllPetiteCaps:
+      case StyleFontVariantCaps::PetiteCaps:
         bool synLower, synUpper;
         mFont->SupportsVariantCaps(aScript, style->variantCaps, addSmallCaps,
                                    synLower, synUpper);
@@ -1450,6 +1434,21 @@ bool gfxHarfBuzzShaper::ShapeText(const char16_t* aText, uint32_t aOffset,
                                               HB_FEATURE_GLOBAL_END});
         }
       }
+    }
+  }
+
+  // gfxFont (and hence this shaper) may be shared across threads via the
+  // global font cache; serialize shaping so that mBuffer and other mutable
+  // per-call state cannot be touched concurrently.
+  RecursiveMutexAutoLock lock(mMutex);
+
+  mUseVerticalPresentationForms = false;
+  if (aVertical) {
+    if (!mVerticalInitialized) {
+      InitializeVertical();
+    }
+    if (!entry->SupportsOpenTypeFeature(aScript, HB_TAG('v', 'e', 'r', 't'))) {
+      mUseVerticalPresentationForms = true;
     }
   }
 

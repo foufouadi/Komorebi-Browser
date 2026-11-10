@@ -12,7 +12,6 @@ task-defaults:
         env:
             FETCH: uv/crates/uv
     run:
-        clone-with: hg
         script: build-rust-based-toolchain.sh
         toolchain-artifact: public/build/uv.tar.zst
     fetches:
@@ -20,54 +19,63 @@ task-defaults:
             - uv
         toolchain:
             - linux64-clang-toolchain
-            - linux64-rust-cross
 
 linux64-uv:
     treeherder:
         symbol: TL(uv)
     run:
-        clone-with: hg
         arguments: ['x86_64-unknown-linux-gnu']
     fetches:
         toolchain:
+            - linux64-rust-1.97
             - sysroot-x86_64-linux-gnu
+
+linux64-aarch64-uv:
+    treeherder:
+        symbol: TLA64(uv)
+    run:
+        arguments: ['aarch64-unknown-linux-gnu']
+    fetches:
+        toolchain:
+            - linux64-rust-1.97
+            - sysroot-aarch64-linux-gnu
 
 macosx64-uv:
     treeherder:
         symbol: TM(uv)
     run:
-        clone-with: hg
         arguments: ['x86_64-apple-darwin']
     fetches:
         toolchain:
+            - linux64-rust-macos-1.97
             - macosx64-sdk-toolchain
 
 macosx64-aarch64-uv:
     treeherder:
         symbol: TMA64(uv)
     run:
-        clone-with: hg
         arguments: ['aarch64-apple-darwin']
     fetches:
         toolchain:
+            - linux64-rust-macos-1.97
             - macosx64-sdk-toolchain
 
 win64-uv:
     treeherder:
         symbol: TW64(uv)
     run:
-        clone-with: hg
         arguments: ['x86_64-pc-windows-msvc']
     fetches:
         toolchain:
+            - linux64-rust-windows-1.97
             - vs-toolchain
 
 win64-aarch64-uv:
     treeherder:
         symbol: TWA64(uv)
     run:
-        clone-with: hg
         arguments: ['aarch64-pc-windows-msvc']
     fetches:
         toolchain:
+            - linux64-rust-windows-1.97
             - vs-toolchain

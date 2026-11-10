@@ -31,8 +31,9 @@ class ActivityTest {
         val window = activity.window
 
         // Turn off Keep Screen on Flag if it is on
-        if (shadowOf(window).getFlag(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON))
+        if (shadowOf(window).getFlag(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)) {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
 
         // Make sure that System UI flags are not set before the test
         val flags =

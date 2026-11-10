@@ -52,6 +52,7 @@ pub enum Metric {
     LabeledCounter(LabeledCounterMetric),
     Distribution(DistributionMetric),
     LabeledDistribution(LabeledDistributionMetric),
+    Events(EventsMetric),
 }
 
 /// Glean counter
@@ -68,6 +69,12 @@ pub struct CounterMetric {
     pub metric: &'static str,
     // Which applications report this metric
     pub applications: Vec<Application>,
+    pub options: CounterOptions,
+}
+
+#[derive(Default)]
+pub struct CounterOptions {
+    pub unique_user_counts: bool,
 }
 
 /// Glean labeled counter
@@ -84,6 +91,15 @@ pub struct LabeledCounterMetric {
     pub metric: &'static str,
     // Which applications report this metric
     pub applications: Vec<Application>,
+    pub options: LabeledCounterOptions,
+}
+
+#[derive(Default)]
+pub struct LabeledCounterOptions {
+    pub unique_user_counts: bool,
+    // List of all possible labels.  Listing these can result in a nicer color scheme, especially
+    // when `unique_user_counts` is set.
+    pub labels: Option<Vec<String>>,
 }
 
 /// Glean timing/memory distribution
@@ -154,6 +170,28 @@ pub enum DistributionMetricKind {
     Custom,
 }
 
+/// Track multiple Glean events together
+///
+/// This will create time-series panels with event counts for each event
+pub struct EventsMetric {
+    /// Name to display on the dashboard
+    pub display_name: &'static str,
+    /// Name of the ping ("metrics" by default)
+    pub ping: &'static str,
+    /// Category name (top-level key in metrics.yaml)
+    pub category: &'static str,
+    /// Metric name (key for the metric)
+    pub metrics: Vec<&'static str>,
+    // Which applications report this metric
+    pub applications: Vec<Application>,
+    pub options: EventsOptions,
+}
+
+#[derive(Default)]
+pub struct EventsOptions {
+    pub unique_user_counts: bool,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Application {
     Android,
@@ -179,6 +217,13 @@ impl TeamConfig {
 
     pub fn team_slug(&self) -> String {
         slug(self.team_name)
+    }
+
+    /// Slug for the extra dashboard
+    pub fn details_slug(&self) -> String {
+        // Every once in a while uploading the JSON fails for me (BDK).
+        // To hack around this, I bump the number at the end there.
+        format!("{}-sync-details2", self.team_slug())
     }
 }
 
@@ -261,5 +306,11 @@ impl From<DistributionMetric> for Metric {
 impl From<LabeledDistributionMetric> for Metric {
     fn from(m: LabeledDistributionMetric) -> Self {
         Self::LabeledDistribution(m)
+    }
+}
+
+impl From<EventsMetric> for Metric {
+    fn from(m: EventsMetric) -> Self {
+        Self::Events(m)
     }
 }

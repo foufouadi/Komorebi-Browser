@@ -8,6 +8,7 @@
 // Keep others in (case-insensitive) order:
 #include "AutoReferenceChainGuard.h"
 #include "ImgDrawResult.h"
+#include "gfx2DGlue.h"
 #include "gfxContext.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/SVGGeometryFrame.h"
@@ -26,8 +27,7 @@ using namespace mozilla::image;
 
 nsIFrame* NS_NewSVGClipPathFrame(mozilla::PresShell* aPresShell,
                                  mozilla::ComputedStyle* aStyle) {
-  return new (aPresShell)
-      mozilla::SVGClipPathFrame(aStyle, aPresShell->GetPresContext());
+  return new mozilla::SVGClipPathFrame(aStyle, aPresShell->GetPresContext());
 }
 
 namespace mozilla {
@@ -312,6 +312,13 @@ bool SVGClipPathFrame::IsTrivial(nsIFrame** aSingleChild) {
     if (!svgChild) {
       continue;
     }
+    // An invisible leaf contributes nothing to the clip, so it does not make
+    // the clipPath non-trivial. Containers are not skipped because a
+    // descendant can set visibility back to visible.
+    if (!svgChild->IsDisplayContainer() &&
+        !kid->StyleVisibility()->IsVisible()) {
+      continue;
+    }
     // We consider a non-trivial clipPath to be one containing
     // either more than one svg child and/or a svg container
     if (foundChild || svgChild->IsDisplayContainer()) {
@@ -385,6 +392,53 @@ void SVGClipPathFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
 
 gfxMatrix SVGClipPathFrame::GetCanvasTM() { return mMatrixForChildren; }
 
+auto SVGClipPathFrame::GetSimpleClipShape(nsIFrame* aClippedFrame,
+                                          bool aAllowGeometry)
+    -> Maybe<SimpleClipShape> {
+  nsIFrame* singleClipPathChild = nullptr;
+  if (!IsTrivial(&singleClipPathChild)) {
+    return {};
+  }
+  SVGGeometryElement::SimpleShape shape;
+  // The spec says to clip away everything when there is nothing to clip with,
+  // which matches what ApplyClipPath does.
+  shape.SetRoundedRect(CSSRect(), CSSSize());
+  if (!singleClipPathChild) {
+    return Some(SimpleClipShape(shape));
+  }
+  SVGGeometryFrame* pathFrame = do_QueryFrame(singleClipPathChild);
+  if (!pathFrame) {
+    return {};
+  }
+
+  auto* element = static_cast<SVGGeometryElement*>(pathFrame->GetContent());
+  gfxMatrix toClippedUserSpace =
+      SVGUtils::GetTransformMatrixInUserSpace(pathFrame) *
+      GetClipPathTransform(aClippedFrame);
+  if (toClippedUserSpace.IsSingular()) {
+    return Some(SimpleClipShape(shape));
+  }
+
+  element->GetAsSimpleShape(&shape);
+  if (shape.IsRoundedRect() &&
+      !toClippedUserSpace.HasNonAxisAlignedTransform() &&
+      toClippedUserSpace._11 > 0 && toClippedUserSpace._22 > 0) {
+    gfxRect rect = toClippedUserSpace.TransformBounds(
+        ThebesRect(shape.AsRect().ToUnknownRect()));
+    shape.SetRoundedRect(
+        CSSRect::FromUnknownRect(ToRect(rect)),
+        CSSSize(float(shape.Radii().width * toClippedUserSpace._11),
+                float(shape.Radii().height * toClippedUserSpace._22)));
+    return Some(SimpleClipShape(shape));
+  }
+
+  if (!aAllowGeometry) {
+    return {};
+  }
+  return Some(SimpleClipShape(SimpleClipGeometry{
+      element, toClippedUserSpace, pathFrame->StyleSVG()->mClipRule}));
+}
+
 gfxMatrix SVGClipPathFrame::GetClipPathTransform(nsIFrame* aClippedFrame) {
   gfxMatrix tm = SVGUtils::GetTransformMatrixInUserSpace(this);
 
@@ -403,14 +457,20 @@ gfxMatrix SVGClipPathFrame::GetClipPathTransform(nsIFrame* aClippedFrame) {
                                         flags);
 }
 
-SVGBBox SVGClipPathFrame::GetBBoxForClipPathFrame(const SVGBBox& aBBox,
-                                                  const gfxMatrix& aMatrix,
-                                                  SVGBBoxFlags aFlags) {
+SVGBBox SVGClipPathFrame::GetBBoxForClipPathFrame(const gfxMatrix& aMatrix,
+                                                  const SVGBBox* aBBox) {
   SVGClipPathFrame* clipPathThatClipsClipPath;
   if (SVGObserverUtils::GetAndObserveClipPath(this,
                                               &clipPathThatClipsClipPath) ==
       SVGObserverUtils::ReferenceState::HasRefsSomeInvalid) {
     return SVGBBox();
+  }
+
+  static int16_t sRefChainLengthCounter = AutoReferenceChainGuard::noChain;
+  AutoReferenceChainGuard refChainGuard(this, &mIsBeingProcessed,
+                                        &sRefChainLengthCounter);
+  if (MOZ_UNLIKELY(!refChainGuard.Reference())) {
+    return SVGBBox();  // Break reference chain
   }
 
   nsIContent* node = GetContent()->GetFirstChild();
@@ -427,12 +487,10 @@ SVGBBox SVGClipPathFrame::GetBBoxForClipPathFrame(const SVGBBox& aBBox,
         if (SVGObserverUtils::GetAndObserveClipPath(frame, &clipPathFrame) !=
                 SVGObserverUtils::ReferenceState::HasRefsSomeInvalid &&
             clipPathFrame) {
-          tmpBBox =
-              clipPathFrame->GetBBoxForClipPathFrame(tmpBBox, aMatrix, aFlags);
+          tmpBBox = clipPathFrame->GetBBoxForClipPathFrame(aMatrix, &tmpBBox);
         }
-        if (!aFlags.contains(
-                SVGBBoxFlag::DoNotClipToBBoxOfContentInsideClipPath)) {
-          tmpBBox.Intersect(aBBox);
+        if (aBBox) {
+          tmpBBox.Intersect(*aBBox);
         }
         unionBBox.UnionEdges(tmpBBox);
       }
@@ -440,8 +498,8 @@ SVGBBox SVGClipPathFrame::GetBBoxForClipPathFrame(const SVGBBox& aBBox,
   }
 
   if (clipPathThatClipsClipPath) {
-    unionBBox.Intersect(clipPathThatClipsClipPath->GetBBoxForClipPathFrame(
-        aBBox, aMatrix, aFlags));
+    unionBBox.Intersect(
+        clipPathThatClipsClipPath->GetBBoxForClipPathFrame(aMatrix, aBBox));
   }
   return unionBBox;
 }

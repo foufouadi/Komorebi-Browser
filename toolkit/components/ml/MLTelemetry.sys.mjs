@@ -9,7 +9,7 @@ const lazy = {};
 ChromeUtils.defineLazyGetter(lazy, "console", () => {
   return console.createInstance({
     maxLogLevelPref: "browser.ml.logLevel",
-    prefix: "MLTelemetry",
+    logModule: "MLTelemetry",
   });
 });
 
@@ -44,6 +44,8 @@ export class MLTelemetry {
   #flowId;
   /** @type {string|undefined} */
   #featureId;
+  /** @type {string|undefined} */
+  #hostProcess;
   /** @type {number|undefined} */
   #startTime;
 
@@ -54,10 +56,13 @@ export class MLTelemetry {
    * @param {string | null} [options.featureId] - The identifier for the ML feature.
    * @param {string | null} [options.flowId] - An optional unique identifier for
    * this flow. If not provided, a new UUID will be generated.
+   * @param {string} [options.hostProcess] - The process serving the engine,
+   * "inference" or "hwinference"; see host_process in metrics.yaml.
    */
   constructor(options = {}) {
     this.#featureId = options.featureId;
     this.#flowId = options.flowId || crypto.randomUUID();
+    this.#hostProcess = options.hostProcess;
 
     this.logEventToConsole(this.constructor, {
       featureId: this.#featureId,
@@ -178,8 +183,14 @@ export class MLTelemetry {
    * @param {string} [options.flowId] - The flow ID. Uses instance flowId if not provided.
    * @param {string} options.engineId - The engine identifier (e.g., "pdfjs", "ml-suggest-intent").
    * @param {number} options.duration - Engine creation time in milliseconds.
+   * @param {string | null} [options.deviceKind] - Kind of the device that loaded the model.
    */
-  recordEngineCreationSuccessFlow({ flowId, engineId, duration }) {
+  recordEngineCreationSuccessFlow({
+    flowId,
+    engineId,
+    duration,
+    deviceKind = null,
+  }) {
     const currentFlowId = flowId || this.#flowId;
     const actualEngineId = engineId;
     const actualLabel = MLTelemetry.getGleanLabel(engineId);
@@ -188,6 +199,8 @@ export class MLTelemetry {
       flow_id: currentFlowId,
       engineId: actualEngineId,
       duration: Math.round(duration),
+      host_process: this.#hostProcess,
+      device_kind: deviceKind,
     });
 
     // Also record the old labeled timing distribution metric
@@ -236,6 +249,7 @@ export class MLTelemetry {
       taskName,
       engineId,
       error: errorString,
+      host_process: this.#hostProcess,
     });
 
     this.logEventToConsole(this.recordEngineCreationFailure, {
@@ -307,6 +321,7 @@ export class MLTelemetry {
           metrics.timePerOutputToken != null
             ? Math.round(metrics.timePerOutputToken * 100) / 100
             : undefined,
+        host_process: this.#hostProcess,
       };
 
       Glean.firefoxAiRuntime.runInferenceSuccessFlow.record(gleanPayload);
@@ -345,6 +360,7 @@ export class MLTelemetry {
     Glean.firefoxAiRuntime.runInferenceFailure.record({
       flow_id,
       error: errorString,
+      host_process: this.#hostProcess,
     });
 
     this.logEventToConsole(this.recordRunInferenceFailure, {
@@ -370,6 +386,8 @@ export class MLTelemetry {
    * @param {number | null} [options.characterCount]
    * @param {number | null} [options.timeToFirstChunk]
    * @param {number | null} [options.averageChunkTime]
+   * @param {string | null} [options.backendSourceRevision]
+   * @param {string | null} [options.deviceKind]
    * @param {string} [options.flow_id]
    * @param {string} [options.feature_id]
    */
@@ -384,6 +402,8 @@ export class MLTelemetry {
     characterCount,
     timeToFirstChunk = null,
     averageChunkTime = null,
+    backendSourceRevision = null,
+    deviceKind = null,
     flow_id = this.#flowId,
     feature_id = this.#featureId,
   }) {
@@ -420,6 +440,8 @@ export class MLTelemetry {
       engine_id: engineId,
       model_id: modelId,
       backend,
+      backend_source_revision: backendSourceRevision,
+      device_kind: deviceKind,
       // Specifically use the "||" operator since Glean expects "null" rather than
       // "undefined". When the counts are 0, this can mean nothing was generated for
       // the counts. We should count these as null.
@@ -428,6 +450,7 @@ export class MLTelemetry {
       time_to_first_chunk: round(timeToFirstChunk),
       average_chunk_time: round(averageChunkTime),
       system_memory_mb: MLTelemetry.#systemMemoryMB,
+      host_process: this.#hostProcess,
     };
 
     Glean.firefoxAiRuntime.engineRun.record(payload);

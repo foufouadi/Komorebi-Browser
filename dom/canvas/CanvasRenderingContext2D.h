@@ -55,6 +55,7 @@ using CanvasImageSource =
     HTMLImageElementOrSVGImageElementOrHTMLCanvasElementOrHTMLVideoElementOrOffscreenCanvasOrImageBitmapOrVideoFrame;
 class ImageBitmap;
 class ImageData;
+struct ImageDataSettings;
 class UTF8StringOrCanvasGradientOrCanvasPattern;
 class OwningUTF8StringOrCanvasGradientOrCanvasPattern;
 class TextMetrics;
@@ -107,6 +108,7 @@ class CanvasRenderingContext2D : public nsICanvasRenderingContextInternal,
   void OnMemoryPressure() override;
   void OnBeforePaintTransaction() override;
   void OnDidPaintTransaction() override;
+  void OnWindowDestroy() override;
   layers::PersistentBufferProvider* GetBufferProvider() override;
 
   Maybe<layers::SurfaceDescriptor> GetFrontBuffer(
@@ -263,12 +265,14 @@ class CanvasRenderingContext2D : public nsICanvasRenderingContextInternal,
     DrawImage(aImage, aSx, aSy, aSw, aSh, aDx, aDy, aDw, aDh, 6, aError);
   }
 
-  already_AddRefed<ImageData> CreateImageData(JSContext*, int32_t aSw,
-                                              int32_t aSh, ErrorResult&);
+  already_AddRefed<ImageData> CreateImageData(
+      JSContext*, int32_t aSw, int32_t aSh, const ImageDataSettings& aSettings,
+      ErrorResult&);
   already_AddRefed<ImageData> CreateImageData(JSContext*, ImageData&,
                                               ErrorResult&);
   already_AddRefed<ImageData> GetImageData(JSContext*, int32_t aSx, int32_t aSy,
                                            int32_t aSw, int32_t aSh,
+                                           const ImageDataSettings& aSettings,
                                            nsIPrincipal& aSubjectPrincipal,
                                            ErrorResult&);
   void PutImageData(ImageData&, int32_t aDx, int32_t aDy, ErrorResult&);
@@ -496,6 +500,8 @@ class CanvasRenderingContext2D : public nsICanvasRenderingContextInternal,
   int32_t GetWidth() override { return GetSize().width; }
   int32_t GetHeight() override { return GetSize().height; }
 
+  PredefinedColorSpace GetColorSpace() const { return mColorSpace; }
+
   // nsICanvasRenderingContextInternal
   /**
    * Gets the pres shell from either the canvas element or the doc shell
@@ -542,8 +548,8 @@ class CanvasRenderingContext2D : public nsICanvasRenderingContextInternal,
     Redraw(ToRect(aR));
     return NS_OK;
   }
-  NS_IMETHOD SetContextOptions(JSContext* aCx, JS::Handle<JS::Value> aOptions,
-                               ErrorResult& aRvForDictionaryInit) override;
+  NS_IMETHOD SetContextOptions(
+      const CanvasRenderingContextOptions& aOptions) override;
 
   /**
    * An abstract base class to be implemented by callers wanting to be notified
@@ -604,11 +610,13 @@ class CanvasRenderingContext2D : public nsICanvasRenderingContextInternal,
       mozilla::CanvasUtils::ImageExtraction aExtractionBehavior,
       int32_t* out_format, gfx::IntSize* out_imageSize) override;
 
-  void OnShutdown();
+  void OnShutdown() override;
 
   bool IsContextLost() const { return mIsContextLost; }
-  void OnRemoteCanvasLost();
-  void OnRemoteCanvasRestored();
+  void OnRemoteCanvasLost() override;
+  void OnRemoteCanvasRestored() override;
+  void OnRemoteCanvasReset(
+      const nsTArray<layers::RemoteTextureOwnerId>& aOwnerIds) override;
 
   /**
    * Update CurrentState().filter with the filter description for
@@ -636,13 +644,15 @@ class CanvasRenderingContext2D : public nsICanvasRenderingContextInternal,
 
   nsresult GetImageDataArray(JSContext* aCx, int32_t aX, int32_t aY,
                              uint32_t aWidth, uint32_t aHeight,
+                             PredefinedColorSpace aColorSpace,
                              nsIPrincipal& aSubjectPrincipal,
                              JSObject** aRetval);
 
   void PutImageData_explicit(int32_t aX, int32_t aY, ImageData&,
                              bool aHasDirtyRect, int32_t aDirtyX,
                              int32_t aDirtyY, int32_t aDirtyWidth,
-                             int32_t aDirtyHeight, ErrorResult&);
+                             int32_t aDirtyHeight,
+                             PredefinedColorSpace aColorSpace, ErrorResult&);
 
   bool CopyBufferProvider(layers::PersistentBufferProvider& aOld,
                           gfx::DrawTarget& aTarget, gfx::IntRect aCopyRect);
@@ -743,9 +753,6 @@ class CanvasRenderingContext2D : public nsICanvasRenderingContextInternal,
    * EnsureTarget() so you don't have to.
    */
   void TransformCurrentPath(const mozilla::gfx::Matrix& aTransform);
-
-  // Report the fillRule has changed.
-  void FillRuleChanged();
 
   /**
    * Check if the target is in an error state. Functions that may need to
@@ -870,6 +877,9 @@ class CanvasRenderingContext2D : public nsICanvasRenderingContextInternal,
   // Member vars
   int32_t mWidth, mHeight;
 
+  // Determines the context colorspace
+  PredefinedColorSpace mColorSpace;
+
   // This is true when the canvas is valid, but of zero size, this requires
   // specific behavior on some operations.
   bool mZero;
@@ -925,8 +935,6 @@ class CanvasRenderingContext2D : public nsICanvasRenderingContextInternal,
   // Which context properties apply to an SVG when calling drawImage.
   CanvasContextProperties mContextProperties = CanvasContextProperties::None;
 
-  bool AddShutdownObserver();
-  void RemoveShutdownObserver();
   bool AlreadyShutDown() const { return mHasShutdown; }
 
   /**
@@ -974,12 +982,15 @@ class CanvasRenderingContext2D : public nsICanvasRenderingContextInternal,
    */
   RefPtr<mozilla::gfx::Path> mPath;
   RefPtr<mozilla::gfx::PathBuilder> mPathBuilder;
+  RefPtr<mozilla::gfx::PathBuilder> mRecycledPathBuilder;
   mozilla::gfx::BackendType mPathType = mozilla::gfx::BackendType::NONE;
   bool mPathPruned = false;
   mozilla::gfx::Matrix mPathTransform;
   bool mPathTransformDirty = false;
 
   void FlushPathTransform();
+  already_AddRefed<mozilla::gfx::PathBuilder> CreateOrRecyclePathBuilder(
+      mozilla::gfx::FillRule aFillRule);
 
   /**
    * Number of times we've invalidated before calling redraw
@@ -1008,18 +1019,24 @@ class CanvasRenderingContext2D : public nsICanvasRenderingContextInternal,
    * drawn with a filter.
    */
   bool NeedToApplyFilter() {
+    // Avoid trying to update filter state if no filter chain has ever been set.
+    if (CurrentState().filterChain.IsEmpty()) {
+      return false;
+    }
     return EnsureUpdatedFilter().mPrimitives.Length() > 0;
   }
 
   /**
-   * Calls UpdateFilter if the canvas's WriteOnly state has changed between the
-   * last call to UpdateFilter and now.
+   * Calls UpdateFilter if the filter description hasn't been built for the
+   * current filter chain yet, or if the canvas's WriteOnly state has changed
+   * between the last call to UpdateFilter and now.
    */
   const gfx::FilterDescription& EnsureUpdatedFilter() {
     bool isWriteOnly = IsWriteOnly() ||
                        (mCanvasElement && mCanvasElement->IsWriteOnly()) ||
                        (mOffscreenCanvas && mOffscreenCanvas->IsWriteOnly());
-    if (CurrentState().filterSourceGraphicTainted != isWriteOnly) {
+    if (!CurrentState().filterDescriptionUpToDate ||
+        CurrentState().filterSourceGraphicTainted != isWriteOnly) {
       // Do not flush here: this runs inside drawing operations that hold raw
       // references to mPath/state, and a flush can run script that resets the
       // context, leading to UAF. Flush already happened at SetFilter() time.
@@ -1073,8 +1090,9 @@ class CanvasRenderingContext2D : public nsICanvasRenderingContextInternal,
   // state stack handling
   class ContextState {
    public:
-    ContextState();
+    ContextState() = default;
     ContextState(const ContextState& aOther);
+
     ~ContextState();
 
     void SetColorStyle(Style aWhichStyle, nscolor aColor);
@@ -1165,6 +1183,8 @@ class CanvasRenderingContext2D : public nsICanvasRenderingContextInternal,
     // We keep track of this to ensure that if this gets out of sync with the
     // tainted state of the canvas itself, we update our filters accordingly.
     bool filterSourceGraphicTainted = false;
+    // Whether |filter| has been built for |filterChain| by UpdateFilter().
+    bool filterDescriptionUpToDate = false;
     bool imageSmoothingEnabled = true;
 
     // Whether resolvedFontLang was an explicitly-specified lang or inferred.
@@ -1173,12 +1193,10 @@ class CanvasRenderingContext2D : public nsICanvasRenderingContextInternal,
 
   AutoTArray<ContextState, 3> mStyleStack;
 
-  inline ContextState& CurrentState() {
-    return mStyleStack[mStyleStack.Length() - 1];
-  }
+  inline ContextState& CurrentState() { return mStyleStack.LastElement(); }
 
   inline const ContextState& CurrentState() const {
-    return mStyleStack[mStyleStack.Length() - 1];
+    return mStyleStack.LastElement();
   }
 
   inline const ContextState& PreviousState() const {
@@ -1204,6 +1222,8 @@ class CanvasRenderingContext2D : public nsICanvasRenderingContextInternal,
   class FontStyleCache
       : public MruCache<FontStyleCacheKey, FontStyleData, FontStyleCache> {
    public:
+    // A cached failure has a null mStyle, but every live entry has a lang.
+    static bool IsEmpty(const FontStyleData& aVal) { return !aVal.mKey.mLang; }
     static HashNumber Hash(const FontStyleCacheKey& aKey) {
       HashNumber hash = HashString(aKey.mFont);
       hash = AddToHash(hash, aKey.mLang->hash());
@@ -1216,7 +1236,72 @@ class CanvasRenderingContext2D : public nsICanvasRenderingContextInternal,
     }
   };
 
-  FontStyleCache mFontStyleCache;
+  mozilla::UniquePtr<FontStyleCache> mFontStyleCache;
+
+  struct FontGroupCacheKey {
+    FontGroupCacheKey() = default;
+    FontGroupCacheKey(const nsACString& aStr, nsAtom* aLang,
+                      CanvasFontStretch aStretch, CanvasFontVariantCaps aCaps,
+                      CanvasFontKerning aKerning, uint64_t aGen)
+        : mSpecifiedFont(aStr),
+          mLang(aLang),
+          mStretch(aStretch),
+          mCaps(aCaps),
+          mKerning(aKerning),
+          mGeneration(aGen) {}
+
+    nsCString mSpecifiedFont;
+    RefPtr<nsAtom> mLang;
+    CanvasFontStretch mStretch;
+    CanvasFontVariantCaps mCaps;
+    CanvasFontKerning mKerning;
+    uint64_t mGeneration = 0;
+  };
+
+  struct FontGroupCacheData {
+    FontGroupCacheData() = default;
+    FontGroupCacheData(const FontGroupCacheKey& aKey,
+                       RefPtr<gfxFontGroup> aFontGroup,
+                       const nsACString& aResolvedFont, const nsFont& aFont)
+        : mKey(aKey),
+          mFontGroup(aFontGroup),
+          mResolvedFont(aResolvedFont),
+          mFont(aFont) {}
+
+    FontGroupCacheKey mKey;
+    RefPtr<gfxFontGroup> mFontGroup;
+    nsCString mResolvedFont;
+    nsFont mFont;
+  };
+
+  class FontGroupCache
+      : public MruCache<FontGroupCacheKey, FontGroupCacheData, FontGroupCache> {
+   public:
+    static bool IsEmpty(const FontGroupCacheData& aVal) {
+      return !aVal.mFontGroup;
+    }
+    static HashNumber Hash(const FontGroupCacheKey& aKey) {
+      HashNumber hash = HashString(aKey.mSpecifiedFont);
+      hash = AddToHash(hash, aKey.mLang->hash());
+      hash = AddToHash(hash, aKey.mStretch);
+      hash = AddToHash(hash, aKey.mCaps);
+      hash = AddToHash(hash, aKey.mKerning);
+      hash = AddToHash(hash, aKey.mGeneration);
+      return hash;
+    }
+    static bool Match(const FontGroupCacheKey& aKey,
+                      const FontGroupCacheData& aVal) {
+      return aVal.mKey.mGeneration == aKey.mGeneration &&
+             aVal.mKey.mSpecifiedFont == aKey.mSpecifiedFont &&
+             aVal.mKey.mLang == aKey.mLang &&
+             aVal.mKey.mStretch == aKey.mStretch &&
+             aVal.mKey.mCaps == aKey.mCaps &&
+             aVal.mKey.mKerning == aKey.mKerning;
+    }
+  };
+
+  mozilla::UniquePtr<FontGroupCache> mFontGroupCache;
+
   const ComputedStyle* GetCurrentFontComputedStyle() {
     GetCurrentFontStyle();
     return CurrentState().fontComputedStyle;
@@ -1230,6 +1315,9 @@ class CanvasRenderingContext2D : public nsICanvasRenderingContextInternal,
   class ColorStyleCache
       : public MruCache<nsACString, ColorStyleCacheEntry, ColorStyleCache> {
    public:
+    static bool IsEmpty(const ColorStyleCacheEntry& aVal) {
+      return aVal.mKey.IsEmpty();
+    }
     static HashNumber Hash(const nsACString& aKey) { return HashString(aKey); }
     static bool Match(const nsACString& aKey,
                       const ColorStyleCacheEntry& aVal) {
@@ -1239,8 +1327,6 @@ class CanvasRenderingContext2D : public nsICanvasRenderingContextInternal,
   ColorStyleCache mColorStyleCache;
 
   ColorStyleCacheEntry ParseColorSlow(const nsACString&);
-
-  mozilla::gfx::PaletteCache mPaletteCache;
 
   friend class CanvasGeneralPattern;
   friend class AdjustedTarget;

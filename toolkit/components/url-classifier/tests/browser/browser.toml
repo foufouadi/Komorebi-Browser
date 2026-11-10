@@ -1,4 +1,11 @@
 [DEFAULT]
+# These tests exercise url-classifier's own tracking protection features, so
+# keep it as the channel classifier even where the content classifier is the
+# default engine.
+prefs = [
+  "privacy.trackingprotection.content.mirror.mode=0",
+  "privacy.trackingprotection.urlclassifier.disable_for_channel_classifier=false",
+]
 support-files = [
   "head.js",
   "page.html",
@@ -16,6 +23,8 @@ support-files = [
 ["browser_defer_annotation_suspend_resume.js"]
 
 ["browser_emailtracking_telemetry.js"]
+
+["browser_popup_tracker.js"]
 
 ["browser_realtime_lookup.js"]
 

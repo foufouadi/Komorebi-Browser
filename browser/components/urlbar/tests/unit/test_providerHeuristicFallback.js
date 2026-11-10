@@ -8,7 +8,7 @@
 
 const QUICKACTIONS_PREF = "browser.urlbar.suggest.quickactions";
 const SUGGEST_ENABLED_PREF = "browser.search.suggest.enabled";
-const PRIVATE_SEARCH_PREF = "browser.search.separatePrivateDefault.ui.enabled";
+const PRIVATE_SEARCH_PREF = "browser.search.separatePrivateDefault.featureGate";
 
 // We make sure that restriction tokens and search terms are correctly
 // recognized when they are separated by each of these different types of spaces
@@ -19,7 +19,19 @@ const TEST_SPACES = [" ", "\u3000", " \u3000", "\u3000 "];
 testEngine_setup();
 
 add_setup(async function () {
+  // These tests expect the unified search button prefs to default to false.
+  let unifiedSearchButtonDefaults = Services.prefs.getDefaultBranch(
+    "browser.urlbar.unifiedSearchButton."
+  );
+  let originalDefaults = {};
+  for (let name of ["always", "historyInSearchMode"]) {
+    originalDefaults[name] = unifiedSearchButtonDefaults.getBoolPref(name);
+    unifiedSearchButtonDefaults.setBoolPref(name, false);
+  }
   registerCleanupFunction(async () => {
+    for (let [name, value] of Object.entries(originalDefaults)) {
+      unifiedSearchButtonDefaults.setBoolPref(name, value);
+    }
     Services.prefs.clearUserPref(QUICKACTIONS_PREF);
     Services.prefs.clearUserPref(SUGGEST_ENABLED_PREF);
     Services.prefs.clearUserPref(PRIVATE_SEARCH_PREF);
@@ -390,11 +402,48 @@ add_task(async function () {
     ],
   });
 
-  info("Forced search through searchbar, keyword.enabled = false");
-  query = "bacon";
+  for (let sapName of ["searchbar", "newtab_searchbar"]) {
+    info(`Forced search through ${sapName}, keyword.enabled = false`);
+    query = "bacon";
+    context = createContext(query, { isPrivate: false, sapName });
+    await check_results({
+      context,
+      matches: [
+        makeSearchResult(context, {
+          engineName: SUGGESTIONS_ENGINE_NAME,
+          heuristic: true,
+          query: "bacon",
+        }),
+      ],
+    });
+  }
+
+  info(
+    "A URL is still a visit in the newtab search bar, keyword.enabled = false"
+  );
+  query = "https://mozilla.org";
   context = createContext(query, {
     isPrivate: false,
-    sapName: "searchbar",
+    sapName: "newtab_searchbar",
+  });
+  await check_results({
+    context,
+    matches: [
+      makeVisitResult(context, {
+        source: UrlbarShared.RESULT_SOURCE.OTHER_LOCAL,
+        uri: `${query}/`,
+        title: `${query}/`,
+        heuristic: true,
+      }),
+    ],
+  });
+
+  // The address bar gets no result at all for this; a search bar searches it.
+  info("Invalid URL through the newtab search bar, keyword.enabled = false");
+  query = "bacon *";
+  context = createContext(query, {
+    isPrivate: false,
+    sapName: "newtab_searchbar",
   });
   await check_results({
     context,
@@ -402,7 +451,7 @@ add_task(async function () {
       makeSearchResult(context, {
         engineName: SUGGESTIONS_ENGINE_NAME,
         heuristic: true,
-        query: "bacon",
+        query,
       }),
     ],
   });
@@ -830,6 +879,237 @@ add_task(async function dont_fixup_urls_with_at_symbol() {
   await check_results({
     context,
     matches: [],
+  });
+});
+
+add_task(async function url_in_search_mode() {
+  Services.prefs.clearUserPref("keyword.enabled");
+  let query = "mozilla.org";
+  let engineSearchMode = {
+    engineName: SUGGESTIONS_ENGINE_NAME,
+    isGeneralPurposeEngine: false,
+  };
+
+  info("A URL is searched for in an engine search mode");
+  let context = createContext(query, {
+    isPrivate: false,
+    searchMode: engineSearchMode,
+    sources: [UrlbarShared.RESULT_SOURCE.SEARCH],
+  });
+  await check_results({
+    context,
+    matches: [
+      makeSearchResult(context, {
+        engineName: SUGGESTIONS_ENGINE_NAME,
+        heuristic: true,
+      }),
+    ],
+  });
+
+  let checkVisit = async sapName => {
+    context = createContext(query, {
+      isPrivate: false,
+      sapName,
+      searchMode: engineSearchMode,
+      sources: [UrlbarShared.RESULT_SOURCE.SEARCH],
+    });
+    await check_results({
+      context,
+      matches: [
+        makeVisitResult(context, {
+          source: UrlbarShared.RESULT_SOURCE.OTHER_LOCAL,
+          uri: `http://${query}/`,
+          title: `${query}/`,
+          heuristic: true,
+        }),
+        makeSearchResult(context, {
+          engineName: SUGGESTIONS_ENGINE_NAME,
+        }),
+      ],
+    });
+  };
+
+  info("A URL is visited in the newtab search bar's engine search mode");
+  await checkVisit("newtab_searchbar");
+
+  Services.prefs.setBoolPref("browser.urlbar.unifiedSearchButton.always", true);
+
+  info("A URL is visited in an engine search mode with navigation enabled");
+  await checkVisit("urlbar");
+
+  info("A URL is not visited in a local search mode");
+  context = createContext(query, {
+    isPrivate: false,
+    searchMode: { source: UrlbarShared.RESULT_SOURCE.BOOKMARKS },
+    sources: [UrlbarShared.RESULT_SOURCE.BOOKMARKS],
+  });
+  await check_results({ context, matches: [] });
+
+  info("A URL is searched for in the search bar's engine search mode");
+  context = createContext(query, {
+    isPrivate: false,
+    sapName: "searchbar",
+    searchMode: engineSearchMode,
+    sources: [UrlbarShared.RESULT_SOURCE.SEARCH],
+  });
+  await check_results({
+    context,
+    matches: [
+      makeSearchResult(context, {
+        engineName: SUGGESTIONS_ENGINE_NAME,
+        heuristic: true,
+      }),
+    ],
+  });
+
+  Services.prefs.clearUserPref("browser.urlbar.unifiedSearchButton.always");
+});
+
+add_task(async function url_search_in_search_mode() {
+  Services.prefs.clearUserPref("keyword.enabled");
+  Services.prefs.setBoolPref("browser.urlbar.unifiedSearchButton.always", true);
+  let engineSearchMode = {
+    engineName: SUGGESTIONS_ENGINE_NAME,
+    isGeneralPurposeEngine: false,
+  };
+
+  let checkUrl = async (query, { uri, title, iconUri, sources }) => {
+    let context = createContext(query, {
+      isPrivate: false,
+      searchMode: engineSearchMode,
+      ...(sources && { sources }),
+    });
+    await check_results({
+      context,
+      matches: [
+        makeVisitResult(context, {
+          source: UrlbarShared.RESULT_SOURCE.OTHER_LOCAL,
+          uri,
+          title,
+          iconUri,
+          heuristic: true,
+        }),
+        makeSearchResult(context, {
+          engineName: SUGGESTIONS_ENGINE_NAME,
+          suggestedIndex: 1,
+        }),
+      ],
+    });
+  };
+
+  info("A search is offered for an origin");
+  await checkUrl("mozilla.org", {
+    uri: "http://mozilla.org/",
+    title: "mozilla.org/",
+    sources: [UrlbarShared.RESULT_SOURCE.SEARCH],
+  });
+
+  info("A search is offered for a URL with a path");
+  await checkUrl("mozilla.org/foo", {
+    uri: "http://mozilla.org/foo",
+    title: "mozilla.org/foo",
+    iconUri: "page-icon:http://mozilla.org/",
+    sources: [UrlbarShared.RESULT_SOURCE.SEARCH],
+  });
+
+  info("A search is offered for a URL with a scheme");
+  await checkUrl("https://mozilla.org/foo", {
+    uri: "https://mozilla.org/foo",
+    title: "https://mozilla.org/foo",
+    iconUri: "page-icon:https://mozilla.org/",
+    sources: [UrlbarShared.RESULT_SOURCE.SEARCH],
+  });
+
+  info("A search is offered with historyInSearchMode enabled");
+  Services.prefs.setBoolPref(
+    "browser.urlbar.unifiedSearchButton.historyInSearchMode",
+    true
+  );
+  await checkUrl("mozilla.org/foo", {
+    uri: "http://mozilla.org/foo",
+    title: "mozilla.org/foo",
+    iconUri: "page-icon:http://mozilla.org/",
+  });
+  Services.prefs.clearUserPref(
+    "browser.urlbar.unifiedSearchButton.historyInSearchMode"
+  );
+
+  info("Only the heuristic search is shown for a non-URL");
+  let context = createContext("hello world", {
+    isPrivate: false,
+    searchMode: engineSearchMode,
+    sources: [UrlbarShared.RESULT_SOURCE.SEARCH],
+  });
+  await check_results({
+    context,
+    matches: [
+      makeSearchResult(context, {
+        engineName: SUGGESTIONS_ENGINE_NAME,
+        heuristic: true,
+      }),
+    ],
+  });
+
+  info("A URL is searched for when unifiedSearchButton.always is disabled");
+  Services.prefs.clearUserPref("browser.urlbar.unifiedSearchButton.always");
+  context = createContext("mozilla.org/foo", {
+    isPrivate: false,
+    searchMode: engineSearchMode,
+    sources: [UrlbarShared.RESULT_SOURCE.SEARCH],
+  });
+  await check_results({
+    context,
+    matches: [
+      makeSearchResult(context, {
+        engineName: SUGGESTIONS_ENGINE_NAME,
+        heuristic: true,
+      }),
+    ],
+  });
+});
+
+add_task(async function url_search_in_search_mode_dedupes_form_history() {
+  Services.prefs.setBoolPref("browser.urlbar.unifiedSearchButton.always", true);
+  Services.prefs.setBoolPref(SUGGEST_ENABLED_PREF, true);
+  let query = "mozilla.org/foo";
+  await UrlbarTestUtils.formHistory.add([
+    { value: query, source: SUGGESTIONS_ENGINE_NAME },
+    { value: `${query}bar`, source: SUGGESTIONS_ENGINE_NAME },
+  ]);
+  registerCleanupFunction(async () => {
+    Services.prefs.clearUserPref("browser.urlbar.unifiedSearchButton.always");
+    Services.prefs.setBoolPref(SUGGEST_ENABLED_PREF, false);
+    await UrlbarTestUtils.formHistory.clear();
+  });
+
+  let context = createContext(query, {
+    isPrivate: false,
+    prohibitRemoteResults: true,
+    searchMode: {
+      engineName: SUGGESTIONS_ENGINE_NAME,
+      isGeneralPurposeEngine: false,
+    },
+    sources: [UrlbarShared.RESULT_SOURCE.SEARCH],
+  });
+  await check_results({
+    context,
+    matches: [
+      makeVisitResult(context, {
+        source: UrlbarShared.RESULT_SOURCE.OTHER_LOCAL,
+        uri: `http://${query}`,
+        title: query,
+        iconUri: "page-icon:http://mozilla.org/",
+        heuristic: true,
+      }),
+      makeSearchResult(context, {
+        engineName: SUGGESTIONS_ENGINE_NAME,
+        suggestedIndex: 1,
+      }),
+      makeFormHistoryResult(context, {
+        suggestion: `${query}bar`,
+        engineName: SUGGESTIONS_ENGINE_NAME,
+      }),
+    ],
   });
 });
 

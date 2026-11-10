@@ -27,6 +27,68 @@ add_task(
   }
 );
 
+add_task(
+  {
+    skip_if: () =>
+      !Services.prefs.getBoolPref("telemetry.fog.artifact_build", false),
+  },
+  function test_jog_object_does_not_validate_schema() {
+    // Bug 2050219: document the limitation until runtime schema validation exists.
+    // See https://firefox-source-docs.mozilla.org/toolkit/components/glean/user/instrumentation_tests.html#tests-and-artifact-builds
+    const balloons = [{ colour: "red", diameter: 5 }];
+    Glean.testOnly.balloons.set(balloons);
+    Assert.deepEqual(balloons, Glean.testOnly.balloons.testGetValue());
+
+    const invalidValues = [
+      [{ color: "red" }],
+      [{ colour: "red", diameter: "small" }],
+      [{ colour: "red", diameter: 5, extra: "field" }],
+      [null],
+    ];
+    for (const value of invalidValues) {
+      Glean.testOnly.balloons.set(value);
+      Assert.deepEqual(
+        value,
+        Glean.testOnly.balloons.testGetValue(),
+        "Artifact builds currently store schema-invalid objects without an invalid_value error"
+      );
+    }
+  }
+);
+
+add_task(function test_jog_object_works() {
+  Services.fog.testRegisterRuntimeMetric(
+    "object",
+    "jog_cat",
+    "jog_object",
+    ["test-ping"],
+    `"ping"`,
+    false,
+    false
+  );
+
+  for (const [input, expected] of [
+    [{}, {}],
+    [[], []],
+    [
+      { empty: [], unset: null, nested: { empty: [], unset: null } },
+      { nested: {} },
+    ],
+    // Array elements retain their positions, even when they are empty.
+    [
+      [{ empty: [], unset: null }, [], {}],
+      [{}, [], {}],
+    ],
+    [
+      { boolean: false, number: 0, string: "", array: [0], object: {} },
+      { boolean: false, number: 0, string: "", array: [0], object: {} },
+    ],
+  ]) {
+    Glean.jogCat.jogObject.set(input);
+    Assert.deepEqual(expected, Glean.jogCat.jogObject.testGetValue());
+  }
+});
+
 add_task(function test_jog_counter_works() {
   Services.fog.testRegisterRuntimeMetric(
     "counter",

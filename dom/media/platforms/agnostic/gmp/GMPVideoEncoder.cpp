@@ -4,6 +4,8 @@
 
 #include "GMPVideoEncoder.h"
 
+#include <cmath>
+
 #include "AnnexB.h"
 #include "ErrorList.h"
 #include "GMPLog.h"
@@ -13,7 +15,9 @@
 #include "H264.h"
 #include "ImageContainer.h"
 #include "ImageConversion.h"
+#include "mozilla/Casting.h"
 #include "mozilla/StaticPrefs_media.h"
+#include "mozilla/media/webrtc/GMPH264Utils.h"
 #include "nsServiceManagerUtils.h"
 #include "prsystem.h"
 
@@ -28,63 +32,6 @@ static GMPVideoCodecMode ToGMPVideoCodecMode(Usage aUsage) {
       // ParamValidationExt in OpenH264 rejects all other codec modes besides
       // realtime and screensharing.
       return kGMPScreensharing;
-  }
-}
-
-static GMPProfile ToGMPProfile(H264_PROFILE aProfile) {
-  switch (aProfile) {
-    case H264_PROFILE_MAIN:
-      return kGMPH264ProfileMain;
-    case H264_PROFILE_EXTENDED:
-      return kGMPH264ProfileExtended;
-    case H264_PROFILE_HIGH:
-      return kGMPH264ProfileHigh;
-    case H264_PROFILE_UNKNOWN:
-    default:
-      return kGMPH264ProfileUnknown;
-  }
-}
-
-static GMPLevel ToGMPLevel(H264_LEVEL aLevel) {
-  switch (aLevel) {
-    case H264_LEVEL::H264_LEVEL_1:
-      return kGMPH264Level1_0;
-    case H264_LEVEL::H264_LEVEL_1_1:
-      // H264_LEVEL_1_b has the same value as H264_LEVEL_1_1, while
-      // kGMPH264Level1_B and kGMPH264Level1_1 differ. Since we can't tell the
-      // difference, we just ignore the 1_b case.
-      return kGMPH264Level1_1;
-    case H264_LEVEL::H264_LEVEL_1_2:
-      return kGMPH264Level1_2;
-    case H264_LEVEL::H264_LEVEL_1_3:
-      return kGMPH264Level1_3;
-    case H264_LEVEL::H264_LEVEL_2:
-      return kGMPH264Level2_0;
-    case H264_LEVEL::H264_LEVEL_2_1:
-      return kGMPH264Level2_1;
-    case H264_LEVEL::H264_LEVEL_2_2:
-      return kGMPH264Level2_2;
-    case H264_LEVEL::H264_LEVEL_3:
-      return kGMPH264Level3_0;
-    case H264_LEVEL::H264_LEVEL_3_1:
-      return kGMPH264Level3_1;
-    case H264_LEVEL::H264_LEVEL_3_2:
-      return kGMPH264Level3_2;
-    case H264_LEVEL::H264_LEVEL_4:
-      return kGMPH264Level4_0;
-    case H264_LEVEL::H264_LEVEL_4_1:
-      return kGMPH264Level4_1;
-    case H264_LEVEL::H264_LEVEL_4_2:
-      return kGMPH264Level4_2;
-    case H264_LEVEL::H264_LEVEL_5:
-      return kGMPH264Level5_0;
-    case H264_LEVEL::H264_LEVEL_5_1:
-      return kGMPH264Level5_1;
-    case H264_LEVEL::H264_LEVEL_5_2:
-      return kGMPH264Level5_2;
-    // 6.0 and above isn't supported.
-    default:
-      return kGMPH264LevelUnknown;
   }
 }
 
@@ -190,6 +137,9 @@ void GMPVideoEncoder::InitComplete(GMPVideoEncoderProxy* aGMP,
 
   GMP_LOG_DEBUG("[{}] GMPVideoEncoder::InitComplete -- encoder initialized",
                 fmt::ptr(this));
+  mBitrateKbps = codec.mStartBitrate;
+  mMaxBitrateKbps = codec.mMaxBitrate;
+  mFramerate = codec.mMaxFramerate;
   mInitPromise.Resolve(true, __func__);
 }
 
@@ -291,9 +241,69 @@ RefPtr<MediaDataEncoder::EncodePromise> GMPVideoEncoder::Encode(
 
 RefPtr<MediaDataEncoder::ReconfigurationPromise> GMPVideoEncoder::Reconfigure(
     const RefPtr<const EncoderConfigurationChangeList>& aConfigurationChanges) {
-  // General reconfiguration interface not implemented right now
-  return MediaDataEncoder::ReconfigurationPromise::CreateAndReject(
-      NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
+  MOZ_ASSERT(IsOnGMPThread());
+
+  using P = MediaDataEncoder::ReconfigurationPromise;
+  if (NS_WARN_IF(!IsInitialized())) {
+    return P::CreateAndReject(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
+  }
+
+  // A reconfiguration on the fly succeeds only if all changes can be applied,
+  // so we only apply them once we have validated them all.
+  uint32_t bitrateKbps = mBitrateKbps;
+  uint32_t framerate = mFramerate;
+  bool ok = true;
+  for (const auto& confChange : aConfigurationChanges->mChanges) {
+    ok &= confChange.match(
+        // Not supported yet
+        [&](const DimensionsChange& aChange) -> bool { return false; },
+        [&](const DisplayDimensionsChange& aChange) -> bool { return false; },
+        [&](const BitrateModeChange& aChange) -> bool { return false; },
+        [&](const BitrateChange& aChange) -> bool {
+          if (aChange.get().isNothing() || aChange.get().ref() < 1000) {
+            return false;
+          }
+          // OpenH264 rejects target bitrates above the maximum set at init.
+          const uint32_t kbps = aChange.get().ref() / 1000;
+          if (kbps > mMaxBitrateKbps) {
+            return false;
+          }
+          bitrateKbps = kbps;
+          return true;
+        },
+        [&](const FramerateChange& aChange) -> bool {
+          if (aChange.get().isNothing()) {
+            return false;
+          }
+          const double fps = aChange.get().ref();
+          if (!std::isfinite(fps) || fps < 1) {
+            return false;
+          }
+          framerate = SaturatingCast<uint32_t>(fps);
+          return true;
+        },
+        [&](const UsageChange& aChange) -> bool { return false; },
+        [&](const ContentHintChange& aChange) -> bool { return false; },
+        [&](const SampleRateChange& aChange) -> bool { return false; },
+        [&](const NumberOfChannelsChange& aChange) -> bool { return false; });
+  }
+
+  if (!ok) {
+    return P::CreateAndReject(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
+  }
+
+  if (bitrateKbps != mBitrateKbps || framerate != mFramerate) {
+    GMP_LOG_DEBUG("[{}] GMPVideoEncoder::Reconfigure -- {} kbps, {} fps",
+                  fmt::ptr(this), bitrateKbps, framerate);
+    GMPErr err = mGMP->SetRates(bitrateKbps, framerate);
+    if (NS_WARN_IF(err != GMPNoErr)) {
+      return P::CreateAndReject(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
+    }
+    mBitrateKbps = bitrateKbps;
+    mFramerate = framerate;
+  }
+
+  return P::CreateAndResolve(true, __func__);
 }
 
 RefPtr<MediaDataEncoder::EncodePromise> GMPVideoEncoder::Drain() {
@@ -332,12 +342,14 @@ RefPtr<GenericPromise> GMPVideoEncoder::SetBitrate(uint32_t aBitsPerSec) {
                                            __func__);
   }
 
-  GMPErr err = mGMP->SetRates(aBitsPerSec / 1000, mConfig.mFramerate);
+  const uint32_t bitrateKbps = aBitsPerSec / 1000;
+  GMPErr err = mGMP->SetRates(bitrateKbps, mFramerate);
   if (NS_WARN_IF(err != GMPNoErr)) {
     return GenericPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_FATAL_ERR,
                                            __func__);
   }
 
+  mBitrateKbps = bitrateKbps;
   return GenericPromise::CreateAndResolve(true, __func__);
 }
 

@@ -7,6 +7,7 @@
 
 #include "content_classifier_ffi.h"
 
+#include "mozilla/MemoryReporting.h"
 #include "nsError.h"
 #include "nsString.h"
 #include "nsTArray.h"
@@ -54,12 +55,20 @@ class ContentClassifierRequest {
   nsCString mSchemelessSite;
   nsCString mSourceSchemelessSite;
   nsCString mTopWindowSchemelessSite;
+  // Full hosts handed to the engine for rule matching. The schemeless sites
+  // above only feed the third-party comparisons.
+  nsCString mHostname;
+  nsCString mSourceHostname;
+  nsCString mTopWindowHostname;
   nsCString mRequestType;
   bool mThirdParty = false;
   bool mThirdPartyToSource = false;
   bool mPrivateBrowsing = false;
   bool mValid = false;
   bool mIsNonRecommendedAddon = false;
+  // Image or media load, which url-classifier's fingerprinting features skip.
+  bool mPassiveContent = false;
+  bool mAddonMayLoad = false;
 
  public:
   bool Valid() const { return mValid; }
@@ -67,6 +76,8 @@ class ContentClassifierRequest {
   bool ThirdParty() const { return mThirdParty; }
   bool PrivateBrowsing() const { return mPrivateBrowsing; }
   bool IsNonRecommendedAddon() const { return mIsNonRecommendedAddon; }
+  bool IsPassiveContent() const { return mPassiveContent; }
+  bool AddonMayLoad() const { return mAddonMayLoad; }
 
   explicit ContentClassifierRequest(nsIChannel* aChannel);
 
@@ -91,6 +102,9 @@ class ContentClassifierEngine final {
     }
   }
 
+  ContentClassifierEngine(const ContentClassifierEngine&) = delete;
+  ContentClassifierEngine& operator=(const ContentClassifierEngine&) = delete;
+
   nsresult InitFromRules(const nsTArray<nsCString>& aRules) {
     return content_classifier_engine_from_rules(&aRules, &mEngine);
   }
@@ -98,7 +112,23 @@ class ContentClassifierEngine final {
   const ContentClassifierFeature& Feature() const { return mFeature; }
 
   ContentClassifierEngineResult CheckNetworkRequest(
-      const ContentClassifierRequest& aRequest, bool aPreviouslyMatched);
+      const ContentClassifierRequest& aRequest, bool aPreviouslyMatched,
+      bool aMatchDocumentAsNetworkRequest);
+
+  // Heap usage of this engine, split by what holds it. See
+  // ContentClassifierEngineSizes for what is left out. |aMallocEnclosingSizeOf|
+  // comes from MOZ_DEFINE_MALLOC_ENCLOSING_SIZE_OF, or is null on builds
+  // without jemalloc, where nothing can be sized from an interior pointer and
+  // the engine estimates those parts instead.
+  ContentClassifierEngineSizes SizeOfIncludingThis(
+      MallocSizeOf aMallocSizeOf, MallocSizeOf aMallocEnclosingSizeOf) const {
+    ContentClassifierEngineSizes sizes =
+        mEngine ? content_classifier_engine_size_of(mEngine, aMallocSizeOf,
+                                                    aMallocEnclosingSizeOf)
+                : ContentClassifierEngineSizes{};
+    sizes.objects += aMallocSizeOf(this);
+    return sizes;
+  }
 
  private:
   ~ContentClassifierEngine() {
@@ -112,9 +142,6 @@ class ContentClassifierEngine final {
 
   const ContentClassifierFeature& mFeature;
   ContentClassifierFFIEngine* mEngine;
-
-  ContentClassifierEngine(const ContentClassifierEngine&) = delete;
-  ContentClassifierEngine& operator=(const ContentClassifierEngine&) = delete;
 };
 
 }  // namespace mozilla

@@ -10,7 +10,7 @@
   class MozArrowScrollbox extends MozElements.BaseControl {
     static #startEndVertical = ["top", "bottom"];
     static #startEndHorizontal = ["left", "right"];
-    #scrollButtonUpdatePending = false;
+    #scrollButtonUpdatePending = null;
 
     static get inheritedAttributes() {
       return {
@@ -23,7 +23,7 @@
     // DisplayPortUtils::MaybeCreateDisplayPortInFirstScrollFrameEncountered
     // relies on the scrollbox being a direct child here, so that it can give
     // the chrome tab bar's scroller a displayport without walking the tabs.
-    get markup() {
+    static get markup() {
       return `
       <html:link rel="stylesheet" href="chrome://global/skin/toolbarbutton.css"/>
       <html:link rel="stylesheet" href="chrome://global/skin/arrowscrollbox.css"/>
@@ -40,7 +40,7 @@
     constructor() {
       super();
       this.attachShadow({ mode: "open" });
-      this.shadowRoot.appendChild(this.fragment);
+      this.shadowRoot.appendChild(this.constructor.fragment);
 
       this.scrollbox = this.shadowRoot.querySelector("scrollbox");
       this._scrollButtonUp = this.shadowRoot.getElementById("scrollbutton-up");
@@ -171,15 +171,6 @@
 
     get overflowing() {
       return this.hasAttribute("overflowing");
-    }
-
-    get fragment() {
-      if (!this.constructor.hasOwnProperty("_fragment")) {
-        this.constructor._fragment = MozXULElement.parseXULToFragment(
-          this.markup
-        );
-      }
-      return document.importNode(this.constructor._fragment, true);
     }
 
     get #verticalMode() {
@@ -583,37 +574,48 @@
       this.scrollbox.scrollBy(scrollOptions);
     }
 
-    // @param aRafCount how many animation frames we need to wait to get
-    // current layout data from getBoundsWithoutFlushing.
+    // @param aRafCount how many animation frames to wait before reading the
+    // bounds.
     #updateScrollButtonsDisabledState(aRafCount = 2) {
       if (!this.overflowing) {
         this.toggleAttribute("scrolledtoend", true);
         this.toggleAttribute("scrolledtostart", true);
-        this.#scrollButtonUpdatePending = false;
+        this.#scrollButtonUpdatePending = null;
         return;
       }
 
-      if (aRafCount) {
-        if (this.#scrollButtonUpdatePending) {
+      if (this.#scrollButtonUpdatePending) {
+        return;
+      }
+
+      let pending = {};
+      this.#scrollButtonUpdatePending = pending;
+      let update = ([scrolledToStart, scrolledToEnd]) => {
+        if (this.#scrollButtonUpdatePending != pending) {
           return;
         }
-
-        this.#scrollButtonUpdatePending = true;
-        let oneIter = () => {
-          if (aRafCount--) {
-            if (this.#scrollButtonUpdatePending && this.isConnected) {
-              window.requestAnimationFrame(oneIter);
-            }
-          } else {
-            this.#updateScrollButtonsDisabledState(0);
+        this.#scrollButtonUpdatePending = null;
+        this.toggleAttribute("scrolledtoend", scrolledToEnd);
+        this.toggleAttribute("scrolledtostart", scrolledToStart);
+      };
+      let oneIter = () => {
+        if (aRafCount--) {
+          if (this.#scrollButtonUpdatePending == pending && this.isConnected) {
+            window.requestAnimationFrame(oneIter);
           }
-        };
-        oneIter();
-        return;
-      }
+        } else if (window.promiseDocumentFlushed) {
+          // Only chrome windows have promiseDocumentFlushed.
+          window
+            .promiseDocumentFlushed(() => this.#getScrolledToStartAndEnd())
+            .then(update);
+        } else {
+          update(this.#getScrolledToStartAndEnd());
+        }
+      };
+      oneIter();
+    }
 
-      this.#scrollButtonUpdatePending = false;
-
+    #getScrolledToStartAndEnd() {
       let scrolledToStart = false;
       let scrolledToEnd = false;
 
@@ -650,8 +652,7 @@
         }
       }
 
-      this.toggleAttribute("scrolledtoend", scrolledToEnd);
-      this.toggleAttribute("scrolledtostart", scrolledToStart);
+      return [scrolledToStart, scrolledToEnd];
     }
 
     disconnectedCallback() {

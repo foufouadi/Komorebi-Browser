@@ -9,7 +9,6 @@ import {
   constructRelevantMemoriesContextMessage,
   replaceUrlsWithTokens,
   resolveMentionUrls,
-  stripUnresolvedUrlTokens,
 } from "moz-src:///browser/components/aiwindow/models/ChatUtils.sys.mjs";
 
 import { DEFAULT_RELEVANT_MEMORIES_MESSAGE_COUNT } from "moz-src:///browser/components/aiwindow/models/memories/MemoriesConstants.sys.mjs";
@@ -30,6 +29,10 @@ import {
 import { EventEmitter } from "resource://gre/modules/EventEmitter.sys.mjs";
 import { Conversation } from "moz-src:///browser/components/aiwindow/models/Conversation.sys.mjs";
 import { consumeStreamChunk } from "moz-src:///browser/components/aiwindow/models/TokenStreamParser.sys.mjs";
+import {
+  stripUnresolvedUrlTokens,
+  UrlTokenizer,
+} from "moz-src:///browser/components/aiwindow/ui/modules/UrlTokenizer.sys.mjs";
 
 /** @typedef {import("moz-src:///browser/components/aiwindow/models/SearchBrowsingHistory.sys.mjs").HistoryRow} HistoryRow */
 
@@ -65,6 +68,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   ToolUI: "moz-src:///browser/components/aiwindow/ui/modules/ToolUI.sys.mjs",
   CONFIRMATION_UI_TYPES:
     "moz-src:///browser/components/aiwindow/ui/modules/ToolUI.sys.mjs",
+  isTabGroupMember: "chrome://browser/content/urlbar/SmartbarMentionUtils.mjs",
 });
 
 ChromeUtils.defineLazyGetter(lazy, "fluentStrings", () => {
@@ -73,12 +77,13 @@ ChromeUtils.defineLazyGetter(lazy, "fluentStrings", () => {
 
 ChromeUtils.defineLazyGetter(lazy, "console", function () {
   return console.createInstance({
-    prefix: "ChatConversation",
+    logModule: "ChatConversation",
   });
 });
 
 const CHAT_ROLES = [MESSAGE_ROLE.USER, MESSAGE_ROLE.ASSISTANT];
 const RESTORABLE_ROLES = [...CHAT_ROLES, MESSAGE_ROLE.TOOL];
+const NO_PAGE_CONTEXT = "No page context is available for this message.";
 
 let _savedLoadPromptDescriptor = null;
 export function _setLoadPromptForTesting(fn) {
@@ -125,58 +130,39 @@ export class ChatConversation extends Conversation {
   lastSubmitType = null;
 
   /**
-   * Transient (not persisted): cached action_type categorization
-   * ("tab_mention", "description", "unsupported") of the most recent browser
-   * action request, used to send telemetry to later tool-result events.
+   * Transient (not persisted): where the most recent user submission asked
+   * for an AI Tab page from (tab_list, tab_group or fxms), or null when it
+   * was typed in the chat. Reported by AI Tab telemetry.
    *
    * @type {?string}
    */
-  lastBrowserActionType = null;
+  aitabSource = null;
 
   /**
-   * A mapping of a URL to its unique URL token. URL tokens are used as shortened
-   * versions of URLs to help the model deal with very long URLs. Very long URLs are
-   * problematic since they are hard for a model to repeat back without making mistakes
-   * or hallucinating details about the URL. There is also additional cost for every
-   * additional token in the context. Long URLs can also contain prompt injections since
-   * they can be of an arbitrary size. URL Tokens help solve all of these issues.
+   * Transient (not persisted): browser_action_submit telemetry context for
+   * manage_tabs confirmation, keyed by toolCallId. Stashed when a tab action
+   * is deferred for user confirmation and consumed when it resolves.
    *
-   * URL tokens are only generated while a message is "in flight" to and from the language
-   * model. When tool calls are handled, messages rendered, and messages stored they are
-   * all done with the URL tokens expanded into full URLs.
-   *
-   * There are no guarantees that a URL in this list isn't just hallucinated by the model.
-   * Any URL the language model invents can be present in this list. The only guarantee
-   * is that a token maps to some kind of arbitrary URL.
-   *
-   * Example mapping:
-   * https://github.com/mozilla/ -> GITHUB_COM_MOZILLA_1
-   *
-   * @type {Map<string, string>}
+   * @type {Map<string, object>} toolCallId -> browser_action_submit context
    */
-  urlToToken = new Map();
+  #pendingBrowserActionTelemetry = new Map();
 
   /**
-   * The reverse mapping for a token back to its original URL.
+   * Uncited memories embedded in the current prompt. Cleared after completion.
    *
-   * e.g. GITHUB_COM_MOZILLA_1 -> https://github.com/mozilla/
-   *
-   * @type {Map<string, string>}
+   * @type {Array<object>}
    */
-  tokenToUrl = new Map();
+  promptEmbeddedMemories = [];
 
   /**
-   * A mapping of the base URL token to how many counts there are for it. It's
-   * used to generate the final number on URL tokens.
+   * URL Tokenizer instance for sending URLs to LLM.
+   * The tokens created by UrlTokenizer are cached to the conversation while
+   * the conversation is loaded in memory. These tokens are in-memory only and not
+   * serialized to storage.
    *
-   * e.g.
-   *
-   * https://github.com/mozilla/                  -> GITHUB_COM_MOZILLA_1
-   * https://github.com/mozilla#not-part-of-token -> GITHUB_COM_MOZILLA_2
-   *
-   * @type {Map<string, number>}
+   * @type {UrlTokenizer}
    */
-  #baseTokenCounts = new Map();
+  urlTokenizer = null;
 
   /**
    * Conversation-level pool of history results keyed by URL, accumulated across
@@ -206,14 +192,6 @@ export class ChatConversation extends Conversation {
    * @type {Set<string>}
    */
   #pendingCitationUrls = new Set();
-
-  /**
-   * Last browser-context string written; injectRealTimeContext skips
-   * rewriting an identical one so the prompt-cache prefix stays stable.
-   *
-   * @type {string|null}
-   */
-  #lastBrowserContext = null;
 
   /**
    * @param {object} params
@@ -255,6 +233,7 @@ export class ChatConversation extends Conversation {
       securityProperties,
     });
 
+    this.urlTokenizer = new UrlTokenizer();
     this.title = title;
     this.description = description;
     this.pageUrl = pageUrl;
@@ -298,6 +277,40 @@ export class ChatConversation extends Conversation {
   }
 
   /**
+   * Stash browser_action_submit telemetry context for a deferred tab action,
+   * to be consumed when its confirmation resolves.
+   *
+   * @param {string} toolCallId
+   * @param {object} telemetryInfo - browser_action_submit context
+   */
+  stashPendingBrowserActionTelemetry(toolCallId, telemetryInfo) {
+    this.#pendingBrowserActionTelemetry.set(toolCallId, telemetryInfo);
+  }
+
+  /**
+   * Retrieve and remove the stashed browser_action_submit context for a tool
+   * call, if any.
+   *
+   * @param {string} toolCallId
+   * @returns {object | undefined} The stashed context, or undefined if none.
+   */
+  takePendingBrowserActionTelemetry(toolCallId) {
+    const telemetryInfo = this.#pendingBrowserActionTelemetry.get(toolCallId);
+    this.#pendingBrowserActionTelemetry.delete(toolCallId);
+    return telemetryInfo;
+  }
+
+  /**
+   * Number of stashed browser_action_submit contexts awaiting a confirmation.
+   * Exposed for tests.
+   *
+   * @type {number}
+   */
+  get pendingBrowserActionTelemetryCount() {
+    return this.#pendingBrowserActionTelemetry.size;
+  }
+
+  /**
    * Converts a URL into a token. It first computes a base token from
    * the hostname and path parts, then appends a monotonically increasing number on the
    * end to make it unique. This token is cached to the conversation while
@@ -311,63 +324,7 @@ export class ChatConversation extends Conversation {
    * @returns {string} The short token for the URL (e.g. "GITHUB_COM_1")
    */
   convertUrlToToken(url) {
-    const seenToken = this.urlToToken.get(url);
-    if (seenToken) {
-      return seenToken;
-    }
-
-    let baseToken = "";
-
-    // Attempt to convert the URL into a base token.
-    const parsedUrl = URL.parse(url);
-    if (parsedUrl) {
-      if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
-        // Go ahead and handle URL tokens for more complicated URLs that
-        // aren't probably supported in the chat interface, but would be useful
-        // to disambiguate from the HTTP(s) varieties.
-        baseToken +=
-          // e.g. "ftp:" -> "FTP"
-          parsedUrl.protocol.toUpperCase().replace(":", "");
-      }
-
-      // Convert the hostname into a token.
-      const hostToken = parsedUrl.hostname
-        .replace(/^www\./, "")
-        .toUpperCase()
-        .replace(/[.\-]/g, "_")
-        .substring(0, 100);
-
-      if (hostToken) {
-        baseToken = baseToken ? `${baseToken}_${hostToken}` : hostToken;
-      }
-
-      // Add on the parts of the URL to the token.
-      for (let part of parsedUrl.pathname.split("/")) {
-        if (!part) {
-          continue;
-        }
-        const partToken = part.toUpperCase().replace(/[^A-Z0-9]/g, "_");
-
-        const nextToken = `${baseToken}_${partToken}`;
-        if (nextToken.length > 100) {
-          break;
-        }
-        baseToken = nextToken;
-      }
-    } else {
-      baseToken = "INVALID_URL";
-    }
-
-    let count = this.#baseTokenCounts.get(baseToken) ?? 0;
-    count += 1;
-    this.#baseTokenCounts.set(baseToken, count);
-
-    const tokenFinal = `${baseToken}_${count}`;
-
-    this.urlToToken.set(url, tokenFinal);
-    this.tokenToUrl.set(tokenFinal, url);
-
-    return tokenFinal;
+    return this.urlTokenizer.encodeToken(url);
   }
 
   /**
@@ -379,7 +336,7 @@ export class ChatConversation extends Conversation {
     const { plainText, tokens } = consumeStreamChunk(
       chunk,
       parserState,
-      this.tokenToUrl
+      this.urlTokenizer.tokenToUrl
     );
 
     if (plainText && currentMessage?.content) {
@@ -391,7 +348,7 @@ export class ChatConversation extends Conversation {
     }
     if (plainText || tokens) {
       this.emit("chat-conversation:message-update", currentMessage);
-      lazy.ChatStore.updateConversation(this);
+      lazy.ChatStore.persistStreamingMessage(this, currentMessage);
     }
   }
 
@@ -399,18 +356,7 @@ export class ChatConversation extends Conversation {
    * @param {AsyncIterable} stream - Model response stream from `runWithGenerator`.
    */
   async receiveResponse(stream) {
-    const currentMessage = this.#getCurrentAssistantResponse();
-    if (!currentMessage) {
-      return {
-        pendingToolCalls: [],
-        fullResponseText: "",
-        usage: null,
-      };
-    }
-
-    if (currentMessage.content?.body) {
-      currentMessage.content.body += "\n\n";
-    }
+    const currentMessage = this.#getStreamTarget();
 
     // Set the browsing history snapshot on the message before streaming so its
     // list is recognized while streaming and swapped to a grid on completion.
@@ -424,11 +370,19 @@ export class ChatConversation extends Conversation {
       currentMessage.citations = this.getCitationsSnapshot();
     }
 
-    const result = await super.receiveResponse(stream, currentMessage);
+    let result;
+    try {
+      result = await super.receiveResponse(stream, currentMessage);
+    } catch (e) {
+      // An aborted or failed stream skips the persist below, so land what
+      // streamed before it stopped rather than leaving it only in memory.
+      await lazy.ChatStore.endStreamingWrites(this.id);
+      throw e;
+    }
 
     if (result.currentMessage?.content?.body) {
       // Expand URL tokens and remove any hallucinated ones.
-      if (this.urlToToken.size) {
+      if (this.urlTokenizer.urlToToken.size) {
         result.currentMessage.content.body = stripUnresolvedUrlTokens(
           result.currentMessage.content.body
         );
@@ -437,26 +391,55 @@ export class ChatConversation extends Conversation {
       this.emit("chat-conversation:message-update", currentMessage);
     }
 
-    // Only resolve used memories once the entire assistant turn is complete,
-    // including all tool calls
-    const citedMemoryIds = currentMessage.tokens?.existing_memory ?? [];
-    if (!result.pendingToolCalls?.length && citedMemoryIds.length) {
-      currentMessage.memoriesApplied =
-        await lazy.MemoriesManager.resolveUsedMemories(citedMemoryIds);
-
-      this.emit("chat-conversation:message-update", currentMessage);
+    const replyMessage = this.getCurrentReplyMessage();
+    if (replyMessage !== currentMessage && currentMessage.citations.length) {
+      replyMessage.citations = currentMessage.citations;
     }
 
+    // Only resolve used memories once the entire assistant turn is complete,
+    // including all tool calls
+    if (!result.pendingToolCalls?.length) {
+      const turnMessages = this.#getCurrentTurnTextMessages();
+      const citedMemoryIds = turnMessages.flatMap(
+        message => message.tokens?.existing_memory ?? []
+      );
+      const promptEmbeddedMemoryIds = this.promptEmbeddedMemories.map(
+        memory => memory.id
+      );
+      this.promptEmbeddedMemories = [];
+
+      const memoryIds = [...citedMemoryIds, ...promptEmbeddedMemoryIds];
+      const memoriesApplied = memoryIds.length
+        ? await lazy.MemoriesManager.resolveUsedMemories(memoryIds)
+        : [];
+
+      for (const message of turnMessages) {
+        if (message !== replyMessage) {
+          message.memoriesApplied = [];
+        }
+      }
+
+      if (memoriesApplied.length) {
+        replyMessage.memoriesApplied = memoriesApplied;
+
+        this.emit("chat-conversation:message-update", replyMessage);
+      }
+    }
+
+    // Drop the pending chunk write rather than flushing it: the full write
+    // below covers the same message, plus the token remainder the stream loop
+    // appends after the last chunk.
+    await lazy.ChatStore.endStreamingWrites(this.id, false);
     await lazy.ChatStore.updateConversation(this);
 
-    // Only finalize the message when the turn is actually done. When the model
-    // requested tool calls, the same assistant message keeps streaming its
-    // answer after the tools run (see the loop in Chat.sys.mjs), so emitting
-    // completion here would mark a still-streaming message complete mid-turn —
-    // e.g. converting a streamed history list into a grid before the answer
+    // Only finalize the reply when the turn is actually done. When the model
+    // requested tool calls, its answer streams into a new message after the
+    // tools run (see the loop in Chat.sys.mjs), and the turn renders as one
+    // bubble, so completing now would mark it complete mid-turn — e.g.
+    // converting a streamed history list into a grid before the answer
     // finishes.
     if (!result.pendingToolCalls?.length) {
-      this.emit("chat-conversation:message-complete", currentMessage);
+      this.emit("chat-conversation:message-complete", replyMessage);
     }
 
     return {
@@ -466,14 +449,48 @@ export class ChatConversation extends Conversation {
     };
   }
 
-  #getCurrentAssistantResponse() {
-    return this.messages
-      .filter(
-        message =>
-          message.role === MESSAGE_ROLE.ASSISTANT &&
-          message?.content?.type === "text"
-      )
-      .at(-1);
+  /**
+   * The message to stream a response into: the last message if it is an
+   * assistant text message waiting for it, otherwise a new one, so text the
+   * model writes after tool results is stored after them.
+   *
+   * @returns {ChatMessage}
+   */
+  #getStreamTarget() {
+    const last = this.messages.at(-1);
+    if (
+      last?.role === MESSAGE_ROLE.ASSISTANT &&
+      last.content?.type === "text" &&
+      !last.content.l10nId
+    ) {
+      return last;
+    }
+    return this.addAssistantMessage("text", "");
+  }
+
+  #getCurrentTurnTextMessages() {
+    const turnIndex = this.currentTurnIndex();
+    return this.messages.filter(
+      message =>
+        message.turnIndex === turnIndex &&
+        message.role === MESSAGE_ROLE.ASSISTANT &&
+        message.content?.type === "text"
+    );
+  }
+
+  /**
+   * The message holding the current turn's reply: its last assistant text
+   * message with content, or its last one if none has any yet.
+   *
+   * @returns {ChatMessage|undefined}
+   */
+  getCurrentReplyMessage() {
+    const turnMessages = this.#getCurrentTurnTextMessages();
+    return (
+      turnMessages.findLast(
+        message => message.content.body || message.toolUIData
+      ) ?? turnMessages.at(-1)
+    );
   }
 
   /**
@@ -493,7 +510,7 @@ export class ChatConversation extends Conversation {
         return false;
       }
       // Keep localized messages (rendered from l10n id)
-      if (type === "text" && !body && !content?.l10nId) {
+      if (type === "text" && !body && !content?.l10nId && !message.toolUIData) {
         return false;
       }
       return true;
@@ -550,6 +567,28 @@ export class ChatConversation extends Conversation {
   }
 
   /**
+   * Finds a pending confirmation in the trailing batch of tool messages.
+   *
+   * @param {string} toolCallId - The tool call to look up.
+   * @returns {ChatMessage|undefined} The pending confirmation, if found.
+   */
+  getPendingToolConfirmation(toolCallId) {
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      const message = this.messages[i];
+      if (message.role !== MESSAGE_ROLE.TOOL) {
+        break;
+      }
+      if (
+        message.content?.tool_call_id === toolCallId &&
+        message.content?.body?.pending
+      ) {
+        return message;
+      }
+    }
+    return undefined;
+  }
+
+  /**
    * Resolves the pending tool-confirmation message for UI actions.
    * Called by ToolUI when the user confirms or cancels via the UI.
    *
@@ -558,14 +597,9 @@ export class ChatConversation extends Conversation {
    * @returns {boolean} True if a pending message was resolved.
    */
   resolvePendingToolConfirmation(outcomeBody, toolCallId) {
-    const message = this.messages.at(-1);
+    const message = this.getPendingToolConfirmation(toolCallId);
 
-    const isResolvableToolMessage =
-      message?.role === MESSAGE_ROLE.TOOL &&
-      message.content?.tool_call_id === toolCallId &&
-      message.content?.body?.pending;
-
-    if (!isResolvableToolMessage) {
+    if (!message) {
       return false;
     }
 
@@ -865,15 +899,35 @@ export class ChatConversation extends Conversation {
         securityProperties: this.securityProperties,
       }
     );
-    if (!realTimePrompt || !userMessage?.content) {
+    if (!userMessage?.content) {
       return;
     }
-    if (realTimePrompt === this.#lastBrowserContext) {
+    // Skip unchanged context and keep the prompt cache stable: Without previous
+    // context there is no page to leave so no note needed.
+    const browserContext = realTimePrompt || NO_PAGE_CONTEXT;
+    const lastBrowserContext =
+      this.#getLastBrowserContext(userMessage) ?? NO_PAGE_CONTEXT;
+    if (browserContext === lastBrowserContext) {
       return;
     }
     userMessage.content.userContext ??= {};
-    userMessage.content.userContext.realTimeContext = realTimePrompt;
-    this.#lastBrowserContext = realTimePrompt;
+    userMessage.content.userContext.realTimeContext = browserContext;
+  }
+
+  /**
+   * Browser context sent last before `userMessage`. Read from messages so
+   * retries and reopened conversations don’t need extra state.
+   *
+   * @param {ChatMessage} userMessage
+   * @returns {string|undefined}
+   */
+  #getLastBrowserContext(userMessage) {
+    return this.messages.findLast(
+      message =>
+        message !== userMessage &&
+        message.role === MESSAGE_ROLE.USER &&
+        message.content.userContext?.realTimeContext
+    )?.content.userContext.realTimeContext;
   }
 
   /**
@@ -904,7 +958,8 @@ export class ChatConversation extends Conversation {
   ) {
     const memoriesContext = await constructMemories(
       prompt,
-      this.#getPreviousRelevantMemories(messageCount)
+      this.#getPreviousRelevantMemories(messageCount),
+      this.engine?.model
     );
     if (memoriesContext == null) {
       return;
@@ -983,15 +1038,17 @@ export class ChatConversation extends Conversation {
    * @returns {URL|null}
    */
   getMostRecentPageVisited() {
-    const sites = this.getSitesList();
+    const message = this.messages.findLast(m =>
+      m.pageUrl?.protocol.startsWith("http")
+    );
 
-    return sites.length ? sites.pop() : null;
+    return message?.pageUrl ?? null;
   }
 
   /**
    * Chat wire-format snapshot: filters out empty-body assistant messages,
-   * walks message → wire shape, then injects realTime/memories `userContext`
-   * as USER messages just before the last user message.
+   * walks message → wire shape, then injects `userContext` of each
+   * message as USER messages just before it.
    *
    * @param {object} [opts]
    * @param {boolean} [opts.applyUrlTokens=true]
@@ -1026,27 +1083,49 @@ export class ChatConversation extends Conversation {
       }
     }
 
-    // Inject contextual user-context messages just before the last user
-    // message, as USER-role messages.
-    const lastUserMsgIdx = filteredSrc.findLastIndex(
-      msg => msg.role == MESSAGE_ROLE.USER
+    const messagesWithContext = ChatConversation.#withUserContext(
+      msgsForAPI,
+      filteredSrc
     );
-    if (lastUserMsgIdx > -1) {
-      const userContext = filteredSrc[lastUserMsgIdx].content.userContext;
-      if (userContext) {
-        const contextMsgs = Object.values(userContext).map(contextMsg => ({
-          role: getRoleLabel(MESSAGE_ROLE.USER).toLowerCase(),
-          content: contextMsg,
-        }));
-        msgsForAPI.splice(lastUserMsgIdx, 0, ...contextMsgs);
-      }
-    }
 
     if (applyUrlTokens) {
-      replaceUrlsWithTokens(this, msgsForAPI);
+      replaceUrlsWithTokens(this, messagesWithContext);
     }
 
-    return msgsForAPI;
+    return messagesWithContext;
+  }
+
+  /**
+   * Adds the context stored on each user message as USER messages just before
+   * it, so browser context stays in the history it was sent with. Memories
+   * only come with the last user message, which already folds in the memories
+   * of the messages before.
+   *
+   * @param {object[]} wireMessages - Messages in chat-completions format.
+   * @param {ChatMessage[]} sourceMessages - The messages `wireMessages` were
+   *   built from, in the same order.
+   * @returns {object[]}
+   */
+  static #withUserContext(wireMessages, sourceMessages) {
+    const lastUserMessageIdx = sourceMessages.findLastIndex(
+      msg => msg.role == MESSAGE_ROLE.USER
+    );
+    return wireMessages.flatMap((message, messageIdx) => {
+      const { role, content } = sourceMessages[messageIdx];
+      if (role != MESSAGE_ROLE.USER || !content.userContext) {
+        return [message];
+      }
+      const contextMessages = Object.entries(content.userContext)
+        .filter(
+          ([key]) =>
+            messageIdx === lastUserMessageIdx || key !== "memoriesContext"
+        )
+        .map(([, contextMessage]) => ({
+          role: getRoleLabel(MESSAGE_ROLE.USER).toLowerCase(),
+          content: contextMessage,
+        }));
+      return [...contextMessages, message];
+    });
   }
 
   #updateActiveBranchTipMessageId() {
@@ -1070,6 +1149,14 @@ export class ChatConversation extends Conversation {
     return this.messages.filter(m => CHAT_ROLES.includes(m.role)).length;
   }
 
+  get tokenToUrl() {
+    return this.urlTokenizer.tokenToUrl;
+  }
+
+  get urlToToken() {
+    return this.urlTokenizer.urlToToken;
+  }
+
   /**
    * Returns the contextMentions count from the most recent user message in
    * the conversation, or 0 if none.
@@ -1080,7 +1167,11 @@ export class ChatConversation extends Conversation {
     const lastUserMsg = this.messages.findLast(
       m => m?.role === MESSAGE_ROLE.USER
     );
-    return lastUserMsg?.content?.contextMentions?.length ?? 0;
+    return (
+      lastUserMsg?.content?.contextMentions?.filter(
+        m => !lazy.isTabGroupMember(m)
+      ).length ?? 0
+    );
   }
 
   /**
@@ -1108,7 +1199,7 @@ export class ChatConversation extends Conversation {
    * Updates the tool UI data for a message with a new UI state
    *
    * @param {ChatMessage} message - The message to update
-   * @param {object} data - The update data containing updateData
+   * @param {object} data - The update data containing properties or updateData
    * @param {string|null} nextUI - The next UI state to transition to, or null to clear
    */
   async updateToolUI(message, data, nextUI) {
@@ -1123,6 +1214,7 @@ export class ChatConversation extends Conversation {
       uiType: nextUI,
       properties: {
         ...message.toolUIData.properties,
+        ...data?.properties,
       },
     };
 
@@ -1141,9 +1233,11 @@ export class ChatConversation extends Conversation {
    *
    * @param {string} toolCallId - The ID of the tool call
    * @param {object} uiData - The UI data to attach to the message
+   * @param {object} [options]
+   * @param {boolean} [options.emitComplete=true] - Whether to mark the message complete
    * @returns {object} Result object with success status and message
    */
-  addUIToolToCurrentMessage(toolCallId, uiData) {
+  addUIToolToCurrentMessage(toolCallId, uiData, { emitComplete = true } = {}) {
     const enrichedUIData = { ...uiData };
 
     // Get the last assistant text message to attach UI to
@@ -1215,7 +1309,9 @@ export class ChatConversation extends Conversation {
 
     // Re-emit complete event since the message was already marked complete before tool execution
     // This forces the UI to re-render with the new toolUIData
-    this.emit("chat-conversation:message-complete", currentMessage);
+    if (emitComplete) {
+      this.emit("chat-conversation:message-complete", currentMessage);
+    }
 
     return {
       success: true,

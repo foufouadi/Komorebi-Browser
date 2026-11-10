@@ -73,7 +73,8 @@ nsresult MathMLElement::BindToTree(BindContext& aContext, nsINode& aParent) {
         [self = RefPtr<MathMLElement>(this)]() {
           nsAutoString nonce;
           self->GetNonce(nonce);
-          self->SetAttr(kNameSpaceID_None, nsGkAtoms::nonce, u""_ns, true);
+          self->SetAttr(kNameSpaceID_None, nsGkAtoms::nonce, u""_ns, true,
+                        IsKnownNewAttr::No);
           self->SetNonce(nonce);
         }));
   }
@@ -142,7 +143,7 @@ static Element::MappedAttributeEntry sGlobalAttributes[] = {
     {nsGkAtoms::displaystyle},
     {nullptr}};
 
-bool MathMLElement::IsAttributeMapped(const nsAtom* aAttribute) const {
+bool MathMLElement::IsNoNamespaceAttrMapped(const nsAtom* aAttribute) const {
   MOZ_ASSERT(IsMathMLElement());
 
   static const MappedAttributeEntry* const globalMap[] = {sGlobalAttributes};
@@ -434,6 +435,7 @@ static constexpr uint8_t cmemmemi(const char (&needle)[N],
 
 void MathMLElement::MapGlobalMathMLAttributesInto(
     MappedDeclarationsBuilder& aBuilder) {
+  MapXmlLangAttrInto(aBuilder);
   // scriptlevel
   // https://w3c.github.io/mathml-core/#dfn-scriptlevel
   const nsAttrValue* value = aBuilder.GetAttr(nsGkAtoms::scriptlevel);

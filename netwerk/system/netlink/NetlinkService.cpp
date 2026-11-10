@@ -27,9 +27,15 @@
 #include "nsString.h"
 #include "nsThreadUtils.h"
 
+#ifdef MOZ_ENTERPRISE
+#  include "nsNetworkInterface_linux.h"
+#endif
+
 #if defined(HAVE_RES_NINIT)
 #  include <netinet/in.h>
 #  include <resolv.h>
+
+#  include <memory>
 #endif
 
 namespace mozilla::net {
@@ -261,6 +267,7 @@ class NetlinkLink {
   uint32_t GetIndex() const { return mIface.ifi_index; }
   uint32_t GetFlags() const { return mIface.ifi_flags; }
   uint16_t GetType() const { return mIface.ifi_type; }
+  const uint8_t* GetMac() const { return mMAC; }
 
   bool Init(struct nlmsghdr* aNlh) {
     struct ifinfomsg* iface;
@@ -271,11 +278,19 @@ class NetlinkLink {
     len = aNlh->nlmsg_len - NLMSG_LENGTH(sizeof(*iface));
 
     bool hasName = false;
+    bool hasMAC = false;
     for (attr = IFLA_RTA(iface); RTA_OK(attr, len);
          attr = RTA_NEXT(attr, len)) {
       if (attr->rta_type == IFLA_IFNAME) {
         mName.Assign((char*)RTA_DATA(attr));
         hasName = true;
+      } else if (attr->rta_type == IFLA_ADDRESS) {
+        memcpy(mMAC, RTA_DATA(attr),
+               std::min<size_t>(RTA_PAYLOAD(attr), ETH_ALEN));
+        hasMAC = true;
+      }
+
+      if (hasName && hasMAC) {
         break;
       }
     }
@@ -290,6 +305,7 @@ class NetlinkLink {
 
  private:
   nsCString mName;
+  uint8_t mMAC[ETH_ALEN]{};
   struct ifinfomsg mIface{};
 };
 
@@ -754,7 +770,7 @@ void NetlinkService::OnLinkMessage(struct nlmsghdr* aNlh) {
   LOG(("NetlinkService::OnLinkMessage [type=%s]",
        aNlh->nlmsg_type == RTM_NEWLINK ? "new" : "del"));
 
-  UniquePtr<NetlinkLink> link(new NetlinkLink());
+  auto link = std::make_unique<NetlinkLink>();
   if (!link->Init(aNlh)) {
     return;
   }
@@ -768,7 +784,7 @@ void NetlinkService::OnLinkMessage(struct nlmsghdr* aNlh) {
       if (!entry) {
         LOG(("Creating new link [index=%u, name=%s, flags=%u, type=%u]",
              linkIndex, linkName.get(), link->GetFlags(), link->GetType()));
-        entry.Insert(MakeUnique<LinkInfo>(std::move(link)));
+        entry.Insert(std::make_unique<LinkInfo>(std::move(link)));
       } else {
         LOG(("Updating link [index=%u, name=%s, flags=%u, type=%u]", linkIndex,
              linkName.get(), link->GetFlags(), link->GetType()));
@@ -782,6 +798,9 @@ void NetlinkService::OnLinkMessage(struct nlmsghdr* aNlh) {
           // If the link went down, remove all routes and neighbors, but keep
           // addresses.
           linkInfo->mDefaultRoutes.Clear();
+#ifdef MOZ_ENTERPRISE
+          linkInfo->mNonGlobalDefaultRoutes.Clear();
+#endif
           linkInfo->mNeighbors.Clear();
         }
 
@@ -805,7 +824,7 @@ void NetlinkService::OnAddrMessage(struct nlmsghdr* aNlh) {
   LOG(("NetlinkService::OnAddrMessage [type=%s]",
        aNlh->nlmsg_type == RTM_NEWADDR ? "new" : "del"));
 
-  UniquePtr<NetlinkAddress> address(new NetlinkAddress());
+  auto address = std::make_unique<NetlinkAddress>();
   if (!address->Init(aNlh)) {
     return;
   }
@@ -852,17 +871,25 @@ void NetlinkService::OnAddrMessage(struct nlmsghdr* aNlh) {
     linkInfo->mAddresses.AppendElement(std::move(address));
   } else {
     // Remove all routes associated with this address
-    for (uint32_t i = linkInfo->mDefaultRoutes.Length(); i-- > 0;) {
-      MOZ_ASSERT(linkInfo->mDefaultRoutes[i]->GetGWAddrPtr(),
-                 "Stored routes must have gateway!");
-      if (linkInfo->mDefaultRoutes[i]->Family() == address->Family() &&
-          address->ContainsAddr(linkInfo->mDefaultRoutes[i]->GetGWAddrPtr())) {
-        if (LOG_ENABLED()) {
-          nsAutoCString routeDbgStr;
-          linkInfo->mDefaultRoutes[i]->GetAsString(routeDbgStr);
-          LOG(("Removing default route: %s", routeDbgStr.get()));
+    for (auto* routes :
+#ifdef MOZ_ENTERPRISE
+         { &linkInfo->mDefaultRoutes, &linkInfo->mNonGlobalDefaultRoutes }
+#else
+         {&linkInfo->mDefaultRoutes}
+#endif
+    ) {
+      for (uint32_t i = routes->Length(); i-- > 0;) {
+        MOZ_ASSERT((*routes)[i]->GetGWAddrPtr(),
+                   "Stored routes must have gateway!");
+        if ((*routes)[i]->Family() == address->Family() &&
+            address->ContainsAddr((*routes)[i]->GetGWAddrPtr())) {
+          if (LOG_ENABLED()) {
+            nsAutoCString routeDbgStr;
+            (*routes)[i]->GetAsString(routeDbgStr);
+            LOG(("Removing default route: %s", routeDbgStr.get()));
+          }
+          routes->RemoveElementAt(i);
         }
-        linkInfo->mDefaultRoutes.RemoveElementAt(i);
       }
     }
 
@@ -897,7 +924,7 @@ void NetlinkService::OnRouteMessage(struct nlmsghdr* aNlh) {
   LOG(("NetlinkService::OnRouteMessage [type=%s]",
        aNlh->nlmsg_type == RTM_NEWROUTE ? "new" : "del"));
 
-  UniquePtr<NetlinkRoute> route(new NetlinkRoute());
+  auto route = std::make_unique<NetlinkRoute>();
   if (!route->Init(aNlh)) {
     return;
   }
@@ -944,16 +971,21 @@ void NetlinkService::OnRouteMessage(struct nlmsghdr* aNlh) {
     return;
   }
 
-  if (route->Family() == AF_INET6 &&
-      net::utils::ipv6_scope((const unsigned char*)route->GetGWAddrPtr()) !=
-          IPV6_SCOPE_GLOBAL) {
-    if (LOG_ENABLED()) {
-      nsAutoCString routeDbgStr;
-      route->GetAsString(routeDbgStr);
-      LOG(("Scope of GW isn't global: %s", routeDbgStr.get()));
-    }
+  bool isGlobalGW =
+      route->Family() != AF_INET6 ||
+      net::utils::ipv6_scope((const unsigned char*)route->GetGWAddrPtr()) ==
+          IPV6_SCOPE_GLOBAL;
+  if (!isGlobalGW && LOG_ENABLED()) {
+    nsAutoCString routeDbgStr;
+    route->GetAsString(routeDbgStr);
+    LOG(("Scope of GW isn't global, not used for network ID: %s",
+         routeDbgStr.get()));
+  }
+#ifndef MOZ_ENTERPRISE
+  if (!isGlobalGW) {
     return;
   }
+#endif
 
   LinkInfo* linkInfo = nullptr;
   mLinks.Get(route->Oif(), &linkInfo);
@@ -967,8 +999,15 @@ void NetlinkService::OnRouteMessage(struct nlmsghdr* aNlh) {
     return;
   }
 
-  for (uint32_t i = 0; i < linkInfo->mDefaultRoutes.Length(); ++i) {
-    if (linkInfo->mDefaultRoutes[i]->Equals(*route)) {
+  nsTArray<UniquePtr<NetlinkRoute>>& defaultRoutes =
+#ifdef MOZ_ENTERPRISE
+      isGlobalGW ? linkInfo->mDefaultRoutes : linkInfo->mNonGlobalDefaultRoutes;
+#else
+      linkInfo->mDefaultRoutes;
+#endif
+
+  for (uint32_t i = 0; i < defaultRoutes.Length(); ++i) {
+    if (defaultRoutes[i]->Equals(*route)) {
       // We shouldn't find equal route when adding a new one, but just in case
       // it can happen remove the old one to avoid duplicities.
       if (LOG_ENABLED()) {
@@ -976,7 +1015,7 @@ void NetlinkService::OnRouteMessage(struct nlmsghdr* aNlh) {
         route->GetAsString(routeDbgStr);
         LOG(("Removing default route: %s", routeDbgStr.get()));
       }
-      linkInfo->mDefaultRoutes.RemoveElementAt(i);
+      defaultRoutes.RemoveElementAt(i);
       break;
     }
   }
@@ -987,7 +1026,7 @@ void NetlinkService::OnRouteMessage(struct nlmsghdr* aNlh) {
       route->GetAsString(routeDbgStr);
       LOG(("Adding default route: %s", routeDbgStr.get()));
     }
-    linkInfo->mDefaultRoutes.AppendElement(std::move(route));
+    defaultRoutes.AppendElement(std::move(route));
   }
 }
 
@@ -995,7 +1034,7 @@ void NetlinkService::OnNeighborMessage(struct nlmsghdr* aNlh) {
   LOG(("NetlinkService::OnNeighborMessage [type=%s]",
        aNlh->nlmsg_type == RTM_NEWNEIGH ? "new" : "del"));
 
-  UniquePtr<NetlinkNeighbor> neigh(new NetlinkNeighbor());
+  auto neigh = std::make_unique<NetlinkNeighbor>();
   if (!neigh->Init(aNlh)) {
     return;
   }
@@ -1068,7 +1107,7 @@ void NetlinkService::OnRouteCheckResult(struct nlmsghdr* aNlh) {
   UniquePtr<NetlinkRoute> route;
 
   if (aNlh) {
-    route = MakeUnique<NetlinkRoute>();
+    route = std::make_unique<NetlinkRoute>();
     if (!route->Init(aNlh)) {
       route = nullptr;
     } else {
@@ -1810,6 +1849,9 @@ void NetlinkService::CalculateNetworkID() {
 
   UpdateLinkStatus();
   ExtractDNSProperties();
+#ifdef MOZ_ENTERPRISE
+  UpdateNetworkInterfaces();
+#endif
 
   bool idChanged = false;
   bool found4 = CalculateIDForFamily(AF_INET, &sha1);
@@ -1817,6 +1859,7 @@ void NetlinkService::CalculateNetworkID() {
 
   if (found4 || found6) {
     nsAutoCString output;
+    SHA1Sum unseeded = sha1;
     SeedNetworkId(sha1);
     uint8_t digest[SHA1Sum::kHashSize];
     sha1.finish(digest);
@@ -1826,6 +1869,7 @@ void NetlinkService::CalculateNetworkID() {
     MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
     LOG(("networkid: id %s\n", output.get()));
     MutexAutoLock lock(mMutex);
+    mUnseededNetworkId = mozilla::Some(unseeded);
     if (mNetworkId != output) {
       // new id
       if (found4 && !found6) {
@@ -1851,6 +1895,7 @@ void NetlinkService::CalculateNetworkID() {
       idChanged = true;
       glean::network::id.AccumulateSingleSample(0);
     }
+    mUnseededNetworkId.reset();
   }
 
   if (idChanged) {
@@ -1858,9 +1903,10 @@ void NetlinkService::CalculateNetworkID() {
     LOG(("has IPv6: %d", bool(sHasNonLocalIPv6)));
   }
 
-  // If this is first time we calculate network ID, don't report it as a network
-  // change. We've started with an empty ID and we've just calculated the
-  // correct ID. The network hasn't really changed.
+  // The first calculation only replaces the initial empty ID with the correct
+  // one. The network hasn't really changed, so don't send the network change
+  // event for it. The network ID change event is still sent so that observers
+  // learn that the ID is now available.
   static bool initialIDCalculation = true;
 
   RefPtr<NetlinkServiceListener> listener;
@@ -1869,9 +1915,11 @@ void NetlinkService::CalculateNetworkID() {
     listener = mListener;
   }
 
-  if (!initialIDCalculation && idChanged && listener) {
+  if (idChanged && listener) {
     listener->OnNetworkIDChanged();
-    mSendNetworkChangeEvent = true;
+    if (!initialIDCalculation) {
+      mSendNetworkChangeEvent = true;
+    }
   }
 
   if (mSendNetworkChangeEvent && listener) {
@@ -1885,6 +1933,14 @@ void NetlinkService::CalculateNetworkID() {
 void NetlinkService::GetNetworkID(nsACString& aNetworkID) {
   MutexAutoLock lock(mMutex);
   aNetworkID = mNetworkId;
+}
+
+bool NetlinkService::MatchNetworkID(const nsACString& aNetworkID,
+                                    const nsACString& aSeed,
+                                    nsACString& aMatchingNetworkID) {
+  MutexAutoLock lock(mMutex);
+  return MatchNetworkId(aNetworkID, aSeed, mUnseededNetworkId, mNetworkId,
+                        aMatchingNetworkID);
 }
 
 nsresult NetlinkService::GetDnsSuffixList(nsTArray<nsCString>& aDnsSuffixList) {
@@ -1902,6 +1958,60 @@ nsresult NetlinkService::GetResolvers(nsTArray<NetAddr>& aResolvers) {
   MutexAutoLock lock(mMutex);
   aResolvers = mDNSResolvers.Clone();
   return NS_OK;
+#else
+  return NS_ERROR_NOT_IMPLEMENTED;
+#endif
+}
+
+#ifdef MOZ_ENTERPRISE
+void NetlinkService::UpdateNetworkInterfaces() {
+  MOZ_ASSERT(!NS_IsMainThread(), "Must not be called on the main thread");
+
+  nsTArray<NetworkInterface> networkInterfaces;
+  for (const auto& linkInfo : mLinks.Values()) {
+    if (!linkInfo->mIsUp) {
+      continue;
+    }
+
+    nsAutoCString linkName;
+    linkInfo->mLink->GetName(linkName);
+
+    LinuxNetworkInterface intf(linkName);
+    intf.SetMAC(linkInfo->mLink->GetMac());
+
+    for (const auto& addr : linkInfo->mAddresses) {
+      if (addr->Family() == AF_INET) {
+        intf.AddIP(reinterpret_cast<const in_addr*>(addr->GetAddrPtr()));
+      } else if (addr->Family() == AF_INET6) {
+        intf.AddIP(reinterpret_cast<const in6_addr*>(addr->GetAddrPtr()));
+      }
+    }
+
+    for (const auto* routes :
+         {&linkInfo->mDefaultRoutes, &linkInfo->mNonGlobalDefaultRoutes}) {
+      for (const auto& route : *routes) {
+        if (route->Family() == AF_INET) {
+          intf.AddGW(reinterpret_cast<const in_addr*>(route->GetGWAddrPtr()));
+        } else if (route->Family() == AF_INET6) {
+          intf.AddGW(reinterpret_cast<const in6_addr*>(route->GetGWAddrPtr()));
+        }
+      }
+    }
+
+    networkInterfaces.AppendElement(std::move(intf));
+  }
+
+  MutexAutoLock lock(mMutex);
+  mNetworkInterfaces = std::move(networkInterfaces);
+}
+#endif
+
+nsresult NetlinkService::GetNetworkInterfaces(
+    nsTArray<RefPtr<nsINetworkInterface>>& aNetworkInterfaces) {
+#ifdef MOZ_ENTERPRISE
+  MutexAutoLock lock(mMutex);
+  return nsNetworkInterface::GetNetworkInterfaces(mNetworkInterfaces,
+                                                  aNetworkInterfaces);
 #else
   return NS_ERROR_NOT_IMPLEMENTED;
 #endif

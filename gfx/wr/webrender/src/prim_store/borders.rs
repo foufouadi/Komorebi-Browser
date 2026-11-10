@@ -2,78 +2,61 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{ColorF, NormalBorder, RepeatMode};
+use api::{ColorF, NormalBorder};
 use api::units::*;
 use smallvec::SmallVec;
-use crate::border::{build_border_instances, NormalBorderSegment, MAX_BORDER_RESOLUTION};
-use crate::clip::{ClipChainInstance, ClipIntern};
+use crate::border::{NormalBorderSegment, MAX_BORDER_RESOLUTION};
 use crate::command_buffer::CommandBufferIndex;
 use crate::pattern::image::ImagePattern;
 use crate::quad::{self, QuadDescriptor, QuadTransformState};
-use crate::visibility::PrimitiveDrawIndex;
+use crate::quad_clip::QuadClipStack;
 use crate::render_task_cache::{RenderTaskCacheKey, RenderTaskCacheKeyKind, RenderTaskParent, to_cache_size};
-use crate::scene_building::{IsVisible};
-use crate::frame_builder::{FrameBuildingContext, FrameBuildingState, PictureContext};
-use crate::intern::{self, DataStore};
-use crate::internal_types::LayoutPrimitiveInfo;
+use crate::frame_builder::{FrameBuildingContext, FrameBuildingState};
+use crate::dl_interner::{DlResolve, DlResolveContext};
 use crate::prim_store::{
-    InternablePrimitive, NinePatchDescriptor, PrimKey, PrimTemplate, PrimTemplateCommonData, PrimitiveKind, PrimitiveScratchBuffer, PrimitiveStore
+    NinePatchDescriptor, PrimTemplate, PrimTemplateCommonData, PrimitiveScratchBuffer
 };
+use crate::scene_building::validate_image_key;
 use crate::resource_cache::ImageRequest;
-use crate::render_task::{RenderTask, RenderTaskKind};
+use crate::spatial_tree::SpatialTree;
+use crate::render_task::RenderTask;
 use crate::render_task_graph::RenderTaskId;
-use crate::spatial_tree::SpatialNodeIndex;
 use crate::util::clamp_to_scale_factor;
 
-// `NormalBorderPrim` now lives in `webrender_api::interned_prims` so content-process
-// interning can hold it. Re-exported to keep existing references working.
-pub use api::interned_prims::NormalBorderPrim;
-
-pub type NormalBorderKey = PrimKey<NormalBorderPrim>;
-
-impl intern::InternDebug for NormalBorderKey {}
+// `NormalBorderPrim` and its key live in `webrender_api::interned_prims`,
+// since the content display list builder interns them.
+pub use api::interned_prims::NormalBorderKey;
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(MallocSizeOf)]
+#[derive(MallocSizeOf, Clone)]
 pub struct NormalBorderData {
     pub border: NormalBorder,
     pub widths: LayoutSideOffsets,
 }
 
-impl NormalBorderData {
-    pub fn update(
-        &self,
-        desc: &QuadDescriptor,
-        clip_chain: &ClipChainInstance,
-        prim_spatial_node_index: SpatialNodeIndex,
-        device_pixel_scale: DevicePixelScale,
-        draw_index: PrimitiveDrawIndex,
-        quad_transform: &mut QuadTransformState,
-        frame_context: &FrameBuildingContext,
-        pic_context: &PictureContext,
-        targets: &[CommandBufferIndex],
-        interned_clips: &DataStore<ClipIntern>,
-        frame_state: &mut FrameBuildingState,
-        scratch: &mut PrimitiveScratchBuffer,
-    ) {
-        // TODO(gw): For now, the scale factors to rasterize borders at are
-        //           based on the true world transform of the primitive. When
-        //           raster roots with local scale are supported in future,
-        //           that will need to be accounted for here.
-        let scale = frame_context
-            .spatial_tree
-            .get_world_transform(prim_spatial_node_index)
-            .scale_factors();
+pub struct BorderRasterization {
+    pub border: NormalBorder,
+    pub segments: SmallVec<[NormalBorderSegment; 8]>,
+    pub scale: LayoutToDeviceScale,
+}
 
-        // Scale factors are normalized to a power of 2 to reduce the number of
-        // resolution changes.
-        // For frames with a changing scale transform round scale factors up to
-        // nearest power-of-2 boundary so that we don't keep having to redraw
-        // the content as it scales up and down. Rounding up to nearest
-        // power-of-2 boundary ensures we never scale up, only down --- avoiding
-        // jaggies. It also ensures we never scale down by more than a factor of
-        // 2, avoiding bad downscaling quality.
+impl BorderRasterization {
+    pub fn new(
+        rect: LayoutRect,
+        mut border: NormalBorder,
+        mut widths: LayoutSideOffsets,
+        quad_transform: &QuadTransformState,
+        snap_thickness: bool,
+        spatial_tree: &SpatialTree,
+    ) -> Self {
+        // The border is rasterized at the scale it is composited at: the
+        // primitive to raster transform of the surface being drawn into, times
+        // that surface's device pixel scale. The two are kept apart because only
+        // the raster part is quantized to a power of two below.
+        let raster_scale = quad_transform.raster_scale_factors();
+        let device_pixel_scale = quad_transform.device_pixel_scale();
+
         // Snap the thickness of a border the author declared at >= 1 CSS pixel
         // to a whole device pixel. Border edges are composited onto their
         // layout-space rects, so a transform makes a 1px edge a fractional
@@ -84,25 +67,92 @@ impl NormalBorderData {
         // (bug 1950029). Rounding the device thickness to the nearest pixel
         // (floored at 1 so a real border can't disappear) makes every side a
         // consistent whole-pixel width. Genuinely sub-CSS-pixel edges are left
-        // untouched. Uses the unclamped world scale factors, since that is the
-        // transform the edge is actually composited with, not the power-of-2
+        // untouched.
+        //
+        // Both this and the corner snapping below are expressed in layout
+        // space, so they are only valid when a single device scale describes
+        // the whole border. Under a perspective transform `w` varies across the
+        // border box, there is no such scale, and `coplanar_scale_factors`
+        // returns None: widening the layout width by 1/scale would then swell
+        // the border by an unbounded amount as the element tilts away from the
+        // viewer, eating into the content box. Leave those borders at their
+        // authored dimensions.
+        //
+        // Uses the unclamped device scale factors, since that is the transform
+        // the edge is actually composited with, not the power-of-2
         // rasterization scale.
-        let snap_width = |w: f32, s: f32| {
-            if w >= 1.0 && s > 0.0 { (w * s).round().max(1.0) / s } else { w }
-        };
-        let device_scale_x = scale.0 * device_pixel_scale.0;
-        let device_scale_y = scale.1 * device_pixel_scale.0;
-        let mut widths = self.widths;
-        widths.left = snap_width(widths.left, device_scale_x);
-        widths.right = snap_width(widths.right, device_scale_x);
-        widths.top = snap_width(widths.top, device_scale_y);
-        widths.bottom = snap_width(widths.bottom, device_scale_y);
+        //
+        // An anti-aliased border declines the thickness snapping: its thickness
+        // is geometry the caller resolved exactly (an SVG stroke, say) and the
+        // shader resolves its edges at their sub-pixel positions, so moving
+        // them to the grid is what the anti-aliasing is there to avoid. The
+        // corner snapping below still applies, since it is about how the corner
+        // texture is sampled rather than where the border's edges are.
+        if let Some((device_scale_x, device_scale_y)) = quad_transform.coplanar_scale_factors() {
+            let snap_width = |w: f32, s: f32| {
+                if w >= 1.0 && s > 0.0 { (w * s).round().max(1.0) / s } else { w }
+            };
+            if snap_thickness {
+                widths.left = snap_width(widths.left, device_scale_x);
+                widths.right = snap_width(widths.right, device_scale_x);
+                widths.top = snap_width(widths.top, device_scale_y);
+                widths.bottom = snap_width(widths.bottom, device_scale_y);
+            }
 
-        let scale_width = clamp_to_scale_factor(scale.0, false);
-        let scale_height = clamp_to_scale_factor(scale.1, false);
+            // A corner's cached texture is rasterized at the whole-pixel size of its
+            // corner box and then stretched onto that box, so a box with a fractional
+            // device size is resampled on composite: the arc loses contrast against
+            // the grid-snapped straight edges, which reads as the curve being thinner
+            // than the sides (bug 2062877). The box is `max(radius, width)`, so
+            // snapping a radius that exceeds its border width to a whole device pixel
+            // makes that composite exact. Radii below the width don't drive the box
+            // size, so they are left alone.
+            //
+            // Rounds down rather than to the nearest pixel. Growing a radius can push
+            // the pair that shares an edge past the length of that edge, which makes
+            // the two corner segments overlap and double-blend a translucent border;
+            // and since the two axes are constrained by different edges, guarding them
+            // separately can round one axis up and the other down, turning a circular
+            // corner into an elliptical one.
+            let snap_radius = |r: f32, w: f32, s: f32| {
+                if r > w && s > 0.0 { (r * s).floor().max(w * s) / s } else { r }
+            };
+            let r = &mut border.radius;
+            r.top_left.width = snap_radius(r.top_left.width, widths.left, device_scale_x);
+            r.top_left.height = snap_radius(r.top_left.height, widths.top, device_scale_y);
+            r.top_right.width = snap_radius(r.top_right.width, widths.right, device_scale_x);
+            r.top_right.height = snap_radius(r.top_right.height, widths.top, device_scale_y);
+            r.bottom_left.width = snap_radius(r.bottom_left.width, widths.left, device_scale_x);
+            r.bottom_left.height = snap_radius(r.bottom_left.height, widths.bottom, device_scale_y);
+            r.bottom_right.width = snap_radius(r.bottom_right.width, widths.right, device_scale_x);
+            r.bottom_right.height = snap_radius(r.bottom_right.height, widths.bottom, device_scale_y);
+        }
+
+        // Under an animated or pinch-zoomed transform, scale factors are
+        // normalized to a power of 2 to reduce the number of resolution changes:
+        // rounding up to the nearest power-of-2 boundary means we don't keep
+        // having to redraw the content as it scales up and down. It ensures we
+        // never scale up, only down --- avoiding jaggies. It also ensures we
+        // never scale down by more than a factor of 2, avoiding bad downscaling
+        // quality.
+        // Under a static transform the exact scale is used, so that the corner
+        // textures composite 1:1 instead of being resampled.
+        let prim_spatial_node = spatial_tree
+            .get_spatial_node(quad_transform.prim_spatial_node_index());
+        let scale_may_change = prim_spatial_node.is_ancestor_or_self_animating
+            || prim_spatial_node.is_ancestor_or_self_zooming;
+        let (scale_width, scale_height) = if scale_may_change {
+            (
+                clamp_to_scale_factor(raster_scale.0, false),
+                clamp_to_scale_factor(raster_scale.1, false),
+            )
+        } else {
+            (raster_scale.0.abs(), raster_scale.1.abs())
+        };
         // Pick the maximum dimension as scale
-        let world_scale = LayoutToWorldScale::new(scale_width.max(scale_height));
-        let mut scale = world_scale * device_pixel_scale;
+        let mut scale = LayoutToDeviceScale::new(
+            scale_width.max(scale_height) * device_pixel_scale.0,
+        );
 
         // Build the per-frame border segments up front so we can clamp the
         // rasterization scale against the largest segment before requesting
@@ -110,8 +160,8 @@ impl NormalBorderData {
         // lower resolution and stretches them: the right shape, but blurrier.
         let mut segments: SmallVec<[NormalBorderSegment; 8]> = SmallVec::new();
         crate::border::create_border_segments(
-            desc.pattern_rect,
-            &self.border,
+            rect,
+            &border,
             &widths,
             &mut |segment| segments.push(segment.clone()),
         );
@@ -125,32 +175,42 @@ impl NormalBorderData {
         let max_scale = LayoutToDeviceScale::new(MAX_BORDER_RESOLUTION as f32 / max_dim);
         scale.0 = scale.0.min(max_scale.0);
 
-        for segment in &segments {
-            let segment_bounds = |extent: &LayoutRect| {
-                let mut bounds = desc.bounds.intersection_unchecked(extent);
-                if let Some(clip_rect) = segment.clip_rect {
-                    bounds = bounds.intersection_unchecked(&clip_rect);
-                }
-                bounds
-            };
+        Self { border, segments, scale }
+    }
+}
 
+impl NormalBorderData {
+    pub fn update(
+        &self,
+        desc: &QuadDescriptor,
+        clips: &QuadClipStack,
+        quad_transform: &mut QuadTransformState,
+        snap_thickness: bool,
+        frame_context: &FrameBuildingContext,
+        targets: &[CommandBufferIndex],
+        frame_state: &mut FrameBuildingState,
+        scratch: &mut PrimitiveScratchBuffer,
+    ) {
+        let BorderRasterization { border, segments, mut scale } = BorderRasterization::new(
+            desc.pattern_rect, self.border, self.widths, quad_transform,
+            snap_thickness, frame_context.spatial_tree,
+        );
+
+        for segment in &segments {
             if let Some(color) = &segment.is_solid {
                 quad::prepare_quad(
                     color,
                     &QuadDescriptor {
                         pattern_rect: segment.pattern_rect,
-                        bounds: segment_bounds(&segment.pattern_rect),
+                        bounds: segment.bounds(&desc.bounds),
                         aligned_aa_edges: desc.aligned_aa_edges & segment.edge_flags,
                         transformed_aa_edges: desc.transformed_aa_edges & segment.edge_flags,
                     },
-                    draw_index,
                     &None,
-                    clip_chain,
+                    clips,
                     quad_transform,
-                    frame_context,
-                    pic_context,
+                    frame_context.spatial_tree,
                     targets,
-                    interned_clips,
                     frame_state,
                     scratch,
                 );
@@ -177,17 +237,8 @@ impl NormalBorderData {
                 frame_state.rg_builder,
                 &mut frame_state.surface_builder,
                 &mut |rg_builder, gpu_buffer_builder| {
-                    rg_builder.add().init(RenderTask::new_dynamic(
-                        cache_size,
-                        RenderTaskKind::new_border_segment(
-                            build_border_instances(
-                                &segment.cache_key,
-                                cache_size,
-                                &self.border,
-                                scale,
-                                gpu_buffer_builder,
-                            )
-                        ),
+                    rg_builder.add().init(segment.render_task(
+                        cache_size, &border, scale, gpu_buffer_builder,
                     ))
                 }
             );
@@ -206,60 +257,23 @@ impl NormalBorderData {
             // the visible part for corners whose adjacent corner overlaps.
             let segment_pattern_rect = segment.pattern_rect;
 
-            let mut stretch_size = segment_pattern_rect.size();
-            let mut spacing = LayoutSize::zero();
-            let mut _repeat_offset = LayoutVector2D::zero();
-            crate::border::compute_border_repetition(
-                segment_pattern_rect.size(),
-                cache_size.to_f32(),
-                segment.repeat_x,
-                segment.repeat_y,
-                &mut stretch_size,
-                &mut spacing,
-                &mut _repeat_offset,
-            );
-
-            // The positioning and size of the dashes and dots is not specified
-            // but browsers are encouraged to make the pattern symetrical.
-            // One way to do this is to apply the repeat offset computed
-            // by compute_border_repetition. However the pattern that we
-            // are repeating is meant to be instead stretched to so that
-            // an integer number of repetitions fills the space.
-
-            if segment.repeat_x == RepeatMode::Repeat {
-                let w = segment_pattern_rect.width();
-                let sw = stretch_size.width;
-                let scale = w / ((w / sw).round() * sw);
-
-                stretch_size.width *= scale;
-            }
-
-            if segment.repeat_y == RepeatMode::Repeat {
-                let h = segment_pattern_rect.height();
-                let sh = stretch_size.height;
-                let scale = h / ((h / sh).round() * sh);
-
-                stretch_size.height *= scale;
-            }
+            let (stretch_size, spacing) = segment.repetition(cache_size);
 
             quad::prepare_repeatable_quad(
                 &pattern,
                 &QuadDescriptor {
                     pattern_rect: segment_pattern_rect,
-                    bounds: segment_bounds(&segment_pattern_rect),
+                    bounds: segment.bounds(&desc.bounds),
                     aligned_aa_edges: desc.aligned_aa_edges & segment.edge_flags,
                     transformed_aa_edges: desc.transformed_aa_edges & segment.edge_flags,
                 },
                 stretch_size,
                 spacing,
-                draw_index,
                 &None,
-                clip_chain,
+                clips,
                 quad_transform,
-                frame_context,
-                pic_context,
+                frame_context.spatial_tree,
                 targets,
-                interned_clips,
                 frame_state,
                 scratch,
             );
@@ -269,11 +283,12 @@ impl NormalBorderData {
 
 pub type NormalBorderTemplate = PrimTemplate<NormalBorderData>;
 
-impl From<NormalBorderKey> for NormalBorderTemplate {
-    fn from(key: NormalBorderKey) -> Self {
+/// Nothing to validate: a normal border names no resource.
+impl DlResolve<NormalBorderKey> for NormalBorderTemplate {
+    fn resolve(key: &NormalBorderKey, _ctx: &DlResolveContext) -> Self {
         let common = PrimTemplateCommonData::with_key_common(key.common);
 
-        let mut border: NormalBorder = key.kind.border.into();
+        let mut border: NormalBorder = key.kind.border.clone().into();
         let widths = LayoutSideOffsets::from_au(key.kind.widths);
 
         // FIXME(emilio): Is this the best place to do this?
@@ -289,58 +304,17 @@ impl From<NormalBorderKey> for NormalBorderTemplate {
     }
 }
 
-pub type NormalBorderDataHandle = intern::Handle<NormalBorderPrim>;
-
-impl intern::Internable for NormalBorderPrim {
-    type Key = NormalBorderKey;
-    type StoreData = NormalBorderTemplate;
-    type InternData = ();
-    const PROFILE_COUNTER: usize = crate::profiler::INTERNED_NORMAL_BORDERS;
-}
-
-impl InternablePrimitive for NormalBorderPrim {
-    fn into_key(
-        self,
-        info: &LayoutPrimitiveInfo,
-    ) -> NormalBorderKey {
-        NormalBorderKey::new(
-            info.into(),
-            self,
-        )
-    }
-
-    fn make_instance_kind(
-        _key: NormalBorderKey,
-        data_handle: NormalBorderDataHandle,
-        _: &mut PrimitiveStore,
-    ) -> PrimitiveKind {
-        PrimitiveKind::NormalBorder {
-            data_handle,
-        }
-    }
-}
-
-
-impl IsVisible for NormalBorderPrim {
-    fn is_visible(&self) -> bool {
-        true
-    }
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 
-// `ImageBorder` now lives in `webrender_api::interned_prims` (with the image
-// request inlined as key/rendering/tile so the value is api-resident). The
-// frame-time `ImageBorderData` below rebuilds the `ImageRequest`.
-pub use api::interned_prims::ImageBorder;
-
-pub type ImageBorderKey = PrimKey<ImageBorder>;
-
-impl intern::InternDebug for ImageBorderKey {}
+// `ImageBorder` and its key live in `webrender_api::interned_prims` (with the
+// image request inlined as key/rendering/tile so the value is api-resident),
+// since the content display list builder interns them. The frame-time
+// `ImageBorderData` below rebuilds the `ImageRequest`.
+pub use api::interned_prims::ImageBorderKey;
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(MallocSizeOf)]
+#[derive(MallocSizeOf, Clone)]
 pub struct ImageBorderData {
     #[ignore_malloc_size_of = "Arc"]
     pub request: ImageRequest,
@@ -373,58 +347,28 @@ impl ImageBorderData {
 
 pub type ImageBorderTemplate = PrimTemplate<ImageBorderData>;
 
-impl From<ImageBorderKey> for ImageBorderTemplate {
-    fn from(key: ImageBorderKey) -> Self {
-        let common = PrimTemplateCommonData::with_key_common(key.common);
+/// As for `ImageTemplate`, an image key from any namespace other than the one
+/// the display list was submitted with becomes `ImageKey::DUMMY`, which names
+/// no resource, so the entry exists and draws nothing (bug 2054652).
+impl DlResolve<ImageBorderKey> for ImageBorderTemplate {
+    fn resolve(key: &ImageBorderKey, ctx: &DlResolveContext) -> Self {
+        let image_key = if validate_image_key(key.kind.key, ctx.id_namespace) {
+            key.kind.key
+        } else {
+            api::ImageKey::DUMMY
+        };
 
         ImageBorderTemplate {
-            common,
+            common: PrimTemplateCommonData::with_key_common(key.common),
             kind: ImageBorderData {
                 request: ImageRequest {
-                    key: key.kind.key,
+                    key: image_key,
                     rendering: key.kind.rendering,
                     tile: key.kind.tile,
                 },
-                nine_patch: key.kind.nine_patch,
+                nine_patch: key.kind.nine_patch.clone(),
             }
         }
-    }
-}
-
-pub type ImageBorderDataHandle = intern::Handle<ImageBorder>;
-
-impl intern::Internable for ImageBorder {
-    type Key = ImageBorderKey;
-    type StoreData = ImageBorderTemplate;
-    type InternData = ();
-    const PROFILE_COUNTER: usize = crate::profiler::INTERNED_IMAGE_BORDERS;
-}
-
-impl InternablePrimitive for ImageBorder {
-    fn into_key(
-        self,
-        info: &LayoutPrimitiveInfo,
-    ) -> ImageBorderKey {
-        ImageBorderKey::new(
-            info.into(),
-            self,
-        )
-    }
-
-    fn make_instance_kind(
-        _key: ImageBorderKey,
-        data_handle: ImageBorderDataHandle,
-        _: &mut PrimitiveStore,
-    ) -> PrimitiveKind {
-        PrimitiveKind::ImageBorder {
-            data_handle
-        }
-    }
-}
-
-impl IsVisible for ImageBorder {
-    fn is_visible(&self) -> bool {
-        true
     }
 }
 
@@ -438,10 +382,10 @@ fn test_struct_sizes() {
     //     test expectations and move on.
     // (b) You made a structure larger. This is not necessarily a problem, but should only
     //     be done with care, and after checking if talos performance regresses badly.
-    assert_eq!(mem::size_of::<NormalBorderPrim>(), 116, "NormalBorderPrim size changed");
-    assert_eq!(mem::size_of::<NormalBorderTemplate>(), 168, "NormalBorderTemplate size changed");
-    assert_eq!(mem::size_of::<NormalBorderKey>(), 120, "NormalBorderKey size changed");
-    assert_eq!(mem::size_of::<ImageBorder>(), 68, "ImageBorder size changed");
-    assert_eq!(mem::size_of::<ImageBorderTemplate>(), 72, "ImageBorderTemplate size changed");
-    assert_eq!(mem::size_of::<ImageBorderKey>(), 72, "ImageBorderKey size changed");
+    assert_eq!(mem::size_of::<api::interned_prims::NormalBorderPrim>(), 116, "NormalBorderPrim size changed");
+    assert_eq!(mem::size_of::<NormalBorderTemplate>(), 200, "NormalBorderTemplate size changed");
+    assert_eq!(mem::size_of::<NormalBorderKey>(), 152, "NormalBorderKey size changed");
+    assert_eq!(mem::size_of::<api::interned_prims::ImageBorder>(), 68, "ImageBorder size changed");
+    assert_eq!(mem::size_of::<ImageBorderTemplate>(), 104, "ImageBorderTemplate size changed");
+    assert_eq!(mem::size_of::<ImageBorderKey>(), 104, "ImageBorderKey size changed");
 }

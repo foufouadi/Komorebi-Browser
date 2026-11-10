@@ -67,6 +67,51 @@ add_task(async function test_unconfigured_initial_state() {
   await tearDown(sandbox);
 });
 
+add_task(async function test_loading_state() {
+  const loadingHeaderL10nId = "firefoxview-syncedtabs-loading-header-2";
+  const loadingImageUrl = "chrome://browser/skin/sidebar/kit-tabs-devices.svg";
+
+  const { SyncedTabsErrorHandler } = ChromeUtils.importESModule(
+    "resource:///modules/firefox-view-synced-tabs-error-handler.sys.mjs"
+  );
+  const sandbox = sinon.createSandbox();
+  sandbox.stub(TabsSetupFlowManager, "uiStateIndex").value(0);
+  sandbox.stub(SyncedTabsErrorHandler, "getErrorType").returns(null);
+
+  await withFirefoxView({}, async browser => {
+    const { document } = browser.contentWindow;
+    await navigateToViewAndWait(document, "syncedtabs");
+
+    let syncedTabsComponent = document.querySelector(
+      "view-syncedtabs:not([slot=syncedtabs])"
+    );
+    await TestUtils.waitForCondition(
+      () => syncedTabsComponent.fullyUpdated,
+      "Synced tabs component is fully updated."
+    );
+
+    let emptyState =
+      syncedTabsComponent.shadowRoot.querySelector("fxview-empty-state");
+    is(
+      emptyState.getAttribute("headerlabel"),
+      loadingHeaderL10nId,
+      "Loading message is shown"
+    );
+
+    const image = emptyState.shadowRoot.querySelector("img.image");
+    ok(
+      !image.hidden,
+      "The main image is not hidden while the loading state is shown"
+    );
+    is(
+      image.getAttribute("src"),
+      loadingImageUrl,
+      "The loading state shows its configured main image"
+    );
+  });
+  sandbox.restore();
+});
+
 add_task(async function test_signed_in() {
   const sandbox = setupMocks({
     state: UIState.STATUS_SIGNED_IN,
@@ -134,24 +179,10 @@ add_task(async function test_signed_in() {
       "Navigated to mock support link"
     );
 
-    await openFirefoxViewTab(window);
-    // Test telemetry for adding a device.
-    Services.fog.testResetFOG();
-    // TODO: Exercise the QR-code based flow on Nova, once implemented.
+    // TODO: Test telemetry for adding a device via the QR-code based flow,
+    // once implemented.
     // FIXME: Bug 2058059 - [Nova] On the tabs from other devices panel there is no QR code displayed when signed in to sync with no devices connected
-    if (!Services.prefs.getBoolPref("browser.nova.enabled", false)) {
-      EventUtils.synthesizeMouseAtCenter(
-        emptyState.querySelector(`moz-button[data-action="add-device"]`)
-          .buttonEl,
-        {},
-        browser.contentWindow
-      );
-      Assert.equal(
-        1,
-        Glean.firefoxviewNext.fxaMobileSync.testGetValue().length,
-        "Expected one fxa_continue event."
-      );
-    }
+
     // clean up extra tabs
     while (gBrowser.tabs.length > 1) {
       await BrowserTestUtils.removeTab(gBrowser.tabs.at(-1));

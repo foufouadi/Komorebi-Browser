@@ -63,15 +63,11 @@ __depth :=
 endif
 $(foreach __d,$(__depth) .,$(eval __depth = $(wordlist 2,$(words $(__depth)),$(__depth))$(eval -include $(subst $(space),/,$(strip $(srcdir) $(__depth) defs.mk)))))
 
-COMMA = ,
-
 # Sanity check some variables
 CHECK_VARS := \
- XPI_NAME \
  LIBRARY_NAME \
  MODULE \
  DEPTH \
- XPI_PKGNAME \
  SHARED_LIBRARY_NAME \
  SONAME \
  STATIC_LIBRARY_NAME \
@@ -93,62 +89,20 @@ RM = rm -f
 # build products (typelibs, components, chrome). It may already be specified by
 # a moz.build file.
 #
-# If XPI_NAME is set, the files will be shipped to $(DIST)/xpi-stage/$(XPI_NAME)
-# instead of $(DIST)/bin. In both cases, if DIST_SUBDIR is set, the files will be
-# shipped to a $(DIST_SUBDIR) subdirectory.
-FINAL_TARGET ?= $(if $(XPI_NAME),$(DIST)/xpi-stage/$(XPI_NAME),$(DIST)/bin)$(DIST_SUBDIR:%=/%)
+# If DIST_SUBDIR is set, the files will be shipped to a $(DIST_SUBDIR)
+# subdirectory of $(DIST)/bin.
+FINAL_TARGET ?= $(DIST)/bin$(DIST_SUBDIR:%=/%)
 # Override the stored value for the check to make sure that the variable is not
 # redefined in the Makefile.in value.
 FINAL_TARGET_FROZEN := '$(FINAL_TARGET)'
 
-ifdef XPI_NAME
-ACDEFINES += -DXPI_NAME=$(XPI_NAME)
-endif
-
-CC := $(CC_WRAPPER) $(CC)
-CXX := $(CXX_WRAPPER) $(CXX)
 MKDIR ?= mkdir
 SLEEP ?= sleep
 TOUCH ?= touch
 
-# Don't build SIMPLE_PROGRAMS with PGO, since they don't need it anyway,
-# and we don't have the same build logic to re-link them in the second pass.
-ifdef SIMPLE_PROGRAMS
-NO_PROFILE_GUIDED_OPTIMIZE = 1
-endif
-
-# No sense in profiling unit tests
-ifdef CPP_UNIT_TESTS
-NO_PROFILE_GUIDED_OPTIMIZE = 1
-endif
-
-# Enable profile-based feedback
-ifdef MOZ_PROFILE_GENERATE
-ifneq (1,$(NO_PROFILE_GUIDED_OPTIMIZE))
-PGO_CFLAGS += -DNS_FREE_PERMANENT_DATA=1
-PGO_CFLAGS += $(if $(filter $(notdir $<),$(notdir $(NO_PROFILE_GUIDED_OPTIMIZE))),,$(PROFILE_GEN_CFLAGS))
-endif # NO_PROFILE_GUIDED_OPTIMIZE
-PGO_LDFLAGS += $(PROFILE_GEN_LDFLAGS)
-endif # MOZ_PROFILE_GENERATE
-
-ifdef MOZ_PROFILE_USE
-ifneq (1,$(NO_PROFILE_GUIDED_OPTIMIZE))
-PGO_CFLAGS += $(if $(filter $(notdir $<),$(notdir $(NO_PROFILE_GUIDED_OPTIMIZE))),,$(PROFILE_USE_CFLAGS))
-endif # NO_PROFILE_GUIDED_OPTIMIZE
-PGO_LDFLAGS += $(PROFILE_USE_LDFLAGS)
-endif # MOZ_PROFILE_USE
-
 # Overloaded by comm builds to refer to $(commtopsrcdir), so that
 # `mail` resolves in en-US builds and in repacks.
 LOCALE_TOPDIR ?= $(topsrcdir)
-MAKE_JARS_FLAGS = \
-	-t $(LOCALE_TOPDIR) \
-	-f $(MOZ_JAR_MAKER_FILE_FORMAT) \
-	$(NULL)
-
-ifdef USE_EXTENSION_MANIFEST
-MAKE_JARS_FLAGS += -e
-endif
 
 TAR_CREATE_FLAGS = -chf
 
@@ -166,17 +120,12 @@ INCLUDES = \
 
 include $(MOZILLA_DIR)/config/static-checking-config.mk
 
-ifndef MOZ_LTO
-MOZ_LTO_CFLAGS :=
-MOZ_LTO_LDFLAGS :=
-endif
+LDFLAGS		= $(COMPUTED_LDFLAGS)
 
-LDFLAGS		= $(MOZ_LTO_LDFLAGS) $(COMPUTED_LDFLAGS) $(PGO_LDFLAGS)
-
-COMPILE_CFLAGS	= $(MOZ_LTO_CFLAGS) $(COMPUTED_CFLAGS) $(PGO_CFLAGS) $(_DEPEND_CFLAGS) $(MK_COMPILE_DEFINES)
-COMPILE_CXXFLAGS = $(MOZ_LTO_CFLAGS) $(COMPUTED_CXXFLAGS) $(PGO_CFLAGS) $(_DEPEND_CFLAGS) $(MK_COMPILE_DEFINES)
-COMPILE_CMFLAGS = $(MOZ_LTO_CFLAGS) $(OS_COMPILE_CMFLAGS) $(MOZBUILD_CMFLAGS)
-COMPILE_CMMFLAGS = $(MOZ_LTO_CFLAGS) $(OS_COMPILE_CMMFLAGS) $(MOZBUILD_CMMFLAGS)
+COMPILE_CFLAGS	= $(COMPUTED_CFLAGS) $(COMPUTED_PGO_CFLAGS) $(_DEPEND_CFLAGS)
+COMPILE_CXXFLAGS = $(COMPUTED_CXXFLAGS) $(COMPUTED_PGO_CFLAGS) $(_DEPEND_CFLAGS)
+COMPILE_CMFLAGS = $(COMPUTED_CMFLAGS)
+COMPILE_CMMFLAGS = $(COMPUTED_CMMFLAGS)
 ASFLAGS = $(COMPUTED_ASFLAGS)
 SFLAGS = $(COMPUTED_SFLAGS)
 
@@ -185,28 +134,8 @@ HOST_CXXFLAGS = $(COMPUTED_HOST_CXXFLAGS) $(_HOST_DEPEND_CFLAGS)
 HOST_C_LDFLAGS = $(COMPUTED_HOST_LDFLAGS) $(COMPUTED_HOST_C_LDFLAGS)
 HOST_CXX_LDFLAGS = $(COMPUTED_HOST_LDFLAGS) $(COMPUTED_HOST_CXX_LDFLAGS)
 
-WASM_CFLAGS = $(COMPUTED_WASM_CFLAGS) $(_DEPEND_CFLAGS) $(MK_COMPILE_DEFINES)
-WASM_CXXFLAGS = $(COMPUTED_WASM_CXXFLAGS) $(_DEPEND_CFLAGS) $(MK_COMPILE_DEFINES)
-
-ifdef MOZ_LTO
-ifeq (Darwin,$(OS_TARGET))
-# When linking on macOS, debug info is not linked along with the final binary,
-# and the dwarf data stays in object files until they are "linked" with the
-# dsymutil tool.
-# With LTO, object files are temporary, and are not kept around, which
-# means there's no object file for dsymutil to do its job. Consequently,
-# there is no debug info for LTOed compilation units.
-# The macOS linker has however an option to explicitly keep those object
-# files, which dsymutil will then find.
-# The catch is that the linker uses sequential numbers for those object
-# files, and doesn't avoid conflicts from multiple linkers running at
-# the same time. So in directories with multiple binaries, object files
-# from the first linked binaries would be overwritten by those of the
-# last linked binary. So we use a subdirectory containing the name of the
-# linked binary.
-LDFLAGS += -Wl,-object_path_lto,$(@F).lto.o/
-endif
-endif
+WASM_CFLAGS = $(COMPUTED_WASM_CFLAGS) $(_DEPEND_CFLAGS)
+WASM_CXXFLAGS = $(COMPUTED_WASM_CXXFLAGS) $(_DEPEND_CFLAGS)
 
 # We only add color flags if neither the flag to disable color
 # (e.g. "-fno-color-diagnostics" nor a flag to control color
@@ -244,12 +173,6 @@ endif
 
 DEPENDENCIES	= .md
 
-# Export to propagate to cl and submake for third-party code.
-# Eventually, we'll want to just use -I.
-ifdef INCLUDE
-export INCLUDE
-endif
-
 # Export to propagate to link.exe and submake for third-party code.
 # Eventually, we'll want to just use -LIBPATH.
 ifdef LIB
@@ -270,22 +193,11 @@ ifdef SCCACHE_CLIENT_SIDE
 export SCCACHE_CLIENT_SIDE
 endif
 
-ifeq ($(OS_ARCH),WINNT)
-ifneq (,$(filter msvc clang-cl,$(CC_TYPE)))
-WIN32_EXE_LDFLAGS += $(WIN32_EXE_DEFAULT_LDFLAGS)
-else
-MOZ_PROGRAM_LDFLAGS += $(WIN32_EXE_DEFAULT_LDFLAGS)
-endif
-endif
-
 -include $(topsrcdir)/$(MOZ_BUILD_APP)/app-config.mk
 
 ######################################################################
 
 ifeq ($(OS_ARCH),Darwin)
-ifndef NSDISTMODE
-NSDISTMODE=absolute_symlink
-endif
 PWD := $(CURDIR)
 endif
 
@@ -300,13 +212,13 @@ endif # WINNT
 ifeq (,$(CROSS_COMPILE)$(filter-out WINNT, $(OS_ARCH)))
 INSTALL = $(NSINSTALL) -t
 
+else ifeq ($(OS_ARCH),Darwin)
+INSTALL = $(NSINSTALL) -L $(PWD)
+
 else
+INSTALL = $(NSINSTALL) -R
 
-# This isn't laid out as conditional directives so that NSDISTMODE can be
-# target-specific.
-INSTALL         = $(if $(filter copy, $(NSDISTMODE)), $(NSINSTALL) -t, $(if $(filter absolute_symlink, $(NSDISTMODE)), $(NSINSTALL) -L $(PWD), $(NSINSTALL) -R))
-
-endif # WINNT
+endif
 
 # The default for install_cmd is simply INSTALL
 install_cmd ?= $(INSTALL) $(1)
@@ -340,31 +252,7 @@ ifdef LOCALE_RELATIVEDIR
 LOCALE_SRCDIR ?= $(call EXPAND_LOCALE_SRCDIR,$(LOCALE_RELATIVEDIR))
 endif
 
-ifdef relativesrcdir
-MAKE_JARS_FLAGS += --relativesrcdir=$(LOCALE_RELATIVEDIR)
-ifneq (en-US,$(AB_CD))
-ifdef IS_LANGUAGE_REPACK
-MAKE_JARS_FLAGS += --l10n-base=$(REAL_LOCALE_MERGEDIR)
-endif
-else
-MAKE_JARS_FLAGS += -c $(LOCALE_SRCDIR)
-endif # en-US
-else
-MAKE_JARS_FLAGS += -c $(LOCALE_SRCDIR)
-endif # ! relativesrcdir
-
-MERGE_FILE = $(LOCALE_SRCDIR)/$(1)
 MERGE_RELATIVE_FILE = $(call EXPAND_LOCALE_SRCDIR,$(2))/$(1)
-
-# The per-locale l10n coverage index is generated by the merge step into the
-# merge dir. Copy it into the localization root ($1) so it ships in the locale's
-# omnijar, reachable at resource://gre/localization/<locale>/coverage.json. This
-# is a no-op for en-US, which has no merge dir.
-INSTALL_L10N_COVERAGE = \
-  test ! -f $(REAL_LOCALE_MERGEDIR)/coverage.json || { \
-    $(NSINSTALL) -D $(1)/localization/$(AB_CD) && \
-    cp $(REAL_LOCALE_MERGEDIR)/coverage.json $(1)/localization/$(AB_CD)/coverage.json; \
-  }
 
 # Enable verbose logs when not using `make -s`
 ifeq (,$(findstring s, $(filter-out --%, $(MAKEFLAGS))))

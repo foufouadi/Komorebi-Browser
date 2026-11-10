@@ -10,6 +10,7 @@ import android.os.Bundle
 import androidx.annotation.VisibleForTesting
 import androidx.core.content.edit
 import androidx.navigation.fragment.findNavController
+import androidx.navigation.fragment.navArgs
 import androidx.preference.CheckBoxPreference
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
@@ -30,12 +31,14 @@ import org.mozilla.fenix.settings.SharedPreferenceUpdater
 import org.mozilla.fenix.settings.SupportUtils
 import org.mozilla.fenix.settings.SwitchWithCaptionPreference
 import org.mozilla.fenix.settings.requirePreference
+import org.mozilla.fenix.settings.scrollToPreferenceWithHighlight
 import org.mozilla.fenix.utils.canShowAddSearchWidgetPrompt
 import org.mozilla.fenix.utils.maybeShowAddSearchWidgetPrompt
 import org.mozilla.gecko.search.SearchWidgetProvider
 
 /** Settings screen allowing users to configure the browser search functionality. */
 class SearchEngineFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFragment {
+    private val args by navArgs<SearchEngineFragmentArgs>()
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         setPreferencesFromResource(
@@ -80,11 +83,6 @@ class SearchEngineFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFragm
         val searchSuggestionsPreference =
             requirePreference<SwitchPreferenceCompat>(R.string.pref_key_show_search_suggestions).apply {
                 isChecked = context.components.settings.shouldShowSearchSuggestions
-            }
-
-        val searchWidgetPreference =
-            requirePreference<SwitchPreferenceCompat>(R.string.pref_key_search_widget_installed_2).apply {
-                isChecked = context.components.settings.searchWidgetInstalled
             }
 
         val trendingSearchSuggestionsPreference =
@@ -157,14 +155,6 @@ class SearchEngineFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFragm
                 isChecked = context.components.settings.shouldShowSearchOptimizationCards
             }
 
-        searchWidgetPreference.onPreferenceChangeListener =
-            object : SharedPreferenceUpdater() {
-                override fun onPreferenceChange(preference: Preference, newValue: Any?): Boolean {
-                    // We cannot remove a widget added to device's homescreen so this cannot be toggled by users.
-                    // The toggle status is set separately from our widget AppWidgetProvider.
-                    return false
-                }
-            }
         searchSuggestionsPreference.onPreferenceChangeListener = SharedPreferenceUpdater()
         showHistorySuggestions.onPreferenceChangeListener = SharedPreferenceUpdater()
         showBookmarkSuggestions.onPreferenceChangeListener = SharedPreferenceUpdater()
@@ -188,6 +178,14 @@ class SearchEngineFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFragm
         showNonSponsoredSuggestionsPreference.setOnPreferenceClickListener {
             showSuggestionCardsPreference.isEnabled = showNonSponsoredSuggestionsPreference.isChecked
             true
+        }
+
+        scrollToRequestedPreference()
+    }
+
+    private fun scrollToRequestedPreference() {
+        args.preferenceToScrollTo?.let {
+            scrollToPreferenceWithHighlight(it)
         }
     }
 
@@ -262,7 +260,8 @@ class SearchEngineFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFragm
      *
      * The preference is only visible when the Nimbus-backed [Settings.googleLensIntegrationEnabled] flag is on. Its
      * checked state reflects the local-only [Settings.googleLensIntegrationUserEnabled] override and changes are
-     * persisted via [SharedPreferenceUpdater].
+     * persisted via [SharedPreferenceUpdater]. Changing it also redraws the search widgets, which show a Lens button
+     * only while the setting is on.
      *
      * @param preference The [SwitchWithCaptionPreference] for the Google Lens search setting.
      */
@@ -271,7 +270,14 @@ class SearchEngineFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFragm
         preference.isVisible = requireContext().components.settings.googleLensIntegrationEnabled
         preference.caption = getString(R.string.preferences_google_lens_availability_caption)
         preference.isChecked = requireContext().components.settings.googleLensIntegrationUserEnabled
-        preference.onPreferenceChangeListener = SharedPreferenceUpdater()
+        preference.onPreferenceChangeListener =
+            object : SharedPreferenceUpdater() {
+                override fun onPreferenceChange(preference: Preference, newValue: Any?): Boolean {
+                    val persisted = super.onPreferenceChange(preference, newValue)
+                    updateAllWidgets(requireContext())
+                    return persisted
+                }
+            }
     }
 
     override fun onPreferenceTreeClick(preference: Preference): Boolean {

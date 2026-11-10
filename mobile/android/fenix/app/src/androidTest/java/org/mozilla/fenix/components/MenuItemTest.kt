@@ -17,12 +17,12 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
-import androidx.compose.ui.unit.dp
 import mozilla.components.ui.icons.R as iconsR
 import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 import org.mozilla.fenix.compose.list.IconListItem
+import org.mozilla.fenix.theme.FirefoxTheme
 
 class MenuItemTest {
     @get:Rule val composeTestRule = createComposeRule()
@@ -31,7 +31,10 @@ class MenuItemTest {
     fun testIconListItemIconUntintedArgumentRespected() {
         with(composeTestRule) {
             setContent {
-                Column(Modifier.background(color = MaterialTheme.colorScheme.surfaceBright).padding(16.dp)) {
+                Column(
+                    Modifier.background(color = MaterialTheme.colorScheme.surfaceBright)
+                        .padding(FirefoxTheme.layout.space.static200)
+                ) {
                     IconListItem(
                         label = "Test Label",
                         beforeIconPainter = painterResource(iconsR.drawable.mozac_ic_shield_slash_multicolor_24),

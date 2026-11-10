@@ -33,8 +33,6 @@
   <string name="tab_tray_close_multiselect_content_description">Kúrò ní móòdù aláṣàyàn púpọ̀</string>
   <!-- About content. %1$s is the name of the app (for example "Firefox"). -->
   <string name="about_content" tools:ignore="BrandUsage">%1$s Jẹ́ ṣíṣẹ̀dá látọwọ́ọ Mozilla.</string>
-  <!-- Private Browsing -->
-  <string name="private_browsing_common_myths">Àwọn àròsọ tó wọ́pọ̀ nípa ìlọkiri-oníwẹ́ẹ̀bù ìkọ̀kọ̀</string>
   <!--
     Open in App "contextual feature recommendation" (CFR)
 
@@ -45,8 +43,6 @@
   <string name="open_in_app_cfr_positive_button_text">Lọ sí àwọn ètò</string>
   <!-- Text for the negative action button -->
   <string name="open_in_app_cfr_negative_button_text">Yọ kúrò</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
   <!-- Text for the info dialog when camera permissions have been denied but user tries to access a camera feature. -->
   <string name="camera_permissions_needed_message">A nílò àti lo ẹ̀rọ ayàwòrán. Lọ sí àwọn ètò Ańdíróídì, tẹ àwọn ìgbaniláàyè, kí o sì tẹ ìgbàláàyè.</string>
   <!-- Text for the positive action button to go to Android Settings to grant permissions. -->
@@ -82,16 +78,8 @@
   <string name="home_screen_shortcut_open_new_tab_2">Táàbù tuntun</string>
   <!-- Shortcut action to open new private tab -->
   <string name="home_screen_shortcut_open_new_private_tab_2">Táàbù ìkọ̀kọ̀ tuntun</string>
-  <!--
-    Recent Tabs
-
-    Header text for jumping back into the recent tab in the home screen
-  -->
-  <string name="recent_tabs_header">Fò wọlé padà</string>
   <!-- Button text for showing all the tabs in the tabs tray -->
   <string name="recent_tabs_show_all">Ṣàfihàn gbogbo rẹ̀</string>
-  <!-- Content description for the button which navigates the user to show all recent tabs in the tabs tray. -->
-  <string name="recent_tabs_show_all_content_description_2">Ṣàfihàn gbogbo bọ́tìnì àwọn táàbù tuntun</string>
   <!-- Text for button in synced tab card that opens synced tabs tray -->
   <string name="recent_tabs_see_all_synced_tabs_button_text">Rí gbogbo táàbù tó ń ṣiṣẹ́ pọ̀</string>
   <!-- Accessibility description for device icon used for recent synced tab -->
@@ -117,11 +105,7 @@
   <string name="recently_visited_menu_item_remove">Yọ kúrò</string>
   <!-- Content description for the button which navigates the user to show all of their history. -->
   <string name="past_explorations_show_all_content_description_2">Ṣàfihàn àwọn ìwádìí tó kojá</string>
-  <!--
-    Browser Fragment
-
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
-  -->
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">Padà</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">Síwájú</string>
@@ -191,10 +175,6 @@
   <string name="search_engine_suggestions_description">Wá tààrà láti ààyè ìfi-àdírẹ̀sì-sí</string>
   <!-- Menu option in the search selector menu to open the search settings -->
   <string name="search_settings_menu_item">Àwọn ètò ìwádìí</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!--
     Search Widget
 
@@ -210,10 +190,8 @@
   <!--
     Preferences
 
-    Title for the settings page
+    Preference category for general settings
   -->
-  <string name="settings">Àwọn ààtò</string>
-  <!-- Preference category for general settings -->
   <string name="preferences_category_general">Gbogbogbò</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">Nípa</string>
@@ -314,8 +292,6 @@
   <string name="customize_addon_collection_hint">Àkójọpọ̀ orúkọ</string>
   <!-- Hint displayed on input field for custom collection user ID -->
   <string name="customize_addon_collection_user_hint">Àkọ́jọpọ̀ ẹni (ID Aṣàmúlò)</string>
-  <!-- Header text for jumping back into the recent tab in customize the home screen -->
-  <string name="customize_toggle_jump_back_in">Wọlé padà sínu</string>
   <!--
     Title for the customize home screen section with recently visited. Recently visited is
     a section where users see a list of tabs that they have visited in the past few days
@@ -477,8 +453,6 @@
     Title of preference for tabs management
   -->
   <string name="preferences_tabs">Àwọn táàbù</string>
-  <!-- Title of preference that allows a user to specify the tab view -->
-  <string name="preferences_tab_view">Wíwo táàbù</string>
   <!-- Option for a list tab view -->
   <string name="tab_view_list">Àtòkọ</string>
   <!-- Option for a grid tab view -->
@@ -515,13 +489,7 @@
   <string name="close_tabs_after_one_week_summary">Padé lẹ́yìn ọ̀sẹ̀ kan</string>
   <!-- Summary for tabs preference when auto closing tabs setting is set to auto close tabs after one month -->
   <string name="close_tabs_after_one_month_summary">Padé lẹ́yìn oṣù kan</string>
-  <!--
-    Inactive tabs
-
-    Category header of a preference that allows a user to enable or disable the inactive tabs feature
-  -->
-  <string name="preferences_inactive_tabs">Gbé àwọn táàbù àtijọ́ lọ sí àìṣiṣẹ́</string>
-  <!-- Title of inactive tabs preference -->
+  <!-- Summary of the preference that allows a user to enable or disable the inactive tabs feature. -->
   <string name="preferences_inactive_tabs_title">Àwọn táàbù tí o kò tíì wò fún ọ̀sẹ̀ méjì má a lọ sí abala àìṣiṣẹ́.</string>
   <!--
     Studies
@@ -557,8 +525,6 @@
   <string name="close_tab_title">Pa táàbù dé %s</string>
   <!-- Content description (not visible, for screen readers etc.): Opens the open tabs menu when pressed -->
   <string name="open_tabs_menu">Ṣí àwọn àtẹ táàbù</string>
-  <!-- Open tabs menu item to save tabs to collection -->
-  <string name="tabs_menu_save_to_collection1">Tọ́jú àwọn táàbù sínú àkójọpọ̀</string>
   <!-- Text for the menu button to delete a collection -->
   <string name="collection_delete">Pa àkójọpọ̀ rẹ́</string>
   <!-- Text for the menu button to rename a collection -->
@@ -590,16 +556,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">%1$d ti yàn</string>
-  <!-- Text for the header that groups the history for today -->
-  <string name="history_today">Òní</string>
-  <!-- Text for the header that groups the history for yesterday -->
-  <string name="history_yesterday">Àná</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">Ọjọ́ méje sẹ́yìn</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">Ọgbọ̀n ọjọ́ sẹ́yìn</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">Ti pẹ́ jù</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">Kò sí ìtàn níbí</string>
   <!--
@@ -851,8 +807,6 @@
   <string name="qr_scanner_dialog_invalid">Àdìrẹ́sì wẹ́ẹ̀bù ò fẹsẹ̀múlẹ̀.</string>
   <!-- QR code scanner prompt dialog positive option when there is an error -->
   <string name="qr_scanner_dialog_invalid_ok">Ó DÁA</string>
-  <!-- Tab collection deletion prompt dialog message. %1$s is the collection name. -->
-  <string name="tab_collection_dialog_message">Ṣé ó dá ọ lójú pé o fẹ́ paárẹ́ %1$s?</string>
   <!-- Sample text for accessibility font size -->
   <string name="accessibility_text_size_sample_text_1">Èyí jẹ́ àpẹẹrẹ ọ̀rọ̀. Ó wà níbí láti ṣàfihàn bí ọ̀rọ̀ yóò ṣe ma hàn nígbà tí o bá ṣe ìlékún tàbí ìdíkù sí ìwọ̀n rẹ̀ pẹ̀lú ètò yìí.</string>
   <!-- Summary for Accessibility Text Size Scaling Preference -->
@@ -1068,12 +1022,8 @@
   <string name="add_to_homescreen_cancel">Parẹ́</string>
   <!-- Add button text for the Add to Homescreen dialog -->
   <string name="add_to_homescreen_add">Ṣàfikún</string>
-  <!-- Continue to website button text for the first-time Add to Homescreen dialog -->
-  <string name="add_to_homescreen_continue">Tẹ̀síwájú sí ojú òpó wẹ́ẹ̀bù</string>
   <!-- Placeholder text for the TextView in the Add to Homescreen dialog -->
   <string name="add_to_homescreen_text_placeholder">Orúkọ ọ̀nà-àbùjá</string>
-  <!-- Describes the add to homescreen functionality -->
-  <string name="add_to_homescreen_description_2">O lè fi ẃéíbusaìtì yí kún Síkíríìnì àkọ́ọ́kàn rẹ nírọ̀rùn láti ní ààyè lẹ́sẹ̀kẹsẹ̀ àti láti ṣe ìwádìí ní ìyára pẹ̀lú ìrírí tó jọ ti áàpù.</string>
   <!-- Preference option for asking to save passwords in Fenix -->
   <string name="preferences_passwords_save_logins_ask_to_save">Bèrè láti fipamọ́</string>
   <!-- Preference option for never saving passwords in Fenix -->
@@ -1254,10 +1204,6 @@
   <string name="browser_menu_add_to_shortcuts">Ṣàfikún àwọn ọ̀nà-àbùjá</string>
   <!-- Browser menu button that removes a shortcut from the home fragment -->
   <string name="browser_menu_remove_from_shortcuts">Yọọ́ kúrò nínú àwọn ọ̀nà-àbùjá</string>
-  <!-- Positive action of a dialog asking to delete -->
-  <string name="dialog_delete_positive">Parẹ́</string>
-  <!-- Negative action of a dialog asking to delete login -->
-  <string name="dialog_delete_negative">Paárẹ́</string>
   <!-- The error message in add login view when hostname field is blank. -->
   <string name="saved_login_hostname_required" tools:ignore="UnusedResources">A nílò orúkọ nẹ́tíwọọ̀kì kọ̀m̀pútà</string>
   <!-- Voice search button content description -->
@@ -1356,13 +1302,4 @@
   <string name="experiments_snackbar">Jẹ́ kí tẹlẹmẹ́tìrì fi dátà ráńṣẹ́.</string>
   <!-- Snackbar button text to navigate to telemetry settings. -->
   <string name="experiments_snackbar_button">Lọ sí àwọn ààtò</string>
-  <!-- Translations feature -->
-
-  <!-- TextField Design System Component -->
-
-  <!-- ==== Terms of use pop up prompt ==== -->
-
-  <!-- ==== Experiment strings. ==== -->
-
-  <!-- ==== End of Terms of use popup prompt. ==== -->
 </resources>

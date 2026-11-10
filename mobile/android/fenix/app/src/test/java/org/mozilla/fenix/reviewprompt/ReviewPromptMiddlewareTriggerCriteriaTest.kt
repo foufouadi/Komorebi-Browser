@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.fenix.reviewprompt
 
 import androidx.test.core.app.ApplicationProvider.getApplicationContext
@@ -27,7 +31,7 @@ class ReviewPromptMiddlewareTriggerCriteriaTest {
             context = getApplicationContext(),
             appInfo =
                 NimbusAppInfo(
-                    appName = ReviewPromptMiddlewareTriggerCriteriaTest::javaClass.name,
+                    appName = ReviewPromptMiddlewareTriggerCriteriaTest::class.java.name,
                     channel = "test",
                 ),
             server = null,

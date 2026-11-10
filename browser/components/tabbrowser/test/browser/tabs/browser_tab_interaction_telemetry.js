@@ -6,6 +6,10 @@ const { TabMetrics } = ChromeUtils.importESModule(
   "moz-src:///browser/components/tabbrowser/TabMetrics.sys.mjs"
 );
 
+const { CustomizableUITestUtils } = ChromeUtils.importESModule(
+  "resource://testing-common/CustomizableUITestUtils.sys.mjs"
+);
+
 let resetTelemetry = async () => {
   await Services.fog.testFlushAllChildren();
   Services.fog.testResetFOG();
@@ -378,7 +382,7 @@ add_task(async function test_move_keyboard_ctrl_shift_pagedown() {
   let tab1 = await addTab("about:blank");
   let tab2 = await addTab("about:blank");
   gBrowser.selectedTab = tab1;
-  let startPos = tab1._tPos;
+  let startPos = tab1.index;
   Assert.equal(getInteractionEvents().length, 0, "No events before keypress");
 
   let tabMovePromise = BrowserTestUtils.waitForEvent(
@@ -392,7 +396,7 @@ add_task(async function test_move_keyboard_ctrl_shift_pagedown() {
   );
   await tabMovePromise;
 
-  Assert.greater(tab1._tPos, startPos, "Tab moved forward");
+  Assert.greater(tab1.index, startPos, "Tab moved forward");
   assertInteractionEvent(getLastInteractionEvent(), {
     action: TabMetrics.METRIC_ACTION.MOVE,
     source: TabMetrics.METRIC_SOURCE.KEYBOARD,
@@ -410,7 +414,7 @@ add_task(async function test_move_context_menu_to_start() {
   // Add a spacer tab so the target tab actually has somewhere to move.
   let spacer = await addTab("about:blank");
   let tab = await addTab("about:blank");
-  Assert.greater(tab._tPos, 0, "Tab starts after index 0");
+  Assert.greater(tab.index, 0, "Tab starts after index 0");
 
   // context_moveToStart is inside the moveTabOptions submenu; navigating
   // nested submenus in headless tests is not reliable, so we call the same
@@ -426,7 +430,7 @@ add_task(async function test_move_context_menu_to_start() {
   });
   await tabMovePromise;
 
-  Assert.equal(tab._tPos, 0, "Tab moved to start");
+  Assert.equal(tab.index, 0, "Tab moved to start");
   assertInteractionEvent(getLastInteractionEvent(), {
     action: TabMetrics.METRIC_ACTION.MOVE,
     source: TabMetrics.METRIC_SOURCE.TAB_MENU,
@@ -677,7 +681,7 @@ add_task(async function test_activate_ctrl_tab_two_tabs() {
   await resetTelemetry();
 });
 
-// The tabs.js on_keydown handler (Ctrl+Shift+Arrow when the tab strip has focus)
+// The tabs.mjs on_keydown handler (Ctrl+Shift+Arrow when the tab strip has focus)
 // passes a KEYBOARD metricsContext to moveTabForward/Backward/ToStart/ToEnd.
 add_task(async function test_move_keyboard_tabstrip_arrow_moves() {
   await resetTelemetry();
@@ -685,7 +689,7 @@ add_task(async function test_move_keyboard_tabstrip_arrow_moves() {
   let tab1 = await addTab("about:blank");
   let tab2 = await addTab("about:blank");
   gBrowser.selectedTab = tab1;
-  Assert.less(tab1._tPos, tab2._tPos, "tab1 starts before tab2");
+  Assert.less(tab1.index, tab2.index, "tab1 starts before tab2");
 
   let tabMovePromise = BrowserTestUtils.waitForEvent(tab1, "TabMove");
   Services.focus.setFocus(tab1, Services.focus.FLAG_BYKEY);
@@ -695,7 +699,7 @@ add_task(async function test_move_keyboard_tabstrip_arrow_moves() {
   });
   await tabMovePromise;
 
-  Assert.greater(tab1._tPos, tab2._tPos, "tab1 moved past tab2");
+  Assert.greater(tab1.index, tab2.index, "tab1 moved past tab2");
   assertInteractionEvent(getLastInteractionEvent(), {
     action: TabMetrics.METRIC_ACTION.MOVE,
     source: TabMetrics.METRIC_SOURCE.KEYBOARD,
@@ -1006,4 +1010,119 @@ add_task(async function test_detach_group_to_new_window() {
 
   await BrowserTestUtils.closeWindow(newWin);
   await resetTelemetry();
+});
+
+let openTabsMenu = async () => {
+  let viewShown = BrowserTestUtils.waitForEvent(
+    document.getElementById("allTabsMenu-allTabsView"),
+    "ViewShown"
+  );
+  document.getElementById("alltabs-button").click();
+  return (await viewShown).target;
+};
+
+let closeTabsMenu = async () => {
+  let panel = document
+    .getElementById("allTabsMenu-allTabsView")
+    .closest("panel");
+  if (!panel) {
+    return;
+  }
+  let hidden = BrowserTestUtils.waitForPopupEvent(panel, "hidden");
+  panel.hidePopup();
+  await hidden;
+};
+
+let openAppMenuTabGroupsList = async () => {
+  await new CustomizableUITestUtils(window).openMainMenu();
+  let subView = PanelMultiView.getViewNode(
+    document,
+    "appMenu-tabGroupsListView"
+  );
+  let viewShown = BrowserTestUtils.waitForEvent(subView, "ViewShown");
+  PanelMultiView.getViewNode(document, "appMenu-tab-groups-button").click();
+  await viewShown;
+  await subView.querySelector("tab-groups-list").updateComplete;
+  return subView;
+};
+
+let closeAppMenu = async () => {
+  if (PanelUI.panel.state == "closed") {
+    return;
+  }
+  await new CustomizableUITestUtils(window).hideMainMenu();
+};
+
+// replaceGroupWithWindow should record DETACH with the correct source when
+// triggered from the "list all tabs" overflow menu's context menu.
+add_task(async function test_detach_group_to_new_window_tab_overflow() {
+  await resetTelemetry();
+
+  let tab1 = await addTab("about:blank");
+  let tab2 = await addTab("about:blank");
+  let group = gBrowser.addTabGroup([tab1, tab2]);
+  gBrowser.tabGroupMenu.close();
+
+  let allTabsMenu = await openTabsMenu();
+  let tabGroupButton = allTabsMenu.querySelector(
+    `#allTabsMenu-groupsView [data-tab-group-id="${group.id}"]`
+  );
+  let menu = await getContextMenu(
+    tabGroupButton,
+    "open-tab-group-context-menu"
+  );
+
+  let newWindowPromise = BrowserTestUtils.waitForNewWindow();
+  menu.querySelector("#open-tab-group-context-menu_moveToNewWindow").click();
+  await closeContextMenu(menu);
+  await closeTabsMenu();
+  let newWin = await newWindowPromise;
+
+  assertInteractionEvent(getLastInteractionEvent(), {
+    action: TabMetrics.METRIC_ACTION.DETACH,
+    source: TabMetrics.METRIC_SOURCE.TAB_OVERFLOW_MENU,
+    tab_count: 2,
+  });
+
+  await BrowserTestUtils.closeWindow(newWin);
+  await resetTelemetry();
+});
+
+// replaceGroupWithWindow should record DETACH with the correct source when
+// triggered from the app menu tab groups list's context menu.
+add_task(async function test_detach_group_to_new_window_app_menu() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.tabs.groups.alternateMenu", true]],
+  });
+  await resetTelemetry();
+
+  let tab1 = await addTab("about:blank");
+  let tab2 = await addTab("about:blank");
+  let group = gBrowser.addTabGroup([tab1, tab2]);
+  gBrowser.tabGroupMenu.close();
+
+  let subView = await openAppMenuTabGroupsList();
+  let tabGroupButton = subView.querySelector(
+    `[data-tab-group-id="${group.id}"]`
+  );
+  let menu = await getContextMenu(
+    tabGroupButton,
+    "open-tab-group-context-menu"
+  );
+
+  let newWindowPromise = BrowserTestUtils.waitForNewWindow();
+  menu.querySelector("#open-tab-group-context-menu_moveToNewWindow").click();
+  await closeContextMenu(menu);
+  let newWin = await newWindowPromise;
+
+  assertInteractionEvent(getLastInteractionEvent(), {
+    action: TabMetrics.METRIC_ACTION.DETACH,
+    source: TabMetrics.METRIC_SOURCE.APP_MENU_GROUP_LIST,
+    tab_count: 2,
+  });
+
+  await closeAppMenu();
+  await BrowserTestUtils.closeWindow(newWin);
+  await resetTelemetry();
+  await SpecialPowers.popPrefEnv();
 });

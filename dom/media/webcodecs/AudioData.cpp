@@ -9,6 +9,7 @@
 #include "AudioSampleFormat.h"
 #include "WebCodecsUtils.h"
 #include "js/StructuredClone.h"
+#include "jsapi.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/Logging.h"
@@ -266,6 +267,10 @@ already_AddRefed<AudioData> AudioData::Constructor(const GlobalObject& aGlobal,
   }
   UniquePtr<uint8_t[], JS::FreePolicy> transferData;
   if (transferLen) {
+    if (!JS_WrapObject(aGlobal.Context(), &*transferBuffer)) {
+      aRv.NoteJSContextException(aGlobal.Context());
+      return nullptr;
+    }
     void* bufferContents =
         JS::StealArrayBufferContents(aGlobal.Context(), *transferBuffer);
     if (!bufferContents) {
@@ -290,6 +295,10 @@ already_AddRefed<AudioData> AudioData::Constructor(const GlobalObject& aGlobal,
   // 9.2.2.3.1. Perform DetachArrayBuffer on transferable
   for (const auto& buffer : aInit.mTransfer) {
     JS::Rooted<JSObject*> obj(aGlobal.Context(), buffer.Obj());
+    if (!JS_WrapObject(aGlobal.Context(), &obj)) {
+      aRv.NoteJSContextException(aGlobal.Context());
+      return nullptr;
+    }
     JS::DetachArrayBuffer(aGlobal.Context(), obj);
   }
   return MakeAndAddRef<AudioData>(global, resource.unwrap(), aInit);
@@ -746,7 +755,7 @@ UniquePtr<AudioData::TransferredData> AudioData::Transfer() {
   }
 
   // This adds a ref to the resource
-  auto serialized = MakeUnique<AudioDataSerializedData>(*this);
+  auto serialized = std::make_unique<AudioDataSerializedData>(*this);
   // This removes the ref to the resource, effectively transfering the backing
   // storage.
   Close();

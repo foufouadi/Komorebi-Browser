@@ -264,22 +264,11 @@ nsEventStatus PuppetWidget::DispatchEvent(WidgetGUIEvent* aEvent) {
   if (aEvent->mClass == eCompositionEventClass ||
       aEvent->mClass == eKeyboardEventClass) {
     TextEventDispatcher* dispatcher = GetTextEventDispatcher();
-    // However, if the event is being dispatched by the text event dispatcher
-    // or, there is native text event dispatcher listener, that means that
-    // native text input event handler is in this process like on Android,
-    // and the event is not synthesized for tests, the event is coming from
-    // the TextEventDispatcher.  In these cases, we shouldn't notify
-    // TextEventDispatcher of dispatching the event.
-    if (!dispatcher->IsDispatchingEvent() &&
-        !(mNativeTextEventDispatcherListener &&
-          !aEvent->mFlags.mIsSynthesizedForTests)) {
-      DebugOnly<nsresult> rv =
-          dispatcher->BeginInputTransactionFor(aEvent, this);
-      NS_WARNING_ASSERTION(
-          NS_SUCCEEDED(rv),
-          "The text event dispatcher should always succeed to start input "
-          "transaction for the event");
-    }
+    DebugOnly<nsresult> rv = dispatcher->BeginInputTransactionFor(aEvent, this);
+    NS_WARNING_ASSERTION(
+        NS_SUCCEEDED(rv),
+        "The text event dispatcher should always succeed to start input "
+        "transaction for the event");
   }
 
   return nsIWidget::DispatchEvent(aEvent);
@@ -450,19 +439,14 @@ nsresult PuppetWidget::SynthesizeNativeTouchpadPan(
   return NS_OK;
 }
 
-void PuppetWidget::LockNativePointer(
-    NativePointerLockMode aNativePointerLockMode) {
-  if (!mBrowserChild) {
-    return;
-  }
-  mBrowserChild->SendLockNativePointer(aNativePointerLockMode);
+void PuppetWidget::LockNativePointer(NativePointerLockMode) {
+  MOZ_ASSERT_UNREACHABLE(
+      "The native pointer should be locked by the parent process");
 }
 
 void PuppetWidget::UnlockNativePointer() {
-  if (!mBrowserChild) {
-    return;
-  }
-  mBrowserChild->SendUnlockNativePointer();
+  MOZ_ASSERT_UNREACHABLE(
+      "The native pointer should be unlocked by the parent process");
 }
 
 void PuppetWidget::SetNativePointerLockMode(
@@ -949,9 +933,9 @@ LayoutDeviceIntPoint PuppetWidget::GetWindowPosition() {
   }
 
   int32_t winX, winY, winW, winH;
-  NS_ENSURE_SUCCESS(GetOwningBrowserChild()->GetDimensions(
-                        DimensionKind::Outer, &winX, &winY, &winW, &winH),
-                    LayoutDeviceIntPoint());
+  NS_ENSURE_SUCCESS(
+      GetOwningBrowserChild()->GetDimensions(&winX, &winY, &winW, &winH),
+      LayoutDeviceIntPoint());
   return LayoutDeviceIntPoint(winX, winY) +
          GetOwningBrowserChild()->GetClientOffset();
 }

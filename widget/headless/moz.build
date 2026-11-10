@@ -18,6 +18,11 @@ LOCAL_INCLUDES += [
     "/widget/%s" % widget_dir,
 ]
 
+EXPORTS.mozilla.widget += [
+    "HeadlessCompositorWidget.h",
+    "HeadlessWidget.h",
+]
+
 UNIFIED_SOURCES += [
     "HeadlessClipboard.cpp",
     "HeadlessClipboardData.cpp",
@@ -27,9 +32,13 @@ UNIFIED_SOURCES += [
     "HeadlessWidget.cpp",
 ]
 
-if widget_dir == "gtk":
+if CONFIG["MOZ_WIDGET_TOOLKIT"] != "uikit":
+    EXPORTS.mozilla.widget += [
+        "HeadlessCompositorWidgetParent.h",
+    ]
+
     UNIFIED_SOURCES += [
-        "HeadlessLookAndFeelGTK.cpp",
+        "HeadlessCompositorWidgetParent.cpp",
     ]
 
 if CONFIG["MOZ_WIDGET_TOOLKIT"] == "cocoa":
@@ -40,7 +49,17 @@ else:
     UNIFIED_SOURCES += [
         "HeadlessKeyBindings.cpp",
     ]
+    SOURCE_HEADERS += [
+        "HeadlessKeyBindings.h",
+    ]
 
 include("/ipc/chromium/chromium-config.mozbuild")
 
 FINAL_LIBRARY = "xul"
+
+SOURCE_HEADERS += [
+    "HeadlessClipboard.h",
+    "HeadlessClipboardData.h",
+    "HeadlessScreenHelper.h",
+    "HeadlessSound.h",
+]

@@ -22,12 +22,14 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/nullability.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "api/audio/audio_processing_statistics.h"
 #include "api/audio_codecs/audio_encoder.h"
+#include "api/audio_codecs/audio_encoder_factory.h"
 #include "api/audio_options.h"
 #include "api/call/audio_sink.h"
 #include "api/crypto/frame_decryptor_interface.h"
@@ -40,7 +42,6 @@
 #include "api/rtp_parameters.h"
 #include "api/rtp_sender_interface.h"
 #include "api/scoped_refptr.h"
-#include "api/transport/rtp/rtp_source.h"
 #include "api/units/data_rate.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
@@ -58,6 +59,7 @@
 #include "media/base/stream_params.h"
 #include "modules/rtp_rtcp/include/report_block_data.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
+#include "modules/sframe/sframe_encryption_config.h"
 #include "rtc_base/async_packet_socket.h"
 #include "rtc_base/containers/flat_set.h"
 #include "rtc_base/copy_on_write_buffer.h"
@@ -229,6 +231,12 @@ class MediaSendChannelInterface {
       uint32_t ssrc,
       scoped_refptr<FrameEncryptorInterface> frame_encryptor) = 0;
 
+  // Sets the Sframe encryptor and mode used to encrypt outgoing frames.
+  // Sframe is Unified Plan only, so this applies to the channel's single
+  // send stream.
+  virtual void SetSframeEncryptionConfig(
+      SframeEncryptionConfig sframe_encryption_config) = 0;
+
   virtual RTCError SetRtpSendParameters(
       uint32_t ssrc,
       const RtpParameters& parameters,
@@ -258,6 +266,12 @@ class MediaSendChannelInterface {
   // Called whenever the list of sending SSRCs changes.
   virtual void SetSsrcListChangedCallback(
       absl::AnyInvocable<void(const std::set<uint32_t>&)> callback) = 0;
+  // Resets the encoder factory override for the given SSRC that was set via
+  // video/audio specific methods.
+  virtual void ResetEncoderFactoryOverride(uint32_t ssrc) = 0;
+
+  // Marks the channel as requiring Sframe encryption. Cannot be undone.
+  virtual void EnableSframe() = 0;
 };
 
 class MediaReceiveChannelInterface {
@@ -332,6 +346,9 @@ class MediaReceiveChannelInterface {
   // Returns current value of base minimum delay in milliseconds.
   virtual std::optional<int> GetBaseMinimumPlayoutDelayMs(
       uint32_t ssrc) const = 0;
+
+  // Marks the channel as requiring Sframe decryption. Cannot be undone.
+  virtual void EnableSframe() = 0;
 };
 
 // The stats information is structured as follows:
@@ -619,8 +636,6 @@ struct VideoSenderInfo : public MediaSenderInfo {
   uint32_t key_frames_encoded = 0;
   // https://w3c.github.io/webrtc-stats/#dom-rtcoutboundrtpstreamstats-totalencodetime
   uint64_t total_encode_time_ms = 0;
-  // https://w3c.github.io/webrtc-stats/#dom-rtcoutboundrtpstreamstats-totalencodedbytestarget
-  uint64_t total_encoded_bytes_target = 0;
   bool has_entered_low_resolution = false;
   // https://w3c.github.io/webrtc-stats/#dom-rtcinboundrtpstreamstats-qpsum
   std::optional<uint64_t> qp_sum;
@@ -922,6 +937,11 @@ class VoiceMediaSendChannelInterface : public MediaSendChannelInterface {
  public:
   virtual bool SetSenderParameters(const AudioSenderParameter& params) = 0;
 
+  // Sets the MID of the media section that is sent. Send streams are created
+  // with the MID, so it must be set before adding send streams and can't be
+  // changed afterwards.
+  virtual void SetMid(absl::string_view mid) = 0;
+
   // Configure stream for sending.
   virtual bool SetAudioSend(uint32_t ssrc,
                             bool enable,
@@ -944,6 +964,15 @@ class VoiceMediaSendChannelInterface : public MediaSendChannelInterface {
   GetStatsTask() = 0;
   virtual bool SenderNackEnabled() const = 0;
   virtual bool SenderNonSenderRttEnabled() const = 0;
+  // Override encoder factory for a specific ssrc.
+  // Replaces the default encoder_factory in AudioSendStream::Config and
+  // Forces reconfiguration of the underlying AudioSendStream
+  virtual bool SetEncoderFactoryOverride(
+      uint32_t ssrc,
+      absl_nonnull scoped_refptr<AudioEncoderFactory> encoder_factory) {
+    return false;
+  }
+  void ResetEncoderFactoryOverride(uint32_t ssrc) override {}
 };
 
 class VoiceMediaReceiveChannelInterface : public MediaReceiveChannelInterface {
@@ -951,7 +980,6 @@ class VoiceMediaReceiveChannelInterface : public MediaReceiveChannelInterface {
   virtual bool SetReceiverParameters(const AudioReceiverParameters& params) = 0;
   // Get the receive parameters for the incoming stream identified by `ssrc`.
   virtual RtpParameters GetRtpReceiverParameters(uint32_t ssrc) const = 0;
-  virtual std::vector<RtpSource> GetSources(uint32_t ssrc) const = 0;
   // Retrieve the receive parameters for the default receive
   // stream, which is used when SSRCs are not signaled.
   virtual RtpParameters GetDefaultRtpReceiveParameters() const = 0;
@@ -1027,6 +1055,15 @@ class VideoMediaSendChannelInterface : public MediaSendChannelInterface {
   // so that it's getting the send stream stats separately by calling
   // GetStats(), and merges with BandwidthEstimationInfo by itself.
   virtual void FillBitrateInfo(BandwidthEstimationInfo* bwe_info) = 0;
+  // Override encoder factory for a specific ssrc.
+  // Replaces the default encoder_factory in VideoSendStream::Config and
+  // forces reallocation of the underlying VideoSendStream
+  virtual bool SetEncoderFactoryOverride(
+      uint32_t ssrc,
+      absl_nonnull std::unique_ptr<VideoEncoderFactory> encoder_factory) {
+    return false;
+  }
+  void ResetEncoderFactoryOverride(uint32_t ssrc) override {}
 };
 
 class VideoMediaReceiveChannelInterface : public MediaReceiveChannelInterface {
@@ -1046,7 +1083,6 @@ class VideoMediaReceiveChannelInterface : public MediaReceiveChannelInterface {
   // RTCP feedback.
   virtual void RequestRecvKeyFrame(uint32_t ssrc) = 0;
 
-  virtual std::vector<RtpSource> GetSources(uint32_t ssrc) const = 0;
   // Set recordable encoded frame callback for `ssrc`
   virtual void SetRecordableEncodedFrameCallback(
       uint32_t ssrc,

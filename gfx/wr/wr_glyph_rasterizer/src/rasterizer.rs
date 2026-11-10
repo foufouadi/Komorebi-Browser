@@ -7,7 +7,7 @@ use api::{FontInstanceOptions, FontInstancePlatformOptions};
 use api::{FontKey, FontRenderMode, FontSize, FontTemplate, FontVariation};
 use api::{ColorU, GlyphIndex, GlyphDimensions, SyntheticItalics};
 use api::{IdNamespace, BlobImageResources};
-use api::channel::crossbeam::{unbounded, Receiver, Sender};
+use api::channel::{unbounded_channel, Receiver, Sender};
 use api::units::*;
 use api::ImageFormat;
 use crate::platform::font::FontContext;
@@ -380,8 +380,9 @@ impl FontTransform {
             // The X axis has been swapped with the Y axis
             SubpixelDirection::Vertical
         } else {
-            // Mixed transforms get no subpixel positioning
-            SubpixelDirection::None
+            // Both axes are projected onto each other (rotation / skew), so no
+            // single axis can carry the sub-pixel offset.
+            SubpixelDirection::Mixed
         }
     }
 }
@@ -1032,6 +1033,11 @@ pub enum SubpixelDirection {
     None = 0,
     Horizontal,
     Vertical,
+    /// A rotated or skewed transform, where neither axis alone can carry the
+    /// sub-pixel offset. Both axes get quarter-pixel positioning, so the run
+    /// snaps to a quarter-pixel grid rather than popping a whole device pixel at
+    /// a time (bug 2063377). Costs 16 raster variants per glyph.
+    Mixed,
 }
 
 impl SubpixelDirection {
@@ -1046,7 +1052,7 @@ impl SubpixelDirection {
 
     pub fn swap_xy(self) -> Self {
         match self {
-            SubpixelDirection::None => self,
+            SubpixelDirection::None | SubpixelDirection::Mixed => self,
             SubpixelDirection::Horizontal => SubpixelDirection::Vertical,
             SubpixelDirection::Vertical => SubpixelDirection::Horizontal,
         }
@@ -1129,6 +1135,7 @@ impl GlyphKey {
             SubpixelDirection::None => (0.0, 0.0),
             SubpixelDirection::Horizontal => (point.x, 0.0),
             SubpixelDirection::Vertical => (0.0, point.y),
+            SubpixelDirection::Mixed => (point.x, point.y),
         };
         let sox = SubpixelOffset::quantize(dx);
         let soy = SubpixelOffset::quantize(dy);
@@ -1537,7 +1544,7 @@ pub struct GlyphRasterizer {
 
 impl GlyphRasterizer {
     pub fn new(workers: Arc<ThreadPool>, dedicated_thread: Option<GlyphRasterThread>, can_use_r8_format: bool) -> Self {
-        let (glyph_tx, glyph_rx) = unbounded();
+        let (glyph_tx, glyph_rx) = unbounded_channel();
 
         let num_workers = workers.current_num_threads();
         let mut contexts = Vec::with_capacity(num_workers);
@@ -1720,9 +1727,46 @@ pub type GlyphRasterResult = Result<RasterizedGlyph, GlyphRasterError>;
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct GpuGlyphCacheKey(pub u32);
 
+/// Rasterized glyphs larger than this in either dimension are dropped.
+///
+/// `FONT_SIZE_LIMIT` bounds the size the backends are *asked* for, but not what
+/// comes back. A near-degenerate transform passes `has_2d_inverse` - which tests
+/// the determinant against exactly zero, while `FontTransform::quantize` puts it
+/// on a 1/1024 grid - and decomposes into a tiny minor axis scale. The glyph size
+/// handed to the backend is quantized, so that tiny scale rounds away while the
+/// compensating shape matrix keeps its full magnitude, and the rasterized glyph
+/// grows roughly as the reciprocal of the determinant: at a determinant of
+/// 9.8e-4, a 148.5px font rasterizes 1140px wide.
+///
+/// A glyph rasterized at `FONT_SIZE_LIMIT` under a transform the device path
+/// admits measures a few hundred pixels a side, so this leaves a wide margin. It
+/// also keeps a packed entry - up to 16 slots of one glyph, see
+/// `pack_glyph_variants_horizontal` - well inside the i32 its dimensions are
+/// computed in, which is what used to overflow (bug 2072715).
+const GLYPH_DIMENSION_LIMIT: i32 = 2048;
+
+/// Rasterize a glyph, treating one that comes back above `GLYPH_DIMENSION_LIMIT`
+/// as a glyph that could not be rasterized at all.
+fn rasterize_glyph_bounded(
+    context: &mut FontContext,
+    font: &FontInstance,
+    key: &GlyphKey,
+) -> GlyphRasterResult {
+    let glyph = context.rasterize_glyph(font, key)?;
+
+    if glyph.width > GLYPH_DIMENSION_LIMIT || glyph.height > GLYPH_DIMENSION_LIMIT {
+        return Err(GlyphRasterError::LoadFailed);
+    }
+
+    Ok(glyph)
+}
+
 fn pack_glyph_variants_horizontal(variants: &[RasterizedGlyph]) -> RasterizedGlyph {
-    // Pack 4 glyph variants horizontally into a single texture.
+    // Pack the glyph variants horizontally into a single texture (4 for a single
+    // sub-pixel axis, 16 for a mixed transform's 4x4 grid).
     // Normalize both left and top offsets via padding so all variants can use the same base offsets.
+    // The arithmetic below stays in i32: every variant is within
+    // `GLYPH_DIMENSION_LIMIT`, which bounds the packed entry well inside i32.
 
     let min_left = variants.iter().map(|v| v.left.floor()).fold(f32::INFINITY, f32::min);
     let max_top = variants.iter().map(|v| v.top.floor()).fold(f32::NEG_INFINITY, f32::max);
@@ -1737,7 +1781,7 @@ fn pack_glyph_variants_horizontal(variants: &[RasterizedGlyph]) -> RasterizedGly
         .map(|v| v.height + (max_top - v.top.floor()) as i32)
         .max().unwrap();
 
-    let packed_width = slot_width * 4;
+    let packed_width = slot_width * variants.len() as i32;
     let bpp = 4;
 
     let mut packed_bytes = vec![0u8; (packed_width * slot_height * bpp) as usize];
@@ -1794,7 +1838,7 @@ fn process_glyph(
     let subpx_dir = key.subpixel_dir();
 
     let result = if subpx_dir == SubpixelDirection::None {
-        context.rasterize_glyph(&font, &key)
+        rasterize_glyph_bounded(context, &font, &key)
     } else {
         let offsets = [
             SubpixelOffset::Zero,
@@ -1803,19 +1847,26 @@ fn process_glyph(
             SubpixelOffset::ThreeQuarters,
         ];
 
-        let mut variants = Vec::with_capacity(4);
-        for offset in &offsets {
-            let variant_key = GlyphKey::new(
-                key.index(),
-                match subpx_dir {
-                    SubpixelDirection::Horizontal => DevicePoint::new(offset.to_f32(), 0.0),
-                    SubpixelDirection::Vertical => DevicePoint::new(0.0, offset.to_f32()),
-                    SubpixelDirection::None => DevicePoint::zero(),
-                },
-                subpx_dir,
-            );
+        // A mixed transform varies on both axes, so it needs the full 4x4 grid
+        // of offsets. The shader indexes it as `offset_y * 4 + offset_x`.
+        let points: Vec<DevicePoint> = match subpx_dir {
+            SubpixelDirection::Horizontal =>
+                offsets.iter().map(|o| DevicePoint::new(o.to_f32(), 0.0)).collect(),
+            SubpixelDirection::Vertical =>
+                offsets.iter().map(|o| DevicePoint::new(0.0, o.to_f32())).collect(),
+            SubpixelDirection::Mixed => offsets.iter()
+                .flat_map(|oy| offsets.iter().map(move |ox| {
+                    DevicePoint::new(ox.to_f32(), oy.to_f32())
+                }))
+                .collect(),
+            SubpixelDirection::None => vec![DevicePoint::zero()],
+        };
 
-            match context.rasterize_glyph(&font, &variant_key) {
+        let mut variants = Vec::with_capacity(points.len());
+        for point in points {
+            let variant_key = GlyphKey::new(key.index(), point, subpx_dir);
+
+            match rasterize_glyph_bounded(context, &font, &variant_key) {
                 Ok(glyph) => variants.push(glyph),
                 Err(e) => return GlyphRasterJob {
                     font: font,
@@ -1900,7 +1951,7 @@ impl GlyphRasterThread {
         on_start: impl FnOnce() + Send + 'static,
         on_end: impl FnOnce() + Send+ 'static,
     ) -> std::io::Result<Self> {
-        let (tx, rx) = unbounded();
+        let (tx, rx) = unbounded_channel();
 
         std::thread::Builder::new().name("Glyph rasterizer".to_string()).spawn(move || {
             on_start();
@@ -2082,6 +2133,71 @@ mod test_glyph_rasterizer {
             |_, _| {},
             &mut Profiler,
         );
+    }
+
+    #[test]
+    fn test_oversized_glyph_is_dropped() {
+        // A glyph that comes back from the backend larger than
+        // `GLYPH_DIMENSION_LIMIT` must be dropped rather than rasterized, so
+        // that packing its sub-pixel variants cannot overflow (bug 2072715).
+        use std::fs::File;
+        use std::io::Read;
+        use api::{FontKey, FontInstanceKey, IdNamespace};
+        use api::units::DevicePoint;
+        use std::sync::Arc;
+        use crate::rasterizer::{BaseFontInstance, FontInstance, GlyphKey, GlyphRasterError,
+                                SubpixelDirection, rasterize_glyph_bounded,
+                                GLYPH_DIMENSION_LIMIT};
+        use crate::platform::font::FontContext;
+
+        let mut font_file =
+            File::open("../wrench/reftests/text/VeraBd.ttf").expect("Couldn't open font file");
+        let mut font_data = vec![];
+        font_file.read_to_end(&mut font_data).unwrap();
+
+        let font_key = FontKey::new(IdNamespace(0), 0);
+        let mut context = FontContext::new();
+        context.add_raw_font(&font_key, Arc::new(font_data), 0);
+
+        let instance = |size: f32| {
+            FontInstance::from_base(Arc::new(BaseFontInstance::new(
+                FontInstanceKey::new(IdNamespace(0), 0),
+                font_key,
+                size,
+                None,
+                None,
+                Vec::new(),
+            )))
+        };
+        let key = GlyphKey::new(36, DevicePoint::zero(), SubpixelDirection::None);
+
+        // An ordinary glyph is unaffected.
+        let ordinary = rasterize_glyph_bounded(&mut context, &instance(32.0), &key).unwrap();
+        assert!(ordinary.width <= GLYPH_DIMENSION_LIMIT);
+        assert!(ordinary.height <= GLYPH_DIMENSION_LIMIT);
+
+        // Control: the backend does rasterize this size, so the error below is
+        // the limit talking and not a rasterization failure.
+        let oversized = instance(4000.0);
+        let raw = context.rasterize_glyph(&oversized, &key)
+                         .expect("backend should rasterize an oversized glyph");
+        assert!(raw.width > GLYPH_DIMENSION_LIMIT || raw.height > GLYPH_DIMENSION_LIMIT);
+
+        assert!(matches!(
+            rasterize_glyph_bounded(&mut context, &oversized, &key),
+            Err(GlyphRasterError::LoadFailed),
+        ));
+    }
+
+    #[test]
+    fn test_packed_glyph_entry_fits_i32() {
+        // `pack_glyph_variants_horizontal` sizes the packed entry in i32. The
+        // largest entry it can be handed is a 4x4 sub-pixel grid of glyphs at
+        // `GLYPH_DIMENSION_LIMIT`, plus a pixel each way of normalizing padding.
+        use crate::rasterizer::GLYPH_DIMENSION_LIMIT;
+
+        let slot = GLYPH_DIMENSION_LIMIT as i64 + 1;
+        assert!(slot * 16 * slot * 4 < i32::MAX as i64);
     }
 
     #[test]

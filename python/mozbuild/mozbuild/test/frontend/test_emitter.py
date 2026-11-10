@@ -8,25 +8,29 @@ import unittest
 import mozpack.path as mozpath
 from mozunit import main
 
-from mozbuild.frontend.context import ObjDirPath, Path, SourcePath
+from mozbuild.frontend.context import CompileFlags, LinkFlags, ObjDirPath, SourcePath
 from mozbuild.frontend.data import (
     ComputedFlags,
     ConfigFileSubstitution,
+    DeclaredLicensedPaths,
+    DeclaredLicenseNotice,
     Defines,
     DirectoryTraversal,
     Exports,
+    FinalTargetFiles,
     FinalTargetPreprocessedFiles,
     GeneratedFile,
+    Headers,
     HostProgram,
     HostRustLibrary,
     HostRustProgram,
     HostSources,
     IPDLCollection,
-    JARManifest,
     LocalInclude,
     LocalizedFiles,
     LocalizedPreprocessedFiles,
     MozSrcFiles,
+    PerSourceFlag,
     Program,
     RustLibrary,
     RustProgram,
@@ -220,6 +224,133 @@ class TestEmitterBasic(unittest.TestCase):
         self.assertEqual(flags.flags["MOZBUILD_CFLAGS"], ["-Os", "-funroll-loops"])
         self.assertEqual(flags.flags["MOZBUILD_CXXFLAGS"], ["-funroll-loops", "-Os"])
 
+    def test_lto_flags(self):
+        reader = self.reader(
+            "compile-flags",
+            extra_substs={
+                "MOZ_LTO_CFLAGS": ["-flto=thin"],
+                "MOZ_LTO_LDFLAGS": ["-flto=thin"],
+            },
+        )
+        sources, ldflags, lib, flags = self.read_topsrcdir(reader)
+        compile_flags = dict(flags.get_flags())
+        for var in ("CFLAGS", "CXXFLAGS", "CMFLAGS", "CMMFLAGS"):
+            self.assertEqual(compile_flags[var][0], "-flto=thin")
+        self.assertEqual(dict(ldflags.get_flags())["LDFLAGS"][0], "-flto=thin")
+
+    def test_lto_flags_unset(self):
+        reader = self.reader("compile-flags")
+        sources, ldflags, lib, flags = self.read_topsrcdir(reader)
+        self.assertEqual(flags.get_flags(), flags.get_flags(exclude=("LTO",)))
+        self.assertEqual(ldflags.get_flags(), ldflags.get_flags(exclude=("LTO",)))
+
+    def test_win32_exe_default_ldflags(self):
+        reader = self.reader(
+            "host-compile-flags",
+            extra_substs={"WIN32_EXE_DEFAULT_LDFLAGS": ["-STACK:8388608"]},
+        )
+        sources, ldflags, host_flags, host_ldflags, lib, target_flags = (
+            self.read_topsrcdir(reader)
+        )
+        link_flags = dict(ldflags.get_flags())
+        self.assertEqual(link_flags["PROGRAM_LDFLAGS"], ["-STACK:8388608"])
+        self.assertNotIn("-STACK:8388608", link_flags.get("LDFLAGS", []))
+        for _, flags in host_ldflags.get_flags():
+            self.assertNotIn("-STACK:8388608", flags)
+
+    def test_macos_program_rpath(self):
+        reader = self.reader(
+            "compile-flags",
+            extra_substs={"OS_ARCH": "Darwin"},
+        )
+        sources, ldflags, lib, flags = self.read_topsrcdir(reader)
+        self.assertEqual(ldflags.flags["MACOS_RPATH"], ["-Wl,-rpath,@executable_path"])
+
+    def test_macos_program_rpath_other_os(self):
+        reader = self.reader("compile-flags")
+        sources, ldflags, lib, flags = self.read_topsrcdir(reader)
+        self.assertEqual(ldflags.flags["MACOS_RPATH"], [])
+
+    def test_pgo_flags(self):
+        reader = self.reader(
+            "compile-flags",
+            extra_substs={
+                "MOZ_PROFILE_GENERATE": "1",
+                "PROFILE_GEN_CFLAGS": ["-fprofile-generate"],
+                "PROFILE_GEN_LDFLAGS": ["-fprofile-generate"],
+            },
+        )
+        sources, ldflags, lib, flags = self.read_topsrcdir(reader)
+        self.assertEqual(flags.flags["PGO"], ["-fprofile-generate"])
+        self.assertEqual(flags.flags["PGO_DEFINES"], ["-DNS_FREE_PERMANENT_DATA=1"])
+        self.assertEqual(ldflags.flags["PGO"], ["-fprofile-generate"])
+
+    def test_pgo_flags_profile_use(self):
+        reader = self.reader(
+            "compile-flags",
+            extra_substs={
+                "MOZ_PROFILE_USE": "1",
+                "PROFILE_USE_CFLAGS": ["-fprofile-use"],
+                "PROFILE_USE_LDFLAGS": ["-fprofile-use"],
+            },
+        )
+        sources, ldflags, lib, flags = self.read_topsrcdir(reader)
+        self.assertEqual(flags.flags["PGO"], ["-fprofile-use"])
+        self.assertEqual(flags.flags["PGO_DEFINES"], [])
+        self.assertEqual(ldflags.flags["PGO"], ["-fprofile-use"])
+
+    def test_pgo_flags_off(self):
+        reader = self.reader("compile-flags")
+        sources, ldflags, lib, flags = self.read_topsrcdir(reader)
+        self.assertEqual(flags.flags["PGO"], [])
+        self.assertEqual(flags.flags["PGO_DEFINES"], [])
+        self.assertEqual(ldflags.flags["PGO"], [])
+
+    def _assert_pgo_compile_flags_skipped(self, name):
+        reader = self.reader(
+            name,
+            extra_substs={
+                "MOZ_PROFILE_GENERATE": "1",
+                "PROFILE_GEN_CFLAGS": ["-fprofile-generate"],
+                "PROFILE_GEN_LDFLAGS": ["-fprofile-generate"],
+            },
+        )
+        objs = self.read_topsrcdir(reader)
+        computed = [o.flags for o in objs if isinstance(o, ComputedFlags)]
+        (compile_flags,) = [f for f in computed if isinstance(f, CompileFlags)]
+        (link_flags,) = [f for f in computed if isinstance(f, LinkFlags)]
+        self.assertEqual(compile_flags["PGO"], [])
+        self.assertEqual(compile_flags["PGO_DEFINES"], [])
+        self.assertEqual(link_flags["PGO"], ["-fprofile-generate"])
+
+    def test_pgo_flags_simple_programs(self):
+        self._assert_pgo_compile_flags_skipped("program")
+
+    def test_pgo_flags_cpp_unit_tests(self):
+        self._assert_pgo_compile_flags_skipped("pgo-cpp-unit-tests")
+
+    def test_pgo_flags_no_pgo(self):
+        self._assert_pgo_compile_flags_skipped("pgo-no-pgo")
+
+    def test_per_source_object_deps(self):
+        reader = self.reader("per-source-object-deps")
+        objs = self.read_topsrcdir(reader)
+        flags = [o for o in objs if isinstance(o, PerSourceFlag)]
+        self.assertEqual(len(flags), 1)
+        self.assertEqual(mozpath.basename(flags[0].file_name), "gen.s")
+        generated, source = flags[0].object_deps
+        self.assertIsInstance(generated, ObjDirPath)
+        self.assertEqual(generated, "!include.S")
+        self.assertIsInstance(source, SourcePath)
+        self.assertEqual(source, "included.inc")
+
+    def test_per_source_object_deps_missing(self):
+        reader = self.reader("per-source-object-deps-missing")
+        with self.assertRaisesRegex(
+            SandboxValidationError, "Dependency of gen.s does not exist"
+        ):
+            self.read_topsrcdir(reader)
+
     def test_asflags(self):
         reader = self.reader("asflags", extra_substs={"ASFLAGS": ["-safeseh"]})
         as_sources, sources, ldflags, lib, flags, asflags = self.read_topsrcdir(reader)
@@ -341,6 +472,17 @@ class TestEmitterBasic(unittest.TestCase):
         )
         self.assertEqual(host_flags.flags["MOZBUILD_HOST_CXXFLAGS"], [])
         self.assertEqual(host_ldflags.flags["MOZBUILD"], ["-Wl,--gc-sections"])
+
+    def test_host_compile_flags_nspr(self):
+        reader = self.reader(
+            "host-compile-flags", extra_substs={"NSPR_CFLAGS": ["-I/obj/nspr"]}
+        )
+        sources, ldflags, host_flags, host_ldflags, lib, target_flags = (
+            self.read_topsrcdir(reader)
+        )
+        flags = dict(host_flags.get_flags())
+        self.assertEqual(flags["HOST_CFLAGS"][-1], "-I/obj/nspr")
+        self.assertEqual(flags["HOST_CXXFLAGS"][-1], "-I/obj/nspr")
 
     def test_host_no_optimize_flags(self):
         reader = self.reader(
@@ -869,6 +1011,16 @@ class TestEmitterBasic(unittest.TestCase):
             ],
         )
 
+    def test_host_program_lto_object_path_flags(self):
+        reader = self.reader(
+            "host-program-paths", extra_substs={"MOZ_LTO_OBJECT_PATH": "1"}
+        )
+        objs = self.read_topsrcdir(reader)
+        self.assertEqual(
+            [o.lto_object_path_flags for o in objs if isinstance(o, HostProgram)],
+            [[], [], []],
+        )
+
     def test_test_manifest_missing_manifest(self):
         """A missing manifest file should result in an error."""
         reader = self.reader("test-manifest-missing-manifest")
@@ -1205,13 +1357,65 @@ class TestEmitterBasic(unittest.TestCase):
         self.assertEqual(defines, expected)
 
     def test_jar_manifests(self):
+        """An application tree jar manifest becomes ordinary installs."""
         reader = self.reader("jar-manifests")
         objs = self.read_topsrcdir(reader)
 
         self.assertEqual(len(objs), 1)
+        obj = objs[0]
+        self.assertIsInstance(obj, FinalTargetFiles)
+        self.assertEqual(obj.install_target, "dist/bin")
+        self.assertEqual(
+            [dest for dest, _ in obj.files.walk() if dest],
+            ["chrome/test/content/test"],
+        )
+
+    def test_jar_manifests_pp_files_extra_deps(self):
+        """A preprocessed jar entry reads what PP_FILES_EXTRA_DEPS names."""
+        reader = self.reader("jar-manifests-pp-extra-deps")
+        objs = self.read_topsrcdir(reader)
+
+        self.assertEqual(len(objs), 1)
+        obj = objs[0]
+        self.assertIsInstance(obj, FinalTargetPreprocessedFiles)
+        self.assertEqual(
+            [mozpath.basename(d.full_path) for d in obj.extra_deps], ["generated.h"]
+        )
+
+    def test_jar_manifests_non_application(self):
+        """Any install target is expanded, not only the application tree."""
+        reader = self.reader("jar-manifests-non-application")
+        objs = self.read_topsrcdir(reader)
+
+        files = [o for o in objs if isinstance(o, FinalTargetFiles)]
+        self.assertEqual(len(files), 1)
+        self.assertEqual(files[0].install_target, "_tests/jar-manifests")
+
+    def test_jar_manifests_pattern_in_subdir(self):
+        """A pattern resolves beside the jar.mn, like a plain source."""
+        reader = self.reader("jar-manifests-subdirectory")
+        objs = self.read_topsrcdir(reader)
+
+        files = [o for o in objs if isinstance(o, FinalTargetFiles)]
+        self.assertEqual(len(files), 1)
+        sources = [f for _, entries in files[0].files.walk() for f in entries]
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(
+            mozpath.normsep(sources[0].full_path),
+            mozpath.join(mozpath.normsep(reader.config.topsrcdir), "sub/assets/**"),
+        )
+
+    def test_jar_manifests_empty(self):
+        """A jar.mn with no section is still a build input."""
+        reader = self.reader("jar-manifests-empty")
+        objs = self.read_topsrcdir(reader, filter_common=False)
+
+        recorded = set()
         for obj in objs:
-            self.assertIsInstance(obj, JARManifest)
-            self.assertIsInstance(obj.path, Path)
+            recorded |= {mozpath.normsep(p) for p in obj.context_all_paths}
+        self.assertIn(
+            mozpath.join(mozpath.normsep(reader.config.topsrcdir), "jar.mn"), recorded
+        )
 
     def test_jar_manifests_multiple_files(self):
         with self.assertRaisesRegex(SandboxValidationError, "limited to one value"):
@@ -1362,6 +1566,16 @@ class TestEmitterBasic(unittest.TestCase):
         self.assertEqual([str(d) for d in deps], ["!generated.txt", "bar.txt"])
         self.assertIsInstance(deps[0], ObjDirPath)
         self.assertIsInstance(deps[1], SourcePath)
+
+    def test_extra_link_deps_shared_library(self):
+        """Test that EXTRA_LINK_DEPS is recorded on a shared library."""
+        reader = self.reader("extra-link-deps-shared")
+        objs = self.read_topsrcdir(reader)
+        libs = [o for o in objs if isinstance(o, SharedLibrary)]
+        self.assertEqual(len(libs), 1)
+        deps = libs[0].extra_link_deps
+        self.assertEqual([str(d) for d in deps], ["!generated.rsp"])
+        self.assertIsInstance(deps[0], ObjDirPath)
 
     def test_extra_link_deps_no_linkable(self):
         """Test that EXTRA_LINK_DEPS without a linkable is an error."""
@@ -1616,6 +1830,14 @@ class TestEmitterBasic(unittest.TestCase):
         ):
             self.read_topsrcdir(reader)
 
+    def test_xpi_pkgname_without_xpi_name(self):
+        """An archive packages a staging area, and only XPI_NAME makes one."""
+        reader = self.reader("xpi-pkgname-without-xpi-name")
+        with self.assertRaisesRegex(
+            SandboxValidationError, "XPI_PKGNAME set but XPI_NAME not set"
+        ):
+            self.read_topsrcdir(reader)
+
     def test_final_target_pp_files(self):
         """Test that FINAL_TARGET_PP_FILES works properly."""
         reader = self.reader("dist-files")
@@ -1750,6 +1972,14 @@ class TestEmitterBasic(unittest.TestCase):
         ):
             self.read_topsrcdir(reader)
 
+    def test_rust_library_invalid_cargo_crate_type(self):
+        """Test that a RustLibrary is restricted to a static library."""
+        reader = self.reader("rust-library-invalid-cargo-crate-type")
+        with self.assertRaisesRegex(
+            SandboxValidationError, "cargo_crate_type.* must be 'staticlib'"
+        ):
+            self.read_topsrcdir(reader)
+
     def test_rust_library_dash_folding(self):
         """Test that on-disk names of RustLibrary objects convert dashes to underscores."""
         reader = self.reader(
@@ -1796,6 +2026,24 @@ class TestEmitterBasic(unittest.TestCase):
         self.assertIsInstance(host_ldflags, ComputedFlags)
         self.assertIsInstance(lib, RustLibrary)
         self.assertEqual(lib.features, ["musthave", "cantlivewithout"])
+        self.assertFalse(lib.no_lto)
+
+    def test_rust_library_no_lto(self):
+        """Test that a RustLibrary LTO opt out is correctly emitted."""
+        reader = self.reader(
+            "rust-library-no-lto",
+            extra_substs=dict(RUST_TARGET="i686-pc-windows-msvc"),
+        )
+        objs = self.read_topsrcdir(reader)
+
+        self.assertEqual(len(objs), 5)
+        ldflags, host_cflags, host_ldflags, lib, cflags = objs
+        self.assertIsInstance(ldflags, ComputedFlags)
+        self.assertIsInstance(cflags, ComputedFlags)
+        self.assertIsInstance(host_cflags, ComputedFlags)
+        self.assertIsInstance(host_ldflags, ComputedFlags)
+        self.assertIsInstance(lib, RustLibrary)
+        self.assertTrue(lib.no_lto)
 
     def test_rust_library_duplicate_features(self):
         """Test that duplicate RustLibrary features are rejected."""
@@ -2017,6 +2265,96 @@ class TestEmitterBasic(unittest.TestCase):
             set(flags.flags["WASM_DEFINES"]),
             set(["-DFOO", '-DBAZ="abcd"', "-UQUX", "-DBAR=7", "-DVALUE=xyz"]),
         )
+
+    def _assert_wasm_link_flags(self, optimize, stack_size):
+        reader = self.reader(
+            "wasm-compile-flags",
+            extra_substs={
+                "WASM_CC": "clang",
+                "WASM_CXX": "clang++",
+                "MOZ_OPTIMIZE": optimize,
+            },
+        )
+        flags = list(self.read_topsrcdir(reader))[2]
+        self.assertEqual(
+            dict(flags.get_flags())["WASM_LDFLAGS"],
+            [
+                "-Wl,--export-all",
+                "-Wl,--stack-first",
+                f"-Wl,-z,stack-size={stack_size}",
+                "-Wl,--no-entry",
+                "-Wl,--import-memory",
+                "-Wl,--import-table",
+            ],
+        )
+
+    def test_wasm_link_flags(self):
+        self._assert_wasm_link_flags("1", 262144)
+
+    def test_wasm_link_flags_no_optimize(self):
+        self._assert_wasm_link_flags("", 1048576)
+
+    def test_source_headers(self):
+        reader = self.reader("reader-source-headers")
+        objs = self.read_topsrcdir(reader)
+        headers = [
+            header for obj in objs if isinstance(obj, Headers) for header in obj.files
+        ]
+        self.assertEqual(
+            headers,
+            [
+                mozpath.join(reader.config.topsrcdir, "exported.h"),
+                mozpath.join(reader.config.topsrcdir, "header.h"),
+                mozpath.join(reader.config.topsrcdir, "installed.h"),
+            ],
+        )
+
+    def test_licenses(self):
+        reader = self.reader("licenses")
+        objs = self.read_topsrcdir(reader)
+
+        notices = {o.id: o for o in objs if isinstance(o, DeclaredLicenseNotice)}
+        coverage = [o for o in objs if isinstance(o, DeclaredLicensedPaths)]
+
+        self.assertEqual(sorted(notices), ["MIT", "mylib"])
+
+        mit = notices["MIT"]
+        self.assertEqual(mit.title, "MIT License")
+        self.assertEqual(mit.spdx, "MIT")
+        self.assertEqual(mozpath.basename(mit.text_path), "mit.txt")
+        self.assertIsNone(mit.notice)
+
+        mylib = notices["mylib"]
+        self.assertEqual(mylib.notice, "Copyright 2026 Somebody.")
+        self.assertEqual(mylib.paths, ["extra/path"])
+        self.assertEqual(mylib.acknowledgement, "Portions are copyright Somebody.")
+        self.assertIsNone(mit.acknowledgement)
+
+        self.assertEqual([o.id for o in coverage], ["MIT"])
+        self.assertEqual(coverage[0].relsrcdir, "lib")
+        # paths are resolved relative to the declaring moz.build
+        self.assertEqual(coverage[0].paths, ["lib/vendor/dep.js", "lib/vendor/other*"])
+
+    def test_licenses_missing_title(self):
+        reader = self.reader("licenses-missing-title")
+        with self.assertRaisesRegex(SandboxValidationError, "requires a title"):
+            self.read_topsrcdir(reader)
+
+    def test_licenses_missing_text_file(self):
+        reader = self.reader("licenses-missing-text-file")
+        with self.assertRaisesRegex(SandboxValidationError, "does not exist"):
+            self.read_topsrcdir(reader)
+
+    def test_licenses_no_text_file_at_all(self):
+        # No `text`, and no moz.yaml above it naming one either.
+        reader = self.reader("licenses-no-text")
+        with self.assertRaisesRegex(SandboxValidationError, "requires a text file"):
+            self.read_topsrcdir(reader)
+
+    def test_licenses_declared_twice_in_one_file(self):
+        reader = self.reader("licenses-declared-twice")
+        with self.assertRaisesRegex(SandboxValidationError, "declared twice here"):
+            self.read_topsrcdir(reader)
 
 
 if __name__ == "__main__":

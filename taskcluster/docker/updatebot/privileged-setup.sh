@@ -45,16 +45,29 @@ pushd /builds/worker/.mozbuild/
 git clone https://github.com/phacility/arcanist.git
 cd arcanist
 git checkout e50d1bc4eabac9c37e3220e9f3fb8e37ae20b957
+# Show the response when Phabricator (or something in front of it) answers a
+# Conduit call with something other than JSON.
+git apply /setup/arcanist_log_invalid_json.patch
+# Send Conduit requests uncompressed: Phabricator's PHP parses a gzipped form
+# body before decompressing it, and large ones fail on max_input_vars.
+git apply /setup/arcanist_no_gzip.patch
 ln -s /builds/worker/.mozbuild/arcanist/bin/arc /usr/local/bin/arc
 popd
 
 . install-node-for-pdfjs.sh
 
-# Install a pinned version of the Claude Code CLI, used for AI-assisted tasks
-# (e.g. attempting a vendor when `./mach vendor` fails). The version is pinned
-# here and its auto-updater is disabled via DISABLE_AUTOUPDATER (see Dockerfile)
-# so the code we execute is reproducible. Requires ANTHROPIC_API_KEY at runtime.
-npm install -g @anthropic-ai/claude-code@2.1.195
+# Install the Claude Code CLI, used for AI-assisted tasks (e.g. attempting a
+# vendor when `./mach vendor` fails). The launcher and its platform binary are
+# pinned by the committed claude-code/package-lock.json and integrity-verified
+# by `npm ci`, which aborts the build on any mismatch; the auto-updater is
+# disabled via DISABLE_AUTOUPDATER (see Dockerfile). So the code we execute is
+# reproducible. Requires ANTHROPIC_API_KEY at runtime.
+mkdir -p /builds/worker/.mozbuild/claude-code
+cp claude-code/package.json claude-code/package-lock.json /builds/worker/.mozbuild/claude-code/
+pushd /builds/worker/.mozbuild/claude-code
+npm ci
+ln -s /builds/worker/.mozbuild/claude-code/node_modules/.bin/claude /usr/local/bin/claude
+popd
 claude --version  # verify
 
 # pdf.js setup
@@ -84,7 +97,8 @@ cd /builds/worker/
 chown -R worker:worker .
 chown -R worker:worker .*
 
-python3 -m pip install --break-system-packages -U pip
+python3 -m pip install --break-system-packages -U pip==26.2.2
 python3 -m pip install --break-system-packages poetry==2.1.1
+python3 -m pip install --break-system-packages --only-binary :all: --require-hashes -r /setup/evolve-requirements.txt
 
 rm -rf /setup

@@ -161,6 +161,7 @@ class GPUProcessManager final : public GPUProcessHost::Listener {
   // Note that a layer tree id is always allocated, even if this returns false.
   bool AllocateAndConnectLayerTreeId(PCompositorBridgeChild* aCompositorBridge,
                                      base::ProcessId aOtherPid,
+                                     LayersId aEmbedderLayersId,
                                      LayersId* aOutLayersId,
                                      CompositorOptions* aOutCompositorOptions);
 
@@ -200,6 +201,11 @@ class GPUProcessManager final : public GPUProcessHost::Listener {
   // Kills the GPU process. Used in normal operation to recover from an error,
   // as well as for tests and diagnostics.
   void KillProcess(bool aGenerateMinidump = false);
+
+  // Kills the GPU process for tests. This exercises the same recovery path as
+  // an unexpected shutdown, but does not count towards disabling the GPU
+  // process or any of its features.
+  void KillProcessForTesting();
 
   // Invoked when we know we will shutdown (but before shutdown begins), to
   // avoid races with other shutdown observers.
@@ -245,6 +251,7 @@ class GPUProcessManager final : public GPUProcessHost::Listener {
   bool CreateContentCompositorManager(
       mozilla::ipc::EndpointProcInfo aOtherProcess,
       dom::ContentParentId aChildId, uint32_t aNamespace,
+      uint32_t aContentBridgeNamespace,
       mozilla::ipc::Endpoint<PCompositorManagerChild>* aOutEndpoint);
   bool CreateContentImageBridge(
       mozilla::ipc::EndpointProcInfo aOtherProcess,
@@ -382,8 +389,6 @@ class GPUProcessManager final : public GPUProcessHost::Listener {
   mozilla::ipc::TaskFactory<GPUProcessManager> mTaskFactory;
   RefPtr<VsyncIOThreadHolder> mVsyncIOThread;
   uint32_t mNextNamespace;
-  uint32_t mIdNamespace;
-  uint32_t mResourceId;
 
   uint32_t mUnstableProcessAttempts;
   uint32_t mTotalProcessAttempts;
@@ -401,7 +406,7 @@ class GPUProcessManager final : public GPUProcessHost::Listener {
   bool mAppInForeground;
 
   // Fields that are associated with the current GPU process.
-  GPUProcessHost* mProcess;
+  RefPtr<GPUProcessHost> mProcess;
   uint64_t mProcessToken;
   bool mProcessStable = false;
   bool mProcessStableOnce = false;

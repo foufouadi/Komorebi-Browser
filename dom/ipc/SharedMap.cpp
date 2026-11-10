@@ -208,7 +208,7 @@ Result<Ok, nsresult> SharedMap::MaybeRebuild() {
   }
   mHandle = nullptr;
 
-  Range<const uint8_t> inputRange(mMapping.DataAsSpan<uint8_t>());
+  mozilla::Range<const uint8_t> inputRange(mMapping.DataAsSpan<uint8_t>());
   InputBuffer buffer(inputRange);
 
   uint32_t count;
@@ -217,7 +217,7 @@ Result<Ok, nsresult> SharedMap::MaybeRebuild() {
   MOZ_ASSERT(mEntries.IsEmpty());
   MOZ_ASSERT(mEntryArray.isNothing());
   for (uint32_t i = 0; i < count; i++) {
-    auto entry = MakeUnique<Entry>(*this);
+    auto entry = std::make_unique<Entry>(*this);
     entry->Code(buffer);
 
     // This buffer was created at runtime, during this session, so any errors

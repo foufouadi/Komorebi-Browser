@@ -11,12 +11,41 @@
 #include "mozilla/dom/BrowserParent.h"
 #include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/WindowContext.h"
 #include "nsAccessibilityService.h"
 #include "nsEventShell.h"
 #include "nsFocusManager.h"
+#include "nsLayoutUtils.h"
 
 namespace mozilla {
 namespace a11y {
+
+/**
+ * If our focus target is the body accessible, manually retarget it to the doc
+ * accessible. Otherwise, focus will land on what is effectively just a
+ * generic accessible as far as clients are concerned, which doesn't have
+ * any useful semantics.
+ */
+static LocalAccessible* MaybeAdjustDocumentFocusTarget(
+    LocalAccessible* aTarget) {
+  if (!aTarget) {
+    return aTarget;
+  }
+  DocAccessible* document = aTarget->Document();
+  if (document && document->IsBodyElement(aTarget->GetContent())) {
+    return document;
+  }
+  return aTarget;
+}
+
+/**
+ * Return the appropriate accessible target given the focused node.
+ */
+static LocalAccessible* FocusTargetFor(DocAccessible* aDocument,
+                                       nsINode* aNode) {
+  return MaybeAdjustDocumentFocusTarget(
+      aDocument->GetAccessibleEvenIfNotInMapOrContainer(aNode));
+}
 
 FocusManager::FocusManager() = default;
 
@@ -43,8 +72,7 @@ LocalAccessible* FocusManager::FocusedLocalAccessible() const {
   if (focusedNode) {
     DocAccessible* doc =
         GetAccService()->GetDocAccessible(focusedNode->OwnerDoc());
-    return doc ? doc->GetAccessibleEvenIfNotInMapOrContainer(focusedNode)
-               : nullptr;
+    return doc ? FocusTargetFor(doc, focusedNode) : nullptr;
   }
 
   return nullptr;
@@ -87,9 +115,10 @@ Accessible* FocusManager::FocusedAccessible() const {
   // which returns the content BrowsingContext that has focus.
   dom::BrowsingContext* focusedContext =
       focusManagerDOM->GetFocusedBrowsingContextInChrome();
+  dom::WindowContext* focusedWindow =
+      focusedContext ? focusedContext->GetCurrentWindowContext() : nullptr;
 
-  DocAccessibleParent* focusedDoc =
-      DocAccessibleParent::GetFrom(focusedContext);
+  DocAccessibleParent* focusedDoc = DocAccessibleParent::GetFrom(focusedWindow);
   return focusedDoc ? focusedDoc->GetFocusedAcc() : nullptr;
 #endif  // defined(ANDROID)
 }
@@ -248,6 +277,7 @@ void FocusManager::ForceFocusEvent() {
 void FocusManager::DispatchFocusEvent(DocAccessible* aDocument,
                                       LocalAccessible* aTarget) {
   MOZ_ASSERT(aDocument, "No document for focused accessible!");
+  aTarget = MaybeAdjustDocumentFocusTarget(aTarget);
   if (aDocument) {
     auto event =
         MakeRefPtr<AccEvent>(nsIAccessibleEvent::EVENT_FOCUS, aTarget,
@@ -277,16 +307,14 @@ void FocusManager::ProcessDOMFocus(nsINode* aTarget) {
       GetAccService()->GetDocAccessible(aTarget->OwnerDoc());
   if (!document) return;
 
-  LocalAccessible* target =
-      document->GetAccessibleEvenIfNotInMapOrContainer(aTarget);
+  LocalAccessible* target = FocusTargetFor(document, aTarget);
   if (target) {
     // Check if still focused. Otherwise we can end up with storing the active
     // item for control that isn't focused anymore.
     nsINode* focusedNode = FocusedDOMNode();
     if (!focusedNode) return;
 
-    LocalAccessible* DOMFocus =
-        document->GetAccessibleEvenIfNotInMapOrContainer(focusedNode);
+    LocalAccessible* DOMFocus = FocusTargetFor(document, focusedNode);
     if (target != DOMFocus) return;
 
     LocalAccessible* activeItem = target->CurrentItem();
@@ -305,7 +333,8 @@ void FocusManager::ProcessFocusEvent(AccEvent* aEvent) {
 
   // Emit focus event if event target is the active item. Otherwise then check
   // if it's still focused and then update active item and emit focus event.
-  LocalAccessible* target = aEvent->GetAccessible();
+  LocalAccessible* target =
+      MaybeAdjustDocumentFocusTarget(aEvent->GetAccessible());
   MOZ_ASSERT(!target->IsDefunct());
   if (target != mActiveItem) {
     // Check if still focused. Otherwise we can end up with storing the active
@@ -314,8 +343,7 @@ void FocusManager::ProcessFocusEvent(AccEvent* aEvent) {
     nsINode* focusedNode = FocusedDOMNode();
     if (!focusedNode) return;
 
-    LocalAccessible* DOMFocus =
-        document->GetAccessibleEvenIfNotInMapOrContainer(focusedNode);
+    LocalAccessible* DOMFocus = FocusTargetFor(document, focusedNode);
     if (target != DOMFocus) return;
 
     LocalAccessible* activeItem = target->CurrentItem();
@@ -406,7 +434,9 @@ void FocusManager::ProcessFocusEvent(AccEvent* aEvent) {
 nsINode* FocusManager::FocusedDOMNode() const {
   nsFocusManager* DOMFocusManager = nsFocusManager::GetFocusManager();
   nsIContent* focusedElm = DOMFocusManager->GetFocusedElement();
-  nsIFrame* focusedFrame = focusedElm ? focusedElm->GetPrimaryFrame() : nullptr;
+  nsIFrame* focusedFrame =
+      focusedElm ? nsLayoutUtils::GetPrimaryOrAreaImageFrame(focusedElm)
+                 : nullptr;
   // DOM elements retain their focused state when they get styled as display:
   // none/content or visibility: hidden. We should treat those cases as if those
   // elements were removed, and focus on doc.

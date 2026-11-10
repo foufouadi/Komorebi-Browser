@@ -7,6 +7,7 @@
 #include "CSSEditUtils.h"
 #include "HTMLEditUtils.h"
 
+#include "js/GCAPI.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/PresShellInlines.h"
 #include "mozilla/dom/BindContext.h"
@@ -109,7 +110,8 @@ class ElementDeletionObserver final : public nsStubMultiMutationObserver {
 
 NS_IMPL_ISUPPORTS(ElementDeletionObserver, nsIMutationObserver)
 
-void ElementDeletionObserver::ParentChainChanged(nsIContent* aContent) {
+void ElementDeletionObserver::ParentChainChanged(nsIContent* aContent)
+    MOZ_CAN_RUN_SCRIPT_BOUNDARY {
   // If the native anonymous content has been unbound already in
   // DeleteRefToAnonymousNode, mNativeAnonNode's parentNode is null.
   if (aContent != mObservedElement || !mNativeAnonNode ||
@@ -122,30 +124,36 @@ void ElementDeletionObserver::ParentChainChanged(nsIContent* aContent) {
 
   // aContent is mObservedElement so that mNativeAnonNode may be stored only by
   // the MNC array. Let's grab it.
-  nsCOMPtr<nsIContent> nativeAnonNode(mNativeAnonNode);
+  mObservedElement->RemoveMutationObserver(self);
+  mObservedElement = nullptr;
+  nsCOMPtr<nsIContent> nativeAnonNode = mNativeAnonNode;
   mNativeAnonNode = nullptr;
   nativeAnonNode->RemoveMutationObserver(self);
   ManualNACPtr::RemoveContentFromNACArray(nativeAnonNode);
-
-  // aContent is mObservedElement so that it's safe to remove it without adding
-  // the refcount.
-  mObservedElement->RemoveMutationObserver(self);
-  mObservedElement = nullptr;
+  // FYI: The call of RemoveContentFromNACArray() might have caused dispatching
+  // a chrome event. So, if you want to refer a member after here, you should
+  // grab it before the call.
 }
 
 void ElementDeletionObserver::NodeWillBeDestroyed(nsINode* aNode) {
   MOZ_DIAGNOSTIC_ASSERT(mSelf);
   MOZ_ASSERT(aNode == mNativeAnonNode || aNode == mObservedElement);
 
+  nsAutoScriptBlocker scriptBlocker;
   // If either mObservedElement or mNativeAnonNode, we don't need to keep
   // observing the other. Therefore, we should stop observing the both and
   // release ourselves.
   RefPtr<ElementDeletionObserver> self = std::move(mSelf);
   mObservedElement->RemoveMutationObserver(self);
   mObservedElement = nullptr;
-  mNativeAnonNode->RemoveMutationObserver(self);
-  mNativeAnonNode->UnbindFromTree();
+  const RefPtr nativeAnonNode = mNativeAnonNode;
   mNativeAnonNode = nullptr;
+  nativeAnonNode->RemoveMutationObserver(self);
+  nativeAnonNode->UnbindFromTree();
+  // FYI: The call of UnbindFromTree() might have caused dispatching a chrome
+  // event. So, if you want to refer a member after `scriptBlocker` above is
+  // destroyed, you have to store the member with a strong pointer before the
+  // call.
 }
 
 /******************************************************************************
@@ -164,13 +172,24 @@ ManualNACPtr HTMLEditor::CreateAnonymousElement(nsAtom* aTag,
     return nullptr;
   }
 
-  if (NS_WARN_IF(!GetDocument())) {
-    return nullptr;
+  {
+    Document* const doc = GetDocument();
+    if (NS_WARN_IF(!doc) ||
+        NS_WARN_IF(aParentContent.GetComposedDoc() != doc)) {
+      return nullptr;
+    }
   }
 
   RefPtr<PresShell> presShell = GetPresShell();
   if (NS_WARN_IF(!presShell)) {
     return nullptr;
+  }
+
+  // Neither <a>, <img> nor <span> will create a UA shadow, so,
+  // CreateAnonymousElement() shouldn't run script.
+  Maybe<JS::AutoAssertNoGC> maybeAssertNoGC;
+  if (aTag == nsGkAtoms::span || aTag == nsGkAtoms::img) {
+    maybeAssertNoGC.emplace();
   }
 
   // Create a new node through the element factory
@@ -181,8 +200,8 @@ ManualNACPtr HTMLEditor::CreateAnonymousElement(nsAtom* aTag,
   }
 
   if (aIsCreatedHidden) {
-    nsresult rv =
-        newElement->SetAttr(kNameSpaceID_None, nsGkAtoms::hidden, u""_ns, true);
+    nsresult rv = newElement->SetAttr(kNameSpaceID_None, nsGkAtoms::hidden,
+                                      u""_ns, true, IsKnownNewAttr::Yes);
     if (NS_FAILED(rv)) {
       NS_WARNING("Element::SetAttr(nsGkAtoms::hidden, ...) failed");
       return nullptr;
@@ -192,13 +211,15 @@ ManualNACPtr HTMLEditor::CreateAnonymousElement(nsAtom* aTag,
   // add an _moz_anonclass attribute if needed
   if (!aAnonClass.IsEmpty()) {
     nsresult rv = newElement->SetAttr(kNameSpaceID_None, nsGkAtoms::_class,
-                                      aAnonClass, true);
+                                      aAnonClass, true, IsKnownNewAttr::Yes);
     if (NS_FAILED(rv)) {
       NS_WARNING("Element::SetAttr(nsGkAtoms::_moz_anonclass) failed");
       return nullptr;
     }
   }
 
+  // We need to put a script blocker before calling BindToTree()  and
+  // UnbindFromTree() because some helper methods require it.
   nsAutoScriptBlocker scriptBlocker;
 
   // establish parenthood of the element
@@ -546,8 +567,11 @@ nsresult HTMLEditor::GetPositionAndDimensions(Element& aElement, int32_t& aX,
     nsAutoString positionValue;
     DebugOnly<nsresult> rvIgnored = CSSEditUtils::GetComputedProperty(
         aElement, *nsGkAtoms::position, positionValue);
-    if (NS_WARN_IF(Destroyed())) {
+    if (NS_WARN_IF(Destroyed())) [[unlikely]] {
       return NS_ERROR_EDITOR_DESTROYED;
+    }
+    if (NS_WARN_IF(aElement.OwnerDoc() != GetDocument())) [[unlikely]] {
+      return NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE;
     }
     NS_WARNING_ASSERTION(NS_SUCCEEDED(rvIgnored),
                          "CSSEditUtils::GetComputedProperty(nsGkAtoms::"
@@ -562,7 +586,13 @@ nsresult HTMLEditor::GetPositionAndDimensions(Element& aElement, int32_t& aX,
     // Get the all the computed css styles attached to the element node
     RefPtr<nsComputedDOMStyle> computedDOMStyle =
         CSSEditUtils::GetComputedStyle(&aElement);
-    if (NS_WARN_IF(!computedDOMStyle)) {
+    if (NS_WARN_IF(Destroyed())) [[unlikely]] {
+      return NS_ERROR_EDITOR_DESTROYED;
+    }
+    if (NS_WARN_IF(aElement.OwnerDoc() != GetDocument())) [[unlikely]] {
+      return NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE;
+    }
+    if (NS_WARN_IF(!computedDOMStyle)) [[unlikely]] {
       return NS_ERROR_FAILURE;
     }
 
@@ -580,7 +610,7 @@ nsresult HTMLEditor::GetPositionAndDimensions(Element& aElement, int32_t& aX,
     mResizedObjectIsAbsolutelyPositioned = false;
     RefPtr<nsGenericHTMLElement> htmlElement =
         nsGenericHTMLElement::FromNode(aElement);
-    if (!htmlElement) {
+    if (NS_WARN_IF(!htmlElement)) [[unlikely]] {
       return NS_ERROR_NULL_POINTER;
     }
     DebugOnly<nsresult> rvIgnored = GetElementOrigin(aElement, aX, aY);

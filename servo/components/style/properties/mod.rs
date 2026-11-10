@@ -21,28 +21,29 @@ pub mod generated {
     include!(concat!(env!("OUT_DIR"), "/properties.rs"));
 }
 
+use crate::FxHashMap;
 use crate::applicable_declarations::RevertKind;
-use crate::custom_properties::{self, ComputedSubstitutionFunctions, SubstitutionResult};
+use crate::custom_properties::{self, ComputedSubstitutionFunctions};
 use crate::derives::*;
 use crate::dom::AttributeTracker;
 #[cfg(feature = "gecko")]
 use crate::gecko_bindings::structs::{CSSPropertyId, NonCustomCSSPropertyId, RefPtr};
 use crate::logical_geometry::WritingMode;
 use crate::parser::ParserContext;
-use crate::stylesheets::CssRuleType;
-use crate::stylesheets::Origin;
+use crate::stylesheets::{CssRuleType, CssRuleTypes, Origin};
 use crate::stylist::Stylist;
+use crate::substitution::{self, SubstitutionFunctionKind, SubstitutionResult};
 use crate::typed_om::{ToTyped, TypedValue};
 use crate::values::{computed, serialize_atom_name};
 use arrayvec::{ArrayVec, Drain as ArrayVecDrain};
-use cssparser::{match_ignore_ascii_case, Parser, ParserInput};
-use rustc_hash::FxHashMap;
+use cssparser::{Parser, match_ignore_ascii_case};
 use servo_arc::Arc;
 use std::{
     borrow::Cow,
     fmt::{self, Write},
     mem,
 };
+use strum::VariantNames;
 use style_traits::{
     CssString, CssWriter, KeywordsCollectFn, ParseError, ParsingMode, SpecifiedValueInfo, ToCss,
 };
@@ -62,12 +63,15 @@ bitflags! {
         const APPLIES_TO_CUE = 1 << 4;
         /// This longhand property applies to ::marker.
         const APPLIES_TO_MARKER = 1 << 5;
+        /// Applies to ::highlight() and related (::selection / ::target-text) pseudo-elements.
+        /// https://drafts.csswg.org/css-pseudo/#highlight-styling
+        const APPLIES_TO_HIGHLIGHT = 1 << 6;
         /// This property is a legacy shorthand.
         ///
         /// https://drafts.csswg.org/css-cascade/#legacy-shorthand
-        const IS_LEGACY_SHORTHAND = 1 << 6;
-       /// This shorthand remains enabled even if some subproperties are pref-disabled.
-        const ALLOWS_DISABLED_SUBPROPERTIES = 1 << 7;
+        const IS_LEGACY_SHORTHAND = 1 << 7;
+        /// This shorthand remains enabled even if some subproperties are pref-disabled.
+        const ALLOWS_DISABLED_SUBPROPERTIES = 1 << 8;
 
         /* The following flags are currently not used in Rust code, they
          * only need to be listed in corresponding properties so that
@@ -126,7 +130,7 @@ impl CSSWideKeyword {
             "unset" => Self::Unset,
             "revert" => Self::Revert,
             "revert-layer" => Self::RevertLayer,
-            "revert-rule" if static_prefs::pref!("layout.css.revert-rule.enabled") => Self::RevertRule,
+            "revert-rule" if crate::pref!("layout.css.revert-rule.enabled") => Self::RevertRule,
             _ => return Err(()),
         })
     }
@@ -278,7 +282,7 @@ impl NonCustomPropertyId {
     #[inline]
     pub fn as_longhand(self) -> Option<LonghandId> {
         if self.0 < property_counts::LONGHANDS as u16 {
-            return Some(unsafe { mem::transmute(self.0 as u16) });
+            return Some(unsafe { mem::transmute(self.0) });
         }
         None
     }
@@ -333,6 +337,11 @@ impl NonCustomPropertyId {
     pub const fn from_alias(id: AliasId) -> Self {
         Self((id as u16) + (property_counts::LONGHANDS_AND_SHORTHANDS as u16))
     }
+
+    /// Iterate over all non-custom properties in arbitrary order.
+    pub fn iter() -> impl Iterator<Item = Self> {
+        (0..property_counts::NON_CUSTOM as u16).map(Self)
+    }
 }
 
 impl From<LonghandId> for NonCustomPropertyId {
@@ -358,7 +367,7 @@ impl From<AliasId> for NonCustomPropertyId {
 
 /// Representation of a CSS property, that is, either a longhand, a shorthand, or a custom
 /// property.
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Clone, Debug, Eq, MallocSizeOf, PartialEq)]
 pub enum PropertyId {
     /// An alias for a shorthand property.
     NonCustom(NonCustomPropertyId),
@@ -521,18 +530,17 @@ impl PropertyId {
         }
     }
 
-    fn allowed_in(&self, context: &ParserContext) -> bool {
-        let id = match self.non_custom_id() {
+    /// Returns this property id is allowed in this set of rules.
+    pub fn allowed_in_rule(&self, rule_types: CssRuleTypes) -> bool {
+        match self.non_custom_id() {
             // Custom properties are allowed everywhere, except `position-try`.
-            None => {
-                return !context
-                    .nesting_context
-                    .rule_types
-                    .contains(CssRuleType::PositionTry)
-            },
-            Some(id) => id,
-        };
-        id.allowed_in(context)
+            None => !rule_types.contains(CssRuleType::PositionTry),
+            Some(id) => id.allowed_in_rule(rule_types),
+        }
+    }
+
+    fn allowed_in(&self, context: &ParserContext) -> bool {
+        self.allowed_in_rule(context.rule_types()) && self.allowed_in_ignoring_rule_type(context)
     }
 
     #[inline]
@@ -561,6 +569,38 @@ impl PropertyId {
             id.collect_property_completion_keywords(f);
         }
         CSSWideKeyword::collect_completion_keywords(f);
+    }
+}
+
+/// Like PropertyId, but with a reference instead of an owned custom property name. Used
+/// when a reference to the author-specified property is required, such as with random().
+/// https://drafts.csswg.org/css-values-5/#valdef-random-property-scoped
+#[derive(Copy, Clone, Debug)]
+pub enum PropertyIdRef<'a> {
+    /// An alias for a shorthand or longhand property.
+    NonCustom(NonCustomPropertyId),
+    /// A reference to a custom property name.
+    Custom(&'a custom_properties::Name),
+}
+
+impl<'a> From<&'a PropertyId> for PropertyIdRef<'a> {
+    fn from(value: &'a PropertyId) -> Self {
+        match value {
+            PropertyId::NonCustom(id) => Self::NonCustom(*id),
+            PropertyId::Custom(name) => Self::Custom(name),
+        }
+    }
+}
+
+impl<'a> From<&'a custom_properties::Name> for PropertyIdRef<'a> {
+    fn from(value: &'a custom_properties::Name) -> Self {
+        Self::Custom(value)
+    }
+}
+
+impl<'a> From<NonCustomPropertyId> for PropertyIdRef<'a> {
+    fn from(value: NonCustomPropertyId) -> Self {
+        Self::NonCustom(value)
     }
 }
 
@@ -694,7 +734,7 @@ impl ShorthandId {
         self,
         declarations: &'a [&'b PropertyDeclaration],
     ) -> Option<AppendableValue<'a, 'b>> {
-        let first_declaration = declarations.get(0)?;
+        let first_declaration = declarations.first()?;
         let rest = || declarations.iter().skip(1);
 
         // https://drafts.csswg.org/css-variables/#variables-in-shorthands
@@ -746,37 +786,34 @@ impl ShorthandId {
     }
 }
 
-/// Return the names of arbitrary substitution functions that are enabled.
-pub fn enabled_arbitrary_substitution_functions() -> &'static [&'static str] {
-    if static_prefs::pref!("layout.css.attr.enabled") {
-        &["var", "env", "attr"]
-    } else {
-        &["var", "env"]
-    }
-}
+/// The arbitrary substitution functions we support. Note that this may
+/// include functions that are behind a disabled pref.
+pub const ARBITRARY_SUBSTITUTION_FUNCTIONS: &[&str] = SubstitutionFunctionKind::VARIANTS;
 
-fn parse_non_custom_property_declaration_value_into<'i>(
+fn parse_non_custom_property_declaration_value_into(
     declarations: &mut SourcePropertyDeclaration,
     context: &ParserContext,
-    input: &mut Parser<'i, '_>,
+    input: &mut Parser,
     start: &cssparser::ParserState,
     parse_entirely_into: impl FnOnce(
         &mut SourcePropertyDeclaration,
-        &mut Parser<'i, '_>,
-    ) -> Result<(), ParseError<'i>>,
+        &mut Parser,
+    ) -> Result<(), ParseError>,
     parsed_wide_keyword: impl FnOnce(&mut SourcePropertyDeclaration, CSSWideKeyword),
     parsed_custom: impl FnOnce(&mut SourcePropertyDeclaration, custom_properties::VariableValue),
-) -> Result<(), ParseError<'i>> {
+) -> Result<(), ParseError> {
     let mut starts_with_curly_block = false;
+    input.look_for_arbitrary_substitution_functions(ARBITRARY_SUBSTITUTION_FUNCTIONS);
     if let Ok(token) = input.next() {
         match token {
-            cssparser::Token::Ident(ref ident) => match CSSWideKeyword::from_ident(ident) {
-                Ok(wk) => {
-                    if input.expect_exhausted().is_ok() {
-                        return Ok(parsed_wide_keyword(declarations, wk));
-                    }
-                },
-                Err(()) => {},
+            cssparser::Token::Ident(ident) => {
+                if let Ok(wk) = CSSWideKeyword::from_ident(ident)
+                    && input.expect_exhausted().is_ok()
+                {
+                    parsed_wide_keyword(declarations, wk);
+                    let _ = input.seen_arbitrary_substitution_functions();
+                    return Ok(());
+                }
             },
             cssparser::Token::CurlyBracketBlock => {
                 starts_with_curly_block = true;
@@ -785,8 +822,7 @@ fn parse_non_custom_property_declaration_value_into<'i>(
         }
     };
 
-    input.reset(&start);
-    input.look_for_arbitrary_substitution_functions(enabled_arbitrary_substitution_functions());
+    input.reset(start);
 
     let mut saw_arbitrary_substitution_functions = false;
     let err = match parse_entirely_into(declarations, input) {
@@ -795,7 +831,7 @@ fn parse_non_custom_property_declaration_value_into<'i>(
             if !saw_arbitrary_substitution_functions {
                 return Ok(());
             }
-            input.new_custom_error(style_traits::StyleParseErrorKind::UnspecifiedError)
+            ParseError::custom(style_traits::StyleParseErrorKind::UnspecifiedError)
         },
         Err(e) => e,
     };
@@ -822,11 +858,12 @@ fn parse_non_custom_property_declaration_value_into<'i>(
         return Err(err);
     }
     input.reset(start);
-    let value = custom_properties::VariableValue::parse(
-        input,
-        Some(&context.namespaces.prefixes),
-        &context.url_data,
-    )?;
+    let value = custom_properties::VariableValue::parse(context, input)?;
+    // If the parser says it saw arbitrary substitution functions, but the parsed value
+    // itself has no references, then the seen functions must be disabled by a pref.
+    if !value.has_references() {
+        return Err(err);
+    }
     parsed_custom(declarations, value);
     Ok(())
 }
@@ -858,6 +895,12 @@ impl PropertyDeclaration {
             PropertyDeclaration::CSSWideKeyword(ref declaration) => Some(declaration.keyword),
             _ => None,
         }
+    }
+
+    /// Returns whether this declaration's value contains `var()` references
+    /// and is thus not parsed yet.
+    pub fn is_unparsed(&self) -> bool {
+        matches!(*self, PropertyDeclaration::WithVariables(..))
     }
 
     /// Returns whether the declaration may be serialized as part of a shorthand.
@@ -905,14 +948,18 @@ impl PropertyDeclaration {
     /// This will not actually parse Importance values, and will always set things
     /// to Importance::Normal. Parsing Importance values is the job of PropertyDeclarationParser,
     /// we only set them here so that we don't have to reallocate
-    pub fn parse_into<'i, 't>(
+    pub fn parse_into(
         declarations: &mut SourcePropertyDeclaration,
         id: PropertyId,
-        context: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<(), ParseError<'i>> {
+        context: &mut ParserContext,
+        input: &mut Parser,
+    ) -> Result<(), ParseError> {
         assert!(declarations.is_empty());
-        debug_assert!(id.allowed_in(context), "{:?}", id);
+        debug_assert!(
+            id.allowed_in(context),
+            "{id:?} is not allowed in this context {:?}",
+            context.rule_types()
+        );
         input.skip_whitespace();
 
         let start = input.state();
@@ -920,13 +967,12 @@ impl PropertyDeclaration {
             PropertyId::Custom(property_name) => {
                 let value = match input.try_parse(CSSWideKeyword::parse) {
                     Ok(keyword) => CustomDeclarationValue::CSSWideKeyword(keyword),
-                    Err(()) => CustomDeclarationValue::Unparsed(Arc::new(
-                        custom_properties::VariableValue::parse(
-                            input,
-                            Some(&context.namespaces.prefixes),
-                            &context.url_data,
-                        )?,
-                    )),
+                    Err(()) => {
+                        CustomDeclarationValue::Unparsed(Arc::new(context.with_property_id(
+                            Some(PropertyIdRef::from(&property_name)),
+                            |context| custom_properties::VariableValue::parse(context, input),
+                        )?))
+                    },
                 };
                 declarations.push(PropertyDeclaration::Custom(CustomDeclaration {
                     name: property_name,
@@ -936,77 +982,83 @@ impl PropertyDeclaration {
             },
             PropertyId::NonCustom(id) => id,
         };
-        match non_custom_id.longhand_or_shorthand() {
-            Ok(longhand_id) => {
-                parse_non_custom_property_declaration_value_into(
-                    declarations,
-                    context,
-                    input,
-                    &start,
-                    |declarations, input| {
-                        let decl = input
-                            .parse_entirely(|input| longhand_id.parse_value(context, input))?;
-                        declarations.push(decl);
-                        Ok(())
-                    },
-                    |declarations, wk| {
-                        declarations.push(PropertyDeclaration::css_wide_keyword(longhand_id, wk));
-                    },
-                    |declarations, variable_value| {
-                        declarations.push(PropertyDeclaration::WithVariables(VariableDeclaration {
-                            id: longhand_id,
-                            value: Arc::new(UnparsedValue {
+
+        context.with_property_id(Some(PropertyIdRef::from(non_custom_id)), |context| {
+            match non_custom_id.longhand_or_shorthand() {
+                Ok(longhand_id) => {
+                    parse_non_custom_property_declaration_value_into(
+                        declarations,
+                        context,
+                        input,
+                        &start,
+                        |declarations, input| {
+                            let decl = input
+                                .parse_entirely(|input| longhand_id.parse_value(context, input))?;
+                            declarations.push(decl);
+                            Ok(())
+                        },
+                        |declarations, wk| {
+                            declarations
+                                .push(PropertyDeclaration::css_wide_keyword(longhand_id, wk));
+                        },
+                        |declarations, variable_value| {
+                            declarations.push(PropertyDeclaration::WithVariables(
+                                VariableDeclaration {
+                                    id: longhand_id,
+                                    value: Arc::new(UnparsedValue {
+                                        variable_value,
+                                        from_shorthand: None,
+                                    }),
+                                },
+                            ))
+                        },
+                    )?;
+                },
+                Err(shorthand_id) => {
+                    parse_non_custom_property_declaration_value_into(
+                        declarations,
+                        context,
+                        input,
+                        &start,
+                        // Not using parse_entirely here: each ShorthandId::parse_into function
+                        // needs to do so *before* pushing to `declarations`.
+                        |declarations, input| shorthand_id.parse_into(declarations, context, input),
+                        |declarations, wk| {
+                            if shorthand_id == ShorthandId::All {
+                                declarations.all_shorthand = AllShorthand::CSSWideKeyword(wk)
+                            } else {
+                                for longhand in shorthand_id.longhands() {
+                                    declarations
+                                        .push(PropertyDeclaration::css_wide_keyword(longhand, wk));
+                                }
+                            }
+                        },
+                        |declarations, variable_value| {
+                            let unparsed = Arc::new(UnparsedValue {
                                 variable_value,
-                                from_shorthand: None,
-                            }),
-                        }))
-                    },
-                )?;
-            },
-            Err(shorthand_id) => {
-                parse_non_custom_property_declaration_value_into(
-                    declarations,
-                    context,
-                    input,
-                    &start,
-                    // Not using parse_entirely here: each ShorthandId::parse_into function needs
-                    // to do so *before* pushing to `declarations`.
-                    |declarations, input| shorthand_id.parse_into(declarations, context, input),
-                    |declarations, wk| {
-                        if shorthand_id == ShorthandId::All {
-                            declarations.all_shorthand = AllShorthand::CSSWideKeyword(wk)
-                        } else {
-                            for longhand in shorthand_id.longhands() {
-                                declarations
-                                    .push(PropertyDeclaration::css_wide_keyword(longhand, wk));
+                                from_shorthand: Some(shorthand_id),
+                            });
+                            if shorthand_id == ShorthandId::All {
+                                declarations.all_shorthand = AllShorthand::WithVariables(unparsed)
+                            } else {
+                                for id in shorthand_id.longhands() {
+                                    declarations.push(PropertyDeclaration::WithVariables(
+                                        VariableDeclaration {
+                                            id,
+                                            value: unparsed.clone(),
+                                        },
+                                    ))
+                                }
                             }
-                        }
-                    },
-                    |declarations, variable_value| {
-                        let unparsed = Arc::new(UnparsedValue {
-                            variable_value,
-                            from_shorthand: Some(shorthand_id),
-                        });
-                        if shorthand_id == ShorthandId::All {
-                            declarations.all_shorthand = AllShorthand::WithVariables(unparsed)
-                        } else {
-                            for id in shorthand_id.longhands() {
-                                declarations.push(PropertyDeclaration::WithVariables(
-                                    VariableDeclaration {
-                                        id,
-                                        value: unparsed.clone(),
-                                    },
-                                ))
-                            }
-                        }
-                    },
-                )?;
-            },
-        }
-        if let Some(use_counters) = context.use_counters {
-            use_counters.non_custom_properties.record(non_custom_id);
-        }
-        Ok(())
+                        },
+                    )?;
+                },
+            }
+            if let Some(use_counters) = context.use_counters {
+                use_counters.non_custom_properties.record(non_custom_id);
+            }
+            Ok(())
+        })
     }
 }
 
@@ -1152,7 +1204,7 @@ impl<'a> PropertyDeclarationId<'a> {
     pub fn to_physical(&self, wm: WritingMode) -> Self {
         match self {
             Self::Longhand(id) => Self::Longhand(id.to_physical(wm)),
-            Self::Custom(_) => self.clone(),
+            Self::Custom(_) => *self,
         }
     }
 
@@ -1242,8 +1294,10 @@ impl IndexedId for PrioritaryPropertyId {
 
     #[inline(always)]
     unsafe fn from_index_release_unchecked(index: usize) -> Self {
-        debug_assert!(index < Self::COUNT);
-        std::mem::transmute(index as u8)
+        unsafe {
+            debug_assert!(index < Self::COUNT);
+            std::mem::transmute(index as u8)
+        }
     }
 
     #[inline(always)]
@@ -1257,8 +1311,10 @@ impl IndexedId for LonghandId {
 
     #[inline(always)]
     unsafe fn from_index_release_unchecked(index: usize) -> Self {
-        debug_assert!(index < Self::COUNT);
-        std::mem::transmute(index as u16)
+        unsafe {
+            debug_assert!(index < Self::COUNT);
+            std::mem::transmute(index as u16)
+        }
     }
 
     #[inline(always)]
@@ -1409,9 +1465,7 @@ impl<Id: IndexedId, const W: usize> IdSet<Id, W> {
     /// Clear all bits
     #[inline]
     pub fn clear(&mut self) {
-        for cell in &mut self.storage {
-            *cell = 0
-        }
+        self.storage.fill(0);
     }
 
     /// Returns whether the set is empty.
@@ -1612,8 +1666,14 @@ impl UnparsedValue {
             }
         }
 
-        let SubstitutionResult { css, attr_taint } = match custom_properties::substitute(
+        let property_id = PropertyIdRef::from(match self.from_shorthand {
+            Some(shorthand_id) => NonCustomPropertyId::from(shorthand_id),
+            None => NonCustomPropertyId::from(longhand_id),
+        });
+
+        let SubstitutionResult { css, attr_taint } = match substitution::substitute(
             &self.variable_value,
+            Some(property_id),
             substitution_functions,
             stylist,
             computed_context,
@@ -1633,7 +1693,7 @@ impl UnparsedValue {
         // whether you want to do this!
         //
         // FIXME(emilio): ParsingMode is slightly fishy...
-        let context = ParserContext::new(
+        let context = ParserContext::new_with_property_id(
             Origin::Author,
             &self.variable_value.url_data,
             None,
@@ -1643,10 +1703,10 @@ impl UnparsedValue {
             None,
             None,
             attr_taint,
+            Some(property_id),
         );
 
-        let mut input = ParserInput::new(&css);
-        let mut input = Parser::new(&mut input);
+        let mut input = Parser::new(&css);
         input.skip_whitespace();
 
         if let Ok(keyword) = input.try_parse(CSSWideKeyword::parse) {
@@ -1659,7 +1719,7 @@ impl UnparsedValue {
                 {
                     Ok(decl) => Cow::Owned(decl),
                     Err(..) => invalid_at_computed_value_time(),
-                }
+                };
             },
             Some(shorthand) => shorthand,
         };
@@ -1704,19 +1764,15 @@ impl UnparsedValue {
     }
 }
 /// A parsed all-shorthand value.
+#[derive(Default)]
 pub enum AllShorthand {
     /// Not present.
+    #[default]
     NotSet,
     /// A CSS-wide keyword.
     CSSWideKeyword(CSSWideKeyword),
     /// An all shorthand with var() references that we can't resolve right now.
     WithVariables(Arc<UnparsedValue>),
-}
-
-impl Default for AllShorthand {
-    fn default() -> Self {
-        Self::NotSet
-    }
 }
 
 impl AllShorthand {
@@ -1844,7 +1900,7 @@ impl<'a> Iterator for TransitionPropertyIterator<'a> {
                     return Some(TransitionPropertyIteration {
                         property: OwnedPropertyDeclarationId::Custom(name),
                         index,
-                    })
+                    });
                 },
                 TransitionProperty::Unsupported(..) => {},
             }

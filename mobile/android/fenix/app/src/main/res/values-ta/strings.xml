@@ -31,14 +31,10 @@
   <string name="tab_tray_close_multiselect_content_description">பன்முறை தேர் பயன்முறையிலிருந்து வெளியேறுக</string>
   <!-- About content. %1$s is the name of the app (for example "Firefox"). -->
   <string name="about_content" tools:ignore="BrandUsage">%1$s மொசில்லாவால் தயாரிக்கப்படுகிறது.</string>
-  <!-- Private Browsing -->
-  <string name="private_browsing_common_myths">கமுக்க உலாவல் பற்றிய பொதுவான தொன்மங்கள்</string>
   <!-- Text for the positive action button -->
   <string name="open_in_app_cfr_positive_button_text">அமைவுகளுக்கு செல்</string>
   <!-- Text for the negative action button -->
   <string name="open_in_app_cfr_negative_button_text">நிராகரி</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
   <!-- Text for the info dialog when camera permissions have been denied but user tries to access a camera feature. -->
   <string name="camera_permissions_needed_message">படகருவிக்கு அணுகல் தேவை. ஆண்ட்ராய்டு அமைவுகளுக்குச் சென்று, அனுமதிகளைத் தட்டி, அனுமதி என்பதைத் தட்டவும்.</string>
   <!-- Text for the positive action button to go to Android Settings to grant permissions. -->
@@ -59,11 +55,7 @@
   <string name="home_screen_shortcut_open_new_tab_2">புதிய கீற்று</string>
   <!-- Shortcut action to open new private tab -->
   <string name="home_screen_shortcut_open_new_private_tab_2">புதிய கமுக்கக் கீற்று</string>
-  <!--
-    Browser Fragment
-
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
-  -->
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">பின்செல்</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">முன்செல்</string>
@@ -125,10 +117,6 @@
   <string name="search_suggestions_onboarding_title">கமுக்க அமர்வுகளில் தேடல் பரிந்துரைகளை அனுமதிக்கவா?</string>
   <!-- Search suggestion onboarding hint description text, %s is the name of the app (for example "Firefox"). -->
   <string name="search_suggestions_onboarding_text">நீங்கள் முகவரி பட்டையில் உள்ளிடும் அனைத்தையும் %s உங்கள் இயல்புநிலை தேடுபொறியுடன் பகிர்ந்து கொள்ளும்.</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!-- Text preview for smaller sized widgets -->
   <string name="search_widget_text_short">தேடல்</string>
   <!-- Text preview for larger sized widgets -->
@@ -138,10 +126,8 @@
   <!--
     Preferences
 
-    Title for the settings page
+    Preference category for general settings
   -->
-  <string name="settings">அமைவுகள்</string>
-  <!-- Preference category for general settings -->
   <string name="preferences_category_general">பொது</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">அறிமுகம்</string>
@@ -368,8 +354,6 @@
   <string name="close_tab_title">%s கீற்றை மூடு</string>
   <!-- Content description (not visible, for screen readers etc.): Opens the open tabs menu when pressed -->
   <string name="open_tabs_menu">கீற்றுப் பட்டியைத் திற</string>
-  <!-- Open tabs menu item to save tabs to collection -->
-  <string name="tabs_menu_save_to_collection1">கீற்றுகளைத் திரட்டில் சேமி</string>
   <!-- Text for the menu button to delete a collection -->
   <string name="collection_delete">திரட்டை நீக்கு</string>
   <!-- Text for the menu button to rename a collection -->
@@ -393,12 +377,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">%1$d தேர்ந்த</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">கடந்த 7 நாட்கள்</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">கடந்த 30 நாட்கள்</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">பழையவை</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">வரலாறு ஏதுமில்லை</string>
   <!--
@@ -601,8 +579,6 @@
   <string name="qr_scanner_dialog_positive">அனுமதி</string>
   <!-- QR code scanner prompt dialog positive option to deny navigation to scanned link -->
   <string name="qr_scanner_dialog_negative">மறு</string>
-  <!-- Tab collection deletion prompt dialog message. %1$s is the collection name. -->
-  <string name="tab_collection_dialog_message">%1$s அழிக்க விரும்புகிறீர்களா?</string>
   <!-- Sample text for accessibility font size -->
   <string name="accessibility_text_size_sample_text_1">இது மாதிரி உரை. இந்த அமைவைக் கொண்டு உரையின் அளவை அதிகரிக்கும்போதும் அல்லது குறைக்கும்போதும் எவ்வாறு தோன்றும் என்பதைக் காண்பிக்க உள்ளது.</string>
   <!-- Summary for Accessibility Text Size Scaling Preference -->
@@ -788,8 +764,6 @@
   <string name="add_to_homescreen_cancel">ரத்து</string>
   <!-- Add button text for the Add to Homescreen dialog -->
   <string name="add_to_homescreen_add">சேர்</string>
-  <!-- Continue to website button text for the first-time Add to Homescreen dialog -->
-  <string name="add_to_homescreen_continue">தளத்திற்குத் தொடர்</string>
   <!-- Placeholder text for the TextView in the Add to Homescreen dialog -->
   <string name="add_to_homescreen_text_placeholder">குறுக்குவழி பெயர்</string>
   <!-- Preference option for asking to save passwords in Fenix -->
@@ -872,8 +846,6 @@
   <string name="confirm_clear_permission_site">இந்தத் தளத்திற்கான இந்த அனுமதியை நீக்க விரும்புகிறீர்களா?</string>
   <!-- label shown when there are not site exceptions to show in the site exception settings -->
   <string name="no_site_exceptions">தள விதிவிலக்குகள் இல்லை</string>
-  <!-- Positive action of a dialog asking to delete -->
-  <string name="dialog_delete_positive">நீக்கு</string>
   <!-- Voice search button content description -->
   <string name="voice_search_content_description">குரல் தேடல்</string>
   <!-- Voice search prompt description displayed after the user presses the voice search button -->
@@ -900,13 +872,4 @@
   <string name="synced_tabs_no_open_tabs">திறந்த கீற்றுகள் இல்லை</string>
   <!-- Confirmation dialog button text when top sites limit is reached. -->
   <string name="top_sites_max_limit_confirmation_button">சரி, புரிந்தது</string>
-  <!-- Translations feature -->
-
-  <!-- TextField Design System Component -->
-
-  <!-- ==== Terms of use pop up prompt ==== -->
-
-  <!-- ==== Experiment strings. ==== -->
-
-  <!-- ==== End of Terms of use popup prompt. ==== -->
 </resources>

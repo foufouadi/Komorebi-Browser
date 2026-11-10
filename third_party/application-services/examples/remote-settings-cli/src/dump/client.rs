@@ -345,7 +345,7 @@ impl CollectionDownloader {
         pb: &ProgressBar,
     ) -> Result<()> {
         let base_url = self.get_attachments_base_url()?;
-        let url = format!("{}/bundles/{}--{}.zip", base_url, bucket, collection);
+        let url = format!("{}bundles/{}--{}.zip", base_url, bucket, collection);
 
         pb.set_message(format!(
             "Downloading attachments bundle for {}/{}",
@@ -417,9 +417,9 @@ impl CollectionDownloader {
                 .join(format!("{}.json", name));
 
             std::fs::create_dir_all(dumps_path.parent().unwrap())?;
-            // We sort both the keys and the records in search-config-v2 to make it
+            // We sort both the keys and the records in search-config-v2/3 to make it
             // easier to read and to experiment with making changes via the dump file.
-            if name == "search-config-v2" {
+            if name == "search-config-v2" || name == "search-config-v3" {
                 data.data.sort_by(|a, b| {
                     if a["recordType"] == b["recordType"] {
                         a["identifier"].as_str().cmp(&b["identifier"].as_str())

@@ -6,6 +6,7 @@
 
 #include "AOMDecoder.h"
 #include "AgnosticDecoderModule.h"
+#include "AllocationPolicy.h"
 #include "AudioTrimmer.h"
 #include "BlankDecoderModule.h"
 #include "DecoderDoctorDiagnostics.h"
@@ -29,6 +30,7 @@
 #include "mozilla/TaskQueue.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/ipc/UtilityMediaServiceParent.h"
+#include "mozilla/layers/ImageBridgeChild.h"
 #include "nsIXULRuntime.h"  // for BrowserTabsRemoteAutostart
 #include "nsPrintfCString.h"
 
@@ -454,6 +456,24 @@ PDMFactory::CreateDecoderWithPDM(PlatformDecoderModule* aPDM,
       aParams.mWrappers.contains(media::Wrapper::MediaChangeMonitor)) {
     return MediaChangeMonitor::Create(this, aParams);
   }
+
+  // If we were not given a compositor, share the decoded frames with the
+  // compositor via the image bridge. It is replaced when the compositor is
+  // reinitialized, so we get the current one each time we create a decoder,
+  // rather than storing it in the parameters kept by our callers.
+  if (!aParams.mKnowsCompositor &&
+      (XRE_IsContentProcess() || XRE_IsParentProcess())) {
+    RefPtr<layers::KnowsCompositor> knowsCompositor =
+        layers::ImageBridgeChild::GetSingleton();
+    // The image bridge only knows about the compositor once one has been
+    // created for a window, e.g. not in gtests.
+    if (knowsCompositor && knowsCompositor->GetCompositorBackendType() !=
+                               layers::LayersBackend::LAYERS_NONE) {
+      CreateDecoderParams params(aParams);
+      params.mKnowsCompositor = knowsCompositor;
+      return aPDM->AsyncCreateDecoder(params);
+    }
+  }
   return aPDM->AsyncCreateDecoder(aParams);
 }
 
@@ -482,6 +502,77 @@ DecodeSupportSet PDMFactory::Supports(
 
   // We have a PDM - check for + return SW/HW support info
   return current->Supports(aParams, aDiagnostics);
+}
+
+RefPtr<PDMSupportsDecoderPromise> PDMFactory::SupportsAsync(
+    const SupportDecoderParams& aParams) const {
+  if (mEMEPDM) {
+    return mEMEPDM->SupportsAsync(aParams);
+  }
+
+  nsTArray<RefPtr<PDMSupportsDecoderPromise>> promises(mCurrentPDMs.Length());
+  for (const auto& m : mCurrentPDMs) {
+    if (!m->Supports(aParams, nullptr).isEmpty()) {
+      promises.AppendElement(m->SupportsAsync(aParams));
+    }
+  }
+  return PDMSupportsDecoderPromise::AllSettled(GetCurrentSerialEventTarget(),
+                                               promises)
+      ->Then(
+          GetCurrentSerialEventTarget(), __func__,
+          [mimeType = aParams.mConfig.mMimeType](
+              CopyableTArray<PDMSupportsDecoderPromise::ResolveOrRejectValue>&&
+                  aValues) -> RefPtr<PDMSupportsDecoderPromise> {
+            DecodeSupportSet support{};
+            for (const auto& value : aValues) {
+              if (value.IsResolve()) {
+                support += value.ResolveValue();
+              }
+            }
+            return PDMSupportsDecoderPromise::CreateAndResolve(support,
+                                                               __func__);
+          },
+          [] {
+            MOZ_CRASH("AllSettled does not reject");
+            return RefPtr<PDMSupportsDecoderPromise>(nullptr);
+          });
+}
+
+/* static */
+RefPtr<PDMSupportsDecoderPromise> PDMFactory::StrictSupportsAsync(
+    const CreateDecoderParams& aParams, AllocPolicy* aPolicy) {
+  return AllocationWrapper::CreateDecoder(aParams, aPolicy)
+      ->Then(
+          GetCurrentSerialEventTarget(), __func__,
+          [](AllocationWrapper::AllocateDecoderPromise::ResolveOrRejectValue&&
+                 aValue) -> RefPtr<PDMSupportsDecoderPromise> {
+            if (aValue.IsReject()) {
+              // The decoder could not be created: report unsupported.
+              return PDMSupportsDecoderPromise::CreateAndResolve(
+                  DecodeSupportSet{}, __func__);
+            }
+            RefPtr<MediaDataDecoder> decoder = std::move(aValue.ResolveValue());
+            return decoder->Init()->Then(
+                GetCurrentSerialEventTarget(), __func__,
+                [decoder](
+                    MediaDataDecoder::InitPromise::ResolveOrRejectValue&& aInit)
+                    -> RefPtr<PDMSupportsDecoderPromise> {
+                  DecodeSupportSet support{};
+                  if (aInit.IsResolve()) {
+                    nsAutoCString reason;
+                    support += decoder->IsHardwareAccelerated(reason)
+                                   ? DecodeSupport::HardwareDecode
+                                   : DecodeSupport::SoftwareDecode;
+                  }
+                  // Keep the decoder alive until its shutdown completes.
+                  decoder->Shutdown()->Then(
+                      GetCurrentSerialEventTarget(), __func__,
+                      [decoder](const ShutdownPromise::ResolveOrRejectValue&) {
+                      });
+                  return PDMSupportsDecoderPromise::CreateAndResolve(support,
+                                                                     __func__);
+                });
+          });
 }
 
 /* static */
@@ -572,17 +663,20 @@ void PDMFactory::CreateRddPDMs() {
   StartupPDM(FFVPXRuntimeLinker::CreateDecoder());
 #ifdef MOZ_FFMPEG
   if (StaticPrefs::media_ffmpeg_enabled() &&
-      StaticPrefs::media_rdd_ffmpeg_enabled() &&
-      !StartupPDM(
-          FFmpegRuntimeLinker::CreateDecoder(),
-          // When Vulkan video decoding is enabled, insert the full FFmpeg
-          // decoder before ffvpx so that Vulkan hardware decoding is
-          // preferred. ffvpx does not support Vulkan decode and would
-          // otherwise be selected first and fall back to software.
-          // TODO (bug 2034236): remove once ffvpx gains Vulkan decode support.
-          gfx::gfxVars::CanUseVulkanHardwareVideoDecoding())) {
-    mFailureFlags += GetFailureFlagBasedOnFFmpegStatus(
-        FFmpegRuntimeLinker::LinkStatusCode());
+      StaticPrefs::media_rdd_ffmpeg_enabled()) {
+    // Prefer system FFmpeg first only when Vulkan is wanted and
+    // media.hardware-video-decoding-vulkan.prefer-system-ffmpeg is true;
+    // otherwise leave ffvpx first.
+    const bool preferSystemForVulkan =
+        gfx::gfxVars::CanUseVulkanHardwareVideoDecoding() &&
+        FFmpegRuntimeLinker::PreferSystemFFmpegForVulkan();
+    PDM_INIT_LOG("Insert system FFmpeg before ffvpx: {}",
+                 preferSystemForVulkan);
+    if (!StartupPDM(FFmpegRuntimeLinker::CreateDecoder(),
+                    preferSystemForVulkan)) {
+      mFailureFlags += GetFailureFlagBasedOnFFmpegStatus(
+          FFmpegRuntimeLinker::LinkStatusCode());
+    }
   }
 #endif
   StartupPDM(AgnosticDecoderModule::Create(),

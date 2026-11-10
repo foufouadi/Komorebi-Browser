@@ -35,10 +35,6 @@
   <string name="tab_tray_select_collection">Danndu to leemannde</string>
   <!-- About content. %1$s is the name of the app (for example "Firefox"). -->
   <string name="about_content" tools:ignore="BrandUsage">Ko Mozilla jibini %1$s</string>
-  <!-- Private Browsing -->
-  <string name="private_browsing_common_myths">Tinndi goowaaɗi baɗte banngogol suturo</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
   <!-- Text for the positive action button to go to Settings for auto close tabs. -->
   <string name="tab_tray_close_tabs_banner_positive_button_text">Juɓtorɗe jiytol</string>
   <!-- Text for the banner message to tell users about our inactive tabs feature. -->
@@ -58,16 +54,8 @@
   <string name="home_screen_shortcut_open_new_tab_2">Tabbere hesere</string>
   <!-- Shortcut action to open new private tab -->
   <string name="home_screen_shortcut_open_new_private_tab_2">Tabbere suuriinde hesere</string>
-  <!--
-    Recent Tabs
-
-    Header text for jumping back into the recent tab in the home screen
-  -->
-  <string name="recent_tabs_header">Artu ɗo ngonno-ɗaa</string>
   <!-- Button text for showing all the tabs in the tabs tray -->
   <string name="recent_tabs_show_all">Hollu fof</string>
-  <!-- Content description for the button which navigates the user to show all recent tabs in the tabs tray. -->
-  <string name="recent_tabs_show_all_content_description_2">Hollu tabbe cakkitiiɗe fof</string>
   <!-- Text for button in synced tab card that opens synced tabs tray -->
   <string name="recent_tabs_see_all_synced_tabs_button_text">Yiy tabbe ceŋondiraaɗe</string>
   <!-- Accessibility description for device icon used for recent synced tab -->
@@ -86,11 +74,7 @@
   <string name="history_metadata_header_2">Jillaaɗe sakket</string>
   <!-- Content description for the button which navigates the user to show all of their history. -->
   <string name="past_explorations_show_all_content_description_2">Hollu jillanɗe ɓennuɗe fof</string>
-  <!--
-    Browser Fragment
-
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
-  -->
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">Caggal</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">Yeeso</string>
@@ -143,10 +127,6 @@
   <string name="search_engine_suggestions_title">Yiylo %s</string>
   <!-- Search engine suggestion description text -->
   <string name="search_engine_suggestions_description">Yiylo beƴ e palal ñiiɓirɗe ngal</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!--
     Search Widget
 
@@ -162,10 +142,8 @@
   <!--
     Preferences
 
-    Title for the settings page
+    Preference category for general settings
   -->
-  <string name="settings">Teelte</string>
-  <!-- Preference category for general settings -->
   <string name="preferences_category_general">Kuuɓal</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">Baɗte</string>
@@ -244,8 +222,6 @@
   <string name="notifications_allowed_summary">Yamiraama</string>
   <!-- Summary for notification preference indicating notifications are not allowed -->
   <string name="notifications_not_allowed_summary">Yamiraaka</string>
-  <!-- Header text for jumping back into the recent tab in customize the home screen -->
-  <string name="customize_toggle_jump_back_in">Artu ɗo ngonno-ɗaa</string>
   <!--
     Title for the customize home screen section with recently visited. Recently visited is
     a section where users see a list of tabs that they have visited in the past few days
@@ -412,8 +388,6 @@
     Title of preference for tabs management
   -->
   <string name="preferences_tabs">Tabbe</string>
-  <!-- Title of preference that allows a user to specify the tab view -->
-  <string name="preferences_tab_view">Jiytol tabbe</string>
   <!-- Option for a list tab view -->
   <string name="tab_view_list">Doggol</string>
   <!-- Option for a grid tab view -->
@@ -456,13 +430,7 @@
   <string name="opening_screen_last_tab_summary">Uddit e hello sakkitiingo</string>
   <!-- Summary for homepage preference indicating opening the homepage when re-opening the app after four hours of inactivity -->
   <string name="opening_screen_after_four_hours_of_inactivity_summary">Uddit e hello jaɓɓorgo caggal waktuuji nayi</string>
-  <!--
-    Inactive tabs
-
-    Category header of a preference that allows a user to enable or disable the inactive tabs feature
-  -->
-  <string name="preferences_inactive_tabs">Dirtin tabbe ɓooyɗe to dooyiiɗe</string>
-  <!-- Title of inactive tabs preference -->
+  <!-- Summary of the preference that allows a user to enable or disable the inactive tabs feature. -->
   <string name="preferences_inactive_tabs_title">Tabbe ɗe a yillaaki e nder jonte ɗiɗi maa ndirtine to lowre dooyorde toh.</string>
   <!-- Title of the active section on the studies list -->
   <string name="studies_active">Ena hurmi</string>
@@ -488,8 +456,6 @@
   <string name="close_tab_title">Uddu tabbe %s</string>
   <!-- Content description (not visible, for screen readers etc.): Opens the open tabs menu when pressed -->
   <string name="open_tabs_menu">Uddit dosol tabbe</string>
-  <!-- Open tabs menu item to save tabs to collection -->
-  <string name="tabs_menu_save_to_collection1">Danndu tabbe to leemannde</string>
   <!-- Text for the button to open tabs of the selected collection -->
   <string name="collection_open_tabs">Uddit tabbe</string>
   <!-- Text for the menu button to remove a top site -->
@@ -505,12 +471,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">suɓaama %1$d</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">Balɗe 7 ɓennuɗe ɗee</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">Balɗe 30 ɓennuɗe ɗee</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">Ɓooyɗo</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">Ɗoo alaa aslol</string>
   <!--
@@ -710,8 +670,6 @@
   <string name="qr_scanner_dialog_positive">YAMIR</string>
   <!-- QR code scanner prompt dialog positive option to deny navigation to scanned link -->
   <string name="qr_scanner_dialog_negative">HAƊ</string>
-  <!-- Tab collection deletion prompt dialog message. %1$s is the collection name. -->
-  <string name="tab_collection_dialog_message">Aɗa yenanaa yiɗde momtude %1$s?</string>
   <!-- Sample text for accessibility font size -->
   <string name="accessibility_text_size_sample_text_1">Ɗum ko jubbannde binndi. Waɗiraa ko ngam hollirde no binndi ɗii mbayata so a ɓeydii walla a ustii darnde alkule ɗee e ngol teeltol.</string>
   <!-- Summary for Accessibility Text Size Scaling Preference -->
@@ -843,8 +801,6 @@
   <string name="add_to_homescreen_cancel">Haaytu</string>
   <!-- Add button text for the Add to Homescreen dialog -->
   <string name="add_to_homescreen_add">Ɓeydu</string>
-  <!-- Continue to website button text for the first-time Add to Homescreen dialog -->
-  <string name="add_to_homescreen_continue">Jooku to Lowre geese</string>
   <!-- Placeholder text for the TextView in the Add to Homescreen dialog -->
   <string name="add_to_homescreen_text_placeholder">Innde sodorde</string>
   <!-- Preference option for asking to save passwords in Fenix -->
@@ -935,8 +891,6 @@
   <string name="phone_feature_blocked_step_settings">1. Yah to teelte Android</string>
   <!-- Confirmation message for a dialog confirming if the user wants to set default value a permission for a site -->
   <string name="confirm_clear_permission_site">Aɗa yananaa yiɗde momtude ɗee jamirooje e ɗee lowe?</string>
-  <!-- Positive action of a dialog asking to delete -->
-  <string name="dialog_delete_positive">Momtu</string>
   <!-- The error message in add login view when hostname field is blank. -->
   <string name="saved_login_hostname_required" tools:ignore="UnusedResources">Innde lowre ena waɗɗii</string>
   <!-- Voice search button content description -->
@@ -977,13 +931,4 @@
   <string name="inactive_tabs_auto_close_message_description" tools:ignore="BrandUsage,UnusedResources">Firefox ena waawi uddude tabbe ɗe a yillaaki e lewru ɓennundu nduu.</string>
   <!-- Text indicating that the Pocket story that also displays this text is a sponsored story by other 3rd party entity. -->
   <string name="pocket_stories_sponsor_indication">Barjinaaɗi</string>
-  <!-- Translations feature -->
-
-  <!-- TextField Design System Component -->
-
-  <!-- ==== Terms of use pop up prompt ==== -->
-
-  <!-- ==== Experiment strings. ==== -->
-
-  <!-- ==== End of Terms of use popup prompt. ==== -->
 </resources>

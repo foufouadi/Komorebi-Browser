@@ -34,6 +34,7 @@
 #include "frontend/ExpressionStatementEmitter.h"  // ExpressionStatementEmitter
 #include "frontend/ForInEmitter.h"                // ForInEmitter
 #include "frontend/ForOfEmitter.h"                // ForOfEmitter
+#include "frontend/FrontendContext.h"             // FrontendContext
 #include "frontend/FunctionEmitter.h"  // FunctionEmitter, FunctionScriptEmitter, FunctionParamsEmitter
 #include "frontend/IfEmitter.h"     // IfEmitter, InternalIfEmitter, CondEmitter
 #include "frontend/LabelEmitter.h"  // LabelEmitter
@@ -513,6 +514,13 @@ bool BytecodeEmitter::emitPopN(unsigned n) {
     return emit1(JSOp::Pop) && emit1(JSOp::Pop);
   }
 
+  // Emit multiple ops if there are many values to pop.
+  while (n > UINT16_MAX) {
+    if (!emitUint16Operand(JSOp::PopN, UINT16_MAX)) {
+      return false;
+    }
+    n -= UINT16_MAX;
+  }
   return emitUint16Operand(JSOp::PopN, n);
 }
 
@@ -1586,6 +1594,12 @@ bool BytecodeEmitter::emitTDZCheckIfNeeded(TaggedParserAtomIndex name,
     return true;
   }
 
+  // `.initializers` is an implementation detail that is always populated
+  // before a constructor can read it.
+  if (name == TaggedParserAtomIndex::WellKnown::dot_initializers_()) {
+    return true;
+  }
+
   Maybe<MaybeCheckTDZ> check =
       innermostTDZCheckCache->needsTDZCheck(this, name);
   if (!check) {
@@ -2155,6 +2169,11 @@ bool BytecodeEmitter::allocateResumeIndex(BytecodeOffset offset,
 bool BytecodeEmitter::allocateTableSwitchResumeIndexRange(
     mozilla::Span<BytecodeOffset> caseOffsets, BytecodeOffset switchOffset,
     uint32_t* firstResumeIndex) {
+  if (caseOffsets.empty()) {
+    // Empty switches don't need adjustment.
+    *firstResumeIndex = 0;
+    return true;
+  }
   auto& list = bytecodeSection().tableSwitchOffsetList();
 
   // The final resume index depends on the number of yield and await ops in the
@@ -2410,6 +2429,10 @@ bool BytecodeEmitter::emitDeclarationInstantiation(ParseNode* body) {
 }
 
 bool BytecodeEmitter::emitScript(ParseNode* body) {
+  if (!fc->checkCompilationCancellation()) {
+    return false;
+  }
+
   setScriptStartOffsetIfUnset(body->pn_pos.begin);
 
   MOZ_ASSERT(inPrologue());
@@ -2558,6 +2581,12 @@ BytecodeEmitter::createImmutableScriptData() {
         sc->asFunctionBox()->memberInitializers().numMemberInitializers;
   }
 
+#ifdef DEBUG
+  uint32_t codeLength = bytecodeSection().code().length();
+  bytecodeSection().tryNoteList().checkTryNotes(codeLength);
+  bytecodeSection().scopeNoteList().checkScopeNotes(codeLength);
+#endif
+
   return ImmutableScriptData::new_(
       fc, mainOffset(), maxFixedSlots, nslots, bodyScopeIndex,
       bytecodeSection().numICEntries(), isFunction, funLength,
@@ -2601,6 +2630,11 @@ bool BytecodeEmitter::getNslots(uint32_t* nslots) const {
 
 bool BytecodeEmitter::emitFunctionScript(FunctionNode* funNode) {
   MOZ_ASSERT(inPrologue());
+
+  if (!fc->checkCompilationCancellation()) {
+    return false;
+  }
+
   ParamsBodyNode* paramsBody = funNode->body();
   FunctionBox* funbox = sc->asFunctionBox();
 
@@ -3110,10 +3144,47 @@ bool BytecodeEmitter::emitIteratorCloseInScope(EmitterScope& currentScope,
   //                [stack] ...
 }
 
+bool BytecodeEmitter::emitDestructuringIteratorClose(
+    SelfHostedIter selfHostedIter) {
+  //                [stack] ... OBJ NEXT ITER DONE
+
+  InternalIfEmitter ifDone(this);
+  if (!ifDone.emitThenElse()) {
+    //              [stack] ... OBJ NEXT ITER
+    return false;
+  }
+  if (!emitPopN(2)) {
+    //              [stack] ... OBJ
+    return false;
+  }
+  if (!ifDone.emitElse()) {
+    //              [stack] ... OBJ NEXT ITER
+    return false;
+  }
+  if (!emit1(JSOp::Swap)) {
+    //              [stack] ... OBJ ITER NEXT
+    return false;
+  }
+  if (!emit1(JSOp::Pop)) {
+    //              [stack] ... OBJ ITER
+    return false;
+  }
+  if (!emitIteratorCloseInInnermostScope(
+          IteratorKind::Sync, CompletionKind::Normal, selfHostedIter)) {
+    //              [stack] ... OBJ
+    return false;
+  }
+  return ifDone.emitEnd();
+}
+
 template <typename InnerEmitter>
 bool BytecodeEmitter::wrapWithDestructuringTryNote(int32_t iterDepth,
                                                    InnerEmitter emitter) {
   MOZ_ASSERT(bytecodeSection().stackDepth() >= iterDepth);
+#ifdef DEBUG
+  auto* control = findInnermostNestableControl<DestructuringControl>();
+  MOZ_ASSERT(*control->nonLocalExitStackDepth() == iterDepth);
+#endif
 
   // Pad a nop at the beginning of the bytecode covered by the trynote so
   // that when unwinding environments, we may unwind to the scope
@@ -3536,6 +3607,12 @@ bool BytecodeEmitter::emitDestructuringOpsArray(ListNode* pattern,
   // IteratorClose is called upon exception only if done is false.
   int32_t tryNoteDepth = bytecodeSection().stackDepth();
 
+  // A forced return from a `yield` will jump out of the destructuring region,
+  // so in that case DestructuringControl emits the IteratorClose after the
+  // loop.
+  DestructuringControl control(this, selfHostedIter);
+  control.setNonLocalExitStackDepth(tryNoteDepth);
+
   for (ParseNode* member : pattern->contents()) {
     bool isFirst = member == pattern->head();
     DebugOnly<bool> hasNext = !!member->pn_next;
@@ -3799,34 +3876,8 @@ bool BytecodeEmitter::emitDestructuringOpsArray(ListNode* pattern,
   // The last DONE value is on top of the stack. If not DONE, call
   // IteratorClose.
   //                [stack] ... OBJ NEXT ITER DONE
-
-  InternalIfEmitter ifDone(this);
-  if (!ifDone.emitThenElse()) {
-    //              [stack] ... OBJ NEXT ITER
-    return false;
-  }
-  if (!emitPopN(2)) {
+  if (!control.emitEnd(this)) {
     //              [stack] ... OBJ
-    return false;
-  }
-  if (!ifDone.emitElse()) {
-    //              [stack] ... OBJ NEXT ITER
-    return false;
-  }
-  if (!emit1(JSOp::Swap)) {
-    //              [stack] ... OBJ ITER NEXT
-    return false;
-  }
-  if (!emit1(JSOp::Pop)) {
-    //              [stack] ... OBJ ITER
-    return false;
-  }
-  if (!emitIteratorCloseInInnermostScope(
-          IteratorKind::Sync, CompletionKind::Normal, selfHostedIter)) {
-    //              [stack] ... OBJ
-    return false;
-  }
-  if (!ifDone.emitEnd()) {
     return false;
   }
 
@@ -6566,6 +6617,12 @@ bool BytecodeEmitter::finishReturn(BytecodeOffset setRvalOffset) {
   }
 
   if (needsFinalYield) {
+    // A forced return from a `yield` expression can have extra values on the
+    // expression stack. Pop them here.
+    int32_t nvalues = bytecodeSection().stackDepth();
+    if (nvalues > 0 && !emitPopN(nvalues)) {
+      return false;
+    }
     if (!emitJump(JSOp::Goto, &finalYields)) {
       return false;
     }
@@ -6581,6 +6638,101 @@ bool BytecodeEmitter::finishReturn(BytecodeOffset setRvalOffset) {
 
   // Nothing special needs to be done.
   return emitReturnRval();
+}
+
+bool BytecodeEmitter::emitCheckYieldResumeKind() {
+  // The bytecode below relies on Next being falsy and Throw/Return being
+  // truthy.
+  static_assert(uint8_t(GeneratorResumeKind::Next) == 0);
+  static_assert(uint8_t(GeneratorResumeKind::Throw) != 0);
+  static_assert(uint8_t(GeneratorResumeKind::Return) != 0);
+
+  const int32_t startDepth = bytecodeSection().stackDepth();
+  //                [stack] RVAL RESUMEKIND
+
+  if (!emit1(JSOp::Dup)) {
+    //              [stack] RVAL RESUMEKIND RESUMEKIND
+    return false;
+  }
+  InternalIfEmitter ifNotNext(this);
+  if (!ifNotNext.emitThen()) {
+    //              [stack] RVAL RESUMEKIND
+    return false;
+  }
+
+  // Handle Throw and Return.
+  if (!emitPushResumeKind(GeneratorResumeKind::Throw)) {
+    //              [stack] RVAL RESUMEKIND THROW
+    return false;
+  }
+  if (!emit1(JSOp::StrictEq)) {
+    //              [stack] RVAL (RESUMEKIND==Throw)
+    return false;
+  }
+  InternalIfEmitter ifThrow(this);
+  if (!ifThrow.emitThen()) {
+    //              [stack] RVAL
+    return false;
+  }
+  if (!emit1(JSOp::Throw)) {
+    //              [stack]
+    return false;
+  }
+  bytecodeSection().setStackDepth(startDepth - 1);
+  if (!ifThrow.emitEnd()) {
+    //              [stack] RVAL
+    return false;
+  }
+  if (!emit1(JSOp::SetRval)) {
+    //              [stack]
+    return false;
+  }
+  {
+    NonLocalExitControl nle(this, NonLocalExitKind::Return);
+    if (!nle.emitReturn()) {
+      return false;
+    }
+  }
+
+  bytecodeSection().setStackDepth(startDepth);
+  if (!ifNotNext.emitEnd()) {
+    //              [stack] RVAL RESUMEKIND
+    return false;
+  }
+  if (!emit1(JSOp::Pop)) {
+    //              [stack] RVAL
+    return false;
+  }
+  return true;
+}
+
+bool BytecodeEmitter::emitCheckAwaitResumeKind() {
+  // An `await` is only resumed by a promise reaction, so we don't have to
+  // handle the Return resume kind here, only Next and Throw.
+  // See https://tc39.es/ecma262/#await.
+
+  // The bytecode below relies on Next being falsy and Throw being truthy.
+  static_assert(uint8_t(GeneratorResumeKind::Next) == 0);
+  static_assert(uint8_t(GeneratorResumeKind::Throw) != 0);
+
+  const int32_t startDepth = bytecodeSection().stackDepth();
+  //                [stack] RVAL RESUMEKIND
+
+  InternalIfEmitter ifThrow(this);
+  if (!ifThrow.emitThen()) {
+    //              [stack] RVAL
+    return false;
+  }
+  if (!emit1(JSOp::Throw)) {
+    //              [stack]
+    return false;
+  }
+  bytecodeSection().setStackDepth(startDepth - 1);
+  if (!ifThrow.emitEnd()) {
+    //              [stack] RVAL
+    return false;
+  }
+  return true;
 }
 
 bool BytecodeEmitter::emitGetDotGeneratorInScope(EmitterScope& currentScope) {
@@ -6603,10 +6755,10 @@ bool BytecodeEmitter::emitInitialYield(UnaryNode* yieldNode) {
   }
 
   if (!emitYieldOp(JSOp::InitialYield)) {
-    //              [stack] RVAL GENERATOR RESUMEKIND
+    //              [stack] RVAL RESUMEKIND
     return false;
   }
-  if (!emit1(JSOp::CheckResumeKind)) {
+  if (!emitCheckYieldResumeKind()) {
     //              [stack] RVAL
     return false;
   }
@@ -6666,11 +6818,11 @@ bool BytecodeEmitter::emitYield(UnaryNode* yieldNode) {
   }
 
   if (!emitYieldOp(JSOp::Yield)) {
-    //              [stack] YIELDRESULT GENERATOR RESUMEKIND
+    //              [stack] YIELDRESULT RESUMEKIND
     return false;
   }
 
-  if (!emit1(JSOp::CheckResumeKind)) {
+  if (!emitCheckYieldResumeKind()) {
     //              [stack] YIELDRESULT
     return false;
   }
@@ -6727,10 +6879,10 @@ bool BytecodeEmitter::emitAwaitInScope(EmitterScope& currentScope) {
     return false;
   }
   if (!emitYieldOp(JSOp::Await)) {
-    //              [stack] RESOLVED GENERATOR RESUMEKIND
+    //              [stack] RESOLVED RESUMEKIND
     return false;
   }
-  if (!emit1(JSOp::CheckResumeKind)) {
+  if (!emitCheckAwaitResumeKind()) {
     //              [stack] RESOLVED
     return false;
   }
@@ -6760,8 +6912,6 @@ bool BytecodeEmitter::emitYieldStar(ParseNode* iter) {
   IteratorKind iterKind = sc->asSuspendableContext()->isAsync()
                               ? IteratorKind::Async
                               : IteratorKind::Sync;
-  bool needsIteratorResult = sc->asSuspendableContext()->needsIteratorResult();
-
   // Steps 2-5.
   if (!emitTree(iter)) {
     //              [stack] ITERABLE
@@ -7037,13 +7187,6 @@ bool BytecodeEmitter::emitYieldStar(ParseNode* iter) {
       //            [stack] NEXT ITER RET ITER RECEIVED
       return false;
     }
-    if (needsIteratorResult) {
-      if (!emitAtomOp(JSOp::GetProp,
-                      TaggedParserAtomIndex::WellKnown::value())) {
-        //          [stack] NEXT ITER RET ITER VAL
-        return false;
-      }
-    }
     if (!emitCall(JSOp::Call, 1)) {
       //            [stack] NEXT ITER RESULT
       return false;
@@ -7086,21 +7229,6 @@ bool BytecodeEmitter::emitYieldStar(ParseNode* iter) {
       //            [stack] NEXT ITER VALUE
       return false;
     }
-    if (needsIteratorResult) {
-      if (!emitPrepareIteratorResult()) {
-        //          [stack] NEXT ITER VALUE RESULT
-        return false;
-      }
-      if (!emit1(JSOp::Swap)) {
-        //          [stack] NEXT ITER RESULT VALUE
-        return false;
-      }
-      if (!emitFinishIteratorResult(true)) {
-        //          [stack] NEXT ITER RESULT
-        return false;
-      }
-    }
-
     if (!ifReturnDone.emitElse()) {
       //            [stack] NEXT ITER RESULT
       return false;
@@ -7113,7 +7241,7 @@ bool BytecodeEmitter::emitYieldStar(ParseNode* iter) {
     }
 
     if (!ifReturnDone.emitEnd()) {
-      //            [stack] NEXT ITER RESULT
+      //            [stack] NEXT ITER VALUE
       return false;
     }
 
@@ -7142,18 +7270,17 @@ bool BytecodeEmitter::emitYieldStar(ParseNode* iter) {
     //
     // Step 7.c.iii.2.
     // Step 7.c.viii.2.
-    if (!emitGetDotGeneratorInInnermostScope()) {
-      //            [stack] NEXT ITER RESULT GENOBJ
+    if (!emit1(JSOp::SetRval)) {
+      //            [stack] NEXT ITER
       return false;
     }
-    if (!emitPushResumeKind(GeneratorResumeKind::Return)) {
-      //            [stack] NEXT ITER RESULT GENOBJ RESUMEKIND
-      return false;
+    {
+      NonLocalExitControl nle(this, NonLocalExitKind::Return);
+      if (!nle.emitReturn()) {
+        return false;
+      }
     }
-    if (!emit1(JSOp::CheckResumeKind)) {
-      //            [stack] NEXT ITER RESULT GENOBJ RESUMEKIND
-      return false;
-    }
+    bytecodeSection().setStackDepth(startDepth - 1);
   }
 
   if (!ifKind.emitEnd()) {
@@ -7200,14 +7327,6 @@ bool BytecodeEmitter::emitYieldStar(ParseNode* iter) {
     return false;
   }
   if (!emitYieldOp(JSOp::Yield)) {
-    //              [stack] NEXT ITER RVAL GENOBJ RESUMEKIND
-    return false;
-  }
-  if (!emit1(JSOp::Swap)) {
-    //              [stack] NEXT ITER RVAL RESUMEKIND GENOBJ
-    return false;
-  }
-  if (!emit1(JSOp::Pop)) {
     //              [stack] NEXT ITER RVAL RESUMEKIND
     return false;
   }
@@ -10937,6 +11056,34 @@ const MemberInitializers& BytecodeEmitter::findMemberInitializersForCall()
   return *compilationState.scopeContext.memberInitializers;
 }
 
+bool BytecodeEmitter::emitInlinedFieldValue(const InlinedField& field) {
+  switch (field.valueKind) {
+    case InlinedFieldValueKind::Number:
+      return emitNumberOp(field.initialValue);
+    case InlinedFieldValueKind::True:
+      return emit1(JSOp::True);
+    case InlinedFieldValueKind::False:
+      return emit1(JSOp::False);
+    case InlinedFieldValueKind::Null:
+      return emit1(JSOp::Null);
+    case InlinedFieldValueKind::Undefined:
+      return emit1(JSOp::Undefined);
+    case InlinedFieldValueKind::EmptyArray:
+      return emitUint32Operand(JSOp::NewArray, 0);
+    case InlinedFieldValueKind::EmptyObject: {
+      // Same as emitObject for a non-singleton `{}`: an empty-shape ObjLiteral.
+      ObjLiteralWriter writer;
+      writer.beginShape(JSOp::NewObject);
+      GCThingIndex index;
+      if (!addObjLiteralData(writer, &index)) {
+        return false;
+      }
+      return emitGCIndexOp(JSOp::NewObject, index);
+    }
+  }
+  MOZ_CRASH("unexpected InlinedFieldValueKind");
+}
+
 bool BytecodeEmitter::emitInitializeInstanceMembers(
     bool isDerivedClassConstructor) {
   const MemberInitializers& memberInitializers =
@@ -10976,6 +11123,55 @@ bool BytecodeEmitter::emitInitializeInstanceMembers(
       //            [stack]
       return false;
     }
+  }
+
+  if (memberInitializers.hasInlinedFields) {
+    MOZ_ASSERT(!isDerivedClassConstructor);
+    for (const InlinedField& field : sc->asFunctionBox()->inlinedFields()) {
+      if (!emitGetName(TaggedParserAtomIndex::WellKnown::dot_this_())) {
+        //              [stack] THIS
+        return false;
+      }
+      if (field.isPrivate) {
+        if (!emitGetPrivateName(field.name)) {
+          //            [stack] THIS KEY
+          return false;
+        }
+        // There is no private brand to check, this class has no private
+        // methods.
+        if (!emitCheckPrivateField(ThrowCondition::ThrowHas,
+                                   ThrowMsgKind::PrivateDoubleInit)) {
+          //            [stack] THIS KEY BOOL
+          return false;
+        }
+        if (!emit1(JSOp::Pop)) {
+          //            [stack] THIS KEY
+          return false;
+        }
+        if (!emitInlinedFieldValue(field)) {
+          //            [stack] THIS KEY VALUE
+          return false;
+        }
+        if (!emit1(JSOp::InitHiddenElem)) {
+          //            [stack] THIS
+          return false;
+        }
+      } else {
+        if (!emitInlinedFieldValue(field)) {
+          //            [stack] THIS VALUE
+          return false;
+        }
+        if (!emitAtomOp(JSOp::InitProp, field.name)) {
+          //            [stack] THIS
+          return false;
+        }
+      }
+      if (!emit1(JSOp::Pop)) {
+        //              [stack]
+        return false;
+      }
+    }
+    return true;
   }
 
   size_t numInitializers = memberInitializers.numMemberInitializers;
@@ -12312,6 +12508,8 @@ bool BytecodeEmitter::emitClass(
                TaggedParserAtomIndex::WellKnown::dot_initializers_());
 #endif
 
+    ctor = &constructorScope->scopeBody()->as<ClassMethod>().method();
+
     auto needsInitializer = [](ParseNode* propdef) {
       return NeedsFieldInitializer(propdef, false) ||
              NeedsAccessorInitializer(propdef, false);
@@ -12331,7 +12529,8 @@ bool BytecodeEmitter::emitClass(
       }
 #endif
       // Any class with field initializers will have a constructor
-      if (!emitCreateMemberInitializers(ce, classMembers,
+      if (!ctor->funbox()->memberInitializers().hasInlinedFields &&
+          !emitCreateMemberInitializers(ce, classMembers,
                                         FieldPlacement::Instance
 #ifdef ENABLE_DECORATORS
                                         ,
@@ -12342,7 +12541,6 @@ bool BytecodeEmitter::emitClass(
       }
     }
 
-    ctor = &constructorScope->scopeBody()->as<ClassMethod>().method();
   } else {
     // The |.initializers| binding is never emitted when in self-hosting mode.
     MOZ_ASSERT(emitterMode == BytecodeEmitter::SelfHosting);

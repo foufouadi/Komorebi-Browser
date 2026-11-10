@@ -7,6 +7,7 @@ package org.mozilla.fenix.home.topsites.controller
 import android.app.Activity
 import androidx.navigation.NavController
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
@@ -18,12 +19,15 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.test.runTest
 import mozilla.components.browser.state.action.SearchAction
 import mozilla.components.browser.state.search.RegionState
+import mozilla.components.browser.state.search.SearchAccessPoint
 import mozilla.components.browser.state.search.SearchEngine
+import mozilla.components.browser.state.search.SearchEngineAccessPoint
 import mozilla.components.browser.state.state.BrowserState
 import mozilla.components.browser.state.state.SearchState
 import mozilla.components.browser.state.state.createTab
 import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.feature.tabs.TabsUseCases
+import mozilla.components.feature.top.sites.DefaultTopSitesProvider
 import mozilla.components.feature.top.sites.TopSite
 import mozilla.components.feature.top.sites.TopSitesUseCases
 import mozilla.components.service.mars.MozAdsUseCases
@@ -43,6 +47,7 @@ import org.mozilla.fenix.GleanMetrics.TopSites
 import org.mozilla.fenix.R
 import org.mozilla.fenix.components.Analytics
 import org.mozilla.fenix.components.AppStore
+import org.mozilla.fenix.components.appstate.AppAction
 import org.mozilla.fenix.components.appstate.AppAction.ShortcutAction
 import org.mozilla.fenix.components.usecases.FenixBrowserUseCases
 import org.mozilla.fenix.ext.components
@@ -64,6 +69,7 @@ class DefaultTopSiteControllerTest {
     private val tabsUseCases: TabsUseCases = mockk(relaxed = true)
     private val selectTabUseCase: TabsUseCases = mockk(relaxed = true)
     private val topSitesUseCases: TopSitesUseCases = mockk(relaxed = true)
+    private val defaultTopSitesProvider: DefaultTopSitesProvider = mockk(relaxed = true)
     private val fenixBrowserUseCases: FenixBrowserUseCases = mockk(relaxed = true)
     private val mozAdsUseCases: MozAdsUseCases = mockk(relaxed = true)
     private val settings: Settings = mockk(relaxed = true)
@@ -86,6 +92,18 @@ class DefaultTopSiteControllerTest {
             type = SearchEngine.Type.BUNDLED,
             resultUrls = listOf("https://www.google.com/?q={searchTerms}"),
             suggestUrl = "https://www.google.com/",
+        )
+
+    private val googleSearchEngineWithTopSiteAccessPoint =
+        googleSearchEngine.copy(
+            accessPoints =
+                mapOf(
+                    SearchAccessPoint.TOPSITE to
+                        SearchEngineAccessPoint(
+                            resultUrls = listOf("https://www.google.com/?q={searchTerms}"),
+                            partnerCode = "firefox-b-t",
+                        )
+                )
         )
 
     private val duckDuckGoSearchEngine =
@@ -432,7 +450,7 @@ class DefaultTopSiteControllerTest {
     @Test
     fun handleSelectGoogleDefaultTopSiteUS() = runTest {
         val topSite =
-            TopSite.Default(
+            TopSite.DefaultPinned(
                 id = 1L,
                 title = "Google",
                 url = SupportUtils.GOOGLE_URL,
@@ -472,9 +490,118 @@ class DefaultTopSiteControllerTest {
     }
 
     @Test
-    fun handleSelectGoogleDefaultTopSiteXX() = runTest {
+    fun `GIVEN the engine has a topsite partner code WHEN the Google top site is selected THEN it is used`() = runTest {
         val topSite =
             TopSite.Default(
+                id = 1L,
+                title = "Google",
+                url = SupportUtils.GOOGLE_URL,
+                createdAt = 0,
+            )
+        val controller = spyk(createController(this))
+
+        every { controller.getAvailableSearchEngines() } returns listOf(googleSearchEngineWithTopSiteAccessPoint)
+
+        store.dispatch(SearchAction.SetRegionAction(RegionState("US", "US")))
+
+        controller.handleSelectTopSite(topSite, position = 0)
+
+        verify {
+            tabsUseCases.addTab.invoke(
+                url = "https://www.google.com/webhp?client=firefox-b-t&channel=ts",
+                selectTab = true,
+                startLoading = true,
+            )
+        }
+    }
+
+    @Test
+    fun `GIVEN the engine has no topsite partner code WHEN the Google top site is selected THEN the region URL is used`() =
+        runTest {
+            val topSite =
+                TopSite.Default(
+                    id = 1L,
+                    title = "Google",
+                    url = SupportUtils.GOOGLE_URL,
+                    createdAt = 0,
+                )
+            val controller = spyk(createController(this))
+
+            every { controller.getAvailableSearchEngines() } returns listOf(googleSearchEngine)
+
+            store.dispatch(SearchAction.SetRegionAction(RegionState("US", "US")))
+
+            controller.handleSelectTopSite(topSite, position = 0)
+
+            verify {
+                tabsUseCases.addTab.invoke(
+                    url = SupportUtils.GOOGLE_US_URL,
+                    selectTab = true,
+                    startLoading = true,
+                )
+            }
+        }
+
+    @Test
+    fun `GIVEN homepage as new tab and a topsite partner code WHEN the Google top site is selected THEN it is used`() =
+        runTest {
+            val topSite =
+                TopSite.Default(
+                    id = 1L,
+                    title = "Google",
+                    url = SupportUtils.GOOGLE_URL,
+                    createdAt = 0,
+                )
+            val controller = spyk(createController(this))
+
+            every { controller.getAvailableSearchEngines() } returns listOf(googleSearchEngineWithTopSiteAccessPoint)
+            every { settings.enableHomepageAsNewTab } returns true
+
+            store.dispatch(SearchAction.SetRegionAction(RegionState("US", "US")))
+
+            controller.handleSelectTopSite(topSite, position = 0)
+
+            verify {
+                fenixBrowserUseCases.loadUrlOrSearch(
+                    searchTermOrURL = "https://www.google.com/webhp?client=firefox-b-t&channel=ts",
+                    newTab = false,
+                    private = false,
+                )
+            }
+        }
+
+    @Test
+    fun `GIVEN homepage as new tab and no topsite partner code WHEN the Google top site is selected THEN the region URL is used`() =
+        runTest {
+            val topSite =
+                TopSite.Default(
+                    id = 1L,
+                    title = "Google",
+                    url = SupportUtils.GOOGLE_URL,
+                    createdAt = 0,
+                )
+            val controller = spyk(createController(this))
+
+            every { controller.getAvailableSearchEngines() } returns listOf(googleSearchEngine)
+            every { settings.enableHomepageAsNewTab } returns true
+
+            store.dispatch(SearchAction.SetRegionAction(RegionState("US", "US")))
+
+            controller.handleSelectTopSite(topSite, position = 0)
+
+            verify {
+                fenixBrowserUseCases.loadUrlOrSearch(
+                    searchTermOrURL = SupportUtils.GOOGLE_US_URL,
+                    newTab = false,
+                    private = false,
+                )
+            }
+        }
+
+    @Test
+    fun handleSelectGoogleDefaultTopSiteXX() = runTest {
+        val topSite =
+            TopSite.DefaultPinned(
                 id = 1L,
                 title = "Google",
                 url = SupportUtils.GOOGLE_URL,
@@ -518,7 +645,7 @@ class DefaultTopSiteControllerTest {
         assertNull(Events.performedSearch.testGetValue())
 
         val topSite =
-            TopSite.Default(
+            TopSite.DefaultPinned(
                 id = 1L,
                 title = "Google",
                 url = SupportUtils.GOOGLE_URL,
@@ -1010,7 +1137,7 @@ class DefaultTopSiteControllerTest {
     fun `WHEN the default Google top site is removed THEN the correct metric is recorded`() = runTest {
         val controller = spyk(createController(this))
         val topSite =
-            TopSite.Default(
+            TopSite.DefaultPinned(
                 id = 1L,
                 title = "Google",
                 url = SupportUtils.GOOGLE_URL,
@@ -1034,6 +1161,104 @@ class DefaultTopSiteControllerTest {
     }
 
     @Test
+    fun `GIVEN a default top site from the provider WHEN top site is removed THEN it is dispatched to be blocked`() =
+        runTest {
+            val topSite =
+                TopSite.Default(id = null, title = "Wikipedia", url = "https://www.wikipedia.org/", createdAt = null)
+            coEvery { defaultTopSitesProvider.getDefaultTopSites() } returns listOf(topSite)
+            val controller = createController(this)
+
+            controller.handleRemoveTopSiteClicked(topSite)
+            testScheduler.advanceUntilIdle()
+
+            verify { appStore.dispatch(AppAction.RemoveTopSite(topSite = topSite, shouldBlock = true)) }
+            coVerify { topSitesUseCases.removeTopSites(topSite) }
+        }
+
+    @Test
+    fun `WHEN the default Google top site is removed THEN it is not dispatched to be blocked`() = runTest {
+        val topSite = TopSite.DefaultPinned(id = 1L, title = "Google", url = SupportUtils.GOOGLE_URL, createdAt = 0)
+        coEvery { defaultTopSitesProvider.getDefaultTopSites() } returns
+            listOf(
+                TopSite.Default(id = null, title = "Wikipedia", url = "https://www.wikipedia.org/", createdAt = null)
+            )
+        val controller = createController(this)
+
+        controller.handleRemoveTopSiteClicked(topSite)
+        testScheduler.advanceUntilIdle()
+
+        verify { appStore.dispatch(AppAction.RemoveTopSite(topSite = topSite, shouldBlock = false)) }
+        coVerify { topSitesUseCases.removeTopSites(topSite) }
+    }
+
+    @Test
+    fun `GIVEN a pinned top site sharing the url of a default top site WHEN it is removed THEN it is dispatched to be blocked`() =
+        runTest {
+            val topSite =
+                TopSite.Pinned(id = 1L, title = "Wikipedia", url = "https://www.wikipedia.org/", createdAt = 0)
+            coEvery { defaultTopSitesProvider.getDefaultTopSites() } returns
+                listOf(
+                    TopSite.Default(
+                        id = null,
+                        title = "Wikipedia",
+                        url = "https://www.wikipedia.org/",
+                        createdAt = null,
+                    )
+                )
+            val controller = createController(this)
+
+            controller.handleRemoveTopSiteClicked(topSite)
+            testScheduler.advanceUntilIdle()
+
+            verify { appStore.dispatch(AppAction.RemoveTopSite(topSite = topSite, shouldBlock = true)) }
+            coVerify { topSitesUseCases.removeTopSites(topSite) }
+        }
+
+    @Test
+    fun `GIVEN a frecent top site sharing the url of a default top site WHEN it is removed THEN it is dispatched to be blocked`() =
+        runTest {
+            val topSite = TopSite.Frecent(id = 1L, title = "Wikipedia", url = "https://wikipedia.org", createdAt = 0)
+            coEvery { defaultTopSitesProvider.getDefaultTopSites() } returns
+                listOf(
+                    TopSite.Default(
+                        id = null,
+                        title = "Wikipedia",
+                        url = "https://www.wikipedia.org/",
+                        createdAt = null,
+                    )
+                )
+            val controller = createController(this)
+
+            controller.handleRemoveTopSiteClicked(topSite)
+            testScheduler.advanceUntilIdle()
+
+            verify { appStore.dispatch(AppAction.RemoveTopSite(topSite = topSite, shouldBlock = true)) }
+            coVerify { topSitesUseCases.removeTopSites(topSite) }
+        }
+
+    @Test
+    fun `GIVEN a pinned top site not sharing the url of a default top site WHEN it is removed THEN it is not dispatched to be blocked`() =
+        runTest {
+            val topSite = TopSite.Pinned(id = 1L, title = "Mozilla", url = "https://www.mozilla.org/", createdAt = 0)
+            coEvery { defaultTopSitesProvider.getDefaultTopSites() } returns
+                listOf(
+                    TopSite.Default(
+                        id = null,
+                        title = "Wikipedia",
+                        url = "https://www.wikipedia.org/",
+                        createdAt = null,
+                    )
+                )
+            val controller = createController(this)
+
+            controller.handleRemoveTopSiteClicked(topSite)
+            testScheduler.advanceUntilIdle()
+
+            verify { appStore.dispatch(AppAction.RemoveTopSite(topSite = topSite, shouldBlock = false)) }
+            coVerify { topSitesUseCases.removeTopSites(topSite) }
+        }
+
+    @Test
     fun `WHEN the frecent top site is updated THEN add the frecent top site as a pinned top site`() = runTest {
         val topSite =
             TopSite.Frecent(
@@ -1053,8 +1278,48 @@ class DefaultTopSiteControllerTest {
             topSitesUseCases.addPinnedSites(title = title, url = url)
         }
         verify {
-            appStore.dispatch(ShortcutAction.FrecencyTopSitePromoted)
+            appStore.dispatch(ShortcutAction.FrecencyTopSitePromoted(url = url))
         }
+    }
+
+    @Test
+    fun `WHEN the default top site is updated THEN add the default top site as a pinned top site`() = runTest {
+        val topSite =
+            TopSite.Default(
+                id = 1L,
+                title = "Mozilla",
+                url = "mozilla.org",
+                createdAt = null,
+            )
+
+        val controller = spyk(createController(this))
+        val title = "Firefox"
+        val url = "firefox.com"
+
+        controller.updateTopSite(topSite = topSite, title = title, url = url)
+
+        coVerify { topSitesUseCases.addPinnedSites(title = title, url = url) }
+        verify { appStore.dispatch(ShortcutAction.DefaultTopSitePromoted(url = url)) }
+    }
+
+    @Test
+    fun `WHEN the default pinned top site is updated THEN update the default pinned top site in storage`() = runTest {
+        val topSite =
+            TopSite.DefaultPinned(
+                id = 1L,
+                title = "Google",
+                url = SupportUtils.GOOGLE_URL,
+                createdAt = 0,
+            )
+
+        val controller = spyk(createController(this))
+        val title = "Search"
+        val url = "google.com"
+
+        controller.updateTopSite(topSite = topSite, title = title, url = url)
+
+        coVerify { topSitesUseCases.updateTopSites(topSite = topSite, title = title, url = url) }
+        coVerify(exactly = 0) { topSitesUseCases.addPinnedSites(any(), any(), any()) }
     }
 
     @Test
@@ -1098,6 +1363,7 @@ class DefaultTopSiteControllerTest {
         verify {
             appStore.dispatch(
                 ShortcutAction.ShortcutAdded(
+                    url = url,
                     source = AddShortcutSource.MANUAL,
                     entryPoint = AddShortcutEntryPoint.HOMEPAGE,
                 )
@@ -1335,6 +1601,28 @@ class DefaultTopSiteControllerTest {
         assertNotNull(ShortcutsLibrary.viewed.testGetValue())
     }
 
+    @Test
+    fun `WHEN the shortcuts section is expanded THEN show_more is recorded`() = runTest {
+        assertNull(TopSites.showMore.testGetValue())
+
+        val controller = createController(this)
+        controller.handleExpandToggleClicked(isExpanded = true)
+
+        assertNotNull(TopSites.showMore.testGetValue())
+        assertNull(TopSites.showLess.testGetValue())
+    }
+
+    @Test
+    fun `WHEN the shortcuts section is collapsed THEN show_less is recorded`() = runTest {
+        assertNull(TopSites.showLess.testGetValue())
+
+        val controller = createController(this)
+        controller.handleExpandToggleClicked(isExpanded = false)
+
+        assertNotNull(TopSites.showLess.testGetValue())
+        assertNull(TopSites.showMore.testGetValue())
+    }
+
     private fun createController(
         scope: CoroutineScope,
         source: TopSitesSource = TopSitesSource.HOMEPAGE,
@@ -1349,6 +1637,7 @@ class DefaultTopSiteControllerTest {
             selectTabUseCase = selectTabUseCase.selectTab,
             fenixBrowserUseCases = fenixBrowserUseCases,
             topSitesUseCases = topSitesUseCases,
+            defaultTopSitesProvider = defaultTopSitesProvider,
             mozAdsUseCases = mozAdsUseCases,
             viewLifecycleScope = scope,
             source = source,

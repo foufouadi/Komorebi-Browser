@@ -196,7 +196,7 @@
   <!-- Short description for the personalCommunications data collection permission -->
   <string name="mozac_feature_addons_permissions_data_collection_personalCommunications_short_description">个人通信</string>
   <!-- Short description for the personallyIdentifyingInfo data collection permission -->
-  <string name="mozac_feature_addons_permissions_data_collection_personallyIdentifyingInfo_short_description">个人身份信息</string>
+  <string name="mozac_feature_addons_permissions_data_collection_personallyIdentifyingInfo_short_description">识别个人身份的信息</string>
   <!-- Short description for the searchTerms data collection permission -->
   <string name="mozac_feature_addons_permissions_data_collection_searchTerms_short_description">搜索词</string>
   <!-- Short description for the technicalAndInteraction data collection permission -->
@@ -220,7 +220,7 @@
   <!-- Long description for the personalCommunications data collection permission -->
   <string name="mozac_feature_addons_permissions_data_collection_personalCommunications_long_description">与扩展开发者分享个人通信</string>
   <!-- Long description for the personallyIdentifyingInfo data collection permission -->
-  <string name="mozac_feature_addons_permissions_data_collection_personallyIdentifyingInfo_long_description">与扩展开发者分享个人身份信息</string>
+  <string name="mozac_feature_addons_permissions_data_collection_personallyIdentifyingInfo_long_description">与扩展开发者分享识别个人身份的信息</string>
   <!-- Long description for the searchTerms data collection permission -->
   <string name="mozac_feature_addons_permissions_data_collection_searchTerms_long_description">与扩展开发者分享搜索词</string>
   <!-- Long description for the technicalAndInteraction data collection permission -->
@@ -285,9 +285,9 @@
   <string name="mozac_feature_addons_permissions_dialog_heading_required_data_collection">必要的数据收集：</string>
   <!-- Heading for the optional settings section in the add-on install dialog. -->
   <string name="mozac_feature_addons_permissions_dialog_heading_optional_settings">可选设置：</string>
-  <!-- Heading for the permissions section in the optional permissions request dialog. -->
+  <!-- Heading for the permissions section in the optional permissions request dialog, and in the confirmation dialog for updating an extension that needs new permissions. -->
   <string name="mozac_feature_addons_permissions_dialog_heading_optional_permissions">新权限：</string>
-  <!-- Heading for the data collection permissions section in the optional permissions request dialog. -->
+  <!-- Heading for the data collection permissions section in the optional permissions request dialog, and in the confirmation dialog for updating an extension that needs new permissions. -->
   <string name="mozac_feature_addons_permissions_dialog_heading_optional_data_collection">新增收集的数据：</string>
   <!-- This is a button to add (install) an add-on . -->
   <string name="mozac_feature_addons_permissions_dialog_add">添加</string>

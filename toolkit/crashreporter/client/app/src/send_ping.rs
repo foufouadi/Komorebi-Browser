@@ -4,8 +4,8 @@
 
 //! An entry point for sending a crash ping.
 
-use crate::std::{env, io::stdin};
-use crate::{glean, logging, net::ping};
+use crate::std::{env, io::stdin, path::PathBuf};
+use crate::{config::installation_path, glean, logging, net::ping, prefs::Prefs};
 
 pub fn main() {
     logging::init();
@@ -17,14 +17,12 @@ pub fn main() {
     let extra: serde_json::Value =
         serde_json::from_reader(stdin()).expect("failed to read extra data from stdin");
 
-    let _glean_handle = glean::InitOptions {
-        data_dir: data_path.into(),
-        locale: None,
-        // Assume that this is only invoked to send a ping when upload is enabled.
-        upload_enabled: true,
-    }
-    .init()
-    .expect("failed to acquire Glean store");
+    let profile_dir = extra
+        .get("ProfileDirectory")
+        .and_then(|v| v.as_str())
+        .map(PathBuf::from);
+
+    let _glean_handle = load_glean(data_path.into(), profile_dir);
 
     ping::CrashPing {
         extra: &extra,
@@ -42,21 +40,9 @@ pub fn cleanup_main() {
 
     let mut args = env::args_os().skip(2);
     let data_path = args.next().expect("no data path provided");
-    let upload_enabled: bool = args
-        .next()
-        .expect("upload enabled missing")
-        .to_str()
-        .expect("non-unicode upload enabled value")
-        .parse()
-        .expect("invalid upload enabled value");
+    let profile_dir = args.next();
 
-    let _glean_handle = glean::InitOptions {
-        data_dir: data_path.into(),
-        locale: None,
-        upload_enabled,
-    }
-    .init()
-    .expect("failed to acquire Glean store");
+    let _glean_handle = load_glean(data_path.into(), profile_dir.map(|s| s.into()));
 
     // Sleep for a short period for Glean to do its thing in the background (and so that
     // `glean::shutdown()` won't log a warning about waiting for init to complete).
@@ -64,4 +50,17 @@ pub fn cleanup_main() {
 
     // Glean shutdown will block (for a period) on at least one ping to be sent.
     ::glean::shutdown();
+}
+
+fn load_glean(data_path: PathBuf, profile_dir: Option<PathBuf>) -> crashping::GleanHandle {
+    let mut prefs = Prefs::default();
+    prefs.update_from_app_dir(installation_path());
+    if let Some(dir) = profile_dir {
+        prefs.update_from_profile_dir(dir.as_ref());
+    }
+
+    glean::InitOptions::new(data_path.into())
+        .with_prefs(&prefs)
+        .init()
+        .expect("failed to acquire Glean store")
 }

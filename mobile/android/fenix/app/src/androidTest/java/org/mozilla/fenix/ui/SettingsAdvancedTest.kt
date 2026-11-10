@@ -16,7 +16,9 @@ import org.hamcrest.Matchers.equalTo
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import org.mozilla.fenix.R
 import org.mozilla.fenix.customannotations.Converted
+import org.mozilla.fenix.customannotations.Critical
 import org.mozilla.fenix.customannotations.SmokeTest
 import org.mozilla.fenix.helpers.AppAndSystemHelper.assertNativeAppOpens
 import org.mozilla.fenix.helpers.AppAndSystemHelper.assertYoutubeAppOpens
@@ -28,6 +30,7 @@ import org.mozilla.fenix.helpers.OpenLinksInApp
 import org.mozilla.fenix.helpers.TestAssetHelper
 import org.mozilla.fenix.helpers.TestAssetHelper.appLinksRedirectAsset
 import org.mozilla.fenix.helpers.TestAssetHelper.externalLinksAsset
+import org.mozilla.fenix.helpers.TestHelper.appContext
 import org.mozilla.fenix.helpers.TestHelper.exitMenu
 import org.mozilla.fenix.helpers.TestHelper.mDevice
 import org.mozilla.fenix.helpers.TestHelper.waitForAppWindowToBeUpdated
@@ -89,10 +92,13 @@ class SettingsAdvancedTest {
                 verifyOpenLinksInAppsButton()
                 verifySettingsOptionSummary("Open links in apps", "Ask before opening")
                 verifyDownloadsButton()
-                verifyLeakCanaryButton()
-                // LeakCanary is disabled in UI tests.
-                // See BuildConfig.LEAKCANARY.
-                verifyLeakCanaryToggle(false)
+                // LeakCanary is only in debug builds
+                if (appContext.resources.getBoolean(R.bool.IS_DEBUG)) {
+                    verifyLeakCanaryButton()
+                    // LeakCanary is disabled in UI tests.
+                    // See BuildConfig.LEAKCANARY.
+                    verifyLeakCanaryToggle(false)
+                }
                 verifyRemoteDebuggingButton()
                 verifyRemoteDebuggingToggle(false)
             }
@@ -257,6 +263,12 @@ class SettingsAdvancedTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1058617
+    @Converted(
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.SettingsOpenLinksInAppsTest#dismissOpenLinksInAppCFRTest"],
+        bug = 2087470,
+        since = "2026-10",
+    )
+    @Critical
     @Test
     fun dismissOpenLinksInAppCFRTest() {
         composeTestRule.activityRule.applySettingsExceptions {

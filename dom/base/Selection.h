@@ -13,12 +13,12 @@
 #include "mozilla/UniquePtr.h"
 #include "mozilla/WeakPtr.h"
 #include "mozilla/dom/Highlight.h"
+#include "mozilla/dom/Range.h"
 #include "mozilla/dom/StyledRange.h"
 #include "mozilla/intl/BidiEmbeddingLevel.h"
 #include "nsDirection.h"
 #include "nsISelectionController.h"
 #include "nsISelectionListener.h"
-#include "nsRange.h"
 #include "nsTArrayForwardDeclare.h"
 #include "nsThreadUtils.h"
 #include "nsWeakReference.h"
@@ -251,6 +251,10 @@ class Selection final : public nsSupportsWeakReference,
                                             AxisScrollParams aVertical,
                                             AxisScrollParams aHorizontal);
 
+  // Restricts a pending asynchronous scroll into view to the nearest scrollable
+  // ancestor of the selection.
+  void LimitPendingScrollToFirstAncestor();
+
   MOZ_CAN_RUN_SCRIPT nsresult ScrollIntoView(
       SelectionRegion, AxisScrollParams aVertical = AxisScrollParams(),
       AxisScrollParams aHorizontal = AxisScrollParams(),
@@ -259,7 +263,7 @@ class Selection final : public nsSupportsWeakReference,
 
  private:
   static bool IsUserSelectionCollapsed(
-      const nsRange& aRange, nsTArray<RefPtr<nsRange>>& aTempRangesToAdd);
+      const Range& aRange, nsTArray<RefPtr<Range>>& aTempRangesToAdd);
   /**
    * https://w3c.github.io/selection-api/#selectstart-event.
    */
@@ -272,7 +276,7 @@ class Selection final : public nsSupportsWeakReference,
    * See `AddRangesForSelectableNodes`.
    */
   [[nodiscard]] MOZ_CAN_RUN_SCRIPT nsresult AddRangesForUserSelectableNodes(
-      nsRange* aRange, Maybe<size_t>* aOutIndex,
+      Range* aRange, Maybe<size_t>* aOutIndex,
       const DispatchSelectstartEvent aDispatchSelectstartEvent);
 
   /**
@@ -287,7 +291,7 @@ class Selection final : public nsSupportsWeakReference,
    *                  empty and no range was added.
    */
   [[nodiscard]] MOZ_CAN_RUN_SCRIPT nsresult AddRangesForSelectableNodes(
-      nsRange* aRange, Maybe<size_t>* aOutIndex,
+      Range* aRange, Maybe<size_t>* aOutIndex,
       DispatchSelectstartEvent aDispatchSelectstartEvent);
 
   already_AddRefed<StaticRange> GetComposedRange(
@@ -319,9 +323,9 @@ class Selection final : public nsSupportsWeakReference,
   /**
    * See mStyledRanges.mRanges.
    */
-  nsRange* GetRangeAt(uint32_t aIndex) const;
-  nsRange* GetFirstRange() const { return GetRangeAt(0); }
-  nsRange* GetLastRange() const {
+  Range* GetRangeAt(uint32_t aIndex) const;
+  Range* GetFirstRange() const { return GetRangeAt(0); }
+  Range* GetLastRange() const {
     return RangeCount() ? GetRangeAt(RangeCount() - 1u) : nullptr;
   }
 
@@ -338,7 +342,7 @@ class Selection final : public nsSupportsWeakReference,
   AbstractRange* GetAbstractRangeAt(uint32_t aIndex) const;
   // Get the anchor-to-focus range if we don't care which end is
   // anchor and which end is focus.
-  const nsRange* GetAnchorFocusRange() const { return mAnchorFocusRange; }
+  const Range* GetAnchorFocusRange() const { return mAnchorFocusRange; }
 
   /**
    * Set mAnchorFocusRange to mStyledRanges.mRanges[aIndex] if aIndex is a
@@ -351,9 +355,9 @@ class Selection final : public nsSupportsWeakReference,
   nsDirection GetDirection() const { return mDirection; }
 
   void SetDirection(nsDirection aDir) { mDirection = aDir; }
-  MOZ_CAN_RUN_SCRIPT nsresult SetAnchorFocusToRange(nsRange* aRange);
+  MOZ_CAN_RUN_SCRIPT nsresult SetAnchorFocusToRange(Range* aRange);
 
-  MOZ_CAN_RUN_SCRIPT void ReplaceAnchorFocusRange(nsRange* aRange);
+  MOZ_CAN_RUN_SCRIPT void ReplaceAnchorFocusRange(Range* aRange);
 
   void AdjustAnchorFocusForMultiRange(nsDirection aDirection);
 
@@ -492,7 +496,7 @@ class Selection final : public nsSupportsWeakReference,
 
     AbstractRange* range = mStyledRanges.GetAbstractRangeAt(0);
     if (range->MayCrossShadowBoundary()) {
-      return range->AsDynamicRange()->CrossShadowBoundaryRangeCollapsed();
+      return range->AsRange()->CrossShadowBoundaryRangeCollapsed();
     }
 
     return true;
@@ -522,9 +526,8 @@ class Selection final : public nsSupportsWeakReference,
 
   void GetType(nsAString& aOutType) const;
 
-  nsRange* GetRangeAt(uint32_t aIndex, mozilla::ErrorResult& aRv);
-  MOZ_CAN_RUN_SCRIPT void AddRangeJS(nsRange& aRange,
-                                     mozilla::ErrorResult& aRv);
+  Range* GetRangeAt(uint32_t aIndex, mozilla::ErrorResult& aRv);
+  MOZ_CAN_RUN_SCRIPT void AddRangeJS(Range& aRange, mozilla::ErrorResult& aRv);
 
   /**
    * Callers need to keep `aRange` alive.
@@ -644,8 +647,7 @@ class Selection final : public nsSupportsWeakReference,
   void GetRangesForInterval(nsINode& aBeginNode, uint32_t aBeginOffset,
                             nsINode& aEndNode, uint32_t aEndOffset,
                             bool aAllowAdjacent,
-                            nsTArray<RefPtr<nsRange>>& aReturn,
-                            ErrorResult& aRv);
+                            nsTArray<RefPtr<Range>>& aReturn, ErrorResult& aRv);
 
   void SetColors(const nsAString& aForeColor, const nsAString& aBackColor,
                  const nsAString& aAltForeColor, const nsAString& aAltBackColor,
@@ -695,6 +697,17 @@ class Selection final : public nsSupportsWeakReference,
   MOZ_CAN_RUN_SCRIPT void CollapseToStart(mozilla::ErrorResult& aRv);
 
   /**
+   * Same as CollapseToStart(), but collapses to the start of aRange instead of
+   * to the start of the first range of this selection.  aRange does not need to
+   * be, and does not become, part of this selection.  Callers which only want
+   * the caret at a range's start should prefer this over adding the range and
+   * then calling CollapseToStart(), which makes the whole of aRange part of the
+   * selection first.
+   */
+  MOZ_CAN_RUN_SCRIPT void CollapseToStartOf(const AbstractRange& aRange,
+                                            mozilla::ErrorResult& aRv);
+
+  /**
    * Collapses the whole selection to a single point at the end
    * of the current selection (irrespective of direction).  If content
    * is focused and editable, the caret will blink there.
@@ -717,7 +730,7 @@ class Selection final : public nsSupportsWeakReference,
 
  public:
   MOZ_CAN_RUN_SCRIPT void AddRangeAndSelectFramesAndNotifyListeners(
-      nsRange& aRange, mozilla::ErrorResult& aRv);
+      Range& aRange, mozilla::ErrorResult& aRv);
 
   MOZ_CAN_RUN_SCRIPT void AddHighlightRangeAndSelectFramesAndNotifyListeners(
       AbstractRange& aRange);
@@ -813,7 +826,7 @@ class Selection final : public nsSupportsWeakReference,
    * the selection. The textRangeStyle will be used by text frame
    * when it is painting the selection.
    */
-  nsresult SetTextRangeStyle(nsRange* aRange,
+  nsresult SetTextRangeStyle(Range* aRange,
                              const TextRangeStyle& aTextRangeStyle);
 
   // Methods to manipulate our mFrameSelection's ancestor limiter.
@@ -856,15 +869,16 @@ class Selection final : public nsSupportsWeakReference,
                                              nsTArray<AbstractRange*>* aRanges);
 
   /**
-   * Converts the results of |GetAbstractRangesForIntervalArray()| to |nsRange|.
+   * Converts the results of |GetAbstractRangesForIntervalArray()| to
+   * |Range|.
    *
    * |StaticRange|s can only occur in Selections of type |eHighlight|.
    * Therefore, this method must not be called for this selection type
-   * as not every |AbstractRange| can be cast to |nsRange|.
+   * as not every |AbstractRange| can be cast to |Range|.
    */
   nsresult GetDynamicRangesForIntervalArray(
       nsINode* aBeginNode, uint32_t aBeginOffset, nsINode* aEndNode,
-      uint32_t aEndOffset, bool aAllowAdjacent, nsTArray<nsRange*>* aRanges);
+      uint32_t aEndOffset, bool aAllowAdjacent, nsTArray<Range*>* aRanges);
 
   /**
    * Modifies the cursor Bidi level after a change in keyboard direction
@@ -881,7 +895,7 @@ class Selection final : public nsSupportsWeakReference,
   friend class ::nsCopySupport;
   friend class ::nsHTMLCopyEncoder;
   MOZ_CAN_RUN_SCRIPT
-  void AddRangeAndSelectFramesAndNotifyListenersInternal(nsRange& aRange,
+  void AddRangeAndSelectFramesAndNotifyListenersInternal(Range& aRange,
                                                          Document* aDocument,
                                                          ErrorResult&);
 
@@ -912,7 +926,7 @@ class Selection final : public nsSupportsWeakReference,
   enum class IsFromRangeMutationObserver { Yes, No };
   /**
    * IsFromRangeMutationObserver::Yes should only be passed if the selection
-   * change is due to a nsRange observing a DOM mutation.
+   * change is due to a Range observing a DOM mutation.
    */
   MOZ_CAN_RUN_SCRIPT void NotifySelectionListeners(
       bool aCalledByJS, IsFromRangeMutationObserver aIsFromRange =
@@ -954,6 +968,9 @@ class Selection final : public nsSupportsWeakReference,
       NS_ASSERTION(aSelection, "null parameter");
     }
     void Revoke() { mSelection = nullptr; }
+    void LimitScrollTargetToFirstAncestor() {
+      mFlags |= ScrollFlags::ScrollFirstAncestorOnly;
+    }
 
    private:
     Selection* mSelection;
@@ -983,7 +1000,7 @@ class Selection final : public nsSupportsWeakReference,
    * mStyledRanges.mRanges so that it's always in [0, mStyledRanges.Length()].
    * Otherwise, if nothing, this didn't add the range to mStyledRanges.
    */
-  MOZ_CAN_RUN_SCRIPT nsresult MaybeAddTableCellRange(nsRange& aRange,
+  MOZ_CAN_RUN_SCRIPT nsresult MaybeAddTableCellRange(Range& aRange,
                                                      Maybe<size_t>* aOutIndex);
 
   MOZ_CAN_RUN_SCRIPT void RemoveAllRangesInternal(
@@ -1079,7 +1096,7 @@ class Selection final : public nsSupportsWeakReference,
      *                  This is nothing only when the method returns an error.
      */
     MOZ_CAN_RUN_SCRIPT nsresult
-    MaybeAddRangeAndTruncateOverlaps(nsRange* aRange, Maybe<size_t>* aOutIndex);
+    MaybeAddRangeAndTruncateOverlaps(Range* aRange, Maybe<size_t>* aOutIndex);
 
     /**
      * Adds the range even if there are overlaps.
@@ -1123,7 +1140,7 @@ class Selection final : public nsSupportsWeakReference,
     MOZ_CAN_RUN_SCRIPT void MaybeFocusCommonEditingHost(
         PresShell* aPresShell) const;
 
-    static nsresult SubtractRange(StyledRange& aRange, nsRange& aSubtract,
+    static nsresult SubtractRange(StyledRange& aRange, Range& aSubtract,
                                   nsTArray<StyledRange>* aOutput);
 
     void UnregisterSelection(IsUnlinking aIsUnlinking = IsUnlinking::No);
@@ -1171,7 +1188,7 @@ class Selection final : public nsSupportsWeakReference,
 
   StyledRanges mStyledRanges{*this};
 
-  RefPtr<nsRange> mAnchorFocusRange;
+  RefPtr<Range> mAnchorFocusRange;
   RefPtr<nsFrameSelection> mFrameSelection;
   RefPtr<AccessibleCaretEventHub> mAccessibleCaretEventHub;
   RefPtr<SelectionChangeEventDispatcher> mSelectionChangeEventDispatcher;

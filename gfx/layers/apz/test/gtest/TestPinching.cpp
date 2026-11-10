@@ -49,6 +49,9 @@ class APZCPinchTester : public APZCBasicTester {
 
   void DoPinchTest(bool aShouldTriggerPinch,
                    nsTArray<uint32_t>* aAllowedTouchBehaviors = nullptr) {
+    if (aAllowedTouchBehaviors) {
+      apzc->DisableDefaultTouchBehaviors();
+    }
     apzc->SetFrameMetrics(GetPinchableFrameMetrics());
     MakeApzcZoomable();
 
@@ -156,7 +159,7 @@ class APZCPinchLockingTester : public APZCPinchTester {
  private:
   ScreenIntPoint mFocus;
   float mSpan;
-  int mPinchLockBufferMaxAge;
+  uint32_t mPinchLockBufferMaxAge;
 
  public:
   APZCPinchLockingTester()
@@ -569,13 +572,12 @@ TEST_F(APZCPinchGestureDetectorTester, Pinch_NoSpan) {
 
   const TimeDuration TIME_BETWEEN_TOUCH_EVENT =
       TimeDuration::FromMilliseconds(50);
-  const auto touchBehaviors = Some(nsTArray<uint32_t>{kDefaultTouchBehavior});
 
   MultiTouchInput mtiStart =
       MultiTouchInput(MultiTouchInput::MULTITOUCH_START, 0, mcc->Time(), 0);
   mtiStart.mTouches.AppendElement(CreateSingleTouchData(inputId, focus));
   mtiStart.mTouches.AppendElement(CreateSingleTouchData(inputId + 1, focus));
-  apzc->ReceiveInputEvent(mtiStart, touchBehaviors);
+  apzc->ReceiveInputEvent(mtiStart);
   mcc->AdvanceBy(TIME_BETWEEN_TOUCH_EVENT);
 
   focus.y -= 35 + 1;  // this is to get over the PINCH_START_THRESHOLD in
@@ -683,4 +685,54 @@ TEST_F(APZCPinchLockingTester, Pinch_Locking_Sticky_Lock_Break_Lock) {
   twoFingerZoom();
   twoFingerPan();
   EXPECT_TRUE(isPinchLockActive());
+}
+
+// Bug 2083366: ending a scrolling gesture while the input block at the head
+// of the queue has a confirmed null target (and therefore a null handoff
+// chain) crashes in ClearScrolledByHandedOffGestureOnChain().
+TEST_F(APZCPinchTester, Pinch_EndedWhileNullTargetBlockQueued) {
+  apzc->SetFrameMetrics(GetPinchableFrameMetrics());
+  MakeApzcZoomable();
+
+  // Start a pinch so that the APZC is in the PINCHING state, which counts as a
+  // scrolling gesture. The pinch block's target is confirmed, so its event is
+  // processed immediately and the input queue is empty afterwards.
+  auto pinchStart = CreatePinchGestureInput(
+      PinchGestureInput::PINCHGESTURE_START, ScreenIntPoint(50, 50), 10.0, 10.0,
+      mcc->Time(), PinchGestureInput::UNKNOWN);
+  apzc->ReceiveInputEvent(pinchStart);
+  EXPECT_TRUE(apzc->IsInScrollingGesture());
+
+  // Queue a wheel block with an unconfirmed target, so that it sits at the
+  // head of the input queue waiting for the main thread. (A touch block would
+  // not work here, as starting one cancels the pinch.) Then have the main
+  // thread confirm a null target for it, which nulls out the block's
+  // overscroll handoff chain. The block remains at the head of the queue since
+  // it is still waiting for a content response.
+  MakeApzcWaitForMainThread();
+  uint64_t wheelBlockId =
+      Wheel(apzc, ScreenIntPoint(50, 50), ScreenPoint(0, 10), mcc->Time())
+          .mInputBlockId;
+  tm->GetInputQueue()->SetConfirmedTargetApzc(wheelBlockId, nullptr);
+
+  // Send a main-thread scroll offset update. PINCHING cannot absorb it, so the
+  // APZC cancels the pinch and goes to NOTHING, ending the scrolling gesture.
+  // That dispatches ClearScrolledByHandedOffGestureOnChain() to the controller
+  // thread (which runs it synchronously in gtests), and it operates on the
+  // handoff chain of the block at the head of the queue, i.e. the null chain
+  // of the wheel block.
+  ScrollMetadata metadata = apzc->GetScrollMetadata();
+  CSSPoint mainThreadOffset(310, 310);
+  metadata.GetMetrics().SetLayoutScrollOffset(mainThreadOffset);
+  nsTArray<ScrollPositionUpdate> scrollUpdates;
+  scrollUpdates.AppendElement(ScrollPositionUpdate::NewScroll(
+      ScrollOrigin::Other, CSSPoint::ToAppUnits(mainThreadOffset)));
+  metadata.SetScrollUpdates(scrollUpdates);
+  metadata.GetMetrics().SetScrollGeneration(
+      scrollUpdates.LastElement().GetGeneration());
+  apzc->NotifyMainThreadTransaction(
+      metadata, AsyncPanZoomController::LayersUpdateFlags{
+                    .mIsFirstPaint = false, .mThisLayerTreeUpdated = true});
+
+  apzc->AssertStateIsReset();
 }

@@ -31,14 +31,10 @@
   <string name="tab_tray_close_multiselect_content_description">মাল্টিলেক্ট মোড থেকে প্রস্থান করুন</string>
   <!-- About content. %1$s is the name of the app (for example "Firefox"). -->
   <string name="about_content" tools:ignore="BrandUsage">%1$s হচ্ছে Mozilla দ্বারা তৈরি।</string>
-  <!-- Private Browsing -->
-  <string name="private_browsing_common_myths">ব্যাক্তিগত ব্রাউজিং সম্পর্কে কিছু ভুল ধারণা</string>
   <!-- Text for the positive action button -->
   <string name="open_in_app_cfr_positive_button_text">সেটিং এ যাও</string>
   <!-- Text for the negative action button -->
   <string name="open_in_app_cfr_negative_button_text">বাতিল</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
   <!-- Text for the positive action button to go to Android Settings to grant permissions. -->
   <string name="camera_permissions_needed_positive_button_text">সেটিং এ যাও</string>
   <!-- Text for the negative action button to dismiss the dialog. -->
@@ -55,11 +51,7 @@
   <string name="home_screen_shortcut_open_new_tab_2">নতুন ট্যাব</string>
   <!-- Shortcut action to open new private tab -->
   <string name="home_screen_shortcut_open_new_private_tab_2">নতুন ব্যক্তিগত ট্যাব</string>
-  <!--
-    Browser Fragment
-
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
-  -->
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">পিছনে</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">সামনে</string>
@@ -119,23 +111,25 @@
   <string name="search_suggestions_onboarding_title">ব্যক্তিগত সেশনে অনুসন্ধানের পরামর্শ দেওয়ার অনুমতি দেবেন?</string>
   <!-- Search suggestion onboarding hint description text, %s is the name of the app (for example "Firefox"). -->
   <string name="search_suggestions_onboarding_text">ঠিকানা বারে টাইপ করা সবকিছ %s আপনার ডিফল্ট অনুসন্ধান ইঞ্জিনের মাধ্যমে আপনার সাথে শেয়ার করবে।</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!-- Text preview for smaller sized widgets -->
   <string name="search_widget_text_short">অনুসন্ধান করুন</string>
   <!-- Text preview for larger sized widgets -->
   <string name="search_widget_text_long">ওয়েবে সন্ধান করুন</string>
   <!-- Content description (not visible, for screen readers etc.): Voice search -->
   <string name="search_widget_voice">কণ্ঠে অনুসন্ধান</string>
+  <!-- Content description (not visible, for screen readers etc.): Button in the search widget that starts a search in a private tab -->
+  <string name="search_widget_private_search">গোপন অনুসন্ধান</string>
+  <!-- Widget description in the widget picker screen for the search bar widget that includes buttons for private search and for voice search -->
+  <string name="search_bar_widget_description">প্রাইভেট ও ভয়েস সার্চ সংবলিত সার্চ বার</string>
+  <!-- Widget description in the widget picker screen for the search bar widget that includes buttons for image search, private search and voice search -->
+  <string name="search_bar_with_lens_widget_description">ছবি, প্রাইভেট ও ভয়েস সার্চ সংবলিত সার্চ বার</string>
+  <!-- Widget description in the widget picker screen for the compact search bar widget -->
+  <string name="compact_search_bar_widget_description">সংক্ষিপ্ত সার্চ বার</string>
   <!--
     Preferences
 
-    Title for the settings page
+    Preference category for general settings
   -->
-  <string name="settings">সেটিংস</string>
-  <!-- Preference category for general settings -->
   <string name="preferences_category_general">সাধারণ</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">সম্পর্কে</string>
@@ -381,16 +375,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">%1$d নির্বাচিত</string>
-  <!-- Text for the header that groups the history for today -->
-  <string name="history_today">আজ</string>
-  <!-- Text for the header that groups the history for yesterday -->
-  <string name="history_yesterday">গতকাল</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">গত 7 দিন</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">গত 30 দিন</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">পুরানো</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">এখানে কোন ইতিহাস নেই</string>
   <!--
@@ -593,8 +577,6 @@
   <string name="qr_scanner_dialog_positive">ALLOW</string>
   <!-- QR code scanner prompt dialog positive option to deny navigation to scanned link -->
   <string name="qr_scanner_dialog_negative">DENY</string>
-  <!-- Tab collection deletion prompt dialog message. %1$s is the collection name. -->
-  <string name="tab_collection_dialog_message">আপনি কি নিশ্চিত আপনি %1$s মুছতে চান?</string>
   <!-- Sample text for accessibility font size -->
   <string name="accessibility_text_size_sample_text_1">এটি নমুনা লেখা। আপনি যখন এই সেটিংটি দিয়ে আকার বাড়াবেন বা হ্রাস করবেন তখন লেখা কি ভাবে প্রদর্শিত হবে তা দেখানোর জন্য এটি এখানে।</string>
   <!-- Summary for Accessibility Text Size Scaling Preference -->
@@ -733,8 +715,6 @@
   <string name="add_to_homescreen_cancel">বাতিল করুন</string>
   <!-- Add button text for the Add to Homescreen dialog -->
   <string name="add_to_homescreen_add">যোগ করুন</string>
-  <!-- Continue to website button text for the first-time Add to Homescreen dialog -->
-  <string name="add_to_homescreen_continue">ওয়েবসাইটে চালিয়ে যান</string>
   <!-- Placeholder text for the TextView in the Add to Homescreen dialog -->
   <string name="add_to_homescreen_text_placeholder">শর্টকাটের নাম</string>
   <!-- Preference option for asking to save passwords in Fenix -->
@@ -791,15 +771,10 @@
   <string name="confirm_clear_permissions_on_all_sites">আপনি কি নিশ্চিত যে আপনি সব সাইটের সব অনুমতি সাফ করতে চান?</string>
   <!-- Confirmation message for a dialog confirming if the user wants to delete all the permissions for a site -->
   <string name="confirm_clear_permissions_site">আপনি কি নিশ্চিত যে আপনি এই সাইটের জন্য সব অনুমতি সাফ করতে চান?</string>
-  <!-- Positive action of a dialog asking to delete -->
-  <string name="dialog_delete_positive">মুছে ফেলুন</string>
-  <!-- Translations feature -->
+  <!--
+    PDF viewer toolbar and buttons
 
-  <!-- TextField Design System Component -->
-
-  <!-- ==== Terms of use pop up prompt ==== -->
-
-  <!-- ==== Experiment strings. ==== -->
-
-  <!-- ==== End of Terms of use popup prompt. ==== -->
+    Content description for accessibility (used by screen readers): Description for the button that triggers the start of a signature workflow on the PDF displayed on the screen.
+  -->
+  <string name="pdf_tools_sign_content_description_2">স্বাক্ষর যোগ করুন</string>
 </resources>

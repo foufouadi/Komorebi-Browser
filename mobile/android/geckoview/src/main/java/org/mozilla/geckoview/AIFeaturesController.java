@@ -26,6 +26,9 @@ import org.mozilla.gecko.util.ThreadUtils;
  */
 @ExperimentalGeckoViewApi
 public class AIFeaturesController {
+  /** Public constructor for AIFeaturesController. */
+  public AIFeaturesController() {}
+
   private static final boolean DEBUG = false;
   private static final String LOGTAG = "AIFeaturesController";
 
@@ -34,6 +37,8 @@ public class AIFeaturesController {
    * specific browsing session.
    */
   public static class RuntimeAIFeatures {
+    /** Public constructor for RuntimeAIFeatures. */
+    public RuntimeAIFeatures() {}
 
     private static final String LIST_FEATURES_EVENT = "GeckoView:AIFeature:ListFeatures";
     private static final String SET_FEATURE_ENABLED_EVENT = "GeckoView:AIFeature:SetEnabled";
@@ -280,6 +285,7 @@ public class AIFeaturesController {
 
   /** An exception for when there is an issue communicating with the AI features toolkit. */
   public static class AIFeaturesException extends Exception {
+    private static final long serialVersionUID = 1L;
 
     /**
      * Construct an [AIFeaturesException]

@@ -19,6 +19,7 @@
 #include "absl/algorithm/container.h"
 #include "api/call/audio_sink.h"
 #include "api/media_stream_interface.h"
+#include "api/rtp_packet_infos.h"
 #include "api/scoped_refptr.h"
 #include "api/sequence_checker.h"
 #include "api/task_queue/task_queue_base.h"
@@ -117,6 +118,14 @@ bool RemoteAudioSource::remote() const {
 void RemoteAudioSource::SetVolume(double volume) {
   RTC_DCHECK_GE(volume, 0);
   RTC_DCHECK_LE(volume, 10);
+  if (!main_thread_->IsCurrent()) {
+    // The Android and Objective-C SDKs call SetVolume() on the application's
+    // thread, but the audio observers are registered on the main thread.
+    main_thread_->PostTask([thiz = scoped_refptr<RemoteAudioSource>(this),
+                            volume] { thiz->SetVolume(volume); });
+    return;
+  }
+  RTC_DCHECK_RUN_ON(main_thread_);
   RTC_LOG(LS_INFO) << StringFormat("RAS::%s({volume=%.2f})", __func__, volume);
   for (auto* observer : audio_observers_) {
     observer->OnSetVolume(volume);
@@ -124,12 +133,14 @@ void RemoteAudioSource::SetVolume(double volume) {
 }
 
 void RemoteAudioSource::RegisterAudioObserver(AudioObserver* observer) {
+  RTC_DCHECK_RUN_ON(main_thread_);
   RTC_DCHECK(observer != nullptr);
   RTC_DCHECK(!absl::c_linear_search(audio_observers_, observer));
   audio_observers_.push_back(observer);
 }
 
 void RemoteAudioSource::UnregisterAudioObserver(AudioObserver* observer) {
+  RTC_DCHECK_RUN_ON(main_thread_);
   RTC_DCHECK(observer != nullptr);
   audio_observers_.remove(observer);
 }
@@ -154,13 +165,16 @@ void RemoteAudioSource::RemoveSink(AudioTrackSinkInterface* sink) {
 void RemoteAudioSource::OnData(const AudioSinkInterface::Data& audio) {
   // Called on the externally-owned audio callback thread, via/from webrtc.
   TRACE_EVENT0("webrtc", "RemoteAudioSource::OnData");
+  const RtpPacketInfos empty_packet_infos;
+  const RtpPacketInfos& packet_infos =
+      audio.packet_infos != nullptr ? *audio.packet_infos : empty_packet_infos;
   MutexLock lock(&sink_lock_);
   for (auto* sink : sinks_) {
     // When peerconnection acts as an audio source, it should not provide
     // absolute capture timestamp.
     sink->OnData(audio.data, 16, audio.sample_rate, audio.channels,
                  audio.samples_per_channel,
-                 /*absolute_capture_timestamp_ms=*/std::nullopt);
+                 /*absolute_capture_timestamp_ms=*/std::nullopt, packet_infos);
   }
 }
 

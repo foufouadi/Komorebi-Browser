@@ -212,18 +212,12 @@ class Completion {
   //
   // Unfortunately, using a template here would prevent the implicit definitions
   // of the copy and move constructor and assignment operators, which is icky.
-  explicit Completion(Return&& variant)
-      : variant(std::forward<Return>(variant)) {}
-  explicit Completion(Throw&& variant)
-      : variant(std::forward<Throw>(variant)) {}
-  explicit Completion(Terminate&& variant)
-      : variant(std::forward<Terminate>(variant)) {}
-  explicit Completion(InitialYield&& variant)
-      : variant(std::forward<InitialYield>(variant)) {}
-  explicit Completion(Yield&& variant)
-      : variant(std::forward<Yield>(variant)) {}
-  explicit Completion(Await&& variant)
-      : variant(std::forward<Await>(variant)) {}
+  explicit Completion(Return&& variant) : variant(std::move(variant)) {}
+  explicit Completion(Throw&& variant) : variant(std::move(variant)) {}
+  explicit Completion(Terminate&& variant) : variant(std::move(variant)) {}
+  explicit Completion(InitialYield&& variant) : variant(std::move(variant)) {}
+  explicit Completion(Yield&& variant) : variant(std::move(variant)) {}
+  explicit Completion(Await&& variant) : variant(std::move(variant)) {}
 
   // Capture a JavaScript operation result as a Completion value. This clears
   // any exception and stack from cx, taking ownership of them itself.
@@ -426,24 +420,33 @@ class MOZ_RAII EvalOptions {
   unsigned lineno_ = 1;
   bool hideFromDebugger_ = false;
   bool bypassCSP_ = false;
+  bool allowRedeclaringExistingLexicalBinding_ = false;
   EnvKind kind_;
 
  public:
   explicit EvalOptions(EnvKind kind) : kind_(kind) {};
   ~EvalOptions() = default;
+
   const char* filename() const { return filename_.get(); }
   unsigned lineno() const { return lineno_; }
   bool hideFromDebugger() const { return hideFromDebugger_; }
   bool bypassCSP() const { return bypassCSP_; }
-  EnvKind kind() const { return kind_; }
-  void setUseInnerBindings() {
-    MOZ_ASSERT(kind_ == EvalOptions::EnvKind::GlobalWithExtraOuterBindings);
-    kind_ = EvalOptions::EnvKind::GlobalWithExtraInnerBindings;
+  bool allowRedeclaringExistingLexicalBinding() const {
+    return allowRedeclaringExistingLexicalBinding_;
   }
+  EnvKind kind() const { return kind_; }
+
   [[nodiscard]] bool setFilename(JSContext* cx, const char* filename);
   void setLineno(unsigned lineno) { lineno_ = lineno; }
   void setHideFromDebugger(bool hide) { hideFromDebugger_ = hide; }
   void setBypassCSP(bool bypass) { bypassCSP_ = bypass; }
+  void setAllowRedeclaringExistingLexicalBinding(bool allow) {
+    allowRedeclaringExistingLexicalBinding_ = allow;
+  }
+  void setUseInnerBindings() {
+    MOZ_ASSERT(kind_ == EvalOptions::EnvKind::GlobalWithExtraOuterBindings);
+    kind_ = EvalOptions::EnvKind::GlobalWithExtraInnerBindings;
+  }
 };
 
 /*
@@ -564,7 +567,6 @@ class Debugger : private mozilla::LinkedListElement<Debugger> {
     OnEnterFrame,
     OnNativeCall,
     OnNewGlobalObject,
-    OnNewPromise,
     OnGarbageCollection,
     HookCount
   };
@@ -700,24 +702,9 @@ class Debugger : private mozilla::LinkedListElement<Debugger> {
   void recomputeDebuggeeZoneSet();
 
   /*
-   * Return true if there is an existing object metadata callback for the
-   * given global's compartment that will prevent our instrumentation of
-   * allocations.
-   */
-  static bool cannotTrackAllocations(const GlobalObject& global);
-
-  /*
-   * Check whether there is an existing object metadata callback for the given
-   * global's compartment and throw an exception if so.
-   */
-  [[nodiscard]] static bool checkCanAddAllocationsTracking(
-      JSContext* cx, Handle<GlobalObject*> debuggee);
-
-  /*
    * Add allocations tracking for objects allocated within the given debuggee's
    * compartment. The given debuggee global must be observed by at least one
-   * Debugger that is tracking allocations and there must be no existing object
-   * metadata callback installed.
+   * Debugger that is tracking allocations.
    */
   static void addAllocationsTracking(JSContext* cx,
                                      Handle<GlobalObject*> debuggee);
@@ -732,7 +719,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger> {
   /*
    * Add or remove allocations tracking for all debuggees.
    */
-  [[nodiscard]] bool addAllocationsTrackingForAllDebuggees(JSContext* cx);
+  void addAllocationsTrackingForAllDebuggees(JSContext* cx);
   void removeAllocationsTrackingForAllDebuggees();
 
   /*

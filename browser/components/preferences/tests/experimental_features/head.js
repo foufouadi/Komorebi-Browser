@@ -70,10 +70,7 @@ const DEFAULT_LABS_RECIPES = [
   }),
 
   NimbusTestUtils.factories.recipe("bucketing-false", {
-    bucketConfig: {
-      ...NimbusTestUtils.factories.recipe.bucketConfig,
-      count: 0,
-    },
+    bucketConfig: NimbusTestUtils.factories.bucketConfig({ count: 0 }),
     isRollout: true,
     targeting: "true",
     isFirefoxLabsOptIn: true,
@@ -125,7 +122,7 @@ async function setupLabsTest(recipes) {
   await ExperimentAPI._rsLoader.updateRecipes("test");
 
   return async function cleanup() {
-    await NimbusTestUtils.removeStore(ExperimentAPI.manager.store);
+    await NimbusTestUtils.assert.storeIsEmpty();
     await SpecialPowers.popPrefEnv();
   };
 }

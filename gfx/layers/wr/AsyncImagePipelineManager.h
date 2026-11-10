@@ -69,7 +69,7 @@ class AsyncImagePipelineManager final {
   void NotifyPipelinesUpdated(RefPtr<const wr::WebRenderPipelineInfo> aInfo,
                               wr::RenderedFrameId aLatestFrameId,
                               wr::RenderedFrameId aLastCompletedFrameId,
-                              RefPtr<Fence>&& aFence);
+                              RefPtr<Fence>&& aReadFence);
 
   // This is run on the compositor thread to process mRenderSubmittedUpdates. We
   // make this public because we need to invoke it from other places.
@@ -98,6 +98,15 @@ class AsyncImagePipelineManager final {
 
   void AddAsyncImagePipeline(const wr::PipelineId& aPipelineId,
                              WebRenderImageHost* aImageHost);
+  // Whether aPipelineId is currently registered by a live pipeline, which may
+  // be another bridge's root pipeline (registered via AddPipeline) as well as
+  // an async image pipeline. A holder that is merely waiting to be destroyed
+  // does not count: its id may legitimately be re-registered while the old
+  // holder drains, e.g. when a tab moves between windows.
+  bool HasLivePipeline(const wr::PipelineId& aPipelineId) const {
+    auto* holder = mPipelineTexturesHolders.Get(wr::AsUint64(aPipelineId));
+    return holder && holder->mDestroyedEpoch.isNothing();
+  }
   void RemoveAsyncImagePipeline(const wr::PipelineId& aPipelineId,
                                 AsyncImagePipelineOps* aPendingOps,
                                 wr::TransactionBuilder& aTxn);
@@ -276,11 +285,11 @@ class AsyncImagePipelineManager final {
 
   struct WebRenderPipelineInfoHolder {
     WebRenderPipelineInfoHolder(RefPtr<const wr::WebRenderPipelineInfo>&& aInfo,
-                                RefPtr<Fence>&& aFence);
+                                RefPtr<Fence>&& aReadFence);
     ~WebRenderPipelineInfoHolder();
     WebRenderPipelineInfoHolder(WebRenderPipelineInfoHolder&&) = default;
     RefPtr<const wr::WebRenderPipelineInfo> mInfo;
-    RefPtr<Fence> mFence;
+    RefPtr<Fence> mReadFence;
   };
 
   std::vector<std::pair<wr::RenderedFrameId, WebRenderPipelineInfoHolder>>

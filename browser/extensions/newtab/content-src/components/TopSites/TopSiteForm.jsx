@@ -116,8 +116,8 @@ export class TopSiteForm extends React.PureComponent {
             source: TOP_SITES_SOURCE,
             event: "TOP_SITES_EDIT",
             action_position: index,
-            hasTitleChanged: this.state.hasTitleChanged,
-            hasURLChanged: this.state.hasURLChanged,
+            has_title_changed: this.state.hasTitleChanged,
+            has_url_changed: this.state.hasURLChanged,
           })
         );
       } else if (!isEdit) {
@@ -153,9 +153,9 @@ export class TopSiteForm extends React.PureComponent {
   }
 
   cleanUrl(url) {
-    // If we are missing a protocol, prepend http://
+    // If we are missing a protocol, prepend https://
     if (!url.startsWith("http:") && !url.startsWith("https:")) {
-      return `http://${url}`;
+      return `https://${url}`;
     }
     return url;
   }

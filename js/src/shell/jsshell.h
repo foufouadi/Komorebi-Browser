@@ -21,12 +21,16 @@
 #include "vm/Monitor.h"
 
 // Some platform hooks must be implemented for single-step profiling.
-#if defined(JS_SIMULATOR_ARM) || defined(JS_SIMULATOR_MIPS64) || \
-    defined(JS_SIMULATOR_ARM64) || defined(JS_SIMULATOR_LOONG64)
+#if defined(JS_SIMULATOR_ARM) || defined(JS_SIMULATOR_MIPS64) ||    \
+    defined(JS_SIMULATOR_ARM64) || defined(JS_SIMULATOR_LOONG64) || \
+    defined(JS_SIMULATOR_RISCV64)
 #  define SINGLESTEP_PROFILING
 #endif
 
 namespace js {
+
+class ArrayObject;
+
 namespace shell {
 
 // Define use of application-specific slots on the shell's global object.
@@ -253,9 +257,29 @@ struct ShellContext {
 
   using ObjectVector = GCVector<JSObject*, 0, SystemAllocPolicy>;
   JS::PersistentRooted<ObjectVector> taskCallbacks;
+
+  // Entry points of the hidden debug session host global.
+  // See the Shell DebugSession SMDOC comment.
+  JS::PersistentRootedObject debugSessionHost;
 };
 
 extern ShellContext* GetShellContext(JSContext* cx);
+
+struct ShellCompartmentPrivate {
+  HeapPtr<ArrayObject*> blackRoot;
+  HeapPtr<ArrayObject*> grayRoot;
+  bool isDebugSessionHost = false;
+
+  // If true, objects from other compartments are wrapped with security
+  // wrappers.
+  bool useSecurityWrappers = false;
+};
+
+extern ShellCompartmentPrivate* EnsureShellCompartmentPrivate(JSContext* cx);
+
+extern const JSClass ShellGlobalClass;
+
+extern void SetStandardRealmOptions(JSContext* cx, JS::RealmOptions& options);
 
 [[nodiscard]] extern bool PrintStackTrace(JSContext* cx,
                                           JS::Handle<JSObject*> stackObj);

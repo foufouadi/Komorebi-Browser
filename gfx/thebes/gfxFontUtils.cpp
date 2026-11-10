@@ -592,7 +592,7 @@ nsresult gfxFontUtils::ReadCMAP(const uint8_t* aBuf, uint32_t aBufLength,
 
 #pragma pack(1)
 
-typedef struct {
+struct Format4Cmap {
   AutoSwap_PRUint16 format;
   AutoSwap_PRUint16 length;
   AutoSwap_PRUint16 language;
@@ -602,32 +602,32 @@ typedef struct {
   AutoSwap_PRUint16 rangeShift;
 
   AutoSwap_PRUint16 arrays[1];
-} Format4Cmap;
+};
 
-typedef struct Format14Cmap {
+struct Format14Cmap {
   AutoSwap_PRUint16 format;
   AutoSwap_PRUint32 length;
   AutoSwap_PRUint32 numVarSelectorRecords;
 
-  typedef struct {
+  struct VarSelectorRecord {
     AutoSwap_PRUint24 varSelector;
     AutoSwap_PRUint32 defaultUVSOffset;
     AutoSwap_PRUint32 nonDefaultUVSOffset;
-  } VarSelectorRecord;
+  };
 
   VarSelectorRecord varSelectorRecords[1];
-} Format14Cmap;
+};
 
-typedef struct DefUVSTable {
+struct DefUVSTable {
   AutoSwap_PRUint32 numUnicodeValueRanges;
 
-  typedef struct {
+  struct UnicodeRange {
     AutoSwap_PRUint24 startUnicodeValue;
     uint8_t additionalCount;
-  } UnicodeRange;
+  };
 
   UnicodeRange ranges[1];
-} DefUVSTable;
+};
 
 typedef struct UnicodeRangeComparator {
   explicit UnicodeRangeComparator(uint32_t aTarget) : mTarget(aTarget) {}
@@ -643,7 +643,7 @@ typedef struct UnicodeRangeComparator {
   const uint32_t mTarget;
 } UnicodeRangeComparator;
 
-typedef struct NonDefUVSTable {
+struct NonDefUVSTable {
   AutoSwap_PRUint32 numUVSMappings;
 
   typedef struct {
@@ -652,7 +652,7 @@ typedef struct NonDefUVSTable {
   } UVSMapping;
 
   UVSMapping uvsMappings[1];
-} NonDefUVSTable;
+};
 
 #pragma pack()
 
@@ -1753,8 +1753,8 @@ void gfxFontUtils::GetVariationData(
       }
       instance.mValues.SetCapacity(axisCount);
       for (unsigned j = 0; j < axisCount; ++j) {
-        gfxFontVariationValue value = {axes[j].axisTag,
-                                       int32_t(coords[j]) / 65536.0f};
+        gfxFontVariation value = {axes[j].axisTag,
+                                  int32_t(coords[j]) / 65536.0f};
         instance.mValues.AppendElement(value);
       }
       aInstances->AppendElement(std::move(instance));
@@ -1864,9 +1864,9 @@ bool gfxFontUtils::IsCffFont(const uint8_t* aFontData) {
 }
 
 #ifdef DEBUG
-/* static */ void gfxFontUtils::AssertSafeThreadOrServoFontMetricsLocked() {
+/* static */ void gfxFontUtils::AssertSafeThreadOrServoFFILocked() {
   if (!dom::GetCurrentThreadWorkerPrivate()) {
-    AssertIsMainThreadOrServoFontMetricsLocked();
+    mozilla::AssertIsMainThreadOrServoFFILocked();
   }
 }
 #endif

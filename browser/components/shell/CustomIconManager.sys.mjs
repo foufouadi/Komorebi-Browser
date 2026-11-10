@@ -6,6 +6,14 @@ import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
 const PREF_ICON_ID = "browser.shell.customIcon.id";
+const PREF_ENABLED = "browser.shell.customIcon.enabled";
+// True once we have ever created the shortcut.
+const PREF_PER_USER_START_MENU_SHORTCUT_CREATED =
+  "browser.shell.customIcon.perUserStartMenuShortcutCreated";
+
+// governingStartMenuShortcut() return values.
+const kUserShortcut = "user";
+const kCommonShortcut = "common";
 
 /**
  * Inlined catalog of selectable icons. Each entry has:
@@ -148,7 +156,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
 
 ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
   return console.createInstance({
-    prefix: "CustomIconManager",
+    logModule: "CustomIconManager",
     maxLogLevel: Services.prefs.getBoolPref(
       "browser.shell.customIcon.log",
       false
@@ -171,6 +179,75 @@ function browserExePath() {
 }
 
 /**
+ * The shortcuts this install owns (by AUMID), as nsIInstallShortcutInfo.
+ *
+ * @returns {Promise<?Array<nsIInstallShortcutInfo>>} Null if the shortcuts
+ *   could not be enumerated.
+ */
+async function installShortcutEntries() {
+  try {
+    return await lazy.ShellService.enumerateInstallShortcuts(
+      lazy.WinTaskbar.defaultGroupId
+    );
+  } catch (ex) {
+    lazy.logConsole.error("enumerateInstallShortcuts failed", ex);
+    return null;
+  }
+}
+
+/**
+ * The Start Menu shortcut that governs the taskbar icon, if any: a per-user
+ * shortcut shadows the common (all-users) one.
+ *
+ * @param {Set<string>} locations Location tags from getInstallShortcutState().
+ * @returns {?("user"|"common")} Null when no Start Menu shortcut exists.
+ */
+function governingStartMenuShortcut(locations) {
+  if (locations.has("Programs")) {
+    return kUserShortcut;
+  }
+  if (locations.has("CommonPrograms")) {
+    return kCommonShortcut;
+  }
+  return null;
+}
+
+/**
+ * Whether the custom icon feature must be turned off for this state.
+ *
+ * @param {object} state A snapshot from getInstallShortcutState().
+ * @param {boolean} everCreatedShortcut The shortcut-created pref.
+ * @returns {boolean}
+ */
+function shouldDisableCustomIcon(state, everCreatedShortcut) {
+  if (governingStartMenuShortcut(state.locations) != kCommonShortcut) {
+    return false;
+  }
+  if (state.locations.has("Taskbar")) {
+    return false;
+  }
+  // In this case, we would need a per-user Start Menu shortcut to be able
+  // to modify the taskbar icon. If the shortcut was previously created,
+  // (and deleted by the user), or if the name is blocked by another install,
+  // we should disable the feature.
+  return everCreatedShortcut || state.slotTakenByOtherInstall;
+}
+
+/**
+ * Test-only wrapper around governingStartMenuShortcut().
+ */
+export function testOnlyGoverningStartMenuShortcut(locations) {
+  return governingStartMenuShortcut(locations);
+}
+
+/**
+ * Test-only wrapper around shouldDisableCustomIcon().
+ */
+export function testOnlyShouldDisableCustomIcon(state, everCreatedShortcut) {
+  return shouldDisableCustomIcon(state, everCreatedShortcut);
+}
+
+/**
  * Apply the given executable icon to every Windows .lnk file that this install
  * owns (taskbar pin, per-user Desktop, per-user Start Menu).
  *
@@ -185,18 +262,22 @@ function browserExePath() {
  */
 async function applyIconToWindowsShortcuts(iconPath, iconResourceId) {
   let aumid = lazy.WinTaskbar.defaultGroupId;
-  let shortcuts = [];
-  try {
-    shortcuts = await lazy.ShellService.enumerateInstallShortcuts(aumid);
-  } catch (ex) {
-    lazy.logConsole.error("enumerateInstallShortcuts failed", ex);
+  let entries = await installShortcutEntries();
+  if (!entries) {
     return false;
   }
 
   lazy.logConsole.debug(
-    `enumerateInstallShortcuts(${aumid}) matched ${shortcuts.length} ` +
-      `shortcut(s): ${shortcuts.join(", ")}`
+    `enumerateInstallShortcuts(${aumid}) matched ${entries.length} ` +
+      `shortcut(s): ${entries.map(entry => entry.path).join(", ")}`
   );
+
+  // Never write the all-users Start Menu shortcut: modifying it
+  // requires elevation and would change the icon other users see.
+  let shortcuts = entries
+    .filter(entry => entry.location != "CommonPrograms")
+    .map(entry => entry.path);
+
   if (!shortcuts.length) {
     lazy.logConsole.warn(
       `No shortcuts matched this install (AUMID ${aumid}); nothing to update. ` +
@@ -479,7 +560,13 @@ export const CustomIconManager = {
         // should be displayed.
         lazy.logConsole.debug("Saw sps-profiles-updated: ", data);
         if (data == "remote") {
-          this.ensureAppliedOrRevert(true /* remoteProfileUpdated */);
+          this.ensureAppliedOrRevert(true /* remoteProfileUpdated */).catch(
+            ex =>
+              lazy.logConsole.error(
+                "Re-applying icon after a remote profile update failed",
+                ex
+              )
+          );
         }
         break;
       }
@@ -515,6 +602,32 @@ export const CustomIconManager = {
       // SelectableProfileService.init() is idempotent, so this is a cheap journey
       // through the microtask queue during the non-startup case.
       await lazy.SelectableProfileService.init();
+    }
+
+    if (!Services.prefs.getBoolPref(PREF_ENABLED, false)) {
+      if (this.currentId) {
+        await this.revert();
+      }
+      return;
+    }
+
+    let state = await this.getInstallShortcutState();
+    if (
+      state &&
+      shouldDisableCustomIcon(
+        state,
+        Services.prefs.getBoolPref(
+          PREF_PER_USER_START_MENU_SHORTCUT_CREATED,
+          false
+        )
+      )
+    ) {
+      lazy.logConsole.warn(
+        "The taskbar icon can no longer be overridden; disabling custom icons."
+      );
+      Services.prefs.setBoolPref(PREF_ENABLED, false);
+      await this.revert();
+      return;
     }
 
     let id = this.currentId;
@@ -553,36 +666,96 @@ export const CustomIconManager = {
   },
 
   /**
-   * Ensure this install owns a per-user Start Menu shortcut.
+   * One snapshot of everything the shortcut creation / feature disabling
+   * policy depends on.
+   *
+   * slotTakenByOtherInstall: enumerateInstallShortcuts only reports shortcuts
+   * whose AUMID and target executable match this install, but every install
+   * of the same brand names its Start Menu shortcut "<brand>.lnk". So if that
+   * file exists in the per-user Programs folder without being among our own
+   * shortcuts, it belongs to a different install and must not be overwritten.
+   *
+   * @returns {Promise<?{locations: Set<string>,
+   *   slotTakenByOtherInstall: boolean}>}
+   *   Null if the shortcuts could not be enumerated.
+   */
+  async getInstallShortcutState() {
+    let entries = await installShortcutEntries();
+    if (!entries) {
+      return null;
+    }
+
+    let locations = new Set(entries.map(entry => entry.location));
+
+    // The per-user Start Menu path maybeCreatePerUserStartMenuShortcut()
+    // would create, named the way the installer names shortcuts.
+    let slotPath = PathUtils.join(
+      Services.dirsvc.get("Progs", Ci.nsIFile).path,
+      AppConstants.MOZ_APP_DISPLAYNAME_DO_NOT_USE + ".lnk"
+    );
+    let slotTakenByOtherInstall = false;
+    if (await IOUtils.exists(slotPath)) {
+      let lowerPath = slotPath.toLowerCase();
+      slotTakenByOtherInstall = !entries.some(
+        entry =>
+          entry.location == "Programs" && entry.path.toLowerCase() == lowerPath
+      );
+    }
+
+    return { locations, slotTakenByOtherInstall };
+  },
+
+  /**
+   * Create a per-user Start Menu shortcut for this install if required.
    *
    * The taskbar gets its icon from Start Menu shortcuts with a matching AUMID,
    * and prioritizes the shortcut present in the user's Roaming folder over
-   * the system-wide Start Menu directory.
+   * the common Start Menu directory.
    *
-   * No-op if shortcut already exists.
+   * No-op if shortcut already exists. Once created, we don't try again.
+   *
+   * Intended to run after ensureAppliedOrRevert() has finished.
    *
    * @returns {Promise<void>}
    */
-  async ensureShortcutInPerUserStartMenu() {
+  async maybeCreatePerUserStartMenuShortcut() {
     if (!this.supported) {
       return;
     }
-    let aumid = lazy.WinTaskbar.defaultGroupId;
-    let shortcuts = [];
-    try {
-      shortcuts = await lazy.ShellService.enumerateInstallShortcuts(aumid);
-    } catch (ex) {
-      lazy.logConsole.error("enumerateInstallShortcuts failed", ex);
+    if (
+      !Services.prefs.getBoolPref(PREF_ENABLED, false) ||
+      Services.prefs.getBoolPref(
+        PREF_PER_USER_START_MENU_SHORTCUT_CREATED,
+        false
+      )
+    ) {
       return;
     }
 
-    let programs =
-      Services.dirsvc.get("Progs", Ci.nsIFile).path.toLowerCase() + "\\";
-    let hasShortcutInPerUserStartMenu = shortcuts.some(p =>
-      p.toLowerCase().startsWith(programs)
-    );
+    let state = await this.getInstallShortcutState();
+    if (!state) {
+      return;
+    }
 
-    if (hasShortcutInPerUserStartMenu) {
+    let governing = governingStartMenuShortcut(state.locations);
+
+    // Our shortcut already exists; just record that.
+    if (governing == kUserShortcut) {
+      Services.prefs.setBoolPref(
+        PREF_PER_USER_START_MENU_SHORTCUT_CREATED,
+        true
+      );
+      return;
+    }
+
+    // We create a shortcut only to shadow the common one; a taskbar
+    // already falling back to the window icon is ours to set at runtime.
+    if (governing != kCommonShortcut) {
+      return;
+    }
+
+    // Don't overwrite another install's shortcut occupying the same name.
+    if (state.slotTakenByOtherInstall) {
       return;
     }
 
@@ -607,9 +780,13 @@ export const CustomIconManager = {
         description,
         exeFile,
         0,
-        aumid,
+        lazy.WinTaskbar.defaultGroupId,
         "Programs",
         name
+      );
+      Services.prefs.setBoolPref(
+        PREF_PER_USER_START_MENU_SHORTCUT_CREATED,
+        true
       );
     } catch (ex) {
       lazy.logConsole.error("Creating per-user install shortcut failed", ex);

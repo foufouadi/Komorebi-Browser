@@ -107,8 +107,10 @@
 
 #include "mozilla/HashFunctions.h"
 #include "mozilla/Likely.h"
+#include "mozilla/MathAlgorithms.h"
 #include "mozilla/Maybe.h"
 
+#include <algorithm>
 #include <memory>
 #include <tuple>
 #include <utility>
@@ -127,6 +129,7 @@ namespace js {
 
 class MapIteratorObject;
 class SetIteratorObject;
+class TableIteratorObject;
 
 namespace detail {
 
@@ -178,6 +181,58 @@ class OrderedHashTableObject : public NativeObject {
 };
 
 }  // namespace detail
+
+// A double-indirect pointer used by linked lists of TableIteratorObjects.
+//
+// This is a pointer to a fixed slot in a NativeObject containing a private
+// value which itself points to a TableIteratorObject.
+//
+// Use of this class avoids barriers when writing to slot values that never
+// contain GC things. The use of HeapSlot means that this will use atomic set
+// operations where appropriate.
+class TableIteratorPtrPtr {
+  HeapSlot* slot;
+
+ public:
+  TableIteratorPtrPtr(NativeObject* object, uint32_t index)
+      : TableIteratorPtrPtr(&object->getFixedSlotRef(index)) {}
+  explicit TableIteratorPtrPtr(HeapSlot* slot) : slot(slot) {
+    MOZ_ASSERT_IF(slot, slot->unbarrieredGet().isDouble());
+  }
+
+  // Get/set the referent.
+  TableIteratorObject* deref() const {
+    MOZ_ASSERT(slot);
+    return static_cast<TableIteratorObject*>(slot->get().toPrivate());
+  }
+  TableIteratorObject* operator*() const { return deref(); }
+  void setRef(TableIteratorObject* ptr) {
+    // No barriers required for private to private update.
+    MOZ_ASSERT(slot);
+    MOZ_ASSERT(slot->unbarrieredGet().isDouble());
+    slot->unbarrieredSet(PrivateValue(ptr));
+  }
+
+  // Store the double-indirect pointer in a slot.
+  void storeInFixedSlot(NativeObject* object, uint32_t index) {
+    // No barriers required for private to private update.
+    HeapSlot& dest = object->getFixedSlotRef(index);
+    MOZ_ASSERT(dest.isUndefined() || dest.isDouble());
+    dest.unbarrieredSet(PrivateValue(slot));
+  }
+  static TableIteratorPtrPtr readFromFixedSlot(const NativeObject* object,
+                                               uint32_t index) {
+    Value value = object->getFixedSlot(index);
+    return TableIteratorPtrPtr(static_cast<HeapSlot*>(value.toPrivate()));
+  }
+
+  bool operator==(const TableIteratorPtrPtr& other) {
+    return slot == other.slot;
+  }
+  bool operator!=(const TableIteratorPtrPtr& other) {
+    return !(*this == other);
+  }
+};
 
 // Base class for MapIteratorObject and SetIteratorObject.
 //
@@ -247,42 +302,41 @@ class TableIteratorObject : public NativeObject {
   // the last iterator in the list.
   //
   // Invariant: *getPrevPtr() == this.
-  TableIteratorObject** getPrevPtr() const {
+  TableIteratorPtrPtr getPrevPtr() const {
     MOZ_ASSERT(isActive());
-    Value v = getReservedSlot(PrevPtrSlot);
-    return static_cast<TableIteratorObject**>(v.toPrivate());
+    return TableIteratorPtrPtr::readFromFixedSlot(this, PrevPtrSlot);
   }
-  void setPrevPtr(TableIteratorObject** p) {
+  void setPrevPtr(TableIteratorPtrPtr p) {
     MOZ_ASSERT(isActive());
-    setReservedSlotPrivateUnbarriered(PrevPtrSlot, p);
+    p.storeInFixedSlot(this, PrevPtrSlot);
   }
   TableIteratorObject* getNext() const {
     MOZ_ASSERT(isActive());
     Value v = getReservedSlot(NextSlot);
     return static_cast<TableIteratorObject*>(v.toPrivate());
   }
-  TableIteratorObject** addressOfNext() {
+  TableIteratorPtrPtr addressOfNext() {
     MOZ_ASSERT(isActive());
-    return addressOfFixedSlotPrivatePtr<TableIteratorObject>(NextSlot);
+    return TableIteratorPtrPtr(this, NextSlot);
   }
   void setNext(TableIteratorObject* p) {
     MOZ_ASSERT(isActive());
     setReservedSlotPrivateUnbarriered(NextSlot, p);
   }
 
-  void link(TableIteratorObject** listp) {
+  void link(TableIteratorPtrPtr listp) {
     MOZ_ASSERT(isActive());
     TableIteratorObject* next = *listp;
     setPrevPtr(listp);
     setNext(next);
-    *listp = this;
+    listp.setRef(this);
     if (next) {
       next->setPrevPtr(this->addressOfNext());
     }
   }
 
   void init(detail::OrderedHashTableObject* target, Kind kind,
-            TableIteratorObject** listp) {
+            TableIteratorPtrPtr listp) {
     initReservedSlot(TargetSlot, ObjectValue(*target));
     setReservedSlotPrivateUint32Unbarriered(KindSlot, uint32_t(kind));
     setReservedSlotPrivateUint32Unbarriered(IndexSlot, 0);
@@ -307,9 +361,9 @@ class TableIteratorObject : public NativeObject {
   }
   void unlink() {
     MOZ_ASSERT(isActive());
-    TableIteratorObject** prevp = getPrevPtr();
+    TableIteratorPtrPtr prevp = getPrevPtr();
     TableIteratorObject* next = getNext();
-    *prevp = next;
+    prevp.setRef(next);
     if (next) {
       next->setPrevPtr(prevp);
     }
@@ -323,9 +377,9 @@ class TableIteratorObject : public NativeObject {
     MOZ_ASSERT(isActive());
     MOZ_ASSERT(old != this);
 
-    TableIteratorObject** prevp = getPrevPtr();
+    TableIteratorPtrPtr prevp = getPrevPtr();
     MOZ_ASSERT(*prevp == old);
-    *prevp = this;
+    prevp.setRef(this);
 
     if (TableIteratorObject* next = getNext()) {
       MOZ_ASSERT(next->getPrevPtr() == old->addressOfNext());
@@ -474,9 +528,9 @@ class MOZ_STACK_CLASS OrderedHashTableImpl {
   void setTenuredIterators(TableIteratorObject* iter) {
     obj->setReservedSlotPrivateUnbarriered(Slots::TenuredIteratorsSlot, iter);
   }
-  TableIteratorObject** addressOfTenuredIterators() const {
+  TableIteratorPtrPtr addressOfTenuredIterators() const {
     static constexpr size_t slot = Slots::TenuredIteratorsSlot;
-    return obj->addressOfFixedSlotPrivatePtr<TableIteratorObject>(slot);
+    return TableIteratorPtrPtr(obj, slot);
   }
 
   // List of all active iterators on this table in the GC nursery.
@@ -489,14 +543,14 @@ class MOZ_STACK_CLASS OrderedHashTableImpl {
   void setNurseryIterators(TableIteratorObject* iter) {
     obj->setReservedSlotPrivateUnbarriered(Slots::NurseryIteratorsSlot, iter);
   }
-  TableIteratorObject** addressOfNurseryIterators() const {
+  TableIteratorPtrPtr addressOfNurseryIterators() const {
     static constexpr size_t slot = Slots::NurseryIteratorsSlot;
-    return obj->addressOfFixedSlotPrivatePtr<TableIteratorObject>(slot);
+    return TableIteratorPtrPtr(obj, slot);
   }
 
   // Returns a pointer to the list of tenured or nursery iterators depending on
   // where |iter| is allocated.
-  TableIteratorObject** addressOfIterators(TableIteratorObject* iter) {
+  TableIteratorPtrPtr addressOfIterators(TableIteratorObject* iter) {
     return IsInsideNursery(iter) ? addressOfNurseryIterators()
                                  : addressOfTenuredIterators();
   }
@@ -517,6 +571,10 @@ class MOZ_STACK_CLASS OrderedHashTableImpl {
   static constexpr uint32_t numHashBucketsToDataCapacity(
       uint32_t numHashBuckets) {
     return uint32_t(numHashBuckets * FillFactor);
+  }
+  static constexpr uint32_t dataCapacityToNumHashBuckets(
+      uint32_t dataCapacity) {
+    return mozilla::RoundUpPow2(dataCapacity / FillFactor);
   }
 
   // Logarithm base 2 of the number of buckets in the hash table initially.
@@ -608,13 +666,31 @@ class MOZ_STACK_CLASS OrderedHashTableImpl {
     return {data, table, hcs, numBytes};
   }
 
-  [[nodiscard]] bool initBuffer(JSContext* cx) {
+  // Returns the hash shift for the smallest table that can hold |count| entries
+  // without rehashing. If |count| exceeds the maximum capacity, this returns
+  // MinHashShift.
+  static constexpr uint32_t hashShiftForCount(uint32_t count) {
+    uint32_t minBuckets = dataCapacityToNumHashBuckets(count);
+    if (minBuckets >= MaxHashBuckets) {
+      return MinHashShift;
+    }
+
+    uint32_t bucketsLog2 = std::max<uint32_t>(mozilla::CeilingLog2(minBuckets),
+                                              InitialBucketsLog2);
+    MOZ_ASSERT(bucketsLog2 < js::kHashNumberBits);
+    return js::kHashNumberBits - bucketsLog2;
+  }
+
+  [[nodiscard]] bool initBuffer(JSContext* cx,
+                                uint32_t hashShift = InitialHashShift) {
     MOZ_ASSERT(!hasAllocatedBuffer());
     MOZ_ASSERT(getDataLength() == 0);
     MOZ_ASSERT(getLiveCount() == 0);
+    MOZ_ASSERT(hashShift >= MinHashShift);
+    MOZ_ASSERT(hashShift <= InitialHashShift);
 
-    constexpr uint32_t buckets = InitialBuckets;
-    constexpr uint32_t capacity = uint32_t(buckets * FillFactor);
+    uint32_t buckets = hashShiftToNumHashBuckets(hashShift);
+    uint32_t capacity = numHashBucketsToDataCapacity(buckets);
 
     auto [dataAlloc, tableAlloc, hcsAlloc, numBytes] =
         allocateBuffer(cx, capacity, buckets);
@@ -629,7 +705,7 @@ class MOZ_STACK_CLASS OrderedHashTableImpl {
     setHashTable(tableAlloc);
     setData(dataAlloc);
     setDataCapacity(capacity);
-    setHashShift(InitialHashShift);
+    setHashShift(hashShift);
     setHashCodeScrambler(hcsAlloc);
     MOZ_ASSERT(hashBuckets() == buckets);
     return true;
@@ -757,6 +833,16 @@ class MOZ_STACK_CLASS OrderedHashTableImpl {
   }
 
   /*
+   * Ensure the table has capacity for at least |count| entries.
+   * This should only be called on an empty table.
+   */
+  [[nodiscard]] bool ensureCapacity(JSContext* cx, uint32_t count) {
+    MOZ_ASSERT(!hasAllocatedBuffer());
+    uint32_t hashShift = hashShiftForCount(count);
+    return initBuffer(cx, hashShift);
+  }
+
+  /*
    * If the table already contains an entry that matches |element|,
    * replace that entry with |element|. Otherwise add a new entry.
    *
@@ -845,17 +931,20 @@ class MOZ_STACK_CLASS OrderedHashTableImpl {
     forEachIterator(
         [this, pos](auto* iter) { IterOps::onRemove(obj, iter, pos); });
 
+    maybeShrink(cx);
+    return true;
+  }
+
+  void maybeShrink(JSContext* cx) {
     // If many entries have been removed, try to shrink the table. Ignore OOM
     // because shrinking the table is an optimization and it's okay for it to
     // fail.
-    if (hashBuckets() > InitialBuckets &&
-        liveCount < getDataLength() * MinDataFill) {
+    if (hasAllocatedBuffer() && hashBuckets() > InitialBuckets &&
+        getLiveCount() < getDataLength() * MinDataFill) {
       if (!rehash(cx, getHashShift() + 1)) {
         cx->recoverFromOutOfMemory();
       }
     }
-
-    return true;
   }
 
   /*
@@ -894,7 +983,8 @@ class MOZ_STACK_CLASS OrderedHashTableImpl {
 
     static void init(OrderedHashTableObject* table, TableIteratorObject* iter,
                      TableIteratorObject::Kind kind) {
-      auto** listp = OrderedHashTableImpl(table).addressOfIterators(iter);
+      TableIteratorPtrPtr listp =
+          OrderedHashTableImpl(table).addressOfIterators(iter);
       iter->init(table, kind, listp);
       seek(table, iter);
     }
@@ -1053,12 +1143,12 @@ class MOZ_STACK_CLASS OrderedHashTableImpl {
 
   void clearNurseryIterators() {
     if (TableIteratorObject* iter = getNurseryIterators()) {
-      iter->setPrevPtr(nullptr);
+      iter->setPrevPtr(TableIteratorPtrPtr(nullptr));
     }
     setNurseryIterators(nullptr);
   }
   void relinkNurseryIterator(TableIteratorObject* iter) {
-    auto** listp = addressOfIterators(iter);
+    TableIteratorPtrPtr listp = addressOfIterators(iter);
     iter->link(listp);
   }
 
@@ -1395,6 +1485,11 @@ class MOZ_STACK_CLASS OrderedHashMapImpl {
   bool remove(JSContext* cx, const Lookup& key) { return impl.remove(cx, key); }
   void clear(JSContext* cx) { impl.clear(cx); }
 
+  [[nodiscard]] bool ensureCapacity(JSContext* cx, uint32_t count) {
+    return impl.ensureCapacity(cx, count);
+  }
+  void maybeShrink(JSContext* cx) { return impl.maybeShrink(cx); }
+
   template <typename K, typename V>
   [[nodiscard]] bool put(JSContext* cx, K&& key, V&& value) {
     return impl.put(cx, Entry(std::forward<K>(key), std::forward<V>(value)));
@@ -1500,6 +1595,11 @@ class MOZ_STACK_CLASS OrderedHashSetImpl {
     impl.forEachEntryUpTo(maxCount, f);
   }
 #endif
+  [[nodiscard]] bool ensureCapacity(JSContext* cx, uint32_t count) {
+    return impl.ensureCapacity(cx, count);
+  }
+  void maybeShrink(JSContext* cx) { return impl.maybeShrink(cx); }
+
   template <typename Input>
   [[nodiscard]] bool put(JSContext* cx, Input&& value) {
     return impl.put(cx, std::forward<Input>(value));

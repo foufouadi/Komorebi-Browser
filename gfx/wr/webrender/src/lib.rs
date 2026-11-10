@@ -76,8 +76,7 @@ executes the passes in order, and composites.
   pattern architecture described above and still describes the retired brush
   shaders.
 - `gfx/wr/webrender/doc/coordinate-spaces.md` — the spatial tree, and the
-  local / picture / raster / world / device spaces. Predates the `VisPixel`
-  visibility space.
+  local / picture / raster / world / device spaces.
 - `gfx/wr/webrender/doc/text-rendering.md`, `blob.md`,
   `CLIPPING_AND_POSITIONING.md`, `swizzling.md` — subsystem deep dives, in
   varying states of currency.
@@ -130,6 +129,8 @@ mod profiler;
 mod telemetry;
 
 mod batch;
+mod bezier;
+mod path_tiler;
 mod border;
 mod border_image;
 mod box_shadow;
@@ -145,6 +146,7 @@ mod debug_colors;
 mod debug_font_data;
 mod debug_item;
 mod device;
+mod dl_interner;
 mod ellipse;
 mod filterdata;
 mod frame_builder;
@@ -163,6 +165,7 @@ mod prepare;
 mod prim_store;
 mod print_tree;
 mod quad;
+mod quad_clip;
 mod render_backend;
 pub mod render_backend_pool;
 mod render_target;
@@ -176,6 +179,7 @@ mod resource_cache;
 pub mod scene;
 mod scene_builder_thread;
 mod scene_building;
+mod scene_debug;
 mod screen_capture;
 mod segment;
 #[cfg(test)]
@@ -210,7 +214,6 @@ extern crate bincode;
 extern crate byteorder;
 pub extern crate euclid;
 extern crate rustc_hash;
-extern crate gleam;
 extern crate num_traits;
 extern crate plane_split;
 extern crate rayon;
@@ -227,17 +230,17 @@ pub extern crate api;
 extern crate webrender_build;
 
 #[doc(hidden)]
-pub use crate::composite::{LayerCompositor, CompositorInputConfig, CompositorSurfaceUsage, ClipRadius};
+pub use crate::composite::{CompositorInputConfig, CompositorSurfaceUsage, ClipRadius};
 pub use crate::composite::{CompositorConfig, Compositor, CompositorCapabilities, CompositorSurfaceTransform};
-pub use crate::composite::{NativeSurfaceId, NativeTileId, NativeSurfaceInfo, PartialPresentCompositor};
-pub use crate::composite::{MappableCompositor, MappedTileInfo, SWGLCompositeSurfaceInfo, WindowVisibility, WindowProperties};
-pub use crate::device::{UploadMethod, VertexUsageHint, get_gl_target, get_unoptimized_shader_source};
-pub use crate::device::{ProgramBinary, ProgramCache, ProgramCacheObserver, FormatDesc, ShaderError};
-pub use crate::device::Device;
-pub use crate::profiler::{ProfilerHooks, set_profiler_hooks};
+pub use crate::composite::{NativeSurfaceId, NativeTileId, NativeSurfaceHandle, NativeSurfaceInfo, BufferDamageCompositor};
+pub use crate::composite::{MappableCompositor, MappedTileInfo, SWGLCompositeSurfaceInfo, SwapchainMode, WindowVisibility, WindowProperties};
+pub use crate::device::{UploadMethod, VertexUsageHint, get_unoptimized_shader_source};
+pub use crate::device::{ProgramBinary, ProgramCache, ProgramCacheObserver, ShaderError};
+pub use crate::device::{Device, DeviceOptions, GlBackendConfig, GpuBackendConfig, GraphicsApi, GraphicsApiInfo};
+pub use crate::profiler::{ProfilerHooks, ProfileCounterValue, set_profiler_hooks};
 pub use crate::renderer::{
-    CpuProfile, DebugFlags, GpuProfile, GraphicsApi,
-    GraphicsApiInfo, PendingShadersToPrecache, PipelineInfo, Renderer, RendererError, RenderResults,
+    CpuProfile, DebugFlags, GpuProfile,
+    PendingShadersToPrecache, PipelineInfo, Renderer, RendererError, RenderResults,
     RendererStats, Shaders, SharedShaders, ShaderPrecacheFlags,
     MAX_VERTEX_TEXTURE_WIDTH,
 };

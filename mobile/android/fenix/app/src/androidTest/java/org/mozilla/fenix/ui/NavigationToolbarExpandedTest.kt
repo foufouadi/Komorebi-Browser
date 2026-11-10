@@ -11,6 +11,7 @@ import androidx.compose.ui.test.junit4.v2.AndroidComposeTestRule as AndroidCompo
 import org.junit.Rule
 import org.junit.Test
 import org.mozilla.fenix.customannotations.Converted
+import org.mozilla.fenix.customannotations.Critical
 import org.mozilla.fenix.customannotations.SmokeTest
 import org.mozilla.fenix.helpers.AppAndSystemHelper.enableOrDisableBackGestureNavigationOnDevice
 import org.mozilla.fenix.helpers.AppAndSystemHelper.setScreenOrientation
@@ -259,7 +260,7 @@ class NavigationToolbarExpandedTest {
             }
     }
 
-    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333172
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3911787
     @Test
     fun verifyTheExpandedToolbarHomepageItemsInLandscapeModeTest() {
         homeScreen(composeTestRule) {
@@ -317,7 +318,7 @@ class NavigationToolbarExpandedTest {
         setScreenOrientation(composeTestRule, ActivityInfo.SCREEN_ORIENTATION_PORTRAIT)
     }
 
-    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333183
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333213
     @Converted(
         replacedBy =
             [
@@ -344,7 +345,7 @@ class NavigationToolbarExpandedTest {
         setScreenOrientation(composeTestRule, ActivityInfo.SCREEN_ORIENTATION_PORTRAIT)
     }
 
-    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333184
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333214
     @Converted(
         replacedBy =
             [
@@ -370,7 +371,7 @@ class NavigationToolbarExpandedTest {
         setScreenOrientation(composeTestRule, ActivityInfo.SCREEN_ORIENTATION_PORTRAIT)
     }
 
-    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333185
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333178
     @Converted(
         replacedBy =
             [
@@ -415,7 +416,7 @@ class NavigationToolbarExpandedTest {
         setScreenOrientation(composeTestRule, ActivityInfo.SCREEN_ORIENTATION_PORTRAIT)
     }
 
-    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333182
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3333212
     @Test
     fun verifyTheExpandedToolbarShareButtonInLandscapeModeTest() {
         val website = mockWebServer.getGenericAsset(1)
@@ -636,6 +637,15 @@ class NavigationToolbarExpandedTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3911787
+    @Converted(
+        replacedBy =
+            [
+                "org.mozilla.fenix.ui.efficiency.tests.SettingsCustomizeExpandedToolbarTest#verifyTheExpandedToolbarHomepageItemsTest"
+            ],
+        bug = 2084095,
+        since = "2026-10",
+    )
+    @Critical
     @Test
     fun verifyTheExpandedToolbarHomepageItemsTest() {
         homeScreen(composeTestRule) {

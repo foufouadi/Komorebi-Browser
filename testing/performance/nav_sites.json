@@ -94,6 +94,111 @@
         ["wait.byTime", 3000],
         ["measure.stop", ""]
       ]
+    },
+    {
+      "name": "google-nav",
+      "type": "interactive",
+      "test_url": "https://www.google.com/",
+      "test_cmds": [
+        ["measure.start", "load"],
+        ["navigate", "https://www.google.com/"],
+        ["wait.byTime", 3000],
+        ["measure.stop", ""]
+      ]
+    },
+    {
+      "name": "facebook-nav",
+      "type": "interactive",
+      "test_url": "https://www.facebook.com/Cristiano",
+      "test_cmds": [
+        ["measure.start", "load"],
+        ["navigate", "https://www.facebook.com/Cristiano"],
+        ["wait.byTime", 3000],
+        ["measure.stop", ""]
+      ]
+    },
+    {
+      "name": "yahoo-nav",
+      "type": "interactive",
+      "test_url": "https://ca.yahoo.com/",
+      "test_cmds": [
+        ["measure.start", "load"],
+        ["navigate", "https://ca.yahoo.com/"],
+        ["wait.byTime", 3000],
+        ["measure.stop", ""]
+      ]
+    },
+    {
+      "name": "google-docs-nav",
+      "type": "interactive",
+      "test_url": "https://docs.google.com/document/d/1US-07msg12slQtI_xchzYxcKlTs6Fp7WqIc6W5GK5M8/edit?usp=sharing",
+      "test_cmds": [
+        ["measure.start", "load"],
+        [
+          "navigate",
+          "https://docs.google.com/document/d/1US-07msg12slQtI_xchzYxcKlTs6Fp7WqIc6W5GK5M8/edit?usp=sharing"
+        ],
+        ["wait.byTime", 3000],
+        ["measure.stop", ""]
+      ]
+    }
+  ],
+  "mobile": [
+    {
+      "name": "amazon-nav",
+      "type": "interactive",
+      "test_url": "https://www.amazon.ca/s?k=laptop",
+      "test_cmds": [
+        ["measure.start", "load"],
+        ["navigate", "https://www.amazon.ca/s?k=laptop"],
+        ["wait.byTime", 4000],
+        ["measure.stop", ""],
+        ["measure.start", "interaction"],
+        ["click.bySelectorAndWait", "a[href*=\"/dp/\"]"],
+        ["wait.byTime", 4000],
+        ["measure.stop", ""]
+      ]
+    },
+    {
+      "name": "wikipedia-nav",
+      "type": "interactive",
+      "test_url": "https://en.m.wikipedia.org/wiki/Barack_Obama",
+      "test_cmds": [
+        ["measure.start", "load"],
+        ["navigate", "https://en.m.wikipedia.org/wiki/Barack_Obama"],
+        ["wait.byTime", 3000],
+        ["measure.stop", ""],
+        ["measure.start", "interaction"],
+        ["click.bySelectorAndWait", "a[href*=\"/wiki/Honolulu\"]"],
+        ["wait.byTime", 3000],
+        ["measure.stop", ""]
+      ]
+    },
+    {
+      "name": "duckduckgo-nav",
+      "type": "interactive",
+      "test_url": "https://duckduckgo.com/?q=mandelbrot+set",
+      "test_cmds": [
+        ["measure.start", "load"],
+        ["navigate", "https://duckduckgo.com/?q=mandelbrot+set"],
+        ["wait.byTime", 4000],
+        ["measure.stop", ""],
+        ["measure.start", "interaction"],
+        ["click.bySelectorAndWait", "a[href*=\"ia=images\"]"],
+        ["wait.byTime", 4000],
+        ["measure.stop", ""]
+      ]
+    },
+    {
+      "name": "bbc-nav",
+      "type": "interactive",
+      "test_url": "https://www.bbc.com/news/",
+      "test_cmds": [
+        ["measure.start", "load"],
+        ["navigate", "https://www.bbc.com/news/"],
+        ["wait.byTime", 4000],
+        ["measure.stop", ""]
+      ]
     }
   ]
 }

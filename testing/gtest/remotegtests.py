@@ -81,6 +81,8 @@ class RemoteGTests:
         Launch the test app, run gtest, collect test results and wait for completion.
         Return False if a crash or other failure is detected, else True.
         """
+        # mach gtest will call run_gtest() directly
+        setup_logging()
         update_mozinfo()
         self.device = mozdevice.ADBDeviceFactory(
             adb=adb_path,
@@ -453,9 +455,11 @@ class remoteGtestOptions(argparse.ArgumentParser):
         self.add_argument(
             "--symbols-path",
             dest="symbols_path",
+            action="append",
             default=None,
             help="absolute path to directory containing breakpad "
-            "symbols, or the URL of a zip file containing symbols",
+            "symbols, or the URL of a zip file containing symbols; "
+            "can be given multiple times",
         )
         self.add_argument(
             "--shuffle",
@@ -485,11 +489,16 @@ def update_mozinfo():
     mozinfo.find_and_update_from_json(*dirs)
 
 
-def main():
+def setup_logging(options=None):
     global log
+    if log is None:
+        log = commandline.setup_logging("gtest", options, {"raw": sys.stdout})
+
+
+def main():
     parser = remoteGtestOptions()
     options = parser.parse_args()
-    log = commandline.setup_logging("gtest", options, {"raw": sys.stdout})
+    setup_logging(options)
     args = options.args
     if not options.libxul_path:
         parser.error("--libxul is required")

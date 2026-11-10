@@ -6,6 +6,7 @@ extern crate url;
 use super::*;
 use address::{Address, AddressType};
 use anonymizer::ToBytesVec;
+use attribute_type::{SdpAttributeFmtp, SdpAttributeFmtpParameters, SdpAttributeRtpmap};
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 
@@ -160,6 +161,17 @@ fn connection_addr_type_mismatch() {
 }
 
 #[test]
+fn information_works() -> Result<(), SdpParserInternalError> {
+    parse_information("foobar")?;
+    Ok(())
+}
+
+#[test]
+fn information_contains_carriage_return() {
+    assert!(parse_information("foobar\rbaz").is_err());
+}
+
+#[test]
 fn bandwidth_works() -> Result<(), SdpParserInternalError> {
     parse_bandwidth("AS:1")?;
     parse_bandwidth("CT:123")?;
@@ -212,7 +224,6 @@ fn test_parse_sdp_line_empty_line() {
 #[test]
 fn test_parse_sdp_line_unsupported_types() {
     assert!(parse_sdp_line("e=foobar", 0).is_err());
-    assert!(parse_sdp_line("i=foobar", 0).is_err());
     assert!(parse_sdp_line("k=foobar", 0).is_err());
     assert!(parse_sdp_line("p=foobar", 0).is_err());
     assert!(parse_sdp_line("r=foobar", 0).is_err());
@@ -412,6 +423,21 @@ c=IN IP6 ::1\r\n
 t=0 0\r\n",
         true,
     )?;
+    Ok(())
+}
+
+#[test]
+fn test_parse_session_information() -> Result<(), SdpParserError> {
+    let sdp_session = parse_sdp(
+        "v=0\r\n
+o=- 0 0 IN IP6 ::1\r\n
+s=-\r\n
+i=test\r\n
+c=IN IP6 ::1\r\n
+t=0 0\r\n",
+        true,
+    )?;
+    assert_eq!(sdp_session.information, Some("test".to_string()));
     Ok(())
 }
 
@@ -771,4 +797,65 @@ fn test_session_add_media_invalid_attribute_fails() -> Result<(), SdpParserInter
         )
         .is_err());
     Ok(())
+}
+
+#[test]
+fn test_default_fmtp_should_be_empty() -> Result<(), SdpParserError> {
+    let media_line = SdpMediaLine {
+        media: SdpMediaValue::Audio,
+        port: 9,
+        port_count: 0,
+        proto: SdpProtocolValue::RtpSavpf,
+        formats: SdpFormatList::Integers(Vec::new()),
+    };
+    let mut msection = SdpMedia::new(media_line);
+    msection
+        .add_codec(SdpAttributeRtpmap::new(96, "boofar".to_string(), 1001))
+        .unwrap();
+
+    assert!(msection
+        .add_attribute(SdpAttribute::Fmtp(SdpAttributeFmtp {
+            payload_type: 96,
+            parameters: SdpAttributeFmtpParameters {
+                packetization_mode: 0,
+                level_asymmetry_allowed: false,
+                profile_level_id: 0x0042_0010,
+                max_fs: 0,
+                max_cpb: 0,
+                max_dpb: 0,
+                max_br: 0,
+                max_mbps: 0,
+                usedtx: false,
+                stereo: false,
+                useinbandfec: false,
+                cbr: false,
+                max_fr: 0,
+                profile: None,
+                level_idx: None,
+                tier: None,
+                maxplaybackrate: 48000,
+                maxaveragebitrate: 0,
+                ptime: 0,
+                minptime: 0,
+                maxptime: 0,
+                encodings: Vec::new(),
+                dtmf_tones: "".to_string(),
+                rtx: None,
+                unknown_tokens: Vec::new()
+            }
+        }))
+        .is_ok());
+
+    let sdpstring = "v=0\r\n
+o=- 0 0 IN IP4 0.0.0.0\r\n
+s=-\r\n
+t=0 0\r\n"
+        .to_owned()
+        + &msection.to_string()
+        + "\r\nc=IN IP4 0.0.0.0";
+
+    assert!(msection.get_attribute(SdpAttributeType::Rtpmap).is_some());
+    assert!(msection.get_attribute(SdpAttributeType::Fmtp).is_some());
+
+    parse_sdp(&sdpstring, true).map(|_| ())
 }

@@ -17,16 +17,15 @@ add_task(async function () {
 
   store.dispatch(Actions.batchEnable(false));
 
-  let wait = waitForNetworkEvents(monitor, 1);
+  const onNetworkEvents = waitForNetworkEvents(monitor, 1);
   await reloadSelectedTab();
-  await wait;
+  await onNetworkEvents;
 
-  wait = waitUntil(() => document.querySelector(".headers-overview"));
-  EventUtils.sendMouseEvent(
-    { type: "mousedown" },
-    document.querySelectorAll(".request-list-item")[0]
+  const onHeadersOverview = waitUntil(() =>
+    document.querySelector(".headers-overview")
   );
-  await wait;
+  clickOnRequestRow(document.querySelectorAll(".request-list-item")[0]);
+  await onHeadersOverview;
 
   await waitForRequestData(store, ["requestHeaders", "responseHeaders"]);
 

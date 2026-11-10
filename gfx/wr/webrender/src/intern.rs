@@ -38,7 +38,7 @@ use malloc_size_of::MallocSizeOf;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
-use std::{ops, u64};
+use std::ops;
 use crate::util::VecHelper;
 use crate::profiler::TransactionProfile;
 use peek_poke::PeekPoke;
@@ -106,6 +106,15 @@ impl ItemUid {
     // Intended for debug usage only
     pub fn get_uid(&self) -> u64 {
         self.uid
+    }
+
+    /// Wrap an id from a counter the caller guarantees is unique, for interning
+    /// schemes that mint their own rather than deriving one from a handle.
+    /// `Handle::uid` packs an index and an epoch, which only works because one
+    /// interner owns the whole index space; see `DlStore::uid` for a scheme that
+    /// cannot make that assumption.
+    pub fn from_counter(id: u64) -> Self {
+        ItemUid { uid: id }
     }
 }
 
@@ -345,6 +354,12 @@ impl<I: Internable> Interner<I> {
         handle
     }
 
+    /// Retrieve the pending list of updates without running a GC step or
+    /// advancing the epoch.
+    pub fn take_pending_updates(&mut self) -> UpdateList<I::Key> {
+        self.update_list.take_and_preallocate()
+    }
+
     /// Retrieve the pending list of updates for an interner
     /// that need to be applied to the data store. Also run
     /// a GC step that removes old entries.
@@ -418,37 +433,65 @@ impl<I: Internable> ops::Index<Handle<I>> for Interner<I> {
 
 /// Meta-macro to enumerate the various interner identifiers and types.
 ///
-/// IMPORTANT: Keep this synchronized with the list in mozilla-central located at
-/// gfx/webrender_bindings/webrender_ffi.h
+/// This list drives the interners and data stores that exist. The memory
+/// report's field list is `enumerate_interning_report_fields!` below, kept
+/// separate so that a type can leave this list without changing the report's
+/// layout, which C++ mirrors by hand.
 ///
 /// Note that this could be a lot less verbose if concat_idents! were stable. :-(
 #[macro_export]
 macro_rules! enumerate_interners {
     ($macro_name: ident) => {
         $macro_name! {
-            clip: ClipIntern,
-            prim: RectanglePrim,
-            normal_border: NormalBorderPrim,
-            image_border: ImageBorder,
-            image: Image,
-            yuv_image: YuvImage,
-            line_decoration: LineDecoration,
-            linear_grad: LinearGradient,
-            radial_grad: RadialGradient,
-            conic_grad: ConicGradient,
+            // Everything that comes from a display item - every primitive,
+            // clips and clip-path polygons - is interned by the content display
+            // list builder now, so none of it has a slot here. What is left is
+            // what the scene builder synthesises. See
+            // doc/dl-builder-interning.md.
             picture: Picture,
-            text_run: TextRun,
             filter_data: FilterDataIntern,
             backdrop_capture: BackdropCapture,
             backdrop_render: BackdropRender,
-            polygon: PolygonIntern,
-            box_shadow: BoxShadow,
+        }
+    }
+}
+
+/// The fields of the per-type interning memory report, one per interned type.
+///
+/// A superset of `enumerate_interners!`, in the same order, since a type's
+/// entry here outlives its interner: the report is `#[repr(C)]` and mirrored by
+/// hand in C++, so its layout must not change when a type stops being interned
+/// on the scene builder. A field nothing writes reports zero.
+///
+/// IMPORTANT: Keep this synchronized with the list in mozilla-central located at
+/// gfx/webrender_bindings/webrender_ffi.h
+macro_rules! enumerate_interning_report_fields {
+    ($macro_name: ident) => {
+        $macro_name! {
+            clip,
+            prim,
+            normal_border,
+            image_border,
+            image,
+            yuv_image,
+            line_decoration,
+            linear_grad,
+            radial_grad,
+            conic_grad,
+            picture,
+            text_run,
+            filter_data,
+            backdrop_capture,
+            backdrop_render,
+            polygon,
+            box_shadow,
+            path,
         }
     }
 }
 
 macro_rules! declare_interning_memory_report {
-    ( $( $name:ident: $ty:ident, )+ ) => {
+    ( $( $name:ident, )+ ) => {
         ///
         #[repr(C)]
         #[derive(AddAssign, Clone, Debug, Default)]
@@ -461,7 +504,7 @@ macro_rules! declare_interning_memory_report {
     }
 }
 
-enumerate_interners!(declare_interning_memory_report);
+enumerate_interning_report_fields!(declare_interning_memory_report);
 
 /// Memory report for interning-related data structures.
 /// cbindgen:derive-eq=false
@@ -473,12 +516,17 @@ pub struct InterningMemoryReport {
     pub interners: InternerSubReport,
     ///
     pub data_stores: InternerSubReport,
+    /// The follower stores for types interned by the content display list
+    /// builder rather than by a scene builder interner. Same field list; a
+    /// type is accounted under one or the other.
+    pub dl_stores: InternerSubReport,
 }
 
 impl ::std::ops::AddAssign for InterningMemoryReport {
     fn add_assign(&mut self, other: InterningMemoryReport) {
         self.interners += other.interners;
         self.data_stores += other.data_stores;
+        self.dl_stores += other.dl_stores;
     }
 }
 

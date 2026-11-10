@@ -144,6 +144,10 @@ class BaselineCodeGen {
 
   void prepareVMCall();
 
+  void ensureDebugModeOSRPointSpace();
+  void emitDebugModeOSRResumeTarget(RetAddrEntry::Kind kind,
+                                    uint32_t returnOffset);
+
   void storeFrameSizeAndPushDescriptor(uint32_t argSize, Register scratch);
 
   enum class CallVMPhase { BeforePushingLocals, AfterPushingLocals };
@@ -319,6 +323,7 @@ class BaselineCompilerHandler {
 #endif
   FixedList<Label> labels_;
   RetAddrEntryVector retAddrEntries_;
+  mozilla::Maybe<uint32_t> lastDebugModeOSRPointOffset_;
   AllocSiteIndexVector allocSiteIndices_;
 
   // Native code offsets for OSR at JSOp::LoopHead ops.
@@ -346,6 +351,7 @@ class BaselineCompilerHandler {
   uint32_t baseWarmUpThreshold_;
 
   bool compileDebugInstrumentation_;
+  bool compileDebugModeOSRResumeTargets_;
   bool ionCompileable_;
 
   bool compilingOffThread_ = false;
@@ -375,7 +381,8 @@ class BaselineCompilerHandler {
 
   Label* labelOf(jsbytecode* pc) { return &labels_[script_->pcToOffset(pc)]; }
 
-  bool isDefinitelyLastOp() const { return pc_ == script_->lastPC(); }
+  // No code is emitted for the ops after the last reachable one.
+  bool isLastReachableOp() const { return pc_ == analysis_.lastReachablePC(); }
 
   bool shouldEmitDebugEpilogueAtReturnOp() const {
     // The JIT uses the return address -> pc mapping and bakes in the pc
@@ -404,6 +411,11 @@ class BaselineCompilerHandler {
     return compileDebugInstrumentation_;
   }
 
+  bool shouldEmitDebugModeOSRResumeTarget(RetAddrEntry::Kind kind) const {
+    return compileDebugModeOSRResumeTargets_ &&
+           CanResumeBaselineScriptAfterDebugModeOSR(kind);
+  }
+
   bool maybeIonCompileable() const { return ionCompileable_; }
   void setIonCompileable(bool value) { ionCompileable_ = value; }
 
@@ -414,6 +426,10 @@ class BaselineCompilerHandler {
 
   RetAddrEntryVector& retAddrEntries() { return retAddrEntries_; }
   OSREntryVector& osrEntries() { return osrEntries_; }
+
+  const mozilla::Maybe<uint32_t>& lastDebugModeOSRPointOffset() const {
+    return lastDebugModeOSRPointOffset_;
+  }
 
   [[nodiscard]] bool recordCallRetAddr(RetAddrEntry::Kind kind,
                                        uint32_t retOffset);
@@ -471,6 +487,8 @@ class BaselineCompiler final : private BaselineCompilerCodeGen {
 
   CodeOffset profilerPushToggleOffset_;
 
+  CodeOffset debugModeOSREpilogueOffset_;
+
   BaselinePerfSpewer perfSpewer_;
 
  public:
@@ -496,6 +514,7 @@ class BaselineCompiler final : private BaselineCompilerCodeGen {
   bool emitBody();
 
   [[nodiscard]] bool emitDebugTrap();
+  void emitDebugModeOSREpilogue();
 };
 
 // Interface used by BaselineCodeGen for BaselineInterpreterGenerator.
@@ -523,8 +542,12 @@ class BaselineInterpreterHandler {
   NonAssertingLabel codeCoverageAtPrologueLabel_;
   NonAssertingLabel codeCoverageAtPCLabel_;
 
-  // Offsets of IC calls for IsIonInlinableOp ops, for Ion bailouts.
-  BaselineInterpreter::ICReturnOffsetVector icReturnOffsets_;
+  // Offsets of bailout stubs for IsIonInlinableOp IC ops, for Ion bailouts.
+  BaselineInterpreter::ICBailoutStubOffsetVector icBailoutStubOffsets_;
+
+  // Return offset of a call to an IsIonInlinableOp IC op. This is populated by
+  // emitNextIC and cleared by the corresponding call to emitICBailoutStub.
+  mozilla::Maybe<uint32_t> icReturnOffset_;
 
   // Offsets of some callVMs for BaselineDebugModeOSR.
   BaselineInterpreter::CallVMOffsets callVMOffsets_;
@@ -551,8 +574,19 @@ class BaselineInterpreterHandler {
   }
   CodeOffsetVector& codeCoverageOffsets() { return codeCoverageOffsets_; }
 
-  BaselineInterpreter::ICReturnOffsetVector& icReturnOffsets() {
-    return icReturnOffsets_;
+  BaselineInterpreter::ICBailoutStubOffsetVector& icBailoutStubOffsets() {
+    return icBailoutStubOffsets_;
+  }
+
+  void setICReturnOffset(uint32_t offset) {
+    MOZ_ASSERT(icReturnOffset_.isNothing());
+    icReturnOffset_.emplace(offset);
+  }
+  uint32_t takeICReturnOffset() {
+    MOZ_ASSERT(icReturnOffset_.isSome());
+    uint32_t offset = *icReturnOffset_;
+    icReturnOffset_.reset();
+    return offset;
   }
 
   void setCurrentOp(JSOp op) { currentOp_.emplace(op); }
@@ -561,7 +595,7 @@ class BaselineInterpreterHandler {
 
   // Interpreter doesn't know the script and pc statically.
   jsbytecode* maybePC() const { return nullptr; }
-  bool isDefinitelyLastOp() const { return false; }
+  bool isLastReachableOp() const { return false; }
   JSScript* maybeScript() const { return nullptr; }
 
   bool shouldEmitDebugEpilogueAtReturnOp() const {
@@ -575,6 +609,10 @@ class BaselineInterpreterHandler {
 
   const BaselineInterpreter::CallVMOffsets& callVMOffsets() const {
     return callVMOffsets_;
+  }
+
+  bool shouldEmitDebugModeOSRResumeTarget(RetAddrEntry::Kind kind) const {
+    return CanResumeBaselineInterpreterAfterDebugModeOSR(kind);
   }
 
   [[nodiscard]] bool recordCallRetAddr(RetAddrEntry::Kind kind,
@@ -629,6 +667,7 @@ class BaselineInterpreterGenerator final : private BaselineInterpreterCodeGen {
  private:
   [[nodiscard]] bool emitInterpreterLoop();
   [[nodiscard]] bool emitDebugTrap();
+  [[nodiscard]] bool emitICBailoutStub();
 
   void emitOutOfLineCodeCoverageInstrumentation();
   [[nodiscard]] bool emitOutOfLineGeneratorResumePrologue();

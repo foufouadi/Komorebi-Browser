@@ -5,7 +5,7 @@
  */
 
 import {
-  getRemoteClient,
+  getRemoteRecords,
   selectMainConfig,
   renderPrompt,
   checkMajorVersion,
@@ -24,10 +24,17 @@ import {
 } from "moz-src:///browser/components/aiwindow/models/ChatUtils.sys.mjs";
 import { openAIEngine } from "moz-src:///browser/components/aiwindow/models/openAIEngine.sys.mjs";
 import { Conversation } from "moz-src:///browser/components/aiwindow/models/Conversation.sys.mjs";
+import { SmartWindowLocation } from "moz-src:///browser/components/aiwindow/models/SmartWindowLocation.sys.mjs";
 
 /**
  * @typedef {import("moz-src:///browser/components/aiwindow/models/Utils.sys.mjs").InferenceParams} InferenceParams
  */
+
+const lazy = {};
+ChromeUtils.defineESModuleGetters(lazy, {
+  getSmartPageName:
+    "chrome://browser/content/aiwindow/modules/TrustedInternalURLs.mjs",
+});
 
 const CUSTOM_PROMPTS_PREF = "browser.smartwindow.customPrompts";
 const MODEL_CHOICE_PREF = "browser.smartwindow.firstrun.modelChoice";
@@ -36,6 +43,19 @@ const MODEL_CHOICE_PREF = "browser.smartwindow.firstrun.modelChoice";
 // buildChatSystemPrompt throws rather than serve a partial prompt. Others are
 // optional (e.g. model-details is model-specific and has no generic record).
 const REQUIRED_CHAT_MODULES = new Set(["identity", "response-rules"]);
+// Chat modules that describe a feature behind a pref. They are assembled only
+// while the pref is on, so the model is never taught about a tool that
+// filterFeatureGatedTools (Chat.sys.mjs) will not give it. Same pref string as
+// AITAB_PREF in Tools.sys.mjs, kept local to avoid an import cycle.
+const GATED_CHAT_MODULES = new Map([
+  ["pages", "browser.smartwindow.aitab.enabled"],
+]);
+// Browser-context fragments predate its params manifest. Without one at this
+// build's major, read the legacy 1.x "tab" fragment, which builds that do not
+// render `{#key}...{/key}` sections also read.
+const LEGACY_BROWSER_CONTEXT_VERSION = "1.0";
+const LEGACY_TAB_MODULE = "tab";
+const TAB_MODULE = "tab-conditional-fields";
 
 export const DEFAULT_PURPOSE = "default";
 export const FEATURE_PURPOSES = Object.freeze({
@@ -47,12 +67,14 @@ export const FEATURE_PURPOSES = Object.freeze({
   [MODEL_FEATURES.CONVERSATION_SUGGESTIONS_FOLLOWUP]:
     PURPOSES.CONVERSATION_STARTERS_SIDEBAR,
   [MODEL_FEATURES.TITLE_GENERATION]: PURPOSES.TITLE_GENERATION,
+  [MODEL_FEATURES.TAB_GROUP_NAMING]: PURPOSES.TAB_GROUP_NAMING,
   [MODEL_FEATURES.MEMORIES_INITIAL_GENERATION_SYSTEM]:
     PURPOSES.MEMORY_GENERATION,
   [MODEL_FEATURES.MEMORIES_MESSAGE_CLASSIFICATION_SYSTEM]:
     PURPOSES.MEMORY_GENERATION,
   [MODEL_FEATURES.AGENT_MONITOR]: PURPOSES.MONITOR,
   [MODEL_FEATURES.SEARCH_ANSWER_GENERATION]: PURPOSES.CHAT,
+  [MODEL_FEATURES.AITAB]: PURPOSES.AITAB,
 });
 
 function getDefaultServiceType(feature) {
@@ -67,7 +89,7 @@ function getDefaultServiceType(feature) {
 const V2_RECORD_KINDS = new Set(["module", "skill", "params"]);
 
 async function loadV2Records() {
-  const records = await getRemoteClient().get();
+  const records = await getRemoteRecords();
   return records.filter(r => V2_RECORD_KINDS.has(r.kind));
 }
 
@@ -116,17 +138,19 @@ function findModule(
   );
 }
 
-function findParams(records, { feature, model }) {
+function findParams(records, { feature, model, majorVersion }) {
+  const major = majorVersion ?? FEATURE_MAJOR_VERSIONS[feature];
   const candidates = records.filter(
     r =>
       r.kind === "params" &&
       r.feature === feature &&
       Array.isArray(r.modules) &&
-      checkMajorVersion(r.version, FEATURE_MAJOR_VERSIONS[feature])
+      checkMajorVersion(r.version, major)
   );
   return (
     (model && candidates.find(r => r.model === model)) ||
     candidates.find(r => r.model === GENERIC_MODEL_NAME) ||
+    candidates.find(r => r.is_default === true) ||
     null
   );
 }
@@ -162,12 +186,21 @@ function listSkills(records, model) {
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * Replaces each `{name}` placeholder that has a substitution with its value.
+ * Placeholders are replaced in a single pass, so substituted values are
+ * inserted literally and never expanded again.
+ *
+ * @param {string} rawContent - Template text.
+ * @param {object} [substitutions] - Values keyed by placeholder name.
+ * @returns {string} The rendered text.
+ */
 function renderTemplate(rawContent, substitutions = {}) {
-  let rendered = rawContent;
-  for (const [name, value] of Object.entries(substitutions)) {
-    rendered = rendered.replaceAll(`{${name}}`, value ?? "");
-  }
-  return rendered;
+  return rawContent.replace(/\{(\w+)\}/g, (placeholder, name) =>
+    Object.hasOwn(substitutions, name)
+      ? (substitutions[name] ?? "")
+      : placeholder
+  );
 }
 
 /**
@@ -216,6 +249,10 @@ export async function buildChatSystemPrompt(model) {
   // the params record. Modules are selected by the major version it names.
   const sections = [];
   for (const entry of params.modules) {
+    const gatePref = GATED_CHAT_MODULES.get(entry.name);
+    if (gatePref && !Services.prefs.getBoolPref(gatePref, false)) {
+      continue;
+    }
     const record = findModule(records, {
       feature: MODEL_FEATURES.CHAT,
       module: entry.name,
@@ -239,10 +276,21 @@ export async function buildChatSystemPrompt(model) {
     )
     .join("\n");
 
+  // The location is read and fetched only when a module renders it.
+  let locationText = "Unavailable";
+  if (sections.some(section => section.includes("{location}"))) {
+    locationText = SmartWindowLocation.getCachedLocation() ?? locationText;
+    // Refreshed here as well as when a Smart Window opens, so that a long
+    // session or a feature enabled mid-session picks up the location. Not
+    // awaited so that prompt assembly never waits on the network.
+    SmartWindowLocation.refresh();
+  }
+
   const prompt = renderTemplate(sections.join("\n\n\n"), {
     skill_list: skillList,
     locale: Services.locale.appLocaleAsBCP47,
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    location: locationText,
     isoTimestamp,
     todayDate: isoTimestamp.split("T")[0],
   });
@@ -275,6 +323,41 @@ export async function getSkillPrompt(name, model) {
 }
 
 /**
+ * Serialize mentioned URLs: List expanded tabs from a tab group under their
+ * respective group.
+ *
+ * @param {object[]} mentionsWithUrl - Mentions with an URL
+ * @returns {string}
+ */
+function renderMentionedUrls(mentionsWithUrl) {
+  // url is intentionally not wrapped in sanitizeUntrustedContent — it's a
+  // structured value the model uses to navigate/fetch, and the spotlighting
+  // tokens would corrupt it. The user-controlled label is sanitized.
+  let lastGroupId = null;
+  return mentionsWithUrl
+    .map(({ url, label, groupId, groupLabel }) => {
+      const lines = [];
+      if (groupId && groupId !== lastGroupId) {
+        const group = sanitizeUntrustedContent(groupLabel);
+        lines.push(group ? `- Tab group: ${group}` : "- Tab group");
+      }
+      lastGroupId = groupId ?? null;
+      // Members are indented under the group
+      const indent = groupId ? "  " : "";
+      lines.push(
+        `${indent}- URL: ${url}`,
+        `${indent}  Title: ${sanitizeUntrustedContent(label)}`
+      );
+      const pageSlug = lazy.getSmartPageName(URL.parse(url));
+      if (pageSlug) {
+        lines.push(`${indent}  Page slug: ${pageSlug}`);
+      }
+      return lines.join("\n");
+    })
+    .join("\n");
+}
+
+/**
  * Build the per-turn browser-context prompt (active tab + any @mentions).
  * Returns null when nothing is available.
  *
@@ -299,18 +382,27 @@ export async function buildBrowserContextPrompt(
   }
 
   const records = await loadV2Records();
+  const paramsRecord = findParams(records, {
+    feature: MODEL_FEATURES.BROWSER_CONTEXT,
+    model,
+  });
   const findFragment = fragment =>
     findModule(records, {
-      feature: "browser-context",
+      feature: MODEL_FEATURES.BROWSER_CONTEXT,
       module: fragment,
-      options: { model },
+      options: {
+        model,
+        version:
+          paramsRecord?.modules.find(m => m.name === fragment)?.version ??
+          LEGACY_BROWSER_CONTEXT_VERSION,
+      },
     });
 
   const fragments = [];
 
   if (browserContextMapping.hasTabInfo) {
     securityProperties.setPrivateData();
-    const record = findFragment("tab");
+    const record = findFragment(paramsRecord ? TAB_MODULE : LEGACY_TAB_MODULE);
     if (record?.prompts) {
       fragments.push(record.prompts);
     }
@@ -318,23 +410,20 @@ export async function buildBrowserContextPrompt(
     delete browserContextMapping.url;
     delete browserContextMapping.title;
     delete browserContextMapping.description;
+    delete browserContextMapping.pageSlug;
   }
   delete browserContextMapping.hasTabInfo;
 
   if (contextMentions?.length) {
-    securityProperties.setPrivateData();
-    // m.url is intentionally not wrapped in sanitizeUntrustedContent — it's a
-    // structured value the model uses to navigate/fetch, and the spotlighting
-    // tokens would corrupt it. The user-controlled label is sanitized.
-    const contextUrls = contextMentions
-      .map(
-        m => `- URL: ${m.url}\n  Title: ${sanitizeUntrustedContent(m.label)}`
-      )
-      .join("\n");
-    browserContextMapping.contextUrls = contextUrls;
-    const record = findFragment("mentions");
-    if (record?.prompts) {
-      fragments.push(record.prompts);
+    // Tab group mentions do not have a URL
+    const mentionsWithUrl = contextMentions.filter(mention => mention.url);
+    if (mentionsWithUrl.length) {
+      securityProperties.setPrivateData();
+      browserContextMapping.contextUrls = renderMentionedUrls(mentionsWithUrl);
+      const record = findFragment("mentions");
+      if (record?.prompts) {
+        fragments.push(record.prompts);
+      }
     }
   }
 
@@ -362,7 +451,7 @@ export async function buildBrowserContextPrompt(
  * @returns {Promise<object>}
  */
 async function selectFeatureConfig(feature, opts = {}) {
-  const allRecords = await getRemoteClient().get();
+  const allRecords = await getRemoteRecords();
 
   const hasV2Params = allRecords.some(
     r => r.feature === feature && r.kind === "params"
@@ -427,20 +516,20 @@ export async function buildEngineForFeature(feature, opts = {}) {
     }
   }
   const serviceType = mainConfig.service_type ?? getDefaultServiceType(feature);
-  const purpose =
+  let purpose =
     mainConfig.purpose ??
     FEATURE_PURPOSES[feature] ??
     FEATURE_PURPOSES[DEFAULT_PURPOSE];
-
   const modelChoiceId =
     opts.modelChoiceIdOverride ??
     Services.prefs.getStringPref(MODEL_CHOICE_PREF, "");
   const { baseURL, apiKey } = openAIEngine.resolveEndpointConfig(modelChoiceId);
 
   // resolve the model to use for inference, this allows specific features to default to chat model
-  let model = mainConfig.model;
+  let model = mainConfig.inference_model || mainConfig.model;
   const CHAT_MODEL_FALLBACK_FEATURES = new Set([
     MODEL_FEATURES.AGENT_MONITOR,
+    MODEL_FEATURES.AITAB,
     MODEL_FEATURES.RESUME_ACTIVITY_CONVERSATION,
     MODEL_FEATURES.RESUME_ACTIVITY_CONVERSATION_STARTER,
   ]);
@@ -451,7 +540,7 @@ export async function buildEngineForFeature(feature, opts = {}) {
     const chatConfig = await selectFeatureConfig(MODEL_FEATURES.CHAT, {
       modelChoiceIdOverride: opts.modelChoiceIdOverride,
     });
-    model = chatConfig.model;
+    model = chatConfig.inference_model || chatConfig.model;
   }
 
   const engine = await openAIEngine.build({
@@ -538,6 +627,10 @@ export async function loadPrompt(feature, opts = {}) {
  *
  * @param {string} feature - Feature identifier from MODEL_FEATURES
  * @param {object} [opts]
+ * @param {string} opts.module - Module name from the feature's params manifest
+ * @param {string} [opts.model] - Model to resolve for; defaults to the model pref
+ * @param {number} [opts.majorVersionOverride] - Major to read instead of
+ *   FEATURE_MAJOR_VERSIONS[feature] (tests, next-release dry runs)
  * @returns {Promise<{prompt: string, version: string}>} The prompt text and version
  */
 export async function loadPromptV2(feature, opts = {}) {
@@ -547,14 +640,18 @@ export async function loadPromptV2(feature, opts = {}) {
   // resolve the model
   const model = opts.model ?? Services.prefs.getStringPref(MODEL_PREF, "");
 
-  // find the params record for the feature+model
+  // find the params record for the feature+model at this build's major, or
+  // the override (honored like the v1 path); findParams applies the default
   const paramsRecord = findParams(v2Records, {
     feature,
     model,
+    majorVersion: opts.majorVersionOverride,
   });
   if (!paramsRecord) {
+    const majorVersion =
+      opts.majorVersionOverride ?? FEATURE_MAJOR_VERSIONS[feature];
     const err = new Error(
-      `No matching v2 params record found for feature: ${feature} with model ${model}`
+      `No matching v2 params record found for feature: ${feature} with model ${model} at major version ${majorVersion}`
     );
     err.clientReason = "v2ParamsUnavailable";
     throw err;
@@ -565,11 +662,12 @@ export async function loadPromptV2(feature, opts = {}) {
     paramsRecord.modules?.find(m => m.name === opts.module)?.version ??
     paramsRecord.version;
 
-  // find the module record for the feature+module+model+version
+  // find the module record for the feature+module+model+version by the param
+  // record's model
   const moduleRecord = findModule(v2Records, {
     feature,
     module: opts.module,
-    options: { model, version: moduleVersion },
+    options: { model: paramsRecord.model, version: moduleVersion },
   });
   if (!moduleRecord?.prompts) {
     const err = new Error(

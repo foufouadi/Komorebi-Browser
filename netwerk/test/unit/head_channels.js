@@ -417,6 +417,12 @@ async function asyncStartTLSTestServer(
     );
     return false;
   }
+  // The server creates an NSS database in its certificate directory, so give
+  // it a per-test copy.
+  let certDirCopy = do_get_tempdir();
+  certDirCopy.append(certDir.leafName);
+  certDir.copyTo(certDirCopy.parent, null);
+  certDir = certDirCopy;
   let process = Cc["@mozilla.org/process/util;1"].createInstance(Ci.nsIProcess);
   process.init(serverBin);
   // Using "sql:" causes the SQL DB to be used so we can run tests on Android.
@@ -572,13 +578,13 @@ class SimpleChannelListener {
 // available. xpcshell tests can import the test file "client-cert.p12" using
 // the password "password", resulting in a certificate with the common name
 // "Test End-entity" being available with a corresponding private key.
-function getTestServerCertificate() {
+async function getTestServerCertificate() {
   const certDB = Cc["@mozilla.org/security/x509certdb;1"].getService(
     Ci.nsIX509CertDB
   );
   const certFile = do_get_file("client-cert.p12");
   certDB.importPKCS12File(certFile, "password");
-  for (const cert of certDB.getCerts()) {
+  for (const cert of await certDB.getCerts()) {
     if (cert.commonName == "Test End-entity") {
       return cert;
     }

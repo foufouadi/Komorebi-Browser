@@ -557,16 +557,16 @@ class LabsMiddlewareTest {
                 nimbusSdk =
                     FakeNimbusApi(
                         context = testContext,
-                        labsProvider = { if (labsThrows) throw RuntimeException("Nimbus fetch failed") else labs },
+                        labsProvider = { if (labsThrows) fakeNimbusFailure("Nimbus fetch failed") else labs },
                         enrolledSlugs = enrolledSlugs,
                         unenrolledSlugs = unenrolledSlugs,
                         enrollStatusProvider = {
-                            if (enrollThrows) throw RuntimeException("enroll failed") else enrollStatus
+                            if (enrollThrows) fakeNimbusFailure("enroll failed") else enrollStatus
                         },
                         unenrollStatusProvider = { unenrollStatus },
                         onUnenrollAll = {
                             unenrollAllCount++
-                            if (unenrollAllThrows) throw RuntimeException("unenroll all failed")
+                            if (unenrollAllThrows) fakeNimbusFailure("unenroll all failed")
                         },
                     ),
                 onRestart = onRestart,
@@ -579,3 +579,8 @@ class LabsMiddlewareTest {
         )
     }
 }
+
+/** Simulates a Nimbus SDK failure in [FakeNimbusApi]. */
+private class FakeNimbusException(message: String) : Exception(message)
+
+private fun fakeNimbusFailure(message: String): Nothing = throw FakeNimbusException(message)

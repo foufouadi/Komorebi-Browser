@@ -240,7 +240,7 @@ object TestHelper {
                 intended(toPackage(appPackageName))
             }
         } catch (e: AssertionFailedError) {
-            e.printStackTrace()
+            Log.e("TestHelper", "assertNativeAppOpens: $appPackageName was not opened", e)
         }
     }
 

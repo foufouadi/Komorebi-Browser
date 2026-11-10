@@ -35,10 +35,14 @@ import org.mozilla.fenix.home.recentsyncedtabs.RecentSyncedTab
 import org.mozilla.fenix.home.recentsyncedtabs.RecentSyncedTabState
 import org.mozilla.fenix.home.recenttabs.RecentTab
 import org.mozilla.fenix.home.recentvisits.RecentlyVisitedItem
+import org.mozilla.fenix.home.sports.MatchCard
+import org.mozilla.fenix.home.sports.SportCardErrorState
 import org.mozilla.fenix.home.topsites.AddShortcutEntryPoint
 import org.mozilla.fenix.home.topsites.AddShortcutSource
+import org.mozilla.fenix.ipprotection.ui.IPProtectionSnackbarBinding
 import org.mozilla.fenix.library.history.PendingDeletionHistory
 import org.mozilla.fenix.messaging.MessagingState
+import org.mozilla.fenix.snackbar.SnackbarBinding
 import org.mozilla.fenix.wallpapers.Wallpaper
 
 /** [Action] implementation related to [AppStore]. */
@@ -88,6 +92,14 @@ sealed class AppAction : Action {
     data class BrowsingModeManagerModeChanged(val mode: BrowsingMode) : AppAction()
 
     data class TopSitesChange(val topSites: List<TopSite>) : AppAction()
+
+    /**
+     * Action dispatched when the user has removed a top site.
+     *
+     * @property topSite The [TopSite] that was removed.
+     * @property shouldBlock Whether to add the top site to the blocklist.
+     */
+    data class RemoveTopSite(val topSite: TopSite, val shouldBlock: Boolean) : AppAction()
 
     data class RecentTabsChange(val recentTabs: List<RecentTab>) : AppAction()
 
@@ -157,8 +169,20 @@ sealed class AppAction : Action {
         /** Restores the [Message] state from the storage. */
         object Restore : MessagingAction()
 
-        /** Evaluates if a new messages should be shown to users. */
-        data class Evaluate(val surface: MessageSurfaceId) : MessagingAction()
+        /**
+         * Evaluates if a new messages should be shown to users.
+         *
+         * For example, `Evaluate(FenixMessageSurfaceId.HOMESCREEN, mapOf("source" to "launcher"))` allows messages to
+         * trigger based on local trigger context (beyond global custom attributes).
+         *
+         * @property surface The surface to evaluate messages for.
+         * @property triggerContext Optional values added to the custom attributes under the key `triggerContext` when
+         *   the message triggers are evaluated.
+         */
+        data class Evaluate(
+            val surface: MessageSurfaceId,
+            val triggerContext: Map<String, Any?>? = null,
+        ) : MessagingAction()
 
         /** Updates [MessagingState.messageToShow] with the given [message]. */
         data class UpdateMessageToShow(val message: Message) : MessagingAction()
@@ -358,10 +382,12 @@ sealed class AppAction : Action {
         /**
          * [ShortcutAction] dispatched when a shortcut is added.
          *
+         * @property url The URL of the added shortcut.
          * @property source The [AddShortcutSource] of how the shortcut was added.
          * @property entryPoint The [AddShortcutEntryPoint] from where the add flow was started from.
          */
         data class ShortcutAdded(
+            val url: String,
             val source: AddShortcutSource,
             val entryPoint: AddShortcutEntryPoint,
         ) : ShortcutAction()
@@ -376,8 +402,19 @@ sealed class AppAction : Action {
         /** [ShortcutAction] dispatched when the manual add website dialog is shown. */
         data object AddWebsiteDialogShown : ShortcutAction()
 
-        /** [ShortcutAction] dispatched when a frecent top site is promoted to a pinned shortcut. */
-        data object FrecencyTopSitePromoted : ShortcutAction()
+        /**
+         * [ShortcutAction] dispatched when a frecent top site is promoted to a pinned shortcut.
+         *
+         * @property url The URL of the pinned shortcut.
+         */
+        data class FrecencyTopSitePromoted(val url: String) : ShortcutAction()
+
+        /**
+         * [ShortcutAction] dispatched when a default top site is promoted to a pinned shortcut.
+         *
+         * @property url The URL of the pinned shortcut.
+         */
+        data class DefaultTopSitePromoted(val url: String) : ShortcutAction()
     }
 
     /** [AppAction]s related to the share feature. */
@@ -462,6 +499,31 @@ sealed class AppAction : Action {
 
         /** [ReaderViewAction] dispatched to reset the [AppState.readerViewState] to its default state. */
         data object Reset : ReaderViewAction()
+    }
+
+    /** [AppAction]s related to Power Saving Mode. */
+    sealed class PowerSavingModeAction : AppAction() {
+
+        /**
+         * Dispatched when Power Saving Mode is turned on or off.
+         *
+         * @property isActive Whether Power Saving Mode is now active.
+         */
+        data class Changed(val isActive: Boolean) : PowerSavingModeAction()
+
+        /**
+         * Dispatched when Power Saving Mode forced a tab into reader view.
+         *
+         * @property tabId The ID of the tab that was forced into reader view.
+         */
+        data class ReaderViewForced(val tabId: String) : PowerSavingModeAction()
+
+        /**
+         * Dispatched when tabs are no longer in the reader view Power Saving Mode forced them into.
+         *
+         * @property tabIds The IDs of the tabs that left their forced reader view.
+         */
+        data class ForcedReaderViewLeft(val tabIds: Set<String>) : PowerSavingModeAction()
     }
 
     /** [AppAction]s related to the private‐browsing lock feature. */
@@ -696,20 +758,68 @@ sealed class AppAction : Action {
         data class UpdateEarliestTrackingDate(val date: Long?) : BlockedTrackersAction()
     }
 
-    /** [SnackbarAction]s related to the IP Protection feature. */
-    sealed class IPProtectionSnackbarAction : SnackbarAction() {
+    /** [AppAction]s related to the Wrexham widget on the homepage. */
+    sealed class SportsWidgetAction : AppAction() {
         /**
-         * Dispatched when IP Protection feature experienced a connection error.
+         * Dispatched when the Homepage Wrexham Widget feature is enabled or disabled.
          *
-         * @property title The title to display in the snackbar.
+         * @property isEnabled Whether the feature is enabled.
          */
-        data class ConnectionError(val title: String) : IPProtectionSnackbarAction()
+        data class FeatureEnabledChanged(val isEnabled: Boolean) : SportsWidgetAction()
 
         /**
-         * Dispatched when IP Protection feature experienced a connection error.
+         * Dispatched when the user shows or hides the widget on the homepage.
+         *
+         * @property isVisible Whether the widget should be shown.
+         */
+        data class VisibilityChanged(val isVisible: Boolean) : SportsWidgetAction()
+
+        /**
+         * Dispatched when new match data is available. Clears any active error.
+         *
+         * @property matchCards The new [MatchCard]s to display or empty if there is no match to show.
+         */
+        data class MatchCardsUpdated(val matchCards: List<MatchCard>) : SportsWidgetAction()
+
+        /**
+         * Dispatched when the widget error state changes.
+         *
+         * @property errorState The [SportCardErrorState] to display or null to clear it.
+         */
+        data class ErrorStateChanged(val errorState: SportCardErrorState?) : SportsWidgetAction()
+
+        /**
+         * Dispatched when the widget debug tool is shown or hidden.
+         *
+         * @property isVisible Whether the debug tool should be displayed.
+         */
+        data class DebugToolVisibilityChanged(val isVisible: Boolean) : SportsWidgetAction()
+    }
+
+    /**
+     * [SnackbarAction]s related to the IP Protection feature.
+     *
+     * The states of these actions are consumed by two bindings: the general [SnackbarBinding] and the feature specific
+     * [IPProtectionSnackbarBinding]. The IP Protection feature could be interacted with, in addition to the dedicated
+     * screens, from the three dot and the trust panel menus - and the binding allows those surfaces to show only the
+     * specific snackbars. As well as ensuring that the snackbar is shown by one binding at a time (depending on the
+     * active view focus).
+     */
+    sealed class IPProtectionSnackbarAction : SnackbarAction() {
+        /**
+         * [IPProtectionSnackbarAction] dispatched to show a snackbar with a custom title. This is the IP Protection
+         * equivalent of [SnackbarAction.ShowSnackbar].
          *
          * @property title The title to display in the snackbar.
          */
-        data class DataLimitReached(val title: String) : IPProtectionSnackbarAction()
+        data class ShowSnackbar(val title: String) : IPProtectionSnackbarAction()
+
+        /**
+         * [IPProtectionSnackbarAction] dispatched to show a snackbar with a custom title and with an action that
+         * navigates the user into the IP Protection settings screen.
+         *
+         * @property title The title to display in the snackbar.
+         */
+        data class ShowActionSettingsSnackbar(val title: String) : IPProtectionSnackbarAction()
     }
 }

@@ -11,7 +11,11 @@ import sys
 import buildconfig
 
 
-def dump_symbols(target, tracking_file, count_ctors=False):
+def dump_symbols(
+    target, tracking_file, count_ctors=False, symbols_dir="crashreporter-symbols"
+):
+    symbols_path = os.path.join(buildconfig.topobjdir, "dist", symbols_dir)
+
     # Our tracking file, if present, will contain path(s) to the previously generated
     # symbols. Remove them in this case so we don't simply accumulate old symbols
     # during incremental builds.
@@ -20,10 +24,7 @@ def dump_symbols(target, tracking_file, count_ctors=False):
             files = fh.read().splitlines()
         dirs = set(os.path.dirname(f) for f in files)
         for d in dirs:
-            shutil.rmtree(
-                os.path.join(buildconfig.topobjdir, "dist", "crashreporter-symbols", d),
-                ignore_errors=True,
-            )
+            shutil.rmtree(os.path.join(symbols_path, d), ignore_errors=True)
 
     # Build default args for symbolstore.py based on platform.
     sym_store_args = []
@@ -71,7 +72,7 @@ def dump_symbols(target, tracking_file, count_ctors=False):
             "-s",
             buildconfig.topsrcdir,
             dump_syms_bin,
-            os.path.join(buildconfig.topobjdir, "dist", "crashreporter-symbols"),
+            symbols_path,
             os.path.abspath(target),
         ]
     )
@@ -108,11 +109,34 @@ def main(argv):
         default=False,
         help="Count static initializers",
     )
+    parser.add_argument(
+        "--symbols-dir",
+        default="crashreporter-symbols",
+        help="Directory under dist/ to store the symbols in",
+    )
     parser.add_argument("library_or_program", help="Path to library or program")
     parser.add_argument("tracking_file", help="Tracking file")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    return dump_symbols(args.library_or_program, args.tracking_file, args.count_ctors)
+    dump_symbols(
+        args.library_or_program,
+        args.tracking_file,
+        args.count_ctors,
+        args.symbols_dir,
+    )
+
+    substs = buildconfig.substs
+    if substs.get("OS_ARCH") != "WINNT" or not substs.get("WINCHECKSEC"):
+        return 0
+    try:
+        subprocess.check_call([
+            sys.executable,
+            os.path.join(buildconfig.topsrcdir, "build", "win32", "autowinchecksec.py"),
+            args.library_or_program,
+        ])
+    except subprocess.CalledProcessError as e:
+        return e.returncode
+    return 0
 
 
 if __name__ == "__main__":

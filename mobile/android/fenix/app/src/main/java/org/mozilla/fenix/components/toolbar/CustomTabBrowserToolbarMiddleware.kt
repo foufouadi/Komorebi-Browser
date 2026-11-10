@@ -49,6 +49,7 @@ import mozilla.components.feature.customtabs.R as customtabsR
 import mozilla.components.feature.ipprotection.store.IPProtectionAction
 import mozilla.components.feature.ipprotection.store.IPProtectionStore
 import mozilla.components.feature.ipprotection.store.state.Authorized
+import mozilla.components.feature.ipprotection.store.state.ProxyActivation
 import mozilla.components.feature.session.TrackingProtectionUseCases
 import mozilla.components.feature.tabs.CustomTabsUseCases
 import mozilla.components.lib.publicsuffixlist.PublicSuffixList
@@ -88,6 +89,7 @@ import org.mozilla.fenix.telemetry.ACTION_SHARE_CLICKED
 import org.mozilla.fenix.telemetry.ACTION_SITE_CUSTOM_CLICKED
 import org.mozilla.fenix.telemetry.SOURCE_ADDRESS_BAR
 import org.mozilla.fenix.telemetry.SURFACE_CUSTOM_TAB
+import org.mozilla.fenix.utils.Settings
 
 private const val CUSTOM_BUTTON_CLICK_RETURN_CODE = 0
 
@@ -111,6 +113,7 @@ private const val CUSTOM_BUTTON_CLICK_RETURN_CODE = 0
  * @param navController [NavController] to use for navigating to other in-app destinations.
  * @param closeTabDelegate Callback for when the current custom tab needs to be closed.
  * @param scope [CoroutineScope] used for running long running operations in background.
+ * @param settings [Settings] to access application settings.
  * @param isSandboxCustomTab Whether the custom tab is sandboxed.
  */
 @Suppress("LongParameterList")
@@ -128,6 +131,7 @@ class CustomTabBrowserToolbarMiddleware(
     private val navController: NavController,
     private val closeTabDelegate: () -> Unit,
     private val scope: CoroutineScope,
+    private val settings: Settings,
     private val isSandboxCustomTab: Boolean = false,
 ) : Middleware<BrowserToolbarState, BrowserToolbarAction> {
     private val customTab
@@ -170,6 +174,11 @@ class CustomTabBrowserToolbarMiddleware(
 
                 useCases.remove(customTabId)
                 closeTabDelegate()
+            }
+
+            is StartPageActions.ProxyActivationAnimationFinished -> {
+                ipProtectionStore.dispatch(IPProtectionAction.ActivationAction.ProxyActivationShown)
+                next(action)
             }
 
             is SiteInfoClicked -> {
@@ -242,15 +251,16 @@ class CustomTabBrowserToolbarMiddleware(
                         surface = SURFACE_CUSTOM_TAB,
                     )
                 )
-                val customTab = customTab
+                val tabContent = customTab?.content ?: return
                 navController.navigate(
                     NavGraphDirections.actionGlobalShareFragment(
                         sessionId = customTabId,
                         data =
                             arrayOf(
                                 ShareData(
-                                    url = customTab?.content?.url,
-                                    title = customTab?.content?.title,
+                                    url = tabContent.url,
+                                    title = tabContent.title,
+                                    private = tabContent.private,
                                 )
                             ),
                         showPage = true,
@@ -268,11 +278,21 @@ class CustomTabBrowserToolbarMiddleware(
                 )
                 navController.nav(
                     R.id.externalAppBrowserFragment,
-                    BrowserFragmentDirections.actionGlobalMenuDialogFragment(
-                        accesspoint = MenuAccessPoint.External,
-                        customTabSessionId = customTabId,
-                        isSandboxCustomTab = isSandboxCustomTab,
-                    ),
+                    when (settings.isMenuCustomizationEnabled) {
+                        true ->
+                            ExternalAppBrowserFragmentDirections.actionExternalAppBrowserFragmentToMenuFragment(
+                                accessPoint = MenuAccessPoint.External,
+                                customTabSessionId = customTabId,
+                                isSandboxCustomTab = isSandboxCustomTab,
+                            )
+
+                        else ->
+                            BrowserFragmentDirections.actionGlobalMenuDialogFragment(
+                                accesspoint = MenuAccessPoint.External,
+                                customTabSessionId = customTabId,
+                                isSandboxCustomTab = isSandboxCustomTab,
+                            )
+                    },
                 )
             }
 
@@ -344,7 +364,9 @@ class CustomTabBrowserToolbarMiddleware(
 
     private fun observeIPProtectionUpdates(store: Store<BrowserToolbarState, BrowserToolbarAction>) {
         ipProtectionStore.observeWhileActive {
-            distinctUntilChangedBy { it.proxyStatus }
+            // Includes proxyActivation so start page actions rebuild once the pending pill
+            // animation is consumed (ProxyActivationShown), dropping the pill again.
+            distinctUntilChangedBy { it.proxyStatus to it.proxyActivation }
                 .collect {
                     updateStartPageActions(store, customTab)
                 }
@@ -465,24 +487,36 @@ class CustomTabBrowserToolbarMiddleware(
         contentDescription: Int,
         onClick: BrowserToolbarInteraction,
     ): Action {
-        return if (ipProtectionStore.state.proxyStatus == Authorized.Active) {
-            Action.AnimatedPillActionRes(
-                iconResId = drawableResId,
-                overlayResId = iconsR.drawable.mozac_ic_globe_24,
-                textResId = R.string.ip_protection_toolbar_pill_label,
-                contentDescriptionResId = R.string.ip_protection_toolbar_pill_description,
-                animated = !ipProtectionStore.state.proxyActiveShown,
-                onClick = onClick,
-                onAnimationStarted = {
-                    ipProtectionStore.dispatch(IPProtectionAction.ProxyActiveShown)
-                },
-            )
-        } else {
-            ActionButtonRes(
-                drawableResId = drawableResId,
-                contentDescription = contentDescription,
-                onClick = onClick,
-            )
+        val ipProtectionState = ipProtectionStore.state
+        return when {
+            ipProtectionState.proxyStatus == Authorized.Active ->
+                Action.AnimatedPillActionRes(
+                    iconResId = drawableResId,
+                    overlayResId = iconsR.drawable.mozac_ic_globe_24,
+                    textResId = R.string.ip_protection_toolbar_pill_label,
+                    contentDescriptionResId = R.string.ip_protection_toolbar_pill_description,
+                    animated = ipProtectionState.proxyActivation == ProxyActivation.TurningOn,
+                    onClick = onClick,
+                    onAnimationFinished = StartPageActions.ProxyActivationAnimationFinished,
+                )
+
+            ipProtectionState.proxyActivation == ProxyActivation.TurningOff ->
+                Action.AnimatedPillActionRes(
+                    iconResId = drawableResId,
+                    overlayResId = iconsR.drawable.mozac_ic_globe_24,
+                    textResId = R.string.ip_protection_toolbar_pill_label_off,
+                    contentDescriptionResId = R.string.ip_protection_toolbar_pill_description_off,
+                    animated = true,
+                    onClick = onClick,
+                    onAnimationFinished = StartPageActions.ProxyActivationAnimationFinished,
+                )
+
+            else ->
+                ActionButtonRes(
+                    drawableResId = drawableResId,
+                    contentDescription = contentDescription,
+                    onClick = onClick,
+                )
         }
     }
 
@@ -507,7 +541,7 @@ class CustomTabBrowserToolbarMiddleware(
     private fun buildEndBrowserActions() = buildList {
         add(
             ActionButtonRes(
-                drawableResId = iconsR.drawable.mozac_ic_ellipsis_vertical_24,
+                drawableResId = iconsR.drawable.mozac_ic_more_vertical_round_24,
                 contentDescription = R.string.content_description_menu,
                 onClick = MenuClicked,
             )
@@ -570,6 +604,8 @@ class CustomTabBrowserToolbarMiddleware(
         @VisibleForTesting
         internal sealed class StartPageActions : BrowserToolbarEvent {
             data object SiteInfoClicked : StartPageActions()
+
+            data object ProxyActivationAnimationFinished : StartPageActions()
         }
 
         @VisibleForTesting

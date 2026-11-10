@@ -40,7 +40,7 @@
   <!-- The header text displayed on the private tabs page when no private tabs are open -->
   <string name="tab_manager_empty_private_tabs_page_header">Navigazione anonima</string>
   <!-- The supplementary text displayed on the private tabs page when no private tabs are open. %1$s is the name of the app (for example "Firefox") -->
-  <string name="tab_manager_empty_private_tabs_page_description">%1$s non salverà alcuna cronologia o cookie per questa finestra. I segnalibri aggiunti verranno comunque conservati sul dispositivo.</string>
+  <string name="tab_manager_empty_private_tabs_page_description">%1$s non salverà alcuna cronologia o cookie, ma i segnalibri aggiunti rimarranno salvati.</string>
   <!-- The header text displayed on the normal tabs page when no normal tabs are open -->
   <string name="tab_manager_empty_normal_tabs_page_header">Apri una nuova scheda per cominciare a cercare</string>
   <!-- Tab tray multi select title in app bar. %1$d is the number of tabs selected -->
@@ -75,9 +75,11 @@
   <string name="home_bookmarks_menu_item_remove">Rimuovi</string>
   <!-- About content. %1$s is the name of the app (for example "Firefox"). -->
   <string name="about_content" tools:ignore="BrandUsage">%1$s è sviluppato da Mozilla.</string>
-  <!-- Private Browsing -->
-  <string name="private_browsing_common_myths">Miti da sfatare sulla navigazione anonima</string>
-  <!-- Text to be announced by the accessibility service to inform the user that the private browsing mode is currently active. -->
+  <!--
+    Private Browsing
+
+    Text to be announced by the accessibility service to inform the user that the private browsing mode is currently active.
+  -->
   <string name="private_browsing_a11y_session_announcement">Sessione di navigazione anonima</string>
   <!--
     True Private Browsing Mode
@@ -101,13 +103,11 @@
 
     Text for the info message. %1$s is the name of the app (for example "Firefox").
   -->
-  <string name="open_in_app_cfr_info_message_2">È possibile impostare %1$s come browser predefinito per aprire i link nelle app.</string>
+  <string name="open_in_app_cfr_info_message_2">È possibile impostare %1$s per aprire automaticamente i link nelle app.</string>
   <!-- Text for the positive action button -->
   <string name="open_in_app_cfr_positive_button_text">Vai alle impostazioni</string>
   <!-- Text for the negative action button -->
   <string name="open_in_app_cfr_negative_button_text">Ignora</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
   <!-- Text for the info dialog when camera permissions have been denied but user tries to access a camera feature. -->
   <string name="camera_permissions_needed_message">È richiesto l’accesso alla fotocamera. Puoi acconsentire all’accesso dalla scheda dei permessi nelle impostazioni di Android.</string>
   <!-- Text for the positive action button to go to Android Settings to grant permissions. -->
@@ -150,13 +150,11 @@
   <!--
     Recent Tabs
 
-    Header text for jumping back into the recent tab in the home screen
+    Header text on the homescreen for continuing to browse the most recent browser tab
   -->
-  <string name="recent_tabs_header">Torna a questa scheda</string>
+  <string name="recent_tabs_header_2">Continua</string>
   <!-- Button text for showing all the tabs in the tabs tray -->
   <string name="recent_tabs_show_all">Visualizza tutte</string>
-  <!-- Content description for the button which navigates the user to show all recent tabs in the tabs tray. -->
-  <string name="recent_tabs_show_all_content_description_2">Pulsante per mostrare tutte le schede recenti</string>
   <!-- Text for button in synced tab card that opens synced tabs tray -->
   <string name="recent_tabs_see_all_synced_tabs_button_text">Mostra tutte le schede sincronizzate</string>
   <!-- Accessibility description for device icon used for recent synced tab -->
@@ -185,8 +183,10 @@
   <!--
     Browser Fragment
 
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
+    Label for popup button that appears when long-pressing the main menu. Tapping it allows the user to customize the main menu layout.
   -->
+  <string name="customize_menu">Personalizza menu</string>
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">Indietro</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">Avanti</string>
@@ -213,6 +213,10 @@
   <string name="browser_menu_no_extensions_installed_description">Nessuna estensione attiva</string>
   <!-- The description of the browser menu appears when the user hasn't installed any extensions and there are recommended extensions. -->
   <string name="browser_menu_try_a_recommended_extension_description">Prova un’estensione consigliata</string>
+  <!-- In the browser menu: Message under the Extensions menu item, displayed when one or more extensions have updates that require approving changes to their permission settings. %1$s is a comma-separated list of one or more extension names. -->
+  <string name="browser_menu_extensions_review_update_description">Controlla l’aggiornamento di %1$s</string>
+  <!-- In the browser menu: Message under an extension name, displayed when the update requires approving changes to extension settings. -->
+  <string name="browser_menu_extension_review_update_description">Controlla le impostazioni per aggiornare</string>
   <!-- Browser menu button that opens account settings -->
   <string name="browser_menu_account_settings">Informazioni sull’account</string>
   <!-- Browser menu button that opens the settings menu -->
@@ -267,8 +271,6 @@
   <string name="browser_menu_syncing_paused_caption">Sincronizzazione sospesa</string>
   <!-- Browser menu caption label for an authenticated user -->
   <string name="browser_menu_signed_in_caption">Gestisci gli elementi da salvare e sincronizzare</string>
-  <!-- Browser menu label that creates a private tab -->
-  <string name="browser_menu_new_private_tab">Nuova scheda anonima</string>
   <!-- Browser menu label that navigates to the Password screen -->
   <string name="browser_menu_passwords">Password</string>
   <!-- Content description (not visible, for screen readers etc.) for the handle used to drag the main menu at the bottom of the screen. -->
@@ -277,6 +279,10 @@
   <string name="browser_main_menu_content_description_navigation_header">Navigazione</string>
   <!-- Content description (not visible, for screen readers etc.) for bottom sheet handlebar custom tab menu. -->
   <string name="browser_custom_tab_menu_handlebar_content_description">Chiudi il menu per la personalizzazione schede</string>
+  <!-- URL bar indicator shown on a cached version of the website, when the tab is reloading, but the content is not live yet -->
+  <string name="browser_toolbar_cached_page_indicator">In cache</string>
+  <!-- Message shown when a cached website has finished reloading and the tab is now showing the live version of the page -->
+  <string name="browser_toolbar_live_page_toast">Pagina attuale</string>
   <!-- Browser menu label that bookmarks the currently visited page -->
   <string name="browser_menu_bookmark_this_page_2">Aggiungi pagina ai segnalibri</string>
   <!-- Browser menu label that navigates to the edit bookmark screen for the current bookmarked page -->
@@ -291,8 +297,12 @@
   <string name="browser_menu_summarize_page">Riassumi pagina</string>
   <!-- Browser menu badge text for summarization feature -->
   <string name="browser_menu_summarize_page_badge">Novità</string>
+  <!-- Browser menu badge text for new, highlighted feature -->
+  <string name="browser_menu_page_badge_text">Novità</string>
   <!-- Browser menu label for navigating to the Web Compat Reporter feature, which provides users the ability to send bug reports for broken sites. -->
   <string name="browser_menu_webcompat_reporter_2">Segnala problemi con il sito</string>
+  <!-- Browser menu label for adding a tab to a tab group -->
+  <string name="browser_menu_add_to_tab_group">Aggiungi a un gruppo</string>
   <!-- Browser menu label that is displayed when the current page has been translated by the translation feature. -->
   <string name="browser_menu_translated">Tradotto</string>
   <!-- Browser menu label for the print feature -->
@@ -309,8 +319,6 @@
   <string name="browser_menu_default_banner_title">Imposta %1$s come predefinito</string>
   <!-- Label text within the set as default banner -->
   <string name="browser_menu_default_banner_subtitle_2">Veloce, riservato e fatto apposta per te.</string>
-  <!-- Content description (not visible, for screen readers etc.) for the button that dismisses the set as default banner in the menu -->
-  <string name="browser_menu_default_banner_dismiss_promotion">Chiudi promozione</string>
   <!-- Content description (not visible, for screen readers etc.) for recommended extensions in main menu -->
   <string name="browser_menu_recommended_extensions_content_description">Altre informazioni</string>
   <!--
@@ -364,7 +372,7 @@
   <!-- Link text to see what AI enhancements are and aren’t included -->
   <string name="ai_controls_see_whats_included">Scopri che cosa è incluso e cosa no</string>
   <!-- Banner text shown when AI enhancements are blocked -->
-  <string name="ai_controls_blocked_info_banner">Per impostazione predefinita, le funzionalità basate sull’IA sono bloccate. Sblocca funzioni specifiche qui sotto.</string>
+  <string name="ai_controls_blocked_info_banner">Le funzionalità basate sull’IA, nuove o esistenti, sono bloccate per impostazione predefinita. Sblocca funzioni specifiche qui sotto.</string>
   <!-- Section header for the AI-powered features list -->
   <string name="ai_controls_ai_powered_features">Funzionalità basate sull’IA</string>
   <!-- Title for the translations AI feature toggle -->
@@ -379,6 +387,10 @@
   <string name="ai_controls_voice_search_title">Ricerca vocale</string>
   <!-- Description for the voice search AI feature toggle -->
   <string name="ai_controls_voice_search_description">L’audio viene convertito in testo da Google Speech Services.</string>
+  <!-- Title for the listen to page AI feature toggle -->
+  <string name="ai_controls_listen_to_page_title">Ascolta la pagina</string>
+  <!-- Description for the listen to page AI feature toggle -->
+  <string name="ai_controls_listen_to_page_description">Il dispositivo può usare l’intelligenza artificiale per leggere ad alta voce. Il testo e l’audio restano privati.</string>
   <!-- Title for the block AI enhancements confirmation dialog -->
   <string name="ai_controls_block_dialog_title">Blocca miglioramenti basati sull’IA?</string>
   <!-- Body text for the block AI enhancements confirmation dialog. %1$s is the name of the app (for example "Firefox"). -->
@@ -470,18 +482,6 @@
   <string name="onboarding_preferences_dialog_positive_button">Fatto</string>
   <!-- Terms of service onboarding title card label. 'Firefox' intentionally hardcoded here -->
   <string name="onboarding_welcome_to_firefox" tools:ignore="BrandUsage">Ti diamo il benvenuto in Firefox</string>
-  <!-- Line one of the terms of service onboarding page. %1$s is replaced by an active link, using onboarding_term_of_service_line_one_link_text_2 as text (“Firefox Terms of Use”). -->
-  <string name="onboarding_term_of_service_line_one_2">Proseguendo, accetti le %1$s.</string>
-  <!-- Used as text for the link in onboarding_term_of_service_line_one_2. -->
-  <string name="onboarding_term_of_service_line_one_link_text_2" tools:ignore="BrandUsage">condizioni di utilizzo di Firefox</string>
-  <!-- Line two of the terms of service onboarding page. 'Firefox' is intentionally hardcoded. %1$s is replaced by an active link, using onboarding_term_of_service_line_two_link_text as text (“Privacy Notice”). -->
-  <string name="onboarding_term_of_service_line_two_2" tools:ignore="BrandUsage">Firefox ha a cuore la tua privacy. Ulteriori informazioni nella nostra %1$s.</string>
-  <!-- Used as text for the link in onboarding_term_of_service_line_two. -->
-  <string name="onboarding_term_of_service_line_two_link_text">informativa sulla privacy</string>
-  <!-- Line three of the terms of service onboarding page. 'Firefox' and 'Mozilla' are intentionally hardcoded. %1$s is replaced by an active link using onboarding_term_of_service_line_three_link_text as text (“Manage”). -->
-  <string name="onboarding_term_of_service_line_three" tools:ignore="BrandUsage">Per migliorare il browser, Firefox invia a Mozilla dati diagnostici e di interazione. %1$s</string>
-  <!-- Used as text for the link in onboarding_term_of_service_line_three. -->
-  <string name="onboarding_term_of_service_line_three_link_text">Gestisci</string>
   <!-- Terms of use (ToU) onboarding redesign title. -->
   <string name="onboarding_redesign_tou_title" tools:ignore="UnusedResources">Lancia il browser Android definitivo</string>
   <!-- Terms of use (ToU) first subheader. -->
@@ -543,8 +543,6 @@
   <string name="onboarding_marketing_body_1" tools:ignore="BrandUsage,UnusedResources">Condividi come hai scoperto Firefox e il fatto che lo utilizzi con i partner per il marketing di Mozilla. Questi dati non vengono mai venduti.</string>
   <!-- Marketing onboarding page button label variant. Button to confirm choice and start browsing. -->
   <string name="onboarding_marketing_positive_button_1" tools:ignore="UnusedResources">Accetta e inizia a navigare</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
   <!-- "Continue" onboarding button. -->
   <string name="nova_onboarding_continue_button">Continua</string>
   <!-- "Continue browsing" onboarding button. -->
@@ -586,20 +584,6 @@
   <string name="nova_onboarding_set_to_default_subtitle">Proteggiamo i tuoi dati e impediamo alle aziende di spiare i tuoi clic, in modo automatico.</string>
   <!-- "Set to default" onboarding button. -->
   <string name="nova_onboarding_set_to_default_button">Imposta come browser predefinito</string>
-  <!-- Toolbar selection onboarding title. -->
-  <string name="nova_onboarding_toolbar_selection_title">Scegli la tua barra degli indirizzi</string>
-  <!-- Toolbar selection onboarding "top" option label. -->
-  <string name="nova_onboarding_toolbar_selection_top_label">In alto</string>
-  <!-- Toolbar selection onboarding "bottom" option label. -->
-  <string name="nova_onboarding_toolbar_selection_bottom_label">In basso</string>
-  <!-- Theme selection onboarding title. -->
-  <string name="nova_onboarding_theme_selection_title" tools:ignore="UnusedResources">Scegli il tuo tema</string>
-  <!-- Theme selection onboarding "automatic" option label. -->
-  <string name="nova_onboarding_theme_selection_automatic_label" tools:ignore="UnusedResources">Automatico</string>
-  <!-- Theme selection onboarding "light" option label. -->
-  <string name="nova_onboarding_theme_selection_light_label" tools:ignore="UnusedResources">Chiaro</string>
-  <!-- Theme selection onboarding "dark" option label. -->
-  <string name="nova_onboarding_theme_selection_dark_label" tools:ignore="UnusedResources">Scuro</string>
   <!-- Sync onboarding title. -->
   <string name="nova_onboarding_sync_title">Riprendi velocemente da dove eri rimasto</string>
   <!-- Sync onboarding subtitle. -->
@@ -614,7 +598,7 @@
   -->
   <string name="nova_onboarding_marketing_body" tools:ignore="BrandUsage,UnusedResources">Condividi come hai scoperto Firefox e il fatto che lo utilizzi con i partner per il marketing di Mozilla. Questi dati non vengono mai venduti. %1$s</string>
   <!-- Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded. -->
-  <string name="nova_onboarding_marketing_body_2" tools:ignore="BrandUsage">Condividi come hai scoperto Firefox e il fatto che lo utilizzi con i partner per il marketing di Mozilla. Questi dati non vengono mai venduti.</string>
+  <string name="nova_onboarding_marketing_body_2" tools:ignore="BrandUsage,UnusedResources">Condividi come hai scoperto Firefox e il fatto che lo utilizzi con i partner per il marketing di Mozilla. Questi dati non vengono mai venduti.</string>
   <!-- Marketing onboarding body. 'Firefox' and 'Mozilla' are intentionally hardcoded. -->
   <string name="nova_onboarding_marketing_body_3" tools:ignore="BrandUsage,UnusedResources">Puoi aiutarci a far conoscere Firefox a più persone permettendo a Mozilla di comunicare ai canali dove lo promuoviamo che utilizzi Firefox.</string>
   <!--
@@ -664,14 +648,8 @@
   <string name="nova_onboarding_notifications_subtitle" tools:ignore="BrandUsage,UnusedResources">Esplora le nuove funzionalità per la privacy di Firefox per rimanere sempre informato su come proteggerti.</string>
   <!-- Notifications onboarding button. -->
   <string name="nova_onboarding_notifications_button">Attiva le notifiche</string>
-  <!-- "Add search widget" onboarding title. -->
-  <string name="nova_onboarding_add_search_widget_title">Rendi ogni ricerca più riservata</string>
-  <!-- "Add search widget" onboarding subtitle. 'Firefox' is intentionally hardcoded. -->
-  <string name="nova_onboarding_add_search_widget_subtitle" tools:ignore="BrandUsage">Avvia ogni ricerca dalla schermata iniziale del tuo telefono, con le protezioni automatiche di Firefox sempre attive.</string>
-  <!-- "Add search widget" onboarding button. 'Firefox' is intentionally hardcoded. -->
-  <string name="nova_onboarding_add_search_widget_button" tools:ignore="BrandUsage">Aggiungi widget di Firefox</string>
   <!-- Customize prompt onboarding title. -->
-  <string name="nova_onboarding_customize_prompt_title" tools:ignore="UnusedResources">Facile da personalizzare, più privacy a ogni tocco.</string>
+  <string name="nova_onboarding_customize_prompt_title" tools:ignore="UnusedResources">Facile da personalizzare, più privacy a ogni tocco</string>
   <plurals name="nova_onboarding_customize_prompt_body" tools:ignore="UnusedResources">
     <!--
       Customize prompt onboarding body.
@@ -689,8 +667,6 @@
   <string name="nova_onboarding_app_icon_prompt_title" tools:ignore="UnusedResources">Scegli un’icona personalizzata per l’app</string>
   <!-- App icon onboarding body. -->
   <string name="nova_onboarding_app_icon_prompt_body" tools:ignore="UnusedResources">Dai un tocco personale alla schermata iniziale.</string>
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!--
     Widget Picker
 
@@ -709,13 +685,19 @@
   <string name="search_widget_text_long">Cerca sul Web</string>
   <!-- Content description (not visible, for screen readers etc.): Voice search -->
   <string name="search_widget_voice">Ricerca vocale</string>
+  <!-- Content description (not visible, for screen readers etc.): Button in the search widget that starts a search in a private tab -->
+  <string name="search_widget_private_search">Ricerca anonima</string>
+  <!-- Widget description in the widget picker screen for the search bar widget that includes buttons for private search and for voice search -->
+  <string name="search_bar_widget_description">Barra di ricerca con ricerca anonima e vocale</string>
+  <!-- Widget description in the widget picker screen for the search bar widget that includes buttons for image search, private search and voice search -->
+  <string name="search_bar_with_lens_widget_description">Barra di ricerca con ricerca per immagini, anonima e vocale</string>
+  <!-- Widget description in the widget picker screen for the compact search bar widget -->
+  <string name="compact_search_bar_widget_description">Barra di ricerca compatta</string>
   <!--
     Preferences
 
-    Title for the settings page
+    Preference category for general settings
   -->
-  <string name="settings">Impostazioni</string>
-  <!-- Preference category for general settings -->
   <string name="preferences_category_general">Generale</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">Informazioni</string>
@@ -737,6 +719,8 @@
   <string name="preferences_search">Ricerca</string>
   <!-- Preference for settings related to Search engines -->
   <string name="preferences_search_engines">Motori di ricerca</string>
+  <!-- Settings item that adds the Firefox search widget to the device's home screen (tapping it opens the confirmation dialogue) -->
+  <string name="preferences_search_widget_in_home_screen">Aggiungi widget di ricerca alla schermata principale</string>
   <!-- Settings item to add a search widget on the device's homescreen. -->
   <string name="preferences_add_search_widget_from_settings">Widget nella schermata principale</string>
   <!-- Preference for settings related to Search engines suggestions -->
@@ -778,8 +762,6 @@
   <string name="preferences_pbm_lock_screen_title">Utilizza il blocco dello schermo per nascondere le schede in navigazione anonima</string>
   <!-- Informs the user how to access the tabs when "Use screen lock to hide tabs in private browsing" is enabled -->
   <string name="preferences_pbm_lock_screen_summary_3">Accedi alle schede tramite impronta digitale, PIN o riconoscimento facciale. Attivando questa funzione si blocca anche la cattura e la condivisione dello schermo.</string>
-  <!-- Preference for removing cookie/consent banners from sites automatically in private mode. See reduce_cookie_banner_summary for additional context. -->
-  <string name="preferences_cookie_banner_reduction_private_mode">Blocco banner per i cookie in navigazione anonima</string>
   <!-- Description of the preference to enable "HTTPS-Only" mode. -->
   <string name="preferences_https_only_summary">Tenta automaticamente la connessione ai siti utilizzando il protocollo di crittografia HTTPS per una maggiore sicurezza.</string>
   <!-- Summary of https only preference if https only is set to off -->
@@ -808,6 +790,8 @@
   <string name="preferences_override_sync_tokenserver">Server personalizzato per Sync</string>
   <!-- Preference category for account information -->
   <string name="preferences_category_account">Account</string>
+  <!-- Preference category for sync controls. Sync can be translated, it's just short for ”Synchronization” in English. -->
+  <string name="preferences_category_sync_controls">Sincronizzazione</string>
   <!-- Preference for changing where the AddressBar is positioned -->
   <string name="preferences_toolbar_2">Posizione della barra degli indirizzi</string>
   <!-- Preference for changing toolbar layout -->
@@ -826,6 +810,8 @@
   <string name="preferences_toolbar_select_shortcut">Seleziona una scorciatoia</string>
   <!-- Title of a menu option allowing to change the shortcut button shown in the toolbar -->
   <string name="toolbar_shortcut_menu_edit_option">Modifica scorciatoia</string>
+  <!-- Preference category for menu customization -->
+  <string name="preferences_menu">Menu</string>
   <!-- Preference for gestures based actions -->
   <string name="preferences_gestures">Gesti</string>
   <!-- Preference for settings related to visual options -->
@@ -864,6 +850,8 @@
   <string name="preferences_search_synced_tabs">Cerca nelle schede sincronizzate</string>
   <!-- Preference for account settings -->
   <string name="preferences_account_settings">Impostazioni account</string>
+  <!-- Preference for account and sync settings -->
+  <string name="preferences_account_and_sync_settings">Account e sincronizzazione</string>
   <!-- Preference for enabling url autocomplete -->
   <string name="preferences_enable_autocomplete_urls">Completamento automatico degli URL</string>
   <!-- Preference title for switch preference to show sponsored Firefox Suggest search suggestions -->
@@ -889,7 +877,7 @@
   <!-- Body for the link sharing toggle.  %1$s is replaced by the brand name (e.g. Firefox). -->
   <string name="link_sharing_toggle_body">Invita i tuoi amici a navigare più velocemente e in modo più sicuro con %1$s ogni volta che condividi un link su WhatsApp.</string>
   <!-- Snackbar message shown when user shares a link -->
-  <string name="link_shared_snackbar_message">Condiviso link</string>
+  <string name="link_shared_snackbar_message">Link condiviso</string>
   <!-- Snackbar action label shown when user shares a link -->
   <string name="link_shared_snackbar_action">Gestisci impostazioni</string>
   <!-- Preference for open links in third party apps -->
@@ -900,6 +888,10 @@
   <string name="preferences_open_links_in_apps_ask">Chiedi prima di aprire</string>
   <!-- Preference for open links in third party apps never open in apps option -->
   <string name="preferences_open_links_in_apps_never">Mai</string>
+  <!-- Preference category header for media related open links in apps settings -->
+  <string name="preferences_media_category">Media</string>
+  <!-- Preference label for choosing whether links open in the YouTube app -->
+  <string name="preferences_open_links_in_youtube">Apri link nell’app YouTube</string>
   <!-- Preference category for file storage. -->
   <string name="preferences_category_file_storage">Archiviazione file</string>
   <!-- Preference title for downloads default location. -->
@@ -911,12 +903,14 @@
   <string name="preference_downloads_folder_permission_lost" tools:ignore="UnusedResources">Non disponi dell’autorizzazione per accedere a questa cartella. Prova a selezionarne un’altra.</string>
   <!-- Preference title for choosing an app to handle downloads -->
   <string name="preferences_choose_app_for_downloads">Gestisci i download con un’altra app</string>
+  <!-- Message shown when no app is available to let the user pick a download folder. -->
+  <string name="preferences_downloads_no_folder_picker_available">Impossibile aprire la finestra di selezione della cartella su questo dispositivo.</string>
   <!-- Preference category for deleting or removing downloads -->
   <string name="preferences_category_delete_or_remove_downloads">Elimina o rimuovi download</string>
   <string name="preferences_downloads_delete_from_device">Elimina dal dispositivo</string>
   <string name="preferences_downloads_delete_from_device_description">Il file viene eliminato dal dispositivo e rimosso dalla cronologia dei download</string>
   <string name="preferences_downloads_remove_from_download_history">Rimuovi dalla cronologia dei download</string>
-  <string name="preferences_downloads_remove_from_download_history_description">Il file viene eliminato dalla cronologia dei download, ma resta salvato sul dispositivo</string>
+  <string name="preferences_downloads_remove_from_download_history_description">Il file viene rimosso dalla cronologia dei download, ma resta salvato sul dispositivo</string>
   <string name="preferences_downloads_ask_when_to_delete_files">Chiedi quando elimino i file</string>
   <!-- Preference for downloads -->
   <string name="preferences_downloads_2">Impostazioni download</string>
@@ -979,13 +973,25 @@
   <!-- Toast shown after confirming the custom extension collection configuration -->
   <string name="toast_customize_extension_collection_done">Raccolta di estensioni modificata. L’app verrà chiusa per applicare le modifiche…</string>
   <!--
+    Add-on removal confirmation dialog
+
+    Title of confirmation dialog. Displayed when uninstalling an extension. %1$s is the name of the extension (for example: Firefox Relay).
+  -->
+  <string name="addon_remove_dialog_title">Rimuovere %1$s?</string>
+  <!-- Body of confirmation dialog. Displayed when uninstalling an extension. -->
+  <string name="addon_remove_dialog_body">Questa operazione rimuove l’estensione e le relative impostazioni dal dispositivo.</string>
+  <!-- Primary button on confirmation dialog. Tapping it uninstalls the selected extension. -->
+  <string name="addon_remove_dialog_confirm">Rimuovi</string>
+  <!-- Secondary button on confirmation dialog. Tapping cancels the process of uninstalling the extension and closes the dialog window. -->
+  <string name="addon_remove_dialog_cancel">Annulla</string>
+  <!--
     Customize Home
 
     Title for the customize home screen section with privacy report.
   -->
   <string name="customize_toggle_privacy_report">Rapporto sulla privacy</string>
-  <!-- Header text for jumping back into the recent tab in customize the home screen -->
-  <string name="customize_toggle_jump_back_in">Riprendi da qui</string>
+  <!-- Title for a customize home screen section. Continue is a section that displays the most recent browser tab, so users can continue browsing where they left off. -->
+  <string name="customize_toggle_continue">Continua</string>
   <!-- Title for the customize home screen section with bookmarks. -->
   <string name="customize_toggle_bookmarks">Segnalibri</string>
   <!--
@@ -1001,12 +1007,8 @@
   <string name="customize_wallpapers">Sfondi</string>
   <!-- Label for the menu item that opens the customize homepage settings screen. -->
   <string name="browser_menu_customize_homepage">Personalizza pagina iniziale</string>
-  <!-- Label for the menu item that opens the wallpaper settings screen. -->
-  <string name="browser_menu_change_wallpaper">Cambia sfondo</string>
   <!-- Title for the customize home screen section with sponsored shortcuts. -->
   <string name="customize_toggle_contile">Scorciatoie sponsorizzate</string>
-  <!-- Title for the customize home screen section that toggles the Homepage sports widget. -->
-  <string name="customize_toggle_world_cup">Coppa del mondo</string>
   <!--
     Wallpapers
 
@@ -1131,6 +1133,8 @@
   <string name="extension_process_crash_dialog_retry_button_text" tools:ignore="UnusedResources">Prova a riavviare le estensioni</string>
   <!-- Button text on the extension crash dialog to prompt the user to continue with all extensions disabled. -->
   <string name="extension_process_crash_dialog_disable_extensions_button_text">Continua con le estensioni disattivate</string>
+  <!-- Text shown in the snackbar action button that lets the user retry an add-on operation that just failed. -->
+  <string name="addon_failure_retry_action">Riprova</string>
   <!--
     Account Preferences
 
@@ -1143,6 +1147,18 @@
   <string name="preferences_sync_now">Sincronizza adesso</string>
   <!-- Preference category for sync -->
   <string name="preferences_sync_category">Scegli cosa sincronizzare</string>
+  <!-- Preference category for sync controls -->
+  <string name="preferences_category_sync">Dati sincronizzati</string>
+  <!-- Preference title for the toggle that allows user to turn sync on or off for the device they are on -->
+  <string name="preferences_enable_sync_title">Sincronizza questo dispositivo</string>
+  <!-- Preference summary for the toggle that turns sync on or off for the device, shown when sync is on. -->
+  <string name="preferences_enable_sync_summary_sync_enabled">I tuoi dati sono salvati e disponibili sui dispositivi sincronizzati.</string>
+  <!-- Preference summary for the toggle that turns sync on or off for the device, shown when sync is off. It explains where synced data comes from. %1$s is the Firefox brand name. -->
+  <string name="preferences_enable_sync_summary_sync_disabled">Usa i dati salvati nel tuo account %1$s.</string>
+  <!-- Summary for the sync preference category. -->
+  <string name="preferences_sync_category_summary">Scegli cosa sincronizzare su tutti i dispositivi connessi</string>
+  <!-- Summary for the sync preference category, when user has disabled all synchronisation items. -->
+  <string name="preferences_sync_category_no_engine_selected_summary">Non stai sincronizzando alcun elemento. Scegli cosa sincronizzare sui tuoi dispositivi.</string>
   <!-- Preference for syncing history -->
   <string name="preferences_sync_history">Cronologia</string>
   <!-- Preference for syncing bookmarks -->
@@ -1155,6 +1171,10 @@
   <string name="preferences_sign_out">Disconnetti</string>
   <!-- Preference displays and allows changing current FxA device name -->
   <string name="preferences_sync_device_name">Nome dispositivo</string>
+  <!-- Preference category for Device name -->
+  <string name="preferences_device_name_category">Nome dispositivo</string>
+  <!-- Label for the Preference that displays and allows changing current device name on Mozilla Account -->
+  <string name="preferences_sync_change_device_name">Cambia nome dispositivo</string>
   <!-- Text shown when user enters empty device name -->
   <string name="empty_device_name_error">Inserire un nome per il dispositivo.</string>
   <!-- Label indicating that sync is in progress -->
@@ -1274,8 +1294,12 @@
   <string name="preference_simple_toolbar">Semplice</string>
   <!-- Preference for using expanded toolbar -->
   <string name="preference_expanded_toolbar">Estesa</string>
-  <!-- Preference description indicating the toolbar location preference is disabled when the tab strip is enabled -->
-  <string name="preference_toolbar_pref_disabled_explanation">La barra degli indirizzi deve essere posizionata in alto quando viene visualizzata la barra delle schede.</string>
+  <!-- Preference for changing where the search bar is positioned on the homepage, shown when the user has set the address bar to be displayed at the top of the screen -->
+  <string name="preferences_homepage_search_location">Posizione della barra di ricerca nella pagina iniziale</string>
+  <!-- Preference for showing the homepage search bar in the middle of the homepage -->
+  <string name="preference_homepage_search_location_middle">Al centro</string>
+  <!-- Preference for showing the homepage search bar at the top of the homepage (combined with the address bar, already displayed at the top) -->
+  <string name="preference_homepage_search_location_top">In alto</string>
   <!-- New tab shortcut in toolbar customization -->
   <string name="toolbar_customize_shortcut_new_tab">Apri una nuova scheda</string>
   <!-- Share shortcut in toolbar customization -->
@@ -1304,6 +1328,11 @@
   <string name="preference_light_theme">Chiaro</string>
   <!-- Preference for using dark theme -->
   <string name="preference_dark_theme">Scuro</string>
+  <!--
+    Preference for using the OLED theme. For localization, this can be translated as "True Black", "Maximum Darkness",
+    or "Full dark" if needed.
+  -->
+  <string name="preference_oled_theme">Nero assoluto</string>
   <!-- Preference for using using dark or light theme automatically set by battery -->
   <string name="preference_auto_battery_theme">Impostato da Risparmio energetico</string>
   <!-- Preference for using following device theme -->
@@ -1314,6 +1343,12 @@
     Preferences for showing tab strip
   -->
   <string name="preference_tab_strip_show">Mostra barra delle schede</string>
+  <!-- Preference for tab bar placement (top or bottom of the screen) -->
+  <string name="preference_tab_strip_location_header">Posizione della barra delle schede</string>
+  <!-- Preference for using top tab strip -->
+  <string name="preference_top_tab_strip">In alto</string>
+  <!-- Preference for using bottom tab strip -->
+  <string name="preference_bottom_tab_strip">In basso</string>
   <!--
     Gestures Preferences
 
@@ -1346,6 +1381,8 @@
   <string name="library_desktop_bookmarks_unfiled">Altri segnalibri</string>
   <!-- Option in Library to open History page -->
   <string name="library_history">Cronologia</string>
+  <!-- Content description (not visible, for screen readers etc.) for the check mark that replaces a site's icon in History and Recently closed tabs when the item is selected -->
+  <string name="library_item_selected_content_description">Selezionato</string>
   <!-- Settings Page Title -->
   <string name="settings_title">Impostazioni</string>
   <!-- Content description (not visible, for screen readers etc.): "Close button for library settings" -->
@@ -1396,8 +1433,8 @@
     Title of preference for tabs management
   -->
   <string name="preferences_tabs">Schede</string>
-  <!-- Title of preference that allows a user to specify the tab view -->
-  <string name="preferences_tab_view">Visualizzazione schede</string>
+  <!-- Title of preference that allows a user to specify the tab layout -->
+  <string name="preferences_tab_layout">Disposizione delle schede</string>
   <!-- Option for a list tab view -->
   <string name="tab_view_list">Elenco</string>
   <!-- Option for a grid tab view -->
@@ -1416,6 +1453,8 @@
   <string name="preference_auto_close_tabs" tools:ignore="UnusedResources">Chiudi automaticamente le schede aperte</string>
   <!-- Content description (not visible, for screen readers etc.): Close tab button -->
   <string name="tab_manager_close_tabs">Chiudi</string>
+  <!-- Content description for the media playback indicator in the tabs tray. -->
+  <string name="tab_indicator_media_playing">Contenuto multimediale in riproduzione</string>
   <!--
     Opening screen
 
@@ -1443,13 +1482,19 @@
   <!-- Summary for homepage preference indicating opening the homepage when re-opening the app after four hours of inactivity -->
   <string name="opening_screen_after_four_hours_of_inactivity_summary">Apri pagina iniziale dopo quattro ore</string>
   <!--
-    Inactive tabs
+    Tab organization
 
-    Category header of a preference that allows a user to enable or disable the inactive tabs feature
+    Category header for the preferences that control how tabs are organized
   -->
-  <string name="preferences_inactive_tabs">Sposta le vecchie schede nella sezione Inattive</string>
-  <!-- Title of inactive tabs preference -->
-  <string name="preferences_inactive_tabs_title">La schede che non visualizzi da due settimane vengono spostate nella sezione Inattive.</string>
+  <string name="preferences_tab_organization">Gestione delle schede</string>
+  <!-- Title of the preference that allows a user to enable or disable the inactive tabs feature -->
+  <string name="preferences_inactive_tabs_toggle_title">Schede inattive</string>
+  <!-- Summary of the preference that allows a user to enable or disable the inactive tabs feature. -->
+  <string name="preferences_inactive_tabs_title">Le schede che non visualizzi da due settimane vengono spostate nella sezione Inattive.</string>
+  <!-- Title of the preference that allows a user to enable or disable the tab groups feature -->
+  <string name="preferences_tab_groups_title">Gruppi di schede</string>
+  <!-- Summary of the preference that allows a user to enable or disable the tab groups feature -->
+  <string name="preferences_tab_groups_description">Organizza le tue schede in gruppi a cui puoi assegnare un nome e salvare.</string>
   <!--
     Privacy report
 
@@ -1502,7 +1547,7 @@
       The %1$d will be replaced by the number of opened tab groups
     -->
     <item quantity="one">Aperto %1$d gruppo di schede. Tocca per cambiare scheda.</item>
-    <item quantity="other">Aperto %1$d gruppi di schede. Tocca per cambiare scheda.</item>
+    <item quantity="other">Aperti %1$d gruppi di schede. Tocca per cambiare scheda.</item>
   </plurals>
   <!--
     Title for the list of tabs in the synced tabs used by a11y services
@@ -1565,8 +1610,6 @@
   <string name="open_tabs_menu">Menu schede aperte</string>
   <!-- Content description (not visible, for screen readers etc.): Return to tab manager -->
   <string name="tab_manager_search_bar_back_content_description">Ritorna al gestore schede</string>
-  <!-- Open tabs menu item to save tabs to collection -->
-  <string name="tabs_menu_save_to_collection1">Salva schede in una raccolta</string>
   <!-- Text for the menu button to delete a collection -->
   <string name="collection_delete">Elimina raccolta</string>
   <!-- Text for the menu button to rename a collection -->
@@ -1637,15 +1680,6 @@
     <item quantity="one">Aggiungi al gruppo di schede “%1$s”, %2$d scheda, colore %3$s</item>
     <item quantity="other">Aggiungi al gruppo di schede “%1$s”, %2$d schede, colore %3$s</item>
   </plurals>
-  <plurals name="share_tab_group_button_content_description">
-    <!--
-      Content Description for share tab group button.
-      %1$s is the name of the tab group.
-      %2$d is the number of tabs in a tab group.
-    -->
-    <item quantity="one">Condividi gruppo di schede “%1$s” con %2$d scheda.</item>
-    <item quantity="other">Condividi gruppo di schede “%1$s” con %2$d schede.</item>
-  </plurals>
   <!-- Content description for the grabber/handle of the tab group bottom sheet. -->
   <string name="tab_group_sheet_dismiss_description">Visualizza gruppo di schede, maniglia di trascinamento per nascondere l’elemento</string>
   <plurals name="expanded_tab_group_header_description">
@@ -1674,6 +1708,11 @@
   <string name="close_tab_and_delete_group_confirmation_dialog_cancel">Annulla</string>
   <!-- Content description for the three dot button next to a tab group" -->
   <string name="tab_group_three_dot_button_content_description">Altre opzioni</string>
+  <!--
+    Content description for the Expand button on the contracted menu for a tab group:
+    when tapped, tabs are displayed in an expanded grid or list view, taking up the full screen.
+  -->
+  <string name="tab_groups_strip_expand_group_content_description">Espandi per mostrare le schede a schermo intero</string>
   <!-- Text shown on the edit button for a tab group on the three dot menu -->
   <string name="tab_group_three_dot_menu_edit">Modifica</string>
   <!-- Text shown on the ungroup button for a tab group on the three dot menu -->
@@ -1694,6 +1733,14 @@
   <string name="ungroup_tab_group_confirmation_dialog_confirm">Separa</string>
   <!-- Text shown on the cancel button in the Ungroup tab group confirmation dialog. -->
   <string name="ungroup_tab_group_confirmation_dialog_cancel">Annulla</string>
+  <!-- Custom accessibility action to reorder a tab up rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_up">Sposta la scheda in alto</string>
+  <!-- Custom accessibility action to reorder a tab left rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_left">Sposta la scheda a sinistra</string>
+  <!-- Custom accessibility action to reorder a tab right rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_right">Sposta la scheda a destra</string>
+  <!-- Custom accessibility action to reorder a tab down rather than dragging. -->
+  <string name="custom_accessibility_action_reorder_tab_down">Sposta la scheda in basso</string>
   <!--
     Color labels for tab groups, used for accessibility and selection UI.
 
@@ -1733,16 +1780,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">%1$d selezionati</string>
-  <!-- Text for the header that groups the history for today -->
-  <string name="history_today">Oggi</string>
-  <!-- Text for the header that groups the history for yesterday -->
-  <string name="history_yesterday">Ieri</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">Ultimi 7 giorni</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">Ultimi 30 giorni</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">Più vecchi</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">Nessuna cronologia disponibile.</string>
   <!--
@@ -1848,7 +1885,7 @@
   -->
   <string name="download_rename_error_exists_error">In questo percorso esiste già un file chiamato “%s”.</string>
   <!-- Error message when renaming with an invalid file name. -->
-  <string name="download_rename_error_invalid_name_error">Non è possibile utilizzare “/” per il nome di un file.</string>
+  <string name="download_rename_error_invalid_name_error">I nomi dei file non possono contenere “/”</string>
   <!-- Error message shown when a user tries to rename a downloaded file but only changes the casing (e.g., "file.txt" to "File.txt"). -->
   <string name="download_rename_error_case_only_error">Il nome inserito modifica solo le maiuscole o le minuscole. Scegli un nome diverso.</string>
   <!-- Title for the alert dialog when the file cannot be renamed. -->
@@ -1894,7 +1931,7 @@
     %1$s is the current file size that has been downloaded.
     %2$s is the total size of the downloaded file.
   -->
-  <string name="download_item_in_progress_description_pending">%1$s / %2$s • in corso</string>
+  <string name="download_item_in_progress_description_pending">%1$s / %2$s • in attesa</string>
   <!--
     Description of an in progress download item, displayed in the downloads list when the total download size is unknown. This results in the estimated download time remaining to be unknown also.
     %1$s is the current file size that has been downloaded.
@@ -1921,6 +1958,8 @@
   <string name="download_search_no_results_found">Nessun risultato trovato</string>
   <!-- Text for the "Select all" button, which selects all downloaded items in the downloads list. -->
   <string name="download_select_all_items">Seleziona tutto</string>
+  <!-- Shown in the downloads list in place of a website name when a file came from a data: or blob: URL that has no website address. "data" refers to the data: URL scheme. -->
+  <string name="download_item_source_data">(data)</string>
   <!--
     Downloads Content Type Filters
 
@@ -1969,8 +2008,6 @@
   <string name="webcompat_reporter_label_mandatory_description">Fornisci una descrizione dettagliata del problema per aiutarci a esaminarlo</string>
   <!-- The label/title of a optional field in the Web Compat Reporter feature for adding additional information. -->
   <string name="webcompat_reporter_label_optional_description">Fornisci una descrizione dettagliata del problema per aiutarci a esaminarlo (facoltativo)</string>
-  <!-- The button text for the cancel button to leave the Web Compat Reporter feature. -->
-  <string name="webcompat_reporter_cancel">Annulla</string>
   <!-- The button text for the send button to submit the provided form data. -->
   <string name="webcompat_reporter_send_report">Invia segnalazione</string>
   <!-- Text for a snackbar to confirm the successful submission of a WebCompat report. -->
@@ -1983,8 +2020,6 @@
   <string name="webcompat_reporter_preview_report">Anteprima segnalazione</string>
   <!-- The title shown at the top of the WebCompat Report preview panel. This appears after the user taps the “Preview” button before sending a report. -->
   <string name="webcompat_reporter_preview_bottom_sheet_header">Anteprima segnalazione</string>
-  <!-- Label for the “Send” button shown in the WebCompat Report preview panel, which the user taps to submit the report. -->
-  <string name="webcompat_reporter_preview_bottom_sheet_send">Invia</string>
   <!-- Title for the Edit URL confirmation dialog in the WebCompatReporter -->
   <string name="webcompat_reporter_edit_url_dialog_title">Modifica URL del sito web</string>
   <!-- Text shown on the save button for the Edit URL confirmation dialog in the WebCompatReporter. -->
@@ -2120,7 +2155,7 @@
   <!-- Bookmark folder editing screen title -->
   <string name="edit_bookmark_folder_fragment_title">Modifica cartella</string>
   <!-- Bookmark URL editing field label -->
-  <string name="bookmark_url_label">INDIRIZZO</string>
+  <string name="bookmark_url_label">Indirizzo</string>
   <!-- Text indicating which folder a bookmark or folder will be saved in -->
   <string name="bookmark_save_in_label">Salva in</string>
   <!-- Label for a text input field for a bookmark or folder name -->
@@ -2373,14 +2408,14 @@
   <string name="sync_sign_in">Accedi per sincronizzare</string>
   <!-- An option from the share dialog to send link to all other sync devices -->
   <string name="sync_send_to_all">Invia a tutti i dispositivi</string>
-  <!-- Text displayed when no other sync devices are available for link sharing -->
-  <string name="sync_no_devices_available">Nessun dispositivo disponibile</string>
-  <!-- Text displayed when no other sync devices are available for link sharing. -->
-  <string name="sync_no_devices_available_description">Qui verranno mostrati tutti i dispositivi collegati e sincronizzati con questo account.</string>
   <!-- An option from the share dialog to reconnect to sync -->
   <string name="sync_reconnect">Riconnetti a Sync</string>
+  <!-- Label for the button in the share dialog that sends the tab to the selected sync devices -->
+  <string name="sync_send_to_selected_devices">Invia</string>
+  <!-- Content description announced when a device is selected in the share dialog -->
+  <string name="send_to_devices_device_selected_content_description">Selezionato</string>
   <!-- Text displayed when sync is offline and cannot be accessed -->
-  <string name="sync_offline">Non in linea</string>
+  <string name="sync_offline">Non connesso</string>
   <!-- An option to connect additional devices -->
   <string name="sync_connect_device">Connetti un altro dispositivo</string>
   <!-- The dialog text shown when additional devices are not available -->
@@ -2401,6 +2436,24 @@
   <string name="sent_from_firefox_template" tools:ignore="UnusedResources">%1$s \n\nInviato da %2$s 🦊 Prova il browser per dispositivi mobili: %3$s</string>
   <!-- A short message template for the shared link with a footer. %1$s is the shared link, %2$s is the app name (e.g. Firefox) and %3$s is a download link for the app. -->
   <string name="sent_from_firefox_template_short" tools:ignore="UnusedResources">%1$s\n\nInviato da %2$s 🦊 %3$s</string>
+  <!-- Send tab to synced devices: Authentication error title - Message asking the user to re-authenticate -->
+  <string name="sync_send_tab_error_auth_title">Accedi di nuovo per inviare schede tra dispositivi</string>
+  <!-- Send tab to synced devices: Authentication error button - Allows user to re-authenticate -->
+  <string name="sync_send_tab_error_auth_button">Accedi</string>
+  <!-- Send tab to synced devices: Authentication error button - Allows user to remove the currently connected account -->
+  <string name="sync_send_tab_error_auth_remove_account">Rimuovi account</string>
+  <!-- Send tab to synced devices: Empty state title - Displayed when the user has no synced devices -->
+  <string name="sync_send_tab_empty_state_title">Nessun dispositivo connesso</string>
+  <!-- Send tab to synced devices: Empty state message - Displayed when the user has no synced devices -->
+  <string name="sync_send_tab_empty_state_description" tools:ignore="BrandUsage">Per inviare una scheda, accedi all’account Firefox su almeno un altro dispositivo.</string>
+  <!-- Send tab to synced devices: Empty state link - Displayed when the user has no synced devices -->
+  <string name="sync_send_tab_empty_state_link">Scopri come connettere un dispositivo</string>
+  <!-- Send tab to synced devices: Connectivity Error title -->
+  <string name="sync_send_tab_error_connection_title">Verifica la tua connessione a Internet</string>
+  <!-- Send tab to synced devices: Connectivity Error message - Suggested user action after internet connection has been established -->
+  <string name="sync_send_tab_error_connection_text">Poi prova a inviare di nuovo la scheda.</string>
+  <!-- Send tab to synced devices: Connectivity Error button - When tapped, refreshes the list of connected devices. -->
+  <string name="sync_send_tab_error_connection_button">Riprova</string>
   <!--
     Notifications
 
@@ -2422,6 +2475,18 @@
     The app name is in the text, due to limitations with localizing Nimbus experiments
   -->
   <string name="nimbus_notification_default_browser_text" tools:ignore="BrandUsage,UnusedResources">Imposta Firefox come browser predefinito</string>
+  <!--
+    Privacy report notification
+
+    Name of the weekly privacy report notification channel. Displayed in the "App notifications" system settings for the app.
+  -->
+  <string name="notification_privacy_report_channel_name">Rapporto sulla privacy</string>
+  <!-- Description of the weekly privacy report notification channel. Displayed in the "App notifications" system settings for the app. %1$s is the app name (e.g. Firefox) -->
+  <string name="notification_privacy_report_channel_description">%1$s mostra quanti elementi traccianti sono stati bloccati durante la navigazione.</string>
+  <!-- Body text for the weekly privacy report notification for when trackers have been blocked. %1$s is the app name (e.g. Firefox) -->
+  <string name="notification_privacy_report_body_has_trackers">Continua a navigare. %1$s continuerà a bloccare.</string>
+  <!-- Headline text of the weekly privacy report notification for when no trackers have been blocked. %1$s is the app name (e.g. Firefox) -->
+  <string name="notification_privacy_report_headline_no_trackers">%1$s blocca gli elementi traccianti mentre navighi. Li vedrai qui.</string>
   <!--
     Survey
 
@@ -2464,8 +2529,6 @@
   <string name="qr_scanner_dialog_invalid">Indirizzo web non valido.</string>
   <!-- QR code scanner prompt dialog positive option when there is an error -->
   <string name="qr_scanner_dialog_invalid_ok">OK</string>
-  <!-- Tab collection deletion prompt dialog message. %1$s is the collection name. -->
-  <string name="tab_collection_dialog_message">Eliminare %1$s?</string>
   <!-- Sample text for accessibility font size -->
   <string name="accessibility_text_size_sample_text_1">Questo è un testo di esempio. Mostra un’anteprima di come apparirà il testo quando aumenti o riduci le dimensioni dei caratteri con questa impostazione.</string>
   <!-- Summary for Accessibility Text Size Scaling Preference -->
@@ -2475,7 +2538,7 @@
   <!-- Title for Accessibility Text Automatic Size Scaling Preference -->
   <string name="preference_accessibility_auto_size_2">Ridimensiona automaticamente i caratteri</string>
   <!-- Summary for Accessibility Text Automatic Size Scaling Preference -->
-  <string name="preference_accessibility_auto_size_summary">La dimensione dei caratteri corrisponderà alle impostazioni di Android. Disattivare per gestire la dimensione dei caratteri separatamente.</string>
+  <string name="preference_accessibility_auto_size_summary">La dimensione dei caratteri corrisponderà alle impostazioni di Android. Disattiva per gestire la dimensione dei caratteri qui.</string>
   <!-- Title for the Delete browsing data preference -->
   <string name="preferences_delete_browsing_data">Elimina dati di navigazione</string>
   <!-- Title for the tabs item in Delete browsing data -->
@@ -2518,7 +2581,7 @@
   <!-- Radio button in the delete browsing data dialog to delete history items for the last hour. -->
   <string name="delete_history_prompt_button_last_hour">Ultima ora</string>
   <!-- Radio button in the delete browsing data dialog to delete history items for today and yesterday. -->
-  <string name="delete_history_prompt_button_today_and_yesterday">Ieri e oggi</string>
+  <string name="delete_history_prompt_button_today_and_yesterday">Oggi e ieri</string>
   <!-- Radio button in the delete browsing data dialog to delete all history. -->
   <string name="delete_history_prompt_button_everything">Tutto</string>
   <!-- Dialog message to the user asking to delete browsing data. %s is the name of the app (for example "Firefox"). -->
@@ -2550,7 +2613,7 @@
 
     Text shown in snackbar when multiple tabs have been sent to device
   -->
-  <string name="sync_sent_tabs_snackbar_2">Scheda inviata</string>
+  <string name="sync_sent_tabs_snackbar_2">Schede inviate</string>
   <!-- Text shown in snackbar when one tab has been sent to device -->
   <string name="sync_sent_tab_snackbar_2">Scheda inviata</string>
   <!-- Text shown in snackbar when sharing tabs failed -->
@@ -2571,6 +2634,12 @@
   <string name="sign_in_create_account_text" tools:ignore="BrandUsage"><![CDATA[Non hai l’account? <u>Creane uno</u> per sincronizzare Firefox tra vari dispositivi.]]></string>
   <!-- Text shown in confirmation dialog to sign out of account. %s is the name of the app (for example "Firefox"). -->
   <string name="sign_out_confirmation_message_2">I dati di navigazione non verranno più sincronizzati con l’account %s, ma non saranno rimossi dal dispositivo in uso.</string>
+  <!-- Title of the confirmation dialog shown when the user signs out of their account -->
+  <string name="sign_out_dialog_title">Disconnettersi dall’account?</string>
+  <!-- Body of the confirmation dialog shown when the user signs out of their account -->
+  <string name="sign_out_dialog_message">I dati sincronizzati resteranno salvati nel tuo account.</string>
+  <!-- Text for the primary action button of the confirmation dialog shown when the user signs out of their account -->
+  <string name="sign_out_dialog_confirm_button">Disconnetti</string>
   <!-- Option to continue signing out of account shown in confirmation dialog to sign out of account -->
   <string name="sign_out_disconnect">Disconnetti</string>
   <!-- Option to cancel signing out shown in confirmation dialog to sign out of account -->
@@ -2611,7 +2680,7 @@
   <!-- Preference for enhanced tracking protection for the strict protection settings -->
   <string name="preference_enhanced_tracking_protection_strict">Restrittiva</string>
   <!-- Preference description for enhanced tracking protection for the strict protection settings -->
-  <string name="preference_enhanced_tracking_protection_strict_description_4">Maggiore protezione dal tracciamento e prestazioni più veloci, alcuni siti potrebbero non funzionare correttamente.</string>
+  <string name="preference_enhanced_tracking_protection_strict_description_4">Maggiore protezione dal tracciamento e prestazioni più veloci, ma alcuni siti potrebbero non funzionare correttamente.</string>
   <!-- Preference label for the enhanced tracking protection option to fix major site issues caused by tracker blocking -->
   <string name="preference_enhanced_tracking_protection_allow_list_baseline_2">Risolvi problemi gravi con i siti (opzione consigliata)</string>
   <!-- Preference label for the enhanced tracking protection option to fix minor site issues caused by tracker blocking -->
@@ -2711,7 +2780,7 @@
   <!-- Category of trackers (redirect trackers) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_redirect_trackers_title">Traccianti di reindirizzamento</string>
   <!-- Description of redirect tracker cookies that can be blocked by Enhanced Tracking Protection -->
-  <string name="etp_redirect_trackers_description">Elimina i cookie impostati per reindirizzare a siti web noti per il tracciamento.</string>
+  <string name="etp_redirect_trackers_description">Elimina i cookie impostati dai reindirizzamenti a siti web noti per il tracciamento.</string>
   <!-- Preference for fingerprinting protection for the custom protection settings -->
   <string name="etp_suspected_fingerprinters_title">Sospetti fingerprinter</string>
   <!-- Description of fingerprinters that can be blocked by fingerprinting protection -->
@@ -2847,12 +2916,8 @@
   <string name="add_to_homescreen_cancel">Annulla</string>
   <!-- Add button text for the Add to Homescreen dialog -->
   <string name="add_to_homescreen_add">Aggiungi</string>
-  <!-- Continue to website button text for the first-time Add to Homescreen dialog -->
-  <string name="add_to_homescreen_continue">Vai al sito web</string>
   <!-- Placeholder text for the TextView in the Add to Homescreen dialog -->
   <string name="add_to_homescreen_text_placeholder">Nome scorciatoia</string>
-  <!-- Describes the add to homescreen functionality -->
-  <string name="add_to_homescreen_description_2">È possibile aggiungere questo sito web alla schermata principale del dispositivo per accedervi più rapidamente, come se si trattasse di un’app.</string>
   <!-- Preference for managing the settings for logins and passwords in Fenix -->
   <string name="preferences_passwords_logins_and_passwords_2">Password</string>
   <!-- Preference for managing the saving of logins and passwords in Fenix -->
@@ -2994,14 +3059,14 @@
   <!-- Label for the BETA badge for the browser VPN entry in the settings list -->
   <string name="preferences_ip_protection_beta_badge_label">BETA</string>
   <!-- Title for the browser VPN settings screen (displayed in the app bar) -->
-  <string name="ip_protection_title">VPN</string>
+  <string name="ip_protection_settings_title">VPN integrata</string>
   <!-- Label for the browser VPN toggle on the settings screen -->
   <string name="ip_protection_toggle_label">VPN</string>
   <!-- Content description for the browser VPN settings screen top bar back button -->
   <string name="ip_protection_navigate_back_button_content_description">Torna indietro</string>
   <!-- Headline for the browser VPN promo card. %s is the name of the app (for example "Firefox"). -->
   <string name="ip_protection_promo_headline">La VPN integrata di %s</string>
-  <!-- Body text for the browser VPN promo card . %s is a learn more link using ip_protection_learn_more as text. -->
+  <!-- Body text for the browser VPN settings header, shown when no promo is running. %s is a learn more link using ip_protection_learn_more as text. -->
   <string name="ip_protection_promo_body_2">Naviga in modo ancora più sicuro nascondendo la tua posizione, anche quando usi reti Wi-Fi pubbliche. %s</string>
   <!-- Link text that opens additional information about the browser VPN -->
   <string name="ip_protection_learn_more">Ulteriori informazioni</string>
@@ -3022,8 +3087,6 @@
   <string name="ip_protection_location_section">Posizione</string>
   <!-- Label for the recommended automatic location option on the browser VPN settings screen -->
   <string name="ip_protection_location_recommended_label">Consigliata</string>
-  <!-- Description for the recommended automatic location option on the browser VPN settings screen -->
-  <string name="ip_protection_location_recommended_description">Seleziona la posizione VPN più veloce per te.</string>
   <!-- Badge label shown in the menu item when the browser VPN is active -->
   <string name="preferences_ip_protection_on">Attiva</string>
   <!-- Badge label shown in the menu item when the browser VPN is off -->
@@ -3034,8 +3097,8 @@
   <string name="ip_protection_menu_paused">In pausa</string>
   <!-- Badge label shown in the menu item when the browser VPN has an error -->
   <string name="ip_protection_menu_error">Errore</string>
-  <!-- Badge label shown in the menu item when the user is eligible to use the browser VPN but should authenticate or authorize it first. -->
-  <string name="ip_protection_menu_auth_required">Provala</string>
+  <!-- Badge label shown in the VPN menu item when the user is eligible for the feature but needs to authenticate / authorize to enable it -->
+  <string name="ip_protection_menu_try_vpn_cta">Provala gratuitamente</string>
   <!-- Content description for the chevron button that opens the browser VPN settings screen -->
   <string name="ip_protection_navigate_settings">Apri impostazioni VPN</string>
   <!--
@@ -3052,6 +3115,10 @@
   <string name="ip_protection_toolbar_pill_label">VPN attiva</string>
   <!-- Accessibility description for the browser VPN pill in the address bar when the VPN has been activated -->
   <string name="ip_protection_toolbar_pill_description">La VPN è attiva.</string>
+  <!-- Label shown next to the browser protection icon in the address bar when the browser VPN turns off -->
+  <string name="ip_protection_toolbar_pill_label_off">VPN disattivata</string>
+  <!-- Accessibility description for the browser VPN pill in the address bar when the VPN has turned off -->
+  <string name="ip_protection_toolbar_pill_description_off">La VPN è disattivata.</string>
   <!-- Label for the button that starts the browser VPN authentication or authorization flow on the settings screen -->
   <string name="ip_protection_get_started">Inizia</string>
   <!-- Label for the "connecting" state of the button that starts the browser VPN authentication or authorization flow on the settings screen -->
@@ -3078,15 +3145,17 @@
   <string name="ip_protection_onboarding_not_now_button">Non adesso</string>
   <!-- Snackbar (in-app pop-up notification) text to signal the browser VPN connection error -->
   <string name="ip_protection_connection_error_snackbar">Impossibile connettersi alla VPN. Riprova tra qualche minuto.</string>
+  <!-- Snackbar (in-app pop-up notification) text to signal the VPN location has been reset due to the previously selected VPN location being no longer available. -->
+  <string name="ip_protection_location_selection_reset_snackbar">La posizione VPN selezionata non è disponibile. È stata impostata la posizione consigliata.</string>
   <!--
     Snackbar (in-app pop-up notification) text to signal the browser VPN has reached the monthly data limit.
     %1$d is the total monthly allowance in GB (for example "50").
   -->
   <string name="ip_protection_data_limit_reached_snackbar">Hai utilizzato %1$d GB di dati VPN. L’accesso alla VPN verrà reimpostato il mese prossimo.</string>
   <!-- Snackbar (in-app pop-up notification) action button text that takes the user to the VPN settings screen. -->
-  <string name="ip_protection_data_limit_reached_snackbar_action">Impostazioni</string>
+  <string name="ip_protection_open_settings_snackbar_action">Impostazioni</string>
   <!-- Description shown on the browser VPN settings screen prompting the user to turn the VPN on. -->
-  <string name="ip_protection_settings_description" tools:ignore="UnusedResources">Attiva la VPN per proteggere la tua privacy durante la navigazione e rendere più difficile il tracciamento.</string>
+  <string name="ip_protection_settings_description" tools:ignore="UnusedResources">Attiva la VPN per rendere la tua navigazione più privata e difficile da tracciare.</string>
   <!-- Title shown on the browser VPN settings screen for location selection section. -->
   <string name="ip_protection_location_title" tools:ignore="UnusedResources">Posizione</string>
   <!-- Label for the Recommended server location option which is automatically selected by the browser. -->
@@ -3101,6 +3170,8 @@
   <string name="ip_protection_location_picker_title" tools:ignore="UnusedResources">Scegli posizione VPN</string>
   <!-- Description for what it means to use the Recommended setting and let the app automatically pick the best server location. -->
   <string name="ip_protection_location_fastest_description" tools:ignore="BrandUsage">Firefox trova la posizione più veloce</string>
+  <!-- Description for an unavailable VPN location in the location list. -->
+  <string name="ip_protection_location_unavailable_description">Non disponibile</string>
   <!-- Error message shown when the selected browser VPN location is unavailable. -->
   <string name="ip_protection_location_unavailable" tools:ignore="UnusedResources">Posizione non disponibile. Scegline un’altra.</string>
   <!-- Snackbar (in-app pop-up notification) text shown when the previously selected browser VPN location is unavailable and the recommended location was used instead. -->
@@ -3108,15 +3179,11 @@
   <!-- Title for the card shown to the user when we are unable to fetch server locations -->
   <string name="ip_protection_locations_unavailable_title">Posizioni non disponibili</string>
   <!-- Description for the card shown to the user when we are unable to fetch server locations -->
-  <string name="ip_protection_locations_unavailable_description">Passata alla posizione consigliata.</string>
+  <string name="ip_protection_locations_unavailable_description">È stata selezionata la posizione consigliata.</string>
   <!-- Title for the browser VPN location selection screen (displayed in the app bar) -->
   <string name="ip_protection_locations_title">Scegli posizione VPN</string>
   <!-- Content description for the browser VPN location selection screen top bar back button -->
   <string name="ip_protection_locations_navigate_back_button_content_description">Torna indietro</string>
-  <!-- Title for the card shown to the user when we are unable to fetch server locations -->
-  <string name="ip_protection_location_unavailable_title" tools:ignore="UnusedResources">La posizione precedente non è disponibile</string>
-  <!-- Description for the card shown to the user when we are unable to fetch server locations -->
-  <string name="ip_protection_location_unavailable_recommended_description" tools:ignore="UnusedResources">Connesso alla posizione consigliata.</string>
   <!--
     Autofill
 
@@ -3134,7 +3201,7 @@
   <!-- Preference option for syncing credit cards across devices. This is displayed when the user is not signed into sync -->
   <string name="preferences_credit_cards_sync_cards_across_devices">Sincronizza le carte tra i tuoi dispositivi</string>
   <!-- Preference option for syncing credit cards across devices. This is displayed when the user is signed into sync -->
-  <string name="preferences_credit_cards_sync_cards">Sincronizza carte di credito</string>
+  <string name="preferences_credit_cards_sync_cards">Sincronizza carte</string>
   <!-- Preference option for adding a card -->
   <string name="preferences_credit_cards_add_credit_card_2">Aggiungi carta</string>
   <!-- Preference option for managing saved cards -->
@@ -3188,7 +3255,7 @@
   <!-- Error message for card name on card validation -->
   <string name="credit_cards_name_on_card_validation_error_message_2">Aggiungi un nome</string>
   <!-- Message displayed in biometric prompt displayed for authentication before allowing users to view their saved credit cards -->
-  <string name="credit_cards_biometric_prompt_message">Sblocca per visualizzare le carte di credito salvate</string>
+  <string name="credit_cards_biometric_prompt_message">Sblocca per visualizzare le carte salvate</string>
   <!-- Title of warning dialog if users have no device authentication set up -->
   <string name="credit_cards_warning_dialog_title_2">Proteggi i metodi di pagamento salvati</string>
   <!-- Message of warning dialog if users have no device authentication set up -->
@@ -3197,6 +3264,14 @@
   <string name="credit_cards_warning_dialog_set_up_now">Imposta adesso</string>
   <!-- Negative button to ignore warning dialog if users have no device authentication set up -->
   <string name="credit_cards_warning_dialog_later">Più tardi</string>
+  <!-- Title of the dialog shown on Android Automotive OS (in cars) when users have no device authentication set up and try to access their saved passwords, payment methods, or sign in to their account -->
+  <string name="automotive_authentication_setup_dialog_title">Proteggi i tuoi dati sensibili</string>
+  <!-- Message of the dialog shown on Android Automotive OS (in cars) when users have no device authentication set up and try to access their saved passwords, payment methods, or sign in to their account -->
+  <string name="automotive_authentication_setup_dialog_message">Imposta una sequenza di blocco, un PIN o una password per proteggere i dati sensibili salvati quando qualcun altro è alla guida della tua auto.</string>
+  <!-- Primary button on the dialog shown on Android Automotive OS (in cars). Tapping it directs users to the device settings to set up a device lock -->
+  <string name="automotive_authentication_setup_dialog_set_up_now">Imposta adesso</string>
+  <!-- Secondary button of the dialog shown on Android Automotive OS (in cars). Tapping closes the dialogue and cancels the action that triggered the dialogue. -->
+  <string name="automotive_authentication_setup_dialog_cancel">Annulla</string>
   <!-- Title of PIN verification dialog to direct users to re-enter their device credentials to access their credit cards -->
   <string name="credit_cards_biometric_prompt_message_pin">Sblocca il dispositivo</string>
   <!-- Message displayed in biometric prompt for authentication, before allowing users to use their stored payment method information -->
@@ -3252,7 +3327,7 @@
   <!-- Label for an address field (e.g. mailing address) used as part of the form autofill feature. The header for the Do/Si of the address. Do/Si refers to provincial level divisions, pertinent to addresses in South Korea. -->
   <string name="addresses_do_si" tools:ignore="UnusedResources">Do/Si</string>
   <!-- Label for an address field (e.g. mailing address) used as part of the form autofill feature. Used in countries like Nicaragua and Colombia where departments are a key administrative division. -->
-  <string name="addresses_department" tools:ignore="UnusedResources">Reparto</string>
+  <string name="addresses_department" tools:ignore="UnusedResources">Dipartimento</string>
   <!-- Label for an address field (e.g. mailing address) used as part of the form autofill feature. Essential for addresses in the United Arab Emirates. -->
   <string name="addresses_emirate" tools:ignore="UnusedResources">Emirato</string>
   <!-- Label for an address field (e.g. mailing address) used as part of the form autofill feature. Relevant for addresses in countries like Russia and Ukraine. -->
@@ -3339,10 +3414,6 @@
   <string name="browser_menu_remove_from_shortcuts">Rimuovi dalle scorciatoie</string>
   <!-- Message in delete confirmation dialog for password -->
   <string name="login_deletion_confirmation_2">Eliminare questa password?</string>
-  <!-- Positive action of a dialog asking to delete -->
-  <string name="dialog_delete_positive">Rimuovi</string>
-  <!-- Negative action of a dialog asking to delete login -->
-  <string name="dialog_delete_negative">Annulla</string>
   <!-- The page title for editing a saved password. -->
   <string name="edit_2">Modifica password</string>
   <!-- The page title for adding new password. -->
@@ -3507,9 +3578,9 @@
   <!-- Default browser card text -->
   <string name="default_browser_experiment_card_text" tools:ignore="BrandUsage">Apri link da siti web, email e messaggi in Firefox per impostazione predefinita.</string>
   <!-- Content description radio buttons with a link to more information -->
-  <string name="radio_preference_info_content_description">Fare clic per ulteriori dettagli</string>
+  <string name="radio_preference_info_content_description">Tocca per ulteriori dettagli</string>
   <!-- Content description for the action bar "up" button -->
-  <string name="action_bar_up_description">Vai su</string>
+  <string name="action_bar_up_description">Torna indietro</string>
   <!--
     Pocket recommended stories
 
@@ -3541,8 +3612,6 @@
   <string name="a11y_action_label_expand">espandere</string>
   <!-- Action label for links to a website containing documentation about a wallpaper collection. Talkback will append this to say "Double tap to open link to learn more about this collection". -->
   <string name="a11y_action_label_wallpaper_collection_learn_more">aprire il link con ulteriori informazioni su questa raccolta</string>
-  <!-- Translations feature -->
-
   <!--
     Translation request dialog
 
@@ -3580,7 +3649,7 @@
   <!-- Button text on the translations dialog when a translation error appears. -->
   <string name="translations_bottom_sheet_positive_button_error">Riprova</string>
   <!-- Inactive button text on the translations dialog that indicates a translation is currently in progress. This button will be accompanied by a loading icon. -->
-  <string name="translations_bottom_sheet_translating_in_progress">Traduzione</string>
+  <string name="translations_bottom_sheet_translating_in_progress">Traduzione in corso</string>
   <!-- Button content description (not visible, for screen readers etc.) for the translations dialog translate button that indicates a translation is currently in progress. -->
   <string name="translations_bottom_sheet_translating_in_progress_content_description">Traduzione in corso</string>
   <!-- Default dropdown option when initially selecting a language from the translations dialog language selection dropdown. -->
@@ -3727,7 +3796,7 @@
   <!-- All languages list item. When the user presses this item, they can delete all languages that were downloaded. -->
   <string name="download_language_all_languages_item_preference_to_delete">Elimina tutte le lingue</string>
   <!-- Content description (not visible, for screen readers etc.): For a language list item that was downloaded, the user can now delete it. -->
-  <string name="download_languages_item_content_description_downloaded_state">Rimuovi</string>
+  <string name="download_languages_item_content_description_downloaded_state">Elimina</string>
   <!-- Content description (not visible, for screen readers etc.): For a language list item, deleting is in progress. -->
   <string name="download_languages_item_content_description_delete_in_progress_state">In corso</string>
   <!--
@@ -3830,17 +3899,16 @@
   <string name="protection_panel_etp_toggle_enabled_description_2">Se qualcosa non funziona su questo sito, prova a disattivarla.</string>
   <!-- Description text for the Enhanced Tracking Protection toggle when tracking protection is disabled. -->
   <string name="protection_panel_etp_toggle_disabled_description_2">È consigliato attivare la protezione antitracciamento.</string>
-  <!--
-    Text for displaying the total number of trackers blocked in the protection panel.
-    %d is a placeholder for the number of trackers blocked.
-  -->
-  <string name="protection_panel_num_trackers_blocked">Elementi traccianti bloccati: %d</string>
   <!-- Text for when tracking protection is disabled and no trackers are blocked. -->
   <string name="protection_panel_etp_disabled_no_trackers_blocked">Gli elementi traccianti non sono bloccati</string>
   <!-- Link text to navigate to privacy and security settings from the protection panel. -->
   <string name="protection_panel_privacy_and_security_settings_2">Impostazioni per la privacy</string>
   <!-- Title text for the protection panel permissions section. -->
   <string name="protection_panel_permissions_title">Permessi</string>
+  <!-- Certificate panel - Title of the section that contains the website's certificate information (issued to, issued by, etc.) as verified by Firefox (thus guaranteeing the HTTPS connection is secure) -->
+  <string name="certificate_details_panel_secure_connection_title">Connessione sicura</string>
+  <!-- Certificate panel - Content description (not visible, for screen readers etc.) for the EU trust mark logo, shown when the website's certificate is a Qualified Website Authentication Certificate (QWAC) as specified in EU Regulation 2024/1183 -->
+  <string name="certificate_details_panel_eu_trust_mark_content_description">Marchio di fiducia UE</string>
   <plurals name="trackers_blocked_panel_total_num_trackers_blocked_2">
     <!--
       Text for displaying the total number of trackers blocked in the trackers blocked panel.
@@ -3901,7 +3969,7 @@
     Description text for a dialog confirming whether the user wants to delete all data for current site.
     %s is a placeholder for the base domain of website.
   -->
-  <string name="clear_site_data_dialog_description"><![CDATA[La rimozione di cookie e dati dei siti web per <b>%s</b> potrebbe disconnetterti dal sito o svuotare eventuali carrelli in sospeso.]]></string>
+  <string name="clear_site_data_dialog_description"><![CDATA[La rimozione di cookie e dati dei siti web per <b>%s</b> potrebbe disconnetterti dai siti e svuotare eventuali carrelli in sospeso.]]></string>
   <!-- Button text on the clear site data dialog to allow users to confirm they wish to clear the site data. -->
   <string name="clear_site_data_dialog_positive_button_text">Cancella</string>
   <!-- Button text on the clear site data dialog to allow users to cancel the action and not clear the site data. -->
@@ -4095,11 +4163,11 @@
   -->
   <string name="debug_drawer_addresses_title">Indirizzi</string>
   <!-- The title of the section header for the list of debug locales that can be enabled and disabled. -->
-  <string name="debug_drawer_addresses_debug_locales_header">Scelta delle lingue da attivare</string>
+  <string name="debug_drawer_addresses_debug_locales_header">Scelta dei locale da attivare</string>
   <!-- The title of the header for the section for managing addresses. -->
   <string name="debug_drawer_addresses_management_header">Gestisci indirizzi</string>
   <!-- The title of the button in the debug drawer for adding a new address. -->
-  <string name="debug_drawer_add_new_address">Aggiungi un nuovo indirizzo per la lingua selezionata</string>
+  <string name="debug_drawer_add_new_address">Aggiungi un nuovo indirizzo per il locale selezionato</string>
   <!-- The title of the button for deleting in the debug drawer all addresses. -->
   <string name="debug_drawer_delete_all_addresses">Elimina tutti gli indirizzi</string>
   <!--
@@ -4119,7 +4187,7 @@
   -->
   <string name="debug_drawer_cfr_tools_title">Strumenti CFR</string>
   <!-- The title of the reset CFR section in CFR Tools -->
-  <string name="debug_drawer_cfr_tools_reset_cfr_title">Ripristina CFR</string>
+  <string name="debug_drawer_cfr_tools_reset_cfr_title">Reimposta CFR</string>
   <!--
     Glean debug tools
 
@@ -4147,7 +4215,7 @@
   <!-- The title of the button for overriding home and current region. -->
   <string name="debug_drawer_override_region">Sovrascrivi regioni home e corrente</string>
   <!-- The title of the button for overriding home region permanently. -->
-  <string name="debug_drawer_override_home_region_permanently">Sostituisci regione home in modo permanente</string>
+  <string name="debug_drawer_override_home_region_permanently">Sovrascrivi regione home in modo permanente</string>
   <!--
     Add-ons debug tools
 
@@ -4209,9 +4277,7 @@
   <!-- Push notification message about old Firefox version. "Update" is a verb. -->
   <string name="certificate_warning_push_notification_pnw2_message" tools:ignore="UnusedResources">Aggiorna prima del 14 marzo per continuare a utilizzare componenti aggiuntivi e altre caratteristiche.</string>
   <!-- Push notification message about old Firefox version -->
-  <string name="certificate_warning_push_notification_pnw3_message" tools:ignore="UnusedResources">Alcune funzioni smetteranno di funzionare da domani.</string>
-  <!-- TextField Design System Component -->
-
+  <string name="certificate_warning_push_notification_pnw3_message" tools:ignore="UnusedResources">Alcune funzioni smetteranno di funzionare domani.</string>
   <!--
     Setup checklist feature
 
@@ -4370,8 +4436,6 @@
   <string name="settings_search_no_results_message">Prova con un’altra ricerca?</string>
   <!-- Content Description for the button to open Settings Search (to search through settings). -->
   <string name="settings_search_button_content_description">Pulsante di ricerca nelle impostazioni</string>
-  <!-- ==== Terms of use pop up prompt ==== -->
-
   <!-- Title for the pop up prompt -->
   <string name="terms_of_use_prompt_title">Abbiamo un aggiornamento</string>
   <!--
@@ -4396,8 +4460,6 @@
   <string name="terms_of_use_prompt_accept">Accetta</string>
   <!-- Label for a button to postpone accepting the terms of use -->
   <string name="terms_of_use_prompt_postpone">Ricordamelo più tardi</string>
-  <!-- ==== Experiment strings. ==== -->
-
   <!-- A title for the popup prompt. -->
   <string name="terms_of_use_prompt_title_option_a" tools:ignore="UnusedResources">Condizioni di utilizzo del servizio</string>
   <!--
@@ -4415,220 +4477,76 @@
   <!--
     Sports widget
 
-    Title text shown at the top of the sports widget country selector, encouraging the user to pick a national team to follow.
+    Label shown on the sports widget scoreboard when a match is currently being played live.
   -->
-  <string name="sports_widget_country_selector_title">Segui la tua squadra</string>
-  <!-- Section header for the North America region in the sports widget country selector. -->
-  <string name="sports_widget_confederation_north_america">Nord America</string>
-  <!-- Section header for the Africa confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_africa">Africa</string>
-  <!-- Section header for the Asia confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_asia">Asia</string>
-  <!-- Section header for the CONCACAF confederation group in the sports widget country selector. "CONCACAF" is the abbreviation for "Confederation of North, Central America and Caribbean Association Football". -->
-  <string name="sports_widget_confederation_concacaf">CONCACAF</string>
-  <!-- Section header for the Europe confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_europe">Europa</string>
-  <!-- Section header for the Oceania confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_oceania">Oceania</string>
-  <!-- Section header for the South America confederation group in the sports widget country selector. -->
-  <string name="sports_widget_confederation_south_america">Sud America</string>
-  <!-- Country name for England in the sports widget. England cannot be resolved with the Android Intl APIs so it needs an explicit string. -->
-  <string name="sports_widget_country_england">Inghilterra</string>
-  <!-- Country name for Scotland in the sports widget. Scotland cannot be resolved with the Android Intl APIs so it needs an explicit string. -->
-  <string name="sports_widget_country_scotland">Scozia</string>
-  <!-- Label shown on the sports widget scoreboard when a match is currently being played live. -->
-  <string name="sports_widget_match_live">LIVE</string>
-  <!-- Title shown on the sports widget champion scoreboard row celebrating the soccer tournament winner. -->
-  <string name="sports_widget_champions_title">Campioni della Coppa del mondo 2026</string>
-  <!-- Title shown on the sports widget champion scoreboard celebrating the soccer tournament runners-up. Runners-up means second place. -->
-  <string name="sports_widget_runner_up_title" tools:ignore="UnusedResources">Secondi classificati</string>
-  <!-- Title shown on the sports widget champion scoreboard celebrating the soccer tournament third place winners. -->
-  <string name="sports_widget_third_place_title">Terzo posto</string>
-  <!-- Round name shown on the sports widget for the Round of 32 stage in the soccer tournament. -->
-  <string name="sports_widget_round_of_32">Sedicesimi di finale</string>
-  <!-- Round name shown on the sports widget for the Round of 16 stage in the soccer tournament. -->
-  <string name="sports_widget_round_of_16">Ottavi di finale</string>
-  <!-- Round name shown on the sports widget for the quarter-finals stage in the soccer tournament. -->
-  <string name="sports_widget_quarter_final">Quarti di finale</string>
-  <!-- Round name shown on the sports widget for the semi-finals stage in the soccer tournament. -->
-  <string name="sports_widget_semi_final">Semifinali</string>
-  <!-- Round name shown on the sports widget for the final stage in the soccer tournament. -->
-  <string name="sports_widget_final">Finale</string>
-  <!-- Round name shown on the sports widget for the bronze final stage in the soccer tournament. -->
-  <string name="sports_widget_bronze_final">Finale per il terzo posto</string>
-  <!-- Sports widget error card message shown when match data fails to load. -->
-  <string name="sports_widget_error_load_failed" tools:ignore="UnusedResources">Le informazioni sulla partita non sono al momento disponibili. Prova ad aggiornare tra qualche minuto.</string>
-  <!-- Sports widget error card message shown when the network connection is interrupted and live updates pause. -->
-  <string name="sports_widget_error_connection_interrupted" tools:ignore="UnusedResources">Connessione interrotta: aggiornamenti in tempo reale sospesi.</string>
+  <string name="wrex_widget_match_live">LIVE</string>
+  <!-- Label shown on the sports widget match status badge when the start of a match has been delayed. -->
+  <string name="wrex_widget_match_delayed">In ritardo</string>
+  <!-- Label shown on the sports widget match status badge when a match has been suspended after it started. -->
+  <string name="wrex_widget_match_suspended">Sospesa</string>
+  <!-- Label shown on the sports widget match status badge when a match has been postponed to a later date. -->
+  <string name="wrex_widget_match_postponed">Rinviata</string>
   <!-- Sports widget action label to refresh match data after an error. -->
-  <string name="sports_widget_error_refresh">Aggiorna</string>
-  <!-- Sports widget group stage label for group A in the soccer tournament. -->
-  <string name="sports_widget_group_a">Gruppo A</string>
-  <!-- Sports widget group stage label for group B in the soccer tournament. -->
-  <string name="sports_widget_group_b">Gruppo B</string>
-  <!-- Sports widget group stage label for group C in the soccer tournament. -->
-  <string name="sports_widget_group_c">Gruppo C</string>
-  <!-- Sports widget group stage label for group D in the soccer tournament. -->
-  <string name="sports_widget_group_d">Gruppo D</string>
-  <!-- Sports widget group stage label for group E in the soccer tournament. -->
-  <string name="sports_widget_group_e">Gruppo E</string>
-  <!-- Sports widget group stage label for group F in the soccer tournament. -->
-  <string name="sports_widget_group_f">Gruppo F</string>
-  <!-- Sports widget group stage label for group G in the soccer tournament. -->
-  <string name="sports_widget_group_g">Gruppo G</string>
-  <!-- Sports widget group stage label for group H in the soccer tournament. -->
-  <string name="sports_widget_group_h">Gruppo H</string>
-  <!-- Sports widget group stage label for group I in the soccer tournament. -->
-  <string name="sports_widget_group_i">Gruppo I</string>
-  <!-- Sports widget group stage label for group J in the soccer tournament. -->
-  <string name="sports_widget_group_j">Gruppo J</string>
-  <!-- Sports widget group stage label for group K in the soccer tournament. -->
-  <string name="sports_widget_group_k">Gruppo K</string>
-  <!-- Sports widget group stage label for group L in the soccer tournament. -->
-  <string name="sports_widget_group_l">Gruppo L</string>
-  <!-- Sports widget button label to see match results. -->
-  <string name="sports_widget_see_results" tools:ignore="UnusedResources">Visualizza risultati</string>
-  <!-- Sports widget button label to view details of a soccer match results. -->
-  <string name="sports_widget_view_match_details" tools:ignore="UnusedResources">Visualizza dettagli della partita</string>
-  <!-- Sports widget section header for related soccer matches in the same group. -->
-  <string name="sports_widget_related_matches" tools:ignore="UnusedResources">Partite collegate</string>
-  <!-- Sports widget section header for a list of upcoming soccer matches that have not yet started. -->
-  <string name="sports_widget_upcoming" tools:ignore="UnusedResources">In arrivo</string>
-  <!-- Sports widget match status suffix appended to match scores (e.g., "3 - 2 (Full time)") to indicate the match has been completed. -->
-  <string name="sports_widget_match_full_time_suffix">(Fine partita)</string>
-  <!-- Sports widget match status to indicate the match has been completed. -->
-  <string name="sports_widget_match_full_time_2">Fine partita</string>
-  <!--
-    Sports widget card title encouraging the user to follow the soccer tournament. “Keep tabs on” is an informal expression
-    meaning to stay updated on or regularly follow something (in this case, World Cup matches and updates).
-    It’s playfully related to Firefox in that “tabs” are a browser feature.
-    It suggests ongoing awareness rather than active monitoring or control. Not to be translated literally as physical “tabs”
-    or tracking in a technical sense; the meaning is about staying informed.
-  -->
-  <string name="sports_widget_card_title">Resta aggiornato sui Mondiali</string>
-  <!-- Sports widget card description shown below the title on the homepage entry point. -->
-  <string name="sports_widget_card_description">Ricevi aggiornamenti in tempo reale sulle partite e altro ancora.</string>
-  <!-- Sports widget menu item to change the selected team. -->
-  <string name="sports_widget_change_team">Cambia squadra</string>
-  <!-- Sports widget menu item to get a custom wallpaper for the widget. -->
-  <string name="sports_widget_get_custom_wallpaper">Ottieni uno sfondo personalizzato</string>
+  <string name="wrex_widget_error_refresh">Aggiorna</string>
+  <!-- Sports widget menu item to view the team's match results. -->
+  <string name="wrex_widget_results">Risultati</string>
+  <!-- Sports widget menu item to view the league standings table. -->
+  <string name="wrex_widget_standings">Classifiche</string>
+  <!-- Sports widget menu item to browse the team's wallpapers. -->
+  <string name="wrex_widget_wallpapers">Sfondi</string>
   <!-- Sports widget menu item to remove the widget from the homepage. -->
-  <string name="sports_widget_remove">Rimuovi</string>
-  <!-- Sports widget card title shown after a team is eliminated, asking if the user still wants to continue following the soccer tournament. -->
-  <string name="sports_widget_still_want_to_follow">Vuoi continuare a seguire il torneo?</string>
-  <!-- Sports widget card description shown after a team is eliminated, suggesting to choose another team. -->
-  <string name="sports_widget_choose_another_team">Scegli un’altra squadra per continuare a seguire la Coppa del mondo.</string>
-  <!-- Sports widget button label to follow another team after the current team is eliminated. -->
-  <string name="sports_widget_follow_another_team">Segui un’altra squadra</string>
-  <!-- Sports widget card title shown before the soccer tournament begins on top of a timer that is counting down. -->
-  <string name="sports_widget_countdown_to_world_cup">Conto alla rovescia per i Mondiali</string>
-  <!-- Sports widget button label that navigates the user to the full soccer tournament match schedule. -->
-  <string name="sports_widget_view_schedule">Vedi il calendario</string>
-  <!-- Sports widget button label that dismisses the step of choosing a team to follow. -->
-  <string name="sports_widget_skip">Salta</string>
-  <!-- Sports widget match status label shown during halftime of a match. -->
-  <string name="sports_widget_halftime" tools:ignore="UnusedResources">Intervallo</string>
-  <!-- Sports widget match status label shown during extra time of a match. -->
-  <string name="sports_widget_extra_time">Tempi supplementari</string>
+  <string name="wrex_widget_remove_widget">Rimuovi widget</string>
+  <!-- Sports widget match status label shown at full-time (abbreviated) - indicates the match has ended, after regulation and extra time have been played -->
+  <string name="wrex_widget_match_full_time_short">FIN</string>
+  <!-- Sports widget match status label shown during half-time of a match. -->
+  <string name="wrex_widget_match_half_time">Intervallo</string>
+  <!-- Sports widget match status label shown during extra time of a match (abbreviated) -->
+  <string name="wrex_widget_match_extra_time_short">TS</string>
   <!-- Sports widget match status label shown during penalties of a match. -->
-  <string name="sports_widget_penalties">Rigori</string>
-  <!--
-    Sports widget countdown label for days. D is short for Day. The layout only allows for 1–2 characters:
-    if there is an equivalent single character for your language, use that (e.g. T for German).
-    Your translation will be automatically truncated at 2 characters to avoid layout issues.
-  -->
-  <string name="sports_widget_countdown_days">G</string>
-  <!--
-    Sports widget countdown pill abbreviated label for hours. H is short for Hour. The layout only allows for 1–2 characters:
-    if there is an equivalent single character for your language, use that (e.g. S for German).
-    Your translation will be automatically truncated at 2 characters to avoid layout issues.
-  -->
-  <string name="sports_widget_countdown_hours">H</string>
-  <!--
-    Sports widget countdown pill abbreviated label for minutes. M is short for Minute. The layout only allows for 1–2 characters:
-    if there is an equivalent single character for your language, use that.
-    Your translation will be automatically truncated at 2 characters to avoid layout issues
-  -->
-  <string name="sports_widget_countdown_minutes">M</string>
-  <!-- Content description (for accessibility, not displayed) for the close button on the sports widget team / country selector. -->
-  <string name="sports_widget_close_team_selection_sheet_content_description">Chiudi il foglio per la selezione della squadra</string>
-  <!-- Content description (for accessibility, not displayed) for the close button on the sports widget card. -->
-  <string name="sports_widget_close_content_description">Chiudi</string>
+  <string name="wrex_widget_match_penalties">Rigori</string>
   <!-- Content description (for accessibility, not displayed) for the overflow (more options) menu button on the sports widget card. -->
-  <string name="sports_widget_more_options_content_description">Altre opzioni</string>
-  <!--
-    Content description (for accessibility, not displayed) announcing the time remaining until the soccer tournament kickoff.
-    %1$d is the number of days, %2$d is the number of hours, and %3$d is the number of minutes.
-  -->
-  <string name="sports_widget_countdown_remaining_content_description">Tempo rimanente. Giorni: %1$d. Ore: %2$d. Minuti: %3$d.</string>
-  <!-- Content description (for accessibility, not displayed)  for the action that navigates to the World Cup website. -->
-  <string name="sports_widget_go_to_world_cup_site_content_description" tools:ignore="UnusedResources">Vai al sito della Coppa del mondo</string>
-  <!--
-    Content description (for accessibility, not displayed)  announcing an upcoming soccer match.
-    %1$s is the home team name, %2$s is the away team name, %3$s is the match date, %4$s is the kickoff time.
-  -->
-  <string name="sports_widget_upcoming_match_content_description">In arrivo: %1$s contro %2$s, il %3$s alle %4$s</string>
+  <string name="wrex_widget_more_options_content_description">Altre opzioni</string>
   <!--
     Content description (for accessibility, not displayed) announcing a soccer match.
     %1$s is the home team name, %2$s is the away team name, %3$s is trailing context
     (e.g. formatted score "1 - 2 (Full time)", upcoming match info "Jun 19 5:00 PM",
     or a match status like "Full time").
   -->
-  <string name="sports_widget_match_content_description">%1$s contro %2$s, %3$s</string>
+  <string name="wrex_widget_match_content_description">%1$s contro %2$s, %3$s</string>
   <!--
-    Content description (for accessibility, not displayed)  used for the sports widget card header announcing a live match for a group or stage.
-    %s is the soccer tournament group name or stage (e.g. Group A represented by sports_widget_group_a, Round of 32 represented by sports_widget_round_of_32,
-    or Final represented by sports_widget_final).
+    Content description (for accessibility, not displayed) used for the sports widget card header announcing a live match.
+    %s is the name of the competition the match belongs to (e.g. "FA Cup").
   -->
-  <string name="sports_widget_live_game_content_description">%s, partita in corso</string>
+  <string name="wrex_widget_live_game_content_description">%s, partita in corso</string>
   <!--
     Content description (for accessibility, not displayed) announcing a live score.
     %1$s is the home team name, %2$d is the home team score, %3$s is the away team name, %4$d is the away team score,
     and %5$s is the match elapsed time (e.g. 72 minutes).
   -->
-  <string name="sports_widget_live_score_content_description">%1$s %2$d, %3$s %4$d, %5$s, in corso</string>
+  <string name="wrex_widget_live_score_content_description">%1$s %2$d, %3$s %4$d, %5$s, in corso</string>
   <!--
     Content description (for accessibility, not displayed) announcing the elapsed minutes of a live match.
     %1$s is the clock value, which may be a plain number (e.g. "72") or include extra time (e.g. "90+3").
   -->
-  <string name="sports_widget_match_elapsed_minutes">Tempo trascorso in minuti: %1$s</string>
+  <string name="wrex_widget_match_elapsed_minutes">Minuti trascorsi: %1$s</string>
   <!--
     Content description (for accessibility, not displayed) for a paginated item.
-    %1$s is the soccer tournament group name or stage (e.g. Group A represented by sports_widget_group_a, Round of 32 represented by sports_widget_round_of_32),
+    %1$s is the name of the competition the match belongs to (e.g. "FA Cup"),
     %2$d is the current page number, and %3$d is the total number of pages.
   -->
-  <string name="sports_widget_page_position_content_description">%1$s, pagina %2$d di %3$d</string>
-  <!--
-    Content description (for accessibility, not displayed) for a page within the World Cup final results carousel.
-    %1$d is the current page number, and %2$d is the total number of pages.
-  -->
-  <string name="sports_widget_final_results_page_content_description" tools:ignore="UnusedResources">Risultati finali della Coppa del mondo, pagina %1$d di %2$d</string>
-  <!-- Content description (for accessibility, not displayed) for the World Cup final results page. -->
-  <string name="sports_widget_final_results_content_description">Risultati finali dei Mondiali</string>
-  <!-- Content description (for accessibility, not displayed) for the remove button that removes the sports widget from the homepage. -->
-  <string name="sports_widget_remove_content_description" tools:ignore="UnusedResources">Rimuovi Coppa del mondo dalla pagina iniziale</string>
-  <!-- Title shown on the sports widget immediately after the user has followed a team. %s is the selected team (e.g., "USA"). -->
-  <string name="sports_widget_team_followed_title">Stai seguendo: \n%s</string>
-  <!-- Description shown on the sports widget immediately after the user has followed a team -->
-  <string name="sports_widget_team_followed_description">Controlla di nuovo per aggiornamenti sulle partite man mano che il torneo si avvicina.</string>
-  <!-- Sports widget match status label shown during first half of a match. -->
-  <string name="sports_widget_first_half" tools:ignore="UnusedResources">Primo tempo</string>
-  <!-- Sports widget match status label shown during second half of a match. -->
-  <string name="sports_widget_second_half" tools:ignore="UnusedResources">Secondo tempo</string>
+  <string name="wrex_widget_page_position_content_description">%1$s, pagina %2$d di %3$d</string>
   <!-- Sports widget error card title shown when the user is offline. -->
-  <string name="sports_widget_error_connection_offline_title">Sembra che tu non sia connesso a Internet.</string>
+  <string name="wrex_widget_error_connection_offline_title">Sembra che tu non sia connesso a Internet</string>
   <!-- Sports widget error card description shown when the user is offline. -->
-  <string name="sports_widget_error_connection_offline_description">Verifica la connessione a Internet e riprova.</string>
-  <!-- Sports widget general group stage label in the soccer tournament. -->
-  <string name="sports_widget_group_stage">Fase a gironi</string>
+  <string name="wrex_widget_error_connection_offline_description">Controlla la connessione a Internet e riprova.</string>
   <!-- Sports widget error card title shown when match data fails to load. -->
-  <string name="sports_widget_error_load_failed_title">Le informazioni sulla partita non sono disponibili al momento.</string>
-  <!-- Sports widget error card description shown when match data fails to load. -->
-  <string name="sports_widget_error_load_failed_description">Prova ad aggiornare tra qualche minuto.</string>
+  <string name="wrex_widget_error_load_failed_title">Impossibile mostrare ora le informazioni sulla partita</string>
+  <!-- Sports widget error card description suggesting to refresh after match information could not be displayed. -->
+  <string name="wrex_widget_error_try_refreshing">Prova ad aggiornare la pagina o riprova più tardi.</string>
+  <!-- Sports widget error card title shown when the latest match results fail to load. -->
+  <string name="wrex_widget_error_results_load_failed_title">I risultati non sono disponibili al momento</string>
   <!-- Content description (for accessibility, not displayed) for teams which have not yet been determined in the match schedule. -->
-  <string name="sports_widget_team_to_be_determined">Squadra da definire</string>
-  <!-- ==== End of Terms of use popup prompt. ==== -->
-
+  <string name="wrex_widget_team_to_be_determined">Squadra da definire</string>
   <!--
     Privacy notice homepage banner
 
@@ -4656,7 +4574,7 @@
   <!-- Lens image search button content description -->
   <string name="lens_search_content_description">Cerca con immagine</string>
   <!-- Content description for the gallery picker button in the Lens camera screen -->
-  <string name="content_description_gallery">Seleziona una foto dalla galleria da inviare a Google Lens</string>
+  <string name="content_description_gallery">Seleziona dalla galleria un’immagine da inviare a Google Lens</string>
   <!-- Content description for the shutter button in the Lens camera screen -->
   <string name="content_description_take_photo">Scatta una foto e inviala a Google Lens</string>
   <!-- Image context menu entry that sends the long-pressed image to Google Lens -->
@@ -4678,13 +4596,25 @@
   <!-- Description for the Google Lens Search Settings page feature toggle -->
   <string name="search_settings_google_lens_description">Invia immagini e foto a Google per una ricerca visiva.</string>
   <!-- Caption shown under the Google Lens toggle clarifying when the feature is available -->
-  <string name="preferences_google_lens_availability_caption">Disponibile solo se Google è attivo ed è impostato come motore di ricerca predefinito durante la navigazione.</string>
+  <string name="preferences_google_lens_availability_caption">Disponibile solo se Google è attivo qui sopra ed è il motore di ricerca in uso durante la navigazione.</string>
   <!-- Content description for the Google Lens half of the camera mode toggle -->
   <string name="lens_camera_mode_lens">Google Lens</string>
   <!-- Content description for the QR scanner half of the camera mode toggle -->
   <string name="lens_camera_mode_qr">Scanner QR</string>
   <!-- Toast shown when the user picks an image from the gallery in QR mode but no QR code is found in it -->
   <string name="lens_camera_qr_no_code_found">Nessun codice QR rilevato nell’immagine</string>
+  <!-- Status shown under an image picked from the gallery or taken with the camera while it is being sent to Google Lens for a visual search -->
+  <string name="lens_camera_loading_status">Ricerca in corso</string>
+  <!-- Button shown under an image picked from the gallery or taken with the camera while it is being sent to Google Lens. Tapping it stops the search and returns to the camera. -->
+  <string name="lens_camera_loading_cancel_button">Annulla</string>
+  <!-- Snackbar message shown when an image picked from the gallery or taken with the camera could not be opened or read, so it was never sent to Google Lens. Shown after returning to the camera. -->
+  <string name="lens_camera_image_load_failed_v2">Impossibile caricare questa immagine.</string>
+  <!-- Snackbar message shown when an image picked from the gallery could not be opened or read, so it was never sent to Google Lens. Shown after returning to the camera. -->
+  <string name="lens_camera_image_load_failed">Impossibile caricare questa immagine. Provane un’altra.</string>
+  <!-- Snackbar message shown when an image picked from the gallery or taken with the camera could not be searched because of a network problem or an error from Google Lens. Shown after returning to the camera, next to the lens_camera_upload_failed_retry_button action. -->
+  <string name="lens_camera_upload_failed">Impossibile ottenere risultati da Google Lens</string>
+  <!-- Action in the snackbar shown when an image picked from the gallery or taken with the camera could not be searched with Google Lens. Tapping it searches the same image again. -->
+  <string name="lens_camera_upload_failed_retry_button">Riprova</string>
   <!-- Title of the bottom sheet shown the first time the user opens the Google Lens camera screen -->
   <string name="lens_opt_out_title">Cerca con Google Lens</string>
   <!-- Description of the bottom sheet shown the first time the user opens the Google Lens camera screen -->
@@ -4739,4 +4669,50 @@
   <string name="firefox_labs_website_isolation_title" tools:ignore="UnusedResources">Isolamento dei siti web</string>
   <!-- Description of the Firefox Labs Sandboxing experiment. -->
   <string name="firefox_labs_website_isolation_description" tools:ignore="UnusedResources">Una barriera aggiuntiva tra i siti web che contribuisce a proteggere i tuoi dati tra schede diverse. Può influire sulle prestazioni, sulla stabilità, sul funzionamento dei siti web e sul salvataggio della cronologia di navigazione.</string>
+  <!--
+    PDF viewer toolbar and buttons
+
+    Content description for accessibility (used by screen readers): Description for the button that triggers the start of a signature workflow on the PDF displayed on the screen.
+  -->
+  <string name="pdf_tools_sign_content_description_2">Aggiungi una firma</string>
+  <!-- Content description for accessibility (used by screen readers): Description of the button that downloads the PDF displayed on the screen to the user's device. -->
+  <string name="pdf_tools_download_content_description">Scarica PDF</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the button that opens the printing dialogue window for the PDF displayed on the screen. -->
+  <string name="pdf_tools_print_content_description">Stampa PDF</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the button that opens the sharing options for the PDF being displayed on the screen. -->
+  <string name="pdf_tools_share_content_description">Condividi PDF</string>
+  <!--
+    PDF viewer add a signature dialog
+
+    The title of the dialog for adding a signature to a PDF.
+  -->
+  <string name="pdf_tools_signature_title">Aggiungi una firma</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the button that closes the dialog for adding a signature to a PDF. -->
+  <string name="pdf_tools_signature_close_content_description">Chiudi il pannello per la firma del PDF</string>
+  <!-- The placeholder text shown in the empty text input field where users can enter the signature they wish to add to a PDF. -->
+  <string name="pdf_tools_signature_placeholder">Inserisci la firma</string>
+  <!-- The text for the button that erases the text the user entered in the "add a signature" field. -->
+  <string name="pdf_tools_signature_clear_button">Cancella</string>
+  <!-- The text for the button that adds the signature the user has typed to the PDF. -->
+  <string name="pdf_tools_signature_add_button">Aggiungi</string>
+  <!-- Content description for accessibility (used by screen readers): Description for the loading indicator when a signature is in the process of being added to a PDF. -->
+  <string name="pdf_tools_signature_adding_content_description">Inserimento della firma</string>
+  <!--
+    Listen to page
+
+    Content description for the reader view panel: a group of buttons floating over the content, which allow customizing the reader view or activating the Listen to Page feature
+  -->
+  <string name="reader_mode_panel_content_description_2">Opzioni della modalità lettura</string>
+  <!--
+    Listen to page
+
+    Content description for the reader mode panel: a group of buttons floating over the content
+  -->
+  <string name="reader_mode_panel_content_description">Opzioni modalità lettura</string>
+  <!-- Content description for the button in the reader view panel that turns on the Listen to Page feature (playback of content begins when button is pressed) -->
+  <string name="reader_mode_panel_listen_content_description">Leggi ad alta voce</string>
+  <!-- Content description for media player displayed in Reader view when the Listen to Page (Read Aloud) feature is selected -->
+  <string name="reader_mode_panel_media_player_content_description">Riproduttore multimediale</string>
+  <!-- Content description for the reader view button Reader view facilitates readability and has a Listen to Page feature. Button icon is a document with headphones, and is displayed next to the page URL when the feature is available. -->
+  <string name="browser_menu_read_or_listen">Modalità lettura, leggi o ascolta la pagina</string>
 </resources>

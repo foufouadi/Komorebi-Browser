@@ -31,8 +31,8 @@ namespace SVGT = SVGGeometryProperty::Tags;
 
 nsContainerFrame* NS_NewSVGForeignObjectFrame(mozilla::PresShell* aPresShell,
                                               mozilla::ComputedStyle* aStyle) {
-  return new (aPresShell)
-      mozilla::SVGForeignObjectFrame(aStyle, aPresShell->GetPresContext());
+  return new mozilla::SVGForeignObjectFrame(aStyle,
+                                            aPresShell->GetPresContext());
 }
 
 namespace mozilla {
@@ -137,7 +137,7 @@ void SVGForeignObjectFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   if (!static_cast<const SVGElement*>(GetContent())->HasValidDimensions()) {
     return;
   }
-  nsDisplayList newList(aBuilder);
+  nsDisplayList newList;
   nsDisplayListSet set(&newList, &newList, &newList, &newList, &newList,
                        &newList);
   DisplayOutline(aBuilder, set);
@@ -294,6 +294,9 @@ void SVGForeignObjectFrame::NotifySVGChanged(ChangeFlags aFlags) {
     if (StyleSVGReset()->mX.HasPercent() || StyleSVGReset()->mY.HasPercent()) {
       needNewBounds = true;
       needNewCanvasTM = true;
+    } else if (SVGIntegrationUtils::UsingEffectsForFrame(this)) {
+      // Effects may have percentage dependent units.
+      needNewBounds = true;
     }
 
     const auto anchorResolutionParams = AnchorPosResolutionParams::From(this);

@@ -221,6 +221,9 @@ bool SVGImageElement::ParseAttribute(int32_t aNamespaceID, nsAtom* aAttribute,
       ParseFetchPriority(aValue, aResult);
       return true;
     }
+    if (aAttribute == nsGkAtoms::referrerpolicy) {
+      return ParseReferrerAttribute(aValue, aResult);
+    }
   }
 
   return SVGImageElementBase::ParseAttribute(aNamespaceID, aAttribute, aValue,
@@ -283,10 +286,9 @@ void SVGImageElement::DestroyContent() {
   SVGImageElementBase::DestroyContent();
 }
 
-NS_IMETHODIMP_(bool)
-SVGImageElement::IsAttributeMapped(const nsAtom* name) const {
+bool SVGImageElement::IsNoNamespaceAttrMapped(const nsAtom* name) const {
   return IsInLengthInfo(name, sLengthInfo) ||
-         SVGImageElementBase::IsAttributeMapped(name);
+         SVGImageElementBase::IsNoNamespaceAttrMapped(name);
 }
 
 //----------------------------------------------------------------------

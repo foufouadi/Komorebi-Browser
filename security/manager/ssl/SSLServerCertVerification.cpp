@@ -69,29 +69,7 @@
 // interrupt the PR_Poll that may waiting for I/O on the socket for which we
 // are validating the cert.
 //
-// When socket process is enabled, libssl is running on socket process. To
-// perform certificate authentication with CertVerifier, we have to send all
-// needed information to parent process and send the result back to socket
-// process via IPC. The workflow is described below.
-// 1. In AuthCertificateHookInternal(), we call RemoteProcessCertVerification()
-//    instead of SSLServerCertVerificationJob::Dispatch when we are on socket
-//    process.
-// 2. In RemoteProcessCertVerification(), PVerifySSLServerCert actors will be
-//    created on IPDL background thread for carrying needed information via IPC.
-// 3. On parent process, VerifySSLServerCertParent is created and it calls
-//    SSLServerCertVerificationJob::Dispatch for doing certificate verification
-//    on one of CertVerificationThreads.
-// 4. When validation is done, OnVerifiedSSLServerCertSuccess IPC message is
-//    sent through the IPDL background thread when
-//    CertVerifier::VerifySSLServerCert returns Success. Otherwise,
-//    OnVerifiedSSLServerCertFailure is sent.
-// 5. After setp 4, PVerifySSLServerCert actors will be released. The
-//    verification result will be dispatched via
-//    SSLServerCertVerificationResult.
-
 #include "SSLServerCertVerification.h"
-
-#include <cstring>
 
 #include "CertVerifier.h"
 #include "CryptoTask.h"
@@ -101,7 +79,6 @@
 #include "RootCertificateTelemetryUtils.h"
 #include "ScopedNSSTypes.h"
 #include "SharedCertVerifier.h"
-#include "VerifySSLServerCertChild.h"
 #include "cert.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/RefPtr.h"
@@ -382,7 +359,7 @@ static nsresult OverrideAllowedForHost(
 // Prohibit changing the server cert only if we negotiated SPDY,
 // in order to support SPDY's cross-origin connection pooling.
 static SECStatus BlockServerCertChangeForSpdy(
-    NSSSocketControl* socketControl, const UniqueCERTCertificate& serverCert) {
+    NSSSocketControl* socketControl, const nsTArray<uint8_t>& serverCertDER) {
   if (!socketControl->IsHandshakeCompleted()) {
     // first handshake on this connection, not a
     // renegotiation.
@@ -423,9 +400,7 @@ static SECStatus BlockServerCertChangeForSpdy(
     PR_SetError(SEC_ERROR_LIBRARY_FAILURE, 0);
     return SECFailure;
   }
-  if (certDER.Length() == serverCert->derCert.len &&
-      memcmp(certDER.Elements(), serverCert->derCert.data, certDER.Length()) ==
-          0) {
+  if (certDER == serverCertDER) {
     return SECSuccess;
   }
 
@@ -519,8 +494,7 @@ void GatherCertificateTransparencyTelemetry(
 }
 
 // This function collects telemetry about certs. It will be called on one of
-// CertVerificationThread. When the socket process is used this will be called
-// on the parent process.
+// CertVerificationThread.
 static void CollectCertTelemetry(
     mozilla::pkix::Result aCertVerificationResult, EVStatus aEVStatus,
     CertVerifier::OCSPStaplingStatus aOcspStaplingStatus,
@@ -599,6 +573,10 @@ static void CollectCertTelemetry(
     if (issuerSources.contains(IssuerSource::BuiltInRootsModule)) {
       mozilla::glean::verification_used_cert_from::built_in_roots_module
           .AddToNumerator(1);
+    }
+    if (issuerSources.contains(IssuerSource::PKCS11Module)) {
+      mozilla::glean::verification_used_cert_from::pkcs11_module.AddToNumerator(
+          1);
     }
   }
 
@@ -738,8 +716,7 @@ SECStatus SSLServerCertVerificationJob::Dispatch(
     Maybe<nsTArray<uint8_t>>& stapledOCSPResponse,
     Maybe<nsTArray<uint8_t>>& sctsFromTLSExtension,
     Maybe<DelegatedCredentialInfo>& dcInfo, uint32_t providerFlags, Time time,
-    uint32_t certVerifierFlags,
-    BaseSSLServerCertVerificationResult* aResultTask) {
+    uint32_t certVerifierFlags, SSLServerCertVerificationResult* aResultTask) {
   // Runs on the socket transport thread
   if (!aResultTask || peerCertChain.IsEmpty()) {
     MOZ_ASSERT_UNREACHABLE(
@@ -902,14 +879,6 @@ SECStatus AuthCertificateHookInternal(
   RefPtr resultTask =
       MakeRefPtr<SSLServerCertVerificationResult>(socketControl);
 
-  if (XRE_IsSocketProcess()) {
-    return RemoteProcessCertVerification(
-        std::move(peerCertChain), hostName, socketControl->GetPort(),
-        socketControl->GetOriginAttributes(), stapledOCSPResponse,
-        sctsFromTLSExtension, dcInfo, providerFlags, certVerifierFlags,
-        resultTask);
-  }
-
   // We *must* do certificate verification on a background thread because
   // we need the socket transport thread to be free for our OCSP requests,
   // and we *want* to do certificate verification on a background thread
@@ -940,30 +909,24 @@ SECStatus AuthCertificateHook(void* arg, PRFileDesc* fd, PRBool checkSig,
 
   NSSSocketControl* socketInfo = static_cast<NSSSocketControl*>(arg);
 
-  UniqueCERTCertificate serverCert(SSL_PeerCertificate(fd));
+  UniqueSECItemArray peerCertChain;
+  SECStatus rv =
+      SSL_PeerCertificateChainDER(fd, TempPtrToSetter(&peerCertChain));
 
-  if (!checkSig || isServer || !socketInfo || !serverCert) {
+  if (!checkSig || isServer || !socketInfo || rv != SECSuccess ||
+      !peerCertChain || peerCertChain->len == 0) {
     PR_SetError(PR_INVALID_STATE_ERROR, 0);
     return SECFailure;
   }
   socketInfo->SetFullHandshake();
 
-  if (BlockServerCertChangeForSpdy(socketInfo, serverCert) != SECSuccess) {
-    return SECFailure;
-  }
-
-  UniqueSECItemArray peerCertChain;
-  SECStatus rv =
-      SSL_PeerCertificateChainDER(fd, TempPtrToSetter(&peerCertChain));
-  if (rv != SECSuccess) {
-    PR_SetError(PR_INVALID_STATE_ERROR, 0);
-    return SECFailure;
-  }
-  MOZ_ASSERT(peerCertChain,
-             "AuthCertificateHook: peerCertChain unexpectedly null");
-
   nsTArray<nsTArray<uint8_t>> peerCertsBytes =
       CreateCertBytesArray(peerCertChain);
+
+  if (BlockServerCertChangeForSpdy(socketInfo, peerCertsBytes[0]) !=
+      SECSuccess) {
+    return SECFailure;
+  }
 
   // SSL_PeerStapledOCSPResponses will never return a non-empty response if
   // OCSP stapling wasn't enabled because libssl wouldn't have let the server

@@ -37,13 +37,36 @@ def _get_mozcheck_target_dir(root, topobjdir):
     return os.path.join(root, "tools", "lint", "mozcheck", "target")
 
 
-def _find_mozcheck_binary(log, root, topobjdir=None):
+UNAVAILABLE = (
+    "mozcheck binary is unavailable: could not locate a prebuilt "
+    "binary (MOZ_FETCHES_DIR/mozcheck) and the source build failed. "
+    "Ensure the linter task fetches the relevant mozcheck toolchain, "
+    "or that cargo is available locally."
+)
+
+
+def _mozcheck_binary(log, root, topobjdir=None):
+    if not (binary := os.environ.get("_MOZCHECK")):
+        binary = _resolve_mozcheck_binary(log, root, topobjdir)
+        if binary:
+            os.environ["_MOZCHECK"] = binary
+    return binary
+
+
+def _resolve_mozcheck_binary(log, root, topobjdir=None):
     exe = ".exe" if sys.platform == "win32" else ""
+
+    # In CI, the binary is fetched by the task itself. Use it directly rather
+    # than going through bootstrap_toolchain, which spawns `mach taskgraph` to
+    # resolve toolchain tasks and takes several seconds.
+    if fetches_dir := os.environ.get("MOZ_FETCHES_DIR"):
+        fetched = os.path.join(fetches_dir, "mozcheck", "mozcheck" + exe)
+        if os.path.isfile(fetched):
+            return fetched
 
     # Locate or fetch the prebuilt mozcheck binary for this host, the same way
     # clang-tidy, gn, cargo-vet, etc. do (see bootstrap_path in
-    # build/moz.configure/bootstrap.configure). This also covers the case
-    # where a prebuilt binary is already available via MOZ_FETCHES_DIR, in CI.
+    # build/moz.configure/bootstrap.configure).
     try:
         from mozbuild.bootstrap import bootstrap_toolchain
 
@@ -88,20 +111,18 @@ def setup(root, **lintargs):
     # Resolve the binary once, here in the parent process, rather than letting
     # every mozlint worker race to fetch or build it (bug 2058685).
     log = lintargs.get("log")
-    _find_mozcheck_binary(log, _resolve_root(root), lintargs.get("topobjdir"))
+    if not _mozcheck_binary(log, _resolve_root(root), lintargs.get("topobjdir")):
+        if log:
+            log.error(UNAVAILABLE)
+        return 1
 
 
 def lint(paths, config, fix=None, **lintargs):
     log = lintargs["log"]
     root = _resolve_root(lintargs["root"])
-    binary = _find_mozcheck_binary(log, root, lintargs.get("topobjdir"))
+    binary = _mozcheck_binary(log, root, lintargs.get("topobjdir"))
     if not binary:
-        raise LintException(
-            "mozcheck binary is unavailable: could not locate a prebuilt "
-            "binary (MOZ_FETCHES_DIR/mozcheck) and the source build failed. "
-            "Ensure the linter task fetches the relevant mozcheck toolchain, "
-            "or that cargo is available locally."
-        )
+        raise LintException(UNAVAILABLE)
 
     check = config.get("check", config["name"])
 

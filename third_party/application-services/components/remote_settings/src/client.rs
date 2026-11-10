@@ -96,6 +96,7 @@ impl<C: ApiClient> RemoteSettingsClient<C> {
         ("main", "regions"),
         ("main", "search-config-icons"),
         ("main", "search-config-v2"),
+        ("main", "search-config-v3"),
         ("main", "search-telemetry-v2"),
         ("main", "summarizer-models-config"),
         ("main", "translations-models"),
@@ -647,7 +648,11 @@ impl ViaductApiClient {
     }
 
     fn make_request(&mut self, url: Url) -> Result<Response> {
-        breadcrumb!("make_request: {url}");
+        self._make_request(url.clone())
+            .inspect_err(|e| breadcrumb!("Request error: {e} ({url})"))
+    }
+
+    fn _make_request(&mut self, url: Url) -> Result<Response> {
         self.remote_state.ensure_no_backoff()?;
 
         let req = Request::get(url);
@@ -658,10 +663,7 @@ impl ViaductApiClient {
         if resp.is_success() {
             Ok(resp)
         } else {
-            Err(Error::response_error(
-                &resp.url,
-                format!("status code: {}", resp.status),
-            ))
+            Err(Error::response_error(&resp))
         }
     }
 }
@@ -693,10 +695,7 @@ impl ApiClient for ViaductApiClient {
         if resp.is_success() {
             Ok(resp.json::<ChangesetResponse>()?)
         } else {
-            Err(Error::response_error(
-                &resp.url,
-                format!("status code: {}", resp.status),
-            ))
+            Err(Error::response_error(&resp))
         }
     }
 
@@ -729,7 +728,19 @@ impl ApiClient for ViaductApiClient {
     }
 
     fn fetch_cert(&mut self, x5u: &str) -> Result<Vec<u8>> {
-        let resp = self.make_request(Url::parse(x5u)?)?;
+        let resp = self
+            .make_request(Url::parse(x5u)?)
+            .map_err(|err| Error::CertificateError(Box::new(err)))?;
+        let content_type = resp
+            .headers
+            .get(viaduct::header_names::CONTENT_TYPE)
+            .unwrap_or_default();
+        if !content_type.contains("text/plain") {
+            return Err(Error::CertificateError(Box::new(Error::ResponseError {
+                url: resp.url.to_string(),
+                message: format!("unexpected content-type: {content_type:?}"),
+            })));
+        }
         Ok(resp.body)
     }
 }
@@ -994,6 +1005,61 @@ mod viaduct_client_tests {
 
         changeset.assert();
     }
+
+    fn api_client() -> ViaductApiClient {
+        ViaductApiClient::new(
+            BaseUrl::parse(&format!("{}/v2", mockito::server_url())).unwrap(),
+            "main",
+            "test-collection",
+        )
+    }
+
+    #[test]
+    fn test_fetch_cert_success() {
+        viaduct_dev::init_backend_dev();
+        let _m = mockito::mock("GET", "/chains/ok.pem")
+            .with_status(200)
+            .with_header("content-type", "text/plain; charset=utf-8")
+            .with_body("PEM")
+            .create();
+        let x5u = format!("{}/chains/ok.pem", mockito::server_url());
+        assert_eq!(api_client().fetch_cert(&x5u).unwrap(), b"PEM");
+    }
+
+    #[test]
+    fn test_fetch_cert_not_found() {
+        viaduct_dev::init_backend_dev();
+        let _m = mockito::mock("GET", "/chains/missing.pem")
+            .with_status(404)
+            .create();
+        let x5u = format!("{}/chains/missing.pem", mockito::server_url());
+        let err = api_client().fetch_cert(&x5u).unwrap_err();
+        assert!(matches!(err, Error::CertificateError(_)), "{err:?}");
+    }
+
+    #[test]
+    fn test_fetch_cert_bad_content_type() {
+        viaduct_dev::init_backend_dev();
+        let _m = mockito::mock("GET", "/chains/html.pem")
+            .with_status(200)
+            .with_header("content-type", "text/html")
+            .with_body("<html></html>")
+            .create();
+        let x5u = format!("{}/chains/html.pem", mockito::server_url());
+        let err = api_client().fetch_cert(&x5u).unwrap_err();
+        assert!(matches!(err, Error::CertificateError(_)), "{err:?}");
+    }
+
+    #[test]
+    fn test_fetch_cert_server_error() {
+        viaduct_dev::init_backend_dev();
+        let _m = mockito::mock("GET", "/chains/broken.pem")
+            .with_status(500)
+            .create();
+        let x5u = format!("{}/chains/broken.pem", mockito::server_url());
+        let err = api_client().fetch_cert(&x5u).unwrap_err();
+        assert!(matches!(err, Error::CertificateError(_)), "{err:?}");
+    }
 }
 
 #[cfg(test)]
@@ -1178,6 +1244,74 @@ mod jexl_tests {
         // Instead, just execute the code from that method that updates the JEXL filter.
         rs_client.inner.lock().jexl_filter = JexlFilter::new(Some(RemoteSettingsContext {
             country: Some("UK".to_string()),
+            ..Default::default()
+        }));
+
+        assert_eq!(
+            rs_client.get_records(false).expect("Error getting records"),
+            Some(vec![])
+        );
+    }
+
+    #[test]
+    fn test_jexl_filter_by_distribution() {
+        let mut api_client = MockApiClient::new();
+        let records = vec![RemoteSettingsRecord {
+            id: "record-0001".into(),
+            last_modified: 100,
+            deleted: false,
+            attachment: None,
+            fields: serde_json::json!({
+                "filter_expression": "env.distribution == \"firefox-001\""
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+        }];
+        let changeset = ChangesetResponse {
+            changes: records.clone(),
+            timestamp: 42,
+            metadata: CollectionMetadata::default(),
+        };
+        api_client.expect_collection_url().returning(|| {
+            "http://rs.example.com/v2/buckets/main/collections/test-collection".into()
+        });
+        api_client.expect_fetch_changeset().returning({
+            let changeset = changeset.clone();
+            move |timestamp| {
+                assert_eq!(timestamp, None);
+                Ok(changeset.clone())
+            }
+        });
+        api_client.expect_is_prod_server().returning(|| Ok(false));
+
+        let context = RemoteSettingsContext {
+            distribution: Some("firefox-001".to_string()),
+            ..Default::default()
+        };
+
+        let mut storage = Storage::new(":memory:".into());
+        let _ = storage.insert_collection_content(
+            "http://rs.example.com/v2/buckets/main/collections/test-collection",
+            &records,
+            42,
+            CollectionMetadata::default(),
+        );
+
+        let rs_client = RemoteSettingsClient::new_from_parts(
+            "test-collection".into(),
+            storage,
+            JexlFilter::new(Some(context)),
+            api_client,
+        );
+
+        assert_eq!(
+            rs_client.get_records(false).expect("Error getting records"),
+            Some(records)
+        );
+
+        rs_client.inner.lock().jexl_filter = JexlFilter::new(Some(RemoteSettingsContext {
+            distribution: Some("default".to_string()),
             ..Default::default()
         }));
 

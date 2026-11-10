@@ -46,7 +46,7 @@ NSS_EXTERN_DATA const NSSItem g_ck_class_privkey;
 
 #define NSS_CK_SET_ATTRIBUTE_VAR(pattr, kind, var) \
     (pattr)->type = kind;                          \
-    (pattr)->pValue = (CK_VOID_PTR)&var;           \
+    (pattr)->pValue = (CK_VOID_PTR) & var;         \
     (pattr)->ulValueLen = (CK_ULONG)sizeof(var);   \
     (pattr)++;
 
@@ -117,24 +117,6 @@ nssCKObject_GetAttributes(
     NSSArena *arenaOpt,
     nssSession *session,
     NSSSlot *slot);
-
-/* Get a single attribute as an item. */
-NSS_EXTERN PRStatus
-nssCKObject_GetAttributeItem(
-    CK_OBJECT_HANDLE object,
-    CK_ATTRIBUTE_TYPE attribute,
-    NSSArena *arenaOpt,
-    nssSession *session,
-    NSSSlot *slot,
-    NSSItem *rvItem);
-
-NSS_EXTERN PRBool
-nssCKObject_IsAttributeTrue(
-    CK_OBJECT_HANDLE object,
-    CK_ATTRIBUTE_TYPE attribute,
-    nssSession *session,
-    NSSSlot *slot,
-    PRStatus *rvStatus);
 
 NSS_EXTERN PRStatus
 nssCKObject_SetAttributes(

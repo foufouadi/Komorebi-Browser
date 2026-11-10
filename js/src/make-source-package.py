@@ -152,6 +152,7 @@ rsync_filter_list = """
 + /mozglue/static/**
 
 + /tools/rb/fix_stacks.py
++ /tools/lint/spidermonkey/**
 + /tools/fuzzing/moz.build
 + /tools/fuzzing/interface/**
 + /tools/fuzzing/registry/**
@@ -185,6 +186,7 @@ rsync_filter_list = """
 + /testing/test/**
 + /testing/web-platform/*.ini
 + /testing/web-platform/*.py
++ /testing/web-platform/python.toml
 + /testing/web-platform/meta/streams/**
 + /testing/web-platform/mozilla/**
 + /testing/web-platform/tests/resources/**
@@ -211,6 +213,7 @@ rsync_filter_list = """
 
 + /js/src/**
 + /js/app.mozbuild
++ /js/moz.build
 + /js/*.configure
 + /js/examples/**
 + /js/public/**

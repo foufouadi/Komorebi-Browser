@@ -9,6 +9,17 @@
  * @typedef {import("../content/Utils.sys.mjs").ProgressAndStatusCallbackParams} ProgressAndStatusCallbackParams
  */
 
+const lazy = {};
+
+ChromeUtils.defineESModuleGetters(
+  lazy,
+  {
+    TextGenerationEngine:
+      "moz-src:///toolkit/components/ml/textgeneration/TextGenerationEngine.sys.mjs",
+  },
+  { global: "contextual" }
+);
+
 /**
  * @constant
  * @type {string}
@@ -136,7 +147,7 @@ export const DEFAULT_MODELS = Object.freeze({
  * The only exception is web extension, as the engine id is dynamically created with the extension id.
  */
 export const FEATURES = {
-  // see toolkit/components/pdfjs/content/PdfjsParent.sys.mjs
+  // see toolkit/components/pdfjs/content/PdfJsParent.sys.mjs
   "pdfjs-alt-text": {
     engineId: "pdfjs",
     fluentId: "mlmodel-pdfjs",
@@ -214,6 +225,9 @@ export const FEATURES = {
   "title-generation": {
     engineId: "title-generation-engine",
   },
+  "tab-group-naming": {
+    engineId: "smart-openai",
+  },
   "conversation-suggestions-sidebar-starter": {
     engineId: "smart-openai",
   },
@@ -239,6 +253,24 @@ export const FEATURES = {
   // see browser/components/aiwindow/models/search/SearchAgent.sys.mjs
   "search-answer-generation": {
     engineId: "smart-openai",
+  },
+  // Exa /answers service.
+  // see browser/components/aiwindow/models/search/SearchWorkflow.sys.mjs
+  "search-answers": {
+    engineId: "smart-openai",
+  },
+  aitab: {
+    engineId: "aitab-engine",
+  },
+  "widget-generation": {
+    engineId: "smart-openai",
+  },
+  // see dom/media/webspeech/recognition/SpeechRecognition.cpp
+  "speech-recognition": {
+    engineId: "parakeet-gguf",
+    fluentId: "mlmodel-speech-recognition",
+    fileDisplayInfoModule:
+      "resource://gre/modules/SpeechRecognitionModelDisplayInfo.sys.mjs",
   },
 };
 
@@ -367,18 +399,6 @@ export const KVCacheQuantizationLevel = {
   F16: "f16",
   // Full precision  (32-bit floating point) (`'_f32'`)
   F32: "f32",
-};
-
-/**
- * Enum for the device used for inference.
- *
- * @readonly
- * @enum {string}
- */
-export const InferenceDevice = {
-  GPU: "gpu",
-  WASM: "wasm",
-  CPU: "cpu",
 };
 
 /**
@@ -547,9 +567,9 @@ export class PipelineOptions {
   runtimeFilename = null;
 
   /**
-   * Device used for inference
+   * Where a llama.cpp model loads, by device id or kind, @see HWInferencePlacement.
    *
-   * @type {InferenceDevice | null}
+   * @type {?HWInferencePlacement}
    */
   device = null;
 
@@ -595,14 +615,14 @@ export class PipelineOptions {
    *
    * @type {?number}
    */
-  numBatch = 1024;
+  numBatch = 2048;
 
   /**
    * Token batch size
    *
    * @type {?number}
    */
-  numUbatch = 1024;
+  numUbatch = 512;
 
   /**
    * Whether to use flash attention
@@ -690,6 +710,15 @@ export class PipelineOptions {
   extraHeaders = null;
 
   /**
+   * How many times an OpenAI-API-compatable backend retries a failed request
+   * before giving up. Null leaves the library default in place; set 0 when the
+   * caller does its own retrying.
+   *
+   * @type {?number}
+   */
+  maxRetries = null;
+
+  /**
    * Create a PipelineOptions instance.
    *
    * @param {object} options - The options for the pipeline. Must include mandatory fields.
@@ -716,7 +745,7 @@ export class PipelineOptions {
   /**
    * Private method to validate enum fields.
    *
-   * @param {string} field - The field being validated (e.g., 'dtype', 'device', 'executionPriority').
+   * @param {string} field - The field being validated (e.g., 'dtype', 'executionPriority').
    * @param {*} value - The value being checked against the enum.
    * @throws {Error} Throws an error if the value is not valid.
    * @private
@@ -724,7 +753,6 @@ export class PipelineOptions {
   #validateEnum(field, value) {
     const enums = {
       dtype: QuantizationLevel,
-      device: InferenceDevice,
       executionPriority: ExecutionPriority,
       logLevel: LogLevel,
       modelHub: ModelHub,
@@ -899,6 +927,7 @@ export class PipelineOptions {
       "serviceType",
       "purpose",
       "extraHeaders",
+      "maxRetries",
     ];
 
     if (options instanceof PipelineOptions) {
@@ -958,7 +987,6 @@ export class PipelineOptions {
         [
           "modelHub",
           "dtype",
-          "device",
           "executionPriority",
           "logLevel",
           "kvCacheDtype",
@@ -1048,6 +1076,7 @@ export class PipelineOptions {
       serviceType: this.serviceType,
       purpose: this.purpose,
       extraHeaders: this.extraHeaders,
+      maxRetries: this.maxRetries,
     };
   }
 
@@ -1362,6 +1391,13 @@ export async function createEngine(
 ) {
   try {
     const pipelineOptions = new PipelineOptions(options);
+    if (lazy.TextGenerationEngine.shouldRoute(pipelineOptions)) {
+      return lazy.TextGenerationEngine.create(
+        pipelineOptions,
+        notificationsCallback,
+        abortSignal
+      );
+    }
     const engineParent = await EngineProcess.getMLEngineParent();
     return engineParent.getEngine({
       pipelineOptions,

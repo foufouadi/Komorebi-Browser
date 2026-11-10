@@ -37,9 +37,10 @@ static Atomic<android_res_nresult_ptr> sAndroidResNResult;
   MOZ_LOG(gGetAddrInfoLog, LogLevel::Debug, ("[DNS]: " msg, ##__VA_ARGS__))
 
 nsresult ResolveHTTPSRecordImpl(const nsACString& aHost,
+                                const Maybe<nsCString>& aOriginHost,
                                 nsIDNSService::DNSFlags aFlags,
                                 TypeRecordResultType& aResult, uint32_t& aTTL,
-                                nsACString& aAliasName) {
+                                HTTPSAliasTarget& aAlias) {
   DNSPacket packet;
   nsAutoCString host(aHost);
   nsresult rv;
@@ -120,7 +121,8 @@ nsresult ResolveHTTPSRecordImpl(const nsACString& aHost,
     return rv;
   }
 
-  return ParseHTTPSRecord(host, packet, aResult, aTTL, aAliasName);
+  packet.SetOriginHost(aOriginHost);
+  return ParseHTTPSRecord(host, packet, aResult, aTTL, aAlias);
 }
 
 void DNSThreadShutdown() {}

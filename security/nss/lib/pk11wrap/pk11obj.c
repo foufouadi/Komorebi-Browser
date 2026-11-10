@@ -30,24 +30,27 @@ SECItem *
 PK11_BlockData(SECItem *data, unsigned long size)
 {
     SECItem *newData;
+    unsigned long long blockedLen;
 
-    if (size == 0u)
+    if (size == 0u || size > UINT_MAX)
         return NULL;
 
-    newData = (SECItem *)PORT_Alloc(sizeof(SECItem));
+    blockedLen = ((unsigned long long)data->len + (size - 1)) / size * size;
+    if (blockedLen > UINT_MAX)
+        return NULL;
+
+    newData = SECITEM_AllocItem(NULL, NULL, (unsigned int)blockedLen);
     if (newData == NULL)
         return NULL;
 
-    newData->len = (data->len + (size - 1)) / size;
-    newData->len *= size;
-
-    newData->data = (unsigned char *)PORT_ZAlloc(newData->len);
-    if (newData->data == NULL) {
-        PORT_Free(newData);
-        return NULL;
+    /* SECITEM_AllocItem leaves data NULL for a zero length, which only
+     * happens if the caller handed us an empty item. */
+    if (newData->len) {
+        /* Pad with the pad length, PKCS#7 style, then overwrite the head of
+         * the buffer with the caller's data. */
+        PORT_Memset(newData->data, newData->len - data->len, newData->len);
+        PORT_Memcpy(newData->data, data->data, data->len);
     }
-    PORT_Memset(newData->data, newData->len - data->len, newData->len);
-    PORT_Memcpy(newData->data, data->data, data->len);
     return newData;
 }
 
@@ -1370,7 +1373,6 @@ PK11_UnwrapPrivKey(PK11SlotInfo *slot, PK11SymKey *wrappingKey,
         SECITEM_FreeItem(param_free, PR_TRUE);
         return NULL;
     }
-    SECITEM_FreeItem(param_free, PR_TRUE);
     privKey = pk11_MakePrivKey(slot, nullKey, !perm /*isOwner*/, privKeyID, wincx);
     if (!privKey) {
         goto loser;
@@ -1410,6 +1412,7 @@ PK11_UnwrapPrivKey(PK11SlotInfo *slot, PK11SymKey *wrappingKey,
         SECKEY_DestroyPublicKey(pubKey);
         SECITEM_FreeItem(ck_id, PR_TRUE);
     }
+    SECITEM_FreeItem(param_free, PR_TRUE);
     return privKey;
 
 loser:
@@ -2253,48 +2256,6 @@ PK11_MatchItem(PK11SlotInfo *slot, CK_OBJECT_HANDLE searchID,
 }
 
 /*
- * count the number of objects that match the template.
- */
-int
-PK11_NumberObjectsFor(PK11SlotInfo *slot, CK_ATTRIBUTE *findTemplate,
-                      int templCount)
-{
-    CK_OBJECT_HANDLE objID[PK11_SEARCH_CHUNKSIZE];
-    int object_count = 0;
-    CK_ULONG returned_count = 0;
-    CK_RV crv = CKR_SESSION_HANDLE_INVALID;
-
-    PK11_EnterSlotMonitor(slot);
-    if (slot->session != CK_INVALID_HANDLE) {
-        crv = PK11_GETTAB(slot)->C_FindObjectsInit(slot->session,
-                                                   findTemplate, templCount);
-    }
-    if (crv != CKR_OK) {
-        PK11_ExitSlotMonitor(slot);
-        PORT_SetError(PK11_MapError(crv));
-        return object_count;
-    }
-
-    /*
-     * collect all the Matching Objects
-     */
-    do {
-        crv = PK11_GETTAB(slot)->C_FindObjects(slot->session, objID,
-                                               PK11_SEARCH_CHUNKSIZE,
-                                               &returned_count);
-        if (crv != CKR_OK) {
-            PORT_SetError(PK11_MapError(crv));
-            break;
-        }
-        object_count += returned_count;
-    } while (returned_count == PK11_SEARCH_CHUNKSIZE);
-
-    PK11_GETTAB(slot)->C_FindObjectsFinal(slot->session);
-    PK11_ExitSlotMonitor(slot);
-    return object_count;
-}
-
-/*
  * Traverse all the objects in a given slot.
  */
 SECStatus
@@ -2356,79 +2317,6 @@ pk11_TraverseAllSlots(SECStatus (*callback)(PK11SlotInfo *, void *),
     PK11_FreeSlotList(list);
 
     return SECSuccess;
-}
-
-CK_OBJECT_HANDLE *
-PK11_FindObjectsFromNickname(char *nickname, PK11SlotInfo **slotptr,
-                             CK_OBJECT_CLASS objclass, int *returnCount, void *wincx)
-{
-    char *tokenName;
-    char *delimit;
-    PK11SlotInfo *slot;
-    CK_OBJECT_HANDLE *objID;
-    CK_ATTRIBUTE findTemplate[] = {
-        { CKA_LABEL, NULL, 0 },
-        { CKA_CLASS, NULL, 0 },
-    };
-    const size_t findCount = sizeof(findTemplate) / sizeof(findTemplate[0]);
-    SECStatus rv;
-    PK11_SETATTRS(&findTemplate[1], CKA_CLASS, &objclass, sizeof(objclass));
-
-    *slotptr = slot = NULL;
-    *returnCount = 0;
-    /* first find the slot associated with this nickname */
-    if ((delimit = PORT_Strchr(nickname, ':')) != NULL) {
-        int len = delimit - nickname;
-        tokenName = (char *)PORT_Alloc(len + 1);
-        if (!tokenName) {
-            return CK_INVALID_HANDLE;
-        }
-        PORT_Memcpy(tokenName, nickname, len);
-        tokenName[len] = 0;
-
-        slot = *slotptr = PK11_FindSlotByName(tokenName);
-        PORT_Free(tokenName);
-        /* if we couldn't find a slot, assume the nickname is an internal cert
-         * with no proceding slot name */
-        if (slot == NULL) {
-            slot = *slotptr = PK11_GetInternalKeySlot();
-        } else {
-            nickname = delimit + 1;
-        }
-    } else {
-        *slotptr = slot = PK11_GetInternalKeySlot();
-    }
-    if (slot == NULL) {
-        return CK_INVALID_HANDLE;
-    }
-
-    rv = pk11_AuthenticateUnfriendly(slot, PR_TRUE, wincx);
-    if (rv != SECSuccess) {
-        PK11_FreeSlot(slot);
-        *slotptr = NULL;
-        return CK_INVALID_HANDLE;
-    }
-
-    findTemplate[0].pValue = nickname;
-    findTemplate[0].ulValueLen = PORT_Strlen(nickname);
-    objID = pk11_FindObjectsByTemplate(slot, findTemplate, findCount, returnCount);
-    if (objID == NULL) {
-        /* PKCS #11 isn't clear on whether or not the NULL is
-         * stored in the template.... try the find again with the
-         * full null terminated string. */
-        findTemplate[0].ulValueLen += 1;
-        objID = pk11_FindObjectsByTemplate(slot, findTemplate, findCount,
-                                           returnCount);
-        if (objID == NULL) {
-            /* Well that's the best we can do. It's just not here */
-            /* what about faked nicknames? */
-            PK11_FreeSlot(slot);
-            *slotptr = NULL;
-            *returnCount = 0;
-        }
-    }
-
-    return objID;
 }
 
 SECItem *

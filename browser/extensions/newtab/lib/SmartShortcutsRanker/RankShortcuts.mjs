@@ -39,8 +39,8 @@ const PLACES_TABLE = "moz_places";
 const VISITS_TABLE = "moz_historyvisits";
 const BOOKMARK_TABLE = "moz_bookmarks";
 const BASE_SEASONALITY_CACHE_EXPIRATION = 1e3 * 60 * 60 * 24 * 7; // 7 day in miliseconds
-const ETA = 0;
-const CLICK_BONUS = 10;
+const ETA = 10;
+const CLICK_BONUS = 20;
 const PREF_SYSTEM_SHORTCUTS_PERSONALIZATION =
   "discoverystream.shortcuts.personalization.enabled";
 
@@ -59,7 +59,7 @@ const FEATURE_META = {
   bias: { pref: "bias_weight", def: 0 },
 };
 
-const FEATURES = ["thom", "rece", "freq", "ctr"];
+const FEATURES = ["thom", "rece", "freq", "bmark", "ctr"];
 const SHORTCUT_POSITIVE_PRIOR = 1;
 const SHORTCUT_NEGATIVE_PRIOR = 1000;
 const SHORTCUT_TAU = 100;
@@ -74,7 +74,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   NewTabUtils: "resource://gre/modules/NewTabUtils.sys.mjs",
   PersistentCache: "resource://newtab/lib/PersistentCache.sys.mjs",
   PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
-  SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
+  SessionStore:
+    "moz-src:///browser/components/sessionstore/SessionStore.sys.mjs",
 });
 
 import { sortKeysValues } from "resource://newtab/lib/SmartShortcutsRanker/ThomSample.mjs";
@@ -235,7 +236,7 @@ export async function getIsOpen(guids, isStartup) {
  * For each input places GUID, report the total visits
  *
  * @param {object[]} topsites Array of objects with a `guid` field (moz_places.guid)
- * @param {string} [placesTable='moz_places'] Table name for places
+ * @param {string} placeTable Table name for places
  * @returns {Promise<object>} Map of guid -> visit total
  */
 export async function fetchVisitCountsByGuid(topsites, placeTable) {
@@ -393,7 +394,7 @@ export async function fetchBookmarkedFlags(
  * @param {object[]} topsites Array of topsites objects
  * @param {string} table Table to query
  * @param {string} placeTable Table to map guid->place_id
- * @returns {result: object} Dictionary of histograms of day-of-week site opens
+ * @returns {Promise<object>} Dictionary of histograms of day-of-week site opens
  */
 export async function fetchDailyVisitsSpecific(topsites, table, placeTable) {
   if (!topsites.length) {
@@ -448,7 +449,7 @@ export async function fetchDailyVisitsSpecific(topsites, table, placeTable) {
  * Get histogram of all site visits over day-of-week
  *
  * @param {string} table Table to query
- * @returns {number[]} Histogram of day-of-week site opens
+ * @returns {Promise<number[]>} Histogram of day-of-week site opens
  */
 export async function fetchDailyVisitsAll(table) {
   const sql = `
@@ -477,7 +478,7 @@ export async function fetchDailyVisitsAll(table) {
  * @param {object[]} topsites Array of topsites objects
  * @param {string} table Table to query
  * @param {string} placeTable Table to map guid->place_id
- * @returns {object} Dictionary of histograms of hour-of-day site opens
+ * @returns {Promise<object>} Dictionary of histograms of hour-of-day site opens
  */
 export async function fetchHourlyVisitsSpecific(topsites, table, placeTable) {
   if (!topsites.length) {
@@ -532,7 +533,7 @@ export async function fetchHourlyVisitsSpecific(topsites, table, placeTable) {
  * Get histogram of all site visits over hour-of-day
  *
  * @param {string} table Table to query
- * @returns {number[]} Histogram of hour-of-day site opens
+ * @returns {Promise<number[]>} Histogram of hour-of-day site opens
  */
 export async function fetchHourlyVisitsAll(table) {
   const sql = `
@@ -611,7 +612,7 @@ function checkWeights(all_weights, features) {
  * @param {object[]} topsites Array of topsites objects
  * @param {string} table Table for shortcuts interactions
  * @param {string} placeTable moz_places table
- * @returns {clicks: [number[], impressions: number[]]} Clicks and impressions for each site in topsites
+ * @returns {Promise<Array>} Clicks and impressions for each site in topsites
  */
 async function fetchShortcutInteractions(topsites, table, placeTable) {
   if (!topsites.length) {
@@ -772,7 +773,7 @@ export class RankShortcutsProvider {
    * Check the shortcut interaction table for new events since
    * the last time we updated the model weights
    *
-   * @param {object} cahce_data shortcut cache
+   * @param {object} cache_data shortcut cache
    * @param {string} table Shortcuts interaction table
    * @param {string} placeTable moz_places table
    * @returns {Promise<object>} Map of guid -> clicks and impression counts
@@ -822,7 +823,7 @@ export class RankShortcutsProvider {
    * Get "frecency" features: frequency, recency, re-frecency, unique days visited
    *
    * @param {Array<object>} withGuid topsites we are building features for
-   * @returns {Promise<{}>} guid -> rece, freq, and refre features
+   * @returns {Promise<{[feature in "refre" | "rece" | "freq" | "unid"]: {[guid: string]: number}}>} guid -> rece, freq, and refre features
    */
   async fetchRefreFeatures(withGuid) {
     const raw_frec = await fetchLast10VisitsByGuid(
@@ -942,7 +943,7 @@ export class RankShortcutsProvider {
     const refrec_scores = ["rece", "freq", "refre", "unid"].some(f =>
       features.includes(f)
     )
-      ? await this.fetchRefreFeatures(withGuid, features)
+      ? await this.fetchRefreFeatures(withGuid)
       : { rece: null, freq: null, refre: null, unid: null };
     const open_scores = features?.includes?.("open")
       ? await getIsOpen(

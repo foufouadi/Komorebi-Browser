@@ -24,9 +24,6 @@ class nsIObserverService;
 namespace mozilla {
 namespace net {
 
-class TRRServiceChild;
-class TRRServiceParent;
-
 const nsCString& TRRProviderKey();
 
 class TRRService : public TRRServiceBase,
@@ -108,8 +105,6 @@ class TRRService : public TRRServiceBase,
   virtual ~TRRService();
 
   friend class TRR;
-  friend class TRRServiceChild;
-  friend class TRRServiceParent;
   static void AddObserver(nsIObserver* aObserver,
                           nsIObserverService* aObserverService = nullptr);
   static bool CheckCaptivePortalIsPassed();
@@ -132,9 +127,8 @@ class TRRService : public TRRServiceBase,
 
   void RebuildSuffixList(nsTArray<nsCString>&& aSuffixList);
 
-  nsresult DispatchTRRRequestInternal(TRR* aTrrRequest, bool aWithLock);
   already_AddRefed<nsIThread> TRRThread_locked();
-  already_AddRefed<nsIThread> MainThreadOrTRRThread(bool aWithLock = true);
+  already_AddRefed<nsIEventTarget> MainThreadOrTRRTarget(bool aWithLock = true);
 
   // This method will process the URI and try to set mPrivateURI to that value.
   // Will return true if performed the change (if the value was different)
@@ -142,6 +136,7 @@ class TRRService : public TRRServiceBase,
   bool MaybeSetPrivateURI(const nsACString& aURI) override;
   void ClearEntireCache();
   void MaybeSpeculativeConnectToTRR();
+  void SetDefaultTRRConnectionInfo(nsHttpConnectionInfo* aConnInfo) override;
 
   virtual void ReadEtcHostsFile() override;
   void AddEtcHosts(const nsTArray<nsCString>&);
@@ -156,6 +151,7 @@ class TRRService : public TRRServiceBase,
       false};  // set when captive portal check is passed
   Atomic<bool, Relaxed> mShutdown{false};
   Atomic<bool, Relaxed> mDontUseTRRThread{false};
+  Atomic<bool, Relaxed> mPreconnectPending{false};
 
   // TRR Blocklist storage
   // mTRRBLStorage is only modified on the main thread, but we query whether it

@@ -27,9 +27,13 @@ add_setup(async function () {
   addedEngine = await SearchService.getEngineByName(TEST_ENGINE_NAME);
 
   // Enable suggestions in this test. Otherwise, the string in the content
-  // search box changes.
+  // search box changes. The feature gate stays off because this file tests the
+  // handoff search bar, which the newtab <moz-urlbar> supersedes.
   await SpecialPowers.pushPrefEnv({
-    set: [["browser.urlbar.suggest.searches", true]],
+    set: [
+      ["browser.urlbar.suggest.searches", true],
+      ["browser.urlbar.newtab.featureGate", false],
+    ],
   });
 
   registerCleanupFunction(async () => {
@@ -52,10 +56,12 @@ async function ensureIcon(tab, expectedIcon) {
       let computedStyle = content.window.getComputedStyle(
         content.document.body
       );
-      await ContentTaskUtils.waitForCondition(
-        () => computedStyle.getPropertyValue("--newtab-search-icon") != "null",
-        "Search Icon not set."
-      );
+      await ContentTaskUtils.waitForCondition(() => {
+        let value = computedStyle.getPropertyValue("--newtab-search-icon");
+        return icon.startsWith("blob:")
+          ? value.startsWith("url(blob:")
+          : value == `url(${icon})`;
+      }, "Search icon not updated");
 
       if (icon.startsWith("blob:")) {
         // We don't check the data here as `browser_contentSearch.js` performs

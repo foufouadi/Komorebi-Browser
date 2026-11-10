@@ -201,8 +201,8 @@ add_task(async function testMoveStartEnabledWithCollapsedGroupAtStart() {
   group.collapsed = true;
 
   gBrowser.moveTabToEnd(tab);
-  is(group.tabs[0]._tPos, 0, "Collapsed group is first element on strip");
-  is(tab._tPos, 1, "Selected tab is second element on strip");
+  is(group.tabs[0].index, 0, "Collapsed group is first element on strip");
+  is(tab.index, 1, "Selected tab is second element on strip");
 
   updateTabContextMenu(tab);
   is(menuItemMoveStartTab.disabled, false, "Move Tab to Start is enabled");
@@ -219,8 +219,8 @@ add_task(async function testMoveStartEnabledWithCollapsedGroupAtEnd() {
   let group = gBrowser.addTabGroup([tab2]);
   group.collapsed = true;
 
-  is(tab._tPos, 0, "Selected tab is first element on strip");
-  is(group.tabs[0]._tPos, 1, "Collapsed group is second element on strip");
+  is(tab.index, 0, "Selected tab is first element on strip");
+  is(group.tabs[0].index, 1, "Collapsed group is second element on strip");
 
   updateTabContextMenu(tab);
   is(menuItemMoveEndTab.disabled, false, "Move Tab to End is enabled");
@@ -229,6 +229,9 @@ add_task(async function testMoveStartEnabledWithCollapsedGroupAtEnd() {
 });
 
 add_task(async function testMoveTabOptionsDisabledFromOnlyTab() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.mini-window.enabled", false]],
+  });
   let tab = gBrowser.selectedTab;
   let menuItemMoveTabOptions = document.getElementById(
     "context_moveTabOptions"
@@ -239,4 +242,29 @@ add_task(async function testMoveTabOptionsDisabledFromOnlyTab() {
     true,
     "Move Tab Options Submenu is disabled"
   );
+  await SpecialPowers.popPrefEnv();
+});
+
+add_task(async function testMoveTabOptionsEnabledFromOnlyTabWithMiniWindow() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.mini-window.enabled", true]],
+  });
+  let tab = gBrowser.selectedTab;
+  updateTabContextMenu(tab);
+  is(
+    document.getElementById("context_moveTabOptions").disabled,
+    false,
+    "Move Tab Options Submenu is enabled"
+  );
+  let miniWindowItem = document.getElementById("context_openTabInMiniWindow");
+  ok(!miniWindowItem.hidden, "Move to Mini Window is shown");
+  ok(!miniWindowItem.disabled, "Move to Mini Window is enabled");
+  for (let id of [
+    "context_moveToStart",
+    "context_moveToEnd",
+    "context_openTabInWindow",
+  ]) {
+    ok(document.getElementById(id).disabled, `${id} is disabled`);
+  }
+  await SpecialPowers.popPrefEnv();
 });

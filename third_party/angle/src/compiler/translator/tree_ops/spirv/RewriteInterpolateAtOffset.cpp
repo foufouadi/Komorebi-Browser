@@ -15,7 +15,6 @@
 #include "compiler/translator/tree_util/DriverUniform.h"
 #include "compiler/translator/tree_util/IntermNode_util.h"
 #include "compiler/translator/tree_util/IntermTraverse.h"
-#include "compiler/translator/tree_util/SpecializationConstant.h"
 
 namespace sh
 {
@@ -89,7 +88,7 @@ bool Traverser::visitAggregate(Visit visit, TIntermAggregate *node)
     correctedOffset->setLine(offsetNode->getLine());
 
     // Replace the offset by the rotated one.
-    queueReplacementWithParent(node, offsetNode, correctedOffset, OriginalNode::IS_DROPPED);
+    queueReplacementWithParent(node, offsetNode, correctedOffset, OriginalNode::BECOMES_CHILD);
 
     return true;
 }

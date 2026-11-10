@@ -16,12 +16,19 @@
 const PDFJS_EVENT_ID = "pdf.js.message";
 const PDF_VIEWER_ORIGIN = "resource://pdf.js";
 const PDF_VIEWER_WEB_PAGE = "resource://pdf.js/web/viewer.html";
+const PDF_VIEWER_WORKER_URL = "resource://pdf.js/build/pdf.worker.mjs";
+const PDF_VIEWER_RENDERER_URL = "resource://pdf.js/build/pdf.renderer.mjs";
 const MAX_NUMBER_OF_PREFS = 60;
+// Recommended page-size limit in ISO 32000-1, Annex C.
+const MAX_PRINT_TO_PDF_PAGE_SIZE_IN_PT = 14400;
+const MAX_PRINT_TO_PDF_FONT_SIZE_IN_PT = 1000;
+const VERTICAL_ALIGN_VALUES = new Set(["top", "center"]);
 const PDF_CONTENT_TYPE = "application/pdf";
 const SUMO_URL = "https://support.mozilla.org/";
 
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
+import { isEmbeddedPdfLoad } from "resource://gre/modules/pdfjs.sys.mjs";
 
 // Non-pdfjs preferences to get when the viewer is created and to observe.
 const toolbarDensityPref = "browser.uidensity";
@@ -32,6 +39,9 @@ ChromeUtils.defineESModuleGetters(lazy, {
   NetUtil: "resource://gre/modules/NetUtil.sys.mjs",
   NetworkManager: "resource://pdf.js/PdfJsNetwork.sys.mjs",
   PdfJs: "resource://pdf.js/PdfJs.sys.mjs",
+  PdfJsFeaturesNotification:
+    "resource://pdf.js/PdfJsFeaturesNotification.sys.mjs",
+  PdfJsPrint: "resource://pdf.js/PdfJsPrint.sys.mjs",
   PdfJsTelemetryContent: "resource://pdf.js/PdfJsTelemetry.sys.mjs",
   PdfSandbox: "resource://pdf.js/PdfSandbox.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
@@ -89,7 +99,7 @@ function getDOMWindow(aChannel, aPrincipal) {
 function getActor(window) {
   try {
     const actorName =
-      AppConstants.platform === "android" ? "GeckoViewPdfjs" : "Pdfjs";
+      AppConstants.platform === "android" ? "GeckoViewPdfJs" : "PdfJs";
     return window.windowGlobalChild.getActor(actorName);
   } catch (ex) {
     return null;
@@ -244,6 +254,13 @@ class PrefObserver {
         type: "bool",
         dispatchToParent: true,
       });
+      // Reaching the impression limit must not close open bars.
+      this.#prefs.set(lazy.PdfJsFeaturesNotification.IMPRESSION_COUNT_PREF, {
+        name: "featuresNotificationDismissed",
+        getValue: () => lazy.PdfJsFeaturesNotification.isConsumed(),
+        dispatchToContent: true,
+        shouldDispatchToContent: value => value,
+      });
     }
     for (const pref of this.#prefs.keys()) {
       Services.prefs.addObserver(pref, this, /* aHoldWeak = */ true);
@@ -259,24 +276,37 @@ class PrefObserver {
     if (!actor) {
       return;
     }
-    const { name, type, dispatchToContent, dispatchToParent } =
-      this.#prefs.get(aPrefName) || {};
+    const {
+      name,
+      type,
+      getValue,
+      dispatchToContent,
+      shouldDispatchToContent,
+      dispatchToParent,
+    } = this.#prefs.get(aPrefName) || {};
     if (!name) {
       return;
     }
     let value;
-    switch (type) {
-      case "bool": {
-        value = Services.prefs.getBoolPref(aPrefName);
-        break;
-      }
-      case "int": {
-        value = Services.prefs.getIntPref(aPrefName);
-        break;
+    if (getValue) {
+      value = getValue();
+    } else {
+      switch (type) {
+        case "bool": {
+          value = Services.prefs.getBoolPref(aPrefName);
+          break;
+        }
+        case "int": {
+          value = Services.prefs.getIntPref(aPrefName);
+          break;
+        }
       }
     }
     const data = { name, value };
-    if (dispatchToContent) {
+    if (
+      dispatchToContent &&
+      (!shouldDispatchToContent || shouldDispatchToContent(value))
+    ) {
       actor.dispatchEvent("updatedPreference", data);
     }
     if (dispatchToParent) {
@@ -298,12 +328,105 @@ class ChromeActions {
     "outlineloaded",
   ]);
 
+  #viewerDocument = null;
+
+  #workers = new Set();
+
+  #rendererWorkers = null;
+
+  #workerUnloadListener = () => this.closeWorkers();
+
   constructor(domWindow, contentDispositionFilename) {
     this.domWindow = domWindow;
+    this.#viewerDocument = domWindow.document;
     this.contentDispositionFilename = contentDispositionFilename;
     this.sandbox = null;
     this.unloadListener = null;
     this.observer = new PrefObserver(domWindow, this.isMobile());
+  }
+
+  // PDF.js does not terminate supplied workers.
+  closeWorkers() {
+    try {
+      for (const worker of this.#workers) {
+        worker.terminate();
+      }
+      this.#workers.clear();
+
+      const { domWindow } = this;
+      if (domWindow.document === this.#viewerDocument) {
+        domWindow.wrappedJSObject.pdfjsPreloadedWorker = null;
+        domWindow.wrappedJSObject.pdfjsPreloadedRendererWorkers = null;
+        if (this.#rendererWorkers) {
+          // Clear in place: AppOptions retains this array.
+          this.#rendererWorkers.length = 0;
+        }
+      }
+    } catch (e) {
+      console.error("Error while closing the PDF.js workers:", e);
+    }
+  }
+
+  #createWorker(url) {
+    const { domWindow } = this;
+    const worker = new domWindow.Worker(url, { type: "module" });
+    if (!this.#workers.size) {
+      domWindow.addEventListener("unload", this.#workerUnloadListener, {
+        once: true,
+      });
+    }
+    this.#workers.add(worker);
+    return worker;
+  }
+
+  preloadWorker() {
+    try {
+      this.domWindow.wrappedJSObject.pdfjsPreloadedWorker = this.#createWorker(
+        PDF_VIEWER_WORKER_URL
+      );
+    } catch (e) {
+      console.error("Error while preloading the PDF.js worker:", e);
+    }
+  }
+
+  preloadRendererWorkers() {
+    if (Services.prefs.getBoolPref("pdfjs.disableWorkerRendering", true)) {
+      return;
+    }
+    const { domWindow } = this;
+    const count = Math.min(
+      Math.max(1, Services.prefs.getIntPref("pdfjs.rendererWorkerCount", 1)),
+      domWindow.navigator.hardwareConcurrency
+    );
+    try {
+      // Expose a content-realm array to the viewer.
+      const workers = Cu.waiveXrays(Cu.cloneInto([], domWindow));
+      this.#rendererWorkers = workers;
+      for (let i = 0; i < count; i++) {
+        const worker = this.#createWorker(PDF_VIEWER_RENDERER_URL);
+        // Handle load errors before PDF.js attaches its listeners.
+        const onError = event => {
+          if (this.#workers.delete(worker)) {
+            event.preventDefault();
+            worker.terminate();
+            const index = workers.indexOf(worker);
+            if (index !== -1) {
+              workers.splice(index, 1);
+            }
+          }
+        };
+        worker.addEventListener("error", onError, { once: true });
+        worker.addEventListener(
+          "message",
+          () => worker.removeEventListener("error", onError),
+          { once: true }
+        );
+        workers.push(worker);
+      }
+      domWindow.wrappedJSObject.pdfjsPreloadedRendererWorkers = workers;
+    } catch (e) {
+      console.error("Error while preloading the PDF.js renderer workers:", e);
+    }
   }
 
   createSandbox(data, sendResponse) {
@@ -421,6 +544,91 @@ class ChromeActions {
     );
   }
 
+  #validatePrintToPDFData(items) {
+    if (!Array.isArray(items) || items.length === 0) {
+      return null;
+    }
+
+    const entries = [];
+    for (const item of items) {
+      const pdfData = item?.data;
+      if (typeof pdfData !== "object" || pdfData === null) {
+        return null;
+      }
+      // The caller positions each generated appearance in the original PDF.
+      const { width, height } = pdfData;
+      if (
+        !Number.isFinite(width) ||
+        !Number.isFinite(height) ||
+        width <= 0 ||
+        height <= 0 ||
+        width > MAX_PRINT_TO_PDF_PAGE_SIZE_IN_PT ||
+        height > MAX_PRINT_TO_PDF_PAGE_SIZE_IN_PT
+      ) {
+        return null;
+      }
+
+      const { text, color, fontSize, fontFamily, verticalAlign } = pdfData;
+      if (
+        typeof text !== "string" ||
+        text === "" ||
+        typeof color !== "string" ||
+        !/^#[0-9a-f]{6}$/i.test(color) ||
+        !Number.isFinite(fontSize) ||
+        fontSize <= 0 ||
+        fontSize > MAX_PRINT_TO_PDF_FONT_SIZE_IN_PT ||
+        (fontFamily != null && typeof fontFamily !== "string") ||
+        (verticalAlign != null && !VERTICAL_ALIGN_VALUES.has(verticalAlign))
+      ) {
+        return null;
+      }
+      entries.push({
+        width,
+        height,
+        text,
+        color,
+        fontSize,
+        fontFamily: fontFamily || "sans-serif",
+        verticalAlign: verticalAlign || "center",
+      });
+    }
+    return entries;
+  }
+
+  /**
+   * Validate field appearances and render them in the viewer's process.
+   *
+   * @param {Array<object>} data - one item per field appearance, each shaped
+   *   like `{ data: { width, height, ... } }` where `width` and `height` are
+   *   the size of the appearance box in pt, and the remaining properties
+   *   describe a text appearance (`text`, `color`, `fontSize`, `fontFamily`
+   *   and `verticalAlign`).
+   * @param {Function} sendResponse - called with the PDF bytes, or with null
+   *   if the data is invalid or printing failed.
+   */
+  printToPDF(data, sendResponse) {
+    if (!sendResponse) {
+      console.warn(
+        "PdfStreamConverter: printToPDF called without a response callback."
+      );
+      return;
+    }
+    const entries = this.#validatePrintToPDFData(data);
+    if (!entries) {
+      console.warn("PdfStreamConverter: ignored invalid print data.");
+      sendResponse(null);
+      return;
+    }
+    try {
+      sendResponse(
+        lazy.PdfJsPrint.printToPDF(this.domWindow.document, entries)
+      );
+    } catch (ex) {
+      console.error("PdfStreamConverter: printToPDF failed.", ex);
+      sendResponse(null);
+    }
+  }
+
   download(data) {
     if (!this.supportsDownloading()) {
       console.warn("PdfStreamConverter: blocked a download request.");
@@ -441,6 +649,7 @@ class ChromeActions {
       blobUrl,
       originalUrl,
       filename,
+      isModified: data.isModified === true,
     });
   }
 
@@ -479,12 +688,27 @@ class ChromeActions {
       ? await this.getNimbusExperimentData()
       : null;
 
+    // Stay within DrawTargetWebgl's size limit when requesting acceleration.
+    let maxCanvasDim = Services.prefs.getIntPref("gfx.canvas.max-size");
+    const acceleratedMaxSize = Services.prefs.getIntPref(
+      "gfx.canvas.accelerated.max-size",
+      0
+    );
+    if (
+      acceleratedMaxSize > 0 &&
+      Services.prefs.getBoolPref("pdfjs.enableHWA", false) &&
+      Cc["@mozilla.org/gfx/info;1"].getService(Ci.nsIGfxInfo)
+        .usingAcceleratedCanvas
+    ) {
+      maxCanvasDim = Math.min(maxCanvasDim, acceleratedMaxSize);
+    }
+
     return {
       allowedGlobalEvents: this.#allowedGlobalEvents,
       canvasMaxAreaInBytes: Services.prefs.getIntPref("gfx.max-alloc-size"),
       isInAutomation: Cu.isInAutomation,
       localeProperties: this.getLocaleProperties(),
-      maxCanvasDim: Services.prefs.getIntPref("gfx.canvas.max-size"),
+      maxCanvasDim,
       nimbusDataStr,
       supportsDocumentFonts:
         !!Services.prefs.getIntPref("browser.display.use_document_fonts") &&
@@ -554,6 +778,16 @@ class ChromeActions {
   reportText(data) {
     const actor = getActor(this.domWindow);
     actor?.sendAsyncMessage("PDFJS:Parent:reportText", data);
+  }
+
+  openAboutPdfFeatures() {
+    const doc = this.domWindow.document;
+    if (!doc.hasValidTransientUserGestureActivation) {
+      return;
+    }
+    doc.consumeTransientUserGestureActivation();
+    const actor = getActor(this.domWindow);
+    actor?.sendAsyncMessage("PDFJS:Parent:openAboutPdfFeatures");
   }
 
   updateFindControlState(data) {
@@ -650,10 +884,27 @@ class ChromeActions {
       }
     }
 
+    if ("featuresNotificationDismissed" in currentPrefs) {
+      currentPrefs.featuresNotificationDismissed =
+        !(await this.#claimFeaturesNotification());
+    }
+
     sendResponse({
       browserPrefs,
       prefs: currentPrefs,
     });
+  }
+
+  // Claim an impression in the parent before exposing the notification.
+  async #claimFeaturesNotification() {
+    if (this.isMobile() || this.domWindow !== this.domWindow.top) {
+      return false;
+    }
+    return (
+      (await getActor(this.domWindow)?.sendQuery(
+        "PDFJS:Parent:claimFeaturesNotification"
+      )) === true
+    );
   }
 
   async setPreferences(data, sendResponse) {
@@ -804,7 +1055,12 @@ class RangedChromeActions extends ChromeActions {
         );
       };
       this.dataListener.oncomplete = () => {
-        if (!done && this.dataListener.isDone) {
+        const { dataListener } = this;
+        if (!dataListener) {
+          return;
+        }
+        this.dataListener = null;
+        if (!done && dataListener.isDone) {
           this.domWindow.postMessage(
             {
               pdfjsLoadAction: "progressiveDone",
@@ -812,10 +1068,12 @@ class RangedChromeActions extends ChromeActions {
             PDF_VIEWER_ORIGIN
           );
         }
-        this.dataListener = null;
       };
     }
 
+    if (done && !data) {
+      this.closeWorkers();
+    }
     this.domWindow.postMessage(
       {
         pdfjsLoadAction: "supportsRangedLoading",
@@ -911,6 +1169,9 @@ class StandardChromeActions extends ChromeActions {
     };
 
     this.dataListener.oncomplete = (data, errorCode) => {
+      if (!data) {
+        this.closeWorkers();
+      }
       this.domWindow.postMessage(
         {
           pdfjsLoadAction: "complete",
@@ -1097,6 +1358,13 @@ PdfStreamConverter.prototype = {
   },
 
   getConvertedType(aFromType, aChannel) {
+    // nsIStreamConverter allows a null channel, but PDF.js needs one to decide
+    // how the PDF must be handled.
+    if (!aChannel) {
+      Components.returnCode = Cr.NS_ERROR_INVALID_ARG;
+      return "";
+    }
+
     if (aChannel instanceof Ci.nsIMultiPartChannel) {
       throw new Components.Exception(
         "PDF.js doesn't support multipart responses.",
@@ -1108,7 +1376,7 @@ PdfStreamConverter.prototype = {
     // PDF.js must not claim the channel and rewrite its type to text/html -
     // that breaks the external handler for attachments opened from the compose
     // window (bug 1698140).
-    let browsingContext = aChannel?.loadInfo?.targetBrowsingContext;
+    let browsingContext = aChannel.loadInfo?.targetBrowsingContext;
     if (!browsingContext) {
       throw new Components.Exception(
         "PDF.js can't be used without a browsing context.",
@@ -1117,7 +1385,7 @@ PdfStreamConverter.prototype = {
     }
 
     const HTML = "text/html";
-    let channelURI = aChannel?.URI;
+    let channelURI = aChannel.URI;
     // We can be invoked for application/octet-stream; check if we want the
     // channel first:
     if (aFromType != "application/pdf") {
@@ -1176,12 +1444,8 @@ PdfStreamConverter.prototype = {
       }
     }
 
-    // If we're loading this PDF with an object/embed element, we always want to
-    // try to render it inline, as we can't fall back to an external handler.
-    if (
-      aChannel.loadInfo?.externalContentPolicyType ==
-      Ci.nsIContentPolicy.TYPE_OBJECT
-    ) {
+    // Keep embedded PDFs in PDF.js instead of invoking the configured handler.
+    if (isEmbeddedPdfLoad(aChannel.loadInfo)) {
       return HTML;
     }
 
@@ -1212,6 +1476,13 @@ PdfStreamConverter.prototype = {
 
     var rangeRequest = false;
     var streamRequest = false;
+    const searchParams = new URLSearchParams(aRequest.URI.ref.toLowerCase());
+    const isPDFBugEnabled = Services.prefs.getBoolPref(
+      "pdfjs.pdfBugEnabled",
+      false
+    );
+    const disableWorker =
+      isPDFBugEnabled && searchParams.get("disableworker") === "true";
     if (isHttpRequest) {
       var contentEncoding = "identity";
       try {
@@ -1223,23 +1494,17 @@ PdfStreamConverter.prototype = {
         acceptRanges = aRequest.getResponseHeader("Accept-Ranges");
       } catch (e) {}
 
-      var hash = aRequest.URI.ref;
-      const isPDFBugEnabled = Services.prefs.getBoolPref(
-        "pdfjs.pdfBugEnabled",
-        false
-      );
       rangeRequest =
         contentEncoding === "identity" &&
         acceptRanges === "bytes" &&
         aRequest.contentLength >= 0 &&
         !Services.prefs.getBoolPref("pdfjs.disableRange", false) &&
-        (!isPDFBugEnabled || !hash.toLowerCase().includes("disablerange=true"));
+        (!isPDFBugEnabled || searchParams.get("disablerange") !== "true");
       streamRequest =
         contentEncoding === "identity" &&
         aRequest.contentLength >= 0 &&
         !Services.prefs.getBoolPref("pdfjs.disableStream", false) &&
-        (!isPDFBugEnabled ||
-          !hash.toLowerCase().includes("disablestream=true"));
+        (!isPDFBugEnabled || searchParams.get("disablestream") !== "true");
     }
 
     aRequest.QueryInterface(Ci.nsIChannel);
@@ -1312,7 +1577,7 @@ PdfStreamConverter.prototype = {
         listener.onDataAvailable(aRequest, inputStream, offset, count);
       },
       onStopRequest(request, statusCode) {
-        var domWindow = getDOMWindow(channel, resourcePrincipal);
+        const domWindow = getDOMWindow(channel, resourcePrincipal);
         if (!Components.isSuccessCode(statusCode) || !domWindow) {
           // The request may have been aborted and the document may have been
           // replaced with something that is not PDF.js, abort attaching.
@@ -1337,6 +1602,11 @@ PdfStreamConverter.prototype = {
             dataListener
           );
         }
+        // viewer.mjs reads these globals during module evaluation.
+        if (!disableWorker) {
+          actions.preloadWorker();
+        }
+        actions.preloadRendererWorkers();
 
         var requestListener = new RequestListener(actions);
         domWindow.document.addEventListener(

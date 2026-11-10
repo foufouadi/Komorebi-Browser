@@ -164,9 +164,16 @@ public class GeckoSession {
   private TranslationsController.SessionTranslation mTranslations =
       new TranslationsController.SessionTranslation(this);
 
+  @OptIn(markerClass = ExperimentalGeckoViewApi.class)
+  private final PictureInPictureController.SessionPictureInPicture mPictureInPicture =
+      new PictureInPictureController.SessionPictureInPicture(this);
+
   /** Session page extractor. Initialized once, in {@link #getSessionPageExtractor()} */
   @OptIn(markerClass = ExperimentalGeckoViewApi.class)
   private PageExtractionController.SessionPageExtractor mPageExtractor;
+
+  @OptIn(markerClass = ExperimentalGeckoViewApi.class)
+  private PdfViewerController.SessionEditor mPdfViewerEditor;
 
   /** {@code SessionMagnifier} handles magnifying glass. */
   /* package */ interface SessionMagnifier {
@@ -325,6 +332,11 @@ public class GeckoSession {
     }
 
     @WrapForJNI(calledFrom = "ui")
+    private GeckoSession getSession() {
+      return GeckoSession.this;
+    }
+
+    @WrapForJNI(calledFrom = "ui")
     private void onCompositorAttached() {
       GeckoSession.this.onCompositorAttached();
     }
@@ -365,9 +377,6 @@ public class GeckoSession {
     // syncResumeResizeCompositor().
     @WrapForJNI(calledFrom = "ui", dispatchTo = "current")
     public native Surface getMagnifiableSurface();
-
-    @WrapForJNI(calledFrom = "ui", dispatchTo = "current")
-    public native void setMaxToolbarHeight(int height);
 
     @WrapForJNI(calledFrom = "ui", dispatchTo = "gecko")
     public native void setFixedBottomOffset(int offset);
@@ -412,12 +421,8 @@ public class GeckoSession {
     // cases, the viewport information we have in Java is no longer valid and needs to
     // be replaced with the new viewport information provided.
     @WrapForJNI(calledFrom = "ui")
-    private void notifyCompositorScrollUpdate(
-        final float scrollX,
-        final float scrollY,
-        final float zoom,
-        final @ScrollPositionUpdate.SourceType int source) {
-      GeckoSession.this.onCompositorScrollUpdate(scrollX, scrollY, zoom, source);
+    private void notifyCompositorScrollUpdate(final ScrollPositionUpdate update) {
+      GeckoSession.this.onCompositorScrollUpdate(update);
     }
 
     @WrapForJNI(calledFrom = "ui")
@@ -1301,6 +1306,10 @@ public class GeckoSession {
   private final TranslationsController.SessionTranslation.Handler mTranslationsHandler =
       mTranslations.getHandler();
 
+  @OptIn(markerClass = ExperimentalGeckoViewApi.class)
+  private final PictureInPictureController.SessionPictureInPicture.Handler
+      mPictureInPictureHandler = mPictureInPicture.getHandler();
+
   /* package */ int handlersCount;
 
   private final GeckoSessionHandler<?>[] mSessionHandlers =
@@ -1316,6 +1325,7 @@ public class GeckoSession {
         mScrollHandler,
         mSelectionActionDelegate,
         mTranslationsHandler,
+        mPictureInPictureHandler,
         mContentBlockingHandler,
         mMediaSessionHandler,
         mExperimentHandler
@@ -1441,6 +1451,31 @@ public class GeckoSession {
       mNativeQueue = nativeQueue;
     }
 
+    @WrapForJNI
+    /* package */ static class ContentMetrics {
+      int width;
+      int height;
+      float devicePixelRatio;
+      float scrollX;
+      float scrollY;
+
+      /* package */ ContentMetrics() {}
+
+      @WrapForJNI
+      /* package */ void set(
+          final int width,
+          final int height,
+          final float devicePixelRatio,
+          final float scrollX,
+          final float scrollY) {
+        this.width = width;
+        this.height = height;
+        this.devicePixelRatio = devicePixelRatio;
+        this.scrollX = scrollX;
+        this.scrollY = scrollY;
+      }
+    }
+
     @Override // IInterface
     public Binder asBinder() {
       if (mBinder == null) {
@@ -1503,14 +1538,6 @@ public class GeckoSession {
     @WrapForJNI(dispatchTo = "proxy", stubName = "Close")
     private native void nativeClose();
 
-    @WrapForJNI(dispatchTo = "proxy", stubName = "Transfer")
-    private native void nativeTransfer(
-        NativeQueue queue,
-        Compositor compositor,
-        EventDispatcher dispatcher,
-        SessionAccessibility.NativeProvider sessionAccessibility,
-        GeckoBundle initData);
-
     @WrapForJNI(dispatchTo = "proxy")
     public native void attachEditable(IGeckoEditableParent parent);
 
@@ -1523,6 +1550,30 @@ public class GeckoSession {
 
     @WrapForJNI(dispatchTo = "proxy")
     private native void printToPdf(GeckoResult<InputStream> geckoResult, long browserContextId);
+
+    @WrapForJNI(calledFrom = "ui", dispatchTo = "proxy")
+    public native void requestFullScreenshot(
+        GeckoResult<Bitmap> result,
+        final Bitmap target,
+        final int x,
+        final int y,
+        final int width,
+        final int height,
+        final float renderingScale);
+
+    @WrapForJNI(calledFrom = "ui", dispatchTo = "proxy")
+    public native void requestRegionToSurface(
+        GeckoResult<Void> result,
+        final Surface surface,
+        final int x,
+        final int y,
+        final int width,
+        final int height,
+        final float scale);
+
+    @WrapForJNI(calledFrom = "ui", dispatchTo = "proxy")
+    public native void requestContentMetrics(
+        GeckoResult<ContentMetrics> result, ContentMetrics metrics);
 
     @WrapForJNI(calledFrom = "gecko")
     private synchronized void onReady(final @Nullable NativeQueue queue) {
@@ -1738,6 +1789,7 @@ public class GeckoSession {
    *
    * @param settings The settings to configure this GeckoSession, or null to use defaults.
    */
+  @SuppressWarnings("this-escape")
   public GeckoSession(final @Nullable GeckoSessionSettings settings) {
     mSettings = new GeckoSessionSettings(settings, this);
     mListener.registerListeners();
@@ -2143,6 +2195,9 @@ public class GeckoSession {
    */
   @AnyThread
   public static class Loader {
+    /** Public constructor for Loader. */
+    public Loader() {}
+
     private String mUri;
     private GeckoSession mReferrerSession;
     private String mReferrerUri;
@@ -2775,6 +2830,20 @@ public class GeckoSession {
     return mPdfFileSaver;
   }
 
+  /**
+   * Get the PDF viewer editor for this GeckoSession.
+   *
+   * @return The current PDF viewer editor session coordinator.
+   */
+  @AnyThread
+  @ExperimentalGeckoViewApi
+  public @NonNull PdfViewerController.SessionEditor getPdfViewerEditor() {
+    if (mPdfViewerEditor == null) {
+      mPdfViewerEditor = new PdfViewerController.SessionEditor(this);
+    }
+    return mPdfViewerEditor;
+  }
+
   /** Represent the result of a save-pdf operation. */
   @AnyThread
   public static class PdfSaveResult {
@@ -2855,6 +2924,24 @@ public class GeckoSession {
     }
 
     ThreadUtils.runOnUiThread(() -> getAutofillSupport().onActiveChanged(active));
+  }
+
+  /**
+   * Set this GeckoSession as active or inactive, same as {@link #setActive}, except that going
+   * inactive is skipped while {@link
+   * PictureInPictureController.SessionPictureInPicture#setKeepActive} is set. Once the embedder
+   * clears the flag, it must call {@link #setActive} with {@code false} if the session is no longer
+   * showing anywhere.
+   *
+   * @param active A boolean determining whether the GeckoSession is active.
+   */
+  @UiThread
+  @OptIn(markerClass = ExperimentalGeckoViewApi.class)
+  /* package */ void maybeSetActive(final boolean active) {
+    if (!active && mPictureInPicture.keepsActive()) {
+      return;
+    }
+    setActive(active);
   }
 
   /**
@@ -3471,6 +3558,42 @@ public class GeckoSession {
   }
 
   /**
+   * Returns the picture-in-picture for this session, which drives the picture-in-picture window for
+   * the video this session is playing.
+   *
+   * @return The {@link PictureInPictureController.SessionPictureInPicture} for this session.
+   */
+  @AnyThread
+  @ExperimentalGeckoViewApi
+  public @NonNull PictureInPictureController.SessionPictureInPicture getSessionPictureInPicture() {
+    return mPictureInPicture;
+  }
+
+  /**
+   * Sets the delegate that is asked to open and close picture-in-picture windows for this session.
+   *
+   * @param delegate The delegate, or {@code null} to unset it.
+   */
+  @UiThread
+  @ExperimentalGeckoViewApi
+  public void setPictureInPictureDelegate(
+      final @Nullable PictureInPictureController.SessionPictureInPicture.Delegate delegate) {
+    mPictureInPictureHandler.setDelegate(delegate, this);
+  }
+
+  /**
+   * Returns the picture-in-picture delegate set on this session.
+   *
+   * @return The delegate, or {@code null} if none is set.
+   */
+  @UiThread
+  @ExperimentalGeckoViewApi
+  public @Nullable PictureInPictureController.SessionPictureInPicture.Delegate
+      getPictureInPictureDelegate() {
+    return mPictureInPictureHandler.getDelegate();
+  }
+
+  /**
    * Set the content callback handler. This will replace the current handler.
    *
    * @param delegate An implementation of ContentDelegate.
@@ -3602,9 +3725,7 @@ public class GeckoSession {
     mHistoryHandler.setDelegate(delegate, this);
   }
 
-  /**
-   * @return The history tracking delegate for this session.
-   */
+  /** {@return the history tracking delegate for this session} */
   @AnyThread
   public @Nullable HistoryDelegate getHistoryDelegate() {
     return mHistoryHandler.getDelegate();
@@ -4618,7 +4739,7 @@ public class GeckoSession {
      */
     @UiThread
     default @Nullable GeckoResult<AllowOrDeny> onShowClipboardPermissionRequest(
-        @NonNull final GeckoSession session, @NonNull ClipboardPermission permission) {
+        @NonNull final GeckoSession session, @NonNull final ClipboardPermission permission) {
       return GeckoResult.deny();
     }
 
@@ -4688,10 +4809,10 @@ public class GeckoSession {
      */
     @UiThread
     default void onLocationChange(
-        @NonNull GeckoSession session,
-        @Nullable String url,
+        @NonNull final GeckoSession session,
+        @Nullable final String url,
         final @NonNull List<PermissionDelegate.ContentPermission> perms,
-        @NonNull Boolean hasUserGesture) {}
+        @NonNull final Boolean hasUserGesture) {}
 
     /**
      * The view's ability to go back has changed.
@@ -4863,6 +4984,8 @@ public class GeckoSession {
     }
 
     /**
+     * A request has failed to load.
+     *
      * @param session The GeckoSession that initiated the callback.
      * @param uri The URI that failed to load.
      * @param error A WebRequestError containing details about the error
@@ -4962,7 +5085,7 @@ public class GeckoSession {
          * @param prompt the prompt that was completed.
          */
         @AnyThread
-        default void onPromptCompleted(@NonNull BasePrompt prompt) {}
+        default void onPromptCompleted(@NonNull final BasePrompt prompt) {}
       }
 
       private void complete() {
@@ -5241,6 +5364,9 @@ public class GeckoSession {
 
     /** Contains all the Identity credential prompts (FedCM) */
     final class IdentityCredential {
+      /** Public constructor for IdentityCredential. */
+      public IdentityCredential() {}
+
       /**
        * ProviderSelectorPrompt contains the information necessary to represent a prompt that allows
        * the user to select the identity credential provider they would like to use.
@@ -6471,7 +6597,11 @@ public class GeckoSession {
       }
     }
 
-    /** Request containing information required to resolve Autocomplete prompt requests. */
+    /**
+     * Request containing information required to resolve Autocomplete prompt requests.
+     *
+     * @param <T> The type of the Autocomplete options.
+     */
     class AutocompleteRequest<T extends Autocomplete.Option<?>> extends BasePrompt {
       /**
        * The Autocomplete options for this request. This can contain a single or multiple entries.
@@ -6972,6 +7102,7 @@ public class GeckoSession {
      * @param source The source of the scroll position change, one of {@link
      *     #SOURCE_USER_INTERACTION} or {@link #SOURCE_OTHER}.
      */
+    @WrapForJNI
     public ScrollPositionUpdate(
         final float scrollX, final float scrollY, final float zoom, final @SourceType int source) {
       this.scrollX = scrollX;
@@ -7566,7 +7697,7 @@ public class GeckoSession {
      */
     @UiThread
     default @Nullable GeckoResult<Integer> onContentPermissionRequest(
-        @NonNull final GeckoSession session, @NonNull ContentPermission perm) {
+        @NonNull final GeckoSession session, @NonNull final ContentPermission perm) {
       return GeckoResult.fromValue(ContentPermission.VALUE_PROMPT);
     }
 
@@ -8086,22 +8217,17 @@ public class GeckoSession {
     mOverscroll.setDistance(y, OverscrollEdgeEffect.AXIS_Y);
   }
 
-  /* package */ void onCompositorScrollUpdate(
-      final float scrollX,
-      final float scrollY,
-      final float zoom,
-      final @ScrollPositionUpdate.SourceType int source) {
+  /* package */ void onCompositorScrollUpdate(final ScrollPositionUpdate update) {
     if (DEBUG) {
       ThreadUtils.assertOnUiThread();
     }
 
     // Tbe incoming scrollX and scrollY are in CSS pixels.
     // For mViewportLeft/Top, convert them to Screen pixels.
-    mViewportLeft = scrollX * zoom;
-    mViewportTop = scrollY * zoom;
-    mViewportZoom = zoom;
+    mViewportLeft = update.scrollX * update.zoom;
+    mViewportTop = update.scrollY * update.zoom;
+    mViewportZoom = update.zoom;
 
-    final ScrollPositionUpdate update = new ScrollPositionUpdate(scrollX, scrollY, zoom, source);
     mLastScrollPositionUpdate = update;
     if (mCompositorScrollDelegate != null) {
       mCompositorScrollDelegate.onScrollChanged(this, update);
@@ -8469,9 +8595,7 @@ public class GeckoSession {
     getAutofillSupport().setDelegate(delegate);
   }
 
-  /**
-   * @return The current {@link Autofill.Delegate} for this session, if any.
-   */
+  /** {@return the current {@link Autofill.Delegate} for this session, if any} */
   @UiThread
   public @Nullable Autofill.Delegate getAutofillDelegate() {
     return getAutofillSupport().getDelegate();
@@ -8491,15 +8615,52 @@ public class GeckoSession {
   }
 
   /**
-   * Saves a PDF of the currently displayed page.
+   * Saves a PDF of the currently displayed webpage. Uses the Gecko print machinery to generate the
+   * PDF.
+   *
+   * <p>When the page is a PDF loaded by PDF JS, then the PDF JS tools are used to acquire the PDF
+   * directly.
    *
    * @return A GeckoResult with an InputStream containing the PDF. The result could
    *     CompleteExceptionally with a {@link GeckoPrintException}s, if there are any issues while
-   *     generating the PDF.
+   *     generating the PDF, or with the PDF JS error, if PDF JS is displaying the document and
+   *     cannot provide it.
    */
   @HandlerThread
   public @NonNull GeckoResult<InputStream> saveAsPdf() {
-    return saveAsPdfByBrowsingContext(null);
+    return isPdfJs()
+        .then(
+            isPdfJs -> {
+              if (Boolean.TRUE.equals(isPdfJs)) {
+                return savePdfDocument();
+              }
+              return saveAsPdfByBrowsingContext(null);
+            },
+            // Could not determine PDF status, use Gecko.
+            exception -> {
+              Log.w(LOGTAG, "PDF status could not be determined.", exception);
+              return saveAsPdfByBrowsingContext(null);
+            });
+  }
+
+  /**
+   * Saves the original bytes of the PDF document that PDF JS is displaying.
+   *
+   * @return A GeckoResult with an InputStream containing the PDF. The result could
+   *     CompleteExceptionally, if PDF JS cannot provide the document.
+   */
+  @HandlerThread
+  private @NonNull GeckoResult<InputStream> savePdfDocument() {
+    return getPdfFileSaver()
+        .save()
+        .then(
+            response -> {
+              if (response == null || response.body == null) {
+                return GeckoResult.fromException(
+                    new IllegalStateException("PDF did not provide a response."));
+              }
+              return GeckoResult.fromValue(response.body);
+            });
   }
 
   /**
@@ -8702,6 +8863,9 @@ public class GeckoSession {
   /** Thrown when failure occurs when printing from a website. */
   @WrapForJNI
   public static class GeckoPrintException extends Exception {
+    @WrapForJNI(skip = true)
+    private static final long serialVersionUID = 1L;
+
     /** The print service was not available. */
     public static final int ERROR_PRINT_SETTINGS_SERVICE_NOT_AVAILABLE = -1;
 

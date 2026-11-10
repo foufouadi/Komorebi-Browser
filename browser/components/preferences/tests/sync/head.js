@@ -19,13 +19,26 @@ async function setupPolicyEngineWithJson(json, customSchema) {
  * @param {Function} testCallback - Async function that receives the document
  * @returns {Promise<void>}
  */
-async function runSyncPaneTest(uiStateData, testCallback) {
+async function runSyncPaneTest(
+  uiStateData,
+  testCallback,
+  isPerDeviceSyncEnabled = false
+) {
   let { UIState } = ChromeUtils.importESModule(
     "resource://services-sync/UIState.sys.mjs"
   );
 
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      ["services.sync.perDeviceEngineChoices", isPerDeviceSyncEnabled],
+      ["services.sync.cwtsMigrationNotification.dismissed", false],
+    ],
+  });
+
   const oldUIState = UIState.get;
   UIState.get = () => uiStateData;
+
+  Services.fog.testResetFOG();
 
   await openPreferencesViaOpenPreferencesAPI("paneSync", {
     leaveOpen: true,

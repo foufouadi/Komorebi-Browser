@@ -32,12 +32,12 @@ struct NativeException {
 };
 
 template <class T>
-static NativeException NullHandle() {
+inline NativeException NullHandle() {
   return {FUNCTION_SIGNATURE};
 }
 
 template <class T>
-static NativeException NullWeakPtr() {
+inline NativeException NullWeakPtr() {
   return {FUNCTION_SIGNATURE};
 }
 
@@ -118,7 +118,7 @@ namespace jni {
  *       static void AttachTo(const MyJavaClass::LocalRef& instance)
  *       {
  *           MyJavaClass::Natives<MyClass>::AttachNative(
- *                   instance, mozilla::MakeUnique<MyClass>());
+ *                   instance, std::make_unique<MyClass>());
  *
  *           // "instance" owns the newly created C++ object, so the C++
  *           // object is destroyed as soon as instance.disposeNative() is

@@ -9,14 +9,13 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::u32;
 use api::{MinimapData, SnapshotImageKey};
-use crate::api::channel::{Sender, single_msg_channel, unbounded_channel};
+use crate::api::channel::{Sender, SyncSender, single_msg_channel, unbounded_channel};
 use crate::api::{BuiltDisplayList, IdNamespace, ExternalScrollId, Parameter, BoolParameter};
 use crate::api::{FontKey, FontInstanceKey, NativeFontHandle};
 use crate::api::{BlobImageData, BlobImageKey, ImageData, ImageDescriptor, ImageKey, Epoch, QualitySettings};
 use crate::api::{BlobImageParams, BlobImageRequest, BlobImageResult, AsyncBlobImageRasterizer, BlobImageHandler};
-use crate::api::{DocumentId, PipelineId, PropertyBindingId, PropertyBindingKey, ExternalEvent};
+use crate::api::{DocumentId, EmbedPolicy, PipelineId, PropertyBindingId, PropertyBindingKey, ExternalEvent};
 use crate::api::{HitTestResult, HitTesterRequest, ApiHitTester, PropertyValue, DynamicProperties};
 use crate::api::{SampledScrollOffset, TileSize, NotificationRequest, DebugFlags};
 use crate::api::{GlyphDimensionRequest, GlyphIndexRequest, GlyphIndex, GlyphDimensions};
@@ -73,6 +72,10 @@ pub enum ResourceUpdate {
     AddSnapshotImage(AddSnapshotImage),
     /// See `AddSnapshotImage`.
     DeleteSnapshotImage(SnapshotImageKey),
+    /// Move a snapshot image, and the pixels already rendered into it, from the
+    /// first key to the second. The keys can belong to different id namespaces.
+    /// After this, only the second key names the image.
+    AdoptSnapshotImage(SnapshotImageKey, SnapshotImageKey),
     /// See `AddFont`.
     AddFont(AddFont),
     /// Deletes an already existing font resource.
@@ -115,6 +118,7 @@ impl fmt::Debug for ResourceUpdate {
             ResourceUpdate::SetBlobImageVisibleArea(..) => f.write_str("ResourceUpdate::SetBlobImageVisibleArea"),
             ResourceUpdate::AddSnapshotImage(..) => f.write_str("ResourceUpdate::AddSnapshotImage"),
             ResourceUpdate::DeleteSnapshotImage(..) => f.write_str("ResourceUpdate::DeleteSnapshotImage"),
+            ResourceUpdate::AdoptSnapshotImage(..) => f.write_str("ResourceUpdate::AdoptSnapshotImage"),
             ResourceUpdate::AddFont(..) => f.write_str("ResourceUpdate::AddFont"),
             ResourceUpdate::DeleteFont(..) => f.write_str("ResourceUpdate::DeleteFont"),
             ResourceUpdate::AddFontInstance(..) => f.write_str("ResourceUpdate::AddFontInstance"),
@@ -305,6 +309,21 @@ impl Transaction {
         self.scene_ops.push(SceneMsg::RemovePipeline(pipeline_id));
     }
 
+    /// Sets the pipelines that `pipeline_id` may embed with iframe items.
+    ///
+    /// The policy must come from trusted code, not from the producer of the
+    /// pipeline's display list. It is kept until the pipeline is removed or
+    /// the policy is replaced, and it applies to the next scene build.
+    pub fn set_embed_policy(&mut self, pipeline_id: PipelineId, policy: EmbedPolicy) {
+        self.scene_ops.push(SceneMsg::SetEmbedPolicy { pipeline_id, policy });
+    }
+
+    /// Enables or disables the enforcement of embed policies in the document.
+    /// While enabled, a pipeline without an embed policy may not embed anything.
+    pub fn set_embed_policy_enforcement(&mut self, enabled: bool) {
+        self.scene_ops.push(SceneMsg::SetEmbedPolicyEnforcement(enabled));
+    }
+
     /// Supplies a new frame to WebRender.
     ///
     /// Non-blocking, it notifies a worker process which processes the display list.
@@ -363,7 +382,10 @@ impl Transaction {
         &mut self,
         device_rect: DeviceIntRect,
     ) {
-        window_size_sanity_check(device_rect.size());
+        let device_rect = DeviceIntRect::from_origin_and_size(
+            device_rect.min,
+            clamp_window_size(device_rect.size()),
+        );
         self.scene_ops.push(
             SceneMsg::SetDocumentView {
                 device_rect,
@@ -565,6 +587,11 @@ impl Transaction {
     /// See `ResourceUpdate::DeleteSnapshotImage`.
     pub fn delete_snapshot_image(&mut self, key: SnapshotImageKey) {
         self.resource_updates.push(ResourceUpdate::DeleteSnapshotImage(key));
+    }
+
+    /// See `ResourceUpdate::AdoptSnapshotImage`.
+    pub fn adopt_snapshot_image(&mut self, from: SnapshotImageKey, to: SnapshotImageKey) {
+        self.resource_updates.push(ResourceUpdate::AdoptSnapshotImage(from, to));
     }
 
     /// See `ResourceUpdate::AddFont`.
@@ -857,6 +884,15 @@ pub enum SceneMsg {
         /// The id namespace owning the resources this display list may reference.
         namespace: IdNamespace,
     },
+    ///
+    SetEmbedPolicy {
+        ///
+        pipeline_id: PipelineId,
+        ///
+        policy: EmbedPolicy,
+    },
+    ///
+    SetEmbedPolicyEnforcement(bool),
     /// Build a scene without affecting any retained state.
     ///
     /// Useful to render an offscreen scene in the background without affecting
@@ -879,9 +915,9 @@ pub enum FrameMsg {
     ///
     UpdateEpoch(PipelineId, Epoch),
     ///
-    HitTest(WorldPoint, Sender<HitTestResult>),
+    HitTest(WorldPoint, SyncSender<HitTestResult>),
     ///
-    RequestHitTester(Sender<Arc<dyn ApiHitTester>>),
+    RequestHitTester(SyncSender<Arc<dyn ApiHitTester>>),
     ///
     SetScrollOffsets(ExternalScrollId, Vec<SampledScrollOffset>),
     ///
@@ -904,6 +940,8 @@ impl fmt::Debug for SceneMsg {
             SceneMsg::RemovePipeline(..) => "SceneMsg::RemovePipeline",
             SceneMsg::SetDocumentView { .. } => "SceneMsg::SetDocumentView",
             SceneMsg::SetRootPipeline(..) => "SceneMsg::SetRootPipeline",
+            SceneMsg::SetEmbedPolicy { .. } => "SceneMsg::SetEmbedPolicy",
+            SceneMsg::SetEmbedPolicyEnforcement(..) => "SceneMsg::SetEmbedPolicyEnforcement",
             SceneMsg::SetQualitySettings { .. } => "SceneMsg::SetQualitySettings",
             SceneMsg::RenderOffscreen(..) => "SceneMsg::BuildOffscreen",
         })
@@ -989,8 +1027,6 @@ pub enum DebugCommand {
     StopCaptureSequence,
     /// Clear cached resources, forcing them to be re-uploaded from templates.
     ClearCaches(ClearCache),
-    /// Enable/disable native compositor usage
-    EnableNativeCompositor(bool),
     /// Sets the maximum amount of existing batches to visit before creating a new one.
     SetBatchingLookback(u32),
     /// Causes the scene builder to pause for a given amount of milliseconds each time it
@@ -1012,6 +1048,16 @@ pub enum DebugCommand {
     /// Capture the next composited frame with RenderDoc, replying with the
     /// written .rdc path (or an error message).
     CaptureRenderDoc(Sender<crate::api::debugger::RenderDocReply>),
+    #[cfg(feature = "debugger")]
+    /// Replace the per-primitive debug override (disabled / highlighted
+    /// primitives) of the window's documents. Replies with an error message
+    /// if the override targets a stale scene generation.
+    SetSceneDebugOverride(crate::api::debugger::SceneDebugOverride, Sender<Result<(), String>>),
+    #[cfg(feature = "debugger")]
+    /// Replace the source of one `.glsl` file, or drop the override when the
+    /// source is `None`, and rebuild the shaders it affects. Replies with the
+    /// compile diagnostics if any affected shader failed to build.
+    SetShaderSource(String, Option<String>, Sender<crate::api::debugger::ShaderReloadReply>),
 }
 
 /// Initial state handed to `RenderBackend::register_window`.
@@ -1076,7 +1122,7 @@ pub struct ResourceCacheInit {
 /// Message sent by the `RenderApi` to the render backend thread.
 pub enum ApiMsg {
     /// Adds a new document namespace.
-    CloneApi(Sender<IdNamespace>),
+    CloneApi(SyncSender<IdNamespace>),
     /// Adds a new document namespace.
     CloneApiByClient(IdNamespace),
     /// Register a new window on this backend thread. Sent once per window,
@@ -1087,7 +1133,7 @@ pub enum ApiMsg {
     /// If a channel is passed via the second argument, an empty message will
     /// be sent on it after the window is unregistered. It can be used for
     /// synchronzation.
-    UnregisterWindow(RenderBackendId, Option<Sender<()>>),
+    UnregisterWindow(RenderBackendId, Option<SyncSender<()>>),
     /// Adds a new document with given initial size, owned by the given window.
     AddDocument(DocumentId, DeviceIntSize, RenderBackendId),
     /// A message targeted at a particular document.
@@ -1103,7 +1149,7 @@ pub enum ApiMsg {
     /// Flush from the caches anything that isn't necessary, to free some memory.
     MemoryPressure,
     /// Collects a memory report.
-    ReportMemory(Sender<Box<MemoryReport>>),
+    ReportMemory(SyncSender<Box<MemoryReport>>),
     /// Change debugging options, scoped to a specific window. The command
     /// only affects documents that belong to the given `RenderBackendId`,
     /// so callers can target one window in a shared backend pool without
@@ -1287,7 +1333,7 @@ impl RenderApi {
     pub fn add_document_with_id(&self,
                                 initial_size: DeviceIntSize,
                                 id: u32) -> DocumentId {
-        window_size_sanity_check(initial_size);
+        let initial_size = clamp_window_size(initial_size);
 
         let document_id = DocumentId::new(self.namespace_id, id);
 
@@ -1652,13 +1698,17 @@ impl Drop for RenderApi {
 }
 
 
-fn window_size_sanity_check(size: DeviceIntSize) {
+fn clamp_window_size(size: DeviceIntSize) -> DeviceIntSize {
     // Anything bigger than this will crash later when attempting to create
     // a render task.
     use crate::api::MAX_RENDER_TASK_SIZE;
     if size.width > MAX_RENDER_TASK_SIZE || size.height > MAX_RENDER_TASK_SIZE {
-        panic!("Attempting to create a {}x{} window/document", size.width, size.height);
+        warn!("Clamping a {}x{} window/document", size.width, size.height);
     }
+    DeviceIntSize::new(
+        size.width.min(MAX_RENDER_TASK_SIZE),
+        size.height.min(MAX_RENDER_TASK_SIZE),
+    )
 }
 
 /// Collection of heap sizes, in bytes.
@@ -1699,4 +1749,77 @@ pub struct MemoryReport {
     pub swap_chain: usize,
     pub render_texture_hosts: usize,
     pub upload_staging_textures: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::{BlobImageResources, ImageDescriptorFlags};
+
+    struct NullRasterizer;
+    impl AsyncBlobImageRasterizer for NullRasterizer {
+        fn rasterize(
+            &mut self,
+            _requests: &[BlobImageParams],
+            _low_priority: bool,
+            _tile_pool: &mut crate::api::BlobTilePool,
+        ) -> Vec<(BlobImageRequest, BlobImageResult)> {
+            Vec::new()
+        }
+    }
+
+    struct NullBlobHandler;
+    impl BlobImageHandler for NullBlobHandler {
+        fn create_blob_rasterizer(&mut self) -> Box<dyn AsyncBlobImageRasterizer> {
+            Box::new(NullRasterizer)
+        }
+        fn create_similar(&self) -> Box<dyn BlobImageHandler> {
+            Box::new(NullBlobHandler)
+        }
+        fn prepare_resources(&mut self, _: &dyn BlobImageResources, _: &[BlobImageParams]) {}
+        fn add(&mut self, _: BlobImageKey, _: Arc<BlobImageData>, _: &DeviceIntRect, _: TileSize) {}
+        fn update(&mut self, _: BlobImageKey, _: Arc<BlobImageData>, _: &DeviceIntRect, _: &BlobDirtyRect) {}
+        fn delete(&mut self, _: BlobImageKey) {}
+        fn delete_font(&mut self, _: FontKey) {}
+        fn delete_font_instance(&mut self, _: FontInstanceKey) {}
+        fn clear_namespace(&mut self, _: IdNamespace) {}
+        fn enable_multithreading(&mut self, _: bool) {}
+    }
+
+    #[test]
+    fn delete_blob_image_in_same_transaction_as_add() {
+        let namespace = IdNamespace(1);
+        let mut resources = ApiResources::new(
+            Some(Box::new(NullBlobHandler)),
+            SharedFontResources::new(namespace),
+        );
+        let key = BlobImageKey(ImageKey::new(namespace, 1));
+        let rect = DeviceIntRect::from_size(DeviceIntSize::new(64, 64));
+        let descriptor = ImageDescriptor::new(64, 64, ImageFormat::BGRA8, ImageDescriptorFlags::empty());
+
+        let mut txn = Transaction::new();
+        txn.add_blob_image(key, descriptor, Arc::new(vec![0; 16]), rect, None);
+        txn.delete_blob_image(key);
+        let mut msg = txn.finalize(DocumentId::new(namespace, 0));
+        resources.update(&mut msg);
+        assert!(msg.blob_requests.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod window_size_tests {
+    use super::*;
+    use crate::api::MAX_RENDER_TASK_SIZE;
+
+    #[test]
+    fn clamp_oversized_window() {
+        assert_eq!(
+            clamp_window_size(DeviceIntSize::new(470287, 29)),
+            DeviceIntSize::new(MAX_RENDER_TASK_SIZE, 29),
+        );
+        assert_eq!(
+            clamp_window_size(DeviceIntSize::new(1024, 768)),
+            DeviceIntSize::new(1024, 768),
+        );
+    }
 }

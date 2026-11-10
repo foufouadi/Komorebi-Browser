@@ -32,26 +32,6 @@ add_setup(async function () {
   do_get_profile();
 
   await initSelectableProfileService();
-
-  // TODO(bug 1967779): require the ProfilesDatastoreService to be initialized
-  Services.prefs.setBoolPref("nimbus.profilesdatastoreservice.enabled", true);
-  Services.prefs.setBoolPref(
-    "nimbus.profilesdatastoreservice.read.enabled",
-    true
-  );
-  NimbusEnrollments._reloadPrefsForTests();
-
-  registerCleanupFunction(() => {
-    Services.prefs.setBoolPref(
-      "nimbus.profilesdatastoreservice.enabled",
-      false
-    );
-    Services.prefs.setBoolPref(
-      "nimbus.profilesdatastoreservice.read.enabled",
-      false
-    );
-    NimbusEnrollments._reloadPrefsForTests();
-  });
 });
 
 /**

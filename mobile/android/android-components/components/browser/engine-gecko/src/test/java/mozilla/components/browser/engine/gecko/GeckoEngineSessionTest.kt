@@ -21,7 +21,6 @@ import mozilla.components.browser.engine.gecko.ext.isExcludedForTrackingProtecti
 import mozilla.components.browser.engine.gecko.permission.geckoContentPermission
 import mozilla.components.browser.engine.gecko.translate.GeckoTranslationUtils.intoTranslationError
 import mozilla.components.browser.engine.gecko.util.FakeEngineDownloadDelegate
-import mozilla.components.browser.errorpages.ErrorType
 import mozilla.components.concept.engine.DefaultSettings
 import mozilla.components.concept.engine.EngineSession
 import mozilla.components.concept.engine.EngineSession.LoadUrlFlags
@@ -39,11 +38,13 @@ import mozilla.components.concept.engine.history.HistoryItem
 import mozilla.components.concept.engine.history.HistoryTrackingDelegate
 import mozilla.components.concept.engine.manifest.WebAppManifest
 import mozilla.components.concept.engine.permission.PermissionRequest
+import mozilla.components.concept.engine.request.ErrorType
 import mozilla.components.concept.engine.request.RequestInterceptor
 import mozilla.components.concept.engine.translate.TranslationError
 import mozilla.components.concept.engine.translate.TranslationOperation
 import mozilla.components.concept.engine.window.WindowRequest
 import mozilla.components.concept.fetch.Headers
+import mozilla.components.concept.fetch.Headers.Names.CONTENT_DISPOSITION
 import mozilla.components.concept.fetch.Response
 import mozilla.components.concept.storage.PageVisit
 import mozilla.components.concept.storage.RedirectSource
@@ -96,7 +97,9 @@ import org.mozilla.geckoview.GeckoSession.PermissionDelegate.PERMISSION_STORAGE_
 import org.mozilla.geckoview.GeckoSession.PermissionDelegate.PERMISSION_TRACKING
 import org.mozilla.geckoview.GeckoSession.ProgressDelegate.SecurityInformation
 import org.mozilla.geckoview.GeckoSessionSettings
+import org.mozilla.geckoview.PdfViewerController
 import org.mozilla.geckoview.SessionFinder
+import org.mozilla.geckoview.SessionPdfFileSaver
 import org.mozilla.geckoview.TranslationsController
 import org.mozilla.geckoview.TranslationsController.TranslationsException
 import org.mozilla.geckoview.WebRequestError
@@ -1897,7 +1900,7 @@ class GeckoEngineSessionTest {
         val observers = mutableListOf<EngineSession.Observer>()
         val policy = TrackingProtectionPolicy.strict()
 
-        for (x in 1..5) {
+        repeat(5) {
             observers.add(spy(object : EngineSession.Observer {}))
         }
 
@@ -3194,6 +3197,58 @@ class GeckoEngineSessionTest {
     }
 
     @Test
+    fun `WHEN addSignatureToPdf is successful THEN onResult should be called`() {
+        val engineSession = GeckoEngineSession(mock(), geckoSessionProvider = geckoSessionProvider)
+        val mockedGeckoEditor: PdfViewerController.SessionEditor = mock()
+
+        val geckoResult = GeckoResult<Void>()
+
+        whenever(geckoSession.pdfViewerEditor).thenReturn(mockedGeckoEditor)
+        whenever(mockedGeckoEditor.addSignature(any())).thenReturn(geckoResult)
+
+        var onResultCalled = false
+        var onExceptionCalled = false
+
+        engineSession.addSignatureToPdf(
+            "Test User",
+            onResult = { onResultCalled = true },
+            onException = { onExceptionCalled = true },
+        )
+
+        geckoResult.complete(null)
+        shadowOf(getMainLooper()).idle()
+
+        assertTrue(onResultCalled)
+        assertFalse(onExceptionCalled)
+    }
+
+    @Test
+    fun `WHEN addSignatureToPdf has an error THEN onException should be called`() {
+        val engineSession = GeckoEngineSession(mock(), geckoSessionProvider = geckoSessionProvider)
+        val mockedGeckoEditor: PdfViewerController.SessionEditor = mock()
+
+        val geckoResult = GeckoResult<Void>()
+
+        whenever(geckoSession.pdfViewerEditor).thenReturn(mockedGeckoEditor)
+        whenever(mockedGeckoEditor.addSignature(any())).thenReturn(geckoResult)
+
+        var onResultCalled = false
+        var onExceptionCalled = false
+
+        engineSession.addSignatureToPdf(
+            "Test User",
+            onResult = { onResultCalled = true },
+            onException = { onExceptionCalled = true },
+        )
+
+        geckoResult.completeExceptionally(Exception())
+        shadowOf(getMainLooper()).idle()
+
+        assertFalse(onResultCalled)
+        assertTrue(onExceptionCalled)
+    }
+
+    @Test
     fun `WHEN session setNeverTranslateSiteSetting is successful THEN onResult should be called`() {
         val engineSession = GeckoEngineSession(mock(), geckoSessionProvider = geckoSessionProvider)
         val mockedGeckoController: TranslationsController.SessionTranslation = mock()
@@ -3712,6 +3767,7 @@ class GeckoEngineSessionTest {
                     appIntent: Intent?,
                     fallbackUrl: String?,
                     appName: String?,
+                    sourceUrl: String?,
                 ) {
                     observedUrl = url
                     observedIntent = appIntent
@@ -3814,6 +3870,7 @@ class GeckoEngineSessionTest {
                     appIntent: Intent?,
                     fallbackUrl: String?,
                     appName: String?,
+                    sourceUrl: String?,
                 ) {
                     observedUrl = url
                     observedIntent = appIntent
@@ -4074,17 +4131,20 @@ class GeckoEngineSessionTest {
                 var observedIntent: Intent? = null
                 var observedFallbackUrl: String? = null
                 var observedAppName: String? = null
+                var observedSourceUrl: String? = null
 
                 override fun onLaunchIntentRequest(
                     url: String,
                     appIntent: Intent?,
                     fallbackUrl: String?,
                     appName: String?,
+                    sourceUrl: String?,
                 ) {
                     observedUrl = url
                     observedIntent = appIntent
                     observedFallbackUrl = fallbackUrl
                     observedAppName = appName
+                    observedSourceUrl = sourceUrl
                 }
 
                 fun reset() {
@@ -4092,10 +4152,12 @@ class GeckoEngineSessionTest {
                     observedIntent = null
                     observedFallbackUrl = null
                     observedAppName = null
+                    observedSourceUrl = null
                 }
             }
 
         engineSession.register(observer)
+        engineSession.currentUrl = "https://www.mozilla.org"
 
         navigationDelegate.value.onLoadRequest(
             mock(),
@@ -4106,6 +4168,7 @@ class GeckoEngineSessionTest {
         assertEquals("result1", observer.observedUrl)
         assertEquals("fallback1", observer.observedFallbackUrl)
         assertEquals("app1", observer.observedAppName)
+        assertEquals("https://www.mozilla.org", observer.observedSourceUrl)
 
         observer.reset()
         navigationDelegate.value.onLoadRequest(
@@ -4117,6 +4180,7 @@ class GeckoEngineSessionTest {
         assertEquals("result2", observer.observedUrl)
         assertEquals("fallback2", observer.observedFallbackUrl)
         assertEquals("app2", observer.observedAppName)
+        assertEquals("https://www.mozilla.org", observer.observedSourceUrl)
 
         observer.reset()
         navigationDelegate.value.onLoadRequest(
@@ -4128,6 +4192,21 @@ class GeckoEngineSessionTest {
         assertEquals("result3", observer.observedUrl)
         assertEquals("fallback3", observer.observedFallbackUrl)
         assertEquals("app3", observer.observedAppName)
+        assertNull(observer.observedSourceUrl)
+
+        observer.reset()
+        navigationDelegate.value.onLoadRequest(
+            mock(),
+            mockLoadRequest("https://www.example.org", triggeredByRedirect = false, isDirectNavigation = true),
+        )
+        navigationDelegate.value.onLoadRequest(
+            mock(),
+            mockLoadRequest("sample:triggeredByRedirect", triggeredByRedirect = true, isDirectNavigation = false),
+        )
+
+        assertNotNull(observer.observedIntent)
+        assertEquals("result1", observer.observedUrl)
+        assertNull(observer.observedSourceUrl)
     }
 
     @Test
@@ -4217,6 +4296,7 @@ class GeckoEngineSessionTest {
                     appIntent: Intent?,
                     fallbackUrl: String?,
                     appName: String?,
+                    sourceUrl: String?,
                 ) {
                     observedUrl = url
                     observedIntent = appIntent
@@ -4299,6 +4379,7 @@ class GeckoEngineSessionTest {
                     appIntent: Intent?,
                     fallbackUrl: String?,
                     appName: String?,
+                    sourceUrl: String?,
                 ) {
                     observedUrl = url
                     observedIntent = appIntent
@@ -4371,6 +4452,7 @@ class GeckoEngineSessionTest {
                     appIntent: Intent?,
                     fallbackUrl: String?,
                     appName: String?,
+                    sourceUrl: String?,
                 ) {
                     observedUrl = url
                     observedIntent = appIntent
@@ -4889,13 +4971,20 @@ class GeckoEngineSessionTest {
 
     @Test
     fun `WHEN requestPdfToDownload THEN notify observers`() {
+        var seenContentDisposition: String? = null
         val engineSession =
             GeckoEngineSession(
                     runtime = mock(),
                     geckoSessionProvider = geckoSessionProvider,
                     defaultSettings =
                         DefaultSettings(
-                            downloadDelegate = FakeEngineDownloadDelegate(guessFileName = { _, _, _ -> "Mozilla.pdf" })
+                            downloadDelegate =
+                                FakeEngineDownloadDelegate(
+                                    guessFileName = { contentDisposition, _, _ ->
+                                        seenContentDisposition = contentDisposition
+                                        "Mozilla.pdf"
+                                    }
+                                )
                         ),
                 )
                 .apply {
@@ -4924,10 +5013,152 @@ class GeckoEngineSessionTest {
             }
         )
 
+        whenever(geckoSession.isPdfJs).thenReturn(GeckoResult.fromValue(false))
         whenever(geckoSession.saveAsPdf()).thenReturn(GeckoResult.fromValue(mock()))
 
         engineSession.requestPdfToDownload()
         shadowOf(getMainLooper()).idle()
+
+        assertEquals("attachment; filename=\"Mozilla.pdf\";", seenContentDisposition)
+    }
+
+    @Test
+    fun `GIVEN a PDF is showing the document WHEN requestPdfToDownload THEN it describes the download`() {
+        var seenUrl: String? = null
+        var seenContentDisposition: String? = null
+        val engineSession =
+            GeckoEngineSession(
+                    runtime = mock(),
+                    geckoSessionProvider = geckoSessionProvider,
+                    defaultSettings =
+                        DefaultSettings(
+                            downloadDelegate =
+                                FakeEngineDownloadDelegate(
+                                    guessFileName = { contentDisposition, _, _ ->
+                                        seenContentDisposition = contentDisposition
+                                        "pdfForm.pdf"
+                                    }
+                                )
+                        ),
+                )
+                .apply {
+                    currentUrl = "content://com.android.providers.downloads.documents/document/1"
+                    currentTitle = "Untitled document - pdfForm.pdf"
+                }
+        engineSession.register(
+            object : EngineSession.Observer {
+                override fun onExternalResource(
+                    url: String,
+                    fileName: String?,
+                    contentLength: Long?,
+                    contentType: String?,
+                    cookie: String?,
+                    userAgent: String?,
+                    isPrivate: Boolean,
+                    skipConfirmation: Boolean,
+                    openInApp: Boolean,
+                    response: Response?,
+                ) {
+                    seenUrl = url
+                }
+            }
+        )
+
+        val pdfFileSaver = mock<SessionPdfFileSaver>()
+        whenever(pdfFileSaver.save())
+            .thenReturn(
+                GeckoResult.fromValue(
+                    WebResponse.Builder("blob:resource://pdf.js/0123")
+                        .statusCode(200)
+                        .addHeader("Content-Disposition", "attachment; filename=\"pdfForm.pdf\"")
+                        .body("%PDF-1.4".byteInputStream())
+                        .build()
+                )
+            )
+        whenever(geckoSession.pdfFileSaver).thenReturn(pdfFileSaver)
+        whenever(geckoSession.isPdfJs).thenReturn(GeckoResult.fromValue(true))
+
+        engineSession.requestPdfToDownload()
+        shadowOf(getMainLooper()).idle()
+
+        assertEquals(
+            "The URL comes from PDF.",
+            "blob:resource://pdf.js/0123",
+            seenUrl,
+        )
+        assertEquals(
+            "The PDF's own file name names it, not the tab title.",
+            "attachment; filename=\"pdfForm.pdf\";",
+            seenContentDisposition,
+        )
+    }
+
+    @Test
+    fun `GIVEN the PDF has no usable file name WHEN requestPdfToDownload THEN the tab title names it`() {
+        var seenContentDisposition: String? = null
+        val engineSession =
+            GeckoEngineSession(
+                    runtime = mock(),
+                    geckoSessionProvider = geckoSessionProvider,
+                    defaultSettings =
+                        DefaultSettings(
+                            downloadDelegate =
+                                FakeEngineDownloadDelegate(
+                                    guessFileName = { contentDisposition, _, _ ->
+                                        seenContentDisposition = contentDisposition
+                                        "Mozilla.pdf"
+                                    }
+                                )
+                        ),
+                )
+                .apply { currentTitle = "Mozilla" }
+
+        val pdfFileSaver = mock<SessionPdfFileSaver>()
+        whenever(pdfFileSaver.save())
+            .thenReturn(
+                GeckoResult.fromValue(
+                    WebResponse.Builder("blob:resource://pdf.js/0123")
+                        .statusCode(200)
+                        .addHeader("Content-Disposition", "attachment; filename=\".pdf\"")
+                        .body("%PDF-1.4".byteInputStream())
+                        .build()
+                )
+            )
+        whenever(geckoSession.pdfFileSaver).thenReturn(pdfFileSaver)
+        whenever(geckoSession.isPdfJs).thenReturn(GeckoResult.fromValue(true))
+
+        engineSession.requestPdfToDownload()
+        shadowOf(getMainLooper()).idle()
+
+        assertEquals("attachment; filename=\"Mozilla.pdf\";", seenContentDisposition)
+    }
+
+    @Test
+    fun `GIVEN a PDF is showing the document WHEN requestPdfToShare THEN the response is given a filename`() {
+        val engineSession = GeckoEngineSession(runtime = mock(), geckoSessionProvider = geckoSessionProvider)
+        val pdfFileSaver = mock<SessionPdfFileSaver>()
+        whenever(pdfFileSaver.save())
+            .thenReturn(
+                GeckoResult.fromValue(
+                    WebResponse.Builder("blob:resource://pdf.js/0123")
+                        .statusCode(200)
+                        .addHeader("Content-Disposition", "attachment; filename=\"Test.pdf\"")
+                        .body("%PDF-1.4".byteInputStream())
+                        .build()
+                )
+            )
+        whenever(geckoSession.pdfFileSaver).thenReturn(pdfFileSaver)
+        whenever(geckoSession.isPdfJs).thenReturn(GeckoResult.fromValue(true))
+        var sharedResponse: Response? = null
+
+        engineSession.requestPdfToShare(onResult = { sharedResponse = it }, onException = {})
+        shadowOf(getMainLooper()).idle()
+
+        assertEquals(
+            listOf("attachment; filename=\"Test.pdf\";"),
+            sharedResponse?.headers?.getAll(CONTENT_DISPOSITION),
+        )
+        assertEquals("application/pdf", sharedResponse?.headers?.get(Headers.Names.CONTENT_TYPE))
     }
 
     @Test
@@ -4956,6 +5187,7 @@ class GeckoEngineSessionTest {
             }
         )
 
+        whenever(geckoSession.isPdfJs).thenReturn(GeckoResult.fromValue(false))
         whenever(geckoSession.saveAsPdf())
             .thenReturn(GeckoResult.fromValue(null))
             .thenReturn(GeckoResult.fromException(IllegalStateException()))
@@ -5027,7 +5259,7 @@ class GeckoEngineSessionTest {
                 runtime = mock(),
                 geckoSessionProvider = geckoSessionProvider,
             )
-        class MockGeckoPrintException() : GeckoPrintException()
+        class MockGeckoPrintException : GeckoPrintException()
         whenever(geckoSession.didPrintPageContent()).thenReturn(GeckoResult.fromException(MockGeckoPrintException()))
 
         engineSession.register(

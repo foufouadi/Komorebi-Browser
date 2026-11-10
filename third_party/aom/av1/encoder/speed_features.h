@@ -544,12 +544,11 @@ typedef struct FIRST_PASS_SPEED_FEATURES {
 /*!\cond */
 typedef struct TPL_SPEED_FEATURES {
   // GOP length adaptive decision.
-  // If set to 0, tpl model decides whether a shorter gf interval is better.
-  // If set to 1, tpl stats of ARFs from base layer, (base+1) layer and
+  // If set to 0, tpl stats of ARFs from base layer, (base+1) layer and
   // (base+2) layer decide whether a shorter gf interval is better.
-  // If set to 2, tpl stats of ARFs from base layer, (base+1) layer and GF boost
+  // If set to 1, tpl stats of ARFs from base layer, (base+1) layer and GF boost
   // decide whether a shorter gf interval is better.
-  // If set to 3, gop length adaptive decision is disabled.
+  // If set to 2, gop length adaptive decision is disabled.
   int gop_length_decision_method;
   // Prune the intra modes search by tpl.
   // If set to 0, we will search all intra modes from DC_PRED to PAETH_PRED.
@@ -1255,6 +1254,11 @@ typedef struct INTER_MODE_SPEED_FEATURES {
   // complexity modes.
   float bias_obmc_mode_rd_scale_pct;
 
+  // Percentage of scaling used to increase the rd cost of GLOBALMV and
+  // GLOBAL_GLOBALMV modes of type ROTZOOM so that encoder decisions are biased
+  // against these modes, favoring low complexity modes.
+  float bias_gm_mode_rd_scale_pct;
+
   // Avoid further evaluation of compound modes using top estimate RD Costs of
   // compound average.
   // Values are 0 (not used),1 - 3 with progressively increasing
@@ -1854,6 +1858,14 @@ typedef struct REAL_TIME_SPEED_FEATURES {
   int selective_cdf_update;
   // Use IntraBC for realtime mode.
   int rt_use_intrabc;
+  // Prune IntraBC for nonrd pickmode.
+  int rt_prune_intrabc_nonrd;
+  // Fallback search mode for IntraBC on hash misses in nonrd pickmode.
+  // 0: Full pixel search (Diamond/Hex search)
+  // 1: Block Vector Predictor (BVP) only
+  // 2: BVP + 12-point integer offset probe
+  // 3: Skip fallback search entirely (Hash-only)
+  int rt_intrabc_miss_mode;
 
   // Force only single reference (LAST) for prediction.
   int force_only_last_ref;

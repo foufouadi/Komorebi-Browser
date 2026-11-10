@@ -263,7 +263,7 @@ static UniquePtr<wchar_t[]> getFullPath(PWCHAR filePath, wchar_t* fname) {
     return nullptr;
   }
 
-  auto full_fname = MakeUnique<wchar_t[]>(pathlen + 1);
+  auto full_fname = std::make_unique<wchar_t[]>(pathlen + 1);
   if (!full_fname) {
     // couldn't allocate memory?
     return nullptr;
@@ -306,11 +306,6 @@ static bool ShouldBlockBasedOnBlockInfo(const DllBlockInfo& info,
 
   if ((info.mFlags & DllBlockInfoFlags::UTILITY_PROCESSES_ONLY) &&
       !(sInitFlags & eDllBlocklistInitFlagIsUtilityProcess)) {
-    return false;
-  }
-
-  if ((info.mFlags & DllBlockInfoFlags::SOCKET_PROCESSES_ONLY) &&
-      !(sInitFlags & eDllBlocklistInitFlagIsSocketProcess)) {
     return false;
   }
 
@@ -725,10 +720,22 @@ MFBT_API void DllBlocklist_SetFullDllServices(
   if (aSvc) {
     aSvc->SetAuthenticodeImpl(GetAuthenticode());
     aSvc->SetWinLauncherServices(gWinLauncher);
+
+    // A xul.dll of another version may lay out ModuleLoadInfo differently, so
+    // don't send it load events.
+    if (!ModuleLoadInfo::IsLayoutCompatible(::GetModuleHandleW(L"xul.dll"))) {
+      gMozglueLoaderObserver.Disable();
+      return;
+    }
+
     gMozglueLoaderObserver.Forward(aSvc);
   }
 
   gDllServices = aSvc;
+}
+
+extern "C" MFBT_API uint32_t ModuleLoadInfoLayoutVersion() {
+  return ModuleLoadInfo::kVersion;
 }
 
 MFBT_API void DllBlocklist_SetBasicDllServices(

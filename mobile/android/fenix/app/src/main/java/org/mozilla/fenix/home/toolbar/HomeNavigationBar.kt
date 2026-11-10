@@ -47,6 +47,7 @@ class HomeNavigationBar(
                     false -> Top
                 }
             }
+        val hasBottomStrip = remember { settings.shouldShowTabStripAtBottom || settings.shouldShowTabGroupsStrip }
         val isKeyboardVisible =
             if (hideWhenKeyboardShown) {
                 val keyboardState by keyboardAsState()
@@ -62,11 +63,8 @@ class HomeNavigationBar(
                 val colors = MaterialTheme.colorScheme
                 MaterialTheme(
                     colorScheme =
-                        if (settings.enableUniversalEdgeToEdgeWallpapers && !isPrivateMode) {
-                            colors.copy(
-                                surface = Color.Transparent,
-                                onSurface = WallpaperTheme.onWallpaper,
-                            )
+                        if (!isPrivateMode) {
+                            colors.copy(surface = Color.Transparent, onSurface = WallpaperTheme.onWallpaper)
                         } else {
                             colors
                         }
@@ -74,6 +72,7 @@ class HomeNavigationBar(
                     NavigationBar(
                         actions = uiState.displayState.navigationActions,
                         toolbarGravity = toolbarGravity,
+                        showDivider = toolbarGravity == Top && !hasBottomStrip,
                         onInteraction = { toolbarStore.dispatch(it) },
                     )
                 }

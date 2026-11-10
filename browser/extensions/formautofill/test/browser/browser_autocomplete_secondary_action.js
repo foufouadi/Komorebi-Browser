@@ -1,0 +1,498 @@
+"use strict";
+
+const PREF = "browser.autocomplete.removeRecords.enabled";
+const AC_L10N = new Localization(
+  ["toolkit/main-window/autocomplete.ftl"],
+  true
+);
+const DELETE_TOOLTIP = AC_L10N.formatValueSync("autocomplete-delete-address");
+
+// Checks every autocomplete event since the last reset shares one flow id.
+function assertOneFlow() {
+  const events = [
+    Glean.autocomplete.dropdownShown,
+    Glean.autocomplete.dropdownClosed,
+    Glean.autocomplete.recordInteraction,
+    Glean.autocomplete.recordDialogInteraction,
+  ].flatMap(metric => metric.testGetValue() ?? []);
+  const flowIds = new Set(events.map(e => e.extra.flow_id));
+  is(flowIds.size, 1, "Every event shares one flow id");
+  const [flowId] = flowIds;
+  ok(flowId, "The shared flow id is not empty");
+  return flowId;
+}
+
+add_setup(async function setup_storage() {
+  await setStorage(TEST_ADDRESS_1);
+});
+
+add_task(async function test_no_secondary_action_when_pref_disabled() {
+  await SpecialPowers.pushPrefEnv({ set: [[PREF, false]] });
+  await BrowserTestUtils.withNewTab(
+    { gBrowser, url: FORM_URL },
+    async browser => {
+      await openPopupOn(browser, "#organization");
+      const rowItem = getDisplayedPopupItems(browser)[0].querySelector(
+        "autocomplete-row-item"
+      );
+      is(
+        rowItem.actions.secondary,
+        null,
+        "Address rows have no secondary action when the pref is off"
+      );
+      ok(
+        !rowItem.shadowRoot.querySelector("moz-button.secondary-action"),
+        "No secondary action button is rendered"
+      );
+      await closePopup(browser);
+    }
+  );
+  await SpecialPowers.popPrefEnv();
+});
+
+add_task(async function test_trash_button_when_pref_enabled() {
+  await SpecialPowers.pushPrefEnv({ set: [[PREF, true]] });
+  await BrowserTestUtils.withNewTab(
+    { gBrowser, url: FORM_URL },
+    async browser => {
+      Services.fog.testResetFOG();
+      await openPopupOn(browser, "#organization");
+      const shownEvents = Glean.autocomplete.dropdownShown.testGetValue();
+      is(shownEvents?.length, 1, "One dropdown shown event is recorded");
+      is(
+        shownEvents[0].extra.record_type,
+        "address",
+        "The event names the address record type"
+      );
+
+      const items = getDisplayedPopupItems(browser);
+
+      const rowItem = items[0].querySelector("autocomplete-row-item");
+      is(
+        rowItem.actions.secondary.type,
+        "delete",
+        "Address rows show a delete secondary action when the pref is on"
+      );
+      ok(
+        !rowItem.actions.secondary.actions,
+        "The trash is a single action, not a flyout"
+      );
+
+      const { label, tooltip } = rowItem.actions.secondary;
+      is(tooltip, DELETE_TOOLTIP, "The tooltip stays short and omits the row");
+      ok(
+        label.includes(TEST_ADDRESS_1.organization),
+        `The accessible name names the row it belongs to, got "${label}"`
+      );
+
+      const button = rowItem.shadowRoot.querySelector(
+        "moz-button.secondary-action"
+      );
+      ok(
+        button.iconSrc.endsWith("delete.svg"),
+        "The secondary action shows the trash icon"
+      );
+
+      // The "Manage addresses" footer row must not get a secondary action.
+      const footer = items.at(-1).querySelector("autocomplete-row-item");
+      is(
+        footer.actions.secondary,
+        null,
+        "The manage footer row has no secondary action"
+      );
+
+      await closePopup(browser);
+      const closedEvents = Glean.autocomplete.dropdownClosed.testGetValue();
+      is(closedEvents?.length, 1, "One dropdown closed event is recorded");
+      is(
+        closedEvents[0].extra.record_type,
+        "address",
+        "The event names the address record type"
+      );
+      is(
+        closedEvents[0].extra.close_reason,
+        "dismissed",
+        "Blurring the field records a dismissed close"
+      );
+      ok(closedEvents[0].extra.flow_id, "The event carries a flow id");
+      is(
+        closedEvents[0].extra.flow_id,
+        shownEvents[0].extra.flow_id,
+        "The closed event's flow id matches the shown event for the same dropdown"
+      );
+    }
+  );
+  await SpecialPowers.popPrefEnv();
+});
+
+async function selectFirstRow(browser, item) {
+  await BrowserTestUtils.synthesizeKey("VK_DOWN", {}, browser);
+  await TestUtils.waitForCondition(
+    () => item.hasAttribute("selected"),
+    "Wait for the first row to become active"
+  );
+}
+
+add_task(async function test_selecting_an_address_records_dropdown_closed() {
+  await BrowserTestUtils.withNewTab(
+    { gBrowser, url: FORM_URL },
+    async browser => {
+      await openPopupOn(browser, "#organization");
+      await selectFirstRow(browser, getDisplayedPopupItems(browser)[0]);
+
+      Services.fog.testResetFOG();
+      await BrowserTestUtils.synthesizeKey("VK_RETURN", {}, browser);
+      await TestUtils.waitForCondition(
+        () => !browser.autoCompletePopup.popupOpen,
+        "Wait for the dropdown to close after selecting the address"
+      );
+
+      const closedEvents = Glean.autocomplete.dropdownClosed.testGetValue();
+      is(closedEvents?.length, 1, "One dropdown closed event is recorded");
+      is(
+        closedEvents[0].extra.record_type,
+        "address",
+        "The event names the address record type"
+      );
+      is(
+        closedEvents[0].extra.close_reason,
+        "selected",
+        "Picking an address records a selected close"
+      );
+    }
+  );
+});
+
+// The Lit render lags the row's selected attribute, so the button can still be
+// hidden when the row is already active. Wait it out before clicking, or the
+// click falls through to the row and fills the form instead.
+async function clickTrashButton(rowItem) {
+  const button = rowItem.shadowRoot.querySelector(
+    "moz-button.secondary-action"
+  );
+
+  await EventUtils.promiseElementReadyForUserInput(button, window, info);
+  await TestUtils.waitForCondition(
+    () => button.checkVisibility({ checkVisibilityCSS: true }),
+    "Wait for the trash button to be visible"
+  );
+  EventUtils.synthesizeMouseAtCenter(button, {}, window);
+}
+
+add_task(async function test_delete_confirms_without_device_sign_in() {
+  await SpecialPowers.pushPrefEnv({ set: [[PREF, true]] });
+  const { FormAutofillUtils } = ChromeUtils.importESModule(
+    "resource://gre/modules/shared/FormAutofillUtils.sys.mjs"
+  );
+  const originalVerify = FormAutofillUtils.verifyUserOSAuth;
+  let verifyCalls = 0;
+  FormAutofillUtils.verifyUserOSAuth = () => {
+    verifyCalls++;
+    return Promise.resolve(true);
+  };
+  let sawDialog = false;
+
+  await BrowserTestUtils.withNewTab(
+    { gBrowser, url: FORM_URL },
+    async browser => {
+      await openPopupOn(browser, "#organization");
+      const item = getDisplayedPopupItems(browser)[0];
+      const rowItem = item.querySelector("autocomplete-row-item");
+      await selectFirstRow(browser, item);
+
+      const dialogClosed = BrowserTestUtils.promiseAlertDialog(
+        null,
+        undefined,
+        {
+          callback: win => {
+            sawDialog = true;
+            const [title, message] = AC_L10N.formatValuesSync([
+              { id: "autocomplete-delete-address-title" },
+              { id: "autocomplete-remove-record-message" },
+            ]);
+            is(
+              win.document.getElementById("infoTitle").textContent,
+              title,
+              "The confirmation asks whether to remove the address"
+            );
+            is(
+              win.document.getElementById("infoBody").textContent,
+              message,
+              "The confirmation warns the action cannot be undone"
+            );
+            win.document.querySelector("dialog").getButton("cancel").click();
+          },
+        }
+      );
+
+      Services.fog.testResetFOG();
+      await clickTrashButton(rowItem);
+      const clickEvents = Glean.autocomplete.recordInteraction.testGetValue();
+      is(clickEvents?.length, 1, "One interaction event is recorded");
+      is(
+        clickEvents[0].extra.interaction_type,
+        "delete",
+        "The trash button records a delete interaction"
+      );
+      is(
+        clickEvents[0].extra.record_type,
+        "address",
+        "The event names the address record type"
+      );
+      await dialogClosed;
+      await TestUtils.waitForCondition(
+        () => browser.autoCompletePopup.popupOpen,
+        "Wait for the dropdown to come back after the confirmation"
+      );
+
+      const events = Glean.autocomplete.recordDialogInteraction.testGetValue();
+      is(events?.length, 1, "One dialog interaction event is recorded");
+      is(
+        events[0].extra.interaction_type,
+        "cancel",
+        "Cancelling the dialog records a cancel interaction"
+      );
+      is(
+        events[0].extra.record_type,
+        "address",
+        "The event names the address record type"
+      );
+      is(events[0].extra.update_type, "delete", "The update type is delete");
+      ok(clickEvents[0].extra.flow_id, "The interaction has a flow id");
+      is(
+        events[0].extra.flow_id,
+        clickEvents[0].extra.flow_id,
+        "The dialog event shares the interaction's flow id"
+      );
+      const shownEvents = Glean.autocomplete.dropdownShown.testGetValue();
+      is(shownEvents?.length, 1, "The dropdown is shown again once");
+      is(
+        shownEvents[0].extra.flow_id,
+        clickEvents[0].extra.flow_id,
+        "The reopened dropdown keeps the interaction's flow id"
+      );
+      is(
+        shownEvents[0].extra.reopened_after_removal,
+        "true",
+        "The reopened dropdown is marked as reopened after a removal"
+      );
+
+      is(verifyCalls, 0, "Removing an address does not ask for device sign in");
+      ok(sawDialog, "The confirmation dialog was shown");
+      ok(
+        browser.autoCompletePopup.popupOpen,
+        "The dropdown is restored once the confirmation is dismissed"
+      );
+
+      const addresses = await getAddresses();
+      is(
+        addresses.length,
+        1,
+        "Cancelling the confirmation leaves the address in place"
+      );
+
+      await closePopup(browser);
+    }
+  );
+  FormAutofillUtils.verifyUserOSAuth = originalVerify;
+  await SpecialPowers.popPrefEnv();
+});
+
+async function activateDelete(browser, onDialog) {
+  const item = getDisplayedPopupItems(browser)[0];
+  const rowItem = item.querySelector("autocomplete-row-item");
+  await selectFirstRow(browser, item);
+
+  const dialogClosed = BrowserTestUtils.promiseAlertDialog(
+    onDialog ? null : "accept",
+    undefined,
+    onDialog
+      ? {
+          callback: win => {
+            onDialog();
+            win.document.querySelector("dialog").getButton("accept").click();
+          },
+        }
+      : {}
+  );
+  await clickTrashButton(rowItem);
+  await dialogClosed;
+}
+
+add_task(async function test_delete_removes_the_address() {
+  await SpecialPowers.pushPrefEnv({ set: [[PREF, true]] });
+  await removeAllRecords();
+  await setStorage(TEST_ADDRESS_1, TEST_ADDRESS_4);
+  const before = await getAddresses();
+
+  await BrowserTestUtils.withNewTab(
+    { gBrowser, url: FORM_URL },
+    async browser => {
+      Services.fog.testResetFOG();
+      await openPopupOn(browser, "#organization");
+      const rowCount = getDisplayedPopupItems(browser).length;
+
+      const popupOpenDuringDialog = [];
+      const onDialog = () =>
+        popupOpenDuringDialog.push(browser.autoCompletePopup.popupOpen);
+      // Confirm deletion of address
+      await withStorageChange("remove", () =>
+        activateDelete(browser, onDialog)
+      );
+
+      const events = Glean.autocomplete.recordInteraction.testGetValue();
+      is(events?.length, 1, "One interaction event is recorded");
+      is(
+        events[0].extra.interaction_type,
+        "delete",
+        "The trash button records a delete interaction"
+      );
+      is(
+        events[0].extra.record_type,
+        "address",
+        "The event names the address record type"
+      );
+      const dialogEvents =
+        Glean.autocomplete.recordDialogInteraction.testGetValue();
+      is(dialogEvents?.length, 1, "One dialog interaction event is recorded");
+      is(
+        dialogEvents[0].extra.interaction_type,
+        "confirm",
+        "Accepting the dialog records a confirm interaction"
+      );
+      is(
+        dialogEvents[0].extra.record_type,
+        "address",
+        "The event names the address record type"
+      );
+      is(
+        dialogEvents[0].extra.update_type,
+        "delete",
+        "The update type is delete"
+      );
+
+      const remaining = await getAddresses();
+      is(remaining.length, 1, "Confirming the removal deleted one address");
+      ok(
+        before.some(
+          address => !remaining.some(kept => kept.guid == address.guid)
+        ),
+        "Exactly one of the stored addresses is gone"
+      );
+
+      await TestUtils.waitForCondition(
+        () => browser.autoCompletePopup.popupOpen,
+        "Wait for the dropdown to come back after the removal"
+      );
+      await TestUtils.waitForCondition(
+        () => getDisplayedPopupItems(browser).length == rowCount - 1,
+        "Wait for the restored dropdown to drop the removed row"
+      );
+
+      // The last address: nothing is left to show, so no reopen.
+      await withStorageChange("remove", () =>
+        activateDelete(browser, onDialog)
+      );
+      await TestUtils.waitForCondition(
+        () => !browser.autoCompletePopup.popupOpen,
+        "Wait for the dropdown to stay closed after the last removal"
+      );
+      Assert.deepEqual(
+        popupOpenDuringDialog,
+        [false, false],
+        "The dropdown is closed while each confirmation dialog is up"
+      );
+      is(
+        Glean.autocomplete.recordInteraction.testGetValue()?.length,
+        2,
+        "Two interaction events are recorded"
+      );
+      is(
+        Glean.autocomplete.recordDialogInteraction.testGetValue()?.length,
+        2,
+        "Two dialog interaction events are recorded"
+      );
+      Assert.deepEqual(
+        Glean.autocomplete.dropdownShown
+          .testGetValue()
+          ?.map(e => e.extra.reopened_after_removal),
+        ["false", "true"],
+        "The dropdown is reopened only after the first removal"
+      );
+      Assert.deepEqual(
+        Glean.autocomplete.dropdownClosed
+          .testGetValue()
+          ?.map(e => e.extra.close_reason),
+        ["removal_prompt", "removal_prompt"],
+        "Each confirmation dialog closes the dropdown as removal_prompt"
+      );
+      assertOneFlow();
+
+      await closePopup(browser);
+    }
+  );
+  await removeAllRecords();
+  await SpecialPowers.popPrefEnv();
+});
+
+add_task(async function test_deleting_the_last_address_closes_the_dropdown() {
+  await SpecialPowers.pushPrefEnv({ set: [[PREF, true]] });
+  await removeAllRecords();
+  await setStorage(TEST_ADDRESS_1);
+
+  await BrowserTestUtils.withNewTab(
+    { gBrowser, url: FORM_URL },
+    async browser => {
+      await openPopupOn(browser, "#organization");
+
+      await withStorageChange("remove", () => activateDelete(browser));
+
+      is(
+        (await getAddresses()).length,
+        0,
+        "The last address was removed from storage"
+      );
+      await TestUtils.waitForCondition(
+        () => !browser.autoCompletePopup.popupOpen,
+        "Wait for the dropdown to be torn down"
+      );
+    }
+  );
+  await removeAllRecords();
+  await SpecialPowers.popPrefEnv();
+});
+
+add_task(async function test_delete_refuses_an_unknown_guid() {
+  await SpecialPowers.pushPrefEnv({ set: [[PREF, true]] });
+  await removeAllRecords();
+  await setStorage(TEST_ADDRESS_1);
+
+  await BrowserTestUtils.withNewTab(
+    { gBrowser, url: FORM_URL },
+    async browser => {
+      await openPopupOn(browser, "#organization");
+
+      const actor =
+        browser.browsingContext.currentWindowGlobal.getActor("FormAutofill");
+      const dialogClosed = BrowserTestUtils.promiseAlertDialog("accept");
+      await actor.onAutoCompleteEntrySelected("FormAutofill:DeleteAddress", {
+        guid: "no-such-guid",
+      });
+      await dialogClosed;
+
+      is(
+        (await getAddresses()).length,
+        1,
+        "A guid that names no stored address removes nothing"
+      );
+
+      await TestUtils.waitForCondition(
+        () => browser.autoCompletePopup.popupOpen,
+        "Wait for the dropdown to come back after the refused removal"
+      );
+      await closePopup(browser);
+    }
+  );
+  await removeAllRecords();
+  await SpecialPowers.popPrefEnv();
+});

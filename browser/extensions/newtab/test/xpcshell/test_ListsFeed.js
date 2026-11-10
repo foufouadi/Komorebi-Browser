@@ -32,7 +32,7 @@ add_task(async function test_construction() {
   info("ListsFeed constructor should create initial values");
 
   Assert.ok(feed, "Could construct a ListsFeed");
-  Assert.ok(!feed.loaded, "ListsFeed is not loaded");
+  Assert.ok(!feed.initialized, "ListsFeed is not initialized");
   Assert.ok(!feed.enabled);
 });
 
@@ -63,7 +63,7 @@ add_task(async function test_onAction_INIT() {
   Assert.ok(feed.initialized);
 });
 
-add_task(async function test_isEnabled() {
+add_task(async function test_isEnabled_via_system_pref() {
   let feed = new ListsFeed();
 
   feed.store = {
@@ -85,7 +85,7 @@ add_task(async function test_isEnabled() {
   Assert.ok(feed.enabled);
 });
 
-add_task(async function test_isEnabled() {
+add_task(async function test_isEnabled_via_trainhopConfig() {
   let feed = new ListsFeed();
 
   feed.store = {
@@ -97,6 +97,7 @@ add_task(async function test_isEnabled() {
       Prefs: {
         values: {
           [PREF_LISTS_ENABLED]: true,
+          region: "US",
           trainhopConfig: {
             widgets: {
               enabled: true,
@@ -113,7 +114,64 @@ add_task(async function test_isEnabled() {
   Assert.ok(feed.enabled);
 });
 
-add_task(async function test_isEnabled() {
+add_task(async function test_isEnabled_via_trainhop_namespace() {
+  let feed = new ListsFeed();
+
+  feed.store = {
+    getState() {
+      return this.state;
+    },
+    dispatch: sinon.spy(),
+    state: {
+      Prefs: {
+        values: {
+          [PREF_LISTS_ENABLED]: true,
+          region: "US",
+          trainhopConfig: { widgetLists: { visible: true } },
+        },
+      },
+    },
+  };
+
+  info("ListsFeed should be enabled via trainhopConfig.widgetLists.visible");
+  Assert.ok(feed.enabled);
+});
+
+add_task(async function test_trainhopConfig_waits_for_region() {
+  let feed = new ListsFeed();
+
+  feed.store = {
+    getState() {
+      return this.state;
+    },
+    dispatch: sinon.spy(),
+    state: {
+      Prefs: {
+        values: {
+          [PREF_LISTS_ENABLED]: true,
+          trainhopConfig: { widgets: { listsEnabled: true } },
+        },
+      },
+    },
+  };
+
+  await feed.onAction({ type: actionTypes.INIT });
+  Assert.ok(
+    !feed.enabled,
+    "trainhop reveal ignored while region is unresolved"
+  );
+  Assert.ok(!feed.initialized, "not initialized without a region");
+
+  feed.store.state.Prefs.values.region = "FR";
+  await feed.onAction({
+    type: actionTypes.PREF_CHANGED,
+    data: { name: "region", value: "FR" },
+  });
+  Assert.ok(feed.enabled, "enabled once the region resolves");
+  Assert.ok(feed.initialized, "initialized when the region resolves");
+});
+
+add_task(async function test_isEnabled_via_widgetsConfig() {
   let feed = new ListsFeed();
 
   feed.store = {

@@ -29,6 +29,10 @@ ChromeUtils.defineESModuleGetters(lazy, {
 let gShutdown = false;
 let gShutdownResolver = null;
 
+function isShuttingDown() {
+  return gShutdown || Services.startup.shuttingDown;
+}
+
 class RemoteSettingsWorkerError extends Error {
   constructor(message) {
     super(message);
@@ -51,7 +55,7 @@ class Worker {
 
   async _execute(method, args = [], options = {}) {
     // Check if we're shutting down.
-    if (gShutdown && method != "prepareShutdown") {
+    if (method != "prepareShutdown" && isShuttingDown()) {
       throw new RemoteSettingsWorkerError("Remote Settings has shut down.");
     }
     // Don't instantiate the worker to shut it down.
@@ -154,12 +158,8 @@ class Worker {
     this.idleTimeoutId = null;
   }
 
-  async canonicalStringify(localRecords, remoteRecords, timestamp) {
-    return this._execute("canonicalStringify", [
-      localRecords,
-      remoteRecords,
-      timestamp,
-    ]);
+  async canonicalStringify(records, timestamp) {
+    return this._execute("canonicalStringify", [records, timestamp]);
   }
 
   async importJSONDump(bucket, collection) {

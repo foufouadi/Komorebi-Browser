@@ -17,6 +17,12 @@ support-files = [
   "bug_2054295_hold_parser.js",
   "file_bug_2054295.html",
   "classic_script.js",
+  "module_1979050.mjs",
+  "module_simpleExport.mjs",
+  "scope1/module_1979050.mjs",
+  "scope1/module_simpleExport.mjs",
+  "scope1/scope2/module_1979050.mjs",
+  "scope1/scope2/module_simpleExport.mjs",
   "bug_1820594_module1.mjs",
   "bug_1820594_module2-1.mjs",
   "bug_1820594_module2-2.mjs",
@@ -50,6 +56,10 @@ support-files = [
   "memory_cached_module_mapped.mjs",
 ]
 
+["test_1979050.html"]
+
+["test_1979050_2.html"]
+
 ["test_bug_1820594.html"]
 
 ["test_bug_1865410.html"]
@@ -67,6 +77,7 @@ support-files = [
 ["test_dynamic_importMap_with_external_script.html"]
 
 ["test_importMap_after_memory_cached_module.html"]
+scheme = "https"
 
 ["test_importMap_with_external_script.html"]
 

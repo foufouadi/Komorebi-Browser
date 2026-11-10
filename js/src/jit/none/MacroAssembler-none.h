@@ -78,6 +78,7 @@ class MacroAssemblerNone : public Assembler {
   void bind(T) {
     MOZ_CRASH();
   }
+  void bind(Label*, BufferOffset) { MOZ_CRASH(); }
   template <typename T>
   void j(Condition, T) {
     MOZ_CRASH();
@@ -86,6 +87,7 @@ class MacroAssemblerNone : public Assembler {
   void jump(T) {
     MOZ_CRASH();
   }
+  void retarget(Label*, Label*) { MOZ_CRASH(); }
   void writeCodePointer(CodeLabel* label) { MOZ_CRASH(); }
   void haltingAlign(size_t) { MOZ_CRASH(); }
   void nopAlign(size_t) { MOZ_CRASH(); }
@@ -162,6 +164,14 @@ class MacroAssemblerNone : public Assembler {
   CodeOffset pushWithPatch(T) {
     MOZ_CRASH();
   }
+  template <typename... Ts>
+  inline void pushRegs(const Ts&...) {
+    MOZ_CRASH();
+  };
+  template <typename... Ts>
+  inline void popRegs(const Ts&...) {
+    MOZ_CRASH();
+  };
 
   void testNullSet(Condition, ValueOperand, Register) { MOZ_CRASH(); }
   void testObjectSet(Condition, ValueOperand, Register) { MOZ_CRASH(); }

@@ -9,12 +9,6 @@ const BLOCKED = "blocked";
 const AI_FEATURES_ENABLED_PREF = "browser.ai.control.default";
 const AI_TARGETING = `'${AI_FEATURES_ENABLED_PREF}'|preferenceValue == '${AVAILABLE}'`;
 
-add_setup(async function () {
-  await SpecialPowers.pushPrefEnv({
-    set: [["test.wait300msAfterTabSwitch", true]],
-  });
-});
-
 // This test verifies that searching filters the features to just that subset that
 // contains the search terms.
 add_task(async function testFilterFeatures() {
@@ -37,7 +31,7 @@ add_task(async function testFilterFeatures() {
     {
       ...DEFAULT_LABS_RECIPES[3],
       slug: "test-featureD",
-      bucketConfig: NimbusTestUtils.factories.recipe.bucketConfig,
+      bucketConfig: NimbusTestUtils.factories.bucketConfig(),
     },
   ];
   const cleanup = await setupLabsTest(recipes);
@@ -133,10 +127,13 @@ add_task(async function testFilterFeatures() {
 
   info(`Resetted the search`);
 
+  let experimentalCategory = doc.getElementById("category-experimental");
+  experimentalCategory.scrollIntoView();
+
   // Clearing the search returns to the previously viewed (experimental) pane;
   // click it explicitly to be robust regardless of the restored pane.
   EventUtils.synthesizeMouseAtCenter(
-    doc.getElementById("category-experimental"),
+    experimentalCategory,
     {},
     gBrowser.contentWindow
   );
@@ -164,6 +161,8 @@ add_task(async function testFilterFeatures() {
       );
     }
 
+    let categoryElement = doc.getElementById(category);
+    categoryElement.scrollIntoView();
     // Check that switching to a non-find-in-page category changes item
     // visibility appropriately.
     EventUtils.synthesizeMouseAtCenter(

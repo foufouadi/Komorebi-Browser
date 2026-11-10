@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -48,6 +49,7 @@
 #include "api/call/transport.h"
 #include "api/media_types.h"
 #include "api/rtp_headers.h"
+#include "api/rtp_packet_infos.h"
 #include "api/rtp_parameters.h"
 #include "api/scoped_refptr.h"
 #include "api/transport/bitrate_settings.h"
@@ -71,6 +73,7 @@
 #include "media/base/media_constants.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
+#include "modules/rtp_rtcp/source/source_tracker.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/DataMutex.h"
 #include "mozilla/MozPromise.h"
@@ -79,7 +82,6 @@
 #include "mozilla/ReentrantMonitor.h"
 #include "mozilla/ReverseIterator.h"
 #include "mozilla/StateWatching.h"
-#include "mozilla/UniquePtr.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/RTCStatsReportBinding.h"
 #include "mozilla/fallible.h"
@@ -390,19 +392,20 @@ WebrtcVideoConduit::WebrtcVideoConduit(
       mFrameRecvThread(CreateWebrtcTaskQueueWrapper(
           GetMediaThreadPool(MediaThreadType::WEBRTC_WORKER),
           "WebrtcVideoConduit::mFrameRecvThread"_ns,
-          /* aSupportsTailDispatch= */ true)),
+          TailDispatchPolicy::ConsistentOrdering)),
       mControl(mCall->mCallThread),
       INIT_CANONICAL(mReceivingSize, mFrameRecvThread, {}),
       mWatchManager(this, mCall->mCallThread),
       mMutex("WebrtcVideoConduit::mMutex"),
-      mDecoderFactory(MakeUnique<WebrtcVideoDecoderFactory>(
+      mDecoderFactory(std::make_unique<WebrtcVideoDecoderFactory>(
           mCallThread.get(), aPCHandle, aRecvTrackingId)),
-      mEncoderFactory(MakeUnique<WebrtcVideoEncoderFactory>(
+      mEncoderFactory(std::make_unique<WebrtcVideoEncoderFactory>(
           mCallThread.get(), std::move(aPCHandle))),
       mRecvSinkProxy(this),
       mSendSinkProxy(this),
       mEngineTransmitting(false),
       mEngineReceiving(false),
+      mSourceTracker(webrtc::Clock::GetRealTimeClockOnlyUseForRelativeTime()),
       mVideoLatencyTestEnable(aOptions.mVideoLatencyTestEnable),
       mMinBitrate(aOptions.mMinBitrate),
       mStartBitrate(aOptions.mStartBitrate),
@@ -767,17 +770,30 @@ void WebrtcVideoConduit::OnControlConfigChange() {
           video_stream.height = codecConfig->mEncodingConstraints.maxHeight;
 
           // Max framerate is also used to cap the source, to avoid processing
-          // frames that will have to be dropped. Our signals here are both
-          // RTCRtpEncodingParameters.maxFramerate (per encoding) and max-fr
-          // for supported codecs.
+          // frames that will have to be dropped. Our signals here are
+          // RTCRtpEncodingParameters.maxFramerate (per encoding), max-fr for
+          // supported codecs, and any macroblocks-per-second cap implied by a
+          // negotiated level (H264 Annex A Table A-1 / AV1 Annex A.3). Since
+          // resolution is always scaled to fit within maxFs (see
+          // VideoStreamFactory::CalculateScaledResolution), maxMbps / maxFs
+          // is a safe worst-case framerate ceiling for whatever resolution
+          // ends up being used.
+          Maybe<double> levelMaxFps;
+          if (codecConstraints.maxMbps && codecConstraints.maxFs) {
+            levelMaxFps = Some(static_cast<double>(codecConstraints.maxMbps) /
+                               codecConstraints.maxFs);
+          }
           video_stream.max_framerate = static_cast<int>(([&]() {
-            if (codecConstraints.maxFps && encodingConstraints.maxFps) {
-              return std::min(*codecConstraints.maxFps,
-                              *encodingConstraints.maxFps);
+            Maybe<double> fps;
+            for (const auto& candidate :
+                 {codecConstraints.maxFps, encodingConstraints.maxFps,
+                  levelMaxFps}) {
+              if (!candidate) {
+                continue;
+              }
+              fps = fps ? Some(std::min(*fps, *candidate)) : candidate;
             }
-            return codecConstraints.maxFps
-                .orElse([&] { return encodingConstraints.maxFps; })
-                .valueOr(-1);
+            return fps.valueOr(-1);
           })());
 
           // Set each layer's max-bitrate explicitly or libwebrtc may ignore all
@@ -1102,8 +1118,26 @@ void WebrtcVideoConduit::CreateRecvStream() {
 
   mRecvStreamConfig.decoder_factory = mDecoderFactory.get();
 
-  mRecvStream =
-      mCall->Call()->CreateVideoReceiveStream(mRecvStreamConfig.Copy());
+  // Config::Copy() does not copy move-only fields like
+  // on_frame_delivered_callback, so it needs to be (re)installed on the copy
+  // that is actually handed to the stream.
+  webrtc::VideoReceiveStreamInterface::Config config = mRecvStreamConfig.Copy();
+  // The receive stream retains this callback (and the RefPtr captured in
+  // it) until DeleteRecvStream() runs it down as part of conduit shutdown,
+  // so there is no cycle beyond that lifetime. Called synchronously on
+  // whatever thread decodes video, not necessarily mCallThread, so hop over
+  // before touching mSourceTracker, which is not thread-safe.
+  config.on_frame_delivered_callback =
+      [self = RefPtr<WebrtcVideoConduit>(this)](
+          const webrtc::RtpPacketInfos& aPacketInfos,
+          webrtc::Timestamp aTimestamp) {
+        self->mCallThread->Dispatch(NS_NewRunnableFunction(
+            "WebrtcVideoConduit::OnFrameDelivered",
+            [self, aPacketInfos, aTimestamp] {
+              self->mSourceTracker.OnFrameDelivered(aPacketInfos, aTimestamp);
+            }));
+      };
+  mRecvStream = mCall->Call()->CreateVideoReceiveStream(std::move(config));
   // Ensure that we set the jitter buffer target on this stream.
   mRecvStream->SetBaseMinimumPlayoutDelayMs(mJitterBufferTargetMs);
 
@@ -1664,9 +1698,7 @@ void WebrtcVideoConduit::OnRtpReceived(webrtc::RtpPacketReceived&& aPacket,
   // grab the value now while on the call thread, and dispatch to main
   // to store the cached value if we have new source information.
   // See Bug 1845621.
-  if (mRecvStream) {
-    mCanonicalRtpSources = mRecvStream->GetSources();
-  }
+  mCanonicalRtpSources = mSourceTracker.GetSources();
 
   mRtpPacketEvent.Notify();
   if (mCall->Call()) {
@@ -1687,8 +1719,7 @@ void WebrtcVideoConduit::OnRtcpReceived(webrtc::CopyOnWriteBuffer&& aPacket) {
   MOZ_ASSERT(mCallThread->IsOnCurrentThread());
 
   if (mCall->Call()) {
-    mCall->Call()->Receiver()->DeliverRtcpPacket(
-        std::forward<webrtc::CopyOnWriteBuffer>(aPacket));
+    mCall->Call()->Receiver()->DeliverRtcpPacket(std::move(aPacket));
   }
 }
 
@@ -2118,6 +2149,15 @@ void WebrtcVideoConduit::GenerateKeyFrame(const Maybe<std::string>& aRid,
         // videoEncoder.
 
         mSendStream->GenerateKeyFrame(rids);
+      }));
+}
+
+void WebrtcVideoConduit::GenerateKeyFrames(std::vector<std::string> aRids) {
+  mCallThread->Dispatch(NS_NewRunnableFunction(
+      __func__, [this, self = RefPtr(this), rids = std::move(aRids)] {
+        if (mSendStream) {
+          mSendStream->GenerateKeyFrame(rids);
+        }
       }));
 }
 

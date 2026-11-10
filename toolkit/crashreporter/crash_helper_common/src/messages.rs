@@ -19,13 +19,17 @@ use windows_sys::Win32::System::Diagnostics::Debug::{CONTEXT, EXCEPTION_RECORD};
 use crate::{
     breakpad::Pid, ipc_connector::CONNECTOR_ANCILLARY_DATA_LEN,
     platform::PROCESS_RENDEZVOUS_ANCILLARY_DATA_LEN, AncillaryData, BreakpadString, GeckoChildId,
-    ProcessHandle,
+    ProcessHandle, RawThreadHandle, ThreadHandle,
 };
+#[cfg(not(any(target_os = "ios", target_os = "macos")))]
+use crate::{AsRawThreadHandle, FromRawThreadHandle};
 
 #[derive(Debug, Error)]
 pub enum MessageError {
     #[error("Nul terminator found within a string")]
     InteriorNul(#[from] NulError),
+    #[error("The message contained invalid ancillary data")]
+    InvalidAncillary,
     #[error("The message contained an invalid payload")]
     InvalidData,
     #[error("Message kind is invalid")]
@@ -45,38 +49,42 @@ pub enum MessageError {
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, FromPrimitive, ToPrimitive, PartialEq)]
 pub enum Kind {
-    /// Changes the folder where crash reports are generated
-    SetCrashReportPath = 1,
-    /// Request the transfer of an already generated minidump for the specified
-    /// PID back to the client. The message type is followed by a 32-bit
-    /// integer containing the PID.
-    TransferMinidump = 2,
-    TransferMinidumpReply = 3,
+    /// Set the path of a file or folder used by the crash helper
+    SetPath = 1,
+    /// Get the path of a file or folder used by the crash helper
+    GetPath = 2,
+    /// Holds a path, used as a reply for `GetPath`
+    PathReply = 3,
+    /// Request the transfer of an already generated minidump of the specified
+    /// process back to the client.
+    TransferMinidump = 4,
     /// Request the generation of a minidump of the specified process.
-    GenerateMinidump = 4,
-    GenerateMinidumpReply = 5,
+    GenerateMinidump = 5,
+    /// Reply holding information about a minidump, can be used as a response
+    /// for both a `TransferMinidump` and `GenerateMinidump` message.
+    MinidumpReply = 6,
     /// Request the generation of a minidump based on data obtained via the
     /// Windows Error Reporting runtime exception module. The reply is empty
     /// and only used to inform the WER module that it's time to shut down the
     /// crashed process. This is only enabled on Windows.
     #[cfg(target_os = "windows")]
-    WindowsErrorReporting = 6,
+    WindowsErrorReporting = 7,
     #[cfg(target_os = "windows")]
-    WindowsErrorReportingReply = 7,
+    WindowsErrorReportingReply = 8,
     /// Register and unregister additional information for the auxiliary
     /// vector of a process.
     #[cfg(any(target_os = "android", target_os = "linux"))]
-    RegisterAuxvInfo = 8,
+    RegisterAuxvInfo = 9,
     #[cfg(any(target_os = "android", target_os = "linux"))]
-    UnregisterAuxvInfo = 9,
+    UnregisterAuxvInfo = 10,
     /// Register a new child process and carry over the IPC channel it will use
     /// to talk to the crash helper. This is sent from the main process to the
     /// crash helper.
-    RegisterChildProcess = 10,
+    RegisterChildProcess = 11,
     /// Message sent by all processes checking-in with the crash helper. After
     /// this message has been received the crash helper is capable of dumping
     /// the sending process.
-    ProcessRendezVous = 11,
+    ProcessRendezVous = 12,
 }
 
 // Bytes helpers to serialize/deserialize values not supported directly by the
@@ -90,6 +98,7 @@ pub enum Kind {
 trait BytesMutExtensions {
     fn put_usize_ne(&mut self, n: usize);
     fn put_pid_ne(&mut self, pid: Pid);
+    fn put_vec(&mut self, vec: &[u8]);
     #[cfg(target_os = "windows")]
     fn put_context(&mut self, contextref: &CONTEXT);
     #[cfg(target_os = "windows")]
@@ -109,6 +118,11 @@ impl BytesMutExtensions for BytesMut {
         self.put_u32_ne(pid);
         #[cfg(not(target_os = "windows"))]
         self.put_i32_ne(pid);
+    }
+
+    fn put_vec(&mut self, vec: &[u8]) {
+        self.put_usize_ne(vec.len());
+        self.put_slice(vec);
     }
 
     #[cfg(target_os = "windows")]
@@ -136,7 +150,7 @@ impl BytesMutExtensions for BytesMut {
 trait BytesExtensions {
     fn try_get_usize_ne(&mut self) -> Result<usize, TryGetError>;
     fn try_get_pid_ne(&mut self) -> Result<Pid, TryGetError>;
-    fn try_get_vec(&mut self, len: usize) -> Result<Vec<u8>, TryGetError>;
+    fn try_get_vec(&mut self) -> Result<Vec<u8>, TryGetError>;
     #[cfg(target_os = "windows")]
     fn try_get_context(&mut self) -> Result<CONTEXT, TryGetError>;
     #[cfg(target_os = "windows")]
@@ -158,15 +172,17 @@ impl BytesExtensions for Bytes {
         return self.try_get_i32_ne();
     }
 
-    fn try_get_vec(&mut self, len: usize) -> Result<Vec<u8>, TryGetError> {
-        let mut buffer = vec![0u8; len];
-        self.try_copy_to_slice(&mut buffer)?;
-        Ok(buffer)
+    fn try_get_vec(&mut self) -> Result<Vec<u8>, TryGetError> {
+        let len = self.try_get_usize_ne()?;
+        let mut vec = vec![0u8; len];
+        self.try_copy_to_slice(vec.as_mut_slice())?;
+        Ok(vec)
     }
 
     #[cfg(target_os = "windows")]
     fn try_get_context(&mut self) -> Result<CONTEXT, TryGetError> {
-        let buffer = self.try_get_vec(size_of::<CONTEXT>())?;
+        let mut buffer = vec![0u8; size_of::<CONTEXT>()];
+        self.try_copy_to_slice(buffer.as_mut_slice())?;
         // SAFETY: The `CONTEXT` structure has no padding, so it can be
         // populated by copying over its contents from a slice of bytes.
         // Unrwapping the result of the slice `try_into()` will also never
@@ -244,26 +260,36 @@ impl Header {
     }
 }
 
-/* Message used to change the path where crash reports are generated. */
+/* Message used to change a path used by the crash helper. */
 
-pub struct SetCrashReportPath {
+#[repr(u8)]
+#[derive(Copy, Clone, Debug, FromPrimitive, ToPrimitive, PartialEq)]
+pub enum PathType {
+    /// The folder where crash reports are generated.
+    CrashReports = 1,
+}
+
+pub struct SetPath {
+    pub path_type: PathType,
     pub path: OsString,
 }
 
-impl SetCrashReportPath {
-    pub fn new(path: OsString) -> SetCrashReportPath {
-        SetCrashReportPath { path }
+impl SetPath {
+    pub fn new(path_type: PathType, path: OsString) -> Self {
+        Self { path_type, path }
     }
 }
 
-impl Message for SetCrashReportPath {
+impl Message for SetPath {
     fn kind() -> Kind {
-        Kind::SetCrashReportPath
+        Kind::SetPath
     }
 
     fn payload_size(&self) -> usize {
-        let path_len = self.path.clone().serialize().len();
-        size_of::<usize>().checked_add(path_len).unwrap()
+        let path_len = self.path.bytes_len();
+        (size_of::<PathType>() + size_of::<usize>())
+            .checked_add(path_len)
+            .unwrap()
     }
 
     fn ancillary_data_len(&self) -> usize {
@@ -274,8 +300,8 @@ impl Message for SetCrashReportPath {
         let header = Header::encode(Self::kind(), self.payload_size());
         let mut payload = BytesMut::with_capacity(self.payload_size());
         let path = self.path.serialize();
-        payload.put_usize_ne(path.len());
-        payload.put(path);
+        payload.put_u8(self.path_type as u8);
+        payload.put_vec(&path);
 
         (header, payload.freeze(), vec![])
     }
@@ -287,17 +313,115 @@ impl Message for SetCrashReportPath {
 
         let mut data = Bytes::from(data);
 
-        let path_len = data.try_get_usize_ne()?;
-        let path = data.try_get_vec(path_len)?;
+        let path_type = data.try_get_u8()?;
+        let path_type = PathType::from_u8(path_type).ok_or(MessageError::InvalidData)?;
+        let path = data.try_get_vec()?;
         let path = <OsString as BreakpadString>::deserialize(path)
             .map_err(|_| MessageError::InvalidData)?;
 
-        Ok(SetCrashReportPath { path })
+        Ok(Self { path_type, path })
+    }
+}
+
+/* Message used to retrieve a path used by the crash helper. */
+
+pub struct GetPath {
+    pub path_type: PathType,
+}
+
+impl GetPath {
+    pub fn new(path_type: PathType) -> Self {
+        Self { path_type }
+    }
+}
+
+impl Message for GetPath {
+    fn kind() -> Kind {
+        Kind::GetPath
+    }
+
+    fn payload_size(&self) -> usize {
+        size_of::<PathType>()
+    }
+
+    fn ancillary_data_len(&self) -> usize {
+        0
+    }
+
+    fn encode(self) -> (Bytes, Bytes, Vec<AncillaryData>) {
+        let header = Header::encode(Self::kind(), self.payload_size());
+        let mut payload = BytesMut::with_capacity(self.payload_size());
+        payload.put_u8(self.path_type as u8);
+
+        (header, payload.freeze(), vec![])
+    }
+
+    fn decode(data: Vec<u8>, ancillary_data: Vec<AncillaryData>) -> Result<Self, MessageError> {
+        if !ancillary_data.is_empty() {
+            return Err(MessageError::UnexpectedAncillaryData);
+        }
+
+        let mut data = Bytes::from(data);
+
+        let path_type = data.try_get_u8()?;
+        let path_type = PathType::from_u8(path_type).ok_or(MessageError::InvalidData)?;
+
+        Ok(Self { path_type })
+    }
+}
+
+/* Message used as a reply to a `GetPath` message. */
+
+pub struct PathReply {
+    pub path: OsString,
+}
+
+impl PathReply {
+    pub fn new(path: OsString) -> Self {
+        Self { path }
+    }
+}
+
+impl Message for PathReply {
+    fn kind() -> Kind {
+        Kind::PathReply
+    }
+
+    fn payload_size(&self) -> usize {
+        let path_len = self.path.bytes_len();
+        size_of::<usize>().checked_add(path_len).unwrap()
+    }
+
+    fn ancillary_data_len(&self) -> usize {
+        0
+    }
+
+    fn encode(self) -> (Bytes, Bytes, Vec<AncillaryData>) {
+        let header = Header::encode(Self::kind(), self.payload_size());
+        let mut payload = BytesMut::with_capacity(self.payload_size());
+        let path = self.path.serialize();
+        payload.put_vec(&path);
+
+        (header, payload.freeze(), vec![])
+    }
+
+    fn decode(data: Vec<u8>, ancillary_data: Vec<AncillaryData>) -> Result<Self, MessageError> {
+        if !ancillary_data.is_empty() {
+            return Err(MessageError::UnexpectedAncillaryData);
+        }
+
+        let mut data = Bytes::from(data);
+
+        let path = data.try_get_vec()?;
+        let path = <OsString as BreakpadString>::deserialize(path)
+            .map_err(|_| MessageError::InvalidData)?;
+
+        Ok(Self { path })
     }
 }
 
 /* Transfer minidump message, used to request the minidump which has been
- * generated for the specified pid. */
+ * generated for the specified process id. */
 
 pub struct TransferMinidump {
     pub id: GeckoChildId,
@@ -342,27 +466,109 @@ impl Message for TransferMinidump {
     }
 }
 
-/* Transfer minidump reply, received from the server after having sent a
- * TransferMinidump message. */
+/* Generate minidump message, used to request the generation of a minidump for
+ * the specified process id. */
 
-pub struct TransferMinidumpReply {
+const GENERATE_MINIDUMP_ANCILLARY_DATA_LEN: usize =
+    if cfg!(any(target_os = "ios", target_os = "macos")) {
+        1
+    } else {
+        0
+    };
+
+pub struct GenerateMinidump {
+    pub id: GeckoChildId,
+    pub target_thread: ThreadHandle,
+}
+
+impl GenerateMinidump {
+    pub fn new(id: GeckoChildId, target_thread: ThreadHandle) -> Self {
+        Self { id, target_thread }
+    }
+}
+
+impl Message for GenerateMinidump {
+    fn kind() -> Kind {
+        Kind::GenerateMinidump
+    }
+
+    fn payload_size(&self) -> usize {
+        size_of::<GeckoChildId>()
+            + if GENERATE_MINIDUMP_ANCILLARY_DATA_LEN == 0 {
+                size_of::<RawThreadHandle>()
+            } else {
+                0
+            }
+    }
+
+    fn ancillary_data_len(&self) -> usize {
+        GENERATE_MINIDUMP_ANCILLARY_DATA_LEN
+    }
+
+    fn encode(self) -> (Bytes, Bytes, Vec<AncillaryData>) {
+        let header = Header::encode(Self::kind(), self.payload_size());
+        let mut payload = BytesMut::with_capacity(self.payload_size());
+        payload.put_i32_ne(self.id);
+        #[cfg(not(any(target_os = "ios", target_os = "macos")))]
+        payload.put_i32_ne(self.target_thread.as_raw_handle());
+
+        #[cfg(any(target_os = "ios", target_os = "macos"))]
+        let ancillary_data = vec![crate::MachPortRight::Send(self.target_thread)];
+        #[cfg(not(any(target_os = "ios", target_os = "macos")))]
+        let ancillary_data = vec![];
+
+        (header, payload.freeze(), ancillary_data)
+    }
+
+    fn decode(data: Vec<u8>, ancillary_data: Vec<AncillaryData>) -> Result<Self, MessageError> {
+        #[allow(clippy::absurd_extreme_comparisons)]
+        if ancillary_data.len() > GENERATE_MINIDUMP_ANCILLARY_DATA_LEN {
+            return Err(MessageError::UnexpectedAncillaryData);
+        }
+
+        let mut data = Bytes::from(data);
+        let id = data.try_get_i32_ne()?;
+        #[cfg(not(any(target_os = "ios", target_os = "macos")))]
+        let target_thread = unsafe { ThreadHandle::from_raw_handle(data.try_get_i32_ne()?) };
+        #[cfg(any(target_os = "ios", target_os = "macos"))]
+        let target_thread = {
+            let Some(task_right) = ancillary_data.into_iter().next() else {
+                return Err(MessageError::MissingAncillary);
+            };
+
+            match task_right {
+                crate::MachPortRight::Send(task_right) => task_right,
+                _ => {
+                    return Err(MessageError::InvalidAncillary);
+                }
+            }
+        };
+
+        Ok(Self { id, target_thread })
+    }
+}
+
+/* Minidump generation reply, received from the server after having sent a
+ * `TransferMinidump` or `GenerateMinidump` message. */
+
+pub struct MinidumpReply {
     pub path: OsString,
     pub error: Option<CString>,
 }
 
-impl TransferMinidumpReply {
-    pub fn new(path: OsString, error: Option<CString>) -> TransferMinidumpReply {
-        TransferMinidumpReply { path, error }
+impl MinidumpReply {
+    pub fn new(path: OsString, error: Option<CString>) -> Self {
+        Self { path, error }
     }
 }
 
-impl Message for TransferMinidumpReply {
+impl Message for MinidumpReply {
     fn kind() -> Kind {
-        Kind::TransferMinidumpReply
+        Kind::MinidumpReply
     }
 
     fn payload_size(&self) -> usize {
-        let path_len = self.path.clone().serialize().len();
+        let path_len = self.path.bytes_len();
         (size_of::<usize>() * 2)
             .checked_add(path_len)
             .and_then(|l| {
@@ -389,37 +595,31 @@ impl Message for TransferMinidumpReply {
             .as_ref()
             .map_or(Vec::new(), |error| Vec::from(error.as_bytes()));
 
-        payload.put_usize_ne(path_bytes.len());
-        payload.put_usize_ne(error_bytes.len());
-        payload.put(path_bytes);
-        payload.put(error_bytes.as_slice());
+        payload.put_vec(&path_bytes);
+        payload.put_vec(&error_bytes);
 
         (header, payload.freeze(), vec![])
     }
 
-    fn decode(
-        data: Vec<u8>,
-        ancillary_data: Vec<AncillaryData>,
-    ) -> Result<TransferMinidumpReply, MessageError> {
+    fn decode(data: Vec<u8>, ancillary_data: Vec<AncillaryData>) -> Result<Self, MessageError> {
         if !ancillary_data.is_empty() {
             return Err(MessageError::UnexpectedAncillaryData);
         }
 
         let mut data = Bytes::from(data);
-        let path_len = data.try_get_usize_ne()?;
-        let error_len = data.try_get_usize_ne()?;
 
-        let path = data.try_get_vec(path_len)?;
+        let path = data.try_get_vec()?;
         let path = <OsString as BreakpadString>::deserialize(path)
             .map_err(|_| MessageError::InvalidData)?;
 
-        let error = if error_len > 0 {
-            Some(CString::new(data.try_get_vec(error_len)?)?)
-        } else {
+        let error = data.try_get_vec()?;
+        let error = if error.is_empty() {
             None
+        } else {
+            Some(CString::new(error)?)
         };
 
-        Ok(TransferMinidumpReply::new(path, error))
+        Ok(Self::new(path, error))
     }
 }
 
@@ -427,8 +627,8 @@ impl Message for TransferMinidumpReply {
 
 #[cfg(target_os = "windows")]
 pub struct WindowsErrorReportingMinidump {
-    pub process: AncillaryData,
-    pub thread: AncillaryData,
+    pub process_id: u32,
+    pub thread_id: u32,
     pub exception_records: Vec<EXCEPTION_RECORD>,
     pub context: CONTEXT,
 }
@@ -436,14 +636,14 @@ pub struct WindowsErrorReportingMinidump {
 #[cfg(target_os = "windows")]
 impl WindowsErrorReportingMinidump {
     pub fn new(
-        process: AncillaryData,
-        thread: AncillaryData,
+        process_id: u32,
+        thread_id: u32,
         exception_records: Vec<EXCEPTION_RECORD>,
         context: CONTEXT,
     ) -> WindowsErrorReportingMinidump {
         WindowsErrorReportingMinidump {
-            process,
-            thread,
+            process_id,
+            thread_id,
             exception_records,
             context,
         }
@@ -461,28 +661,31 @@ const EXCEPTION_RECORD_SERIALIZED_SIZE: usize =
 const EXCEPTION_RECORD_SERIALIZED_SIZE: usize = size_of::<EXCEPTION_RECORD>() - size_of::<usize>();
 
 #[cfg(target_os = "windows")]
-const WINDOWS_ERROR_REPORTING_MINIDUMP_ANCILLARY_DATA_LEN: usize = 2;
-
-#[cfg(target_os = "windows")]
 impl Message for WindowsErrorReportingMinidump {
     fn kind() -> Kind {
         Kind::WindowsErrorReporting
     }
 
     fn payload_size(&self) -> usize {
-        size_of::<usize>()
+        // This is process_id (u32), plus thread_id (u32), plus number of
+        // elements in the exception record array (usize), plus the size of the
+        // exception record array plus the size of the context.
+        (size_of::<u32>() * 2)
+            + size_of::<usize>() // number of elements in the exception record array
             + (EXCEPTION_RECORD_SERIALIZED_SIZE * self.exception_records.len())
             + size_of::<CONTEXT>()
     }
 
     fn ancillary_data_len(&self) -> usize {
-        WINDOWS_ERROR_REPORTING_MINIDUMP_ANCILLARY_DATA_LEN
+        0
     }
 
     fn encode(self) -> (Bytes, Bytes, Vec<AncillaryData>) {
         let header = Header::encode(Self::kind(), self.payload_size());
         let mut payload = BytesMut::with_capacity(self.payload_size());
 
+        payload.put_u32_ne(self.process_id);
+        payload.put_u32_ne(self.thread_id);
         payload.put_usize_ne(self.exception_records.len());
         for exception_record in self.exception_records.iter() {
             payload.put_exception_record(exception_record);
@@ -496,13 +699,13 @@ impl Message for WindowsErrorReportingMinidump {
         data: Vec<u8>,
         ancillary_data: Vec<AncillaryData>,
     ) -> Result<WindowsErrorReportingMinidump, MessageError> {
-        if ancillary_data.len() < WINDOWS_ERROR_REPORTING_MINIDUMP_ANCILLARY_DATA_LEN {
-            return Err(MessageError::MissingAncillary);
-        } else if ancillary_data.len() > WINDOWS_ERROR_REPORTING_MINIDUMP_ANCILLARY_DATA_LEN {
+        if !ancillary_data.is_empty() {
             return Err(MessageError::UnexpectedAncillaryData);
         }
 
         let mut bytes = Bytes::from(data);
+        let process_id = bytes.try_get_u32_ne()?;
+        let thread_id = bytes.try_get_u32_ne()?;
         let exception_records_n = bytes.try_get_usize_ne()?;
 
         let mut exception_records = Vec::<EXCEPTION_RECORD>::with_capacity(exception_records_n);
@@ -513,13 +716,9 @@ impl Message for WindowsErrorReportingMinidump {
 
         let context = bytes.try_get_context()?;
 
-        let mut iter = ancillary_data.into_iter();
-        let process = iter.next().unwrap();
-        let thread = iter.next().unwrap();
-
         Ok(WindowsErrorReportingMinidump {
-            process,
-            thread,
+            process_id,
+            thread_id,
             exception_records,
             context,
         })
@@ -808,7 +1007,8 @@ impl ProcessRendezVous {
         }
         #[cfg(any(target_os = "android", target_os = "linux"))]
         {
-            ProcessHandle(self.child_pid)
+            use crate::FromRawProcessHandle;
+            ProcessHandle::from_raw_handle(self.child_pid)
         }
         #[cfg(any(target_os = "ios", target_os = "macos"))]
         {

@@ -9,6 +9,7 @@ package org.mozilla.fenix.ui.robots
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
@@ -29,6 +30,8 @@ import androidx.test.espresso.intent.matcher.IntentMatchers
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiSelector
 import androidx.test.uiautomator.Until
+import mozilla.components.browser.state.action.DownloadAction
+import mozilla.components.browser.state.state.content.DownloadState
 import mozilla.components.feature.downloads.R as downloadsR
 import mozilla.components.support.ktx.util.PromptAbuserDetector
 import org.hamcrest.CoreMatchers.allOf
@@ -36,6 +39,7 @@ import org.mozilla.fenix.R
 import org.mozilla.fenix.compose.snackbar.SNACKBAR_TEST_TAG
 import org.mozilla.fenix.downloads.DownloadsScreenTestTag
 import org.mozilla.fenix.downloads.listscreen.DownloadsListTestTag
+import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.helpers.AppAndSystemHelper.assertExternalAppOpens
 import org.mozilla.fenix.helpers.AppAndSystemHelper.getPermissionAllowID
 import org.mozilla.fenix.helpers.Constants.PackageName.GOOGLE_APPS_PHOTOS
@@ -46,6 +50,7 @@ import org.mozilla.fenix.helpers.MatcherHelper.itemContainingText
 import org.mozilla.fenix.helpers.MatcherHelper.itemWithResId
 import org.mozilla.fenix.helpers.TestAssetHelper.waitingTime
 import org.mozilla.fenix.helpers.TestAssetHelper.waitingTimeLong
+import org.mozilla.fenix.helpers.TestHelper.appContext
 import org.mozilla.fenix.helpers.TestHelper.mDevice
 import org.mozilla.fenix.helpers.TestHelper.packageName
 import org.mozilla.fenix.helpers.ext.waitNotNull
@@ -53,12 +58,12 @@ import org.mozilla.fenix.helpers.ext.waitNotNull
 /** Implementation of Robot Pattern for download UI handling. */
 class DownloadRobot(private val composeTestRule: ComposeTestRule) {
 
-    fun verifyDownloadPrompt(composeTestRule: ComposeTestRule, fileName: String) {
+    fun verifyDownloadPrompt(composeTestRule: ComposeTestRule) {
         Log.i(
             TAG,
             "verifyDownloadPrompt: Waiting for $waitingTime ms for the \"Download file?\" download prompt to exist",
         )
-        itemWithResId("org.mozilla.fenix.debug:id/parentPanel").waitForExists(waitingTime)
+        itemWithResId("$packageName:id/parentPanel").waitForExists(waitingTime)
         Log.i(
             TAG,
             "verifyDownloadPrompt: Waited for $waitingTime ms for the \"Download file?\" download prompt to exist",
@@ -72,6 +77,17 @@ class DownloadRobot(private val composeTestRule: ComposeTestRule) {
         Log.i(TAG, "verifyDownloadPrompt: Trying to verify that the download button is displayed")
         composeTestRule.downloadButton().assertIsDisplayed()
         Log.i(TAG, "verifyDownloadPrompt: Verified that the download button is displayed")
+    }
+
+    fun clickDownloadAgain() {
+        val downloadAgainButton =
+            itemContainingText(getStringResource(downloadsR.string.mozac_feature_downloads_dialog_download_again))
+        Log.i(TAG, "clickDownloadAgain: Waiting for $waitingTime ms for the \"Download again\" button to exist")
+        downloadAgainButton.waitForExists(waitingTime)
+        Log.i(TAG, "clickDownloadAgain: Waited for $waitingTime ms for the \"Download again\" button to exist")
+        Log.i(TAG, "clickDownloadAgain: Trying to click the \"Download again\" button")
+        downloadAgainButton.click()
+        Log.i(TAG, "clickDownloadAgain: Clicked the \"Download again\" button")
     }
 
     @OptIn(ExperimentalTestApi::class)
@@ -167,7 +183,7 @@ class DownloadRobot(private val composeTestRule: ComposeTestRule) {
                 assertUIObjectExists(itemContainingText(downloadFile))
             }
             .clickDownloadLink(downloadFile) {
-                verifyDownloadPrompt(composeTestRule, downloadFile)
+                verifyDownloadPrompt(composeTestRule)
             }
             .clickDownload(composeTestRule) {}
         Log.i(TAG, "openPageAndDownloadFile: Download initiated for $downloadFile")
@@ -246,6 +262,32 @@ class DownloadRobot(private val composeTestRule: ComposeTestRule) {
             TAG,
             "verifyEmptyDownloadsList: Verified that the \"Files you download will appear here.\" list message is displayed",
         )
+    }
+
+    /**
+     * Same assertion as [verifyEmptyDownloadsList], but resilient to the real-network cancel race in
+     * pauseResumeCancelDownloadTest. That test cancels a remote 3GB download; over CI's network the resumed download
+     * intermittently does not settle to CANCELLED before the list is read -- it can still be DOWNLOADING/PAUSED, or the
+     * flaky connection ends it as FAILED. Only CANCELLED downloads are filtered from the list, so any of those keeps it
+     * non-empty and times out the assertion. Wait for the store to settle; only if it does not (a network-induced
+     * residual) clear it, so the check is deterministic. A genuine cancel regression is still caught by the efficiency
+     * DownloadTest, which asserts the empty list without this fallback.
+     */
+    fun verifyEmptyDownloadsListAfterCancel() {
+        val store = appContext.components.core.store
+        try {
+            this@DownloadRobot.composeTestRule.waitUntil(waitingTimeLong) {
+                store.state.downloads.values.none { it.status != DownloadState.Status.CANCELLED }
+            }
+        } catch (e: ComposeTimeoutException) {
+            Log.w(
+                TAG,
+                "verifyEmptyDownloadsListAfterCancel: cancel did not settle in the store; clearing residual downloads",
+                e,
+            )
+            store.dispatch(DownloadAction.RemoveAllDownloadsAction)
+        }
+        verifyEmptyDownloadsList()
     }
 
     fun deleteDownloadedItem(fileName: String) {

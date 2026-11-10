@@ -49,7 +49,12 @@ class MFMediaEngineParent final : public PMFMediaEngineParent {
 
   using TrackType = TrackInfo::TrackType;
 
-  static MFMediaEngineParent* GetMediaEngineById(uint64_t aId);
+  static already_AddRefed<MFMediaEngineParent> GetMediaEngineById(uint64_t aId);
+
+  // Return true if aId has been allocated and its engine, if still alive, was
+  // created by aManager.
+  static bool IsMediaEngineIdAllowed(uint64_t aId,
+                                     const RemoteMediaManagerParent* aManager);
 
   MFMediaEngineStreamWrapper* GetMediaEngineStream(
       TrackType aType, const CreateDecoderParams& aParam);
@@ -68,6 +73,8 @@ class MFMediaEngineParent final : public PMFMediaEngineParent {
   mozilla::ipc::IPCResult RecvSetLooping(bool aLooping);
   mozilla::ipc::IPCResult RecvNotifyEndOfStream(TrackInfo::TrackType aType);
   mozilla::ipc::IPCResult RecvShutdown();
+
+  void ActorDestroy(ActorDestroyReason aWhy) override;
 
  private:
   ~MFMediaEngineParent();

@@ -4,7 +4,7 @@
 
 The Activation Window feature allows the browser to experiment with the first hours of a new profile's lifetime by temporarily setting different defaults during a configurable time period (typically 48 hours). This enables:
 
-- Hiding or showing specific content sections (top sites, top stories) during the activation window
+- Hiding or showing specific content sections (top sites, top stories, widgets) during the activation window
 - Displaying messaging when entering or exiting the activation window
 - Reverting to normal defaults after the activation window expires
 - Preserving user preference changes made during the activation window
@@ -60,6 +60,7 @@ The activation window is configured via Nimbus using the `newtabTrainhop` featur
       maxProfileAgeInHours: 48,
       disableTopSites: true,
       disableTopStories: true,
+      disableWidgets: true,
       variant: "a",
       enterActivationWindowMessageID: "ACTIVATION_WINDOW_WELCOME_V1",
       exitActivationWindowMessageID: "ACTIVATION_WINDOW_EXIT_V1"
@@ -74,6 +75,7 @@ The activation window is configured via Nimbus using the `newtabTrainhop` featur
 - **`maxProfileAgeInHours`** (number, default: 48): Duration of the activation window in hours
 - **`disableTopSites`** (boolean, default: false): Hide top sites section during activation window
 - **`disableTopStories`** (boolean, default: false): Hide top stories section during activation window
+- **`disableWidgets`** (boolean, default: false): Hide widgets during activation window
 - **`variant`** (string, default: ""): Experiment variant identifier
 - **`enterActivationWindowMessageID`** (string, default: ""): Message ID to show when entering the window
 - **`exitActivationWindowMessageID`** (string, default: ""): Message ID to show when exiting the window
@@ -140,6 +142,16 @@ Messages for the activation window use the `ActivationWindowMessage` component a
 - **`primaryButton`** (object, optional): Configuration for primary button.
 - **`secondaryButton`** (object, optional): Configuration for secondary button
 
+### Image variants
+
+`imageSrc` may be accompanied by optional variants that let the image adapt to color scheme and viewport width. Supplying any of the narrow/responsive variants opts the message into a "flush" image treatment that bleeds to the card edges, with three layout tiers:
+
+- **Below 866px** (vertical layout): a full-width banner, using `imageSrcResponsive` (and `imageSrcDarkResponsive` in dark mode).
+- **866px–1072px** (horizontal layout): a full-height flush column, using `imageSrcNarrow` (and `imageSrcDarkNarrow` in dark mode). The 1072px breakpoint matches the newtab discovery-stream section switch.
+- **At/above 1072px** (horizontal layout): a full-height flush column, using `imageSrc` (and `imageSrcDark` in dark mode).
+
+Any variant that is not provided falls back to `imageSrc`. Dark-mode variants are selected via `prefers-color-scheme`. Each tier's art is chosen to match that tier's column proportions to minimize cropping.
+
 #### Button Configuration
 
 Each button object has:
@@ -160,6 +172,7 @@ Test messages are available in `browser/components/asrouter/modules/PanelTestPro
 
 - `TEST_ACTIVATION_WINDOW_ENTER_MESSAGE`
 - `TEST_ACTIVATION_WINDOW_EXIT_MESSAGE`
+- `TEST_ACTIVATION_WINDOW_FULL_BLEED_IMAGE`
 
 To test these messages:
 

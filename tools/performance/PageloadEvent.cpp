@@ -9,15 +9,19 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/RandomNum.h"
 #include "mozilla/ScopeExit.h"
+#include "mozilla/TimeStamp.h"
 #include "mozilla/glean/DomMetrics.h"
 #include "mozilla/glean/GleanPings.h"
 
 #include "nsIChannel.h"
 #include "nsIEffectiveTLDService.h"
+#include "nsINavHistoryService.h"
 #include "nsITransportSecurityInfo.h"
 #include "nsIURI.h"
 #include "nsIX509Cert.h"
+#include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
+#include "nsToolkitCompsCID.h"
 
 #include "ScopedNSSTypes.h"
 #include "cert.h"
@@ -33,14 +37,16 @@ uint32_t PageloadEventData::sPageLoadEventCounter = 0;
 // We don't want to record an event for every page load, so instead we
 // randomly sample the events based on the channel.
 //
-// For nightly and beta, 100% of page loads will be sent using the default
-// page_load ping, and 10% will be sent as page_load_domain pings.
+// Each page load is sent as at most one ping, with the page_load_domain
+// sample taken first.
 //
-// For release, 10% of page loads will be sent using the default ping,
-// and 0.1% will be sent as page_load_domain pings.
+// Nightly: page_load_domain every 10 pageloads, page_load for the rest.
+// Dev edition: page_load_domain every 1000 pageloads, page_load for the rest.
+// Release: page_load_domain every 1000 pageloads, page_load every 3 of the
+// rest.
 
 // Normal sampling
-#ifdef EARLY_BETA_OR_EARLIER
+#if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION)
 static constexpr uint64_t kNormalSamplingInterval = 1;  // Every pageload.
 #else
 static constexpr uint64_t kNormalSamplingInterval = 3;  // Every 3 pageloads.
@@ -59,6 +65,20 @@ PageloadEventType GetPageloadEventType() {
                 "kDomainSamplingInterval should always be higher than "
                 "kNormalSamplingInterval");
 
+  // Tests need a particular event type rather than a sampled one.
+#ifdef DEBUG
+  // Debug only: this one sends the etld+1 of every page, and its test cannot
+  // run on opt regardless, needing the debug-only built-in root override.
+  if (mozilla::Preferences::GetBool(
+          "dom.pageload_event.testing.always_send_domain", false)) {
+    return PageloadEventType::kDomain;
+  }
+#endif
+  if (mozilla::Preferences::GetBool(
+          "dom.pageload_event.testing.always_send_normal", false)) {
+    return PageloadEventType::kNormal;
+  }
+
   Maybe<uint64_t> rand = mozilla::RandomUint64();
   if (rand.isSome()) {
     uint64_t result =
@@ -73,6 +93,157 @@ PageloadEventType GetPageloadEventType() {
   }
   return PageloadEventType::kNone;
 }
+
+#ifndef MOZ_GECKOVIEW_HISTORY
+// Runs a history query and reports how many results it produced, or Nothing if
+// the query could not be run.
+static Maybe<uint32_t> CountHistoryResults(
+    nsINavHistoryService* aHistory, nsINavHistoryQuery* aQuery,
+    nsINavHistoryQueryOptions* aOptions) {
+  nsCOMPtr<nsINavHistoryResult> result;
+  if (NS_FAILED(
+          aHistory->ExecuteQuery(aQuery, aOptions, getter_AddRefs(result)))) {
+    return Nothing();
+  }
+
+  nsCOMPtr<nsINavHistoryContainerResultNode> root;
+  if (NS_FAILED(result->GetRoot(getter_AddRefs(root))) ||
+      NS_FAILED(root->SetContainerOpen(true))) {
+    return Nothing();
+  }
+
+  uint32_t count = 0;
+  nsresult rv = root->GetChildCount(&count);
+  root->SetContainerOpen(false);
+
+  return NS_SUCCEEDED(rv) ? Some(count) : Nothing();
+}
+
+// Whether aDomain (an ETLD+1) was unvisited today, until aNavigationStartTime,
+// per the in-process Places history. Returns false when history is
+// unavailable. Desktop only; GeckoView history lives in the embedding app.
+bool FirstDailyLoadFromPlaces(const nsACString& aDomain,
+                              const TimeStamp& aNavigationStartTime) {
+  if (aNavigationStartTime.IsNull()) {
+    return false;
+  }
+
+  nsCOMPtr<nsINavHistoryService> history =
+      do_GetService(NS_NAVHISTORYSERVICE_CONTRACTID);
+  bool historyDisabled = true;
+  if (!history || NS_FAILED(history->GetHistoryDisabled(&historyDisabled)) ||
+      historyDisabled) {
+    return false;
+  }
+
+  nsCOMPtr<nsINavHistoryQuery> query;
+  nsCOMPtr<nsINavHistoryQueryOptions> options;
+  if (NS_FAILED(history->GetNewQuery(getter_AddRefs(query))) ||
+      NS_FAILED(history->GetNewQueryOptions(getter_AddRefs(options)))) {
+    return false;
+  }
+
+  // Convert the monotonic navigation start to Places' wall-clock visit_date.
+  PRTime navigationStart =
+      PR_Now() -
+      static_cast<PRTime>(
+          (TimeStamp::Now() - aNavigationStartTime).ToMicroseconds());
+
+  if (NS_FAILED(query->SetDomain(aDomain)) ||
+      NS_FAILED(query->SetDomainIsHost(false)) ||
+      NS_FAILED(query->SetBeginTimeReference(
+          nsINavHistoryQuery::TIME_RELATIVE_TODAY)) ||
+      NS_FAILED(query->SetBeginTime(0)) ||
+      NS_FAILED(query->SetEndTime(navigationStart)) ||
+      NS_FAILED(options->SetResultType(
+          nsINavHistoryQueryOptions::RESULTS_AS_VISIT)) ||
+      NS_FAILED(options->SetMaxResults(1)) ||
+      NS_FAILED(options->SetQueryType(
+          nsINavHistoryQueryOptions::QUERY_TYPE_HISTORY))) {
+    return false;
+  }
+
+  return CountHistoryResults(history, query, options).valueOr(1) == 0;
+}
+
+// A profile is considered to belong to a legitimate client, once its history
+// reaches back this far and holds this many distinct pages. The oldest visit
+// stands in for the age of the client.
+static constexpr PRTime kActiveClientMinHistoryAge =
+    PRTime(3) * 24 * 60 * 60 * PR_USEC_PER_SEC;
+static constexpr uint32_t kActiveClientMinPages = 5;
+
+// How long to wait before asking again once a profile has failed to qualify.
+static constexpr int32_t kActiveClientRecheckSeconds = 60 * 60;
+
+static bool IsActiveClientFromPlaces() {
+  nsCOMPtr<nsINavHistoryService> history =
+      do_GetService(NS_NAVHISTORYSERVICE_CONTRACTID);
+  bool historyDisabled = true;
+  if (!history || NS_FAILED(history->GetHistoryDisabled(&historyDisabled)) ||
+      historyDisabled) {
+    return false;
+  }
+
+  nsCOMPtr<nsINavHistoryQuery> query;
+  nsCOMPtr<nsINavHistoryQueryOptions> options;
+  if (NS_FAILED(history->GetNewQuery(getter_AddRefs(query))) ||
+      NS_FAILED(history->GetNewQueryOptions(getter_AddRefs(options)))) {
+    return false;
+  }
+
+  // Anything at all from before the cutoff means the profile is old enough.
+  if (NS_FAILED(
+          query->SetEndTimeReference(nsINavHistoryQuery::TIME_RELATIVE_NOW)) ||
+      NS_FAILED(query->SetEndTime(-kActiveClientMinHistoryAge)) ||
+      NS_FAILED(options->SetResultType(
+          nsINavHistoryQueryOptions::RESULTS_AS_VISIT)) ||
+      NS_FAILED(options->SetMaxResults(1)) ||
+      NS_FAILED(options->SetQueryType(
+          nsINavHistoryQueryOptions::QUERY_TYPE_HISTORY))) {
+    return false;
+  }
+
+  if (CountHistoryResults(history, query, options).valueOr(0) == 0) {
+    return false;
+  }
+
+  // Count distinct pages rather than visits, so that a profile reloading a
+  // single page does not qualify.
+  if (NS_FAILED(history->GetNewQuery(getter_AddRefs(query))) ||
+      NS_FAILED(history->GetNewQueryOptions(getter_AddRefs(options))) ||
+      NS_FAILED(
+          options->SetResultType(nsINavHistoryQueryOptions::RESULTS_AS_URI)) ||
+      NS_FAILED(options->SetMaxResults(kActiveClientMinPages)) ||
+      NS_FAILED(options->SetQueryType(
+          nsINavHistoryQueryOptions::QUERY_TYPE_HISTORY))) {
+    return false;
+  }
+
+  return CountHistoryResults(history, query, options).valueOr(0) >=
+         kActiveClientMinPages;
+}
+
+// Pageload events are recorded far more often than this answer can change, and
+// it only ever flips from false to true, so cache it and stop querying once the
+// profile qualifies.
+bool IsActiveClient() {
+  static bool sIsActiveClient = false;
+  static TimeStamp sLastCheck;
+
+  if (!sIsActiveClient) {
+    TimeStamp now = TimeStamp::Now();
+    if (sLastCheck.IsNull() ||
+        (now - sLastCheck) >
+            TimeDuration::FromSeconds(kActiveClientRecheckSeconds)) {
+      sLastCheck = now;
+      sIsActiveClient = IsActiveClientFromPlaces();
+    }
+  }
+
+  return sIsActiveClient;
+}
+#endif
 
 void PageloadEventData::SetDocumentFeature(DocumentFeature aFeature) {
   uint32_t value = 0;
@@ -337,8 +508,10 @@ void PageloadEventData::SendAsPageLoadDomainEvent() {
   extra.isFirstDailyLoad = mozilla::Some(this->mIsFirstDailyLoad);
   extra.httpVer = this->httpVer;
   extra.sameOriginNav = this->sameOriginNav;
+  extra.loadedInForeground = this->loadedInForeground;
   extra.documentFeatures = this->documentFeatures;
   extra.loadType = this->loadType;
+  extra.isActiveClient = this->isActiveClient;
 
   // Add some noise to any numerical metrics.
   extra.lcpTime = AddMultiplicativeNoise(this->lcpTime);

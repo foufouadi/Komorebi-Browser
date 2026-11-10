@@ -113,6 +113,11 @@ const ERR_PARENT_PID_PERSISTS =
 const ERR_BGTASK_EXCLUSIVE =
   "failed to exclusively open executable file from background task: ";
 
+// Sentinel value for the aExpectedExitValue parameter of runUpdate, to be used
+// when the updater is expected to crash. A crash has no portable exit value, so
+// the exit value cannot tell a crash apart from a graceful failure.
+const EXIT_VALUE_CRASHED = "crashed";
+
 const LOG_SVC_SUCCESSFUL_LAUNCH = "Process was started... waiting on result.";
 const LOG_SVC_UNSUCCESSFUL_LAUNCH =
   "The install directory path is not valid for this application.";
@@ -1011,10 +1016,11 @@ function setupTestCommon(aAppUpdateAutoEnabled = false, aAllowBits = false) {
 
   let applyDir = getApplyDirFile().parent;
 
-  // Try to remove the directory used to apply updates and the updates directory
-  // on platforms other than Windows. This is non-fatal for the test since if
-  // this fails a different directory will be used.
-  if (applyDir.exists()) {
+  // Try to remove the directory used to apply updates in Program Files. This is
+  // non-fatal for the test since if this fails a different directory will be
+  // used. Elsewhere, its parent is the per-test temp dir, which the harness
+  // creates and removes.
+  if (usesProgramFilesApplyDir() && applyDir.exists()) {
     debugDump("attempting to remove directory. Path: " + applyDir.path);
     try {
       removeDirRecursive(applyDir);
@@ -1224,8 +1230,9 @@ function cleanupTestCommon() {
   let applyDir = getApplyDirFile().parent;
 
   // Try to remove the directory used to apply updates. Since the test has
-  // already finished this is non-fatal for the test.
-  if (applyDir.exists()) {
+  // already finished this is non-fatal for the test. Outside of Program Files,
+  // the parent is the per-test temp dir, which the harness removes.
+  if (usesProgramFilesApplyDir() && applyDir.exists()) {
     debugDump("attempting to remove directory. Path: " + applyDir.path);
     try {
       removeDirRecursive(applyDir);
@@ -1377,6 +1384,78 @@ function checkAppBundleModTime() {
     "the last modified time on the apply to directory should " +
       "change after a successful update"
   );
+}
+
+/**
+ * Checks that the updater wrote update telemetry with a valid, recent
+ * install_timestamp. On macOS the data is stored as an extended attribute on
+ * the .app directory; on other platforms it is a JSON file in the install
+ * directory.
+ */
+function checkUpdateTelemetry() {
+  let contents;
+  if (AppConstants.platform == "macosx") {
+    let telemetryFile = getApplyDirFile("update_telemetry.json");
+    Assert.ok(
+      !telemetryFile.exists(),
+      "update_telemetry.json should not exist on macOS"
+    );
+    let appDir = getApplyDirFile();
+    let macFile = appDir.QueryInterface(Ci.nsILocalFileMac);
+    Assert.ok(
+      macFile.hasXAttr("org.mozilla.update-telemetry"),
+      "org.mozilla.update-telemetry xattr should exist"
+    );
+    let attrValue = macFile.getXAttr("org.mozilla.update-telemetry");
+    contents = new TextDecoder().decode(new Uint8Array(attrValue));
+  } else {
+    let telemetryFile = getApplyDirFile("update_telemetry.json");
+    Assert.ok(
+      telemetryFile.exists(),
+      "update_telemetry.json should exist in the install directory"
+    );
+    contents = readFile(telemetryFile);
+  }
+  Assert.ok(contents, "update telemetry should not be empty");
+  Assert.ok(
+    !contents.includes("\0"),
+    "update telemetry should be UTF-8 encoded (no null bytes)"
+  );
+  let data = JSON.parse(contents);
+  Assert.ok(
+    "install_timestamp" in data,
+    "update telemetry should contain install_timestamp"
+  );
+  let ts = parseInt(data.install_timestamp, 10);
+  Assert.ok(
+    !isNaN(ts) && ts > 0,
+    "install_timestamp should be a positive number"
+  );
+  let nowMs = Date.now();
+  Assert.less(
+    nowMs - ts,
+    300000,
+    "install_timestamp should be within the last 5 minutes"
+  );
+}
+
+/**
+ * Checks that update telemetry was NOT written to the install directory.
+ */
+function checkNoUpdateTelemetry() {
+  let telemetryFile = getApplyDirFile("update_telemetry.json");
+  Assert.ok(
+    !telemetryFile.exists(),
+    "update_telemetry.json should not exist in the install directory"
+  );
+  if (AppConstants.platform == "macosx") {
+    let appDir = getApplyDirFile();
+    let macFile = appDir.QueryInterface(Ci.nsILocalFileMac);
+    Assert.ok(
+      !macFile.hasXAttr("org.mozilla.update-telemetry"),
+      "org.mozilla.update-telemetry xattr should not exist"
+    );
+  }
 }
 
 /**
@@ -1561,28 +1640,37 @@ function getAppVersion() {
   return iniParser.getString("App", "Version");
 }
 
+function usesProgramFilesApplyDir() {
+  return gIsServiceTest && IS_AUTHENTICODE_CHECK_ENABLED;
+}
+
 /**
  * Helper function for getting the path to the directory where the
- * application binary is located (e.g. <test_file_leafname>/dir.app/).
+ * application binary is located (e.g. <per_test_temp_dir>/dir.app).
  *
- * Note: The dir.app subdirectory under <test_file_leafname> is needed for
- *       platforms other than Mac OS X so the tests can run in parallel due to
- *       update staging creating a lock file named moz_update_in_progress.lock in
- *       the parent directory of the installation directory.
+ * Note: The dir.app subdirectory is needed for platforms other than Mac OS X
+ *       so the tests can run in parallel due to update staging creating a lock
+ *       file named moz_update_in_progress.lock in the parent directory of the
+ *       installation directory.
  * Note: For service tests with IS_AUTHENTICODE_CHECK_ENABLED we use an absolute
- *       path inside Program Files because the service itself will refuse to
- *       update an installation not located in Program Files.
+ *       path inside Program Files (<maintenance_service_dir>/<test_file_leafname>/dir.app)
+ *       because the service itself will refuse to update an installation not
+ *       located in Program Files.
  *
  * @return  The path to the directory where application binary is located.
  */
 function getApplyDirPath() {
-  if (gIsServiceTest && IS_AUTHENTICODE_CHECK_ENABLED) {
-    let dir = getMaintSvcDir();
+  let dir;
+  if (usesProgramFilesApplyDir()) {
+    dir = getMaintSvcDir();
     dir.append(gTestID);
-    dir.append("dir.app");
-    return dir.path;
+  } else {
+    dir = do_get_tempdir();
+    // Resolve symlinks (e.g. /var on macOS) so paths match the updater's.
+    dir.normalize();
   }
-  return gTestID + "/dir.app/";
+  dir.append("dir.app");
+  return dir.path;
 }
 
 /**
@@ -1602,23 +1690,18 @@ function getApplyDirPath() {
  *          applied.
  */
 function getApplyDirFile(aRelPath) {
-  // do_get_file only supports relative paths, but under these conditions we
-  // need to use an absolute path in Program Files instead.
-  if (gIsServiceTest && IS_AUTHENTICODE_CHECK_ENABLED) {
-    let file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
-    file.initWithPath(getApplyDirPath());
-    if (aRelPath) {
-      if (aRelPath == "..") {
+  let file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+  file.initWithPath(getApplyDirPath());
+  if (aRelPath) {
+    for (let part of aRelPath.split("/")) {
+      if (part == "..") {
         file = file.parent;
-      } else {
-        aRelPath = aRelPath.replace(/\//g, "\\");
-        file.appendRelativePath(aRelPath);
+      } else if (part) {
+        file.append(part);
       }
     }
-    return file;
   }
-  let relpath = getApplyDirPath() + (aRelPath ? aRelPath : "");
-  return do_get_file(relpath, true);
+  return file;
 }
 
 /**
@@ -1999,7 +2082,10 @@ function removeUpdateInProgressLockFile(aDir) {
   Assert.ok(!file.exists(), MSG_SHOULD_NOT_EXIST + getMsgPath(file.path));
 }
 
-function stripQuarantineBitFromPath(aPath) {
+/**
+ * Tests should call setupTestAppBundle instead.
+ */
+function _stripQuarantineBitFromPath(aPath) {
   if (AppConstants.platform != "macosx") {
     do_throw("macOS-only function called by a different platform!");
   }
@@ -2012,9 +2098,17 @@ function stripQuarantineBitFromPath(aPath) {
   xattrBin.initWithPath("/usr/bin/xattr");
   stripQuarantineBitProcess.init(xattrBin);
   stripQuarantineBitProcess.run(true, args, args.length);
+  Assert.equal(
+    stripQuarantineBitProcess.exitValue,
+    0,
+    "xattr should succeed for " + aPath
+  );
 }
 
-function selfSignAppBundle(aPath) {
+/**
+ * Tests should call setupTestAppBundle instead.
+ */
+function _selfSignAppBundle(aPath) {
   if (AppConstants.platform != "macosx") {
     do_throw("macOS-only function called by a different platform!");
   }
@@ -2027,15 +2121,68 @@ function selfSignAppBundle(aPath) {
   codesignBin.initWithPath("/usr/bin/codesign");
   codesignProcess.init(codesignBin);
   codesignProcess.run(true, args, args.length);
+  Assert.equal(
+    codesignProcess.exitValue,
+    0,
+    "codesign should succeed for " + aPath
+  );
 }
 
 /**
+ * Tests should call setupTestAppBundle instead.
+ *
+ * Writes the test's application bundle Info.plist, unless the test has already
+ * set it up through gTestFiles, and ad-hoc signs the bundle.
+ */
+function _signTestAppBundle() {
+  if (AppConstants.platform != "macosx") {
+    do_throw("macOS-only function called by a different platform!");
+  }
+
+  let infoPlist = getApplyDirFile(DIR_CONTENTS + FILE_INFO_PLIST);
+  if (!infoPlist.exists()) {
+    writeFile(infoPlist, DIR_APP_INFO_PLIST_FILE_CONTENTS);
+  }
+  let bundlePath = getApplyDirFile().path;
+  _stripQuarantineBitFromPath(bundlePath);
+  _selfSignAppBundle(bundlePath);
+}
+
+/**
+ * Copies or symlinks the application files and the test updater into the
+ * test's application directory. On macOS it also makes the directory a valid,
+ * ad-hoc signed app bundle, since macOS can otherwise report the bundle as
+ * damaged and hold the launch of the updater inside it. Call this after every
+ * other file the test needs inside the bundle is in place, since changes made
+ * afterwards break the signature.
+ *
+ * @param options.requiresOmnijar when true, copy or symlink omnijars as well.
+ */
+async function setupTestAppBundle({ requiresOmnijar = false } = {}) {
+  await TestUtils.waitForCondition(() => {
+    try {
+      _setupAppFiles({ requiresOmnijar });
+      return true;
+    } catch (e) {
+      logTestInfo("exception when calling _setupAppFiles, Exception: " + e);
+    }
+    return false;
+  }, "Waiting to setup app files");
+
+  if (AppConstants.platform == "macosx") {
+    _signTestAppBundle();
+  }
+}
+
+/**
+ * Tests should call setupTestAppBundle instead.
+ *
  * Copies the test updater to the GRE binary directory and returns the nsIFile
  * for the copied test updater.
  *
  * @return  nsIFIle for the copied test updater.
  */
-function copyTestUpdaterToBinDir() {
+function _copyTestUpdaterToBinDir() {
   let testUpdater = getTestDirFile(FILE_UPDATER_BIN);
   let updater = getGREBinDir();
   updater.append(FILE_UPDATER_BIN);
@@ -2044,7 +2191,7 @@ function copyTestUpdaterToBinDir() {
   }
 
   if (AppConstants.platform == "macosx") {
-    stripQuarantineBitFromPath(updater.path);
+    _stripQuarantineBitFromPath(updater.path);
     updater.append("Contents");
     updater.append("MacOS");
     updater.append("org.mozilla.updater");
@@ -2137,7 +2284,7 @@ function readServiceLogFile() {
  *          installed application.
  * @param   aExpectedExitValue
  *          The expected exit value from the updater binary for non-service
- *          tests.
+ *          tests, or EXIT_VALUE_CRASHED when the updater is expected to crash.
  * @param   aCheckSvcLog
  *          Whether the service log should be checked for service tests.
  * @param   aPatchDirPath (optional)
@@ -2185,7 +2332,7 @@ function runUpdate(
   }
 
   if (!gUpdateBin) {
-    gUpdateBin = copyTestUpdaterToBinDir();
+    gUpdateBin = _copyTestUpdaterToBinDir();
   }
 
   Assert.ok(
@@ -2242,7 +2389,16 @@ function runUpdate(
 
   let process = Cc["@mozilla.org/process/util;1"].createInstance(Ci.nsIProcess);
   process.init(launchBin);
-  process.run(true, args, args.length);
+  try {
+    process.run(true, args, args.length);
+  } catch (e) {
+    // nsIProcess.run throws when the process exits with a negative exit value,
+    // which is how Windows reports a process that crashed. Leave it to the exit
+    // value check below to tell whether that crash was expected.
+    if (process.exitValue >= 0) {
+      throw e;
+    }
+  }
 
   resetEnvironment();
 
@@ -2250,15 +2406,19 @@ function runUpdate(
     Services.env.set("MOZ_TEST_SHORTER_WAIT_PID", "");
   }
 
+  let exitValue = process.exitValue;
+  let expectCrash = aExpectedExitValue == EXIT_VALUE_CRASHED;
+  let checkExitValue = !gIsServiceTest && !expectCrash;
+
   let status = readStatusFile();
   if (
-    (!gIsServiceTest && process.exitValue != aExpectedExitValue) ||
+    (checkExitValue && exitValue != aExpectedExitValue) ||
     (status != aExpectedStatus && !gIsServiceTest && !isInvalidArgTest)
   ) {
-    if (process.exitValue != aExpectedExitValue) {
+    if (checkExitValue && exitValue != aExpectedExitValue) {
       logTestInfo(
         "updater exited with unexpected value! Got: " +
-          process.exitValue +
+          exitValue +
           ", Expected: " +
           aExpectedExitValue
       );
@@ -2281,9 +2441,9 @@ function runUpdate(
     }
   }
 
-  if (!gIsServiceTest) {
+  if (checkExitValue) {
     Assert.equal(
-      process.exitValue,
+      exitValue,
       aExpectedExitValue,
       "the process exit value" + MSG_SHOULD_EQUAL
     );
@@ -2342,8 +2502,10 @@ function runTestHelperSync(aArgs) {
  * Creates a symlink for updater tests.
  */
 function createSymlink() {
+  let baseDir = do_get_tempdir().path;
   let args = [
     "setup-symlink",
+    baseDir,
     "moz-foo",
     "moz-bar",
     "target",
@@ -2356,6 +2518,7 @@ function createSymlink() {
   file.permissions = 0o666;
   args = [
     "setup-symlink",
+    baseDir,
     "moz-foo2",
     "moz-bar2",
     "target2",
@@ -2370,8 +2533,10 @@ function createSymlink() {
  * Removes a symlink for updater tests.
  */
 function removeSymlink() {
+  let baseDir = do_get_tempdir().path;
   let args = [
     "remove-symlink",
+    baseDir,
     "moz-foo",
     "moz-bar",
     "target",
@@ -2381,6 +2546,7 @@ function removeSymlink() {
   Assert.equal(exitValue, 0, "the helper process exit value should be 0");
   args = [
     "remove-symlink",
+    baseDir,
     "moz-foo2",
     "moz-bar2",
     "target2",
@@ -2641,6 +2807,8 @@ function isBinarySigned(aBinPath) {
 }
 
 /**
+ * Tests should call setupTestAppBundle instead.
+ *
  * Helper function for setting up the application files required to launch the
  * application for the updater tests by either copying or creating symlinks to
  * the files.
@@ -2649,7 +2817,7 @@ function isBinarySigned(aBinPath) {
  * This may be required to launch the updated application and have non-trivial
  * functionality available.
  */
-function setupAppFiles({ requiresOmnijar = false } = {}) {
+function _setupAppFiles({ requiresOmnijar = false } = {}) {
   debugDump(
     "start - copying or creating symlinks to application files " +
       "for the test"
@@ -2722,7 +2890,7 @@ function setupAppFiles({ requiresOmnijar = false } = {}) {
     copyFileToTestAppDir(aAppFile.relPath, aAppFile.inDir);
   });
 
-  copyTestUpdaterToBinDir();
+  _copyTestUpdaterToBinDir();
 
   debugDump(
     "finish - copying or creating symlinks to application files " +
@@ -3128,7 +3296,7 @@ async function runHelperFileInUse(aRelPath, aCopyTestHelper) {
   }
   fileInUseBin.permissions = PERMS_DIRECTORY;
   let args = [
-    getApplyDirPath() + DIR_RESOURCES,
+    getApplyDirFile(DIR_RESOURCES).path,
     "input",
     "output",
     "-s",
@@ -3166,7 +3334,7 @@ async function runHelperPIDPersists(aRelPath, aCopyTestHelper) {
   }
   pidPersistsBin.permissions = PERMS_DIRECTORY;
   let args = [
-    getApplyDirPath() + DIR_RESOURCES,
+    getApplyDirFile(DIR_RESOURCES).path,
     "input",
     "output",
     "-s",
@@ -3206,7 +3374,7 @@ async function runHelperLockFile(aTestFile) {
   }
   lockFileRelPath = lockFileRelPath.join("/") + "/" + aTestFile.fileName;
   let args = [
-    getApplyDirPath() + DIR_RESOURCES,
+    getApplyDirFile(DIR_RESOURCES).path,
     "input",
     "output",
     "-s",
@@ -3356,7 +3524,7 @@ async function setupUpdaterTest(
   // updater app bundle, so make sure it is in place now in case we want to
   // manipulate it.
   if (!gUpdateBin) {
-    gUpdateBin = copyTestUpdaterToBinDir();
+    gUpdateBin = _copyTestUpdaterToBinDir();
   }
 
   let filesWithCompareContents = [];
@@ -3498,20 +3666,9 @@ async function setupUpdaterTest(
     });
   }
 
-  await TestUtils.waitForCondition(() => {
-    try {
-      setupAppFiles({ requiresOmnijar });
-      return true;
-    } catch (e) {
-      logTestInfo("exception when calling setupAppFiles, Exception: " + e);
-    }
-    return false;
-  }, "Waiting to setup app files");
+  await setupTestAppBundle({ requiresOmnijar });
 
   if (AppConstants.platform == "macosx") {
-    let bundlePath = afterApplyBinDir.parent.parent.path;
-    stripQuarantineBitFromPath(bundlePath);
-    selfSignAppBundle(bundlePath);
     filesWithCompareContents.forEach(elem => {
       elem.memFile.originalContents = readFileBytes(elem.diskFile);
       elem.memFile.compareContents = elem.memFile.originalContents;
@@ -4251,11 +4408,15 @@ function checkFilesAfterUpdateCommon(aStageDirExists, aToBeDeletedDirExists) {
 function checkToBeDeletedFileCount(aExpectedCount) {
   let toBeDeletedDir = getApplyDirFile(DIR_TOBEDELETED);
   let relocatedFiles = [];
-  let dirEntries = toBeDeletedDir.directoryEntries;
-  while (dirEntries.hasMoreElements()) {
-    let entry = dirEntries.nextFile;
-    if (entry.isFile() && entry.leafName.startsWith("moz")) {
-      relocatedFiles.push(entry);
+  // The directory only exists on Windows, and only once the updater had a
+  // reason to create it, so a missing directory means no relocated file.
+  if (toBeDeletedDir.exists()) {
+    let dirEntries = toBeDeletedDir.directoryEntries;
+    while (dirEntries.hasMoreElements()) {
+      let entry = dirEntries.nextFile;
+      if (entry.isFile() && entry.leafName.startsWith("moz")) {
+        relocatedFiles.push(entry);
+      }
     }
   }
   Assert.equal(
@@ -4755,7 +4916,7 @@ function getProcessArgs(aExtraArgs) {
   // override that path with the per-test temp directory that xpcshell provides,
   // which should be user writable.
   let profileDir = appBin.parent.parent;
-  if (gIsServiceTest && IS_AUTHENTICODE_CHECK_ENABLED) {
+  if (usesProgramFilesApplyDir()) {
     profileDir = do_get_tempdir();
   }
   profileDir.append("profile");
@@ -4804,7 +4965,8 @@ function getProcessArgs(aExtraArgs) {
  * @return  the file for the application to dump its arguments into.
  */
 function getAppArgsLogPath() {
-  let appArgsLog = do_get_file("/" + gTestID + "_app_args_log", true);
+  let appArgsLog = do_get_tempdir();
+  appArgsLog.append(gTestID + "_app_args_log");
   if (appArgsLog.exists()) {
     appArgsLog.remove(false);
   }
@@ -4822,7 +4984,8 @@ function getAppArgsLogPath() {
  * @return  the nsIFile for the shell script to launch the application.
  */
 function getLaunchScript() {
-  let launchScript = do_get_file("/" + gTestID + "_launch.sh", true);
+  let launchScript = do_get_tempdir();
+  launchScript.append(gTestID + "_launch.sh");
   if (launchScript.exists()) {
     launchScript.remove(false);
   }

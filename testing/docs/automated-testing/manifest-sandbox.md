@@ -4,9 +4,23 @@ Suites that use `manifestparser`, like Mochitest and XPCShell, have test
 manifests that denote whether a given test should be skipped or not based
 on a set of context.
 
-Gecko builds generate a `target.mozinfo.json` with metadata about the build.
-An example `target.mozinfo.json` might look like {download}`this
-<target.mozinfo.json>`. These keys can then be used `skip-if` in test manifests:
+Gecko builds generate a `target.mozinfo.json` with metadata about the build,
+written by {searchfox}`python/mozbuild/mozbuild/mozinfo.py`. An excerpt of one
+might look like this:
+
+```json
+{
+  "os": "linux",
+  "processor": "x86_64",
+  "bits": 64,
+  "debug": false,
+  "asan": false,
+  "nightly_build": true,
+  "toolkit": "gtk"
+}
+```
+
+These keys can then be used `skip-if` in test manifests:
 
 ```
 skip-if = e10s && os == 'win'
@@ -24,7 +38,7 @@ Where to add the new key depends on what type of information it is.
 
 1. If the key is a property of the build, you'll need to patch {searchfox}`this file <python/mozbuild/mozbuild/mozinfo.py>`.
 2. If the key is a property of the test environment, you'll need to patch
-   [mozinfo](https://firefox-source-docs.mozilla.org/mozbase/mozinfo.html).
+   {doc}`mozinfo </mozbase/mozinfo>`.
 3. If the key is a runtime configuration, for example based on a pref that is
    passed in via mach or the task configuration, then you'll need to update the
    individual test harnesses. For example, {searchfox}`this location <mozilla-central/rev/a7e33b7f61e7729e2b1051d2a7a27799f11a5de6:testing/mochitest/runtests.py#3341>`
@@ -37,8 +51,7 @@ Reftests and Crashtests use a different kind of manifest, but the general idea
 is the same.
 
 As before, Gecko builds generate a `target.mozinfo.json` with metadata about
-the build. An example `target.mozinfo.json` might look like {download}`this
-<target.mozinfo.json>`. This is consumed in the Reftest harness and translated
+the build. This is consumed in the Reftest harness and translated
 into keywords that can be used like:
 
 ```

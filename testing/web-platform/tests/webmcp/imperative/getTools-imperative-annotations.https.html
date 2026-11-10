@@ -13,6 +13,8 @@ promise_test(async t => {
     annotations: {
       readOnlyHint: true,
       untrustedContentHint: true,
+      consequentialHint: false,
+      debugging: true,
     },
     execute: () => {},
   };
@@ -27,6 +29,8 @@ promise_test(async t => {
   const expectedAnnotations = {
     readOnlyHint: true,
     untrustedContentHint: true,
+    consequentialHint: false,
+    debugging: true,
   };
   assert_object_equals(registeredTool.annotations, expectedAnnotations,
       "annotations object should match exactly the expected IDL properties and values");
@@ -52,6 +56,8 @@ promise_test(async t => {
   const expectedAnnotations = {
     readOnlyHint: true,
     untrustedContentHint: false,
+    consequentialHint: false,
+    debugging: false,
   };
   assert_object_equals(registeredTool.annotations, expectedAnnotations,
       "annotations object should contain default value for omitted untrustedContentHint property");
@@ -75,6 +81,8 @@ promise_test(async t => {
   const expectedAnnotations = {
     readOnlyHint: false,
     untrustedContentHint: false,
+    consequentialHint: false,
+    debugging: false,
   };
   assert_object_equals(registeredTool.annotations, expectedAnnotations,
       "annotations object should match exactly the expected IDL default properties and values");
@@ -93,7 +101,7 @@ promise_test(async t => {
 
   const tools = await document.modelContext.getTools();
   const registeredTool = tools.find(t => t.name === "unannotated_tool");
-  assert_equals(registeredTool.annotations, undefined, "annotations property should be undefined when omitted at registration");
-}, "Test that getTools() returns undefined annotations when omitted at registration");
+  assert_equals(registeredTool.annotations, null, "annotations property should be null when omitted at registration");
+}, "Test that getTools() returns null annotations when omitted at registration");
 </script>
 </body>

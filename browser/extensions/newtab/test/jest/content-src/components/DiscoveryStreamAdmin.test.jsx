@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { act, fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import { WrapWithProvider } from "test/jest/test-utils";
 import {
   CollapseToggle,
@@ -388,9 +388,110 @@ describe("<DiscoveryStreamAdminUI>", () => {
     });
   });
 
+  describe("IAB Banner Ad Sizes", () => {
+    const IAB_PREFS = {
+      ...CONTEXTUAL_PREFS,
+      "discoverystream.sections.enabled": true,
+      "discoverystream.sections.contextualAds.enabled": true,
+      "discoverystream.placements.spocs": "newtab_spocs",
+      "discoverystream.placements.spocs.counts": "6",
+      "newtabAdSize.billboard": false,
+      "newtabAdSize.mediumRectangle": false,
+    };
+
+    const renderIAB = (otherPrefs = {}) =>
+      renderUI({ otherPrefs: { ...IAB_PREFS, ...otherPrefs } });
+
+    it("should add the billboard placement when the toggle is turned on", () => {
+      const { container, dispatch } = renderIAB();
+      fireToggle(container.querySelector("#newtab_billboard"), true);
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref("newtabAdSize.billboard", true)
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref(
+          "discoverystream.placements.spocs",
+          "newtab_spocs, newtab_billboard"
+        )
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref("discoverystream.placements.spocs.counts", "6, 1")
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref(
+          "discoverystream.placements.contextualBanners",
+          "newtab_billboard"
+        )
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref("discoverystream.placements.contextualBanners.counts", "1")
+      );
+    });
+
+    it("should remove the billboard placement when the toggle is turned off", () => {
+      const { container, dispatch } = renderIAB({
+        "discoverystream.placements.spocs": "newtab_spocs, newtab_billboard",
+        "discoverystream.placements.spocs.counts": "6, 1",
+        "newtabAdSize.billboard": true,
+      });
+      fireToggle(container.querySelector("#newtab_billboard"), false);
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref("newtabAdSize.billboard", false)
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref("discoverystream.placements.spocs", "newtab_spocs")
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref("discoverystream.placements.spocs.counts", "6")
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref("discoverystream.placements.contextualBanners", "")
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref("discoverystream.placements.contextualBanners.counts", "")
+      );
+    });
+
+    it("should update the medium rectangle placement independently", () => {
+      const { container, dispatch } = renderIAB({
+        "discoverystream.placements.spocs": "newtab_spocs, newtab_billboard",
+        "discoverystream.placements.spocs.counts": "6, 1",
+        "newtabAdSize.billboard": true,
+      });
+      fireToggle(container.querySelector("#newtab_rectangle"), true);
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref("newtabAdSize.mediumRectangle", true)
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref(
+          "discoverystream.placements.spocs",
+          "newtab_spocs, newtab_billboard, newtab_rectangle"
+        )
+      );
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.SetPref(
+          "discoverystream.placements.contextualBanners",
+          "newtab_billboard"
+        )
+      );
+    });
+
+    it("should refresh the cache after an ad size changes", () => {
+      const { container, dispatch } = renderIAB();
+      fireToggle(container.querySelector("#newtab_billboard"), true);
+      expect(dispatch).toHaveBeenCalledWith(
+        ac.OnlyToMain({ type: at.DISCOVERY_STREAM_DEV_REFRESH_CACHE })
+      );
+    });
+  });
+
   describe("Widgets", () => {
     const renderWidgets = (otherPrefs = { "widgets.system.enabled": false }) =>
       renderUI({ otherPrefs });
+
+    afterEach(() => {
+      delete document.l10n;
+    });
 
     it("should flip widgets.system.enabled from the master toggle", () => {
       const { container, dispatch } = renderWidgets();
@@ -413,20 +514,53 @@ describe("<DiscoveryStreamAdminUI>", () => {
       );
     });
 
-    // Bug 2063657: the sports widget is retired; removed in bug 2063656.
-    it("should not render any sports widget row", () => {
+    it("should sort the toggles A-Z by their customize panel label", async () => {
+      // jsdom has no document.l10n; the labels are attribute-only messages.
+      const labels = {
+        "newtab-custom-widget-clock-toggle": "Clock",
+        "newtab-custom-widget-crossword-toggle": "Crossword",
+        "newtab-custom-widget-horoscopes-toggle": "Horoscopes",
+        "newtab-custom-widget-lists-toggle": "Lists",
+        "newtab-custom-widget-picture-toggle": "Picture of the day",
+        "newtab-custom-widget-privacy-toggle": "Privacy",
+        "newtab-custom-widget-search-toggle": "Search",
+        "newtab-custom-widget-solitaire-toggle": "Solitaire",
+        "newtab-custom-widget-stocks-toggle2": "Finance",
+        "newtab-custom-widget-timer-toggle": "Timer",
+        "newtab-custom-widget-travel-toggle": "Travel",
+        "newtab-custom-widget-weather-toggle": "Weather",
+        "newtab-custom-widget-wrexhamafc": "Wrexham AFC",
+      };
+      document.l10n = {
+        formatMessages: async keys =>
+          keys.map(({ id }) => ({
+            attributes: [{ name: "label", value: labels[id] }],
+          })),
+      };
+
       const { container } = renderWidgets({ "widgets.system.enabled": true });
-      expect(
-        container.querySelector('[id="widgets.system.sportsWidget.enabled"]')
-      ).not.toBeInTheDocument();
-      expect(
-        container.querySelector('[id="widgets.sportsWidget.live.enabled"]')
-      ).not.toBeInTheDocument();
-      expect(
-        container.querySelector(
-          '[id="widgets.sportsWidget.celebrations.enabled"]'
-        )
-      ).not.toBeInTheDocument();
+      const order = () =>
+        [...container.querySelectorAll('[id^="widgets.system."]')].map(toggle =>
+          toggle.getAttribute("data-l10n-id")
+        );
+      await waitFor(() => expect(order()).toHaveLength(13));
+
+      // Written by hand so the test does not mirror the sort.
+      expect(order()).toEqual([
+        "newtab-custom-widget-clock-toggle",
+        "newtab-custom-widget-crossword-toggle",
+        "newtab-custom-widget-stocks-toggle2",
+        "newtab-custom-widget-horoscopes-toggle",
+        "newtab-custom-widget-lists-toggle",
+        "newtab-custom-widget-picture-toggle",
+        "newtab-custom-widget-privacy-toggle",
+        "newtab-custom-widget-search-toggle",
+        "newtab-custom-widget-solitaire-toggle",
+        "newtab-custom-widget-timer-toggle",
+        "newtab-custom-widget-travel-toggle",
+        "newtab-custom-widget-weather-toggle",
+        "newtab-custom-widget-wrexhamafc",
+      ]);
     });
 
     it("should disable per-widget toggles when the widget system is off", () => {
@@ -568,12 +702,26 @@ describe("<ToggleStoryButton>", () => {
 });
 
 describe("<DiscoveryStreamAdminUI> Layouts", () => {
+  // Rendered order is alphabetical by displayed label, not declaration order.
   const VARIANTS = [
+    "auto-minimize-widgets",
     "nova-full-width",
     "side-by-side-content-lead",
-    "side-by-side-widgets-lead",
     "side-by-side-content-lead-five",
+    "side-by-side-widgets-lead",
     "side-by-side-widgets-lead-five",
+    "spaces-buttons-bottom",
+    "spaces-buttons-top",
+    "spaces-floating-arrows",
+    "spaces-peek",
+    "spaces-preview-cards",
+    "spaces-preview-illustrated",
+    "spaces-preview-kit",
+    "spaces-thematic-v1",
+    // @experiment(remove) { bug 2078816 }
+    "widget-first-content-slot",
+    // @experiment(remove) { bug 2069496 }
+    "widgets-ad-large",
   ];
   // Everything isSideBySideActive gates on, so the status line stays quiet.
   const ACTIVE_PREFS = {

@@ -173,7 +173,7 @@ static nr_socket_vtbl nr_socket_wrapped_vtbl = {2,
                                                 nullptr};
 
 int nr_socket_wrapped_create(nr_socket* inner, nr_socket** outp) {
-  auto wrapped = MakeUnique<nr_socket_wrapped>();
+  auto wrapped = std::make_unique<nr_socket_wrapped>();
 
   wrapped->sock_ = inner;
 
@@ -499,8 +499,8 @@ nsresult TestStunServer::SetResponseAddr(const std::string& addr,
                                          uint16_t port) {
   nr_transport_addr addr2;
 
-  int r =
-      nr_str_port_to_transport_addr(addr.c_str(), port, IPPROTO_UDP, &addr2);
+  int r = nr_str_port_to_transport_addr(addr.c_str(), nullptr, port,
+                                        IPPROTO_UDP, &addr2);
   if (r) return NS_ERROR_FAILURE;
 
   return SetResponseAddr(&addr2);

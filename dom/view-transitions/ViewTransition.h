@@ -5,16 +5,21 @@
 #ifndef mozilla_dom_ViewTransition_h
 #define mozilla_dom_ViewTransition_h
 
+#include <functional>
+#include <memory>
+
 #include "mozilla/Attributes.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/layers/IpcResourceUpdateQueue.h"
 #include "nsAtomHashKeys.h"
+#include "nsCOMPtr.h"
 #include "nsClassHashtable.h"
 #include "nsRect.h"
 #include "nsRefPtrHashtable.h"
 #include "nsWrapperCache.h"
 
 class nsIGlobalObject;
+class nsIPrincipal;
 class nsITimer;
 
 namespace mozilla {
@@ -23,10 +28,11 @@ class ErrorResult;
 struct Keyframe;
 struct PseudoStyleRequest;
 struct StyleLockedDeclarationBlock;
+class WindowRenderer;
 
 namespace layers {
 class RenderRootStateManager;
-}
+}  // namespace layers
 
 namespace wr {
 struct ImageKey;
@@ -68,6 +74,9 @@ enum class SkipTransitionReason : uint8_t {
   // Can happen due to various recoverable internal errors such as GPU process
   // crashes or GPU device resets.
   ResetRendering,
+  // The navigation an outbound cross-document transition was captured for was
+  // stopped or superseded before the new document was revealed.
+  NavigationAborted,
 };
 
 // https://drafts.csswg.org/css-view-transitions-1/#viewtransition-phase
@@ -80,6 +89,7 @@ enum class ViewTransitionPhase : uint8_t {
 };
 
 struct ViewTransitionCapturedElement;
+struct OldSnapshotData;
 
 using ViewTransitionNamedElements =
     nsClassHashtable<nsAtomHashKey, ViewTransitionCapturedElement>;
@@ -90,6 +100,11 @@ struct ViewTransitionParams {
   ViewTransitionNamedElements namedElements;
   AutoTArray<RefPtr<nsAtom>, 8> names;
   nsSize initialSnapshotContainingBlockSize;
+  // Principal of the document whose old state was captured. Reveal() checks
+  // that the new document is same-origin with it.
+  nsCOMPtr<nsIPrincipal> producerPrincipal;
+  // Id of the BrowsingContext whose document captured the old state.
+  uint64_t producerBrowsingContextId = 0;
 
   ~ViewTransitionParams();
 };
@@ -107,12 +122,35 @@ class ViewTransition final : public nsISupports, public nsWrapperCache {
   static already_AddRefed<ViewTransition> CreateCrossDocument(
       Document&, UniquePtr<ViewTransitionParams>, TypeList&&);
 
+  static already_AddRefed<ViewTransition> CreateOutboundCrossDocument(
+      Document&, TypeList&&);
+
+  bool IsOutboundCrossDocument() const { return mIsOutboundCrossDocument; }
+
+  // Moves old-state snapshots from another WebRender bridge to the bridge of
+  // aRenderer. Does nothing if aRenderer does not use WebRender.
+  static void AdoptOldSnapshots(WindowRenderer* aRenderer,
+                                ViewTransitionNamedElements& aNamedElements);
+
+  [[nodiscard]] MOZ_CAN_RUN_SCRIPT UniquePtr<ViewTransitionParams>
+  CaptureOldStateForCrossDocument();
+
+  // Captures the old state in the next rendering update, after the animation
+  // frame callbacks. aProceed then gets the captured params, or null if the
+  // transition was skipped.
+  void BeginDeferredOutboundCapture(
+      std::function<void(UniquePtr<ViewTransitionParams>&&)>&& aProceed);
+
   Promise* GetUpdateCallbackDone(ErrorResult&);
   Promise* GetReady(ErrorResult&);
   Promise* GetFinished(ErrorResult&);
   ViewTransitionTypeSet* Types();
   const TypeList& GetTypeList() const { return mTypeList; }
   TypeList& GetTypeList() { return mTypeList; }
+
+  // Called when the active types change. Updates the styles that use
+  // :active-view-transition-type().
+  void NotifyTypesChanged();
 
   void SkipTransition(SkipTransitionReason = SkipTransitionReason::JS);
   MOZ_CAN_RUN_SCRIPT void PerformPendingOperations();
@@ -157,6 +195,27 @@ class ViewTransition final : public nsISupports, public nsWrapperCache {
       nsIFrame* capturedFrame, const gfx::MatrixScales& aInheritedScale,
       nsRect& aOutCapturedRect);
 
+  // For a transition in an in-process subdocument, the embedder paints a
+  // snapshot of the whole subdocument while rendering is suppressed for the
+  // transition, instead of the subdocument itself.
+  bool IsCapturingSubdocumentSnapshot() const {
+    return mCapturingSubdocumentSnapshot;
+  }
+  // Whether the embedder holds the subdocument's last paint. It then paints the
+  // snapshot if there is one, and nothing otherwise, e.g. if the subdocument
+  // wasn't visible when the snapshot was taken.
+  bool IsHoldingSubdocument() const { return !!mSubdocumentSnapshot; }
+  // The snapshot rect, relative to the embedder frame.
+  nsRect SubdocumentSnapshotRect() const;
+  // Restricts the snapshot rect to aRect, relative to the embedder frame, and
+  // returns the result.
+  nsRect ClipSubdocumentSnapshotRect(const nsRect& aRect);
+  // Same as GetOrCreateOldImageKey and ReadOldImageKey, for the subdocument
+  // snapshot.
+  const wr::ImageKey* GetOrCreateSubdocumentSnapshotKey(
+      layers::RenderRootStateManager*, wr::IpcResourceUpdateQueue&);
+  const wr::ImageKey* ReadSubdocumentSnapshotKey();
+
   Element* FindPseudo(const PseudoStyleRequest&) const;
 
   const StyleLockedDeclarationBlock* GetDynamicRuleFor(const Element&) const;
@@ -186,10 +245,15 @@ class ViewTransition final : public nsISupports, public nsWrapperCache {
 
   void ClearActiveTransition(bool aIsDocumentHidden);
   void Timeout();
+  // Runs mOutboundCaptureProceed without params if it is set, so that the
+  // navigation continues.
+  void ReleaseDeferredOutboundCapture();
   MOZ_CAN_RUN_SCRIPT void Setup();
   [[nodiscard]] MOZ_CAN_RUN_SCRIPT Maybe<SkipTransitionReason>
   CaptureOldState();
   [[nodiscard]] Maybe<SkipTransitionReason> CaptureNewState();
+  MOZ_CAN_RUN_SCRIPT void CaptureSubdocumentSnapshotIfNeeded();
+  void ReleaseSubdocumentSnapshot();
   void SetupTransitionPseudoElements();
   [[nodiscard]] bool UpdatePseudoElementStyles(bool aNeedsInvalidation);
   void ClearNamedElements();
@@ -223,6 +287,10 @@ class ViewTransition final : public nsISupports, public nsWrapperCache {
   // Short lived array pointer used to mark old captures for DL building.
   OldCaptureFramesArray* mOldCaptureElements = nullptr;
 
+  // See IsCapturingSubdocumentSnapshot.
+  std::unique_ptr<OldSnapshotData> mSubdocumentSnapshot;
+  bool mCapturingSubdocumentSnapshot = false;
+
   // The element identifier for the elements which need the auto-generated
   // view-transition-name. The lifetime of those element identifiers is
   // element’s node document’s active view transition.
@@ -247,6 +315,13 @@ class ViewTransition final : public nsISupports, public nsWrapperCache {
   RefPtr<nsITimer> mTimeoutTimer;
 
   Phase mPhase = Phase::PendingCapture;
+  // True for the outbound transition created on the old document during a
+  // cross-document navigation.
+  bool mIsOutboundCrossDocument = false;
+  // The aProceed of BeginDeferredOutboundCapture. PerformPendingOperations
+  // runs it after the capture.
+  std::function<void(UniquePtr<ViewTransitionParams>&&)>
+      mOutboundCaptureProceed;
   // The wrapper of the pseudo-elements tree, to make sure it is always
   // out-of-flow. This is the top-layer for rendering the view transition tree.
   // So in general, its child (and only one) is the transition root

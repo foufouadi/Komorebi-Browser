@@ -78,7 +78,7 @@ class PageExtractionTest : BaseSessionTest() {
         mainSession.loadTestPath(PAGE_EXTRACTION_READER_MODE_HTML_PATH)
         mainSession.waitForPageStop()
 
-        val options = PageExtractionController.ContentParams(true)
+        val options = PageExtractionController.ContentParams(true, false)
         val pageContent = sessionRule.waitForResult(mainSession.sessionPageExtractor.getPageContent(options))
         mainSession.waitForRoundTrip()
 

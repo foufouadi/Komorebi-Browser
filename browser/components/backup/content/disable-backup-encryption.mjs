@@ -5,7 +5,7 @@
 import { html } from "chrome://global/content/vendor/lit.all.mjs";
 import { MozLitElement } from "chrome://global/content/lit-utils.mjs";
 
-// eslint-disable-next-line import/no-unassigned-import
+// eslint-disable-next-line import-x/no-unassigned-import
 import "chrome://global/content/elements/moz-message-bar.mjs";
 
 const ERROR_L10N_ID = "backup-error-retry";
@@ -72,11 +72,11 @@ export default class DisableBackupEncryption extends MozLitElement {
         aria-labelledby="backup-disable-encryption-header"
         aria-describedby="backup-disable-encryption-description"
       >
-        <h1
+        <h2
           id="backup-disable-encryption-header"
           class="heading-medium"
           data-l10n-id="disable-backup-encryption-header"
-        ></h1>
+        ></h2>
         <main id="backup-disable-encryption-content">
           <div id="backup-disable-encryption-description">
             <span

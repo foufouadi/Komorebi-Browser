@@ -8,7 +8,6 @@ with Files("**"):
 DIRS += ["build"]
 
 XPIDL_SOURCES += [
-    "nsIWebBrowser.idl",
     "nsIWebBrowserChrome.idl",
 ]
 
@@ -35,4 +34,8 @@ LOCAL_INCLUDES += [
 EXPORTS += [
     "nsEmbedCID.h",
     "nsWebBrowser.h",
+]
+
+SOURCE_HEADERS += [
+    "nsWebBrowserContentPolicy.h",
 ]

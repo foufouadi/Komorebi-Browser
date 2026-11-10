@@ -185,8 +185,87 @@ void OnUncaughtException(NSException* aException) {
   [super run];
 }
 
+// Whether the override below is in effect. This is the lever to pull if the
+// limitation documented there turns out to matter more than the behaviour it
+// buys; with it off, every request reaches AppKit's handler as before.
+static bool PiPPlayerHandlesAccessibilityFrontmost() {
+  return mozilla::StaticPrefs::
+      widget_macos_pip_player_accessibility_frontmost_enabled();
+}
+
+// An assistive technology that moves its cursor onto the Picture-in-Picture
+// player asks, through the accessibility API, for this application to be made
+// frontmost (bug 1688932). AppKit's implementation of that request activates
+// the application in a way that makes the window server leave the fullscreen
+// Space the player is floating over, even though the player -- a non-activating
+// window on that Space -- is the only window of ours the user can see, and even
+// when no other window of ours is ordered in at all. A plain in-process
+// activation does not have that effect: the player becomes key, Gecko treats it
+// as active (see nsWindowMap.mm), the accessibility focus lands in the player,
+// and the user stays on the Space they were looking at. That is also the state
+// a click on the player produces. So when the player is our only window on the
+// active Space, handle the request that way and leave AppKit's handler out of
+// it -- also when we already consider ourselves active: the assistive
+// technology asks again once the first request did not make us frontmost as
+// far as the window server is concerned, and that repeat must not reach
+// AppKit's handler either.
+//
+// The limitation this carries, for the accessibility team to weigh in on:
+// NSAccessibilityFrontmostAttribute is the handler for every accessibility
+// client, not only for an assistive technology moving its cursor. `tell
+// application "System Events" to set frontmost of process "Firefox" to true`
+// and the automation built on it arrive here as well, and they carry nothing
+// that distinguishes them from the assistive technology's request. So while a
+// player is our only window on the active Space, a request of that kind is
+// answered by making the player key rather than by activating in the way the
+// window server acts on, and a user whose browser window is on another Space
+// cannot get to it that way for as long as the player is open. Every other
+// route to the browser window is unaffected: Cmd-Tab, the Dock, the Window
+// menu and clicking the window itself do not go through this property. Set
+// widget.macos.pip-player-accessibility-frontmost.enabled to false to hand
+// these requests back to AppKit.
+- (void)setAccessibilityFrontmost:(BOOL)aFrontmost {
+  if (aFrontmost && PiPPlayerHandlesAccessibilityFrontmost()) {
+    NSWindow* playerOnActiveSpace = nil;
+    BOOL otherWindowOnActiveSpace = NO;
+    for (NSWindow* window in self.windows) {
+      if (!window.isVisible || !window.isOnActiveSpace) {
+        continue;
+      }
+      if ([window isKindOfClass:[BaseWindow class]] &&
+          (window.styleMask & NSWindowStyleMaskNonactivatingPanel)) {
+        playerOnActiveSpace = window;
+      } else if ([window isKindOfClass:[BaseWindow class]] &&
+                 ![window isKindOfClass:[PopupWindow class]]) {
+        // PopupWindow derives from BaseWindow, but a menu, autocomplete popup
+        // or tooltip is not a window the user could be looking at instead of
+        // the player, and one of them being up must not turn this off.
+        otherWindowOnActiveSpace = YES;
+      }
+    }
+    if (playerOnActiveSpace && !otherWindowOnActiveSpace) {
+      if (!self.isActive) {
+        [self activateIgnoringOtherApps:YES];
+      }
+      if (!playerOnActiveSpace.isKeyWindow) {
+        [playerOnActiveSpace makeKeyAndOrderFront:nil];
+      }
+      return;
+    }
+  }
+  [super setAccessibilityFrontmost:aFrontmost];
+}
+
 - (void)sendEvent:(NSEvent*)anEvent {
   mozilla::BackgroundHangMonitor().NotifyActivity();
+  if (anEvent.type == NSEventTypeApplicationDefined &&
+      anEvent.subtype == kEventSubtypeNativeTest) {
+    if (nsCOMPtr<nsIObserverService> obs =
+            mozilla::services::GetObserverService()) {
+      obs->NotifyObservers(nullptr, "appshell-native-test-event", nullptr);
+    }
+    return;
+  }
   [super sendEvent:anEvent];
 }
 
@@ -198,12 +277,36 @@ void OnUncaughtException(NSException* aException) {
   if (expiration) {
     mozilla::BackgroundHangMonitor().NotifyWait();
   }
-  NSEvent* nextEvent = [super nextEventMatchingMask:mask
-                                          untilDate:expiration
-                                             inMode:mode
-                                            dequeue:flag];
-  if (expiration) {
-    mozilla::BackgroundHangMonitor().NotifyActivity();
+  NSEvent* nextEvent = nil;
+  @try {
+    nextEvent = [super nextEventMatchingMask:mask
+                                   untilDate:expiration
+                                      inMode:mode
+                                     dequeue:flag];
+  } @catch (NSException* exception) {
+    // All nested AppKit event loops we host (context menus, popup
+    // menus, modal dialogs, sheets, file pickers, color and print
+    // panels, drag-and-drop sessions, NSWindow resize/move tracking,
+    // NSAlert, ...) re-enter -[NSApplication nextEventMatchingMask:...],
+    // so this is the lowest layer at which a standard NSException
+    // raised inside one of those loops can be intercepted. Catching
+    // here centralizes nsObjCExceptionLog and the
+    // ShouldIgnoreObjCException allow-list (currently the
+    // "Missing Touches" case from bug 1694000).
+    //
+    // This does not help with exceptions that do not carry standard
+    // ObjC type info (see bug 2041942 and bug 2042800 comment 1+).
+    // Those bypass every @catch (NSException*) on the stack, including
+    // this one, and need a different lever.
+    nsObjCExceptionLog(exception);
+    if (!ShouldIgnoreObjCException(exception)) {
+      @throw;
+    }
+    // Suppressed: drop this event tick; Apple's loop iterates again.
+  } @finally {
+    if (expiration) {
+      mozilla::BackgroundHangMonitor().NotifyActivity();
+    }
   }
   return nextEvent;
 }
@@ -388,8 +491,7 @@ nsresult nsAppShell::Init() {
   // related initialization that is not needed for these process types.
   bool isNSApplicationProcessType =
       (XRE_GetProcessType() != GeckoProcessType_Content) &&
-      (XRE_GetProcessType() != GeckoProcessType_RDD) &&
-      (XRE_GetProcessType() != GeckoProcessType_Socket);
+      (XRE_GetProcessType() != GeckoProcessType_RDD);
 
   if (isNSApplicationProcessType) {
     // This call initializes NSApplication unless:
@@ -443,9 +545,9 @@ nsresult nsAppShell::Init() {
     ScreenManager& screenManager = ScreenManager::GetSingleton();
 
     if (gfxPlatform::IsHeadless()) {
-      screenManager.SetHelper(mozilla::MakeUnique<HeadlessScreenHelper>());
+      screenManager.SetHelper(std::make_unique<HeadlessScreenHelper>());
     } else {
-      screenManager.SetHelper(mozilla::MakeUnique<ScreenHelperCocoa>());
+      screenManager.SetHelper(std::make_unique<ScreenHelperCocoa>());
     }
 
     InitMemoryPressureObserver();
@@ -494,6 +596,7 @@ void nsAppShell::ProcessGeckoEvents(void* aInfo) {
 
   if (self->mRunningEventLoop) {
     self->mRunningEventLoop = false;
+    ++self->mNativeWakeups;
 
     // The run loop may be sleeping -- [NSRunLoop runMode:...]
     // won't return until it's given a reason to wake up.  Awaken it by
@@ -694,6 +797,7 @@ bool nsAppShell::ProcessNextNativeEvent(bool aMayWait) {
   }
 
   bool wasRunningEventLoop = mRunningEventLoop;
+  uint32_t wakeupsAtEntry = mNativeWakeups;
   mRunningEventLoop = aMayWait;
   NSDate* waitUntil = nil;
   if (aMayWait) waitUntil = [NSDate distantFuture];
@@ -718,6 +822,7 @@ bool nsAppShell::ProcessNextNativeEvent(bool aMayWait) {
     NS_ASSERTION(mAutoreleasePools && ::CFArrayGetCount(mAutoreleasePools),
                  "No autorelease pool for native event");
 
+    uint32_t wakeupsBeforeWait = mNativeWakeups;
     if (aMayWait && [[GeckoNSApplication sharedApplication] didLaunch]) {
       currentMode = [currentRunLoop currentMode];
       if (!currentMode) currentMode = NSDefaultRunLoopMode;
@@ -792,6 +897,9 @@ bool nsAppShell::ProcessNextNativeEvent(bool aMayWait) {
       eventProcessed = true;
 #endif
     }
+    if (mRunningEventLoop && mNativeWakeups != wakeupsBeforeWait) {
+      ++mLostNativeWakeups;
+    }
   } while (mRunningEventLoop);
 
   if (eventProcessed) {
@@ -802,7 +910,9 @@ bool nsAppShell::ProcessNextNativeEvent(bool aMayWait) {
     moreEvents = !!nextEvent;
   }
 
-  mRunningEventLoop = wasRunningEventLoop;
+  // A wake-up consumed by this nested loop was also meant for any enclosing
+  // native loop, so don't let it go back to waiting.
+  mRunningEventLoop = wasRunningEventLoop && mNativeWakeups == wakeupsAtEntry;
 
   NS_OBJC_END_TRY_IGNORE_BLOCK;
 
@@ -961,6 +1071,34 @@ nsAppShell::OnProcessNextEvent(nsIThreadInternal* aThread, bool aMayWait) {
   return nsBaseAppShell::OnProcessNextEvent(aThread, aMayWait);
 
   NS_OBJC_END_TRY_BLOCK_RETURN(NS_ERROR_FAILURE);
+}
+
+NS_IMPL_ISUPPORTS_INHERITED(nsAppShell, nsBaseAppShell,
+                            nsICocoaAppShellTestUtils)
+
+NS_IMETHODIMP
+nsAppShell::PostNativeTestEvent() {
+  NS_OBJC_BEGIN_TRY_BLOCK_RETURN;
+
+  [NSApp postEvent:[NSEvent otherEventWithType:NSEventTypeApplicationDefined
+                                      location:NSMakePoint(0, 0)
+                                 modifierFlags:0
+                                     timestamp:0
+                                  windowNumber:0
+                                       context:nullptr
+                                       subtype:kEventSubtypeNativeTest
+                                         data1:0
+                                         data2:0]
+           atStart:NO];
+  return NS_OK;
+
+  NS_OBJC_END_TRY_BLOCK_RETURN(NS_ERROR_FAILURE);
+}
+
+NS_IMETHODIMP
+nsAppShell::GetLostNativeWakeups(uint32_t* aResult) {
+  *aResult = mLostNativeWakeups;
+  return NS_OK;
 }
 
 // AfterProcessNextEvent

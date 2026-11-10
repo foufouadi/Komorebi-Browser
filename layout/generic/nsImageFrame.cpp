@@ -77,6 +77,7 @@
 #include "mozilla/dom/BrowserChild.h"
 #include "mozilla/dom/HTMLAnchorElement.h"
 #include "mozilla/dom/Link.h"
+#include "mozilla/dom/Range.h"
 #include "mozilla/dom/Selection.h"
 #include "nsBidiPresUtils.h"
 #include "nsBidiUtils.h"
@@ -87,7 +88,6 @@
 #include "nsIContent.h"
 #include "nsIURIMutator.h"
 #include "nsLayoutUtils.h"
-#include "nsRange.h"
 #include "nsStyleStructInlines.h"
 
 using namespace mozilla;
@@ -120,11 +120,10 @@ class nsDisplayGradient final : public nsPaintedDisplayItem {
 
   void Paint(nsDisplayListBuilder*, gfxContext* aCtx) final;
 
-  bool CreateWebRenderCommands(wr::DisplayListBuilder&,
-                               wr::IpcResourceUpdateQueue&,
-                               const StackingContextHelper&,
-                               layers::RenderRootStateManager*,
-                               nsDisplayListBuilder*) final;
+  WebRenderCommandsResult CreateWebRenderCommands(
+      wr::DisplayListBuilder&, wr::IpcResourceUpdateQueue&,
+      const StackingContextHelper&, layers::RenderRootStateManager*,
+      nsDisplayListBuilder*) final;
 
   NS_DISPLAY_DECL_NAME("Gradient", TYPE_GRADIENT)
 };
@@ -149,7 +148,7 @@ void nsDisplayGradient::Paint(nsDisplayListBuilder* aBuilder,
   (void)result;
 }
 
-bool nsDisplayGradient::CreateWebRenderCommands(
+WebRenderCommandsResult nsDisplayGradient::CreateWebRenderCommands(
     wr::DisplayListBuilder& aBuilder, wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc, layers::RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
@@ -169,10 +168,10 @@ bool nsDisplayGradient::CreateWebRenderCommands(
         dest, dest.TopLeft(), dest, dest.Size(),
         /* aOpacity = */ 1.0f);
     if (result == ImgDrawResult::NOT_SUPPORTED) {
-      return false;
+      return Err("gradient image layer is not supported");
     }
   }
-  return true;
+  return Ok();
 }
 
 // sizes (pixels) for image icon, padding and border frame
@@ -369,8 +368,8 @@ static bool SizeDependsOnIntrinsicSize(const ReflowInput& aReflowInput) {
 }
 
 nsIFrame* NS_NewImageFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell) nsImageFrame(aStyle, aPresShell->GetPresContext(),
-                                       nsImageFrame::Kind::ImageLoadingContent);
+  return new nsImageFrame(aStyle, aPresShell->GetPresContext(),
+                          nsImageFrame::Kind::ImageLoadingContent);
 }
 
 static bool ShouldCreateImageFrameForContentProperty(
@@ -384,33 +383,31 @@ nsIFrame* NS_NewXULImageFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
   auto kind = ShouldCreateImageFrameForContentProperty(*aStyle)
                   ? nsImageFrame::Kind::ContentProperty
                   : nsImageFrame::Kind::XULImage;
-  return new (aPresShell)
-      nsImageFrame(aStyle, aPresShell->GetPresContext(), kind);
+  return new nsImageFrame(aStyle, aPresShell->GetPresContext(), kind);
 }
 
 nsIFrame* NS_NewImageFrameForContentProperty(PresShell* aPresShell,
                                              ComputedStyle* aStyle) {
-  return new (aPresShell) nsImageFrame(aStyle, aPresShell->GetPresContext(),
-                                       nsImageFrame::Kind::ContentProperty);
+  return new nsImageFrame(aStyle, aPresShell->GetPresContext(),
+                          nsImageFrame::Kind::ContentProperty);
 }
 
 nsIFrame* NS_NewImageFrameForGeneratedContentIndex(PresShell* aPresShell,
                                                    ComputedStyle* aStyle) {
-  return new (aPresShell)
-      nsImageFrame(aStyle, aPresShell->GetPresContext(),
-                   nsImageFrame::Kind::ContentPropertyAtIndex);
+  return new nsImageFrame(aStyle, aPresShell->GetPresContext(),
+                          nsImageFrame::Kind::ContentPropertyAtIndex);
 }
 
 nsIFrame* NS_NewImageFrameForListStyleImage(PresShell* aPresShell,
                                             ComputedStyle* aStyle) {
-  return new (aPresShell) nsImageFrame(aStyle, aPresShell->GetPresContext(),
-                                       nsImageFrame::Kind::ListStyleImage);
+  return new nsImageFrame(aStyle, aPresShell->GetPresContext(),
+                          nsImageFrame::Kind::ListStyleImage);
 }
 
 nsIFrame* NS_NewImageFrameForViewTransition(PresShell* aPresShell,
                                             ComputedStyle* aStyle) {
-  return new (aPresShell) nsImageFrame(aStyle, aPresShell->GetPresContext(),
-                                       nsImageFrame::Kind::ViewTransition);
+  return new nsImageFrame(aStyle, aPresShell->GetPresContext(),
+                          nsImageFrame::Kind::ViewTransition);
 }
 
 bool nsImageFrame::ShouldShowBrokenImageIcon() const {
@@ -452,8 +449,7 @@ bool nsImageFrame::ShouldShowBrokenImageIcon() const {
 
 nsImageFrame* nsImageFrame::CreateContinuingFrame(
     mozilla::PresShell* aPresShell, ComputedStyle* aStyle) const {
-  return new (aPresShell)
-      nsImageFrame(aStyle, aPresShell->GetPresContext(), mKind);
+  return new nsImageFrame(aStyle, aPresShell->GetPresContext(), mKind);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsImageFrame)
@@ -1897,7 +1893,7 @@ class nsDisplayAltFeedback final : public nsPaintedDisplayItem {
                                 ToReferenceFrame(), flags);
   }
 
-  bool CreateWebRenderCommands(
+  WebRenderCommandsResult CreateWebRenderCommands(
       wr::DisplayListBuilder& aBuilder, wr::IpcResourceUpdateQueue& aResources,
       const StackingContextHelper& aSc,
       layers::RenderRootStateManager* aManager,
@@ -1911,7 +1907,10 @@ class nsDisplayAltFeedback final : public nsPaintedDisplayItem {
         this, aBuilder, aResources, aSc, aManager, aDisplayListBuilder,
         ToReferenceFrame(), flags);
 
-    return result == ImgDrawResult::SUCCESS;
+    if (result != ImgDrawResult::SUCCESS) {
+      return Err("alt feedback could not be fully drawn");
+    }
+    return Ok();
   }
 
   NS_DISPLAY_DECL_NAME("AltFeedback", TYPE_ALT_FEEDBACK)
@@ -2187,17 +2186,19 @@ ImgDrawResult nsImageFrame::DisplayAltFeedbackWithoutLayer(
 
       SVGImageContext svgContext;
       Maybe<ImageIntRegion> region;
+      bool rasterizedForDest = false;
       IntSize decodeSize =
           nsLayoutUtils::ComputeImageContainerDrawingParameters(
-              imgCon, this, destRect, destRect, aSc, aFlags, svgContext,
-              region);
+              imgCon, this, destRect, destRect, aBuilder, aSc, aFlags,
+              svgContext, region, &rasterizedForDest);
       RefPtr<image::WebRenderImageProvider> provider;
       result = imgCon->GetImageProvider(aManager->LayerManager(), decodeSize,
                                         svgContext, region, aFlags,
                                         getter_AddRefs(provider));
       if (provider) {
         bool wrResult = aManager->CommandBuilder().PushImageProvider(
-            aItem, provider, result, aBuilder, aResources, destRect, bounds);
+            aItem, provider, result, aBuilder, aResources, destRect, bounds,
+            rasterizedForDest && !region);
         result &= wrResult ? ImgDrawResult::SUCCESS : ImgDrawResult::NOT_READY;
       } else {
         // We don't use &= here because we want the result to be NOT_READY so
@@ -2222,7 +2223,7 @@ ImgDrawResult nsImageFrame::DisplayAltFeedbackWithoutLayer(
       auto borderWidths = wr::ToBorderWidths(1.0, 1.0, 1.0, 1.0);
       wr::BorderSide side = {color, wr::BorderStyle::Solid};
       wr::BorderSide sides[4] = {side, side, side, side};
-      Range<const wr::BorderSide> sidesRange(sides, 4);
+      mozilla::Range<const wr::BorderSide> sidesRange(sides, 4);
       aBuilder.PushBorder(dest, wrBounds, isBackfaceVisible, borderWidths,
                           sidesRange, wr::EmptyBorderRadius());
 
@@ -2234,7 +2235,7 @@ ImgDrawResult nsImageFrame::DisplayAltFeedbackWithoutLayer(
           rect, PresContext()->AppUnitsPerDevPixel());
       dest = wr::ToLayoutRect(devPxRect);
 
-      aBuilder.PushRoundedRect(dest, wrBounds, isBackfaceVisible, color);
+      aBuilder.PushEllipse(dest, wrBounds, isBackfaceVisible, color);
     }
 
     // Reduce the inner rect by the width of the icon, and leave an
@@ -2453,7 +2454,7 @@ void nsDisplayImage::MaybeCreateWebRenderCommandsForViewTransition(
                      /* aForceAntiAliasing = */ false, rendering, key);
 }
 
-bool nsDisplayImage::CreateWebRenderCommands(
+WebRenderCommandsResult nsDisplayImage::CreateWebRenderCommands(
     wr::DisplayListBuilder& aBuilder, wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc, RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
@@ -2462,13 +2463,13 @@ bool nsDisplayImage::CreateWebRenderCommands(
   if (!image) {
     MaybeCreateWebRenderCommandsForViewTransition(
         aBuilder, aResources, aSc, aManager, aDisplayListBuilder);
-    return true;
+    return Ok();
   }
 
   if (nsImageMap* map = frame->GetImageMap(); map && map->HasFocus()) {
     // We can't draw some of the focus areas (in particular, PolyArea would be
     // somewhat hard to do).
-    return false;
+    return Err("focused image map area cannot be drawn");
   }
 
   auto* prevImage = frame->mPrevImage.get();
@@ -2493,8 +2494,10 @@ bool nsDisplayImage::CreateWebRenderCommands(
 
   SVGImageContext svgContext;
   Maybe<ImageIntRegion> region;
+  bool rasterizedForDest = false;
   IntSize decodeSize = nsLayoutUtils::ComputeImageContainerDrawingParameters(
-      image, mFrame, destRect, destRect, aSc, flags, svgContext, region);
+      image, mFrame, destRect, destRect, aBuilder, aSc, flags, svgContext,
+      region, &rasterizedForDest);
 
   RefPtr<image::WebRenderImageProvider> provider;
   ImgDrawResult drawResult =
@@ -2553,7 +2556,7 @@ bool nsDisplayImage::CreateWebRenderCommands(
       }
       break;
     case ImgDrawResult::NOT_SUPPORTED:
-      return false;
+      return Err("image provider is not supported");
     default:
       updatePrevImage = prevImage != image;
       break;
@@ -2570,8 +2573,9 @@ bool nsDisplayImage::CreateWebRenderCommands(
   // failure will be due to resource constraints and fallback is unlikely to
   // help us. Hence we can ignore the return value from PushImage.
   aManager->CommandBuilder().PushImageProvider(
-      this, provider, drawResult, aBuilder, aResources, destRect, destRect);
-  return true;
+      this, provider, drawResult, aBuilder, aResources, destRect, destRect,
+      rasterizedForDest && !region);
+  return Ok();
 }
 
 ImgDrawResult nsImageFrame::PaintImage(gfxContext& aRenderingContext,
@@ -2819,12 +2823,12 @@ bool nsImageFrame::IsLeafDynamic() const {
 nsIContent* nsImageFrame::GetExplicitEventTargetContent(
     const WidgetEvent* aEvent /* = nullptr */) const {
   if (mImageMap && aEvent) {
-    // XXX We need to make this special check for area element's capturing the
-    // mouse due to bug 135040. Remove it once that's fixed.
+    // Areas capturing the mouse need the image frame to be their target.
     nsIContent* capturingContent = aEvent->HasMouseEventMessage()
                                        ? PresShell::GetCapturingContent()
                                        : nullptr;
-    if (capturingContent && capturingContent->GetPrimaryFrame() == this) {
+    if (capturingContent &&
+        nsLayoutUtils::GetPrimaryOrAreaImageFrame(capturingContent) == this) {
       return capturingContent;
     }
     const CSSIntPoint p = TranslateEventCoords(
@@ -2883,7 +2887,7 @@ nsresult nsImageFrame::HandleEvent(nsPresContext* aPresContext,
           NS_ENSURE_SUCCESS(rv, rv);
 
           spec += nsPrintfCString("?%d,%d", p.x.value, p.y.value);
-          rv = NS_MutateURI(uri).SetSpec(spec).Finalize(uri);
+          rv = NS_NewURI(getter_AddRefs(uri), spec);
           NS_ENSURE_SUCCESS(rv, rv);
 
           if (aEvent->mMessage == ePointerClick &&
@@ -2894,7 +2898,7 @@ nsresult nsImageFrame::HandleEvent(nsPresContext* aPresContext,
                 aEvent->IsTrusted() ? UserNavigationInvolvement::Activation
                                     : UserNavigationInvolvement::None);
           } else {
-            nsContentUtils::TriggerLinkMouseOver(anchorNode, uri, target);
+            nsContentUtils::TriggerLinkMouseOver(anchorNode, uri);
           }
         }
       }

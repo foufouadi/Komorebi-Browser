@@ -9,7 +9,6 @@ import kotlin.test.assertNotNull
 import kotlinx.coroutines.test.runTest
 import mozilla.appservices.RustComponentsInitializer
 import mozilla.components.concept.storage.CreditCard
-import mozilla.components.concept.storage.CreditCardNumber
 import mozilla.components.concept.storage.NewCreditCardFields
 import mozilla.components.concept.storage.UpdatableAddressFields
 import mozilla.components.concept.storage.UpdatableCreditCardFields
@@ -46,26 +45,22 @@ class AutofillCreditCardsAddressesStorageTest {
 
     @Test
     fun `add credit card`() = runTest {
-        val plaintextNumber = CreditCardNumber.Plaintext("4111111111111111")
         val creditCardFields =
             NewCreditCardFields(
                 billingName = "Jon Doe",
-                plaintextCardNumber = plaintextNumber,
-                cardNumberLast4 = "1111",
+                cardNumber = "4111111111111111",
                 expiryMonth = 12,
                 expiryYear = 2028,
                 cardType = "amex",
+                cardCvv = null,
             )
         val creditCard = storage.addCreditCard(creditCardFields)
 
         assertNotNull(creditCard)
 
         assertEquals(creditCardFields.billingName, creditCard.billingName)
-        assertEquals(
-            plaintextNumber,
-            storage.crypto.decrypt(storage.crypto.getOrGenerateKey(), creditCard.encryptedCardNumber),
-        )
-        assertEquals(creditCardFields.cardNumberLast4, creditCard.cardNumberLast4)
+        assertEquals(creditCardFields.cardNumber, creditCard.cardNumber)
+        assertEquals("1111", creditCard.cardNumberLast4)
         assertEquals(creditCardFields.expiryMonth, creditCard.expiryMonth)
         assertEquals(creditCardFields.expiryYear, creditCard.expiryYear)
         assertEquals(creditCardFields.cardType, creditCard.cardType)
@@ -75,7 +70,7 @@ class AutofillCreditCardsAddressesStorageTest {
                 CreditCard.ELLIPSIS +
                 CreditCard.ELLIPSIS +
                 CreditCard.ELLIPSIS +
-                creditCardFields.cardNumberLast4 +
+                "1111" +
                 CreditCard.ELLIPSES_END,
             creditCard.obfuscatedCardNumber,
         )
@@ -83,15 +78,14 @@ class AutofillCreditCardsAddressesStorageTest {
 
     @Test
     fun `get credit card`() = runTest {
-        val plaintextNumber = CreditCardNumber.Plaintext("5500000000000004")
         val creditCardFields =
             NewCreditCardFields(
                 billingName = "Jon Doe",
-                plaintextCardNumber = plaintextNumber,
-                cardNumberLast4 = "0004",
+                cardNumber = "5500000000000004",
                 expiryMonth = 12,
                 expiryYear = 2028,
                 cardType = "amex",
+                cardCvv = null,
             )
         val creditCard = storage.addCreditCard(creditCardFields)
 
@@ -105,42 +99,38 @@ class AutofillCreditCardsAddressesStorageTest {
 
     @Test
     fun `get all credit cards`() = runTest {
-        val plaintextNumber1 = CreditCardNumber.Plaintext("5500000000000004")
         val creditCardFields1 =
             NewCreditCardFields(
                 billingName = "Jane Fields",
-                plaintextCardNumber = plaintextNumber1,
-                cardNumberLast4 = "0004",
+                cardNumber = "5500000000000004",
                 expiryMonth = 12,
                 expiryYear = 2028,
                 cardType = "mastercard",
+                cardCvv = null,
             )
-        val plaintextNumber2 = CreditCardNumber.Plaintext("4111111111111111")
         val creditCardFields2 =
             NewCreditCardFields(
                 billingName = "Banana Apple",
-                plaintextCardNumber = plaintextNumber2,
-                cardNumberLast4 = "1111",
+                cardNumber = "4111111111111111",
                 expiryMonth = 1,
                 expiryYear = 2030,
                 cardType = "visa",
+                cardCvv = null,
             )
-        val plaintextNumber3 = CreditCardNumber.Plaintext("340000000000009")
         val creditCardFields3 =
             NewCreditCardFields(
                 billingName = "Pineapple Orange",
-                plaintextCardNumber = plaintextNumber3,
-                cardNumberLast4 = "0009",
+                cardNumber = "340000000000009",
                 expiryMonth = 2,
                 expiryYear = 2028,
                 cardType = "amex",
+                cardCvv = null,
             )
         val creditCard1 = storage.addCreditCard(creditCardFields1)
         val creditCard2 = storage.addCreditCard(creditCardFields2)
         val creditCard3 = storage.addCreditCard(creditCardFields3)
 
         val creditCards = storage.getAllCreditCards()
-        val key = storage.crypto.getOrGenerateKey()
 
         val savedCreditCard1 = creditCards.find { it == creditCard1 }
         assertNotNull(savedCreditCard1)
@@ -152,9 +142,9 @@ class AutofillCreditCardsAddressesStorageTest {
         val count = storage.countAllCreditCards()
         assertEquals(3, count)
 
-        assertEquals(plaintextNumber1, storage.crypto.decrypt(key, savedCreditCard1.encryptedCardNumber))
-        assertEquals(plaintextNumber2, storage.crypto.decrypt(key, savedCreditCard2.encryptedCardNumber))
-        assertEquals(plaintextNumber3, storage.crypto.decrypt(key, savedCreditCard3.encryptedCardNumber))
+        assertEquals("5500000000000004", savedCreditCard1.cardNumber)
+        assertEquals("4111111111111111", savedCreditCard2.cardNumber)
+        assertEquals("340000000000009", savedCreditCard3.cardNumber)
     }
 
     @Test
@@ -162,11 +152,11 @@ class AutofillCreditCardsAddressesStorageTest {
         val creditCardFields =
             NewCreditCardFields(
                 billingName = "Jon Doe",
-                plaintextCardNumber = CreditCardNumber.Plaintext("4111111111111111"),
-                cardNumberLast4 = "1111",
+                cardNumber = "4111111111111111",
                 expiryMonth = 12,
                 expiryYear = 2028,
                 cardType = "visa",
+                cardCvv = null,
             )
 
         var creditCard = storage.addCreditCard(creditCardFields)
@@ -175,22 +165,20 @@ class AutofillCreditCardsAddressesStorageTest {
         var newCreditCardFields =
             UpdatableCreditCardFields(
                 billingName = "Jane Fields",
-                cardNumber = CreditCardNumber.Plaintext("30000000000004"),
-                cardNumberLast4 = "0004",
+                cardNumber = "30000000000004",
                 expiryMonth = 12,
                 expiryYear = 2038,
                 cardType = "diners",
+                cardCvv = null,
             )
 
         storage.updateCreditCard(creditCard.guid, newCreditCardFields)
 
         creditCard = storage.getCreditCard(creditCard.guid)!!
 
-        val key = storage.crypto.getOrGenerateKey()
-
         assertEquals(newCreditCardFields.billingName, creditCard.billingName)
-        assertEquals(newCreditCardFields.cardNumber, storage.crypto.decrypt(key, creditCard.encryptedCardNumber))
-        assertEquals(newCreditCardFields.cardNumberLast4, creditCard.cardNumberLast4)
+        assertEquals(newCreditCardFields.cardNumber, creditCard.cardNumber)
+        assertEquals("0004", creditCard.cardNumberLast4)
         assertEquals(newCreditCardFields.expiryMonth, creditCard.expiryMonth)
         assertEquals(newCreditCardFields.expiryYear, creditCard.expiryYear)
         assertEquals(newCreditCardFields.cardType, creditCard.cardType)
@@ -199,11 +187,11 @@ class AutofillCreditCardsAddressesStorageTest {
         newCreditCardFields =
             UpdatableCreditCardFields(
                 billingName = "Bob Jones",
-                cardNumber = creditCard.encryptedCardNumber,
-                cardNumberLast4 = "0004",
+                cardNumber = creditCard.cardNumber,
                 expiryMonth = 12,
                 expiryYear = 2038,
                 cardType = "diners",
+                cardCvv = null,
             )
 
         storage.updateCreditCard(creditCard.guid, newCreditCardFields)
@@ -211,11 +199,79 @@ class AutofillCreditCardsAddressesStorageTest {
         creditCard = storage.getCreditCard(creditCard.guid)!!
 
         assertEquals(newCreditCardFields.billingName, creditCard.billingName)
-        assertEquals(newCreditCardFields.cardNumber, creditCard.encryptedCardNumber)
-        assertEquals(newCreditCardFields.cardNumberLast4, creditCard.cardNumberLast4)
+        assertEquals(newCreditCardFields.cardNumber, creditCard.cardNumber)
+        assertEquals("0004", creditCard.cardNumberLast4)
         assertEquals(newCreditCardFields.expiryMonth, creditCard.expiryMonth)
         assertEquals(newCreditCardFields.expiryYear, creditCard.expiryYear)
         assertEquals(newCreditCardFields.cardType, creditCard.cardType)
+    }
+
+    @Test
+    fun `GIVEN a credit card added without a security code WHEN it is read THEN the security code is null`() = runTest {
+        val creditCard = storage.addCreditCard(newCreditCardFields())
+
+        assertNull(creditCard.cardCvv)
+        assertNull(storage.getCreditCard(creditCard.guid)!!.cardCvv)
+    }
+
+    @Test
+    fun `GIVEN a credit card added with a security code WHEN it is read THEN the security code is returned`() =
+        runTest {
+            val creditCard = storage.addCreditCard(newCreditCardFields(cardCvv = "123"))
+
+            assertEquals("123", creditCard.cardCvv)
+            assertEquals("123", storage.getCreditCard(creditCard.guid)!!.cardCvv)
+            assertEquals("123", storage.getAllCreditCards().single().cardCvv)
+        }
+
+    @Test
+    fun `GIVEN a stored security code WHEN the credit card is updated without one THEN the security code is kept`() =
+        runTest {
+            val creditCard = storage.addCreditCard(newCreditCardFields(cardCvv = "123"))
+
+            storage.updateCreditCard(creditCard.guid, updatableCreditCardFields(billingName = "Bob Jones"))
+
+            val updatedCreditCard = storage.getCreditCard(creditCard.guid)!!
+            assertEquals("Bob Jones", updatedCreditCard.billingName)
+            assertEquals("123", updatedCreditCard.cardCvv)
+        }
+
+    @Test
+    fun `GIVEN a stored security code WHEN the credit card is updated with a new one THEN the security code is replaced`() =
+        runTest {
+            val creditCard = storage.addCreditCard(newCreditCardFields(cardCvv = "123"))
+
+            storage.updateCreditCard(creditCard.guid, updatableCreditCardFields(cardCvv = "456"))
+
+            assertEquals("456", storage.getCreditCard(creditCard.guid)!!.cardCvv)
+        }
+
+    @Test
+    fun `GIVEN a stored security code WHEN the credit card is updated with an empty one THEN the security code is removed`() =
+        runTest {
+            val creditCard = storage.addCreditCard(newCreditCardFields(cardCvv = "123"))
+
+            storage.updateCreditCard(creditCard.guid, updatableCreditCardFields(cardCvv = ""))
+
+            assertNull(storage.getCreditCard(creditCard.guid)!!.cardCvv)
+        }
+
+    @Test
+    fun `GIVEN no stored security code WHEN the credit card is updated with one THEN the security code is stored`() =
+        runTest {
+            val creditCard = storage.addCreditCard(newCreditCardFields())
+
+            storage.updateCreditCard(creditCard.guid, updatableCreditCardFields(cardCvv = "123"))
+
+            assertEquals("123", storage.getCreditCard(creditCard.guid)!!.cardCvv)
+        }
+
+    @Test
+    fun `GIVEN a non-existent credit card guid WHEN updateCreditCard is called THEN nothing is stored`() = runTest {
+        storage.updateCreditCard("guid", updatableCreditCardFields())
+
+        assertNull(storage.getCreditCard("guid"))
+        assertEquals(0, storage.countAllCreditCards())
     }
 
     @Test
@@ -223,11 +279,11 @@ class AutofillCreditCardsAddressesStorageTest {
         val creditCardFields =
             NewCreditCardFields(
                 billingName = "Jon Doe",
-                plaintextCardNumber = CreditCardNumber.Plaintext("30000000000004"),
-                cardNumberLast4 = "0004",
+                cardNumber = "30000000000004",
                 expiryMonth = 12,
                 expiryYear = 2028,
                 cardType = "diners",
+                cardCvv = null,
             )
 
         val creditCard = storage.addCreditCard(creditCardFields)
@@ -433,4 +489,24 @@ class AutofillCreditCardsAddressesStorageTest {
 
         verify(storageSpy).conn
     }
+
+    private fun newCreditCardFields(cardCvv: String? = null) =
+        NewCreditCardFields(
+            billingName = "Jon Doe",
+            cardNumber = "4111111111111111",
+            expiryMonth = 12,
+            expiryYear = 2028,
+            cardType = "visa",
+            cardCvv = cardCvv,
+        )
+
+    private fun updatableCreditCardFields(billingName: String = "Jon Doe", cardCvv: String? = null) =
+        UpdatableCreditCardFields(
+            billingName = billingName,
+            cardNumber = "4111111111111111",
+            expiryMonth = 12,
+            expiryYear = 2028,
+            cardType = "visa",
+            cardCvv = cardCvv,
+        )
 }

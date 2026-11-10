@@ -174,16 +174,9 @@ class gfxDWriteFontEntry final : public gfxFontEntry {
 
   gfxFontEntry* Clone() const override;
 
-  hb_blob_t* GetFontTable(uint32_t aTableTag) override;
-
   nsresult ReadCMAP(FontInfoData* aFontInfoData = nullptr) override;
 
   bool IsCJKFont();
-
-  bool HasVariations() override;
-  void GetVariationAxes(nsTArray<gfxFontVariationAxis>& aAxes) override;
-  void GetVariationInstances(
-      nsTArray<gfxFontVariationInstance>& aInstances) override;
 
   void SetForceGDIClassic(bool aForce) { mForceGDIClassic = aForce; }
   bool GetForceGDIClassic() { return mForceGDIClassic; }
@@ -204,10 +197,21 @@ class gfxDWriteFontEntry final : public gfxFontEntry {
   // Protected destructor, to discourage deletion outside of Release():
   virtual ~gfxDWriteFontEntry();
 
-  virtual nsresult CopyFontTable(uint32_t aTableTag,
-                                 nsTArray<uint8_t>& aBuffer) override;
+#if MOZ_FONTATIONS
+  void InitSkrifaFontFace() override MOZ_REQUIRES(mLock);
+#endif
 
-  virtual gfxFont* CreateFontInstance(const gfxFontStyle* aFontStyle);
+  bool HasVariationsInternal() override;
+  void GetVariationAxesInternal(nsTArray<gfxFontVariationAxis>& aAxes) override;
+  void GetVariationInstancesInternal(
+      nsTArray<gfxFontVariationInstance>& aInstances) override;
+
+  hb_blob_t* GetFontTableInternal(uint32_t aTableTag) override;
+
+  nsresult CopyFontTable(uint32_t aTableTag,
+                         nsTArray<uint8_t>& aBuffer) override;
+
+  gfxFont* CreateFontInstance(const gfxFontStyle* aFontStyle) override;
 
   nsresult CreateFontFace(
       IDWriteFontFace** aFontFace, const gfxFontStyle* aFontStyle = nullptr,
@@ -227,17 +231,22 @@ class gfxDWriteFontEntry final : public gfxFontEntry {
 
   // For custom fonts, we hold a reference to the IDWriteFontFileStream for
   // for the IDWriteFontFile, so that the data is available.
-  RefPtr<gfxDWriteFontFileStream> mFontFileStream;
+  RefPtr<IDWriteFontFileStream> mFontFileStream;
 
   // font face corresponding to the mFont/mFontFile *without* any DWrite
   // style simulations applied
-  RefPtr<IDWriteFontFace> mFontFace;
+  RefPtr<IDWriteFontFace> mFontFace MOZ_GUARDED_BY(mLock);
   // Extended fontface interface if supported, else null
-  RefPtr<IDWriteFontFace5> mFontFace5;
+  RefPtr<IDWriteFontFace5> mFontFace5 MOZ_GUARDED_BY(mLock);
 
   DWRITE_FONT_FACE_TYPE mFaceType;
 
   mozilla::Atomic<FontTableCache*> mFontTableCache;
+
+#if MOZ_FONTATIONS
+  // File fragment backing our Skrifa font, if unable to mmap the file.
+  void* mFragmentContext = nullptr;
+#endif
 
   int8_t mIsCJK;
   bool mIsSystemFont;
@@ -249,9 +258,10 @@ class gfxDWriteFontEntry final : public gfxFontEntry {
   // faces can be reliably identified via a GDI LOGFONT structure.
   bool mMayUseGDIAccess = false;
 
-  mozilla::ThreadSafeWeakPtr<mozilla::gfx::UnscaledFontDWrite> mUnscaledFont;
-  mozilla::ThreadSafeWeakPtr<mozilla::gfx::UnscaledFontDWrite>
-      mUnscaledFontBold;
+  mozilla::ThreadSafeWeakPtr<mozilla::gfx::UnscaledFontDWrite> mUnscaledFont
+      MOZ_GUARDED_BY(mLock);
+  mozilla::ThreadSafeWeakPtr<mozilla::gfx::UnscaledFontDWrite> mUnscaledFontBold
+      MOZ_GUARDED_BY(mLock);
 };
 
 // custom text renderer used to determine the fallback font for a given char
@@ -402,9 +412,6 @@ class gfxDWriteFontList final : public gfxPlatformFontList {
       WidthRange aWidthForEntry, SlantStyleRange aStyleForEntry,
       FontData* aFontData) override;
 
-  IDWriteGdiInterop* GetGDIInterop() { return mGDIInterop; }
-  bool UseGDIFontTableAccess() const;
-
   bool FindAndAddFamiliesLocked(
       FontVisibilityProvider* aFontVisibilityProvider,
       mozilla::StyleGenericFontFamily aGeneric, const nsACString& aFamily,
@@ -487,10 +494,6 @@ class gfxDWriteFontList final : public gfxPlatformFontList {
   virtual already_AddRefed<FontInfoData> CreateFontInfoData();
 
   gfxFloat mForceGDIClassicMaxFontSize;
-
-  // whether to use GDI font table access routines
-  bool mGDIFontTableAccess;
-  RefPtr<IDWriteGdiInterop> mGDIInterop;
 
   RefPtr<DWriteFontFallbackRenderer> mFallbackRenderer;
   RefPtr<IDWriteTextFormat> mFallbackFormat;

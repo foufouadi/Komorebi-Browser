@@ -73,6 +73,17 @@ enum PrefersReducedMotionOverride {
 };
 
 /**
+ * CSS prefers-contrast values override.
+ */
+enum PrefersContrastOverride {
+  "none",
+  "no-preference",
+  "more",
+  "less",
+  "custom",
+};
+
+/**
  * Allowed overrides of platform/pref default behaviour for touch events.
  */
 enum TouchEventsOverride {
@@ -122,7 +133,7 @@ interface BrowsingContext {
 
   [SetterThrows] attribute [LegacyNullToEmptyString] DOMString customPlatform;
 
-  [SetterThrows] attribute [LegacyNullToEmptyString] DOMString customUserAgent;
+  [SetterThrows] attribute [LegacyNullToEmptyString] UTF8String customUserAgent;
 
   readonly attribute DOMString embedderElementType;
 
@@ -255,6 +266,9 @@ interface BrowsingContext {
   // Forced-colors simulation, for DevTools
   [SetterThrows] attribute ForcedColorsOverride forcedColorsOverride;
 
+  // Contrast simulation, for DevTools.
+  [SetterThrows] attribute PrefersContrastOverride prefersContrastOverride;
+
   // Animation playbackRate multiplier, for Devtools
   [SetterThrows] attribute double animationsPlayBackRateMultiplier;
 
@@ -328,6 +342,9 @@ BrowsingContext includes LoadContextMixin;
 
 [Exposed=Window, ChromeOnly]
 interface CanonicalBrowsingContext : BrowsingContext {
+  // Whether enterprise policy has disabled service workers for the top-level site.
+  readonly attribute boolean serviceWorkersDisabledByPolicy;
+
   // Top-level only download folder override for WebDriver BiDi's.
   [SetterThrows] attribute DOMString downloadFolderOverride;
 

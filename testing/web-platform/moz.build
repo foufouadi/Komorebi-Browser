@@ -10,8 +10,6 @@ TEST_HARNESS_FILES["web-platform"] += [
     "wptrunner.ini",
 ]
 
-PYTHON_UNITTEST_MANIFESTS += ["python.toml"]
-
 with Files("**"):
     SCHEDULES.exclusive = [
         "web-platform-tests",
@@ -842,9 +840,6 @@ with Files("tests/touch-events/**"):
 with Files("tests/tools/**"):
     BUG_COMPONENT = ("Testing", "web-platform-tests")
 
-with Files("tests/top-level-storage-access-api/**"):
-    BUG_COMPONENT = ("Core", "Privacy: Anti-Tracking")
-
 with Files("tests/trusted-types/**"):
     BUG_COMPONENT = ("Core", "DOM: Security")
 
@@ -905,7 +900,7 @@ with Files("tests/webdriver/tests/bidi/**"):
 with Files("tests/webgl/**"):
     BUG_COMPONENT = ("Core", "Graphics: CanvasWebGL")
 
-with Files("tests/webgl/**"):
+with Files("tests/webgpu/**"):
     BUG_COMPONENT = ("Core", "Graphics: WebGPU")
 
 with Files("tests/webidl/ecmascript-binding/**"):

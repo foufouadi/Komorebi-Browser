@@ -434,6 +434,17 @@ void nsRFPService::PrefChanged(const char* aPref) {
   if (pref.EqualsLiteral(RESIST_FINGERPRINTINGPROTECTION_OVERRIDE_PREF) ||
       pref.EqualsLiteral(RESIST_FINGERPRINTINGPROTECTION_OVERRIDE_BASE_PREF)) {
     UpdateFPPOverrideList();
+
+    // Granular overrides are applied on top of the global set of enabled
+    // targets, which just changed. Ask the WebCompat service to send them
+    // again so they are recomputed against the new global set. This is done
+    // here, rather than by having the service observe the pref itself, to
+    // guarantee that the global set is updated first.
+    if (XRE_IsParentProcess() && mWebCompatService) {
+      DebugOnly<nsresult> rv = mWebCompatService->RefreshOverrides();
+      NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                           "Failed to refresh the fingerprinting overrides");
+    }
   } else if (pref.EqualsLiteral(GLEAN_DATA_SUBMISSION_PREF)) {
     if (XRE_IsParentProcess() &&
         !Preferences::GetBool(GLEAN_DATA_SUBMISSION_PREF, false)) {
@@ -2686,7 +2697,14 @@ RFPTargetSet nsRFPService::CreateOverridesFromText(
     const nsString& aOverridesText, RFPTargetSet aBaseOverrides) {
   RFPTargetSet result = aBaseOverrides;
 
-  for (const nsAString& each : aOverridesText.Split(',')) {
+  for (const nsAString& token : aOverridesText.Split(',')) {
+    // Tolerate whitespace around each entry, e.g. "+A, -B".
+    nsAutoString each(token);
+    each.Trim(" \t\r\n");
+    if (each.IsEmpty()) {
+      continue;
+    }
+
     Maybe<RFPTarget> mappedValue =
         nsRFPService::TextToRFPTarget(Substring(each, 1, each.Length() - 1));
     if (mappedValue.isNothing()) {
@@ -2740,33 +2758,47 @@ nsRFPService::SetFingerprintingOverrides(
   // Clear all overrides before importing.
   CleanAllOverrides();
 
-  StaticMutexAutoLock lock(sEnabledFingerprintingProtectionsMutex);
-  for (const auto& fpOverride : aOverrides) {
-    nsAutoCString domainKey;
+  // Read the overrides out of the (JS-implemented) override objects before
+  // taking the lock, so that we don't call into JS while holding it.
+  struct ParsedOverride {
+    nsCString mDomainKey;
+    nsCString mOverridesText;
+    bool mIsBaseline = false;
+  };
+  nsTArray<ParsedOverride> parsedOverrides(aOverrides.Length());
 
-    nsresult rv = nsRFPService::CreateOverrideDomainKey(fpOverride, domainKey);
+  for (const auto& fpOverride : aOverrides) {
+    ParsedOverride parsed;
+
+    nsresult rv =
+        nsRFPService::CreateOverrideDomainKey(fpOverride, parsed.mDomainKey);
     // Skip the current overrides if we fail to create the domain key.
     if (NS_WARN_IF(NS_FAILED(rv))) {
       continue;
     }
 
-    nsAutoCString overridesText;
-    rv = fpOverride->GetOverrides(overridesText);
+    rv = fpOverride->GetOverrides(parsed.mOverridesText);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    bool isBaseline = false;
-    rv = fpOverride->GetIsBaseline(&isBaseline);
+    rv = fpOverride->GetIsBaseline(&parsed.mIsBaseline);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    RFPTargetSet baseOverrides = isBaseline
-                                     ? sEnabledFingerprintingProtectionsBase
-                                     : sEnabledFingerprintingProtections;
-    RFPTargetSet targets = nsRFPService::CreateOverridesFromText(
-        NS_ConvertUTF8toUTF16(overridesText), baseOverrides);
+    parsedOverrides.AppendElement(std::move(parsed));
+  }
 
-    // The newly added one will replace the existing one for the given domain
-    // key.
-    mFingerprintingOverrides.InsertOrUpdate(domainKey, targets);
+  {
+    StaticMutexAutoLock lock(sEnabledFingerprintingProtectionsMutex);
+    for (const auto& parsed : parsedOverrides) {
+      RFPTargetSet baseOverrides = parsed.mIsBaseline
+                                       ? sEnabledFingerprintingProtectionsBase
+                                       : sEnabledFingerprintingProtections;
+      RFPTargetSet targets = nsRFPService::CreateOverridesFromText(
+          NS_ConvertUTF8toUTF16(parsed.mOverridesText), baseOverrides);
+
+      // The newly added one will replace the existing one for the given
+      // domain key.
+      mFingerprintingOverrides.InsertOrUpdate(parsed.mDomainKey, targets);
+    }
   }
 
   if (Preferences::GetBool(
@@ -3182,6 +3214,8 @@ void nsRFPService::GetExemptedDomainsLowercase(nsCString& aExemptedDomains) {
 #define EXEMPTED_DOMAINS_PREF_NAME \
   "privacy.resistFingerprinting.exemptedDomains"
 
+  // Callers compare this against a lower-cased host, and
+  // nsContentUtils::IsURIInList() asserts that the list is lower-case.
   static bool sInited = false;
   if (!sInited) {
     sInited = true;
@@ -3189,10 +3223,12 @@ void nsRFPService::GetExemptedDomainsLowercase(nsCString& aExemptedDomains) {
     ClearOnShutdown(sExemptedDomainsLowercase);
     Preferences::GetCString(EXEMPTED_DOMAINS_PREF_NAME,
                             *sExemptedDomainsLowercase);
+    ToLowerCase(*sExemptedDomainsLowercase);
     Preferences::RegisterCallback(
         [](const char* aPref, void* aData) {
           Preferences::GetCString(EXEMPTED_DOMAINS_PREF_NAME,
                                   *sExemptedDomainsLowercase);
+          ToLowerCase(*sExemptedDomainsLowercase);
         },
         EXEMPTED_DOMAINS_PREF_NAME);
   }
@@ -3232,8 +3268,8 @@ CSSIntRect nsRFPService::GetSpoofedScreenAvailSize(const nsRect& aRect,
 }
 
 /* static */
-uint64_t nsRFPService::GetSpoofedStorageLimit() {
-  uint64_t limit = 50ULL * 1024ULL * 1024ULL * 1024ULL;  // 50 GiB
+int64_t nsRFPService::GetSpoofedStorageLimit() {
+  int64_t limit = 50LL * 1024LL * 1024LL * 1024LL;  // 50 GiB
   MOZ_ASSERT(limit / 5 ==
              dom::quota::QuotaManager::GetGroupLimitForLimit(limit));
 

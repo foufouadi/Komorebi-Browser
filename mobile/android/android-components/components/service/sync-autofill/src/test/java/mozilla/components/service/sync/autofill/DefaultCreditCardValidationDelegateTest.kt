@@ -8,7 +8,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.runBlocking
 import mozilla.appservices.RustComponentsInitializer
 import mozilla.components.concept.storage.CreditCardEntry
-import mozilla.components.concept.storage.CreditCardNumber
 import mozilla.components.concept.storage.CreditCardValidationDelegate.Result
 import mozilla.components.concept.storage.NewCreditCardFields
 import mozilla.components.lib.dataprotect.SecureAbove22Preferences
@@ -48,11 +47,11 @@ class DefaultCreditCardValidationDelegateTest {
             val creditCardFields =
                 NewCreditCardFields(
                     billingName = "Pineapple Orange",
-                    plaintextCardNumber = CreditCardNumber.Plaintext("4111111111111111"),
-                    cardNumberLast4 = "1111",
+                    cardNumber = "4111111111111111",
                     expiryMonth = 12,
                     expiryYear = 2028,
                     cardType = "visa",
+                    cardCvv = null,
                 )
             val creditCard = storage.addCreditCard(creditCardFields)
             val newCreditCard = createCreditCardEntry(guid = creditCard.guid)
@@ -66,11 +65,11 @@ class DefaultCreditCardValidationDelegateTest {
         val creditCardFields =
             NewCreditCardFields(
                 billingName = "Pineapple Orange",
-                plaintextCardNumber = CreditCardNumber.Plaintext("4111111111111111"),
-                cardNumberLast4 = "1111",
+                cardNumber = "4111111111111111",
                 expiryMonth = 12,
                 expiryYear = 2028,
                 cardType = "visa",
+                cardCvv = null,
             )
         val creditCard = storage.addCreditCard(creditCardFields)
         val newCreditCard = createCreditCardEntry(guid = creditCard.guid)
@@ -85,11 +84,11 @@ class DefaultCreditCardValidationDelegateTest {
             val creditCardFields =
                 NewCreditCardFields(
                     billingName = "Pineapple Orange",
-                    plaintextCardNumber = CreditCardNumber.Plaintext("4111111111111111"),
-                    cardNumberLast4 = "1111",
+                    cardNumber = "4111111111111111",
                     expiryMonth = 12,
                     expiryYear = 2028,
                     cardType = "visa",
+                    cardCvv = null,
                 )
             val creditCard = storage.addCreditCard(creditCardFields)
             val newCreditCard = createCreditCardEntry(cardNumber = "4111111111111111")
@@ -105,11 +104,11 @@ class DefaultCreditCardValidationDelegateTest {
             val creditCardFields =
                 NewCreditCardFields(
                     billingName = "Pineapple Orange",
-                    plaintextCardNumber = CreditCardNumber.Plaintext("4111111111111111"),
-                    cardNumberLast4 = "1111",
+                    cardNumber = "4111111111111111",
                     expiryMonth = 12,
                     expiryYear = 2028,
                     cardType = "visa",
+                    cardCvv = null,
                 )
             storage.addCreditCard(creditCardFields)
 
@@ -134,4 +133,5 @@ fun createCreditCardEntry(
         expiryMonth = expiryMonth,
         expiryYear = expiryYear,
         cardType = cardType,
+        cardCvv = null,
     )

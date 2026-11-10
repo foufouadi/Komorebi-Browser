@@ -9,12 +9,13 @@
 
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-import { UrlbarProvider } from "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs";
+import {
+  UrlbarProvider,
+  UrlbarUtils,
+} from "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs";
 import { UrlbarShared } from "chrome://browser/content/urlbar/UrlbarShared.mjs";
 
-const lazy = {};
-
-ChromeUtils.defineESModuleGetters(lazy, {
+const lazy = XPCOMUtils.declareLazy({
   AppMenuNotifications: "resource://gre/modules/AppMenuNotifications.sys.mjs",
   DefaultBrowserCheck:
     "moz-src:///browser/components/DefaultBrowserCheck.sys.mjs",
@@ -27,40 +28,38 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "moz-src:///browser/components/urlbar/UrlbarProviderTopSites.sys.mjs",
   UrlbarResult: "chrome://browser/content/urlbar/UrlbarResult.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
-});
+  cfrFeaturesUserPref: {
+    pref: "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features",
+    default: true,
+  },
+  SUPPORTED_ENGINES: () => {
+    // Converts a list of Google domains to a pipe separated string of escaped TLDs.
+    // [www.google.com, ..., www.google.co.uk] => "com|...|co\.uk"
+    const googleTLDs = lazy.SearchStaticData.getAlternateDomains(
+      "www.google.com"
+    )
+      .map(str => str.slice("www.google.".length).replaceAll(".", "\\."))
+      .join("|");
 
-XPCOMUtils.defineLazyPreferenceGetter(
-  lazy,
-  "cfrFeaturesUserPref",
-  "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features",
-  true
-);
-
-ChromeUtils.defineLazyGetter(lazy, "SUPPORTED_ENGINES", () => {
-  // Converts a list of Google domains to a pipe separated string of escaped TLDs.
-  // [www.google.com, ..., www.google.co.uk] => "com|...|co\.uk"
-  const googleTLDs = lazy.SearchStaticData.getAlternateDomains("www.google.com")
-    .map(str => str.slice("www.google.".length).replaceAll(".", "\\."))
-    .join("|");
-
-  // This maps engine names to regexes matching their homepages. We show the
-  // redirect tip on these pages.
-  return new Map([
-    ["Bing", { domainPath: /^www\.bing\.com\/$/ }],
-    [
-      "DuckDuckGo",
-      {
-        domainPath: /^(start\.)?duckduckgo\.com\/$/,
-        prohibitedSearchParams: ["q"],
-      },
-    ],
-    [
-      "Google",
-      {
-        domainPath: new RegExp(`^www\.google\.(?:${googleTLDs})\/(webhp)?$`),
-      },
-    ],
-  ]);
+    // This maps engine names to regexes matching their homepages. We show the
+    // redirect tip on these pages.
+    return new Map([
+      ["Bing", { domainPath: /^www\.bing\.com\/$/ }],
+      [
+        "DuckDuckGo",
+        {
+          domainPath: /^(start\.)?duckduckgo\.com\/$/,
+          prohibitedSearchParams: ["q"],
+        },
+      ],
+      [
+        "Google",
+        {
+          domainPath: new RegExp(`^www\.google\.(?:${googleTLDs})\/(webhp)?$`),
+        },
+      ],
+    ]);
+  },
 });
 
 // The maximum number of times we'll show a tip across all sessions.
@@ -84,6 +83,16 @@ export class UrlbarProviderSearchTips extends UrlbarProvider {
   /** @type {?UrlbarProviderSearchTips} */
   static #instance = null;
 
+  /**
+   * Whether and what kind of tip we've shown in the current engagement.
+   *
+   * @type {Values<typeof UrlbarShared.SEARCH_TIP_TYPE>}
+   */
+  showedTipTypeInCurrentEngagement = UrlbarShared.SEARCH_TIP_TYPE.NONE;
+
+  /** @type {Values<typeof UrlbarShared.SEARCH_TIP_TYPE>} */
+  currentTip = UrlbarShared.SEARCH_TIP_TYPE.NONE;
+
   constructor() {
     super();
     if (UrlbarProviderSearchTips.#instance) {
@@ -103,9 +112,6 @@ export class UrlbarProviderSearchTips extends UrlbarProvider {
         break;
       }
     }
-
-    // Whether and what kind of tip we've shown in the current engagement.
-    this.showedTipTypeInCurrentEngagement = UrlbarShared.SEARCH_TIP_TYPE.NONE;
 
     // Used to track browser windows we've seen.
     this._seenWindows = new WeakSet();
@@ -147,8 +153,9 @@ export class UrlbarProviderSearchTips extends UrlbarProvider {
    * @param {UrlbarQueryContext} queryContext
    * @param {(provider: UrlbarProvider, result: UrlbarResult) => void} addCallback
    *   Callback invoked by the provider to add a new result.
+   * @param {UrlbarParentController} controller The controller instance.
    */
-  async startQuery(queryContext, addCallback) {
+  async startQuery(queryContext, addCallback, controller) {
     let instance = this.queryInstance;
 
     let tip = this.currentTip;
@@ -156,7 +163,7 @@ export class UrlbarProviderSearchTips extends UrlbarProvider {
     this.currentTip = UrlbarShared.SEARCH_TIP_TYPE.NONE;
 
     let defaultEngine = await lazy.SearchService.getDefault();
-    let icon = await defaultEngine.getIconURL();
+    let icon = await UrlbarUtils.getEngineIconUrl(defaultEngine, controller);
     if (instance != this.queryInstance) {
       return;
     }
@@ -197,7 +204,7 @@ export class UrlbarProviderSearchTips extends UrlbarProvider {
    *
    * @param {UrlbarResult} result
    *   The result that was picked.
-   * @param {window} window
+   * @param {BrowserWindow} window
    *   The browser window in which the tip is being displayed.
    */
   #pickResult(result, window) {
@@ -216,6 +223,11 @@ export class UrlbarProviderSearchTips extends UrlbarProvider {
     );
   }
 
+  /**
+   * @param {UrlbarQueryContext} queryContext
+   * @param {UrlbarParentController} controller
+   * @param {object} details
+   */
   onEngagement(queryContext, controller, details) {
     this.#pickResult(details.result, controller.browserWindow);
   }
@@ -227,7 +239,7 @@ export class UrlbarProviderSearchTips extends UrlbarProvider {
   /**
    * Called from `onLocationChange` in browser.js.
    *
-   * @param {window} window
+   * @param {BrowserWindow} window
    *  The browser window where the location change happened.
    * @param {nsIURI} uri
    *  The URI being navigated to.
@@ -250,7 +262,7 @@ export class UrlbarProviderSearchTips extends UrlbarProvider {
   /**
    * Called by the static function with the same name.
    *
-   * @param {window} window
+   * @param {BrowserWindow} window
    *  The browser window where the location change happened.
    * @param {nsIURI} uri
    *  The URI being navigated to.
@@ -324,7 +336,7 @@ export class UrlbarProviderSearchTips extends UrlbarProvider {
    *
    * @param {string} urlStr
    *   The URL of the page being loaded, in string form.
-   * @param {window} window
+   * @param {BrowserWindow} window
    *   The browser window in which the tip is being displayed.
    */
   async _maybeShowTipForUrl(urlStr, window) {
@@ -507,7 +519,11 @@ async function isDefaultEngineHomepage(urlStr) {
     return false;
   }
 
-  if (url.searchParams.has(homepageMatches.prohibitedSearchParams)) {
+  if (
+    homepageMatches.prohibitedSearchParams?.some(param =>
+      url.searchParams.has(param)
+    )
+  ) {
     return false;
   }
 

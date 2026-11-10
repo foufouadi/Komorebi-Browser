@@ -4,7 +4,7 @@
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
-  GenAI: "resource:///modules/GenAI.sys.mjs",
+  GenAI: "moz-src:///browser/components/genai/GenAI.sys.mjs",
 });
 
 /**
@@ -15,7 +15,9 @@ export class GenAIParent extends JSWindowActorParent {
     lazy.GenAI.handleShortcutsMessage(
       name,
       data,
-      this.browsingContext.topFrameElement
+      this.browsingContext.topFrameElement,
+      this.manager.documentURI,
+      this.manager
     );
   }
 }

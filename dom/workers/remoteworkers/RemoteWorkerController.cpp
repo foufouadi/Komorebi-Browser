@@ -65,6 +65,7 @@ RemoteWorkerController::~RemoteWorkerController() {
 
 void RemoteWorkerController::SetWorkerActor(RemoteWorkerParent* aActor) {
   AssertIsOnBackgroundThread();
+  MOZ_ASSERT(!IsTerminated());
   MOZ_ASSERT(!mActor);
   MOZ_ASSERT(aActor);
 
@@ -228,8 +229,8 @@ void RemoteWorkerController::MaybeStartSharedWorkerOp(Args&&... aArgs) {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(!mIsServiceWorker);
 
-  UniquePtr<PendingSharedWorkerOp> op =
-      MakeUnique<PendingSharedWorkerOp>(std::forward<Args>(aArgs)...);
+  auto op =
+      std::make_unique<PendingSharedWorkerOp>(std::forward<Args>(aArgs)...);
 
   if (!op->MaybeStart(this)) {
     mPendingOps.AppendElement(std::move(op));
@@ -310,8 +311,7 @@ RefPtr<ServiceWorkerOpPromise> RemoteWorkerController::ExecServiceWorkerOp(
   RefPtr<ServiceWorkerOpPromise::Private> promise =
       new ServiceWorkerOpPromise::Private(__func__);
 
-  UniquePtr<PendingServiceWorkerOp> op =
-      MakeUnique<PendingServiceWorkerOp>(std::move(aArgs), promise);
+  auto op = std::make_unique<PendingServiceWorkerOp>(std::move(aArgs), promise);
 
   if (!op->MaybeStart(this)) {
     mPendingOps.AppendElement(std::move(op));
@@ -330,8 +330,8 @@ RemoteWorkerController::ExecServiceWorkerFetchEventOp(
   RefPtr<ServiceWorkerFetchEventOpPromise::Private> promise =
       new ServiceWorkerFetchEventOpPromise::Private(__func__);
 
-  UniquePtr<PendingSWFetchEventOp> op =
-      MakeUnique<PendingSWFetchEventOp>(aArgs, promise, std::move(aReal));
+  auto op =
+      std::make_unique<PendingSWFetchEventOp>(aArgs, promise, std::move(aReal));
 
   if (!op->MaybeStart(this)) {
     mPendingOps.AppendElement(std::move(op));
@@ -604,14 +604,18 @@ RemoteWorkerController::PendingSWFetchEventOp::PendingSWFetchEventOp(
   IPCInternalRequest& req = mArgs.common().internalRequest();
   if (req.body().isSome() &&
       req.body().ref().type() == BodyStreamVariant::TParentToParentStream) {
-    nsCOMPtr<nsIInputStream> stream;
     auto streamLength = req.bodySize();
     const auto& uuid = req.body().ref().get_ParentToParentStream().uuid();
 
     auto storage = RemoteLazyInputStreamStorage::Get().unwrapOr(nullptr);
     MOZ_DIAGNOSTIC_ASSERT(storage);
-    storage->GetStream(uuid, 0, streamLength, getter_AddRefs(mBodyStream));
-    storage->ForgetStream(uuid);
+    if (req.hasStreamBody()) {
+      // Transfer the streaming body instead of retaining a clone for replay.
+      mBodyStream = storage->ForgetStream(uuid);
+    } else {
+      storage->GetStream(uuid, 0, streamLength, getter_AddRefs(mBodyStream));
+      storage->ForgetStream(uuid);
+    }
 
     MOZ_DIAGNOSTIC_ASSERT(mBodyStream);
 
@@ -635,6 +639,15 @@ bool RemoteWorkerController::PendingSWFetchEventOp::MaybeStart(
     mPromise = nullptr;
     // Because the worker has transitioned to terminated, this operation is moot
     // and so we should return true because there's no need to queue it.
+    return true;
+  }
+
+  // If the streaming body could not be taken from storage the worker would
+  // see a request whose body is missing.
+  if (NS_WARN_IF(mArgs.common().internalRequest().hasStreamBody() &&
+                 !mBodyStream)) {
+    mPromise->Reject(NS_ERROR_FAILURE, __func__);
+    mPromise = nullptr;
     return true;
   }
 

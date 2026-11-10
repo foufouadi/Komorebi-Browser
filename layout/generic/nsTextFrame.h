@@ -38,7 +38,7 @@ class CharacterDataBuffer;
 /**
  * Helper for CSS text-autospace, used by nsTextFrame::PropertyProvider.
  */
-class MOZ_STACK_CLASS TextAutospace final {
+class TextAutospace final {
  public:
   enum class CharClass : uint8_t {
     Other,
@@ -168,6 +168,8 @@ class nsTextFrame : public nsIFrame {
       return mTextStyle->mHyphens;
     }
     mozilla::gfx::ShapedTextFlags GetShapedTextFlags() const final;
+
+    bool GetSourceText(Range aRange, nsAString& aText) const final;
 
     already_AddRefed<DrawTarget> GetDrawTarget() const final;
 
@@ -995,7 +997,6 @@ class nsTextFrame : public nsIFrame {
     LineDecoration(const LineDecoration& aOther) = default;
 
     bool operator==(const LineDecoration& aOther) const = default;
-    bool operator!=(const LineDecoration& aOther) const = default;
   };
   struct TextDecorations {
     AutoTArray<LineDecoration, 1> mOverlines, mUnderlines, mStrikes;
@@ -1009,7 +1010,6 @@ class nsTextFrame : public nsIFrame {
     bool HasOverline() const { return !mOverlines.IsEmpty(); }
     bool HasStrikeout() const { return !mStrikes.IsEmpty(); }
     bool operator==(const TextDecorations& aOther) const = default;
-    bool operator!=(const TextDecorations& aOther) const = default;
   };
   enum TextDecorationColorResolution { eResolvedColors, eUnresolvedColors };
   void GetTextDecorations(nsPresContext* aPresContext,

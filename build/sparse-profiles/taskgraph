@@ -1,3 +1,4 @@
+# git-checkout: full
 %include build/sparse-profiles/mach
 
 # In order to decide which docker images to build, we need all the
@@ -52,9 +53,24 @@ path:remote/test/puppeteer/
 # for new-style try pushes
 path:try_task_config.json
 
-# app-services tooling.
+# app-services tooling and their dependencies
 path:services/app-services-tools/embedded-uniffi-bindgen
 path:services/app-services-tools/nimbus-fml
+path:Cargo.lock
+path:intl/icu_segmenter_data
+path:third_party/application-services/tools/embedded-uniffi-bindgen
+path:third_party/application-services/components/support/error
+path:third_party/application-services/components/support/error/macros
+path:third_party/application-services/components/support/nimbus-fml
+path:third_party/application-services/components/support/tracing
+path:third_party/application-services/components/viaduct
+path:third_party/rust/autocfg
+path:third_party/rust/icu_collections
+path:third_party/rust/icu_normalizer
+path:third_party/rust/icu_normalizer_data
+path:third_party/rust/icu_properties
+path:third_party/rust/icu_properties_data
+path:third_party/rust/utf8_iter
 
 # Moz.build files are read in filesystem mode
 glob:**/moz.build
@@ -81,6 +97,8 @@ path:config/milestone.txt
 path:mobile/android/mach_commands.py
 path:gradle/
 path:mobile/android/config/
+path:mobile/android/gradle/plugins/nimbus-gradle-plugin/src/
+path:third_party/application-services/.buildconfig-android.yml
 glob:**/*.gradle
 glob:**/*.gradle.kts
 glob:**/gradle.properties
@@ -129,6 +147,7 @@ path:testing/webdriver
 
 # for firefox-android
 path:mobile/android/android-components/.buildconfig.yml
+glob:mobile/android/android-components/**/robolectric.properties
 path:mobile/android/focus-android/.buildconfig.yml
 path:mobile/android/fenix/.buildconfig.yml
 path:mobile/android/android-components/gradle/wrapper/gradle-wrapper.properties
@@ -137,3 +156,6 @@ path:mobile/android/fenix/gradle/wrapper/gradle-wrapper.properties
 path:mobile/android/android-components/plugins/dependencies/src/main/java/DependenciesPlugin.kt
 path:mobile/android/android-components/plugins/dependencies/src/main/java/ApplicationServices.kt
 path:mobile/android/version.txt
+
+# for the in-tree app-services gradle dependencies toolchain task
+path:third_party/application-services/.buildconfig-android.yml

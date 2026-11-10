@@ -11,14 +11,15 @@ import {
 import { MAX_TABS_FOR_RECENT_BROWSING } from "./helpers.mjs";
 import { searchTabList } from "./search-helpers.mjs";
 import { ViewPage } from "./viewpage.mjs";
-// eslint-disable-next-line import/no-unassigned-import
+// eslint-disable-next-line import-x/no-unassigned-import
 import "chrome://browser/content/firefoxview/card-container.mjs";
-// eslint-disable-next-line import/no-unassigned-import
+// eslint-disable-next-line import-x/no-unassigned-import
 import "chrome://browser/content/firefoxview/fxview-tab-list.mjs";
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
-  SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
+  SessionStore:
+    "moz-src:///browser/components/sessionstore/SessionStore.sys.mjs",
   AppConstants: "resource://gre/modules/AppConstants.sys.mjs",
 });
 
@@ -164,8 +165,9 @@ class RecentlyClosedTabsInView extends ViewPage {
   }
 
   updateRecentlyClosedTabs() {
-    let recentlyClosedTabsData =
-      lazy.SessionStore.getClosedTabData(getWindow());
+    let recentlyClosedTabsData = lazy.SessionStore.getClosedTabData({
+      sourceWindow: getWindow(),
+    });
     if (Services.prefs.getBoolPref(INCLUDE_CLOSED_TABS_FROM_CLOSED_WINDOWS)) {
       recentlyClosedTabsData.push(
         ...lazy.SessionStore.getClosedTabDataFromClosedWindows()

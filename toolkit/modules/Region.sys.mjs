@@ -7,7 +7,7 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
-  LocationHelper: "resource://gre/modules/LocationHelper.sys.mjs",
+  LocationHelper: "moz-src:///dom/base/LocationHelper.sys.mjs",
   RemoteSettings: "resource://services-settings/remote-settings.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
 });
@@ -83,7 +83,7 @@ XPCOMUtils.defineLazyServiceGetter(
 );
 
 const log = console.createInstance({
-  prefix: "Region.sys.mjs",
+  logModule: "Region.sys.mjs",
   maxLogLevel: lazy.loggingEnabled ? "All" : "Warn",
 });
 

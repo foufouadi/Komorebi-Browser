@@ -2,13 +2,23 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { SessionStore } from "resource:///modules/sessionstore/SessionStore.sys.mjs";
+import { SessionStore } from "moz-src:///browser/components/sessionstore/SessionStore.sys.mjs";
+
+import {
+  isNewPageUrl,
+  sanitizeUntrustedContent,
+} from "moz-src:///browser/components/aiwindow/models/ChatUtils.sys.mjs";
+import { isAllowedURLProtocol } from "moz-src:///browser/components/aiwindow/models/SecurityProperties.sys.mjs";
+
+/**
+ * @import { TabGroupColor } from "chrome://browser/content/tabbrowser/tabgroup.mjs"
+ */
 
 const lazy = {};
 
 ChromeUtils.defineLazyGetter(lazy, "console", () =>
   console.createInstance({
-    prefix: "TabManagementService",
+    logModule: "TabManagementService",
   })
 );
 
@@ -84,6 +94,18 @@ export class TabManagementService {
    * Counter for generating unique operation IDs.
    */
   #operationCounter = 0;
+
+  /**
+   * Keeps track of where tabs were before they were moved, so we can
+   * restore their properties and undo actions.
+   *
+   * @type {WeakMap<Tab, {
+   *   groupId: string,
+   *   pinned: boolean,
+   *   group: Pick<TabGroupInfo, "id" | "label" | "color"> | null
+   * }>}
+   */
+  #tabOrigins = new WeakMap();
 
   /**
    * Restores tabs closed by a specific operation.
@@ -301,6 +323,15 @@ export class TabManagementService {
     }
 
     const groupColor = color || this.#getNextUnusedColor(window);
+    const origins = validTabs.map(tab => ({
+      tab,
+      pinned: tab.pinned,
+      group: tab.group && {
+        id: tab.group.id,
+        label: tab.group.label,
+        color: tab.group.color,
+      },
+    }));
 
     try {
       const group = window.gBrowser.addTabGroup(validTabs, {
@@ -317,6 +348,10 @@ export class TabManagementService {
           failedTabs,
           error: "Failed to create tab group",
         };
+      }
+
+      for (const { tab, ...tabOrigin } of origins) {
+        this.#tabOrigins.set(tab, { groupId: group.id, ...tabOrigin });
       }
 
       return {
@@ -471,9 +506,9 @@ export class TabManagementService {
         excludeTabs: claimedTabs,
       });
 
-      // Pinned/already-grouped tabs would be rejected later by
-      // createTabGroup's own validation, so a match here can't be treated
-      // as merged - open a fresh tab instead, same as no match at all.
+      // Pinned/already-grouped tabs are left where they are, so a match here
+      // can't be treated as merged - open a fresh tab instead, same as no
+      // match at all.
       if (existingTab && !existingTab.pinned && !existingTab.group) {
         claimedTabs.add(existingTab);
         resolvedTabs.push(existingTab);
@@ -544,6 +579,7 @@ export class TabManagementService {
       // Ungroup each tab individually (removes them from the group but doesn't close them)
       for (const tab of tabsInGroup) {
         window.gBrowser.ungroupTab(tab);
+        this.#restoreTabOrigin(tab, groupId, window);
       }
 
       return {
@@ -558,6 +594,137 @@ export class TabManagementService {
         error: error.message || "Failed to ungroup tabs",
       };
     }
+  }
+
+  /**
+   * Restores original tab properties and location before an action.
+   *
+   * @param {Tab} tab - Tab just ungrouped from groupId
+   * @param {string} groupId - ID of the group createTabGroup created
+   * @param {Window} window - Browser window containing the tab
+   * @private
+   */
+  #restoreTabOrigin(tab, groupId, window) {
+    const origin = this.#tabOrigins.get(tab);
+    if (origin?.groupId !== groupId) {
+      return;
+    }
+    this.#tabOrigins.delete(tab);
+
+    if (origin.pinned) {
+      window.gBrowser.pinTab(tab);
+    } else if (origin.group) {
+      const prevGroup = window.gBrowser.tabGroups.find(
+        group => group.id === origin.group.id
+      );
+      if (prevGroup) {
+        window.gBrowser.moveTabToExistingGroup(tab, prevGroup);
+      } else {
+        window.gBrowser.addTabGroup([tab], origin.group);
+      }
+    }
+  }
+
+  /**
+   * @typedef {object} TabGroupInfo
+   * @property {string} id - ID of the tab group
+   * @property {string} label - Label of the tab group
+   * @property {TabGroupColor} color - Color code of the tab group
+   * @property {number} tabCount - Number of visible tabs
+   * @property {Array<{url: string, title: string, lastAccessed: number}>} tabs
+   *   The visible tabs, with sanitized titles
+   */
+
+  /**
+   * Returns the open tab groups in a window as read-only metadata.
+   *
+   * Grouped tabs are filtered through the same rules as getTabList(), so
+   * internal (about:, chrome:, ...) and new-page URLs and hidden tabs are never
+   * exposed and tab titles are sanitized as untrusted content. Groups left with
+   * no visible tabs after filtering are omitted, so every returned group has at
+   * least one tab and consumers never need to skip empty groups themselves.
+   *
+   * @param {object} options
+   * @param {Window} options.window - Browser window to read tab groups from
+   * @returns {TabGroupInfo[]} Open tab groups with at least one visible tab,
+   *   or an empty array when the window is invalid
+   */
+  getTabGroups({ window }) {
+    if (!window?.gBrowser) {
+      lazy.console.warn("Invalid browser window provided to getTabGroups");
+      return [];
+    }
+
+    return window.gBrowser.tabGroups
+      .map(group => this.#getTabGroupInfo(group))
+      .filter(group => group.tabCount);
+  }
+
+  /**
+   * Returns a single open tab group by ID, in the same shape as
+   * getTabGroups(). Returns null when no group with that ID is open, or when
+   * the group has no visible tabs after filtering, so a non-null result always
+   * has at least one tab (matching getTabGroups()).
+   *
+   * @param {object} options
+   * @param {string} options.groupId - ID of the tab group to read
+   * @param {Window} options.window - Browser window containing the tab group
+   * @returns {?TabGroupInfo} The matching group, or null when it does not
+   *   exist or has no visible tabs
+   */
+  getTabGroupById({ groupId, window }) {
+    if (!groupId || !window?.gBrowser) {
+      lazy.console.warn("Invalid parameters provided to getTabGroupById");
+      return null;
+    }
+
+    const group = window.gBrowser.tabGroups.find(g => g.id === groupId);
+
+    if (!group) {
+      return null;
+    }
+
+    const groupInfo = this.#getTabGroupInfo(group);
+
+    return groupInfo.tabCount ? groupInfo : null;
+  }
+
+  /**
+   * Builds the read-only shape for a single tab group, filtering its tabs
+   * through the same rules getTabList() uses so internal or untrusted URLs
+   * are never exposed and titles are sanitized.
+   *
+   * @param {MozTabbrowserTabGroup} group - Browser tab group
+   * @returns {TabGroupInfo} Read-only group metadata
+   * @private
+   */
+  #getTabGroupInfo(group) {
+    const tabs = [];
+
+    for (const tab of group.tabs) {
+      const url = tab.linkedBrowser?.currentURI?.spec;
+
+      if (
+        !tab.hidden &&
+        !tab.closing &&
+        isAllowedURLProtocol(url) &&
+        !isNewPageUrl(url)
+      ) {
+        tabs.push({
+          url,
+          title: sanitizeUntrustedContent(tab.label),
+          lastAccessed: tab.lastAccessed,
+        });
+      }
+    }
+
+    return {
+      id: group.id,
+      label: group.label,
+      color: group.color,
+      tabCount: tabs.length,
+      tabs,
+    };
   }
 
   /**
@@ -589,6 +756,24 @@ export class TabManagementService {
   }
 
   /**
+   * Why a tab cannot go into a tab group in the given window.
+   *
+   * @param {Tab} tab - Tab to check
+   * @param {Window} window - Window the group would be created in
+   * @returns {?string} The reason, or null when the tab can be grouped
+   */
+  getGroupingRejection(tab, window) {
+    // Tabs in a group all belong to one window
+    if (!tab?.linkedBrowser || tab.documentGlobal !== window) {
+      return "invalid-tab";
+    }
+    if (tab.closing) {
+      return "tab-closing";
+    }
+    return null;
+  }
+
+  /**
    * Validates tabs for grouping and filters out invalid ones.
    *
    * @param {Array<Tab>} tabs - Tabs to validate
@@ -601,44 +786,11 @@ export class TabManagementService {
     const failedTabs = [];
 
     tabs.forEach(tab => {
-      // Check if tab belongs to the window
-      const tabInWindow = tab?.linkedBrowser && tab.documentGlobal === window;
-
-      if (!tabInWindow) {
-        failedTabs.push({
-          tab,
-          reason: "invalid-tab",
-        });
+      const reason = this.getGroupingRejection(tab, window);
+      if (reason) {
+        failedTabs.push({ tab, reason });
         return;
       }
-
-      // Pinned tabs cannot be grouped
-      if (tab.pinned) {
-        failedTabs.push({
-          tab,
-          reason: "pinned-tab",
-        });
-        return;
-      }
-
-      // Tab already in a group
-      if (tab.group) {
-        failedTabs.push({
-          tab,
-          reason: "already-grouped",
-        });
-        return;
-      }
-
-      // Tab is closing
-      if (tab.closing) {
-        failedTabs.push({
-          tab,
-          reason: "tab-closing",
-        });
-        return;
-      }
-
       validTabs.push(tab);
     });
 

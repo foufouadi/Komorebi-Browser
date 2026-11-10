@@ -298,6 +298,7 @@ class nsMenuPopupFrame final : public nsBlockFrame, public nsIWidgetListener {
   bool IsNativeMenu() const { return mIsNativeMenu; }
   bool CanSkipLayout() const;
   bool IsMouseTransparent() const;
+  mozilla::widget::TransparencyMode WidgetTransparencyMode() const;
 
   // Return true if the popup is for a menulist.
   bool IsMenuList() const;
@@ -456,6 +457,8 @@ class nsMenuPopupFrame final : public nsBlockFrame, public nsIWidgetListener {
 
   void WillDispatchPopupPositioned() { mPendingPositionedEvent = false; }
 
+  static void FlipAnchorForRTL(int8_t& aPopupAnchor, int8_t& aPopupAlignment);
+
  protected:
   void InitPositionFromAnchorAlign(const nsAString& aAnchor,
                                    const nsAString& aAlign);
@@ -540,11 +543,6 @@ class nsMenuPopupFrame final : public nsBlockFrame, public nsIWidgetListener {
   bool ShouldFollowAnchor() const;
 
   bool ShouldFollowAnchor(nsRect& aRect);
-
-  // Returns parent menu widget for submenus that are in the same
-  // frame hierarchy, it's needed for Linux/Wayland which demands
-  // strict popup windows hierarchy.
-  nsIWidget* GetParentMenuWidget();
 
   // Returns the effective margin for this popup. This is the CSS margin plus
   // the context-menu shift, if needed.

@@ -95,10 +95,10 @@ SmoothScrollAnimation::SmoothScrollAnimation(ScrollAnimationKind aKind,
       smallestVisibleIncrement = CSSPixel::ToAppUnits(
           ParentLayerCoord(1) / mApzc.GetFrameMetrics().GetZoom());
     }
-    mAnimationPhysics = MakeUnique<ScrollAnimationMSDPhysics>(
+    mAnimationPhysics = std::make_unique<ScrollAnimationMSDPhysics>(
         mKind, mFinalDestination, smallestVisibleIncrement);
   } else {
-    mAnimationPhysics = MakeUnique<ScrollAnimationBezierPhysics>(
+    mAnimationPhysics = std::make_unique<ScrollAnimationBezierPhysics>(
         mFinalDestination,
         apz::ComputeBezierAnimationSettingsForOrigin(aOrigin));
   }
@@ -189,7 +189,7 @@ CSSPoint SmoothScrollAnimation::GetViewportOffset(
 bool SmoothScrollAnimation::DoSample(FrameMetrics& aFrameMetrics,
                                      const TimeDuration& aDelta) {
   TimeStamp now = mApzc.GetFrameTime().Time();
-  CSSToParentLayerScale zoom(aFrameMetrics.GetZoom());
+  const CSSToParentLayerScale& zoom = aFrameMetrics.GetZoom();
   if (zoom == CSSToParentLayerScale(0)) {
     return false;
   }

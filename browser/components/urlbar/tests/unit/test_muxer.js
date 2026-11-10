@@ -68,7 +68,7 @@ add_task(async function test_muxer() {
 
   let provider = registerBasicTestProvider(matches);
   let context = createContext(undefined, { providers: [provider.name] });
-  let controller = UrlbarTestUtils.newMockController();
+  let controller = UrlbarTestUtils.mockChildController();
   /**
    * A test muxer.
    */
@@ -94,7 +94,7 @@ add_task(async function test_muxer() {
   context.muxer = "TestMuxer";
 
   info("Check results, the order should be: bookmark, history, tab");
-  await providersManager.startQuery(context, controller);
+  await providersManager.startQuery(context, controller.parentController);
   Assert.deepEqual(context.results, [matches[1], matches[2], matches[0]]);
 
   // Sanity check, should not throw.
@@ -126,12 +126,11 @@ add_task(async function test_preselectedHeuristic_singleProvider() {
   let context = createContext(undefined, {
     providers: [provider.name],
   });
-  let controller = UrlbarTestUtils.newMockController();
 
   info("Check results, the order should be: b (heuristic), a, c");
   await ProvidersManager.getInstanceForSap("urlbar").startQuery(
     context,
-    controller
+    UrlbarTestUtils.mockChildController().parentController
   );
   Assert.deepEqual(context.results, [matches[1], matches[0], matches[2]]);
 });
@@ -180,12 +179,11 @@ add_task(async function test_preselectedHeuristic_multiProviders() {
   let context = createContext(undefined, {
     providers: [provider1.name, provider2.name],
   });
-  let controller = UrlbarTestUtils.newMockController();
 
   info("Check results, the order should be: e (heuristic), a, b, c, d, f");
   await ProvidersManager.getInstanceForSap("urlbar").startQuery(
     context,
-    controller
+    UrlbarTestUtils.mockChildController().parentController
   );
   Assert.deepEqual(context.results, [
     matches2[1],
@@ -251,12 +249,11 @@ add_task(async function test_suggestions() {
   let context = createContext(undefined, {
     providers: [provider.name],
   });
-  let controller = UrlbarTestUtils.newMockController();
 
   info("Check results, the order should be: mozzarella, moz, a, b, @moz, c");
   await ProvidersManager.getInstanceForSap("urlbar").startQuery(
     context,
-    controller
+    UrlbarTestUtils.mockChildController().parentController
   );
   Assert.deepEqual(context.results, [
     matches[2],
@@ -307,10 +304,10 @@ add_task(async function test_deduplicate_for_unitConversion() {
   const context = createContext(undefined, {
     providers: [searchProvider.name, unitConversion.name],
   });
-  const controller = UrlbarTestUtils.newMockController();
+  const controller = UrlbarTestUtils.mockChildController();
   await ProvidersManager.getInstanceForSap("urlbar").startQuery(
     context,
-    controller
+    controller.parentController
   );
   Assert.deepEqual(context.results, [unitConversionSuggestion]);
 });
@@ -607,10 +604,9 @@ async function doBadHeuristicGroupsTest(resultGroups, expectedResults) {
 
   let provider = registerBasicTestProvider(BAD_HEURISTIC_RESULTS);
   let context = createContext("foo", { providers: [provider.name] });
-  let controller = UrlbarTestUtils.newMockController();
   await ProvidersManager.getInstanceForSap("urlbar").startQuery(
     context,
-    controller
+    UrlbarTestUtils.mockChildController().parentController
   );
   Assert.deepEqual(context.results, expectedResults);
 
@@ -826,10 +822,9 @@ async function checkSemanticDedupe({
       ? [semanticProvider.name, nonSemanticProvider.name]
       : [nonSemanticProvider.name, semanticProvider.name],
   });
-  let controller = UrlbarTestUtils.newMockController();
   await ProvidersManager.getInstanceForSap("urlbar").startQuery(
     context,
-    controller
+    UrlbarTestUtils.mockChildController().parentController
   );
 
   Assert.deepEqual(
@@ -922,7 +917,7 @@ add_task(async function test_semantic_only_survives() {
   });
   await ProvidersManager.getInstanceForSap("urlbar").startQuery(
     context,
-    UrlbarTestUtils.newMockController()
+    UrlbarTestUtils.mockChildController().parentController
   );
 
   Assert.deepEqual(
@@ -968,7 +963,7 @@ add_task(async function test_dedupe_two_semantic_prefixes() {
   });
   await ProvidersManager.getInstanceForSap("urlbar").startQuery(
     context,
-    UrlbarTestUtils.newMockController()
+    UrlbarTestUtils.mockChildController().parentController
   );
 
   Assert.deepEqual(
@@ -1036,7 +1031,7 @@ add_task(async function test_semantic_history_separate_group_ratio() {
   });
   await providersManager.startQuery(
     limitedResultsContext,
-    UrlbarTestUtils.newMockController()
+    UrlbarTestUtils.mockChildController().parentController
   );
   Assert.equal(limitedResultsContext.results.length, 3, "Fills the budget");
   Assert.equal(
@@ -1052,7 +1047,7 @@ add_task(async function test_semantic_history_separate_group_ratio() {
   });
   await providersManager.startQuery(
     historyViewContext,
-    UrlbarTestUtils.newMockController()
+    UrlbarTestUtils.mockChildController().parentController
   );
   Assert.equal(historyViewContext.results.length, 10, "Fills the budget");
   Assert.equal(
@@ -1080,7 +1075,7 @@ add_task(async function test_semantic_history_separate_group_ratio() {
   });
   await providersManager.startQuery(
     sparseContext,
-    UrlbarTestUtils.newMockController()
+    UrlbarTestUtils.mockChildController().parentController
   );
   Assert.equal(
     sparseContext.results.filter(r => !isSemantic(r)).length,
@@ -1102,4 +1097,100 @@ add_task(async function test_semantic_history_separate_group_ratio() {
   providersManager.unregisterProvider(fewExactProvider);
   providersManager.unregisterProvider(semanticProvider);
   UrlbarPrefs.clear("suggest.semanticHistory.separateGroup");
+});
+
+/**
+ * Does a zero prefix query with history results and, optionally, 3 temporal
+ * search suggestions. The default of 15 history results is more than any max
+ * result count the tests expect, so the number of results is limited by
+ * `maxResultsActual` and not by the number of available results. Any number of
+ * temporal suggestions makes the muxer use `temporal.zeroPrefixMaxRichResults`.
+ * 3 matches the temporal row count of the 7:3:3 zero prefix layout.
+ *
+ * @param {object} options
+ * @param {boolean} options.temporal
+ *   Whether temporal search suggestions are included.
+ * @param {number} [options.historyCount]
+ *   The number of history results.
+ * @returns {Promise<UrlbarQueryContext>}
+ */
+async function doMaxResultsActualQuery({ temporal, historyCount = 15 }) {
+  let results = Array.from(
+    { length: historyCount },
+    (_, i) =>
+      new UrlbarResult({
+        type: UrlbarShared.RESULT_TYPE.URL,
+        source: UrlbarShared.RESULT_SOURCE.HISTORY,
+        payload: { url: `https://example.com/${i}`, title: "Page" },
+      })
+  );
+  if (temporal) {
+    for (let query of ["q1", "q2", "q3"]) {
+      results.push(
+        new UrlbarResult({
+          type: UrlbarShared.RESULT_TYPE.SEARCH,
+          source: UrlbarShared.RESULT_SOURCE.SEARCH,
+          group: UrlbarShared.RESULT_GROUP.TEMPORAL_SUGGESTION,
+          payload: {
+            engine: "Test",
+            suggestion: query,
+            lowerCaseSuggestion: query,
+            title: query,
+          },
+        })
+      );
+    }
+  }
+
+  let provider = registerBasicTestProvider(results);
+  let context = createContext("", { providers: [provider.name] });
+  let providersManager = ProvidersManager.getInstanceForSap("urlbar");
+  await providersManager.startQuery(
+    context,
+    UrlbarTestUtils.mockChildController().parentController
+  );
+  providersManager.unregisterProvider(provider);
+  return context;
+}
+
+// Without temporal suggestions, maxResultsActual is maxResults.
+add_task(async function test_maxResultsActual_noTemporalSuggestions() {
+  let context = await doMaxResultsActualQuery({ temporal: false });
+  Assert.equal(context.maxResultsActual, 10);
+  Assert.equal(context.results.length, 10);
+});
+
+// With temporal suggestions, temporal.zeroPrefixMaxRichResults is used.
+add_task(async function test_maxResultsActual_temporalSuggestions() {
+  let context = await doMaxResultsActualQuery({ temporal: true });
+  Assert.equal(context.maxResultsActual, 13);
+  Assert.equal(context.results.length, 13);
+});
+
+// maxResultsActual follows a modified temporal.zeroPrefixMaxRichResults.
+add_task(async function test_maxResultsActual_zeroPrefixMaxRichResults() {
+  UrlbarPrefs.set("temporal.zeroPrefixMaxRichResults", 8);
+  let context = await doMaxResultsActualQuery({ temporal: true });
+  Assert.equal(context.maxResultsActual, 8);
+  Assert.equal(context.results.length, 8);
+  UrlbarPrefs.clear("temporal.zeroPrefixMaxRichResults");
+});
+
+// A user-set maxRichResults takes precedence over temporal suggestions.
+add_task(async function test_maxResultsActual_userMaxRichResults() {
+  UrlbarPrefs.set("maxRichResults", 5);
+  let context = await doMaxResultsActualQuery({ temporal: true });
+  Assert.equal(context.maxResultsActual, 5);
+  Assert.equal(context.results.length, 5);
+  UrlbarPrefs.clear("maxRichResults");
+});
+
+// maxResultsActual is a max, so there can be fewer results than it.
+add_task(async function test_maxResultsActual_fewerResults() {
+  let context = await doMaxResultsActualQuery({
+    temporal: true,
+    historyCount: 5,
+  });
+  Assert.equal(context.maxResultsActual, 13);
+  Assert.equal(context.results.length, 8);
 });

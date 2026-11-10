@@ -52,7 +52,6 @@ add_setup(async function () {
 
   await SpecialPowers.pushPrefEnv({
     set: [
-      ["test.wait300msAfterTabSwitch", true],
       ["privacy.trackingprotection.socialtracking.enabled", true],
       [
         "urlclassifier.features.socialtracking.blacklistHosts",
@@ -60,11 +59,13 @@ add_setup(async function () {
       ],
     ],
   });
+  await UrlClassifierTestUtils.addTestHostsFromPrefs();
 
   info("Setting MockFilePicker.");
   mockTransferRegisterer.register();
 
-  registerCleanupFunction(function () {
+  registerCleanupFunction(async function () {
+    await UrlClassifierTestUtils.cleanupTestTrackers();
     mockTransferRegisterer.unregister();
     MockFilePicker.cleanup();
     tempDir.remove(true);

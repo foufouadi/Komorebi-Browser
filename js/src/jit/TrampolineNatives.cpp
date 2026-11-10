@@ -45,7 +45,7 @@ uint32_t JitRuntime::generateArraySortTrampoline(MacroAssembler& masm,
                                                  ArraySortKind kind) {
   AutoCreatedBy acb(masm, "JitRuntime::generateArraySortTrampoline");
 
-  const uint32_t offset = startTrampolineCode(masm);
+  const uint32_t offset = startTrampolineCode(masm, TargetKind::Call);
 
   // The stack for the trampoline frame will look like this:
   //
@@ -92,9 +92,10 @@ uint32_t JitRuntime::generateArraySortTrampoline(MacroAssembler& masm,
       -int32_t(FrameSize) + ArraySortData::offsetOfComparatorArgs();
 
 #ifdef JS_USE_LINK_REGISTER
-  masm.pushReturnAddress();
-#endif
+  masm.pushRegs(LinkRegister, FramePointer);
+#else
   masm.push(FramePointer);
+#endif
   masm.moveStackPtrTo(FramePointer);
 
   AllocatableGeneralRegisterSet regs(GeneralRegisterSet::All());
@@ -339,8 +340,7 @@ bool jit::CallTrampolineNativeJitCode(JSContext* cx, TrampolineNative native,
   // Release temporary buffer used for OSR into Ion.
   cx->runtime()->jitRuntime()->freeIonOsrTempData();
 
-  if (result.isMagic()) {
-    MOZ_ASSERT(result.isMagic(JS_ION_ERROR));
+  if (result.isMagic(JS_ION_ERROR)) {
     return false;
   }
 

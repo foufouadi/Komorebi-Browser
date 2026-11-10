@@ -33,6 +33,15 @@ watchman watch .
 watchman -j < tools/tryselect/watchman.json
 ```
 
+:::{note}
+PowerShell on Windows does not support the `<` redirection operator. From
+PowerShell or `cmd`, pipe the file in instead:
+
+```shell
+more tools\tryselect\watchman.json | watchman -j
+```
+:::
+
 You should see output like:
 
 ```json

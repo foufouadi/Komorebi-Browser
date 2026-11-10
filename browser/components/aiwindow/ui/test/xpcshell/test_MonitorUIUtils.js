@@ -11,7 +11,21 @@ const { MonitorAgent } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/models/agents/MonitorAgent.sys.mjs"
 );
 
+const { PlacesUtils } = ChromeUtils.importESModule(
+  "resource://gre/modules/PlacesUtils.sys.mjs"
+);
+
+const { PlacesTestUtils } = ChromeUtils.importESModule(
+  "resource://testing-common/PlacesTestUtils.sys.mjs"
+);
+
+const { Region } = ChromeUtils.importESModule(
+  "resource://gre/modules/Region.sys.mjs"
+);
+
 const originalDelete = MonitorAgent.deleteMonitor;
+
+const SUPPORTED_REGIONS_PREF = "browser.smartwindow.agent.supportedRegions";
 
 /**
  * Test that deleteMonitorWithConfirmation returns correct values when confirmation is skipped
@@ -138,4 +152,198 @@ add_task(async function test_deleteMonitorWithConfirmation_return_shape() {
   Assert.ok("error" in result, "Error result should have error property");
 
   MonitorAgent.deleteMonitor = originalDelete;
+});
+
+/**
+ * resolveWatchUrlTitles returns page titles from Places.
+ */
+add_task(async function test_resolveWatchUrlTitles() {
+  do_get_profile();
+
+  const withTitle = "https://example.com/product";
+  const noTitle = "https://example.org/untitled";
+  await PlacesTestUtils.addVisits([{ uri: withTitle, title: "Great Product" }]);
+
+  try {
+    const titles = await MonitorUIUtils.resolveWatchUrlTitles([
+      withTitle,
+      noTitle,
+      "not a url",
+    ]);
+
+    Assert.equal(
+      titles[withTitle],
+      "Great Product",
+      "Resolves a page title from Places"
+    );
+    Assert.ok(!(noTitle in titles), "Omits URLs Places has no title for");
+    Assert.ok(!("not a url" in titles), "Ignores malformed URLs");
+  } finally {
+    await PlacesUtils.history.clear();
+  }
+});
+
+/**
+ * resolveWatchUrlTitles tolerates missing input.
+ */
+add_task(async function test_resolveWatchUrlTitles_empty() {
+  Assert.deepEqual(
+    await MonitorUIUtils.resolveWatchUrlTitles(),
+    {},
+    "Returns an empty map when given no URLs"
+  );
+});
+
+add_task(function test_formatMonitorForModel() {
+  const monitor = {
+    title: "Watches",
+    monitorPrompt: "new posts",
+    watchUrls: ["https://example.com/watches"],
+    enabled: true,
+    schedule: { type: "weekly", weekday: 1, hour: 8, minute: 30 },
+  };
+  Assert.deepEqual(
+    MonitorUIUtils.formatMonitorForModel(monitor),
+    {
+      status: "watching",
+      name: "Watches",
+      watchUrls: ["https://example.com/watches"],
+      condition: "new posts",
+      schedule: "weekly on Monday at 08:30",
+    },
+    "A watching weekly monitor is summarized in English"
+  );
+
+  const schedules = [
+    [
+      { type: "weekly", weekday: 0, hour: 23, minute: 5 },
+      "weekly on Sunday at 23:05",
+    ],
+    [
+      { type: "weekly", weekday: 6, hour: 0, minute: 0 },
+      "weekly on Saturday at 00:00",
+    ],
+    [{ type: "daily", hour: 9, minute: 0 }, "daily at 09:00"],
+    [{ type: "interval", hours: 1 }, "every hour"],
+    [{ type: "interval", hours: 6 }, "every 6 hours"],
+  ];
+  for (const [schedule, expected] of schedules) {
+    Assert.equal(
+      MonitorUIUtils.formatMonitorForModel({ ...monitor, schedule }).schedule,
+      expected,
+      `The ${schedule.type} schedule is described as "${expected}"`
+    );
+  }
+
+  Assert.equal(
+    MonitorUIUtils.formatMonitorForModel({ ...monitor, enabled: false }).status,
+    "paused",
+    "A disabled monitor is paused"
+  );
+  Assert.equal(
+    MonitorUIUtils.formatMonitorForModel({
+      ...monitor,
+      enabled: false,
+      expiry: { expiredAt: "2026-10-01T00:00:00.000Z", reason: "inactive" },
+    }).status,
+    "expired",
+    "An expired monitor is reported as expired rather than paused"
+  );
+});
+
+add_task(function test_getScheduleL10n() {
+  Assert.equal(
+    MonitorUIUtils.getScheduleL10n({
+      frequency: "weekly",
+      time: "08:30",
+      weekday: "1",
+    }).id,
+    "ai-tasks-alert-schedule-weekly-monday",
+    "A weekly schedule uses its weekday's string"
+  );
+  Assert.equal(
+    MonitorUIUtils.getScheduleL10n({ frequency: "daily", time: "08:30" }).id,
+    "ai-tasks-alert-schedule-daily-at",
+    "A daily schedule uses the daily string"
+  );
+});
+
+/**
+ * Makes locales available so a task can switch the app locale through
+ * Services.locale.requestedLocales.
+ *
+ * @param {string[]} locales
+ * @returns {Function} Restores the original available and requested locales.
+ */
+function useAppLocales(locales) {
+  const { availableLocales, requestedLocales } = Services.locale;
+  Services.locale.availableLocales = locales;
+  return () => {
+    Services.locale.availableLocales = availableLocales;
+    Services.locale.requestedLocales = requestedLocales;
+  };
+}
+
+/**
+ * The gate takes a home region and an app locale, so a supported region on its
+ * own is not enough and neither is a supported locale.
+ */
+add_task(function test_isMonitorRegionSupported_pairsRegionWithLocale() {
+  const originalRegion = Region.home;
+  const restoreLocales = useAppLocales(["en-US", "fr"]);
+  // A list made up for this test, not the markets the feature ships to.
+  Services.prefs.setCharPref(
+    SUPPORTED_REGIONS_PREF,
+    JSON.stringify([["US", ["en-*"]]])
+  );
+  const cases = [
+    ["US", "en-US", true],
+    ["US", "fr", false],
+  ];
+
+  try {
+    for (const [region, locale, expected] of cases) {
+      Region._setHomeRegion(region, false);
+      Services.locale.requestedLocales = [locale];
+      Assert.equal(
+        MonitorUIUtils.isMonitorRegionSupported(),
+        expected,
+        `${region} / ${locale} is ${expected ? "" : "not "}supported`
+      );
+    }
+  } finally {
+    Region._setHomeRegion(originalRegion, false);
+    restoreLocales();
+    Services.prefs.clearUserPref(SUPPORTED_REGIONS_PREF);
+  }
+});
+
+/**
+ * An empty pref is how the feature gets switched off everywhere, while an
+ * unparseable one falls back to the built-in markets rather than taking the
+ * feature away from everybody.
+ */
+add_task(function test_isMonitorRegionSupported_emptyAndMalformedPref() {
+  const originalRegion = Region.home;
+  const restoreLocales = useAppLocales(["en-US"]);
+  Region._setHomeRegion("US", false);
+  Services.locale.requestedLocales = ["en-US"];
+
+  try {
+    Services.prefs.setCharPref(SUPPORTED_REGIONS_PREF, "");
+    Assert.ok(
+      !MonitorUIUtils.isMonitorRegionSupported(),
+      "An empty pref switches the feature off"
+    );
+
+    Services.prefs.setCharPref(SUPPORTED_REGIONS_PREF, "US,CA");
+    Assert.ok(
+      MonitorUIUtils.isMonitorRegionSupported(),
+      "An unparseable pref falls back to the built-in markets"
+    );
+  } finally {
+    Region._setHomeRegion(originalRegion, false);
+    restoreLocales();
+    Services.prefs.clearUserPref(SUPPORTED_REGIONS_PREF);
+  }
 });

@@ -26,37 +26,14 @@ struct ScaleFactor {
   float scale;
 
   constexpr ScaleFactor() : scale(1.0) {}
-  constexpr ScaleFactor(const ScaleFactor<Src, Dst>& aCopy)
-      : scale(aCopy.scale) {}
+  constexpr ScaleFactor(const ScaleFactor<Src, Dst>& aCopy) = default;
   explicit constexpr ScaleFactor(float aScale) : scale(aScale) {}
 
   ScaleFactor<Dst, Src> Inverse() { return ScaleFactor<Dst, Src>(1 / scale); }
 
   ScaleFactor<Src, Dst>& operator=(const ScaleFactor<Src, Dst>&) = default;
 
-  bool operator==(const ScaleFactor<Src, Dst>& aOther) const {
-    return scale == aOther.scale;
-  }
-
-  bool operator!=(const ScaleFactor<Src, Dst>& aOther) const {
-    return !(*this == aOther);
-  }
-
-  bool operator<(const ScaleFactor<Src, Dst>& aOther) const {
-    return scale < aOther.scale;
-  }
-
-  bool operator<=(const ScaleFactor<Src, Dst>& aOther) const {
-    return scale <= aOther.scale;
-  }
-
-  bool operator>(const ScaleFactor<Src, Dst>& aOther) const {
-    return scale > aOther.scale;
-  }
-
-  bool operator>=(const ScaleFactor<Src, Dst>& aOther) const {
-    return scale >= aOther.scale;
-  }
+  auto operator<=>(const ScaleFactor<Src, Dst>& aOther) const = default;
 
   template <class Other>
   ScaleFactor<Other, Dst> operator/(

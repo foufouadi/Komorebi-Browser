@@ -43,6 +43,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ElementInlines.h"
 #include "mozilla/dom/HTMLBRElement.h"
+#include "mozilla/dom/Range.h"
 #include "mozilla/dom/RangeBinding.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/StaticRange.h"
@@ -60,7 +61,6 @@
 #include "nsINode.h"
 #include "nsLiteralString.h"
 #include "nsPrintfCString.h"
-#include "nsRange.h"
 #include "nsReadableUtils.h"
 #include "nsString.h"
 #include "nsStringFwd.h"
@@ -111,22 +111,22 @@ static bool IsPendingStyleCachePreservingSubAction(
   }
 }
 
-template already_AddRefed<nsRange>
+template already_AddRefed<dom::Range>
 HTMLEditor::CreateRangeIncludingAdjuscentWhiteSpaces(
     const EditorDOMRange& aRange);
-template already_AddRefed<nsRange>
+template already_AddRefed<dom::Range>
 HTMLEditor::CreateRangeIncludingAdjuscentWhiteSpaces(
     const EditorRawDOMRange& aRange);
-template already_AddRefed<nsRange>
+template already_AddRefed<dom::Range>
 HTMLEditor::CreateRangeIncludingAdjuscentWhiteSpaces(
     const EditorDOMPoint& aStartPoint, const EditorDOMPoint& aEndPoint);
-template already_AddRefed<nsRange>
+template already_AddRefed<dom::Range>
 HTMLEditor::CreateRangeIncludingAdjuscentWhiteSpaces(
     const EditorRawDOMPoint& aStartPoint, const EditorDOMPoint& aEndPoint);
-template already_AddRefed<nsRange>
+template already_AddRefed<dom::Range>
 HTMLEditor::CreateRangeIncludingAdjuscentWhiteSpaces(
     const EditorDOMPoint& aStartPoint, const EditorRawDOMPoint& aEndPoint);
-template already_AddRefed<nsRange>
+template already_AddRefed<dom::Range>
 HTMLEditor::CreateRangeIncludingAdjuscentWhiteSpaces(
     const EditorRawDOMPoint& aStartPoint, const EditorRawDOMPoint& aEndPoint);
 
@@ -137,6 +137,16 @@ nsresult HTMLEditor::InitEditorContentAndSelection() {
   // document is editable.
   if (!EntireDocumentIsEditable()) {
     return NS_OK;
+  }
+
+  // Don't create padding BR element if the <body> is an EditContext editing
+  // host. (This can be called even if no element is focused, so we can't
+  // rely on the active EditContext here which would be null in those cases.)
+  if (Element* body = GetBodyElement()) {
+    if (body->HasFlag(ELEMENT_HAS_EDIT_CONTEXT) &&
+        !body->GetParentNode()->IsEditable()) {
+      return NS_OK;
+    }
   }
 
   nsresult rv = MaybeCreatePaddingBRElementForEmptyEditor();
@@ -252,7 +262,7 @@ void HTMLEditor::OnStartToHandleTopLevelEditSubAction(
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return;
     }
-    if (const nsRange* range = SelectionRef().GetRangeAt(0)) {
+    if (const dom::Range* range = SelectionRef().GetRangeAt(0)) {
       TopLevelEditSubActionDataRef().mSelectedRange->StoreRange(*range);
     }
   }
@@ -421,7 +431,7 @@ nsresult HTMLEditor::OnEndHandlingTopLevelEditSubActionInternal() {
             // XXX We should investigate whether this is really needed because
             //     it seems that the following code does not handle the
             //     white-spaces.
-            RefPtr<nsRange> extendedChangedRange =
+            RefPtr<dom::Range> extendedChangedRange =
                 CreateRangeIncludingAdjuscentWhiteSpaces(changedRange);
             if (extendedChangedRange) {
               MOZ_ASSERT(extendedChangedRange->IsPositioned());
@@ -450,7 +460,7 @@ nsresult HTMLEditor::OnEndHandlingTopLevelEditSubActionInternal() {
             if (MOZ_UNLIKELY(!editingHost)) {
               break;
             }
-            RefPtr<nsRange> extendedChangedRange = AutoClonedRangeArray::
+            RefPtr<dom::Range> extendedChangedRange = AutoClonedRangeArray::
                 CreateRangeWrappingStartAndEndLinesContainingBoundaries(
                     changedRange, GetTopLevelEditSubAction(),
                     isBlockLevelSubAction
@@ -701,7 +711,7 @@ Result<EditActionResult, nsresult> HTMLEditor::CanHandleHTMLEditSubAction(
     return EditActionResult::CanceledResult();
   }
 
-  const nsRange* range = SelectionRef().GetRangeAt(0);
+  const dom::Range* range = SelectionRef().GetRangeAt(0);
   nsINode* selStartNode = range->GetStartContainer();
   if (NS_WARN_IF(!selStartNode) || NS_WARN_IF(!selStartNode->IsContent())) {
     return Err(NS_ERROR_FAILURE);
@@ -789,7 +799,7 @@ nsresult HTMLEditor::EnsureCaretNotAfterInvisibleBRElement(
 
   // If we are after a padding `<br>` element for empty last line in the same
   // block, then move selection to be before it
-  const nsRange* firstRange = SelectionRef().GetRangeAt(0);
+  const dom::Range* firstRange = SelectionRef().GetRangeAt(0);
   if (NS_WARN_IF(!firstRange)) {
     return NS_ERROR_FAILURE;
   }
@@ -1076,6 +1086,36 @@ Result<EditActionResult, nsresult> HTMLEditor::HandleInsertText(
     return EditActionResult::HandledResult();
   }
 
+  const RefPtr<Element> editingHost =
+      ComputeEditingHost(LimitInBodyElement::No);
+  if (NS_WARN_IF(!editingHost)) {
+    return Err(NS_ERROR_FAILURE);
+  }
+
+  // For the compatibility with the other browsers, we shouldn't delete extant
+  // unnecessary line break at inserting text because it may be used as a marker
+  // by the web app. Especially when IME started composition, modifying the
+  // editable content which is caused by that the web app restores the
+  // unnecessary line break may lead committing the composition.
+  const Maybe<EditorLineBreak> preservingUnnecessaryLineBreak =
+      [&]() MOZ_NEVER_INLINE_DEBUG -> Maybe<EditorLineBreak> {
+    const auto selectionRangeEnd =
+        EditorBase::GetFirstSelectionEndPoint<EditorRawDOMPoint>();
+    if (!selectionRangeEnd.IsSet()) [[unlikely]] {
+      return Nothing{};
+    }
+    const WSScanResult nextThing =
+        HTMLEditUtils::ScanInclusiveNextThingWithIgnoringUnnecessaryLineBreak(
+            selectionRangeEnd,
+            // For the compatibility with the other browsers, we should delete
+            // unecessary line break if and only if it's a padding line break
+            // for empty block or it makes an empty line before a child block
+            // boundary. Therefore, we should treat a padding line break for an
+            // empty block is significant here.
+            TreatAsUnnecessaryLineBreak{}, *editingHost);
+    return nextThing.MaybeIgnoredLineBreak();
+  }();
+
   // If the selection isn't collapsed, delete it.  Don't delete existing inline
   // tags, because we're hopefully going to insert text (bug 787432).
   if (!SelectionRef().IsCollapsed() &&
@@ -1088,12 +1128,9 @@ Result<EditActionResult, nsresult> HTMLEditor::HandleInsertText(
           "nsIEditor::eNoStrip) failed");
       return Err(rv);
     }
-  }
-
-  const RefPtr<Element> editingHost =
-      ComputeEditingHost(LimitInBodyElement::No);
-  if (NS_WARN_IF(!editingHost)) {
-    return Err(NS_ERROR_FAILURE);
+    if (NS_WARN_IF(editingHost != ComputeEditingHost(LimitInBodyElement::No))) {
+      return Err(NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE);
+    }
   }
 
   nsresult rv = EnsureNoPaddingBRElementForEmptyEditor();
@@ -1178,7 +1215,8 @@ Result<EditActionResult, nsresult> HTMLEditor::HandleInsertText(
       // since empty strings are meaningful there.
       Result<InsertTextResult, nsresult> insertEmptyTextResultOrError =
           InsertTextWithTransaction(aInsertionString, pointToInsert,
-                                    InsertTextTo::ExistingTextNodeIfAvailable);
+                                    InsertTextTo::ExistingTextNodeIfAvailable,
+                                    aPurpose);
       if (MOZ_UNLIKELY(insertEmptyTextResultOrError.isErr())) {
         NS_WARNING("HTMLEditor::InsertTextWithTransaction() failed");
         return insertEmptyTextResultOrError.propagateErr();
@@ -1189,17 +1227,21 @@ Result<EditActionResult, nsresult> HTMLEditor::HandleInsertText(
       // called for IME composition. However, for the safety, let's ignore the
       // caret position explicitly.
       insertEmptyTextResult.IgnoreCaretPointSuggestion();
-      nsresult rv = EnsureNoFollowingUnnecessaryLineBreak(
-          insertEmptyTextResult.EndOfInsertedTextRef(),
-          // When user inserting text, the web app may expect that nothing
-          // extant content will be deleted. Therefore, we should preserve
-          // preformatted linefeed at least.
-          PreservePreformattedLineBreak::Yes, PaddingForEmptyBlock::Unnecessary,
-          *editingHost);
-      if (NS_FAILED(rv)) {
-        NS_WARNING(
-            "HTMLEditor::EnsureNoFollowingUnnecessaryLineBreak() failed");
-        return Err(rv);
+      // Don't delete extant unnecessary line break because it may be inserted
+      // by the web app as a private marker.
+      if (preservingUnnecessaryLineBreak.isNothing()) [[likely]] {
+        nsresult rv = EnsureNoFollowingUnnecessaryLineBreak(
+            insertEmptyTextResult.EndOfInsertedTextRef(),
+            // When user inserting text, the web app may expect that nothing
+            // extant content will be deleted. Therefore, we should preserve
+            // preformatted linefeed at least.
+            PreservePreformattedLineBreak::Yes,
+            PaddingForEmptyBlock::Unnecessary, *editingHost);
+        if (NS_FAILED(rv)) {
+          NS_WARNING(
+              "HTMLEditor::EnsureNoFollowingUnnecessaryLineBreak() failed");
+          return Err(rv);
+        }
       }
       const EditorDOMPoint& endOfInsertedText =
           insertEmptyTextResult.EndOfInsertedTextRef();
@@ -1258,7 +1300,7 @@ Result<EditActionResult, nsresult> HTMLEditor::HandleInsertText(
               compositionEndPoint.IsSet()
                   ? EditorDOMRange(pointToInsert, compositionEndPoint)
                   : EditorDOMRange(pointToInsert),
-              aPurpose, *editingHost);
+              preservingUnnecessaryLineBreak, aPurpose, *editingHost);
       if (MOZ_UNLIKELY(replaceTextResult.isErr())) {
         NS_WARNING("WhiteSpaceVisibilityKeeper::ReplaceText() failed");
         return replaceTextResult.propagateErr();
@@ -1304,7 +1346,7 @@ Result<EditActionResult, nsresult> HTMLEditor::HandleInsertText(
               newCompositionStartPoint.ToRawRangeBoundary(),
               newCompositionEndPoint.ToRawRangeBoundary());
       if (NS_FAILED(rv)) {
-        NS_WARNING("nsRange::SetStartAndEnd() failed");
+        NS_WARNING("Range::SetStartAndEnd() failed");
         return Err(rv);
       }
     } else {
@@ -1317,7 +1359,7 @@ Result<EditActionResult, nsresult> HTMLEditor::HandleInsertText(
               pointToInsert.ToRawRangeBoundary(),
               endOfInsertedText.ToRawRangeBoundary());
       if (NS_FAILED(rv)) {
-        NS_WARNING("nsRange::SetStartAndEnd() failed");
+        NS_WARNING("Range::SetStartAndEnd() failed");
         return Err(rv);
       }
     }
@@ -1382,38 +1424,39 @@ Result<EditActionResult, nsresult> HTMLEditor::HandleInsertText(
         // expects that character data change will be notified at last.
         const WSScanResult nextThing = HTMLEditUtils::
             ScanInclusiveNextThingWithIgnoringUnnecessaryLineBreak(
-                currentPoint, PaddingForEmptyBlock::Unnecessary, *editingHost);
-        if (nextThing.MaybeIgnoredLineBreak().isSome()) {
+                currentPoint,
+                TreatAsUnnecessaryLineBreak{
+                    LineBreakFor::PaddingForEmptyBlock,
+                    LineBreakFor::EmptyLineBeforeBlockBoundary},
+                *editingHost);
+        if (nextThing.MaybeIgnoredLineBreak().isSome() &&
+            // Don't delete extant unnecessary line break because it may be
+            // inserted by the web app as a private marker.
+            nextThing.MaybeIgnoredLineBreak() !=
+                preservingUnnecessaryLineBreak &&
+            !(IsPlaintextMailComposer() &&
+              nextThing.IgnoredLineBreakIsRequiredInPlaintextMailComposer())) {
           const EditorLineBreak& lineBreak =
               nextThing.MaybeIgnoredLineBreak().ref();
-          // When user inserting content, the web app may expect that nothing
-          // extant content will be deleted. Therefore, we should preserve
-          // preformatted linefeed at least. However, we should delete it if
-          // it's a padding for empty block for the compatibility with the other
-          // browsers.
-          if (lineBreak.IsHTMLBRElement() ||
-              lineBreak.IsPaddingForEmptyBlock()) {
-            const RefPtr<Element> ancestorLimiterToDeleteEmptyInlines =
-                lineBreak.ContentRef().IsInclusiveDescendantOf(
-                    currentPoint.GetContainer())
-                    ? currentPoint.GetContainerOrContainerParentElement()
-                    : editingHost.get();
-            {
-              AutoTrackDOMPoint trackCurrentPoint(RangeUpdaterRef(),
-                                                  &currentPoint);
-              Result<EditorDOMPoint, nsresult> deleteLineBreakResultOrError =
-                  DeleteLineBreakWithTransaction(
-                      lineBreak, nsIEditor::eStrip,
-                      *ancestorLimiterToDeleteEmptyInlines);
-              if (deleteLineBreakResultOrError.isErr()) [[unlikely]] {
-                NS_WARNING(
-                    "HTMLEditor::DeleteLineBreakWithTransaction() failed");
-                return deleteLineBreakResultOrError.propagateErr();
-              }
+          const RefPtr<Element> ancestorLimiterToDeleteEmptyInlines =
+              lineBreak.ContentRef().IsInclusiveDescendantOf(
+                  currentPoint.GetContainer())
+                  ? currentPoint.GetContainerOrContainerParentElement()
+                  : editingHost.get();
+          {
+            AutoTrackDOMPoint trackCurrentPoint(RangeUpdaterRef(),
+                                                &currentPoint);
+            Result<EditorDOMPoint, nsresult> deleteLineBreakResultOrError =
+                DeleteLineBreakWithTransaction(
+                    lineBreak, nsIEditor::eStrip,
+                    *ancestorLimiterToDeleteEmptyInlines);
+            if (deleteLineBreakResultOrError.isErr()) [[unlikely]] {
+              NS_WARNING("HTMLEditor::DeleteLineBreakWithTransaction() failed");
+              return deleteLineBreakResultOrError.propagateErr();
             }
-            if (NS_WARN_IF(!currentPoint.IsSetAndValidInComposedDoc())) {
-              return Err(NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE);
-            }
+          }
+          if (NS_WARN_IF(!currentPoint.IsSetAndValidInComposedDoc())) {
+            return Err(NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE);
           }
         }
       }
@@ -1426,9 +1469,9 @@ Result<EditActionResult, nsresult> HTMLEditor::HandleInsertText(
         // not assumed that inserted text is split at every linefeed.
         MOZ_ASSERT(*lineBreakType == LineBreakType::Linefeed);
         Result<InsertTextResult, nsresult> insertTextResult =
-            InsertTextWithTransaction(
-                aInsertionString, currentPoint,
-                InsertTextTo::ExistingTextNodeIfAvailable);
+            InsertTextWithTransaction(aInsertionString, currentPoint,
+                                      InsertTextTo::ExistingTextNodeIfAvailable,
+                                      aPurpose);
         if (MOZ_UNLIKELY(insertTextResult.isErr())) {
           NS_WARNING("HTMLEditor::InsertTextWithTransaction() failed");
           return insertTextResult.propagateErr();
@@ -1463,7 +1506,8 @@ Result<EditActionResult, nsresult> HTMLEditor::HandleInsertText(
                 InsertTextWithTransaction(
                     lineText, currentPoint,
                     GetInsertTextTo(inclusiveNextLinefeedOffset,
-                                    lineStartOffset));
+                                    lineStartOffset),
+                    aPurpose);
             if (MOZ_UNLIKELY(insertTextResult.isErr())) {
               NS_WARNING("HTMLEditor::InsertTextWithTransaction() failed");
               return insertTextResult.propagateErr();
@@ -1531,7 +1575,7 @@ Result<EditActionResult, nsresult> HTMLEditor::HandleInsertText(
                                                 lineStartOffset, lineLength);
             if (!lineText.Contains(u'\t')) {
               return WhiteSpaceVisibilityKeeper::InsertText(
-                  *this, lineText, currentPoint,
+                  *this, lineText, currentPoint, preservingUnnecessaryLineBreak,
                   GetInsertTextTo(inclusiveNextLinefeedOffset, lineStartOffset),
                   *editingHost);
             }
@@ -1539,6 +1583,7 @@ Result<EditActionResult, nsresult> HTMLEditor::HandleInsertText(
             formattedLineText.ReplaceSubstring(u"\t"_ns, u"    "_ns);
             return WhiteSpaceVisibilityKeeper::InsertText(
                 *this, formattedLineText, currentPoint,
+                preservingUnnecessaryLineBreak,
                 GetInsertTextTo(inclusiveNextLinefeedOffset, lineStartOffset),
                 *editingHost);
           }();
@@ -1627,19 +1672,6 @@ Result<EditActionResult, nsresult> HTMLEditor::HandleInsertText(
       if (insertPaddingLineBreakResult.inspect().HasCaretPointSuggestion()) {
         currentPoint = insertPaddingLineBreakResult.unwrap().UnwrapCaretPoint();
       }
-    } else {
-      nsresult rv = EnsureNoFollowingUnnecessaryLineBreak(
-          currentPoint,
-          // When user inserting text, the web app may expect that nothing
-          // extant content will be deleted. Therefore, we should preserve
-          // preformatted linefeed at least.
-          PreservePreformattedLineBreak::Yes, PaddingForEmptyBlock::Unnecessary,
-          *editingHost);
-      if (NS_FAILED(rv)) {
-        NS_WARNING(
-            "HTMLEditor::EnsureNoFollowingUnnecessaryLineBreak() failed");
-        return Err(rv);
-      }
     }
     currentPoint.SetInterlinePosition(InterlinePosition::EndOfLine);
     rv = CollapseSelectionTo(currentPoint);
@@ -1654,7 +1686,7 @@ Result<EditActionResult, nsresult> HTMLEditor::HandleInsertText(
     rv = TopLevelEditSubActionDataRef().mChangedRange->SetStartAndEnd(
         pointToInsert.ToRawRangeBoundary(), currentPoint.ToRawRangeBoundary());
     if (NS_FAILED(rv)) {
-      NS_WARNING("nsRange::SetStartAndEnd() failed");
+      NS_WARNING("Range::SetStartAndEnd() failed");
       return Err(rv);
     }
     return EditActionResult::HandledResult();
@@ -1667,7 +1699,7 @@ Result<EditActionResult, nsresult> HTMLEditor::HandleInsertText(
                        "EndOfLine) failed, but ignored");
   rv = TopLevelEditSubActionDataRef().mChangedRange->CollapseTo(pointToInsert);
   if (NS_FAILED(rv)) {
-    NS_WARNING("nsRange::CollapseTo() failed");
+    NS_WARNING("Range::CollapseTo() failed");
     return Err(rv);
   }
   return EditActionResult::HandledResult();
@@ -2610,7 +2642,7 @@ HTMLEditor::DeleteTextAndNormalizeSurroundingWhiteSpaces(
             ReplaceTextWithTransaction(
                 MOZ_KnownLive(*startToDelete.ContainerAs<Text>()),
                 startToDelete.Offset(), lengthToReplaceInFirstTextNode,
-                normalizedWhiteSpacesInFirstNode);
+                normalizedWhiteSpacesInFirstNode, InsertTextFor::NormalText);
         if (MOZ_UNLIKELY(replaceTextResult.isErr())) {
           NS_WARNING("HTMLEditor::ReplaceTextWithTransaction() failed");
           return replaceTextResult.propagateErr();
@@ -2686,7 +2718,7 @@ HTMLEditor::DeleteTextAndNormalizeSurroundingWhiteSpaces(
             MOZ_KnownLive(*startToDelete.ContainerAs<Text>()),
             startToDelete.Offset(),
             endToDelete.Offset() - startToDelete.Offset(),
-            normalizedWhiteSpacesInLastNode);
+            normalizedWhiteSpacesInLastNode, InsertTextFor::NormalText);
     if (MOZ_UNLIKELY(replaceTextResult.isErr())) {
       NS_WARNING("HTMLEditor::ReplaceTextWithTransaction() failed");
       return replaceTextResult.propagateErr();
@@ -2835,7 +2867,8 @@ HTMLEditor::JoinTextNodesWithNormalizeWhiteSpaces(Text& aLeftText,
         lastLeftChar && !IsCollapsibleChar(lastLeftChar)) {
       if (firstRightChar != HTMLEditUtils::kSpace) {
         Result<InsertTextResult, nsresult> replaceWhiteSpaceResultOrError =
-            ReplaceTextWithTransaction(aRightText, 0u, 1u, u" "_ns);
+            ReplaceTextWithTransaction(aRightText, 0u, 1u, u" "_ns,
+                                       InsertTextFor::NormalText);
         if (MOZ_UNLIKELY(replaceWhiteSpaceResultOrError.isErr())) {
           NS_WARNING("HTMLEditor::ReplaceTextWithTransaction() failed");
           return replaceWhiteSpaceResultOrError.propagateErr();
@@ -2872,8 +2905,9 @@ HTMLEditor::JoinTextNodesWithNormalizeWhiteSpaces(Text& aLeftText,
     if (!IsCollapsibleCharOrNBSP(secondLastChar) &&
         !IsCollapsibleCharOrNBSP(firstRightChar)) {
       Result<InsertTextResult, nsresult> replaceWhiteSpaceResultOrError =
-          ReplaceTextWithTransaction(
-              aLeftText, aLeftText.DataBuffer().GetLength() - 1u, 1u, u" "_ns);
+          ReplaceTextWithTransaction(aLeftText,
+                                     aLeftText.DataBuffer().GetLength() - 1u,
+                                     1u, u" "_ns, InsertTextFor::NormalText);
       if (MOZ_UNLIKELY(replaceWhiteSpaceResultOrError.isErr())) {
         NS_WARNING("HTMLEditor::ReplaceTextWithTransaction() failed");
         return replaceWhiteSpaceResultOrError.propagateErr();
@@ -5683,7 +5717,7 @@ Result<EditActionResult, nsresult> HTMLEditor::HandleOutdentAtSelection(
 
   // Push selection past end of left element of last split indented element.
   if (unwrappedOutdentResult.GetLeftContent()) {
-    const nsRange* firstRange = SelectionRef().GetRangeAt(0);
+    const dom::Range* firstRange = SelectionRef().GetRangeAt(0);
     if (NS_WARN_IF(!firstRange)) {
       return EditActionResult::HandledResult();
     }
@@ -5713,7 +5747,7 @@ Result<EditActionResult, nsresult> HTMLEditor::HandleOutdentAtSelection(
   // And pull selection before beginning of right element of last split
   // indented element.
   if (unwrappedOutdentResult.GetRightContent()) {
-    const nsRange* firstRange = SelectionRef().GetRangeAt(0);
+    const dom::Range* firstRange = SelectionRef().GetRangeAt(0);
     if (NS_WARN_IF(!firstRange)) {
       return EditActionResult::HandledResult();
     }
@@ -7412,7 +7446,7 @@ Result<EditorDOMPoint, nsresult> HTMLEditor::AlignBlockContentsWithDivElement(
 
 Result<EditorRawDOMRange, nsresult>
 HTMLEditor::GetRangeExtendedToHardLineEdgesForBlockEditAction(
-    const nsRange* aRange, const Element& aEditingHost) const {
+    const dom::Range* aRange, const Element& aEditingHost) const {
   MOZ_ASSERT(IsEditActionDataAvailable());
 
   // This tweaks selections to be more "natural".
@@ -7567,7 +7601,8 @@ HTMLEditor::GetRangeExtendedToHardLineEdgesForBlockEditAction(
 }
 
 template <typename EditorDOMRangeType>
-already_AddRefed<nsRange> HTMLEditor::CreateRangeIncludingAdjuscentWhiteSpaces(
+already_AddRefed<dom::Range>
+HTMLEditor::CreateRangeIncludingAdjuscentWhiteSpaces(
     const EditorDOMRangeType& aRange) {
   MOZ_DIAGNOSTIC_ASSERT(aRange.IsPositioned());
   return CreateRangeIncludingAdjuscentWhiteSpaces(aRange.StartRef(),
@@ -7575,7 +7610,8 @@ already_AddRefed<nsRange> HTMLEditor::CreateRangeIncludingAdjuscentWhiteSpaces(
 }
 
 template <typename EditorDOMPointType1, typename EditorDOMPointType2>
-already_AddRefed<nsRange> HTMLEditor::CreateRangeIncludingAdjuscentWhiteSpaces(
+already_AddRefed<dom::Range>
+HTMLEditor::CreateRangeIncludingAdjuscentWhiteSpaces(
     const EditorDOMPointType1& aStartPoint,
     const EditorDOMPointType2& aEndPoint) {
   MOZ_DIAGNOSTIC_ASSERT(!aStartPoint.IsInNativeAnonymousSubtree());
@@ -7645,10 +7681,10 @@ already_AddRefed<nsRange> HTMLEditor::CreateRangeIncludingAdjuscentWhiteSpaces(
     return nullptr;
   }
 
-  RefPtr<nsRange> range =
-      nsRange::Create(startPoint.ToRawRangeBoundary(),
-                      endPoint.ToRawRangeBoundary(), IgnoreErrors());
-  NS_WARNING_ASSERTION(range, "nsRange::Create() failed");
+  RefPtr<dom::Range> range =
+      dom::Range::Create(startPoint.ToRawRangeBoundary(),
+                         endPoint.ToRawRangeBoundary(), IgnoreErrors());
+  NS_WARNING_ASSERTION(range, "Range::Create() failed");
   return range.forget();
 }
 
@@ -8905,8 +8941,10 @@ nsresult HTMLEditor::ReapplyCachedStyles() {
     return NS_OK;
   }
 
-  for (PendingStyleCache& styleCacheBeforeEdit :
-       Reversed(*TopLevelEditSubActionDataRef().mCachedPendingStyles)) {
+  const AutoPendingStyleCacheArray cachedPendingStyles(
+      TopLevelEditSubActionDataRef().mCachedPendingStyles->Clone());
+  for (const PendingStyleCache& styleCacheBeforeEdit :
+       Reversed(cachedPendingStyles)) {
     bool isFirst = false, isAny = false, isAll = false;
     nsAutoString currentValue;
     const EditorInlineStyle inlineStyle = styleCacheBeforeEdit.ToInlineStyle();
@@ -9021,7 +9059,7 @@ void HTMLEditor::SetSelectionInterlinePosition() {
   MOZ_ASSERT(SelectionRef().IsCollapsed());
 
   // Get the (collapsed) selection location
-  const nsRange* firstRange = SelectionRef().GetRangeAt(0);
+  const dom::Range* firstRange = SelectionRef().GetRangeAt(0);
   if (NS_WARN_IF(!firstRange)) {
     return;
   }

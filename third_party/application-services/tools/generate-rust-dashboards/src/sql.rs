@@ -5,7 +5,7 @@
 /// Very simple SQL query builder
 ///
 /// Use this if it helps or use raw SQL if it's easier.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Query {
     pub select: Vec<String>,
     pub from: String,
@@ -92,5 +92,28 @@ impl Query {
         self.from = format!(
             "(SELECT * FROM mozdata.fenix.{table_name} WHERE '${{application}}' = 'firefox_android')"
         );
+    }
+}
+
+/// Union query
+///
+/// Like `Query`, use this if it helps or use raw SQL if it's easier.
+#[derive(Debug, Default)]
+pub struct Union {
+    pub queries: Vec<Query>,
+    pub order_by: Option<String>,
+}
+
+impl Union {
+    pub fn sql(&self) -> String {
+        let mut sql = String::default();
+
+        for (i, q) in self.queries.iter().enumerate() {
+            if i != 0 {
+                sql.push_str("UNION ALL\n");
+            }
+            sql.push_str(&format!("{}\n", q.sql()));
+        }
+        sql
     }
 }

@@ -87,6 +87,11 @@ struct hb_serialize_context_t
         virtual_links.push (o.virtual_links[i]);
     }
 
+    bool in_error () const
+    {
+      return real_links.in_error() || virtual_links.in_error();
+    }
+
     bool add_virtual_link (objidx_t objidx)
     {
       if (!objidx)
@@ -327,11 +332,13 @@ struct hb_serialize_context_t
   __attribute__((returns_nonnull))
   Type *push ()
   {
-    if (unlikely (in_error ())) return start_embed<Type> ();
+    // Keep pushing when we've error'd out on int overflows, since pop_discard()
+    // and pop_pack() keep popping; otherwise they would pop the parent object.
+    if (unlikely (in_error () && !only_overflow ())) return start_embed<Type> ();
 
     object_t *obj = object_pool.alloc ();
     if (unlikely (!obj))
-      check_success (false);
+      err (HB_SERIALIZE_ERROR_OTHER);
     else
     {
       obj->head = head;

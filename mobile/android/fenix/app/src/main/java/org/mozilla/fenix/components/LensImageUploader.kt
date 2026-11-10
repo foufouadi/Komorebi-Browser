@@ -46,17 +46,24 @@ class LensImageUploader(
     )
 
     /**
-     * Decodes, scales, compresses, and uploads the image at [imageUri] to Google Lens.
+     * Decodes the image at [imageUri] upright and subsampled to the upload size, so it can be displayed before it is
+     * passed to [uploadImage]. The caller owns the returned bitmap.
      *
-     * @param imageUri The content URI of the image to upload.
+     * @param imageUri The content URI of the image to decode.
+     * @return The decoded bitmap, or null if the image could not be read.
+     */
+    suspend fun decodeImage(imageUri: Uri): Bitmap? = withContext(Dispatchers.IO) { decodeBitmap(imageUri) }
+
+    /**
+     * Scales, compresses, and uploads [bitmap] to Google Lens. [bitmap] is left untouched so the caller can keep
+     * drawing it.
+     *
+     * @param bitmap The image to upload, typically from [decodeImage].
      * @param isPrivate When true, the upload runs in GeckoView's private cookie context so the returned Lens session
      *   matches the private tab the result is opened in.
      */
-    suspend fun upload(imageUri: Uri, isPrivate: Boolean): UploadResult =
-        withContext(Dispatchers.IO) {
-            val bitmap = decodeBitmap(imageUri) ?: return@withContext UploadResult(resultUrl = null)
-            uploadBitmap(bitmap, isPrivate)
-        }
+    suspend fun uploadImage(bitmap: Bitmap, isPrivate: Boolean): UploadResult =
+        withContext(Dispatchers.IO) { uploadBitmap(bitmap, isPrivate, recycleSource = false) }
 
     /**
      * Fetches the image at [imageUrl], then scales, compresses, and uploads it to Google Lens. The browser's User-Agent
@@ -69,10 +76,16 @@ class LensImageUploader(
     suspend fun uploadFromUrl(imageUrl: String, isPrivate: Boolean): UploadResult =
         withContext(Dispatchers.IO) {
             val bitmap = fetchBitmap(imageUrl, isPrivate) ?: return@withContext UploadResult(resultUrl = null)
-            uploadBitmap(bitmap, isPrivate)
+            uploadBitmap(bitmap, isPrivate, recycleSource = true)
         }
 
-    private fun uploadBitmap(bitmap: Bitmap, isPrivate: Boolean): UploadResult {
+    /**
+     * @param bitmap The image to upload.
+     * @param isPrivate Whether the upload runs in GeckoView's private cookie context.
+     * @param recycleSource Whether [bitmap] is recycled once compressed, freeing it before the network wait. False when
+     *   the caller still owns it.
+     */
+    private fun uploadBitmap(bitmap: Bitmap, isPrivate: Boolean, recycleSource: Boolean): UploadResult {
         val scaled = scaleBitmap(bitmap)
         val scaledWidth = scaled.width
         val scaledHeight = scaled.height
@@ -80,7 +93,7 @@ class LensImageUploader(
         val jpegData = compressToJpeg(scaled)
 
         if (scaled !== bitmap) scaled.recycle()
-        bitmap.recycle()
+        if (recycleSource) bitmap.recycle()
 
         val uploadUrl = "$UPLOAD_ENDPOINT?${commonParams()}&ep=$EP_BY_BYTES"
 
@@ -130,10 +143,7 @@ class LensImageUploader(
 
     @VisibleForTesting
     internal fun decodeBitmap(uri: Uri): Bitmap? {
-        val bitmap =
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                BitmapFactory.decodeStream(input)
-            } ?: return null
+        val bitmap = decodeSampledBitmap(uri) ?: return null
 
         // Camera2 writes the capture orientation as an EXIF tag rather than rotating pixels,
         // and BitmapFactory.decodeStream discards EXIF. Re-read the tag from a fresh stream and
@@ -221,6 +231,29 @@ class LensImageUploader(
             total += read
             if (total > max) return null
             out.write(buffer, 0, read)
+        }
+    }
+
+    /**
+     * Decodes the image at [uri] into a Bitmap, subsampling so neither dimension exceeds [MAX_IMAGE_DIMENSION]. Camera
+     * captures are at full sensor resolution, well beyond what the upload needs. The stream is opened twice because it
+     * cannot be rewound after the bounds have been read.
+     */
+    private fun decodeSampledBitmap(uri: Uri): Bitmap? {
+        val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            BitmapFactory.decodeStream(input, null, boundsOptions)
+        }
+        // A bounds pass always returns a null bitmap, so the decoded dimensions are what tell
+        // us whether the image could be read. They are untouched if the stream could not be opened.
+        if (boundsOptions.outWidth <= 0 || boundsOptions.outHeight <= 0) return null
+
+        val decodeOptions =
+            BitmapFactory.Options().apply {
+                inSampleSize = computeSampleSize(boundsOptions.outWidth, boundsOptions.outHeight)
+            }
+        return context.contentResolver.openInputStream(uri)?.use { input ->
+            BitmapFactory.decodeStream(input, null, decodeOptions)
         }
     }
 

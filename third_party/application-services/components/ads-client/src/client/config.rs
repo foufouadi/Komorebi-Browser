@@ -4,21 +4,25 @@
 */
 
 use crate::mars::Environment;
-use crate::telemetry::Telemetry;
+use crate::non_empty_string::NonEmptyString;
 
-pub struct AdsClientConfig<T>
-where
-    T: Telemetry,
-{
+pub(crate) struct AdsClientConfig {
     pub cache_config: Option<AdsCacheConfig>,
-    pub context_id_provider: Option<Box<dyn super::ContextIdProvider>>,
     pub environment: Environment,
-    pub telemetry: T,
+    #[cfg(feature = "stateful")]
+    pub store_config: Option<AdsStoreConfig>,
+    pub user_agent: Option<NonEmptyString>,
 }
 
 #[derive(Clone, Debug)]
-pub struct AdsCacheConfig {
+pub(crate) struct AdsCacheConfig {
     pub db_path: String,
     pub default_cache_ttl_seconds: Option<u64>,
     pub max_size_mib: Option<u64>,
+}
+
+#[cfg(feature = "stateful")]
+#[derive(Clone, Debug)]
+pub(crate) struct AdsStoreConfig {
+    pub db_path: String,
 }

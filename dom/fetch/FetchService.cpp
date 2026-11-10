@@ -8,6 +8,7 @@
 #include "FetchParent.h"
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/Components.h"
 #include "mozilla/SchedulerGroup.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/dom/ClientInfo.h"
@@ -316,6 +317,14 @@ bool FetchService::FetchInstance::IsLocalHostFetch() const {
     return false;
   }
   return res;
+}
+
+bool FetchService::FetchInstance::IsServiceWorkerEligible() const {
+  if (!mArgs.is<WorkerFetchArgs>() ||
+      mArgs.as<WorkerFetchArgs>().mController.isNothing()) {
+    return false;
+  }
+  return mRequest && !mRequest->SkipServiceWorker();
 }
 
 void FetchService::FetchInstance::Cancel(bool aForceAbort) {
@@ -716,7 +725,7 @@ nsresult FetchService::RegisterNetworkObserver() {
     return NS_ERROR_UNEXPECTED;
   }
 
-  nsCOMPtr<nsIIOService> ioService = services::GetIOService();
+  nsCOMPtr<nsIIOService> ioService = components::IO::Service();
   if (!ioService) {
     return NS_ERROR_UNEXPECTED;
   }
@@ -849,7 +858,11 @@ RefPtr<FetchServicePromises> FetchService::Fetch(FetchArgs&& aArgs) {
     return NetworkErrorResponse(rv, fetch->Args());
   }
 
-  if (mOffline && !fetch->IsLocalHostFetch()) {
+  // A controlled client's request has to be dispatched to the service worker
+  // before the network is consulted, so it cannot be failed here. If no
+  // service worker answers it, the channel fails on its own while offline.
+  if (mOffline && !fetch->IsLocalHostFetch() &&
+      !fetch->IsServiceWorkerEligible()) {
     FETCH_LOG(("FetchService::Fetch network offline"));
     return NetworkErrorResponse(NS_ERROR_OFFLINE, fetch->Args());
   }

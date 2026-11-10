@@ -108,11 +108,12 @@ object BrowserToolbarStoreBuilder {
                                     settings = components.settings,
                                     summarizationFeatureSettings = components.core.summarizeFeatureSettings,
                                     translationsFeatureSettings = TranslationsEnabledSettings.dataStore(activity),
+                                    listenSettings = components.listenToPage.settings,
                                     shareUseCases = components.useCases.shareUseCases,
                                     navController = navController,
                                     summarizationNavigator =
                                         SummarizationNavigator(
-                                            summarizationSettings = components.core.summarizationSettings,
+                                            summarizationSettings = components.core.summarizationSettingsBinding,
                                             eligibilityChecker = components.core.summarizationEligibilityChecker,
                                             getCurrentTab = { browserStore.state.selectedTab },
                                         ),
@@ -138,7 +139,10 @@ object BrowserToolbarStoreBuilder {
                                     settings = components.settings,
                                     scope = lifecycleScope,
                                 ),
-                                BrowserToolbarTelemetryMiddleware(),
+                                BrowserToolbarTelemetryMiddleware(
+                                    appStore = appStore,
+                                    settings = components.settings,
+                                ),
                             )
 
                         else ->
@@ -157,6 +161,7 @@ object BrowserToolbarStoreBuilder {
                                     navController = navController,
                                     closeTabDelegate = { activity.finishAndRemoveTask() },
                                     scope = lifecycleScope,
+                                    settings = components.settings,
                                     isSandboxCustomTab = isSandboxCustomTab,
                                 )
                             )

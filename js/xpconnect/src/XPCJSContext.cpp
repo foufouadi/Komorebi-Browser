@@ -458,7 +458,7 @@ class WatchdogManager {
 
   void StartWatchdog() {
     MOZ_ASSERT(!mWatchdog);
-    mWatchdog = mozilla::MakeUnique<Watchdog>(this);
+    mWatchdog = std::make_unique<Watchdog>(this);
     mWatchdog->Init();
   }
 
@@ -768,6 +768,11 @@ bool XPCJSContext::InterruptCallback(JSContext* cx) {
     win = SandboxWindowOrNull(global, cx);
   }
 
+  if (!win && !chrome) {
+    // Explicit associations must not make system-principal scripts stoppable.
+    win = SandboxAssociatedWindowOrNull(global);
+  }
+
   if (!win) {
     NS_WARNING("No active window");
     return true;
@@ -835,7 +840,14 @@ void xpc::SetPrefableRealmOptions(JS::RealmOptions& options) {
 void xpc::SetPrefableCompileOptions(JS::PrefableCompileOptions& options) {
   options.setSourcePragmas(StaticPrefs::javascript_options_source_pragmas())
       .setSourcePhaseImports(
-          StaticPrefs::javascript_options_experimental_source_phase_imports());
+          StaticPrefs::javascript_options_experimental_source_phase_imports())
+      .setDeferImportEval(
+#ifdef NIGHTLY_BUILD
+          StaticPrefs::javascript_options_experimental_defer_import_eval()
+#else
+          false
+#endif
+      );
 }
 
 void xpc::SetPrefableContextOptions(JS::ContextOptions& options) {
@@ -1011,12 +1023,6 @@ static void ReloadPrefsCallback(const char* pref, void* aXpccx) {
 
   auto& contextOptions = JS::ContextOptionsRef(cx);
   SetPrefableContextOptions(contextOptions);
-
-#ifdef NIGHTLY_BUILD
-  JS_SetGlobalJitCompilerOption(
-      cx, JSJITCOMPILER_REGEXP_BUFFER_BOUNDARIES,
-      StaticPrefs::javascript_options_experimental_regexp_buffer_boundaries());
-#endif
 
   // Set options not shared with workers.
   contextOptions
@@ -1331,8 +1337,8 @@ nsresult XPCJSContext::Initialize() {
 #  endif
 #elif defined(XP_WIN)
   // 1MB is the default stack size on Windows. We use the -STACK linker flag
-  // (see WIN32_EXE_LDFLAGS in config/config.mk) to request a larger stack, so
-  // we determine the stack size at runtime.
+  // (see WIN32_EXE_DEFAULT_LDFLAGS in build/moz.configure/windows.configure) to
+  // request a larger stack, so we determine the stack size at runtime.
   const size_t kUncappedStackQuota = GetWindowsStackSize();
 #  if defined(MOZ_ASAN)
   // See the standalone MOZ_ASAN branch below for the ASan case.

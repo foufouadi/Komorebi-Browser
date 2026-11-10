@@ -3,6 +3,10 @@ import {
   LLM_TELEMETRY_TABLE,
   TOOL_RESULT_TABLE,
   TOOL_RESULT_HISTORY_URL_INDEX,
+  MESSAGE_ROLE_CREATED_DATE_INDEX,
+  MESSAGE_PARENT_ID_INDEX,
+  MESSAGE_REVISION_ROOT_INDEX,
+  MESSAGE_ORDINAL_INDEX_DROP,
 } from "./ChatSql.sys.mjs";
 
 /*
@@ -37,7 +41,7 @@ async function applyV2(conn, version) {
  */
 async function getColumns(conn, tableName) {
   const columns = await conn.execute(`PRAGMA table_info(${tableName})`);
-  return new Set(columns.map(c => c.name));
+  return new Set(columns.map(c => c.getResultByName("name")));
 }
 
 // Rename insights to memories
@@ -213,6 +217,34 @@ async function applyV11(conn, version) {
   `);
 }
 
+// Index the two self-referencing message foreign keys, which cascade on delete,
+// and (role, created_date) for MESSAGES_BY_DATE_AND_ROLE. Drop the unused
+// standalone ordinal index.
+async function applyV12(conn, version) {
+  if (version >= 12) {
+    return;
+  }
+
+  await conn.execute(MESSAGE_PARENT_ID_INDEX);
+  await conn.execute(MESSAGE_REVISION_ROOT_INDEX);
+  await conn.execute(MESSAGE_ROLE_CREATED_DATE_INDEX);
+  await conn.execute(MESSAGE_ORDINAL_INDEX_DROP);
+}
+
+// Persist the telemetry triggers that fired for a conversation
+async function applyV13(conn, version) {
+  if (version >= 13) {
+    return;
+  }
+
+  const columns = await getColumns(conn, "llm_telemetry");
+  if (columns.has("triggers")) {
+    return;
+  }
+
+  await conn.execute("ALTER TABLE llm_telemetry ADD COLUMN triggers BLOB");
+}
+
 /**
  * Array of migration functions to run in the order they should be run in.
  *
@@ -229,4 +261,6 @@ export const migrations = [
   applyV9,
   applyV10,
   applyV11,
+  applyV12,
+  applyV13,
 ];

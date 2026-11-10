@@ -17,6 +17,7 @@ add_setup(async function () {
       ["browser.urlbar.autoFill", false],
     ],
   });
+  UrlbarTestUtils.registerZeroPrefixProvider();
 });
 
 add_task(async function alt_left_click_test() {

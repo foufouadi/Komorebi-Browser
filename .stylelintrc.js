@@ -32,6 +32,8 @@ module.exports = {
     "stylelint-use-logical",
   ],
   ignoreFiles,
+  reportNeedlessDisables: true,
+  reportUnscopedDisables: true,
   rules: {
     /* Disabled because of `-moz-element(#foo)` which gets misparsed. */
     "color-no-invalid-hex": null,
@@ -282,6 +284,7 @@ module.exports = {
     "stylelint-plugin-mozilla/no-base-design-tokens": true,
     "stylelint-plugin-mozilla/no-has-selector": true,
     "stylelint-plugin-mozilla/use-design-tokens": true,
+    "stylelint-plugin-mozilla/use-paired-color-tokens": true,
   },
 
   overrides: [
@@ -420,10 +423,9 @@ module.exports = {
         // Stylelint does not support negating the file glob within an overrides section,
         // so these rules get re-enabled for some devtools files in the section below
         "devtools/**",
-        // FXR is no longer maintained and is not expected to use design tokens
-        "browser/fxr/**",
         // Android does not use design tokens
         "mobile/android/**",
+        "toolkit/themes/mobile/global/aboutLicense.css",
         // Docs do not use design tokens
         "docs/**",
         // DOM does not use design tokens
@@ -432,6 +434,8 @@ module.exports = {
         "layout/**",
         // Testing does not use design tokens
         "testing/**",
+        "**/test/**",
+        "**/tests/**",
         // UA Widgets should not use design tokens
         "toolkit/themes/shared/colorpicker-common.css",
         "toolkit/themes/shared/colorpicker.css",

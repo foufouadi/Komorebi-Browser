@@ -27,7 +27,6 @@ components/glean/index
 modules/toolkit_modules/index
 content/toolkit_widgets/index
 components/resistfingerprinting/resistfingerprinting/index
-components/url-classifier/url-classifier/index
 components/extensions/webextensions/index
 /extensions/spellcheck/index
 mozapps/dmgInstallHelper/docs/index
@@ -38,4 +37,5 @@ components/sessionstore/index
 actors/actors/picture-in-picture-child-video-wrapper-api
 components/captchadetection/captcha-detection/index
 components/contentrelevancy/index
+mozapps/pushnotificationhelper/index
 ```

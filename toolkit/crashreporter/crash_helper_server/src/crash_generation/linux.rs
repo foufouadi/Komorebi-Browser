@@ -7,11 +7,12 @@ use super::CrashGenerator;
 use anyhow::Result;
 use crash_helper_common::{
     messages::{self},
-    GeckoChildId,
+    ApplicationInfo, GeckoChildId, RawProcessHandle,
 };
 use minidump_writer::minidump_writer::DirectAuxvDumpInfo;
+use mozannotation_server::CAnnotation;
 use once_cell::sync::Lazy;
-use std::{collections::HashMap, sync::Mutex};
+use std::{collections::HashMap, fs, sync::Mutex};
 
 // Table holding the information about the auxiliary vector of potentially
 // every process registered with the crash helper.
@@ -44,5 +45,30 @@ pub(crate) extern "C" fn get_auxv_info(
         true
     } else {
         false
+    }
+}
+
+/// Create the annotations that are specific to this platform, there are none
+/// at the moment.
+pub(crate) fn create_platform_specific_annotations(
+    _app_info: &ApplicationInfo,
+) -> Result<Vec<CAnnotation>> {
+    Ok(Vec::new())
+}
+
+fn process_uptime_internal(pid: RawProcessHandle) -> Result<f64> {
+    let metadata = fs::metadata(format!("/proc/{pid}"))?;
+    let creation_time = metadata.modified()?;
+    let uptime = creation_time.elapsed()?;
+    Ok(uptime.as_secs_f64())
+}
+
+pub(crate) fn process_uptime(pid: RawProcessHandle) -> f64 {
+    match process_uptime_internal(pid) {
+        Ok(uptime) => uptime,
+        Err(err) => {
+            log::error!("Could not calculate uptime for process {pid}: {err}");
+            0.0f64
+        }
     }
 }

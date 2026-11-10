@@ -7,7 +7,8 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   TabGroupTestUtils: "resource://testing-common/TabGroupTestUtils.sys.mjs",
-  TabStateFlusher: "resource:///modules/sessionstore/TabStateFlusher.sys.mjs",
+  TabStateFlusher:
+    "moz-src:///browser/components/sessionstore/TabStateFlusher.sys.mjs",
 });
 
 // Context menu tests
@@ -507,8 +508,8 @@ add_task(async function test_tabGroupContextMenuMovePinnedTabToNewGroup() {
   Assert.ok(!pinnedTab.pinned, "first pinned tab is no longer pinned");
   Assert.ok(pinnedTab.group, "first pinned tab is grouped");
   Assert.greater(
-    pinnedTab._tPos,
-    pinnedUngroupedTab._tPos,
+    pinnedTab.index,
+    pinnedUngroupedTab.index,
     "pinned tab's group appears after the list of pinned tabs"
   );
   await removeTabGroup(pinnedTab.group);
@@ -894,6 +895,46 @@ add_task(async function test_tabGroupContextMenuSavedGroupsAndNoOpenGroups() {
   });
 
   BrowserTestUtils.removeTab(tab);
+  lazy.TabGroupTestUtils.forgetSavedTabGroups();
+});
+
+/*
+ * Tests that moving the last open tab into a saved tab group does not close
+ * the browser window
+ */
+add_task(async function test_movingLastTabToSavedTabGroup() {
+  let tab = BrowserTestUtils.addTab(gBrowser, "https://example.com");
+  let group = gBrowser.addTabGroup([tab], {
+    label: "Test group",
+  });
+
+  await BrowserTestUtils.browserLoaded(tab.linkedBrowser);
+  await lazy.TabGroupTestUtils.saveAndCloseTabGroup(group);
+  Assert.equal(
+    SessionStore.getSavedTabGroups().length,
+    1,
+    "The group was saved"
+  );
+
+  openTrustedLinkIn("https://example.com", "current");
+  await BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);
+
+  await lazy.TabStateFlusher.flush(gBrowser.selectedTab);
+
+  let onUnload = () => ok(false, "Window should not have closed");
+  window.addEventListener("unload", onUnload);
+
+  await withTabMenu(gBrowser.selectedTab, async () => {
+    // Actually opening the menu popups results in an AccessKeyConflictError
+    TabContextMenu.addTabsToSavedGroup(group.id);
+  });
+
+  await TestUtils.waitForTick();
+
+  Assert.ok(true, "Window didn't close");
+
+  window.removeEventListener("unload", onUnload);
+
   lazy.TabGroupTestUtils.forgetSavedTabGroups();
 });
 

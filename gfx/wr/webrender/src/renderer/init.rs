@@ -4,7 +4,7 @@
 
 use api::{BlobImageHandler, ColorF, CrashAnnotator, DocumentId, IdNamespace};
 use api::{RenderBackendId, VoidPtrToSizeFn, FontRenderMode, ImageFormat};
-use api::{RenderNotifier, ImageBufferKind};
+use api::{RenderNotifier, ImageBufferKind, PipelineId};
 use api::units::*;
 use api::channel::unbounded_channel;
 pub use api::DebugFlags;
@@ -13,23 +13,23 @@ use crate::bump_allocator::ChunkPool;
 use crate::render_api::{ApiMsg, RenderApiSender, FrameMsg, ResourceCacheInit, WindowRegistration};
 use crate::render_backend_pool::{PoolMemberSetup, RenderBackendPool};
 use crate::scene_builder_thread::SceneBuilderRequest;
-use crate::composite::{CompositorKind, CompositorConfig};
+use crate::composite::{CompositorKind, CompositorConfig, SwapchainMode};
+use super::layer_tree::LayerTree;
 use crate::device::{
-    UploadMethod, UploadPBOPool, VertexUsageHint, Device, ProgramCache, TextureFilter
+    DeviceOptions, GpuBackendConfig, UploadMethod, UploadBufferPool, VertexUsageHint, Device, ProgramCache, TextureFilter
 };
 use crate::frame_builder::FrameBuilderConfig;
 use glyph_rasterizer::{GlyphRasterThread, SharedFontResources};
 use crate::gpu_types::PrimitiveInstanceData;
 use crate::internal_types::{FastHashMap, FastHashSet};
 use crate::profiler::{self, Profiler, TransactionProfile};
-use crate::device::query::{GpuProfiler, GpuDebugMethod};
 use crate::render_backend::RenderBackend;
 use crate::texture_cache::TextureCacheConfig;
-use crate::renderer::{
-    debug, vertex, gl,
+use crate::renderer::{DEFAULT_PATH_AA_SAMPLES, 
+    debug, vertex,
     debug::DebugOverlayState,
     Renderer, BufferDamageTracker, PipelineInfo, TextureResolver,
-    RendererError, ShaderPrecacheFlags, VERTEX_DATA_TEXTURE_COUNT,
+    RendererError, ShaderPrecacheFlags,
     upload::UploadTexturePool,
     shade::{Shaders, SharedShaders},
 };
@@ -102,6 +102,9 @@ pub trait SceneBuilderHooks {
     /// This is called exactly once, when the scene builder thread is about to
     /// terminate.
     fn deregister(&self);
+    /// This is called when the embed policy of `embedder` rejects an iframe
+    /// item that references `child`, once per pair and document.
+    fn embed_policy_violation(&self, _document_id: DocumentId, _embedder: PipelineId, _child: PipelineId) {}
 }
 
 /// Allows callers to hook into the main render_backend loop and provide
@@ -130,6 +133,12 @@ pub struct WebRenderOptions {
     pub use_optimized_shaders: bool,
     pub enable_aa: bool,
     pub enable_dithering: bool,
+    /// Delay promotion of moving 8-bit YUV images to compositor surfaces until
+    /// their picture-space coverage rect has remained stable for several frames.
+    pub enable_yuv_overlay_stability: bool,
+    /// Promote only the largest visible 8-bit YUV image to external compositing.
+    /// Higher bit depths and RGB images retain their existing behavior.
+    pub limit_sdr_yuv_external_composites: bool,
     pub max_recorded_profiles: usize,
     pub precache_flags: ShaderPrecacheFlags,
     /// Enable sub-pixel anti-aliasing if a fast implementation is available.
@@ -140,7 +149,7 @@ pub struct WebRenderOptions {
     pub image_tiling_threshold: i32,
     pub upload_method: UploadMethod,
     /// The default size in bytes for PBOs used to upload texture data.
-    pub upload_pbo_default_size: usize,
+    pub upload_buffer_default_size: usize,
     pub batched_upload_threshold: i32,
     pub workers: Option<Arc<ThreadPool>>,
     /// A pool of large memory chunks used by the per-frame allocators.
@@ -185,9 +194,6 @@ pub struct WebRenderOptions {
     pub gpu_supports_fast_clears: bool,
     pub allow_dual_source_blending: bool,
     pub allow_advanced_blend_equation: bool,
-    /// If true, allow textures to be initialized with glTexStorage.
-    /// This affects VRAM consumption and data upload paths.
-    pub allow_texture_storage_support: bool,
     /// If true, we allow the data uploaded in a different format from the
     /// one expected by the driver, pretending the format is matching, and
     /// swizzling the components on all the shader sampling.
@@ -203,9 +209,6 @@ pub struct WebRenderOptions {
     /// The configuration options defining how WR composites the final scene.
     pub compositor_config: CompositorConfig,
     pub enable_gpu_markers: bool,
-    /// If true, panic whenever a GL error occurs. This has a significant
-    /// performance impact, so only use when debugging specific problems!
-    pub panic_on_gl_error: bool,
     pub picture_tile_size: Option<DeviceIntSize>,
     pub texture_cache_config: TextureCacheConfig,
     /// If true, we'll use instanced vertex attributes. Each instace is a quad.
@@ -251,6 +254,8 @@ impl Default for WebRenderOptions {
             use_optimized_shaders: false,
             enable_aa: true,
             enable_dithering: false,
+            enable_yuv_overlay_stability: false,
+            limit_sdr_yuv_external_composites: false,
             debug_flags: DebugFlags::empty(),
             max_recorded_profiles: 0,
             precache_flags: ShaderPrecacheFlags::empty(),
@@ -262,7 +267,7 @@ impl Default for WebRenderOptions {
             // This is best as `Immediate` on Angle, or `Pixelbuffer(Dynamic)` on GL,
             // but we are unable to make this decision here, so picking the reasonable medium.
             upload_method: UploadMethod::PixelBuffer(ONE_TIME_USAGE_HINT),
-            upload_pbo_default_size: 512 * 512 * 4,
+            upload_buffer_default_size: 512 * 512 * 4,
             batched_upload_threshold: 512 * 512,
             workers: None,
             chunk_pool: None,
@@ -286,14 +291,12 @@ impl Default for WebRenderOptions {
             gpu_supports_fast_clears: false,
             allow_dual_source_blending: true,
             allow_advanced_blend_equation: false,
-            allow_texture_storage_support: true,
             allow_texture_swizzling: true,
             clear_caches_with_quads: true,
             dump_shader_source: None,
             surface_origin_is_top_left: false,
             compositor_config: CompositorConfig::default(),
             enable_gpu_markers: true,
-            panic_on_gl_error: false,
             picture_tile_size: None,
             texture_cache_config: TextureCacheConfig::DEFAULT,
             // Disabling instancing means more vertex data to upload and potentially
@@ -326,7 +329,7 @@ impl Default for WebRenderOptions {
 /// ```
 /// [WebRenderOptions]: struct.WebRenderOptions.html
 pub fn create_webrender_instance(
-    gl: Rc<dyn gl::Gl>,
+    backend: GpuBackendConfig,
     notifier: Box<dyn RenderNotifier>,
     mut options: WebRenderOptions,
     shaders: Option<&SharedShaders>,
@@ -348,32 +351,33 @@ pub fn create_webrender_instance(
     HAS_BEEN_INITIALIZED.store(true, Ordering::SeqCst);
 
     // For now, we assume that native OS compositors are top-left origin. If that doesn't
-    // turn out to be the case, we can add a query method on `LayerCompositor`.
+    // turn out to be the case, we can add a query method on the `Compositor` trait.
     match options.compositor_config {
         CompositorConfig::Draw { .. } | CompositorConfig::Native { .. } => {}
-        CompositorConfig::Layer { .. } => {
-            options.surface_origin_is_top_left = true;
+        CompositorConfig::Layer { ref compositor } => {
+            if let SwapchainMode::OsLayers { .. } = compositor.get_swapchain_mode() {
+                options.surface_origin_is_top_left = true;
+            }
         }
     }
 
     // `api_tx` is obtained from the render backend pool further down; only
     // the result channel is created here, since the renderer owns its rx end.
     let (result_tx, result_rx) = unbounded_channel();
-    let gl_type = gl.get_type();
 
     let mut device = Device::new(
-        gl,
-        options.crash_annotator.clone(),
-        options.resource_override_path.clone(),
-        options.use_optimized_shaders,
-        options.upload_method.clone(),
-        options.batched_upload_threshold,
-        options.cached_programs.take(),
-        options.allow_texture_storage_support,
-        options.allow_texture_swizzling,
-        options.dump_shader_source.take(),
-        options.surface_origin_is_top_left,
-        options.panic_on_gl_error,
+        backend,
+        DeviceOptions {
+            crash_annotator: options.crash_annotator.clone(),
+            resource_override_path: options.resource_override_path.clone(),
+            use_optimized_shaders: options.use_optimized_shaders,
+            upload_method: options.upload_method.clone(),
+            batched_upload_threshold: options.batched_upload_threshold,
+            cached_programs: options.cached_programs.take(),
+            allow_texture_swizzling: options.allow_texture_swizzling,
+            dump_shader_source: options.dump_shader_source.take(),
+            surface_origin_is_top_left: options.surface_origin_is_top_left,
+        },
     );
 
     let color_cache_formats = device.preferred_color_formats();
@@ -385,7 +389,7 @@ pub fn create_webrender_instance(
         options.allow_advanced_blend_equation &&
         device.get_capabilities().supports_advanced_blend_equation;
     let ext_blend_equation_advanced_coherent =
-        device.supports_extension("GL_KHR_blend_equation_advanced_coherent");
+        device.get_capabilities().supports_advanced_blend_equation_coherent;
 
     let enable_clear_scissor = options
         .enable_clear_scissor
@@ -423,7 +427,7 @@ pub fn create_webrender_instance(
     let shaders = match shaders {
         Some(shaders) => Rc::clone(shaders),
         None => {
-            let mut shaders = Shaders::new(&mut device, gl_type, &options)?;
+            let mut shaders = Shaders::new(&mut device, &options)?;
             if options.precache_flags.intersects(ShaderPrecacheFlags::ASYNC_COMPILE | ShaderPrecacheFlags::FULL_COMPILE) {
                 let mut pending_shaders = shaders.precache_all(options.precache_flags);
                 while shaders.resume_precache(&mut device, &mut pending_shaders)? {}
@@ -530,14 +534,9 @@ pub fn create_webrender_instance(
         use_shared_instance_buffer,
     );
 
-    let texture_upload_pbo_pool = UploadPBOPool::new(&mut device, options.upload_pbo_default_size);
+    let texture_upload_buffer_pool = UploadBufferPool::new(&mut device, options.upload_buffer_default_size);
     let staging_texture_pool = UploadTexturePool::new();
     let texture_resolver = TextureResolver::new(&mut device);
-
-    let mut vertex_data_textures = Vec::new();
-    for _ in 0 .. VERTEX_DATA_TEXTURE_COUNT {
-        vertex_data_textures.push(vertex::VertexDataTextures::new());
-    }
 
     let is_software = device.get_capabilities().renderer_name.starts_with("Software");
 
@@ -555,18 +554,19 @@ pub fn create_webrender_instance(
     };
 
     let compositor_kind = match options.compositor_config {
-        CompositorConfig::Draw { max_partial_present_rects, draw_previous_partial_present_regions, .. } => {
-            CompositorKind::Draw { max_partial_present_rects, draw_previous_partial_present_regions }
+        CompositorConfig::Draw { max_partial_present_rects, .. } => {
+            CompositorKind::Draw { max_partial_present_rects }
         }
         CompositorConfig::Native { ref compositor } => {
-            let capabilities = compositor.get_capabilities(&mut device);
+            let capabilities = compositor.get_capabilities();
 
             CompositorKind::Native {
                 capabilities,
             }
         }
-        CompositorConfig::Layer { .. } => {
+        CompositorConfig::Layer { ref compositor } => {
             CompositorKind::Layer {
+                mode: compositor.get_swapchain_mode(),
             }
         }
     };
@@ -579,7 +579,7 @@ pub fn create_webrender_instance(
         gpu_supports_advanced_blend: ext_blend_equation_advanced,
         advanced_blend_is_coherent: ext_blend_equation_advanced_coherent,
         gpu_supports_render_target_partial_update: device.get_capabilities().supports_render_target_partial_update,
-        external_images_require_copy: !device.get_capabilities().supports_image_external_essl3,
+        external_images_require_copy: !device.get_capabilities().supports_external_textures_in_all_shaders,
         batch_lookback_count: WebRenderOptions::BATCH_LOOKBACK_COUNT,
         background_color: Some(options.clear_color),
         compositor_kind,
@@ -592,6 +592,7 @@ pub fn create_webrender_instance(
         low_quality_pinch_zoom: options.low_quality_pinch_zoom,
         max_shared_surface_size: options.max_shared_surface_size,
         enable_dithering: options.enable_dithering,
+        enable_yuv_overlay_stability: options.enable_yuv_overlay_stability,
     };
     info!("WR {:?}", config);
 
@@ -748,23 +749,7 @@ pub fn create_webrender_instance(
         ));
     }
 
-    let debug_method = if !options.enable_gpu_markers {
-        // The GPU markers are disabled.
-        GpuDebugMethod::None
-    } else if device.get_capabilities().supports_khr_debug {
-        GpuDebugMethod::KHR
-    } else if device.supports_extension("GL_EXT_debug_marker") {
-        GpuDebugMethod::MarkerEXT
-    } else {
-        warn!("asking to enable_gpu_markers but no supporting extension was found");
-        GpuDebugMethod::None
-    };
-
-    info!("using {:?}", debug_method);
-
-    let gpu_profiler = GpuProfiler::new(Rc::clone(device.rc_gl()), debug_method);
-    #[cfg(feature = "capture")]
-    let read_fbo = device.create_fbo();
+    let gpu_profiler = device.create_gpu_profiler(options.enable_gpu_markers);
 
     let mut renderer = Renderer {
         result_rx,
@@ -780,6 +765,7 @@ pub fn create_webrender_instance(
         shaders,
         debug: debug::LazyInitializedDebugRenderer::new(),
         debug_flags: DebugFlags::empty(),
+        path_aa_samples: DEFAULT_PATH_AA_SAMPLES,
         profile: TransactionProfile::new(),
         frame_counter: 0,
         resource_upload_time: 0.0,
@@ -795,24 +781,27 @@ pub fn create_webrender_instance(
         vaos,
         gpu_buffer_texture_f: None,
         gpu_buffer_texture_f_too_large: 0,
+        gpu_buffer_last_data_f: Vec::new(),
         gpu_buffer_texture_i: None,
         gpu_buffer_texture_i_too_large: 0,
-        vertex_data_textures,
-        current_vertex_data_textures: 0,
+        gpu_buffer_last_data_i: Vec::new(),
+        gpu_buffer_texture_edges: None,
+        gpu_buffer_texture_edges_too_large: 0,
+        gpu_buffer_last_data_edges: Vec::new(),
+        vertex_data: vertex::VertexDataRing::new(),
         pipeline_info: PipelineInfo::default(),
         dither_matrix_texture,
         external_image_handler: None,
         size_of_ops: make_size_of_ops(),
         cpu_profiles: VecDeque::new(),
         gpu_profiles: VecDeque::new(),
-        texture_upload_pbo_pool,
+        frame_build_profiles: VecDeque::new(),
+        texture_upload_buffer_pool,
         staging_texture_pool,
         texture_resolver,
         renderer_errors: Vec::new(),
         async_frame_recorder: None,
         async_screenshots: None,
-        #[cfg(feature = "capture")]
-        read_fbo,
         #[cfg(feature = "replay")]
         owned_external_images: FastHashMap::default(),
         notifications: Vec::new(),
@@ -823,7 +812,9 @@ pub fn create_webrender_instance(
         documents_seen: FastHashSet::default(),
         force_redraw: true,
         compositor_config: options.compositor_config,
+        layer_tree: LayerTree::new(),
         current_compositor_kind: compositor_kind,
+        limit_sdr_yuv_external_composites: options.limit_sdr_yuv_external_composites,
         allocated_native_surfaces: FastHashSet::default(),
         debug_overlay_state: DebugOverlayState::new(),
         buffer_damage_tracker: BufferDamageTracker::default(),

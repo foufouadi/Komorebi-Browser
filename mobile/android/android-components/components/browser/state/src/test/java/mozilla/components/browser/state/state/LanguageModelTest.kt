@@ -42,8 +42,11 @@ class LanguageModelTest {
 
         // Simulated process state before syncing with the engine
         val processState =
-            if (options.operation == ModelOperation.DOWNLOAD) ModelState.DOWNLOAD_IN_PROGRESS
-            else ModelState.DELETION_IN_PROGRESS
+            if (options.operation == ModelOperation.DOWNLOAD) {
+                ModelState.DOWNLOAD_IN_PROGRESS
+            } else {
+                ModelState.DELETION_IN_PROGRESS
+            }
 
         val newModelState =
             LanguageModel.determineNewLanguageModelState(
@@ -77,8 +80,11 @@ class LanguageModelTest {
 
         // Simulated process state before syncing with the engine
         val processState =
-            if (options.operation == ModelOperation.DOWNLOAD) ModelState.DOWNLOAD_IN_PROGRESS
-            else ModelState.DELETION_IN_PROGRESS
+            if (options.operation == ModelOperation.DOWNLOAD) {
+                ModelState.DOWNLOAD_IN_PROGRESS
+            } else {
+                ModelState.DELETION_IN_PROGRESS
+            }
 
         val newModelState =
             LanguageModel.determineNewLanguageModelState(
@@ -138,8 +144,11 @@ class LanguageModelTest {
 
         // Simulated process state before syncing with the engine
         val processState =
-            if (options.operation == ModelOperation.DOWNLOAD) ModelState.DOWNLOAD_IN_PROGRESS
-            else ModelState.DELETION_IN_PROGRESS
+            if (options.operation == ModelOperation.DOWNLOAD) {
+                ModelState.DOWNLOAD_IN_PROGRESS
+            } else {
+                ModelState.DELETION_IN_PROGRESS
+            }
 
         val newModelState =
             LanguageModel.determineNewLanguageModelState(
@@ -172,8 +181,11 @@ class LanguageModelTest {
 
         // Simulated process state before syncing with the engine
         val processState =
-            if (options.operation == ModelOperation.DOWNLOAD) ModelState.DOWNLOAD_IN_PROGRESS
-            else ModelState.DELETION_IN_PROGRESS
+            if (options.operation == ModelOperation.DOWNLOAD) {
+                ModelState.DOWNLOAD_IN_PROGRESS
+            } else {
+                ModelState.DELETION_IN_PROGRESS
+            }
 
         val newModelState =
             LanguageModel.determineNewLanguageModelState(
@@ -197,8 +209,11 @@ class LanguageModelTest {
 
         // Simulated process state before syncing with the engine
         val processState =
-            if (options.operation == ModelOperation.DOWNLOAD) ModelState.DOWNLOAD_IN_PROGRESS
-            else ModelState.DELETION_IN_PROGRESS
+            if (options.operation == ModelOperation.DOWNLOAD) {
+                ModelState.DOWNLOAD_IN_PROGRESS
+            } else {
+                ModelState.DELETION_IN_PROGRESS
+            }
 
         val mockNonDownloadedPivot =
             listOf(

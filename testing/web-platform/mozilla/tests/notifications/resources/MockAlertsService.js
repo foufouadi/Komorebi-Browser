@@ -27,10 +27,37 @@ function mockServicesChromeScript() {
 
   const mockAlertsService = {
     showAlertWithCallbacks(alert, callbacks) {
+      // Remove properties of object that can't be sent across process boundary.
+      function sanitizeObject(object) {
+        if (object === null) {
+          return null;
+        }
+        const sanitized = {};
+        for (let [key, value] of Object.entries(object)) {
+          // Send spec of nsIURI.
+          if (value?.spec) {
+            value = value.spec;
+          }
+          if (typeof value === "function") {
+            continue;
+          }
+          if (typeof value === "object") {
+            value = sanitizeObject(value);
+          }
+          sanitized[key] = value;
+        }
+        return sanitized;
+      }
+      // data about this alert that can be queried by the content process
+      // with getNotificationData().
+      const data = sanitizeObject(alert);
+      data.body = data.text; // for consistency with Notification
+      data.actions = alert.actions.map(sanitizeObject);
       activeNotifications[alert.name] = {
         callbacks,
         title: alert.title,
         image: alert.image,
+        data,
       };
 
       // fake async alert show event
@@ -92,11 +119,14 @@ function mockServicesChromeScript() {
     mockAlertsService
   );
 
-  function clickNotifications(doClose) {
+  function clickNotifications({ doClose, appState }) {
     // Until we need to close a specific notification, just click them all.
     for (let [name, notification] of Object.entries(activeNotifications)) {
       let { callbacks } = notification;
-      callbacks.onAlertClick();
+      callbacks.onAlertClick(
+        null,
+        Ci.nsIAlertCallbacks[appState] ?? Ci.nsIAlertCallbacks.UNKNOWN
+      );
       if (doClose) {
         mockAlertsService.closeAlert(name);
       }
@@ -144,6 +174,10 @@ function mockServicesChromeScript() {
 
   addMessageListener("mock-alert-service:get-notification-ids", () =>
     Object.keys(activeNotifications)
+  );
+
+  addMessageListener("mock-alert-service:get-notification-data", () =>
+    Object.values(activeNotifications).map(value => value.data)
   );
 
   addMessageListener("mock-alert-service:get-icon-image", id => {
@@ -203,18 +237,18 @@ const MockAlertsService = {
         this._chromeScript = null;
       });
   },
-  async clickNotifications() {
+  async clickNotifications(appState) {
     // Most implementations of the nsIAlertsService automatically close upon click.
     await this._chromeScript.sendQuery(
       "mock-alert-service:click-notifications",
-      true
+      { doClose: true, appState }
     );
   },
-  async clickNotificationsWithoutClose() {
+  async clickNotificationsWithoutClose(appState) {
     // The implementation on macOS does not automatically close the notification.
     await this._chromeScript.sendQuery(
       "mock-alert-service:click-notifications",
-      false
+      { doClose: false, appState }
     );
   },
   async closeNotifications() {
@@ -245,11 +279,24 @@ const MockAlertsService = {
       "mock-alert-service:get-notification-ids"
     );
   },
-  async getIconImage(id) {
+  async getNotificationData() {
     return await this._chromeScript.sendQuery(
+      "mock-alert-service:get-notification-data"
+    );
+  },
+  async getIconImage(id) {
+    const pngData = await this._chromeScript.sendQuery(
       "mock-alert-service:get-icon-image",
       id
     );
+    if (!pngData) {
+      return null;
+    }
+    const imageDecoder = new ImageDecoder({ type: "image/png", data: pngData });
+    const {image} = await imageDecoder.decode();
+    const rgba = new Uint8Array(image.allocationSize());
+    image.copyTo(rgba, {format: "RGBA"});
+    return rgba;
   },
   async setHistory(ids) {
     return await this._chromeScript.sendQuery(

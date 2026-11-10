@@ -41,8 +41,6 @@ class WasmGcObject;
 class WasmStructObject;
 class WasmArrayObject;
 
-struct AllocationMetadataBuilder;
-
 namespace gc {
 class StoreBuffer;
 }  // namespace gc
@@ -120,6 +118,13 @@ class alignas(16) Instance {
 
   // Set to 1 when wasm should call CheckForInterrupt.
   mozilla::Atomic<uint32_t, mozilla::Relaxed> interrupt_;
+
+#if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86)
+  // Whether wasmMxcsr_ has been set to something other than ieeeMxcsr_.
+  // This is a hot field, so we separate it from the mxcsr fields below to
+  // stay in the common jit field area.
+  uint32_t hasWasmMxcsr_;
+#endif
 
   // The address of the realm()->zone()->needsMarkingBarrier(). This is
   // specific to this instance and not a process wide field, and so it cannot
@@ -207,6 +212,17 @@ class alignas(16) Instance {
   // The exclusive maximum index of a global that has been initialized so far.
   uint32_t maxInitializedGlobalsIndexPlus1_;
 
+#if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86)
+  // Precomputed full x86 MXCSR values for the wasm boundary stubs to load
+  // directly. `ieee` is the ambient MXCSR snapshotted at instantiation that
+  // should be restored whenever leaving wasm JIT code. `wasm` is a possibly
+  // modified MXCSR that should be switched to when entering wasm JIT code.
+  //
+  // These are the same if `!hasWasmMxcsr_`.
+  uint32_t ieeeMxcsr_;
+  uint32_t wasmMxcsr_;
+#endif
+
   // Pointer that should be freed (due to padding before the Instance).
   void* allocatedBase_;
 
@@ -216,7 +232,7 @@ class alignas(16) Instance {
 #ifdef JS_GC_ZEAL
   const void* addressOfGCZealModeBits_;
 #endif
-  const js::AllocationMetadataBuilder* allocationMetadataBuilder_;
+  uint32_t hasAllocationMetadataBuilder_;
 
   // A copy of the runtime's addressOfLastBufferedWholeCell, used for whole-cell
   // store buffer entries.
@@ -318,11 +334,16 @@ class alignas(16) Instance {
   static constexpr size_t offsetOfInterrupt() {
     return offsetof(Instance, interrupt_);
   }
+#if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86)
+  static constexpr size_t offsetOfHasWasmMxcsr() {
+    return offsetof(Instance, hasWasmMxcsr_);
+  }
+#endif
   static constexpr size_t offsetOfAllocSites() {
     return offsetof(Instance, allocSites_);
   }
-  static constexpr size_t offsetOfAllocationMetadataBuilder() {
-    return offsetof(Instance, allocationMetadataBuilder_);
+  static constexpr size_t offsetOfHasAllocationMetadataBuilder() {
+    return offsetof(Instance, hasAllocationMetadataBuilder_);
   }
   static constexpr size_t offsetOfAddressOfLastBufferedWholeCell() {
     return offsetof(Instance, addressOfLastBufferedWholeCell_);
@@ -351,6 +372,14 @@ class alignas(16) Instance {
   static constexpr size_t offsetOfCallRefMetrics() {
     return offsetof(Instance, callRefMetrics_);
   }
+#if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86)
+  static constexpr size_t offsetOfIeeeMxcsr() {
+    return offsetof(Instance, ieeeMxcsr_);
+  }
+  static constexpr size_t offsetOfWasmMxcsr() {
+    return offsetof(Instance, wasmMxcsr_);
+  }
+#endif
   static constexpr size_t offsetOfData() { return offsetof(Instance, data_); }
   static constexpr size_t offsetInData(size_t offset) {
     return offsetOfData() + offset;
@@ -392,9 +421,8 @@ class alignas(16) Instance {
   bool isInterrupted() const;
   void resetInterrupt();
 
-  void setAllocationMetadataBuilder(
-      const js::AllocationMetadataBuilder* allocationMetadataBuilder) {
-    allocationMetadataBuilder_ = allocationMetadataBuilder;
+  void setHasAllocationMetadataBuilder(bool hasBuilder) {
+    hasAllocationMetadataBuilder_ = hasBuilder;
   }
 
   int32_t computeInitialHotnessCounter(uint32_t funcIndex,

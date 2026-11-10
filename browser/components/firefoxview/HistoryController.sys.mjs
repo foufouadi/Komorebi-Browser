@@ -5,11 +5,19 @@
 const lazy = {};
 
 import { getLogger } from "chrome://browser/content/firefoxview/helpers.mjs";
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
 ChromeUtils.defineESModuleGetters(lazy, {
   PlacesQuery: "resource://gre/modules/PlacesQuery.sys.mjs",
   PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
+  ProfileAge: "resource://gre/modules/ProfileAge.sys.mjs",
 });
+
+const HAS_IMPORTED_HISTORY_PREF = "browser.migrate.interactions.history";
+const IMPORT_HISTORY_DISMISSED_PREF =
+  "browser.tabs.firefox-view.importHistory.dismissed";
+const IMPORT_BANNER_PROFILE_AGE_CUTOFF_DAYS = 8;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const HISTORY_MAP_L10N_IDS = {
   sidebar: {
@@ -53,6 +61,7 @@ export class HistoryController {
   host;
   searchQuery;
   sortOption;
+  #profileAge = Infinity;
   #todaysDate;
   #yesterdaysDate;
 
@@ -88,15 +97,71 @@ export class HistoryController {
     };
     this.host = host;
 
+    XPCOMUtils.defineLazyPreferenceGetter(
+      this,
+      "importHistoryDismissed",
+      IMPORT_HISTORY_DISMISSED_PREF,
+      false,
+      () => host.requestUpdate()
+    );
+    XPCOMUtils.defineLazyPreferenceGetter(
+      this,
+      "hasImportedHistory",
+      HAS_IMPORTED_HISTORY_PREF,
+      false,
+      () => host.requestUpdate()
+    );
+
     host.addController(this);
   }
 
   hostConnected() {
     this.placesQuery.observeHistory(historyMap => this.updateCache(historyMap));
+    if (!this.importHistoryDismissed && !this.hasImportedHistory) {
+      this.#updateProfileAge();
+    }
   }
 
   hostDisconnected() {
     this.placesQuery.close();
+  }
+
+  async #updateProfileAge() {
+    const profileAccessor = await lazy.ProfileAge();
+    const profileCreateTime = await profileAccessor.created;
+    this.profileAge = (Date.now() - profileCreateTime) / MS_PER_DAY;
+  }
+
+  /**
+   * The age of the current profile in days.
+   *
+   * @type {number}
+   */
+  get profileAge() {
+    return this.#profileAge;
+  }
+
+  set profileAge(days) {
+    this.#profileAge = days;
+    this.host.requestUpdate();
+  }
+
+  /**
+   * Whether to prompt the user to import history from another browser.
+   *
+   * @type {boolean}
+   */
+  get shouldShowImportBanner() {
+    return (
+      this.profileAge < IMPORT_BANNER_PROFILE_AGE_CUTOFF_DAYS &&
+      !this.hasImportedHistory &&
+      !this.importHistoryDismissed &&
+      Services.policies.isAllowed("profileImport")
+    );
+  }
+
+  dismissImportHistory() {
+    Services.prefs.setBoolPref(IMPORT_HISTORY_DISMISSED_PREF, true);
   }
 
   deleteFromHistory() {
@@ -185,14 +250,21 @@ export class HistoryController {
    */
   #normalizeVisit(visit) {
     visit.time = visit.date.getTime();
-    visit.pageGuid = visit.guid;
-    visit.guid = `${visit.guid}|${visit.time}`;
+    // Visits are cached and can be normalized more than once, so derive `guid`
+    // from the page guid captured on the first pass rather than from the
+    // (already time-suffixed) `guid`, which would otherwise keep growing.
+    visit.pageGuid ??= visit.guid;
+    // A row identifies a page, and for the date sorts a page per day, since
+    // that is how the query groups visits. Keying on the visit time instead
+    // would change a row's identity every time the page is visited again.
+    visit.guid =
+      this.sortOption === "date" || this.sortOption === "datesite"
+        ? `${visit.pageGuid}|${this.placesQuery.getStartOfDayTimestamp(
+            visit.date
+          )}`
+        : visit.pageGuid;
     visit.title = visit.title || visit.url;
     visit.icon = `page-icon:${visit.url}`;
-    visit.primaryL10nId = "fxviewtabrow-tabs-list-tab";
-    visit.primaryL10nArgs = JSON.stringify({
-      targetURI: visit.url,
-    });
     visit.secondaryL10nId = "fxviewtabrow-options-menu-button";
     visit.secondaryL10nArgs = JSON.stringify({
       tabTitle: visit.title || visit.url,
@@ -233,6 +305,7 @@ export class HistoryController {
         this.#setTodaysDate();
         return this.#getVisitsForDateSite(historyMap);
       case "lastvisited":
+      case "mostvisited":
         return this.#getVisitsForLastVisited(historyMap);
       default:
         return [];

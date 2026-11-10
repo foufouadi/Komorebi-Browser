@@ -57,9 +57,10 @@ class TestSessionRestoreClosedTabs(SessionStoreTestCase):
             """
             let resolve = arguments[0];
             let tab = gBrowser.tabs[1];
+            let browser = tab.linkedBrowser;
             gBrowser.removeTab(tab);
-            let { TabStateFlusher } = ChromeUtils.importESModule("resource:///modules/sessionstore/TabStateFlusher.sys.mjs");
-            TabStateFlusher.flush(tab).then(resolve);
+            let { TabStateFlusher } = ChromeUtils.importESModule("moz-src:///browser/components/sessionstore/TabStateFlusher.sys.mjs");
+            TabStateFlusher.flush(browser).then(resolve);
             """
         )
 
@@ -70,7 +71,7 @@ class TestSessionRestoreClosedTabs(SessionStoreTestCase):
         self.assertEqual(
             self.marionette.execute_script(
                 """
-            let { SessionStore } = ChromeUtils.importESModule("resource:///modules/sessionstore/SessionStore.sys.mjs");
+            let { SessionStore } = ChromeUtils.importESModule("moz-src:///browser/components/sessionstore/SessionStore.sys.mjs");
             let state = JSON.parse(SessionStore.getBrowserState());
             return state.windows[0]._closedTabs.length;
             """
@@ -82,7 +83,7 @@ class TestSessionRestoreClosedTabs(SessionStoreTestCase):
         self.assertEqual(
             self.marionette.execute_script(
                 """
-            let { SessionStore } = ChromeUtils.importESModule("resource:///modules/sessionstore/SessionStore.sys.mjs");
+            let { SessionStore } = ChromeUtils.importESModule("moz-src:///browser/components/sessionstore/SessionStore.sys.mjs");
             let state = JSON.parse(SessionStore.getBrowserState());
             return state.windows[0]._closedTabs[0].removeAfterRestore;
             """
@@ -129,9 +130,10 @@ class TestSessionRestoreClosedTabs(SessionStoreTestCase):
             """
             let resolve = arguments[0];
             let tab = gBrowser.tabs[1];
+            let browser = tab.linkedBrowser;
             gBrowser.removeTab(tab);
-            let { TabStateFlusher } = ChromeUtils.importESModule("resource:///modules/sessionstore/TabStateFlusher.sys.mjs");
-            TabStateFlusher.flush(tab).then(resolve);
+            let { TabStateFlusher } = ChromeUtils.importESModule("moz-src:///browser/components/sessionstore/TabStateFlusher.sys.mjs");
+            TabStateFlusher.flush(browser).then(resolve);
             """
         )
 
@@ -143,7 +145,7 @@ class TestSessionRestoreClosedTabs(SessionStoreTestCase):
                 """
                 const lazy = {};
                 ChromeUtils.defineESModuleGetters(lazy, {
-                    SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
+                    SessionStore: "moz-src:///browser/components/sessionstore/SessionStore.sys.mjs",
                 });
                 function observeClosedTabsChange() {
                     return new Promise(resolve => {

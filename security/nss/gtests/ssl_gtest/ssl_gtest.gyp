@@ -13,6 +13,7 @@
       'sources': [
         'bloomfilter_unittest.cc',
         'libssl_internals.c',
+        '<(DEPTH)/gtests/common/pk11_import.cc',
         'selfencrypt_unittest.cc',
         'ssl_0rtt_unittest.cc',
         'ssl_aead_unittest.cc',
@@ -42,6 +43,7 @@
         'ssl_misc_unittest.cc',
         'ssl_reconfig_unittest.cc',
         'ssl_option_unittest.cc',
+        'ssl_peer_cert_unittest.cc',
         'ssl_record_unittest.cc',
         'ssl_recordsep_unittest.cc',
         'ssl_recordsize_unittest.cc',
@@ -61,6 +63,7 @@
         'tls_filter.cc',
         'tls_grease_unittest.cc',
         'tls_hkdf_unittest.cc',
+        'tls_mldsa_unittest.cc',
         'tls_mlkem_unittest.cc',
         'tls_protect.cc',
         'tls_psk_unittest.cc',
@@ -100,11 +103,6 @@
         [ 'disable_dbm==0', {
           'dependencies': [
             '<(DEPTH)/lib/dbm/src/src.gyp:dbm',
-          ],
-        }],
-        [ 'disable_kyber==0', {
-          'sources': [
-             'tls_xyber_unittest.cc',
           ],
         }],
         [ 'enable_sslkeylogfile==1 and sanitizer_flags==0', {

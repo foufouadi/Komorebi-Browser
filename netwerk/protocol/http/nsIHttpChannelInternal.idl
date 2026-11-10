@@ -16,7 +16,6 @@ namespace mozilla {
 class TimeStamp;
 namespace net {
 class nsHttpConnectionInfo;
-class WebSocketConnectionBase;
 class EarlyHintConnectArgs;
 }
 namespace dom {
@@ -28,7 +27,6 @@ enum class RequestMode : uint8_t;
 [ptr] native StringArray(nsTArray<nsCString>);
 [ref] native CStringArrayRef(const nsTArray<nsCString>);
 [ref] native securityMessagesArray(nsCOMArray<nsISecurityConsoleMessage>);
-[ptr] native WebSocketConnectionBase(mozilla::net::WebSocketConnectionBase);
 
 native TimeStamp(mozilla::TimeStamp);
 native RequestMode(mozilla::dom::RequestMode);
@@ -55,8 +53,6 @@ interface nsIHttpUpgradeListener : nsISupports
                                          in nsIAsyncOutputStream aSocketOut);
 
     [must_use] void onUpgradeFailed(in nsresult aErrorCode);
-
-    [noscript] void onWebSocketConnectionAvailable(in WebSocketConnectionBase aConnection);
 };
 
 /**
@@ -90,16 +86,6 @@ interface nsIHttpChannelInternal : nsISupports
      */
     [noscript, must_use]
     void takeAllSecurityMessages(in securityMessagesArray aMessages);
-
-    /**
-     * Helper method to set a cookie with a consumer-provided
-     * cookie header, _but_ using the channel's other information
-     * (URI's, prompters, date headers etc).
-     *
-     * @param aCookieHeader
-     *        The cookie header values to be parsed.
-     */
-    [must_use] void setCookieHeaders(in Array<ACString> aCookieHeaders);
 
     /**
      * Returns true in case this channel is used for auth;
@@ -250,12 +236,6 @@ interface nsIHttpChannelInternal : nsISupports
     [must_use] attribute unsigned long initialRwin;
 
     /**
-     * Get value of the URI passed to nsIHttpChannel.redirectTo() if any.
-     * May return null when redirectTo() has not been called.
-     */
-    [must_use] readonly attribute nsIURI apiRedirectToURI;
-
-    /**
      * Enable/Disable use of Alternate Services with this channel.
      * The network.http.altsvc.enabled preference is still a pre-requisite.
      */
@@ -315,11 +295,6 @@ interface nsIHttpChannelInternal : nsISupports
      * contains the reason why that was skipped.
      */
     [must_use] readonly attribute nsITRRSkipReason_value trrSkipReason;
-
-    /**
-     * True if channel is loaded by socket process.
-     */
-    [must_use] readonly attribute boolean isLoadedBySocketProcess;
 
     /**
      * Set to true if the channel is an OCSP check.

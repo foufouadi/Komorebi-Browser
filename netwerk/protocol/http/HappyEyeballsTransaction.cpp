@@ -11,6 +11,7 @@
 #include "HttpConnectionBase.h"
 #include "HttpLog.h"
 #include "nsHttpConnection.h"
+#include "nsHttpConnectionInfo.h"
 #include "nsHttpTransaction.h"
 #include "nsITLSSocketControl.h"
 #include "nsITransportSecurityInfo.h"
@@ -82,6 +83,17 @@ void HappyEyeballsTransaction::OnTransportStatus(nsITransport* aTransport,
 
 bool HappyEyeballsTransaction::Do0RTT(bool aCanSendEarlyData) {
   if (!mZeroRttHandle) {
+    return false;
+  }
+
+  // For a proxy CONNECT / MASQUE (CONNECT-UDP) connection, this is the *outer*
+  // connection to the proxy. The real transaction's request must travel through
+  // the inner tunnel, not as TLS early data on the outer proxy hop. Mirror the
+  // legacy path, which drives the outer handshake with a NullHttpTransaction
+  // (no request data): decline 0-RTT here so the outer connection establishes
+  // cleanly and is then converted to a wildcard proxy connection, after which
+  // the real transaction is dispatched through CreateTunnelStream.
+  if (nsHttpConnectionInfo* ci = ConnectionInfo(); ci && ci->UsingConnect()) {
     return false;
   }
 
@@ -241,6 +253,15 @@ void HappyEyeballsTransaction::Transition(State aNext,
         if (RefPtr<nsHttpConnection> h1 = do_QueryObject(conn)) {
           h1->SwapTransaction(this, mRealTxn);
         }
+      }
+
+      // For an accepted 0-RTT winner the real txn's request was already sent as
+      // early data, so its ReadSegments never runs again to refresh the
+      // security info the way Finish0RTT would. Now that the connection is
+      // attached, do that refresh so the channel doesn't see a null
+      // securityInfo on the resumed connection.
+      if (Entered0RTT()) {
+        mRealTxn->RefreshSecurityInfoAfter0RTTAdopt();
       }
 
       SetConnection(nullptr);

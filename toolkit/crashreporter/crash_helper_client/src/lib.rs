@@ -5,14 +5,15 @@
 use anyhow::{bail, Result};
 use crash_helper_common::{
     messages::{self},
-    ApplicationInfo, BreakpadString, GeckoChildId, IPCClientChannel, IPCConnector, RawIPCConnector,
+    ApplicationInfo, BreakpadString, FromRawThreadHandle, GeckoChildId, IPCClientChannel,
+    IPCConnector, RawIPCConnector, RawThreadHandle, ThreadHandle,
 };
 #[cfg(any(target_os = "android", target_os = "linux"))]
 use minidump_writer::minidump_writer::{AuxvType, DirectAuxvDumpInfo};
 #[cfg(target_os = "android")]
 use std::os::fd::RawFd;
 #[cfg(target_os = "windows")]
-use std::os::windows::io::{BorrowedHandle, OwnedHandle, RawHandle};
+use std::os::windows::io::{AsRawHandle, BorrowedHandle, OwnedHandle, RawHandle};
 use std::{
     ffi::{c_char, CString, OsString},
     hint::spin_loop,
@@ -26,7 +27,10 @@ use std::{
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::{
     Foundation::HANDLE,
-    System::Diagnostics::Debug::{CONTEXT, EXCEPTION_RECORD},
+    System::{
+        Diagnostics::Debug::{CONTEXT, EXCEPTION_RECORD},
+        Threading::{GetProcessId, GetThreadId},
+    },
 };
 
 extern crate num_traits;
@@ -42,10 +46,17 @@ pub struct CrashHelperClient {
 }
 
 impl CrashHelperClient {
-    fn set_crash_report_path(&mut self, path: OsString) -> Result<()> {
-        let message = messages::SetCrashReportPath::new(path);
+    fn set_path(&self, path_type: messages::PathType, path: OsString) -> Result<()> {
+        let message = messages::SetPath::new(path_type, path);
         self.connector.send_message(message)?;
         Ok(())
+    }
+
+    fn get_path(&self, path_type: messages::PathType) -> Result<OsString> {
+        let message = messages::GetPath::new(path_type);
+        self.connector.send_message(message)?;
+        let reply = self.connector.recv_reply::<messages::PathReply>()?;
+        Ok(reply.path)
     }
 
     fn register_child_process(&mut self, id: GeckoChildId) -> Result<IPCConnector> {
@@ -90,9 +101,7 @@ impl CrashHelperClient {
         let message = messages::TransferMinidump::new(id);
         self.connector.send_message(message)?;
 
-        let reply = self
-            .connector
-            .recv_reply::<messages::TransferMinidumpReply>()?;
+        let reply = self.connector.recv_reply::<messages::MinidumpReply>()?;
 
         if reply.path.is_empty() {
             // TODO: We should return Result<Option<CrashReport>> instead of
@@ -103,6 +112,28 @@ impl CrashHelperClient {
         Ok(CrashReport {
             path: reply.path.into_raw(),
             error: reply.error.map_or(null_mut(), |error| error.into_raw()),
+        })
+    }
+
+    fn generate_crash_report(
+        &mut self,
+        id: GeckoChildId,
+        target_thread: ThreadHandle,
+    ) -> Result<CrashReport> {
+        let message = messages::GenerateMinidump::new(id, target_thread);
+        self.connector.send_message(message)?;
+
+        let reply = self.connector.recv_reply::<messages::MinidumpReply>()?;
+
+        if reply.path.is_empty() {
+            // TODO: We should return Result<Option<CrashReport>> instead of
+            // this. Semantics would be better once we interact with Rust
+            bail!("Minidump for id {id:} could not be generated");
+        }
+
+        Ok(CrashReport {
+            path: reply.path.into_raw(),
+            error: reply.error.map_or(null_mut(), CString::into_raw),
         })
     }
 }
@@ -211,15 +242,50 @@ pub struct CrashReport {
 ///
 /// The `client` parameter must be a valid pointer to the crash helper client
 /// object returned by the [`crash_helper_launch()`] or
-/// [`crash_helper_connect()`] functions.
+/// [`crash_helper_connect()`] functions. The `path` parameter must be a valid
+/// pointer to a platform-dependent nul-terminated string.
 #[no_mangle]
 pub unsafe extern "C" fn set_crash_report_path(
-    client: *mut CrashHelperClient,
+    client: *const CrashHelperClient,
     path: *const BreakpadChar,
 ) -> bool {
-    let client = client.as_mut().unwrap();
+    let client = client.as_ref().unwrap();
     let path = <OsString as BreakpadString>::from_ptr(path);
-    client.set_crash_report_path(path).is_ok()
+    client
+        .set_path(messages::PathType::CrashReports, path)
+        .is_ok()
+}
+
+/// Retrieves the path where crash reports are generated.
+///
+/// The returned path is a pointer to a nul-terminated UTF8 string on various
+/// Unixes (including macOS) and an UTF16 string on Windows.
+///
+/// # Safety
+///
+/// The `client` parameter must be a valid pointer to the crash helper client
+/// object returned by the [`crash_helper_launch()`] or
+/// [`crash_helper_connect()`] functions.
+#[no_mangle]
+pub unsafe extern "C" fn get_crash_report_path(
+    client: *const CrashHelperClient,
+) -> *mut BreakpadChar {
+    let client = client.as_ref().unwrap();
+    let path = client
+        .get_path(messages::PathType::CrashReports)
+        .unwrap_or(OsString::new());
+    BreakpadString::into_raw(path)
+}
+
+/// Releases a path obtained via [`get_crash_report_path()`]
+///
+/// # Safety
+///
+/// The `path` argument must be a pointer returned by the
+/// [`get_crash_report_path()`] function.
+#[no_mangle]
+pub unsafe extern "C" fn release_path(path: *mut BreakpadChar) {
+    let _string = <OsString as BreakpadString>::from_raw(path);
 }
 
 /// Creates a new IPC channel to connect a soon-to-be-created child process
@@ -297,6 +363,31 @@ pub unsafe extern "C" fn release_crash_report(crash_report: *mut CrashReport) {
     }
 }
 
+/// Generate a minidump for the process specified by `id`.
+///
+/// # Safety
+///
+/// The `client` parameter must be a valid pointer to the crash helper client
+/// object returned by the [`crash_helper_launch()`] or
+/// [`crash_helper_connect()`] functions. The `target_thread` parameter must be
+/// a valid platform-specific thread handle.
+#[no_mangle]
+pub unsafe extern "C" fn generate_crash_report(
+    client: *mut CrashHelperClient,
+    id: GeckoChildId,
+    target_thread: RawThreadHandle,
+) -> *mut CrashReport {
+    let client = client.as_mut().unwrap();
+    let target_thread = ThreadHandle::from_raw_handle(target_thread);
+    if let Ok(crash_report) = client.generate_crash_report(id, target_thread) {
+        // The object will be owned by the C++ code from now on, until it is
+        // passed back in `release_crash_report`.
+        Box::into_raw(Box::new(crash_report))
+    } else {
+        null_mut()
+    }
+}
+
 /// Report an exception to the crash manager that has been captured outside of
 /// Firefox processes, typically within the Windows Error Reporting runtime
 /// exception module.
@@ -308,15 +399,25 @@ pub unsafe extern "C" fn release_crash_report(crash_report: *mut CrashReport) {
 #[cfg(target_os = "windows")]
 pub unsafe fn report_external_exception(
     main_process_pid: Pid,
-    process: OwnedHandle,
-    thread: OwnedHandle,
+    process: BorrowedHandle,
+    thread: BorrowedHandle,
     exception_record_ptr: *mut EXCEPTION_RECORD,
     context_ptr: *mut CONTEXT,
 ) {
     let exception_records = collect_exception_records(exception_record_ptr);
     let context = unsafe { context_ptr.read() };
+    // SAFETY: The `process` handle is guaranteed to be valid.
+    let pid = match unsafe { GetProcessId(process.as_raw_handle() as HANDLE) } {
+        0 => return,
+        pid => pid,
+    };
+    // SAFETY: The `thread` handle is guaranteed to be valid.
+    let tid = match unsafe { GetThreadId(thread.as_raw_handle() as HANDLE) } {
+        0 => return,
+        tid => tid,
+    };
     let message =
-        messages::WindowsErrorReportingMinidump::new(process, thread, exception_records, context);
+        messages::WindowsErrorReportingMinidump::new(pid, tid, exception_records, context);
 
     // In the code below we connect to the crash helper, send our message and
     // wait for a reply before returning, but we ignore errors because we

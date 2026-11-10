@@ -12,6 +12,7 @@
 #include "PKCS11ModuleDB.h"
 #include "PKCS11Token.h"
 #include "ScopedNSSTypes.h"
+#include "certdb.h"
 #include "mozilla/ipc/Endpoint.h"
 #include "nsDebugImpl.h"
 
@@ -349,6 +350,192 @@ ipc::IPCResult PKCS11ModuleChild::RecvCancelProtectedAuth(uint64_t id) {
         Some(std::make_pair(ProtectedAuthState::Cancelled, id));
     authPromptMonitorLock.Notify();
   }
+  return IPC_OK();
+}
+
+enum class Trust {
+  Unknown,
+  Anchor,
+  Distrusted,
+};
+
+Trust GetTrustForCert(CERTCertificate* cert) {
+  CERTCertTrust trust;
+  // CERT_GetCertTrust returns SECSuccess iff there is a trust record. If there
+  // isn't a trust record, trust is unknown.
+  if (CERT_GetCertTrust(cert, &trust) != SECSuccess) {
+    return Trust::Unknown;
+  }
+  uint32_t flags = SEC_GET_TRUST_FLAGS(&trust, trustSSL);
+  // If the terminal bit is set and the trust bit is not set, this certificate
+  // is actively distrusted.
+  if ((flags & (CERTDB_TRUSTED_CA | CERTDB_TERMINAL_RECORD)) ==
+      CERTDB_TERMINAL_RECORD) {
+    return Trust::Distrusted;
+  }
+  // If the trust bit is set, this is a trust anchor.
+  if (flags & CERTDB_TRUSTED_CA) {
+    return Trust::Anchor;
+  }
+  // Otherwise, trust is unknown.
+  return Trust::Unknown;
+}
+
+ipc::IPCResult PKCS11ModuleChild::RecvFindObjects(
+    SearchingFor aSearchingFor, FindObjectsResolver&& aResolver) {
+  mAuthTaskQueue->Dispatch(NS_NewRunnableFunction(
+      __func__, [searchingFor(aSearchingFor), self = RefPtr{this},
+                 resolver(std::move(aResolver))] {
+        nsTArray<CryptokiObject> objects;
+        PK11CertListType certListType;
+        switch (searchingFor) {
+          case SearchingFor::ClientCertificates:
+            // Using `PK11CertListUserUnique` would make the most sense
+            // here, but that turns out to be too conservative in terms of
+            // what NSS considers a "client certificate" to be. Instead
+            // just search for all certificates.
+            certListType = PK11CertListUnique;
+            break;
+          case SearchingFor::CACertificates:
+            certListType = PK11CertListCAUnique;
+            break;
+        }
+        UniqueCERTCertList nssCertificates(
+            PK11_ListCerts(certListType, self.get()));
+        if (nssCertificates.get()) {
+          for (CERTCertListNode* node = CERT_LIST_HEAD(nssCertificates.get());
+               !CERT_LIST_END(node, nssCertificates.get());
+               node = CERT_LIST_NEXT(node)) {
+            Trust trust = GetTrustForCert(node->cert);
+            // Don't expose actively distrusted certificates.
+            if (trust == Trust::Distrusted) {
+              continue;
+            }
+            Certificate certificate;
+            certificate.der().AppendElements(node->cert->derCert.data,
+                                             node->cert->derCert.len);
+            certificate.serverAuthTrustAnchor() = trust == Trust::Anchor;
+            objects.AppendElement(std::move(certificate));
+
+            // If not searching for client certificates, don't look for a
+            // corresponding private key.
+            if (searchingFor != SearchingFor::ClientCertificates) {
+              continue;
+            }
+            // If a certificate has a corresponding private key, expose the
+            // corresponding public key.
+            UniqueSECKEYPrivateKey privateKey(
+                PK11_FindKeyByAnyCert(node->cert, self.get()));
+            if (!privateKey) {
+              continue;
+            }
+            UniqueSECKEYPublicKey publicKey(CERT_ExtractPublicKey(node->cert));
+            if (!publicKey) {
+              continue;
+            }
+            nsTArray<uint8_t> certDER(node->cert->derCert.data,
+                                      node->cert->derCert.len);
+            switch (SECKEY_GetPublicKeyType(publicKey.get())) {
+              case rsaKey:
+              case rsaPssKey: {
+                nsTArray<uint8_t> modulus(publicKey->u.rsa.modulus.data,
+                                          publicKey->u.rsa.modulus.len);
+                RSAKey rsakey(modulus, certDER);
+                objects.AppendElement(std::move(rsakey));
+                break;
+              }
+              case ecKey: {
+                nsTArray<uint8_t> params(publicKey->u.ec.DEREncodedParams.data,
+                                         publicKey->u.ec.DEREncodedParams.len);
+                ECKey eckey(params, certDER);
+                objects.AppendElement(std::move(eckey));
+                break;
+              }
+              default:
+                break;
+            }
+          }
+        }
+        self->mTaskQueue->Dispatch(NS_NewRunnableFunction(
+            __func__,
+            [objects(std::move(objects)), resolver(std::move(resolver))] {
+              resolver(std::move(objects));
+            }));
+      }));
+  return IPC_OK();
+}
+
+static void SignDataGivenCertificate(const nsTArray<uint8_t>& certificate,
+                                     const nsTArray<uint8_t>& data,
+                                     const nsTArray<uint8_t>& params,
+                                     nsTArray<uint8_t>& signature, void* ctx) {
+  signature.Clear();
+  SECItem certItem = {siBuffer, const_cast<uint8_t*>(certificate.Elements()),
+                      static_cast<unsigned int>(certificate.Length())};
+  UniqueCERTCertificate cert(CERT_NewTempCertificate(
+      CERT_GetDefaultCertDB(), &certItem, nullptr, false, true));
+  if (!cert) {
+    return;
+  }
+  UniqueSECKEYPrivateKey key(PK11_FindKeyByAnyCert(cert.get(), ctx));
+  if (!key) {
+    return;
+  }
+  SECItem hashItem = {siBuffer, const_cast<uint8_t*>(data.Elements()),
+                      static_cast<unsigned int>(data.Length())};
+  SECItem paramsItem = {siBuffer, const_cast<uint8_t*>(params.Elements()),
+                        static_cast<unsigned int>(params.Length())};
+  SECItem* paramsPtr = params.Length() > 0 ? &paramsItem : nullptr;
+  CK_MECHANISM_TYPE mechanism;
+  switch (key->keyType) {
+    case ecKey:
+      mechanism = CKM_ECDSA;
+      break;
+    case rsaKey:
+      // If we have params, this is RSA-PSS.
+      if (params.Length() > 0) {
+        mechanism = CKM_RSA_PKCS_PSS;
+      } else {
+        // If this is a DigestInfo or a TLS 1.0 MD5/SHA1 hash, this is RSA-PKCS.
+        // Otherwise, this is an emsa-pss-encoded digest that should be signed
+        // with raw RSA.
+        UniqueSGNDigestInfo digestInfo(SGN_DecodeDigestInfo(&hashItem));
+        if (digestInfo || data.Length() == 36) {
+          mechanism = CKM_RSA_PKCS;
+        } else {
+          mechanism = CKM_RSA_X_509;
+        }
+      }
+      break;
+    default:
+      return;
+  }
+  uint32_t len = PK11_SignatureLen(key.get());
+  UniqueSECItem sig(::SECITEM_AllocItem(nullptr, nullptr, len));
+  SECStatus srv = PK11_SignWithMechanism(key.get(), mechanism, paramsPtr,
+                                         sig.get(), &hashItem);
+  if (srv != SECSuccess) {
+    return;
+  }
+  signature.AppendElements(sig->data, sig->len);
+}
+
+ipc::IPCResult PKCS11ModuleChild::RecvSign(nsTArray<uint8_t> aCertificate,
+                                           nsTArray<uint8_t> aData,
+                                           nsTArray<uint8_t> aParams,
+                                           SignResolver&& aResolver) {
+  mAuthTaskQueue->Dispatch(NS_NewRunnableFunction(
+      __func__, [self = RefPtr{this}, certificate(std::move(aCertificate)),
+                 data(std::move(aData)), params(std::move(aParams)),
+                 resolver(std::move(aResolver))] {
+        nsTArray<uint8_t> signature;
+        SignDataGivenCertificate(certificate, data, params, signature, self);
+        self->mTaskQueue->Dispatch(NS_NewRunnableFunction(
+            __func__,
+            [signature(std::move(signature)), resolver(std::move(resolver))] {
+              resolver(std::move(signature));
+            }));
+      }));
   return IPC_OK();
 }
 

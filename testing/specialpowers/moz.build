@@ -5,8 +5,6 @@
 XPI_NAME = "specialpowers"
 XPI_PKGNAME = "specialpowers@mozilla.org"
 
-USE_EXTENSION_MANIFEST = True
-
 FINAL_TARGET_FILES += [
     "api.js",
     "manifest.json",
@@ -23,7 +21,6 @@ modules = [
     "content/ContentTaskUtils.sys.mjs",
     "content/MockColorPicker.sys.mjs",
     "content/MockFilePicker.sys.mjs",
-    "content/MockPermissionPrompt.sys.mjs",
     "content/MockPromptCollection.sys.mjs",
     "content/MockSound.sys.mjs",
     "content/SpecialPowersChild.sys.mjs",

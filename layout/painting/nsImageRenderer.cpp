@@ -16,6 +16,7 @@
 #include "gfxContext.h"
 #include "gfxDrawable.h"
 #include "mozilla/ISVGDisplayableFrame.h"
+#include "mozilla/SVGImageContext.h"
 #include "mozilla/SVGIntegrationUtils.h"
 #include "mozilla/SVGObserverUtils.h"
 #include "mozilla/SVGPaintServerFrame.h"
@@ -77,6 +78,7 @@ struct SymbolicImageEntry {
 struct SymbolicImageCache final
     : public mozilla::MruCache<SymbolicImageKey, SymbolicImageEntry,
                                SymbolicImageCache, 8> {
+  static bool IsEmpty(const ValueType& aVal) { return !std::get<0>(aVal.mKey); }
   static HashNumber Hash(const KeyType& aKey) {
     return AddToHash(std::get<0>(aKey)->hash(),
                      HashGeneric(std::get<1>(aKey), std::get<2>(aKey)));
@@ -116,7 +118,8 @@ static already_AddRefed<imgIContainer> GetSymbolicIconImage(nsAtom* aName,
   return do_AddRef(lookup.Data().mImage);
 }
 
-bool nsImageRenderer::PrepareImage() {
+bool nsImageRenderer::PrepareImage(
+    const Maybe<PositionParams>& aPositionParams) {
   if (mImage->IsNone()) {
     mPrepareResult = ImgDrawResult::BAD_IMAGE;
     return false;
@@ -136,7 +139,14 @@ bool nsImageRenderer::PrepareImage() {
   }
 
   if (!mImage->IsComplete()) {
-    MOZ_DIAGNOSTIC_ASSERT(isImageRequest);
+    MOZ_DIAGNOSTIC_ASSERT(isImageRequest && request);
+
+    if (aPositionParams &&
+        ImageIsDefinitelyNotVisible(*aPositionParams, *request)) {
+      // May become in-bound at some point due to property changes.
+      mPrepareResult = ImgDrawResult::NOT_READY;
+      return false;
+    }
 
     // Make sure the image is actually decoding.
     bool frameComplete = request->StartDecodingWithResult(
@@ -260,6 +270,33 @@ bool nsImageRenderer::PrepareImage() {
   return IsReady();
 }
 
+static CSSSizeOrRatio ComputeIntrinsicSize(imgIContainer* aImage,
+                                           const ImageResolution& aResolution) {
+  CSSSizeOrRatio result;
+  bool haveWidth, haveHeight;
+  CSSIntSize imageIntSize;
+  nsLayoutUtils::ComputeSizeForDrawing(aImage, aResolution, imageIntSize,
+                                       result.mRatio, haveWidth, haveHeight);
+  if (haveWidth) {
+    result.SetWidth(CSSPixel::ToAppUnits(imageIntSize.width));
+  }
+  if (haveHeight) {
+    result.SetHeight(CSSPixel::ToAppUnits(imageIntSize.height));
+  }
+
+  // If we know the aspect ratio and one of the dimensions,
+  // we can compute the other missing width or height.
+  if (!haveHeight && haveWidth && result.mRatio) {
+    CSSIntCoord intrinsicHeight =
+        result.mRatio.Inverted().ApplyTo(imageIntSize.width);
+    result.SetHeight(nsPresContext::CSSPixelsToAppUnits(intrinsicHeight));
+  } else if (haveHeight && !haveWidth && result.mRatio) {
+    CSSIntCoord intrinsicWidth = result.mRatio.ApplyTo(imageIntSize.height);
+    result.SetWidth(nsPresContext::CSSPixelsToAppUnits(intrinsicWidth));
+  }
+  return result;
+}
+
 CSSSizeOrRatio nsImageRenderer::ComputeIntrinsicSize() {
   NS_ASSERTION(IsReady(),
                "Ensure PrepareImage() has returned true "
@@ -269,29 +306,7 @@ CSSSizeOrRatio nsImageRenderer::ComputeIntrinsicSize() {
   switch (mType) {
     case StyleImage::Tag::MozSymbolicIcon:
     case StyleImage::Tag::Url: {
-      bool haveWidth, haveHeight;
-      CSSIntSize imageIntSize;
-      nsLayoutUtils::ComputeSizeForDrawing(mImageContainer, mImageResolution,
-                                           imageIntSize, result.mRatio,
-                                           haveWidth, haveHeight);
-      if (haveWidth) {
-        result.SetWidth(CSSPixel::ToAppUnits(imageIntSize.width));
-      }
-      if (haveHeight) {
-        result.SetHeight(CSSPixel::ToAppUnits(imageIntSize.height));
-      }
-
-      // If we know the aspect ratio and one of the dimensions,
-      // we can compute the other missing width or height.
-      if (!haveHeight && haveWidth && result.mRatio) {
-        CSSIntCoord intrinsicHeight =
-            result.mRatio.Inverted().ApplyTo(imageIntSize.width);
-        result.SetHeight(nsPresContext::CSSPixelsToAppUnits(intrinsicHeight));
-      } else if (haveHeight && !haveWidth && result.mRatio) {
-        CSSIntCoord intrinsicWidth = result.mRatio.ApplyTo(imageIntSize.height);
-        result.SetWidth(nsPresContext::CSSPixelsToAppUnits(intrinsicWidth));
-      }
-
+      result = ::ComputeIntrinsicSize(mImageContainer, mImageResolution);
       break;
     }
     case StyleImage::Tag::Element: {
@@ -571,10 +586,12 @@ ImgDrawResult nsImageRenderer::Draw(nsPresContext* aPresContext,
     case StyleImage::Tag::Image: {
       const auto fill = LayoutDeviceRect::FromAppUnits(
           aFill, aPresContext->AppUnitsPerDevPixel());
-      ctx->GetDrawTarget()->FillRect(
-          fill.ToUnknownRect(),
-          ColorPattern(ToDeviceColor(mImage->AsImage()->CalcColor(mForFrame))),
-          DrawOptions(/* aAlpha = */ aOpacity));
+      nscolor color = mImage->AsImage()->CalcColor(mForFrame);
+      if (NS_GET_A(color)) {
+        ctx->GetDrawTarget()->FillRect(fill.ToUnknownRect(),
+                                       ColorPattern(ToDeviceColor(color)),
+                                       DrawOptions(/* aAlpha = */ aOpacity));
+      }
       break;
     }
     case StyleImage::Tag::Gradient: {
@@ -677,11 +694,7 @@ ImgDrawResult nsImageRenderer::BuildWebRenderDisplayItems(
         containerFlags |= imgIContainer::FLAG_RECORD_BLOB;
       }
 
-      CSSIntSize destCSSSize{
-          nsPresContext::AppUnitsToIntCSSPixels(aDest.width),
-          nsPresContext::AppUnitsToIntCSSPixels(aDest.height)};
-
-      SVGImageContext svgContext(Some(destCSSSize));
+      SVGImageContext svgContext(Some(CSSSize::FromAppUnits(aDest.Size())));
       Maybe<ImageIntRegion> region;
 
       const int32_t appUnitsPerDevPixel = aPresContext->AppUnitsPerDevPixel();
@@ -691,10 +704,11 @@ ImgDrawResult nsImageRenderer::BuildWebRenderDisplayItems(
           LayoutDeviceRect::FromAppUnits(aFill, appUnitsPerDevPixel);
       auto stretchSize = wr::ToLayoutSize(destRect.Size());
 
+      bool rasterizedForDest = false;
       gfx::IntSize decodeSize =
           nsLayoutUtils::ComputeImageContainerDrawingParameters(
-              mImageContainer, mForFrame, destRect, clipRect, aSc,
-              containerFlags, svgContext, region);
+              mImageContainer, mForFrame, destRect, clipRect, aBuilder, aSc,
+              containerFlags, svgContext, region, &rasterizedForDest);
 
       RefPtr<image::WebRenderImageProvider> provider;
       drawResult = mImageContainer->GetImageProvider(
@@ -720,7 +734,8 @@ ImgDrawResult nsImageRenderer::BuildWebRenderDisplayItems(
         // The image is not repeating. Just push as a regular image.
         aBuilder.PushImage(dest, clip, !aItem->BackfaceIsHidden(), false,
                            rendering, key.value(), true,
-                           wr::ColorF{1.0f, 1.0f, 1.0f, aOpacity});
+                           wr::ColorF{1.0f, 1.0f, 1.0f, aOpacity}, false, false,
+                           rasterizedForDest);
       } else {
         nsPoint firstTilePos = nsLayoutUtils::GetBackgroundFirstTilePos(
             aDest.TopLeft(), aFill.TopLeft(), aRepeatSize);
@@ -757,13 +772,16 @@ ImgDrawResult nsImageRenderer::BuildWebRenderDisplayItems(
       break;
     }
     case StyleImage::Tag::Image: {
-      const int32_t appUnitsPerDevPixel = aPresContext->AppUnitsPerDevPixel();
-      auto fillRect = wr::ToLayoutRect(
-          LayoutDeviceRect::FromAppUnits(aFill, appUnitsPerDevPixel));
-      aBuilder.PushRect(
-          fillRect, fillRect, !aItem->BackfaceIsHidden(),
-          /* aFoceAntiAliasing = */ false, /* aIsCheckerboard = */ false,
-          wr::ToColorF(ToDeviceColor(mImage->AsImage()->CalcColor(mForFrame))));
+      nscolor color = mImage->AsImage()->CalcColor(mForFrame);
+      if (NS_GET_A(color)) {
+        const int32_t appUnitsPerDevPixel = aPresContext->AppUnitsPerDevPixel();
+        auto fillRect = wr::ToLayoutRect(
+            LayoutDeviceRect::FromAppUnits(aFill, appUnitsPerDevPixel));
+        aBuilder.PushRect(fillRect, fillRect, !aItem->BackfaceIsHidden(),
+                          /* aFoceAntiAliasing = */ false,
+                          /* aIsCheckerboard = */ false,
+                          wr::ToColorF(ToDeviceColor(color)));
+      }
       break;
     }
     default:
@@ -812,6 +830,83 @@ already_AddRefed<gfxDrawable> nsImageRenderer::DrawableForElement(
   return MakeAndAddRef<gfxSurfaceDrawable>(
       mImageElementSurface.GetSourceSurface().get(),
       mImageElementSurface.mSize);
+}
+
+bool nsImageRenderer::ImageIsDefinitelyNotVisible(
+    const PositionParams& aPositionParams, imgRequestProxy& aRequest) {
+  if (!StaticPrefs::image_decode_defer_if_not_visible()) {
+    return false;
+  }
+
+  const auto* bgFrame = nsCSSRendering::FindBackgroundFrame(mForFrame);
+  if (bgFrame != mForFrame) {
+    // Bail if this frame requires some special handling.
+    return false;
+  }
+
+  const auto& layer = aPositionParams.mLayer;
+  if (layer.mAttachment != StyleImageLayerAttachment::Scroll) {
+    // Scrolling may unveil more of the background image.
+    return false;
+  }
+
+  const bool xRepeat =
+      layer.mRepeat.mXRepeat != StyleImageLayerRepeat::NoRepeat;
+  const bool yRepeat =
+      layer.mRepeat.mYRepeat != StyleImageLayerRepeat::NoRepeat;
+  if (xRepeat && yRepeat) {
+    // Guaranteed to cover the visible area.
+    return false;
+  }
+
+  if (!mImage->IsSizeAvailable()) {
+    return false;
+  }
+
+  nsCOMPtr<imgIContainer> image;
+  if (NS_FAILED(aRequest.GetImage(getter_AddRefs(image)))) {
+    return false;
+  }
+  const auto size = ::ComputeIntrinsicSize(image, mImageResolution);
+  if (!size.IsConcrete()) {
+    return false;
+  }
+
+  auto* presContext = mForFrame->PresContext();
+  nsIFrame* attachedToFrame = mForFrame;
+  bool transformedFixed = false;
+  nsRect positionArea = nsCSSRendering::ComputeImageLayerPositioningArea(
+      presContext, mForFrame, aPositionParams.mBorderArea, layer,
+      &attachedToFrame, &transformedFixed);
+
+  if (transformedFixed) {
+    // Treat it like `scroll`.
+    return false;
+  }
+
+  const auto imageInfo = nsCSSRendering::ComputeBackgroundImageInfo(
+      size, positionArea.Size(), layer);
+
+  if (imageInfo.IsEmpty()) {
+    return false;
+  }
+
+  nsRect imageRect{imageInfo.mTopLeft + positionArea.TopLeft() +
+                       aPositionParams.mBorderArea.TopLeft(),
+                   imageInfo.mSize};
+  const nsRect& rectInBorderArea = aPositionParams.mBackgroundClipRect;
+
+  // If we repeat on one axis, force that axis to overlap.
+  if (xRepeat) {
+    imageRect.x = rectInBorderArea.x;
+    imageRect.width = rectInBorderArea.width;
+  }
+  if (yRepeat) {
+    imageRect.y = rectInBorderArea.y;
+    imageRect.height = rectInBorderArea.height;
+  }
+
+  return !rectInBorderArea.Intersects(imageRect);
 }
 
 ImgDrawResult nsImageRenderer::DrawLayer(
@@ -959,7 +1054,7 @@ ImgDrawResult nsImageRenderer::DrawBorderImageComponent(
     const nsRect& aDirtyRect, const nsRect& aFill, const CSSIntRect& aSrc,
     StyleBorderImageRepeatKeyword aHFill, StyleBorderImageRepeatKeyword aVFill,
     const nsSize& aUnitSize, uint8_t aIndex,
-    const Maybe<nsSize>& aSVGViewportSize, const bool aHasIntrinsicRatio) {
+    const Maybe<CSSSize>& aSVGViewportSize, const bool aHasIntrinsicRatio) {
   if (!IsReady()) {
     MOZ_ASSERT_UNREACHABLE(
         "Ensure PrepareImage() has returned true before "
@@ -1020,9 +1115,14 @@ ImgDrawResult nsImageRenderer::DrawBorderImageComponent(
         nsLayoutUtils::GetSamplingFilterForFrame(mForFrame);
 
     if (!RequiresScaling(aFill, aHFill, aVFill, aUnitSize)) {
+      SVGImageContext svgContext;
+      SVGImageContext::MaybeStoreContextPaint(svgContext, mForFrame, subImage);
+      if (aSVGViewportSize) {
+        svgContext.SetViewportSize(aSVGViewportSize);
+      }
       ImgDrawResult result = nsLayoutUtils::DrawSingleImage(
           aRenderingContext, aPresContext, subImage, samplingFilter, aFill,
-          aDirtyRect, SVGImageContext(), drawFlags);
+          aDirtyRect, svgContext, drawFlags);
 
       if (!mImage->IsComplete()) {
         result &= ImgDrawResult::SUCCESS_NOT_COMPLETE;

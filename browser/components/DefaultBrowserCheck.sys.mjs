@@ -8,7 +8,8 @@ let lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   CommonDialog: "resource://gre/modules/CommonDialog.sys.mjs",
-  SessionStartup: "resource:///modules/sessionstore/SessionStartup.sys.mjs",
+  SessionStartup:
+    "moz-src:///browser/components/sessionstore/SessionStartup.sys.mjs",
 });
 
 export var DefaultBrowserCheck = {
@@ -185,7 +186,10 @@ export var DefaultBrowserCheck = {
     let isDefault = false;
     let isDefaultError = false;
     try {
-      isDefault = shellService.isDefaultBrowser(isStartupCheck, false);
+      isDefault = await shellService.isDefaultBrowserAsync(
+        isStartupCheck,
+        false
+      );
     } catch (ex) {
       isDefaultError = true;
     }

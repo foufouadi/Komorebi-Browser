@@ -16,6 +16,12 @@ const REAL_SITE = "https://example.com";
 const PDF_VIEWER_ORIGIN = "resource://pdf.js";
 const JSON_VIEWER_ORIGIN = "resource://devtools";
 
+add_setup(async function () {
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.ipProtection.features.siteInclusions", false]],
+  });
+});
+
 function makePrincipal(uriSpec) {
   return Services.scriptSecurityManager.createContentPrincipal(
     Services.io.newURI(uriSpec),
@@ -71,7 +77,7 @@ add_task(async function test_getSitePrincipal_handles_missing_browser() {
 
 /**
  * Verifies that privileged chrome:// URLs flow through getSitePrincipal as
- * non-system content principals, and that IPPExceptionsManager.canManage still
+ * non-system content principals, and that IPPSiteRuleManager.canManage still
  * treats them as unmanageable so site-exclusion controls never appear over
  * chrome UI surfaces.
  *
@@ -110,7 +116,7 @@ add_task(async function test_chrome_url_is_treated_as_privileged() {
   );
 
   Assert.ok(
-    !IPPExceptionsManager.canManage(principal),
+    !IPPSiteRuleManager.canManage(principal),
     "canManage should treat chrome:// URLs as unmanageable so the site-exclusion UI stays hidden"
   );
 });
@@ -131,7 +137,7 @@ add_task(async function test_exclusion_toggle_stores_url_bar_origin() {
 
   sandbox.stub(IPPProxyManager, "state").value(IPPProxyStates.ACTIVE);
 
-  let setExclusionSpy = sandbox.spy(IPPExceptionsManager, "setExclusion");
+  let setRuleSpy = sandbox.spy(IPPPermissionRules, "setRule");
 
   let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, REAL_SITE);
 
@@ -156,18 +162,18 @@ add_task(async function test_exclusion_toggle_stores_url_bar_origin() {
   await disableVPNPromise;
 
   Assert.ok(
-    setExclusionSpy.calledOnce,
-    "IPPExceptionsManager.setExclusion should be called once"
+    setRuleSpy.calledOnce,
+    "IPPPermissionRules.setRule should be called once"
   );
   Assert.equal(
-    setExclusionSpy.firstCall.args[0]?.origin,
+    setRuleSpy.firstCall.args[0]?.origin,
     REAL_SITE,
-    "setExclusion receives a principal whose origin matches the URL bar URL"
+    "setRule receives a principal whose origin matches the URL bar URL"
   );
   Assert.strictEqual(
-    setExclusionSpy.firstCall.args[1],
-    true,
-    "setExclusion should be called with shouldExclude=true"
+    setRuleSpy.firstCall.args[1],
+    IPPPrincipalRules.EXCLUDED,
+    "setRule should be called with EXCLUDED"
   );
 
   // Confirm the permission is registered on the real site.
@@ -190,7 +196,7 @@ add_task(async function test_exclusion_toggle_stores_url_bar_origin() {
   await enableVPNPromise;
 
   Assert.equal(
-    setExclusionSpy.secondCall.args[0]?.origin,
+    setRuleSpy.secondCall.args[0]?.origin,
     REAL_SITE,
     "Re-enabling VPN removes the exclusion for the underlying site origin"
   );

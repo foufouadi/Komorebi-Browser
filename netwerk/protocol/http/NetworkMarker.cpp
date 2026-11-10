@@ -12,10 +12,11 @@
 #include "nsIClassOfService.h"
 
 namespace mozilla::net {
-struct NetworkMarker {
-  static constexpr Span<const char> MarkerTypeName() {
-    return MakeStringSpan("Network");
-  }
+struct NetworkMarker : public BaseMarkerType<NetworkMarker> {
+  static constexpr const char* Name = "Network";
+  static constexpr bool UseSpecialFrontendLocation = true;
+  static constexpr bool ETWStoreName = true;
+
   static void StreamJSONMarkerData(
       baseprofiler::SpliceableJSONWriter& aWriter, mozilla::TimeStamp aStart,
       mozilla::TimeStamp aEnd, int64_t aID, const ProfilerString8View& aURI,
@@ -28,7 +29,8 @@ struct NetworkMarker {
       int64_t aRedirectChannelId, uint32_t aClassOfServiceFlags,
       bool aClassOfServiceIncremental, nsresult aRequestStatus,
       const mozilla::Maybe<mozilla::net::HttpVersion> aHttpVersion,
-      mozilla::Maybe<uint32_t> aResponseStatus) {
+      mozilla::Maybe<uint32_t> aResponseStatus,
+      const ProfilerString8View& aSecPurpose, bool aActivatedFromPrefetch) {
     // This payload still streams a startTime and endTime property because it
     // made the migration to MarkerTiming on the front-end easier.
     aWriter.TimeProperty("startTime", aStart);
@@ -104,6 +106,16 @@ struct NetworkMarker {
       aWriter.BoolProperty("isPrivateBrowsing", aIsPrivateBrowsing);
     }
 
+    if (aSecPurpose.Length() != 0) {
+      aWriter.StringProperty("secPurpose", aSecPurpose);
+    }
+
+    if (aActivatedFromPrefetch) {
+      // Same vocabulary as PerformanceNavigationTiming's deliveryType.
+      aWriter.StringProperty("deliveryType",
+                             MakeStringSpan("navigational-prefetch"));
+    }
+
     if (aType != NetworkLoadType::LOAD_START) {
       aWriter.TimeProperty("domainLookupStart", aTimings.domainLookupStart);
       aWriter.TimeProperty("domainLookupEnd", aTimings.domainLookupEnd);
@@ -116,9 +128,6 @@ struct NetworkMarker {
       aWriter.TimeProperty("responseStart", aTimings.responseStart);
       aWriter.TimeProperty("responseEnd", aTimings.responseEnd);
     }
-  }
-  static MarkerSchema MarkerTypeDisplay() {
-    return MarkerSchema::SpecialFrontendLocation{};
   }
 
   static Span<const char> GetNetworkState(NetworkLoadType aType) {
@@ -402,6 +411,7 @@ void profiler_add_network_marker(
     nsICacheInfoChannel::CacheDisposition aCacheDisposition,
     uint64_t aInnerWindowID, bool aIsPrivateBrowsing,
     nsIClassOfService* aClassOfService, nsresult aRequestStatus,
+    const nsACString& aSecPurpose, bool aActivatedFromPrefetch,
     const mozilla::net::TimingStruct* aTimings,
     UniquePtr<ProfileChunkedBuffer> aSource,
     const Maybe<mozilla::net::HttpVersion> aHttpVersion,
@@ -448,6 +458,7 @@ void profiler_add_network_marker(
       redirect_spec,
       aContentType ? ProfilerString8View(*aContentType) : ProfilerString8View(),
       aRedirectFlags, aRedirectChannelId, classOfServiceFlags,
-      classOfServiceIncremental, aRequestStatus, aHttpVersion, aResponseStatus);
+      classOfServiceIncremental, aRequestStatus, aHttpVersion, aResponseStatus,
+      aSecPurpose, aActivatedFromPrefetch);
 }
 }  // namespace mozilla::net

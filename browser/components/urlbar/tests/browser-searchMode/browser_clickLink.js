@@ -19,6 +19,7 @@ add_task(async function clickLink() {
   await SpecialPowers.pushPrefEnv({
     set: [["browser.urlbar.scotchBonnet.enableOverride", false]],
   });
+  UrlbarTestUtils.registerZeroPrefixProvider();
   for (let test of [
     // searchString, href to use in the link
     [LINK_PAGE_URL, LINK_PAGE_URL],

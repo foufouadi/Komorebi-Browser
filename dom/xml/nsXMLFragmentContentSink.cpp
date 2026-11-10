@@ -39,6 +39,9 @@ class nsXMLFragmentContentSink : public nsXMLContentSink,
                                const nsAString& aSystemId,
                                const nsAString& aPublicId,
                                nsISupports* aCatalogData) override;
+  NS_IMETHOD HandleStartElement(const char16_t* aName, const char16_t** aAtts,
+                                uint32_t aAttsCount, uint32_t aLineNumber,
+                                uint32_t aColumnNumber) override;
   NS_IMETHOD HandleProcessingInstruction(const char16_t* aTarget,
                                          const char16_t* aData) override;
   NS_IMETHOD HandleXMLDeclaration(const char16_t* aVersion,
@@ -86,8 +89,7 @@ class nsXMLFragmentContentSink : public nsXMLContentSink,
   virtual nsresult MaybeProcessXSLTLink(
       ProcessingInstruction* aProcessingInstruction, const nsAString& aHref,
       bool aAlternate, const nsAString& aTitle, const nsAString& aType,
-      const nsAString& aMedia, const nsAString& aReferrerPolicy,
-      bool* aWasXSLT = nullptr) override;
+      const nsAString& aMedia, const nsAString& aReferrerPolicy) override;
 
   nsCOMPtr<Document> mTargetDocument;
   // the fragment
@@ -157,6 +159,17 @@ bool nsXMLFragmentContentSink::SetDocElement(int32_t aNameSpaceID,
                                              nsIContent* aContent) {
   // this is a fragment, not a document
   return false;
+}
+
+NS_IMETHODIMP
+nsXMLFragmentContentSink::HandleStartElement(const char16_t* aName,
+                                             const char16_t** aAtts,
+                                             uint32_t aAttsCount,
+                                             uint32_t aLineNumber,
+                                             uint32_t aColumnNumber) {
+  return nsXMLContentSink::HandleStartElement(aName, aAtts, aAttsCount,
+                                              aLineNumber, aColumnNumber,
+                                              FROM_PARSER_FRAGMENT);
 }
 
 nsresult nsXMLFragmentContentSink::CreateElement(
@@ -263,8 +276,7 @@ nsresult nsXMLFragmentContentSink::ProcessStyleLinkFromHeader(
 nsresult nsXMLFragmentContentSink::MaybeProcessXSLTLink(
     ProcessingInstruction* aProcessingInstruction, const nsAString& aHref,
     bool aAlternate, const nsAString& aTitle, const nsAString& aType,
-    const nsAString& aMedia, const nsAString& aReferrerPolicy, bool* aWasXSLT) {
-  MOZ_ASSERT(!aWasXSLT, "Our one caller doesn't care about whether we're XSLT");
+    const nsAString& aMedia, const nsAString& aReferrerPolicy) {
   return NS_OK;
 }
 

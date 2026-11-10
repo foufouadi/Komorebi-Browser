@@ -60,7 +60,7 @@ GeckoViewContentChannelParent::Delete() {
 }
 
 NS_IMETHODIMP
-GeckoViewContentChannelParent::GetRemoteType(nsACString& aRemoteType) {
+GeckoViewContentChannelParent::GetRemoteType(dom::RemoteType& aRemoteType) {
   if (!CanSend()) {
     return NS_ERROR_UNEXPECTED;
   }
@@ -157,14 +157,14 @@ bool GeckoViewContentChannelParent::Init(
     }
   });
 
-  nsCOMPtr<nsIURI> uri = ipc::DeserializeURI(aArgs.uri());
+  nsCOMPtr<nsIURI> uri(aArgs.uri());
 
   if (!uri || !uri->SchemeIs("content")) {
     rv = NS_ERROR_UNKNOWN_PROTOCOL;
     return false;
   }
 
-  nsAutoCString remoteType;
+  dom::RemoteType remoteType;
   rv = GetRemoteType(remoteType);
   if (MOZ_UNLIKELY(NS_FAILED(rv))) {
     return false;

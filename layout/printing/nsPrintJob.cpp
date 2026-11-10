@@ -67,6 +67,7 @@ static const char sPrintSettingsServiceContractID[] =
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLFrameElement.h"
+#include "mozilla/dom/Range.h"
 #include "mozilla/gfx/DrawEventRecorder.h"
 #include "mozilla/layout/RemotePrintJobChild.h"
 #include "nsComponentManagerUtils.h"
@@ -81,9 +82,8 @@ static const char sPrintSettingsServiceContractID[] =
 #include "nsISupportsUtils.h"
 #include "nsIWebBrowserChrome.h"
 #include "nsPageSequenceFrame.h"
-#include "nsRange.h"
 
-#if defined(ACCESSIBILITY) && defined(MOZ_ENABLE_SKIA_PDF)
+#ifdef ACCESSIBILITY
 #  include "mozilla/a11y/DocManager.h"
 #  include "mozilla/a11y/PdfStructTreeBuilder.h"
 #endif
@@ -207,7 +207,8 @@ void nsPrintJob::BuildNestedPrintObjects(
 
     // Note: docShell and doc are known-non-null at this point; they've been
     // null-checked above (with null leading to 'continue' statements).
-    auto childPO = MakeUnique<nsPrintObject>(*docShell, *doc, aParentPO.get());
+    auto childPO =
+        std::make_unique<nsPrintObject>(*docShell, *doc, aParentPO.get());
 
     mPrintDocList.AppendElement(childPO.get());
     BuildNestedPrintObjects(childPO);
@@ -392,7 +393,7 @@ nsresult nsPrintJob::DoCommonPrint(bool aIsPrintPreview,
     nsAutoScriptBlocker scriptBlocker;
     // Note: docShell is implicitly non-null via do_QueryReferent necessarily
     // having succeeded (if we got here).
-    mPrintObject = MakeUnique<nsPrintObject>(*docShell, aDoc);
+    mPrintObject = std::make_unique<nsPrintObject>(*docShell, aDoc);
     mPrintDocList.AppendElement(mPrintObject.get());
 
     BuildNestedPrintObjects(mPrintObject);
@@ -904,7 +905,7 @@ nsresult nsPrintJob::SetupToPrintContent() {
   //      to the "File Name" dialog, this comes back as an error
   // Don't start printing when regression test are executed
   if (mIsDoingPrinting) {
-#if defined(ACCESSIBILITY) && defined(MOZ_ENABLE_SKIA_PDF)
+#ifdef ACCESSIBILITY
     if (!mIsCreatingPrintPreview) {
       a11y::DocManager::NotifyOfPrintDocument(mPrintObject->mDocument);
       // XXX Out-of-process iframes inside a parent process document won't be
@@ -1172,7 +1173,7 @@ nsresult nsPrintJob::UpdateSelectionAndShrinkPrintObject(
     const uint32_t rangeCount = selection->RangeCount();
     for (const uint32_t inx : IntegerRange(rangeCount)) {
       MOZ_ASSERT(selection->RangeCount() == rangeCount);
-      const RefPtr<nsRange> range{selection->GetRangeAt(inx)};
+      const RefPtr<dom::Range> range{selection->GetRangeAt(inx)};
       selectionPS->AddRangeAndSelectFramesAndNotifyListeners(*range,
                                                              IgnoreErrors());
     }
@@ -1262,9 +1263,11 @@ nsresult nsPrintJob::ReflowPrintObject(const UniquePtr<nsPrintObject>& aPO) {
       !aPO->mParent || !aPO->mParent->PrintingIsEnabled();
   auto* embedderFrame = [&]() -> nsSubDocumentFrame* {
     if (documentIsTopLevel) {
-      if (nsCOMPtr<nsIDocumentViewer> viewer =
-              do_QueryInterface(mDocViewerPrint)) {
-        return viewer->FindContainerFrame();
+      if (mIsCreatingPrintPreview) {
+        if (nsCOMPtr<nsIDocumentViewer> viewer =
+                do_QueryInterface(mDocViewerPrint)) {
+          return viewer->FindContainerFrame();
+        }
       }
     } else if (aPO->mContent) {
       return do_QueryFrame(aPO->mContent->GetPrimaryFrame());
@@ -1497,7 +1500,7 @@ struct MOZ_STACK_CLASS SelectionRangeState {
   }
 
   // Selects all the nodes that are _not_ included in a given set of ranges.
-  MOZ_CAN_RUN_SCRIPT void SelectComplementOf(Span<const RefPtr<nsRange>>);
+  MOZ_CAN_RUN_SCRIPT void SelectComplementOf(Span<const RefPtr<dom::Range>>);
   // Removes the selected ranges from the document.
   MOZ_CAN_RUN_SCRIPT void RemoveSelectionFromDocument();
 
@@ -1507,7 +1510,7 @@ struct MOZ_STACK_CLASS SelectionRangeState {
     uint32_t mOffset;
   };
 
-  MOZ_CAN_RUN_SCRIPT void SelectRange(nsRange*);
+  MOZ_CAN_RUN_SCRIPT void SelectRange(dom::Range*);
   MOZ_CAN_RUN_SCRIPT void SelectNodesExceptInSubtree(const Position& aStart,
                                                      const Position& aEnd);
 
@@ -1520,7 +1523,7 @@ struct MOZ_STACK_CLASS SelectionRangeState {
 };
 
 void SelectionRangeState::SelectComplementOf(
-    Span<const RefPtr<nsRange>> aRanges) {
+    Span<const RefPtr<dom::Range>> aRanges) {
   for (const auto& range : aRanges) {
     auto start = Position{range->GetMayCrossShadowBoundaryStartContainer(),
                           range->MayCrossShadowBoundaryStartOffset()};
@@ -1530,7 +1533,7 @@ void SelectionRangeState::SelectComplementOf(
   }
 }
 
-void SelectionRangeState::SelectRange(nsRange* aRange) {
+void SelectionRangeState::SelectRange(dom::Range* aRange) {
   if (aRange && !aRange->AreNormalRangeAndCrossShadowBoundaryRangeCollapsed()) {
     mSelection->AddRangeAndSelectFramesAndNotifyListeners(*aRange,
                                                           IgnoreErrors());
@@ -1561,9 +1564,9 @@ void SelectionRangeState::SelectNodesExceptInSubtree(const Position& aStart,
     }
   }
 
-  RefPtr<nsRange> range =
-      nsRange::Create(start.mNode, start.mOffset, aStart.mNode, aStart.mOffset,
-                      IgnoreErrors(), AllowRangeCrossShadowBoundary::Yes);
+  RefPtr<dom::Range> range = dom::Range::Create(
+      start.mNode, start.mOffset, aStart.mNode, aStart.mOffset, IgnoreErrors(),
+      AllowRangeCrossShadowBoundary::Yes);
   SelectRange(range);
 
   start = aEnd;
@@ -1590,9 +1593,9 @@ void SelectionRangeState::RemoveSelectionFromDocument() {
   for (auto& entry : mPositions) {
     const Position& pos = entry.GetData();
     nsINode* root = entry.GetKey();
-    RefPtr<nsRange> range =
-        nsRange::Create(pos.mNode, pos.mOffset, root, root->GetChildCount(),
-                        IgnoreErrors(), AllowRangeCrossShadowBoundary::Yes);
+    RefPtr<dom::Range> range =
+        dom::Range::Create(pos.mNode, pos.mOffset, root, root->GetChildCount(),
+                           IgnoreErrors(), AllowRangeCrossShadowBoundary::Yes);
     SelectRange(range);
   }
   for (uint32_t i = 0; i < mSelection->RangeCount(); i++) {
@@ -1611,7 +1614,7 @@ void SelectionRangeState::RemoveSelectionFromDocument() {
 MOZ_CAN_RUN_SCRIPT_BOUNDARY static nsresult DeleteNonSelectedNodes(
     Document& aDoc) {
   MOZ_ASSERT(aDoc.IsStaticDocument());
-  const auto* printRanges = static_cast<nsTArray<RefPtr<nsRange>>*>(
+  const auto* printRanges = static_cast<nsTArray<RefPtr<dom::Range>>*>(
       aDoc.GetProperty(nsGkAtoms::printselectionranges));
   if (!printRanges) {
     return NS_OK;
@@ -1717,7 +1720,8 @@ bool nsPrintJob::PrePrintSheet() {
   // If the sheet doesn't get printed at all, the |done| will be |true|.
   bool done = false;
   nsPageSequenceFrame* pageSeqFrame = do_QueryFrame(mPageSeqFrame.GetFrame());
-  nsresult rv = pageSeqFrame->PrePrintNextSheet(mPagePrintTimer, &done);
+  nsresult rv = pageSeqFrame->PrePrintNextSheet(mPagePrintTimer,
+                                                mPrintCallbackRunner, &done);
   if (NS_FAILED(rv)) {
     // ??? ::PrintSheet doesn't set |printData->mIsAborted = true| if
     // rv != NS_ERROR_ABORT, but I don't really understand why this should be
@@ -1790,6 +1794,7 @@ bool nsPrintJob::PrintSheet(nsPrintObject* aPO) {
   }
 
   pageSeqFrame->DoPageEnd();
+  mPrintCallbackRunner.Reset();
 
   // If we just printed the final sheet (the one with index "numSheets-1"),
   // then we're done!
@@ -1836,13 +1841,10 @@ bool nsPrintJob::DonePrintingSheets(nsPrintObject* aPO, nsresult aResult) {
   PR_PL(("****** In DV::DonePrintingSheets PO: %p (%s)\n", aPO,
          aPO ? LoggableTypeOfPO(aPO) : ""));
 
-  // If there is a pageSeqFrame, make sure there are no more printCanvas active
-  // that might call |Notify| on the pagePrintTimer after things are cleaned up
-  // and printing was marked as being done.
-  if (mPageSeqFrame.IsAlive()) {
-    nsPageSequenceFrame* pageSeqFrame = do_QueryFrame(mPageSeqFrame.GetFrame());
-    pageSeqFrame->ResetPrintCanvasList();
-  }
+  // Make sure there are no more printCanvas active that might call |Notify| on
+  // the pagePrintTimer after things are cleaned up and printing was marked as
+  // being done.
+  mPrintCallbackRunner.Reset();
 
   // Guarantee that mPrt and mPrintObject won't be deleted during a
   // call of PrintDocContent() and FirePrintCompletionEvent().
@@ -2018,7 +2020,7 @@ class nsPrintCompletionEvent : public Runnable {
     NS_ASSERTION(mDocViewerPrint, "mDocViewerPrint is null.");
   }
 
-  NS_IMETHOD Run() override {
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY NS_IMETHOD Run() override {
     if (mDocViewerPrint) {
       mDocViewerPrint->OnDonePrinting();
     }
@@ -2026,7 +2028,7 @@ class nsPrintCompletionEvent : public Runnable {
   }
 
  private:
-  nsCOMPtr<nsIDocumentViewerPrint> mDocViewerPrint;
+  MOZ_KNOWN_LIVE const nsCOMPtr<nsIDocumentViewerPrint> mDocViewerPrint;
 };
 
 //-----------------------------------------------------------

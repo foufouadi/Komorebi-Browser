@@ -8,7 +8,7 @@
 
 #include "mozilla/gfx/DeviceManagerDx.h"
 #include "mozilla/gfx/Logging.h"
-#include "mozilla/layers/CompositeProcessD3D11FencesHolderMap.h"
+#include "mozilla/layers/CompositeProcessFencesHolderMap.h"
 #include "mozilla/layers/FenceD3D11.h"
 #include "mozilla/webgpu/WebGPUParent.h"
 
@@ -20,7 +20,7 @@ UniquePtr<SharedTextureD3D11> SharedTextureD3D11::Create(
     const uint32_t aWidth, const uint32_t aHeight,
     const struct ffi::WGPUTextureFormat aFormat,
     const ffi::WGPUTextureUsages aUsage) {
-  auto* fencesHolderMap = layers::CompositeProcessD3D11FencesHolderMap::Get();
+  auto* fencesHolderMap = layers::CompositeProcessFencesHolderMap::Get();
   if (!fencesHolderMap) {
     MOZ_ASSERT_UNREACHABLE("unexpected to be called");
     gfxCriticalNoteOnce << "Failed to get FencesHolderMap";
@@ -94,9 +94,9 @@ UniquePtr<SharedTextureD3D11> SharedTextureD3D11::Create(
   auto fencesHolderId = layers::CompositeProcessFencesHolderId::GetNext();
   fencesHolderMap->Register(fencesHolderId);
 
-  return MakeUnique<SharedTextureD3D11>(aWidth, aHeight, aFormat, aUsage,
-                                        texture, std::move(handle),
-                                        fencesHolderId, std::move(fence));
+  return std::make_unique<SharedTextureD3D11>(aWidth, aHeight, aFormat, aUsage,
+                                              texture, std::move(handle),
+                                              fencesHolderId, std::move(fence));
 }
 
 SharedTextureD3D11::SharedTextureD3D11(
@@ -115,23 +115,23 @@ SharedTextureD3D11::SharedTextureD3D11(
 }
 
 SharedTextureD3D11::~SharedTextureD3D11() {
-  auto* fencesHolderMap = layers::CompositeProcessD3D11FencesHolderMap::Get();
+  auto* fencesHolderMap = layers::CompositeProcessFencesHolderMap::Get();
   if (fencesHolderMap) {
     fencesHolderMap->Unregister(mFencesHolderId);
   } else {
-    gfxCriticalNoteOnce
-        << "CompositeProcessD3D11FencesHolderMap does not exist";
+    gfxCriticalNoteOnce << "CompositeProcessFencesHolderMap does not exist";
   }
 }
 
 void* SharedTextureD3D11::GetSharedTextureHandle() {
   RefPtr<ID3D11Device> device;
   mTexture->GetDevice(getter_AddRefs(device));
-  auto* fencesHolderMap = layers::CompositeProcessD3D11FencesHolderMap::Get();
+  auto* fencesHolderMap = layers::CompositeProcessFencesHolderMap::Get();
   MOZ_ASSERT(fencesHolderMap);
 
   // XXX deliver fences to wgpu
-  fencesHolderMap->WaitAllFencesAndForget(mFencesHolderId, device);
+  auto fences = fencesHolderMap->TakeAllFencesAndForget(mFencesHolderId);
+  layers::FenceD3D11::WaitD3D11Fences(fences, device);
 
   return mSharedHandle->GetHandle();
 }
@@ -141,7 +141,7 @@ Maybe<layers::SurfaceDescriptor> SharedTextureD3D11::ToSurfaceDescriptor() {
 
   mWriteFence->Update(mSubmissionIndex);
 
-  auto* fencesHolderMap = layers::CompositeProcessD3D11FencesHolderMap::Get();
+  auto* fencesHolderMap = layers::CompositeProcessFencesHolderMap::Get();
   MOZ_ASSERT(fencesHolderMap);
   fencesHolderMap->SetWriteFence(mFencesHolderId, mWriteFence);
 
@@ -156,14 +156,13 @@ Maybe<layers::SurfaceDescriptor> SharedTextureD3D11::ToSurfaceDescriptor() {
       /* hasKeyedMutex */ false, Some(mFencesHolderId)));
 }
 
-void SharedTextureD3D11::GetSnapshot(const ipc::Shmem& aDestShmem,
-                                     size_t aDestStride) {
+FrontBufferSnapshot SharedTextureD3D11::GetSnapshot() {
   RefPtr<ID3D11Device> device;
   mTexture->GetDevice(getter_AddRefs(device));
   if (!device) {
     MOZ_ASSERT_UNREACHABLE("unexpected to be called");
     gfxCriticalNoteOnce << "Failed to get ID3D11Device";
-    return;
+    return {};
   }
 
   RefPtr<ID3D11DeviceContext> deviceContext;
@@ -171,7 +170,7 @@ void SharedTextureD3D11::GetSnapshot(const ipc::Shmem& aDestShmem,
   if (!deviceContext) {
     MOZ_ASSERT_UNREACHABLE("unexpected to be called");
     gfxCriticalNoteOnce << "Failed to get ID3D11DeviceContext";
-    return;
+    return {};
   }
 
   D3D11_TEXTURE2D_DESC textureDesc = {0};
@@ -189,36 +188,39 @@ void SharedTextureD3D11::GetSnapshot(const ipc::Shmem& aDestShmem,
   if (FAILED(hr)) {
     MOZ_ASSERT_UNREACHABLE("unexpected to be called");
     gfxCriticalNote << "Failed to create ID3D11Texture2D: " << gfx::hexa(hr);
-    return;
+    return {};
   }
 
   deviceContext->CopyResource(cpuTexture, mTexture);
+
+  const size_t bytesPerRow = static_cast<size_t>(mWidth) * 4;
+  auto handle = ipc::shared_memory::Create(bytesPerRow * mHeight);
+  auto mapping = handle.Map();
+  if (!handle || !mapping) {
+    return {};
+  }
 
   D3D11_MAPPED_SUBRESOURCE map;
   hr = deviceContext->Map(cpuTexture, 0, D3D11_MAP_READ, 0, &map);
   if (FAILED(hr)) {
     MOZ_ASSERT_UNREACHABLE("unexpected to be called");
     gfxCriticalNote << "Failed to map ID3D11Texture2D: " << gfx::hexa(hr);
-    return;
+    return {};
   }
 
   uint8_t* src = static_cast<uint8_t*>(map.pData);
-  uint8_t* dst = aDestShmem.get<uint8_t>();
+  uint8_t* dst = mapping.DataAs<uint8_t>();
 
   const size_t src_stride = static_cast<size_t>(map.RowPitch);
-  const size_t bytesPerRow = static_cast<size_t>(mWidth) * 4;
   MOZ_RELEASE_ASSERT(src_stride >= bytesPerRow);
-  MOZ_RELEASE_ASSERT(aDestStride >= bytesPerRow);
 
   for (uint32_t y = 0; y < mHeight; y++) {
     memcpy(dst, src, bytesPerRow);
-    if (bytesPerRow < aDestStride) {
-      memset(dst + bytesPerRow, 0, aDestStride - bytesPerRow);
-    }
     src += src_stride;
-    dst += aDestStride;
+    dst += bytesPerRow;
   }
   deviceContext->Unmap(cpuTexture, 0);
+  return {std::move(handle), mWidth, mHeight, bytesPerRow};
 }
 
 }  // namespace mozilla::webgpu

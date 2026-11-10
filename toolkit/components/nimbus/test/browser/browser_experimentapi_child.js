@@ -4,12 +4,6 @@
 "use strict";
 
 add_setup(async function setup() {
-  await SpecialPowers.pushPrefEnv({
-    set: [["test.wait300msAfterTabSwitch", true]],
-  });
-
-  const cleanup = await setupTest();
-
   SpecialPowers.addTaskImport(
     "ExperimentAPI",
     "resource://nimbus/ExperimentAPI.sys.mjs"
@@ -22,8 +16,6 @@ add_setup(async function setup() {
     "TestUtils",
     "resource://testing-common/TestUtils.sys.mjs"
   );
-
-  registerCleanupFunction(cleanup);
 });
 
 add_task(async function testGetFromChildNewEnrollment() {

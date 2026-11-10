@@ -12,7 +12,6 @@
 #include "WebGL2Context.h"
 #include "WebGLBuffer.h"
 #include "WebGLContext.h"
-#include "WebGLContextUtils.h"
 #include "WebGLFormats.h"
 #include "WebGLFramebuffer.h"
 #include "WebGLProgram.h"
@@ -29,6 +28,7 @@
 #include "jsfriendapi.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/StaticPrefs_webgl.h"
+#include "mozilla/Vector.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/ImageData.h"
 #include "mozilla/dom/WebGLRenderingContextBinding.h"
@@ -41,9 +41,8 @@
 
 namespace mozilla {
 
-using namespace mozilla::dom;
-using namespace mozilla::gfx;
-using namespace mozilla::gl;
+using namespace gfx;
+using namespace gl;
 
 //
 //  WebGL API
@@ -902,7 +901,7 @@ bool WebGLContext::DoReadPixelsAndConvert(
 }
 
 webgl::ReadPixelsResult WebGLContext::ReadPixelsInto(
-    const webgl::ReadPixelsDesc& desc, const Range<uint8_t>& dest) {
+    const webgl::ReadPixelsDesc& desc, const mozilla::Range<uint8_t>& dest) {
   const FuncScope funcScope(*this, "readPixels");
   if (IsContextLost()) return {};
 
@@ -1373,41 +1372,64 @@ void WebGLContext::UniformData(
 
   // -
 
-  const auto& samplerInfo = locInfo->samplerInfo;
-  if (samplerInfo) {
-    const auto idata = ReinterpretToSpan<const uint32_t>::From(data);
-    const auto maxTexUnits = GLMaxTextureUnits();
-    for (const auto& val : idata) {
-      if (val >= maxTexUnits) {
-        ErrorInvalidValue(
-            "This uniform location is a sampler, but %d"
-            " is not a valid texture unit.",
-            val);
-        return;
+  // copy uniforms data from shared memory
+  Vector<webgl::UniformDataVal, 8> uniformValues;
+  {
+    // this should most often be a pure stack operation, so quite fast
+    if (uniformValues.append(data.data(), data.size()) == false) {
+      ErrorOutOfMemory("Failed to copy sampler uniform data.");
+      return;
+    }
+  }
+
+  // validate that all uniform values do not exceed maximum texture units
+  {
+    if (locInfo->HasSampleUniformInformation()) {
+      const auto maxTexUnits = GLMaxTextureUnits();
+      for (const auto& u32UniformValue : uniformValues) {
+        if (u32UniformValue.u32 >= maxTexUnits) {
+          ErrorInvalidValue(
+              "This uniform location is a sampler, but %d"
+              " is not a valid texture unit.",
+              u32UniformValue.u32);
+          return;
+        }
       }
     }
   }
 
   // -
 
-  // This is a little galaxy-brain, sorry!
-  const auto ptr = static_cast<const void*>(data.data());
-  (*pfn)(*gl, static_cast<GLint>(loc), elemCount, transpose, ptr);
+  // upload values to GPU
+  {
+    // This is a little galaxy-brain, sorry!
+    const auto uniformValuesVoidPointer =
+        static_cast<const void*>(uniformValues.begin());
+    (*pfn)(*gl, static_cast<GLint>(loc), elemCount, transpose,
+           uniformValuesVoidPointer);
+  }
 
   // -
 
-  if (samplerInfo) {
-    auto& texUnits = samplerInfo->texUnits;
+  // cache the uniform values in the texture units
+  {
+    if (!locInfo->HasSampleUniformInformation()) {
+      return;
+    }
 
-    const auto srcBegin = reinterpret_cast<const uint32_t*>(data.data());
-    auto destIndex = locInfo->indexIntoUniform;
-    if (destIndex < texUnits.length()) {
-      // Only sample as many indexes as available tex units allow.
-      const auto destCount = std::min(elemCount, texUnits.length() - destIndex);
-      for (const auto& val : Span<const uint32_t>(srcBegin, destCount)) {
-        texUnits[destIndex] = AssertedCast<uint8_t>(val);
-        destIndex += 1;
+    auto& targetTextureUnits = locInfo->GetSamplerUnformInformation()->texUnits;
+    uint32_t targetIndex = locInfo->indexIntoUniform;
+
+    // try to cache all uniform values in texture unit positions
+    for (auto& uniformValue : uniformValues) {
+      // it can be that not all uniform values fit
+      if (targetIndex >= targetTextureUnits.length()) {
+        break;
       }
+
+      // convert the uint32_t to uint8_t and store in texUnits
+      targetTextureUnits[targetIndex] = AssertedCast<uint8_t>(uniformValue.u32);
+      targetIndex += 1;
     }
   }
 }
@@ -1425,8 +1447,6 @@ void WebGLContext::UseProgram(WebGLProgram* prog) {
     funcScope.mBindFailureGuard = false;
     return;
   }
-
-  if (!ValidateObject("prog", *prog)) return;
 
   if (!prog->UseProgram()) return;
 
@@ -1503,8 +1523,6 @@ void WebGLContext::CompileShader(WebGLShader& shader) {
   const FuncScope funcScope(*this, "compileShader");
   if (IsContextLost()) return;
 
-  if (!ValidateObject("shader", shader)) return;
-
   shader.CompileShader();
 }
 
@@ -1567,6 +1585,17 @@ void WebGLContext::PolygonOffset(GLfloat factor, GLfloat units) {
   gl->fPolygonOffset(factor, units);
 }
 
+void WebGLContext::PolygonOffsetClampEXT(const GLfloat factor,
+                                         const GLfloat units,
+                                         const GLfloat clamp) {
+  const FuncScope funcScope(*this, "polygonOffsetClampEXT");
+  if (IsContextLost()) return;
+  MOZ_RELEASE_ASSERT(
+      IsExtensionEnabled(WebGLExtensionID::EXT_polygon_offset_clamp));
+
+  gl->fPolygonOffsetClamp(factor, units, clamp);
+}
+
 void WebGLContext::ProvokingVertex(const webgl::ProvokingVertex mode) const {
   const FuncScope funcScope(*this, "provokingVertex");
   if (IsContextLost()) return;
@@ -1581,6 +1610,23 @@ void WebGLContext::SampleCoverage(GLclampf value, WebGLboolean invert) {
   if (IsContextLost()) return;
 
   gl->fSampleCoverage(value, invert);
+}
+
+void WebGLContext::ClipControlEXT(const GLenum origin, const GLenum depth) {
+  const FuncScope funcScope(*this, "clipControlEXT");
+  if (IsContextLost()) return;
+  MOZ_RELEASE_ASSERT(IsExtensionEnabled(WebGLExtensionID::EXT_clip_control));
+
+  if (origin != LOCAL_GL_LOWER_LEFT && origin != LOCAL_GL_UPPER_LEFT) {
+    ErrorInvalidEnumArg("origin", origin);
+    return;
+  }
+  if (depth != LOCAL_GL_NEGATIVE_ONE_TO_ONE && depth != LOCAL_GL_ZERO_TO_ONE) {
+    ErrorInvalidEnumArg("depth", depth);
+    return;
+  }
+
+  gl->fClipControl(origin, depth);
 }
 
 }  // namespace mozilla

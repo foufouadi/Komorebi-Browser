@@ -1,7 +1,7 @@
 [DEFAULT]
 firefox-appdir = "browser"
-skip-if = [
-  "os == 'android'",
+run-if = [
+  "os != 'android'",
 ]
 head = "head.js"
 support-files = [
@@ -38,10 +38,6 @@ reason = "ASRouter is Firefox-only."
 
 ["test_backgroundtask_no_output.js"]
 requesttimeoutfactor = 2  # Slow on Windows
-skip-if = [
-  "ccov",
-]
-reason = "Bug 1804825: code coverage harness prints [CodeCoverage] output in early startup."
 
 ["test_backgroundtask_not_ephemeral_profile.js"]
 run-sequentially = ["true"] # Uses global profile directory `DefProfRt`
@@ -60,11 +56,6 @@ skip-if = [
 
 ["test_backgroundtask_shouldprocessupdates.js"]
 run-sequentially = ["true"] # perma-fail in parallel
-skip-if = [
-  "os == 'win' && os_version == '10.2009' && arch == 'x86_64'", # Bug 1937351
-  "os == 'win' && os_version == '11.26100'", # Bug 1937351
-  "os == 'win' && os_version == '11.26200'", # Bug 1937351
-]
 
 ["test_backgroundtask_simultaneous_instances.js"]
 

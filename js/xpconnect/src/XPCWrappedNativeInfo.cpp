@@ -7,6 +7,7 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/SourceLocation.h"
 
+#include "jsapi.h"
 #include "nsIScriptError.h"
 #include "nsPointerHashKeys.h"
 #include "nsPrintfCString.h"
@@ -84,8 +85,10 @@ bool XPCNativeMember::Resolve(XPCCallContext& ccx, XPCNativeInterface* iface,
     callback = XPC_WN_GetterSetter;
   }
 
-  jsid name = GetName();
-  JS_MarkCrossZoneId(ccx, name);
+  RootedId name(ccx, GetName());
+  if (!JS_WrapId(ccx, &name)) {
+    return false;
+  }
 
   JSFunction* fun;
   if (name.isString()) {
@@ -628,6 +631,13 @@ already_AddRefed<XPCNativeSet> XPCNativeSet::NewInstance(
     return nullptr;
   }
 
+  // A set always holds nsISupports on top of the given interfaces, so the
+  // array has to leave room for it.
+  if (array.Length() > kMaxInterfaceCount - 1) {
+    NS_WARNING("Too many interfaces in set");
+    return nullptr;
+  }
+
   // We impose the invariant:
   // "All sets have exactly one nsISupports interface and it comes first."
   // This is the place where we impose that rule - even if given inputs
@@ -677,6 +687,11 @@ already_AddRefed<XPCNativeSet> XPCNativeSet::NewInstanceMutate(
   MOZ_ASSERT(otherSet);
 
   if (!newInterface) {
+    return nullptr;
+  }
+
+  if (otherSet->mInterfaceCount == kMaxInterfaceCount) {
+    NS_WARNING("Too many interfaces in set");
     return nullptr;
   }
 

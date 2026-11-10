@@ -8,10 +8,10 @@
  * the Taskbar Tabs systems should interact with it through this interface.
  */
 
-import { TaskbarTabsRegistryStorage } from "resource:///modules/taskbartabs/TaskbarTabsRegistry.sys.mjs";
-import { TaskbarTabsWindowManager } from "resource:///modules/taskbartabs/TaskbarTabsWindowManager.sys.mjs";
-import { TaskbarTabsPin } from "resource:///modules/taskbartabs/TaskbarTabsPin.sys.mjs";
-import { TaskbarTabsUtils } from "resource:///modules/taskbartabs/TaskbarTabsUtils.sys.mjs";
+import { TaskbarTabsRegistryStorage } from "moz-src:///browser/components/taskbartabs/TaskbarTabsRegistry.sys.mjs";
+import { TaskbarTabsWindowManager } from "moz-src:///browser/components/taskbartabs/TaskbarTabsWindowManager.sys.mjs";
+import { TaskbarTabsPin } from "moz-src:///browser/components/taskbartabs/TaskbarTabsPin.sys.mjs";
+import { TaskbarTabsUtils } from "moz-src:///browser/components/taskbartabs/TaskbarTabsUtils.sys.mjs";
 
 let lazy = {};
 
@@ -24,7 +24,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
 
 ChromeUtils.defineLazyGetter(lazy, "logConsole", () => {
   return console.createInstance({
-    prefix: "TaskbarTabs",
+    logModule: "TaskbarTabs",
     maxLogLevel: "Warn",
   });
 });
@@ -62,6 +62,22 @@ export const TaskbarTabs = new (class {
   }
 
   /**
+   * Gets the data needed to build the window title of a Taskbar Tab.
+   *
+   * @param {string} aId - The ID of the Taskbar Tab.
+   * @returns {Promise<{name: string, userContextId: number}>} The name and
+   * container of the Taskbar Tab.
+   * @throws {Error} If `aId` is not a valid Taskbar Tabs ID.
+   */
+  async getTaskbarTabTitleInfo(aId) {
+    let taskbarTab = await this.getTaskbarTab(aId);
+    return {
+      name: taskbarTab.name,
+      userContextId: taskbarTab.userContextId,
+    };
+  }
+
+  /**
    * Finds an existing Taskbar Tab that matches aUrl within aUserContextId. If
    * one does not exist, it is created.
    *
@@ -80,6 +96,9 @@ export const TaskbarTabs = new (class {
    * attempted even if the Taskbar Tab already exists.
    * @param {DOMWindow?} [aDetails.window] - The window to associate any UI
    * with, if applicable.
+   * @returns {Promise<{created: boolean, taskbarTab: TaskbarTab,
+   * pin: ?Promise<{rejected: boolean}>}>} `pin` settles once the pin attempt,
+   * including any OS prompt, completes, or is null if no pin was attempted.
    */
   async findOrCreateTaskbarTab(aUrl, aUserContextId, aDetails = {}) {
     if (aDetails.manifest) {
@@ -103,9 +122,10 @@ export const TaskbarTabs = new (class {
       aDetails
     );
 
+    let pin = null;
     if (result.created || aDetails.ensurePinned) {
       // Don't wait for the pinning to complete.
-      this.#pinTaskbarTab(result.taskbarTab, result.icon, {
+      pin = this.#pinTaskbarTab(result.taskbarTab, result.icon, {
         window: aDetails.window ?? null,
       });
     }
@@ -113,12 +133,21 @@ export const TaskbarTabs = new (class {
     return {
       created: result.created,
       taskbarTab: result.taskbarTab,
+      pin,
     };
   }
 
   // Used internally; can expose non-public members in its result.
   async #findOrCreateTaskbarTab(aUrl, aUserContextId, aDetails = {}) {
     await this.#ready;
+
+    if (!aDetails.manifest?.name && aUrl.scheme === "moz-extension") {
+      aDetails.manifest = {
+        ...aDetails.manifest,
+        name: WebExtensionPolicy.getByURI(aUrl)?.name,
+      };
+    }
+
     let result = this.#registry.findOrCreateTaskbarTab(
       aUrl,
       aUserContextId,
@@ -144,7 +173,7 @@ export const TaskbarTabs = new (class {
       aDetails
     );
     this.#registry.patchTaskbarTab(aTaskbarTab, {
-      shortcutRelativePath: result,
+      shortcutRelativePath: result.shortcut,
     });
     return result;
   }
@@ -206,8 +235,9 @@ export const TaskbarTabs = new (class {
     }
 
     return {
-      window: win,
+      created,
       taskbarTab,
+      window: win,
     };
   }
 

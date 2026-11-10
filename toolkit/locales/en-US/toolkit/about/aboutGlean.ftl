@@ -200,15 +200,13 @@ about-glean-metrics-table-settings-timelines-vertical-line-x-offset = Y-axis X o
 about-glean-metrics-table-settings-timelines-vertical-line-y-offset = Y-axis Y offset
 
 
-# Label displayed near an input field that can be used to filter metrics
-about-glean-label-for-filter-metrics = Filter
-# This message sits alongside an input field, further describing its purpose.
-# Category refers to the category in which a given metric is recorded.
-# Name refers to the name of a given metric.
-# Type refers to a given metric's metric type.
-# Value refers to the underlying value of a given metric.
-# "Simple type" refers to a value type that does not have deeply-nested data, such as a boolean, number, string, or list of strings.
-about-glean-description-for-filter-metrics = This will filter the table below based on category, name, type, and value (if the value is a simple type).
+# label: Displayed near an input field that can be used to filter metrics
+# description: This message sits alongside an input field, further describing its purpose. Category refers to the category in which a given metric is recorded. Name refers to the name of a given metric. Type refers to a given metric's metric type. Value refers to the underlying value of a given metric. "Simple type" refers to a value type that does not have deeply-nested data, such as a boolean, number, string, or list of strings.
+# placeholder: Search is a verb in this case
+about-glean-filter-metrics =
+  .label = Filter Metrics
+  .description = This will filter the table below based on category, name, type, and value (if the value is a simple type).
+  .placeholder = Search
 
 about-glean-button-load-all = Load All Values
 # A button that, when pressed, exports the data currently shown in the metrics table
@@ -225,3 +223,15 @@ about-glean-no-data-to-display = No data to display.
 # Do not translate strings between <code> </code> tags.
 about-glean-dual-labeled-metric-warning = <code>DualLabeledCounter</code> metrics are not yet supported in the <code>about:glean</code> view.
 about-glean-unknown-metric-type-warning = Unknown metric type.
+
+# Label for selection drop-down list containing Pings for selection
+about-glean-store-submitted-pings-select-label = Ping:
+# Toggle label to enable the storage of Pings that are submitted
+about-glean-store-submitted-pings =
+  .label = Store submitted Pings
+  .description = Enables storing of submitted Pings in-memory
+
+# Header for a section that shows client information
+about-glean-submitted-ping-client-info-title = Client Info
+# Header for a section that shows Ping information
+about-glean-submitted-ping-ping-info-title = Ping Info

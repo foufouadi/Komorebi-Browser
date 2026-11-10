@@ -418,6 +418,9 @@ typedef struct SSLResumptionTokenInfoStr {
     PRUint32 alpnSelectionLen;
     PRUint32 maxEarlyDataSize;
     PRTime expirationTime; /* added in NSS 3.41 */
+    /* PR_TRUE if the token carries the resumption secret in cleartext. See
+     * SSL_EnablePlaintextResumptionExport. Added in NSS 3.134. */
+    PRBool plaintextSecret;
 } SSLResumptionTokenInfo;
 
 /*
@@ -437,10 +440,28 @@ typedef struct SSLResumptionTokenInfoStr {
                           SSLResumptionTokenInfo *_token, PRUintn _len),     \
                          (tokenData, tokenLen, token, len))
 
+/* Flags for SSL_GetResumptionTokenInfoWithFlags. */
+/* Leave |peerCert| NULL rather than constructing a CERTCertificate. */
+#define SSL_RESUMPTION_TOKEN_INFO_NO_PEER_CERT 0x1
+
+/*
+ * As SSL_GetResumptionTokenInfo, with |flags| a bitwise OR of
+ * SSL_RESUMPTION_TOKEN_INFO_* values. Unknown flags are rejected with
+ * SEC_ERROR_INVALID_ARGS.
+ */
+#define SSL_GetResumptionTokenInfoWithFlags(tokenData, tokenLen, token, len, \
+                                            flags)                           \
+    SSL_EXPERIMENTAL_API("SSL_GetResumptionTokenInfoWithFlags",              \
+                         (const PRUint8 *_tokenData, unsigned int _tokenLen, \
+                          SSLResumptionTokenInfo *_token, PRUintn _len,      \
+                          PRUint32 _flags),                                  \
+                         (tokenData, tokenLen, token, len, flags))
+
 /*
  * SSL_GetResumptionTokenInfo allocates memory in order to populate |tokenInfo|.
  * Any SSLResumptionTokenInfo struct filled with SSL_GetResumptionTokenInfo
- * has to be freed with SSL_DestroyResumptionTokenInfo.
+ * or SSL_GetResumptionTokenInfoWithFlags has to be freed with
+ * SSL_DestroyResumptionTokenInfo.
  */
 #define SSL_DestroyResumptionTokenInfo(tokenInfo) \
     SSL_EXPERIMENTAL_API(                         \
@@ -494,6 +515,22 @@ typedef SECStatus(PR_CALLBACK *SSLResumptionTokenCallback)(
         "SSL_SetResumptionToken",                                           \
         (PRFileDesc * _fd, const PRUint8 *_token, const unsigned int _len), \
         (fd, token, len))
+
+/*
+ * Selects how the resumption master secret is encoded in tokens delivered to
+ * the SSLResumptionTokenCallback. When |enabled| is PR_FALSE (the default), it
+ * is wrapped. When |enabled| is PR_TRUE, it is written in cleartext; the
+ * embedder is responsible for the confidentiality of the token.
+ *
+ * If the secret can't be extracted (e.g. in FIPS mode), the wrapped form is
+ * used regardless of this setting. The token records which form was written.
+ *
+ * SSL_GetResumptionTokenInfo and SSL_SetResumptionToken accept either form,
+ * except that SSL_SetResumptionToken rejects cleartext tokens in FIPS mode.
+ */
+#define SSL_EnablePlaintextResumptionExport(fd, enabled)        \
+    SSL_EXPERIMENTAL_API("SSL_EnablePlaintextResumptionExport", \
+                         (PRFileDesc * _fd, PRBool _enabled), (fd, enabled))
 
 /* TLS 1.3 allows a server to set a limit on the number of bytes of early data
  * that can be received. This allows that limit to be set. This function has no

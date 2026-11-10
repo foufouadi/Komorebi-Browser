@@ -12,6 +12,10 @@ const { CustomizableUITestUtils } = ChromeUtils.importESModule(
 );
 let gCUITestUtils = new CustomizableUITestUtils(window);
 
+add_setup(function () {
+  UrlbarTestUtils.registerZeroPrefixProvider();
+});
+
 add_task(async function () {
   for (let openFn of [
     () => {

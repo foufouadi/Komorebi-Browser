@@ -1,7 +1,8 @@
 [DEFAULT]
-skip-if = [
-  "os == 'android'", # WebSerial not supported on Android
-  "xorigin", # WebSerial is not allowed from a cross-origin iframe
+# WebSerial is not supported on Android, and is not allowed from a cross-origin
+# iframe.
+run-if = [
+  "os != 'android' && !xorigin",
 ]
 support-files = [
   "serial_worker.js",
@@ -25,6 +26,8 @@ prefs = [
 ]
 
 ["test_serial_api.html"]
+
+["test_serial_bluetooth_allowlist.html"]
 
 ["test_serial_buffer_size.html"]
 

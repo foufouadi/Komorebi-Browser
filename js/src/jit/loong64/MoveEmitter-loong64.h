@@ -13,6 +13,7 @@ namespace jit {
 
 class MoveEmitterLOONG64 {
   void emitDoubleMove(const MoveOperand& from, const MoveOperand& to);
+  void emitSimd128Move(const MoveOperand& from, const MoveOperand& to);
   void breakCycle(const MoveOperand& to, MoveOp::Type type);
   void completeCycle(const MoveOperand& from, const MoveOperand& to,
                      MoveOp::Type type);
@@ -34,7 +35,7 @@ class MoveEmitterLOONG64 {
   bool inCycle_ = false;
 
   void assertDone() { MOZ_ASSERT(!inCycle_); }
-  Address cycleSlot() const;
+  Address cycleSlot();
   int32_t getAdjustedOffset(const MoveOperand& operand) const;
   Address getAdjustedAddress(const MoveOperand& operand) const;
 

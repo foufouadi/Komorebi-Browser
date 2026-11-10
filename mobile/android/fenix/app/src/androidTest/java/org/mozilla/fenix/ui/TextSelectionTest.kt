@@ -9,6 +9,7 @@ import mozilla.components.feature.sitepermissions.SitePermissionsRules
 import org.junit.Rule
 import org.junit.Test
 import org.mozilla.fenix.customannotations.Converted
+import org.mozilla.fenix.customannotations.Critical
 import org.mozilla.fenix.customannotations.SmokeTest
 import org.mozilla.fenix.helpers.FenixTestRule
 import org.mozilla.fenix.helpers.HomeActivityTestRule
@@ -279,6 +280,19 @@ class TextSelectionTest {
         }
     }
 
+    @Test
+    fun verifyUrlBarTextSelectionOptionsWithinAddressBarInFocusedModeTest() {
+        composeTestRule.activityRule.applySettingsExceptions { it.showAddressBarInFocusMode = true }
+        val genericURL = mockWebServer.getGenericAsset(1)
+
+        navigationToolbar(composeTestRule) {}.enterURLAndEnterToBrowser(genericURL.url) {}.openNavigationToolbar {}
+        searchScreen(retryableComposeTestRule.current) {
+            clickEditUrlButton()
+            longClickToolbar()
+            verifyTextSelectionOptions("Copy", "Cut")
+        }
+    }
+
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2326814
     @Test
     fun verifyCopyUrlBarTextSelectionOptionTest() {
@@ -286,6 +300,13 @@ class TextSelectionTest {
 
         navigationToolbar(composeTestRule) {}.enterURLAndEnterToBrowser(genericURL.url) {}.openNavigationToolbar {}
         searchScreen(retryableComposeTestRule.current) {
+            // open floating toolbar
+            longClickToolbar()
+            // long click selects only the touched word, which is wherever the centre of the
+            // rendered URL falls. "Select all" widens it to the whole URL
+            clickContextMenuItem("Select all")
+            // select all also dismisses the floating toolbar, so long click again
+            // to bring the toolbar back with the selection intact.
             longClickToolbar()
             clickContextMenuItem("Copy")
             clickClearButton()
@@ -304,6 +325,9 @@ class TextSelectionTest {
         navigationToolbar(composeTestRule) {}.enterURLAndEnterToBrowser(genericURL.url) {}.openNavigationToolbar {}
         searchScreen(retryableComposeTestRule.current) {
             longClickToolbar()
+            // See verifyCopyUrlBarTextSelectionOptionTest for why the selection is widened and the toolbar reopened.
+            clickContextMenuItem("Select all")
+            longClickToolbar()
             clickContextMenuItem("Cut")
             verifySearchBarPlaceholder("Search or enter address")
             longClickToolbar()
@@ -313,6 +337,12 @@ class TextSelectionTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/414316
+    @Converted(
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.TextSelectionTest#urlBarQuickActionsTest"],
+        bug = 2087040,
+        since = "2026-10",
+    )
+    @Critical
     @Test
     fun urlBarQuickActionsTest() {
         val firstWebsite = mockWebServer.getGenericAsset(1)

@@ -9,8 +9,10 @@
 #include "GLReadTexImageHelper.h"
 #include "GLUploadHelpers.h"
 #include "GeckoProfiler.h"
-#include "GfxTexturesReporter.h"   // for GfxTexturesReporter
-#include "gfx2DGlue.h"             // for ContentForFormat, etc
+#include "GfxTexturesReporter.h"  // for GfxTexturesReporter
+#include "gfx2DGlue.h"            // for ContentForFormat, etc
+#include "mozilla/ScopeExit.h"
+#include "mozilla/UniquePtrExtensions.h"
 #include "mozilla/gfx/2D.h"        // for DataSourceSurface
 #include "mozilla/gfx/BaseSize.h"  // for BaseSize
 #include "mozilla/gfx/Logging.h"   // for gfxCriticalError
@@ -63,6 +65,11 @@ already_AddRefed<TextureHost> CreateTextureHostOGL(
   switch (aDesc.type()) {
 #ifdef MOZ_WIDGET_ANDROID
     case SurfaceDescriptor::TSurfaceTextureDescriptor: {
+      if (gfx::gfxVars::ForceAImageReaderAndroid()) {
+        MOZ_ASSERT_UNREACHABLE("unexpected to be called");
+        gfxCriticalError() << "ForceAImageReader is enabled";
+        return nullptr;
+      }
       const SurfaceTextureDescriptor& desc =
           aDesc.get_SurfaceTextureDescriptor();
       java::GeckoSurfaceTexture::LocalRef surfaceTexture =
@@ -74,6 +81,11 @@ already_AddRefed<TextureHost> CreateTextureHostOGL(
       break;
     }
     case SurfaceDescriptor::TSurfaceDescriptorAndroidHardwareBuffer: {
+      if (aDeallocator) {
+        gfxCriticalError() << "SurfaceDescriptorAndroidHardwareBuffer is used "
+                              "only for remote texture";
+        return nullptr;
+      }
       const SurfaceDescriptorAndroidHardwareBuffer& desc =
           aDesc.get_SurfaceDescriptorAndroidHardwareBuffer();
       result = AndroidHardwareBufferTextureHost::Create(aFlags, desc);
@@ -102,7 +114,8 @@ already_AddRefed<TextureHost> CreateTextureHostOGL(
 
 #ifdef MOZ_WIDGET_GTK
     case SurfaceDescriptor::TSurfaceDescriptorDMABuf: {
-      result = new DMABUFTextureHostOGL(aFlags, aDesc);
+      const SurfaceDescriptorDMABuf& desc = aDesc.get_SurfaceDescriptorDMABuf();
+      result = new DMABUFTextureHostOGL(aFlags, desc);
       if (!result->IsValid()) {
         gfxCriticalError() << "DMABuf surface import failed!";
         result = nullptr;
@@ -331,127 +344,6 @@ void GLTextureSource::BindTexture(GLenum aTextureUnit,
 bool GLTextureSource::IsValid() const { return !!gl() && mTextureHandle != 0; }
 
 ////////////////////////////////////////////////////////////////////////
-// DirectMapTextureSource
-
-DirectMapTextureSource::DirectMapTextureSource(gl::GLContext* aContext,
-                                               gfx::DataSourceSurface* aSurface)
-    : GLTextureSource(aContext, 0, LOCAL_GL_TEXTURE_RECTANGLE_ARB,
-                      aSurface->GetSize(), aSurface->GetFormat()),
-      mSync(nullptr) {
-  MOZ_ASSERT(aSurface);
-
-  UpdateInternal(aSurface, nullptr, nullptr, true);
-}
-
-DirectMapTextureSource::DirectMapTextureSource(TextureSourceProvider* aProvider,
-                                               gfx::DataSourceSurface* aSurface)
-    : DirectMapTextureSource(aProvider->GetGLContext(), aSurface) {}
-
-DirectMapTextureSource::~DirectMapTextureSource() {
-  if (!mSync || !gl() || !gl()->MakeCurrent() || gl()->IsDestroyed()) {
-    return;
-  }
-
-  gl()->fDeleteSync(mSync);
-  mSync = nullptr;
-}
-
-bool DirectMapTextureSource::Update(gfx::DataSourceSurface* aSurface,
-                                    nsIntRegion* aDestRegion,
-                                    gfx::IntPoint* aSrcOffset,
-                                    gfx::IntPoint* aDstOffset) {
-  MOZ_RELEASE_ASSERT(aDstOffset == nullptr);
-  if (!aSurface) {
-    return false;
-  }
-
-  return UpdateInternal(aSurface, aDestRegion, aSrcOffset, false);
-}
-
-void DirectMapTextureSource::MaybeFenceTexture() {
-  if (!gl() || !gl()->MakeCurrent() || gl()->IsDestroyed()) {
-    return;
-  }
-
-  if (mSync) {
-    gl()->fDeleteSync(mSync);
-  }
-  mSync = gl()->fFenceSync(LOCAL_GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-}
-
-bool DirectMapTextureSource::Sync(bool aBlocking) {
-  if (!gl() || !gl()->MakeCurrent() || gl()->IsDestroyed()) {
-    // We use this function to decide whether we can unlock the texture
-    // and clean it up. If we return false here and for whatever reason
-    // the context is absent or invalid, the compositor will keep a
-    // reference to this texture forever.
-    return true;
-  }
-
-  if (!mSync) {
-    return false;
-  }
-
-  GLenum waitResult =
-      gl()->fClientWaitSync(mSync, LOCAL_GL_SYNC_FLUSH_COMMANDS_BIT,
-                            aBlocking ? LOCAL_GL_TIMEOUT_IGNORED : 0);
-  return waitResult == LOCAL_GL_ALREADY_SIGNALED ||
-         waitResult == LOCAL_GL_CONDITION_SATISFIED;
-}
-
-bool DirectMapTextureSource::UpdateInternal(gfx::DataSourceSurface* aSurface,
-                                            nsIntRegion* aDestRegion,
-                                            gfx::IntPoint* aSrcOffset,
-                                            bool aInit) {
-  if (!gl() || !gl()->MakeCurrent()) {
-    return false;
-  }
-
-  MOZ_ASSERT(gl()->IsExtensionSupported(gl::GLContext::APPLE_texture_range));
-  MOZ_ASSERT(gl()->IsExtensionSupported(gl::GLContext::APPLE_client_storage));
-
-  if (aInit) {
-    gl()->fGenTextures(1, &mTextureHandle);
-    gl()->fBindTexture(LOCAL_GL_TEXTURE_RECTANGLE_ARB, mTextureHandle);
-
-    gl()->fTexParameteri(LOCAL_GL_TEXTURE_RECTANGLE_ARB,
-                         LOCAL_GL_TEXTURE_STORAGE_HINT_APPLE,
-                         LOCAL_GL_STORAGE_CACHED_APPLE);
-    gl()->fTextureRangeAPPLE(LOCAL_GL_TEXTURE_RECTANGLE_ARB,
-                             aSurface->Stride() * aSurface->GetSize().height,
-                             aSurface->GetData());
-
-    gl()->fTexParameteri(LOCAL_GL_TEXTURE_RECTANGLE_ARB,
-                         LOCAL_GL_TEXTURE_WRAP_S, LOCAL_GL_CLAMP_TO_EDGE);
-    gl()->fTexParameteri(LOCAL_GL_TEXTURE_RECTANGLE_ARB,
-                         LOCAL_GL_TEXTURE_WRAP_T, LOCAL_GL_CLAMP_TO_EDGE);
-  }
-
-  MOZ_ASSERT(mTextureHandle);
-
-  // APPLE_client_storage
-  gl()->fPixelStorei(LOCAL_GL_UNPACK_CLIENT_STORAGE_APPLE, LOCAL_GL_TRUE);
-
-  nsIntRegion destRegion = aDestRegion
-                               ? *aDestRegion
-                               : IntRect(0, 0, aSurface->GetSize().width,
-                                         aSurface->GetSize().height);
-  gfx::IntPoint srcPoint = aSrcOffset ? *aSrcOffset : gfx::IntPoint(0, 0);
-  mFormat = gl::UploadSurfaceToTexture(
-      gl(), aSurface, destRegion, mTextureHandle, aSurface->GetSize(), nullptr,
-      aInit, srcPoint, gfx::IntPoint(0, 0), LOCAL_GL_TEXTURE0,
-      LOCAL_GL_TEXTURE_RECTANGLE_ARB);
-
-  if (mSync) {
-    gl()->fDeleteSync(mSync);
-    mSync = nullptr;
-  }
-
-  gl()->fPixelStorei(LOCAL_GL_UNPACK_CLIENT_STORAGE_APPLE, LOCAL_GL_FALSE);
-  return true;
-}
-
-////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////
 // SurfaceTextureHost
 
@@ -494,9 +386,8 @@ gfx::Matrix4x4 SurfaceTextureSource::GetTextureTransform() {
 
   // GetTransformMatrix() returns the transform set by the producer side of the
   // SurfaceTexture that must be applied to texture coordinates when
-  // sampling. In some cases we may have set an override value, such as in
-  // AndroidNativeWindowTextureData where we own the producer side, or for
-  // MediaCodec output on devices where where we know the value is incorrect.
+  // sampling. In some cases we may have set an override value, such as for
+  // MediaCodec output on devices where we know the value is incorrect.
   if (mTransformOverride) {
     ret = *mTransformOverride;
   } else {
@@ -660,6 +551,15 @@ bool SurfaceTextureHost::SupportsExternalCompositing(
   return aBackend == WebRenderBackend::SOFTWARE;
 }
 
+SurfaceDescriptor SurfaceTextureHost::GetSurfaceDescriptor() {
+  if (!mSurfTex) {
+    return SurfaceDescriptor();
+  }
+  return SurfaceTextureDescriptor(mSurfTex->GetHandle(), mSize, mFormat,
+                                  mContinuousUpdate, mForceBT709ColorSpace,
+                                  mTransformOverride);
+}
+
 ////////////////////////////////////////////////////////////////////////
 // AndroidHardwareBufferTextureSource
 
@@ -691,24 +591,55 @@ bool AndroidHardwareBufferTextureSource::EnsureEGLImage() {
     const auto& gle = gl::GLContextEGL::Cast(mGL);
     const auto& egl = gle->mEgl;
 
-    const EGLint attribs[] = {LOCAL_EGL_SYNC_NATIVE_FENCE_FD_ANDROID,
-                              fenceFd.get(), LOCAL_EGL_NONE};
+    // Like Chromium's AndroidImageBacking::BeginRead() and
+    // ImageReaderGLOwner::ScopedCurrentImageRef::GetReadyFence(), give EGL a
+    // duplicate FD while retaining the original fence. Restore it on failure
+    // so a subsequent bind or readback still waits for the producer.
+    auto restoreAcquireFence = MakeScopeExit(
+        [&] { mAndroidHardwareBuffer->SetAcquireFence(std::move(fenceFd)); });
+    UniqueFileHandle importFd = DuplicateFileHandle(fenceFd);
+    if (!importFd) {
+      gfxCriticalNoteOnce
+          << "AHB compositor: failed to duplicate acquire fence FD";
+      DeleteTextureHandle();
+      DestroyEGLImage();
+      return false;
+    }
 
+    // EGL takes ownership of the duplicate, including on creation failure.
+    const EGLint attribs[] = {LOCAL_EGL_SYNC_NATIVE_FENCE_FD_ANDROID,
+                              importFd.release(), LOCAL_EGL_NONE};
     EGLSync sync =
         egl->fCreateSyncKHR(LOCAL_EGL_SYNC_NATIVE_FENCE_ANDROID, attribs);
-    if (sync) {
-      // Release fd here, since it is owned by EGLSync
-      (void)fenceFd.release();
-
-      if (egl->IsExtensionSupported(gl::EGLExtension::KHR_wait_sync)) {
-        egl->fWaitSync(sync, 0);
-      } else {
-        egl->fClientWaitSync(sync, 0, LOCAL_EGL_FOREVER);
-      }
-      egl->fDestroySync(sync);
-    } else {
-      gfxCriticalNote << "Failed to create EGLSync from acquire fence fd";
+    if (!sync) {
+      const EGLint eglError = egl->mLib->fGetError();
+      gfxCriticalNoteOnce
+          << "AHB compositor: failed to import acquire fence, EGL error: "
+          << eglError;
+      DeleteTextureHandle();
+      DestroyEGLImage();
+      return false;
     }
+    bool waitSucceeded;
+    if (egl->IsExtensionSupported(gl::EGLExtension::KHR_wait_sync)) {
+      // Queue a GPU-side wait without blocking the CPU.
+      waitSucceeded = egl->fWaitSync(sync, 0) == LOCAL_EGL_TRUE;
+    } else {
+      // Without server-side wait support, block the CPU until the fence
+      // signals.
+      waitSucceeded = egl->fClientWaitSync(sync, 0, LOCAL_EGL_FOREVER) ==
+                      LOCAL_EGL_CONDITION_SATISFIED;
+    }
+    egl->fDestroySync(sync);
+    if (!waitSucceeded) {
+      gfxCriticalNoteOnce << "AHB compositor: acquire fence wait failed";
+      DeleteTextureHandle();
+      DestroyEGLImage();
+      return false;
+    }
+
+    // A successful wait no longer needs the original FD for retry.
+    restoreAcquireFence.release();
   }
 
   if (mTextureHandle) {
@@ -992,6 +923,7 @@ void AndroidImageReaderImageTextureSource::DeallocateDeviceData() {
 AndroidImageReaderImageTextureHost::AndroidImageReaderImageTextureHost(
     TextureFlags aFlags, const AndroidImageReaderImageDescriptor& aDescriptor)
     : TextureHost(TextureHostType::AndroidSurfaceTexture, aFlags),
+      mDescriptor(aDescriptor),
       mImageReaderId(aDescriptor.imageReaderId()),
       mFrameId(aDescriptor.frameId()),
       mSize(aDescriptor.size()),
@@ -1093,6 +1025,10 @@ void AndroidImageReaderImageTextureHost::PushDisplayItems(
 bool AndroidImageReaderImageTextureHost::SupportsExternalCompositing(
     WebRenderBackend aBackend) {
   return aBackend == WebRenderBackend::SOFTWARE;
+}
+
+SurfaceDescriptor AndroidImageReaderImageTextureHost::GetSurfaceDescriptor() {
+  return mDescriptor;
 }
 
 #endif  // MOZ_WIDGET_ANDROID

@@ -446,6 +446,12 @@ struct FeaturesVk : FeatureSetBase
         &members,
     };
 
+    FeatureInfo splitCrossFormatLayeredImageCopy = {
+        "splitCrossFormatLayeredImageCopy",
+        FeatureCategory::VulkanWorkarounds,
+        &members,
+    };
+
     FeatureInfo supportsImageFormatList = {
         "supportsImageFormatList",
         FeatureCategory::VulkanFeatures,
@@ -800,6 +806,12 @@ struct FeaturesVk : FeatureSetBase
         &members,
     };
 
+    FeatureInfo supportsExtendedDynamicState3 = {
+        "supportsExtendedDynamicState3",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
     FeatureInfo usePrimitiveRestartEnableDynamicState = {
         "usePrimitiveRestartEnableDynamicState",
         FeatureCategory::VulkanWorkarounds,
@@ -820,6 +832,30 @@ struct FeaturesVk : FeatureSetBase
 
     FeatureInfo supportsLogicOpDynamicState = {
         "supportsLogicOpDynamicState",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo supportsPatchControlPointsDynamicState = {
+        "supportsPatchControlPointsDynamicState",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo supportsAlphaToCoverageEnableDynamicState = {
+        "supportsAlphaToCoverageEnableDynamicState",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo supportsAlphaToOneEnableDynamicState = {
+        "supportsAlphaToOneEnableDynamicState",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo supportsDepthClampEnableDynamicState = {
+        "supportsDepthClampEnableDynamicState",
         FeatureCategory::VulkanFeatures,
         &members,
     };
@@ -917,6 +953,12 @@ struct FeaturesVk : FeatureSetBase
     FeatureInfo supportsRasterizationOrderAttachmentAccess = {
         "supportsRasterizationOrderAttachmentAccess",
         FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo addFramebufferFetchBarrierOnUseMidRenderPass = {
+        "addFramebufferFetchBarrierOnUseMidRenderPass",
+        FeatureCategory::VulkanWorkarounds,
         &members,
     };
 
@@ -1037,6 +1079,12 @@ struct FeaturesVk : FeatureSetBase
     FeatureInfo supportsSwapchainMaintenance1 = {
         "supportsSwapchainMaintenance1",
         FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo swapchainDeferredMemoryAllocation = {
+        "swapchainDeferredMemoryAllocation",
+        FeatureCategory::VulkanWorkarounds,
         &members,
     };
 
@@ -1580,12 +1628,6 @@ struct FeaturesVk : FeatureSetBase
         &members,
     };
 
-    FeatureInfo supportsGlobalPriorityQuery = {
-        "supportsGlobalPriorityQuery",
-        FeatureCategory::VulkanFeatures,
-        &members,
-    };
-
     FeatureInfo supportsBufferDeviceAddress = {
         "supportsBufferDeviceAddress",
         FeatureCategory::VulkanFeatures,
@@ -1664,6 +1706,12 @@ struct FeaturesVk : FeatureSetBase
         &members,
     };
 
+    FeatureInfo simulateTileMemoryTransferSrcForTesting = {
+        "simulateTileMemoryTransferSrcForTesting",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
     FeatureInfo supportsClKhrSubgroups = {
         "supportsClKhrSubgroups",
         FeatureCategory::VulkanFeatures,
@@ -1678,6 +1726,72 @@ struct FeaturesVk : FeatureSetBase
 
     FeatureInfo supportsShaderDemoteToHelperInvocation = {
         "supportsShaderDemoteToHelperInvocation",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo avoidImageGhostOutsideRenderPass = {
+        "avoidImageGhostOutsideRenderPass",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo supportsAmdShaderCoreProperties = {
+        "supportsAmdShaderCoreProperties",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo initializeColorAttachmentWithWhite = {
+        "initializeColorAttachmentWithWhite",
+        FeatureCategory::VulkanAppWorkarounds,
+        &members,
+    };
+
+    FeatureInfo enableAlphaChannelImages = {
+        "enableAlphaChannelImages",
+        FeatureCategory::VulkanWorkarounds,
+        &members,
+    };
+
+    FeatureInfo preferPrecomputedVertexTransform = {
+        "preferPrecomputedVertexTransform",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo debugSupportsClFp64 = {
+        "debugSupportsClFp64",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo supportsClFp16 = {
+        "supportsClFp16",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo supportsClFp64 = {
+        "supportsClFp64",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo supportsPipelineBinary = {
+        "supportsPipelineBinary",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo preferPipelineBinaries = {
+        "preferPipelineBinaries",
+        FeatureCategory::VulkanFeatures,
+        &members,
+    };
+
+    FeatureInfo allowPipelineBinariesForTesting = {
+        "allowPipelineBinariesForTesting",
         FeatureCategory::VulkanFeatures,
         &members,
     };

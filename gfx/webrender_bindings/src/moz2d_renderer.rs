@@ -22,7 +22,6 @@ use std::collections::btree_map::BTreeMap;
 use std::collections::hash_map;
 use std::collections::hash_map::HashMap;
 use std::collections::Bound::Included;
-use std::i32;
 use std::mem;
 use std::os::raw::c_void;
 use std::ptr;
@@ -338,7 +337,7 @@ impl<'a> CachedReader<'a> {
             .cache
             .range((
                 Included(CacheKey::new(*bounds, 0u32)),
-                Included(CacheKey::new(*bounds, std::u32::MAX)),
+                Included(CacheKey::new(*bounds, u32::MAX)),
             ))
             .next()
         {
@@ -609,6 +608,7 @@ fn rasterize_blob(mut job: Job) -> (BlobImageRequest, BlobImageResult) {
         unsafe {
             if wr_moz2d_render_cb(
                 ByteSlice::new(&job.commands[..]),
+                request.key.0 .0,
                 descriptor.format,
                 &descriptor.rect,
                 &job.visible_rect,
@@ -742,7 +742,7 @@ use bindings::{WrFontInstanceKey, WrFontKey, WrIdNamespace};
 extern "C" {
     fn HasFontData(key: WrFontKey) -> bool;
     fn AddFontData(key: WrFontKey, data: *const u8, size: usize, index: u32, vec: &ArcVecU8);
-    fn AddNativeFontHandle(key: WrFontKey, handle: *mut c_void, index: u32);
+    fn AddNativeFontHandle(key: WrFontKey, handle: *mut c_void, size: usize, index: u32);
     fn DeleteFontData(key: WrFontKey);
     fn AddBlobFont(
         instance_key: WrFontInstanceKey,
@@ -814,7 +814,7 @@ impl Moz2dBlobImageHandler {
         fn process_native_font_handle(key: FontKey, handle: &NativeFontHandle) {
             if let Some(file) = dwrote::FontFile::new_from_path(&handle.path) {
                 if let Ok(face) = file.create_face(handle.index, dwrote::DWRITE_FONT_SIMULATIONS_NONE) {
-                    unsafe { AddNativeFontHandle(key, face.as_ptr() as *mut c_void, 0) };
+                    unsafe { AddNativeFontHandle(key, face.as_ptr() as *mut c_void, 0, 0) };
                     return;
                 }
             }
@@ -836,7 +836,7 @@ impl Moz2dBlobImageHandler {
                 .unwrap()
                 .unwrap();
             let face = font.create_font_face();
-            unsafe { AddNativeFontHandle(key, face.as_ptr() as *mut c_void, 0) };
+            unsafe { AddNativeFontHandle(key, face.as_ptr() as *mut c_void, 0, 0) };
         }
 
         #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -853,13 +853,14 @@ impl Moz2dBlobImageHandler {
                         .expect("Failed reading font descriptor and could not load fallback font")
                 },
             };
-            unsafe { AddNativeFontHandle(key, font.as_ptr() as *mut c_void, 0) };
+            unsafe { AddNativeFontHandle(key, font.as_ptr() as *mut c_void, 0, 0) };
         }
 
         #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
         fn process_native_font_handle(key: FontKey, handle: &NativeFontHandle) {
             let cstr = CString::new(handle.path.as_os_str().as_bytes()).unwrap();
-            unsafe { AddNativeFontHandle(key, cstr.as_ptr() as *mut c_void, handle.index) };
+            let size = cstr.to_bytes_with_nul().len();
+            unsafe { AddNativeFontHandle(key, cstr.as_ptr() as *mut c_void, size, handle.index) };
         }
 
         fn process_fonts(

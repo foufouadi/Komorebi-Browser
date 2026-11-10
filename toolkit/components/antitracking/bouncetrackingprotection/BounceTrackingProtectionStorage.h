@@ -4,9 +4,12 @@
 #ifndef mozilla_BounceTrackingProtectionStorage_h_
 #define mozilla_BounceTrackingProtectionStorage_h_
 
+#include <functional>
+
 #include "mozIStorageFunction.h"
 #include "mozilla/Logging.h"
-#include "mozilla/Monitor.h"
+#include "mozilla/MozPromise.h"
+#include "mozilla/Mutex.h"
 #include "mozilla/ThreadSafety.h"
 #include "mozilla/WeakPtr.h"
 #include "mozilla/dom/FlippedOnce.h"
@@ -15,15 +18,16 @@
 #include "nsIObserver.h"
 #include "nsISupports.h"
 #include "nsTHashMap.h"
+#include "nsTHashSet.h"
 #include "mozIStorageConnection.h"
 #include "mozilla/OriginAttributesHashKey.h"
+#include "BounceTrackingSite.h"
 
 class nsIPrincipal;
 class mozIStorageConnection;
 namespace mozilla {
 
 class BounceTrackingStateGlobal;
-class BounceTrackingState;
 class OriginAttributes;
 
 extern LazyLogModule gBounceTrackingProtectionLog;
@@ -38,9 +42,7 @@ class BounceTrackingProtectionStorage final : public nsIObserver,
   NS_DECL_NSIASYNCSHUTDOWNBLOCKER
 
  public:
-  BounceTrackingProtectionStorage()
-      : mMonitor("mozilla::BounceTrackingProtectionStorage::mMonitor"),
-        mPendingWrites(0) {};
+  BounceTrackingProtectionStorage();
 
   // Initialises the storage including the on-disk database.
   [[nodiscard]] nsresult Init();
@@ -56,9 +58,6 @@ class BounceTrackingProtectionStorage final : public nsIObserver,
 
   RefPtr<BounceTrackingStateGlobal> GetOrCreateStateGlobal(
       nsIPrincipal* aPrincipal);
-
-  RefPtr<BounceTrackingStateGlobal> GetOrCreateStateGlobal(
-      BounceTrackingState* aBounceTrackingState);
 
   using StateGlobalMap =
       nsTHashMap<OriginAttributesHashKey, RefPtr<BounceTrackingStateGlobal>>;
@@ -100,6 +99,11 @@ class BounceTrackingProtectionStorage final : public nsIObserver,
   // Clear all state.
   [[nodiscard]] nsresult Clear();
 
+  // Flushes pending updates. Resolves once all queued database operations,
+  // including initialization and loading the on-disk state into memory, have
+  // completed.
+  RefPtr<GenericPromise> TestFlush();
+
  private:
   [[nodiscard]] nsresult InitInternal();
 
@@ -113,9 +117,10 @@ class BounceTrackingProtectionStorage final : public nsIObserver,
   // initialized and not-yet finalized
   RefPtr<mozIStorageConnection> mDatabaseConnection;  // Worker thread only
 
-  // Wait (non-blocking) until the service is fully initialized. We may be
-  // waiting for that async work started by Init().
-  [[nodiscard]] nsresult WaitForInitialization();
+  // Returns an error if initialization failed or shutdown has started. Does not
+  // wait for initialization: database operations dispatched to
+  // mBackgroundThread before it has finished run after it.
+  [[nodiscard]] nsresult CheckDBAvailable();
 
   // Called to indicate to the async shutdown service that we are all wrapped
   // up. This also spins down the worker thread, since it is called after all
@@ -191,15 +196,12 @@ class BounceTrackingProtectionStorage final : public nsIObserver,
       mozIStorageConnection* aDatabaseConnection,
       const nsTArray<PendingUpdate>& aUpdates);
 
-  // Service state management. We protect these variables with a monitor. This
-  // monitor is also used to signal the completion of initialization and
-  // finalization performed in the worker thread.
-  Monitor mMonitor;
+  // Service state management. We protect these variables with a mutex.
+  Mutex mMutex;
 
-  FlippedOnce<false> mInitialized MOZ_GUARDED_BY(mMonitor);
-  FlippedOnce<false> mErrored MOZ_GUARDED_BY(mMonitor);
-  FlippedOnce<false> mShuttingDown MOZ_GUARDED_BY(mMonitor);
-  uint32_t mPendingWrites MOZ_GUARDED_BY(mMonitor);
+  FlippedOnce<false> mErrored MOZ_GUARDED_BY(mMutex);
+  FlippedOnce<false> mShuttingDown MOZ_GUARDED_BY(mMutex);
+  uint32_t mPendingWrites MOZ_GUARDED_BY(mMutex);
 
   // The pending updates to be flushed to the database in bulk.
   // Only holds changes that go through UpdateDBEntry.
@@ -214,15 +216,39 @@ class BounceTrackingProtectionStorage final : public nsIObserver,
   // Map of origin attributes to global state object. This enables us to track
   // bounce tracking state per OA, e.g. to separate private browsing from normal
   // browsing.
-  StateGlobalMap mStateGlobal{};
+  StateGlobalMap mStateGlobal;
+
+  // Whether the on-disk state has been loaded into mStateGlobal. Main thread
+  // only.
+  bool mMemoryStateLoaded = false;
+
+  // Database operations issued before the on-disk state was loaded into memory.
+  // Main thread only.
+  // Loaded entries matching a deletion are skipped.
+  nsTArray<std::function<bool(const ImportEntry&)>> mDeletionsBeforeLoad;
+  // Loaded entries for these sites are merged into the in-memory state and the
+  // merged result is written back, since the database row now holds the value
+  // written before load.
+  nsTHashMap<OriginAttributesHashKey, nsTHashSet<nsCString>>
+      mSitesWrittenBeforeLoad;
+
+  void NoteSiteWrittenBeforeLoad(const OriginAttributes& aOriginAttributes,
+                                 const nsACString& aSiteHost);
+  void NoteDeletionBeforeLoad(
+      std::function<bool(const ImportEntry&)>&& aMatches);
+  bool IsDeletedBeforeLoad(const ImportEntry& aEntry) const;
+  bool IsSiteWrittenBeforeLoad(const ImportEntry& aEntry);
+
+  // Writes the in-memory state of a site to the database.
+  [[nodiscard]] nsresult PersistMemoryState(
+      BounceTrackingStateGlobal* aStateGlobal, const BounceTrackingSite& aSite);
 
   // Helpers used to sync updates to BounceTrackingStateGlobal with the
   // database.
 
   // Updates or inserts a DB entry keyed by OA + site host.
-  [[nodiscard]] nsresult UpdateDBEntry(
-      const OriginAttributes& aOriginAttributes, const nsACString& aSiteHost,
-      EntryType aEntryType, PRTime aTimeStamp);
+  [[nodiscard]] nsresult UpdateDBEntry(const BounceTrackingSite& aSite,
+                                       EntryType aEntryType, PRTime aTimeStamp);
 
   // Flushes pending updates to the database if the buffer is full
   [[nodiscard]] nsresult MaybeFlushPendingUpdates();

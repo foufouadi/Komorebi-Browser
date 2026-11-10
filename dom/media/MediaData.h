@@ -99,7 +99,7 @@ class BufferStorage {
 // auto buffer = MakeUniqueFallible<float[]>(samples)
 // becomes: AlignedFloatBuffer buffer(samples)
 //
-// auto buffer = MakeUnique<float[]>(samples)
+// auto buffer = std::make_unique<float[]>(samples)
 // becomes:
 // AlignedFloatBuffer buffer(samples);
 // if (!buffer) { return NS_ERROR_OUT_OF_MEMORY; }
@@ -166,6 +166,7 @@ class AlignedBuffer {
   }
 
   Type* Data() const { return mData; }
+  Type* Elements() const { return mData; }
   size_t Length() const { return mLength; }
   size_t Size() const { return mLength * sizeof(Type); }
   Type& operator[](size_t aIndex) {

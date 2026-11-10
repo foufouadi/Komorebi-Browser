@@ -4,7 +4,6 @@
 
 use euclid::{Angle, Size2D};
 use crate::parse_function::parse_function;
-use std::f32;
 use std::str::FromStr;
 use webrender::api::*;
 use webrender::api::units::*;
@@ -18,6 +17,7 @@ pub trait YamlHelper {
     fn as_vec_u32(&self) -> Option<Vec<u32>>;
     fn as_vec_u64(&self) -> Option<Vec<u64>>;
     fn as_pipeline_id(&self) -> Option<PipelineId>;
+    fn as_embed_policy(&self) -> Option<EmbedPolicy>;
     fn as_rect(&self) -> Option<LayoutRect>;
     fn as_size(&self) -> Option<LayoutSize>;
     fn as_side_offsets(&self) -> Option<LayoutSideOffsets>;
@@ -42,9 +42,15 @@ pub trait YamlHelper {
     fn as_vec_filter_data(&self) -> Option<Vec<FilterData>>;
     fn as_complex_clip_region(&self) -> ComplexClipRegion;
     fn as_sticky_offset_bounds(&self) -> StickyOffsetBounds;
-    fn as_gradient(&self, dl: &mut DisplayListBuilder) -> Gradient;
-    fn as_radial_gradient(&self, dl: &mut DisplayListBuilder) -> RadialGradient;
-    fn as_conic_gradient(&self, dl: &mut DisplayListBuilder) -> ConicGradient;
+    fn as_gradient(&self, dl: &mut DisplayListBuilder) -> (Gradient, Vec<GradientStop>);
+    fn as_radial_gradient(
+        &self,
+        dl: &mut DisplayListBuilder,
+    ) -> (RadialGradient, Vec<GradientStop>);
+    fn as_conic_gradient(
+        &self,
+        dl: &mut DisplayListBuilder,
+    ) -> (ConicGradient, Vec<GradientStop>);
     fn as_complex_clip_regions(&self) -> Vec<ComplexClipRegion>;
     fn as_rotation(&self) -> Option<Rotation>;
 }
@@ -177,7 +183,7 @@ fn make_rotation(
     let pre_transform = LayoutTransform::translation(-origin.x, -origin.y, -0.0);
     let post_transform = LayoutTransform::translation(origin.x, origin.y, 0.0);
 
-    let theta = 2.0f32 * f32::consts::PI - degrees.to_radians();
+    let theta = std::f32::consts::TAU - degrees.to_radians();
     let transform =
         LayoutTransform::identity().pre_rotate(axis_x, axis_y, axis_z, Angle::radians(theta));
 
@@ -202,6 +208,14 @@ fn make_skew(
     let alpha = Angle::radians(skew_x.to_radians());
     let beta = Angle::radians(skew_y.to_radians());
     LayoutTransform::skew(alpha, beta)
+}
+
+fn gradient_alpha_mode(yaml: &Yaml) -> AlphaMode {
+    if yaml["unpremultiplied"].as_bool().unwrap_or(false) {
+        AlphaMode::Unpremultiplied
+    } else {
+        AlphaMode::Premultiplied
+    }
 }
 
 impl YamlHelper for Yaml {
@@ -265,6 +279,19 @@ impl YamlHelper for Yaml {
 
     fn as_pt_to_f32(&self) -> Option<f32> {
         self.as_force_f32().map(|fv| fv * 16. / 12.)
+    }
+
+    fn as_embed_policy(&self) -> Option<EmbedPolicy> {
+        match *self {
+            Yaml::String(ref s) if s == "unrestricted" => Some(EmbedPolicy::Unrestricted),
+            Yaml::Array(ref v) => Some(EmbedPolicy::Restricted(
+                v.iter()
+                    .map(|ns| ns.as_i64().expect("embed-policy takes pipeline namespaces") as u32)
+                    .collect(),
+            )),
+            Yaml::BadValue => None,
+            _ => panic!("embed-policy is either `unrestricted` or a list of pipeline namespaces"),
+        }
     }
 
     fn as_rect(&self) -> Option<LayoutRect> {
@@ -773,7 +800,7 @@ impl YamlHelper for Yaml {
                     let scale = self["scale"].as_f32().unwrap();
                     let x_channel_selector = self["x_channel_selector"].as_i64().unwrap() as u32;
                     let y_channel_selector = self["y_channel_selector"].as_i64().unwrap() as u32;
-                    Some(FilterOp::SVGFEDisplacementMap{node, scale, x_channel_selector, y_channel_selector})
+                    Some(FilterOp::SVGFEDisplacementMap{node, scale_x: scale, scale_y: scale, x_channel_selector, y_channel_selector})
                 },
                 "dropshadow" => {
                     let color = self["color"].as_colorf().unwrap();
@@ -933,6 +960,18 @@ impl YamlHelper for Yaml {
                     let amount: f32 = args[0].parse().unwrap();
                     Some(FilterOp::Opacity(amount.into(), amount))
                 }
+                // A second argument is a property binding id, which makes the
+                // filter animated rather than static. The bound value is the
+                // amount above; nothing needs to update it for the binding to
+                // count as animating.
+                ("opacity", ref args, _) if args.len() == 2 => {
+                    let amount: f32 = args[0].parse().unwrap();
+                    let id: u64 = args[1].parse().unwrap();
+                    Some(FilterOp::Opacity(
+                        PropertyBinding::Binding(PropertyBindingKey::new(id), amount),
+                        amount,
+                    ))
+                }
                 ("saturate", ref args, _) if args.len() == 1 => {
                     Some(FilterOp::Saturate(args[0].parse().unwrap()))
                 }
@@ -1052,7 +1091,7 @@ impl YamlHelper for Yaml {
         }
     }
 
-    fn as_gradient(&self, dl: &mut DisplayListBuilder) -> Gradient {
+    fn as_gradient(&self, dl: &mut DisplayListBuilder) -> (Gradient, Vec<GradientStop>) {
         let start = self["start"].as_point().expect("gradient must have start");
         let end = self["end"].as_point().expect("gradient must have end");
         let stops = self["stops"]
@@ -1076,10 +1115,10 @@ impl YamlHelper for Yaml {
             ExtendMode::Clamp
         };
 
-        dl.create_gradient(start, end, stops, extend_mode)
+        dl.create_gradient(start.to_vector(), end.to_vector(), stops, extend_mode, gradient_alpha_mode(self))
     }
 
-    fn as_radial_gradient(&self, dl: &mut DisplayListBuilder) -> RadialGradient {
+    fn as_radial_gradient(&self, dl: &mut DisplayListBuilder) -> (RadialGradient, Vec<GradientStop>) {
         let center = self["center"].as_point().expect("radial gradient must have center");
         let radius = self["radius"].as_size().expect("radial gradient must have a radius");
         let stops = self["stops"]
@@ -1103,10 +1142,10 @@ impl YamlHelper for Yaml {
             ExtendMode::Clamp
         };
 
-        dl.create_radial_gradient(center, radius, stops, extend_mode)
+        dl.create_radial_gradient(center.to_vector(), radius, stops, extend_mode, gradient_alpha_mode(self))
     }
 
-    fn as_conic_gradient(&self, dl: &mut DisplayListBuilder) -> ConicGradient {
+    fn as_conic_gradient(&self, dl: &mut DisplayListBuilder) -> (ConicGradient, Vec<GradientStop>) {
         let center = self["center"].as_point().expect("conic gradient must have center");
         let angle = self["angle"].as_force_f32().expect("conic gradient must have an angle");
         let stops = self["stops"]
@@ -1130,7 +1169,7 @@ impl YamlHelper for Yaml {
             ExtendMode::Clamp
         };
 
-        dl.create_conic_gradient(center, angle, stops, extend_mode)
+        dl.create_conic_gradient(center.to_vector(), angle, stops, extend_mode, gradient_alpha_mode(self))
     }
 
     fn as_complex_clip_regions(&self) -> Vec<ComplexClipRegion> {

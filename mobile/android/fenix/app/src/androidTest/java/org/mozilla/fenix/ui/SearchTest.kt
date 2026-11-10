@@ -18,6 +18,8 @@ import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.mozilla.fenix.R
+import org.mozilla.fenix.customannotations.Converted
+import org.mozilla.fenix.customannotations.Critical
 import org.mozilla.fenix.customannotations.SkipLeaks
 import org.mozilla.fenix.customannotations.SmokeTest
 import org.mozilla.fenix.ext.components
@@ -78,6 +80,7 @@ class SearchTest {
                 skipOnboarding = true,
                 isPocketEnabled = false,
                 isRecentTabsFeatureEnabled = false,
+                isRecentlyVisitedFeatureEnabled = true,
                 isWallpaperOnboardingEnabled = false,
                 isLocationPermissionEnabled = SitePermissionsRules.Action.BLOCKED,
                 // workaround for toolbar at top position by default
@@ -181,6 +184,11 @@ class SearchTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1059459
+    @Converted(
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.SearchTest#verifyQRScanningCameraAccessDialogTest"],
+        bug = 2063102,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun verifyQRScanningCameraAccessDialogTest() {
@@ -216,6 +224,11 @@ class SearchTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/235397
+    @Converted(
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.SearchTest#scanQRCodeToOpenAWebpageTest"],
+        bug = 2063052,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun scanQRCodeToOpenAWebpageTest() {
@@ -256,6 +269,14 @@ class SearchTest {
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/235395
     // Verifies a temporary change of search engine from the Search shortcut menu
+    @Converted(
+        replacedBy =
+            [
+                "org.mozilla.fenix.ui.efficiency.tests.SearchTest#searchEnginesCanBeChangedTemporarilyFromSearchSelectorMenuTest"
+            ],
+        bug = 2063045,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun searchEnginesCanBeChangedTemporarilyFromSearchSelectorMenuTest() {
@@ -293,6 +314,12 @@ class SearchTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/522918
+    @Converted(
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.SearchTest#verifyClearSearchButtonTest"],
+        bug = 2071309,
+        since = "2026-09",
+    )
+    @Critical
     @Test
     fun verifyClearSearchButtonTest() {
         homeScreen(composeTestRule) {}
@@ -304,6 +331,12 @@ class SearchTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1623441
+    @Converted(
+        replacedBy =
+            ["org.mozilla.fenix.ui.efficiency.tests.SearchTest#searchResultsOpenedInNewTabsGenerateSearchGroupsTest"],
+        bug = 2063072,
+        since = "2026-08",
+    )
     @Ignore("Failing: https://bugzilla.mozilla.org/show_bug.cgi?id=1930244")
     @SmokeTest
     @Test
@@ -420,6 +453,14 @@ class SearchTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1591781
+    @Converted(
+        replacedBy =
+            [
+                "org.mozilla.fenix.ui.efficiency.tests.SearchTest#searchGroupIsNotGeneratedForLinksOpenedInPrivateTabsTest"
+            ],
+        bug = 2063074,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun searchGroupIsNotGeneratedForLinksOpenedInPrivateTabsTest() {
@@ -458,6 +499,12 @@ class SearchTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1592269
+    @Converted(
+        replacedBy =
+            ["org.mozilla.fenix.ui.efficiency.tests.SearchTest#deleteIndividualHistoryItemsFromSearchGroupTest"],
+        bug = 2063080,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun deleteIndividualHistoryItemsFromSearchGroupTest() {
@@ -721,9 +768,14 @@ class SearchTest {
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1232638
     // Default search code for DuckDuckGo-US
-    @Ignore("Failing, see https://bugzilla.mozilla.org/show_bug.cgi?id=1858878")
+    @Converted(
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.SearchTest#defaultSearchCodeDuckDuckGoUSTest"],
+        bug = 2078576,
+        since = "2026-10",
+    )
+    @Critical
     @Test
-    fun defaultSearchCodeDuckDuckGoUS() {
+    fun defaultSearchCodeDuckDuckGoUSTest() {
         homeScreen(composeTestRule) {}
             .openThreeDotMenu {}
             .clickSettingsButton {}
@@ -735,18 +787,13 @@ class SearchTest {
         homeScreen(composeTestRule) {}
             .openSearch {}
             .submitQuery(queryString) {
-                verifyPageContent("duckduckgo")
+                verifyUrl(queryString)
             }
             .openThreeDotMenu {}
-            .clickHistoryButton {
-                // Full URL no longer visible in the nav bar, so we'll check the history record
-                // A search group is sometimes created when searching with DuckDuckGo
-                try {
-                    verifyHistoryItemExists(shouldExist = true, item = Constants.searchEngineCodes["DuckDuckGo"]!!)
-                } catch (e: AssertionError) {
-                    openSearchGroup(queryString)
-                    verifyHistoryItemExists(shouldExist = true, item = Constants.searchEngineCodes["DuckDuckGo"]!!)
-                }
+            .clickBookmarkThisPageButton {}
+            .openThreeDotMenu {}
+            .clickBookmarksButton {
+                verifyBookmarkedURL("https://duckduckgo.com/?t=fpas&q=firefox")
             }
     }
 
@@ -782,6 +829,16 @@ class SearchTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2154215
+    @Converted(
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.SearchTest#verifyHistorySearchWithBrowsingHistoryTest"],
+        bug = 2063046,
+        since = "2026-08",
+        notes =
+            "Full parity. Same two deviations as bug 2063043: the negative suggestion check " +
+                "asserts no suggestion row contains the term (legacy matched the plural container tag " +
+                "with assertAny(hasText().not())), and the typed-toolbar check is a substring text match " +
+                "rather than a normalized semantics read.",
+    )
     @SmokeTest
     @Test
     fun verifyHistorySearchWithBrowsingHistoryTest() {
@@ -842,6 +899,18 @@ class SearchTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2154199
+    @Converted(
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.SearchTest#verifyTabsSearchWithOpenTabsTest"],
+        bug = 2063043,
+        since = "2026-08",
+        notes =
+            "Full parity. Two deliberate deviations: the negative suggestion check asserts no " +
+                "suggestion row contains the term (legacy matched the plural container tag with " +
+                "assertAny(hasText().not()), which passes whenever any node lacks the text), and the " +
+                "typed-toolbar check is a substring text match rather than a normalized semantics read. " +
+                "The URL-based suggestion assertions depend on SearchMockServerRule 404ing the asset so " +
+                "the tabs stay untitled; the port keeps that rule to preserve them.",
+    )
     @SmokeTest
     @Test
     fun verifyTabsSearchWithOpenTabsTest() {
@@ -962,6 +1031,12 @@ class SearchTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2230212
+    @Converted(
+        replacedBy =
+            ["org.mozilla.fenix.ui.efficiency.tests.SearchTest#searchHistoryNotRememberedInPrivateBrowsingTest"],
+        bug = 2063066,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun searchHistoryNotRememberedInPrivateBrowsingTest() {

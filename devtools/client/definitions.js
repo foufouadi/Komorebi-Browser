@@ -137,6 +137,8 @@ const CommandKeys = new Localization(
   true
 );
 
+const NEW_SETTINGS_PANEL_URL = "chrome://devtools/content/settings/index.html";
+
 var Tools = {};
 exports.Tools = Tools;
 
@@ -144,7 +146,14 @@ exports.Tools = Tools;
 Tools.options = {
   id: "options",
   ordinal: 0,
-  url: "chrome://devtools/content/framework/toolbox-options.html",
+  get url() {
+    if (
+      Services.prefs.getBoolPref("devtools.settings.redesign-enabled", false)
+    ) {
+      return NEW_SETTINGS_PANEL_URL;
+    }
+    return "chrome://devtools/content/framework/toolbox-options.html";
+  },
   icon: "chrome://devtools/skin/images/settings.svg",
   bgTheme: "theme-body",
   label: l10n("options.label"),
@@ -158,6 +167,12 @@ Tools.options = {
   },
 
   build(iframeWindow, toolbox, commands) {
+    if (this.url === NEW_SETTINGS_PANEL_URL) {
+      const {
+        SettingsPanel,
+      } = require("resource://devtools/client/settings/panel.mjs");
+      return new SettingsPanel(iframeWindow, toolbox);
+    }
     return new OptionsPanel(iframeWindow, toolbox, commands);
   },
 };
@@ -588,12 +603,7 @@ exports.ToolboxButtons = [
     id: "command-button-screenshot",
     description: l10n("toolbox.buttons.screenshot"),
     isToolSupported: toolbox => {
-      return (
-        // @backward-compat { version 87 } We need to check for the screenshot actor as well
-        // when connecting to older server that does not have the screenshotContentActor
-        toolbox.target.hasActor("screenshotContent") ||
-        toolbox.target.hasActor("screenshot")
-      );
+      return toolbox.target.hasActor("screenshotContent");
     },
     async onClick(event, toolbox) {
       // Special case for screenshot button to check for clipboard preference
@@ -844,71 +854,28 @@ function createHighlightButton({ highlighterTypes, id }) {
     isToolSupported: toolbox =>
       toolbox.commands.descriptorFront.isTabDescriptor,
     async onClick(event, toolbox) {
-      // @backward-compat { version 154 } Firefox 154 started supporting toggling
-      // global highlighters via Target Actor Configuration. The else branch can be later removed.
-      const { targetConfigurationCommand } = toolbox.commands;
-      if (await targetConfigurationCommand.supports("enabledHighlighters")) {
-        const { configuration } = targetConfigurationCommand;
-        let highlighters = configuration.enabledHighlighters || [];
-        // Check if all the highlighters were enabled
-        if (highlighterTypes.every(type => highlighters.includes(type))) {
-          // Disable the highlighters
-          highlighters = highlighters.filter(
-            type => !highlighterTypes.includes(type)
-          );
-        } else {
-          // Enable the highlighters
-          highlighters = [...highlighters, ...highlighterTypes];
-        }
-        // Instruct the backend to toggle the highlighters on/off
-        await targetConfigurationCommand.updateConfiguration({
-          enabledHighlighters: highlighters,
-        });
-      } else {
-        const inspectorFront = await toolbox.target.getFront("inspector");
-        await Promise.all(
-          highlighterTypes.map(async name => {
-            const highlighter =
-              await inspectorFront.getOrCreateHighlighterByType(name);
-
-            if (highlighter.isShown()) {
-              await highlighter.hide();
-            } else {
-              await highlighter.show();
-            }
-          })
-        );
-      }
-    },
-    isChecked(toolbox) {
       const { targetConfigurationCommand } = toolbox.commands;
       const { configuration } = targetConfigurationCommand;
-      // Note that we cannot query targetConfigurationCommand.supports as this is an async function,
-      // so fallback on looking if the enabledHighlighters configuration key exists
-      //
-      // @backward-compat { version 154 } Firefox 154 started supporting toggling
-      // global highlighters via Target Actor Configuration. The else branch can be later removed.
-      if ("enabledHighlighters" in configuration) {
-        const highlighters = configuration.enabledHighlighters || [];
-        const isChecked = highlighterTypes.every(type =>
-          highlighters.includes(type)
+      let highlighters = configuration.enabledHighlighters || [];
+      // Check if all the highlighters were enabled
+      if (highlighterTypes.every(type => highlighters.includes(type))) {
+        // Disable the highlighters
+        highlighters = highlighters.filter(
+          type => !highlighterTypes.includes(type)
         );
-        return isChecked;
+      } else {
+        // Enable the highlighters
+        highlighters = [...highlighters, ...highlighterTypes];
       }
-      // if the inspector doesn't exist, then the highlighter has not yet been connected
-      // to the front end.
-      const inspectorFront = toolbox.target.getCachedFront("inspector");
-      if (!inspectorFront) {
-        // initialize the inspector front asyncronously. There is a potential for buggy
-        // behavior here, but we need to change how the buttons get data (have them
-        // consume data from reducers rather than writing our own version) in order to
-        // fix this properly.
-        return false;
-      }
-
-      return highlighterTypes.every(name =>
-        inspectorFront.getKnownHighlighter(name)?.isShown()
-      );
+      // Instruct the backend to toggle the highlighters on/off
+      await targetConfigurationCommand.updateConfiguration({
+        enabledHighlighters: highlighters,
+      });
+    },
+    isChecked(toolbox) {
+      const { configuration } = toolbox.commands.targetConfigurationCommand;
+      const highlighters = configuration.enabledHighlighters || [];
+      return highlighterTypes.every(type => highlighters.includes(type));
     },
     isToggle: true,
   };

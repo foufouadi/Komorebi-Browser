@@ -5,7 +5,9 @@
 #ifndef _include_ipc_glue_UtilityProcessHost_h_
 #define _include_ipc_glue_UtilityProcessHost_h_
 
+#include "mozilla/MozPromise.h"
 #include "mozilla/UniquePtr.h"
+#include "nsITimer.h"
 #include "mozilla/ipc/UtilityProcessParent.h"
 #include "mozilla/ipc/UtilityProcessSandboxing.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
@@ -61,13 +63,19 @@ class UtilityProcessHost final : public mozilla::ipc::GeckoChildProcessHost {
   // succeeded.
   RefPtr<LaunchPromiseType> LaunchPromise();
 
+  // Resolved once the process' channel has been closed and this host is about
+  // to go away. Never rejected.
+  using ShutdownPromiseType = MozPromise<Ok, nsresult, false>;
+
   // Inform the process that it should clean up its resources and shut
   // down. This initiates an asynchronous shutdown sequence. After this
   // method returns, it is safe for the caller to forget its pointer to
   // the UtilityProcessHost.
   //
+  // The returned promise resolves once that sequence has completed.
+  //
   // After this returns, the attached Listener is no longer used.
-  void Shutdown();
+  RefPtr<ShutdownPromiseType> Shutdown();
 
   // Return the actor for the top-level actor of the process. If the process
   // has not connected yet, this returns null.
@@ -103,7 +111,9 @@ class UtilityProcessHost final : public mozilla::ipc::GeckoChildProcessHost {
   // Kill the remote process, triggering IPC shutdown.
   void KillHard(const char* aReason);
 
-  void DestroyProcess();
+  // Kill the process if it does not acknowledge our shutdown request within
+  // dom.ipc.utilityProcess.shutdownTimeoutSecs, so it cannot hang shutdown.
+  void StartForceKillTimer();
 
 #if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
   // Sandbox utility processes based on IsUtilitySandboxEnabled()
@@ -127,6 +137,10 @@ class UtilityProcessHost final : public mozilla::ipc::GeckoChildProcessHost {
 
   bool mShutdownRequested = false;
 
+  nsCOMPtr<nsITimer> mForceKillTimer;
+
+  MozPromiseHolder<ShutdownPromiseType> mShutdownPromise;
+
   void ResolvePromise();
   void RejectPromise(LaunchError);
 
@@ -137,14 +151,6 @@ class UtilityProcessHost final : public mozilla::ipc::GeckoChildProcessHost {
 #if defined(MOZ_WMF_CDM) && defined(MOZ_SANDBOX)
   void EnanbleMFCDMTelemetryEventIfNeeded() const;
 #endif
-
-  // Set to true on construction and to false just prior deletion.
-  // The UtilityProcessHost isn't refcounted; so we can capture this by value in
-  // lambdas along with a strong reference to mLiveToken and check if that value
-  // is true before accessing "this".
-  // While a reference to mLiveToken can be taken on any thread; its value can
-  // only be read or written on the main thread.
-  const RefPtr<media::Refcountable<bool>> mLiveToken;
 
   RefPtr<LaunchPromiseType::Private> mLaunchPromise{};
   bool mLaunchPromiseSettled = false;

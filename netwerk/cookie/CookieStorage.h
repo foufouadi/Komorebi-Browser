@@ -9,6 +9,8 @@
 
 #include "CookieCommons.h"
 #include "CookieKey.h"
+#include "mozilla/Maybe.h"
+#include "mozilla/net/Cookie.h"
 #include "nsICookieNotification.h"
 #include "nsIObserver.h"
 #include "nsTHashtable.h"
@@ -16,13 +18,11 @@
 
 class nsIArray;
 class nsICookie;
-class nsICookieTransactionCallback;
 class nsIPrefBranch;
 
 namespace mozilla {
 namespace net {
 
-class Cookie;
 class CookieParser;
 
 // Inherit from CookieKey so this can be stored in nsTHashTable
@@ -61,7 +61,7 @@ class CookieStorage : public nsIObserver, public nsSupportsWeakReference {
 
   size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const;
 
-  void GetCookies(nsTArray<RefPtr<nsICookie>>& aCookies) const;
+  enum class ExpiredCookies { Exclude, Include };
 
   void GetSessionCookies(nsTArray<RefPtr<nsICookie>>& aCookies) const;
 
@@ -71,20 +71,21 @@ class CookieStorage : public nsIObserver, public nsSupportsWeakReference {
                                       const nsACString& aName,
                                       const nsACString& aPath);
 
-  uint32_t CountCookiesFromHost(const nsACString& aBaseDomain,
-                                uint32_t aPrivateBrowsingId);
-
-  bool HasCookiesForSite(const nsACString& aBaseDomain,
-                         const OriginAttributesPattern& aPattern);
-
   uint32_t CountCookieBytesNotMatchingCookie(const Cookie& cookie,
                                              const nsACString& baseDomain);
 
-  void GetAll(nsTArray<RefPtr<nsICookie>>& aResult) const;
+  void GetAll(nsTArray<RefPtr<nsICookie>>& aResult,
+              ExpiredCookies aExpired = ExpiredCookies::Exclude) const;
 
   void GetCookiesFromHost(const nsACString& aBaseDomain,
                           const OriginAttributes& aOriginAttributes,
                           nsTArray<RefPtr<Cookie>>& aCookies);
+
+  bool HasCookies(const nsACString& aBaseDomain,
+                  const OriginAttributes& aOriginAttributes);
+
+  bool HasCookies(const nsACString& aBaseDomain,
+                  const OriginAttributesPattern& aPattern);
 
   void GetCookiesWithOriginAttributes(const OriginAttributesPattern& aPattern,
                                       const nsACString& aBaseDomain,
@@ -95,7 +96,7 @@ class CookieStorage : public nsIObserver, public nsSupportsWeakReference {
                     const OriginAttributes& aOriginAttributes,
                     const nsACString& aHost, const nsACString& aName,
                     const nsACString& aPath, bool aFromHttp,
-                    const nsID* aOperationID);
+                    const Maybe<nsID>& aOperationID = Nothing());
 
   virtual void RemoveCookiesWithOriginAttributes(
       const OriginAttributesPattern& aPattern, const nsACString& aBaseDomain);
@@ -111,14 +112,14 @@ class CookieStorage : public nsIObserver, public nsSupportsWeakReference {
                      const nsACString& aBaseDomain, bool aIsThirdParty = false,
                      dom::BrowsingContext* aBrowsingContext = nullptr,
                      bool aOldCookieIsSession = false,
-                     const nsID* aOperationID = nullptr);
+                     const Maybe<nsID>& aOperationID = Nothing());
 
   void AddCookie(CookieParser* aCookieParser, const nsACString& aBaseDomain,
                  const OriginAttributes& aOriginAttributes, Cookie* aCookie,
                  int64_t aCurrentTimeInUsec, nsIURI* aHostURI,
                  const nsACString& aCookieHeader, bool aFromHttp,
                  bool aIsThirdParty, dom::BrowsingContext* aBrowsingContext,
-                 const nsID* aOperationID = nullptr);
+                 const Maybe<nsID>& aOperationID = Nothing());
 
   uint32_t RemoveOldestCookies(CookieEntry* aEntry, bool aSecure,
                                uint32_t aBytesToRemove,
@@ -150,9 +151,6 @@ class CookieStorage : public nsIObserver, public nsSupportsWeakReference {
   virtual void Close() = 0;
 
   virtual void EnsureInitialized() = 0;
-
-  virtual nsresult RunInTransaction(
-      nsICookieTransactionCallback* aCallback) = 0;
 
  protected:
   // stores the CookieEntry entryclass and an index into the cookie array within
@@ -190,10 +188,12 @@ class CookieStorage : public nsIObserver, public nsSupportsWeakReference {
 
   void Init();
 
-  bool FindCookie(const nsACString& aBaseDomain,
-                  const OriginAttributes& aOriginAttributes,
-                  const nsACString& aHost, const nsACString& aName,
-                  const nsACString& aPath, CookieListIter& aIter);
+  bool FindCookieIncludingExpired(const nsACString& aBaseDomain,
+                                  const OriginAttributes& aOriginAttributes,
+                                  const nsACString& aHost,
+                                  const nsACString& aName,
+                                  const nsACString& aPath,
+                                  CookieListIter& aIter);
 
   void AddCookieToList(const nsACString& aBaseDomain,
                        const OriginAttributes& aOriginAttributes,
@@ -215,7 +215,7 @@ class CookieStorage : public nsIObserver, public nsSupportsWeakReference {
 
   void RemoveCookieFromListInternal(const CookieListIter& aIter);
 
-  virtual void RemoveCookieFromDB(const Cookie& aCookie) = 0;
+  virtual void RemoveCookieFromDB(Cookie* aCookie) = 0;
 
   already_AddRefed<nsIArray> PurgeCookiesWithCallbacks(
       int64_t aCurrentTimeInUsec, uint16_t aMaxNumberOfCookies,
@@ -248,6 +248,8 @@ class CookieStorage : public nsIObserver, public nsSupportsWeakReference {
   virtual already_AddRefed<nsIArray> PurgeCookies(int64_t aCurrentTimeInUsec,
                                                   uint16_t aMaxNumberOfCookies,
                                                   int64_t aCookiePurgeAge) = 0;
+
+  void PurgeExpiredCookies();
 
   void RemoveCookiesFromBack(nsTArray<CookieListIter>& aCookieIters,
                              nsCOMPtr<nsIArray>& aPurgedList);

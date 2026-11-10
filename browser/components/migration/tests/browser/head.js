@@ -14,7 +14,7 @@ const { sinon } = ChromeUtils.importESModule(
   "resource://testing-common/Sinon.sys.mjs"
 );
 const { InternalTestingProfileMigrator } = ChromeUtils.importESModule(
-  "resource:///modules/InternalTestingProfileMigrator.sys.mjs"
+  "moz-src:///browser/components/migration/InternalTestingProfileMigrator.sys.mjs"
 );
 const { TelemetryTestUtils } = ChromeUtils.importESModule(
   "resource://testing-common/TelemetryTestUtils.sys.mjs"
@@ -185,6 +185,8 @@ async function waitForTestMigration(
     history: EXPECTED_QUANTITY,
     logins: EXPECTED_QUANTITY,
     cards: EXPECTED_QUANTITY,
+    extensions: EXPECTED_QUANTITY,
+    formdata: EXPECTED_QUANTITY,
   });
 
   sandbox

@@ -142,7 +142,8 @@ NS_IMPL_ISUPPORTS(RemoteHandlerApp, nsIHandlerApp)
 
 static inline void CopyHandlerInfoTonsIHandlerInfo(
     const HandlerInfo& info, nsIHandlerInfo* aHandlerInfo) {
-  HandlerApp preferredApplicationHandler = info.preferredApplicationHandler();
+  const HandlerApp& preferredApplicationHandler =
+      info.preferredApplicationHandler();
   nsCOMPtr<nsIHandlerApp> preferredApp(
       new RemoteHandlerApp(preferredApplicationHandler));
   aHandlerInfo->SetPreferredApplicationHandler(preferredApp);
@@ -241,7 +242,7 @@ NS_IMETHODIMP ContentHandlerService::GetTypeFromExtension(
   _retval.Assign(*mExtToTypeMap.LookupOrInsertWith(aFileExtension, [&] {
     nsCString type;
     mHandlerServiceChild->SendGetTypeFromExtension(aFileExtension, &type);
-    return MakeUnique<nsCString>(type);
+    return std::make_unique<nsCString>(type);
   }));
   return NS_OK;
 }

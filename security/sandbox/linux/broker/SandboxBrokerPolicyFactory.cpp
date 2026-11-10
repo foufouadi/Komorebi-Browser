@@ -22,7 +22,10 @@
 #endif  // MOZ_ENABLE_V4L2
 #ifdef MOZ_ENABLE_VULKAN_VIDEO
 #  include "mozilla/Components.h"
-#  include "nsIGfxInfo.h"
+#  include "mozilla/gfx/gfxVars.h"
+// gfxVars.h logging collides with sandbox policy one so undef it.
+#  undef CHECK
+#  undef DCHECK
 #endif  // MOZ_ENABLE_VULKAN_VIDEO
 #ifdef MOZ_WIDGET_GTK
 #  include <glib.h>
@@ -43,6 +46,7 @@
 #include "mozilla/UniquePtrExtensions.h"
 #include "mozilla/ipc/SharedMemoryHandle.h"
 #include "nsAppDirectoryServiceDefs.h"
+#include "nsCharSeparatedTokenizer.h"
 #include "nsComponentManagerUtils.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsIFile.h"
@@ -61,6 +65,8 @@
 #ifdef ANDROID
 #  include "cutils/properties.h"
 #endif
+
+#include <memory>
 
 namespace mozilla {
 
@@ -330,6 +336,8 @@ static void AddMemoryReporting(SandboxBroker::Policy* aPolicy, pid_t aPid) {
   // Bug 1647957: memory reporting.
   aPolicy->AddPath(rdonly, nsPrintfCString("/proc/%d/statm", aPid).get());
   aPolicy->AddPath(rdonly, nsPrintfCString("/proc/%d/smaps", aPid).get());
+  aPolicy->AddPath(rdonly,
+                   nsPrintfCString("/proc/%d/smaps_rollup", aPid).get());
 }
 
 static void AddDynamicPathList(SandboxBroker::Policy* policy,
@@ -540,13 +548,11 @@ void SandboxBrokerPolicyFactory::InitContentPolicy() {
 
   nsAutoCString xdgConfigDirs(PR_GetEnv("XDG_CONFIG_DIRS"));
   for (const auto& path : xdgConfigDirs.Split(':')) {
-    if (path[0] != '/') {
+    if (path.IsEmpty() || path[0] != '/') {
       continue;
     }
 
-    if (!path.IsEmpty()) {  // AddPath will fail on empty strings
-      policy->AddFutureDir(rdonly, PromiseFlatCString(path).get());
-    }
+    policy->AddFutureDir(rdonly, PromiseFlatCString(path).get());
   }
 
   // Allow fonts subdir in XDG_DATA_HOME
@@ -560,7 +566,7 @@ void SandboxBrokerPolicyFactory::InitContentPolicy() {
   // Any font subdirs in XDG_DATA_DIRS
   nsAutoCString xdgDataDirs(PR_GetEnv("XDG_DATA_DIRS"));
   for (const auto& path : xdgDataDirs.Split(':')) {
-    if (path[0] != '/') {
+    if (path.IsEmpty() || path[0] != '/') {
       continue;
     }
 
@@ -793,24 +799,17 @@ void SandboxBrokerPolicyFactory::InitContentPolicy() {
     policy->AddTree(rdwrcr, "/dev/shm");
   }
 
+  if (allowPulse) {
 #ifdef MOZ_WIDGET_GTK
-  if (const auto userDir = g_get_user_runtime_dir()) {
-    // Bug 1321134: DConf's single bit of shared memory
-    // The leaf filename is "user" by default, but is configurable.
-    nsPrintfCString shmPath("%s/dconf/", userDir);
-    policy->AddFutureDir(rdwrcr, shmPath.get());
-    policy->AddAncestors(shmPath.get());
-    if (allowPulse) {
+    if (const auto userDir = g_get_user_runtime_dir()) {
       // PulseAudio, if it can't get server info from X11, will break
       // unless it can open this directory (or create it, but in our use
       // case we know it already exists).  See bug 1335329.
       nsPrintfCString pulsePath("%s/pulse", userDir);
       policy->AddPath(rdonly, pulsePath.get());
     }
-  }
 #endif  // MOZ_WIDGET_GTK
 
-  if (allowPulse) {
     // PulseAudio also needs access to read the $XAUTHORITY file (see
     // bug 1384986 comment #1), but that's already allowed for hybrid
     // GPU drivers (see above).
@@ -848,8 +847,7 @@ UniquePtr<SandboxBroker::Policy> SandboxBrokerPolicyFactory::GetContentPolicy(
 
   std::call_once(mContentInited, [this] { InitContentPolicy(); });
   MOZ_ASSERT(mCommonContentPolicy);
-  UniquePtr<SandboxBroker::Policy> policy(
-      new SandboxBroker::Policy(*mCommonContentPolicy));
+  auto policy = std::make_unique<SandboxBroker::Policy>(*mCommonContentPolicy);
 
   // No read blocking at level 2 and below.
   // file:// processes also get global read permissions
@@ -940,7 +938,7 @@ static void AddV4l2Dependencies(SandboxBroker::Policy* policy) {
 
 #ifdef MOZ_ENABLE_VULKAN_VIDEO
 
-static void AddVulkanDependencies(SandboxBroker::Policy* policy) {
+static void AddVulkanDependencies(SandboxBroker::Policy* policy, int aPid) {
   // RDD Vulkan Video decode: ICD manifests (paths beyond AddGLDependencies).
   policy->AddTree(rdonly, "/usr/share/vulkan/icd.d");
   policy->AddTree(rdonly, "/usr/local/share/vulkan/icd.d");
@@ -978,7 +976,13 @@ static void AddVulkanDependencies(SandboxBroker::Policy* policy) {
 
   policy->AddPath(rdwr, "/dev/nvidiactl", SandboxBroker::Policy::AddAlways);
   policy->AddPath(rdwr, "/dev/nvidia-uvm", SandboxBroker::Policy::AddAlways);
+  // NVIDIA 570+ opens this during UVM init (alongside /dev/nvidia-uvm).
+  policy->AddPath(rdwr, "/dev/nvidia-uvm-tools",
+                  SandboxBroker::Policy::AddAlways);
   policy->AddPath(rdwr, "/dev/nvidia-modeset",
+                  SandboxBroker::Policy::AddAlways);
+  // Read by InitVulkanDecoder to skip Vulkan when nvidia_drm modeset is off.
+  policy->AddPath(rdonly, "/sys/module/nvidia_drm/parameters/modeset",
                   SandboxBroker::Policy::AddAlways);
   policy->AddTree(rdonly, "/dev/nvidia-caps");
   for (int i = 0; i < 8; i++) {
@@ -989,12 +993,15 @@ static void AddVulkanDependencies(SandboxBroker::Policy* policy) {
   // AddAlways because the udmabuf misc device only exists while its module is
   // loaded, which may happen after this policy is built.
   policy->AddPath(rdwr, "/dev/udmabuf", SandboxBroker::Policy::AddAlways);
+
+  // NVIDIA CUDA (pulled in by VK_NV_optical_flow during vkCreateDevice).
+  policy->AddPath(rdonly, nsPrintfCString("/proc/%d/maps", aPid).get());
 }
 #endif  // MOZ_ENABLE_VULKAN_VIDEO
 
 /* static */ UniquePtr<SandboxBroker::Policy>
 SandboxBrokerPolicyFactory::GetRDDPolicy(int aPid) {
-  auto policy = MakeUnique<SandboxBroker::Policy>();
+  auto policy = std::make_unique<SandboxBroker::Policy>();
 
   AddSharedMemoryPaths(policy.get(), aPid);
 
@@ -1058,15 +1065,8 @@ SandboxBrokerPolicyFactory::GetRDDPolicy(int aPid) {
   // Only open Vulkan-specific sandbox paths if Vulkan Video is actually
   // enabled and supported on this GPU, to avoid granting display-server
   // access when the feature is blocked or disabled.
-  nsCOMPtr<nsIGfxInfo> gfxInfo = components::GfxInfo::Service();
-  int32_t vulkanStatus = nsIGfxInfo::FEATURE_STATUS_UNKNOWN;
-  nsAutoCString failureId;
-  if (gfxInfo &&
-      NS_SUCCEEDED(gfxInfo->GetFeatureStatus(
-          nsIGfxInfo::FEATURE_HARDWARE_VIDEO_DECODING_VULKAN, failureId,
-          &vulkanStatus)) &&
-      vulkanStatus == nsIGfxInfo::FEATURE_STATUS_OK) {
-    AddVulkanDependencies(policy.get());
+  if (gfx::gfxVars::CanUseVulkanHardwareVideoDecoding()) {
+    AddVulkanDependencies(policy.get(), aPid);
 #  if defined(MOZ_WIDGET_GTK)
     // EGL needs display server sockets for EGL_MESA_image_dma_buf_export
     // (bug 2021722).
@@ -1118,67 +1118,8 @@ SandboxBrokerPolicyFactory::GetRDDPolicy(int aPid) {
 }
 
 /* static */ UniquePtr<SandboxBroker::Policy>
-SandboxBrokerPolicyFactory::GetSocketProcessPolicy(int aPid) {
-  auto policy = MakeUnique<SandboxBroker::Policy>();
-
-  policy->AddPath(rdonly, "/dev/urandom");
-  policy->AddPath(rdonly, "/dev/random");
-  policy->AddPath(rdonly, "/proc/sys/crypto/fips_enabled");
-  policy->AddPath(rdonly, "/proc/cpuinfo");
-  policy->AddPath(rdonly, "/proc/meminfo");
-  policy->AddTree(rdonly, "/sys/devices/cpu");
-  policy->AddTree(rdonly, "/sys/devices/system/cpu");
-  policy->AddTree(rdonly, "/lib");
-  policy->AddTree(rdonly, "/lib64");
-  policy->AddTree(rdonly, "/usr/lib");
-  policy->AddTree(rdonly, "/usr/lib32");
-  policy->AddTree(rdonly, "/usr/lib64");
-  policy->AddTree(rdonly, "/usr/share");
-  policy->AddTree(rdonly, "/usr/local/share");
-  policy->AddTree(rdonly, "/etc");
-
-  // glibc will try to stat64("/") while populating nsswitch database
-  // https://sourceware.org/git/?p=glibc.git;a=blob;f=nss/nss_database.c;h=cf0306adc47f12d9bc761ab1b013629f4482b7e6;hb=9826b03b747b841f5fc6de2054bf1ef3f5c4bdf3#l396
-  // denying will make getaddrinfo() return ENONAME
-  policy->AddPath(access, "/");
-
-  AddLdconfigPaths(policy.get());
-
-  // Socket process sandbox needs to allow shmem in order to support
-  // profiling.  See Bug 1626385.
-  AddSharedMemoryPaths(policy.get(), aPid);
-
-  // Bug 1647957: memory reporting.
-  AddMemoryReporting(policy.get(), aPid);
-
-  // Firefox binary dir.
-  // Note that unlike the previous cases, we use NS_GetSpecialDirectory
-  // instead of GetSpecialSystemDirectory. The former requires a working XPCOM
-  // system, which may not be the case for some tests. For querying for the
-  // location of XPCOM things, we can use it anyway.
-  nsCOMPtr<nsIFile> ffDir;
-  nsresult rv = NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(ffDir));
-  if (NS_SUCCEEDED(rv)) {
-    nsAutoCString tmpPath;
-    rv = ffDir->GetNativePath(tmpPath);
-    if (NS_SUCCEEDED(rv)) {
-      policy->AddTree(rdonly, tmpPath.get());
-    }
-  }
-
-#if defined(MOZ_PROFILE_GENERATE)
-  AddLLVMProfilePathDirectory(policy.get());
-#endif
-
-  if (policy->IsEmpty()) {
-    policy = nullptr;
-  }
-  return policy;
-}
-
-/* static */ UniquePtr<SandboxBroker::Policy>
 SandboxBrokerPolicyFactory::GetUtilityProcessPolicy(int aPid) {
-  auto policy = MakeUnique<SandboxBroker::Policy>();
+  auto policy = std::make_unique<SandboxBroker::Policy>();
 
   policy->AddPath(rdonly, "/dev/urandom");
   policy->AddPath(rdonly, "/proc/cpuinfo");
@@ -1237,5 +1178,77 @@ SandboxBrokerPolicyFactory::GetUtilityProcessPolicy(int aPid) {
   }
   return policy;
 }
+
+#ifndef ANDROID
+/* static */
+UniquePtr<SandboxBroker::Policy>
+SandboxBrokerPolicyFactory::GetHWInferencePolicy(int aPid) {
+  auto policy = std::make_unique<SandboxBroker::Policy>();
+
+  AddSharedMemoryPaths(policy.get(), aPid);
+
+  policy->AddPath(rdonly, "/dev/urandom");
+  // FIXME (bug 1662321): we should fix nsSystemInfo so that every
+  // child process doesn't need to re-read these files to get the info
+  // the parent process already has.
+  policy->AddPath(rdonly, "/proc/cpuinfo");
+  policy->AddPath(rdonly,
+                  "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq");
+  policy->AddPath(rdonly, "/sys/devices/system/cpu/cpu0/cache/index2/size");
+  policy->AddPath(rdonly, "/sys/devices/system/cpu/cpu0/cache/index3/size");
+  policy->AddTree(rdonly, "/sys/devices/cpu");
+  policy->AddTree(rdonly, "/sys/devices/system/cpu");
+  policy->AddTree(rdonly, "/sys/devices/system/node");
+  policy->AddTree(rdonly, "/lib");
+  policy->AddTree(rdonly, "/lib64");
+  policy->AddTree(rdonly, "/usr/lib");
+  policy->AddTree(rdonly, "/usr/lib32");
+  policy->AddTree(rdonly, "/usr/lib64");
+  policy->AddTree(rdonly, "/run/opengl-driver/lib");
+  policy->AddTree(rdonly, "/nix/store");
+
+  // Bug 1647957: memory reporting.
+  AddMemoryReporting(policy.get(), aPid);
+
+  // Firefox binary dir.
+  // Note that unlike the previous cases, we use NS_GetSpecialDirectory
+  // instead of GetSpecialSystemDirectory. The former requires a working XPCOM
+  // system, which may not be the case for some tests. For querying for the
+  // location of XPCOM things, we can use it anyway.
+  nsCOMPtr<nsIFile> ffDir;
+  nsresult rv = NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(ffDir));
+  if (NS_SUCCEEDED(rv)) {
+    nsAutoCString tmpPath;
+    rv = ffDir->GetNativePath(tmpPath);
+    if (NS_SUCCEEDED(rv)) {
+      policy->AddTree(rdonly, tmpPath.get());
+    }
+  }
+
+  if (!mozilla::IsPackagedBuild()) {
+    // If this is not a packaged build the resources are likely symlinks to
+    // outside the binary dir. Therefore in non-release builds we allow reads
+    // from the whole repository. MOZ_DEVELOPER_REPO_DIR is set by mach run.
+    const char* developer_repo_dir = PR_GetEnv("MOZ_DEVELOPER_REPO_DIR");
+    if (developer_repo_dir) {
+      policy->AddTree(rdonly, developer_repo_dir);
+    }
+  }
+
+  // GPU compute backends need GPU access and GL context creation (but not
+  // display server access, as of bug 1769499).
+  AddGLDependencies(policy.get());
+
+  // GPU drivers may need general-case library loading.
+  AddLdconfigPaths(policy.get());
+  AddLdLibraryEnvPaths(policy.get());
+
+#  if defined(MOZ_PROFILE_GENERATE)
+  AddLLVMProfilePathDirectory(policy.get());
+#  endif
+
+  return policy;
+}
+#endif  // !ANDROID
 
 }  // namespace mozilla

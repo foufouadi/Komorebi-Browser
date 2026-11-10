@@ -15,7 +15,7 @@ const TEST_PAGE =
 async function openTestPage(pageUrl) {
   const tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, pageUrl);
   await SpecialPowers.spawn(tab.linkedBrowser, [], async () => {
-    await content.customElements.whenDefined("ai-website-chip");
+    await content.customElements.whenDefined("smartwindow-chip");
   });
   return { tab, browser: tab.linkedBrowser };
 }
@@ -94,7 +94,7 @@ add_task(async function test_website_chip_inline_click_event() {
     const chip = content.document.getElementById("test-inline-chip");
 
     let clickEvent = null;
-    chip.addEventListener("ai-website-chip:click", e => (clickEvent = e), {
+    chip.addEventListener("smartwindow-chip:click", e => (clickEvent = e), {
       once: true,
     });
 
@@ -120,7 +120,7 @@ add_task(async function test_website_chip_context_remove() {
   await SpecialPowers.spawn(browser, [], async () => {
     const chip = content.document.getElementById("test-context-chip");
 
-    Assert.equal(chip.type, "context-chip", "Chip type should be context-chip");
+    Assert.equal(chip.type, "context", "Chip type should be context");
     Assert.equal(
       chip.label,
       "Example Site",
@@ -135,7 +135,7 @@ add_task(async function test_website_chip_context_remove() {
     Assert.ok(removeIcon, "Remove button should have icon");
 
     let removeEvent = null;
-    chip.addEventListener("ai-website-chip:remove", e => (removeEvent = e), {
+    chip.addEventListener("smartwindow-chip:remove", e => (removeEvent = e), {
       once: true,
     });
 
@@ -169,6 +169,88 @@ add_task(async function test_website_chip_context_with_link() {
       link.getAttribute("href"),
       "https://mozilla.org",
       "Link should expose href for native browser features (copy link, middle-click)"
+    );
+  });
+
+  BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_website_chip_tab_group_icon() {
+  const { tab, browser } = await openTestPage(TEST_PAGE);
+
+  await SpecialPowers.spawn(browser, [], async () => {
+    const chip = content.document.getElementById("test-group-chip");
+    await chip.updateComplete;
+    const shadow = chip.shadowRoot;
+
+    const icon = shadow.querySelector("tab-group-icon");
+    Assert.ok(icon, "A tab group chip renders a tab group icon");
+    Assert.equal(
+      icon.shadowRoot.textContent.trim(),
+      "T",
+      "The icon shows the group label's initial"
+    );
+    const probe = content.document.createElement("div");
+    probe.style.backgroundColor = "var(--tab-group-blue)";
+    content.document.body.appendChild(probe);
+    const expected = content.getComputedStyle(probe).backgroundColor;
+    probe.remove();
+
+    const iconStyle = content.getComputedStyle(icon);
+    Assert.equal(
+      iconStyle.backgroundColor,
+      expected,
+      "The icon paints the group color"
+    );
+    Assert.notEqual(
+      iconStyle.backgroundColor,
+      "rgba(0, 0, 0, 0)",
+      "The group color resolves rather than falling back to transparent"
+    );
+    Assert.ok(
+      !shadow.querySelector(".chip-icon"),
+      "A tab group chip has no favicon"
+    );
+    Assert.equal(
+      shadow.querySelector(".chip-label").textContent.trim(),
+      "Trip planning",
+      "The chip shows the group label"
+    );
+    Assert.ok(
+      !shadow.querySelector("a.chip"),
+      "A tab group chip is not a link, since it has no URL"
+    );
+  });
+
+  BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_website_chip_tab_group_without_color() {
+  const { tab, browser } = await openTestPage(TEST_PAGE);
+
+  await SpecialPowers.spawn(browser, [], async () => {
+    // A group that has been closed no longer reports a color, but the chip
+    // still stands for a group rather than for a page.
+    const chip = content.document.getElementById("test-group-chip");
+    chip.tabGroupColor = "";
+    await chip.updateComplete;
+    const shadow = chip.shadowRoot;
+
+    const icon = shadow.querySelector("tab-group-icon");
+    await icon.updateComplete;
+    Assert.ok(icon, "The chip still renders a tab group icon");
+    Assert.ok(!shadow.querySelector(".chip-icon"), "And still has no favicon");
+
+    const probe = content.document.createElement("div");
+    probe.style.backgroundColor = "var(--tab-group-gray)";
+    content.document.body.appendChild(probe);
+    const expected = content.getComputedStyle(probe).backgroundColor;
+    probe.remove();
+
+    Assert.equal(
+      content.getComputedStyle(icon).backgroundColor,
+      expected,
+      "The icon draws like a gray group rather than falling back to transparent"
     );
   });
 

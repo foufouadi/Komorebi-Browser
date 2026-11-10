@@ -892,7 +892,8 @@ WhiteSpaceVisibilityKeeper::NormalizeWhiteSpacesAt(
 
   const OwningNonNull<Text> textNode = *aPoint.ContainerAs<Text>();
   Result<InsertTextResult, nsresult> insertTextResultOrError =
-      aHTMLEditor.ReplaceTextWithTransaction(textNode, normalizedWhiteSpaces);
+      aHTMLEditor.ReplaceTextWithTransaction(textNode, normalizedWhiteSpaces,
+                                             InsertTextFor::NormalText);
   if (MOZ_UNLIKELY(insertTextResultOrError.isErr())) {
     NS_WARNING("HTMLEditor::ReplaceTextWithTransaction() failed");
     return insertTextResultOrError.propagateErr();
@@ -986,7 +987,8 @@ WhiteSpaceVisibilityKeeper::NormalizeWhiteSpacesBefore(
       continue;
     }
     Result<InsertTextResult, nsresult> replaceWhiteSpacesResultOrError =
-        aHTMLEditor.ReplaceTextWithTransaction(*precedingTextNode, replaceData);
+        aHTMLEditor.ReplaceTextWithTransaction(*precedingTextNode, replaceData,
+                                               InsertTextFor::NormalText);
     if (MOZ_UNLIKELY(replaceWhiteSpacesResultOrError.isErr())) {
       NS_WARNING("HTMLEditor::ReplaceTextWithTransaction() failed");
       return replaceWhiteSpacesResultOrError.propagateErr();
@@ -1102,7 +1104,8 @@ WhiteSpaceVisibilityKeeper::NormalizeWhiteSpacesAfter(
       continue;
     }
     Result<InsertTextResult, nsresult> replaceWhiteSpacesResultOrError =
-        aHTMLEditor.ReplaceTextWithTransaction(*followingTextNode, replaceData);
+        aHTMLEditor.ReplaceTextWithTransaction(*followingTextNode, replaceData,
+                                               InsertTextFor::NormalText);
     if (MOZ_UNLIKELY(replaceWhiteSpacesResultOrError.isErr())) {
       NS_WARNING("HTMLEditor::ReplaceTextWithTransaction() failed");
       return replaceWhiteSpacesResultOrError.propagateErr();
@@ -1212,7 +1215,8 @@ WhiteSpaceVisibilityKeeper::NormalizeWhiteSpacesToSplitTextNodeAt(
                        : EditorDOMPoint::AtEndOf(*parentNode);
   }
   Result<InsertTextResult, nsresult> replaceWhiteSpacesResultOrError =
-      aHTMLEditor.ReplaceTextWithTransaction(textNode, replaceWhiteSpacesData);
+      aHTMLEditor.ReplaceTextWithTransaction(textNode, replaceWhiteSpacesData,
+                                             InsertTextFor::NormalText);
   if (MOZ_UNLIKELY(replaceWhiteSpacesResultOrError.isErr())) {
     NS_WARNING("HTMLEditor::ReplaceTextWithTransaction() failed");
     return replaceWhiteSpacesResultOrError.propagateErr();
@@ -1622,7 +1626,8 @@ WhiteSpaceVisibilityKeeper::NormalizeSurroundingWhiteSpacesToDeleteCharacters(
     Result<InsertTextResult, nsresult>
         replaceFollowingWhiteSpacesResultOrError =
             aHTMLEditor.ReplaceTextWithTransaction(
-                aTextNode, normalizedFollowingWhiteSpacesData);
+                aTextNode, normalizedFollowingWhiteSpacesData,
+                InsertTextFor::NormalText);
     if (MOZ_UNLIKELY(replaceFollowingWhiteSpacesResultOrError.isErr())) {
       NS_WARNING("HTMLEditor::ReplaceTextWithTransaction() failed");
       return replaceFollowingWhiteSpacesResultOrError.propagateErr();
@@ -1638,7 +1643,8 @@ WhiteSpaceVisibilityKeeper::NormalizeSurroundingWhiteSpacesToDeleteCharacters(
     Result<InsertTextResult, nsresult>
         replacePrecedingWhiteSpacesResultOrError =
             aHTMLEditor.ReplaceTextWithTransaction(
-                aTextNode, normalizedPrecedingWhiteSpacesData);
+                aTextNode, normalizedPrecedingWhiteSpacesData,
+                InsertTextFor::NormalText);
     if (MOZ_UNLIKELY(replacePrecedingWhiteSpacesResultOrError.isErr())) {
       NS_WARNING("HTMLEditor::ReplaceTextWithTransaction() failed");
       return replacePrecedingWhiteSpacesResultOrError.propagateErr();
@@ -2055,8 +2061,10 @@ WhiteSpaceVisibilityKeeper::EnsureNoInvisibleWhiteSpaces(
 Result<InsertTextResult, nsresult>
 WhiteSpaceVisibilityKeeper::InsertTextOrInsertOrUpdateCompositionString(
     HTMLEditor& aHTMLEditor, const nsAString& aStringToInsert,
-    const EditorDOMRange& aRangeToBeReplaced, InsertTextTo aInsertTextTo,
-    InsertTextFor aPurpose, const Element& aEditingHost) {
+    const EditorDOMRange& aRangeToBeReplaced,
+    const Maybe<EditorLineBreak>& aExtantUnnecessaryLineBreak,
+    InsertTextTo aInsertTextTo, InsertTextFor aPurpose,
+    const Element& aEditingHost) {
   MOZ_ASSERT(aRangeToBeReplaced.StartRef().IsInContentNode());
   MOZ_ASSERT_IF(!EditorBase::InsertingTextForExtantComposition(aPurpose),
                 aRangeToBeReplaced.Collapsed());
@@ -2186,35 +2194,43 @@ WhiteSpaceVisibilityKeeper::InsertTextOrInsertOrUpdateCompositionString(
       !EditorBase::InsertingTextForExtantComposition(aPurpose)) {
     const WSScanResult nextThing =
         HTMLEditUtils::ScanInclusiveNextThingWithIgnoringUnnecessaryLineBreak(
-            pointToInsert, PaddingForEmptyBlock::Unnecessary, aEditingHost);
-    if (nextThing.MaybeIgnoredLineBreak().isSome()) {
+            pointToInsert,
+            TreatAsUnnecessaryLineBreak{
+                LineBreakFor::PaddingForEmptyBlock,
+                LineBreakFor::EmptyLineBeforeBlockBoundary},
+            aEditingHost);
+    // Don't delete extant unnecessary line break because it may be inserted by
+    // the web app as a private marker.
+    if (nextThing.MaybeIgnoredLineBreak().isSome() &&
+        nextThing.MaybeIgnoredLineBreak() != aExtantUnnecessaryLineBreak) {
       const EditorLineBreak& lineBreak =
           nextThing.MaybeIgnoredLineBreak().ref();
-      // When user inserting content, the web app may expect that nothing
-      // extant content will be deleted. Therefore, we should preserve
-      // preformatted linefeed at least. However, we should delete it if it's a
-      // padding for empty block for the compatibility with the other browsers.
-      if (lineBreak.IsHTMLBRElement() || lineBreak.IsPaddingForEmptyBlock()) {
-        const RefPtr<const Element> ancestorLimiterToDeleteEmptyInlines =
-            lineBreak.ContentRef().IsInclusiveDescendantOf(
-                pointToInsert.GetContainer())
-                ? pointToInsert.GetContainerOrContainerParentElement()
-                : &aEditingHost;
-        {
-          AutoTrackDOMPoint trackCurrentPoint(aHTMLEditor.RangeUpdaterRef(),
-                                              &pointToInsert);
-          Result<EditorDOMPoint, nsresult> deleteLineBreakResultOrError =
-              aHTMLEditor.DeleteLineBreakWithTransaction(
-                  nextThing.MaybeIgnoredLineBreak().ref(), nsIEditor::eStrip,
-                  *ancestorLimiterToDeleteEmptyInlines);
-          if (deleteLineBreakResultOrError.isErr()) [[unlikely]] {
-            NS_WARNING("HTMLEditor::DeleteLineBreakWithTransaction() failed");
-            return deleteLineBreakResultOrError.propagateErr();
-          }
+      const RefPtr<const Element> ancestorLimiterToDeleteEmptyInlines =
+          lineBreak.ContentRef().IsInclusiveDescendantOf(
+              pointToInsert.GetContainer())
+              ? pointToInsert.GetContainerOrContainerParentElement()
+              : &aEditingHost;
+      // If we're replacing text, the insertion point needs to be in a Text
+      // after removing unnecessary line break.
+      const bool expectPointToInsertInText =
+          pointToInsert.GetContainer()->IsText() &&
+          insertTextData.ReplaceLength();
+      {
+        AutoTrackDOMPoint trackCurrentPoint(aHTMLEditor.RangeUpdaterRef(),
+                                            &pointToInsert);
+        Result<EditorDOMPoint, nsresult> deleteLineBreakResultOrError =
+            aHTMLEditor.DeleteLineBreakWithTransaction(
+                nextThing.MaybeIgnoredLineBreak().ref(), nsIEditor::eStrip,
+                *ancestorLimiterToDeleteEmptyInlines);
+        if (deleteLineBreakResultOrError.isErr()) [[unlikely]] {
+          NS_WARNING("HTMLEditor::DeleteLineBreakWithTransaction() failed");
+          return deleteLineBreakResultOrError.propagateErr();
         }
-        if (NS_WARN_IF(!pointToInsert.IsSetAndValidInComposedDoc())) {
-          return Err(NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE);
-        }
+      }
+      if (NS_WARN_IF(!pointToInsert.IsSetAndValidInComposedDoc()) ||
+          NS_WARN_IF(expectPointToInsertInText &&
+                     !pointToInsert.GetContainer()->IsText())) {
+        return Err(NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE);
       }
     }
   }
@@ -2222,7 +2238,7 @@ WhiteSpaceVisibilityKeeper::InsertTextOrInsertOrUpdateCompositionString(
   MOZ_ASSERT_IF(insertTextData.ReplaceLength(), pointToInsert.IsInTextNode());
   Result<InsertTextResult, nsresult> insertOrReplaceTextResultOrError =
       aHTMLEditor.InsertOrReplaceTextWithTransaction(pointToInsert,
-                                                     insertTextData);
+                                                     insertTextData, aPurpose);
   if (MOZ_UNLIKELY(insertOrReplaceTextResultOrError.isErr())) {
     NS_WARNING("HTMLEditor::ReplaceTextWithTransaction() failed");
     return insertOrReplaceTextResultOrError;
@@ -2371,7 +2387,8 @@ nsresult WhiteSpaceVisibilityKeeper::
   const OwningNonNull<Text> text(textNode);
   Result<InsertTextResult, nsresult> normalizeWhiteSpaceSequenceResultOrError =
       aHTMLEditor.ReplaceTextWithTransaction(
-          text, firstOffset, endOffset - firstOffset, normalizedString);
+          text, firstOffset, endOffset - firstOffset, normalizedString,
+          InsertTextFor::NormalText);
   if (MOZ_UNLIKELY(normalizeWhiteSpaceSequenceResultOrError.isErr())) {
     NS_WARNING("HTMLEditor::ReplaceTextWithTransaction() failed");
     return normalizeWhiteSpaceSequenceResultOrError.unwrapErr();
@@ -2448,7 +2465,7 @@ WhiteSpaceVisibilityKeeper::DeleteContentNodeAndJoinTextNodesAroundIt(
                 pointToPutCaret,
                 // We never delete a line break in an empty block so that we can
                 // treat it as significant and can skip the normalization.
-                PaddingForEmptyBlock::Significant, aEditingHost);
+                TreatAsUnnecessaryLineBreak{}, aEditingHost);
         if (nextThingOfCaretPoint.ReachedBlockBoundary()) {
           const EditorDOMPoint atBlockBoundary =
               nextThingOfCaretPoint
@@ -2616,55 +2633,6 @@ WhiteSpaceVisibilityKeeper::DeleteContentNodeAndJoinTextNodesAroundIt(
   }
   return CaretPoint(
       joinTextNodesResultOrError.unwrap().AtJoinedPoint<EditorDOMPoint>());
-}
-
-// static
-nsresult WhiteSpaceVisibilityKeeper::ReplaceTextAndRemoveEmptyTextNodes(
-    HTMLEditor& aHTMLEditor, const EditorDOMRangeInTexts& aRangeToReplace,
-    const nsAString& aReplaceString) {
-  MOZ_ASSERT(aRangeToReplace.IsPositioned());
-  MOZ_ASSERT(aRangeToReplace.StartRef().IsSetAndValid());
-  MOZ_ASSERT(aRangeToReplace.EndRef().IsSetAndValid());
-  MOZ_ASSERT(aRangeToReplace.StartRef().IsBefore(aRangeToReplace.EndRef()));
-
-  {
-    Result<InsertTextResult, nsresult> caretPointOrError =
-        aHTMLEditor.ReplaceTextWithTransaction(
-            MOZ_KnownLive(*aRangeToReplace.StartRef().ContainerAs<Text>()),
-            aRangeToReplace.StartRef().Offset(),
-            aRangeToReplace.InSameContainer()
-                ? aRangeToReplace.EndRef().Offset() -
-                      aRangeToReplace.StartRef().Offset()
-                : aRangeToReplace.StartRef().ContainerAs<Text>()->TextLength() -
-                      aRangeToReplace.StartRef().Offset(),
-            aReplaceString);
-    if (MOZ_UNLIKELY(caretPointOrError.isErr())) {
-      NS_WARNING("HTMLEditor::ReplaceTextWithTransaction() failed");
-      return caretPointOrError.unwrapErr();
-    }
-    // Ignore caret suggestion because there was
-    // AutoTransactionsConserveSelection.
-    caretPointOrError.unwrap().IgnoreCaretPointSuggestion();
-  }
-
-  if (aRangeToReplace.InSameContainer()) {
-    return NS_OK;
-  }
-
-  Result<CaretPoint, nsresult> caretPointOrError =
-      aHTMLEditor.DeleteTextAndTextNodesWithTransaction(
-          EditorDOMPointInText::AtEndOf(
-              *aRangeToReplace.StartRef().ContainerAs<Text>()),
-          aRangeToReplace.EndRef(),
-          HTMLEditor::TreatEmptyTextNodes::KeepIfContainerOfRangeBoundaries);
-  if (MOZ_UNLIKELY(caretPointOrError.isErr())) {
-    NS_WARNING("HTMLEditor::DeleteTextAndTextNodesWithTransaction() failed");
-    return caretPointOrError.unwrapErr();
-  }
-  // Ignore caret suggestion because there was
-  // AutoTransactionsConserveSelection.
-  caretPointOrError.unwrap().IgnoreCaretPointSuggestion();
-  return NS_OK;
 }
 
 // static

@@ -13,7 +13,7 @@ const lazy = {};
 
 ChromeUtils.defineLazyGetter(lazy, "logConsole", () =>
   console.createInstance({
-    prefix: "IPProtectionServerlist",
+    logModule: "IPP_Serverlist",
     maxLogLevel: Services.prefs.getBoolPref("browser.ipProtection.log", false)
       ? "Debug"
       : "Warn",
@@ -36,6 +36,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
  * user-facing `countries` enumeration.
  */
 export const RECOMMENDED_COUNTRY_CODE = "REC";
+
+const EGRESS_LOCATION_PREF = "browser.ipProtection.egressLocation";
 
 /**
  * Event dispatched by `IPProtectionServerlistBase` instances whenever the
@@ -216,15 +218,44 @@ class Country {
  */
 export class IPProtectionServerlistBase extends EventTarget {
   /**
-   * @type {Country[] | null}
+   * @type {Country[]}
    */
-  __list = null;
+  __list = [];
 
-  init() {}
+  constructor() {
+    super();
+    this.handleEvent = this.#handleEvent.bind(this);
+  }
 
-  async initOnStartupCompleted() {}
+  init() {
+    lazy.IPProtectionService.addEventListener(
+      "IPProtectionService:StateChanged",
+      this.handleEvent
+    );
+  }
+  uninit() {
+    lazy.IPProtectionService.removeEventListener(
+      "IPProtectionService:StateChanged",
+      this.handleEvent
+    );
+  }
+  #handleEvent(_event) {
+    this.#refreshWhenReady();
+  }
 
-  uninit() {}
+  async initOnStartupCompleted() {
+    this.#refreshWhenReady();
+  }
+
+  // Not before startup has completed: the source may not be readable yet.
+  #refreshWhenReady() {
+    if (
+      lazy.IPPStartupCache.isStartupCompleted &&
+      lazy.IPProtectionService.state === lazy.IPProtectionStates.READY
+    ) {
+      this.maybeFetchList(true);
+    }
+  }
 
   /**
    * Tries to refresh the list from the underlining source.
@@ -288,6 +319,31 @@ export class IPProtectionServerlistBase extends EventTarget {
   }
 
   /**
+   * Resolves the egress location the user picked to the country to route
+   * through. Locked countries are refused unless the user is premium.
+   *
+   * @param {(() => Promise<boolean>) | null} [isPremium]
+   *   Whether the user may use locked countries. When omitted, they may not.
+   * @returns {Promise<string|undefined>} - The country code, or undefined for
+   *   the recommended location.
+   */
+  async resolveEgressCountry(isPremium) {
+    const country =
+      Services.prefs.getStringPref(EGRESS_LOCATION_PREF, "") || undefined;
+    if (!country || !this.getLocation(country)?.country.locked) {
+      return country;
+    }
+    try {
+      if (await isPremium?.()) {
+        return country;
+      }
+    } catch (e) {
+      lazy.logConsole.error("Premium check failed:", e);
+    }
+    return undefined;
+  }
+
+  /**
    * Given a city, it selects an available server.
    *
    * @param {City?} city
@@ -330,42 +386,16 @@ export class RemoteSettingsServerlist extends IPProtectionServerlistBase {
   #bucket = null;
   #runningPromise = null;
 
-  constructor() {
-    super();
-    this.handleEvent = this.#handleEvent.bind(this);
-    this.__list = IPProtectionServerlistBase.dataToList(
-      lazy.IPPStartupCache.locationList
-    );
-  }
-  init() {
-    lazy.IPProtectionService.addEventListener(
-      "IPProtectionService:StateChanged",
-      this.handleEvent
-    );
-  }
-
   async initOnStartupCompleted() {
+    super.initOnStartupCompleted();
     this.bucket.on("sync", async () => {
       await this.maybeFetchList(true);
     });
   }
 
-  uninit() {
-    lazy.IPProtectionService.removeEventListener(
-      "IPProtectionService:StateChanged",
-      this.handleEvent
-    );
-  }
-
-  #handleEvent(_event) {
-    if (lazy.IPProtectionService.state === lazy.IPProtectionStates.READY) {
-      this.maybeFetchList();
-    }
-  }
-
   maybeFetchList(forceUpdate = false) {
     if (this.__list.length !== 0 && !forceUpdate) {
-      return Promise.resolve();
+      return Promise.resolve(false);
     }
 
     if (this.#runningPromise) {
@@ -377,8 +407,8 @@ export class RemoteSettingsServerlist extends IPProtectionServerlistBase {
         await this.bucket.get()
       );
 
-      lazy.IPPStartupCache.storeLocationList(this.__list);
       this.dispatchEvent(new Event(LIST_CHANGED_EVENT));
+      return true;
     };
 
     this.#runningPromise = fetchList().finally(
@@ -414,29 +444,27 @@ export class PrefServerList extends IPProtectionServerlistBase {
   }
 
   async initOnStartupCompleted() {
+    super.initOnStartupCompleted();
     Services.prefs.addObserver(PrefServerList.PREF_NAME, this.#observer);
-    // If the pref changed between startup and registering the observer we have
-    // not handled it yet. If the value hasn't actually changed, this is a no-op.
-    this.maybeFetchList();
   }
 
   uninit() {
+    super.uninit();
     Services.prefs.removeObserver(PrefServerList.PREF_NAME, this.#observer);
   }
 
-  maybeFetchList(forceUpdate = false) {
+  maybeFetchList(_forceUpdate = false) {
     const newList = Services.prefs.getStringPref(PrefServerList.PREF_NAME, "");
 
-    // If the list hasn't changed, we don't need to fetch it again.
-    if (!forceUpdate && newList === this.#previousList) {
-      return Promise.resolve();
+    if (newList === this.#previousList) {
+      return Promise.resolve(false);
     }
     this.#previousList = newList;
     this.__list = IPProtectionServerlistBase.dataToList(
       PrefServerList.prefValue
     );
     this.dispatchEvent(new Event(LIST_CHANGED_EVENT));
-    return Promise.resolve();
+    return Promise.resolve(true);
   }
 
   static get PREF_NAME() {

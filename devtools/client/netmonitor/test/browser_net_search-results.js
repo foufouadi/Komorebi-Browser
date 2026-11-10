@@ -29,9 +29,9 @@ add_task(async function () {
     HTTPS_SEARCH_SJS + "?value=test2",
   ];
 
-  const wait = waitForNetworkEvents(monitor, 2);
+  const onNetworkEvents = waitForNetworkEvents(monitor, 2);
   await SpecialPowers.spawn(tab.linkedBrowser, [URLS], makeRequests);
-  await wait;
+  await onNetworkEvents;
 
   // Open the Search panel
   await store.dispatch(Actions.openSearch());
@@ -213,13 +213,13 @@ add_task(async function () {
   ];
   const nonMatchingUrls = [HTTPS_SEARCH_SJS + "?value=somethingDifferent"];
 
-  const wait = waitForNetworkEvents(
+  const onNetworkEvents = waitForNetworkEvents(
     monitor,
     matchingUrls.length + nonMatchingUrls.length
   );
   await SpecialPowers.spawn(tab.linkedBrowser, [matchingUrls], makeRequests);
   await SpecialPowers.spawn(tab.linkedBrowser, [nonMatchingUrls], makeRequests);
-  await wait;
+  await onNetworkEvents;
 
   // Open the Search panel
   await store.dispatch(Actions.openSearch());
@@ -583,7 +583,7 @@ async function checkSaveAllAsHARWithContextMenu(
     "devtools/client/netmonitor/src/har/har-menu-utils"
   );
 
-  EventUtils.sendMouseEvent({ type: "mousedown" }, resourceMatch);
+  clickInView(resourceMatch);
   EventUtils.sendMouseEvent({ type: "contextmenu" }, resourceMatch);
 
   info("Trigger Copy All As HAR from the context menu");

@@ -52,6 +52,8 @@ namespace mozilla {
 // Forward declaration for `StyleLengthPercentage::AsCalc`, which
 // references the type below in the generated code.
 struct StyleCalcLengthPercentage;
+// Same but for `AsPercentage`.
+struct StylePercentage;
 
 // Forward declaration for `StyleVariableReferenceValue`, which references the
 // the type below in the generated code.
@@ -64,13 +66,10 @@ using StyleUnparsedValue = CopyableTArray<StyleUnparsedSegment>;
 struct StyleNumericValue;
 
 namespace gfx {
-struct FontVariation;
-struct FontFeature;
 class FontPaletteValueSet;
 }  // namespace gfx
 }  // namespace mozilla
-using gfxFontVariation = mozilla::gfx::FontVariation;
-using gfxFontFeature = mozilla::gfx::FontFeature;
+struct gfxFontVariationAxis;
 
 enum nsCSSUnit : uint32_t;
 enum nsChangeHint : uint32_t;
@@ -127,6 +126,7 @@ struct PseudoStyleRequest;
 
 template <typename L>
 union StyleGenericCalcNode;
+union StyleSpecifiedLeaf;
 
 namespace css {
 class Loader;
@@ -162,11 +162,11 @@ struct StyleBox {
     delete mRaw;
   }
 
-  StyleBox(const StyleBox& aOther) : StyleBox(MakeUnique<T>(*aOther)) {}
+  StyleBox(const StyleBox& aOther) : StyleBox(std::make_unique<T>(*aOther)) {}
 
   StyleBox& operator=(const StyleBox& aOther) const {
     delete mRaw;
-    mRaw = MakeUnique<T>(*aOther).release();
+    mRaw = std::make_unique<T>(*aOther).release();
     return *this;
   }
 
@@ -191,8 +191,6 @@ struct StyleBox {
   }
 
   bool operator==(const StyleBox& aOther) const { return *(*this) == *aOther; }
-
-  bool operator!=(const StyleBox& aOther) const { return *(*this) != *aOther; }
 
  private:
   T* mRaw;

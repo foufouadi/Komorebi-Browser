@@ -10,6 +10,7 @@
 // Keep others in (case-insensitive) order:
 #include "AutoReferenceChainGuard.h"
 #include "SVGAnimatedTransformList.h"
+#include "gfx2DGlue.h"
 #include "gfxPattern.h"
 #include "gfxUtils.h"
 #include "mozilla/PresShell.h"
@@ -99,7 +100,6 @@ uint16_t SVGGradientFrame::GetEnumValue(uint32_t aIndex, nsIContent* aDefault) {
 }
 
 uint16_t SVGGradientFrame::GetGradientUnits() {
-  // This getter is called every time the others are called - maybe cache it?
   return GetEnumValue(dom::SVGGradientElement::GRADIENTUNITS);
 }
 
@@ -129,11 +129,11 @@ SVGGradientFrame* SVGGradientFrame::GetGradientTransformFrame(
 }
 
 gfxMatrix SVGGradientFrame::GetGradientTransform(
-    nsIFrame* aSource, const gfxRect* aOverrideBounds) {
+    nsIFrame* aSource, uint16_t aGradientUnits,
+    const gfxRect* aOverrideBounds) {
   gfxMatrix bboxMatrix;
-  uint16_t gradientUnits = GetGradientUnits();
-  if (gradientUnits != SVG_UNIT_TYPE_USERSPACEONUSE) {
-    NS_ASSERTION(gradientUnits == SVG_UNIT_TYPE_OBJECTBOUNDINGBOX,
+  if (aGradientUnits != SVG_UNIT_TYPE_USERSPACEONUSE) {
+    NS_ASSERTION(aGradientUnits == SVG_UNIT_TYPE_OBJECTBOUNDINGBOX,
                  "Unknown gradientUnits type");
     // objectBoundingBox is the default anyway
 
@@ -267,7 +267,7 @@ already_AddRefed<gfxPattern> SVGGradientFrame::GetPaintServerPattern(
     return MakeAndAddRef<gfxPattern>(DeviceColor());
   }
 
-  if (nStops == 1 || GradientVectorLengthIsZero()) {
+  if (nStops == 1 || GradientVectorLengthIsZero(gradientUnits)) {
     // The gradient paints a single colour, using the stop-color of the last
     // gradient step if there are more than one.
     return MakeAndAddRef<gfxPattern>(ToDeviceColor(stops.LastElement().mColor));
@@ -276,7 +276,8 @@ already_AddRefed<gfxPattern> SVGGradientFrame::GetPaintServerPattern(
   // Get the transform list (if there is one). We do this after the returns
   // above since this call can be expensive when "gradientUnits" is set to
   // "objectBoundingBox" (since that requiring a GetBBox() call).
-  gfxMatrix patternMatrix = GetGradientTransform(aSource, aOverrideBounds);
+  gfxMatrix patternMatrix =
+      GetGradientTransform(aSource, gradientUnits, aOverrideBounds);
   if (patternMatrix.IsSingular()) {
     return nullptr;
   }
@@ -293,7 +294,7 @@ already_AddRefed<gfxPattern> SVGGradientFrame::GetPaintServerPattern(
     return nullptr;
   }
 
-  RefPtr<gfxPattern> gradient = CreateGradient();
+  RefPtr<gfxPattern> gradient = CreateGradient(gradientUnits);
   if (!gradient) {
     return nullptr;
   }
@@ -325,19 +326,128 @@ already_AddRefed<gfxPattern> SVGGradientFrame::GetPaintServerPattern(
   return gradient.forget();
 }
 
+class MOZ_STACK_CLASS SVGWrColorStopInterpolator
+    : public ColorStopInterpolator<SVGWrColorStopInterpolator> {
+ public:
+  SVGWrColorStopInterpolator(
+      const nsTArray<ColorStop>& aStops,
+      const StyleColorInterpolationMethod& aStyleColorInterpolationMethod,
+      nsTArray<wr::GradientStop>& aResult)
+      : ColorStopInterpolator(aStops, aStyleColorInterpolationMethod, false),
+        mResult(aResult) {}
+
+  void CreateStop(float aPosition, DeviceColor aColor) {
+    wr::GradientStop* stop = mResult.AppendElement();
+    stop->color = wr::ToColorF(aColor);
+    stop->offset = aPosition;
+  }
+
+ private:
+  nsTArray<wr::GradientStop>& mResult;
+};
+
+Maybe<SVGGradientFrame::WebRenderGradient>
+SVGGradientFrame::GetWebRenderGradient(nsIFrame* aSource,
+                                       float aGraphicOpacity) {
+  uint16_t gradientUnits = GetGradientUnits();
+  if (gradientUnits == SVG_UNIT_TYPE_USERSPACEONUSE) {
+    mSource = aSource->IsTextFrame() ? aSource->GetParent() : aSource;
+  }
+
+  WebRenderGradient result;
+
+  AutoTArray<ColorStop, 8> stops;
+  GetStops(&stops, aGraphicOpacity);
+
+  if (stops.IsEmpty()) {
+    result.mSolidColor.emplace(DeviceColor());
+    return Some(std::move(result));
+  }
+  if (stops.Length() == 1 || GradientVectorLengthIsZero(gradientUnits)) {
+    result.mSolidColor.emplace(ToDeviceColor(stops.LastElement().mColor));
+    return Some(std::move(result));
+  }
+
+  gfxMatrix gradientToUserSpace =
+      GetGradientTransform(aSource, gradientUnits, nullptr);
+  if (gradientToUserSpace.IsSingular()) {
+    return Nothing();
+  }
+
+  if (!GetWebRenderGeometry(gradientUnits, gradientToUserSpace, result)) {
+    return Nothing();
+  }
+
+  // spreadMethod="reflect" is expressed as a repeating gradient over twice
+  // the vector whose second half mirrors the stops.
+  bool reflect = false;
+  switch (GetSpreadMethod()) {
+    case SVG_SPREADMETHOD_REFLECT:
+      reflect = true;
+      result.mExtendMode = wr::ExtendMode::Repeat;
+      break;
+    case SVG_SPREADMETHOD_REPEAT:
+      result.mExtendMode = wr::ExtendMode::Repeat;
+      break;
+    default:
+      result.mExtendMode = wr::ExtendMode::Clamp;
+      break;
+  }
+
+  if (StyleSVG()->mColorInterpolation == StyleColorInterpolation::Linearrgb) {
+    static constexpr auto interpolationMethod = StyleColorInterpolationMethod{
+        StyleColorSpace::SrgbLinear, StyleHueInterpolationMethod::Shorter};
+    SVGWrColorStopInterpolator interpolator(stops, interpolationMethod,
+                                            result.mStops);
+    interpolator.CreateStops();
+  } else {
+    for (const auto& stop : stops) {
+      wr::GradientStop* wrStop = result.mStops.AppendElement();
+      wrStop->color = wr::ToColorF(ToDeviceColor(stop.mColor));
+      wrStop->offset = stop.mPosition;
+    }
+  }
+
+  if (reflect) {
+    switch (result.mType) {
+      case GradientType::Linear:
+        result.mEnd = result.mStart + (result.mEnd - result.mStart) * 2.0f;
+        break;
+      case GradientType::Radial:
+        result.mRadii = result.mRadii * 2.0f;
+        break;
+    }
+    nsTArray<wr::GradientStop> mirrored;
+    mirrored.SetCapacity(result.mStops.Length() * 2);
+    for (const auto& stop : result.mStops) {
+      wr::GradientStop* s = mirrored.AppendElement();
+      s->color = stop.color;
+      s->offset = stop.offset / 2.0f;
+    }
+    for (const auto& stop : Reversed(result.mStops)) {
+      wr::GradientStop* s = mirrored.AppendElement();
+      s->color = stop.color;
+      s->offset = 1.0f - stop.offset / 2.0f;
+    }
+    result.mStops = std::move(mirrored);
+  }
+
+  return Some(std::move(result));
+}
+
 // Private (helper) methods
 
-float SVGGradientFrame::GetLengthValue(const SVGAnimatedLength& aLength) {
+float SVGGradientFrame::GetLengthValue(uint16_t aGradientUnits,
+                                       const SVGAnimatedLength& aLength) {
   // Object bounding box units are handled by setting the appropriate
   // transform in GetGradientTransform, but we need to handle user
   // space units as part of the individual Get* routines.  Fixes 323669.
 
-  uint16_t gradientUnits = GetGradientUnits();
-  if (gradientUnits == SVG_UNIT_TYPE_USERSPACEONUSE) {
+  if (aGradientUnits == SVG_UNIT_TYPE_USERSPACEONUSE) {
     return SVGUtils::UserSpace(mSource, &aLength);
   }
 
-  NS_ASSERTION(gradientUnits == SVG_UNIT_TYPE_OBJECTBOUNDINGBOX,
+  NS_ASSERTION(aGradientUnits == SVG_UNIT_TYPE_OBJECTBOUNDINGBOX,
                "Unknown gradientUnits type");
 
   if (aLength.IsPercentage()) {
@@ -439,7 +549,8 @@ nsresult SVGLinearGradientFrame::AttributeChanged(int32_t aNameSpaceID,
 
 //----------------------------------------------------------------------
 
-float SVGLinearGradientFrame::GetLengthValue(uint32_t aIndex) {
+float SVGLinearGradientFrame::GetLengthValue(uint16_t aGradientUnits,
+                                             uint32_t aIndex) {
   dom::SVGLinearGradientElement* lengthElement = GetLinearGradientWithLength(
       aIndex, static_cast<dom::SVGLinearGradientElement*>(GetContent()));
   // We passed in mContent as a fallback, so, assuming mContent is non-null, the
@@ -447,7 +558,8 @@ float SVGLinearGradientFrame::GetLengthValue(uint32_t aIndex) {
   MOZ_ASSERT(lengthElement,
              "Got unexpected null element from GetLinearGradientWithLength");
 
-  return GetLengthValue(lengthElement->mLengthAttributes[aIndex]);
+  return GetLengthValue(aGradientUnits,
+                        lengthElement->mLengthAttributes[aIndex]);
 }
 
 dom::SVGLinearGradientElement*
@@ -464,20 +576,64 @@ SVGLinearGradientFrame::GetLinearGradientWithLength(
   return SVGGradientFrame::GetLinearGradientWithLength(aIndex, aDefault);
 }
 
-bool SVGLinearGradientFrame::GradientVectorLengthIsZero() {
-  return GetLengthValue(dom::SVGLinearGradientElement::ATTR_X1) ==
-             GetLengthValue(dom::SVGLinearGradientElement::ATTR_X2) &&
-         GetLengthValue(dom::SVGLinearGradientElement::ATTR_Y1) ==
-             GetLengthValue(dom::SVGLinearGradientElement::ATTR_Y2);
+bool SVGLinearGradientFrame::GradientVectorLengthIsZero(
+    uint16_t aGradientUnits) {
+  return GetLengthValue(aGradientUnits,
+                        dom::SVGLinearGradientElement::ATTR_X1) ==
+             GetLengthValue(aGradientUnits,
+                            dom::SVGLinearGradientElement::ATTR_X2) &&
+         GetLengthValue(aGradientUnits,
+                        dom::SVGLinearGradientElement::ATTR_Y1) ==
+             GetLengthValue(aGradientUnits,
+                            dom::SVGLinearGradientElement::ATTR_Y2);
 }
 
-already_AddRefed<gfxPattern> SVGLinearGradientFrame::CreateGradient() {
-  float x1 = GetLengthValue(dom::SVGLinearGradientElement::ATTR_X1);
-  float y1 = GetLengthValue(dom::SVGLinearGradientElement::ATTR_Y1);
-  float x2 = GetLengthValue(dom::SVGLinearGradientElement::ATTR_X2);
-  float y2 = GetLengthValue(dom::SVGLinearGradientElement::ATTR_Y2);
+already_AddRefed<gfxPattern> SVGLinearGradientFrame::CreateGradient(
+    uint16_t aGradientUnits) {
+  float x1 =
+      GetLengthValue(aGradientUnits, dom::SVGLinearGradientElement::ATTR_X1);
+  float y1 =
+      GetLengthValue(aGradientUnits, dom::SVGLinearGradientElement::ATTR_Y1);
+  float x2 =
+      GetLengthValue(aGradientUnits, dom::SVGLinearGradientElement::ATTR_X2);
+  float y2 =
+      GetLengthValue(aGradientUnits, dom::SVGLinearGradientElement::ATTR_Y2);
 
   return MakeAndAddRef<gfxPattern>(x1, y1, x2, y2);
+}
+
+bool SVGLinearGradientFrame::GetWebRenderGeometry(
+    uint16_t aGradientUnits, const gfxMatrix& aGradientToUserSpace,
+    WebRenderGradient& aGradient) {
+  gfxPoint p1(
+      GetLengthValue(aGradientUnits, dom::SVGLinearGradientElement::ATTR_X1),
+      GetLengthValue(aGradientUnits, dom::SVGLinearGradientElement::ATTR_Y1));
+  gfxPoint p2(
+      GetLengthValue(aGradientUnits, dom::SVGLinearGradientElement::ATTR_X2),
+      GetLengthValue(aGradientUnits, dom::SVGLinearGradientElement::ATTR_Y2));
+
+  // Transforming the two end points is only equivalent to transforming the
+  // gradient when the lines of constant color, which are perpendicular to the
+  // vector, remain perpendicular to the transformed vector.
+  const gfxMatrix& m = aGradientToUserSpace;
+  double vx = p2.x - p1.x;
+  double vy = p2.y - p1.y;
+  double nx = -vy;
+  double ny = vx;
+  double mvx = m._11 * vx + m._21 * vy;
+  double mvy = m._12 * vx + m._22 * vy;
+  double mnx = m._11 * nx + m._21 * ny;
+  double mny = m._12 * nx + m._22 * ny;
+  double dot = mvx * mnx + mvy * mny;
+  double norm = std::sqrt((mvx * mvx + mvy * mvy) * (mnx * mnx + mny * mny));
+  if (norm == 0.0 || std::abs(dot) > 1e-4 * norm) {
+    return false;
+  }
+
+  aGradient.mType = GradientType::Linear;
+  aGradient.mStart = CSSPoint::FromUnknownPoint(ToPoint(m.TransformPoint(p1)));
+  aGradient.mEnd = CSSPoint::FromUnknownPoint(ToPoint(m.TransformPoint(p2)));
+  return true;
 }
 
 // -------------------------------------------------------------------------
@@ -514,7 +670,8 @@ nsresult SVGRadialGradientFrame::AttributeChanged(int32_t aNameSpaceID,
 
 //----------------------------------------------------------------------
 
-float SVGRadialGradientFrame::GetLengthValue(uint32_t aIndex,
+float SVGRadialGradientFrame::GetLengthValue(uint16_t aGradientUnits,
+                                             uint32_t aIndex,
                                              Maybe<float> aDefaultValue) {
   dom::SVGRadialGradientElement* lengthElement = GetRadialGradientWithLength(
       aIndex, !aDefaultValue
@@ -527,7 +684,8 @@ float SVGRadialGradientFrame::GetLengthValue(uint32_t aIndex,
              "Got unexpected null element from GetRadialGradientWithLength");
 
   return lengthElement
-             ? GetLengthValue(lengthElement->mLengthAttributes[aIndex])
+             ? GetLengthValue(aGradientUnits,
+                              lengthElement->mLengthAttributes[aIndex])
              : *aDefaultValue;
 }
 
@@ -545,27 +703,96 @@ SVGRadialGradientFrame::GetRadialGradientWithLength(
   return SVGGradientFrame::GetRadialGradientWithLength(aIndex, aDefault);
 }
 
-bool SVGRadialGradientFrame::GradientVectorLengthIsZero() {
-  float cx = GetLengthValue(dom::SVGRadialGradientElement::ATTR_CX);
-  float cy = GetLengthValue(dom::SVGRadialGradientElement::ATTR_CY);
-  float r = GetLengthValue(dom::SVGRadialGradientElement::ATTR_R);
+bool SVGRadialGradientFrame::GradientVectorLengthIsZero(
+    uint16_t aGradientUnits) {
+  float cx =
+      GetLengthValue(aGradientUnits, dom::SVGRadialGradientElement::ATTR_CX);
+  float cy =
+      GetLengthValue(aGradientUnits, dom::SVGRadialGradientElement::ATTR_CY);
+  float r =
+      GetLengthValue(aGradientUnits, dom::SVGRadialGradientElement::ATTR_R);
   // If fx or fy are not set, use cx/cy instead
-  float fx = GetLengthValue(dom::SVGRadialGradientElement::ATTR_FX, cx);
-  float fy = GetLengthValue(dom::SVGRadialGradientElement::ATTR_FY, cy);
-  float fr = GetLengthValue(dom::SVGRadialGradientElement::ATTR_FR);
+  float fx = GetLengthValue(aGradientUnits,
+                            dom::SVGRadialGradientElement::ATTR_FX, cx);
+  float fy = GetLengthValue(aGradientUnits,
+                            dom::SVGRadialGradientElement::ATTR_FY, cy);
+  float fr =
+      GetLengthValue(aGradientUnits, dom::SVGRadialGradientElement::ATTR_FR);
   return cx == fx && cy == fy && r == fr;
 }
 
-already_AddRefed<gfxPattern> SVGRadialGradientFrame::CreateGradient() {
-  float cx = GetLengthValue(dom::SVGRadialGradientElement::ATTR_CX);
-  float cy = GetLengthValue(dom::SVGRadialGradientElement::ATTR_CY);
-  float r = GetLengthValue(dom::SVGRadialGradientElement::ATTR_R);
+already_AddRefed<gfxPattern> SVGRadialGradientFrame::CreateGradient(
+    uint16_t aGradientUnits) {
+  float cx =
+      GetLengthValue(aGradientUnits, dom::SVGRadialGradientElement::ATTR_CX);
+  float cy =
+      GetLengthValue(aGradientUnits, dom::SVGRadialGradientElement::ATTR_CY);
+  float r =
+      GetLengthValue(aGradientUnits, dom::SVGRadialGradientElement::ATTR_R);
+  if (r < 0) {
+    return nullptr;
+  }
   // If fx or fy are not set, use cx/cy instead
-  float fx = GetLengthValue(dom::SVGRadialGradientElement::ATTR_FX, cx);
-  float fy = GetLengthValue(dom::SVGRadialGradientElement::ATTR_FY, cy);
-  float fr = GetLengthValue(dom::SVGRadialGradientElement::ATTR_FR);
+  float fx = GetLengthValue(aGradientUnits,
+                            dom::SVGRadialGradientElement::ATTR_FX, cx);
+  float fy = GetLengthValue(aGradientUnits,
+                            dom::SVGRadialGradientElement::ATTR_FY, cy);
+  float fr =
+      GetLengthValue(aGradientUnits, dom::SVGRadialGradientElement::ATTR_FR);
+  if (fr < 0) {
+    return nullptr;
+  }
 
   return MakeAndAddRef<gfxPattern>(fx, fy, fr, cx, cy, r);
+}
+
+bool SVGRadialGradientFrame::GetWebRenderGeometry(
+    uint16_t aGradientUnits, const gfxMatrix& aGradientToUserSpace,
+    WebRenderGradient& aGradient) {
+  float cx =
+      GetLengthValue(aGradientUnits, dom::SVGRadialGradientElement::ATTR_CX);
+  float cy =
+      GetLengthValue(aGradientUnits, dom::SVGRadialGradientElement::ATTR_CY);
+  float r =
+      GetLengthValue(aGradientUnits, dom::SVGRadialGradientElement::ATTR_R);
+  float fx = GetLengthValue(aGradientUnits,
+                            dom::SVGRadialGradientElement::ATTR_FX, cx);
+  float fy = GetLengthValue(aGradientUnits,
+                            dom::SVGRadialGradientElement::ATTR_FY, cy);
+  float fr =
+      GetLengthValue(aGradientUnits, dom::SVGRadialGradientElement::ATTR_FR);
+
+  // WebRender radial gradients have no focal point.
+  if (fx != cx || fy != cy || fr != 0.0f) {
+    return false;
+  }
+
+  // A circle maps to an axis aligned ellipse under a scale, and to a circle
+  // under a similarity. Anything else (skew, non-uniform scale with rotation)
+  // has no WebRender equivalent.
+  const gfxMatrix& m = aGradientToUserSpace;
+  double exx = m._11 * r;
+  double exy = m._12 * r;
+  double eyx = m._21 * r;
+  double eyy = m._22 * r;
+  CSSSize radii;
+  if (!m.HasNonAxisAlignedTransform()) {
+    radii = CSSSize(std::abs(exx), std::abs(eyy));
+  } else {
+    double lx = std::hypot(exx, exy);
+    double ly = std::hypot(eyx, eyy);
+    double dot = exx * eyx + exy * eyy;
+    if (std::abs(lx - ly) > 1e-4 * lx || std::abs(dot) > 1e-4 * lx * ly) {
+      return false;
+    }
+    radii = CSSSize(lx, ly);
+  }
+
+  aGradient.mType = GradientType::Radial;
+  aGradient.mCenter =
+      CSSPoint::FromUnknownPoint(ToPoint(m.TransformPoint(gfxPoint(cx, cy))));
+  aGradient.mRadii = radii;
+  return true;
 }
 
 }  // namespace mozilla
@@ -576,14 +803,14 @@ already_AddRefed<gfxPattern> SVGRadialGradientFrame::CreateGradient() {
 
 nsIFrame* NS_NewSVGLinearGradientFrame(mozilla::PresShell* aPresShell,
                                        mozilla::ComputedStyle* aStyle) {
-  return new (aPresShell)
-      mozilla::SVGLinearGradientFrame(aStyle, aPresShell->GetPresContext());
+  return new mozilla::SVGLinearGradientFrame(aStyle,
+                                             aPresShell->GetPresContext());
 }
 
 nsIFrame* NS_NewSVGRadialGradientFrame(mozilla::PresShell* aPresShell,
                                        mozilla::ComputedStyle* aStyle) {
-  return new (aPresShell)
-      mozilla::SVGRadialGradientFrame(aStyle, aPresShell->GetPresContext());
+  return new mozilla::SVGRadialGradientFrame(aStyle,
+                                             aPresShell->GetPresContext());
 }
 
 namespace mozilla {

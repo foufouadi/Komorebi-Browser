@@ -60,7 +60,9 @@
  static double
  _tent_eval (const Triple &tent, double v)
  {
-   double start = tent.minimum, peak = tent.middle, end = tent.maximum;
+   double start = (double) tent.minimum;
+   double peak = (double) tent.middle;
+   double end = (double) tent.maximum;
    if (unlikely (start > peak || peak > end)) return 1.0;
    if (unlikely (start < 0.0 && end > 0.0 && peak != 0.0)) return 1.0;
    if (peak == 0.0 || v == peak) return 1.0;
@@ -80,7 +82,7 @@
    double b = _tent_eval (tent, hi);
    *tmin = hb_min (a, b);
    *tmax = hb_max (a, b);
-   if (lo <= tent.middle && tent.middle <= hi)
+   if (lo <= (double) tent.middle && (double) tent.middle <= hi)
      *tmax = hb_max (*tmax, 1.0);
  }
 
@@ -118,8 +120,8 @@
      if (plan->user_axes_location.has (tag))
      {
        if (!plan->old_intermediates.has (tag, &old_int)) return false;
-       lo = old_int->minimum;
-       hi = old_int->maximum;
+       lo = (double) old_int->minimum;
+       hi = (double) old_int->maximum;
      }
      else if (axis.is_hidden ())
        lo = hi = 0.0; /* private axis: intermediate is always 0 */
@@ -130,51 +132,184 @@
    if (!var_store->get_region_list ().get_var_regions (plan->axes_old_index_tag_map, regions))
      return false;
 
+   hb_hashmap_t<hb_tag_t, unsigned> grid_pos;
+   hb_vector_t<hb_vector_t<double>> grid_points;
    for (unsigned i = 0; i < axes.length; i++)
    {
+     grid_pos.reset ();
+     grid_points.reset ();
+
      hb_tag_t tag = axes[i].get_axis_tag ();
      hb_pair_t<double, double> *identity;
      if (!box.has (tag, &identity)) return false;
 
-     double dmin = 0.0, dmax = 0.0;
+     /* Collect the row's active regions (non-zero delta). A varidx (or the
+      * implicit identity mapping) that doesn't resolve to a real store row
+      * behaves as "no variation" at runtime, so it contributes no regions;
+      * this also covers a NULL VarStore. */
+     hb_vector_t<hb_pair_t<int, unsigned>> active; /* (delta, region index) */
      uint32_t varidx = varidx_map->map (i);
+     /* Runtime treats out-of-range delta-set indices as zero. */
+     if (varidx != HB_OT_LAYOUT_NO_VARIATIONS_INDEX &&
+	 !var_store->has_delta_set (varidx))
+       varidx = HB_OT_LAYOUT_NO_VARIATIONS_INDEX;
      if (varidx != HB_OT_LAYOUT_NO_VARIATIONS_INDEX)
      {
        unsigned outer = varidx >> 16;
        unsigned inner = varidx & 0xFFFF;
-       if (outer >= var_store->get_sub_table_count ()) return false;
-       else
+       const OT::VarData &vd = var_store->get_sub_table (outer);
+       const OT::HBUINT8 *delta_bytes = vd.get_delta_bytes ();
+       unsigned row_size = vd.get_row_size ();
+       unsigned region_count = vd.get_region_index_count ();
+       for (unsigned r = 0; r < region_count; r++)
        {
-	 const OT::VarData &vd = var_store->get_sub_table (outer);
-	 if (inner >= vd.get_item_count ()) return false;
+	 int delta = vd.get_item_delta_fast (inner, r, delta_bytes, row_size);
+	 if (!delta) continue;
+	 unsigned region_idx = vd.get_region_index (r);
+	 if (region_idx >= regions.length) return false;
+	 active.push (hb_pair (delta, region_idx));
+       }
+       if (active.in_error ()) return false;
+     }
+
+     /* The delta is piecewise multilinear in the axis coordinates (each
+      * region scalar is a product of independent per-axis tents), so over
+      * the box its exact extremes are attained at vertices of the grid of
+      * per-axis tent breakpoints. Enumerate that grid when it is small
+      * (real fonts); otherwise fall back to per-region interval
+      * arithmetic, which ignores correlations between regions and is
+      * looser but still conservative. Mirrors fontTools'
+      * VarStore.getExtremes. */
+     constexpr unsigned MAX_GRID = 1u << 14;
+     bool exact = true;
+     double dmin = 0.0, dmax = 0.0; /* delta extremes, F2Dot14 units */
+     double vmin = 0.0, vmax = 0.0; /* identity + delta extremes, coord units */
+
+     /* Grid axes: the target axis (identity term), plus every axis a valid
+      * tent of an active region references. */
+     auto add_grid_axis = [&] (hb_tag_t t) -> int
+     {
+       unsigned *pos;
+       if (grid_pos.has (t, &pos)) return (int) *pos;
+       unsigned new_pos = grid_pos.get_population ();
+       hb_pair_t<double, double> *input;
+       double blo = -1.0, bhi = +1.0;
+       if (box.has (t, &input)) { blo = input->first; bhi = input->second; }
+       grid_points.push (hb_vector_t<double> ());
+       if (grid_points.in_error ()) return -1;
+       auto &points = grid_points[new_pos];
+       points.push (blo);
+       points.push (bhi);
+       if (points.in_error () || !grid_pos.set (t, new_pos)) return -1;
+       return (int) new_pos;
+     };
+
+     if (add_grid_axis (tag) < 0) return false;
+     /* Per active region: (grid axis position, tent) for its valid tents. */
+     hb_vector_t<hb_vector_t<hb_pair_t<unsigned, Triple>>> region_tents;
+     for (const auto &ar : active)
+     {
+       region_tents.push (hb_vector_t<hb_pair_t<unsigned, Triple>> ());
+       if (region_tents.in_error ()) return false;
+       auto &tents = region_tents[region_tents.length - 1];
+       for (const auto &_ : regions[ar.second])
+       {
+	 const Triple &tent = _.second;
+	 /* Tents the runtime ignores (constant scalar 1) add no breakpoints. */
+	 if (tent.middle == 0.f ||
+	     tent.minimum > tent.middle || tent.middle > tent.maximum ||
+	     (tent.minimum < 0.f && tent.maximum > 0.f))
+	   continue;
+	 int pos = add_grid_axis (_.first);
+	 if (pos < 0) return false;
+	 auto &points = grid_points[pos];
+	 double blo = points[0], bhi = points[1];
+	 points.push (hb_clamp ((double) tent.minimum, blo, bhi));
+	 points.push (hb_clamp ((double) tent.middle, blo, bhi));
+	 points.push (hb_clamp ((double) tent.maximum, blo, bhi));
+	 tents.push (hb_pair ((unsigned) pos, tent));
+	 if (points.in_error () || tents.in_error ()) return false;
+       }
+     }
+
+     unsigned grid_size = 1;
+     for (auto &points : grid_points)
+     {
+       points.qsort ([] (const double &a, const double &b) -> int
+		     { return a < b ? -1 : a > b ? +1 : 0; });
+       unsigned n = 0;
+       for (unsigned j = 0; j < points.length; j++)
+	 if (!n || points.arrayZ[j] != points.arrayZ[n - 1])
+	   points.arrayZ[n++] = points.arrayZ[j];
+       points.shrink (n);
+       if (grid_size > MAX_GRID / points.length) { exact = false; break; }
+       grid_size *= points.length;
+     }
+
+     if (exact)
+     {
+       unsigned target_pos = 0; /* the target axis was added first */
+       hb_vector_t<unsigned> odometer;
+       if (!odometer.resize (grid_pos.get_population ())) return false;
+       bool first = true;
+       while (true)
+       {
+	 double delta_sum = 0.0;
+	 for (unsigned r = 0; r < active.length; r++)
+	 {
+	   double scalar = 1.0;
+	   for (const auto &pt : region_tents[r])
+	   {
+	     double v = grid_points[pt.first][odometer[pt.first]];
+	     scalar *= _tent_eval (pt.second, v);
+	     if (scalar == 0.0) break;
+	   }
+	   delta_sum += scalar * active[r].first;
+	 }
+	 double coord = grid_points[target_pos][odometer[target_pos]];
+	 double value = coord + delta_sum / 16384.0;
+	 if (first)
+	 {
+	   dmin = dmax = delta_sum;
+	   vmin = vmax = value;
+	   first = false;
+	 }
 	 else
 	 {
-	   const OT::HBUINT8 *delta_bytes = vd.get_delta_bytes ();
-	   unsigned row_size = vd.get_row_size ();
-	   unsigned region_count = vd.get_region_index_count ();
-	   for (unsigned r = 0; r < region_count; r++)
-	   {
-	     int delta = vd.get_item_delta_fast (inner, r, delta_bytes, row_size);
-	     if (!delta) continue;
-	     unsigned region_idx = vd.get_region_index (r);
-	     if (region_idx >= regions.length) return false;
-	     double smin = 1.0, smax = 1.0;
-	     for (const auto &_ : regions[region_idx])
-	     {
-	       hb_pair_t<double, double> *input;
-	       double blo = -1.0, bhi = +1.0;
-	       if (box.has (_.first, &input)) { blo = input->first; bhi = input->second; }
-	       double tmin, tmax;
-	       _tent_value_range (_.second, blo, bhi, &tmin, &tmax);
-	       smin *= tmin;
-	       smax *= tmax;
-	       if (smax == 0.0) break;
-	     }
-	     if (delta > 0) { dmin += smin * delta; dmax += smax * delta; }
-	     else           { dmin += smax * delta; dmax += smin * delta; }
-	   }
+	   dmin = hb_min (dmin, delta_sum); dmax = hb_max (dmax, delta_sum);
+	   vmin = hb_min (vmin, value);     vmax = hb_max (vmax, value);
 	 }
+	 unsigned k = 0;
+	 for (; k < odometer.length; k++)
+	 {
+	   if (++odometer[k] < grid_points[k].length) break;
+	   odometer[k] = 0;
+	 }
+	 if (k == odometer.length) break;
        }
+     }
+     else
+     {
+       for (const auto &ar : active)
+       {
+	 int delta = ar.first;
+	 double smin = 1.0, smax = 1.0;
+	 for (const auto &_ : regions[ar.second])
+	 {
+	   hb_pair_t<double, double> *input;
+	   double blo = -1.0, bhi = +1.0;
+	   if (box.has (_.first, &input)) { blo = input->first; bhi = input->second; }
+	   double tmin, tmax;
+	   _tent_value_range (_.second, blo, bhi, &tmin, &tmax);
+	   smin *= tmin;
+	   smax *= tmax;
+	   if (smax == 0.0) break;
+	 }
+	 if (delta > 0) { dmin += smin * delta; dmax += smax * delta; }
+	 else           { dmin += smax * delta; dmax += smin * delta; }
+       }
+       vmin = identity->first + dmin / 16384.0;
+       vmax = identity->second + dmax / 16384.0;
      }
      /* A pinned axis whose delta is constant over the box is self-contained:
       * its final coordinate is a constant. It can be removed from fvar/avar
@@ -195,8 +330,8 @@
 
      /* Pad by one F2Dot14 unit against rounding differences with the
       * runtime's fixed-point evaluation. */
-     double lo = hb_clamp (identity->first + dmin / 16384.0 - 1.0 / 16384.0, -1.0, +1.0);
-     double hi = hb_clamp (identity->second + dmax / 16384.0 + 1.0 / 16384.0, -1.0, +1.0);
+     double lo = hb_clamp (vmin - 1.0 / 16384.0, -1.0, +1.0);
+     double hi = hb_clamp (vmax + 1.0 / 16384.0, -1.0, +1.0);
      lo = floor (lo * 16384.0) / 16384.0;
      hi = ceil (hi * 16384.0) / 16384.0;
      if (lo <= -1.0 && hi >= +1.0)
@@ -332,6 +467,21 @@ normalize_axes_location (hb_face_t *face, hb_subset_plan_t *plan)
     return true;
 
   hb_array_t<const OT::AxisRecord> axes = face->table.fvar->get_axes ();
+  for (const auto &axis : axes)
+  {
+    hb_tag_t tag = axis.get_axis_tag ();
+    const Triple *range;
+    float minimum, middle, maximum;
+    axis.get_coordinates (minimum, middle, maximum);
+    if (plan->user_axes_location.has (tag, &range) && !range->is_point () &&
+        range->minimum == minimum &&
+        range->middle == middle &&
+        range->maximum == maximum)
+      plan->user_axes_location.del (tag);
+  }
+  if (plan->user_axes_location.is_empty ())
+    return true;
+
   if (!plan->check_success (plan->normalized_coords.resize (axes.length)))
     return false;
 
@@ -450,21 +600,27 @@ normalize_axes_location (hb_face_t *face, hb_subset_plan_t *plan)
        * (its 'pinned' path flattens ALL blends; lift this once
        * https://github.com/harfbuzz/harfbuzz/pull/4710 lands, porting
        * fontTools' instantiateCFF2 from
-       * https://github.com/fonttools/fonttools/pull/3506), and VARC passes
-       * through verbatim with explicit fvar axis indices that renumbering
-       * would desynchronize. Such axes stay in fvar as ordinary hidden
-       * pins. */
-      bool detect_self_contained = true;
-      for (hb_tag_t table_tag : { HB_TAG ('C','F','F','2'), HB_TAG ('V','A','R','C') })
-      {
-        hb_blob_t *blob = hb_face_reference_table (face, table_tag);
-        if (hb_blob_get_length (blob))
-          detect_self_contained = false;
-        hb_blob_destroy (blob);
-      }
+       * https://github.com/fonttools/fonttools/pull/3506). Such axes stay
+       * in fvar as ordinary hidden pins. VARC remaps its axis indices and
+       * rejects instancing of axes it references. */
+      hb_blob_t *cff2_blob = hb_face_reference_table (face, HB_TAG ('C','F','F','2'));
+      bool detect_self_contained = !hb_blob_get_length (cff2_blob);
+      hb_blob_destroy (cff2_blob);
       if (!_compute_avar2_reachable_ranges (plan, axes, avar_table,
                                             detect_self_contained))
         return false;
+
+#ifndef HB_NO_VAR_COMPOSITES
+      /* VARC overrides can reach coordinates outside the font-level
+       * ranges. Do not cull variation data using those ranges. */
+      if (!plan->drop_tables.has (HB_TAG ('V','A','R','C')))
+      {
+        hb_blob_t *varc_blob = hb_face_reference_table (face, HB_TAG ('V','A','R','C'));
+        if (hb_blob_get_length (varc_blob))
+          plan->avar2_reachable_ranges.reset ();
+        hb_blob_destroy (varc_blob);
+      }
+#endif
 
       /* Keep all axes in fvar (pinned ones as hidden), EXCEPT self-contained
        * pinned axes, which are removed entirely. */
@@ -576,51 +732,62 @@ update_instance_metrics_map_from_cff2 (hb_subset_plan_t *plan)
     if (has_bounds_info)
     {
       plan->head_maxp_info.xMin = hb_min (plan->head_maxp_info.xMin, extents.x_bearing);
-      plan->head_maxp_info.xMax = hb_max (plan->head_maxp_info.xMax, extents.x_bearing + extents.width);
+      plan->head_maxp_info.xMax = hb_max (plan->head_maxp_info.xMax,
+						 hb_saturate_add (extents.x_bearing, extents.width));
       plan->head_maxp_info.yMax = hb_max (plan->head_maxp_info.yMax, extents.y_bearing);
-      plan->head_maxp_info.yMin = hb_min (plan->head_maxp_info.yMin, extents.y_bearing + extents.height);
+      plan->head_maxp_info.yMin = hb_min (plan->head_maxp_info.yMin,
+						 hb_saturate_add (extents.y_bearing, extents.height));
     }
 
     if (_hmtx.has_data ())
     {
-      int hori_aw = _hmtx.get_advance_without_var_unscaled (old_gid);
+      double hori_aw = _hmtx.get_advance_without_var_unscaled (old_gid);
       if (_hmtx.var_table.get_length ())
-        hori_aw += (int) roundf (_hmtx.var_table->get_advance_delta_unscaled (old_gid, font->coords, font->num_coords,
-                                                                              hvar_store_cache));
+        hori_aw += (double) roundf (_hmtx.var_table->get_advance_delta_unscaled (old_gid, font->coords, font->num_coords,
+									 hvar_store_cache));
       /* Malicious deltas can take the advance out of the UFWORD range that
        * hmtx serialization stores.  Clamp, to keep downstream consumers
        * (e.g. CFF width optimizer) bounded and consistent with hmtx. */
-      hori_aw = hb_clamp (hori_aw, 0, 0xFFFF);
+      hori_aw = hb_clamp (hori_aw, 0., 65535.);
       int lsb = extents.x_bearing;
       if (!has_bounds_info)
       {
         _hmtx.get_leading_bearing_without_var_unscaled (old_gid, &lsb);
       }
       plan->hmtx_map.set (new_gid, hb_pair ((unsigned) hori_aw, lsb));
-      plan->bounds_width_vec[new_gid] = extents.width;
+      if (has_bounds_info)
+        plan->bounds_width_vec[new_gid] = extents.width;
     }
 
     if (_vmtx.has_data ())
     {
-      int vert_aw = _vmtx.get_advance_without_var_unscaled (old_gid);
+      double vert_aw = _vmtx.get_advance_without_var_unscaled (old_gid);
       if (_vmtx.var_table.get_length ())
-        vert_aw += (int) roundf (_vmtx.var_table->get_advance_delta_unscaled (old_gid, font->coords, font->num_coords,
-                                                                              vvar_store_cache));
-      vert_aw = hb_clamp (vert_aw, 0, 0xFFFF);
+        vert_aw += (double) roundf (_vmtx.var_table->get_advance_delta_unscaled (old_gid, font->coords, font->num_coords,
+									 vvar_store_cache));
+      vert_aw = hb_clamp (vert_aw, 0., 65535.);
       hb_position_t vorg_x = 0;
       hb_position_t vorg_y = 0;
       int tsb = 0;
       if (has_bounds_info &&
            hb_font_get_glyph_v_origin (font, old_gid, &vorg_x, &vorg_y))
       {
-        tsb = vorg_y - extents.y_bearing;
+        tsb = hb_saturate_sub (vorg_y, extents.y_bearing);
       } else {
         _vmtx.get_leading_bearing_without_var_unscaled (old_gid, &tsb);
       }
 
       plan->vmtx_map.set (new_gid, hb_pair ((unsigned) vert_aw, tsb));
-      plan->bounds_height_vec[new_gid] = extents.height;
+      if (has_bounds_info)
+        plan->bounds_height_vec[new_gid] = hb_saturate_neg (extents.height);
     }
+  }
+  /* No glyph contributed bounds: do not serialize the accumulator's
+   * inverted sentinels into head (or a downgraded CFF FontBBox). */
+  if (plan->head_maxp_info.xMin > plan->head_maxp_info.xMax)
+  {
+    plan->head_maxp_info.xMin = plan->head_maxp_info.xMax = 0;
+    plan->head_maxp_info.yMin = plan->head_maxp_info.yMax = 0;
   }
   hb_font_destroy (font);
   if (hvar_store_cache)

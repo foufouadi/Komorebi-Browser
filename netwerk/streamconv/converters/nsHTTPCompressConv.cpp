@@ -25,6 +25,7 @@
 #include "nsIThreadRetargetableRequest.h"
 #include "nsIThreadRetargetableStreamListener.h"
 #include "nsNetCID.h"
+#include "nsNetUtil.h"
 #include "nsServiceManagerUtils.h"
 #include "nsStreamUtils.h"
 #include "nsStringStream.h"
@@ -903,7 +904,7 @@ nsHTTPCompressConv::OnDataAvailable(nsIRequest* request, nsIInputStream* iStr,
     case HTTP_COMPRESS_BROTLI:
     case HTTP_COMPRESS_BROTLI_DICTIONARY: {
       if (!mBrotli) {
-        mBrotli = MakeUnique<BrotliWrapper>();
+        mBrotli = std::make_unique<BrotliWrapper>();
         if (!mBrotli->Init(request, mMode)) {
           return NS_ERROR_FAILURE;
         }
@@ -926,7 +927,7 @@ nsHTTPCompressConv::OnDataAvailable(nsIRequest* request, nsIInputStream* iStr,
     case HTTP_COMPRESS_ZSTD:
     case HTTP_COMPRESS_ZSTD_DICTIONARY: {
       if (!mZstd) {
-        mZstd = MakeUnique<ZstdWrapper>(request, mMode);
+        mZstd = std::make_unique<ZstdWrapper>(request, mMode);
         if (!mZstd->mDStream) {
           return NS_ERROR_OUT_OF_MEMORY;
         }
@@ -946,7 +947,18 @@ nsHTTPCompressConv::OnDataAvailable(nsIRequest* request, nsIInputStream* iStr,
       }
     } break;
 
-    default:
+    default: {
+      // Pass-through modes must honour mDispatchToMainThread as well.
+      // CheckListenerChain() reports success for chains that can only run on
+      // the main thread, on the promise that this converter bounces the data
+      // back there.
+      if (mDispatchToMainThread && !NS_IsMainThread()) {
+        nsAutoCString data;
+        MOZ_TRY(NS_ReadInputStreamToString(iStr, data, streamLen));
+        return do_OnDataAvailable(request, aSourceOffset, data.BeginReading(),
+                                  data.Length());
+      }
+
       nsCOMPtr<nsIStreamListener> listener;
       {
         MutexAutoLock lock(mMutex);
@@ -956,6 +968,7 @@ nsHTTPCompressConv::OnDataAvailable(nsIRequest* request, nsIInputStream* iStr,
       if (NS_FAILED(rv)) {
         return rv;
       }
+    } break;
   } /* switch */
 
   return NS_OK;

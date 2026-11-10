@@ -570,6 +570,24 @@ ssl_GetCertificateAuthTypes(CERTCertificate *cert, SSLAuthType targetAuthType)
             }
             break;
 
+        case SEC_OID_ML_DSA_44:
+            if (cert->keyUsage & KU_DIGITAL_SIGNATURE) {
+                authTypes |= 1 << ssl_auth_mldsa44;
+            }
+            break;
+
+        case SEC_OID_ML_DSA_65:
+            if (cert->keyUsage & KU_DIGITAL_SIGNATURE) {
+                authTypes |= 1 << ssl_auth_mldsa65;
+            }
+            break;
+
+        case SEC_OID_ML_DSA_87:
+            if (cert->keyUsage & KU_DIGITAL_SIGNATURE) {
+                authTypes |= 1 << ssl_auth_mldsa87;
+            }
+            break;
+
         default:
             break;
     }
@@ -730,6 +748,15 @@ ssl_CertSuitableForAuthType(CERTCertificate *cert, sslAuthTypeMask authTypes)
             mask |= 1 << ssl_auth_ecdsa;
             mask |= 1 << ssl_auth_ecdh_rsa;
             mask |= 1 << ssl_auth_ecdh_ecdsa;
+            break;
+        case SEC_OID_ML_DSA_44:
+            mask |= 1 << ssl_auth_mldsa44;
+            break;
+        case SEC_OID_ML_DSA_65:
+            mask |= 1 << ssl_auth_mldsa65;
+            break;
+        case SEC_OID_ML_DSA_87:
+            mask |= 1 << ssl_auth_mldsa87;
             break;
         default:
             break;
@@ -1013,4 +1040,42 @@ NSS_FindCertKEAType(CERTCertificate *cert)
         default:
             return ssl_kea_null;
     }
+}
+
+void
+ssl_ClearPeerCertificate(sslSecurityInfo *sec)
+{
+    SECITEM_FreeItem(&sec->peerCertDER, PR_FALSE);
+    SECKEY_DestroySubjectPublicKeyInfo(sec->peerCertSPKI);
+    sec->peerCertSPKI = NULL;
+}
+
+/* Install |derCert| as the peer's end-entity certificate, replacing any
+ * previous one.
+ *
+ * The subjectPublicKeyInfo is parsed out now and kept alongside the DER, so
+ * that the certificate is decoded exactly once per handshake however many
+ * times the peer's key is needed afterwards.  It also means a certificate we
+ * cannot get a key out of is rejected here, while the Certificate message is
+ * being handled, rather than several messages later.
+ */
+SECStatus
+ssl_SetPeerCertificate(sslSecurityInfo *sec, const SECItem *derCert)
+{
+    SECItem der = { siBuffer, NULL, 0 };
+    CERTSubjectPublicKeyInfo *spki;
+
+    spki = ssl_ExtractSPKIFromDER(derCert);
+    if (!spki) {
+        return SECFailure;
+    }
+    if (SECITEM_CopyItem(NULL, &der, derCert) != SECSuccess) {
+        SECKEY_DestroySubjectPublicKeyInfo(spki);
+        return SECFailure;
+    }
+
+    ssl_ClearPeerCertificate(sec);
+    sec->peerCertDER = der;
+    sec->peerCertSPKI = spki;
+    return SECSuccess;
 }

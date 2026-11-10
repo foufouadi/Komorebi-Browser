@@ -380,10 +380,12 @@ imgRequestProxy::GetName(nsACString& aName) {
 }
 
 NS_IMETHODIMP
-imgRequestProxy::IsPending(bool* _retval) { return NS_ERROR_NOT_IMPLEMENTED; }
+imgRequestProxy::IsPending(bool* /*_retval*/) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
 
 NS_IMETHODIMP
-imgRequestProxy::GetStatus(nsresult* aStatus) {
+imgRequestProxy::GetStatus(nsresult* /*aStatus*/) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -411,7 +413,9 @@ imgRequestProxy::Cancel(nsresult status) {
     return NS_ERROR_FAILURE;
   }
 
-  if (NS_WARN_IF(!mCancelable)) {
+  // Non-cancelable requests, like CSS images, are still in the load group, so
+  // canceling the load group tries to cancel them too.
+  if (!mCancelable) {
     return NS_ERROR_FAILURE;
   }
 
@@ -1223,7 +1227,7 @@ imgRequestProxyStatic::imgRequestProxyStatic(mozilla::image::Image* aImage,
     : mImagePrincipal(aImagePrincipal),
       mTriggeringPrincipal(aTriggeringPrincipal),
       mHadCrossOriginRedirects(aHadCrossOriginRedirects) {
-  mBehaviour = mozilla::MakeUnique<StaticBehaviour>(aImage);
+  mBehaviour = std::make_unique<StaticBehaviour>(aImage);
 }
 
 NS_IMETHODIMP

@@ -36,6 +36,8 @@
 
 ["include:../../../../../dom/cache/test/marionette/manifest.toml"]
 
+["include:../../../../../dom/fs/test/marionette/manifest.toml"]
+
 ["include:../../../../../dom/indexedDB/test/marionette/manifest.toml"]
 
 ["include:../../../../../dom/notification/test/marionette/manifest.toml"]
@@ -69,6 +71,8 @@
 ["include:../../../../../toolkit/components/antitracking/bouncetrackingprotection/test/marionette/manifest.toml"]
 
 ["include:../../../../../toolkit/components/cleardata/tests/marionette/manifest.toml"]
+
+["include:../../../../../toolkit/components/downloads/test/marionette/manifest.toml"]
 
 ["include:../../../../../toolkit/components/extensions/test/marionette/manifest-serviceworker.toml"]
 

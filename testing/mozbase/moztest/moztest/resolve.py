@@ -5,6 +5,7 @@
 import fnmatch
 import os
 import pickle
+import re
 import sys
 from abc import ABCMeta, abstractmethod
 from collections import defaultdict
@@ -12,6 +13,7 @@ from functools import cache
 
 import mozpack.path as mozpath
 from manifestparser import TestManifest, combine_fields
+from manifestparser.filters import chunk_by_runtime
 from mozbuild.base import MozbuildObject
 from mozbuild.testing import REFTEST_FLAVORS, TEST_MANIFESTS, install_test_files
 from mozpack.files import FileFinder
@@ -20,6 +22,8 @@ here = os.path.abspath(os.path.dirname(__file__))
 
 MOCHITEST_CHUNK_BY_DIR = 4
 MOCHITEST_TOTAL_CHUNKS = 5
+
+ROOT_TAGS_RE = re.compile(rb"^tags *:", re.MULTILINE)
 
 
 def WebglSuite(name):
@@ -225,6 +229,20 @@ TEST_SUITES = {
         "kwargs": {"flavor": "plain", "subsuite": "media", "test_paths": None},
         "task_regex": [
             "mochitest-media($|.*(-1|[^0-9])$)",
+            "test-verify($|.*(-1|[^0-9])$)",
+        ],
+    },
+    "mochitest-speech-recognition": {
+        "aliases": ("msr", "speech-recognition"),
+        "build_flavor": "mochitest",
+        "mach_command": "mochitest",
+        "kwargs": {
+            "flavor": "plain",
+            "subsuite": "speech-recognition",
+            "test_paths": None,
+        },
+        "task_regex": [
+            "mochitest-speech-recognition($|.*(-1|[^0-9])$)",
             "test-verify($|.*(-1|[^0-9])$)",
         ],
     },
@@ -542,6 +560,7 @@ _test_subsuites = {
     ("marionette", "unittest"): "marionette-unittest",
     ("mochitest", "gpu"): "mochitest-plain-gpu",
     ("mochitest", "media"): "mochitest-media",
+    ("mochitest", "speech-recognition"): "mochitest-speech-recognition",
     ("mochitest", "webgl1-core"): "mochitest-webgl1-core",
     ("mochitest", "webgl1-ext"): "mochitest-webgl1-ext",
     ("mochitest", "webgl2-core"): "mochitest-webgl2-core",
@@ -594,6 +613,10 @@ def rewrite_test_base(test, new_base):
     test["here"] = mozpath.join(new_base, test["dir_relpath"])
     test["path"] = mozpath.join(new_base, test["file_relpath"])
     return test
+
+
+def _is_under(path, prefix):
+    return path == prefix or path.startswith(prefix.rstrip("/") + "/")
 
 
 class TestLoader(MozbuildObject, metaclass=ABCMeta):
@@ -688,7 +711,11 @@ class TestManifestLoader(TestLoader):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.finder = FileFinder(self.topsrcdir)
-        self.reader = self.mozbuild_reader(config_mode="empty")
+        # Checkouts in automation are clean, checking it again on sparse
+        # checkouts (e.g. in decision tasks) is slow.
+        self.reader = self.mozbuild_reader(
+            config_mode="empty", vcs_check_clean="MOZ_AUTOMATION" not in os.environ
+        )
         self.variables = {f"{k}_MANIFESTS": v[0] for k, v in TEST_MANIFESTS.items()}
         self.variables.update({f"{f.upper()}_MANIFESTS": f for f in REFTEST_FLAVORS})
 
@@ -800,7 +827,6 @@ class TestResolver(MozbuildObject):
         self._geckoview_junit_loaded = False
         self._tests_loaded = False
         self._wpt_loaded = False
-        self.meta_tags = {}
 
     def _reset_state(self):
         self._tests_by_path = defaultdict(list)
@@ -845,6 +871,42 @@ class TestResolver(MozbuildObject):
                     self._tests_by_manifest[test["manifest_relpath"]].append(relpath)
         return self._tests_by_manifest
 
+    @cache
+    def get_test_paths_by_manifest(self, suite, paths):
+        """Find the manifests of ``suite`` that contain tests under ``paths``.
+
+        Args:
+            suite (str): The suite to look at. Values are keys of `TEST_SUITES`.
+            paths (frozenset): Source directories or test files, relative to the
+                source root.
+
+        Returns:
+            A dict mapping each manifest holding at least one test under ``paths``
+            to the paths that should be run from it. A manifest maps to itself when
+            it lives under one of ``paths``, and to the requested paths when they
+            are narrower than the manifest (a single test file, or a subdirectory
+            of the manifest's directory).
+        """
+        suite_definition = TEST_SUITES[suite]
+        kwargs = {
+            "flavor": suite_definition["build_flavor"],
+            "subsuite": suite_definition.get("kwargs", {}).get("subsuite", "undefined"),
+        }
+
+        by_manifest = {}
+        for path in paths:
+            for test in self.resolve_tests(paths=[path], **kwargs):
+                manifest = chunk_by_runtime.get_manifest(test)
+                # Run the manifest itself when it is entirely under the requested
+                # path, and the requested path when it is the narrower of the two.
+                test_path = manifest if _is_under(manifest, path) else path
+                by_manifest.setdefault(manifest, set()).add(test_path)
+
+        return {
+            manifest: [manifest] if manifest in test_paths else sorted(test_paths)
+            for manifest, test_paths in by_manifest.items()
+        }
+
     @property
     def test_dirs(self):
         if not self._test_dirs:
@@ -867,19 +929,38 @@ class TestResolver(MozbuildObject):
 
         return tuple(paths)
 
+    @cache
     def _extract_tags_from_file(self, file_path):
+        """Return the root-level ``tags`` of a wptrunner metadata file.
 
-        tags = []
+        Only the few files with an unindented ``tags`` key are handed to
+        wptmanifest, as parsing all of them is too slow for the decision task.
+        """
         try:
-            with open(file_path, encoding="utf-8") as f:
-                for line in f:
-                    if "tags: [" in line:
-                        tags = line.split("[")[1].split("]")[0].split()
-                        break
+            with open(file_path, "rb") as f:
+                content = f.read()
         except OSError:
-            # File doesn't exist or isn't readable
-            pass
-        return tags
+            return ()
+
+        if not ROOT_TAGS_RE.search(content):
+            return ()
+
+        from wptrunner.wptmanifest.node import KeyValueNode, ListNode, ValueNode
+        from wptrunner.wptmanifest.parser import parse
+
+        try:
+            root = parse(content)
+        except Exception:
+            return ()
+        for node in root.children:
+            if not isinstance(node, KeyValueNode) or node.data != "tags":
+                continue
+            for value in node.children:
+                if isinstance(value, ListNode):
+                    return tuple(str(child.data) for child in value.children)
+                if isinstance(value, ValueNode):
+                    return (str(value.data),)
+        return ()
 
     def get_test_tags(self, test_tags, metadata_base, path):
 
@@ -893,12 +974,7 @@ class TestResolver(MozbuildObject):
             all_paths = dir_metadata_paths
 
         for file_path in all_paths:
-            if file_path in self.meta_tags:
-                test_tags.extend(self.meta_tags[file_path])
-            else:
-                tags = self._extract_tags_from_file(file_path)
-                self.meta_tags[file_path] = tags
-                test_tags.extend(tags)
+            test_tags.extend(self._extract_tags_from_file(file_path))
 
         return list(set(test_tags))
 
@@ -1489,7 +1565,7 @@ class TestResolver(MozbuildObject):
             # one or none are defined, but not both
             tests = list(self.resolve_tests(paths=[relpath]))
             if not tests:
-                tests = list(self.resolve_tests(tags=entry))
+                tests = list(self.resolve_tests(tags=[entry]))
             run_tests.extend(tests)
 
             if not tests:

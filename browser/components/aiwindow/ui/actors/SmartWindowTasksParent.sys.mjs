@@ -6,6 +6,8 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   MonitorAgent:
     "moz-src:///browser/components/aiwindow/models/agents/MonitorAgent.sys.mjs",
+  MONITOR_BLOCKED_STATE_CHANGED_TOPIC:
+    "moz-src:///browser/components/aiwindow/models/agents/Monitor.sys.mjs",
   MonitorUIUtils:
     "moz-src:///browser/components/aiwindow/ui/modules/MonitorUIUtils.sys.mjs",
   TOTAL_NUM_MONITORS:
@@ -28,7 +30,28 @@ export class SmartWindowTasksParent extends JSWindowActorParent {
     ["SmartWindowTasks:RunMonitor", this.#handleRunMonitor.bind(this)],
     ["SmartWindowTasks:PauseMonitor", this.#handlePauseMonitor.bind(this)],
     ["SmartWindowTasks:GetConstants", this.#handleGetConstants.bind(this)],
+    ["SmartWindowTasks:OpenUrl", this.#handleOpenUrl.bind(this)],
   ]);
+
+  #observer = {
+    observe: () => {
+      this.sendAsyncMessage("SmartWindowTasks:BlockedStateChanged");
+    },
+  };
+
+  actorCreated() {
+    Services.obs.addObserver(
+      this.#observer,
+      lazy.MONITOR_BLOCKED_STATE_CHANGED_TOPIC
+    );
+  }
+
+  didDestroy() {
+    Services.obs.removeObserver(
+      this.#observer,
+      lazy.MONITOR_BLOCKED_STATE_CHANGED_TOPIC
+    );
+  }
 
   async receiveMessage({ data, name }) {
     const handler = this.#messageHandlers.get(name);
@@ -44,10 +67,17 @@ export class SmartWindowTasksParent extends JSWindowActorParent {
   async #handleListMonitors() {
     try {
       const monitors = await lazy.MonitorAgent.listMonitors();
+      // Resolve page titles
+      await Promise.all(
+        monitors.map(async monitor => {
+          monitor.watchUrlTitles =
+            await lazy.MonitorUIUtils.resolveWatchUrlTitles(monitor.watchUrls);
+        })
+      );
       return { success: true, monitors };
     } catch (error) {
       console.error("Failed to list monitors:", error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message, code: error.code };
     }
   }
 
@@ -57,7 +87,7 @@ export class SmartWindowTasksParent extends JSWindowActorParent {
       return { success: true, monitor };
     } catch (error) {
       console.error("Failed to create monitor:", error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message, code: error.code };
     }
   }
 
@@ -80,7 +110,7 @@ export class SmartWindowTasksParent extends JSWindowActorParent {
       return { success: true, monitor };
     } catch (error) {
       console.error("Failed to update monitor:", error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message, code: error.code };
     }
   }
 
@@ -90,7 +120,7 @@ export class SmartWindowTasksParent extends JSWindowActorParent {
       return { success: true, result };
     } catch (error) {
       console.error("Failed to run monitor:", error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message, code: error.code };
     }
   }
 
@@ -100,8 +130,15 @@ export class SmartWindowTasksParent extends JSWindowActorParent {
       return { success: true };
     } catch (error) {
       console.error("Failed to pause monitor:", error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message, code: error.code };
     }
+  }
+
+  #handleOpenUrl(data) {
+    return lazy.MonitorUIUtils.openMonitorUrl(
+      this.browsingContext.topChromeWindow,
+      data?.url
+    );
   }
 
   #handleGetConstants() {
@@ -113,6 +150,7 @@ export class SmartWindowTasksParent extends JSWindowActorParent {
         SCHEDULE_TYPES: lazy.SCHEDULE_TYPES,
         isMonitorRegionSupported:
           lazy.MonitorUIUtils.isMonitorRegionSupported(),
+        isBlocked: lazy.MonitorAgent.isBlocked,
         smartWindowSupportUrl:
           Services.urlFormatter.formatURLPref("app.support.baseURL") +
           "smart-window",

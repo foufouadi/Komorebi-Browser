@@ -20,12 +20,9 @@ add_task(async function () {
   // Execute requests.
   await performRequests(monitor, tab, 1);
 
-  const wait = waitForDOM(document, ".headers-overview");
-  EventUtils.sendMouseEvent(
-    { type: "mousedown" },
-    document.querySelectorAll(".request-list-item")[0]
-  );
-  await wait;
+  const onDomUpdated = waitForDOM(document, ".headers-overview");
+  clickOnRequestRow(document.querySelectorAll(".request-list-item")[0]);
+  await onDomUpdated;
 
   clickOnSidebarTab(document, "request");
 

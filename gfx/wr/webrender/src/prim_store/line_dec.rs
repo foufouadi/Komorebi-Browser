@@ -11,16 +11,9 @@ use euclid::Scale;
 use crate::render_task::{RenderTask, RenderTaskKind};
 use crate::render_task_cache::{RenderTaskCacheKey, RenderTaskCacheKeyKind, RenderTaskParent};
 use crate::render_task_graph::RenderTaskId;
-use crate::scene_building::{IsVisible};
-use crate::frame_builder::{FrameBuildingContext, FrameBuildingState};
-use crate::intern;
-use crate::internal_types::LayoutPrimitiveInfo;
-use crate::prim_store::{
-    PrimKey, PrimTemplate, PrimTemplateCommonData,
-    InternablePrimitive, PrimitiveStore,
-};
-use crate::prim_store::PrimitiveKind;
-use crate::spatial_tree::SpatialNodeIndex;
+use crate::dl_interner::{DlResolve, DlResolveContext};
+use crate::frame_builder::FrameBuildingState;
+use crate::prim_store::{PrimTemplate, PrimTemplateCommonData};
 use crate::util::clamp_to_scale_factor;
 
 /// Maximum resolution in device pixels at which line decorations are rasterized.
@@ -36,17 +29,13 @@ pub struct LineDecorationCacheKey {
     pub size: LayoutSizeAu,
 }
 
-// `LineDecoration` now lives in `webrender_api::interned_prims` so content-process
-// interning can hold it. Re-exported to keep existing references working.
-pub use api::interned_prims::LineDecoration;
-
-pub type LineDecorationKey = PrimKey<LineDecoration>;
-
-impl intern::InternDebug for LineDecorationKey {}
+// `LineDecoration` and its key live in `webrender_api::interned_prims`, since
+// the content display list builder interns them.
+pub use api::interned_prims::LineDecorationKey;
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(MallocSizeOf)]
+#[derive(MallocSizeOf, Clone)]
 pub struct LineDecorationData {
     pub style: LineStyle,
     pub orientation: LineOrientation,
@@ -59,11 +48,14 @@ impl LineDecorationData {
     /// current local size, write the GPU block, and (for non-solid styles)
     /// allocate a cached render task. Returns the task id and the per-
     /// instance GPU buffer address consumed by `batch.rs`.
+    ///
+    /// `local_to_device_scale` is the scale from the primitive's local space to
+    /// the device space of the surface it will be drawn into, which is the
+    /// resolution the cached mask needs to be rasterized at.
     pub fn prepare(
         &self,
         prim_size: LayoutSize,
-        prim_spatial_node_index: SpatialNodeIndex,
-        frame_context: &FrameBuildingContext,
+        local_to_device_scale: (f32, f32),
         frame_state: &mut FrameBuildingState,
     ) -> Option<(RenderTaskId, LayoutSize)> {
         let cache_key = get_line_decoration_size(
@@ -86,8 +78,7 @@ impl LineDecorationData {
                 );
                 let task = self.allocate_render_task(
                     cache_key,
-                    prim_spatial_node_index,
-                    frame_context,
+                    local_to_device_scale,
                     frame_state,
                 );
 
@@ -100,17 +91,9 @@ impl LineDecorationData {
     fn allocate_render_task(
         &self,
         cache_key: LineDecorationCacheKey,
-        prim_spatial_node_index: SpatialNodeIndex,
-        frame_context: &FrameBuildingContext,
+        local_to_device_scale: (f32, f32),
         frame_state: &mut FrameBuildingState,
     ) -> RenderTaskId {
-        // TODO(gw): These scale factors don't do a great job if the world transform
-        //           contains perspective
-        let scale = frame_context
-            .spatial_tree
-            .get_world_transform(prim_spatial_node_index)
-            .scale_factors();
-
         // Scale factors are normalized to a power of 2 to reduce the number of
         // resolution changes.
         // For frames with a changing scale transform round scale factors up to
@@ -119,8 +102,8 @@ impl LineDecorationData {
         // power-of-2 boundary ensures we never scale up, only down --- avoiding
         // jaggies. It also ensures we never scale down by more than a factor of
         // 2, avoiding bad downscaling quality.
-        let scale_width = clamp_to_scale_factor(scale.0, false);
-        let scale_height = clamp_to_scale_factor(scale.1, false);
+        let scale_width = clamp_to_scale_factor(local_to_device_scale.0, false);
+        let scale_height = clamp_to_scale_factor(local_to_device_scale.1, false);
         // Pick the maximum dimension as scale
         let scale_factor = LayoutToDeviceScale::new(scale_width.max(scale_height));
 
@@ -172,56 +155,18 @@ impl LineDecorationData {
 
 pub type LineDecorationTemplate = PrimTemplate<LineDecorationData>;
 
-impl From<LineDecorationKey> for LineDecorationTemplate {
-    fn from(line_dec: LineDecorationKey) -> Self {
-        let common = PrimTemplateCommonData::with_key_common(line_dec.common);
+/// Nothing to validate: a line names no resource.
+impl DlResolve<LineDecorationKey> for LineDecorationTemplate {
+    fn resolve(key: &LineDecorationKey, _ctx: &DlResolveContext) -> Self {
         LineDecorationTemplate {
-            common,
+            common: PrimTemplateCommonData::with_key_common(key.common),
             kind: LineDecorationData {
-                style: line_dec.kind.style,
-                orientation: line_dec.kind.orientation,
-                wavy_line_thickness: line_dec.kind.wavy_line_thickness,
-                color: line_dec.kind.color.into(),
-            }
+                style: key.kind.style,
+                orientation: key.kind.orientation,
+                wavy_line_thickness: key.kind.wavy_line_thickness,
+                color: key.kind.color.into(),
+            },
         }
-    }
-}
-
-pub type LineDecorationDataHandle = intern::Handle<LineDecoration>;
-
-impl intern::Internable for LineDecoration {
-    type Key = LineDecorationKey;
-    type StoreData = LineDecorationTemplate;
-    type InternData = ();
-    const PROFILE_COUNTER: usize = crate::profiler::INTERNED_LINE_DECORATIONS;
-}
-
-impl InternablePrimitive for LineDecoration {
-    fn into_key(
-        self,
-        info: &LayoutPrimitiveInfo,
-    ) -> LineDecorationKey {
-        LineDecorationKey::new(
-            info.into(),
-            self,
-        )
-    }
-
-    fn make_instance_kind(
-        _key: LineDecorationKey,
-        data_handle: LineDecorationDataHandle,
-        _: &mut PrimitiveStore,
-    ) -> PrimitiveKind {
-        PrimitiveKind::LineDecoration {
-            data_handle,
-        }
-    }
-}
-
-
-impl IsVisible for LineDecoration {
-    fn is_visible(&self) -> bool {
-        self.color.a > 0
     }
 }
 
@@ -303,7 +248,7 @@ fn test_struct_sizes() {
     //     test expectations and move on.
     // (b) You made a structure larger. This is not necessarily a problem, but should only
     //     be done with care, and after checking if talos performance regresses badly.
-    assert_eq!(mem::size_of::<LineDecoration>(), 12, "LineDecoration size changed");
-    assert_eq!(mem::size_of::<LineDecorationTemplate>(), 28, "LineDecorationTemplate size changed");
-    assert_eq!(mem::size_of::<LineDecorationKey>(), 16, "LineDecorationKey size changed");
+    assert_eq!(mem::size_of::<api::interned_prims::LineDecoration>(), 12, "LineDecoration size changed");
+    assert_eq!(mem::size_of::<LineDecorationTemplate>(), 60, "LineDecorationTemplate size changed");
+    assert_eq!(mem::size_of::<LineDecorationKey>(), 48, "LineDecorationKey size changed");
 }

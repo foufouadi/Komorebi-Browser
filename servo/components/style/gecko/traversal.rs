@@ -7,7 +7,8 @@
 use crate::context::{SharedStyleContext, StyleContext};
 use crate::dom::{TElement, TNode};
 use crate::gecko::wrapper::{GeckoElement, GeckoNode};
-use crate::traversal::{recalc_style_at, DomTraversal, PerLevelTraversalData};
+use crate::gecko_bindings::bindings::Gecko_FlushPendingNamedTimelineUpdates;
+use crate::traversal::{DomTraversal, recalc_style_at};
 
 /// This is the simple struct that Gecko uses to encapsulate a DOM traversal for
 /// styling.
@@ -18,14 +19,13 @@ pub struct RecalcStyleOnly<'a> {
 impl<'a> RecalcStyleOnly<'a> {
     /// Create a `RecalcStyleOnly` traversal from a `SharedStyleContext`.
     pub fn new(shared: SharedStyleContext<'a>) -> Self {
-        RecalcStyleOnly { shared: shared }
+        RecalcStyleOnly { shared }
     }
 }
 
 impl<'recalc, 'le> DomTraversal<GeckoElement<'le>> for RecalcStyleOnly<'recalc> {
     fn process_preorder<F>(
         &self,
-        traversal_data: &PerLevelTraversalData,
         context: &mut StyleContext<GeckoElement<'le>>,
         node: GeckoNode<'le>,
         note_child: F,
@@ -34,7 +34,7 @@ impl<'recalc, 'le> DomTraversal<GeckoElement<'le>> for RecalcStyleOnly<'recalc> 
     {
         if let Some(el) = node.as_element() {
             let mut data = unsafe { el.ensure_data() };
-            recalc_style_at(self, traversal_data, context, el, &mut data, note_child);
+            recalc_style_at(self, context, el, &mut data, note_child);
         }
     }
 
@@ -49,5 +49,9 @@ impl<'recalc, 'le> DomTraversal<GeckoElement<'le>> for RecalcStyleOnly<'recalc> 
 
     fn shared_context(&self) -> &SharedStyleContext<'recalc> {
         &self.shared
+    }
+
+    fn after_sequential_tasks(&self, root: GeckoElement<'le>) {
+        unsafe { Gecko_FlushPendingNamedTimelineUpdates(root.0) };
     }
 }

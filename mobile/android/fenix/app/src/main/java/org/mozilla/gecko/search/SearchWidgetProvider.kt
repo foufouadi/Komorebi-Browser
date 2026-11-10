@@ -12,24 +12,18 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.speech.RecognizerIntent
 import android.view.View
 import android.widget.RemoteViews
 import androidx.annotation.Dimension
 import androidx.annotation.Dimension.Companion.DP
 import androidx.annotation.VisibleForTesting
-import org.mozilla.fenix.GleanMetrics.Metrics
-import org.mozilla.fenix.HomeActivity
-import org.mozilla.fenix.IntentReceiverActivity
 import org.mozilla.fenix.R
-import org.mozilla.fenix.ext.components
-import org.mozilla.fenix.home.intent.StartSearchIntentProcessor
 import org.mozilla.fenix.iconpicker.DefaultAppIconRepository
 import org.mozilla.fenix.iconpicker.DefaultPackageManagerWrapper
 import org.mozilla.fenix.utils.IntentUtils
-import org.mozilla.fenix.utils.Settings
-import org.mozilla.fenix.widget.VoiceSearchActivity
-import org.mozilla.fenix.widget.VoiceSearchActivity.Companion.SPEECH_PROCESSING
+import org.mozilla.fenix.widget.SearchWidgetIntents
+import org.mozilla.fenix.widget.SearchWidgets
+import org.mozilla.fenix.widget.glance.SearchBarWidget
 
 class SearchWidgetProvider : AppWidgetProvider() {
     // Implementation note:
@@ -38,19 +32,19 @@ class SearchWidgetProvider : AppWidgetProvider() {
     // The existing name replicates the name and package we used in Fennec.
 
     override fun onEnabled(context: Context) {
-        recordWidgetIsInstalled(context.components.settings)
+        SearchWidgets.syncInstalledState(context)
     }
 
     override fun onDisabled(context: Context) {
-        context.components.settings.searchWidgetInstalled = false
-        Metrics.searchWidgetInstalled.set(false)
+        SearchWidgets.syncInstalledState(context)
     }
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
-        recordWidgetIsInstalled(context.components.settings)
+        SearchWidgets.syncInstalledState(context)
 
         val textSearchIntent = createTextSearchIntent(context)
         val voiceSearchIntent = createVoiceSearchIntent(context)
+        val lensSearchIntent = createLensSearchIntent(context)
 
         appWidgetIds.forEach { appWidgetId ->
             val currentWidth = appWidgetManager.getAppWidgetOptions(appWidgetId).getInt(OPTION_APPWIDGET_MIN_WIDTH)
@@ -61,7 +55,15 @@ class SearchWidgetProvider : AppWidgetProvider() {
             val layout = getLayout(layoutSize, showMic)
             val text = getText(layoutSize, context)
 
-            val views = createRemoteViews(context, layout, textSearchIntent, voiceSearchIntent, text)
+            val views =
+                createRemoteViews(
+                    context,
+                    layout,
+                    textSearchIntent,
+                    voiceSearchIntent,
+                    lensSearchIntent,
+                    text,
+                )
             appWidgetManager.updateAppWidget(appWidgetId, views)
         }
     }
@@ -74,6 +76,7 @@ class SearchWidgetProvider : AppWidgetProvider() {
     ) {
         val textSearchIntent = createTextSearchIntent(context)
         val voiceSearchIntent = createVoiceSearchIntent(context)
+        val lensSearchIntent = createLensSearchIntent(context)
 
         val currentWidth = appWidgetManager.getAppWidgetOptions(appWidgetId).getInt(OPTION_APPWIDGET_MIN_WIDTH)
         val layoutSize = getLayoutSize(currentWidth)
@@ -81,63 +84,61 @@ class SearchWidgetProvider : AppWidgetProvider() {
         val layout = getLayout(layoutSize, showMic)
         val text = getText(layoutSize, context)
 
-        val views = createRemoteViews(context, layout, textSearchIntent, voiceSearchIntent, text)
+        val views =
+            createRemoteViews(
+                context,
+                layout,
+                textSearchIntent,
+                voiceSearchIntent,
+                lensSearchIntent,
+                text,
+            )
         appWidgetManager.updateAppWidget(appWidgetId, views)
     }
 
-    private fun recordWidgetIsInstalled(settings: Settings) {
-        if (!settings.searchWidgetInstalled) {
-            settings.searchWidgetInstalled = true
-            Metrics.searchWidgetInstalled.set(true)
-        }
-    }
-
     /** Builds pending intent that opens the browser and starts a new text search. */
-    private fun createTextSearchIntent(context: Context): PendingIntent {
-        return Intent(context, IntentReceiverActivity::class.java).let { intent ->
-            val createTextSearchIntentFlags =
-                IntentUtils.DEFAULT_PENDING_INTENT_FLAGS or PendingIntent.FLAG_UPDATE_CURRENT
-            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            intent.putExtra(HomeActivity.OPEN_TO_SEARCH, StartSearchIntentProcessor.SEARCH_WIDGET)
-            PendingIntent.getActivity(
-                context,
-                REQUEST_CODE_NEW_TAB,
-                intent,
-                createTextSearchIntentFlags,
-            )
-        }
-    }
+    private fun createTextSearchIntent(context: Context): PendingIntent =
+        PendingIntent.getActivity(
+            context,
+            REQUEST_CODE_NEW_TAB,
+            SearchWidgetIntents.textSearch(context, SearchWidgets.LEGACY_WIDGET_TYPE),
+            IntentUtils.DEFAULT_PENDING_INTENT_FLAGS or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
 
     /** Builds pending intent that starts a new voice search. */
     @VisibleForTesting
-    internal fun createVoiceSearchIntent(context: Context): PendingIntent? {
-        if (!context.components.settings.shouldShowVoiceSearch) {
-            return null
-        }
-
-        val voiceIntent =
-            Intent(context, VoiceSearchActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                putExtra(SPEECH_PROCESSING, true)
-            }
-
-        val intentSpeech = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-
-        return intentSpeech.resolveActivity(context.packageManager)?.let {
+    internal fun createVoiceSearchIntent(context: Context): PendingIntent? =
+        SearchWidgetIntents.maybeVoiceSearch(context, SearchWidgets.LEGACY_WIDGET_TYPE)?.let { intent ->
             PendingIntent.getActivity(
                 context,
                 REQUEST_CODE_VOICE,
-                voiceIntent,
+                intent,
                 IntentUtils.DEFAULT_PENDING_INTENT_FLAGS,
             )
         }
-    }
 
-    private fun createRemoteViews(
+    /**
+     * Builds pending intent that opens the browser and starts a Google Lens image search. Returns null when the Google
+     * Lens integration is disabled or the user's selected search engine is not Google, so the button can be hidden.
+     */
+    @VisibleForTesting
+    internal fun createLensSearchIntent(context: Context): PendingIntent? =
+        SearchWidgetIntents.maybeLensSearch(context, SearchWidgets.LEGACY_WIDGET_TYPE)?.let { intent ->
+            PendingIntent.getActivity(
+                context,
+                REQUEST_CODE_LENS,
+                intent,
+                IntentUtils.DEFAULT_PENDING_INTENT_FLAGS or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+        }
+
+    @VisibleForTesting
+    internal fun createRemoteViews(
         context: Context,
         layout: Int,
         textSearchIntent: PendingIntent,
         voiceSearchIntent: PendingIntent?,
+        lensSearchIntent: PendingIntent?,
         text: String?,
     ): RemoteViews {
         return RemoteViews(context.packageName, layout).apply {
@@ -157,12 +158,19 @@ class SearchWidgetProvider : AppWidgetProvider() {
                     setOnClickPendingIntent(R.id.button_search_widget_new_tab, textSearchIntent)
                     setOnClickPendingIntent(R.id.button_search_widget_voice, voiceSearchIntent)
                     setOnClickPendingIntent(R.id.button_search_widget_new_tab_icon, textSearchIntent)
+                    setOnClickPendingIntent(R.id.button_search_widget_lens, lensSearchIntent)
                     setTextViewText(R.id.button_search_widget_new_tab, text)
                     // Unlike "small" widget, "medium" and "large" sizes do not have separate layouts
-                    // that exclude the microphone icon, which is why we must hide it accordingly here.
-                    if (voiceSearchIntent == null) {
-                        setViewVisibility(R.id.button_search_widget_voice, View.GONE)
-                    }
+                    // that exclude the microphone and lens icons, which is why we must hide them
+                    // accordingly here.
+                    setViewVisibility(
+                        R.id.button_search_widget_voice,
+                        if (voiceSearchIntent == null) View.GONE else View.VISIBLE,
+                    )
+                    setViewVisibility(
+                        R.id.button_search_widget_lens,
+                        if (lensSearchIntent == null) View.GONE else View.VISIBLE,
+                    )
                 }
             }
         }
@@ -195,6 +203,7 @@ class SearchWidgetProvider : AppWidgetProvider() {
         private const val DP_LARGE = 256
         private const val REQUEST_CODE_NEW_TAB = 0
         private const val REQUEST_CODE_VOICE = 1
+        private const val REQUEST_CODE_LENS = 2
 
         /**
          * Updates all instances of the search widget.
@@ -203,18 +212,31 @@ class SearchWidgetProvider : AppWidgetProvider() {
          * when the voice search setting is toggled.
          *
          * @param context The application context.
+         */
+        fun updateAllWidgets(context: Context) {
+            updateAllWidgets(context, AppWidgetManager.getInstance(context))
+        }
+
+        /**
+         * Updates all instances of the search widget.
+         *
+         * @param context The application context.
          * @param appWidgetManager An instance of [AppWidgetManager].
          */
         fun updateAllWidgets(context: Context, appWidgetManager: AppWidgetManager) {
-            val widgetIds = appWidgetManager.getAppWidgetIds(ComponentName(context, SearchWidgetProvider::class.java))
+            SearchBarWidget.refresh()
 
-            if (widgetIds.isNotEmpty()) {
-                context.sendBroadcast(
-                    Intent(context, SearchWidgetProvider::class.java).apply {
-                        action = AppWidgetManager.ACTION_APPWIDGET_UPDATE
-                        putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, widgetIds)
-                    }
-                )
+            SearchWidgets.providers.keys.forEach { provider ->
+                val widgetIds = appWidgetManager.getAppWidgetIds(ComponentName(context, provider))
+
+                if (widgetIds.isNotEmpty()) {
+                    context.sendBroadcast(
+                        Intent(context, provider).apply {
+                            action = AppWidgetManager.ACTION_APPWIDGET_UPDATE
+                            putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, widgetIds)
+                        }
+                    )
+                }
             }
         }
 

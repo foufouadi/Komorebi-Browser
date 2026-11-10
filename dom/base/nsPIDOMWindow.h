@@ -259,44 +259,6 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
    */
   void SetHasSMILTimeEventListeners() { mMayHaveSMILTimeEventListener = true; }
 
-  /**
-   * Call this to check whether some node (this window, its document,
-   * or content in that document) has a beforeinput event listener.
-   * Returing false may be wrong if some nodes have come from another document
-   * with `Document.adoptNode`.
-   */
-  bool HasBeforeInputEventListenersForTelemetry() const {
-    return mMayHaveBeforeInputEventListenerForTelemetry;
-  }
-
-  /**
-   * Call this to indicate that some node (this window, its document,
-   * or content in that document) has a beforeinput event listener.
-   */
-  void SetHasBeforeInputEventListenersForTelemetry() {
-    mMayHaveBeforeInputEventListenerForTelemetry = true;
-  }
-
-  /**
-   * Call this to check whether some node (The document, or content in the
-   * document) has been observed by web apps with a mutation observer.
-   * (i.e., `MutationObserver.observe()` called by chrome script and addon's
-   * script does not make this returns true).
-   * Returing false may be wrong if some nodes have come from another document
-   * with `Document.adoptNode`.
-   */
-  bool MutationObserverHasObservedNodeForTelemetry() const {
-    return mMutationObserverHasObservedNodeForTelemetry;
-  }
-
-  /**
-   * Call this to indicate that some node (The document, or content in the
-   * document) is observed by web apps with a mutation observer.
-   */
-  void SetMutationObserverHasObservedNodeForTelemetry() {
-    mMutationObserverHasObservedNodeForTelemetry = true;
-  }
-
   // Sets the event for window.event. Does NOT take ownership, so
   // the caller is responsible for clearing the event before the
   // event gets deallocated. Pass nullptr to set window.event to
@@ -405,7 +367,8 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
 
   // Fire any DOM notification events related to things that happened while
   // the window was frozen.
-  virtual nsresult FireDelayedDOMEvents(bool aIncludeSubWindows) = 0;
+  MOZ_CAN_RUN_SCRIPT virtual nsresult FireDelayedDOMEvents(
+      bool aIncludeSubWindows) = 0;
 
   /**
    * Get the docshell in this window.
@@ -590,8 +553,10 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
 
   virtual nsresult GetControllers(nsIControllers** aControllers) = 0;
 
-  MOZ_CAN_RUN_SCRIPT virtual nsresult GetInnerWidth(double* aWidth) = 0;
-  MOZ_CAN_RUN_SCRIPT virtual nsresult GetInnerHeight(double* aHeight) = 0;
+  MOZ_CAN_RUN_SCRIPT virtual nsresult GetInnerWidth(
+      mozilla::dom::CallerType aCallerType, double* aWidth) = 0;
+  MOZ_CAN_RUN_SCRIPT virtual nsresult GetInnerHeight(
+      mozilla::dom::CallerType aCallerType, double* aHeight) = 0;
 
   virtual already_AddRefed<nsDOMCSSDeclaration> GetComputedStyle(
       mozilla::dom::Element& aElt, const nsAString& aPseudoElt,
@@ -600,7 +565,7 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
   virtual bool GetFullScreen() = 0;
 
   virtual nsresult Focus(mozilla::dom::CallerType aCallerType) = 0;
-  virtual nsresult Close() = 0;
+  MOZ_CAN_RUN_SCRIPT virtual nsresult Close() = 0;
 
   mozilla::dom::DocGroup* GetDocGroup() const;
 
@@ -685,10 +650,6 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
   bool mMayHavePointerRawUpdateEventListener = false;
   bool mMayHaveTransitionEventListener = false;
   bool mMayHaveSMILTimeEventListener = false;
-  // Only used for telemetry probes.  This may be wrong if some nodes have
-  // come from another document with `Document.adoptNode`.
-  bool mMayHaveBeforeInputEventListenerForTelemetry = false;
-  bool mMutationObserverHasObservedNodeForTelemetry = false;
 
   // Our inner window's outer window.
   nsCOMPtr<nsPIDOMWindowOuter> mOuterWindow;
@@ -890,7 +851,8 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
 
   // Fire any DOM notification events related to things that happened while
   // the window was frozen.
-  virtual nsresult FireDelayedDOMEvents(bool aIncludeSubWindows) = 0;
+  MOZ_CAN_RUN_SCRIPT virtual nsresult FireDelayedDOMEvents(
+      bool aIncludeSubWindows) = 0;
 
   /**
    * Get the docshell in this window.
@@ -915,7 +877,7 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
    *
    * aDocument must not be null.
    */
-  virtual nsresult SetNewDocument(
+  MOZ_CAN_RUN_SCRIPT virtual nsresult SetNewDocument(
       Document* aDocument, nsISupports* aState, bool aForceReuseInnerWindow,
       mozilla::dom::WindowGlobalChild* aActor = nullptr) = 0;
 
@@ -945,15 +907,15 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
   virtual void LeaveModalState() = 0;
 
   virtual bool CanClose() = 0;
-  virtual void ForceClose() = 0;
+  MOZ_CAN_RUN_SCRIPT virtual void ForceClose() = 0;
 
   /**
    * Moves the top-level window into fullscreen mode if aIsFullScreen is true,
    * otherwise exits fullscreen.
    */
-  virtual nsresult SetFullscreenInternal(FullscreenReason aReason,
-                                         bool aIsFullscreen) = 0;
-  virtual void FullscreenWillChange(bool aIsFullscreen) = 0;
+  MOZ_CAN_RUN_SCRIPT virtual nsresult SetFullscreenInternal(
+      FullscreenReason aReason, bool aIsFullscreen) = 0;
+  MOZ_CAN_RUN_SCRIPT virtual void FullscreenWillChange(bool aIsFullscreen) = 0;
   /**
    * This function should be called when the fullscreen state is flipped.
    * If no widget is involved the fullscreen change, this method is called
@@ -962,9 +924,8 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
    *
    * @param aIsFullscreen indicates whether the widget is in fullscreen.
    */
-  virtual void FinishFullscreenChange(bool aIsFullscreen) = 0;
-
-  virtual void ForceFullScreenInWidget() = 0;
+  MOZ_CAN_RUN_SCRIPT virtual void FinishFullscreenChange(
+      bool aIsFullscreen) = 0;
 
   virtual void MacFullscreenMenubarOverlapChanged(
       mozilla::DesktopCoord aOverlapAmount) = 0;
@@ -1036,7 +997,7 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
    *
    * Outer windows only.
    */
-  virtual bool DispatchCustomEvent(
+  MOZ_CAN_RUN_SCRIPT virtual bool DispatchCustomEvent(
       const nsAString& aEventName,
       mozilla::ChromeOnlyDispatch aChromeOnlyDispatch =
           mozilla::ChromeOnlyDispatch::eNo) = 0;
@@ -1046,6 +1007,7 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
    *
    * Outer windows only.
    */
+  MOZ_CAN_RUN_SCRIPT
   virtual nsresult OpenNoNavigate(const nsACString& aUrl,
                                   const nsAString& aName,
                                   const nsAString& aOptions,
@@ -1084,25 +1046,24 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
   // aLoadState will be passed on through to the windowwatcher.
   // aForceNoOpener will act just like a "noopener" feature in aOptions except
   //                will not affect any other window features.
+  MOZ_CAN_RUN_SCRIPT
   virtual nsresult Open(const nsACString& aUrl, const nsAString& aName,
                         const nsAString& aOptions,
                         nsDocShellLoadState* aLoadState, bool aForceNoOpener,
                         mozilla::dom::BrowsingContext** _retval) = 0;
+  MOZ_CAN_RUN_SCRIPT
   virtual nsresult OpenDialog(const nsACString& aUrl, const nsAString& aName,
                               const nsAString& aOptions, nsIArray* aArguments,
                               mozilla::dom::BrowsingContext** _retval) = 0;
-
-  MOZ_CAN_RUN_SCRIPT virtual nsresult GetInnerWidth(double* aWidth) = 0;
-  MOZ_CAN_RUN_SCRIPT virtual nsresult GetInnerHeight(double* aHeight) = 0;
 
   virtual mozilla::dom::Element* GetFrameElement() = 0;
 
   virtual bool Closed() = 0;
   virtual bool GetFullScreen() = 0;
-  virtual nsresult SetFullScreen(bool aFullscreen) = 0;
+  MOZ_CAN_RUN_SCRIPT virtual nsresult SetFullScreen(bool aFullscreen) = 0;
 
   virtual nsresult Focus(mozilla::dom::CallerType aCallerType) = 0;
-  virtual nsresult Close() = 0;
+  MOZ_CAN_RUN_SCRIPT virtual nsresult Close() = 0;
 
   virtual nsresult MoveBy(int32_t aXDif, int32_t aYDif) = 0;
 

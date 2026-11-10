@@ -13,12 +13,10 @@ kind-dependencies:
     - toolchain
 
 task-defaults:
-    run-on-repo-type: [hg]
     worker-type: b-linux
     fetches:
         toolchain:
             - linux64-node
-            - newtab-node-modules
     optimization:
         skip-unless-expanded: null
 
@@ -53,7 +51,6 @@ tasks:
                 MOZ_BROWSER_NEWTAB_LOCALES_ALL: "1"
             max-run-time: 1800
         run:
-            clone-with: hg
             using: mach
             mach: build
         run-on-projects: ['mozilla-central']

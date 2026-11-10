@@ -124,8 +124,6 @@ export default [
       "browser/components/tabbrowser/content/browser-allTabsMenu.js",
       "browser/components/tabbrowser/content/browser-ctrlTab.js",
       "browser/components/tabbrowser/content/browser-fullZoom.js",
-      "browser/components/tabbrowser/content/tabbrowser.js",
-      "browser/components/tabbrowser/content/tabs.js",
       "browser/components/translations/content/fullPageTranslationsPanel.js",
       "browser/components/translations/content/selectTranslationsPanel.js",
       "testing/mochitest/browser-test.js",
@@ -301,7 +299,7 @@ export default [
   {
     name: "globals-frame-script",
     files: [
-      "browser/base/content/test/performance/browser_startup_content.js",
+      "browser/base/content/test/browser-performance/browser_startup_content.js",
       "devtools/server/startup/frame.js",
       "docshell/test/browser/file_bug1328501_framescript.js",
       "dom/indexedDB/test/test_message_manager_ipc.html",
@@ -450,6 +448,7 @@ export default [
       "testing/raptor/browsertime/indexeddb_open.js",
       "testing/raptor/browsertime/indexeddb_write.js",
       "testing/raptor/browsertime/jetstream3.js",
+      "testing/raptor/browsertime/media_playback.js",
       "testing/raptor/browsertime/media_seek.js",
       "testing/raptor/browsertime/motionmark-1-3.js",
       "testing/raptor/browsertime/network_bench.js",
@@ -470,7 +469,6 @@ export default [
       "testing/web-platform/tests/webrtc/third_party/sdp/sdp.js",
       "testing/xpcshell/moz-http2/moz-http2-child.js",
       "testing/xpcshell/moz-http2/moz-http2.js",
-      "toolkit/components/normandy/actions/schemas/export_json.js",
       "toolkit/themes/shared/design-system/config/*.js",
       "toolkit/themes/shared/design-system/tests/try-runner.js",
       "tools/lint/stylelint/stylelint-plugin-mozilla/helpers.mjs",

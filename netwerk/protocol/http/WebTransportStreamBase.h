@@ -45,9 +45,7 @@ class StreamId {
 
   constexpr uint64_t Index() const { return mId >> 2; }
 
-  constexpr bool operator==(const StreamId& aRhs) const {
-    return mId == aRhs.mId;
-  }
+  constexpr bool operator==(const StreamId& aRhs) const = default;
 
   static constexpr StreamId From(uint64_t aVal) { return StreamId(aVal); }
 
@@ -77,7 +75,7 @@ class WebTransportStreamBase : public nsIInputStreamCallback,
 
   virtual StreamId WebTransportStreamId() const = 0;
   virtual uint64_t GetStreamId() const = 0;
-  virtual void SendStopSending(uint8_t aErrorCode) = 0;
+  virtual void SendStopSending(uint64_t aErrorCode) = 0;
   virtual void SendFin() = 0;
   virtual void Reset(uint64_t aErrorCode) = 0;
   virtual already_AddRefed<nsIWebTransportSendStreamStats>

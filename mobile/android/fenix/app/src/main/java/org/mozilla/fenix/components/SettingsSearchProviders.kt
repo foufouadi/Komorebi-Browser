@@ -9,6 +9,7 @@ import org.mozilla.fenix.settings.ai.AIControlsSearchProvider
 import org.mozilla.fenix.settings.datachoices.DataChoicesSearchProvider
 import org.mozilla.fenix.settings.labs.FirefoxLabsSettingsSearchProvider
 import org.mozilla.fenix.settings.pagesummaries.PageSummariesSettingsSearchProvider
+import org.mozilla.fenix.settings.search.GoogleLensSettingsSearchProvider
 import org.mozilla.fenix.settings.settingssearch.SettingsSearchProvider
 import org.mozilla.fenix.summarization.onboarding.SummarizationFeatureDiscoveryConfiguration
 
@@ -23,16 +24,15 @@ import org.mozilla.fenix.summarization.onboarding.SummarizationFeatureDiscoveryC
  * silently disappearing from settings search.
  *
  * @param summarizationFeatureConfiguration Gates whether the Page Summaries screen is indexed.
- * @param isFirefoxLabsEnabled Returns whether Firefox Labs is currently enabled.
  */
 internal fun settingsSearchProviders(
-    summarizationFeatureConfiguration: SummarizationFeatureDiscoveryConfiguration,
-    isFirefoxLabsEnabled: () -> Boolean,
+    summarizationFeatureConfiguration: SummarizationFeatureDiscoveryConfiguration
 ): List<SettingsSearchProvider> =
     listOf(
         DataChoicesSearchProvider,
         AIControlsSearchProvider,
         PageSummariesSettingsSearchProvider(summarizationFeatureConfiguration),
-        FirefoxLabsSettingsSearchProvider(isFirefoxLabsEnabled),
+        FirefoxLabsSettingsSearchProvider(),
         ToolbarShortcutSettingsSearchProvider,
+        GoogleLensSettingsSearchProvider,
     )

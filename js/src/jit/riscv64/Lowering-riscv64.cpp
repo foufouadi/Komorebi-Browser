@@ -175,7 +175,7 @@ void LIRGeneratorRiscv64::lowerDivI(MDiv* div) {
     // Check for division by a power of two, which is an easy and important case
     // to optimize.
     if (std::has_single_bit(mozilla::Abs(rhs))) {
-      int32_t shift = mozilla::FloorLog2(mozilla::Abs(rhs));
+      int32_t shift = std::countr_zero(mozilla::Abs(rhs));
       auto lhs = useRegisterAtStart(div->lhs());
       auto* lir = new (alloc()) LDivPowTwoI(lhs, shift, rhs < 0);
       if (div->fallible()) {
@@ -219,7 +219,7 @@ void LIRGeneratorRiscv64::lowerDivI64(MDiv* div) {
     int64_t rhs = div->rhs()->toConstant()->toInt64();
 
     if (std::has_single_bit(mozilla::Abs(rhs))) {
-      int32_t shift = mozilla::FloorLog2(mozilla::Abs(rhs));
+      int32_t shift = std::countr_zero(mozilla::Abs(rhs));
       auto lhs = useRegisterAtStart(div->lhs());
       auto* lir = new (alloc()) LDivPowTwoI64(lhs, shift, rhs < 0);
       define(lir, div);
@@ -242,7 +242,7 @@ void LIRGeneratorRiscv64::lowerModI(MMod* mod) {
     int32_t rhs = mod->rhs()->toConstant()->toInt32();
 
     if (std::has_single_bit(mozilla::Abs(rhs))) {
-      int32_t shift = mozilla::FloorLog2(mozilla::Abs(rhs));
+      int32_t shift = std::countr_zero(mozilla::Abs(rhs));
       auto lhs = useRegisterAtStart(mod->lhs());
       auto* lir = new (alloc()) LModPowTwoI(lhs, shift);
       if (mod->fallible()) {
@@ -282,7 +282,7 @@ void LIRGeneratorRiscv64::lowerModI64(MMod* mod) {
     int64_t rhs = mod->rhs()->toConstant()->toInt64();
 
     if (std::has_single_bit(mozilla::Abs(rhs))) {
-      int32_t shift = mozilla::FloorLog2(mozilla::Abs(rhs));
+      int32_t shift = std::countr_zero(mozilla::Abs(rhs));
       auto lhs = useRegisterAtStart(mod->lhs());
       auto* lir = new (alloc()) LModPowTwoI64(lhs, shift);
       define(lir, mod);
@@ -306,7 +306,7 @@ void LIRGeneratorRiscv64::lowerUDiv(MDiv* div) {
     uint32_t rhs = div->rhs()->toConstant()->toInt32();
 
     if (std::has_single_bit(rhs)) {
-      int32_t shift = mozilla::FloorLog2(rhs);
+      int32_t shift = std::countr_zero(rhs);
       auto lhs = useRegisterAtStart(div->lhs());
       auto* lir = new (alloc()) LDivPowTwoI(lhs, shift, false);
       if (div->fallible()) {
@@ -347,7 +347,7 @@ void LIRGeneratorRiscv64::lowerUDivI64(MDiv* div) {
     uint64_t rhs = div->rhs()->toConstant()->toInt64();
 
     if (std::has_single_bit(rhs)) {
-      int32_t shift = mozilla::FloorLog2(rhs);
+      int32_t shift = std::countr_zero(rhs);
       auto lhs = useRegisterAtStart(div->lhs());
       auto* lir = new (alloc()) LDivPowTwoI64(lhs, shift, false);
       define(lir, div);
@@ -371,7 +371,7 @@ void LIRGeneratorRiscv64::lowerUMod(MMod* mod) {
     uint32_t rhs = mod->rhs()->toConstant()->toInt32();
 
     if (std::has_single_bit(rhs)) {
-      int32_t shift = mozilla::FloorLog2(rhs);
+      int32_t shift = std::countr_zero(rhs);
       auto lhs = useRegisterAtStart(mod->lhs());
       auto* lir = new (alloc()) LModPowTwoI(lhs, shift);
       if (mod->fallible()) {
@@ -404,7 +404,7 @@ void LIRGeneratorRiscv64::lowerUModI64(MMod* mod) {
     uint64_t rhs = mod->rhs()->toConstant()->toInt64();
 
     if (std::has_single_bit(rhs)) {
-      int32_t shift = mozilla::FloorLog2(rhs);
+      int32_t shift = std::countr_zero(rhs);
       auto lhs = useRegisterAtStart(mod->lhs());
       auto* lir = new (alloc()) LModPowTwoI64(lhs, shift);
       define(lir, mod);
@@ -597,6 +597,12 @@ void LIRGeneratorRiscv64::lowerAtomicStore64(MStoreUnboxedScalar* ins) {
   add(new (alloc()) LAtomicStore64(elements, index, value), ins);
 }
 
+// A constant zero is stored from zero.
+bool LIRGeneratorRiscv64::canStoreConstantWithoutRegister(MDefinition* value) {
+  return value->isConstant() &&
+         (value->toConstant()->isInt32(0) || value->toConstant()->isInt64(0));
+}
+
 void LIRGenerator::visitBox(MBox* ins) {
   MDefinition* opd = ins->getOperand(0);
 
@@ -706,17 +712,9 @@ void LIRGenerator::visitCompareExchangeTypedArrayElement(
   LAllocation oldval = useRegister(ins->oldval());
   LAllocation newval = useRegister(ins->newval());
 
-  // If the target is a floating register then we need a temp at the
-  // CodeGenerator level for creating the result.
-
-  LDefinition outTemp = LDefinition::BogusTemp();
   LDefinition valueTemp = LDefinition::BogusTemp();
   LDefinition offsetTemp = LDefinition::BogusTemp();
   LDefinition maskTemp = LDefinition::BogusTemp();
-
-  if (ins->arrayType() == Scalar::Uint32 && IsFloatingPointType(ins->type())) {
-    outTemp = temp();
-  }
 
   if (Scalar::byteSize(ins->arrayType()) < 4) {
     valueTemp = temp();
@@ -725,8 +723,7 @@ void LIRGenerator::visitCompareExchangeTypedArrayElement(
   }
 
   auto* lir = new (alloc()) LCompareExchangeTypedArrayElement(
-      elements, index, oldval, newval, outTemp, valueTemp, offsetTemp,
-      maskTemp);
+      elements, index, oldval, newval, valueTemp, offsetTemp, maskTemp);
   define(lir, ins);
 }
 
@@ -752,17 +749,9 @@ void LIRGenerator::visitAtomicExchangeTypedArrayElement(
 
   LAllocation value = useRegisterAtStart(ins->value());
 
-  LDefinition outTemp = LDefinition::BogusTemp();
   LDefinition valueTemp = LDefinition::BogusTemp();
   LDefinition offsetTemp = LDefinition::BogusTemp();
   LDefinition maskTemp = LDefinition::BogusTemp();
-
-  // If the target is a floating register then we need a temp at the
-  // CodeGenerator level for creating the result.
-  if (ins->arrayType() == Scalar::Uint32) {
-    MOZ_ASSERT(ins->type() == MIRType::Double);
-    outTemp = temp();
-  }
 
   if (Scalar::byteSize(ins->arrayType()) < 4) {
     valueTemp = temp();
@@ -771,7 +760,7 @@ void LIRGenerator::visitAtomicExchangeTypedArrayElement(
   }
 
   auto* lir = new (alloc()) LAtomicExchangeTypedArrayElement(
-      elements, index, value, outTemp, valueTemp, offsetTemp, maskTemp);
+      elements, index, value, valueTemp, offsetTemp, maskTemp);
   define(lir, ins);
 }
 
@@ -825,15 +814,8 @@ void LIRGenerator::visitAtomicTypedArrayElementBinop(
     return;
   }
 
-  // For a Uint32Array with a known double result we need a temp for
-  // the intermediate output.
-  LDefinition outTemp = LDefinition::BogusTemp();
-  if (ins->arrayType() == Scalar::Uint32 && IsFloatingPointType(ins->type())) {
-    outTemp = temp();
-  }
-
   auto* lir = new (alloc()) LAtomicTypedArrayElementBinop(
-      elements, index, value, outTemp, valueTemp, offsetTemp, maskTemp);
+      elements, index, value, valueTemp, offsetTemp, maskTemp);
   define(lir, ins);
 }
 
@@ -891,20 +873,6 @@ void LIRGenerator::visitWasmTruncateToInt64(MWasmTruncateToInt64* ins) {
   MOZ_ASSERT(opd->type() == MIRType::Double || opd->type() == MIRType::Float32);
 
   defineInt64(new (alloc()) LWasmTruncateToInt64(useRegister(opd)), ins);
-}
-
-void LIRGenerator::visitWasmUnsignedToDouble(MWasmUnsignedToDouble* ins) {
-  MOZ_ASSERT(ins->input()->type() == MIRType::Int32);
-  LWasmUint32ToDouble* lir =
-      new (alloc()) LWasmUint32ToDouble(useRegisterAtStart(ins->input()));
-  define(lir, ins);
-}
-
-void LIRGenerator::visitWasmUnsignedToFloat32(MWasmUnsignedToFloat32* ins) {
-  MOZ_ASSERT(ins->input()->type() == MIRType::Int32);
-  LWasmUint32ToFloat32* lir =
-      new (alloc()) LWasmUint32ToFloat32(useRegisterAtStart(ins->input()));
-  define(lir, ins);
 }
 
 void LIRGenerator::visitWasmCompareExchangeHeap(MWasmCompareExchangeHeap* ins) {
@@ -1028,7 +996,7 @@ void LIRGenerator::visitWasmBinarySimd128(MWasmBinarySimd128* ins) {
   MOZ_CRASH("binary SIMD NYI");
 }
 
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
 bool MWasmTernarySimd128::specializeBitselectConstantMaskAsShuffle(
     int8_t shuffle[16]) {
   return false;
@@ -1055,6 +1023,10 @@ void LIRGenerator::visitWasmShuffleSimd128(MWasmShuffleSimd128* ins) {
 
 void LIRGenerator::visitWasmReplaceLaneSimd128(MWasmReplaceLaneSimd128* ins) {
   MOZ_CRASH("replace-lane SIMD NYI");
+}
+
+void LIRGenerator::visitWasmMoveLaneSimd128(MWasmMoveLaneSimd128* ins) {
+  MOZ_CRASH("move-lane SIMD NYI");
 }
 
 void LIRGenerator::visitWasmScalarToSimd128(MWasmScalarToSimd128* ins) {

@@ -54,6 +54,10 @@ async function showCustomizePanel(win) {
 }
 
 add_task(async function test_customize_sidebar_actions() {
+  // This task asserts on the launcher's tool buttons, so make sure the launcher
+  // is showing. Opening a panel doesn't reveal it, and in practice the user
+  // reaches this panel from the launcher's settings button.
+  await SidebarTestUtils.ensureLauncherVisible(window);
   const customizeComponent = await showCustomizePanel(window);
   const sidebar = document.querySelector("sidebar-main");
   let toolEntrypointsCount = sidebar.toolButtons.length;
@@ -475,4 +479,65 @@ add_task(async function test_settings_synchronized_across_windows() {
 
   SidebarController.hide();
   await BrowserTestUtils.closeWindow(newWindow);
+});
+
+add_task(async function test_open_tabs_hover_preview_setting() {
+  // The preceding task leaves vertical tabs on and the sidebar moved, which
+  // shifts the Tools list down the panel. Start from a known layout so the
+  // synthesized clicks land on the checkbox.
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      ["sidebar.openTabsPanel.enabled", true],
+      [VERTICAL_TABS_PREF, false],
+      [SIDEBAR_VISIBILITY_PREF, "always-show"],
+      [POSITION_SETTING_PREF, true],
+    ],
+  });
+  await SidebarController.waitUntilStable();
+
+  const panel = await showCustomizePanel(window);
+  const { contentWindow } = SidebarController.browser;
+  await BrowserTestUtils.waitForMutationCondition(
+    panel.shadowRoot,
+    { subtree: true, childList: true },
+    () => panel.hoverPreviewInput
+  );
+  ok(
+    panel.hoverPreviewInput.checked,
+    "The hover preview setting is on by default."
+  );
+
+  panel.hoverPreviewInput.scrollIntoView({ block: "center" });
+  EventUtils.synthesizeMouseAtCenter(
+    panel.hoverPreviewInput,
+    {},
+    contentWindow
+  );
+  await TestUtils.waitForCondition(
+    () => !Services.prefs.getBoolPref(HOVER_PREVIEW_PREF),
+    "Waiting for the hover preview to be turned off."
+  );
+  ok(
+    !Services.prefs.getBoolPref(HOVER_PREVIEW_PREF),
+    "Unchecking the setting turns the hover preview off."
+  );
+
+  panel.hoverPreviewInput.scrollIntoView({ block: "center" });
+  EventUtils.synthesizeMouseAtCenter(
+    panel.hoverPreviewInput,
+    {},
+    contentWindow
+  );
+  await TestUtils.waitForCondition(
+    () => Services.prefs.getBoolPref(HOVER_PREVIEW_PREF),
+    "Waiting for the hover preview to be turned back on."
+  );
+  ok(
+    Services.prefs.getBoolPref(HOVER_PREVIEW_PREF),
+    "Checking it again turns the hover preview back on."
+  );
+
+  SidebarController.hide();
+  Services.prefs.clearUserPref(HOVER_PREVIEW_PREF);
+  await SpecialPowers.popPrefEnv();
 });

@@ -350,23 +350,20 @@ async function test_strict_native_fallback() {
     `${inStatus} should be an error code`
   );
 
-  if (!mozinfo.socketprocess_networking) {
-    // Confirmation state isn't passed cross-process.
-    info("Now with confirmation failed - should fallback");
-    Services.dns.clearCache(true);
-    setModeAndURI(2, "doh?responseIP=2.2.2.2&corruptedAnswer=true");
-    Services.prefs.setCharPref("network.trr.confirmationNS", "example.com");
-    await TestUtils.waitForCondition(
-      // 3 => CONFIRM_FAILED, 4 => CONFIRM_TRYING_FAILED
-      () =>
-        Services.dns.currentTrrConfirmationState == 3 ||
-        Services.dns.currentTrrConfirmationState == 4,
-      `Timed out waiting for confirmation failure. Currently ${Services.dns.currentTrrConfirmationState}`,
-      1,
-      5000
-    );
-    await new TRRDNSListener("bar.example.com", "127.0.0.1"); // Should fallback
-  }
+  info("Now with confirmation failed - should fallback");
+  Services.dns.clearCache(true);
+  setModeAndURI(2, "doh?responseIP=2.2.2.2&corruptedAnswer=true");
+  Services.prefs.setCharPref("network.trr.confirmationNS", "example.com");
+  await TestUtils.waitForCondition(
+    // 3 => CONFIRM_FAILED, 4 => CONFIRM_TRYING_FAILED
+    () =>
+      Services.dns.currentTrrConfirmationState == 3 ||
+      Services.dns.currentTrrConfirmationState == 4,
+    `Timed out waiting for confirmation failure. Currently ${Services.dns.currentTrrConfirmationState}`,
+    1,
+    5000
+  );
+  await new TRRDNSListener("bar.example.com", "127.0.0.1"); // Should fallback
 
   info("Now a successful case.");
   // Cancel connections to let TRR recover after the connection/decode error cases
@@ -375,17 +372,15 @@ async function test_strict_native_fallback() {
   await new Promise(resolve => do_timeout(500, resolve));
   Services.dns.clearCache(true);
   setModeAndURI(2, "doh?responseIP=2.2.2.2");
-  if (!mozinfo.socketprocess_networking) {
-    // Only need to reset confirmation state if we messed with it before.
-    Services.prefs.setCharPref("network.trr.confirmationNS", "skip");
-    await TestUtils.waitForCondition(
-      // 5 => CONFIRM_DISABLED
-      () => Services.dns.currentTrrConfirmationState == 5,
-      `Timed out waiting for confirmation disabled. Currently ${Services.dns.currentTrrConfirmationState}`,
-      1,
-      5000
-    );
-  }
+  // Reset the confirmation state that the confirmation failure case changed.
+  Services.prefs.setCharPref("network.trr.confirmationNS", "skip");
+  await TestUtils.waitForCondition(
+    // 5 => CONFIRM_DISABLED
+    () => Services.dns.currentTrrConfirmationState == 5,
+    `Timed out waiting for confirmation disabled. Currently ${Services.dns.currentTrrConfirmationState}`,
+    1,
+    5000
+  );
   await new TRRDNSListener("bar.example.com", "2.2.2.2");
 
   info("Now without strict fallback mode, timeout case");
@@ -819,8 +814,14 @@ async function test_builtin_excluded_domains_mode3() {
 
 async function count_cookies() {
   info("Check that none of the requests have set any cookies.");
-  Assert.equal(Services.cookies.countCookiesFromHost("example.com"), 0);
-  Assert.equal(Services.cookies.countCookiesFromHost("foo.example.com."), 0);
+  Assert.equal(
+    Services.cookies.getCookiesFromHost("example.com", {}).length,
+    0
+  );
+  Assert.equal(
+    Services.cookies.getCookiesFromHost("foo.example.com.", {}).length,
+    0
+  );
 }
 
 async function test_connection_closed() {

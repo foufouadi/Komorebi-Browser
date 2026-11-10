@@ -5,14 +5,21 @@
 import {
   WIDGET_REGISTRY,
   getWidgetOrder,
+  getWidgets,
+  isWeatherAvailable,
   isWidgetAddable,
   isWidgetEnabled,
   isWidgetToggleVisible,
   isWidgetsContainerVisible,
   resolveWidgetSize,
+  resolveWidgetDisplaySize,
+  getChosenOption,
   resolveWidgetOrder,
   resolveWidgetHasSidebar,
-  resolveCrosswordEndpoint,
+  resolveSidebarWidget,
+  hasContentAreaWidgets,
+  isAllowedFrameUrl,
+  resolveWidgetFrame,
   resolvePrivacyBlankChance,
   resolvePrivacyMaxCount,
   resolvePrivacyDisplayCount,
@@ -40,6 +47,7 @@ describe("isWidgetToggleVisible", () => {
   it("is true via trainhopConfig.widgets (addable)", () => {
     expect(
       isWidgetToggleVisible(listsWidget, {
+        region: "US",
         trainhopConfig: { widgets: { listsEnabled: true } },
       })
     ).toBe(true);
@@ -48,7 +56,16 @@ describe("isWidgetToggleVisible", () => {
   it("is true via the widgetsSettings.*Visible override", () => {
     expect(
       isWidgetToggleVisible(listsWidget, {
+        region: "US",
         trainhopConfig: { widgetsSettings: { listsVisible: true } },
+      })
+    ).toBe(true);
+  });
+
+  it("is true via the legacy widgetsConfig override", () => {
+    expect(
+      isWidgetToggleVisible(listsWidget, {
+        widgetsConfig: { listsEnabled: true },
       })
     ).toBe(true);
   });
@@ -63,24 +80,162 @@ describe("isWidgetToggleVisible", () => {
   });
 });
 
-// Bug 2063657: the sports widget is retired; removed in bug 2063656.
-describe("retired sports widget", () => {
-  const sportsWidget = WIDGET_REGISTRY.find(w => w.id === "sportsWidget");
+// Bug 2063207: the privacy widget's readout needs history, so it is hidden
+// outright on profiles that record none.
+describe("privacy widget on a profile with no history", () => {
+  const privacy = WIDGET_REGISTRY.find(w => w.id === "privacy");
   const everythingOn = {
     "widgets.enabled": true,
-    "widgets.sportsWidget.enabled": true,
-    "widgets.system.sportsWidget.enabled": true,
-    widgetsConfig: { sportsWidgetEnabled: true },
+    "widgets.privacy.enabled": true,
+    "widgets.system.privacy.enabled": true,
+    region: "US",
+    widgetsConfig: { privacyEnabled: true },
     trainhopConfig: {
-      widgets: { sportsWidgetEnabled: true },
-      widgetsSettings: { sportsWidgetVisible: true },
+      widgetPrivacy: { visible: true },
+      widgets: { privacyEnabled: true },
+      widgetsSettings: { privacyVisible: true },
     },
   };
 
-  it("is never addable, visible or enabled, whatever the prefs say", () => {
-    expect(isWidgetAddable(sportsWidget, everythingOn)).toBe(false);
-    expect(isWidgetToggleVisible(sportsWidget, everythingOn)).toBe(false);
-    expect(isWidgetEnabled(sportsWidget, everythingOn, true)).toBe(false);
+  it("is not addable, visible or enabled when history is off", () => {
+    const prefs = { ...everythingOn, recordsHistory: false };
+    expect(isWidgetAddable(privacy, prefs)).toBe(false);
+    expect(isWidgetToggleVisible(privacy, prefs)).toBe(false);
+    expect(isWidgetEnabled(privacy, prefs, true)).toBe(false);
+  });
+
+  it("is unaffected when history is on", () => {
+    const prefs = { ...everythingOn, recordsHistory: true };
+    expect(isWidgetAddable(privacy, prefs)).toBe(true);
+    expect(isWidgetToggleVisible(privacy, prefs)).toBe(true);
+    expect(isWidgetEnabled(privacy, prefs, true)).toBe(true);
+  });
+
+  it("stays available when the value is missing entirely", () => {
+    // A missing broadcast must not hide a working widget.
+    expect(isWidgetAddable(privacy, everythingOn)).toBe(true);
+  });
+
+  it("leaves widgets that do not need history alone", () => {
+    expect(
+      isWidgetAddable(listsWidget, {
+        "widgets.system.lists.enabled": true,
+        recordsHistory: false,
+      })
+    ).toBe(true);
+  });
+});
+
+describe("widgets on a profile with no resolved region", () => {
+  const trainhopReveal = {
+    [listsWidget.enabledPref]: true,
+    trainhopConfig: { widgets: { [listsWidget.trainhopEnabledKey]: true } },
+  };
+
+  it("ignores a trainhopConfig.widgets reveal", () => {
+    expect(isWidgetAddable(listsWidget, trainhopReveal)).toBe(false);
+    expect(isWidgetToggleVisible(listsWidget, trainhopReveal)).toBe(false);
+    expect(isWidgetEnabled(listsWidget, trainhopReveal, true)).toBe(false);
+  });
+
+  it("ignores a widgetsSettings.*Visible reveal", () => {
+    const prefs = {
+      [listsWidget.enabledPref]: true,
+      trainhopConfig: {
+        widgetsSettings: { [listsWidget.widgetsSettingsVisibleKey]: true },
+      },
+    };
+    expect(isWidgetAddable(listsWidget, prefs)).toBe(false);
+    expect(isWidgetToggleVisible(listsWidget, prefs)).toBe(false);
+    expect(isWidgetEnabled(listsWidget, prefs, true)).toBe(false);
+  });
+
+  it("ignores a dedicated trainhopNamespace reveal", () => {
+    const potd = WIDGET_REGISTRY.find(w => w.id === "pictureOfTheDay");
+    const prefs = {
+      [potd.enabledPref]: true,
+      trainhopConfig: { [potd.trainhopNamespace]: { visible: true } },
+    };
+    expect(isWidgetAddable(potd, prefs)).toBe(false);
+    expect(isWidgetToggleVisible(potd, prefs)).toBe(false);
+    expect(isWidgetEnabled(potd, prefs, true)).toBe(false);
+  });
+
+  it("treats an empty or null region as unresolved", () => {
+    expect(
+      isWidgetAddable(listsWidget, { ...trainhopReveal, region: "" })
+    ).toBe(false);
+    expect(
+      isWidgetAddable(listsWidget, { ...trainhopReveal, region: null })
+    ).toBe(false);
+  });
+
+  it("acts on the reveal as soon as any region resolves", () => {
+    const prefs = { ...trainhopReveal, region: "FR" };
+    expect(isWidgetAddable(listsWidget, prefs)).toBe(true);
+    expect(isWidgetToggleVisible(listsWidget, prefs)).toBe(true);
+    expect(isWidgetEnabled(listsWidget, prefs, true)).toBe(true);
+  });
+
+  it("leaves the system pref ungated, so a build or operator reveal still works", () => {
+    const prefs = {
+      [listsWidget.enabledPref]: true,
+      [listsWidget.systemEnabledPref]: true,
+    };
+    expect(isWidgetAddable(listsWidget, prefs)).toBe(true);
+    expect(isWidgetToggleVisible(listsWidget, prefs)).toBe(true);
+    expect(isWidgetEnabled(listsWidget, prefs, true)).toBe(true);
+  });
+
+  it("withholds the reveal without hiding a system-enabled widget", () => {
+    const prefs = {
+      ...trainhopReveal,
+      [listsWidget.systemEnabledPref]: true,
+    };
+    expect(isWidgetAddable(listsWidget, prefs)).toBe(true);
+    expect(isWidgetToggleVisible(listsWidget, prefs)).toBe(true);
+    expect(isWidgetEnabled(listsWidget, prefs, true)).toBe(true);
+    expect(
+      isWidgetsContainerVisible({
+        "widgets.system.enabled": true,
+        trainhopConfig: { widgets: { enabled: true } },
+      })
+    ).toBe(true);
+  });
+
+  it("leaves the legacy widgetsConfig toggle ungated", () => {
+    const prefs = {
+      [listsWidget.enabledPref]: true,
+      widgetsConfig: { [listsWidget.trainhopEnabledKey]: true },
+    };
+    expect(isWidgetToggleVisible(listsWidget, prefs)).toBe(true);
+    expect(isWidgetAddable(listsWidget, prefs)).toBe(false);
+    expect(isWidgetEnabled(listsWidget, prefs, true)).toBe(false);
+  });
+
+  it("gates the container's trainhop terms but not its pref terms", () => {
+    expect(
+      isWidgetsContainerVisible({
+        trainhopConfig: { widgets: { enabled: true } },
+      })
+    ).toBe(false);
+    expect(
+      isWidgetsContainerVisible({
+        trainhopConfig: { widgetsSettings: { enabled: true } },
+      })
+    ).toBe(false);
+    expect(isWidgetsContainerVisible({ "widgets.system.enabled": true })).toBe(
+      true
+    );
+    expect(
+      isWidgetsContainerVisible({ widgetsConfig: { enabled: true } })
+    ).toBe(true);
+    expect(
+      isWidgetsContainerVisible({
+        region: "FR",
+        trainhopConfig: { widgets: { enabled: true } },
+      })
+    ).toBe(true);
   });
 });
 
@@ -98,6 +253,7 @@ describe("isWidgetsContainerVisible", () => {
   it("is true via trainhopConfig.widgets.enabled", () => {
     expect(
       isWidgetsContainerVisible({
+        region: "US",
         trainhopConfig: { widgets: { enabled: true } },
       })
     ).toBe(true);
@@ -106,6 +262,7 @@ describe("isWidgetsContainerVisible", () => {
   it("is true via widgetsSettings.enabled", () => {
     expect(
       isWidgetsContainerVisible({
+        region: "US",
         trainhopConfig: { widgetsSettings: { enabled: true } },
       })
     ).toBe(true);
@@ -124,19 +281,21 @@ describe("getWidgetOrder", () => {
 
   it("respects a fully-specified custom order", () => {
     expect(
-      getWidgetOrder(
-        "focusTimer,lists,weather,sportsWidget,clocks,privacy,crossword"
-      )
+      getWidgetOrder("focusTimer,lists,weather,clocks,privacy,crossword")
     ).toEqual([
       "focusTimer",
       "lists",
       "weather",
-      "sportsWidget",
       "clocks",
       "privacy",
       "crossword",
       "pictureOfTheDay",
       "stocks",
+      "recentSearches",
+      "horoscopes",
+      "travel",
+      "solitaire",
+      "wrexhamAFC",
     ]);
   });
 
@@ -144,13 +303,17 @@ describe("getWidgetOrder", () => {
     expect(getWidgetOrder("weather")).toEqual([
       "weather",
       "pictureOfTheDay",
-      "sportsWidget",
       "clocks",
       "lists",
       "focusTimer",
       "privacy",
       "crossword",
       "stocks",
+      "recentSearches",
+      "horoscopes",
+      "travel",
+      "solitaire",
+      "wrexhamAFC",
     ]);
   });
 
@@ -159,12 +322,16 @@ describe("getWidgetOrder", () => {
       "lists",
       "weather",
       "pictureOfTheDay",
-      "sportsWidget",
       "clocks",
       "focusTimer",
       "privacy",
       "crossword",
       "stocks",
+      "recentSearches",
+      "horoscopes",
+      "travel",
+      "solitaire",
+      "wrexhamAFC",
     ]);
   });
 
@@ -180,12 +347,16 @@ describe("getWidgetOrder", () => {
       "focusTimer",
       "lists",
       "pictureOfTheDay",
-      "sportsWidget",
       "clocks",
       "weather",
       "privacy",
       "crossword",
       "stocks",
+      "recentSearches",
+      "horoscopes",
+      "travel",
+      "solitaire",
+      "wrexhamAFC",
     ]);
     expect(result.length).toBe(registryIds.length);
   });
@@ -206,11 +377,15 @@ describe("resolveWidgetOrder", () => {
       "lists",
       "focusTimer",
       "pictureOfTheDay",
-      "sportsWidget",
       "clocks",
       "privacy",
       "crossword",
       "stocks",
+      "recentSearches",
+      "horoscopes",
+      "travel",
+      "solitaire",
+      "wrexhamAFC",
     ]);
   });
 
@@ -225,11 +400,15 @@ describe("resolveWidgetOrder", () => {
       "weather",
       "lists",
       "pictureOfTheDay",
-      "sportsWidget",
       "clocks",
       "privacy",
       "crossword",
       "stocks",
+      "recentSearches",
+      "horoscopes",
+      "travel",
+      "solitaire",
+      "wrexhamAFC",
     ]);
   });
 
@@ -244,11 +423,15 @@ describe("resolveWidgetOrder", () => {
       "focusTimer",
       "weather",
       "pictureOfTheDay",
-      "sportsWidget",
       "clocks",
       "privacy",
       "crossword",
       "stocks",
+      "recentSearches",
+      "horoscopes",
+      "travel",
+      "solitaire",
+      "wrexhamAFC",
     ]);
   });
 });
@@ -268,6 +451,7 @@ describe("isWidgetAddable", () => {
     expect(
       isWidgetAddable(listsWidget, {
         [listsWidget.systemEnabledPref]: false,
+        region: "US",
         trainhopConfig: {
           widgets: { [listsWidget.trainhopEnabledKey]: true },
         },
@@ -287,6 +471,7 @@ describe("isWidgetAddable", () => {
     expect(
       isWidgetAddable(listsWidget, {
         [listsWidget.systemEnabledPref]: false,
+        region: "US",
         trainhopConfig: { widgetsSettings: { listsVisible: true } },
       })
     ).toBe(true);
@@ -306,6 +491,7 @@ describe("isWidgetAddable", () => {
     expect(
       isWidgetAddable(potd, {
         [potd.systemEnabledPref]: false,
+        region: "US",
         trainhopConfig: { widgetPictureOfTheDay: { visible: true } },
       })
     ).toBe(true);
@@ -316,17 +502,123 @@ describe("isWidgetAddable", () => {
     expect(
       isWidgetAddable(crossword, {
         [crossword.systemEnabledPref]: false,
+        region: "US",
         trainhopConfig: { widgetCrossword: { visible: true } },
       })
     ).toBe(true);
   });
+
+  it.each([
+    ["widgets", { privacyEnabled: true }],
+    ["widgetsSettings", { privacyVisible: true }],
+  ])(
+    "makes privacy addable via %s despite its preffed-off default",
+    (type, payload) => {
+      const privacy = WIDGET_REGISTRY.find(w => w.id === "privacy");
+      const prefs = { [privacy.systemEnabledPref]: false, region: "US" };
+      expect(isWidgetAddable(privacy, prefs)).toBe(false);
+      expect(
+        isWidgetAddable(privacy, {
+          ...prefs,
+          trainhopConfig: { [type]: payload },
+        })
+      ).toBe(true);
+    }
+  );
 
   it("is addable when revealed via the dedicated widgetPrivacy namespace", () => {
     const privacy = WIDGET_REGISTRY.find(w => w.id === "privacy");
     expect(
       isWidgetAddable(privacy, {
         [privacy.systemEnabledPref]: false,
+        region: "US",
         trainhopConfig: { widgetPrivacy: { visible: true } },
+      })
+    ).toBe(true);
+  });
+
+  it.each([
+    ["widgets", { stocksEnabled: true }],
+    ["widgetsSettings", { stocksVisible: true }],
+  ])(
+    "makes stocks addable via %s despite its preffed-off default",
+    (type, payload) => {
+      const stocks = WIDGET_REGISTRY.find(w => w.id === "stocks");
+      const prefs = { [stocks.systemEnabledPref]: false, region: "US" };
+      expect(isWidgetAddable(stocks, prefs)).toBe(false);
+      expect(
+        isWidgetAddable(stocks, {
+          ...prefs,
+          trainhopConfig: { [type]: payload },
+        })
+      ).toBe(true);
+    }
+  );
+
+  it.each([
+    ["widgets", { recentSearchesEnabled: true }],
+    ["widgetsSettings", { recentSearchesVisible: true }],
+    ["widgetRecentSearches", { visible: true }],
+  ])(
+    "makes recent searches addable via %s despite its preffed-off default",
+    (type, payload) => {
+      const recentSearches = WIDGET_REGISTRY.find(
+        w => w.id === "recentSearches"
+      );
+      const prefs = {
+        [recentSearches.systemEnabledPref]: false,
+        region: "US",
+      };
+      expect(isWidgetAddable(recentSearches, prefs)).toBe(false);
+      expect(
+        isWidgetAddable(recentSearches, {
+          ...prefs,
+          trainhopConfig: { [type]: payload },
+        })
+      ).toBe(true);
+    }
+  );
+
+  it("is addable when revealed via the dedicated widgetRecentSearches namespace", () => {
+    const recentSearches = WIDGET_REGISTRY.find(w => w.id === "recentSearches");
+    expect(
+      isWidgetAddable(recentSearches, {
+        [recentSearches.systemEnabledPref]: false,
+        region: "US",
+        trainhopConfig: { widgetRecentSearches: { visible: true } },
+      })
+    ).toBe(true);
+  });
+
+  it("is addable when revealed via the dedicated widgetHoroscopes namespace", () => {
+    const horoscopes = WIDGET_REGISTRY.find(w => w.id === "horoscopes");
+    expect(
+      isWidgetAddable(horoscopes, {
+        [horoscopes.systemEnabledPref]: false,
+        region: "US",
+        trainhopConfig: { widgetHoroscopes: { visible: true } },
+      })
+    ).toBe(true);
+  });
+
+  it("is addable when revealed via the dedicated widgetTravel namespace", () => {
+    const travel = WIDGET_REGISTRY.find(w => w.id === "travel");
+    expect(
+      isWidgetAddable(travel, {
+        [travel.systemEnabledPref]: false,
+        region: "US",
+        trainhopConfig: { widgetTravel: { visible: true } },
+      })
+    ).toBe(true);
+  });
+
+  it("is addable when revealed via the dedicated widgetSolitaire namespace", () => {
+    const solitaire = WIDGET_REGISTRY.find(w => w.id === "solitaire");
+    expect(
+      isWidgetAddable(solitaire, {
+        [solitaire.systemEnabledPref]: false,
+        region: "US",
+        trainhopConfig: { widgetSolitaire: { visible: true } },
       })
     ).toBe(true);
   });
@@ -394,6 +686,7 @@ describe("isWidgetEnabled", () => {
         {
           [listsWidget.enabledPref]: true,
           [listsWidget.systemEnabledPref]: false,
+          region: "US",
           trainhopConfig: {
             widgets: { [listsWidget.trainhopEnabledKey]: true },
           },
@@ -401,6 +694,69 @@ describe("isWidgetEnabled", () => {
         true
       )
     ).toBe(true);
+  });
+});
+
+describe("getChosenOption and resolveWidgetDisplaySize", () => {
+  const VIEW = {
+    type: "choice",
+    id: "view",
+    l10nId: "tally-view",
+    pref: "widgets.tally.view",
+    options: [
+      { value: "day", l10nId: "tally-view-day" },
+      { value: "week", l10nId: "tally-view-week", size: "large" },
+    ],
+  };
+  const WIDGET = {
+    id: "tally",
+    card: "FramedWidgetCard",
+    sizePref: "widgets.tally.size",
+    defaultSize: "medium",
+    validSizes: ["medium", "large"],
+    menu: [VIEW],
+  };
+
+  it("chooses the option the pref holds, or the first while it holds none", () => {
+    expect(getChosenOption(VIEW, { "widgets.tally.view": "week" }).value).toBe(
+      "week"
+    );
+    expect(getChosenOption(VIEW, {}).value).toBe("day");
+    expect(getChosenOption(VIEW, { "widgets.tally.view": "month" }).value).toBe(
+      "day"
+    );
+  });
+
+  it("grows to the size a chosen option needs", () => {
+    expect(
+      resolveWidgetDisplaySize(WIDGET, { "widgets.tally.view": "week" }, true)
+    ).toBe("large");
+  });
+
+  it("keeps the widget's size for an option without one", () => {
+    expect(resolveWidgetDisplaySize(WIDGET, {}, true)).toBe("medium");
+  });
+
+  it("keeps the widget's size where the layout does not allow resizing", () => {
+    expect(
+      resolveWidgetDisplaySize(WIDGET, { "widgets.tally.view": "week" }, false)
+    ).toBe("medium");
+  });
+
+  it("keeps the size of a widget not drawn by FramedWidgetCard", () => {
+    expect(
+      resolveWidgetDisplaySize(
+        { ...WIDGET, card: undefined },
+        { "widgets.tally.view": "week" },
+        true
+      )
+    ).toBe("medium");
+  });
+
+  it("is the widget's size for a widget without a menu", () => {
+    expect(
+      resolveWidgetDisplaySize({ ...WIDGET, menu: undefined }, {}, true)
+    ).toBe("medium");
   });
 });
 
@@ -544,36 +900,269 @@ describe("resolveWidgetHasSidebar", () => {
   });
 });
 
-describe("resolveCrosswordEndpoint", () => {
-  const dedicatedEndpoint = "https://dedicated.example.com/index.html";
-  const sharedEndpoint = "https://shared.example.com/index.html";
-  const prefEndpoint = "https://pref.example.com/index.html";
+describe("resolveSidebarWidget", () => {
+  const weatherWidget = WIDGET_REGISTRY.find(w => w.id === "weather");
+  const privacyWidget = WIDGET_REGISTRY.find(w => w.id === "privacy");
 
-  it("prefers the dedicated widgetCrossword endpoint over the shared key and pref", () => {
+  const weatherSmall = {
+    "widgets.enabled": true,
+    [weatherWidget.enabledPref]: true,
+    [weatherWidget.systemEnabledPref]: true,
+    [weatherWidget.sizePref]: "small",
+  };
+  const privacySmall = {
+    "widgets.enabled": true,
+    [privacyWidget.enabledPref]: true,
+    [privacyWidget.systemEnabledPref]: true,
+    [privacyWidget.sizePref]: "small",
+    trainhopConfig: {
+      widgets: { [privacyWidget.trainhopSidebarKey]: true },
+    },
+  };
+
+  it("returns null when nothing qualifies", () => {
+    expect(resolveSidebarWidget({ "widgets.enabled": true })).toBeNull();
+  });
+
+  it("returns weather when it is enabled and small", () => {
+    expect(resolveSidebarWidget(weatherSmall)).toBe(weatherWidget);
+  });
+
+  it("honors an explicit widgetsEnabled argument over the pref", () => {
     expect(
-      resolveCrosswordEndpoint({
-        "widgets.crossword.endpoint": prefEndpoint,
+      resolveSidebarWidget({ ...weatherSmall, "widgets.enabled": false }, true)
+    ).toBe(weatherWidget);
+  });
+
+  it("returns null when the widget is not small", () => {
+    expect(
+      resolveSidebarWidget({
+        ...weatherSmall,
+        [weatherWidget.sizePref]: "medium",
+      })
+    ).toBeNull();
+  });
+
+  it("does not place privacy in the sidebar by default", () => {
+    expect(
+      resolveSidebarWidget({ ...privacySmall, trainhopConfig: {} })
+    ).toBeNull();
+  });
+
+  it("returns privacy when trainhop turns its sidebar placement on at small", () => {
+    expect(resolveSidebarWidget(privacySmall)).toBe(privacyWidget);
+  });
+
+  it("returns only the first qualifying widget in registry order", () => {
+    const both = { ...weatherSmall, ...privacySmall };
+    expect(resolveSidebarWidget(both)).toBe(weatherWidget);
+  });
+});
+
+describe("hasContentAreaWidgets", () => {
+  const weatherWidget = WIDGET_REGISTRY.find(w => w.id === "weather");
+  const privacyWidget = WIDGET_REGISTRY.find(w => w.id === "privacy");
+  const listsWidget = WIDGET_REGISTRY.find(w => w.id === "lists");
+
+  const weatherSmall = {
+    "widgets.enabled": true,
+    [weatherWidget.enabledPref]: true,
+    [weatherWidget.systemEnabledPref]: true,
+    [weatherWidget.sizePref]: "small",
+  };
+  const privacyEnabled = {
+    [privacyWidget.enabledPref]: true,
+    [privacyWidget.systemEnabledPref]: true,
+  };
+  const listsEnabled = {
+    [listsWidget.enabledPref]: true,
+    [listsWidget.systemEnabledPref]: true,
+  };
+
+  it("is false when no widget is enabled", () => {
+    expect(hasContentAreaWidgets({ "widgets.enabled": true })).toBe(false);
+  });
+
+  it("is false when the only enabled widget sits in the sidebar", () => {
+    expect(hasContentAreaWidgets(weatherSmall)).toBe(false);
+  });
+
+  it("is true when another widget is enabled beside the sidebar one", () => {
+    expect(hasContentAreaWidgets({ ...weatherSmall, ...listsEnabled })).toBe(
+      true
+    );
+  });
+
+  it("is false when privacy is the only widget and it sits in the sidebar", () => {
+    expect(
+      hasContentAreaWidgets({
+        "widgets.enabled": true,
+        ...privacyEnabled,
+        [privacyWidget.sizePref]: "small",
         trainhopConfig: {
-          widgetCrossword: { endpoint: dedicatedEndpoint },
-          widgets: { crosswordEndpoint: sharedEndpoint },
+          widgets: { [privacyWidget.trainhopSidebarKey]: true },
         },
       })
-    ).toBe(dedicatedEndpoint);
+    ).toBe(false);
   });
 
-  it("falls back to the shared widgets endpoint when no dedicated endpoint", () => {
+  it("uses the widgetsEnabled argument instead of the pref", () => {
     expect(
-      resolveCrosswordEndpoint({
-        "widgets.crossword.endpoint": prefEndpoint,
-        trainhopConfig: { widgets: { crosswordEndpoint: sharedEndpoint } },
+      hasContentAreaWidgets({ "widgets.enabled": false, ...listsEnabled }, true)
+    ).toBe(true);
+    expect(
+      hasContentAreaWidgets({ "widgets.enabled": true, ...listsEnabled }, false)
+    ).toBe(false);
+  });
+});
+
+const testWidget = {
+  id: "testWidget",
+  src: "https://static.example.com/widget.html",
+  trainhopNamespace: "widgetTest",
+};
+const framedWidget = {
+  id: "testFramed",
+  framed: true,
+  trainhopNamespace: "widgetTestFramed",
+};
+const frameUrl = "https://frame.example.mozgcp.net/index.html";
+const FRAME_HOST_PREFS = {
+  "widgets.framed.allowedHostSuffixes": ".mozgcp.net, .mozilla.com",
+};
+
+describe("resolveWidgetFrame", () => {
+  it("prefers the trainhop namespace iframeSrcOverride over the static src", () => {
+    const trainhopSrc = "https://trainhop.example.com/widget.html";
+    expect(
+      resolveWidgetFrame(testWidget, {
+        trainhopConfig: { widgetTest: { iframeSrcOverride: trainhopSrc } },
       })
-    ).toBe(sharedEndpoint);
+    ).toEqual({ src: trainhopSrc, state: "ok" });
   });
 
-  it("falls back to the raw pref when no trainhop override is present", () => {
+  it("uses the static src for a non-framed widget", () => {
+    expect(resolveWidgetFrame(testWidget, {}, {})).toEqual({
+      src: testWidget.src,
+      state: "ok",
+    });
+  });
+
+  it("loads the url of a manifest entry", () => {
     expect(
-      resolveCrosswordEndpoint({ "widgets.crossword.endpoint": prefEndpoint })
-    ).toBe(prefEndpoint);
+      resolveWidgetFrame(framedWidget, {}, { testFramed: { url: frameUrl } })
+    ).toEqual({ src: frameUrl, state: "ok" });
+  });
+
+  it("is hidden when the manifest has no entry", () => {
+    expect(resolveWidgetFrame(framedWidget, {}, {}).state).toBe("hidden");
+    expect(resolveWidgetFrame(framedWidget, {}, undefined).state).toBe(
+      "hidden"
+    );
+  });
+
+  it("ignores a framed widget's iframeSrcOverride that isAllowedFrameUrl rejects", () => {
+    expect(
+      resolveWidgetFrame(
+        framedWidget,
+        {
+          ...FRAME_HOST_PREFS,
+          trainhopConfig: {
+            widgetTestFramed: {
+              iframeSrcOverride: "https://evil.example.com/",
+            },
+          },
+        },
+        { testFramed: { url: frameUrl } }
+      )
+    ).toEqual({ src: frameUrl, state: "ok" });
+  });
+
+  it("keeps an unavailable framed widget hidden, even with an override", () => {
+    expect(
+      resolveWidgetFrame(
+        framedWidget,
+        {
+          ...FRAME_HOST_PREFS,
+          trainhopConfig: {
+            widgetTestFramed: {
+              iframeSrcOverride:
+                "https://hotfix.merino.prod.webservices.mozgcp.net/index.html",
+            },
+          },
+        },
+        { testFramed: { unavailable: true } }
+      )
+    ).toEqual({ src: "", state: "hidden" });
+  });
+
+  it("lets the trainhop iframeSrcOverride override a hidden framed widget", () => {
+    const trainhopSrc =
+      "https://hotfix.merino.prod.webservices.mozgcp.net/index.html";
+    expect(
+      resolveWidgetFrame(
+        framedWidget,
+        {
+          ...FRAME_HOST_PREFS,
+          trainhopConfig: {
+            widgetTestFramed: { iframeSrcOverride: trainhopSrc },
+          },
+        },
+        {}
+      )
+    ).toEqual({ src: trainhopSrc, state: "ok" });
+  });
+});
+
+describe("isAllowedFrameUrl", () => {
+  it("rejects everything when the pref is empty", () => {
+    expect(
+      isAllowedFrameUrl("https://frame.example.mozgcp.net/", {
+        "widgets.framed.allowedHostSuffixes": "",
+      })
+    ).toBe(false);
+  });
+
+  it.each([
+    ["https://prod-games-particle.merino.prod.webservices.mozgcp.net/", true],
+    ["https://example.mozilla.com/", true],
+    ["ftp://prod-games-particle.merino.prod.webservices.mozgcp.net/", false],
+    ["https://evil.example.com/", false],
+    ["https://mozgcp.net.evil.example/", false],
+    ["not a url", false],
+  ])("%s -> %p", (url, expected) => {
+    expect(isAllowedFrameUrl(url, FRAME_HOST_PREFS)).toBe(expected);
+  });
+});
+
+describe("getWidgets", () => {
+  const extensionWidget = {
+    id: "extensionWidget",
+    extensionID: "test-widget@mozilla.org",
+    customizeL10nId: "registry-label",
+  };
+
+  it("keeps an entry without an extensionID", () => {
+    expect(getWidgets([listsWidget], {})).toEqual([listsWidget]);
+  });
+
+  it("drops an extension entry the ExtensionWidgets state lacks", () => {
+    expect(getWidgets([extensionWidget], {})).toEqual([]);
+  });
+
+  it("merges the ExtensionWidgets entry under the registry fields", () => {
+    const src = "moz-extension://test/w.html";
+    expect(
+      getWidgets([extensionWidget], {
+        [extensionWidget.extensionID]: { src },
+      })
+    ).toEqual([{ ...extensionWidget, src }]);
+  });
+
+  it("treats an undefined ExtensionWidgets state as empty", () => {
+    expect(getWidgets([listsWidget, extensionWidget], undefined)).toEqual([
+      listsWidget,
+    ]);
   });
 });
 
@@ -865,5 +1454,78 @@ describe("resolvePrivacyCelebrationThreshold", () => {
     ).toBe(20);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+});
+
+describe("WIDGET_REGISTRY customize panel fields", () => {
+  const activeWidgets = WIDGET_REGISTRY.filter(w => !w.retired);
+
+  // Literal values, so a renamed source fails this test.
+  const EXPECTED_EVENT_SOURCES = {
+    pictureOfTheDay: "WIDGET_PICTURE_OF_THE_DAY",
+    clocks: "WIDGET_CLOCKS",
+    lists: "WIDGET_LISTS",
+    focusTimer: "WIDGET_TIMER",
+    weather: "WEATHER",
+    privacy: "WIDGET_PRIVACY",
+    crossword: "WIDGET_CROSSWORD",
+    stocks: "WIDGET_STOCKS",
+    recentSearches: "WIDGET_RECENT_SEARCHES",
+    horoscopes: "WIDGET_HOROSCOPES",
+    travel: "WIDGET_TRAVEL",
+    solitaire: "WIDGET_SOLITAIRE",
+    wrexhamAFC: "WIDGET_WREXHAMAFC",
+  };
+
+  it("gives every active entry a customizeL10nId", () => {
+    for (const widget of activeWidgets) {
+      expect(typeof widget.customizeL10nId).toBe("string");
+      expect(widget.customizeL10nId).toMatch(/^newtab-custom-widget-/);
+    }
+  });
+
+  it("keeps customizeL10nId unique across entries", () => {
+    const ids = activeWidgets.map(w => w.customizeL10nId);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("carries today's customizeEventSource for every active entry", () => {
+    expect(
+      Object.fromEntries(activeWidgets.map(w => [w.id, w.customizeEventSource]))
+    ).toEqual(EXPECTED_EVENT_SOURCES);
+  });
+});
+
+describe("isWeatherAvailable", () => {
+  it("is false when nothing reveals the weather toggle", () => {
+    expect(isWeatherAvailable({})).toBe(false);
+  });
+
+  it("is true via the system.showWeather pref", () => {
+    expect(isWeatherAvailable({ "system.showWeather": true })).toBe(true);
+  });
+
+  it("is true via trainhopConfig.weather.enabled", () => {
+    expect(
+      isWeatherAvailable({
+        trainhopConfig: { weather: { enabled: true } },
+      })
+    ).toBe(true);
+  });
+
+  it("is true via trainhopConfig.widgetWeather.visible", () => {
+    expect(
+      isWeatherAvailable({
+        trainhopConfig: { widgetWeather: { visible: true } },
+      })
+    ).toBe(true);
+  });
+
+  it("is true via the widgetsSettings.weatherVisible override", () => {
+    expect(
+      isWeatherAvailable({
+        trainhopConfig: { widgetsSettings: { weatherVisible: true } },
+      })
+    ).toBe(true);
   });
 });

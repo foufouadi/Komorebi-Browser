@@ -22,8 +22,8 @@ panel-list {
   --panel-section-header-padding-inline-start: calc(var(--size-item-small) / 2);
   --panel-item-icon-size: var(--icon-size-small);
   --panel-item-button-border-radius: var(--border-radius-medium);
+  --icon-fill: light-dark(var(--color-violet-50), var(--color-violet-40));
   margin-inline: var(--panel-inline-margin);
-  /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
   max-width: var(--panel-max-width);
   white-space: normal;
 
@@ -32,6 +32,7 @@ panel-list {
     --panel-list-border-color: light-dark(var(--color-purple-20), var(--color-gray-70));
     --panel-list-text-color: light-dark(var(--color-violet-110), var(--color-violet-0));
     --button-background-color-hover: light-dark(var(--color-violet-0), var(--color-violet-100));
+    --button-text-color-hover: var(--panel-list-text-color);
   }
 }
 
@@ -43,10 +44,8 @@ panel-list {
 @media -moz-pref("browser.nova.enabled") {
   /* TODO: Bug 2033070 -  Nova tokens were implemented as the default value for the custom properties, and the fallbacks (and lint exceptions) will need to be removed after launch */
   panel-list {
-    /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
     --panel-list-border-radius: var(--smartwindow-panel-item-border-radius);
     --panel-section-header-padding-inline-start: var(--size-item-small);
-    /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
     --panel-item-button-border-radius: var(--smartwindow-panel-item-border-radius);
 
     @media not (forced-colors) {
@@ -58,6 +57,7 @@ panel-list {
       );
       --button-background-color-hover: var(--smartwindow-panel-item-background-color-hover);
       --button-background-color-active: var(--smartwindow-panel-item-background-color-active);
+      --button-text-color-hover: var(--panel-list-text-color);
     }
   }
 }
@@ -74,7 +74,6 @@ panel-list[valign="top"] {
 panel-item.panel-section-header::part(button) {
   /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
   color: var(--panel-section-header-color);
-  /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
   font-size: var(--panel-section-header-font-size);
   opacity: 1;
   /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
@@ -83,8 +82,11 @@ panel-item.panel-section-header::part(button) {
   padding-inline: var(--panel-section-header-padding-inline-start) var(--panel-item-padding);
 }
 
+panel-item.panel-command-footer::part(button) {
+  border: none;
+}
+
 panel-item:not(.panel-section-header)::part(button) {
-  /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
   border-radius: var(--panel-item-button-border-radius);
   cursor: pointer;
   margin-inline: var(--space-small);
@@ -92,6 +94,11 @@ panel-item:not(.panel-section-header)::part(button) {
   max-width: calc(100% - 2 * var(--space-small));
   /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
   padding: var(--panel-item-padding);
+}
+
+panel-item.selected:not(.panel-section-header)::part(button) {
+  background-color: var(--button-background-color-hover);
+  color: var(--button-text-color-hover);
 }
 
 panel-item[icon]::part(button) {
@@ -116,52 +123,76 @@ panel-item::part(label) {
   white-space: nowrap;
 }
 
-/* Style `ai-website-chip` to behave like a `panel-item`. */
+/* Laid out here rather than by .panel-item-container, whose grid is Nova only. */
+.panel-tab-group-item {
+  align-items: center;
+  /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
+  column-gap: var(--panel-item-padding);
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
+  padding: var(--panel-item-padding);
+}
+
+.panel-tab-group-icon {
+  /* The design draws the initial smaller on this surface. */
+  --tab-group-icon-font-size: 8.2px;
+  --tab-group-icon-notch-radius: var(--border-radius-xsmall);
+  --tab-group-icon-size: var(--panel-item-icon-size);
+}
+
+.panel-tab-group-label::part(button) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Style `smartwindow-chip` to behave like a `panel-item`. */
 /* stylelint-disable-next-line stylelint-plugin-mozilla/no-has-selector */
-panel-list:has(ai-website-chip) {
+panel-list:has(smartwindow-chip) {
   padding-block: 0;
 }
 
-panel-list ai-website-chip {
+panel-list smartwindow-chip {
   box-sizing: border-box;
   display: flex;
   padding: var(--space-xsmall);
   width: 100%;
 }
 
-panel-list ai-website-chip::part(chip) {
-  --background-color-hover: light-dark(color-mix(in srgb, var(--color-violet-50) 15%, transparent), var(--color-violet-110));
-  --background-color-box: transparent;
+panel-list smartwindow-chip::part(chip) {
+  --source-chip-background-color: transparent;
+  --source-chip-background-color-hover: light-dark(color-mix(in srgb, var(--color-violet-50) 15%, transparent), var(--color-violet-110));
 
   max-width: none;
   min-width: 0;
   width: 100%;
 }
 
-panel-list ai-website-chip::part(chip):hover {
-  --background-color-box: var(--background-color-hover);
-}
-
-panel-list ai-website-chip::part(chip):focus-visible {
+panel-list smartwindow-chip::part(chip):focus-visible {
   outline: var(--focus-outline);
   outline-offset: var(--focus-outline-inset);
 }
 
 @media -moz-pref("browser.nova.enabled") {
-  panel-list ai-website-chip::part(chip) {
-    --background-color-hover: light-dark(color-mix(in srgb, var(--color-violet-desaturated-10) 70%, transparent), var(--color-violet-desaturated-60));
+  panel-list smartwindow-chip::part(chip) {
+    --source-chip-background-color-hover: light-dark(
+      color-mix(in srgb, var(--color-violet-desaturated-10) 70%, transparent),
+      var(--color-violet-desaturated-60)
+    );
   }
 }
 
 .panel-item-container {
-  border-radius: var(--panel-item-button-border-radius);
+  border-radius: var(--border-radius-small);
   cursor: pointer;
   margin-inline: var(--space-small);
   /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
   padding-inline: var(--panel-item-padding);
 
   &:hover,
-  &:focus-within {
+  &:focus-within,
+  &.selected {
     background-color: var(--button-background-color-hover);
   }
 
@@ -173,7 +204,6 @@ panel-list ai-website-chip::part(chip):focus-visible {
   panel-item::part(button) {
     background-color: transparent;
     margin-inline: 0;
-    /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
     max-width: 100%;
     padding-block: 0;
     padding-inline: 0;
@@ -190,14 +220,20 @@ panel-list ai-website-chip::part(chip):focus-visible {
 
   panel-item::part(label) {
     font-size: var(--panel-section-header-font-size);
-    font-weight: var(--font-weight-bold);
+    font-weight: var(--font-weight-heading);
+  }
+
+  /* This row uses the container for layout; its label is a menu item, not the
+     title of a description row. */
+  &.panel-tab-group-item panel-item::part(label) {
+    font-size: inherit;
+    font-weight: inherit;
   }
 
   .panel-item-description {
     margin-inline: 0;
     padding-inline: 0;
     padding-block: 0 var(--space-small);
-    font-size: var(--font-size-small);
     opacity: var(--opacity-deemphasized);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -240,7 +276,7 @@ panel-list ai-website-chip::part(chip):focus-visible {
 
   .panel-item-icon-image {
     -moz-context-properties: fill;
-    fill: var(--icon-color);
+    fill: var(--icon-fill);
     width: var(--panel-item-icon-size);
     height: var(--panel-item-icon-size);
   }
@@ -254,5 +290,10 @@ panel-list ai-website-chip::part(chip):focus-visible {
 
   .panel-item-description {
     padding-block-end: 0;
+  }
+
+  panel-item.panel-section-header::part(button) {
+    color: var(--panel-list-text-color);
+    font-weight: var(--font-weight-heading);
   }
 }

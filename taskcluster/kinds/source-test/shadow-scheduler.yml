@@ -13,20 +13,23 @@ task-defaults:
               name: public/shadow-scheduler/optimized-tasks.json
               path: /builds/worker/optimized-tasks.json
             - type: directory
+              name: public/shadow-scheduler-state
+              path: /builds/worker/shadow-scheduler-state
+            - type: directory
               name: public/build
               path: /builds/worker/artifacts/perf
         env:
             DECISION_TASK_ID: {task-reference: <decision>}
             MOZ_PERFHERDER_UPLOAD: /builds/worker/artifacts/perf/perfherder-data-bugbug.json
+            SHADOW_SCHEDULER_STATE_PATH: /builds/worker/shadow-scheduler-state/state.json
     treeherder:
         kind: other
         tier: 3
-    run-on-repo-type: [hg]
     run-on-projects: ['autoland-only']
     run:
-        clone-with: hg
-        using: mach
-        mach: taskgraph optimized -v --json -p task-id=$DECISION_TASK_ID --output-file /builds/worker/optimized-tasks.json
+        using: run-task
+        cwd: '{checkout}'
+        command: ./mach taskgraph optimized -v --json -p task-id=$DECISION_TASK_ID --output-file /builds/worker/optimized-tasks.json
         sparse-profile: taskgraph
 
 relevant_tests:
@@ -182,3 +185,99 @@ bugbug_reduced_high:
     worker:
         env:
             TASKGRAPH_OPTIMIZE_STRATEGIES: gecko_taskgraph.optimize:experimental.bugbug_reduced_high
+
+perf_fixed_batch:
+    description: Runs all performance tests when a fixed number of pushes have been made since the last batch instead of the default perf cadence.
+    treeherder:
+        symbol: SS(perf_fixed_batch)
+    index:
+        product: source
+        job-name: shadow-scheduler-perf_fixed_batch
+    worker:
+        artifacts: &perf-shadow-scheduler-artifacts
+            - type: file
+              name: public/shadow-scheduler/parameters.yml
+              path: /builds/worker/parameters.yml
+        env:
+            TASKGRAPH_OPTIMIZE_STRATEGIES: gecko_taskgraph.optimize:experimental.perf_fixed_batch
+    run:
+        # Re-run the decision task's scheduling with a target method that
+        # targets every push-based perf task on every push (autoland only
+        # targets those against shippable builds on backstop pushes), so the
+        # strategy under evaluation gets to judge all of them.
+        command: &perf-shadow-scheduler-command >-
+            ./mach python --virtualenv taskgraph taskcluster/scripts/misc/shadow-scheduler-parameters.py
+            --decision-task-id $DECISION_TASK_ID
+            --target-tasks-method autoland_perf_shadow_scheduler_tasks
+            /builds/worker/parameters.yml &&
+            ./mach taskgraph optimized -v --json -p /builds/worker/parameters.yml --output-file /builds/worker/optimized-tasks.json
+
+perf_time_batch:
+    description: Runs all performance tests when a fixed time has passed since the last batch instead of the default perf cadence.
+    treeherder:
+        symbol: SS(perf_time_batch)
+    index:
+        product: source
+        job-name: shadow-scheduler-perf_time_batch
+    worker:
+        artifacts: *perf-shadow-scheduler-artifacts
+        env:
+            TASKGRAPH_OPTIMIZE_STRATEGIES: gecko_taskgraph.optimize:experimental.perf_time_batch
+    run:
+        command: *perf-shadow-scheduler-command
+
+perf_rasb:
+    description: Runs all performance tests when the probability that a commit since the last batch regressed performance, according to bugbug's risk scores, reaches a threshold (risk-aware stream batching) instead of the default perf cadence.
+    treeherder:
+        symbol: SS(perf_rasb)
+    index:
+        product: source
+        job-name: shadow-scheduler-perf_rasb
+    worker:
+        artifacts: *perf-shadow-scheduler-artifacts
+        env:
+            TASKGRAPH_OPTIMIZE_STRATEGIES: gecko_taskgraph.optimize:experimental.perf_rasb
+    run:
+        command: *perf-shadow-scheduler-command
+
+perf_rasb_la:
+    description: Runs all performance tests when the sum of bugbug's risk scores of the commits since the last batch reaches a threshold (risk-aware stream batching, linear aggregation) instead of the default perf cadence.
+    treeherder:
+        symbol: SS(perf_rasb_la)
+    index:
+        product: source
+        job-name: shadow-scheduler-perf_rasb_la
+    worker:
+        artifacts: *perf-shadow-scheduler-artifacts
+        env:
+            TASKGRAPH_OPTIMIZE_STRATEGIES: gecko_taskgraph.optimize:experimental.perf_rasb_la
+    run:
+        command: *perf-shadow-scheduler-command
+
+perf_rapb:
+    description: Runs all performance tests when the probability that a commit since the last batch regressed performance, with risk scores rising the longer commits wait, reaches a threshold (risk-aged priority batching) instead of the default perf cadence.
+    treeherder:
+        symbol: SS(perf_rapb)
+    index:
+        product: source
+        job-name: shadow-scheduler-perf_rapb
+    worker:
+        artifacts: *perf-shadow-scheduler-artifacts
+        env:
+            TASKGRAPH_OPTIMIZE_STRATEGIES: gecko_taskgraph.optimize:experimental.perf_rapb
+    run:
+        command: *perf-shadow-scheduler-command
+
+perf_rapb_la:
+    description: Runs all performance tests when the sum of the risk scores of the commits since the last batch, rising the longer commits wait, reaches a threshold (risk-aged priority batching, linear aggregation) instead of the default perf cadence.
+    treeherder:
+        symbol: SS(perf_rapb_la)
+    index:
+        product: source
+        job-name: shadow-scheduler-perf_rapb_la
+    worker:
+        artifacts: *perf-shadow-scheduler-artifacts
+        env:
+            TASKGRAPH_OPTIMIZE_STRATEGIES: gecko_taskgraph.optimize:experimental.perf_rapb_la
+    run:
+        command: *perf-shadow-scheduler-command

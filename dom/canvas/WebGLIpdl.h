@@ -11,6 +11,7 @@
 #include "ipc/IPCMessageUtils.h"
 #include "mozilla/GfxMessageUtils.h"
 #include "mozilla/dom/BindingIPCUtils.h"
+#include "mozilla/ipc/SharedMemoryHandle.h"
 #include "mozilla/ipc/Shmem.h"
 #include "mozilla/layers/LayersSurfaces.h"
 
@@ -95,7 +96,7 @@ class RaiiShmem final {
     return mShmem;
   }
 
-  Range<uint8_t> ByteRange() const {
+  mozilla::Range<uint8_t> ByteRange() const {
     if (!IsShmem()) {
       return {};
     }

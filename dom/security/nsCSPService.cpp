@@ -8,20 +8,15 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/StaticPrefs_security.h"
 #include "mozilla/dom/PolicyContainer.h"
-#include "mozilla/net/DocumentChannel.h"
-#include "mozilla/net/DocumentLoadListener.h"
-#include "nsAsyncRedirectVerifyHelper.h"
 #include "nsCOMPtr.h"
 #include "nsContentPolicyUtils.h"
 #include "nsContentUtils.h"
 #include "nsError.h"
-#include "nsIAsyncVerifyRedirectCallback.h"
 #include "nsIContent.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsIProtocolHandler.h"
 #include "nsIURI.h"
 #include "nsNetUtil.h"
-#include "nsQueryObject.h"
 #include "nsString.h"
 
 using namespace mozilla;
@@ -32,7 +27,7 @@ CSPService::CSPService() = default;
 
 CSPService::~CSPService() = default;
 
-NS_IMPL_ISUPPORTS(CSPService, nsIContentPolicy, nsIChannelEventSink)
+NS_IMPL_ISUPPORTS(CSPService, nsIContentPolicy)
 
 static bool SubjectToCSP(nsILoadInfo* aLoadInfo, nsIURI* aURI,
                          nsContentPolicyType aContentType) {
@@ -92,6 +87,12 @@ static bool SubjectToCSP(nsILoadInfo* aLoadInfo, nsIURI* aURI,
     if (StringBeginsWith(uriSpec, "resource://pdf.js/"_ns)) {
       return false;
     }
+    // Exempt the script used by the top-level VideoDocument.
+    if (contentType == ExtContentPolicyType::TYPE_SCRIPT &&
+        uriSpec.EqualsLiteral(
+            "resource://content-accessible/TopLevelVideoDocument.js")) {
+      return false;
+    }
     if (!isImgOrStyleOrDTD) {
       return true;
     }
@@ -99,10 +100,9 @@ static bool SubjectToCSP(nsILoadInfo* aLoadInfo, nsIURI* aURI,
   if (aURI->SchemeIs("chrome")) {
     nsAutoCString uriSpec;
     aURI->GetSpec(uriSpec);
-    // Exempt the script used by the top-level VideoDocument.
+    // Treat chrome: scripts loaded by pdf.js like resource://pdf.js/ scripts.
     if (contentType == ExtContentPolicyType::TYPE_SCRIPT &&
-        uriSpec.EqualsLiteral(
-            "chrome://global/content/TopLevelVideoDocument.js")) {
+        nsContentUtils::IsPDFJS(aLoadInfo->GetLoadingPrincipal())) {
       return false;
     }
     if (!isImgOrStyleOrDTD) {
@@ -239,76 +239,10 @@ CSPService::ShouldProcess(nsIURI* aContentLocation, nsILoadInfo* aLoadInfo,
   return ShouldLoad(aContentLocation, aLoadInfo, aDecision);
 }
 
-/* nsIChannelEventSink implementation */
-NS_IMETHODIMP
-CSPService::AsyncOnChannelRedirect(nsIChannel* oldChannel,
-                                   nsIChannel* newChannel, uint32_t flags,
-                                   nsIAsyncVerifyRedirectCallback* callback) {
-  net::nsAsyncRedirectAutoCallback autoCallback(callback);
-
-  if (XRE_IsE10sParentProcess()) {
-    nsCOMPtr<nsIParentChannel> parentChannel;
-    NS_QueryNotificationCallbacks(oldChannel, parentChannel);
-    RefPtr<net::DocumentLoadListener> docListener =
-        do_QueryObject(parentChannel);
-    // Since this is an IPC'd channel we do not have access to the request
-    // context. In turn, we do not have an event target for policy violations.
-    // Enforce the CSP check in the content process where we have that info.
-    // We allow redirect checks to run for document loads via
-    // DocumentLoadListener, since these are fully supported and we don't
-    // expose the redirects to the content process. We can't do this for all
-    // request types yet because we don't serialize nsICSPEventListener.
-    if (parentChannel && !docListener) {
-      return NS_OK;
-    }
-  }
-
-  // Don't do these checks if we're switching from DocumentChannel
-  // to a real channel. In that case, we should already have done
-  // the checks in the parent process. AsyncOnChannelRedirect
-  // isn't called in the content process if we switch process,
-  // so checking here would just hide bugs in the process switch
-  // cases.
-  if (RefPtr<net::DocumentChannel> docChannel = do_QueryObject(oldChannel)) {
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIURI> newUri;
-  nsresult rv = newChannel->GetURI(getter_AddRefs(newUri));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsCOMPtr<nsILoadInfo> loadInfo = oldChannel->LoadInfo();
-
-  /* Since redirecting channels don't call into nsIContentPolicy, we call our
-   * Content Policy implementation directly when redirects occur using the
-   * information set in the LoadInfo when channels are created.
-   *
-   * We check if the CSP permits this host for this type of load, if not,
-   * we cancel the load now.
-   */
-  nsCOMPtr<nsIURI> originalUri;
-  rv = oldChannel->GetOriginalURI(getter_AddRefs(originalUri));
-  if (NS_FAILED(rv)) {
-    autoCallback.DontCallback();
-    oldChannel->Cancel(NS_ERROR_DOM_BAD_URI);
-    return rv;
-  }
-
-  Maybe<nsresult> cancelCode;
-  rv = ConsultCSPForRedirect(originalUri, newUri, loadInfo, cancelCode);
-  if (cancelCode) {
-    oldChannel->Cancel(*cancelCode);
-  }
-  if (NS_FAILED(rv)) {
-    autoCallback.DontCallback();
-  }
-
-  return rv;
-}
-
 nsresult CSPService::ConsultCSPForRedirect(nsIURI* aOriginalURI,
                                            nsIURI* aNewURI,
                                            nsILoadInfo* aLoadInfo,
+                                           uint32_t aFlags,
                                            Maybe<nsresult>& aCancelCode) {
   // No need to continue processing if CSP is disabled or if the protocol
   // is *not* subject to CSP.

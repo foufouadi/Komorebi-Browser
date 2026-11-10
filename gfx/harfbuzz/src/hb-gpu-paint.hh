@@ -267,18 +267,39 @@ struct hb_gpu_paint_t
    * hb_gpu_paint_encode() concatenates them after the op stream and
    * patches the recorded indices into texel offsets. */
   hb_vector_t<hb_blob_t *> sub_blobs;
+  /* Total bytes held in sub_blobs; bounded by HB_GPU_PAINT_MAX_SUB_BYTES. */
+  unsigned sub_bytes = 0;
+
+  bool push_sub_blob (hb_blob_t *blob)
+  {
+    unsigned len = hb_blob_get_length (blob);
+    if (unlikely (len > HB_GPU_PAINT_MAX_SUB_BYTES - sub_bytes ||
+		  !sub_blobs.push_or_fail (blob)))
+      return false;
+    sub_bytes += len;
+    return true;
+  }
 
   /* Nesting depth of push_group / pop_group.  We bail (set
    * `unsupported`) if it exceeds HB_GPU_PAINT_MAX_GROUP_DEPTH,
    * which matches HB_GPU_PAINT_GROUP_DEPTH in the fragment shader. */
   unsigned group_depth = 0;
 
-  /* Cumulative work budget for the current paint walk; reset by
-   * hb_gpu_paint_clear().  Charged with the curves consumed by each
-   * clip-glyph encode, so per-glyph outline limits cannot multiply
-   * with the paint-graph traversal limits of the font tables
-   * driving us (e.g. COLR). */
-  int64_t work_left = HB_GPU_PAINT_MAX_WORK;
+  /* Work budget for the current paint session; reset by
+   * hb_gpu_paint_clear().  All the session's work is outline-derived
+   * (outline traversal, the curves generated from it, and the clip
+   * outline texels the fragment shader walks per layer -- the GPU
+   * backend never rasterizes), so a single counter suffices.  It is the
+   * public draw/paint budget: seeded into the scratch encoder through the
+   * public draw-budget API before each glyph and read back afterwards. */
+  int64_t budget = HB_BUDGET_DEFAULT;
+  int64_t budget_remaining = HB_BUDGET_GLYPH;
+
+  void recharge_budget ()
+  {
+    budget_remaining = budget == HB_BUDGET_DEFAULT ?
+		       HB_BUDGET_GLYPH : budget;
+  }
 
   /* Stack of pending clips.  Each color/gradient op consumes the
    * current state of this stack: the layer is rendered where ALL
@@ -297,12 +318,21 @@ struct hb_gpu_paint_t
      * time; glyph clips are encoded lazily on first consuming layer
      * and cached.  sub_blob_index is -1 until the encode happens,
      * then holds the index into c->sub_blobs and ext_* hold the
-     * design-unit extents. */
+     * design-unit extents, or HB_GPU_PAINT_CLIP_EMPTY if the outline
+     * has no ink and layers under it are to be skipped. */
     int                   sub_blob_index;
     int                   ext_x0, ext_y0, ext_x1, ext_y1;
   };
   pending_clip_t clip_stack[3];
   unsigned       clip_depth = 0;
+
+  /* Rectangle clips are not encoded (see "Out of scope for v1"),
+   * but their pop_clip must not pop the glyph/path clip below them.
+   * rect_clips[d] counts the rectangle clips pushed while clip_depth
+   * was d; the paint walk pops them before anything at depth d, so
+   * a non-zero count at the current depth identifies a rectangle
+   * pop.  The last slot collects everything pushed past the cap. */
+  unsigned       rect_clips[3 + 1] = {};
 
   /* Carries the cur_transform captured at push_clip_path_start
    * through to push_clip_path_end, where the encoded clip is

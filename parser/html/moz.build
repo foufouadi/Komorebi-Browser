@@ -19,6 +19,7 @@ EXPORTS += [
     "nsHtml5DependentUTF16Buffer.h",
     "nsHtml5DocumentBuilder.h",
     "nsHtml5DocumentMode.h",
+    "nsHtml5FragmentFastPath.h",
     "nsHtml5HtmlAttributes.h",
     "nsHtml5Macros.h",
     "nsHtml5Module.h",
@@ -55,6 +56,7 @@ UNIFIED_SOURCES += [
     "nsHtml5DependentUTF16Buffer.cpp",
     "nsHtml5DocumentBuilder.cpp",
     "nsHtml5ElementName.cpp",
+    "nsHtml5FragmentFastPath.cpp",
     "nsHtml5Highlighter.cpp",
     "nsHtml5HtmlAttributes.cpp",
     "nsHtml5Module.cpp",
@@ -114,6 +116,13 @@ elif (
         "nsHtml5TokenizerALUStubs.cpp",
         "nsHtml5TokenizerSIMD.cpp",
     ]
+elif (
+    CONFIG["TARGET_CPU"] == "loongarch64" and CONFIG["TARGET_ENDIANNESS"] == "little"
+) and (CONFIG["CC_TYPE"] != "gcc" or int(CONFIG["CC_VERSION"].split(".")[0]) >= 12):
+    UNIFIED_SOURCES += [
+        "nsHtml5TokenizerALU.cpp",
+        "nsHtml5TokenizerSIMD.cpp",
+    ]
 else:
     UNIFIED_SOURCES += [
         "nsHtml5TokenizerALU.cpp",
@@ -124,4 +133,21 @@ FINAL_LIBRARY = "xul"
 
 LOCAL_INCLUDES += [
     "/dom/base",
+]
+
+SOURCE_HEADERS += [
+    "nsHtml5AutoPauseUpdate.h",
+    "nsHtml5ElementName.h",
+    "nsHtml5Highlighter.h",
+    "nsHtml5StackNode.h",
+    "nsHtml5StateSnapshot.h",
+    "nsHtml5Tokenizer.h",
+    "nsHtml5TokenizerCppSupplement.h",
+    "nsHtml5TokenizerHSupplement.h",
+    "nsHtml5TokenizerLoopPoliciesALU.h",
+    "nsHtml5TokenizerLoopPoliciesSIMD.h",
+    "nsHtml5TreeBuilder.h",
+    "nsHtml5TreeBuilderCppSupplement.h",
+    "nsHtml5TreeBuilderHSupplement.h",
+    "nsHtml5UTF16BufferCppSupplement.h",
 ]

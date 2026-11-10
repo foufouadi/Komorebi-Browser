@@ -124,7 +124,8 @@ dom::OffThreadCSPContext* WorkletImpl::GetCSPContext() {
 
   if (!mCSPContext && mPolicyContainer && mPolicyContainer->csp().isSome()) {
     ipc::CSPInfo cspInfo(mPolicyContainer->csp().ref());
-    mCSPContext = MakeUnique<dom::OffThreadCSPContext>(std::move(cspInfo));
+    mCSPContext =
+        std::make_unique<dom::OffThreadCSPContext>(std::move(cspInfo));
   }
   return mCSPContext.get();
 }
@@ -143,6 +144,7 @@ void WorkletImpl::NotifyWorkletFinished() {
                                self->mFinishedOnExecutionThread = true;
                                self->mGlobalScope = nullptr;
                                self->mCSPContext = nullptr;
+                               self->OnFinishedOnExecutionThread();
                              }));
 
   mTerminated = true;

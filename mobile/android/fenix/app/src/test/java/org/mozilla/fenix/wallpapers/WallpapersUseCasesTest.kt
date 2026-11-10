@@ -5,6 +5,7 @@
 package org.mozilla.fenix.wallpapers
 
 import android.content.res.Configuration
+import android.util.Size
 import io.mockk.Runs
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -43,6 +44,12 @@ import org.mozilla.fenix.wallpapers.LegacyWallpaperMigration.Companion.TURNING_R
 class WallpapersUseCasesTest {
 
     @get:Rule val temporaryFolder = TemporaryFolder()
+
+    private val displaySize =
+        mockk<Size> {
+            every { width } returns 1080
+            every { height } returns 1920
+        }
 
     // initialize this once, so it can be shared throughout tests
     private val baseFakeDate = Date()
@@ -119,7 +126,6 @@ class WallpapersUseCasesTest {
                 makeFakeRemoteWallpaper(TimeRelation.LATER, name)
             }
         every { mockSettings.currentWallpaperName } returns ""
-        every { mockSettings.enableHomepageEdgeToEdgeBackgroundFeature } returns true
         coEvery { mockFileManager.lookupExpiredWallpaper(any()) } returns null
         coEvery { mockMetadataFetcher.downloadWallpaperList() } returns fakeRemoteWallpapers
         coEvery { mockDownloader.downloadThumbnail(any()) } returns Wallpaper.ImageFileState.Downloaded
@@ -144,7 +150,6 @@ class WallpapersUseCasesTest {
             listOf("first", "second", "third").map { name ->
                 makeFakeRemoteWallpaper(TimeRelation.LATER, name)
             }
-        every { mockSettings.enableHomepageEdgeToEdgeBackgroundFeature } returns true
         every { mockSettings.currentWallpaperName } returns ""
         coEvery { mockFileManager.lookupExpiredWallpaper(any()) } returns null
         coEvery { mockMetadataFetcher.downloadWallpaperList() } returns fakeRemoteWallpapers
@@ -176,7 +181,6 @@ class WallpapersUseCasesTest {
                     makeFakeRemoteWallpaper(TimeRelation.BEFORE, name)
                 }
             val possibleWallpapers = fakeRemoteWallpapers + fakeExpiredRemoteWallpapers
-            every { mockSettings.enableHomepageEdgeToEdgeBackgroundFeature } returns true
             every { mockSettings.currentWallpaperName } returns ""
             coEvery { mockFileManager.lookupExpiredWallpaper(any()) } returns null
             coEvery { mockMetadataFetcher.downloadWallpaperList() } returns possibleWallpapers
@@ -208,7 +212,6 @@ class WallpapersUseCasesTest {
             val expiredWallpaper = makeFakeRemoteWallpaper(TimeRelation.BEFORE, "expired")
             val allWallpapers = listOf(expiredWallpaper) + fakeRemoteWallpapers
             every { mockSettings.currentWallpaperName } returns "expired"
-            every { mockSettings.enableHomepageEdgeToEdgeBackgroundFeature } returns true
             coEvery { mockFileManager.lookupExpiredWallpaper(any()) } returns expiredWallpaper
             coEvery { mockMetadataFetcher.downloadWallpaperList() } returns allWallpapers
             coEvery { mockDownloader.downloadThumbnail(any()) } returns Wallpaper.ImageFileState.Downloaded
@@ -238,7 +241,6 @@ class WallpapersUseCasesTest {
                 }
             val expiredWallpaper = makeFakeRemoteWallpaper(TimeRelation.BEFORE, TURNING_RED_PANDA_WALLPAPER_NAME)
             val allWallpapers = listOf(expiredWallpaper) + fakeRemoteWallpapers
-            every { mockSettings.enableHomepageEdgeToEdgeBackgroundFeature } returns true
             every { mockSettings.currentWallpaperName } returns TURNING_RED_PANDA_WALLPAPER_NAME
             every { mockSettings.shouldMigrateLegacyWallpaperCardColors } returns true
             every { mockSettings.currentWallpaperTextColor } returns TURNING_RED_WALLPAPER_TEXT_COLOR.toHexColor()
@@ -274,7 +276,6 @@ class WallpapersUseCasesTest {
                     makeFakeRemoteWallpaper(TimeRelation.LATER, name)
                 }
             val locale = "en-CA"
-            every { mockSettings.enableHomepageEdgeToEdgeBackgroundFeature } returns true
             every { mockSettings.currentWallpaperName } returns ""
             coEvery { mockFileManager.lookupExpiredWallpaper(any()) } returns null
             coEvery { mockMetadataFetcher.downloadWallpaperList() } returns fakeRemoteWallpapers
@@ -303,7 +304,6 @@ class WallpapersUseCasesTest {
                 listOf("first", "second", "third").map { name ->
                     makeFakeRemoteWallpaper(TimeRelation.LATER, name)
                 }
-            every { mockSettings.enableHomepageEdgeToEdgeBackgroundFeature } returns true
             every { mockSettings.currentWallpaperName } returns ""
             coEvery { mockFileManager.lookupExpiredWallpaper(any()) } returns null
             coEvery { mockMetadataFetcher.downloadWallpaperList() } returns fakeRemoteWallpapers
@@ -333,7 +333,6 @@ class WallpapersUseCasesTest {
                     makeFakeRemoteWallpaper(TimeRelation.LATER, name)
                 }
             every { mockSettings.currentWallpaperName } returns ""
-            every { mockSettings.enableHomepageEdgeToEdgeBackgroundFeature } returns true
             coEvery { mockFileManager.lookupExpiredWallpaper(any()) } returns null
             coEvery { mockMetadataFetcher.downloadWallpaperList() } returns fakeRemoteWallpapers
             coEvery { mockDownloader.downloadThumbnail(any()) } returns Wallpaper.ImageFileState.Downloaded
@@ -368,7 +367,6 @@ class WallpapersUseCasesTest {
                 }
             val failedWallpaper = makeFakeRemoteWallpaper(TimeRelation.LATER, "failed")
             every { mockSettings.currentWallpaperName } returns ""
-            every { mockSettings.enableHomepageEdgeToEdgeBackgroundFeature } returns true
             coEvery { mockFileManager.lookupExpiredWallpaper(any()) } returns null
             coEvery { mockMetadataFetcher.downloadWallpaperList() } returns
                 listOf(failedWallpaper) + fakeRemoteWallpapers
@@ -397,7 +395,6 @@ class WallpapersUseCasesTest {
                 listOf("first", "second", "third").map { name ->
                     makeFakeRemoteWallpaper(TimeRelation.LATER, name)
                 }
-            every { mockSettings.enableHomepageEdgeToEdgeBackgroundFeature } returns true
             every { mockSettings.currentWallpaperName } returns ""
             coEvery { mockFileManager.lookupExpiredWallpaper(any()) } returns null
             coEvery { mockMetadataFetcher.downloadWallpaperList() } returns fakeRemoteWallpapers
@@ -427,7 +424,6 @@ class WallpapersUseCasesTest {
                 }
             val possibleWallpapers = listOf(selectedWallpaper) + fakeRemoteWallpapers
             every { mockSettings.currentWallpaperName } returns selectedWallpaper.name
-            every { mockSettings.enableHomepageEdgeToEdgeBackgroundFeature } returns true
             coEvery { mockFileManager.lookupExpiredWallpaper(any()) } returns null
             coEvery { mockMetadataFetcher.downloadWallpaperList() } returns possibleWallpapers
             coEvery { mockDownloader.downloadThumbnail(any()) } returns Wallpaper.ImageFileState.Downloaded
@@ -613,7 +609,8 @@ class WallpapersUseCasesTest {
                 every { name } returns "test"
             }
             val orientation = Configuration.ORIENTATION_PORTRAIT
-            val defaultLoadBitmapUseCase = spyk(WallpapersUseCases.DefaultLoadBitmapUseCase { mockFolder })
+            val defaultLoadBitmapUseCase =
+                spyk(WallpapersUseCases.DefaultLoadBitmapUseCase({ mockFolder }, { displaySize }))
             coEvery { defaultLoadBitmapUseCase.loadWallpaperFromDisk(wallpaper, orientation) } returns mockk()
 
             defaultLoadBitmapUseCase.invoke(wallpaper, orientation)
@@ -628,7 +625,8 @@ class WallpapersUseCasesTest {
                 every { name } returns "test"
             }
             val orientation = Configuration.ORIENTATION_LANDSCAPE
-            val defaultLoadBitmapUseCase = spyk(WallpapersUseCases.DefaultLoadBitmapUseCase { mockFolder })
+            val defaultLoadBitmapUseCase =
+                spyk(WallpapersUseCases.DefaultLoadBitmapUseCase({ mockFolder }, { displaySize }))
             coEvery { defaultLoadBitmapUseCase.loadWallpaperFromDisk(wallpaper, orientation) } returns mockk()
 
             defaultLoadBitmapUseCase.invoke(wallpaper, orientation)
@@ -642,12 +640,16 @@ class WallpapersUseCasesTest {
             val wallpaper: Wallpaper = mockk { every { name } returns "test" }
             val ioBlockEntered = CompletableDeferred<Unit>()
 
-            val useCase = WallpapersUseCases.DefaultLoadBitmapUseCase {
-                ioBlockEntered.complete(Unit)
-                suspendCancellableCoroutine {
-                    // never resumed; will be ended via cancellation
-                }
-            }
+            val useCase =
+                WallpapersUseCases.DefaultLoadBitmapUseCase(
+                    getFilesDir = {
+                        ioBlockEntered.complete(Unit)
+                        suspendCancellableCoroutine {
+                            // never resumed; will be ended via cancellation
+                        }
+                    },
+                    getDisplaySize = { displaySize },
+                )
 
             var codeAfterLoadRan = false
             val job = launch {
@@ -663,65 +665,36 @@ class WallpapersUseCasesTest {
         }
 
     @Test
-    fun `GIVEN EdgeToEdgeBackground feature is enabled by Nimbus WHEN loading the wallpapers list THEN EdgeToEdge is in the list`() =
-        runTest {
-            every { mockSettings.enableHomepageEdgeToEdgeBackgroundFeature } returns true
-            every { mockSettings.currentWallpaperName } returns ""
-            coEvery { mockFileManager.lookupExpiredWallpaper(any()) } returns null
-            coEvery { mockMetadataFetcher.downloadWallpaperList() } returns emptyList()
+    fun `WHEN loading the wallpapers list THEN EdgeToEdge is in the list`() = runTest {
+        every { mockSettings.currentWallpaperName } returns ""
+        coEvery { mockFileManager.lookupExpiredWallpaper(any()) } returns null
+        coEvery { mockMetadataFetcher.downloadWallpaperList() } returns emptyList()
 
-            WallpapersUseCases.DefaultInitializeWallpaperUseCase(
-                    appStore,
-                    mockDownloader,
-                    mockFileManager,
-                    mockMetadataFetcher,
-                    mockMigrationHelper,
-                    mockSettings,
-                    "en-US",
-                )
-                .invoke()
-
-            assertEquals(
-                listOf(Wallpaper.EdgeToEdge, Wallpaper.Default),
-                appStore.state.wallpaperState.availableWallpapers,
+        WallpapersUseCases.DefaultInitializeWallpaperUseCase(
+                appStore,
+                mockDownloader,
+                mockFileManager,
+                mockMetadataFetcher,
+                mockMigrationHelper,
+                mockSettings,
+                "en-US",
             )
-        }
+            .invoke()
+
+        assertEquals(
+            listOf(Wallpaper.EdgeToEdge, Wallpaper.Default),
+            appStore.state.wallpaperState.availableWallpapers,
+        )
+    }
 
     @Test
-    fun `GIVEN EdgeToEdgeBackground feature is disabled by Nimbus WHEN loading the wallpapers list THEN EdgeToEdge is not in the list`() =
-        runTest {
-            every { mockSettings.enableHomepageEdgeToEdgeBackgroundFeature } returns false
-            every { mockSettings.currentWallpaperName } returns ""
-            coEvery { mockFileManager.lookupExpiredWallpaper(any()) } returns null
-            coEvery { mockMetadataFetcher.downloadWallpaperList() } returns emptyList()
+    fun `WHEN EdgeToEdge wallpaper is persisted THEN EdgeToEdge wallpaper is selected`() = runTest {
+        every { mockSettings.currentWallpaperName } returns Wallpaper.EDGE_TO_EDGE
 
-            WallpapersUseCases.DefaultInitializeWallpaperUseCase(
-                    appStore,
-                    mockDownloader,
-                    mockFileManager,
-                    mockMetadataFetcher,
-                    mockMigrationHelper,
-                    mockSettings,
-                    "en-US",
-                )
-                .invoke()
+        WallpapersUseCases.DefaultFetchCurrentWallpaperUseCase(mockSettings, appStore).invoke()
 
-            assertEquals(
-                listOf(Wallpaper.Default),
-                appStore.state.wallpaperState.availableWallpapers,
-            )
-        }
-
-    @Test
-    fun `GIVEN EdgeToEdgeBackground feature is disabled by Nimbus WHEN EdgeToEdge wallpaper is persisted THEN default wallpaper is selected`() =
-        runTest {
-            every { mockSettings.enableHomepageEdgeToEdgeBackgroundFeature } returns false
-            every { mockSettings.currentWallpaperName } returns Wallpaper.EDGE_TO_EDGE
-
-            WallpapersUseCases.DefaultFetchCurrentWallpaperUseCase(mockSettings, appStore).invoke()
-
-            assertEquals(Wallpaper.Default, appStore.state.wallpaperState.currentWallpaper)
-        }
+        assertEquals(Wallpaper.EdgeToEdge, appStore.state.wallpaperState.currentWallpaper)
+    }
 
     private enum class TimeRelation {
         BEFORE,

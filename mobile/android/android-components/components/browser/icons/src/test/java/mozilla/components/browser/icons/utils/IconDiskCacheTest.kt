@@ -211,9 +211,6 @@ class IconDiskCacheTest {
         assertEquals("Hello World", String(data))
     }
 
-    private val cacheParent
-        get() = File(testContext.cacheDir, CACHE_PARENT)
-
     companion object {
         private const val CACHE_PARENT = "mozac_browser_icons"
         private const val ICONS_DIR = "icons"

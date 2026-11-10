@@ -12,16 +12,14 @@
 #include <winternl.h>
 #include <processthreadsapi.h>
 
-#include <bcrypt.h>
-#pragma comment(lib, "bcrypt.lib")
-
 #include <oleauto.h>
 #pragma comment(lib, "oleaut32.lib")
+
+#include <memory>
 
 #include "AssemblyPayloads.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/DynamicallyLinkedFunctionPtr.h"
-#include "mozilla/UniquePtr.h"
 #include "mozilla/WindowsProcessMitigations.h"
 #include "nsWindowsDllInterceptor.h"
 #include "nsWindowsHelpers.h"
@@ -318,7 +316,7 @@ template <typename OrigFuncT, size_t N, typename PredicateT, typename... Args>
 bool TestHook(const char (&dll)[N], const char* func, PredicateT&& aPred,
               Args&&... aArgs) {
   auto orig_func(
-      mozilla::MakeUnique<WindowsDllInterceptor::FuncHookType<OrigFuncT>>());
+      std::make_unique<WindowsDllInterceptor::FuncHookType<OrigFuncT>>());
   wchar_t dllW[N];
   std::copy(std::begin(dll), std::end(dll), std::begin(dllW));
 
@@ -446,7 +444,7 @@ bool TestHook(const char (&dll)[N], const char* func, PredicateT&& aPred,
 template <typename OrigFuncT, size_t N, typename PredicateT>
 bool TestDetour(const char (&dll)[N], const char* func, PredicateT&& aPred) {
   auto orig_func(
-      mozilla::MakeUnique<WindowsDllInterceptor::FuncHookType<OrigFuncT>>());
+      std::make_unique<WindowsDllInterceptor::FuncHookType<OrigFuncT>>());
   wchar_t dllW[N];
   std::copy(std::begin(dll), std::end(dll), std::begin(dllW));
 
@@ -840,6 +838,9 @@ MOZ_GLOBINIT struct TestCase {
     TestCase("RexAndWithoutSib", NoStubAddressCheck),
     TestCase("JmpInsideEarlyBytes", ExpectedFail),
     TestCase("CallInsideEarlyBytes", ExpectedFail),
+    TestCase("StoreR10RipRelative", ExpectedFail),
+    TestCase("LoadRspRipRelative", ExpectedFail),
+    TestCase("RexCmpRipRelativeSpl", ExpectedFail),
 #  elif defined(_M_IX86)
     // Skip the stub address check as we always generate a trampoline for x86.
     TestCase("PushRet", NoStubAddressCheck,
@@ -1220,7 +1221,7 @@ bool TestSpareBytesAfterDetour() {
   interceptor.Init("TestDllInterceptor.exe");
   InterceptorFunction& interceptorFunc = InterceptorFunction::Create();
   auto orig_func(
-      mozilla::MakeUnique<WindowsDllInterceptor::FuncHookType<void (*)()>>());
+      std::make_unique<WindowsDllInterceptor::FuncHookType<void (*)()>>());
 
   bool successful = orig_func->Set(
       interceptor, "SpareBytesAfterDetour",
@@ -1282,7 +1283,7 @@ bool TestSpareBytesAfterDetourFor10BytePatch() {
   InterceptorFunction& interceptorFunc = InterceptorFunction::Create();
 
   auto orig_func(
-      mozilla::MakeUnique<ShortInterceptor::FuncHookType<void (*)()>>());
+      std::make_unique<ShortInterceptor::FuncHookType<void (*)()>>());
   bool successful = orig_func->SetDetour(
       interceptor, "SpareBytesAfterDetourFor10BytePatch",
       reinterpret_cast<void (*)()>(interceptorFunc.GetFunction()));
@@ -1366,6 +1367,8 @@ bool TestDynamicCodePolicy() {
 }
 
 #if defined(_M_X64)
+static uint64_t gXorOperands[] = {0, kRipRelativeValue};
+
 constexpr unsigned char kTestValue = 0xcc;
 
 bool TestIsEqualToGlobalValue() {
@@ -1504,6 +1507,37 @@ extern "C" int wmain(int argc, wchar_t* argv[]) {
                        true, kTestValue) &&
       // ... and also after hooking.
       TestIsEqualToGlobalValue() &&
+      TEST_HOOK("TestDllInterceptor.exe", LoadRaxRipRelative, Equals,
+                kRipRelativeValue) &&
+      TEST_HOOK("TestDllInterceptor.exe", LoadR10RipRelative, Equals,
+                kRipRelativeValue) &&
+      TEST_HOOK("TestDllInterceptor.exe", LoadR8RipRelative, Equals,
+                kRipRelativeValue) &&
+      TEST_HOOK("TestDllInterceptor.exe", LoadR11RexWRBRipRelative, Equals,
+                kRipRelativeValue) &&
+      TEST_HOOK("TestDllInterceptor.exe", LoadRdxRexWBRipRelative, Equals,
+                kRipRelativeValue) &&
+      TEST_HOOK("TestDllInterceptor.exe", LoadR12RipRelative, Equals,
+                kRipRelativeValue) &&
+      TEST_HOOK("TestDllInterceptor.exe", LoadR13RipRelative, Equals,
+                kRipRelativeValue) &&
+      TEST_HOOK("TestDllInterceptor.exe", LoadRbpRipRelative, Equals,
+                kRipRelativeValue) &&
+      TEST_HOOK("TestDllInterceptor.exe", LeaR8RipRelative, Equals,
+                kRipRelativeValue) &&
+      TEST_HOOK("TestDllInterceptor.exe", LeaRdxRexWBRipRelative, Equals,
+                kRipRelativeValue) &&
+      TEST_HOOK("TestDllInterceptor.exe", RexWIndirectJump, Equals,
+                kRipRelativeValue) &&
+      TEST_HOOK("TestDllInterceptor.exe", RexWIndirectCall, Equals,
+                ~kRipRelativeValue) &&
+      TEST_HOOK_PARAMS("TestDllInterceptor.exe", XorWithMemoryOperand, Equals,
+                       kRipRelativeValue & 0xffffffffULL, gXorOperands) &&
+      TEST_HOOK_PARAMS("TestDllInterceptor.exe", XorRexRBWithMemoryOperand,
+                       Equals, kRipRelativeValue & 0xffffffffULL, 0, 0, 0,
+                       gXorOperands) &&
+      TEST_HOOK("TestDllInterceptor.exe", CmpImm8RipRelativeBytePtr, Equals,
+                true) &&
 #endif
 #ifdef _M_IX86
       // We keep this test to hook complex code on x86. (Bug 850957)
@@ -1559,8 +1593,6 @@ extern "C" int wmain(int argc, wchar_t* argv[]) {
 #if !defined(_M_ARM64)
       TEST_HOOK("user32.dll", SetCursorPos, NotEquals, FALSE) &&
 #endif
-      TEST_HOOK("bcrypt.dll", BCryptGenRandom, Equals,
-                static_cast<NTSTATUS>(STATUS_INVALID_HANDLE)) &&
       TEST_HOOK("advapi32.dll", RtlGenRandom, Equals, TRUE) &&
       TEST_HOOK_PARAMS("oleaut32.dll", VariantClear, Equals, S_OK, &var) &&
 #if !defined(_M_ARM64)

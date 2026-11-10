@@ -11,6 +11,9 @@ JOB_CHOICES = {
     "android-x86_64-debug",
     "android-aarch64-opt",
     "android-aarch64-debug",
+    "android-arm-appservices-opt",
+    "android-x86_64-appservices-opt",
+    "android-aarch64-appservices-opt",
     "linux64-opt",
     "linux64-debug",
     "linux64-aarch64-opt",
@@ -26,3 +29,15 @@ JOB_CHOICES = {
     "win64-aarch64-opt",
     "win64-aarch64-debug",
 }
+
+GECKO_NIGHTLY_TREES = [
+    "mozilla-central",
+    "integration/autoland",
+]
+
+# The list below should be updated when we have new ESRs.
+GECKO_ESR_TREES = [
+    "releases/mozilla-esr153",
+    "releases/mozilla-esr140",
+    "releases/mozilla-esr115",
+]

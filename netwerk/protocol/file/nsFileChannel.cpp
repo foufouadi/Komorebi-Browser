@@ -342,7 +342,7 @@ static nsresult MakeWindowsDriveListingStream(nsIInputStream** aResult,
       break;
     }
     len = result;
-    buf = MakeUnique<WCHAR[]>(len);
+    buf = std::make_unique<WCHAR[]>(len);
   }
 
   nsCString listing;
@@ -572,7 +572,7 @@ nsresult nsFileChannel::MaybeSendFileOpenNotification() {
 
 /* static */
 nsresult nsFileChannel::DoNotifyFileChannelOpened(
-    const nsACString& aRemoteType,
+    const mozilla::dom::RemoteType& aRemoteType,
     const mozilla::net::FileChannelInfo& aFileChannelInfo) {
   nsCOMPtr<nsIObserverService> obsService = components::Observer::Service();
   if (!obsService) {

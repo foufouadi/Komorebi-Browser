@@ -59,6 +59,7 @@
 #include "nsAttrValueInlines.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsCSSProps.h"
+#include "nsCharSeparatedTokenizer.h"
 #include "nsContentUtils.h"
 #include "nsDOMTokenList.h"
 #include "nsDeviceContext.h"
@@ -378,8 +379,8 @@ const StyleLockedDeclarationBlock* Gecko_GetStyleAttrDeclarationBlock(
   return aElement->GetInlineStyleDeclaration();
 }
 
-const StyleLockedDeclarationBlock*
-Gecko_GetHTMLPresentationAttrDeclarationBlock(const Element* aElement) {
+const StyleLockedDeclarationBlock* Gecko_GetMappedAttributeDeclarations(
+    const Element* aElement) {
   return aElement->GetMappedAttributeStyle();
 }
 
@@ -390,6 +391,12 @@ const StyleLockedDeclarationBlock* Gecko_GetViewTransitionDynamicRule(
     return nullptr;
   }
   return vt->GetDynamicRuleFor(*aElement);
+}
+
+void Gecko_GetSubmitString(const Document* aDocument, nsAString* aResult) {
+  MOZ_ASSERT(NS_IsMainThread());
+  nsContentUtils::GetMaybeLocalizedString(PropertiesFile::FORMS_PROPERTIES,
+                                          "Submit", aDocument, *aResult);
 }
 
 const StyleLockedDeclarationBlock* Gecko_GetExtraContentStyleDeclarations(
@@ -539,27 +546,28 @@ void Gecko_UpdateAnimations(const Element* aElement,
   // Handle timeline scopes first, because our own scroll/view-linked animations
   // may be affected.
   if (aTasks & UpdateAnimationsTasks::TimelineScopes) {
-    presContext->TimelineManager()->UpdateTimelineScopes(element,
-                                                         aComputedData);
-    // We could try to limit the impact here, at least for changes involving not
-    // `all`. However, defer any such optimization until after bug 2024012.
-    presContext->AnimationManager()->UpdateAllNamedTimelineAnimations();
+    presContext->TimelineManager()->UpdateTimelineScopes(
+        const_cast<Element*>(element), pseudoRequest, aComputedData);
   }
 
   // Handle scroll/view timelines first because CSS animations may refer to the
-  // timeline defined by itself.
+  // timeline defined by itself. Other animations referring to the affected
+  // names are updated once the traversal is done, see
+  // nsAnimationManager::FlushPendingNamedTimelineUpdates().
   if (aTasks & UpdateAnimationsTasks::ScrollTimelines) {
     const auto affected = presContext->TimelineManager()->UpdateTimelines(
         const_cast<Element*>(element), pseudoRequest, aComputedData,
         TimelineManager::ProgressTimelineType::Scroll);
-    presContext->AnimationManager()->UpdateNamedTimelineAnimations(affected);
+    presContext->AnimationManager()->MarkNamedTimelineAnimationsForUpdate(
+        affected);
   }
 
   if (aTasks & UpdateAnimationsTasks::ViewTimelines) {
     const auto affected = presContext->TimelineManager()->UpdateTimelines(
         const_cast<Element*>(element), pseudoRequest, aComputedData,
         TimelineManager::ProgressTimelineType::View);
-    presContext->AnimationManager()->UpdateNamedTimelineAnimations(affected);
+    presContext->AnimationManager()->MarkNamedTimelineAnimationsForUpdate(
+        affected);
   }
 
   if (aTasks & UpdateAnimationsTasks::CSSAnimations) {
@@ -610,6 +618,14 @@ void Gecko_UpdateAnimations(const Element* aElement,
         const_cast<Element*>(element), pseudoRequest,
         EffectCompositor::RestyleType::Standard,
         EffectCompositor::CascadeLevel::Animations);
+  }
+}
+
+void Gecko_FlushPendingNamedTimelineUpdates(const Element* aRoot) {
+  MOZ_ASSERT(aRoot);
+  if (nsPresContext* presContext =
+          nsContentUtils::GetContextForContent(aRoot)) {
+    presContext->AnimationManager()->FlushPendingNamedTimelineUpdates();
   }
 }
 
@@ -794,11 +810,15 @@ bool Gecko_MatchViewTransitionClass(
   const Document* doc = aElement->OwnerDoc();
   MOZ_ASSERT(doc);
   const ViewTransition* vt = doc->GetActiveViewTransition();
-  MOZ_ASSERT(
-      vt, "We should have an active view transition for this pseudo-element");
-
+  if (!vt) {
+    // We can get here while lazily resolving the style of a named view
+    // transition pseudo-element that doesn't exist.
+    return false;
+  }
   nsAtom* name = Gecko_GetImplementedPseudoIdentifier(aElement);
-  MOZ_ASSERT(name);
+  if (!name) {
+    return false;
+  }
   return vt->MatchClassList(name, *aPtNameAndClassSelector);
 }
 
@@ -833,20 +853,6 @@ bool Gecko_HasActiveViewTransitionTypes(
     }
   }
   return false;
-}
-
-nsAtom* Gecko_GetXMLLangValue(const Element* aElement) {
-  const nsAttrValue* attr =
-      aElement->GetParsedAttr(nsGkAtoms::lang, kNameSpaceID_XML);
-
-  if (!attr) {
-    return nullptr;
-  }
-
-  MOZ_ASSERT(attr->Type() == nsAttrValue::eAtom);
-
-  RefPtr<nsAtom> atom = attr->GetAtomValue();
-  return atom.forget().take();
 }
 
 const PreferenceSheet::Prefs* Gecko_GetPrefSheetPrefs(const Document* aDoc) {
@@ -962,7 +968,11 @@ SERVO_IMPL_ELEMENT_ATTR_MATCHING_FUNCTIONS(Gecko_Snapshot,
 #undef SERVO_IMPL_ELEMENT_ATTR_MATCHING_FUNCTIONS
 
 nsAtom* Gecko_Atomize(const char* aString, uint32_t aLength) {
-  return NS_Atomize(nsDependentCSubstring(aString, aLength)).take();
+  nsDependentCSubstring str(aString, aLength);
+  if (NS_IsMainThread()) {
+    return NS_AtomizeMainThread(str).take();
+  }
+  return NS_Atomize(str).take();
 }
 
 nsAtom* Gecko_Atomize16(const nsAString* aString) {
@@ -977,7 +987,8 @@ void Gecko_nsFont_InitSystem(nsFont* aDest, StyleSystemFont aFontId,
                              const nsStyleFont* aFont,
                              const Document* aDocument) {
   const nsFont& defaultVariableFont =
-      aDocument->GetFontPrefsForLang(aFont->mLanguage)->mDefaultVariableFont;
+      aDocument->GetFontPrefsForLang(aFont->GetLangAtom())
+          ->mDefaultVariableFont;
 
   // We have passed uninitialized memory to this function,
   // initialize it. We can't simply return an nsFont because then
@@ -1036,7 +1047,7 @@ void Gecko_SetFontPaletteOverride(
     return;
   }
   aValues->mOverrides.AppendElement(gfx::FontPaletteValueSet::OverrideColor{
-      uint32_t(aIndex), gfx::sRGBColor::FromABGR(aColor->ToColor())});
+      uint32_t(aIndex), aColor->ToColor()});
 }
 
 void Gecko_EnsureImageLayersLength(nsStyleImageLayers* aLayers, size_t aLen,
@@ -1236,16 +1247,6 @@ bool Gecko_IsURIInList(const URLExtraData* aData, const nsACString* aList) {
                                      PromiseFlatCString(*aList));
 }
 
-void Gecko_nsStyleFont_SetLang(nsStyleFont* aFont, nsAtom* aAtom) {
-  aFont->mLanguage = dont_AddRef(aAtom);
-  aFont->mExplicitLanguage = true;
-}
-
-void Gecko_nsStyleFont_CopyLangFrom(nsStyleFont* aFont,
-                                    const nsStyleFont* aSource) {
-  aFont->mLanguage = aSource->mLanguage;
-}
-
 Length Gecko_nsStyleFont_ComputeMinSize(const nsStyleFont* aFont,
                                         const Document* aDocument) {
   // Don't change font-size:0, since that would un-hide hidden text.
@@ -1257,7 +1258,7 @@ Length Gecko_nsStyleFont_ComputeMinSize(const nsStyleFont* aFont,
     return {0};
   }
   Length minFontSize =
-      aDocument->GetFontPrefsForLang(aFont->mLanguage)->mMinimumFontSize;
+      aDocument->GetFontPrefsForLang(aFont->GetLangAtom())->mMinimumFontSize;
   if (minFontSize.ToCSSPixels() <= 0.0f) {
     return {0};
   }
@@ -1291,12 +1292,14 @@ void ShutdownServo() {
   URLExtraData::Shutdown();
 }
 
-void AssertIsMainThreadOrServoFontMetricsLocked() {
+#ifdef DEBUG
+void AssertIsMainThreadOrServoFFILocked() {
   if (!NS_IsMainThread()) {
     MOZ_ASSERT(sServoFFILock);
     sServoFFILock->AssertCurrentThreadOwns();
   }
 }
+#endif
 
 }  // namespace mozilla
 
@@ -1766,6 +1769,17 @@ uint64_t Gecko_Element_GetSubtreeBloomFilter(const Element* aElement) {
   return aElement->GetSubtreeBloomFilter();
 }
 
+uint64_t Gecko_Element_GetRandomSeed(const Element* aElement) {
+  return aElement->GetRandomSeed();
+}
+
+void Gecko_Document_GetRandomHasherKey(const Document* aDocument, uint64_t* aK0,
+                                       uint64_t* aK1) {
+  const Array<uint64_t, 2>& key = aDocument->GetRandomHasherKey();
+  *aK0 = key[0];
+  *aK1 = key[1];
+}
+
 bool StyleSingleFontFamily::IsNamedFamily(const nsAString& aFamilyName) const {
   if (!IsFamilyName()) {
     return false;
@@ -2048,4 +2062,10 @@ bool Gecko_GetAnchorPosSize(const AnchorPosResolutionParams* aParams,
   }();
   *aOut = Length::FromPixels(CSSPixel::FromAppUnits(l));
   return true;
+}
+
+bool Gecko_ScheduleIdle(void (*aFunction)(), uint32_t aTimeout) {
+  return NS_SUCCEEDED(NS_DispatchToCurrentThreadQueue(
+      NS_NewRunnableFunction("Gecko_ScheduleIdle", aFunction), aTimeout,
+      EventQueuePriority::Idle));
 }

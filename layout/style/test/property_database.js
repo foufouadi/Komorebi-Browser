@@ -1776,7 +1776,7 @@ var gCSSProperties = {
     domProp: "MozAppearance",
     domPropDisabled: true, // Bug 1977489
     inherited: false,
-    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    type: CSS_TYPE_LEGACY_SHORTHAND,
     alias_for: "appearance",
     subproperties: ["appearance"],
   },
@@ -4213,8 +4213,9 @@ var gCSSProperties = {
       "saturation",
       "color",
       "luminosity",
+      "plus-lighter",
     ],
-    invalid_values: ["none", "10px", "multiply multiply", "plus-lighter"],
+    invalid_values: ["none", "10px", "multiply multiply"],
   },
   "background-clip": {
     /*
@@ -5469,10 +5470,6 @@ var gCSSProperties = {
       "counters(bar, '.', none)",
       "counters(foo)",
       'counter(foo, ".")',
-      'attr("title")',
-      "attr('title')",
-      "attr(2)",
-      "attr(-2)",
       "counter(2)",
       "counters(-2, '.')",
       "-moz-alt-content",
@@ -7859,13 +7856,21 @@ var gCSSProperties = {
     domProp: "positionVisibility",
     inherited: false,
     type: CSS_TYPE_LONGHAND,
-    initial_values: ["anchors-visible"],
-    other_values: ["anchors-valid", "always", "no-overflow"],
+    initial_values: ["anchor-visible", "anchors-visible"],
+    other_values: [
+      "always",
+      "anchor-valid",
+      "anchors-valid",
+      "no-overflow",
+      "anchor-visible no-overflow",
+      "anchor-visible anchors-valid no-overflow",
+    ],
     invalid_values: [
       "none",
       "auto",
-      "always anchors-valid",
-      "anchors-visible always",
+      "always anchor-valid",
+      "anchor-visible always",
+      "anchor-valid anchors-valid",
     ],
   },
   quotes: {
@@ -12430,6 +12435,50 @@ var gCSSProperties = {
     alias_for: "mask-size",
     subproperties: ["mask-size"],
   },
+  "view-transition-name": {
+    domProp: "viewTransitionName",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: ["none"],
+    other_values: [
+      "all",
+      "ball",
+      "mall",
+      "color",
+      "foobar",
+      "\\32bounce",
+      "-bounce",
+      "-\\32bounce",
+      "\\32 0bounce",
+      "-\\32 0bounce",
+      "\\2bounce",
+      "-\\2bounce",
+    ],
+    invalid_values: ["auto", "abc --bounce", "10px", "rgb(1, 2, 3)"],
+  },
+  "view-transition-class": {
+    domProp: "viewTransitionClass",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: ["none"],
+    other_values: [
+      "all",
+      "ball",
+      "mall",
+      "color",
+      "foobar",
+      "\\32bounce",
+      "-bounce",
+      "-\\32bounce",
+      "\\32 0bounce",
+      "-\\32 0bounce",
+      "\\2bounce",
+      "-\\2bounce",
+      "abc abc",
+      "\\32bounce abc",
+    ],
+    invalid_values: ["abc none", "10px", "rgb(1, 2, 3)", "default"],
+  },
 }; // end of gCSSProperties
 
 if (IsCSSPropertyPrefEnabled("layout.css.line-clamp.enabled")) {
@@ -12761,18 +12810,29 @@ gCSSProperties["text-justify"] = {
   invalid_values: [],
 };
 
-var isGridTemplateMasonryValueEnabled = IsCSSPropertyPrefEnabled(
-  "layout.css.grid-template-masonry-value.enabled"
+var isDisplayGridLanesEnabled = IsCSSPropertyPrefEnabled(
+  "layout.css.display-grid-lanes.enabled"
 );
 
-if (isGridTemplateMasonryValueEnabled) {
-  gCSSProperties["masonry-auto-flow"] = {
-    domProp: "masonryAutoFlow",
+if (isDisplayGridLanesEnabled) {
+  gCSSProperties["display"].other_values.push(
+    "grid-lanes",
+    "inline-grid-lanes"
+  );
+  gCSSProperties["fit-tolerance"] = {
+    domProp: "fitTolerance",
     inherited: false,
     type: CSS_TYPE_LONGHAND,
-    initial_values: ["pack"],
-    other_values: ["pack ordered", "ordered next", "next definite-first"],
-    invalid_values: ["auto", "none", "10px", "row", "dense"],
+    initial_values: ["normal"],
+    other_values: ["infinite", "0", "1em", "4%", "calc(2px + 10%)"],
+    invalid_values: ["none", "-1px", "-1%", "1", "normal 1px", "1px infinite"],
+  };
+  gCSSProperties["flow-tolerance"] = {
+    domProp: "flowTolerance",
+    inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "fit-tolerance",
+    subproperties: ["fit-tolerance"],
   };
 }
 
@@ -13006,20 +13066,6 @@ gCSSProperties["grid-template-columns"] = {
   ],
   unbalanced_values: ["(foo] 40px"],
 };
-if (isGridTemplateMasonryValueEnabled) {
-  gCSSProperties["grid-template-columns"].other_values.push("masonry");
-  gCSSProperties["grid-template-columns"].invalid_values.push(
-    "masonry []",
-    "masonry [foo] 40px",
-    "masonry 40px",
-    "[foo] masonry",
-    "0px masonry",
-    "masonry masonry",
-    "subgrid masonry",
-    "masonry subgrid",
-    "masonry repeat(1, [])"
-  );
-}
 gCSSProperties["grid-template-rows"] = {
   domProp: "gridTemplateRows",
   inherited: false,
@@ -13102,22 +13148,6 @@ gCSSProperties["grid-template"] = {
     "subgrid / 'fizz'",
   ],
 };
-if (isGridTemplateMasonryValueEnabled) {
-  gCSSProperties["grid-template"].other_values.push(
-    "masonry / subgrid",
-    "subgrid / masonry",
-    "masonry / masonry" /* valid but behaves as 'masonry / none' */,
-    "masonry/40px 20px",
-    "subgrid [foo] [] [bar baz] / masonry",
-    "40px 20px/masonry",
-    "masonry/subgrid  [foo] [] repeat(3, [a] [b]) [bar baz]",
-    "subgrid [foo] [] [bar baz]/masonry"
-  );
-  gCSSProperties["grid-template"].invalid_values.push(
-    "masonry",
-    "masonry / 'fizz'"
-  );
-}
 
 gCSSProperties["grid"] = {
   domProp: "grid",
@@ -13495,7 +13525,7 @@ gCSSProperties["overscroll-behavior-x"] = {
   inherited: false,
   type: CSS_TYPE_LONGHAND,
   initial_values: ["auto"],
-  other_values: ["contain", "none"],
+  other_values: ["contain", "chain", "none"],
   invalid_values: ["left", "1px"],
 };
 gCSSProperties["overscroll-behavior-y"] = {
@@ -13503,7 +13533,7 @@ gCSSProperties["overscroll-behavior-y"] = {
   inherited: false,
   type: CSS_TYPE_LONGHAND,
   initial_values: ["auto"],
-  other_values: ["contain", "none"],
+  other_values: ["contain", "chain", "none"],
   invalid_values: ["left", "1px"],
 };
 gCSSProperties["overscroll-behavior-inline"] = {
@@ -13512,7 +13542,7 @@ gCSSProperties["overscroll-behavior-inline"] = {
   logical: true,
   type: CSS_TYPE_LONGHAND,
   initial_values: ["auto"],
-  other_values: ["contain", "none"],
+  other_values: ["contain", "chain", "none"],
   invalid_values: ["left", "1px"],
 };
 gCSSProperties["overscroll-behavior-block"] = {
@@ -13521,7 +13551,7 @@ gCSSProperties["overscroll-behavior-block"] = {
   logical: true,
   type: CSS_TYPE_LONGHAND,
   initial_values: ["auto"],
-  other_values: ["contain", "none"],
+  other_values: ["contain", "chain", "none"],
   invalid_values: ["left", "1px"],
 };
 gCSSProperties["overscroll-behavior"] = {
@@ -13532,9 +13562,12 @@ gCSSProperties["overscroll-behavior"] = {
   initial_values: ["auto"],
   other_values: [
     "contain",
+    "chain",
     "none",
     "contain contain",
     "contain auto",
+    "chain chain",
+    "chain auto",
     "none contain",
   ],
   invalid_values: ["left", "1px", "contain auto none", "contain nonsense"],
@@ -13854,6 +13887,24 @@ if (false) {
       "fill, default",
       "2px",
     ],
+  };
+
+  gCSSProperties["-moz-scrollbar-inset-block"] = {
+    // domProp: "MozScrollbarInsetBlock",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: ["0", "0 0"],
+    other_values: ["1px 2px", "calc(2em + 3ex)", "1px calc(2em)"],
+    invalid_values: ["auto", "20%", "-10px", "1px 2px 3px", "1px 2px 3px 4px"],
+  };
+
+  gCSSProperties["-moz-scrollbar-inset-inline"] = {
+    // domProp: "MozScrollbarInsetInline",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: ["0", "0 0"],
+    other_values: ["1px 2px", "calc(2em + 3ex)", "1px calc(2em)"],
+    invalid_values: ["auto", "20%", "-10px", "1px 2px 3px", "1px 2px 3px 4px"],
   };
 }
 
@@ -14466,6 +14517,22 @@ if (IsCSSPropertyPrefEnabled("layout.css.text-autospace.enabled")) {
   });
 }
 
+if (IsCSSPropertyPrefEnabled("layout.css.text-autospace-size.enabled")) {
+  Object.assign(gCSSProperties, {
+    "text-autospace-size": {
+      domProp: "textAutospaceSize",
+      inherited: true,
+      type: CSS_TYPE_LONGHAND,
+      applies_to_first_letter: true,
+      applies_to_first_line: true,
+      applies_to_placeholder: true,
+      initial_values: ["0.125"],
+      other_values: ["0", "0.5", "-0.25", "calc(1 / 3)"],
+      invalid_values: ["normal", "auto", "10%", "2px", "calc(1em / 4)"],
+    },
+  });
+}
+
 if (IsCSSPropertyPrefEnabled("layout.css.prefixes.transforms")) {
   Object.assign(gCSSProperties, {
     "-moz-transform": {
@@ -14577,6 +14644,39 @@ if (IsCSSPropertyPrefEnabled("layout.css.prefixes.transitions")) {
   });
 }
 
+if (IsCSSPropertyPrefEnabled("layout.css.margin-trim.enabled")) {
+  gCSSProperties["margin-trim"] = {
+    domProp: "marginTrim",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: ["none"],
+    other_values: [
+      "block",
+      "block-start",
+      "block-end",
+      "block-start block-end",
+      "block-end block-start",
+    ],
+    invalid_values: [
+      "block block",
+      "block block-start block-end",
+      "block-start block-end block",
+      "block-start block-start",
+      "block 10px",
+      "auto",
+      "left",
+      "none block",
+      "none block-start",
+      "inline",
+      "inline-start",
+      "inline-end",
+      "block inline",
+      "inline-start inline-end",
+      "block-start inline-start",
+    ],
+  };
+}
+
 if (IsCSSPropertyPrefEnabled("layout.css.field-sizing.enabled")) {
   Object.assign(gCSSProperties, {
     "field-sizing": {
@@ -14586,55 +14686,6 @@ if (IsCSSPropertyPrefEnabled("layout.css.field-sizing.enabled")) {
       initial_values: ["fixed"],
       other_values: ["content"],
       invalid_values: ["none", "auto"],
-    },
-  });
-}
-
-if (IsCSSPropertyPrefEnabled("dom.viewTransitions.enabled")) {
-  Object.assign(gCSSProperties, {
-    "view-transition-name": {
-      domProp: "viewTransitionName",
-      inherited: false,
-      type: CSS_TYPE_LONGHAND,
-      initial_values: ["none"],
-      other_values: [
-        "all",
-        "ball",
-        "mall",
-        "color",
-        "foobar",
-        "\\32bounce",
-        "-bounce",
-        "-\\32bounce",
-        "\\32 0bounce",
-        "-\\32 0bounce",
-        "\\2bounce",
-        "-\\2bounce",
-      ],
-      invalid_values: ["auto", "abc --bounce", "10px", "rgb(1, 2, 3)"],
-    },
-    "view-transition-class": {
-      domProp: "viewTransitionClass",
-      inherited: false,
-      type: CSS_TYPE_LONGHAND,
-      initial_values: ["none"],
-      other_values: [
-        "all",
-        "ball",
-        "mall",
-        "color",
-        "foobar",
-        "\\32bounce",
-        "-bounce",
-        "-\\32bounce",
-        "\\32 0bounce",
-        "-\\32 0bounce",
-        "\\2bounce",
-        "-\\2bounce",
-        "abc abc",
-        "\\32bounce abc",
-      ],
-      invalid_values: ["abc none", "10px", "rgb(1, 2, 3)", "default"],
     },
   });
 }
@@ -14710,7 +14761,7 @@ if (IsCSSPropertyPrefEnabled("layout.css.corner-shape.enabled")) {
   const cornerShapeLonghand = {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
-    initial_values: ["round"],
+    initial_values: ["round", "superellipse(1)"],
     other_values: [
       "scoop",
       "bevel",
@@ -14718,7 +14769,6 @@ if (IsCSSPropertyPrefEnabled("layout.css.corner-shape.enabled")) {
       "square",
       "squircle",
       "superellipse(0)",
-      "superellipse(1)",
       "superellipse(2)",
       "superellipse(-1)",
       "superellipse(0.5)",
@@ -14734,7 +14784,6 @@ if (IsCSSPropertyPrefEnabled("layout.css.corner-shape.enabled")) {
       "superellipse(round)",
       "superellipse(1, 2)",
       "superellipse 1",
-      "round scoop",
     ],
   };
   Object.assign(gCSSProperties, {

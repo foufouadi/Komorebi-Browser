@@ -41,6 +41,7 @@
 #include "OT/Color/COLR/colrv1-closure.hh"
 #include "OT/Color/CPAL/CPAL.hh"
 #include "hb-ot-var-fvar-table.hh"
+#include "hb-ot-var-varc-table.hh"
 #include "hb-ot-stat-table.hh"
 #include "hb-ot-math-table.hh"
 
@@ -104,8 +105,8 @@ _cmap_closure (hb_face_t	   *face,
 	       const hb_set_t	   *unicodes,
 	       hb_set_t		   *glyphset)
 {
-  OT::cmap::accelerator_t cmap (face);
-  cmap.table->closure_glyphs (unicodes, glyphset);
+  OT::cmap_accelerator_t cmap (face);
+  cmap.closure_glyphs (unicodes, glyphset);
 }
 
 static void _colr_closure (hb_subset_plan_t* plan,
@@ -117,8 +118,7 @@ static void _colr_closure (hb_subset_plan_t* plan,
   hb_set_t palette_indices, layer_indices;
   // Collect all glyphs referenced by COLRv0
   hb_set_t glyphset_colrv0;
-  for (hb_codepoint_t gid : *glyphs_colred)
-    colr.closure_glyphs (gid, &glyphset_colrv0);
+  colr.closure_glyphs (glyphs_colred, &glyphset_colrv0);
 
   glyphs_colred->union_ (glyphset_colrv0);
 
@@ -131,13 +131,6 @@ static void _colr_closure (hb_subset_plan_t* plan,
   _remap_palette_indexes (&palette_indices, &plan->colr_palettes);
 
 #ifndef HB_NO_VAR
-  if (!colr.has_var_store () || !variation_indices) return;
-
-  const OT::ItemVariationStore &var_store = colr.get_var_store ();
-  // generated inner_maps is used by ItemVariationStore serialize(), which is subset only
-  unsigned subtable_count = var_store.get_sub_table_count ();
-  generate_varstore_inner_maps (variation_indices, subtable_count, plan->colrv1_varstore_inner_maps);
-
   /* colr variation indices mapping during planning phase:
    * generate colrv1_variation_idx_delta_map. When delta set index map is not
    * included, it's a mapping from varIdx-> (new varIdx,delta). Otherwise, it's
@@ -146,21 +139,29 @@ static void _colr_closure (hb_subset_plan_t* plan,
    * Besides, we need to generate a delta set idx-> new var_idx map for updating
    * delta set index map if exists. This map will be updated again after
    * instancing. */
-  if (!plan->all_axes_pinned)
+  if (colr.has_var_store () && variation_indices)
   {
-    remap_variation_indices (var_store,
+    const OT::ItemVariationStore &var_store = colr.get_var_store ();
+    // generated inner_maps is used by ItemVariationStore serialize(), which is subset only
+    unsigned subtable_count = var_store.get_sub_table_count ();
+    generate_varstore_inner_maps (variation_indices, subtable_count, plan->colrv1_varstore_inner_maps);
+
+    if (!plan->all_axes_pinned)
+      remap_variation_indices (var_store,
                               variation_indices,
                               plan->normalized_coords,
                               false, /* no need to calculate delta for COLR during planning */
                               plan->all_axes_pinned,
                               plan->colrv1_variation_idx_delta_map);
-
-    if (colr.has_delta_set_index_map ())
-      remap_colrv1_delta_set_index_indices (colr.get_delta_set_index_map (),
-                                             delta_set_indices,
-                                             plan->colrv1_variation_idx_delta_map,
-                                             plan->colrv1_new_deltaset_idx_varidx_map);
   }
+
+  /* Sentinel-only maps still need their delta-set indices remapped, even
+   * when there are no live variation rows or no variation store. */
+  if (!plan->all_axes_pinned && colr.has_delta_set_index_map ())
+    remap_colrv1_delta_set_index_indices (colr.get_delta_set_index_map (),
+                                         delta_set_indices,
+                                         plan->colrv1_variation_idx_delta_map,
+                                         plan->colrv1_new_deltaset_idx_varidx_map);
 #endif
 }
 
@@ -247,7 +248,7 @@ _populate_unicodes_to_retain (const hb_set_t *unicodes_in,
   hb_set_t unicodes = _unicode_closure(unicodes_in,
     !(plan->flags & HB_SUBSET_FLAGS_NO_BIDI_CLOSURE));
 
-  OT::cmap::accelerator_t cmap (plan->source);
+  OT::cmap_accelerator_t cmap (plan->source);
   unsigned size_threshold = plan->source->get_num_glyphs ();
 
   if (glyphs->is_empty () && unicodes.get_population () < size_threshold)
@@ -390,6 +391,7 @@ _glyf_add_gid_and_children (const OT::glyf_accelerator_t &glyf,
 			    hb_codepoint_t gid,
 			    hb_set_t *gids_to_retain,
 			    int operation_count,
+			    int64_t &bytes_budget,
 			    unsigned depth = 0)
 {
   /* Check if is already visited */
@@ -397,17 +399,24 @@ _glyf_add_gid_and_children (const OT::glyf_accelerator_t &glyf,
 
   gids_to_retain->add (gid);
 
+  auto glyph = glyf.glyph_for_gid (gid);
+
+  /* Every retained glyph is walked here and again when glyf is subset.
+   * Charge its untrimmed bytes before the operation count can bail out,
+   * so that a glyph retained past that point is still paid for. */
+  if (unlikely (!hb_budget_spend (bytes_budget, HB_BUDGET_1, glyph.get_bytes ().length)))
+    return operation_count;
+
   if (unlikely (depth++ > HB_MAX_NESTING_LEVEL)) return operation_count;
   if (unlikely (--operation_count < 0)) return operation_count;
-
-  auto glyph = glyf.glyph_for_gid (gid);
 
   for (auto &item : glyph.get_composite_iterator ())
     operation_count =
       _glyf_add_gid_and_children (glyf,
-				  item.get_gid (),
+				  item.get_gid (glyph.is_extended ()),
 				  gids_to_retain,
 				  operation_count,
+				  bytes_budget,
 				  depth);
 
   return operation_count;
@@ -475,19 +484,47 @@ _populate_gids_to_retain (hb_subset_plan_t* plan,
 
   plan->_glyphset_colred = cur_glyphset;
 
-  // XXX TODO VARC closure / subset
+#ifndef HB_NO_VAR_COMPOSITES
+  if (!drop_tables->has (OT::VARC::tableTag))
+  {
+    if (unlikely (!plan->source->table.VARC->closure_glyphs (&cur_glyphset)))
+    {
+      plan->check_success (false);
+      return;
+    }
+    _remove_invalid_gids (&cur_glyphset, plan->source->get_num_glyphs ());
+  }
+#endif
+
+  plan->_glyphset_varced = cur_glyphset;
 
   _nameid_closure (plan, drop_tables);
   /* Populate a full set of glyphs to retain by adding all referenced
    * composite glyphs. */
   if (glyf.has_data ())
+  {
+    /* With a monotonic loca the retained glyphs add up to at most the
+     * table; loca need not be monotonic though, and any number of glyph
+     * IDs may alias the same bytes, each of them trimmed separately. */
+    int64_t bytes_budget = (int64_t) glyf.get_table_length () *
+			   HB_SUBSET_GLYF_MAX_BYTES_FACTOR;
     for (hb_codepoint_t gid : cur_glyphset)
       _glyf_add_gid_and_children (glyf, gid, &plan->_glyphset,
-				  cur_glyphset.get_population () * HB_MAX_COMPOSITE_OPERATIONS_PER_GLYPH);
+				  cur_glyphset.get_population () * HB_MAX_COMPOSITE_OPERATIONS_PER_GLYPH,
+				  bytes_budget);
+    if (unlikely (!plan->check_success (bytes_budget >= 0)))
+      return;
+  }
   else
     plan->_glyphset.union_ (cur_glyphset);
 #ifndef HB_NO_SUBSET_CFF
-  if (!plan->accelerator || plan->accelerator->has_seac)
+  /* Component closure cannot add anything when all valid glyphs are already
+   * retained. A new accelerator still needs an accurate has_seac value for
+   * future partial subsets. */
+  bool all_glyphs_retained =
+    cur_glyphset.get_population () == plan->source->get_num_glyphs ();
+  if ((!all_glyphs_retained || plan->attach_accelerator_data) &&
+      (!plan->accelerator || plan->accelerator->has_seac))
   {
     bool has_seac = false;
     if (cff->is_valid ())
@@ -508,18 +545,30 @@ _populate_gids_to_retain (hb_subset_plan_t* plan,
 #endif
 }
 
-static void
+static bool
 _create_glyph_map_gsub (const hb_set_t* glyph_set_gsub,
                         const hb_map_t* glyph_map,
-                        hb_map_t* out)
+                        hb_map_t* out,
+                        hb_vector_t<hb_codepoint_t>* out_flat)
 {
+  if (unlikely (glyph_set_gsub->in_error ()))
+    return false;
+
+  hb_codepoint_t max_gid = HB_SET_VALUE_INVALID;
+  hb_set_previous (glyph_set_gsub, &max_gid);
+  unsigned flat_size = max_gid == HB_SET_VALUE_INVALID ? 0 : max_gid + 1;
+  if (unlikely (!out_flat->resize_dirty (flat_size)))
+    return false;
+  hb_memset (out_flat->arrayZ, 0xFF, flat_size * sizeof (hb_codepoint_t));
+
   out->alloc (glyph_set_gsub->get_population ());
-  + hb_iter (glyph_set_gsub)
-  | hb_map ([&] (hb_codepoint_t gid) {
-    return hb_codepoint_pair_t (gid, glyph_map->get (gid));
-  })
-  | hb_sink (out)
-  ;
+  for (auto gid : *glyph_set_gsub)
+  {
+    hb_codepoint_t new_gid = glyph_map->get (gid);
+    out->set (gid, new_gid);
+    out_flat->arrayZ[gid] = new_gid;
+  }
+  return !out->in_error ();
 }
 
 static bool
@@ -570,11 +619,27 @@ _create_old_gid_to_new_gid_map (const hb_face_t *face,
         continue;
       }
 
+      if (unlikely (!*new_gid))
+      {
+        DEBUG_MSG (SUBSET, nullptr, "Glyph id 0 is reserved for .notdef.");
+        return false;
+      }
+
       if (*new_gid > max_glyph)
         max_glyph = *new_gid;
       new_to_old_gid_list->push (hb_pair (*new_gid, old_gid));
     }
     new_to_old_gid_list->qsort ();
+
+    // MAXP has the widest glyph-count field, HBUINT24. Include the unmapped
+    // glyphs and the initial .notdef slot before assigning their ids below.
+    constexpr unsigned max_num_glyphs = (1u << (8 * OT::HBUINT24::static_size)) - 1;
+    if (unlikely (max_glyph >= max_num_glyphs ||
+                  remaining.get_population () > max_num_glyphs - (max_glyph + 1)))
+    {
+      DEBUG_MSG (SUBSET, nullptr, "The provided custom glyph mapping is out of range.");
+      return false;
+    }
 
     // Anything that wasn't mapped by the requested mapping should
     // be placed after the requested mapping.
@@ -648,6 +713,7 @@ hb_subset_plan_t::hb_subset_plan_t (hb_face_t *face,
   all_axes_pinned = false;
   pinned_at_default = true;
   has_gdef_varstore = false;
+  colrv1_constant_after_pinning = -1;
   has_avar2 = false;
 
 #ifdef HB_EXPERIMENTAL_API
@@ -678,9 +744,30 @@ hb_subset_plan_t::hb_subset_plan_t (hb_face_t *face,
   if (unlikely (in_error ()))
     return;
 
+#ifndef HB_NO_VAR_COMPOSITES
+  if (!input->sets.drop_tables->has (OT::VARC::tableTag) &&
+      input->sets.no_subset_tables->has (OT::VARC::tableTag) &&
+      !(input->flags & HB_SUBSET_FLAGS_RETAIN_GIDS) &&
+      face->table.VARC->has_data ())
+  {
+    check_success (false);
+    return;
+  }
+#endif
+
 #ifndef HB_NO_VAR
   if (!check_success (normalize_axes_location (face, this)))
       return;
+#endif
+#ifndef HB_NO_VAR_COMPOSITES
+  if (!user_axes_location.is_empty () &&
+      !input->sets.drop_tables->has (OT::VARC::tableTag) &&
+      input->sets.no_subset_tables->has (OT::VARC::tableTag) &&
+      face->table.VARC->has_data ())
+  {
+    check_success (false);
+    return;
+  }
 #endif
 
   _populate_unicodes_to_retain (input->sets.unicodes, input->sets.glyphs, this);
@@ -710,10 +797,12 @@ hb_subset_plan_t::hb_subset_plan_t (hb_face_t *face,
   }
 #endif
 
-  _create_glyph_map_gsub (
+  if (!check_success (_create_glyph_map_gsub (
       &_glyphset_gsub,
       glyph_map,
-      &glyph_map_gsub);
+      &glyph_map_gsub,
+      &glyph_map_gsub_flat)))
+    return;
 
   // Now that we have old to new gid map update the unicode to new gid list.
   for (unsigned i = 0; i < unicode_to_new_gid_list.length; i++)

@@ -44,7 +44,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "moz-src:///browser/components/customizableui/CustomizableUI.sys.mjs",
   ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
   FxAccounts: "resource://gre/modules/FxAccounts.sys.mjs",
-  GenAI: "resource:///modules/GenAI.sys.mjs",
+  GenAI: "moz-src:///browser/components/genai/GenAI.sys.mjs",
   ICON_CATALOG:
     // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
     "moz-src:///browser/components/shell/CustomIconManager.sys.mjs",
@@ -53,7 +53,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "moz-src:///browser/components/ipprotection/IPProtection.sys.mjs",
   MessagingSystemAllowlists:
     "resource://messaging-system/lib/MessagingSystemAllowlists.sys.mjs",
-  MigrationUtils: "resource:///modules/MigrationUtils.sys.mjs",
+  MigrationUtils:
+    "moz-src:///browser/components/migration/MigrationUtils.sys.mjs",
   ON_SERVICE_ENABLED_NOTIFICATION:
     "resource://gre/modules/FxAccountsCommon.sys.mjs",
   PlacesTransactions: "resource://gre/modules/PlacesTransactions.sys.mjs",
@@ -61,16 +62,22 @@ ChromeUtils.defineESModuleGetters(lazy, {
   PlacesUIUtils: "moz-src:///browser/components/places/PlacesUIUtils.sys.mjs",
   PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
+  PushNotificationHelper:
+    "resource://gre/modules/PushNotificationHelper.sys.mjs",
   // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
-  Referrals: "resource:///modules/referrals/Referrals.sys.mjs",
+  Referrals: "moz-src:///browser/components/referrals/Referrals.sys.mjs",
+  ResetProfile: "resource://gre/modules/ResetProfile.sys.mjs",
   // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
   SelectableProfileService:
     "resource:///modules/profiles/SelectableProfileService.sys.mjs",
-  SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
+  SessionStore:
+    "moz-src:///browser/components/sessionstore/SessionStore.sys.mjs",
+  // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
+  SharingUtils: "moz-src:///browser/components/sharing/SharingUtils.sys.mjs",
   // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
   Spotlight: "resource:///modules/asrouter/Spotlight.sys.mjs",
   // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
-  TaskbarTabs: "resource:///modules/taskbartabs/TaskbarTabs.sys.mjs",
+  TaskbarTabs: "moz-src:///browser/components/taskbartabs/TaskbarTabs.sys.mjs",
   UIState: "resource://services-sync/UIState.sys.mjs",
   UITour: "moz-src:///browser/components/uitour/UITour.sys.mjs",
   LaunchOnLogin: "resource://gre/modules/LaunchOnLogin.sys.mjs",
@@ -150,9 +157,14 @@ export const SpecialMessageActions = {
    *   confirmed the action, so it will hang until the prompt is dismissed. This
    *   parameter makes the API resolve after the prompt is shown, but before the
    *   user has confirmed or rejected the action. Defaults to false.
+   * @param {boolean} options.promptOnly Only pin through the OS prompt that
+   *   asks for the user's consent, never through an API that may pin silently.
+   *   Defaults to false.
    */
-  pinFirefoxToTaskbar(window, { privatePin, fireAndForget } = {}) {
-    return window.getShellService().pinToTaskbar(privatePin, fireAndForget);
+  pinFirefoxToTaskbar(window, { privatePin, fireAndForget, promptOnly } = {}) {
+    return window
+      .getShellService()
+      .pinToTaskbar(privatePin, fireAndForget, promptOnly);
   },
 
   /**
@@ -167,12 +179,13 @@ export const SpecialMessageActions = {
    * requiring the site to be open or previously visited.
    *
    * Returns true if the tab was newly created and pinned, null if a Taskbar
-   * Tab for this URL already existed, or false if an error occurred.
+   * Tab for this URL already existed, or false if an error occurred or the
+   * user declined the OS pin prompt.
    *
-   * NOTE: findOrCreateTaskbarTab resolves once the taskbar tab is registered,
-   * not once it has actually been pinned. The internal pin step (and the
-   * Windows 11 OS pin dialog) runs after the promise settles, so we return
-   * before the user has accepted or rejected the OS prompt.
+   * Waits for the pin attempt, including the Windows 11 OS pin dialog, to
+   * complete. If the user declines and the Taskbar Tab was created by this
+   * call, it is deleted along with its shortcut, so the site is not treated
+   * as already pinned and can be offered again later.
    *
    * @param {object} data
    * @param {string} data.url - The URL of the web app (HTTP/HTTPS only).
@@ -201,11 +214,20 @@ export const SpecialMessageActions = {
     };
 
     try {
-      await lazy.TaskbarTabs.findOrCreateTaskbarTab(uri, 0, {
-        manifest,
-        ensurePinned: true,
-      });
-      return true;
+      let { created, taskbarTab, pin } =
+        await lazy.TaskbarTabs.findOrCreateTaskbarTab(uri, 0, {
+          manifest,
+          ensurePinned: true,
+        });
+      let { rejected } = await pin;
+      if (rejected) {
+        if (created) {
+          await lazy.TaskbarTabs.removeTaskbarTab(taskbarTab.id);
+        }
+        return false;
+      }
+      // If an existing tab is found, don't report that one was created.
+      return created ? true : null;
     } catch (e) {
       console.error("Failed to pin Taskbar Tab:", e);
       return false;
@@ -254,6 +276,18 @@ export const SpecialMessageActions = {
     await window
       .getShellService()
       .setAsDefaultProtocolHandler(protocol, url, openInFirefox);
+  },
+
+  /**
+   * Set browser as the OS default browser via the "Open with" picker
+   * (IOpenWithLauncher), guaranteeing an OS-level prompt. Claiming the https
+   * protocol handler this way sets the whole web-browser default (http and
+   * https) with a single picker. Windows only.
+   *
+   * @param {Window} window Reference to a window object
+   */
+  async setDefaultBrowserViaOpenWith(window) {
+    await window.getShellService().setAsDefaultProtocolHandler("https");
   },
 
   /**
@@ -378,6 +412,7 @@ export const SpecialMessageActions = {
     const allowedPrefs = [
       "browser.aboutwelcome.didSeeFinalScreen",
       "browser.sessionstore.newTabOnRestore",
+      "browser.smartwindow.agent.monitorAnnouncement",
       "browser.smartwindow.enabled",
       "browser.smartwindow.firstrun.hasCompleted",
       "browser.smartwindow.firstrun.modelChoice",
@@ -394,11 +429,11 @@ export const SpecialMessageActions = {
       "browser.migrate.content-modal.about-welcome-behavior",
       "browser.migrate.content-modal.import-all.enabled",
       "browser.migrate.preferences-entrypoint.enabled",
+      "browser.ml.chat.provider",
       "browser.shell.checkDefaultBrowser",
       "browser.shell.setDefaultGuidanceNotifications",
       "browser.startup.homepage",
       "browser.startup.page",
-      "browser.startup.windowsLaunchOnLogin.disableLaunchOnLoginPrompt",
       "browser.privateWindowSeparation.enabled",
       "browser.firefox-view.feature-tour",
       "browser.pdfjs.feature-tour",
@@ -430,6 +465,7 @@ export const SpecialMessageActions = {
     const allowedSetOnImpressionPrefs = [
       "termsofuse.firstAcceptedDate",
       "termsofuse.acceptedDate",
+      "browser.startup.couldRestoreSession.count",
     ];
 
     // allowedPrefs above is the in-tree baseline. It can be extended off-train
@@ -520,10 +556,15 @@ export const SpecialMessageActions = {
     }
     // In practice, all FxA signin flows will have a "service", because that param dictates the
     // UI shown by FxA. But to be extra cautious, this code treats it as optional.
-    let neededService = data?.extraParams?.service;
+    let extraParams = data?.extraParams;
+    let neededService = extraParams?.service;
+    if (neededService) {
+      delete extraParams.service;
+    }
     const url = await lazy.FxAccounts.config.promiseConnectAccountURI(
+      neededService || "sync",
       data?.entrypoint || "activity-stream-firstrun",
-      data?.extraParams || {}
+      extraParams || {}
     );
 
     let window = browser.documentGlobal;
@@ -765,6 +806,21 @@ export const SpecialMessageActions = {
     await lazy.CustomIconManager.apply(id);
   },
 
+  /**
+   * Turns closed-browser web notifications on or off on the user's behalf.
+   *
+   * PushNotificationHelper is only packaged on Windows, so this is a no-op on
+   * other platforms to avoid importing a module that does not exist.
+   *
+   * @param {boolean} value Whether the helper should run.
+   */
+  setClosedBrowserNotifications(value) {
+    if (AppConstants.platform !== "win") {
+      return;
+    }
+    lazy.PushNotificationHelper.setEnabled(value);
+  },
+
   async createAndOpenProfile() {
     await lazy.SelectableProfileService.createNewProfile(
       true,
@@ -846,6 +902,7 @@ export const SpecialMessageActions = {
         lazy.MigrationUtils.showMigrationWizard(window, {
           entrypoint: lazy.MigrationUtils.MIGRATION_ENTRYPOINTS.NEWTAB,
           migratorKey: action.data?.source,
+          tabModal: action.data?.tabModal,
         });
         break;
       case "OPEN_PRIVATE_BROWSER_WINDOW":
@@ -868,6 +925,17 @@ export const SpecialMessageActions = {
           }
         );
         break;
+      case "SHOW_QR_CODE": {
+        const { gBrowser } = window.top;
+        await lazy.SharingUtils.showQRCodePanel(
+          window.top,
+          gBrowser.getTabForBrowser(browser)
+            ? browser
+            : gBrowser.selectedBrowser,
+          Services.urlFormatter.formatURL(action.data.args)
+        );
+        break;
+      }
       case "OPEN_ABOUT_PAGE": {
         let aboutPageURL = new URL(`about:${action.data.args}`);
         if (!ALLOWED_ABOUT_PAGES.has(aboutPageURL.pathname)) {
@@ -901,6 +969,27 @@ export const SpecialMessageActions = {
           }
         );
         break;
+      case "OPEN_SUPPORT_PAGE": {
+        let baseURL = new URL(
+          Services.urlFormatter.formatURLPref("app.support.baseURL")
+        );
+        let supportPageURL = new URL(action.data.args, baseURL);
+        // The page must resolve to a URL under the support base URL.
+        if (
+          supportPageURL.origin !== baseURL.origin ||
+          !supportPageURL.pathname.startsWith(baseURL.pathname)
+        ) {
+          throw new Error(
+            `SpecialMessageActions: OPEN_SUPPORT_PAGE disallows ${action.data.args}`
+          );
+        }
+        window.openLinkIn(supportPageURL.href, action.data.where || "current", {
+          private: false,
+          triggeringPrincipal:
+            Services.scriptSecurityManager.createNullPrincipal({}),
+        });
+        break;
+      }
       case "OPEN_APPLICATIONS_MENU":
         lazy.UITour.showMenu(window, action.data.args);
         break;
@@ -943,6 +1032,9 @@ export const SpecialMessageActions = {
       case "SET_DEFAULT_BROWSER":
         await this.setDefaultBrowser(window);
         break;
+      case "SET_DEFAULT_BROWSER_OPEN_WITH":
+        await this.setDefaultBrowserViaOpenWith(window);
+        break;
       case "SET_DEFAULT_PDF_HANDLER":
         await this.setDefaultPDFHandler(
           window,
@@ -969,6 +1061,12 @@ export const SpecialMessageActions = {
         break;
       case "REMOVE_LAUNCH_ON_LOGIN":
         await lazy.LaunchOnLogin.disable();
+        break;
+      case "ENABLE_CLOSED_BROWSER_NOTIFICATIONS":
+        this.setClosedBrowserNotifications(true);
+        break;
+      case "DISABLE_CLOSED_BROWSER_NOTIFICATIONS":
+        this.setClosedBrowserNotifications(false);
         break;
       case "CREATE_GROUP_FROM_CURRENT_TAB": {
         let tab =
@@ -1016,7 +1114,12 @@ export const SpecialMessageActions = {
           break;
         }
         const data = action.data;
+        const service = data?.extraParams?.service;
+        if (service) {
+          delete data.extraParams.service;
+        }
         const url = await lazy.FxAccounts.config.promiseConnectAccountURI(
+          service || "sync",
           data && data.entrypoint,
           (data && data.extraParams) || {}
         );
@@ -1033,7 +1136,22 @@ export const SpecialMessageActions = {
         return this.fxaSignInFlow(action.data, browser);
       case "FXA_AIWINDOW_SIGNIN_FLOW":
         /** @returns {Promise<boolean>} */
-        return lazy.AIWindow.launchWindow(browser);
+        return lazy.AIWindow.launchWindow(
+          browser,
+          false,
+          action.data?.source ?? "asrouter"
+        );
+      case "OPEN_SMARTWINDOW_MONITOR_CREATE":
+        lazy.AIWindowUI.showMonitorCreateForm(window);
+        break;
+      case "SUBMIT_SMARTWINDOW_PROMPT": {
+        const { prompt, source = "fxms" } = action.data;
+        await lazy.AIWindowUI.submitToSidebar(window, prompt, {
+          submitType: source,
+          aitabSource: source,
+        });
+        break;
+      }
       case "OPEN_PROTECTION_PANEL": {
         let { gProtectionsHandler } = window;
         gProtectionsHandler.showProtectionsPopup({});
@@ -1063,8 +1181,8 @@ export const SpecialMessageActions = {
         Services.prefs.setStringPref(DOH_DOORHANGER_DECISION_PREF, "UIOk");
         break;
       case "CANCEL":
-        // A no-op used by CFRs that minimizes the notification but does not
-        // trigger a dismiss or block (it keeps the notification around)
+        // A no-op used by some surfaces that minimizes the notification but
+        // does not trigger a dismiss or block (it keeps the notification around)
         break;
       case "CONFIGURE_HOMEPAGE":
         this.configureHomepage(action.data);
@@ -1108,6 +1226,9 @@ export const SpecialMessageActions = {
       case "SET_TERMS_OF_USE_INTERACTED":
         Services.obs.notifyObservers(null, "termsofuse:interacted");
         break;
+      case "ACCEPT_SMARTWINDOW_TOU":
+        Services.obs.notifyObservers(null, "smartwindow-tou-accepted");
+        break;
       case "CREATE_NEW_SELECTABLE_PROFILE":
         this.createAndOpenProfile();
         break;
@@ -1144,6 +1265,9 @@ export const SpecialMessageActions = {
         await window.PanelUI.showSubView(panel_id, anchor);
         break;
       }
+      case "SELECT_AND_MARK_MENU_ITEM":
+        await window.PanelUI.selectAndMarkItem([...action.data.itemIds]);
+        break;
       case "CREATE_TASKBAR_TAB": {
         let currentTab = window.gBrowser.selectedTab;
         await lazy.TaskbarTabs.moveTabIntoTaskbarTab(currentTab);
@@ -1189,6 +1313,13 @@ export const SpecialMessageActions = {
           aboutPageURL.toString(),
           action.data.where || "tab"
         );
+        break;
+      }
+      case "RESET_PROFILE": {
+        if (!lazy.ResetProfile.resetSupported()) {
+          throw new Error("Profile reset is not supported for this profile.");
+        }
+        await lazy.ResetProfile.openConfirmationDialog(window);
         break;
       }
       default:

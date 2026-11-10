@@ -16,12 +16,6 @@ struct URLExtraData;
 class CSSStyleSheet;
 }  // namespace mozilla
 
-// Forward declaration copied here since ServoBindings.h #includes nsCSSValue.h.
-extern "C" {
-mozilla::URLExtraData* Servo_CssUrlData_GetExtraData(const RawServoCssUrlData*);
-bool Servo_CssUrlData_IsLocalRef(const RawServoCssUrlData* url);
-}
-
 enum nsCSSUnit : uint32_t {
   eCSSUnit_Null = 0,  // (n/a) null unit, value is not specified
 
@@ -86,7 +80,6 @@ class nsCSSValue {
   nsCSSValue& operator=(nsCSSValue&& aCopy);
 
   bool operator==(const nsCSSValue& aOther) const;
-  bool operator!=(const nsCSSValue&) const = default;
 
   nsCSSUnit GetUnit() const { return mUnit; }
   bool IsLengthUnit() const {

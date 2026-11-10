@@ -37,6 +37,10 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CollectionItemInfo
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.collectionItemInfo
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
@@ -46,19 +50,20 @@ import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.dp
 import mozilla.components.browser.state.state.TabSessionState
 import mozilla.components.compose.base.button.IconButton
+import mozilla.components.compose.base.theme.ThemedValue
+import mozilla.components.compose.base.theme.ThemedValueProvider
+import mozilla.components.compose.draggable.ItemInteractionState
 import mozilla.components.concept.engine.utils.ABOUT_HOME_URL
 import mozilla.components.support.base.utils.MAX_URI_LENGTH
 import mozilla.components.ui.icons.R as iconsR
 import org.mozilla.fenix.R
 import org.mozilla.fenix.compose.Favicon
 import org.mozilla.fenix.compose.TabThumbnail
+import org.mozilla.fenix.compose.swipeToDismissFade
 import org.mozilla.fenix.tabstray.TabsTrayTestTag
-import org.mozilla.fenix.tabstray.browser.compose.TabItemInteractionState
 import org.mozilla.fenix.tabstray.data.TabsTrayItem
 import org.mozilla.fenix.tabstray.data.createTab
 import org.mozilla.fenix.theme.FirefoxTheme
-import org.mozilla.fenix.theme.ThemedValue
-import org.mozilla.fenix.theme.ThemedValueProvider
 
 private val TabHeaderFaviconSize = 12.dp
 
@@ -76,13 +81,15 @@ private val TabHeaderFaviconSize = 12.dp
  * @param selectionState: The tab's selection state.
  * @param shouldClickListen Whether or not the item should stop listening to click events.
  * @param onLongClick Invoked when the item is long clicked.
+ * @param itemInfo: Optional CollectionItemInfo? for a11y to read this item in a collection.
+ * @param accessibilityActions Accessibility actions offered on the item, such as reordering it.
  */
 @Composable
 fun TabGridTabItem(
     tab: TabsTrayItem.Tab,
     swipeToDismissBoxState: SwipeToDismissBoxState,
     swipingEnabled: Boolean,
-    interactionState: TabItemInteractionState,
+    interactionState: ItemInteractionState,
     onCloseClick: (TabsTrayItem.Tab) -> Unit,
     onClick: (TabsTrayItem) -> Unit,
     modifier: Modifier = Modifier,
@@ -95,6 +102,8 @@ fun TabGridTabItem(
         ),
     shouldClickListen: Boolean = true,
     onLongClick: ((TabsTrayItem) -> Unit)? = null,
+    itemInfo: CollectionItemInfo? = null,
+    accessibilityActions: List<CustomAccessibilityAction> = emptyList(),
 ) {
     // SwipeToDismissBox invokes onDismiss from a LaunchedEffect keyed on the callback, so an
     // unstable lambda would re-close the tab on every recomposition that follows the dismissal.
@@ -110,7 +119,7 @@ fun TabGridTabItem(
         onDismiss = onDismiss,
     ) {
         TabContent(
-            modifier = Modifier.fadeOnSwipeToDismiss(swipeToDismissBoxState),
+            modifier = Modifier.swipeToDismissFade(swipeToDismissBoxState),
             tab = tab,
             thumbnailSize = thumbnailSizePx,
             selectionState = selectionState,
@@ -122,6 +131,8 @@ fun TabGridTabItem(
                 ),
             onCloseTabClick = onCloseClick,
             interactionState = interactionState,
+            itemInfo = itemInfo,
+            accessibilityActions = accessibilityActions,
         )
     }
 }
@@ -136,6 +147,8 @@ fun TabGridTabItem(
  * @param clickHandler: The tab's click handler,
  * @param onCloseTabClick: Invoked when a tab is closed.
  * @param interactionState The tab item's interaction state (hover, drag, etc)
+ * @param itemInfo: Optional CollectionItemInfo? for a11y to read this item in a collection.
+ * @param accessibilityActions Accessibility actions offered on the item, such as reordering it.
  */
 @Composable
 private fun TabContent(
@@ -150,7 +163,9 @@ private fun TabContent(
         ),
     clickHandler: TabsTrayItemClickHandler,
     onCloseTabClick: ((TabsTrayItem.Tab) -> Unit),
-    interactionState: TabItemInteractionState,
+    interactionState: ItemInteractionState,
+    itemInfo: CollectionItemInfo? = null,
+    accessibilityActions: List<CustomAccessibilityAction> = emptyList(),
 ) {
     Box(
         modifier =
@@ -169,6 +184,10 @@ private fun TabContent(
                     )
                     .semantics {
                         selected = selectionState.isFocused
+                        if (itemInfo != null) collectionItemInfo = itemInfo
+                        if (accessibilityActions.isNotEmpty()) {
+                            customActions = accessibilityActions
+                        }
                     },
             shape = tabContentCardShape,
             border = tabItemConditionalBorder(selectionState),
@@ -192,10 +211,14 @@ private fun TabContent(
                         ),
                     shape = thumbnailShape,
                 ) {
-                    Thumbnail(
-                        tab = tab,
-                        size = thumbnailSize,
-                    )
+                    Box {
+                        Thumbnail(
+                            tab = tab,
+                            size = thumbnailSize,
+                        )
+
+                        MediaPlaybackIndicator(isMediaActive = tab.isMediaActive)
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(FirefoxTheme.layout.space.static50))
@@ -338,7 +361,7 @@ private data class TabGridItemPreviewState(
     val multiSelectionSelected: Boolean,
     val url: String = "www.mozilla.org",
     val title: String = "Mozilla Domain",
-    val interactionState: TabItemInteractionState = TabItemInteractionState(),
+    val interactionState: ItemInteractionState = ItemInteractionState(),
 )
 
 private val tabGridItemPreviewStateData: List<Pair<String, TabGridItemPreviewState>> =
@@ -407,7 +430,7 @@ private val tabGridItemPreviewStateData: List<Pair<String, TabGridItemPreviewSta
                 isActive = false,
                 multiSelectionEnabled = false,
                 multiSelectionSelected = false,
-                interactionState = TabItemInteractionState(isDragged = true),
+                interactionState = ItemInteractionState(isDragged = true),
             ),
         ),
         Pair(
@@ -416,7 +439,7 @@ private val tabGridItemPreviewStateData: List<Pair<String, TabGridItemPreviewSta
                 isActive = false,
                 multiSelectionEnabled = false,
                 multiSelectionSelected = false,
-                interactionState = TabItemInteractionState(isHoveredByItem = true),
+                interactionState = ItemInteractionState(isHoveredByItem = true),
             ),
         ),
     )
@@ -449,6 +472,31 @@ private fun TabGridItemPreview(
             clickHandler = TabsTrayItemClickHandler(onClick = {}, onCloseClick = {}),
             onCloseTabClick = {},
             interactionState = tabGridItemState.value.interactionState,
+        )
+    }
+}
+
+@Composable
+@PreviewLightDark
+private fun TabGridItemMediaPreview() {
+    FirefoxTheme {
+        TabContent(
+            tab =
+                createTab(
+                    url = "www.mozilla.org",
+                    title = "Mozilla Domain",
+                    isMediaActive = true,
+                ),
+            selectionState =
+                TabsTrayItemSelectionState(
+                    isSelected = false,
+                    isFocused = false,
+                    multiSelectEnabled = false,
+                ),
+            thumbnailSize = 108,
+            clickHandler = TabsTrayItemClickHandler(onClick = {}, onCloseClick = {}),
+            onCloseTabClick = {},
+            interactionState = ItemInteractionState(),
         )
     }
 }

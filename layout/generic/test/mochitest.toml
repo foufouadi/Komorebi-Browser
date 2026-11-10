@@ -189,6 +189,8 @@ skip-if = [
 
 ["test_bug1847329.html"]
 
+["test_bug2022026.html"]
+
 ["test_crash_on_mouse_move.html"]
 
 ["test_dynamic_reflow_root_disallowal.html"]
@@ -229,6 +231,8 @@ skip-if = [
 ["test_key_enter_single_summary.html"]
 
 ["test_key_space_single_summary.html"]
+
+["test_margin_trim_interrupt.html"]
 
 ["test_movement_by_characters.html"]
 

@@ -2,10 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/// <reference path="./moz-promo.tagmap.d.ts" />
+
 import { html } from "../vendor/lit.all.mjs";
 import { MozLitElement } from "../lit-utils.mjs";
 
-// eslint-disable-next-line import/no-unassigned-import
+// eslint-disable-next-line import-x/no-unassigned-import
 import "chrome://global/content/elements/moz-button.mjs";
 
 window.MozXULElement?.insertFTLIfNeeded("toolkit/global/mozPromo.ftl");
@@ -24,13 +26,15 @@ window.MozXULElement?.insertFTLIfNeeded("toolkit/global/mozPromo.ftl");
  * @property {string} imageWidth - How big the image is sized. Can be "default", "small" or "large".
  * @property {string} imageDisplay - Whether the image touches the edge of the promo or has a little bit of padding around it. Can be "cover" or "padded".
  * @property {boolean} dismissable - Whether the promo can be dismissed.
+ * @slot image - Content rendered in place of the image when imageSrc is not set.
  * @fires promo:user-dismissed
  *  Custom event indicating that the promo was dismissed by the user.
  */
-export default class MozPromo extends MozLitElement {
+export class MozPromo extends MozLitElement {
   static queries = {
     actionsSlot: "slot[name=actions]",
     supportLinkSlot: "slot[name=support-link]",
+    imageSlot: "slot[name=image]",
     actionsSupportWrapper: ".actions-and-support-link-wrapper",
     closeButton: "moz-button.close",
   };
@@ -76,7 +80,7 @@ export default class MozPromo extends MozLitElement {
         <div class="image-container"><img src=${this.imageSrc} alt="" /></div>
       `;
     }
-    return "";
+    return html`<slot name="image"></slot>`;
   }
 
   closeButtonTemplate() {

@@ -236,14 +236,14 @@ static int nr_ice_component_initialize_udp(struct nr_ice_ctx_ *ctx,nr_ice_compon
       if(r=nr_ice_socket_create(ctx,component,sock,NR_ICE_SOCKET_TYPE_DGRAM,&isock))
         ABORT(r);
 
-      /* Create a STUN server context for this socket */
-      if ((r=nr_ice_component_create_stun_server_ctx(component,isock,&addrs[i].addr,lufrag,pwd)))
-        ABORT(r);
-
       /* Make sure we don't leak this. Failures might result in it being
        * unused, but we hand off references to this in enough places below
        * that unwinding it all becomes impractical. */
       STAILQ_INSERT_TAIL(&component->sockets,isock,entry);
+
+      /* Create a STUN server context for this socket */
+      if ((r=nr_ice_component_create_stun_server_ctx(component,isock,&addrs[i].addr,lufrag,pwd)))
+        ABORT(r);
 
       if (!(component->stream->flags & NR_ICE_CTX_FLAGS_RELAY_ONLY)) {
         /* Create one host candidate */
@@ -282,7 +282,6 @@ static int nr_ice_component_initialize_udp(struct nr_ice_ctx_ *ctx,nr_ice_compon
         r_log(LOG_ICE,LOG_WARNING,"ICE-STREAM(%s): relay only option results in no host candidate for %s",component->stream->label,addrs[i].addr.as_string);
       }
 
-#ifdef USE_TURN
       if ((component->stream->flags & NR_ICE_CTX_FLAGS_RELAY_ONLY) &&
           (component->stream->turn_server_ct == 0)) {
         r_log(LOG_ICE,LOG_ERR,"ICE-STREAM(%s): relay only option is set without any TURN server configured",component->stream->label);
@@ -339,7 +338,6 @@ static int nr_ice_component_initialize_udp(struct nr_ice_ctx_ *ctx,nr_ice_compon
 
         cand=0;
       }
-#endif /* USE_TURN */
     }
 
     _status = 0;
@@ -520,7 +518,6 @@ static int nr_ice_component_initialize_tcp(struct nr_ice_ctx_ *ctx,nr_ice_compon
         }
       }
 
-#ifdef USE_TURN
       /* Create a new relayed candidate for each addr/TURN server pair */
       for(j=0;j<component->stream->turn_server_ct;j++){
         nr_transport_addr addr;
@@ -602,15 +599,14 @@ static int nr_ice_component_initialize_tcp(struct nr_ice_ctx_ *ctx,nr_ice_compon
         if((r=nr_ice_socket_create(ctx, component, buffered_sock, NR_ICE_SOCKET_TYPE_STREAM_TURN, &turn_isock)))
           ABORT(r);
 
-
-        /* Create a STUN server context for this socket */
-        if ((r=nr_ice_component_create_stun_server_ctx(component,turn_isock,&addr,lufrag,pwd)))
-          ABORT(r);
-
         /* Make sure we don't leak this. Failures might result in it being
          * unused, but we hand off references to this in enough places below
          * that unwinding it all becomes impractical. */
         STAILQ_INSERT_TAIL(&component->sockets,turn_isock,entry);
+
+        /* Create a STUN server context for this socket */
+        if ((r=nr_ice_component_create_stun_server_ctx(component,turn_isock,&addr,lufrag,pwd)))
+          ABORT(r);
 
         /* Attach ourselves to it */
         if(r=nr_ice_candidate_create(ctx,component,
@@ -623,7 +619,6 @@ static int nr_ice_component_initialize_tcp(struct nr_ice_ctx_ *ctx,nr_ice_compon
         component->candidate_ct++;
         cand=0;
       }
-#endif /* USE_TURN */
     }
 
     _status = 0;
@@ -1124,8 +1119,10 @@ int nr_ice_component_pair_candidate(nr_ice_peer_ctx *pctx, nr_ice_component *pco
       if(!nr_ice_component_can_candidate_tcptype_pair(lcand->tcp_type, pcand->tcp_type))
         continue;
 
-      /* https://tools.ietf.org/html/draft-ietf-rtcweb-mdns-ice-candidates-03#section-3.3.2 */
-      if(lcand->type == RELAYED && pcand->mdns_addr && strlen(pcand->mdns_addr)) {
+      /* https://datatracker.ietf.org/doc/html/draft-ietf-mmusic-mdns-ice-candidates#section-3.3.2-3 */
+      // Note: This probably should not hold for FQDN (as opposed to mDNS), but
+      // we don't really support that anyway for remote candidates.
+      if(lcand->type == RELAYED && strlen(pcand->addr.fqdn)) {
         continue;
       }
 
@@ -1661,25 +1658,39 @@ void nr_ice_component_check_if_failed(nr_ice_component *comp)
     }
   }
 
-int nr_ice_component_select_pair(nr_ice_peer_ctx *pctx, nr_ice_component *comp)
+void nr_ice_component_maybe_select_pair(nr_ice_peer_ctx *pctx, nr_ice_component *comp)
   {
     nr_ice_cand_pair **pairs=0;
     int ct=0;
     nr_ice_cand_pair *pair;
-    int r,_status;
+    int r;
+
+    if(comp->nominated)
+      return;
+
+    assert(pctx->controlling);
+    assert(!nr_ice_peer_ctx_aggressive_nomination(pctx));
 
     /* Size the array */
     pair=TAILQ_FIRST(&comp->stream->check_list);
     while(pair){
-      if (comp->component_id == pair->local->component_id)
-          ct++;
+      if (comp->component_id == pair->local->component_id){
+        if(pair->nominated ||
+           (pair->state == NR_ICE_PAIR_STATE_IN_PROGRESS &&
+            pair->stun_client->mode == NR_ICE_CLIENT_MODE_USE_CANDIDATE))
+          return;
+
+        ct++;
+      }
 
       pair=TAILQ_NEXT(pair,check_queue_entry);
     }
 
     /* Make and fill the array */
-    if(!(pairs=R_NEW_CNT(nr_ice_cand_pair*, ct)))
-      ABORT(R_NO_MEMORY);
+    if(!(pairs=R_NEW_CNT(nr_ice_cand_pair*, ct))){
+      r_log(LOG_ICE,LOG_ERR,"ICE-PEER(%s)/STREAM(%s)/COMP(%d): Failed to allocate candidate pairs",pctx->label,comp->stream->label,comp->component_id);
+      return;
+    }
 
     ct=0;
     pair=TAILQ_FIRST(&comp->stream->check_list);
@@ -1693,13 +1704,10 @@ int nr_ice_component_select_pair(nr_ice_peer_ctx *pctx, nr_ice_component *comp)
     if (pctx->handler) {
       if(r=pctx->handler->vtbl->select_pair(pctx->handler->obj,
         comp->stream,comp->component_id,pairs,ct))
-        ABORT(r);
+        r_log(LOG_ICE,LOG_ERR,"ICE-PEER(%s)/STREAM(%s)/COMP(%d): Pair selection callback failed with %d",pctx->label,comp->stream->label,comp->component_id,r);
     }
 
-    _status=0;
-  abort:
     free(pairs);
-    return(_status);
   }
 
 

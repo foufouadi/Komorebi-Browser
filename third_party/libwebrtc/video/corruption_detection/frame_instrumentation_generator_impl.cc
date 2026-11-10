@@ -79,20 +79,15 @@ std::optional<CorruptionDetectionFilterSettings> GetCorruptionFilterSettings(
 }
 
 std::unique_ptr<FrameSelector> CreateFrameSelector(
-    const Environment* environment,
+    const Environment& environment,
     VideoCodecType video_codec_type,
     std::optional<ScalabilityMode> scalability_mode) {
-  if (!environment) {
-    return nullptr;
-  }
-
-  CorruptionDetectionFrameSelectorSettings settings(
-      environment->field_trials());
+  CorruptionDetectionFrameSelectorSettings settings(environment.field_trials());
   if (!settings.is_enabled()) {
     return nullptr;
   }
   return std::make_unique<FrameSelector>(
-      *environment, scalability_mode.value_or(ScalabilityMode::kL1T1),
+      environment, scalability_mode.value_or(ScalabilityMode::kL1T1),
       FrameSelector::Timespan{
           .lower_bound = settings.low_overhead_lower_bound(),
           .upper_bound = settings.low_overhead_upper_bound()},
@@ -104,7 +99,7 @@ std::unique_ptr<FrameSelector> CreateFrameSelector(
 }  // namespace
 
 FrameInstrumentationGeneratorImpl::FrameInstrumentationGeneratorImpl(
-    const Environment* environment,
+    const Environment& environment,
     VideoCodecType video_codec_type,
     std::optional<ScalabilityMode> scalability_mode)
     : video_codec_type_(video_codec_type),
@@ -117,7 +112,7 @@ void FrameInstrumentationGeneratorImpl::OnCapturedFrame(VideoFrame frame) {
   while (captured_frames_.size() >= kMaxPendingFrames) {
     captured_frames_.pop();
   }
-  captured_frames_.push(frame);
+  captured_frames_.push(std::move(frame));
 }
 
 std::optional<FrameInstrumentationData>

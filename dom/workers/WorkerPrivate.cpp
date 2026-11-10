@@ -57,7 +57,6 @@
 #include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/Exceptions.h"
-#include "mozilla/dom/FeaturePolicyUtils.h"
 #include "mozilla/dom/FunctionBinding.h"
 #include "mozilla/dom/IndexedDatabaseManager.h"
 #include "mozilla/dom/JSExecutionManager.h"
@@ -69,6 +68,7 @@
 #include "mozilla/dom/PRemoteWorkerDebuggerParent.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/PerformanceStorageWorker.h"
+#include "mozilla/dom/PermissionsPolicyUtils.h"
 #include "mozilla/dom/PolicyContainer.h"
 #include "mozilla/dom/PromiseDebugging.h"
 #include "mozilla/dom/ReferrerInfo.h"
@@ -176,26 +176,6 @@ const nsIID kDEBUGWorkerEventTargetIID = {
     {0xba, 0x87, 0x3b, 0x3b, 0x5b, 0x1d, 0x5, 0xfb}};
 
 #endif
-
-template <class T>
-class UniquePtrComparator {
-  using A = UniquePtr<T>;
-  using B = T*;
-
- public:
-  bool Equals(const A& a, const A& b) const {
-    return (a && b) ? (*a == *b) : (!a && !b);
-  }
-  bool LessThan(const A& a, const A& b) const {
-    return (a && b) ? (*a < *b) : !!b;
-  }
-};
-
-template <class T>
-inline UniquePtrComparator<T> GetUniquePtrComparator(
-    const nsTArray<UniquePtr<T>>&) {
-  return UniquePtrComparator<T>();
-}
 
 // This class is used to wrap any runnables that the worker receives via the
 // nsIEventTarget::Dispatch() method (either from NS_DispatchToCurrentThread or
@@ -1445,33 +1425,10 @@ void WorkerPrivate::EvictFromBFCache() {
   runnable->Dispatch(this);
 }
 
-nsresult WorkerPrivate::SetCsp(nsIContentSecurityPolicy* aCSP) {
+nsresult WorkerPrivate::SetPolicyContainerFromHeaders(
+    const PolicyContainer::Headers& aHeaders) {
   AssertIsOnMainThread();
-  if (!aCSP) {
-    return NS_OK;
-  }
-  aCSP->EnsureEventTarget(mMainThreadEventTarget);
-
-  mLoadInfo.mCSP = aCSP;
-  auto ctx = OffThreadCSPContext::CreateFromCSP(aCSP);
-  if (NS_WARN_IF(ctx.isErr())) {
-    return ctx.unwrapErr();
-  }
-  mLoadInfo.mCSPContext = ctx.unwrap();
-  return NS_OK;
-}
-
-nsresult WorkerPrivate::SetCSPFromHeaderValues(
-    const nsACString& aCSPHeaderValue,
-    const nsACString& aCSPReportOnlyHeaderValue) {
-  AssertIsOnMainThread();
-  MOZ_DIAGNOSTIC_ASSERT(!mLoadInfo.mCSP);
-
-  NS_ConvertASCIItoUTF16 cspHeaderValue(aCSPHeaderValue);
-  NS_ConvertASCIItoUTF16 cspROHeaderValue(aCSPReportOnlyHeaderValue);
-
-  nsresult rv;
-  nsCOMPtr<nsIContentSecurityPolicy> csp = new nsCSPContext();
+  MOZ_DIAGNOSTIC_ASSERT(!mLoadInfo.mPolicyContainer);
 
   // First, we try to query the URI from the Principal, but
   // in case selfURI remains empty (e.g in case the Principal
@@ -1489,44 +1446,11 @@ nsresult WorkerPrivate::SetCSPFromHeaderValues(
   }
   MOZ_ASSERT(selfURI, "need a self URI for CSP");
 
-  rv = csp->SetRequestContextWithPrincipal(mLoadInfo.mPrincipal, selfURI, ""_ns,
-                                           0);
-  NS_ENSURE_SUCCESS(rv, rv);
+  RefPtr<PolicyContainer> policyContainer =
+      MOZ_TRY(PolicyContainer::CreateForNonDocument(mLoadInfo.mPrincipal,
+                                                    selfURI, aHeaders));
 
-  csp->EnsureEventTarget(mMainThreadEventTarget);
-
-  // If there's a CSP header, apply it.
-  if (!cspHeaderValue.IsEmpty()) {
-    rv = CSP_AppendCSPFromHeader(csp, cspHeaderValue, false);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-  // If there's a report-only CSP header, apply it.
-  if (!cspROHeaderValue.IsEmpty()) {
-    rv = CSP_AppendCSPFromHeader(csp, cspROHeaderValue, true);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  RefPtr<extensions::WebExtensionPolicy> addonPolicy;
-
-  if (basePrin) {
-    addonPolicy = basePrin->AddonPolicy();
-  }
-
-  // For extension workers there aren't any csp header values,
-  // instead it will inherit the Extension CSP.
-  if (addonPolicy) {
-    csp->AppendPolicy(addonPolicy->BaseCSP(), false, false);
-    csp->AppendPolicy(addonPolicy->ExtensionPageCSP(), false, false);
-  }
-
-  mLoadInfo.mCSP = csp;
-
-  auto ctx = OffThreadCSPContext::CreateFromCSP(csp);
-  if (NS_WARN_IF(ctx.isErr())) {
-    return ctx.unwrapErr();
-  }
-  mLoadInfo.mCSPContext = ctx.unwrap();
-  return NS_OK;
+  return SetPolicyContainerOnMainThread(policyContainer);
 }
 
 bool WorkerPrivate::IsFrozenForWorkerThread() const {
@@ -1546,14 +1470,12 @@ void WorkerPrivate::StorePolicyContainerArgsOnClient() {
 
   mozilla::ipc::PolicyContainerArgs policyContainerArgs;
 
-  if (mLoadInfo.mCSPContext) {
-    policyContainerArgs.csp() = Some(mLoadInfo.mCSPContext->CSPInfo());
+  if (mLoadInfo.mPolicyContainerArgs) {
+    policyContainerArgs = *mLoadInfo.mPolicyContainerArgs;
   }
 
   policyContainerArgs.ipAddressSpace() =
       static_cast<nsILoadInfo::IPAddressSpace>(mLoadInfo.mIPAddressSpace);
-  // TODO(Bug 2017654): Check if integrity policy args need to be propagated
-  // to workers as well. Currently not set explicitly here.
 
   clientSource.SetPolicyContainerArgs(policyContainerArgs);
 }
@@ -1661,11 +1583,10 @@ nsresult WorkerPrivate::DispatchLockHeld(
     return NS_ERROR_UNEXPECTED;
   }
 
-  // Postpone the debuggee runnable dispatching while remote debugger
-  // registration
-  if (runnable->IsDebuggeeRunnable() && !mDebuggerReady &&
-      !mRemoteDebuggerReady &&
-      (!mRemoteDebuggerRegistered && XRE_IsParentProcess())) {
+  // Suspend the debuggee while the debugger has asked us to, through either the
+  // local or the remote mechanism.
+  if (runnable->IsDebuggeeRunnable() &&
+      !(mDebuggerReady && mRemoteDebuggerReady)) {
     MOZ_RELEASE_ASSERT(!aSyncLoopTarget);
     mDelayedDebuggeeRunnables.AppendElement(runnable);
     return NS_OK;
@@ -1782,6 +1703,7 @@ void WorkerPrivate::BindRemoteWorkerDebuggerChild() {
     MutexAutoLock lock(mMutex);
     MOZ_ASSERT_DEBUG_OR_FUZZING(!mRemoteDebugger);
     mRemoteDebugger = std::move(debugger);
+    mRemoteDebuggerBindingDone = true;
     mDebuggerBindingCondVar.Notify();
   }
 }
@@ -1798,6 +1720,11 @@ void WorkerPrivate::CreateRemoteDebuggerEndpoints() {
                               !mDebuggerParentEp.IsValid() &&
                               !mDebuggerChildEp.IsValid());
 
+  // A fresh endpoint pair means the worker thread has to bind again, so
+  // EnableRemoteDebugger must wait for it again. This runs on both the
+  // construction and the Thaw path.
+  mRemoteDebuggerBindingDone = false;
+
   (void)NS_WARN_IF(NS_FAILED(PRemoteWorkerDebugger::CreateEndpoints(
       &mDebuggerParentEp, &mDebuggerChildEp)));
 }
@@ -1810,8 +1737,7 @@ void WorkerPrivate::SetIsRemoteDebuggerRegistered(const bool& aRegistered) {
     MOZ_ASSERT(mRemoteDebuggerRegistered != aRegistered);
 
     mRemoteDebuggerRegistered = aRegistered;
-    bool debuggerRegistered = mDebuggerRegistered && mRemoteDebuggerRegistered;
-    if (mRemoteDebuggerReady && mDebuggerReady && debuggerRegistered) {
+    if (mRemoteDebuggerReady && mDebuggerReady) {
       LOGV(
           ("WorkerPrivate::SetIsRemoteDebuggerRegistered [%p] dispatching "
            "the delayed debuggee runnables",
@@ -1841,6 +1767,7 @@ void WorkerPrivate::SetIsRemoteDebuggerRegistered(const bool& aRegistered) {
     // here since Worker quickly shutdown or initialization fails in
     // WorkerThreadPrimaryRunnable::Run().
     mRemoteDebuggerRegistered = aRegistered;
+    mRemoteDebuggerBindingDone = true;
   }
   if (unregisteredDebugger) {
     unregisteredDebugger->Close();
@@ -1869,7 +1796,7 @@ void WorkerPrivate::SetIsRemoteDebuggerReady(const bool& aReady) {
 
   mRemoteDebuggerReady = aReady;
 
-  if (mRemoteDebuggerReady && mDebuggerReady && debuggerRegistered) {
+  if (mRemoteDebuggerReady && mDebuggerReady) {
     LOGV(
         ("WorkerPrivate::SetIsRemoteDebuggerReady [%p] dispatching "
          "the delayed debuggee runnables",
@@ -1908,7 +1835,9 @@ void WorkerPrivate::EnableRemoteDebugger() {
   mozilla::ipc::Endpoint<PRemoteWorkerDebuggerParent> parentEp;
   {
     MutexAutoLock lock(mMutex);
-    if (!mRemoteDebugger) {
+    // CondVar::Wait may wake spuriously; falling through would skip the
+    // registration below and leave this worker permanently undebuggable.
+    while (!mRemoteDebuggerBindingDone) {
       mDebuggerBindingCondVar.Wait();
     }
     // If Worker Thread never run the event loop, i.e. JSContext initilaization
@@ -1968,7 +1897,9 @@ void WorkerPrivate::EnableRemoteDebugger() {
     // loop that needs this (parent) thread would deadlock, since a sync loop
     // does not otherwise drain the debugger queue (bug 2053827).
     mProcessDebuggerIPCHandshake = true;
-    if (!mRemoteDebuggerRegistered) {
+    // mRemoteDebugger is cleared and the condvar notified when the worker
+    // finishes, so this terminates whether or not registration succeeds.
+    while (!mRemoteDebuggerRegistered && mRemoteDebugger) {
       mDebuggerBindingCondVar.Wait();
     }
     mProcessDebuggerIPCHandshake = false;
@@ -2685,15 +2616,33 @@ void WorkerPrivate::SetBaseURI(nsIURI* aBaseURI) {
                                                    mLocationInfo.mOrigin);
 }
 
-nsresult WorkerPrivate::SetPrincipalsAndCSPOnMainThread(
+nsresult WorkerPrivate::SetPrincipalsOnMainThread(
     nsIPrincipal* aPrincipal, nsIPrincipal* aPartitionedPrincipal,
-    nsILoadGroup* aLoadGroup, nsIContentSecurityPolicy* aCsp) {
-  return mLoadInfo.SetPrincipalsAndCSPOnMainThread(
-      aPrincipal, aPartitionedPrincipal, aLoadGroup, aCsp);
+    nsILoadGroup* aLoadGroup) {
+  return mLoadInfo.SetPrincipalsOnMainThread(aPrincipal, aPartitionedPrincipal,
+                                             aLoadGroup);
 }
 
-nsresult WorkerPrivate::SetPrincipalsAndCSPFromChannel(nsIChannel* aChannel) {
-  return mLoadInfo.SetPrincipalsAndCSPFromChannel(aChannel);
+nsresult WorkerPrivate::SetPolicyContainerOnMainThread(
+    PolicyContainer* aPolicyContainer) {
+  MOZ_TRY(mLoadInfo.SetPolicyContainerOnMainThread(aPolicyContainer));
+
+  if (nsIContentSecurityPolicy* csp = GetCsp()) {
+    csp->EnsureEventTarget(mMainThreadEventTarget);
+  }
+
+  return NS_OK;
+}
+
+nsresult WorkerPrivate::SetPrincipalsAndPolicyContainerFromChannel(
+    nsIChannel* aChannel) {
+  MOZ_TRY(mLoadInfo.SetPrincipalsAndPolicyContainerFromChannel(aChannel));
+
+  if (nsIContentSecurityPolicy* csp = GetCsp()) {
+    csp->EnsureEventTarget(mMainThreadEventTarget);
+  }
+
+  return NS_OK;
 }
 
 bool WorkerPrivate::FinalChannelPrincipalIsValid(nsIChannel* aChannel) {
@@ -2907,6 +2856,7 @@ WorkerPrivate::WorkerPrivate(
       mChildEp(std::move(aChildEp)),
       mRemoteDebuggerRegistered(false),
       mRemoteDebuggerReady(true),
+      mRemoteDebuggerBindingDone(false),
       mProcessDebuggerIPCHandshake(false),
       mIsQueued(false),
       // Route the worker through the RemoteWorkerDebugger, including top-level
@@ -3237,6 +3187,21 @@ already_AddRefed<WorkerPrivate> WorkerPrivate::Constructor(
     aLoadInfo = stackLoadInfo.ptr();
   }
 
+  // Until the worker is registered and holds mSelfRef, a failure destroys it
+  // on this thread. For a nested worker that is the parent's worker thread, so
+  // the main-thread-only load info members have to be proxy released.
+  RefPtr<WorkerPrivate> worker;
+  auto releaseLoadInfoOnFailure = MakeScopeExit([&] {
+    if (!parent) {
+      return;
+    }
+    if (worker) {
+      worker->ProxyReleaseMainThreadObjects();
+    } else if (stackLoadInfo) {
+      MOZ_ALWAYS_TRUE(stackLoadInfo->ProxyReleaseMainThreadObjects(parent));
+    }
+  });
+
   // NB: This has to be done before creating the WorkerPrivate, because it will
   // attempt to use static variables that are initialized in the RuntimeService
   // constructor.
@@ -3263,7 +3228,7 @@ already_AddRefed<WorkerPrivate> WorkerPrivate::Constructor(
   AgentClusterIdAndCoop idAndCoop = ComputeAgentClusterIdAndCoop(
       parent, aWorkerKind, aLoadInfo, aIsChromeWorker);
 
-  RefPtr<WorkerPrivate> worker = new WorkerPrivate(
+  worker = new WorkerPrivate(
       parent, aScriptURL, aIsChromeWorker, aWorkerKind, aRequestCredentials,
       aWorkerType, aWorkerName, aServiceWorkerScope, *aLoadInfo, std::move(aId),
       idAndCoop.mId, idAndCoop.mCoop, std::move(aCancellationCallback),
@@ -3295,6 +3260,7 @@ already_AddRefed<WorkerPrivate> WorkerPrivate::Constructor(
   // ClearSelfAndParentEventTargetRef().
   worker->mSelfRef = worker;
   worker->mParentRef = MakeRefPtr<WorkerParentRef>(worker);
+  releaseLoadInfoOnFailure.release();
 
   // The remote and local debugger mechanisms are mutually exclusive. Enable the
   // remote worker debugger once the worker is really scheduled; otherwise
@@ -3392,10 +3358,7 @@ nsresult WorkerPrivate::SetIsDebuggerReady(bool aReady) {
 
   mDebuggerReady = aReady;
 
-  bool debuggerRegistered = mDebuggerRegistered && (mRemoteDebuggerRegistered ||
-                                                    XRE_IsParentProcess());
-
-  if (aReady && debuggerRegistered) {
+  if (mDebuggerReady && mRemoteDebuggerReady) {
     // Dispatch all the delayed runnables without releasing the lock, to ensure
     // that the order in which debuggee runnables execute is the same as the
     // order in which they were originally dispatched.
@@ -3653,7 +3616,7 @@ nsresult WorkerPrivate::GetLoadInfo(
       loadInfo.mUseRegularPrincipal = document->UseRegularPrincipal();
       loadInfo.mUsingStorageAccess = document->UsingStorageAccess();
       loadInfo.mSerialAllowed =
-          FeaturePolicyUtils::IsFeatureAllowed(document, u"serial"_ns);
+          PermissionsPolicyUtils::IsFeatureAllowed(document, u"serial"_ns);
       loadInfo.mShouldResistFingerprinting =
           document->ShouldResistFingerprinting(
               RFPTarget::IsAlwaysEnabledForPrecompute);
@@ -3778,7 +3741,7 @@ nsresult WorkerPrivate::GetLoadInfo(
                                      : nsILoadInfo::NoStoragePermission);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    rv = loadInfo.SetPrincipalsAndCSPFromChannel(loadInfo.mChannel);
+    rv = loadInfo.SetPrincipalsAndPolicyContainerFromChannel(loadInfo.mChannel);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -5125,7 +5088,6 @@ bool WorkerPrivate::ChangePeerConnectionsInternal(bool aHasPeerConnections) {
 void WorkerPrivate::PropagateStorageAccessPermissionGrantedInternal() {
   auto data = mWorkerThreadAccessible.Access();
 
-  mLoadInfo.mUseRegularPrincipal = true;
   mLoadInfo.mUsingStorageAccess = true;
 
   WorkerGlobalScope* globalScope = GlobalScope();
@@ -6181,7 +6143,7 @@ void WorkerPrivate::ReportError(JSContext* aCx,
                    data->mErrorHandlerRecursionCount == 1,
                "Bad recursion logic!");
 
-  UniquePtr<WorkerErrorReport> report = MakeUnique<WorkerErrorReport>();
+  auto report = std::make_unique<WorkerErrorReport>();
   if (aReport) {
     report->AssignErrorReport(aReport);
   }

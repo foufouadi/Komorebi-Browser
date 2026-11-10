@@ -8,6 +8,7 @@ import { EmbeddedMigrationWizard } from "content-src/components/EmbeddedMigratio
 import { EmbeddedThemePicker } from "content-src/components/EmbeddedThemePicker";
 import { TextBoxTile } from "content-src/components/TextBoxTile";
 import { ContentToggle } from "content-src/components/ContentToggle";
+import { LinkParagraph } from "content-src/components/LinkParagraph";
 import { MultiStageUtils } from "content-src/lib/multistage-utils.mjs";
 import { GlobalOverrider } from "tests/unit/utils";
 
@@ -304,7 +305,9 @@ describe("ContentTiles component", () => {
 
   it("should render EmbeddedThemePicker for 'theme-picker' tile type", () => {
     const TEST_CONTENT_WITH_THEME_PICKER = {
-      tiles: [{ type: "theme-picker" }],
+      tiles: [
+        { type: "theme-picker", data: { installSource: "about:welcome" } },
+      ],
     };
 
     const themePickerWrapper = mount(
@@ -321,9 +324,19 @@ describe("ContentTiles component", () => {
       embeddedThemePicker.exists(),
       "EmbeddedThemePicker component should be rendered"
     );
+    assert.equal(
+      embeddedThemePicker.prop("installSource"),
+      "about:welcome",
+      "installSource should be forwarded from tile data"
+    );
 
     const themePickerEl = themePickerWrapper.find("theme-picker");
     assert.ok(themePickerEl.exists(), "theme-picker element rendered");
+    assert.equal(
+      themePickerEl.prop("installsource"),
+      "about:welcome",
+      "installsource attribute should be set on the theme-picker element"
+    );
 
     themePickerWrapper.unmount();
   });
@@ -862,6 +875,183 @@ describe("ContentTiles component", () => {
     wrapper.unmount();
   });
 
+  const CAROUSEL_TILE = {
+    type: "single-select",
+    layout: "carousel",
+    selected: "test1",
+    data: [
+      {
+        id: "test1",
+        type: "carousel-card",
+        pill: { label: { raw: "test1 pill" }, icon: "chrome://test/one.svg" },
+        label: { raw: "test1 label" },
+      },
+      {
+        id: "test2",
+        type: "carousel-card",
+        pill: { label: { raw: "test2 pill" } },
+        label: { raw: "test2 label" },
+      },
+    ],
+  };
+
+  it("should select and scroll the card when a pill is chosen", () => {
+    const scrollToStub = sandbox.stub(Element.prototype, "scrollTo");
+    // Run a single frame of the centring animation, which would otherwise
+    // schedule itself for the lifetime of the test run.
+    sandbox
+      .stub(window, "requestAnimationFrame")
+      .onFirstCall()
+      .callsFake(callback => callback(window.performance.now()));
+
+    wrapper = mount(
+      <ContentTiles
+        content={{ tiles: CAROUSEL_TILE }}
+        setActiveSingleSelectSelection={setActiveSingleSelectSelection}
+        activeSingleSelectSelections={{ "single-select-0": "test1" }}
+        handleAction={handleAction}
+      />
+    );
+    wrapper.find("CarouselNav").prop("onSelect")("test2");
+
+    assert.calledWithExactly(
+      setActiveSingleSelectSelection.lastCall,
+      "test2",
+      "single-select-0"
+    );
+    assert.called(scrollToStub);
+    assert.notCalled(handleAction);
+    wrapper.unmount();
+  });
+
+  it("should pass pill_nav_label through unwrapped", () => {
+    wrapper = mount(
+      <ContentTiles
+        content={{
+          tiles: { ...CAROUSEL_TILE, pill_nav_label: { raw: "Highlights" } },
+        }}
+        setActiveSingleSelectSelection={setActiveSingleSelectSelection}
+        handleAction={handleAction}
+      />
+    );
+    assert.deepEqual(wrapper.find("CarouselNav").prop("navLabel"), {
+      raw: "Highlights",
+    });
+    wrapper.unmount();
+  });
+
+  const mountCarousel = () =>
+    mount(
+      <ContentTiles
+        content={{ tiles: CAROUSEL_TILE }}
+        setActiveSingleSelectSelection={setActiveSingleSelectSelection}
+        activeSingleSelectSelections={{ "single-select-0": "test1" }}
+        handleAction={handleAction}
+      />
+    );
+
+  it("should centre the card without animating when motion is reduced", () => {
+    const scrollToStub = sandbox.stub(Element.prototype, "scrollTo");
+    sandbox.stub(window, "matchMedia").returns({ matches: true });
+    const rafStub = sandbox
+      .stub(window, "requestAnimationFrame")
+      .callsFake(callback => callback(window.performance.now()));
+
+    wrapper = mountCarousel();
+
+    assert.calledOnce(rafStub);
+    assert.calledWithMatch(scrollToStub, { behavior: "auto" });
+    wrapper.unmount();
+  });
+
+  it("should re-centre the card when the row is resized", async () => {
+    const scrollToStub = sandbox.stub(Element.prototype, "scrollTo");
+    sandbox
+      .stub(window, "requestAnimationFrame")
+      .callsFake(callback => callback(window.performance.now() + 1000));
+    let notifyResize;
+    sandbox.stub(window, "ResizeObserver").callsFake(function (callback) {
+      notifyResize = callback;
+      this.observe = () => {};
+      this.disconnect = () => {};
+    });
+
+    wrapper = mountCarousel();
+    scrollToStub.resetHistory();
+
+    notifyResize();
+    assert.notCalled(scrollToStub);
+
+    const scroller = wrapper.find("fieldset.carousel").getDOMNode();
+    sandbox
+      .stub(scroller, "getBoundingClientRect")
+      .returns({ left: 0, width: 500, height: 200 });
+    const card = wrapper.find("label.carousel-card").at(0).getDOMNode();
+    sandbox
+      .stub(card, "getAnimations")
+      .returns([{ finished: Promise.resolve() }]);
+
+    notifyResize();
+    await Promise.resolve();
+    assert.called(scrollToStub);
+    wrapper.unmount();
+  });
+
+  it("should not observe or glide until a card is selected", () => {
+    const scrollToStub = sandbox.stub(Element.prototype, "scrollTo");
+    const observeStub = sandbox.stub();
+    sandbox.stub(window, "ResizeObserver").callsFake(function () {
+      this.observe = observeStub;
+      this.disconnect = () => {};
+    });
+
+    wrapper = mount(
+      <ContentTiles
+        content={{ tiles: CAROUSEL_TILE }}
+        setActiveSingleSelectSelection={setActiveSingleSelectSelection}
+        handleAction={handleAction}
+      />
+    );
+
+    assert.notCalled(observeStub);
+    assert.notCalled(scrollToStub);
+    wrapper.unmount();
+  });
+
+  it("should stop gliding once the card has had its full duration", () => {
+    const scrollToStub = sandbox.stub(Element.prototype, "scrollTo");
+    sandbox.stub(window, "matchMedia").returns({ matches: false });
+    sandbox
+      .stub(window, "requestAnimationFrame")
+      .callsFake(callback => callback(window.performance.now() + 1000));
+
+    wrapper = mountCarousel();
+
+    assert.calledWithMatch(scrollToStub, { behavior: "auto" });
+    wrapper.unmount();
+  });
+
+  it("should drop the pill icons when the row reports the small layout", () => {
+    const realGetComputedStyle = window.getComputedStyle;
+    sandbox.stub(window, "getComputedStyle").callsFake(el => {
+      const style = realGetComputedStyle(el);
+      return {
+        ...style,
+        getPropertyValue: prop =>
+          prop === "--carousel-layout" ? "small" : style.getPropertyValue(prop),
+      };
+    });
+
+    wrapper = mountCarousel();
+    wrapper.update();
+
+    assert.isTrue(wrapper.find("CarouselNav").prop("compact"));
+    assert.isUndefined(
+      wrapper.find("moz-segmented-control-item").at(0).prop("iconsrc")
+    );
+    wrapper.unmount();
+  });
+
   it("should apply styles to label element", () => {
     const TEST_STYLE = { marginBlock: "5px" };
     const tileData = {
@@ -1316,6 +1506,141 @@ describe("ContentTiles component", () => {
       toggleWrapper.find(ContentToggle).prop("onToggle"),
       setContentToggleChecked
     );
+  });
+
+  it("should render LinkParagraph for 'text' tile type, positioned in the tiles order", () => {
+    const TEXT_TILE = {
+      type: "text",
+      font_styles: "legal",
+      text: [
+        "By continuing, you agree to the ",
+        { raw: "Terms of Use", link_key: "terms_of_use" },
+      ],
+    };
+    const textWrapper = mount(
+      <ContentTiles
+        content={{ tiles: [CHECKLIST_TILE, TEXT_TILE] }}
+        handleAction={handleAction}
+        activeMultiSelect={null}
+        setActiveMultiSelect={setActiveMultiSelect}
+      />
+    );
+
+    const paragraphs = textWrapper.find(LinkParagraph);
+    assert.lengthOf(paragraphs, 1);
+    assert.deepEqual(paragraphs.prop("text_content"), TEXT_TILE);
+
+    const tiles = textWrapper.find(".content-tile");
+    assert.isTrue(tiles.at(1).find(LinkParagraph).exists());
+
+    textWrapper.unmount();
+  });
+
+  it("should not render LinkParagraph for a 'text' tile without a text array", () => {
+    const textWrapper = shallow(
+      <ContentTiles
+        content={{ tiles: [{ type: "text" }] }}
+        handleAction={handleAction}
+        activeMultiSelect={null}
+        setActiveMultiSelect={setActiveMultiSelect}
+      />
+    );
+    assert.ok(!textWrapper.find(LinkParagraph).exists());
+  });
+
+  it("should add link-style to the header of a tile with header.linkStyle", () => {
+    const DISCLOSURE_TILE = {
+      type: "multiselect",
+      header: {
+        title: "Manage data collection settings",
+        linkStyle: true,
+      },
+      data: [{ id: "interaction-data", defaultValue: true }],
+    };
+
+    const linkStyleWrapper = mount(
+      <ContentTiles
+        content={{ tiles: [DISCLOSURE_TILE] }}
+        handleAction={handleAction}
+        activeMultiSelect={null}
+        setActiveMultiSelect={setActiveMultiSelect}
+        setScreenMultiSelects={sandbox.stub()}
+      />
+    );
+
+    const tileButton = linkStyleWrapper.find("button.tile-header");
+    assert.ok(
+      tileButton.hasClass("link-style"),
+      "Should style the header as a link"
+    );
+    // A link-style header still expands its tile, so it keeps the disclosure
+    // semantics rather than the semantics of a `link` tile.
+    assert.strictEqual(tileButton.prop("aria-expanded"), false);
+    assert.ok(
+      linkStyleWrapper.find(".arrow-icon").exists(),
+      "Should show arrow-icon, not external-link-icon"
+    );
+
+    tileButton.simulate("click");
+    assert.strictEqual(
+      linkStyleWrapper.find("button.tile-header").prop("aria-expanded"),
+      true,
+      "Should expand when clicked"
+    );
+
+    linkStyleWrapper.unmount();
+  });
+
+  it("should prefill a collapsed disclosure tile's defaults", () => {
+    // The data-collection disclosure starts collapsed, so its defaults have to
+    // be collected without the user ever opening it.
+    const DISCLOSURE_TILE = {
+      type: "multiselect",
+      header: {
+        title: "Manage data collection settings",
+        linkStyle: true,
+      },
+      multiSelectItemDesign: "grouped-card",
+      data: [
+        { id: "interaction-data", defaultValue: true },
+        { id: "crash-data", defaultValue: false },
+      ],
+    };
+
+    const collapsedWrapper = mount(
+      <ContentTiles
+        content={{ tiles: [DISCLOSURE_TILE] }}
+        handleAction={handleAction}
+        activeMultiSelect={null}
+        setActiveMultiSelect={setActiveMultiSelect}
+      />
+    );
+
+    assert.ok(
+      !collapsedWrapper.find(".multi-select-container").exists(),
+      "Tile is still collapsed"
+    );
+    sinon.assert.calledWithExactly(
+      setActiveMultiSelect,
+      ["interaction-data"],
+      "tile-0"
+    );
+
+    collapsedWrapper.unmount();
+  });
+
+  it("should not add link-style to a header without linkStyle", () => {
+    const plainWrapper = mount(
+      <ContentTiles
+        content={{ tiles: [MOBILE_TILE] }}
+        handleAction={handleAction}
+        setActiveMultiSelect={setActiveMultiSelect}
+      />
+    );
+
+    assert.ok(!plainWrapper.find("button.tile-header").hasClass("link-style"));
+
+    plainWrapper.unmount();
   });
 
   it("should pass contentToggleChecked to TextBoxTile", () => {

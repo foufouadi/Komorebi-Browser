@@ -59,8 +59,9 @@ class SheetLoadDataHashKey : public PLDHashEntryHdr {
         mCORSMode(aKey->mCORSMode),
         mOrigin(aKey->mOrigin),
         mCompatMode(aKey->mCompatMode),
-        mSRIMetadata(aKey->mSRIMetadata),
-        mIsLinkRelPreloadOrEarlyHint(aKey->mIsLinkRelPreloadOrEarlyHint) {
+        mIsLinkRelPreloadOrEarlyHint(aKey->mIsLinkRelPreloadOrEarlyHint),
+        mLoadedAsImage(aKey->mLoadedAsImage),
+        mSRIMetadata(aKey->mSRIMetadata) {
     MOZ_COUNT_CTOR(SheetLoadDataHashKey);
   }
 
@@ -68,9 +69,9 @@ class SheetLoadDataHashKey : public PLDHashEntryHdr {
                        nsIPrincipal* aPartitionPrincipal,
                        NotNull<const Encoding*> aEncodingGuess,
                        CORSMode aCORSMode, StyleOrigin aOrigin,
-                       nsCompatibility aCompatMode,
-                       const dom::SRIMetadata& aSRIMetadata,
-                       css::StylePreloadKind aPreloadKind)
+                       nsCompatibility aCompatMode, bool aLoadedAsImage,
+                       css::StylePreloadKind aPreloadKind,
+                       const dom::SRIMetadata& aSRIMetadata)
       : mURI(aURI),
         mLoaderPrincipal(aLoaderPrincipal),
         mPartitionPrincipal(aPartitionPrincipal),
@@ -78,9 +79,10 @@ class SheetLoadDataHashKey : public PLDHashEntryHdr {
         mCORSMode(aCORSMode),
         mOrigin(aOrigin),
         mCompatMode(aCompatMode),
-        mSRIMetadata(aSRIMetadata),
         mIsLinkRelPreloadOrEarlyHint(
-            css::IsLinkRelPreloadOrEarlyHint(aPreloadKind)) {
+            css::IsLinkRelPreloadOrEarlyHint(aPreloadKind)),
+        mLoadedAsImage(aLoadedAsImage),
+        mSRIMetadata(aSRIMetadata) {
     MOZ_ASSERT(aURI);
     MOZ_ASSERT(aLoaderPrincipal);
     MOZ_COUNT_CTOR(SheetLoadDataHashKey);
@@ -90,13 +92,13 @@ class SheetLoadDataHashKey : public PLDHashEntryHdr {
       : mURI(std::move(toMove.mURI)),
         mLoaderPrincipal(std::move(toMove.mLoaderPrincipal)),
         mPartitionPrincipal(std::move(toMove.mPartitionPrincipal)),
-        mEncodingGuess(std::move(toMove.mEncodingGuess)),
-        mCORSMode(std::move(toMove.mCORSMode)),
-        mOrigin(std::move(toMove.mOrigin)),
-        mCompatMode(std::move(toMove.mCompatMode)),
-        mSRIMetadata(std::move(toMove.mSRIMetadata)),
-        mIsLinkRelPreloadOrEarlyHint(
-            std::move(toMove.mIsLinkRelPreloadOrEarlyHint)) {
+        mEncodingGuess(toMove.mEncodingGuess),
+        mCORSMode(toMove.mCORSMode),
+        mOrigin(toMove.mOrigin),
+        mCompatMode(toMove.mCompatMode),
+        mIsLinkRelPreloadOrEarlyHint(toMove.mIsLinkRelPreloadOrEarlyHint),
+        mLoadedAsImage(toMove.mLoadedAsImage),
+        mSRIMetadata(std::move(toMove.mSRIMetadata)) {
     MOZ_COUNT_CTOR(SheetLoadDataHashKey);
   }
 
@@ -141,8 +143,9 @@ class SheetLoadDataHashKey : public PLDHashEntryHdr {
   const CORSMode mCORSMode;
   const StyleOrigin mOrigin;
   const nsCompatibility mCompatMode;
-  dom::SRIMetadata mSRIMetadata;
   const bool mIsLinkRelPreloadOrEarlyHint;
+  const bool mLoadedAsImage;
+  dom::SRIMetadata mSRIMetadata;
 };
 
 namespace css {
@@ -257,7 +260,7 @@ class Loader final {
    * @param aBuffer the stylesheet data
    */
   Result<LoadSheetResult, nsresult> LoadInlineStyle(
-      const SheetInfo&, const nsAString& aBuffer,
+      const SheetInfo&, const nsACString& aBuffer,
       nsICSSLoaderObserver* aObserver);
 
   /**
@@ -295,12 +298,6 @@ class Loader final {
   nsresult LoadChildSheet(StyleSheet& aParentSheet, SheetLoadData* aParentData,
                           nsIURI* aURL, dom::MediaList* aMedia,
                           LoaderReusableStyleSheets* aSavedSheets);
-
-  /**
-   * Called when we hit the internal memory cache with a complete stylesheet.
-   */
-  void DidHitCompleteSheetCache(const SheetLoadDataHashKey&,
-                                const StyleUseCounters* aCounters);
 
   enum class UseSystemPrincipal { No, Yes };
 
@@ -455,7 +452,7 @@ class Loader final {
   // Inserts a style sheet in a document or a ShadowRoot.
   void InsertSheetInTree(StyleSheet& aSheet);
 
-  enum class PendingLoad { No, Yes };
+  enum class TriggeringPendingLoad : bool { No, Yes };
 
  private:
   friend class mozilla::SharedStyleSheetCache;
@@ -473,7 +470,7 @@ class Loader final {
   // Only to be called by `LoadSheet`.
   [[nodiscard]] bool MaybeDeferLoad(SheetLoadData& aLoadData,
                                     SheetState aSheetState,
-                                    PendingLoad aPendingLoad,
+                                    TriggeringPendingLoad aPendingLoad,
                                     const SheetLoadDataHashKey& aKey);
 
   // Only to be called by `LoadSheet`.
@@ -491,7 +488,7 @@ class Loader final {
   // Only to be called by `LoadSheet`.
   [[nodiscard]] nsresult LoadSheetAsyncInternal(
       SheetLoadData& aLoadData, uint64_t aEarlyHintPreloaderId,
-      const SheetLoadDataHashKey& aKey);
+      const SheetLoadDataHashKey& aKey, TriggeringPendingLoad);
 
   // Helpers to conditionally block onload if mDocument is non-null.
   void IncrementOngoingLoadCountAndMaybeBlockOnload() {
@@ -568,7 +565,7 @@ class Loader final {
   // Note: LoadSheet is responsible for setting the sheet to complete on
   // failure.
   nsresult LoadSheet(SheetLoadData&, SheetState, uint64_t aEarlyHintPreloaderId,
-                     PendingLoad = PendingLoad::No);
+                     TriggeringPendingLoad = TriggeringPendingLoad::No);
 
   enum class AllowAsyncParse {
     Yes,
@@ -587,7 +584,7 @@ class Loader final {
 
   // The load of the sheet in the load data is done, one way or another.
   // Do final cleanup.
-  void SheetComplete(SheetLoadData&, nsresult);
+  void SheetComplete(SheetLoadData&, nsresult, TriggeringPendingLoad);
 
   // Notify observers on an individual data. This is different from
   // SheetComplete for loads that are shared.

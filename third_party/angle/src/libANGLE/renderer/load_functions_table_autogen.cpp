@@ -9,6 +9,7 @@
 //   Contains the GetLoadFunctionsMap for texture_format_util.h
 //
 
+#include "common/debug.h"
 #include "libANGLE/renderer/load_functions_table.h"
 
 #include "image_util/copyimage.h"
@@ -41,7 +42,7 @@ void UnimplementedLoadFunction(const ImageLoadContext &context,
                                size_t outputRowPitch,
                                size_t outputDepthPitch)
 {
-    UNIMPLEMENTED();
+    FATAL() << "UNIMPLEMENTED load function.";
 }
 
 void UnreachableLoadFunction(const ImageLoadContext &context,
@@ -55,7 +56,7 @@ void UnreachableLoadFunction(const ImageLoadContext &context,
                              size_t outputRowPitch,
                              size_t outputDepthPitch)
 {
-    UNREACHABLE();
+    FATAL() << "UNREACHABLE load function.";
 }
 
 LoadImageFunctionInfo A1RGB5_ANGLEX_to_A1R5G5B5_UNORM(GLenum type)
@@ -486,18 +487,6 @@ LoadImageFunctionInfo COMPRESSED_RGB8_ETC2_to_R8G8B8A8_UNORM(GLenum type)
     }
 }
 
-LoadImageFunctionInfo COMPRESSED_RGB8_LOSSY_DECODE_ETC2_ANGLE_to_BC1_RGB_UNORM_BLOCK(GLenum type)
-{
-    switch (type)
-    {
-        case GL_UNSIGNED_BYTE:
-            return LoadImageFunctionInfo(LoadETC2RGB8ToBC1, true);
-        default:
-            UNREACHABLE();
-            return LoadImageFunctionInfo(UnreachableLoadFunction, true);
-    }
-}
-
 LoadImageFunctionInfo COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2_to_ETC2_R8G8B8A1_UNORM_BLOCK(
     GLenum type)
 {
@@ -517,19 +506,6 @@ LoadImageFunctionInfo COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2_to_R8G8B8A8_UNORM
     {
         case GL_UNSIGNED_BYTE:
             return LoadImageFunctionInfo(LoadETC2RGB8A1ToRGBA8, true);
-        default:
-            UNREACHABLE();
-            return LoadImageFunctionInfo(UnreachableLoadFunction, true);
-    }
-}
-
-LoadImageFunctionInfo
-COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_LOSSY_DECODE_ETC2_ANGLE_to_BC1_RGBA_UNORM_BLOCK(GLenum type)
-{
-    switch (type)
-    {
-        case GL_UNSIGNED_BYTE:
-            return LoadImageFunctionInfo(LoadETC2RGB8A1ToBC1, true);
         default:
             UNREACHABLE();
             return LoadImageFunctionInfo(UnreachableLoadFunction, true);
@@ -1700,19 +1676,6 @@ LoadImageFunctionInfo COMPRESSED_SRGB8_ETC2_to_R8G8B8A8_UNORM_SRGB(GLenum type)
     }
 }
 
-LoadImageFunctionInfo COMPRESSED_SRGB8_LOSSY_DECODE_ETC2_ANGLE_to_BC1_RGB_UNORM_SRGB_BLOCK(
-    GLenum type)
-{
-    switch (type)
-    {
-        case GL_UNSIGNED_BYTE:
-            return LoadImageFunctionInfo(LoadETC2SRGB8ToBC1, true);
-        default:
-            UNREACHABLE();
-            return LoadImageFunctionInfo(UnreachableLoadFunction, true);
-    }
-}
-
 LoadImageFunctionInfo COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2_to_ETC2_R8G8B8A1_SRGB_BLOCK(
     GLenum type)
 {
@@ -1732,20 +1695,6 @@ LoadImageFunctionInfo COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2_to_R8G8B8A8_UNOR
     {
         case GL_UNSIGNED_BYTE:
             return LoadImageFunctionInfo(LoadETC2SRGB8A1ToRGBA8, true);
-        default:
-            UNREACHABLE();
-            return LoadImageFunctionInfo(UnreachableLoadFunction, true);
-    }
-}
-
-LoadImageFunctionInfo
-COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_LOSSY_DECODE_ETC2_ANGLE_to_BC1_RGBA_UNORM_SRGB_BLOCK(
-    GLenum type)
-{
-    switch (type)
-    {
-        case GL_UNSIGNED_BYTE:
-            return LoadImageFunctionInfo(LoadETC2SRGB8A1ToBC1, true);
         default:
             UNREACHABLE();
             return LoadImageFunctionInfo(UnreachableLoadFunction, true);
@@ -1974,18 +1923,6 @@ LoadImageFunctionInfo DEPTH_COMPONENT32_OES_to_default(GLenum type)
     }
 }
 
-LoadImageFunctionInfo ETC1_RGB8_LOSSY_DECODE_ANGLE_to_BC1_RGB_UNORM_BLOCK(GLenum type)
-{
-    switch (type)
-    {
-        case GL_UNSIGNED_BYTE:
-            return LoadImageFunctionInfo(LoadETC1RGB8ToBC1, true);
-        default:
-            UNREACHABLE();
-            return LoadImageFunctionInfo(UnreachableLoadFunction, true);
-    }
-}
-
 LoadImageFunctionInfo ETC1_RGB8_OES_to_ETC1_R8G8B8_UNORM_BLOCK(GLenum type)
 {
     switch (type)
@@ -2051,7 +1988,7 @@ LoadImageFunctionInfo G8_B8_R8_3PLANE_420_UNORM_ANGLE_to_default(GLenum type)
     switch (type)
     {
         case GL_UNSIGNED_BYTE:
-            return LoadImageFunctionInfo(UnimplementedLoadFunction, true);
+            return LoadImageFunctionInfo(LoadYuvToNative, true);
         default:
             UNREACHABLE();
             return LoadImageFunctionInfo(UnreachableLoadFunction, true);
@@ -3296,6 +3233,8 @@ LoadImageFunctionInfo RGB565_to_R8G8B8A8_UNORM(GLenum type)
     {
         case GL_UNSIGNED_BYTE:
             return LoadImageFunctionInfo(LoadToNative3To4<GLubyte, 0xFF>, true);
+        case GL_UNSIGNED_INT_2_10_10_10_REV_EXT:
+            return LoadImageFunctionInfo(LoadRGB10A2ToRGBA8, true);
         case GL_UNSIGNED_SHORT_5_6_5:
             return LoadImageFunctionInfo(LoadR5G6B5ToRGBA8, true);
         default:
@@ -4091,17 +4030,6 @@ LoadFunctionMap GetLoadFunctionsMap(GLenum internalFormat, FormatID angleFormat)
             }
             break;
         }
-        case GL_COMPRESSED_RGB8_LOSSY_DECODE_ETC2_ANGLE:
-        {
-            switch (angleFormat)
-            {
-                case FormatID::BC1_RGB_UNORM_BLOCK:
-                    return COMPRESSED_RGB8_LOSSY_DECODE_ETC2_ANGLE_to_BC1_RGB_UNORM_BLOCK;
-                default:
-                    break;
-            }
-            break;
-        }
         case GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2:
         {
             switch (angleFormat)
@@ -4110,17 +4038,6 @@ LoadFunctionMap GetLoadFunctionsMap(GLenum internalFormat, FormatID angleFormat)
                     return COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2_to_ETC2_R8G8B8A1_UNORM_BLOCK;
                 case FormatID::R8G8B8A8_UNORM:
                     return COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2_to_R8G8B8A8_UNORM;
-                default:
-                    break;
-            }
-            break;
-        }
-        case GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_LOSSY_DECODE_ETC2_ANGLE:
-        {
-            switch (angleFormat)
-            {
-                case FormatID::BC1_RGBA_UNORM_BLOCK:
-                    return COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_LOSSY_DECODE_ETC2_ANGLE_to_BC1_RGBA_UNORM_BLOCK;
                 default:
                     break;
             }
@@ -4533,17 +4450,6 @@ LoadFunctionMap GetLoadFunctionsMap(GLenum internalFormat, FormatID angleFormat)
             }
             break;
         }
-        case GL_COMPRESSED_SRGB8_LOSSY_DECODE_ETC2_ANGLE:
-        {
-            switch (angleFormat)
-            {
-                case FormatID::BC1_RGB_UNORM_SRGB_BLOCK:
-                    return COMPRESSED_SRGB8_LOSSY_DECODE_ETC2_ANGLE_to_BC1_RGB_UNORM_SRGB_BLOCK;
-                default:
-                    break;
-            }
-            break;
-        }
         case GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2:
         {
             switch (angleFormat)
@@ -4552,17 +4458,6 @@ LoadFunctionMap GetLoadFunctionsMap(GLenum internalFormat, FormatID angleFormat)
                     return COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2_to_ETC2_R8G8B8A1_SRGB_BLOCK;
                 case FormatID::R8G8B8A8_UNORM_SRGB:
                     return COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2_to_R8G8B8A8_UNORM_SRGB;
-                default:
-                    break;
-            }
-            break;
-        }
-        case GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_LOSSY_DECODE_ETC2_ANGLE:
-        {
-            switch (angleFormat)
-            {
-                case FormatID::BC1_RGBA_UNORM_SRGB_BLOCK:
-                    return COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_LOSSY_DECODE_ETC2_ANGLE_to_BC1_RGBA_UNORM_SRGB_BLOCK;
                 default:
                     break;
             }
@@ -4654,17 +4549,6 @@ LoadFunctionMap GetLoadFunctionsMap(GLenum internalFormat, FormatID angleFormat)
                 default:
                     return DEPTH_COMPONENT32_OES_to_default;
             }
-        }
-        case GL_ETC1_RGB8_LOSSY_DECODE_ANGLE:
-        {
-            switch (angleFormat)
-            {
-                case FormatID::BC1_RGB_UNORM_BLOCK:
-                    return ETC1_RGB8_LOSSY_DECODE_ANGLE_to_BC1_RGB_UNORM_BLOCK;
-                default:
-                    break;
-            }
-            break;
         }
         case GL_ETC1_RGB8_OES:
         {

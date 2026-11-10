@@ -113,472 +113,6 @@
         "targeting"
       ]
     },
-    "CFRUrlbarChiclet": {
-      "$schema": "https://json-schema.org/draft/2019-09/schema",
-      "$id": "file:///CFRUrlbarChiclet.schema.json",
-      "title": "CFRUrlbarChiclet",
-      "description": "A template with a chiclet button with text.",
-      "allOf": [
-        {
-          "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/Message"
-        }
-      ],
-      "type": "object",
-      "properties": {
-        "content": {
-          "type": "object",
-          "properties": {
-            "category": {
-              "type": "string",
-              "description": "Attribute used for different groups of messages from the same provider"
-            },
-            "layout": {
-              "type": "string",
-              "description": "Describes how content should be displayed.",
-              "enum": [
-                "chiclet_open_url"
-              ]
-            },
-            "bucket_id": {
-              "type": "string",
-              "description": "A bucket identifier for the addon. This is used in order to anonymize telemetry for history-sensitive targeting."
-            },
-            "notification_text": {
-              "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/localizableText",
-              "description": "The text in the small blue chicklet that appears in the URL bar. This can be a reference to a localized string in Firefox or just a plain string."
-            },
-            "active_color": {
-              "type": "string",
-              "description": "Background color of the button"
-            },
-            "action": {
-              "type": "object",
-              "properties": {
-                "url": {
-                  "description": "The page to open when the button is clicked.",
-                  "type": "string",
-                  "format": "moz-url-format"
-                },
-                "where": {
-                  "description": "Should it open in a new tab or the current tab",
-                  "type": "string",
-                  "enum": [
-                    "current",
-                    "tabshifted"
-                  ]
-                }
-              },
-              "additionalProperties": true,
-              "required": [
-                "url",
-                "where"
-              ]
-            }
-          },
-          "additionalProperties": true,
-          "required": [
-            "layout",
-            "category",
-            "bucket_id",
-            "notification_text",
-            "action"
-          ]
-        },
-        "template": {
-          "type": "string",
-          "const": "cfr_urlbar_chiclet"
-        }
-      },
-      "required": [
-        "targeting",
-        "trigger"
-      ]
-    },
-    "ExtensionDoorhanger": {
-      "$schema": "https://json-schema.org/draft/2019-09/schema",
-      "$id": "file:///ExtensionDoorhanger.schema.json",
-      "title": "ExtensionDoorhanger",
-      "description": "A template with a heading, addon icon, title and description. No markup allowed.",
-      "allOf": [
-        {
-          "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/Message"
-        }
-      ],
-      "type": "object",
-      "properties": {
-        "content": {
-          "type": "object",
-          "properties": {
-            "category": {
-              "type": "string",
-              "description": "Attribute used for different groups of messages from the same provider"
-            },
-            "layout": {
-              "type": "string",
-              "description": "Attribute used for different groups of messages from the same provider",
-              "enum": [
-                "short_message",
-                "icon_and_message",
-                "addon_recommendation"
-              ]
-            },
-            "anchor_id": {
-              "type": "string",
-              "description": "A DOM element ID that the pop-over will be anchored."
-            },
-            "alt_anchor_id": {
-              "type": "string",
-              "description": "An alternate DOM element ID that the pop-over will be anchored."
-            },
-            "bucket_id": {
-              "type": "string",
-              "description": "A bucket identifier for the addon. This is used in order to anonymize telemetry for history-sensitive targeting."
-            },
-            "skip_address_bar_notifier": {
-              "type": "boolean",
-              "description": "Skip the 'Recommend' notifier and show directly."
-            },
-            "persistent_doorhanger": {
-              "type": "boolean",
-              "description": "Prevent the doorhanger from being dismissed if user interacts with the page or switches between applications."
-            },
-            "show_in_private_browsing": {
-              "type": "boolean",
-              "description": "Whether to allow the message to be shown in private browsing mode. Defaults to false."
-            },
-            "notification_text": {
-              "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/localizableText",
-              "description": "The text in the small blue chicklet that appears in the URL bar. This can be a reference to a localized string in Firefox or just a plain string."
-            },
-            "info_icon": {
-              "type": "object",
-              "description": "The small icon displayed in the top right corner of the pop-over. Should be 19x19px, svg or png. Defaults to a small question mark.",
-              "properties": {
-                "label": {
-                  "oneOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "attributes": {
-                          "type": "object",
-                          "properties": {
-                            "tooltiptext": {
-                              "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/localizableText",
-                              "description": "Text for button tooltip used to provide information about the doorhanger."
-                            }
-                          },
-                          "required": [
-                            "tooltiptext"
-                          ]
-                        }
-                      },
-                      "required": [
-                        "attributes"
-                      ]
-                    },
-                    {
-                      "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/localizedText"
-                    }
-                  ]
-                },
-                "sumo_path": {
-                  "type": "string",
-                  "description": "Last part of the path in the URL to the support page with the information about the doorhanger.",
-                  "examples": [
-                    "extensionpromotions",
-                    "extensionrecommendations"
-                  ]
-                }
-              }
-            },
-            "learn_more": {
-              "type": "string",
-              "description": "Last part of the path in the SUMO URL to the support page with the information about the doorhanger.",
-              "examples": [
-                "extensionpromotions",
-                "extensionrecommendations"
-              ]
-            },
-            "heading_text": {
-              "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/localizableText",
-              "description": "The larger heading text displayed in the pop-over. This can be a reference to a localized string in Firefox or just a plain string."
-            },
-            "icon": {
-              "$ref": "file:///ExtensionDoorhanger.schema.json#/$defs/linkUrl",
-              "description": "The icon displayed in the pop-over. Should be 32x32px or 64x64px and png/svg."
-            },
-            "icon_dark_theme": {
-              "type": "string",
-              "description": "Pop-over icon, dark theme variant. Should be 32x32px or 64x64px and png/svg."
-            },
-            "icon_class": {
-              "type": "string",
-              "description": "CSS class of the pop-over icon."
-            },
-            "addon": {
-              "description": "Addon information including AMO URL.",
-              "type": "object",
-              "properties": {
-                "id": {
-                  "$ref": "file:///ExtensionDoorhanger.schema.json#/$defs/plainText",
-                  "description": "Unique addon ID"
-                },
-                "title": {
-                  "$ref": "file:///ExtensionDoorhanger.schema.json#/$defs/plainText",
-                  "description": "Addon name"
-                },
-                "author": {
-                  "$ref": "file:///ExtensionDoorhanger.schema.json#/$defs/plainText",
-                  "description": "Addon author"
-                },
-                "icon": {
-                  "$ref": "file:///ExtensionDoorhanger.schema.json#/$defs/linkUrl",
-                  "description": "The icon displayed in the pop-over. Should be 64x64px and png/svg."
-                },
-                "rating": {
-                  "type": "string",
-                  "description": "Star rating"
-                },
-                "users": {
-                  "type": "string",
-                  "description": "Installed users"
-                },
-                "amo_url": {
-                  "$ref": "file:///ExtensionDoorhanger.schema.json#/$defs/linkUrl",
-                  "description": "Link that offers more information related to the addon."
-                }
-              },
-              "required": [
-                "title",
-                "author",
-                "icon",
-                "amo_url"
-              ]
-            },
-            "text": {
-              "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/localizableText",
-              "description": "The body text displayed in the pop-over. This can be a reference to a localized string in Firefox or just a plain string."
-            },
-            "descriptionDetails": {
-              "description": "Additional information and steps on how to use",
-              "type": "object",
-              "properties": {
-                "steps": {
-                  "description": "Array of string_ids",
-                  "type": "array",
-                  "items": {
-                    "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/localizedText",
-                    "description": "Id of string to localized addon description"
-                  }
-                }
-              },
-              "required": [
-                "steps"
-              ]
-            },
-            "buttons": {
-              "description": "The label and functionality for the buttons in the pop-over.",
-              "type": "object",
-              "properties": {
-                "primary": {
-                  "type": "object",
-                  "properties": {
-                    "label": {
-                      "type": "object",
-                      "oneOf": [
-                        {
-                          "properties": {
-                            "value": {
-                              "$ref": "file:///ExtensionDoorhanger.schema.json#/$defs/plainText",
-                              "description": "Button label override used when a localized version is not available."
-                            },
-                            "attributes": {
-                              "type": "object",
-                              "properties": {
-                                "accesskey": {
-                                  "type": "string",
-                                  "description": "A single character to be used as a shortcut key for the secondary button. This should be one of the characters that appears in the button label."
-                                }
-                              },
-                              "required": [
-                                "accesskey"
-                              ],
-                              "description": "Button attributes."
-                            }
-                          },
-                          "required": [
-                            "value",
-                            "attributes"
-                          ]
-                        },
-                        {
-                          "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/localizedText"
-                        }
-                      ],
-                      "description": "Id of localized string or message override."
-                    },
-                    "action": {
-                      "type": "object",
-                      "properties": {
-                        "type": {
-                          "type": "string",
-                          "description": "Action dispatched by the button."
-                        },
-                        "data": {
-                          "properties": {
-                            "url": {
-                              "type": "string",
-                              "$comment": "This is dynamically generated from the addon.id. See CFRPageActions.sys.mjs",
-                              "description": "URL used in combination with the primary action dispatched."
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
-                "secondary": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "label": {
-                        "type": "object",
-                        "oneOf": [
-                          {
-                            "properties": {
-                              "value": {
-                                "allOf": [
-                                  {
-                                    "$ref": "file:///ExtensionDoorhanger.schema.json#/$defs/plainText"
-                                  },
-                                  {
-                                    "description": "Button label override used when a localized version is not available."
-                                  }
-                                ]
-                              },
-                              "attributes": {
-                                "type": "object",
-                                "properties": {
-                                  "accesskey": {
-                                    "type": "string",
-                                    "description": "A single character to be used as a shortcut key for the secondary button. This should be one of the characters that appears in the button label."
-                                  }
-                                },
-                                "required": [
-                                  "accesskey"
-                                ],
-                                "description": "Button attributes."
-                              }
-                            },
-                            "required": [
-                              "value",
-                              "attributes"
-                            ]
-                          },
-                          {
-                            "properties": {
-                              "string_id": {
-                                "allOf": [
-                                  {
-                                    "$ref": "file:///ExtensionDoorhanger.schema.json#/$defs/plainText"
-                                  },
-                                  {
-                                    "description": "Id of localized string for button"
-                                  }
-                                ]
-                              }
-                            },
-                            "required": [
-                              "string_id"
-                            ]
-                          }
-                        ],
-                        "description": "Id of localized string or message override."
-                      },
-                      "action": {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "type": "string",
-                            "description": "Action dispatched by the button."
-                          },
-                          "data": {
-                            "properties": {
-                              "url": {
-                                "allOf": [
-                                  {
-                                    "$ref": "file:///ExtensionDoorhanger.schema.json#/$defs/linkUrl"
-                                  },
-                                  {
-                                    "description": "URL used in combination with the primary action dispatched."
-                                  }
-                                ]
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "additionalProperties": true,
-          "required": [
-            "layout",
-            "bucket_id",
-            "heading_text",
-            "text",
-            "buttons"
-          ],
-          "if": {
-            "properties": {
-              "skip_address_bar_notifier": {
-                "anyOf": [
-                  {
-                    "const": "false"
-                  },
-                  {
-                    "const": null
-                  }
-                ]
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "category",
-              "notification_text"
-            ]
-          }
-        },
-        "template": {
-          "type": "string",
-          "enum": [
-            "cfr_doorhanger",
-            "milestone_message"
-          ]
-        }
-      },
-      "additionalProperties": true,
-      "required": [
-        "targeting",
-        "trigger"
-      ],
-      "$defs": {
-        "plainText": {
-          "description": "Plain text (no HTML allowed)",
-          "type": "string"
-        },
-        "linkUrl": {
-          "description": "Target for links or buttons",
-          "type": "string",
-          "format": "uri"
-        }
-      }
-    },
     "InfoBar": {
       "$schema": "https://json-schema.org/draft/2019-09/schema",
       "$id": "file:///InfoBar.schema.json",
@@ -778,6 +312,10 @@
               "items": {
                 "type": "object",
                 "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "A stable identifier for this button, reported as `event_context.source` on click telemetry. Defaults to `button_<index>` when omitted."
+                  },
                   "label": {
                     "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/localizableText",
                     "description": "The text label of the button."
@@ -850,6 +388,27 @@
                 "required": [
                   "type"
                 ]
+              }
+            },
+            "inline_icons": {
+              "description": "Inline icons to slot into the message text. Each key must match the `data-l10n-name` of an `<img>` placeholder in the Fluent string; a placeholder with no entry here is dropped. Set `alt` on that `<img>` in the Fluent string.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "imageURL": {
+                    "type": "string",
+                    "description": "URL of the icon image."
+                  },
+                  "rtlImageURL": {
+                    "type": "string",
+                    "description": "Optional alternative URL used in RTL locales."
+                  }
+                },
+                "required": [
+                  "imageURL"
+                ],
+                "additionalProperties": false
               }
             },
             "style": {
@@ -1156,6 +715,7 @@
               "enum": [
                 "VPN",
                 "PIN",
+                "RELAY",
                 "OTHER"
               ]
             },
@@ -1432,6 +992,10 @@
             "imageDisplay": {
               "type": "string",
               "description": "Display style for the image."
+            },
+            "dismissable": {
+              "type": "boolean",
+              "description": "When true, shows moz-promo's built-in top-right close (X) button. Dismissing hides the promo and records telemetry. Defaults to false."
             },
             "primary_button": {
               "type": "object",
@@ -1850,6 +1414,91 @@
         "targeting"
       ]
     },
+    "UrlbarAction": {
+      "$schema": "https://json-schema.org/draft/2019-09/schema",
+      "$id": "file:///UrlbarAction.schema.json",
+      "title": "UrlbarAction",
+      "description": "A template for messages that add a quick action button to the address bar, shown when the user types one of its keywords. Frequency caps are not currently supported, and no impressions, exposure or messaging telemetry are recorded; use the urlbar engagement telemetry, where actions appear as `fxms_<key>`.",
+      "allOf": [
+        {
+          "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/Message"
+        }
+      ],
+      "type": "object",
+      "properties": {
+        "template": {
+          "type": "string",
+          "const": "urlbar_action"
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]{1,24}$",
+              "description": "Unique identifier for the action. Firefox registers it as `fxms_<key>`, which is how it appears in urlbar telemetry."
+            },
+            "keywords": {
+              "type": "array",
+              "items": {
+                "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/localizableText"
+              },
+              "minItems": 1,
+              "description": "Typed text that shows the action. A localized string may hold several comma separated keywords."
+            },
+            "label": {
+              "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/localizableText",
+              "description": "Text displayed on the action button."
+            },
+            "icon": {
+              "type": "string",
+              "pattern": "^(chrome|resource)://",
+              "description": "A chrome:// or resource:// URL of an icon that ships with Firefox."
+            },
+            "action": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "SHOW_SPOTLIGHT",
+                    "OPEN_ABOUT_PAGE",
+                    "OPEN_PREFERENCES_PAGE",
+                    "OPEN_SUPPORT_PAGE",
+                    "SELECT_AND_MARK_MENU_ITEM"
+                  ],
+                  "description": "The special message action run when the action is picked."
+                },
+                "data": {
+                  "type": "object",
+                  "description": "Data for the action."
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "key",
+            "keywords",
+            "label",
+            "icon",
+            "action"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "not": {
+        "required": [
+          "trigger"
+        ]
+      },
+      "required": [
+        "targeting"
+      ]
+    },
     "Message": {
       "type": "object",
       "properties": {
@@ -1871,9 +1520,6 @@
           "enum": [
             "action_only",
             "bookmarks_bar_button",
-            "cfr_urlbar_chiclet",
-            "cfr_doorhanger",
-            "milestone_message",
             "infobar",
             "menu_message",
             "pb_newtab",
@@ -1884,7 +1530,8 @@
             "feature_callout",
             "toast_notification",
             "toolbar_badge",
-            "update_action"
+            "update_action",
+            "urlbar_action"
           ]
         },
         "frequency": {
@@ -2057,45 +1704,6 @@
           },
           "then": {
             "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/BookmarksBarButton"
-          }
-        },
-        {
-          "if": {
-            "type": "object",
-            "properties": {
-              "template": {
-                "type": "string",
-                "enum": [
-                  "cfr_urlbar_chiclet"
-                ]
-              }
-            },
-            "required": [
-              "template"
-            ]
-          },
-          "then": {
-            "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/CFRUrlbarChiclet"
-          }
-        },
-        {
-          "if": {
-            "type": "object",
-            "properties": {
-              "template": {
-                "type": "string",
-                "enum": [
-                  "cfr_doorhanger",
-                  "milestone_message"
-                ]
-              }
-            },
-            "required": [
-              "template"
-            ]
-          },
-          "then": {
-            "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/ExtensionDoorhanger"
           }
         },
         {
@@ -2287,6 +1895,25 @@
           },
           "then": {
             "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/UpdateAction"
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "template": {
+                "type": "string",
+                "enum": [
+                  "urlbar_action"
+                ]
+              }
+            },
+            "required": [
+              "template"
+            ]
+          },
+          "then": {
+            "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/UrlbarAction"
           }
         }
       ]

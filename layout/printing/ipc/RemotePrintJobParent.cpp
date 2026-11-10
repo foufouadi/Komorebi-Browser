@@ -20,7 +20,7 @@
 #include "nsIWebProgressListener.h"
 #include "private/pprio.h"
 
-#if defined(ACCESSIBILITY) && defined(MOZ_ENABLE_SKIA_PDF)
+#ifdef ACCESSIBILITY
 #  include "mozilla/a11y/PdfStructTreeBuilder.h"
 #endif
 
@@ -53,7 +53,7 @@ mozilla::ipc::IPCResult RemotePrintJobParent::RecvInitializePrint(
   mInnerWindowId = wgp->InnerWindowId();
   mTabId = bp->GetTabId();
 
-#if defined(ACCESSIBILITY) && defined(MOZ_ENABLE_SKIA_PDF)
+#ifdef ACCESSIBILITY
   if (auto* builder =
           mozilla::a11y::PdfStructTreeBuilder::Get(mInnerWindowId)) {
     RefPtr{builder->GetReadyPromise()}->Then(
@@ -90,7 +90,7 @@ void RemotePrintJobParent::InitializePrint(const nsAString& aDocumentTitle,
     return;
   }
 
-  mPrintTranslator = MakeUnique<PrintTranslator>(mPrintDeviceContext);
+  mPrintTranslator = std::make_unique<PrintTranslator>(mPrintDeviceContext);
   FileDescriptor fd;
   rv = PrepareNextPageFD(&fd);
   if (NS_FAILED(rv)) {

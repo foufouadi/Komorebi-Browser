@@ -713,11 +713,11 @@ class ThreadActor extends Actor {
     // fall back to whatever we can find.
     let meta = bps.find(bp => bp.isStepStart) || bps[0];
     if (!meta) {
-      // We've tried to avoid using `getAllColumnOffsets()` because the set of
-      // locations included in this list is very under-defined, but for this
-      // usecase it's not the end of the world. Maybe one day we could have an
-      // "onEnterFrame" that was scoped to a specific script to avoid this.
-      meta = script.getAllColumnOffsets()[0];
+      // There are no recommended breakpoint locations, e.g. when the file
+      // only contains function declarations. Fall back to the script's main
+      // entry offset so the first-statement breakpoint still fires when
+      // top-level execution begins.
+      meta = { offset: script.mainOffset };
     }
 
     if (!meta) {
@@ -1203,9 +1203,7 @@ class ThreadActor extends Actor {
    */
   async _handleResumeLimit({ resumeLimit, frameActorID }) {
     const steppingType = resumeLimit.type;
-    if (
-      !["break", "step", "next", "finish", "restart"].includes(steppingType)
-    ) {
+    if (!["step", "next", "finish", "restart"].includes(steppingType)) {
       return Promise.reject({
         error: "badParameterType",
         message: "Unknown resumeLimit type",
@@ -1262,7 +1260,6 @@ class ThreadActor extends Actor {
     if (stepFrame) {
       switch (steppingType) {
         case "step":
-        case "break":
         case "next":
           if (stepFrame.script) {
             if (!this.sourcesManager.isFrameBlackBoxed(stepFrame)) {
@@ -1334,7 +1331,7 @@ class ThreadActor extends Actor {
         this._clearSteppingHooks();
       }
 
-      this.doResume({ resumeLimit });
+      this.doResume();
       return {};
     } catch (error) {
       return error instanceof Error
@@ -2226,8 +2223,8 @@ class ThreadActor extends Actor {
 
       // Find the offsets in the HTML at which inline scripts might start.
       const scriptTagMatches = content.matchAll(/<script[^>]*>/gi);
-      const scriptStartOffsets = [...scriptTagMatches].map(
-        rv => rv.index + rv[0].length
+      const scriptStartOffsets = Array.from(
+        scriptTagMatches.map(rv => rv.index + rv[0].length)
       );
 
       // Find the script tags in this HTML page by parsing a new document from

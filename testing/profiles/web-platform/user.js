@@ -7,6 +7,11 @@
 // Disable scroll axis lock, WebDriver should be able to scroll arbitrary
 // directions.
 user_pref("apz.axis_lock.mode", 0);
+// Use zero movement tolerance before a touch is treated as a pan, so that in
+// automation touch events scroll from exactly the position they are dispatched
+// without small movements first being absorbed.
+user_pref("apz.touch_move_tolerance", "0.0");
+user_pref("apz.touch_start_tolerance", "0.0");
 // Don't use the new tab page but about:blank for opened tabs
 user_pref("browser.newtabpage.enabled", false);
 // Don't restore the last open set of tabs if the browser has crashed
@@ -14,6 +19,9 @@ user_pref("browser.sessionstore.resume_from_crash", false);
 // Don't show the Bookmarks Toolbar on any tab (the above pref that
 // disables the New Tab Page ends up showing the toolbar on about:blank).
 user_pref("browser.toolbars.bookmarks.visibility", "never");
+// Accept the form resubmission confirmation instead of prompting, so tests can
+// reload the result of a POST navigation.
+user_pref("dom.confirm_repost.testing.always_accept", true);
 // Expose TestUtils interface
 user_pref("dom.testing.testutils.enabled", true);
 // Only install add-ons from the profile and the application scope

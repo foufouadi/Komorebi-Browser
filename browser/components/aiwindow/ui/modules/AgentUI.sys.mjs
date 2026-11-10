@@ -20,7 +20,15 @@
  * @property {string} [contextPageUrl] - Current page URL to seed the agent with
  * @property {object} conversation - The active ChatConversation
  * @property {ChromeWindow} [window] - The browser window
+ * @property {boolean} [isFullPage] - True when the smart window is in full page mode
  */
+
+/** @typedef {import("moz-src:///browser/components/aiwindow/ui/modules/MonitorUIUtils.sys.mjs").WatchTask} WatchTask */
+
+import {
+  AGENT_COMMANDS,
+  parseAgentCommand,
+} from "chrome://browser/content/aiwindow/modules/AgentCommands.mjs";
 
 const lazy = {};
 
@@ -45,7 +53,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
 
 ChromeUtils.defineLazyGetter(lazy, "console", () =>
   console.createInstance({
-    prefix: "AgentUI",
+    logModule: "AgentUI",
     maxLogLevelPref: "browser.smartwindow.agentUI.logLevel",
   })
 );
@@ -78,15 +86,41 @@ export const AGENT_UPDATE_TYPES = Object.freeze({
   SAVE_WATCH_DRAFT: "save-watch-draft",
 });
 
-export const AGENT_COMMANDS = Object.freeze({
-  WATCH: "watch",
-});
-
 // Default cadence for a newly created monitor
 const DEFAULT_MONITOR_CHECK_MINUTES = 60;
 const PREF_AGENT_ENABLED = "browser.smartwindow.agent.enabled";
 // Address of the tasks page, passed to chat messages as the $url variable.
 const TASKS_PAGE_URL = "about:smartwindowtasks";
+
+/**
+ * Actions of the outcomes the model is told about when the user acts on a
+ * monitor card
+ */
+const MONITOR_OUTCOMES = Object.freeze({
+  CREATE_WATCH: "create_watch",
+  CANCEL_WATCH: "cancel_watch",
+  PAGE_NOT_WATCHABLE: "page_not_watchable",
+  LIMIT_REACHED: "limit_reached",
+});
+
+/**
+ * Descriptions sent to the model for each of MONITOR_OUTCOMES. Kept in
+ * English, like the monitor log below, so the model's history doesn't depend
+ * on the UI locale.
+ */
+const MONITOR_OUTCOME_DESCRIPTIONS = Object.freeze({
+  [MONITOR_OUTCOMES.CREATE_WATCH]:
+    "User created a watch task. watchTask contains the task that was created.",
+  [MONITOR_OUTCOMES.CANCEL_WATCH]:
+    "User cancelled setting up a watch task. No watch task was created.",
+  [MONITOR_OUTCOMES.PAGE_NOT_WATCHABLE]:
+    "User tried to create a watch task, but the current page can't be watched. Only regular web pages can be watched. No watch task was created.",
+  [MONITOR_OUTCOMES.LIMIT_REACHED]:
+    "User tried to create a watch task, but they already have the maximum number of active watch tasks. No watch task was created.",
+});
+
+// Most entries kept in a monitor's log. The "created" entry is always kept.
+const MAX_MONITOR_LOG_ENTRIES = 10;
 
 /**
  * Handles interactive updates from agent cards embedded in chat
@@ -140,7 +174,8 @@ export class AgentUI {
   };
 
   /**
-   *  New agents register their smartbar commands here
+   *  New agents register their smartbar commands here, keyed by the ids
+   *  declared in AgentCommands.mjs
    *
    * @private
    */
@@ -152,34 +187,56 @@ export class AgentUI {
    * Handles the monitor create card for the current page
    *
    * @param {AgentCommandContext} context
-   * @param {string} context.text - The command argument text, with the `/monitor` prefix stripped
+   * @param {string} context.text - The command argument text, with the `/watch` prefix stripped
    * @param {string} [context.contextPageUrl] - Url of the page the command was issued from
    * @param {Conversation} context.conversation - The conversation the command was submitted in
    */
-  static async #handleMonitorCommand({ text, contextPageUrl, conversation }) {
+  static async #handleMonitorCommand({
+    text,
+    contextPageUrl,
+    conversation,
+    isFullPage,
+  }) {
     if (!conversation) {
       return;
     }
     const { prompt: condition, raw } = text;
-    const url = contextPageUrl || "";
+    let url = contextPageUrl || "";
     if (raw) {
       const userMessage = conversation.addUserMessage(raw);
       conversation.emit("chat-conversation:message-update", userMessage);
     }
 
     if (!lazy.isAllowedWatchUrl(url)) {
-      conversation.addAssistantWithL10nMessage(
-        "smartwindow-agent-monitor-page-not-watchable"
-      );
-      return;
+      // Full page mode isn't tied to a page, so it will fail as a
+      // "watchable" page, however we still want an empty card to
+      // display in full page mode.
+      if (!isFullPage) {
+        const message = conversation.addAssistantWithL10nMessage(
+          "smartwindow-agent-monitor-page-not-watchable"
+        );
+        this.#reportMonitorOutcome(
+          message,
+          conversation,
+          this.#buildMonitorOutcome(MONITOR_OUTCOMES.PAGE_NOT_WATCHABLE)
+        );
+        return;
+      }
+      url = "";
     }
 
     const monitors = await lazy.MonitorAgent.listMonitors();
-    if (monitors.length >= lazy.TOTAL_NUM_MONITORS) {
-      conversation.addAssistantWithL10nMessage(
+    const activeCount = monitors.filter(monitor => monitor.enabled).length;
+    if (activeCount >= lazy.TOTAL_NUM_MONITORS) {
+      const message = conversation.addAssistantWithL10nMessage(
         "smartwindow-agent-monitor-limit-reached",
         { count: lazy.TOTAL_NUM_MONITORS },
         { l10nName: "tasks", href: TASKS_PAGE_URL }
+      );
+      this.#reportMonitorOutcome(
+        message,
+        conversation,
+        this.#buildMonitorOutcome(MONITOR_OUTCOMES.LIMIT_REACHED)
       );
       return;
     }
@@ -229,13 +286,19 @@ export class AgentUI {
     const monitorName =
       args.pageTitle ||
       lazy.l10n.formatValueSync("smartwindow-agent-monitor-default-name");
-    message.content.body = "";
-    message.content.l10nId = "smartwindow-agent-monitor-watching";
-    message.content.l10nArgs = {
-      monitorName,
-      schedule: this.#formatScheduleSummary(updateData?.schedule),
-    };
-    message.content.link = { l10nName: "tasks", href: TASKS_PAGE_URL };
+    const watchUrlTitles = await lazy.MonitorUIUtils.resolveWatchUrlTitles(
+      args.watchUrls
+    );
+    this.#setMessageL10n(
+      message,
+      "smartwindow-agent-monitor-watching",
+      {
+        monitorName,
+        schedule: this.#formatScheduleSummary(updateData?.schedule),
+      },
+      { l10nName: "tasks", href: TASKS_PAGE_URL }
+    );
+    await this.#reportMonitorCreated(message, conversation, monitorId);
     message.toolUIDraft = null;
     message.toolUIData = {
       ...message.toolUIData,
@@ -246,6 +309,7 @@ export class AgentUI {
           monitorName,
           url: args.watchUrls[0] ?? "",
           watchUrls: args.watchUrls,
+          watchUrlTitles,
           condition: args.prompt,
           status: this.#statusForKind("watching"),
           schedule: updateData?.schedule,
@@ -278,13 +342,20 @@ export class AgentUI {
   }
 
   /**
-   * Dismisses the "create" card without persisting anything
+   * Dismisses the "create" card without persisting anything, replacing the
+   * setup prompt with a cancellation acknowledgement
    *
    * @param {AgentHandlerContext} context
    * @returns {Promise<boolean>}
    */
   static async #handleCancelMonitor({ message, conversation }) {
     message.toolUIDraft = null;
+    this.#setMessageL10n(message, "smartwindow-agent-monitor-canceled");
+    this.#reportMonitorOutcome(
+      message,
+      conversation,
+      this.#buildMonitorOutcome(MONITOR_OUTCOMES.CANCEL_WATCH)
+    );
     await conversation.updateToolUI(message, null, null);
     return true;
   }
@@ -327,6 +398,9 @@ export class AgentUI {
     }
 
     const agent = message?.toolUIData?.properties?.agent ?? {};
+    const watchUrlTitles = await lazy.MonitorUIUtils.resolveWatchUrlTitles(
+      updateData.watchUrls
+    );
     message.toolUIDraft = null;
     message.toolUIData = {
       ...message.toolUIData,
@@ -338,11 +412,13 @@ export class AgentUI {
           condition: updateData.condition,
           url: updateData.watchUrls?.[0] ?? agent.url,
           watchUrls: updateData.watchUrls,
+          watchUrlTitles,
           schedule: updateData.schedule,
         },
       },
     };
     conversation.emit("chat-conversation:message-update", message);
+    await this.#syncConversationNow(conversation);
     return true;
   }
 
@@ -392,10 +468,13 @@ export class AgentUI {
     const monitorName =
       agent.monitorName ||
       lazy.l10n.formatValueSync("smartwindow-agent-monitor-default-name");
-    message.content.body = "";
-    message.content.l10nId = "smartwindow-agent-monitor-deleted";
-    message.content.l10nArgs = { monitorName };
-    message.content.link = null;
+    this.#setMessageL10n(message, "smartwindow-agent-monitor-deleted", {
+      monitorName,
+    });
+    this.#recordWatchTask(message, {
+      ...(message.content.watchTask ?? { name: monitorName }),
+      status: "deleted",
+    });
 
     // User confirmed and deletion succeeded, remove the card
     await conversation.updateToolUI(message, null, null);
@@ -435,6 +514,7 @@ export class AgentUI {
       },
     };
     conversation.emit("chat-conversation:message-update", message);
+    await this.#syncConversationNow(conversation);
     return true;
   }
 
@@ -461,8 +541,7 @@ export class AgentUI {
 
     // The manual run fires MONITOR_AGENTS_CHANGED_TOPIC but sync this
     // conversation directly so the card updates even when it is not observed
-    const byId = await this.#loadMonitorsById();
-    this.#syncConversationHistory(conversation, byId);
+    await this.#syncConversationNow(conversation);
     return true;
   }
 
@@ -526,6 +605,26 @@ export class AgentUI {
     return new Map(monitors.map(monitor => [monitor.id, monitor]));
   }
 
+  /**
+   * Syncs a conversation's monitor cards right away instead of waiting on the
+   * MONITOR_AGENTS_CHANGED_TOPIC observer, so a card action's change is
+   * logged before the user's next message. A failed sync is logged rather
+   * than failing the card action, which has already succeeded.
+   *
+   * @param {object} conversation - The ChatConversation to reconcile
+   * @private
+   */
+  static async #syncConversationNow(conversation) {
+    try {
+      this.#syncConversationHistory(
+        conversation,
+        await this.#loadMonitorsById()
+      );
+    } catch (error) {
+      lazy.console.error("AgentUI: failed to sync monitor cards", error);
+    }
+  }
+
   static async #syncAllMonitorHistories() {
     if (!this.#observedConversations.size) {
       return;
@@ -538,7 +637,8 @@ export class AgentUI {
 
   /**
    * Rebuilds each monitor card's history from its monitor's notification
-   * entries and re-renders when it changed
+   * entries, logs changes to the monitor for the model, and re-renders when
+   * either changed
    *
    * @param {object} conversation - The ChatConversation to reconcile
    * @param {Map<string, object>} byId - Serialized monitors keyed by id
@@ -550,29 +650,271 @@ export class AgentUI {
         continue;
       }
       const agent = message.toolUIData.properties?.agent;
-      const monitor = byId.get(agent?.id);
-      if (!monitor) {
+      // Cards still in create mode have no monitor yet
+      if (!agent?.id) {
         continue;
       }
-
-      // Pass raw history data - let the component handle formatting
-      const history = (monitor.history ?? [])
-        .filter(entry => entry.status === "success" || entry.status === "error")
-        .reverse();
-
-      if (JSON.stringify(history) === JSON.stringify(agent.history ?? [])) {
-        continue;
+      // A missing monitor still goes to the log step, which records a task
+      // deleted outside the chat.
+      const monitor = byId.get(agent.id);
+      const logChanged = this.#syncMonitorLog(message, monitor);
+      const historyChanged =
+        !!monitor && this.#syncCardHistory(message, agent, monitor);
+      // Re-render once, and only when something changed
+      if (logChanged || historyChanged) {
+        conversation.emit("chat-conversation:message-update", message);
       }
-
-      message.toolUIData = {
-        ...message.toolUIData,
-        properties: {
-          ...message.toolUIData.properties,
-          agent: { ...agent, history },
-        },
-      };
-      conversation.emit("chat-conversation:message-update", message);
     }
+  }
+
+  /**
+   * Copies a monitor's check results onto its card
+   *
+   * @param {object} message - The chat message the card is attached to
+   * @param {object} agent - The card's agent data, from
+   *   message.toolUIData.properties
+   * @param {object} monitor - The serialized monitor
+   * @returns {boolean} True when the card's history changed
+   * @private
+   */
+  static #syncCardHistory(message, agent, monitor) {
+    // Pass raw history data - let the component handle formatting
+    const history = (monitor.history ?? [])
+      .filter(entry => entry.status === "success" || entry.status === "error")
+      .reverse();
+
+    if (JSON.stringify(history) === JSON.stringify(agent.history ?? [])) {
+      return false;
+    }
+
+    message.toolUIData = {
+      ...message.toolUIData,
+      properties: {
+        ...message.toolUIData.properties,
+        agent: { ...agent, history },
+      },
+    };
+    return true;
+  }
+
+  /**
+   * Logs any change between a card's last known watch task and the
+   * monitor store, wherever the change was made
+   *
+   * @param {object} message - The chat message the card is attached to
+   * @param {?object} monitor - The serialized monitor, or null if deleted
+   * @returns {boolean} True when the message changed
+   * @private
+   */
+  static #syncMonitorLog(message, monitor) {
+    if (monitor) {
+      return this.#recordWatchTask(
+        message,
+        lazy.MonitorUIUtils.formatMonitorForModel(monitor)
+      );
+    }
+    // The monitor is gone, so log it as deleted unless that's already logged
+    const previous = message.content?.watchTask;
+    if (!previous || previous.status === "deleted") {
+      return false;
+    }
+    return this.#recordWatchTask(message, {
+      ...previous,
+      status: "deleted",
+    });
+  }
+
+  /**
+   * Replaces a message's rendered text with a localized agent message
+   *
+   * @param {object} message - The message whose text is being replaced
+   * @param {string} l10nId - Fluent id of the replacement text
+   * @param {?object} [l10nArgs] - Fluent args for the replacement text
+   * @param {?{l10nName: string, href: string}} [link] - Link embedded in the text
+   * @private
+   */
+  static #setMessageL10n(message, l10nId, l10nArgs = null, link = null) {
+    message.content.body = "";
+    message.content.l10nId = l10nId;
+    message.content.l10nArgs = l10nArgs;
+    message.content.link = link;
+  }
+
+  /**
+   * Builds what the model is told about a monitor card outcome, shaped like
+   * the result ToolUI sends after a tab action confirmation.
+   *
+   * @param {string} action - One of MONITOR_OUTCOMES
+   * @param {WatchTask} [watchTask] - The task the outcome applies to,
+   *   sent to the model as `watchTask`
+   * @returns {{description: string, action: string, watchTask?: WatchTask}}
+   * @private
+   */
+  static #buildMonitorOutcome(action, watchTask = null) {
+    const outcome = {
+      description: MONITOR_OUTCOME_DESCRIPTIONS[action],
+      action,
+    };
+    if (watchTask) {
+      outcome.watchTask = watchTask;
+    }
+    return outcome;
+  }
+
+  /**
+   * Tells the model about a card outcome that has no monitor to log. A card
+   * created by a tool call resolves its pending tool result. Otherwise the
+   * outcome goes in the message body, which the model reads but the user
+   * doesn't see because the message renders from its l10n id.
+   *
+   * @param {object} message - The chat message the outcome is shown on
+   * @param {object} conversation - The active ChatConversation
+   * @param {object} outcome - Result of #buildMonitorOutcome
+   * @private
+   */
+  static #reportMonitorOutcome(message, conversation, outcome) {
+    if (!message) {
+      return;
+    }
+    const resolved = conversation.resolvePendingToolConfirmation(
+      outcome,
+      message.toolUIData?.toolCallId
+    );
+    if (!resolved) {
+      message.content.body = outcome.description;
+    }
+  }
+
+  /**
+   * Tells the model about a newly created monitor and starts the card's
+   * change log. Failing to read the monitor back is logged rather than
+   * thrown, so the create flow still finishes and the card leaves create
+   * mode.
+   *
+   * @param {object} message - The chat message the card is attached to
+   * @param {object} conversation - The active ChatConversation
+   * @param {string} monitorId - Id of the monitor that was created
+   * @private
+   */
+  static async #reportMonitorCreated(message, conversation, monitorId) {
+    let watchTask = null;
+    try {
+      const created = (await this.#loadMonitorsById()).get(monitorId);
+      if (created) {
+        watchTask = lazy.MonitorUIUtils.formatMonitorForModel(created);
+        message.content.monitorLog = [{ action: "created", at: Date.now() }];
+        this.#recordWatchTask(message, watchTask);
+      }
+    } catch (error) {
+      lazy.console.error("AgentUI: failed to read the created monitor", error);
+    }
+    // Last, because resolving a pending tool result saves the conversation.
+    // Always resolved, so a pending tool result never stays pending.
+    conversation.resolvePendingToolConfirmation(
+      this.#buildMonitorOutcome(MONITOR_OUTCOMES.CREATE_WATCH, watchTask),
+      message.toolUIData?.toolCallId
+    );
+  }
+
+  /**
+   * Saves a card's watch task, logs how it differs from the previous one,
+   * and rebuilds the message body the model reads. The first watch task
+   * recorded on a card is saved without a log entry.
+   *
+   * @param {object} message - The chat message the card is attached to
+   * @param {WatchTask} next - The watch task as it is now
+   * @returns {boolean} True when the watch task changed
+   * @private
+   */
+  static #recordWatchTask(message, next) {
+    const { content } = message;
+    const previous = content.watchTask;
+    const log = content.monitorLog ?? [];
+    if (previous) {
+      const entries = this.#diffWatchTasks(previous, next);
+      if (!entries.length) {
+        return false;
+      }
+      const at = Date.now();
+      log.push(...entries.map(entry => ({ ...entry, at })));
+      if (log.length > MAX_MONITOR_LOG_ENTRIES) {
+        const start = log[0].action === "created" ? 1 : 0;
+        log.splice(start, log.length - MAX_MONITOR_LOG_ENTRIES);
+      }
+    }
+    content.monitorLog = log;
+    content.watchTask = next;
+    content.body = this.#renderMonitorLog(log, next);
+    return true;
+  }
+
+  /**
+   * Compares a watch task before and after a change and describes what
+   * changed as log entries, e.g. pausing it and editing its condition gives
+   * [{ action: "paused" }, { action: "edited", changes: ["condition"] }].
+   * Returns an empty array when nothing changed.
+   *
+   * @param {WatchTask} previous - The watch task as last logged
+   * @param {WatchTask} next - The watch task as it is now
+   * @returns {Array<{action: string, changes?: string[]}>}
+   * @private
+   */
+  static #diffWatchTasks(previous, next) {
+    const entries = [];
+    if (next.status !== previous.status) {
+      entries.push({
+        action: next.status === "watching" ? "resumed" : next.status,
+      });
+    }
+    if (next.status === "deleted") {
+      return entries;
+    }
+    const changes = Object.keys(next).filter(
+      field =>
+        field !== "status" &&
+        JSON.stringify(previous[field]) !== JSON.stringify(next[field])
+    );
+    if (changes.length) {
+      entries.push({ action: "edited", changes });
+    }
+    return entries;
+  }
+
+  /**
+   * Formats a card's monitor log and current watch task as text for the model
+   *
+   * @param {Array<{action: string, at: number, changes?: string[]}>} log
+   * @param {WatchTask} watchTask - The watch task as it is now
+   * @returns {string}
+   * @private
+   */
+  static #renderMonitorLog(log, watchTask) {
+    const lines = ["User created a watch task in this chat."];
+    if (log.length) {
+      lines.push("Log of the task, oldest first:");
+      for (const { action, at, changes } of log) {
+        const details = changes?.length ? ` (${changes.join(", ")})` : "";
+        lines.push(`- ${this.#formatLogTime(at)} ${action}${details}`);
+      }
+    }
+    lines.push(`current: ${JSON.stringify(watchTask)}`);
+    return lines.join("\n");
+  }
+
+  /**
+   * Formats a timestamp as local "YYYY-MM-DD HH:MM" for the model
+   *
+   * @param {number} at - Milliseconds since the epoch
+   * @returns {string}
+   * @private
+   */
+  static #formatLogTime(at) {
+    const date = new Date(at);
+    const pad = n => String(n).padStart(2, "0");
+    return (
+      `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+      `${pad(date.getHours())}:${pad(date.getMinutes())}`
+    );
   }
 
   /**
@@ -672,29 +1014,6 @@ export class AgentUI {
   }
 
   /**
-   * Parses a leading command keyword from chat classified smartbar input as an
-   * interim stand in for the "/" command palette
-   *
-   * @param {string} value - Raw chat input
-   * @returns {?{command: string, prompt: string, raw: string}} The lowercased
-   *  command keyword, the text following the command, and the raw chat input,
-   *  or null when there is no leading command
-   * @private
-   */
-  static #parseCommand(value) {
-    const raw = String(value ?? "").trim();
-    const match = /^\/(\w+)\b\s*(.*)$/s.exec(raw);
-    if (!match) {
-      return null;
-    }
-    return {
-      command: match[1].toLowerCase(),
-      prompt: match[2].trim(),
-      raw,
-    };
-  }
-
-  /**
    * Routes a smartbar submission to an agent when it is an agent command
 
    * @param {object} context
@@ -703,6 +1022,7 @@ export class AgentUI {
    * @param {string} [context.contextPageUrl] - Current page URL to seed the agent
    * @param {object} context.conversation - The active ChatConversation
    * @param {ChromeWindow} [context.window] - The browser window
+   * @param {boolean} [context.isFullPage] - True when the smart window is in full page mode
    * @returns {boolean} True when the input was recognized and handled as a command
    */
   static tryHandleCommand({
@@ -711,6 +1031,7 @@ export class AgentUI {
     contextPageUrl,
     conversation,
     window,
+    isFullPage = false,
   }) {
     if (
       !lazy.MonitorUIUtils.isMonitorRegionSupported() ||
@@ -720,12 +1041,12 @@ export class AgentUI {
     }
 
     // An explicit command from the palette takes priority
-    const parsed = this.#parseCommand(value);
+    const parsed = parseAgentCommand(value);
     const parsedCommand = command
       ? {
           command,
           prompt: parsed?.prompt ?? "",
-          raw: String(value ?? "").trim(),
+          raw: value.trim(),
         }
       : parsed;
 
@@ -744,6 +1065,7 @@ export class AgentUI {
       contextPageUrl,
       conversation,
       window,
+      isFullPage,
     });
 
     return true;

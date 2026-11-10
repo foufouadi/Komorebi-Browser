@@ -8,6 +8,7 @@
 #include "mozilla/Logging.h"
 #include "mozilla/net/DNS.h"
 #include "nsCRT.h"
+#include "nsDNSService2.h"
 #include "nsICancelable.h"
 #include "nsIDNSListener.h"
 #include "nsIDNSRecord.h"
@@ -73,6 +74,7 @@ class nsSOCKSSocketInfo : public nsIDNSListener {
   PRStatus DoHandshake(PRFileDesc* fd, int16_t oflags = -1);
   int16_t GetPollFlags() const;
   bool IsConnected() const { return mState == SOCKS_CONNECTED; }
+  bool HasPendingError() const { return mPendingError != 0; }
   void ForgetFD() { mFD = nullptr; }
   void SetNamedPipeFD(PRFileDesc* fd) { mFD = fd; }
 
@@ -197,6 +199,10 @@ class nsSOCKSSocketInfo : public nsIDNSListener {
   nsCOMPtr<nsIDNSRecord> mDnsRec;
   nsCOMPtr<nsICancelable> mLookup;
   nsresult mLookupStatus{NS_ERROR_NOT_INITIALIZED};
+  // Connect failure from OnLookupComplete, reported on the next handshake.
+  PRErrorCode mPendingError{0};
+  int32_t mPendingOSError{0};
+  bool mProxyConnectAttempted{false};
   PRFileDesc* mFD{nullptr};
 
   nsCString mDestinationHost;
@@ -406,9 +412,14 @@ PRStatus nsSOCKSSocketInfo::StartDNS(PRFileDesc* fd) {
   MOZ_ASSERT(!mDnsRec && mState == SOCKS_INITIAL,
              "Must be in initial state to make DNS Lookup");
 
-  nsCOMPtr<nsIDNSService> dns;
-  dns = mozilla::components::DNS::Service();
-  if (!dns) return PR_FAILURE;
+  // We are on the socket thread, where the DNS service can't be created
+  // directly, so make sure it gets created on the main thread if needed.
+  nsCOMPtr<nsIDNSService> dns = GetOrInitDNSService();
+  if (!dns) {
+    LOGERROR(("socks: DNS service unavailable"));
+    PR_SetError(PR_BAD_ADDRESS_ERROR, 0);
+    return PR_FAILURE;
+  }
 
   nsCString proxyHost;
   mProxy->GetHost(proxyHost);
@@ -423,11 +434,16 @@ PRStatus nsSOCKSSocketInfo::StartDNS(PRFileDesc* fd) {
 
   if (NS_FAILED(rv)) {
     LOGERROR(("socks: DNS lookup for SOCKS proxy %s failed", proxyHost.get()));
+    PR_SetError(PR_BAD_ADDRESS_ERROR, 0);
     return PR_FAILURE;
   }
   mState = SOCKS_DNS_IN_PROGRESS;
   PR_SetError(PR_IN_PROGRESS_ERROR, 0);
   return PR_FAILURE;
+}
+
+static bool IsInProgress(PRErrorCode aError) {
+  return aError == PR_WOULD_BLOCK_ERROR || aError == PR_IN_PROGRESS_ERROR;
 }
 
 NS_IMETHODIMP
@@ -439,7 +455,10 @@ nsSOCKSSocketInfo::OnLookupComplete(nsICancelable* aRequest,
   mDnsRec = aRecord;
   mState = SOCKS_DNS_COMPLETE;
   if (mFD) {
-    ConnectToProxy(mFD);
+    if (ConnectToProxy(mFD) != PR_SUCCESS && !IsInProgress(PR_GetError())) {
+      mPendingError = PR_GetError();
+      mPendingOSError = PR_GetOSError();
+    }
     ForgetFD();
   }
   return NS_OK;
@@ -474,6 +493,7 @@ PRStatus nsSOCKSSocketInfo::ConnectToProxy(PRFileDesc* fd) {
       if (NS_FAILED(rv)) {
         LOGERROR(
             ("socks: unable to connect to SOCKS proxy, %s", proxyHost.get()));
+        PR_SetError(PR_BAD_ADDRESS_ERROR, 0);
         return PR_FAILURE;
       }
     } else {
@@ -488,6 +508,10 @@ PRStatus nsSOCKSSocketInfo::ConnectToProxy(PRFileDesc* fd) {
       if (NS_FAILED(rv)) {
         LOGERROR(
             ("socks: unable to connect to SOCKS proxy, %s", proxyHost.get()));
+        // Otherwise the error from the last failed connect is still set.
+        if (!mProxyConnectAttempted) {
+          PR_SetError(PR_BAD_ADDRESS_ERROR, 0);
+        }
         return PR_FAILURE;
       }
 
@@ -500,12 +524,13 @@ PRStatus nsSOCKSSocketInfo::ConnectToProxy(PRFileDesc* fd) {
     FixupAddressFamily(fd, &proxy);
     PRNetAddr prProxy;
     NetAddrToPRNetAddr(&proxy, &prProxy);
+    mProxyConnectAttempted = true;
     status = fd->lower->methods->connect(fd->lower, &prProxy, mTimeout);
     if (status != PR_SUCCESS) {
       PRErrorCode c = PR_GetError();
 
       // If EINPROGRESS, return now and check back later after polling
-      if (c == PR_WOULD_BLOCK_ERROR || c == PR_IN_PROGRESS_ERROR) {
+      if (IsInProgress(c)) {
         mState = SOCKS_CONNECTING_TO_PROXY;
         return status;
       }
@@ -603,7 +628,7 @@ PRStatus nsSOCKSSocketInfo::ContinueConnectingToProxy(PRFileDesc* fd,
   status = fd->lower->methods->connectcontinue(fd->lower, oflags);
   if (status != PR_SUCCESS) {
     PRErrorCode c = PR_GetError();
-    if (c != PR_WOULD_BLOCK_ERROR && c != PR_IN_PROGRESS_ERROR) {
+    if (!IsInProgress(c)) {
       // A connection failure occured, try another address
       mState = SOCKS_DNS_COMPLETE;
       return ConnectToProxy(fd);
@@ -1015,6 +1040,11 @@ void nsSOCKSSocketInfo::SetConnectTimeout(PRIntervalTime to) { mTimeout = to; }
 PRStatus nsSOCKSSocketInfo::DoHandshake(PRFileDesc* fd, int16_t oflags) {
   LOGDEBUG(("socks: DoHandshake(), state = %d", mState));
 
+  if (mPendingError) {
+    PR_SetError(mPendingError, mPendingOSError);
+    return PR_FAILURE;
+  }
+
   switch (mState) {
     case SOCKS_INITIAL:
       if (IsLocalProxy()) {
@@ -1304,6 +1334,11 @@ static int16_t nsSOCKSIOLayerPoll(PRFileDesc* fd, int16_t in_flags,
   if (info == nullptr) return PR_FAILURE;
 
   if (!info->IsConnected()) {
+    // No readiness follows a pending error, so report ready to surface it.
+    if (info->HasPendingError()) {
+      *out_flags = in_flags;
+      return in_flags;
+    }
     *out_flags = 0;
     return info->GetPollFlags();
   }

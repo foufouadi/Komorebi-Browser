@@ -8,6 +8,7 @@
 #include "mozilla/Attributes.h"
 
 #include <cstddef>
+#include <cstdint>
 
 namespace mozilla::htmlaccel {
 // True iff the buffer contains less-than, ampersand, carriage return,
@@ -18,6 +19,26 @@ namespace mozilla::htmlaccel {
 // the complexity to do that.
 MOZ_NEVER_INLINE bool ContainsMarkup(const char16_t* aPtr,
                                      const char16_t* aEnd);
+
+/// Appends the offsets from aStart of the less-than signs and ampersands from
+/// aPtr on to aOut. Returns where it stopped: at the first U+0000 or carriage
+/// return, or at the first 16-code-unit stride that doesn't fit before aEnd
+/// or whose offsets might not fit before aOutEnd.
+MOZ_NEVER_INLINE const char16_t* CollectLessThanAndAmpersand(
+    const char16_t* aStart, const char16_t* aPtr, const char16_t* aEnd,
+    uint32_t*& aOut, const uint32_t* aOutEnd);
+
+/// Returns the offset from aPtr of the first double quote, ampersand, carriage
+/// return or U+0000, or of the first 16-code-unit stride that doesn't fit
+/// before aEnd.
+MOZ_NEVER_INLINE size_t SkipAttributeValueDoubleQuoted(const char16_t* aPtr,
+                                                       const char16_t* aEnd);
+
+/// Returns the offset from aPtr of the first single quote, ampersand, carriage
+/// return or U+0000, or of the first 16-code-unit stride that doesn't fit
+/// before aEnd.
+MOZ_NEVER_INLINE size_t SkipAttributeValueSingleQuoted(const char16_t* aPtr,
+                                                       const char16_t* aEnd);
 
 // HTML Serializer functions
 
@@ -69,6 +90,13 @@ MOZ_NEVER_INLINE uint32_t CountEscapedInAttributeValue(const char16_t* aPtr,
 // an immediate. Once the LLVM bug is fixed, these should be changed
 // to MOZ_ALWAYS_INLINE_EVEN_DEBUG to allow the constants to move further
 // up to the top of nsHtml5Tokenizer::stateLoop.
+//
+// The functions for states that accumulate into nsHtml5Tokenizer::strBuf
+// take an output pointer and store each examined 16-unit stride there
+// before inspecting it. The output therefore receives garbage past the
+// returned length, up to the end of the last examined stride, but never
+// more code units than there are between aPtr and aEnd. The caller must
+// have room for that many code units at aOut, without overlapping the input.
 
 /// The innerHTML / DOMParser case for the data state in the HTML parser
 MOZ_NEVER_INLINE int32_t AccelerateDataFastest(const char16_t* aPtr,
@@ -94,47 +122,63 @@ MOZ_NEVER_INLINE int32_t AccelerateRawtextViewSource(const char16_t* aPtr,
 MOZ_NEVER_INLINE int32_t AccelerateRawtextLineCol(const char16_t* aPtr,
                                                   const char16_t* aEnd);
 
+/// The innerHTML / DOMParser case for the script data escaped state in the
+/// HTML parser
+MOZ_NEVER_INLINE int32_t
+AccelerateScriptDataEscapedFastest(const char16_t* aPtr, const char16_t* aEnd);
+
+/// View Source case for the script data escaped state in the HTML parser
+MOZ_NEVER_INLINE int32_t AccelerateScriptDataEscapedViewSource(
+    const char16_t* aPtr, const char16_t* aEnd);
+
+/// Normal network case for the script data escaped state in the HTML parser
+MOZ_NEVER_INLINE int32_t
+AccelerateScriptDataEscapedLineCol(const char16_t* aPtr, const char16_t* aEnd);
+
 /// The innerHTML / DOMParser case for the comment state in the HTML parser
 MOZ_NEVER_INLINE int32_t AccelerateCommentFastest(const char16_t* aPtr,
-                                                  const char16_t* aEnd);
+                                                  const char16_t* aEnd,
+                                                  char16_t* aOut);
 
 /// View Source case for the comment state in the HTML parser
 MOZ_NEVER_INLINE int32_t AccelerateCommentViewSource(const char16_t* aPtr,
-                                                     const char16_t* aEnd);
+                                                     const char16_t* aEnd,
+                                                     char16_t* aOut);
 
 /// Normal network case for the comment state in the HTML parser
 MOZ_NEVER_INLINE int32_t AccelerateCommentLineCol(const char16_t* aPtr,
-                                                  const char16_t* aEnd);
+                                                  const char16_t* aEnd,
+                                                  char16_t* aOut);
 
 /// The innerHTML / DOMParser case for the attribute value single-quoted state
 /// in the HTML parser
 MOZ_NEVER_INLINE int32_t AccelerateAttributeValueSingleQuotedFastest(
-    const char16_t* aPtr, const char16_t* aEnd);
+    const char16_t* aPtr, const char16_t* aEnd, char16_t* aOut);
 
 /// View Source case for the attribute value single-quoted state in the HTML
 /// parser
 MOZ_NEVER_INLINE int32_t AccelerateAttributeValueSingleQuotedViewSource(
-    const char16_t* aPtr, const char16_t* aEnd);
+    const char16_t* aPtr, const char16_t* aEnd, char16_t* aOut);
 
 /// Normal network case for the attribute value single-quoted state in the HTML
 /// parser
 MOZ_NEVER_INLINE int32_t AccelerateAttributeValueSingleQuotedLineCol(
-    const char16_t* aPtr, const char16_t* aEnd);
+    const char16_t* aPtr, const char16_t* aEnd, char16_t* aOut);
 
 /// The innerHTML / DOMParser case for the attribute value double-quoted state
 /// in the HTML parser
 MOZ_NEVER_INLINE int32_t AccelerateAttributeValueDoubleQuotedFastest(
-    const char16_t* aPtr, const char16_t* aEnd);
+    const char16_t* aPtr, const char16_t* aEnd, char16_t* aOut);
 
 /// View Source case for the attribute value double-quoted state in the HTML
 /// parser
 MOZ_NEVER_INLINE int32_t AccelerateAttributeValueDoubleQuotedViewSource(
-    const char16_t* aPtr, const char16_t* aEnd);
+    const char16_t* aPtr, const char16_t* aEnd, char16_t* aOut);
 
 /// Normal network case for the attribute value double-quoted state in the HTML
 /// parser
 MOZ_NEVER_INLINE int32_t AccelerateAttributeValueDoubleQuotedLineCol(
-    const char16_t* aPtr, const char16_t* aEnd);
+    const char16_t* aPtr, const char16_t* aEnd, char16_t* aOut);
 
 /// The innerHTML / DOMParser case for the CDATA section state in the HTML
 /// parser

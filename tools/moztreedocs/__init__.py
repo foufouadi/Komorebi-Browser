@@ -40,6 +40,7 @@ def read_build_config(docdir):
     # Only define the parts we need.
     class fakeconfig:
         topsrcdir = build.topsrcdir
+        substs = {}
 
     variables = ("SPHINX_TREES", "SPHINX_PYTHON_PACKAGE_DIRS")
     reader = BuildReader(fakeconfig())
@@ -113,7 +114,25 @@ class _SphinxManager:
     def _generate_python_api_docs(self):
         """Generate Python API doc files."""
         out_dir = os.path.join(self.staging_dir, "python")
-        base_args = ["--no-toc", "-o", out_dir]
+        # apidoc generates reStructuredText by default; point it at the
+        # Markdown templates instead, as the docs are only built from Markdown.
+        # The template file names are the ones apidoc looks up, so they keep
+        # their `.rst.jinja` names even though they emit Markdown.
+        base_args = [
+            "--no-toc",
+            "--suffix",
+            "md",
+            "--templatedir",
+            os.path.join(here, "apidoc_templates"),
+            "-o",
+            out_dir,
+        ]
+
+        with open(os.path.join(MAIN_DOC_PATH, "config.yml")) as fh:
+            api_excludes = [
+                os.path.join(self.topsrcdir, path)
+                for path in yaml.safe_load(fh).get("python_api_exclude", [])
+            ]
 
         for p in sorted(self.python_package_dirs):
             full = os.path.join(self.topsrcdir, p)
@@ -132,6 +151,7 @@ class _SphinxManager:
             args = list(base_args)
             args.append(full)
             args.extend(excludes)
+            args.extend(e for e in api_excludes if e.startswith(full + os.sep))
 
             sphinx.ext.apidoc.main(args)
 

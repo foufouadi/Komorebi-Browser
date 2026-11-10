@@ -289,20 +289,6 @@ void LIRGeneratorX64::lowerAtomicStore64(MStoreUnboxedScalar* ins) {
   add(new (alloc()) LAtomicStore64(elements, index, value), ins);
 }
 
-void LIRGenerator::visitWasmUnsignedToDouble(MWasmUnsignedToDouble* ins) {
-  MOZ_ASSERT(ins->input()->type() == MIRType::Int32);
-  LWasmUint32ToDouble* lir =
-      new (alloc()) LWasmUint32ToDouble(useRegisterAtStart(ins->input()));
-  define(lir, ins);
-}
-
-void LIRGenerator::visitWasmUnsignedToFloat32(MWasmUnsignedToFloat32* ins) {
-  MOZ_ASSERT(ins->input()->type() == MIRType::Int32);
-  LWasmUint32ToFloat32* lir =
-      new (alloc()) LWasmUint32ToFloat32(useRegisterAtStart(ins->input()));
-  define(lir, ins);
-}
-
 void LIRGenerator::visitWasmLoad(MWasmLoad* ins) {
   MDefinition* base = ins->base();
   // 'base' is a GPR but may be of either type.  If it is 32-bit it is
@@ -338,6 +324,10 @@ static bool CanUseInt32OrInt64Constant(MDefinition* value) {
   return true;
 }
 
+bool LIRGeneratorX64::canStoreConstantWithoutRegister(MDefinition* value) {
+  return IsIntType(value->type()) && CanUseInt32OrInt64Constant(value);
+}
+
 void LIRGenerator::visitWasmStore(MWasmStore* ins) {
   MDefinition* base = ins->base();
   // See comment in visitWasmLoad re the type of 'base'.
@@ -366,7 +356,7 @@ void LIRGenerator::visitWasmStore(MWasmStore* ins) {
       valueAlloc = useRegisterAtStart(value);
       break;
     case Scalar::Simd128:
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
       valueAlloc = useRegisterAtStart(value);
       break;
 #else
@@ -523,7 +513,7 @@ void LIRGeneratorX64::lowerDivI64(MDiv* div) {
     // Division by powers of two can be done by shifting, and division by
     // other numbers can be done by a reciprocal multiplication technique.
     if (std::has_single_bit(mozilla::Abs(rhs))) {
-      int32_t shift = mozilla::FloorLog2(mozilla::Abs(rhs));
+      int32_t shift = std::countr_zero(mozilla::Abs(rhs));
       LAllocation lhs = useRegisterAtStart(div->lhs());
 
       // We have to round the result toward 0 when the remainder is non-zero.
@@ -554,7 +544,7 @@ void LIRGeneratorX64::lowerModI64(MMod* mod) {
     int64_t rhs = mod->rhs()->toConstant()->toInt64();
 
     if (std::has_single_bit(mozilla::Abs(rhs))) {
-      int32_t shift = mozilla::FloorLog2(mozilla::Abs(rhs));
+      int32_t shift = std::countr_zero(mozilla::Abs(rhs));
 
       auto* lir =
           new (alloc()) LModPowTwoI64(useRegisterAtStart(mod->lhs()), shift);
@@ -579,7 +569,7 @@ void LIRGeneratorX64::lowerUDivI64(MDiv* div) {
     uint64_t rhs = div->rhs()->toConstant()->toInt64();
 
     if (std::has_single_bit(rhs)) {
-      int32_t shift = mozilla::FloorLog2(rhs);
+      int32_t shift = std::countr_zero(rhs);
 
       auto* lir = new (alloc()) LDivPowTwoI64(useRegisterAtStart(div->lhs()),
                                               LAllocation(), shift, false);
@@ -604,7 +594,7 @@ void LIRGeneratorX64::lowerUModI64(MMod* mod) {
     uint64_t rhs = mod->rhs()->toConstant()->toInt64();
 
     if (std::has_single_bit(rhs)) {
-      int32_t shift = mozilla::FloorLog2(rhs);
+      int32_t shift = std::countr_zero(rhs);
 
       auto* lir =
           new (alloc()) LModPowTwoI64(useRegisterAtStart(mod->lhs()), shift);

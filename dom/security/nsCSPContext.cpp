@@ -17,6 +17,7 @@
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/LinkStyle.h"
 #include "mozilla/dom/ReportingUtils.h"
 #include "mozilla/dom/WindowGlobalParent.h"
 #include "mozilla/glean/DomSecurityMetrics.h"
@@ -487,6 +488,22 @@ nsCSPContext::AppendPolicy(const nsAString& aPolicyString, bool aReportOnly,
   return NS_OK;
 }
 
+// Bug 2072122: Trusted Types readiness experiment only, to be removed.
+Maybe<nsCSPPolicy::Disposition> nsCSPContext::GetStrictPolicyDisposition() {
+  EnsureIPCPoliciesRead();
+  Maybe<nsCSPPolicy::Disposition> result;
+  for (const nsCSPPolicy* policy : mPolicies) {
+    if (!policy->isStrict()) {
+      continue;
+    }
+    if (policy->getDisposition() == nsCSPPolicy::Disposition::Enforce) {
+      return Some(nsCSPPolicy::Disposition::Enforce);
+    }
+    result = Some(nsCSPPolicy::Disposition::Report);
+  }
+  return result;
+}
+
 NS_IMETHODIMP
 nsCSPContext::GetRequireTrustedTypesForDirectiveState(
     RequireTrustedTypesForDirectiveState*
@@ -687,11 +704,18 @@ nsCSPContext::GetAllowsInline(CSPDirective aDirective, bool aHasUnsafeHash,
     // one policy, so this check may be unnecessary.
     if (content.IsEmpty()) {
       if (aSourceText.IsVoid()) {
-        // Lazily retrieve the text of inline script, see bug 1376651.
-        nsCOMPtr<nsIScriptElement> element =
-            do_QueryInterface(aTriggeringElement);
-        MOZ_ASSERT(element);
-        element->GetScriptText(content);
+        // Lazily retrieve inline script / stylesheets, see bug 1376651.
+        if (nsCOMPtr<nsIScriptElement> element =
+                do_QueryInterface(aTriggeringElement)) {
+          element->GetScriptText(content);
+        } else if (auto* style = LinkStyle::FromNode(*aTriggeringElement)) {
+          if (!style->GetInlineSheetText(content)) {
+            // TODO: Could fall back more reasonably perhaps.
+            MOZ_CRASH("OOM when getting sheet text for CSP reporting");
+          }
+        } else {
+          MOZ_ASSERT_UNREACHABLE("No way to get the actual source text?");
+        }
       } else {
         content = aSourceText;
       }
@@ -1266,8 +1290,10 @@ nsresult nsCSPContext::SendReportsToEndpoints(
   RefPtr<CSPViolationReportBody> body =
       new CSPViolationReportBody(window->AsGlobal(), aViolationEventInit);
 
-  ReportingUtils::Report(window->AsGlobal(), nsGkAtoms::cspViolation,
-                         reportGroup, aViolationEventInit.mDocumentURI, body);
+  ReportingUtils::Report(
+      window->AsGlobal(), nsGkAtoms::cspViolation,
+      NS_ConvertUTF16toUTF8(reportGroup),
+      NS_ConvertUTF16toUTF8(aViolationEventInit.mDocumentURI), body);
   return NS_OK;
 }
 

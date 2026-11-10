@@ -158,6 +158,7 @@
 #include "js/WasmModule.h"    // JS::WasmModule
 #include "js/Wrapper.h"
 #include "proxy/DeadObjectProxy.h"  // js::IsDeadProxyObject
+#include "shell/DebugSession.h"
 #include "shell/jsoptparse.h"
 #include "shell/jsshell.h"
 #include "shell/OSObject.h"
@@ -491,7 +492,7 @@ static bool SetMozLog(JSContext* cx, unsigned argc, Value* vp) {
  * Limit the timeout to 30 minutes to prevent an overflow on platfoms
  * that represent the time internally in microseconds using 32-bit int.
  */
-static const double MAX_TIMEOUT_SECONDS = 1800.0;
+static const int32_t MAX_TIMEOUT_SECONDS = 1800;
 
 // Not necessarily in sync with the browser
 #ifdef ENABLE_SHARED_MEMORY
@@ -850,10 +851,11 @@ already_AddRefed<JS::Stencil> OffThreadJob::stealStencil(JSContext* cx) {
   return stencil_.forget();
 }
 
-struct ShellCompartmentPrivate {
-  GCPtr<ArrayObject*> blackRoot;
-  GCPtr<ArrayObject*> grayRoot;
-};
+static bool IsDebugSessionHostCompartment(JS::Compartment* comp) {
+  auto* priv =
+      static_cast<ShellCompartmentPrivate*>(JS_GetCompartmentPrivate(comp));
+  return priv && priv->isDebugSessionHost;
+}
 
 struct MOZ_STACK_CLASS EnvironmentPreparer
     : public js::ScriptEnvironmentPreparer {
@@ -915,12 +917,12 @@ enum class ShellGlobalKind {
   WindowProxy,
 };
 
-static void SetStandardRealmOptions(JSContext* cx, JS::RealmOptions& options);
 static JSObject* NewStringInterruptCallbackGlobal(JSContext* cx);
-static JSObject* NewGlobalObject(
-    JSContext* cx, JS::RealmOptions& options, JSPrincipals* principals,
-    ShellGlobalKind kind, bool immutablePrototype,
-    JS::HandleObject existingWindowProxy = nullptr);
+static JSObject* NewGlobalObject(JSContext* cx, JS::RealmOptions& options,
+                                 JSPrincipals* principals, ShellGlobalKind kind,
+                                 bool immutablePrototype,
+                                 JS::HandleObject existingWindowProxy = nullptr,
+                                 bool securityWrappers = false);
 
 /*
  * A toy WindowProxy class for the shell. This is intended for testing code
@@ -948,6 +950,8 @@ JSObject* NewShellWindowProxy(JSContext* cx, JS::HandleObject global) {
   return obj;
 }
 
+static const js::CrossCompartmentSecurityWrapper ShellSecurityWrapper(0);
+
 // A wrap callback that matches the behavior of the browser which reuses an
 // existing wrapper object via Wrapper::Renew when one is supplied. This allows
 // exercising Wrapper::Renew.
@@ -955,11 +959,15 @@ static JSObject* ShellWrapObjectCallback(JSContext* cx,
                                          JS::HandleObject existing,
                                          JS::HandleObject obj) {
   MOZ_ASSERT(!obj->is<js::WrapperObject>() || js::IsWindowProxy(obj));
+  auto* priv = static_cast<ShellCompartmentPrivate*>(
+      JS_GetCompartmentPrivate(cx->compartment()));
+  const js::Wrapper* handler = (priv && priv->useSecurityWrappers)
+                                   ? &ShellSecurityWrapper
+                                   : &js::CrossCompartmentWrapper::singleton;
   if (existing) {
-    return js::Wrapper::Renew(existing, obj,
-                              &js::CrossCompartmentWrapper::singleton);
+    return js::Wrapper::Renew(existing, obj, handler);
   }
-  return js::Wrapper::New(cx, obj, &js::CrossCompartmentWrapper::singleton);
+  return js::Wrapper::New(cx, obj, handler);
 }
 
 static const JSWrapObjectCallbacks ShellWrapObjectCallbacks = {
@@ -1070,7 +1078,8 @@ ShellContext::ShellContext(JSContext* cx, IsWorkerEnum isWorker_)
       errFilePtr(nullptr),
       outFilePtr(nullptr),
       offThreadMonitor(mutexid::ShellOffThreadState),
-      taskCallbacks(cx) {}
+      taskCallbacks(cx),
+      debugSessionHost(cx) {}
 
 ShellContext* js::shell::GetShellContext(JSContext* cx) {
   ShellContext* sc = static_cast<ShellContext*>(JS_GetContextPrivate(cx));
@@ -1088,7 +1097,7 @@ static void TraceRootArrays(JSTracer* trc, gc::MarkColor color) {
         continue;
       }
 
-      GCPtr<ArrayObject*>& array =
+      HeapPtr<ArrayObject*>& array =
           (color == gc::MarkColor::Black) ? priv->blackRoot : priv->grayRoot;
       TraceEdge(trc, &array, "shell root array");
 
@@ -1212,6 +1221,10 @@ static bool ShellInterruptCallback(JSContext* cx) {
     JS::AutoSaveExceptionState savedExc(cx);
 
     if (sc->interruptFunc.isObject()) {
+      // We need to allow running the callback, which may be in the interrupted
+      // realm.
+      js::AutoAllowScriptInInterrupt allowScript(cx);
+
       JSAutoRealm ar(cx, &sc->interruptFunc.toObject());
 
       // Report any exceptions thrown by the JS interrupt callback, but do
@@ -1558,20 +1571,19 @@ static bool GlobalOfFirstJobInQueue(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  auto& genericJob = cx->microTaskQueues->microTaskQueue.front();
-  JS::JSMicroTask* job = JS::ToUnwrappedJSMicroTask(genericJob);
-  if (!job) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_DEAD_OBJECT);
+  const JS::MicroTask& job =
+      cx->microTaskQueues->microTaskQueue.front().toMicroTask();
 
-    return false;
-  }
-
-  RootedObject global(cx, JS::GetExecutionGlobalFromJSMicroTask(job));
+  RootedObject global(cx, job.asJS().executionGlobal());
   if (!global) {
     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_DEAD_OBJECT);
     return false;
   }
   MOZ_ASSERT(global);
+  if (IsDebugSessionHostCompartment(JS::GetCompartment(global))) {
+    JS_ReportErrorASCII(cx, "The job belongs to an internal global");
+    return false;
+  }
   if (!cx->compartment()->wrap(cx, &global)) {
     return false;
   }
@@ -1638,6 +1650,11 @@ static void ForwardingPromiseRejectionTrackerCallback(
     JSContext* cx, bool mutedErrors, JS::HandleObject promise,
     JS::PromiseRejectionHandlingState state, void* data) {
   AutoReportException are(cx);
+
+  // Don't expose promises of the debug session host.
+  if (IsDebugSessionHostCompartment(JS::GetCompartment(promise))) {
+    return;
+  }
 
   if (!TrackUnhandledRejections(cx, promise, state)) {
     return;
@@ -4475,7 +4492,8 @@ static const JSClass sandbox_class = {
     &sandbox_classOps,
 };
 
-static void SetStandardRealmOptions(JSContext* cx, JS::RealmOptions& options) {
+void js::shell::SetStandardRealmOptions(JSContext* cx,
+                                        JS::RealmOptions& options) {
   options.creationOptions()
       .setSharedMemoryAndAtomicsEnabled(enableSharedMemory)
       .setCoopAndCoepEnabled(false)
@@ -4850,7 +4868,7 @@ static bool Sleep_fn(JSContext* cx, unsigned argc, Value* vp) {
   ShellContext* sc = GetShellContext(cx);
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  TimeDuration duration = TimeDuration::FromSeconds(0.0);
+  TimeDuration duration = TimeDuration::Zero();
   if (args.length() > 0) {
     double t_secs;
     if (!ToNumber(cx, args[0], &t_secs)) {
@@ -4945,7 +4963,7 @@ static void WatchdogMain(JSContext* cx) {
         }
 
         TimeDuration sleepDuration = sc->watchdogTimeout
-                                         ? TimeDuration::FromSeconds(0.1)
+                                         ? TimeDuration::FromMilliseconds(100)
                                          : TimeDuration::Forever();
         sc->watchdogWakeup.wait_for(guard, sleepDuration);
       }
@@ -5636,7 +5654,8 @@ static bool Elapsed(JSContext* cx, unsigned argc, Value* vp) {
   return false;
 }
 
-static ShellCompartmentPrivate* EnsureShellCompartmentPrivate(JSContext* cx) {
+ShellCompartmentPrivate* js::shell::EnsureShellCompartmentPrivate(
+    JSContext* cx) {
   Compartment* comp = cx->compartment();
   auto priv =
       static_cast<ShellCompartmentPrivate*>(JS_GetCompartmentPrivate(comp));
@@ -5645,6 +5664,17 @@ static ShellCompartmentPrivate* EnsureShellCompartmentPrivate(JSContext* cx) {
     JS_SetCompartmentPrivate(cx->compartment(), priv);
   }
   return priv;
+}
+
+static void ClearShellCompartmentPrivates(JSContext* cx) {
+  for (ZonesIter zone(cx->runtime(), SkipAtoms); !zone.done(); zone.next()) {
+    for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next()) {
+      auto* priv =
+          static_cast<ShellCompartmentPrivate*>(JS_GetCompartmentPrivate(comp));
+      JS_SetCompartmentPrivate(comp, nullptr);
+      js_delete(priv);
+    }
+  }
 }
 
 static bool ParseModule(JSContext* cx, unsigned argc, Value* vp) {
@@ -5773,6 +5803,57 @@ static bool ParseModule(JSContext* cx, unsigned argc, Value* vp) {
   Rooted<ShellModuleObjectWrapper*> wrapper(
       cx, ShellModuleObjectWrapper::create(cx, module.as<ModuleObject>(),
                                            moduleType));
+  if (!wrapper) {
+    return false;
+  }
+  args.rval().setObject(*wrapper);
+  return true;
+}
+
+static bool CreateSyntheticModule(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  if (!args.requireAtLeast(cx, "createSyntheticModule", 1)) {
+    return false;
+  }
+
+  if (!args[0].isObject()) {
+    const char* typeName = InformalValueTypeName(args[0]);
+    JS_ReportErrorASCII(cx, "expected object of exports, got %s", typeName);
+    return false;
+  }
+
+  RootedObject exports(cx, &args[0].toObject());
+  JS::RootedIdVector ids(cx);
+  if (!GetPropertyKeys(cx, exports, JSITER_OWNONLY, &ids)) {
+    return false;
+  }
+
+  Rooted<ExportNameVector> exportNames(cx);
+  JS::RootedVector<Value> exportValues(cx);
+  RootedValue idValue(cx);
+  RootedValue value(cx);
+  Rooted<JSAtom*> name(cx);
+  for (size_t i = 0; i < ids.length(); i++) {
+    idValue = IdToValue(ids[i]);
+    name = ToAtom<CanGC>(cx, idValue);
+    if (!name || !JS_GetPropertyById(cx, exports, ids[i], &value)) {
+      return false;
+    }
+    if (!exportNames.append(name) || !exportValues.append(value)) {
+      ReportOutOfMemory(cx);
+      return false;
+    }
+  }
+
+  Rooted<ModuleObject*> module(cx,
+                               ModuleObject::createSynthetic(cx, &exportNames));
+  if (!module ||
+      !ModuleObject::createSyntheticEnvironment(cx, module, exportValues)) {
+    return false;
+  }
+
+  Rooted<ShellModuleObjectWrapper*> wrapper(
+      cx, ShellModuleObjectWrapper::create(cx, module));
   if (!wrapper) {
     return false;
   }
@@ -6263,10 +6344,6 @@ static bool GetModuleEnvironmentNames(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  // The "*namespace*" binding is a detail of current implementation so hide
-  // it to give stable results in tests.
-  ids.eraseIfEqual(NameToId(cx->names().star_namespace_star_));
-
   uint32_t length = ids.length();
   Rooted<ArrayObject*> array(cx, NewDenseFullyAllocatedArray(cx, length));
   if (!array) {
@@ -6332,6 +6409,49 @@ static bool GetModuleEnvironmentValue(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
+  return true;
+}
+
+static bool GetModuleLoadedModules(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  if (args.length() != 1) {
+    JS_ReportErrorASCII(cx, "Wrong number of arguments");
+    return false;
+  }
+
+  Rooted<ModuleObject*> module(cx);
+  if (args[0].isObject() && args[0].toObject().is<ShellModuleObjectWrapper>()) {
+    module = args[0].toObject().as<ShellModuleObjectWrapper>().get();
+  } else if (ModuleNamespaceObject::isInstance(args[0])) {
+    module = &args[0].toObject().as<ModuleNamespaceObject>().module();
+  } else {
+    JS_ReportErrorASCII(cx,
+                        "First argument should be a ShellModuleObjectWrapper "
+                        "or a module namespace object");
+    return false;
+  }
+
+  if (!module->hasCyclicModuleFields()) {
+    JS_ReportErrorASCII(
+        cx, "Operation is not supported on synthetic module objects.");
+    return false;
+  }
+
+  LoadedModuleMap& loadedModules = module->loadedModules();
+  uint32_t length = loadedModules.count();
+  Rooted<ArrayObject*> array(cx, NewDenseFullyAllocatedArray(cx, length));
+  if (!array) {
+    return false;
+  }
+
+  array->setDenseInitializedLength(length);
+  uint32_t i = 0;
+  for (auto iter = loadedModules.iter(); !iter.done(); iter.next()) {
+    JSAtom* specifier = iter.get().key()->as<ModuleRequestObject>().specifier();
+    array->initDenseElement(i++, StringValue(specifier));
+  }
+
+  args.rval().setObject(*array);
   return true;
 }
 
@@ -7432,6 +7552,7 @@ static bool NewGlobal(JSContext* cx, unsigned argc, Value* vp) {
   JS::RealmBehaviors& behaviors = options.behaviors();
   ShellGlobalKind kind = ShellGlobalKind::WindowProxy;
   bool immutablePrototype = true;
+  bool securityWrappers = false;
 
   SetStandardRealmOptions(cx, options);
 
@@ -7527,6 +7648,13 @@ static bool NewGlobal(JSContext* cx, unsigned argc, Value* vp) {
       immutablePrototype = v.toBoolean();
     }
 
+    if (!JS_GetProperty(cx, opts, "securityWrappers", &v)) {
+      return false;
+    }
+    if (v.isBoolean()) {
+      securityWrappers = v.toBoolean();
+    }
+
     if (!JS_GetProperty(cx, opts, "systemPrincipal", &v)) {
       return false;
     }
@@ -7615,13 +7743,20 @@ static bool NewGlobal(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
+  if (securityWrappers && creationOptions.compartmentSpecifier() ==
+                              JS::CompartmentSpecifier::ExistingCompartment) {
+    JS_ReportErrorASCII(cx, "securityWrappers requires a new compartment");
+    return false;
+  }
+
   if (!CheckRealmOptions(cx, options, principals.get())) {
     return false;
   }
 
-  RootedObject global(cx,
-                      NewGlobalObject(cx, options, principals.get(), kind,
-                                      immutablePrototype, existingWindowProxy));
+  RootedObject global(
+      cx,
+      NewGlobalObject(cx, options, principals.get(), kind, immutablePrototype,
+                      existingWindowProxy, securityWrappers));
   if (!global) {
     return false;
   }
@@ -7883,9 +8018,8 @@ static bool WithSourceHook(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  mozilla::UniquePtr<ShellSourceHook> hook =
-      mozilla::MakeUnique<ShellSourceHook>(cx,
-                                           args[0].toObject().as<JSFunction>());
+  auto hook = std::make_unique<ShellSourceHook>(
+      cx, args[0].toObject().as<JSFunction>());
   if (!hook) {
     return false;
   }
@@ -7966,6 +8100,12 @@ static void SingleStepCallback(void* arg, jit::Simulator* sim, void* pc) {
   // see WasmTailCallFPScratchReg and CollapseWasmFrameFast
   state.tempFP = (void*)sim->getRegister(jit::Simulator::t7);
 #  elif defined(JS_SIMULATOR_LOONG64)
+  state.sp = (void*)sim->getRegister(jit::Simulator::sp);
+  state.lr = (void*)sim->getRegister(jit::Simulator::ra);
+  state.fp = (void*)sim->getRegister(jit::Simulator::fp);
+  // see WasmTailCallFPScratchReg and CollapseWasmFrameFast
+  state.tempFP = (void*)sim->getRegister(jit::Simulator::t3);
+#  elif defined(JS_SIMULATOR_RISCV64)
   state.sp = (void*)sim->getRegister(jit::Simulator::sp);
   state.lr = (void*)sim->getRegister(jit::Simulator::ra);
   state.fp = (void*)sim->getRegister(jit::Simulator::fp);
@@ -8866,7 +9006,7 @@ static bool EnsureRootArray(JSContext* cx, gc::MarkColor color, unsigned argc,
     return false;
   }
 
-  GCPtr<ArrayObject*>& root =
+  HeapPtr<ArrayObject*>& root =
       (color == gc::MarkColor::Black) ? priv->blackRoot : priv->grayRoot;
 
   if (!root && !(root = NewTenuredDenseEmptyArray(cx))) {
@@ -8958,6 +9098,13 @@ static bool AddMarkObservers(JSContext* cx, unsigned argc, Value* vp) {
       // NurseryAwareHashMap). It is simpler to evict the nursery to prevent
       // nursery objects from being observed.
       cx->runtime()->gc.evictNursery();
+    }
+
+    if (value.isSymbol()) {
+      JS::Symbol* symbol = value.toSymbol();
+      if (symbol->isLocal()) {
+        value.setSymbol(symbol->sharedSymbol());
+      }
     }
 
     if (!markObservers->get().append(value)) {
@@ -9221,9 +9368,9 @@ static bool CopyExpandoProperties(JSContext* cx, HandleObject target,
     MOZ_ASSERT(desc.isSome());
 
     JSAutoRealm dstRealm(cx, target);
-    cx->recordRefToId(id);
     RootedId wrappedId(cx, id);
-    if (!cx->compartment()->wrap(cx, &desc)) {
+    if (!cx->wrapOrRecordRefToId(&wrappedId) ||
+        !cx->compartment()->wrap(cx, &desc)) {
       return false;
     }
     Rooted<PropertyDescriptor> desc_(cx, *desc);
@@ -10024,6 +10171,25 @@ static bool DisableExecutionTracing(JSContext* cx, unsigned argc,
 
 // clang-format off
 static const JSFunctionSpecWithHelp shell_functions[] = {
+    JS_FN_HELP("debugSessionCreate", DebugSessionCreate, 1, 0,
+"debugSessionCreate(global)",
+"  Create a debug session for |global|. Debug sessions use the DebugSession\n"
+"  module shared with WebDriver BiDi. With --fuzzing-safe, they replace the\n"
+"  Debugger API. See debugSessionCommand for its commands."),
+
+    JS_FN_HELP("debugSessionCommand", DebugSessionCommand, 2, 0,
+"debugSessionCommand(command, [arg])",
+"  Run a debug session command:\n"
+"  - enable, disable: start or stop debugging the session's global.\n"
+"  - destroy: end the session.\n"
+"  - setBreakpoints: arg is a list of {id, url, line, column}.\n"
+"  - setPauseOnExceptions: arg is none, uncaught or all.\n"
+"  - setPauseActions: arg is a list of actions. Each pause takes actions from\n"
+"        the list until a resume or step action.\n"
+"  - listScripts: return the URLs of the debuggee's scripts.\n"
+"  - getScriptSource: arg is a URL, return the source of its script.\n"
+"  - takeLog: return and clear the list of pauses and evaluation results."),
+
     JS_FN_HELP("options", Options, 0, 0,
 "options([option ...])",
 "  Get or toggle JavaScript options."),
@@ -10230,6 +10396,12 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 "  a JSON module ('json'), a bytes module ('bytes'), or a text module ('text'),\n"
 "  and returns a ModuleObject wrapper object."),
 
+    JS_FN_HELP("createSyntheticModule", CreateSyntheticModule, 1, 0,
+"createSyntheticModule(exports)",
+"  Creates a synthetic module whose exports are the own properties of the\n"
+"  object |exports|, and returns a ModuleObject wrapper object. Export names\n"
+"  can be arbitrary strings."),
+
     JS_FN_HELP("instantiateModuleStencil", InstantiateModuleStencil, 1, 0,
 "instantiateModuleStencil(stencil, [options])",
 "  Instantiates the given stencil as module, and return the module object."),
@@ -10275,6 +10447,11 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
     JS_FN_HELP("getModuleEnvironmentValue", GetModuleEnvironmentValue, 2, 0,
 "getModuleEnvironmentValue(module, name)",
 "  Get the value of a bound name in a module environment.\n"),
+
+    JS_FN_HELP("getModuleLoadedModules", GetModuleLoadedModules, 1, 0,
+"getModuleLoadedModules(module)",
+"  Get the list of specifiers recorded in a module's [[LoadedModules]]. The\n"
+"  argument is either a module object or a module namespace object\n"),
 
     JS_FN_HELP("dumpStencil", DumpStencil, 1, 0,
 "dumpStencil(code, [options])",
@@ -10444,6 +10621,9 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 "          their prototypes will be sealed. These constructors will be defined on the\n"
 "          global as non-configurable and non-writable.\n"
 "      immutablePrototype: whether the global's prototype is immutable.\n"
+"      securityWrappers: If true, objects from other compartments will be\n"
+"         wrapped in the new global's compartment with security wrappers.\n"
+"         Requires a new compartment.\n"
 "      principal: if present, its value converted to a number must be an\n"
 "         integer that fits in 32 bits; use that as the new realm's\n"
 "         principal. Shell principals are toys, meant only for testing; one\n"
@@ -10996,6 +11176,9 @@ static ExtraGlobalBindingWithHelp extraGlobalBindingsWithHelp[] = {
 "      Getter with JSJitInfo.slotIndex\n"
 "    FakeDOMObject.prototype.global\n"
 "      Getter/setter with JSJitInfo::AliasEverything\n"
+"    FakeDOMObject.prototype.pendingGlobalProperties\n"
+"      Setting this to N makes the next get define N new global properties,\n"
+"      even though the getter has JSJitInfo::AliasNone\n"
 "    FakeDOMObject.prototype.doFoo()\n"
 "      Method with JSJitInfo\n"
 "    FakeDOMObject.prototype.getObject()\n"
@@ -11379,7 +11562,7 @@ static const JSClassOps global_classOps = {
 static constexpr uint32_t DOM_PROTOTYPE_SLOT = JSCLASS_GLOBAL_SLOT_COUNT;
 static constexpr uint32_t DOM_GLOBAL_SLOTS = 1;
 
-static const JSClass global_class = {
+const JSClass js::shell::ShellGlobalClass = {
     "global",
     JSCLASS_GLOBAL_FLAGS | JSCLASS_GLOBAL_FLAGS_WITH_SLOTS(DOM_GLOBAL_SLOTS),
     &global_classOps,
@@ -11451,6 +11634,48 @@ static bool dom_set_global(JSContext* cx, HandleObject obj, void* self,
     return false;
   }
 
+  return true;
+}
+
+// Number of new global properties that the next call to the
+// FakeDOMObject.prototype.pendingGlobalProperties getter will define.
+static mozilla::Atomic<uint32_t> sFakeDOMPendingGlobalProperties(0);
+
+static bool dom_get_pendingGlobalProperties(JSContext* cx, HandleObject obj,
+                                            void* self,
+                                            JSJitGetterCallArgs args) {
+  MOZ_ASSERT(JS::GetClass(obj) == GetDomClass());
+  MOZ_ASSERT(self == DOM_PRIVATE_VALUE);
+
+  // Define new properties on the global, like a Gecko DOM getter that lazily
+  // defines interface constructors while creating a reflector. This may
+  // reallocate the global's dynamic slots.
+  static mozilla::Atomic<uint32_t> counter(0);
+  RootedObject global(cx, cx->global());
+  uint32_t count = sFakeDOMPendingGlobalProperties.exchange(0);
+  for (uint32_t i = 0; i < count; i++) {
+    char name[32];
+    SprintfLiteral(name, "__fakeDOMGlobalProp%u", uint32_t(counter++));
+    if (!JS_DefineProperty(cx, global, name, UndefinedHandleValue, 0)) {
+      return false;
+    }
+  }
+
+  args.rval().setUndefined();
+  return true;
+}
+
+static bool dom_set_pendingGlobalProperties(JSContext* cx, HandleObject obj,
+                                            void* self,
+                                            JSJitSetterCallArgs args) {
+  MOZ_ASSERT(JS::GetClass(obj) == GetDomClass());
+  MOZ_ASSERT(self == DOM_PRIVATE_VALUE);
+
+  if (!args[0].isInt32() || args[0].toInt32() < 0) {
+    JS_ReportErrorASCII(cx, "Expected a non-negative int32");
+    return false;
+  }
+  sFakeDOMPendingGlobalProperties = uint32_t(args[0].toInt32());
   return true;
 }
 
@@ -11552,6 +11777,40 @@ static const JSJitInfo dom_global_getterinfo = {
     0                           /* slotIndex */
 };
 
+// Note: an AliasNone getter that may define properties on the global,
+// to mimic lazily initialized DOM constructors.
+static const JSJitInfo dom_pendingGlobalProperties_getterinfo = {
+    {(JSJitGetterOp)dom_get_pendingGlobalProperties},
+    {0}, /* protoID */
+    {0}, /* depth */
+    JSJitInfo::Getter,
+    JSJitInfo::AliasNone, /* aliasSet */
+    JSVAL_TYPE_UNDEFINED, /* returnType */
+    false,                /* isInfallible. False in setters. */
+    false,                /* isMovable */
+    false,                /* isEliminatable */
+    false,                /* isAlwaysInSlot */
+    false,                /* isLazilyCachedInSlot */
+    false,                /* isTypedMethod */
+    0                     /* slotIndex */
+};
+
+static const JSJitInfo dom_pendingGlobalProperties_setterinfo = {
+    {(JSJitGetterOp)dom_set_pendingGlobalProperties},
+    {0}, /* protoID */
+    {0}, /* depth */
+    JSJitInfo::Setter,
+    JSJitInfo::AliasEverything, /* aliasSet */
+    JSVAL_TYPE_UNKNOWN,         /* returnType */
+    false,                      /* isInfallible. False in setters. */
+    false,                      /* isMovable. */
+    false,                      /* isEliminatable. */
+    false,                      /* isAlwaysInSlot */
+    false,                      /* isLazilyCachedInSlot */
+    false,                      /* isTypedMethod */
+    0                           /* slotIndex */
+};
+
 static const JSJitInfo dom_global_setterinfo = {
     {(JSJitGetterOp)dom_set_global},
     {0}, /* protoID */
@@ -11609,6 +11868,10 @@ static const JSPropertySpec dom_props[] = {
     JSPropertySpec::nativeAccessors("global", JSPROP_ENUMERATE,
                                     dom_genericGetter, &dom_global_getterinfo,
                                     dom_genericSetter, &dom_global_setterinfo),
+    JSPropertySpec::nativeAccessors(
+        "pendingGlobalProperties", JSPROP_ENUMERATE, dom_genericGetter,
+        &dom_pendingGlobalProperties_getterinfo, dom_genericSetter,
+        &dom_pendingGlobalProperties_setterinfo),
     JS_PS_END,
 };
 
@@ -11846,7 +12109,7 @@ static JSObject* NewStringInterruptCallbackGlobal(JSContext* cx) {
   options.creationOptions().setInvisibleToDebugger(true);
 
   RootedObject glob(cx,
-                    JS_NewGlobalObject(cx, &global_class, nullptr,
+                    JS_NewGlobalObject(cx, &ShellGlobalClass, nullptr,
                                        JS::DontFireOnNewGlobalHook, options));
   if (!glob) {
     return nullptr;
@@ -11877,9 +12140,10 @@ static JSObject* NewStringInterruptCallbackGlobal(JSContext* cx) {
 static JSObject* NewGlobalObject(JSContext* cx, JS::RealmOptions& options,
                                  JSPrincipals* principals, ShellGlobalKind kind,
                                  bool immutablePrototype,
-                                 JS::HandleObject existingWindowProxy) {
+                                 JS::HandleObject existingWindowProxy,
+                                 bool securityWrappers) {
   RootedObject glob(cx,
-                    JS_NewGlobalObject(cx, &global_class, principals,
+                    JS_NewGlobalObject(cx, &ShellGlobalClass, principals,
                                        JS::DontFireOnNewGlobalHook, options));
   if (!glob) {
     return nullptr;
@@ -11894,6 +12158,14 @@ static JSObject* NewGlobalObject(JSContext* cx, JS::RealmOptions& options,
 
   {
     JSAutoRealm ar(cx, glob);
+
+    if (securityWrappers) {
+      ShellCompartmentPrivate* priv = EnsureShellCompartmentPrivate(cx);
+      if (!priv) {
+        return nullptr;
+      }
+      priv->useSecurityWrappers = true;
+    }
 
     if (kind == ShellGlobalKind::WindowProxy) {
       RootedObject proxy(cx, NewShellWindowProxy(cx, glob));
@@ -11940,7 +12212,9 @@ static JSObject* NewGlobalObject(JSContext* cx, JS::RealmOptions& options,
     if (!JS_InitReflectParse(cx, glob)) {
       return nullptr;
     }
-    if (!JS_DefineDebuggerObject(cx, glob)) {
+    // With --fuzzing-safe the Debugger API is only available through the debug
+    // session module. See the SMDOC comment in DebugSession.cpp.
+    if (!fuzzingSafe && !JS_DefineDebuggerObject(cx, glob)) {
       return nullptr;
     }
     if (!JS_DefineFunctionsWithHelp(cx, glob, shell_functions) ||
@@ -12414,8 +12688,7 @@ ShellContext::~ShellContext() {
   if (cx_) {
     JS_SetContextPrivate(cx_, nullptr);
     JS::SetHostCleanupFinalizationRegistryCallback(cx_, nullptr, nullptr);
-    JS_SetGrayGCRootsTracer(cx_, nullptr, nullptr);
-    JS_RemoveExtraGCRootsTracer(cx_, TraceBlackRoots, nullptr);
+    ClearShellCompartmentPrivates(cx_);
   }
   MOZ_ASSERT(offThreadJobs.empty());
 }
@@ -13009,6 +13282,9 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption('\0', "test-wasm-await-tier2",
                         "Forcibly activate tiering and block "
                         "instantiation on completion of tier2") ||
+      !op.addBoolOption('\0', "disable-main-thread-wasm-denormals",
+                        "Disable denormals (FTZ+DAZ) for wasm execution on "
+                        "the main thread, to emulate WebAudio worklets") ||
       !op.addBoolOption('\0', "no-native-regexp",
                         "Disable native regexp compilation") ||
       !op.addIntOption(
@@ -13152,9 +13428,6 @@ bool InitOptionParser(OptionParser& op) {
       !op.addStringOption('\0', "ion-parallel-compile", "on/off",
                           "--ion-parallel compile is deprecated. Use "
                           "--ion-offthread-compile.") ||
-      !op.addBoolOption('\0', "disable-main-thread-denormals",
-                        "Disable Denormals on the main thread only, to "
-                        "emulate WebAudio worklets.") ||
       !op.addStringOption('\0', "object-keys-scalar-replacement", "on/off",
                           "Replace Object.keys with a NativeIterators "
                           "(default: on)") ||
@@ -13231,7 +13504,7 @@ bool InitOptionParser(OptionParser& op) {
           '\0', "no-sse42",
           "Pretend CPU does not support SSE4.2 instructions "
           "to test JIT codegen (no-op on platforms other than x86 and x64).") ||
-#ifdef ENABLE_WASM_AVX
+#ifdef ENABLE_JIT_AVX
       !op.addBoolOption('\0', "enable-avx",
                         "No-op. AVX is enabled by default, if available.") ||
       !op.addBoolOption(
@@ -13434,8 +13707,9 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption('\0', "enable-joint-iteration",
                         "Enable Joint Iteration") ||
       !op.addBoolOption('\0', "enable-atomics-pause", "Enable Atomics pause") ||
-      !op.addBoolOption('\0', "enable-temporal", "Enable Temporal") ||
       !op.addBoolOption('\0', "enable-import-bytes", "Enable import bytes") ||
+      !op.addBoolOption('\0', "enable-export-star-default",
+                        "Include default in export * declarations") ||
       !op.addBoolOption('\0', "enable-import-text", "Enable import text") ||
       !op.addBoolOption('\0', "enable-promise-allkeyed",
                         "Enable Promise.allKeyed") ||
@@ -13458,7 +13732,9 @@ bool InitOptionParser(OptionParser& op) {
       !op.addBoolOption('\0', "enable-regexp-buffer-boundaries",
                         "Enable RegExp Buffer Boundaries") ||
       !op.addBoolOption('\0', "enable-wasm-esm-integration",
-                        "Enable wasm/esm integration")) {
+                        "Enable wasm/esm integration") ||
+      !op.addBoolOption('\0', "enable-defer-import-eval",
+                        "Enable Deferred Import Evaluation")) {
     return false;
   }
 
@@ -13556,6 +13832,9 @@ bool SetGlobalOptionsPreJSInit(const OptionParser& op) {
   if (op.getBoolOption("enable-import-bytes")) {
     JS::Prefs::setAtStartup_experimental_import_bytes(true);
   }
+  if (op.getBoolOption("enable-export-star-default")) {
+    JS::Prefs::setAtStartup_experimental_export_star_default(true);
+  }
   if (op.getBoolOption("enable-promise-allkeyed")) {
     JS::Prefs::setAtStartup_experimental_promise_allkeyed(true);
   }
@@ -13568,6 +13847,9 @@ bool SetGlobalOptionsPreJSInit(const OptionParser& op) {
   if (op.getBoolOption("enable-regexp-buffer-boundaries")) {
     JS::Prefs::setAtStartup_experimental_regexp_buffer_boundaries(true);
   }
+  if (op.getBoolOption("enable-defer-import-eval")) {
+    JS::Prefs::setAtStartup_experimental_defer_import_eval(true);
+  }
 #endif
   if (op.getBoolOption("enable-source-phase-imports")) {
     JS::Prefs::set_experimental_source_phase_imports(true);
@@ -13577,11 +13859,6 @@ bool SetGlobalOptionsPreJSInit(const OptionParser& op) {
         setAtStartup_experimental_source_phase_imports_test262_module_source(
             true);
   }
-#ifdef JS_HAS_INTL_API
-  if (op.getBoolOption("enable-temporal")) {
-    JS::Prefs::setAtStartup_experimental_temporal(true);
-  }
-#endif
   JS::Prefs::setAtStartup_experimental_weakrefs_expose_cleanupSome(true);
 
   if (op.getBoolOption("disable-property-error-message-fix")) {
@@ -13920,6 +14197,9 @@ bool SetContextWasmOptions(JSContext* cx, const OptionParser& op) {
       .setWasmBaseline(enableWasmBaseline)
       .setWasmIon(enableWasmOptimizing)
       .setTestWasmAwaitTier2(enableTestWasmAwaitTier2);
+  if (op.getBoolOption("disable-main-thread-wasm-denormals")) {
+    JS::ContextOptionsRef(cx).setWasmDisablesDenormals();
+  }
 
 #ifndef __wasi__
   // Also the following are to be propagated.
@@ -14188,35 +14468,6 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
     }
   }
 
-  if (op.getBoolOption("disable-main-thread-denormals")) {
-    // This is a simplified version of WebAudio code, which is good enough for
-    // fuzzing purposes.
-    //
-    // See dom/media/webaudio/blink/DenormalDisabler.h#124
-#if defined(__GNUC__) && defined(__SSE__) && defined(__x86_64__)
-    int savedCSR;
-    asm volatile("stmxcsr %0" : "=m"(savedCSR));
-    int newCSR = savedCSR | 0x8040;
-    asm volatile("ldmxcsr %0" : : "m"(newCSR));
-#elif defined(__arm__)
-    int savedCSR;
-    asm volatile("vmrs %[result], FPSCR" : [result] "=r"(savedCSR));
-    // Bit 24 is the flush-to-zero mode control bit. Setting it to 1 flushes
-    // denormals to 0.
-    int newCSR = savedCSR | (1 << 24);
-    asm volatile("vmsr FPSCR, %[src]" : : [src] "r"(newCSR));
-#elif defined(__aarch64__)
-    int savedCSR;
-    asm volatile("mrs %x[result], FPCR" : [result] "=r"(savedCSR));
-    // Bit 24 is the flush-to-zero mode control bit. Setting it to 1 flushes
-    // denormals to 0.
-    int newCSR = savedCSR | (1 << 24);
-    asm volatile("msr FPCR, %x[src]" : : [src] "r"(newCSR));
-#else
-    // Do nothing on other architecture.
-#endif
-  }
-
   if (const char* str = op.getStringOption("object-keys-scalar-replacement")) {
     if (strcmp(str, "on") == 0) {
       jit::JitOptions.disableObjectKeysScalarReplacement = false;
@@ -14331,12 +14582,6 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
   if (op.getBoolOption("trace-regexp-peephole")) {
     jit::JitOptions.trace_regexp_peephole_optimization = true;
   }
-
-#ifdef NIGHTLY_BUILD
-  if (op.getBoolOption("enable-regexp-buffer-boundaries")) {
-    jit::JitOptions.js_regexp_buffer_boundaries = true;
-  }
-#endif
 
   if (op.getBoolOption("less-debug-code")) {
     jit::JitOptions.lessDebugCode = true;

@@ -90,10 +90,12 @@ LocalAccessible* HTMLSelectListAccessible::CurrentItem() const {
 }
 
 void HTMLSelectListAccessible::SetCurrentItem(const LocalAccessible* aItem) {
-  if (!aItem->GetContent()->IsElement()) return;
-
-  aItem->GetContent()->AsElement()->SetAttr(
-      kNameSpaceID_None, nsGkAtoms::selected, u"true"_ns, true);
+  if (!aItem->GetContent()->IsElement()) {
+    return;
+  }
+  aItem->GetContent()->AsElement()->SetAttr(kNameSpaceID_None,
+                                            nsGkAtoms::selected, u"true"_ns,
+                                            true, IsKnownNewAttr::No);
 }
 
 bool HTMLSelectListAccessible::IsAcceptableChild(nsIContent* aEl) const {
@@ -286,8 +288,7 @@ uint64_t HTMLComboboxAccessible::NativeState() const {
   // Get focus status from base class
   uint64_t state = LocalAccessible::NativeState();
 
-  nsComboboxControlFrame* comboFrame = do_QueryFrame(GetFrame());
-  if (comboFrame && comboFrame->IsDroppedDown()) {
+  if (Elm()->State().HasState(dom::ElementState::OPEN)) {
     state |= states::EXPANDED;
   }
 
@@ -295,29 +296,12 @@ uint64_t HTMLComboboxAccessible::NativeState() const {
   return state;
 }
 
-EDescriptionValueFlag HTMLComboboxAccessible::Description(
-    nsString& aDescription) const {
-  aDescription.Truncate();
-  // First check to see if combo box itself has a description, perhaps through
-  // tooltip (title attribute) or via aria-describedby
-  EDescriptionValueFlag descFlag = LocalAccessible::Description(aDescription);
-  if (!aDescription.IsEmpty()) {
-    return descFlag;
-  }
-
-  // Otherwise use description of selected option.
-  LocalAccessible* option = SelectedOption();
-  if (option) {
-    return option->Description(aDescription);
-  }
-
-  return eDescriptionOK;
-}
-
 void HTMLComboboxAccessible::Value(nsString& aValue) const {
-  // Use accessible name of selected option.
-  LocalAccessible* option = SelectedOption();
-  if (option) option->Name(aValue);
+  HTMLSelectElement* select = HTMLSelectElement::FromNode(mContent);
+
+  if (HTMLOptionElement* option = select->GetSelectedOption()) {
+    option->GetRenderedLabel(aValue);
+  }
 }
 
 bool HTMLComboboxAccessible::HasPrimaryAction() const { return true; }

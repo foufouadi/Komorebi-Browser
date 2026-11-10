@@ -92,12 +92,19 @@ impl Default for SnapshotImageKey {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct ExternalImageId(pub u64);
 
+/// An opaque handle to a GPU texture owned by the application. Its meaning
+/// depends on the graphics API the renderer runs on; with OpenGL it is the
+/// texture name.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct ExternalTextureHandle(pub u64);
+
 /// The source for an external image.
 pub enum ExternalImageSource<'a> {
     /// A raw pixel buffer.
     RawData(&'a [u8]),
-    /// A gl::GLuint texture handle.
-    NativeTexture(u32),
+    /// A texture created by the application.
+    NativeTexture(ExternalTextureHandle),
     /// An invalid source.
     Invalid,
 }
@@ -273,6 +280,9 @@ bitflags! {
         ///
         /// See https://github.com/servo/webrender/pull/2555/
         const ALLOW_MIPMAPS = 2;
+        /// The image originates from DRM video and should preferentially use
+        /// external composition. This does not imply hardware-protected storage.
+        const IS_DRM_SOURCE = 4;
     }
 }
 
@@ -337,6 +347,11 @@ impl ImageDescriptor {
     /// Returns true if this descriptor is opaque
     pub fn is_opaque(&self) -> bool {
         self.flags.contains(ImageDescriptorFlags::IS_OPAQUE)
+    }
+
+    /// Returns true if this image originates from DRM video.
+    pub fn is_drm_source(&self) -> bool {
+        self.flags.contains(ImageDescriptorFlags::IS_DRM_SOURCE)
     }
 
     /// Returns true if this descriptor allows mipmaps

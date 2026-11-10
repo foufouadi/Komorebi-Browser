@@ -16,5 +16,6 @@ data class PageMetadata(
     val wordCount: Int = 0,
     val language: String = "en",
     val isReaderable: Boolean = false,
+    val isGated: Boolean = false,
     val pageTitle: String = "",
 )

@@ -6,6 +6,10 @@
 
 "use strict";
 
+add_setup(function () {
+  UrlbarTestUtils.registerZeroPrefixProvider();
+});
+
 add_task(async function test() {
   await runTest();
   // Setting suggest.topsites to false disables the view's autoOpen behavior,

@@ -77,6 +77,13 @@ Each `.yml` file must have at least one linter defined in it. Here are the suppo
 - setup - A function that sets up external dependencies (optional)
 - support-files - A list of glob patterns matching configuration files (optional)
 - find-dotfiles - If set to `true`, run on dot files (.\*) (optional)
+- split-dirs - How to split each directory before dividing the paths into jobs. A number
+  splits that many levels deep, and `auto` splits only the directories heavier than an
+  equal share of the files. Use this for linters that lint a directory the same way as
+  each of its entries (optional)
+- split-ignore-files - With `split-dirs: auto`, a list of ignore files whose matches count
+  as empty when weighing. A `.txt` file holds one path per line, and any other file is a
+  JavaScript list of quoted patterns (optional)
 - ignore-case - If set to `true` and `type` is regex, ignore the case (optional)
 
 Note that a linter may not have both `extensions` and `exclude_extensions` specified at the
@@ -170,10 +177,17 @@ ruff:
 ```
 
 Notice the payload has two parts, delimited by ':'. The first is the module
-path, which `mozlint` will attempt to import. The second is the object path
-within that module (e.g, the name of a function to call). It is up to consumers
-of `mozlint` to ensure the module is in `sys.path`. Structured log linters
-use the same import mechanism.
+path, which `mozlint` resolves to a file next to the linter definition and
+loads from there, so it cannot collide with a module of the same name on
+`sys.path`. The second is the object path within that module (e.g, the name of
+a function to call). The payload's own imports still go through `sys.path`, so
+consumers of `mozlint` must keep the linter directory on it. Structured log
+linters use the same mechanism.
+
+A consumer whose definitions live apart from the modules they name (such as
+comm-central, whose definitions in `comm/tools/lint` wrap payloads from
+`tools/lint`) can pass those extra directories as the `linter_paths` lintarg.
+They are searched after the definition's own directory.
 
 The `support-files` key is used to list configuration files or files related
 to the running of the linter itself. If using `--outgoing` or `--workdir`

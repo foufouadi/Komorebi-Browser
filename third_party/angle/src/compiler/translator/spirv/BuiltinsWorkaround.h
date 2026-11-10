@@ -13,11 +13,12 @@
 
 namespace sh
 {
+class DriverUniform;
 
 [[nodiscard]] bool ShaderBuiltinsWorkaround(TCompiler *compiler,
                                             TIntermBlock *root,
-                                            TSymbolTable *symbolTable,
-                                            const ShCompileOptions &compileOptions);
+                                            const DriverUniform *driverUniforms,
+                                            TSymbolTable *symbolTable);
 
 }  // namespace sh
 

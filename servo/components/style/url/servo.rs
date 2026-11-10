@@ -7,6 +7,7 @@
 use crate::derives::*;
 use crate::parser::ParserContext;
 use crate::stylesheets::CorsMode;
+use crate::url::UrlInitiator;
 use crate::values::computed::{Context, ToComputedValue};
 use servo_arc::Arc;
 use std::fmt::{self, Write};
@@ -49,7 +50,9 @@ pub struct CssUrlData {
 
 impl ToShmem for CssUrl {
     fn to_shmem(&self, _builder: &mut SharedMemoryBuilder) -> to_shmem::Result<Self> {
-        unimplemented!("If servo wants to share stylesheets across processes, ToShmem for Url must be implemented");
+        unimplemented!(
+            "If servo wants to share stylesheets across processes, ToShmem for Url must be implemented"
+        );
     }
 }
 
@@ -69,6 +72,7 @@ impl CssUrl {
         url: String,
         context: &ParserContext,
         _cors_mode: CorsMode,
+        _initiator: UrlInitiator,
     ) -> Self {
         let serialization = Arc::new(url);
         // Per https://drafts.csswg.org/css-values-4/#url-empty

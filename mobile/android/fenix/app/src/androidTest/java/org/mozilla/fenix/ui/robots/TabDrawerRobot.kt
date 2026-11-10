@@ -34,7 +34,6 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
-import mozilla.components.ui.tabcounter.TabCounterTestTags
 import org.mozilla.fenix.R
 import org.mozilla.fenix.helpers.Constants
 import org.mozilla.fenix.helpers.Constants.RETRY_COUNT
@@ -47,6 +46,7 @@ import org.mozilla.fenix.helpers.TestAssetHelper.waitingTime
 import org.mozilla.fenix.helpers.TestAssetHelper.waitingTimeShort
 import org.mozilla.fenix.helpers.TestHelper.mDevice
 import org.mozilla.fenix.tabstray.TabsTrayTestTag
+import org.mozilla.fenix.tabstray.TabsTrayTestTag.NORMAL_TABS_LIST
 
 fun tabDrawer(
     composeTestRule: ComposeTestRule,
@@ -193,7 +193,7 @@ class TabDrawerRobot(private val composeTestRule: ComposeTestRule) {
 
     @OptIn(ExperimentalTestApi::class)
     fun verifyNormalTabsList() {
-        composeTestRule.waitUntilDoesNotExist(hasTestTag("tabstray.tabList.normal.empty"), waitingTime)
+        composeTestRule.waitUntilAtLeastOneExists(hasTestTag(NORMAL_TABS_LIST), waitingTime)
         Log.i(TAG, "verifyNormalTabsList: Trying to verify that the normal tabs list exists")
         composeTestRule.normalTabsListGridView().assertExists()
         Log.i(TAG, "verifyNormalTabsList: Verified that the normal tabs list exists")
@@ -295,6 +295,35 @@ class TabDrawerRobot(private val composeTestRule: ComposeTestRule) {
         Log.i(TAG, "verifyTabCloseButton: Trying to verify that the close tab button exists")
         composeTestRule.closeTabButton().assertExists()
         Log.i(TAG, "verifyTabCloseButton: Verified that the close tab button exists")
+    }
+
+    // Indicator lives only in the unmerged tree: it is merged into the tab item's clickable root.
+    /** Verifies the media indicator on a tab, shown while its media session is PLAYING. */
+    fun verifyTabMediaIndicator() {
+        Log.i(TAG, "verifyTabMediaIndicator: Waiting for $waitingTime ms until the tab media indicator exists")
+        composeTestRule.waitUntil(waitingTime) {
+            composeTestRule
+                .onAllNodesWithTag(TabsTrayTestTag.TAB_ITEM_MEDIA_INDICATOR, useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
+        Log.i(TAG, "verifyTabMediaIndicator: Trying to verify that the tab media indicator exists")
+        composeTestRule.tabMediaIndicator().assertExists()
+        Log.i(TAG, "verifyTabMediaIndicator: Verified that the tab media indicator exists")
+    }
+
+    /** Verifies the media indicator is gone, as happens once the tab's media is paused. */
+    fun verifyTabMediaIndicatorDoesNotExist() {
+        Log.i(TAG, "verifyTabMediaIndicatorDoesNotExist: Waiting for $waitingTime ms until the media indicator is gone")
+        composeTestRule.waitUntil(waitingTime) {
+            composeTestRule
+                .onAllNodesWithTag(TabsTrayTestTag.TAB_ITEM_MEDIA_INDICATOR, useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .isEmpty()
+        }
+        Log.i(TAG, "verifyTabMediaIndicatorDoesNotExist: Trying to verify that the tab media indicator does not exist")
+        composeTestRule.tabMediaIndicator().assertDoesNotExist()
+        Log.i(TAG, "verifyTabMediaIndicatorDoesNotExist: Verified that the tab media indicator does not exist")
     }
 
     fun verifyTabTrayIsOpen() {
@@ -728,6 +757,10 @@ private fun ComposeTestRule.closeTabButton() = onNodeWithTag(TabsTrayTestTag.TAB
 /** Obtains an open tab's thumbnail when there's only one tab open. */
 private fun ComposeTestRule.tabThumbnail() = onNodeWithTag(TabsTrayTestTag.TAB_ITEM_THUMBNAIL)
 
+/** Obtains a tab's media-playing indicator (unmerged tree; see verifyTabMediaIndicator). */
+private fun ComposeTestRule.tabMediaIndicator() =
+    onNodeWithTag(TabsTrayTestTag.TAB_ITEM_MEDIA_INDICATOR, useUnmergedTree = true)
+
 /** Obtains the three dot button in the Tabs Tray banner. */
 private fun ComposeTestRule.threeDotButton() = onNodeWithTag(TabsTrayTestTag.THREE_DOT_BUTTON)
 
@@ -749,20 +782,11 @@ private fun ComposeTestRule.dropdownMenuItemTabSettings() = onNodeWithTag(TabsTr
 /** Obtains the dropdown menu item to share tabs. */
 private fun ComposeTestRule.dropdownMenuItemShare() = onNodeWithTag(TabsTrayTestTag.SHARE_BUTTON)
 
-/** Obtains the normal tabs counter. */
-private fun ComposeTestRule.normalTabsCounter() = onNodeWithTag(TabCounterTestTags.NORMAL_TABS_COUNTER)
-
 /** Obtains the Tabs Tray banner collections button. */
 private fun ComposeTestRule.collectionsButton() = onNodeWithTag(TabsTrayTestTag.COLLECTIONS_BUTTON)
 
 /** Obtains the Tabs Tray banner multi selection counter. */
 private fun ComposeTestRule.multiSelectionCounter() = onNodeWithTag(TabsTrayTestTag.SELECTION_COUNTER)
-
-/** Obtains the Tabs Tray banner handle. */
-private fun ComposeTestRule.bannerHandle() = onNodeWithTag(TabsTrayTestTag.BANNER_HANDLE)
-
-/** Obtains the media control button with the given [action] as its content description. */
-private fun ComposeTestRule.tabMediaControlButton(action: String) = onNodeWithContentDescription(action)
 
 /** Obtains the root of the Tabs Tray banner. */
 private fun ComposeTestRule.banner() = onNodeWithTag(TabsTrayTestTag.BANNER_ROOT)

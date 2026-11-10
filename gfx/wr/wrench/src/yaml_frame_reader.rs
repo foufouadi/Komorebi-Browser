@@ -13,12 +13,11 @@ use std::convert::TryInto;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::usize;
 use webrender::api::*;
 use webrender::render_api::*;
 use webrender::api::units::*;
 use webrender::api::FillRule;
-use crate::wrench::{FontDescriptor, Wrench, WrenchThing, DisplayList};
+use crate::wrench::{FontDescriptor, FontInstanceDescriptor, Wrench, WrenchThing, DisplayList};
 use crate::yaml_helper::{StringEnum, YamlHelper, make_perspective};
 use yaml_rust::{Yaml, YamlLoader};
 use crate::PLATFORM_DEFAULT_FACE_NAME;
@@ -64,6 +63,36 @@ impl FontDescriptor {
     }
 }
 
+/// GL texture format parameters for an image format.
+struct GlFormatDesc {
+    internal: gl::GLenum,
+    external: gl::GLenum,
+    pixel_type: gl::GLenum,
+}
+
+fn gl_format_desc(format: ImageFormat) -> GlFormatDesc {
+    let (internal, external, pixel_type) = match format {
+        ImageFormat::R8 => (gl::R8, gl::RED, gl::UNSIGNED_BYTE),
+        ImageFormat::R16 => (gl::R16, gl::RED, gl::UNSIGNED_SHORT),
+        ImageFormat::BGRA8 => unreachable!("BGRA8 is uploaded through the RGBA8 layout, see add_image"),
+        ImageFormat::RGBA8 => (gl::RGBA8, gl::RGBA, gl::UNSIGNED_BYTE),
+        ImageFormat::RGBAF32 => (gl::RGBA32F, gl::RGBA, gl::FLOAT),
+        ImageFormat::RGBAI32 => (gl::RGBA32I, gl::RGBA_INTEGER, gl::INT),
+        ImageFormat::RG8 => (gl::RG8, gl::RG, gl::UNSIGNED_BYTE),
+        ImageFormat::RG16 => (gl::RG16, gl::RG, gl::UNSIGNED_SHORT),
+    };
+    GlFormatDesc { internal, external, pixel_type }
+}
+
+fn gl_target(target: ImageBufferKind) -> gl::GLenum {
+    match target {
+        ImageBufferKind::Texture2D => gl::TEXTURE_2D,
+        ImageBufferKind::TextureRect => gl::TEXTURE_RECTANGLE,
+        ImageBufferKind::TextureExternal |
+        ImageBufferKind::TextureExternalBT709 => gl::TEXTURE_EXTERNAL_OES,
+    }
+}
+
 struct LocalExternalImageHandler {
     texture_ids: Vec<(gl::GLuint, ImageDescriptor)>,
 }
@@ -78,7 +107,7 @@ impl LocalExternalImageHandler {
     fn init_gl_texture(
         id: gl::GLuint,
         gl_target: gl::GLuint,
-        format_desc: webrender::FormatDesc,
+        format_desc: GlFormatDesc,
         width: gl::GLint,
         height: gl::GLint,
         bytes: &[u8],
@@ -104,29 +133,28 @@ impl LocalExternalImageHandler {
     }
 
     pub fn add_image(&mut self,
-        device: &webrender::Device,
+        gl: &dyn gl::Gl,
         desc: ImageDescriptor,
         target: ImageBufferKind,
         image_data: ImageData,
     ) -> ImageData {
         let (image_id, channel_idx) = match image_data {
             ImageData::Raw(ref data) => {
-                let gl = device.gl();
                 let texture_ids = gl.gen_textures(1);
                 let format_desc = if desc.format == ImageFormat::BGRA8 {
                     // Force BGRA8 data to RGBA8 layout to avoid potential
                     // need for usage of texture-swizzle.
-                    webrender::FormatDesc {
+                    GlFormatDesc {
                         external: gl::BGRA,
-                        .. device.gl_describe_format(ImageFormat::RGBA8)
+                        .. gl_format_desc(ImageFormat::RGBA8)
                     }
                 } else {
-                    device.gl_describe_format(desc.format)
+                    gl_format_desc(desc.format)
                 };
 
                 LocalExternalImageHandler::init_gl_texture(
                     texture_ids[0],
-                    webrender::get_gl_target(target),
+                    gl_target(target),
                     format_desc,
                     desc.size.width as gl::GLint,
                     desc.size.height as gl::GLint,
@@ -160,7 +188,7 @@ impl ExternalImageHandler for LocalExternalImageHandler {
         let (id, desc) = self.texture_ids[key.0 as usize];
         ExternalImage {
             uv: TexelRect::new(0.0, 0.0, desc.size.width as f32, desc.size.height as f32),
-            source: ExternalImageSource::NativeTexture(id),
+            source: ExternalImageSource::NativeTexture(ExternalTextureHandle(id as u64)),
         }
     }
     fn unlock(&mut self, _key: ExternalImageId, _channel_index: u8) {}
@@ -325,6 +353,7 @@ pub struct YamlFrameReader {
     frame_count: u32,
 
     display_lists: Vec<DisplayList>,
+    enforce_embed_policy: bool,
 
     watch_source: bool,
     list_resources: bool,
@@ -342,8 +371,6 @@ pub struct YamlFrameReader {
 
     image_map: HashMap<(PathBuf, Option<i64>), (ImageKey, LayoutSize)>,
 
-    fonts: HashMap<FontDescriptor, FontKey>,
-    font_instances: HashMap<(FontKey, FontSize, FontInstanceFlags, SyntheticItalics), FontInstanceKey>,
     font_render_mode: Option<FontRenderMode>,
     snapshots: HashMap<String, Snapshot>,
     allow_mipmaps: bool,
@@ -386,10 +413,9 @@ impl YamlFrameReader {
             aux_dir: yaml_path.parent().unwrap().to_owned(),
             frame_count: 0,
             display_lists: Vec::new(),
+            enforce_embed_policy: false,
             scroll_offsets: HashMap::new(),
             transform_properties: Vec::new(),
-            fonts: HashMap::new(),
-            font_instances: HashMap::new(),
             font_render_mode: None,
             snapshots: HashMap::new(),
             allow_mipmaps: false,
@@ -410,18 +436,10 @@ impl YamlFrameReader {
         }
     }
 
-    pub fn deinit(mut self, wrench: &mut Wrench) {
-        let mut txn = Transaction::new();
-
-        for (_, font_instance) in self.font_instances.drain() {
-            txn.delete_font_instance(font_instance);
-        }
-
-        for (_, font) in self.fonts.drain() {
-            txn.delete_font(font);
-        }
-
-        wrench.api.send_transaction(wrench.document_id, txn);
+    // Fonts are not torn down here: they live on `Wrench` so that an identical
+    // font keeps its instance key across yaml files, which is what lets content
+    // interning dedup a run that two files share.
+    pub fn deinit(self, _wrench: &mut Wrench) {
     }
 
     fn top_space(&self) -> SpatialId {
@@ -430,6 +448,11 @@ impl YamlFrameReader {
 
     pub fn yaml_path(&self) -> &PathBuf {
         &self.yaml_path
+    }
+
+    /// The number of transactions sent so far.
+    pub fn frame_count(&self) -> u32 {
+        self.frame_count
     }
 
     pub fn new_from_args(args: &clap::ArgMatches) -> YamlFrameReader {
@@ -486,26 +509,44 @@ impl YamlFrameReader {
         self.reset();
 
         self.parse_transform_properties(&yaml);
+        self.enforce_embed_policy = yaml["enforce-embed-policy"].as_bool().unwrap_or(false);
+
+        // Pipelines to remove before this frame's display lists are set. Sent
+        // as its own transaction, with no display list and so no scene rebuild,
+        // which is what a pipeline removal looks like coming from Gecko.
+        if let Some(removed) = yaml["remove-pipelines"].as_vec() {
+            let mut txn = Transaction::new();
+            for pipeline in removed {
+                txn.remove_pipeline(
+                    pipeline.as_pipeline_id().expect("remove-pipelines takes pipeline ids"),
+                );
+            }
+            wrench.api.send_transaction(wrench.document_id, txn);
+        }
 
         if let Some(pipelines) = yaml["pipelines"].as_vec() {
             for pipeline in pipelines {
                 let pipeline_id = pipeline["id"].as_pipeline_id().unwrap();
-                let mut builder = DisplayListBuilder::new(pipeline_id);
+                let mut builder = wrench.take_dl_builder(pipeline_id);
                 self.build_pipeline(wrench, &mut builder, pipeline_id, false, pipeline);
+                wrench.put_dl_builder(pipeline_id, builder);
             }
         }
 
-        let mut builder = DisplayListBuilder::new(wrench.root_pipeline_id);
+        let root_pipeline_id = wrench.root_pipeline_id;
+        let mut builder = wrench.take_dl_builder(root_pipeline_id);
 
         if let Some(frames) = yaml["frames"].as_vec() {
             for frame in frames {
-                self.build_pipeline(wrench, &mut builder, wrench.root_pipeline_id, true, frame);
+                self.build_pipeline(wrench, &mut builder, root_pipeline_id, true, frame);
             }
         } else {
             let root_stacking_context = &yaml["root"];
             assert_ne!(*root_stacking_context, Yaml::BadValue);
-            self.build_pipeline(wrench, &mut builder, wrench.root_pipeline_id, true, root_stacking_context);
+            self.build_pipeline(wrench, &mut builder, root_pipeline_id, true, root_stacking_context);
         }
+
+        wrench.put_dl_builder(root_pipeline_id, builder);
 
         // If replaying the same frame during interactive use, the frame gets rebuilt,
         // but the external image handler has already been consumed by the renderer.
@@ -558,17 +599,16 @@ impl YamlFrameReader {
                 paired_with_perspective: false,
             };
 
-            let fixed_id = builder.push_reference_frame(
+            let fixed_id = builder.define_reference_frame(
                 LayoutPoint::zero(),
                 SpatialId::root_reference_frame(pipeline_id),
                 TransformStyle::Flat,
                 transform,
                 kind,
             );
-            builder.pop_reference_frame();
             self.dppx_root_reference_frame = Some(fixed_id);
 
-            let ref_frame_id = builder.push_reference_frame(
+            let ref_frame_id = builder.define_reference_frame(
                 LayoutPoint::zero(),
                 *self.spatial_id_stack.last().unwrap(),
                 TransformStyle::Flat,
@@ -592,7 +632,6 @@ impl YamlFrameReader {
 
         if dppx_reference_frame {
             self.spatial_id_stack.pop().unwrap();
-            builder.pop_reference_frame();
         }
 
         let (pipeline, payload) = builder.end();
@@ -602,6 +641,7 @@ impl YamlFrameReader {
             present,
             send_transaction,
             render_offscreen: offscreen,
+            embed_policy: yaml["embed-policy"].as_embed_policy(),
         });
 
         assert_eq!(self.spatial_id_stack.len(), 1);
@@ -834,7 +874,7 @@ impl YamlFrameReader {
 
             let external_image_data =
                 self.external_image_handler.as_mut().unwrap().add_image(
-                    &wrench.renderer.device,
+                    wrench.gl(),
                     descriptor,
                     external_target,
                     image_data
@@ -855,28 +895,26 @@ impl YamlFrameReader {
 
     fn get_or_create_font(&mut self, desc: FontDescriptor, wrench: &mut Wrench) -> FontKey {
         let list_resources = self.list_resources;
-        *self.fonts
-            .entry(desc.clone())
-            .or_insert_with(|| match desc {
-                FontDescriptor::Path {
-                    ref path,
-                    font_index,
-                } => {
-                    if list_resources { println!("{}", path.to_string_lossy()); }
-                    let mut file = File::open(path).expect("Couldn't open font file");
-                    let mut bytes = vec![];
-                    file.read_to_end(&mut bytes)
-                        .expect("failed to read font file");
-                    wrench.font_key_from_bytes(bytes, font_index)
-                }
-                FontDescriptor::Family { ref name } => wrench.font_key_from_name(name),
-                FontDescriptor::Properties {
-                    ref family,
-                    weight,
-                    style,
-                    stretch,
-                } => wrench.font_key_from_properties(family, weight, style, stretch),
-            })
+        wrench.get_or_create_font(desc, |wrench, desc| match *desc {
+            FontDescriptor::Path {
+                ref path,
+                font_index,
+            } => {
+                if list_resources { println!("{}", path.to_string_lossy()); }
+                let mut file = File::open(path).expect("Couldn't open font file");
+                let mut bytes = vec![];
+                file.read_to_end(&mut bytes)
+                    .expect("failed to read font file");
+                wrench.font_key_from_bytes(bytes, font_index)
+            }
+            FontDescriptor::Family { ref name } => wrench.font_key_from_name(name),
+            FontDescriptor::Properties {
+                ref family,
+                weight,
+                style,
+                stretch,
+            } => wrench.font_key_from_properties(family, weight, style, stretch),
+        })
     }
 
     pub fn allow_mipmaps(&mut self, allow_mipmaps: bool) {
@@ -899,19 +937,13 @@ impl YamlFrameReader {
         synthetic_italics: SyntheticItalics,
         wrench: &mut Wrench,
     ) -> FontInstanceKey {
-        let font_render_mode = self.font_render_mode;
-
-        *self.font_instances
-            .entry((font_key, size.into(), flags, synthetic_italics))
-            .or_insert_with(|| {
-                wrench.add_font_instance(
-                    font_key,
-                    size,
-                    flags,
-                    font_render_mode,
-                    synthetic_italics,
-                )
-            })
+        wrench.get_or_create_font_instance(FontInstanceDescriptor {
+            font_key,
+            size: size.into(),
+            flags,
+            render_mode: self.font_render_mode,
+            synthetic_italics,
+        })
     }
 
     fn as_image_mask(&mut self, item: &Yaml, wrench: &mut Wrench) -> Option<ImageMask> {
@@ -1060,7 +1092,7 @@ impl YamlFrameReader {
             .as_rect()
             .expect("gradient must have bounds");
 
-        let gradient = item.as_gradient(dl);
+        let (gradient, stops) = item.as_gradient(dl);
         let tile_size = item["tile-size"].as_size().unwrap_or_else(|| bounds.size());
         let tile_spacing = item["tile-spacing"].as_size().unwrap_or_else(LayoutSize::zero);
 
@@ -1069,7 +1101,8 @@ impl YamlFrameReader {
             bounds,
             gradient,
             tile_size,
-            tile_spacing
+            tile_spacing,
+            &stops,
         );
     }
 
@@ -1087,7 +1120,7 @@ impl YamlFrameReader {
         let bounds = item[bounds_key]
             .as_rect()
             .expect("radial gradient must have bounds");
-        let gradient = item.as_radial_gradient(dl);
+        let (gradient, stops) = item.as_radial_gradient(dl);
         let tile_size = item["tile-size"].as_size().unwrap_or_else(|| bounds.size());
         let tile_spacing = item["tile-spacing"].as_size().unwrap_or_else(LayoutSize::zero);
 
@@ -1097,6 +1130,7 @@ impl YamlFrameReader {
             gradient,
             tile_size,
             tile_spacing,
+            &stops,
         );
     }
 
@@ -1114,7 +1148,7 @@ impl YamlFrameReader {
         let bounds = item[bounds_key]
             .as_rect()
             .expect("conic gradient must have bounds");
-        let gradient = item.as_conic_gradient(dl);
+        let (gradient, stops) = item.as_conic_gradient(dl);
         let tile_size = item["tile-size"].as_size().unwrap_or_else(|| bounds.size());
         let tile_spacing = item["tile-spacing"].as_size().unwrap_or_else(LayoutSize::zero);
 
@@ -1124,6 +1158,7 @@ impl YamlFrameReader {
             gradient,
             tile_size,
             tile_spacing,
+            &stops,
         );
     }
 
@@ -1134,6 +1169,9 @@ impl YamlFrameReader {
         item: &Yaml,
         info: &mut CommonItemProperties,
     ) {
+        // Set by a nine-patch gradient source; the stops travel with the
+        // gradient to `push_border` rather than being recorded separately.
+        let mut gradient_stops = Vec::new();
         let bounds_key = if item["type"].is_badvalue() {
             "border"
         } else {
@@ -1252,15 +1290,18 @@ impl YamlFrameReader {
                             NinePatchBorderSource::Image(image_key, ImageRendering::Auto)
                         }
                         "gradient" => {
-                            let gradient = item.as_gradient(dl);
+                            let (gradient, stops) = item.as_gradient(dl);
+                            gradient_stops = stops;
                             NinePatchBorderSource::Gradient(gradient)
                         }
                         "radial-gradient" => {
-                            let gradient = item.as_radial_gradient(dl);
+                            let (gradient, stops) = item.as_radial_gradient(dl);
+                            gradient_stops = stops;
                             NinePatchBorderSource::RadialGradient(gradient)
                         }
                         "conic-gradient" => {
-                            let gradient = item.as_conic_gradient(dl);
+                            let (gradient, stops) = item.as_conic_gradient(dl);
+                            gradient_stops = stops;
                             NinePatchBorderSource::ConicGradient(gradient)
                         }
                         _ => unreachable!("Unexpected border type"),
@@ -1286,7 +1327,7 @@ impl YamlFrameReader {
             None
         };
         if let Some(details) = border_details {
-            dl.push_border(info, bounds, widths, details);
+            dl.push_border(info, bounds, widths, details, &gradient_stops);
         }
     }
 
@@ -1732,6 +1773,8 @@ impl YamlFrameReader {
                 ("scrollbar-container", PrimitiveFlags::IS_SCROLLBAR_CONTAINER),
                 ("prefer-compositor-surface", PrimitiveFlags::PREFER_COMPOSITOR_SURFACE),
                 ("checkerboard-background", PrimitiveFlags::CHECKERBOARD_BACKGROUND),
+                ("antialiased", PrimitiveFlags::ANTIALISED),
+                ("rasterized-for-rect", PrimitiveFlags::RASTERIZED_FOR_RECT),
             ] {
                 if let Some(value) = item[key].as_bool() {
                     flags.set(flag, value);
@@ -1999,6 +2042,26 @@ impl YamlFrameReader {
             ));
         }
 
+        if !yaml["path"].is_badvalue() {
+            assert!(clip_id.is_none(), "invalid clip definition");
+
+            let path_yaml = &yaml["path"];
+            let rect = path_yaml["rect"].as_rect().expect("path clips need a rect");
+            let data = path_yaml["data"].as_str().expect("path clips need path data");
+            let fill_rule = match path_yaml["fill-rule"].as_str() {
+                Some("evenodd") => FillRule::Evenodd,
+                Some("nonzero") | None => FillRule::Nonzero,
+                Some(other) => panic!("unknown fill rule {:?}", other),
+            };
+
+            clip_id = Some(dl.define_clip_path(
+                spatial_id,
+                &parse_svg_path(data),
+                rect,
+                fill_rule,
+            ));
+        }
+
         if !complex_clips.is_empty() {
             // Only 1 complex clip is supported per clip (todo: change yaml format)
             assert_eq!(complex_clips.len(), 1);
@@ -2017,7 +2080,7 @@ impl YamlFrameReader {
         }
     }
 
-    fn push_reference_frame(
+    fn define_reference_frame(
         &mut self,
         dl: &mut DisplayListBuilder,
         default_bounds: impl Fn() -> LayoutRect,
@@ -2086,7 +2149,7 @@ impl YamlFrameReader {
             None => PropertyBinding::Value(transform_value),
         };
 
-        let reference_frame_id = dl.push_reference_frame(
+        let reference_frame_id = dl.define_reference_frame(
             bounds.min,
             *self.spatial_id_stack.last().unwrap(),
             transform_style,
@@ -2109,7 +2172,7 @@ impl YamlFrameReader {
         yaml: &Yaml,
     ) {
         let default_bounds = || LayoutRect::from_size(wrench.window_size_f32());
-        let real_id = self.push_reference_frame(dl, default_bounds, yaml);
+        let real_id = self.define_reference_frame(dl, default_bounds, yaml);
         self.spatial_id_stack.push(real_id);
 
         if let Some(yaml_items) = yaml["items"].as_vec() {
@@ -2117,10 +2180,9 @@ impl YamlFrameReader {
         }
 
         self.spatial_id_stack.pop().unwrap();
-        dl.pop_reference_frame();
     }
 
-    fn push_computed_frame(
+    fn define_computed_frame(
         &mut self,
         dl: &mut DisplayListBuilder,
         default_bounds: impl Fn() -> LayoutRect,
@@ -2132,7 +2194,7 @@ impl YamlFrameReader {
         let vertical_flip = yaml["vertical-flip"].as_bool().unwrap_or(false);
         let rotation = yaml["rotation"].as_rotation().unwrap_or(Rotation::Degree0);
 
-        let reference_frame_id = dl.push_computed_frame(
+        let reference_frame_id = dl.define_computed_frame(
             bounds.min,
             *self.spatial_id_stack.last().unwrap(),
             scale_from,
@@ -2155,7 +2217,7 @@ impl YamlFrameReader {
         yaml: &Yaml,
     ) {
         let default_bounds = || LayoutRect::from_size(wrench.window_size_f32());
-        let real_id = self.push_computed_frame(dl, default_bounds, yaml);
+        let real_id = self.define_computed_frame(dl, default_bounds, yaml);
         self.spatial_id_stack.push(real_id);
 
         if let Some(yaml_items) = yaml["items"].as_vec() {
@@ -2163,7 +2225,6 @@ impl YamlFrameReader {
         }
 
         self.spatial_id_stack.pop().unwrap();
-        dl.pop_reference_frame();
     }
 
     fn add_stacking_context_from_yaml(
@@ -2184,10 +2245,10 @@ impl YamlFrameReader {
         let has_transform = !yaml["transform"].is_badvalue() || !yaml["perspective"].is_badvalue();
         let pushed_reference_frame = if has_transform || bounds.min != LayoutPoint::zero() {
             let reference_frame_id = if has_transform {
-                self.push_reference_frame(dl, default_bounds, yaml)
+                self.define_reference_frame(dl, default_bounds, yaml)
             } else {
                 let parent_spatial_id = *self.spatial_id_stack.last().unwrap();
-                dl.push_reference_frame(
+                dl.define_reference_frame(
                     bounds.min,
                     parent_spatial_id,
                     transform_style,
@@ -2287,7 +2348,6 @@ impl YamlFrameReader {
 
         if pushed_reference_frame {
             self.spatial_id_stack.pop().unwrap();
-            dl.pop_reference_frame();
         }
     }
 
@@ -2343,6 +2403,7 @@ impl WrenchThing for YamlFrameReader {
                 self.display_lists.clone(),
                 &self.scroll_offsets,
                 &self.transform_properties,
+                self.enforce_embed_policy,
             );
         } else {
             wrench.refresh();
@@ -2367,5 +2428,176 @@ impl WrenchThing for YamlFrameReader {
         if self.requested_frame > 0 {
             self.requested_frame -= 1;
         }
+    }
+}
+
+/// Parse SVG path data. Arcs are not supported.
+fn parse_svg_path(data: &str) -> webrender::api::Path {
+    let mut parser = SvgPathParser { data: data.as_bytes(), pos: 0 };
+
+    let mut builder = PathBuilder::new();
+    let mut in_sub_path = false;
+    let mut current = LayoutPoint::zero();
+    let mut first = LayoutPoint::zero();
+    // The control point to reflect for the S and T commands, if the previous
+    // command was a curve of the same kind.
+    let mut prev_cubic_ctrl = None;
+    let mut prev_quadratic_ctrl = None;
+    let mut command = 0u8;
+
+    loop {
+        parser.skip_separators();
+        let Some(c) = parser.peek() else {
+            break;
+        };
+        if c.is_ascii_alphabetic() {
+            command = c;
+            parser.pos += 1;
+        } else if command == b'M' {
+            // Coordinates after a move-to are implicit line-tos.
+            command = b'L';
+        } else if command == b'm' {
+            command = b'l';
+        } else if command == 0 || command.eq_ignore_ascii_case(&b'z') {
+            panic!("path data must start with a move-to: {:?}", data);
+        }
+
+        let relative = command.is_ascii_lowercase();
+        let origin = if relative { current.to_vector() } else { LayoutVector2D::zero() };
+
+        if command.eq_ignore_ascii_case(&b'z') {
+            if in_sub_path {
+                builder.end(true);
+                in_sub_path = false;
+            }
+            current = first;
+            prev_cubic_ctrl = None;
+            prev_quadratic_ctrl = None;
+            continue;
+        }
+
+        if command.eq_ignore_ascii_case(&b'm') {
+            if in_sub_path {
+                builder.end(false);
+            }
+            current = parser.point() + origin;
+            first = current;
+            builder.begin(current);
+            in_sub_path = true;
+            prev_cubic_ctrl = None;
+            prev_quadratic_ctrl = None;
+            continue;
+        }
+
+        // Drawing after a close-path starts a new sub-path at the same point.
+        if !in_sub_path {
+            builder.begin(current);
+            first = current;
+            in_sub_path = true;
+        }
+
+        let mut cubic_ctrl = None;
+        let mut quadratic_ctrl = None;
+        match command.to_ascii_uppercase() {
+            b'L' => {
+                current = parser.point() + origin;
+                builder.line_to(current);
+            }
+            b'H' => {
+                current.x = parser.number() + origin.x;
+                builder.line_to(current);
+            }
+            b'V' => {
+                current.y = parser.number() + origin.y;
+                builder.line_to(current);
+            }
+            b'C' | b'S' => {
+                let ctrl1 = if command.eq_ignore_ascii_case(&b's') {
+                    prev_cubic_ctrl.map_or(current, |ctrl: LayoutPoint| current + (current - ctrl))
+                } else {
+                    parser.point() + origin
+                };
+                let ctrl2 = parser.point() + origin;
+                current = parser.point() + origin;
+                builder.cubic_bezier_to(ctrl1, ctrl2, current);
+                cubic_ctrl = Some(ctrl2);
+            }
+            b'Q' | b'T' => {
+                let ctrl = if command.eq_ignore_ascii_case(&b't') {
+                    prev_quadratic_ctrl.map_or(current, |ctrl: LayoutPoint| current + (current - ctrl))
+                } else {
+                    parser.point() + origin
+                };
+                current = parser.point() + origin;
+                builder.quadratic_bezier_to(ctrl, current);
+                quadratic_ctrl = Some(ctrl);
+            }
+            _ => panic!("unsupported path command {:?}", command as char),
+        }
+        prev_cubic_ctrl = cubic_ctrl;
+        prev_quadratic_ctrl = quadratic_ctrl;
+    }
+
+    if in_sub_path {
+        builder.end(false);
+    }
+
+    builder.build()
+}
+
+struct SvgPathParser<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> SvgPathParser<'a> {
+    fn peek(&self) -> Option<u8> {
+        self.data.get(self.pos).cloned()
+    }
+
+    fn skip_separators(&mut self) {
+        while let Some(c) = self.peek() {
+            if !c.is_ascii_whitespace() && c != b',' {
+                break;
+            }
+            self.pos += 1;
+        }
+    }
+
+    /// Numbers don't need to be separated when that is not ambiguous, for
+    /// example `-1.5-2` or `.5.5`.
+    fn number(&mut self) -> f32 {
+        self.skip_separators();
+        let start = self.pos;
+        if let Some(b'-') | Some(b'+') = self.peek() {
+            self.pos += 1;
+        }
+        let mut seen_dot = false;
+        while let Some(c) = self.peek() {
+            if c == b'.' && !seen_dot {
+                seen_dot = true;
+            } else if !c.is_ascii_digit() {
+                break;
+            }
+            self.pos += 1;
+        }
+        if let Some(b'e') | Some(b'E') = self.peek() {
+            self.pos += 1;
+            if let Some(b'-') | Some(b'+') = self.peek() {
+                self.pos += 1;
+            }
+            while let Some(b'0'..=b'9') = self.peek() {
+                self.pos += 1;
+            }
+        }
+
+        let token = std::str::from_utf8(&self.data[start..self.pos]).unwrap();
+        token.parse().unwrap_or_else(|_| panic!("invalid path number {:?} at {}", token, start))
+    }
+
+    fn point(&mut self) -> LayoutPoint {
+        let x = self.number();
+        let y = self.number();
+        LayoutPoint::new(x, y)
     }
 }

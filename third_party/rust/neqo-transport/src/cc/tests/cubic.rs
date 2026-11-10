@@ -15,9 +15,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+use neqo_common::to_u64;
 use test_fixture::now;
 
-use super::{RTT, make_cc_cubic};
+use super::{RTT, make_cc_cubic, make_cc_cubic_with};
 use crate::{
     cc::{
         ClassicSlowStart, CongestionController as _,
@@ -47,7 +48,18 @@ fn setup_congestion_avoidance(
     ClassicCongestionController<ClassicSlowStart, Cubic>,
     CongestionControlStats,
 ) {
-    let mut cc = make_cc_cubic();
+    setup_congestion_avoidance_with(Cubic::default(), fast_convergence)
+}
+
+/// Like [`setup_congestion_avoidance`], but with the given Cubic instance.
+fn setup_congestion_avoidance_with(
+    cubic: Cubic,
+    fast_convergence: bool,
+) -> (
+    ClassicCongestionController<ClassicSlowStart, Cubic>,
+    CongestionControlStats,
+) {
+    let mut cc = make_cc_cubic_with(cubic);
     let mut cc_stats = CongestionControlStats::default();
     // Enter congestion avoidance phase.
     cc.set_ssthresh(1);
@@ -334,8 +346,9 @@ fn congestion_event_congestion_avoidance() {
     assert_eq!(cc_stats.congestion_events.loss, 1);
 }
 
-/// Verify that `acked_bytes` is correctly reduced on a congestion event.
-fn acked_bytes_reduced_on_congestion_event(
+/// Verify that `cwnd` and `acked_bytes` are correctly reduced on a congestion event.
+fn cwnd_and_acked_bytes_reduced_on_congestion_event(
+    cubic: Cubic,
     trigger: impl FnOnce(
         &mut ClassicCongestionController<ClassicSlowStart, Cubic>,
         Instant,
@@ -343,7 +356,7 @@ fn acked_bytes_reduced_on_congestion_event(
     ),
     beta: usize,
 ) {
-    let (mut cubic, mut cc_stats) = setup_congestion_avoidance(false);
+    let (mut cubic, mut cc_stats) = setup_congestion_avoidance_with(cubic, false);
 
     // The helper acked packet 0. Ack one more to accumulate acked_bytes.
     let now = now() + RTT / 10;
@@ -359,24 +372,41 @@ fn acked_bytes_reduced_on_congestion_event(
     // Trigger the congestion event.
     trigger(&mut cubic, now, &mut cc_stats);
 
-    // Verify acked_bytes was reduced by the correct factor.
-    let expected = acked_bytes_before * beta / Cubic::BETA_USIZE_DIVISOR;
-    assert_eq!(cubic.acked_bytes(), expected);
+    // Verify cwnd and acked_bytes were reduced by the correct factor.
+    assert_eq!(
+        cubic.cwnd(),
+        cubic.cwnd_initial() * beta / Cubic::BETA_USIZE_DIVISOR
+    );
+    assert_eq!(
+        cubic.acked_bytes(),
+        acked_bytes_before * beta / Cubic::BETA_USIZE_DIVISOR
+    );
 }
 
 #[test]
-fn acked_bytes_reduced_on_loss() {
-    acked_bytes_reduced_on_congestion_event(
+fn cwnd_and_acked_bytes_reduced_on_loss() {
+    cwnd_and_acked_bytes_reduced_on_congestion_event(
+        Cubic::default(),
         |cc, _, stats| packet_lost(cc, 2, stats),
         Cubic::BETA_USIZE_DIVIDEND,
     );
 }
 
 #[test]
-fn acked_bytes_reduced_on_ecn_ce() {
-    acked_bytes_reduced_on_congestion_event(
+fn cwnd_and_acked_bytes_reduced_on_ecn_ce() {
+    cwnd_and_acked_bytes_reduced_on_congestion_event(
+        Cubic::default(),
         |cc, now, stats| ecn_ce(cc, 2, now, stats),
         Cubic::BETA_USIZE_DIVIDEND_ECN,
+    );
+}
+
+#[test]
+fn cwnd_and_acked_bytes_reduced_on_ecn_ce_without_abe() {
+    cwnd_and_acked_bytes_reduced_on_congestion_event(
+        Cubic::default().abe(false),
+        |cc, now, stats| ecn_ce(cc, 2, now, stats),
+        Cubic::BETA_USIZE_DIVIDEND,
     );
 }
 
@@ -436,6 +466,73 @@ fn congestion_event_congestion_avoidance_no_overflow() {
         now().checked_sub(PTO).unwrap(),
         &mut cc_stats,
     );
+}
+
+/// Regression test for the Cubic issue discussed on the ccwg mailing list.
+///
+/// > TL;DR: Sections 4.4 and 4.5 of RFC 9438 do not account for segments_acked
+/// > when increasing CWND outside the Reno-friendly region. As a result, a
+/// > literal implementation makes CUBIC's growth rate depend on the receiver's
+/// > ACK ratio, and causes measurable unfairness. It gets increasingly worse as
+/// > ACKs become less frequent.
+///
+/// <https://mailarchive.ietf.org/arch/msg/ccwg/ZTYECT1NQijwwxq2sDLE0scbQAg/>
+///
+/// Our implementation is not affected today, as we correctly account for bytes
+/// acked in [`ClassicCongestionController::on_packets_acked`].
+#[test]
+fn cwnd_growth_independent_of_ack_ratio() {
+    /// Divisible by every ACK ratio, so all of them ack the same number of bytes.
+    const PACKETS: usize = 40;
+
+    /// `cwnd` growth in bytes after `PACKETS` are acked `ack_ratio` at a time.
+    fn growth(ack_ratio: u32) -> usize {
+        let mut cc = make_cc_cubic();
+        let mut cc_stats = CongestionControlStats::default();
+        let mtu = cc.max_datagram_size();
+        let cwnd_initial_f64 = convert_to_f64(cc.cwnd_initial());
+        // Low ssthresh to put us into congestion avoidance phase.
+        cc.set_ssthresh(1);
+        // Put `w_max` out of reach, so that `w_cubic(t + min_rtt)` always exceeds the
+        // `cwnd * 1.5` upper bound of RFC 9438 section 4.2 and `target` is pinned to that
+        // bound, which makes the expected growth below exact. This also keeps Cubic out
+        // of the Reno-friendly region.
+        cc.congestion_control_mut()
+            .set_w_max(cwnd_initial_f64 * 1000.0);
+
+        let mut now = now();
+        let mut next_pn_send = fill_cwnd(&mut cc, 0, now);
+        let cwnd_before = cc.cwnd();
+
+        let packets_per_ack = u64::from(ack_ratio);
+        for ack in 0..to_u64(PACKETS) / packets_per_ack {
+            now += RTT * ack_ratio / 10;
+            let first_pn = ack * packets_per_ack;
+            assert!(
+                first_pn + packets_per_ack <= next_pn_send,
+                "can only ack packets that were sent"
+            );
+            // `on_packets_acked` expects the largest acked packet first.
+            let acked = (first_pn..first_pn + packets_per_ack)
+                .rev()
+                .map(|pn| sent::make_packet(pn, now, mtu))
+                .collect::<Vec<_>>();
+            cc.on_packets_acked(&acked, &RttEstimate::new(RTT), now, &mut cc_stats);
+            next_pn_send = fill_cwnd(&mut cc, next_pn_send, now);
+        }
+
+        cc.cwnd() - cwnd_before
+    }
+
+    let mtu = make_cc_cubic().max_datagram_size();
+    for ack_ratio in [1, 2, 10] {
+        // We operate at the `cwnd * 1.5` upper bound, so we should grow by `PACKETS / 2` segments.
+        assert_eq!(
+            growth(ack_ratio),
+            PACKETS / 2 * mtu,
+            "unexpected CWND growth for ACK ratio {ack_ratio}"
+        );
+    }
 }
 
 #[test]

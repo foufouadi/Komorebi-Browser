@@ -53,7 +53,6 @@ EXPORTS += [
     "nsDocShell.h",
     "nsDocShellLoadState.h",
     "nsDocShellLoadTypes.h",
-    "nsDocShellTreeOwner.h",
     "nsDSURIContentListener.h",
     "nsIScrollObserver.h",
     "nsWebNavigationInfo.h",
@@ -91,7 +90,6 @@ UNIFIED_SOURCES += [
     "nsDocShellEnumerator.cpp",
     "nsDocShellLoadState.cpp",
     "nsDocShellTelemetryUtils.cpp",
-    "nsDocShellTreeOwner.cpp",
     "nsDSURIContentListener.cpp",
     "nsPingListener.cpp",
     "nsRefreshTimer.cpp",
@@ -121,6 +119,15 @@ LOCAL_INCLUDES += [
     "/tools/profiler",
 ]
 
-EXTRA_JS_MODULES += ["URIFixup.sys.mjs"]
+MOZ_SRC_FILES += ["URIFixup.sys.mjs"]
 
 include("/tools/fuzzing/libfuzzer-config.mozbuild")
+
+SOURCE_HEADERS += [
+    "nsAboutRedirector.h",
+    "nsDocShellEditorData.h",
+    "nsDocShellEnumerator.h",
+    "nsDocShellTelemetryUtils.h",
+    "nsPingListener.h",
+    "nsRefreshTimer.h",
+]

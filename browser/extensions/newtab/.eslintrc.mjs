@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import importPlugin from "eslint-plugin-import";
+import { importX } from "eslint-plugin-import-x";
 import jsxA11y from "eslint-plugin-jsx-a11y";
 import react from "eslint-plugin-react";
 import globals from "globals";
@@ -11,10 +11,10 @@ export default [
   {
     ...jsxA11y.flatConfigs.recommended,
     // When adding items to this file please check for effects on sub-directories.
-    plugins: { import: importPlugin, react, "jsx-a11y": jsxA11y },
+    plugins: { "import-x": importX, react, "jsx-a11y": jsxA11y },
     settings: {
       react: {
-        version: "16.2.0",
+        version: "19.2.0",
       },
     },
     rules: {
@@ -49,7 +49,7 @@ export default [
       "block-scoped-var": "error",
       // XXX Bug 1326071 - This should be reduced down - probably to 20 or to
       // be removed & synced with the mozilla/recommended value.
-      complexity: ["error", 61],
+      complexity: ["error", { max: 61, variant: "modified" }],
       "consistent-this": ["error", "use-bind"],
       eqeqeq: "error",
       "func-name-matching": "error",
@@ -111,7 +111,7 @@ export default [
   {
     // TODO: Bug 1773467 - Move these to .mjs or figure out a generic way
     // to identify these as modules.
-    files: ["test/schemas/**/*.js", "test/unit/**/*.js", "test/jest/**/*.js"],
+    files: ["test/jest/**/*.js"],
     languageOptions: {
       sourceType: "module",
     },
@@ -143,7 +143,6 @@ export default [
       "content-src/**",
       "loaders/**",
       "tools/**",
-      "test/unit/**",
       "test/jest/**",
     ],
     languageOptions: { globals: globals.node },
@@ -157,10 +156,10 @@ export default [
     },
   },
   {
-    files: ["content-src/**", "test/unit/**", "test/jest/**"],
+    files: ["content-src/**", "test/jest/**"],
     rules: {
       // Disallow commonjs in these directories.
-      "import/no-commonjs": 2,
+      "import-x/no-commonjs": 2,
     },
   },
   {
@@ -168,20 +167,7 @@ export default [
     // their npm imports are resolved by webpack/Jest, not Node's module resolver.
     files: ["content-src/vendor.mjs", "test/jest/jest-setup.mjs"],
     rules: {
-      "import/no-unresolved": "off",
-    },
-  },
-  {
-    // These tests simulate the browser environment.
-    files: "test/unit/**",
-    languageOptions: {
-      globals: {
-        ...globals.browser,
-        ...globals.mocha,
-        assert: "readonly",
-        chai: "readonly",
-        sinon: "readonly",
-      },
+      "import-x/no-unresolved": "off",
     },
   },
   {

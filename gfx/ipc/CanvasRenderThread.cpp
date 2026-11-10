@@ -5,34 +5,28 @@
 #include "CanvasRenderThread.h"
 
 #include "mozilla/BackgroundHangMonitor.h"
-#include "mozilla/SharedThreadPool.h"
-#include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/gfx/CanvasManagerParent.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/layers/CanvasTranslator.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/webrender/RenderThread.h"
 #include "nsThread.h"
-#include "prsystem.h"
-#include "transport/runnable_utils.h"
 
-bool NS_IsInCanvasThreadOrWorker() {
-  return mozilla::gfx::CanvasRenderThread::IsInCanvasRenderOrWorkerThread();
+bool NS_IsInCanvasThread() {
+  return mozilla::gfx::CanvasRenderThread::IsInCanvasRenderThread();
 }
 
 namespace mozilla::gfx {
 
 static StaticRefPtr<CanvasRenderThread> sCanvasRenderThread;
-static mozilla::BackgroundHangMonitor* sBackgroundHangMonitor;
+[[maybe_unused]] static mozilla::BackgroundHangMonitor* sBackgroundHangMonitor;
 #ifdef DEBUG
 static bool sCanvasRenderThreadEverStarted = false;
 #endif
 
 CanvasRenderThread::CanvasRenderThread(nsCOMPtr<nsIThread>&& aThread,
                                        bool aCreatedThread)
-    : mMutex("CanvasRenderThread::mMutex"),
-      mThread(std::move(aThread)),
-      mCreatedThread(aCreatedThread) {}
+    : mThread(std::move(aThread)), mCreatedThread(aCreatedThread) {}
 
 CanvasRenderThread::~CanvasRenderThread() = default;
 
@@ -147,20 +141,6 @@ void CanvasRenderThread::Shutdown() {
 
 // static
 bool CanvasRenderThread::IsInCanvasRenderThread() {
-  return sCanvasRenderThread &&
-         sCanvasRenderThread->mThread == NS_GetCurrentThread();
-}
-
-/* static */ bool CanvasRenderThread::IsInCanvasWorkerThread() {
-  // It is possible there are no worker threads, and the worker is the same as
-  // the CanvasRenderThread itself.
-  return sCanvasRenderThread &&
-         sCanvasRenderThread->mThread == NS_GetCurrentThread();
-}
-
-/* static */ bool CanvasRenderThread::IsInCanvasRenderOrWorkerThread() {
-  // It is possible there are no worker threads, and the worker is the same as
-  // the CanvasRenderThread itself.
   return sCanvasRenderThread &&
          sCanvasRenderThread->mThread == NS_GetCurrentThread();
 }

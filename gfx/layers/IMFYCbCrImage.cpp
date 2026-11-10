@@ -9,7 +9,7 @@
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/layers/CompositableClient.h"
 #include "mozilla/layers/CompositableForwarder.h"
-#include "mozilla/layers/CompositeProcessD3D11FencesHolderMap.h"
+#include "mozilla/layers/CompositeProcessFencesHolderMap.h"
 #include "mozilla/layers/D3D11YCbCrImage.h"
 #include "mozilla/layers/FenceD3D11.h"
 #include "mozilla/layers/TextureClient.h"
@@ -40,6 +40,11 @@ bool IMFYCbCrImage::CopyDataToTexture(const Data& aData, ID3D11Device* aDevice,
                                       DXGIYCbCrTextureData* aTextureData) {
   MOZ_ASSERT(aTextureData);
 
+  const auto sizes = aData.GetPlaneSizes();
+  if (!sizes) {
+    return false;
+  }
+
   if (!gfx::DeviceManagerDx::Get()->CanInitializeKeyedMutexTextures()) {
     return false;
   }
@@ -58,18 +63,18 @@ bool IMFYCbCrImage::CopyDataToTexture(const Data& aData, ID3D11Device* aDevice,
   D3D11_BOX box;
   box.front = box.top = box.left = 0;
   box.back = 1;
-  box.right = aData.YDataSize().width;
-  box.bottom = aData.YDataSize().height;
+  box.right = sizes->mY.width;
+  box.bottom = sizes->mY.height;
   ctx->UpdateSubresource(textureY, 0, &box, aData.mYChannel, aData.mYStride, 0);
 
-  box.right = aData.CbCrDataSize().width;
-  box.bottom = aData.CbCrDataSize().height;
+  box.right = sizes->mCbCr.width;
+  box.bottom = sizes->mCbCr.height;
   ctx->UpdateSubresource(textureCb, 0, &box, aData.mCbChannel,
                          aData.mCbCrStride, 0);
   ctx->UpdateSubresource(textureCr, 0, &box, aData.mCrChannel,
                          aData.mCbCrStride, 0);
 
-  auto* fenceHolderMap = CompositeProcessD3D11FencesHolderMap::Get();
+  auto* fenceHolderMap = CompositeProcessFencesHolderMap::Get();
   if (!fenceHolderMap) {
     MOZ_ASSERT_UNREACHABLE("unexpected to be called");
     return false;
@@ -88,7 +93,7 @@ TextureClient* IMFYCbCrImage::GetD3D11TextureClient(
     return nullptr;
   }
 
-  auto* fenceHolderMap = CompositeProcessD3D11FencesHolderMap::Get();
+  auto* fenceHolderMap = CompositeProcessFencesHolderMap::Get();
   if (!fenceHolderMap) {
     MOZ_ASSERT_UNREACHABLE("unexpected to be called");
     return nullptr;
@@ -112,9 +117,8 @@ TextureClient* IMFYCbCrImage::GetD3D11TextureClient(
   DXGIYCbCrTextureData* data =
       mTextureClient->GetInternalData()->AsDXGIYCbCrTextureData();
 
-  if (!fenceHolderMap->WaitAllFencesAndForget(data->mFencesHolderId, device)) {
-    return nullptr;
-  }
+  auto fences = fenceHolderMap->TakeAllFencesAndForget(data->mFencesHolderId);
+  FenceD3D11::WaitD3D11Fences(fences, device);
 
   if (!CopyDataToTexture(mData, device, data)) {
     // Failed to copy data

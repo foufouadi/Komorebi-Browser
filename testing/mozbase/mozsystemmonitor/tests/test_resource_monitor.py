@@ -2,11 +2,18 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+import json
 import multiprocessing
+import os
+import subprocess
+import sys
+import tempfile
 import time
 import unittest
+from unittest import mock
 
 import mozunit
+import pytest
 
 try:
     import psutil
@@ -14,10 +21,38 @@ except ImportError:
     psutil = None
 
 from mozsystemmonitor.resourcemonitor import (
+    FORWARD_ENV,
     SystemResourceMonitor,
     SystemResourceUsage,
     _parse_hg_source_url,
+    _process_sampling_interval,
 )
+
+UBSAN_FILE = "/builds/worker/checkouts/gecko/third_party/llama.cpp/ggml/src/ggml-c.c"
+UBSAN_MESSAGE = "applying non-zero offset 96 to null pointer"
+UBSAN_LINES = [
+    f"{UBSAN_FILE}:7106:33: runtime error: {UBSAN_MESSAGE}",
+    f"    #0 0x7b417858d37c in incr_ptr_aligned {UBSAN_FILE}:7106:33",
+    "    #1 0x7f42401b0a33 in clone misc/../sysdeps/unix/sysv/linux/x86_64/clone.S:100",
+    f"SUMMARY: UndefinedBehaviorSanitizer: undefined-behavior {UBSAN_FILE}:7106:33",
+]
+
+
+# Monitors created by the tests shouldn't forward to the one running the tests
+# in automation.
+@pytest.fixture(autouse=True)
+def no_forwarding(monkeypatch):
+    monkeypatch.delenv(FORWARD_ENV, raising=False)
+
+
+def _wait_for_measurement(monitor, timeout=30):
+    """Wait for the first measurement, which takes a while when the
+    collecting process is spawned rather than forked, e.g. on macOS."""
+    deadline = time.monotonic() + timeout
+    while not monitor.measurements:
+        assert time.monotonic() < deadline, "no measurement received"
+        monitor._drain_pipe()
+        time.sleep(0.05)
 
 
 @unittest.skipIf(psutil is None, "Resource monitor requires psutil.")
@@ -106,6 +141,7 @@ class TestResourceMonitor(unittest.TestCase):
         monitor = SystemResourceMonitor(poll_interval=0.25)
 
         monitor.start()
+        _wait_for_measurement(monitor)
         time.sleep(1)
         monitor.stop()
 
@@ -295,6 +331,194 @@ class TestResourceMonitor(unittest.TestCase):
         markers = monitor.as_profile()["threads"][0]["markers"]["data"]
         self.assertTrue(any(m.get("type") == "TSanError" for m in markers))
 
+    def _ubsan_action(self, message=UBSAN_MESSAGE, stack=None, **extra):
+        data = {
+            "time": int(time.time() * 1000),
+            "kind": "undefined-behavior",
+            "message": message,
+            "file": UBSAN_FILE,
+            "lineno": 7106,
+            "column": 33,
+        }
+        if stack is not None:
+            data["stack"] = stack
+        data.update(extra)
+        SystemResourceMonitor.ubsan_error(data)
+
+    def test_ubsan_error(self):
+        rev = "56b3cc68b5e7557a3e13fca984f0f8aebc60dd22"
+        monitor = SystemResourceMonitor(
+            poll_interval=0.25,
+            metadata={"sourceURL": f"https://hg.mozilla.org/try/rev/{rev}"},
+        )
+        monitor.start()
+        self._ubsan_action(
+            scope="browser/foo",
+            test="test_foo",
+            stack=[
+                {
+                    "function": "incr_ptr_aligned",
+                    "file": UBSAN_FILE,
+                    "line": 7106,
+                    "column": 33,
+                },
+                {"function": "clone", "module": "libc.so.6", "module_offset": 0x1000},
+            ],
+        )
+        # A report without location or stack still produces a marker.
+        SystemResourceMonitor.ubsan_error({
+            "time": int(time.time() * 1000),
+            "kind": "undefined-behavior",
+            "message": "division by zero",
+        })
+        monitor.stop()
+
+        events = self._events(monitor, "UBSan Error")
+        self.assertEqual(len(events), 2)
+        first, second = events[0][2], events[1][2]
+        self.assertEqual(first["type"], "UBSanError")
+        self.assertEqual(first["color"], "orange")
+        self.assertEqual(first["kind"], "undefined-behavior")
+        self.assertEqual(first["message"], UBSAN_MESSAGE)
+        self.assertEqual(first["file"], "third_party/llama.cpp/ggml/src/ggml-c.c")
+        self.assertEqual(first["line"], 7106)
+        self.assertEqual(first["column"], 33)
+        self.assertEqual(first["scope"], "browser/foo")
+        self.assertEqual(first["test"], "test_foo")
+        self.assertEqual(
+            first["stack"][0]["file"],
+            f"hg:hg.mozilla.org/try:third_party/llama.cpp/ggml/src/ggml-c.c:{rev}",
+        )
+        self.assertNotIn("file", first["stack"][1])
+        self.assertEqual(second["message"], "division by zero")
+        self.assertNotIn("file", second)
+        self.assertNotIn("stack", second)
+
+        markers = monitor.as_profile()["threads"][0]["markers"]["data"]
+        self.assertEqual(len([m for m in markers if m.get("type") == "UBSanError"]), 2)
+
+    def test_ubsan_error_without_stack_points_at_the_location(self):
+        monitor = SystemResourceMonitor(poll_interval=0.25)
+        monitor.start()
+        self._ubsan_action()
+        monitor.stop()
+
+        events = self._events(monitor, "UBSan Error")
+        self.assertEqual(len(events), 1)
+        self.assertEqual(
+            events[0][2]["stack"],
+            [{"file": "third_party/llama.cpp/ggml/src/ggml-c.c", "line": 7106}],
+        )
+
+    def test_process_output_ubsan_report(self):
+        monitor = SystemResourceMonitor(poll_interval=0.25)
+        monitor.start()
+        for line in UBSAN_LINES:
+            self._process_output(monitor, line, process="GECKO(1717)")
+        self._process_output(monitor, "unrelated output", process="GECKO(1717)")
+        monitor.stop()
+
+        events = self._events(monitor, "UBSan Error")
+        self.assertEqual(len(events), 1)
+        data = events[0][2]
+        self.assertEqual(data["type"], "UBSanError")
+        self.assertEqual(data["message"], UBSAN_MESSAGE)
+        self.assertEqual(data["file"], "third_party/llama.cpp/ggml/src/ggml-c.c")
+        self.assertEqual(data["line"], 7106)
+        self.assertEqual(data["column"], 33)
+        self.assertEqual(
+            [f["function"] for f in data["stack"]], ["incr_ptr_aligned", "clone"]
+        )
+        self.assertEqual(
+            data["stack"][0]["file"], "third_party/llama.cpp/ggml/src/ggml-c.c"
+        )
+        # The report lines are folded into the marker; only the unrelated
+        # line becomes a generic output marker.
+        self.assertEqual(len(self._events(monitor, "output")), 1)
+
+    def test_ubsan_error_action_supersedes_line_report(self):
+        monitor = SystemResourceMonitor(poll_interval=0.25)
+        monitor.start()
+        # Harnesses feed their parser before logging each line, so the
+        # action arrives after the header and frames but before SUMMARY.
+        for line in UBSAN_LINES[:3]:
+            self._process_output(monitor, line, process="GECKO(1717)")
+        action_stack = [
+            {"function": "incr_ptr_aligned", "file": UBSAN_FILE, "line": 7106},
+            {"function": "ggml_graph_nbytes", "file": UBSAN_FILE, "line": 7113},
+            {"function": "clone"},
+        ]
+        self._ubsan_action(stack=action_stack)
+        self._process_output(monitor, UBSAN_LINES[3], process="GECKO(1717)")
+        self._process_output(monitor, "unrelated output", process="GECKO(1717)")
+        monitor.stop()
+
+        events = self._events(monitor, "UBSan Error")
+        self.assertEqual(len(events), 1)
+        self.assertEqual(len(events[0][2]["stack"]), 3)
+        self.assertEqual(len(self._events(monitor, "output")), 1)
+
+    def test_ubsan_line_report_completing_after_action_is_dropped(self):
+        monitor = SystemResourceMonitor(poll_interval=0.25)
+        monitor.start()
+        self._ubsan_action()
+        for line in UBSAN_LINES:
+            self._process_output(monitor, line, process="GECKO(1717)")
+        self.assertEqual(len(self._events(monitor, "UBSan Error")), 1)
+
+        # A second identical report is a new one.
+        for line in UBSAN_LINES:
+            self._process_output(monitor, line, process="GECKO(1717)")
+        monitor.stop()
+
+        self.assertEqual(len(self._events(monitor, "UBSan Error")), 2)
+        self.assertEqual(len(self._events(monitor, "output")), 0)
+
+    def test_process_output_ubsan_flushed_on_stop(self):
+        monitor = SystemResourceMonitor(poll_interval=0.25)
+        monitor.start()
+        for line in UBSAN_LINES[:2]:
+            self._process_output(monitor, line, process="GECKO(1717)")
+        self.assertEqual(len(self._events(monitor, "UBSan Error")), 0)
+        monitor.stop()
+
+        events = self._events(monitor, "UBSan Error")
+        self.assertEqual(len(events), 1)
+        self.assertEqual(len(events[0][2]["stack"]), 1)
+
+    def test_process_output_ubsan_keyed_by_process(self):
+        monitor = SystemResourceMonitor(poll_interval=0.25)
+        monitor.start()
+        other = [
+            "/src/a.c:12:3: runtime error: division by zero",
+            "SUMMARY: UndefinedBehaviorSanitizer: undefined-behavior /src/a.c:12:3",
+        ]
+        self._process_output(monitor, UBSAN_LINES[0], process="A")
+        self._process_output(monitor, other[0], process="B")
+        self._process_output(monitor, UBSAN_LINES[1], process="A")
+        self._process_output(monitor, other[1], process="B")
+        for line in UBSAN_LINES[2:]:
+            self._process_output(monitor, line, process="A")
+        monitor.stop()
+
+        events = self._events(monitor, "UBSan Error")
+        self.assertEqual(
+            [e[2]["message"] for e in events], ["division by zero", UBSAN_MESSAGE]
+        )
+        self.assertEqual(len(events[1][2]["stack"]), 2)
+        self.assertEqual(len(self._events(monitor, "output")), 0)
+
+    def test_process_output_ubsan_without_moztest(self):
+        monitor = SystemResourceMonitor(poll_interval=0.25)
+        monitor._ubsan_parser = None
+        monitor.start()
+        for line in UBSAN_LINES:
+            self._process_output(monitor, line, process="GECKO(1717)")
+        monitor.stop()
+
+        self.assertEqual(len(self._events(monitor, "UBSan Error")), 0)
+        self.assertEqual(len(self._events(monitor, "output")), 4)
+
     def test_as_profile(self):
         monitor = SystemResourceMonitor(poll_interval=0.25)
 
@@ -327,13 +551,75 @@ class TestResourceMonitor(unittest.TestCase):
         self.assertIn({"type": "Text", "text": "foo"}, markers)
         self.assertIn({"type": "Text", "text": "bar"}, markers)
 
-    def _process_output(self, monitor, line):
-        SystemResourceMonitor.test_status({
+    def _test_status(self, monitor, **kwargs):
+        data = {
+            "action": "test_status",
+            "test": "test_foo.js",
+            "time": (time.monotonic() - monitor.start_time) * 1000
+            + monitor.start_timestamp * 1000,
+        }
+        data.update(kwargs)
+        SystemResourceMonitor.test_status(data)
+
+    def test_status_expectations(self):
+        monitor = SystemResourceMonitor(poll_interval=0.25)
+        monitor.start()
+        # mozlog drops "expected" when it matches "status", so an expected
+        # failure arrives without it.
+        self._test_status(monitor, status="FAIL", message="a todo")
+        self._test_status(monitor, status="FAIL", expected="PASS", message="a failure")
+        self._test_status(monitor, status="PASS", message="a pass")
+        self._test_status(
+            monitor, status="PASS", expected="FAIL", message="a todo that passed"
+        )
+        self._test_status(
+            monitor,
+            status="FAIL",
+            message="a failure that will be retried",
+            extra={"will_retry": True},
+        )
+        monitor.stop()
+
+        by_message = {
+            data["message"]: (name, data)
+            for _, name, data in monitor.events
+            if data and data.get("type") == "TestStatus"
+        }
+        self.assertEqual(len(by_message), 5)
+
+        name, data = by_message["a todo"]
+        self.assertEqual(name, "KNOWN-FAIL")
+        self.assertEqual(data["color"], "yellow")
+
+        name, data = by_message["a failure"]
+        self.assertEqual(name, "FAIL")
+        self.assertEqual(data["color"], "orange")
+
+        name, data = by_message["a pass"]
+        self.assertEqual(name, "PASS")
+        self.assertEqual(data["color"], "green")
+
+        name, data = by_message["a todo that passed"]
+        self.assertEqual(name, "UNEXPECTED-PASS")
+        self.assertEqual(data["color"], "orange")
+
+        name, data = by_message["a failure that will be retried"]
+        self.assertEqual(name, "FAIL")
+        self.assertEqual(data["color"], "orange")
+
+    def _process_output(self, monitor, line, process=None):
+        data = {
             "action": "process_output",
             "data": line,
             "time": (time.monotonic() - monitor.start_time) * 1000
             + monitor.start_timestamp * 1000,
-        })
+        }
+        if process is not None:
+            data["process"] = process
+        SystemResourceMonitor.test_status(data)
+
+    def _events(self, monitor, name):
+        return [e for e in monitor.events if len(e) == 3 and e[1] == name]
 
     def test_process_output_docshell(self):
         monitor = SystemResourceMonitor(poll_interval=0.25)
@@ -456,25 +742,242 @@ class TestResourceMonitor(unittest.TestCase):
         _, _, data = warnings_[1]
         self.assertEqual(data["message"], "'NS_FAILED(rv)'")
 
+    # NS_DebugBreak rings the bell before the assertion text.
+    NS_ASSERTION_LINE = (
+        "\x07[Parent 5900, Main Thread] ###!!! ASSERTION: Out-of-flow frame got "
+        "reflowed before its placeholder: 'Error', file "
+        "layout/generic/nsPlaceholderFrame.cpp:131"
+    )
+    NS_ASSERTION_FRAMES = (
+        "#01: NS_DebugBreak(unsigned int, char const*, char const*, char const*, int) "
+        "[xpcom/base/nsDebugImpl.cpp:516]",
+        "#02: nsPlaceholderFrame::Reflow(nsPresContext*) "
+        "[layout/generic/nsPlaceholderFrame.cpp:131]",
+    )
+    MOZ_ASSERT_LINE = (
+        "[6136] Assertion failure: false (unreachable), at "
+        "/builds/worker/checkouts/gecko/dom/workers/RuntimeService.cpp:2229"
+    )
+
     def test_process_output_cpp_assertion(self):
+        monitor = SystemResourceMonitor(poll_interval=0.25)
+        monitor.start()
+        self._process_output(monitor, self.NS_ASSERTION_LINE)
+        for frame in self.NS_ASSERTION_FRAMES:
+            self._process_output(monitor, frame)
+        self._process_output(monitor, "totally random output line that we don't parse")
+        monitor.stop()
+
+        asserts = self._events(monitor, "NS_ASSERTION")
+        self.assertEqual(len(asserts), 1)
+        _, _, data = asserts[0]
+        self.assertEqual(data["type"], "AssertionFailure")
+        self.assertEqual(data["kind"], "NS_ASSERTION")
+        self.assertEqual(data["color"], "orange")
+        self.assertNotIn("fatal", data)
+        self.assertIn("Out-of-flow frame", data["message"])
+        self.assertEqual(data["file"], "layout/generic/nsPlaceholderFrame.cpp")
+        self.assertEqual(data["line"], 131)
+        self.assertEqual(data["pid"], 5900)
+        self.assertEqual(data["process"], "Parent")
+        self.assertEqual(data["thread"], "Main Thread")
+        self.assertEqual(
+            [f["function"] for f in data["stack"]],
+            [
+                "NS_DebugBreak(unsigned int, char const*, char const*, char const*, int)",
+                "nsPlaceholderFrame::Reflow(nsPresContext*)",
+            ],
+        )
+        self.assertEqual(data["stack"][1]["line"], 131)
+        # The frames were folded into the assertion, only the trailing line
+        # is a generic output marker.
+        self.assertEqual(len(self._events(monitor, "output")), 1)
+
+    def test_process_output_assertion_flushed_on_stop(self):
+        monitor = SystemResourceMonitor(poll_interval=0.25)
+        monitor.start()
+        self._process_output(monitor, self.MOZ_ASSERT_LINE)
+        self._process_output(monitor, "#01: f() [dom/workers/RuntimeService.cpp:2229]")
+        self.assertEqual(self._events(monitor, "MOZ_ASSERT"), [])
+        monitor.stop()
+
+        asserts = self._events(monitor, "MOZ_ASSERT")
+        self.assertEqual(len(asserts), 1)
+        _, _, data = asserts[0]
+        self.assertEqual(data["color"], "red")
+        self.assertTrue(data["fatal"])
+        self.assertEqual(data["file"], "dom/workers/RuntimeService.cpp")
+        self.assertEqual(data["pid"], 6136)
+        self.assertNotIn("process", data)
+        self.assertEqual(
+            data["stack"],
+            [
+                {
+                    "function": "f()",
+                    "file": "dom/workers/RuntimeService.cpp",
+                    "line": 2229,
+                }
+            ],
+        )
+
+    def test_process_output_xpcshell_assertion_without_frames(self):
         monitor = SystemResourceMonitor(poll_interval=0.25)
         monitor.start()
         self._process_output(
             monitor,
-            "[Parent 5900, Main Thread] ###!!! ASSERTION: Out-of-flow frame got "
-            "reflowed before its placeholder: 'Error', file "
-            "layout/generic/nsPlaceholderFrame.cpp:131",
+            "[123, Main Thread] ###!!! ASSERTION: boom: 'expr', file xpcom/a.cpp:7",
         )
+        self._process_output(monitor, "unrelated")
         monitor.stop()
 
-        asserts = [e for e in monitor.events if len(e) == 3 and e[1] == "C++ assertion"]
+        asserts = self._events(monitor, "NS_ASSERTION")
+        self.assertEqual(len(asserts), 1)
+        _, _, data = asserts[0]
+        self.assertEqual(data["pid"], 123)
+        self.assertNotIn("process", data)
+        # Without frames the source location still gives the marker a cause.
+        self.assertEqual(data["stack"], [{"file": "xpcom/a.cpp", "line": 7}])
+
+    def test_process_output_assertions_keyed_by_process(self):
+        monitor = SystemResourceMonitor(poll_interval=0.25)
+        monitor.start()
+        self._process_output(monitor, self.MOZ_ASSERT_LINE, process="A")
+        self._process_output(monitor, self.NS_ASSERTION_LINE, process="B")
+        self._process_output(monitor, "#01: a() [a.cpp:1]", process="A")
+        self._process_output(monitor, "#01: b() [b.cpp:1]", process="B")
+        monitor.stop()
+
+        moz_assert = self._events(monitor, "MOZ_ASSERT")[0][2]
+        ns_assertion = self._events(monitor, "NS_ASSERTION")[0][2]
+        self.assertEqual([f["function"] for f in moz_assert["stack"]], ["a()"])
+        self.assertEqual([f["function"] for f in ns_assertion["stack"]], ["b()"])
+
+    def test_process_output_cpp_assertion_without_moztest(self):
+        monitor = SystemResourceMonitor(poll_interval=0.25)
+        monitor._assertion_parser = None
+        monitor.start()
+        self._process_output(monitor, self.NS_ASSERTION_LINE)
+        monitor.stop()
+
+        asserts = self._events(monitor, "C++ assertion")
         self.assertEqual(len(asserts), 1)
         _, _, data = asserts[0]
         self.assertEqual(data["type"], "cppDebug")
         self.assertEqual(data["color"], "red")
-        self.assertIn("Out-of-flow frame", data["message"])
-        self.assertEqual(data["file"], "layout/generic/nsPlaceholderFrame.cpp")
         self.assertEqual(data["line"], 131)
+
+    def _assertion_failure(self, message="x", stack=None, **extra):
+        SystemResourceMonitor.assertion_failure({
+            "time": int(time.time() * 1000),
+            "kind": "MOZ_ASSERT",
+            "message": message,
+            "file": "/builds/worker/checkouts/gecko/dom/workers/RuntimeService.cpp",
+            "lineno": 2229,
+            "fatal": True,
+            "stack": stack,
+            **extra,
+        })
+
+    def test_assertion_failure_action(self):
+        rev = "56b3cc68b5e7557a3e13fca984f0f8aebc60dd22"
+        monitor = SystemResourceMonitor(
+            poll_interval=0.25,
+            metadata={"sourceURL": f"https://hg.mozilla.org/try/rev/{rev}"},
+        )
+        monitor.start()
+        self._assertion_failure(
+            message="false (unreachable)",
+            pid=6136,
+            process_type="Child",
+            thread="DOM Worker",
+            test="dom/workers/test/test_bar.html",
+            stack=[
+                {
+                    "function": "Run()",
+                    "file": "/builds/worker/checkouts/gecko/dom/workers/RuntimeService.cpp",
+                    "line": 2229,
+                },
+                {"module": "libxul.so", "module_offset": 0x43A0},
+            ],
+        )
+        monitor.stop()
+
+        asserts = self._events(monitor, "MOZ_ASSERT")
+        self.assertEqual(len(asserts), 1)
+        _, _, data = asserts[0]
+        self.assertEqual(data["type"], "AssertionFailure")
+        self.assertEqual(data["kind"], "MOZ_ASSERT")
+        self.assertEqual(data["color"], "red")
+        self.assertTrue(data["fatal"])
+        self.assertEqual(data["message"], "false (unreachable)")
+        self.assertEqual(data["file"], "dom/workers/RuntimeService.cpp")
+        self.assertEqual(data["line"], 2229)
+        self.assertEqual(data["pid"], 6136)
+        self.assertEqual(data["process"], "Child")
+        self.assertEqual(data["thread"], "DOM Worker")
+        self.assertEqual(data["test"], "dom/workers/test/test_bar.html")
+        self.assertEqual(
+            data["stack"][0]["file"],
+            f"hg:hg.mozilla.org/try:dom/workers/RuntimeService.cpp:{rev}",
+        )
+        self.assertEqual(
+            data["stack"][1], {"module": "libxul.so", "module_offset": 0x43A0}
+        )
+
+        markers = monitor.as_profile()["threads"][0]["markers"]["data"]
+        marker = next(m for m in markers if m.get("type") == "AssertionFailure")
+        self.assertIn("cause", marker)
+
+    def test_assertion_failure_action_supersedes_line_report(self):
+        monitor = SystemResourceMonitor(poll_interval=0.25)
+        monitor.start()
+        self._process_output(monitor, self.MOZ_ASSERT_LINE)
+        self._process_output(monitor, "#01: f() [dom/workers/RuntimeService.cpp:2229]")
+        # The harness parser emits the action when it sees the terminating
+        # line, before that line is logged.
+        self._assertion_failure(
+            message="false (unreachable)",
+            stack=[{"function": "g()", "file": "dom/a.cpp", "line": 1}],
+        )
+        self._process_output(monitor, "terminating line")
+        monitor.stop()
+
+        asserts = self._events(monitor, "MOZ_ASSERT")
+        self.assertEqual(len(asserts), 1)
+        self.assertEqual([f["function"] for f in asserts[0][2]["stack"]], ["g()"])
+        self.assertEqual(len(self._events(monitor, "output")), 1)
+
+    def test_assertion_failure_action_with_other_key_keeps_both(self):
+        monitor = SystemResourceMonitor(poll_interval=0.25)
+        monitor.start()
+        self._process_output(monitor, self.MOZ_ASSERT_LINE)
+        self._process_output(monitor, "#01: f() [dom/workers/RuntimeService.cpp:2229]")
+        self._assertion_failure(message="something else")
+        self._process_output(monitor, "terminating line")
+        monitor.stop()
+
+        messages = sorted(e[2]["message"] for e in self._events(monitor, "MOZ_ASSERT"))
+        self.assertEqual(messages, ["false (unreachable)", "something else"])
+
+    def test_line_report_completing_after_action_is_dropped(self):
+        monitor = SystemResourceMonitor(poll_interval=0.25)
+        monitor.start()
+        self._assertion_failure(message="false (unreachable)")
+        self._process_output(monitor, self.MOZ_ASSERT_LINE)
+        self._process_output(monitor, "#01: f() [dom/workers/RuntimeService.cpp:2229]")
+        self._process_output(monitor, "terminating line")
+        # The same assertion firing again is a new event.
+        self._process_output(monitor, self.MOZ_ASSERT_LINE)
+        self._process_output(monitor, "terminating line")
+        monitor.stop()
+
+        asserts = self._events(monitor, "MOZ_ASSERT")
+        self.assertEqual(len(asserts), 2)
+        self.assertIsNone(asserts[0][2].get("stack", [{}])[0].get("function"))
+        self.assertEqual(
+            asserts[1][2]["stack"],
+            [{"file": "dom/workers/RuntimeService.cpp", "line": 2229}],
+        )
 
     def test_process_output_console(self):
         monitor = SystemResourceMonitor(poll_interval=0.25)
@@ -979,6 +1482,404 @@ class TestLsanLeakFrameRewrite(unittest.TestCase):
         self.assertEqual(len(leaks), 1)
         _, _, data = leaks[0]
         self.assertNotIn("stack", data)
+
+
+@unittest.skipIf(psutil is None, "Resource monitor requires psutil.")
+class TestForwarding(unittest.TestCase):
+    def setUp(self):
+        fd, self.forward_path = tempfile.mkstemp()
+        os.close(fd)
+        self.addCleanup(os.unlink, self.forward_path)
+
+    def _child(self):
+        with mock.patch.dict(os.environ, {FORWARD_ENV: self.forward_path}):
+            return SystemResourceMonitor(poll_interval=0.1)
+
+    def test_forwarding(self):
+        parent = SystemResourceMonitor(poll_interval=0.1)
+        self.assertFalse(parent.forwarding)
+        parent.start()
+        parent.accept_forwarded(self.forward_path)
+
+        child = self._child()
+        self.assertTrue(child.forwarding)
+        child.start()
+        self.assertEqual(child.measurements, [])
+        child.record_event("event", data={"type": "Text", "text": "data"})
+        start = time.monotonic()
+        child.record_marker("marker", start, start + 0.1, "text")
+        with child.phase("phase"):
+            time.sleep(0.3)
+        child.forward_perfherder("suite", ["option"], "/upload")
+        child.stop()
+        parent.stop()
+
+        self.assertEqual(len(parent.events), 1)
+        self.assertEqual(
+            parent.events[0][1:], ("event", {"type": "Text", "text": "data"})
+        )
+        self.assertEqual(
+            parent.markers[0],
+            ("marker", start, start + 0.1, "text", SystemResourceMonitor.TASK_CATEGORY),
+        )
+        self.assertEqual(list(parent.phases), ["phase"])
+        self.assertEqual(len(parent.perfherder_requests), 1)
+        name, options, req_start, req_end, upload_dir, source = (
+            parent.perfherder_requests[0]
+        )
+        self.assertEqual((name, options, upload_dir), ("suite", ["option"], "/upload"))
+        self.assertEqual(req_start, child.start_time)
+        self.assertEqual(source, os.getpid())
+
+        data = parent.perfherder_data(name, options, req_start, req_end, source)
+        self.assertEqual(data["framework"], {"name": "job_resource_usage"})
+        self.assertEqual(
+            [suite["name"] for suite in data["suites"]],
+            ["suite.overall", "suite.phase"],
+        )
+        self.assertEqual(data["suites"][0]["extraOptions"], ["option"])
+
+    def test_forwarded_phase_name_conflict(self):
+        monitor = SystemResourceMonitor(poll_interval=0.1)
+        monitor.start()
+        with monitor.phase("phase"):
+            pass
+        monitor._add_phase("phase", 1.0, 2.0, 1)
+        monitor._add_phase("phase", 3.0, 4.0, 2)
+        monitor.stop()
+        self.assertEqual(monitor.phases["phase (2)"], (1.0, 2.0))
+        self.assertEqual(monitor.phases["phase (3)"], (3.0, 4.0))
+
+        data = monitor.perfherder_data("suite", [], 1.0, 2.0, 1)
+        self.assertEqual(
+            [suite["name"] for suite in data["suites"]],
+            ["suite.overall", "suite.phase"],
+        )
+
+    def test_forwarded_phase_before_local_phase(self):
+        monitor = SystemResourceMonitor(poll_interval=0.1)
+        monitor.start()
+        monitor._add_phase("phase", 1.0, 2.0, 1)
+        with monitor.phase("phase"):
+            pass
+        monitor.stop()
+        self.assertEqual(monitor.phases["phase"], (1.0, 2.0))
+        self.assertIn("phase (2)", monitor.phases)
+
+        data = monitor.perfherder_data("suite", [])
+        self.assertEqual(
+            [suite["name"] for suite in data["suites"]],
+            ["suite.overall", "suite.phase"],
+        )
+        self.assertNotEqual(data["suites"][1]["subtests"][0]["value"], 1.0)
+
+    def test_perfherder_data_source_phases(self):
+        monitor = SystemResourceMonitor(poll_interval=0.1)
+        monitor.start()
+        start = time.monotonic()
+        monitor._add_phase("outer", start, start + 0.3, 1)
+        monitor._add_phase("inner", start + 0.1, start + 0.2, 2)
+        monitor.stop()
+
+        for source, phase in ((1, "outer"), (2, "inner")):
+            data = monitor.perfherder_data("suite", [], start, start + 0.3, source)
+            self.assertEqual(
+                [suite["name"] for suite in data["suites"]],
+                ["suite.overall", f"suite.{phase}"],
+            )
+        data = monitor.perfherder_data("suite", [])
+        self.assertEqual([suite["name"] for suite in data["suites"]], ["suite.overall"])
+
+    def test_concurrent_forwarding(self):
+        parent = SystemResourceMonitor(poll_interval=0.1)
+        parent.start()
+        parent.accept_forwarded(self.forward_path)
+        _run_forwarding_children(self.forward_path)
+        parent.stop()
+
+        self.assertEqual(len([m for m in parent.markers if m[0] == "marker"]), 2000)
+
+    def test_accept_forwarded_not_running(self):
+        monitor = SystemResourceMonitor(poll_interval=0.1)
+        monitor.accept_forwarded(self.forward_path)
+        self.assertIsNone(monitor._from_children_path)
+
+    def test_forward_after_stop(self):
+        child = self._child()
+        child.start()
+        child.stop()
+        with self.assertWarns(UserWarning):
+            child.forward_perfherder("suite", [])
+
+    def test_children_forward_path(self):
+        parent = SystemResourceMonitor(poll_interval=0.1)
+        self.assertIsNone(parent.children_forward_path)
+        parent.start()
+        parent.accept_forwarded(self.forward_path)
+        self.assertEqual(parent.children_forward_path, self.forward_path)
+        parent.stop()
+
+        self.assertEqual(self._child().children_forward_path, self.forward_path)
+
+    def test_forward_to(self):
+        parent = SystemResourceMonitor(poll_interval=0.1)
+        parent.start()
+        parent.accept_forwarded(self.forward_path)
+
+        child = SystemResourceMonitor(forward_to=self.forward_path)
+        self.assertTrue(child.forwarding)
+        child.start()
+        start = time.monotonic()
+        child.record_marker("marker", start, start + 0.1, "text")
+        child.stop()
+        parent.stop()
+
+        self.assertEqual(
+            parent.markers[0],
+            ("marker", start, start + 0.1, "text", SystemResourceMonitor.TASK_CATEGORY),
+        )
+
+    @unittest.skipUnless(hasattr(os, "fork"), "Requires fork.")
+    def test_forked_child_forgets_monitor(self):
+        monitor = SystemResourceMonitor(poll_interval=0.1)
+        monitor.start()
+        _wait_for_measurement(monitor)
+        pid = os.fork()
+        if pid == 0:
+            forgotten = SystemResourceMonitor.instance is None and monitor._pipe.closed
+            monitor._atexit_stop()
+            # Hold the lock as the parent's drain timer could have when forking.
+            monitor._pipe_lock.acquire()
+            monitor.stop()
+            os._exit(0 if forgotten else 1)
+        _, status = os.waitpid(pid, 0)
+        self.assertEqual(os.waitstatus_to_exitcode(status), 0)
+        child_exit = time.monotonic()
+        time.sleep(0.5)
+        self.assertIs(SystemResourceMonitor.instance, monitor)
+        monitor.stop()
+        self.assertGreater(monitor.measurements[-1].end, child_exit)
+
+    def _artifact_filenames(self, monitor):
+        return sorted(
+            data["filename"] for _, name, data in monitor.events if name == "artifact"
+        )
+
+    def test_forwarded_artifacts_in_parent_upload_dir(self):
+        with tempfile.TemporaryDirectory() as upload_dir:
+            open(os.path.join(upload_dir, "file"), "w").close()
+            parent = SystemResourceMonitor(poll_interval=0.1)
+            parent.start()
+            parent.accept_forwarded(self.forward_path)
+
+            child = self._child()
+            child.start()
+            child.stop(upload_dir=upload_dir)
+            parent.stop(upload_dir=upload_dir)
+
+            self.assertEqual(self._artifact_filenames(parent), ["file"])
+
+    def test_forwarded_artifacts_in_other_upload_dir(self):
+        with tempfile.TemporaryDirectory() as upload_dir:
+            with tempfile.TemporaryDirectory() as child_upload_dir:
+                open(os.path.join(upload_dir, "parent"), "w").close()
+                open(os.path.join(child_upload_dir, "child"), "w").close()
+                parent = SystemResourceMonitor(poll_interval=0.1)
+                parent.start()
+                parent.accept_forwarded(self.forward_path)
+
+                child = self._child()
+                child.start()
+                child.stop(upload_dir=child_upload_dir)
+                parent.stop(upload_dir=upload_dir)
+
+                self.assertEqual(self._artifact_filenames(parent), ["child", "parent"])
+
+    def test_forwarded_artifacts_moved_out_of_parent_upload_dir(self):
+        with tempfile.TemporaryDirectory() as upload_dir:
+            path = os.path.join(upload_dir, "file")
+            open(path, "w").close()
+            parent = SystemResourceMonitor(poll_interval=0.1)
+            parent.start()
+            parent.accept_forwarded(self.forward_path)
+
+            child = self._child()
+            child.start()
+            child.stop(upload_dir=upload_dir)
+            os.unlink(path)
+            parent.stop(upload_dir=upload_dir)
+
+            self.assertEqual(self._artifact_filenames(parent), ["file"])
+
+    def test_forwarded_sccache_log_parsed_once(self):
+        with tempfile.TemporaryDirectory() as upload_dir:
+            open(os.path.join(upload_dir, "sccache.log"), "w").close()
+            parent = SystemResourceMonitor(poll_interval=0.1)
+            parent.start()
+            parent.accept_forwarded(self.forward_path)
+
+            with mock.patch.object(
+                SystemResourceMonitor, "_parse_sccache_log"
+            ) as parse_sccache_log:
+                child = self._child()
+                child.start()
+                child.stop(upload_dir=upload_dir)
+                parent.stop(upload_dir=upload_dir)
+
+            self.assertEqual(parse_sccache_log.call_count, 1)
+            self.assertEqual(self._artifact_filenames(parent), ["sccache.log"])
+
+    def test_partial_line(self):
+        parent = SystemResourceMonitor(poll_interval=0.1)
+        parent.start()
+        parent.accept_forwarded(self.forward_path)
+        with open(self.forward_path, "a") as fh:
+            fh.write('["event", "complete", 1.0, null]\n["event", "incompl')
+        parent._read_forwarded()
+        self.assertEqual(parent.events, [(1.0, "complete")])
+        with open(self.forward_path, "a") as fh:
+            fh.write('ete", 2.0, null]\n')
+        parent.stop()
+        self.assertEqual(parent.events, [(1.0, "complete"), (2.0, "incomplete")])
+
+    def test_perfherder_data_all_phases(self):
+        monitor = SystemResourceMonitor(poll_interval=0.1)
+        monitor.start()
+        with monitor.phase("phase1"):
+            time.sleep(0.3)
+        monitor.stop()
+
+        data = monitor.perfherder_data("suite", [])
+        self.assertEqual(
+            [suite["name"] for suite in data["suites"]],
+            ["suite.overall", "suite.phase1"],
+        )
+        overall = {s["name"] for s in data["suites"][0]["subtests"]}
+        self.assertLessEqual(
+            {"io_write_bytes", "io.read_bytes", "io_write_time", "io_read_time"},
+            overall,
+        )
+
+
+def _run_forwarding_children(forward_path):
+    script = (
+        "import time\n"
+        "from mozsystemmonitor.resourcemonitor import SystemResourceMonitor\n"
+        "m = SystemResourceMonitor()\n"
+        "m.start()\n"
+        "for i in range(500):\n"
+        "    t = time.monotonic()\n"
+        "    m.record_marker('marker', t, t, 'x' * 200)\n"
+        "m.stop()\n"
+    )
+    env = dict(os.environ, **{FORWARD_ENV: forward_path})
+    env["PYTHONPATH"] = os.pathsep.join(sys.path)
+    children = [
+        subprocess.Popen([sys.executable, "-c", script], env=env) for _ in range(4)
+    ]
+    for child in children:
+        assert child.wait() == 0
+
+
+def test_concurrent_forwarding_lines(tmp_path):
+    # Forwarding children don't need psutil, so this also runs where the
+    # parent can't monitor.
+    forward_path = tmp_path / "forward.jsonl"
+    forward_path.touch()
+    _run_forwarding_children(str(forward_path))
+
+    data = forward_path.read_bytes()
+    assert data.endswith(b"\n")
+    records = [json.loads(line) for line in data.splitlines()]
+    assert len(records) == 2000
+    assert all(record[0] == "marker" for record in records)
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (None, None),
+        ("", None),
+        ("0", None),
+        ("2.5", 2.5),
+        ("yes", 0.1),
+    ],
+)
+def test_process_sampling_interval(value, expected):
+    env = {} if value is None else {"MOZ_PROCESS_SAMPLING": value}
+    with mock.patch.dict(os.environ, env):
+        if value is None:
+            os.environ.pop("MOZ_PROCESS_SAMPLING", None)
+        assert _process_sampling_interval(0.1) == expected
+
+
+@pytest.mark.skipif(psutil is None, reason="Resource monitor requires psutil.")
+def test_process_sampling_with_interval():
+    with mock.patch.dict(os.environ, {"MOZ_PROCESS_SAMPLING": "0.5"}):
+        monitor = SystemResourceMonitor(poll_interval=0.1)
+        monitor.start()
+        _wait_for_measurement(monitor)
+        subprocess.run([sys.executable, "-c", "import time; time.sleep(2)"], check=True)
+        time.sleep(0.6)
+        monitor.stop()
+    cmds = [cmd for pid, start, end, cmd, ppid in monitor.processes]
+    assert any("time.sleep(2)" in cmd for cmd in cmds), cmds
+
+
+@pytest.mark.skipif(psutil is None, reason="Resource monitor requires psutil.")
+def test_process_sampling_still_running():
+    sleep = [sys.executable, "-c", "import time; time.sleep(60)"]
+    before = subprocess.Popen(sleep + ["before"])
+    try:
+        with mock.patch.dict(os.environ, {"MOZ_PROCESS_SAMPLING": "0.1"}):
+            monitor = SystemResourceMonitor(poll_interval=0.1)
+            monitor.start()
+            # Let the monitor take its first sample, which is what it
+            # considers to be running before it started.
+            _wait_for_measurement(monitor)
+            during = subprocess.Popen(sleep + ["during"])
+            try:
+                time.sleep(1)
+                monitor.stop()
+            finally:
+                during.kill()
+                during.wait()
+    finally:
+        before.kill()
+        before.wait()
+    cmds = [cmd for pid, start, end, cmd, ppid in monitor.processes]
+    assert any(cmd.endswith(" during") for cmd in cmds), cmds
+    assert not any(cmd.endswith(" before") for cmd in cmds), cmds
+
+
+@pytest.mark.skipif(psutil is None, reason="Resource monitor requires psutil.")
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux only")
+def test_process_sampling_start_time():
+    with mock.patch.dict(os.environ, {"MOZ_PROCESS_SAMPLING": "0.1"}):
+        monitor = SystemResourceMonitor(poll_interval=0.1)
+        monitor.start()
+        _wait_for_measurement(monitor)
+        before = time.monotonic()
+        child = subprocess.Popen([
+            sys.executable,
+            "-c",
+            "import time; time.sleep(60)",
+            "start-time",
+        ])
+        after = time.monotonic()
+        try:
+            time.sleep(1)
+            monitor.stop()
+        finally:
+            child.kill()
+            child.wait()
+    starts = [
+        start for pid, start, end, cmd, ppid in monitor.processes if pid == child.pid
+    ]
+    assert len(starts) == 1, monitor.processes
+    # /proc/<pid>/stat has a resolution of one clock tick, usually 10ms, and
+    # converting between clocks adds a little imprecision.
+    assert before - 0.02 <= starts[0] <= after + 0.01, (before, starts[0], after)
 
 
 if __name__ == "__main__":

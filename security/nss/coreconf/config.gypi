@@ -44,7 +44,7 @@
         }],
         ['OS=="win"', {
           'use_system_zlib%': 0,
-          'nspr_libs%': ['libnspr4.lib', 'libplc4.lib', 'libplds4.lib'],
+          'nspr_libs%': ['nspr4.lib', 'plc4.lib', 'plds4.lib'],
           'zlib_libs%': [],
           #TODO
           'moz_debug_flags%': '',
@@ -100,6 +100,10 @@
     'cc_is_clang%': '<(cc_is_clang)',
     'cc_is_gcc%': '<(cc_is_gcc)',
     'cc_use_gnu_ld%': '<(cc_use_gnu_ld)',
+    # Windows only: build with clang-cl, lld-link and llvm-lib from llvm_bindir
+    # (an absolute path) instead of MSVC. build.sh --clang-cl sets these.
+    'clang_cl%': 0,
+    'llvm_bindir%': '',
     # Some defaults
     'disable_arm_hw_aes%': 0,
     'disable_arm_hw_sha1%': 0,
@@ -112,7 +116,6 @@
     'disable_deprecated_rc2%': 0,
     'disable_dbm%': 1,
     'disable_libpkix%': 1,
-    'disable_kyber%' : 0,
     'disable_werror%': 0,
     'disable_altivec%': 0,
     'disable_crypto_vsx%': 0,
@@ -122,6 +125,10 @@
     'moz_fold_libs%': 0,
     'moz_folded_library_name%': '',
     'sanitizer_flags%': 0,
+    # Windows only: the architecture suffix of clang-cl's ASan runtime
+    # libraries. build.sh sets this and puts the runtime's directory in
+    # the LIB environment variable.
+    'clang_rt_asan_arch%': '',
     'static_libs%': 0,
     'no_zdefs%': 0,
     'fuzz%': 0,
@@ -200,6 +207,12 @@
       [ 'OS=="android"', {
         'libraries': [
           '-llog',
+        ],
+      }],
+      # Without this, NSPR's Windows headers mark PR_* dllimport, breaking a static link.
+      [ 'OS=="win"', {
+        'defines': [
+          '_NSPR_BUILD_',
         ],
       }],
       [ 'fuzz==1', {
@@ -502,6 +515,46 @@
               # The -L/usr/lib is redundant but innocuous: it's a default path.
               'LIBRARY_SEARCH_PATHS': ['/usr/lib <(sanitizer_flags)'],
             },
+            # gyp's Windows generator ignores cflags and ldflags. See
+            # clang_cl_sanitizers in coreconf/sanitizers.sh.
+            'msvs_settings': {
+              'VCCLCompilerTool': {
+                'AdditionalOptions': [
+                  '<@(sanitizer_flags)',
+                  '/clang:-fno-omit-frame-pointer',
+                  '/clang:-fno-optimize-sibling-calls',
+                ],
+              },
+            },
+            'conditions': [
+              # Link the ASan runtime as clang-cl would: the DLL's import
+              # library, the whole static thunk, and the SEH interceptor.
+              [ 'clang_rt_asan_arch!=""', {
+                'msvs_settings': {
+                  'VCLinkerTool': {
+                    'AdditionalOptions': [
+                      'clang_rt.asan_dynamic-<(clang_rt_asan_arch).lib',
+                      '-wholearchive:clang_rt.asan_dynamic_runtime_thunk-<(clang_rt_asan_arch).lib',
+                    ],
+                  },
+                },
+                'conditions': [
+                  [ 'target_arch=="ia32"', {
+                    'msvs_settings': {
+                      'VCLinkerTool': {
+                        'AdditionalOptions': [ '-include:___asan_seh_interceptor' ],
+                      },
+                    },
+                  }, {
+                    'msvs_settings': {
+                      'VCLinkerTool': {
+                        'AdditionalOptions': [ '-include:__asan_seh_interceptor' ],
+                      },
+                    },
+                  }],
+                ],
+              }],
+            ],
           }],
           [ 'emit_llvm==1', {
             'cflags': ['-flto'],
@@ -589,6 +642,29 @@
                   },
                 },
               }],
+              [ 'target_arch=="arm64"', {
+                'msvs_configuration_platform': 'ARM64',
+                'msvs_settings': {
+                  'VCCLCompilerTool': {
+                    'PreprocessorDefinitions': [
+                      'WIN64',
+                      '_ARM64_',
+                      '__ARM_FEATURE_CRYPTO',
+                    ],
+                    'AdditionalOptions': [ '/EHsc' ],
+                  },
+                },
+                'conditions': [
+                  # gyp runs clang-cl with -m64, which alone means x86-64.
+                  [ 'clang_cl==1', {
+                    'msvs_settings': {
+                      'VCCLCompilerTool': {
+                        'AdditionalOptions': [ '--target=aarch64-pc-windows-msvc' ],
+                      },
+                    },
+                  }],
+                ],
+              }],
             ],
           }],
           [ 'disable_dbm==1', {
@@ -614,11 +690,6 @@
           [ 'disable_deprecated_rc2==1', {
             'defines': [
               'NSS_DISABLE_DEPRECATED_RC2',
-            ],
-          }],
-          [ 'disable_kyber==1', {
-            'defines': [
-              'NSS_DISABLE_KYBER',
             ],
           }],
 
@@ -711,6 +782,16 @@
     },
   },
   'conditions': [
+    # gyp's ninja generator only switches to clang-cl when CC names it here; it
+    # ignores CC in the environment on Windows. Every build file includes this
+    # one, which keeps the settings identical across them as gyp requires.
+    [ 'clang_cl==1', {
+      'make_global_settings': [
+        ['CC', '<(llvm_bindir)/clang-cl'],
+        ['LD', '<(llvm_bindir)/lld-link'],
+        ['AR', '<(llvm_bindir)/llvm-lib'],
+      ],
+    }],
     [ 'cc_use_gnu_ld==1 or OS=="solaris"', {
       'variables': {
         'process_map_file': ['/bin/sh', '-c', '/usr/bin/env grep -v ";-" >(mapfile) | sed -e "s,;+,," -e "s; DATA ;;" -e "s,;;,," -e "s,;.*,;," > >@(_outputs)'],

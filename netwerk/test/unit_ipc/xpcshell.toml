@@ -68,6 +68,7 @@ support-files = [
   "!/netwerk/test/unit/http2-ca.pem",
   "!/netwerk/test/unit/test_orb_empty_header.js",
   "!/netwerk/test/unit/test_simple_unknown_uris.js",
+  "!/netwerk/test/unit/test_compressConv_offmainthread_js_listener.js",
   "child_is_proxy_used.js",
   "child_cookie_header.js",
   "child_dns_by_type_resolve.js",
@@ -82,30 +83,30 @@ prefs = [
 
 ["test_alt-data_closeWithStatus_wrap.js"]
 prefs = ["network.allow_raw_sockets_in_content_processes=true"]
-skip-if = [
-  "isolated_process", # Bug 1709961
-]
 
 ["test_alt-data_cross_process_wrap.js"]
-skip-if = [
-  "isolated_process", # Bug 1709961
+prefs = [
+  "network.allow_raw_sockets_in_content_processes=true",
+  "network.cache.alt_data.validate_binding_principal=false", # the xpcshell child loads no documents
 ]
-prefs = ["network.allow_raw_sockets_in_content_processes=true"]
 
 ["test_alt-data_simple_wrap.js"]
-skip-if = [
-  "isolated_process", # Bug 1709961
+prefs = [
+  "network.allow_raw_sockets_in_content_processes=true",
+  "network.cache.alt_data.validate_binding_principal=false", # the xpcshell child loads no documents
 ]
-prefs = ["network.allow_raw_sockets_in_content_processes=true"]
 
 ["test_alt-data_stream_wrap.js"]
-prefs = ["network.allow_raw_sockets_in_content_processes=true"]
+prefs = [
+  "network.allow_raw_sockets_in_content_processes=true",
+  "network.cache.alt_data.validate_binding_principal=false", # the xpcshell child loads no documents
+]
 
 ["test_cache-entry-id_wrap.js"]
-skip-if = [
-  "isolated_process", # Bug 1709961
+prefs = [
+  "network.allow_raw_sockets_in_content_processes=true",
+  "network.cache.alt_data.validate_binding_principal=false", # the xpcshell child loads no documents
 ]
-prefs = ["network.allow_raw_sockets_in_content_processes=true"]
 
 ["test_cache_jar_wrap.js"]
 
@@ -123,6 +124,15 @@ prefs = ["network.allow_raw_sockets_in_content_processes=true"]
 prefs = [
   "network.allow_raw_sockets_in_content_processes=true",
  "security.allow_eval_with_system_principal=true",
+]
+
+["test_compressConv_offmainthread_js_listener_wrap.js"]
+prefs = [
+  "network.allow_raw_sockets_in_content_processes=true",
+  "network.decompression_off_mainthread2=true",
+  "network.decompression_off_mainthread_min_size=1",
+  "network.http.encoding.trustworthy_is_https=false",
+  "media.rdd-process.enabled=false",
 ]
 
 ["test_cookie_header_stripped.js"]
@@ -153,10 +163,8 @@ prefs = ["network.allow_raw_sockets_in_content_processes=true"]
 prefs = ["network.allow_raw_sockets_in_content_processes=true"]
 
 ["test_http3_prio_disabled_wrap.js"]
-run-sequentially = ["true"] # http3server
 skip-if = [
   "os == 'android' && os_version == '14' && arch == 'x86_64'", # Bug 1982955
-  "os == 'win' && os_version == '11.26100' && arch == 'x86_64' && msix", # Bug 1807925
   "os == 'win' && os_version == '11.26200' && arch == 'x86_64' && msix", # Bug 1807925
 ]
 
@@ -167,9 +175,6 @@ skip-if = [
 ]
 
 ["test_httpcancel_wrap.js"]
-skip-if = [
-  "isolated_process", # Bug 1709961
-]
 prefs = ["network.allow_raw_sockets_in_content_processes=true"]
 
 ["test_httpsuspend_wrap.js"]
@@ -195,9 +200,6 @@ prefs = ["network.allow_raw_sockets_in_content_processes=true"]
 prefs = ["network.allow_raw_sockets_in_content_processes=true"]
 
 ["test_redirect-caching_failure_wrap.js"]
-skip-if = [
-  "isolated_process", # Bug 1709961
-]
 prefs = ["network.allow_raw_sockets_in_content_processes=true"]
 
 ["test_redirect-caching_passing_wrap.js"]
@@ -225,9 +227,6 @@ prefs = ["network.allow_raw_sockets_in_content_processes=true"]
 prefs = ["network.allow_raw_sockets_in_content_processes=true"]
 
 ["test_redirect_veto_parent.js"]
-skip-if = [
-  "isolated_process", # Bug 1709961
-]
 prefs = ["network.allow_raw_sockets_in_content_processes=true"]
 run-sequentially = ["true"] # doesn't play nice with others.
 
@@ -251,6 +250,11 @@ prefs = ["network.allow_raw_sockets_in_content_processes=true"]
 
 ["test_simple_wrap.js"]
 prefs = ["network.allow_raw_sockets_in_content_processes=true"]
+
+["test_stale-while-revalidate_redirect.js"]
+support-files = [
+  "child_stale-while-revalidate_redirect.js",
+]
 
 ["test_trackingProtection_annotateChannels_wrap1.js"]
 prefs = ["network.allow_raw_sockets_in_content_processes=true"]

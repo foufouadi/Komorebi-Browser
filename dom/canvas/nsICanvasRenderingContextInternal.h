@@ -35,6 +35,9 @@ class nsDisplayListBuilder;
 class ClientWebGLContext;
 class PresShell;
 class WebGLFramebufferJS;
+namespace dom {
+class CanvasRenderingContextOptions;
+}  // namespace dom
 namespace ipc {
 class IProtocol;
 }  // namespace ipc
@@ -96,9 +99,11 @@ class nsICanvasRenderingContextInternal : public nsISupports,
   virtual int32_t GetWidth() = 0;
   virtual int32_t GetHeight() = 0;
 
-  // Sets the dimensions of the canvas, in pixels.  Called
-  // whenever the size of the element changes.
+  // Sets the dimensions of the canvas, in pixels.  Called whenever the size of
+  // the element changes.
   NS_IMETHOD SetDimensions(int32_t width, int32_t height) = 0;
+  // Trigger a deferred context creation error from SetDimensions.
+  NS_IMETHOD MaybeThrowContextCreationError() { return NS_OK; }
 
   // Initializes the canvas after the object is constructed.
   virtual nsresult Initialize() { return NS_OK; }
@@ -199,8 +204,8 @@ class nsICanvasRenderingContextInternal : public nsISupports,
   // Redraw the dirty rectangle of this canvas.
   NS_IMETHOD Redraw(const gfxRect& dirty) = 0;
 
-  NS_IMETHOD SetContextOptions(JSContext* cx, JS::Handle<JS::Value> options,
-                               mozilla::ErrorResult& aRvForDictionaryInit) {
+  NS_IMETHOD SetContextOptions(
+      const mozilla::dom::CanvasRenderingContextOptions& aOptions) {
     return NS_OK;
   }
 
@@ -208,6 +213,16 @@ class nsICanvasRenderingContextInternal : public nsISupports,
 
   virtual void OnBeforePaintTransaction() {}
   virtual void OnDidPaintTransaction() {}
+
+  virtual void OnWindowDestroy() {}
+
+  // Notifications from CanvasShutdownManager, if registered with
+  // AddShutdownObserver.
+  virtual void OnShutdown() {}
+  virtual void OnRemoteCanvasLost() {}
+  virtual void OnRemoteCanvasRestored() {}
+  virtual void OnRemoteCanvasReset(
+      const nsTArray<mozilla::layers::RemoteTextureOwnerId>& aOwnerIds) {}
 
   virtual mozilla::layers::PersistentBufferProvider* GetBufferProvider() {
     return nullptr;
@@ -234,13 +249,20 @@ class nsICanvasRenderingContextInternal : public nsISupports,
   // Checking if fingerprinting protection is enable for the given target.
   bool ShouldResistFingerprinting(mozilla::RFPTarget aTarget) const;
 
-  bool DispatchEvent(const nsAString& eventName, mozilla::CanBubble aCanBubble,
-                     mozilla::Cancelable aIsCancelable) const;
+  MOZ_CAN_RUN_SCRIPT bool DispatchEvent(
+      const nsAString& eventName, mozilla::CanBubble aCanBubble,
+      mozilla::Cancelable aIsCancelable) const;
 
   void RecordCanvasUsage(mozilla::CanvasExtractionAPI aAPI,
                          mozilla::CSSIntSize size) const;
 
  protected:
+  // Registers with CanvasShutdownManager to receive OnShutdown and
+  // OnRemoteCanvas* notifications. Returns false if the thread is shutting
+  // down.
+  bool AddShutdownObserver();
+  void RemoveShutdownObserver();
+
   RefPtr<mozilla::dom::HTMLCanvasElement> mCanvasElement;
   RefPtr<mozilla::dom::OffscreenCanvas> mOffscreenCanvas;
   RefPtr<nsRefreshDriver> mRefreshDriver;

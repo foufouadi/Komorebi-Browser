@@ -7,6 +7,7 @@
 
 #include "Assertions.h"
 #include "ClientUsageArray.h"
+#include "mozilla/StaticString.h"
 #include "mozilla/ThreadSafeWeakPtr.h"
 #include "mozilla/dom/quota/QuotaManager.h"
 
@@ -30,9 +31,9 @@ class OriginInfo final : public SupportsThreadSafeWeakPtr<OriginInfo> {
 
   OriginInfo(GroupInfo* aGroupInfo, const nsACString& aOrigin,
              const nsACString& aStorageOrigin, bool aIsPrivate,
-             const ClientUsageArray& aClientUsages, uint64_t aUsage,
-             int64_t aAccessTime, int32_t aMaintenanceDate, bool aPersisted,
-             bool aDirectoryExists);
+             bool aIsEncrypted, const ClientUsageArray& aClientUsages,
+             int64_t aUsage, int64_t aAccessTime, int32_t aMaintenanceDate,
+             bool aPersisted, bool aDirectoryExists);
 
   GroupInfo* GetGroupInfo() const { return mGroupInfo; }
 
@@ -71,6 +72,8 @@ class OriginInfo final : public SupportsThreadSafeWeakPtr<OriginInfo> {
   }
 
   bool IsPrivate() const { return mIsPrivate; }
+
+  bool IsEncrypted() const { return mIsEncrypted; }
 
   bool IsExtensionOrigin() const { return mIsExtension; }
 
@@ -143,13 +146,13 @@ class OriginInfo final : public SupportsThreadSafeWeakPtr<OriginInfo> {
 
   void LockedDirectoryCreated();
 
-  void LockedTruncateUsages(Client::Type aClientType, uint64_t aDelta,
+  void LockedTruncateUsages(Client::Type aClientType, int64_t aDelta,
                             DirtyTrackingAutoLock& aProofOfLock);
 
-  Maybe<bool> LockedUpdateUsages(Client::Type aClientType, uint64_t aDelta,
+  Maybe<bool> LockedUpdateUsages(Client::Type aClientType, int64_t aDelta,
                                  DirtyTrackingAutoLock& aProofOfLock);
 
-  bool LockedUpdateUsagesForEviction(Client::Type aClientType, uint64_t aDelta,
+  bool LockedUpdateUsagesForEviction(Client::Type aClientType, int64_t aDelta,
                                      DirtyTrackingAutoLock& aProofOfLock);
 
   constexpr TimeStamp GetLastModifiedTime() const { return mLastModifiedTime; }
@@ -166,6 +169,7 @@ class OriginInfo final : public SupportsThreadSafeWeakPtr<OriginInfo> {
   int64_t mAccessTime;
   int32_t mMaintenanceDate;
   bool mIsPrivate;
+  bool mIsEncrypted;
   bool mAccessed;
   bool mPersisted;
   const bool mIsExtension;
@@ -188,8 +192,21 @@ class OriginInfo final : public SupportsThreadSafeWeakPtr<OriginInfo> {
 
   void MakeDirty(DirtyTrackingAutoLock& aProofOfLock);
 
+  // Records the quotamanager.usage_underflow event if aUsage is negative.
+  void LockedMaybeRecordUsageUnderflow(Client::Type aClientType, int64_t aUsage,
+                                       StaticString aCallSite);
+
   ClientUsageArray mClientUsages;
-  uint64_t mUsage;
+  // Per client, how many times a negative usage was seen for this OriginInfo.
+  // Used to throttle usage_underflow telemetry events.
+  Array<uint32_t, Client::TYPE_MAX> mUsageUnderflowCount{};
+
+  // Signed for the same reason as QuotaManager::mTemporaryStorageUsage: though
+  // it shouldn't go negative, in case that happens (transient state or bug
+  // elsewhere) don't let the value underflow, which would result in a huge
+  // number, making all integers comparisons to become buggy. See bug 2066923
+  // and bug 1585978 for details.
+  int64_t mUsage;
   TimeStamp mLastModifiedTime;
   bool mMetadataDirty = false;
 };

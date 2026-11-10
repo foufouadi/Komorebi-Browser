@@ -9,6 +9,7 @@
 
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/Document.h"
+#include "mozilla/StaticPrefs_mathml.h"
 
 #include "nsIHttpChannel.h"
 #include "nsIHttpChannelInternal.h"
@@ -68,7 +69,7 @@ static bool PingsEnabled(int32_t* aMaxPerLink, bool* aRequireSameHost) {
 // We wait this many milliseconds before killing the ping channel...
 #define PING_TIMEOUT 10000
 
-static void OnPingTimeout(nsITimer* aTimer, void* aClosure) {
+static void OnPingTimeout(nsITimer* /*aTimer*/, void* aClosure) {
   nsILoadGroup* loadGroup = static_cast<nsILoadGroup*>(aClosure);
   if (loadGroup) {
     loadGroup->Cancel(NS_ERROR_ABORT);
@@ -248,10 +249,10 @@ static void ForEachPing(nsIContent* aContent, ForEachPingCallback aCallback,
   //       just parse the raw attribute.  It might be nice if the content node
   //       implemented an interface that exposed an enumeration of nsIURIs.
 
-  // Make sure we are dealing with either an <A> or <AREA> element in the HTML
-  // or XHTML namespace, or an <a> element in the SVG namespace.
   if (!aContent->IsAnyOfHTMLElements(nsGkAtoms::a, nsGkAtoms::area) &&
-      !aContent->IsSVGElement(nsGkAtoms::a)) {
+      !aContent->IsSVGElement(nsGkAtoms::a) &&
+      !(aContent->IsMathMLElement(nsGkAtoms::a) &&
+        StaticPrefs::mathml_a_element_enabled())) {
     return;
   }
 
@@ -326,17 +327,18 @@ nsresult nsPingListener::StartTimeout(DocGroup* aDocGroup) {
 }
 
 NS_IMETHODIMP
-nsPingListener::OnStartRequest(nsIRequest* aRequest) { return NS_OK; }
+nsPingListener::OnStartRequest(nsIRequest* /*aRequest*/) { return NS_OK; }
 
 NS_IMETHODIMP
-nsPingListener::OnDataAvailable(nsIRequest* aRequest, nsIInputStream* aStream,
-                                uint64_t aOffset, uint32_t aCount) {
+nsPingListener::OnDataAvailable(nsIRequest* /*aRequest*/,
+                                nsIInputStream* aStream, uint64_t /*aOffset*/,
+                                uint32_t aCount) {
   uint32_t result;
   return aStream->ReadSegments(NS_DiscardSegment, nullptr, aCount, &result);
 }
 
 NS_IMETHODIMP
-nsPingListener::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
+nsPingListener::OnStopRequest(nsIRequest* /*aRequest*/, nsresult /*aStatus*/) {
   mLoadGroup = nullptr;
 
   if (mTimer) {

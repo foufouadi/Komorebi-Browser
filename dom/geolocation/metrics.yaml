@@ -27,6 +27,21 @@ geolocation:
     notification_emails:
       - krosylight@mozilla.com
     expires: never
+  request_activation:
+    type: labeled_counter
+    description: >
+      The user activation state on each geolocation request.
+    labels:
+      - full_activated
+      - has_been_activated
+      - none
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2078221
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2078221
+    notification_emails:
+      - krosylight@mozilla.com
+    expires: never
   request_result:
     type: labeled_counter
     description: >
@@ -92,6 +107,26 @@ geolocation:
     notification_emails:
       - daparks@mozilla.com
     expires: never
+  network_provider:
+    type: labeled_counter
+    description: >
+      Which network geolocation service each request from the
+      NetworkGeolocationProvider was sent to, determined from the host of the
+      configured geo.provider.network.url.  "other" means the URL had a host that
+      is not one of the services listed here, and "unknown" means it had no
+      host that could be parsed.
+    labels:
+      - google
+      - beacondb
+      - other
+      - unknown
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2070622
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2070622
+    notification_emails:
+      - daparks@mozilla.com
+    expires: never
   network_failures:
     type: labeled_counter
     description: >
@@ -109,6 +144,24 @@ geolocation:
     notification_emails:
       - daparks@mozilla.com
     expires: never
+  network_link_change:
+    type: labeled_counter
+    description: >
+      How many network:link-status-changed notifications, by notification, the
+      NetworkGeolocationProvider request cache saw after it first cached a
+      position.
+    labels:
+      - up
+      - down
+      - changed
+      - unknown
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2060572
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2060572
+    notification_emails:
+      - daparks@mozilla.com
+    expires: never
   geolocation_cache_hit:
     type: labeled_counter
     description: >
@@ -120,6 +173,26 @@ geolocation:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2010958
     data_reviews:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2010958
+    notification_emails:
+      - daparks@mozilla.com
+    expires: never
+  persisted_cache:
+    type: labeled_counter
+    description: >
+      What became of the NetworkGeolocationProvider request cache entry that an
+      earlier session persisted, recorded when a session first consults the
+      cache: absent if there was none, adopted if it was for the current
+      network, rejected if it was for another network, or superseded if a
+      network request completed before the network ID was known.
+    labels:
+      - absent
+      - adopted
+      - rejected
+      - superseded
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2078452
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2078452
     notification_emails:
       - daparks@mozilla.com
     expires: never

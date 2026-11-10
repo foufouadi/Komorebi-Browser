@@ -40,7 +40,6 @@
     scroll-padding-inline: 10px 20px;
   }
 </style>
-</style>
 <body>
   <div id="container">
     <div id="content">
@@ -181,6 +180,13 @@ promise_test(async t => {
 }, 'view timeline inset as string');
 
 promise_test(async t => {
+  assert_throws_js(TypeError, () => {
+    new ViewTimeline({
+      subject: target,
+      inset: []
+    });
+  });
+
   assert_throws_js(TypeError, () => {
     new ViewTimeline({
       subject: target,

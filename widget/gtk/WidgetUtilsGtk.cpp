@@ -134,8 +134,22 @@ bool GdkIsX11Display() {
   return isX11Display;
 }
 
+// Returns the pointer of the display's default seat.
+//
+// On Wayland the client pointer belongs to whichever seat added a device
+// last, so with several seats it can be a seat the user is not on. The
+// default seat is the first one the compositor announced.
 GdkDevice* GdkGetPointer() {
+  static auto sGdkDisplayGetDefaultSeat = (GdkSeat * (*)(GdkDisplay*))
+      dlsym(RTLD_DEFAULT, "gdk_display_get_default_seat");
+  static auto sGdkSeatGetPointer =
+      (GdkDevice * (*)(GdkSeat*)) dlsym(RTLD_DEFAULT, "gdk_seat_get_pointer");
   GdkDisplay* display = gdk_display_get_default();
+  if (sGdkDisplayGetDefaultSeat && sGdkSeatGetPointer) {
+    if (GdkSeat* seat = sGdkDisplayGetDefaultSeat(display)) {
+      return sGdkSeatGetPointer(seat);
+    }
+  }
   GdkDeviceManager* deviceManager = gdk_display_get_device_manager(display);
   return gdk_device_manager_get_client_pointer(deviceManager);
 }
@@ -317,6 +331,9 @@ bool ShouldUsePortal(PortalKind aPortalKind) {
         return StaticPrefs::widget_use_xdg_desktop_portal_mime_handler();
       case PortalKind::NativeMessaging:
         return StaticPrefs::widget_use_xdg_desktop_portal_native_messaging();
+      case PortalKind::NativeMessagingProxy:
+        return StaticPrefs::
+            widget_use_xdg_desktop_portal_native_messaging_proxy();
       case PortalKind::Settings:
         autoBehavior = true;
         return StaticPrefs::widget_use_xdg_desktop_portal_settings();
@@ -324,6 +341,11 @@ bool ShouldUsePortal(PortalKind aPortalKind) {
         return StaticPrefs::widget_use_xdg_desktop_portal_location();
       case PortalKind::OpenUri:
         return StaticPrefs::widget_use_xdg_desktop_portal_open_uri();
+      case PortalKind::Notification:
+        // The portal notification backend is not feature complete yet, so it
+        // is opt-in for now regardless of the environment.
+        autoBehavior = false;
+        return StaticPrefs::widget_use_xdg_desktop_portal_notification();
     }
     return 2;
   }();
@@ -494,7 +516,8 @@ static nsCString GetWindowManagerName() {
                          req_type, &actual_type_return, &actual_format_return,
                          &nitems_return, &bytes_after_return, &prop_return);
 
-  if (result != Success || bytes_after_return != 0 || nitems_return != 1) {
+  if (result != X11Success || bytes_after_return != 0 || nitems_return != 1 ||
+      actual_format_return != 32) {
     return {};
   }
 
@@ -518,7 +541,7 @@ static nsCString GetWindowManagerName() {
                          false,      // delete
                          req_type, &actual_type_return, &actual_format_return,
                          &nitems_return, &bytes_after_return, &prop_return);
-  if (result != Success || bytes_after_return != 0) {
+  if (result != X11Success || bytes_after_return != 0) {
     return {};
   }
 
@@ -615,9 +638,9 @@ static uint32_t GetWindowUserTime(GdkDisplay* aDisplay, uintptr_t aWindow) {
 
   if (XGetWindowProperty(xDisplay, aWindow, atom, 0, 1, false, XA_CARDINAL,
                          &actualType, &actualFormat, &numberOfItems,
-                         &bytesAfter, &property) == Success &&
+                         &bytesAfter, &property) == X11Success &&
       property) {
-    if (numberOfItems == 1) {
+    if (numberOfItems == 1 && actualFormat == 32) {
       userTime = *((uint32_t*)property);
     }
     XFree(property);

@@ -27,7 +27,6 @@
 #include "nsIFrame.h"
 #include "nsISelectionListener.h"
 #include "nsITransferable.h"
-#include "nsRect.h"
 #include "nsString.h"
 #include "nsTArray.h"
 
@@ -88,13 +87,7 @@ struct AlternativeCharCode {
   uint32_t mUnshiftedCharCode = 0u;
   uint32_t mShiftedCharCode = 0u;
 
-  bool operator==(const AlternativeCharCode& aOther) const {
-    return mUnshiftedCharCode == aOther.mUnshiftedCharCode &&
-           mShiftedCharCode == aOther.mShiftedCharCode;
-  }
-  bool operator!=(const AlternativeCharCode& aOther) const {
-    return !(*this == aOther);
-  }
+  bool operator==(const AlternativeCharCode& aOther) const = default;
 };
 
 /******************************************************************************
@@ -113,6 +106,12 @@ struct ShortcutKeyCandidate {
     // keyboard layout never matches with Ctrl + Shift + `;` shortcut.
     MatchExactly,
   };
+  friend auto format_as(ShiftState aState) {
+    return aState == ShiftState::MatchExactly ? "MatchExactly" : "Ignorable";
+  }
+  friend std::ostream& operator<<(std::ostream& aStream, ShiftState aState) {
+    return aStream << format_as(aState);
+  }
 
   enum class SkipIfEarlierHandlerDisabled : bool {
     // Even if an earlier handler is disabled, this may match with another
@@ -126,6 +125,13 @@ struct ShortcutKeyCandidate {
     // without Shift, and Shift + Digit6 introduces `6`).
     Yes,
   };
+  friend auto format_as(SkipIfEarlierHandlerDisabled aSkippable) {
+    return aSkippable == SkipIfEarlierHandlerDisabled::No ? "No" : "Yes";
+  }
+  friend std::ostream& operator<<(std::ostream& aStream,
+                                  SkipIfEarlierHandlerDisabled aSkippable) {
+    return aStream << format_as(aSkippable);
+  }
 
   ShortcutKeyCandidate() = default;
   ShortcutKeyCandidate(
@@ -141,6 +147,12 @@ struct ShortcutKeyCandidate {
   ShiftState mShiftState = ShiftState::MatchExactly;
   SkipIfEarlierHandlerDisabled mSkipIfEarlierHandlerDisabled =
       SkipIfEarlierHandlerDisabled::No;
+
+  friend std::string format_as(const ShortcutKeyCandidate& aCandidate);
+  friend std::ostream& operator<<(std::ostream& aStream,
+                                  const ShortcutKeyCandidate& aCandidate) {
+    return aStream << format_as(aCandidate);
+  }
 };
 
 /******************************************************************************
@@ -652,14 +664,14 @@ class WidgetKeyboardEvent final : public WidgetInputEvent {
     }
   }
 
-  void GetDOMKeyName(nsAString& aKeyName) {
+  void GetDOMKeyName(nsAString& aKeyName) const {
     if (mKeyNameIndex == KEY_NAME_INDEX_USE_STRING) {
       aKeyName = mKeyValue;
       return;
     }
     GetDOMKeyName(mKeyNameIndex, aKeyName);
   }
-  void GetDOMCodeName(nsAString& aCodeName) {
+  void GetDOMCodeName(nsAString& aCodeName) const {
     if (mCodeNameIndex == CODE_NAME_INDEX_USE_STRING) {
       aCodeName = mCodeValue;
       return;
@@ -683,12 +695,31 @@ class WidgetKeyboardEvent final : public WidgetInputEvent {
   }
 
   /**
-   * Get the candidates for shortcut key.
+   * Get the candidates for shortcut key to check whether this event matches
+   * with a shortcut.
    *
    * @param aCandidates [out] the candidate shortcut key combination list.
    *                          the first item is most preferred.
    */
-  void GetShortcutKeyCandidates(ShortcutKeyCandidateArray& aCandidates) const;
+  void GetShortcutKeyCandidates(ShortcutKeyCandidateArray& aCandidates) const {
+    GetShortcutKeyCandidatesInternal(ShortcutKeyPriority::UserIntention,
+                                     aCandidates);
+  }
+
+  /**
+   * Get a list of shortcut keys which may match with this event. So, this is
+   * useful to suggest the user to consider a registering shortcut with a key
+   * press.
+   *
+   * @param aCandidates [out] The first element is the most preferred shortcut
+   *                          which may be available with other keyboard
+   *                          layouts.
+   */
+  void GetRegisterableShortcutKeys(
+      ShortcutKeyCandidateArray& aCandidates) const {
+    GetShortcutKeyCandidatesInternal(
+        ShortcutKeyPriority::AccessibleFromAnyKeyboardLayouts, aCandidates);
+  }
 
   /**
    * Get the candidates for access key.
@@ -928,6 +959,26 @@ class WidgetKeyboardEvent final : public WidgetInputEvent {
             "Invalid native key binding type");
     }
   }
+
+  enum class ShortcutKeyPriority {
+    // Return the shortcut key candidates in the order of user's intention.
+    UserIntention,
+    // Return the shortcut key candidates in the order of easier to access from
+    // any keyboard layouts.
+    AccessibleFromAnyKeyboardLayouts,
+  };
+  void GetShortcutKeyCandidatesInternal(ShortcutKeyPriority,
+                                        ShortcutKeyCandidateArray&) const;
+
+  friend auto format_as(ShortcutKeyPriority aPriority) {
+    return aPriority == ShortcutKeyPriority::UserIntention
+               ? "UserIntention"
+               : "AccessibleFromAnyKeyboardLayouts";
+  }
+  friend std::ostream& operator<<(std::ostream& aStream,
+                                  ShortcutKeyPriority aPriority) {
+    return aStream << format_as(aPriority);
+  }
 };
 
 /******************************************************************************
@@ -1027,7 +1078,8 @@ class WidgetCompositionEvent final : public WidgetGUIEvent {
   }
 
   bool IsFollowedByCompositionEnd() const {
-    return IsFollowedByCompositionEnd(mOriginalMessage);
+    return IsFollowedByCompositionEnd(mOriginalMessage ? mOriginalMessage
+                                                       : mMessage);
   }
 
   static bool IsFollowedByCompositionEnd(EventMessage aEventMessage) {
@@ -1078,7 +1130,7 @@ class WidgetQueryContentEvent final : public WidgetGUIEvent {
   }
 
   struct Options final {
-    explicit Options() {}  // XXX Cannot use `= default` here
+    explicit Options() {}  // NOLINT(modernize-use-equals-default)
     explicit Options(const WidgetQueryContentEvent& aEvent)
         : mRelativeToInsertionPoint(aEvent.mInput.mRelativeToInsertionPoint) {}
 
@@ -1272,6 +1324,7 @@ class WidgetQueryContentEvent final : public WidgetGUIEvent {
     // Used by eQueryTextRectArray
     CopyableTArray<mozilla::LayoutDeviceIntRect> mRectArray;
     // true if selection is reversed (end < start)
+    // FIXME: Use RangeDirection enum class.
     bool mReversed = false;
     // true if DOM element under mouse belongs to widget
     bool mWidgetIsHit = false;
@@ -1443,16 +1496,42 @@ class WidgetSelectionEvent final : public WidgetGUIEvent {
     return nullptr;
   }
 
+  [[nodiscard]] bool IsReversed() const {
+    return mDirection == RangeDirection::Reversed;
+  }
+
+  [[nodiscard]] bool ShouldExpandToClusterBoundary() const {
+    return mExpandToClusterBoundary == ExpandToClusterBoundary::Yes;
+  }
+
+  /**
+   * Return true if this event is dispatched by valid dispatcher. eSetSelection
+   * event is important for TextEventDispatcher. Therefore, this event must be
+   * dispatched by TextEventDispatcher.
+   */
+  [[nodiscard]] bool DispatchedByValidDispatcher() const {
+    // If this event is dispatched in another process, TextEventDispatcher in
+    // this process does not need to get involved.
+    if (mFlags.CameFromAnotherProcess()) {
+      return true;
+    }
+    // SetSelection event must be dispatched by TextEventDispatcher.
+    return mDispatchedByTextEventDispatcher;
+  }
+
   // Start offset of selection
   uint32_t mOffset = 0;
   // Length of selection
   uint32_t mLength = 0;
   // Selection "anchor" should be in front
-  bool mReversed = false;
+  RangeDirection mDirection = RangeDirection::Normal;
   // Cluster-based or character-based
-  bool mExpandToClusterBoundary = true;
+  ExpandToClusterBoundary mExpandToClusterBoundary =
+      ExpandToClusterBoundary::Yes;
   // true if setting selection succeeded.
   bool mSucceeded = false;
+  // true if TextEventDispatcher dispatches this event.
+  bool mDispatchedByTextEventDispatcher = false;
   // Fennec provides eSetSelection reason codes for downstream
   // use in AccessibleCaret visibility logic.
   int16_t mReason = nsISelectionListener::NO_REASON;

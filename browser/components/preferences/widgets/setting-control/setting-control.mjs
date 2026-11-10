@@ -16,7 +16,7 @@ import {
   SettingElement,
   spread,
 } from "chrome://browser/content/preferences/widgets/setting-element.mjs";
-import MozInputFolder from "chrome://global/content/elements/moz-input-folder.mjs";
+import { MozInputFolder } from "chrome://global/content/elements/moz-input-folder.mjs";
 
 /** @import { LitElement, Ref, TemplateResult } from "chrome://global/content/vendor/lit.all.mjs" */
 /** @import { SettingElementConfig } from "chrome://browser/content/preferences/widgets/setting-element.mjs" */
@@ -508,12 +508,14 @@ export class SettingControl extends SettingElement {
               support-page=${supportPage}
             ></a>`
           : ""}
-        <moz-button
-          slot="actions"
-          @click=${this.disableExtension}
-          ?disabled=${this.isDisablingExtension}
-          data-l10n-id="disable-extension"
-        ></moz-button>
+        ${this.setting.controllingExtensionInfo.mayDisable
+          ? html`<moz-button
+              slot="actions"
+              @click=${this.disableExtension}
+              ?disabled=${this.isDisablingExtension}
+              data-l10n-id="disable-extension"
+            ></moz-button>`
+          : ""}
       </moz-message-bar>`;
     } else if (this.showEnableExtensionMessage) {
       messageBar = html`<moz-message-bar

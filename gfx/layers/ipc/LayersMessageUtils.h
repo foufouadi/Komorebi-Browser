@@ -21,7 +21,7 @@
 #include "mozilla/ipc/ByteBuf.h"
 #include "mozilla/ipc/ProtocolMessageUtils.h"
 #include "mozilla/ipc/RustMessageUtils.h"
-#include "mozilla/layers/APZInputBridge.h"
+#include "mozilla/layers/APZBridge.h"
 #include "mozilla/layers/AsyncDragMetrics.h"
 #include "mozilla/layers/CompositorOptions.h"
 #include "mozilla/layers/CompositorScrollUpdate.h"
@@ -142,11 +142,11 @@ struct ParamTraits<mozilla::layers::RepaintRequest::ScrollOffsetUpdateType>
           mozilla::layers::RepaintRequest::sHighestScrollOffsetUpdateType> {};
 
 template <>
-struct ParamTraits<mozilla::layers::OverscrollBehavior>
+struct ParamTraits<mozilla::StyleOverscrollBehavior>
     : public ContiguousEnumSerializerInclusive<
-          mozilla::layers::OverscrollBehavior,
-          mozilla::layers::OverscrollBehavior::Auto,
-          mozilla::layers::kHighestOverscrollBehavior> {};
+          mozilla::StyleOverscrollBehavior,
+          mozilla::StyleOverscrollBehavior::Auto,
+          mozilla::StyleOverscrollBehavior::None> {};
 
 template <>
 struct ParamTraits<mozilla::StyleOverflow>
@@ -573,6 +573,7 @@ struct ParamTraits<mozilla::layers::APZEventResult> {
     WriteParam(aWriter, aParam.mTargetGuid);
     WriteParam(aWriter, aParam.mInputBlockId);
     WriteParam(aWriter, aParam.mTargetCanScrollHorizontally);
+    WriteParam(aWriter, aParam.mSwipableDirectionsForTouch);
   }
 
   static bool Read(MessageReader* aReader, paramType* aResult) {
@@ -590,7 +591,8 @@ struct ParamTraits<mozilla::layers::APZEventResult> {
 
     return (ReadParam(aReader, &aResult->mTargetGuid) &&
             ReadParam(aReader, &aResult->mInputBlockId) &&
-            ReadParam(aReader, &aResult->mTargetCanScrollHorizontally));
+            ReadParam(aReader, &aResult->mTargetCanScrollHorizontally) &&
+            ReadParam(aReader, &aResult->mSwipableDirectionsForTouch));
   }
 };
 
@@ -782,6 +784,13 @@ struct ParamTraits<mozilla::layers::GpuFence*> {
     return true;
   }
 };
+
+template <>
+struct ParamTraits<mozilla::layers::RemoteDecoderVideoType>
+    : public ContiguousEnumSerializerInclusive<
+          mozilla::layers::RemoteDecoderVideoType,
+          mozilla::layers::RemoteDecoderVideoType::TypeNone,
+          mozilla::layers::kHighestRemoteDecoderVideoType> {};
 
 } /* namespace IPC */
 

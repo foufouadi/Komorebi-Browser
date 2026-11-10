@@ -9,18 +9,29 @@
 # Options: {"default": {"perfherder": true, "perfherder-metrics": [{ "name": "time", "unit": "s" }, { "name": "rss-memory", "unit": "s" }, { "name": "pss-memory", "unit": "s" }]}} #noqa
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+if [ "$MOZPERFTEST_SIMPLEPERF" = "1" ] && [ -z "$RESOURCE_PROFILING_WRAPPED" ]; then
+    export RESOURCE_PROFILING_WRAPPED=1
+    exec "$PYTHON_PATH_SHELL_SCRIPT" "$SCRIPT_DIR/profile_resource_usage.py" "$0"
+fi
 TEST_TIME=600
 export RUN_BACKGROUND=False
 
 bash $SCRIPT_DIR/collect-proc-info-cpu.sh $SCRIPT_DIR $TEST_TIME &
 bash $SCRIPT_DIR/collect-proc-info-memory.sh $SCRIPT_DIR $TEST_TIME &
 bash $SCRIPT_DIR/test-android-resource-usage.sh $TEST_TIME &
+TEST_PID=$!
+wait $TEST_PID
+TEST_STATUS=$?
 wait
 pkill -f "sh test-background-resource-usage"
 pkill -f "sh collect-proc-info-cpu"
 pkill -f "sh collect-proc-info-memory"
-rm $TESTING_DIR/test_start.signal
-rm $TESTING_DIR/test_end.signal
+rm -f $TESTING_DIR/test_start.signal
+rm -f $TESTING_DIR/test_end.signal
 pkill -f "sh main"
+
+if [ $TEST_STATUS -ne 0 ]; then
+    exit $TEST_STATUS
+fi
 
 python3 $SCRIPT_DIR/parse_resource_usage.py $TESTING_DIR $BROWSER_BINARY $RUN_BACKGROUND

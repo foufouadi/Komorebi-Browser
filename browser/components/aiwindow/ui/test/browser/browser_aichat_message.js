@@ -191,7 +191,7 @@ add_task(async function test_user_message_website_mentions_render_as_chips() {
       }
 
       await content.customElements.whenDefined("ai-chat-message");
-      await content.customElements.whenDefined("ai-website-chip");
+      await content.customElements.whenDefined("smartwindow-chip");
 
       const doc = content.document;
 
@@ -230,7 +230,7 @@ add_task(async function test_user_message_website_mentions_render_as_chips() {
             return false;
           }
           return (
-            msg.querySelector("ai-website-chip") ||
+            msg.querySelector("smartwindow-chip") ||
             msg.querySelector('a[href^="mention:"]')
           );
         },
@@ -243,7 +243,7 @@ add_task(async function test_user_message_website_mentions_render_as_chips() {
       );
 
       const msg = el.shadowRoot.querySelector(".message-user");
-      const chip = msg.querySelector("ai-website-chip");
+      const chip = msg.querySelector("smartwindow-chip");
       const mentionAnchor = msg.querySelector('a[href^="mention:"]');
 
       info("message-user HTML: " + msg.innerHTML);
@@ -253,7 +253,7 @@ add_task(async function test_user_message_website_mentions_render_as_chips() {
         !mentionAnchor,
         `mention anchor should be replaced (got: ${mentionAnchor?.outerHTML})`
       );
-      Assert.ok(chip, "ai-website-chip should be rendered");
+      Assert.ok(chip, "smartwindow-chip should be rendered");
 
       // Validate via rendered DOM (stable, avoids Xray property visibility)
       await ContentTaskUtils.waitForCondition(
@@ -293,6 +293,112 @@ add_task(async function test_user_message_website_mentions_render_as_chips() {
   }
 });
 
+add_task(async function test_user_message_tab_group_mention_renders_icon() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.smartwindow.enabled", true]],
+  });
+
+  const tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    "about:aichatcontent"
+  );
+  const browser = tab.linkedBrowser;
+
+  try {
+    await SpecialPowers.spawn(browser, [], async () => {
+      if (content.document.readyState !== "complete") {
+        await ContentTaskUtils.waitForEvent(content, "load");
+      }
+
+      await content.customElements.whenDefined("ai-chat-message");
+      await content.customElements.whenDefined("smartwindow-chip");
+
+      const doc = content.document;
+      const markdown =
+        "Summarize [Trip planning](mention:?href=group%3Agroup-1&color=blue)";
+
+      const el = doc.createElement("ai-chat-message");
+      doc.body.appendChild(el);
+      const elJS = el.wrappedJSObject || el;
+
+      el.setAttribute("data-message-role", "user");
+      elJS.message = markdown;
+      el.setAttribute("message", markdown);
+
+      await ContentTaskUtils.waitForCondition(
+        () => el.shadowRoot?.querySelector(".message-user smartwindow-chip"),
+        "the tab group mention should become a chip"
+      );
+
+      const chip = el.shadowRoot.querySelector(
+        ".message-user smartwindow-chip"
+      );
+      await ContentTaskUtils.waitForCondition(
+        () => !!chip.shadowRoot,
+        "chip should have a shadowRoot"
+      );
+
+      const icon = chip.shadowRoot.querySelector("tab-group-icon");
+      Assert.ok(icon, "a tab group mention renders a tab group icon");
+      Assert.equal(
+        icon.shadowRoot.textContent.trim(),
+        "T",
+        "the icon shows the group label's initial"
+      );
+      const probe = doc.createElement("div");
+      probe.style.backgroundColor = "var(--tab-group-blue)";
+      doc.body.appendChild(probe);
+      const expectedColor = content.getComputedStyle(probe).backgroundColor;
+      probe.remove();
+
+      const iconColor = content.getComputedStyle(icon).backgroundColor;
+      Assert.equal(
+        iconColor,
+        expectedColor,
+        "the icon is tinted with the group color"
+      );
+      Assert.notEqual(
+        iconColor,
+        "rgba(0, 0, 0, 0)",
+        "the group color resolves rather than falling back to transparent"
+      );
+      Assert.ok(
+        !chip.shadowRoot.querySelector("img.chip-icon"),
+        "and shows no favicon"
+      );
+      Assert.ok(
+        !chip.shadowRoot.querySelector("a.chip"),
+        "and is not a link, since a tab group has no URL"
+      );
+      Assert.equal(
+        chip.shadowRoot.querySelector(".chip-label").textContent.trim(),
+        "Trip planning",
+        "the chip shows the group label"
+      );
+
+      const openTabGroupPromise = ContentTaskUtils.waitForEvent(
+        doc,
+        "AIChatContent:OpenTabGroup",
+        false,
+        null,
+        true
+      );
+      chip.shadowRoot.querySelector("button.chip").click();
+      const openTabGroupEvent = await openTabGroupPromise;
+      Assert.equal(
+        openTabGroupEvent.detail.groupId,
+        "group-1",
+        "clicking the chip requests its tab group"
+      );
+
+      el.remove();
+    });
+  } finally {
+    BrowserTestUtils.removeTab(tab);
+    await SpecialPowers.popPrefEnv();
+  }
+});
+
 add_task(
   async function test_user_message_website_mentions_url_length_validation() {
     await SpecialPowers.pushPrefEnv({
@@ -312,7 +418,7 @@ add_task(
         }
 
         await content.customElements.whenDefined("ai-chat-message");
-        await content.customElements.whenDefined("ai-website-chip");
+        await content.customElements.whenDefined("smartwindow-chip");
 
         const doc = content.document;
 
@@ -340,13 +446,16 @@ add_task(
         await new Promise(resolve => content.setTimeout(resolve, 100));
 
         const msg = el.shadowRoot.querySelector(".message-user");
-        const chip = msg.querySelector("ai-website-chip");
+        const chip = msg.querySelector("smartwindow-chip");
         const mentionAnchor = msg.querySelector('a[href^="mention:"]');
 
         info("message-user HTML with empty URL: " + msg.innerHTML);
 
         // Empty URL should not create chip, but should leave the mention anchor
-        Assert.ok(!chip, "ai-website-chip should not be created for empty URL");
+        Assert.ok(
+          !chip,
+          "smartwindow-chip should not be created for empty URL"
+        );
         Assert.ok(mentionAnchor, "mention anchor should remain for empty URL");
 
         // Test with URL that's too long (>2048 chars) - should not create chip
@@ -360,7 +469,7 @@ add_task(
         await new Promise(resolve => content.setTimeout(resolve, 100));
 
         const longMsg = el.shadowRoot.querySelector(".message-user");
-        const longChip = longMsg.querySelector("ai-website-chip");
+        const longChip = longMsg.querySelector("smartwindow-chip");
         const longMentionAnchor = longMsg.querySelector('a[href^="mention:"]');
 
         info("message-user HTML with long URL: " + longMsg.innerHTML);
@@ -368,7 +477,7 @@ add_task(
         // Too long URL should not create chip, but should leave the mention anchor
         Assert.ok(
           !longChip,
-          "ai-website-chip should not be created for URL longer than 2048 chars"
+          "smartwindow-chip should not be created for URL longer than 2048 chars"
         );
         Assert.ok(
           longMentionAnchor,
@@ -385,18 +494,18 @@ add_task(
         await ContentTaskUtils.waitForCondition(
           () => {
             const message = el.shadowRoot?.querySelector(".message-user");
-            return message?.querySelector("ai-website-chip");
+            return message?.querySelector("smartwindow-chip");
           },
           () => {
             const message = el.shadowRoot?.querySelector(".message-user");
-            return `Expected ai-website-chip for valid URL. message-user=${
+            return `Expected smartwindow-chip for valid URL. message-user=${
               message ? message.innerHTML : "<none>"
             }`;
           }
         );
 
         const updatedMsg = el.shadowRoot.querySelector(".message-user");
-        const validChip = updatedMsg.querySelector("ai-website-chip");
+        const validChip = updatedMsg.querySelector("smartwindow-chip");
         const validMentionAnchor = updatedMsg.querySelector(
           'a[href^="mention:"]'
         );
@@ -404,7 +513,10 @@ add_task(
         info("message-user HTML with valid URL: " + updatedMsg.innerHTML);
 
         // Valid URL should create chip and remove mention anchor
-        Assert.ok(validChip, "ai-website-chip should be created for valid URL");
+        Assert.ok(
+          validChip,
+          "smartwindow-chip should be created for valid URL"
+        );
         Assert.ok(
           !validMentionAnchor,
           "mention anchor should be replaced for valid URL"
@@ -488,6 +600,173 @@ add_task(async function test_empty_links_render_as_plain_text() {
 
         el.remove();
       }
+    });
+  } finally {
+    BrowserTestUtils.removeTab(tab);
+    await SpecialPowers.popPrefEnv();
+  }
+});
+
+// The core of the streaming optimization: as more text streams in after a
+// finished block, that block's DOM element must be reused, not rebuilt. This is
+// what keeps a long reply from getting janky - and what stops a finished table
+// (with its shadow DOM and ResizeObserver) from being torn down every chunk.
+add_task(async function test_streaming_reuses_finished_blocks() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.smartwindow.enabled", true]],
+  });
+
+  const tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    "about:aichatcontent"
+  );
+  const browser = tab.linkedBrowser;
+
+  try {
+    await SpecialPowers.spawn(browser, [], async () => {
+      if (content.document.readyState !== "complete") {
+        await ContentTaskUtils.waitForEvent(content, "load");
+      }
+      await content.customElements.whenDefined("ai-chat-message");
+      await content.customElements.whenDefined("ai-chat-table");
+
+      const doc = content.document;
+      const el = doc.createElement("ai-chat-message");
+      doc.body.appendChild(el);
+
+      // Xray wrappers can block Lit setters, so set the property AND attribute.
+      const elJS = el.wrappedJSObject || el;
+      el.setAttribute("data-message-role", "assistant");
+
+      const TABLE = "| A | B |\n|---|---|\n| 1 | 2 |";
+      const base = `Intro paragraph.\n\n${TABLE}\n\n`;
+
+      async function stream(message, marker) {
+        elJS.message = message;
+        el.setAttribute("message", message);
+        await ContentTaskUtils.waitForCondition(() => {
+          const container = el.shadowRoot.querySelector(".message-assistant");
+          return container && container.textContent.includes(marker);
+        }, `streamed render should include "${marker}"`);
+      }
+
+      await stream(`${base}Tail`, "Tail");
+      const introParagraph = el.shadowRoot.querySelector(
+        ".message-assistant > p"
+      );
+      const table = el.shadowRoot.querySelector(
+        ".message-assistant ai-chat-table"
+      );
+      Assert.ok(introParagraph, "intro paragraph should render");
+      Assert.ok(table, "table should render");
+
+      // Keep appending text after the (now finished) table.
+      await stream(`${base}Tail grows`, "Tail grows");
+      await stream(`${base}Tail grows longer`, "Tail grows longer");
+
+      const introParagraphLater = el.shadowRoot.querySelector(
+        ".message-assistant > p"
+      );
+      const tableLater = el.shadowRoot.querySelector(
+        ".message-assistant ai-chat-table"
+      );
+
+      Assert.strictEqual(
+        introParagraph,
+        introParagraphLater,
+        "the finished intro paragraph node should be reused, not rebuilt"
+      );
+      Assert.strictEqual(
+        table,
+        tableLater,
+        "the finished table node should be reused across chunks, not rebuilt"
+      );
+
+      el.remove();
+    });
+  } finally {
+    BrowserTestUtils.removeTab(tab);
+    await SpecialPowers.popPrefEnv();
+  }
+});
+
+// Mid-stream a block can change type as later characters arrive (a paragraph
+// becomes a table once its separator row lands; earlier text becomes a link once
+// its reference definition streams in). Each transition must reach the correct
+// final DOM.
+add_task(async function test_streaming_block_transitions() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.smartwindow.enabled", true]],
+  });
+
+  const tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    "about:aichatcontent"
+  );
+  const browser = tab.linkedBrowser;
+
+  try {
+    await SpecialPowers.spawn(browser, [], async () => {
+      if (content.document.readyState !== "complete") {
+        await ContentTaskUtils.waitForEvent(content, "load");
+      }
+      await content.customElements.whenDefined("ai-chat-message");
+      await content.customElements.whenDefined("ai-chat-table");
+
+      const doc = content.document;
+      const el = doc.createElement("ai-chat-message");
+      doc.body.appendChild(el);
+
+      const elJS = el.wrappedJSObject || el;
+      el.setAttribute("data-message-role", "assistant");
+
+      const set = message => {
+        elJS.message = message;
+        el.setAttribute("message", message);
+      };
+      const msg = () => el.shadowRoot.querySelector(".message-assistant");
+
+      // Paragraph -> table once the separator row arrives.
+      set("| A | B |");
+      await ContentTaskUtils.waitForCondition(
+        () => msg()?.querySelector("p"),
+        "a header-only table row renders as a paragraph first"
+      );
+      set("| A | B |\n|---|---|\n| 1 | 2 |");
+      await ContentTaskUtils.waitForCondition(
+        () => msg()?.querySelector("ai-chat-table"),
+        "table forms once the separator row arrives"
+      );
+      Assert.ok(
+        !msg().querySelector(":scope > p"),
+        "no stale paragraph left behind after becoming a table"
+      );
+
+      // Late reference definition turns earlier text into a link.
+      set("See [docs][1] now.");
+      await ContentTaskUtils.waitForCondition(
+        () => msg()?.textContent.includes("[docs][1]"),
+        "an undefined reference renders as literal text"
+      );
+      Assert.equal(
+        msg().querySelectorAll("a[href]").length,
+        0,
+        "no anchor before the reference is defined"
+      );
+      set("See [docs][1] now.\n\n[1]: https://example.com");
+      await ContentTaskUtils.waitForCondition(
+        () => msg()?.querySelector("a[href]"),
+        "earlier text becomes a link once its definition streams in"
+      );
+      Assert.ok(
+        msg()
+          .querySelector("a[href]")
+          .getAttribute("href")
+          .startsWith("https://example.com"),
+        "the link points at the streamed-in definition"
+      );
+
+      el.remove();
     });
   } finally {
     BrowserTestUtils.removeTab(tab);

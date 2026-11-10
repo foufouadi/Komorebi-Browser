@@ -4,12 +4,9 @@
 // found in the LICENSE file.
 //
 
-#ifdef UNSAFE_BUFFERS_BUILD
-#    pragma allow_unsafe_buffers
-#endif
-
 #include "compiler/translator/BuiltInFunctionEmulator.h"
 #include "angle_gl.h"
+#include "common/unsafe_buffers.h"
 #include "compiler/translator/Symbol.h"
 #include "compiler/translator/tree_util/IntermTraverse.h"
 
@@ -118,10 +115,12 @@ bool BuiltInFunctionEmulator::setFunctionCalled(int uniqueId)
         return false;
     }
 
-    for (size_t i = 0; i < mFunctions.size(); ++i)
+    for (int functionId : mFunctions)
     {
-        if (mFunctions[i] == uniqueId)
+        if (functionId == uniqueId)
+        {
             return true;
+        }
     }
     // If the function depends on another, mark the dependency as called.
     auto dependency = mFunctionDependencies.find(uniqueId);
@@ -152,7 +151,7 @@ void BuiltInFunctionEmulator::addFunctionMap(BuiltinQueryFunc queryFunc)
 // static
 void BuiltInFunctionEmulator::WriteEmulatedFunctionName(TInfoSinkBase &out, const char *name)
 {
-    ASSERT(name[strlen(name) - 1] != '(');
+    ANGLE_UNSAFE_TODO(ASSERT(name[strlen(name) - 1] != '('));
     out << name << "_emu";
 }
 

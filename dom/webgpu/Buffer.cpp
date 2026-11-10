@@ -116,7 +116,7 @@ already_AddRefed<Buffer> Buffer::Create(Device* aDevice, RawId aDeviceId,
     return nullptr;
   }
 
-  ffi::WGPUBufferDescriptor desc = {};
+  ffi::WGPUFfiBufferDescriptor desc = {};
   webgpu::StringHelper label(aDesc.mLabel);
   desc.label = label.Get();
   desc.size = aDesc.mSize;
@@ -149,15 +149,9 @@ void Buffer::Cleanup() {
   }
   mValid = false;
 
-  if (mMapped && !mMapped->mViews.IsEmpty()) {
-    // The array buffers could live longer than us and our shmem, so make sure
-    // we clear the external buffer bindings.
-    dom::AutoJSAPI jsapi;
-    if (jsapi.Init(mParent->GetRelevantGlobal())) {
-      IgnoredErrorResult rv;
-      UnmapArrayBuffers(jsapi.cx(), rv);
-    }
-  }
+  // `ArrayBuffer`s from `GetMappedRange` may outlive us, but each holds its own
+  // reference to `mShmem` (see `ExternalBufferFreeCallback`), so we can leave
+  // them attached.
   mMapped.reset();
 
   mParent->UntrackBuffer(this);
@@ -406,6 +400,8 @@ void Buffer::Unmap(JSContext* aCx, ErrorResult& aRv) {
   AbortMapRequest();
 
   if (!mMapped) {
+    ffi::wgpu_client_buffer_unmap(GetClient(), mParent->GetId(), GetId(),
+                                  false);
     return;
   }
 

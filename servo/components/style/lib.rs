@@ -27,6 +27,8 @@
 
 #![deny(missing_docs)]
 
+// Needed by macros that refer to `$crate::cssparser`.
+#[allow(clippy::single_component_path_imports)]
 pub(crate) use cssparser;
 
 #[macro_use]
@@ -93,6 +95,7 @@ pub mod media_queries;
 pub mod parallel;
 pub mod parser;
 pub mod piecewise_linear;
+pub mod prefs;
 pub mod properties_and_values;
 #[macro_use]
 pub mod queries;
@@ -111,6 +114,7 @@ pub mod style_resolver;
 pub mod stylesheet_set;
 pub mod stylesheets;
 pub mod stylist;
+pub mod substitution;
 pub mod thread_state;
 pub mod traversal;
 pub mod traversal_flags;
@@ -291,6 +295,19 @@ impl From<std::collections::TryReserveError> for AllocErr {
     }
 }
 
+impl From<hashbrown::TryReserveError> for AllocErr {
+    #[inline]
+    fn from(_: hashbrown::TryReserveError) -> Self {
+        Self
+    }
+}
+
+/// A hash map using the Fx hasher.
+pub type FxHashMap<K, V> = hashbrown::HashMap<K, V, rustc_hash::FxBuildHasher>;
+
+/// A hash set using the Fx hasher.
+pub type FxHashSet<T> = hashbrown::HashSet<T, rustc_hash::FxBuildHasher>;
+
 /// Shrink the capacity of the collection if needed.
 pub(crate) trait ShrinkIfNeeded {
     fn shrink_if_needed(&mut self);
@@ -305,7 +322,7 @@ fn should_shrink(len: usize, capacity: usize) -> bool {
     capacity >= CAPACITY_THRESHOLD && len + capacity / 4 < capacity
 }
 
-impl<K, V, H> ShrinkIfNeeded for std::collections::HashMap<K, V, H>
+impl<K, V, H> ShrinkIfNeeded for hashbrown::HashMap<K, V, H>
 where
     K: Eq + Hash,
     H: BuildHasher,
@@ -317,7 +334,7 @@ where
     }
 }
 
-impl<T, H> ShrinkIfNeeded for std::collections::HashSet<T, H>
+impl<T, H> ShrinkIfNeeded for hashbrown::HashSet<T, H>
 where
     T: Eq + Hash,
     H: BuildHasher,

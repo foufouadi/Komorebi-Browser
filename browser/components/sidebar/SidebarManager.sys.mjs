@@ -26,7 +26,8 @@ const DEFAULT_HORIZONTAL_VISIBILITY = "hide-on-close";
 // New panels that are ready to be introduced to new sidebar users should be added to this list;
 // ensure your feature flag is enabled at the same time you do this and that its the same value as
 // what you added to .
-const DEFAULT_LAUNCHER_TOOLS = "aichat,syncedtabs,history,bookmarks,opentabs";
+const DEFAULT_LAUNCHER_TOOLS =
+  "opentabs,bookmarks,aichat,history,syncedtabs,passwords";
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
@@ -34,7 +35,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "moz-src:///browser/components/customizableui/CustomizableUI.sys.mjs",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   PrefUtils: "moz-src:///toolkit/modules/PrefUtils.sys.mjs",
-  SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
+  SessionStore:
+    "moz-src:///browser/components/sessionstore/SessionStore.sys.mjs",
   SidebarState: "moz-src:///browser/components/sidebar/SidebarState.sys.mjs",
 });
 XPCOMUtils.defineLazyPreferenceGetter(lazy, "sidebarNimbus", "sidebar.nimbus");
@@ -66,13 +68,6 @@ XPCOMUtils.defineLazyPreferenceGetter(
     if (!newVal) {
       // Disable vertical tabs if revamped sidebar is turned off
       Services.prefs.setBoolPref("sidebar.verticalTabs", false);
-    } else if (newVal && !lazy.verticalTabsEnabled) {
-      // Horizontal tabs with sidebar.revamp default to "hide-on-close"; users
-      // can opt into the switcher-only "hide-launcher" from the customize panel.
-      Services.prefs.setStringPref(
-        VISIBILITY_SETTING_PREF,
-        DEFAULT_HORIZONTAL_VISIBILITY
-      );
     }
   }
 );
@@ -245,10 +240,12 @@ class SidebarManager extends EventTarget {
       DEFAULT_VERTICAL_VISIBILITY
     );
     if (!isEnabled) {
-      // Switching to (or initializing) horizontal tabs.
-      if (currentVisibility === "expand-on-hover") {
-        this.#savedVisibility = currentVisibility;
-      }
+      // Switching to (or initializing) horizontal tabs. The saved value is only
+      // consumed by a switch back that finds an invalid visibility, so record
+      // the absence of a choice too: otherwise one left over from an earlier
+      // switch stays latched and is restored over an unrelated one.
+      this.#savedVisibility =
+        currentVisibility === "expand-on-hover" ? currentVisibility : null;
       if (!HORIZONTAL_VISIBILITIES.includes(currentVisibility)) {
         Services.prefs.setStringPref(
           VISIBILITY_SETTING_PREF,
@@ -265,31 +262,6 @@ class SidebarManager extends EventTarget {
       );
       this.#savedVisibility = null;
     }
-  }
-
-  /**
-   * Has the new sidebar launcher already been visible and "used" in this profile?
-   */
-  get hasSidebarLauncherBeenVisible() {
-    // Its possible sidebar.revamp was enabled previously, but we can effectively reset if its currently false
-    if (!lazy.sidebarRevampEnabled) {
-      return false;
-    }
-    if (lazy.verticalTabsEnabled) {
-      return true;
-    }
-    // this pref tells us a sidebar panel has been opened, so it implies the launcher has
-    // been visible, but can't reliably indicate that the launcher has *not* been visible.
-    if (Services.prefs.getBoolPref("sidebar.new-sidebar.has-used", false)) {
-      return true;
-    }
-    // check if the launcher has ever been visible (in this session) in any of our open windows,
-    for (let w of lazy.BrowserWindowTracker.getOrderedWindows()) {
-      if (w.SidebarController.launcherEverVisible) {
-        return true;
-      }
-    }
-    return false;
   }
 
   /**
@@ -400,17 +372,20 @@ class SidebarManager extends EventTarget {
    * Provide a system-level "backup" state to be stored for those using "Never
    * remember history" or "Clear history when browser closes".
    *
-   * If it doesn't exist or isn't parsable, return `null`.
+   * If it doesn't exist, isn't parsable or isn't an object, the pref is reset
+   * and an empty state object is returned.
    *
    * @returns {object}
    */
   getBackupState() {
     try {
-      return JSON.parse(lazy.sidebarBackupState);
-    } catch (e) {
-      Services.prefs.clearUserPref(BACKUP_STATE_PREF);
-      return null;
-    }
+      const state = JSON.parse(lazy.sidebarBackupState);
+      if (state && typeof state == "object" && !Array.isArray(state)) {
+        return state;
+      }
+    } catch (e) {}
+    Services.prefs.clearUserPref(BACKUP_STATE_PREF);
+    return {};
   }
 
   /**

@@ -7,6 +7,8 @@ package org.mozilla.fenix.home.toolbar
 import android.content.Context
 import android.content.Intent
 import android.speech.RecognizerIntent
+import androidx.annotation.DrawableRes
+import androidx.annotation.StringRes
 import androidx.annotation.VisibleForTesting
 import androidx.navigation.NavController
 import kotlinx.coroutines.CoroutineScope
@@ -18,6 +20,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import mozilla.components.browser.state.search.SearchEngine
 import mozilla.components.browser.state.selector.getNormalOrPrivateTabs
+import mozilla.components.browser.state.selector.selectedTab
 import mozilla.components.browser.state.state.selectedOrDefaultSearchEngine
 import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.compose.browser.toolbar.concept.Action
@@ -29,6 +32,7 @@ import mozilla.components.compose.browser.toolbar.concept.PageOrigin.Companion.C
 import mozilla.components.compose.browser.toolbar.concept.PageOrigin.Companion.ContextualMenuOption.PasteFromClipboard
 import mozilla.components.compose.browser.toolbar.concept.PageOrigin.Companion.PageOriginContextualMenuInteractions.LoadFromClipboardClicked
 import mozilla.components.compose.browser.toolbar.concept.PageOrigin.Companion.PageOriginContextualMenuInteractions.PasteFromClipboardClicked
+import mozilla.components.compose.browser.toolbar.store.BrowserDisplayToolbarAction
 import mozilla.components.compose.browser.toolbar.store.BrowserDisplayToolbarAction.BrowserActionsEndUpdated
 import mozilla.components.compose.browser.toolbar.store.BrowserDisplayToolbarAction.NavigationActionsUpdated
 import mozilla.components.compose.browser.toolbar.store.BrowserDisplayToolbarAction.PageActionsEndUpdated
@@ -75,9 +79,18 @@ import org.mozilla.fenix.components.menu.MenuAccessPoint
 import org.mozilla.fenix.components.usecases.FenixBrowserUseCases
 import org.mozilla.fenix.ext.nav
 import org.mozilla.fenix.home.HomeFragmentDirections
+import org.mozilla.fenix.home.goBackFromHomepage
+import org.mozilla.fenix.home.goForwardFromHomepage
+import org.mozilla.fenix.home.privatebrowsing.controller.PrivateBrowsingController
 import org.mozilla.fenix.home.toolbar.DisplayActions.FakeClicked
 import org.mozilla.fenix.home.toolbar.DisplayActions.MenuClicked
+import org.mozilla.fenix.home.toolbar.DisplayActions.PrivateModeClicked
+import org.mozilla.fenix.home.toolbar.DisplayActions.StoriesClicked
 import org.mozilla.fenix.home.toolbar.DisplayActions.VoiceSearchClicked
+import org.mozilla.fenix.home.toolbar.NavigationInteractions.NavigateBackClicked
+import org.mozilla.fenix.home.toolbar.NavigationInteractions.NavigateBackLongClicked
+import org.mozilla.fenix.home.toolbar.NavigationInteractions.NavigateForwardClicked
+import org.mozilla.fenix.home.toolbar.NavigationInteractions.NavigateForwardLongClicked
 import org.mozilla.fenix.home.toolbar.PageOriginInteractions.OriginClicked
 import org.mozilla.fenix.home.toolbar.TabCounterInteractions.AddNewPrivateTab
 import org.mozilla.fenix.home.toolbar.TabCounterInteractions.AddNewTab
@@ -101,6 +114,10 @@ internal sealed class DisplayActions : BrowserToolbarEvent {
     data object FakeClicked : DisplayActions()
 
     data object VoiceSearchClicked : DisplayActions()
+
+    data class StoriesClicked(override val source: Source) : DisplayActions()
+
+    data class PrivateModeClicked(override val source: Source) : DisplayActions()
 }
 
 internal sealed class TabCounterInteractions : BrowserToolbarEvent {
@@ -117,6 +134,17 @@ internal sealed class PageOriginInteractions : BrowserToolbarEvent {
     data object OriginClicked : PageOriginInteractions()
 }
 
+@VisibleForTesting
+internal sealed class NavigationInteractions : BrowserToolbarEvent {
+    data class NavigateBackClicked(override val source: Source) : NavigationInteractions()
+
+    data class NavigateBackLongClicked(override val source: Source) : NavigationInteractions()
+
+    data class NavigateForwardClicked(override val source: Source) : NavigationInteractions()
+
+    data class NavigateForwardLongClicked(override val source: Source) : NavigationInteractions()
+}
+
 /**
  * [Middleware] responsible for configuring and handling interactions with the composable toolbar.
  *
@@ -127,6 +155,7 @@ internal sealed class PageOriginInteractions : BrowserToolbarEvent {
  * @param fenixBrowserUseCases [FenixBrowserUseCases] for loading URLs and opening new tabs.
  * @param navController [NavController] to use for navigating to other in-app destinations.
  * @param browsingModeManager [BrowsingModeManager] for querying the current browsing mode.
+ * @param privateBrowsingController [PrivateBrowsingController] for handling private browsing interactions.
  * @param settings [Settings] for accessing application settings.
  * @param translationsFeatureSettings Web content translations availability status.
  * @param isWideScreen Callback for checking if the screen is wide.
@@ -142,6 +171,7 @@ class BrowserToolbarMiddleware(
     private val fenixBrowserUseCases: FenixBrowserUseCases,
     private val navController: NavController,
     private val browsingModeManager: BrowsingModeManager,
+    private val privateBrowsingController: PrivateBrowsingController,
     private val settings: Settings,
     private val translationsFeatureSettings: TranslationsEnabledSettings,
     private val isWideScreen: () -> Boolean,
@@ -166,14 +196,17 @@ class BrowserToolbarMiddleware(
                 }
 
                 updatePageOrigin(store)
+                updateStartBrowserActions(store)
                 updateEndPageActions(store)
                 updateEndBrowserActions(store)
                 scope.launch {
                     updateNavigationActions(store)
                 }
                 updateToolbarActionsBasedOnOrientation(store)
+                updateToolbarActionsBasedOnBrowsingMode(store)
                 updateTabsCount(store)
                 updateMenuHighlight(store)
+                observePageNavigationStatus(store)
 
                 observeTranslationsFeatureAvailabilityUpdates(store)
             }
@@ -193,7 +226,12 @@ class BrowserToolbarMiddleware(
             is MenuClicked -> {
                 navController.nav(
                     R.id.homeFragment,
-                    HomeFragmentDirections.actionGlobalMenuDialogFragment(accesspoint = MenuAccessPoint.Home),
+                    when (settings.isMenuCustomizationEnabled) {
+                        true ->
+                            HomeFragmentDirections.actionHomeFragmentToMenuFragment(accessPoint = MenuAccessPoint.Home)
+                        else ->
+                            HomeFragmentDirections.actionGlobalMenuDialogFragment(accesspoint = MenuAccessPoint.Home)
+                    },
                 )
                 removeMenuButtonHighlight()
                 next(action)
@@ -221,9 +259,46 @@ class BrowserToolbarMiddleware(
                 next(action)
             }
 
+            is StoriesClicked -> {
+                navController.nav(
+                    R.id.homeFragment,
+                    HomeFragmentDirections.actionHomeFragmentToStoriesFragment(),
+                )
+                next(action)
+            }
+
+            is PrivateModeClicked -> {
+                privateBrowsingController.handlePrivateModeButtonClicked(
+                    BrowsingMode.fromBoolean(!browsingModeManager.mode.isPrivate)
+                )
+                next(action)
+            }
+
             is OriginClicked -> {
                 Events.searchBarTapped.record(Events.SearchBarTappedExtra("HOME"))
                 appStore.dispatch(SearchStarted())
+            }
+            is NavigateBackClicked -> {
+                goBackFromHomepage(
+                    browserStore = browserStore,
+                    navController = navController,
+                )
+                next(action)
+            }
+            is NavigateBackLongClicked -> {
+                showTabHistory()
+                next(action)
+            }
+            is NavigateForwardClicked -> {
+                goForwardFromHomepage(
+                    browserStore = browserStore,
+                    navController = navController,
+                )
+                next(action)
+            }
+            is NavigateForwardLongClicked -> {
+                showTabHistory()
+                next(action)
             }
             is VoiceSearchClicked -> {
                 scope.launch {
@@ -240,7 +315,7 @@ class BrowserToolbarMiddleware(
                 clipboard.extractURL()?.let {
                     fenixBrowserUseCases.loadUrlOrSearch(
                         searchTermOrURL = it,
-                        newTab = true,
+                        newTab = !settings.enableHomepageAsNewTab,
                         private = browsingModeManager.mode == Private,
                         searchEngine = reconcileSelectedEngine(),
                     )
@@ -254,6 +329,12 @@ class BrowserToolbarMiddleware(
             else -> next(action)
         }
     }
+
+    private fun showTabHistory() =
+        navController.nav(
+            R.id.homeFragment,
+            NavGraphDirections.actionGlobalTabHistoryDialogFragment(activeSessionId = null),
+        )
 
     private fun addNewTab(
         store: Store<BrowserToolbarState, BrowserToolbarAction>,
@@ -328,6 +409,10 @@ class BrowserToolbarMiddleware(
             )
         )
 
+    private fun updateStartBrowserActions(store: Store<BrowserToolbarState, BrowserToolbarAction>) {
+        store.dispatch(BrowserDisplayToolbarAction.BrowserActionsStartUpdated(buildStartBrowserActions()))
+    }
+
     private fun updateEndBrowserActions(store: Store<BrowserToolbarState, BrowserToolbarAction>) {
         store.dispatch(BrowserActionsEndUpdated(buildEndBrowserActions()))
     }
@@ -363,12 +448,32 @@ class BrowserToolbarMiddleware(
         )
     }
 
+    private fun buildStartBrowserActions(): List<Action> =
+        listOf(
+                HomeToolbarActionConfig(HomeToolbarAction.Stories) {
+                    settings.isHomepageMiddleSearchEnabled &&
+                        settings.showPocketRecommendationsFeature &&
+                        !browsingModeManager.mode.isPrivate
+                },
+                HomeToolbarActionConfig(HomeToolbarAction.Back) {
+                    isWideScreen() && settings.enableHomepageAsNewTab
+                },
+                HomeToolbarActionConfig(HomeToolbarAction.Forward) {
+                    isWideScreen() && settings.enableHomepageAsNewTab
+                },
+            )
+            .filter { config -> config.isVisible() }
+            .map { config -> buildHomeAction(config.action, Source.AddressBar.BrowserStart) }
+
     private fun buildEndBrowserActions(): List<Action> {
         val isWideWindow = isWideScreen()
         val isTallWindow = isTallScreen()
         val shouldUseExpandedToolbar = settings.shouldUseExpandedToolbar
 
         return listOf(
+                HomeToolbarActionConfig(HomeToolbarAction.PrivateMode) {
+                    settings.isHomepageMiddleSearchEnabled
+                },
                 HomeToolbarActionConfig(HomeToolbarAction.TabCounter) {
                     !shouldUseExpandedToolbar || !isTallWindow || isWideWindow
                 },
@@ -463,10 +568,21 @@ class BrowserToolbarMiddleware(
         }
     }
 
+    private fun updateToolbarActionsBasedOnBrowsingMode(store: Store<BrowserToolbarState, BrowserToolbarAction>) {
+        appStore.observeWhileActive {
+            distinctUntilChangedBy { it.mode }
+                .collect {
+                    updateStartBrowserActions(store)
+                    updateEndBrowserActions(store)
+                }
+        }
+    }
+
     private fun updateToolbarActionsBasedOnOrientation(store: Store<BrowserToolbarState, BrowserToolbarAction>) {
         appStore.observeWhileActive {
             distinctUntilChangedBy { it.orientation }
                 .collect {
+                    updateStartBrowserActions(store)
                     updateEndBrowserActions(store)
                     updateNavigationActions(store)
                 }
@@ -479,6 +595,23 @@ class BrowserToolbarMiddleware(
                 .collect {
                     updateEndBrowserActions(store)
                     updateNavigationActions(store)
+                }
+        }
+    }
+
+    private fun observePageNavigationStatus(store: Store<BrowserToolbarState, BrowserToolbarAction>) {
+        browserStore.observeWhileActive {
+            distinctUntilChangedBy {
+                Pair(
+                    it.selectedTab?.content?.canGoBack,
+                    it.selectedTab?.content?.canGoForward,
+                )
+            }
+                .collect {
+                    updateStartBrowserActions(store)
+                    if (ShortcutType.fromValue(settings.toolbarExpandedShortcutKey) == ShortcutType.BACK) {
+                        updateNavigationActions(store)
+                    }
                 }
         }
     }
@@ -520,12 +653,16 @@ class BrowserToolbarMiddleware(
     internal enum class HomeToolbarAction {
         TabCounter,
         Menu,
+        Stories,
+        PrivateMode,
         FakeBookmark,
         FakeShare,
         NewTab,
         FakeTranslate,
         FakeHomepage,
+        Back,
         FakeBack,
+        Forward,
         FakeSummarize,
     }
 
@@ -533,6 +670,45 @@ class BrowserToolbarMiddleware(
         val action: HomeToolbarAction,
         val isVisible: () -> Boolean = { true },
     )
+
+    private fun createFakeActionButtonRes(
+        @DrawableRes drawableResId: Int,
+        @StringRes contentDescription: Int,
+    ) =
+        ActionButtonRes(
+            drawableResId = drawableResId,
+            contentDescription = contentDescription,
+            state = ActionButton.State.DISABLED,
+            onClick = FakeClicked,
+        )
+
+    private fun createBackActionButtonRes(source: Source) =
+        ActionButtonRes(
+            drawableResId = iconsR.drawable.mozac_ic_back_24,
+            contentDescription = R.string.browser_menu_back,
+            state =
+                if (browserStore.state.selectedTab?.content?.canGoBack == true) {
+                    ActionButton.State.DEFAULT
+                } else {
+                    ActionButton.State.DISABLED
+                },
+            onClick = NavigateBackClicked(source),
+            onLongClick = NavigateBackLongClicked(source),
+        )
+
+    private fun createForwardActionButtonRes(source: Source) =
+        ActionButtonRes(
+            drawableResId = iconsR.drawable.mozac_ic_forward_24,
+            contentDescription = R.string.browser_menu_forward,
+            state =
+                if (browserStore.state.selectedTab?.content?.canGoForward == true) {
+                    ActionButton.State.DEFAULT
+                } else {
+                    ActionButton.State.DISABLED
+                },
+            onClick = NavigateForwardClicked(source),
+            onLongClick = NavigateForwardLongClicked(source),
+        )
 
     @VisibleForTesting
     internal fun buildHomeAction(
@@ -566,7 +742,7 @@ class BrowserToolbarMiddleware(
                         .filterNot { it is SupportedMenuNotifications.Summarize }
                         .any { it != SupportedMenuNotifications.OpenInApp }
                 ActionButtonRes(
-                    drawableResId = iconsR.drawable.mozac_ic_ellipsis_vertical_24,
+                    drawableResId = iconsR.drawable.mozac_ic_more_vertical_round_24,
                     contentDescription = R.string.content_description_menu,
                     highlighted = highlighted,
                     onClick = MenuClicked(source),
@@ -574,19 +750,35 @@ class BrowserToolbarMiddleware(
             }
 
             HomeToolbarAction.FakeBookmark ->
-                ActionButtonRes(
+                createFakeActionButtonRes(
                     drawableResId = iconsR.drawable.mozac_ic_bookmark_24,
                     contentDescription = R.string.browser_menu_bookmark_this_page_2,
-                    state = ActionButton.State.DISABLED,
-                    onClick = FakeClicked,
                 )
 
             HomeToolbarAction.FakeShare ->
-                ActionButtonRes(
+                createFakeActionButtonRes(
                     drawableResId = iconsR.drawable.mozac_ic_share_android_24,
                     contentDescription = R.string.browser_menu_share,
-                    state = ActionButton.State.DISABLED,
-                    onClick = FakeClicked,
+                )
+
+            HomeToolbarAction.Stories ->
+                ActionButtonRes(
+                    drawableResId = iconsR.drawable.mozac_ic_newsfeed_24,
+                    contentDescription = R.string.homepage_all_stories,
+                    onClick = StoriesClicked(source),
+                )
+
+            HomeToolbarAction.PrivateMode ->
+                ActionButtonRes(
+                    drawableResId = iconsR.drawable.mozac_ic_private_mode_24,
+                    contentDescription = R.string.content_description_private_browsing,
+                    state =
+                        if (browsingModeManager.mode.isPrivate) {
+                            ActionButton.State.ACTIVE
+                        } else {
+                            ActionButton.State.DEFAULT
+                        },
+                    onClick = PrivateModeClicked(source),
                 )
 
             HomeToolbarAction.NewTab ->
@@ -607,36 +799,32 @@ class BrowserToolbarMiddleware(
                 )
 
             HomeToolbarAction.FakeTranslate ->
-                ActionButtonRes(
+                createFakeActionButtonRes(
                     drawableResId = iconsR.drawable.mozac_ic_translate_24,
                     contentDescription = R.string.browser_toolbar_translate,
-                    state = ActionButton.State.DISABLED,
-                    onClick = FakeClicked,
                 )
 
             HomeToolbarAction.FakeHomepage ->
-                ActionButtonRes(
+                createFakeActionButtonRes(
                     drawableResId = iconsR.drawable.mozac_ic_home_24,
                     contentDescription = R.string.browser_menu_homepage,
-                    state = ActionButton.State.DISABLED,
-                    onClick = FakeClicked,
                 )
 
             HomeToolbarAction.FakeBack ->
-                ActionButtonRes(
+                createFakeActionButtonRes(
                     drawableResId = iconsR.drawable.mozac_ic_back_24,
                     contentDescription = R.string.browser_menu_back,
-                    state = ActionButton.State.DISABLED,
-                    onClick = FakeClicked,
                 )
 
             HomeToolbarAction.FakeSummarize ->
-                ActionButtonRes(
+                createFakeActionButtonRes(
                     drawableResId = iconsR.drawable.mozac_ic_lightning_24,
                     contentDescription = summariesR.string.mozac_summarize_settings_summarize_pages,
-                    state = ActionButton.State.DISABLED,
-                    onClick = FakeClicked,
                 )
+
+            HomeToolbarAction.Back -> createBackActionButtonRes(source)
+
+            HomeToolbarAction.Forward -> createForwardActionButtonRes(source)
         }
 
     private suspend fun isTranslationsFeatureAvailable(): Boolean {
@@ -658,7 +846,11 @@ class BrowserToolbarMiddleware(
                     false -> HomeToolbarAction.FakeBookmark // the first available option in settings.
                 }
             ShortcutType.HOMEPAGE -> HomeToolbarAction.FakeHomepage
-            ShortcutType.BACK -> HomeToolbarAction.FakeBack
+            ShortcutType.BACK ->
+                when (settings.enableHomepageAsNewTab) {
+                    true -> HomeToolbarAction.Back
+                    false -> HomeToolbarAction.FakeBack
+                }
             ShortcutType.SUMMARIZE -> HomeToolbarAction.FakeSummarize
             ShortcutType.NONE -> null
         }

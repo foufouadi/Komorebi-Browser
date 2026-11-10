@@ -15,7 +15,6 @@
 static float sProgressVal;  // between 0 and 100
 static mozilla::Atomic<gboolean> sQuit(FALSE);
 static gboolean sEnableUI;
-static guint sTimerID;
 
 static GtkWidget* sWin;
 static GtkWidget* sLabel;
@@ -24,10 +23,11 @@ static GdkPixbuf* sPixbuf;
 
 constinit StringTable sStrings;
 
-static gboolean UpdateDialog(gpointer data) {
+static gboolean UpdateDialog(gpointer /*data*/) {
   if (sQuit) {
     gtk_widget_hide(sWin);
     gtk_main_quit();
+    return G_SOURCE_REMOVE;
   }
 
   float progress = sProgressVal;
@@ -35,11 +35,11 @@ static gboolean UpdateDialog(gpointer data) {
   gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(sProgressBar),
                                 progress / 100.0);
 
-  return TRUE;
+  return G_SOURCE_CONTINUE;
 }
 
-static gboolean OnDeleteEvent(GtkWidget* widget, GdkEvent* event,
-                              gpointer user_data) {
+static gboolean OnDeleteEvent(GtkWidget* /*widget*/, GdkEvent* /*event*/,
+                              gpointer /*user_data*/) {
   return TRUE;
 }
 
@@ -102,7 +102,7 @@ int ShowProgressUI() {
   gtk_box_pack_start(GTK_BOX(vbox), sLabel, FALSE, FALSE, 0);
   gtk_box_pack_start(GTK_BOX(vbox), sProgressBar, TRUE, TRUE, 0);
 
-  sTimerID = g_timeout_add(TIMER_INTERVAL, UpdateDialog, nullptr);
+  g_timeout_add(TIMER_INTERVAL, UpdateDialog, nullptr);
 
   gtk_container_set_border_width(GTK_CONTAINER(sWin), 10);
   gtk_container_add(GTK_CONTAINER(sWin), vbox);

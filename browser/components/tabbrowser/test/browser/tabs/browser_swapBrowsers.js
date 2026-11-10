@@ -57,9 +57,9 @@ add_task(async function swapBrowsersAcrossWindows() {
   );
 
   is(
-    Cu.getGlobalForObject(otherWin.gBrowser._getTabProgressListener(otherTab)),
-    Cu.getGlobalForObject(otherWin.gBrowser),
-    "the restored listener belongs to the tab's own window"
+    otherWin.gBrowser.constructor,
+    gBrowser.constructor,
+    "both windows share one Tabbrowser class"
   );
 
   BrowserTestUtils.startLoadingURIString(otherTab.linkedBrowser, PAGE_C);

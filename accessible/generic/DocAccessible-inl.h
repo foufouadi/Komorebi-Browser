@@ -10,6 +10,7 @@
 #include "NotificationController.h"
 #include "States.h"
 #include "mozilla/dom/DocumentInlines.h"
+#include "nsAccUtils.h"
 #include "nsAccessibilityService.h"
 
 #ifdef A11Y_LOG
@@ -68,31 +69,6 @@ inline void DocAccessible::UpdateText(nsIContent* aTextNode) {
   if (!mNotificationController || !HasLoadState(eTreeConstructed)) {
     return;
   }
-  nsINode* parent = aTextNode->GetParent();
-  if (parent && parent->IsGeneratedContentContainerForMarker()) {
-    // This is the text of a bullet. Accessibility handles bullets differently
-    // to normal text. Instead of creating a TextLeafAccessible and caching the
-    // text on it, HTMLListBulletAccessible retrieves the text directly from
-    // layout, so any update is reflected immediately. That means we need to
-    // invalidate cached HyperText offsets immediately.
-    LocalAccessible* bullet = mDoc->GetAccessible(parent);
-    if (!bullet) {
-      return;
-    }
-    mDoc->QueueCacheUpdate(bullet, CacheDomain::Text);
-    HyperTextAccessible* container =
-        bullet->LocalParent() ? bullet->LocalParent()->AsHyperText() : nullptr;
-    if (container) {
-      int32_t offset =
-          container->GetChildOffset(bullet, /* aInvalidateAfter */ true);
-      nsAutoString text;
-      bullet->AppendTextTo(text);
-      auto event =
-          MakeRefPtr<AccTextChangeEvent>(container, offset, text, true);
-      mDoc->FireDelayedEvent(event);
-    }
-    return;
-  }
   mNotificationController->ScheduleTextUpdate(aTextNode);
 }
 
@@ -111,10 +87,17 @@ inline void DocAccessible::NotifyOfLoad(uint32_t aLoadEventType) {
 
 inline void DocAccessible::MaybeNotifyOfValueChange(
     LocalAccessible* aAccessible) {
-  if (aAccessible->IsCombobox() || aAccessible->IsPassword() ||
-      aAccessible->Role() == roles::ENTRY ||
-      aAccessible->Role() == roles::SPINBUTTON) {
-    FireDelayedEvent(nsIAccessibleEvent::EVENT_TEXT_VALUE_CHANGE, aAccessible);
+  // aAccessible might not itself fire value change events; e.g. it could be an
+  // intervening generic between a text leaf and an ancestor combobox. Walk up
+  // while an ancestor's value might depend on aAccessible.
+  for (LocalAccessible* acc = aAccessible; acc; acc = acc->LocalParent()) {
+    if (nsAccUtils::ShouldFireValueChangeForDescendantChanges(acc)) {
+      FireDelayedEvent(nsIAccessibleEvent::EVENT_TEXT_VALUE_CHANGE, acc);
+      return;
+    }
+    if (!acc->HasValueDependent()) {
+      return;
+    }
   }
 }
 

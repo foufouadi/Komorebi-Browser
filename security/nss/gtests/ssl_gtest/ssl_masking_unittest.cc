@@ -32,8 +32,10 @@ class MaskingTest : public ::testing::Test {
 
   void InitSecret(SSLHashType hash_type) {
     ScopedPK11SlotInfo slot(PK11_GetInternalSlot());
-    PK11SymKey *s = PK11_KeyGen(slot_.get(), CKM_GENERIC_SECRET_KEY_GEN,
-                                nullptr, AES_128_KEY_LENGTH, nullptr);
+    // FIPS HMAC needs a key of at least half the hash length.
+    PK11SymKey* s =
+        PK11_KeyGen(slot_.get(), CKM_GENERIC_SECRET_KEY_GEN, nullptr,
+                    static_cast<int>(GetHashLength(hash_type)), nullptr);
     ASSERT_NE(nullptr, s);
     secret_.reset(s);
   }
@@ -51,10 +53,10 @@ class MaskingTest : public ::testing::Test {
   static const int kSampleSize = 16;
   static const int kMaskSize = 16;
   void CreateMask(PRUint16 ciphersuite, SSLProtocolVariant variant,
-                  std::string label, const std::vector<uint8_t> &sample,
-                  std::vector<uint8_t> *out_mask) {
+                  std::string label, const std::vector<uint8_t>& sample,
+                  std::vector<uint8_t>* out_mask) {
     ASSERT_NE(nullptr, out_mask);
-    SSLMaskingContext *ctx_init = nullptr;
+    SSLMaskingContext* ctx_init = nullptr;
     EXPECT_EQ(SECSuccess,
               SSL_CreateVariantMaskingContext(
                   SSL_LIBRARY_VERSION_TLS_1_3, ciphersuite, variant,
@@ -97,8 +99,8 @@ class SuiteTest : public MaskingTest,
                   public ::testing::WithParamInterface<uint16_t> {
  public:
   SuiteTest() : ciphersuite_(GetParam()) {}
-  void CreateMask(std::string label, const std::vector<uint8_t> &sample,
-                  std::vector<uint8_t> *out_mask) {
+  void CreateMask(std::string label, const std::vector<uint8_t>& sample,
+                  std::vector<uint8_t>* out_mask) {
     MaskingTest::CreateMask(ciphersuite_, ssl_variant_datagram, label, sample,
                             out_mask);
   }
@@ -112,8 +114,8 @@ class VariantTest : public MaskingTest,
  public:
   VariantTest() : variant_(GetParam()) {}
   void CreateMask(uint16_t ciphersuite, std::string label,
-                  const std::vector<uint8_t> &sample,
-                  std::vector<uint8_t> *out_mask) {
+                  const std::vector<uint8_t>& sample,
+                  std::vector<uint8_t>* out_mask) {
     MaskingTest::CreateMask(ciphersuite, variant_, label, sample, out_mask);
   }
 
@@ -128,8 +130,8 @@ class VariantSuiteTest : public MaskingTest,
   VariantSuiteTest()
       : variant_(std::get<0>(GetParam())),
         ciphersuite_(std::get<1>(GetParam())) {}
-  void CreateMask(std::string label, const std::vector<uint8_t> &sample,
-                  std::vector<uint8_t> *out_mask) {
+  void CreateMask(std::string label, const std::vector<uint8_t>& sample,
+                  std::vector<uint8_t>* out_mask) {
     MaskingTest::CreateMask(ciphersuite_, variant_, label, sample, out_mask);
   }
 
@@ -146,7 +148,7 @@ TEST_P(VariantSuiteTest, MaskContextNoLabel) {
 
 TEST_P(VariantSuiteTest, MaskNoSample) {
   std::vector<uint8_t> mask(kMaskSize);
-  SSLMaskingContext *ctx_init = nullptr;
+  SSLMaskingContext* ctx_init = nullptr;
   EXPECT_EQ(SECSuccess,
             SSL_CreateVariantMaskingContext(
                 SSL_LIBRARY_VERSION_TLS_1_3, ciphersuite_, variant_,
@@ -166,7 +168,7 @@ TEST_P(VariantSuiteTest, MaskNoSample) {
 TEST_P(VariantSuiteTest, MaskShortSample) {
   std::vector<uint8_t> sample(kSampleSize);
   std::vector<uint8_t> mask(kMaskSize);
-  SSLMaskingContext *ctx_init = nullptr;
+  SSLMaskingContext* ctx_init = nullptr;
   EXPECT_EQ(SECSuccess,
             SSL_CreateVariantMaskingContext(
                 SSL_LIBRARY_VERSION_TLS_1_3, ciphersuite_, variant_,
@@ -183,7 +185,7 @@ TEST_P(VariantSuiteTest, MaskShortSample) {
 TEST_P(VariantSuiteTest, MaskContextUnsupportedMech) {
   std::vector<uint8_t> sample(kSampleSize);
   std::vector<uint8_t> mask(kMaskSize);
-  SSLMaskingContext *ctx_init = nullptr;
+  SSLMaskingContext* ctx_init = nullptr;
   EXPECT_EQ(SECFailure,
             SSL_CreateVariantMaskingContext(
                 SSL_LIBRARY_VERSION_TLS_1_3, TLS_RSA_WITH_AES_128_CBC_SHA256,
@@ -195,7 +197,7 @@ TEST_P(VariantSuiteTest, MaskContextUnsupportedMech) {
 TEST_P(VariantSuiteTest, MaskContextUnsupportedVersion) {
   std::vector<uint8_t> sample(kSampleSize);
   std::vector<uint8_t> mask(kMaskSize);
-  SSLMaskingContext *ctx_init = nullptr;
+  SSLMaskingContext* ctx_init = nullptr;
   EXPECT_EQ(SECFailure, SSL_CreateVariantMaskingContext(
                             SSL_LIBRARY_VERSION_TLS_1_2, ciphersuite_, variant_,
                             secret_.get(), nullptr, 0, &ctx_init));
@@ -212,7 +214,7 @@ TEST_P(VariantSuiteTest, MaskMaxLength) {
 
   std::vector<uint8_t> sample(kSampleSize);
   std::vector<uint8_t> mask(max_mask_len + 1);
-  SSLMaskingContext *ctx_init = nullptr;
+  SSLMaskingContext* ctx_init = nullptr;
   EXPECT_EQ(SECSuccess,
             SSL_CreateVariantMaskingContext(
                 SSL_LIBRARY_VERSION_TLS_1_3, ciphersuite_, variant_,
@@ -231,7 +233,7 @@ TEST_P(VariantSuiteTest, MaskMinLength) {
   std::vector<uint8_t> sample(kSampleSize);
   std::vector<uint8_t> mask(1);  // Don't pass a null
 
-  SSLMaskingContext *ctx_init = nullptr;
+  SSLMaskingContext* ctx_init = nullptr;
   EXPECT_EQ(SECSuccess,
             SSL_CreateVariantMaskingContext(
                 SSL_LIBRARY_VERSION_TLS_1_3, ciphersuite_, variant_,
@@ -291,8 +293,8 @@ TEST_P(SuiteTest, MaskTlsVariantKeySeparation) {
   std::vector<uint8_t> sample(kSampleSize);
   std::vector<uint8_t> tls_mask(kMaskSize);
   std::vector<uint8_t> dtls_mask(kMaskSize);
-  SSLMaskingContext *stream_ctx_init = nullptr;
-  SSLMaskingContext *datagram_ctx_init = nullptr;
+  SSLMaskingContext* stream_ctx_init = nullptr;
+  SSLMaskingContext* datagram_ctx_init = nullptr;
 
   // Init
   EXPECT_EQ(SECSuccess, SSL_CreateVariantMaskingContext(

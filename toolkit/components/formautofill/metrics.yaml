@@ -25,6 +25,401 @@ formautofill.creditcards:
       - autofill@lists.mozilla.org
       - passwords-dev@mozilla.org
     expires: never
+  saved_count:
+    type: quantity
+    unit: credit cards
+    lifetime: application
+    description: >
+      The number of credit cards saved in the store serving them. Read when the
+      store loads at startup and after every change, so it is sent on every
+      metrics ping, unlike autofill_profiles_count, which is only set when a
+      card is added or edited.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2086210
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2086210
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - autofill@lists.mozilla.org
+    expires: never
+  saved_cvv_count:
+    type: quantity
+    unit: credit cards
+    lifetime: application
+    description: >
+      The number of saved credit cards that have a security code (CVV) saved.
+      Read and sent like saved_count. Reports only the count, never the code
+      or its length.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2086210
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2086210
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - autofill@lists.mozilla.org
+    expires: never
+  cvv_saving_toggled:
+    type: event
+    description: >
+      Recorded when the user turns saving security codes (CVV) on or off,
+      from the "Save security codes" setting or from the toggle on a card
+      doorhanger.
+    bugs:
+      - https://bugzil.la/2086225
+    data_reviews:
+      - https://bugzil.la/2086225
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - autofill@lists.mozilla.org
+    expires: never
+    extra_keys:
+      enabled:
+        description: The new state, true when saving security codes is on.
+        type: boolean
+      source:
+        description: >
+          Where it was changed: "settings" (the Settings checkbox),
+          "save_prompt" (the toggle on the save doorhanger for a new card) or
+          "update_prompt" (the toggle on the "Save security code?" doorhanger
+          for a saved card).
+        type: string
+      had_saved_cvv:
+        description: >
+          Whether at least one saved card had a security code when the setting
+          changed.
+        type: boolean
+  cvv_saving_enabled:
+    type: boolean
+    lifetime: application
+    description: >
+      Whether saving security codes (CVV) is turned on. Set at startup, so it
+      is sent on every metrics ping. Only set when security codes are
+      supported.
+    bugs:
+      - https://bugzil.la/2086225
+    data_reviews:
+      - https://bugzil.la/2086225
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - autofill@lists.mozilla.org
+    expires: never
+  migrate_to_rust:
+    type: event
+    description: >
+      Recorded once per attempt to copy a profile's credit cards from the store
+      serving them into the other one, which is what has to succeed before that
+      store starts serving. Both directions report here, told apart by
+      `direction`. Tracks how often the copy succeeds, on how many records, and
+      how long it takes.
+    data_sensitivity:
+      - technical
+    bugs:
+      - https://bugzil.la/2068982
+      - https://bugzil.la/2085806
+    data_reviews:
+      - https://bugzil.la/2068982
+      - https://bugzil.la/2085806
+    notification_emails:
+      - autofill@lists.mozilla.org
+    expires: never
+    extra_keys:
+      run_id:
+        description: >
+          A fresh id per run, so that the migrate_record_divergence events a run
+          emitted join to it unambiguously.
+        type: string
+      direction:
+        description: >
+          Which way the credit cards were copied: "to_rust" for the migration into
+          the Rust store, "to_json" for the copy back when the pref that chooses
+          the store is turned off again. A profile can do both, so this is what
+          keeps the two apart.
+        type: string
+      attempt:
+        description: >
+          How many launches had already tried and failed before this one, 0 on
+          the first. A retry emits an otherwise identical event, so this is
+          what separates a profile that failed once from one failing every
+          time. The migrator gives up after 10. Always 0 for "to_json", which
+          is not limited.
+        type: quantity
+      result:
+        description: >
+          "ok" when the store copied into ended up holding exactly what the
+          source holds -- every record arrived and nothing the source lacks
+          survived, compared by guid rather than by count -- so the profile
+          could be handed to it; otherwise "error". A "to_json" copy hands the
+          profile back to the JSON store either way, so an "error" there means
+          some records did not make it back.
+        type: string
+      source_total:
+        description: >
+          Number of credit card records the migration tried to copy, as counted in
+          the store copied from.
+        type: quantity
+      target_total:
+        description: >
+          Number of records the store copied into held once the copy finished,
+          read back rather than counted as it went. Equal to `migrated` when the
+          copy is sound; lower means records reported as written are not there.
+          0 if the migration threw before reading back.
+        type: quantity
+      migrated:
+        description: >
+          Number of records the import reported as written. A record the store
+          copied into already held under the same timeLastModified is left
+          alone, so source_total minus migrated minus failed is the number that
+          needed nothing doing.
+        type: quantity
+      failed:
+        description: >
+          Number of records the import rejected. Why is summarized in
+          error_message.
+        type: quantity
+      failed_deletions:
+        description: >
+          Number of deletions the copy could not apply, whether removing a
+          record the source no longer has or importing a tombstone for one it
+          had already deleted. `result` tells the two apart: a record that
+          would not delete is still in the store copied into, so the run fails
+          on it, while a tombstone that would not import leaves that store
+          correct and costs a deletion coming back at the next sync.
+        type: quantity
+      diverged:
+        description: >
+          Number of records the store copied into accepted and then held with a
+          different value in a field it stores: the copy is complete but not
+          faithful. Fields it derives on read, or has no column for, are not
+          compared -- neither was carried by the copy, so neither says anything
+          about it. Which fields disagreed is in migrate_record_divergence.
+          Does not fail the migration. 0 if the migration threw before
+          verifying.
+        type: quantity
+      duration_ms:
+        description: Wall-clock duration of the migration, in milliseconds.
+        type: quantity
+      error_code:
+        description: >
+          The UniFFI error variant when the migration threw, for grouping, or
+          "SourceChanged" when the JSON store was written to while it was
+          copied into the Rust store, which fails the run. Absent otherwise,
+          including when records were rejected or came up short: the counts
+          already describe that.
+        type: string
+      error_message:
+        description: >
+          A normalized, PII-stripped message: the first reason a record was
+          rejected, or the error text where the migration threw. One example to
+          read rather than a set to aggregate -- rejected records in one batch
+          nearly always share a cause. Absent when the counts say it all.
+        type: string
+
+  migrate_to_rust_blocked:
+    type: event
+    description: >
+      Recorded each time a profile with credit cards owes a copy of them into
+      the Rust store -- the migration or its dry run -- and a check holds it
+      back rather than risk asking the user anything. Tracks how many profiles
+      each check keeps from migrating, and so how many the move to the Rust
+      store would leave behind.
+    data_sensitivity:
+      - technical
+    bugs:
+      - https://bugzil.la/2081661
+    data_reviews:
+      - https://bugzil.la/2081661
+    notification_emails:
+      - autofill@lists.mozilla.org
+    expires: never
+    extra_keys:
+      reason:
+        description: >
+          Which check held the copy back. "primary_password": a primary password
+          is set, so nothing is copied into Rust, whose key it guards.
+          "keystore_locked": the copy waits until something else unlocks the OS
+          key store. "keystore_busy": the copy waits behind another OS key store
+          operation.
+        type: string
+      dry_run:
+        description: >
+          Whether the copy owed is the dry run, which measures the migration
+          and then undoes it.
+        type: boolean
+
+  migrate_record_divergence:
+    type: event
+    description: >
+      Recorded once per credit card record that came out of a migration held
+      differently from the way the store copied from held it, naming the fields
+      that disagreed and which way each of them went. One event per record,
+      however many of its fields disagreed; join to migrate_to_rust on run_id
+      for the direction and for `diverged`, the total.
+
+      Catches the failure the counts cannot: both stores accepting a write and
+      then holding different values, since the Rust store normalises names,
+      phone numbers, regions and countries itself. Only the fields that store
+      keeps are compared.
+
+      Only field names are recorded, never values.
+    data_sensitivity:
+      - technical
+    bugs:
+      - https://bugzil.la/2068982
+    data_reviews:
+      - https://bugzil.la/2068982
+    notification_emails:
+      - autofill@lists.mozilla.org
+    expires: never
+    extra_keys:
+      run_id:
+        description: The migrate_to_rust run this record was copied by.
+        type: string
+      changed:
+        description: >
+          Comma-separated names of the fields both stores hold, with different
+          values -- a normalised name, phone number, region or country lands
+          here. Absent when there are none.
+        type: string
+      dropped:
+        description: >
+          Comma-separated names of the fields the store copied from holds and
+          the one copied into came back empty on: the copy losing something.
+          Absent when there are none.
+        type: string
+      added:
+        description: >
+          Comma-separated names of the fields the store copied from left empty
+          and the one copied into came back with, most often ones it derives on
+          read. Absent when there are none.
+        type: string
+
+  cvv_manage_action:
+    type: event
+    description: >
+      Recorded when the user saves a card from the card editor in Settings
+      (Manage payment methods > Add or Edit) and the security code (CVV)
+      changed. Not recorded when the security code is unchanged or the dialog
+      is cancelled. Only the kind of change is recorded, never the code.
+    data_sensitivity:
+      - interaction
+    bugs:
+      - https://bugzil.la/2086229
+    data_reviews:
+      - https://bugzil.la/2086229
+    notification_emails:
+      - autofill@lists.mozilla.org
+    expires: never
+    extra_keys:
+      action:
+        description: >
+          "add": a code is saved for a card that had none. "edit": the stored
+          code is changed. "clear": the stored code is removed.
+        type: string
+
+  cvv_prompt_shown:
+    type: event
+    description: >
+      Recorded when the credit card doorhanger offers to save a security code
+      the user entered in the form: the save doorhanger for a new card
+      submitted with a security code, or the update doorhanger for a saved card
+      submitted with a new or changed security code.
+    bugs:
+      - https://bugzil.la/2086203
+    data_reviews:
+      - https://bugzil.la/2086203
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - autofill@lists.mozilla.org
+      - passwords-dev@mozilla.org
+    expires: never
+    extra_keys:
+      prompt_type: &cvv_prompt_type
+        description: >
+          "new_card" for the save doorhanger of a new card, "existing_card" for
+          the update doorhanger offering to add a security code to a saved
+          card.
+        type: string
+      flow_id: &cvv_prompt_flow_id
+        description: >
+          Flow id of the interaction session with the credit card form, shared
+          with the credit card form events.
+        type: string
+
+  cvv_prompt_action:
+    type: event
+    description: >
+      Recorded when the user responds to a doorhanger recorded by
+      cvv_prompt_shown, or when it is closed without a response. A button
+      clicked after reopening a closed doorhanger is still recorded.
+    bugs:
+      - https://bugzil.la/2086203
+    data_reviews:
+      - https://bugzil.la/2086203
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - autofill@lists.mozilla.org
+      - passwords-dev@mozilla.org
+    expires: never
+    extra_keys:
+      prompt_type: *cvv_prompt_type
+      action:
+        description: >
+          "save" when the card is saved or updated, "save_new" when an existing
+          card is saved as a new payment method, "not_now" (new_card) or
+          "no_thanks" (existing_card) when the Dismiss button is clicked,
+          "never_save" when the user stops saving cards, and "closed", recorded
+          once, when the doorhanger is closed without a button being clicked,
+          for example with Esc or by closing the tab.
+        type: string
+      cvv_saving_enabled:
+        description: >
+          Whether saving security codes was turned on when the user responded.
+        type: boolean
+      flow_id: *cvv_prompt_flow_id
+
+  store_error:
+    type: event
+    description: >
+      Recorded when adding, updating or reading (decrypting) a card, or
+      clearing its security code (CVV), fails in the credit card store. Not
+      recorded when the card does not exist. Only the error category is
+      recorded, never the code or any other card value.
+    data_sensitivity:
+      - technical
+    bugs:
+      - https://bugzil.la/2086894
+    data_reviews:
+      - https://bugzil.la/2086894
+    notification_emails:
+      - autofill@lists.mozilla.org
+    expires: never
+    extra_keys:
+      operation:
+        description: >
+          "add": a new card was being saved. "update": a stored card was being
+          changed. "clear": a stored card's security code was being removed.
+          "read": one or all stored cards were being read.
+        type: string
+      error_type:
+        description: >
+          The UniFFI error variant the store threw, e.g. "CryptoError" or
+          "SqlError". "PrimaryPasswordLocked" when the user declined or has not
+          entered the primary password; filter it out to count real failures.
+          "Unknown" for any other error.
+        type: string
+      has_cvv:
+        description: >
+          Whether a security code was involved: the card being written carried
+          one, the code being cleared, or a card being read has one. Absent
+          when a failed read could not tell.
+        type: boolean
+
 
 formautofill:
   form_submission_heuristic:
@@ -43,12 +438,13 @@ formautofill:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1969173
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1999871
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2041172
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2072820
     data_reviews:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1874829#c4
     notification_emails:
       - autofill@lists.mozilla.org
       - passwords-dev@mozilla.org
-    expires: 160
+    expires: 166
 
   iframe_layout_detection:
     type: event
@@ -95,6 +491,59 @@ formautofill:
           iframe.
         type: string
 
+  dropdown_suppressed:
+    type: event
+    description: >
+      Recorded when the autocomplete dropdown is withheld on a field because
+      the field's autocomplete attribute holds a value that cannot be parsed
+      into a known field name (only while
+      extensions.formautofill.suppressUnrecognizedAutocomplete.enabled is on).
+      Recorded at most once each time the field is focused.
+    bugs:
+      - https://bugzil.la/2081405
+    data_reviews:
+      - https://bugzil.la/2081405
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - autofill@lists.mozilla.org
+      - passwords-dev@mozilla.org
+    expires: never
+    extra_keys:
+      category:
+        description: >
+          Autofill category of the field: "address", "creditCard" or
+          "passport".
+        type: string
+      field_name:
+        description: >
+          The field name the field was classified as before its autocomplete
+          attribute changed, such as "address-line1".
+        type: string
+
+  dropdown_suppressed_total:
+    type: event
+    description: >
+      The number of dropdown_suppressed events recorded on the fields of a
+      form. Recorded once per form, when the form is submitted or the page is
+      left, and only if the dropdown was withheld at least once.
+    bugs:
+      - https://bugzil.la/2081405
+    data_reviews:
+      - https://bugzil.la/2081405
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - autofill@lists.mozilla.org
+      - passwords-dev@mozilla.org
+    expires: never
+    extra_keys:
+      count:
+        description: >
+          How many times the dropdown was withheld on the form's fields,
+          counted at most once per field focus.
+        type: quantity
+
   availability:
     type: boolean
     description: >
@@ -117,6 +566,7 @@ formautofill:
       Captures the method of user interaction initiating the prompt and the result of the prompt.
       Possible triggers include:
         "autofill" when a user attempts to autofill a payment method.
+        "delete_autocomplete" when a user deletes a payment method from the form autocomplete dropdown
         "edit" when a user edits a login in about:preferences
         "toggle_pref_os_auth" when a user toggles "Autofill / Require device sign in" in about:preferences
       Possible results include:
@@ -906,7 +1356,12 @@ address:
         type: string
       mlversion:
         description: >
-          ml model version
+          Revision of the ML field classifier configured for this client, or
+          empty when the feature is off. Recorded on every detection, including
+          forms the classifier did not label, so that version cohorts are not
+          conditioned on the model having succeeded. The two-engine classifier
+          reports both revisions joined by "/", the single-engine one reports a
+          single revision.
         type: string
 
   filled_address_form_ext:
@@ -1168,8 +1623,10 @@ creditcard:
       creditcard.detected#cc_form_v2.
     bugs: &creditcard_detected_bugs
       - https://bugzil.la/1757731
+      - https://bugzil.la/2086235
     data_reviews: &creditcard_detected_data_reviews
       - https://bugzil.la/1757731
+      - https://bugzil.la/2086235
     notification_emails: &creditcard_detected_emails
       - autofill@lists.mozilla.org
       - passwords-dev@mozilla.org
@@ -1204,6 +1661,10 @@ creditcard:
       cc_exp_year:
         description: >
           credit card expiration year
+        type: string
+      cc_csc:
+        description: >
+          credit card security code (CVV) field result
         type: string
       field_name:
         description: >
@@ -1246,8 +1707,10 @@ creditcard:
       - interaction
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1837161
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2086235
     data_reviews:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1837161
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2086235
     notification_emails:
       - autofill@lists.mozilla.org
     expires: never
@@ -1272,6 +1735,9 @@ creditcard:
         type: string
       cc_exp_year:
         description: Credit card expiration year result
+        type: string
+      cc_csc:
+        description: Credit card security code (CVV) field result
         type: string
 
   filled_modified_cc_form_v2:
@@ -1362,6 +1828,9 @@ creditcard:
           What triggered the OS Keystore Popup.
           "edit" - when editing credit cards
           "autofill" - when autofilling credit cards
+          "formautofill_migration" - when copying credit cards from the JSON
+          store into the Rust store, which does not ask for
+          re-authentication
         type: string
 
 passport:
@@ -1660,3 +2129,161 @@ formautofill.addresses:
       - passwords-dev@mozilla.org
     expires: never
     unit: address autofill profiles
+
+  migrate_to_rust:
+    type: event
+    description: >
+      Recorded once per attempt to copy a profile's addresses from the store
+      serving them into the other one, which is what has to succeed before that
+      store starts serving. Both directions report here, told apart by
+      `direction`. Tracks how often the copy succeeds, on how many records, and
+      how long it takes.
+    data_sensitivity:
+      - technical
+    bugs:
+      - https://bugzil.la/2058441
+      - https://bugzil.la/2085806
+    data_reviews:
+      - https://bugzil.la/2058441
+      - https://bugzil.la/2085806
+    notification_emails:
+      - autofill@lists.mozilla.org
+    expires: never
+    extra_keys:
+      run_id:
+        description: >
+          A fresh id per run, so that the migrate_record_divergence events a run
+          emitted join to it unambiguously.
+        type: string
+      direction:
+        description: >
+          Which way the addresses were copied: "to_rust" for the migration into
+          the Rust store, "to_json" for the copy back when the pref that chooses
+          the store is turned off again. A profile can do both, so this is what
+          keeps the two apart.
+        type: string
+      attempt:
+        description: >
+          How many launches had already tried and failed before this one, 0 on
+          the first. A retry emits an otherwise identical event, so this is
+          what separates a profile that failed once from one failing every
+          time. The migrator gives up after 10. Always 0 for "to_json", which
+          is not limited.
+        type: quantity
+      result:
+        description: >
+          "ok" when the store copied into ended up holding exactly what the
+          source holds -- every record arrived and nothing the source lacks
+          survived, compared by guid rather than by count -- so the profile
+          could be handed to it; otherwise "error". A "to_json" copy hands the
+          profile back to the JSON store either way, so an "error" there means
+          some records did not make it back.
+        type: string
+      source_total:
+        description: >
+          Number of address records the migration tried to copy, as counted in
+          the store copied from.
+        type: quantity
+      target_total:
+        description: >
+          Number of records the store copied into held once the copy finished,
+          read back rather than counted as it went. Equal to `migrated` when the
+          copy is sound; lower means records reported as written are not there.
+          0 if the migration threw before reading back.
+        type: quantity
+      migrated:
+        description: >
+          Number of records the import reported as written. A record the store
+          copied into already held under the same timeLastModified is left
+          alone, so source_total minus migrated minus failed is the number that
+          needed nothing doing.
+        type: quantity
+      failed:
+        description: >
+          Number of records the import rejected. Why is summarized in
+          error_message.
+        type: quantity
+      failed_deletions:
+        description: >
+          Number of deletions the copy could not apply, whether removing a
+          record the source no longer has or importing a tombstone for one it
+          had already deleted. `result` tells the two apart: a record that
+          would not delete is still in the store copied into, so the run fails
+          on it, while a tombstone that would not import leaves that store
+          correct and costs a deletion coming back at the next sync.
+        type: quantity
+      diverged:
+        description: >
+          Number of records the store copied into accepted and then held with a
+          different value in a field it stores: the copy is complete but not
+          faithful. Fields it derives on read, or has no column for, are not
+          compared -- neither was carried by the copy, so neither says anything
+          about it. Which fields disagreed is in migrate_record_divergence.
+          Does not fail the migration. 0 if the migration threw before
+          verifying.
+        type: quantity
+      duration_ms:
+        description: Wall-clock duration of the migration, in milliseconds.
+        type: quantity
+      error_code:
+        description: >
+          The UniFFI error variant when the migration threw, for grouping, or
+          "SourceChanged" when the JSON store was written to while it was
+          copied into the Rust store, which fails the run. Absent otherwise,
+          including when records were rejected or came up short: the counts
+          already describe that.
+        type: string
+      error_message:
+        description: >
+          A normalized, PII-stripped message: the first reason a record was
+          rejected, or the error text where the migration threw. One example to
+          read rather than a set to aggregate -- rejected records in one batch
+          nearly always share a cause. Absent when the counts say it all.
+        type: string
+
+  migrate_record_divergence:
+    type: event
+    description: >
+      Recorded once per address record that came out of a migration held
+      differently from the way the store copied from held it, naming the fields
+      that disagreed and which way each of them went. One event per record,
+      however many of its fields disagreed; join to migrate_to_rust on run_id
+      for the direction and for `diverged`, the total.
+
+      Catches the failure the counts cannot: both stores accepting a write and
+      then holding different values, since the Rust store normalises names,
+      phone numbers, regions and countries itself. Only the fields that store
+      keeps are compared.
+
+      Only field names are recorded, never values.
+    data_sensitivity:
+      - technical
+    bugs:
+      - https://bugzil.la/2058441
+    data_reviews:
+      - https://bugzil.la/2058441
+    notification_emails:
+      - autofill@lists.mozilla.org
+    expires: never
+    extra_keys:
+      run_id:
+        description: The migrate_to_rust run this record was copied by.
+        type: string
+      changed:
+        description: >
+          Comma-separated names of the fields both stores hold, with different
+          values -- a normalised name, phone number, region or country lands
+          here. Absent when there are none.
+        type: string
+      dropped:
+        description: >
+          Comma-separated names of the fields the store copied from holds and
+          the one copied into came back empty on: the copy losing something.
+          Absent when there are none.
+        type: string
+      added:
+        description: >
+          Comma-separated names of the fields the store copied from left empty
+          and the one copied into came back with, most often ones it derives on
+          read. Absent when there are none.
+        type: string

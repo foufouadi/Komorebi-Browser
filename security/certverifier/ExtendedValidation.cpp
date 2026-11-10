@@ -203,17 +203,6 @@ static const struct EVInfo kEVInfos[] = {
     "BAAAAAABIVhTCKI=",
   },
   {
-    // CN=Buypass Class 3 Root CA,O=Buypass AS-983163327,C=NO
-    "2.16.578.1.26.1.3.3",
-    "Buypass EV OID",
-    { 0xED, 0xF7, 0xEB, 0xBC, 0xA2, 0x7A, 0x2A, 0x38, 0x4D, 0x38, 0x7B,
-      0x7D, 0x40, 0x10, 0xC6, 0x66, 0xE2, 0xED, 0xB4, 0x84, 0x3E, 0x4C,
-      0x29, 0xB4, 0xAE, 0x1D, 0x5B, 0x93, 0x32, 0xE6, 0xB2, 0x4D },
-    "ME4xCzAJBgNVBAYTAk5PMR0wGwYDVQQKDBRCdXlwYXNzIEFTLTk4MzE2MzMyNzEg"
-    "MB4GA1UEAwwXQnV5cGFzcyBDbGFzcyAzIFJvb3QgQ0E=",
-    "Ag==",
-  },
-  {
     // CN=Certum Trusted Network CA,OU=Certum Certification Authority,O=Unizeto Technologies S.A.,C=PL
     "1.2.616.1.113527.2.5.1.1",
     "Certum EV OID",
@@ -366,18 +355,6 @@ static const struct EVInfo kEVInfos[] = {
     "BVVWvPJepDU1w6QP1atFcg==",
   },
   {
-    // CN=DigiCert Trusted Root G4,OU=www.digicert.com,O=DigiCert Inc,C=US
-    "2.16.840.1.114412.2.1",
-    "DigiCert EV OID",
-    { 0x55, 0x2F, 0x7B, 0xDC, 0xF1, 0xA7, 0xAF, 0x9E, 0x6C, 0xE6, 0x72,
-      0x01, 0x7F, 0x4F, 0x12, 0xAB, 0xF7, 0x72, 0x40, 0xC7, 0x8E, 0x76,
-      0x1A, 0xC2, 0x03, 0xD1, 0xD9, 0xD2, 0x0A, 0xC8, 0x99, 0x88 },
-    "MGIxCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsT"
-    "EHd3dy5kaWdpY2VydC5jb20xITAfBgNVBAMTGERpZ2lDZXJ0IFRydXN0ZWQgUm9v"
-    "dCBHNA==",
-    "BZsbV56OITLiOQe9p3d1XA==",
-  },
-  {
     // CN=DigiCert TLS RSA4096 Root G5,O="DigiCert, Inc.",C=US
     "2.23.140.1.1",
     "CA/Browser Forum EV OID",
@@ -503,63 +480,6 @@ static const struct EVInfo kEVInfos[] = {
     "drEgUnTwhYdGs/gjGvbCwA==",
   },
   {
-    // CN=Amazon Root CA 1,O=Amazon,C=US
-    "2.23.140.1.1",
-    "CA/Browser Forum EV OID",
-    { 0x8E, 0xCD, 0xE6, 0x88, 0x4F, 0x3D, 0x87, 0xB1, 0x12, 0x5B, 0xA3,
-      0x1A, 0xC3, 0xFC, 0xB1, 0x3D, 0x70, 0x16, 0xDE, 0x7F, 0x57, 0xCC,
-      0x90, 0x4F, 0xE1, 0xCB, 0x97, 0xC6, 0xAE, 0x98, 0x19, 0x6E },
-    "MDkxCzAJBgNVBAYTAlVTMQ8wDQYDVQQKEwZBbWF6b24xGTAXBgNVBAMTEEFtYXpv"
-    "biBSb290IENBIDE=",
-    "Bmyfz5m/jAo54vB4ikPmljZbyg==",
-  },
-  {
-    // CN=Amazon Root CA 2,O=Amazon,C=US
-    "2.23.140.1.1",
-    "CA/Browser Forum EV OID",
-    { 0x1B, 0xA5, 0xB2, 0xAA, 0x8C, 0x65, 0x40, 0x1A, 0x82, 0x96, 0x01,
-      0x18, 0xF8, 0x0B, 0xEC, 0x4F, 0x62, 0x30, 0x4D, 0x83, 0xCE, 0xC4,
-      0x71, 0x3A, 0x19, 0xC3, 0x9C, 0x01, 0x1E, 0xA4, 0x6D, 0xB4 },
-    "MDkxCzAJBgNVBAYTAlVTMQ8wDQYDVQQKEwZBbWF6b24xGTAXBgNVBAMTEEFtYXpv"
-    "biBSb290IENBIDI=",
-    "Bmyf0pY1hp8KD+WGePhbJruKNw==",
-  },
-  {
-    // CN=Amazon Root CA 3,O=Amazon,C=US
-    "2.23.140.1.1",
-    "CA/Browser Forum EV OID",
-    { 0x18, 0xCE, 0x6C, 0xFE, 0x7B, 0xF1, 0x4E, 0x60, 0xB2, 0xE3, 0x47,
-      0xB8, 0xDF, 0xE8, 0x68, 0xCB, 0x31, 0xD0, 0x2E, 0xBB, 0x3A, 0xDA,
-      0x27, 0x15, 0x69, 0xF5, 0x03, 0x43, 0xB4, 0x6D, 0xB3, 0xA4 },
-    "MDkxCzAJBgNVBAYTAlVTMQ8wDQYDVQQKEwZBbWF6b24xGTAXBgNVBAMTEEFtYXpv"
-    "biBSb290IENBIDM=",
-    "Bmyf1XSXNmY/Owua2eiedgPySg==",
-  },
-  {
-    // CN=Amazon Root CA 4,O=Amazon,C=US
-    "2.23.140.1.1",
-    "CA/Browser Forum EV OID",
-    { 0xE3, 0x5D, 0x28, 0x41, 0x9E, 0xD0, 0x20, 0x25, 0xCF, 0xA6, 0x90,
-      0x38, 0xCD, 0x62, 0x39, 0x62, 0x45, 0x8D, 0xA5, 0xC6, 0x95, 0xFB,
-      0xDE, 0xA3, 0xC2, 0x2B, 0x0B, 0xFB, 0x25, 0x89, 0x70, 0x92 },
-    "MDkxCzAJBgNVBAYTAlVTMQ8wDQYDVQQKEwZBbWF6b24xGTAXBgNVBAMTEEFtYXpv"
-    "biBSb290IENBIDQ=",
-    "Bmyf18G7EEwpQ+Vxe3ssyBrBDg==",
-  },
-  {
-    // CN=Starfield Services Root Certificate Authority - G2,O="Starfield Technologies, Inc.",L=Scottsdale,ST=Arizona,C=US
-    "2.23.140.1.1",
-    "CA/Browser Forum EV OID",
-    { 0x56, 0x8D, 0x69, 0x05, 0xA2, 0xC8, 0x87, 0x08, 0xA4, 0xB3, 0x02,
-      0x51, 0x90, 0xED, 0xCF, 0xED, 0xB1, 0x97, 0x4A, 0x60, 0x6A, 0x13,
-      0xC6, 0xE5, 0x29, 0x0F, 0xCB, 0x2A, 0xE6, 0x3E, 0xDA, 0xB5 },
-    "MIGYMQswCQYDVQQGEwJVUzEQMA4GA1UECBMHQXJpem9uYTETMBEGA1UEBxMKU2Nv"
-    "dHRzZGFsZTElMCMGA1UEChMcU3RhcmZpZWxkIFRlY2hub2xvZ2llcywgSW5jLjE7"
-    "MDkGA1UEAxMyU3RhcmZpZWxkIFNlcnZpY2VzIFJvb3QgQ2VydGlmaWNhdGUgQXV0"
-    "aG9yaXR5IC0gRzI=",
-    "AA==",
-  },
-  {
     // CN=GDCA TrustAUTH R5 ROOT,O="GUANG DONG CERTIFICATE AUTHORITY CO.,LTD.",C=CN
     "1.2.156.112559.1.1.6.1",
     "GDCA EV OID",
@@ -653,40 +573,6 @@ static const struct EVInfo kEVInfos[] = {
     "MfXkYgxsWO3W2A==",
   },
   {
-    // CN=emSign ECC Root CA - G3,O=eMudhra Technologies Limited,OU=emSign PKI,C=IN
-    "2.23.140.1.1",
-    "CA/Browser Forum EV OID",
-    { 0x86, 0xA1, 0xEC, 0xBA, 0x08, 0x9C, 0x4A, 0x8D, 0x3B, 0xBE, 0x27,
-      0x34, 0xC6, 0x12, 0xBA, 0x34, 0x1D, 0x81, 0x3E, 0x04, 0x3C, 0xF9,
-      0xE8, 0xA8, 0x62, 0xCD, 0x5C, 0x57, 0xA3, 0x6B, 0xBE, 0x6B },
-    "MGsxCzAJBgNVBAYTAklOMRMwEQYDVQQLEwplbVNpZ24gUEtJMSUwIwYDVQQKExxl"
-    "TXVkaHJhIFRlY2hub2xvZ2llcyBMaW1pdGVkMSAwHgYDVQQDExdlbVNpZ24gRUND"
-    "IFJvb3QgQ0EgLSBHMw==",
-    "PPYHqWhwDtqLhA==",
-  },
-  {
-    // CN=emSign Root CA - C1,O=eMudhra Inc,OU=emSign PKI,C=US
-    "2.23.140.1.1",
-    "CA/Browser Forum EV OID",
-    { 0x12, 0x56, 0x09, 0xAA, 0x30, 0x1D, 0xA0, 0xA2, 0x49, 0xB9, 0x7A,
-      0x82, 0x39, 0xCB, 0x6A, 0x34, 0x21, 0x6F, 0x44, 0xDC, 0xAC, 0x9F,
-      0x39, 0x54, 0xB1, 0x42, 0x92, 0xF2, 0xE8, 0xC8, 0x60, 0x8F },
-    "MFYxCzAJBgNVBAYTAlVTMRMwEQYDVQQLEwplbVNpZ24gUEtJMRQwEgYDVQQKEwtl"
-    "TXVkaHJhIEluYzEcMBoGA1UEAxMTZW1TaWduIFJvb3QgQ0EgLSBDMQ==",
-    "AK7PALrEzzL4Q7I=",
-    },
-  {
-    // CN=emSign ECC Root CA - C3,O=eMudhra Inc,OU=emSign PKI,C=US
-    "2.23.140.1.1",
-    "CA/Browser Forum EV OID",
-    { 0xBC, 0x4D, 0x80, 0x9B, 0x15, 0x18, 0x9D, 0x78, 0xDB, 0x3E, 0x1D,
-      0x8C, 0xF4, 0xF9, 0x72, 0x6A, 0x79, 0x5D, 0xA1, 0x64, 0x3C, 0xA5,
-      0xF1, 0x35, 0x8E, 0x1D, 0xDB, 0x0E, 0xDC, 0x0D, 0x7E, 0xB3 },
-    "MFoxCzAJBgNVBAYTAlVTMRMwEQYDVQQLEwplbVNpZ24gUEtJMRQwEgYDVQQKEwtl"
-    "TXVkaHJhIEluYzEgMB4GA1UEAxMXZW1TaWduIEVDQyBSb290IENBIC0gQzM=",
-    "e3G2gla4EnycqA==",
-  },
-  {
     // OU=certSIGN ROOT CA G2,O=CERTSIGN SA,C=RO
     "2.23.140.1.1",
     "CA/Browser Forum EV OID",
@@ -765,6 +651,32 @@ static const struct EVInfo kEVInfos[] = {
     "TkYgQXV0b3JpZGFkIGRlIENlcnRpZmljYWNpb24xFDASBgNVBAsTC0FORiBDQSBS"
     "YWl6MSIwIAYDVQQDExlBTkYgU2VjdXJlIFNlcnZlciBSb290IENB",
     "DdPjvGz5a7E=",
+  },
+  {
+    // CN=Hellenic Academic and Research Institutions ECC RootCA 2015,O=Hellenic Academic and Research Institutions Cert. Authority,L=Athens,C=GR
+    "2.23.140.1.1",
+    "CA/Browser Forum EV OID",
+    { 0x44, 0xB5, 0x45, 0xAA, 0x8A, 0x25, 0xE6, 0x5A, 0x73, 0xCA, 0x15,
+      0xDC, 0x27, 0xFC, 0x36, 0xD2, 0x4C, 0x1C, 0xB9, 0x95, 0x3A, 0x06,
+      0x65, 0x39, 0xB1, 0x15, 0x82, 0xDC, 0x48, 0x7B, 0x48, 0x33 },
+    "MIGqMQswCQYDVQQGEwJHUjEPMA0GA1UEBxMGQXRoZW5zMUQwQgYDVQQKEztIZWxs"
+    "ZW5pYyBBY2FkZW1pYyBhbmQgUmVzZWFyY2ggSW5zdGl0dXRpb25zIENlcnQuIEF1"
+    "dGhvcml0eTFEMEIGA1UEAxM7SGVsbGVuaWMgQWNhZGVtaWMgYW5kIFJlc2VhcmNo"
+    "IEluc3RpdHV0aW9ucyBFQ0MgUm9vdENBIDIwMTU=",
+    "AA==",
+  },
+  {
+    // CN=Hellenic Academic and Research Institutions RootCA 2015,O=Hellenic Academic and Research Institutions Cert. Authority,L=Athens,C=GR
+    "2.23.140.1.1",
+    "CA/Browser Forum EV OID",
+    { 0xA0, 0x40, 0x92, 0x9A, 0x02, 0xCE, 0x53, 0xB4, 0xAC, 0xF4, 0xF2,
+      0xFF, 0xC6, 0x98, 0x1C, 0xE4, 0x49, 0x6F, 0x75, 0x5E, 0x6D, 0x45,
+      0xFE, 0x0B, 0x2A, 0x69, 0x2B, 0xCD, 0x52, 0x52, 0x3F, 0x36 },
+    "MIGmMQswCQYDVQQGEwJHUjEPMA0GA1UEBxMGQXRoZW5zMUQwQgYDVQQKEztIZWxs"
+    "ZW5pYyBBY2FkZW1pYyBhbmQgUmVzZWFyY2ggSW5zdGl0dXRpb25zIENlcnQuIEF1"
+    "dGhvcml0eTFAMD4GA1UEAxM3SGVsbGVuaWMgQWNhZGVtaWMgYW5kIFJlc2VhcmNo"
+    "IEluc3RpdHV0aW9ucyBSb290Q0EgMjAxNQ==",
+    "AA==",
   },
   {
     // CN=HARICA TLS RSA Root CA 2021,O=Hellenic Academic and Research Institutions CA,C=GR
@@ -1048,6 +960,17 @@ static const struct EVInfo kEVInfos[] = {
     "MFoxCzAJBgNVBAYTAkpQMSYwJAYDVQQKEx1TRUNPTSBUcnVzdCBTeXN0ZW1zIENv"
     "LiwgTHRkLjEjMCEGA1UEAxMaU0VDT00gVExTIEVDQyBSb290IENBIDIwMjQ=",
     "AIF6LO+PI3pE",
+  },
+  {
+    // CN=SwissSign RSA TLS Root CA 2022 - 1,O=SwissSign AG,C=CH
+    "2.23.140.1.1",
+    "CA/Browser Forum EV OID",
+    { 0x19, 0x31, 0x44, 0xF4, 0x31, 0xE0, 0xFD, 0xDB, 0x74, 0x07, 0x17,
+      0xD4, 0xDE, 0x92, 0x6A, 0x57, 0x11, 0x33, 0x88, 0x4B, 0x43, 0x60,
+      0xD3, 0x0E, 0x27, 0x29, 0x13, 0xCB, 0xE6, 0x60, 0xCE, 0x41 },
+    "MFExCzAJBgNVBAYTAkNIMRUwEwYDVQQKEwxTd2lzc1NpZ24gQUcxKzApBgNVBAMT"
+    "IlN3aXNzU2lnbiBSU0EgVExTIFJvb3QgQ0EgMjAyMiAtIDE=",
+    "Q/oMX04bgBhE79G0TzUfRPSA7cs=",
   }
     // clang-format on
 };

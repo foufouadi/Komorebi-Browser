@@ -8,7 +8,9 @@ import hashlib
 import os
 import pathlib
 import sys
+import threading
 import time
+from concurrent.futures import Future
 
 import requests
 from taskgraph import create
@@ -26,9 +28,19 @@ RETRY_TIMEOUT = 9 * 60  # seconds
 RETRY_INTERVAL = 10  # seconds
 
 # Preset confidence thresholds.
+CT_VERY_LOW = 0.3
 CT_LOW = 0.7
 CT_MEDIUM = 0.8
 CT_HIGH = 0.9
+
+# The confidence levels of the preset thresholds, for which bugbug can return the thresholds to
+# use with its current models.
+CT_LEVELS = {
+    CT_VERY_LOW: "very_low",
+    CT_LOW: "low",
+    CT_MEDIUM: "medium",
+    CT_HIGH: "high",
+}
 
 GROUP_TRANSLATIONS = {
     "testing/web-platform/tests": "",
@@ -44,15 +56,44 @@ def translate_group(group):
     return group
 
 
+def get_confidence_threshold(data, kind, confidence_threshold):
+    """Return the threshold to use for the "tasks" or "groups" (`kind`) of a bugbug reply.
+
+    The scale of the confidences depends on bugbug's models, so bugbug returns the thresholds
+    matching the preset ones (computed when training its models) in "confidence_thresholds".
+    Other thresholds, or preset ones when bugbug didn't return any, are used as they are.
+    """
+    level = CT_LEVELS.get(confidence_threshold)
+    if level is None:
+        return confidence_threshold
+
+    return (
+        data
+        .get("confidence_thresholds", {})
+        .get(kind, {})
+        .get(level, confidence_threshold)
+    )
+
+
 class BugbugTimeoutException(Exception):
     pass
 
 
-@functools.cache
-def get_session():
+def _new_session():
     s = requests.Session()
     s.headers.update({"X-API-KEY": "gecko-taskgraph"})
     return requests_retry_session(retries=5, session=s)
+
+
+@functools.cache
+def get_session():
+    return _new_session()
+
+
+# Taskgraph forks a process per kind, and connections pooled in the parent's
+# session would be shared with, and between, those processes.
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=get_session.cache_clear)
 
 
 def _perfherder_artifact_path(base_path, perfherder_data):
@@ -98,23 +139,10 @@ def _write_perfherder_data(lower_is_better):
             json.dump(perfherder_data, f)
 
 
-@functools.cache
-def push_schedules(branch, rev):
-    # Noop if we're in test-action-callback
-    if create.testing:
-        return
-
-    url = BUGBUG_BASE_URL + f"/push/{branch}/{rev}/schedules"
-    start = monotonic()
-    session = get_session()
-
-    # On try there is no fallback and pulling is slower, so we allow bugbug more
-    # time to compute the results.
-    # See https://github.com/mozilla/bugbug/issues/1673.
-    timeout = RETRY_TIMEOUT
-    if branch == "try":
-        timeout += int(timeout / 3)
-
+def _get_when_ready(url, session, timeout):
+    """Query ``url`` until bugbug stops answering 202 (result still being
+    computed) or ``timeout`` seconds have passed. Returns the last response
+    and the number of retries."""
     attempts = timeout / RETRY_INTERVAL
     i = 0
     while i < attempts:
@@ -126,14 +154,34 @@ def push_schedules(branch, rev):
 
         time.sleep(RETRY_INTERVAL)
         i += 1
+    return r, i
+
+
+def _fetch_push_schedules(branch, rev, session, *, write_perfherder_data=True):
+    # Noop if we're in test-action-callback
+    if create.testing:
+        return
+
+    url = BUGBUG_BASE_URL + f"/push/{branch}/{rev}/schedules"
+    start = monotonic()
+
+    # On try there is no fallback and pulling is slower, so we allow bugbug more
+    # time to compute the results.
+    # See https://github.com/mozilla/bugbug/issues/1673.
+    timeout = RETRY_TIMEOUT
+    if branch == "try":
+        timeout += int(timeout / 3)
+
+    r, i = _get_when_ready(url, session, timeout)
     end = monotonic()
 
-    _write_perfherder_data(
-        lower_is_better={
-            "bugbug_push_schedules_time": end - start,
-            "bugbug_push_schedules_retries": i,
-        }
-    )
+    if write_perfherder_data:
+        _write_perfherder_data(
+            lower_is_better={
+                "bugbug_push_schedules_time": end - start,
+                "bugbug_push_schedules_retries": i,
+            }
+        )
 
     data = r.json()
     if r.status_code == 202:
@@ -148,6 +196,49 @@ def push_schedules(branch, rev):
         }
 
     return data
+
+
+@functools.cache
+def push_schedules(branch, rev):
+    return _fetch_push_schedules(branch, rev, get_session())
+
+
+@functools.cache
+def push_perf_risk(branch, rev):
+    """Return bugbug's performance regression risk prediction for the push
+    of ``rev``, which scores each of its commits."""
+    url = BUGBUG_BASE_URL + f"/perfregressionpredictor/predict/push/{branch}/{rev}"
+    r, _ = _get_when_ready(url, get_session(), RETRY_TIMEOUT)
+    if r.status_code == 202:
+        raise BugbugTimeoutException(f"Timed out waiting for result from '{url}'")
+    return r.json()
+
+
+def start_push_schedules(branch, rev):
+    """Start querying bugbug for the push schedules in a daemon thread.
+
+    Returns a `Future` that callers can either check or ignore; since the
+    thread is a daemon, it won't keep the process alive if bugbug is slow.
+
+    The future isn't cached, so that the processes taskgraph forks to load kinds
+    don't wait for a thread that isn't copied into them. The thread uses its own
+    session, so that those processes don't inherit and reuse its open
+    connections, and so that it doesn't share a session with the main thread.
+    """
+    future = Future()
+
+    def run():
+        try:
+            future.set_result(
+                _fetch_push_schedules(
+                    branch, rev, _new_session(), write_perfherder_data=False
+                )
+            )
+        except Exception as e:
+            future.set_exception(e)
+
+    threading.Thread(target=run, daemon=True).start()
+    return future
 
 
 @functools.cache

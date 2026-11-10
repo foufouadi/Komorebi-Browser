@@ -43,10 +43,13 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach 
 
 dependencies {
     implementation(libs.kaml)
-    compileOnly(libs.android.gradle.plugin)
+    implementation(libs.android.gradle.plugin)
+    implementation(libs.kotlin.gradle.plugin)
     implementation(libs.spotless.plugin)
+    implementation(libs.tomlj)
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
+    testImplementation(libs.mockito)
     testRuntimeOnly(libs.junit.platform.launcher)
 
     lintChecks(libs.androidx.lint)

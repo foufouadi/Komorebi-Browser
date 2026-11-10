@@ -31,7 +31,7 @@
  *
  * Portions of this code taken from V8, whose copyright notice is as follows:
  *
- *   Copyright 2017 the V8 project authors. All rights reserved.
+ *   Copyright 2017,2021 the V8 project authors. All rights reserved.
  *   Redistribution and use in source and binary forms, with or without
  *   modification, are permitted provided that the following conditions are
  *   met:
@@ -100,11 +100,13 @@
 
 #include "builtin/Number.h"
 #include "gc/GCEnum.h"
+#include "js/AllocPolicy.h"
 #include "js/BigInt.h"
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
 #include "js/Printer.h"               // js::GenericPrinter
 #include "js/StableStringChars.h"
 #include "js/Utility.h"
+#include "js/Vector.h"
 #include "util/DifferentialTesting.h"
 #include "vm/JSONPrinter.h"  // js::JSONPrinter
 #include "vm/StaticStrings.h"
@@ -261,6 +263,36 @@ using TwoDigit = uint64_t;
 using TwoDigit = __uint128_t;
 #endif
 
+inline BigInt::Digit BigInt::digitAdd3(Digit a, Digit b, Digit c,
+                                       Digit* carry) {
+#if defined(HAVE_TWO_DIGIT)
+  TwoDigit result = static_cast<TwoDigit>(a) + b + c;
+  *carry = result >> DigitBits;
+  return static_cast<Digit>(result);
+#else
+  Digit result = a + b;
+  *carry = result < a;
+  result += c;
+  *carry += result < c;
+  return result;
+#endif
+}
+
+inline BigInt::Digit BigInt::digitSub3(Digit a, Digit b, Digit c,
+                                       Digit* borrow) {
+#if defined(HAVE_TWO_DIGIT)
+  TwoDigit result = static_cast<TwoDigit>(a) - b - c;
+  *borrow = -static_cast<Digit>(result >> DigitBits);
+  return static_cast<Digit>(result);
+#else
+  Digit result = a - b;
+  *borrow = result > a;
+  Digit difference = result - c;
+  *borrow += difference > result;
+  return difference;
+#endif
+}
+
 inline BigInt::Digit BigInt::digitMul(Digit a, Digit b, Digit* high) {
 #if defined(HAVE_TWO_DIGIT)
   TwoDigit result = static_cast<TwoDigit>(a) * static_cast<TwoDigit>(b);
@@ -288,12 +320,28 @@ inline BigInt::Digit BigInt::digitMul(Digit a, Digit b, Digit* high) {
   Digit rMid2 = aHigh * bLow;
   Digit rHigh = aHigh * bHigh;
 
-  Digit carry = 0;
-  Digit low = digitAdd(rLow, rMid1 << HalfDigitBits, &carry);
-  low = digitAdd(low, rMid2 << HalfDigitBits, &carry);
+  Digit carry;
+  Digit low =
+      digitAdd3(rLow, rMid1 << HalfDigitBits, rMid2 << HalfDigitBits, &carry);
 
   *high = (rMid1 >> HalfDigitBits) + (rMid2 >> HalfDigitBits) + rHigh + carry;
 
+  return low;
+#endif
+}
+
+inline BigInt::Digit BigInt::digitMulAdd(Digit a, Digit b, Digit c, Digit d,
+                                         Digit* high) {
+  // The result can't overflow: (B - 1)^2 + 2 * (B - 1) = B^2 - 1.
+#if defined(HAVE_TWO_DIGIT)
+  TwoDigit result = static_cast<TwoDigit>(a) * b + c + d;
+  *high = result >> DigitBits;
+  return static_cast<Digit>(result);
+#else
+  Digit carry;
+  Digit low = digitMul(a, b, high);
+  low = digitAdd3(low, c, d, &carry);
+  *high += carry;
   return low;
 #endif
 }
@@ -403,19 +451,16 @@ void BigInt::internalMultiplyAdd(const BigInt* source, Digit factor,
   Digit high = 0;
   for (unsigned i = 0; i < n; i++) {
     Digit current = sourceDigits[i];
-    Digit newCarry = 0;
 
     // Compute this round's multiplication.
     Digit newHigh = 0;
     current = digitMul(current, factor, &newHigh);
 
     // Add last round's carryovers.
-    current = digitAdd(current, high, &newCarry);
-    current = digitAdd(current, carry, &newCarry);
+    current = digitAdd3(current, high, carry, &carry);
 
     // Store result and prepare for next round.
     resultDigits[i] = current;
-    carry = newCarry;
     high = newHigh;
   }
 
@@ -455,34 +500,42 @@ void BigInt::multiplyAccumulate(const BigInt* multiplicand, Digit multiplier,
   Digit carry = 0;
   Digit high = 0;
   for (unsigned i = 0; i < multiplicandDigits.size(); i++, accumulatorIndex++) {
-    Digit acc = accumulatorDigits[accumulatorIndex];
-    Digit newCarry = 0;
-
     // Add last round's carryovers.
-    acc = digitAdd(acc, high, &newCarry);
-    acc = digitAdd(acc, carry, &newCarry);
+    Digit acc =
+        digitAdd3(accumulatorDigits[accumulatorIndex], high, carry, &carry);
 
     // Compute this round's multiplication.
     Digit multiplicandDigit = multiplicandDigits[i];
     Digit low = digitMul(multiplier, multiplicandDigit, &high);
-    acc = digitAdd(acc, low, &newCarry);
+    Digit lowCarry;
+    acc = digitAdd(acc, low, &lowCarry);
+    carry += lowCarry;
 
     // Store result and prepare for next round.
     accumulatorDigits[accumulatorIndex] = acc;
-    carry = newCarry;
   }
 
   while (carry || high) {
     MOZ_ASSERT(accumulatorIndex < accumulatorDigits.size());
-    Digit acc = accumulatorDigits[accumulatorIndex];
-    Digit newCarry = 0;
-    acc = digitAdd(acc, high, &newCarry);
+    accumulatorDigits[accumulatorIndex] =
+        digitAdd3(accumulatorDigits[accumulatorIndex], high, carry, &carry);
     high = 0;
-    acc = digitAdd(acc, carry, &newCarry);
-    accumulatorDigits[accumulatorIndex] = acc;
-    carry = newCarry;
     accumulatorIndex++;
   }
+}
+
+inline int8_t BigInt::absoluteCompare(ConstDigits x, ConstDigits y) {
+  MOZ_RELEASE_ASSERT(x.size() == y.size());
+  int i = x.size() - 1;
+  while (i >= 0 && x[i] == y[i]) {
+    i--;
+  }
+
+  if (i < 0) {
+    return 0;
+  }
+
+  return x[i] > y[i] ? 1 : -1;
 }
 
 inline int8_t BigInt::absoluteCompare(const BigInt* x, const BigInt* y) {
@@ -498,18 +551,7 @@ inline int8_t BigInt::absoluteCompare(const BigInt* x, const BigInt* y) {
     return diff < 0 ? -1 : 1;
   }
 
-  auto xDigits = x->digits();
-  auto yDigits = y->digits();
-  int i = xDigits.size() - 1;
-  while (i >= 0 && xDigits[i] == yDigits[i]) {
-    i--;
-  }
-
-  if (i < 0) {
-    return 0;
-  }
-
-  return xDigits[i] > yDigits[i] ? 1 : -1;
+  return absoluteCompare(x->unguardedDigits(), y->unguardedDigits());
 }
 
 BigInt* BigInt::absoluteAdd(JSContext* cx, HandleBigInt x, HandleBigInt y,
@@ -580,18 +622,11 @@ BigInt* BigInt::absoluteAdd(JSContext* cx, HandleBigInt x, HandleBigInt y,
     Digit carry = 0;
     unsigned i = 0;
     for (; i < rightDigits.size(); i++) {
-      Digit newCarry = 0;
-      Digit sum = digitAdd(leftDigits[i], rightDigits[i], &newCarry);
-      sum = digitAdd(sum, carry, &newCarry);
-      resultDigits[i] = sum;
-      carry = newCarry;
+      resultDigits[i] = digitAdd3(leftDigits[i], rightDigits[i], carry, &carry);
     }
 
     for (; i < leftDigits.size(); i++) {
-      Digit newCarry = 0;
-      Digit sum = digitAdd(leftDigits[i], carry, &newCarry);
-      resultDigits[i] = sum;
-      carry = newCarry;
+      resultDigits[i] = digitAdd(leftDigits[i], carry, &carry);
     }
 
     resultDigits[i] = carry;
@@ -635,18 +670,11 @@ BigInt* BigInt::absoluteSub(JSContext* cx, HandleBigInt x, HandleBigInt y,
     Digit borrow = 0;
     unsigned i = 0;
     for (; i < yDigits.size(); i++) {
-      Digit newBorrow = 0;
-      Digit difference = digitSub(xDigits[i], yDigits[i], &newBorrow);
-      difference = digitSub(difference, borrow, &newBorrow);
-      resultDigits[i] = difference;
-      borrow = newBorrow;
+      resultDigits[i] = digitSub3(xDigits[i], yDigits[i], borrow, &borrow);
     }
 
     for (; i < xDigits.size(); i++) {
-      Digit newBorrow = 0;
-      Digit difference = digitSub(xDigits[i], borrow, &newBorrow);
-      resultDigits[i] = difference;
-      borrow = newBorrow;
+      resultDigits[i] = digitSub(xDigits[i], borrow, &borrow);
     }
 
     MOZ_ASSERT(!borrow);
@@ -714,56 +742,6 @@ bool BigInt::absoluteDivWithDigitDivisor(
   }
 
   return true;
-}
-
-// Adds `summand` onto `this`, starting with `summand`'s 0th digit
-// at `this`'s `startIndex`'th digit. Returns the "carry" (0 or 1).
-BigInt::Digit BigInt::absoluteInplaceAdd(const BigInt* summand,
-                                         unsigned startIndex) {
-  Digit carry = 0;
-  unsigned n = summand->digitLength();
-  MOZ_ASSERT(digitLength() > startIndex,
-             "must start adding at an in-range digit");
-  MOZ_ASSERT(digitLength() - startIndex >= n,
-             "digits being added to must not extend above the digits in "
-             "this (except for the returned carry digit)");
-  auto thisDigits = digits();
-  auto summandDigits = summand->digits();
-  for (unsigned i = 0; i < n; i++) {
-    Digit newCarry = 0;
-    Digit sum =
-        digitAdd(thisDigits[startIndex + i], summandDigits[i], &newCarry);
-    sum = digitAdd(sum, carry, &newCarry);
-    thisDigits[startIndex + i] = sum;
-    carry = newCarry;
-  }
-
-  return carry;
-}
-
-// Subtracts `subtrahend` from this, starting with `subtrahend`'s 0th digit
-// at `this`'s `startIndex`-th digit. Returns the "borrow" (0 or 1).
-BigInt::Digit BigInt::absoluteInplaceSub(const BigInt* subtrahend,
-                                         unsigned startIndex) {
-  Digit borrow = 0;
-  unsigned n = subtrahend->digitLength();
-  MOZ_ASSERT(digitLength() > startIndex,
-             "must start subtracting from an in-range digit");
-  MOZ_ASSERT(digitLength() - startIndex >= n,
-             "digits being subtracted from must not extend above the "
-             "digits in this (except for the returned borrow digit)");
-  auto thisDigits = digits();
-  auto subtrahendDigits = subtrahend->digits();
-  for (unsigned i = 0; i < n; i++) {
-    Digit newBorrow = 0;
-    Digit difference =
-        digitSub(thisDigits[startIndex + i], subtrahendDigits[i], &newBorrow);
-    difference = digitSub(difference, borrow, &newBorrow);
-    thisDigits[startIndex + i] = difference;
-    borrow = newBorrow;
-  }
-
-  return borrow;
 }
 
 // Returns whether (factor1 * factor2) > (high << kDigitBits) + low.
@@ -839,15 +817,206 @@ BigInt* BigInt::absoluteLeftShiftAlwaysCopy(JSContext* cx, HandleBigInt x,
   return result;
 }
 
+// The schoolbook division algorithm computes an estimate of the quotient
+// (q-hat) by dividing each pair of digits in the dividend by the top digit of
+// the divisor. This two-by-one division is fine on architectures with a wide
+// hardware division instruction, but AArch64 is not one of those; there it is
+// much faster to divide by multiplying against an inverse, and since each
+// operation has the same divisor, we can compute the inverse once. As it turns
+// out, it's just as fast to do things this way on x86/x86-64, so we just take
+// the same path everywhere.
+//
+// Note that this relies on the divisor being "normalized" (left-shifted such
+// that its most significant bit is set); this normalization is stripped off in
+// the end as part of the schoolbook algorithm.
+//
+// This routine was derived from V8's MultiplicativeDigitDiv.
+BigInt::Digit BigInt::normalizedDigitInverse(Digit divisor) {
+  MOZ_ASSERT(divisor & (Digit(1) << (DigitBits - 1)));
+  Digit high = ~divisor;
+  Digit low = Digit(-1);
+  Digit remainder;
+  return digitDiv(high, low, divisor, &remainder);
+}
+
+// This routine was derived from V8's MultiplicativeDigitDiv.
+BigInt::Digit BigInt::digitDivByMultiplication(Digit high, Digit low,
+                                               Digit divisor, Digit inverse,
+                                               Digit* remainder) {
+  MOZ_ASSERT(divisor & (Digit(1) << (DigitBits - 1)));
+  MOZ_ASSERT(high < divisor);
+  MOZ_ASSERT(inverse == normalizedDigitInverse(divisor));
+  // https://gmplib.org/~tege/division-paper.pdf, "Algorithm 4".
+  // Paper: u1 = high, u0 = low, d = divisor, v = inverse,
+  // "mod β" means "truncate to Digit width".
+  // 1. <q1, q0> ← v*u1
+  Digit q1;
+  Digit q0 = digitMul(high, inverse, &q1);
+  // 2. <q1, q0> ← <q1, q0> + <u1, u0>
+  Digit carry;
+  q0 = digitAdd(q0, low, &carry);
+  q1 = digitAdd3(q1, high, carry, &carry);
+  MOZ_ASSERT(carry == 0);
+  // 3. q1 ← (q1 + 1) mod β
+  q1++;
+  // 4. r ← (u0 − q1*d) mod β
+  Digit r = low - q1 * divisor;
+  // 5. if r > q0:  // Unpredictable condition
+  if (r > q0) {
+    // 6. q1 ← (q1 − 1) mod β
+    q1--;
+    // 7. r ← (r + d) mod β
+    r += divisor;
+  }
+  // 8 if r >= d:  // Unlikely condition
+  if (MOZ_UNLIKELY(r >= divisor)) {
+    // 9. q1 ← q1 + 1
+    q1++;
+    // 10. r ← r − d
+    r -= divisor;
+  }
+  // 11. return q1, r
+  *remainder = r;
+
+#ifdef DEBUG
+  {
+    Digit q, r;
+    q = digitDiv(high, low, divisor, &r);
+    MOZ_ASSERT(q == q1);
+    MOZ_ASSERT(r == *remainder);
+  }
+#endif
+
+  return q1;
+}
+
+void BigInt::multiplyDigits(ConstDigits multiplicand, Digit multiplier,
+                            Digits product) {
+  MOZ_RELEASE_ASSERT(product.size() == multiplicand.size() + 1);
+
+  Digit carry = 0;
+  for (size_t i = 0; i < multiplicand.size(); i++) {
+    product[i] = digitMulAdd(multiplicand[i], multiplier, carry, 0, &carry);
+  }
+  product[multiplicand.size()] = carry;
+}
+
+// Both inplaceSubDigits and inplaceAddDigits check the bounds once, by taking
+// a subspan of `x` of the same length as `y`.
+BigInt::Digit BigInt::inplaceSubDigits(Digits x, ConstDigits y) {
+  Digits xs = x.First(y.size());
+  Digit borrow = 0;
+  for (size_t i = 0; i < y.size(); i++) {
+    xs[i] = digitSub3(xs[i], y[i], borrow, &borrow);
+  }
+  return borrow;
+}
+
+BigInt::Digit BigInt::inplaceAddDigits(Digits x, ConstDigits y) {
+  Digits xs = x.First(y.size());
+  Digit carry = 0;
+  for (size_t i = 0; i < y.size(); i++) {
+    xs[i] = digitAdd3(xs[i], y[i], carry, &carry);
+  }
+  return carry;
+}
+
+// See Knuth, Volume 2, section 4.3.1, Algorithm D.  Also see the overview of
+// the algorithm by Jan Marthedal Rasmussen over at
+// https://janmr.com/blog/2014/04/basic-multiple-precision-long-division/.
+//
+// On return the low `v.size()` digits of `u` hold the remainder.
+void BigInt::divideDigitsInPlace(Digits u, ConstDigits v, Digits q,
+                                 Digits qhatv) {
+  // The unusual variable names inside this function are consistent with
+  // Knuth's book, as well as with Go's implementation of this algorithm.
+  // Maintaining this consistency is probably more useful than trying to
+  // come up with more descriptive names for them.
+
+  // First, check preconditions. Use release asserts on sizes, so that the
+  // compiler can remove bounds checks on Digits::operator[] access.
+  const size_t n = v.size();
+  // `v` must have at least two digits with the high bit of its top digit set.
+  MOZ_RELEASE_ASSERT(n >= 2);
+  MOZ_ASSERT(v[n - 1] >> (DigitBits - 1));
+
+  // `u` must have more digits than `v`, with the top `v.size()` digits of `u`
+  // less than `v`.
+  MOZ_RELEASE_ASSERT(u.size() > n);
+  MOZ_ASSERT(absoluteCompare(u.From(u.size() - n), v) < 0);
+  // If `q` is non-empty it must have `u.size() - v.size()` digits and receives
+  // the quotient.
+  MOZ_RELEASE_ASSERT(q.empty() || q.size() == u.size() - n);
+  // `qhatv` must have `v.size() + 1` digits.
+  MOZ_RELEASE_ASSERT(qhatv.size() == n + 1);
+  const size_t m = u.size() - n - 1;
+
+  // D2.
+  // Iterate over the dividend's digit (like the "grade school" algorithm).
+  // `vn1` is the divisor's most significant digit.
+  Digit vn1 = v[n - 1];
+  Digit vn2 = v[n - 2];
+  Digit vn1Inverse = normalizedDigitInverse(vn1);
+  for (size_t j = m + 1; j-- > 0;) {
+    // The digits of `u` that this iteration works on.
+    Digits uj = u.From(j).First(n + 1);
+
+    // D3.
+    // Estimate the current iteration's quotient digit (see Knuth for
+    // details). `qhat` is the current quotient digit.
+    Digit qhat = std::numeric_limits<Digit>::max();
+
+    // `ujn` is the dividend's most significant remaining digit.
+    Digit ujn = uj[n];
+    if (ujn != vn1) {
+      // `rhat` is the current iteration's remainder.
+      Digit rhat = 0;
+      // Estimate the current quotient digit by dividing the most significant
+      // digits of dividend and divisor. The result will not be too small,
+      // but could be a bit too large.
+      qhat = digitDivByMultiplication(ujn, uj[n - 1], vn1, vn1Inverse, &rhat);
+
+      // Decrement the quotient estimate as needed by looking at the next
+      // digit, i.e. by testing whether
+      // qhat * v_{n-2} > (rhat << DigitBits) + u_{j+n-2}.
+      Digit ujn2 = uj[n - 2];
+      while (productGreaterThan(qhat, vn2, rhat, ujn2)) {
+        qhat--;
+        Digit prevRhat = rhat;
+        rhat += vn1;
+        // v[n-1] >= 0, so this tests for overflow.
+        if (rhat < prevRhat) {
+          break;
+        }
+      }
+    }
+
+    // D4.
+    // Multiply the divisor with the current quotient digit, and subtract
+    // it from the dividend. If there was "borrow", then the quotient digit
+    // was one too high, so we must correct it and undo one subtraction of
+    // the (shifted) divisor.
+    multiplyDigits(v, qhat, qhatv);
+    Digit c = inplaceSubDigits(uj, qhatv);
+    if (c) {
+      c = inplaceAddDigits(uj, v);
+      uj[n] = uj[n] + c;
+      qhat--;
+    }
+
+    if (!q.empty()) {
+      q[j] = qhat;
+    }
+  }
+}
+
 // Divides `dividend` by `divisor`, returning the result in `quotient` and
 // `remainder`. Mathematically, the contract is:
 //
 //   quotient = (dividend - remainder) / divisor, with 0 <= remainder < divisor.
 //
 // Both `quotient` and `remainder` are optional, for callers that are only
-// interested in one of them.  See Knuth, Volume 2, section 4.3.1, Algorithm D.
-// Also see the overview of the algorithm by Jan Marthedal Rasmussen over at
-// https://janmr.com/blog/2014/04/basic-multiple-precision-long-division/.
+// interested in one of them.
 bool BigInt::absoluteDivWithBigIntDivisor(
     JSContext* cx, HandleBigInt dividend, HandleBigInt divisor,
     const Maybe<MutableHandleBigInt>& quotient,
@@ -860,14 +1029,10 @@ bool BigInt::absoluteDivWithBigIntDivisor(
   MOZ_ASSERT(!quotient || !quotient.value());
   MOZ_ASSERT(!remainder || !remainder.value());
 
-  // The unusual variable names inside this function are consistent with
-  // Knuth's book, as well as with Go's implementation of this algorithm.
-  // Maintaining this consistency is probably more useful than trying to
-  // come up with more descriptive names for them.
   const unsigned n = divisor->digitLength();
   const unsigned m = dividend->digitLength() - n;
 
-  RootedTuple<BigInt*, BigInt*, BigInt*, BigInt*> roots(cx);
+  RootedTuple<BigInt*, BigInt*, BigInt*> roots(cx);
 
   // The quotient to be computed.
   RootedField<BigInt*, 0> q(roots);
@@ -880,9 +1045,9 @@ bool BigInt::absoluteDivWithBigIntDivisor(
 
   // In each iteration, `qhatv` holds `divisor` * `current quotient digit`.
   // "v" is the book's name for `divisor`, `qhat` the current quotient digit.
-  RootedField<BigInt*, 1> qhatv(roots,
-                                createUninitialized(cx, n + 1, isNegative));
-  if (!qhatv) {
+  Vector<Digit, 16, SystemAllocPolicy> qhatv;
+  if (!qhatv.resize(n + 1)) {
+    ReportOutOfMemory(cx);
     return false;
   }
 
@@ -894,7 +1059,7 @@ bool BigInt::absoluteDivWithBigIntDivisor(
   Digit lastDigit = divisor->individualDigit(n - 1);
   unsigned shift = std::countl_zero(lastDigit);
 
-  RootedField<BigInt*, 2> shiftedDivisor(roots);
+  RootedField<BigInt*, 1> shiftedDivisor(roots);
   if (shift > 0) {
     shiftedDivisor = absoluteLeftShiftAlwaysCopy(cx, divisor, shift,
                                                  LeftShiftMode::SameSizeResult);
@@ -907,74 +1072,16 @@ bool BigInt::absoluteDivWithBigIntDivisor(
 
   // Holds the (continuously updated) remaining part of the dividend, which
   // eventually becomes the remainder.
-  RootedField<BigInt*, 3> u(
+  RootedField<BigInt*, 2> u(
       roots, absoluteLeftShiftAlwaysCopy(cx, dividend, shift,
                                          LeftShiftMode::AlwaysAddOneDigit));
   if (!u) {
     return false;
   }
 
-  {
-    auto shiftedDivisorDigits = shiftedDivisor->digits();
-    auto uDigits = u->digits();
-    auto qDigits =
-        quotient ? q->digits() : BigInt::DigitsGuard(Digits(), nullptr);
-
-    // D2.
-    // Iterate over the dividend's digit (like the "grade school" algorithm).
-    // `vn1` is the divisor's most significant digit.
-    Digit vn1 = shiftedDivisorDigits[n - 1];
-    for (int j = m; j >= 0; j--) {
-      // D3.
-      // Estimate the current iteration's quotient digit (see Knuth for
-      // details).
-      // `qhat` is the current quotient digit.
-      Digit qhat = std::numeric_limits<Digit>::max();
-
-      // `ujn` is the dividend's most significant remaining digit.
-      Digit ujn = uDigits[j + n];
-      if (ujn != vn1) {
-        // `rhat` is the current iteration's remainder.
-        Digit rhat = 0;
-        // Estimate the current quotient digit by dividing the most significant
-        // digits of dividend and divisor. The result will not be too small,
-        // but could be a bit too large.
-        qhat = digitDiv(ujn, uDigits[j + n - 1], vn1, &rhat);
-
-        // Decrement the quotient estimate as needed by looking at the next
-        // digit, i.e. by testing whether
-        // qhat * v_{n-2} > (rhat << DigitBits) + u_{j+n-2}.
-        Digit vn2 = shiftedDivisorDigits[n - 2];
-        Digit ujn2 = uDigits[j + n - 2];
-        while (productGreaterThan(qhat, vn2, rhat, ujn2)) {
-          qhat--;
-          Digit prevRhat = rhat;
-          rhat += vn1;
-          // v[n-1] >= 0, so this tests for overflow.
-          if (rhat < prevRhat) {
-            break;
-          }
-        }
-      }
-
-      // D4.
-      // Multiply the divisor with the current quotient digit, and subtract
-      // it from the dividend. If there was "borrow", then the quotient digit
-      // was one too high, so we must correct it and undo one subtraction of
-      // the (shifted) divisor.
-      internalMultiplyAdd(shiftedDivisor, qhat, 0, n, qhatv);
-      Digit c = u->absoluteInplaceSub(qhatv, j);
-      if (c) {
-        c = u->absoluteInplaceAdd(shiftedDivisor, j);
-        uDigits[j + n] = uDigits[j + n] + c;
-        qhat--;
-      }
-
-      if (quotient) {
-        qDigits[j] = qhat;
-      }
-    }
-  }
+  divideDigitsInPlace(u->unguardedDigits(),
+                      shiftedDivisor->unguardedDigits().First(n),
+                      quotient ? q->unguardedDigits() : Digits(), qhatv);
 
   if (quotient) {
     BigInt* bi = destructivelyTrimHighZeroDigits(cx, q);
@@ -1097,9 +1204,7 @@ BigInt* BigInt::absoluteAddOne(JSContext* cx, HandleBigInt x,
     auto resultDigits = result->digits();
     Digit carry = 1;
     for (unsigned i = 0; i < inputLength; i++) {
-      Digit newCarry = 0;
-      resultDigits[i] = digitAdd(xDigits[i], carry, &newCarry);
-      carry = newCarry;
+      resultDigits[i] = digitAdd(xDigits[i], carry, &carry);
     }
     if (resultLength > inputLength) {
       MOZ_ASSERT(carry == 1);
@@ -1135,9 +1240,7 @@ BigInt* BigInt::absoluteSubOne(JSContext* cx, HandleBigInt x,
     auto resultDigits = result->digits();
     Digit borrow = 1;
     for (unsigned i = 0; i < length; i++) {
-      Digit newBorrow = 0;
-      resultDigits[i] = digitSub(xDigits[i], borrow, &newBorrow);
-      borrow = newBorrow;
+      resultDigits[i] = digitSub(xDigits[i], borrow, &borrow);
     }
     MOZ_ASSERT(!borrow);
   }
@@ -2092,6 +2195,28 @@ BigInt* BigInt::mod(JSContext* cx, HandleBigInt x, HandleBigInt y) {
 
     return createFromDigit(cx, remainderDigit, x->isNegative());
   } else {
+    uint32_t k;
+    Digit c;
+    if (shouldModuloByCrandallReduction(y, &k, &c)) {
+      RootedBigInt result(cx, modCrandall(cx, x, k, c));
+#ifdef DEBUG
+      if (result) {
+        RootedBigInt expected(cx);
+        if (absoluteDivWithBigIntDivisor(cx, x, y, Nothing(), Some(&expected),
+                                         x->isNegative()) &&
+            (expected = destructivelyTrimHighZeroDigits(cx, expected))) {
+          MOZ_ASSERT(equal(result, expected));
+        } else {
+          // Could be OOM, or it could be that schoolbook needed more scratch
+          // space than crandall, which pushed it over the max bigint size.
+          // Clear the exn generically instead of recoverFromOutOfMemory.
+          cx->clearPendingException();
+        }
+      }
+#endif
+      return result;
+    }
+
     RootedBigInt remainder(cx);
     if (!absoluteDivWithBigIntDivisor(cx, x, y, Nothing(), Some(&remainder),
                                       x->isNegative())) {
@@ -2100,6 +2225,146 @@ BigInt* BigInt::mod(JSContext* cx, HandleBigInt x, HandleBigInt y) {
     MOZ_ASSERT(remainder);
     return destructivelyTrimHighZeroDigits(cx, remainder);
   }
+}
+
+bool BigInt::shouldModuloByCrandallReduction(const BigInt* m, uint32_t* k,
+                                             Digit* c) {
+  // `m` is `2^k - c` for a single-digit `c` if all of its bits above the low
+  // digit are set and the low digit is non-zero.
+  auto mDigits = m->digits();
+  size_t n = mDigits.size();
+  if (n < 2) {
+    return false;
+  }
+
+  // High digit is all ones followed by zeroes in the high bits.
+  Digit top = mDigits[n - 1];
+  if (top & (top + 1)) {
+    return false;
+  }
+
+  // Middle digits are all ones.
+  for (size_t i = 1; i < n - 1; i++) {
+    if (mDigits[i] != Digit(-1)) {
+      return false;
+    }
+  }
+
+  // Low digit is non-zero.
+  if (!mDigits[0]) {
+    return false;
+  }
+
+  unsigned topBits = DigitBits - std::countl_zero(top);
+  Digit cValue = -mDigits[0];
+  uint32_t kValue = (n - 1) * DigitBits + topBits;
+
+  // Crandall reduction is always possible if the preceding conditions hold.
+  // But for some one- and two-digit divisors, it's not profitable.
+  unsigned cBits = DigitBits - std::countl_zero(cValue);
+  if (2 * cBits > kValue) {
+    return false;
+  }
+
+  *k = kValue;
+  *c = cValue;
+  return true;
+}
+
+// See "Handbook of Applied Cryptography" by A. Menezes, P. van Oorschot and
+// S. Vanstone, §14.3.4. `r` is an in-out parameter: it starts as the dividend
+// and is incrementally mutated into the modulo.
+void BigInt::modDigitsInPlaceByCrandallReduction(Digits r, uint32_t k,
+                                                 Digit c) {
+  // For single-digit `c`, the divisor has three parts: a bottom digit whose
+  // value is `-c`, a string of all-ones middle digits, and a high digit with a
+  // string of `kHighDigitBits` ones. The bottom and middle digits are together
+  // the low digits.
+  const size_t kLowDigitCount = k / DigitBits;
+  const unsigned kHighDigitBits = k % DigitBits;
+  const Digit kHighDigitMask = (Digit(1) << kHighDigitBits) - 1;
+  MOZ_RELEASE_ASSERT(kLowDigitCount > 0);
+  // If r is smaller, it is already reduced, and the caller should just return
+  // it without copying.
+  MOZ_RELEASE_ASSERT(r.size() >= kLowDigitCount);
+
+  // Consider that `(x + y) mod z = ((x mod z) + y) mod z`. This congruence
+  // holds also for multiplication. We can replace any part of the dividend with
+  // a smaller value that is congruent to it modulo `2^k - c`, without changing
+  // the result.
+  //
+  // Consider also that `2^k mod (2^k - c) = c`. Therefore, if the bits of a
+  // digit at or above bit `k` have value `d` and start at bit `k + s`, they
+  // contribute `d * 2^(k + s)` to the dividend, which is congruent to `d * c *
+  // 2^s`. We clear those bits and add `d * c` at bit `s` instead.
+  //
+  // We do this from the top digit down. Each fold decreases the dividend, so it
+  // never carries above the digit being cleared, but it may carry into that
+  // digit, which is then folded again. Once all bits at or above bit `k` are
+  // clear, the dividend is less than `2^k`, so at most one subtraction of `2^k
+  // - c` remains.
+  for (size_t j = r.size(); j-- > kLowDigitCount;) {
+    const unsigned shift = j == kLowDigitCount ? kHighDigitBits : 0;
+    while (Digit d = r[j] >> shift) {
+      r[j] &= (Digit(1) << shift) - 1;
+      const size_t s = j * DigitBits + shift - k;
+      const unsigned sb = s % DigitBits;
+      // `d * c`...
+      Digit high;
+      Digit low = digitMul(d, c, &high);
+      // ...at bit `s`.
+      Digit t0 = low << sb;
+      Digit t1 = sb ? (high << sb) | (low >> (DigitBits - sb)) : high;
+      Digit t2 = sb ? high >> (DigitBits - sb) : 0;
+      size_t i = s / DigitBits;
+      // Finally, add `d * c * 2^s` back into dividend.
+      Digit carry;
+      r[i] = digitAdd(r[i], t0, &carry);
+      i++;
+      r[i] = digitAdd3(r[i], t1, carry, &carry);
+      i++;
+      if (i < r.size()) {
+        r[i] = digitAdd3(r[i], t2, carry, &carry);
+        for (i++; carry; i++) {
+          r[i] = digitAdd(r[i], carry, &carry);
+        }
+      } else {
+        MOZ_ASSERT(!t2 && !carry);
+      }
+    }
+  }
+
+  // Now `r < 2^k`, so at most one subtraction of `2^k - c` is needed, which is
+  // the case if `r + c >= 2^k`.
+  Digit carry = c;
+  for (size_t i = 0; carry && i < kLowDigitCount; i++) {
+    r[i] = digitAdd(r[i], carry, &carry);
+  }
+  if (kLowDigitCount < r.size()) {
+    Digit top = r[kLowDigitCount] + carry;
+    r[kLowDigitCount] = top & kHighDigitMask;
+    carry = top >> kHighDigitBits;
+  }
+  if (carry) {
+    return;
+  }
+  Digit borrow = c;
+  for (size_t i = 0; borrow; i++) {
+    r[i] = digitSub(r[i], borrow, &borrow);
+  }
+}
+
+BigInt* BigInt::modCrandall(JSContext* cx, HandleBigInt x, uint32_t k,
+                            Digit c) {
+  if (x->digitLength() * DigitBits < k) {
+    return x;
+  }
+  RootedBigInt r(cx, copy(cx, x));
+  if (!r) {
+    return nullptr;
+  }
+  modDigitsInPlaceByCrandallReduction(r->unguardedDigits(), k, c);
+  return destructivelyTrimHighZeroDigits(cx, r);
 }
 
 bool BigInt::divmod(JSContext* cx, Handle<BigInt*> x, Handle<BigInt*> y,
@@ -2861,35 +3126,24 @@ BigInt* BigInt::truncateAndSubFromPowerOfTwo(JSContext* cx, HandleBigInt x,
     Digit borrow = 0;
     // Take digits from `x` until its length is exhausted.
     for (size_t i = 0; i < std::min(resultLength - 1, xLength); i++) {
-      Digit newBorrow = 0;
-      Digit difference = digitSub(0, xDigits[i], &newBorrow);
-      difference = digitSub(difference, borrow, &newBorrow);
-      resultDigits[i] = difference;
-      borrow = newBorrow;
+      resultDigits[i] = digitSub3(0, xDigits[i], borrow, &borrow);
     }
     // Then simulate leading zeroes in `x` as needed.
     for (size_t i = xLength; i < resultLength - 1; i++) {
-      Digit newBorrow = 0;
-      Digit difference = digitSub(0, borrow, &newBorrow);
-      resultDigits[i] = difference;
-      borrow = newBorrow;
+      resultDigits[i] = digitSub(0, borrow, &borrow);
     }
 
     // The MSD might contain extra bits that we don't want.
     Digit xMSD = resultLength <= xLength ? xDigits[resultLength - 1] : 0;
     Digit resultMSD;
     if (bits % DigitBits == 0) {
-      Digit newBorrow = 0;
-      resultMSD = digitSub(0, xMSD, &newBorrow);
-      resultMSD = digitSub(resultMSD, borrow, &newBorrow);
+      resultMSD = digitSub3(0, xMSD, borrow, &borrow);
     } else {
       size_t drop = DigitBits - (bits % DigitBits);
       xMSD = (xMSD << drop) >> drop;
       Digit minuendMSD = Digit(1) << (DigitBits - drop);
-      Digit newBorrow = 0;
-      resultMSD = digitSub(minuendMSD, xMSD, &newBorrow);
-      resultMSD = digitSub(resultMSD, borrow, &newBorrow);
-      MOZ_ASSERT(newBorrow == 0, "result < 2^bits");
+      resultMSD = digitSub3(minuendMSD, xMSD, borrow, &borrow);
+      MOZ_ASSERT(borrow == 0, "result < 2^bits");
       // If all subtracted bits were zero, we have to get rid of the
       // materialized minuendMSD again.
       resultMSD &= (minuendMSD - 1);

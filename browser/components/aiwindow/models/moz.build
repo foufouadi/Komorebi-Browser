@@ -6,6 +6,8 @@ with Files("**"):
     BUG_COMPONENT = ("Core", "Machine Learning: General")
 
 DIRS += [
+    "aitab",
+    "auth",
     "memories",
     "agents",
     "search",
@@ -17,6 +19,7 @@ BROWSER_CHROME_MANIFESTS += [
 ]
 
 MOZ_SRC_FILES += [
+    "AuthProvider.sys.mjs",
     "Chat.sys.mjs",
     "ChatUtils.sys.mjs",
     "Conversation.sys.mjs",
@@ -33,6 +36,7 @@ MOZ_SRC_FILES += [
     "SearchBrowsingHistoryDomainBoost.sys.mjs",
     "SecurityProperties.sys.mjs",
     "SmartFormFillModel.sys.mjs",
+    "SmartWindowLocation.sys.mjs",
     "SmartWindowNavigationInfo.sys.mjs",
     "TelemetryManager.sys.mjs",
     "TelemetryUtils.sys.mjs",
@@ -40,7 +44,6 @@ MOZ_SRC_FILES += [
     "TokenStreamParser.sys.mjs",
     "Tools.sys.mjs",
     "Utils.sys.mjs",
-    "WCSMerinoClient.sys.mjs",
 ]
 
 XPCSHELL_TESTS_MANIFESTS += [

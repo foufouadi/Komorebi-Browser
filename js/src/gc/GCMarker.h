@@ -353,6 +353,8 @@ class MarkingTracerT
 
   template <typename T>
   bool onEdge(T** thingp, const char* name);
+  JSTracer::TraceBufferResult onBufferEdge(void** bufferp,
+                                           const char* name) override;
   friend class GenericTracerImpl<MarkingTracerT<markingOptions>>;
 
   GCMarker* gcMarker();
@@ -827,8 +829,7 @@ class MOZ_RAII AutoSetMarkColor {
   ~AutoSetMarkColor() { marker_.setMarkColor(initialColor_); }
 };
 
-inline AutoMarkingLock::AutoMarkingLock(JSTracer* trc,
-                                        MarkingLock& markingLock) {
+inline AutoMarkingLock::AutoMarkingLock(JSTracer* trc, LightLock& markingLock) {
 #ifdef JS_GC_CONCURRENT_MARKING
   if (IsConcurrentMarkingTracer(trc)) {
     lock = &markingLock;

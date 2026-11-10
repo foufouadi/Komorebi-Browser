@@ -7,8 +7,8 @@ const { Sampling } = ChromeUtils.importESModule(
 const { ClientID } = ChromeUtils.importESModule(
   "resource://gre/modules/ClientID.sys.mjs"
 );
-const { ClientEnvironment } = ChromeUtils.importESModule(
-  "resource://normandy/lib/ClientEnvironment.sys.mjs"
+const { ClientEnvironmentBase } = ChromeUtils.importESModule(
+  "resource://gre/modules/components-utils/ClientEnvironment.sys.mjs"
 );
 const { ExperimentStore } = ChromeUtils.importESModule(
   "resource://nimbus/lib/ExperimentStore.sys.mjs"
@@ -63,19 +63,9 @@ add_task(async function test_add_to_store() {
 add_task(async function test_add_rollout_to_store() {
   const { manager, cleanup } = await setupTest();
 
-  const recipe = {
-    ...NimbusTestUtils.factories.recipe("rollout-slug"),
-    branches: [NimbusTestUtils.factories.rollout("rollout").branch],
+  const recipe = NimbusTestUtils.factories.recipe("rollout-slug", {
     isRollout: true,
-    active: true,
-    bucketConfig: {
-      namespace: "nimbus-test-utils",
-      randomizationUnit: "normandy_id",
-      start: 0,
-      count: 1000,
-      total: 1000,
-    },
-  };
+  });
 
   await manager.enroll(recipe, "test_add_rollout_to_store");
   const experiment = manager.store.get("rollout-slug");
@@ -565,7 +555,11 @@ add_task(async function test_sampling_check() {
   const { sandbox, manager, cleanup } = await setupTest();
 
   sandbox.stub(Sampling, "bucketSample").resolves(true);
-  sandbox.replaceGetter(ClientEnvironment, "userId", () => 42);
+  sandbox.replaceGetter(
+    ClientEnvironmentBase,
+    "legacyRandomizationId",
+    () => 42
+  );
 
   let recipe = NimbusTestUtils.factories.recipe("foo", { bucketConfig: null });
 
@@ -980,7 +974,7 @@ add_task(async function testForceEnrollmentWithCoenrollment() {
     Assert.ok(enrollment.active, `Enrollment for ${optInSlug} is active`);
   }
 
-  NimbusTestUtils.cleanupManager([
+  await NimbusTestUtils.cleanupManager([
     "optin-foo",
     "optin-bar",
     "optin-baz",
@@ -1109,15 +1103,13 @@ add_task(async function test_randomizationUnit() {
   const ENROLL = "cedc1378-b806-4664-8c3e-2090f2f46e00";
   const NOT_ENROLL = "b502506a-416c-40ea-9f96-c6feaf451470";
 
-  const normandyIdBucketing = {
-    ...NimbusTestUtils.factories.recipe.bucketConfig,
+  const normandyIdBucketing = NimbusTestUtils.factories.bucketConfig({
     count: 100,
-  };
-  const groupIdBucketing = {
-    ...NimbusTestUtils.factories.recipe.bucketConfig,
+  });
+  const groupIdBucketing = NimbusTestUtils.factories.bucketConfig({
     randomizationUnit: "group_id",
     count: 100,
-  };
+  });
 
   Services.prefs.setStringPref("app.normandy.user_id", ENROLL);
   await ClientID.setProfileGroupID(NOT_ENROLL);
@@ -1146,10 +1138,9 @@ add_task(async function test_randomizationUnit() {
 
 add_task(async function test_group_enrollment() {
   const recipe = NimbusTestUtils.factories.recipe("group_enroll", {
-    bucketConfig: {
-      ...NimbusTestUtils.factories.recipe.bucketConfig,
+    bucketConfig: NimbusTestUtils.factories.bucketConfig({
       randomizationUnit: "group_id",
-    },
+    }),
   });
 
   await ClientID.setProfileGroupID("cedc1378-b806-4664-8c3e-2090f2f46e00");
@@ -1196,10 +1187,7 @@ add_task(async function test_getAvailableOptIns() {
       requiresRestart: false,
     }),
     NimbusTestUtils.factories.recipe("targeting-only-1", {
-      bucketConfig: {
-        ...NimbusTestUtils.factories.recipe.bucketConfig,
-        count: 0,
-      },
+      bucketConfig: NimbusTestUtils.factories.bucketConfig({ count: 0 }),
       isRollout: true,
       isFirefoxLabsOptIn: true,
       firefoxLabsTitle: "bogus-title",
@@ -1209,10 +1197,7 @@ add_task(async function test_getAvailableOptIns() {
       requiresRestart: false,
     }),
     NimbusTestUtils.factories.recipe("targeting-only-2", {
-      bucketConfig: {
-        ...NimbusTestUtils.factories.recipe.bucketConfig,
-        count: 0,
-      },
+      bucketConfig: NimbusTestUtils.factories.bucketConfig({ count: 0 }),
       isRollout: true,
       isFirefoxLabsOptIn: true,
       firefoxLabsTitle: "bogus-title",

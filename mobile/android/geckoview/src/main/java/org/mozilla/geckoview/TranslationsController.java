@@ -29,6 +29,9 @@ import org.mozilla.gecko.util.ThreadUtils;
  * the translations toolkit.
  */
 public class TranslationsController {
+  /** Public constructor for TranslationsController. */
+  public TranslationsController() {}
+
   private static final boolean DEBUG = false;
   private static final String LOGTAG = "TranslationsController";
 
@@ -40,6 +43,8 @@ public class TranslationsController {
    * setting preferences, managing downloads, and getting information on language models available.
    */
   public static class RuntimeTranslation {
+    /** Public constructor for RuntimeTranslation. */
+    public RuntimeTranslation() {}
 
     // Events Dispatched to Toolkit Translations
     private static final String ENGINE_SUPPORTED_EVENT =
@@ -452,6 +457,9 @@ public class TranslationsController {
       /** Builder for Model Management Options */
       @AnyThread
       public static class Builder {
+        /** Public constructor for Builder. */
+        public Builder() {}
+
         /* package */ String mLanguage = null;
         /* package */ @ModelOperation String mOperation;
         /* package */ @OperationLevel String mOperationLevel = ALL;
@@ -938,6 +946,9 @@ public class TranslationsController {
       /** Builder for making translation options. */
       @AnyThread
       public static class Builder {
+        /** Public constructor for Builder. */
+        public Builder() {}
+
         /* package */ boolean mDownloadModel = true;
 
         /**
@@ -1009,7 +1020,7 @@ public class TranslationsController {
        * @param translationState The state of the translation as reported by the translation engine.
        */
       default void onTranslationStateChange(
-          @NonNull final GeckoSession session, @Nullable TranslationState translationState) {}
+          @NonNull final GeckoSession session, @Nullable final TranslationState translationState) {}
     }
 
     /** Translation pair is the from language and to language set on the translation state. */
@@ -1353,6 +1364,7 @@ public class TranslationsController {
    * translations toolkit engine.
    */
   public static class TranslationsException extends Exception {
+    private static final long serialVersionUID = 1L;
 
     /**
      * Construct a [TranslationsException]

@@ -276,6 +276,8 @@ std::shared_ptr<ShaderTranslateTask> ShaderD3D::compile(const gl::Context *conte
 
     const std::string &source = mState.getSource();
 
+    options->removeInactiveVariables = true;
+
 #if !defined(ANGLE_ENABLE_WINDOWS_UWP)
     if (gl::DebugAnnotationsActive(context))
     {
@@ -285,6 +287,11 @@ std::shared_ptr<ShaderTranslateTask> ShaderD3D::compile(const gl::Context *conte
         options->sourcePath     = true;
     }
 #endif
+
+    if (context->isHardenedContext())
+    {
+        options->clampIndirectArrayBounds = true;
+    }
 
     if (features.expandIntegerPowExpressions.enabled)
     {
@@ -324,14 +331,6 @@ std::shared_ptr<ShaderTranslateTask> ShaderD3D::compile(const gl::Context *conte
     if (extensions.shaderPixelLocalStorageANGLE)
     {
         options->pls = mRenderer->getNativePixelLocalStorageOptions();
-    }
-
-    // D3D11 Feature Level 9_3 and below do not support non-constant loop indexes in fragment
-    // shaders.  Shader compilation will fail.  To provide a better error message we can instruct
-    // the compiler to pre-validate.
-    if (!features.supportsNonConstantLoopIndexing.enabled)
-    {
-        options->validateLoopIndexing = true;
     }
 
     // The D3D translations are not currently validation-error-free

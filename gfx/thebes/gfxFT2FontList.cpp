@@ -5,12 +5,13 @@
 #include <android/log.h>
 #include <dirent.h>
 
+#include <memory>
+
 #include "gfxAndroidPlatform.h"
 #include "mozilla/Base64.h"
 #include "mozilla/EndianUtils.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Omnijar.h"
-#include "mozilla/UniquePtr.h"
 #include "mozilla/UniquePtrExtensions.h"
 #include "mozilla/dom/ContentChild.h"
 #include "nsReadableUtils.h"
@@ -110,16 +111,14 @@ already_AddRefed<SharedFTFace> FT2FontEntry::GetFTFace(bool aCommit) {
       NS_ASSERTION(bufSize == item->RealSize(), "error reading bundled font");
       // fontData takes ownership of fontDataBuf
       auto fontData = MakeRefPtr<FontData>(std::move(fontDataBuf), bufSize);
-      auto ufd = MakeRefPtr<FTUserFontData>(fontData);
-      face = ufd->CloneFace(mFTFontIndex);
+      face = Factory::NewSharedFTFaceFromData(fontData, mFTFontIndex);
       if (!face) {
         NS_WARNING("failed to create freetype face");
         return nullptr;
       }
     }
   } else {
-    RefPtr<FTUserFontData> fd = new FTUserFontData(mFilename.get());
-    face = fd->CloneFace(mFTFontIndex);
+    face = Factory::NewSharedFTFace(mFilename.get(), mFTFontIndex);
     if (!face) {
       NS_WARNING("failed to create freetype face");
       return nullptr;
@@ -145,9 +144,9 @@ already_AddRefed<SharedFTFace> FT2FontEntry::GetFTFace(bool aCommit) {
   return face.forget();
 }
 
-FTUserFontData* FT2FontEntry::GetUserFontData() {
+FontData* FT2FontEntry::GetUserFontData() {
   if (SharedFTFace* face = mFTFace) {
-    return static_cast<FTUserFontData*>(face->GetData());
+    return face->GetFontData();
   }
   return nullptr;
 }
@@ -168,7 +167,9 @@ FT2FontEntry::~FT2FontEntry() {
   auto* face = mHBFace.exchange(nullptr);
   hb_face_destroy(face);
   if (mMMVar) {
+    // Scaled fonts may still be using the shared face.
     SharedFTFace* face = mFTFace;
+    AutoLockSharedFTFace lock(face);
     FT_Done_MM_Var(face->GetFace()->glyph->library, mMMVar);
   }
   if (mFTFace) {
@@ -207,10 +208,9 @@ gfxFont* FT2FontEntry::CreateFontInstance(const gfxFontStyle* aStyle) {
       // variation settings to it.
       RefPtr<SharedFTFace> varFace;
       if (!mFilename.IsEmpty() && mFilename[0] == '/') {
-        varFace =
-            Factory::NewSharedFTFace(nullptr, mFilename.get(), mFTFontIndex);
+        varFace = Factory::NewSharedFTFace(mFilename.get(), mFTFontIndex);
       } else {
-        varFace = face->GetData()->CloneFace(mFTFontIndex);
+        varFace = face->CloneFace();
       }
       if (varFace) {
         gfxFT2FontBase::SetupVarCoords(GetMMVar(), settings,
@@ -254,8 +254,7 @@ already_AddRefed<FT2FontEntry> FT2FontEntry::CreateFontEntry(
   // Ownership of aFontData is passed in here; the fontEntry must
   // retain it as long as the FT_Face needs it, and ensure it is
   // eventually deleted.
-  RefPtr<FTUserFontData> ufd = MakeRefPtr<FTUserFontData>(aFontData);
-  RefPtr<SharedFTFace> face = ufd->CloneFace();
+  RefPtr<SharedFTFace> face = Factory::NewSharedFTFaceFromData(aFontData, 0);
   if (!face) {
     return nullptr;
   }
@@ -364,10 +363,6 @@ FT2FontEntry* FT2FontEntry::CreateFontEntry(const nsACString& aName,
   return fe;
 }
 
-FT2FontEntry* gfxFT2Font::GetFontEntry() {
-  return static_cast<FT2FontEntry*>(mFontEntry.get());
-}
-
 // Copied/modified from similar code in gfxMacPlatformFontList.mm:
 // Complex scripts will not render correctly unless Graphite or OT
 // layout tables are present.
@@ -380,7 +375,7 @@ FT2FontEntry* gfxFT2Font::GetFontEntry() {
 // properly.
 
 nsresult FT2FontEntry::ReadCMAP(FontInfoData* aFontInfoData) {
-  if (mCharacterMap || mShmemCharacterMap) {
+  if (HasCharacterMap()) {
     return NS_OK;
   }
 
@@ -454,13 +449,12 @@ nsresult FT2FontEntry::ReadCMAP(FontInfoData* aFontInfoData) {
     } else {
       charmap = pfl->FindCharMap(charmap);
     }
-    mHasCmapTable = true;
   } else {
     // if error occurred, initialize to null cmap
     charmap = new gfxCharacterMap(0);
-    mHasCmapTable = false;
   }
   if (setCharMap) {
+    AutoWriteLock lock(mLock);
     if (mCharacterMap.compareExchange(nullptr, charmap.get())) {
       // We forget rather than addref because we don't use the charmap below.
       charmap.forget().leak();
@@ -518,7 +512,7 @@ hb_face_t* FT2FontEntry::CreateHBFace() {
   return nullptr;
 }
 
-bool FT2FontEntry::HasFontTable(uint32_t aTableTag) {
+bool FT2FontEntry::HasFontTableInternal(uint32_t aTableTag) {
   // If we already have a FreeType face, we can just use that.
   if (mFTFace) {
     RefPtr<SharedFTFace> face = GetFTFace();
@@ -576,13 +570,11 @@ nsresult FT2FontEntry::CopyFontTable(uint32_t aTableTag,
   return gfxFT2FontEntryBase::CopyFaceTable(face, aTableTag, aBuffer);
 }
 
-hb_blob_t* FT2FontEntry::GetFontTable(uint32_t aTableTag) {
-  if (FTUserFontData* userFontData = GetUserFontData()) {
+hb_blob_t* FT2FontEntry::GetFontTableInternal(uint32_t aTableTag) {
+  if (auto* ufd = GetUserFontData()) {
     // If there's a cairo font face, we may be able to return a blob
     // that just wraps a range of the attached user font data
-    if (const auto* data = userFontData->GetData()) {
-      return gfxFontUtils::GetTableFromFontData(data, aTableTag);
-    }
+    return gfxFontUtils::GetTableFromFontData(ufd->Data(), aTableTag);
   }
 
   // Try to read table directly via harfbuzz API, unless CreateHBFace will be
@@ -597,7 +589,7 @@ hb_blob_t* FT2FontEntry::GetFontTable(uint32_t aTableTag) {
 
   // Otherwise, use the default method (which in turn will call our
   // implementation of CopyFontTable).
-  return gfxFontEntry::GetFontTable(aTableTag);
+  return gfxFontEntry::GetFontTableInternal(aTableTag);
 }
 
 gfxFontEntry::FontTableCache* FT2FontEntry::GetFontTableCache(bool aCreate) {
@@ -611,7 +603,7 @@ gfxFontEntry::FontTableCache* FT2FontEntry::GetFontTableCache(bool aCreate) {
   return mFontTableCache;
 }
 
-bool FT2FontEntry::HasVariations() {
+bool FT2FontEntry::HasVariationsInternal() {
   switch (mHasVariations) {
     case HasVariationsState::No:
       return false;
@@ -631,7 +623,8 @@ bool FT2FontEntry::HasVariations() {
   return hasVariations;
 }
 
-void FT2FontEntry::GetVariationAxes(nsTArray<gfxFontVariationAxis>& aAxes) {
+void FT2FontEntry::GetVariationAxesInternal(
+    nsTArray<gfxFontVariationAxis>& aAxes) {
   if (!HasVariations()) {
     return;
   }
@@ -640,7 +633,7 @@ void FT2FontEntry::GetVariationAxes(nsTArray<gfxFontVariationAxis>& aAxes) {
   }
 }
 
-void FT2FontEntry::GetVariationInstances(
+void FT2FontEntry::GetVariationInstancesInternal(
     nsTArray<gfxFontVariationInstance>& aInstances) {
   if (!HasVariations()) {
     return;
@@ -659,6 +652,7 @@ FT_MM_Var* FT2FontEntry::GetMMVar() {
   if (!face) {
     return nullptr;
   }
+  AutoLockSharedFTFace faceLock(face);
   if (FT_Err_Ok != FT_Get_MM_Var(face->GetFace(), &mMMVar)) {
     mMMVar = nullptr;
   }
@@ -725,7 +719,7 @@ void gfxFT2FontList::CollectInitData(const FontListEntry& aFLE,
             mFamilyInitData.AppendElement(fontlist::Family::InitData{
                 key, aFLE.familyName(), fontlist::Family::kNoIndex,
                 aFLE.visibility()});
-            return MakeUnique<nsTArray<fontlist::Face::InitData>>();
+            return std::make_unique<nsTArray<fontlist::Face::InitData>>();
           })
       ->AppendElement(fontlist::Face::InitData{
           aFLE.filepath(), aFLE.index(), false,
@@ -1543,7 +1537,7 @@ void gfxFT2FontList::FindFonts() {
 
   // Chrome process: get the cached list (if any)
   if (!mFontNameCache) {
-    mFontNameCache = MakeUnique<FontNameCache>();
+    mFontNameCache = std::make_unique<FontNameCache>();
   }
   mFontNameCache->Init();
 

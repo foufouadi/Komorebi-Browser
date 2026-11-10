@@ -26,9 +26,6 @@ struct ValidateASTOptions
     // Check that all symbols reference TVariables that have been declared.  For built-ins, this
     // makes sure that the same GLSL built-in uses the same TVariable consistently.
     bool validateVariableReferences = true;
-    // Whether validateVariableReferences should also include specialization constants.  Their
-    // declaration is output after their usage is discovered, so this is disabled until then.
-    bool validateSpecConstReferences = false;
     // Validate that:
     //
     // - TIntermUnary only contains unary operators
@@ -67,6 +64,9 @@ struct ValidateASTOptions
     // Check that every symbol has its precision specified.  That includes variables, block members,
     // function parameters and return values.
     bool validatePrecision = true;
+    // Check that there is no const-foldable control flow (like |switch (constant)|, |if (true)|,
+    // etc).
+    bool validateNoConstantControlFlow = false;  // TODO
     // Check that variable declarations that can't have initializers don't have initializers
     // (varyings, uniforms for example).
     bool validateInitializers = true;  // TODO
@@ -97,6 +97,9 @@ struct ValidateASTOptions
     // If PruneNoOps has been run, check that no statements are ever added after branches in the
     // same block.  Those statements would be dead code.
     bool validateNoStatementsAfterBranch = true;
+    // Check that a switch block does not end in `case FOO:`, which is not valid GLSL and trips up
+    // many backends.
+    bool validateNoCaseAtEndOfSwitchBlock = true;
     // Check that swizzle is not applied to swizzle.  Swizzles of swizzles are folded in
     // TIntermSwizzle::fold.
     bool validateNoSwizzleOfSwizzle = true;

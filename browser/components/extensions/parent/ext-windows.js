@@ -118,7 +118,15 @@ this.windows = class extends ExtensionAPIPersistent {
           let windowId = Window.WINDOW_ID_NONE;
           let window = Services.focus.activeWindow;
           if (window && extension.canAccessWindow(window)) {
-            windowId = windowTracker.getId(window);
+            if (window.document.readyState !== "complete") {
+              // isBrowserWindow() is not reliable when the window is loading.
+              // Wait a little bit until it is ready.
+              window.addEventListener("load", listener, { once: true });
+              return;
+            }
+            if (windowTracker.isBrowserWindow(window)) {
+              windowId = windowTracker.getId(window);
+            }
           }
           if (windowId !== lastOnFocusChangedWindowId) {
             fire.async(windowId);
@@ -357,7 +365,18 @@ this.windows = class extends ExtensionAPIPersistent {
             }
           }
 
-          args.appendElement(null); // extraOptions
+          // All types other than "normal" create "popup"-type windows.
+          const isPopup =
+            createData.type !== null && createData.type != "normal";
+
+          let extraOptions = null;
+          if (isPopup) {
+            extraOptions = Cc[
+              "@mozilla.org/hash-property-bag;1"
+            ].createInstance(Ci.nsIWritablePropertyBag2);
+            extraOptions.setPropertyAsBool("web-extension-popup-window", true);
+          }
+          args.appendElement(extraOptions); // extraOptions
           args.appendElement(null); // referrerInfo
           args.appendElement(null); // postData
           args.appendElement(null); // allowThirdPartyFixup
@@ -391,16 +410,19 @@ this.windows = class extends ExtensionAPIPersistent {
 
           let features = ["chrome"];
 
-          if (createData.type === null || createData.type == "normal") {
+          if (!isPopup) {
             features.push("dialog=no", "all");
           } else {
-            // All other types create "popup"-type windows by default.
             features.push(
               "dialog",
               "resizable",
               "minimizable",
               "titlebar",
-              "close"
+              "close",
+              // Ensures new windows appear in the user's current view
+              // instead of restoring a persisted fullscreen sizemode and
+              // taking a Space of their own.
+              "suppressinitialfullscreen"
             );
             if (createData.left === null && createData.top === null) {
               features.push("centerscreen");

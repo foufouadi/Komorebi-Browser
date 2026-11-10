@@ -6,6 +6,7 @@
 #define vm_ArrayBufferObject_h
 
 #include "mozilla/Maybe.h"
+#include "mozilla/Span.h"
 
 #include <tuple>  // std::tuple
 
@@ -209,10 +210,10 @@ class ArrayBufferObject : public ArrayBufferObjectMaybeShared {
 #endif
 
  public:
-  static const uint8_t DATA_SLOT = 0;
-  static const uint8_t BYTE_LENGTH_SLOT = 1;
-  static const uint8_t FIRST_VIEW_SLOT = 2;
-  static const uint8_t FLAGS_SLOT = 3;
+  JS_DEFINE_TYPED_SLOT(0, DATA_SLOT, Private);
+  JS_DEFINE_TYPED_SLOT(1, BYTE_LENGTH_SLOT, Private);
+  JS_DEFINE_TYPED_SLOT(2, FIRST_VIEW_SLOT, Object, Null);
+  JS_DEFINE_TYPED_SLOT(3, FLAGS_SLOT, Int32);
 
   static const uint8_t RESERVED_SLOTS = 4;
 
@@ -221,7 +222,7 @@ class ArrayBufferObject : public ArrayBufferObjectMaybeShared {
   // aligned.
   static constexpr size_t ARRAY_BUFFER_ALIGNMENT = 8;
 
-  static_assert(FLAGS_SLOT == JS_ARRAYBUFFER_FLAGS_SLOT,
+  static_assert(FLAGS_SLOT.index() == JS_ARRAYBUFFER_FLAGS_SLOT,
                 "self-hosted code with burned-in constants must get the "
                 "right flags slot");
 
@@ -497,6 +498,10 @@ class ArrayBufferObject : public ArrayBufferObjectMaybeShared {
   static FixedLengthArrayBufferObject* createZeroed(
       JSContext* cx, size_t nbytes, HandleObject proto = nullptr);
 
+  static FixedLengthArrayBufferObject* createCopied(
+      JSContext* cx, mozilla::Span<const uint8_t> src,
+      HandleObject proto = nullptr);
+
   // Create an ArrayBufferObject that is safely finalizable and can later be
   // initialize()d to become a real, content-visible ArrayBufferObject.
   static FixedLengthArrayBufferObject* createEmpty(JSContext* cx);
@@ -558,13 +563,14 @@ class ArrayBufferObject : public ArrayBufferObjectMaybeShared {
   static void detach(JSContext* cx, Handle<ArrayBufferObject*> buffer);
 
   static constexpr size_t offsetOfByteLengthSlot() {
-    return getFixedSlotOffset(BYTE_LENGTH_SLOT);
+    return getFixedSlotOffsetTyped(BYTE_LENGTH_SLOT);
   }
   static constexpr size_t offsetOfFlagsSlot() {
-    return getFixedSlotOffset(FLAGS_SLOT);
+    return getFixedSlotOffsetTyped(FLAGS_SLOT);
   }
 
  protected:
+  void initFirstView();
   void setFirstView(ArrayBufferViewObject* view);
 
  private:
@@ -573,6 +579,7 @@ class ArrayBufferObject : public ArrayBufferObjectMaybeShared {
     void* freeUserData;
   };
   FreeInfo* freeInfo() const;
+  void setFreeInfo(BufferContents contents);
 
  public:
   uint8_t* dataPointer() const;
@@ -640,7 +647,9 @@ class ArrayBufferObject : public ArrayBufferObjectMaybeShared {
                                              size_t length);
 
  protected:
+  void initDataPointer(BufferContents contents);
   void setDataPointer(BufferContents contents);
+  void initByteLength(size_t length);
   void setByteLength(size_t length);
 
   /**
@@ -657,6 +666,7 @@ class ArrayBufferObject : public ArrayBufferObjectMaybeShared {
   size_t associatedBytes() const;
 
   uint32_t flags() const;
+  void initFlags(uint32_t flags);
   void setFlags(uint32_t flags);
 
   void setIsDetached() {
@@ -667,10 +677,10 @@ class ArrayBufferObject : public ArrayBufferObjectMaybeShared {
 
   void initialize(size_t byteLength, BufferContents contents) {
     MOZ_ASSERT(contents.isAligned(byteLength));
-    setByteLength(byteLength);
-    setFlags(0);
-    setFirstView(nullptr);
-    setDataPointer(contents);
+    initByteLength(byteLength);
+    initFlags(0);
+    initFirstView();
+    initDataPointer(contents);
   }
 
  public:
@@ -756,17 +766,17 @@ class ResizableArrayBufferObject : public ArrayBufferObject {
 
   void setMaxByteLength(size_t length) {
     MOZ_ASSERT(length <= ArrayBufferObject::ByteLengthLimit);
-    setFixedSlot(MAX_BYTE_LENGTH_SLOT, PrivateValue(length));
+    setFixedSlotTyped(MAX_BYTE_LENGTH_SLOT, PrivateValue(length));
   }
 
   void initialize(size_t byteLength, size_t maxByteLength,
                   BufferContents contents) {
     MOZ_ASSERT(contents.isAligned(byteLength));
-    setByteLength(byteLength);
+    initByteLength(byteLength);
     setMaxByteLength(maxByteLength);
-    setFlags(RESIZABLE);
-    setFirstView(nullptr);
-    setDataPointer(contents);
+    initFlags(RESIZABLE);
+    initFirstView();
+    initDataPointer(contents);
   }
 
   // Resize this buffer.
@@ -778,7 +788,8 @@ class ResizableArrayBufferObject : public ArrayBufferObject {
       JS::Handle<ResizableArrayBufferObject*> source);
 
  public:
-  static const uint8_t MAX_BYTE_LENGTH_SLOT = ArrayBufferObject::RESERVED_SLOTS;
+  JS_DEFINE_TYPED_SLOT(ArrayBufferObject::RESERVED_SLOTS, MAX_BYTE_LENGTH_SLOT,
+                       Private, Undefined);
 
   static const uint8_t RESERVED_SLOTS = ArrayBufferObject::RESERVED_SLOTS + 1;
 
@@ -789,7 +800,7 @@ class ResizableArrayBufferObject : public ArrayBufferObject {
   static const JSClass class_;
 
   size_t maxByteLength() const {
-    return size_t(getFixedSlot(MAX_BYTE_LENGTH_SLOT).toPrivate());
+    return size_t(getFixedSlotTyped(MAX_BYTE_LENGTH_SLOT).toPrivate());
   }
 
   static ResizableArrayBufferObject* copyAndDetach(
@@ -827,10 +838,10 @@ class ImmutableArrayBufferObject : public ArrayBufferObject {
 
   void initialize(size_t byteLength, BufferContents contents) {
     MOZ_ASSERT(contents.isAligned(byteLength));
-    setByteLength(byteLength);
-    setFlags(IMMUTABLE);
-    setFirstView(nullptr);
-    setDataPointer(contents);
+    initByteLength(byteLength);
+    initFlags(IMMUTABLE);
+    initFirstView();
+    initDataPointer(contents);
   }
 
  public:

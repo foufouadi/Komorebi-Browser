@@ -112,6 +112,25 @@ browser_implicitRoleARIAExpanded.js
 
 **Audit a11y performance when adding 10000 elements with implicit ARIA roles**
 
+browser_panManySVGShapes.js
+===========================
+
+:owner: Accessibility Team
+:name: browser_panManySVGShapes.js
+:Default options:
+
+::
+
+ --extra-args headless
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --perfherder
+ --perfherder-metrics name:A11Y_TotalTime,unit:ms,shouldAlert:True, name:A11Y_DoInitialUpdate_parent,unit:ms,shouldAlert:False, name:A11Y_ProcessQueuedCacheUpdate_parent,unit:ms,shouldAlert:False, name:A11Y_ContentRemovedNode_parent,unit:ms,shouldAlert:False, name:A11Y_ContentRemovedAcc_parent,unit:ms,shouldAlert:False, name:A11Y_PruneOrInsertSubtree_parent,unit:ms,shouldAlert:False, name:A11Y_ShutdownChildrenInSubtree_parent,unit:ms,shouldAlert:False, name:A11Y_ShowEvent_parent,unit:ms,shouldAlert:False, name:A11Y_RecvCache_parent,unit:ms,shouldAlert:False, name:A11Y_ProcessShowEvent_parent,unit:ms,shouldAlert:False, name:A11Y_CoalesceEvents_parent,unit:ms,shouldAlert:False, name:A11Y_CoalesceMutationEvents_parent,unit:ms,shouldAlert:False, name:A11Y_ProcessHideEvent_parent,unit:ms,shouldAlert:False, name:A11Y_SendCache_parent,unit:ms,shouldAlert:False, name:A11Y_WillRefresh_parent,unit:ms,shouldAlert:False, name:A11Y_AccessibilityServiceInit_parent,unit:ms,shouldAlert:False, name:A11Y_PlatformShowHideEvent_parent,unit:ms,shouldAlert:False, name:A11Y_DoInitialUpdate_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_ProcessQueuedCacheUpdate_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_ContentRemovedNode_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_ContentRemovedAcc_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_PruneOrInsertSubtree_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_ShutdownChildrenInSubtree_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_ShowEvent_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_RecvCache_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_ProcessShowEvent_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_CoalesceEvents_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_CoalesceMutationEvents_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_ProcessHideEvent_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_SendCache_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_WillRefresh_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_AccessibilityServiceInit_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_PlatformShowHideEvent_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_DoInitialUpdate_content,unit:ms,shouldAlert:False, name:A11Y_ProcessQueuedCacheUpdate_content,unit:ms,shouldAlert:False, name:A11Y_ContentRemovedNode_content,unit:ms,shouldAlert:False, name:A11Y_ContentRemovedAcc_content,unit:ms,shouldAlert:False, name:A11Y_PruneOrInsertSubtree_content,unit:ms,shouldAlert:False, name:A11Y_ShutdownChildrenInSubtree_content,unit:ms,shouldAlert:False, name:A11Y_ShowEvent_content,unit:ms,shouldAlert:False, name:A11Y_RecvCache_content,unit:ms,shouldAlert:False, name:A11Y_ProcessShowEvent_content,unit:ms,shouldAlert:False, name:A11Y_CoalesceEvents_content,unit:ms,shouldAlert:False, name:A11Y_CoalesceMutationEvents_content,unit:ms,shouldAlert:False, name:A11Y_ProcessHideEvent_content,unit:ms,shouldAlert:False, name:A11Y_SendCache_content,unit:ms,shouldAlert:False, name:A11Y_WillRefresh_content,unit:ms,shouldAlert:False, name:A11Y_AccessibilityServiceInit_content,unit:ms,shouldAlert:False, name:A11Y_PlatformShowHideEvent_content,unit:ms,shouldAlert:False, name:A11Y_DoInitialUpdate_Count_content,unit:iterations,shouldAlert:False, name:A11Y_ProcessQueuedCacheUpdate_Count_content,unit:iterations,shouldAlert:False, name:A11Y_ContentRemovedNode_Count_content,unit:iterations,shouldAlert:False, name:A11Y_ContentRemovedAcc_Count_content,unit:iterations,shouldAlert:False, name:A11Y_PruneOrInsertSubtree_Count_content,unit:iterations,shouldAlert:False, name:A11Y_ShutdownChildrenInSubtree_Count_content,unit:iterations,shouldAlert:False, name:A11Y_ShowEvent_Count_content,unit:iterations,shouldAlert:False, name:A11Y_RecvCache_Count_content,unit:iterations,shouldAlert:False, name:A11Y_ProcessShowEvent_Count_content,unit:iterations,shouldAlert:False, name:A11Y_CoalesceEvents_Count_content,unit:iterations,shouldAlert:False, name:A11Y_CoalesceMutationEvents_Count_content,unit:iterations,shouldAlert:False, name:A11Y_ProcessHideEvent_Count_content,unit:iterations,shouldAlert:False, name:A11Y_SendCache_Count_content,unit:iterations,shouldAlert:False, name:A11Y_WillRefresh_Count_content,unit:iterations,shouldAlert:False, name:A11Y_AccessibilityServiceInit_Count_content,unit:iterations,shouldAlert:False, name:A11Y_PlatformShowHideEvent_Count_content,unit:iterations,shouldAlert:False
+ --try-platform linux, mac, win
+ --verbose
+
+**Audit a11y performance when panning an SVG workspace containing 2000 transformed groups, each with an ARIA labelled path. Modelled on the Blockly workspace in bug 2059322.**
+
 browser_reflowPseudoelements.js
 ===============================
 
@@ -150,6 +169,25 @@ browser_removeManySpellingErrors.js
 
 **Audit a11y performance when removing 500 spelling errors from content editable.**
 
+browser_testCSSVisibilityChange.js
+==================================
+
+:owner: Accessibility Team
+:name: browser_testCSSVisibilityChange.js
+:Default options:
+
+::
+
+ --extra-args headless
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --perfherder
+ --perfherder-metrics name:A11Y_TotalTime,unit:ms,shouldAlert:True, name:A11Y_DoInitialUpdate_parent,unit:ms,shouldAlert:False, name:A11Y_ProcessQueuedCacheUpdate_parent,unit:ms,shouldAlert:False, name:A11Y_ContentRemovedNode_parent,unit:ms,shouldAlert:False, name:A11Y_ContentRemovedAcc_parent,unit:ms,shouldAlert:False, name:A11Y_PruneOrInsertSubtree_parent,unit:ms,shouldAlert:False, name:A11Y_ShutdownChildrenInSubtree_parent,unit:ms,shouldAlert:False, name:A11Y_ShowEvent_parent,unit:ms,shouldAlert:False, name:A11Y_RecvCache_parent,unit:ms,shouldAlert:False, name:A11Y_ProcessShowEvent_parent,unit:ms,shouldAlert:False, name:A11Y_CoalesceEvents_parent,unit:ms,shouldAlert:False, name:A11Y_CoalesceMutationEvents_parent,unit:ms,shouldAlert:False, name:A11Y_ProcessHideEvent_parent,unit:ms,shouldAlert:False, name:A11Y_SendCache_parent,unit:ms,shouldAlert:False, name:A11Y_WillRefresh_parent,unit:ms,shouldAlert:False, name:A11Y_AccessibilityServiceInit_parent,unit:ms,shouldAlert:False, name:A11Y_PlatformShowHideEvent_parent,unit:ms,shouldAlert:False, name:A11Y_DoInitialUpdate_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_ProcessQueuedCacheUpdate_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_ContentRemovedNode_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_ContentRemovedAcc_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_PruneOrInsertSubtree_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_ShutdownChildrenInSubtree_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_ShowEvent_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_RecvCache_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_ProcessShowEvent_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_CoalesceEvents_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_CoalesceMutationEvents_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_ProcessHideEvent_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_SendCache_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_WillRefresh_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_AccessibilityServiceInit_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_PlatformShowHideEvent_Count_parent,unit:iterations,shouldAlert:False, name:A11Y_DoInitialUpdate_content,unit:ms,shouldAlert:False, name:A11Y_ProcessQueuedCacheUpdate_content,unit:ms,shouldAlert:False, name:A11Y_ContentRemovedNode_content,unit:ms,shouldAlert:False, name:A11Y_ContentRemovedAcc_content,unit:ms,shouldAlert:False, name:A11Y_PruneOrInsertSubtree_content,unit:ms,shouldAlert:False, name:A11Y_ShutdownChildrenInSubtree_content,unit:ms,shouldAlert:False, name:A11Y_ShowEvent_content,unit:ms,shouldAlert:False, name:A11Y_RecvCache_content,unit:ms,shouldAlert:False, name:A11Y_ProcessShowEvent_content,unit:ms,shouldAlert:False, name:A11Y_CoalesceEvents_content,unit:ms,shouldAlert:False, name:A11Y_CoalesceMutationEvents_content,unit:ms,shouldAlert:False, name:A11Y_ProcessHideEvent_content,unit:ms,shouldAlert:False, name:A11Y_SendCache_content,unit:ms,shouldAlert:False, name:A11Y_WillRefresh_content,unit:ms,shouldAlert:False, name:A11Y_AccessibilityServiceInit_content,unit:ms,shouldAlert:False, name:A11Y_PlatformShowHideEvent_content,unit:ms,shouldAlert:False, name:A11Y_DoInitialUpdate_Count_content,unit:iterations,shouldAlert:False, name:A11Y_ProcessQueuedCacheUpdate_Count_content,unit:iterations,shouldAlert:False, name:A11Y_ContentRemovedNode_Count_content,unit:iterations,shouldAlert:False, name:A11Y_ContentRemovedAcc_Count_content,unit:iterations,shouldAlert:False, name:A11Y_PruneOrInsertSubtree_Count_content,unit:iterations,shouldAlert:False, name:A11Y_ShutdownChildrenInSubtree_Count_content,unit:iterations,shouldAlert:False, name:A11Y_ShowEvent_Count_content,unit:iterations,shouldAlert:False, name:A11Y_RecvCache_Count_content,unit:iterations,shouldAlert:False, name:A11Y_ProcessShowEvent_Count_content,unit:iterations,shouldAlert:False, name:A11Y_CoalesceEvents_Count_content,unit:iterations,shouldAlert:False, name:A11Y_CoalesceMutationEvents_Count_content,unit:iterations,shouldAlert:False, name:A11Y_ProcessHideEvent_Count_content,unit:iterations,shouldAlert:False, name:A11Y_SendCache_Count_content,unit:iterations,shouldAlert:False, name:A11Y_WillRefresh_Count_content,unit:iterations,shouldAlert:False, name:A11Y_AccessibilityServiceInit_Count_content,unit:iterations,shouldAlert:False, name:A11Y_PlatformShowHideEvent_Count_content,unit:iterations,shouldAlert:False
+ --try-platform linux, mac, win
+ --verbose
+
+**Audit a11y performance when changing the CSS visibility of subtree's ancestor.**
+
 
 ## browser/base/content/test
 
@@ -162,6 +200,96 @@ perftest_browser_xhtml_dom.js
 :name: Dom-size
 
 **Measures the size of the DOM**
+
+
+## browser/components/aiwindow/ui/test/browser_perf
+
+Performance tests for Smart Window on Firefox Desktop
+
+browser_smartwindow_intent_perf.js
+==================================
+
+:owner: GenAI Team
+:name: browser_smartwindow_intent_perf.js
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:SMART-INTENT-default-intent-latency-first-use,unit:ms,shouldAlert:False, name:SMART-INTENT-default-intent-latency-cold,unit:ms,shouldAlert:True, name:SMART-INTENT-default-intent-latency-warm,unit:ms,shouldAlert:True, name:SMART-INTENT-default-engine-creation-time-first-use,unit:ms,shouldAlert:False, name:SMART-INTENT-default-engine-creation-time-cold,unit:ms,shouldAlert:True, name:SMART-INTENT-default-engine-run-time-first-use,unit:ms,shouldAlert:False, name:SMART-INTENT-default-engine-run-time-cold,unit:ms,shouldAlert:True, name:SMART-INTENT-default-engine-run-time-warm,unit:ms,shouldAlert:True, name:SMART-INTENT-default-memory-before-run-first-use,unit:MiB,shouldAlert:False, name:SMART-INTENT-default-memory-before-run-cold,unit:MiB,shouldAlert:True, name:SMART-INTENT-default-memory-before-run-warm,unit:MiB,shouldAlert:True, name:SMART-INTENT-default-memory-after-run-first-use,unit:MiB,shouldAlert:False, name:SMART-INTENT-default-memory-after-run-cold,unit:MiB,shouldAlert:True, name:SMART-INTENT-default-memory-after-run-warm,unit:MiB,shouldAlert:True, name:SMART-INTENT-default-peak-memory,unit:MiB,shouldAlert:True, name:SMART-INTENT-en-fr-intent-latency-first-use,unit:ms,shouldAlert:False, name:SMART-INTENT-en-fr-intent-latency-cold,unit:ms,shouldAlert:True, name:SMART-INTENT-en-fr-intent-latency-warm,unit:ms,shouldAlert:True, name:SMART-INTENT-en-fr-engine-creation-time-first-use,unit:ms,shouldAlert:False, name:SMART-INTENT-en-fr-engine-creation-time-cold,unit:ms,shouldAlert:True, name:SMART-INTENT-en-fr-engine-run-time-first-use,unit:ms,shouldAlert:False, name:SMART-INTENT-en-fr-engine-run-time-cold,unit:ms,shouldAlert:True, name:SMART-INTENT-en-fr-engine-run-time-warm,unit:ms,shouldAlert:True, name:SMART-INTENT-en-fr-memory-before-run-first-use,unit:MiB,shouldAlert:False, name:SMART-INTENT-en-fr-memory-before-run-cold,unit:MiB,shouldAlert:True, name:SMART-INTENT-en-fr-memory-before-run-warm,unit:MiB,shouldAlert:True, name:SMART-INTENT-en-fr-memory-after-run-first-use,unit:MiB,shouldAlert:False, name:SMART-INTENT-en-fr-memory-after-run-cold,unit:MiB,shouldAlert:True, name:SMART-INTENT-en-fr-memory-after-run-warm,unit:MiB,shouldAlert:True, name:SMART-INTENT-en-fr-peak-memory,unit:MiB,shouldAlert:True
+ --verbose
+ --ml-services
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**User-perceived latency and inference memory for the Smart Window intent classifier, driven through the production smartbar flow**
+
+browser_smartwindow_perf.js
+===========================
+
+:owner: GenAI Team
+:name: browser_smartwindow_perf.js
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:ttft-overhead,unit:ms,shouldAlert:True
+ --verbose
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**User-perceived responsiveness of Smart Window across window states and profile sizes**
+
+
+## browser/components/genai/tests/browser
+
+Performance tests for GenAI features on Firefox Desktop
+
+browser_link_preview_perf.js
+============================
+
+:owner: GenAI Team
+:name: browser_link_preview_perf.js
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:LINKPREVIEW-first-keypoint-latency-first-use,unit:ms,shouldAlert:False, name:LINKPREVIEW-first-keypoint-latency-cold,unit:ms,shouldAlert:True, name:LINKPREVIEW-keypoints-complete-latency-first-use,unit:ms,shouldAlert:False, name:LINKPREVIEW-keypoints-complete-latency-cold,unit:ms,shouldAlert:True, name:LINKPREVIEW-peak-memory,unit:MiB,shouldAlert:True, name:LINKPREVIEW-engine-creation-time-first-use,unit:ms,shouldAlert:False, name:LINKPREVIEW-engine-creation-time-cold,unit:ms,shouldAlert:True, name:LINKPREVIEW-engine-run-time-first-use,unit:ms,shouldAlert:False, name:LINKPREVIEW-engine-run-time-cold,unit:ms,shouldAlert:True, name:LINKPREVIEW-memory-after-run-first-use,unit:MiB,shouldAlert:False, name:LINKPREVIEW-memory-after-run-cold,unit:MiB,shouldAlert:True, name:LINKPREVIEW-time-to-first-token-first-use,unit:ms,shouldAlert:False, name:LINKPREVIEW-time-to-first-token-cold,unit:ms,shouldAlert:True, name:LINKPREVIEW-decoding-time-first-use,unit:ms,shouldAlert:False, name:LINKPREVIEW-decoding-time-cold,unit:ms,shouldAlert:True, name:LINKPREVIEW-tokens-per-second-first-use,unit:tokens/s,shouldAlert:False,lowerIsBetter:False, name:LINKPREVIEW-tokens-per-second-cold,unit:tokens/s,shouldAlert:True,lowerIsBetter:False
+ --verbose
+ --ml-services
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**User-perceived latency and inference memory for Link Preview key points, driven through the production UI flow**
+
+
+## browser/components/tabbrowser/test/browser/smarttabgrouping/performance
+
+End-to-end performance tests for Smart Tab Grouping
+
+browser_smart_tab_grouping_perf.js
+==================================
+
+:owner: GenAI Team
+:name: browser_smart_tab_grouping_perf.js
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:STG-E2E-embedder-engine-creation-time-cold,unit:ms,shouldAlert:True, name:STG-E2E-embedder-engine-creation-time-first-use,unit:ms,shouldAlert:False, name:STG-E2E-embedder-engine-run-time-cold,unit:ms,shouldAlert:True, name:STG-E2E-embedder-engine-run-time-first-use,unit:ms,shouldAlert:False, name:STG-E2E-embedder-engine-run-time-warm,unit:ms,shouldAlert:True, name:STG-E2E-embedder-memory-after-run-cold,unit:MiB,shouldAlert:True, name:STG-E2E-embedder-memory-after-run-first-use,unit:MiB,shouldAlert:False, name:STG-E2E-embedder-memory-after-run-warm,unit:MiB,shouldAlert:True, name:STG-E2E-embedder-memory-before-run-cold,unit:MiB,shouldAlert:True, name:STG-E2E-embedder-memory-before-run-first-use,unit:MiB,shouldAlert:False, name:STG-E2E-embedder-memory-before-run-warm,unit:MiB,shouldAlert:True, name:STG-E2E-labelLatency-cold,unit:ms,shouldAlert:True, name:STG-E2E-labelLatency-first-use,unit:ms,shouldAlert:False, name:STG-E2E-labelLatency-warm,unit:ms,shouldAlert:True, name:STG-E2E-peak-memory,unit:MiB,shouldAlert:True, name:STG-E2E-suggestLatency-cold,unit:ms,shouldAlert:True, name:STG-E2E-suggestLatency-first-use,unit:ms,shouldAlert:False, name:STG-E2E-suggestLatency-warm,unit:ms,shouldAlert:True, name:STG-E2E-topic-engine-creation-time-cold,unit:ms,shouldAlert:True, name:STG-E2E-topic-engine-creation-time-first-use,unit:ms,shouldAlert:False, name:STG-E2E-topic-engine-run-time-cold,unit:ms,shouldAlert:True, name:STG-E2E-topic-engine-run-time-first-use,unit:ms,shouldAlert:False, name:STG-E2E-topic-engine-run-time-warm,unit:ms,shouldAlert:True, name:STG-E2E-topic-memory-after-run-cold,unit:MiB,shouldAlert:True, name:STG-E2E-topic-memory-after-run-first-use,unit:MiB,shouldAlert:False, name:STG-E2E-topic-memory-after-run-warm,unit:MiB,shouldAlert:True, name:STG-E2E-topic-memory-before-run-cold,unit:MiB,shouldAlert:True, name:STG-E2E-topic-memory-before-run-first-use,unit:MiB,shouldAlert:False, name:STG-E2E-topic-memory-before-run-warm,unit:MiB,shouldAlert:True
+ --verbose
+ --ml-services
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**End-to-end Smart Tab Grouping latency, measured through the tab group menu**
 
 
 ## browser/components/translations/tests/browser
@@ -221,6 +349,96 @@ browser_translations_perf_tiny.js
  --try-platform linux, mac, win
 
 **Tests the performance of Full Page Translations with a tiny-architecture model**
+
+
+## browser/components/urlbar/tests/browser-ml
+
+Performance tests for urlbar features on Firefox Desktop
+
+browser_quicksuggest_ml_perf.js
+===============================
+
+:owner: GenAI Team
+:name: browser_quicksuggest_ml_perf.js
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:MLSUGGEST-suggestion-latency-first-use,unit:ms,shouldAlert:False, name:MLSUGGEST-suggestion-latency-warm,unit:ms,shouldAlert:True, name:MLSUGGEST-peak-memory,unit:MiB,shouldAlert:True, name:MLSUGGEST-intent-engine-run-time-first-use,unit:ms,shouldAlert:False, name:MLSUGGEST-intent-engine-run-time-warm,unit:ms,shouldAlert:True, name:MLSUGGEST-intent-memory-after-run-first-use,unit:MiB,shouldAlert:False, name:MLSUGGEST-intent-memory-after-run-warm,unit:MiB,shouldAlert:True, name:MLSUGGEST-ner-engine-run-time-first-use,unit:ms,shouldAlert:False, name:MLSUGGEST-ner-engine-run-time-warm,unit:ms,shouldAlert:True, name:MLSUGGEST-ner-memory-after-run-first-use,unit:MiB,shouldAlert:False, name:MLSUGGEST-ner-memory-after-run-warm,unit:MiB,shouldAlert:True
+ --verbose
+ --ml-services
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**User-perceived latency and inference memory for ML-backed Firefox Suggest, driven through the production urlbar flow**
+
+browser_urlbar_semantic_history_perf.js
+=======================================
+
+:owner: GenAI Team
+:name: browser_urlbar_semantic_history_perf.js
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:SEMANTICHISTORY-indexing-engine-run-time,unit:ms,shouldAlert:True, name:SEMANTICHISTORY-indexing-memory-after-run,unit:MiB,shouldAlert:True, name:SEMANTICHISTORY-semantic-result-latency,unit:ms,shouldAlert:True, name:SEMANTICHISTORY-peak-memory,unit:MiB,shouldAlert:True, name:SEMANTICHISTORY-engine-creation-time,unit:ms,shouldAlert:True, name:SEMANTICHISTORY-engine-run-time,unit:ms,shouldAlert:True, name:SEMANTICHISTORY-memory-after-run,unit:MiB,shouldAlert:True
+ --verbose
+ --ml-services
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**User-perceived latency and inference memory for semantic history search, driven through history ingestion and the production urlbar flow**
+
+
+## browser/extensions/formautofill/test/browser/performance
+
+Performance tests for Form Autofill on Firefox Desktop
+
+browser_formautofill_ml_perf.js
+===============================
+
+:owner: Form Autofill Team
+:name: browser_formautofill_ml_perf.js
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:FORM-AUTOFILL-single-engine-focus-to-identification-time-first-use,unit:ms,shouldAlert:False, name:FORM-AUTOFILL-single-engine-focus-to-identification-time-cold,unit:ms,shouldAlert:True, name:FORM-AUTOFILL-single-engine-focus-to-identification-time-warm,unit:ms,shouldAlert:True, name:FORM-AUTOFILL-single-engine-engine-creation-time-first-use,unit:ms,shouldAlert:False, name:FORM-AUTOFILL-single-engine-engine-creation-time-cold,unit:ms,shouldAlert:True, name:FORM-AUTOFILL-single-engine-engine-run-time-first-use,unit:ms,shouldAlert:False, name:FORM-AUTOFILL-single-engine-engine-run-time-cold,unit:ms,shouldAlert:True, name:FORM-AUTOFILL-single-engine-engine-run-time-warm,unit:ms,shouldAlert:True, name:FORM-AUTOFILL-single-engine-memory-before-run-first-use,unit:MiB,shouldAlert:False, name:FORM-AUTOFILL-single-engine-memory-before-run-cold,unit:MiB,shouldAlert:True, name:FORM-AUTOFILL-single-engine-memory-before-run-warm,unit:MiB,shouldAlert:True, name:FORM-AUTOFILL-single-engine-memory-after-run-first-use,unit:MiB,shouldAlert:False, name:FORM-AUTOFILL-single-engine-memory-after-run-cold,unit:MiB,shouldAlert:True, name:FORM-AUTOFILL-single-engine-memory-after-run-warm,unit:MiB,shouldAlert:True, name:FORM-AUTOFILL-single-engine-peak-memory,unit:MiB,shouldAlert:True, name:FORM-AUTOFILL-double-engine-focus-to-identification-time-first-use,unit:ms,shouldAlert:False, name:FORM-AUTOFILL-double-engine-focus-to-identification-time-cold,unit:ms,shouldAlert:True, name:FORM-AUTOFILL-double-engine-focus-to-identification-time-warm,unit:ms,shouldAlert:True, name:FORM-AUTOFILL-double-engine-peak-memory,unit:MiB,shouldAlert:True, name:FORM-AUTOFILL-double-engine-encoder-engine-creation-time-first-use,unit:ms,shouldAlert:False, name:FORM-AUTOFILL-double-engine-encoder-engine-creation-time-cold,unit:ms,shouldAlert:True, name:FORM-AUTOFILL-double-engine-encoder-engine-run-time-first-use,unit:ms,shouldAlert:False, name:FORM-AUTOFILL-double-engine-encoder-engine-run-time-cold,unit:ms,shouldAlert:True, name:FORM-AUTOFILL-double-engine-encoder-engine-run-time-warm,unit:ms,shouldAlert:True, name:FORM-AUTOFILL-double-engine-encoder-memory-before-run-first-use,unit:MiB,shouldAlert:False, name:FORM-AUTOFILL-double-engine-encoder-memory-before-run-cold,unit:MiB,shouldAlert:True, name:FORM-AUTOFILL-double-engine-encoder-memory-before-run-warm,unit:MiB,shouldAlert:True, name:FORM-AUTOFILL-double-engine-encoder-memory-after-run-first-use,unit:MiB,shouldAlert:False, name:FORM-AUTOFILL-double-engine-encoder-memory-after-run-cold,unit:MiB,shouldAlert:True, name:FORM-AUTOFILL-double-engine-encoder-memory-after-run-warm,unit:MiB,shouldAlert:True, name:FORM-AUTOFILL-double-engine-head-engine-creation-time-first-use,unit:ms,shouldAlert:False, name:FORM-AUTOFILL-double-engine-head-engine-creation-time-cold,unit:ms,shouldAlert:True, name:FORM-AUTOFILL-double-engine-head-engine-run-time-first-use,unit:ms,shouldAlert:False, name:FORM-AUTOFILL-double-engine-head-engine-run-time-cold,unit:ms,shouldAlert:True, name:FORM-AUTOFILL-double-engine-head-engine-run-time-warm,unit:ms,shouldAlert:True, name:FORM-AUTOFILL-double-engine-head-memory-before-run-first-use,unit:MiB,shouldAlert:False, name:FORM-AUTOFILL-double-engine-head-memory-before-run-cold,unit:MiB,shouldAlert:True, name:FORM-AUTOFILL-double-engine-head-memory-before-run-warm,unit:MiB,shouldAlert:True, name:FORM-AUTOFILL-double-engine-head-memory-after-run-first-use,unit:MiB,shouldAlert:False, name:FORM-AUTOFILL-double-engine-head-memory-after-run-cold,unit:MiB,shouldAlert:True, name:FORM-AUTOFILL-double-engine-head-memory-after-run-warm,unit:MiB,shouldAlert:True
+ --verbose
+ --ml-services
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**Integrated ML Autofill performance for the single- and double-engine classifiers**
+
+
+## dom/media/webspeech/recognition/test
+
+Performance tests for on-device speech recognition
+
+browser_speech_recognition_perf.js
+==================================
+
+:owner: Media Playback Team
+:name: browser_speech_recognition_perf.js
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:engine-ready-latency,unit:ms,shouldAlert:False, name:first-result-latency,unit:ms,shouldAlert:False, name:finalization-latency,unit:ms,shouldAlert:False, name:real-time-factor,unit:X,shouldAlert:False,lowerIsBetter:False, name:memory-after-init,unit:MB,shouldAlert:False, name:memory-mid-recognition,unit:MB,shouldAlert:False
+ --verbose
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**Latency, real-time factor and memory of on-device speech recognition**
 
 
 ## dom/serviceworkers/test/performance
@@ -485,6 +703,7 @@ test_trr_bench.js
 ::
 
  --perfherder
+ --perfherder-metrics name:average,unit:ms,shouldAlert:True,lowerIsBetter:True
 
 **Benchmark for TRR (Trusted Recursive Resolver) DNS lookup performance under various load conditions.**
 
@@ -604,24 +823,6 @@ This mozperftest gets webpagetest to run pageload tests on Firefox against the 5
 
 Performance tests running through Mochitest for ML Models
 
-browser_ml_security_perf.js
-===========================
-
-:owner: GenAI Team
-:name: ML Security Orchestrator Performance Tests
-:Default options:
-
-::
-
- --perfherder
- --perfherder-metrics name:latency,unit:ms,shouldAlert:False
- --verbose
- --manifest perftest.toml
- --manifest-flavor browser-chrome
- --try-platform linux, mac, win
-
-**Template test for latency for ML Security Orchestrator**
-
 browser_ml_semantic_history_search_perf.js
 ==========================================
 
@@ -658,24 +859,6 @@ browser_ml_smart_tab_clustering_perf.js
 
 **Testing Smart Tab Clustering**
 
-browser_ml_speecht5_tts.js
-==========================
-
-:owner: GenAI Team
-:name: ML Speech T5 TTS
-:Default options:
-
-::
-
- --perfherder
- --perfherder-metrics name:latency,unit:ms,shouldAlert:False, name:memory,unit:MiB,shouldAlert:False
- --verbose
- --manifest perftest.toml
- --manifest-flavor browser-chrome
- --try-platform linux, mac, win
-
-**Testing Speech T5 TTS**
-
 browser_ml_autofill_perf.js
 ===========================
 
@@ -686,13 +869,13 @@ browser_ml_autofill_perf.js
 ::
 
  --perfherder
- --perfherder-metrics name:AUTOFILL-pipeline-ready-latency,unit:ms,shouldAlert:False, name:AUTOFILL-initialization-latency,unit:ms,shouldAlert:False, name:AUTOFILL-model-run-latency,unit:ms,shouldAlert:False, name:AUTOFILL-total-memory-usage,unit:MiB,shouldAlert:False, name:tokenSpeed,unit:tokens/s,shouldAlert:False,lowerIsBetter:False, name:charactersSpeed,unit:chars/s,shouldAlert:False,lowerIsBetter:False, name:AUTOFILL-concurrent-init-latency,unit:ms,shouldAlert:False, name:AUTOFILL-two-engine-e2e-run-latency,unit:ms,shouldAlert:False, name:AUTOFILL-two-engine-total-memory-usage,unit:MiB,shouldAlert:False, name:AUTOFILL-encoder-pipeline-ready-latency,unit:ms,shouldAlert:False, name:AUTOFILL-encoder-initialization-latency,unit:ms,shouldAlert:False, name:AUTOFILL-encoder-model-run-latency,unit:ms,shouldAlert:False, name:AUTOFILL-head-pipeline-ready-latency,unit:ms,shouldAlert:False, name:AUTOFILL-head-initialization-latency,unit:ms,shouldAlert:False, name:AUTOFILL-head-model-run-latency,unit:ms,shouldAlert:False
+ --perfherder-metrics name:AUTOFILL-pipeline-ready-latency,unit:ms,shouldAlert:False, name:AUTOFILL-initialization-latency,unit:ms,shouldAlert:False, name:AUTOFILL-model-run-latency,unit:ms,shouldAlert:False, name:AUTOFILL-total-memory-usage,unit:MiB,shouldAlert:False, name:tokenSpeed,unit:tokens/s,shouldAlert:False,lowerIsBetter:False, name:charactersSpeed,unit:chars/s,shouldAlert:False,lowerIsBetter:False, name:AUTOFILL-two-engine-concurrent-init-latency,unit:ms,shouldAlert:False, name:AUTOFILL-two-engine-e2e-run-latency,unit:ms,shouldAlert:False, name:AUTOFILL-two-engine-total-memory-usage,unit:MiB,shouldAlert:False, name:AUTOFILL-encoder-pipeline-ready-latency,unit:ms,shouldAlert:False, name:AUTOFILL-encoder-initialization-latency,unit:ms,shouldAlert:False, name:AUTOFILL-encoder-model-run-latency,unit:ms,shouldAlert:False, name:AUTOFILL-head-pipeline-ready-latency,unit:ms,shouldAlert:False, name:AUTOFILL-head-initialization-latency,unit:ms,shouldAlert:False, name:AUTOFILL-head-model-run-latency,unit:ms,shouldAlert:False
  --verbose
  --manifest perftest.toml
  --manifest-flavor browser-chrome
  --try-platform linux, mac, win
 
-**Latency for the ML Autofill model (legacy single-model and new two-engine)**
+**Latency for the ML Autofill model (default single-model and opt-in two-engine)**
 
 browser_ml_engine_multi_perf.js
 ===============================
@@ -704,7 +887,7 @@ browser_ml_engine_multi_perf.js
 ::
 
  --perfherder
- --perfherder-metrics name:latency,unit:ms,shouldAlert:False, name:memory,unit:MiB,shouldAlert:False, name:intent-PIPELINE_READY_LATENCY,unit:MiB,shouldAlert:False, name:intent-INITIALIZATION_LATENCY,unit:MiB,shouldAlert:False, name:intent-MODEL_RUN_LATENCY,unit:MiB,shouldAlert:False, name:suggest-PIPELINE_READY_LATENCY,unit:MiB,shouldAlert:False, name:suggest-INITIALIZATION_LATENCY,unit:MiB,shouldAlert:False, name:suggest-MODEL_RUN_LATENCY,unit:MiB,shouldAlert:False, name:engine3-PIPELINE_READY_LATENCY,unit:MiB,shouldAlert:False, name:engine3-INITIALIZATION_LATENCY,unit:MiB,shouldAlert:False, name:engine3-MODEL_RUN_LATENCY,unit:MiB,shouldAlert:False, name:engine4-PIPELINE_READY_LATENCY,unit:MiB,shouldAlert:False, name:engine4-INITIALIZATION_LATENCY,unit:MiB,shouldAlert:False, name:engine4-MODEL_RUN_LATENCY,unit:MiB,shouldAlert:False, name:TOTAL_MEMORY_USAGE,unit:MiB,shouldAlert:False
+ --perfherder-metrics name:latency,unit:ms,shouldAlert:False, name:memory,unit:MiB,shouldAlert:False
  --verbose
  --manifest perftest.toml
  --manifest-flavor browser-chrome
@@ -811,7 +994,7 @@ browser_ml_suggest_inference.js
 ::
 
  --perfherder
- --perfherder-metrics name:inference-pipeline-ready-latency,unit:ms,shouldAlert:False, name:inference-initialization-latency,unit:ms,shouldAlert:False, name:inference-model-run-latency,unit:ms,shouldAlert:False, name:inference-total-memory-usage,unit:ms,shouldAlert:False
+ --perfherder-metrics name:inference-pipeline-ready-latency,unit:ms,shouldAlert:False, name:inference-initialization-latency,unit:ms,shouldAlert:False, name:inference-model-run-latency,unit:ms,shouldAlert:False, name:inference-total-memory-usage,unit:MiB,shouldAlert:False
  --verbose
  --manifest perftest.toml
  --manifest-flavor browser-chrome
@@ -819,23 +1002,71 @@ browser_ml_suggest_inference.js
 
 **Template test for ML suggest Inference Model**
 
-browser_ml_summarizer_perf.js
+
+## toolkit/components/pdfjs/test
+
+Performance tests for PDF.js features on Firefox Desktop
+
+browser_pdfjs_alttext_perf.js
 =============================
 
 :owner: GenAI Team
-:name: browser_ml_summarizer_perf.js
+:name: browser_pdfjs_alttext_perf.js
 :Default options:
 
 ::
 
  --perfherder
- --perfherder-metrics name:latency,unit:ms,shouldAlert:True, name:memory,unit:MiB,shouldAlert:True, name:tokenSpeed,unit:tokens/s,shouldAlert:True,lowerIsBetter:False, name:charactersSpeed,unit:chars/s,shouldAlert:True,lowerIsBetter:False
+ --perfherder-metrics name:PDFJS-ALT-TEXT-alt-text-latency-first-use,unit:ms,shouldAlert:False, name:PDFJS-ALT-TEXT-alt-text-latency-cold,unit:ms,shouldAlert:True, name:PDFJS-ALT-TEXT-alt-text-latency-warm,unit:ms,shouldAlert:True, name:PDFJS-ALT-TEXT-engine-creation-time-first-use,unit:ms,shouldAlert:False, name:PDFJS-ALT-TEXT-engine-creation-time-cold,unit:ms,shouldAlert:True, name:PDFJS-ALT-TEXT-engine-run-time-first-use,unit:ms,shouldAlert:False, name:PDFJS-ALT-TEXT-engine-run-time-cold,unit:ms,shouldAlert:True, name:PDFJS-ALT-TEXT-engine-run-time-warm,unit:ms,shouldAlert:True, name:PDFJS-ALT-TEXT-memory-before-run-first-use,unit:MiB,shouldAlert:False, name:PDFJS-ALT-TEXT-memory-before-run-cold,unit:MiB,shouldAlert:True, name:PDFJS-ALT-TEXT-memory-before-run-warm,unit:MiB,shouldAlert:True, name:PDFJS-ALT-TEXT-memory-after-run-first-use,unit:MiB,shouldAlert:False, name:PDFJS-ALT-TEXT-memory-after-run-cold,unit:MiB,shouldAlert:True, name:PDFJS-ALT-TEXT-memory-after-run-warm,unit:MiB,shouldAlert:True, name:PDFJS-ALT-TEXT-peak-memory,unit:MiB,shouldAlert:True
+ --verbose
+ --ml-services
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**User-perceived latency and inference memory for PDF.js alt-text generation, driven through the production image-adding flow**
+
+
+## toolkit/components/pdfjs/test/perf
+
+Performance tests for the PDF.js viewer UI on Firefox Desktop, using PDFs with empty pages
+
+browser_pdfjs_ui_interaction_perf.js
+====================================
+
+:owner: PDF.js Team
+:name: browser_pdfjs_ui_interaction_perf.js
+:Default options:
+
+::
+
+ --extra-args setpref=layout.frame_rate=0, setpref=docshell.event_starvation_delay_hint=1
+ --perfherder
+ --perfherder-metrics name:PDFJS-UI-scroll-100p,unit:ms,shouldAlert:True, name:PDFJS-UI-zoom-100p,unit:ms,shouldAlert:True, name:PDFJS-UI-goto-1000p,unit:ms,shouldAlert:True
  --verbose
  --manifest perftest.toml
  --manifest-flavor browser-chrome
  --try-platform linux, mac, win
 
-**Template test for latency for Summarizer model**
+**Time for the PDF.js viewer to scroll, zoom and go to pages in PDFs with 100 and 1000 empty pages**
+
+browser_pdfjs_ui_open_perf.js
+=============================
+
+:owner: PDF.js Team
+:name: browser_pdfjs_ui_open_perf.js
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:PDFJS-UI-first-open-pagesinit,unit:ms,shouldAlert:False, name:PDFJS-UI-first-open-pagerendered,unit:ms,shouldAlert:False, name:PDFJS-UI-open-1p-pagesinit,unit:ms,shouldAlert:True, name:PDFJS-UI-open-1p-pagerendered,unit:ms,shouldAlert:True, name:PDFJS-UI-open-1p-render-delay,unit:ms,shouldAlert:False, name:PDFJS-UI-open-1000p-pagesinit,unit:ms,shouldAlert:True, name:PDFJS-UI-open-1000p-pagerendered,unit:ms,shouldAlert:True, name:PDFJS-UI-open-1000p-pagesloaded,unit:ms,shouldAlert:True
+ --verbose
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**Time for the PDF.js viewer to open PDFs with 1 and 1000 empty pages, from the navigation start**
 
 
 ## toolkit/components/places/tests/browser/performance
@@ -855,7 +1086,7 @@ browser_calculate_frecency_speed.js
  --manifest perftest.toml
  --manifest-flavor browser-chrome
  --perfherder
- --perfherder-metrics name:PlacesCalculateFrecencyHighFrequency,unit:ms,shouldAlert:False, name:PlacesCalculateFrecencyLowFrequency,unit:ms,shouldAlert:False, name:PlacesCalculateFrecencyChunked,unit:ms,shouldAlert:False
+ --perfherder-metrics name:PlacesCalculateFrecencyHighFrequency,unit:ms,shouldAlert:False, name:PlacesCalculateFrecencyLowFrequency,unit:ms,shouldAlert:False, name:PlacesCalculateFrecencyChunked,unit:ms,shouldAlert:False, name:PlacesCalculateFrecencyBookmarkOnly,unit:ms,shouldAlert:False, name:PlacesCalculateFrecencyRedirectChain,unit:ms,shouldAlert:False, name:PlacesCalculateFrecencyInteractions,unit:ms,shouldAlert:False, name:PlacesCalculateFrecencyManyVisits,unit:ms,shouldAlert:False, name:PlacesCalculateFrecencyVeryManyVisits,unit:ms,shouldAlert:False, name:PlacesCalculateFrecencyWorstCase,unit:ms,shouldAlert:False
  --try-platform linux, mac
  --verbose
 

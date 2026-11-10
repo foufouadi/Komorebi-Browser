@@ -32,6 +32,7 @@
 #endif
 #include "mozilla/EventForwards.h"
 #include "mozilla/LazyIdleThread.h"
+#include "mozilla/MozPromise.h"
 #include "mozilla/Printf.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Vector.h"
@@ -532,7 +533,7 @@ class WinUtils {
   static nsresult WriteBitmap(nsIFile* aFile, imgIContainer* aImage);
 
   /**
-   * Wrapper for PathCanonicalize().
+   * Wrapper for PathCchCanonicalize().
    * Upon success, the resulting output string length is <= MAX_PATH.
    * @param  aPath [in,out] The path to transform.
    * @return true on success, false on failure.
@@ -703,10 +704,10 @@ class FaviconHelper {
   static const char kShortcutCacheDir[];
   static nsresult ObtainCachedIconFile(
       nsCOMPtr<nsIURI> aFaviconPageURI, nsString& aICOFilePath,
-      RefPtr<LazyIdleThread>& aIOThread, bool aURLShortcut,
+      nsISerialEventTarget* aIOThread, bool aURLShortcut,
       already_AddRefed<nsIRunnable> aRunnable = nullptr);
   static RefPtr<ObtainCachedIconFileAsyncPromise> ObtainCachedIconFileAsync(
-      nsCOMPtr<nsIURI> aFaviconPageURI, RefPtr<LazyIdleThread>& aIOThread,
+      nsCOMPtr<nsIURI> aFaviconPageURI, nsISerialEventTarget* aIOThread,
       IconCacheDir aCacheDir);
 
   static nsresult GetOutputIconPath(nsCOMPtr<nsIURI> aFaviconPageURI,

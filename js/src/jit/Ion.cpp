@@ -57,9 +57,9 @@
 #include "jit/WarpOracle.h"
 #include "jit/WasmBCE.h"
 #include "jit/WasmRefTypeAnalysis.h"
-#include "js/friend/UsageStatistics.h"  // JSUseCounter
 #include "js/Printf.h"
 #include "js/UniquePtr.h"
+#include "util/Denormals.h"
 #include "util/Memory.h"
 #include "util/WindowsWrapper.h"
 #include "vm/HelperThreads.h"
@@ -71,6 +71,7 @@
 #include "gc/GC-inl.h"
 #include "gc/StableCellHasher-inl.h"
 #include "jit/InlineScriptTree-inl.h"
+#include "jit/JSJitFrameIter-inl.h"
 #include "jit/MacroAssembler-inl.h"
 #include "jit/SafepointIndex-inl.h"
 #include "vm/GeckoProfiler-inl.h"
@@ -94,6 +95,7 @@ JitRuntime::~JitRuntime() {
   MOZ_ASSERT(ionLazyLinkList_.ref().isEmpty());
 
   MOZ_ASSERT(ionFreeTaskBatch_.ref().empty());
+  MOZ_ASSERT(debugModeOSRReturnSites_.ref().empty());
 
   // By this point, the jitcode global table should be empty.
   MOZ_ASSERT_IF(jitcodeGlobalTable_, jitcodeGlobalTable_->empty());
@@ -102,14 +104,15 @@ JitRuntime::~JitRuntime() {
   js_delete(jitHintsMap_.ref());
 }
 
-uint32_t JitRuntime::startTrampolineCode(MacroAssembler& masm) {
+uint32_t JitRuntime::startTrampolineCode(MacroAssembler& masm,
+                                         TargetKind kind) {
   AutoCreatedBy acb(masm, "startTrampolineCode");
 
   masm.assumeUnreachable("Shouldn't get here");
   masm.flushBuffer();
   masm.haltingAlign(CodeAlignment);
   masm.setFramePushed(0);
-  return masm.currentOffset();
+  return masm.indirectTarget(kind).offset();
 }
 
 bool JitRuntime::initialize(JSContext* cx) {
@@ -166,6 +169,10 @@ bool JitRuntime::generateTrampolines(JSContext* cx) {
   JitSpew(JitSpew_Codegen, "# Emitting invalidator");
   generateInvalidator(masm, &bailoutTail);
   rangeRecorder.recordOffset("Trampoline: Invalidator");
+
+  JitSpew(JitSpew_Codegen, "# Emitting BaselineDebugModeOSR handler");
+  generateBaselineDebugModeOSRHandler(masm);
+  rangeRecorder.recordOffset("Trampoline: BaselineDebugModeOSR");
 
   JitSpew(JitSpew_Codegen, "# Emitting EnterJIT [Normal] trampoline");
   generateEnterJIT(cx, masm, EnterJitMode::Normal);
@@ -337,20 +344,6 @@ void JitRuntime::freeIonOsrTempData() {
   ionOsrTempDataSize_ = 0;
 }
 
-static bool LinkCodeGen(JSContext* cx, CodeGenerator* codegen,
-                        HandleScript script) {
-  if (!codegen->link(cx)) {
-    return false;
-  }
-
-  // Record Ion compile time in glean.
-  if (mozilla::TimeDuration compileTime = codegen->getCompilationTime()) {
-    cx->metrics().ION_COMPILE_TIME(compileTime);
-  }
-
-  return true;
-}
-
 static bool LinkBackgroundCodeGen(JSContext* cx, IonCompileTask* task) {
   CodeGenerator* codegen = task->backgroundCodegen();
   if (!codegen) {
@@ -358,8 +351,7 @@ static bool LinkBackgroundCodeGen(JSContext* cx, IonCompileTask* task) {
   }
 
   JitContext jctx(cx);
-  RootedScript script(cx, task->script());
-  return LinkCodeGen(cx, codegen, script);
+  return codegen->link(cx);
 }
 
 void jit::LinkIonScript(JSContext* cx, HandleScript calleeScript) {
@@ -399,9 +391,9 @@ uint8_t* jit::LazyLinkTopActivation(JSContext* cx,
 
   // Enter the Baseline code instead of Ion code in two cases:
   //
-  // * The caller is resuming a suspended generator. Ion's resume dispatch only
-  //   handles the Next resume kind so this just means a resume that hits this
-  //   rare window doesn't enter Ion yet.
+  // * The caller is resuming a suspended generator. We currently don't resume
+  //   GeneratorResumeKind::Throw in Ion so this just means a resume that hits
+  //   this rare window doesn't enter Ion yet.
   // * The caller pushed a trial-inlining ICScript for us: it's only used by
   //   Baseline code.
   FrameDescriptor descriptor = jsFrame->descriptor();
@@ -432,6 +424,34 @@ void JitRuntime::TraceWeakJitcodeGlobalTable(JSRuntime* rt, JSTracer* trc) {
   if (rt->hasJitRuntime() && rt->jitRuntime()->hasJitcodeGlobalTable()) {
     rt->jitRuntime()->getJitcodeGlobalTable()->traceWeak(rt, trc);
   }
+}
+
+void JitRuntime::handleGrowSlotsForPureCall(JSContext* cx) {
+  MOZ_ASSERT(inPureCall());
+
+  // We only set the inPureCall flag for calls in Ion code with alias
+  // sets that claim not to have arbitrary side-effects. Therefore, we
+  // should not have re-entered JIT code, and the call that set the
+  // flag should be the innermost frame (aside from the exit frame).
+  MOZ_RELEASE_ASSERT(cx->activation()->isJit());
+  JitActivation* activation = cx->activation()->asJit();
+  MOZ_RELEASE_ASSERT(activation->hasExitFP());
+
+  JSJitFrameIter frame(activation);
+  // We currently only set this flag for DOM calls.
+  MOZ_RELEASE_ASSERT(frame.isExitFrameLayout<IonDOMExitFrameLayout>());
+  ++frame;
+  MOZ_RELEASE_ASSERT(frame.isIonJS());
+
+  // If we've already invalidated, we've cleared the IonScript
+  // pointer, so we can't invalidate again.
+  if (frame.checkInvalidation()) {
+    return;
+  }
+
+  JitSpew(JitSpew_IonInvalidate,
+          "Invalidating frame: slots reallocated during pure call");
+  Invalidate(cx, frame.script());
 }
 
 bool JitZone::addInlinedCompilation(const IonScriptKey& ionScriptKey,
@@ -561,16 +581,13 @@ void JitZone::finishScriptTableRoots() {
 }
 
 void JitZone::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
-                                     JS::CodeSizes* code, size_t* jitZone,
-                                     size_t* cacheIRStubs) const {
+                                     JS::CodeSizes* code,
+                                     size_t* jitZone) const {
   *jitZone += mallocSizeOf(this);
   *jitZone +=
       baselineCacheIRStubCodes_.shallowSizeOfExcludingThis(mallocSizeOf);
-  *jitZone += ionCacheIRStubInfoSet_.shallowSizeOfExcludingThis(mallocSizeOf);
 
   execAlloc().addSizeOfCode(code);
-
-  *cacheIRStubs += stubSpace_.sizeOfExcludingThis(mallocSizeOf);
 }
 
 void JitCodeHeader::init(JitCode* jitCode) {
@@ -895,7 +912,8 @@ const SafepointIndex* IonScript::getSafepointIndex(uint32_t disp) const {
   //
   // such as:  <...      ...    ...  ...  .   ...    ...>
   if (guessDisp > disp) {
-    while (--guess >= minEntry) {
+    while (guess > minEntry) {
+      guess--;
       guessDisp = table[guess].displacement();
       MOZ_ASSERT(guessDisp >= disp);
       if (guessDisp == disp) {
@@ -978,6 +996,7 @@ namespace js {
 namespace jit {
 
 bool OptimizeMIR(MIRGenerator* mir) {
+  MOZ_ASSERT(!DenormalsDisabled());
   MIRGraph& graph = mir->graph();
 
   if (mir->shouldCancel("Start")) {
@@ -1617,6 +1636,20 @@ bool OptimizeMIR(MIRGenerator* mir) {
     }
   }
 
+  // This must run after all passes that can move or insert instructions, so
+  // that nothing ends up between a post write barrier and its store.
+  if (!mir->compilingWasm()) {
+    if (!AddPostWriteBarriers(graph)) {
+      return false;
+    }
+    mir->spewPass("Add Post Write Barriers");
+    AssertGraphCoherency(graph);
+
+    if (mir->shouldCancel("Add Post Write Barriers")) {
+      return false;
+    }
+  }
+
   AssertGraphCoherency(graph, /* force = */ true);
 
   if (JitSpewEnabled(JitSpew_MIRExpressions)) {
@@ -1692,6 +1725,11 @@ LIRGraph* GenerateLIR(MIRGenerator* mir) {
     return nullptr;
   }
 
+  if (!PropagateIndirectJumpTargets(mir, *lir)) {
+    return nullptr;
+  }
+  mir->spewPass("Propagate Indirect Jump Targets");
+
   return lir;
 }
 
@@ -1713,7 +1751,6 @@ CodeGenerator* CompileBackEnd(MIRGenerator* mir, WarpSnapshot* snapshot) {
   // Everything in CompileBackEnd can potentially run on a helper thread.
   AutoEnterIonBackend enter;
   AutoSpewEndFunction spewEndFunction(mir);
-  mozilla::TimeStamp compileStartTime = mozilla::TimeStamp::Now();
 
   {
     WarpCompilation comp(mir->alloc());
@@ -1732,11 +1769,7 @@ CodeGenerator* CompileBackEnd(MIRGenerator* mir, WarpSnapshot* snapshot) {
     return nullptr;
   }
 
-  CodeGenerator* codegen = GenerateCode(mir, lir, snapshot);
-  if (codegen) {
-    codegen->setCompilationTime(mozilla::TimeStamp::Now() - compileStartTime);
-  }
-  return codegen;
+  return GenerateCode(mir, lir, snapshot);
 }
 
 static AbortReasonOr<WarpSnapshot*> CreateWarpSnapshot(JSContext* cx,
@@ -1905,7 +1938,7 @@ static AbortReason IonCompile(JSContext* cx, HandleScript script,
       return AbortReason::Disable;
     }
 
-    succeeded = LinkCodeGen(cx, codegen.get(), script);
+    succeeded = codegen->link(cx);
   }
 
   if (succeeded) {
@@ -2031,17 +2064,6 @@ static MethodStatus Compile(JSContext* cx, HandleScript script,
             script->filename(), script->lineno(),
             script->column().oneOriginValue());
     return Method_CantCompile;
-  }
-
-  // TODO(Bug 2039389): Remove generator use counters
-  if (script->isGenerator()) {
-    if (script->isAsync()) {
-      cx->runtime()->setUseCounter(
-          cx->global(), JSUseCounter::ASYNC_GENERATOR_FUNCTION_ION_ELIGIBLE);
-    } else {
-      cx->runtime()->setUseCounter(
-          cx->global(), JSUseCounter::GENERATOR_FUNCTION_ION_ELIGIBLE);
-    }
   }
 
   OptimizationLevel optimizationLevel =
@@ -2426,9 +2448,82 @@ bool jit::IonCompileScriptForBaselineOSR(JSContext* cx, BaselineFrame* frame,
   return true;
 }
 
+static void InvalidateFrame(const JSJitFrameIter& frame, JSScript* script) {
+  IonScript* ionScript = script->ionScript();
+
+  // Purge ICs before we mark this script as invalidated. This will
+  // prevent lastJump_ from appearing to be a bogus pointer, just
+  // in case anyone tries to read it.
+  ionScript->purgeICs(script->zone());
+
+  // This frame needs to be invalidated. We do the following:
+  //
+  // 1. Increment the reference counter to keep the ionScript alive
+  //    for the invalidation bailout or for the exception handler.
+  // 2. Determine safepoint that corresponds to the current call.
+  // 3. From safepoint, get distance to the OSI-patchable offset.
+  // 4. From the IonScript, determine the distance between the
+  //    call-patchable offset and the invalidation epilogue.
+  // 5. Patch the OSI point with a call-relative to the
+  //    invalidation epilogue.
+  //
+  // The code generator ensures that there's enough space for us
+  // to patch in a call-relative operation at each invalidation
+  // point.
+  //
+  // Note: you can't simplify this mechanism to "just patch the
+  // instruction immediately after the call" because things may
+  // need to move into a well-defined register state (using move
+  // instructions after the call) in to capture an appropriate
+  // snapshot after the call occurs.
+
+  ionScript->incrementInvalidationCount();
+
+  JitCode* ionCode = ionScript->method();
+
+  // We're about to remove edges from the JSScript to GC things embedded in
+  // the JitCode. Perform a barrier to let the GC know about those edges.
+  PreWriteBarrier(script->zone(), ionCode, [](JSTracer* trc, JitCode* code) {
+    code->traceChildren(trc);
+  });
+
+  ionCode->setInvalidated();
+
+  // Don't adjust OSI points in a bailout path.
+  if (frame.isBailoutJS()) {
+    return;
+  }
+
+  // Write the delta (from the return address offset to the
+  // IonScript pointer embedded into the invalidation epilogue)
+  // where the safepointed call instruction used to be. We rely on
+  // the call sequence causing the safepoint being >= the size of
+  // a uint32, which is checked during safepoint index
+  // construction.
+  AutoWritableJitCode awjc(ionCode);
+  const SafepointIndex* si =
+      ionScript->getSafepointIndex(frame.resumePCinCurrentFrame());
+  CodeLocationLabel dataLabelToMunge(frame.resumePCinCurrentFrame());
+  ptrdiff_t delta = ionScript->invalidateEpilogueDataOffset() -
+                    (frame.resumePCinCurrentFrame() - ionCode->raw());
+  Assembler::PatchWrite_Imm32(dataLabelToMunge, Imm32(delta));
+
+  CodeLocationLabel osiPatchPoint =
+      SafepointReader::InvalidationPatchPoint(ionScript, si);
+  CodeLocationLabel invalidateEpilogue(
+      ionCode, CodeOffset(ionScript->invalidateEpilogueOffset()));
+
+  JitSpew(
+      JitSpew_IonInvalidate,
+      "   ! Invalidate ionScript %p (inv count %zu) -> patching osipoint %p",
+      ionScript, ionScript->invalidationCount(), (void*)osiPatchPoint.raw());
+  Assembler::PatchWrite_NearCall(osiPatchPoint, invalidateEpilogue);
+}
+
+template <typename ShouldInvalidateFn>
 static void InvalidateActivation(JS::GCContext* gcx,
                                  const JitActivationIterator& activations,
-                                 bool invalidateAll) {
+                                 ShouldInvalidateFn shouldInvalidate) {
   JitSpew(JitSpew_IonInvalidate, "BEGIN invalidating activation");
 
 #ifdef CHECK_OSIPOINT_REGISTERS
@@ -2512,79 +2607,11 @@ static void InvalidateActivation(JS::GCContext* gcx,
       continue;
     }
 
-    if (!invalidateAll && !script->ionScript()->invalidated()) {
+    if (!shouldInvalidate(script)) {
       continue;
     }
 
-    IonScript* ionScript = script->ionScript();
-
-    // Purge ICs before we mark this script as invalidated. This will
-    // prevent lastJump_ from appearing to be a bogus pointer, just
-    // in case anyone tries to read it.
-    ionScript->purgeICs(script->zone());
-
-    // This frame needs to be invalidated. We do the following:
-    //
-    // 1. Increment the reference counter to keep the ionScript alive
-    //    for the invalidation bailout or for the exception handler.
-    // 2. Determine safepoint that corresponds to the current call.
-    // 3. From safepoint, get distance to the OSI-patchable offset.
-    // 4. From the IonScript, determine the distance between the
-    //    call-patchable offset and the invalidation epilogue.
-    // 5. Patch the OSI point with a call-relative to the
-    //    invalidation epilogue.
-    //
-    // The code generator ensures that there's enough space for us
-    // to patch in a call-relative operation at each invalidation
-    // point.
-    //
-    // Note: you can't simplify this mechanism to "just patch the
-    // instruction immediately after the call" because things may
-    // need to move into a well-defined register state (using move
-    // instructions after the call) in to capture an appropriate
-    // snapshot after the call occurs.
-
-    ionScript->incrementInvalidationCount();
-
-    JitCode* ionCode = ionScript->method();
-
-    // We're about to remove edges from the JSScript to GC things embedded in
-    // the JitCode. Perform a barrier to let the GC know about those edges.
-    PreWriteBarrier(script->zone(), ionCode, [](JSTracer* trc, JitCode* code) {
-      code->traceChildren(trc);
-    });
-
-    ionCode->setInvalidated();
-
-    // Don't adjust OSI points in a bailout path.
-    if (frame.isBailoutJS()) {
-      continue;
-    }
-
-    // Write the delta (from the return address offset to the
-    // IonScript pointer embedded into the invalidation epilogue)
-    // where the safepointed call instruction used to be. We rely on
-    // the call sequence causing the safepoint being >= the size of
-    // a uint32, which is checked during safepoint index
-    // construction.
-    AutoWritableJitCode awjc(ionCode);
-    const SafepointIndex* si =
-        ionScript->getSafepointIndex(frame.resumePCinCurrentFrame());
-    CodeLocationLabel dataLabelToMunge(frame.resumePCinCurrentFrame());
-    ptrdiff_t delta = ionScript->invalidateEpilogueDataOffset() -
-                      (frame.resumePCinCurrentFrame() - ionCode->raw());
-    Assembler::PatchWrite_Imm32(dataLabelToMunge, Imm32(delta));
-
-    CodeLocationLabel osiPatchPoint =
-        SafepointReader::InvalidationPatchPoint(ionScript, si);
-    CodeLocationLabel invalidateEpilogue(
-        ionCode, CodeOffset(ionScript->invalidateEpilogueOffset()));
-
-    JitSpew(
-        JitSpew_IonInvalidate,
-        "   ! Invalidate ionScript %p (inv count %zu) -> patching osipoint %p",
-        ionScript, ionScript->invalidationCount(), (void*)osiPatchPoint.raw());
-    Assembler::PatchWrite_NearCall(osiPatchPoint, invalidateEpilogue);
+    InvalidateFrame(frame, script);
   }
 
   JitSpew(JitSpew_IonInvalidate, "END invalidating activation");
@@ -2600,7 +2627,9 @@ void jit::InvalidateAll(JS::GCContext* gcx, Zone* zone) {
   for (JitActivationIterator iter(cx); !iter.done(); ++iter) {
     if (iter->compartment()->zone() == zone) {
       JitSpew(JitSpew_IonInvalidate, "Invalidating all frames for GC");
-      InvalidateActivation(gcx, iter, true);
+      InvalidateActivation(gcx, iter, [](JSScript* script) {
+        return !script->realm()->jitRealm().isPreservingCode();
+      });
     }
   }
 }
@@ -2658,7 +2687,9 @@ void jit::Invalidate(JSContext* cx, const IonScriptKeyVector& invalid,
 
   JS::GCContext* gcx = cx->gcContext();
   for (JitActivationIterator iter(cx); !iter.done(); ++iter) {
-    InvalidateActivation(gcx, iter, false);
+    InvalidateActivation(gcx, iter, [](JSScript* script) {
+      return script->ionScript()->invalidated();
+    });
   }
 
   // Drop the references added above. If a script was never active, its

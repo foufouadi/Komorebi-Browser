@@ -263,6 +263,7 @@ class TextInputSelectionController final : public nsSupportsWeakReference,
   NS_IMETHOD GetSelectionFromScript(RawSelectionType aRawSelectionType,
                                     Selection** aSelection) override;
   Selection* GetSelection(RawSelectionType aRawSelectionType) override;
+  Selection* GetExistingSelection(RawSelectionType aRawSelectionType) override;
   MOZ_CAN_RUN_SCRIPT NS_IMETHOD ScrollSelectionIntoView(
       RawSelectionType aRawSelectionType, SelectionRegion aRegion,
       ControllerScrollFlags aFlags) override;
@@ -414,6 +415,15 @@ TextInputSelectionController::GetSelectionFromScript(
 Selection* TextInputSelectionController::GetSelection(
     RawSelectionType aRawSelectionType) {
   return GetSelection(ToSelectionType(aRawSelectionType));
+}
+
+Selection* TextInputSelectionController::GetExistingSelection(
+    RawSelectionType aRawSelectionType) {
+  if (!mFrameSelection) {
+    return nullptr;
+  }
+  return mFrameSelection->GetExistingSelection(
+      ToSelectionType(aRawSelectionType));
 }
 
 NS_IMETHODIMP
@@ -743,6 +753,8 @@ void TextInputListener::OnSelectionChange(Selection& aSelection,
     return;
   }
 
+  RefPtr<TextControlElement> txtCtrlElement = mTxtCtrlElement;
+
   // Fire the select event
   // The specs don't exactly say when we should fire the select event.
   // IE: Whenever you add/remove a character to/from the selection. Also
@@ -765,12 +777,13 @@ void TextInputListener::OnSelectionChange(Selection& aSelection,
   if (!collapsed && (aReason & (nsISelectionListener::MOUSEUP_REASON |
                                 nsISelectionListener::KEYPRESS_REASON |
                                 nsISelectionListener::SELECTALL_REASON))) {
-    if (nsCOMPtr<nsIContent> content = mTxtCtrlElement) {
-      if (auto* frame = content->GetPrimaryFrame()) {
+    if (txtCtrlElement) {
+      if (auto* frame = txtCtrlElement->GetPrimaryFrame()) {
         RefPtr<PresShell> presShell = frame->PresShell();
         nsEventStatus status = nsEventStatus_eIgnore;
         WidgetEvent event(true, eFormSelect);
-        presShell->HandleEventWithTarget(&event, frame, content, &status);
+        presShell->HandleEventWithTarget(&event, frame, txtCtrlElement,
+                                         &status);
       }
     }
   }
@@ -782,7 +795,7 @@ void TextInputListener::OnSelectionChange(Selection& aSelection,
 
   mSelectionWasCollapsed = collapsed;
 
-  if (nsFocusManager::GetFocusedElementStatic() != mTxtCtrlElement) {
+  if (nsFocusManager::GetFocusedElementStatic() != txtCtrlElement) {
     return;
   }
 
@@ -895,7 +908,7 @@ TextInputListener::HandleEvent(Event* aEvent) {
 
     RefPtr<nsAtom> eventTypeAtom =
         ShortcutKeys::ConvertEventToDOMEventType(widgetKeyEvent);
-    for (KeyEventHandler* handler = keyHandlers; handler;
+    for (RefPtr<KeyEventHandler> handler = keyHandlers; handler;
          handler = handler->GetNextHandler()) {
       if (!handler->EventTypeEquals(eventTypeAtom)) {
         continue;
@@ -965,6 +978,10 @@ TextInputListener::HandleEvent(Event* aEvent) {
 }
 
 nsresult TextInputListener::OnEditActionHandled(TextEditor& aTextEditor) {
+  // UpdateTextInputCommands may run script
+  const RefPtr<TextControlElement> kungFuDeathGrip(mTxtCtrlElement);
+  (void)kungFuDeathGrip;
+
   // Update the undo / redo menus
   //
   size_t numUndoItems = aTextEditor.NumberOfUndoItems();
@@ -1279,8 +1296,10 @@ static constexpr size_t kMaxCountOfCacheToReuse = 25;
 static AutoTArray<void*, kMaxCountOfCacheToReuse>* sReleasedInstances = nullptr;
 static bool sHasShutDown = false;
 
-TextControlState::TextControlState(TextControlElement* aOwningElement)
+TextControlState::TextControlState(TextControlElement* aOwningElement,
+                                   const nsAString& aInitialValue)
     : mTextCtrlElement(aOwningElement),
+      mValue(aInitialValue),
       mEverInited(false),
       mEditorInitialized(false),
       mSelectionCached(true)
@@ -1293,15 +1312,14 @@ TextControlState::TextControlState(TextControlElement* aOwningElement)
 }
 
 TextControlState* TextControlState::Construct(
-    TextControlElement* aOwningElement) {
+    TextControlElement* aOwningElement, const nsAString& aInitialValue) {
   void* mem;
   if (sReleasedInstances && !sReleasedInstances->IsEmpty()) {
     mem = sReleasedInstances->PopLastElement();
   } else {
     mem = moz_xmalloc(sizeof(TextControlState));
   }
-
-  return new (mem) TextControlState(aOwningElement);
+  return new (mem) TextControlState(aOwningElement, aInitialValue);
 }
 
 TextControlState::~TextControlState() {
@@ -1461,7 +1479,6 @@ nsresult TextControlState::InitializeSelection(PresShell* aPresShell) {
 
   // Create a SelectionController
   mSelCon = new TextInputSelectionController(aPresShell, *editorRoot);
-  EnsureTextInputListener();
 
   // Editor will override this as needed from InitializeSelection.
   mSelCon->SetDisplaySelection(nsISelectionController::SELECTION_HIDDEN);
@@ -1476,7 +1493,6 @@ nsresult TextControlState::InitializeSelection(PresShell* aPresShell) {
     if (caret) {
       selection->AddSelectionListener(caret);
     }
-    mTextInputListener->StartToListenToSelectionChange();
   }
 
   // If an editor exists from before, prepare it for usage
@@ -1530,7 +1546,6 @@ void TextControlState::EnsureTextInputListener() {
       mTextEditor->SetTextInputListener(mTextInputListener);
     }
   }
-  mTextInputListener->StartToHandleShortcutKeys();
 }
 
 bool TextControlState::IsPreparingEditor() const {
@@ -1632,7 +1647,7 @@ nsresult TextControlState::PrepareEditor() {
       if (mPasswordMaskData) {
         passwordMaskData = std::move(mPasswordMaskData);
       } else {
-        passwordMaskData = MakeUnique<PasswordMaskData>();
+        passwordMaskData = std::make_unique<PasswordMaskData>();
       }
     } else {
       mPasswordMaskData = nullptr;
@@ -1753,7 +1768,14 @@ nsresult TextControlState::PrepareEditor() {
   NS_WARNING_ASSERTION(enabledUndoRedo,
                        "Failed to enable undo/redo transaction");
 
+  // The listener only acts on notifications from the editor and on keyboard
+  // events. Text controls prepare the editor in GetEventTargetParent(), which
+  // runs before any listener sees a keyboard event, so creating the listener
+  // can wait until now. This registers our keyboard listeners before the
+  // editor's own, which PostCreate() adds.
   EnsureTextInputListener();
+  mTextInputListener->StartToListenToSelectionChange();
+  mTextInputListener->StartToHandleShortcutKeys();
 
   if (!mEditorInitialized) {
     newTextEditor->PostCreate();

@@ -5,6 +5,7 @@
 use super::{plan_incoming, ProcessIncomingRecordImpl, ProcessOutgoingRecordImpl, SyncRecord};
 use crate::error::*;
 use crate::Store;
+use db_crypto::EncryptorDecryptor;
 use error_support::warn;
 use rusqlite::{
     types::{FromSql, ToSql},
@@ -33,12 +34,12 @@ pub const COLLECTION_SYNCID_META_KEY: &str = "sync_id";
 pub trait SyncEngineStorageImpl<T>: Send + Sync {
     fn get_incoming_impl(
         &self,
-        enc_key: &Option<String>,
+        encdec: &Arc<dyn EncryptorDecryptor>,
     ) -> Result<Box<dyn ProcessIncomingRecordImpl<Record = T>>>;
     fn reset_storage(&self, conn: &Transaction<'_>) -> Result<()>;
     fn get_outgoing_impl(
         &self,
-        enc_key: &Option<String>,
+        encdec: &Arc<dyn EncryptorDecryptor>,
     ) -> Result<Box<dyn ProcessOutgoingRecordImpl<Record = T>>>;
 }
 
@@ -47,7 +48,6 @@ pub struct ConfigSyncEngine<T> {
     pub(crate) config: EngineConfig,
     pub(crate) store: Arc<Store>,
     pub(crate) storage_impl: Box<dyn SyncEngineStorageImpl<T>>,
-    local_enc_key: Option<String>,
 }
 
 impl<T> ConfigSyncEngine<T> {
@@ -60,7 +60,6 @@ impl<T> ConfigSyncEngine<T> {
             config,
             store,
             storage_impl,
-            local_enc_key: None,
         }
     }
     fn put_meta(&self, conn: &Connection, tail: &str, value: &dyn ToSql) -> Result<()> {
@@ -74,18 +73,6 @@ impl<T> ConfigSyncEngine<T> {
     fn delete_meta(&self, conn: &Connection, tail: &str) -> Result<()> {
         let key = format!("{}.{}", self.config.namespace, tail);
         crate::db::store::delete_meta(conn, &key)
-    }
-    /// The last-sync timestamp in milliseconds, 0 if never synced.
-    pub(crate) fn get_last_sync_millis(&self) -> Result<i64> {
-        let db = self.store.lock_db()?;
-        Ok(self
-            .get_meta::<i64>(&db.writer, LAST_SYNC_META_KEY)?
-            .unwrap_or_default())
-    }
-
-    pub(crate) fn set_last_sync_millis(&self, millis: i64) -> Result<()> {
-        let db = self.store.lock_db()?;
-        self.put_meta(&db.writer, LAST_SYNC_META_KEY, &millis)
     }
 
     // Reset the local sync data so the next server request fetches all records.
@@ -114,15 +101,16 @@ impl<T: SyncRecord + std::fmt::Debug> SyncEngine for ConfigSyncEngine<T> {
         self.config.collection.clone()
     }
 
-    fn set_local_encryption_key(&mut self, key: &str) -> anyhow::Result<()> {
-        self.local_enc_key = Some(key.to_string());
+    /// The store owns the encryptor, so the key handed to us by the sync
+    /// manager is unused. Accepting it keeps consumers that still pass one
+    /// working. TODO(Bug 2075562): remove once Android and iOS stop passing
+    /// it.
+    fn set_local_encryption_key(&mut self, _key: &str) -> anyhow::Result<()> {
+        warn!("set_local_encryption_key: ignored, the store owns the encryptor");
         Ok(())
     }
 
-    fn prepare_for_sync(
-        &self,
-        _get_client_data: &dyn Fn() -> sync15::ClientData,
-    ) -> anyhow::Result<()> {
+    fn sync_started(&self) -> anyhow::Result<()> {
         let db = self.store.lock_db()?;
         let signal = db.begin_interrupt_scope()?;
         crate::db::schema::create_empty_sync_temp_tables(&db.writer)?;
@@ -143,7 +131,7 @@ impl<T: SyncRecord + std::fmt::Debug> SyncEngine for ConfigSyncEngine<T> {
         incoming_telemetry.applied(inbound.len() as u32);
         telem.incoming(incoming_telemetry);
         let tx = db.writer.unchecked_transaction()?;
-        let incoming_impl = self.storage_impl.get_incoming_impl(&self.local_enc_key)?;
+        let incoming_impl = self.storage_impl.get_incoming_impl(&db.encdec)?;
 
         incoming_impl.stage_incoming(&tx, inbound, &signal)?;
         tx.commit()?;
@@ -158,8 +146,8 @@ impl<T: SyncRecord + std::fmt::Debug> SyncEngine for ConfigSyncEngine<T> {
         let db = self.store.lock_db()?;
         let signal = db.begin_interrupt_scope()?;
         let tx = db.writer.unchecked_transaction()?;
-        let incoming_impl = self.storage_impl.get_incoming_impl(&self.local_enc_key)?;
-        let outgoing_impl = self.storage_impl.get_outgoing_impl(&self.local_enc_key)?;
+        let incoming_impl = self.storage_impl.get_incoming_impl(&db.encdec)?;
+        let outgoing_impl = self.storage_impl.get_outgoing_impl(&db.encdec)?;
 
         // Get "states" for each record...
         for state in incoming_impl.fetch_incoming_states(&tx)? {
@@ -169,10 +157,13 @@ impl<T: SyncRecord + std::fmt::Debug> SyncEngine for ConfigSyncEngine<T> {
             super::apply_incoming_action(&*incoming_impl, &tx, action)?;
         }
 
-        // write the timestamp now, so if we are interrupted merging or
+        // The timestamp value is handled differently in desktop v mobile. Record a
+        // timestamp if we are given one now, so if we are interrupted merging or
         // creating outgoing changesets we don't need to re-download the same
         // records.
-        self.put_meta(&tx, LAST_SYNC_META_KEY, &timestamp.as_millis())?;
+        if timestamp != ServerTimestamp(0) {
+            self.put_meta(&tx, LAST_SYNC_META_KEY, &timestamp.as_millis())?;
+        }
 
         incoming_impl.finish_incoming(&tx)?;
 
@@ -190,7 +181,7 @@ impl<T: SyncRecord + std::fmt::Debug> SyncEngine for ConfigSyncEngine<T> {
         let db = self.store.lock_db()?;
         self.put_meta(&db.writer, LAST_SYNC_META_KEY, &new_timestamp.as_millis())?;
         let tx = db.writer.unchecked_transaction()?;
-        let outgoing_impl = self.storage_impl.get_outgoing_impl(&self.local_enc_key)?;
+        let outgoing_impl = self.storage_impl.get_outgoing_impl(&db.encdec)?;
         outgoing_impl.finish_synced_items(&tx, ids)?;
         tx.commit()?;
         Ok(())
@@ -256,6 +247,19 @@ impl<T: SyncRecord + std::fmt::Debug> SyncEngine for ConfigSyncEngine<T> {
         warn!("not implemented as there isn't a valid use case for it");
         Ok(())
     }
+
+    fn last_sync(&self) -> anyhow::Result<Option<ServerTimestamp>> {
+        let db = self.store.lock_db()?;
+        Ok(self
+            .get_meta::<i64>(&db.writer, LAST_SYNC_META_KEY)?
+            .map(ServerTimestamp::from_millis))
+    }
+
+    fn reset_last_sync(&self) -> anyhow::Result<()> {
+        let db = self.store.lock_db()?;
+        self.delete_meta(&db.writer, LAST_SYNC_META_KEY)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -265,17 +269,19 @@ mod tests {
     use crate::db::credit_cards::tests::{
         get_all, insert_tombstone_record, test_insert_mirror_record,
     };
+    use crate::db::models::credit_card::encrypt_str;
     use crate::db::models::credit_card::InternalCreditCard;
     use crate::db::schema::create_empty_sync_temp_tables;
-    use crate::encryption::EncryptorDecryptor;
+    use crate::db::test::random_key_encryptor;
     use crate::sync::{IncomingBso, UnknownFields};
+    use db_crypto::EncryptorDecryptor;
     use nss_as::ensure_initialized;
     use sql_support::ConnExt;
 
     impl InternalCreditCard {
         pub fn into_test_incoming_bso(
             self,
-            encdec: &EncryptorDecryptor,
+            encdec: &dyn EncryptorDecryptor,
             unknown_fields: UnknownFields,
         ) -> IncomingBso {
             let mut payload = self.into_payload(encdec).expect("is json");
@@ -302,11 +308,7 @@ mod tests {
     #[test]
     fn test_credit_card_engine_apply_timestamp() -> Result<()> {
         ensure_initialized();
-        let mut credit_card_engine = create_engine();
-        let test_key = crate::encryption::create_autofill_key().unwrap();
-        credit_card_engine
-            .set_local_encryption_key(&test_key)
-            .unwrap();
+        let credit_card_engine = create_engine();
         {
             let db = credit_card_engine.store.lock_db()?;
             create_empty_sync_temp_tables(&db.writer)?;
@@ -366,12 +368,12 @@ mod tests {
     fn test_engine_sync_reset() -> Result<()> {
         ensure_initialized();
         let engine = create_engine();
-        let encdec = EncryptorDecryptor::new_with_random_key().unwrap();
+        let encdec = random_key_encryptor().unwrap();
 
         let cc = InternalCreditCard {
             guid: Guid::random(),
             cc_name: "Ms Jane Doe".to_string(),
-            cc_number_enc: encdec.encrypt("12341232412341234")?,
+            cc_number_enc: encrypt_str(&encdec, "12341232412341234")?,
             cc_number_last_4: "1234".to_string(),
             cc_exp_month: 12,
             cc_exp_year: 2021,

@@ -92,6 +92,10 @@ nsIGlobalObject* GetIncumbentGlobal();
 // Returns the global associated with the current compartment. This may be null.
 nsIGlobalObject* GetCurrentGlobal();
 
+// Walks the script settings stack for the entry global's
+// WebTaskSchedulingState. Callers on a hot path should first check
+// CycleCollectedJSContext::MayHaveWebTaskSchedulingState(), which is false
+// unless some global on this thread actually has one.
 WebTaskSchedulingState* GetWebTaskSchedulingState();
 
 // JS-implemented WebIDL presents an interesting situation with respect to the
@@ -190,6 +194,9 @@ class MOZ_STACK_CLASS AutoJSAPI : protected ScriptSettingsStackEntry {
   AutoJSAPI();
 
   ~AutoJSAPI();
+
+  AutoJSAPI(const AutoJSAPI&) = delete;
+  AutoJSAPI& operator=(const AutoJSAPI&) = delete;
 
   // This uses the SafeJSContext (or worker equivalent), and enters a null
   // compartment, so that the consumer is forced to select a compartment to
@@ -294,9 +301,6 @@ class MOZ_STACK_CLASS AutoJSAPI : protected ScriptSettingsStackEntry {
  private:
   void InitInternal(nsIGlobalObject* aGlobalObject, JSObject* aGlobal,
                     JSContext* aCx, bool aIsMainThread);
-
-  AutoJSAPI(const AutoJSAPI&) = delete;
-  AutoJSAPI& operator=(const AutoJSAPI&) = delete;
 };
 
 /*
@@ -330,14 +334,8 @@ class AutoNoJSAPI : protected ScriptSettingsStackEntry,
   // during construction.
   explicit AutoNoJSAPI(JSContext* aCx);
 
-  // Stashed JSContext* so we don't need to GetJSContext in our destructor.
-  // It's probably safe to hold on to this, in the sense that the world should
-  // not get torn down while we're on the stack, and if it's not, we'd need to
-  // fix JSAutoNullableRealm to not hold on to a JSContext either, or
-  // something.
-  JSContext* mCx;
-
   AutoYieldJSThreadExecution mExecutionYield;
+  JS::AutoHideScriptedCaller mCallerOverride;
 };
 
 }  // namespace dom

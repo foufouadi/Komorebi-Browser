@@ -135,8 +135,7 @@ NotificationPermissionRequest::Run() {
                  PermissionCheckPurpose::PermissionRequest,
                  mWindow->GetExtantDoc())) {
     mPermission = NotificationPermission::Denied;
-  } else if (!StaticPrefs::dom_webnotifications_allowcrossoriginiframe() &&
-             !mPrincipal->Subsumes(mTopLevelPrincipal)) {
+  } else if (!mPrincipal->Subsumes(mTopLevelPrincipal)) {
     mPermission = NotificationPermission::Denied;
   }
 
@@ -281,14 +280,13 @@ already_AddRefed<Notification> Notification::Constructor(
       },
       notification);
 
-  ContextInfo contextInfo = notification->GetContextInfo();
-  if (!notification->CreateActor(contextInfo)) {
-    notification->Deactivate();
-    aRv.ThrowUnknownError("Failed to create actor.");
+  Maybe<ContextInfo> contextInfo = notification->GetContextInfo();
+  if (!contextInfo) {
+    aRv.ThrowInvalidStateError("Failed by an invalidated global context");
     return nullptr;
   }
-
-  notification->LoadImageAndShow(promise, std::move(contextInfo));
+  notification->LoadImageAndShow(WrapNotNull(promise.get()),
+                                 contextInfo.extract());
 
   notification->KeepAliveIfHasListenersFor(nsGkAtoms::onclick);
   notification->KeepAliveIfHasListenersFor(nsGkAtoms::onshow);
@@ -307,7 +305,7 @@ Result<Ok, nsresult> ValidateBase64Data(const nsAString& aData) {
   // To and from to ensure it is valid base64.
   RefPtr<nsStructuredCloneContainer> container =
       new nsStructuredCloneContainer();
-  MOZ_TRY(container->InitFromBase64(aData, JS_STRUCTURED_CLONE_VERSION));
+  MOZ_TRY(container->InitFromBase64(aData));
 
   nsString result;
   MOZ_TRY(container->GetDataAsBase64(result));
@@ -418,10 +416,19 @@ already_AddRefed<Notification> Notification::ValidateAndCreate(
     }
   }
 
-  // Step 12: If options["icon"] exists, then parse it using baseURL, and if
+  // 10. If options["navigate"] exists, then parse it using baseURL, and if that
+  // does not return failure, set notification’s navigation URL to the return
+  // value. (Otherwise notification’s navigation URL remains null.)
+  RefPtr<nsIURI> navigateUrl;
+  if (StaticPrefs::dom_webnotifications_navigate_enabled() &&
+      aOptions.mNavigate.WasPassed()) {
+    navigateUrl = ResolveURL(aGlobal, aOptions.mNavigate.Value());
+  }
+
+  // Step 13: If options["icon"] exists, then parse it using baseURL, and if
   // that does not return failure, set notification’s icon URL to the return
   // value. (Otherwise icon URL is not set.)
-  RefPtr<nsIURI> iconUrl = ResolveIconURL(aGlobal, aOptions.mIcon);
+  RefPtr<nsIURI> iconUrl = ResolveURL(aGlobal, aOptions.mIcon);
 
   // Step 19: Set notification’s actions to « ».
   nsTArray<IPCNotificationAction> actions;
@@ -435,9 +442,16 @@ already_AddRefed<Notification> Notification::ValidateAndCreate(
       action.name() = entry.mAction;
       // Step 20.3: Set action’s title to entry["title"].
       action.title() = entry.mTitle;
-      // Step 20.4: (Skipping icon support, see
+      if (StaticPrefs::dom_webnotifications_navigate_enabled() &&
+          entry.mNavigate.WasPassed()) {
+        // Step 20.4: If entry["navigate"] exists, then parse it using baseURL,
+        // and if that does not return failure, set action’s navigation URL to
+        // the return value. (Otherwise action’s navigation URL remains null.)
+        action.navigate() = ResolveURL(aGlobal, entry.mNavigate.Value());
+      }
+      // Step 20.5: (Skipping icon support, see
       // https://github.com/whatwg/notifications/issues/233)
-      // Step 20.5: Append action to notification’s actions.
+      // Step 20.6: Append action to notification’s actions.
       actions.AppendElement(std::move(action));
       if (actions.Length() == kMaxActions) {
         break;
@@ -449,8 +463,8 @@ already_AddRefed<Notification> Notification::ValidateAndCreate(
       nsString(), IPCNotificationOptions(
                       nsString(aTitle), aOptions.mDir, nsString(aOptions.mLang),
                       nsString(aOptions.mBody), nsString(aOptions.mTag),
-                      iconUrl, aOptions.mRequireInteraction, silent, vibrate,
-                      nsString(dataResult.unwrap()), actions));
+                      iconUrl, navigateUrl, aOptions.mRequireInteraction,
+                      silent, vibrate, nsString(dataResult.unwrap()), actions));
 
   RefPtr<Notification> notification =
       new Notification(aGlobal, ipcNotification, aScope);
@@ -588,11 +602,11 @@ uint32_t Notification::MaxActions(const GlobalObject& aGlobal) {
   return kMaxActions;
 }
 
-already_AddRefed<nsIURI> Notification::ResolveIconURL(
-    nsIGlobalObject* aGlobal, const nsACString& aIconUrl) {
+already_AddRefed<nsIURI> Notification::ResolveURL(nsIGlobalObject* aGlobal,
+                                                  const nsACString& aUrl) {
   nsresult rv = NS_OK;
 
-  if (aIconUrl.IsEmpty()) {
+  if (aUrl.IsEmpty()) {
     return nullptr;
   }
 
@@ -602,7 +616,7 @@ already_AddRefed<nsIURI> Notification::ResolveIconURL(
   }
 
   nsCOMPtr<nsIURI> srcUri;
-  rv = NS_NewURI(getter_AddRefs(srcUri), aIconUrl, nullptr, baseUri);
+  rv = NS_NewURI(getter_AddRefs(srcUri), aUrl, nullptr, baseUri);
   if (NS_FAILED(rv)) {
     return nullptr;
   }
@@ -620,7 +634,9 @@ void Notification::Close() {
     return;
   }
   if (!mActor) {
-    CreateActor(GetContextInfo());
+    if (Maybe<ContextInfo> context = GetContextInfo()) {
+      CreateActor(context.extract());
+    }
   }
   if (mActor) {
     (void)mActor->SendClose();
@@ -646,7 +662,7 @@ void Notification::GetData(JSContext* aCx,
     nsresult rv;
     RefPtr<nsStructuredCloneContainer> container =
         new nsStructuredCloneContainer();
-    rv = container->InitFromBase64(dataSerialized, JS_STRUCTURED_CLONE_VERSION);
+    rv = container->InitFromBase64(dataSerialized);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       aRetval.setNull();
       return;
@@ -679,6 +695,12 @@ void Notification::GetActions(nsTArray<NotificationAction>& aRetVal) {
     RootedDictionary<NotificationAction> action(RootingCx());
     action.mAction = entry.name();
     action.mTitle = entry.title();
+    if (entry.navigate() &&
+        StaticPrefs::dom_webnotifications_navigate_enabled()) {
+      nsAutoCString spec;
+      entry.navigate()->GetSpec(spec);
+      action.mNavigate.Construct(spec);
+    }
     aRetVal.AppendElement(action);
   }
 }
@@ -727,35 +749,39 @@ already_AddRefed<Promise> Notification::ShowPersistentNotification(
     return nullptr;
   }
 
-  ContextInfo contextInfo = notification->GetContextInfo();
-  if (!notification->CreateActor(contextInfo)) {
+  Maybe<ContextInfo> contextInfo = notification->GetContextInfo();
+  if (!contextInfo || !notification->CreateActor(contextInfo.ref())) {
     aRv.ThrowUnknownError("Failed to create actor.");
     return nullptr;
   }
-  notification->LoadImageAndShow(p, std::move(contextInfo));
+  notification->LoadImageAndShow(WrapNotNull(p), contextInfo.extract());
 
   return p.forget();
 }
 
-Notification::ContextInfo Notification::GetContextInfo() {
+Maybe<Notification::ContextInfo> Notification::GetContextInfo() {
   // TODO: Should get nsIGlobalObject methods for each method
   if (WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate()) {
-    return {.mTarget = workerPrivate->HybridEventTarget(),
-            .mPrincipal = workerPrivate->GetPrincipal(),
-            .mEffectiveStoragePrincipal =
-                workerPrivate->GetEffectiveStoragePrincipal(),
-            .mIsSecureContext = workerPrivate->IsSecureContext()};
+    return Some(
+        ContextInfo{.mTarget = workerPrivate->HybridEventTarget(),
+                    .mPrincipal = workerPrivate->GetPrincipal(),
+                    .mEffectiveStoragePrincipal =
+                        workerPrivate->GetEffectiveStoragePrincipal(),
+                    .mIsSecureContext = workerPrivate->IsSecureContext()});
   }
 
-  nsGlobalWindowInner* win = GetOwnerWindow();
-  return {
-      .mPrincipal = win->GetPrincipal(),
-      .mEffectiveStoragePrincipal = win->GetEffectiveStoragePrincipal(),
-      .mIsSecureContext = win->IsSecureContext(),
-  };
+  if (nsGlobalWindowInner* win = GetOwnerWindow()) {
+    return Some(ContextInfo{
+        .mPrincipal = win->GetPrincipal(),
+        .mEffectiveStoragePrincipal = win->GetEffectiveStoragePrincipal(),
+        .mIsSecureContext = win->IsSecureContext(),
+    });
+  }
+  return Nothing();
 }
 
-bool Notification::CreateActor(const ContextInfo& aInfo) {
+WeakPtr<notification::NotificationChild> Notification::CreateActor(
+    const ContextInfo& aInfo) {
   mozilla::ipc::PBackgroundChild* backgroundActor =
       mozilla::ipc::BackgroundChild::GetOrCreateForCurrentThread();
 
@@ -775,7 +801,7 @@ bool Notification::CreateActor(const ContextInfo& aInfo) {
       window ? window->GetWindowGlobalChild() : nullptr);
 
   if (!childEndpoint.Bind(mActor, aInfo.mTarget)) {
-    return false;
+    return nullptr;
   }
 
   (void)backgroundActor->SendCreateNotificationParent(
@@ -783,14 +809,15 @@ bool Notification::CreateActor(const ContextInfo& aInfo) {
       WrapNotNull(aInfo.mEffectiveStoragePrincipal), aInfo.mIsSecureContext,
       mScope, mIPCNotification);
 
-  return true;
+  return mActor;
 }
 
-void Notification::LoadImageAndShow(Promise* aPromise, ContextInfo&& aInfo) {
+void Notification::LoadImageAndShow(NotNull<Promise*> aPromise,
+                                    ContextInfo&& aInfo) {
   nsCOMPtr<nsIURI> uri = mIPCNotification.options().icon();
   Maybe<ClientInfo> clientInfo = GetParentObject()->GetClientInfo();
   if (!uri || clientInfo.isNothing()) {
-    SendShow(aPromise, Nothing());
+    SendShow(aPromise, Nothing(), std::move(aInfo));
     return;
   }
 
@@ -806,7 +833,7 @@ void Notification::LoadImageAndShow(Promise* aPromise, ContextInfo&& aInfo) {
   using IPCImagePromise = mozilla::MozPromise<Maybe<IPCImage>, bool, true>;
   InvokeAsync(
       GetMainThreadSerialEventTarget(), __func__,
-      [uri, clientInfo, contextInfo = std::move(aInfo)]() {
+      [uri, clientInfo, contextInfo = aInfo]() {
         // Don't load the image if we aren't even allowed to show the
         // notification.
         NotificationPermission permission = GetNotificationPermission(
@@ -866,46 +893,52 @@ void Notification::LoadImageAndShow(Promise* aPromise, ContextInfo&& aInfo) {
           })
       ->Then(
           GetCurrentSerialEventTarget(), __func__,
-          [self = RefPtr{this}, promise = RefPtr{aPromise},
-           workerRef = std::move(workerRef)](Maybe<IPCImage>&& aImage) {
+          [self = RefPtr{this}, promise = WrapNotNull(RefPtr{aPromise.get()}),
+           workerRef = std::move(workerRef),
+           contextInfo = aInfo](Maybe<IPCImage>&& aImage) mutable {
             // SendShow must happen on the original (potentially Worker) thread.
-            self->SendShow(promise, std::move(aImage));
+            self->SendShow(promise, std::move(aImage), std::move(contextInfo));
           },
           [](bool) {});
 }
 
-void Notification::SendShow(Promise* aPromise, Maybe<IPCImage>&& aIcon) {
+void Notification::SendShow(NotNull<Promise*> aPromise, Maybe<IPCImage>&& aIcon,
+                            ContextInfo&& aInfo) {
   if (mIsClosed) {
     MOZ_ASSERT(mIPCNotification.options().icon(),
                "Closure before SendShow can only happen with image resources");
     return;
   }
 
-  mActor->SendShow(std::move(aIcon))
-      ->Then(GetCurrentSerialEventTarget(), __func__,
-             [self = RefPtr{this}, promise = RefPtr(aPromise)](
-                 notification::PNotificationChild::ShowPromise::
-                     ResolveOrRejectValue&& aResult) {
-               if (aResult.IsReject()) {
-                 promise->MaybeRejectWithUnknownError(
-                     "Failed to open notification");
-                 self->Deactivate();
-                 return;
-               }
+  RefPtr<notification::NotificationChild> actor = CreateActor(aInfo).get();
+  if (!actor) {
+    Deactivate();
+    aPromise->MaybeRejectWithUnknownError("Failed to create actor.");
+    return;
+  }
 
-               CopyableErrorResult rv = aResult.ResolveValue();
-               if (rv.Failed()) {
-                 promise->MaybeReject(std::move(rv));
-                 self->Deactivate();
-                 return;
-               }
+  actor->SendShow(std::move(aIcon))
+      ->Then(
+          GetCurrentSerialEventTarget(), __func__,
+          [self = RefPtr{this}, promise = WrapNotNull(RefPtr(aPromise.get()))](
+              notification::PNotificationChild::ShowPromise::
+                  ResolveOrRejectValue&& aResult) {
+            if (aResult.IsReject()) {
+              promise->MaybeRejectWithUnknownError(
+                  "Failed to open notification");
+              self->Deactivate();
+              return;
+            }
 
-               if (promise) {
-                 promise->MaybeResolveWithUndefined();
-               } else {
-                 self->DispatchTrustedEvent(u"show"_ns);
-               }
-             });
+            CopyableErrorResult rv = aResult.ResolveValue();
+            if (rv.Failed()) {
+              promise->MaybeReject(std::move(rv));
+              self->Deactivate();
+              return;
+            }
+
+            promise->MaybeResolveWithUndefined();
+          });
 }
 
 void Notification::Deactivate() {

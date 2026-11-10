@@ -91,8 +91,7 @@ stateDiagram-v2
 		 SD --> W1: beginWSSetup
 		 W1 --> W2: wsOnStart Success
 		 W2 --> R: handleHelloReply
-		 R --> R: send (subscribe)
-         R --> R: Receive + notify observers
+		 R --> R: send (subscribe)<br/>receive + notify observers
 		 R --> SD: wsOnStop
 		 R --> SD: sendPing Fails
 		 W1 --> SD: wsOnStart fails
@@ -137,7 +136,7 @@ See also:
 The source code for push is available under the following paths in mozilla-central:
 
 * [`dom/push/`](https://searchfox.org/firefox-main/source/dom/push/)
-* [`mobile/shared/components/geckoview/GeckoViewPush.sys.mjs`](mobile/shared/components/geckoview/GeckoViewPush.sys.mjs)
+* [`mobile/shared/components/geckoview/GeckoViewPush.sys.mjs`](https://searchfox.org/firefox-main/source/mobile/shared/components/geckoview/GeckoViewPush.sys.mjs)
 * [`mobile/android/geckoview/src/main/java/org/mozilla/geckoview/WebPush*.java`](https://searchfox.org/firefox-main/source/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/)
 * Under `mobile/android/android-components/components`:
   * [`feature/push/src/main/java/mozilla/components/feature/push/`](https://searchfox.org/firefox-main/source/mobile/android/android-components/components/feature/push/src/main/java/mozilla/components/feature/push/)

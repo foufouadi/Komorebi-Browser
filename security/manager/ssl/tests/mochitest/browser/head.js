@@ -70,13 +70,18 @@ function readCertificate(filename, trustString) {
  */
 async function openCertManager() {
   let win = window.openDialog("chrome://pippki/content/certManager.xhtml");
-  return new Promise(resolve => {
-    win.addEventListener(
-      "load",
-      function () {
-        executeSoon(() => resolve(win));
-      },
-      { once: true }
-    );
-  });
+  await TestUtils.topicObserved("psm:cert-manager-loaded");
+  return win;
+}
+
+async function findCertByCommonName(commonName) {
+  let certDB = Cc["@mozilla.org/security/x509certdb;1"].getService(
+    Ci.nsIX509CertDB
+  );
+  for (let cert of await certDB.getCerts()) {
+    if (cert.commonName == commonName) {
+      return cert;
+    }
+  }
+  return null;
 }

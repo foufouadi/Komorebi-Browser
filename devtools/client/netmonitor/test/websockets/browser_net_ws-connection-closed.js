@@ -28,12 +28,12 @@ add_task(async function () {
   const requests = document.querySelectorAll(".request-list-item");
 
   // Select the request to open the side panel.
-  EventUtils.sendMouseEvent({ type: "mousedown" }, requests[0]);
+  clickOnRequestRow(requests[0]);
 
   // Click on the "Response" panel
   clickOnSidebarTab(document, "response");
 
-  const wait = waitForDOM(
+  const onDomUpdated = waitForDOM(
     document,
     "#messages-view .msg-connection-closed-message"
   );
@@ -42,7 +42,7 @@ add_task(async function () {
   await SpecialPowers.spawn(tab.linkedBrowser, [], async () => {
     await content.wrappedJSObject.closeConnection();
   });
-  await wait;
+  await onDomUpdated;
 
   is(
     !!document.querySelector("#messages-view .msg-connection-closed-message"),

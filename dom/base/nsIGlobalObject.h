@@ -201,11 +201,9 @@ class nsIGlobalObject : public nsISupports {
     return nullptr;
   }
 
-  virtual void SetWebTaskSchedulingState(
-      mozilla::dom::WebTaskSchedulingState* aState) {}
-  virtual mozilla::dom::WebTaskSchedulingState* GetWebTaskSchedulingState()
-      const {
-    return nullptr;
+  void SetWebTaskSchedulingState(mozilla::dom::WebTaskSchedulingState* aState);
+  mozilla::dom::WebTaskSchedulingState* GetWebTaskSchedulingState() const {
+    return mWebTaskSchedulingState;
   }
 
   // For globals with a concept of a Base URI (windows, workers), the base URI,
@@ -421,13 +419,16 @@ class nsIGlobalObject : public nsISupports {
   nsTArray<RefPtr<mozilla::dom::ReportingObserver>> mReportingObservers;
   // https://w3c.github.io/reporting/#windoworworkerglobalscope-report-buffer
   nsTArray<RefPtr<mozilla::dom::Report>> mReportBuffer;
-  nsTHashMap<nsString, uint32_t> mReportPerTypeCount;
+  nsTHashMap<RefPtr<nsAtom>, uint32_t> mReportPerTypeCount;
 
   // https://streams.spec.whatwg.org/#count-queuing-strategy-size-function
   RefPtr<mozilla::dom::Function> mCountQueuingStrategySizeFunction;
 
   // https://streams.spec.whatwg.org/#byte-length-queuing-strategy-size-function
   RefPtr<mozilla::dom::Function> mByteLengthQueuingStrategySizeFunction;
+
+  // https://wicg.github.io/scheduling-apis/#scheduling-state
+  RefPtr<mozilla::dom::WebTaskSchedulingState> mWebTaskSchedulingState;
 };
 
 #endif  // nsIGlobalObject_h_

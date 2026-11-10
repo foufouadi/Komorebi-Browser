@@ -5,8 +5,6 @@
 XPI_NAME = "mozscreenshots"
 XPI_PKGNAME = "mozscreenshots@mozilla.org"
 
-USE_EXTENSION_MANIFEST = True
-
 extension_files = [
     "api.js",
     "manifest.json",
@@ -19,11 +17,13 @@ resources_files = [
 configurations_files = [
     "configurations/AppMenu.sys.mjs",
     "configurations/Buttons.sys.mjs",
+    "configurations/ColorScheme.sys.mjs",
     "configurations/ControlCenter.sys.mjs",
     "configurations/CustomizeMode.sys.mjs",
     "configurations/CustomTitlebar.sys.mjs",
     "configurations/DevTools.sys.mjs",
     "configurations/LightweightThemes.sys.mjs",
+    "configurations/Nova.sys.mjs",
     "configurations/PermissionPrompts.sys.mjs",
     "configurations/Preferences.sys.mjs",
     "configurations/Tabs.sys.mjs",

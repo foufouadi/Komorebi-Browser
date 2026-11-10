@@ -18,10 +18,13 @@ import mozilla.components.feature.summarize.SummarizationCompleted
 import mozilla.components.feature.summarize.SummarizationFailed
 import mozilla.components.feature.summarize.SummarizationRequested
 import mozilla.components.feature.summarize.SummarizationState
+import mozilla.components.feature.summarize.SummaryFeedback
+import mozilla.components.feature.summarize.SummaryFeedbackProvided
 import mozilla.components.feature.summarize.ViewAppeared
 import mozilla.components.feature.summarize.ViewDismissed
 import mozilla.components.feature.summarize.content.Content
 import mozilla.components.feature.summarize.content.PageMetadata
+import mozilla.components.feature.summarize.content.PaywalledContentException
 import mozilla.components.lib.llm.mlpa.service.RateLimited
 import mozilla.components.lib.state.Store
 import mozilla.components.support.test.robolectric.testContext
@@ -137,6 +140,30 @@ class SummarizationTelemetryMiddlewareTest {
         assertNull(extras["error_type"])
         assertNull(extras["error_code"])
         assertNotNull(extras["summarize_duration_ms"])
+    }
+
+    @Test
+    fun `WHEN SummarizationFailed with a paywalled page THEN error_type identifies the paywall and no content metrics are recorded`() {
+        assertNull(AiSummarize.completed.testGetValue())
+
+        // A gated page never reaches ContentExtracted, so the session carries no content metrics.
+        every { store.state } returns SummarizationState.Inert(initializedWithShake = false)
+        invokeMiddleware(ViewAppeared)
+        invokeMiddleware(
+            SummarizationRequested(LlmProvider.Info(nameRes = 42, modelId = LlmProvider.ModelID(TEST_MODEL)))
+        )
+        invokeMiddleware(SummarizationFailed(PaywalledContentException()))
+
+        val snapshot = AiSummarize.completed.testGetValue()!!
+        assertEquals(1, snapshot.size)
+
+        val extras = snapshot.first().extra!!
+        assertEquals("false", extras["success"])
+        assertEquals(TEST_MODEL, extras["model"])
+        assertEquals("PaywalledContentException", extras["error_type"])
+        assertEquals("9999", extras["error_code"])
+        assertNull(extras["content_type"])
+        assertNull(extras["length_words"])
     }
 
     @Test
@@ -339,6 +366,54 @@ class SummarizationTelemetryMiddlewareTest {
         val extras = snapshot.first().extra!!
         assertEquals(TEST_MODEL, extras["model"])
         assertNotNull(extras["session_id"])
+    }
+
+    @Test
+    fun `WHEN good feedback is provided THEN feedback is recorded with rating good and model`() {
+        assertNull(AiSummarize.feedback.testGetValue())
+
+        setupFullSession()
+        invokeMiddleware(SummaryFeedbackProvided(SummaryFeedback.GOOD))
+
+        val snapshot = AiSummarize.feedback.testGetValue()!!
+        assertEquals(1, snapshot.size)
+
+        val extras = snapshot.first().extra!!
+        assertEquals("good", extras["rating"])
+        assertEquals(TEST_MODEL, extras["model"])
+        assertNotNull(extras["session_id"])
+    }
+
+    @Test
+    fun `WHEN bad feedback is provided THEN feedback is recorded with rating bad`() {
+        assertNull(AiSummarize.feedback.testGetValue())
+
+        setupFullSession()
+        invokeMiddleware(SummaryFeedbackProvided(SummaryFeedback.BAD))
+
+        val extras = AiSummarize.feedback.testGetValue()!!.first().extra!!
+        assertEquals("bad", extras["rating"])
+    }
+
+    @Test
+    fun `WHEN the rating is changed THEN each rating is recorded with the same session id`() {
+        setupFullSession()
+        invokeMiddleware(SummaryFeedbackProvided(SummaryFeedback.BAD))
+        invokeMiddleware(SummaryFeedbackProvided(SummaryFeedback.GOOD))
+
+        val snapshot = AiSummarize.feedback.testGetValue()!!
+        assertEquals(2, snapshot.size)
+        assertEquals("bad", snapshot[0].extra!!["rating"])
+        assertEquals("good", snapshot[1].extra!!["rating"])
+        assertEquals(snapshot[0].extra!!["session_id"], snapshot[1].extra!!["session_id"])
+    }
+
+    @Test
+    fun `WHEN the summary is never rated THEN no feedback is recorded`() {
+        setupFullSession()
+        invokeMiddleware(ViewDismissed(true))
+
+        assertNull(AiSummarize.feedback.testGetValue())
     }
 
     private fun setupFullSession() {

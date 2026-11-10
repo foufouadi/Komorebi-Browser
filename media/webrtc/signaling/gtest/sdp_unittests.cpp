@@ -10,6 +10,8 @@
 #include "sdp/ParsingResultComparer.h"
 #include "sdp/RsdparsaSdpParser.h"
 #include "sdp/SdpAttribute.h"
+#include "sdp/SdpHelper.h"
+#include "sdp/SdpImpl.h"
 #include "sdp/SdpMediaSection.h"
 #include "sdp/SipccSdpParser.h"
 #include "ssl.h"
@@ -119,7 +121,7 @@ class SdpTest : public ::testing::Test {
   }
 
   // Returns "level" for new media section
-  int AddNewMedia(sdp_media_e type) {
+  int AddNewMedia(sdp_media_e /*type*/) {
     final_level_++;
     EXPECT_EQ(sdp_insert_media_line(sdp_ptr_, final_level_), SDP_SUCCESS);
     EXPECT_EQ(sdp_set_conn_nettype(sdp_ptr_, final_level_, SDP_NT_INTERNET),
@@ -1605,7 +1607,7 @@ class NewSdpTest
         const auto secondResults = secondParser->Parse(os.str());
         // Whether we expected the parse to work or not, it should
         // succeed the second time if it succeeded the first.
-        ASSERT_TRUE(!!Sdp())
+        ASSERT_TRUE(!!secondResults->Sdp())
         << "Parse failed on second pass, SDP was: " << std::endl
         << os.str() << std::endl
         << "Errors were: " << IntSerializeParseErrors(secondResults);
@@ -1670,7 +1672,7 @@ class NewSdpTest
                    const std::string& search_pt,
                    const SdpRtpmapAttributeList& rtpmaps) const {
     ASSERT_TRUE(rtpmaps.HasEntry(search_pt));
-    auto attr = rtpmaps.GetEntry(search_pt);
+    const auto& attr = rtpmaps.GetEntry(search_pt);
     ASSERT_EQ(expected_pt, attr.pt);
     ASSERT_EQ(codec, attr.codec);
     std::cout << "Codec = " << name << std::endl;
@@ -1683,7 +1685,7 @@ class NewSdpTest
                     uint16_t streams, const std::string& search_pt,
                     const SdpSctpmapAttributeList& sctpmaps) const {
     ASSERT_TRUE(sctpmaps.HasEntry(search_pt));
-    auto attr = sctpmaps.GetFirstEntry();
+    const auto& attr = sctpmaps.GetFirstEntry();
     ASSERT_EQ(expected_pt, search_pt);
     ASSERT_EQ(expected_pt, attr.pt);
     ASSERT_EQ(name, attr.name);
@@ -1793,6 +1795,32 @@ TEST_P(NewSdpTest, CheckOriginGetAddress) {
       << "Wrong address in origin";
 }
 
+TEST_P(NewSdpTest, parseSessionInformation) {
+  SKIP_TEST_WITH_SIPCC_PARSER
+  ParseSdp(
+      "v=0\r\n"
+      "o=- 4294967296 2 IN IP4 127.0.0.1\r\n"
+      "s=With information\r\n"
+      "i=an information\r\n"
+      "c=IN IP4 198.51.100.7\r\n"
+      "t=0 0\r\n"
+      "m=video 56436 RTP/SAVPF 120\r\n"
+      "a=rtpmap:120 VP8/90000\r\n");
+}
+
+TEST_P(NewSdpTest, parseMediaInformation) {
+  SKIP_TEST_WITH_SIPCC_PARSER
+  ParseSdp(
+      "v=0\r\n"
+      "o=- 4294967296 2 IN IP4 127.0.0.1\r\n"
+      "s=With information\r\n"
+      "c=IN IP4 198.51.100.7\r\n"
+      "t=0 0\r\n"
+      "m=video 56436 RTP/SAVPF 120\r\n"
+      "i=an information\r\n"
+      "a=rtpmap:120 VP8/90000\r\n");
+}
+
 TEST_P(NewSdpTest, CheckGetMissingBandwidth) {
   ParseSdp(kVideoSdp);
   ASSERT_EQ(0U, Sdp()->GetBandwidth("CT")) << "Wrong bandwidth in session";
@@ -1802,8 +1830,7 @@ TEST_P(NewSdpTest, CheckGetBandwidth) {
   ParseSdp("v=0" CRLF "o=- 4294967296 2 IN IP4 127.0.0.1" CRLF "s=SIP Call" CRLF
            "c=IN IP4 198.51.100.7" CRLF "b=CT:5000" CRLF "b=FOOBAR:10" CRLF
            "b=AS:4" CRLF "t=0 0" CRLF "m=video 56436 RTP/SAVPF 120" CRLF
-           "a=rtpmap:120 VP8/90000" CRLF,
-           true, ::testing::get<1>(GetParam()));
+           "a=rtpmap:120 VP8/90000" CRLF);
   ASSERT_EQ(5000U, Sdp()->GetBandwidth("CT"))
       << "Wrong CT bandwidth in session";
   ASSERT_EQ(0U, Sdp()->GetBandwidth("FOOBAR"))
@@ -2062,7 +2089,7 @@ MOZ_RUNINIT const std::vector<std::string> kBasicAV1AudioVideoOfferLines = {
     "a=rtcp:62454 IN IP4 162.222.183.171",
     "a=end-of-candidates",
     "a=ssrc:5150",
-    "m=video 9 RTP/SAVPF 99 122 123",
+    "m=video 9 RTP/SAVPF 98 122 123",
     "c=IN IP6 ::1",
     "a=fingerprint:sha-1 "
     "DF:FA:FB:08:3B:3C:54:1D:D7:D4:05:77:A0:72:9B:14:08:6D:0F:4C",
@@ -2134,15 +2161,53 @@ MOZ_RUNINIT const std::string kBasicAudioVideoOfferLinefeedOnly =
 TEST_P(NewSdpTest, BasicAudioVideoSdpParse) { ParseSdp(kBasicAudioVideoOffer); }
 
 MOZ_RUNINIT const std::string kAv1AudioVideoOffer =
-    joinSdp(kBasicAudioVideoOfferLines, "\r\n");
+    joinSdp(kBasicAV1AudioVideoOfferLines, "\r\n");
 
 MOZ_RUNINIT const std::string kAv1AudioVideoOfferLinefeedOnly =
-    joinSdp(kBasicAudioVideoOfferLines, "\n");
+    joinSdp(kBasicAV1AudioVideoOfferLines, "\n");
 
 TEST_P(NewSdpTest, Av1AudioVideoSdpParse) { ParseSdp(kAv1AudioVideoOffer); }
 
 TEST_P(NewSdpTest, Av1AudioVideoSdpParseLinefeedOnly) {
   ParseSdp(kAv1AudioVideoOfferLinefeedOnly);
+}
+
+TEST_P(NewSdpTest, CheckAv1Fmtp) {
+  // https://aomediacodec.github.io/av1-rtp-spec/#sdp-parameters
+  // Out-of-range parameters are ignored.
+  // This changed from being rejected by webrtc-sdp, to bring the two
+  // parsers in line with each other, before switching over to using
+  // webrtc-sdp exclusively. We can then address the differences one
+  // by one. See bug 2067241.
+  for (const auto* outOfRange : {"profile=3", "level-idx=32", "tier=2"}) {
+    ParseSdp(
+        kVideoSdp + "a=rtpmap:99 AV1/90000\r\na=fmtp:99 " + outOfRange + "\r\n",
+        false);
+    ASSERT_TRUE(!!Sdp())
+    << "Parse failed for " << outOfRange << ": " << SerializeParseErrors();
+    const auto* ignored = Sdp()->GetMediaSection(0).FindFmtp("99");
+    ASSERT_TRUE(ignored);
+    const auto& ignoredAv1 =
+        static_cast<const SdpFmtpAttributeList::Av1Parameters&>(*ignored);
+    EXPECT_TRUE(ignoredAv1.profile.isNothing()) << outOfRange;
+    EXPECT_TRUE(ignoredAv1.levelIdx.isNothing()) << outOfRange;
+    EXPECT_TRUE(ignoredAv1.tier.isNothing()) << outOfRange;
+  }
+
+  ParseSdp(kVideoSdp +
+           "a=rtpmap:99 AV1/90000\r\na=fmtp:99 "
+           "profile=0;level-idx=9;tier=0\r\n");
+
+  const SdpMediaSection& msec = Sdp()->GetMediaSection(0);
+  const auto* params = msec.FindFmtp("99");
+  ASSERT_TRUE(params);
+  ASSERT_EQ(SdpRtpmapAttributeList::kAV1, params->codec_type);
+
+  const auto& av1 =
+      static_cast<const SdpFmtpAttributeList::Av1Parameters&>(*params);
+  ASSERT_EQ(Some(static_cast<uint8_t>(0)), av1.profile);
+  ASSERT_EQ(Some(static_cast<uint8_t>(9)), av1.levelIdx);
+  ASSERT_EQ(Some(static_cast<uint8_t>(0)), av1.tier);
 }
 
 TEST_P(NewSdpTest, CheckRemoveFmtp) {
@@ -3400,20 +3465,20 @@ TEST_P(NewSdpTest, CheckExtmap) {
 
   ASSERT_EQ(1U, extmaps[0].entry);
   ASSERT_FALSE(extmaps[0].direction_specified);
-  ASSERT_EQ("urn:ietf:params:rtp-hdrext:ssrc-audio-level",
+  ASSERT_EQ("urn:ietf:params:rtp-hdrext:ssrc-audio-level"_ns,
             extmaps[0].extensionname);
-  ASSERT_EQ("", extmaps[0].extensionattributes);
+  ASSERT_EQ(""_ns, extmaps[0].extensionattributes);
 
   ASSERT_EQ(2U, extmaps[1].entry);
   ASSERT_TRUE(extmaps[1].direction_specified);
   ASSERT_EQ(SdpDirectionAttribute::kSendonly, extmaps[1].direction);
-  ASSERT_EQ("some_extension", extmaps[1].extensionname);
-  ASSERT_EQ("", extmaps[1].extensionattributes);
+  ASSERT_EQ("some_extension"_ns, extmaps[1].extensionname);
+  ASSERT_EQ(""_ns, extmaps[1].extensionattributes);
 
   ASSERT_EQ(3U, extmaps[2].entry);
   ASSERT_FALSE(extmaps[2].direction_specified);
-  ASSERT_EQ("some_other_extension", extmaps[2].extensionname);
-  ASSERT_EQ("some_params some more params", extmaps[2].extensionattributes);
+  ASSERT_EQ("some_other_extension"_ns, extmaps[2].extensionname);
+  ASSERT_EQ("some_params some more params"_ns, extmaps[2].extensionattributes);
 }
 
 TEST_P(NewSdpTest, CheckRtcpFb) {
@@ -4144,9 +4209,10 @@ TEST_P(NewSdpTest, CheckAddMediaSection) {
   ASSERT_EQ(3U, Sdp()->GetMediaSectionCount())
       << "Wrong number of media sections";
 
-  Sdp()->AddMediaSection(
-      SdpMediaSection::kVideo, SdpDirectionAttribute::Direction::kSendrecv,
-      58000, SdpMediaSection::kUdpDtlsSctp, sdp::kIPv4, "127.0.0.1");
+  Sdp()->AddMediaSection({.type = SdpMediaSection::kVideo},
+                         SdpDirectionAttribute::Direction::kSendrecv, 58000,
+                         SdpMediaSection::kUdpDtlsSctp, sdp::kIPv4,
+                         "127.0.0.1");
 
   ASSERT_EQ(4U, Sdp()->GetMediaSectionCount())
       << "Wrong number of media sections after adding media section";
@@ -4161,7 +4227,7 @@ TEST_P(NewSdpTest, CheckAddMediaSection) {
   ASSERT_EQ(sdp::kIPv4, newMediaSection.GetConnection().GetAddrType());
   ASSERT_EQ("127.0.0.1", newMediaSection.GetConnection().GetAddress());
 
-  Sdp()->AddMediaSection(SdpMediaSection::kAudio,
+  Sdp()->AddMediaSection({.type = SdpMediaSection::kAudio},
                          SdpDirectionAttribute::Direction::kSendonly, 14006,
                          SdpMediaSection::kTcpDtlsRtpSavpf, sdp::kIPv6,
                          "2607:f8b0:4004:801::2013");
@@ -4180,33 +4246,6 @@ TEST_P(NewSdpTest, CheckAddMediaSection) {
   ASSERT_EQ(sdp::kIPv6, nextNewMediaSection.GetConnection().GetAddrType());
   ASSERT_EQ("2607:f8b0:4004:801::2013",
             nextNewMediaSection.GetConnection().GetAddress());
-
-  if (!ResultsAreFromSipcc()) {
-    // All following AddMediaSection calls are expected to fail
-    // SdpMediaSection::kDccpRtpAvp is expected to cause a failure
-    Sdp()->AddMediaSection(SdpMediaSection::kAudio,
-                           SdpDirectionAttribute::Direction::kSendonly, 14006,
-                           SdpMediaSection::kDccpRtpAvp, sdp::kIPv6,
-                           "2607:f8b0:4004:801::2013");
-    ASSERT_EQ(5U, Sdp()->GetMediaSectionCount())
-        << "Wrong number of media sections after adding media section";
-
-    // sdp::kAddrTypeNone is expected to cause a failure
-    Sdp()->AddMediaSection(SdpMediaSection::kAudio,
-                           SdpDirectionAttribute::Direction::kSendonly, 14006,
-                           SdpMediaSection::kDtlsSctp, sdp::kAddrTypeNone,
-                           "2607:f8b0:4004:801::2013");
-    ASSERT_EQ(5U, Sdp()->GetMediaSectionCount())
-        << "Wrong number of media sections after adding media section";
-
-    // "NOT:AN.IP.ADDRESS" is expected to cause a failure
-    Sdp()->AddMediaSection(SdpMediaSection::kAudio,
-                           SdpDirectionAttribute::Direction::kSendonly, 14006,
-                           SdpMediaSection::kTcpDtlsRtpSavpf, sdp::kIPv6,
-                           "NOT:AN.IP.ADDRESS");
-    ASSERT_EQ(5U, Sdp()->GetMediaSectionCount())
-        << "Wrong number of media sections after adding media section";
-  }
 }
 
 TEST_P(NewSdpTest, CheckAddDataChannel_Draft05) {
@@ -4271,6 +4310,116 @@ TEST_P(NewSdpTest, CheckAddDataChannel) {
   ASSERT_TRUE(mediaSection.GetAttributeList().HasAttribute(
       SdpAttribute::kSctpPortAttribute));
   ASSERT_EQ(15000U, mediaSection.GetAttributeList().GetSctpPort());
+}
+
+// Neither parser can programatically create a media section with an unknown
+// media type, so build one by hand and check that it round-trips through
+// serialization. Since we aren't using the parsers to create documents, this
+// is a limitation of the tests rather than a bug.
+// See CheckUnknownMediaTypeParse for the webrtc-sdp parser path.
+TEST(NewSdpTestNoFixture, CheckUnknownMediaTypeSerialize)
+{
+  SdpImpl sdp(SdpOrigin("-", 4294967296, 2, sdp::kIPv4, "127.0.0.1"));
+
+  const SdpMediaSection& msection = sdp.AddMediaSection(
+      {.type = SdpMediaSection::kUnknown,
+       .unknown = Some(SdpMediaSection::UnknownMediaTypeData{
+           .name = "sprinkles", .formatString = "8 16 foo"})},
+      SdpDirectionAttribute::kSendrecv, 9, SdpMediaSection::kUdpTlsRtpSavpf,
+      sdp::kIPv4, "0.0.0.0");
+
+  ASSERT_EQ(SdpMediaSection::kUnknown, msection.GetMediaType());
+  ASSERT_TRUE(msection.GetMediaTypeInfo().unknown.isSome());
+  ASSERT_EQ("sprinkles", msection.GetMediaTypeInfo().unknown->name);
+  ASSERT_EQ("8 16 foo", msection.GetMediaTypeInfo().unknown->formatString);
+  ASSERT_TRUE(msection.GetFormats().empty());
+
+  std::ostringstream os;
+  msection.Serialize(os);
+  ASSERT_EQ("m=sprinkles 9 UDP/TLS/RTP/SAVPF 8 16 foo" CRLF
+            "c=IN IP4 0.0.0.0" CRLF "a=sendrecv" CRLF,
+            os.str());
+
+  std::ostringstream sdpOs;
+  sdp.Serialize(sdpOs);
+  ASSERT_EQ("v=0" CRLF "o=- 4294967296 2 IN IP4 127.0.0.1" CRLF "s=-" CRLF
+            "t=0 0" CRLF "m=sprinkles 9 UDP/TLS/RTP/SAVPF 8 16 foo" CRLF
+            "c=IN IP4 0.0.0.0" CRLF "a=sendrecv" CRLF,
+            sdpOs.str());
+}
+
+// An unknown media type with no formats must not leave a trailing space on the
+// m= line.
+TEST(NewSdpTestNoFixture, CheckUnknownMediaTypeNoFormatsSerialize)
+{
+  SdpImpl sdp(SdpOrigin("-", 4294967296, 2, sdp::kIPv4, "127.0.0.1"));
+
+  const SdpMediaSection& msection = sdp.AddMediaSection(
+      {.type = SdpMediaSection::kUnknown,
+       .unknown = Some(SdpMediaSection::UnknownMediaTypeData{
+           .name = "clowncar", .formatString = ""})},
+      SdpDirectionAttribute::kInactive, 0, SdpMediaSection::kUdpTlsRtpSavpf,
+      sdp::kIPv4, "0.0.0.0");
+
+  std::ostringstream os;
+  msection.Serialize(os);
+  ASSERT_EQ("m=clowncar 0 UDP/TLS/RTP/SAVPF" CRLF "c=IN IP4 0.0.0.0" CRLF
+            "a=inactive" CRLF,
+            os.str());
+}
+
+TEST(NewSdpTestNoFixture, CheckUnknownMediaTypeParse)
+{
+  const std::string kUnknownMediaTypeOffer =
+      "v=0" CRLF "o=Mozilla-SIPUA-35.0a1 5184 0 IN IP4 0.0.0.0" CRLF
+      "s=SIP Call" CRLF "c=IN IP4 224.0.0.1/100/12" CRLF "t=0 0" CRLF
+      "m=audio 9 RTP/SAVPF 109" CRLF "a=rtpmap:109 opus/48000/2" CRLF
+      "m=sprinkles 9 UDP/TLS/RTP/SAVPF 8 16 foo" CRLF
+      "m=clowncar 0 UDP/TLS/RTP/SAVPF" CRLF;
+
+  RsdparsaSdpParser parser;
+  const auto results = parser.Parse(kUnknownMediaTypeOffer);
+  ASSERT_TRUE(!!results->Sdp());
+  ASSERT_EQ(0U, results->Errors().size());
+  ASSERT_EQ(3U, results->Sdp()->GetMediaSectionCount());
+
+  const SdpMediaSection& audio = results->Sdp()->GetMediaSection(0);
+  ASSERT_EQ(SdpMediaSection::kAudio, audio.GetMediaType());
+  ASSERT_TRUE(audio.GetMediaTypeInfo().unknown.isNothing());
+
+  const SdpMediaSection& sprinkles = results->Sdp()->GetMediaSection(1);
+  ASSERT_EQ(SdpMediaSection::kUnknown, sprinkles.GetMediaType());
+  ASSERT_TRUE(sprinkles.GetMediaTypeInfo().unknown.isSome());
+  ASSERT_EQ("sprinkles", sprinkles.GetMediaTypeInfo().unknown->name);
+  ASSERT_EQ("8 16 foo", sprinkles.GetMediaTypeInfo().unknown->formatString);
+  // The format list of an unknown media type is not tokenized
+  ASSERT_TRUE(sprinkles.GetFormats().empty());
+
+  const SdpMediaSection& clowncar = results->Sdp()->GetMediaSection(2);
+  ASSERT_EQ(SdpMediaSection::kUnknown, clowncar.GetMediaType());
+  ASSERT_TRUE(clowncar.GetMediaTypeInfo().unknown.isSome());
+  ASSERT_EQ("clowncar", clowncar.GetMediaTypeInfo().unknown->name);
+  ASSERT_EQ("", clowncar.GetMediaTypeInfo().unknown->formatString);
+
+  // Both m= lines must come back out the way they went in
+  // Make sure we don't add a trailing space to the format string for unknown
+  // media types
+  std::ostringstream os;
+  results->Sdp()->Serialize(os);
+  ASSERT_NE(std::string::npos,
+            os.str().find("m=sprinkles 9 UDP/TLS/RTP/SAVPF 8 16 foo" CRLF));
+  ASSERT_NE(std::string::npos,
+            os.str().find("m=clowncar 0 UDP/TLS/RTP/SAVPF" CRLF));
+
+  // Reparsing our own serialization has to be stable. It will not match the
+  // SDP we were given, because serialization normalizes the session name,
+  // moves the session level connection line into each media section, and
+  // writes out the default directions.
+  const auto reparsed = parser.Parse(os.str());
+  ASSERT_TRUE(!!reparsed->Sdp());
+  std::ostringstream reserialized;
+  reparsed->Sdp()->Serialize(reserialized);
+  ASSERT_EQ(os.str(), reserialized.str());
 }
 
 TEST(NewSdpTestNoFixture, CheckParsingResultComparer)
@@ -6134,6 +6283,97 @@ TEST_P(NewSdpTest, CheckRtxAptRtxTime) {
                                format_params[0].parameters.get())
                                ->rtx_time);
   }
+}
+
+// MediaTypeInfo deliberately has no operator==; MatchesTypeOf compares the
+// media type alone, while IdenticalTo also compares the format list.
+TEST(NewSdpTestNoFixture, CheckMediaTypeInfoComparison)
+{
+  const SdpMediaSection::MediaTypeInfo audio{.type = SdpMediaSection::kAudio};
+  const SdpMediaSection::MediaTypeInfo video{.type = SdpMediaSection::kVideo};
+
+  ASSERT_TRUE(audio.MatchesTypeOf(audio));
+  ASSERT_TRUE(audio.IdenticalTo(audio));
+  ASSERT_FALSE(audio.MatchesTypeOf(video));
+  ASSERT_FALSE(audio.IdenticalTo(video));
+
+  const auto unknown = [](const std::string& aName,
+                          const std::string& aFormatString) {
+    return SdpMediaSection::MediaTypeInfo{
+        .type = SdpMediaSection::kUnknown,
+        .unknown = Some(SdpMediaSection::UnknownMediaTypeData{
+            .name = aName, .formatString = aFormatString})};
+  };
+  const auto sprinkles = unknown("sprinkles", "8 16 foo");
+
+  // Media type names are case-insensitive for both comparisons, even though
+  // the case an unknown media type was received in is what gets reproduced.
+  ASSERT_TRUE(sprinkles.MatchesTypeOf(unknown("SPRINKLES", "8 16 foo")));
+  ASSERT_TRUE(sprinkles.MatchesTypeOf(unknown("SpRiNkLeS", "8 16 foo")));
+  ASSERT_TRUE(sprinkles.IdenticalTo(unknown("SPRINKLES", "8 16 foo")));
+
+  // The format list is not part of the media type, and is compared verbatim
+  ASSERT_TRUE(sprinkles.MatchesTypeOf(unknown("sprinkles", "0")));
+  ASSERT_FALSE(sprinkles.IdenticalTo(unknown("sprinkles", "0")));
+  ASSERT_FALSE(sprinkles.IdenticalTo(unknown("sprinkles", "8 16 FOO")));
+
+  ASSERT_FALSE(sprinkles.MatchesTypeOf(unknown("clowncar", "8 16 foo")));
+  ASSERT_FALSE(sprinkles.MatchesTypeOf(audio));
+  ASSERT_FALSE(audio.MatchesTypeOf(sprinkles));
+}
+
+// A rejected m= section still has to fit the SDP grammar, which is why
+// DisableMsection gives the media types it understands a placeholder format.
+// The format list of an unknown media type is reproduced verbatim, so it must
+// not gain a placeholder that its own m= line does not mention.
+TEST(NewSdpTestNoFixture, CheckDisableMsectionKeepsUnknownFormats)
+{
+  SdpImpl sdp(SdpOrigin("-", 4294967296, 2, sdp::kIPv4, "127.0.0.1"));
+
+  SdpMediaSection& unknown = sdp.AddMediaSection(
+      {.type = SdpMediaSection::kUnknown,
+       .unknown = Some(SdpMediaSection::UnknownMediaTypeData{
+           .name = "sprinkles", .formatString = "8 16 foo"})},
+      SdpDirectionAttribute::kSendrecv, 9, SdpMediaSection::kUdpTlsRtpSavpf,
+      sdp::kIPv4, "0.0.0.0");
+  SdpHelper::DisableMsection(&sdp, &unknown);
+
+  ASSERT_EQ(0U, unknown.GetPort());
+  ASSERT_FALSE(
+      unknown.GetAttributeList().HasAttribute(SdpAttribute::kRtpmapAttribute));
+  std::ostringstream unknownOs;
+  unknown.Serialize(unknownOs);
+  ASSERT_NE(
+      std::string::npos,
+      unknownOs.str().find("m=sprinkles 0 UDP/TLS/RTP/SAVPF 8 16 foo" CRLF));
+
+  // An empty format list would leave the m= line without the fmt token the
+  // grammar requires, so it gets the placeholder.
+  SdpMediaSection& noFormats = sdp.AddMediaSection(
+      {.type = SdpMediaSection::kUnknown,
+       .unknown = Some(SdpMediaSection::UnknownMediaTypeData{
+           .name = "clowncar", .formatString = ""})},
+      SdpDirectionAttribute::kSendrecv, 9, SdpMediaSection::kUdpTlsRtpSavpf,
+      sdp::kIPv4, "0.0.0.0");
+  SdpHelper::DisableMsection(&sdp, &noFormats);
+
+  ASSERT_FALSE(noFormats.GetAttributeList().HasAttribute(
+      SdpAttribute::kRtpmapAttribute));
+  std::ostringstream noFormatsOs;
+  noFormats.Serialize(noFormatsOs);
+  ASSERT_NE(std::string::npos,
+            noFormatsOs.str().find("m=clowncar 0 UDP/TLS/RTP/SAVPF 19" CRLF));
+
+  // A media type we do know gets the placeholder, which is the branch the
+  // unknown media type has to stay out of.
+  SdpMediaSection& audio = sdp.AddMediaSection(
+      {.type = SdpMediaSection::kAudio}, SdpDirectionAttribute::kSendrecv, 9,
+      SdpMediaSection::kUdpTlsRtpSavpf, sdp::kIPv4, "0.0.0.0");
+  SdpHelper::DisableMsection(&sdp, &audio);
+
+  ASSERT_EQ(0U, audio.GetPort());
+  ASSERT_TRUE(
+      audio.GetAttributeList().HasAttribute(SdpAttribute::kRtpmapAttribute));
 }
 
 }  // End namespace test.

@@ -4,14 +4,19 @@
 
 import itertools
 import re
-from collections import OrderedDict
 from copy import deepcopy
 
 import ipdl.ast
 import ipdl.builtin
 from ipdl.cxx.ast import *
 from ipdl.cxx.code import *
-from ipdl.type import ActorType, TypeVisitor, UnionType, builtinHeaderIncludes
+from ipdl.type import (
+    ActorType,
+    TypeVisitor,
+    UnionType,
+    builtinHeaderIncludes,
+    hasTaintedBaseType,
+)
 from ipdl.util import hash_str
 
 # -----------------------------------------------------------------------------
@@ -1121,21 +1126,38 @@ class MessageDecl(ipdl.ast.MessageDecl):
     def actorDecl(self):
         return self.params[0]
 
+    def isParamTainted(self, d, side):
+        """Whether the in-param |d| received by |side| should be wrapped in
+        Tainted<>: either the whole message is [Tainted], or |d|'s type is a
+        [Tainted] imported type (possibly wrapped) and |side| may receive it
+        from a less trusted process."""
+        if "NoTaint" in d.attributes:
+            return False
+        if self.decl.type.tainted:
+            return True
+        return hasTaintedBaseType(
+            d.ipdltype
+        ) and self.protocolType.mayReceiveFromLessTrusted(side)
+
     def makeCxxParams(
         self, paramsems="in", returnsems="out", side=None, implicit=True, direction=None
     ):
         """Return a list of C++ decls per the spec'd configuration.
         |params| and |returns| is the C++ semantics of those: 'in', 'out', or None."""
 
-        def makeDecl(d, sems):
-            if (
-                self.decl.type.tainted
-                and "NoTaint" not in d.attributes
-                and direction == "recv"
-            ):
-                # Tainted types are passed by-value, allowing the receiver to move them if desired.
+        def makeDecl(d, sems, tainted=False):
+            if tainted:
+                # Tainted types are passed by rvalue reference to recv methods,
+                # allowing the receiver to move them if desired. Alloc methods
+                # get an lvalue reference, as the value is later moved into the
+                # constructor's recv method.
                 assert sems != "out"
-                return Decl(Type("Tainted", T=d.bareType(side)), d.name)
+                t = Type("Tainted", T=d.bareType(side))
+                if sems == "move":
+                    t.rvalref = True
+                else:
+                    t.ref = True
+                return Decl(t, d.name)
 
             if sems == "in":
                 t = d.inType(side, direction)
@@ -1179,7 +1201,14 @@ class MessageDecl(ipdl.ast.MessageDecl):
 
         cxxparams = []
         if paramsems is not None:
-            cxxparams.extend([makeDecl(d, paramsems) for d in self.params])
+            cxxparams.extend([
+                makeDecl(
+                    d,
+                    paramsems,
+                    tainted=direction == "recv" and self.isParamTainted(d, side),
+                )
+                for d in self.params
+            ])
 
         if returnsems == "promise" and self.returns:
             pass
@@ -1199,7 +1228,12 @@ class MessageDecl(ipdl.ast.MessageDecl):
         return cxxparams
 
     def makeCxxArgs(
-        self, paramsems="in", retsems="out", retcallsems="out", implicit=True
+        self,
+        paramsems="in",
+        retsems="out",
+        retcallsems="out",
+        implicit=True,
+        side=None,
     ):
         assert not retcallsems or retsems  # retcallsems => returnsems
         cxxargs = []
@@ -1209,11 +1243,16 @@ class MessageDecl(ipdl.ast.MessageDecl):
             # implementors take these parameters as T*, and
             # std::move(RefPtr<T>) doesn't coerce to T*.
             # We also don't move NotNull, as it has no move constructor.
+            # Tainted<> params are taken by rvalue reference, so they are always
+            # moved.
             cxxargs.extend([
                 (
                     p.var()
-                    if p.ipdltype.isRefcounted()
-                    or (p.ipdltype.isIPDL() and p.ipdltype.isNotNull())
+                    if not (side and self.isParamTainted(p, side))
+                    and (
+                        p.ipdltype.isRefcounted()
+                        or (p.ipdltype.isIPDL() and p.ipdltype.isNotNull())
+                    )
                     else ExprMove(p.var())
                 )
                 for p in self.params
@@ -1410,6 +1449,7 @@ class _DecorateWithCxxStuff(ipdl.ast.Visitor):
     def __init__(self):
         self.visitedTus = set()
         self.protocolName = None
+        self.protocolType = None
 
     def visitTranslationUnit(self, tu):
         if tu not in self.visitedTus:
@@ -1424,6 +1464,7 @@ class _DecorateWithCxxStuff(ipdl.ast.Visitor):
 
     def visitProtocol(self, pro):
         self.protocolName = pro.name
+        self.protocolType = pro.decl.type
         Protocol.upgrade(pro)
         return ipdl.ast.Visitor.visitProtocol(self, pro)
 
@@ -1455,6 +1496,7 @@ class _DecorateWithCxxStuff(ipdl.ast.Visitor):
 
     def visitMessageDecl(self, md):
         md.namespace = self.protocolName
+        md.protocolType = self.protocolType
         md.params = [param.accept(self) for param in md.inParams]
         md.returns = [ret.accept(self) for ret in md.outParams]
         MessageDecl.upgrade(md)
@@ -1600,7 +1642,7 @@ class _GenerateProtocolCode(ipdl.ast.Visitor):
         """Generate the definitions for all structs and unions. This will
         re-order the declarations if needed in the C++ code such that
         dependencies have already been defined."""
-        decls = OrderedDict()
+        decls = {}
         for su in tu.structsAndUnions:
             if isinstance(su, StructDecl):
                 which = "struct"
@@ -1652,13 +1694,13 @@ class _GenerateProtocolCode(ipdl.ast.Visitor):
         def gen_struct(deps, defn):
             for dep in deps:
                 if dep in decls:
-                    d, t = decls[dep]
-                    del decls[dep]
+                    d, t = decls.pop(dep)
                     gen_struct(d, t)
             self.hdrfile.addthings(defn)
 
-        while len(decls) > 0:
-            _, (d, t) = decls.popitem(False)
+        while decls:
+            first_k = next(iter(decls))
+            d, t = decls.pop(first_k)
             gen_struct(d, t)
 
     def visitProtocol(self, p):
@@ -2109,49 +2151,6 @@ class _ParamTraits:
         clsns = _putInNamespaces(clsdecl, namespaces)
         defns = _putInNamespaces(methoddefns, namespaces)
         return clsns, defns
-
-    @classmethod
-    def actorPickling(cls, actortype, side):
-        """Generates pickling for IPDL actors. This is a |nullable| deserializer.
-        Write and read callers will perform nullability validation."""
-
-        cxxtype = _cxxBareType(actortype, side, fq=True)
-        basetype = Type("mozilla::ipc::IProtocol", ptr=True)
-
-        # void Write(..) impl - Write actor as IProtocol*
-        write = cls.checkedWrite(
-            None,
-            ExprCast(cls.var, basetype, static=True),
-            cls.writervar,
-            sentinelKey=actortype.name(),
-        )
-
-        # bool Read(..) impl - Read actor as IProtocol*
-        read = StmtCode(
-            """
-            ${read}
-            if (actor && actor->GetProtocolId() != ${protocolid}) {
-                ${typeerror}
-                return {};
-            }
-            return static_cast<${cxxtype}>(actor);
-            """,
-            read=cls._checkedRead(
-                None,
-                basetype,
-                ExprVar("actor"),
-                sentinelKey=actortype.name(),
-                what="managed " + actortype.name() + " actor",
-            ),
-            protocolid=_protocolId(actortype),
-            typeerror=cls.fatalError(
-                cls.readervar,
-                "Unexpected actor type (expected " + actortype.name() + ")",
-            ),
-            cxxtype=cxxtype,
-        )
-
-        return cls.generateDecl(cxxtype, [write], [read])
 
     @classmethod
     def structPickling(cls, structtype):
@@ -3246,6 +3245,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
         self.cppfile = None
         self.ns = None
         self.cls = None
+        self.concreteActorType = None
         self.protocolCxxIncludes = []
         self.actorForwardDecls = []
         self.usingDecls = []
@@ -3351,22 +3351,34 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
             Whitespace.NL,
         ])
 
-        actortype = ActorType(tu.protocol.decl.type)
-        traitsdecl, traitsdefn = _ParamTraits.actorPickling(actortype, self.side)
-
-        self.hdrfile.addthings([traitsdecl, Whitespace.NL] + _includeGuardEnd(hf))
-
-        # If the implementation type is not overridden, add an implicit import
-        # for the default implementation header file. Explicit implementation
-        # types will specify their headers manually with `include`.
-        if self.protocol.implAttribute(self.side) is None:
-            assert self.protocol.name.startswith("P")
-            self.externalIncludes.add(
-                "".join(n.name + "/" for n in self.protocol.namespaces)
-                + self.protocol.name[1:]
-                + self.side.capitalize()
-                + ".h"
+        def makeActorTraits(qname):
+            return StmtCode(
+                """
+                namespace mozilla::ipc {
+                template <>
+                struct ActorTraits<${qname}> {
+                    static constexpr ProtocolId kProtocolId = ${protocolid};
+                    static constexpr Side kSide = ${side}Side;
+                };
+                }  // namespace mozilla::ipc
+                """,
+                qname=qname,
+                protocolid=_protocolId(self.protocol.decl.type),
+                side=self.side.title(),
             )
+
+        # Generate ActorTraits specializations for the generated actor type, as
+        # well as the single implementation type (if known).
+        # This will allow the type to be used by IProtocol::ActorCast to perform
+        # safe downcasting of actor types.
+        self.hdrfile.addthing(
+            makeActorTraits(_actorName(str(self.protocol.qname()), self.side))
+        )
+
+        if self.concreteActorType is not None:
+            self.hdrfile.addthing(makeActorTraits(self.concreteActorType))
+
+        self.hdrfile.addthings(_includeGuardEnd(hf))
 
         # make the .cpp file
         cf.addthings(
@@ -3403,8 +3415,6 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
             Whitespace.NL,
             Whitespace.NL,
         ])
-
-        cf.addthing(traitsdefn)
 
     def visitUsingStmt(self, using):
         if using.decl.fullname is not None:
@@ -3520,6 +3530,41 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
                 Whitespace.NL,
             ])
 
+        implAttr = self.protocol.implAttribute(self.side)
+        if implAttr is None:
+            assert self.protocol.name.startswith("P")
+            pqname = self.protocol.qname()
+            self.concreteActorType = ipdl.ast.QualifiedId(
+                pqname.loc, pqname.baseid[1:] + self.side.title(), pqname.quals
+            )
+
+            # If the implementation type is not overridden, add an implicit
+            # import for the default implementation header file. Explicit
+            # implementation types will specify their headers manually with
+            # `include`.
+            self.externalIncludes.add(
+                "/".join(
+                    self.concreteActorType.quals
+                    + [self.concreteActorType.baseid + ".h"]
+                )
+            )
+        elif implAttr != "virtual":
+            parts = implAttr.value.split("::")
+            self.concreteActorType = ipdl.ast.QualifiedId(
+                implAttr.loc, parts[-1], parts[:-1]
+            )
+
+        # Add a forward declaration to the header file for our actor's concrete
+        # type, if we have one.
+        if self.concreteActorType is not None:
+            self.hdrfile.addthings([
+                _makeForwardDeclForQClass(
+                    self.concreteActorType.baseid,
+                    self.concreteActorType.quals,
+                ),
+                Whitespace.NL,
+            ])
+
         self.cls = Class(self.clsname, inherits=inherits, abstract=True)
 
         self.cls.addstmt(Label.PRIVATE)
@@ -3604,7 +3649,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
                     defaultRecv = MethodDefn(recvDecl)
                     defaultRecv.addcode("return IPC_OK();\n")
                     self.cls.addstmt(defaultRecv)
-                elif self.protocol.implAttribute(self.side) == "virtual":
+                elif self.concreteActorType is None:
                     # If we're using virtual calls, we need the methods to be
                     # declared on the base class.
                     recvDecl.methodspec = MethodSpec.PURE
@@ -3612,7 +3657,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
 
         # If we're using virtual calls, we need the methods to be declared on
         # the base class.
-        if self.protocol.implAttribute(self.side) == "virtual":
+        if self.concreteActorType is None:
             for md in p.messageDecls:
                 managed = md.decl.type.constructedType()
                 if not ptype.isManagerOf(managed) or md.decl.type.isDtor():
@@ -4146,7 +4191,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
             thereEp=thereEp,
         )
 
-        # void BindPEndpoint(ManagedEndpoint<PHere>&& aEndpoint, PHere* aActor)
+        # bool BindPEndpoint(ManagedEndpoint<PHere>&& aEndpoint, PHere* aActor)
         bindmeth = MethodDefn(
             MethodDecl(
                 "Bind%sEndpoint" % managed.name(),
@@ -4155,6 +4200,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
                     Decl(self.protocol.managedCxxType(managed, self.side), actor.name),
                 ],
                 ret=Type.BOOL,
+                warn_unused=True,
             )
         )
         bindmeth.addcode(
@@ -4287,18 +4333,11 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
     ##
 
     def concreteThis(self):
-        implAttr = self.protocol.implAttribute(self.side)
-        if implAttr == "virtual":
+        if self.concreteActorType is None:
             return ExprVar.THIS
-
-        if implAttr is None:
-            assert self.protocol.name.startswith("P")
-            className = self.protocol.name[1:] + self.side.capitalize()
-        else:
-            assert isinstance(implAttr, ipdl.ast.StringLiteral)
-            className = implAttr.value
-
-        return ExprCode("static_cast<${className}*>(this)", className=className)
+        return ExprCast(
+            ExprVar.THIS, Type(str(self.concreteActorType), ptr=True), static=True
+        )
 
     def thisCall(self, function, args):
         return ExprCall(ExprSelect(self.concreteThis(), "->", function), args=args)
@@ -4931,7 +4970,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
             start = 1
 
         def maybeTainted(p, side):
-            if md.decl.type.tainted and "NoTaint" not in p.attributes:
+            if md.isParamTainted(p, side):
                 return Type("Tainted", T=p.bareType(side))
             return p.bareType(side)
 
@@ -5233,6 +5272,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
                     paramsems="move",
                     retsems=retsems,
                     retcallsems="out",
+                    side=self.side,
                 ),
             ),
         )

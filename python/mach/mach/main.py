@@ -5,6 +5,8 @@
 # This module provides functionality for the command-line build tool
 # (mach). It is packaged as a module because everything is a library.
 
+from __future__ import annotations
+
 import argparse
 import io
 import logging
@@ -233,6 +235,8 @@ To see more help for a specific command, run:
         Returns the integer exit code that should be used. 0 means success. All
         other values indicate failure.
         """
+        from mozversioncontrol import StaleWorkspaceError
+
         sentry = NoopErrorReporter()
 
         stdin = sys.stdin if stdin is None else stdin
@@ -268,6 +272,14 @@ To see more help for a specific command, run:
             print("mach interrupted by signal or user action. Stopping.")
             return 1
 
+        except StaleWorkspaceError as e:
+            print(str(e), file=stderr)
+            print(
+                "\nmach cannot proceed until the jj workspace is updated.",
+                file=stderr,
+            )
+            return 1
+
         except Exception:
             # _run swallows exceptions in invoked handlers and converts them to
             # a proper exit code. So, the only scenario where we should get an
@@ -296,6 +308,8 @@ To see more help for a specific command, run:
             sys.stderr = orig_stderr
 
     def _run(self, argv):
+        from mozversioncontrol import StaleWorkspaceError
+
         if self.populate_context_handler:
             topsrcdir = Path(self.populate_context_handler("topdir"))
             from .sentry import register_sentry
@@ -370,13 +384,18 @@ To see more help for a specific command, run:
             import threading
 
             context._telemetry_init_done = threading.Event()
+            context._telemetry_init_error = None
 
             def _finish_telemetry_init(future):
-                from .telemetry import report_invocation_metrics
+                try:
+                    from .telemetry import report_invocation_metrics
 
-                context.telemetry = future.result()
-                report_invocation_metrics(context.telemetry, handler.name)
-                context._telemetry_init_done.set()
+                    context.telemetry = future.result()
+                    report_invocation_metrics(context.telemetry, handler.name)
+                except Exception as e:
+                    context._telemetry_init_error = e
+                finally:
+                    context._telemetry_init_done.set()
 
             self._telemetry_future.add_done_callback(_finish_telemetry_init)
 
@@ -421,8 +440,8 @@ To see more help for a specific command, run:
                 profile_command=args.profile_command,
                 **vars(args.command_args),
             )
-        except KeyboardInterrupt as ki:
-            raise ki
+        except (KeyboardInterrupt, StaleWorkspaceError):
+            raise
         except FailedCommandError as e:
             print(e)
             return e.exit_code
@@ -491,6 +510,12 @@ To see more help for a specific command, run:
         finally:
             if context._telemetry_init_done is not None:
                 context._telemetry_init_done.wait()
+                if context._telemetry_init_error is not None:
+                    print(
+                        "Warning: failed to initialize mach telemetry: "
+                        f"{context._telemetry_init_error!r}",
+                        file=sys.stderr,
+                    )
 
     def log(self, level, action, params, format_str):
         """Helper method to record a structured log event."""
@@ -535,13 +560,13 @@ To see more help for a specific command, run:
 
             machrc, .machrc
         """
-        valid_names = ("machrc", ".machrc")
+        from mach.util import MACHRC_NAMES
 
         def find_in_dir(base: Path):
             if base.is_file():
                 return base
 
-            for name in valid_names:
+            for name in MACHRC_NAMES:
                 path = base / name
                 if path.is_file():
                     return path

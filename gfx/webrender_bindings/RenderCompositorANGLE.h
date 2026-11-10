@@ -87,22 +87,14 @@ class RenderCompositorANGLE final : public RenderCompositor {
   // Interface for wr::Compositor
   void CompositorBeginFrame() override;
   void CompositorEndFrame() override;
-  void Bind(wr::NativeTileId aId, wr::DeviceIntPoint* aOffset, uint32_t* aFboId,
-            wr::DeviceIntRect aDirtyRect,
-            wr::DeviceIntRect aValidRect) override;
-  void Unbind() override;
   void BindSwapChain(wr::NativeSurfaceId aId,
                      const wr::DeviceIntRect* aDirtyRects,
                      size_t aNumDirtyRects) override;
   void PresentSwapChain(wr::NativeSurfaceId aId,
                         const wr::DeviceIntRect* aDirtyRects,
                         size_t aNumDirtyRects) override;
-  void CreateSurface(wr::NativeSurfaceId aId, wr::DeviceIntPoint aVirtualOffset,
-                     wr::DeviceIntSize aTileSize, bool aIsOpaque) override;
   void CreateExternalSurface(wr::NativeSurfaceId aId, bool aIsOpaque) override;
   void DestroySurface(NativeSurfaceId aId) override;
-  void CreateTile(wr::NativeSurfaceId aId, int32_t aX, int32_t aY) override;
-  void DestroyTile(wr::NativeSurfaceId aId, int32_t aX, int32_t aY) override;
   void AttachExternalImage(wr::NativeSurfaceId aId,
                            wr::ExternalImageId aExternalImage) override;
   void CreateSwapChainSurface(wr::NativeSurfaceId aId, wr::DeviceIntSize aSize,
@@ -117,15 +109,15 @@ class RenderCompositorANGLE final : public RenderCompositor {
                   wr::DeviceIntRect aRoundedClipRect,
                   wr::ClipRadius aClipRadius) override;
   bool EnableAsyncScreenshot() override;
-  void GetCompositorCapabilities(CompositorCapabilities* aCaps) override;
   void GetWindowProperties(WindowProperties* aProperties) override;
 
   // Interface for partial present
-  bool UsePartialPresent() override;
+  bool UseWindowPartialPresent() override;
   bool RequestFullRender() override;
   uint32_t GetMaxPartialPresentRects() override;
+  size_t GetBufferAge() const override { return 1; }
 
-  RefPtr<layers::Fence> GetAndResetReleaseFence() override;
+  RefPtr<layers::Fence> GetAndResetReadFence() override;
 
   bool MaybeReadback(const gfx::IntSize& aReadbackSize,
                      const wr::ImageFormat& aReadbackFormat,
@@ -133,9 +125,8 @@ class RenderCompositorANGLE final : public RenderCompositor {
                      bool* aNeedsYFlip) override;
 
  protected:
-  bool UseCompositor() const;
   bool RecreateNonNativeCompositorSwapChain();
-  void InitializeUsePartialPresent();
+  void InitializeUseWindowPartialPresent();
   void InsertGraphicsCommandsFinishedWaitQuery(
       RenderedFrameId aRenderedFrameId);
   bool WaitForPreviousGraphicsCommandsFinishedQuery(bool aWaitAll = false);
@@ -175,7 +166,7 @@ class RenderCompositorANGLE final : public RenderCompositor {
   RenderedFrameId mLastCompletedFrameId;
 
   Maybe<LayoutDeviceIntSize> mBufferSize;
-  bool mUsePartialPresent = false;
+  bool mUseWindowPartialPresent = false;
   bool mFullRender = false;
   bool mFirstPresent = true;
   // Wether we're currently using alpha.

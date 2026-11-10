@@ -37,10 +37,9 @@ from cmdline import (
     FIREFOX_ANDROID_APPS,
     FIREFOX_APPS,
     GECKO_PROFILER_APPS,
+    SAFARI_APPS,
     TRACE_APPS,
 )
-from condprof.client import ProfileNotFoundError, get_profile
-from condprof.util import download_file, get_current_platform
 from etw_profile import ETWProfile
 from gecko_profile import GeckoProfile
 from logger.logger import RaptorLogger
@@ -120,9 +119,11 @@ class Perftest(metaclass=ABCMeta):
         screenshot_on_failure=False,
         power_test=False,
         install_extensions=None,
+        test_names=None,
         **kwargs,
     ):
         self._remote_test_root = None
+        self._test_names = test_names or []
         self._dirs_to_remove = []
         self.verbose = verbose
         self.page_count = []
@@ -354,6 +355,11 @@ class Perftest(metaclass=ABCMeta):
     def get_conditioned_profile(self, binary=None):
         """Downloads a platform-specific conditioned profile, using the
         condprofile client API; returns a self.conditioned_profile_dir"""
+        # Late import: condprof pulls in arsenic and aiohttp, which runs
+        # without a conditioned profile never use.
+        from condprof.client import ProfileNotFoundError, get_profile
+        from condprof.util import get_current_platform
+
         if self.conditioned_profile_dir:
             # We already have a directory, so provide a copy that
             # will get deleted after it's done with
@@ -472,6 +478,8 @@ class Perftest(metaclass=ABCMeta):
         if not install_extensions:
             return
 
+        from condprof.util import download_file
+
         # Sideloaded extensions are disabled by default; these prefs make them
         # install and enable on startup (mirrors the condprof webext customization).
         self.profile.set_preferences({
@@ -537,6 +545,41 @@ class Perftest(metaclass=ABCMeta):
         if test.get("preferences") is not None and self.config["app"] in FIREFOX_APPS:
             self.set_browser_test_prefs(test["preferences"])
 
+        if (
+            self.playback is not None
+            and self.playback.playback_mode == "direct"
+            and self.config["app"] in FIREFOX_APPS
+        ):
+            self.set_browser_test_prefs({
+                "network.proxy.type": 0,
+                "network.dns.forceResolve": self.playback.host,
+                "network.socket.forcePort": (
+                    f"80={self.playback.http_port};443={self.playback.https_port}"
+                ),
+            })
+
+    def playback_chrome_args(self):
+        """Chrome cmd-line args pointing the browser at the playback server."""
+        if self.playback.playback_mode == "direct":
+            resolver_rules = (
+                f"MAP *:80 {self.playback.host}:{self.playback.http_port},"
+                f"MAP *:443 {self.playback.host}:{self.playback.https_port},"
+                "EXCLUDE localhost"
+            )
+            return [
+                f"--host-resolver-rules={resolver_rules}",
+                "--ignore-certificate-errors",
+            ]
+
+        pb_args = [
+            f"--proxy-server={self.playback.host}:{self.playback.port}",
+            "--proxy-bypass-list=localhost;127.0.0.1",
+            "--ignore-certificate-errors",
+        ]
+        if not self.is_localhost:
+            pb_args[0] = pb_args[0].replace("127.0.0.1", self.config["host"])
+        return pb_args
+
     @abstractmethod
     def setup_chrome_args(self):
         pass
@@ -545,7 +588,7 @@ class Perftest(metaclass=ABCMeta):
     def get_browser_meta(self):
         pass
 
-    def run_tests(self, tests, test_names):
+    def run_tests(self, tests):
         tests_to_run = tests
         if self.results_handler.existing_results:
             tests_to_run = []
@@ -561,7 +604,7 @@ class Perftest(metaclass=ABCMeta):
                     os.sys.exit(1)
                 finally:
                     self.run_test_teardown(test)
-            return self.process_results(tests, test_names)
+            return self.process_results(tests)
         finally:
             self.clean_up()
 
@@ -573,7 +616,7 @@ class Perftest(metaclass=ABCMeta):
     def run_test_teardown(self, test):
         self.check_for_crashes()
 
-    def process_results(self, tests, test_names):
+    def process_results(self, tests):
         # when running locally output results in build/raptor.json; when running
         # in production output to a local.json to be turned into tc job artifact
         raptor_json_path = os.path.join(self.artifact_dir, "raptor.json")
@@ -583,7 +626,9 @@ class Perftest(metaclass=ABCMeta):
         self.config["raptor_json_path"] = raptor_json_path
         self.config["artifact_dir"] = self.artifact_dir
         self.config["page_count"] = self.page_count
-        res = self.results_handler.summarize_and_output(self.config, tests, test_names)
+        res = self.results_handler.summarize_and_output(
+            self.config, tests, self._test_names
+        )
 
         # Gecko profiling symbolication
         # We enable the gecko profiler either when the profiler is enabled with
@@ -676,6 +721,7 @@ class Perftest(metaclass=ABCMeta):
 
         self.config.update({
             "playback_tool": test.get("playback"),
+            "playback_mode": test.get("playback_mode", "proxy"),
             "playback_version": test.get("playback_version", "8.1.1"),
             "playback_files": playback_files,
             "verbose": self.config.get("verbose", False)
@@ -691,13 +737,20 @@ class Perftest(metaclass=ABCMeta):
         # let's start it!
         self.playback.start()
 
+    def _get_source_path_mappings(self):
+        if not self.benchmark:
+            return None
+        return [self.benchmark.get_source_path_mapping()]
+
     def _init_gecko_profiling(self, test):
         LOG.info("initializing gecko profiler")
         upload_dir = os.getenv("MOZ_UPLOAD_DIR")
         if not upload_dir:
             LOG.critical("Profiling ignored because MOZ_UPLOAD_DIR was not set")
         else:
-            self.gecko_profiler = GeckoProfile(upload_dir, self.config, test)
+            self.gecko_profiler = GeckoProfile(
+                upload_dir, self.config, test, self._get_source_path_mappings()
+            )
 
     def _init_etw_profiling(self, test):
         LOG.info("initializing ETW profiler")
@@ -710,7 +763,9 @@ class Perftest(metaclass=ABCMeta):
         if not upload_dir:
             LOG.critical("ETW Profiling ignored because MOZ_UPLOAD_DIR was not set")
         else:
-            self.etw_profiler = ETWProfile(upload_dir, self.config, test)
+            self.etw_profiler = ETWProfile(
+                upload_dir, self.config, test, self._get_source_path_mappings()
+            )
 
     def _init_samply_profiling(self, test):
         LOG.info("initializing Samply profiler")
@@ -721,7 +776,9 @@ class Perftest(metaclass=ABCMeta):
         if not upload_dir:
             LOG.critical("Samply profiling ignored because MOZ_UPLOAD_DIR was not set")
         else:
-            self.samply_profiler = SamplyProfile(upload_dir, self.config, test)
+            self.samply_profiler = SamplyProfile(
+                upload_dir, self.config, test, self._get_source_path_mappings()
+            )
 
     def _init_chrome_trace(self, test):
         LOG.info("initializing Chrome Trace handler")
@@ -749,7 +806,9 @@ class Perftest(metaclass=ABCMeta):
         if not upload_dir:
             LOG.critical("Perf profiling ignored because MOZ_UPLOAD_DIR was not set")
         else:
-            self.perf_profiler = PerfProfile(upload_dir, self.config, test)
+            self.perf_profiler = PerfProfile(
+                upload_dir, self.config, test, self._get_source_path_mappings()
+            )
 
     def disable_non_local_connections(self):
         # For Firefox we need to set MOZ_DISABLE_NONLOCAL_CONNECTIONS=1 env var before startup
@@ -843,15 +902,25 @@ class PerftestAndroid(Perftest):
         tcp_port = f"tcp:{port}"
         self.device.create_socket_connection("reverse", tcp_port, tcp_port)
 
-    def set_reverse_ports(self):
+    def set_reverse_ports(self, test):
         if self.is_localhost:
             if self.playback:
-                LOG.info("making the raptor playback server port available to device")
-                self.set_reverse_port(self.playback.port)
+                LOG.info("making the raptor playback server ports available to device")
+                ports = [self.playback.port]
+                if self.playback.playback_mode == "direct":
+                    ports = [self.playback.http_port, self.playback.https_port]
+                for port in ports:
+                    self.set_reverse_port(port)
 
             if self.benchmark:
                 LOG.info("making the raptor benchmarks server port available to device")
                 self.set_reverse_port(int(self.benchmark.port))
+
+            for port in getattr(test.get("support_class"), "reverse_ports", []):
+                LOG.info(
+                    f"making the support class server port {port} available to device"
+                )
+                self.set_reverse_port(port)
         else:
             LOG.info("Reverse port forwarding is used only on local devices")
 
@@ -930,19 +999,16 @@ class PerftestDesktop(Perftest):
         chrome_args = ["--use-mock-keychain", "--no-default-browser-check"]
 
         if test.get("playback", False):
-            pb_args = [
-                f"--proxy-server={self.playback.host}:{self.playback.port}",
-                "--proxy-bypass-list=localhost;127.0.0.1",
-                "--ignore-certificate-errors",
-            ]
-
-            if not self.is_localhost:
-                pb_args[0] = pb_args[0].replace("127.0.0.1", self.config["host"])
-
-            chrome_args.extend(pb_args)
+            chrome_args.extend(self.playback_chrome_args())
 
         if self.debug_mode:
             chrome_args.extend(["--auto-open-devtools-for-tabs"])
+
+        chrome_args.extend(
+            arg.strip()
+            for arg in test.get("chrome_args", "").splitlines()
+            if arg.strip()
+        )
 
         return chrome_args
 
@@ -981,7 +1047,15 @@ class PerftestDesktop(Perftest):
                         except FileNotFoundError:
                             pass
                     browser_name = self.config["app"]
-                    browser_version = plist.get("CFBundleShortVersionString")
+                    short_version = plist.get("CFBundleShortVersionString")
+                    if self.config["app"] in SAFARI_APPS:
+                        bundle_version = plist.get("CFBundleVersion")
+                        if short_version and bundle_version:
+                            browser_version = f"{short_version} ({bundle_version})"
+                        else:
+                            browser_version = short_version or bundle_version
+                    else:
+                        browser_version = short_version
                 elif "linux" in self.config["platform"]:
                     command = [self.config["binary"], "--version"]
                     proc = subprocess.run(

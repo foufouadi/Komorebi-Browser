@@ -20,6 +20,7 @@ use crate::{
     features::extended_connect::{
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
         session::{DgramContextIdError, Protocol, State},
+        stats::SessionStats,
     },
     frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
 };
@@ -39,6 +40,7 @@ pub struct Session {
     negotiated_protocol: Option<String>,
     /// Send groups registered for this session.
     send_groups: HashSet<SendGroupId>,
+    stats: SessionStats,
 }
 
 impl Display for Session {
@@ -59,6 +61,7 @@ impl Session {
             pending_streams: HashSet::default(),
             negotiated_protocol: None,
             send_groups: HashSet::default(),
+            stats: SessionStats::default(),
         }
     }
     /// Register a send group with a caller-provided ID for this session.
@@ -240,6 +243,22 @@ impl Protocol for Session {
         self.negotiated_protocol.as_deref()
     }
 
+    fn stats(&self) -> Option<&SessionStats> {
+        Some(&self.stats)
+    }
+
+    fn record_sent_outgoing_datagrams(&mut self, count: u64) {
+        self.stats.outgoing_datagrams.sent += count;
+    }
+
+    fn record_expired_outgoing_datagrams(&mut self, count: u64) {
+        self.stats.outgoing_datagrams.expired += count;
+    }
+
+    fn record_dropped_outgoing_datagrams(&mut self, count: u64) {
+        self.stats.outgoing_datagrams.dropped += count;
+    }
+
     fn register_send_group(&mut self, id: SendGroupId) -> Res<()> {
         Self::register_send_group(self, id)
     }
@@ -248,8 +267,9 @@ impl Protocol for Session {
         Self::validate_send_group(self, group_id)
     }
 
-    fn write_datagram_prefix(&self, _encoder: &mut Encoder) {
+    fn datagram_prefix(&self) -> Option<u64> {
         // WebTransport does not add prefix (i.e. context ID).
+        None
     }
 
     fn dgram_context_id(&self, datagram: Bytes) -> Result<Bytes, DgramContextIdError> {

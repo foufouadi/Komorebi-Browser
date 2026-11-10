@@ -19,8 +19,6 @@ import mozilla.components.browser.state.state.LastMediaAccessState
 import mozilla.components.browser.state.state.PackageCategory
 import mozilla.components.browser.state.state.ReaderState
 import mozilla.components.browser.state.state.SessionState
-import mozilla.components.browser.state.state.TabGroup
-import mozilla.components.browser.state.state.TabPartition
 import mozilla.components.browser.state.state.TabSessionState
 import mozilla.components.browser.state.state.TranslationsBrowserState
 import mozilla.components.browser.state.state.createTab
@@ -458,18 +456,14 @@ class BrowserStateWriterReaderTest {
     }
 
     @Test
-    fun `Read and write tabs and tab partitions`() {
+    fun `Read and write tabs`() {
         val engineState = createFakeEngineState()
         val engine = createFakeEngine(engineState)
 
         val tab = createTab(url = "https://www.mozilla.org", id = "mozilla")
-        val tabGroup = TabGroup(id = "group1", name = "Group 1", tabIds = setOf("mozilla"))
-        val tabPartition = TabPartition(id = "testFeaturePartition1", tabGroups = listOf(tabGroup))
-        val tabPartitions = mapOf("testFeaturePartition1" to tabPartition)
         val state =
             BrowserState(
                 tabs = listOf(tab),
-                tabPartitions = tabPartitions,
                 selectedTabId = "mozilla",
             )
 
@@ -484,15 +478,6 @@ class BrowserStateWriterReaderTest {
         assertNotNull(restoredState)
 
         assertEquals("https://www.mozilla.org", restoredState.tabs[0].state.url)
-        assertEquals(1, restoredState.tabPartitions.size)
-
-        val restoredPartition = restoredState.tabPartitions["testFeaturePartition1"]
-        assertNotNull(restoredPartition)
-        assertEquals("testFeaturePartition1", restoredPartition.id)
-        assertEquals(1, restoredPartition.tabGroups.size)
-        assertEquals("group1", restoredPartition.tabGroups[0].id)
-        assertEquals("Group 1", restoredPartition.tabGroups[0].name)
-        assertEquals(setOf("mozilla"), restoredPartition.tabGroups[0].tabIds)
     }
 
     @Test

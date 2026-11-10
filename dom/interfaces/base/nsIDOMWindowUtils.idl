@@ -664,9 +664,10 @@ interface nsIDOMWindowUtils : nsISupports {
    * NOTE: The synthesized native event will be fired asynchronously, and upon
    * completion the callback, if provided, will be notified.
    *
-   * Widget support: Windows.
+   * Widget support: Windows, GTK, headless.
    * @param aScreenX, aScreenY screen coords of the focus point of this event.
-   * @param aDeltaX, aDeltaY the amount of delta in the pan.
+   * @param aDeltaX, aDeltaY the amount of delta in the pan. Positive values
+   *        scroll the content down / to the right, on all platforms.
    * @param aModifierFlags is expected to contain native modifier values.
    */
   void sendNativeTouchpadPan(in unsigned long aEventPhase,
@@ -684,6 +685,12 @@ interface nsIDOMWindowUtils : nsISupports {
   readonly attribute unsigned long parsedStyleSheets;
 
   /**
+   * Returns how many times the innerHTML fast path parsed markup in this
+   * process.
+   */
+  readonly attribute unsigned long innerHTMLFastPathCount;
+
+  /**
    * See nsIWidget::ActivateNativeMenuItemAt
    *
    * Cannot be accessed from unprivileged context (not content-accessible)
@@ -698,6 +705,33 @@ interface nsIDOMWindowUtils : nsISupports {
    * Will throw a DOM security error if called without chrome privileges.
    */
   void forceUpdateNativeMenuAt(in AString indexString);
+
+  /**
+   * Returns the key equivalent currently carried by the native menu item that
+   * was built from the element with id elementId, as "<modifiers>|<key>" --
+   * for example "command|-" or "shift,command|n". Modifiers is a comma
+   * separated list in the macOS canonical order control, option, shift,
+   * command. Returns the empty string if the item has no key equivalent, and
+   * throws if no native menu item was built from that element.
+   *
+   * This exists solely so that tests can check that edits to a <key> element
+   * reach the native menu: an NSMenuItem's key equivalent is otherwise not
+   * observable from script, and it is what the menu bar matches against when
+   * nsCocoaWindow::PostHandleKeyEvent offers it a key Gecko left unhandled.
+   * It has no non-test callers. macOS only; throws elsewhere.
+   *
+   * Cannot be accessed from unprivileged context (not content-accessible)
+   * Will throw a DOM security error if called without chrome privileges.
+   */
+  AString getNativeMenuItemKeyEquivalent(in AString elementId);
+
+  /**
+   * Returns the title currently shown by the native menu item that was built
+   * from the element with id elementId, and throws if no native menu item was
+   * built from that element. Tests use this to check that long labels on macOS
+   * are cut to the element's max-width.
+   */
+  AString getNativeMenuItemTitle(in AString elementId);
 
   /**
    * Returns the current selection as plaintext. Note that the result may be
@@ -1106,13 +1140,15 @@ interface nsIDOMWindowUtils : nsISupports {
    * @Param aOffset The relative to start of selection
    * @param aReplaceSrcString the source string of replaceText. If not matched, do nothing.
    * @param aAdditionalFlags See the description of CONTENT_COMMAND_FLAG_*.
+   * @return true if the command is enabled. Note that if the focused content is
+   *         not in the same process, this always returns true.
    */
-  void sendContentCommandEvent(in AString aType,
-                               [optional] in nsITransferable aTransferable,
-                               [optional] in AString aString,
-                               [optional] in uint32_t aOffset,
-                               [optional] in AString aReplaceSrcString,
-                               [optional] in unsigned long aAdditionalFlags);
+  boolean sendContentCommandEvent(in AString aType,
+                                  [optional] in nsITransferable aTransferable,
+                                  [optional] in AString aString,
+                                  [optional] in uint32_t aOffset,
+                                  [optional] in AString aReplaceSrcString,
+                                  [optional] in unsigned long aAdditionalFlags);
 
   /**
    * sendQueryContentEvent()'s aAdditionalFlags may have one of following
@@ -1257,6 +1293,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * aFrameElement is the iframe element which contains the child-process
    * fullscreen document.
    */
+  [can_run_script]
   void remoteFrameFullscreenChanged(
     in Element aFrameElement,
     [optional] in boolean aFullscreenKeyboardLockEnabled);
@@ -1265,6 +1302,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * Called when the remote frame has popped all fullscreen elements off its
    * stack, so that the operation can complete on the parent side.
    */
+  [can_run_script]
   void remoteFrameFullscreenReverted();
 
   /**
@@ -1274,6 +1312,7 @@ interface nsIDOMWindowUtils : nsISupports {
    * The return value indicates whether there is any fullscreen request
    * handled by this call.
    */
+  [can_run_script]
   boolean handleFullscreenRequests();
 
   /**
@@ -1498,6 +1537,13 @@ interface nsIDOMWindowUtils : nsISupports {
    * (see advanceTimeAndRefresh and restoreNormalRefresh above).
    */
   readonly attribute boolean isTestControllingRefreshes;
+
+  /**
+   * Whether this process saw a trusted mousedown and no mouseup or dragend
+   * since. While this is true, moving or resizing a window suppresses the drag
+   * service until the next trusted mouseup.
+   */
+  readonly attribute boolean isMouseDown;
 
   /**
    * Reports whether APZ is enabled on the widget that this window is attached
@@ -1928,9 +1974,10 @@ interface nsIDOMWindowUtils : nsISupports {
    * Increase the chaos mode activation level. An equivalent number of
    * calls to leaveChaosMode must be made in order to restore the original
    * chaos mode state. If the activation level is nonzero all chaos mode
-   * features are activated.
+   * features are activated, or only those of aFeatures (a mask of
+   * mozilla::ChaosFeature values) once it has been given.
    */
-  void enterChaosMode();
+  void enterChaosMode([optional] in unsigned long aFeatures);
 
   /**
    * Decrease the chaos mode activation level. See enterChaosMode().

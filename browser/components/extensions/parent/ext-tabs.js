@@ -12,7 +12,9 @@ ChromeUtils.defineESModuleGetters(this, {
   ExtensionControlledPopup:
     "resource:///modules/ExtensionControlledPopup.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
-  SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
+  SessionStore:
+    "moz-src:///browser/components/sessionstore/SessionStore.sys.mjs",
+  Tabbrowser: "moz-src:///browser/components/tabbrowser/Tabbrowser.sys.mjs",
 });
 
 ChromeUtils.defineLazyGetter(this, "strBundle", function () {
@@ -36,9 +38,6 @@ ChromeUtils.defineLazyGetter(this, "tabHidePopup", () => {
     getLocalizedDescription: (doc, message, addonDetails) => {
       let image = doc.createXULElement("image");
       image.classList.add("extension-controlled-icon", "alltabs-icon");
-      if (!doc.getElementById("alltabs-button")?.closest("#TabsToolbar")) {
-        image.classList.add("alltabs-icon-generic");
-      }
       return BrowserUIUtils.getLocalizedFragment(
         doc,
         message,
@@ -347,7 +346,7 @@ this.tabs = class extends ExtensionAPIPersistent {
         // Ignore any events prior to TabOpen
         // and events that are triggered while tabs are swapped between windows.
         if (
-          updatedTab.initializingTab ||
+          updatedTab.initializing ||
           updatedTab.documentGlobal.gBrowserInit?.isAdoptingTab()
         ) {
           return;
@@ -423,7 +422,7 @@ this.tabs = class extends ExtensionAPIPersistent {
             // Ignore all TabMove events except when the splitViewId changes.
             return;
           }
-          if (updatedTab.removedByAdoption || updatedTab.addedByAdoption) {
+          if (event.detail.adoptingSplitView) {
             // Ignore TabMove events that were fired while adopting a split
             // view and its tabs across windows. When a split view is adopted,
             // it continues to exist in the new window, so despite the multiple
@@ -863,7 +862,10 @@ this.tabs = class extends ExtensionAPIPersistent {
             )
           );
           for (let nativeTab of nativeTabs) {
-            nativeTab.documentGlobal.gBrowser.discardBrowser(nativeTab);
+            nativeTab.documentGlobal.gBrowser.discardBrowser(nativeTab, {
+              renderDiscarded: true,
+              skipOnClose: false,
+            });
           }
         },
 
@@ -902,7 +904,7 @@ this.tabs = class extends ExtensionAPIPersistent {
                 () => browser.fixupAndLoadURIString(url, options),
                 { once: true }
               );
-              tabbrowser._insertBrowser(nativeTab);
+              tabbrowser.insertBrowser(nativeTab);
             }
           }
 
@@ -1122,7 +1124,7 @@ this.tabs = class extends ExtensionAPIPersistent {
               } else {
                 insertionPoint = Math.min(insertionPoint, maxIndex);
               }
-            } else if (isSameWindow && nativeTab._tPos <= lastInsertion) {
+            } else if (isSameWindow && nativeTab.index <= lastInsertion) {
               // lastInsertion is the current index of the last inserted tab.
               // insertionPoint is the desired index of the current tab *after* moving it.
               // When the tab is moved, the last inserted tab will no longer be at index
@@ -1166,7 +1168,7 @@ this.tabs = class extends ExtensionAPIPersistent {
               } else if (isSameWindow) {
                 // Other tab in split was not specified, but the index points
                 // to the same split view. Reverse if needed:
-                wantReversedSplit = otherTabInSplit._tPos === insertionPoint;
+                wantReversedSplit = otherTabInSplit.index === insertionPoint;
               }
               if (wantReversedSplit) {
                 // Split views move as one unit, but if the API call describes
@@ -1203,7 +1205,7 @@ this.tabs = class extends ExtensionAPIPersistent {
             }
             lastInsertionMap.set(
               window,
-              splitview ? splitviewTabs.at(-1)._tPos : nativeTab._tPos
+              splitview ? splitviewTabs.at(-1).index : nativeTab.index
             );
             if (splitview) {
               for (const tab of splitviewTabs) {
@@ -1600,7 +1602,10 @@ this.tabs = class extends ExtensionAPIPersistent {
           if (append) {
             previousTab = referenceTab;
             lastSuccessor =
-              (insert && referenceTab && referenceTab.successor) || null;
+              (insert &&
+                referenceTab &&
+                referenceWindow.gBrowser.getSuccessor(referenceTab)) ||
+              null;
           } else {
             lastSuccessor = referenceTab;
           }
@@ -1619,9 +1624,12 @@ this.tabs = class extends ExtensionAPIPersistent {
             } else if (tab.documentGlobal !== referenceWindow) {
               continue;
             }
-            referenceWindow.gBrowser.replaceInSuccession(tab, tab.successor);
+            referenceWindow.gBrowser.replaceInSuccession(
+              tab,
+              referenceWindow.gBrowser.getSuccessor(tab)
+            );
             if (append && tab === lastSuccessor) {
-              lastSuccessor = tab.successor;
+              lastSuccessor = referenceWindow.gBrowser.getSuccessor(tab);
             }
             if (previousTab) {
               referenceWindow.gBrowser.setSuccessor(previousTab, tab);
@@ -1785,7 +1793,7 @@ this.tabs = class extends ExtensionAPIPersistent {
             for (const nativeTab of nativeTabs) {
               if (
                 nativeTab.documentGlobal === window &&
-                nativeTab._tPos < firstTabInGroup._tPos
+                nativeTab.index < firstTabInGroup.index
               ) {
                 tabsBefore.push(nativeTab);
               } else {
@@ -1818,10 +1826,10 @@ this.tabs = class extends ExtensionAPIPersistent {
           }
           for (let [group, tabs] of ungroupOrder) {
             // Preserve original order of ungrouped tabs.
-            tabs.sort((a, b) => a._tPos - b._tPos);
+            tabs.sort((a, b) => a.index - b.index);
             tabs = getNativeTabsOrSplitViews(tabs);
             let firstTab = tabs[0];
-            if (group.documentGlobal.gBrowser.isSplitViewWrapper(firstTab)) {
+            if (Tabbrowser.isSplitViewWrapper(firstTab)) {
               firstTab = firstTab.tabs[0];
             }
             if (firstTab === group.tabs[0]) {

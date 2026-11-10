@@ -24,9 +24,10 @@ import org.mozilla.gecko.util.XPCOMError;
  */
 @AnyThread
 public class WebRequestError extends Exception {
+  private static final long serialVersionUID = 1L;
+
   /** Defines the set of valid error categories for web request failures. */
   @Retention(RetentionPolicy.SOURCE)
-  /** Error category definitions for web request errors. */
   @IntDef({
     ERROR_CATEGORY_UNKNOWN,
     ERROR_CATEGORY_SECURITY,

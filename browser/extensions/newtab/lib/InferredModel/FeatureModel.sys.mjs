@@ -25,6 +25,7 @@ const MAX_INT_32 = 2 ** 32;
  * @returns {{[key: string]: number}}
  */
 export function divideDict(numerator, denominator) {
+  /** @type {{[key: string]: number}} */
   const result = {};
   Object.keys(numerator).forEach(k => {
     result[k] = denominator[k] ? numerator[k] / denominator[k] : 0;
@@ -98,7 +99,7 @@ export class DayTimeWeighting {
   /**
    * Instantiate class based on a series of day periods in the past.
    *
-   * @param {int[]} pastDays Series of number of days, indicating days ago intervals in reverse chronological order.
+   * @param {number[]} pastDays Series of number of days, indicating days ago intervals in reverse chronological order.
    * Intervals are added: If the first value is 1 and the second is 5, then the first interval is 0-1 and second interval is between 1 and 6.
    * @param {number[]} relativeWeight Relative weight of each period. Must be same length as pastDays
    */
@@ -124,7 +125,7 @@ export class DayTimeWeighting {
       const start = new Date(curEndTime - daysAgo * DAYS_TO_MS);
       const end = new Date(curEndTime);
 
-      curEndTime = start;
+      curEndTime = start.getTime();
       return { start, end };
     });
     return res;
@@ -133,7 +134,7 @@ export class DayTimeWeighting {
   /**
    * Get relative weight of current index.
    *
-   * @param {int} weightIndex Index
+   * @param {number} weightIndex Index
    * @returns {number} Weight at index, or 0 if index out of range.
    */
   getRelativeWeight(weightIndex) {
@@ -248,12 +249,19 @@ export class TileImportance {
 export class FeatureModel {
   /**
    *
-   * @param {string} modelId
-   * @param {object} dayTimeWeighting Data for day time weighting class
-   * @param {object} interestVectorModel Data for interest model
-   * @param {object} tileImportance Data for tile importance
-   * @param {boolean} rescale Whether to rescale to max value
-   * @param {boolean} logScale Whether to apply natural log (ln(x+ 1)) before rescaling
+   * @param {object} options
+   * @param {string} [options.modelId]
+   * @param {object} options.dayTimeWeighting Data for day time weighting class
+   * @param {object} options.interestVectorModel Data for interest model
+   * @param {object} options.tileImportance Data for tile importance
+   * @param {boolean} [options.rescale] Whether to rescale to max value
+   * @param {boolean} [options.logScale] Whether to apply natural log (ln(x+ 1)) before rescaling
+   * @param {string} [options.modelType] One of MODEL_TYPE
+   * @param {boolean} [options.clickScale] Whether to divide the interest vector by the number of clicks
+   * @param {boolean} [options.normalize] Whether to apply L2 normalization
+   * @param {boolean} [options.normalizeL1] Whether to apply L1 normalization
+   * @param {string[]} [options.privateFeatures] Features included in the coarse private interest vector
+   * @param {number} [options.ctrPriorStrength] Strength of the Bayesian smoothing prior for CTR models
    */
   constructor({
     modelId,
@@ -263,6 +271,7 @@ export class FeatureModel {
     modelType,
     rescale = false,
     logScale = false,
+    clickScale = false,
     normalize = false,
     normalizeL1 = false,
     privateFeatures = [],
@@ -274,6 +283,7 @@ export class FeatureModel {
     this.interestVectorModel = interestVectorModel;
     this.rescale = rescale;
     this.logScale = logScale;
+    this.clickScale = clickScale;
     this.normalize = normalize;
     this.normalizeL1 = normalizeL1;
     this.modelType = modelType;
@@ -305,11 +315,14 @@ export class FeatureModel {
     });
   }
 
+  /**
+   * Returns the number of discrete values for each feature in the model, based on the thresholds specified.
+   * This is used for a debugging UI
+   *
+   * @returns {{[featureName: string]: {numValues: number, currentValue?: number, overrideValue?: number}}}
+   */
   getInterestFeaturesSupported() {
-    /**
-     * Returns the number of discrete values for each feature in the model, based on the thresholds specified.
-     * This is used for a debugging UI
-     */
+    /** @type {ReturnType<FeatureModel["getInterestFeaturesSupported"]>} */
     const output = {};
     for (const [name, feature] of Object.entries(this.interestVectorModel)) {
       if (feature.thresholds) {
@@ -343,13 +356,63 @@ export class FeatureModel {
   }
 
   /**
+   * Convert discretized location topics into this model's interest features.
+   * Returns null if a required coarse timezone value is unavailable or invalid.
+   */
+  transformLocationTopicsToInterestVector(
+    locationTopics = {},
+    coarseInferredInterests = {}
+  ) {
+    const timeZoneFeature = this.interestVectorModel.timeZoneOffset;
+    const { timeZoneOffset } = coarseInferredInterests;
+    if (
+      timeZoneFeature &&
+      (!Number.isInteger(timeZoneOffset) ||
+        timeZoneOffset < 0 ||
+        timeZoneOffset > timeZoneFeature.thresholds?.length)
+    ) {
+      return null;
+    }
+    return Object.fromEntries(
+      Object.entries(this.interestVectorModel).map(([name, feature]) => {
+        // we keep the user's measured timezoneoffset instead of replacing
+        if (name === "timeZoneOffset") {
+          return [name, timeZoneOffset];
+        }
+        return [
+          name,
+          // we assume the max discrete value of clicks so location vector gets full confidence
+          // the uncertainty of the location based features are baked into the grid and priors
+          name === SPECIAL_FEATURE_CLICK
+            ? (feature.thresholds?.length ?? 0)
+            : (locationTopics[name] ?? 0),
+        ];
+      })
+    );
+  }
+
+  computePrivateLocationInterestVector(locationInterestVector) {
+    return Object.fromEntries(
+      Object.entries(locationInterestVector)
+        .filter(([name]) =>
+          this.privateFeatures ? this.privateFeatures.includes(name) : true
+        )
+        .map(([name, value]) => [
+          name,
+          this.interestVectorModel[name].applyDifferentialPrivacy(value),
+        ])
+    );
+  }
+
+  /**
    * Computes an interest vector or aggregate based on the model and raw sql inout.
    *
    * @param {object} config
    * @param {Array.<Array.<string|number>>} config.dataForIntervals Raw aggregate output from SQL query. Could be clicks or impressions
    * @param {{[key: string]: number}} config.indexSchema Map of keys to indices in each sub-array in dataForIntervals
+   * @param {boolean} [config.applyPostProcessing=false] Whether to apply the model's log scaling, rescaling and normalization
    * @param {boolean} [config.applyThresholding=false] Whether to apply thresholds
-   * @param {boolean} [config.applyDifferntialPrivacy=false] Whether to apply differential privacy. This will be used for sending to telemetry.
+   * @param {boolean} [config.applyDifferentialPrivacy=false] Whether to apply differential privacy. This will be used for sending to telemetry.
    * @returns
    */
   computeInterestVector({
@@ -390,6 +453,7 @@ export class FeatureModel {
     );
 
     // Since we are doing linear combinations, it is fine to do the day-time weighting at this step
+    /** @type {{[key: string]: number}} */
     let totalResults = {};
     processedPerTimeInterval.forEach(intervalTotals => {
       for (const key of Object.keys(intervalTotals)) {
@@ -413,6 +477,7 @@ export class FeatureModel {
       totalResults = dictApply(totalResults, x => x / numClicks);
     }
 
+    /** @type {{[key: string]: number}} */
     const zeroFilledResult = {};
     // Set non-click or impression values in a way that preserves original key order
     Object.values(this.interestVectorModel).forEach(interestFeature => {
@@ -504,7 +569,7 @@ export class FeatureModel {
    *
    * @param {{[key: string]: number}} clicks - Per-feature click counts.
    * @param {{[key: string]: number}} impressions - Per-feature impression counts.
-   * @param {number} averageCTR - The average CTR for the user.
+   * @param {number} averageCTRInput - The average CTR for the user.
    * @returns {{[key: string]: number}} Normalized smoothed CTR values.
    */
   applyBayesianSmoothing(clicks, impressions, averageCTRInput = null) {
@@ -514,6 +579,7 @@ export class FeatureModel {
         ? averageCTRInput
         : DEFAULT_USER_CTR;
     const alpha = averageCTR * k;
+    /** @type {{[key: string]: number}} */
     const result = {};
     const allKeys = new Set([
       ...Object.keys(clicks),
@@ -536,15 +602,18 @@ export class FeatureModel {
    * In all cases model_id is returned.
    *
    * @param {object} params - Function parameters.
-   * @param {{[key: string]: number}} params.clickDict - A dictionary of interest keys to click counts.
-   * @param {{[key: string]: number}} params.impressionDict - A dictionary of interest keys to impression counts.
+   * @param {{[key: string]: number}} params.clicks - A dictionary of interest keys to click counts.
+   * @param {{[key: string]: number}} params.impressions - A dictionary of interest keys to impression counts.
    * @param {string} [params.model_id="unknown"] - Identifier for the model used in generating the vectors.
    * @param {boolean} [params.condensePrivateValues=true] - If true, condenses coarse private interest values into an array format.
+   * @param {number} [params.timeZoneOffset] - Time zone offset to add to the coarse interest vectors, if the model has that feature.
+   * @param {object} [params.debugOverrideCoarseValueDictionary] - Values to threshold instead of the computed ones, for debugging.
+   * @param {number} [params.averageCtr] - The user's average CTR, used for Bayesian smoothing.
    *
-   * @returns {object} result - An object containing one or more of the following:
-   * @returns {object} result.inferredInterest - A dictionary of private inferred interest scores
-   * @returns {object} [result.coarseInferredInterests] - A dictionary of thresholded interest scores (non-private), if supported.
-   * @returns {object} [result.coarsePrivateInferredInterests] - A dictionary of thresholded interest scores with differential privacy, if supported.
+   * @returns {{inferredInterests: object, coarseInferredInterests?: object, coarsePrivateInferredInterests?: object}}
+   *   inferredInterests is a dictionary of private inferred interest scores.
+   *   coarseInferredInterests is a dictionary of thresholded interest scores (non-private), if supported.
+   *   coarsePrivateInferredInterests is a dictionary of thresholded interest scores with differential privacy, if supported.
    */
   computeCTRInterestVectors({
     clicks,
@@ -652,18 +721,20 @@ export class FeatureModel {
    * @param {object} params.indexSchema - Schema that defines how interest indices should be computed.
    * @param {string} [params.model_id="unknown"] - Identifier for the model used to produce these vectors.
    * @param {boolean} [params.condensePrivateValues=true] - If true, condenses coarse private interest values into an array format.
+   * @param {boolean} [params.applyPostProcessing=false] - Whether to apply the model's log scaling, rescaling and normalization before thresholding.
    *
-   * @returns {object} result - An object containing the computed interest vectors.
-   * @returns {object} result.inferredInterests - A dictionary of private inferred interest values, with `model_id`.
-   * @returns {object} [result.coarseInferredInterests] - Coarse thresholded (non-private) interest vector, if supported.
-   * @returns {object | {values: Array<number>, model_id: string}} [result.coarsePrivateInferredInterests] - Coarse and differentially private interests.
-   *           If `condensePrivateValues` is true, returned as an object with a `values` array; otherwise, as a dictionary.
+   * @returns {{inferredInterests: object, coarseInferredInterests?: object, coarsePrivateInferredInterests?: object | {values: Array<number>, model_id: string}}}
+   *   inferredInterests is a dictionary of private inferred interest values, with `model_id`.
+   *   coarseInferredInterests is a coarse thresholded (non-private) interest vector, if supported.
+   *   coarsePrivateInferredInterests holds coarse and differentially private interests. If
+   *   `condensePrivateValues` is true, it is an object with a `values` array; otherwise, a dictionary.
    */
   computeInterestVectors({
     dataForIntervals,
     indexSchema,
     model_id = "unknown",
     condensePrivateValues = true,
+    applyPostProcessing = false,
   }) {
     const result = {};
     let inferredInterests;
@@ -673,6 +744,7 @@ export class FeatureModel {
     inferredInterests = this.computeInterestVector({
       dataForIntervals,
       indexSchema,
+      applyPostProcessing,
     });
     result.inferredInterests = { ...inferredInterests };
 
@@ -680,6 +752,7 @@ export class FeatureModel {
       coarseInferredInterests = this.computeInterestVector({
         dataForIntervals,
         indexSchema,
+        applyPostProcessing,
         applyThresholding: true,
       });
       if (coarseInferredInterests) {
@@ -694,6 +767,7 @@ export class FeatureModel {
       coarsePrivateInferredInterests = this.computeInterestVector({
         dataForIntervals,
         indexSchema,
+        applyPostProcessing,
         applyThresholding: true,
         applyDifferentialPrivacy: true,
       });

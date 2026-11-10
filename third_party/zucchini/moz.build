@@ -8,6 +8,12 @@ Library("zucchini")
 
 DisableStlWrapping()
 
+# checked_iterators.h opens libc++'s std namespace with _LIBCPP_BEGIN_NAMESPACE_STD
+# to specialize internal traits; newer libc++ pushes ABI attributes there that
+# go unused, tripping -Wpragma-clang-attribute.
+if CONFIG["CC_TYPE"] in ("clang", "clang-cl"):
+    CXXFLAGS += ["-Wno-pragma-clang-attribute"]
+
 LOCAL_INCLUDES += [
     "/third_party/abseil-cpp/",
     "/third_party/googletest/googletest/include",
@@ -18,6 +24,7 @@ LOCAL_INCLUDES += [
 DEFINES["_FILE_OFFSET_BITS"] = 64
 DEFINES["UNICODE"] = True
 DEFINES["ENABLED_VLOG_LEVEL"] = 1
+DEFINES["MOZ_NEUTER_SEH_FOR_MINGWCLANG"] = True
 
 if not CONFIG["MOZ_DEBUG"]:
     DEFINES["NDEBUG"] = True
@@ -83,11 +90,26 @@ SOURCES += [
     "/third_party/zucchini/chromium/components/zucchini/targets_affinity.cc",
     "/third_party/zucchini/chromium/components/zucchini/zucchini_apply.cc",
     "/third_party/zucchini/chromium/components/zucchini/zucchini_gen.cc",
-    "/third_party/zucchini/chromium/components/zucchini/zucchini_integration.cc",
     "/third_party/zucchini/moz_zucchini.cc",
 ]
 
+SOURCES[
+    "/third_party/zucchini/chromium/base/strings/utf_string_conversions.cc"
+].flags += ["-Wno-unused-template"]
+
+# zucchini uses standard C++ containers internally that will throw std::bad_alloc in
+# out-of-memory scenarios. The updater needs to behave differently in OOM scenarios,
+# so we enable exceptions and wrap zucchini entry points to convert any std::bad_alloc
+# exception thrown during patch application into a BSPATCH_MEM_ERROR failure status
+# code. Follow isMemoryAllocationErrorCode() from UpdateService.sys.mjs for details.
+if CONFIG["CC_TYPE"] == "clang-cl":
+    CXXFLAGS += ["/EHs", "/GR"]
+else:
+    CXXFLAGS += ["-fexceptions", "-frtti"]
+
 if CONFIG["TARGET_OS"] == "WINNT":
+    CXXFLAGS += ["-U_HAS_EXCEPTIONS", "-D_HAS_EXCEPTIONS=1"]
+
     USE_STATIC_MSVCRT = True
 
     SOURCES += [
@@ -165,3 +187,13 @@ if CONFIG["MOZ_APP_NAME"] != "zucchini":
     TEST_DIRS += [
         "tests/gtest",
     ]
+
+LICENSED_UNDER += ["chromium"]
+LICENSED_UNDER["chromium"].paths = [
+    "chromium",
+]
+
+LICENSED_UNDER += ["unicode"]
+LICENSED_UNDER["unicode"].paths = [
+    "chromium/base/third_party/icu",
+]

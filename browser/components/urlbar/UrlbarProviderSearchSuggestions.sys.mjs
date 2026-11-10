@@ -11,10 +11,9 @@ import {
   UrlbarProvider,
   UrlbarUtils,
 } from "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs";
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-const lazy = {};
-
-ChromeUtils.defineESModuleGetters(lazy, {
+const lazy = XPCOMUtils.declareLazy({
   DEFAULT_FORM_HISTORY_PARAM:
     "moz-src:///toolkit/components/search/SearchSuggestionController.sys.mjs",
   FormHistory: "resource://gre/modules/FormHistory.sys.mjs",
@@ -165,10 +164,10 @@ export class UrlbarProviderSearchSuggestions extends UrlbarProvider {
       (queryContext.sapName == "urlbar" &&
         !lazy.UrlbarPrefs.get("suggest.searches") &&
         !this._isTokenOrRestrictionPresent(queryContext)) ||
-      // In the search bar, `browser.search.suggest.enabled` turns off only the
+      // In a search bar, `browser.search.suggest.enabled` turns off only the
       // remote suggestions, which `SearchSuggestionController` takes care of,
       // and form history is shown regardless.
-      (queryContext.sapName != "searchbar" &&
+      (!queryContext.isSearchbarSAP &&
         (!lazy.UrlbarPrefs.get("browser.search.suggest.enabled") ||
           (queryContext.isPrivate &&
             !lazy.UrlbarPrefs.get("browser.search.suggest.enabled.private"))))
@@ -301,7 +300,7 @@ export class UrlbarProviderSearchSuggestions extends UrlbarProvider {
       engine,
       query,
       alias,
-      controller.browserWindow
+      controller
     );
 
     if (!results || instance != this.queryInstance) {
@@ -360,6 +359,11 @@ export class UrlbarProviderSearchSuggestions extends UrlbarProvider {
     return undefined;
   }
 
+  /**
+   * @param {UrlbarQueryContext} queryContext
+   * @param {UrlbarParentController} controller
+   * @param {object} details
+   */
   onEngagement(queryContext, controller, details) {
     let { result } = details;
 
@@ -382,7 +386,10 @@ export class UrlbarProviderSearchSuggestions extends UrlbarProvider {
       case RESULT_MENU_COMMANDS.TRENDING_BLOCK:
         lazy.UrlbarPrefs.set("suggest.trending", false);
         this.#recordTrendingBlockedTelemetry();
-        this.#replaceTrendingResultWithAcknowledgement(controller);
+        this.#replaceTrendingResultWithAcknowledgement(
+          controller,
+          queryContext
+        );
         break;
     }
   }
@@ -397,7 +404,7 @@ export class UrlbarProviderSearchSuggestions extends UrlbarProvider {
     engine,
     searchString,
     alias,
-    win
+    controller
   ) {
     if (!engine) {
       return null;
@@ -550,12 +557,12 @@ export class UrlbarProviderSearchSuggestions extends UrlbarProvider {
               description: entry.description || undefined,
               query,
               icon: !entry.value
-                ? await engine.getIconURL()
-                : UrlbarUtils.getRemoteIconUrl(
-                    entry.icon,
-                    UrlbarProviderSearchSuggestions.RICH_ICON_SIZE,
-                    win
-                  ),
+                ? await UrlbarUtils.getEngineIconUrl(engine, controller)
+                : UrlbarUtils.getRemoteImageUrl({
+                    controller,
+                    url: entry.icon,
+                    size: UrlbarProviderSearchSuggestions.RICH_ICON_SIZE,
+                  }),
               helpUrl: entry.trending ? TRENDING_HELP_URL : undefined,
             },
             highlights: {
@@ -658,12 +665,15 @@ export class UrlbarProviderSearchSuggestions extends UrlbarProvider {
     Glean.urlbarTrending.block.add(1);
   }
 
-  /*
+  /**
    * Remove all the trending results and show an acknowledgement that the
    * trending suggestions have been turned off.
+   *
+   * @param {UrlbarParentController} controller
+   * @param {UrlbarQueryContext} queryContext
    */
-  #replaceTrendingResultWithAcknowledgement(controller) {
-    let resultsToRemove = controller.view.visibleResults.filter(
+  #replaceTrendingResultWithAcknowledgement(controller, queryContext) {
+    let resultsToRemove = queryContext.results.filter(
       result => result.payload.trending
     );
     // Show an acknowledgement tip for the first result.

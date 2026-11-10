@@ -8,13 +8,9 @@ support-files = [
 prefs = [
   "browser.bookmarks.testing.skipDefaultBookmarksImport=true",
   "browser.urlbar.trending.featureGate=false",
-  "layout.css.attr.enabled=true",
 ]
 
 ["browser_action_searchengine.js"]
-skip-if = [
-  "os == 'win' && asan", # Bug 1834810
-]
 
 ["browser_action_searchengine_alias.js"]
 
@@ -32,6 +28,11 @@ support-files = [
 ]
 
 ["browser_contextualsearch.js"]
+support-files = [
+  "../browser/POSTSearchEngine.xml",
+  "../browser/post_search_engine.html",
+  "../browser/print_postdata.sjs",
+]
 
 ["browser_contextualsearch_install.js"]
 
@@ -102,6 +103,10 @@ support-files = [
 
 ["browser_oneOffs_settings.js"]
 
+["browser_partnerCode_smartbar.js"]
+
+["browser_partnerCode_urlbar.js"]
+
 ["browser_placeholder.js"]
 support-files = [
   "../browser/searchSuggestionEngine.xml",
@@ -124,6 +129,12 @@ https_first_disabled = true
 ["browser_searchSuggestions.js"]
 support-files = [
   "../browser/searchSuggestionEngine.xml",
+  "../browser/searchSuggestionEngine.sjs",
+]
+
+["browser_searchSuggestions_postData.js"]
+support-files = [
+  "../browser/print_postdata.sjs",
   "../browser/searchSuggestionEngine.sjs",
 ]
 

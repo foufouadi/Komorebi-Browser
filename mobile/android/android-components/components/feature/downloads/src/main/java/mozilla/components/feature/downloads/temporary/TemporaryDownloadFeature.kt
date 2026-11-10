@@ -25,13 +25,16 @@ import kotlinx.coroutines.withContext
 import mozilla.components.browser.state.state.content.ShareResourceState
 import mozilla.components.concept.fetch.Client
 import mozilla.components.concept.fetch.Headers
+import mozilla.components.concept.fetch.Headers.Names.CONTENT_DISPOSITION
 import mozilla.components.concept.fetch.Headers.Names.CONTENT_TYPE
 import mozilla.components.concept.fetch.Request
 import mozilla.components.concept.fetch.Response
 import mozilla.components.support.base.feature.LifecycleAwareFeature
 import mozilla.components.support.base.log.logger.Logger
 import mozilla.components.support.ktx.kotlin.ifNullOrEmpty
+import mozilla.components.support.ktx.kotlin.sanitizeFileName
 import mozilla.components.support.ktx.kotlin.sanitizeURL
+import mozilla.components.support.utils.DownloadUtils
 
 /** Default mime type for base64 images data URLs not containing the media type. */
 @VisibleForTesting internal const val DEFAULT_IMAGE_EXTENSION = "jpg"
@@ -73,7 +76,7 @@ abstract class TemporaryDownloadFeature(
     }
 
     init {
-        CoroutineScope(ioDispatcher).launch {
+        CoroutineScope(ioDispatcher).launch(coroutineExceptionHandler("Cache cleanup")) {
             cleanupCache()
         }
     }
@@ -94,21 +97,42 @@ abstract class TemporaryDownloadFeature(
                     requireNotNull(internetResource.response)
                 }
 
-            if (response.status != Response.SUCCESS) {
-                response.close()
-                // We experienced a problem trying to fetch the file, nothing more we can do.
-                throw (RuntimeException("Resource is not available to download"))
-            }
-
-            var tempFile: File? = null
-            response.body.useStream { input ->
-                val fileExtension = '.' + getFileExtension(response.headers, input)
-                tempFile = getTempFile(fileExtension)
-                FileOutputStream(tempFile).use { output -> input.copyTo(output) }
-            }
-
-            tempFile!!
+            persistResponseToTempFile(response)
         }
+    }
+
+    @VisibleForTesting(otherwise = PROTECTED)
+    internal suspend fun downloadDirectResource(response: Response): File =
+        withContext(ioDispatcher) {
+            val fileName =
+                DownloadUtils.extractFileNameFromUrlOrNull(
+                        contentDisposition = response.headers[CONTENT_DISPOSITION],
+                        url = null,
+                    )
+                    ?.sanitizeFileName()
+            persistResponseToTempFile(response, fileName)
+        }
+
+    private fun persistResponseToTempFile(response: Response, fileName: String? = null): File {
+        if (response.status != Response.SUCCESS) {
+            response.close()
+            // We experienced a problem trying to fetch the file, nothing more we can do.
+            throw (RuntimeException("Resource is not available to download"))
+        }
+
+        var tempFile: File? = null
+        response.body.useStream { input ->
+            val fileExtension = '.' + getFileExtension(response.headers, input)
+            tempFile =
+                if (fileName == null) {
+                    getTempFile(fileExtension)
+                } else {
+                    getNamedTempFile(fileName) ?: getTempFile(fileExtension)
+                }
+            FileOutputStream(tempFile).use { output -> input.copyTo(output) }
+        }
+
+        return tempFile!!
     }
 
     @VisibleForTesting
@@ -116,6 +140,25 @@ abstract class TemporaryDownloadFeature(
 
     @VisibleForTesting
     internal fun getTempFile(fileExtension: String) = File(getMediaShareCacheDirectory(), getFilename(fileExtension))
+
+    private fun getNamedTempFile(fileName: String): File? {
+        val randomFolderName = Random.nextInt().absoluteValue.toString()
+        val folder = File(getMediaShareCacheDirectory(), randomFolderName)
+        folder.mkdirs()
+        val file = File(folder, fileName)
+        val isCreated =
+            try {
+                file.createNewFile()
+            } catch (_: IOException) {
+                logger.debug("Could not create a file with the provided name!")
+                false
+            }
+        if (isCreated) {
+            return file
+        }
+        folder.delete()
+        return null
+    }
 
     @VisibleForTesting internal fun getCacheDirectory() = File(context.cacheDir, cacheDirName)
 
@@ -138,11 +181,21 @@ abstract class TemporaryDownloadFeature(
     @VisibleForTesting
     internal fun cleanupCache() {
         logger.debug("Deleting previous cache of shared files")
-        val success = getCacheDirectory().listFiles()?.all { it.deleteRecursively() } ?: true
-        if (!success) {
+        // Every entry is attempted; one that cannot be deleted must not strand the rest.
+        val failures = getCacheDirectory().listFiles()?.count { !it.deleteCacheEntry() } ?: 0
+        if (failures > 0) {
             logger.debug("Cleanup incomplete: some files were locked or could not be removed.")
         }
     }
+
+    // Sibling features share this directory. deleteRecursively() asserts on an entry another
+    // cleanup removed mid-walk instead of reporting a failure.
+    private fun File.deleteCacheEntry() =
+        try {
+            deleteRecursively()
+        } catch (_: AssertionError) {
+            !exists()
+        }
 
     protected fun coroutineExceptionHandler(action: String) = CoroutineExceptionHandler { _, throwable ->
         when (throwable) {
@@ -151,9 +204,12 @@ abstract class TemporaryDownloadFeature(
             }
 
             is IOException,
-            is RuntimeException,
-            is NullPointerException -> {
+            is RuntimeException -> {
                 logger.warn("$action failed: $throwable")
+            }
+
+            else -> {
+                logger.warn("$action failed unexpectedly: $throwable")
             }
         }
     }

@@ -36,8 +36,6 @@
   --content-col-width: minmax(calc((4 * var(--col-width)) + 34px), var(--content-max-width));
 
   // Pre-computed widths spanning N grid columns including (N-1) gaps
-  --col-span-2: #{--col-span(2)};
-  --col-span-3: #{--col-span(3)};
   --col-span-12: #{--col-span(12)};
   --col-span-16: #{--col-span(16)};
   --col-span-20: #{--col-span(20)};
@@ -111,6 +109,33 @@
   grid-row: 4;
 }
 
+// Where a centered logo would push .content down a row (see Base.jsx) but the
+// search bar's variant B keeps the logo in the sidebar, the search starts on
+// that row instead, with the card behind it starting where the logo would.
+.nova-enabled.container.search-lowered {
+  > .sticky-search-sentinel {
+    grid-row: 3;
+  }
+
+  > .search-wrapper {
+    grid-row: 3 / span 2;
+  }
+
+  > :is(.sticky-search-sentinel, .search-wrapper) {
+    // stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens
+    margin-block-start: var(--search-card-overhang-block-start);
+
+    // Minus the search-wrapper's block padding in _Search.scss.
+    @media (height > #{$break-point-sticky-search}) {
+      margin-block-start: calc(var(--search-card-overhang-block-start) - var(--space-xlarge));
+    }
+  }
+
+  .content {
+    grid-row: 5;
+  }
+}
+
 // Spans all three columns, so it reclaims both side gutters and their gaps
 // (324px) at widths where .content is still bounded by them. Capped at the same
 // columns .content is, so the two stay aligned at every width.
@@ -128,19 +153,32 @@
   max-inline-size: var(--content-max-width);
 }
 
+// The widgets section should have some bottom margin if Recommended stories or Recent Activity are not present.
+.nova-enabled
+.content-full-width:not(:has(.layout-content-column.has-feed, .layout-highlights-column))
+.widgets-section-container {
+  margin-block-end: var(--space-xxlarge);
+}
+
 // Side-by-side layouts (Bug 2061741). The lead class means the experiment is
 // assigned, which is enough to frame a lone section; .side-by-side-active means the
 // page has both a feed and a content-area widget to place. Base.jsx decides both. A
 // variant and its -five counterpart share a lead class and differ only in card
 // count; see .side-by-side-five below.
+// .spaces-thematic is listed because a thematic space holds the same pair, so its
+// columns need the same boxes and panels; only the grid they sit in differs, and
+// that lives in _Spaces.scss.
 .nova-enabled
 .content-full-width:is(
   .side-by-side-content-lead,
-  .side-by-side-widgets-lead
+  .side-by-side-widgets-lead,
+  .spaces-thematic
 ) {
-  // Clears the shortcuts above. The row gap alone is exactly the panel's upward
-  // bleed, which would leave the panel edge touching them.
+  // Clears the shortcuts above and the bottom of the page below. The panel
+  // bleeds --space-medium outward, so each margin loses that much; the end one
+  // is against the page edge and needs more left over than the start does.
   margin-block-start: var(--space-large);
+  margin-block-end: var(--space-xxlarge);
 
   // Stacked panels each bleed --space-medium outward, so a bare gutter leaves the
   // two bleeds overlapping. Same arithmetic as the pair's column-gap.
@@ -207,10 +245,15 @@
 // wallpaper-contrast-fix forces color-scheme to match the wallpaper, so text can
 // land the same shade as its own fill. inherit, not initial -- initial pins
 // light-dark() to its light branch and breaks dark themes. #add-widgets-button is
-// listed to outrank the by-id fix in _Widgets.scss.
+// listed to outrank the by-id fix in _Widgets.scss. Spaces frames the same three
+// containers with the same panel, so it needs the same exemption.
 :is(.lightWallpaper, .darkWallpaper)
 .nova-enabled
-.content-full-width:is(.side-by-side-content-lead, .side-by-side-widgets-lead)
+.content-full-width:is(
+  .side-by-side-content-lead,
+  .side-by-side-widgets-lead,
+  .spaces
+)
 :is(
   .widgets-section-container,
   .layout-content-column.has-feed,
@@ -218,6 +261,10 @@
 )
 :is(
   .section-title,
+  // The sections-off header sets color-scheme on the span inside the title, so
+  // the parent alone is not enough. See _DiscoveryStreamBase.scss.
+  .section-title span,
+  .ds-header,
   .section-context-menu,
   .section-follow,
   .ds-highlights-title,
@@ -337,7 +384,6 @@
 .nova-enabled
 .content-full-width.side-by-side-content-lead.side-by-side-active.side-by-side-five {
   @include at-band-fits-pair(4) {
-    // stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens
     grid-template-columns: --col-span(16) --col-span(4);
   }
 }
@@ -345,7 +391,6 @@
 .nova-enabled
 .content-full-width.side-by-side-widgets-lead.side-by-side-active.side-by-side-five {
   @include at-band-fits-pair(4) {
-    // stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens
     grid-template-columns: --col-span(4) --col-span(16);
   }
 }

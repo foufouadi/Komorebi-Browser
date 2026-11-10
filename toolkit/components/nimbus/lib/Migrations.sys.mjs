@@ -3,10 +3,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-const lazy = {};
-
-ChromeUtils.defineESModuleGetters(lazy, {
+const lazy = XPCOMUtils.declareLazy({
   ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
   FirefoxLabs: "resource://nimbus/FirefoxLabs.sys.mjs",
   NimbusEnrollments: "resource://nimbus/lib/Enrollments.sys.mjs",
@@ -16,14 +15,16 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "moz-src:///toolkit/profile/ProfilesDatastoreService.sys.mjs",
   RemoteSettingsSyncError:
     "resource://nimbus/lib/RemoteSettingsExperimentLoader.sys.mjs",
+  ShutdownStartedError:
+    "resource://nimbus/lib/RemoteSettingsExperimentLoader.sys.mjs",
   UnenrollmentCause: "resource://nimbus/lib/ExperimentManager.sys.mjs",
-});
 
-ChromeUtils.defineLazyGetter(lazy, "log", () => {
-  const { Logger } = ChromeUtils.importESModule(
-    "resource://messaging-system/lib/Logger.sys.mjs"
-  );
-  return new Logger("NimbusMigrations");
+  log: () => {
+    const { Logger } = ChromeUtils.importESModule(
+      "resource://messaging-system/lib/Logger.sys.mjs"
+    );
+    return new Logger("NimbusMigrations");
+  },
 });
 
 function isBackgroundTaskMode() {
@@ -32,6 +33,15 @@ function isBackgroundTaskMode() {
   );
 
   return bts?.isBackgroundTaskMode ?? false;
+}
+
+function getLegacyStorePath() {
+  if (Cu.isInAutomation) {
+    try {
+      return Services.prefs.getStringPref("nimbus.persistence.legacyStorePath");
+    } catch {}
+  }
+  return PathUtils.join(PathUtils.profileDir, "ExperimentDataStore.json");
 }
 
 /**
@@ -120,13 +130,41 @@ function migrateNoop() {
   // new clients.
 }
 
+/**
+ * Delete the databases, files and preferences left behind by AddonStudies,
+ * AddonRollouts, PreferenceExperiments, PreferenceRollouts and Storage which
+ * were removed in bug 2059778.
+ */
+async function migrateRemoveNormandyDatabases() {
+  function deleteDatabase(name) {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(name);
+      request.onsuccess = () => resolve();
+      request.onblocked = () => reject(new Error(`Cannot delete DB ${name}`));
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  function deleteProfileFile(name) {
+    return IOUtils.remove(PathUtils.join(PathUtils.profileDir, name));
+  }
+
+  await Promise.allSettled([
+    ...["shield", "normandy-addon-rollout", "normandy-preference-rollout"].map(
+      deleteDatabase
+    ),
+    ...["shield-preference-experiments.json", "shield-recipe-client.json"].map(
+      deleteProfileFile
+    ),
+  ]);
+
+  Services.prefs.deleteBranch("app.normandy.startupExperimentPrefs.");
+  Services.prefs.deleteBranch("app.normandy.startupRolloutPrefs.");
+}
+
 async function migrateEnrollmentsToSql() {
-  if (!lazy.NimbusEnrollments.databaseEnabled) {
-    // We are in an xpcshell test that has not initialized the
-    // ProfilesDatastoreService.
-    //
-    // TODO(bug 1967779): require the ProfilesDatastoreService to be initialized
-    // and remove this check.
+  if (!lazy.NimbusEnrollments.persistenceEnabled) {
+    // We are in a test.
     return;
   }
 
@@ -141,12 +179,21 @@ async function migrateEnrollmentsToSql() {
 
   await lazy.ExperimentAPI.manager.store.ready();
 
+  let legacyStoreData = null;
+
+  try {
+    legacyStoreData = await IOUtils.readJSON(getLegacyStorePath());
+  } catch (e) {
+    if (DOMException.isInstance(e) && e.name === "NotFoundError") {
+      // The legacy store does not exist. There is nothing to migrate.
+      return;
+    }
+  }
+
   // Ensure we are copying the data from the JSONFile explicitly because if the
   // NimbusEnrollments table is the source of truth, then getAll() will return
   // an empty array.
-  const enrollments = Object.values(
-    lazy.ExperimentAPI.manager.store._jsonFile.data
-  );
+  const enrollments = Object.values(legacyStoreData);
 
   // If there are no enrollments we can skip the rest of the migration.
   if (enrollments.length === 0) {
@@ -252,19 +299,13 @@ async function migrateEnrollmentsToSql() {
     }
   });
 
-  if (lazy.NimbusEnrollments.readFromDatabaseEnabled) {
-    // These now exist in the database and in the ExperimentStore's JSONFile
-    // data. However, the regular ExperimentStore data will not have been
-    // populated yet (because it will have read zero rows from the database
-    // during `SharedDataMap.init()`.
-    const store = lazy.ExperimentAPI.manager.store;
-    store._data = structuredClone(store._jsonFile.data);
-    store._syncToChildren({ flush: true });
-  }
-
-  await lazy.ExperimentAPI.manager.store._reportStartupDatabaseConsistency(
-    "migration"
-  );
+  // These now exist in the database and in the ExperimentStore's JSONFile
+  // data. However, the regular ExperimentStore data will not have been
+  // populated yet (because it will have read zero rows from the database
+  // during `SharedDataMap.init()`.
+  const store = lazy.ExperimentAPI.manager.store;
+  store._data = legacyStoreData;
+  store._syncToChildren({ flush: true });
 }
 
 /**
@@ -275,26 +316,27 @@ async function migrateEnrollmentsToSql() {
  * the prefs set by the enrollment.
  *
  * @param {string} migration The name of the migration.
- * @param {string} slug The slug of the rollout.
+ * @param {string[]} slugs The slug of the rollout(s) to migrate out of.
  */
-function graduateLabs(migration, slug) {
+function graduateLabs(migration, slugs) {
   if (isBackgroundTaskMode()) {
     // This migration does not apply to background task mode.
     lazy.log.debug(`${migration}: skipping (is background task mode)`);
     return;
   }
 
-  const enrollment = lazy.ExperimentAPI.manager.store.get(slug);
-  if (!enrollment?.active) {
-    lazy.log.debug(`${migration}: skipping (no or inactive enrollment)`);
-    return;
-  }
+  for (const slug of slugs) {
+    const enrollment = lazy.ExperimentAPI.manager.store.get(slug);
+    if (!enrollment?.active) {
+      continue;
+    }
 
-  lazy.ExperimentAPI.manager._unenroll(
-    enrollment,
-    lazy.UnenrollmentCause.Migration(migration),
-    { unsetEnrollmentPrefs: false }
-  );
+    lazy.ExperimentAPI.manager._unenroll(
+      enrollment,
+      lazy.UnenrollmentCause.Migration(migration),
+      { unsetEnrollmentPrefs: false }
+    );
+  }
 }
 
 /**
@@ -309,7 +351,7 @@ function graduateLabs(migration, slug) {
  * update to exactly 145.
  */
 function migrateGraduateFirefoxLabsAutoPip(migration) {
-  graduateLabs(migration, "firefox-labs-auto-pip");
+  graduateLabs(migration, ["firefox-labs-auto-pip"]);
 }
 
 /**
@@ -319,13 +361,13 @@ function migrateGraduateFirefoxLabsAutoPip(migration) {
  * default in Nightly. We need to unenroll users without resetting the prefs
  * controlled by the feature.
  */
-function migrateGraduateFirefoxLabsJPEGXL(migration) {
+function migrateGraduateFirefoxLabsJPEGXLNightly(migration) {
   if (!AppConstants.MOZ_JXL) {
     lazy.log.debug(`${migration}: skipping (MOZ_JXL disabled)`);
     return;
   }
 
-  graduateLabs(migration, "firefox-labs-jpeg-xl");
+  graduateLabs(migration, ["firefox-labs-jpeg-xl"]);
 }
 
 function migrateRestorePrefFlipsBug2054546(migration) {
@@ -395,6 +437,25 @@ function migrateRestorePrefFlipsBug2054546(migration) {
   }
 }
 
+function migrateGraduateFirefoxLabsJPEGXLAllChannels(migration) {
+  if (!AppConstants.MOZ_JXL) {
+    lazy.log.debug(`${migration}: skipping (MOZ_JXL disabled)`);
+    return;
+  }
+
+  graduateLabs(migration, [
+    "firefox-labs-jpeg-xl-beta",
+    "firefox-labs-jpeg-xl-deved",
+    "firefox-labs-jpeg-xl-release",
+  ]);
+}
+
+async function migrateRemoveLegacyStore() {
+  try {
+    await IOUtils.remove(getLegacyStorePath(), { ignoreAbsent: true });
+  } catch {}
+}
+
 /**
  * Migrate the pre-Nimbus Firefox Labs experiences into Nimbus enrollments.
  *
@@ -418,8 +479,6 @@ async function migrateFirefoxLabsEnrollments() {
     async () => {
       const labs = await lazy.FirefoxLabs.create();
 
-      let didEnroll = false;
-
       for (const [feature, slug] of Object.entries(
         LABS_MIGRATION_FEATURE_MAP
       )) {
@@ -437,40 +496,15 @@ async function migrateFirefoxLabsEnrollments() {
           continue;
         }
 
-        await labs.enroll(slug, "control");
-
-        // We need to overwrite the original pref value stored in the
-        // ExperimentStore so that unenrolling will disable the feature.
-        const enrollment = lazy.ExperimentAPI.manager.store.get(slug);
-        if (!enrollment) {
-          lazy.log.error(`Enrollment with ${slug} should exist but does not`);
-          continue;
-        }
-        if (!enrollment.active) {
-          lazy.log.error(
-            `Enrollment with slug ${slug} should be active but is not.`
-          );
-          continue;
-        }
-
-        const prefEntry = enrollment.prefs?.find(entry => entry.name === pref);
-        if (!prefEntry) {
-          lazy.log.error(
-            `Enrollment with slug ${slug} does not set pref ${pref}`
-          );
-          continue;
-        }
-
-        didEnroll = true;
-        prefEntry.originalValue = false;
-      }
-
-      if (didEnroll) {
-        // Trigger a save of the ExperimentStore since we've changed some data
-        // structures without using set().
-        // We do not have to sync these changes to child processes because the
-        // data is only used in the parent process.
-        lazy.ExperimentAPI.manager.store._jsonFile.saveSoon();
+        // Set the original value to `null` instead of `false` so that it will
+        // restore by removing the user branch value instead of setting it to
+        // false if the default branch value changes.
+        //
+        // TODO(bug 2086737): Remove support for originalPrefValues in
+        // the entire enrollment pipeline.
+        await labs.enroll(slug, "control", {
+          originalPrefValues: new Map([[pref, null]]),
+        });
       }
     },
     { mode: "shared" }
@@ -480,11 +514,24 @@ async function migrateFirefoxLabsEnrollments() {
 export class MigrationError extends Error {
   static Reason = Object.freeze({
     UNKNOWN: "unknown",
+    SHUTDOWN_STARTED: "shutdown-started",
   });
 
   constructor(reason) {
     super(`Migration error: ${reason}`);
     this.reason = reason;
+  }
+
+  static getReason(e) {
+    if (e instanceof MigrationError) {
+      return e.reason;
+    }
+
+    if (e instanceof lazy.ShutdownStartedError) {
+      return MigrationError.Reason.SHUTDOWN_STARTED;
+    }
+
+    return MigrationError.Reason.UNKNOWN;
   }
 }
 
@@ -530,10 +577,7 @@ export const NimbusMigrations = {
           `applyMigrations: error running migration ${i} (${migration.name}): ${e}`
         );
 
-        const reason =
-          e instanceof MigrationError
-            ? e.reason
-            : MigrationError.Reason.UNKNOWN;
+        const reason = MigrationError.getReason(e);
         lazy.NimbusTelemetry.recordMigration(migration.name, duration, reason);
 
         break;
@@ -590,6 +634,7 @@ export const NimbusMigrations = {
     [Phase.INIT_STARTED]: [
       migration("multi-phase-migrations", migrateMultiphase),
       migration("separate-rollout-opt-out", migrateSeparateRolloutOptOut),
+      migration("remove-normandy-databases", migrateRemoveNormandyDatabases),
     ],
 
     [Phase.AFTER_STORE_INITIALIZED]: [
@@ -608,9 +653,14 @@ export const NimbusMigrations = {
       ),
       migration(
         "graduate-firefox-labs-jpeg-xl",
-        migrateGraduateFirefoxLabsJPEGXL
+        migrateGraduateFirefoxLabsJPEGXLNightly
       ),
       migration("bug-2054546-mitigation", migrateRestorePrefFlipsBug2054546),
+      migration(
+        "graduate-firefox-labs-jpeg-xl-all-channels",
+        migrateGraduateFirefoxLabsJPEGXLAllChannels
+      ),
+      migration("remove-legacy-store", migrateRemoveLegacyStore),
     ],
 
     [Phase.AFTER_REMOTE_SETTINGS_UPDATE]: [

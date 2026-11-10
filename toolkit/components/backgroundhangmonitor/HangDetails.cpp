@@ -11,7 +11,6 @@
 #include "mozilla/FileUtils.h"
 #include "mozilla/gfx/GPUParent.h"
 #include "mozilla/dom/ContentChild.h"
-#include "mozilla/dom/ContentParent.h"  // For RemoteTypePrefix
 #include "mozilla/FileUtils.h"
 #include "mozilla/SchedulerGroup.h"
 #include "mozilla/GfxMessageUtils.h"  // For ParamTraits<GeckoProcessType>
@@ -290,10 +289,10 @@ void nsHangDetails::Submit() {
           case GeckoProcessType_Content: {
             auto cc = dom::ContentChild::GetSingleton();
             if (cc) {
-              // Use the prefix so we don't get URIs from Fission isolated
+              // Use the kind so we don't get URIs from Fission isolated
               // processes.
-              hangDetails->mDetails.remoteType().Assign(
-                  dom::RemoteTypePrefix(cc->GetRemoteType()));
+              hangDetails->mDetails.remoteType() =
+                  cc->GetRemoteType().StringifyKind();
               (void)cc->SendBHRThreadHang(hangDetails->mDetails);
             }
             break;
@@ -585,7 +584,7 @@ Result<HangDetails, nsresult> ReadHangDetailsFromFile(nsIFile* aFile) {
 
   HangDetails result;
   uint32_t duration = MOZ_TRY(ReadUint(fd));
-  result.duration() = TimeDuration::FromMilliseconds(double(duration));
+  result.duration() = TimeDuration::FromMilliseconds(duration);
   result.threadName() = MOZ_TRY(ReadTString<char>(fd));
   result.runnableName() = MOZ_TRY(ReadTString<char>(fd));
   result.process() = MOZ_TRY(ReadTString<char>(fd));
@@ -690,6 +689,12 @@ Result<Ok, nsresult> WriteHangDetailsToFile(HangDetails& aDetails,
 
 NS_IMETHODIMP
 ProcessHangStackRunnable::Run() {
+  PersistedToDisk persistedToDisk = PersistedToDisk::No;
+  if (mPermahangFile &&
+      WriteHangDetailsToFile(mHangDetails, mPermahangFile).isOk()) {
+    persistedToDisk = PersistedToDisk::Yes;
+  }
+
   // NOTE: Reading module information can take a long time, which is why we do
   // it off-main-thread.
   if (mHangDetails.stack().modules().IsEmpty()) {
@@ -697,7 +702,7 @@ ProcessHangStackRunnable::Run() {
   }
 
   RefPtr<nsHangDetails> hangDetails =
-      new nsHangDetails(std::move(mHangDetails), mPersistedToDisk);
+      new nsHangDetails(std::move(mHangDetails), persistedToDisk);
   hangDetails->Submit();
 
   return NS_OK;

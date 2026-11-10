@@ -17,11 +17,11 @@ use crate::render_task::{BlurTask, RenderTask, BlurTaskCache};
 use crate::render_task::RenderTaskKind;
 use crate::renderer::{BlendMode, GpuBufferAddress, GpuBufferBuilder};
 use crate::space::SpaceMapper;
-use crate::spatial_tree::SpatialTree;
+use crate::spatial_tree::{SpatialTree, SpatialNodeIndex};
 use crate::surface::{SurfaceDescriptor, SurfaceInfo, calculate_screen_uv};
 use crate::surface::SurfaceIndex;
 use crate::svg_filter::{get_coverage_source_svgfe, FilterGraphNodeKey, FilterGraphOpKey};
-use crate::util::MaxRect;
+use crate::util::{MaxRect, ScaleOffset};
 use smallvec::SmallVec;
 use crate::internal_types::Filter;
 use crate::profiler;
@@ -55,8 +55,13 @@ pub enum PictureCompositeMode {
     TileCache {
         slice_id: SliceId,
     },
-    /// Apply an SVG filter graph
-    SVGFEGraph(Vec<(FilterGraphNode, FilterGraphOp)>),
+    /// Apply an SVG filter graph. The `SpatialNodeIndex` is the spatial node
+    /// the filter subregions are authored against (the filtered element's
+    /// node). For a backdrop filter the graph is composited in backdrop-root
+    /// space, so the subregions must be mapped from the source node into the
+    /// surface's space at frame time. NOT included in the interned
+    /// PictureCompositeKey (interning is unaffected).
+    SVGFEGraph(Vec<(FilterGraphNode, FilterGraphOp)>, SpatialNodeIndex),
     /// A surface that is used as an input to another primitive
     IntermediateSurface,
 }
@@ -100,11 +105,12 @@ impl PictureCompositeMode {
 
                 surface_rect.inflate(blur_inflation_x, blur_inflation_y)
             }
-            PictureCompositeMode::SVGFEGraph(ref filters) => {
+            PictureCompositeMode::SVGFEGraph(ref filters, _) => {
                 // Return prim_subregion for use in get_local_prim_rect, which
                 // is the polygon size.
                 // This must match surface_rects.unclipped_local.
-                get_coverage_target_svgfe(filters, surface_rect.cast_unit())
+                let filters = map_svgfe_subregions(filters, &surface.svgfe_source_map);
+                get_coverage_target_svgfe(&filters, surface_rect.cast_unit())
             }
             _ => {
                 surface_rect
@@ -154,15 +160,78 @@ impl PictureCompositeMode {
 
                 rect
             }
-            PictureCompositeMode::SVGFEGraph(ref filters) => {
+            PictureCompositeMode::SVGFEGraph(ref filters, _) => {
                 // surface_rect may be for source or target, so invalidate based
                 // on both interpretations
-                let target_subregion = get_coverage_source_svgfe(filters, surface_rect.cast());
-                let source_subregion = get_coverage_target_svgfe(filters, surface_rect.cast());
+                let filters = map_svgfe_subregions(filters, &surface.svgfe_source_map);
+                let target_subregion = get_coverage_source_svgfe(&filters, surface_rect.cast());
+                let source_subregion = get_coverage_target_svgfe(&filters, surface_rect.cast());
                 target_subregion.union(&source_subregion)
             }
             _ => {
                 surface_rect
+            }
+        }
+    }
+
+    /// The region of this surface's own space that has to be rasterized in order
+    /// to produce `dest_rect` of its output: the inverse of `get_coverage`.
+    ///
+    /// Larger than `dest_rect` for the modes that sample outside their
+    /// destination. Culling against a rect derived without this would drop
+    /// content that is off-screen itself but visible through a blur or a shadow.
+    pub fn get_required_source_rect(
+        &self,
+        surface: &SurfaceInfo,
+        dest_rect: LayoutRect,
+    ) -> LayoutRect {
+        match self {
+            PictureCompositeMode::Filter(Filter::Blur { width, height, should_inflate, .. }) => {
+                // A blur that doesn't inflate is a backdrop filter: its source is
+                // the captured backdrop rather than primitives drawn into this
+                // surface, and it samples with `BlurEdgeMode::Mirror`, so it
+                // needs nothing from outside `dest_rect`.
+                if *should_inflate {
+                    let (width_factor, height_factor) = surface.clamp_blur_radius(*width, *height);
+
+                    dest_rect.inflate(
+                        width_factor.ceil() * BLUR_SAMPLE_SCALE,
+                        height_factor.ceil() * BLUR_SAMPLE_SCALE,
+                    )
+                } else {
+                    dest_rect
+                }
+            }
+            PictureCompositeMode::Filter(Filter::DropShadows(ref shadows)) => {
+                // Output at a point comes from the surface at that point (the
+                // unshifted copy) and, blurred, from that point less the shadow
+                // offset - the same relationship `get_coverage` walks forwards.
+                let mut rect = dest_rect;
+
+                for shadow in shadows {
+                    let (blur_radius_x, blur_radius_y) = surface.clamp_blur_radius(
+                        shadow.blur_radius,
+                        shadow.blur_radius,
+                    );
+
+                    let shadow_source_rect = dest_rect
+                        .translate(-shadow.offset)
+                        .inflate(
+                            blur_radius_x * BLUR_SAMPLE_SCALE,
+                            blur_radius_y * BLUR_SAMPLE_SCALE,
+                        );
+
+                    rect = rect.union(&shadow_source_rect);
+                }
+
+                rect
+            }
+            PictureCompositeMode::SVGFEGraph(ref filters, _) => {
+                let filters = map_svgfe_subregions(filters, &surface.svgfe_source_map);
+                get_coverage_source_svgfe(&filters, dest_rect)
+            }
+            _ => {
+                dest_rect
             }
         }
     }
@@ -262,7 +331,6 @@ pub fn prepare_composite_mode(
     parent_surface_index: SurfaceIndex,
     surface_rects: &SurfaceAllocInfo,
     snapshot: &Option<SnapshotInfo>,
-    can_use_shared_surface: bool,
     frame_context: &FrameBuildingContext,
     frame_state: &mut FrameBuildingState,
     data_stores: &DataStores,
@@ -325,7 +393,7 @@ pub fn prepare_composite_mode(
                         None,
                         clear_color,
                         cmd_buffer_index,
-                        can_use_shared_surface,
+                        true,
                         Some(original_size.round().to_i32()),
                     )
                 ).with_uv_rect_kind(uv_rect_kind)
@@ -362,26 +430,66 @@ pub fn prepare_composite_mode(
 
             let device_rect = surface_rects.clipped;
 
+            let blur_std_deviations: SmallVec<[DeviceSize; 1]> = shadows.iter().map(|shadow| {
+                let (blur_radius_x, blur_radius_y) = surface.clamp_blur_radius(
+                    shadow.blur_radius,
+                    shadow.blur_radius,
+                );
+                DeviceSize::new(
+                    blur_radius_x * surface.local_scale.0 * device_pixel_scale.0,
+                    blur_radius_y * surface.local_scale.1 * device_pixel_scale.0,
+                )
+            }).collect();
+
+            // Align the source to the downscaling grid of the largest blur,
+            // in device space. Otherwise the downscaled pixels move relative to
+            // the content as the blur radius (and so the surface inflation)
+            // changes, and animated shadows visibly pulse.
+            let max_std_deviation = blur_std_deviations
+                .iter()
+                .fold(DeviceSize::zero(), |max, std_dev| max.max(*std_dev));
+            let scale_factor = BlurTask::downscale_factor(device_rect.size(), max_std_deviation);
+            let aligned_rect = DeviceRect::new(
+                (device_rect.min.to_vector() / scale_factor).floor().to_point() * scale_factor,
+                (device_rect.max.to_vector() / scale_factor).ceil().to_point() * scale_factor,
+            );
+            let max_surface_size = frame_context.max_surface_size() as f32;
+            let (task_rect, uv_rect_kind, clear_color, content_size) = if aligned_rect == device_rect ||
+                aligned_rect.width() > max_surface_size ||
+                aligned_rect.height() > max_surface_size
+            {
+                (device_rect, surface_rects.uv_rect_kind, None, None)
+            } else {
+                let uv_rect_kind = calculate_uv_rect_kind(aligned_rect, surface_rects.unclipped);
+                let content_size = (device_rect.max - aligned_rect.min).to_size().to_i32();
+                (aligned_rect, uv_rect_kind, Some(ColorF::TRANSPARENT), Some(content_size))
+            };
+            let task_size = if task_rect == device_rect {
+                surface_rects.task_size
+            } else {
+                task_rect.size().to_i32()
+            };
+
             let cmd_buffer_index = frame_state.cmd_buffers.create_cmd_buffer();
 
             let picture_task_id = frame_state.rg_builder.add().init(
                 RenderTask::new_dynamic(
-                    surface_rects.task_size,
+                    task_size,
                     RenderTaskKind::new_picture(
-                        surface_rects.task_size,
+                        task_size,
                         surface_rects.needs_scissor_rect,
-                        device_rect.min,
+                        task_rect.min,
                         surface_spatial_node_index,
                         raster_spatial_node_index,
                         device_pixel_scale,
                         None,
                         None,
-                        None,
+                        clear_color,
                         cmd_buffer_index,
-                        can_use_shared_surface,
-                        None,
+                        true,
+                        content_size,
                     ),
-                ).with_uv_rect_kind(surface_rects.uv_rect_kind)
+                ).with_uv_rect_kind(uv_rect_kind)
             );
 
             let mut blur_tasks = BlurTaskCache::default();
@@ -389,17 +497,9 @@ pub fn prepare_composite_mode(
             extra_gpu_data.resize(shadows.len(), GpuBufferAddress::INVALID);
 
             let mut blur_render_task_id = picture_task_id;
-            for shadow in shadows {
-                let (blur_radius_x, blur_radius_y) = surface.clamp_blur_radius(
-                    shadow.blur_radius,
-                    shadow.blur_radius,
-                );
-
+            for blur_std_deviation in blur_std_deviations {
                 blur_render_task_id = RenderTask::new_blur(
-                    DeviceSize::new(
-                        blur_radius_x * surface.local_scale.0 * device_pixel_scale.0,
-                        blur_radius_y * surface.local_scale.1 * device_pixel_scale.0,
-                    ),
+                    blur_std_deviation,
                     picture_task_id,
                     frame_state.rg_builder,
                     RenderTargetKind::Color,
@@ -430,28 +530,20 @@ pub fn prepare_composite_mode(
             let map_pic_to_parent = SpaceMapper::new_with_target(
                 parent_surface.surface_spatial_node_index,
                 surface_spatial_node_index,
-                parent_surface.clipping_rect,
+                parent_surface.clipping_rect_in_picture_space(),
                 frame_context.spatial_tree,
             );
             let pic_rect = surface.clipped_local_rect;
-            let pic_in_raster_space = map_pic_to_parent
-                .map(&pic_rect)
-                .expect("bug: unable to map mix-blend content into parent");
+            let backdrop = map_pic_to_parent.map(&pic_rect).and_then(|pic_in_raster_space| {
+                let backdrop_rect = parent_surface.map_to_device_rect(&pic_in_raster_space);
+                backdrop_rect
+                    .intersection(&parent_surface.clipping_rect)
+                    .map(|available_rect| (available_rect, backdrop_rect))
+            });
 
-            let backdrop_rect = pic_in_raster_space;
-            let parent_surface_rect = parent_surface.clipping_rect;
-
-            let readback_task_id = match backdrop_rect.intersection(&parent_surface_rect) {
-                Some(available_rect) => {
-                    let backdrop_rect = parent_surface.map_to_device_rect(
-                        &backdrop_rect,
-                        frame_context.spatial_tree,
-                    );
-
-                    let available_rect = parent_surface.map_to_device_rect(
-                        &available_rect,
-                        frame_context.spatial_tree,
-                    ).round_out();
+            let readback_task_id = match backdrop {
+                Some((available_rect, backdrop_rect)) => {
+                    let available_rect = available_rect.round_out();
 
                     let backdrop_uv = calculate_uv_rect_kind(
                         available_rect,
@@ -507,7 +599,7 @@ pub fn prepare_composite_mode(
                                 None,
                                 None,
                                 cmd_buffer_index,
-                                can_use_shared_surface,
+                                true,
                                 None,
                             )
                         ).with_uv_rect_kind(surface_rects.uv_rect_kind)
@@ -546,7 +638,7 @@ pub fn prepare_composite_mode(
                                 None,
                                 None,
                                 cmd_buffer_index,
-                                can_use_shared_surface,
+                                true,
                                 None,
                             )
                         ).with_uv_rect_kind(surface_rects.uv_rect_kind)
@@ -585,7 +677,7 @@ pub fn prepare_composite_mode(
                                 None,
                                 None,
                                 cmd_buffer_index,
-                                can_use_shared_surface,
+                                true,
                                 None,
                             )
                         ).with_uv_rect_kind(surface_rects.uv_rect_kind)
@@ -625,7 +717,7 @@ pub fn prepare_composite_mode(
                                 None,
                                 None,
                                 cmd_buffer_index,
-                                can_use_shared_surface,
+                                true,
                                 None,
                             )
                         ).with_uv_rect_kind(surface_rects.uv_rect_kind)
@@ -664,7 +756,7 @@ pub fn prepare_composite_mode(
                                 None,
                                 None,
                                 cmd_buffer_index,
-                                can_use_shared_surface,
+                                true,
                                 None,
                             )
                         ).with_uv_rect_kind(surface_rects.uv_rect_kind)
@@ -679,8 +771,13 @@ pub fn prepare_composite_mode(
                 surface_rects.clipped_local,
             );
         }
-        PictureCompositeMode::SVGFEGraph(ref filters) => {
+        PictureCompositeMode::SVGFEGraph(ref filters, _source_spatial_node_index) => {
             let cmd_buffer_index = frame_state.cmd_buffers.create_cmd_buffer();
+
+            // Map the subregions into the surface's (backdrop-root) space to
+            // match the coverage computed in get_surface_rects.
+            let filters = map_svgfe_subregions(filters, &surface_rects.svgfe_source_map);
+            let filters = &filters;
 
             let prim_subregion = surface_rects.unclipped;
             let target_subregion = surface_rects.clipped;
@@ -706,7 +803,7 @@ pub fn prepare_composite_mode(
                         None,
                         None,
                         cmd_buffer_index,
-                        can_use_shared_surface,
+                        true,
                         None,
                     )
                 )
@@ -846,10 +943,40 @@ pub struct SurfaceAllocInfo {
     // Only used for SVGFEGraph currently, this is the source pixels needed to
     // render the pixels in clipped.
     pub source: DeviceRect,
-    // Only used for SVGFEGraph, this is the same as clipped before rounding.
+    // `clipped` before rounding, i.e. the exact device-space image of
+    // `clipped_local`. This is the rect to use where the surface's local ->
+    // device mapping matters rather than the allocated size, which is why it is
+    // what `SurfaceInfo::clipping_rect` is set from.
     pub clipped_notsnapped: DeviceRect,
     pub clipped_local: PictureRect,
     pub uv_rect_kind: UvRectKind,
+    // Only used for SVGFEGraph: mapping from the space the filter subregions
+    // are authored in (the filtered element's spatial node) to the space the
+    // graph is composited in (the surface's spatial node, which for a backdrop
+    // filter is the backdrop root). Identity for regular filters.
+    pub svgfe_source_map: ScaleOffset,
+}
+
+/// Map every absolute subregion in an SVGFE filter graph through `map`, moving
+/// backdrop-filter subregions from the filtered element's space into the space
+/// the graph composites in. This must be a full scale+offset rather than a
+/// translation: a reference frame between the element and the backdrop root may
+/// scale (pdf.js scales its text spans), and a translation alone then misplaces
+/// the subregion. The per-input `offset`/`source_padding`/`target_padding`
+/// fields are relative deltas and are left untouched. `map` is the identity for
+/// regular (non-backdrop) filters, leaving the subregions unchanged.
+fn map_svgfe_subregions(
+    filters: &[(FilterGraphNode, FilterGraphOp)],
+    map: &ScaleOffset,
+) -> Vec<(FilterGraphNode, FilterGraphOp)> {
+    filters.iter().map(|(node, op)| {
+        let mut node = node.clone();
+        node.subregion = map.map_rect(&node.subregion);
+        for input in &mut node.inputs {
+            input.subregion = map.map_rect(&input.subregion);
+        }
+        (node, op.clone())
+    }).collect()
 }
 
 pub fn get_surface_rects(
@@ -863,23 +990,36 @@ pub fn get_surface_rects(
 ) -> Option<SurfaceAllocInfo> {
     let parent_surface = &surfaces[parent_surface_index.0];
 
+    let parent_clipping_rect = parent_surface.clipping_rect_in_picture_space();
+
     let local_to_parent = SpaceMapper::new_with_target(
         parent_surface.surface_spatial_node_index,
         surfaces[surface_index.0].surface_spatial_node_index,
-        parent_surface.clipping_rect,
+        parent_clipping_rect,
         spatial_tree,
     );
 
     let local_clip_rect = local_to_parent
-        .unmap(&parent_surface.clipping_rect)
+        .unmap(&parent_clipping_rect)
         .unwrap_or(PictureRect::max_rect())
         .cast_unit();
 
     let surface = &mut surfaces[surface_index.0];
 
+    let mut svgfe_source_map = ScaleOffset::identity();
+
     let (clipped_local, unclipped_local, source_local) = match composite_mode {
-        PictureCompositeMode::SVGFEGraph(ref filters) => {
-            let prim_subregion = composite_mode.get_rect(surface, None);
+        PictureCompositeMode::SVGFEGraph(ref filters, _) => {
+            // The subregions are authored against the filtered element's
+            // spatial node, but the graph is composited in this surface's space
+            // (the backdrop root for a backdrop filter). Map them through the
+            // relationship computed when the surface was assigned so they line
+            // up with the captured source and the output prim.
+            svgfe_source_map = surface.svgfe_source_map;
+            let filters = map_svgfe_subregions(filters, &svgfe_source_map);
+            let filters = &filters;
+
+            let prim_subregion = get_coverage_target_svgfe(filters, surface.clipped_local_rect.cast_unit());
 
             let visible_subregion: LayoutRect =
                 prim_subregion.cast_unit()
@@ -987,28 +1127,10 @@ pub fn get_surface_rects(
         }
     };
 
-    let (mut clipped, mut unclipped, mut source) = if surface.raster_spatial_node_index != surface.surface_spatial_node_index {
-        assert_eq!(surface.device_pixel_scale.0, 1.0);
+    let mut clipped = surface.map_to_device_rect(&clipped_local.cast_unit());
+    let mut unclipped = surface.map_to_device_rect(&unclipped_local.cast_unit());
+    let mut source = surface.map_to_device_rect(&source_local.cast_unit());
 
-        let local_to_world = SpaceMapper::new_with_target(
-            spatial_tree.root_reference_frame_index(),
-            surface.surface_spatial_node_index,
-            WorldRect::max_rect(),
-            spatial_tree,
-        );
-
-        let clipped = local_to_world.map(&clipped_local.cast_unit()).unwrap() * surface.device_pixel_scale;
-        let unclipped = local_to_world.map(&unclipped_local).unwrap() * surface.device_pixel_scale;
-        let source = local_to_world.map(&source_local.cast_unit()).unwrap() * surface.device_pixel_scale;
-
-        (clipped, unclipped, source)
-    } else {
-        let clipped = clipped_local.cast_unit() * surface.device_pixel_scale;
-        let unclipped = unclipped_local.cast_unit() * surface.device_pixel_scale;
-        let source = source_local.cast_unit() * surface.device_pixel_scale;
-
-        (clipped, unclipped, source)
-    };
     let mut clipped_snapped = clipped.round_out();
     let mut source_snapped = source.round_out();
 
@@ -1028,11 +1150,14 @@ pub fn get_surface_rects(
         surface.raster_spatial_node_index = surface.surface_spatial_node_index;
         surface.device_pixel_scale = Scale::new(max_surface_size / max_dimension);
         surface.local_scale = (1.0, 1.0);
+        // The device space this surface rasterizes in just changed, so anything
+        // derived from the old one below has to be re-derived.
+        surface.update_picture_to_device_mapping(spatial_tree);
 
         let add_markers = profiler::thread_is_being_profiled();
         if add_markers {
-            let new_clipped = (clipped_local.cast_unit() * surface.device_pixel_scale).round();
-            let new_source = (source_local.cast_unit() * surface.device_pixel_scale).round();
+            let new_clipped = surface.map_to_device_rect(&clipped_local.cast_unit()).round();
+            let new_source = surface.map_to_device_rect(&source_local.cast_unit()).round();
             profiler::add_text_marker("SurfaceSizeLimited",
                 format!("Surface for {:?} reduced from raster {:?} (source {:?}) to local {:?} (source {:?})",
                     composite_mode.kind(),
@@ -1041,9 +1166,9 @@ pub fn get_surface_rects(
                 Duration::from_secs_f32(new_clipped.width() * new_clipped.height() / 1000000000.0));
         }
 
-        clipped = clipped_local.cast_unit() * surface.device_pixel_scale;
-        unclipped = unclipped_local.cast_unit() * surface.device_pixel_scale;
-        source = source_local.cast_unit() * surface.device_pixel_scale;
+        clipped = surface.map_to_device_rect(&clipped_local.cast_unit());
+        unclipped = surface.map_to_device_rect(&unclipped_local.cast_unit());
+        source = surface.map_to_device_rect(&source_local.cast_unit());
         clipped_snapped = clipped.round();
         source_snapped = source.round();
     }
@@ -1078,6 +1203,7 @@ pub fn get_surface_rects(
         clipped_notsnapped: clipped,
         clipped_local,
         uv_rect_kind,
+        svgfe_source_map,
     })
 }
 
@@ -1236,7 +1362,9 @@ impl From<Option<PictureCompositeMode>> for PictureCompositeKey {
             Some(PictureCompositeMode::ComponentTransferFilter(handle)) => {
                 PictureCompositeKey::ComponentTransfer(handle.uid())
             }
-            Some(PictureCompositeMode::SVGFEGraph(filter_nodes)) => {
+            Some(PictureCompositeMode::SVGFEGraph(filter_nodes, _source_spatial_node)) => {
+                // Deliberately exclude the source spatial node from the interned
+                // key: it does not affect the filter graph identity.
                 PictureCompositeKey::SVGFEGraph(
                     filter_nodes.into_iter().map(|(node, op)| {
                         (node.into(), op.into())

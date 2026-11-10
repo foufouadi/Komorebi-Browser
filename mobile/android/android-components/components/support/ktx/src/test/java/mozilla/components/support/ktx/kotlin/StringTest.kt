@@ -86,6 +86,8 @@ class StringTest {
         assertEquals(expectedUrl, "http://mozilla.org".toNormalizedUrl())
         assertEquals(expectedUrl, "  http://mozilla.org  ".toNormalizedUrl())
         assertEquals(expectedUrl, "mozilla.org".toNormalizedUrl())
+        assertEquals("https://mozilla.org/a%20b", "https://mozilla.org/a b".toNormalizedUrl())
+        assertEquals("http://mozilla.org/a%20b", "mozilla.org/a b".toNormalizedUrl())
     }
 
     @Test
@@ -307,6 +309,16 @@ class StringTest {
         testCases.forEach { (raw, escaped) ->
             assertEquals(escaped, raw.sanitizeFileName())
         }
+    }
+
+    @Test
+    fun truncateMiddle() {
+        assertEquals("123…890", "1234567890".truncateMiddle(7))
+        assertEquals("1234567890", "1234567890".truncateMiddle(10))
+        assertEquals("1234567890", "1234567890".truncateMiddle(20))
+        assertEquals("1…0", "1234567890".truncateMiddle(3))
+        assertEquals("1", "1234567890".truncateMiddle(1))
+        assertEquals("123...890", "1234567890".truncateMiddle(9, "..."))
     }
 
     @Test
@@ -556,6 +568,12 @@ class StringTest {
     }
 
     @Test
+    fun `should losslessly decode the path of a url it cannot shorten`() {
+        "http://badport:65536/%D1%82%D0%B5%D1%81%D1%82%20file" shortenedShouldBecome "http://badport:65536/тест%20file"
+        "http://$PUNYCODE.com/%D1%82%D0%B5%D1%81%D1%82" shortenedShouldBecome "$IDN.com"
+    }
+
+    @Test
     fun `should convert host to idn when calling shortURL`() {
         "http://$PUNYCODE.blah.com" shortenedShouldBecome "$IDN.blah.com"
     }
@@ -684,13 +702,13 @@ class StringTest {
     @Test
     fun `GIVEN an invalid base64 image string WHEN converting it into bitmap THEN the result is null`() {
         val invalidBase64BitmapString = "aa"
-        assertNull(invalidBase64BitmapString.base64ToBitmap())
+        assertNull(invalidBase64BitmapString.base64ToBitmap(ICON_PX, ICON_PX))
     }
 
     @Test
     fun `GIVEN a valid base64 png string WHEN converting it into bitmap THEN the result is not null and no exception is thrown`() {
         val validBase64BitmapString = "data:image/png;base64,R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs="
-        assertNotNull(validBase64BitmapString.base64ToBitmap())
+        assertNotNull(validBase64BitmapString.base64ToBitmap(ICON_PX, ICON_PX))
     }
 
     @Test
@@ -698,9 +716,9 @@ class StringTest {
         val validBase64JpegString = "data:image/jpeg;base64,R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs="
         val validBase64JpgString = "data:image/jpg;base64,R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs="
         val validBase64AnythingString = "data:image/anything;base64,R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs="
-        assertNotNull(validBase64JpegString.base64ToBitmap())
-        assertNotNull(validBase64JpgString.base64ToBitmap())
-        assertNotNull(validBase64AnythingString.base64ToBitmap())
+        assertNotNull(validBase64JpegString.base64ToBitmap(ICON_PX, ICON_PX))
+        assertNotNull(validBase64JpgString.base64ToBitmap(ICON_PX, ICON_PX))
+        assertNotNull(validBase64AnythingString.base64ToBitmap(ICON_PX, ICON_PX))
     }
 
     @Test
@@ -708,9 +726,33 @@ class StringTest {
         val invalidBase64String = "R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs="
         val invalidBase64String2 = "data:image/jpg;base64;R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs="
         val invalidBase64String3 = "image/jpg;base64,R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs="
-        assertNull(invalidBase64String.base64ToBitmap())
-        assertNull(invalidBase64String2.base64ToBitmap())
-        assertNull(invalidBase64String3.base64ToBitmap())
+        assertNull(invalidBase64String.base64ToBitmap(ICON_PX, ICON_PX))
+        assertNull(invalidBase64String2.base64ToBitmap(ICON_PX, ICON_PX))
+        assertNull(invalidBase64String3.base64ToBitmap(ICON_PX, ICON_PX))
+    }
+
+    @Test
+    fun `GIVEN a base64 image larger than the target WHEN converting it into a bitmap THEN it is subsampled`() {
+        val bitmap = FOUR_BY_FOUR_PNG.base64ToBitmap(targetWidth = 1, targetHeight = 1)
+
+        assertNotNull(bitmap)
+        assertEquals(1, bitmap.width)
+        assertEquals(1, bitmap.height)
+    }
+
+    @Test
+    fun `GIVEN a data URI whose payload is not base64 WHEN converting it into a bitmap THEN null is returned`() {
+        // The other invalid cases here are rejected by the data URI pattern, so they never reach the decode.
+        assertNull("data:image/png;base64,!!!!not-base64!!!!".base64ToBitmap(ICON_PX, ICON_PX))
+    }
+
+    @Test
+    fun `GIVEN a base64 image smaller than the target WHEN converting it into a bitmap THEN it is decoded whole`() {
+        val bitmap = FOUR_BY_FOUR_PNG.base64ToBitmap(targetWidth = 64, targetHeight = 64)
+
+        assertNotNull(bitmap)
+        assertEquals(4, bitmap.width)
+        assertEquals(4, bitmap.height)
     }
 
     @Test
@@ -746,9 +788,37 @@ class StringTest {
         assertFalse("http://example.com?a=b&c=d&e=f#g=h".urlContainsQueryParameters("g=h"))
     }
 
+    @Test
+    fun `GIVEN a camel case string WHEN converting it to snake case THEN its words are lowercased and joined by underscores`() {
+        assertEquals("enrolled_and_entitled", "EnrolledAndEntitled".toSnakeCase())
+        assertEquals("user_action", "userAction".toSnakeCase())
+        assertEquals("ready", "Ready".toSnakeCase())
+        assertEquals("a_b_test", "ABTest".toSnakeCase())
+        assertEquals("", "".toSnakeCase())
+    }
+
+    @Test
+    fun `toWellFormed only replaces unpaired surrogates`() {
+        val valid = "abc \uD83D\uDE00 def"
+        assertSame(valid, valid.toWellFormed())
+        assertEquals("", "".toWellFormed())
+        assertEquals("\uFFFD", "\uD83D".toWellFormed())
+        assertEquals("\uFFFD", "\uDE00".toWellFormed())
+        assertEquals("a\uFFFDb", "a\uD83Db".toWellFormed())
+        assertEquals("\uFFFD\uFFFD", "\uDE00\uD83D".toWellFormed())
+        assertEquals("\uFFFD\uD83D\uDE00", "\uD83D\uD83D\uDE00".toWellFormed())
+        assertEquals("\uD83D\uDE00\uFFFD", "\uD83D\uDE00\uDE00".toWellFormed())
+    }
+
     private infix fun String.shortenedShouldBecome(expect: String) {
         assertEquals(expect, this.shortened())
     }
 
     private fun String.shortened() = this.toShortUrl(publicSuffixList)
 }
+
+private const val ICON_PX = 32
+
+// A 4x4 PNG, small enough to inline but large enough to subsample.
+private const val FOUR_BY_FOUR_PNG =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAEElEQVR42mMQVDKGIwbiOACj1AZhWTrROwAAAABJRU5ErkJggg=="

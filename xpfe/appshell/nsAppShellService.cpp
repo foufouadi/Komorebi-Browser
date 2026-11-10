@@ -38,7 +38,6 @@
 #include "mozilla/dom/Document.h"
 
 #include "nsEmbedCID.h"
-#include "nsIWebBrowser.h"
 #include "nsIDocShell.h"
 
 #include "nsWebBrowser.h"
@@ -178,11 +177,11 @@ class WebBrowserChrome2Stub final : public nsIWebBrowserChrome,
                                     public nsIInterfaceRequestor,
                                     public nsSupportsWeakReference {
  protected:
-  nsCOMPtr<nsIWebBrowser> mBrowser;
+  RefPtr<nsWebBrowser> mBrowser;
   virtual ~WebBrowserChrome2Stub() = default;
 
  public:
-  void SetBrowser(nsIWebBrowser* aBrowser) { mBrowser = aBrowser; }
+  void SetBrowser(nsWebBrowser* aBrowser) { mBrowser = aBrowser; }
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSIWEBBROWSERCHROME
@@ -228,8 +227,8 @@ WebBrowserChrome2Stub::GetInterface(const nsIID& aIID, void** aSink) {
 }
 
 NS_IMETHODIMP
-WebBrowserChrome2Stub::GetDimensions(DimensionKind aDimensionKind, int32_t* aX,
-                                     int32_t* aY, int32_t* aCX, int32_t* aCY) {
+WebBrowserChrome2Stub::GetDimensions(int32_t* aX, int32_t* aY, int32_t* aCX,
+                                     int32_t* aCY) {
   if (aX) {
     *aX = 0;
   }
@@ -247,12 +246,10 @@ WebBrowserChrome2Stub::GetDimensions(DimensionKind aDimensionKind, int32_t* aX,
 
 NS_IMETHODIMP
 WebBrowserChrome2Stub::SetDimensions(DimensionRequest&& aRequest) {
-  nsCOMPtr<nsIBaseWindow> window(do_QueryInterface(mBrowser));
-  NS_ENSURE_STATE(window);
-  // Inner and outer dimensions are equal.
-  aRequest.mDimensionKind = DimensionKind::Outer;
-  MOZ_TRY(aRequest.SupplementFrom(window));
-  return aRequest.ApplyOuterTo(window);
+  RefPtr<nsDocShell> docShell = mBrowser ? mBrowser->GetDocShell() : nullptr;
+  NS_ENSURE_STATE(docShell);
+  MOZ_TRY(aRequest.SupplementFrom(docShell));
+  return aRequest.ApplyOuterTo(docShell);
 }
 
 NS_IMETHODIMP
@@ -260,14 +257,14 @@ WebBrowserChrome2Stub::Blur() { return NS_ERROR_NOT_IMPLEMENTED; }
 
 class BrowserDestroyer final : public Runnable {
  public:
-  BrowserDestroyer(nsIWebBrowser* aBrowser, nsISupports* aContainer)
+  BrowserDestroyer(nsWebBrowser* aBrowser, nsISupports* aContainer)
       : mozilla::Runnable("BrowserDestroyer"),
         mBrowser(aBrowser),
         mContainer(aContainer) {}
 
-  static nsresult Destroy(nsIWebBrowser* aBrowser) {
-    nsCOMPtr<nsIBaseWindow> window(do_QueryInterface(aBrowser));
-    return window->Destroy();
+  static nsresult Destroy(nsWebBrowser* aBrowser) {
+    aBrowser->Close();
+    return NS_OK;
   }
 
   NS_IMETHOD
@@ -280,22 +277,22 @@ class BrowserDestroyer final : public Runnable {
   virtual ~BrowserDestroyer() = default;
 
  private:
-  nsCOMPtr<nsIWebBrowser> mBrowser;
+  RefPtr<nsWebBrowser> mBrowser;
   nsCOMPtr<nsISupports> mContainer;
 };
 
 // This is the "stub" we return from CreateWindowlessBrowser - it exists
-// to manage the lifetimes of the nsIWebBrowser and container window.
+// to manage the lifetimes of the nsWebBrowser and container window.
 // In particular, it keeps a strong reference to both, to prevent them from
 // being collected while this object remains alive, and ensures that they
 // aren't destroyed when it's not safe to run scripts.
 class WindowlessBrowser final : public nsIWindowlessBrowser,
                                 public nsIInterfaceRequestor {
  public:
-  WindowlessBrowser(nsIWebBrowser* aBrowser, nsISupports* aContainer)
+  WindowlessBrowser(nsWebBrowser* aBrowser, nsISupports* aContainer)
       : mBrowser(aBrowser), mContainer(aContainer), mClosed(false) {
-    mWebNavigation = do_QueryInterface(aBrowser);
-    mInterfaceRequestor = do_QueryInterface(aBrowser);
+    mWebNavigation = aBrowser;
+    mInterfaceRequestor = aBrowser;
   }
   NS_DECL_ISUPPORTS
   NS_DECL_NSIWINDOWLESSBROWSER
@@ -318,7 +315,7 @@ class WindowlessBrowser final : public nsIWindowlessBrowser,
     nsContentUtils::AddScriptRunner(runnable.forget());
   }
 
-  nsCOMPtr<nsIWebBrowser> mBrowser;
+  RefPtr<nsWebBrowser> mBrowser;
   nsCOMPtr<nsIWebNavigation> mWebNavigation;
   nsCOMPtr<nsIInterfaceRequestor> mInterfaceRequestor;
   // we don't use the container but just hold a reference to it.
@@ -345,11 +342,10 @@ WindowlessBrowser::Close() {
 
 NS_IMETHODIMP
 WindowlessBrowser::GetBrowsingContext(BrowsingContext** aBrowsingContext) {
-  nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem = do_QueryInterface(mBrowser);
-  if (!docShellTreeItem) {
+  if (!mBrowser) {
     return NS_ERROR_NOT_INITIALIZED;
   }
-  return docShellTreeItem->GetBrowsingContextXPCOM(aBrowsingContext);
+  return mBrowser->GetBrowsingContextXPCOM(aBrowsingContext);
 }
 
 NS_IMETHODIMP
@@ -461,17 +457,24 @@ nsresult nsAppShellService::JustCreateTopWindow(
 
   RefPtr<AppWindow> window = new AppWindow(aChromeMask);
 
-#ifdef XP_WIN
-  // If the parent is currently fullscreen, tell the child to ignore persisted
-  // full screen states. This way new browser windows open on top of fullscreen
-  // windows normally.
-  if (nsCOMPtr<nsIBaseWindow> baseWin = do_QueryInterface(aParent)) {
-    nsCOMPtr<nsIWidget> widget = baseWin->GetMainWidget();
-    if (widget && widget->SizeMode() == nsSizeMode_Fullscreen) {
-      window->IgnoreXULSizeMode(true);
+  // Ignore a persisted sizemode="fullscreen" either when the caller asked for
+  // it, or when the parent is currently fullscreen. Without this a new window
+  // restores that sizemode and takes a Space of its own, so it never appears
+  // where the user is. The parent case is what keeps new browser windows
+  // opening on top of a fullscreen window; the flag covers callers that pass
+  // no parent, such as an extension popup.
+  bool shouldIgnoreXULSizeMode =
+      aChromeMask & nsIWebBrowserChrome::CHROME_SUPPRESS_INITIAL_FULLSCREEN;
+  if (!shouldIgnoreXULSizeMode) {
+    if (nsCOMPtr<nsIBaseWindow> baseWin = do_QueryInterface(aParent)) {
+      nsCOMPtr<nsIWidget> widget = baseWin->GetMainWidget();
+      shouldIgnoreXULSizeMode =
+          widget && widget->SizeMode() == nsSizeMode_Fullscreen;
     }
   }
-#endif
+  if (shouldIgnoreXULSizeMode) {
+    window->IgnoreXULSizeMode(true);
+  }
 
   widget::InitData widgetInitData;
   if (aIsHiddenWindow) {
@@ -499,18 +502,8 @@ nsresult nsAppShellService::JustCreateTopWindow(
     widgetInitData.mHasRemoteContent = true;
   }
 
-#if defined(MOZ_WIDGET_GTK) || defined(XP_WIN)
-  // Windows/Gtk PIP window support. It's Chrome dialog window, always on top
-  // and without any bar.
-  uint32_t pipMask = nsIWebBrowserChrome::CHROME_ALWAYS_ON_TOP |
-                     nsIWebBrowserChrome::CHROME_OPENAS_CHROME |
-                     nsIWebBrowserChrome::CHROME_WINDOW_RESIZE;
-  uint32_t barMask = nsIWebBrowserChrome::CHROME_MENUBAR |
-                     nsIWebBrowserChrome::CHROME_TOOLBAR |
-                     nsIWebBrowserChrome::CHROME_LOCATIONBAR |
-                     nsIWebBrowserChrome::CHROME_TITLEBAR;
-  if (widgetInitData.mWindowType == widget::WindowType::Dialog &&
-      ((aChromeMask & pipMask) == pipMask) && !(aChromeMask & barMask)) {
+#if defined(MOZ_WIDGET_GTK) || defined(XP_WIN) || defined(XP_MACOSX)
+  if (aChromeMask & nsIWebBrowserChrome::CHROME_MEDIA_PIP) {
     widgetInitData.mPiPType = mozilla::widget::PiPType::MediaPiP;
   }
 #endif
@@ -546,9 +539,6 @@ nsresult nsAppShellService::JustCreateTopWindow(
     widgetInitData.mBorderStyle = BorderStyle::Border;
     if (aChromeMask & nsIWebBrowserChrome::CHROME_TITLEBAR) {
       widgetInitData.mBorderStyle |= BorderStyle::Title;
-    }
-    if (aChromeMask & nsIWebBrowserChrome::CHROME_WINDOW_CLOSE) {
-      widgetInitData.mBorderStyle |= BorderStyle::Close;
     }
     if (aChromeMask & nsIWebBrowserChrome::CHROME_WINDOW_RESIZE) {
       widgetInitData.mResizable = true;

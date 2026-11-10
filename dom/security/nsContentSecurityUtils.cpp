@@ -6,6 +6,8 @@
 
 #include "nsContentSecurityUtils.h"
 
+#include <algorithm>
+
 #include "mozilla/Components.h"
 #include "mozilla/dom/PolicyContainer.h"
 #include "mozilla/dom/ScriptSettings.h"
@@ -343,6 +345,20 @@ FilenameTypeAndDetails nsContentSecurityUtils::FilenameToFilenameType(
   static constexpr auto kExtensionRegex = u"extensions/(.+)@(.+)!(.+)$"_ns;
   static constexpr auto kSingleFileRegex = u"^[a-zA-Z0-9.?]+$"_ns;
 
+  static constexpr nsLiteralCString kUserChromePrefixes[] = {
+      "userscripts/"_ns,        "userchromejs/"_ns,
+      "user_chrome_files/"_ns,  "tabmix"_ns,
+      "searchwp/"_ns,           "custombuttons"_ns,
+      "tabgroups-resource/"_ns,
+  };
+
+  static constexpr nsLiteralCString kUserResourcePrefixes[] = {
+      "usl-ucjs/"_ns,
+      "sfm-ucjs/"_ns,
+      "cpmanager-legacy/"_ns,
+      "pwa/utils/"_ns,
+  };
+
   if (fileName.IsEmpty()) {
     return FilenameTypeAndDetails(kOther, Nothing());
   }
@@ -350,28 +366,33 @@ FilenameTypeAndDetails nsContentSecurityUtils::FilenameToFilenameType(
   // resource:// and chrome://
   // These don't contain any user (profile) paths.
   if (StringBeginsWith(fileName, "chrome://"_ns)) {
-    if (StringBeginsWith(fileName, "chrome://userscripts/"_ns) ||
-        StringBeginsWith(fileName, "chrome://userchromejs/"_ns) ||
-        StringBeginsWith(fileName, "chrome://user_chrome_files/"_ns) ||
-        StringBeginsWith(fileName, "chrome://tabmix"_ns) ||
-        StringBeginsWith(fileName, "chrome://searchwp/"_ns) ||
-        StringBeginsWith(fileName, "chrome://custombuttons"_ns) ||
-        StringBeginsWith(fileName, "chrome://tabgroups-resource/"_ns)) {
+    const auto path = Substring(fileName, 9);
+
+    if (std::any_of(std::begin(kUserChromePrefixes),
+                    std::end(kUserChromePrefixes), [&](const auto& prefix) {
+                      return StringBeginsWith(path, prefix);
+                    })) {
       return FilenameTypeAndDetails(kSuspectedUserChromeJS,
                                     Some(StripQueryRef(fileName)));
     }
+
     return FilenameTypeAndDetails(kChromeURI, Some(StripQueryRef(fileName)));
   }
+
   if (StringBeginsWith(fileName, "resource://"_ns)) {
-    if (StringBeginsWith(fileName, "resource://usl-ucjs/"_ns) ||
-        StringBeginsWith(fileName, "resource://sfm-ucjs/"_ns) ||
-        StringBeginsWith(fileName, "resource://cpmanager-legacy/"_ns) ||
-        StringBeginsWith(fileName, "resource://pwa/utils/"_ns)) {
+    const auto path = Substring(fileName, 11);
+
+    if (std::any_of(std::begin(kUserResourcePrefixes),
+                    std::end(kUserResourcePrefixes), [&](const auto& prefix) {
+                      return StringBeginsWith(path, prefix);
+                    })) {
       return FilenameTypeAndDetails(kSuspectedUserChromeJS,
                                     Some(StripQueryRef(fileName)));
     }
+
     return FilenameTypeAndDetails(kResourceURI, Some(StripQueryRef(fileName)));
   }
+
   if (StringBeginsWith(fileName, "moz-src://"_ns)) {
     return FilenameTypeAndDetails(kMozSrcURI, Some(StripQueryRef(fileName)));
   }
@@ -1185,8 +1206,9 @@ nsString nsContentSecurityUtils::GetIsElementNonceableNonce(
   // element’s attribute list:
   if (nsCOMPtr<nsIScriptElement> script =
           do_QueryInterface(const_cast<Element*>(&aElement))) {
-    auto containsScriptOrStyle = [](const nsAString& aStr) {
-      return aStr.LowerCaseFindASCII("<script") != kNotFound ||
+    auto containsLinkScriptOrStyle = [](const nsAString& aStr) {
+      return aStr.LowerCaseFindASCII("<link") != kNotFound ||
+             aStr.LowerCaseFindASCII("<script") != kNotFound ||
              aStr.LowerCaseFindASCII("<style") != kNotFound;
     };
 
@@ -1194,21 +1216,21 @@ nsString nsContentSecurityUtils::GetIsElementNonceableNonce(
     uint32_t i = 0;
     while (BorrowedAttrInfo info = aElement.GetAttrInfoAt(i++)) {
       // Step 2.1. If attribute’s name contains an ASCII case-insensitive match
-      // for "<script" or "<style", return "Not Nonceable".
+      // for "<link", <script" or "<style", return "Not Nonceable".
       const nsAttrName* name = info.mName;
       if (nsAtom* prefix = name->GetPrefix()) {
-        if (containsScriptOrStyle(nsDependentAtomString(prefix))) {
+        if (containsLinkScriptOrStyle(nsDependentAtomString(prefix))) {
           return EmptyString();
         }
       }
-      if (containsScriptOrStyle(nsDependentAtomString(name->LocalName()))) {
+      if (containsLinkScriptOrStyle(nsDependentAtomString(name->LocalName()))) {
         return EmptyString();
       }
 
       // Step 2.2. If attribute’s value contains an ASCII case-insensitive match
-      // for "<script" or "<style", return "Not Nonceable".
+      // for "<link", "<script" or "<style", return "Not Nonceable".
       info.mValue->ToString(value);
-      if (containsScriptOrStyle(value)) {
+      if (containsLinkScriptOrStyle(value)) {
         return EmptyString();
       }
     }
@@ -1376,7 +1398,7 @@ static nsLiteralCString sImgSrcDataBlobAllowList[] = {
     "chrome://browser/content/sidebar/sidebar-opentabs.html"_ns,
     "chrome://browser/content/sidebar/sidebar-syncedtabs.html"_ns,
     "chrome://browser/content/spotlight.html"_ns,
-    "chrome://browser/content/syncedtabs/sidebar.xhtml"_ns,
+    "chrome://browser/content/syncedtabs/sidebar.html"_ns,
     "chrome://browser/content/webext-panels.xhtml"_ns,
     "chrome://devtools/content/application/index.html"_ns,
     "chrome://devtools/content/framework/browser-toolbox/window.html"_ns,
@@ -1422,7 +1444,7 @@ static nsLiteralCString sImgSrcAddonsAllowList[] = {
 //  UNSAFE! Allows loading everything.
 static nsLiteralCString sImgSrcWildcardAllowList[] = {
     "about:reader"_ns,
-    "chrome://browser/content/syncedtabs/sidebar.xhtml"_ns,
+    "chrome://browser/content/syncedtabs/sidebar.html"_ns,
     // STOP! Do not add anything to this list.
 };
 // img-src https://example.org
@@ -1461,6 +1483,24 @@ static nsLiteralCString sConnectSrcHttpsHostAllowList[] = {"about:logging"_ns};
 //  Any https host source. Used by the New Tab crossword widget, which embeds a
 //  Merino-served bundle in a sandboxed iframe.
 static nsLiteralCString sFrameSrcHttpsHostAllowList[] = {
+    "about:home"_ns,
+    "about:newtab"_ns,
+};
+// frame-src https://*.example.org
+//  Wildcard host sources are normally forbidden. This is a narrow exception,
+//  agreed with the security team, so that New Tab framed widgets can load from
+//  any Merino-served subdomain. Only the exact sources in
+//  sFrameSrcWildcardHostSources are allowed, and only on these pages.
+static nsLiteralCString sFrameSrcWildcardHostAllowList[] = {
+    "about:home"_ns,
+    "about:newtab"_ns,
+};
+static nsLiteralString sFrameSrcWildcardHostSources[] = {
+    u"https://*.merino.nonprod.webservices.mozgcp.net"_ns,
+    u"https://*.merino.prod.webservices.mozgcp.net"_ns,
+};
+// frame-src moz-extension:
+static nsLiteralCString sFrameSrcMozExtensionAllowList[] = {
     "about:home"_ns,
     "about:newtab"_ns,
 };
@@ -1722,7 +1762,30 @@ class FrameSrcVisitor : public AllowBuiltinSrcVisitor {
     MOZ_ASSERT(aDirective == CSPDirective::FRAME_SRC_DIRECTIVE);
   }
 
+  bool visitSchemeSrc(const nsCSPSchemeSrc& src) override {
+    nsAutoString scheme;
+    src.getScheme(scheme);
+
+    if (scheme == u"moz-extension"_ns) {
+      if (CheckAllowList(Span(sFrameSrcMozExtensionAllowList))) {
+        return true;
+      }
+    }
+
+    return AllowBuiltinSrcVisitor::visitSchemeSrc(src);
+  }
+
   bool visitHostSrc(const nsCSPHostSrc& src) override {
+    if (CheckAllowList(Span(sFrameSrcWildcardHostAllowList))) {
+      nsAutoString str;
+      src.toString(str);
+      for (const nsLiteralString& allowed : sFrameSrcWildcardHostSources) {
+        if (str.Equals(allowed)) {
+          return true;
+        }
+      }
+    }
+
     return VisitHostSrcWithWildcardAndHttpsHostAllowLists(
         src, nullptr, sFrameSrcHttpsHostAllowList);
   }
@@ -1826,8 +1889,6 @@ void nsContentSecurityUtils::AssertAboutPageHasCSP(Document* aDocument) {
       "about:blank"_ns,
       // about:srcdoc is a special about page -> no CSP
       "about:srcdoc"_ns,
-      // about:sync-log displays plain text only -> no CSP
-      "about:sync-log"_ns,
       // about:logo just displays the firefox logo -> no CSP
       "about:logo"_ns,
       // about:sync is a special mozilla-signed developer addon with low usage
@@ -2146,11 +2207,6 @@ bool nsContentSecurityUtils::ValidateScriptFilename(JSContext* cx,
     // We will temporarily allow all jar URIs through for now
     return true;
   }
-  if (filename.Equals("about:sync-log"_ns)) {
-    // about:sync-log runs in the parent process and displays a directory
-    // listing. The listing has inline javascript that executes on load.
-    return true;
-  }
 
   if (StringBeginsWith(filename, "moz-extension://"_ns)) {
     nsCOMPtr<nsIURI> uri;
@@ -2179,21 +2235,11 @@ bool nsContentSecurityUtils::ValidateScriptFilename(JSContext* cx,
     }
   }
 
-  auto kAllowedFilenamesPrefix = {
-      // Until 371900 is fixed, we need to do something about about:downloads
-      // and this is the most reasonable. See 1727770
-      "about:downloads"_ns,
-      // We think this is the same problem as about:downloads
-      "about:preferences"_ns, "about:settings"_ns,
-      // Browser console will give a filename of 'debugger' See 1763943
-      // Sometimes it's 'debugger eager eval code', other times just 'debugger
-      // eval code'
-      "debugger"_ns};
-
-  for (auto allowedFilenamePrefix : kAllowedFilenamesPrefix) {
-    if (StringBeginsWith(filename, allowedFilenamePrefix)) {
-      return true;
-    }
+  // Browser console will give a filename of 'debugger' See 1763943
+  // Sometimes it's 'debugger eager eval code', other times just 'debugger
+  // eval code'
+  if (StringBeginsWith(filename, "debugger"_ns)) {
+    return true;
   }
 
   // Log to MOZ_LOG

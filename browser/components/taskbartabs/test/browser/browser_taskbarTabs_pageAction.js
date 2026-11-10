@@ -10,23 +10,49 @@ const BASE_URL = "https://example.com/";
 const BASE_URL_HTTP = "http://mochi.test:8888/";
 const HIDDEN_URI = "about:about";
 const FILE_URI = "file:///";
+let MOZ_EXTENSION_URI; // set under 'add_setup'
 
 ChromeUtils.defineESModuleGetters(this, {
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   FileTestUtils: "resource://testing-common/FileTestUtils.sys.mjs",
   sinon: "resource://testing-common/Sinon.sys.mjs",
-  TaskbarTabs: "resource:///modules/taskbartabs/TaskbarTabs.sys.mjs",
-  TaskbarTabsPin: "resource:///modules/taskbartabs/TaskbarTabsPin.sys.mjs",
+  TaskbarTabs: "moz-src:///browser/components/taskbartabs/TaskbarTabs.sys.mjs",
+  TaskbarTabsPin:
+    "moz-src:///browser/components/taskbartabs/TaskbarTabsPin.sys.mjs",
   TaskbarTabsPageAction:
-    "resource:///modules/taskbartabs/TaskbarTabsPageAction.sys.mjs",
-  TaskbarTabsUtils: "resource:///modules/taskbartabs/TaskbarTabsUtils.sys.mjs",
+    "moz-src:///browser/components/taskbartabs/TaskbarTabsPageAction.sys.mjs",
+  TaskbarTabsUtils:
+    "moz-src:///browser/components/taskbartabs/TaskbarTabsUtils.sys.mjs",
 });
 
-sinon.stub(TaskbarTabsPin, "pinTaskbarTab");
+sinon.stub(TaskbarTabsPin, "pinTaskbarTab").resolves({});
 sinon.stub(TaskbarTabsPin, "unpinTaskbarTab");
+
+const kFakeAddonId = "taskbartabs-test-addon@tests.mozilla.org";
+const kFakeAddonName = "browser_taskbarTabs_addons.js test addon";
+let gExtension;
+
+add_setup(async () => {
+  gExtension = ExtensionTestUtils.loadExtension({
+    manifest: {
+      browser_specific_settings: { gecko: { id: kFakeAddonId } },
+      name: kFakeAddonName,
+      version: "1.2.3",
+    },
+    files: {
+      "example.html": "<!doctype html>addon example page",
+      // This is used in test_extension_name_is_used.
+      "with-manifest.html": `<!doctype html><link href='data:application/json,{"name": "override!","start_url": "/from_manifest"}' rel=manifest>`,
+    },
+  });
+
+  await gExtension.startup();
+  MOZ_EXTENSION_URI = `moz-extension://${gExtension.uuid}/example.html`;
+});
 
 registerCleanupFunction(async () => {
   sinon.restore();
+  await gExtension.unload();
   await TaskbarTabs.resetForTests();
 });
 
@@ -252,6 +278,8 @@ add_task(async function testVariousVisibilityChanges() {
     [HIDDEN_URI, BASE_URL_HTTP, false, true],
     [FILE_URI, BASE_URL, false, true],
     [BASE_URL, FILE_URI, true, false],
+    [MOZ_EXTENSION_URI, BASE_URL, true, true],
+    [HIDDEN_URI, MOZ_EXTENSION_URI, false, true],
   ];
 
   for (const args of argsList) {
@@ -396,4 +424,95 @@ add_task(async function test_page_action_uses_manifest() {
     await BrowserTestUtils.closeWindow(win);
     await TaskbarTabs.removeTaskbarTab(tt.id);
   });
+});
+
+add_task(async function test_extension_name_is_used() {
+  async function checkExtensionURIWithManifest({ withManifest, expected }) {
+    let uri = Services.io.newURI(MOZ_EXTENSION_URI);
+    uri = uri.resolve(withManifest ? "/with-manifest.html" : "/example.html");
+    uri += "?queryparam&another#more"; // check that these are removed
+    uri = Services.io.newURI(uri);
+
+    let manifest = { name: "override!", start_url: "/from_manifest" };
+    let result = await TaskbarTabs.findOrCreateTaskbarTab(uri, 0, {
+      ...(withManifest ? { manifest } : {}),
+    });
+    is(
+      result.taskbarTab.name,
+      expected.name,
+      "findOrCreateTaskbarTab uses expected name"
+    );
+    is(
+      result.taskbarTab.startUrl,
+      expected.startUrl,
+      "findOrCreateTaskbarTab uses expected start URL"
+    );
+    ok(result.created, "A new Taskbar Tab was created.");
+    await TaskbarTabs.removeTaskbarTab(result.taskbarTab.id);
+
+    await BrowserTestUtils.withNewTab(uri.spec, async browser => {
+      const tab = window.gBrowser.getTabForBrowser(browser);
+      const move = await TaskbarTabs.moveTabIntoTaskbarTab(tab);
+
+      is(
+        move.taskbarTab.name,
+        expected.name,
+        "moveTabIntoTaskbarTab uses expected name"
+      );
+      is(
+        result.taskbarTab.startUrl,
+        expected.startUrl,
+        "moveTabIntoTaskbarTab uses expected start URL"
+      );
+      ok(move.created, "A new Taskbar Tab was created.");
+
+      await BrowserTestUtils.closeWindow(move.window);
+      await TaskbarTabs.removeTaskbarTab(move.taskbarTab.id);
+    });
+  }
+
+  await checkExtensionURIWithManifest({
+    withManifest: false,
+    expected: {
+      name: kFakeAddonName,
+      startUrl: Services.io.newURI(MOZ_EXTENSION_URI).resolve("/example.html"),
+    },
+  });
+
+  await checkExtensionURIWithManifest({
+    withManifest: true,
+    expected: {
+      name: "override!",
+      startUrl: Services.io.newURI(MOZ_EXTENSION_URI).resolve("/from_manifest"),
+    },
+  });
+});
+
+add_task(async function test_pageActionRequiresDesktopEntryApi() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.shell.desktop-entry-api", "disabled"]],
+  });
+
+  const element = document.getElementById("taskbar-tabs-button");
+
+  let locationChange = BrowserTestUtils.waitForLocationChange(
+    gBrowser,
+    BASE_URL
+  );
+  const tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    BASE_URL,
+    false
+  );
+
+  await locationChange;
+  is(
+    element.hidden,
+    // only matters on Linux
+    AppConstants.platform === "linux",
+    `Page action is hidden when desktopEntryApi is null`
+  );
+
+  await SpecialPowers.popPrefEnv();
+  BrowserTestUtils.removeTab(tab);
 });

@@ -15,8 +15,6 @@ use crate::invalidation::{InvalidationReason, PrimitiveCompareResult, quadtree::
 use crate::invalidation::vert_buffer::{CornersCache, VertRange};
 use crate::intern::ItemUid;
 use crate::picture::clampf;
-use crate::picture_composite_mode::PictureCompositeMode;
-use crate::surface::SurfaceIndex;
 use crate::print_tree::PrintTreePrinter;
 use crate::resource_cache::ResourceCache;
 use crate::space::SpaceMapper;
@@ -34,7 +32,6 @@ pub struct CachedSurface {
     pub root: TileNode,
     pub background_color: Option<ColorF>,
     pub invalidation_reason: Option<InvalidationReason>,
-    pub sub_graphs: Vec<(PictureRect, Vec<(PictureCompositeMode, SurfaceIndex)>)>,
 }
 
 impl CachedSurface {
@@ -49,7 +46,6 @@ impl CachedSurface {
             root: TileNode::new_leaf(Vec::new()),
             background_color: None,
             invalidation_reason: None,
-            sub_graphs: Vec::new(),
         }
     }
 
@@ -75,7 +71,6 @@ impl CachedSurface {
             PicturePoint::new(-1.0e32, -1.0e32),
         );
         self.invalidation_reason  = None;
-        self.sub_graphs.clear();
 
         // If the tile isn't visible, early exit, skipping the normal set up to
         // validate dependencies. Instead, we will only compare the current tile
@@ -360,11 +355,14 @@ pub struct PrimitiveDependencyInfo {
     /// Color binding this primitive depends on.
     pub color_binding: Option<ColorBinding>,
     /// Intern uid for this primitive instance. Stable across frames and across
-    /// content-side scroll events: scene building normalises each primitive's
-    /// prim_rect by the accumulated external_scroll_offset before interning,
-    /// so the key (and therefore this uid) does not change when the scroll
-    /// position changes. If external_scroll_offset is ever removed, this
-    /// stability guarantee would need to be preserved by another mechanism.
+    /// content-side scroll events: the primitive's key includes its local
+    /// prim_rect, and the display-list builder subtracts the accumulated
+    /// external scroll offset from every coordinate in whole app units before
+    /// the item is recorded, so the rect - and therefore this uid - does not
+    /// change when the scroll position does. That normalisation must stay exact:
+    /// unlike the raster-space corners below, which are quantized to a quarter
+    /// device pixel, a uid compare is bit-exact, so sub-pixel drift in the
+    /// round-trip would invalidate tiles on every scroll offset.
     pub prim_uid: ItemUid,
     /// Scratch range for the primitive's rect corners in raster space (unquantized).
     /// Quantized into per-tile vert_data inside add_prim_dependency.

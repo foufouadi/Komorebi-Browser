@@ -38,7 +38,7 @@ add_setup(async function () {
 
   await SpecialPowers.pushPrefEnv({
     set: [
-      ["browser.search.separatePrivateDefault.ui.enabled", false],
+      ["browser.search.separatePrivateDefault.featureGate", false],
       ["browser.urlbar.scotchBonnet.enableOverride", false],
     ],
   });
@@ -229,14 +229,15 @@ add_task(async function alt_enter_search_remote() {
     );
     // Check search mode is not activated in the new tab.
     await UrlbarTestUtils.assertSearchMode(window, null);
-    BrowserTestUtils.removeTab(newTab);
-    Assert.equal(
-      browser,
-      gBrowser.selectedBrowser,
-      "We're back in the original tab."
+    await BrowserTestUtils.switchTab(
+      gBrowser,
+      gBrowser.getTabForBrowser(browser)
     );
     await UrlbarTestUtils.assertSearchMode(window, null);
-    await UrlbarTestUtils.promisePopupClose(window);
+    Assert.equal(gURLBar.value, "about:robots", "The URL should be restored");
+    Assert.ok(!gURLBar.view.isOpen, "The view should be closed");
+    Assert.ok(!gURLBar.focused, "The input should not be focused");
+    BrowserTestUtils.removeTab(newTab);
   });
 });
 

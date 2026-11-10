@@ -27,7 +27,7 @@ class DefaultIconGeneratorTest {
         val color = generator.pickColor(res, "http://m.facebook.com")
 
         // Color does not change
-        for (i in 0..99) {
+        repeat(100) {
             assertEquals(color, generator.pickColor(res, "http://m.facebook.com"))
         }
 

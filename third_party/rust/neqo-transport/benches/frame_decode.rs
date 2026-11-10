@@ -21,7 +21,7 @@ const FRAME_PAYLOAD: usize = 100;
 /// then decode them all in one pass.  This isolates `Frame::decode` and the
 /// varint path it calls.
 ///
-/// Frame type 0x0e = StreamWithOffLen (offset present, length present, no FIN).
+/// Frame type 0x0e = `StreamWithOffLen` (offset present, length present, no FIN).
 fn encode_stream_frames(n: usize) -> Vec<u8> {
     let mut enc = Encoder::default();
     for i in 0..to_u64(n) {
@@ -45,11 +45,33 @@ fn frame_decode(c: &mut Criterion, n: usize) {
     });
 }
 
+/// Number of distinct start offsets for a PADDING frame within a 16-byte chunk.
+const PADDING_ALIGNMENTS: usize = 16;
+
+/// Decode an `n`-byte PADDING frame at every alignment, as real PADDING can start anywhere.
+fn padding_decode(c: &mut Criterion, n: usize) {
+    let buf = vec![0; n + PADDING_ALIGNMENTS - 1];
+    c.bench_function(&format!("Frame::decode PADDING {n} bytes"), |b| {
+        b.iter(|| {
+            for offset in 0..PADDING_ALIGNMENTS {
+                let mut dec = Decoder::new(&buf[offset..offset + n]);
+                black_box(Frame::decode(&mut dec).expect("decode frame"));
+            }
+        });
+    });
+}
+
 fn benchmark(c: &mut Criterion) {
     frame_decode(c, 10);
     frame_decode(c, 100);
     frame_decode(c, 1_000);
+    padding_decode(c, 1_500);
+    padding_decode(c, 16_383);
 }
 
-criterion_group!(benches, benchmark);
+criterion_group! {
+    name = benches;
+    config = { neqo_common::log::init(None); Criterion::default() };
+    targets = benchmark
+}
 criterion_main!(benches);

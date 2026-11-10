@@ -24,6 +24,8 @@ export default [
 
   // Exclude TypeScript files.
   "*.ts",
+  // However, Figma Code Connect templates are included
+  "!**/*.figma.ts",
 
   // Ignore VSCode files
   ".vscode/",
@@ -51,8 +53,7 @@ export default [
   "browser/app/",
   "browser/branding/**/firefox-branding.js",
   // Gzipped test file.
-  "browser/base/content/test/general/gZipOfflineChild.html",
-  "browser/base/content/test/urlbar/file_blank_but_not_blank.html",
+  "browser/base/content/test/browser-general/gZipOfflineChild.html",
   // Pre-processed template file
   "browser/components/backup/content/archive.template.html",
   // Test files that are really json not js, and don't need to be linted.
@@ -143,6 +144,10 @@ export default [
   // Service workers fixtures which require specific resource caching.
   "dom/base/test/file_js_cache.js",
   "dom/serviceworkers/test/file_js_cache.js",
+
+  // ESLint parse does not support import source yet (Bug 2063547)
+  "dom/base/test/test_wasm_offthread_compile.html",
+  "dom/base/test/jsmodules/scriptDisabled_frame.html",
 
   // Intentional broken files
   "dom/base/test/file_js_cache_syntax_error.js",
@@ -268,7 +273,6 @@ export default [
   // Intentionally invalid files
   "toolkit/components/workerloader/tests/moduleF-syntax-error.js",
   "toolkit/components/enterprisepolicies/tests/browser/config_broken_json.json",
-  "toolkit/components/normandy/test/unit/mock_api/api/v1/extension/index.json",
   "toolkit/mozapps/extensions/test/xpcshell/data/test_AddonRepository_fail.json",
 
   // Built files

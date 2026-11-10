@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "gc/GC.h"
 #include "gc/HashUtil.h"
 #include "js/friend/WindowProxy.h"  // js::IsWindow
 #include "js/HashTable.h"
@@ -126,10 +127,16 @@ bool js::NativeObject::toDictionaryMode(JSContext* cx,
     return false;
   }
 
-  obj->setShape(shape);
-
-  MOZ_ASSERT(obj->inDictionaryMode());
   obj->setDictionaryModeSlotSpan(span);
+
+  // Ensure concurrent marking can't see the new shape without the dictionary
+  // mode slot span.
+  gc::MemoryReleaseFence(obj->zone());
+
+  gc::MaybeSleepForConcurrentMarkingDelays(cx);
+
+  obj->setShape(shape);
+  MOZ_ASSERT(obj->inDictionaryMode());
 
   return true;
 }
@@ -973,19 +980,33 @@ bool NativeObject::removeProperty(JSContext* cx, Handle<NativeObject*> obj,
     obj->maybeFreeDictionaryPropSlots(cx, dictMap, mapLength);
   }
 
+  if (wasTrackedObjectFuseProp) {
+    Watchtower::finishPropertyRemove(cx, obj, prop);
+  }
+
   return true;
 }
 
 /* static */
 bool NativeObject::densifySparseElements(JSContext* cx,
-                                         Handle<NativeObject*> obj) {
+                                         Handle<NativeObject*> obj,
+                                         uint32_t newInitializedLength) {
   AutoCheckShapeConsistency check(obj);
   MOZ_ASSERT(obj->inDictionaryMode());
+  MOZ_ASSERT(newInitializedLength <= obj->getDenseCapacity());
 
-  // First generate a new dictionary shape so that the shape and map can then
-  // be updated infallibly.
+  // First generate a new dictionary shape so that the elements, shape and map
+  // can then be updated infallibly.
   if (!NativeObject::generateNewDictionaryShape(cx, obj)) {
     return false;
+  }
+
+  obj->ensureDenseInitializedLength(newInitializedLength, 0);
+
+  if (obj->compartment()->objectMaybeInIteration(obj)) {
+    // Mark the densified elements as maybe-in-iteration. See also the comment
+    // in GetIterator.
+    obj->markDenseElementsMaybeInIteration();
   }
 
   Rooted<DictionaryPropMap*> map(cx, obj->shape()->propMap()->asDictionary());

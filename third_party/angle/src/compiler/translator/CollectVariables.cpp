@@ -5,11 +5,8 @@
 //
 // CollectVariables.cpp: Collect lists of shader interface variables based on the AST.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-#    pragma allow_unsafe_buffers
-#endif
-
 #include "compiler/translator/CollectVariables.h"
+#include "common/unsafe_buffers.h"
 
 #include "angle_gl.h"
 #include "common/utilities.h"
@@ -103,10 +100,12 @@ ShaderVariable *FindVariableInInterfaceBlock(const ImmutableString &name,
 ShaderVariable *FindShaderIOBlockVariable(const ImmutableString &blockName,
                                           std::vector<ShaderVariable> *infoList)
 {
-    for (size_t index = 0; index < infoList->size(); ++index)
+    for (ShaderVariable &variable : *infoList)
     {
-        if (blockName == (*infoList)[index].structOrBlockName)
-            return &(*infoList)[index];
+        if (blockName == variable.structOrBlockName)
+        {
+            return &variable;
+        }
     }
 
     return nullptr;
@@ -117,20 +116,22 @@ ShaderVariable *FindShaderIOBlockVariable(const ImmutableString &blockName,
 class CollectVariablesTraverser : public TIntermTraverser
 {
   public:
-    CollectVariablesTraverser(std::vector<ShaderVariable> *attribs,
-                              std::vector<ShaderVariable> *outputVariables,
-                              std::vector<ShaderVariable> *uniforms,
-                              std::vector<ShaderVariable> *inputVaryings,
-                              std::vector<ShaderVariable> *outputVaryings,
-                              std::vector<ShaderVariable> *sharedVariables,
-                              std::vector<InterfaceBlock> *uniformBlocks,
-                              std::vector<InterfaceBlock> *shaderStorageBlocks,
-                              char userVariablePrefix,
-                              ShHashFunction64 hashFunction,
-                              TSymbolTable *symbolTable,
-                              GLenum shaderType,
-                              const TExtensionBehavior &extensionBehavior,
-                              bool transformFloatUniformToFP16);
+    CollectVariablesTraverser(
+        std::vector<ShaderVariable> *attribs,
+        std::vector<ShaderVariable> *outputVariables,
+        std::vector<ShaderVariable> *uniforms,
+        std::vector<ShaderVariable> *inputVaryings,
+        std::vector<ShaderVariable> *outputVaryings,
+        std::vector<ShaderVariable> *sharedVariables,
+        std::vector<InterfaceBlock> *uniformBlocks,
+        std::vector<InterfaceBlock> *shaderStorageBlocks,
+        ShHashFunction64 hashFunction,
+        NameMap *nameMap,
+        TSymbolTable *symbolTable,
+        GLenum shaderType,
+        const TExtensionBehavior &extensionBehavior,
+        bool transformFloatUniformToFP16,
+        const SamplersStaticallyUsedWithTexelFetch &samplersStaticallyUsedWithTexelFetch);
 
     bool visitGlobalQualifierDeclaration(Visit visit,
                                          TIntermGlobalQualifierDeclaration *node) override;
@@ -140,12 +141,14 @@ class CollectVariablesTraverser : public TIntermTraverser
 
   private:
     std::string getMappedName(const TSymbol *symbol) const;
+    std::string getMappedBlockName(const TSymbol *symbol) const;
 
     void setFieldOrVariableProperties(const TType &type,
                                       bool staticUse,
                                       bool isShaderIOBlock,
                                       bool isPatch,
                                       bool isUniform,
+                                      const SelectedFields *fieldsStaticallyUsedWithTexelFetch,
                                       ShaderVariable *variableOut) const;
     void setFieldProperties(const TType &type,
                             const ImmutableString &name,
@@ -153,11 +156,13 @@ class CollectVariablesTraverser : public TIntermTraverser
                             bool isShaderIOBlock,
                             bool isPatch,
                             bool isUniform,
+                            const SelectedFields *fieldsStaticallyUsedWithTexelFetch,
                             SymbolType symbolType,
                             ShaderVariable *variableOut) const;
     void setCommonVariableProperties(const TType &type,
                                      const TVariable &variable,
                                      bool isUniform,
+                                     const SelectedFields *fieldsStaticallyUsedWithTexelFetch,
                                      ShaderVariable *variableOut) const;
 
     ShaderVariable recordAttribute(const TIntermSymbol &variable) const;
@@ -255,9 +260,10 @@ class CollectVariablesTraverser : public TIntermTraverser
     bool mBoundingBoxAdded;
     bool mTessCoordAdded;
     bool mTransformFloatUniformToFP16;
+    const SamplersStaticallyUsedWithTexelFetch &mSamplersStaticallyUsedWithTexelFetch;
 
-    char mUserVariablePrefix;
     ShHashFunction64 mHashFunction;
+    NameMap *mNameMap;
 
     GLenum mShaderType;
     const TExtensionBehavior &mExtensionBehavior;
@@ -272,12 +278,13 @@ CollectVariablesTraverser::CollectVariablesTraverser(
     std::vector<sh::ShaderVariable> *sharedVariables,
     std::vector<sh::InterfaceBlock> *uniformBlocks,
     std::vector<sh::InterfaceBlock> *shaderStorageBlocks,
-    char userVariablePrefix,
     ShHashFunction64 hashFunction,
+    NameMap *nameMap,
     TSymbolTable *symbolTable,
     GLenum shaderType,
     const TExtensionBehavior &extensionBehavior,
-    const bool transformFloatUniformToFP16)
+    const bool transformFloatUniformToFP16,
+    const SamplersStaticallyUsedWithTexelFetch &samplersStaticallyUsedWithTexelFetch)
     : TIntermTraverser(true, false, false, symbolTable),
       mAttribs(attribs),
       mOutputVariables(outputVariables),
@@ -331,15 +338,21 @@ CollectVariablesTraverser::CollectVariablesTraverser(
       mBoundingBoxAdded(false),
       mTessCoordAdded(false),
       mTransformFloatUniformToFP16(transformFloatUniformToFP16),
-      mUserVariablePrefix(userVariablePrefix),
+      mSamplersStaticallyUsedWithTexelFetch(samplersStaticallyUsedWithTexelFetch),
       mHashFunction(hashFunction),
+      mNameMap(nameMap),
       mShaderType(shaderType),
       mExtensionBehavior(extensionBehavior)
 {}
 
 std::string CollectVariablesTraverser::getMappedName(const TSymbol *symbol) const
 {
-    return HashName(symbol, mUserVariablePrefix, mHashFunction, nullptr).data();
+    return HashName(symbol, kUserVariableNamePrefix, mHashFunction, mNameMap).data();
+}
+
+std::string CollectVariablesTraverser::getMappedBlockName(const TSymbol *symbol) const
+{
+    return HashName(symbol, kUserBlockNamePrefix, mHashFunction, mNameMap).data();
 }
 
 void CollectVariablesTraverser::setBuiltInInfoFromSymbol(const TVariable &variable,
@@ -356,7 +369,7 @@ void CollectVariablesTraverser::setBuiltInInfoFromSymbol(const TVariable &variab
                    type.getQualifier() == EvqTessLevelOuter ||
                    type.getQualifier() == EvqBoundingBox;
 
-    setFieldOrVariableProperties(type, true, isShaderIOBlock, isPatch, false, info);
+    setFieldOrVariableProperties(type, true, isShaderIOBlock, isPatch, false, nullptr, info);
 }
 
 void CollectVariablesTraverser::recordBuiltInVaryingUsed(const TVariable &variable,
@@ -743,18 +756,28 @@ void CollectVariablesTraverser::visitSymbol(TIntermSymbol *symbol)
     }
 }
 
-void CollectVariablesTraverser::setFieldOrVariableProperties(const TType &type,
-                                                             bool staticUse,
-                                                             bool isShaderIOBlock,
-                                                             bool isPatch,
-                                                             const bool isUniform,
-                                                             ShaderVariable *variableOut) const
+void CollectVariablesTraverser::setFieldOrVariableProperties(
+    const TType &type,
+    bool staticUse,
+    bool isShaderIOBlock,
+    bool isPatch,
+    const bool isUniform,
+    const SelectedFields *fieldsStaticallyUsedWithTexelFetch,
+    ShaderVariable *variableOut) const
 {
     ASSERT(variableOut);
 
     variableOut->staticUse       = staticUse;
     variableOut->isShaderIOBlock = isShaderIOBlock;
     variableOut->isPatch         = isPatch;
+
+    if (fieldsStaticallyUsedWithTexelFetch != nullptr &&
+        fieldsStaticallyUsedWithTexelFetch->subfields.empty())
+    {
+        // Not a struct, so the uniform is the sampler itself and has been statically used with
+        // texelFetch.
+        variableOut->texelFetchStaticUse = true;
+    }
 
     const TStructure *structure           = type.getStruct();
     const TInterfaceBlock *interfaceBlock = type.getInterfaceBlock();
@@ -771,14 +794,29 @@ void CollectVariablesTraverser::setFieldOrVariableProperties(const TType &type,
 
         const TFieldList &fields = structure->fields();
 
+        uint32_t fieldIndex = 0;
         for (const TField *field : fields)
         {
             // Regardless of the variable type (uniform, in/out etc.) its fields are always plain
             // ShaderVariable objects.
             ShaderVariable fieldVariable;
+            const SelectedFields *subfieldsStaticallyUsedWithTexelFetch = nullptr;
+            if (fieldsStaticallyUsedWithTexelFetch != nullptr)
+            {
+                // Check if any subfields are used with texelFetch.
+                auto iter = fieldsStaticallyUsedWithTexelFetch->subfields.find(fieldIndex);
+                if (iter != fieldsStaticallyUsedWithTexelFetch->subfields.end())
+                {
+                    subfieldsStaticallyUsedWithTexelFetch = iter->second;
+                }
+            }
+
             setFieldProperties(*field->type(), field->name(), staticUse, isShaderIOBlock, isPatch,
-                               isUniform, field->symbolType(), &fieldVariable);
+                               isUniform, subfieldsStaticallyUsedWithTexelFetch,
+                               field->symbolType(), &fieldVariable);
             variableOut->fields.push_back(fieldVariable);
+
+            ++fieldIndex;
         }
     }
     else if (interfaceBlock && isShaderIOBlock)
@@ -789,10 +827,10 @@ void CollectVariablesTraverser::setFieldOrVariableProperties(const TType &type,
         {
             variableOut->structOrBlockName = interfaceBlock->name().data();
             variableOut->mappedStructOrBlockName =
-                isPerVertex
-                    ? interfaceBlock->name().data()
-                    : HashName(interfaceBlock->name(), mUserVariablePrefix, mHashFunction, nullptr)
-                          .data();
+                isPerVertex ? interfaceBlock->name().data()
+                            : HashName(interfaceBlock->name(), kUserBlockNamePrefix, mHashFunction,
+                                       mNameMap)
+                                  .data();
         }
         const TFieldList &fields = interfaceBlock->fields();
         for (const TField *field : fields)
@@ -800,7 +838,7 @@ void CollectVariablesTraverser::setFieldOrVariableProperties(const TType &type,
             ShaderVariable fieldVariable;
 
             setFieldProperties(*field->type(), field->name(), staticUse, true, isPatch, false,
-                               field->symbolType(), &fieldVariable);
+                               nullptr, field->symbolType(), &fieldVariable);
             fieldVariable.isShaderIOBlock = true;
             variableOut->fields.push_back(fieldVariable);
         }
@@ -833,28 +871,33 @@ void CollectVariablesTraverser::setFieldOrVariableProperties(const TType &type,
     }
 }
 
-void CollectVariablesTraverser::setFieldProperties(const TType &type,
-                                                   const ImmutableString &name,
-                                                   bool staticUse,
-                                                   bool isShaderIOBlock,
-                                                   bool isPatch,
-                                                   const bool isUniform,
-                                                   SymbolType symbolType,
-                                                   ShaderVariable *variableOut) const
+void CollectVariablesTraverser::setFieldProperties(
+    const TType &type,
+    const ImmutableString &name,
+    bool staticUse,
+    bool isShaderIOBlock,
+    bool isPatch,
+    const bool isUniform,
+    const SelectedFields *fieldsStaticallyUsedWithTexelFetch,
+    SymbolType symbolType,
+    ShaderVariable *variableOut) const
 {
     ASSERT(variableOut);
-    setFieldOrVariableProperties(type, staticUse, isShaderIOBlock, isPatch, isUniform, variableOut);
+    setFieldOrVariableProperties(type, staticUse, isShaderIOBlock, isPatch, isUniform,
+                                 fieldsStaticallyUsedWithTexelFetch, variableOut);
     variableOut->name.assign(name.data(), name.length());
     variableOut->mappedName =
         (symbolType == SymbolType::BuiltIn)
             ? name.data()
-            : HashName(name, mUserVariablePrefix, mHashFunction, nullptr).data();
+            : HashName(name, kUserVariableNamePrefix, mHashFunction, mNameMap).data();
 }
 
-void CollectVariablesTraverser::setCommonVariableProperties(const TType &type,
-                                                            const TVariable &variable,
-                                                            const bool isUniform,
-                                                            ShaderVariable *variableOut) const
+void CollectVariablesTraverser::setCommonVariableProperties(
+    const TType &type,
+    const TVariable &variable,
+    const bool isUniform,
+    const SelectedFields *fieldsStaticallyUsedWithTexelFetch,
+    ShaderVariable *variableOut) const
 {
     ASSERT(variableOut);
     ASSERT(type.getInterfaceBlock() == nullptr || IsShaderIoBlock(type.getQualifier()) ||
@@ -864,7 +907,8 @@ void CollectVariablesTraverser::setCommonVariableProperties(const TType &type,
     const bool isShaderIOBlock = type.getInterfaceBlock() != nullptr;
     const bool isPatch = type.getQualifier() == EvqPatchIn || type.getQualifier() == EvqPatchOut;
 
-    setFieldOrVariableProperties(type, staticUse, isShaderIOBlock, isPatch, isUniform, variableOut);
+    setFieldOrVariableProperties(type, staticUse, isShaderIOBlock, isPatch, isUniform,
+                                 fieldsStaticallyUsedWithTexelFetch, variableOut);
 
     const bool isNamed = variable.symbolType() != SymbolType::Empty;
 
@@ -901,7 +945,7 @@ void CollectVariablesTraverser::setCommonVariableProperties(const TType &type,
         variableOut->structOrBlockName.assign(interfaceBlock->name().data(),
                                               interfaceBlock->name().length());
         variableOut->mappedStructOrBlockName =
-            HashName(interfaceBlock->name(), mUserVariablePrefix, mHashFunction, nullptr).data();
+            HashName(interfaceBlock->name(), kUserBlockNamePrefix, mHashFunction, mNameMap).data();
         variableOut->isShaderIOBlock = true;
     }
 }
@@ -912,7 +956,7 @@ ShaderVariable CollectVariablesTraverser::recordAttribute(const TIntermSymbol &v
     ASSERT(!type.getStruct());
 
     ShaderVariable attribute;
-    setCommonVariableProperties(type, variable.variable(), false, &attribute);
+    setCommonVariableProperties(type, variable.variable(), false, nullptr, &attribute);
 
     attribute.location = type.getLayoutQualifier().location;
     return attribute;
@@ -924,7 +968,7 @@ ShaderVariable CollectVariablesTraverser::recordOutputVariable(const TIntermSymb
     ASSERT(!type.getStruct());
 
     ShaderVariable outputVariable;
-    setCommonVariableProperties(type, variable.variable(), false, &outputVariable);
+    setCommonVariableProperties(type, variable.variable(), false, nullptr, &outputVariable);
 
     outputVariable.location = type.getLayoutQualifier().location;
     outputVariable.index    = type.getLayoutQualifier().index;
@@ -937,7 +981,7 @@ ShaderVariable CollectVariablesTraverser::recordVarying(const TIntermSymbol &var
     const TType &type = variable.getType();
 
     ShaderVariable varying;
-    setCommonVariableProperties(type, variable.variable(), false, &varying);
+    setCommonVariableProperties(type, variable.variable(), false, nullptr, &varying);
     varying.location = type.getLayoutQualifier().location;
 
     switch (type.getQualifier())
@@ -1027,9 +1071,10 @@ void CollectVariablesTraverser::recordInterfaceBlock(const char *instanceName,
     ASSERT(blockType);
 
     interfaceBlock->name       = blockType->name().data();
-    interfaceBlock->mappedName = getMappedName(blockType);
+    interfaceBlock->mappedName = getMappedBlockName(blockType);
 
-    const bool isGLInBuiltin = (instanceName != nullptr) && strncmp(instanceName, "gl_in", 5u) == 0;
+    const bool isGLInBuiltin =
+        (instanceName != nullptr) && ANGLE_UNSAFE_TODO(strncmp(instanceName, "gl_in", 5u)) == 0;
     if (instanceName != nullptr)
     {
         interfaceBlock->instanceName = instanceName;
@@ -1055,6 +1100,8 @@ void CollectVariablesTraverser::recordInterfaceBlock(const char *instanceName,
     if (interfaceBlock->blockType == BlockType::kBlockUniform ||
         interfaceBlock->blockType == BlockType::kBlockBuffer)
     {
+        interfaceBlock->isRowMajorLayout =
+            interfaceBlockType.getLayoutQualifier().matrixPacking == EmpRowMajor;
         interfaceBlock->binding          = blockType->blockBinding();
         interfaceBlock->layout           = GetBlockLayoutType(blockType->blockStorage());
     }
@@ -1088,10 +1135,10 @@ void CollectVariablesTraverser::recordInterfaceBlock(const char *instanceName,
         }
 
         ShaderVariable fieldVariable;
-        setFieldProperties(fieldType, field->name(), staticUse, false, false, false,
+        setFieldProperties(fieldType, field->name(), staticUse, false, false, false, nullptr,
                            field->symbolType(), &fieldVariable);
         fieldVariable.isRowMajorLayout =
-            (fieldType.getLayoutQualifier().matrixPacking == EmpRowMajor);
+            fieldType.getLayoutQualifier().matrixPacking == EmpRowMajor;
         interfaceBlock->fields.push_back(fieldVariable);
 
         // The SSBO is not readonly if any field is not readonly.
@@ -1122,7 +1169,14 @@ ShaderVariable CollectVariablesTraverser::recordUniform(const TIntermSymbol &var
     {
         uniform.isFloat16 = true;
     }
-    setCommonVariableProperties(variable.getType(), variable.variable(), true, &uniform);
+    auto fieldsStaticallyUsedWithTexelFetch =
+        mSamplersStaticallyUsedWithTexelFetch.find(&variable.variable());
+    setCommonVariableProperties(
+        variable.getType(), variable.variable(), true,
+        fieldsStaticallyUsedWithTexelFetch == mSamplersStaticallyUsedWithTexelFetch.end()
+            ? nullptr
+            : &fieldsStaticallyUsedWithTexelFetch->second,
+        &uniform);
     uniform.binding = variable.getType().getLayoutQualifier().binding;
     uniform.imageUnitFormat =
         GetImageInternalFormatType(variable.getType().getLayoutQualifier().imageInternalFormat);
@@ -1312,13 +1366,13 @@ bool CollectVariablesTraverser::visitBinary(Visit, TIntermBinary *binaryNode)
             // The layout of the block cannot be changed by the translator based on which fields are
             // active, and there isn't anything else that ANGLE or the application would
             // realistically do with a knowledge that some fields may be inactive.
-            for (size_t fieldIndex = 0; fieldIndex < namedBlock->fields.size(); ++fieldIndex)
+            for (ShaderVariable &field : namedBlock->fields)
             {
                 // TODO(oetuaho): Would be nicer to record static use of fields of named interface
                 // blocks more accurately at parse time - now we only mark the fields statically
                 // used if they are active. http://anglebug.com/42261150 We need to mark this field
                 // and all of its sub-fields, as static/active
-                MarkActive(&namedBlock->fields[fieldIndex]);
+                MarkActive(&field);
             }
         }
 
@@ -1335,26 +1389,28 @@ bool CollectVariablesTraverser::visitBinary(Visit, TIntermBinary *binaryNode)
 
 }  // anonymous namespace
 
-void CollectVariables(TIntermBlock *root,
-                      std::vector<ShaderVariable> *attributes,
-                      std::vector<ShaderVariable> *outputVariables,
-                      std::vector<ShaderVariable> *uniforms,
-                      std::vector<ShaderVariable> *inputVaryings,
-                      std::vector<ShaderVariable> *outputVaryings,
-                      std::vector<ShaderVariable> *sharedVariables,
-                      std::vector<InterfaceBlock> *uniformBlocks,
-                      std::vector<InterfaceBlock> *shaderStorageBlocks,
-                      char userVariablePrefix,
-                      ShHashFunction64 hashFunction,
-                      TSymbolTable *symbolTable,
-                      GLenum shaderType,
-                      const TExtensionBehavior &extensionBehavior,
-                      const bool transformFloatUniformToFP16)
+void CollectVariables(
+    TIntermBlock *root,
+    std::vector<ShaderVariable> *attributes,
+    std::vector<ShaderVariable> *outputVariables,
+    std::vector<ShaderVariable> *uniforms,
+    std::vector<ShaderVariable> *inputVaryings,
+    std::vector<ShaderVariable> *outputVaryings,
+    std::vector<ShaderVariable> *sharedVariables,
+    std::vector<InterfaceBlock> *uniformBlocks,
+    std::vector<InterfaceBlock> *shaderStorageBlocks,
+    ShHashFunction64 hashFunction,
+    NameMap *nameMap,
+    TSymbolTable *symbolTable,
+    GLenum shaderType,
+    const TExtensionBehavior &extensionBehavior,
+    const bool transformFloatUniformToFP16,
+    const SamplersStaticallyUsedWithTexelFetch &samplersStaticallyUsedWithTexelFetch)
 {
     CollectVariablesTraverser collect(
         attributes, outputVariables, uniforms, inputVaryings, outputVaryings, sharedVariables,
-        uniformBlocks, shaderStorageBlocks, userVariablePrefix, hashFunction, symbolTable,
-        shaderType, extensionBehavior, transformFloatUniformToFP16);
+        uniformBlocks, shaderStorageBlocks, hashFunction, nameMap, symbolTable, shaderType,
+        extensionBehavior, transformFloatUniformToFP16, samplersStaticallyUsedWithTexelFetch);
     root->traverse(&collect);
 
     // Attributes are simply vertex shader inputs (and compute shader attributes),

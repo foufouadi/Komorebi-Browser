@@ -32,3 +32,5 @@ vendoring:
 
   patches:
     - hsts.patch
+    - sslcontext.patch
+    - cgi_py315.patch

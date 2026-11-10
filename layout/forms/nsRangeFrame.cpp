@@ -40,7 +40,7 @@ using namespace mozilla::dom;
 using namespace mozilla::image;
 
 nsIFrame* NS_NewRangeFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell) nsRangeFrame(aStyle, aPresShell->GetPresContext());
+  return new nsRangeFrame(aStyle, aPresShell->GetPresContext());
 }
 
 nsRangeFrame::nsRangeFrame(ComputedStyle* aStyle, nsPresContext* aPresContext)
@@ -656,9 +656,10 @@ bool nsRangeFrame::ShouldUseNativeStyle() const {
 
   return StyleDisplay()->EffectiveAppearance() == StyleAppearance::Range &&
          trackFrame &&
-         !trackFrame->Style()->HasAuthorSpecifiedBorderOrBackground() &&
+         !trackFrame->Style()->HasAuthorOrUserSpecifiedBorderOrBackground() &&
          progressFrame &&
-         !progressFrame->Style()->HasAuthorSpecifiedBorderOrBackground() &&
+         !progressFrame->Style()
+              ->HasAuthorOrUserSpecifiedBorderOrBackground() &&
          thumbFrame &&
-         !thumbFrame->Style()->HasAuthorSpecifiedBorderOrBackground();
+         !thumbFrame->Style()->HasAuthorOrUserSpecifiedBorderOrBackground();
 }

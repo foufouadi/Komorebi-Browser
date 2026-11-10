@@ -15,6 +15,12 @@ LINUX_WORKER_TYPES = {
     "default": "t-linux-docker-noscratch-amd",
 }
 
+# linux worker types running the in-tree test docker image
+LINUX_DOCKER_WORKER_TYPES = set(LINUX_WORKER_TYPES.values()) | {
+    "t-linux-wayland",
+    "t-linux-xlarge-wayland",
+}
+
 # windows worker types keyed by test-platform and virtualization
 WINDOWS_WORKER_TYPES = {
     "windows10-64": {  # source-test
@@ -162,6 +168,7 @@ MACOSX_WORKER_TYPES = {
     "macosx1500-64": "t-osx-1500-m4",
     "macosx1500-aarch64": "t-osx-1500-m4",
     "macosx1500-aarch64-vms": "t-osx-1500-m-vms",
+    "macosx2700-aarch64": "t-osx-2700-m4",
 }
 
 transforms = TransformSequence()
@@ -192,6 +199,8 @@ def set_worker_type(config, tasks):
             task["worker-type"] = MACOSX_WORKER_TYPES["macosx1500-aarch64"]
         elif test_platform.startswith("macosx1500-64"):
             task["worker-type"] = MACOSX_WORKER_TYPES["macosx1500-64"]
+        elif test_platform.startswith("macosx2700-aarch64"):
+            task["worker-type"] = MACOSX_WORKER_TYPES["macosx2700-aarch64"]
         elif test_platform.startswith("win"):
             # figure out what platform the job needs to run on
             if task["virtualization"] == "hardware":
@@ -240,10 +249,7 @@ def set_worker_type(config, tasks):
             else:
                 task["worker-type"] = "t-bitbar-gw-perf-s24"
         elif test_platform.startswith("android-hw-a55"):
-            if task["suite"] != "raptor":
-                task["worker-type"] = "t-lambda-perf-a55"
-            else:
-                task["worker-type"] = "t-bitbar-gw-perf-a55"
+            task["worker-type"] = "t-lambda-perf-a55"
         elif test_platform.startswith("android-em-14-arm64"):
             task["worker-type"] = MACOSX_WORKER_TYPES["macosx1500-aarch64"]
         elif test_platform.startswith("android-em-"):
@@ -257,15 +263,10 @@ def set_worker_type(config, tasks):
             elif task.get("suite", "") in ["talos", "raptor"] and not task[
                 "build-platform"
             ].startswith("linux64-ccov"):
-                if test_platform.startswith("linux2404"):
-                    if "browsertime-network-bench" in task.get("test-name"):
-                        task["worker-type"] = "t-linux-netperf-2404"
-                    else:
-                        task["worker-type"] = "t-linux-talos-2404"
-                elif "browsertime-network-bench" in task.get("test-name"):
-                    task["worker-type"] = "t-linux-netperf-1804"
+                if "browsertime-network-bench" in task.get("test-name"):
+                    task["worker-type"] = "t-linux-netperf-2404"
                 else:
-                    task["worker-type"] = "t-linux-talos-1804"
+                    task["worker-type"] = "t-linux-talos-2404"
             else:
                 task["worker-type"] = LINUX_WORKER_TYPES[task["instance-size"]]
         else:
@@ -285,6 +286,40 @@ def set_wayland_env(config, tasks):
         env["MOZ_ENABLE_WAYLAND"] = "1"
         env["WAYLAND_DISPLAY"] = "wayland-0"
         env["NEED_GNOME_KEYRING"] = "true"
+        yield task
+
+
+@transforms.add
+def set_ml_accelerator_env(config, tasks):
+    """Tell the ML tests that llama.cpp must find an accelerator (Metal)."""
+    for task in tasks:
+        if (
+            task["test-platform"].startswith("macosx")
+            and task["worker-type"] == MACOSX_WORKER_TYPES["macosx1500-aarch64"]
+        ):
+            env = task.setdefault("worker", {}).setdefault("env", {})
+            env["MOZ_ML_EXPECT_ACCELERATOR"] = "1"
+        yield task
+
+
+@transforms.add
+def set_screenshots_font_antialiasing(config, tasks):
+    """The Linux test image disables font antialiasing image-wide to match
+    releng's setup; mozscreenshots wants real antialiased text for its
+    comparison screenshots, so opt this task back in without touching the
+    other tasks sharing that image.
+
+    The config file only exists in the in-tree Linux docker image, so only
+    tasks running there can point FONTCONFIG_FILE at it: anywhere else this
+    would point fontconfig at a missing file rather than merely losing
+    antialiasing."""
+    for task in tasks:
+        if (
+            task["test-name"] == "mochitest-browser-screenshots"
+            and task["worker-type"] in LINUX_DOCKER_WORKER_TYPES
+        ):
+            env = task.setdefault("worker", {}).setdefault("env", {})
+            env["FONTCONFIG_FILE"] = "/builds/worker/.fonts-aa.conf"
         yield task
 
 

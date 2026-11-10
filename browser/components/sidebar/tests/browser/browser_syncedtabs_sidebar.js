@@ -90,6 +90,21 @@ const tabClients = [
   },
 ];
 
+let gSandbox;
+
+/**
+ * A task that throws never reaches its own `sandbox.restore()`. Restoring a
+ * leftover sandbox before the next one is created, and again at the end of the
+ * file, keeps those stubs out of the next test file.
+ */
+function createSandbox() {
+  gSandbox?.restore();
+  gSandbox = sinon.createSandbox();
+  return gSandbox;
+}
+
+registerCleanupFunction(() => gSandbox?.restore());
+
 function verifyContexMenuItemsByL10nIds(menu, expectedItems, message) {
   // verify context menu items by comparing l10n-ids and placement of separators
   const actualItems = Array.from(
@@ -101,13 +116,17 @@ function verifyContexMenuItemsByL10nIds(menu, expectedItems, message) {
   Assert.deepEqual(actualItems, expectedItems, message);
 }
 
-async function waitForSyncedTabListInCard(component, cardIndex = 0) {
+async function waitForSyncedTabListInCard(
+  component,
+  cardIndex = 0,
+  minRows = 1
+) {
   info("Waiting for the cards list to be populated");
   await BrowserTestUtils.waitForMutationCondition(
-    component,
+    component.shadowRoot,
     { childList: true, subtree: true },
     () => {
-      return component.cards.length;
+      return component.cards.length > cardIndex;
     }
   );
   const card = component.cards[cardIndex];
@@ -118,14 +137,14 @@ async function waitForSyncedTabListInCard(component, cardIndex = 0) {
     { childList: true, subtree: true },
     () => {
       info(`Got rowEls: ${tabList.rowEls?.length}`);
-      return tabList.rowEls?.length;
+      return tabList.rowEls?.length >= minRows;
     }
   );
   return tabList.rowEls;
 }
 
 add_task(async function test_tabs() {
-  const sandbox = sinon.createSandbox();
+  const sandbox = createSandbox();
   sandbox.stub(lazy.SyncedTabsErrorHandler, "getErrorType").returns(null);
   sandbox.stub(lazy.TabsSetupFlowManager, "uiStateIndex").value(4);
   sandbox.stub(lazy.SyncedTabs, "getTabClients").resolves(tabClients);
@@ -158,6 +177,11 @@ add_task(async function test_tabs() {
       const tabData = client.tabs[j];
       Assert.equal(row.title, tabData.title, `Tab ${j + 1} has correct title.`);
       Assert.equal(row.url, tabData.url, `Tab ${j + 1} has correct URL.`);
+      await assertRowTooltip(
+        row,
+        `${tabData.title}\n${tabData.url}`,
+        `Tab ${j + 1} tooltip shows the title and URL.`
+      );
 
       // We need to wait for the document to flush to ensure it's completely opened
       await content.promiseDocumentFlushed(() => {});
@@ -298,7 +322,7 @@ add_task(async function test_syncedtabs_searchbox_focus_and_context_menu() {
 });
 
 add_task(async function test_close_remote_tab_context_menu() {
-  const sandbox = sinon.createSandbox();
+  const sandbox = createSandbox();
   sandbox.stub(lazy.SyncedTabsErrorHandler, "getErrorType").returns(null);
   sandbox.stub(lazy.TabsSetupFlowManager, "uiStateIndex").value(4);
   sandbox.stub(lazy.SyncedTabs, "getTabClients").resolves(tabClients);
@@ -339,7 +363,7 @@ add_task(async function test_close_remote_tab_context_menu() {
 });
 
 add_task(async function test_device_header_context_menu() {
-  const sandbox = sinon.createSandbox();
+  const sandbox = createSandbox();
   sandbox.stub(lazy.SyncedTabsErrorHandler, "getErrorType").returns(null);
   sandbox.stub(lazy.TabsSetupFlowManager, "uiStateIndex").value(4);
   sandbox.stub(lazy.SyncedTabs, "getTabClients").resolves(tabClients);
@@ -427,7 +451,7 @@ add_task(async function test_device_header_context_menu() {
 });
 
 add_task(async function test_connect_additional_devices() {
-  const sandbox = sinon.createSandbox();
+  const sandbox = createSandbox();
   sandbox.stub(lazy.SyncedTabsErrorHandler, "getErrorType").returns(null);
   sandbox.stub(lazy.TabsSetupFlowManager, "uiStateIndex").value(2);
   sandbox.stub(lazy.SyncedTabs, "getTabClients").resolves([
@@ -488,7 +512,7 @@ add_task(async function test_connect_additional_devices() {
 });
 
 add_task(async function test_tabs_click_auxclick() {
-  const sandbox = sinon.createSandbox();
+  const sandbox = createSandbox();
   sandbox.stub(lazy.SyncedTabsErrorHandler, "getErrorType").returns(null);
   sandbox.stub(lazy.TabsSetupFlowManager, "uiStateIndex").value(4);
   sandbox.stub(lazy.SyncedTabs, "getTabClients").resolves(tabClients);
@@ -616,7 +640,7 @@ add_task(async function test_tabs_click_auxclick() {
 
 add_task(async function test_open_in_new_tab_context_menu() {
   // Test synced tabs context menu functionality for "Open in new Tab"
-  const sandbox = sinon.createSandbox();
+  const sandbox = createSandbox();
   sandbox.stub(lazy.SyncedTabsErrorHandler, "getErrorType").returns(null);
   sandbox.stub(lazy.TabsSetupFlowManager, "uiStateIndex").value(4);
   sandbox.stub(lazy.SyncedTabs, "getTabClients").resolves(tabClients);
@@ -636,19 +660,7 @@ add_task(async function test_open_in_new_tab_context_menu() {
 
   // Verify "Open in new Tab" context menu item
   info("Verify 'Open in new Tab' context menu item.");
-  let secondTab;
-  await BrowserTestUtils.waitForMutationCondition(
-    component.shadowRoot,
-    { childList: true, subtree: true },
-    () => {
-      const { lists } = component;
-      if (lists.length && lists[0]?.rowEls?.length > 1) {
-        secondTab = lists[0].rowEls[1];
-        return true;
-      }
-      return false;
-    }
-  );
+  const [, secondTab] = await waitForSyncedTabListInCard(component, 0, 2);
 
   // Wait for new tab to open when activating menu item
   // Use the URL from the second tab in our test data
@@ -691,7 +703,7 @@ add_task(async function test_open_in_new_tab_context_menu() {
 
 add_task(async function test_open_in_new_container_tab_context_menu() {
   // Test synced tabs context menu functionality for "Open in new container Tab"
-  const sandbox = sinon.createSandbox();
+  const sandbox = createSandbox();
   sandbox.stub(lazy.SyncedTabsErrorHandler, "getErrorType").returns(null);
   sandbox.stub(lazy.TabsSetupFlowManager, "uiStateIndex").value(4);
   sandbox.stub(lazy.SyncedTabs, "getTabClients").resolves(tabClients);
@@ -711,19 +723,7 @@ add_task(async function test_open_in_new_container_tab_context_menu() {
 
   // Verify "Open in new container Tab" context menu item
   info("Verify 'Open in new container Tab' context menu item.");
-  let secondTab;
-  await BrowserTestUtils.waitForMutationCondition(
-    component.shadowRoot,
-    { childList: true, subtree: true },
-    () => {
-      const { lists } = component;
-      if (lists.length && lists[0]?.rowEls?.length > 1) {
-        secondTab = lists[0].rowEls[1];
-        return true;
-      }
-      return false;
-    }
-  );
+  const [, secondTab] = await waitForSyncedTabListInCard(component, 0, 2);
 
   // Wait for new tab to open when activating menu item
   const promiseTabOpened = BrowserTestUtils.waitForNewTab(

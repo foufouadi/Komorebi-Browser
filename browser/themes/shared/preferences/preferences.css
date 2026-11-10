@@ -73,7 +73,7 @@
 
 #search-container {
   position: sticky;
-  top: 0;
+  inset-block-start: 0;
   /* Bug 2026689 Negative margin is used here to hide the borders of setting-controls on scroll
      as well as the shadow to the left of the searchbar */
   margin-inline-start: -4px;
@@ -83,20 +83,19 @@
      up after searching. */
   z-index: 2;
   background-color: var(--background-color-canvas);
-  padding-top: var(--page-space-block-start);
-  padding-bottom: var(--search-container-padding);
+  padding-block: var(--page-space-block-start) var(--search-container-padding);
   padding-inline: var(--focus-outline-offset);
   /* Ensure focus indicators on elements below the search container
      aren't obscured. */
-  margin-bottom: var(--search-container-margin);
+  margin-block-end: var(--search-container-margin);
+
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-small);
 }
 
 #searchInput {
   width: 100%;
-}
-
-#policies-container-content:not([hidden]) + #searchInput {
-  margin-block-start: var(--space-small);
 }
 
 .main-content {
@@ -104,7 +103,7 @@
   --search-container-margin: calc(var(--focus-outline-width) + var(--focus-outline-offset));
 
   contain: inline-size;
-  padding-top: 0;
+  padding-block-start: 0;
   scroll-padding-top: calc(calc(2 * var(--page-space-block-start)) + var(--search-container-padding) + var(--search-container-margin));
 
   @media (max-width: 950px) {
@@ -131,13 +130,6 @@ setting-group[data-category] {
   margin: 0 0 var(--space-xlarge);
 }
 
-/* Bug 2002963 - payments and addresses are in a groupbox together, but they probably shouldn't be */
-#formAutofillGroupBox {
-  display: flex;
-  flex-direction: column;
-  gap: 32px;
-}
-
 html|h1 {
   margin: 0 0 var(--space-large);
 }
@@ -151,7 +143,7 @@ description.indent,
   color: var(--text-color-deemphasized);
 
   /* Ensures margin on checkboxes, radios, and description don't create a big gap between the input and indented description */
-  margin-top: calc(var(--space-xsmall) * -1);
+  margin-block-start: calc(var(--space-xsmall) * -1);
 }
 
 button,
@@ -177,11 +169,10 @@ label {
 
 label {
   margin: var(--space-xxsmall) 0;
+}
 
-  &.tail-with-learn-more + a {
-    margin-block: var(--space-xxsmall);
-    margin-inline: var(--space-small) 0;
-  }
+#urlLabel {
+  margin-block-end: var(--space-small);
 }
 
 .description-deemphasized {
@@ -191,11 +182,6 @@ label {
 .firefoxLabs-description {
   color: var(--text-color-deemphasized);
   margin: 0;
-}
-
-.tip-caption {
-  font-size: 0.9em;
-  color: var(--text-color-deemphasized);
 }
 
 menulist::part(label),
@@ -211,17 +197,6 @@ button > hbox > label {
 checkbox,
 radio {
   margin: var(--space-small) 0;
-
-  &.tail-with-learn-more + a {
-    margin-block: var(--space-small);
-    margin-inline: var(--space-small) 0;
-  }
-}
-
-/* Add a bit of space to the end of descriptions to
- * leave margin with e.g. additional buttons on the side. */
-.description-with-side-element {
-  margin-inline-end: 10px !important;
 }
 
 .learnMore {
@@ -283,8 +258,8 @@ radio {
 
   /* The first subcategory title for each category should not have margin-top. */
   .subcategory:not([hidden]) ~ .subcategory {
-    padding-top: var(--space-xxlarge);
-    border-top: 1px solid var(--border-color);
+    padding-block-start: var(--space-xxlarge);
+    border-block-start: 1px solid var(--border-color);
   }
 }
 
@@ -443,136 +418,21 @@ richlistitem[selected] .actionsMenu:focus-visible {
   outline-offset: -3px;
 }
 
-/* Home Pane */
+/** SRD Search Pane START **/
 
-#homepageGroup menulist,
-#homepageGroup html|input {
-  margin: var(--space-xsmall) 0;
+#defaultEngineNormal,
+#defaultPrivateEngine {
+  max-width: var(--search-engine-name-max-width);
 }
 
-#homepageGroup html|input {
-  text-align: match-parent;
+#engineList {
+  --box-group-max-height: 500px;
 }
 
-#homepageGroup:-moz-locale-dir(rtl) html|input {
-  unicode-bidi: plaintext;
-}
-
-#homepageAndNewWindowsOption {
-  margin-top: 20px;
-}
-
-#homepageGroup:-moz-locale-dir(rtl) panel[type="autocomplete-richlistbox"] {
-  direction: rtl;
-}
-
-.homepage-buttons > .homepage-button {
-  flex: 1 auto;
-}
-
-.homepage-button:first-of-type {
-  margin-inline-start: 0;
-}
-
-.homepage-button:last-of-type {
-  margin-inline-end: 0;
-}
-
-#homeContentsGroup .checkbox-icon[src] {
-  -moz-context-properties: fill;
-  fill: currentColor;
-  margin-inline-end: var(--checkbox-margin-inline);
-  width: 16px;
-}
-
-#homeContentsGroup > [data-subcategory] {
-  margin-top: 14px;
-}
-
-#homeContentsGroup > [data-subcategory] .section-checkbox {
-  font-weight: var(--font-weight-semibold);
-}
-
-#homeContentsGroup > [data-subcategory] > vbox menulist {
-  margin-block: 0;
-}
-
-/* Align fix for prefs that have a text link in the headline */
-#homeContentsGroup > [data-subcategory] > hbox {
-  align-items: last baseline;
-}
-
-#homeContentsGroup .checkbox-label {
-  margin-inline-end: var(--space-small);
-}
-
-a[is="moz-support-link"] {
-  display: inline-block;
-  white-space: initial;
-}
-
-/* Search Pane */
-
-#engineList > treechildren::-moz-tree-image(engineShown, checked),
-#blocklistsTree > treechildren::-moz-tree-image(selectionCol, checked) {
-  list-style-image: url("chrome://global/skin/icons/check.svg");
-  -moz-context-properties: fill, stroke;
-  fill: var(--color-accent-primary);
-}
-
-#engineList > treechildren::-moz-tree-image(engineShown, checked, selected),
-#blocklistsTree > treechildren::-moz-tree-image(selectionCol, checked, selected) {
-  fill: var(--text-color-accent-primary-selected);
-  stroke: var(--color-accent-primary-selected);
-}
-
-@media (forced-colors) {
-  #engineList > treechildren::-moz-tree-image(hover),
-  #blocklistsTree > treechildren::-moz-tree-image(hover) {
-    fill: var(--text-color-list-item-hover);
-    /* fill allows icon and text colors, but we have no such rules for stroke */
-    stroke: var(--background-color-list-item-hover);
-  }
-}
-
-#engineList > treechildren::-moz-tree-row,
-#blocklistsTree > treechildren::-moz-tree-row {
-  min-height: 36px;
-}
-
-#selectionCol {
-  min-width: 26px;
-}
-
-#addEnginesBox {
-  margin: 4px 0 0;
-}
-
-/* Privacy Pane */
-
-#allowSmartSize {
-  margin-block: 0 4px;
-}
-
-#historyPane {
-  margin-top: 4px;
-}
-
-#historyButtons {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-#blockCookies,
-#keepRow {
-  margin-top: 1.5em;
-}
+/** SRD Search Pane END **/
 
 /* Collapse the non-active vboxes in decks to use only the height the
    active vbox needs */
-#historyPane:not([selectedIndex="1"]) > #historyDontRememberPane,
-#historyPane:not([selectedIndex="2"]) > #historyCustomPane,
 #weavePrefsDeck:not([selectedIndex="1"]) > #hasFxaAccount,
 #fxaLoginStatus:not([selectedIndex="1"]) > #fxaLoginUnverified,
 #fxaLoginStatus:not([selectedIndex="2"]) > #fxaLoginRejected {
@@ -584,7 +444,7 @@ a[is="moz-support-link"] {
 }
 
 .text-link {
-  margin-bottom: 0;
+  margin-block-end: 0;
 }
 
 .text-link[disabled] {
@@ -610,7 +470,7 @@ html|label[disabled] {
 }
 
 html|dialog {
-  padding: var(--space-xlarge);
+  padding: var(--dialog-padding);
 }
 
 html|dialog::backdrop,
@@ -620,13 +480,15 @@ html|dialog::backdrop,
 
 html|dialog,
 .dialogBox {
-  border: 1px solid transparent;
-  border-radius: var(--border-radius-medium);
-  box-shadow: var(--popup-box-shadow);
+  border: var(--border-width) solid var(--dialog-border-color);
+  border-radius: var(--dialog-border-radius);
+  box-shadow: var(--dialog-box-shadow);
+  background-color: var(--dialog-background-color);
 }
 
 .dialogBox {
-  background-color: var(--background-color-box);
+  --dialog-resizer-inset: calc(0.3 * var(--dialog-border-radius));
+
   background-clip: content-box;
   color: var(--text-color);
   /* `transparent` will use the dialogText color in high-contrast themes and
@@ -635,15 +497,8 @@ html|dialog,
   margin: 0;
   padding: 0;
   overflow-x: auto;
-}
-
-@media (prefers-color-scheme: dark) {
-  @media not (forced-colors) {
-    html|dialog,
-    .dialogBox {
-      --background-color-canvas: #42414d;
-    }
-  }
+  -moz-scrollbar-inset-inline: 0 var(--dialog-resizer-inset);
+  -moz-scrollbar-inset-block: 0 var(--dialog-resizer-inset);
 }
 
 .dialogBox[resizable="true"] {
@@ -653,9 +508,18 @@ html|dialog,
   min-width: 66ch;
 }
 
+.dialogBox.vpnSiteRuleDialogBox {
+  min-width: 24em;
+
+  .dialogFrame {
+    width: 24em;
+    min-width: 24em;
+  }
+}
+
 .dialogTitleBar {
   padding: 0.4em 0.2em;
-  border-bottom: 1px solid var(--border-color);
+  border-block-end: 1px solid var(--border-color);
 }
 
 .dialogTitle {
@@ -747,11 +611,11 @@ html|dialog,
 }
 
 #fxaAccountDisabled {
-  margin-bottom: calc(-1 * var(--space-large));
+  margin-block-end: calc(-1 * var(--space-large));
 }
 
 #noFxaAccount > label:first-child {
-  margin-bottom: 0.6em;
+  margin-block-end: 0.6em;
 }
 
 #noFxaCaption {
@@ -791,11 +655,11 @@ button#noFxaSignIn {
 }
 
 .separator {
-  border-bottom: 1px solid var(--border-color);
+  border-block-end: 1px solid var(--border-color);
 }
 
 #fxaGroup {
-  margin-bottom: 32px;
+  margin-block-end: 32px;
 }
 
 .openLink {
@@ -824,7 +688,7 @@ button#noFxaSignIn {
 }
 
 #syncStatusContainer {
-  margin-top: 32px;
+  margin-block-start: 32px;
 }
 
 #syncChangeOptions {
@@ -847,13 +711,13 @@ button#noFxaSignIn {
 
 .sync-engines-list > div,
 .sync-engines-list + hbox {
-  margin-top: 0;
-  padding-top: var(--space-large);
+  margin-block-start: 0;
+  padding-block-start: var(--space-large);
 }
 
 dialog > .sync-engines-list > div,
 dialog > .sync-engines-list + hbox {
-  padding-top: 0;
+  padding-block-start: 0;
 }
 
 .sync-engines-list checkbox .checkbox-icon,
@@ -928,8 +792,8 @@ dialog > .sync-engines-list + hbox {
 }
 
 .fxaMobilePromo {
-  margin-top: 2px !important;
-  margin-bottom: var(--space-xxlarge);
+  margin-block-start: 2px !important;
+  margin-block-end: var(--space-xxlarge);
 }
 
 .androidIcon,
@@ -961,12 +825,12 @@ dialog > .sync-engines-list + hbox {
   height: 16px;
   margin-inline-end: 6px;
   align-self: start;
-  margin-top: 0.4em;
+  margin-block-start: 0.4em;
   flex-shrink: 0;
 }
 
 .info-box-container.smaller-font-size .info-icon {
-  margin-top: 0.3em;
+  margin-block-start: 0.3em;
 }
 
 #search-results-back-button {
@@ -981,7 +845,7 @@ dialog > .sync-engines-list + hbox {
 
 #search-tooltip-container {
   position: relative;
-  top: 0;
+  inset-block-start: 0;
 }
 
 .search-tooltip {
@@ -992,7 +856,7 @@ dialog > .sync-engines-list + hbox {
   background-color: #ffe900;
   color: #000;
   border: 1px solid #d7b600;
-  margin-top: -18px;
+  margin-block-start: -18px;
   opacity: 0.85;
   z-index: 1;
 }
@@ -1005,8 +869,8 @@ dialog > .sync-engines-list + hbox {
   position: absolute;
   content: "";
   border: 7px solid transparent;
-  border-top-color: #d7b600;
-  top: 100%;
+  border-block-start-color: #d7b600;
+  inset-block-start: 100%;
   inset-inline-start: calc(50% - 7px);
   forced-color-adjust: none;
 }
@@ -1015,19 +879,19 @@ dialog > .sync-engines-list + hbox {
   position: absolute;
   content: "";
   border: 6px solid transparent;
-  border-top-color: #ffe900;
-  top: 100%;
+  border-block-start-color: #ffe900;
+  inset-block-start: 100%;
   inset-inline-start: calc(50% - 6px);
   forced-color-adjust: none;
 }
 
 @media (forced-colors: active) {
   .search-tooltip::before {
-    border-top-color: CanvasText;
+    border-block-start-color: CanvasText;
   }
 
   .search-tooltip::after {
-    border-top-color: Canvas;
+    border-block-start-color: Canvas;
   }
 }
 
@@ -1106,12 +970,8 @@ menulist[indicator="true"] > menupopup menuitem[indicator="true"]:not([image]) >
   padding-inline-start: 13px;
 }
 
-#warning-message > .message-bar-description {
-  width: 32em;
-}
-
 #warning-message {
-  margin-top: 8px;
+  margin-block-start: 8px;
 }
 
 .action-button {
@@ -1139,15 +999,13 @@ richlistitem .text-link:hover {
   color: inherit;
 }
 
-#proxy-grid,
-#dnsOverHttps-grid {
+#proxy-grid {
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
 }
 
-.proxy-grid-row,
-.dnsOverHttps-grid-row {
+.proxy-grid-row {
   display: contents;
 }
 
@@ -1157,7 +1015,7 @@ richlistitem .text-link:hover {
 }
 
 #pane-experimental-featureGates > .featureGate:not(.visually-hidden) ~ .featureGate:not(.visually-hidden) {
-  margin-top: var(--space-xlarge);
+  margin-block-start: var(--space-xlarge);
 }
 
 #pane-experimental-featureGates moz-fieldset::part(label) {
@@ -1165,7 +1023,7 @@ richlistitem .text-link:hover {
 }
 
 #experimentalCategory-reset {
-  margin-top: var(--space-small);
+  margin-block-start: var(--space-small);
 }
 
 .featureGateDescription {
@@ -1183,164 +1041,6 @@ richlistitem .text-link:hover {
 
 .checkbox-row a {
   margin-inline-start: 6px;
-}
-
-/* This is an HTML div (not XUL hbox), so it needs explicit display:flex for
-   horizontal icon+title layout. */
-#moreFromMozillaCategory-header {
-  display: flex;
-  flex-wrap: wrap;
-}
-
-#moreFromMozillaCategory-header .subtitle {
-  flex-basis: 100%;
-  margin-block-start: var(--space-xsmall);
-  margin-block-end: var(--space-xlarge);
-}
-
-#moreFromMozillaCategory {
-  display: flex;
-  flex-direction: column;
-}
-
-#moreFromMozillaCategory .mozilla-product-item {
-  margin-top: 30px;
-}
-
-#moreFromMozillaCategory .product-title {
-  margin: 4px 0 3px;
-  background-repeat: no-repeat;
-  background-size: contain;
-  padding-inline-start: 30px;
-  -moz-context-properties: fill;
-  fill: currentColor;
-}
-
-#moreFromMozillaCategory .product-title:-moz-locale-dir(rtl) {
-  background-position-x: right;
-}
-
-#moreFromMozillaCategory .product-description-box {
-  padding-inline-start: 30px;
-  margin: 2px 0;
-}
-
-#moreFromMozillaCategory .description {
-  display: inline;
-}
-
-#moreFromMozillaCategory .small-button {
-  margin-block: 14px 2px;
-  margin-inline: 30px 0;
-}
-
-/* Product icon backgrounds for the legacy (non-SRD) More from Mozilla page.
- * Scoped to #moreFromMozillaCategory so they don't apply to the config-based
- * moz-card elements that reuse the same product IDs. */
-#moreFromMozillaCategory {
-  #firefox-mobile {
-    background-image: url("chrome://browser/skin/device-phone.svg");
-  }
-
-  #mozilla-vpn {
-    background-image: url("chrome://browser/skin/preferences/vpn-logo.svg");
-  }
-
-  #mozilla-monitor {
-    background-image: url("chrome://browser/skin/preferences/monitor-logo.svg");
-  }
-
-  #firefox-relay {
-    background-image: url("chrome://browser/skin/preferences/relay-logo.svg");
-  }
-
-  #solo-ai {
-    background-image: url("chrome://browser/skin/preferences/solo-ai-logo.svg");
-  }
-
-  #mdn {
-    background-image: url("chrome://browser/skin/preferences/mdn-logo.svg");
-  }
-}
-
-.qr-code-box {
-  max-width: 320px; /* a unit better than px for this & next? */
-  min-height: 204px;
-  margin-block: 10px 0;
-  margin-inline-start: 30px;
-  background-color: var(--background-color-box-info);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: space-evenly;
-  border-radius: var(--border-radius-small);
-
-  @media (forced-colors) {
-    border: 1px solid currentColor;
-  }
-}
-
-.qr-code-box-image-wrapper {
-  position: relative;
-  display: grid;
-  align-items: center;
-  justify-items: center;
-}
-
-.qr-code-box-image {
-  border-radius: var(--border-radius-small);
-  padding: 2px;
-  width: 80px;
-  flex: 0 0 auto;
-  -moz-context-properties: fill;
-  fill: currentColor;
-}
-
-.qr-code-box-logo {
-  height: 18px;
-  position: absolute;
-}
-
-.qr-code-title-label {
-  flex: 1 1 auto;
-}
-
-.qr-code-box-title {
-  font-size: 0.87em;
-  font-weight: normal;
-
-  text-align: center;
-
-  margin-block: 20px 0;
-  margin-inline: 40px;
-}
-
-.simple .qr-code-box-title {
-  margin-block: 0;
-  width: 296px;
-}
-
-.simple .qr-code-box {
-  padding-inline: var(--space-xlarge);
-  padding-block: 20px;
-}
-
-.simple .qr-code-box-image {
-  padding: 10px;
-}
-
-#moreFromMozillaCategory .qr-code-link {
-  font-size: 0.87em;
-}
-
-@media (prefers-color-scheme: dark) {
-  .qr-code-box {
-    background-color: rgba(91, 91, 102, 0.45);
-  }
-
-  .qr-code-box-title {
-    color: #fbfbfe;
-  }
 }
 
 #webAppearanceGroup .description-deemphasized {
@@ -1386,7 +1086,7 @@ richlistitem .text-link:hover {
     height: var(--icon-size);
     width: var(--icon-size);
     inset-inline-end: var(--space-large);
-    top: 50%;
+    inset-block-start: 50%;
     transform: translateY(-50%);
   }
 }
@@ -1405,13 +1105,20 @@ setting-group[groupid="home"] {
 }
 /** SRD rows control for New Tab END **/
 
-/** SRD History first item is label-less START **/
-/* bug 2001196: Workaround for using legend as label for the select. */
-setting-group[groupid="history"] > moz-fieldset::part(inputs),
-setting-group[groupid="history"] > moz-card > moz-fieldset::part(inputs) {
-  margin-block-start: 0;
+/** SRD Primary Password START **/
+#statusPrimaryPassword .primary-pw-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-small);
 }
-/** SRD History first item is label-less END **/
+
+#statusPrimaryPassword .primary-pw-status-icon {
+  width: var(--size-item-small);
+  height: var(--size-item-small);
+  -moz-context-properties: fill;
+  fill: var(--icon-color-success);
+}
+/** SRD Primary Password END **/
 
 setting-group[groupid="aiFeatures"] {
   --select-max-width: fit-content;
@@ -1422,6 +1129,9 @@ setting-group[groupid="aiFeatures"] {
 }
 
 #blockAiGroup {
+  /* aiBlockedMessage overlaps our border on purpose to avoid a corner seam; clip it so it doesn't paint over the border. */
+  overflow: hidden;
+
   @media not (prefers-contrast) {
     --block-ai-background-color: light-dark(color-mix(in srgb, currentColor 3%, transparent), color-mix(in srgb, currentColor 5%, transparent));
     background-color: var(--block-ai-background-color);
@@ -1429,11 +1139,12 @@ setting-group[groupid="aiFeatures"] {
 }
 
 #aiBlockedMessage {
-  margin: calc(-1 * var(--space-large));
-  margin-top: var(--space-medium);
-  --message-bar-border-radius: 0 0 var(--box-border-radius) var(--box-border-radius);
-  border-bottom-color: transparent;
-  border-inline-color: transparent;
+  /* Overshoot the border by a hair, at odd zoom levels an exact match can round short and leave a gap. */
+  margin: calc(-1 * var(--space-large) - var(--box-border-width) - 1px);
+  margin-block-start: var(--space-medium);
+  border-radius: 0;
+  --message-bar-icon-container-border-radius-start-start: 0;
+  border-color: transparent;
 }
 
 #aiControlDefaultToggle {
@@ -1507,9 +1218,9 @@ setting-group[groupid="aiStatesDescription"] {
 }
 
 .translations-manage-language:first-child {
-  border-bottom: 1px solid var(--border-color);
+  border-block-end: 1px solid var(--border-color);
   padding: 8px;
-  margin-bottom: 8px;
+  margin-block-end: 8px;
 }
 
 .translations-manage-language {
@@ -1549,7 +1260,7 @@ setting-group[groupid="aiStatesDescription"] {
   #browserUseCurrent,
   #browserUseBookmark,
   #browserUseBlank {
-    margin-top: 10px;
+    margin-block-start: 10px;
   }
 
   #privacyPrefs {
@@ -1589,7 +1300,7 @@ setting-group[groupid="aiStatesDescription"] {
 }
 
 .subsection-heading {
-  margin-bottom: var(--space-small);
+  margin-block-end: var(--space-small);
 }
 
 .section-header-last {
@@ -1606,23 +1317,17 @@ setting-pane[onsearchpane] {
   margin-block-start: var(--space-large);
 }
 
-/* Styles for the "sponsors support our mission" message and link on the Home tab */
-.mission-message {
-  margin-block-start: var(--space-large);
-
-  > a {
-    font-size: var(--font-size-small);
-  }
-}
-
+/** SRD DNS over HTTPS START **/
 #dohProviderSelect {
   --select-max-width: 235px;
 }
+/** SRD DNS over HTTPS END **/
 
 #browserContainersbox moz-message-bar {
   margin-block-start: 0;
 }
 
+/** SRD Enhanced Tracking Protection START **/
 #etpBannerEl {
   border-radius: var(--border-radius-large);
   background-clip: content-box;
@@ -1648,6 +1353,7 @@ setting-pane[onsearchpane] {
   display: flex;
   gap: var(--space-small);
 }
+/** SRD Enhanced Tracking Protection END **/
 
 #addresses-list-header,
 #payments-list-header,
@@ -1665,15 +1371,32 @@ setting-pane[onsearchpane] {
   --box-label-font-weight: var(--font-weight-heading);
 }
 
+/* box-header-bold only reaches the item's own label, so the second column
+   heading, which is slotted, has to be weighted on its own. */
+#notification-sites-list moz-box-item[slot="header"] [slot="actions"] {
+  font-weight: var(--font-weight-heading);
+}
+
+#containers-list {
+  --box-group-max-height: 525px;
+}
+
 .containers-identity-item {
   --box-icon-start-fill: var(--identity-icon-color);
   --box-icon-size: var(--icon-size-xlarge);
 
   @media -moz-pref("browser.nova.enabled") {
-    --box-icon-start-fill: var(--identity-fill-color);
+    --box-icon-start-fill: var(--identity-color);
     --box-icon-padding: round(up, var(--space-small), 0.5px);
-    --box-icon-border-radius: var(--border-radius-circle);
-    --box-icon-background: var(--identity-fill-tint);
+  }
+}
+
+#site-containers-list {
+  --box-group-max-height: 500px;
+
+  container-select {
+    --select-min-width: 10em;
+    --select-max-width: 10em;
   }
 }
 

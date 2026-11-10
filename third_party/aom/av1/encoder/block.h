@@ -1359,6 +1359,10 @@ typedef struct macroblock {
   /**@{*/
   //! Variance of the source frame.
   unsigned int source_variance;
+  //! Sub-block local variance energy difference.
+  int sub_block_energy_diff;
+  //! Cached block size for sub-block local variance energy difference.
+  BLOCK_SIZE sub_block_energy_bsize;
   //! Flag to indicate coding block is zero sad.
   int block_is_zero_sad;
   //! Flag to indicate superblock ME in variance partition is determined to be
@@ -1378,6 +1382,9 @@ typedef struct macroblock {
   //! Flag to indicate if a fixed partition should be used, only if the
   // speed feature rt_sf->use_fast_fixed_part is enabled.
   int sb_force_fixed_part;
+  //! Reference already copied into the current superblock when its row
+  // started, or NONE_FRAME. Only set for skip segment superblocks.
+  MV_REFERENCE_FRAME sb_copied_ref;
   //! SSE of the current predictor.
   unsigned int pred_sse[REF_FRAMES];
   //! Prediction for ML based partition.
@@ -1439,10 +1446,20 @@ typedef struct macroblock {
   RD_STATS *rdcost;
 #endif  // CONFIG_PARTITION_SEARCH_ORDER
 
-  /*! \brief Distance from bottom edge of the frame in pixels. */
+  /*! \brief Signed vertical distance, in pixels, from the bottom edge of the
+   *  current prediction block to the bottom edge of the frame.
+   *
+   *  The value may be negative when the prediction block extends beyond the
+   *  bottom edge of the frame.
+   */
   int pix_to_bottom_edge;
 
-  /*! \brief Distance from right edge of the frame in pixels. */
+  /*! \brief Signed horizontal distance, in pixels, from the right edge of the
+   *  current prediction block to the right edge of the frame.
+   *
+   *  The value may be negative when the prediction block extends beyond the
+   *  right edge of the frame.
+   */
   int pix_to_right_edge;
 } MACROBLOCK;
 #undef SINGLE_REF_MODES

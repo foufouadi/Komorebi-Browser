@@ -11,9 +11,16 @@ ChromeUtils.defineESModuleGetters(lazy, {
   FormHistoryAutoCompleteResult:
     "resource://gre/modules/FormHistoryAutoComplete.sys.mjs",
   FormScenarios: "resource://gre/modules/FormScenarios.sys.mjs",
-  GenericAutocompleteItem: "resource://gre/modules/FillHelpers.sys.mjs",
+  adaptExternalAutocompleteItem: "resource://gre/modules/FillHelpers.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
 });
+
+XPCOMUtils.defineLazyServiceGetter(
+  lazy,
+  "gFormFillService",
+  "@mozilla.org/satchel/form-fill-controller;1",
+  Ci.nsIFormFillController
+);
 
 XPCOMUtils.defineLazyPreferenceGetter(lazy, "gDebug", "browser.formfill.debug");
 XPCOMUtils.defineLazyPreferenceGetter(
@@ -30,6 +37,25 @@ function log(message) {
 }
 
 export class FormHistoryChild extends JSWindowActorChild {
+  receiveMessage({ name }) {
+    switch (name) {
+      case "FormHistory:RepopulateAutocompletePopup":
+        this.#repopulateAutocompletePopup();
+        break;
+    }
+  }
+
+  #repopulateAutocompletePopup() {
+    const input = lazy.gFormFillService.QueryInterface(Ci.nsIAutoCompleteInput);
+    if (!input.popupOpen) {
+      return;
+    }
+
+    const { controller } = input;
+    controller.resetInternalState();
+    controller.startSearch(controller.searchString);
+  }
+
   handleEvent(event) {
     switch (event.type) {
       case "DOMFormBeforeSubmit":
@@ -142,7 +168,7 @@ export class FormHistoryChild extends JSWindowActorChild {
       ? "SignUpFormScenario"
       : "";
 
-    return { inputName, scenarioName };
+    return { inputName, inputType: input.type, scenarioName };
   }
 
   /**
@@ -207,16 +233,7 @@ export class FormHistoryChild extends JSWindowActorChild {
     }
 
     acResult.externalEntries.push(
-      ...externalEntries.map(
-        entry =>
-          new lazy.GenericAutocompleteItem(
-            entry.image,
-            entry.label,
-            entry.secondary,
-            entry.fillMessageName,
-            entry.fillMessageData
-          )
-      )
+      ...externalEntries.map(lazy.adaptExternalAutocompleteItem)
     );
 
     acResult.removeDuplicateHistoryEntries();

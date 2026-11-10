@@ -1,13 +1,5 @@
 "use strict";
 
-// Nova being enabled changes some of the styling that is being tested here.
-const novaEnabled = Services.prefs.getBoolPref(
-  "browser.nova.enabled",
-  true // If the pref isn't set to false, assume Nova styles are enabled by default.
-);
-
-info(`Run with Nova browser styles ${novaEnabled ? "enabled" : "disabled"}`);
-
 // PNG image data for a simple red dot.
 const BACKGROUND_1 =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACNbyblAAAAHElEQVQI12P4//8/w38GIAXDIBKE0DHxgljNBAAO9TXL0Y4OHwAAAABJRU5ErkJggg==";
@@ -63,7 +55,7 @@ function validateTheme(
     textColor = hexToRGB(textColor);
   }
 
-  const expectThemeImageInToolbox = isLWT ? hasVerticalAlign : novaEnabled;
+  const expectThemeImageInToolbox = isLWT && hasVerticalAlign;
 
   Assert.equal(
     expectThemeImageInToolbox,
@@ -113,9 +105,8 @@ add_task(async function test_dynamic_theme_updates() {
   });
 
   let rootCS = window.getComputedStyle(window.document.documentElement);
-  let toolboxCS = window.getComputedStyle(
-    window.document.documentElement.querySelector("#navigator-toolbox")
-  );
+  let bodyCS = window.getComputedStyle(window.document.body);
+
   await extension.startup();
 
   // Check with customized background vertical alignment
@@ -157,7 +148,7 @@ add_task(async function test_dynamic_theme_updates() {
   });
 
   let { color } = rootCS;
-  let backgroundImage = toolboxCS.backgroundImage;
+  let backgroundImage = bodyCS.backgroundImage;
   let backgroundColor = getToolboxBackgroundColor();
   validateTheme(backgroundImage, backgroundColor, color, false);
 
@@ -188,9 +179,7 @@ add_task(async function test_dynamic_theme_updates_with_data_url() {
   });
 
   let rootCS = window.getComputedStyle(window.document.documentElement);
-  let toolboxCS = window.getComputedStyle(
-    window.document.documentElement.querySelector("#navigator-toolbox")
-  );
+  let bodyCS = window.getComputedStyle(window.document.body);
   await extension.startup();
 
   extension.sendMessage("update-theme", {
@@ -227,7 +216,7 @@ add_task(async function test_dynamic_theme_updates_with_data_url() {
   });
 
   let { color } = rootCS;
-  let backgroundImage = toolboxCS.backgroundImage;
+  let backgroundImage = bodyCS.backgroundImage;
   let backgroundColor = getToolboxBackgroundColor();
   validateTheme(backgroundImage, backgroundColor, color, false);
 

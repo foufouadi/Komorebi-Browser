@@ -14,6 +14,8 @@ const { AppConstants } = ChromeUtils.importESModule(
   "resource://gre/modules/AppConstants.sys.mjs"
 );
 
+const ENABLE_STORED_SUBMITTED_PINGS_PREF =
+  "telemetry.fog.enable_store_submitted_pings";
 const METRIC_DATA = {};
 let MAPPED_METRIC_DATA = [];
 let FILTERED_METRIC_DATA = [];
@@ -21,6 +23,10 @@ let LIMITED_METRIC_DATA = [];
 let LIMIT_OFFSET = 0;
 let LIMIT_COUNT = 200;
 let METRIC_DATA_INITIALIZED = false;
+let STORE_SUBMITTED_PINGS_ENABLED = false;
+let SUBMITTED_PING = undefined;
+const CAMEL_CASE_REGEX = /_(\w)/g;
+const INITIAL_CASE_REGEX = /\b\w/g;
 const INVALID_VALUE_REASONS = {
   DUAL_LABELED_METRIC: 0,
   UNKNOWN_METRIC: 1,
@@ -84,6 +90,10 @@ function updatePrefsAndDefines() {
     uploadL10nId = "about-glean-upload-enabled-local";
   }
   document.l10n.setAttributes(uploadMessageEl, uploadL10nId);
+
+  STORE_SUBMITTED_PINGS_ENABLED = Services.prefs.getBoolPref(
+    ENABLE_STORED_SUBMITTED_PINGS_PREF
+  );
 }
 
 function camelToKebab(str) {
@@ -176,7 +186,7 @@ function fillDebugTag() {
 
 function showTab(button) {
   let current_tab = document.querySelector(".active");
-  let category = button.getAttribute("id").substring("category-".length);
+  let category = button.getAttribute("view");
   let content = document.getElementById(category);
   if (current_tab == content) {
     return;
@@ -185,9 +195,6 @@ function showTab(button) {
   current_tab.hidden = true;
   content.classList.add("active");
   content.hidden = false;
-  let current_button = document.querySelector("[selected=true]");
-  current_button.removeAttribute("selected");
-  button.setAttribute("selected", "true");
 
   if (category == "metrics-table") {
     // Init base level metric data
@@ -214,18 +221,6 @@ function showTab(button) {
 }
 
 function handleRedesign() {
-  const categories = document.getElementById("categories");
-  const div = document.createElement("div");
-  div.id = "category-metrics-table";
-  div.className = "category";
-  div.setAttribute("role", "menuitem");
-  div.setAttribute("tabindex", 0);
-  const span = document.createElement("span");
-  span.className = "category-name";
-  span.setAttribute("data-l10n-id", "about-glean-category-metrics-table");
-  div.appendChild(span);
-  categories.appendChild(div);
-
   /**
    * Handle metric filter input.
    *
@@ -265,7 +260,7 @@ function onLoad() {
       showTab(e.target);
     }
   });
-  showTab(document.getElementById("category-about-glean"));
+  showTab(document.querySelector("[view='about-glean']"));
 
   updatePrefsAndDefines();
   refillPingNames();
@@ -296,11 +291,12 @@ function onLoad() {
     setTimeout(() => {
       feedbackToast.style.visibility = "hidden";
     }, 3000);
+    loadStoredSubmittedPings();
   });
 
-  handleRedesign();
-
   DOCUMENT_BODY_SEL = d3.select(document.body);
+
+  handleRedesign();
 
   document
     .getElementById("metrics-table-settings-button")
@@ -318,6 +314,273 @@ function onLoad() {
   document.getElementById("export-data").addEventListener("click", () => {
     exportData();
   });
+
+  // Initialize storing of submitted pings
+  const storeSubmittedPingsEl = document.querySelector(
+    `[data-form-control='storeSubmittedPings']`
+  );
+  storeSubmittedPingsEl.pressed = STORE_SUBMITTED_PINGS_ENABLED;
+  storeSubmittedPingsEl.addEventListener("toggle", e => {
+    const enabled = e.target.pressed;
+    Services.prefs.setBoolPref(ENABLE_STORED_SUBMITTED_PINGS_PREF, enabled);
+    Services.fog.setStoreSubmittedPingsEnabled(enabled);
+    if (!enabled) {
+      Services.fog.clearStoredSubmittedPings();
+      document
+        .querySelectorAll("#submitted-pings-select>optgroup")
+        .forEach(el => el.remove());
+    }
+  });
+
+  loadStoredSubmittedPings();
+}
+
+/**
+ * Loads and parses stored submitted pings
+ */
+function loadStoredSubmittedPings() {
+  if (STORE_SUBMITTED_PINGS_ENABLED) {
+    const selectEl = document.getElementById("submitted-pings-select");
+    selectEl.querySelectorAll("optgroup").forEach(og => og.remove());
+
+    const allPings = Services.fog.getAllStoredSubmittedPings().map(ping => {
+      ping.submittedDate = new Date(ping.submittedDate).toISOString();
+      return ping;
+    });
+    const pingsObj = allPings.reduce((acc, curr) => {
+      if (!acc[curr.ping]) {
+        acc[curr.ping] = [];
+      }
+      acc[curr.ping].push(curr);
+      return acc;
+    }, {});
+    Object.keys(pingsObj).forEach(ping => {
+      pingsObj[ping].toSorted((a, b) => {
+        d3.descending(a.submittedDate, b.submittedDate);
+      });
+    });
+    for (let ping of Object.keys(pingsObj).toSorted((a, b) =>
+      d3.ascending(a, b)
+    )) {
+      const optgroupEl = document.createElement("optgroup");
+      optgroupEl.label = ping;
+
+      for (let p of pingsObj[ping]) {
+        const el = document.createElement("option");
+        el.innerText = `${p.ping} (${p.submittedDate})`;
+        el.value = p.documentId;
+        optgroupEl.appendChild(el);
+      }
+      selectEl.appendChild(optgroupEl);
+    }
+
+    selectEl.addEventListener("input", e => {
+      if (e.target.value !== "") {
+        SUBMITTED_PING = allPings.find(
+          ping => ping.documentId === e.target.value
+        );
+        if (SUBMITTED_PING !== undefined) {
+          const allMetrics = Object.keys(
+            SUBMITTED_PING.payload.metrics ?? {}
+          ).reduce((acc, currKey) => {
+            const curr = (SUBMITTED_PING.payload.metrics ?? {})[currKey];
+            const type = getTypeFromPingKey(currKey);
+            return {
+              ...acc,
+              ...Object.keys(curr).reduce((acc, key) => {
+                let split = key.split(".");
+                const metric = split
+                  .at(-1)
+                  .replace(CAMEL_CASE_REGEX, (_, char) => char.toUpperCase());
+                split = split.slice(0, -1);
+                const category = split
+                  .map((v, i) =>
+                    i === 0
+                      ? v.replace(CAMEL_CASE_REGEX, (_, char) =>
+                          char.toUpperCase()
+                        )
+                      : v
+                          .replace(INITIAL_CASE_REGEX, char =>
+                            char.toUpperCase()
+                          )
+                          .replace(CAMEL_CASE_REGEX, (_, char) =>
+                            char.toUpperCase()
+                          )
+                  )
+                  .join("");
+                acc[`${category}.${metric}`] = curr[key];
+
+                const datum = MAPPED_METRIC_DATA.find(
+                  d => d.category === category && d.name === metric
+                );
+                if (datum) {
+                  datum.storedValue = curr[key];
+                  datum.loaded = true;
+                } else {
+                  MAPPED_METRIC_DATA.push({
+                    category,
+                    fullName: `${category}.${metric}`,
+                    loaded: true,
+                    metric: undefined,
+                    name: metric,
+                    storedValue: curr[key],
+                    type,
+                    value: undefined,
+                  });
+                }
+
+                return acc;
+              }, {}),
+            };
+          }, {});
+
+          const allEvents = (SUBMITTED_PING.payload.events ?? []).reduce(
+            (acc, curr) => {
+              let split = curr.category.split(".");
+              const metric = curr.name.replace(CAMEL_CASE_REGEX, (_, char) =>
+                char.toUpperCase()
+              );
+              const category = split
+                .map((v, i) =>
+                  i === 0
+                    ? v.replace(CAMEL_CASE_REGEX, (_, char) =>
+                        char.toUpperCase()
+                      )
+                    : v
+                        .replace(INITIAL_CASE_REGEX, char => char.toUpperCase())
+                        .replace(CAMEL_CASE_REGEX, (_, char) =>
+                          char.toUpperCase()
+                        )
+                )
+                .join("");
+              if (acc[`${category}.${metric}`]) {
+                acc[`${category}.${metric}`].push(curr);
+              } else {
+                acc[`${category}.${metric}`] = [curr];
+              }
+              return acc;
+            },
+            {}
+          );
+          Object.entries(allEvents).forEach(([key, value]) => {
+            const [category, metric] = key.split(".");
+            const datum = MAPPED_METRIC_DATA.find(
+              d => d.category === category && d.name === metric
+            );
+            if (datum) {
+              datum.storedValue = value;
+              datum.loaded = true;
+            } else {
+              MAPPED_METRIC_DATA.push({
+                category,
+                fullName: `${category}.${metric}`,
+                loaded: true,
+                metric: undefined,
+                name: metric,
+                storedValue: value,
+                type: "Event",
+                value: undefined,
+              });
+            }
+          });
+          SUBMITTED_PING.payload.allMetrics = {
+            ...allMetrics,
+            ...allEvents,
+          };
+          document.getElementById("submitted-ping-info").hidden = false;
+          document.getElementById("submitted-ping-client-info").textContent =
+            prettyPrint(SUBMITTED_PING.payload.client_info);
+          document.getElementById("submitted-ping-ping-info").textContent =
+            prettyPrint(SUBMITTED_PING.payload.ping_info);
+        } else {
+          SUBMITTED_PING = undefined;
+          MAPPED_METRIC_DATA.forEach(datum => {
+            datum.storedValue = undefined;
+          });
+          document.getElementById("submitted-ping-info").hidden = true;
+        }
+      } else {
+        SUBMITTED_PING = undefined;
+        MAPPED_METRIC_DATA.forEach(datum => {
+          datum.storedValue = undefined;
+        });
+        document.getElementById("submitted-ping-info").hidden = true;
+      }
+      updateFilteredMetricData(
+        document.getElementById("filter-metrics").value.toLowerCase()
+      );
+    });
+  }
+}
+
+function getTypeFromPingKey(key) {
+  let type = "";
+  switch (key) {
+    case "boolean":
+      type = "Boolean";
+      break;
+    case "counter":
+      type = "Counter";
+      break;
+    case "custom_distribution":
+      type = "CustomDistribution";
+      break;
+    case "datetime":
+      type = "Datetime";
+      break;
+    case "dual_labeled_counter":
+      type = "DualLabeledCounter";
+      break;
+    case "labeled_boolean":
+      type = "LabeledBoolean";
+      break;
+    case "labeled_counter":
+      type = "LabeledCounter";
+      break;
+    case "labeled_custom_distribution":
+      type = "LabeledCustomDistribution";
+      break;
+    case "labeled_memory_distribution":
+      type = "LabeledMemoryDistribution";
+      break;
+    case "labeled_quantity":
+      type = "LabeledQuantity";
+      break;
+    case "labeled_timing_distribution":
+      type = "LabeledTimingDistribution";
+      break;
+    case "memory_distribution":
+      type = "MemoryDistribution";
+      break;
+    case "object":
+      type = "Object";
+      break;
+    case "quantity":
+      type = "Quantity";
+      break;
+    case "rate":
+      type = "Rate";
+      break;
+    case "string":
+      type = "String";
+      break;
+    case "string_list":
+      type = "StringList";
+      break;
+    case "timespan":
+      type = "Timespan";
+      break;
+    case "timing_distribution":
+      type = "TimingDistribution";
+      break;
+    case "url":
+      type = "Url";
+      break;
+    case "uuid":
+      type = "Uuid";
+      break;
+  }
+  return type;
 }
 
 /**
@@ -346,6 +609,7 @@ function initializeMetricData() {
       METRIC_DATA[category][metricName] = {
         type: constructorName,
         value: undefined,
+        storedValue: undefined,
         metric,
       };
     }
@@ -360,15 +624,15 @@ function updateButtonsSelection(selection) {
 }
 
 function createOrUpdateLabeledHistogram(selection, datum) {
-  const keysAndValues = Object.entries(datum.value || {}).map(
-    ([key, value]) => [
-      key,
-      {
-        fullName: datum.fullName + `.${key}`,
-        value,
-      },
-    ]
-  );
+  const keysAndValues = Object.entries(
+    (datum.storedValue ?? datum.value) || {}
+  ).map(([key, value]) => [
+    key,
+    {
+      fullName: datum.fullName + `.${key}`,
+      value,
+    },
+  ]);
 
   selection.selectAll("*").remove();
   if (keysAndValues.length === 0) {
@@ -392,10 +656,9 @@ function createOrUpdateLabeledHistogram(selection, datum) {
 }
 
 function createOrUpdateHistogram(selection, datum) {
-  const values = Object.entries(datum.value?.values || {}).map((d, i) => [
-    ...d,
-    i,
-  ]);
+  const values = Object.entries(
+    (datum.storedValue ?? datum.value)?.values || {}
+  ).map((d, i) => [...d, i]);
 
   if (!values || values.length === 0) {
     selection.select("p")?.remove();
@@ -490,7 +753,7 @@ function createOrUpdateHistogram(selection, datum) {
 }
 
 function createOrUpdateEventChart(selection, datum) {
-  const values = (datum.value || []).map((d, i) => ({
+  const values = ((datum.storedValue ?? datum.value) || []).map((d, i) => ({
     ...d,
     index: i,
     fullName: datum.fullName,
@@ -834,7 +1097,7 @@ function updateValueSelection(selection) {
             if (codeSelection.empty()) {
               codeSelection = d3.select(this).append("pre").append("code");
             }
-            codeSelection.text(prettyPrint(datum.value));
+            codeSelection.text(prettyPrint(datum.storedValue ?? datum.value));
         }
       }
     });
@@ -959,10 +1222,6 @@ function updateTable() {
     .attr("data-d3-row", d => d.fullName)
     .classed({ "metric-row": true });
 
-  const actions = newRows
-    .append("td")
-    .attr("data-d3-cell", "actions")
-    .append("div");
   // Set the HTML content for the `category` and `name` cells, and store the name cells in-scope so we can
   // append our buttons to them.
   newRows
@@ -980,22 +1239,25 @@ function updateTable() {
     .append("td")
     .attr("data-d3-cell", "type")
     .text(d => d.type);
+  const actions = newRows
+    .append("td")
+    .attr("data-d3-cell", "actions")
+    .append("div");
   newRows.append("td").attr("data-d3-cell", "value");
 
   actions
     .append("button")
-    .attr("data-l10n-id", "about-glean-button-load-value")
-    .on("click", datum => updateDatum(datum));
-  actions
-    .append("button")
     .attr("data-l10n-id", "about-glean-button-dictionary-link")
-    .classed({ primary: true })
     // On click, rewrite the metric category+name to snake-case, so we can link to the Glean dictionary.
     // TODO: add canonical_name field to metrics https://bugzilla.mozilla.org/show_bug.cgi?id=1983630
     .on("click", datum => {
       const url = getDocsURL(datum);
       window.open(url, "_blank").focus();
     });
+  actions
+    .append("button")
+    .attr("data-l10n-id", "about-glean-button-load-value")
+    .on("click", datum => updateDatum(datum));
 
   // Since `.enter` has been called on `rows` and we've handled new data points, everything
   // that touches `rows` from here on out will affect ALL elements, old and new.
@@ -1024,7 +1286,7 @@ function updateTable() {
  * @param {*} searchString the string by which the metric data will be filtered
  */
 function updateFilteredMetricData(searchString) {
-  if (!searchString) {
+  if (!searchString && !SUBMITTED_PING) {
     FILTERED_METRIC_DATA = MAPPED_METRIC_DATA;
   } else {
     const simpleTypeValueSearch = datum => {
@@ -1034,21 +1296,28 @@ function updateFilteredMetricData(searchString) {
       switch (datum.type) {
         case SIMPLE_TYPES.Boolean:
           if (searchString == "true") {
-            return datum.value === true;
+            return (datum.storedValue ?? datum.value) === true;
           } else if (searchString == "false") {
-            return datum.value === false;
+            return (datum.storedValue ?? datum.value) === false;
           }
           return false;
         default:
           return false;
       }
     };
+
+    const submittedPingIncludesMetric = datum =>
+      Object.keys(SUBMITTED_PING.payload.allMetrics).find(
+        metric => metric === `${datum.category}.${datum.name}`
+      ) !== undefined;
+
     FILTERED_METRIC_DATA = MAPPED_METRIC_DATA.filter(
       datum =>
-        datum.category.toLowerCase().includes(searchString) ||
-        datum.name.toLowerCase().includes(searchString) ||
-        datum.type.toLowerCase().includes(searchString) ||
-        simpleTypeValueSearch(datum)
+        (datum.category.toLowerCase().includes(searchString) ||
+          datum.name.toLowerCase().includes(searchString) ||
+          datum.type.toLowerCase().includes(searchString) ||
+          simpleTypeValueSearch(datum)) &&
+        (SUBMITTED_PING === undefined || submittedPingIncludesMetric(datum))
     );
   }
 
@@ -1074,7 +1343,10 @@ function updateFilteredMetricData(searchString) {
                   LIMIT_OFFSET + LIMIT_COUNT + 100 >
                   FILTERED_METRIC_DATA.length
                 ) {
-                  LIMIT_OFFSET = FILTERED_METRIC_DATA.length - LIMIT_COUNT;
+                  LIMIT_OFFSET = Math.max(
+                    0,
+                    FILTERED_METRIC_DATA.length - LIMIT_COUNT
+                  );
                 } else if (
                   LIMIT_OFFSET + LIMIT_COUNT <
                   FILTERED_METRIC_DATA.length - 100
@@ -1113,7 +1385,7 @@ function exportData() {
       {
         name: `${datum.fullName}`,
         docs: getDocsURL(datum),
-        value: datum.value,
+        value: datum.storedValue ?? datum.value,
       },
     ],
     []

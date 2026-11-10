@@ -192,7 +192,7 @@ def all_tests(create_tests):
                 "flavor": "browser-chrome",
                 "manifest": "kiwi/browser.toml",
                 "subsuite": "devtools",
-                "tags": "devtools",
+                "tags": "devtools kiwi-tag",
             },
         ),
     ])
@@ -409,6 +409,65 @@ def test_resolve_multiple_paths(resolver):
     assert len(result) == 4
 
 
+def test_get_test_paths_by_manifest_directory(resolver):
+    """A directory maps every manifest holding tests under it to itself."""
+    mapping = resolver.get_test_paths_by_manifest("xpcshell", frozenset(["banana"]))
+
+    assert mapping
+    for manifest, test_paths in mapping.items():
+        assert manifest.startswith("banana/")
+        assert test_paths == [manifest]
+
+
+def test_get_test_paths_by_manifest_included_manifest(resolver):
+    """Manifests included by another one are attributed to the manifest that
+    includes them, so that a chunk running one runs the tests it pulls in."""
+    assert sorted(
+        resolver.get_test_paths_by_manifest("xpcshell", frozenset(["carrot"]))
+    ) == ["carrot/xpcshell-one.toml", "carrot/xpcshell-two.toml"]
+
+
+def test_get_test_paths_by_manifest_manifest(resolver):
+    """A path naming a manifest maps only that manifest."""
+    manifest = next(
+        iter(resolver.get_test_paths_by_manifest("xpcshell", frozenset(["banana"])))
+    )
+
+    assert resolver.get_test_paths_by_manifest("xpcshell", frozenset([manifest])) == {
+        manifest: [manifest]
+    }
+
+
+def test_get_test_paths_by_manifest_narrower_than_manifest(resolver):
+    """A path narrower than the manifest holding its tests is kept as it is, so
+    that the task runs what was asked for rather than the whole manifest."""
+    path = "dragonfruit/elderberry"
+    mapping = resolver.get_test_paths_by_manifest("xpcshell", frozenset([path]))
+
+    assert mapping
+    for manifest, test_paths in mapping.items():
+        if manifest.startswith(path + "/"):
+            assert test_paths == [manifest]
+        else:
+            # The manifest lives above the requested path and holds tests that
+            # were not asked for.
+            assert test_paths == [path]
+
+
+def test_get_test_paths_by_manifest_single_test_file(resolver):
+    """A path naming a single test file maps its manifest to that file only."""
+    test_file = "banana/currant/test_xpcshell_A.js"
+    mapping = resolver.get_test_paths_by_manifest("xpcshell", frozenset([test_file]))
+
+    assert mapping
+    assert all(test_paths == [test_file] for test_paths in mapping.values())
+
+
+def test_get_test_paths_by_manifest_no_match(resolver):
+    """A path holding no test of that suite maps nothing."""
+    assert resolver.get_test_paths_by_manifest("xpcshell", frozenset(["fig"])) == {}
+
+
 def test_resolve_support_files(resolver):
     expected_support_files = "data/**\nxpcshell_updater.toml"
     tests = list(resolver.resolve_tests(paths=["dragonfruit"]))
@@ -543,6 +602,54 @@ def test_resolve_metadata_file_not_suite(resolver):
     assert suites == set()
     assert len(tests) == 1
     assert tests[0]["file_relpath"] == "apple/test_a11y.html"
+
+
+def test_resolve_metadata_tag_entry(resolver):
+    """Test that an entry which is not a path is looked up as a tag."""
+    suites, tests = resolver.resolve_metadata(["kiwi-tag"])
+    assert suites == set()
+    assert [t["file_relpath"] for t in tests] == ["kiwi/browser_devtools.js"]
+
+
+WPT_TAG_FILES = {
+    "list-commas.ini": "prefs: [a:b]\ntags: [inc-origin-init, indexedDB]\n",
+    "scalar.ini": "tags: indexedDB\n",
+    "multiline.ini": "tags: [inc-origin-init,\n       indexedDB]\nleak-threshold: [default:1]\n",
+    "nested.ini": "[test.html]\n  tags: [nested]\n",
+    "nested-and-root.ini": "tags: [root]\n[test.html]\n  tags: [nested]\n",
+    "space-before-colon.ini": "tags : [a]\n",
+    "none.ini": "prefs: [a:b]\n",
+    "comment-list.ini": "tags: [a, b]  # bug 123\n",
+    "comment-scalar.ini": "tags: foo # explanation\n",
+    "comment-multiline.ini": "tags: [a, # first\n       b] # second\n",
+    "comment-bracket.ini": "tags: [a,\n  # see bug ] for details\n  b]\n",
+}
+
+WPT_TAG_EXPECTED = {
+    "list-commas.ini": ("inc-origin-init", "indexedDB"),
+    "scalar.ini": ("indexedDB",),
+    "multiline.ini": ("inc-origin-init", "indexedDB"),
+    "nested.ini": (),
+    "nested-and-root.ini": ("root",),
+    "space-before-colon.ini": ("a",),
+    "none.ini": (),
+    "comment-list.ini": ("a", "b"),
+    "comment-scalar.ini": ("foo",),
+    "comment-multiline.ini": ("a", "b"),
+    "comment-bracket.ini": ("a", "b"),
+}
+
+
+def test_extract_wpt_tags(resolver, tmpdir):
+    """Test that wpt metadata tags are read in every accepted syntax."""
+    resolver._extract_tags_from_file.cache_clear()
+
+    for name, content in WPT_TAG_FILES.items():
+        path = tmpdir.join(name)
+        path.write(content)
+        assert resolver._extract_tags_from_file(str(path)) == WPT_TAG_EXPECTED[name]
+
+    assert resolver._extract_tags_from_file(str(tmpdir.join("missing.ini"))) == ()
 
 
 def test_ancestor_manifest_defaults(resolver, topsrcdir, defaults):

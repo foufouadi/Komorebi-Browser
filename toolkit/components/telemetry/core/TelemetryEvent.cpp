@@ -28,7 +28,6 @@
 #include "TelemetryEventData.h"
 #include "TelemetryScalar.h"
 
-using mozilla::MakeUnique;
 using mozilla::Maybe;
 using mozilla::StaticAutoPtr;
 using mozilla::StaticMutex;
@@ -53,35 +52,37 @@ namespace TelemetryIPCAccumulator = mozilla::TelemetryIPCAccumulator;
 
 namespace geckoprofiler::markers {
 
-struct EventMarker {
-  static constexpr mozilla::Span<const char> MarkerTypeName() {
-    return mozilla::MakeStringSpan("TEvent");
-  }
+struct EventMarker : public mozilla::BaseMarkerType<EventMarker> {
+  static constexpr const char* Name = "TEvent";
+  // "Event" and "ChildEvent" only differ by their name.
+  static constexpr bool ETWStoreName = true;
+  using MS = mozilla::MarkerSchema;
+  static constexpr MS::Location Locations[] = {
+      MS::Location::MarkerChart,
+      MS::Location::MarkerTable,
+  };
+  static constexpr MS::PayloadField PayloadFields[] = {
+      {"cat", MS::InputType::CString, "Category", MS::Format::UniqueString},
+      {"met", MS::InputType::CString, "Method", MS::Format::UniqueString},
+      {"obj", MS::InputType::CString, "Object", MS::Format::UniqueString},
+      {"val", MS::InputType::CString, "Value", MS::Format::String},
+  };
+  static constexpr const char* TooltipLabel =
+      "{marker.data.cat}.{marker.data.met}#{marker.data.obj} "
+      "{marker.data.val}";
+  static constexpr const char* TableLabel =
+      "{marker.data.cat}.{marker.data.met}#"
+      "{marker.data.obj} {marker.data.val}";
   static void StreamJSONMarkerData(
       mozilla::baseprofiler::SpliceableJSONWriter& aWriter,
-      const nsCString& aCategory, const nsCString& aMethod,
-      const nsCString& aObject, const Maybe<nsCString>& aValue) {
-    aWriter.UniqueStringProperty("cat", aCategory);
-    aWriter.UniqueStringProperty("met", aMethod);
-    aWriter.UniqueStringProperty("obj", aObject);
+      const mozilla::ProfilerString8View& aCategory,
+      const mozilla::ProfilerString8View& aMethod,
+      const mozilla::ProfilerString8View& aObject,
+      const Maybe<nsCString>& aValue) {
+    StreamJSONMarkerDataImpl(aWriter, aCategory, aMethod, aObject);
     if (aValue.isSome()) {
       aWriter.StringProperty("val", aValue.value());
     }
-  }
-  using MS = mozilla::MarkerSchema;
-  static MS MarkerTypeDisplay() {
-    MS schema{MS::Location::MarkerChart, MS::Location::MarkerTable};
-    schema.AddKeyLabelFormat("cat", "Category", MS::Format::UniqueString);
-    schema.AddKeyLabelFormat("met", "Method", MS::Format::UniqueString);
-    schema.AddKeyLabelFormat("obj", "Object", MS::Format::UniqueString);
-    schema.AddKeyLabelFormat("val", "Value", MS::Format::String);
-    schema.SetTooltipLabel(
-        "{marker.data.cat}.{marker.data.met}#{marker.data.obj} "
-        "{marker.data.val}");
-    schema.SetTableLabel(
-        "{marker.data.cat}.{marker.data.met}#"
-        "{marker.data.obj} {marker.data.val}");
-    return schema;
   }
 };
 
@@ -1161,7 +1162,8 @@ nsresult TelemetryEvent::CreateSnapshots(uint32_t aDataset, bool aClear,
       gEventRecords.Clear();
       for (auto& pair : leftovers) {
         gEventRecords.InsertOrUpdate(
-            pair.first, MakeUnique<EventRecordArray>(std::move(pair.second)));
+            pair.first,
+            std::make_unique<EventRecordArray>(std::move(pair.second)));
       }
       leftovers.Clear();
     }

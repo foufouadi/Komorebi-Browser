@@ -9,11 +9,12 @@ use crate::gecko_bindings::bindings;
 use crate::gecko_bindings::structs;
 use crate::parser::ParserContext;
 use crate::stylesheets::{CorsMode, UrlExtraData};
+use crate::url::UrlInitiator;
 use crate::values::computed::{Context, ToComputedValue};
+use hashbrown::HashMap;
 use malloc_size_of::{MallocSizeOf, MallocSizeOfOps};
 use nsstring::nsCString;
 use servo_arc::Arc;
-use std::collections::HashMap;
 use std::fmt::{self, Write};
 use std::mem::ManuallyDrop;
 use std::sync::{LazyLock, RwLock};
@@ -43,6 +44,10 @@ pub struct CssUrlData {
     /// The CORS mode that will be used for the load.
     #[css(skip)]
     cors_mode: CorsMode,
+
+    /// What caused this URL to be loaded.
+    #[css(skip)]
+    initiator: UrlInitiator,
 
     /// Data to trigger a load from Gecko. This is mutable in C++.
     ///
@@ -106,35 +111,36 @@ impl CssUrl {
         url: String,
         context: &ParserContext,
         cors_mode: CorsMode,
+        initiator: UrlInitiator,
     ) -> Self {
         use crate::use_counters::CustomUseCounter;
-        if let Some(counters) = context.use_counters {
-            if !counters
+        if let Some(counters) = context.use_counters
+            && !counters
                 .custom
                 .recorded(CustomUseCounter::MaybeHasFullBaseUriDependency)
-            {
-                let dep = NonLocalUriDependency::scan(&url);
-                if dep >= NonLocalUriDependency::Absolute {
-                    counters
-                        .custom
-                        .record(CustomUseCounter::HasNonLocalUriDependency);
-                }
-                if dep >= NonLocalUriDependency::Path {
-                    counters
-                        .custom
-                        .record(CustomUseCounter::MaybeHasPathBaseUriDependency);
-                }
-                if dep >= NonLocalUriDependency::Full {
-                    counters
-                        .custom
-                        .record(CustomUseCounter::MaybeHasFullBaseUriDependency);
-                }
+        {
+            let dep = NonLocalUriDependency::scan(&url);
+            if dep >= NonLocalUriDependency::Absolute {
+                counters
+                    .custom
+                    .record(CustomUseCounter::HasNonLocalUriDependency);
+            }
+            if dep >= NonLocalUriDependency::Path {
+                counters
+                    .custom
+                    .record(CustomUseCounter::MaybeHasPathBaseUriDependency);
+            }
+            if dep >= NonLocalUriDependency::Full {
+                counters
+                    .custom
+                    .record(CustomUseCounter::MaybeHasFullBaseUriDependency);
             }
         }
         CssUrl(Arc::new(CssUrlData {
             serialization: url.into(),
             extra_data: context.url_data.clone(),
             cors_mode,
+            initiator,
             load_data: LoadDataSource::Owned(LoadData::default()),
         }))
     }
@@ -169,13 +175,13 @@ impl CssUrlData {
             .as_bytes()
             .iter()
             .next()
-            .map_or(false, |b| *b == b'#')
+            .is_some_and(|b| *b == b'#')
     }
 
     /// Return the unresolved url as string, or the empty string if it's
     /// invalid.
     pub fn as_str(&self) -> &str {
-        &*self.serialization
+        &self.serialization
     }
 }
 
@@ -287,7 +293,7 @@ impl LoadDataSource {
             }
         }
         let mut guard = LOAD_DATA_TABLE.write().unwrap();
-        let r = guard.entry(key).or_insert_with(Default::default);
+        let r = guard.entry(key).or_default();
         &**r
     }
 }
@@ -364,4 +370,4 @@ impl ToCss for ComputedUrl {
 /// A table mapping CssUrlData objects to their lazily created LoadData
 /// objects.
 static LOAD_DATA_TABLE: LazyLock<RwLock<HashMap<LoadDataKey, Box<LoadData>>>> =
-    LazyLock::new(|| Default::default());
+    LazyLock::new(Default::default);

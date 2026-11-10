@@ -2,31 +2,36 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const lazy = {};
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-ChromeUtils.defineESModuleGetters(lazy, {
-  ClientEnvironment: "resource://normandy/lib/ClientEnvironment.sys.mjs",
+const lazy = XPCOMUtils.declareLazy({
+  ClientEnvironmentBase:
+    "resource://gre/modules/components-utils/ClientEnvironment.sys.mjs",
   ClientID: "resource://gre/modules/ClientID.sys.mjs",
   ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
   ExperimentStore: "resource://nimbus/lib/ExperimentStore.sys.mjs",
   FirstStartup: "resource://gre/modules/FirstStartup.sys.mjs",
+  LegacyHeartbeatFeature:
+    // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
+    "moz-src:///browser/components/nimbus/LegacyHeartbeatFeature.sys.mjs",
   NimbusEnrollments: "resource://nimbus/lib/Enrollments.sys.mjs",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   NimbusTelemetry: "resource://nimbus/lib/Telemetry.sys.mjs",
-  NormandyUtils: "resource://normandy/lib/NormandyUtils.sys.mjs",
   PrefFlipsFeature: "resource://nimbus/lib/PrefFlipsFeature.sys.mjs",
   PrefUtils: "moz-src:///toolkit/modules/PrefUtils.sys.mjs",
   EnrollmentsContext:
     "resource://nimbus/lib/RemoteSettingsExperimentLoader.sys.mjs",
   MatchStatus: "resource://nimbus/lib/RemoteSettingsExperimentLoader.sys.mjs",
   Sampling: "resource://gre/modules/components-utils/Sampling.sys.mjs",
-});
+  ShutdownStartedError:
+    "resource://nimbus/lib/RemoteSettingsExperimentLoader.sys.mjs",
 
-ChromeUtils.defineLazyGetter(lazy, "log", () => {
-  const { Logger } = ChromeUtils.importESModule(
-    "resource://messaging-system/lib/Logger.sys.mjs"
-  );
-  return new Logger("ExperimentManager");
+  log: () => {
+    const { Logger } = ChromeUtils.importESModule(
+      "resource://messaging-system/lib/Logger.sys.mjs"
+    );
+    return new Logger("ExperimentManager");
+  },
 });
 
 /** @typedef {import("./PrefFlipsFeature.sys.mjs").PrefBranch} PrefBranch */
@@ -202,8 +207,7 @@ export class ExperimentManager {
   /** @type AboutConfigObserver */
   #aboutConfigObserver;
 
-  constructor({ id = "experimentmanager", store } = {}) {
-    this.id = id;
+  constructor({ store } = {}) {
     this.store = store || new lazy.ExperimentStore();
 
     /** @type {OptInEntry[]} */
@@ -350,7 +354,7 @@ export class ExperimentManager {
 
     if (
       lazy.ExperimentAPI.labsEnabled &&
-      lazy.NimbusEnrollments.readFromDatabaseEnabled
+      lazy.NimbusEnrollments.persistenceEnabled
     ) {
       // If labs are disabled, we will immediately clear the list of opt-in
       // recipes after initialization.
@@ -390,6 +394,8 @@ export class ExperimentManager {
 
       Services.fog.applyServerKnobsConfig(JSON.stringify(cfg));
     });
+
+    lazy.LegacyHeartbeatFeature.init();
   }
 
   /**
@@ -418,12 +424,12 @@ export class ExperimentManager {
     }
 
     if (!result.ok) {
-      lazy.NimbusTelemetry.recordEnrollmentStatus({
-        slug: recipe.slug,
+      this.store._db?.recordEnrollmentStatus(recipe.slug, {
         status: EnrollmentStatus.DISQUALIFIED,
         reason: EnrollmentStatusReason.ERROR,
-        error_string: result.reason,
+        error: result.reason,
       });
+
       return;
     }
 
@@ -442,40 +448,35 @@ export class ExperimentManager {
 
     switch (result.status) {
       case lazy.MatchStatus.DISABLED:
-        lazy.NimbusTelemetry.recordEnrollmentStatus({
-          slug: recipe.slug,
+        this.store._db?.recordEnrollmentStatus(recipe.slug, {
           status: EnrollmentStatus.NOT_ENROLLED,
           reason: EnrollmentStatusReason.OPT_OUT,
         });
         break;
 
       case lazy.MatchStatus.ENROLLMENT_PAUSED:
-        lazy.NimbusTelemetry.recordEnrollmentStatus({
-          slug: recipe.slug,
+        this.store._db?.recordEnrollmentStatus(recipe.slug, {
           status: EnrollmentStatus.NOT_ENROLLED,
           reason: EnrollmentStatusReason.ENROLLMENTS_PAUSED,
         });
         break;
 
       case lazy.MatchStatus.NO_MATCH:
-        lazy.NimbusTelemetry.recordEnrollmentStatus({
-          slug: recipe.slug,
+        this.store._db?.recordEnrollmentStatus(recipe.slug, {
           status: EnrollmentStatus.NOT_ENROLLED,
           reason: EnrollmentStatusReason.NOT_TARGETED,
         });
         break;
 
       case lazy.MatchStatus.TARGETING_ONLY:
-        lazy.NimbusTelemetry.recordEnrollmentStatus({
-          slug: recipe.slug,
+        this.store._db?.recordEnrollmentStatus(recipe.slug, {
           status: EnrollmentStatus.NOT_ENROLLED,
           reason: EnrollmentStatusReason.NOT_SELECTED,
         });
         break;
 
       case lazy.MatchStatus.UNENROLLED_IN_ANOTHER_PROFILE:
-        lazy.NimbusTelemetry.recordEnrollmentStatus({
-          slug: recipe.slug,
+        this.store._db?.recordEnrollmentStatus(recipe.slug, {
           status: EnrollmentStatus.NOT_ENROLLED,
           reason: EnrollmentStatusReason.UNENROLLED_IN_ANOTHER_PROFILE,
         });
@@ -500,7 +501,7 @@ export class ExperimentManager {
   async getUserId(bucketConfig) {
     let id;
     if (bucketConfig.randomizationUnit === "normandy_id") {
-      id = lazy.ClientEnvironment.userId;
+      id = lazy.ClientEnvironmentBase.legacyRandomizationId;
     } else if (bucketConfig.randomizationUnit === "group_id") {
       id = await lazy.ClientID.getProfileGroupID();
     } else {
@@ -514,6 +515,8 @@ export class ExperimentManager {
 
   /**
    * Get the list of opt-ins that are available for enrollment.
+   *
+   * This may return an empty list if called during shutdown.
    *
    * @returns {OptInEntry[]} The opt-in recipes and their sources.
    */
@@ -529,25 +532,36 @@ export class ExperimentManager {
     // RemoteSettingsExperimentLoader should have finished updating at least
     // once. Prevent concurrent updates while we filter through the list of
     // available opt-in recipes.
-    const entries = await lazy.ExperimentAPI._rsLoader.withUpdateLock(
-      async () => {
-        const filtered = [];
+    let entries;
+    try {
+      entries = await lazy.ExperimentAPI._rsLoader.withUpdateLock(
+        async () => {
+          const filtered = [];
 
-        for (const entry of this.optIns) {
-          if (
-            (await enrollmentsCtx.checkTargeting(entry.recipe)) &&
-            (await this.isInBucketAllocation(entry.recipe.bucketConfig)) &&
-            (this.store.get(entry.recipe.slug)?.active ||
-              this.canEnroll(entry.recipe).ok)
-          ) {
-            filtered.push(entry);
+          for (const entry of this.optIns) {
+            if (
+              (await enrollmentsCtx.checkTargeting(entry.recipe)) &&
+              (await this.isInBucketAllocation(entry.recipe.bucketConfig)) &&
+              (this.store.get(entry.recipe.slug)?.active ||
+                this.canEnroll(entry.recipe).ok)
+            ) {
+              filtered.push(entry);
+            }
           }
-        }
 
-        return filtered;
-      },
-      { mode: "shared" }
-    );
+          return filtered;
+        },
+        { mode: "shared" }
+      );
+    } catch (e) {
+      // If we're in shutdown, there is no point presenting opt-ins to the user
+      // because we don't want to change enrollment state.
+      if (e instanceof lazy.ShutdownStartedError) {
+        return [];
+      }
+
+      throw e;
+    }
 
     entries.sort(
       (a, b) =>
@@ -655,25 +669,37 @@ export class ExperimentManager {
    * Start a new experiment by enrolling the users
    *
    * @param {object} recipe
-   *                 The recipe to enroll in.
+   * The recipe to enroll in.
+   *
    * @param {string} source
-   *                 The source of the experiment (e.g., "rs-loader" for recipes
-   *                 from Remote Settings).
+   * The source of the experiment (e.g., "rs-loader" for recipes from Remote
+   * Settings).
+   *
    * @param {object} options
+   *
    * @param {boolean} options.reenroll
-   *                  Allow re-enrollment. Only supported for rollouts.
+   * Allow re-enrollment. Only supported for rollouts.
+   *
    * @param {string} options.branchSlug
-   *                 If enrolling in a Firefox Labs opt-in experiment, this
-   *                 option is required and will dictate which branch to enroll
-   *                 in.
+   * If enrolling in a Firefox Labs opt-in, this option is required and will
+   * dictate which branch to enroll in.
+   *
+   * @param {Map<string, unknown> | undefined} options.originalPrefValues
+   * If enrolling in a Firefox labs opt-in, this option allows Labs to specify
+   * original values for prefs.
    *
    * @returns {Promise<Enrollment>}
-   *          The experiment object stored in the data store.
+   * The experiment object stored in the data store.
    *
-   * @throws {Error} If a recipe already exists in the store with the same slug
-   *                 as `recipe` and re-enrollment is prevented.
+   * @throws {Error}
+   * If a recipe already exists in the store with the same slug as `recipe` and
+   * re-enrollment is prevented.
    */
-  async enroll(recipe, source, { reenroll = false, branchSlug } = {}) {
+  async enroll(
+    recipe,
+    source,
+    { reenroll = false, branchSlug, originalPrefValues } = {}
+  ) {
     if (typeof source !== "string") {
       throw new Error("source is required");
     }
@@ -691,8 +717,7 @@ export class ExperimentManager {
         slug,
         lazy.NimbusTelemetry.EnrollmentFailureReason.NAME_CONFLICT
       );
-      lazy.NimbusTelemetry.recordEnrollmentStatus({
-        slug,
+      this.store._db?.recordEnrollmentStatus(slug, {
         status: lazy.NimbusTelemetry.EnrollmentStatus.NOT_ENROLLED,
         reason: lazy.NimbusTelemetry.EnrollmentStatusReason.NAME_CONFLICT,
       });
@@ -750,18 +775,22 @@ export class ExperimentManager {
             slug,
             lazy.NimbusTelemetry.EnrollmentFailureReason.FEATURE_CONFLICT
           );
-          lazy.NimbusTelemetry.recordEnrollmentStatus({
-            slug,
+          this.store._db?.recordEnrollmentStatus(slug, {
             status: lazy.NimbusTelemetry.EnrollmentStatus.NOT_ENROLLED,
             reason:
               lazy.NimbusTelemetry.EnrollmentStatusReason.FEATURE_CONFLICT,
-            conflict_slug: Array.from(result.conflictingEnrollments).join(","),
+            conflictSlugs: Array.from(result.conflictingEnrollments).sort(),
           });
           return null;
       }
     }
 
-    return this._enroll(recipe, branch.slug, source);
+    return this._enroll(
+      recipe,
+      branch.slug,
+      source,
+      recipe.isFirefoxLabsOptIn ? originalPrefValues : undefined
+    );
   }
 
   /**
@@ -776,14 +805,20 @@ export class ExperimentManager {
    * @param {string} source
    * The source associated with the enrollment.
    *
+   * @param {Map<string, unknown> | undefined} originalPrefValues
+   * If enrolling in a Firefox labs opt-in, this option allows Labs to specify
+   * original values for prefs.
+   *
    * @returns {object} The computed enrollment.
    */
-  _enroll(recipe, branchSlug, source) {
+  _enroll(recipe, branchSlug, source, originalPrefValues = undefined) {
     const { slug, isRollout } = recipe;
     const { enrollment, prefsToSet } = this.createEnrollment(
       recipe,
       branchSlug,
-      source
+      source,
+      undefined,
+      originalPrefValues
     );
 
     // Unenroll in any conflicting prefFlips enrollments.
@@ -799,7 +834,8 @@ export class ExperimentManager {
     this._setEnrollmentPrefs(prefsToSet);
     this._updatePrefObservers(enrollment);
 
-    lazy.NimbusTelemetry.recordEnrollment(enrollment);
+    const enrollmentStatus = lazy.NimbusTelemetry.recordEnrollment(enrollment);
+    this.store._db?.recordEnrollmentStatus(enrollment.slug, enrollmentStatus);
 
     lazy.log.debug(
       `New ${isRollout ? "rollout" : "experiment"} started: ${slug}, ${
@@ -832,22 +868,82 @@ export class ExperimentManager {
    * @param {string} source
    * The source associated with the enrollment.
    *
-   * @param {object} properties
-   * Additional properties to overwrite on the enrollment.
+   * @param {object} extra
+   * Additional properties to set on the enrollment.
    *
-   * @param {boolean} options.active
-   * Whether or not the enrollment should be active (enrolled).
+   * @param {Map<string, unknown> | undefined} originalPrefValues
+   * When creating a Firefox labs opt-in, this option allows Labs to specify
+   * original values for prefs.
    *
    * @returns {CreateEnrollmentResult}
+   * The resulting enrollment and the prefs that should be set.
    *
-   * @throws If the branch does not exist.
+   * @throws {Error}
+   * If the branch does not exist.
    */
   createEnrollment(
     recipe,
     branchSlug,
     source,
-    { active = true, ...extra } = {}
+    extra = {},
+    originalPrefValues = undefined
   ) {
+    const enrollment = ExperimentManager.createIncompleteEnrollment(
+      recipe,
+      branchSlug,
+      source,
+      extra
+    );
+
+    let prefsToSet = null;
+    if (enrollment.active) {
+      this._prefFlips._annotateEnrollment(enrollment);
+
+      const result = this._getPrefsForBranch(
+        enrollment.branch,
+        recipe.isRollout,
+        originalPrefValues
+      );
+
+      enrollment.prefs = result.prefs;
+      prefsToSet = result.prefsToSet;
+    }
+
+    return { enrollment, prefsToSet };
+  }
+
+  /**
+   * Create an incomplete enrollment.
+   *
+   * The enrollment will not be annotated with correct values for the `prefs` or
+   * `prefFlips` fields.
+   *
+   * This function exists to provide a common implementation for creating
+   * enrollments in {@link ExperimentManager.createEnrollment} and tests.
+   *
+   * @param {object} recipe
+   * The recipe.
+   *
+   * @param {string} branchSlug
+   * The slug of the branch to enroll in. This must exist in the recipe.
+   *
+   * @param {string} source
+   * The source associated with the enrollment.
+   *
+   * @param {object} extra
+   * Additional properties to set on the enrollment.
+   *
+   * @returns {object}
+   * An incomplete enrollment.
+   */
+  static createIncompleteEnrollment(recipe, branchSlug, source, extra = {}) {
+    const branch = recipe.branches.find(b => b.slug === branchSlug);
+    if (typeof branch === "undefined") {
+      throw new Error(`${recipe.slug}: no such branch ${branchSlug}`);
+    }
+
+    const { active = true, ...rest } = extra;
+
     const {
       slug,
       userFacingName,
@@ -863,49 +959,40 @@ export class ExperimentManager {
       requiresRestart,
     } = recipe;
 
-    const branch = recipe.branches.find(b => b.slug === branchSlug);
-    if (typeof branch === "undefined") {
-      throw new Error(`${recipe.slug}: no such branch ${branchSlug}`);
+    const enrollment = Object.assign(
+      {
+        slug,
+        source,
+        userFacingName,
+        userFacingDescription,
+        lastSeen: new Date().toJSON(),
+        featureIds,
+        isRollout,
+        active,
+        branch,
+        localizations,
+      },
+      typeof isFirefoxLabsOptIn !== "undefined"
+        ? {
+            isFirefoxLabsOptIn,
+            firefoxLabsTitle,
+            firefoxLabsDescription,
+            firefoxLabsDescriptionLinks,
+            firefoxLabsGroup,
+            requiresRestart,
+          }
+        : {},
+      rest
+    );
+
+    if (
+      !enrollment.active &&
+      typeof enrollment.unenrollReason === "undefined"
+    ) {
+      enrollment.unenrollReason = lazy.NimbusTelemetry.UnenrollReason.UNKNOWN;
     }
 
-    const enrollment = {
-      slug,
-      source,
-      userFacingName,
-      userFacingDescription,
-      lastSeen: new Date().toJSON(),
-      featureIds,
-      isRollout,
-      prefs: [],
-      active,
-      branch,
-      localizations,
-    };
-
-    if (typeof isFirefoxLabsOptIn !== "undefined") {
-      Object.assign(enrollment, {
-        isFirefoxLabsOptIn,
-        firefoxLabsTitle,
-        firefoxLabsDescription,
-        firefoxLabsDescriptionLinks,
-        firefoxLabsGroup,
-        requiresRestart,
-      });
-    }
-
-    let prefsToSet = null;
-    if (active) {
-      this._prefFlips._annotateEnrollment(enrollment);
-
-      const result = this._getPrefsForBranch(enrollment.branch, isRollout);
-
-      enrollment.prefs = result.prefs;
-      prefsToSet = result.prefsToSet;
-    }
-
-    Object.assign(enrollment, extra);
-
-    return { enrollment, prefsToSet };
+    return enrollment;
   }
 
   /**
@@ -1055,8 +1142,7 @@ export class ExperimentManager {
       // Unenrollment due to studies or rollouts becoming disabled are handled in
       // `_handleStudiesOptOut` or `_handleRolloutsOptOut` respectively.
       if (result.status === lazy.MatchStatus.DISABLED) {
-        lazy.NimbusTelemetry.recordEnrollmentStatus({
-          slug: recipe.slug,
+        this.store._db?.recordEnrollmentStatus(recipe.slug, {
           status: EnrollmentStatus.NOT_ENROLLED,
           reason: EnrollmentStatusReason.OPT_OUT,
         });
@@ -1145,8 +1231,7 @@ export class ExperimentManager {
       }
 
       if (result.status === lazy.MatchStatus.TARGETING_AND_BUCKETING) {
-        lazy.NimbusTelemetry.recordEnrollmentStatus({
-          slug: enrollment.slug,
+        this.store._db?.recordEnrollmentStatus(enrollment.slug, {
           branch: enrollment.branch.slug,
           status: EnrollmentStatus.ENROLLED,
           reason: EnrollmentStatusReason.QUALIFIED,
@@ -1253,7 +1338,11 @@ export class ExperimentManager {
 
     this.store.deactivateEnrollment(slug, cause.reason);
 
-    lazy.NimbusTelemetry.recordUnenrollment(enrollment, cause);
+    const enrollmentStatus = lazy.NimbusTelemetry.recordUnenrollment(
+      enrollment,
+      cause
+    );
+    this.store._db?.recordEnrollmentStatus(enrollment.slug, enrollmentStatus);
 
     if (unsetEnrollmentPrefs) {
       this._unsetEnrollmentPrefs(enrollment, cause, { duringRestore });
@@ -1365,7 +1454,7 @@ export class ExperimentManager {
     }
 
     while (Object.keys(branchValues).length < branches.length + includeNot) {
-      const id = lazy.NormandyUtils.generateUuid();
+      const id = Services.uuid.generateUUID().toString().slice(1, -1);
       const enrolls = await lazy.Sampling.bucketSample(
         [id, namespace],
         start,
@@ -1400,7 +1489,11 @@ export class ExperimentManager {
    * @param {string} userId
    * @returns {Promise<Branch>}
    */
-  async chooseBranch(slug, branches, userId = lazy.ClientEnvironment.userId) {
+  async chooseBranch(
+    slug,
+    branches,
+    userId = lazy.ClientEnvironmentBase.legacyRandomizationId
+  ) {
     const ratios = branches.map(({ ratio = 1 }) => ratio);
 
     // It's important that the input be:
@@ -1409,7 +1502,7 @@ export class ExperimentManager {
     // - Differs from the input used for sampling the recipe (otherwise only
     //   branches that contain the same buckets as the recipe sampling will
     //   receive users)
-    const input = `${this.id}-${userId}-${slug}-branch`;
+    const input = `experimentmanager-${userId}-${slug}-branch`;
 
     const index = await lazy.Sampling.ratioSample(input, ratios);
     return branches[index];
@@ -1471,12 +1564,23 @@ export class ExperimentManager {
   /**
    * Generate the list of prefs a recipe will set.
    *
-   * @param {object} branch The recipe branch that will be enrolled.
-   * @param {boolean} isRollout Whether or not this recipe is a rollout.
+   * @param {object} branch
+   * The recipe branch that will be enrolled.
+   *
+   * @param {boolean} isRollout
+   * Whether or not this recipe is a rollout.
+   *
+   * @param {Map<string, unknown> | undefined} originalPrefValues
+   * If provided, this will be queried for the original values of prefs before
+   * any other source (existing enrollments, actual pref values).
    *
    * @returns {PrefsForBranch}
    */
-  _getPrefsForBranch(branch, isRollout = false) {
+  _getPrefsForBranch(
+    branch,
+    isRollout = false,
+    originalPrefValues = undefined
+  ) {
     const prefs = [];
     const prefsToSet = [];
 
@@ -1500,28 +1604,34 @@ export class ExperimentManager {
           const { pref: prefName, branch: prefBranch } = setPref;
 
           let originalValue;
-          const conflictingPref = conflictingEnrollment?.prefs?.find(
-            p => p.name === prefName
-          );
+          let conflictingPref = undefined;
 
-          if (conflictingPref) {
-            // If there is another enrollment that has already set the pref we
-            // care about, we use its stored originalValue.
-            originalValue = conflictingPref.originalValue;
+          if (originalPrefValues?.has(prefName)) {
+            originalValue = originalPrefValues.get(prefName);
           } else {
-            // If there is an active prefFlips experiment for this pref on this
-            // branch, we must use its originalValue.
-            const prefFlipValue = this._prefFlips._getOriginalValue(
-              prefName,
-              prefBranch
+            conflictingPref = conflictingEnrollment?.prefs?.find(
+              p => p.name === prefName
             );
-            if (typeof prefFlipValue !== "undefined") {
-              originalValue = prefFlipValue;
+
+            if (conflictingPref) {
+              // If there is another enrollment that has already set the pref we
+              // care about, we use its stored originalValue.
+              originalValue = conflictingPref.originalValue;
             } else {
-              originalValue = lazy.PrefUtils.getPrefStrict(
+              // If there is an active prefFlips experiment for this pref on this
+              // branch, we must use its originalValue.
+              const prefFlipValue = this._prefFlips._getOriginalValue(
                 prefName,
                 prefBranch
               );
+              if (typeof prefFlipValue !== "undefined") {
+                originalValue = prefFlipValue;
+              } else {
+                originalValue = lazy.PrefUtils.getPrefStrict(
+                  prefName,
+                  prefBranch
+                );
+              }
             }
           }
 

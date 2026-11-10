@@ -23,6 +23,7 @@
 #include "vm/Realm.h"
 #include "vm/Scope.h"
 #include "vm/Shape.h"
+#include "vm/Watchtower.h"
 #include "wasm/WasmDebug.h"
 #include "wasm/WasmDebugFrame.h"
 #include "wasm/WasmInstance.h"
@@ -498,17 +499,11 @@ ModuleEnvironmentObject* ModuleEnvironmentObject::createSynthetic(
 
 /* static */
 ModuleEnvironmentObject* ModuleEnvironmentObject::createForWasmModule(
-    JSContext* cx, Handle<ModuleObject*> module) {
-  // Wasm source-phase modules have no JavaScript bindings, so the environment
-  // has no property slots.
-  Rooted<SharedPropMap*> map(cx);
-  uint32_t mapLength = 0;
-  uint32_t numSlots = JSSLOT_FREE(&class_);
-  uint32_t numFixed = gc::GetGCKindSlots(gc::GetGCObjectKind(numSlots));
+    JSContext* cx, Handle<ModuleObject*> module,
+    Handle<ExportNameVector> exportNames) {
   Rooted<SharedShape*> shape(
-      cx, SharedShape::getInitialOrPropMapShape(cx, &class_, cx->realm(),
-                                                TaggedProto(nullptr), numFixed,
-                                                map, mapLength, OBJECT_FLAGS));
+      cx, CreateEnvironmentShapeForWasmModule(cx, &class_, JSSLOT_FREE(&class_),
+                                              exportNames));
   if (!shape) {
     return nullptr;
   }
@@ -537,14 +532,30 @@ IndirectBindingMap& ModuleEnvironmentObject::importBindings() const {
   return module().importBindings();
 }
 
-bool ModuleEnvironmentObject::createImportBinding(JSContext* cx,
-                                                  Handle<JSAtom*> importName,
-                                                  Handle<ModuleObject*> module,
-                                                  Handle<JSAtom*> localName) {
+bool ModuleEnvironmentObject::createImportBinding(
+    JSContext* cx, Handle<JSAtom*> importName,
+    Handle<ResolvedBindingObject*> binding) {
   RootedId importNameId(cx, AtomToId(importName));
-  RootedId localNameId(cx, AtomToId(localName));
-  Rooted<ModuleEnvironmentObject*> env(cx, &module->initialEnvironment());
-  return importBindings().put(cx, importNameId, env, localNameId);
+  return importBindings().put(cx, importNameId, binding);
+}
+
+/* static */
+uint32_t ModuleEnvironmentObject::namespaceSlotIndex(ImportPhase phase) {
+  MOZ_ASSERT(phase == ImportPhase::Evaluation ||
+             phase == ImportPhase::Deferred);
+  return phase == ImportPhase::Deferred ? DEFERRED_NAMESPACE_SLOT.index()
+                                        : NAMESPACE_SLOT.index();
+}
+
+void ModuleEnvironmentObject::initNamespaceSlot(ImportPhase phase,
+                                                ModuleNamespaceObject* ns) {
+  MOZ_ASSERT(phase == ImportPhase::Evaluation ||
+             phase == ImportPhase::Deferred);
+  auto slot =
+      phase == ImportPhase::Deferred ? DEFERRED_NAMESPACE_SLOT : NAMESPACE_SLOT;
+  MOZ_ASSERT(getReservedSlotTyped(slot).isUndefined() ||
+             &getReservedSlotTyped(slot).toObject() == ns);
+  setReservedSlotTyped(slot, ObjectValue(*ns));
 }
 
 bool ModuleEnvironmentObject::hasImportBinding(Handle<PropertyName*> name) {
@@ -799,8 +810,7 @@ static bool IsInternalDotName(JSContext* cx, HandleId id) {
          id.isAtom(cx->names().dot_staticInitializers_) ||
          id.isAtom(cx->names().dot_staticFieldKeys_) ||
          id.isAtom(cx->names().dot_args_) ||
-         id.isAtom(cx->names().dot_newTarget_) ||
-         id.isAtom(cx->names().star_namespace_star_);
+         id.isAtom(cx->names().dot_newTarget_);
 }
 #endif
 
@@ -1740,7 +1750,8 @@ class DebugEnvironmentProxyHandler : public NurseryAllocableProxyHandler {
         return true;
       }
 
-      if (action == SET && bi.kind() == BindingKind::Const) {
+      if (action == SET && (bi.kind() == BindingKind::Const ||
+                            bi.kind() == BindingKind::Using)) {
         ReportRuntimeLexicalError(cx, JSMSG_BAD_CONST_ASSIGN, id);
         return false;
       }
@@ -1865,7 +1876,8 @@ class DebugEnvironmentProxyHandler : public NurseryAllocableProxyHandler {
         return true;
       }
 
-      if (action == SET && bi.kind() == BindingKind::Const) {
+      if (action == SET && (bi.kind() == BindingKind::Const ||
+                            bi.kind() == BindingKind::Using)) {
         ReportRuntimeLexicalError(cx, JSMSG_BAD_CONST_ASSIGN, id);
         return false;
       }
@@ -3841,14 +3853,21 @@ static void ReportRuntimeRedeclaration(JSContext* cx,
 
 [[nodiscard]] static bool CheckLexicalNameConflict(
     JSContext* cx, Handle<ExtensibleLexicalEnvironmentObject*> lexicalEnv,
-    HandleObject varObj, Handle<PropertyName*> name) {
+    HandleObject varObj, Handle<PropertyName*> name, bool isConst,
+    bool allowRedeclaringExistingLexicalBinding) {
   const char* redeclKind = nullptr;
   RootedId id(cx, NameToId(name));
   mozilla::Maybe<PropertyInfo> prop, shadowedExistingProp;
 
   if ((prop = lexicalEnv->lookup(cx, name))) {
     // ES 15.1.11 step 5.b
-    redeclKind = prop->writable() ? "let" : "const";
+    //
+    // Reinitialization doesn't change a binding's writability, so
+    // redeclaring with a different const-ness is still an error.
+    bool existingIsConst = !prop->writable();
+    if (!allowRedeclaringExistingLexicalBinding || existingIsConst != isConst) {
+      redeclKind = prop->writable() ? "let" : "const";
+    }
   } else if (varObj->is<NativeObject>() &&
              (prop = varObj->as<NativeObject>().lookup(cx, name))) {
     // Faster path for ES 15.1.11 step 5.c-d when the shape can be found
@@ -3968,19 +3987,47 @@ static void ReportCannotDeclareGlobalBinding(JSContext* cx,
   return true;
 }
 
+// Define a new lexical binding, or if |allowRedeclaringExistingLexicalBinding|
+// is set and the binding already exists, reset its slot to uninitialized so
+// the caller's initializer can write a new value.
+[[nodiscard]] static bool DefineLexicalBinding(
+    JSContext* cx, Handle<ExtensibleLexicalEnvironmentObject*> lexicalEnv,
+    Handle<PropertyName*> name, HandleId id, HandleValue uninitialized,
+    unsigned attrs, bool allowRedeclaringExistingLexicalBinding,
+    bool* anyRedeclared) {
+  if (allowRedeclaringExistingLexicalBinding) {
+    mozilla::Maybe<PropertyInfo> prop = lexicalEnv->lookup(cx, name);
+    if (prop.isSome()) {
+      MOZ_ASSERT(prop->isDataProperty());
+      MOZ_ASSERT(prop->writable() == !(attrs & JSPROP_READONLY));
+      lexicalEnv->setSlot(prop->slot(), uninitialized);
+      *anyRedeclared = true;
+      return true;
+    }
+  }
+
+  return NativeDefineDataProperty(cx, lexicalEnv, id, uninitialized, attrs);
+}
+
 // Add the var/let/const bindings to the variables environment of a global or
 // sloppy-eval script. The redeclaration checks should already have been
 // performed.
 static bool InitGlobalOrEvalDeclarations(
     JSContext* cx, HandleScript script,
-    Handle<ExtensibleLexicalEnvironmentObject*> lexicalEnv,
-    HandleObject varObj) {
+    Handle<ExtensibleLexicalEnvironmentObject*> lexicalEnv, HandleObject varObj,
+    bool allowRedeclaringExistingLexicalBinding) {
   Rooted<BindingIter> bi(cx, BindingIter(script));
   RootedTuple<PropertyName*, JSObject*, jsid, Value> declRoots(cx);
   RootedField<PropertyName*> name(declRoots);
   RootedField<JSObject*> obj2(declRoots);
   RootedField<jsid> id(declRoots);
   RootedField<Value> uninitialized(declRoots);
+
+  // Whether any binding below actually reset an existing slot, rather than
+  // defining a fresh one. JIT code is invalidated at most once, after the
+  // loop, only if this is true.
+  bool anyRedeclared = false;
+
   for (; bi; bi++) {
     if (bi.isTopLevelFunction()) {
       continue;
@@ -4015,8 +4062,9 @@ static bool InitGlobalOrEvalDeclarations(
       case BindingKind::Let: {
         id = NameToId(name);
         uninitialized = MagicValue(JS_UNINITIALIZED_LEXICAL);
-        if (!NativeDefineDataProperty(cx, lexicalEnv, id, uninitialized,
-                                      attrs)) {
+        if (!DefineLexicalBinding(cx, lexicalEnv, name, id, uninitialized,
+                                  attrs, allowRedeclaringExistingLexicalBinding,
+                                  &anyRedeclared)) {
           return false;
         }
 
@@ -4027,6 +4075,13 @@ static bool InitGlobalOrEvalDeclarations(
         MOZ_CRASH("Expected binding kind");
         return false;
     }
+  }
+
+  if (anyRedeclared) {
+    // Discard JIT code that inlined old values from the global lexical
+    // environment. Any code compiled after this point sees the reset slots
+    // as the TDZ, not a stale value.
+    Watchtower::watchGlobalLexicalRedeclaration(cx, lexicalEnv);
   }
 
   return true;
@@ -4126,8 +4181,8 @@ static bool InitHoistedFunctionDeclarations(JSContext* cx, HandleScript script,
 
 [[nodiscard]] static bool CheckGlobalDeclarationConflicts(
     JSContext* cx, HandleScript script,
-    Handle<ExtensibleLexicalEnvironmentObject*> lexicalEnv,
-    HandleObject varObj) {
+    Handle<ExtensibleLexicalEnvironmentObject*> lexicalEnv, HandleObject varObj,
+    bool allowRedeclaringExistingLexicalBinding) {
   // Due to the extensibility of the global lexical environment, we must
   // check for redeclaring a binding.
   //
@@ -4169,7 +4224,9 @@ static bool InitHoistedFunctionDeclarations(JSContext* cx, HandleScript script,
   // Check that lexical bindings do not conflict.
   for (; bi; bi++) {
     name = bi.name()->asPropertyName();
-    if (!CheckLexicalNameConflict(cx, lexicalEnv, varObj, name)) {
+    if (!CheckLexicalNameConflict(cx, lexicalEnv, varObj, name,
+                                  bi.kind() == BindingKind::Const,
+                                  allowRedeclaringExistingLexicalBinding)) {
       return false;
     }
   }
@@ -4304,18 +4361,25 @@ bool js::GlobalOrEvalDeclInstantiation(JSContext* cx, HandleObject envChain,
   RootedObject varObj(cx, &GetVariablesObject(envChain));
   Rooted<ExtensibleLexicalEnvironmentObject*> lexicalEnv(cx);
 
+  bool allowRedeclaringExistingLexicalBinding =
+      script->allowRedeclaringExistingLexicalBinding();
+  MOZ_ASSERT_IF(script->isForEval(), !allowRedeclaringExistingLexicalBinding);
+
   if (script->isForEval()) {
     if (!CheckEvalDeclarationConflicts(cx, script, envChain, varObj)) {
       return false;
     }
   } else {
     lexicalEnv = &NearestEnclosingExtensibleLexicalEnvironment(envChain);
-    if (!CheckGlobalDeclarationConflicts(cx, script, lexicalEnv, varObj)) {
+    if (!CheckGlobalDeclarationConflicts(
+            cx, script, lexicalEnv, varObj,
+            allowRedeclaringExistingLexicalBinding)) {
       return false;
     }
   }
 
-  if (!InitGlobalOrEvalDeclarations(cx, script, lexicalEnv, varObj)) {
+  if (!InitGlobalOrEvalDeclarations(cx, script, lexicalEnv, varObj,
+                                    allowRedeclaringExistingLexicalBinding)) {
     return false;
   }
 

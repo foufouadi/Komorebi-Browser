@@ -89,10 +89,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 /* for backwards compatibility with obsolete versions of the STUN spec */
 #define NR_STUN_ATTR_OLD_XOR_MAPPED_ADDRESS  0x8020
 
-#ifdef USE_STUND_0_96
-#define NR_STUN_ATTR_OLD_CHANGE_REQUEST      0x0003
-#endif /* USE_STUND_0_96 */
-
 #ifdef USE_RFC_3489_BACKWARDS_COMPATIBLE
 /* for backwards compatibility with obsolete versions of the STUN spec */
 #define NR_STUN_ATTR_OLD_PASSWORD            0x0007
@@ -101,15 +97,12 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define NR_STUN_ATTR_OLD_CHANGED_ADDRESS     0x0005
 #endif /* USE_RFC_3489_BACKWARDS_COMPATIBLE */
 
-#ifdef USE_ICE
 /* ICE attributes */
 #define NR_STUN_ATTR_PRIORITY                0x0024
 #define NR_STUN_ATTR_USE_CANDIDATE           0x0025
 #define NR_STUN_ATTR_ICE_CONTROLLED          0x8029
 #define NR_STUN_ATTR_ICE_CONTROLLING         0x802A
-#endif /* USE_ICE */
 
-#ifdef USE_TURN
 /* TURN attributes */
 #define NR_STUN_ATTR_LIFETIME                0x000d
 /* from an expired draft defined as optional, but in the required range */
@@ -120,7 +113,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define NR_STUN_ATTR_REQUESTED_TRANSPORT     0x0019
 
 #define NR_STUN_ATTR_REQUESTED_TRANSPORT_UDP     17
-#endif /* USE_TURN */
 
 /*
  *                +-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -162,7 +154,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define NR_STUN_MSG_BINDING_ERROR_RESPONSE          NR_STUN_TYPE(NR_METHOD_BINDING, \
                                                                  NR_CLASS_ERROR_RESPONSE)
 
-#ifdef USE_TURN
 /* building blocks for TURN message types */
 #define NR_METHOD_ALLOCATE                 0x003
 #define NR_METHOD_REFRESH                  0x004
@@ -206,7 +197,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
                                                                       NR_CLASS_ERROR_RESPONSE)
 
 
-#endif /* USE_TURN */
 
 
 #define NR_STUN_AUTH_RULE_OPTIONAL      (1<<0)

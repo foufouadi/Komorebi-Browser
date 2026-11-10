@@ -54,7 +54,6 @@
 
 .attention > #fxview-tab-row-favicon::after {
   background-image: radial-gradient(circle, var(--favicon-badge-color), var(--favicon-badge-color) 2px, transparent 2px);
-  /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
   height: 4px;
   width: 100%;
   inset-block-start: var(--icon-size-medium);
@@ -75,7 +74,6 @@
 
   .fxview-tab-row-main.attention > & {
     background-image: radial-gradient(circle, var(--favicon-badge-color), var(--favicon-badge-color) 2px, transparent 2px);
-    /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
     height: 4px;
     width: 100%;
     inset-block-start: var(--icon-size-medium);
@@ -85,11 +83,9 @@
 .fxview-tab-row-main:is(.muted, .soundplaying, .activemedia-blocked):not(.attention) .fxview-tab-row-favicon::after {
   /* inset-inline-start set to half of the favicon
   width to place it horizontally centered */
-  /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
   inset-inline-start: 8px;
   /* inset-block-start set to display 6px above
   the top of the favicon */
-  /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
   inset-block-start: -6px;
   background-color: var(--background-color-box);
   padding: 1px;
@@ -97,7 +93,7 @@
 }
 
 .fxview-tab-row-main.muted .fxview-tab-row-favicon::after {
-  background-image: url("chrome://global/skin/media/audio-muted.svg");
+  background-image: url("resource://content-accessible/media/audio-muted.svg");
 }
 
 .fxview-tab-row-main.soundplaying .fxview-tab-row-favicon::after {
@@ -117,23 +113,14 @@
   fill: var(--identity-icon-color);
   margin-inline-end: 8px;
 
-  /* Match the container context-menu items: fill-color icon inside a round
-     15% tinted background. */
   @media -moz-pref("browser.nova.enabled") {
-    box-sizing: content-box;
-    padding: var(--identity-icon-inset);
-    border-radius: var(--border-radius-circle);
-    background-color: var(--identity-fill-tint);
-    background-origin: content-box;
-    background-repeat: no-repeat;
-    background-position: center;
-    fill: var(--identity-fill-color);
+    fill: var(--identity-color);
   }
 }
 
 :host([current]) {
   @media -moz-pref("browser.nova.enabled") {
-    outline: 1px solid var(--tab-selected-outline-color);
+    outline: 1px solid var(--tab-border-color-selected);
     outline-offset: -1px;
 
     @media (not (prefers-contrast)) {
@@ -141,13 +128,14 @@
       background:
         var(--tab-border-color-accent) border-box border-area,
         var(--tab-background-color-selected) padding-box;
+      color: var(--tab-text-color-selected);
     }
   }
 }
 
 :host([current][inactive-window]) {
   @media -moz-pref("browser.nova.enabled") {
-    outline-color: color-mix(in srgb, var(--tab-selected-outline-color) 60%, transparent);
+    outline-color: color-mix(in srgb, var(--tab-border-color-selected) 60%, transparent);
     --tab-border-color-selected-leading: color-mix(in srgb, var(--color-violet-30) 60%, transparent);
     --tab-border-color-selected-trailing: color-mix(in srgb, light-dark(var(--color-orange-30), var(--color-violet-50)) 60%, transparent);
   }

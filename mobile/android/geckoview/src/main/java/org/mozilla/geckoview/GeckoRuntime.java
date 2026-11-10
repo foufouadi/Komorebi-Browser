@@ -7,7 +7,6 @@ package org.mozilla.geckoview;
 import android.annotation.SuppressLint;
 import android.app.ActivityManager;
 import android.app.PendingIntent;
-import android.app.Service;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -37,11 +36,13 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.mozilla.gecko.Clipboard;
 import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.GeckoAppShell;
+import org.mozilla.gecko.GeckoJavaSampler;
 import org.mozilla.gecko.GeckoNetworkManager;
 import org.mozilla.gecko.GeckoScreenChangeListener;
 import org.mozilla.gecko.GeckoScreenOrientation;
@@ -194,8 +195,13 @@ public final class GeckoRuntime implements Parcelable {
       GeckoNetworkManager.getInstance().start(GeckoAppShell.getApplicationContext());
 
       // Set settings that may have changed between last app opening
-      GeckoAppShell.setIs24HourFormat(
-          DateFormat.is24HourFormat(GeckoAppShell.getApplicationContext()));
+      ThreadUtils.postToBackgroundThread(
+          () -> {
+            // DateFormat.is24HourFormat is expensive.
+            // If this is first call that ICU is used, it is 7-40ms on Pixel 6a. 3ms on next calls.
+            GeckoAppShell.setIs24HourFormat(
+                DateFormat.is24HourFormat(GeckoAppShell.getApplicationContext()));
+          });
 
       // OnPrimaryClipChangedListener() won’t be triggered for a background
       // application, so update the clipboard sequence number once the
@@ -442,9 +448,7 @@ public final class GeckoRuntime implements Parcelable {
     }
 
     try {
-      @SuppressWarnings("unchecked")
-      final Class<? extends Service> cls =
-          (Class<? extends Service>) Class.forName("org.mozilla.gecko.crashhelper.CrashHelper");
+      final Class<?> cls = Class.forName("org.mozilla.gecko.crashhelper.CrashHelper");
       final Intent i = new Intent(context, cls);
       final File minidumps = new File(context.getFilesDir(), "minidumps");
       context.bindService(
@@ -497,6 +501,7 @@ public final class GeckoRuntime implements Parcelable {
     GeckoAppShell.setDisplayDpiOverride(settings.getDisplayDpiOverride());
     GeckoAppShell.setScreenSizeOverride(settings.getScreenSizeOverride());
     GeckoAppShell.setCrashHandlerService(settings.getCrashHandler());
+    GeckoJavaSampler.setProguardUuid(settings.getProguardUuid());
     GeckoFontScaleListener.getInstance().attachToContext(context, settings);
 
     Bundle extras = settings.getExtras();
@@ -529,7 +534,16 @@ public final class GeckoRuntime implements Parcelable {
     }
 
     final GeckoProcessManager pm = GeckoProcessManager.getInstance();
-    pm.setIsolatedProcessEnabled(settings.getIsolatedProcessEnabled());
+    // Process-selection related environment variables must be applied before GeckoThread starts and
+    // XPCOMEventTarget.launcherThread() blocks are run.
+    final ArrayList<String> env = GeckoThread.getEnvFromExtras(extras);
+    if (env.contains("MOZ_ANDROID_CONTENT_SERVICE_ISOLATED_PROCESS=1")) {
+      Log.i(LOGTAG, "Enabling isolated process mode for content service processes at force");
+      pm.setIsolatedProcessEnabled(true);
+    } else {
+      pm.setIsolatedProcessEnabled(settings.getIsolatedProcessEnabled());
+    }
+    // TODO(m_kato): We have to check environment variables for Zygote process support.
     pm.setAppZygoteEnabled(settings.getAppZygoteProcessEnabled());
 
     final int[] fds = startCrashHelper();

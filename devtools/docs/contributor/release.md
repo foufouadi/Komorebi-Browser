@@ -20,14 +20,12 @@ The `webidl-deprecated-list.js` file will be used to avoid calling deprecated ge
 
 ## Remove backwards compatibility code
 
-In order to accommodate connecting to older server, we sometimes need to introduce specific branches in the code. At the moment, we only support connecting to server 2 versions older than the client (e.g. if the client is 87, we support connecting to 86 and 85).
-This means that on each release there's an opportunity to cleanup backward compatibility code that was introduced for server we don't have to support anymore. If I go back to my example with the 87 client, we can remove any backward-compatibility code that was added in 85.
+In order to accommodate connecting to older server, we sometimes need to introduce specific branches in the code. At the moment, we only support connecting to server 3 versions older than the client (e.g. if the client is 87, we support connecting to 86, 85 and 84).
+This means that on each release there's an opportunity to cleanup backward compatibility code that was introduced for server we don't have to support anymore. If I go back to my example with the 87 client, we can remove any backward-compatibility code that was added in 84.
 
-Luckily, when adding compatibility code, we also add comments that follow a specific pattern: `@backward-compat { version XX }`, where `XX` is the version number the code is supporting.
+When adding compatibility code, we also add comments that follow a specific pattern: `@backward-compat { version XX }`, where `XX` is the version number the code is supporting.
 
-Back to our example where the current version is 87, we need to list all the comments added for 85. This can be done by doing a search with the following expression: `@backward-compat { version 85 }` (here's the searchfox equivalent: [searchfox query](https://searchfox.org/mozilla-central/search?q=%40backward-compat%5Cs*%7B%5Cs*version+85%5Cs*%7D&path=&case=false&regexp=true)).
-
-Try to file a specific bug for each backward compatibility code you are removing (you can have broader bugs though, for example if you are removing a trait). Those bugs should block a META bug that will reference all the cleanups. You can check if a bug already exists in the main cleanup META bug ([Bug 1677944](https://bugzilla.mozilla.org/show_bug.cgi?id=1677944)), and if not, you can create it by visiting [this bugzilla link](https://bugzilla.mozilla.org/enter_bug.cgi?format=__default__&blocked=1677944&product=DevTools&component=General&short_desc=[META]%20Cleanup%20backward%20compatibility%20code%20added%20in%20YY&comment=YY%20is%20now%20in%20release,%20so%20we%20can%20remove%20any%20backward%20compatibility%20code%20that%20was%20added%20to%20support%20older%20servers&keywords=meta&bug_type=task) (make sure to replace `YY` with a version number that is equal to the current number minus 2; so if current release is 87, YY is 87 - 2 = 85).
+Back to our example where the current version is 87, we need to list all the comments added for 84. This can be done by doing a search with the following expression: `@backward-compat { version 84 }` (here's the searchfox equivalent: [searchfox query](https://searchfox.org/mozilla-central/search?q=%40backward-compat%5Cs*%7B%5Cs*version+84%5Cs*%7D&path=&case=false&regexp=true)).
 
 ## Smoke test remote debugging
 
@@ -38,6 +36,7 @@ See the [DevTools Backward Compatitility Tests](tests/backward-compat-tests.md)
 documentation.
 
 The DevTools backward compatibility job was added in [Bug 2053559](https://bugzilla.mozilla.org/show_bug.cgi?id=2053559).
+Results can be found on the [devtools-backward-monitor](https://firefox-devtools.github.io/devtools-backward-monitor/).
 
 The automated job currently only covers testing Desktop Firefox. Once we are
 confident the job works correctly and [Android coverage has been added](https://bugzilla.mozilla.org/show_bug.cgi?id=2062545),
@@ -49,7 +48,7 @@ We will run the remote debugging smoke tests twice. Once to exercise backward co
 
 You can use either desktop or mobile versions of Firefox as the server. Mobile is preferable as some codepaths are specific to Firefox mobile, but if you don't have access to an Android device, using a Desktop server is a decent alternative.
 
-- [Instructions](https://firefox-source-docs.mozilla.org/devtools-user/about_colon_debugging/index.html#connecting-to-a-remote-device) to setup remote debugging for Firefox mobile.
+- [Instructions](/devtools-user/about_colon_debugging/index.md#connecting-to-a-remote-device) to setup remote debugging for Firefox mobile.
 - [Instructions](https://gist.github.com/juliandescottes/b0d3d83154d9ea8a84db5d32aa35d2c1) to setup remote debugging for Firefox desktop.
 
 #### Backward compatibility test
@@ -146,6 +145,8 @@ Follow the [upgrade documentation](https://searchfox.org/firefox-main/source/dev
 ## Check xpcshell debugging
 
 Check that xpcshell tests can be debugged using the `--jsdebugger` option.
+
+This check is automated by `browser_backward_compat_xpcshell.js`, which runs in the daily `DTbc(same)` job (see [Remote debugging backward compatibility tests](./tests/backward-compat-tests.md)). If this job is green, you can skip the manual steps below.
 
 1. Run Firefox from `mozilla-central` using `./mach run`
 1. Open an `about:debugging` tab

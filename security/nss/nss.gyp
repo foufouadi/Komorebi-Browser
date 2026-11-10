@@ -68,7 +68,6 @@
             'lib/cryptohi/cryptohi.gyp:cryptohi',
             'lib/dev/dev.gyp:nssdev',
             'lib/freebl/freebl.gyp:freebl',
-            'lib/jar/jar.gyp:jar',
             'lib/libpkix/libpkix.gyp:libpkix',
             # mozpkix and mozpkix-testlib are static C++ libs
             'lib/mozpkix/mozpkix.gyp:mozpkix',
@@ -131,7 +130,6 @@
                 'cmd/nssdefaults/nssdefaults.gyp:nssdefaults',
                 'cmd/pwdecrypt/pwdecrypt.gyp:pwdecrypt',
                 'cmd/shlibsign/shlibsign.gyp:shlibsign',
-                'cmd/signtool/signtool.gyp:signtool',
                 'cmd/signver/signver.gyp:signver',
                 'cmd/smimetools/smimetools.gyp:cmsutil',
                 'cmd/ssltap/ssltap.gyp:ssltap',
@@ -221,6 +219,7 @@
             'gtests/pk11_gtest/pk11_gtest.gyp:pk11_gtest',
             'gtests/smime_gtest/smime_gtest.gyp:smime_gtest',
             'gtests/softoken_gtest/softoken_gtest.gyp:softoken_gtest',
+            'gtests/softoken_static_gtest/softoken_static_gtest.gyp:softoken_static_gtest',
             'gtests/ssl_gtest/ssl_gtest.gyp:ssl_gtest',
             'gtests/util_gtest/util_gtest.gyp:util_gtest',
             'lib/ckfw/builtins/testlib/builtins-testlib.gyp:nssckbi-testlib',

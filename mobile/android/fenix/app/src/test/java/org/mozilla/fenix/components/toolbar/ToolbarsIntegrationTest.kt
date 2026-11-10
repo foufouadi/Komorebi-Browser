@@ -29,7 +29,6 @@ class ToolbarsIntegrationTest {
     private val browserLayout: ViewGroup = mockk(relaxed = true)
     private val engineView: EngineView = mockk(relaxed = true)
     private val toolbar: BrowserToolbarComposable = mockk(relaxed = true)
-    private val navbar: BrowserNavigationBar = mockk(relaxed = true)
     private var onToolbarsResetCount = 0
     private val onToolbarsReset: () -> Unit = { onToolbarsResetCount++ }
 

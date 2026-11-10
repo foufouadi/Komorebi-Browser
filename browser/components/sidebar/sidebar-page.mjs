@@ -8,7 +8,7 @@ import { MozLitElement } from "chrome://global/content/lit-utils.mjs";
 import { html } from "chrome://global/content/vendor/lit.all.mjs";
 // eslint-disable-next-line mozilla/reject-import-system-module-from-non-system
 import { PlacesUtils } from "resource://gre/modules/PlacesUtils.sys.mjs";
-// eslint-disable-next-line import/no-unassigned-import
+// eslint-disable-next-line import-x/no-unassigned-import
 import "chrome://browser/content/sidebar/sidebar-panel-header.mjs";
 
 ChromeUtils.defineESModuleGetters(lazy, {
@@ -264,15 +264,17 @@ export class SidebarPage extends MozLitElement {
   /**
    * Show the "Clear data for site" dialog.
    *
+   * @param {string} [url]
+   *   A URL from the site to clear. Defaults to the trigger node's URL.
    * @returns {"accept" | "cancel"}
    *   The dialog's closing button.
    */
-  async forgetAboutThisSite() {
+  async forgetAboutThisSite(url = this.triggerNode.url) {
     let host;
     if (PlacesUtils.nodeIsHost(this.triggerNode)) {
       host = this.triggerNode.query.domain;
     } else {
-      host = Services.io.newURI(this.triggerNode.url).host;
+      host = Services.io.newURI(url).host;
     }
     let baseDomain;
     try {

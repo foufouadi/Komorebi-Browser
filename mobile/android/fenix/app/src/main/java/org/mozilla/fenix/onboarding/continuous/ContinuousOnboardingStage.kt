@@ -8,6 +8,7 @@ package org.mozilla.fenix.onboarding.continuous
 enum class ContinuousOnboardingStage {
     DAY_2,
     DAY_3,
+    DAY_5,
     DAY_7,
     NONE,
 }

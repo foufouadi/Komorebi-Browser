@@ -76,6 +76,8 @@ struct ParamCapture : angle::NonCopyable
     ParamData data;
     int dataNElements           = 0;
     int arrayClientPointerIndex = -1;
+    int arrayClientPointerMergedIndex = -1;
+    int arrayClientPointerOffset      = 0;
     size_t readBufferSizeBytes  = 0;
     uint32_t uniqueID           = 0;
     static uint32_t nextID;
@@ -150,7 +152,7 @@ struct CallCapture
     std::string customFunctionName;
     ParamBuffer params;
     bool isActive = true;
-    gl::ContextID contextID;
+    gl::ContextID contextID{0};
     bool isSyncPoint = false;
 };
 

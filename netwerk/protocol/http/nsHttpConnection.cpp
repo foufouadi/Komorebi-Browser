@@ -365,7 +365,13 @@ void nsHttpConnection::StartSpdy(nsITLSSocketControl* sslControl,
   nsresult rv = NS_OK;
   bool spdyProxy = mConnInfo->UsingHttpsProxy() && mConnInfo->UsingConnect() &&
                    !mHasTLSTransportLayer;
-  if (spdyProxy) {
+  // For Happy Eyeballs, leave the wildcard conversion and transaction handling
+  // to HappyEyeballsConnectionAttempt (see MaybeDispatchOuterProxyConn).
+  bool isHE = mTransaction && mTransaction->IsHappyEyeballsTransaction();
+  // TODO: this is the legacy H2 outer-proxy path. Remove it (and the !isHE
+  // split below) once Happy Eyeballs establishes the outer proxy connection by
+  // default (network.http.happy_eyeballs_proxy_enabled).
+  if (spdyProxy && !isHE) {
     RefPtr<nsHttpConnectionInfo> wildCardProxyCi;
     rv = mConnInfo->CreateWildCard(getter_AddRefs(wildCardProxyCi));
     MOZ_ASSERT(NS_SUCCEEDED(rv));
@@ -376,7 +382,17 @@ void nsHttpConnection::StartSpdy(nsITLSSocketControl* sslControl,
   }
 
   if (!mDid0RTTSpdy && mTransaction) {
-    if (spdyProxy) {
+    if (spdyProxy && isHE) {
+      // Don't reset (NET_RESET would look like a connection failure to HE) or
+      // add the speculative transaction to the session (asserts without a
+      // CONNECT response); hand the connection to the spdy session and succeed.
+      mSpdySession->SetConnection(mTransaction->Connection());
+      mTransaction->SetConnection(nullptr);
+      mTransaction->DoNotRemoveAltSvc();
+      mTransaction->InvokeCallback();
+      mTransaction->Close(NS_OK);
+      mTransaction = nullptr;
+    } else if (spdyProxy) {
       if (NS_FAILED(status)) {
         // proxy upgrade needs Restartable for transaction reset
         // note that using NonSticky here won't work because it breaks
@@ -546,17 +562,12 @@ nsresult nsHttpConnection::Activate(nsAHttpTransaction* trans, uint32_t caps,
     if (mTlsHandshaker->NPNComplete()) {
       mExperienced = true;
     }
-    if (mBootstrappedTimingsSet) {
-      mBootstrappedTimingsSet = false;
-      nsHttpTransaction* hTrans = trans->QueryHttpTransaction();
-      if (hTrans) {
-        hTrans->BootstrapTimings(mBootstrappedTimings);
-        SetUrgentStartPreferred(hTrans->GetClassOfService().Flags() &
-                                nsIClassOfService::UrgentStart);
-      }
+    if (nsHttpTransaction* hTrans = trans->QueryHttpTransaction()) {
+      SetUrgentStartPreferred(hTrans->GetClassOfService().Flags() &
+                              nsIClassOfService::UrgentStart);
     }
-    mBootstrappedTimings = TimingStruct();
   }
+  HandOffConnectPhase(trans);
 
   if (caps & NS_HTTP_LARGE_KEEPALIVE) {
     mDefaultTimeoutFactor = StaticPrefs::network_http_largeKeepaliveFactor();
@@ -668,7 +679,16 @@ nsresult nsHttpConnection::Activate(nsAHttpTransaction* trans, uint32_t caps,
   nsresult rv = NS_OK;
   // If this is an extended connection then we have already performed the proxy
   // connect and don't need to do it a second time.
-  if (!mExtendedCONNECTHttp2Session) {
+  //
+  // Happy Eyeballs drives the outer connection with a speculative transaction
+  // that carries no request data, and the tunnel belongs to the real
+  // transaction: it is the one that needs OnProxyConnectComplete and the inner
+  // TLS layer. A CONNECT issued by the speculative transaction would consume
+  // the tunnel and leave the real transaction with a connection it can't use.
+  // Staying in UNINITIALIZED means the real transaction's own Activate sets the
+  // tunnel up, exactly as on the legacy DnsAndConnectSocket path.
+  if (!mExtendedCONNECTHttp2Session &&
+      !mTransaction->IsHappyEyeballsTransaction()) {
     rv = CheckTunnelIsNeeded(mTransaction);
   }
   if (NS_FAILED(rv)) goto failed_activation;
@@ -740,9 +760,11 @@ nsresult nsHttpConnection::AddTransaction(nsAHttpTransaction* httpTransaction,
   needTunnel = needTunnel && httpTransaction->QueryHttpTransaction();
 
   // Let the transaction know that the tunnel is already established and we
-  // don't need to setup the tunnel again.
-  if (transCI->UsingConnect()) {
-    MOZ_ASSERT(mProxyConnectResponseHead);
+  // don't need to setup the tunnel again. Note that we only have a response
+  // head if the CONNECT request was sent on this connection - for example a
+  // HTTP/2 proxy connection tunnels each transaction in its own stream, so
+  // there is nothing to report here.
+  if (transCI->UsingConnect() && mProxyConnectResponseHead) {
     httpTransaction->OnProxyConnectComplete(mProxyConnectResponseHead);
   }
 
@@ -751,7 +773,8 @@ nsresult nsHttpConnection::AddTransaction(nsAHttpTransaction* httpTransaction,
 
   if (mSpdySession) {
     nsCOMPtr<nsIInterfaceRequestor> callbacks = GetCallbacks();
-    if (!mSpdySession->AddStream(httpTransaction, priority, callbacks)) {
+    RefPtr<ASpdySession> spdySession = mSpdySession;
+    if (!spdySession->AddStream(httpTransaction, priority, callbacks)) {
       MOZ_ASSERT(false);  // this cannot happen!
       httpTransaction->Close(NS_ERROR_ABORT);
       return NS_ERROR_FAILURE;
@@ -1551,7 +1574,7 @@ void nsHttpConnection::ForceSendIO(nsITimer* aTimer, void* aClosure) {
   nsHttpConnection* self = static_cast<nsHttpConnection*>(aClosure);
   MOZ_ASSERT(aTimer == self->mForceSendTimer);
   self->mForceSendTimer = nullptr;
-  NS_DispatchToCurrentThread(new HttpConnectionForceIO(self, false));
+  DispatchToCurrent(new HttpConnectionForceIO(self, false));
 }
 
 nsresult nsHttpConnection::MaybeForceSendIO() {
@@ -1579,7 +1602,7 @@ nsresult nsHttpConnection::ForceRecv() {
   LOG(("nsHttpConnection::ForceRecv [this=%p]\n", this));
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
 
-  return NS_DispatchToCurrentThread(new HttpConnectionForceIO(this, true));
+  return DispatchToCurrent(new HttpConnectionForceIO(this, true));
 }
 
 // trigger an asynchronous write
@@ -1736,6 +1759,16 @@ nsresult nsHttpConnection::OnReadSegment(const char* buf, uint32_t count,
   nsresult rv = mSocketOut->Write(buf, count, countRead);
   if (NS_FAILED(rv)) {
     mSocketOutCondition = rv;
+  } else if (*countRead == 0 && mTlsHandshaker->EarlyDataUsed() &&
+             !mTlsHandshaker->NPNComplete()) {
+    // NSS accepts no more early data once the allowance of the session ticket
+    // is used up. The rest is sent after the handshake completes.
+    LOG(
+        ("nsHttpConnection::OnReadSegment [this=%p] early data limit reached, "
+         "waiting for the handshake",
+         this));
+    mTlsHandshaker->SetEarlyDataLimitReached();
+    mSocketOutCondition = NS_BASE_STREAM_WOULD_BLOCK;
   } else if (*countRead == 0) {
     mSocketOutCondition = NS_BASE_STREAM_CLOSED;
   } else {
@@ -1806,9 +1839,10 @@ nsresult nsHttpConnection::OnSocketWritable() {
         // etc.. and that is negotiated with NPN/ALPN in the SSL handshake.
         if (!mTlsHandshaker->EnsureNPNComplete() &&
             (!mTlsHandshaker->EarlyDataUsed() ||
-             mTlsHandshaker->TlsHandshakeComplitionPending())) {
-          // The handshake is not done and we cannot write 0RTT data or nss has
-          // already finished 0RTT data.
+             mTlsHandshaker->TlsHandshakeComplitionPending() ||
+             mTlsHandshaker->EarlyDataLimitReached())) {
+          // The handshake is not done and we cannot write 0RTT data, nss has
+          // already finished 0RTT data, or the early data limit is reached.
           mSocketOutCondition = NS_BASE_STREAM_WOULD_BLOCK;
         } else if (!mTransaction) {
           rv = NS_ERROR_FAILURE;
@@ -1863,7 +1897,11 @@ nsresult nsHttpConnection::OnSocketWritable() {
       again = false;
     } else if (NS_FAILED(mSocketOutCondition)) {
       if (mSocketOutCondition == NS_BASE_STREAM_WOULD_BLOCK) {
-        if (!mTlsHandshaker->EarlyDataCanNotBeUsed()) {
+        if (mTlsHandshaker->EarlyDataLimitReached()) {
+          // Polling for write would busy wait until the handshake completes;
+          // reading drives the handshake instead.
+          rv = ResumeRecv();
+        } else if (!mTlsHandshaker->EarlyDataCanNotBeUsed()) {
           // continue writing
           // We are not going to poll for write if the handshake is in progress,
           // but early data cannot be used.
@@ -1961,7 +1999,6 @@ nsresult nsHttpConnection::OnSocketReadable() {
   mLastReadTime = now;
 
   nsresult rv = NS_OK;
-  uint32_t n;
   bool again = true;
 
   do {
@@ -1984,6 +2021,7 @@ nsresult nsHttpConnection::OnSocketReadable() {
     }
 
     mSocketInCondition = NS_OK;
+    uint32_t n = 0;
     if (!mTransaction) {
       rv = NS_ERROR_FAILURE;
       LOG(("  No Transaction In OnSocketWritable\n"));
@@ -2408,9 +2446,6 @@ void nsHttpConnection::CheckForTraffic(bool check) {
 void nsHttpConnection::SetEvent(nsresult aStatus) {
   LOG(("nsHttpConnection::SetEvent [this=%p status=%" PRIx32 "]\n", this,
        static_cast<uint32_t>(aStatus)));
-  if (!mBootstrappedTimingsSet) {
-    mBootstrappedTimingsSet = true;
-  }
   switch (aStatus) {
     case NS_NET_STATUS_RESOLVING_HOST:
       mBootstrappedTimings.domainLookupStart = TimeStamp::Now();
@@ -2645,9 +2680,11 @@ void nsHttpConnection::HandshakeDoneInternal() {
 
   int16_t tlsVersion;
   tlsSocketControl->GetSSLVersionUsed(&tlsVersion);
-  mConnInfo->SetLessThanTls13(
-      (tlsVersion < nsITLSSocketControl::TLS_VERSION_1_3) &&
-      (tlsVersion != nsITLSSocketControl::SSL_VERSION_UNKNOWN));
+  mConnInfo = mConnInfo->Mutate()
+                  .SetLessThanTls13(
+                      (tlsVersion < nsITLSSocketControl::TLS_VERSION_1_3) &&
+                      (tlsVersion != nsITLSSocketControl::SSL_VERSION_UNKNOWN))
+                  .Finalize();
 #ifndef ANDROID
   mTlsHandshaker->EarlyDataTelemetry(tlsVersion, earlyDataAccepted,
                                      mContentBytesWritten0RTT);
@@ -2703,6 +2740,16 @@ void nsHttpConnection::HandshakeDoneInternal() {
 }
 
 void nsHttpConnection::SetTunnelSetupDone() {
+  // Happy Eyeballs' speculative transaction skips tunnel setup (see Activate),
+  // so an HE-driven outer proxy connection reaches here with no proxy-connect
+  // stream to retire. The end state is the same either way: an H2 outer hop
+  // tunnels per stream via CreateTunnelStream, not through this one.
+  if (mState == HttpConnectionState::UNINITIALIZED) {
+    MOZ_ASSERT(!mProxyConnectStream);
+    ChangeState(HttpConnectionState::REQUEST);
+    return;
+  }
+
   MOZ_ASSERT(mProxyConnectStream);
   MOZ_ASSERT(mState == HttpConnectionState::SETTING_UP_TUNNEL);
 

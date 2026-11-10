@@ -15,7 +15,6 @@
 
 #include <algorithm>
 
-#include "AltServiceChild.h"
 #include "CacheControlParser.h"
 #include "Http2Session.h"
 #include "Http2Stream.h"
@@ -227,8 +226,8 @@ Http2Session::Http2Session(nsISocketTransport* aSocketTransport,
 
   LOG3(("Http2Session::Http2Session %p serial=0x%" PRIX64 "\n", this, mSerial));
 
-  mInputFrameBuffer = MakeUnique<char[]>(mInputFrameBufferSize);
-  mOutputQueueBuffer = MakeUnique<char[]>(mOutputQueueSize);
+  mInputFrameBuffer = std::make_unique<char[]>(mInputFrameBufferSize);
+  mOutputQueueBuffer = std::make_unique<char[]>(mOutputQueueSize);
   mDecompressBuffer.SetCapacity(kDefaultBufferSize);
 
   mPushAllowance = gHttpHandler->SpdyPushAllowance();
@@ -278,7 +277,10 @@ void Http2Session::ShutdownStream(Http2StreamBase* aStream, nsresult aReason) {
   } else if (!mCleanShutdown && PossibleZeroRTTRetryError(aReason)) {
     CloseStream(aStream, aReason);
   } else {
-    CloseStream(aStream, NS_ERROR_ABORT);
+    // The connection went away without a clean GOAWAY-based shutdown, but
+    // this stream never received any response data, so it is safe to retry
+    // it on a new connection.
+    CloseStream(aStream, NS_ERROR_NET_UNCLEAN_SHUTDOWN);
   }
 }
 
@@ -1401,6 +1403,8 @@ void Http2Session::CleanupStream(Http2StreamBase* aStream, nsresult aResult,
     return;
   }
 
+  RefPtr<Http2Session> self(this);
+
   // don't reset a stream that has recevied a fin or rst
   if (!aStream->RecvdFin() && !aStream->RecvdReset() && aStream->StreamID() &&
       !(mInputFrameFinal &&
@@ -2267,14 +2271,6 @@ class UpdateAltSvcEvent : public Runnable {
     uri->GetScheme(originScheme);
     uri->GetHost(originHost);
     uri->GetPort(&originPort);
-
-    if (XRE_IsSocketProcess()) {
-      AltServiceChild::ProcessHeader(
-          mHeader, originScheme, originHost, originPort, mCI->GetUsername(),
-          mCI->GetPrivate(), nullptr, mCI->ProxyInfo(), 0,
-          mCI->GetOriginAttributes(), mCI);
-      return NS_OK;
-    }
 
     AltSvcMapping::ProcessHeader(mHeader, originScheme, originHost, originPort,
                                  mCI->GetUsername(), mCI->GetPrivate(), nullptr,
@@ -3942,7 +3938,14 @@ nsresult Http2Session::ConfirmTLSProfile() {
     return SessionError(INADEQUATE_SECURITY);
   }
 
-  if (kea != ssl_kea_dh && kea != ssl_kea_ecdh && kea != ssl_kea_ecdh_hybrid) {
+  if (kea == ssl_kea_kem && !StaticPrefs::security_tls_enable_mlkem1024()) {
+    LOG3(("Http2Session::ConfirmTLSProfile %p FAILED due to disabled KEA %d\n",
+          this, kea));
+    return SessionError(INADEQUATE_SECURITY);
+  }
+
+  if (kea != ssl_kea_dh && kea != ssl_kea_ecdh && kea != ssl_kea_ecdh_hybrid &&
+      kea != ssl_kea_kem) {
     LOG3(("Http2Session::ConfirmTLSProfile %p FAILED due to invalid KEA %d\n",
           this, kea));
     return SessionError(INADEQUATE_SECURITY);

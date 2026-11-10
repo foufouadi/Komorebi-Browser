@@ -7,13 +7,13 @@
 package mozilla.components.support.ktx.kotlin
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.InetAddresses
 import android.net.Uri
 import android.os.Build
 import android.util.Base64
 import android.util.Patterns
 import android.webkit.URLUtil
+import androidx.annotation.Px
 import androidx.annotation.VisibleForTesting
 import androidx.core.net.toUri
 import java.io.File
@@ -29,6 +29,7 @@ import java.util.Locale
 import kotlin.text.RegexOption.IGNORE_CASE
 import mozilla.components.lib.publicsuffixlist.PublicSuffixList
 import mozilla.components.support.base.utils.MAX_URI_LENGTH
+import mozilla.components.support.ktx.android.graphics.toSampledBitmap
 import mozilla.components.support.ktx.android.net.commonPrefixes
 import mozilla.components.support.ktx.android.net.hostWithoutCommonPrefixes
 import mozilla.components.support.ktx.util.RegistrableDomainSpan
@@ -44,6 +45,8 @@ private val re =
     }
 
 private const val MAILTO = "mailto:"
+
+private const val REPLACEMENT_CHAR = '\uFFFD'
 
 // Number of last digits to be shown when credit card number is obfuscated.
 private const val LAST_VISIBLE_DIGITS_COUNT = 4
@@ -76,7 +79,7 @@ fun String.toShortUrl(publicSuffixList: PublicSuffixList): String {
             inputString.startsWith(FILE_PREFIX) ||
             uri.port !in -1..MAX_VALID_PORT
     ) {
-        return inputString
+        return URLStringUtils.toLosslessDisplayUrl(inputString)
     }
 
     if (
@@ -141,7 +144,10 @@ fun String.isExtensionUrl() = this.startsWith("moz-extension://")
 /** Checks if this String is a URL of a resource. */
 fun String.isResourceUrl() = this.startsWith("resource://")
 
-/** Appends `http` scheme if no scheme is present in this String. */
+/**
+ * Appends `http` scheme if no scheme is present in this String, and encodes the spaces after the authority of an HTTP/S
+ * URL as `%20`.
+ */
 fun String.toNormalizedUrl(): String {
     val s = this.sanitizeURL()
     // Most commonly we'll encounter http or https schemes.
@@ -149,7 +155,7 @@ fun String.toNormalizedUrl(): String {
     return if (!s.startsWith("http://") && !s.startsWith("https://")) {
         URLStringUtils.toNormalizedURL(s)
     } else {
-        s
+        URLStringUtils.encodeSpacesAfterAuthority(s)
     }
 }
 
@@ -444,13 +450,29 @@ fun String.trimmed(): String {
 
 /**
  * Returns a bitmap from its base64 representation. Returns null if the string is not a valid base64 representation of a
- * bitmap
+ * bitmap.
+ *
+ * The image is subsampled while it is decoded, so a data URI describing an image far larger than the view it is bound
+ * for never has to be held in memory at full resolution.
+ *
+ * @param targetWidth The minimum width, in pixels, the decoded bitmap should have.
+ * @param targetHeight The minimum height, in pixels, the decoded bitmap should have.
  */
-fun String.base64ToBitmap(): Bitmap? =
-    extractBase6RawString()?.let { rawString ->
-        val raw = Base64.decode(rawString, Base64.DEFAULT)
-        BitmapFactory.decodeByteArray(raw, 0, raw.size)
-    }
+fun String.base64ToBitmap(
+    @Px targetWidth: Int,
+    @Px targetHeight: Int,
+): Bitmap? {
+    val rawString = extractBase6RawString() ?: return null
+    val bytes =
+        try {
+            Base64.decode(rawString, Base64.DEFAULT)
+        } catch (e: IllegalArgumentException) {
+            // A well formed data URI can still carry a payload that is not base64 at all.
+            return null
+        }
+
+    return bytes.toSampledBitmap(targetWidth, targetHeight)
+}
 
 @VisibleForTesting
 internal fun String.extractBase6RawString(): String? {
@@ -462,4 +484,66 @@ internal fun String.extractBase6RawString(): String? {
         val (_, contentString) = it.destructured
         contentString
     }
+}
+
+/**
+ * Truncates the string from the middle if it exceeds [maxLength].
+ *
+ * @param maxLength The maximum length of the string.
+ * @param ellipsis The string to use as ellipsis, defaults to "…".
+ * @return The truncated string.
+ */
+fun String.truncateMiddle(maxLength: Int, ellipsis: String = "…"): String {
+    if (length <= maxLength) {
+        return this
+    }
+    if (maxLength <= ellipsis.length) {
+        return take(maxLength)
+    }
+
+    val half = (maxLength - ellipsis.length) / 2
+    val start = take(half)
+    val end = takeLast(maxLength - ellipsis.length - half)
+    return "$start$ellipsis$end"
+}
+
+/**
+ * Returns this camelCase or PascalCase string in snake_case: every uppercase character after the first is preceded by
+ * an underscore, and every character is lowercased.
+ */
+fun String.toSnakeCase(): String = buildString {
+    this@toSnakeCase.forEachIndexed { index, char ->
+        if (index > 0 && char.isUpperCase()) {
+            append('_')
+        }
+        append(char.lowercaseChar())
+    }
+}
+
+/**
+ * Returns this string with any unpaired UTF-16 surrogates replaced with U+FFFD, or this string itself if it has none.
+ * Web content can produce such strings (e.g. via `document.title`), but they can't be encoded as UTF-8, which is
+ * required when passing them to Rust components. Equivalent to JavaScript's `String.prototype.toWellFormed()`.
+ */
+fun String.toWellFormed(): String {
+    var result: StringBuilder? = null
+    var i = 0
+    while (i < length) {
+        val c = this[i]
+        if (i + 1 < length && Character.isSurrogatePair(c, this[i + 1])) {
+            result?.append(c)?.append(this[i + 1])
+            i += 2
+            continue
+        }
+        if (c.isSurrogate()) {
+            if (result == null) {
+                result = StringBuilder(length).append(this, 0, i)
+            }
+            result.append(REPLACEMENT_CHAR)
+        } else {
+            result?.append(c)
+        }
+        i++
+    }
+    return result?.toString() ?: this
 }

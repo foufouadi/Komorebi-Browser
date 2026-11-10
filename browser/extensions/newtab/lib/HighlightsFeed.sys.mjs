@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/** @import {Store} from "resource://newtab/lib/Store.sys.mjs" */
+
 import { actionTypes as at } from "resource://newtab/common/Actions.mjs";
 
 import {
@@ -35,6 +37,9 @@ export const BOOKMARKS_RESTORE_FAILED_EVENT = "bookmarks-restore-failed";
 const RECENT_DOWNLOAD_THRESHOLD = 36 * 60 * 60 * 1000;
 
 export class HighlightsFeed {
+  /** @type {Store} */
+  store = null;
+
   constructor() {
     this.dedupe = new Dedupe(this._dedupeKey);
     this.linksCache = new lazy.LinksCache(
@@ -132,7 +137,9 @@ export class HighlightsFeed {
   /**
    * Refresh the highlights data for content.
    *
-   * @param {bool} options.broadcast Should the update be broadcasted.
+   * @param {object} [options]
+   * @param {boolean} [options.broadcast] Should the update be broadcasted.
+   * @param {boolean} [options.isStartup] Being called while HighlightsFeed is initting.
    */
   async fetchHighlights(options = {}) {
     // If TopSites are enabled we need them for deduping, so wait for
@@ -194,6 +201,10 @@ export class HighlightsFeed {
       checkedAdult
     );
 
+    // Before the loop: image callbacks started there expect the section rows
+    // set by updateSection, so nothing may be awaited in between.
+    await this._addLastVisitDates(deduped);
+
     // Keep all "bookmark"s and at most one (most recent) "history" per host
     const highlights = [];
     const hosts = new Set();
@@ -254,6 +265,36 @@ export class HighlightsFeed {
       shouldBroadcast,
       options.isStartup
     );
+  }
+
+  /**
+   * Set lastVisitDate (in ms) on each non-download highlight.
+   *
+   * @param {object[]} highlights
+   */
+  async _addLastVisitDates(highlights) {
+    const pages = highlights.filter(page => page.type !== "download");
+    if (!pages.length) {
+      return;
+    }
+    const urls = JSON.stringify(pages.map(page => page.url));
+    let rows;
+    try {
+      rows = await lazy.NewTabUtils.activityStreamProvider.executePlacesQuery(
+        `SELECT url, last_visit_date / 1000 FROM moz_places
+         WHERE url_hash IN (SELECT hash(value) FROM json_each(:urls))
+           AND url IN (SELECT value FROM json_each(:urls))`,
+        { params: { urls } }
+      );
+    } catch (e) {
+      // The date is decoration, so a failure must not block highlights.
+      console.error(e);
+      return;
+    }
+    const lastVisitDates = new Map(rows);
+    for (const page of pages) {
+      page.lastVisitDate = lastVisitDates.get(page.url);
+    }
   }
 
   /**

@@ -527,6 +527,9 @@ _cairo_ft_unscaled_font_init (cairo_ft_unscaled_font_t *unscaled,
         }
 
         if (getVar && getVarDesignCoords) {
+            /* The external face may already be in use by another renderer. */
+            if (face_context)
+                mozilla_LockSharedFTFace (face_context, NULL);
 	    if (0 == (*getVar) (face, &ft_mm_var))
 	    {
 		unscaled->variations = _cairo_calloc_ab (ft_mm_var->num_axis, sizeof (FT_Fixed));
@@ -537,6 +540,8 @@ _cairo_ft_unscaled_font_init (cairo_ft_unscaled_font_t *unscaled,
 		else
 		    free (ft_mm_var);
 	    }
+            if (face_context)
+                mozilla_UnlockSharedFTFace (face_context);
 	}
     } else {
 	char *filename_copy;
@@ -1029,12 +1034,13 @@ _compute_xrender_bitmap_size(FT_Bitmap      *target,
     /* compute the size of the final bitmap */
     ftbit = &slot->bitmap;
 
+    /* Reject absurd glyph dimensions to avoid overflow below. */
+    if (ftbit->width > INT_MAX / 4 || ftbit->rows > INT_MAX) {
+      return -1;
+    }
+
     width = ftbit->width;
     height = ftbit->rows;
-
-    /* Reject absurd glyph dimensions to avoid overflow below. */
-    if (width < 0 || width > INT_MAX / 4 || height < 0)
-	return -1;
 
     pitch = (width + 3) & ~3;
 
@@ -1087,11 +1093,12 @@ _compute_xrender_bitmap_size(FT_Bitmap      *target,
     target->pitch = pitch;
     target->buffer = NULL;
 
-    /* Reject this size if the multiplication overflows. */
-    if ((cairo_int64_t) pitch * height > INT_MAX)
+    /* Reject this size if the multiplication would overflow an int. */
+    size_t result;
+    if (_cairo_mul_size_t_overflow(pitch, height, &result) || result > INT_MAX)
 	return -1;
 
-    return pitch * height;
+    return (int) result;
 }
 
 /* this functions converts the glyph bitmap found in a FT_GlyphSlot
@@ -1443,27 +1450,29 @@ _get_bitmap_surface (FT_Bitmap		     *bitmap,
 	    if (error)
 		return _cairo_error (_cairo_ft_to_cairo_error (error));
 
-	    FT_Bitmap_Done( library, bitmap );
-	    *bitmap = tmp;
-
-	    stride = bitmap->pitch;
+            /* tmp is our locally-managed view of bitmap, which belongs to
+             * the glyph slot. Only access and free tmp. */
+	    stride = tmp.pitch;
 	    data = _cairo_malloc_ab (height, stride);
-	    if (!data)
+	    if (!data) {
+		FT_Bitmap_Done( library, &tmp );
 		return _cairo_error (CAIRO_STATUS_NO_MEMORY);
+	    }
 
-	    if (bitmap->num_grays != 256)
+	    if (tmp.num_grays != 256)
 	    {
 	      unsigned int x, y;
-	      unsigned int mul = 255 / (bitmap->num_grays - 1);
-	      FT_Byte *p = bitmap->buffer;
+	      unsigned int mul = 255 / (tmp.num_grays - 1);
+	      FT_Byte *p = tmp.buffer;
 	      for (y = 0; y < height; y++) {
 	        for (x = 0; x < width; x++)
 		  p[x] *= mul;
-		p += bitmap->pitch;
+		p += tmp.pitch;
 	      }
 	    }
 
-	    memcpy (data, bitmap->buffer, (size_t)stride * height);
+	    memcpy (data, tmp.buffer, (size_t)stride * height);
+	    FT_Bitmap_Done( library, &tmp );
 	    break;
 	}
 	/* fall through */

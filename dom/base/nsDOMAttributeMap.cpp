@@ -94,19 +94,18 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsDOMAttributeMap)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsDOMAttributeMap)
 
-nsresult nsDOMAttributeMap::SetOwnerDocument(Document* aDocument) {
+void nsDOMAttributeMap::AdoptCachedAttributes(nsNodeInfoManager* aManager) {
   for (const auto& entry : mAttributeCache.Values()) {
-    nsresult rv = entry->SetOwnerDocument(aDocument);
-    NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
+    IgnoredErrorResult rv;
+    entry->Adopt(aManager, rv);
   }
-  return NS_OK;
 }
 
-void nsDOMAttributeMap::DropAttribute(int32_t aNamespaceID,
-                                      nsAtom* aLocalName) {
+void nsDOMAttributeMap::DropAttribute(int32_t aNamespaceID, nsAtom* aLocalName,
+                                      const nsAttrValue* aValue) {
   nsAttrKey attr(aNamespaceID, aLocalName);
   if (auto entry = mAttributeCache.Lookup(attr)) {
-    entry.Data()->SetMap(nullptr);  // break link to map
+    entry.Data()->SetMap(nullptr, aValue);  // break link to map
     entry.Remove();
   }
 }
@@ -252,7 +251,10 @@ already_AddRefed<Attr> nsDOMAttributeMap::SetNamedItemNS(
       // Attr to the hashtable and do the actual attr set on the element.  This
       // will make the whole thing look like a single attribute mutation (with
       // the new attr node in place) as opposed to a removal and addition.
-      DropAttribute(oldNi->NamespaceID(), oldNi->NameAtom());
+      BorrowedAttrInfo info = mContent->GetAttrInfoAt(i);
+      MOZ_ASSERT(info.mName &&
+                 info.mName->Equals(oldNi->NameAtom(), oldNi->NamespaceID()));
+      DropAttribute(oldNi->NamespaceID(), oldNi->NameAtom(), info.mValue);
     }
   }
 
@@ -263,7 +265,8 @@ already_AddRefed<Attr> nsDOMAttributeMap::SetNamedItemNS(
   aAttr.SetMap(this);
 
   rv = mContent->SetAttr(ni->NamespaceID(), ni->NameAtom(), ni->GetPrefixAtom(),
-                         *compliantString, true);
+                         *compliantString, nullptr, true,
+                         oldNi ? IsKnownNewAttr::No : IsKnownNewAttr::Yes);
   if (NS_FAILED(rv)) {
     DropAttribute(ni->NamespaceID(), ni->NameAtom());
     aError.Throw(rv);

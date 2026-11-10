@@ -11,6 +11,7 @@ import androidx.core.view.isVisible
 import androidx.navigation.NavController
 import androidx.navigation.Navigation
 import com.google.android.material.materialswitch.MaterialSwitch
+import io.mockk.CapturingSlot
 import io.mockk.Runs
 import io.mockk.coEvery
 import io.mockk.every
@@ -21,6 +22,11 @@ import io.mockk.spyk
 import io.mockk.verify
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
+import mozilla.components.browser.state.action.WebExtensionAction
+import mozilla.components.browser.state.state.BrowserState
+import mozilla.components.browser.state.state.WebExtensionState
+import mozilla.components.browser.state.state.extension.PendingExtensionUpdate
+import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.concept.base.profiler.Profiler
 import mozilla.components.concept.engine.EngineSession
 import mozilla.components.concept.engine.webextension.EnableSource
@@ -71,6 +77,7 @@ class InstalledAddonDetailsFragmentTest {
                 every { getProfilerTime() } returns PROFILER_START_TIME
                 every { isProfilerActive() } returns true
             }
+        every { testContext.components.core.store } returns BrowserStore()
     }
 
     @Test
@@ -180,6 +187,134 @@ class InstalledAddonDetailsFragmentTest {
         fragment.bindEnableSwitch()
 
         verify { enableSwitch.isEnabled = false }
+    }
+
+    @Test
+    fun `GIVEN enabling fails WHEN tapping retry on the snackbar THEN the enable is attempted again`() {
+        val addon = mockAddon()
+        every { addon.isEnabled() } returns false
+        every { addon.isSupported() } returns true
+        every { addon.isDisabledAsUnsupported() } returns false
+        setUpFragmentForAddon(addon)
+        every {
+            addonManager.enableAddon(addon, EnableSource.USER, any(), any())
+        } answers { lastArg<(Throwable) -> Unit>().invoke(RuntimeException("boom")) }
+        val onRetry = captureSnackbarRetry()
+
+        fragment.toggleAddon(
+            switch = mockk(relaxed = true),
+            privateBrowsingSwitch = mockk(relaxed = true),
+            isChecked = true,
+        )
+
+        verify(exactly = 1) { addonManager.enableAddon(addon, EnableSource.USER, any(), any()) }
+        verify { fragment.showAddonFailureSnackbar(any(), any()) }
+
+        onRetry.captured.invoke()
+
+        verify(exactly = 2) { addonManager.enableAddon(addon, EnableSource.USER, any(), any()) }
+    }
+
+    @Test
+    fun `GIVEN enabling fails WHEN the addon is enabled again before tapping retry THEN the enable is not attempted again`() {
+        val addon = mockAddon()
+        every { addon.isEnabled() } returns false
+        every { addon.isSupported() } returns true
+        every { addon.isDisabledAsUnsupported() } returns false
+        setUpFragmentForAddon(addon)
+        every {
+            addonManager.enableAddon(addon, EnableSource.USER, any(), any())
+        } answers { lastArg<(Throwable) -> Unit>().invoke(RuntimeException("boom")) }
+        val onRetry = captureSnackbarRetry()
+
+        fragment.toggleAddon(
+            switch = mockk(relaxed = true),
+            privateBrowsingSwitch = mockk(relaxed = true),
+            isChecked = true,
+        )
+
+        verify(exactly = 1) { addonManager.enableAddon(addon, EnableSource.USER, any(), any()) }
+
+        every { addon.isEnabled() } returns true
+
+        onRetry.captured.invoke()
+
+        verify(exactly = 1) { addonManager.enableAddon(addon, EnableSource.USER, any(), any()) }
+    }
+
+    @Test
+    fun `GIVEN disabling fails WHEN tapping retry on the snackbar THEN the disable is attempted again`() {
+        val addon = mockAddon()
+        every { addon.isEnabled() } returns true
+        setUpFragmentForAddon(addon)
+        every {
+            addonManager.disableAddon(addon, any(), any(), any())
+        } answers { lastArg<(Throwable) -> Unit>().invoke(RuntimeException("boom")) }
+        val onRetry = captureSnackbarRetry()
+
+        fragment.toggleAddon(
+            switch = mockk(relaxed = true),
+            privateBrowsingSwitch = mockk(relaxed = true),
+            isChecked = false,
+        )
+
+        verify(exactly = 1) { addonManager.disableAddon(addon, any(), any(), any()) }
+        verify { fragment.showAddonFailureSnackbar(any(), any()) }
+
+        onRetry.captured.invoke()
+
+        verify(exactly = 2) { addonManager.disableAddon(addon, any(), any(), any()) }
+    }
+
+    @Test
+    fun `GIVEN an add-on with a settings page WHEN disabling it fails THEN the settings stay visible`() {
+        val addon = mockAddon()
+        every { addon.isEnabled() } returns true
+        setUpFragmentForAddon(addon)
+        every {
+            addonManager.disableAddon(addon, any(), any(), any())
+        } answers { lastArg<(Throwable) -> Unit>().invoke(RuntimeException("boom")) }
+        captureSnackbarRetry()
+
+        fragment.toggleAddon(
+            switch = mockk(relaxed = true),
+            privateBrowsingSwitch = mockk(relaxed = true),
+            isChecked = false,
+        )
+
+        assertTrue(fragment.binding.settings.isVisible)
+    }
+
+    @Test
+    fun `GIVEN uninstalling fails WHEN tapping retry on the snackbar THEN the uninstall is attempted again`() {
+        val addon = mockAddon()
+        setUpFragmentForAddon(addon)
+        every {
+            addonManager.uninstallAddon(addon, any(), any())
+        } answers { lastArg<(String, Throwable) -> Unit>().invoke("some-addon-id", RuntimeException("boom")) }
+        val onRetry = captureSnackbarRetry()
+        fragment.uninstallAddon()
+
+        verify(exactly = 1) { addonManager.uninstallAddon(addon, any(), any()) }
+        verify { fragment.showAddonFailureSnackbar(any(), any()) }
+
+        onRetry.captured.invoke()
+
+        verify(exactly = 2) { addonManager.uninstallAddon(addon, any(), any()) }
+    }
+
+    @Test
+    fun `GIVEN the fragment is detached WHEN tapping retry on the snackbar THEN the retry action is not run`() {
+        var retried = false
+        val guardedRetry = fragment.retryIfFragmentIsAttached { retried = true }
+
+        every { fragment.context } returns null
+        guardedRetry.invoke()
+        assertFalse(retried)
+
+        every { fragment.context } returns testContext
+        guardedRetry.invoke()
+        assertTrue(retried)
     }
 
     @Test
@@ -530,6 +665,95 @@ class InstalledAddonDetailsFragmentTest {
         }
     }
 
+    @Test
+    fun `GIVEN an add-on with a pending update WHEN binding the message bars THEN show the update banner until the update is gone`() {
+        val store = setUpFragmentWithPendingUpdate(enabled = true, pendingUpdateIds = listOf("some-addon-id"))
+        val updateBanner = fragment.binding.root.findViewById<View>(addonsR.id.add_on_messagebar_update)
+
+        fragment.bindMessageBars()
+        assertTrue(updateBanner.isVisible)
+
+        store.dispatch(WebExtensionAction.RemovePendingExtensionUpdateAction("some-addon-id"))
+        fragment.bindMessageBars()
+        assertFalse(updateBanner.isVisible)
+    }
+
+    @Test
+    fun `GIVEN a disabled add-on with a pending update WHEN binding the message bars THEN show the update banner`() {
+        setUpFragmentWithPendingUpdate(enabled = false, pendingUpdateIds = listOf("some-addon-id"))
+        val updateBanner = fragment.binding.root.findViewById<View>(addonsR.id.add_on_messagebar_update)
+
+        fragment.bindMessageBars()
+        assertTrue(updateBanner.isVisible)
+    }
+
+    @Test
+    fun `GIVEN only another add-on has a pending update WHEN binding the message bars THEN do not show the update banner`() {
+        setUpFragmentWithPendingUpdate(enabled = true, pendingUpdateIds = listOf("other-addon-id"))
+        val updateBanner = fragment.binding.root.findViewById<View>(addonsR.id.add_on_messagebar_update)
+
+        fragment.bindMessageBars()
+        assertFalse(updateBanner.isVisible)
+    }
+
+    @Test
+    fun `GIVEN an add-on WHEN clicking the remove button THEN confirmation dialog is shown and the add-on is not uninstalled`() {
+        val addon = mockAddon()
+        setUpFragmentForAddon(addon)
+        fragment.bindRemoveButton()
+
+        fragment.binding.removeAddOn.performClick()
+
+        assertTrue(fragment.showRemoveDialog)
+        verify(exactly = 0) { addonManager.uninstallAddon(any(), any(), any()) }
+    }
+
+    @Test
+    fun `GIVEN the remove dialog is shown WHEN the removal is confirmed THEN the dialog is hidden and the add-on is uninstalled`() {
+        every { fragment.uninstallAddon() } just Runs
+        fragment.showRemoveDialog = true
+
+        fragment.onRemoveDialogConfirmed()
+
+        assertFalse(fragment.showRemoveDialog)
+        verify(exactly = 1) { fragment.uninstallAddon() }
+    }
+
+    @Test
+    fun `GIVEN the remove dialog is shown WHEN the removal is cancelled THEN the dialog is hidden and the add-on is not uninstalled`() {
+        every { fragment.uninstallAddon() } just Runs
+        fragment.showRemoveDialog = true
+
+        fragment.onRemoveDialogCanceled()
+
+        assertFalse(fragment.showRemoveDialog)
+        verify(exactly = 0) { fragment.uninstallAddon() }
+    }
+
+    private fun setUpFragmentWithPendingUpdate(enabled: Boolean, pendingUpdateIds: List<String>): BrowserStore {
+        val addon = Addon(id = "some-addon-id", translatableName = mapOf(Addon.DEFAULT_LOCALE to "some-name"))
+        setUpFragmentForAddon(addon)
+        every { fragment.requireContext() } returns testContext
+        val store =
+            BrowserStore(
+                BrowserState(
+                    extensions = mapOf(addon.id to WebExtensionState(addon.id, enabled = enabled)),
+                    pendingExtensionUpdates =
+                        pendingUpdateIds.associateWith {
+                            PendingExtensionUpdate(
+                                extensionId = it,
+                                permissions = listOf("privacy"),
+                                origins = emptyList(),
+                                dataCollectionPermissions = emptyList(),
+                                onPermissionsGranted = {},
+                            )
+                        },
+                )
+            )
+        every { testContext.components.core.store } returns store
+        return store
+    }
+
     private fun mockAddon(openOptionsPageInTab: Boolean = true): Addon {
         val addon: Addon = mockk()
         every { addon.id } returns "some-addon-id"
@@ -549,6 +773,24 @@ class InstalledAddonDetailsFragmentTest {
         every { addon.installedState } returns installedState
 
         return addon
+    }
+
+    private fun setUpFragmentForAddon(addon: Addon) {
+        every { fragment.addon } returns addon
+        every { fragment.context } returns testContext
+        every { fragment.provideAddonManager() } returns addonManager
+        fragment._binding =
+            FragmentInstalledAddOnDetailsBinding.inflate(
+                LayoutInflater.from(testContext),
+                mockk(relaxed = true),
+                false,
+            )
+    }
+
+    private fun captureSnackbarRetry(): CapturingSlot<() -> Unit> {
+        val onRetry = slot<() -> Unit>()
+        every { fragment.showAddonFailureSnackbar(any(), capture(onRetry)) } just Runs
+        return onRetry
     }
 
     companion object {

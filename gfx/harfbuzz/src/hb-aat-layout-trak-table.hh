@@ -156,10 +156,13 @@ struct TrackData
     float t0 = trackTable[i].get_track_value ();
     float t1 = trackTable[j].get_track_value ();
 
-    float t = (track - t0) / (t1 - t0);
-
     float a = trackTable[i].get_value (ptem, base, size_table);
     float b = trackTable[j].get_value (ptem, base, size_table);
+
+    // Deal with font bugs.
+    if (unlikely (t0 == t1)) return (a + b) * 0.5f;
+
+    float t = (track - t0) / (t1 - t0);
     return a + t * (b - a);
   }
 
@@ -230,13 +233,13 @@ struct trak
     {
       hb_position_t advance_to_add = get_h_tracking (c->font, track);
       foreach_grapheme (buffer, start, end)
-	buffer->pos[start].x_advance += advance_to_add;
+	buffer->pos[start].x_advance = hb_saturate_add (buffer->pos[start].x_advance, advance_to_add);
     }
     else
     {
       hb_position_t advance_to_add = get_v_tracking (c->font, track);
       foreach_grapheme (buffer, start, end)
-	buffer->pos[start].y_advance += advance_to_add;
+	buffer->pos[start].y_advance = hb_saturate_add (buffer->pos[start].y_advance, advance_to_add);
     }
 
     return_trace (true);

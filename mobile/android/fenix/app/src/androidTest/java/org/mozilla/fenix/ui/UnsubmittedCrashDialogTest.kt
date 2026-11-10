@@ -4,7 +4,6 @@
 
 package org.mozilla.fenix.ui
 
-import android.content.Context
 import android.text.format.DateUtils
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertTextEquals
@@ -12,14 +11,11 @@ import androidx.compose.ui.test.hasTextExactly
 import androidx.compose.ui.test.junit4.v2.AndroidComposeTestRule as AndroidComposeTestRuleV2
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import io.mockk.every
-import io.mockk.mockk
 import kotlin.test.assertIs
 import mozilla.components.lib.crash.store.CrashAction
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.mozilla.fenix.R
@@ -35,21 +31,12 @@ import org.mozilla.fenix.helpers.MatcherHelper.itemContainingText
 import org.mozilla.fenix.helpers.TestHelper
 
 class UnsubmittedCrashDialogTest {
-    private lateinit var fakeContext: Context
 
     @get:Rule(order = 0) val fenixTestRule: FenixTestRule = FenixTestRule()
 
-    @Before
-    fun setup() {
-        fakeContext = mockk<Context>()
-        every { fakeContext.getTheme() } returns mockk()
-        every { fakeContext.packageName } returns "org.mozilla.fenix.debug"
-        every { fakeContext.startActivity(any()) } returns mockk()
-    }
-
     @get:Rule(order = 1)
     val composeTestRule =
-        AndroidComposeTestRuleV2(HomeActivityTestRule.withDefaultSettingsOverrides(useNewCrashReporterFlow = true)) {
+        AndroidComposeTestRuleV2(HomeActivityTestRule.withDefaultSettingsOverrides()) {
             it.activity
         }
 
@@ -103,9 +90,6 @@ class UnsubmittedCrashDialogTest {
 
     private fun cancelForEverUnsubmittedCrashPull(): String =
         TestHelper.appContext.resources.getString(R.string.unsubmitted_crash_requested_by_devs_dialog_never_button)
-
-    private fun learnMoreUnsubmittedCrashPull(): String =
-        TestHelper.appContext.resources.getString(R.string.unsubmitted_crash_requested_by_devs_learn_more)
 
     @OptIn(ExperimentalTestApi::class)
     private fun clickButton(text: String) {

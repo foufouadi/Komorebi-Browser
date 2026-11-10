@@ -17,7 +17,8 @@ $ds-card-image-gradient-solid: rgba(0, 0, 0, 100%);
     display: flex;
     flex-direction: column;
     gap: var(--space-small);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 15%);
+    border: var(--card-border);
+    box-shadow: var(--card-box-shadow);
     border-radius: var(--border-radius-medium);
     position: relative;
     overflow: hidden;
@@ -74,7 +75,9 @@ $ds-card-image-gradient-solid: rgba(0, 0, 0, 100%);
       z-index: 2;
 
       @media (prefers-reduced-motion: no-preference) {
-        animation: loading 1.5s infinite;
+        .page-visible & {
+          animation: loading 1.5s infinite;
+        }
       }
     }
 
@@ -129,8 +132,11 @@ $ds-card-image-gradient-solid: rgba(0, 0, 0, 100%);
       inset-block-start: calc(var(--space-xsmall) + var(--space-large));
     }
 
-    button,
-    .context-menu {
+    // The "..." trigger and its menu are now a moz-button and panel-list. Re-enable
+    // pointer events for both (the overlay above sets pointer-events: none), or
+    // the menu items can't be hovered/clicked and clicks fall through to the card.
+    moz-button,
+    panel-list {
       pointer-events: auto;
     }
 
@@ -229,17 +235,6 @@ $ds-card-image-gradient-solid: rgba(0, 0, 0, 100%);
     color: var(--newtab-text-primary-color);
     padding: var(--space-small);
     margin: var(--space-small);
-    font-size: var(--font-size-small);
-  }
-
-  .ds-card-daily-brief-topic {
-    position: absolute;
-    inset-block-end: var(--space-xsmall);
-    inset-inline-start: var(--space-xsmall);
-    background: var(--background-color-canvas);
-    border-radius: var(--border-radius-small);
-    color: var(--newtab-text-primary-color);
-    padding: var(--space-xsmall);
     font-size: var(--font-size-small);
   }
 
@@ -401,15 +396,20 @@ $ds-card-image-gradient-solid: rgba(0, 0, 0, 100%);
 
   // Loading Animation
   &.placeholder {
-    box-shadow: 0 2px 6px #15141A24;
+    border: var(--card-border);
+    box-shadow: var(--card-box-shadow);
     border-radius: var(--border-radius-large);
   }
 
-  .ds-card-grid & {
+  // @experiment(remove) { bug 2069496 }: drop .widgets-row-ad-cell.
+  // The widgets row cell has no grid ancestor but needs the same card
+  // surface, hover and forced-colors treatment.
+  :is(.ds-card-grid, .widgets-row-ad-cell) & {
     @include newtab-card-style;
 
     &:not(.placeholder) {
-      box-shadow: 0 1px 2px 0 rgba(58, 57, 68, 20%);
+      border: var(--card-border);
+      box-shadow: var(--card-box-shadow);
       border-radius: var(--border-radius-large);
 
       &.active,
@@ -511,6 +511,7 @@ $ds-card-image-gradient-solid: rgba(0, 0, 0, 100%);
     .card-stp-button-hover-background {
       border-radius: var(--border-radius-large) var(--border-radius-large) 0 0;
       background-color: var(--button-background-color-ghost);
+      color: var(--button-text-color-ghost);
     }
 
     .ds-card-link:focus {
@@ -664,11 +665,13 @@ $ds-card-image-gradient-solid: rgba(0, 0, 0, 100%);
       inset-block-end: var(--space-xsmall);
       inset-inline-end: var(--space-large);
       background: var(--button-background-color-ghost);
+      color: var(--button-text-color-ghost);
     }
   }
 
   .context-menu-button {
     background-color: var(--button-background-color-ghost);
+    color: var(--button-text-color-ghost);
 
     @media (forced-colors: active) {
       border: var(--border-width) solid var(--button-border-color-ghost);

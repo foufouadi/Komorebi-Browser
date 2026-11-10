@@ -1,8 +1,8 @@
 [DEFAULT]
 subsuite = "a11y"
-skip-if = [
-  "headless",
-  "os != 'linux'",
+# ATK exists only on Linux, and AT-SPI needs a real window.
+run-if = [
+  "os == 'linux' && !headless",
 ]
 support-files = ["head.js"]
 prefs = [
@@ -17,6 +17,10 @@ prefs = [
 ["browser_action.js"]
 
 ["browser_atspi_interfaces.js"]
+
+["browser_editabletext.js"]
+
+["browser_forceEnabled.js"]
 
 ["browser_groupPosition.js"]
 

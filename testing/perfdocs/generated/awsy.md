@@ -1,12 +1,19 @@
 # AWSY
 
 Are We Slim Yet project (commonly known as AWSY) tracks memory usage across builds.
+It uses the same infrastructure as [about:memory](/performance/memory/about_colon_memory.md)
+to measure memory usage, either with the recorded tp6 pageset or with blank tabs
+(base memory usage). AWSY runs in TaskCluster on all branches and platforms, and its results
+are posted to [Perfherder](https://treeherder.mozilla.org/perfherder/) where regressions are
+tracked automatically.
+
+As new processes are added to Firefox we want to make sure their memory usage is also tracked
+by AWSY. To this end we request that memory reporting be integrated into any new process
+before it is enabled on Nightly.
 
 On treeherder, the AWSY builds are listed in subgroups of `SY`.
 
-AWSY tests consist of three types: TP5\*, TP6, and Base Memory Usage.
-
-*\*TP5 tests are out of date and no longer maintained. These tests are scheduled to be removed:* <https://bugzilla.mozilla.org/show_bug.cgi?id=1712406>
+AWSY tests consist of two types: TP6 and Base Memory Usage.
 
 ## Awsy tests
 
@@ -26,27 +33,29 @@ AWSY tests consist of three types: TP5\*, TP6, and Base Memory Usage.
 **Owner**: :mccr8 and Perftest Team
 
 * **Test Task**:
-  * test-linux2404-64-clang-trunk/opt
+  * {ref}`test-linux2404-64-clang-trunk/opt <hardware-gcp-c3d-standard-8>`
     * awsy-base: None
     * awsy-base-dmd: None
 
-  * test-linux2404-64-shippable/opt
+  * {ref}`test-linux2404-64-shippable/opt <hardware-gcp-c3d-standard-8>`
     * awsy-base: trunk
     * awsy-base-dmd: None
 
-  * test-linux2404-64/opt
+  * {ref}`test-linux2404-64/opt <hardware-gcp-c3d-standard-8>`
     * awsy-base: None
     * awsy-base-dmd: None
 
-  * test-macosx1470-64-shippable/opt
+  * {ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`
     * awsy-base: trunk
     * awsy-base-dmd: None
 
-  * test-windows11-64-25h2-shippable/opt
+  * {ref}`test-macosx1500-aarch64-vms-shippable/opt <hardware-tart-mac-mini-m4>`
+
+  * {ref}`test-windows11-64-25h2-shippable/opt <hardware-azure-standard-f8alds-v7>`
     * awsy-base: trunk
     * awsy-base-dmd: None
 
-  * test-windows11-64-25h2/opt
+  * {ref}`test-windows11-64-25h2/opt <hardware-azure-standard-f8alds-v7>`
     * awsy-base: None
     * awsy-base-dmd: None
 
@@ -66,57 +75,31 @@ AWSY tests consist of three types: TP5\*, TP6, and Base Memory Usage.
 **Owner**: :mccr8 and Perftest Team
 
 * **Test Task**:
-  * test-linux2404-64-clang-trunk/opt
+  * {ref}`test-linux2404-64-clang-trunk/opt <hardware-gcp-c3d-standard-8>`
     * awsy-base-dmd: None
     * awsy-dmd: None
 
-  * test-linux2404-64-shippable/opt
+  * {ref}`test-linux2404-64-shippable/opt <hardware-gcp-c3d-standard-8>`
     * awsy-base-dmd: None
     * awsy-dmd: None
 
-  * test-linux2404-64/opt
+  * {ref}`test-linux2404-64/opt <hardware-gcp-c3d-standard-8>`
     * awsy-base-dmd: None
     * awsy-dmd: None
 
-  * test-macosx1470-64-shippable/opt
+  * {ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`
+    * awsy-base-dmd: None
+
+  * {ref}`test-macosx1500-aarch64-vms-shippable/opt <hardware-tart-mac-mini-m4>`
+    * awsy-dmd: None
+
+  * {ref}`test-windows11-64-25h2-shippable/opt <hardware-azure-standard-f8alds-v7>`
     * awsy-base-dmd: None
     * awsy-dmd: None
 
-  * test-windows11-64-25h2-shippable/opt
+  * {ref}`test-windows11-64-25h2/opt <hardware-azure-standard-f8alds-v7>`
     * awsy-base-dmd: None
     * awsy-dmd: None
-
-  * test-windows11-64-25h2/opt
-    * awsy-base-dmd: None
-    * awsy-dmd: None
-
-::::
-
-(tp5-Awsy-tests)=
-
-::::{dropdown} tp5 (FF)
-:class-container: anchor-id-tp5-Awsy-tests
-
-* **Command to Run Locally**
-
-  ```
-  ./mach awsy-test --tp5
-  ```
-
-**Owner**: :mccr8 and Perftest Team
-
-* **Test Task**:
-  * test-linux2404-64-clang-trunk/opt
-
-  * test-linux2404-64-shippable/opt
-
-  * test-linux2404-64/opt
-
-  * test-macosx1470-64-shippable/opt
-
-  * test-windows11-64-25h2-shippable/opt
-
-  * test-windows11-64-25h2/opt
 
 ::::
 
@@ -134,22 +117,24 @@ AWSY tests consist of three types: TP5\*, TP6, and Base Memory Usage.
 **Owner**: :mccr8 and Perftest Team
 
 * **Test Task**:
-  * test-linux2404-64-clang-trunk/opt
+  * {ref}`test-linux2404-64-clang-trunk/opt <hardware-gcp-c3d-standard-8>`
     * awsy-tp6: None
 
-  * test-linux2404-64-shippable/opt
+  * {ref}`test-linux2404-64-shippable/opt <hardware-gcp-c3d-standard-8>`
     * awsy-tp6: trunk
 
-  * test-linux2404-64/opt
+  * {ref}`test-linux2404-64/opt <hardware-gcp-c3d-standard-8>`
     * awsy-tp6: None
 
-  * test-macosx1470-64-shippable/opt
+  * {ref}`test-macosx1500-aarch64-shippable/opt <hardware-mac-mini-m4>`
+
+  * {ref}`test-macosx1500-aarch64-vms-shippable/opt <hardware-tart-mac-mini-m4>`
     * awsy-tp6: trunk
 
-  * test-windows11-64-25h2-shippable/opt
+  * {ref}`test-windows11-64-25h2-shippable/opt <hardware-azure-standard-f8alds-v7>`
     * awsy-tp6: trunk
 
-  * test-windows11-64-25h2/opt
+  * {ref}`test-windows11-64-25h2/opt <hardware-azure-standard-f8alds-v7>`
     * awsy-tp6: None
 
 ::::
@@ -163,14 +148,6 @@ as the test output is only reported as raw JSON. The CLI is documented via:
 
 ```bash
 ./mach awsy-test --help
-```
-
-*Currently all tests will download TP5 even if it is not used, see:* <https://bugzilla.mozilla.org/show_bug.cgi?id=1683920>
-
-### TP5 tests
-
-```bash
-./mach awsy-test --tp5
 ```
 
 ### TP6 tests
@@ -193,17 +170,14 @@ AWSY runs can be generated through the mach try fuzzy finder:
 ./mach try fuzzy
 ```
 
-A query for "awsy" will return all AWSY tests. The default test is TP5, TP6 and Base test names will contain `tp6` and `base`, respectively.
+A query for "awsy" will return all AWSY tests. TP6 and Base test names will contain `tp6` and `base`, respectively.
 
 The following documents all tests we currently run for AWSY.
-*The following content was migrated from* <https://wiki.mozilla.org/AWSY/Tests> *and will be updated to clarify TP5/TP6 tests vs Base tests:* <https://bugzilla.mozilla.org/show_bug.cgi?id=1714600>
+*The following content was migrated from* <https://wiki.mozilla.org/AWSY/Tests> *and will be updated to clarify TP6 tests vs Base tests:* <https://bugzilla.mozilla.org/show_bug.cgi?id=1714600>
 
-## TP5/TP6 Tests
+## TP6 Tests
 
-The following tests exist for both TP5 and TP6. Running `./mach awsy-test` by default will run TP6 tests\*.
-To run TP5 tests, add the `--tp5` flag: `./mach awsy-test --tp5`
-
-*\*TP5 tests are out of date and no longer maintained. These tests are scheduled to be removed:* <https://bugzilla.mozilla.org/show_bug.cgi?id=1712406>
+Running `./mach awsy-test` by default will run TP6 tests.
 
 ### Explicit Memory
 
@@ -213,7 +187,7 @@ To run TP5 tests, add the `--tp5` flag: `./mach awsy-test --tp5`
 
 - A regression in this usually means a new feature is using or retaining more memory and should be looked at. These are easier to diagnose because we can compare memory reports.
 
-See the `about:memory` [mdn page](https://developer.mozilla.org/docs/Mozilla/Performance/about:memory#Explicit_Allocations) for more details.
+See the [about:memory documentation](/performance/memory/about_colon_memory.md#explicit-allocations) for more details.
 
 ### Heap Unclassified
 
@@ -249,9 +223,15 @@ See the `about:memory` [mdn page](https://developer.mozilla.org/docs/Mozilla/Per
 
 A change has caused more JavaScript to load at startup or into blank pages.
 
-- **Common solution**: lazily load any new modules you rely on
-- **Common solution**: Split your code out to only load what is minimally needed initially. You modified the JS engine and it's using more memory
-- **Common solution**: Attempt to reduce your object size for the common case, these tend to add up! You implemented a new feature in JavaScript
+- **Common solution**: Lazily load any new modules you rely on.
+- **Common solution**: Split your code out to only load what is minimally needed initially.
+
+You modified the JS engine and it's using more memory.
+
+- **Common solution**: Attempt to reduce your object size for the common case, these tend to add up!
+
+You implemented a new feature in JavaScript.
+
 - **Common solution**: Write the majority (or all of it) in compiled code (C++/Rust). This will reduce overhead and generally improve performance.
 
 ### Base Content Heap Unclassified
@@ -263,7 +243,7 @@ A change has caused more JavaScript to load at startup or into blank pages.
 - A regression in this can indicate that we're leaking memory or that additional memory reporters should be added.
 - An improvement can indicate that leaks have been fixed or that we added new memory reporters.
 
-See the `about:memory` [mdn page](https://developer.mozilla.org/docs/Mozilla/Performance/about:memory#Explicit_Allocations) for more details.
+See the [about:memory documentation](/performance/memory/about_colon_memory.md#explicit-allocations) for more details.
 
 ### Base Content JS
 
@@ -275,8 +255,9 @@ See the `about:memory` [mdn page](https://developer.mozilla.org/docs/Mozilla/Per
 
 ### Base Content Resident Unique Memory
 
-*to do: add test definition*
+- This is the "resident-unique" value in `about:memory`, also known as the unique set size ([USS](https://en.wikipedia.org/wiki/Unique_set_size)). It is the memory mapped by a content process that is present in physical memory and not shared with any other process, which is roughly the amount of RAM we'd expect to be freed if that process was closed. Read-only data such as shared libraries is shared between processes, so it is not counted here.
+- Since we can have dozens of content processes with Fission, this measures how much a single new content process adds to the total memory used by the system. The median value across all content processes is reported.
 
-#### Other references
+**Possible regression causes**
 
-[Are We Slim Yet MDN web docs](https://developer.mozilla.org/en-US/docs/Mozilla/Performance/AWSY)
+- A regression in this usually means more memory is allocated or touched in every content process, for example by loading more code or data at content process startup. It often tracks regressions in Base Content Explicit, Base Content Heap Unclassified, or Base Content JS. A regression here that isn't visible in those can indicate memory that isn't covered by memory reporters, such as graphics allocations or memory that used to be shared between processes.

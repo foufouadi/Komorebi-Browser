@@ -446,7 +446,7 @@ class MarkupContextMenu {
   }
 
   #getCopySubmenu(markupContainer, isElement, isFragment) {
-    const copySubmenu = new Menu();
+    const copySubmenu = new Menu({ accesskeyConflictsBug: 2073896 });
     copySubmenu.append(
       new MenuItem({
         id: "node-menu-copyinner",
@@ -754,13 +754,16 @@ class MarkupContextMenu {
     const isScreenshotable =
       isElement && this.selection.nodeFront.isTreeDisplayed;
 
-    const menu = new Menu({ id: "markup-context-menu" });
+    const menu = new Menu({
+      id: "markup-context-menu",
+      accesskeyConflictsBug: 2073896,
+    });
     menu.append(
       new MenuItem({
         id: "node-menu-edithtml",
         label: INSPECTOR_L10N.getStr(`${this.#getEditMarkupString()}.label`),
         accesskey: INSPECTOR_L10N.getStr("inspectorHTMLEdit.accesskey"),
-        disabled: isAnonymous || (!isElement && !isFragment),
+        disabled: !this.markup.canEditSelectedNodeHTML(),
         click: () => this.#editHTML(),
       })
     );

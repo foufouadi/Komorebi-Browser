@@ -156,14 +156,11 @@ add_task(async function () {
 
   store.dispatch(Actions.batchEnable(false));
 
-  let wait = waitForNetworkEvents(monitor, 10);
+  let onNetworkEvents = waitForNetworkEvents(monitor, 10);
   await performRequestsInContent(REQUESTS_WITH_MEDIA_AND_FLASH_AND_WS);
-  await wait;
+  await onNetworkEvents;
 
-  EventUtils.sendMouseEvent(
-    { type: "mousedown" },
-    document.querySelectorAll(".request-list-item")[0]
-  );
+  clickOnRequestRow(document.querySelectorAll(".request-list-item")[0]);
 
   isnot(
     getSelectedRequest(store.getState()),
@@ -194,9 +191,11 @@ add_task(async function () {
 
   info("Performing more requests.");
   // As the view is filtered and there is only one request for which we fetch event timings
-  wait = waitForNetworkEvents(monitor, 10, { expectedEventTimings: 1 });
+  onNetworkEvents = waitForNetworkEvents(monitor, 10, {
+    expectedEventTimings: 1,
+  });
   await performRequestsInContent(REQUESTS_WITH_MEDIA_AND_FLASH_AND_WS);
-  await wait;
+  await onNetworkEvents;
 
   info("Testing html filtering again.");
   testFilterButtons(monitor, "html");
@@ -205,9 +204,11 @@ add_task(async function () {
   ]);
 
   info("Performing more requests.");
-  wait = waitForNetworkEvents(monitor, 10, { expectedEventTimings: 1 });
+  onNetworkEvents = waitForNetworkEvents(monitor, 10, {
+    expectedEventTimings: 1,
+  });
   await performRequestsInContent(REQUESTS_WITH_MEDIA_AND_FLASH_AND_WS);
-  await wait;
+  await onNetworkEvents;
 
   info("Testing html filtering again.");
   testFilterButtons(monitor, "html");

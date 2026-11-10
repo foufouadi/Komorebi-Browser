@@ -9,9 +9,12 @@
 #include "nscore.h"
 
 class nsTableFrame;
+class nsIFrame;
+class nsContainerFrame;
 
 namespace mozilla {
 class PresShell;
+class ComputedStyle;
 }  // namespace mozilla
 
 // Factory methods for creating MathML objects
@@ -25,16 +28,8 @@ nsIFrame* NS_NewMathMLmpaddedFrame(mozilla::PresShell* aPresShell,
                                    mozilla::ComputedStyle* aStyle);
 nsIFrame* NS_NewMathMLmspaceFrame(mozilla::PresShell* aPresShell,
                                   mozilla::ComputedStyle* aStyle);
-nsIFrame* NS_NewMathMLmsFrame(mozilla::PresShell* aPresShell,
-                              mozilla::ComputedStyle* aStyle);
 nsIFrame* NS_NewMathMLmfracFrame(mozilla::PresShell* aPresShell,
                                  mozilla::ComputedStyle* aStyle);
-nsIFrame* NS_NewMathMLmsubFrame(mozilla::PresShell* aPresShell,
-                                mozilla::ComputedStyle* aStyle);
-nsIFrame* NS_NewMathMLmsupFrame(mozilla::PresShell* aPresShell,
-                                mozilla::ComputedStyle* aStyle);
-nsIFrame* NS_NewMathMLmsubsupFrame(mozilla::PresShell* aPresShell,
-                                   mozilla::ComputedStyle* aStyle);
 nsIFrame* NS_NewMathMLmunderoverFrame(mozilla::PresShell* aPresShell,
                                       mozilla::ComputedStyle* aStyle);
 nsIFrame* NS_NewMathMLmmultiscriptsFrame(mozilla::PresShell* aPresShell,

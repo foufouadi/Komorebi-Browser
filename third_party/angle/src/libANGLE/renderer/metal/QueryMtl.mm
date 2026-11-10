@@ -7,11 +7,8 @@
 //    Defines the class interface for QueryMtl, implementing QueryImpl.
 //
 
-#ifdef UNSAFE_BUFFERS_BUILD
-#    pragma allow_unsafe_buffers
-#endif
-
 #include "libANGLE/renderer/metal/QueryMtl.h"
+#include "common/unsafe_buffers.h"
 
 #include "libANGLE/renderer/metal/ContextMtl.h"
 
@@ -24,9 +21,9 @@ QueryMtl::~QueryMtl() {}
 void QueryMtl::onDestroy(const gl::Context *context)
 {
     ContextMtl *contextMtl = mtl::GetImpl(context);
-    if (!getAllocatedVisibilityOffsets().empty())
+    if (mVisibilityResultBuffer)
     {
-        contextMtl->onOcclusionQueryDestroy(context, this);
+        contextMtl->onOcclusionQueryDestroy(*this);
     }
     mVisibilityResultBuffer = nullptr;
 }
@@ -51,7 +48,7 @@ angle::Result QueryMtl::begin(const gl::Context *context)
                 }
             }
 
-            ANGLE_TRY(contextMtl->onOcclusionQueryBegin(context, this));
+            ANGLE_TRY(contextMtl->onOcclusionQueryBegin(*this));
             break;
         case gl::QueryType::TransformFeedbackPrimitivesWritten:
             mTransformFeedbackPrimitivesDrawn = 0;
@@ -85,7 +82,7 @@ angle::Result QueryMtl::end(const gl::Context *context)
     {
         case gl::QueryType::AnySamples:
         case gl::QueryType::AnySamplesConservative:
-            contextMtl->onOcclusionQueryEnd(context, this);
+            contextMtl->onOcclusionQueryEnd();
             break;
         case gl::QueryType::TransformFeedbackPrimitivesWritten:
             onTransformFeedbackEnd(context);
@@ -129,7 +126,7 @@ angle::Result QueryMtl::waitAndGetResult(const gl::Context *context, T *params)
             const uint8_t *visibilityResultBytes =
                 mVisibilityResultBuffer->mapReadOnly(contextMtl).data();
             uint64_t queryResult;
-            memcpy(&queryResult, visibilityResultBytes, sizeof(queryResult));
+            ANGLE_UNSAFE_TODO(memcpy(&queryResult, visibilityResultBytes, sizeof(queryResult)));
             mVisibilityResultBuffer->unmap(contextMtl);
 
             *params = queryResult ? GL_TRUE : GL_FALSE;
@@ -205,18 +202,6 @@ angle::Result QueryMtl::getResult(const gl::Context *context, GLint64 *params)
 angle::Result QueryMtl::getResult(const gl::Context *context, GLuint64 *params)
 {
     return waitAndGetResult(context, params);
-}
-
-void QueryMtl::resetVisibilityResult(ContextMtl *contextMtl)
-{
-    // Occlusion query buffer must be allocated in QueryMtl::begin
-    ASSERT(mVisibilityResultBuffer);
-
-    // Fill the query's buffer with zeros
-    auto blitEncoder = contextMtl->getBlitCommandEncoder();
-    blitEncoder->fillBuffer(mVisibilityResultBuffer, NSMakeRange(0, mtl::kOcclusionQueryResultSize),
-                            0);
-    mVisibilityResultBuffer->syncContent(contextMtl, blitEncoder);
 }
 
 void QueryMtl::onTransformFeedbackEnd(const gl::Context *context)

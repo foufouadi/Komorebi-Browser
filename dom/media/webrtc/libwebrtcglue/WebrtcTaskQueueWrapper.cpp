@@ -94,13 +94,18 @@ enum class DeletionPolicy : uint8_t { Blocking, NonBlocking };
  */
 template <DeletionPolicy Deletion>
 class WebrtcTaskQueueWrapper : public webrtc::TaskQueueBase {
+  using OwnerType = std::conditional_t<Deletion == DeletionPolicy::NonBlocking,
+                                       UniquePtr<WebrtcTaskQueueWrapper>,
+                                       WebrtcTaskQueueWrapper*>;
+
  public:
   class TaskQueueObserver final : public TaskQueue::Observer {
    public:
     NS_INLINE_DECL_THREADSAFE_REFCOUNTING(TaskQueueObserver, override);
 
     template <typename Wrapper>
-    explicit TaskQueueObserver(Wrapper aOwner)
+      requires std::is_constructible_v<OwnerType, Wrapper&&>
+    explicit TaskQueueObserver(Wrapper&& aOwner)
         : mOwner(std::forward<Wrapper>(aOwner)) {}
 
     void WillProcessEvent(TaskQueue* aQueue) override {
@@ -124,15 +129,13 @@ class WebrtcTaskQueueWrapper : public webrtc::TaskQueueBase {
     // mOwner is safe because the underlying TaskQueue first finishes shutdown,
     // then the observer is destroyed, then the WebrtcTaskQueueWrapper is
     // destroyed. See the WebrtcTaskQueueWrawpper::Delete for more details.
-    std::conditional_t<Deletion == DeletionPolicy::NonBlocking,
-                       UniquePtr<WebrtcTaskQueueWrapper>,
-                       WebrtcTaskQueueWrapper*> const mOwner;
+    const OwnerType mOwner;
     Maybe<CurrentTaskQueueSetter> mCurrent;
   };
 
  public:
   template <typename Target>
-  WebrtcTaskQueueWrapper(Target aTaskQueue, const nsACString& aName)
+  WebrtcTaskQueueWrapper(Target&& aTaskQueue, const nsACString& aName)
       : mTaskQueue(std::forward<Target>(aTaskQueue)), mName(aName) {}
   ~WebrtcTaskQueueWrapper() = default;
 
@@ -225,12 +228,13 @@ namespace mozilla {
 
 std::unique_ptr<webrtc::TaskQueueBase, webrtc::TaskQueueDeleter>
 CreateWebrtcTaskQueue(already_AddRefed<nsIEventTarget> aTarget,
-                      const nsACString& aName, bool aSupportsTailDispatch) {
+                      const nsACString& aName,
+                      TailDispatchPolicy aTailDispatchPolicy) {
   using Wrapper = WebrtcTaskQueueWrapper<DeletionPolicy::Blocking>;
   const auto& flat = PromiseFlatCString(aName);
   auto tq = TaskQueue::Create(std::move(aTarget), "WebrtcTaskQueue",
-                              aSupportsTailDispatch);
-  auto wrapper = MakeUnique<Wrapper>(std::move(tq), flat);
+                              aTailDispatchPolicy);
+  auto wrapper = std::make_unique<Wrapper>(std::move(tq), flat);
   auto observer = MakeRefPtr<Wrapper::TaskQueueObserver>(wrapper.get());
   wrapper->mTaskQueue->SetObserver(observer);
   return std::unique_ptr<webrtc::TaskQueueBase, webrtc::TaskQueueDeleter>(
@@ -239,11 +243,11 @@ CreateWebrtcTaskQueue(already_AddRefed<nsIEventTarget> aTarget,
 
 RefPtr<TaskQueue> CreateWebrtcTaskQueueWrapper(
     already_AddRefed<nsIEventTarget> aTarget, const nsLiteralCString& aName,
-    bool aSupportsTailDispatch) {
+    TailDispatchPolicy aTailDispatchPolicy) {
   using Wrapper = WebrtcTaskQueueWrapper<DeletionPolicy::NonBlocking>;
   auto tq = TaskQueue::Create(std::move(aTarget), StaticString(aName),
-                              aSupportsTailDispatch);
-  auto wrapper = MakeUnique<Wrapper>(tq.get(), aName);
+                              aTailDispatchPolicy);
+  auto wrapper = std::make_unique<Wrapper>(tq.get(), aName);
   auto observer = MakeRefPtr<Wrapper::TaskQueueObserver>(std::move(wrapper));
   tq->SetObserver(observer);
   return tq;
@@ -260,12 +264,11 @@ UniquePtr<webrtc::TaskQueueFactory> CreateWebrtcTaskQueueFactory() {
       // until they've run, and that doesn't play nice with tail dispatching
       // since there will never be a tail. DeletionPolicy::Blocking because this
       // is for libwebrtc use and that's what they expect.
-      constexpr bool supportTailDispatch = false;
       // XXX Do something with aPriority
       return CreateWebrtcTaskQueue(
           GetMediaThreadPool(MediaThreadType::WEBRTC_WORKER),
           nsDependentCSubstring(aName.data(), aName.size()),
-          supportTailDispatch);
+          TailDispatchPolicy::NoTailDispatch);
     }
   };
 

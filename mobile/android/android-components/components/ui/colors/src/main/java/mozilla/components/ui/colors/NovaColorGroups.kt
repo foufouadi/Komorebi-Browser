@@ -66,6 +66,7 @@ val novaColorGroups =
                     ColorSwatch("Violet Desaturated 70", NovaColors.VioletDesaturated70),
                     ColorSwatch("Violet Desaturated 80", NovaColors.VioletDesaturated80),
                     ColorSwatch("Violet Desaturated 90", NovaColors.VioletDesaturated90),
+                    ColorSwatch("Violet Desaturated 90A40", NovaColors.VioletDesaturated90A40),
                     ColorSwatch("Violet Desaturated 90A50", NovaColors.VioletDesaturated90A50),
                     ColorSwatch("Violet Desaturated 90A70", NovaColors.VioletDesaturated90A70),
                 ),

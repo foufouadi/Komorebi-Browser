@@ -6,6 +6,8 @@ import { Troubleshoot } from "resource://gre/modules/Troubleshoot.sys.mjs";
 
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 
+import { getMozRemoteImageURL } from "moz-src:///toolkit/modules/FaviconUtils.sys.mjs";
+
 import { ReportBrokenSiteHelpers as Helpers } from "./ReportBrokenSiteHelpers.mjs";
 
 export class ReportBrokenSiteParent extends JSWindowActorParent {
@@ -75,7 +77,12 @@ export class ReportBrokenSiteParent extends JSWindowActorParent {
 
     let favicon;
     try {
-      favicon = this.browsingContext.topFrameElement?.mIconURL;
+      const faviconUrl = this.browsingContext.topFrameElement?.mIconURL;
+      favicon = faviconUrl
+        ? getMozRemoteImageURL(faviconUrl, {
+            size: 16,
+          })
+        : undefined;
     } catch (err) {
       console.error("Report Broken Site: failed to get favicon", err);
     }
@@ -114,6 +121,11 @@ export class ReportBrokenSiteParent extends JSWindowActorParent {
         btpHasPurgedSite: {
           isTabSpecific: true,
           value: antitracking.btpHasPurgedSite,
+          glean: "tabInfo.antitracking",
+        },
+        btpPurgeHistory: {
+          isTabSpecific: true,
+          value: antitracking.btpPurgeHistory,
           glean: "tabInfo.antitracking",
         },
         etpCategory: {
@@ -393,6 +405,7 @@ export class ReportBrokenSiteParent extends JSWindowActorParent {
     // Ask BounceTrackingProtection whether it has recently purged state for the
     // site in the current top level context.
     let btpHasPurgedSite = false;
+    let btpPurgeHistory = [];
     let { currentWindowGlobal } = browsingContext;
     if (
       Services.prefs.getIntPref("privacy.bounceTrackingProtection.mode") !=
@@ -407,6 +420,21 @@ export class ReportBrokenSiteParent extends JSWindowActorParent {
         let { baseDomain } = documentPrincipal;
         btpHasPurgedSite =
           bounceTrackingProtection.hasRecentlyPurgedSite(baseDomain);
+
+        let purgeEntries =
+          bounceTrackingProtection.getRecentPurgedChainEntriesForSite(
+            baseDomain
+          );
+        for (let entry of purgeEntries) {
+          let historyEntry = { purgedHost: entry.siteHost };
+          let record = entry.bounceTrackingRecord;
+          if (record) {
+            historyEntry.initialHost = record.initialHost;
+            historyEntry.finalHost = record.finalHost;
+            historyEntry.bounceHosts = Array.from(record.bounceHosts);
+          }
+          btpPurgeHistory.push(historyEntry);
+        }
       }
     }
 
@@ -429,6 +457,7 @@ export class ReportBrokenSiteParent extends JSWindowActorParent {
         Ci.nsIWebProgressListener.STATE_BLOCKED_MIXED_DISPLAY_CONTENT
       ),
       btpHasPurgedSite,
+      btpPurgeHistory,
       etpCategory: this.#getETPCategory(),
     };
   }

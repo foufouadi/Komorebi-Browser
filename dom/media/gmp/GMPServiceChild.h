@@ -25,7 +25,6 @@ class GeckoMediaPluginServiceChild : public GeckoMediaPluginService {
 
  public:
   static already_AddRefed<GeckoMediaPluginServiceChild> GetSingleton();
-  nsresult Init() override;
 
   NS_DECL_ISUPPORTS_INHERITED
 
@@ -49,9 +48,17 @@ class GeckoMediaPluginServiceChild : public GeckoMediaPluginService {
   static void UpdateGMPCapabilities(
       nsTArray<mozilla::dom::GMPCapabilityData>&& aCapabilities);
 
+  // Returns whether the GMP capabilities received from the parent process
+  // support aAPI with aTags. This does not need the GMP service to exist.
+  static bool HasCapabilityForAPI(const nsACString& aAPI,
+                                  const nsTArray<nsCString>& aTags);
+
   void BeginShutdown();
 
  protected:
+  nsresult InitMainThread() override;
+  void UninitMainThread() override;
+
   void InitializePlugins(nsISerialEventTarget*) override {
     // Nothing to do here.
   }

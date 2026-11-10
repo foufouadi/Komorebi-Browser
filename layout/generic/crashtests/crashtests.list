@@ -25,7 +25,7 @@ load chrome://reftest/content/crashtests/layout/generic/crashtests/321224.xhtml
 load chrome://reftest/content/crashtests/layout/generic/crashtests/322780-1.xhtml
 load 323381-1.html
 load 323381-2.html
-load 323386-1.html
+asserts(0-1) load 323386-1.html # Large sizes, but font-metric dependent whether the calculation overflows.
 load 323389-1.html
 load 323389-2.html
 load 323493-1.html
@@ -325,7 +325,7 @@ load 476241-1.html
 load 477731-1.html
 load 477928.html
 load 478131-1.html
-load 478170-1.html # Big sizes
+load 478170-1.html
 pref(layout.css.letter-spacing.model,2) load 478185-1.html
 load 478504.html
 asserts-if(!Android,0-1) load 479938-1.html # Bug 575011
@@ -487,7 +487,7 @@ load 798020-1.html
 load 798235-1.html
 load 799207-1.html
 load 799207-2.html
-load 801268-1.html
+asserts(1-2) load 801268-1.html # Large sizes hit NS_UNCONSTRAINEDSIZE assert.
 load 804089-1.xhtml
 load 807565-1.html
 load 807565-2.html

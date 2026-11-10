@@ -250,24 +250,6 @@ struct nsCSSRendering {
                                                        nscolor aColor);
 
   /**
-   * Render a gradient for an element.
-   * aDest is the rect for a single tile of the gradient on the destination.
-   * aFill is the rect on the destination to be covered by repeated tiling of
-   * the gradient.
-   * aSrc is the part of the gradient to be rendered into a tile (aDest), if
-   * aSrc and aDest are different sizes, the image will be scaled to map aSrc
-   * onto aDest.
-   * aIntrinsicSize is the size of the source gradient.
-   */
-  static void PaintGradient(nsPresContext* aPresContext, gfxContext& aContext,
-                            const mozilla::StyleGradient& aGradient,
-                            const nsRect& aDirtyRect, const nsRect& aDest,
-                            const nsRect& aFill, const nsSize& aRepeatSize,
-                            const mozilla::CSSIntRect& aSrc,
-                            const nsSize& aIntrinsiceSize,
-                            float aOpacity = 1.0);
-
-  /**
    * Find the frame whose background style should be used to draw the
    * canvas background. aForFrame must be the frame for the root element
    * whose background style should be used. This function will return
@@ -332,6 +314,17 @@ struct nsCSSRendering {
       nsPresContext* aPresContext, nsIFrame* aForFrame,
       const nsRect& aBorderArea, const nsStyleImageLayers::Layer& aLayer,
       nsIFrame** aAttachedToFrame, bool* aOutTransformedFixed);
+
+  struct BackgroundImageInfo {
+    nsSize mSize{};
+    nsPoint mAnchor{};
+    nsPoint mTopLeft{};
+
+    bool IsEmpty() const { return mSize.IsEmpty(); }
+  };
+  static BackgroundImageInfo ComputeBackgroundImageInfo(
+      const mozilla::CSSSizeOrRatio& aIntrinsicSize,
+      const nsSize& aPositionAreaSize, const nsStyleImageLayers::Layer& aLayer);
 
   // Implementation of the formula for computation of background-repeat round
   // See http://dev.w3.org/csswg/css3-background/#the-background-size

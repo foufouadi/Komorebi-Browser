@@ -7,7 +7,7 @@ export const ProcessType = Object.freeze({
    * Converts a key string to a fluent ID defined in processTypes.ftl.
    */
   kProcessTypeMap: {
-    // Keys defined in xpcom/build/GeckoProcessTypes.h
+    // Keys defined in xpcom/build/GeckoProcessTypes.inc
     default: "process-type-default",
     gpu: "process-type-gpu",
     tab: "process-type-tab",
@@ -26,6 +26,7 @@ export const ProcessType = Object.freeze({
     utility_jSOracle: "process-type-utility-actor-js-oracle",
     utility_windowsUtils: "process-type-utility-actor-windows-utils",
     utility_windowsFileDialog: "process-type-utility-actor-windows-file-dialog",
+    utility_hwInference: "process-type-utility-actor-hw-inference",
 
     // Keys defined in dom/ipc/RemoteType.h
     extension: "process-type-extension",

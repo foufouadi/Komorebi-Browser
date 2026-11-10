@@ -12,6 +12,7 @@
 
 #include <vector>
 
+#include "common/FastVector.h"
 #include "common/FixedVector.h"
 #include "common/Optional.h"
 #include "common/angleutils.h"
@@ -205,11 +206,9 @@ class Framebuffer final : public angle::ObserverInterface,
     ~Framebuffer() override;
     void onDestroy(const Context *context);
 
-    egl::Error setSurfaces(const Context *context,
-                           egl::Surface *surface,
-                           egl::Surface *readSurface);
+    void setSurfaces(const Context *context, egl::Surface *surface, egl::Surface *readSurface);
     void setReadSurface(const Context *context, egl::Surface *readSurface);
-    egl::Error unsetSurfaces(const Context *context);
+    void unsetSurfaces(const Context *context);
     angle::Result setLabel(const Context *context, const std::string &label) override;
     const std::string &getLabel() const override;
 
@@ -455,10 +454,16 @@ class Framebuffer final : public angle::ObserverInterface,
     // Observer implementation
     void onSubjectStateChange(angle::SubjectIndex index, angle::SubjectMessage message) override;
 
-    bool formsRenderingFeedbackLoopWith(const Context *context) const;
-    bool formsCopyingFeedbackLoopWith(TextureID copyTextureID,
-                                      GLint copyTextureLevel,
-                                      GLint copyTextureLayer) const;
+    enum class AllowedFeedbackLoop : bool
+    {
+        NoneAllowed,
+        ReadOnlyDepthStencil,
+    };
+
+    bool formsRenderingFeedbackLoopWith(const Context *context,
+                                        AllowedFeedbackLoop allowedFeedbackLoop) const;
+    bool formsCopyingFeedbackLoopWith(TextureID destTextureId,
+                                      const gl::ImageIndex &destImageIndex) const;
 
     angle::Result ensureClearAttachmentsInitialized(const Context *context, GLbitfield mask);
     angle::Result ensureClearBufferAttachmentsInitialized(const Context *context,
@@ -531,6 +536,18 @@ class Framebuffer final : public angle::ObserverInterface,
                           GLsizei samples);
 
     void markAttachmentsInitialized(const DrawBufferMask &color, bool depth, bool stencil);
+    void markAttachmentsUninitialized(const Context *context,
+                                      size_t count,
+                                      const GLenum *attachments);
+    angle::FastVector<GLenum, IMPLEMENTATION_MAX_DRAW_BUFFERS + 2> overrideInvalidateAttachments(
+        size_t count,
+        const GLenum *attachments) const;
+    angle::Result checkAllAttachmentsEnclosedBy(const Context *context,
+                                                const Rectangle &area,
+                                                DrawBufferMask colorMask,
+                                                bool depth,
+                                                bool stencil,
+                                                bool *allEnclosedOut) const;
 
     // Checks that we have a partially masked clear:
     // * some color channels are masked out
@@ -538,13 +555,15 @@ class Framebuffer final : public angle::ObserverInterface,
     // * scissor test partially overlaps the framebuffer
     // * any attachment is an arrayed texture, but the framebuffer attachment doesn't completely
     // cover it
-    bool partialClearNeedsInit(const Context *context,
-                               DrawBufferMask color,
-                               bool depth,
-                               bool stencil);
-    bool partialBufferClearNeedsInit(const Context *context,
-                                     GLenum bufferType,
-                                     DrawBufferMask drawBuffers);
+    angle::Result partialClearNeedsInit(const Context *context,
+                                        DrawBufferMask color,
+                                        bool depth,
+                                        bool stencil,
+                                        bool *needsInitOut);
+    angle::Result partialBufferClearNeedsInit(const Context *context,
+                                              GLenum bufferType,
+                                              DrawBufferMask drawBuffers,
+                                              bool *needsInitOut);
 
     FramebufferAttachment *getAttachmentFromSubjectIndex(angle::SubjectIndex index);
 

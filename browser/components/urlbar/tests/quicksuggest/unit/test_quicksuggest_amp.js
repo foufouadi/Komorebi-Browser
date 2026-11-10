@@ -469,9 +469,9 @@ add_task(async function dedupeAgainstURL_timestamps() {
         ],
         histories,
         context,
-        conditionalPayloadProperties: {
+        payloadRules: {
           url: {
-            custom: (index, result) => {
+            validate: (index, result) => {
               if (index != ampResultIndex) {
                 return false;
               }
@@ -483,7 +483,7 @@ add_task(async function dedupeAgainstURL_timestamps() {
             },
           },
           sponsoredClickUrl: {
-            custom: (index, result) => {
+            validate: (index, result) => {
               if (index != ampResultIndex) {
                 return false;
               }
@@ -743,9 +743,9 @@ add_task(async function dismissResult() {
           providers: [UrlbarProviderQuickSuggest.name],
           isPrivate: false,
         }),
-        conditionalPayloadProperties: {
+        payloadRules: {
           url: {
-            custom: (_index, result) => {
+            validate: (_index, result) => {
               QuickSuggestTestUtils.assertTimestampsReplaced(result, {
                 url: TIMESTAMP_SUGGESTION_URL,
               });
@@ -753,7 +753,7 @@ add_task(async function dismissResult() {
             },
           },
           sponsoredClickUrl: {
-            custom: (_index, result) => {
+            validate: (_index, result) => {
               QuickSuggestTestUtils.assertTimestampsReplaced(result, {
                 sponsoredClickUrl: TIMESTAMP_SUGGESTION_CLICK_URL,
               });
@@ -832,6 +832,7 @@ add_task(async function sponsoredPriority() {
           }),
           QuickSuggestTestUtils.ampResult({
             isBestMatch: true,
+            bestMatchType: UrlbarShared.BEST_MATCH_TYPE.SMALL,
             suggestedIndex: 1,
             isSuggestedIndexRelativeToGroup: false,
           }),
@@ -849,6 +850,229 @@ add_task(async function sponsoredPriority() {
       },
     ],
   });
+});
+
+// Tests `quicksuggest.ampTopPickScoreForLargeIcon` with valid values using
+// offline AMP. When a suggestion's score meets the threshold, it should be a
+// large best match.
+add_task(async function ampTopPickScoreForLargeIcon_enabled_offline() {
+  let key = input =>
+    createContext(input, {
+      providers: [UrlbarProviderQuickSuggest.name],
+      isPrivate: false,
+    });
+
+  for (let ampTopPickScoreForLargeIcon of ["1", "1.0"]) {
+    info(
+      "Testing with ampTopPickScoreForLargeIcon set to: " +
+        JSON.stringify(ampTopPickScoreForLargeIcon)
+    );
+    await doResultCheckTest({
+      env: {
+        prefs: [
+          ["suggest.quicksuggest.all", true],
+          ["suggest.quicksuggest.sponsored", true],
+          ["quicksuggest.ampTopPickCharThreshold", 5],
+          [
+            "quicksuggest.ampTopPickScoreForLargeIcon",
+            ampTopPickScoreForLargeIcon,
+          ],
+        ],
+        remoteSettingRecords: [
+          {
+            collection: QuickSuggestTestUtils.RS_COLLECTION.AMP,
+            type: QuickSuggestTestUtils.RS_TYPE.AMP,
+            attachment: [
+              QuickSuggestTestUtils.ampRemoteSettings({
+                score: 0.3,
+                keywords: ["0.3", "0.3 sugg", "0.3 suggestion"],
+                full_keywords: [["0.3 suggestion", 5]],
+              }),
+              QuickSuggestTestUtils.ampRemoteSettings({
+                score: 1.0,
+                keywords: ["1.0", "1.0 sugg", "1.0 suggestion"],
+                full_keywords: [["1.0 suggestion", 5]],
+              }),
+            ],
+          },
+        ],
+      },
+      tests: [
+        // * Suggestion with score below score threshold
+        // * Keyword length below ampTopPickCharThreshold
+        // => No top pick
+        {
+          context: key("0.3"),
+          expected: [
+            QuickSuggestTestUtils.ampResult({
+              fullKeyword: "0.3 suggestion",
+              isBestMatch: false,
+              bestMatchType: UrlbarShared.BEST_MATCH_TYPE.NONE,
+              suggestedIndex: -1,
+            }),
+          ],
+        },
+
+        // * Suggestion with score below score threshold
+        // * Keyword length meets ampTopPickCharThreshold
+        // => Top pick, small size
+        {
+          context: key("0.3 sugg"),
+          expected: [
+            QuickSuggestTestUtils.ampResult({
+              fullKeyword: "0.3 suggestion",
+              isBestMatch: true,
+              bestMatchType: UrlbarShared.BEST_MATCH_TYPE.SMALL,
+              suggestedIndex: 1,
+              isSuggestedIndexRelativeToGroup: false,
+            }),
+          ],
+        },
+
+        // * Suggestion with score that meets score threshold
+        // * Keyword length below ampTopPickCharThreshold
+        // => No top pick
+        {
+          context: key("1.0"),
+          expected: [
+            QuickSuggestTestUtils.ampResult({
+              fullKeyword: "1.0 suggestion",
+              isBestMatch: false,
+              bestMatchType: UrlbarShared.BEST_MATCH_TYPE.NONE,
+              suggestedIndex: -1,
+            }),
+          ],
+        },
+
+        // * Suggestion with score that meets score threshold
+        // * Keyword length meets ampTopPickCharThreshold
+        // => Top pick, large size
+        {
+          context: key("1.0 sugg"),
+          expected: [
+            QuickSuggestTestUtils.ampResult({
+              fullKeyword: "1.0 suggestion",
+              isBestMatch: true,
+              bestMatchType: UrlbarShared.BEST_MATCH_TYPE.LARGE,
+              suggestedIndex: 1,
+              isSuggestedIndexRelativeToGroup: false,
+            }),
+          ],
+        },
+      ],
+    });
+  }
+});
+
+// Tests `quicksuggest.ampTopPickScoreForLargeIcon` with empty and invalid
+// values using offline AMP. Suggestions should be a small best match.
+add_task(async function ampTopPickScoreForLargeIcon_disabled_offline() {
+  let key = input =>
+    createContext(input, {
+      providers: [UrlbarProviderQuickSuggest.name],
+      isPrivate: false,
+    });
+
+  for (let ampTopPickScoreForLargeIcon of ["", "not a number"]) {
+    info(
+      "Testing with ampTopPickScoreForLargeIcon set to: " +
+        JSON.stringify(ampTopPickScoreForLargeIcon)
+    );
+    await doResultCheckTest({
+      env: {
+        prefs: [
+          ["suggest.quicksuggest.all", true],
+          ["suggest.quicksuggest.sponsored", true],
+          ["quicksuggest.ampTopPickCharThreshold", 5],
+          [
+            "quicksuggest.ampTopPickScoreForLargeIcon",
+            ampTopPickScoreForLargeIcon,
+          ],
+        ],
+        remoteSettingRecords: [
+          {
+            collection: QuickSuggestTestUtils.RS_COLLECTION.AMP,
+            type: QuickSuggestTestUtils.RS_TYPE.AMP,
+            attachment: [
+              QuickSuggestTestUtils.ampRemoteSettings({
+                score: 0.3,
+                keywords: ["0.3", "0.3 sugg", "0.3 suggestion"],
+                full_keywords: [["0.3 suggestion", 5]],
+              }),
+              QuickSuggestTestUtils.ampRemoteSettings({
+                score: 1.0,
+                keywords: ["1.0", "1.0 sugg", "1.0 suggestion"],
+                full_keywords: [["1.0 suggestion", 5]],
+              }),
+            ],
+          },
+        ],
+      },
+      tests: [
+        // * Suggestion with the usual AMP score
+        // * Keyword length below ampTopPickCharThreshold
+        // => No top pick
+        {
+          context: key("0.3"),
+          expected: [
+            QuickSuggestTestUtils.ampResult({
+              fullKeyword: "0.3 suggestion",
+              isBestMatch: false,
+              bestMatchType: UrlbarShared.BEST_MATCH_TYPE.NONE,
+              suggestedIndex: -1,
+            }),
+          ],
+        },
+
+        // * Suggestion with the usual AMP score
+        // * Keyword length meets ampTopPickCharThreshold
+        // => Top pick, small size
+        {
+          context: key("0.3 sugg"),
+          expected: [
+            QuickSuggestTestUtils.ampResult({
+              fullKeyword: "0.3 suggestion",
+              isBestMatch: true,
+              bestMatchType: UrlbarShared.BEST_MATCH_TYPE.SMALL,
+              suggestedIndex: 1,
+              isSuggestedIndexRelativeToGroup: false,
+            }),
+          ],
+        },
+
+        // * Suggestion with a max score
+        // * Keyword length below ampTopPickCharThreshold
+        // => No top pick
+        {
+          context: key("1.0"),
+          expected: [
+            QuickSuggestTestUtils.ampResult({
+              fullKeyword: "1.0 suggestion",
+              isBestMatch: false,
+              bestMatchType: UrlbarShared.BEST_MATCH_TYPE.NONE,
+              suggestedIndex: -1,
+            }),
+          ],
+        },
+
+        // * Suggestion with a max score
+        // * Keyword length meets ampTopPickCharThreshold
+        // => Top pick, small size
+        {
+          context: key("1.0 sugg"),
+          expected: [
+            QuickSuggestTestUtils.ampResult({
+              fullKeyword: "1.0 suggestion",
+              isBestMatch: true,
+              bestMatchType: UrlbarShared.BEST_MATCH_TYPE.SMALL,
+              suggestedIndex: 1,
+              isSuggestedIndexRelativeToGroup: false,
+            }),
+          ],
+        },
+      ],
+    });
+  }
 });
 
 // The `Amp` Rust providers should be passed to the Rust component when querying
@@ -916,13 +1140,27 @@ add_task(async function keywordLengthThreshold() {
           type: QuickSuggestTestUtils.RS_TYPE.AMP,
           attachment: [
             QuickSuggestTestUtils.ampRemoteSettings({
-              keywords: ["x", "xx"],
+              keywords: ["", "x", "xx"],
             }),
           ],
         },
       ],
     },
     tests: [
+      {
+        context: createContext("", {
+          providers: [UrlbarProviderQuickSuggest.name],
+          isPrivate: false,
+        }),
+        expected: [],
+      },
+      {
+        context: createContext(" ", {
+          providers: [UrlbarProviderQuickSuggest.name],
+          isPrivate: false,
+        }),
+        expected: [],
+      },
       {
         context: createContext("x", {
           providers: [UrlbarProviderQuickSuggest.name],
@@ -977,6 +1215,7 @@ add_task(async function ampTopPickCharThreshold() {
   let toppick = QuickSuggestTestUtils.ampResult({
     fullKeyword: "amp full keyword",
     isBestMatch: true,
+    bestMatchType: UrlbarShared.BEST_MATCH_TYPE.SMALL,
     suggestedIndex: 1,
     isSuggestedIndexRelativeToGroup: false,
   });
@@ -1200,7 +1439,7 @@ async function doAmpMatchingStrategyTest({
     "queryWithMetrics"
   );
 
-  let controller = UrlbarTestUtils.newMockController();
+  let controller = UrlbarTestUtils.mockChildController();
   await controller.startQuery(
     createContext("amp", {
       providers: [UrlbarProviderQuickSuggest.name],
@@ -1263,7 +1502,9 @@ add_task(async function online_disabled() {
           QuickSuggestTestUtils.ampResult({
             source: "merino",
             provider: "adm",
-            icon: "https://example.com/amp-icon",
+            icon: UrlbarTestUtils.makeMozRemoteImageUrl(
+              "https://example.com/amp-icon"
+            ),
             iabCategory: "22 - Shopping",
             requestId: "request_id",
             suggestedIndex: -1,
@@ -1315,7 +1556,7 @@ add_task(async function online_enabled() {
   let expected = {
     source: "merino",
     provider: "adm",
-    icon: "https://example.com/amp-icon",
+    icon: UrlbarTestUtils.makeMozRemoteImageUrl("https://example.com/amp-icon"),
     iabCategory: "22 - Shopping",
     requestId: "request_id",
     suggestedIndex: -1,
@@ -1329,6 +1570,9 @@ add_task(async function online_enabled() {
 
   let noSuggestionId = structuredClone(MERINO_SUGGESTION);
   delete noSuggestionId.custom_details.amp.suggestion_id;
+
+  let noSuggestionIdResult = QuickSuggestTestUtils.ampResult(expected);
+  delete noSuggestionIdResult.payload.suggestionId;
 
   await doResultCheckTest({
     env: {
@@ -1456,12 +1700,7 @@ add_task(async function online_enabled() {
         context,
         description: "Missing custom_details",
         merinoSuggestions: [noCustomDetails],
-        expected: [
-          QuickSuggestTestUtils.ampResult({
-            ...expected,
-            suggestionId: undefined,
-          }),
-        ],
+        expected: [noSuggestionIdResult],
       },
 
       {
@@ -1473,12 +1712,7 @@ add_task(async function online_enabled() {
             custom_details: undefined,
           },
         ],
-        expected: [
-          QuickSuggestTestUtils.ampResult({
-            ...expected,
-            suggestionId: undefined,
-          }),
-        ],
+        expected: [noSuggestionIdResult],
       },
 
       {
@@ -1490,12 +1724,7 @@ add_task(async function online_enabled() {
             custom_details: null,
           },
         ],
-        expected: [
-          QuickSuggestTestUtils.ampResult({
-            ...expected,
-            suggestionId: undefined,
-          }),
-        ],
+        expected: [noSuggestionIdResult],
       },
 
       {
@@ -1507,24 +1736,14 @@ add_task(async function online_enabled() {
             custom_details: {},
           },
         ],
-        expected: [
-          QuickSuggestTestUtils.ampResult({
-            ...expected,
-            suggestionId: undefined,
-          }),
-        ],
+        expected: [noSuggestionIdResult],
       },
 
       {
         context,
         description: "Missing custom_details.amp",
         merinoSuggestions: [noCustomDetailsAmp],
-        expected: [
-          QuickSuggestTestUtils.ampResult({
-            ...expected,
-            suggestionId: undefined,
-          }),
-        ],
+        expected: [noSuggestionIdResult],
       },
 
       {
@@ -1538,12 +1757,7 @@ add_task(async function online_enabled() {
             },
           },
         ],
-        expected: [
-          QuickSuggestTestUtils.ampResult({
-            ...expected,
-            suggestionId: undefined,
-          }),
-        ],
+        expected: [noSuggestionIdResult],
       },
     ],
   });
@@ -1557,7 +1771,7 @@ add_task(async function online_quickSuggestAmpTopPickCharThreshold() {
     searchString: "some long query",
     suggestion: {},
     expected: {
-      meetsThreshold: true,
+      meetsTopPickThreshold: true,
       isTopPick: true,
     },
   });
@@ -1573,7 +1787,7 @@ add_task(async function online_isTopPick_true() {
       is_top_pick: true,
     },
     expected: {
-      meetsThreshold: false,
+      meetsTopPickThreshold: false,
       isTopPick: true,
     },
   });
@@ -1589,7 +1803,7 @@ add_task(async function online_isTopPick_false() {
       is_top_pick: false,
     },
     expected: {
-      meetsThreshold: true,
+      meetsTopPickThreshold: true,
       isTopPick: false,
     },
   });
@@ -1604,7 +1818,7 @@ add_task(async function online_isTopPick_undefined_short() {
       is_top_pick: undefined,
     },
     expected: {
-      meetsThreshold: false,
+      meetsTopPickThreshold: false,
       isTopPick: false,
     },
   });
@@ -1619,15 +1833,73 @@ add_task(async function online_isTopPick_undefined_long() {
       is_top_pick: undefined,
     },
     expected: {
-      meetsThreshold: true,
+      meetsTopPickThreshold: true,
       isTopPick: true,
     },
   });
 });
 
+// Tests `quicksuggest.ampTopPickScoreForLargeIcon` with a valid value using
+// online AMP. When a suggestion's score meets the threshold, it should be a
+// large best match.
+add_task(async function online_ampTopPickScoreForLargeIcon_enabled() {
+  UrlbarPrefs.set("quicksuggest.ampTopPickScoreForLargeIcon", "1.0");
+
+  info("Matching suggestion with score below ampTopPickScoreForLargeIcon");
+  await doOnlineTopPickTest({
+    searchString: "amp",
+    suggestion: {
+      is_top_pick: true,
+      score: 0.3,
+    },
+    expected: {
+      meetsTopPickThreshold: false,
+      isTopPick: true,
+      bestMatchType: UrlbarShared.BEST_MATCH_TYPE.SMALL,
+    },
+  });
+
+  info("Matching suggestion with score that meets ampTopPickScoreForLargeIcon");
+  await doOnlineTopPickTest({
+    searchString: "amp",
+    suggestion: {
+      is_top_pick: true,
+      score: 1.0,
+    },
+    expected: {
+      meetsTopPickThreshold: false,
+      isTopPick: true,
+      bestMatchType: UrlbarShared.BEST_MATCH_TYPE.LARGE,
+    },
+  });
+
+  UrlbarPrefs.clear("quicksuggest.ampTopPickScoreForLargeIcon");
+});
+
+// Tests `quicksuggest.ampTopPickScoreForLargeIcon` with an empty string using
+// online AMP. Suggestions should be a small best match.
+add_task(async function online_ampTopPickScoreForLargeIcon_disabled() {
+  UrlbarPrefs.set("quicksuggest.ampTopPickScoreForLargeIcon", "");
+
+  await doOnlineTopPickTest({
+    searchString: "amp",
+    suggestion: {
+      is_top_pick: true,
+      score: 1.0,
+    },
+    expected: {
+      meetsTopPickThreshold: false,
+      isTopPick: true,
+      bestMatchType: UrlbarShared.BEST_MATCH_TYPE.SMALL,
+    },
+  });
+
+  UrlbarPrefs.clear("quicksuggest.ampTopPickScoreForLargeIcon");
+});
+
 async function doOnlineTopPickTest({ searchString, suggestion, expected }) {
   // This test isn't testing what it should be if this fails.
-  if (expected.meetsThreshold) {
+  if (expected.meetsTopPickThreshold) {
     Assert.greaterOrEqual(
       searchString.length,
       UrlbarPrefs.get("quickSuggestAmpTopPickCharThreshold"),
@@ -1641,9 +1913,11 @@ async function doOnlineTopPickTest({ searchString, suggestion, expected }) {
     );
   }
 
-  let expectedPayload = expected.isTopPick
+  let expectedResult = expected.isTopPick
     ? {
         isBestMatch: true,
+        bestMatchType:
+          expected.bestMatchType ?? UrlbarShared.BEST_MATCH_TYPE.SMALL,
         suggestedIndex: 1,
         isSuggestedIndexRelativeToGroup: false,
       }
@@ -1667,18 +1941,7 @@ async function doOnlineTopPickTest({ searchString, suggestion, expected }) {
       ],
       merinoSuggestions: [
         {
-          title: "Amp Suggestion",
-          url: "https://example.com/amp",
-          provider: "adm",
-          is_sponsored: true,
-          score: 0.31,
-          icon: "https://example.com/amp-icon",
-          iab_category: "22 - Shopping",
-          block_id: 1,
-          full_keyword: "amp",
-          advertiser: "Amp",
-          impression_url: "https://example.com/amp-impression",
-          click_url: "https://example.com/amp-click",
+          ...MERINO_SUGGESTION,
           ...suggestion,
         },
       ],
@@ -1688,12 +1951,14 @@ async function doOnlineTopPickTest({ searchString, suggestion, expected }) {
         context,
         expected: [
           QuickSuggestTestUtils.ampResult({
-            ...expectedPayload,
+            ...expectedResult,
 
             // Usual properties
             source: "merino",
             provider: "adm",
-            icon: "https://example.com/amp-icon",
+            icon: UrlbarTestUtils.makeMozRemoteImageUrl(
+              "https://example.com/amp-icon"
+            ),
             iabCategory: "22 - Shopping",
             requestId: "request_id",
           }),

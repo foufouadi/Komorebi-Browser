@@ -20,7 +20,9 @@ tasks-from:
     - toolchain-clang-tidy-external.yml
     - toolchains.yml
     - translations-fetch.yml
-    - updatebot.yml
     - onnxruntime.yml
     - onnxruntime-web-fetch.yml
+    - parakeet-models-fetch.yml
     - openh264.yml
+    - widevine.yml
+    - pnpm.yml

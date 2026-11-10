@@ -20,6 +20,7 @@
 #include "nsICacheStorageVisitor.h"
 #include "nsICryptoHash.h"
 #include "nsIInterfaceRequestor.h"
+#include "nsILoadContextInfo.h"
 #include "nsIObserver.h"
 #include "nsIStreamListener.h"
 #include "nsString.h"
@@ -82,13 +83,19 @@ class DictionaryCacheEntry final : public nsICacheEntryOpenCallback,
   nsresult Prefetch(nsILoadContextInfo* aLoadContextInfo, bool& aShouldSuspend,
                     const std::function<void(nsresult)>& aFunc);
 
+  void SetLoadContextInfo(nsILoadContextInfo* aLoadContextInfo) {
+    mLoadContextInfo = aLoadContextInfo;
+  }
+  nsILoadContextInfo* GetLoadContextInfo() const { return mLoadContextInfo; }
+
   nsCString GetHash() const;
   bool HasHash();
   void SetHash(const nsACString& aHash);
 
   void WriteOnHash();
 
-  void SetOrigin(DictionaryOrigin* aOrigin) { mOrigin = aOrigin; }
+  // Defined out of line since DictionaryOrigin isn't complete yet here.
+  void SetOrigin(DictionaryOrigin* aOrigin);
 
   const nsCString& GetId() const { return mId; }
 
@@ -123,7 +130,7 @@ class DictionaryCacheEntry final : public nsICacheEntryOpenCallback,
   // Accumulate a hash while saving a file being received to the cache
   void AccumulateHash(const char* aBuf, int32_t aCount);
   void FinishHash();
-  void FinishHashOnMainThread();
+  void FinishHashOnMainThread(const nsACString& aHash);
 
   // return a pointer to the data and length
   uint8_t* DictionaryData(size_t* aLength) const;
@@ -180,7 +187,7 @@ class DictionaryCacheEntry final : public nsICacheEntryOpenCallback,
   Maybe<UrlPatternGlue> mCachedPattern;
 
   // SHA-256 hash value - only written/read on MainThread (after
-  // pending->active) Written by FinishHash() on MainThread, immutable after
+  // pending->active) Written by FinishHashOnMainThread(), immutable after
   // that
   nsCString mHash;
 
@@ -199,7 +206,8 @@ class DictionaryCacheEntry final : public nsICacheEntryOpenCallback,
   Vector<uint8_t> mPendingDictionaryData;
 
   // for accumulating SHA-256 hash values for dictionaries
-  // Only used on main thread (MOZ_ASSERT in AccumulateHash/FinishHash)
+  // Only used sequentially from the cache write path (AccumulateHash/
+  // FinishHash), on whichever thread delivers the data; cleared by FinishHash
   nsCOMPtr<nsICryptoHash> mCrypto;
 
   // Structure to track prefetch callbacks with their private browsing status
@@ -236,6 +244,9 @@ class DictionaryCacheEntry final : public nsICacheEntryOpenCallback,
   // headers still contain Content-Encoding. Non-empty means data on disk
   // is likely still compressed (decompressor wasn't applied before save).
   nsCString mStoredContentEncoding;
+
+  // Only accessed on MainThread.
+  nsCOMPtr<nsILoadContextInfo> mLoadContextInfo;
 };
 
 // XXX Do we want to pre-read dictionaries into RAM at startup (lazily)?
@@ -259,7 +270,8 @@ class DictionaryOriginReader final : public nsICacheEntryOpenCallback,
 
   void Start(
       bool aCreate, DictionaryOrigin* aOrigin, nsACString& aKey, nsIURI* aURI,
-      ExtContentPolicyType aType, DictionaryCache* aCache,
+      ExtContentPolicyType aType, nsILoadContextInfo* aLoadContextInfo,
+      DictionaryCache* aCache,
       const std::function<nsresult(bool, DictionaryCacheEntry*)>& aCallback);
   void FinishMatch();
 
@@ -286,8 +298,14 @@ class DictionaryOrigin : public nsICacheEntryMetaDataVisitor {
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSICACHEENTRYMETADATAVISITOR
 
-  DictionaryOrigin(const nsACString& aOrigin, nsICacheEntry* aEntry)
-      : mOrigin(aOrigin), mEntry(aEntry) {}
+  DictionaryOrigin(const nsACString& aOrigin, nsICacheEntry* aEntry,
+                   nsILoadContextInfo* aLoadContextInfo)
+      : mOrigin(aOrigin), mEntry(aEntry), mLoadContextInfo(aLoadContextInfo) {}
+
+  nsILoadContextInfo* GetLoadContextInfo() const { return mLoadContextInfo; }
+
+  void SetMapKey(const nsACString& aMapKey) { mMapKey = aMapKey; }
+  const nsCString& GetMapKey() const { return mMapKey; }
 
   void SetCacheEntry(nsICacheEntry* aEntry);
   nsresult Write(DictionaryCacheEntry* aDictEntry);
@@ -310,6 +328,9 @@ class DictionaryOrigin : public nsICacheEntryMetaDataVisitor {
 
   nsCString mOrigin;
   nsCOMPtr<nsICacheEntry> mEntry;
+  nsCOMPtr<nsILoadContextInfo> mLoadContextInfo;
+  // Key this origin is stored under in DictionaryCache::mDictionaryCache.
+  nsCString mMapKey;
   DictCacheList mEntries;
   // Dictionaries currently being received.  Once these get a Hash, move to
   // mEntries
@@ -356,21 +377,27 @@ class DictionaryCache final : public nsIObserver {
                     const nsACString& aPattern, nsTArray<nsCString>& aMatchDest,
                     const nsACString& aId, const Maybe<nsCString>& aHash,
                     bool aNewEntry, uint32_t aExpiration,
+                    nsILoadContextInfo* aLoadContextInfo,
                     DictionaryCacheEntry** aDictEntry);
 
   already_AddRefed<DictionaryCacheEntry> AddEntry(
-      nsIURI* aURI, bool aNewEntry, DictionaryCacheEntry* aDictEntry);
+      nsIURI* aURI, bool aNewEntry, nsILoadContextInfo* aLoadContextInfo,
+      DictionaryCacheEntry* aDictEntry);
 
-  static void RemoveDictionaryOMT(const nsACString& aKey);
+  static void RemoveDictionaryOMT(const nsACString& aKey,
+                                  nsILoadContextInfo* aLoadContextInfo);
   // remove the entire origin (should be empty!)
-  static void RemoveOriginFor(const nsACString& aKey);
+  static void RemoveOriginFor(const nsACString& aKey,
+                              nsILoadContextInfo* aLoadContextInfo);
 
   // Remove a dictionary if it exists for the key given
-  static void RemoveDictionary(const nsACString& aKey);
-  // Remove an origin for the origin given
-  void RemoveOrigin(const nsACString& aOrigin);
+  static void RemoveDictionary(const nsACString& aKey,
+                               nsILoadContextInfo* aLoadContextInfo);
+  // Remove an origin for the map key given (see DictionaryOrigin::mMapKey)
+  void RemoveOrigin(const nsACString& aMapKey);
 
-  nsresult RemoveEntry(nsIURI* aURI, const nsACString& aKey);
+  nsresult RemoveEntry(nsIURI* aURI, const nsACString& aKey,
+                       nsILoadContextInfo* aLoadContextInfo);
 
   static void RemoveDictionariesForOrigin(nsIURI* aURI);
   static void RemoveAllDictionaries();
@@ -379,14 +406,17 @@ class DictionaryCache final : public nsIObserver {
   void Clear();
 
   // Corrupt the hash of a dictionary entry for testing
-  void CorruptHashForTesting(const nsACString& aURI);
+  void CorruptHashForTesting(const nsACString& aURI,
+                             nsILoadContextInfo* aLoadContextInfo);
 
   // Clear the dictionary data while keeping the entry (for testing)
-  void ClearDictionaryDataForTesting(const nsACString& aURI);
+  void ClearDictionaryDataForTesting(const nsACString& aURI,
+                                     nsILoadContextInfo* aLoadContextInfo);
 
   // return an entry
   void GetDictionaryFor(
-      nsIURI* aURI, ExtContentPolicyType aType, nsHttpChannel* aChan,
+      nsIURI* aURI, ExtContentPolicyType aType,
+      nsILoadContextInfo* aLoadContextInfo, nsHttpChannel* aChan,
       void (*aSuspend)(nsHttpChannel*),
       const std::function<nsresult(bool, DictionaryCacheEntry*)>& aCallback);
 
@@ -396,9 +426,18 @@ class DictionaryCache final : public nsIObserver {
   }
 
  private:
-  void RemoveOriginForInternal(const nsACString& aKey);
+  void RemoveOriginForInternal(const nsACString& aKey,
+                               nsILoadContextInfo* aLoadContextInfo);
 
-  static StaticRefPtr<nsICacheStorage> sCacheStorage;
+  static already_AddRefed<nsICacheStorage> GetCacheStorage(
+      nsILoadContextInfo* aLoadContextInfo);
+
+  // Builds the key used in mDictionaryCache: aPrePath plus a suffix derived
+  // from aLoadContextInfo's OriginAttributes and anonymous flag.
+  static void MakeCacheKey(const nsACString& aPrePath,
+                           nsILoadContextInfo* aLoadContextInfo,
+                           nsACString& aKey);
+
   static Atomic<bool, Relaxed> sShutdown;
 
   // In-memory cache of dictionary entries.  HashMap, keyed by origin, of

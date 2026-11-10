@@ -8,35 +8,27 @@ ChromeUtils.defineESModuleGetters(this, {
   SiteDataTestUtils: "resource://testing-common/SiteDataTestUtils.sys.mjs",
 });
 
-const SRD_ENABLED = Services.prefs.getBoolPref(
-  "browser.settings-redesign.enabled",
-  false
-);
-
 async function checkPrivacyPreferences(expectedDisabled) {
   await BrowserTestUtils.withNewTab(
     "about:preferences#privacy",
     async browser => {
       await SpecialPowers.spawn(
         browser,
-        [{ expectedDisabled, srdEnabled: SRD_ENABLED }],
-        async ({ expectedDisabled: expected, srdEnabled }) => {
+        [{ expectedDisabled }],
+        async ({ expectedDisabled: expected }) => {
           let { historyMode, ...sub } = expected;
           is(
             content.document.getElementById("historyMode").disabled,
             historyMode,
             "#historyMode disabled state"
           );
-          if (srdEnabled) {
-            await content.gotoPref("paneHistory");
-            await new Promise(r => content.requestAnimationFrame(r));
-          }
+          await content.gotoPref("paneHistory");
+          await new Promise(r => content.requestAnimationFrame(r));
           for (let [id, exp] of Object.entries(sub)) {
-            let el = srdEnabled
-              ? content.document.querySelector(
-                  `setting-group[groupid='historyAdvanced'] #${id}`
-                )
-              : content.document.getElementById(id);
+            let el = content.document.querySelector(
+              `setting-group[groupid='historyAdvanced'] #${id}`
+            );
+
             is(el.disabled, exp, `#${id} disabled state`);
           }
         }
@@ -84,6 +76,20 @@ add_task(async function test_sanitizeOnShutdown_object_locked_false() {
     },
   });
   await checkPrivacyPreferences(NONE_DISABLED);
+});
+
+// A locked policy locks the history dropdown, but not what sits under it.
+add_task(async function test_locked_policy_still_allows_sub_settings() {
+  await setupPolicyEngineWithJson({
+    policies: {
+      SanitizeOnShutdown: { Cookies: true, Locked: true },
+    },
+  });
+  await checkPrivacyPreferences({
+    historyMode: true,
+    shutdownClearingExceptions: false,
+    clearDataSettings: false,
+  });
 });
 
 // Bug 2049937: end-to-end check that a SanitizeOnShutdown.Exceptions entry set

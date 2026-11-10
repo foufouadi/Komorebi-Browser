@@ -1610,6 +1610,8 @@ public class WebExtension {
    * (e.g. when metadata properties in the bundle are not matching the type expected by GeckoView).
    */
   public static class InvalidMetaDataException extends RuntimeException {
+    private static final long serialVersionUID = 1L;
+
     /** For testing */
     protected InvalidMetaDataException() {
       super("InvalidMetaDataException");
@@ -1625,6 +1627,8 @@ public class WebExtension {
 
   /** Extension thrown when an error occurs during extension installation. */
   public static class InstallException extends Exception {
+    private static final long serialVersionUID = 1L;
+
     /** Error code definitions for extension installation failures. */
     public static class ErrorCodes {
       /** The download failed due to network problems. */
@@ -1819,6 +1823,9 @@ public class WebExtension {
    * in Firefox. </a>
    */
   public static class SignedStateFlags {
+    /** Public constructor for SignedStateFlags. */
+    public SignedStateFlags() {}
+
     // Keep in sync with AddonManager.sys.mjs
     /**
      * This extension may be signed but by a certificate that doesn't chain to our our trusted
@@ -1862,6 +1869,9 @@ public class WebExtension {
    * cause stability or security issues are put on a blocklist </a>.
    */
   public static class BlocklistStateFlags {
+    /** Public constructor for BlocklistStateFlags. */
+    public BlocklistStateFlags() {}
+
     // Keep in sync with nsIBlocklistService.idl
     /** This extension does not appear in the blocklist. */
     public static final int NOT_BLOCKED = 0;
@@ -1899,6 +1909,9 @@ public class WebExtension {
 
   /** Flags indicating reasons why an extension is disabled. */
   public static class DisabledFlags {
+    /** Public constructor for DisabledFlags. */
+    public DisabledFlags() {}
+
     /** The extension has been disabled by the user */
     public static final int USER = 1 << 1;
 
@@ -2810,8 +2823,8 @@ public class WebExtension {
     public interface Info {
 
       /**
-       * @return A number representing the number of bytes received so far from the host during the
-       *     download This does not take file compression into consideration
+       * {@return a number representing the number of bytes received so far from the host during the
+       * download} This does not take file compression into consideration.
        */
       @UiThread
       default long bytesReceived() {
@@ -2819,8 +2832,8 @@ public class WebExtension {
       }
 
       /**
-       * @return boolean indicating whether a currently-interrupted (e.g. paused) download can be
-       *     resumed from the point where it was interrupted
+       * {@return a boolean indicating whether a currently-interrupted (e.g. paused) download can be
+       * resumed from the point where it was interrupted}
        */
       @UiThread
       default boolean canResume() {
@@ -2828,8 +2841,8 @@ public class WebExtension {
       }
 
       /**
-       * @return A number representing the time when this download ended. This is null if the
-       *     download has not yet finished.
+       * {@return a number representing the time when this download ended} This is null if the
+       * download has not yet finished.
        */
       @Nullable
       @UiThread
@@ -2838,9 +2851,9 @@ public class WebExtension {
       }
 
       /**
-       * @return One of <a
-       *     href="https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/downloads/InterruptReason">Interrupt
-       *     Reason</a> constants denoting the error reason.
+       * {@return one of <a
+       * href="https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/downloads/InterruptReason">Interrupt
+       * Reason</a> constants denoting the error reason}
        */
       @Nullable
       @UiThread
@@ -2849,8 +2862,8 @@ public class WebExtension {
       }
 
       /**
-       * @return the estimated number of milliseconds between the UNIX epoch and when this download
-       *     is estimated to be completed. This is null if it is not known.
+       * {@return the estimated number of milliseconds between the UNIX epoch and when this download
+       * is estimated to be completed} This is null if it is not known.
        */
       @Nullable
       @UiThread
@@ -2858,17 +2871,13 @@ public class WebExtension {
         return null;
       }
 
-      /**
-       * @return boolean indicating whether a downloaded file still exists
-       */
+      /** {@return a boolean indicating whether a downloaded file still exists} */
       @UiThread
       default boolean fileExists() {
         return false;
       }
 
-      /**
-       * @return the filename.
-       */
+      /** {@return the filename} */
       @NonNull
       @UiThread
       default String filename() {
@@ -2876,17 +2885,15 @@ public class WebExtension {
       }
 
       /**
-       * @return the total number of bytes in the whole file, after decompression. A value of -1
-       *     means that the total file size is unknown.
+       * {@return the total number of bytes in the whole file, after decompression} A value of -1
+       * means that the total file size is unknown.
        */
       @UiThread
       default long fileSize() {
         return -1;
       }
 
-      /**
-       * @return the downloaded file's MIME type
-       */
+      /** {@return the downloaded file's MIME type} */
       @NonNull
       @UiThread
       default String mime() {
@@ -2894,17 +2901,15 @@ public class WebExtension {
       }
 
       /**
-       * @return boolean indicating whether the download is paused i.e. if the download has stopped
-       *     reading data from the host but has kept the connection open
+       * {@return a boolean indicating whether the download is paused i.e. if the download has
+       * stopped reading data from the host but has kept the connection open}
        */
       @UiThread
       default boolean paused() {
         return false;
       }
 
-      /**
-       * @return String representing the downloaded file's referrer
-       */
+      /** {@return a string representing the downloaded file's referrer} */
       @NonNull
       @UiThread
       default String referrer() {
@@ -2912,7 +2917,7 @@ public class WebExtension {
       }
 
       /**
-       * @return the number of milliseconds between the UNIX epoch and when this download began
+       * {@return the number of milliseconds between the UNIX epoch and when this download began}
        */
       @UiThread
       default long startTime() {
@@ -2920,8 +2925,8 @@ public class WebExtension {
       }
 
       /**
-       * @return a new state; one of the state constants to indicate whether the download is in
-       *     progress, interrupted or complete
+       * {@return a new state; one of the state constants to indicate whether the download is in
+       * progress, interrupted or complete}
        */
       @UiThread
       default @DownloadState int state() {
@@ -2929,9 +2934,9 @@ public class WebExtension {
       }
 
       /**
-       * @return total number of bytes in the file being downloaded. This does not take file
-       *     compression into consideration. A value of -1 here means that the total number of bytes
-       *     is unknown
+       * {@return the total number of bytes in the file being downloaded} This does not take file
+       * compression into consideration. A value of -1 here means that the total number of bytes is
+       * unknown.
        */
       @UiThread
       default long totalBytes() {

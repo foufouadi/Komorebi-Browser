@@ -26,7 +26,7 @@
 
 // Version number for shader translation API.
 // It is incremented every time the API changes.
-#define ANGLE_SH_VERSION 407
+#define ANGLE_SH_VERSION 426
 
 enum ShShaderSpec
 {
@@ -59,8 +59,7 @@ enum ShShaderOutput
     SH_GLSL_440_CORE_OUTPUT,
     SH_GLSL_450_CORE_OUTPUT,
 
-    // Prefer using these to specify HLSL output type:
-    SH_HLSL_3_0_OUTPUT,  // D3D 9
+    // Prefer using this to specify HLSL output type:
     SH_HLSL_4_1_OUTPUT,  // D3D 11
 
     // Output SPIR-V for the Vulkan backend.
@@ -83,12 +82,6 @@ struct ShCompileOptionsMetal
     int defaultUniformsBindingIndex = 0;
     // Binding index for UBO's argument buffer
     int UBOArgumentBufferBindingIndex = 0;
-
-    bool generateShareableShaders = false;
-
-    // Insert asm("") instructions into loop bodies, telling the compiler that all loops have side
-    // effects and cannot be optimized out.
-    bool injectAsmStatementIntoLoopBodies = false;
 };
 
 // For ANGLE_shader_pixel_local_storage.
@@ -180,10 +173,8 @@ struct ShCompileOptions
     // If requested, validates the AST after every transformation.  Useful for debugging.
     uint64_t validateAST : 1;
 
-    // Validates loop and indexing in the shader to ensure that they do not exceed the minimum
-    // functionality mandated in GLSL 1.0 spec, Appendix A, Section 4 and 5.  There is no need to
-    // specify this parameter when compiling for WebGL - it is implied.
-    uint64_t validateLoopIndexing : 1;
+    // Limit the number of output varyings allowed in vertex shaders to work around driver bugs.
+    uint64_t limitOutputVaryingsTo256 : 1;
 
     // Emits #line directives in HLSL.
     uint64_t lineDirectives : 1;
@@ -250,8 +241,7 @@ struct ShCompileOptions
     // Linux/Mac driver bugs.
     uint64_t scalarizeVecAndMatConstructorArgs : 1;
 
-    // This flag overwrites a struct name with a unique prefix.  It is intended as a workaround for
-    // drivers that do not handle struct scopes correctly, including all Mac drivers and Linux AMD.
+    // This flag is a no-op and will be removed once chromium code no longer references it.
     uint64_t regenerateStructNames : 1;
 
     // This flag works around a bug in the HLSL compiler optimizer that folds certain constant pow
@@ -363,8 +353,7 @@ struct ShCompileOptions
     // Workaround for a driver bug with nested switches.
     uint64_t wrapSwitchInIfTrue : 1;
 
-    // This flag controls how to translate WEBGL_video_texture sampling function.
-    uint64_t takeVideoTextureAsExternalOES : 1;
+    uint64_t unused4 : 1;
 
     // This flag works around a inconsistent behavior in Mac AMD driver where gl_VertexID doesn't
     // include base vertex value. It replaces gl_VertexID with (gl_VertexID + angle_BaseVertex) when
@@ -414,17 +403,18 @@ struct ShCompileOptions
     // Always write explicit location layout qualifiers for fragment outputs.
     uint64_t explicitFragmentLocations : 1;
 
-    // Dithering is emulated by injecting code in the fragment shader
-    uint64_t emulateDithering : 1;
+    // Precompute the vertex pre-rotation swap + Y-flip into a driver uniform (transformXY) so the
+    // injected ANGLETransformPosition reduces to two dot products instead of a per-vertex
+    // ternary/unpack/multiply.  When unset, the original ternary+flip path is emitted.
+    uint64_t preferPrecomputedVertexTransform : 1;
 
-    // Add round() after applying dither.  This works around a Qualcomm quirk where values can get
-    // ceil()ed instead.
-    uint64_t roundOutputAfterDithering : 1;
+    // Avoid complex expressions in struct constructors to work around driver bugs.
+    uint64_t avoidComplexExpressionsInStructConstructor : 1;
 
-    // placeholder bit for removed castMediumpFloatTo16Bit option. This is needed because chromium
-    // fuzzer needs the ShCompileOptions memory layout remains unchanged to be able to map the bugs
-    // filed.
-    uint64_t unused3 : 1;
+    // Whether |#extension ... : disable| is allowed after non-preprocessor tokens in WebGL.
+    // WebGL1 deviates from GLSL by allowing |#extension| directives after non-preprocessor tokens.
+    // This option restricts this deviation to non-disable behaviors.
+    uint64_t allowExtensionDisableAfterNonPPTokensInWebGL : 1;
 
     // anglebug.com/42265995: packUnorm4x8 fails on Pixel 4 if it is not passed a highp vec4.
     // TODO(anglebug.com/42265995): This workaround is currently only applied for pixel local
@@ -482,14 +472,15 @@ struct ShCompileOptions
     // Ensure all loops execute side-effects or terminate.
     uint64_t ensureLoopForwardProgress : 1;
 
-    // Do not preform any shader validation or perform any shader transformations. Shader state can
-    // still be reflected.
-    uint64_t skipAllValidationAndTransforms : 1;
+    uint64_t unused2 : 1;
 
     uint64_t transformFloatUniformTo16Bits : 1;
 
     // Whether the ANGLE IR should be used.  Ineffective if ANGLE is built without IR support.
     uint64_t useIR : 1;
+
+    // Whether ESSL300 fragment outputs should be expanded to vec4s.
+    uint64_t expandFragmentOutputsToVec4 : 1;
 
     ShCompileOptionsMetal metal;
     ShPixelLocalStorageOptions pls;
@@ -561,7 +552,6 @@ struct ShBuiltInResources
     int ANGLE_multi_draw;
     // TODO(http://anglebug.com/40096583) remove after chromium side removal to pass compilation
     int ANGLE_base_vertex_base_instance;
-    int WEBGL_video_texture;
     int APPLE_clip_distance;
     int OES_texture_cube_map_array;
     int EXT_texture_cube_map_array;
@@ -619,11 +609,6 @@ struct ShBuiltInResources
     // Set a 64 bit hash function to enable user-defined name hashing.
     // Default is NULL.
     ShHashFunction64 HashFunction;
-
-    // User defined variables are prefixed with '_' and UserVariableNamePrefix. If UserVariableName
-    // is the null character, no prefixing is done and collisions between user variables and
-    // variables introduced during translation is possible.
-    char UserVariableNamePrefix;
 
     // The maximum complexity an expression can be when limitExpressionComplexity is turned on.
     int MaxExpressionComplexity;
@@ -830,7 +815,7 @@ const std::string &GetBuiltInResourcesString(const ShHandle handle);
 // type: Specifies the type of shader - GL_FRAGMENT_SHADER or GL_VERTEX_SHADER.
 // spec: Specifies the language spec the compiler must conform to - SH_GLES2_SPEC or SH_WEBGL_SPEC.
 // output: Specifies the output code type - for example SH_ESSL_OUTPUT, SH_GLSL_OUTPUT,
-//         SH_HLSL_3_0_OUTPUT or SH_HLSL_4_1_OUTPUT. Note: Each output type may only
+//         or SH_HLSL_4_1_OUTPUT. Note: Each output type may only
 //         be supported in some configurations.
 // resources: Specifies the built-in resources.
 ShHandle ConstructCompiler(sh::GLenum type,
@@ -917,9 +902,6 @@ int GetVertexShaderNumViews(const ShHandle handle);
 // not one.
 const std::vector<ShPixelLocalStorageLayout> *GetPixelLocalStorageLayouts(const ShHandle handle);
 
-// Returns specialization constant usage bits
-uint32_t GetShaderSpecConstUsageBits(const ShHandle handle);
-
 // Returns true if the passed in variables pack in maxVectors followingthe packing rules from the
 // GLSL 1.017 spec, Appendix A, section 7.
 // Returns false otherwise. Also look at the enforcePackingRestrictions flag above.
@@ -989,10 +971,8 @@ inline bool IsWebGLBasedSpec(ShShaderSpec spec)
     return (spec == SH_WEBGL_SPEC || spec == SH_WEBGL2_SPEC);
 }
 
-// Can't prefix with just _ because then we might introduce a double underscore, which is not safe
-// in GLSL (ESSL 3.00.6 section 3.8: All identifiers containing a double underscore are reserved for
-// use by the underlying implementation). u is short for user-defined.
-extern const char kUserDefinedNamePrefix;
+extern const char kUserVariableNamePrefix;
+extern const char kUserBlockNamePrefix;
 
 enum class MetadataFlags
 {
@@ -1022,29 +1002,16 @@ enum class MetadataFlags
     EnumCount = InvalidEnum,
 };
 
+// If samplers are extracted from structs, their names will be <prefix><N>, where <N> is a
+// zero-based index assigned in DFS-order of declaration.
+extern const char kExtractedSamplerNamePrefix[];
+
 namespace vk
 {
 
-// Specialization constant ids
-enum class SpecializationConstantId : uint32_t
-{
-    Dither = 0,
-
-    InvalidEnum = 1,
-    EnumCount   = InvalidEnum,
-};
-
-enum class SpecConstUsage : uint32_t
-{
-    Dither = 0,
-
-    InvalidEnum = 1,
-    EnumCount   = InvalidEnum,
-};
-
 enum ColorAttachmentDitherControl
 {
-    // See comments in ContextVk::updateDither and EmulateDithering.cpp
+    // See comments in ContextVk::updateDither
     kDitherControlNoDither   = 0,
     kDitherControlDither4444 = 1,
     kDitherControlDither5551 = 2,
@@ -1078,6 +1045,7 @@ constexpr uint32_t kNonSemanticInstructionMask       = 0xF;
 constexpr uint32_t kOverviewHasSampleRateShadingMask = 0x10;
 constexpr uint32_t kOverviewHasSampleIDMask          = 0x20;
 constexpr uint32_t kOverviewHasOutputPerVertexMask   = 0x40;
+constexpr uint32_t kOverviewHasFragCoordMask         = 0x80;
 
 enum ReservedIds
 {
@@ -1089,6 +1057,7 @@ enum ReservedIds
 
     // Global information
     kIdNonSemanticInstructionSet,
+    kIdGlslStdInstructionSet,
     kIdEntryPoint,
 
     // Basic types
@@ -1101,6 +1070,7 @@ enum ReservedIds
     kIdMat3,
     kIdMat4,
     kIdInt,
+    kIdIVec2,
     kIdIVec4,
     kIdUint,
 
@@ -1109,10 +1079,21 @@ enum ReservedIds
     kIdIntOne,
     kIdIntTwo,
     kIdIntThree,
+    kIdIntFour,
+    kIdIntFive,
+    kIdIntSix,
+    kIdIntSeven,
+
+    kIdFloatTwo,
+
+    kIdVec4Zero,
+    kIdIVec4Zero,
 
     // Type pointers
     kIdIntInputTypePointer,
+    kIdVec4InputTypePointer,
     kIdVec4OutputTypePointer,
+    kIdVec3OutputTypePointer,
     kIdIVec4FunctionTypePointer,
     kIdOutputPerVertexTypePointer,
 
@@ -1132,6 +1113,9 @@ enum ReservedIds
 
     // Multisampling support
     kIdSampleID,
+
+    // Dithering emulation
+    kIdFragCoord,
 
     // =============================================================================================
     // ANGLE internal shader variables, which are not produced as ShaderVariables.

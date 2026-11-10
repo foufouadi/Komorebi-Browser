@@ -98,13 +98,6 @@ def check(ctx, paths):
     return 0
 
 
-@SubCommand("ts", "setup", description="Install TypeScript and other dependencies.")
-def setup(ctx):
-    # Install locally under tools/ts/node_modules, to avoid any conflicts for now.
-    os.chdir(mozpath.dirname(__file__))
-    return ctx._sub_mach(["npm", "ci"])
-
-
 @SubCommand("ts", "update", description="Update tools/@types libraries.")
 def update(ctx):
     typelib_dir = mozpath.join(ctx.topsrcdir, "tools/@types/generated")
@@ -161,7 +154,7 @@ def subs(ctx):
 def tsc(ctx, *args):
     return ctx._sub_mach([
         "node",
-        os.path.join("node_modules", "typescript", "bin", "tsc"),
+        os.path.join(ctx.topsrcdir, "node_modules", "typescript", "bin", "tsc"),
         *args,
     ])
 
@@ -173,6 +166,7 @@ def node(ctx, script, *args):
 
 
 def maybe_setup(ctx):
+    """Check if npm modules are installed, and run setup if needed."""
     sys.path.append(mozpath.join(ctx.topsrcdir, "tools", "lint", "eslint"))
     import setup_helper
     from mozbuild.nodeutil import check_node_executables_valid
@@ -180,11 +174,8 @@ def maybe_setup(ctx):
     if not check_node_executables_valid():
         return 1
 
+    setup_helper.set_project_root(ctx.topsrcdir)
     setup_helper.eslint_maybe_setup(package_name="TypeScript")
-
-    """Check if npm modules are installed, and run setup if needed."""
-    dir = mozpath.dirname(__file__)
-    setup_helper.eslint_maybe_setup(dir, "TypeScript support modules")
 
 
 def build_required(lib, item):

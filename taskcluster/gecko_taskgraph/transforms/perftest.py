@@ -14,9 +14,10 @@ from taskgraph.util.copy import deepcopy
 from taskgraph.util.schema import Schema, optionally_keyed_by, resolve_keyed_by
 from taskgraph.util.treeherder import join_symbol, split_symbol
 
-from gecko_taskgraph.transforms.test import linux_perf_platform_restrictions
-
 transforms = TransformSequence()
+
+# Target tasks methods that only select tasks meant to be profiled.
+PROFILING_TARGET_TASKS_METHODS = {"perftest-applink-profiling"}
 
 
 class PerftestDescriptionSchema(Schema, forbid_unknown_fields=False, kw_only=True):
@@ -273,16 +274,26 @@ def pass_perftest_options(config, jobs):
 
 @transforms.add
 def setup_gecko_profile_from_try_config(config, jobs):
-    """Apply gecko-profile settings when --gecko-profile is used with ./mach try fuzzy.
+    """Apply gecko-profile settings when --gecko-profile is used with ./mach try fuzzy,
+    or when a cron selects tasks through a profiling target tasks method.
 
     This mimics the logic from the gecko_profile action but applies it during
     task generation instead of as a post-hoc action.
     """
-    gecko_profile = config.params.get("try_task_config", {}).get("gecko-profile", False)
-    simpleperf_compatible_tests = ["-homeview-", "-applink-", "-restore-"]
+    gecko_profile = (
+        config.params.get("try_task_config", {}).get("gecko-profile", False)
+        or config.params.get("target_tasks_method") in PROFILING_TARGET_TASKS_METHODS
+    )
+    resource_tests = ["-background-resource-", "-foreground-resource-"]
+    simpleperf_compatible_tests = [
+        "-homeview-",
+        "-applink-",
+        "-restore-",
+        *resource_tests,
+    ]
 
     for job in jobs:
-        # For simpleperf-compatible startup tests, add simpleperf support
+        # For simpleperf-compatible tests, add simpleperf support
         if (
             any(test in job["name"] for test in simpleperf_compatible_tests)
             and gecko_profile
@@ -293,8 +304,9 @@ def setup_gecko_profile_from_try_config(config, jobs):
                 "--simpleperf",
                 "--simpleperf-path",
                 "$MOZ_FETCHES_DIR/android-simpleperf",
-                "--geckoprofiler",
             ]
+            if not any(test in job["name"] for test in resource_tests):
+                simpleperf_args.append("--geckoprofiler")
             job["run"]["command"] += " " + " ".join(simpleperf_args)
 
             # Add required toolchain dependencies
@@ -418,7 +430,7 @@ def setup_regression_detector(config, jobs):
 @transforms.add
 def apply_perftest_tier_optimization(config, jobs):
     for job in jobs:
-        job["optimization"] = {"skip-unless-backstop": None}
+        job["optimization"] = {"perf-cadence-backstop": None}
         job["treeherder"]["tier"] = max(job["treeherder"]["tier"], 2)
         yield job
 
@@ -429,10 +441,6 @@ def set_perftest_attributes(config, jobs):
         attributes = job.setdefault("attributes", {})
         attributes["perftest_name"] = job["name"]
         yield job
-
-
-# Restrict most perftest jobs to Ubuntu 24.04, keeping only allowed exceptions on 18.04.
-transforms.add(linux_perf_platform_restrictions.restrict_perftest_to_2404)
 
 
 @transforms.add
@@ -450,10 +458,6 @@ def setup_autoland_retriggers(config, jobs):
         ):
             attrs["task_duplicates"] = 4
         yield job
-
-
-# Apply platform restrictions for perftest jobs failing on Ubuntu 24.04
-transforms.add(linux_perf_platform_restrictions.restrict_perftest_to_1804)
 
 
 @transforms.add

@@ -52,9 +52,10 @@ from manifestparser.filters import (
     subsuite,
     tags,
 )
-from manifestparser.util import normsep
+from manifestparser.util import normsep, split_manifest_list
 from mozgeckoprofiler import (
     symbolicate_profile_json,
+    symbolicate_profiles,
     view_gecko_profile,
 )
 from mozserve import DoHServer, Http2Server, Http3Server, MozHttp2Server
@@ -84,7 +85,9 @@ from mozprofile.cli import KeyValueParseError, parse_key_value, parse_preference
 from mozprofile.permissions import ServerLocations
 from mozrunner.utils import get_stack_fixer_function, test_environment
 from mozscreenshot import dump_screen
+from moztest.assertions import AssertionFailureParser
 from moztest.tsan import TSANErrorParser
+from moztest.ubsan import UBSanErrorParser
 
 HAVE_PSUTIL = False
 try:
@@ -359,6 +362,7 @@ class MessageLogger:
         """Transform a failure message so it doesn't fail the job."""
         if message.get("action") == "test_status" and "expected" in message:
             message["expected"] = message.get("status")
+            message.setdefault("extra", {})["will_retry"] = True
         elif message.get("action") == "log":
             if message.get("message", "").startswith("TEST-UNEXPECTED"):
                 message["message"] = message["message"].replace(
@@ -575,8 +579,9 @@ class MochitestServer:
             self._httpdPath = SCRIPT_DIR
         self._httpdPath = os.path.abspath(self._httpdPath)
 
-        self._trainHop = "browser.newtabpage.trainhopAddon.version=any" in options.get(
-            "extraPrefs", []
+        self._trainHop = (
+            "browser.newtabpage.trainhopAddonDeployment.version=any"
+            in options.get("extraPrefs", [])
         )
 
         MochitestServer.instance_count += 1
@@ -618,7 +623,9 @@ class MochitestServer:
         # care about races in xpcshell. So disable TSan for the server.
         env["TSAN_OPTIONS"] = "report_bugs=0"
 
-        # Don't use socket process for the xpcshell server.
+        # Trainhop runs this xpcshell against a Beta/Release libxul that can
+        # still launch the socket process.
+        # TODO: remove once Release no longer has the socket process (bug 2077172).
         env["MOZ_DISABLE_SOCKET_PROCESS"] = "1"
 
         if mozinfo.isWin:
@@ -913,10 +920,10 @@ def checkAndConfigureV4l2loopback(device):
     class v4l2_control(ctypes.Structure):
         _fields_ = [("id", ctypes.c_uint32), ("value", ctypes.c_int32)]
 
-    # These are private v4l2 control IDs, see:
-    # https://github.com/umlaeute/v4l2loopback/blob/fd822cf0faaccdf5f548cddd9a5a3dcebb6d584d/v4l2loopback.c#L131
-    KEEP_FORMAT = 0x8000000
-    SUSTAIN_FRAMERATE = 0x8000001
+    # These are v4l2loopback control IDs, see:
+    # https://github.com/v4l2loopback/v4l2loopback/blob/v0.15.4/v4l2loopback.c#L260-L262
+    KEEP_FORMAT = 0x0098F900
+    SUSTAIN_FRAMERATE = 0x0098F901
     VIDIOC_S_CTRL = 0xC008561C
 
     control = v4l2_control()
@@ -960,7 +967,7 @@ def findTestMediaDevices(log):
         log.error("Couldn't find a v4l2loopback video device")
         return None
 
-    # Feed it a frame of output so it has something to display
+    # Repeat a single frame for the duration of the tests.
     gst01 = which("gst-launch-0.1")
     gst010 = which("gst-launch-0.10")
     gst10 = which("gst-launch-1.0")
@@ -976,6 +983,8 @@ def findTestMediaDevices(log):
         "videotestsrc",
         "pattern=green",
         "num-buffers=1",
+        "!",
+        "imagefreeze",
         "!",
         "v4l2sink",
         f"device={device}",
@@ -1028,12 +1037,22 @@ class MochitestDesktop:
     DEFAULT_TIMEOUT = 60.0
     mediaDevices = None
     mozinfo_variables_shown = False
+    # Whether api.js enters chaos mode once the harness has started, rather
+    # than Firefox at startup through MOZ_CHAOSMODE. Remote harnesses don't run
+    # start_desktop.js, which has api.js start the tests.
+    deferChaosMode = True
 
     patternFiles = {}
 
     # XXX use automation.py for test name to avoid breaking legacy
     # TODO: replace this with 'runtests.py' or 'mochitest' or the like
     test_name = "automation.py"
+
+    # The test currently running, and whether it has already reported a result.
+    # Tracked apart from each other so crash and leak attribution get a test
+    # path, not a status marker.
+    lastTestSeen = None
+    lastTestFinished = False
 
     def __init__(self, flavor, logger_options, staged_addons=None, quiet=False):
         update_mozinfo()
@@ -1042,6 +1061,7 @@ class MochitestDesktop:
         self.server = None
         self.wsserver = None
         self.websocketProcessBridge = None
+        self.parakeetModelServer = None
         self.sslTunnel = None
         self.manifest = None
         self.tests_by_manifest = defaultdict(list)
@@ -1086,6 +1106,7 @@ class MochitestDesktop:
         self.browserProcessId = None
 
         self.haveDumpedScreen = False
+        self.appPid = None
         # Create variables to count the number of passes, fails, todos.
         self.countpass = 0
         self.countfail = 0
@@ -1434,6 +1455,60 @@ class MochitestDesktop:
                 break
         return is_webrtc_tag_present and options.subsuite in ["media"]
 
+    def startParakeetModelServer(self, options):
+        """Start the local model-hub server for the speech-recognition
+        (parakeet) tests. It serves the GGUF models fetched into MOZ_FETCHES_DIR
+        (and the audio/transcript from the source tree) so the tests never hit
+        the network; the test points browser.ml.modelHubRootUrl at it.
+        """
+        port = 8766
+        env = dict(os.environ)
+        env["PARAKEET_MODEL_SERVER_PORT"] = str(port)
+        command = [sys.executable, "serve_model.py"]
+        self.parakeetModelServer = subprocess.Popen(command, cwd=SCRIPT_DIR, env=env)
+        self.log.info(
+            f"runtests.py | parakeet model server pid: {self.parakeetModelServer.pid}"
+        )
+
+        # Ensure the server is up, wait for at most ten seconds. A plain TCP
+        # connect isn't enough: if a server from a previous, ungracefully
+        # terminated run is still wedged on this port, connect() succeeds
+        # against that stale process and every test in this run silently
+        # talks to it instead. Check for the marker header so we know we're
+        # actually talking to the server we just spawned.
+        for i in range(1, 100):
+            if self.parakeetModelServer.poll() is not None:
+                self.log.error("runtests.py | parakeet model server failed to launch.")
+                return
+            try:
+                with urlopen(f"http://127.0.0.1:{port}/", timeout=1) as resp:
+                    if resp.headers.get("X-Parakeet-Model-Server") == "1":
+                        break
+                self.log.error(
+                    f"runtests.py | port {port} is already in use by a "
+                    "process that isn't the parakeet model server; kill it "
+                    "and re-run."
+                )
+                return
+            except Exception:
+                time.sleep(0.1)
+        else:
+            self.log.error(
+                "runtests.py | Timed out while waiting for parakeet model "
+                "server startup."
+            )
+
+    def needsParakeetModelServer(self, options):
+        """
+        Returns whether the active tests include the parakeet speech-recognition
+        tests, which need the local model hub.
+        """
+        tests = self.getActiveTests(options)
+        for test in tests:
+            if "parakeet-asr" in test.get("tags", "") and "disabled" not in test:
+                return True
+        return False
+
     def startHttp3Server(self, options):
         """
         Start a Http3 test server.
@@ -1576,6 +1651,10 @@ class MochitestDesktop:
         if self.needsWebsocketProcessBridge(options):
             self.startWebsocketProcessBridge(options)
 
+        # Only the speech-recognition tests need the local model hub.
+        if self.needsParakeetModelServer(options):
+            self.startParakeetModelServer(options)
+
         # start SSL pipe
         self.sslTunnel = SSLTunnel(options, logger=self.log)
         self.sslTunnel.buildConfig(self.locations, public=public)
@@ -1641,6 +1720,13 @@ class MochitestDesktop:
                 self.log.info("Stopping websocket/process bridge")
             except Exception:
                 self.log.critical("Exception stopping websocket/process bridge")
+        if self.parakeetModelServer is not None:
+            try:
+                self.parakeetModelServer.kill()
+                self.parakeetModelServer.wait()
+                self.log.info("Stopping parakeet model server")
+            except Exception:
+                self.log.critical("Exception stopping parakeet model server")
         if self.http3Server is not None:
             try:
                 self.http3Server.stop()
@@ -1698,9 +1784,11 @@ class MochitestDesktop:
             )
 
             if options.testingModulesDir is not None:
-                manifestFile.write(
-                    f"resource testing-common file:///{options.testingModulesDir}\n"
-                )
+                modulesDir = options.testingModulesDir
+                if not modulesDir.startswith("/"):
+                    modulesDir = "/" + modulesDir
+                manifestFile.write(f"resource testing-common file://{modulesDir}\n")
+
         if options.store_chrome_manifest:
             shutil.copyfile(manifest, options.store_chrome_manifest)
         return manifest
@@ -2318,7 +2406,10 @@ toolbar#nav-bar {
         certutil = os.path.join(options.utilityPath, "certutil" + bin_suffix)
         pk12util = os.path.join(options.utilityPath, "pk12util" + bin_suffix)
         toolsEnv = env
-        if "browser.newtabpage.trainhopAddon.version=any" in options.extraPrefs:
+        if (
+            "browser.newtabpage.trainhopAddonDeployment.version=any"
+            in options.extraPrefs
+        ):
             toolsEnv["LD_LIBRARY_PATH"] = os.path.join(os.path.dirname(here), "bin")
         if mozinfo.info["asan"]:
             # Disable leak checking when running these tools
@@ -2333,16 +2424,6 @@ toolbar#nav-bar {
         else:
             # desktop seems to use the old
             certdbPath = options.profilePath
-
-        # certutil.exe depends on some DLLs in the app directory
-        # When running tests against an MSIX-installed Firefox, these DLLs
-        # cannot be used out of the install directory, they must be copied
-        # elsewhere first.
-        if "WindowsApps" in options.app:
-            install_dir = os.path.dirname(options.app)
-            for f in os.listdir(install_dir):
-                if f.endswith(".dll"):
-                    shutil.copy(os.path.join(install_dir, f), options.utilityPath)
 
         status = call(
             [certutil, "-N", "-d", certdbPath, "-f", pwfilePath], env=toolsEnv
@@ -2619,11 +2700,14 @@ toolbar#nav-bar {
         elif options.flavor in ("a11y", "chrome"):
             test_timeout = 45
 
-        if "MOZ_CHAOSMODE=0xfb" in options.environment and test_timeout:
+        chaos_mode_features = getattr(options, "chaosModeFeatures", None)
+        if chaos_mode_features and test_timeout:
             test_timeout *= 2
             self.log.info(
-                f"Increasing default timeout to {test_timeout} seconds (MOZ_CHAOSMODE)"
+                f"Increasing default timeout to {test_timeout} seconds (chaos mode)"
             )
+        if chaos_mode_features and self.deferChaosMode:
+            prefs["mochitest.chaosModeFeatures"] = chaos_mode_features
 
         if test_timeout:
             prefs["testing.browserTestHarness.timeout"] = test_timeout
@@ -2731,7 +2815,21 @@ toolbar#nav-bar {
             )
             return
         self.haveDumpedScreen = True
-        dump_screen(utilityPath, self.log)
+        # The browser can quit before the macOS capture lands; keep it on screen.
+        pid = self.appPid if mozinfo.isMac else None
+        if pid:
+            try:
+                os.kill(pid, signal.SIGSTOP)
+            except OSError:
+                pid = None
+        try:
+            dump_screen(utilityPath, self.log)
+        finally:
+            if pid:
+                try:
+                    os.kill(pid, signal.SIGCONT)
+                except OSError:
+                    pass
 
     def killAndGetStack(self, processPID, utilityPath, debuggerInfo, dump_screen=False):
         """
@@ -2927,7 +3025,7 @@ toolbar#nav-bar {
             # Enable Marionette and allow system access to execute the mochitest
             # init script in the chrome scope of the application
             args.append("-marionette")
-            args.append("-remote-allow-system-access")
+            env["MOZ_REMOTE_ALLOW_SYSTEM_ACCESS"] = "1"
 
             # TODO: mozrunner should use -foreground at least for mac
             # https://bugzilla.mozilla.org/show_bug.cgi?id=916512
@@ -2957,6 +3055,9 @@ toolbar#nav-bar {
             else:
                 tsanErrors = None
 
+            assertionFailures = AssertionFailureParser(self.log)
+            ubsanErrors = UBSanErrorParser(self.log)
+
             # create an instance to process the output
             outputHandler = self.OutputHandler(
                 harness=self,
@@ -2967,6 +3068,8 @@ toolbar#nav-bar {
                 shutdownLeaks=shutdownLeaks,
                 lsanLeaks=lsanLeaks,
                 tsanErrors=tsanErrors,
+                assertionFailures=assertionFailures,
+                ubsanErrors=ubsanErrors,
                 bisectChunk=bisectChunk,
                 restartAfterFailure=restartAfterFailure,
             )
@@ -2994,6 +3097,7 @@ toolbar#nav-bar {
 
             # create mozrunner instance and start the system under test process
             self.lastTestSeen = self.test_name
+            self.lastTestFinished = False
             self.lastManifest = currentManifest
             startTime = datetime.now()
 
@@ -3032,6 +3136,7 @@ toolbar#nav-bar {
                     outputTimeout=timeout,
                 )
                 proc = runner.process_handler
+                self.appPid = proc.pid
                 self.log.info(f"runtests.py | Application pid: {proc.pid}")
 
                 gecko_id = f"GECKO({proc.pid})"
@@ -3085,6 +3190,7 @@ toolbar#nav-bar {
             # see https://bugzilla.mozilla.org/show_bug.cgi?id=913970
             self.log.info("runtests.py | Waiting for browser...")
             status = proc.wait()
+            self.appPid = None
             if status is None:
                 self.log.warning(
                     "runtests.py | Failed to get app exit code - running/crashed?"
@@ -3151,9 +3257,7 @@ toolbar#nav-bar {
                     # this requires a custom message vs log.error/log.warning/etc.
                     self.message_logger.process_message(message)
             else:
-                self.lastTestSeen = (
-                    currentManifest or "Main app process exited normally"
-                )
+                self.log.info("runtests.py | Main app process exited normally")
 
             self.log.info(
                 f"runtests.py | Application ran for: {str(datetime.now() - startTime)}"
@@ -3176,6 +3280,7 @@ toolbar#nav-bar {
                 symbolsPath,
                 test=self.lastTestSeen,
                 quiet=quiet,
+                group=currentManifest,
             )
 
             expected = None
@@ -3449,9 +3554,11 @@ toolbar#nav-bar {
 
         # Retry-on-failure relies on counters populated by the desktop
         # OutputHandler pipeline, which remote harness subclasses bypass.
+        # Verification looks for intermittent failures, which a retry hides.
         retry = (
             type(self) is MochitestDesktop
             and os.environ.get("MOZ_AUTOMATION") is not None
+            and not (options.verify or options.verify_fission)
         )
         if retry:
             self.message_logger.retry_mode = True
@@ -3567,6 +3674,10 @@ toolbar#nav-bar {
         # Number of times to repeat test(s) when running test in
         VERIFY_REPEAT_SINGLE_BROWSER = 5
 
+        # Every chaos mode feature except TimerScheduling (bug 1390884).
+        CHAOS_MODE_FEATURES = 0xFB
+        chaos_env = [] if self.deferChaosMode else ["MOZ_CHAOSMODE=0xfb"]
+
         def step1():
             options.repeat = VERIFY_REPEAT
             options.keep_open = False
@@ -3594,10 +3705,13 @@ toolbar#nav-bar {
             options.repeat = VERIFY_REPEAT
             options.keep_open = False
             options.runUntilFailure = True
-            options.environment.append("MOZ_CHAOSMODE=0xfb")
+            options.environment.extend(chaos_env)
+            options.chaosModeFeatures = CHAOS_MODE_FEATURES
             options.profilePath = None
             result = self.runTests(options)
-            options.environment.remove("MOZ_CHAOSMODE=0xfb")
+            for var in chaos_env:
+                options.environment.remove(var)
+            options.chaosModeFeatures = None
             result = result or (-2 if self.countfail > 0 else 0)
             self.message_logger.finish()
             return result
@@ -3606,7 +3720,8 @@ toolbar#nav-bar {
             options.repeat = 0
             options.keep_open = False
             options.runUntilFailure = False
-            options.environment.append("MOZ_CHAOSMODE=0xfb")
+            options.environment.extend(chaos_env)
+            options.chaosModeFeatures = CHAOS_MODE_FEATURES
             for i in range(VERIFY_REPEAT_SINGLE_BROWSER):
                 options.profilePath = None
                 result = self.runTests(options)
@@ -3614,7 +3729,9 @@ toolbar#nav-bar {
                 self.message_logger.finish()
                 if result != 0:
                     break
-            options.environment.remove("MOZ_CHAOSMODE=0xfb")
+            for var in chaos_env:
+                options.environment.remove(var)
+            options.chaosModeFeatures = None
             return result
 
         def fission_step(fission_pref):
@@ -3711,12 +3828,7 @@ toolbar#nav-bar {
             "http3": options.useHttp3Server,
             "http2": options.useHttp2Server,
             "inc_origin_init": os.environ.get("MOZ_ENABLE_INC_ORIGIN_INIT") == "1",
-            "nova": self.extraPrefs.get("browser.nova.enabled", True),
             "sessionHistoryInParent": True,
-            "socketprocess_e10s": self.extraPrefs.get("network.process.enabled", False),
-            "socketprocess_networking": self.extraPrefs.get(
-                "network.http.network_access_on_socket_process.enabled", False
-            ),
             "standalone": options.restartBetweenTests,
             "swgl": self.extraPrefs.get("gfx.webrender.software", False),
             "verify": options.verify,
@@ -3738,6 +3850,7 @@ toolbar#nav-bar {
             "is_emulator": mozinfo.info.get("is_emulator", False),
             "coverage": mozinfo.info.get("coverage", False),
             "nogpu": mozinfo.info.get("nogpu", False),
+            "isolated_process": options.isolated_process,
         })
 
         if not self.mozinfo_variables_shown:
@@ -3805,7 +3918,7 @@ toolbar#nav-bar {
             prefs = list(self.prefs_by_manifest[m])[0]
             self.extraPrefs = origPrefs.copy()
             if prefs:
-                prefs = [p.strip() for p in prefs.strip().split("\n")]
+                prefs = split_manifest_list(prefs)
                 self.log.info(
                     "The following extra prefs will be set:\n  {}".format(
                         "\n  ".join(prefs)
@@ -3816,7 +3929,7 @@ toolbar#nav-bar {
             envVars = list(self.env_vars_by_manifest[m])[0]
             self.extraEnv = {}
             if envVars:
-                self.extraEnv = envVars.strip().split()
+                self.extraEnv = split_manifest_list(envVars)
                 env_list = "\n  ".join(self.extraEnv)
                 self.log.info(
                     f"The following extra environment variables will be set:\n  {env_list}"
@@ -3877,6 +3990,9 @@ toolbar#nav-bar {
                 with out_path.open("w", encoding="utf-8") as f:
                     f.write(json.dumps(data))
 
+        if "MOZ_AUTOMATION" in os.environ:
+            symbolicate_profiles(symbol_dir=options.symbolsPath)
+
         self.handleShutdownProfile(options)
 
         if not result:
@@ -3896,17 +4012,22 @@ toolbar#nav-bar {
 
             profiler_logger = get_proxy_logger("profiler")
             profiler_logger.info("Shutdown performance profiling was enabled")
-            profiler_logger.info(f"Profile saved locally to: {profile_path}")
 
             if options.profilerSaveOnly or options.profiler:
                 # Only do the extra work of symbolicating and viewing the profile if
                 # officially requested through a command line flag. The MOZ_PROFILER_*
                 # flags can be set by a user.
-                symbolicate_profile_json(profile_path, options.symbolsPath)
+                # Symbolication gzips the profile, which moves it, so report and
+                # open the path it returns.
+                profile_path = symbolicate_profile_json(
+                    profile_path, options.symbolsPath
+                )
+                profiler_logger.info(f"Profile saved locally to: {profile_path}")
                 view_gecko_profile_from_mochitest(
                     profile_path, options, profiler_logger
                 )
             else:
+                profiler_logger.info(f"Profile saved locally to: {profile_path}")
                 profiler_logger.info(
                     "The profiler was enabled outside of the mochitests. "
                     "Use --profiler instead of MOZ_PROFILER_SHUTDOWN to "
@@ -4049,7 +4170,7 @@ toolbar#nav-bar {
                 # See bug 479518 and bug 1414063.
                 timeout = 370.0
 
-            if "MOZ_CHAOSMODE=0xfb" in options.environment and timeout:
+            if getattr(options, "chaosModeFeatures", None) and timeout:
                 timeout *= 2
 
             # Detect shutdown leaks for m-bc runs
@@ -4108,11 +4229,6 @@ toolbar#nav-bar {
                 self.log.info(
                     "runtests.py | Running with cross-origin iframes: {}".format(
                         mozinfo.info.get("xorigin", False)
-                    )
-                )
-                self.log.info(
-                    "runtests.py | Running with socketprocess_e10s: {}".format(
-                        mozinfo.info.get("socketprocess_e10s", False)
                     )
                 )
                 self.log.info(f"runtests.py | Running {scheme} tests: start.\n")
@@ -4253,8 +4369,7 @@ toolbar#nav-bar {
             profiler_logger.info("Wait 10s for Firefox to write the profile to disk.")
             time.sleep(10)
 
-            # Symbolicate the profile generated above using signals. The profile
-            # file will be named something like:
+            # The profile file will be named something like:
             #  `$MOZ_UPLOAD_DIR/profile_${tid}_${pid}.json
             # where `tid` is /currently/ always 0 (we can only write our profile
             # from the main thread). This may change if we end up writing from
@@ -4262,16 +4377,6 @@ toolbar#nav-bar {
             # `platform.cpp` for more details on how we name signal-generated
             # profiles.
             # Sanity check that we actually have a MOZ_UPLOAD_DIR
-            if "MOZ_UPLOAD_DIR" in os.environ:
-                profiler_logger.info(
-                    f"Symbolicating profile in {os.environ['MOZ_UPLOAD_DIR']}"
-                )
-                profile_path = "{}/profile_0_{}.json".format(
-                    os.environ["MOZ_UPLOAD_DIR"], browser_pid
-                )
-                profiler_logger.info(f"Looking inside symbols dir: {symbolsPath})")
-                profiler_logger.info(f"Symbolicating profile: {profile_path}")
-                symbolicate_profile_json(profile_path, symbolsPath)
         else:
             profiler_logger.info(
                 "Not sending a signal to start the profiler - not on MacOS or Linux. See Bug 1823370."
@@ -4352,6 +4457,8 @@ toolbar#nav-bar {
             shutdownLeaks=None,
             lsanLeaks=None,
             tsanErrors=None,
+            assertionFailures=None,
+            ubsanErrors=None,
             bisectChunk=None,
             restartAfterFailure=None,
         ):
@@ -4367,6 +4474,8 @@ toolbar#nav-bar {
             self.shutdownLeaks = shutdownLeaks
             self.lsanLeaks = lsanLeaks
             self.tsanErrors = tsanErrors
+            self.assertionFailures = assertionFailures
+            self.ubsanErrors = ubsanErrors
             self.bisectChunk = bisectChunk
             self.restartAfterFailure = restartAfterFailure
             self.browserProcessId = None
@@ -4403,6 +4512,8 @@ toolbar#nav-bar {
                 self.trackShutdownLeaks,
                 self.trackLSANLeaks,
                 self.trackTSanErrors,
+                self.trackAssertionFailures,
+                self.trackUBSanErrors,
                 self.count_structured,
             ]
             if self.bisectChunk or self.restartAfterFailure:
@@ -4446,6 +4557,12 @@ toolbar#nav-bar {
 
             if self.tsanErrors:
                 self.tsanErrors.flush()
+
+            if self.assertionFailures:
+                self.assertionFailures.flush()
+
+            if self.ubsanErrors:
+                self.ubsanErrors.flush()
 
         # output message handlers:
         # these take a message and return a message
@@ -4517,8 +4634,10 @@ toolbar#nav-bar {
             """record last test on harness"""
             if message["action"] == "test_start":
                 self.harness.lastTestSeen = message["test"]
+                self.harness.lastTestFinished = False
             elif message["action"] == "test_end":
-                self.harness.lastTestSeen = "{} (finished)".format(message["test"])
+                self.harness.lastTestSeen = message["test"]
+                self.harness.lastTestFinished = True
             return message
 
         def dumpScreenOnTimeout(self, message):
@@ -4549,7 +4668,7 @@ toolbar#nav-bar {
                     if message["action"] == "log"
                     else message["data"]
                 )
-                if "(finished)" in self.harness.lastTestSeen:
+                if self.harness.lastTestFinished:
                     self.lsanLeaks.log(line, self.harness.lastManifest)
                 else:
                     self.lsanLeaks.log(line, self.harness.lastTestSeen)
@@ -4563,11 +4682,38 @@ toolbar#nav-bar {
                     else message["data"]
                 )
                 pid = message.get("process")
-                if "(finished)" in self.harness.lastTestSeen:
+                if self.harness.lastTestFinished:
                     scope = self.harness.lastManifest
                 else:
                     scope = self.harness.lastTestSeen
                 self.tsanErrors.log(line, pid=pid, scope=scope)
+            return message
+
+        def trackAssertionFailures(self, message):
+            if self.assertionFailures and message["action"] == "process_output":
+                test = self.harness.lastTestSeen
+                if test.endswith(" (finished)"):
+                    test = test[: -len(" (finished)")]
+                self.assertionFailures.log(
+                    message["data"], pid=message.get("process"), test=test
+                )
+            return message
+
+        def trackUBSanErrors(self, message):
+            if self.ubsanErrors and message["action"] == "process_output":
+                if self.harness.lastTestFinished:
+                    scope = self.harness.lastManifest
+                else:
+                    scope = self.harness.lastTestSeen
+                test = self.harness.lastTestSeen
+                if test.endswith(" (finished)"):
+                    test = test[: -len(" (finished)")]
+                self.ubsanErrors.log(
+                    message["data"],
+                    pid=message.get("process"),
+                    scope=scope,
+                    test=test,
+                )
             return message
 
         def trackShutdownLeaks(self, message):
@@ -4614,6 +4760,18 @@ def view_gecko_profile_from_mochitest(profile_path, options, profiler_logger):
 
 def run_test_harness(parser, options):
     parser.validate(options)
+
+    # certutil.exe depends on some DLLs in the app directory
+    # When running tests against an MSIX-installed Firefox, these DLLs
+    # cannot be used out of the install directory, they must be copied
+    # elsewhere first. This is done once here rather than before every
+    # certutil call because overwriting the copies intermittently fails
+    # when the previous copies are still locked.
+    if "WindowsApps" in options.app:
+        install_dir = os.path.dirname(options.app)
+        for f in os.listdir(install_dir):
+            if f.endswith(".dll"):
+                shutil.copy(os.path.join(install_dir, f), options.utilityPath)
 
     logger_options = {
         key: value

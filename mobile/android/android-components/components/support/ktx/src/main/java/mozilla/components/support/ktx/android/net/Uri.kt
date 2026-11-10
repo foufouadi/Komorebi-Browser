@@ -11,7 +11,6 @@ import android.os.Build
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
 import androidx.annotation.VisibleForTesting
-import androidx.core.net.toUri
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -157,7 +156,7 @@ fun Uri.toFileUri(context: Context, dirToCopy: String = "/temps"): Uri {
     } catch (e: RuntimeException) {
         Logger("Uri.kt").warn("Could not access file from uri", e)
     }
-    return "file:///${Uri.encode(temporalFile.absolutePath)}".toUri()
+    return Uri.fromFile(temporalFile)
 }
 
 @VisibleForTesting
@@ -168,20 +167,24 @@ internal fun copyFile(temporalFile: File, inStream: InputStream): Long {
 }
 
 @VisibleForTesting
+@Suppress("TooGenericExceptionCaught")
 internal fun Uri.getFileNameForContentUris(contentResolver: ContentResolver): String {
     var fileName = ""
-    contentResolver.query(this, null, null, null, null)?.use { cursor ->
-        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-        val fileExtension = getFileExtension(contentResolver)
-        fileName =
-            if (nameIndex == -1) {
-                generateFileName(fileExtension)
-            } else {
-                cursor.moveToFirst()
-                cursor.getString(nameIndex) ?: generateFileName(fileExtension)
+    var fileExtension = ""
+
+    try {
+        fileExtension = getFileExtension(contentResolver)
+        contentResolver.query(this, null, null, null, null)?.use { cursor ->
+            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (nameIndex != -1 && cursor.moveToFirst()) {
+                fileName = cursor.getString(nameIndex).orEmpty()
             }
+        }
+    } catch (e: RuntimeException) {
+        Logger("Uri.kt").warn("Could not read the file name from the content provider", e)
     }
-    return fileName.sanitizeFileName()
+
+    return fileName.sanitizeFileName().ifEmpty { generateFileName(fileExtension) }
 }
 
 /** Generate a file name using a randomUUID + the current timestamp. */

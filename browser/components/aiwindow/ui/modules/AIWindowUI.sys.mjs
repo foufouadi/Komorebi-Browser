@@ -14,6 +14,8 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   AutoTabGrouping:
     "moz-src:///browser/components/aiwindow/ui/modules/AutoTabGrouping.sys.mjs",
+  MonitorPanel:
+    "moz-src:///browser/components/aiwindow/ui/modules/MonitorPanel.sys.mjs",
   URILoadingHelper: "resource:///modules/URILoadingHelper.sys.mjs",
 });
 
@@ -499,6 +501,24 @@ export const AIWindowUI = {
   },
 
   /**
+   * Toggle the monitor creation panel anchored to its toolbar button.
+   *
+   * @param {Window} win
+   */
+  toggleMonitorPanel(win) {
+    lazy.MonitorPanel.toggleMonitorPanel(win);
+  },
+
+  /**
+   * Open the monitor panel straight to the create form.
+   *
+   * @param {Window} win
+   */
+  showMonitorCreateForm(win) {
+    lazy.MonitorPanel.showCreateForm(win);
+  },
+
+  /**
    * Toggle the AI Window sidebar
    *
    * @param {Window} win
@@ -707,6 +727,32 @@ export const AIWindowUI = {
 
     const aiWindowBrowser = win.document.getElementById(this.BROWSER_ID);
     return aiWindowBrowser?.contentDocument?.querySelector("ai-window:defined");
+  },
+
+  /**
+   * Sends a request to the sidebar chat, opening the sidebar on the selected
+   * tab's conversation first if it is closed.
+   *
+   * @param {Window} win
+   * @param {string} text
+   * @param {object} options
+   * @param {string} options.submitType - How the request was made, for
+   *   telemetry.
+   * @param {string} [options.aitabSource] - Where an AI Tab page was requested
+   *   from, for telemetry.
+   */
+  async submitToSidebar(win, text, { submitType, aitabSource }) {
+    if (!this.isSidebarOpen(win)) {
+      await this.openSidebar(
+        win,
+        AIWindow.getActiveConversation(win) ?? undefined
+      );
+    }
+    this._getSidebarAiWindow(win)?.submitChatMessage({
+      text,
+      submitType,
+      aitabSource,
+    });
   },
 
   /**

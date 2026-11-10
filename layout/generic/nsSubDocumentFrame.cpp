@@ -20,6 +20,7 @@
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/ImageDocument.h"
 #include "mozilla/dom/RemoteBrowser.h"
+#include "mozilla/dom/ViewTransition.h"
 #include "mozilla/layers/RenderRootStateManager.h"
 #include "mozilla/layers/StackingContextHelper.h"  // for StackingContextHelper
 #include "mozilla/layers/WebRenderScrollData.h"
@@ -162,6 +163,7 @@ void nsSubDocumentFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
 }
 
 void nsSubDocumentFrame::UpdateEmbeddedBrowsingContextDependentData() {
+  MOZ_ASSERT(!nsContentUtils::IsSafeToRunScript());
   if (!mFrameLoader) {
     return;
   }
@@ -177,6 +179,7 @@ void nsSubDocumentFrame::UpdateEmbeddedBrowsingContextDependentData() {
   }
   MaybeUpdateRemoteStyle();
   MaybeUpdateEmbedderColorScheme();
+  MaybeUpdateEmbedderScrollbarInset();
   MaybeUpdateEmbedderZoom();
   PropagateIsUnderHiddenEmbedderElement(
       PresShell()->IsUnderHiddenEmbedderElement() ||
@@ -200,24 +203,25 @@ void nsSubDocumentFrame::ShowViewer() {
   if (!frameloader->IsRemoteFrame() && !PresContext()->IsDynamic()) {
     // We let the printing code take care of loading the document and
     // initializing the shell.
-  } else {
-    AutoWeakFrame weakThis(this);
-    mCallingShow = true;
-    bool didCreateDoc = frameloader->Show(this);
-    if (!weakThis.IsAlive()) {
-      return;
-    }
-    mCallingShow = false;
-    mDidCreateDoc = didCreateDoc;
-    if (!HasAnyStateBits(NS_FRAME_FIRST_REFLOW)) {
-      frameloader->UpdatePositionAndSize(this);
-    }
-    if (!weakThis.IsAlive()) {
-      return;
-    }
-    UpdateEmbeddedBrowsingContextDependentData();
-    InvalidateFrame();
+    return;
   }
+  AutoWeakFrame weakThis(this);
+  mCallingShow = true;
+  bool didCreateDoc = frameloader->Show(this);
+  if (!weakThis.IsAlive()) {
+    return;
+  }
+  mCallingShow = false;
+  mDidCreateDoc = didCreateDoc;
+  if (!HasAnyStateBits(NS_FRAME_FIRST_REFLOW)) {
+    frameloader->UpdatePositionAndSize(this);
+  }
+  if (!weakThis.IsAlive()) {
+    return;
+  }
+  nsAutoScriptBlocker sb;
+  UpdateEmbeddedBrowsingContextDependentData();
+  InvalidateFrame();
 }
 
 Document* nsSubDocumentFrame::GetExtantSubdocument() {
@@ -281,27 +285,22 @@ LayoutDeviceIntSize nsSubDocumentFrame::GetInitialSubdocumentSize() const {
     for (const auto& detachedShell : frameloader->GetDetachedSubdocs()) {
       if (RefPtr<mozilla::PresShell> ps = do_QueryReferent(detachedShell)) {
         if (nsPresContext* pc = ps->GetPresContext()) {
-          return LayoutDeviceIntSize(
-              pc->AppUnitsToDevPixels(pc->GetVisibleArea().width),
-              pc->AppUnitsToDevPixels(pc->GetVisibleArea().height));
+          return LayoutDeviceIntSize::FromAppUnitsRounded(
+              pc->GetVisibleArea().Size(), pc->AppUnitsPerDevPixel());
         }
       }
     }
   }
-  // Pick some default size for now.  Using 10x10 because that's what the
-  // code used to do.
-  return LayoutDeviceIntSize(10, 10);
+  return LayoutDeviceIntSize::FromAppUnitsRounded(
+      kFallbackIntrinsicSize, PresContext()->AppUnitsPerDevPixel());
 }
 
 LayoutDeviceIntSize nsSubDocumentFrame::GetSubdocumentSize() const {
   if (HasAnyStateBits(NS_FRAME_FIRST_REFLOW)) {
     return GetInitialSubdocumentSize();
   }
-
-  nsSize docSizeAppUnits = GetDestRect().Size();
-  nsPresContext* pc = PresContext();
-  return LayoutDeviceIntSize(pc->AppUnitsToDevPixels(docSizeAppUnits.width),
-                             pc->AppUnitsToDevPixels(docSizeAppUnits.height));
+  return LayoutDeviceIntSize::FromAppUnitsRounded(
+      GetDestRect().Size(), PresContext()->AppUnitsPerDevPixel());
 }
 
 static void WrapBackgroundColorInOwnLayer(nsDisplayListBuilder* aBuilder,
@@ -309,7 +308,7 @@ static void WrapBackgroundColorInOwnLayer(nsDisplayListBuilder* aBuilder,
                                           nsDisplayList* aList) {
   for (nsDisplayItem* item : aList->TakeItems()) {
     if (item->GetType() == DisplayItemType::TYPE_BACKGROUND_COLOR) {
-      nsDisplayList tmpList(aBuilder);
+      nsDisplayList tmpList;
       tmpList.AppendToTop(item);
       item = MakeDisplayItemWithIndex<nsDisplayOwnLayer>(
           aBuilder, aFrame, /* aIndex = */ nsDisplayOwnLayer::OwnLayerForSubdoc,
@@ -395,6 +394,19 @@ void nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     }
   }
 
+  Document* subdoc = presShell->GetDocument();
+  ViewTransition* vt = subdoc->GetActiveViewTransition();
+  if (vt && aBuilder->IsPaintingToWindow() &&
+      subdoc->RenderingSuppressedForViewTransitions() &&
+      vt->IsHoldingSubdocument()) {
+    DisplayListClipState::AutoSaveRestore clipState(aBuilder);
+    clipState.ClipContainingBlockDescendantsToContentBox(aBuilder, this);
+    aLists.Content()
+        ->AppendNewToTop<nsDisplayViewTransitionSubdocumentSnapshot>(
+            aBuilder, this, vt->SubdocumentSnapshotRect());
+    return;
+  }
+
   nsIFrame* subdocRootFrame = presShell->GetRootFrame();
 
   nsPresContext* presContext = presShell->GetPresContext();
@@ -440,7 +452,7 @@ void nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
                        presContext->IsRootContentDocumentCrossProcess() ||
                        (sf && sf->IsScrollingActive());
 
-  nsDisplayList childItems(aBuilder);
+  nsDisplayList childItems;
 
   if (subdocRootFrame) {
     DisplayListClipState::AutoSaveRestore nestedClipState(aBuilder);
@@ -519,6 +531,17 @@ void nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   if (layerItem) {
     childItems.AppendToTop(layerItem);
     layerItem->SetShouldFlattenAway(!needsOwnLayer);
+  }
+
+  if (vt && vt->IsCapturingSubdocumentSnapshot() &&
+      aBuilder->IsPaintingToWindow()) {
+    // The iframe element can also be captured by a transition in its own
+    // document, which wraps this frame in another
+    // nsDisplayViewTransitionCapture, so this one needs a different index.
+    childItems.AppendNewToTopWithIndex<nsDisplayViewTransitionCapture>(
+        aBuilder, this, /* aIndex = */ 1, &childItems,
+        aBuilder->CurrentActiveScrolledRoot(),
+        nsDisplayViewTransitionCapture::Kind::Subdocument);
   }
 
   if (aBuilder->IsForFrameVisibility()) {
@@ -775,6 +798,36 @@ void nsSubDocumentFrame::MaybeUpdateEmbedderColorScheme() {
   (void)bc->SetEmbedderColorSchemes(schemes);
 }
 
+void nsSubDocumentFrame::MaybeUpdateEmbedderScrollbarInset() {
+  nsFrameLoader* fl = mFrameLoader.get();
+  if (!fl) {
+    return;
+  }
+
+  BrowsingContext* bc = fl->GetExtantBrowsingContext();
+  if (!bc) {
+    return;
+  }
+
+  // The content document can't express this in CSS: its viewport scroll frame's
+  // style is a non-inheriting anonymous box. Forward our own
+  // -moz-scrollbar-inset-{block,inline} instead, resolved to physical sides in
+  // our writing mode and converted to device pixels, since the subdocument's
+  // writing mode and zoom are both its own.
+  const WritingMode wm = GetWritingMode();
+  nsPresContext* pc = PresContext();
+  const nsMargin physical =
+      StyleDisplay()->GetScrollbarInset(wm).GetPhysicalMargin(wm);
+
+  const LayoutDeviceIntMargin inset = LayoutDevicePixel::FromAppUnitsRounded(
+      physical, pc->AppUnitsPerDevPixel());
+  if (bc->GetEmbedderScrollbarInset() == inset) {
+    return;
+  }
+
+  (void)bc->SetEmbedderScrollbarInset(inset);
+}
+
 void nsSubDocumentFrame::MaybeUpdateEmbedderZoom() {
   nsFrameLoader* fl = mFrameLoader.get();
   if (!fl) {
@@ -850,6 +903,7 @@ void nsSubDocumentFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle) {
     // If there's no old style, the call in Init() or ShowViewer() should have
     // us covered.
     MaybeUpdateEmbedderColorScheme();
+    MaybeUpdateEmbedderScrollbarInset();
     MaybeUpdateRemoteStyle(aOldComputedStyle);
     if (aOldComputedStyle->EffectiveZoom() != Style()->EffectiveZoom()) {
       MaybeUpdateEmbedderZoom();
@@ -872,8 +926,7 @@ void nsSubDocumentFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle) {
 }
 
 nsIFrame* NS_NewSubDocumentFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell)
-      nsSubDocumentFrame(aStyle, aPresShell->GetPresContext());
+  return new nsSubDocumentFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSubDocumentFrame)
@@ -1242,14 +1295,14 @@ void nsDisplayRemote::Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) {
   target->DrawDependentSurface(mPaintData.mTabId, destRect);
 }
 
-bool nsDisplayRemote::CreateWebRenderCommands(
+WebRenderCommandsResult nsDisplayRemote::CreateWebRenderCommands(
     mozilla::wr::DisplayListBuilder& aBuilder,
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc,
     mozilla::layers::RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
   if (!mPaintData.mLayersId.IsValid()) {
-    return true;
+    return Ok();
   }
 
   auto* subDocFrame = static_cast<nsSubDocumentFrame*>(mFrame);
@@ -1277,7 +1330,7 @@ bool nsDisplayRemote::CreateWebRenderCommands(
                       mozilla::wr::AsPipelineId(mPaintData.mLayersId),
                       /*ignoreMissingPipelines*/ true);
 
-  return true;
+  return Ok();
 }
 
 bool nsDisplayRemote::UpdateScrollData(

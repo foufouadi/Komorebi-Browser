@@ -4,7 +4,7 @@
 
 ChromeUtils.defineESModuleGetters(this, {
   ExtensionUtils: "resource://gre/modules/ExtensionUtils.sys.mjs",
-  QWACs: "resource://gre/modules/psm/QWACs.sys.mjs",
+  QWACs: "moz-src:///security/manager/ssl/QWACs.sys.mjs",
 });
 
 /**
@@ -1387,7 +1387,8 @@ var gIdentityHandler = {
 
     let value = gBrowser.currentURI.displaySpec;
     let urlString = value + "\n" + gBrowser.contentTitle;
-    let htmlString = '<a href="' + value + '">' + value + "</a>";
+    let escapedValue = BrowserUtils.escapeHtmlEntities(value);
+    let htmlString = `<a href="${escapedValue}">${escapedValue}</a>`;
 
     let scale = window.devicePixelRatio;
     let canvas = document.createElementNS(

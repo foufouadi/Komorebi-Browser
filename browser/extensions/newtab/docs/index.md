@@ -40,15 +40,31 @@ in `browser/extensions/newtab/content-src` directory. These files will be compil
 
 ## Building assets and running Firefox
 
-To build assets and run Firefox, run the following from the root of the mozilla-central repository:
+The build generates the bundles and CSS into the objdir, so to build assets and run Firefox, run the following from the root of the mozilla-central repository:
 
 ```shell
-./mach newtab bundle && ./mach build && ./mach run
+./mach build faster && ./mach run
 ```
+
+Use `./mach build` instead of `./mach build faster` if you haven't built Firefox in this checkout yet, or if your change also touches compiled code.
+
+## Bundles left in the source tree
+
+`./mach newtab bundle` and `./mach newtab watch` write the bundles and CSS into the source tree (`data/content/*.bundle.js` and `css/`), not the objdir. While these copies exist, the build packages them in place of the ones it generates. They go stale with the next change to `content-src/`, and Firefox keeps running the old code. `git status browser/extensions/newtab` lists them as untracked files.
+
+To go back to the copies the build generates, delete them and rebuild:
+
+```shell
+rm -r browser/extensions/newtab/data/content/*.bundle.js browser/extensions/newtab/css
+touch browser/extensions/newtab/addon-jar.mn
+./mach build faster
+```
+
+Touching `addon-jar.mn` makes the build look up the source of each packaged file again. Without it, the build still points at the deleted copies.
 
 ## Continuous development / debugging
 
-For near real-time reloading, run the following commands in **two separate terminals** to automatically rebuild bundled files whenever JSX or SCSS files change. After making a change, [restart your local instance](/devtools-user/browser_console/index.html#controlling-the-browser) to apply the updates. Run the following terminal commands:
+For near real-time reloading, run the following commands in **two separate terminals** to automatically rebuild bundled files whenever JSX or SCSS files change. After making a change, [restart your local instance](/devtools-user/browser_console/index.md#controlling-the-browser) to apply the updates. Run the following terminal commands:
 
 ```shell
 ./mach newtab watch
@@ -58,7 +74,7 @@ For near real-time reloading, run the following commands in **two separate termi
 ./mach run
 ```
 
-**IMPORTANT NOTE**: This task will add inline source maps to help with debugging, which changes the memory footprint. Do not use the `watch` task for profiling or performance testing! After finishing your work, **be sure to stop the watch process**. When stopped, it will automatically run a final bundle step to remove the temporary inline source maps.
+**IMPORTANT NOTE**: This task will add inline source maps to help with debugging, which changes the memory footprint. Do not use the `watch` task for profiling or performance testing! After finishing your work, **be sure to stop the watch process**. When stopped, it will automatically run a final bundle step to remove the temporary inline source maps. That step leaves bundles in the source tree; see "Bundles left in the source tree" above to remove them.
 
 ## Pre-commit git hook
 
@@ -68,7 +84,7 @@ it runs the following checks in order, stopping at the first failure:
 1. **Bundle** — if newtab source or bundle output files are staged, runs
    `./mach newtab bundle` and blocks the commit if the output files differ
    from what is staged.
-2. **Lint** — runs [mozlint](https://firefox-source-docs.mozilla.org/code-quality/lint/usage.html)
+2. **Lint** — runs {doc}`mozlint </code-quality/lint/usage>`
    on staged files and blocks the commit if there are errors.
 3. **Tests** — optionally runs unit tests (configurable, disabled by default).
 
@@ -84,7 +100,6 @@ By default, no tests are run on commit. To configure which tests run, use
 
 ```shell
 git config newtab.pre-commit.tests jest       # Jest only (~30 seconds)
-git config newtab.pre-commit.tests jest-karma # Jest + Karma/Enzyme (~3-5 minutes)
 git config newtab.pre-commit.tests all        # all tests including xpcshell and browser (10+ minutes)
 git config newtab.pre-commit.tests none       # skip tests (default)
 ```
@@ -93,11 +108,12 @@ To commit despite failing tests, use `git commit --no-verify` to bypass the hook
 
 ## Running tests
 
-The majority of New Tab / Messaging unit tests are written using
-[mocha](https://mochajs.org), and other errors that may show up there are
+New Tab unit tests are written using [Jest](https://jestjs.io) and
+[React Testing Library](https://testing-library.com/docs/react-testing-library/intro/),
+and other errors that may show up there are
 [SCSS](https://sass-lang.com/documentation/syntax) issues flagged by
 [stylelint](https://stylelint.io). These things are all run using
-`npm test` under the `newtab` slug in Treeherder/Try, so if that slug turns
+`npm test` under the `node(newtab)` slug in Treeherder/Try, so if that slug turns
 red, these tests are what is failing. To execute them, do this:
 
 ```shell
@@ -114,22 +130,20 @@ To run newtab specific tests that aren't covered by `mach lint` and
 
 ```shell
 ./mach npm run lint:stylelint --prefix=browser/extensions/newtab
-./mach npm run testmc:build --prefix=browser/extensions/newtab
-./mach npm run testmc:unit --prefix=browser/extensions/newtab
+./mach npm run testmc:jest --prefix=browser/extensions/newtab
 ```
 
 Mochitests and xpcshell tests run normally, using `mach test`.
 
 ## Code Coverage
 
-Our testing setup will run code coverage tools in addition to just the unit
-tests. It will error out if the code coverage metrics don't meet certain thresholds.
+CI collects Jest code coverage for the unit tests and reports it to the code
+coverage tools and Searchfox. There are no coverage thresholds.
 
-If you see any missing test coverage, you can inspect the coverage report by
-running
+To inspect the coverage report locally, run
 
 ```shell
-./mach npm test --prefix=browser/extensions/newtab &&
+./mach npm run testmc:jest:coverage --prefix=browser/extensions/newtab &&
 ./mach npm run debugcoverage --prefix=browser/extensions/newtab
 ```
 

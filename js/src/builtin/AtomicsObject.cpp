@@ -1198,6 +1198,11 @@ template <typename T>
 static PlainObject* AtomicsWaitAsync(
     JSContext* cx, SharedArrayRawBuffer* sarb, size_t byteOffset, T value,
     const mozilla::Maybe<mozilla::TimeDuration>& timeout) {
+  if (!cx->runtime()->offThreadPromiseState.ref().initialized()) {
+    JS_ReportErrorASCII(cx, "Atomics.waitAsync not supported in this runtime.");
+    return nullptr;
+  }
+
   // Step 16a.
   Rooted<PromiseObject*> promiseObject(
       cx, CreatePromiseObjectWithoutResolutionFunctions(cx));
@@ -1306,7 +1311,7 @@ static bool DoAtomicsWait(JSContext* cx, bool isAsync,
     // Step 9.
     if (!std::isnan(timeout_ms)) {
       if (timeout_ms < 0) {
-        timeout = mozilla::Some(mozilla::TimeDuration::FromSeconds(0.0));
+        timeout = mozilla::Some(mozilla::TimeDuration::Zero());
       } else if (!std::isinf(timeout_ms)) {
         timeout =
             mozilla::Some(mozilla::TimeDuration::FromMilliseconds(timeout_ms));
@@ -1722,7 +1727,7 @@ FutexThread::WaitResult js::FutexThread::wait(
 
   // 4000s is about the longest timeout slice that is guaranteed to
   // work cross-platform.
-  auto maxSlice = mozilla::TimeDuration::FromSeconds(4000.0);
+  auto maxSlice = mozilla::TimeDuration::FromSeconds(4000);
 
   for (;;) {
     // If we are doing a timed wait, calculate the end time for this wait

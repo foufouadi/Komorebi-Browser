@@ -8,6 +8,7 @@
 #include "HttpTrafficAnalyzer.h"
 #include "mozilla/Array.h"
 #include "mozilla/WeakPtr.h"
+#include "mozilla/dom/PWebTransport.h"
 #include "mozilla/net/NeqoHttp3Conn.h"
 #include "nsAHttpConnection.h"
 #include "nsDeque.h"
@@ -148,26 +149,38 @@ class Http3SessionBase {
   // For WebTransport
   virtual void CloseWebTransportConn() = 0;
   virtual void StreamHasDataToWrite(Http3StreamBase* aStream) = 0;
-  virtual nsresult CloseWebTransport(uint64_t aSessionId, uint32_t aError,
-                                     const nsACString& aMessage) = 0;
+  virtual bool CloseWebTransport(
+      uint64_t aSessionId, uint32_t aError, const nsACString& aMessage,
+      mozilla::dom::WebTransportStatsData& aStats) = 0;
   virtual void SendDatagram(Http3WebTransportSession* aSession,
                             nsTArray<uint8_t>& aData, uint64_t aTrackingId,
-                            uint64_t aSendGroupId, int64_t aSendOrder) = 0;
+                            uint64_t aSendGroupId, int64_t aSendOrder,
+                            TimeStamp aTimestamp) = 0;
   virtual uint64_t MaxDatagramSize(uint64_t aSessionId) = 0;
   virtual nsresult ExportWebTransportKeyingMaterial(
       uint64_t aSessionId, const nsTArray<uint8_t>& aLabel,
-      const nsTArray<uint8_t>& aContext,
+      const nsTArray<uint8_t>& aContext, uint32_t aOutputLength,
       nsTArray<uint8_t>& aKeyingMaterial) = 0;
+  virtual void SetDatagramMaxBufferedDatagrams(
+      uint64_t aSessionId, uint32_t aMaxBufferedDatagrams) = 0;
+  virtual void SetDatagramMaxAge(uint64_t aSessionId, double aMaxAge) = 0;
+  virtual bool GetWebTransportSessionStats(
+      uint64_t aSessionId, mozilla::dom::WebTransportStatsData& aStats) = 0;
   virtual nsresult RegisterWebTransportSendGroup(uint64_t aSessionId,
                                                  uint64_t aGroupId) = 0;
   virtual nsresult GetWebTransportSessionProtocol(uint64_t aSessionId,
                                                   nsACString& aProtocol) = 0;
+  virtual void
+  SetWebTransportAnticipatedConcurrentIncomingUnidirectionalStreams(
+      uint64_t aSessionId, uint16_t aValue) = 0;
+  virtual void SetWebTransportAnticipatedConcurrentIncomingBidirectionalStreams(
+      uint64_t aSessionId, uint16_t aValue) = 0;
   virtual nsresult TryActivatingWebTransportStream(
       uint64_t* aStreamId, Http3StreamBase* aStream) = 0;
   virtual void ResetWebTransportStream(Http3WebTransportStream* aStream,
                                        uint64_t aErrorCode) = 0;
   virtual void StreamStopSending(Http3WebTransportStream* aStream,
-                                 uint8_t aErrorCode) = 0;
+                                 uint64_t aErrorCode) = 0;
   virtual void SetSendOrder(Http3StreamBase* aStream, int64_t aSendOrder) = 0;
   virtual void SetSendGroup(Http3StreamBase* aStream,
                             uint64_t aSendGroupId) = 0;
@@ -197,10 +210,18 @@ class Http3Session final : public Http3SessionBase,
   };
 
   Http3Session();
-  nsresult Init(const nsHttpConnectionInfo* aConnInfo, nsINetAddr* selfAddr,
+  nsresult Init(nsHttpConnectionInfo* aConnInfo, nsINetAddr* selfAddr,
                 nsINetAddr* peerAddr, HttpConnectionUDP* udpConn,
                 uint32_t aProviderFlags, nsIInterfaceRequestor* callbacks,
                 nsIUDPSocket* socket, bool aIsTunnel = false);
+
+  // Re-key this session's connection info after
+  // nsHttpConnectionMgr::HandOffHttp3OnlyConnection has moved the owning
+  // connection out of an Http3Policy::Only entry. The session keeps its own
+  // clone, and connection-manager lookups made from here later on -- e.g.
+  // AllowToRetryDifferentIPFamilyForHttp3 from Shutdown, or GetServerCertHashes
+  // -- resolve an entry from its hash key, so it has to follow the connection.
+  void RekeyAfterHttp3OnlyHandOff(nsHttpConnectionInfo* aConnInfo);
 
   bool IsConnected() const { return mState == CONNECTED; }
   bool CanSendData() const {
@@ -240,8 +261,9 @@ class Http3Session final : public Http3SessionBase,
                             uint32_t* aCountWritten, bool* aFin) override;
 
   // The folowing functions are used by Http3WebTransportSession:
-  nsresult CloseWebTransport(uint64_t aSessionId, uint32_t aError,
-                             const nsACString& aMessage) override;
+  bool CloseWebTransport(uint64_t aSessionId, uint32_t aError,
+                         const nsACString& aMessage,
+                         mozilla::dom::WebTransportStatsData& aStats) override;
   nsresult CreateWebTransportStream(uint64_t aSessionId,
                                     WebTransportStreamType aStreamType,
                                     uint64_t* aStreamId);
@@ -289,23 +311,35 @@ class Http3Session final : public Http3SessionBase,
   void ResetWebTransportStream(Http3WebTransportStream* aStream,
                                uint64_t aErrorCode) override;
   void StreamStopSending(Http3WebTransportStream* aStream,
-                         uint8_t aErrorCode) override;
+                         uint64_t aErrorCode) override;
 
   void SendDatagram(Http3WebTransportSession* aSession,
                     nsTArray<uint8_t>& aData, uint64_t aTrackingId,
-                    uint64_t aSendGroupId, int64_t aSendOrder) override;
+                    uint64_t aSendGroupId, int64_t aSendOrder,
+                    TimeStamp aTimestamp) override;
   void SendHTTPDatagram(uint64_t aStreamId, nsTArray<uint8_t>& aData,
                         uint64_t aTrackingId) override;
 
   uint64_t MaxDatagramSize(uint64_t aSessionId) override;
   nsresult ExportWebTransportKeyingMaterial(
       uint64_t aSessionId, const nsTArray<uint8_t>& aLabel,
-      const nsTArray<uint8_t>& aContext,
+      const nsTArray<uint8_t>& aContext, uint32_t aOutputLength,
       nsTArray<uint8_t>& aKeyingMaterial) override;
   nsresult RegisterWebTransportSendGroup(uint64_t aSessionId,
                                          uint64_t aGroupId) override;
+  bool GetWebTransportSessionStats(
+      uint64_t aSessionId,
+      mozilla::dom::WebTransportStatsData& aStats) override;
+  void SetDatagramMaxBufferedDatagrams(uint64_t aSessionId,
+                                       uint32_t aMaxBufferedDatagrams) override;
+  void SetDatagramMaxAge(uint64_t aSessionId, double aMaxAge) override;
   nsresult GetWebTransportSessionProtocol(uint64_t aSessionId,
                                           nsACString& aProtocol) override;
+  void SetWebTransportAnticipatedConcurrentIncomingUnidirectionalStreams(
+      uint64_t aSessionId, uint16_t aValue) override;
+  void SetWebTransportAnticipatedConcurrentIncomingBidirectionalStreams(
+      uint64_t aSessionId, uint16_t aValue) override;
+
   void SetSendOrder(Http3StreamBase* aStream, int64_t aSendOrder) override;
   void SetSendGroup(Http3StreamBase* aStream, uint64_t aSendGroupId) override;
 
@@ -355,6 +389,8 @@ class Http3Session final : public Http3SessionBase,
   void QueueStream(Http3StreamBase* stream);
   void RemoveStreamFromQueues(Http3StreamBase*);
   void ProcessPending();
+  void ApplyAnticipatedWebTransportStreams(Http3StreamBase* aStream,
+                                           uint64_t aSessionId);
 
   void CallCertVerification(Maybe<nsCString> aEchPublicName);
   void SetSecInfo();
@@ -452,6 +488,9 @@ class Http3Session final : public Http3SessionBase,
   RefPtr<nsHttpTransaction> mFirstHttpTransaction;
 
   RefPtr<nsHttpConnectionInfo> mConnInfo;
+  // Copy of mConnInfo->GetIsTrrServiceChannel() that DontReuse can read off
+  // the socket thread.
+  Atomic<bool, Relaxed> mIsTrrServiceChannel{false};
 
   int64_t mTotalBytesRead = 0;     // total data read
   int64_t mTotalBytesWritten = 0;  // total data read

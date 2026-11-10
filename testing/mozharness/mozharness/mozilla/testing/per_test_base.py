@@ -12,6 +12,8 @@ import sys
 
 import mozinfo
 
+TEST_SUMMARY_FILENAME = "summary.jsonl"
+
 
 class SingleTestMixin:
     """Utility functions for per-test testing like test verification and per-test coverage."""
@@ -27,6 +29,7 @@ class SingleTestMixin:
         # Use self._map_test_path_to_source(test_machine_path, source_path) to add a mapping.
         self.test_src_path = {}
         self.per_test_log_index = 1
+        self.test_summary_started = False
 
     def _map_test_path_to_source(self, test_machine_path, source_path):
         test_machine_path = test_machine_path.replace(os.sep, posixpath.sep)
@@ -37,6 +40,19 @@ class SingleTestMixin:
         if suite and (suite == "gpu" or suite.startswith("webgl")):
             return True
         return False
+
+    @staticmethod
+    def _tests_under(tests_by_path, paths):
+        prefixes = []
+        for path in paths:
+            path = path.replace(posixpath.sep, os.sep).rstrip(os.sep)
+            prefixes.append((path, path + os.sep))
+
+        return [
+            test
+            for test in tests_by_path
+            if any(test == path or test.startswith(prefix) for path, prefix in prefixes)
+        ]
 
     def _find_misc_tests(self, dirs, changed_files, mozinfo, gpu=False):
         manifests = [
@@ -161,6 +177,15 @@ class SingleTestMixin:
                 "Per-test run updated with manifest %s (%d tests)"
                 % (path, len(man.files))
             )
+
+        if self.config.get("verify_paths"):
+            requested_paths = changed_files
+            changed_files = self._tests_under(tests_by_path, requested_paths)
+            if not changed_files:
+                self.warning(
+                    "Per-test run found no test under the requested paths: "
+                    + ", ".join(sorted(requested_paths))
+                )
 
         # for each changed file, determine if it is a test file, and what suite it is in
         for file in changed_files:
@@ -365,14 +390,6 @@ class SingleTestMixin:
         mozinfo.update({"headless": self.config.get("headless", False)})
         mozinfo.update({"a11y_checks": self.config.get("a11y_checks", False)})
         mozinfo.update({
-            "socketprocess_e10s": "media.peerconnection.mtransport_process=true"
-            in self.config.get("extra_prefs", [])
-        })
-        mozinfo.update({
-            "socketprocess_networking": "network.http.network_access_on_socket_process.enabled=true"
-            in self.config.get("extra_prefs", [])
-        })
-        mozinfo.update({
             "swgl": "gfx.webrender.software=true" in self.config.get("extra_prefs", [])
         })
         mozinfo.update({
@@ -433,11 +450,11 @@ class SingleTestMixin:
                     if changed.startswith(specified):
                         changed_and_specified.add(changed)
                         break
-            if changed_and_specified:
+            if changed_and_specified and not self.config.get("verify_paths"):
                 changed_files = changed_and_specified
             else:
-                # if specified paths do not match changed files, assume the
-                # specified paths are explicitly requested tests
+                # verify the specified paths themselves when asked to or when
+                # they do not match changed files
                 changed_files = set()
                 changed_files.update(specified_paths)
             self.info("Per-test run found explicit request in MOZHARNESS_TEST_PATHS:")
@@ -463,26 +480,35 @@ class SingleTestMixin:
             self.tests_downloaded = True
             return
 
-        files_per_chunk = total_tests / float(self.config.get("total_chunks", 1))
-        files_per_chunk = int(math.ceil(files_per_chunk))
+        self.suites = self._chunk_suites(
+            int(self.config.get("total_chunks", 1)),
+            int(self.config.get("this_chunk", 1)),
+        )
+        self.tests_downloaded = True
 
-        chunk_number = int(self.config.get("this_chunk", 1))
+    def _chunk_suites(self, total_chunks, this_chunk):
+        """Return the share of self.suites that this chunk should run.
+
+        The suites are sorted because they are built by iterating a set of
+        paths, whose order varies between processes: every chunk has to slice
+        the same list for the chunks to together cover each test once.
+        """
+        total_tests = sum(len(tests) for tests in self.suites.values())
+        files_per_chunk = int(math.ceil(total_tests / float(total_chunks)))
+
         suites = {}
-        start = (chunk_number - 1) * files_per_chunk
-        end = chunk_number * files_per_chunk
+        start = (this_chunk - 1) * files_per_chunk
+        end = this_chunk * files_per_chunk
         current = -1
-        for suite in self.suites:
-            for test in self.suites[suite]:
+        for suite in sorted(self.suites):
+            for test in sorted(self.suites[suite]):
                 current += 1
                 if current >= start and current < end:
-                    if suite not in suites:
-                        suites[suite] = []
-                    suites[suite].append(test)
+                    suites.setdefault(suite, []).append(test)
             if current >= end:
                 break
 
-        self.suites = suites
-        self.tests_downloaded = True
+        return suites
 
     def query_args(self, suite):
         """
@@ -584,8 +610,8 @@ class SingleTestMixin:
 
     def get_indexed_logs(self, dir, test_suite):
         """
-        Per-test tasks need distinct file names for the raw, errorsummary and
-        testsummary logs on each run.
+        Per-test tasks need distinct file names for the raw and errorsummary
+        logs on each run.
         """
         index = ""
         if self.verify_enabled or self.per_test_coverage:
@@ -595,5 +621,21 @@ class SingleTestMixin:
         error_summary_file = os.path.join(
             dir, "%s%s_errorsummary.log" % (test_suite, index)
         )
-        test_summary_file = os.path.join(dir, "summary.jsonl")
-        return raw_log_file, error_summary_file, test_summary_file
+        return raw_log_file, error_summary_file
+
+    def query_test_summary_file(self, dir, suite_definition):
+        """
+        Path of the task's summary.jsonl if the suite definition opts in with
+        `test_summary`, else None.
+
+        Every harness run of the task appends to the same file, so the first
+        call starts it over.
+        """
+        if not suite_definition.get("test_summary"):
+            return None
+        path = os.path.join(dir, TEST_SUMMARY_FILENAME)
+        if not self.test_summary_started:
+            self.test_summary_started = True
+            os.makedirs(dir, exist_ok=True)
+            open(path, "w", encoding="utf-8").close()
+        return path

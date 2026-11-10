@@ -242,6 +242,10 @@ class SessionControlInteractor(
         topSiteController.handleShowAllTopSitesClicked()
     }
 
+    override fun onExpandToggleClicked(isExpanded: Boolean) {
+        topSiteController.handleExpandToggleClicked(isExpanded)
+    }
+
     override fun onShortcutsLibraryViewed() {
         topSiteController.handleShortcutsLibraryViewed()
     }
@@ -298,10 +302,6 @@ class SessionControlInteractor(
 
     override fun onRecentTabClicked(tabId: String) {
         recentTabController.handleRecentTabClicked(tabId)
-    }
-
-    override fun onRecentTabShowAllClicked() {
-        recentTabController.handleRecentTabShowAllClicked()
     }
 
     override fun onRemoveRecentTab(tab: RecentTab.Tab) {

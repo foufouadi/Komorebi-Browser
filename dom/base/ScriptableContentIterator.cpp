@@ -5,8 +5,8 @@
 #include "ScriptableContentIterator.h"
 
 #include "mozilla/ContentIterator.h"
+#include "mozilla/dom/Range.h"
 #include "nsINode.h"
-#include "nsRange.h"
 
 namespace mozilla {
 
@@ -72,13 +72,13 @@ void ScriptableContentIterator::EnsureContentIterator() {
   switch (mIteratorType) {
     case POST_ORDER_ITERATOR:
     default:
-      mContentIterator = MakeUnique<PostContentIterator>();
+      mContentIterator = std::make_unique<PostContentIterator>();
       break;
     case PRE_ORDER_ITERATOR:
-      mContentIterator = MakeUnique<PreContentIterator>();
+      mContentIterator = std::make_unique<PreContentIterator>();
       break;
     case SUBTREE_ITERATOR:
-      mContentIterator = MakeUnique<ContentSubtreeIterator>();
+      mContentIterator = std::make_unique<ContentSubtreeIterator>();
       break;
   }
 }
@@ -96,7 +96,8 @@ ScriptableContentIterator::InitWithRootNode(IteratorType aType,
 }
 
 NS_IMETHODIMP
-ScriptableContentIterator::InitWithRange(IteratorType aType, nsRange* aRange) {
+ScriptableContentIterator::InitWithRange(IteratorType aType,
+                                         dom::Range* aRange) {
   if (aType == NOT_INITIALIZED ||
       (mIteratorType != NOT_INITIALIZED && aType != mIteratorType)) {
     return NS_ERROR_INVALID_ARG;
@@ -108,7 +109,7 @@ ScriptableContentIterator::InitWithRange(IteratorType aType, nsRange* aRange) {
 
 NS_IMETHODIMP
 ScriptableContentIterator::InitWithRangeAllowCrossShadowBoundary(
-    IteratorType aType, nsRange* aRange) {
+    IteratorType aType, dom::Range* aRange) {
   if (aType == NOT_INITIALIZED ||
       (mIteratorType != NOT_INITIALIZED && aType != mIteratorType) ||
       aType != SUBTREE_ITERATOR) {

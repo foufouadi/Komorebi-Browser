@@ -9,11 +9,11 @@ import { thompsonSampleSort } from "resource://newtab/lib/SmartShortcutsRanker/T
  *
  * @param {number[]} hist Defines histogram of counts
  * @param {number} t Time/Index we are interpolating to
- * @returns {normed: number} Normalized number
+ * @returns {number} Normalized number
  */
 export function interpolateWrappedHistogram(hist, t) {
   if (!hist.length) {
-    return hist;
+    return 0;
   }
   const n = hist.length;
   const lo = Math.floor(t) % n;
@@ -95,8 +95,8 @@ export function sumNorm(vec) {
  * over a feature, this is stored in the shortcut cache
  *
  * @param {number[]} vals scores to normalize
- * @param {object} normobj Dictionary of storing info for running mean var
- * @returns {[number, obj]} normalized features and the updated object
+ * @param {object} input_normobj Dictionary of storing info for running mean var
+ * @returns {[number[], object]} normalized features and the updated object
  */
 export function normUpdate(vals, input_normobj) {
   if (!vals.length) {
@@ -132,8 +132,8 @@ export function normUpdate(vals, input_normobj) {
  * Normalize a dictionary of {key: hist[]} using squared values and column-wise normalization.
  * Returns {key: normedHist[]} where each hist[j] is divided by sum_k hist_k[j]^2.
  *
- * @param {{[key: string]: number}} dict - A dictionary mapping keys to arrays of P(t|s) values.
- * @returns {{[key: string]: number}} New dictionary with normalized histograms (P(s|t)).
+ * @param {{[key: string]: number[]}} dict - A dictionary mapping keys to arrays of P(t|s) values.
+ * @returns {{[key: string]: number[]}} New dictionary with normalized histograms (P(s|t)).
  */
 export function normHistDict(dict) {
   const keys = Object.keys(dict);
@@ -158,6 +158,7 @@ export function normHistDict(dict) {
   }
 
   // normalize
+  /** @type {{[key: string]: number[]}} */
   const normalized = {};
   for (const [key, row] of Object.entries(squared)) {
     normalized[key] = row.map((val, j) => (colSums[j] ? val / colSums[j] : 0));
@@ -252,7 +253,7 @@ const TYPE_SCORE = {
  * @param {object} visitCounts guid -> {visit.type, visit.time}
  * @param {object} visitCounts guid -> total visit count
  * @param {object} opts options for controlling calc
- * @returns {Promise<{pvec: number[]|null, hists: any}>}
+ * @returns {Promise<{[feature in "refre" | "rece" | "freq" | "unid"]: {[guid: string]: number}}>}
  */
 export async function buildFrecencyFeatures(
   visitsByGuid,

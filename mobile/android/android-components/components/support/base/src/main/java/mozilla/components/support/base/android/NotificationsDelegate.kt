@@ -16,6 +16,7 @@ import androidx.annotation.VisibleForTesting
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.Lifecycle
+import mozilla.components.support.base.log.logger.Logger
 
 typealias OnPermissionGranted = () -> Unit
 
@@ -29,6 +30,8 @@ typealias OnPermissionRejected = () -> Unit
  * @property onPermissionRejected optional callback for handling permission refusal.
  */
 class NotificationsDelegate(val notificationManagerCompat: NotificationManagerCompat) {
+    private val logger = Logger("NotificationsDelegate")
+
     var isRequestingPermission: Boolean = false
         private set
 
@@ -82,7 +85,6 @@ class NotificationsDelegate(val notificationManagerCompat: NotificationManagerCo
      *   notification. Note that it will also be called when the permission is already granted.
      * @param onPermissionRejected optional callback for handling permission refusal.
      */
-    @SuppressLint("MissingPermission", "NotifyUsage")
     fun notify(
         notificationTag: String? = null,
         notificationId: Int,
@@ -92,17 +94,13 @@ class NotificationsDelegate(val notificationManagerCompat: NotificationManagerCo
         showPermissionRationale: Boolean = false,
     ) {
         if (hasPostNotificationsPermission()) {
-            notificationManagerCompat.notify(notificationTag, notificationId, notification)
+            notifySafe(notificationTag, notificationId, notification)
             onPermissionGranted.invoke()
         } else {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 requestNotificationPermission(
                     onPermissionGranted = {
-                        notificationManagerCompat.notify(
-                            notificationTag,
-                            notificationId,
-                            notification,
-                        )
+                        notifySafe(notificationTag, notificationId, notification)
                         onPermissionGranted.invoke()
                     },
                     onPermissionRejected = onPermissionRejected,
@@ -116,6 +114,20 @@ class NotificationsDelegate(val notificationManagerCompat: NotificationManagerCo
                 // For now we just call onPermissionRejected here to ping the caller about the permission status.
                 onPermissionRejected.invoke()
             }
+        }
+    }
+
+    @SuppressLint("MissingPermission", "NotifyUsage")
+    private fun notifySafe(
+        notificationTag: String?,
+        notificationId: Int,
+        notification: Notification,
+    ) {
+        try {
+            notificationManagerCompat.notify(notificationTag, notificationId, notification)
+        } catch (e: SecurityException) {
+            // Dropping the notification is preferable to crashing.
+            logger.warn("Failed to post notification", e)
         }
     }
 

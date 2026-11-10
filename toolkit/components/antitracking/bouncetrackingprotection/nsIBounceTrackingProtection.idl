@@ -74,6 +74,11 @@ interface nsIBounceTrackingProtection : nsISupports {
     // across all OriginAttributes.
     boolean hasRecentlyPurgedSite(in ACString aSiteHost);
 
+    // Returns purge entries where aSiteHost appears anywhere in the bounce
+    // chain: as the purged site key, initialHost, finalHost, or a bounceHost.
+    // Searches across all OriginAttributes.
+    Array<nsIBounceTrackingPurgeEntry> getRecentPurgedChainEntriesForSite(in ACString aSiteHost);
+
     // Test getter to inspect remote exception list state.
     Array<ACString> testGetSiteHostExceptions();
 
@@ -81,6 +86,12 @@ interface nsIBounceTrackingProtection : nsISupports {
     // classified bounce trackers.
     [implicit_jscontext]
     Promise testRunPurgeBounceTrackers();
+
+    // Flush pending storage updates. Resolves once all queued storage
+    // operations, including initialization and loading the on-disk state into
+    // memory, have completed.
+    [implicit_jscontext]
+    Promise testFlushStorage();
 
     // Clear expired user activation flags. Expiry is set via pref
     // "privacy.bounceTrackingProtection.bounceTrackingActivationLifetimeSec".

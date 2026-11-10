@@ -76,8 +76,9 @@ IPCResult IPCResult::FailImpl(NotNull<IProtocol*> actor, const char* where,
 }
 
 /* static */
-IPCResult IPCResult::FailForTesting(NotNull<IProtocol*> actor,
-                                    const char* where, const char* why) {
+IPCResult IPCResult::FailForTesting(NotNull<IProtocol*> /*actor*/,
+                                    const char* /*where*/,
+                                    const char* /*why*/) {
   return IPCResult(false);
 }
 
@@ -127,7 +128,7 @@ bool LoggingEnabledFor(const char* aTopLevelProtocol, Side aSide,
   Tokenizer::Token t;
   while (tokens.Next(t)) {
     if (t.Type() == Tokenizer::TOKEN_WORD) {
-      auto filter = t.AsString();
+      const auto& filter = t.AsString();
 
       // Since aTopLevelProtocol never includes the "Parent" / "Child" suffix,
       // this will only occur when filter doesn't include it either, meaning
@@ -868,9 +869,7 @@ IPDLResolverInner::~IPDLResolverInner() {
 }
 
 bool IPDLAsyncReturnsCallbacks::EntryKey::operator==(
-    const EntryKey& aOther) const {
-  return mSeqno == aOther.mSeqno && mType == aOther.mType;
-}
+    const EntryKey& aOther) const = default;
 
 bool IPDLAsyncReturnsCallbacks::EntryKey::operator<(
     const EntryKey& aOther) const {

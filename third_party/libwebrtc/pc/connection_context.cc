@@ -13,6 +13,7 @@
 #include <memory>
 #include <utility>
 
+#include "absl/base/nullability.h"
 #include "api/audio_options.h"
 #include "api/environment/environment.h"
 #include "api/scoped_refptr.h"
@@ -24,14 +25,38 @@
 #include "pc/media_factory.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/internal/default_socket_server.h"
+#include "rtc_base/logging.h"
 #include "rtc_base/network.h"
 #include "rtc_base/socket_factory.h"
 #include "rtc_base/socket_server.h"
+#include "rtc_base/system/ignore_warnings.h"
 #include "rtc_base/thread.h"
 
 namespace webrtc {
 
 namespace {
+
+// Returns the network thread that the application supplied, if any. Support for
+// a worker thread that is distinct from the network thread is being removed.
+// For compatibility with applications that supply a worker thread but no
+// network thread, the worker thread is used as the network thread if its socket
+// server can create sockets. That joins the worker and network threads.
+RTC_PUSH_IGNORING_WDEPRECATED_DECLARATIONS()
+Thread* absl_nullable ResolveNetworkThread(
+    const PeerConnectionFactoryDependencies& dependencies) {
+  Thread* worker_thread = dependencies.worker_thread;
+  if (dependencies.network_thread != nullptr || worker_thread == nullptr ||
+      !worker_thread->socketserver()->CanCreateSockets()) {
+    return dependencies.network_thread;
+  }
+  RTC_LOG(LS_WARNING)
+      << "PeerConnectionFactoryDependencies::worker_thread is set while "
+         "network_thread is not. The worker thread will be used as the "
+         "network thread. Applications should set network_thread instead. "
+         "See PSA: https://groups.google.com/g/discuss-webrtc/c/Fs_Hd5XNJh0";
+  return worker_thread;
+}
+RTC_POP_IGNORING_WDEPRECATED_DECLARATIONS()
 
 Thread* MaybeStartNetworkThread(
     Thread* old_thread,
@@ -77,12 +102,25 @@ std::unique_ptr<SctpTransportFactoryInterface> MaybeCreateSctpFactory(
 #endif
 }
 
+// Returns the thread to use as the worker thread. Support for a worker thread
+// that is distinct from the network thread is being removed, so applications
+// should stop supplying one. Reading the deprecated member is confined to this
+// function in order to keep the warning suppression as narrow as possible.
+RTC_PUSH_IGNORING_WDEPRECATED_DECLARATIONS()
+Thread* absl_nonnull ResolveWorkerThread(
+    const PeerConnectionFactoryDependencies& dependencies,
+    Thread* absl_nonnull network_thread) {
+  return dependencies.worker_thread != nullptr ? dependencies.worker_thread
+                                               : network_thread;
+}
+RTC_POP_IGNORING_WDEPRECATED_DECLARATIONS()
+
 }  // namespace
 
 // Static
 scoped_refptr<ConnectionContext> ConnectionContext::Create(
     const Environment& env,
-    PeerConnectionFactoryDependencies* dependencies) {
+    PeerConnectionFactoryDependencies* absl_nonnull dependencies) {
   return scoped_refptr<ConnectionContext>(
       new ConnectionContext(env, dependencies));
 }
@@ -99,18 +137,13 @@ MediaEngineInterface* ConnectionContext::MediaEngineReference::media_engine()
 
 ConnectionContext::ConnectionContext(
     const Environment& env,
-    PeerConnectionFactoryDependencies* dependencies)
+    PeerConnectionFactoryDependencies* absl_nonnull dependencies)
     : is_configured_for_media_(dependencies->media_factory != nullptr),
-      network_thread_(MaybeStartNetworkThread(dependencies->network_thread,
-                                              owned_socket_factory_,
-                                              owned_network_thread_)),
-      worker_thread_(dependencies->worker_thread,
-                     []() {
-                       auto thread_holder = Thread::Create();
-                       thread_holder->SetName("pc_worker_thread", nullptr);
-                       thread_holder->Start();
-                       return thread_holder;
-                     }),
+      network_thread_(
+          MaybeStartNetworkThread(ResolveNetworkThread(*dependencies),
+                                  owned_socket_factory_,
+                                  owned_network_thread_)),
+      worker_thread_(ResolveWorkerThread(*dependencies, network_thread_)),
       signaling_thread_(MaybeWrapThread(dependencies->signaling_thread,
                                         wraps_current_thread_)),
       media_engine_(
@@ -125,11 +158,24 @@ ConnectionContext::ConnectionContext(
       default_socket_factory_(std::move(dependencies->packet_socket_factory)),
       sctp_factory_(
           MaybeCreateSctpFactory(std::move(dependencies->sctp_factory),
-                                 network_thread())),
-      use_rtx_(true) {
+                                 network_thread())) {
   RTC_DCHECK_RUN_ON(signaling_thread_);
+  RTC_DCHECK(network_thread_ != nullptr);
+  RTC_DCHECK(worker_thread_ != nullptr);
   RTC_DCHECK(!(default_network_manager_ && network_monitor_factory_))
       << "You can't set both network_manager and network_monitor_factory.";
+
+  if (worker_thread_ != network_thread_) {
+    RTC_LOG(LS_ERROR)
+        << "\n"
+        << "***************************************************************\n"
+        << "* DEPRECATION: A worker thread distinct from the network      *\n"
+        << "* thread is configured. Support for a separate worker thread  *\n"
+        << "* is being removed. Applications must stop supplying          *\n"
+        << "* PeerConnectionFactoryDependencies::worker_thread.           *\n"
+        << "* PSA: https://groups.google.com/g/discuss-webrtc/c/Fs_Hd5XNJh0\n"
+        << "***************************************************************";
+  }
 
   signaling_thread_->AllowInvokesToThread(worker_thread());
   signaling_thread_->AllowInvokesToThread(network_thread_);
@@ -139,7 +185,7 @@ ConnectionContext::ConnectionContext(
     // network_thread_. In this case, no further action is required as
     // signaling_thread_ can already invoke network_thread_.
     network_thread_->PostTask(
-        [thread = network_thread_, worker_thread = worker_thread_.get()] {
+        [thread = network_thread_, worker_thread = worker_thread_] {
           thread->DisallowBlockingCalls();
           thread->DisallowAllInvokes();
           if (worker_thread == thread) {

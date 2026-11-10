@@ -15,7 +15,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "resource:///modules/asrouter/ASRouterDefaultConfig.sys.mjs",
   ASRouterNewTabHook: "resource:///modules/asrouter/ASRouterNewTabHook.sys.mjs",
   AddonManager: "resource://gre/modules/AddonManager.sys.mjs",
-  BackupService: "resource:///modules/backup/BackupService.sys.mjs",
+  BackupService: "moz-src:///browser/components/backup/BackupService.sys.mjs",
   BrowserSearchTelemetry:
     "moz-src:///browser/components/search/BrowserSearchTelemetry.sys.mjs",
   BrowserUtils: "resource://gre/modules/BrowserUtils.sys.mjs",
@@ -23,8 +23,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   ContentBlockingPrefs:
     "moz-src:///browser/components/protections/ContentBlockingPrefs.sys.mjs",
-  ContextualIdentityService:
-    "moz-src:///toolkit/components/contextualidentity/ContextualIdentityService.sys.mjs",
   DAPIncrementality: "resource://gre/modules/DAPIncrementality.sys.mjs",
   DAPTelemetrySender: "resource://gre/modules/DAPTelemetrySender.sys.mjs",
   DAPVisitCounter: "resource://gre/modules/DAPVisitCounter.sys.mjs",
@@ -32,16 +30,17 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "moz-src:///browser/components/DefaultBrowserCheck.sys.mjs",
   DesktopActorRegistry:
     "moz-src:///browser/components/DesktopActorRegistry.sys.mjs",
-  Discovery: "resource:///modules/Discovery.sys.mjs",
-  DistributionManagement: "resource:///modules/distribution.sys.mjs",
+  DistributionManagement: "moz-src:///browser/components/distribution.sys.mjs",
   DownloadsViewableInternally:
     "moz-src:///browser/components/downloads/DownloadsViewableInternally.sys.mjs",
   ExtensionsUI: "resource:///modules/ExtensionsUI.sys.mjs",
   FormAutofillUtils: "resource://gre/modules/shared/FormAutofillUtils.sys.mjs",
   Interactions: "moz-src:///browser/components/places/Interactions.sys.mjs",
-  LoginBreaches: "resource:///modules/LoginBreaches.sys.mjs",
+  LoginBreaches:
+    "moz-src:///browser/components/aboutlogins/LoginBreaches.sys.mjs",
   LoginHelper: "resource://gre/modules/LoginHelper.sys.mjs",
-  MigrationUtils: "resource:///modules/MigrationUtils.sys.mjs",
+  MigrationUtils:
+    "moz-src:///browser/components/migration/MigrationUtils.sys.mjs",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   OnboardingMessageProvider:
     "resource:///modules/asrouter/OnboardingMessageProvider.sys.mjs",
@@ -63,8 +62,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   SearchService: "moz-src:///toolkit/components/search/SearchService.sys.mjs",
   SearchSERPTelemetry:
     "moz-src:///browser/components/search/SearchSERPTelemetry.sys.mjs",
-  SessionStartup: "resource:///modules/sessionstore/SessionStartup.sys.mjs",
-  SessionWindowUI: "resource:///modules/sessionstore/SessionWindowUI.sys.mjs",
+  SessionStartup:
+    "moz-src:///browser/components/sessionstore/SessionStartup.sys.mjs",
   ShortcutUtils: "resource://gre/modules/ShortcutUtils.sys.mjs",
   SpecialMessageActions:
     "resource://messaging-system/lib/SpecialMessageActions.sys.mjs",
@@ -76,8 +75,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   TRRRacer: "resource:///modules/TRRPerformance.sys.mjs",
   WebChannel: "resource://gre/modules/WebChannel.sys.mjs",
   WebProtocolHandlerRegistrar:
-    "resource:///modules/WebProtocolHandlerRegistrar.sys.mjs",
-  WindowsRegistry: "resource://gre/modules/WindowsRegistry.sys.mjs",
+    "moz-src:///browser/components/protocolhandler/WebProtocolHandlerRegistrar.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
 });
 
@@ -100,6 +98,11 @@ if (AppConstants.ENABLE_WEBDRIVER) {
     "@mozilla.org/remote/agent;1",
     Ci.nsIRemoteAgent
   );
+
+  ChromeUtils.defineESModuleGetters(lazy, {
+    RemoteControlBanner:
+      "moz-src:///browser/components/remotecontrol/RemoteControlBanner.sys.mjs",
+  });
 } else {
   lazy.Marionette = { running: false };
   lazy.RemoteAgent = { running: false };
@@ -275,12 +278,13 @@ BrowserGlue.prototype = {
         // This notification is broadcast by the docshell when it "fixes up" a
         // URI that it's been asked to load into a keyword search.
         let engine = null;
+        let info = null;
         try {
-          engine = lazy.SearchService.getEngineById(
-            subject.QueryInterface(Ci.nsISupportsString).data
-          );
+          info = subject.QueryInterface(Ci.nsIURIFixupInfo);
+          engine = lazy.SearchService.getEngineById(info.keywordProviderId);
         } catch (ex) {
           console.error(ex);
+          return;
         }
         let win = lazy.BrowserWindowTracker.getTopWindow({
           allowFromInactiveWorkspace: true,
@@ -288,7 +292,15 @@ BrowserGlue.prototype = {
         lazy.BrowserSearchTelemetry.recordSearch(
           win.gBrowser.selectedBrowser,
           engine,
-          "urlbar"
+          "urlbar",
+          {
+            submission: info
+              ? {
+                  partnerCode: info.keywordPartnerCode,
+                  telemetryId: info.keywordTelemetryId || undefined,
+                }
+              : undefined,
+          }
         );
         break;
       }
@@ -324,9 +336,6 @@ BrowserGlue.prototype = {
           "os-autostart",
           false
         );
-        if (AppConstants.platform == "win") {
-          lazy.StartupOSIntegration.checkForLaunchOnLogin();
-        }
         break;
       }
     }
@@ -503,73 +512,6 @@ BrowserGlue.prototype = {
     }
   },
 
-  /**
-   * Show a notification bar offering a reset.
-   *
-   * @param reason
-   *        String of either "unused" or "uninstall", specifying the reason
-   *        why a profile reset is offered.
-   */
-  _resetProfileNotification(reason) {
-    let win = lazy.BrowserWindowTracker.getTopWindow({
-      allowFromInactiveWorkspace: true,
-    });
-    if (!win) {
-      return;
-    }
-
-    const { ResetProfile } = ChromeUtils.importESModule(
-      "resource://gre/modules/ResetProfile.sys.mjs"
-    );
-    if (!ResetProfile.resetSupported()) {
-      return;
-    }
-
-    let productName = lazy.gBrandBundle.GetStringFromName("brandShortName");
-    let resetBundle = Services.strings.createBundle(
-      "chrome://global/locale/resetProfile.properties"
-    );
-
-    let message;
-    if (reason == "unused") {
-      message = resetBundle.formatStringFromName("resetUnusedProfile.message", [
-        productName,
-      ]);
-    } else if (reason == "uninstall") {
-      message = resetBundle.formatStringFromName("resetUninstalled.message", [
-        productName,
-      ]);
-    } else {
-      throw new Error(
-        `Unknown reason (${reason}) given to _resetProfileNotification.`
-      );
-    }
-    let buttons = [
-      {
-        label: resetBundle.formatStringFromName(
-          "refreshProfile.resetButton.label",
-          [productName]
-        ),
-        accessKey: resetBundle.GetStringFromName(
-          "refreshProfile.resetButton.accesskey"
-        ),
-        callback() {
-          ResetProfile.openConfirmationDialog(win);
-        },
-      },
-    ];
-
-    win.gNotificationBox.appendNotification(
-      "reset-profile-notification",
-      {
-        label: message,
-        image: "chrome://global/skin/icons/question-64.png",
-        priority: win.gNotificationBox.PRIORITY_INFO_LOW,
-      },
-      buttons
-    );
-  },
-
   _notifyUnsignedAddonsDisabled() {
     let win = lazy.BrowserWindowTracker.getTopWindow({
       allowFromInactiveWorkspace: true,
@@ -578,17 +520,9 @@ BrowserGlue.prototype = {
       return;
     }
 
-    let message = win.gNavigatorBundle.getString(
-      "unsignedAddonsDisabled.message"
-    );
     let buttons = [
       {
-        label: win.gNavigatorBundle.getString(
-          "unsignedAddonsDisabled.learnMore.label"
-        ),
-        accessKey: win.gNavigatorBundle.getString(
-          "unsignedAddonsDisabled.learnMore.accesskey"
-        ),
+        "l10n-id": "unsigned-addons-disabled-learn-more",
         callback() {
           win.BrowserAddonUI.openAddonsMgr(
             "addons://list/extension?unsigned=true"
@@ -600,7 +534,7 @@ BrowserGlue.prototype = {
     win.gNotificationBox.appendNotification(
       "unsigned-addons-disabled",
       {
-        label: message,
+        label: { "l10n-id": "unsigned-addons-disabled-message" },
         priority: win.gNotificationBox.PRIORITY_WARNING_MEDIUM,
       },
       buttons
@@ -620,6 +554,11 @@ BrowserGlue.prototype = {
         Services.startup.wasSilentlyStarted ||
         !Services.prefs.getBoolPref("browser.startup.blankWindow", false)
       ) {
+        return false;
+      }
+
+      // Don't display the blank window with the --receive-push-messages argument
+      if (cmdLine.findFlag("receive-push-messages", false) != -1) {
         return false;
       }
 
@@ -684,9 +623,7 @@ BrowserGlue.prototype = {
       return;
     }
 
-    let browserWindowFeatures =
-      "chrome,all,dialog=no,extrachrome,menubar,resizable,scrollbars,status," +
-      "location,toolbar,personalbar";
+    let browserWindowFeatures = "chrome,all,dialog=no,resizable,toolbar";
     // This needs to be set when opening the window to ensure that the AppUserModelID
     // is set correctly on Windows. Without it, initial launches with `-private-window`
     // will show up under the regular Firefox taskbar icon first, and then switch
@@ -793,8 +730,6 @@ BrowserGlue.prototype = {
       }
     });
 
-    this._maybeOfferProfileReset();
-
     this._checkForOldBuildUpdates();
 
     // Check if Sync is configured
@@ -811,56 +746,6 @@ BrowserGlue.prototype = {
     );
 
     this._firstWindowTelemetry(aWindow);
-  },
-
-  _maybeOfferProfileReset() {
-    // Offer to reset a user's profile if it hasn't been used for 60 days.
-    const OFFER_PROFILE_RESET_INTERVAL_MS = 60 * 24 * 60 * 60 * 1000;
-    let lastUse = Services.appinfo.replacedLockTime;
-    let disableResetPrompt = Services.prefs.getBoolPref(
-      "browser.disableResetPrompt",
-      false
-    );
-
-    // Also check prefs.js last modified timestamp as a backstop.
-    // This helps for cases where the lock file checks don't work,
-    // e.g. NFS or because the previous time Firefox ran, it ran
-    // for a very long time. See bug 1054947 and related bugs.
-    lastUse = Math.max(
-      lastUse,
-      Services.prefs.userPrefsFileLastModifiedAtStartup
-    );
-
-    if (
-      !disableResetPrompt &&
-      lastUse &&
-      Date.now() - lastUse >= OFFER_PROFILE_RESET_INTERVAL_MS
-    ) {
-      this._resetProfileNotification("unused");
-    } else if (AppConstants.platform == "win" && !disableResetPrompt) {
-      // Check if we were just re-installed and offer Firefox Reset
-      let updateChannel;
-      try {
-        updateChannel = ChromeUtils.importESModule(
-          "resource://gre/modules/UpdateUtils.sys.mjs"
-        ).UpdateUtils.UpdateChannel;
-      } catch (ex) {}
-      if (updateChannel) {
-        let uninstalledValue = lazy.WindowsRegistry.readRegKey(
-          Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
-          "Software\\Mozilla\\Firefox",
-          `Uninstalled-${updateChannel}`
-        );
-        let removalSuccessful = lazy.WindowsRegistry.removeRegKey(
-          Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
-          "Software\\Mozilla\\Firefox",
-          `Uninstalled-${updateChannel}`
-        );
-        if (removalSuccessful && uninstalledValue == "True") {
-          this._resetProfileNotification("uninstall");
-        }
-      }
-    }
   },
 
   /**
@@ -912,23 +797,6 @@ BrowserGlue.prototype = {
         failureHandler(ex);
       }
     }
-  },
-
-  _monitorWebcompatReporterPref() {
-    const PREF = "extensions.webcompat-reporter.enabled";
-    const ID = "webcompat-reporter@mozilla.org";
-    Services.prefs.addObserver(PREF, async () => {
-      let addon = await lazy.AddonManager.getAddonByID(ID);
-      if (!addon) {
-        return;
-      }
-      let enabled = Services.prefs.getBoolPref(PREF, false);
-      if (enabled && !addon.isActive) {
-        await addon.enable({ allowSystemAddons: true });
-      } else if (!enabled && addon.isActive) {
-        await addon.disable({ allowSystemAddons: true });
-      }
-    });
   },
 
   // All initial windows have opened.
@@ -983,8 +851,11 @@ BrowserGlue.prototype = {
       AsanReporter.init();
     }
 
+    if (AppConstants.ENABLE_WEBDRIVER) {
+      lazy.RemoteControlBanner.init();
+    }
+
     lazy.Sanitizer.onStartup();
-    lazy.SessionWindowUI.maybeShowRestoreSessionInfoBar();
     this._scheduleStartupIdleTasks();
     this._lateTasksIdleObserver = (idleService, topic) => {
       if (topic == "idle") {
@@ -1000,8 +871,6 @@ BrowserGlue.prototype = {
       this._lateTasksIdleObserver,
       LATE_TASKS_IDLE_TIME_SEC
     );
-
-    this._monitorWebcompatReporterPref();
 
     // Loading the MigrationUtils module does the work of registering the
     // migration wizard JSWindowActor pair. In case nothing else has done
@@ -1073,14 +942,6 @@ BrowserGlue.prototype = {
           lazy.SafeBrowsing.init();
         },
         timeout: 5000,
-      },
-
-      {
-        name: "ContextualIdentityService.load",
-        task: async () => {
-          await lazy.ContextualIdentityService.load();
-          lazy.Discovery.update();
-        },
       },
     ];
 
@@ -1408,11 +1269,7 @@ BrowserGlue.prototype = {
         false
       )
     ) {
-      lazy
-        .RemoteSettings(lazy.LoginBreaches.REMOTE_SETTINGS_COLLECTION)
-        .on("sync", async event => {
-          await lazy.LoginBreaches.update(event.data.current);
-        });
+      lazy.LoginBreaches.subscribeToBreachUpdates();
     }
   },
 
@@ -1628,7 +1485,7 @@ BrowserGlue.prototype = {
     // Use an increasing number to keep track of the current state of the user's
     // profile, so we can move data around as needed as the browser evolves.
     // Completely unrelated to the current Firefox release number.
-    const APP_DATA_VERSION = 180;
+    const APP_DATA_VERSION = 184;
     const PREF = "browser.migration.version";
 
     let profileDataVersion = Services.prefs.getIntPref(PREF, -1);
@@ -1702,7 +1559,10 @@ BrowserGlue.prototype = {
     try {
       const win = browser.documentGlobal;
       const shellService = win.getShellService();
-      const isNowDefault = shellService.isDefaultBrowser(false, false);
+      const isNowDefault = await shellService.isDefaultBrowserAsync(
+        false,
+        false
+      );
       const resultEnum =
         (isNowDefault ? 0 : 1) * 2 +
         (shellService.shouldCheckDefaultBrowser ? 1 : 0);

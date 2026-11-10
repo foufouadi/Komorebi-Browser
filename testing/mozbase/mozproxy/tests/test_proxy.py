@@ -1,12 +1,15 @@
 #!/usr/bin/env python
+import json
 import os
+from contextlib import ExitStack
 from unittest import mock
 
 import mozinfo
 import mozunit
+import pytest
 import requests
 from mozproxy import get_playback
-from support import tempdir
+from support import firefox_binary, tempdir
 
 here = os.path.dirname(__file__)
 
@@ -65,16 +68,6 @@ def get_status_code(url, playback):
     return response.status_code
 
 
-def cleanup():
-    # some tests create this file as a side-effect
-    policies_file = os.path.join("distribution", "policies.json")
-    try:
-        if os.path.exists(policies_file):
-            os.remove(policies_file)
-    except PermissionError:
-        pass
-
-
 def test_mitm_check_proxy(*args):
     # test setup
     pageset_name = os.path.join(here, "files", "mitm5-linux-firefox-amazon.manifest")
@@ -85,13 +78,13 @@ def test_mitm_check_proxy(*args):
         "playback_version": "8.1.1",
         "platform": mozinfo.os,
         "run_local": "MOZ_AUTOMATION" not in os.environ,
-        "binary": "firefox",
         "app": "firefox",
         "host": "127.0.0.1",
     }
 
     with tempdir() as obj_path:
         config["obj_path"] = obj_path
+        config["binary"] = firefox_binary(obj_path)
         playback = get_playback(config)
         assert playback is not None
 
@@ -105,7 +98,6 @@ def test_mitm_check_proxy(*args):
             assert get_status_code(url, playback) == 404
         finally:
             playback.stop()
-    cleanup()
 
 
 @mock.patch("mozproxy.backends.mitm.Mitmproxy.check_proxy")
@@ -125,20 +117,19 @@ def test_mitm(*args):
         "playback_version": "8.1.1",
         "platform": mozinfo.os,
         "run_local": True,
-        "binary": "firefox",
         "app": "firefox",
         "host": "example.com",
     }
 
     with tempdir() as obj_path:
         config["obj_path"] = obj_path
+        config["binary"] = firefox_binary(obj_path)
         playback = get_playback(config)
-    assert playback is not None
-    try:
-        playback.start()
-    finally:
-        playback.stop()
-    cleanup()
+        assert playback is not None
+        try:
+            playback.start()
+        finally:
+            playback.stop()
 
 
 @mock.patch("mozproxy.backends.mitm.Mitmproxy.check_proxy")
@@ -204,20 +195,184 @@ def test_mitm_with_retry(*args):
         "playback_version": "8.1.1",
         "platform": mozinfo.os,
         "run_local": True,
-        "binary": "firefox",
         "app": "firefox",
         "host": "example.com",
     }
 
     with tempdir() as obj_path:
         config["obj_path"] = obj_path
+        config["binary"] = firefox_binary(obj_path)
         playback = get_playback(config)
-    assert playback is not None
-    try:
-        playback.start()
-    finally:
-        playback.stop()
-    cleanup()
+        assert playback is not None
+        try:
+            playback.start()
+        finally:
+            playback.stop()
+
+
+def test_mitm_direct_mode():
+    config = {
+        "playback_tool": "mitmproxy",
+        "playback_files": ["pageset.manifest"],
+        "playback_mode": "direct",
+        "playback_version": "12.2.1",
+        "platform": mozinfo.os,
+        "run_local": True,
+        "binary": "/tmp/chrome",
+        "app": "chrome",
+        "host": "127.0.0.1",
+    }
+
+    process = mock.Mock(pid=1234)
+    with tempdir() as obj_path:
+        config["obj_path"] = obj_path
+        playback = get_playback(config)
+        playback.playback_files = [mock.Mock()]
+        with ExitStack() as stack:
+            stack.enter_context(
+                mock.patch(
+                    "mozproxy.backends.mitm.mitm.get_available_port",
+                    side_effect=[18080, 18443],
+                )
+            )
+            stack.enter_context(
+                mock.patch(
+                    "mozproxy.backends.mitm.mitm.Mitmproxy._build_replay_paths",
+                    return_value=["/tmp/fake.mp"],
+                )
+            )
+            stack.enter_context(
+                mock.patch(
+                    "mozproxy.backends.mitm.mitm.Mitmproxy.check_proxy",
+                    return_value=True,
+                )
+            )
+            process_handler = stack.enter_context(
+                mock.patch(
+                    "mozproxy.backends.mitm.mitm.ProcessHandler",
+                    return_value=process,
+                )
+            )
+            playback.start_mitmproxy("/tmp/mitmdump", "/tmp/chrome")
+
+    command = process_handler.call_args.args[0]
+    assert "--listen-port" not in command
+    assert "reverse:http://example.invalid@18080" in command
+    assert "reverse:https://example.invalid@18443" in command
+    assert "keep_host_header=true" in command
+    assert "alt_server_replay_ignore_port=true" in command
+
+
+def test_mitm_direct_mode_rejects_unsupported_version():
+    config = {
+        "playback_tool": "mitmproxy",
+        "playback_files": ["pageset.manifest"],
+        "playback_mode": "direct",
+        "playback_version": "6.0.2",
+        "platform": mozinfo.os,
+        "run_local": True,
+        "binary": "/tmp/chrome",
+        "app": "chrome",
+        "host": "127.0.0.1",
+    }
+
+    with tempdir() as obj_path:
+        config["obj_path"] = obj_path
+        with pytest.raises(
+            ValueError,
+            match=(
+                "Direct playback does not support mitmproxy 6.0.2; "
+                "supported versions: 11.0.0, 12.2.1"
+            ),
+        ):
+            get_playback(config)
+
+
+def test_mitm_direct_mode_firefox_policy():
+    config = {
+        "playback_tool": "mitmproxy",
+        "playback_files": ["pageset.manifest"],
+        "playback_mode": "direct",
+        "playback_version": "12.2.1",
+        "platform": mozinfo.os,
+        "run_local": True,
+        "binary": "firefox",
+        "app": "firefox",
+        "host": "127.0.0.1",
+    }
+
+    with tempdir() as obj_path:
+        config["obj_path"] = obj_path
+        playback = get_playback(config)
+
+    playback.cert_path = "/tmp/mitmproxy-ca-cert.cer"
+    policies = json.loads(playback._policies_content())["policies"]
+    assert policies == {
+        "Certificates": {"Install": ["/tmp/mitmproxy-ca-cert.cer"]},
+        "Proxy": {"Mode": "none", "Locked": True},
+    }
+
+
+@pytest.mark.parametrize(
+    "playback_mode,expected_calls",
+    [
+        ("direct", [mock.call(7, (10240, -1)), mock.call(7, (256, -1))]),
+        ("proxy", []),
+    ],
+)
+def test_mitm_nofile_limit_for_mitmdump(playback_mode, expected_calls):
+    config = {
+        "playback_tool": "mitmproxy",
+        "playback_files": ["pageset.manifest"],
+        "playback_mode": playback_mode,
+        "playback_version": "12.2.1",
+        "platform": mozinfo.os,
+        "run_local": True,
+        "binary": "/tmp/chrome",
+        "app": "chrome",
+        "host": "127.0.0.1",
+    }
+
+    fake_resource = mock.Mock()
+    fake_resource.RLIMIT_NOFILE = 7
+    fake_resource.RLIM_INFINITY = -1
+    fake_resource.getrlimit.return_value = (256, -1)
+    process = mock.Mock(pid=1234)
+    with tempdir() as obj_path:
+        config["obj_path"] = obj_path
+        playback = get_playback(config)
+        playback.playback_files = [mock.Mock()]
+        with ExitStack() as stack:
+            stack.enter_context(
+                mock.patch("mozproxy.backends.mitm.mitm.resource", fake_resource)
+            )
+            stack.enter_context(
+                mock.patch(
+                    "mozproxy.backends.mitm.mitm.get_available_port",
+                    side_effect=[18080, 18443],
+                )
+            )
+            stack.enter_context(
+                mock.patch(
+                    "mozproxy.backends.mitm.mitm.Mitmproxy._build_replay_paths",
+                    return_value=["/tmp/fake.mp"],
+                )
+            )
+            stack.enter_context(
+                mock.patch(
+                    "mozproxy.backends.mitm.mitm.Mitmproxy.check_proxy",
+                    return_value=True,
+                )
+            )
+            stack.enter_context(
+                mock.patch(
+                    "mozproxy.backends.mitm.mitm.ProcessHandler",
+                    return_value=process,
+                )
+            )
+            playback.start_mitmproxy("/tmp/mitmdump", "/tmp/chrome")
+
+    assert fake_resource.setrlimit.call_args_list == expected_calls
 
 
 if __name__ == "__main__":

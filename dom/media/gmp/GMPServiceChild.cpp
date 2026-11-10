@@ -45,7 +45,7 @@ GeckoMediaPluginServiceChild::GetSingleton() {
   return service.forget().downcast<GeckoMediaPluginServiceChild>();
 }
 
-nsresult GeckoMediaPluginServiceChild::Init() {
+nsresult GeckoMediaPluginServiceChild::InitMainThread() {
   MOZ_ASSERT(NS_IsMainThread());
   GMP_LOG_DEBUG("{}::{}", __CLASS__, __FUNCTION__);
 
@@ -59,7 +59,18 @@ nsresult GeckoMediaPluginServiceChild::Init() {
     return rv;
   }
 
-  return GeckoMediaPluginService::Init();
+  return GeckoMediaPluginService::InitMainThread();
+}
+
+void GeckoMediaPluginServiceChild::UninitMainThread() {
+  MOZ_ASSERT(NS_IsMainThread());
+  GMP_LOG_DEBUG("{}::{}", __CLASS__, __FUNCTION__);
+
+  // Rejects the ticket's promise, which the callback in AddShutdownBlocker()
+  // ignores.
+  mShutdownBlocker = nullptr;
+
+  GeckoMediaPluginService::UninitMainThread();
 }
 
 NS_IMPL_ISUPPORTS_INHERITED0(GeckoMediaPluginServiceChild,
@@ -262,13 +273,14 @@ static auto GMPCapabilitiesToString() {
 /* static */
 void GeckoMediaPluginServiceChild::UpdateGMPCapabilities(
     nsTArray<GMPCapabilityData>&& aCapabilities) {
+  bool registerShutdownClear = false;
   {
     // The mutex should unlock before sending the "gmp-changed" observer
     // service notification.
     StaticMutexAutoLock lock(sGMPCapabilitiesMutex);
     if (!sGMPCapabilities) {
       sGMPCapabilities = new nsTArray<GMPCapabilityAndVersion>();
-      ClearOnShutdown(&sGMPCapabilities);
+      registerShutdownClear = true;
     }
     sGMPCapabilities->Clear();
     for (const GMPCapabilityData& plugin : aCapabilities) {
@@ -277,6 +289,14 @@ void GeckoMediaPluginServiceChild::UpdateGMPCapabilities(
 
     GMP_LOG_DEBUG("{}::{} {{{}}}", __CLASS__, __FUNCTION__,
                   GMPCapabilitiesToString().get());
+  }
+
+  if (registerShutdownClear) {
+    // Clear under the lock, as HasCapabilityForAPI can run on any thread.
+    RunOnShutdown([] {
+      StaticMutexAutoLock lock(sGMPCapabilitiesMutex);
+      sGMPCapabilities = nullptr;
+    });
   }
 
   // Fire a notification so that any MediaKeySystemAccess
@@ -312,25 +332,28 @@ void GeckoMediaPluginServiceChild::BeginShutdown() {
   RemoveShutdownBlockerIfNeeded();
 }
 
-NS_IMETHODIMP
-GeckoMediaPluginServiceChild::HasPluginForAPI(const nsACString& aAPI,
-                                              const nsTArray<nsCString>& aTags,
-                                              bool* aHasPlugin) {
+/* static */
+bool GeckoMediaPluginServiceChild::HasCapabilityForAPI(
+    const nsACString& aAPI, const nsTArray<nsCString>& aTags) {
   StaticMutexAutoLock lock(sGMPCapabilitiesMutex);
   if (!sGMPCapabilities) {
-    *aHasPlugin = false;
-    return NS_OK;
+    return false;
   }
 
   nsCString api(aAPI);
   for (const GMPCapabilityAndVersion& plugin : *sGMPCapabilities) {
     if (GMPCapability::Supports(plugin.mCapabilities, api, aTags)) {
-      *aHasPlugin = true;
-      return NS_OK;
+      return true;
     }
   }
+  return false;
+}
 
-  *aHasPlugin = false;
+NS_IMETHODIMP
+GeckoMediaPluginServiceChild::HasPluginForAPI(const nsACString& aAPI,
+                                              const nsTArray<nsCString>& aTags,
+                                              bool* aHasPlugin) {
+  *aHasPlugin = HasCapabilityForAPI(aAPI, aTags);
   return NS_OK;
 }
 
@@ -485,7 +508,8 @@ nsresult GeckoMediaPluginServiceChild::AddShutdownBlocker() {
       name, NS_LITERAL_STRING_FROM_CSTRING(__FILE__), __LINE__);
   if (mShutdownBlocker) {
     mShutdownBlocker->ShutdownPromise()->Then(
-        mMainThread, __func__, [this, self = RefPtr(this), name]() {
+        mMainThread, __func__,
+        [this, self = RefPtr(this), name]() {
           GMP_LOG_DEBUG("GMPServiceChild::BlockShutdown: {}",
                         NS_ConvertUTF16toUTF8(name).get());
           mXPCOMWillShutdown = true;
@@ -493,7 +517,8 @@ nsresult GeckoMediaPluginServiceChild::AddShutdownBlocker() {
           gmpThread->Dispatch(
               NewRunnableMethod("GMPServiceChild::BeginShutdown", this,
                                 &GeckoMediaPluginServiceChild::BeginShutdown));
-        });
+        },
+        [] {});
     return NS_OK;
   }
 

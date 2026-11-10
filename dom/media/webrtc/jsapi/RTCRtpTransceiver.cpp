@@ -782,6 +782,37 @@ void RTCRtpTransceiver::NegotiatedDetailsToAudioCodecConfigs(
   }
 }
 
+/*static*/
+void RTCRtpTransceiver::EarlyRecvCodecsToAudioCodecConfigs(
+    JsepTrack& aTrack, std::vector<AudioCodecConfig>* aConfigs) {
+  Maybe<AudioCodecConfig> telephoneEvent;
+
+  aTrack.ForEachEarlyRecvCodec(
+      [&](const UniquePtr<JsepCodecDescription>& codec) {
+        if (!codec->mEnabled || codec->Type() != SdpMediaSection::kAudio ||
+            !codec->DirectionSupported(sdp::kRecv)) {
+          return;
+        }
+        Maybe<AudioCodecConfig> config;
+        const JsepAudioCodecDescription& audio =
+            static_cast<const JsepAudioCodecDescription&>(*codec);
+        JsepCodecDescToAudioCodecConfig(audio, &config);
+        if (!config) {
+          return;
+        }
+        if (config->mName == "telephone-event") {
+          telephoneEvent = std::move(config);
+        } else {
+          aConfigs->push_back(std::move(*config));
+        }
+      });
+
+  // Put telephone event at the back, because webrtc.org crashes if we don't
+  if (telephoneEvent) {
+    aConfigs->push_back(std::move(*telephoneEvent));
+  }
+}
+
 auto RTCRtpTransceiver::GetActivePayloadTypes() const
     -> RefPtr<ActivePayloadTypesPromise> {
   if (!mConduit) {
@@ -818,10 +849,8 @@ static auto JsepCodecDescToVideoCodecConfig(
     return Nothing();
   }
 
-  UniquePtr<VideoCodecConfigH264> h264Config;
-
   if (aCodec.mName == "H264") {
-    h264Config = MakeUnique<VideoCodecConfigH264>();
+    auto h264Config = std::make_unique<VideoCodecConfigH264>();
     size_t spropSize = sizeof(h264Config->sprop_parameter_sets);
     strncpy(h264Config->sprop_parameter_sets,
             aCodec.mSpropParameterSets.c_str(), spropSize);
@@ -903,6 +932,25 @@ void RTCRtpTransceiver::NegotiatedDetailsToVideoCodecConfigs(
   }
 }
 
+/*static*/
+void RTCRtpTransceiver::EarlyRecvCodecsToVideoCodecConfigs(
+    JsepTrack& aTrack, std::vector<VideoCodecConfig>* aConfigs) {
+  aTrack.ForEachEarlyRecvCodec(
+      [&](const UniquePtr<JsepCodecDescription>& codec) {
+        if (!codec->mEnabled || codec->Type() != SdpMediaSection::kVideo ||
+            !codec->DirectionSupported(sdp::kRecv)) {
+          return;
+        }
+        const JsepVideoCodecDescription& video =
+            static_cast<const JsepVideoCodecDescription&>(*codec);
+
+        JsepCodecDescToVideoCodecConfig(video).apply(
+            [&](VideoCodecConfig config) {
+              aConfigs->push_back(std::move(config));
+            });
+      });
+}
+
 /* static */
 void RTCRtpTransceiver::ToDomRtpCodec(const JsepCodecDescription& aCodec,
                                       RTCRtpCodec* aDomCodec) {
@@ -980,8 +1028,7 @@ void RTCRtpTransceiver::ToDomHeaderExtensions(
   aDetails.ForEachRTPHeaderExtension(
       [&](const SdpExtmapAttributeList::Extmap& aExtmap) {
         RTCRtpHeaderExtensionParameters ext;
-        ext.mUri.Construct(
-            NS_ConvertUTF8toUTF16(aExtmap.extensionname.c_str()));
+        ext.mUri.Construct(NS_ConvertUTF8toUTF16(aExtmap.extensionname));
         ext.mId.Construct(aExtmap.entry);
         // We do not negotiate RFC 6904 encrypted header extensions. When we do,
         // this should report encrypted=true with the inner (unwrapped) URI.
@@ -1009,7 +1056,6 @@ void RTCRtpTransceiver::SetCodecPreferences(
   nsTArray<RTCRtpCodec> aCodecsFiltered;
   OverrideRtxPreference rtxOverride =
       OverrideRtxPreference::OverrideWithDisabled;
-  ;
   bool useableCodecs = false;
 
   // kind = transciever's kind.
@@ -1076,13 +1122,17 @@ void RTCRtpTransceiver::SetCodecPreferences(
   // If we passed an empty list, we should restore the default list, including
   // RTX
 
-  mPreferredCodecs.clear();
-  std::vector<UniquePtr<JsepCodecDescription>> defaultCodecs;
+  mPreferredCodecs.Clear();
+  AutoTArray<UniquePtr<JsepCodecDescription>, 16> defaultCodecs;
 
   if (kind.EqualsLiteral("video")) {
-    PeerConnectionImpl::GetDefaultVideoCodecs(defaultCodecs, rtxOverride);
+    EnumerateDefaultVideoCodecs(
+        &defaultCodecs,
+        DefaultCodecPreferencesWithRtxOverride(mPc->mPrefs, rtxOverride));
   } else if (kind.EqualsLiteral("audio")) {
-    PeerConnectionImpl::GetDefaultAudioCodecs(defaultCodecs);
+    EnumerateDefaultAudioCodecs(
+        &defaultCodecs,
+        DefaultCodecPreferencesWithRtxOverride(mPc->mPrefs, rtxOverride));
   }
 
   if (!aCodecsFiltered.IsEmpty()) {
@@ -1122,13 +1172,13 @@ void RTCRtpTransceiver::SetCodecPreferences(
         if ((mimeType.Find(defaultCodec->mName) != kNotFound) &&
             (inputCodec.mClockRate == defaultCodec->mClock) && channelsMatch &&
             sdpFmtpLinesMatch) {
-          mPreferredCodecs.emplace_back(defaultCodec->Clone());
+          mPreferredCodecs.EmplaceBack(defaultCodec->Clone());
           break;
         }
       }
     }
   } else {
-    mPreferredCodecs.swap(defaultCodecs);
+    mPreferredCodecs = std::move(defaultCodecs);
     mPreferredCodecsInUse = false;
   }
 }
@@ -1306,7 +1356,7 @@ RefPtr<RTCStatsPromise> RTCRtpTransceiver::ApplyCodecStats(
                   // We have all the data we need to register codec stats and
                   // assign codecIds for this transceiver's rtp stream stats.
 
-                  auto report = MakeUnique<RTCStatsCollection>();
+                  auto report = std::make_unique<RTCStatsCollection>();
                   FlattenStats(std::move(aTransceiverStats), report.get());
 
                   // Find the codec stats we are looking for, based on the
@@ -1379,7 +1429,7 @@ RefPtr<RTCStatsPromise> RTCRtpTransceiver::ApplyCodecStats(
           GetMainThreadSerialEventTarget(), __func__,
           [finalCodecStats = std::move(finalCodecStats)](
               nsTArray<UniquePtr<RTCStatsCollection>> aStats) mutable {
-            auto finalStats = MakeUnique<RTCStatsCollection>();
+            auto finalStats = std::make_unique<RTCStatsCollection>();
             FlattenStats(std::move(aStats), finalStats.get());
             MOZ_ASSERT(finalStats->mCodecStats.IsEmpty());
             if (!finalStats->mCodecStats.SetCapacity(finalCodecStats->size(),

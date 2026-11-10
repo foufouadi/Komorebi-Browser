@@ -97,7 +97,7 @@ ifdef ENABLE_MOZSEARCH_PLUGIN
           index.scip
 	rm $(topsrcdir)/rust-analyzer.json
 ifeq ($(MOZ_BUILD_APP),mobile/android)
-	@echo 'Generating mozsearch java/kotlin semanticdb tarball...'
+	@echo 'Generating mozsearch java/kotlin SCIP tarball...'
 	$(RM) $(MOZSEARCH_JAVA_INDEX_BASENAME).zip
 	cd $(topsrcdir)/ && \
           $(PYTHON3) $(topsrcdir)/mach android compile-all && \
@@ -128,6 +128,12 @@ ifeq (Darwin_cocoa, $(OS_ARCH)_$(MOZ_WIDGET_TOOLKIT))
 	$(call py_action,zip $(UPDATE_FRAMEWORK_ARTIFACTS_ARCHIVE_BASENAME).zip,--error-if-empty -C $(ABS_DIST)/update_framework_artifacts '$(ABS_DIST)/$(PKG_PATH)$(UPDATE_FRAMEWORK_ARTIFACTS_ARCHIVE_BASENAME).zip' '*.framework')
 endif # Darwin_cocoa
 endif # MOZ_ARTIFACT_BUILDS
+ifdef MOZ_APPSERVICES_IN_TREE
+ifdef MOZ_LIBMEGAZORD_ARTIFACTS
+	@echo 'Generating libmegazord.so artifacts archive ($(LIBMEGAZORD_SO_ARTIFACTS_ARCHIVE_BASENAME).zip)'
+	$(call py_action,package_libmegazord_artifacts $(LIBMEGAZORD_SO_ARTIFACTS_ARCHIVE_BASENAME).zip,--dist-bin '$(ABS_DIST)/bin' '$(ABS_DIST)/$(PKG_PATH)$(LIBMEGAZORD_SO_ARTIFACTS_ARCHIVE_BASENAME).zip')
+endif
+endif
 
 make-package-internal: prepare-package make-sourcestamp-file
 	@echo 'Compressing...'
@@ -195,13 +201,6 @@ endif
 multilocale.txt: LOCALES?=$(MOZ_CHROME_MULTILOCALE)
 multilocale.txt:
 	$(call py_action,file_generate $@,$(MOZILLA_DIR)/toolkit/locales/gen_multilocale.py main '$(MULTILOCALE_DIR)/multilocale.txt' $(MDDEPDIR)/multilocale.txt.pp '$(MULTILOCALE_DIR)/multilocale.txt' $(ALL_LOCALES))
-
-# This version of the target uses AB_CD to build multilocale.txt and places it
-# in the $(XPI_NAME)/res dir - it should be used when repackaging a build.
-multilocale.txt-%: LOCALES?=$(AB_CD)
-multilocale.txt-%: MULTILOCALE_DIR=$(DIST)/xpi-stage/$(XPI_NAME)/res
-multilocale.txt-%:
-	$(call py_action,file_generate multilocale.txt,$(MOZILLA_DIR)/toolkit/locales/gen_multilocale.py main '$(MULTILOCALE_DIR)/multilocale.txt' $(MDDEPDIR)/multilocale.txt.pp '$(MULTILOCALE_DIR)/multilocale.txt' $(ALL_LOCALES))
 
 locale-manifest.in: LOCALES?=$(MOZ_CHROME_MULTILOCALE)
 locale-manifest.in: $(GLOBAL_DEPS) FORCE

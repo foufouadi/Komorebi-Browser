@@ -5,7 +5,6 @@
 #include "BrowserChild.h"
 
 #ifdef ACCESSIBILITY
-#  include "mozilla/a11y/DocAccessibleChild.h"
 #  include "nsAccessibilityService.h"
 #endif
 #include <utility>
@@ -76,6 +75,7 @@
 #include "mozilla/layers/IAPZCTreeManager.h"
 #include "mozilla/layers/ImageBridgeChild.h"
 #include "mozilla/layers/InputAPZContext.h"
+#include "mozilla/layers/LayerTreeLog.h"
 #include "mozilla/layers/TouchActionHelper.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
 #include "mozilla/widget/ScreenManager.h"
@@ -105,7 +105,6 @@
 #include "nsIURI.h"
 #include "nsIURIMutator.h"
 #include "nsIWeakReferenceUtils.h"
-#include "nsIWebBrowser.h"
 #include "nsIWebProgress.h"
 #include "nsIXULRuntime.h"
 #include "nsLayoutUtils.h"
@@ -124,12 +123,10 @@
 #  include "nsAppRunner.h"
 #endif
 
-#ifdef NS_PRINTING
-#  include "mozilla/layout/RemotePrintJobChild.h"
-#  include "nsIPrintSettings.h"
-#  include "nsIPrintSettingsService.h"
-#  include "nsIWebBrowserPrint.h"
-#endif
+#include "mozilla/layout/RemotePrintJobChild.h"
+#include "nsIPrintSettings.h"
+#include "nsIPrintSettingsService.h"
+#include "nsIWebBrowserPrint.h"
 
 static mozilla::LazyLogModule sApzChildLog("apz.child");
 
@@ -362,9 +359,6 @@ BrowserChild::BrowserChild(ContentChild* aManager, const TabId& aTabId,
       mShouldSendWebProgressEventsToParent(false),
       mRenderLayers(true),
       mIsPreservingLayers(false),
-#if defined(XP_WIN) && defined(ACCESSIBILITY)
-      mNativeWindowHandle(0),
-#endif
       mCancelContentJSEpoch(0) {
   mozilla::HoldJSObjects(this);
 
@@ -483,10 +477,7 @@ nsresult BrowserChild::Init(mozIDOMWindowProxy* aParent,
     // here. dom/base/crashtests/1419902.html
     return NS_ERROR_FAILURE;
   }
-  nsIWebBrowser* webBrowser = mWebBrowser;
-
-  mWebNav = do_QueryInterface(webBrowser);
-  NS_ASSERTION(mWebNav, "nsWebBrowser doesn't implement nsIWebNavigation?");
+  mWebNav = mWebBrowser;
 
   // IPC uses a WebBrowser object for which DNS prefetching is turned off
   // by default. But here we really want it, so enable it explicitly
@@ -516,13 +507,6 @@ nsresult BrowserChild::Init(mozIDOMWindowProxy* aParent,
   NS_ENSURE_TRUE(window, NS_ERROR_FAILURE);
   nsCOMPtr<EventTarget> chromeHandler = window->GetChromeEventHandler();
   docShell->SetChromeEventHandler(chromeHandler);
-
-  // Window scrollbar flags only affect top level remote frames, not fission
-  // frames.
-  if (mIsTopLevel) {
-    nsContentUtils::SetScrollbarsVisibility(
-        docShell, !!(mChromeFlags & nsIWebBrowserChrome::CHROME_SCROLLBARS));
-  }
 
   nsWeakPtr weakPtrThis = do_GetWeakReference(
       static_cast<nsIBrowserChild*>(this));  // for capture by the lambda
@@ -667,15 +651,9 @@ BrowserChild::SetDimensions(DimensionRequest&& aRequest) {
 }
 
 NS_IMETHODIMP
-BrowserChild::GetDimensions(DimensionKind aDimensionKind, int32_t* aX,
-                            int32_t* aY, int32_t* aCx, int32_t* aCy) {
+BrowserChild::GetDimensions(int32_t* aX, int32_t* aY, int32_t* aCx,
+                            int32_t* aCy) {
   LayoutDeviceIntRect rect = GetOuterRect();
-  if (aDimensionKind == DimensionKind::Inner) {
-    if (aX || aY) {
-      return NS_ERROR_NOT_IMPLEMENTED;
-    }
-    rect.SizeTo(GetInnerSize());
-  }
   if (aX) {
     *aX = rect.x;
   }
@@ -722,14 +700,13 @@ BrowserChild::ProvideWindow(nsIOpenWindowInfo* aOpenWindowInfo,
   // If it turns out we're opening in the current browser, just hand over the
   // current browser's docshell.
   if (openLocation == nsIBrowserDOMWindow::OPEN_CURRENTWINDOW) {
-    nsCOMPtr<nsIWebBrowser> browser = do_GetInterface(WebNavigation());
     *aWindowIsNew = false;
 
-    nsCOMPtr<mozIDOMWindowProxy> win;
-    MOZ_TRY(browser->GetContentDOMWindow(getter_AddRefs(win)));
+    nsCOMPtr<nsPIDOMWindowOuter> win =
+        mWebBrowser ? mWebBrowser->GetWindow() : nullptr;
+    NS_ENSURE_STATE(win);
 
-    RefPtr<BrowsingContext> bc(
-        nsPIDOMWindowOuter::From(win)->GetBrowsingContext());
+    RefPtr<BrowsingContext> bc(win->GetBrowsingContext());
     bc.forget(aReturn);
     return NS_OK;
   }
@@ -770,8 +747,9 @@ void BrowserChild::DestroyWindow() {
     data.reset();
   }
 
-  nsCOMPtr<nsIBaseWindow> baseWindow = do_QueryInterface(WebNavigation());
-  if (baseWindow) baseWindow->Destroy();
+  if (mWebBrowser) {
+    mWebBrowser->Close();
+  }
 
   if (mPuppetWidget) {
     mPuppetWidget->Destroy();
@@ -824,9 +802,8 @@ BrowserChild::~BrowserChild() {
 
   DestroyWindow();
 
-  nsCOMPtr<nsIWebBrowser> webBrowser = do_QueryInterface(WebNavigation());
-  if (webBrowser) {
-    webBrowser->SetContainerWindow(nullptr);
+  if (mWebBrowser) {
+    mWebBrowser->SetWebBrowserChrome(nullptr);
   }
 
   mozilla::DropJSObjects(this);
@@ -919,7 +896,6 @@ mozilla::ipc::IPCResult BrowserChild::RecvResumeLoad(
 nsresult BrowserChild::CloneDocumentTreeIntoSelf(
     const MaybeDiscarded<BrowsingContext>& aSourceBC,
     const embedding::PrintData& aPrintData) {
-#ifdef NS_PRINTING
   if (NS_WARN_IF(aSourceBC.IsNullOrDiscarded())) {
     return NS_ERROR_FAILURE;
   }
@@ -971,7 +947,6 @@ nsresult BrowserChild::CloneDocumentTreeIntoSelf(
     return rv;
   }
 
-#endif
   return NS_OK;
 }
 
@@ -981,9 +956,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvCloneDocumentTreeIntoSelf(
     CloneDocumentTreeIntoSelfResolver&& aResolve) {
   nsresult rv = NS_OK;
 
-#ifdef NS_PRINTING
   rv = CloneDocumentTreeIntoSelf(aSourceBC, aPrintData);
-#endif
 
   aResolve(NS_SUCCEEDED(rv));
   return IPC_OK();
@@ -991,7 +964,6 @@ mozilla::ipc::IPCResult BrowserChild::RecvCloneDocumentTreeIntoSelf(
 
 nsresult BrowserChild::UpdateRemotePrintSettings(
     const embedding::PrintData& aPrintData) {
-#ifdef NS_PRINTING
   nsCOMPtr<nsIDocShell> ourDocShell = do_GetInterface(WebNavigation());
   if (NS_WARN_IF(!ourDocShell)) {
     return NS_ERROR_FAILURE;
@@ -1047,16 +1019,13 @@ nsresult BrowserChild::UpdateRemotePrintSettings(
     }
     return BrowsingContext::WalkFlag::Next;
   });
-#endif
 
   return NS_OK;
 }
 
 mozilla::ipc::IPCResult BrowserChild::RecvUpdateRemotePrintSettings(
     const embedding::PrintData& aPrintData) {
-#ifdef NS_PRINTING
   UpdateRemotePrintSettings(aPrintData);
-#endif
 
   return IPC_OK();
 }
@@ -1097,13 +1066,13 @@ mozilla::ipc::IPCResult BrowserChild::RecvShow(
 
   mPuppetWidget->SetSizeMode(aOwnerInfo.sizeMode());
   if (!mDidFakeShow) {
-    nsCOMPtr<nsIBaseWindow> baseWindow = do_QueryInterface(WebNavigation());
-    if (!baseWindow) {
-      NS_ERROR("WebNavigation() doesn't QI to nsIBaseWindow");
+    if (!mWebBrowser) {
       return IPC_FAIL_NO_REASON(this);
     }
 
-    baseWindow->SetVisibility(true);
+    if (RefPtr<nsDocShell> docShell = mWebBrowser->GetDocShell()) {
+      docShell->SetVisibility(true);
+    }
     res = InitBrowserChildMessageManager();
   }
 
@@ -1135,8 +1104,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvInitRendering(
 mozilla::ipc::IPCResult BrowserChild::RecvScrollbarPreferenceChanged(
     ScrollbarPreference aPreference) {
   MOZ_ASSERT(!mIsTopLevel,
-             "Scrollbar visibility should be derived from chrome flags for "
-             "top-level windows");
+             "Top-level windows use the default scrollbar preference");
   if (nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation())) {
     nsDocShell::Cast(docShell)->SetScrollbarPreference(aPreference);
   }
@@ -1186,9 +1154,9 @@ mozilla::ipc::IPCResult BrowserChild::RecvUpdateDimensions(
   // MobileViewportManager needs the content viewer size to be updated before
   // the reflow, otherwise it gets a stale size when it computes a new CSS
   // viewport.
-  nsCOMPtr<nsIBaseWindow> baseWin = do_QueryInterface(WebNavigation());
-  baseWin->SetPositionAndSize(0, 0, innerSize.width, innerSize.height,
-                              nsIBaseWindow::eRepaint);
+  RefPtr<nsDocShell> docShell = mWebBrowser->GetDocShell();
+  docShell->SetPositionAndSize(0, 0, innerSize.width, innerSize.height,
+                               nsIBaseWindow::eRepaint);
 
   const LayoutDeviceIntRect widgetRect(
       GetOuterRect().TopLeft() + mClientOffset + mChromeOffset, innerSize);
@@ -1519,10 +1487,10 @@ void BrowserChild::ProcessPendingCoalescedTouchData() {
 
   UniquePtr<WidgetTouchEvent> touchMoveEvent =
       mCoalescedTouchData.TakeCoalescedEvent();
-  (void)RecvRealTouchEvent(*touchMoveEvent,
-                           mCoalescedTouchData.GetScrollableLayerGuid(),
-                           mCoalescedTouchData.GetInputBlockId(),
-                           mCoalescedTouchData.GetApzResponse());
+  HandleRealTouchEvent(*touchMoveEvent,
+                       mCoalescedTouchData.GetScrollableLayerGuid(),
+                       mCoalescedTouchData.GetInputBlockId(),
+                       mCoalescedTouchData.GetApzResponse());
 }
 
 void BrowserChild::ProcessPendingCoalescedMouseDataAndDispatchEvents() {
@@ -1598,8 +1566,7 @@ void BrowserChild::FlushAllCoalescedMouseData() {
     if (!data || data->IsEmpty()) {
       continue;
     }
-    UniquePtr<CoalescedMouseData> dispatchData =
-        MakeUnique<CoalescedMouseData>();
+    auto dispatchData = std::make_unique<CoalescedMouseData>();
 
     dispatchData->RetrieveDataFrom(*data);
     mToBeDispatchedMouseData.Push(dispatchData.release());
@@ -1640,8 +1607,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvRealMouseMoveEvent(
     // Can't coalesce current mousemove event. Put the coalesced mousemove data
     // with the same pointer id to mToBeDispatchedMouseData, coalesce the
     // current one, and process all pending data in mToBeDispatchedMouseData.
-    UniquePtr<CoalescedMouseData> dispatchData =
-        MakeUnique<CoalescedMouseData>();
+    auto dispatchData = std::make_unique<CoalescedMouseData>();
 
     dispatchData->RetrieveDataFrom(*data);
     mToBeDispatchedMouseData.Push(dispatchData.release());
@@ -1650,7 +1616,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvRealMouseMoveEvent(
     CoalescedMouseData* newData =
         mCoalescedMouseData
             .InsertOrUpdate(aMouseEvent.pointerId,
-                            MakeUnique<CoalescedMouseData>())
+                            std::make_unique<CoalescedMouseData>())
             .get();
     // We don't want to dispatch aEvent immediately.  However, we need to
     // dispatch eMouseRawUpdate immediately if there is a `pointerrawupdate`
@@ -1756,8 +1722,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvRealMouseButtonEvent(
     // events in the end of the nsQueue and dispatch events from the beginning.
     FlushAllCoalescedMouseData();
 
-    UniquePtr<CoalescedMouseData> dispatchData =
-        MakeUnique<CoalescedMouseData>();
+    auto dispatchData = std::make_unique<CoalescedMouseData>();
 
     // We'll dispatch aEvent immediately via
     // ProcessPendingCoalescedMouseDataAndDispatchEvents().
@@ -1962,6 +1927,14 @@ mozilla::ipc::IPCResult BrowserChild::RecvNormalPriorityMouseWheelEvent(
 mozilla::ipc::IPCResult BrowserChild::RecvRealTouchEvent(
     const WidgetTouchEvent& aEvent, const ScrollableLayerGuid& aGuid,
     const uint64_t& aInputBlockId, const nsEventStatus& aApzResponse) {
+  HandleRealTouchEvent(aEvent, aGuid, aInputBlockId, aApzResponse);
+  return IPC_OK();
+}
+
+void BrowserChild::HandleRealTouchEvent(const WidgetTouchEvent& aEvent,
+                                        const ScrollableLayerGuid& aGuid,
+                                        const uint64_t& aInputBlockId,
+                                        const nsEventStatus& aApzResponse) {
   MOZ_LOG(sApzChildLog, LogLevel::Debug,
           ("Receiving touch event of type %d\n", aEvent.mMessage));
 
@@ -2011,7 +1984,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvRealTouchEvent(
     // We shouldn't have any e10s platforms that have touch events enabled
     // without APZ.
     MOZ_ASSERT(false);
-    return IPC_OK();
+    return;
   }
 
   if (mAPZEventState) {
@@ -2019,7 +1992,6 @@ mozilla::ipc::IPCResult BrowserChild::RecvRealTouchEvent(
                                       aApzResponse, status,
                                       std::move(allowedTouchBehaviors));
   }
-  return IPC_OK();
 }
 
 mozilla::ipc::IPCResult BrowserChild::RecvNormalPriorityRealTouchEvent(
@@ -2048,9 +2020,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvRealTouchMoveEvent(
       // failures.
       if (aEvent.mFlags.mIsSynthesizedForTests) {
         ProcessPendingCoalescedTouchData();
-        if (!RecvRealTouchEvent(aEvent, aGuid, aInputBlockId, aApzResponse)) {
-          return IPC_FAIL_NO_REASON(this);
-        }
+        HandleRealTouchEvent(aEvent, aGuid, aInputBlockId, aApzResponse);
         return IPC_OK();
       }
       if (mCoalescedTouchData.IsEmpty() ||
@@ -2104,13 +2074,11 @@ mozilla::ipc::IPCResult BrowserChild::RecvRealTouchMoveEvent(
         // dispatching the touchMoveEvent.
         MOZ_ASSERT(!touchMoveEvent->CanConvertToPointerRawUpdate());
         const uint32_t generation = mCoalescedTouchData.Generation();
-        if (!RecvRealTouchEvent(*touchMoveEvent,
-                                mCoalescedTouchData.GetScrollableLayerGuid(),
-                                mCoalescedTouchData.GetInputBlockId(),
-                                mCoalescedTouchData.GetApzResponse())) {
-          return IPC_FAIL_NO_REASON(this);
-        }
-        // RecvRealTouchEvent() may have caused spinning the event loop and
+        HandleRealTouchEvent(*touchMoveEvent,
+                             mCoalescedTouchData.GetScrollableLayerGuid(),
+                             mCoalescedTouchData.GetInputBlockId(),
+                             mCoalescedTouchData.GetApzResponse());
+        // HandleRealTouchEvent() may have caused spinning the event loop and
         // changed sConsecutiveTouchMoveCount.  So, we need to check it now.
         if (PostponeDispatchingTouchMove()) {
           mCoalescedTouchMoveEventFlusher->StartObserver();
@@ -2133,9 +2101,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvRealTouchMoveEvent(
     }
   }
 
-  if (!RecvRealTouchEvent(aEvent, aGuid, aInputBlockId, aApzResponse)) {
-    return IPC_FAIL_NO_REASON(this);
-  }
+  HandleRealTouchEvent(aEvent, aGuid, aInputBlockId, aApzResponse);
   return IPC_OK();
 }
 
@@ -2160,7 +2126,7 @@ void BrowserChild::HandleTouchRawUpdateEvent(
     // the debugger, we should set this to `true`.
     touch->convertToPointerRawUpdate = true;
   }
-  RecvRealTouchEvent(touchRawUpdateEvent, aGuid, aInputBlockId, aApzResponse);
+  HandleRealTouchEvent(touchRawUpdateEvent, aGuid, aInputBlockId, aApzResponse);
 }
 
 mozilla::ipc::IPCResult BrowserChild::RecvNormalPriorityRealTouchMoveEvent(
@@ -2221,7 +2187,7 @@ already_AddRefed<DataTransfer> BrowserChild::ConvertToDataTransfer(
   // the principal permits it (and dom.events.datatransfer.protected.enabled is
   // false).  Otherwise, protected DataTransfer access should only be given to
   // the system.
-  if (!aPrincipal || Manager()->GetRemoteType() != EXTENSION_REMOTE_TYPE) {
+  if (!aPrincipal || !Manager()->GetRemoteType().IsExtension()) {
     aPrincipal = nsContentUtils::GetSystemPrincipal();
   }
 
@@ -2414,6 +2380,7 @@ void BrowserChild::RequestEditCommands(NativeKeyBindingsType aType,
 
   // Don't send aEvent to the parent process directly because it'll be marked
   // as posted to remote process.
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   WidgetKeyboardEvent localEvent(aEvent);
   SendRequestNativeKeyBindings(aType, localEvent, &aCommands);
 }
@@ -2670,6 +2637,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvNormalPrioritySelectionEvent(
 mozilla::ipc::IPCResult BrowserChild::RecvSimpleContentCommandEvent(
     const EventMessage& aMessage) {
   WidgetContentCommandEvent localEvent(true, aMessage, mPuppetWidget);
+  localEvent.MarkAsComingFromAnotherProcess();
   DispatchWidgetEventViaAPZ(localEvent);
   (void)SendOnEventNeedingAckHandled(aMessage, 0u);
   return IPC_OK();
@@ -2687,6 +2655,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvInsertText(
   WidgetContentCommandEvent localEvent(true, eContentCommandInsertText,
                                        mPuppetWidget);
   localEvent.mString = Some(nsString(aStringToInsert));
+  localEvent.MarkAsComingFromAnotherProcess();
   DispatchWidgetEventViaAPZ(localEvent);
   (void)SendOnEventNeedingAckHandled(eContentCommandInsertText, 0u);
   return IPC_OK();
@@ -2699,7 +2668,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvNormalPriorityInsertText(
 
 mozilla::ipc::IPCResult BrowserChild::RecvReplaceText(
     const nsString& aReplaceSrcString, const nsString& aStringToInsert,
-    uint32_t aOffset, bool aPreventSetSelection) {
+    uint32_t aOffset, PreventSetSelection aPreventSetSelection) {
   // Use normal event path to reach focused document.
   WidgetContentCommandEvent localEvent(true, eContentCommandReplaceText,
                                        mPuppetWidget);
@@ -2707,6 +2676,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvReplaceText(
   localEvent.mSelection.mReplaceSrcString = aReplaceSrcString;
   localEvent.mSelection.mOffset = aOffset;
   localEvent.mSelection.mPreventSetSelection = aPreventSetSelection;
+  localEvent.MarkAsComingFromAnotherProcess();
   DispatchWidgetEventViaAPZ(localEvent);
   (void)SendOnEventNeedingAckHandled(eContentCommandReplaceText, 0u);
   return IPC_OK();
@@ -2714,7 +2684,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvReplaceText(
 
 mozilla::ipc::IPCResult BrowserChild::RecvNormalPriorityReplaceText(
     const nsString& aReplaceSrcString, const nsString& aStringToInsert,
-    uint32_t aOffset, bool aPreventSetSelection) {
+    uint32_t aOffset, PreventSetSelection aPreventSetSelection) {
   return RecvReplaceText(aReplaceSrcString, aStringToInsert, aOffset,
                          aPreventSetSelection);
 }
@@ -2744,21 +2714,6 @@ mozilla::ipc::IPCResult BrowserChild::RecvPasteTransferable(
   ourDocShell->DoCommandWithParams("cmd_pasteTransferable", params);
   return IPC_OK();
 }
-
-#ifdef ACCESSIBILITY
-a11y::PDocAccessibleChild* BrowserChild::AllocPDocAccessibleChild(
-    PDocAccessibleChild*, const uint64_t&, const MaybeDiscardedBrowsingContext&,
-    const bool&) {
-  MOZ_ASSERT_UNREACHABLE("should never call this!");
-  return nullptr;
-}
-
-bool BrowserChild::DeallocPDocAccessibleChild(
-    a11y::PDocAccessibleChild* aChild) {
-  delete static_cast<mozilla::a11y::DocAccessibleChild*>(aChild);
-  return true;
-}
-#endif
 
 RefPtr<VsyncMainChild> BrowserChild::GetVsyncChild() {
   // Initializing VsyncMainChild here turns on per-BrowserChild Vsync for a
@@ -2902,7 +2857,6 @@ mozilla::ipc::IPCResult BrowserChild::RecvHandleAccessKey(
 mozilla::ipc::IPCResult BrowserChild::RecvPrintPreview(
     const PrintData& aPrintData, const MaybeDiscardedBrowsingContext& aSourceBC,
     PrintPreviewResolver&& aCallback) {
-#ifdef NS_PRINTING
   // If we didn't succeed in passing off ownership of aCallback, then something
   // went wrong.
   auto sendCallbackError = MakeScopeExit([&] {
@@ -2956,26 +2910,22 @@ mozilla::ipc::IPCResult BrowserChild::RecvPrintPreview(
                       nsGlobalWindowOuter::IsPreview::Yes,
                       nsGlobalWindowOuter::IsForWindowDotPrint::No,
                       std::move(aCallback), nullptr, IgnoreErrors());
-#endif
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult BrowserChild::RecvExitPrintPreview() {
-#ifdef NS_PRINTING
   nsCOMPtr<nsIWebBrowserPrint> webBrowserPrint =
       do_GetInterface(ToSupports(WebNavigation()));
   if (NS_WARN_IF(!webBrowserPrint)) {
     return IPC_OK();
   }
   webBrowserPrint->ExitPrintPreview();
-#endif
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult BrowserChild::CommonPrint(
     const MaybeDiscardedBrowsingContext& aBc, const PrintData& aPrintData,
     RefPtr<BrowsingContext>* aCachedBrowsingContext) {
-#ifdef NS_PRINTING
   if (NS_WARN_IF(aBc.IsNullOrDiscarded())) {
     return IPC_OK();
   }
@@ -3013,42 +2963,31 @@ mozilla::ipc::IPCResult BrowserChild::CommonPrint(
       return IPC_OK();
     }
   }
-#endif
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult BrowserChild::RecvPrint(
     const MaybeDiscardedBrowsingContext& aBc, const PrintData& aPrintData,
     bool aReturnStaticClone, PrintResolver&& aResolve) {
-#ifdef NS_PRINTING
   RefPtr<BrowsingContext> browsingContext;
   auto result = CommonPrint(aBc, aPrintData,
                             aReturnStaticClone ? &browsingContext : nullptr);
   aResolve(browsingContext);
   return result;
-#else
-  aResolve(nullptr);
-  return IPC_OK();
-#endif
 }
 
 mozilla::ipc::IPCResult BrowserChild::RecvPrintClonedPage(
     const MaybeDiscardedBrowsingContext& aBc, const PrintData& aPrintData,
     const MaybeDiscardedBrowsingContext& aClonedBc) {
-#ifdef NS_PRINTING
   if (aClonedBc.IsNullOrDiscarded()) {
     return IPC_OK();
   }
   RefPtr<BrowsingContext> clonedBc = aClonedBc.get();
   return CommonPrint(aBc, aPrintData, &clonedBc);
-#else
-  return IPC_OK();
-#endif
 }
 
 mozilla::ipc::IPCResult BrowserChild::RecvDestroyPrintClone(
     const MaybeDiscardedBrowsingContext& aCachedPage) {
-#ifdef NS_PRINTING
   if (aCachedPage) {
     RefPtr<nsPIDOMWindowOuter> window = aCachedPage->GetDOMWindow();
     if (NS_WARN_IF(!window)) {
@@ -3056,33 +2995,21 @@ mozilla::ipc::IPCResult BrowserChild::RecvDestroyPrintClone(
     }
     window->Close();
   }
-#endif
   return IPC_OK();
-}
-
-mozilla::ipc::IPCResult BrowserChild::RecvUpdateNativeWindowHandle(
-    const uintptr_t& aNewHandle) {
-#if defined(XP_WIN) && defined(ACCESSIBILITY)
-  mNativeWindowHandle = aNewHandle;
-  return IPC_OK();
-#else
-  return IPC_FAIL_NO_REASON(this);
-#endif
 }
 
 mozilla::ipc::IPCResult BrowserChild::RecvDestroy() {
   MOZ_ASSERT(!mDestroyed);
   mDestroyed = true;
 
-  nsTArray<PContentPermissionRequestChild*> childArray =
+  nsTArray<RefPtr<RemotePermissionRequest>> childArray =
       nsContentPermissionUtils::GetContentPermissionRequestChildById(
           GetTabId());
 
   // Need to close undeleted ContentPermissionRequestChilds before tab is
   // closed.
   for (auto& permissionRequestChild : childArray) {
-    auto* child = static_cast<RemotePermissionRequest*>(permissionRequestChild);
-    child->Destroy();
+    permissionRequestChild->Destroy();
   }
 
   if (mBrowserChildMessageManager) {
@@ -3287,6 +3214,8 @@ void BrowserChild::InitRenderingState(
   } else {
     mLayersConnected = Some(false);
   }
+  LAYERTREE_LOG("BrowserChild layer tree {:x} initialized, connected {}",
+                aLayersId, success);
 
   nsCOMPtr<nsIObserverService> observerService =
       mozilla::services::GetObserverService();
@@ -3636,6 +3565,8 @@ void BrowserChild::ReinitRendering() {
     }
   }
 
+  LAYERTREE_LOG("BrowserChild layer tree {:x} reinitialized, connected {}",
+                mLayersId, success);
   if (!success) {
     NS_WARNING("failed to recreate layer manager");
     return;
@@ -3656,6 +3587,8 @@ void BrowserChild::ReinitRendering() {
 }
 
 void BrowserChild::ReinitRenderingForDeviceReset() {
+  LAYERTREE_LOG("BrowserChild layer tree {:x} reinitializing for device reset",
+                mLayersId);
   RefPtr<WebRenderLayerManager> lm =
       mPuppetWidget->GetWindowRenderer()->AsWebRender();
   if (lm) {
@@ -3704,9 +3637,9 @@ mozilla::ipc::IPCResult BrowserChild::RecvUIResolutionChanged(
   const LayoutDeviceIntSize innerSize = GetInnerSize();
   if (mHasValidInnerSize && oldInnerSize != innerSize) {
     // See RecvUpdateDimensions for the order of these operations.
-    nsCOMPtr<nsIBaseWindow> baseWin = do_QueryInterface(WebNavigation());
-    baseWin->SetPositionAndSize(0, 0, innerSize.width, innerSize.height,
-                                nsIBaseWindow::eRepaint);
+    RefPtr<nsDocShell> docShell = mWebBrowser->GetDocShell();
+    docShell->SetPositionAndSize(0, 0, innerSize.width, innerSize.height,
+                                 nsIBaseWindow::eRepaint);
 
     const LayoutDeviceIntRect widgetRect(
         GetOuterRect().TopLeft() + mClientOffset + mChromeOffset, innerSize);
@@ -4245,7 +4178,7 @@ void BrowserChild::OnPointerRawUpdateEventListenerRemoved(
            mPointerRawUpdateWindowCount));
 }
 
-#if defined(ACCESSIBILITY) && defined(MOZ_ENABLE_SKIA_PDF)
+#ifdef ACCESSIBILITY
 mozilla::ipc::IPCResult BrowserChild::RecvRequestDocAccessibleForPrint() {
   if (RefPtr<Document> doc = GetTopLevelDocument()) {
     a11y::DocManager::NotifyOfPrintDocument(doc);

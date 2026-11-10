@@ -26,6 +26,10 @@ struct ScopedDelete {
   }
   void operator()(CERTDistNames* names) { CERT_FreeDistNames(names); }
   void operator()(CERTName* name) { CERT_DestroyName(name); }
+  void operator()(CERTValidity* validity) { CERT_DestroyValidity(validity); }
+  void operator()(CERTCertificateRequest* req) {
+    CERT_DestroyCertificateRequest(req);
+  }
   void operator()(CERTCertList* list) { CERT_DestroyCertList(list); }
   void operator()(CERTSubjectPublicKeyInfo* spki) {
     SECKEY_DestroySubjectPublicKeyInfo(spki);
@@ -47,10 +51,14 @@ struct ScopedDelete {
     SECKEY_DestroyEncryptedPrivateKeyInfo(e, true);
   }
   void operator()(SECItem* item) { SECITEM_FreeItem(item, true); }
+  void operator()(SECItemArray* array) { SECITEM_FreeArray(array, true); }
   void operator()(SECKEYPublicKey* key) { SECKEY_DestroyPublicKey(key); }
   void operator()(SECKEYPrivateKey* key) { SECKEY_DestroyPrivateKey(key); }
   void operator()(SECKEYPrivateKeyList* list) {
     SECKEY_DestroyPrivateKeyList(list);
+  }
+  void operator()(SECKEYPrivateKeyInfo* pki) {
+    SECKEY_DestroyPrivateKeyInfo(pki, PR_TRUE);
   }
   void operator()(SECMODModule* module) { SECMOD_DestroyModule(module); }
   void operator()(SEC_PKCS12DecoderContext* dcx) {
@@ -83,9 +91,11 @@ struct ScopedMaybeDelete {
 SCOPED(CERTCertList);
 SCOPED(CERTCertificate);
 SCOPED(CERTCertificateList);
+SCOPED(CERTCertificateRequest);
 SCOPED(CERTDistNames);
 SCOPED(CERTName);
 SCOPED(CERTSubjectPublicKeyInfo);
+SCOPED(CERTValidity);
 SCOPED(HpkeContext);
 SCOPED(NSSInitContext);
 SCOPED(PK11Context);
@@ -99,9 +109,11 @@ SCOPED(PQGParams);
 SCOPED(PRFileDesc);
 SCOPED(SECAlgorithmID);
 SCOPED(SECItem);
+SCOPED(SECItemArray);
 SCOPED(SECKEYEncryptedPrivateKeyInfo);
 SCOPED(SECKEYPrivateKey);
 SCOPED(SECKEYPrivateKeyList);
+SCOPED(SECKEYPrivateKeyInfo);
 SCOPED(SECKEYPublicKey);
 SCOPED(SECMODModule);
 SCOPED(SEC_PKCS12DecoderContext);

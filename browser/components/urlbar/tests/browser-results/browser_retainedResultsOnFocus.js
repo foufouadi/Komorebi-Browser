@@ -76,6 +76,7 @@ add_setup(async function () {
       ["browser.urlbar.scotchBonnet.enableOverride", false],
     ],
   });
+  UrlbarTestUtils.registerZeroPrefixProvider();
   // Add some history for the empty panel and autofill.
   await PlacesTestUtils.addVisits([
     {
@@ -89,6 +90,7 @@ add_setup(async function () {
   ]);
   registerCleanupFunction(async function () {
     await PlacesUtils.history.clear();
+    UrlbarUtils._backspaceBlocks.clear();
   });
 });
 
@@ -427,12 +429,12 @@ add_task(async function test_rowReuse() {
     win.gURLBar.blur();
   });
 
-  // Wait until breakout-extend stops.
+  // Wait until the bar collapses.
   // This will test if row caching based on the urlbar width works
-  // even when the width changes due to breakout-extend (bug 2037933).
+  // even when the width changes with the popover (bug 2037933).
   await TestUtils.waitForCondition(
-    () => !win.gURLBar.hasAttribute("breakout-extend"),
-    "Wait for breakout-extend to finish"
+    () => !win.gURLBar.matches(":popover-open"),
+    "Wait for the popover to close"
   );
 
   // Don't use promiseAutocompleteResultPopup.

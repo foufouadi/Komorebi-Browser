@@ -8,6 +8,7 @@ import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  PDFJS_VERSION: "resource://pdf.js/PdfJsVersion.sys.mjs",
   PlacesDBUtils: "resource://gre/modules/PlacesDBUtils.sys.mjs",
 });
 
@@ -441,10 +442,6 @@ var dataProviders = {
         remoteTypes.gpu = 1;
       }
     } catch (e) {}
-
-    if (Services.io.socketProcessLaunched) {
-      remoteTypes.socket = 1;
-    }
 
     let data = {
       remoteTypes,
@@ -944,6 +941,20 @@ var dataProviders = {
     });
   },
 
+  pdfjs: function pdfjs(done) {
+    done({
+      version: lazy.PDFJS_VERSION,
+      enabled: !Services.prefs.getBoolPref("pdfjs.disabled", false),
+      annotationEditorEnabled:
+        Services.prefs.getIntPref("pdfjs.annotationEditorMode", 0) !== -1,
+      enableXfa: Services.prefs.getBoolPref("pdfjs.enableXfa", true),
+      openPdfAttachmentsInline: Services.prefs.getBoolPref(
+        "browser.download.open_pdf_attachments_inline",
+        false
+      ),
+    });
+  },
+
   libraryVersions: function libraryVersions(done) {
     let data = {};
     let verInfo = Cc["@mozilla.org/security/nssversion;1"].getService(
@@ -1011,33 +1022,13 @@ var dataProviders = {
       return;
     }
 
-    const { PreferenceExperiments: NormandyPreferenceStudies } =
-      ChromeUtils.importESModule(
-        "resource://normandy/lib/PreferenceExperiments.sys.mjs"
-      );
-    const { AddonStudies: NormandyAddonStudies } = ChromeUtils.importESModule(
-      "resource://normandy/lib/AddonStudies.sys.mjs"
-    );
-    const { PreferenceRollouts: NormandyPreferenceRollouts } =
-      ChromeUtils.importESModule(
-        "resource://normandy/lib/PreferenceRollouts.sys.mjs"
-      );
     const { ExperimentAPI } = ChromeUtils.importESModule(
       "resource://nimbus/ExperimentAPI.sys.mjs"
     );
 
     // Get Normandy data in parallel, and sort each group by slug.
-    const [
-      addonStudies,
-      prefRollouts,
-      prefStudies,
-      nimbusExperiments,
-      nimbusRollouts,
-    ] = await Promise.all(
+    const [nimbusExperiments, nimbusRollouts] = await Promise.all(
       [
-        NormandyAddonStudies.getAllActive(),
-        NormandyPreferenceRollouts.getAllActive(),
-        NormandyPreferenceStudies.getAllActive(),
         ExperimentAPI.manager.store
           .ready()
           .then(() => ExperimentAPI.manager.store.getAllActiveExperiments()),
@@ -1055,9 +1046,6 @@ var dataProviders = {
     );
 
     done({
-      addonStudies,
-      prefRollouts,
-      prefStudies,
       nimbusExperiments,
       nimbusRollouts,
     });

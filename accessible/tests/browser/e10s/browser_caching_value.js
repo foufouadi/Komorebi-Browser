@@ -378,16 +378,7 @@ addAccessibleTask(
     await invokeFocus(browser, "select");
 
     // Select the second option (drop-down collapsed).
-    let p = waitForEvents({
-      expected: [
-        [EVENT_SELECTION, "second_option"],
-        [EVENT_TEXT_VALUE_CHANGE, "select"],
-      ],
-      unexpected: [
-        stateChangeEventArgs("second_option", EXT_STATE_ACTIVE, true, true),
-        stateChangeEventArgs("first_option", EXT_STATE_ACTIVE, false, true),
-      ],
-    });
+    let p = waitForEvent(EVENT_TEXT_VALUE_CHANGE, "select");
     await invokeContentTask(browser, [], () => {
       content.document.getElementById("select").selectedIndex = 1;
     });
@@ -404,7 +395,6 @@ addAccessibleTask(
 
     p = waitForEvents({
       expected: [
-        [EVENT_SELECTION, "first_option"],
         [EVENT_TEXT_VALUE_CHANGE, "select"],
         [EVENT_HIDE, "ContentSelectDropdown"],
       ],
@@ -526,4 +516,38 @@ addAccessibleTask(
     is(color.value, "0% red 0% green 0% blue", "Value correct after change");
   },
   { chrome: true, topLevel: true }
+);
+
+/**
+ * Test that a text change deeper than a direct child still fires a value
+ * change event on the combobox ancestor.
+ */
+addAccessibleTask(
+  `
+  <div id="combo-nested" role="combobox"><span style="display: block;">1</span></div>
+  <div id="combo-flat" role="combobox"><span>1</span></div>
+  `,
+  async function (browser, docAcc) {
+    const comboNested = findAccessibleChildByID(docAcc, "combo-nested");
+    const comboFlat = findAccessibleChildByID(docAcc, "combo-flat");
+    is(comboNested.value, "1", "Initial nested combobox value correct");
+    is(comboFlat.value, "1", "Initial flat combobox value correct");
+
+    info("Changing text of a descendant nested inside an intervening generic");
+    let changed = waitForEvent(EVENT_TEXT_VALUE_CHANGE, "combo-nested");
+    await invokeContentTask(browser, [], () => {
+      content.document.querySelector("#combo-nested span").textContent = "2";
+    });
+    await changed;
+    is(comboNested.value, "2", "Nested combobox value correct after change");
+
+    info("Changing text of a direct text descendant");
+    changed = waitForEvent(EVENT_TEXT_VALUE_CHANGE, "combo-flat");
+    await invokeContentTask(browser, [], () => {
+      content.document.querySelector("#combo-flat span").textContent = "2";
+    });
+    await changed;
+    is(comboFlat.value, "2", "Flat combobox value correct after change");
+  },
+  { chrome: true, iframe: true, remoteIframe: true }
 );

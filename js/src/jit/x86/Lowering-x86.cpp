@@ -4,6 +4,8 @@
 
 #include "jit/x86/Lowering-x86.h"
 
+#include <bit>
+
 #include "jit/Lowering.h"
 #include "jit/MIR-wasm.h"
 #include "jit/MIR.h"
@@ -191,12 +193,11 @@ void LIRGeneratorX86::lowerForMulInt64(LMulI64* ins, MMul* mir,
 
   if (rhs->isConstant()) {
     int64_t constant = rhs->toConstant()->toInt64();
-    int32_t shift = mozilla::FloorLog2(uint64_t(constant));
     // See special cases in CodeGeneratorX86Shared::visitMulI64.
     if (constant >= -1 && constant <= 2) {
       needsTemp = false;
     }
-    if (constant > 0 && int64_t(1) << shift == constant) {
+    if (constant > 0 && std::has_single_bit(uint64_t(constant))) {
       needsTemp = false;
     }
   }
@@ -350,20 +351,6 @@ void LIRGeneratorX86::lowerAtomicStore64(MStoreUnboxedScalar* ins) {
   add(new (alloc()) LAtomicStore64(elements, index, value, temp), ins);
 }
 
-void LIRGenerator::visitWasmUnsignedToDouble(MWasmUnsignedToDouble* ins) {
-  MOZ_ASSERT(ins->input()->type() == MIRType::Int32);
-  LWasmUint32ToDouble* lir = new (alloc())
-      LWasmUint32ToDouble(useRegisterAtStart(ins->input()), temp());
-  define(lir, ins);
-}
-
-void LIRGenerator::visitWasmUnsignedToFloat32(MWasmUnsignedToFloat32* ins) {
-  MOZ_ASSERT(ins->input()->type() == MIRType::Int32);
-  LWasmUint32ToFloat32* lir = new (alloc())
-      LWasmUint32ToFloat32(useRegisterAtStart(ins->input()), temp());
-  define(lir, ins);
-}
-
 // If the base is a constant, and it is zero or its offset is zero, then
 // code generation will fold the values into the access.  Allocate the
 // pointer to a register only if that can't happen.
@@ -486,7 +473,7 @@ void LIRGenerator::visitWasmStore(MWasmStore* ins) {
       }
       break;
     case Scalar::Simd128:
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
       valueAlloc = useRegisterAtStart(ins->value());
       break;
 #else

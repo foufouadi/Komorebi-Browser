@@ -28,9 +28,12 @@ const SHARED_DATA_IS_BROWSER_AUTOMATION_KEY =
 
 const PREF_DYNAMIC_START_ENABLED = "remote.experimental.dynamicstart.enabled";
 
+// Locked by the DisableDeveloperTools enterprise policy.
+const PREF_POLICY_DISABLED = "remote.policy.disabled";
+
 // Complements -marionette flag for starting the Marionette server.
-// We also set this if Marionette is running in order to start the server
-// again after a Firefox restart.
+// We also set this if Marionette is running for browser automation in order to
+// start the server again after a Firefox restart.
 const ENV_ENABLED = "MOZ_MARIONETTE";
 
 // Besides starting based on existing prefs in a profile and a command
@@ -46,12 +49,15 @@ const ENV_ENABLED = "MOZ_MARIONETTE";
 // pref being set to 4444.
 const ENV_PRESERVE_PREFS = "MOZ_MARIONETTE_PREF_STATE_ACROSS_RESTARTS";
 
+const EXIT_CODE_NOT_AVAILABLE = 69;
+
 const isRemote =
   Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT;
 
 class MarionetteParentProcess {
   #browserStartupFinished;
   #isBrowserAutomation;
+  #portFilePath;
 
   constructor() {
     this.server = null;
@@ -63,6 +69,11 @@ class MarionetteParentProcess {
     // Whether the running instance belongs to a browser automation session.
     // True for command line startup. Optional for startAtRuntime.
     this.#isBrowserAutomation = true;
+
+    // Path to the file where the Marionette port should be saved, in addition
+    // to the one saved in the profile. This path is only used when starting
+    // Marionette dynamically via startAtRuntime().
+    this.#portFilePath = null;
 
     this.#browserStartupFinished = lazy.Deferred();
   }
@@ -88,6 +99,11 @@ class MarionetteParentProcess {
       return;
     }
 
+    if (Services.prefs.getBoolPref(PREF_POLICY_DISABLED, false)) {
+      lazy.logger.warn("Marionette is disabled by enterprise policy");
+      return;
+    }
+
     this._enabled = value;
     lazy.logger.info(value ? "Marionette enabled" : "Marionette disabled");
   }
@@ -98,6 +114,10 @@ class MarionetteParentProcess {
 
   get isBrowserAutomationRunning() {
     return this.running && this.#isBrowserAutomation;
+  }
+
+  get isDynamicStartRunning() {
+    return this.running && !this.#isBrowserAutomation;
   }
 
   /**
@@ -129,6 +149,7 @@ class MarionetteParentProcess {
       lazy.logger.trace(`Received observer notification ${topic}`);
     }
 
+    let hasBeforeCancelObserver = false;
     switch (topic) {
       case "profile-after-change":
         Services.obs.addObserver(this, "command-line-startup");
@@ -189,9 +210,13 @@ class MarionetteParentProcess {
       case "final-ui-startup":
         Services.obs.removeObserver(this, topic);
 
-        Services.obs.addObserver(this, "before-cancel-download-prompt");
         Services.obs.addObserver(this, "browser-idle-startup-tasks-finished");
         Services.obs.addObserver(this, "mail-idle-startup-tasks-finished");
+
+        // startAtRuntime will not hit this path, and the observer should not
+        // be removed on quit-application.
+        Services.obs.addObserver(this, "before-cancel-download-prompt");
+        hasBeforeCancelObserver = true;
 
         Services.obs.addObserver(this, "quit-application");
         Services.obs.addObserver(this, "xpcom-shutdown");
@@ -213,10 +238,14 @@ class MarionetteParentProcess {
 
       case "quit-application":
         Services.obs.removeObserver(this, topic);
-        // Remove this observer here rather than inside the handler itself,
-        // because on some platforms the notification fires multiple times
-        // and removing an already-removed observer would throw.
-        Services.obs.removeObserver(this, "before-cancel-download-prompt");
+
+        if (hasBeforeCancelObserver) {
+          // Remove this observer here rather than inside the handler itself,
+          // because on some platforms the notification fires multiple times
+          // and removing an already-removed observer would throw.
+          Services.obs.removeObserver(this, "before-cancel-download-prompt");
+        }
+
         lazy.logger.trace(
           `Application is shutting down with reason: "${data || "unknown"}"`
         );
@@ -271,13 +300,22 @@ class MarionetteParentProcess {
       await this.server.start();
     } catch (e) {
       lazy.logger.fatal("Marionette server failed to start", e);
-      Services.startup.quit(Ci.nsIAppStartup.eForceQuit);
+      Services.startup.quit(
+        Ci.nsIAppStartup.eForceQuit,
+        EXIT_CODE_NOT_AVAILABLE
+      );
       return;
     }
 
     this.updateWebdriverActiveFlag(true);
 
-    Services.env.set(ENV_ENABLED, "1");
+    // Only set MOZ_MARIONETTE environment variable when using marionette for
+    // regular browser automation. Dynamically starting marionette for tooling
+    // or ai remote control should not set the variable.
+    if (this.#isBrowserAutomation) {
+      Services.env.set(ENV_ENABLED, "1");
+    }
+
     Services.obs.notifyObservers(this, NOTIFY_LISTENING, true);
     lazy.logger.debug("Marionette is listening");
 
@@ -305,17 +343,26 @@ class MarionetteParentProcess {
    * @param {boolean=} options.isBrowserAutomation
    *     True if the server is started for regular browser automation (as
    *     opposed to tooling, agentic assisted browsing etc.). Defaults to true.
+   * @param {string=} options.portFilePath
+   *     Path to a file where the Marionette port should be written once the
+   *     server is listening. The parent directory has to exist.
+   *     Defaults to null, in which case no additional file is written.
    *
    * @returns {number}
    *     The port on which Marionette was started. -1 if it could not be started.
    */
   async startAtRuntime(options = {}) {
-    const { isBrowserAutomation = true } = options;
+    const { isBrowserAutomation = true, portFilePath = null } = options;
 
     if (!Services.prefs.getBoolPref(PREF_DYNAMIC_START_ENABLED, false)) {
       lazy.logger.debug(
         `Start aborted, ${PREF_DYNAMIC_START_ENABLED} is disabled`
       );
+      return -1;
+    }
+
+    if (Services.prefs.getBoolPref(PREF_POLICY_DISABLED, false)) {
+      lazy.logger.warn("Start aborted, Marionette is disabled by policy");
       return -1;
     }
 
@@ -371,6 +418,20 @@ class MarionetteParentProcess {
       throw Error(`Unable to start Marionette: ${e}`);
     }
 
+    this.#portFilePath = portFilePath;
+    if (this.#portFilePath !== null) {
+      try {
+        await IOUtils.write(
+          this.#portFilePath,
+          lazy.textEncoder.encode(`${this.server.port}`)
+        );
+      } catch (e) {
+        lazy.logger.warn(
+          `Failed to create ${this.#portFilePath} (${e.message})`
+        );
+      }
+    }
+
     return this.server.port;
   }
 
@@ -404,6 +465,16 @@ class MarionetteParentProcess {
         lazy.logger.warn(
           `Failed to remove ${this._activePortPath} (${e.message})`
         );
+      }
+
+      if (this.#portFilePath !== null) {
+        try {
+          await IOUtils.remove(this.#portFilePath, { ignoreAbsent: true });
+        } catch (e) {
+          lazy.logger.warn(
+            `Failed to remove ${this.#portFilePath} (${e.message})`
+          );
+        }
       }
 
       lazy.logger.debug("Marionette stopped listening");

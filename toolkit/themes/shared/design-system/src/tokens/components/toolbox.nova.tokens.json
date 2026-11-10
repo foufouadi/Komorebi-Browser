@@ -6,20 +6,6 @@
           "nativeTheme": "-moz-headerbarinactive",
           "default": "transparent"
         }
-      },
-      "gradient-leading": {
-        "value": {
-          "light": "{color.violet.10}",
-          "dark": "{color.violet-desaturated.70}",
-          "forcedColors": "Canvas"
-        }
-      },
-      "gradient-trailing": {
-        "value": {
-          "light": "{color.orange.10}",
-          "dark": "{color.orange.70}",
-          "forcedColors": "Canvas"
-        }
       }
     }
   },
@@ -30,6 +16,10 @@
           "nativeTheme": "-moz-headerbartext",
           "default": "{text.color.@base}"
         }
+      },
+      "current": {
+        "comment": "Figma aliases this to toolbox/text/color so designers see a real color, but CSS must use currentColor: the tab inherits --lwt-text-color under an lwtheme and --toolbox-text-color-inactive in a background window, neither of which --toolbox-text-color tracks. Listed in figma-import.mjs's FIGMA_IGNORES so the alias doesn't overwrite this.",
+        "value": "{toolbox.text.color.@base}"
       }
     }
   }

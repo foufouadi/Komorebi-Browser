@@ -19,6 +19,7 @@
 #include "js/friend/ErrorMessages.h"  // JSMSG_*
 #include "js/Modules.h"  // JS::GetModulePrivate, JS::ModuleDynamicImportHook, JS::ModuleType
 #include "vm/EqualityOperations.h"  // js::SameValue
+#include "vm/GeneratorObject.h"     // js::GetGeneratorObjectForModule
 #include "vm/Interpreter.h"    // Execute, Lambda, ReportRuntimeLexicalError
 #include "vm/ModuleBuilder.h"  // js::ModuleBuilder
 #include "vm/Modules.h"
@@ -27,8 +28,10 @@
 #include "vm/SharedStencil.h"  // js::GCThingIndex
 #include "vm/StringType.h"     // js::IdToPrintableUTF8
 #include "wasm/WasmJS.h"       // js::WasmModuleObject
+#include "wasm/WasmModule.h"   // js::wasm::Module
 
 #include "gc/GCContext-inl.h"
+#include "gc/StableCellHasher-inl.h"
 #include "vm/EnvironmentObject-inl.h"  // EnvironmentObject::setAliasedBinding
 #include "vm/JSObject-inl.h"
 #include "vm/JSScript-inl.h"
@@ -175,9 +178,36 @@ ModuleObject* ResolvedBindingObject::module() const {
   return &value.toObject().as<ModuleObject>();
 }
 
+BindingNameType ResolvedBindingObject::bindingNameType() const {
+  Value value = getReservedSlotTyped(BINDING_NAME_SLOT);
+  if (value.isString()) {
+    return BindingNameType::String;
+  }
+  return static_cast<BindingNameType>(value.toInt32());
+}
+
+bool ResolvedBindingObject::isNamespace() const {
+  return bindingNameType() != BindingNameType::String;
+}
+
 JSAtom* ResolvedBindingObject::bindingName() const {
+  MOZ_ASSERT(bindingNameType() == BindingNameType::String);
   Value value = getReservedSlotTyped(BINDING_NAME_SLOT);
   return &value.toString()->asAtom();
+}
+
+ImportPhase ResolvedBindingObject::namespacePhase() const {
+  MOZ_ASSERT(isNamespace());
+  return bindingNameType() == BindingNameType::DeferredNamespace
+             ? ImportPhase::Deferred
+             : ImportPhase::Evaluation;
+}
+
+bool ResolvedBindingObject::isSameBinding(
+    const ResolvedBindingObject* other) const {
+  return module() == other->module() &&
+         getReservedSlotTyped(BINDING_NAME_SLOT) ==
+             other->getReservedSlotTyped(BINDING_NAME_SLOT);
 }
 
 /* static */
@@ -196,6 +226,25 @@ ResolvedBindingObject* ResolvedBindingObject::create(
 
   self->initReservedSlotTyped(MODULE_SLOT, ObjectValue(*module));
   self->initReservedSlotTyped(BINDING_NAME_SLOT, StringValue(bindingName));
+  return self;
+}
+
+/* static */
+ResolvedBindingObject* ResolvedBindingObject::createNamespace(
+    JSContext* cx, Handle<ModuleObject*> module, ImportPhase phase) {
+  MOZ_ASSERT(phase == ImportPhase::Evaluation ||
+             phase == ImportPhase::Deferred);
+  ResolvedBindingObject* self =
+      NewObjectWithGivenProto<ResolvedBindingObject>(cx, nullptr);
+  if (!self) {
+    return nullptr;
+  }
+
+  BindingNameType type = phase == ImportPhase::Deferred
+                             ? BindingNameType::DeferredNamespace
+                             : BindingNameType::Namespace;
+  self->initReservedSlotTyped(MODULE_SLOT, ObjectValue(*module));
+  self->initReservedSlotTyped(BINDING_NAME_SLOT, Int32Value(int32_t(type)));
   return self;
 }
 
@@ -327,8 +376,20 @@ IndirectBindingMap::Binding::Binding(ModuleEnvironmentObject* environment,
     : environment(environment),
 #ifdef DEBUG
       targetName(targetName),
+      isReservedSlot(false),
 #endif
       prop(prop) {
+}
+
+IndirectBindingMap::Binding::Binding(ModuleEnvironmentObject* environment,
+                                     uint32_t slot)
+    : environment(environment),
+#ifdef DEBUG
+      targetName(JS::PropertyKey::Void()),
+      isReservedSlot(true),
+#endif
+      prop({PropertyFlag::Enumerable}, slot) {
+  MOZ_ASSERT(ModuleEnvironmentObject::isNamespaceSlot(slot));
 }
 
 void IndirectBindingMap::trace(JSTracer* trc) {
@@ -349,15 +410,28 @@ void IndirectBindingMap::trace(JSTracer* trc) {
 }
 
 bool IndirectBindingMap::put(JSContext* cx, HandleId name,
-                             Handle<ModuleEnvironmentObject*> environment,
-                             HandleId targetName) {
+                             Handle<ResolvedBindingObject*> binding) {
+  Rooted<ModuleEnvironmentObject*> environment(
+      cx, &binding->module()->initialEnvironment());
+  if (binding->isNamespace()) {
+    uint32_t slot =
+        ModuleEnvironmentObject::namespaceSlotIndex(binding->namespacePhase());
+    return putBinding(cx, name, Binding(environment, slot));
+  }
+
+  RootedId targetName(cx, AtomToId(binding->bindingName()));
+  mozilla::Maybe<PropertyInfo> prop = environment->lookup(cx, targetName);
+  MOZ_ASSERT(prop.isSome());
+  return putBinding(cx, name, Binding(environment, targetName, *prop));
+}
+
+bool IndirectBindingMap::putBinding(JSContext* cx, HandleId name,
+                                    Binding&& binding) {
   if (!map_) {
     map_.emplace(cx->zone());
   }
 
-  mozilla::Maybe<PropertyInfo> prop = environment->lookup(cx, targetName);
-  MOZ_ASSERT(prop.isSome());
-  if (!map_->put(name, Binding(environment, targetName, *prop))) {
+  if (!map_->put(name, std::move(binding))) {
     ReportOutOfMemory(cx);
     return false;
   }
@@ -378,8 +452,14 @@ bool IndirectBindingMap::lookup(jsid name, ModuleEnvironmentObject** envOut,
 
   const Binding& binding = ptr->value();
   MOZ_ASSERT(binding.environment);
-  MOZ_ASSERT(
-      binding.environment->containsPure(binding.targetName, binding.prop));
+#ifdef DEBUG
+  if (binding.isReservedSlot) {
+    MOZ_ASSERT(ModuleEnvironmentObject::isNamespaceSlot(binding.prop.slot()));
+  } else {
+    MOZ_ASSERT(
+        binding.environment->containsPure(binding.targetName, binding.prop));
+  }
+#endif
   *envOut = binding.environment;
   *propOut = Some(binding.prop);
   return true;
@@ -387,6 +467,14 @@ bool IndirectBindingMap::lookup(jsid name, ModuleEnvironmentObject** envOut,
 
 ///////////////////////////////////////////////////////////////////////////
 // ModuleNamespaceObject
+
+// Module namespace objects need 3 reserved slots (ExportsSlot, BindingsSlot,
+// DeferredSlot), so they use a custom proxy class instead of the default
+// ProxyClass which only has 2.
+static const JSClass moduleNamespaceProxyClass =
+    PROXY_CLASS_DEF("Module Namespace",
+                    JSCLASS_HAS_RESERVED_SLOTS(
+                        ModuleNamespaceObject::ModuleNamespaceSlot::SlotCount));
 
 /* static */
 constexpr ModuleNamespaceObject::ProxyHandler
@@ -401,10 +489,11 @@ bool ModuleNamespaceObject::isInstance(HandleValue value) {
 ModuleNamespaceObject* ModuleNamespaceObject::create(
     JSContext* cx, Handle<ModuleObject*> module,
     MutableHandle<UniquePtr<ExportNameVector>> exports,
-    MutableHandle<UniquePtr<IndirectBindingMap>> bindings) {
+    MutableHandle<UniquePtr<IndirectBindingMap>> bindings, ImportPhase phase) {
   RootedValue priv(cx, ObjectValue(*module));
   ProxyOptions options;
   options.setLazyProto(true);
+  options.setClass(&moduleNamespaceProxyClass);
 
   RootedObject object(
       cx, NewProxyObject(cx, &proxyHandler, priv, nullptr, options));
@@ -420,6 +509,37 @@ ModuleNamespaceObject* ModuleNamespaceObject::create(
                        PrivateValue(bindings.get().release()));
   AddCellMemory(object, sizeof(IndirectBindingMap),
                 MemoryUse::ModuleBindingMap);
+
+  // https://tc39.es/proposal-defer-import-eval/#sec-modulenamespacecreate
+  // Step 9. If phase is defer, then:
+  if (phase == ImportPhase::Deferred) {
+    //   a. Assert: module.[[DeferredNamespace]] is empty.
+    MOZ_ASSERT(!module->maybeDeferredNamespace());
+
+    //   b. Set module.[[DeferredNamespace]] to M.
+    Rooted<ModuleNamespaceObject*> ns(cx, &object->as<ModuleNamespaceObject>());
+    module->setDeferredNamespace(ns);
+
+    //   c. Set M.[[Deferred]] to true.
+    SetProxyReservedSlot(object, DeferredSlot, JS::TrueValue());
+
+    //   d. Let toStringTag be "Deferred Module".
+    //   Note. Implement in ModuleNamespaceObject::ProxyHandler.
+  } else {
+    // Step 10. Else:
+    //   a. Assert: module.[[Namespace]] is empty.
+    MOZ_ASSERT(!module->namespace_());
+
+    //   b. Set module.[[Namespace]] to M.
+    module->initReservedSlotTyped(ModuleObject::NAMESPACE_SLOT,
+                                  ObjectValue(*object));
+
+    //   c. Set M.[[Deferred]] to false.
+    SetProxyReservedSlot(object, DeferredSlot, JS::FalseValue());
+
+    //   d. Let toStringTag be "Module".
+    //   Note. Implement in ModuleNamespaceObject::ProxyHandler.
+  }
 
   return &object->as<ModuleNamespaceObject>();
 }
@@ -448,6 +568,10 @@ IndirectBindingMap& ModuleNamespaceObject::bindings() {
   return *bindings;
 }
 
+bool ModuleNamespaceObject::isDeferred() const {
+  return GetProxyReservedSlot(this, DeferredSlot).toBoolean();
+}
+
 bool ModuleNamespaceObject::hasExports() const {
   // Exports may not be present if we hit OOM in initialization.
   return !GetProxyReservedSlot(this, ExportsSlot).isUndefined();
@@ -460,18 +584,14 @@ bool ModuleNamespaceObject::hasBindings() const {
 
 bool ModuleNamespaceObject::addBinding(JSContext* cx,
                                        Handle<JSAtom*> exportedName,
-                                       Handle<ModuleObject*> targetModule,
-                                       Handle<JSAtom*> targetName) {
-  Rooted<ModuleEnvironmentObject*> environment(
-      cx, &targetModule->initialEnvironment());
+                                       Handle<ResolvedBindingObject*> binding) {
   RootedId exportedNameId(cx, AtomToId(exportedName));
-  RootedId targetNameId(cx, AtomToId(targetName));
-  return bindings().put(cx, exportedNameId, environment, targetNameId);
+  return bindings().put(cx, exportedNameId, binding);
 }
 
 constexpr char ModuleNamespaceObject::ProxyHandler::family = 0;
 
-static void ReportUninitializedModuleBinding(JSContext* cx, HandleId id) {
+void js::ReportUninitializedModuleBinding(JSContext* cx, HandleId id) {
   // Module export names are property keys and may not be identifier names,
   // so use IdIsPropertyKey rather than IdIsIdentifier.
   if (UniqueChars printable =
@@ -522,13 +642,52 @@ bool ModuleNamespaceObject::ProxyHandler::preventExtensions(
   return true;
 }
 
+// https://tc39.es/proposal-defer-import-eval/#sec-IsSymbolLikeNamespaceKey
+// IsSymbolLikeNamespaceKey(P, ns)
+static bool IsSymbolLikeNamespaceKey(JSContext* cx, const jsid& prop,
+                                     ModuleNamespaceObject* ns) {
+  // Step 1. If P is a Symbol, return true.
+  // Step 2. If ns.[[Deferred]] is true and P is "then", return true.
+  // Step 3. Return false.
+  return prop.isSymbol() || (ns->isDeferred() && prop.isAtom(cx->names().then));
+}
+
+// https://tc39.es/proposal-defer-import-eval/#sec-GetModuleExportsList
+static bool EnsureDeferredModuleEvaluated(JSContext* cx,
+                                          Handle<ModuleNamespaceObject*> ns) {
+  // Step 1. If O.[[Deferred]] is true, then:
+  if (ns->isDeferred()) {
+    // Step 1.a. Let m be O.[[Module]].
+    Rooted<ModuleObject*> module(cx, &ns->module());
+
+    // Step 1.b. Perform ? EvaluateModuleSync(m).
+    if (!js::EvaluateModuleSync(cx, module)) {
+      return false;
+    }
+
+    MOZ_ASSERT(module->status() == ModuleStatus::Evaluated);
+  }
+
+  // Step 2. Return O.[[Exports]].
+  //         (See function comment: callers read ns->bindings() instead.)
+  return true;
+}
+
+// https://tc39.es/ecma262/#sec-module-namespace-exotic-objects-getownproperty-p
+// https://tc39.es/proposal-defer-import-eval/#sec-module-namespace-exotic-objects-getownproperty-p
 bool ModuleNamespaceObject::ProxyHandler::getOwnPropertyDescriptor(
     JSContext* cx, HandleObject proxy, HandleId id,
     MutableHandle<mozilla::Maybe<PropertyDescriptor>> desc) const {
   Rooted<ModuleNamespaceObject*> ns(cx, &proxy->as<ModuleNamespaceObject>());
-  if (id.isSymbol()) {
+
+  // Step 1. If IsSymbolLikeNamespaceKey(P, O) is true, return
+  //         OrdinaryGetOwnProperty(O, P). This returns before Step 2, so
+  //         symbol-like keys never trigger deferred module evaluation.
+  if (IsSymbolLikeNamespaceKey(cx, id, ns)) {
     if (id.isWellKnownSymbol(JS::SymbolCode::toStringTag)) {
-      desc.set(Some(PropertyDescriptor::Data(StringValue(cx->names().Module))));
+      JSAtom* toStringTag =
+          ns->isDeferred() ? cx->names().DeferredModule : cx->names().Module;
+      desc.set(Some(PropertyDescriptor::Data(StringValue(toStringTag))));
       return true;
     }
 
@@ -536,6 +695,13 @@ bool ModuleNamespaceObject::ProxyHandler::getOwnPropertyDescriptor(
     return true;
   }
 
+  // Step 2. Let exports be ? GetModuleExportsList(O).
+  // Note: For a deferred namespace this evaluates the underlying module.
+  if (!EnsureDeferredModuleEvaluated(cx, ns)) {
+    return false;
+  }
+
+  // Step 3. If exports does not contain P, return undefined.
   const IndirectBindingMap& bindings = ns->bindings();
   ModuleEnvironmentObject* env;
   mozilla::Maybe<PropertyInfo> prop;
@@ -545,12 +711,15 @@ bool ModuleNamespaceObject::ProxyHandler::getOwnPropertyDescriptor(
     return true;
   }
 
+  // Step 4. Let value be ? O.[[Get]](P, O).
   RootedValue value(cx, env->getSlot(prop->slot()));
   if (value.isMagic(JS_UNINITIALIZED_LEXICAL)) {
     ReportUninitializedModuleBinding(cx, id);
     return false;
   }
 
+  // Step 5. Return PropertyDescriptor { [[Value]]: value, [[Writable]]: true,
+  //         [[Enumerable]]: true, [[Configurable]]: false }.
   desc.set(
       Some(PropertyDescriptor::Data(value, {JS::PropertyAttribute::Enumerable,
                                             JS::PropertyAttribute::Writable})));
@@ -590,41 +759,45 @@ static bool ValidatePropertyDescriptor(
   return result.succeed();
 }
 
+// https://tc39.es/ecma262/#sec-module-namespace-exotic-objects-defineownproperty-p-desc
+// https://tc39.es/proposal-defer-import-eval/#sec-module-namespace-exotic-objects-defineownproperty-p-desc
 bool ModuleNamespaceObject::ProxyHandler::defineProperty(
     JSContext* cx, HandleObject proxy, HandleId id,
     Handle<PropertyDescriptor> desc, ObjectOpResult& result) const {
-  if (id.isSymbol()) {
-    if (id.isWellKnownSymbol(JS::SymbolCode::toStringTag)) {
-      RootedValue value(cx, StringValue(cx->names().Module));
-      return ValidatePropertyDescriptor(cx, desc, false, false, false, value,
-                                        result);
-    }
-    return result.fail(JSMSG_CANT_DEFINE_PROP_OBJECT_NOT_EXTENSIBLE);
-  }
-
-  const IndirectBindingMap& bindings =
-      proxy->as<ModuleNamespaceObject>().bindings();
-  ModuleEnvironmentObject* env;
-  mozilla::Maybe<PropertyInfo> prop;
-  if (!bindings.lookup(id, &env, &prop)) {
-    return result.fail(JSMSG_CANT_DEFINE_PROP_OBJECT_NOT_EXTENSIBLE);
-  }
-
-  RootedValue value(cx, env->getSlot(prop->slot()));
-  if (value.isMagic(JS_UNINITIALIZED_LEXICAL)) {
-    ReportUninitializedModuleBinding(cx, id);
+  Rooted<mozilla::Maybe<PropertyDescriptor>> currentDesc(cx);
+  if (!getOwnPropertyDescriptor(cx, proxy, id, &currentDesc)) {
     return false;
   }
 
-  return ValidatePropertyDescriptor(cx, desc, true, true, false, value, result);
+  // Step 3. NOTE: If O.[[Deferred]] is true, the step above will ensure that
+  //         the module is evaluated.
+  //
+  // Impl note:
+  // This is only valid for non-symbol-like keys. For a symbol-like key,
+  // getOwnPropertyDescriptor returns at its own Step 1 without evaluating,
+  // matching spec Step 1 (return OrdinaryDefineOwnProperty), which returns
+  // before the evaluating Step 2.
+
+  if (currentDesc.isNothing()) {
+    return result.fail(JSMSG_CANT_DEFINE_PROP_OBJECT_NOT_EXTENSIBLE);
+  }
+
+  RootedValue value(cx, currentDesc->value());
+  return ValidatePropertyDescriptor(cx, desc, currentDesc->writable(),
+                                    currentDesc->enumerable(),
+                                    currentDesc->configurable(), value, result);
 }
 
 bool ModuleNamespaceObject::ProxyHandler::has(JSContext* cx, HandleObject proxy,
                                               HandleId id, bool* bp) const {
   Rooted<ModuleNamespaceObject*> ns(cx, &proxy->as<ModuleNamespaceObject>());
-  if (id.isSymbol()) {
+  if (IsSymbolLikeNamespaceKey(cx, id, ns)) {
     *bp = id.isWellKnownSymbol(JS::SymbolCode::toStringTag);
     return true;
+  }
+
+  if (!EnsureDeferredModuleEvaluated(cx, ns)) {
+    return false;
   }
 
   *bp = ns->bindings().has(id);
@@ -635,14 +808,20 @@ bool ModuleNamespaceObject::ProxyHandler::get(JSContext* cx, HandleObject proxy,
                                               HandleValue receiver, HandleId id,
                                               MutableHandleValue vp) const {
   Rooted<ModuleNamespaceObject*> ns(cx, &proxy->as<ModuleNamespaceObject>());
-  if (id.isSymbol()) {
+  if (IsSymbolLikeNamespaceKey(cx, id, ns)) {
     if (id.isWellKnownSymbol(JS::SymbolCode::toStringTag)) {
-      vp.setString(cx->names().Module);
+      JSAtom* toStringTag =
+          ns->isDeferred() ? cx->names().DeferredModule : cx->names().Module;
+      vp.setString(toStringTag);
       return true;
     }
 
     vp.setUndefined();
     return true;
+  }
+
+  if (!EnsureDeferredModuleEvaluated(cx, ns)) {
+    return false;
   }
 
   ModuleEnvironmentObject* env;
@@ -673,29 +852,46 @@ bool ModuleNamespaceObject::ProxyHandler::delete_(
     JSContext* cx, HandleObject proxy, HandleId id,
     ObjectOpResult& result) const {
   Rooted<ModuleNamespaceObject*> ns(cx, &proxy->as<ModuleNamespaceObject>());
-  if (id.isSymbol()) {
+  // Step 1. If IsSymbolLikeNamespaceKey(P, O), return OrdinaryDelete(O, P).
+  // The only ordinary property on a namespace is Symbol.toStringTag
+  // ([[Configurable]]: false); all other symbol-like keys are not present, so
+  // OrdinaryDelete succeeds for them.
+  if (IsSymbolLikeNamespaceKey(cx, id, ns)) {
     if (id.isWellKnownSymbol(JS::SymbolCode::toStringTag)) {
       return result.failCantDelete();
     }
-
     return result.succeed();
   }
 
+  // Step 2. Let exports be ? GetModuleExportsList(O).
+  if (!EnsureDeferredModuleEvaluated(cx, ns)) {
+    return false;
+  }
+
+  // Step 3. If exports contains P, return false.
   if (ns->bindings().has(id)) {
     return result.failCantDelete();
   }
 
+  // Step 4. Return true.
   return result.succeed();
 }
 
 bool ModuleNamespaceObject::ProxyHandler::ownPropertyKeys(
     JSContext* cx, HandleObject proxy, MutableHandleIdVector props) const {
   Rooted<ModuleNamespaceObject*> ns(cx, &proxy->as<ModuleNamespaceObject>());
+
+  // Step 1. Let exports be ? GetModuleExportsList(O).
+  if (!EnsureDeferredModuleEvaluated(cx, ns)) {
+    return false;
+  }
+
   uint32_t count = ns->exports().length();
   if (!props.reserve(props.length() + count + 1)) {
     return false;
   }
 
+  // Step 2-3. Return exports concatenated with symbol keys.
   for (JSAtom* atom : ns->exports()) {
     props.infallibleAppend(AtomToId(atom));
   }
@@ -1162,6 +1358,18 @@ ModuleNamespaceObject* ModuleObject::namespace_() {
   return &value.toObject().as<ModuleNamespaceObject>();
 }
 
+ModuleNamespaceObject* ModuleObject::maybeDeferredNamespace() const {
+  Value value = getReservedSlotTyped(DEFERRED_NAMESPACE_SLOT);
+  if (value.isUndefined()) {
+    return nullptr;
+  }
+  return &value.toObject().as<ModuleNamespaceObject>();
+}
+
+void ModuleObject::setDeferredNamespace(Handle<ModuleNamespaceObject*> ns) {
+  setReservedSlotTyped(DEFERRED_NAMESPACE_SLOT, ObjectValue(*ns));
+}
+
 ScriptSourceObject* ModuleObject::scriptSourceObject() const {
   return cyclicModuleFields()->scriptSourceObject;
 }
@@ -1174,6 +1382,25 @@ JSObject* ModuleObject::moduleSource() const {
   return &value.toObject();
 }
 
+bool ModuleObject::isWasmModule() const {
+  JSObject* source = moduleSource();
+  return source && source->is<WasmModuleObject>();
+}
+
+#ifdef NIGHTLY_BUILD
+JSObject* ModuleObject::wasmInstance() const {
+  Value value = getReservedSlotTyped(WASM_INSTANCE_SLOT);
+  if (value.isUndefined()) {
+    return nullptr;
+  }
+  return &value.toObject();
+}
+
+void ModuleObject::setWasmInstance(JSObject* instance) {
+  setReservedSlotTyped(WASM_INSTANCE_SLOT, ObjectValue(*instance));
+}
+#endif
+
 void ModuleObject::initAsyncSlots(JSContext* cx, bool hasTopLevelAwait,
                                   Handle<ListObject*> asyncParentModules) {
   cyclicModuleFields()->hasTopLevelAwait = hasTopLevelAwait;
@@ -1185,11 +1412,11 @@ bool ModuleObject::initScriptSlots(JSContext* cx, HandleScript script) {
   MOZ_ASSERT(script->sourceObject());
   MOZ_ASSERT(script->filename());
   initReservedSlotTyped(SCRIPT_SLOT, PrivateGCThingValue(script));
-  cyclicModuleFields()->scriptSourceObject = script->sourceObject();
+  ScriptSourceObject* sso = script->sourceObject();
+  cyclicModuleFields()->scriptSourceObject = sso;
   auto& sources = ObjectRealm::get(this).moduleScriptSources;
-  WeakHeapPtr<ScriptSourceObject*> key(script->sourceObject());
-  auto p = sources.lookupForAdd(key);
-  if (!p.found() && !sources.add(p, key)) {
+  auto p = sources.lookupForAdd(sso);
+  if (!p.found() && !sources.add(p, WeakHeapPtr<ScriptSourceObject*>(sso))) {
     ReportOutOfMemory(cx);
     return false;
   }
@@ -1266,9 +1493,11 @@ const char* ModuleObject::filename() const {
   }
   ScriptSourceObject* sso = cyclicModuleFields()->scriptSourceObject;
   if (!sso->hasSource()) {
-    // TODO: Bug 2030454: Return the wasm module filename once we support
-    // evaluation phase imports.
-    return "(unknown)";
+    MOZ_ASSERT(isWasmModule());
+    const wasm::Module& module =
+        moduleSource()->as<WasmModuleObject>().module();
+    const char* source = module.codeMeta().scriptedCaller().source.get();
+    return source ? source : "(unknown)";
   }
   return sso->source()->filename();
 }
@@ -1548,6 +1777,11 @@ bool ModuleObject::execute(JSContext* cx, Handle<ModuleObject*> self) {
     return false;
   }
 #endif
+#ifdef NIGHTLY_BUILD
+  if (self->isWasmModule()) {
+    return WasmModuleExecute(cx, self);
+  }
+#endif
 
   RootedScript script(cx, self->script());
 
@@ -1573,6 +1807,17 @@ bool ModuleObject::execute(JSContext* cx, Handle<ModuleObject*> self) {
 
 /* static */
 void ModuleObject::onTopLevelEvaluationFinished(ModuleObject* module) {
+  // A module's evaluation can finish while its top-level-await generator is
+  // still suspended at an await: a rejected async dependency settles it in
+  // AsyncModuleExecutionRejected, and a debugger can force a throw out of an
+  // await. The pending await reaction resumes the generator afterwards and
+  // needs the script, so keep the slot here. It is cleared once the generator
+  // is closed, in AbstractGeneratorObject::setClosed.
+  AbstractGeneratorObject* genObj = GetGeneratorObjectForModule(module);
+  if (genObj && genObj->isSuspended()) {
+    return;
+  }
+
   // SCRIPT_SLOT is used by debugger to access environments during evaluating
   // the top-level script.
   // Clear the reference at exit to prevent us keeping this alive unnecessarily.
@@ -1582,26 +1827,27 @@ void ModuleObject::onTopLevelEvaluationFinished(ModuleObject* module) {
 /* static */
 ModuleNamespaceObject* ModuleObject::createNamespace(
     JSContext* cx, Handle<ModuleObject*> self,
-    MutableHandle<UniquePtr<ExportNameVector>> exports) {
-  MOZ_ASSERT(!self->namespace_());
-
+    MutableHandle<UniquePtr<ExportNameVector>> exports, ImportPhase phase) {
   Rooted<UniquePtr<IndirectBindingMap>> bindings(cx);
   bindings = cx->make_unique<IndirectBindingMap>();
   if (!bindings) {
     return nullptr;
   }
 
-  auto* ns = ModuleNamespaceObject::create(cx, self, exports, &bindings);
+  auto* ns = ModuleNamespaceObject::create(cx, self, exports, &bindings, phase);
   if (!ns) {
     return nullptr;
   }
 
-  self->initReservedSlotTyped(NAMESPACE_SLOT, ObjectValue(*ns));
   return ns;
 }
 
-void ModuleObject::clearNamespaceOnFailure() {
-  setReservedSlotTyped(NAMESPACE_SLOT, UndefinedValue());
+void ModuleObject::clearNamespaceOnFailure(ImportPhase phase) {
+  if (phase == ImportPhase::Deferred) {
+    setReservedSlotTyped(DEFERRED_NAMESPACE_SLOT, UndefinedValue());
+  } else {
+    setReservedSlotTyped(NAMESPACE_SLOT, UndefinedValue());
+  }
 }
 
 /* static */
@@ -1627,9 +1873,8 @@ bool ModuleObject::createSyntheticEnvironment(JSContext* cx,
     return false;
   }
 
-  // We expect one property per synthetic value plus one for the *namespace*
-  // binding.
-  MOZ_ASSERT(env->shape()->propMapLength() == values.length() + 1);
+  // We expect one property per synthetic value.
+  MOZ_ASSERT(env->shape()->propMapLength() == values.length());
 
   for (uint32_t i = 0; i < values.length(); i++) {
     env->setAliasedBinding(env->firstSyntheticValueSlot() + i, values[i]);
@@ -1641,13 +1886,37 @@ bool ModuleObject::createSyntheticEnvironment(JSContext* cx,
 }
 
 /* static */
+void ModuleObject::initWasmExportBindings(JSContext* cx,
+                                          Handle<ModuleObject*> self,
+                                          JS::HandleVector<Value> values) {
+  Rooted<ModuleEnvironmentObject*> env(cx, &self->initialEnvironment());
+
+  // The exports occupy the slots after the reserved slots.
+  MOZ_ASSERT(env->slotSpan() ==
+             env->firstSyntheticValueSlot() + values.length());
+
+  for (uint32_t i = 0; i < values.length(); i++) {
+    env->setAliasedBinding(env->firstSyntheticValueSlot() + i, values[i]);
+  }
+}
+
+/* static */
 bool ModuleObject::createWasmEnvironment(JSContext* cx,
-                                         Handle<ModuleObject*> self) {
+                                         Handle<ModuleObject*> self,
+                                         Handle<ExportNameVector> exportNames) {
   Rooted<ModuleEnvironmentObject*> env(
-      cx, ModuleEnvironmentObject::createForWasmModule(cx, self));
+      cx, ModuleEnvironmentObject::createForWasmModule(cx, self, exportNames));
   if (!env) {
     return false;
   }
+
+  // The export bindings are immutable and remain uninitialized until the
+  // module is executed, so that reading one before then is a reference error.
+  for (uint32_t slot = env->firstSyntheticValueSlot(); slot < env->slotSpan();
+       slot++) {
+    env->setAliasedBinding(slot, MagicValue(JS_UNINITIALIZED_LEXICAL));
+  }
+
   self->setInitialEnvironment(env);
   return true;
 }
@@ -1893,7 +2162,7 @@ bool ModuleBuilder::buildTables(frontend::StencilModuleMetadata& metadata) {
           }
         }
       }
-    } else if (exp.importNameValueType == ImportNameValueType::AllButDefault) {
+    } else if (exp.importNameValueType == ImportNameValueType::All) {
       MOZ_ASSERT(!exp.exportName);
       if (!metadata.starExportEntries.append(exp)) {
         js::ReportOutOfMemory(fc_);
@@ -2178,6 +2447,42 @@ bool ModuleBuilder::processAttributes(frontend::StencilModuleRequest& request,
   return true;
 }
 
+bool ModuleBuilder::processImportWithPhase(
+    frontend::NameNode* localNameNode,
+    frontend::TaggedParserAtomIndex specifier, frontend::NameNode* moduleSpec,
+    ImportPhase phase) {
+  using namespace js::frontend;
+  MOZ_ASSERT(phase == ImportPhase::Source || phase == ImportPhase::Deferred);
+
+  MaybeModuleRequestIndex moduleRequestIndex =
+      appendModuleRequest(specifier, nullptr, phase);
+  if (!moduleRequestIndex.isSome()) {
+    return false;
+  }
+
+  if (!maybeAppendRequestedModule(moduleRequestIndex, moduleSpec)) {
+    return false;
+  }
+
+  auto localName = localNameNode->atom();
+  markUsedByStencil(localName);
+
+  uint32_t line;
+  JS::LimitedColumnNumberOneOrigin column;
+  eitherParser_.computeLineAndColumn(localNameNode->pn_pos.begin, &line,
+                                     &column);
+
+  ImportNameValueType importNameValue = phase == ImportPhase::Source
+                                            ? ImportNameValueType::Source
+                                            : ImportNameValueType::Namespace;
+
+  auto entry = StencilModuleEntry::importEntry(
+      moduleRequestIndex, localName, TaggedParserAtomIndex(), importNameValue,
+      line, JS::ColumnNumberOneOrigin(column));
+
+  return importEntries_.put(localName, entry);
+}
+
 bool ModuleBuilder::processImport(frontend::BinaryNode* importNode) {
   using namespace js::frontend;
 
@@ -2191,32 +2496,25 @@ bool ModuleBuilder::processImport(frontend::BinaryNode* importNode) {
 
   auto specifier = moduleSpec->atom();
 
-  if (importNode->as<ImportDeclarationNode>().phase() == ImportPhase::Source) {
+  ImportPhase phase = importNode->as<ImportDeclarationNode>().phase();
+  if (phase == ImportPhase::Source) {
     auto* localNameNode = &importNode->left()->as<NameNode>();
     MOZ_ASSERT(localNameNode->isKind(ParseNodeKind::Name));
 
-    MaybeModuleRequestIndex moduleRequestIndex =
-        appendModuleRequest(specifier, nullptr, ImportPhase::Source);
-    if (!moduleRequestIndex.isSome()) {
-      return false;
-    }
-
-    if (!maybeAppendRequestedModule(moduleRequestIndex, moduleSpec)) {
-      return false;
-    }
-
-    auto localName = localNameNode->atom();
-    markUsedByStencil(localName);
-
-    uint32_t line;
-    JS::LimitedColumnNumberOneOrigin column;
-    eitherParser_.computeLineAndColumn(localNameNode->pn_pos.begin, &line,
-                                       &column);
-
-    auto entry = StencilModuleEntry::importEntry(
-        moduleRequestIndex, localName, TaggedParserAtomIndex(),
-        ImportNameValueType::Source, line, JS::ColumnNumberOneOrigin(column));
-    return importEntries_.put(localName, entry);
+    return processImportWithPhase(localNameNode, specifier, moduleSpec,
+                                  ImportPhase::Source);
+  } else if (phase == ImportPhase::Deferred) {
+    // The left child is the importSpecSet list containing a single
+    // ImportNamespaceSpec; extract the NameNode from it.
+    auto* specList = &importNode->left()->as<ListNode>();
+    MOZ_ASSERT(specList->isKind(ParseNodeKind::ImportSpecList));
+    MOZ_ASSERT(specList->count() == 1);
+    auto* namespaceSpec = &specList->head()->as<UnaryNode>();
+    MOZ_ASSERT(namespaceSpec->isKind(ParseNodeKind::ImportNamespaceSpec));
+    auto* localNameNode = &namespaceSpec->kid()->as<NameNode>();
+    MOZ_ASSERT(localNameNode->isKind(ParseNodeKind::Name));
+    return processImportWithPhase(localNameNode, specifier, moduleSpec,
+                                  ImportPhase::Deferred);
   }
 
   auto* specList = &importNode->left()->as<ListNode>();

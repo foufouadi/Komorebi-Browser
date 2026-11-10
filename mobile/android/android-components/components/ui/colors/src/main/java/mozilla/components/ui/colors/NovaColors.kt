@@ -47,6 +47,7 @@ object NovaColors {
     val VioletDesaturated70 = Color(0xFF3E315F)
     val VioletDesaturated80 = Color(0xFF281D44)
     val VioletDesaturated90 = Color(0xFF180E30)
+    val VioletDesaturated90A40 = Color(0x66180E30)
     val VioletDesaturated90A50 = Color(0x80180E30)
     val VioletDesaturated90A70 = Color(0xB2180E30)
 

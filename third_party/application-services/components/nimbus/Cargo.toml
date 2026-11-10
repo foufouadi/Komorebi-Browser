@@ -13,11 +13,9 @@ exclude = ["/android", "/ios"]
 name = "nimbus"
 
 [features]
-# `rkv-safe-mode` is the same name as used by glean. For us though, it's the default.
-default=["stateful"]
-rkv-safe-mode = ["dep:rkv"]
+default = ["stateful"]
 stateful-uniffi-bindings = []
-stateful = ["rkv-safe-mode", "stateful-uniffi-bindings", "dep:remote_settings", "dep:regex", "dep:firefox-versioning"]
+stateful = ["dep:rkv", "stateful-uniffi-bindings", "dep:remote_settings", "dep:regex", "dep:firefox-versioning"]
 
 [dependencies]
 anyhow = "1"
@@ -32,7 +30,7 @@ uuid = { version = "1.3", features = ["serde", "v4"]}
 sha2 = "^0.10"
 hex = "0.4"
 once_cell = "1"
-uniffi = { version = "0.31" }
+uniffi = { version = "0.32" }
 chrono = { version = "0.4", features = ["serde"]}
 icu_segmenter = "2"
 error-support = { path = "../support/error" }
@@ -42,10 +40,10 @@ regex = { version = "1.9", optional = true }
 firefox-versioning = { path = "../support/firefox-versioning", optional = true }
 
 [build-dependencies]
-uniffi = { version = "0.31", features = ["build"] }
+uniffi = { version = "0.32", features = ["build"] }
 
 [dev-dependencies]
 error-support = { path = "../support/error", features = ["testing"] }
 clap = { version = "4.2", default-features = false, features = ["std", "derive"] }
 tempfile = "3"
-ctor = "0.2.2"
+ctor = "1"

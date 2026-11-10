@@ -2,7 +2,7 @@
 // C enum becomes i32 on some systems (eg. Windows).
 #![allow(clippy::unnecessary_cast)]
 
-use super::hb::*;
+use super::{hb::*, HbBlob};
 
 use std::ffi::c_void;
 use std::mem::{align_of, offset_of, size_of};
@@ -10,12 +10,10 @@ use std::ptr::null_mut;
 use std::sync::Arc;
 
 use harfrust::{
-    font::{
-        AdvanceWidthBatch, BuiltinFontFuncs, Font, FontBlob, FontFuncs, FontInstance,
-        FontTableFunction,
-    },
-    GlyphExtents, GlyphFlags as HRGlyphFlags, GlyphId, GlyphInfo as HRGlyphInfo,
-    GlyphPosition as HRGlyphPosition, NormalizedCoord, ShapeOptions, Tag,
+    font::{Blob, Font, NormalizedCoord, TableFunction},
+    Advances, FontFuncs, GlyphExtents, GlyphFlags as HRGlyphFlags, GlyphId,
+    GlyphInfo as HRGlyphInfo, GlyphPosition as HRGlyphPosition, NominalGlyphs, ShapeOptions,
+    ShaperFont, Tag,
 };
 use smallvec::SmallVec;
 
@@ -72,38 +70,13 @@ impl HbFace {
 unsafe impl Send for HbFace {}
 unsafe impl Sync for HbFace {}
 
-struct HbBlob(*mut hb_blob_t);
-
-impl Drop for HbBlob {
-    fn drop(&mut self) {
-        unsafe {
-            hb_blob_destroy(self.0);
-        }
-    }
-}
-
-impl AsRef<[u8]> for HbBlob {
-    fn as_ref(&self) -> &[u8] {
-        let mut length = 0;
-        let data = unsafe { hb_blob_get_data(self.0, &mut length) };
-        if data.is_null() {
-            &[]
-        } else {
-            unsafe { std::slice::from_raw_parts(data.cast(), length as usize) }
-        }
-    }
-}
-
-unsafe impl Send for HbBlob {}
-unsafe impl Sync for HbBlob {}
-
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn _hb_harfrust_shaper_face_data_create_rs(
     face: *mut hb_face_t,
 ) -> *mut c_void {
     let face_index = hb_face_get_index(face);
     let hb_face = HbFace::new(face);
-    let table_fn = FontTableFunction::new(Arc::new(move |tag| {
+    let table_fn = TableFunction::new(Arc::new(move |tag| {
         let blob = hb_face.reference_table(tag);
         if blob.is_null() {
             return None;
@@ -114,12 +87,12 @@ pub unsafe extern "C" fn _hb_harfrust_shaper_face_data_create_rs(
             }
             return None;
         }
-        Some(FontBlob::Shared(Arc::new(HbBlob(blob))))
+        Some(Blob::Shared(Arc::new(HbBlob(blob))))
     }));
 
     let font = match Font::new(table_fn, face_index) {
-        Ok(font) => font,
-        Err(_) => return null_mut(),
+        Some(font) => font,
+        None => return null_mut(),
     };
 
     let hr_face_data = Box::new(HBHarfRustFaceData { font });
@@ -134,7 +107,10 @@ pub unsafe extern "C" fn _hb_harfrust_shaper_face_data_destroy_rs(data: *mut c_v
 }
 
 pub struct HBHarfRustFontData {
-    instance: FontInstance,
+    instance: Font,
+    x_scale: i32,
+    y_scale: i32,
+    ptem: Option<f32>,
 }
 
 struct HBHarfBuzzFontFuncs {
@@ -142,7 +118,7 @@ struct HBHarfBuzzFontFuncs {
 }
 
 impl FontFuncs for HBHarfBuzzFontFuncs {
-    fn nominal_glyph(&mut self, _: &BuiltinFontFuncs, c: u32) -> Option<GlyphId> {
+    fn nominal_glyph(&self, _: &ShaperFont, c: u32) -> Option<GlyphId> {
         let mut glyph = 0;
         if unsafe { hb_font_get_nominal_glyph(self.font, c, &mut glyph) } != 0 {
             Some(GlyphId::new(glyph))
@@ -151,7 +127,7 @@ impl FontFuncs for HBHarfBuzzFontFuncs {
         }
     }
 
-    fn variant_glyph(&mut self, _: &BuiltinFontFuncs, c: u32, vs: u32) -> Option<GlyphId> {
+    fn variation_glyph(&self, _: &ShaperFont, c: u32, vs: u32) -> Option<GlyphId> {
         let mut glyph = 0;
         if unsafe { hb_font_get_variation_glyph(self.font, c, vs, &mut glyph) } != 0 {
             Some(GlyphId::new(glyph))
@@ -160,11 +136,11 @@ impl FontFuncs for HBHarfBuzzFontFuncs {
         }
     }
 
-    fn advance_width(&mut self, _: &BuiltinFontFuncs, glyph: GlyphId) -> i32 {
+    fn glyph_h_advance(&self, _: &ShaperFont, glyph: GlyphId) -> i32 {
         unsafe { hb_font_get_glyph_h_advance(self.font, glyph.to_u32()) }
     }
 
-    fn populate_advance_widths(&mut self, _: &BuiltinFontFuncs, batch: AdvanceWidthBatch<'_>) {
+    fn glyph_h_advances(&self, _: &ShaperFont, batch: Advances<'_>) {
         let raw = batch.into_raw();
         unsafe {
             hb_font_get_glyph_h_advances(
@@ -178,11 +154,25 @@ impl FontFuncs for HBHarfBuzzFontFuncs {
         }
     }
 
-    fn advance_height(&mut self, _: &BuiltinFontFuncs, glyph: GlyphId) -> i32 {
+    fn nominal_glyphs(&self, _: &ShaperFont, batch: NominalGlyphs<'_>) -> usize {
+        let raw = batch.into_raw();
+        unsafe {
+            hb_font_get_nominal_glyphs(
+                self.font,
+                raw.len as u32,
+                raw.codepoints,
+                raw.codepoint_stride as u32,
+                raw.glyphs,
+                raw.glyph_stride as u32,
+            ) as usize
+        }
+    }
+
+    fn glyph_v_advance(&self, _: &ShaperFont, glyph: GlyphId) -> i32 {
         unsafe { hb_font_get_glyph_v_advance(self.font, glyph.to_u32()) }
     }
 
-    fn vertical_origin(&mut self, _: &BuiltinFontFuncs, glyph: GlyphId) -> (i32, i32) {
+    fn glyph_v_origin(&self, _: &ShaperFont, glyph: GlyphId) -> (i32, i32) {
         let mut x = 0;
         let mut y = 0;
         unsafe {
@@ -191,7 +181,7 @@ impl FontFuncs for HBHarfBuzzFontFuncs {
         (x, y)
     }
 
-    fn extents(&mut self, _: &BuiltinFontFuncs, glyph: GlyphId) -> Option<GlyphExtents> {
+    fn glyph_extents(&self, _: &ShaperFont, glyph: GlyphId) -> Option<GlyphExtents> {
         let mut extents = hb_glyph_extents_t {
             x_bearing: 0,
             y_bearing: 0,
@@ -211,7 +201,7 @@ impl FontFuncs for HBHarfBuzzFontFuncs {
     }
 }
 
-fn font_to_instance(font: *mut hb_font_t, font_ref: &Font) -> FontInstance {
+fn font_to_instance(font: *mut hb_font_t, font_ref: &Font) -> Font {
     let mut num_coords: u32 = 0;
     let coords = unsafe { hb_font_get_var_coords_normalized(font, &mut num_coords) };
     let coords = if coords.is_null() {
@@ -220,7 +210,8 @@ fn font_to_instance(font: *mut hb_font_t, font_ref: &Font) -> FontInstance {
         unsafe { std::slice::from_raw_parts(coords, num_coords as usize) }
     };
     let coords = coords.iter().map(|&v| NormalizedCoord::from_bits(v as i16));
-    FontInstance::builder(font_ref)
+    font_ref
+        .instance_builder()
         .normalized_coords(coords)
         .build()
 }
@@ -233,7 +224,18 @@ pub unsafe extern "C" fn _hb_harfrust_shaper_font_data_create_rs(
     let face_data = face_data as *const HBHarfRustFaceData;
 
     let instance = font_to_instance(font, &(*face_data).font);
-    let hr_font_data = HBHarfRustFontData { instance };
+    let mut x_scale = 0;
+    let mut y_scale = 0;
+    hb_font_get_scale(font, &mut x_scale, &mut y_scale);
+    let ptem = hb_font_get_ptem(font);
+    let ptem = (ptem > 0.0).then_some(ptem);
+    // HarfBuzz invalidates shaper font data when any of these values change.
+    let hr_font_data = HBHarfRustFontData {
+        instance,
+        x_scale,
+        y_scale,
+        ptem,
+    };
 
     let hr_font_data = Box::new(hr_font_data);
     let hr_font_data_ptr = Box::into_raw(hr_font_data);
@@ -258,13 +260,13 @@ fn hb_language_to_hr_language(language: hb_language_t) -> Option<harfrust::Langu
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn _hb_harfrust_buffer_create_rs() -> *mut c_void {
-    let hr_buffer = Box::new(harfrust::UnicodeBuffer::new());
+    let hr_buffer = Box::new(harfrust::Buffer::new());
     Box::into_raw(hr_buffer) as *mut c_void
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn _hb_harfrust_buffer_destroy_rs(data: *mut c_void) {
-    let data = data as *mut harfrust::UnicodeBuffer;
+    let data = data as *mut harfrust::Buffer;
     let _hr_buffer = Box::from_raw(data);
 }
 
@@ -345,57 +347,63 @@ pub unsafe extern "C" fn _hb_harfrust_shape_rs(
     num_features: u32,
 ) -> hb_bool_t {
     let font_data = font_data as *const HBHarfRustFontData;
-    let hr_buffer_box = hr_buffer_box as *mut harfrust::UnicodeBuffer;
-    let mut hr_buffer_box = Box::from_raw(hr_buffer_box);
-    let mut hr_buffer = *hr_buffer_box;
+    let hr_buffer = &mut *(hr_buffer_box as *mut harfrust::Buffer);
+    hr_buffer.clear();
+    let shape_plan = (shape_plan as *const harfrust::ShapePlan).as_ref();
 
     // Set buffer properties
     let cluster_level = hb_buffer_get_cluster_level(buffer);
     let cluster_level = match cluster_level {
         hb_buffer_cluster_level_t_HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES => {
-            harfrust::BufferClusterLevel::MonotoneGraphemes
+            harfrust::ClusterLevel::MonotoneGraphemes
         }
         hb_buffer_cluster_level_t_HB_BUFFER_CLUSTER_LEVEL_MONOTONE_CHARACTERS => {
-            harfrust::BufferClusterLevel::MonotoneCharacters
+            harfrust::ClusterLevel::MonotoneCharacters
         }
         hb_buffer_cluster_level_t_HB_BUFFER_CLUSTER_LEVEL_CHARACTERS => {
-            harfrust::BufferClusterLevel::Characters
+            harfrust::ClusterLevel::Characters
         }
         hb_buffer_cluster_level_t_HB_BUFFER_CLUSTER_LEVEL_GRAPHEMES => {
-            harfrust::BufferClusterLevel::Graphemes
+            harfrust::ClusterLevel::Graphemes
         }
-        _ => harfrust::BufferClusterLevel::default(),
+        _ => harfrust::ClusterLevel::MonotoneGraphemes,
     };
     hr_buffer.set_cluster_level(cluster_level);
     let flags = hb_buffer_get_flags(buffer);
     hr_buffer.set_flags(harfrust::BufferFlags::from_bits_truncate(flags as u32));
     let not_found_variation_selector_glyph =
         hb_buffer_get_not_found_variation_selector_glyph(buffer);
-    if not_found_variation_selector_glyph != u32::MAX {
-        hr_buffer.set_not_found_variation_selector_glyph(not_found_variation_selector_glyph);
-    }
+    hr_buffer.set_not_found_variation_selector_glyph(
+        (not_found_variation_selector_glyph != u32::MAX)
+            .then_some(not_found_variation_selector_glyph),
+    );
 
-    // Segment properties:
-    let script = hb_buffer_get_script(buffer);
-    let language = hb_buffer_get_language(buffer);
-    let direction = hb_buffer_get_direction(buffer);
-    // Convert to HarfRust types
-    let script = harfrust::Script::from_iso15924_tag(Tag::from_u32(script as u32))
-        .unwrap_or(harfrust::script::UNKNOWN);
-    let language = hb_language_to_hr_language(language);
-    let direction = match direction {
-        hb_direction_t_HB_DIRECTION_LTR => harfrust::Direction::LeftToRight,
-        hb_direction_t_HB_DIRECTION_RTL => harfrust::Direction::RightToLeft,
-        hb_direction_t_HB_DIRECTION_TTB => harfrust::Direction::TopToBottom,
-        hb_direction_t_HB_DIRECTION_BTT => harfrust::Direction::BottomToTop,
-        _ => harfrust::Direction::Invalid,
-    };
-    // Set properties on the buffer
-    hr_buffer.set_script(script);
-    if let Some(lang) = language {
-        hr_buffer.set_language(lang);
+    if let Some(plan) = shape_plan {
+        // Language is only used to build the plan; shaping with an explicit
+        // plan reads its cached segment properties instead of buffer language.
+        hr_buffer.set_script(Some(plan.script().unwrap_or(harfrust::Script::UNKNOWN)));
+        hr_buffer.set_direction(plan.direction());
+    } else {
+        // Convert segment properties when shaping without a cached plan.
+        let script = hb_buffer_get_script(buffer);
+        let language = hb_buffer_get_language(buffer);
+        let direction = hb_buffer_get_direction(buffer);
+        let script = harfrust::Script::from_iso15924_tag(Tag::from_u32(script as u32))
+            .unwrap_or(harfrust::Script::UNKNOWN);
+        let language = hb_language_to_hr_language(language);
+        let direction = match direction {
+            hb_direction_t_HB_DIRECTION_LTR => harfrust::Direction::LeftToRight,
+            hb_direction_t_HB_DIRECTION_RTL => harfrust::Direction::RightToLeft,
+            hb_direction_t_HB_DIRECTION_TTB => harfrust::Direction::TopToBottom,
+            hb_direction_t_HB_DIRECTION_BTT => harfrust::Direction::BottomToTop,
+            _ => harfrust::Direction::Invalid,
+        };
+        hr_buffer.set_script(Some(script));
+        if let Some(lang) = language {
+            hr_buffer.set_language(Some(lang));
+        }
+        hr_buffer.set_direction(direction);
     }
-    hr_buffer.set_direction(direction);
 
     // Populate buffer
     let count = hb_buffer_get_length(buffer);
@@ -410,28 +418,26 @@ pub unsafe extern "C" fn _hb_harfrust_shape_rs(
     let post_context = std::slice::from_raw_parts(post_context, post_context_length as usize);
     hr_buffer.set_post_context_codepoints(post_context);
 
-    let ptem = hb_font_get_ptem(font);
-    let ptem = if ptem > 0.0 { Some(ptem) } else { None };
-
     let features = hb_feature_to_hr_feature(features, num_features);
-    let shape_plan = (shape_plan as *const harfrust::ShapePlan).as_ref();
-    let mut x_scale = 0;
-    let mut y_scale = 0;
-    hb_font_get_scale(font, &mut x_scale, &mut y_scale);
-    let mut font_funcs = HBHarfBuzzFontFuncs { font };
+    let font_funcs = HBHarfBuzzFontFuncs { font };
+    let shaper_font = ShaperFont::new(&(*font_data).instance)
+        .with_scale_separate((*font_data).x_scale, (*font_data).y_scale)
+        .with_font_funcs(Some(&font_funcs));
     let options = ShapeOptions::new()
         .plan(shape_plan)
-        .scale_separate(Some((x_scale, y_scale)))
-        .point_size(ptem)
-        .features(&features)
-        .font_funcs(Some(&mut font_funcs));
-    let glyphs = harfrust::shape(&(*font_data).instance, hr_buffer, options);
+        .point_size((*font_data).ptem)
+        .features(&features);
+    if harfrust::shape(&shaper_font, hr_buffer, options).is_err()
+        || !hr_buffer.allocation_successful()
+    {
+        return false as hb_bool_t;
+    }
 
     hb_buffer_set_content_type(
         buffer,
         hb_buffer_content_type_t_HB_BUFFER_CONTENT_TYPE_GLYPHS,
     );
-    let count = glyphs.len();
+    let count = hr_buffer.len();
     hb_buffer_set_length(buffer, count as u32);
     let mut count_out: u32 = 0;
     let infos = hb_buffer_get_glyph_infos(buffer, &mut count_out);
@@ -440,12 +446,14 @@ pub unsafe extern "C" fn _hb_harfrust_shape_rs(
         return false as hb_bool_t;
     }
 
-    std::ptr::copy_nonoverlapping(glyphs.glyph_infos().as_ptr().cast(), infos, count);
-    std::ptr::copy_nonoverlapping(glyphs.glyph_positions().as_ptr().cast(), positions, count);
+    std::ptr::copy_nonoverlapping(hr_buffer.glyph_infos().as_ptr().cast(), infos, count);
+    std::ptr::copy_nonoverlapping(
+        hr_buffer.glyph_positions().as_ptr().cast(),
+        positions,
+        count,
+    );
 
-    let hr_buffer = glyphs.clear();
-    *hr_buffer_box = hr_buffer; // Move the buffer back into the box
-    let _ = Box::into_raw(hr_buffer_box); // Prevent double free
+    hr_buffer.clear();
 
     true as hb_bool_t
 }

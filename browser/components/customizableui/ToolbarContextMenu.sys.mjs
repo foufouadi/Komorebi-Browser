@@ -10,7 +10,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   CustomizableUI:
     "moz-src:///browser/components/customizableui/CustomizableUI.sys.mjs",
   ExtensionsUI: "resource:///modules/ExtensionsUI.sys.mjs",
-  SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
+  SessionStore:
+    "moz-src:///browser/components/sessionstore/SessionStore.sys.mjs",
 });
 
 XPCOMUtils.defineLazyPreferenceGetter(
@@ -345,7 +346,7 @@ export var ToolbarContextMenu = {
         .toggleAttribute("disabled", closedCount == 0);
       document.l10n.setArgs(
         document.getElementById("toolbar-context-undoCloseTab"),
-        { tabCount: closedCount }
+        { tabCount: Math.max(closedCount, 1) }
       );
       return;
     }

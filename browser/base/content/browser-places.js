@@ -36,7 +36,7 @@ ChromeUtils.defineESModuleGetters(this, {
   PanelMultiView:
     "moz-src:///browser/components/customizableui/PanelMultiView.sys.mjs",
   RecentlyClosedTabsAndWindowsMenuUtils:
-    "resource:///modules/sessionstore/RecentlyClosedTabsAndWindowsMenuUtils.sys.mjs",
+    "moz-src:///browser/components/sessionstore/RecentlyClosedTabsAndWindowsMenuUtils.sys.mjs",
   UrlbarShared: "chrome://browser/content/urlbar/UrlbarShared.mjs",
 });
 
@@ -579,6 +579,16 @@ var PlacesCommandHook = {
       (await BrowserWindowTracker.promiseOpenWindow());
     win.gURLBar.search(UrlbarShared.RESTRICT_TOKENS.BOOKMARK, {
       searchModeEntry: "bookmarkmenu",
+    });
+  },
+
+  async searchTabs(searchModeEntry) {
+    let win =
+      BrowserWindowTracker.getTopWindow() ??
+      (await BrowserWindowTracker.promiseOpenWindow());
+    win.focus();
+    win.gURLBar.search(UrlbarShared.RESTRICT_TOKENS.OPENPAGE, {
+      searchModeEntry,
     });
   },
 
@@ -1997,14 +2007,14 @@ var BookmarkingUI = {
         if (shortcutElem) {
           let shortcut = ShortcutUtils.prettifyShortcut(shortcutElem);
           let contextItemL10nId = isStarred
-            ? "main-context-menu-edit-bookmark-with-shortcut"
-            : "main-context-menu-bookmark-page-with-shortcut";
+            ? "main-context-menu-edit-bookmark-with-shortcut-2"
+            : "main-context-menu-bookmark-page-with-shortcut-2";
           let l10nArgs = { shortcut };
           document.l10n.setAttributes(contextItem, contextItemL10nId, l10nArgs);
         } else {
           let contextItemL10nId = isStarred
-            ? "main-context-menu-edit-bookmark"
-            : "main-context-menu-bookmark-page";
+            ? "main-context-menu-edit-bookmark-2"
+            : "main-context-menu-bookmark-page-2";
           document.l10n.setAttributes(contextItem, contextItemL10nId);
         }
       }

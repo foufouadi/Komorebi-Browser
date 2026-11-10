@@ -134,6 +134,7 @@ class DefaultSessionControlController(
     private val shareUseCases: ShareUseCases,
     private val showAddSearchWidgetPrompt: () -> Unit,
     private val requestSetDefaultBrowserPrompt: () -> Unit,
+    private val applicationScope: CoroutineScope = viewLifecycleScope,
 ) : SessionControlController {
 
     private var callback: SessionControlControllerCallback? = null
@@ -211,7 +212,7 @@ class DefaultSessionControlController(
         if (updatedCollection?.tabs?.size == 1) {
             callback?.removeCollection(collection)
         } else {
-            viewLifecycleScope.launch {
+            applicationScope.launch {
                 tabCollectionStorage.removeTabFromCollection(collection, tab)
             }
         }
@@ -220,7 +221,7 @@ class DefaultSessionControlController(
     override fun handleCollectionShareTabsClicked(collection: TabCollection) {
         showShareFragment(
             collection.title,
-            collection.tabs.map { ShareData(url = it.url, title = it.title) },
+            collection.tabs.map { ShareData(url = it.url, title = it.title, private = false) },
         )
         Collections.shared.record(NoExtras())
     }

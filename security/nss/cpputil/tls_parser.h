@@ -23,6 +23,7 @@ namespace nss_test {
 const uint8_t kTlsHandshakeClientHello = 1;
 const uint8_t kTlsHandshakeServerHello = 2;
 const uint8_t kTlsHandshakeNewSessionTicket = 4;
+const uint8_t kTlsHandshakeEndOfEarlyData = 5;
 const uint8_t kTlsHandshakeHelloRetryRequest = 6;
 const uint8_t kTlsHandshakeEncryptedExtensions = 8;
 const uint8_t kTlsHandshakeCertificate = 11;
@@ -43,6 +44,7 @@ const uint8_t kTlsAlertBadRecordMac = 20;
 const uint8_t kTlsAlertRecordOverflow = 22;
 const uint8_t kTlsAlertHandshakeFailure = 40;
 const uint8_t kTlsAlertBadCertificate = 42;
+const uint8_t kTlsAlertUnsupportedCertificate = 43;
 const uint8_t kTlsAlertCertificateRevoked = 44;
 const uint8_t kTlsAlertCertificateExpired = 45;
 const uint8_t kTlsAlertIllegalParameter = 47;

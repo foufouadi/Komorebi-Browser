@@ -5,6 +5,7 @@
 package org.mozilla.fenix.wallpapers
 
 import android.graphics.Bitmap
+import android.util.Size
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -45,7 +46,7 @@ import org.mozilla.fenix.theme.FirefoxTheme
 fun WallpaperOnboarding(
     wallpapers: List<Wallpaper>,
     currentWallpaper: Wallpaper,
-    loadWallpaperResource: suspend (Wallpaper) -> Bitmap?,
+    loadWallpaperResource: suspend (Wallpaper, Size) -> Bitmap?,
     onCloseClicked: () -> Unit,
     onExploreMoreButtonClicked: () -> Unit,
     onSelectWallpaper: (Wallpaper) -> Unit,
@@ -91,7 +92,7 @@ fun WallpaperOnboarding(
             WallpaperThumbnails(
                 wallpapers = wallpapers,
                 selectedWallpaper = currentWallpaper,
-                loadWallpaperResource = { loadWallpaperResource(it) },
+                loadWallpaperResource = { wallpaper, size -> loadWallpaperResource(wallpaper, size) },
                 onSelectWallpaper = { onSelectWallpaper(it) },
             )
 
@@ -122,7 +123,7 @@ private fun WallpaperSnackbarPreview() {
             currentWallpaper = Wallpaper.Default,
             onCloseClicked = {},
             onExploreMoreButtonClicked = {},
-            loadWallpaperResource = { null },
+            loadWallpaperResource = { _, _ -> null },
             onSelectWallpaper = {},
         )
     }

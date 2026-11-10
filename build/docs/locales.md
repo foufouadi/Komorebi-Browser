@@ -11,11 +11,6 @@ are termed "single-locale language repacks". There is another concept of a
 "multi-locale language build", which is more like a regular build and less
 like a re-packaging post-processing step.
 
-:::{note}
-These builds rely on make targets that don't work for
-[artifact builds](https://bugzilla.mozilla.org/show_bug.cgi?id=1387485).
-:::
-
 ### Instructions for single-locale repacks for developers
 
 This assumes that `$AB_CD` is the locale you want to repack with; you
@@ -36,7 +31,7 @@ find the available localizations from [firefox-l10n](https://github.com/mozilla-
    ```
 
 You should find a re-packaged build at `OBJDIR/dist/`, and a runnable binary
-in `OBJDIR/dist/l10n-stage/`. The `installers` target runs quite a few
+in `OBJDIR/dist/l10n-stage/$AB_CD/`. The `installers` target runs quite a few
 things for you, including getting the localizations from
 <https://github.com/mozilla-l10n/firefox-l10n> (or updating it if already
 present). It will clone them into `~/.mozbuild/l10n-central`. If you prefer to
@@ -96,48 +91,6 @@ the `MOZ_CHROME_MULTILOCALE` variable set, like:
 env MOZ_CHROME_MULTILOCALE=en-US,de,it,zh-TW ./mach android install-geckoview_example
 ```
 
-#### Multi-locale builds without compiling
-
-For deep technical reasons, artifact builds do not support multi-locale builds.
-However, with a little work, we can achieve the same effect:
-
-1. Arrange a `mozconfig` without a compilation environment but with support
-   for the `RecursiveMake` build backend, like:
-
-   ```shell
-   ac_add_options --disable-compile-environment
-   export BUILD_BACKENDS=FasterMake,RecursiveMake
-   ... other options ...
-   ```
-
-2. Configure.
-
-   ```shell
-   ./mach configure
-   ```
-
-3. Manually provide compiled artifacts.
-
-   ```shell
-   ./mach artifact install [-v]
-   ```
-
-4. Build.
-
-   ```shell
-   ./mach build
-   ```
-
-5. Produce a multi-locale package.
-
-   ```shell
-   ./mach package-multi-locale --locales de it zh-TW
-   ```
-
-This build configuration is fragile and not generally useful for active
-development (for that, use a full/compiled build), but it certainly speeds
-testing multi-locale packaging.
-
 ### General flow of repacks
 
 The general flow of the locale repacks is controlled by
@@ -146,15 +99,16 @@ the packaging build system. The three main entry points above all trigger
 related build flows:
 
 1. Get the localization repository, if needed
-2. Run l10n-merge with a prior clobber of the merge dir
+2. Run `l10n-merge`
 3. Copy l10n files to `dist`, with minor differences here between `l10n-%` and `chrome-%`
 4. Repackage and package
 
 Details on l10n-merge are described in its own section below.
-The copying of files is mainly controlled by `jar.mn`, in the few source
+The copying of files is driven by the `l10n-manifest.json` that the build
+backend emits from `jar.mn` and `LOCALIZED_FILES`, in the few source
 directories that include localizable files. `l10n-%` is used for repacks,
-`chrome-%` for multi-locale packages. The repackaging is dedicated
-Python code in `toolkit/mozapps/installer/l10n-repack.py`, using an existing
+`chrome-%` for multi-locale packages. The repackaging is done by
+`python/mozbuild/mozbuild/action/l10n_repackage.py`, starting from an existing
 package. It strips existing `chrome` l10n resources, and adds localizations
 and metadata.
 

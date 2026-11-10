@@ -14,7 +14,6 @@
 #include "TouchManager.h"
 #include "Units.h"
 #include "Visibility.h"
-#include "mozilla/ArenaObjectID.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/FlushType.h"
 #include "mozilla/Logging.h"
@@ -35,7 +34,6 @@
 #include "nsIContent.h"
 #include "nsIObserver.h"
 #include "nsISelectionController.h"
-#include "nsPresArena.h"
 #include "nsPresContext.h"
 #include "nsQueryFrame.h"
 #include "nsRect.h"
@@ -69,7 +67,6 @@ class nsITimer;
 class nsPageSequenceFrame;
 class nsPIDOMWindowOuter;
 class nsPresShellEventCB;
-class nsRange;
 class nsRefreshDriver;
 class nsRegion;
 class nsTextFrame;
@@ -86,6 +83,7 @@ class ReflowCountMgr;
 
 namespace mozilla {
 class AccessibleCaretEventHub;
+struct AnchorPosAnchorInfo;
 class FallbackRenderer;
 class GeckoMVMContext;
 class nsDisplayList;
@@ -96,9 +94,14 @@ class ProfileChunkedBuffer;
 class ScopedNameRef;
 class ScrollContainerFrame;
 class StyleSheet;
+struct StyleAtom;
 
 struct AutoConnectedAncestorTracker;
 struct PointerInfo;
+
+// Cache used for storing top layer indices of anchor lists, grouped by name.
+using AnchorPosAnchorTopLayerIndexCache =
+    nsTHashMap<const nsAtom*, nsTArray<size_t>>;
 
 #ifdef ACCESSIBILITY
 namespace a11y {
@@ -111,6 +114,7 @@ class BrowserParent;
 class Element;
 class Event;
 class HTMLSlotElement;
+class Range;
 class Selection;
 class PerformanceMainThread;
 }  // namespace dom
@@ -263,45 +267,6 @@ class PresShell final : public nsStubDocumentObserver,
     return mPresContext && mPresContext->IsRoot();
   }
 
-  /**
-   * All frames owned by the shell are allocated from an arena.  They
-   * are also recycled using free lists.  Separate free lists are
-   * maintained for each frame type (aID), which must always correspond
-   * to the same aSize value.  AllocateFrame is infallible and will abort
-   * on out-of-memory.
-   */
-  void* AllocateFrame(nsQueryFrame::FrameIID aID, size_t aSize) {
-#define FRAME_ID(classname, ...)                                  \
-  static_assert(size_t(nsQueryFrame::FrameIID::classname##_id) == \
-                    size_t(eArenaObjectID_##classname),           \
-                "");
-#define ABSTRACT_FRAME_ID(classname)                              \
-  static_assert(size_t(nsQueryFrame::FrameIID::classname##_id) == \
-                    size_t(eArenaObjectID_##classname),           \
-                "");
-#include "mozilla/FrameIdList.h"
-#undef FRAME_ID
-#undef ABSTRACT_FRAME_ID
-    return AllocateByObjectID(ArenaObjectID(size_t(aID)), aSize);
-  }
-
-  void FreeFrame(nsQueryFrame::FrameIID aID, void* aPtr) {
-    return FreeByObjectID(ArenaObjectID(size_t(aID)), aPtr);
-  }
-
-  void* AllocateByObjectID(ArenaObjectID aID, size_t aSize) {
-    void* result = mFrameArena.Allocate(aID, aSize);
-    RecordAlloc(result);
-    return result;
-  }
-
-  void FreeByObjectID(ArenaObjectID aID, void* aPtr) {
-    RecordFree(aPtr);
-    if (!mIsDestroying) {
-      mFrameArena.Free(aID, aPtr);
-    }
-  }
-
   Document* GetDocument() const { return mDocument; }
 
   nsPresContext* GetPresContext() const { return mPresContext; }
@@ -380,7 +345,10 @@ class PresShell final : public nsStubDocumentObserver,
   enum class ResizeEventKind : uint8_t { Regular, Visual };
   void ScheduleResizeEventIfNeeded(ResizeEventKind = ResizeEventKind::Regular);
 
-  void PostScrollEvent(mozilla::Runnable*);
+  // Returns the current scroll event generation, which must be kept around by
+  // the caller to prevent duplicate scroll event entries.
+  [[nodiscard]] uint32_t PostScrollEvent(mozilla::Runnable*);
+  uint32_t GetScrollEventGeneration() const { return mScrollEventGeneration; }
 
   /**
    * Returns true if the document hosted by this presShell is in a devtools
@@ -421,12 +389,23 @@ class PresShell final : public nsStubDocumentObserver,
    */
   MOZ_CAN_RUN_SCRIPT_BOUNDARY bool DoFlushLayout(bool aInterruptible);
 
+  enum class MobileViewportManagerUpdate : uint8_t {
+    // The pres shell is initializing. Nothing is laid out yet, so don't reflow.
+    PresShellInit,
+    // Something that decides which mobile viewport manager the document needs
+    // changed (e.g. RDM was toggled). Reflows if the manager gets replaced.
+    ManagerTypeMayChange,
+    // As above, and the layout viewport size may have changed too (e.g. the
+    // viewport size override), so reflow even if the manager stays the same.
+    LayoutViewportSizeMayChange,
+  };
+
   /**
    * Note that the assumptions that determine whether we need a mobile viewport
    * manager may have changed.
    */
   MOZ_CAN_RUN_SCRIPT void MaybeRecreateMobileViewportManager(
-      bool aAfterInitialization);
+      MobileViewportManagerUpdate aUpdate);
 
   /**
    * Returns true if this document uses mobile viewport sizing (including
@@ -812,12 +791,14 @@ class PresShell final : public nsStubDocumentObserver,
   nsIFrame* GetAbsoluteContainingBlock(nsIFrame* aFrame);
 
   // https://drafts.csswg.org/css-anchor-position-1/#target
-  nsIFrame* GetAnchorPosAnchor(const ScopedNameRef& aName,
-                               const nsIFrame* aPositionedFrame) const;
+  nsIFrame* GetAnchorPosAnchor(
+      const ScopedNameRef& aName, const nsIFrame* aPositionedFrame,
+      uint32_t aPositionedFrameTreeDepth,
+      AnchorPosAnchorTopLayerIndexCache* aTopLayerIndexCache = nullptr) const;
   void CollectAnchorNames(const nsIFrame* aPositionedFrame,
                           nsTArray<nsString>& aResult);
-  void AddAnchorPosAnchor(const nsAtom* aName, nsIFrame* aFrame);
-  void RemoveAnchorPosAnchor(const nsAtom* aName, nsIFrame* aFrame);
+  void AddAnchorPosAnchor(Span<const StyleAtom> aNames, nsIFrame* aFrame);
+  void RemoveAnchorPosAnchor(Span<const StyleAtom> aNames, nsIFrame* aFrame);
   enum class AnchorPosUpdateResult {
     NotApplicable,
     Flushed,
@@ -1370,6 +1351,8 @@ class PresShell final : public nsStubDocumentObserver,
   NS_IMETHOD GetSelectionFromScript(RawSelectionType aRawSelectionType,
                                     dom::Selection** aSelection) override;
   dom::Selection* GetSelection(RawSelectionType aRawSelectionType) override;
+  dom::Selection* GetExistingSelection(
+      RawSelectionType aRawSelectionType) override;
 
   NS_IMETHOD SetDisplaySelection(int16_t aToggle) override;
   NS_IMETHOD GetDisplaySelection(int16_t* aToggle) override;
@@ -1531,10 +1514,15 @@ class PresShell final : public nsStubDocumentObserver,
    *   >= FlushType::Style.  This also returns true if a throttled
    *   animation flush is required.
    */
-  bool NeedFlush(FlushType aType) const {
+  bool NeedFlush(FlushType aType, bool aFlushAnimations) const {
     MOZ_ASSERT(aType >= FlushType::Style);
-    return mNeedStyleFlush || mNeedThrottledAnimationFlush ||
+    return mNeedStyleFlush ||
+           (mNeedThrottledAnimationFlush && aFlushAnimations) ||
            (mNeedLayoutFlush && aType >= FlushType::InterruptibleLayout);
+  }
+
+  bool NeedFlush(const ChangesToFlush& aFlush) const {
+    return NeedFlush(aFlush.mFlushType, aFlush.mFlushAnimations);
   }
 
   /**
@@ -1563,7 +1551,7 @@ class PresShell final : public nsStubDocumentObserver,
    */
   MOZ_CAN_RUN_SCRIPT
   void FlushPendingNotifications(FlushType aType) {
-    if (!NeedFlush(aType)) {
+    if (!NeedFlush(aType, /* aFlushAnimations = */ true)) {
       return;
     }
 
@@ -1572,7 +1560,7 @@ class PresShell final : public nsStubDocumentObserver,
 
   MOZ_CAN_RUN_SCRIPT
   void FlushPendingNotifications(ChangesToFlush aType) {
-    if (!NeedFlush(aType.mFlushType)) {
+    if (!NeedFlush(aType)) {
       return;
     }
 
@@ -1710,7 +1698,7 @@ class PresShell final : public nsStubDocumentObserver,
    */
   MOZ_CAN_RUN_SCRIPT
   nsresult GoToAnchor(const nsAString& aAnchorName,
-                      const nsRange* aFirstTextDirective, bool aScroll,
+                      const dom::Range* aFirstTextDirective, bool aScroll,
                       ScrollFlags aAdditionalScrollFlags = ScrollFlags::None);
 
   /**
@@ -1971,32 +1959,6 @@ class PresShell final : public nsStubDocumentObserver,
    */
   bool DetermineFontSizeInflationState();
 
-  void RecordAlloc(void* aPtr) {
-#ifdef DEBUG
-    if (!mAllocatedPointers) {
-      return;  // Hash set was presumably freed to avert OOM.
-    }
-    MOZ_ASSERT(!mAllocatedPointers->Contains(aPtr));
-    if (!mAllocatedPointers->Insert(aPtr, fallible)) {
-      // Yikes! We're nearly out of memory, and this insertion would've pushed
-      // us over the ledge. At this point, we discard & stop using this set,
-      // since we don't have enough memory to keep it accurate from this point
-      // onwards. Hopefully this helps relieve the memory pressure a bit, too.
-      mAllocatedPointers = nullptr;
-    }
-#endif
-  }
-
-  void RecordFree(void* aPtr) {
-#ifdef DEBUG
-    if (!mAllocatedPointers) {
-      return;  // Hash set was presumably freed to avert OOM.
-    }
-    MOZ_ASSERT(mAllocatedPointers->Contains(aPtr));
-    mAllocatedPointers->Remove(aPtr);
-#endif
-  }
-
   struct EventTargetInfo {
     EventTargetInfo() = default;
     EventTargetInfo(EventMessage aEventMessage, nsIFrame* aFrame,
@@ -2060,8 +2022,6 @@ class PresShell final : public nsStubDocumentObserver,
 
   DOMHighResTimeStamp GetPerformanceNowUnclamped();
 
-  bool ScheduleReflowOffTimer();
-
   friend class ::AutoPointerEventTargetUpdater;
 
   // ProcessReflowCommands returns whether we processed all our dirty roots
@@ -2089,16 +2049,6 @@ class PresShell final : public nsStubDocumentObserver,
   void AddUserSheet(StyleSheet*);
   void AddAgentSheet(StyleSheet*);
   void AddAuthorSheet(StyleSheet*);
-
-  /**
-   * Initialize cached font inflation preference values and do an initial
-   * computation to determine if font inflation is enabled.
-   *
-   * @see nsLayoutUtils::sFontSizeInflationEmPerLine
-   * @see nsLayoutUtils::sFontSizeInflationMinTwips
-   * @see nsLayoutUtils::sFontSizeInflationLineThreshold
-   */
-  void SetupFontInflation();
 
   /**
    * Implementation methods for FlushPendingNotifications.
@@ -2133,6 +2083,7 @@ class PresShell final : public nsStubDocumentObserver,
     RenderingState mOldState;
   };
   void SetRenderingState(const RenderingState& aState);
+  void RemoveAnchorPosAnchor(const nsAtom* aName, nsIFrame* aFrame);
 
   friend class ::nsPresShellEventCB;
 
@@ -2141,11 +2092,11 @@ class PresShell final : public nsStubDocumentObserver,
   // given a display list, clip the items within the list to
   // the range
   nsRect ClipListToRange(nsDisplayListBuilder* aBuilder, nsDisplayList* aList,
-                         nsRange* aRange);
+                         dom::Range* aRange);
 
   // create a RangePaintInfo for the range aRange containing the
   // display list needed to paint the range to a surface
-  UniquePtr<RangePaintInfo> CreateRangePaintInfo(nsRange* aRange,
+  UniquePtr<RangePaintInfo> CreateRangePaintInfo(dom::Range* aRange,
                                                  nsRect& aSurfaceRect,
                                                  bool aForPrimarySelection);
 
@@ -3156,8 +3107,7 @@ class PresShell final : public nsStubDocumentObserver,
           : mEventHandler(aEventHandler) {
         MOZ_DIAGNOSTIC_ASSERT(!mEventHandler.mCurrentEventInfoSetter);
         mEventHandler.mCurrentEventInfoSetter = this;
-        mEventHandler.mPresShell->PushCurrentEventInfo(
-            std::forward<EventTargetInfo>(aInfo));
+        mEventHandler.mPresShell->PushCurrentEventInfo(std::move(aInfo));
       }
       AutoCurrentEventInfoSetter(EventHandler& aEventHandler,
                                  EventMessage aEventMessage,
@@ -3279,18 +3229,6 @@ class PresShell final : public nsStubDocumentObserver,
   // The `performance.now()` value when we last started to process reflows.
   DOMHighResTimeStamp mLastReflowStart{0.0};
 
-#ifdef DEBUG
-  // We track allocated pointers in a diagnostic hash set, to assert against
-  // missing/double frees. This set is allocated infallibly in the PresShell
-  // constructor's initialization list. The set can get quite large, so we use
-  // fallible allocation when inserting into it; and if these operations ever
-  // fail, then we just get rid of the set and stop using this diagnostic from
-  // that point on.  (There's not much else we can do, when the set grows
-  // larger than the available memory.)
-  UniquePtr<nsTHashSet<void*>> mAllocatedPointers{
-      MakeUnique<nsTHashSet<void*>>()};
-#endif
-
   // A list of stack weak frames. This is a pointer to the last item in the
   // list.
   AutoWeakFrame* mAutoWeakFrames = nullptr;
@@ -3312,7 +3250,8 @@ class PresShell final : public nsStubDocumentObserver,
   // Note: Does not store implicit anchors, since many elements can be
   // potential implicit anchors (e.g. pseudo-elements' implicit anchor
   // is its originating element).
-  nsTHashMap<RefPtr<const nsAtom>, nsTArray<nsIFrame*>> mAnchorPosAnchors;
+  nsTHashMap<RefPtr<const nsAtom>, nsTArray<AnchorPosAnchorInfo>>
+      mAnchorPosAnchors;
   nsTArray<nsIFrame*> mAnchorPosPositioned;
 
   // Reflow roots that need to be reflowed.
@@ -3369,6 +3308,10 @@ class PresShell final : public nsStubDocumentObserver,
   // Pending list of scroll/scrollend/etc events.
   nsTArray<RefPtr<Runnable>> mPendingScrollEvents;
 
+  // An always-non-zero generation number for scroll events. This lets callers
+  // know whether they've dispatched a scroll event this frame already.
+  uint32_t mScrollEventGeneration = 1;
+
   nsTHashSet<nsIContent*> mHiddenContentInForcedLayout;
 
   nsTHashSet<nsIFrame*> mContentVisibilityAutoFrames;
@@ -3403,9 +3346,6 @@ class PresShell final : public nsStubDocumentObserver,
 
   // Layout viewport size that we still haven't committed to the layout tree.
   Maybe<nsSize> mPendingLayoutViewportSize;
-
-  using Arena = nsPresArena<8192, ArenaObjectID, eArenaObjectID_COUNT>;
-  Arena mFrameArena;
 
   Maybe<nsPoint> mVisualViewportOffset;
 

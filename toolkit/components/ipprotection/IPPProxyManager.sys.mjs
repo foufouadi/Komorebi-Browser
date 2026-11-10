@@ -2,12 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
+import { AUTH_ERRORS } from "moz-src:///toolkit/components/ipprotection/IPPAuthProvider.sys.mjs";
 
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   IPPChannelFilter:
+    "moz-src:///toolkit/components/ipprotection/IPPChannelFilter.sys.mjs",
+  IPPMode:
     "moz-src:///toolkit/components/ipprotection/IPPChannelFilter.sys.mjs",
   IPPLifecycleHelper:
     "moz-src:///toolkit/components/ipprotection/IPPLifecycleHelper.sys.mjs",
@@ -47,6 +51,15 @@ XPCOMUtils.defineLazyPreferenceGetter(
   Temporal.Duration.from({ seconds: 30 }).total("milliseconds")
 );
 
+// How long an activation stays in ACTIVATING waiting for the service to
+// become ready.
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "serviceWaitTimeout",
+  "browser.ipProtection.serviceWaitTimeout",
+  Temporal.Duration.from({ seconds: 90 }).total("milliseconds")
+);
+
 XPCOMUtils.defineLazyPreferenceGetter(
   lazy,
   "retryAfter",
@@ -78,17 +91,64 @@ export const ERRORS = Object.freeze({
   TIMEOUT: "timeout-error", // Activation took too long and was aborted
   MISSING_PROMISE: "missing-activation-promise", // Expected promise was not returned
   MISSING_ABORT: "missing-abort-controller", // Expected abort controller was not returned
+  MISSING_PASS: "missing-pass", // A rotation completed without a pass or an error
   PASS_UNAVAILABLE: "pass-unavailable", // No pass was returned from the server
   SERVER_NOT_FOUND: "server-not-found", // No server was found for the location
+  SERVERLIST_UNAVAILABLE: "serverlist-unavailable", // The server list could not be fetched
   CANCELED: "activation-canceled", // Activation was canceled
   VPN_UNAVAILABLE: "vpn-unavailable", // VPN unavailable in local region
+  NOT_READY: "not-ready-error", // Activation was requested outside of the ready state
+  QUOTA_EXHAUSTED: "quota-exhausted", // The bandwidth limit has been reached
+  CONNECTION_FAILED: "connection-failed", // The proxy connection never came up
+
+  /**
+   * Maps an auth provider error onto this vocabulary. Causes without a name of
+   * our own pass through unchanged.
+   *
+   * @param {import("./IPPAuthProvider.sys.mjs").AuthError} error
+   * @returns {string}
+   */
+  from(error) {
+    switch (error) {
+      case AUTH_ERRORS.NETWORK_ERROR:
+        return ERRORS.NETWORK;
+      case AUTH_ERRORS.SERVER_ERROR:
+        return ERRORS.CATASTROPHIC;
+      case AUTH_ERRORS.REGION_UNAVAILABLE:
+        return ERRORS.VPN_UNAVAILABLE;
+      case AUTH_ERRORS.QUOTA_EXCEEDED:
+        return ERRORS.QUOTA_EXHAUSTED;
+      default:
+        return error;
+    }
+  },
 });
+
+const MAX_STACK_FRAMES = 8;
+const MAX_SOURCE_LENGTH = 500; // Glean's event extra limit.
+
+/**
+ * The privileged frames of a stack as "function@filename:line:column",
+ * innermost first. Dropping the directories keeps any URL out of telemetry.
+ *
+ * @param {string} stack - a newline separated SpiderMonkey stack.
+ * @returns {string} up to eight frames, newline separated.
+ */
+function stackSource(stack) {
+  return stack
+    .split("\n")
+    .filter(frame => /(?:moz-src|resource|chrome):\/\//.test(frame))
+    .slice(0, MAX_STACK_FRAMES)
+    .map(frame => frame.replace(/@.*\//, "@"))
+    .join("\n")
+    .slice(0, MAX_SOURCE_LENGTH);
+}
 
 const LOG_PREF = "browser.ipProtection.log";
 
 ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
   return console.createInstance({
-    prefix: "IPPProxyManager",
+    logModule: "IPP_ProxyManager",
     maxLogLevel: Services.prefs.getBoolPref(LOG_PREF, false) ? "Debug" : "Warn",
   });
 });
@@ -173,6 +233,7 @@ class IPPProxyManagerSingleton extends EventTarget {
   #state = IPPProxyStates.NOT_READY;
 
   #activatingPromise = null;
+  #waitingForService = false;
   #activationAbortController = null;
 
   #pass = null;
@@ -191,6 +252,7 @@ class IPPProxyManagerSingleton extends EventTarget {
   /** @type {string | null} */
   #errorType = null;
   #refreshUsageAbortController = null;
+  #observingOfflineStatus = false;
 
   constructor() {
     super();
@@ -198,6 +260,7 @@ class IPPProxyManagerSingleton extends EventTarget {
     this.setErrorState = this.#setErrorState.bind(this);
     this.handleProxyErrorEvent = this.#handleProxyErrorEvent.bind(this);
     this.handleEvent = this.#handleEvent.bind(this);
+    this.observeOfflineStatus = this.#observeOfflineStatus.bind(this);
   }
 
   init() {
@@ -205,6 +268,13 @@ class IPPProxyManagerSingleton extends EventTarget {
       "IPProtectionService:StateChanged",
       this.handleEvent
     );
+    if (!this.#observingOfflineStatus) {
+      Services.obs.addObserver(
+        this.observeOfflineStatus,
+        "network:offline-status-changed"
+      );
+      this.#observingOfflineStatus = true;
+    }
 
     if (!this.#usage) {
       this.#usage = lazy.IPPStartupCache.usageInfo;
@@ -225,10 +295,19 @@ class IPPProxyManagerSingleton extends EventTarget {
       "IPProtectionService:StateChanged",
       this.handleEvent
     );
+    if (this.#observingOfflineStatus) {
+      Services.obs.removeObserver(
+        this.observeOfflineStatus,
+        "network:offline-status-changed"
+      );
+      this.#observingOfflineStatus = false;
+    }
 
     if (
+      this.#activatingPromise ||
       this.#state === IPPProxyStates.ACTIVE ||
-      this.#state === IPPProxyStates.ACTIVATING
+      this.#state === IPPProxyStates.ACTIVATING ||
+      this.#state === IPPProxyStates.ERROR
     ) {
       this.stop(false);
     }
@@ -239,7 +318,7 @@ class IPPProxyManagerSingleton extends EventTarget {
 
     this.#pass = null;
     this.#usage = null;
-    this.#connection = null;
+    this.#cancelChannelFilter();
   }
 
   /**
@@ -270,6 +349,97 @@ class IPPProxyManagerSingleton extends EventTarget {
     return this.#connection?.isolationKey;
   }
 
+  get mode() {
+    return this.#connection?.mode ?? null;
+  }
+
+  /**
+   * Whether the proxy is up in the mode a user-started connection gets. A
+   * narrower connection, such as one kept up only for the sites that always
+   * use the VPN, does not count.
+   *
+   * @returns {boolean}
+   */
+  get isDefaultModeActive() {
+    return (
+      this.state === IPPProxyStates.ACTIVE &&
+      this.mode === lazy.IPPMode.getDefault()
+    );
+  }
+
+  /**
+   * Resolves once an activation can do its work, so one requested too early
+   * waits instead of being thrown away. A cached READY does not count: it is
+   * carried over from the previous session.
+   *
+   * @param {AbortSignal} abortSignal
+   * @returns {?Promise<void>}
+   *  Null when the service is ready now.
+   * @throws {string}
+   *  ERRORS.NOT_READY when the service has settled on needing the user.
+   */
+  #waitForService(abortSignal) {
+    const canActivateNow = () =>
+      lazy.IPPStartupCache.isStartupCompleted &&
+      lazy.IPProtectionService.state === lazy.IPProtectionStates.READY;
+    let mayBecomeReady = () =>
+      !lazy.IPPStartupCache.isStartupCompleted ||
+      (lazy.IPProtectionService.state ===
+        lazy.IPProtectionStates.UNINITIALIZED &&
+        lazy.IPProtectionService.featureEnabled);
+    if (AppConstants.platform === "android") {
+      // TODO: Change the expected behavior in GeckoView's
+      // IPProtectionControllerTest.
+      mayBecomeReady = () => !lazy.IPPStartupCache.isStartupCompleted;
+    }
+
+    if (canActivateNow()) {
+      return null;
+    }
+    if (!mayBecomeReady()) {
+      throw ERRORS.NOT_READY;
+    }
+
+    const { promise, resolve, reject } = Promise.withResolvers();
+
+    const recheck = () => {
+      if (canActivateNow()) {
+        resolve();
+      } else if (!mayBecomeReady()) {
+        reject(ERRORS.NOT_READY);
+      }
+    };
+
+    // Startup completing can make an activation possible, or rule it out, with
+    // no state change of its own to report.
+    const aborted = () => reject(abortSignal.reason);
+
+    lazy.IPProtectionService.addEventListener(
+      "IPProtectionService:StateChanged",
+      recheck
+    );
+    lazy.IPProtectionService.addEventListener(
+      "IPProtectionService:StartupCompleted",
+      recheck
+    );
+    abortSignal.addEventListener("abort", aborted, { once: true });
+
+    lazy.logConsole.info("Holding traffic until the service is ready");
+    this.#waitingForService = true;
+    return promise.finally(() => {
+      this.#waitingForService = false;
+      lazy.IPProtectionService.removeEventListener(
+        "IPProtectionService:StateChanged",
+        recheck
+      );
+      lazy.IPProtectionService.removeEventListener(
+        "IPProtectionService:StartupCompleted",
+        recheck
+      );
+      abortSignal.removeEventListener("abort", aborted);
+    });
+  }
+
   get hasValidProxyPass() {
     return !!this.#pass?.isValid();
   }
@@ -289,14 +459,19 @@ class IPPProxyManagerSingleton extends EventTarget {
     return this.#connection;
   }
 
-  createChannelFilter() {
-    if (!this.#connection) {
-      this.#connection = lazy.IPPChannelFilter.create();
+  /**
+   * @param {import("./IPPChannelFilter.sys.mjs").IPPProxyMode} [mode]
+   */
+  #createChannelFilter(mode) {
+    this.#connection ??= lazy.IPPChannelFilter.create();
+    this.#connection.mode =
+      mode === undefined ? lazy.IPPMode.getDefault() : lazy.IPPMode.from(mode);
+    if (!this.#connection.active) {
       this.#connection.start();
     }
   }
 
-  cancelChannelFilter() {
+  #cancelChannelFilter() {
     if (this.#connection) {
       this.#connection.stop();
       this.#connection = null;
@@ -318,41 +493,55 @@ class IPPProxyManagerSingleton extends EventTarget {
    * True if started by user action, false if system action
    * @param {boolean} inPrivateBrowsing
    * True if started from a private browsing window
-   * @param {string} [country]
-   * Optional ISO 3166-1 alpha-2 country code to route through. When
-   * omitted, the recommended (anycast) location is used.
+   * @param {string|Promise<string|undefined>} [country]
+   * Optional ISO 3166-1 alpha-2 country code to route through, or a promise
+   * for one. When omitted, the recommended (anycast) location is used.
+   * @param {import("./IPPChannelFilter.sys.mjs").IPPProxyMode} [mode]
+   * Mode for this connection. When omitted, browser.ipProtection.mode decides.
    * @returns {Promise<{started: boolean, error?: string}>}
    * Started is true if successfully connected, error contains the error message if it fails.
    */
-  async start(userAction = true, inPrivateBrowsing = false, country) {
-    if (this.#state === IPPProxyStates.ACTIVATING) {
-      if (!this.#activatingPromise) {
-        throw new Error(ERRORS.MISSING_PROMISE);
-      }
-
+  async start(userAction = true, inPrivateBrowsing = false, country, mode) {
+    if (this.#activatingPromise) {
       return this.#activatingPromise;
     }
 
-    if (
-      this.#state === IPPProxyStates.NOT_READY ||
-      this.#state === IPPProxyStates.ERROR ||
-      this.#state === IPPProxyStates.PAUSED
-    ) {
-      return { started: false };
+    if (this.#state === IPPProxyStates.PAUSED) {
+      return { started: false, error: ERRORS.QUOTA_EXHAUSTED };
     }
 
-    this.#activationAbortController = new AbortController();
-    const abortSignal = this.#activationAbortController.signal;
+    if (this.#state === IPPProxyStates.ERROR) {
+      if (!userAction) {
+        return { started: false, error: this.#errorType ?? ERRORS.GENERIC };
+      }
+      // A user retry tears the failed connection down; the next state
+      // announced is ACTIVATING, not an idle READY in between.
+      this.#stopInternal();
+    }
 
-    // Abort the activation if it takes more than 30 seconds, or if the user cancels it.
-    lazy.setTimeout(
+    const abortController = new AbortController();
+    const abortSignal = abortController.signal;
+    let serviceReady;
+    try {
+      serviceReady = this.#waitForService(abortSignal);
+    } catch (error) {
+      // Settles a retry out of ERROR, which would stay in ERROR.
+      this.updateState();
+      return { started: false, error };
+    }
+    this.#activationAbortController = abortController;
+
+    // Abort the activation if it exceeds the guardian timeout, or if the user
+    // cancels it.
+    const timeoutId = lazy.setTimeout(
       () => {
-        this.#activationAbortController?.abort(ERRORS.TIMEOUT);
+        abortController.abort(ERRORS.TIMEOUT);
       },
-      Temporal.Duration.from({ seconds: 30 }).total("milliseconds")
+      serviceReady ? lazy.serviceWaitTimeout : lazy.timeout
     );
 
-    this.#setState(IPPProxyStates.ACTIVATING);
+    // Before the first await, so it holds traffic for the whole activation.
+    this.#createChannelFilter(mode);
 
     const { promise: abortPromise, reject } = Promise.withResolvers();
     abortSignal.addEventListener(
@@ -363,23 +552,30 @@ class IPPProxyManagerSingleton extends EventTarget {
       { once: true }
     );
 
-    this.#activatingPromise = Promise.race([
-      this.#startInternal(abortSignal, country),
+    const clearActivation = () => {
+      this.#activatingPromise = null;
+      this.#activationAbortController = null;
+    };
+
+    const activating = Promise.race([
+      this.#startInternal(abortSignal, country, serviceReady),
       abortPromise,
     ])
       .then(
         started => {
-          if (
-            this.#state === IPPProxyStates.ERROR ||
-            this.#state === IPPProxyStates.PAUSED
-          ) {
-            return { started: false };
+          clearActivation();
+          if (this.#state === IPPProxyStates.PAUSED) {
+            this.updateState();
+            return { started: false, error: ERRORS.QUOTA_EXHAUSTED };
+          }
+          if (this.#state === IPPProxyStates.ERROR) {
+            return { started: false, error: this.#errorType ?? ERRORS.GENERIC };
           }
           // Proxy failed to start but no error was given.
           if (!started) {
-            this.cancelChannelFilter();
+            this.#cancelChannelFilter();
             this.updateState();
-            return { started: false };
+            return { started: false, error: ERRORS.GENERIC };
           }
           this.#setState(IPPProxyStates.ACTIVE);
           Glean.ipprotection.started.record({
@@ -389,44 +585,62 @@ class IPPProxyManagerSingleton extends EventTarget {
           return { started: true };
         },
         error => {
-          this.#activationAbortController = null;
-          this.cancelChannelFilter();
-          this.#setErrorState(error);
+          clearActivation();
+          if (error === ERRORS.NOT_READY) {
+            this.#cancelChannelFilter();
+            this.updateState();
+          } else if (error === ERRORS.CANCELED) {
+            this.#cancelChannelFilter();
+            this.#setErrorState(error);
+          } else if (userAction) {
+            this.#connection?.fail();
+            this.#cancelChannelFilter();
+            this.#setErrorState(error);
+          } else {
+            // Nobody checks a system activation's result, so keep holding
+            // traffic in ERROR until stop() rather than retrying from READY.
+            this.#setErrorState(error);
+          }
           return { started: false, error };
         }
       )
-      .finally(() => {
-        this.#activatingPromise = null;
-        this.#activationAbortController = null;
-      });
-    return this.#activatingPromise;
+      .finally(() => lazy.clearTimeout(timeoutId));
+
+    this.#activatingPromise = activating;
+    // A StateChanged listener can drain microtasks, so the activation may
+    // already be settled and cleared by the time dispatching returns.
+    this.#setState(IPPProxyStates.ACTIVATING);
+    return activating;
   }
 
-  async #startInternal(abortSignal, country) {
+  async #startInternal(abortSignal, country, serviceReady) {
+    await serviceReady;
+
     // Check network status before attempting connection
     if (lazy.IPPNetworkUtils.isOffline) {
       throw ERRORS.NETWORK;
     }
 
-    await lazy.IPProtectionServerlist.maybeFetchList();
+    try {
+      await lazy.IPProtectionServerlist.maybeFetchList();
+    } catch (e) {
+      lazy.logConsole.error("Serverlist fetch failed:", e);
+      throw ERRORS.SERVERLIST_UNAVAILABLE;
+    }
 
     const notReady = await lazy.IPProtectionService.authProvider.aboutToStart();
     if (notReady) {
-      throw notReady.error || ERRORS.GENERIC;
+      throw ERRORS.from(notReady.error) || ERRORS.GENERIC;
     }
 
-    // Check if we aborted before starting the channel filter.
     if (abortSignal?.aborted) {
-      return false;
+      throw abortSignal.reason ?? ERRORS.CANCELED;
     }
-
-    this.createChannelFilter();
 
     // If the current proxy pass is valid, no need to re-authenticate.
     // Throws an error if the proxy pass is not available.
     if (this.#pass == null || this.#pass.shouldRotate()) {
-      const { pass, usage, error, status } =
-        await this.#getPassAndUsage(abortSignal);
+      const { pass, usage, error } = await this.#getPassAndUsage(abortSignal);
       if (usage) {
         this.#setUsage(usage);
         if (usage.quotaExhausted) {
@@ -436,21 +650,15 @@ class IPPProxyManagerSingleton extends EventTarget {
       }
 
       if (error || !pass) {
-        if (status === 500) {
-          throw ERRORS.CATASTROPHIC;
-        } else if (status === 451) {
-          // This next block should be removed when bug 2058331 is addressed, adding this to Android.
-          if (Services.appinfo.OS === "Android") {
-            throw ERRORS.CATASTROPHIC;
-          }
-          throw ERRORS.VPN_UNAVAILABLE;
-        }
-        throw ERRORS.PASS_UNAVAILABLE;
+        throw typeof error === "string"
+          ? ERRORS.from(error)
+          : ERRORS.PASS_UNAVAILABLE;
       }
       this.#pass = pass;
     }
     this.#schedulePassRotation(this.#pass);
 
+    country = await country;
     const location = country
       ? lazy.IPProtectionServerlist.getLocation(country)
       : lazy.IPProtectionServerlist.getRecommendedLocation();
@@ -473,7 +681,7 @@ class IPPProxyManagerSingleton extends EventTarget {
       return true;
     }
 
-    return false;
+    throw ERRORS.CONNECTION_FAILED;
   }
 
   /**
@@ -483,15 +691,13 @@ class IPPProxyManagerSingleton extends EventTarget {
    * True if started by user action, false if system action
    */
   async stop(userAction = true) {
-    if (this.#state === IPPProxyStates.ACTIVATING) {
-      if (!this.#activatingPromise) {
-        throw new Error(ERRORS.MISSING_PROMISE);
-      }
+    if (this.#activatingPromise) {
       if (!this.#activationAbortController) {
         throw new Error(ERRORS.MISSING_ABORT);
       }
-      this.#activationAbortController?.abort(ERRORS.CANCELED);
-      await this.#activatingPromise.then(() => this.stop(userAction));
+      const activating = this.#activatingPromise;
+      this.#activationAbortController.abort(ERRORS.CANCELED);
+      await activating.then(() => this.stop(userAction));
       return;
     }
 
@@ -503,16 +709,7 @@ class IPPProxyManagerSingleton extends EventTarget {
       return;
     }
 
-    if (this.#connection) {
-      this.cancelChannelFilter();
-
-      lazy.clearTimeout(this.#rotationTimer);
-      this.#rotationTimer = 0;
-
-      this.#rotation?.controller.abort();
-
-      this.networkErrorObserver.stop();
-    }
+    this.#stopInternal();
 
     lazy.logConsole.info("Stopped");
 
@@ -524,6 +721,7 @@ class IPPProxyManagerSingleton extends EventTarget {
       userAction,
       duration: String(sessionLength),
     });
+
     this.updateState();
     if (
       userAction &&
@@ -535,6 +733,52 @@ class IPPProxyManagerSingleton extends EventTarget {
   }
 
   /**
+   * Tears the connection down without announcing a state, for callers that
+   * move to the next state themselves.
+   */
+  #stopInternal() {
+    if (this.#connection) {
+      this.#cancelChannelFilter();
+
+      lazy.clearTimeout(this.#rotationTimer);
+      this.#rotationTimer = 0;
+
+      this.#rotation?.controller.abort();
+
+      this.networkErrorObserver.stop();
+    }
+    this.#errorType = null;
+  }
+
+  /**
+   * Change the mode of the active connection. Only channels opened from now on
+   * are affected.
+   *
+   * @param {import("./IPPChannelFilter.sys.mjs").IPPProxyMode} mode
+   * @returns {{changed: boolean, error?: string}}
+   */
+  setMode(mode) {
+    if (this.#state !== IPPProxyStates.ACTIVE) {
+      return { changed: false, error: ERRORS.NOT_READY };
+    }
+
+    this.#connection.mode = lazy.IPPMode.from(mode);
+    lazy.logConsole.debug("Switched to mode:", this.#connection.mode);
+
+    this.dispatchEvent(
+      new CustomEvent("IPPProxyManager:ModeChanged", {
+        bubbles: true,
+        composed: true,
+        detail: {
+          mode: this.#connection.mode,
+        },
+      })
+    );
+
+    return { changed: true };
+  }
+
+  /**
    * Switch the active proxy connection to a server in a different country.
    *
    * @param {string} country - country code
@@ -542,7 +786,7 @@ class IPPProxyManagerSingleton extends EventTarget {
    */
   switch(country) {
     if (this.#state !== IPPProxyStates.ACTIVE) {
-      return { switched: false };
+      return { switched: false, error: ERRORS.NOT_READY };
     }
 
     const location = country
@@ -579,9 +823,11 @@ class IPPProxyManagerSingleton extends EventTarget {
       this.#usageRefreshAbortController = null;
     }
     lazy.IPPStartupCache.storeUsageInfo(null);
+    // An activation waiting for the service refuses on its own once the
+    // service settles; stopping it here would record a cancellation instead.
     if (
       this.#state === IPPProxyStates.ACTIVE ||
-      this.#state === IPPProxyStates.ACTIVATING ||
+      (this.#state === IPPProxyStates.ACTIVATING && !this.#waitingForService) ||
       this.#state === IPPProxyStates.PAUSED ||
       this.#state === IPPProxyStates.ERROR
     ) {
@@ -606,7 +852,7 @@ class IPPProxyManagerSingleton extends EventTarget {
     if (wasActive) {
       this.#connection?.suspend();
     } else {
-      this.cancelChannelFilter();
+      this.#cancelChannelFilter();
     }
 
     Glean.ipprotection.paused.record({
@@ -631,7 +877,7 @@ class IPPProxyManagerSingleton extends EventTarget {
    * Throws an error on failures.
    *
    * @param {AbortSignal} [abortSignal=null] - a signal to indicate the fetch should be aborted, will then throw an AbortError
-   * @returns {Promise<{pass: ProxyPass | null, usage: ProxyUsage | null, error: string | null}>}
+   * @returns {Promise<{pass?: ProxyPass | null, usage?: ProxyUsage | null, error?: import("./IPPAuthProvider.sys.mjs").AuthError, status?: number}>}
    */
   async #getPassAndUsage(abortSignal = null) {
     let { status, error, pass, usage } =
@@ -643,16 +889,15 @@ class IPPProxyManagerSingleton extends EventTarget {
     });
 
     // Handle quota exceeded as a special case - return null pass with usage
-    if (status === 429 && error === "quota_exceeded") {
+    if (error === AUTH_ERRORS.QUOTA_EXCEEDED) {
       lazy.logConsole.info("Quota exceeded", {
         usage: usage ? `${usage.remaining} / ${usage.max}` : "unknown",
       });
       return { pass: null, usage, error, status };
     }
 
-    // All other error cases
-    if (error || status != 200) {
-      return { error: error || `Status: ${status}`, status };
+    if (error) {
+      return { error, status };
     }
 
     return { pass, usage, status };
@@ -799,7 +1044,7 @@ class IPPProxyManagerSingleton extends EventTarget {
 
     if (!pass) {
       lazy.logConsole.debug("Failed to rotate token!");
-      this.#setErrorState("missing_pass");
+      this.#setErrorState(ERRORS.MISSING_PASS);
       return null;
     }
     // Inject the new token in the current connection
@@ -870,6 +1115,16 @@ class IPPProxyManagerSingleton extends EventTarget {
     return null;
   }
 
+  /**
+   * Fails an active connection when the user switches to offline mode, so it
+   * doesn't keep appearing connected.
+   */
+  #observeOfflineStatus() {
+    if (Services.io.offline && this.#state === IPPProxyStates.ACTIVE) {
+      this.#setErrorState(ERRORS.NETWORK);
+    }
+  }
+
   updateState() {
     // State must remain as error until the connection is stopped.
     if (this.#state === IPPProxyStates.ERROR && this.#connection?.active) {
@@ -880,7 +1135,9 @@ class IPPProxyManagerSingleton extends EventTarget {
     this.#errorType = null;
 
     if (lazy.IPProtectionService.state !== lazy.IPProtectionStates.READY) {
-      this.#setState(IPPProxyStates.NOT_READY);
+      if (!this.#activatingPromise) {
+        this.#setState(IPPProxyStates.NOT_READY);
+      }
       return;
     }
 
@@ -889,8 +1146,14 @@ class IPPProxyManagerSingleton extends EventTarget {
       return;
     }
 
-    // State must remain active if the connection is active.
-    if (this.#connection?.active) {
+    // An activation in flight reports its own outcome: neither the filter nor
+    // a pass outliving an earlier connection says it succeeded.
+    if (this.#activatingPromise) {
+      return;
+    }
+
+    // A filter with no pass behind it holds traffic; it carries no connection.
+    if (this.#connection?.active && this.#pass) {
       this.#setState(IPPProxyStates.ACTIVE);
       return;
     }
@@ -905,10 +1168,15 @@ class IPPProxyManagerSingleton extends EventTarget {
    */
   #setErrorState(error) {
     this.#rotation?.controller.abort();
+    this.#connection?.fail();
 
-    this.#errorType = typeof error === "string" ? error : ERRORS.GENERIC;
-    if (this.#state === IPPProxyStates.ACTIVE) {
-      // If the proxy is active, switch to the error state.
+    const isString = typeof error === "string";
+    // Keep the kind in a local: updateState() below clears #errorType.
+    const errorType = isString ? ERRORS.from(error) : ERRORS.GENERIC;
+    this.#errorType = errorType;
+
+    if (this.#state === IPPProxyStates.ACTIVE || this.#connection?.active) {
+      // If the proxy is active or holding traffic, switch to the error state.
       // Stop will need to be called to move out of the error state.
       this.#setState(IPPProxyStates.ERROR);
     } else {
@@ -917,7 +1185,14 @@ class IPPProxyManagerSingleton extends EventTarget {
     }
 
     lazy.logConsole.error(error);
-    Glean.ipprotection.error.record({ source: "ProxyManager" });
+    // A provider can report an error it never threw, which carries no stack.
+    const stack = isString
+      ? ""
+      : stackSource(error?.stack ?? new Error().stack);
+    Glean.ipprotection.error.record({
+      source: stack || "ProxyManager",
+      reason: errorType,
+    });
   }
 
   /**
@@ -973,6 +1248,7 @@ class IPPProxyManagerSingleton extends EventTarget {
       return;
     }
 
+    const prevState = this.#state;
     this.#state = state;
 
     this.dispatchEvent(
@@ -981,6 +1257,7 @@ class IPPProxyManagerSingleton extends EventTarget {
         composed: true,
         detail: {
           state,
+          prevState,
         },
       })
     );

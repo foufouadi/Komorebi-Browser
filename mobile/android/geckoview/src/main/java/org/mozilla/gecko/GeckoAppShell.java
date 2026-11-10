@@ -48,6 +48,7 @@ import android.view.ContextThemeWrapper;
 import android.view.Display;
 import android.view.Display.HdrCapabilities;
 import android.view.InputDevice;
+import android.view.ViewConfiguration;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.view.inputmethod.InputMethodSubtype;
@@ -469,8 +470,8 @@ public class GeckoAppShell {
   /** The wake-lock is held by a background window. */
   static final int WAKE_LOCK_STATE_LOCKED_BACKGROUND = 2;
 
-  @SuppressLint("Wakelock") // We keep the wake lock independent from the function
-  // scope, so we need to suppress the linter warning.
+  // Gecko acquires and releases these locks in separate calls, for as long as it needs them.
+  @SuppressLint({"Wakelock", "WakelockTimeout"})
   private static void setWakeLockState(final String lock, final int state) {
     if (sWakeLocks == null) {
       sWakeLocks = new SimpleArrayMap<>(WAKE_LOCKS_COUNT);
@@ -546,7 +547,13 @@ public class GeckoAppShell {
   private static native void notifyAlertListener(
       String name, String topic, String action, String origin);
 
-  /** Called by the NotificationListener to notify Gecko that a notification has shown. */
+  /**
+   * Called by the NotificationListener to notify Gecko that a notification has shown.
+   *
+   * @param name the notification name
+   * @param cookie the notification cookie
+   * @param origin the origin that created the notification
+   */
   public static void onNotificationShow(
       final String name, final String cookie, @NotNull final String origin) {
     if (GeckoThread.isRunning()) {
@@ -557,6 +564,9 @@ public class GeckoAppShell {
   /**
    * Called by the NotificationListener to notify Gecko that a previously shown notification has
    * been closed.
+   *
+   * @param name the notification name
+   * @param origin the origin that created the notification
    */
   public static void onNotificationClose(@NotNull final String name, @NotNull final String origin) {
     if (GeckoThread.isRunning()) {
@@ -567,6 +577,10 @@ public class GeckoAppShell {
   /**
    * Called by the NotificationListener to notify Gecko that a previously shown notification has
    * been clicked on.
+   *
+   * @param name the notification name
+   * @param action the action that was clicked, or null for the notification itself
+   * @param origin the origin that created the notification
    */
   public static void onNotificationClick(
       @NotNull final String name, @Nullable final String action, @NotNull final String origin) {
@@ -987,6 +1001,7 @@ public class GeckoAppShell {
   }
 
   private static Context sApplicationContext;
+  private static ViewConfiguration sViewConfiguration;
   private static Boolean sIs24HourFormat = true;
 
   @WrapForJNI
@@ -1461,48 +1476,6 @@ public class GeckoAppShell {
   }
 
   @WrapForJNI(calledFrom = "any")
-  public static int getAudioOutputFramesPerBuffer() {
-    if (BuildConfig.DEBUG_BUILD && isIsolatedProcess()) {
-      // AudioManager.getProperty won't return on isolated process
-      throw new UnsupportedOperationException(
-          "getAudioOutputFramesPerBuffer is not supported in isolated processes");
-    }
-    final int DEFAULT = 512;
-
-    final AudioManager am =
-        (AudioManager) getApplicationContext().getSystemService(Context.AUDIO_SERVICE);
-    if (am == null) {
-      return DEFAULT;
-    }
-    final String prop = am.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER);
-    if (prop == null) {
-      return DEFAULT;
-    }
-    return Integer.parseInt(prop);
-  }
-
-  @WrapForJNI(calledFrom = "any")
-  public static int getAudioOutputSampleRate() {
-    if (BuildConfig.DEBUG_BUILD && isIsolatedProcess()) {
-      // AudioManager.getProperty won't return on isolated process
-      throw new UnsupportedOperationException(
-          "getAudioOutputSampleRate is not supported in isolated processes");
-    }
-    final int DEFAULT = 44100;
-
-    final AudioManager am =
-        (AudioManager) getApplicationContext().getSystemService(Context.AUDIO_SERVICE);
-    if (am == null) {
-      return DEFAULT;
-    }
-    final String prop = am.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE);
-    if (prop == null) {
-      return DEFAULT;
-    }
-    return Integer.parseInt(prop);
-  }
-
-  @WrapForJNI(calledFrom = "any")
   public static void setCommunicationAudioModeOn(final boolean on) {
     final AudioManager am =
         (AudioManager) getApplicationContext().getSystemService(Context.AUDIO_SERVICE);
@@ -1545,6 +1518,18 @@ public class GeckoAppShell {
   @WrapForJNI
   public static boolean getIs24HourFormat() {
     return sIs24HourFormat;
+  }
+
+  @WrapForJNI
+  private static int getTextCursorBlinkIntervalMillis() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.BAKLAVA
+        || Build.VERSION.SDK_INT_FULL < Build.VERSION_CODES_FULL.BAKLAVA_1) {
+      return 500;
+    }
+    if (sViewConfiguration == null) {
+      sViewConfiguration = ViewConfiguration.get(getApplicationContext());
+    }
+    return sViewConfiguration.getTextCursorBlinkIntervalMillis();
   }
 
   @WrapForJNI

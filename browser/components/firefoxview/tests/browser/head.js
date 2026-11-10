@@ -47,7 +47,8 @@ ChromeUtils.defineESModuleGetters(this, {
   AboutWelcomeParent: "resource:///actors/AboutWelcomeParent.sys.mjs",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   SyncedTabs: "resource://services-sync/SyncedTabs.sys.mjs",
-  TabStateFlusher: "resource:///modules/sessionstore/TabStateFlusher.sys.mjs",
+  TabStateFlusher:
+    "moz-src:///browser/components/sessionstore/TabStateFlusher.sys.mjs",
 });
 
 /**
@@ -438,7 +439,7 @@ function isElInViewport(element) {
 async function clickFirefoxViewButton(win) {
   await BrowserTestUtils.synthesizeMouseAtCenter(
     "#firefox-view-button",
-    { type: "mousedown" },
+    {},
     win.browsingContext
   );
 }

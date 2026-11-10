@@ -6,9 +6,7 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 import { UrlbarProvider } from "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs";
 import { UrlbarShared } from "chrome://browser/content/urlbar/UrlbarShared.mjs";
 
-const lazy = {};
-
-ChromeUtils.defineESModuleGetters(lazy, {
+const lazy = XPCOMUtils.declareLazy({
   AppUpdater: "resource://gre/modules/AppUpdater.sys.mjs",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   NLP: "resource://gre/modules/NLP.sys.mjs",
@@ -19,9 +17,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "moz-src:///browser/components/urlbar/UrlbarProviderGlobalActions.sys.mjs",
   UrlbarResult: "chrome://browser/content/urlbar/UrlbarResult.mjs",
   UrlUtils: "resource://gre/modules/UrlUtils.sys.mjs",
+  appUpdater: () => new lazy.AppUpdater(),
 });
-
-ChromeUtils.defineLazyGetter(lazy, "appUpdater", () => new lazy.AppUpdater());
 
 const EN_LOCALE_MATCH = /^en(-.*)$/;
 
@@ -422,11 +419,12 @@ export class UrlbarProviderInterventions extends UrlbarProvider {
     },
   });
 
-  constructor() {
-    super();
-    // The tip we should currently show.
-    this.currentTip = UrlbarShared.INTERVENTION_TIP_TYPE.NONE;
-  }
+  /**
+   * The tip we should currently show.
+   *
+   * @type {Values<typeof UrlbarShared.INTERVENTION_TIP_TYPE>}
+   */
+  currentTip = UrlbarShared.INTERVENTION_TIP_TYPE.NONE;
 
   /**
    * @returns {Values<typeof UrlbarShared.PROVIDER_TYPE>}
@@ -658,6 +656,11 @@ export class UrlbarProviderInterventions extends UrlbarProvider {
     }
   }
 
+  /**
+   * @param {UrlbarQueryContext} queryContext
+   * @param {UrlbarParentController} controller
+   * @param {object} details
+   */
   onEngagement(queryContext, controller, details) {
     // `selType` is "tip" when the tip's main button is picked. Ignore clicks on
     // the help command ("help"), which is handled by UrlbarInput since we
@@ -695,7 +698,10 @@ export class UrlbarProviderInterventions extends UrlbarProvider {
   static resetAppUpdater() {
     // Reset only if the object has already been initialized.
     if (!Object.getOwnPropertyDescriptor(lazy, "appUpdater").get) {
-      lazy.appUpdater = new lazy.AppUpdater();
+      // eslint-disable-next-line mozilla/valid-lazy
+      Object.defineProperty(lazy, "appUpdater", {
+        value: new lazy.AppUpdater(),
+      });
     }
   }
 }
@@ -735,7 +741,9 @@ function openClearHistoryDialog(window) {
   if (lazy.PrivateBrowsingUtils.isWindowPrivate(window)) {
     return;
   }
-  lazy.Sanitizer.showUI(window);
+  lazy.Sanitizer.showUI(window, undefined, {
+    entryPoint: lazy.Sanitizer.DIALOG_ENTRY_POINTS.ADDRESS_BAR_SUGGESTION,
+  });
 }
 
 function restartBrowser() {

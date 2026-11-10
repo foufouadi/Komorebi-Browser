@@ -101,22 +101,16 @@
     <string name="preferences_sync_debug_pairing_start_title">Begin pairing</string>
     <!-- Label for enabling Homepage as a New Tab -->
     <string name="preferences_debug_settings_homepage_as_new_tab" translatable="false">Enable Homepage as a New Tab</string>
-    <!-- Label for enabling the universal edge-to-edge wallpapers treatment on the homepage -->
-    <string name="preferences_debug_settings_universal_edge_to_edge_wallpapers" translatable="false">Enable universal edge-to-edge wallpapers</string>
     <!-- Label for hiding the Collections UI -->
     <string name="preferences_debug_settings_hide_collections_ui" translatable="false">Hide Collections UI</string>
-    <!-- Label for enabling Firefox Labs -->
-    <string name="preferences_debug_settings_firefox_labs" translatable="false">Enable Firefox Labs</string>
-    <!-- Label for enabling top sites pager layout -->
-    <string name="preferences_debug_settings_top_sites_pager" translatable="false">Enable Top Sites Pager</string>
-    <!-- Label for enabling Add Shortcuts improvement -->
-    <string name="preferences_debug_settings_add_shortcuts_improvement" translatable="false">Enable Add Shortcuts Improvement</string>
+    <!-- Label for migrating Collections to Tab Groups -->
+    <string name="preferences_debug_settings_migrate_collections_to_tab_groups" translatable="false">Migrate Collections to Tab Groups</string>
     <!-- Label for showing more shortcuts -->
     <string name="preferences_debug_settings_show_more_shortcuts" translatable="false">Show More Shortcuts</string>
-    <!-- Label for enabling Merino Client -->
-    <string name="preferences_debug_settings_merino_client" translatable="false">Enable Merino Client</string>
     <!-- Label for enabling Homepage Weather Widget -->
     <string name="preferences_debug_settings_homepage_weather_widget" translatable="false">Enable Homepage Weather Widget</string>
+    <!-- Label for enabling Homepage Wrexham Widget -->
+    <string name="preferences_debug_settings_homepage_wrexham_widget" translatable="false">Enable Homepage Wrexham Widget</string>
     <!-- Label for enabling Mozilla Ads Client for Sponsored Stories -->
     <string name="preferences_debug_settings_ads_client_for_stories" translatable="false">Enable Ads Client for Stories</string>
     <!-- Label for enabling the custom tab extension -->
@@ -127,6 +121,10 @@
     <string name="preferences_debug_settings_use_minimal_bottom_toolbar_while_entering_text" translatable="false">Use a minimal bottom toolbar while entering text in a website</string>
     <!-- Label for the option of using new scroll data for animating the dynamic toolbar -->
     <string name="preferences_debug_settings_use_scroll_data_for_dynamic_toolbar" translatable="false">Animate dynamic toolbars based on website scroll data</string>
+    <!-- Label for the option to show the toolbar in focus mode when clicked -->
+    <string name="preferences_debug_settings_show_toolbar_in_focus_mode" translatable="false">Enable focus mode</string>
+    <!-- Label for the option to enable browser menu customization screen -->
+    <string name="preferences_debug_settings_enable_menu_customization_screen" translatable="false">Enable menu customization screen</string>
     <!-- Label for toggling Remote Crash Pull -->
     <string name="preferences_crash_pull_never_show_again" translatable="false">Never show Crash Pull</string>
     <!-- Label for enabling the Debug Drawer -->
@@ -137,8 +135,18 @@
     <string name="preferences_debug_settings_microsurvey_feature" translatable="false">Enable Microsurvey Feature</string>
     <!-- Label for enabling shake to summarize -->
     <string name="preferences_key_enable_shake_to_summarize" translatable="false">Enable Shake to Summarize Feature Flag</string>
+    <!-- Label for enabling listen to page -->
+    <string name="preferences_key_enable_listen_to_page" translatable="false">Enable Listen to Page Feature Flag (requires app restart)</string>
+    <!-- Label for enabling the weekly privacy notification -->
+    <string name="preferences_debug_settings_privacy_report_notification" translatable="false">Enable Weekly Privacy Report Notification Feature</string>
+    <!-- Label for forcing the weekly privacy report notification to show, with a fixed count of blocked trackers -->
+    <string name="preferences_debug_settings_force_weekly_privacy_report_notification_title" translatable="false">Show Tracker Count in Weekly Privacy Report Notification</string>
+    <!-- Label for forcing the weekly privacy report notification to show, with a fixed count of blocked trackers -->
+    <string name="preferences_debug_settings_force_weekly_privacy_report_notification_summary" translatable="false">When enabled, sets blocked trackers to 48 to show the \“48 trackers blocked this week\” notification. When disabled, shows the \"feature prompt\" notification.</string>
     <!-- Label for enabling remote search configuration -->
     <string name="preferences_debug_settings_remote_search_configuration" translatable="false">Enable Remote Search Configuration (requires restart)</string>
+    <!-- Label for selecting the search-config-v3 Remote Settings collection -->
+    <string name="preferences_debug_settings_search_config_v3" translatable="false">Use search-config-v3 (requires restart)</string>
     <!-- Label for enabling Address Sync -->
     <string name="preferences_debug_settings_address_sync" translatable="false">Enable Address Sync for supported regions</string>
     <!-- Label for enabling the DNS over HTTPS settings -->
@@ -147,8 +155,6 @@
     <string name="preferences_debug_settings_enable_persistent_onboarding" translatable="false">Show onboarding on each app cold open</string>
     <!-- Label for enabling Homepage Customization -->
     <string name="preferences_debug_settings_homepage_customization" translatable="false">Enable Homepage Customization</string>
-    <!-- Label for enabling trending and recent searches on the Homepage Search -->
-    <string name="preferences_debug_settings_homepage_trending_recent_search" translatable="false">Enable Trending and Recent Search on Homepage</string>
 
     <!-- Search Optimization Secret Settings -->
     <string name="preferences_debug_settings_search_optimization" translatable="false">Search Optimization Feature</string>
@@ -157,9 +163,6 @@
     <string name="preferences_debug_settings_enable_search_optimization_sport" translatable="false">Show Search Optimization Sport cards</string>
     <string name="preferences_debug_settings_enable_search_optimization_flight" translatable="false">Show Search Optimization Flight cards</string>
     <string name="preferences_debug_settings_search_optimization_card_summary" translatable="false">This needs the Search Optimization Feature enabled</string>
-
-    <!-- Label for enabling Private Mode and Stories Entry Point -->
-    <string name="preferences_debug_settings_private_mode_and_stories_entry_point" translatable="false">Enable Private Mode and Stories Entry Point</string>
 
     <!-- longfox secret setting -->
     <string name="preferences_debug_settings_enable_longfox" translatable="false">Enable Longfox</string>
@@ -175,13 +178,19 @@
     <string name="preferences_debug_settings_show_voice_search_in_display_toolbar" translatable="false">Show Voice Search in Display Toolbar</string>
 
     <!-- Label for toggling the Tab Groups feature -->
-    <string name="preferences_tab_groups_feature" translatable="false">Enable Tab Groups</string>
     <string name="preferences_tab_groups_drag_and_drop" translatable="false">Enable Tab Groups Drag and Drop</string>
     <string name="preferences_tab_groups_live_reorder" translatable="false">Enable Live Reorder for Drag and Drop</string>
     <string name="preferences_tab_groups_onboarding" translatable="false">Enable Tab Groups Onboarding</string>
+    <string name="preferences_tab_groups_strip" translatable="false">Enable Tab Groups Strip</string>
+    <string name="preferences_tab_groups_in_menu" translatable="false">Enable Tab Groups In Menu</string>
 
     <!-- Label for toggling the Tab Manager opening animation -->
     <string name="preferences_tab_manager_opening_animation" translatable="false">Enable Tab Manager opening animation</string>
+
+    <!-- Label for toggling the tab reload cover base feature -->
+    <string name="preferences_debug_settings_tab_reload_cover_enabled" translatable="false">Enable tab reload cover</string>
+    <!-- Label for toggling the scroll-aware thumbnail capture that feeds the tab reload cover -->
+    <string name="preferences_debug_settings_tab_reload_cover_scroll_aware_enabled" translatable="false">Enable scroll-aware capture (requires tab reload cover)</string>
 
     <string name="preferences_terms_of_use_accepted" translatable="false">Terms of Use accepted</string>
     <string name="preferences_terms_of_use_debug_timer" translatable="false">30s ToU timer enabled</string>
@@ -203,6 +212,10 @@
     <string name="preferences_debug_settings_isolated_process" translatable="false">Enable Isolated Content Process (requires restart)</string>
     <string name="preferences_debug_settings_app_zygote" translatable="false">Enable Isolated Processes with Zygote Preloading (requires restart)</string>
 
+    <!-- Labels for the Power Saving Mode options in secret settings. -->
+    <string name="preferences_debug_settings_power_saving_mode_auto" translatable="false">Enable Power Saving Mode automatically (follows OS battery saver)</string>
+    <string name="preferences_debug_settings_power_saving_mode_manual" translatable="false">Enable Power Saving Mode manually</string>
+
     <!-- Label for enabling uninstall survey in secret settings. -->
     <string name="preferences_debug_settings_uninstall_survey">Enable Uninstall Survey</string>
 
@@ -212,7 +225,16 @@
     <!-- Label for using the new PDF viewer tools in secret settings. -->
     <string name="preferences_debug_settings_use_new_pdf_tools" translatable="false">Use New PDF Tools</string>
 
-    <!-- Label for the defaults section and reset action in secret settings. -->
+    <string name="preferences_debug_settings_use_account_settings_new_ui" translatable="false">Use new Account Settings UI</string>
+
+    <string name="preferences_debug_settings_enable_sync_decoupling" translatable="false">Enable accounts - sync decoupling (requires restart)</string>
+
+    <!-- Label for using the open links in YouTube app preference in secret settings. -->
+    <string name="preferences_debug_settings_open_links_in_youtube" translatable="false">Open links in YouTube app preference</string>
+
+    <string name="preferences_debug_settings_enable_qwac_ui" translatable="false">Enable QWAC UI</string>
+
+  <!-- Label for the defaults section and reset action in secret settings. -->
     <string name="preferences_debug_settings_reset_defaults" translatable="false">Reset switches to defaults</string>
     <string name="preferences_debug_settings_reset_defaults_message" translatable="false">This will reset all toggle switches to their defaults. Custom Glean Server and Remote Settings Server are not affected.</string>
     <string name="preferences_debug_settings_reset_defaults_confirm" translatable="false">Reset</string>
@@ -263,7 +285,24 @@
     <string name="debug_drawer_distribution_tools_title">Distribution Tools</string>
     <string name="debug_drawer_distribution_id" translatable="false">Distribution ID</string>
     <string name="debug_drawer_play_referrer" translatable="false">Play install referrer</string>
+    <string name="debug_drawer_referral" translatable="false">Install referral</string>
     <string name="debug_drawer_run_query_provider_test" translatable="false">Run query provider test</string>
+
+    <!-- Debug drawer IP protection location tools -->
+    <string name="debug_drawer_ip_protection_location_tools_title" translatable="false">IP Protection Location Tools</string>
+    <string name="debug_drawer_ip_protection_location_tools_description" translatable="false">Edit the proxy country list. Every change is applied immediately, as if the engine had pushed it.</string>
+    <string name="debug_drawer_ip_protection_selected_location" translatable="false">Selected location</string>
+    <string name="debug_drawer_ip_protection_recommended" translatable="false">Recommended</string>
+    <string name="debug_drawer_ip_protection_country_list" translatable="false">Country list</string>
+    <string name="debug_drawer_ip_protection_hide_country" translatable="false">Hide</string>
+    <string name="debug_drawer_ip_protection_show_country" translatable="false">Show</string>
+    <string name="debug_drawer_ip_protection_empty_country_list" translatable="false">No countries yet. The list is fetched once IP protection is ready.</string>
+    <string name="debug_drawer_ip_protection_uninitialized" translatable="false">IP protection has not initialized yet. Open a tab and wait for the service to warm up.</string>
+    <string name="debug_drawer_ip_protection_unavailable" translatable="false">IP protection is not available here. Check the Nimbus configuration and the region.</string>
+    <string name="debug_drawer_ip_protection_signed_out" translatable="false">Sign in to your Mozilla account to use IP protection.</string>
+
+  <!-- Debug drawer Listen to Page tools -->
+  <string name="debug_drawer_listen_to_page_tools_title">Listen to Page Tools</string>
 
     <!-- Debug drawer "contextual feature recommendation" (CFR) tools -->
     <!-- The description of the reset CFR section in CFR Tools -->
@@ -338,9 +377,9 @@
 
     <!-- Firefox Labs -->
     <!-- The name of an experimental feature displayed in the Firefox Labs screen. This feature appends a star to the Settings toolbar title. This string is for testing purposes only. -->
-    <string name="firefox_labs_test_lab_title">Add a star to settings</string>
+    <string name="firefox_labs_test_lab_title" tools:ignore="UnusedResources">Add a star to settings</string>
     <!-- The description of the "Add a star to settings" feature in the Firefox Labs screen. This string is for testing purposes only. -->
-    <string name="firefox_labs_test_lab_description">Appends a star to the settings toolbar title. (Experiment is for testing purposes only.)</string>
+    <string name="firefox_labs_test_lab_description" tools:ignore="UnusedResources">Appends a star to the settings toolbar title. (Experiment is for testing purposes only.)</string>
 
     <!-- Debug drawer tab group tools -->
     <!-- The title of the debug drawer tab to help populate tab groups-->
@@ -412,7 +451,14 @@
 
     <!-- Label for the Customize Home preference to show the weather widget on the homepage. -->
     <string name="customize_toggle_weather" translatable="false">Weather</string>
+    <!-- Label for the Customize Home preference to show the Wrexham widget on the homepage. -->
+    <string name="customize_toggle_wrexham_widget" translatable="false">Wrexham Widget</string>
 
     <!--  Firefox brand name  -->
     <string name="app_name_firefox" tools:ignore="BrandUsage">Firefox</string>
+
+    <!--  Proper name for the Wrexham wallpaper section title. As it is a brand name we do not want it translated.-->
+    <string name="wallpaper_wrexham_title" translatable="false">Wrexham A.F.C.</string>
+    <!-- Proper name of the team shown in the Wrexham widget header. As it is a brand name we do not want it translated. -->
+    <string name="wrex_widget_team_name" translatable="false">Wrexham AFC</string>
 </resources>

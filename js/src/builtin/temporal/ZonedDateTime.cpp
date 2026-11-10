@@ -33,6 +33,7 @@
 #include "gc/AllocKind.h"
 #include "gc/Barrier.h"
 #include "gc/GCEnum.h"
+#include "jit/InlinableNatives.h"
 #include "js/CallArgs.h"
 #include "js/CallNonGenericMethod.h"
 #include "js/Class.h"
@@ -61,6 +62,30 @@ using namespace js::temporal;
 
 static inline bool IsZonedDateTime(Handle<Value> v) {
   return v.isObject() && v.toObject().is<ZonedDateTimeObject>();
+}
+
+bool js::temporal::WrapZonedDateTime(
+    JSContext* cx, MutableHandle<ZonedDateTime> zonedDateTime) {
+  // Fast path for when |zonedDateTime| is in the current compartment.
+  if (MOZ_LIKELY(
+          zonedDateTime.timeZone().get().toTimeZoneObject()->compartment() ==
+              cx->compartment() &&
+          (zonedDateTime.object() == nullptr ||
+           zonedDateTime.object()->compartment() == cx->compartment()))) {
+    return true;
+  }
+
+  EpochNanoseconds epochNs = zonedDateTime.epochNanoseconds();
+  Rooted<TimeZoneValue> timeZone(cx, zonedDateTime.timeZone());
+
+  if (!timeZone.wrap(cx)) {
+    return false;
+  }
+
+  // Avoid storing a cross-compartment object reference. The only cost is
+  // losing tz offset caching.
+  zonedDateTime.set(ZonedDateTime{epochNs, timeZone, zonedDateTime.calendar()});
+  return true;
 }
 
 // Returns |RoundNumberToIncrement(offsetNanoseconds, 60 × 10^9, "halfExpand")|.
@@ -267,26 +292,16 @@ static bool ToTemporalZonedDateTime(JSContext* cx, Handle<JSObject*> item,
 
   // Step 4.a.
   if (auto* zonedDateTime = item->maybeUnwrapIf<ZonedDateTimeObject>()) {
-    auto epochNs = zonedDateTime->epochNanoseconds();
-    Rooted<TimeZoneValue> timeZone(cx, zonedDateTime->timeZone());
-    Rooted<CalendarValue> calendar(cx, zonedDateTime->calendar());
+    // Step 4.a.vi. (Reordered)
+    result.set(ZonedDateTime{zonedDateTime});
 
-    if (!timeZone.wrap(cx)) {
-      return false;
-    }
-    if (!calendar.wrap(cx)) {
+    if (!result.wrap(cx)) {
       return false;
     }
 
     // Steps 4.a.i-v.
     ZonedDateTimeOptions ignoredOptions;
-    if (!ToTemporalZonedDateTimeOptions(cx, options, &ignoredOptions)) {
-      return false;
-    }
-
-    // Step 4.a.vi.
-    result.set(ZonedDateTime{epochNs, timeZone, calendar});
-    return true;
+    return ToTemporalZonedDateTimeOptions(cx, options, &ignoredOptions);
   }
 
   // Step 4.b.
@@ -525,7 +540,7 @@ static ZonedDateTimeObject* CreateTemporalZonedDateTime(
   // Step 4.
   auto epochNs = ToEpochNanoseconds(epochNanoseconds);
   object->initFixedSlotTyped(ZonedDateTimeObject::SECONDS_SLOT,
-                             NumberValue(epochNs.seconds));
+                             DoubleValue(epochNs.seconds));
   object->initFixedSlotTyped(ZonedDateTimeObject::NANOSECONDS_SLOT,
                              Int32Value(epochNs.nanoseconds));
 
@@ -534,8 +549,9 @@ static ZonedDateTimeObject* CreateTemporalZonedDateTime(
                              timeZone.toSlotValue());
 
   // Step 6.
-  object->initFixedSlotTyped(ZonedDateTimeObject::CALENDAR_SLOT,
-                             calendar.toSlotValue());
+  object->initFixedSlotTyped(
+      ZonedDateTimeObject::CALENDAR_AND_OFFSET_SLOT,
+      Int32Value(PackedCalendarAndOffset::pack(calendar.identifier()).value));
 
   // Step 7.
   return object;
@@ -559,7 +575,7 @@ ZonedDateTimeObject* js::temporal::CreateTemporalZonedDateTime(
 
   // Step 4.
   object->initFixedSlotTyped(ZonedDateTimeObject::SECONDS_SLOT,
-                             NumberValue(epochNanoseconds.seconds));
+                             DoubleValue(epochNanoseconds.seconds));
   object->initFixedSlotTyped(ZonedDateTimeObject::NANOSECONDS_SLOT,
                              Int32Value(epochNanoseconds.nanoseconds));
 
@@ -568,8 +584,9 @@ ZonedDateTimeObject* js::temporal::CreateTemporalZonedDateTime(
                              timeZone.toSlotValue());
 
   // Step 6.
-  object->initFixedSlotTyped(ZonedDateTimeObject::CALENDAR_SLOT,
-                             calendar.toSlotValue());
+  object->initFixedSlotTyped(
+      ZonedDateTimeObject::CALENDAR_AND_OFFSET_SLOT,
+      Int32Value(PackedCalendarAndOffset::pack(calendar.identifier()).value));
 
   // Step 7.
   return object;
@@ -604,8 +621,7 @@ static bool AddZonedDateTime(JSContext* cx, Handle<ZonedDateTime> zonedDateTime,
 
   // Step 2.
   ISODateTime isoDateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &isoDateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &isoDateTime)) {
     return false;
   }
 
@@ -652,12 +668,15 @@ bool js::temporal::AddZonedDateTime(JSContext* cx,
 /**
  * DifferenceZonedDateTime ( ns1, ns2, timeZone, calendar, largestUnit )
  */
-static bool DifferenceZonedDateTime(JSContext* cx, const EpochNanoseconds& ns1,
+static bool DifferenceZonedDateTime(JSContext* cx,
+                                    Handle<ZonedDateTime> zonedDateTime,
                                     const EpochNanoseconds& ns2,
-                                    Handle<TimeZoneValue> timeZone,
-                                    Handle<CalendarValue> calendar,
                                     TemporalUnit largestUnit,
                                     InternalDuration* result) {
+  EpochNanoseconds ns1 = zonedDateTime.epochNanoseconds();
+  Handle<TimeZoneValue> timeZone = zonedDateTime.timeZone();
+  Handle<CalendarValue> calendar = zonedDateTime.calendar();
+
   MOZ_ASSERT(IsValidEpochNanoseconds(ns1));
   MOZ_ASSERT(IsValidEpochNanoseconds(ns2));
 
@@ -669,11 +688,11 @@ static bool DifferenceZonedDateTime(JSContext* cx, const EpochNanoseconds& ns1,
 
   // Step 2.
   ISODateTime startDateTime;
-  if (!GetISODateTimeFor(cx, timeZone, ns1, &startDateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &startDateTime)) {
     return false;
   }
 
-  // Steps 2-3.
+  // Step 3.
   ISODateTime endDateTime;
   if (!GetISODateTimeFor(cx, timeZone, ns2, &endDateTime)) {
     return false;
@@ -794,8 +813,8 @@ bool js::temporal::DifferenceZonedDateTimeWithRounding(
 
   // Step 2.
   InternalDuration difference;
-  if (!DifferenceZonedDateTime(cx, ns1, ns2, timeZone, calendar,
-                               settings.largestUnit, &difference)) {
+  if (!DifferenceZonedDateTime(cx, zonedDateTime, ns2, settings.largestUnit,
+                               &difference)) {
     return false;
   }
 
@@ -809,7 +828,7 @@ bool js::temporal::DifferenceZonedDateTimeWithRounding(
 
   // Step 4.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, timeZone, ns1, &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -845,14 +864,13 @@ bool js::temporal::DifferenceZonedDateTimeWithTotal(
 
   // Step 2.
   InternalDuration difference;
-  if (!DifferenceZonedDateTime(cx, ns1, ns2, timeZone, calendar, unit,
-                               &difference)) {
+  if (!DifferenceZonedDateTime(cx, zonedDateTime, ns2, unit, &difference)) {
     return false;
   }
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, timeZone, ns1, &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1302,8 +1320,7 @@ static bool ZonedDateTime_era(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1329,8 +1346,7 @@ static bool ZonedDateTime_eraYear(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1357,8 +1373,7 @@ static bool ZonedDateTime_year(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1384,8 +1399,7 @@ static bool ZonedDateTime_month(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1412,8 +1426,7 @@ static bool ZonedDateTime_monthCode(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1441,8 +1454,7 @@ static bool ZonedDateTime_day(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1468,8 +1480,7 @@ static bool ZonedDateTime_hour(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1496,8 +1507,7 @@ static bool ZonedDateTime_minute(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1524,8 +1534,7 @@ static bool ZonedDateTime_second(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1552,8 +1561,7 @@ static bool ZonedDateTime_millisecond(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1581,8 +1589,7 @@ static bool ZonedDateTime_microsecond(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1610,8 +1617,7 @@ static bool ZonedDateTime_nanosecond(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1693,8 +1699,7 @@ static bool ZonedDateTime_dayOfWeek(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1722,8 +1727,7 @@ static bool ZonedDateTime_dayOfYear(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1751,8 +1755,7 @@ static bool ZonedDateTime_weekOfYear(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1780,8 +1783,7 @@ static bool ZonedDateTime_yearOfWeek(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1812,8 +1814,7 @@ static bool ZonedDateTime_hoursInDay(JSContext* cx, const CallArgs& args) {
 
   // Step 4.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, timeZone, zonedDateTime.epochNanoseconds(),
-                         &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1874,8 +1875,7 @@ static bool ZonedDateTime_daysInWeek(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1903,8 +1903,7 @@ static bool ZonedDateTime_daysInMonth(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1932,8 +1931,7 @@ static bool ZonedDateTime_daysInYear(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1961,8 +1959,7 @@ static bool ZonedDateTime_monthsInYear(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -1991,8 +1988,7 @@ static bool ZonedDateTime_inLeapYear(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -2021,9 +2017,7 @@ static bool ZonedDateTime_offsetNanoseconds(JSContext* cx,
 
   // Step 3.
   int64_t offsetNanoseconds;
-  if (!GetOffsetNanosecondsFor(cx, zonedDateTime.timeZone(),
-                               zonedDateTime.epochNanoseconds(),
-                               &offsetNanoseconds)) {
+  if (!GetOffsetNanosecondsFor(cx, zonedDateTime, &offsetNanoseconds)) {
     return false;
   }
   MOZ_ASSERT(std::abs(offsetNanoseconds) < ToNanoseconds(TemporalUnit::Day));
@@ -2052,9 +2046,7 @@ static bool ZonedDateTime_offset(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   int64_t offsetNanoseconds;
-  if (!GetOffsetNanosecondsFor(cx, zonedDateTime.timeZone(),
-                               zonedDateTime.epochNanoseconds(),
-                               &offsetNanoseconds)) {
+  if (!GetOffsetNanosecondsFor(cx, zonedDateTime, &offsetNanoseconds)) {
     return false;
   }
   MOZ_ASSERT(std::abs(offsetNanoseconds) < ToNanoseconds(TemporalUnit::Day));
@@ -2108,7 +2100,7 @@ static bool ZonedDateTime_with(JSContext* cx, const CallArgs& args) {
 
   // Step 7.
   int64_t offsetNanoseconds;
-  if (!GetOffsetNanosecondsFor(cx, timeZone, epochNs, &offsetNanoseconds)) {
+  if (!GetOffsetNanosecondsFor(cx, zonedDateTime, &offsetNanoseconds)) {
     return false;
   }
 
@@ -2239,8 +2231,7 @@ static bool ZonedDateTime_withPlainTime(JSContext* cx, const CallArgs& args) {
 
   // Step 5.
   ISODateTime isoDateTime;
-  if (!GetISODateTimeFor(cx, timeZone, zonedDateTime.epochNanoseconds(),
-                         &isoDateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &isoDateTime)) {
     return false;
   }
 
@@ -2542,7 +2533,7 @@ static bool ZonedDateTime_round(JSContext* cx, const CallArgs& args) {
 
   // Step 18.
   ISODateTime isoDateTime;
-  if (!GetISODateTimeFor(cx, timeZone, thisNs, &isoDateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &isoDateTime)) {
     return false;
   }
 
@@ -2613,7 +2604,7 @@ static bool ZonedDateTime_round(JSContext* cx, const CallArgs& args) {
 
     // Step 20.b.
     int64_t offsetNanoseconds;
-    if (!GetOffsetNanosecondsFor(cx, timeZone, thisNs, &offsetNanoseconds)) {
+    if (!GetOffsetNanosecondsFor(cx, zonedDateTime, &offsetNanoseconds)) {
       return false;
     }
     MOZ_ASSERT(std::abs(offsetNanoseconds) < ToNanoseconds(TemporalUnit::Day));
@@ -2850,8 +2841,7 @@ static bool ZonedDateTime_startOfDay(JSContext* cx, const CallArgs& args) {
 
   // Step 5.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, timeZone, zonedDateTime.epochNanoseconds(),
-                         &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
 
@@ -2998,8 +2988,7 @@ static bool ZonedDateTime_toPlainDate(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime temporalDateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &temporalDateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &temporalDateTime)) {
     return false;
   }
 
@@ -3033,8 +3022,7 @@ static bool ZonedDateTime_toPlainTime(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime temporalDateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &temporalDateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &temporalDateTime)) {
     return false;
   }
 
@@ -3067,8 +3055,7 @@ static bool ZonedDateTime_toPlainDateTime(JSContext* cx, const CallArgs& args) {
 
   // Step 3.
   ISODateTime dateTime;
-  if (!GetISODateTimeFor(cx, zonedDateTime.timeZone(),
-                         zonedDateTime.epochNanoseconds(), &dateTime)) {
+  if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
     return false;
   }
   MOZ_ASSERT(ISODateTimeWithinLimits(dateTime));
@@ -3149,7 +3136,8 @@ static const JSPropertySpec ZonedDateTime_prototype_properties[] = {
     JS_PSG("millisecond", ZonedDateTime_millisecond, 0),
     JS_PSG("microsecond", ZonedDateTime_microsecond, 0),
     JS_PSG("nanosecond", ZonedDateTime_nanosecond, 0),
-    JS_PSG("epochMilliseconds", ZonedDateTime_epochMilliseconds, 0),
+    JS_INLINABLE_PSG("epochMilliseconds", ZonedDateTime_epochMilliseconds, 0,
+                     ZonedDateTimeEpochMilliseconds),
     JS_PSG("epochNanoseconds", ZonedDateTime_epochNanoseconds, 0),
     JS_PSG("dayOfWeek", ZonedDateTime_dayOfWeek, 0),
     JS_PSG("dayOfYear", ZonedDateTime_dayOfYear, 0),

@@ -22,7 +22,7 @@ add_task(async function () {
   store.dispatch(Actions.batchEnable(false));
 
   info("Performing requests.");
-  let wait = waitForNetworkEvents(monitor, 2);
+  const onNetworkEvents = waitForNetworkEvents(monitor, 2);
   const REQUEST_URLS = [
     "https://example.com" + CORS_SJS_PATH,
     "http://example.com" + CORS_SJS_PATH,
@@ -36,29 +36,20 @@ add_task(async function () {
       }
     }
   );
-  await wait;
+  await onNetworkEvents;
 
   info("Wait until the Security tab is visible");
-  wait = waitForDOM(document, "#security-tab");
+  const onDomUpdated = waitForDOM(document, "#security-tab");
 
   info("Selecting secure request.");
-  EventUtils.sendMouseEvent(
-    { type: "mousedown" },
-    document.querySelectorAll(".request-list-item")[0]
-  );
-  await wait;
+  clickOnRequestRow(document.querySelectorAll(".request-list-item")[0]);
+  await onDomUpdated;
 
   info("Selecting security tab.");
-  EventUtils.sendMouseEvent(
-    { type: "mousedown" },
-    document.querySelector("#security-tab")
-  );
+  clickInView(document.querySelector("#security-tab"));
 
   info("Selecting insecure request.");
-  EventUtils.sendMouseEvent(
-    { type: "mousedown" },
-    document.querySelectorAll(".request-list-item")[1]
-  );
+  clickOnRequestRow(document.querySelectorAll(".request-list-item")[1]);
 
   ok(
     document.querySelector("#headers-tab[aria-selected=true]"),

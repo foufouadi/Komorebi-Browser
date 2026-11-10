@@ -28,6 +28,8 @@ async function checkOpensOnFocus(win = window) {
 }
 
 add_setup(async function () {
+  UrlbarTestUtils.registerZeroPrefixProvider();
+
   // Add some history for the empty panel.
   await PlacesTestUtils.addVisits([
     {

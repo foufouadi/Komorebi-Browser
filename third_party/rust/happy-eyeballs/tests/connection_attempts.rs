@@ -1,14 +1,20 @@
+#![allow(clippy::disallowed_methods, reason = "tests may use Instant::now")]
+
 /// > 6. Establishing Connections
 ///
 /// <https://www.ietf.org/archive/id/draft-ietf-happy-happyeyeballs-v3-02.html#section-6>
 mod common;
 use common::*;
 
-use std::{net::SocketAddr, num::NonZeroU32, time::Duration};
+use std::{
+    net::{Ipv6Addr, SocketAddr, SocketAddrV6},
+    num::NonZeroU32,
+    time::Duration,
+};
 
 use happy_eyeballs::{
-    CONNECTION_ATTEMPT_DELAY, ConnectionAttemptHttpVersions, DnsResult, Endpoint, Id, Input,
-    NetworkConfig, Output,
+    CONNECTION_ATTEMPT_DELAY, ConnectionAttemptHttpVersions, DnsResult, Endpoint, EndpointTarget,
+    Id, Input, NetworkConfig, Output, ScopedIpv6Addr,
 };
 
 #[test]
@@ -26,7 +32,7 @@ fn ipv6_blackhole() {
     for _ in 0..42 {
         now += CONNECTION_ATTEMPT_DELAY;
         let connection_attempt = he.process_output(now).unwrap().attempt().unwrap();
-        if connection_attempt.address.is_ipv4() {
+        if connection_attempt.address().unwrap().is_ipv4() {
             return;
         }
     }
@@ -68,7 +74,7 @@ fn connection_attempt_delay_multiplier() {
     he.input(
         Input::DnsResult {
             id: Id::from(1),
-            result: DnsResult::Aaaa(Ok(vec![V6_ADDR, V6_ADDR_2, V6_ADDR_3])),
+            result: DnsResult::Aaaa(Ok(vec![V6_ADDR.into(), V6_ADDR_2.into(), V6_ADDR_3.into()])),
             stale: false,
         },
         now,
@@ -82,13 +88,13 @@ fn connection_attempt_delay_multiplier() {
     // Second attempt at t=250 (after base * 2^0). The next delay then doubles.
     now += base;
     let second = he.process_output(now).unwrap().attempt().unwrap();
-    assert_eq!(second.address.ip(), V6_ADDR_2);
+    assert_eq!(second.address().unwrap().ip(), V6_ADDR_2);
     he.expect(Output::Timer { duration: base * 2 }, now);
 
     // Third attempt at t=750 (after base * 2^1). The next delay doubles again.
     now += base * 2;
     let third = he.process_output(now).unwrap().attempt().unwrap();
-    assert_eq!(third.address.ip(), V6_ADDR_3);
+    assert_eq!(third.address().unwrap().ip(), V6_ADDR_3);
     he.expect(Output::Timer { duration: base * 4 }, now);
 }
 
@@ -110,7 +116,7 @@ fn failed_attempts_do_not_increase_delay() {
     he.input(
         Input::DnsResult {
             id: Id::from(1),
-            result: DnsResult::Aaaa(Ok(vec![V6_ADDR, V6_ADDR_2])),
+            result: DnsResult::Aaaa(Ok(vec![V6_ADDR.into(), V6_ADDR_2.into()])),
             stale: false,
         },
         now,
@@ -120,7 +126,7 @@ fn failed_attempts_do_not_increase_delay() {
     he.expect(out_attempt_v6_h1_h2(Id::from(3)), now);
     he.input(in_connection_result_negative(Id::from(3)), now);
     let second = he.process_output(now).unwrap().attempt().unwrap();
-    assert_eq!(second.address.ip(), V6_ADDR_2);
+    assert_eq!(second.address().unwrap().ip(), V6_ADDR_2);
 
     // Only one attempt is in progress, so the delay stays at the base value
     // rather than growing because a previous attempt failed.
@@ -154,7 +160,7 @@ fn successful_connection_cancels_others() {
     he.input(
         Input::DnsResult {
             id: Id::from(1),
-            result: DnsResult::Aaaa(Ok(vec![V6_ADDR, V6_ADDR_2])),
+            result: DnsResult::Aaaa(Ok(vec![V6_ADDR.into(), V6_ADDR_2.into()])),
             stale: false,
         },
         now,
@@ -173,7 +179,7 @@ fn successful_connection_cancels_others() {
         Output::AttemptConnection {
             id: Id::from(5),
             endpoint: Endpoint {
-                address: SocketAddr::new(V6_ADDR_2.into(), PORT),
+                target: EndpointTarget::Address(SocketAddr::new(V6_ADDR_2.into(), PORT)),
                 http_version: ConnectionAttemptHttpVersions::H2OrH1,
                 ech_config: None,
             },
@@ -238,7 +244,7 @@ fn succeeded_keeps_emitting_succeeded() {
 }
 
 /// The connection-attempt-delay timer reflects the time *remaining*, not the full delay.
-/// Calling process_output partway through the delay should return a timer for the remainder.
+/// Calling `process_output` partway through the delay should return a timer for the remainder.
 #[test]
 fn connection_attempt_delay_partial_elapsed() {
     let custom_delay = Duration::from_millis(100);
@@ -257,7 +263,7 @@ fn connection_attempt_delay_partial_elapsed() {
     let elapsed = Duration::from_millis(40);
     he.expect(
         Output::Timer {
-            duration: custom_delay - elapsed,
+            duration: custom_delay.checked_sub(elapsed).unwrap(),
         },
         now + elapsed,
     );
@@ -289,4 +295,41 @@ fn cancelled_connection_result_ignored() {
     // This must not panic.
     he.input(in_connection_result_negative(Id::from(4)), now);
     he.expect(Output::Succeeded, now);
+}
+
+/// A link-local address is only usable with its scope id, and the same address
+/// on two interfaces is two distinct endpoints.
+#[test]
+fn link_local_keeps_scope_id() {
+    let link_local = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
+    let (mut now, mut he) = setup();
+
+    expect_initial_dns_queries(&mut he, now);
+    he.input(in_dns_https_negative(Id::from(0)), now);
+    he.expect(out_resolution_delay(), now);
+    he.input(
+        Input::DnsResult {
+            id: Id::from(1),
+            result: DnsResult::Aaaa(Ok(vec![
+                ScopedIpv6Addr::new(link_local, NonZeroU32::new(2)),
+                ScopedIpv6Addr::new(link_local, NonZeroU32::new(3)),
+            ])),
+            stale: false,
+        },
+        now,
+    );
+
+    let first = he.process_output(now).unwrap().attempt().unwrap();
+    assert_eq!(
+        first.address(),
+        Some(SocketAddr::V6(SocketAddrV6::new(link_local, PORT, 0, 2)))
+    );
+
+    he.expect(out_connection_attempt_delay(), now);
+    now += CONNECTION_ATTEMPT_DELAY;
+    let second = he.process_output(now).unwrap().attempt().unwrap();
+    assert_eq!(
+        second.address(),
+        Some(SocketAddr::V6(SocketAddrV6::new(link_local, PORT, 0, 3)))
+    );
 }

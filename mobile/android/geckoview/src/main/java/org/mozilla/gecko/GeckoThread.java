@@ -4,6 +4,7 @@
 
 package org.mozilla.gecko;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.content.res.Resources;
@@ -308,6 +309,7 @@ public class GeckoThread extends Thread {
     setState(State.LIBS_READY);
   }
 
+  @SuppressLint("AppBundleLocaleChanges")
   private static void initGeckoEnvironment() {
     final Context context = GeckoAppShell.getApplicationContext();
     final Locale locale = Locale.getDefault();
@@ -380,7 +382,14 @@ public class GeckoThread extends Thread {
     }
   }
 
-  private static ArrayList<String> getEnvFromExtras(final Bundle extras) {
+  /**
+   * Extract environment variable from extras. The environment variables are stored in the extras as
+   * "env0", "env1", etc.
+   *
+   * @param extras the bundle to read, may be null
+   * @return the environment variables, as "NAME=value" strings
+   */
+  public static ArrayList<String> getEnvFromExtras(final Bundle extras) {
     if (extras == null) {
       return new ArrayList<>();
     }
@@ -822,25 +831,51 @@ public class GeckoThread extends Thread {
     ThreadUtils.getUiHandler().postDelayed(UI_THREAD_CALLBACK, delay);
   }
 
-  /** Queue a call to the given static method until Gecko is in the RUNNING state. */
+  /**
+   * Queue a call to the given static method until Gecko is in the RUNNING state.
+   *
+   * @param cls the class declaring the method
+   * @param methodName the method name
+   * @param args the method arguments
+   */
   public static void queueNativeCall(
       final Class<?> cls, final String methodName, final Object... args) {
     sNativeQueue.queueUntilReady(cls, methodName, args);
   }
 
-  /** Queue a call to the given instance method until Gecko is in the RUNNING state. */
+  /**
+   * Queue a call to the given instance method until Gecko is in the RUNNING state.
+   *
+   * @param obj the object to call the method on
+   * @param methodName the method name
+   * @param args the method arguments
+   */
   public static void queueNativeCall(
       final Object obj, final String methodName, final Object... args) {
     sNativeQueue.queueUntilReady(obj, methodName, args);
   }
 
-  /** Queue a call to the given instance method until Gecko is in the RUNNING state. */
+  /**
+   * Queue a call to the given instance method until Gecko reaches the given state.
+   *
+   * @param state the state to wait for
+   * @param obj the object to call the method on
+   * @param methodName the method name
+   * @param args the method arguments
+   */
   public static void queueNativeCallUntil(
       final State state, final Object obj, final String methodName, final Object... args) {
     sNativeQueue.queueUntil(state, obj, methodName, args);
   }
 
-  /** Queue a call to the given static method until Gecko is in the RUNNING state. */
+  /**
+   * Queue a call to the given static method until Gecko reaches the given state.
+   *
+   * @param state the state to wait for
+   * @param cls the class declaring the method
+   * @param methodName the method name
+   * @param args the method arguments
+   */
   public static void queueNativeCallUntil(
       final State state, final Class<?> cls, final String methodName, final Object... args) {
     sNativeQueue.queueUntil(state, cls, methodName, args);

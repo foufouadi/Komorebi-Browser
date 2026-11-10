@@ -6,7 +6,12 @@ export type GetTextOptions = Partial<{
   // The length of extracted text that is sufficient for the purpose.
   // When set, extraction will stop when the text meets or exceeds this length.
   // When unset, the lenghth of the extracted text is unbounded.
+  // Link URLs count as a fixed length, so the text can be longer or shorter
+  // than this.
   sufficientLength: number;
+  // The same as sufficientLength, but for a video transcript that replaces the
+  // page content, e.g. on YouTube. Falls back to sufficientLength when unset.
+  sufficientTranscriptLength: number;
   // Just include the viewport content.
   justViewport: boolean;
   // Skip canvases smaller than this dimension
@@ -26,6 +31,10 @@ export type GetTextOptions = Partial<{
   _forceRemoveBoilerplate: boolean;
   // The URL of the page being extracted. Used to apply custom extraction strategies for specific sites.
   sourceUrl: string;
+  // Return plain prose instead of the default markdown-annotated text. Anchors
+  // keep their text but lose their target, and whitespace within a block
+  // collapses to single spaces. Paragraph breaks between blocks are preserved.
+  useSimpleText: boolean;
 }>;
 
 export type CanvasSnapshot = {
@@ -38,6 +47,7 @@ export type DOMExtractionResult = {
   text: string;
   links: string[];
   canvases: HTMLCanvasElement[];
+  siteStrategy: string | null;
 };
 
 export type ExtractionResult = {
@@ -47,6 +57,9 @@ export type ExtractionResult = {
 };
 
 export type ExtractionStrategy = Partial<{
+  // Identifies the site-specific strategy ("google-search", "youtube"), or
+  // null for the default one.
+  name: string | null;
   // A CSS selector for elements to exclude from extraction.
   filterSelector: string;
   // Whether to format blocks that are inside anchors as markdown links.
@@ -66,6 +79,10 @@ export type PageMetadata = {
   language: string;
   // whether the page is likely readable by reader mode
   isReaderable: boolean;
+  // whether the page declares that its content is gated, e.g. behind a paywall
+  // or a registration wall. Derived from the schema.org `isAccessibleForFree`
+  // markup, so this is only ever true for pages that annotate themselves.
+  isGated: boolean;
 };
 
 /**

@@ -4,6 +4,14 @@
 
 #include "jit/loong64/MacroAssembler-loong64.h"
 
+#include "mozilla/Casting.h"
+#include "mozilla/FloatingPoint.h"
+
+#include <bit>
+#include <cstdint>
+#include <optional>
+#include <utility>
+
 #include "jit/Bailouts.h"
 #include "jit/BaselineFrame.h"
 #include "jit/JitFrames.h"
@@ -133,7 +141,7 @@ void MacroAssemblerLOONG64Compat::convertDoubleToInt32(FloatRegister src,
   as_bstrpick_d(scratch, scratch, CauseBitPos + CauseBitCount - 1, CauseBitPos);
   as_andi(scratch, scratch,
           CauseIOrVMask);  // masking for Inexact and Invalid flag.
-  ma_b(scratch, zero, fail, Assembler::NotEqual);
+  ma_b(scratch, scratch, fail, Assembler::NonZero);
 }
 
 void MacroAssemblerLOONG64Compat::convertDoubleToPtr(FloatRegister src,
@@ -155,7 +163,7 @@ void MacroAssemblerLOONG64Compat::convertDoubleToPtr(FloatRegister src,
   as_bstrpick_d(scratch, scratch, CauseBitPos + CauseBitCount - 1, CauseBitPos);
   as_andi(scratch, scratch,
           CauseIOrVMask);  // masking for Inexact and Invalid flag.
-  ma_b(scratch, zero, fail, Assembler::NotEqual);
+  ma_b(scratch, scratch, fail, Assembler::NonZero);
 }
 
 // Checks whether a float32 is representable as a 32-bit integer. If so, the
@@ -178,7 +186,7 @@ void MacroAssemblerLOONG64Compat::convertFloat32ToInt32(
   MOZ_ASSERT(CauseBitPos < 32);
   as_bstrpick_w(scratch, scratch, CauseBitPos + CauseBitCount - 1, CauseBitPos);
   as_andi(scratch, scratch, CauseIOrVMask);
-  ma_b(scratch, zero, fail, Assembler::NotEqual);
+  ma_b(scratch, scratch, fail, Assembler::NonZero);
 }
 
 void MacroAssemblerLOONG64Compat::convertFloat32ToDouble(FloatRegister src,
@@ -196,6 +204,13 @@ void MacroAssemblerLOONG64Compat::convertInt32ToFloat32(const Address& src,
                                                         FloatRegister dest) {
   ma_fld_s(dest, src);
   as_ffint_s_w(dest, dest);
+}
+
+void MacroAssemblerLOONG64::ma_move(Register dest, Register src) {
+  if (dest == src) {
+    return;
+  }
+  as_or(dest, src, zero);
 }
 
 void MacroAssemblerLOONG64::ma_li(Register dest, CodeLabel* label) {
@@ -349,7 +364,9 @@ FaultingCodeRange MacroAssemblerLOONG64::ma_st_d(Register src,
 
 // Add.
 void MacroAssemblerLOONG64::ma_add_d(Register rd, Register rj, Imm32 imm) {
-  if (is_intN(imm.value, 12)) {
+  if (imm.value == 0) {
+    ma_move(rd, rj);
+  } else if (is_intN(imm.value, 12)) {
     as_addi_d(rd, rj, imm.value);
   } else if (rd != rj) {
     ma_li(rd, imm);
@@ -364,7 +381,9 @@ void MacroAssemblerLOONG64::ma_add_d(Register rd, Register rj, Imm32 imm) {
 }
 
 void MacroAssemblerLOONG64::ma_add_d(Register rd, Register rj, ImmWord imm) {
-  if (is_intN(imm.value, 12)) {
+  if (imm.value == 0) {
+    ma_move(rd, rj);
+  } else if (is_intN(imm.value, 12)) {
     as_addi_d(rd, rj, imm.value);
   } else if (rd != rj) {
     ma_li(rd, imm);
@@ -411,7 +430,7 @@ void MacroAssemblerLOONG64::ma_addPtrTestOverflow(Register rd, Register rj,
 
   if (rj == rk) {
     if (rj == rd) {
-      as_or(scratch, rj, zero);
+      ma_move(scratch, rj);
       rj = scratch;
     }
 
@@ -424,7 +443,7 @@ void MacroAssemblerLOONG64::ma_addPtrTestOverflow(Register rd, Register rj,
     MOZ_ASSERT(rd != scratch2);
 
     if (rj == rd) {
-      as_or(scratch2, rj, zero);
+      ma_move(scratch2, rj);
       rj = scratch2;
     }
 
@@ -444,12 +463,12 @@ void MacroAssemblerLOONG64::ma_addPtrTestOverflow(Register rd, Register rj,
   Register scratch = temps.Acquire();
 
   if (imm.value == 0) {
-    as_ori(rd, rj, 0);
+    ma_move(rd, rj);
     return;
   }
 
   if (rj == rd) {
-    as_ori(scratch, rj, 0);
+    ma_move(scratch, rj);
     rj = scratch;
   }
 
@@ -470,13 +489,13 @@ void MacroAssemblerLOONG64::ma_addPtrTestOverflow(Register rd, Register rj,
   Register scratch = temps.Acquire();
 
   if (imm.value == 0) {
-    as_ori(rd, rj, 0);
+    ma_move(rd, rj);
     return;
   }
 
   if (rj == rd) {
     MOZ_ASSERT(rj != scratch);
-    as_ori(scratch, rj, 0);
+    ma_move(scratch, rj);
     rj = scratch;
   }
 
@@ -571,7 +590,9 @@ void MacroAssemblerLOONG64::ma_addPtrTestSigned(Condition cond, Register rd,
 
 // Subtract.
 void MacroAssemblerLOONG64::ma_sub_d(Register rd, Register rj, Imm32 imm) {
-  if (is_intN(-imm.value, 12)) {
+  if (imm.value == 0) {
+    ma_move(rd, rj);
+  } else if (is_intN(-imm.value, 12)) {
     as_addi_d(rd, rj, -imm.value);
   } else {
     UseScratchRegisterScope temps(asMasm());
@@ -582,7 +603,9 @@ void MacroAssemblerLOONG64::ma_sub_d(Register rd, Register rj, Imm32 imm) {
 }
 
 void MacroAssemblerLOONG64::ma_sub_d(Register rd, Register rj, ImmWord imm) {
-  if (is_intN(-imm.value, 12)) {
+  if (imm.value == 0) {
+    ma_move(rd, rj);
+  } else if (is_intN(-imm.value, 12)) {
     as_addi_d(rd, rj, -imm.value);
   } else {
     UseScratchRegisterScope temps(asMasm());
@@ -614,7 +637,7 @@ void MacroAssemblerLOONG64::ma_subPtrTestOverflow(Register rd, Register rj,
   Register rj_copy = rj;
 
   if (rj == rd) {
-    as_or(scratch, rj, zero);
+    ma_move(scratch, rj);
     rj_copy = scratch;
   }
 
@@ -642,15 +665,88 @@ void MacroAssemblerLOONG64::ma_subPtrTestOverflow(Register rd, Register rj,
 }
 
 void MacroAssemblerLOONG64::ma_mul_d(Register rd, Register rj, Imm32 imm) {
-  // li handles the relocation.
-  UseScratchRegisterScope temps(asMasm());
-  Register scratch = temps.Acquire();
-  MOZ_ASSERT(rj != scratch);
-  ma_li(scratch, imm);
-  as_mul_d(rd, rj, scratch);
+  ma_mul_d(rd, rj,
+           ImmWord(mozilla::BitwiseCast<uintptr_t>(
+               static_cast<int64_t>(imm.value))));
 }
 
 void MacroAssemblerLOONG64::ma_mul_d(Register rd, Register rj, ImmWord imm) {
+  const int64_t value = imm.value;
+
+  switch (value) {
+    case -1:
+      as_sub_d(rd, zero, rj);
+      return;
+    case 0:
+      ma_move(rd, zero);
+      return;
+    case 1:
+      ma_move(rd, rj);
+      return;
+    case 2:
+      as_add_d(rd, rj, rj);
+      return;
+    default:
+      break;
+  }
+
+  if (value > 0) {
+    const uint64_t uvalue = static_cast<uint64_t>(value);
+
+    if (std::has_single_bit(uvalue - 1)) {
+      const int32_t shift = std::countr_zero(uvalue - 1);
+      if (shift < 5) {
+        as_alsl_d(rd, rj, rj, shift - 1);
+      } else {
+        UseScratchRegisterScope temps(asMasm());
+        Register scratch = rd;
+        if (rd == rj) {
+          scratch = temps.Acquire();
+        }
+        as_slli_d(scratch, rj, shift);
+        as_add_d(rd, scratch, rj);
+      }
+      return;
+    }
+
+    // Use shift if constant is power of 2.
+    if (std::has_single_bit(uvalue)) {
+      as_slli_d(rd, rj, std::countr_zero(uvalue));
+      return;
+    }
+
+    if (std::has_single_bit(uvalue + 1)) {
+      const int32_t shift = std::countr_zero(uvalue + 1);
+
+      UseScratchRegisterScope temps(asMasm());
+      Register scratch = rd;
+      if (rd == rj) {
+        scratch = temps.Acquire();
+      }
+      as_slli_d(scratch, rj, shift);
+      as_sub_d(rd, scratch, rj);
+      return;
+    }
+
+    const int32_t shift = mozilla::FloorLog2(uvalue);
+    const uint64_t rest = uvalue - (UINT64_C(1) << shift);
+    if (std::has_single_bit(rest)) {
+      const int32_t restShift = std::countr_zero(rest);
+
+      UseScratchRegisterScope temps(asMasm());
+      Register scratch = rd;
+      if (rd == rj) {
+        scratch = temps.Acquire();
+      }
+      as_slli_d(scratch, rj, shift - restShift);
+      as_add_d(rd, scratch, rj);
+      if (restShift != 0) {
+        as_slli_d(rd, rd, restShift);
+      }
+      return;
+    }
+  }
+
   // li handles the relocation.
   UseScratchRegisterScope temps(asMasm());
   Register scratch = temps.Acquire();
@@ -677,11 +773,11 @@ void MacroAssemblerLOONG64::ma_mulPtrTestOverflow(Register rd, Register rj,
   MOZ_ASSERT(rd != scratch);
 
   if (rd == rj) {
-    as_or(scratch, rj, zero);
+    ma_move(scratch, rj);
     rj = scratch;
     rk = (rd == rk) ? rj : rk;
   } else if (rd == rk) {
-    as_or(scratch, rk, zero);
+    ma_move(scratch, rk);
     rk = scratch;
   }
 
@@ -745,15 +841,15 @@ FaultingCodeRange MacroAssemblerLOONG64::ma_load(Register dest, Address address,
         fcr = FaultingCodeRange(currentOffset());
         if (size == SizeByte) {
           if (extension == ZeroExtend) {
-            as_ldx_bu(dest, address.base, scratch);
+            as_ldx_bu(dest, scratch, address.base);
           } else {
-            as_ldx_b(dest, address.base, scratch);
+            as_ldx_b(dest, scratch, address.base);
           }
         } else {
           if (extension == ZeroExtend) {
-            as_ldx_hu(dest, address.base, scratch);
+            as_ldx_hu(dest, scratch, address.base);
           } else {
-            as_ldx_h(dest, address.base, scratch);
+            as_ldx_h(dest, scratch, address.base);
           }
         }
       }
@@ -807,12 +903,12 @@ FaultingCodeRange MacroAssemblerLOONG64::ma_load(Register dest, Address address,
         fcr = FaultingCodeRange(currentOffset());
         if (size == SizeWord) {
           if (extension == ZeroExtend) {
-            as_ldx_wu(dest, address.base, scratch);
+            as_ldx_wu(dest, scratch, address.base);
           } else {
-            as_ldx_w(dest, address.base, scratch);
+            as_ldx_w(dest, scratch, address.base);
           }
         } else {
-          as_ldx_d(dest, address.base, scratch);
+          as_ldx_d(dest, scratch, address.base);
         }
       }
       break;
@@ -857,9 +953,9 @@ FaultingCodeRange MacroAssemblerLOONG64::ma_store(
 
         fcr = FaultingCodeRange(currentOffset());
         if (size == SizeByte) {
-          as_stx_b(data, address.base, scratch);
+          as_stx_b(data, scratch, address.base);
         } else {
-          as_stx_h(data, address.base, scratch);
+          as_stx_h(data, scratch, address.base);
         }
       }
       break;
@@ -901,9 +997,9 @@ FaultingCodeRange MacroAssemblerLOONG64::ma_store(
 
         fcr = FaultingCodeRange(currentOffset());
         if (size == SizeWord) {
-          as_stx_w(data, address.base, scratch);
+          as_stx_w(data, scratch, address.base);
         } else {
-          as_stx_d(data, address.base, scratch);
+          as_stx_d(data, scratch, address.base);
         }
       }
       break;
@@ -911,6 +1007,18 @@ FaultingCodeRange MacroAssemblerLOONG64::ma_store(
       MOZ_CRASH("Invalid argument for ma_store");
   }
   return fcr;
+}
+
+FaultingCodeRange MacroAssemblerLOONG64::ma_store(
+    Imm32 imm, Address address, LoadStoreSize size,
+    LoadStoreExtension extension) {
+  if (imm.value == 0) {
+    return ma_store(zero, address, size, extension);
+  }
+  UseScratchRegisterScope temps(asMasm());
+  Register scratch = temps.Acquire();
+  ma_li(scratch, imm);
+  return ma_store(scratch, address, size, extension);
 }
 
 void MacroAssemblerLOONG64Compat::computeScaledAddress(const BaseIndex& address,
@@ -961,6 +1069,18 @@ Address MacroAssemblerLOONG64Compat::computeScaledAddress(
   return Address(scratch, address.offset);
 }
 
+Address MacroAssemblerLOONG64Compat::computeAbsoluteAddress(
+    AbsoluteAddress address, UseScratchRegisterScope& temps) {
+  const int64_t value = mozilla::BitwiseCast<int64_t>(address.addr);
+  const int64_t low12 = mozilla::BitwiseCast<int64_t>(
+                            mozilla::BitwiseCast<uint64_t>(value) << 52) >>
+                        52;
+  const Register scratch = temps.Acquire();
+  ma_li(scratch, ImmWord(mozilla::BitwiseCast<uint64_t>(value) -
+                         mozilla::BitwiseCast<uint64_t>(low12)));
+  return Address(scratch, low12);
+}
+
 void MacroAssemblerLOONG64::ma_pop(Register r) {
   MOZ_ASSERT(r != StackPointer);
   as_ld_d(r, StackPointer, 0);
@@ -971,7 +1091,7 @@ void MacroAssemblerLOONG64::ma_push(Register r) {
   if (r == StackPointer) {
     UseScratchRegisterScope temps(asMasm());
     Register scratch = temps.Acquire();
-    as_or(scratch, r, zero);
+    ma_move(scratch, r);
     as_addi_d(StackPointer, StackPointer, -int32_t(sizeof(intptr_t)));
     as_st_d(scratch, StackPointer, 0);
   } else {
@@ -1021,14 +1141,11 @@ void MacroAssemblerLOONG64::ma_b(Address addr, ImmGCPtr imm, Label* label,
 
 void MacroAssemblerLOONG64::ma_bl(Label* label) {
   LabelDoc target = refLabel(label);
+  UseScratchRegisterScope temps(asMasm());
+  Register scratch = temps.Acquire();
+
   if (label->bound()) {
-    // Generate the long jump for calls because return address has to be
-    // the address after the reserved block.
-    addLongJump(nextOffset(), BufferOffset(label->offset()));
-    UseScratchRegisterScope temps(asMasm());
-    Register scratch = temps.Acquire();
-    ma_liPatchable(scratch, ImmWord(LabelBase::INVALID_OFFSET));
-    as_jirl(ra, scratch, BOffImm16(0), target);
+    ma_call36(label->offset() - nextOffset().getOffset(), scratch);
     return;
   }
 
@@ -1036,19 +1153,35 @@ void MacroAssemblerLOONG64::ma_bl(Label* label) {
   uint32_t nextInChain =
       label->used() ? label->offset() : LabelBase::INVALID_OFFSET;
 
-  // Make the whole branch continous in the buffer. The '5'
+  // Make the whole branch continuous in the buffer. The '2'
   // instructions are writing at below.
-  m_buffer.ensureSpace(5 * sizeof(uint32_t));
+  m_buffer.ensureSpace(2 * sizeof(uint32_t));
 
-  BufferOffset bo = emit(getBranchCode(BranchIsCall).encode(), target);
+  // The first word is a tag that will be checked against by
+  // Assembler::bind(InstImm*, uintptr_t, uintptr_t) and patched with real
+  // offsets.
+  BufferOffset bo =
+      emit(InstImm(op_pcaddu18i, 0, scratch, false).encode(), target);
   writeInst(nextInChain);
   if (!oom()) {
     label->use(bo.getOffset());
   }
-  // Leave space for long jump.
-  as_nop();
-  as_nop();
-  as_nop();
+}
+
+void MacroAssemblerLOONG64::ma_jump36(int32_t offset, Register scratch) {
+  static_assert(MaxCodeBytesPerProcess <= (static_cast<uint64_t>(1) << 37),
+                "All JIT code jump offsets must fit in 128GiB to use jump36");
+  const auto [si20, offs16] = SplitJump36Offset(offset);
+  as_pcaddu18i(scratch, si20);
+  as_jirl(zero, scratch, BOffImm16(offs16));
+}
+
+void MacroAssemblerLOONG64::ma_call36(int32_t offset, Register scratch) {
+  static_assert(MaxCodeBytesPerProcess <= (static_cast<uint64_t>(1) << 37),
+                "All JIT code jump offsets must fit in 128GiB to use call36");
+  const auto [si20, offs16] = SplitJump36Offset(offset);
+  as_pcaddu18i(scratch, si20);
+  as_jirl(ra, scratch, BOffImm16(offs16));
 }
 
 void MacroAssemblerLOONG64::branchWithCode(InstImm code, Label* label,
@@ -1062,19 +1195,15 @@ void MacroAssemblerLOONG64::branchWithCode(InstImm code, Label* label,
   if (label->bound()) {
     int32_t offset = label->offset() - m_buffer.nextOffset().getOffset();
 
-    if (BOffImm16::IsInRange(offset)) {
+    if (code.isShortJumpInRange(offset)) {
       jumpKind = ShortJump;
     }
 
     // ShortJump
     if (jumpKind == ShortJump) {
-      MOZ_ASSERT(BOffImm16::IsInRange(offset));
+      MOZ_ASSERT(code.isShortJumpInRange(offset));
 
-      if (code.extractBitField(31, 26) == ((uint32_t)op_bcz >> 26)) {
-        code.setImm21(offset);
-      } else {
-        code.setBOffImm16(BOffImm16(offset));
-      }
+      code.setShortJumpOffset(offset);
       emit(code.encode(), target);
       return;
     }
@@ -1082,36 +1211,19 @@ void MacroAssemblerLOONG64::branchWithCode(InstImm code, Label* label,
     // LongJump
     if (code.encode() == inst_beq.encode()) {
       // Handle long jump
-      addLongJump(nextOffset(), BufferOffset(label->offset()));
-      if (scratch == Register::Invalid()) {
-        UseScratchRegisterScope temps(asMasm());
-        Register scratch = temps.Acquire();
-        ma_liPatchable(scratch, ImmWord(LabelBase::INVALID_OFFSET));
-        as_jirl(zero, scratch, BOffImm16(0), target);  // jr scratch
-      } else {
-        ma_liPatchable(scratch, ImmWord(LabelBase::INVALID_OFFSET));
-        as_jirl(zero, scratch, BOffImm16(0), target);  // jr scratch
-      }
-      as_nop();
+      UseScratchRegisterScope temps(asMasm());
+      ma_jump36(offset,
+                scratch != Register::Invalid() ? scratch : temps.Acquire());
       return;
     }
 
     // OpenLongJump
     // Handle long conditional branch, the target offset is based on self,
-    // point to next instruction of nop at below.
-    InstImm code_r = invertBranch(code, BOffImm16(5 * sizeof(uint32_t)));
-    emit(code_r.encode());
-    addLongJump(nextOffset(), BufferOffset(label->offset()));
-    if (scratch == Register::Invalid()) {
-      UseScratchRegisterScope temps(asMasm());
-      Register scratch = temps.Acquire();
-      ma_liPatchable(scratch, ImmWord(LabelBase::INVALID_OFFSET));
-      as_jirl(zero, scratch, BOffImm16(0), target);  // jr scratch
-    } else {
-      ma_liPatchable(scratch, ImmWord(LabelBase::INVALID_OFFSET));
-      as_jirl(zero, scratch, BOffImm16(0), target);  // jr scratch
-    }
-    as_nop();
+    // point to next instruction at below.
+    emit(invertBranch(code, 3 * sizeof(uint32_t)).encode());
+    UseScratchRegisterScope temps(asMasm());
+    ma_jump36(label->offset() - nextOffset().getOffset(),
+              scratch != Register::Invalid() ? scratch : temps.Acquire());
     return;
   }
 
@@ -1122,11 +1234,11 @@ void MacroAssemblerLOONG64::branchWithCode(InstImm code, Label* label,
       label->used() ? label->offset() : LabelBase::INVALID_OFFSET;
 
   if (jumpKind == ShortJump) {
-    // Make the whole branch continous in the buffer.
+    // Make the whole branch continuous in the buffer.
     m_buffer.ensureSpace(2 * sizeof(uint32_t));
 
     // Indicate that this is short jump with offset 4.
-    code.setBOffImm16(BOffImm16(4));
+    code.setShortJumpOffset(4);
     BufferOffset bo = emit(code.encode(), target);
     writeInst(nextInChain);
     if (!oom()) {
@@ -1137,18 +1249,15 @@ void MacroAssemblerLOONG64::branchWithCode(InstImm code, Label* label,
 
   bool conditional = code.encode() != inst_beq.encode();
 
-  // Make the whole branch continous in the buffer. The '5'
-  // instructions are writing at below (contain conditional nop).
-  m_buffer.ensureSpace(5 * sizeof(uint32_t));
+  // Make the whole branch continuous in the buffer, the jump36 pair plus 1 for
+  // the conditional inverted-branch skip.
+  m_buffer.ensureSpace((conditional ? 3 : 2) * sizeof(uint32_t));
 
-  BufferOffset bo = emit(code.encode(), target);  // invert
+  BufferOffset bo = emit(code.encode(), target);
   writeInst(nextInChain);
   if (!oom()) {
     label->use(bo.getOffset());
   }
-  // Leave space for potential long jump.
-  as_nop();
-  as_nop();
   if (conditional) {
     as_nop();
   }
@@ -1211,9 +1320,7 @@ void MacroAssemblerLOONG64::ma_cselz(Register rd, Register rj, Register rk,
   MOZ_ASSERT(rd != rtmp);
 
   if (rj == rk) {
-    if (rd != rj) {
-      as_or(rd, rj, zero);
-    }
+    ma_move(rd, rj);
     return;
   }
 
@@ -1245,9 +1352,7 @@ void MacroAssemblerLOONG64::ma_cselnz(Register rd, Register rj, Register rk,
   MOZ_ASSERT(rd != rtmp);
 
   if (rj == rk) {
-    if (rd != rj) {
-      as_or(rd, rj, zero);
-    }
+    ma_move(rd, rj);
     return;
   }
 
@@ -1309,7 +1414,7 @@ FaultingCodeRange MacroAssemblerLOONG64::ma_fld_s(FloatRegister dest,
     MOZ_ASSERT(base != scratch);
     ma_li(scratch, Imm32(offset));
     fcr = js::wasm::FaultingCodeRange(currentOffset());
-    as_fldx_s(dest, base, scratch);
+    as_fldx_s(dest, scratch, base);
   }
   return fcr;
 }
@@ -1329,7 +1434,7 @@ FaultingCodeRange MacroAssemblerLOONG64::ma_fld_d(FloatRegister dest,
     MOZ_ASSERT(base != scratch);
     ma_li(scratch, Imm32(offset));
     fcr = js::wasm::FaultingCodeRange(currentOffset());
-    as_fldx_d(dest, base, scratch);
+    as_fldx_d(dest, scratch, base);
   }
   return fcr;
 }
@@ -1349,7 +1454,7 @@ FaultingCodeRange MacroAssemblerLOONG64::ma_fst_s(FloatRegister src,
     MOZ_ASSERT(base != scratch);
     ma_li(scratch, Imm32(offset));
     fcr = js::wasm::FaultingCodeRange(currentOffset());
-    as_fstx_s(src, base, scratch);
+    as_fstx_s(src, scratch, base);
   }
   return fcr;
 }
@@ -1369,7 +1474,45 @@ FaultingCodeRange MacroAssemblerLOONG64::ma_fst_d(FloatRegister src,
     MOZ_ASSERT(base != scratch);
     ma_li(scratch, Imm32(offset));
     fcr = js::wasm::FaultingCodeRange(currentOffset());
-    as_fstx_d(src, base, scratch);
+    as_fstx_d(src, scratch, base);
+  }
+  return fcr;
+}
+
+FaultingCodeRange MacroAssemblerLOONG64::ma_vld(VRegister vd, Address address) {
+  int32_t offset = address.offset;
+  Register base = address.base;
+  js::wasm::FaultingCodeRange fcr;
+
+  if (is_intN(offset, 12)) {
+    fcr = js::wasm::FaultingCodeRange(currentOffset());
+    as_vld(vd, base, uint32_t(offset));
+  } else {
+    UseScratchRegisterScope temps(asMasm());
+    Register scratch = temps.Acquire();
+    MOZ_ASSERT(base != scratch);
+    ma_li(scratch, Imm32(offset));
+    fcr = js::wasm::FaultingCodeRange(currentOffset());
+    as_vldx(vd, scratch, base);
+  }
+  return fcr;
+}
+
+FaultingCodeRange MacroAssemblerLOONG64::ma_vst(VRegister vd, Address address) {
+  int32_t offset = address.offset;
+  Register base = address.base;
+  js::wasm::FaultingCodeRange fcr;
+
+  if (is_intN(offset, 12)) {
+    fcr = js::wasm::FaultingCodeRange(currentOffset());
+    as_vst(vd, base, uint32_t(offset));
+  } else {
+    UseScratchRegisterScope temps(asMasm());
+    Register scratch = temps.Acquire();
+    MOZ_ASSERT(base != scratch);
+    ma_li(scratch, Imm32(offset));
+    fcr = js::wasm::FaultingCodeRange(currentOffset());
+    as_vstx(vd, scratch, base);
   }
   return fcr;
 }
@@ -1427,7 +1570,7 @@ void MacroAssemblerLOONG64::ma_liPatchable(Register dest, Imm32 imm) {
 void MacroAssemblerLOONG64::ma_fmovz(FloatFormat fmt, FloatRegister fd,
                                      FloatRegister fj, Register rk) {
   Label done;
-  ma_b(rk, zero, &done, Assembler::NotEqual);
+  ma_b(rk, rk, &done, Assembler::NonZero);
   if (fmt == SingleFloat) {
     as_fmov_s(fd, fj);
   } else {
@@ -1439,7 +1582,7 @@ void MacroAssemblerLOONG64::ma_fmovz(FloatFormat fmt, FloatRegister fd,
 void MacroAssemblerLOONG64::ma_fmovn(FloatFormat fmt, FloatRegister fd,
                                      FloatRegister fj, Register rk) {
   Label done;
-  ma_b(rk, zero, &done, Assembler::Equal);
+  ma_b(rk, rk, &done, Assembler::Zero);
   if (fmt == SingleFloat) {
     as_fmov_s(fd, fj);
   } else {
@@ -1449,17 +1592,44 @@ void MacroAssemblerLOONG64::ma_fmovn(FloatFormat fmt, FloatRegister fd,
 }
 
 void MacroAssemblerLOONG64::ma_and(Register rd, Register rj, Imm32 imm) {
+  const bool isStackOp = rd == StackPointer;
+  const auto maybeRange = GetContiguousMaskRange(
+      mozilla::BitwiseCast<uint64_t>(static_cast<int64_t>(imm.value)));
+
   if (is_uintN(imm.value, 12)) {
     as_andi(rd, rj, imm.value);
-  } else if (const auto maybeRange =
-                 GetContiguousMaskRange(mozilla::BitwiseCast<uint64_t>(
-                     static_cast<int64_t>(imm.value)))) {
+  } else if (!isStackOp && maybeRange) {
     const auto [msb, lsb] = *maybeRange;
     as_bstrpick_d(rd, rj, msb, lsb);
     if (lsb != 0) {
       as_slli_d(rd, rd, lsb);
     }
-  } else if (rd != rj) {
+  } else if (!isStackOp && rd != rj) {
+    ma_li(rd, imm);
+    as_and(rd, rj, rd);
+  } else {
+    UseScratchRegisterScope temps(asMasm());
+    Register scratch = temps.Acquire();
+    MOZ_ASSERT(rj != scratch);
+    ma_li(scratch, imm);
+    as_and(rd, rj, scratch);
+  }
+}
+
+void MacroAssemblerLOONG64::ma_and(Register rd, Register rj, ImmWord imm) {
+  const bool isStackOp = rd == StackPointer;
+  const auto maybeRange =
+      GetContiguousMaskRange(mozilla::BitwiseCast<uint64_t>(imm.value));
+
+  if (is_uintN(imm.value, 12)) {
+    as_andi(rd, rj, static_cast<int32_t>(imm.value));
+  } else if (!isStackOp && maybeRange) {
+    const auto [msb, lsb] = *maybeRange;
+    as_bstrpick_d(rd, rj, msb, lsb);
+    if (lsb != 0) {
+      as_slli_d(rd, rd, lsb);
+    }
+  } else if (!isStackOp && rd != rj) {
     ma_li(rd, imm);
     as_and(rd, rj, rd);
   } else {
@@ -1472,8 +1642,24 @@ void MacroAssemblerLOONG64::ma_and(Register rd, Register rj, Imm32 imm) {
 }
 
 void MacroAssemblerLOONG64::ma_or(Register rd, Register rj, Imm32 imm) {
-  if (is_uintN(imm.value, 12)) {
+  if (imm.value == 0) {
+    ma_move(rd, rj);
+  } else if (is_uintN(imm.value, 12)) {
     as_ori(rd, rj, imm.value);
+  } else {
+    UseScratchRegisterScope temps(asMasm());
+    Register scratch = temps.Acquire();
+    MOZ_ASSERT(rj != scratch);
+    ma_li(scratch, imm);
+    as_or(rd, rj, scratch);
+  }
+}
+
+void MacroAssemblerLOONG64::ma_or(Register rd, Register rj, ImmWord imm) {
+  if (imm.value == 0) {
+    ma_move(rd, rj);
+  } else if (is_uintN(imm.value, 12)) {
+    as_ori(rd, rj, static_cast<int32_t>(imm.value));
   } else {
     UseScratchRegisterScope temps(asMasm());
     Register scratch = temps.Acquire();
@@ -1493,6 +1679,26 @@ void MacroAssemblerLOONG64::ma_xor(Register rd, Register rj, Imm32 imm) {
     ma_li(scratch, imm);
     as_xor(rd, rj, scratch);
   }
+}
+
+void MacroAssemblerLOONG64::ma_xor(Register rd, Register rj, ImmWord imm) {
+  if (is_uintN(imm.value, 12)) {
+    as_xori(rd, rj, static_cast<int32_t>(imm.value));
+  } else {
+    UseScratchRegisterScope temps(asMasm());
+    Register scratch = temps.Acquire();
+    MOZ_ASSERT(rj != scratch);
+    ma_li(scratch, imm);
+    as_xor(rd, rj, scratch);
+  }
+}
+
+void MacroAssemblerLOONG64::ma_nor(Register rd, Register rj, Imm32 imm) {
+  UseScratchRegisterScope temps(asMasm());
+  Register scratch = temps.Acquire();
+  MOZ_ASSERT(rj != scratch);
+  ma_li(scratch, imm);
+  as_nor(rd, rj, scratch);
 }
 
 // Arithmetic-based ops.
@@ -1564,6 +1770,82 @@ void MacroAssemblerLOONG64::ma_sub32TestOverflow(Register rd, Register rj,
 }
 
 void MacroAssemblerLOONG64::ma_mul(Register rd, Register rj, Imm32 imm) {
+  const int32_t value = imm.value;
+
+  switch (value) {
+    case -1:
+      as_sub_w(rd, zero, rj);
+      return;
+    case 0:
+      as_slli_w(rd, zero, 0);
+      return;
+    case 1:
+      as_slli_w(rd, rj, 0);
+      return;
+    case 2:
+      as_add_w(rd, rj, rj);
+      return;
+    default:
+      break;
+  }
+
+  if (value > 0) {
+    const uint32_t uvalue = static_cast<uint32_t>(value);
+
+    if (std::has_single_bit(uvalue - 1)) {
+      const uint32_t shift = std::countr_zero(uvalue - 1);
+      if (shift < 5) {
+        as_alsl_w(rd, rj, rj, shift - 1);
+      } else {
+        UseScratchRegisterScope temps(asMasm());
+        Register scratch = rd;
+        if (rd == rj) {
+          scratch = temps.Acquire();
+        }
+        as_slli_w(scratch, rj, shift);
+        as_add_w(rd, scratch, rj);
+      }
+      return;
+    }
+
+    // Use shift if constant is power of 2.
+    if (std::has_single_bit(uvalue)) {
+      as_slli_w(rd, rj, std::countr_zero(uvalue));
+      return;
+    }
+
+    if (std::has_single_bit(uvalue + 1)) {
+      const uint32_t shift = std::countr_zero(uvalue + 1);
+
+      UseScratchRegisterScope temps(asMasm());
+      Register scratch = rd;
+      if (rd == rj) {
+        scratch = temps.Acquire();
+      }
+      as_slli_w(scratch, rj, shift);
+      as_sub_w(rd, scratch, rj);
+      return;
+    }
+
+    const uint32_t shift = mozilla::FloorLog2(uvalue);
+    const uint32_t rest = uvalue - (UINT32_C(1) << shift);
+    if (std::has_single_bit(rest)) {
+      const uint32_t restShift = std::countr_zero(rest);
+
+      UseScratchRegisterScope temps(asMasm());
+      Register scratch = rd;
+      if (rd == rj) {
+        scratch = temps.Acquire();
+      }
+      as_slli_w(scratch, rj, shift - restShift);
+      as_add_w(rd, scratch, rj);
+      if (restShift != 0) {
+        as_slli_w(rd, rd, restShift);
+      }
+      return;
+    }
+  }
+
   UseScratchRegisterScope temps(asMasm());
   Register scratch = temps.Acquire();
   MOZ_ASSERT(rj != scratch);
@@ -1583,9 +1865,9 @@ void MacroAssemblerLOONG64::ma_mul32TestOverflow(Register rd, Register rj,
 void MacroAssemblerLOONG64::ma_mul32TestOverflow(Register rd, Register rj,
                                                  Imm32 imm, Label* overflow) {
   UseScratchRegisterScope temps(asMasm());
+  ma_mul_d(rd, rj, imm);
+  // Defer scratch allocation to reduce pressure.
   Register scratch = temps.Acquire();
-  ma_li(scratch, imm);
-  as_mul_d(rd, rj, scratch);
   as_slli_w(scratch, rd, 0);
   ma_b(rd, scratch, overflow, Assembler::NotEqual);
 }
@@ -1596,6 +1878,54 @@ FaultingCodeRange MacroAssemblerLOONG64::ma_load(Register dest,
                                                  const BaseIndex& src,
                                                  LoadStoreSize size,
                                                  LoadStoreExtension extension) {
+  if (src.offset == 0 && src.scale == TimesOne) {
+    FaultingCodeRange fcr(currentOffset());
+    switch (size) {
+      case SizeByte:
+        switch (extension) {
+          case ZeroExtend:
+            as_ldx_bu(dest, src.base, src.index);
+            break;
+          case SignExtend:
+            as_ldx_b(dest, src.base, src.index);
+            break;
+          default:
+            MOZ_CRASH("Invalid extension.");
+        }
+        break;
+      case SizeHalfWord:
+        switch (extension) {
+          case ZeroExtend:
+            as_ldx_hu(dest, src.base, src.index);
+            break;
+          case SignExtend:
+            as_ldx_h(dest, src.base, src.index);
+            break;
+          default:
+            MOZ_CRASH("Invalid extension.");
+        }
+        break;
+      case SizeWord:
+        switch (extension) {
+          case ZeroExtend:
+            as_ldx_wu(dest, src.base, src.index);
+            break;
+          case SignExtend:
+            as_ldx_w(dest, src.base, src.index);
+            break;
+          default:
+            MOZ_CRASH("Invalid extension.");
+        }
+        break;
+      case SizeDouble:
+        as_ldx_d(dest, src.base, src.index);
+        break;
+      default:
+        MOZ_CRASH("Invalid size.");
+    }
+    return fcr;
+  }
+
   UseScratchRegisterScope temps(asMasm());
   Address address = asMasm().computeScaledAddress(src, temps);
   return asMasm().ma_load(dest, address, size, extension);
@@ -1604,38 +1934,45 @@ FaultingCodeRange MacroAssemblerLOONG64::ma_load(Register dest,
 FaultingCodeRange MacroAssemblerLOONG64::ma_store(
     Register data, const BaseIndex& dest, LoadStoreSize size,
     LoadStoreExtension extension) {
+  if (dest.offset == 0 && dest.scale == TimesOne) {
+    FaultingCodeRange fcr(currentOffset());
+    switch (size) {
+      case SizeByte:
+        as_stx_b(data, dest.base, dest.index);
+        break;
+      case SizeHalfWord:
+        as_stx_h(data, dest.base, dest.index);
+        break;
+      case SizeWord:
+        as_stx_w(data, dest.base, dest.index);
+        break;
+      case SizeDouble:
+        as_stx_d(data, dest.base, dest.index);
+        break;
+      default:
+        MOZ_CRASH("Invalid size.");
+    }
+    return fcr;
+  }
+
   UseScratchRegisterScope temps(asMasm());
   Address address = asMasm().computeScaledAddress(dest, temps);
   return asMasm().ma_store(data, address, size, extension);
 }
 
-void MacroAssemblerLOONG64::ma_store(Imm32 imm, const BaseIndex& dest,
-                                     LoadStoreSize size,
-                                     LoadStoreExtension extension) {
-  if (imm.value == 0) {
-    ma_store(zero, dest, size, extension);
-    return;
-  }
-
+FaultingCodeRange MacroAssemblerLOONG64::ma_store(
+    Imm32 imm, const BaseIndex& dest, LoadStoreSize size,
+    LoadStoreExtension extension) {
   UseScratchRegisterScope temps(asMasm());
   Address address = asMasm().computeScaledAddress(dest, temps);
-
-  Register scratch = temps.Acquire();
-  ma_li(scratch, imm);
-  asMasm().ma_store(scratch, address, size, extension);
+  return ma_store(imm, address, size, extension);
 }
 
 // Branches when done from within loongarch-specific code.
-// TODO(loong64) Optimize ma_b
 void MacroAssemblerLOONG64::ma_b(Register lhs, Register rhs, Label* label,
                                  Condition c, JumpKind jumpKind,
                                  Register scratch) {
   switch (c) {
-    case Equal:
-    case NotEqual:
-      asMasm().branchWithCode(getBranchCode(lhs, rhs, c), label, jumpKind,
-                              scratch);
-      break;
     case Always:
       ma_b(label, jumpKind);
       break;
@@ -1646,14 +1983,10 @@ void MacroAssemblerLOONG64::ma_b(Register lhs, Register rhs, Label* label,
       MOZ_ASSERT(lhs == rhs);
       asMasm().branchWithCode(getBranchCode(lhs, c), label, jumpKind, scratch);
       break;
-    default: {
-      UseScratchRegisterScope temps(*this);
-      Register scratch = temps.Acquire();
-      Condition cond = ma_cmp(scratch, lhs, rhs, c);
-      asMasm().branchWithCode(getBranchCode(scratch, cond), label, jumpKind,
+    default:
+      asMasm().branchWithCode(getBranchCode(lhs, rhs, c), label, jumpKind,
                               scratch);
       break;
-    }
   }
 }
 
@@ -1671,16 +2004,23 @@ void MacroAssemblerLOONG64::ma_b(Register lhs, Imm32 imm, Label* label,
   } else {
     UseScratchRegisterScope temps(asMasm());
     Register scratch = temps.Acquire();
+    MOZ_ASSERT(lhs != scratch);
     switch (c) {
       case Equal:
       case NotEqual:
-        MOZ_ASSERT(lhs != scratch);
+      case Above:
+      case AboveOrEqual:
+      case Below:
+      case BelowOrEqual:
+      case GreaterThan:
+      case GreaterThanOrEqual:
+      case LessThan:
+      case LessThanOrEqual:
         ma_li(scratch, imm);
         ma_b(lhs, scratch, label, c, jumpKind);
         break;
       default:
-        Condition cond = ma_cmp(scratch, lhs, imm, c);
-        asMasm().branchWithCode(getBranchCode(scratch, cond), label, jumpKind);
+        MOZ_CRASH("Invalid condition.");
     }
   }
 }
@@ -2159,62 +2499,132 @@ void MacroAssemblerLOONG64::minMaxPtr(Register lhs, ImmWord rhs, Register dest,
 
 void MacroAssemblerLOONG64::minMaxDouble(FloatRegister srcDest,
                                          FloatRegister second, bool handleNaN,
-                                         bool isMax) {
+                                         bool handleZero, bool isMax) {
   if (srcDest == second) return;
-
-  if (!handleNaN) {
-    if (isMax) {
-      as_fmax_d(srcDest, srcDest, second);
-    } else {
-      as_fmin_d(srcDest, srcDest, second);
-    }
-    return;
-  }
 
   Label nan, done;
 
-  // First or second is NaN, result is NaN.
-  ma_bc_d(srcDest, second, &nan, Assembler::DoubleUnordered, ShortJump);
+  if (handleNaN) {
+    ma_bc_d(srcDest, second, &nan, Assembler::DoubleUnordered, ShortJump);
+  }
+
+  ScratchDoubleScope2 fpscratch2(asMasm());
+  if (handleZero) {
+    as_fmov_d(fpscratch2, srcDest);  // Save the first operand.
+  }
+
   if (isMax) {
     as_fmax_d(srcDest, srcDest, second);
   } else {
     as_fmin_d(srcDest, srcDest, second);
   }
-  ma_b(&done, ShortJump);
 
-  bind(&nan);
-  as_fadd_d(srcDest, srcDest, second);
+  if (handleZero) {
+    {
+      UseScratchRegisterScope temps(asMasm());
+      const Register scratch = temps.Acquire();
+
+      as_movfr2gr_d(scratch, srcDest);
+      // If the result is non-zero, the job is done.
+      as_bstrpick_d(scratch, scratch, 62, 0);
+      ma_b(scratch, scratch, &done, Assembler::NonZero, ShortJump);
+    }
+
+    {
+      // ... Otherwise, since LoongArch implements IEEE 754-2008 where the
+      // signedness of zero from min/max is not specified, it is our
+      // responsibility to ensure min(+0.0, -0.0) equals -0.0, and max(+0.0,
+      // -0.0) equals +0.0.
+      UseScratchRegisterScope temps(asMasm());
+      const Register scratch = temps.Acquire();
+      const Register scratch2 = temps.Acquire();
+
+      as_movfr2gr_d(scratch, fpscratch2);
+      as_movfr2gr_d(scratch2, second);
+      // We only care about the sign bit. Other bits will be thrown away by
+      // BSTRINS.D since the result is zero.
+      if (isMax) {
+        as_and(scratch, scratch, scratch2);
+      } else {
+        as_or(scratch, scratch, scratch2);
+      }
+      as_bstrins_d(scratch, zero, 62, 0);
+      as_movgr2fr_d(srcDest, scratch);
+    }
+  }
+
+  if (handleNaN) {
+    ma_b(&done, ShortJump);
+
+    bind(&nan);
+    as_fadd_d(srcDest, srcDest, second);
+  }
 
   bind(&done);
 }
 
 void MacroAssemblerLOONG64::minMaxFloat32(FloatRegister srcDest,
                                           FloatRegister second, bool handleNaN,
-                                          bool isMax) {
+                                          bool handleZero, bool isMax) {
   if (srcDest == second) return;
-
-  if (!handleNaN) {
-    if (isMax) {
-      as_fmax_s(srcDest, srcDest, second);
-    } else {
-      as_fmin_s(srcDest, srcDest, second);
-    }
-    return;
-  }
 
   Label nan, done;
 
-  // First or second is NaN, result is NaN.
-  ma_bc_s(srcDest, second, &nan, Assembler::DoubleUnordered, ShortJump);
+  if (handleNaN) {
+    ma_bc_s(srcDest, second, &nan, Assembler::DoubleUnordered, ShortJump);
+  }
+
+  ScratchFloat32Scope2 fpscratch2(asMasm());
+  if (handleZero) {
+    as_fmov_s(fpscratch2, srcDest);  // Save the first operand.
+  }
+
   if (isMax) {
     as_fmax_s(srcDest, srcDest, second);
   } else {
     as_fmin_s(srcDest, srcDest, second);
   }
-  ma_b(&done, ShortJump);
 
-  bind(&nan);
-  as_fadd_s(srcDest, srcDest, second);
+  if (handleZero) {
+    {
+      UseScratchRegisterScope temps(asMasm());
+      const Register scratch = temps.Acquire();
+
+      as_movfr2gr_s(scratch, srcDest);
+      // If the result is non-zero, the job is done.
+      as_bstrpick_w(scratch, scratch, 30, 0);
+      ma_b(scratch, scratch, &done, Assembler::NonZero, ShortJump);
+    }
+
+    {
+      // ... Otherwise, since LoongArch implements IEEE 754-2008 where the
+      // signedness of zero from min/max is not specified, it is our
+      // responsibility to ensure min(+0.0, -0.0) equals -0.0, and max(+0.0,
+      // -0.0) equals +0.0.
+      UseScratchRegisterScope temps(asMasm());
+      const Register scratch = temps.Acquire();
+      const Register scratch2 = temps.Acquire();
+
+      as_movfr2gr_s(scratch, fpscratch2);
+      as_movfr2gr_s(scratch2, second);
+      // We only care about the sign bit. Other bits will be thrown away by
+      // BSTRINS.W since the result is zero.
+      if (isMax) {
+        as_and(scratch, scratch, scratch2);
+      } else {
+        as_or(scratch, scratch, scratch2);
+      }
+      as_bstrins_w(scratch, zero, 30, 0);
+      as_movgr2fr_w(srcDest, scratch);
+    }
+  }
+
+  if (handleNaN) {
+    ma_b(&done, ShortJump);
+
+    bind(&nan);
+    as_fadd_s(srcDest, srcDest, second);
+  }
 
   bind(&done);
 }
@@ -2239,10 +2649,9 @@ FaultingCodeRange MacroAssemblerLOONG64::loadFloat32(const BaseIndex& src,
   return asMasm().ma_fld_s(dest, src);
 }
 
-void MacroAssemblerLOONG64::wasmLoadImpl(const wasm::MemoryAccessDesc& access,
-                                         Register memoryBase, Register ptr,
-                                         Register ptrScratch,
-                                         AnyRegister output, Register tmp) {
+FaultingCodeRange MacroAssemblerLOONG64::wasmLoadImpl(
+    const wasm::MemoryAccessDesc& access, Register memoryBase, Register ptr,
+    Register ptrScratch, AnyRegister output, Register tmp) {
   uint32_t offset = access.offset32();
   MOZ_ASSERT_IF(offset, ptrScratch != InvalidReg);
 
@@ -2251,43 +2660,125 @@ void MacroAssemblerLOONG64::wasmLoadImpl(const wasm::MemoryAccessDesc& access,
     ptr = ptrScratch;
   }
 
-  wasmLoadImpl(access, memoryBase, ptr, output);
+  return wasmLoadImpl(access, memoryBase, ptr, output);
 }
 
-void MacroAssemblerLOONG64::wasmLoadImpl(const wasm::MemoryAccessDesc& access,
-                                         Register memoryBase, Register ptr,
-                                         AnyRegister output) {
+FaultingCodeRange MacroAssemblerLOONG64::wasmLoadImpl(
+    const wasm::MemoryAccessDesc& access, Register memoryBase, Register ptr,
+    AnyRegister output) {
+  MOZ_ASSERT_IF(
+      access.isZeroExtendSimd128Load(),
+      access.type() == Scalar::Float32 || access.type() == Scalar::Float64);
+  MOZ_ASSERT_IF(
+      access.isSplatSimd128Load(),
+      access.type() == Scalar::Uint8 || access.type() == Scalar::Uint16 ||
+          access.type() == Scalar::Float32 || access.type() == Scalar::Float64);
+  MOZ_ASSERT_IF(access.isWidenSimd128Load(), access.type() == Scalar::Float64);
+
   access.assertOffsetInGuardPages();
   asMasm().memoryBarrierBefore(access.sync());
 
   FaultingCodeRange fcr(currentOffset());
   switch (access.type()) {
     case Scalar::Int8:
-      as_ldx_b(output.gpr(), memoryBase, ptr);
+      as_ldx_b(output.gpr(), ptr, memoryBase);
       break;
     case Scalar::Uint8:
-      as_ldx_bu(output.gpr(), memoryBase, ptr);
+      if (access.isSplatSimd128Load()) {
+        UseScratchRegisterScope temps(asMasm());
+        const Register scratch = temps.Acquire();
+        as_add_d(scratch, memoryBase, ptr);
+        fcr = FaultingCodeRange(currentOffset());
+        as_vldrepl_b(output.fpu().toV(), scratch, 0);
+      } else {
+        as_ldx_bu(output.gpr(), ptr, memoryBase);
+      }
       break;
     case Scalar::Int16:
-      as_ldx_h(output.gpr(), memoryBase, ptr);
+      as_ldx_h(output.gpr(), ptr, memoryBase);
       break;
     case Scalar::Uint16:
-      as_ldx_hu(output.gpr(), memoryBase, ptr);
+      if (access.isSplatSimd128Load()) {
+        UseScratchRegisterScope temps(asMasm());
+        const Register scratch = temps.Acquire();
+        as_add_d(scratch, memoryBase, ptr);
+        fcr = FaultingCodeRange(currentOffset());
+        as_vldrepl_h(output.fpu().toV(), scratch, 0);
+      } else {
+        as_ldx_hu(output.gpr(), ptr, memoryBase);
+      }
       break;
     case Scalar::Int32:
-      as_ldx_w(output.gpr(), memoryBase, ptr);
+      as_ldx_w(output.gpr(), ptr, memoryBase);
       break;
     case Scalar::Uint32:
-      as_ldx_wu(output.gpr(), memoryBase, ptr);
+      as_ldx_wu(output.gpr(), ptr, memoryBase);
       break;
     case Scalar::Int64:
-      as_ldx_d(output.gpr(), memoryBase, ptr);
-      break;
-    case Scalar::Float64:
-      as_fldx_d(output.fpu(), memoryBase, ptr);
+      as_ldx_d(output.gpr(), ptr, memoryBase);
       break;
     case Scalar::Float32:
-      as_fldx_s(output.fpu(), memoryBase, ptr);
+      if (access.isSplatSimd128Load()) {
+        UseScratchRegisterScope temps(asMasm());
+        const Register scratch = temps.Acquire();
+        as_add_d(scratch, memoryBase, ptr);
+        fcr = FaultingCodeRange(currentOffset());
+        as_vldrepl_w(output.fpu().toV(), scratch, 0);
+      } else if (access.isZeroExtendSimd128Load()) {
+        UseScratchRegisterScope temps(asMasm());
+        const Register scratch = temps.Acquire();
+        as_vldi(output.fpu().toV(), 0);
+        fcr = FaultingCodeRange(currentOffset());
+        as_ldx_wu(scratch, ptr, memoryBase);
+        as_vinsgr2vr_w(output.fpu().toV(), scratch, 0);
+      } else {
+        as_fldx_s(output.fpu(), ptr, memoryBase);
+      }
+      break;
+    case Scalar::Float64:
+      if (access.isSplatSimd128Load()) {
+        UseScratchRegisterScope temps(asMasm());
+        const Register scratch = temps.Acquire();
+        as_add_d(scratch, memoryBase, ptr);
+        fcr = FaultingCodeRange(currentOffset());
+        as_vldrepl_d(output.fpu().toV(), scratch, 0);
+      } else if (access.isWidenSimd128Load()) {
+        as_fldx_d(output.fpu(), ptr, memoryBase);
+        switch (access.widenSimdOp()) {
+          case wasm::SimdOp::V128Load8x8S:
+            asMasm().widenLowInt8x16(output.fpu(), output.fpu());
+            break;
+          case wasm::SimdOp::V128Load8x8U:
+            asMasm().unsignedWidenLowInt8x16(output.fpu(), output.fpu());
+            break;
+          case wasm::SimdOp::V128Load16x4S:
+            asMasm().widenLowInt16x8(output.fpu(), output.fpu());
+            break;
+          case wasm::SimdOp::V128Load16x4U:
+            asMasm().unsignedWidenLowInt16x8(output.fpu(), output.fpu());
+            break;
+          case wasm::SimdOp::V128Load32x2S:
+            asMasm().widenLowInt32x4(output.fpu(), output.fpu());
+            break;
+          case wasm::SimdOp::V128Load32x2U:
+            asMasm().unsignedWidenLowInt32x4(output.fpu(), output.fpu());
+            break;
+          default:
+            MOZ_CRASH("unexpected widening op");
+        }
+      } else if (access.isZeroExtendSimd128Load()) {
+        UseScratchRegisterScope temps(asMasm());
+        const Register scratch = temps.Acquire();
+        as_vldi(output.fpu().toV(), 0);
+        fcr = FaultingCodeRange(currentOffset());
+        as_ldx_d(scratch, ptr, memoryBase);
+        as_vinsgr2vr_d(output.fpu().toV(), scratch, 0);
+      } else {
+        as_fldx_d(output.fpu(), ptr, memoryBase);
+      }
+      break;
+    case Scalar::Simd128:
+      as_vldx(output.fpu().toV(), ptr, memoryBase);
       break;
     default:
       MOZ_CRASH("unexpected array type");
@@ -2296,10 +2787,20 @@ void MacroAssemblerLOONG64::wasmLoadImpl(const wasm::MemoryAccessDesc& access,
   asMasm().appendAndVerify(
       access, wasm::TrapMachineInsnForLoad(byteSize(access.type())), fcr);
   asMasm().memoryBarrierAfter(access.sync());
+  return fcr;
 }
 
-void MacroAssemblerLOONG64::wasmLoadImpl(const wasm::MemoryAccessDesc& access,
-                                         Address address, AnyRegister output) {
+FaultingCodeRange MacroAssemblerLOONG64::wasmLoadImpl(
+    const wasm::MemoryAccessDesc& access, Address address, AnyRegister output) {
+  MOZ_ASSERT_IF(
+      access.isZeroExtendSimd128Load(),
+      access.type() == Scalar::Float32 || access.type() == Scalar::Float64);
+  MOZ_ASSERT_IF(
+      access.isSplatSimd128Load(),
+      access.type() == Scalar::Uint8 || access.type() == Scalar::Uint16 ||
+          access.type() == Scalar::Float32 || access.type() == Scalar::Float64);
+  MOZ_ASSERT_IF(access.isWidenSimd128Load(), access.type() == Scalar::Float64);
+
   access.assertOffsetInGuardPages();
   asMasm().memoryBarrierBefore(access.sync());
 
@@ -2309,13 +2810,45 @@ void MacroAssemblerLOONG64::wasmLoadImpl(const wasm::MemoryAccessDesc& access,
       fcr = ma_load(output.gpr(), address, SizeByte, SignExtend);
       break;
     case Scalar::Uint8:
-      fcr = ma_load(output.gpr(), address, SizeByte, ZeroExtend);
+      if (access.isSplatSimd128Load()) {
+        UseScratchRegisterScope temps(asMasm());
+        Register base;
+        int32_t offset;
+        if (auto result = EncodeVldreplImmediate<0>(address.offset)) {
+          base = address.base;
+          offset = *result;
+        } else {
+          base = temps.Acquire();
+          asMasm().computeEffectiveAddress(address, base);
+          offset = 0;
+        }
+        fcr = FaultingCodeRange(currentOffset());
+        as_vldrepl_b(output.fpu().toV(), base, static_cast<uint32_t>(offset));
+      } else {
+        fcr = ma_load(output.gpr(), address, SizeByte, ZeroExtend);
+      }
       break;
     case Scalar::Int16:
       fcr = ma_load(output.gpr(), address, SizeHalfWord, SignExtend);
       break;
     case Scalar::Uint16:
-      fcr = ma_load(output.gpr(), address, SizeHalfWord, ZeroExtend);
+      if (access.isSplatSimd128Load()) {
+        UseScratchRegisterScope temps(asMasm());
+        Register base;
+        int32_t offset;
+        if (auto result = EncodeVldreplImmediate<1>(address.offset)) {
+          base = address.base;
+          offset = *result;
+        } else {
+          base = temps.Acquire();
+          asMasm().computeEffectiveAddress(address, base);
+          offset = 0;
+        }
+        fcr = FaultingCodeRange(currentOffset());
+        as_vldrepl_h(output.fpu().toV(), base, static_cast<uint32_t>(offset));
+      } else {
+        fcr = ma_load(output.gpr(), address, SizeHalfWord, ZeroExtend);
+      }
       break;
     case Scalar::Int32:
       fcr = ma_load(output.gpr(), address, SizeWord, SignExtend);
@@ -2327,10 +2860,81 @@ void MacroAssemblerLOONG64::wasmLoadImpl(const wasm::MemoryAccessDesc& access,
       fcr = ma_load(output.gpr(), address, SizeDouble);
       break;
     case Scalar::Float64:
-      fcr = ma_fld_d(output.fpu(), address);
+      if (access.isSplatSimd128Load()) {
+        UseScratchRegisterScope temps(asMasm());
+        Register base;
+        int32_t offset;
+        if (auto result = EncodeVldreplImmediate<3>(address.offset)) {
+          base = address.base;
+          offset = *result;
+        } else {
+          base = temps.Acquire();
+          asMasm().computeEffectiveAddress(address, base);
+          offset = 0;
+        }
+        fcr = FaultingCodeRange(currentOffset());
+        as_vldrepl_d(output.fpu().toV(), base, static_cast<uint32_t>(offset));
+      } else if (access.isWidenSimd128Load()) {
+        fcr = ma_fld_d(output.fpu(), address);
+        switch (access.widenSimdOp()) {
+          case wasm::SimdOp::V128Load8x8S:
+            asMasm().widenLowInt8x16(output.fpu(), output.fpu());
+            break;
+          case wasm::SimdOp::V128Load8x8U:
+            asMasm().unsignedWidenLowInt8x16(output.fpu(), output.fpu());
+            break;
+          case wasm::SimdOp::V128Load16x4S:
+            asMasm().widenLowInt16x8(output.fpu(), output.fpu());
+            break;
+          case wasm::SimdOp::V128Load16x4U:
+            asMasm().unsignedWidenLowInt16x8(output.fpu(), output.fpu());
+            break;
+          case wasm::SimdOp::V128Load32x2S:
+            asMasm().widenLowInt32x4(output.fpu(), output.fpu());
+            break;
+          case wasm::SimdOp::V128Load32x2U:
+            asMasm().unsignedWidenLowInt32x4(output.fpu(), output.fpu());
+            break;
+          default:
+            MOZ_CRASH("unexpected widening op");
+        }
+      } else if (access.isZeroExtendSimd128Load()) {
+        UseScratchRegisterScope temps(asMasm());
+        const Register scratch = temps.Acquire();
+        as_vldi(output.fpu().toV(), 0);
+        fcr = ma_load(scratch, address, SizeDouble, ZeroExtend);
+        as_vinsgr2vr_d(output.fpu().toV(), scratch, 0);
+      } else {
+        fcr = ma_fld_d(output.fpu(), address);
+      }
       break;
     case Scalar::Float32:
-      fcr = ma_fld_s(output.fpu(), address);
+      if (access.isSplatSimd128Load()) {
+        UseScratchRegisterScope temps(asMasm());
+        Register base;
+        int32_t offset;
+        if (auto result = EncodeVldreplImmediate<2>(address.offset)) {
+          base = address.base;
+          offset = *result;
+        } else {
+          base = temps.Acquire();
+          asMasm().computeEffectiveAddress(address, base);
+          offset = 0;
+        }
+        fcr = FaultingCodeRange(currentOffset());
+        as_vldrepl_w(output.fpu().toV(), base, static_cast<uint32_t>(offset));
+      } else if (access.isZeroExtendSimd128Load()) {
+        UseScratchRegisterScope temps(asMasm());
+        const Register scratch = temps.Acquire();
+        as_vldi(output.fpu().toV(), 0);
+        fcr = ma_load(scratch, address, SizeWord, ZeroExtend);
+        as_vinsgr2vr_w(output.fpu().toV(), scratch, 0);
+      } else {
+        fcr = ma_fld_s(output.fpu(), address);
+      }
+      break;
+    case Scalar::Simd128:
+      fcr = ma_vld(output.fpu().toV(), address);
       break;
     default:
       MOZ_CRASH("unexpected array type");
@@ -2339,6 +2943,7 @@ void MacroAssemblerLOONG64::wasmLoadImpl(const wasm::MemoryAccessDesc& access,
   asMasm().appendAndVerify(
       access, wasm::TrapMachineInsnForLoad(byteSize(access.type())), fcr);
   asMasm().memoryBarrierAfter(access.sync());
+  return fcr;
 }
 
 void MacroAssemblerLOONG64::wasmLoadAbsoluteImpl(
@@ -2355,10 +2960,9 @@ void MacroAssemblerLOONG64::wasmLoadAbsoluteImpl(
   wasmLoadImpl(access, memoryBase, scratch, output);
 }
 
-void MacroAssemblerLOONG64::wasmStoreImpl(const wasm::MemoryAccessDesc& access,
-                                          AnyRegister value,
-                                          Register memoryBase, Register ptr,
-                                          Register ptrScratch, Register tmp) {
+FaultingCodeRange MacroAssemblerLOONG64::wasmStoreImpl(
+    const wasm::MemoryAccessDesc& access, AnyRegister value,
+    Register memoryBase, Register ptr, Register ptrScratch, Register tmp) {
   uint32_t offset = access.offset32();
   MOZ_ASSERT_IF(offset, ptrScratch != InvalidReg);
 
@@ -2367,12 +2971,12 @@ void MacroAssemblerLOONG64::wasmStoreImpl(const wasm::MemoryAccessDesc& access,
     ptr = ptrScratch;
   }
 
-  wasmStoreImpl(access, value, memoryBase, ptr);
+  return wasmStoreImpl(access, value, memoryBase, ptr);
 }
 
-void MacroAssemblerLOONG64::wasmStoreImpl(const wasm::MemoryAccessDesc& access,
-                                          AnyRegister value,
-                                          Register memoryBase, Register ptr) {
+FaultingCodeRange MacroAssemblerLOONG64::wasmStoreImpl(
+    const wasm::MemoryAccessDesc& access, AnyRegister value,
+    Register memoryBase, Register ptr) {
   access.assertOffsetInGuardPages();
   asMasm().memoryBarrierBefore(access.sync());
 
@@ -2380,24 +2984,27 @@ void MacroAssemblerLOONG64::wasmStoreImpl(const wasm::MemoryAccessDesc& access,
   switch (access.type()) {
     case Scalar::Int8:
     case Scalar::Uint8:
-      as_stx_b(value.gpr(), memoryBase, ptr);
+      as_stx_b(value.gpr(), ptr, memoryBase);
       break;
     case Scalar::Int16:
     case Scalar::Uint16:
-      as_stx_h(value.gpr(), memoryBase, ptr);
+      as_stx_h(value.gpr(), ptr, memoryBase);
       break;
     case Scalar::Int32:
     case Scalar::Uint32:
-      as_stx_w(value.gpr(), memoryBase, ptr);
+      as_stx_w(value.gpr(), ptr, memoryBase);
       break;
     case Scalar::Int64:
-      as_stx_d(value.gpr(), memoryBase, ptr);
+      as_stx_d(value.gpr(), ptr, memoryBase);
       break;
     case Scalar::Float64:
-      as_fstx_d(value.fpu(), memoryBase, ptr);
+      as_fstx_d(value.fpu(), ptr, memoryBase);
       break;
     case Scalar::Float32:
-      as_fstx_s(value.fpu(), memoryBase, ptr);
+      as_fstx_s(value.fpu(), ptr, memoryBase);
+      break;
+    case Scalar::Simd128:
+      as_vstx(value.fpu().toV(), ptr, memoryBase);
       break;
     default:
       MOZ_CRASH("unexpected array type");
@@ -2406,10 +3013,11 @@ void MacroAssemblerLOONG64::wasmStoreImpl(const wasm::MemoryAccessDesc& access,
   asMasm().appendAndVerify(
       access, wasm::TrapMachineInsnForStore(byteSize(access.type())), fcr);
   asMasm().memoryBarrierAfter(access.sync());
+  return fcr;
 }
 
-void MacroAssemblerLOONG64::wasmStoreImpl(const wasm::MemoryAccessDesc& access,
-                                          AnyRegister value, Address address) {
+FaultingCodeRange MacroAssemblerLOONG64::wasmStoreImpl(
+    const wasm::MemoryAccessDesc& access, AnyRegister value, Address address) {
   access.assertOffsetInGuardPages();
   asMasm().memoryBarrierBefore(access.sync());
 
@@ -2436,6 +3044,9 @@ void MacroAssemblerLOONG64::wasmStoreImpl(const wasm::MemoryAccessDesc& access,
     case Scalar::Float32:
       fcr = ma_fst_s(value.fpu(), address);
       break;
+    case Scalar::Simd128:
+      fcr = ma_vst(value.fpu().toV(), address);
+      break;
     default:
       MOZ_CRASH("unexpected array type");
   }
@@ -2443,6 +3054,7 @@ void MacroAssemblerLOONG64::wasmStoreImpl(const wasm::MemoryAccessDesc& access,
   asMasm().appendAndVerify(
       access, wasm::TrapMachineInsnForStore(byteSize(access.type())), fcr);
   asMasm().memoryBarrierAfter(access.sync());
+  return fcr;
 }
 
 void MacroAssemblerLOONG64::wasmStoreAbsoluteImpl(
@@ -2459,7 +3071,67 @@ void MacroAssemblerLOONG64::wasmStoreAbsoluteImpl(
   wasmStoreImpl(access, value, memoryBase, scratch);
 }
 
-void MacroAssemblerLOONG64Compat::wasmLoadI64Impl(
+FaultingCodeRange MacroAssemblerLOONG64::wasmStoreLane(
+    const wasm::MemoryAccessDesc& access, FloatRegister src,
+    Register memoryBase, Register ptr, uint32_t laneSize, uint32_t laneIndex) {
+  access.assertOffsetInGuardPages();
+  asMasm().memoryBarrierBefore(access.sync());
+
+  UseScratchRegisterScope temps(asMasm());
+  Register scratch = temps.Acquire();
+
+  as_add_d(scratch, memoryBase, ptr);
+
+  std::optional<int32_t> offset;
+  switch (laneSize) {
+    case 1:
+      offset = EncodeVstelmOffsetImmediate<0>(access.offset32());
+      break;
+    case 2:
+      offset = EncodeVstelmOffsetImmediate<1>(access.offset32());
+      break;
+    case 4:
+      offset = EncodeVstelmOffsetImmediate<2>(access.offset32());
+      break;
+    case 8:
+      offset = EncodeVstelmOffsetImmediate<3>(access.offset32());
+      break;
+    default:
+      MOZ_CRASH("unsupported lane size");
+  }
+
+  int32_t si8;
+  if (offset) {
+    si8 = *offset;
+  } else {
+    ma_add_d(scratch, scratch, ImmWord(access.offset32()));
+    si8 = 0;
+  }
+
+  FaultingCodeRange fcr(currentOffset());
+  switch (laneSize) {
+    case 1:
+      as_vstelm_b(src.toV(), scratch, si8, laneIndex);
+      break;
+    case 2:
+      as_vstelm_h(src.toV(), scratch, si8, laneIndex);
+      break;
+    case 4:
+      as_vstelm_w(src.toV(), scratch, si8, laneIndex);
+      break;
+    case 8:
+      as_vstelm_d(src.toV(), scratch, si8, laneIndex);
+      break;
+    default:
+      MOZ_CRASH("unsupported lane size");
+  }
+  asMasm().appendAndVerify(
+      access, wasm::TrapMachineInsnForStore(byteSize(access.type())), fcr);
+  asMasm().memoryBarrierAfter(access.sync());
+  return fcr;
+}
+
+FaultingCodeRange MacroAssemblerLOONG64Compat::wasmLoadI64Impl(
     const wasm::MemoryAccessDesc& access, Register memoryBase, Register ptr,
     Register ptrScratch, Register64 output, Register tmp) {
   uint32_t offset = access.offset32();
@@ -2470,11 +3142,11 @@ void MacroAssemblerLOONG64Compat::wasmLoadI64Impl(
     ptr = ptrScratch;
   }
 
-  MacroAssemblerLOONG64::wasmLoadImpl(access, memoryBase, ptr,
-                                      AnyRegister(output.reg));
+  return MacroAssemblerLOONG64::wasmLoadImpl(access, memoryBase, ptr,
+                                             AnyRegister(output.reg));
 }
 
-void MacroAssemblerLOONG64Compat::wasmStoreI64Impl(
+FaultingCodeRange MacroAssemblerLOONG64Compat::wasmStoreI64Impl(
     const wasm::MemoryAccessDesc& access, Register64 value, Register memoryBase,
     Register ptr, Register ptrScratch, Register tmp) {
   uint32_t offset = access.offset32();
@@ -2485,13 +3157,15 @@ void MacroAssemblerLOONG64Compat::wasmStoreI64Impl(
     ptr = ptrScratch;
   }
 
-  MacroAssemblerLOONG64::wasmStoreImpl(access, AnyRegister(value.reg),
-                                       memoryBase, ptr);
+  return MacroAssemblerLOONG64::wasmStoreImpl(access, AnyRegister(value.reg),
+                                              memoryBase, ptr);
 }
 
 void MacroAssemblerLOONG64::outOfLineWasmTruncateToInt32Check(
     FloatRegister input, Register output, MIRType fromType, TruncFlags flags,
-    Label* rejoin, const wasm::TrapSiteDesc& trapSiteDesc) {
+    Label* rejoin, const wasm::TrapSiteDesc& trapSiteDesc,
+    wasm::StackMap* stackMapForTraps,
+    wasm::StackMapRegistry* stackMapRegistry) {
   bool isUnsigned = flags & TRUNC_UNSIGNED;
   bool isSaturating = flags & TRUNC_SATURATING;
 
@@ -2553,14 +3227,24 @@ void MacroAssemblerLOONG64::outOfLineWasmTruncateToInt32Check(
     asMasm().branchFloat(Assembler::DoubleUnordered, input, input, &inputIsNaN);
   }
 
-  asMasm().wasmTrap(wasm::Trap::IntegerOverflow, trapSiteDesc);
+  FaultingCodeRange fcr1 =
+      asMasm().wasmTrap(wasm::Trap::IntegerOverflow, trapSiteDesc);
+  if (stackMapRegistry) {
+    propagateOOM(stackMapRegistry->addMap(stackMapForTraps, fcr1));
+  }
   asMasm().bind(&inputIsNaN);
-  asMasm().wasmTrap(wasm::Trap::InvalidConversionToInteger, trapSiteDesc);
+  FaultingCodeRange fcr2 =
+      asMasm().wasmTrap(wasm::Trap::InvalidConversionToInteger, trapSiteDesc);
+  if (stackMapRegistry) {
+    propagateOOM(stackMapRegistry->addMap(stackMapForTraps, fcr2));
+  }
 }
 
 void MacroAssemblerLOONG64::outOfLineWasmTruncateToInt64Check(
     FloatRegister input, Register64 output_, MIRType fromType, TruncFlags flags,
-    Label* rejoin, const wasm::TrapSiteDesc& trapSiteDesc) {
+    Label* rejoin, const wasm::TrapSiteDesc& trapSiteDesc,
+    wasm::StackMap* stackMapForTraps,
+    wasm::StackMapRegistry* stackMapRegistry) {
   bool isUnsigned = flags & TRUNC_UNSIGNED;
   bool isSaturating = flags & TRUNC_SATURATING;
 
@@ -2624,9 +3308,17 @@ void MacroAssemblerLOONG64::outOfLineWasmTruncateToInt64Check(
     asMasm().branchFloat(Assembler::DoubleUnordered, input, input, &inputIsNaN);
   }
 
-  asMasm().wasmTrap(wasm::Trap::IntegerOverflow, trapSiteDesc);
+  FaultingCodeRange fcr1 =
+      asMasm().wasmTrap(wasm::Trap::IntegerOverflow, trapSiteDesc);
+  if (stackMapRegistry) {
+    propagateOOM(stackMapRegistry->addMap(stackMapForTraps, fcr1));
+  }
   asMasm().bind(&inputIsNaN);
-  asMasm().wasmTrap(wasm::Trap::InvalidConversionToInteger, trapSiteDesc);
+  FaultingCodeRange fcr2 =
+      asMasm().wasmTrap(wasm::Trap::InvalidConversionToInteger, trapSiteDesc);
+  if (stackMapRegistry) {
+    propagateOOM(stackMapRegistry->addMap(stackMapForTraps, fcr2));
+  }
 }
 
 void MacroAssemblerLOONG64Compat::profilerEnterFrame(Register framePtr,
@@ -2657,6 +3349,14 @@ void MacroAssembler::subFromStackPtr(Imm32 imm32) {
   }
 }
 
+#ifdef ENABLE_JIT_SIMD
+bool MacroAssembler::MustMaskShiftCountSimd128(wasm::SimdOp, int32_t*) {
+  // LSX vector shifts already mask the shift count by the lane width.
+  // <https://jia.je/unofficial-loongarch-intrinsics-guide/lsx/shift/>
+  return false;
+}
+#endif
+
 //{{{ check_macroassembler_style
 // ===============================================================
 // MacroAssembler high-level usage.
@@ -2681,14 +3381,16 @@ void MacroAssembler::PushRegsInMask(LiveRegisterSet set) {
     storePtr(*iter, Address(StackPointer, diff));
   }
 
-#ifdef ENABLE_WASM_SIMD
-#  error "Needs more careful logic if SIMD is enabled"
-#endif
-
   for (FloatRegisterBackwardIterator iter(set.fpus().reduceSetForPush());
        iter.more(); ++iter) {
-    diff -= sizeof(double);
-    storeDouble(*iter, Address(StackPointer, diff));
+    FloatRegister reg = *iter;
+    diff -= reg.size();
+    if (reg.isSimd128()) {
+      storeUnalignedSimd128(reg, Address(StackPointer, diff));
+    } else {
+      MOZ_ASSERT(reg.isDouble());
+      storeDouble(reg, Address(StackPointer, diff));
+    }
   }
   MOZ_ASSERT(diff == 0);
 }
@@ -2706,15 +3408,28 @@ void MacroAssembler::PopRegsInMaskIgnore(LiveRegisterSet set,
     }
   }
 
-#ifdef ENABLE_WASM_SIMD
-#  error "Needs more careful logic if SIMD is enabled"
-#endif
-
   for (FloatRegisterBackwardIterator iter(set.fpus().reduceSetForPush());
        iter.more(); ++iter) {
-    diff -= sizeof(double);
-    if (!ignore.has(*iter)) {
-      loadDouble(Address(StackPointer, diff), *iter);
+    FloatRegister reg = *iter;
+    diff -= reg.size();
+
+    // Any view of a register in the ignore set suppresses the restore.
+    bool ignored = false;
+    for (uint32_t i = 0; i < reg.numAliased(); i++) {
+      if (ignore.has(reg.aliased(i))) {
+        ignored = true;
+        break;
+      }
+    }
+    if (ignored) {
+      continue;
+    }
+
+    if (reg.isSimd128()) {
+      loadUnalignedSimd128(Address(StackPointer, diff), reg);
+    } else {
+      MOZ_ASSERT(reg.isDouble());
+      loadDouble(Address(StackPointer, diff), reg);
     }
   }
   MOZ_ASSERT(diff == 0);
@@ -2737,21 +3452,16 @@ void MacroAssembler::storeRegsInMask(LiveRegisterSet set, Address dest,
   }
   MOZ_ASSERT(diffG == 0);
 
-#ifdef ENABLE_WASM_SIMD
-#  error "Needs more careful logic if SIMD is enabled"
-#endif
-
   for (FloatRegisterBackwardIterator iter(fpuSet); iter.more(); ++iter) {
     FloatRegister reg = *iter;
     diffF -= reg.size();
     numFpu -= 1;
     dest.offset -= reg.size();
-    if (reg.isDouble()) {
-      storeDouble(reg, dest);
-    } else if (reg.isSingle()) {
-      storeFloat32(reg, dest);
+    if (reg.isSimd128()) {
+      storeUnalignedSimd128(reg, dest);
     } else {
-      MOZ_CRASH("Unknown register type.");
+      MOZ_ASSERT(reg.isDouble());
+      storeDouble(reg, dest);
     }
   }
   MOZ_ASSERT(numFpu == 0);
@@ -2839,23 +3549,29 @@ CodeOffset MacroAssembler::call(Label* label) {
 }
 
 CodeOffset MacroAssembler::callWithPatch() {
-  as_bl(JOffImm26(1 * sizeof(uint32_t)));
+  UseScratchRegisterScope temps(asMasm());
+  const Register scratch = temps.Acquire();
+  ma_call36(0, scratch);
   return CodeOffset(currentOffset());
 }
 
 void MacroAssembler::patchCall(uint32_t callerOffset, uint32_t calleeOffset) {
-  BufferOffset call(callerOffset - 1 * sizeof(uint32_t));
+  BufferOffset pcaddu18iOffset(callerOffset - 2 * sizeof(uint32_t));
+  BufferOffset jirlOffset(callerOffset - 1 * sizeof(uint32_t));
 
-  JOffImm26 offset = BufferOffset(calleeOffset).diffB<JOffImm26>(call);
-  if (!offset.isInvalid()) {
-    InstJump* bal = (InstJump*)editSrc(call);
-    bal->setJOffImm26(offset);
-  } else {
-    uint32_t u32Offset = callerOffset - 4 * sizeof(uint32_t);
-    uint32_t* u32 =
-        reinterpret_cast<uint32_t*>(editSrc(BufferOffset(u32Offset)));
-    *u32 = calleeOffset - callerOffset;
-  }
+  InstImm* const inst0 = reinterpret_cast<InstImm*>(editSrc(pcaddu18iOffset));
+  InstImm* const inst1 = reinterpret_cast<InstImm*>(editSrc(jirlOffset));
+  MOZ_ASSERT(inst0->extractBitField(31, 25) == ((uint32_t)op_pcaddu18i) >> 25);
+  MOZ_ASSERT(inst1->extractBitField(31, 26) == ((uint32_t)op_jirl) >> 26);
+
+  const Register scratch = Register::FromCode(inst0->extractRD());
+  MOZ_ASSERT(scratch == Register::FromCode(inst1->extractRJ()));
+
+  const int64_t offset = static_cast<int64_t>(calleeOffset) -
+                         static_cast<int64_t>(pcaddu18iOffset.getOffset());
+  const auto [si20, offs16] = SplitJump36Offset(offset);
+  *inst0 = InstImm(op_pcaddu18i, si20, scratch, false);
+  *inst1 = InstImm(op_jirl, BOffImm16(offs16), scratch, ra);
 }
 
 CodeOffset MacroAssembler::farJumpWithPatch() {
@@ -2908,10 +3624,10 @@ void MacroAssembler::call(ImmPtr target) {
 void MacroAssembler::call(JitCode* c) {
   UseScratchRegisterScope temps(asMasm());
   Register scratch = temps.Acquire();
-  BufferOffset bo = m_buffer.nextOffset();
-  addPendingJump(bo, ImmPtr(c->raw()), RelocationKind::JITCODE);
-  ma_liPatchable(scratch, ImmPtr(c->raw()));
-  callJitNoProfiler(scratch);
+  addPendingJump(m_buffer.nextOffset(), ImmPtr(c->raw()),
+                 RelocationKind::JITCODE);
+  as_pcaddu18i(scratch, 0);
+  as_jirl(ra, scratch, BOffImm16(0));
 }
 
 CodeOffset MacroAssembler::nopPatchableToCall() {
@@ -2960,7 +3676,7 @@ void MacroAssembler::setupUnalignedABICall(Register scratch) {
   setupNativeABICall();
   dynamicAlignment_ = true;
 
-  as_or(scratch, StackPointer, zero);
+  ma_move(scratch, StackPointer);
 
   // Force sp to be aligned
   asMasm().subPtr(Imm32(sizeof(uintptr_t)), StackPointer);
@@ -3102,8 +3818,8 @@ void MacroAssembler::branchPtrInNurseryChunk(Condition cond, Register ptr,
   MOZ_ASSERT(temp != InvalidReg);
 
   ma_and(temp, ptr, Imm32(int32_t(~gc::ChunkMask)));
-  branchPtr(InvertCondition(cond), Address(temp, gc::ChunkStoreBufferOffset),
-            zero, label);
+  loadPtr(Address(temp, gc::ChunkStoreBufferOffset), temp);
+  branchPtr(InvertCondition(cond), temp, Imm32(0), label);
 }
 
 void MacroAssembler::branchValueIsNurseryCell(Condition cond,
@@ -3130,7 +3846,7 @@ void MacroAssembler::branchValueIsNurseryCellImpl(Condition cond,
 
   getGCThingValueChunk(value, temp);
   loadPtr(Address(temp, gc::ChunkStoreBufferOffset), temp);
-  branchPtr(InvertCondition(cond), temp, zero, label);
+  branchPtr(InvertCondition(cond), temp, Imm32(0), label);
 
   bind(&done);
 }
@@ -3357,7 +4073,7 @@ void MacroAssembler::wasmTruncateDoubleToUInt64(
   as_sltui(scratch, output, 1);
   as_or(scratch2, scratch2, scratch);
 
-  ma_b(scratch2, zero, oolEntry, Assembler::NotEqual);
+  ma_b(scratch2, scratch2, oolEntry, Assembler::NonZero);
 
   bind(&done);
 
@@ -3401,7 +4117,7 @@ void MacroAssembler::wasmTruncateFloat32ToUInt64(
   as_sltui(scratch, output, 1);
   as_or(scratch2, scratch2, scratch);
 
-  ma_b(scratch2, zero, oolEntry, Assembler::NotEqual);
+  ma_b(scratch2, scratch2, oolEntry, Assembler::NonZero);
 
   bind(&done);
 
@@ -3422,7 +4138,7 @@ void MacroAssembler::wasmTruncateDoubleToInt64(
   as_movfcsr2gr(scratch);
   moveFromDouble(fpscratch, output.reg);
   as_bstrpick_d(scratch, scratch, Assembler::CauseV, Assembler::CauseV);
-  ma_b(scratch, zero, oolEntry, Assembler::NotEqual);
+  ma_b(scratch, scratch, oolEntry, Assembler::NonZero);
 
   if (isSaturating) {
     bind(oolRejoin);
@@ -3441,7 +4157,7 @@ void MacroAssembler::wasmTruncateFloat32ToInt64(
   as_movfcsr2gr(scratch);
   moveFromDouble(fpscratch, output.reg);
   as_bstrpick_d(scratch, scratch, Assembler::CauseV, Assembler::CauseV);
-  ma_b(scratch, zero, oolEntry, Assembler::NotEqual);
+  ma_b(scratch, scratch, oolEntry, Assembler::NonZero);
 
   if (isSaturating) {
     bind(oolRejoin);
@@ -3450,54 +4166,69 @@ void MacroAssembler::wasmTruncateFloat32ToInt64(
 
 void MacroAssembler::oolWasmTruncateCheckF32ToI32(
     FloatRegister input, Register output, TruncFlags flags,
-    const wasm::TrapSiteDesc& trapSiteDesc, Label* rejoin) {
+    const wasm::TrapSiteDesc& trapSiteDesc, Label* rejoin,
+    wasm::StackMap* stackMapForTraps,
+    wasm::StackMapRegistry* stackMapRegistry) {
   outOfLineWasmTruncateToInt32Check(input, output, MIRType::Float32, flags,
-                                    rejoin, trapSiteDesc);
+                                    rejoin, trapSiteDesc, stackMapForTraps,
+                                    stackMapRegistry);
 }
 
 void MacroAssembler::oolWasmTruncateCheckF64ToI32(
     FloatRegister input, Register output, TruncFlags flags,
-    const wasm::TrapSiteDesc& trapSiteDesc, Label* rejoin) {
+    const wasm::TrapSiteDesc& trapSiteDesc, Label* rejoin,
+    wasm::StackMap* stackMapForTraps,
+    wasm::StackMapRegistry* stackMapRegistry) {
   outOfLineWasmTruncateToInt32Check(input, output, MIRType::Double, flags,
-                                    rejoin, trapSiteDesc);
+                                    rejoin, trapSiteDesc, stackMapForTraps,
+                                    stackMapRegistry);
 }
 
 void MacroAssembler::oolWasmTruncateCheckF32ToI64(
     FloatRegister input, Register64 output, TruncFlags flags,
-    const wasm::TrapSiteDesc& trapSiteDesc, Label* rejoin) {
+    const wasm::TrapSiteDesc& trapSiteDesc, Label* rejoin,
+    wasm::StackMap* stackMapForTraps,
+    wasm::StackMapRegistry* stackMapRegistry) {
   outOfLineWasmTruncateToInt64Check(input, output, MIRType::Float32, flags,
-                                    rejoin, trapSiteDesc);
+                                    rejoin, trapSiteDesc, stackMapForTraps,
+                                    stackMapRegistry);
 }
 
 void MacroAssembler::oolWasmTruncateCheckF64ToI64(
     FloatRegister input, Register64 output, TruncFlags flags,
-    const wasm::TrapSiteDesc& trapSiteDesc, Label* rejoin) {
+    const wasm::TrapSiteDesc& trapSiteDesc, Label* rejoin,
+    wasm::StackMap* stackMapForTraps,
+    wasm::StackMapRegistry* stackMapRegistry) {
   outOfLineWasmTruncateToInt64Check(input, output, MIRType::Double, flags,
-                                    rejoin, trapSiteDesc);
+                                    rejoin, trapSiteDesc, stackMapForTraps,
+                                    stackMapRegistry);
 }
 
-void MacroAssembler::wasmLoad(const wasm::MemoryAccessDesc& access,
-                              Register memoryBase, Register ptr,
-                              Register ptrScratch, AnyRegister output) {
-  wasmLoadImpl(access, memoryBase, ptr, ptrScratch, output, InvalidReg);
+FaultingCodeRange MacroAssembler::wasmLoad(const wasm::MemoryAccessDesc& access,
+                                           Register memoryBase, Register ptr,
+                                           Register ptrScratch,
+                                           AnyRegister output) {
+  return wasmLoadImpl(access, memoryBase, ptr, ptrScratch, output, InvalidReg);
 }
 
-void MacroAssembler::wasmLoadI64(const wasm::MemoryAccessDesc& access,
-                                 Register memoryBase, Register ptr,
-                                 Register ptrScratch, Register64 output) {
-  wasmLoadI64Impl(access, memoryBase, ptr, ptrScratch, output, InvalidReg);
+FaultingCodeRange MacroAssembler::wasmLoadI64(
+    const wasm::MemoryAccessDesc& access, Register memoryBase, Register ptr,
+    Register ptrScratch, Register64 output) {
+  return wasmLoadI64Impl(access, memoryBase, ptr, ptrScratch, output,
+                         InvalidReg);
 }
 
-void MacroAssembler::wasmStore(const wasm::MemoryAccessDesc& access,
-                               AnyRegister value, Register memoryBase,
-                               Register ptr, Register ptrScratch) {
-  wasmStoreImpl(access, value, memoryBase, ptr, ptrScratch, InvalidReg);
+FaultingCodeRange MacroAssembler::wasmStore(
+    const wasm::MemoryAccessDesc& access, AnyRegister value,
+    Register memoryBase, Register ptr, Register ptrScratch) {
+  return wasmStoreImpl(access, value, memoryBase, ptr, ptrScratch, InvalidReg);
 }
 
-void MacroAssembler::wasmStoreI64(const wasm::MemoryAccessDesc& access,
-                                  Register64 value, Register memoryBase,
-                                  Register ptr, Register ptrScratch) {
-  wasmStoreI64Impl(access, value, memoryBase, ptr, ptrScratch, InvalidReg);
+FaultingCodeRange MacroAssembler::wasmStoreI64(
+    const wasm::MemoryAccessDesc& access, Register64 value, Register memoryBase,
+    Register ptr, Register ptrScratch) {
+  return wasmStoreI64Impl(access, value, memoryBase, ptr, ptrScratch,
+                          InvalidReg);
 }
 
 void MacroAssembler::enterFakeExitFrameForWasm(Register cxreg, Register scratch,
@@ -3618,12 +4349,11 @@ static BaseIndex ToAtomicAddress(MacroAssembler& masm, const BaseIndex& mem,
 }
 
 template <typename T>
-static void CompareExchange(MacroAssembler& masm,
-                            const wasm::MemoryAccessDesc* access,
-                            Scalar::Type type, Synchronization sync,
-                            const T& mem, Register oldval, Register newval,
-                            Register valueTemp, Register offsetTemp,
-                            Register maskTemp, Register output) {
+static FaultingCodeRange CompareExchange(
+    MacroAssembler& masm, const wasm::MemoryAccessDesc* access,
+    Scalar::Type type, Synchronization sync, const T& mem, Register oldval,
+    Register newval, Register valueTemp, Register offsetTemp, Register maskTemp,
+    Register output) {
   UseScratchRegisterScope temps(masm);
   bool signExtend = Scalar::isSignedIntType(type);
   unsigned nbytes = Scalar::byteSize(type);
@@ -3646,6 +4376,48 @@ static void CompareExchange(MacroAssembler& masm,
   Register scratch = temps.Acquire();
   masm.computeEffectiveAddress(mem, scratch);
 
+  if (LOONG64Flags::HasLamcasExtension()) {
+    MOZ_ASSERT(valueTemp == InvalidReg);
+    MOZ_ASSERT(offsetTemp == InvalidReg);
+    MOZ_ASSERT(maskTemp == InvalidReg);
+
+    // The expected value is passed via rd, which also receives the old value.
+    masm.ma_move(output, oldval);
+
+    FaultingCodeRange fcr(masm.currentOffset());
+    switch (nbytes) {
+      case 1:
+        masm.as_amcas_db_b(output, scratch, newval);
+        break;
+      case 2:
+        masm.as_amcas_db_h(output, scratch, newval);
+        break;
+      case 4:
+        masm.as_amcas_db_w(output, scratch, newval);
+        break;
+      default:
+        MOZ_CRASH();
+    }
+    if (access) {
+      masm.appendAndVerify(*access, wasm::TrapMachineInsn::Atomic, fcr);
+    }
+
+    // > Regardless of whether the comparison results are equal or not, the old
+    // > memory value is written to the general-purpose register rd after sign
+    // > expansion.
+    // https://loongson.github.io/LoongArch-Documentation/LoongArch-Vol1-EN.html#_amcas_db_bhwd
+    //
+    // Thus we only need to zero-extend it when needed.
+    if (!signExtend && nbytes < 4) {
+      if (nbytes == 1) {
+        masm.as_andi(output, output, 0xff);
+      } else {
+        masm.as_bstrpick_d(output, output, 15, 0);
+      }
+    }
+    return fcr;
+  }
+
   Register scratch2 = temps.Acquire();
 
   if (nbytes == 4) {
@@ -3659,14 +4431,14 @@ static void CompareExchange(MacroAssembler& masm,
     }
     masm.as_slli_w(scratch2, oldval, 0);
     masm.ma_b(output, scratch2, &end, Assembler::NotEqual, ShortJump);
-    masm.as_or(scratch2, newval, zero);
+    masm.ma_move(scratch2, newval);
     masm.as_sc_w(scratch2, scratch, 0);
     masm.ma_b(scratch2, Register(scratch2), &again, Assembler::Zero, ShortJump);
 
     masm.memoryBarrierAfter(sync);
     masm.bind(&end);
 
-    return;
+    return fcr;
   }
 
   masm.as_andi(offsetTemp, scratch, 3);
@@ -3723,18 +4495,32 @@ static void CompareExchange(MacroAssembler& masm,
   masm.memoryBarrierAfter(sync);
 
   masm.bind(&end);
+  return fcr;
 }
 
 template <typename T>
-static void CompareExchange64(MacroAssembler& masm,
-                              const wasm::MemoryAccessDesc* access,
-                              Synchronization sync, const T& mem,
-                              Register64 expect, Register64 replace,
-                              Register64 output) {
+static FaultingCodeRange CompareExchange64(MacroAssembler& masm,
+                                           const wasm::MemoryAccessDesc* access,
+                                           Synchronization sync, const T& mem,
+                                           Register64 expect,
+                                           Register64 replace,
+                                           Register64 output) {
   MOZ_ASSERT(expect != output && replace != output);
   UseScratchRegisterScope temps(masm);
   Register scratch = temps.Acquire();
   masm.computeEffectiveAddress(mem, scratch);
+
+  if (LOONG64Flags::HasLamcasExtension()) {
+    // The expected value is passed via rd, which also receives the old value.
+    masm.movePtr(expect.reg, output.reg);
+
+    FaultingCodeRange fcr(masm.currentOffset());
+    masm.as_amcas_db_d(output.reg, scratch, replace.reg);
+    if (access) {
+      masm.appendAndVerify(*access, wasm::TrapMachineInsn::Atomic, fcr);
+    }
+    return fcr;
+  }
 
   Register scratch2 = temps.Acquire();
 
@@ -3760,15 +4546,16 @@ static void CompareExchange64(MacroAssembler& masm,
   masm.memoryBarrierAfter(sync);
 
   masm.bind(&exit);
+  return fcr;
 }
 
 template <typename T>
-static void AtomicExchange(MacroAssembler& masm,
-                           const wasm::MemoryAccessDesc* access,
-                           Scalar::Type type, Synchronization sync,
-                           const T& mem, Register value, Register valueTemp,
-                           Register offsetTemp, Register maskTemp,
-                           Register output) {
+static FaultingCodeRange AtomicExchange(MacroAssembler& masm,
+                                        const wasm::MemoryAccessDesc* access,
+                                        Scalar::Type type, Synchronization sync,
+                                        const T& mem, Register value,
+                                        Register valueTemp, Register offsetTemp,
+                                        Register maskTemp, Register output) {
   UseScratchRegisterScope temps(masm);
   bool signExtend = Scalar::isSignedIntType(type);
   unsigned nbytes = Scalar::byteSize(type);
@@ -3800,7 +4587,7 @@ static void AtomicExchange(MacroAssembler& masm,
       if (!signExtend) {
         masm.as_andi(output, output, 0xff);
       }
-      return;
+      return fcr;
     }
     case 2: {
       if (!LOONG64Flags::HasLamBhExtension()) {
@@ -3820,7 +4607,7 @@ static void AtomicExchange(MacroAssembler& masm,
         // Ditto.
         masm.as_bstrpick_d(output, output, 15, 0);
       }
-      return;
+      return fcr;
     }
     case 4: {
       MOZ_ASSERT(valueTemp == InvalidReg);
@@ -3833,7 +4620,7 @@ static void AtomicExchange(MacroAssembler& masm,
         masm.appendAndVerify(*access, wasm::TrapMachineInsn::Atomic, fcr);
       }
 
-      return;
+      return fcr;
     }
     default:
       MOZ_CRASH();
@@ -3895,13 +4682,14 @@ static void AtomicExchange(MacroAssembler& masm,
   }
 
   masm.memoryBarrierAfter(sync);
+  return fcr;
 }
 
 template <typename T>
-static void AtomicExchange64(MacroAssembler& masm,
-                             const wasm::MemoryAccessDesc* access,
-                             Synchronization sync, const T& mem,
-                             Register64 value, Register64 output) {
+static FaultingCodeRange AtomicExchange64(MacroAssembler& masm,
+                                          const wasm::MemoryAccessDesc* access,
+                                          Synchronization sync, const T& mem,
+                                          Register64 value, Register64 output) {
   MOZ_ASSERT(value != output);
   UseScratchRegisterScope temps(masm);
 
@@ -3913,15 +4701,17 @@ static void AtomicExchange64(MacroAssembler& masm,
   if (access) {
     masm.appendAndVerify(*access, wasm::TrapMachineInsn::Atomic, fcr);
   }
+  return fcr;
 }
 
 template <typename T>
-static void AtomicFetchOp(MacroAssembler& masm,
-                          const wasm::MemoryAccessDesc* access,
-                          Scalar::Type type, Synchronization sync, AtomicOp op,
-                          const T& mem, Register value, Register valueTemp,
-                          Register offsetTemp, Register maskTemp,
-                          Register output) {
+static FaultingCodeRange AtomicFetchOp(MacroAssembler& masm,
+                                       const wasm::MemoryAccessDesc* access,
+                                       Scalar::Type type, Synchronization sync,
+                                       AtomicOp op, const T& mem,
+                                       Register value, Register valueTemp,
+                                       Register offsetTemp, Register maskTemp,
+                                       Register output) {
   UseScratchRegisterScope temps(masm);
   bool signExtend = Scalar::isSignedIntType(type);
   unsigned nbytes = Scalar::byteSize(type);
@@ -3962,7 +4752,7 @@ static void AtomicFetchOp(MacroAssembler& masm,
     if (access) {
       masm.appendAndVerify(*access, wasm::TrapMachineInsn::Atomic, fcr);
     }
-    return;
+    return fcr;
   }
 
   if (LOONG64Flags::HasLamBhExtension() &&
@@ -3978,8 +4768,8 @@ static void AtomicFetchOp(MacroAssembler& masm,
       masm.as_sub_w(operand, zero, value);
     }
 
+    FaultingCodeRange fcr(masm.currentOffset());
     if (nbytes == 1) {
-      FaultingCodeRange fcr(masm.currentOffset());
       masm.as_amadd_db_b(output, scratch, operand);
       if (access) {
         masm.appendAndVerify(*access, wasm::TrapMachineInsn::Atomic, fcr);
@@ -3990,7 +4780,6 @@ static void AtomicFetchOp(MacroAssembler& masm,
         masm.as_andi(output, output, 0xff);
       }
     } else {
-      FaultingCodeRange fcr(masm.currentOffset());
       masm.as_amadd_db_h(output, scratch, operand);
       if (access) {
         masm.appendAndVerify(*access, wasm::TrapMachineInsn::Atomic, fcr);
@@ -4001,7 +4790,7 @@ static void AtomicFetchOp(MacroAssembler& masm,
         masm.as_bstrpick_d(output, output, 15, 0);
       }
     }
-    return;
+    return fcr;
   }
 
   masm.as_andi(offsetTemp, scratch, 3);
@@ -4065,7 +4854,7 @@ static void AtomicFetchOp(MacroAssembler& masm,
         break;
     }
 
-    return;
+    return fcr;
   }
 
   // Without LAM_BH, byte and halfword addition and subtraction require an LL/SC
@@ -4132,13 +4921,15 @@ static void AtomicFetchOp(MacroAssembler& masm,
   }
 
   masm.memoryBarrierAfter(sync);
+  return fcr;
 }
 
 template <typename T>
-static void AtomicFetchOp64(MacroAssembler& masm,
-                            const wasm::MemoryAccessDesc* access,
-                            Synchronization sync, AtomicOp op, Register64 value,
-                            const T& mem, Register64 temp, Register64 output) {
+static FaultingCodeRange AtomicFetchOp64(MacroAssembler& masm,
+                                         const wasm::MemoryAccessDesc* access,
+                                         Synchronization sync, AtomicOp op,
+                                         Register64 value, const T& mem,
+                                         Register64 temp, Register64 output) {
   MOZ_ASSERT(value != output);
   MOZ_ASSERT(value != temp);
   UseScratchRegisterScope temps(masm);
@@ -4175,6 +4966,7 @@ static void AtomicFetchOp64(MacroAssembler& masm,
   if (access) {
     masm.appendAndVerify(*access, wasm::TrapMachineInsn::Atomic, fcr);
   }
+  return fcr;
 }
 
 void MacroAssembler::compareExchange(Scalar::Type type, Synchronization sync,
@@ -4207,52 +4999,47 @@ void MacroAssembler::compareExchange64(Synchronization sync,
   CompareExchange64(*this, nullptr, sync, mem, expect, replace, output);
 }
 
-void MacroAssembler::wasmCompareExchange(const wasm::MemoryAccessDesc& access,
-                                         const Address& mem, Register oldval,
-                                         Register newval, Register valueTemp,
-                                         Register offsetTemp, Register maskTemp,
-                                         Register output) {
-  CompareExchange(*this, &access, access.type(), access.sync(), mem, oldval,
-                  newval, valueTemp, offsetTemp, maskTemp, output);
+FaultingCodeRange MacroAssembler::wasmCompareExchange(
+    const wasm::MemoryAccessDesc& access, const Address& mem, Register oldval,
+    Register newval, Register valueTemp, Register offsetTemp, Register maskTemp,
+    Register output) {
+  return CompareExchange(*this, &access, access.type(), access.sync(), mem,
+                         oldval, newval, valueTemp, offsetTemp, maskTemp,
+                         output);
 }
 
-void MacroAssembler::wasmCompareExchange(const wasm::MemoryAccessDesc& access,
-                                         const BaseIndex& mem, Register oldval,
-                                         Register newval, Register valueTemp,
-                                         Register offsetTemp, Register maskTemp,
-                                         Register output) {
-  CompareExchange(*this, &access, access.type(), access.sync(), mem, oldval,
-                  newval, valueTemp, offsetTemp, maskTemp, output);
+FaultingCodeRange MacroAssembler::wasmCompareExchange(
+    const wasm::MemoryAccessDesc& access, const BaseIndex& mem, Register oldval,
+    Register newval, Register valueTemp, Register offsetTemp, Register maskTemp,
+    Register output) {
+  return CompareExchange(*this, &access, access.type(), access.sync(), mem,
+                         oldval, newval, valueTemp, offsetTemp, maskTemp,
+                         output);
 }
 
-void MacroAssembler::wasmCompareExchange(const wasm::MemoryAccessDesc& access,
-                                         const BaseIndex& mem, Register oldval,
-                                         Register newval, Register valueTemp,
-                                         Register offsetTemp, Register maskTemp,
-                                         Register output,
-                                         wasm::ZeroExtendIndex zeroExtend) {
+FaultingCodeRange MacroAssembler::wasmCompareExchange(
+    const wasm::MemoryAccessDesc& access, const BaseIndex& mem, Register oldval,
+    Register newval, Register valueTemp, Register offsetTemp, Register maskTemp,
+    Register output, wasm::ZeroExtendIndex zeroExtend) {
   UseScratchRegisterScope temps(*this);
   BaseIndex address = ToAtomicAddress(*this, mem, zeroExtend, temps);
-  CompareExchange(*this, &access, access.type(), access.sync(), address, oldval,
-                  newval, valueTemp, offsetTemp, maskTemp, output);
+  return CompareExchange(*this, &access, access.type(), access.sync(), address,
+                         oldval, newval, valueTemp, offsetTemp, maskTemp,
+                         output);
 }
 
-void MacroAssembler::wasmCompareExchange64(const wasm::MemoryAccessDesc& access,
-                                           const Address& mem,
-                                           Register64 expect,
-                                           Register64 replace,
-                                           Register64 output) {
-  CompareExchange64(*this, &access, access.sync(), mem, expect, replace,
-                    output);
+FaultingCodeRange MacroAssembler::wasmCompareExchange64(
+    const wasm::MemoryAccessDesc& access, const Address& mem, Register64 expect,
+    Register64 replace, Register64 output) {
+  return CompareExchange64(*this, &access, access.sync(), mem, expect, replace,
+                           output);
 }
 
-void MacroAssembler::wasmCompareExchange64(const wasm::MemoryAccessDesc& access,
-                                           const BaseIndex& mem,
-                                           Register64 expect,
-                                           Register64 replace,
-                                           Register64 output) {
-  CompareExchange64(*this, &access, access.sync(), mem, expect, replace,
-                    output);
+FaultingCodeRange MacroAssembler::wasmCompareExchange64(
+    const wasm::MemoryAccessDesc& access, const BaseIndex& mem,
+    Register64 expect, Register64 replace, Register64 output) {
+  return CompareExchange64(*this, &access, access.sync(), mem, expect, replace,
+                           output);
 }
 
 void MacroAssembler::wasmCompareExchange64(const wasm::MemoryAccessDesc& access,
@@ -4294,31 +5081,30 @@ void MacroAssembler::atomicExchange64(Synchronization sync,
   AtomicExchange64(*this, nullptr, sync, mem, value, output);
 }
 
-void MacroAssembler::wasmAtomicExchange(const wasm::MemoryAccessDesc& access,
-                                        const Address& mem, Register value,
-                                        Register valueTemp, Register offsetTemp,
-                                        Register maskTemp, Register output) {
-  AtomicExchange(*this, &access, access.type(), access.sync(), mem, value,
-                 valueTemp, offsetTemp, maskTemp, output);
+FaultingCodeRange MacroAssembler::wasmAtomicExchange(
+    const wasm::MemoryAccessDesc& access, const Address& mem, Register value,
+    Register valueTemp, Register offsetTemp, Register maskTemp,
+    Register output) {
+  return AtomicExchange(*this, &access, access.type(), access.sync(), mem,
+                        value, valueTemp, offsetTemp, maskTemp, output);
 }
 
-void MacroAssembler::wasmAtomicExchange(const wasm::MemoryAccessDesc& access,
-                                        const BaseIndex& mem, Register value,
-                                        Register valueTemp, Register offsetTemp,
-                                        Register maskTemp, Register output) {
-  AtomicExchange(*this, &access, access.type(), access.sync(), mem, value,
-                 valueTemp, offsetTemp, maskTemp, output);
+FaultingCodeRange MacroAssembler::wasmAtomicExchange(
+    const wasm::MemoryAccessDesc& access, const BaseIndex& mem, Register value,
+    Register valueTemp, Register offsetTemp, Register maskTemp,
+    Register output) {
+  return AtomicExchange(*this, &access, access.type(), access.sync(), mem,
+                        value, valueTemp, offsetTemp, maskTemp, output);
 }
 
-void MacroAssembler::wasmAtomicExchange(const wasm::MemoryAccessDesc& access,
-                                        const BaseIndex& mem, Register value,
-                                        Register valueTemp, Register offsetTemp,
-                                        Register maskTemp, Register output,
-                                        wasm::ZeroExtendIndex zeroExtend) {
+FaultingCodeRange MacroAssembler::wasmAtomicExchange(
+    const wasm::MemoryAccessDesc& access, const BaseIndex& mem, Register value,
+    Register valueTemp, Register offsetTemp, Register maskTemp, Register output,
+    wasm::ZeroExtendIndex zeroExtend) {
   UseScratchRegisterScope temps(*this);
   BaseIndex address = ToAtomicAddress(*this, mem, zeroExtend, temps);
-  AtomicExchange(*this, &access, access.type(), access.sync(), address, value,
-                 valueTemp, offsetTemp, maskTemp, output);
+  return AtomicExchange(*this, &access, access.type(), access.sync(), address,
+                        value, valueTemp, offsetTemp, maskTemp, output);
 }
 
 void MacroAssembler::atomicFetchOp(Scalar::Type type, Synchronization sync,
@@ -4351,13 +5137,12 @@ void MacroAssembler::atomicFetchOp64(Synchronization sync, AtomicOp op,
   AtomicFetchOp64(*this, nullptr, sync, op, value, mem, temp, output);
 }
 
-void MacroAssembler::wasmAtomicFetchOp(const wasm::MemoryAccessDesc& access,
-                                       AtomicOp op, Register value,
-                                       const Address& mem, Register valueTemp,
-                                       Register offsetTemp, Register maskTemp,
-                                       Register output) {
-  AtomicFetchOp(*this, &access, access.type(), access.sync(), op, mem, value,
-                valueTemp, offsetTemp, maskTemp, output);
+FaultingCodeRange MacroAssembler::wasmAtomicFetchOp(
+    const wasm::MemoryAccessDesc& access, AtomicOp op, Register value,
+    const Address& mem, Register valueTemp, Register offsetTemp,
+    Register maskTemp, Register output) {
+  return AtomicFetchOp(*this, &access, access.type(), access.sync(), op, mem,
+                       value, valueTemp, offsetTemp, maskTemp, output);
 }
 
 void MacroAssembler::wasmAtomicFetchOp(const wasm::MemoryAccessDesc& access,
@@ -4582,6 +5367,24 @@ static void AtomicEffectOp64(MacroAssembler& masm, Synchronization, AtomicOp op,
   }
 }
 
+void MacroAssembler::atomicEffectOp(Scalar::Type arrayType,
+                                    Synchronization sync, AtomicOp op,
+                                    Register value, const BaseIndex& mem,
+                                    Register valueTemp, Register offsetTemp,
+                                    Register maskTemp) {
+  AtomicEffectOp(*this, nullptr, arrayType, sync, op, mem, value, valueTemp,
+                 offsetTemp, maskTemp);
+}
+
+void MacroAssembler::atomicEffectOp(Scalar::Type arrayType,
+                                    Synchronization sync, AtomicOp op,
+                                    Register value, const Address& mem,
+                                    Register valueTemp, Register offsetTemp,
+                                    Register maskTemp) {
+  AtomicEffectOp(*this, nullptr, arrayType, sync, op, mem, value, valueTemp,
+                 offsetTemp, maskTemp);
+}
+
 void MacroAssembler::wasmAtomicEffectOp(const wasm::MemoryAccessDesc& access,
                                         AtomicOp op, Register value,
                                         const Address& mem, Register valueTemp,
@@ -4623,23 +5426,22 @@ void MacroAssembler::atomicEffectOp64(Synchronization sync, AtomicOp op,
 }
 
 template <typename T>
-static void WasmAtomicExchange64(MacroAssembler& masm,
-                                 const wasm::MemoryAccessDesc& access,
-                                 const T& mem, Register64 value,
-                                 Register64 output) {
-  AtomicExchange64(masm, &access, access.sync(), mem, value, output);
+static FaultingCodeRange WasmAtomicExchange64(
+    MacroAssembler& masm, const wasm::MemoryAccessDesc& access, const T& mem,
+    Register64 value, Register64 output) {
+  return AtomicExchange64(masm, &access, access.sync(), mem, value, output);
 }
 
-void MacroAssembler::wasmAtomicExchange64(const wasm::MemoryAccessDesc& access,
-                                          const Address& mem, Register64 src,
-                                          Register64 output) {
-  WasmAtomicExchange64(*this, access, mem, src, output);
+FaultingCodeRange MacroAssembler::wasmAtomicExchange64(
+    const wasm::MemoryAccessDesc& access, const Address& mem, Register64 src,
+    Register64 output) {
+  return WasmAtomicExchange64(*this, access, mem, src, output);
 }
 
-void MacroAssembler::wasmAtomicExchange64(const wasm::MemoryAccessDesc& access,
-                                          const BaseIndex& mem, Register64 src,
-                                          Register64 output) {
-  WasmAtomicExchange64(*this, access, mem, src, output);
+FaultingCodeRange MacroAssembler::wasmAtomicExchange64(
+    const wasm::MemoryAccessDesc& access, const BaseIndex& mem, Register64 src,
+    Register64 output) {
+  return WasmAtomicExchange64(*this, access, mem, src, output);
 }
 
 void MacroAssembler::wasmAtomicExchange64(const wasm::MemoryAccessDesc& access,
@@ -4651,18 +5453,18 @@ void MacroAssembler::wasmAtomicExchange64(const wasm::MemoryAccessDesc& access,
   AtomicExchange64(*this, &access, access.sync(), address, src, output);
 }
 
-void MacroAssembler::wasmAtomicFetchOp64(const wasm::MemoryAccessDesc& access,
-                                         AtomicOp op, Register64 value,
-                                         const Address& mem, Register64 temp,
-                                         Register64 output) {
-  AtomicFetchOp64(*this, &access, access.sync(), op, value, mem, temp, output);
+FaultingCodeRange MacroAssembler::wasmAtomicFetchOp64(
+    const wasm::MemoryAccessDesc& access, AtomicOp op, Register64 value,
+    const Address& mem, Register64 temp, Register64 output) {
+  return AtomicFetchOp64(*this, &access, access.sync(), op, value, mem, temp,
+                         output);
 }
 
-void MacroAssembler::wasmAtomicFetchOp64(const wasm::MemoryAccessDesc& access,
-                                         AtomicOp op, Register64 value,
-                                         const BaseIndex& mem, Register64 temp,
-                                         Register64 output) {
-  AtomicFetchOp64(*this, &access, access.sync(), op, value, mem, temp, output);
+FaultingCodeRange MacroAssembler::wasmAtomicFetchOp64(
+    const wasm::MemoryAccessDesc& access, AtomicOp op, Register64 value,
+    const BaseIndex& mem, Register64 temp, Register64 output) {
+  return AtomicFetchOp64(*this, &access, access.sync(), op, value, mem, temp,
+                         output);
 }
 
 void MacroAssembler::wasmAtomicFetchOp64(const wasm::MemoryAccessDesc& access,
@@ -4679,137 +5481,14 @@ void MacroAssembler::wasmAtomicFetchOp64(const wasm::MemoryAccessDesc& access,
 // ========================================================================
 // JS atomic operations.
 
-template <typename T>
-static void CompareExchangeJS(MacroAssembler& masm, Scalar::Type arrayType,
-                              Synchronization sync, const T& mem,
-                              Register oldval, Register newval,
-                              Register valueTemp, Register offsetTemp,
-                              Register maskTemp, Register temp,
-                              AnyRegister output) {
-  if (arrayType == Scalar::Uint32) {
-    masm.compareExchange(arrayType, sync, mem, oldval, newval, valueTemp,
-                         offsetTemp, maskTemp, temp);
-    masm.convertUInt32ToDouble(temp, output.fpu());
-  } else {
-    masm.compareExchange(arrayType, sync, mem, oldval, newval, valueTemp,
-                         offsetTemp, maskTemp, output.gpr());
-  }
-}
-
-template <typename T>
-static void AtomicExchangeJS(MacroAssembler& masm, Scalar::Type arrayType,
-                             Synchronization sync, const T& mem, Register value,
-                             Register valueTemp, Register offsetTemp,
-                             Register maskTemp, Register temp,
-                             AnyRegister output) {
-  if (arrayType == Scalar::Uint32) {
-    masm.atomicExchange(arrayType, sync, mem, value, valueTemp, offsetTemp,
-                        maskTemp, temp);
-    masm.convertUInt32ToDouble(temp, output.fpu());
-  } else {
-    masm.atomicExchange(arrayType, sync, mem, value, valueTemp, offsetTemp,
-                        maskTemp, output.gpr());
-  }
-}
-
-template <typename T>
-static void AtomicFetchOpJS(MacroAssembler& masm, Scalar::Type arrayType,
-                            Synchronization sync, AtomicOp op, Register value,
-                            const T& mem, Register valueTemp,
-                            Register offsetTemp, Register maskTemp,
-                            Register temp, AnyRegister output) {
-  if (arrayType == Scalar::Uint32) {
-    masm.atomicFetchOp(arrayType, sync, op, value, mem, valueTemp, offsetTemp,
-                       maskTemp, temp);
-    masm.convertUInt32ToDouble(temp, output.fpu());
-  } else {
-    masm.atomicFetchOp(arrayType, sync, op, value, mem, valueTemp, offsetTemp,
-                       maskTemp, output.gpr());
-  }
-}
-
-void MacroAssembler::compareExchangeJS(Scalar::Type arrayType,
-                                       Synchronization sync, const Address& mem,
-                                       Register oldval, Register newval,
-                                       Register valueTemp, Register offsetTemp,
-                                       Register maskTemp, Register temp,
-                                       AnyRegister output) {
-  CompareExchangeJS(*this, arrayType, sync, mem, oldval, newval, valueTemp,
-                    offsetTemp, maskTemp, temp, output);
-}
-
-void MacroAssembler::compareExchangeJS(Scalar::Type arrayType,
-                                       Synchronization sync,
-                                       const BaseIndex& mem, Register oldval,
-                                       Register newval, Register valueTemp,
-                                       Register offsetTemp, Register maskTemp,
-                                       Register temp, AnyRegister output) {
-  CompareExchangeJS(*this, arrayType, sync, mem, oldval, newval, valueTemp,
-                    offsetTemp, maskTemp, temp, output);
-}
-
-void MacroAssembler::atomicExchangeJS(Scalar::Type arrayType,
-                                      Synchronization sync, const Address& mem,
-                                      Register value, Register valueTemp,
-                                      Register offsetTemp, Register maskTemp,
-                                      Register temp, AnyRegister output) {
-  AtomicExchangeJS(*this, arrayType, sync, mem, value, valueTemp, offsetTemp,
-                   maskTemp, temp, output);
-}
-
-void MacroAssembler::atomicExchangeJS(Scalar::Type arrayType,
-                                      Synchronization sync,
-                                      const BaseIndex& mem, Register value,
-                                      Register valueTemp, Register offsetTemp,
-                                      Register maskTemp, Register temp,
-                                      AnyRegister output) {
-  AtomicExchangeJS(*this, arrayType, sync, mem, value, valueTemp, offsetTemp,
-                   maskTemp, temp, output);
-}
-
-void MacroAssembler::atomicFetchOpJS(Scalar::Type arrayType,
-                                     Synchronization sync, AtomicOp op,
-                                     Register value, const Address& mem,
-                                     Register valueTemp, Register offsetTemp,
-                                     Register maskTemp, Register temp,
-                                     AnyRegister output) {
-  AtomicFetchOpJS(*this, arrayType, sync, op, value, mem, valueTemp, offsetTemp,
-                  maskTemp, temp, output);
-}
-
-void MacroAssembler::atomicFetchOpJS(Scalar::Type arrayType,
-                                     Synchronization sync, AtomicOp op,
-                                     Register value, const BaseIndex& mem,
-                                     Register valueTemp, Register offsetTemp,
-                                     Register maskTemp, Register temp,
-                                     AnyRegister output) {
-  AtomicFetchOpJS(*this, arrayType, sync, op, value, mem, valueTemp, offsetTemp,
-                  maskTemp, temp, output);
-}
-
-void MacroAssembler::atomicEffectOpJS(Scalar::Type arrayType,
-                                      Synchronization sync, AtomicOp op,
-                                      Register value, const BaseIndex& mem,
-                                      Register valueTemp, Register offsetTemp,
-                                      Register maskTemp) {
-  AtomicEffectOp(*this, nullptr, arrayType, sync, op, mem, value, valueTemp,
-                 offsetTemp, maskTemp);
-}
-
-void MacroAssembler::atomicEffectOpJS(Scalar::Type arrayType,
-                                      Synchronization sync, AtomicOp op,
-                                      Register value, const Address& mem,
-                                      Register valueTemp, Register offsetTemp,
-                                      Register maskTemp) {
-  AtomicEffectOp(*this, nullptr, arrayType, sync, op, mem, value, valueTemp,
-                 offsetTemp, maskTemp);
-}
-
 void MacroAssembler::atomicPause() {
   // LoongArch doesn't have 'pause' or 'yield' instructions like other
   // platforms, just use nop here.
   nop();
 }
+
+// ===============================================================
+// Arithmetic functions
 
 void MacroAssembler::flexibleQuotient32(Register lhs, Register rhs,
                                         Register dest, bool isUnsigned,
@@ -4883,12 +5562,12 @@ void MacroAssembler::floorFloat32ToInt32(FloatRegister src, Register dest,
 
   // We have to check for -0 and NaN when the result is zero.
   Label notZero;
-  ma_b(dest, zero, &notZero, Assembler::NotEqual, ShortJump);
+  ma_b(dest, dest, &notZero, Assembler::NonZero, ShortJump);
   {
     // If any of the two most significant bits is set, |src| is -0 or NaN.
     moveFromFloat32(src, dest);
     as_srli_w(dest, dest, 30);
-    branch32(Assembler::NotEqual, dest, zero, fail);
+    branch32(Assembler::NotEqual, dest, Imm32(0), fail);
   }
   bind(&notZero);
 }
@@ -4912,12 +5591,12 @@ void MacroAssembler::floorDoubleToInt32(FloatRegister src, Register dest,
 
   // We have to check for -0 and NaN when the result is zero.
   Label notZero;
-  ma_b(dest, zero, &notZero, Assembler::NotEqual, ShortJump);
+  ma_b(dest, dest, &notZero, Assembler::NonZero, ShortJump);
   {
     // If any of the two most significant bits is set, |src| is negative or NaN.
     moveFromDouble(src, dest);
     as_srli_d(dest, dest, 62);
-    branchPtr(Assembler::NotEqual, dest, zero, fail);
+    branchPtr(Assembler::NotEqual, dest, Imm32(0), fail);
   }
   bind(&notZero);
 }
@@ -4941,11 +5620,11 @@ void MacroAssembler::ceilFloat32ToInt32(FloatRegister src, Register dest,
 
   // We have to check for (-1, -0] and NaN when the result is zero.
   Label notZero;
-  ma_b(dest, zero, &notZero, Assembler::NotEqual, ShortJump);
+  ma_b(dest, dest, &notZero, Assembler::NonZero, ShortJump);
   {
     // If binary value is not zero, the input was not 0, so we bail.
     moveFromFloat32(src, dest);
-    branch32(Assembler::NotEqual, dest, zero, fail);
+    branch32(Assembler::NotEqual, dest, Imm32(0), fail);
   }
   bind(&notZero);
 }
@@ -4969,11 +5648,11 @@ void MacroAssembler::ceilDoubleToInt32(FloatRegister src, Register dest,
 
   // We have to check for (-1, -0] and NaN when the result is zero.
   Label notZero;
-  ma_b(dest, zero, &notZero, Assembler::NotEqual, ShortJump);
+  ma_b(dest, dest, &notZero, Assembler::NonZero, ShortJump);
   {
     // If binary value is not zero, the input was not 0, so we bail.
     moveFromDouble(src, dest);
-    branchPtr(Assembler::NotEqual, dest, zero, fail);
+    branchPtr(Assembler::NotEqual, dest, Imm32(0), fail);
   }
   bind(&notZero);
 }
@@ -4993,7 +5672,7 @@ void MacroAssembler::roundFloat32ToInt32(FloatRegister src, Register dest,
   {
     // If binary value is not zero, it is NaN or -0, so we bail.
     moveFromFloat32(src, dest);
-    branch32(Assembler::NotEqual, dest, zero, fail);
+    branch32(Assembler::NotEqual, dest, Imm32(0), fail);
     ma_b(&end, ShortJump);
   }
 
@@ -5044,7 +5723,7 @@ void MacroAssembler::roundDoubleToInt32(FloatRegister src, Register dest,
   {
     // If binary value is not zero, it is NaN or -0, so we bail.
     moveFromDouble(src, dest);
-    branchPtr(Assembler::NotEqual, dest, zero, fail);
+    branchPtr(Assembler::NotEqual, dest, Imm32(0), fail);
     ma_b(&end, ShortJump);
   }
 
@@ -5099,12 +5778,12 @@ void MacroAssembler::truncFloat32ToInt32(FloatRegister src, Register dest,
 
   // We have to check for (-1, -0] and NaN when the result is zero.
   Label notZero;
-  ma_b(dest, zero, &notZero, Assembler::NotEqual, ShortJump);
+  ma_b(dest, dest, &notZero, Assembler::NonZero, ShortJump);
   {
     // If any of the two most significant bits is set, |src| is negative or NaN.
     moveFromFloat32(src, dest);
     as_srli_w(dest, dest, 30);
-    branch32(Assembler::NotEqual, dest, zero, fail);
+    branch32(Assembler::NotEqual, dest, Imm32(0), fail);
   }
   bind(&notZero);
 }
@@ -5128,24 +5807,130 @@ void MacroAssembler::truncDoubleToInt32(FloatRegister src, Register dest,
 
   // We have to check for (-1, -0] and NaN when the result is zero.
   Label notZero;
-  ma_b(dest, zero, &notZero, Assembler::NotEqual, ShortJump);
+  ma_b(dest, dest, &notZero, Assembler::NonZero, ShortJump);
   {
     // If any of the two most significant bits is set, |src| is negative or NaN.
     moveFromDouble(src, dest);
     as_srli_d(dest, dest, 62);
-    branchPtr(Assembler::NotEqual, dest, zero, fail);
+    branchPtr(Assembler::NotEqual, dest, Imm32(0), fail);
   }
   bind(&notZero);
 }
 
+template <typename T>
+void MacroAssemblerLOONG64::RoundHelper(RoundingMode mode, FloatRegister src,
+                                        FloatRegister dest) {
+  static_assert(std::is_same_v<T, float> || std::is_same_v<T, double>);
+
+  using Traits = mozilla::FloatingPoint<T>;
+  constexpr bool IsDouble = std::is_same_v<T, double>;
+
+  using ScratchFPScope2 =
+      std::conditional_t<IsDouble, ScratchDoubleScope2, ScratchFloat32Scope2>;
+  ScratchFPScope2 fpscratch2(asMasm());
+
+  MOZ_ASSERT(!(dest == src && dest == fpscratch2));
+
+  if (dest == src) {
+    // Keep the input sign around for the fixup of results that round to zero.
+    if constexpr (IsDouble) {
+      as_fmov_d(fpscratch2, src);
+    } else {
+      as_fmov_s(fpscratch2, src);
+    }
+  }
+  const FloatRegister old = dest == src ? fpscratch2 : src;
+
+  if (dest != src) {
+    // Copy the value into position to get ready for fast (already integral)
+    // path.
+    if constexpr (IsDouble) {
+      as_fmov_d(dest, src);
+    } else {
+      as_fmov_s(dest, src);
+    }
+  }
+
+  {
+    Label notNaN;
+    // Canonicalize NaNs per the WASM NaN propagation rules.
+    if constexpr (IsDouble) {
+      ma_bc_d(src, src, &notNaN, Assembler::DoubleOrdered, ShortJump);
+      as_fmin_d(dest, src, src);
+    } else {
+      ma_bc_s(src, src, &notNaN, Assembler::DoubleOrdered, ShortJump);
+      as_fmin_s(dest, src, src);
+    }
+    bind(&notNaN);
+  }
+
+  UseScratchRegisterScope temps(this);
+  const Register scratch = temps.Acquire();
+  Label done;
+
+  if constexpr (IsDouble) {
+    as_movfr2gr_d(scratch, src);
+  } else {
+    as_movfr2gr_s(scratch, src);
+  }
+
+  // Extract the exponent part ...
+  as_bstrpick_d(scratch, scratch,
+                Traits::kExponentShift + Traits::kExponentWidth - 1,
+                Traits::kExponentShift);
+  // ... then check if !(ULP < 1).
+  as_slti(scratch, scratch, Traits::kExponentBias + Traits::kExponentShift);
+  // If so, the value is already integral.
+  ma_b(scratch, scratch, &done, Assembler::Zero, ShortJump);
+  // If not, round now.
+  if constexpr (IsDouble) {
+    switch (mode) {
+      case RoundingMode::Down:
+        as_ftintrm_l_d(dest, src);
+        break;
+      case RoundingMode::Up:
+        as_ftintrp_l_d(dest, src);
+        break;
+      case RoundingMode::NearestTiesToEven:
+        as_ftintrne_l_d(dest, src);
+        break;
+      case RoundingMode::TowardsZero:
+        as_ftintrz_l_d(dest, src);
+        break;
+    }
+    as_ffint_d_l(dest, dest);
+    as_fcopysign_d(dest, dest, old);
+  } else {
+    switch (mode) {
+      case RoundingMode::Down:
+        as_ftintrm_w_s(dest, src);
+        break;
+      case RoundingMode::Up:
+        as_ftintrp_w_s(dest, src);
+        break;
+      case RoundingMode::NearestTiesToEven:
+        as_ftintrne_w_s(dest, src);
+        break;
+      case RoundingMode::TowardsZero:
+        as_ftintrz_w_s(dest, src);
+        break;
+    }
+    as_ffint_s_w(dest, dest);
+    as_fcopysign_s(dest, dest, old);
+  }
+  bind(&done);
+}
+
 void MacroAssembler::nearbyIntDouble(RoundingMode mode, FloatRegister src,
                                      FloatRegister dest) {
-  MOZ_CRASH("not supported on this platform");
+  MOZ_ASSERT(HasRoundInstruction(mode));
+  RoundHelper<double>(mode, src, dest);
 }
 
 void MacroAssembler::nearbyIntFloat32(RoundingMode mode, FloatRegister src,
                                       FloatRegister dest) {
-  MOZ_CRASH("not supported on this platform");
+  MOZ_ASSERT(HasRoundInstruction(mode));
+  RoundHelper<float>(mode, src, dest);
 }
 
 void MacroAssembler::copySignDouble(FloatRegister lhs, FloatRegister rhs,
@@ -5167,8 +5952,9 @@ void MacroAssemblerLOONG64Compat::move32(Register src, Register dest) {
 }
 
 void MacroAssemblerLOONG64Compat::movePtr(Register src, Register dest) {
-  as_or(dest, src, zero);
+  ma_move(dest, src);
 }
+
 void MacroAssemblerLOONG64Compat::movePtr(ImmWord imm, Register dest) {
   ma_li(dest, imm);
 }
@@ -5229,47 +6015,18 @@ FaultingCodeRange MacroAssemblerLOONG64Compat::load16SignExtend(
 
 FaultingCodeRange MacroAssemblerLOONG64Compat::load32(const Address& address,
                                                       Register dest) {
-  return ma_ld_w(dest, address);
+  return ma_load(dest, address, SizeWord, SignExtend);
 }
 
 FaultingCodeRange MacroAssemblerLOONG64Compat::load32(const BaseIndex& address,
                                                       Register dest) {
-  Register base = address.base;
-  Register index = address.index;
-  int32_t offset = address.offset;
-  uint32_t shift = Imm32::ShiftOf(address.scale).value;
-  js::wasm::FaultingCodeRange fcr;
-
-  UseScratchRegisterScope temps(asMasm());
-  if (offset != 0) {
-    Register scratch = temps.Acquire();
-    ma_li(scratch, Imm32(offset));
-    if (shift != 0) {
-      MOZ_ASSERT(shift <= 4);
-      as_alsl_d(scratch, index, scratch, shift - 1);
-    } else {
-      as_add_d(scratch, index, scratch);
-    }
-    fcr = js::wasm::FaultingCodeRange(currentOffset());
-    as_ldx_w(dest, base, scratch);
-  } else if (shift != 0) {
-    Register scratch = temps.Acquire();
-    as_slli_d(scratch, index, shift);
-    fcr = js::wasm::FaultingCodeRange(currentOffset());
-    as_ldx_w(dest, base, scratch);
-  } else {
-    fcr = js::wasm::FaultingCodeRange(currentOffset());
-    as_ldx_w(dest, base, index);
-  }
-  return fcr;
+  return ma_load(dest, address, SizeWord, SignExtend);
 }
 
 void MacroAssemblerLOONG64Compat::load32(AbsoluteAddress address,
                                          Register dest) {
   UseScratchRegisterScope temps(asMasm());
-  Register scratch = temps.Acquire();
-  movePtr(ImmPtr(address.addr), scratch);
-  load32(Address(scratch, 0), dest);
+  load32(computeAbsoluteAddress(address, temps), dest);
 }
 
 void MacroAssemblerLOONG64Compat::load32(wasm::SymbolicAddress address,
@@ -5282,47 +6039,18 @@ void MacroAssemblerLOONG64Compat::load32(wasm::SymbolicAddress address,
 
 FaultingCodeRange MacroAssemblerLOONG64Compat::loadPtr(const Address& address,
                                                        Register dest) {
-  return ma_ld_d(dest, address);
+  return ma_load(dest, address, SizeDouble);
 }
 
 FaultingCodeRange MacroAssemblerLOONG64Compat::loadPtr(const BaseIndex& src,
                                                        Register dest) {
-  Register base = src.base;
-  Register index = src.index;
-  int32_t offset = src.offset;
-  uint32_t shift = Imm32::ShiftOf(src.scale).value;
-  js::wasm::FaultingCodeRange fcr;
-
-  UseScratchRegisterScope temps(asMasm());
-  if (offset != 0) {
-    Register scratch = temps.Acquire();
-    ma_li(scratch, Imm32(offset));
-    if (shift != 0) {
-      MOZ_ASSERT(shift <= 4);
-      as_alsl_d(scratch, index, scratch, shift - 1);
-    } else {
-      as_add_d(scratch, index, scratch);
-    }
-    fcr = js::wasm::FaultingCodeRange(currentOffset());
-    as_ldx_d(dest, base, scratch);
-  } else if (shift != 0) {
-    Register scratch = temps.Acquire();
-    as_slli_d(scratch, index, shift);
-    fcr = js::wasm::FaultingCodeRange(currentOffset());
-    as_ldx_d(dest, base, scratch);
-  } else {
-    fcr = js::wasm::FaultingCodeRange(currentOffset());
-    as_ldx_d(dest, base, index);
-  }
-  return fcr;
+  return ma_load(dest, src, SizeDouble);
 }
 
 void MacroAssemblerLOONG64Compat::loadPtr(AbsoluteAddress address,
                                           Register dest) {
   UseScratchRegisterScope temps(asMasm());
-  Register scratch = temps.Acquire();
-  movePtr(ImmPtr(address.addr), scratch);
-  loadPtr(Address(scratch, 0), dest);
+  loadPtr(computeAbsoluteAddress(address, temps), dest);
 }
 
 void MacroAssemblerLOONG64Compat::loadPtr(wasm::SymbolicAddress address,
@@ -5338,16 +6066,9 @@ void MacroAssemblerLOONG64Compat::loadPrivate(const Address& address,
   loadPtr(address, dest);
 }
 
-void MacroAssemblerLOONG64Compat::store8(Imm32 imm, const Address& address) {
-  if (imm.value == 0) {
-    ma_store(zero, address, SizeByte);
-    return;
-  }
-
-  UseScratchRegisterScope temps(asMasm());
-  Register scratch = temps.Acquire();
-  ma_li(scratch, imm);
-  ma_store(scratch, address, SizeByte);
+FaultingCodeRange MacroAssemblerLOONG64Compat::store8(Imm32 imm,
+                                                      const Address& address) {
+  return ma_store(imm, address, SizeByte);
 }
 
 FaultingCodeRange MacroAssemblerLOONG64Compat::store8(Register src,
@@ -5364,16 +6085,9 @@ FaultingCodeRange MacroAssemblerLOONG64Compat::store8(Register src,
   return ma_store(src, dest, SizeByte);
 }
 
-void MacroAssemblerLOONG64Compat::store16(Imm32 imm, const Address& address) {
-  if (imm.value == 0) {
-    ma_store(zero, address, SizeHalfWord);
-    return;
-  }
-
-  UseScratchRegisterScope temps(asMasm());
-  Register scratch = temps.Acquire();
-  ma_li(scratch, imm);
-  ma_store(scratch, address, SizeHalfWord);
+FaultingCodeRange MacroAssemblerLOONG64Compat::store16(Imm32 imm,
+                                                       const Address& address) {
+  return ma_store(imm, address, SizeHalfWord);
 }
 
 FaultingCodeRange MacroAssemblerLOONG64Compat::store16(Register src,
@@ -5393,9 +6107,7 @@ FaultingCodeRange MacroAssemblerLOONG64Compat::store16(
 void MacroAssemblerLOONG64Compat::store32(Register src,
                                           AbsoluteAddress address) {
   UseScratchRegisterScope temps(asMasm());
-  Register scratch = temps.Acquire();
-  movePtr(ImmPtr(address.addr), scratch);
-  store32(src, Address(scratch, 0));
+  store32(src, computeAbsoluteAddress(address, temps));
 }
 
 FaultingCodeRange MacroAssemblerLOONG64Compat::store32(Register src,
@@ -5403,16 +6115,9 @@ FaultingCodeRange MacroAssemblerLOONG64Compat::store32(Register src,
   return ma_store(src, address, SizeWord);
 }
 
-void MacroAssemblerLOONG64Compat::store32(Imm32 src, const Address& address) {
-  if (src.value == 0) {
-    ma_store(zero, address, SizeWord);
-    return;
-  }
-
-  UseScratchRegisterScope temps(asMasm());
-  Register scratch = temps.Acquire();
-  move32(src, scratch);
-  ma_store(scratch, address, SizeWord);
+FaultingCodeRange MacroAssemblerLOONG64Compat::store32(Imm32 src,
+                                                       const Address& address) {
+  return ma_store(src, address, SizeWord);
 }
 
 void MacroAssemblerLOONG64Compat::store32(Imm32 imm, const BaseIndex& dest) {
@@ -5467,49 +6172,17 @@ template void MacroAssemblerLOONG64Compat::storePtr<BaseIndex>(
 
 FaultingCodeRange MacroAssemblerLOONG64Compat::storePtr(
     Register src, const Address& address) {
-  return ma_st_d(src, address);
+  return ma_store(src, address, SizeDouble);
 }
 
 FaultingCodeRange MacroAssemblerLOONG64Compat::storePtr(
     Register src, const BaseIndex& address) {
-  Register base = address.base;
-  Register index = address.index;
-  int32_t offset = address.offset;
-  int32_t shift = Imm32::ShiftOf(address.scale).value;
-  FaultingCodeRange fcr;
-
-  UseScratchRegisterScope temps(asMasm());
-  if ((offset == 0) && (shift == 0)) {
-    fcr = FaultingCodeRange(currentOffset());
-    as_stx_d(src, base, index);
-  } else if (is_intN(offset, 12)) {
-    Register scratch = temps.Acquire();
-    if (shift == 0) {
-      as_add_d(scratch, base, index);
-    } else {
-      as_alsl_d(scratch, index, base, shift - 1);
-    }
-    fcr = FaultingCodeRange(currentOffset());
-    as_st_d(src, scratch, offset);
-  } else {
-    Register scratch = temps.Acquire();
-    ma_li(scratch, Imm32(offset));
-    if (shift == 0) {
-      as_add_d(scratch, scratch, index);
-    } else {
-      as_alsl_d(scratch, index, scratch, shift - 1);
-    }
-    fcr = FaultingCodeRange(currentOffset());
-    as_stx_d(src, base, scratch);
-  }
-  return fcr;
+  return ma_store(src, address, SizeDouble);
 }
 
 void MacroAssemblerLOONG64Compat::storePtr(Register src, AbsoluteAddress dest) {
   UseScratchRegisterScope temps(asMasm());
-  Register scratch = temps.Acquire();
-  movePtr(ImmPtr(dest.addr), scratch);
-  storePtr(src, Address(scratch, 0));
+  storePtr(src, computeAbsoluteAddress(dest, temps));
 }
 
 void MacroAssemblerLOONG64Compat::testNullSet(Condition cond,
@@ -5518,8 +6191,8 @@ void MacroAssemblerLOONG64Compat::testNullSet(Condition cond,
   MOZ_ASSERT(cond == Equal || cond == NotEqual);
   UseScratchRegisterScope temps(asMasm());
   Register scratch = temps.Acquire();
-  splitTag(value, scratch);
-  ma_cmp_set(dest, scratch, ImmTag(JSVAL_TAG_NULL), cond);
+  splitSignExtTag(value, scratch);
+  ma_cmp_set(dest, scratch, ImmTagSignExt(JSVAL_TAG_NULL), cond);
 }
 
 void MacroAssemblerLOONG64Compat::testObjectSet(Condition cond,
@@ -5528,8 +6201,8 @@ void MacroAssemblerLOONG64Compat::testObjectSet(Condition cond,
   MOZ_ASSERT(cond == Equal || cond == NotEqual);
   UseScratchRegisterScope temps(asMasm());
   Register scratch = temps.Acquire();
-  splitTag(value, scratch);
-  ma_cmp_set(dest, scratch, ImmTag(JSVAL_TAG_OBJECT), cond);
+  splitSignExtTag(value, scratch);
+  ma_cmp_set(dest, scratch, ImmTagSignExt(JSVAL_TAG_OBJECT), cond);
 }
 
 void MacroAssemblerLOONG64Compat::testUndefinedSet(Condition cond,
@@ -5538,8 +6211,8 @@ void MacroAssemblerLOONG64Compat::testUndefinedSet(Condition cond,
   MOZ_ASSERT(cond == Equal || cond == NotEqual);
   UseScratchRegisterScope temps(asMasm());
   Register scratch = temps.Acquire();
-  splitTag(value, scratch);
-  ma_cmp_set(dest, scratch, ImmTag(JSVAL_TAG_UNDEFINED), cond);
+  splitSignExtTag(value, scratch);
+  ma_cmp_set(dest, scratch, ImmTagSignExt(JSVAL_TAG_UNDEFINED), cond);
 }
 
 void MacroAssemblerLOONG64Compat::unboxInt32(const ValueOperand& operand,
@@ -5862,7 +6535,7 @@ Register MacroAssemblerLOONG64Compat::extractObject(const Address& address,
 Register MacroAssemblerLOONG64Compat::extractTag(const Address& address,
                                                  Register scratch) {
   loadPtr(address, scratch);
-  as_bstrpick_d(scratch, scratch, 63, JSVAL_TAG_SHIFT);
+  splitSignExtTag(scratch, scratch);
   return scratch;
 }
 
@@ -6145,7 +6818,7 @@ void MacroAssemblerLOONG64Compat::handleFailureWithHandlerTail(
     bind(&skipProfilingInstrumentation);
   }
 
-  as_or(StackPointer, FramePointer, zero);
+  ma_move(StackPointer, FramePointer);
   pop(FramePointer);
   ret();
 
@@ -6186,11 +6859,11 @@ CodeOffset MacroAssemblerLOONG64Compat::toggledCall(JitCode* target,
   BufferOffset bo = nextOffset();
   CodeOffset offset(bo.getOffset());  // first instruction location,not changed.
   addPendingJump(bo, ImmPtr(target->raw()), RelocationKind::JITCODE);
-  ma_liPatchable(scratch, ImmPtr(target->raw()));
+  as_pcaddu18i(scratch, 0);
   if (enabled) {
     as_jirl(ra, scratch, BOffImm16(0));
   } else {
-    as_nop();
+    emit(InstImm(op_bne, BOffImm16(0), zero, zero).encode());
   }
   MOZ_ASSERT_IF(!oom(), nextOffset().getOffset() - offset.offset() ==
                             ToggledCallSize(nullptr));
@@ -6208,7 +6881,7 @@ void MacroAssembler::shiftIndex32AndAdd(Register indexTemp32, int shift,
   addPtr(indexTemp32, pointer);
 }
 
-void MacroAssembler::wasmMarkCallAsSlow() { mov(ra, ra); }
+void MacroAssembler::wasmMarkCallAsSlow() { as_ori(ra, ra, 0); }
 
 const int32_t SlowCallMarker = 0x03800021;  // ori ra, ra, 0
 

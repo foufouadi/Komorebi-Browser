@@ -338,16 +338,6 @@ discopane-notice-recommendations2 =
         extensions you’ve installed, profile preferences, and usage statistics.
 discopane-notice-learn-more = Learn more
 
-# Notice for the colorway theme removal
-colorway-removal-notice-message =
-    .heading = Your colorway theme(s) were removed.
-    .message =
-        { -brand-product-name } updated its colorways collection. We removed
-        the old version(s) from your “Saved Themes” list. Get new versions on
-        the add-ons site.
-colorway-removal-notice-learn-more = Learn more
-colorway-removal-notice-button = Get updated colorways themes
-
 # Notice to make user aware that themes are not applied in forced colors mode.
 # This notice is only visible on Windows.
 forced-colors-theme-notice =
@@ -400,8 +390,10 @@ permissions-addon-button = Permissions
 extension-enabled-heading = Enabled
 extension-disabled-heading = Disabled
 
-theme-enabled-heading = Enabled
-theme-disabled-heading2 = Saved Themes
+theme-enabled-heading2 =
+  .heading = Active Theme
+theme-disabled-heading3 =
+  .heading = Saved Themes
 
 plugin-enabled-heading = Enabled
 plugin-disabled-heading = Disabled
@@ -529,7 +521,9 @@ addon-permissions-learnmore = Learn more about permissions
 addon-permissions-managed-by-policy = Some permissions are managed by your organization.
 
 recommended-extensions-heading = Recommended Extensions
-recommended-themes-heading = Recommended Themes
+
+recommended-themes-card-heading =
+  .heading = Recommended Themes
 
 # Variables:
 #   $hostname (string) - Host where the permissions are granted
@@ -631,6 +625,7 @@ mlmodel-smart-tab-topic-engine = { -brand-short-name } uses this to suggest name
 mlmodel-smart-tab-embedding-engine = { -brand-short-name } uses this to suggest tabs for your tab groups
 
 mlmodel-formfill-engine = { -brand-short-name } uses this to help fill in address forms
+mlmodel-speech-recognition = { -brand-short-name } uses this for on-device speech recognition
 
 # AI Model will be downloaded on the users device and used locally
 addon-category-mlmodel = On-device AI
@@ -709,9 +704,19 @@ themes-mode-dark =
 themes-mode-device =
   .label = Device
 
+# Accessible name for the group of light/dark/device buttons.
+themes-mode =
+  .aria-label = Appearance
+
 # Heading for the in-product themes picker section in about:addons
 aboutaddons-themes-picker-heading =
     .heading = { -brand-product-name } themes
+
+# Heading for the section of the themes picker listing the classic themes
+# (a selection of official Firefox themes from previous Firefox releases,
+# for users who prefer a gradient-free look).
+aboutaddons-classic-themes-heading =
+    .heading = Classic themes
 
 # Show more / show less button at the bottom of the themes picker
 aboutaddons-themes-picker-see-more = Show more

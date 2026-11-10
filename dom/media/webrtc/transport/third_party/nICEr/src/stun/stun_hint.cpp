@@ -54,7 +54,6 @@ int
 nr_is_stun_message(UCHAR *buf, size_t len)
 {
    const UINT4 cookie = htonl(NR_STUN_MAGIC_COOKIE);
-   const UINT4 cookie2 = htonl(NR_STUN_MAGIC_COOKIE2);
    UINT2 type;
    nr_stun_encoded_attribute* attr;
    unsigned int attrLen;
@@ -75,7 +74,6 @@ nr_is_stun_message(UCHAR *buf, size_t len)
    case NR_STUN_MSG_BINDING_RESPONSE:
    case NR_STUN_MSG_BINDING_ERROR_RESPONSE:
 
-#ifdef USE_TURN
     case NR_STUN_MSG_ALLOCATE_REQUEST:
     case NR_STUN_MSG_ALLOCATE_RESPONSE:
     case NR_STUN_MSG_ALLOCATE_ERROR_RESPONSE:
@@ -102,19 +100,12 @@ nr_is_stun_message(UCHAR *buf, size_t len)
 #ifdef NR_STUN_MSG_CONNECT_STATUS_INDICATION
     case NR_STUN_MSG_CONNECT_STATUS_INDICATION:
 #endif
-#endif /* USE_TURN */
 
         /* ok so far, continue */
         break;
    default:
         return 0;
         break;
-   }
-
-   if (!memcmp(&cookie2, &buf[4], sizeof(UINT4))) {
-       /* return here because if it's an old-style message then there will
-        * not be a fingerprint in the message */
-       return 1;
    }
 
    if (memcmp(&cookie, &buf[4], sizeof(UINT4)))

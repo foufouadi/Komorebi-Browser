@@ -4,6 +4,7 @@
 
 import { UrlbarShared } from "chrome://browser/content/urlbar/UrlbarShared.mjs";
 import UrlbarPrefs from "chrome://browser/content/urlbar/UrlbarContentPrefs.mjs";
+import { UrlbarContentUtils } from "chrome://browser/content/urlbar/UrlbarContentUtils.mjs";
 
 /**
  * Array of keyCodes to defer.
@@ -253,7 +254,7 @@ export class UrlbarEventBufferer {
     // At this point, no events have been deferred for this search; we must
     // figure out if this event should be deferred.
     let isMacNavigation =
-      this.input.controller.platform == "macosx" &&
+      UrlbarContentUtils.getPlatform() == "macosx" &&
       event.ctrlKey &&
       this.input.view.isOpen &&
       (event.key === "n" || event.key === "p");
@@ -261,9 +262,17 @@ export class UrlbarEventBufferer {
       return false;
     }
 
+    // Switching search engines which will start a new query.
+    if (
+      event.keyCode == KeyEvent.DOM_VK_DOWN &&
+      event.getModifierState("Accel")
+    ) {
+      return false;
+    }
+
     if (DEFERRED_KEY_CODES.has(event.keyCode)) {
       // Defer while the user is composing.
-      if (this.input.editor.composing) {
+      if (this.input.isComposing) {
         return true;
       }
       if (this.input.controller.keyEventMovesCaret(event)) {
@@ -357,7 +366,7 @@ export class UrlbarEventBufferer {
     }
 
     let isMacDownNavigation =
-      this.input.controller.platform == "macosx" &&
+      UrlbarContentUtils.getPlatform() == "macosx" &&
       event.ctrlKey &&
       this.input.view.isOpen &&
       event.key === "n";

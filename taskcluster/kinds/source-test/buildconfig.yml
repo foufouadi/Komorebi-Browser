@@ -6,10 +6,10 @@ task-defaults:
     description: Make sure the content of .buildconfig.yml matches what gradle knows about its projects
     always-target: true
     run:
-        clone-with: hg
         using: run-task
         cwd: '{checkout}'
     worker-type: t-linux-docker-amd
+    use-gradle: online
     worker:
         artifacts:
             - type: directory
@@ -18,7 +18,6 @@ task-defaults:
         docker-image: {in-tree: lint}
         max-run-time: 1800
         env:
-            GRADLE_USER_HOME: "/builds/worker/checkouts/gecko/mobile/android/gradle/dotgradle-online"
             MOZCONFIG: "/builds/worker/checkouts/gecko/mobile/android/config/mozconfigs/android-arm/nightly-android-lints"
             ANDROID_SDK_ROOT: "/builds/worker/fetches/android-sdk-linux"
     platform: lint/opt
@@ -42,7 +41,6 @@ buildconfig-android-components:
             - "mobile/android/android-components/**/build.gradle"
             - "mobile/android/android-components/.buildconfig.yml"
     run:
-        clone-with: hg
         command: './mach --log-no-times build pre-export export && ./mach android update-buildconfig --check android-components'
     treeherder:
         symbol: buildconfig(AC)
@@ -55,7 +53,6 @@ buildconfig-focus:
             - "mobile/android/focus-android/**/build.gradle"
             - "mobile/android/focus-android/.buildconfig.yml"
     run:
-        clone-with: hg
         command: './mach --log-no-times build pre-export export && ./mach android update-buildconfig --check focus'
     treeherder:
         symbol: buildconfig(focus)
@@ -68,7 +65,6 @@ buildconfig-fenix:
             - "mobile/android/fenix/**/build.gradle"
             - "mobile/android/fenix/.buildconfig.yml"
     run:
-        clone-with: hg
         command: './mach --log-no-times build pre-export export && ./mach android update-buildconfig --check fenix'
     treeherder:
         symbol: buildconfig(fenix)

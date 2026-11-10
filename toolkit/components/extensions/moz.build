@@ -82,6 +82,7 @@ XPIDL_SOURCES += [
     "mozIExtensionAPIRequestHandling.idl",
     "mozIExtensionProcessScript.idl",
     "nsINativeMessagingPortal.idl",
+    "nsINativeMessagingProxy.idl",
 ]
 
 XPIDL_MODULE = "webextensions"
@@ -109,8 +110,9 @@ UNIFIED_SOURCES += [
 ]
 
 if CONFIG["MOZ_WIDGET_TOOLKIT"] == "gtk" and CONFIG["MOZ_ENABLE_DBUS"]:
-    EXPORTS.mozilla.extensions += ["NativeMessagingPortal.h"]
+    EXPORTS.mozilla.extensions += ["NativeMessagingPortal.h", "NativeMessagingProxy.h"]
     UNIFIED_SOURCES += ["NativeMessagingPortal.cpp"]
+    SOURCES += ["NativeMessagingProxy.cpp"]
     CXXFLAGS += CONFIG["MOZ_DBUS_GLIB_CFLAGS"]
     CXXFLAGS += CONFIG["MOZ_GTK3_CFLAGS"]
     DEFINES["MOZ_APP_NAME"] = '"%s"' % CONFIG["MOZ_APP_NAME"]
@@ -127,6 +129,7 @@ JAR_MANIFESTS += ["jar.mn"]
 BROWSER_CHROME_MANIFESTS += [
     "test/browser/browser.toml",
     "test/browser/protocol-remote-false/browser.toml",
+    "test/browser/webextensions-remote-false/browser.toml",
 ]
 
 MOCHITEST_MANIFESTS += [

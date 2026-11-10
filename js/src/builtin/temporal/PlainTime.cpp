@@ -27,6 +27,7 @@
 #include "builtin/temporal/ZonedDateTime.h"
 #include "gc/AllocKind.h"
 #include "gc/Barrier.h"
+#include "jit/InlinableNatives.h"
 #include "js/CallArgs.h"
 #include "js/CallNonGenericMethod.h"
 #include "js/Class.h"
@@ -597,17 +598,16 @@ static bool ToTemporalTime(JSContext* cx, Handle<JSObject*> item,
   }
 
   // Step 2.c.
-  if (auto* zonedDateTime = item->maybeUnwrapIf<ZonedDateTimeObject>()) {
-    auto epochNs = zonedDateTime->epochNanoseconds();
-    Rooted<TimeZoneValue> timeZone(cx, zonedDateTime->timeZone());
+  if (auto* zdtObj = item->maybeUnwrapIf<ZonedDateTimeObject>()) {
+    Rooted<ZonedDateTime> zonedDateTime(cx, ZonedDateTime{zdtObj});
 
-    if (!timeZone.wrap(cx)) {
+    if (!zonedDateTime.wrap(cx)) {
       return false;
     }
 
-    // Steps 2.c.i.
+    // Step 2.c.i.
     ISODateTime dateTime;
-    if (!GetISODateTimeFor(cx, timeZone, epochNs, &dateTime)) {
+    if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
       return false;
     }
 
@@ -1622,12 +1622,15 @@ static const JSFunctionSpec PlainTime_prototype_methods[] = {
 };
 
 static const JSPropertySpec PlainTime_prototype_properties[] = {
-    JS_PSG("hour", PlainTime_hour, 0),
-    JS_PSG("minute", PlainTime_minute, 0),
-    JS_PSG("second", PlainTime_second, 0),
-    JS_PSG("millisecond", PlainTime_millisecond, 0),
-    JS_PSG("microsecond", PlainTime_microsecond, 0),
-    JS_PSG("nanosecond", PlainTime_nanosecond, 0),
+    JS_INLINABLE_PSG("hour", PlainTime_hour, 0, PlainTimeHour),
+    JS_INLINABLE_PSG("minute", PlainTime_minute, 0, PlainTimeMinute),
+    JS_INLINABLE_PSG("second", PlainTime_second, 0, PlainTimeSecond),
+    JS_INLINABLE_PSG("millisecond", PlainTime_millisecond, 0,
+                     PlainTimeMillisecond),
+    JS_INLINABLE_PSG("microsecond", PlainTime_microsecond, 0,
+                     PlainTimeMicrosecond),
+    JS_INLINABLE_PSG("nanosecond", PlainTime_nanosecond, 0,
+                     PlainTimeNanosecond),
     JS_STRING_SYM_PS(toStringTag, "Temporal.PlainTime", JSPROP_READONLY),
     JS_PS_END,
 };

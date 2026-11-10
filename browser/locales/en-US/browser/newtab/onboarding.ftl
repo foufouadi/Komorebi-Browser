@@ -456,17 +456,12 @@ onboarding-checklist-remove-2 = Remove checklist
 tab-groups-onboarding-feature-callout-title = Try tab groups for less clutter, more focus
 tab-groups-onboarding-feature-callout-subtitle = Get organized by dragging one tab on top of another to create your first group.
 
-# The text "list all tabs" refers to the string tabs-toolbar-list-all-tabs
-tab-groups-onboarding-create-group-title-3 = Find your tab groups in the List All Tabs menu anytime.
 tab-groups-onboarding-create-group-no-alltabs-button-title = Find your groups by searching for them in the address bar.
-
-# The text "list all tabs" refers to the string tabs-toolbar-list-all-tabs
-tab-groups-onboarding-saved-groups-title-3 = When you close a tab group, reopen it from the List All Tabs menu anytime.
 tab-groups-onboarding-saved-groups-no-alltabs-button-title-2 = Find your closed groups by searching for them in the address bar.
-
-# The text "list all tabs" refers to the string tabs-toolbar-list-all-tabs
-tab-groups-onboarding-session-restore-title-2 = Reopen your tab groups from the List All Tabs menu anytime.
 tab-groups-onboarding-dismiss = OK
+
+# "here" refers to the application menu button
+tab-groups-onboarding-auto-saved-title = Tab groups are auto-saved. Find them here.
 
 ## Multi Profiles feature onboarding messages
 
@@ -608,6 +603,45 @@ onboarding-refresh-gratitude-subtitle = Thank you for using { -brand-short-name 
 # "has your back" is an idiom suggesting support and protection
 onboarding-refresh-gratitude-title = { -brand-short-name } has your back
 
+## First Run Onboarding refresh strings
+
+# "has your back" is an idiom suggesting support and protection
+onboarding-refresh-splash-screen-title = { -brand-product-name } has your back, starting now
+onboarding-refresh-hero-text = Built to protect you, not track you.
+onboarding-refresh-tou-default = Open all links with { -brand-short-name }
+onboarding-refresh-tou-pin = { PLATFORM() ->
+    [macos] Keep { -brand-short-name } in Dock
+   *[other] Add { -brand-short-name } to your taskbar
+}
+onboarding-refresh-tou-default-unchecked = Keep built-in protection every time you browse
+onboarding-refresh-tou-pin-unchecked = Keep the only major independent browser a click away
+onboarding-refresh-terms-of-use-with-links = By continuing, you agree to the <a data-l10n-name="terms_of_use">{ -brand-product-name } Terms of Use</a> and our <a data-l10n-name="privacy_notice">Privacy Notice</a>. To help improve the browser, { -brand-product-name } sends diagnostic and interaction data to { -vendor-short-name }.
+onboarding-refresh-data-collection-link = Manage data collection settings
+
+onboarding-refresh-primary-button = Continue
+
+onboarding-refresh-fro-import-header = Bring in your data
+# "It" in "It stays yours" means the browsing data the user is importing (bookmarks, passwords, history).
+# Refers to personal data, indicating that ownership of imported data remains with the user.
+onboarding-refresh-fro-import-subtitle = It stays yours. { -brand-product-name } never sells personal data.
+onboarding-refresh-fro-import-body = Your personal data stays personal. { -brand-product-name } will never sell it.
+onboarding-refresh-fro-skip-button = Skip
+
+onboarding-refresh-fro-theme-header = Play with your look
+
+onboarding-refresh-tab-layout-header = Try a different tab layout
+onboarding-refresh-fro-tab-layout-title = Choose a new tab layout
+onboarding-refresh-tab-layout-top = On top
+onboarding-refresh-tab-layout-side = On the side
+onboarding-refresh-tab-layout-minimal = Minimal
+# Tooltip displayed on hover for minimal tabs image
+onboarding-minimal-tabs-tooltip =
+    .title = A browser window displaying tabs as small icons along the side of the screen, in a minimized sidebar.
+
+# Description for minimal tabs image
+onboarding-minimal-tabs-description =
+    .aria-description = A browser window displaying tabs as small icons along the side of the screen, in a minimized sidebar.
+
 ## Smart window switcher callout
 
 smartwindow-switcher-callout = Switch between Smart and Classic Windows anytime.
@@ -645,3 +679,60 @@ smartwindow-sidebar-auto-open-callout-rejected-subtitle = If you change your min
 onboarding-theme-picker-title = Pick a theme
 onboarding-theme-picker-subtitle = Bring a little more color into { -brand-short-name }.
 onboarding-theme-picker-button-label = Save and continue
+
+## Carousel navigation
+
+# Default accessible name for the row of pills used to move between carousel
+# cards. String means `Highlights of a feature` (feature is a noun).
+onboarding-carousel-nav =
+  .aria-label = Feature highlights
+
+## Welcome Back Onboarding
+
+welcome-back-onboarding-title = New features built to help you do more
+welcome-back-onboarding-primary-button-label = Start browsing
+welcome-back-onboarding-secondary-button-label = See what else is new
+# Pill label for features that allow you to tidy up your tabs
+welcome-back-onboarding-pill-label-tabs = Tidy Tabs
+welcome-back-onboarding-pill-label-vpn = Built-in VPN
+welcome-back-onboarding-pill-label-pdf = PDF Tools
+welcome-back-onboarding-card-label-tabs = Tidy up with vertical tabs and groups
+welcome-back-onboarding-card-label-vpn = Stay hidden with built-in VPN
+welcome-back-onboarding-card-label-pdf = Highlight, sign, and work with PDFs
+welcome-back-onboarding-card-tilebutton-label = Try it
+
+## New Tab Onboarding cards
+
+hnt-card-import-header = Set up your { -brand-short-name } in seconds
+hnt-card-import-body = Bring in your bookmarks, passwords, and more from another browser.
+hnt-card-import-primary-button = Import your data
+
+hnt-card-default-body = { -brand-product-name } is the only major browser built to protect you, not track you.
+hnt-card-default-primary-button = Open links with { -brand-short-name }
+
+hnt-card-pin-header = Keep { -brand-short-name } a click away
+hnt-card-pin-body = { PLATFORM() ->
+    [macos] Jump back in to protected browsing from your dock.
+   *[other] Jump back in to protected browsing from your taskbar.
+}
+
+hnt-card-mobile-header = Get built-in protection on your phone
+hnt-card-mobile-body = Download { -brand-product-name } for mobile for extra privacy on the go.
+hnt-card-mobile-primary-button = Get { -brand-product-name } for mobile.
+
+hnt-card-wallpaper-header = Pick a fresh wallpaper
+hnt-card-wallpaper-body = Make this screen feel like home with a background you love.
+hnt-card-wallpaper-primary-button = Start customizing
+
+hnt-card-taskbar-tabs-header = Add your favorite sites to your Windows taskbar
+hnt-card-taskbar-tabs-body = Open your most visited sites like an app with all of { -brand-product-name }’s protections.
+hnt-card-taskbar-tabs-primary-button = Add sites to taskbar
+
+hnt-card-extensions-header = Boost { -brand-short-name } with extensions
+hnt-card-extensions-body = Customize your browsing with our most loved extensions.
+hnt-card-extensions-primary-button = Explore
+
+# "Do your thing" is an idiom meaning to do what you are interested in or skilled at,
+# rather than simply doing what everyone else does.
+hnt-card-last-card-header-start = All set. Go do your thing.
+hnt-card-last-card-header-end = Tracking protection is on.

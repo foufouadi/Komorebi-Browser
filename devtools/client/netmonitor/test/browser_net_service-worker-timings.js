@@ -27,25 +27,15 @@ add_task(async function testServiceWorkerTimings() {
 
   const timingsSelector =
     "#timings-panel .tabpanel-summary-container.service-worker";
-  wait = waitForDOM(document, timingsSelector, 3);
+  const onDomUpdated = waitForDOM(document, timingsSelector, 3);
 
-  AccessibilityUtils.setEnv({
-    // Keyboard users will will see the sidebar when the request row is
-    // selected. Accessibility is handled on the container level.
-    actionCountRule: false,
-    interactiveRule: false,
-    labelRule: false,
-  });
   EventUtils.sendMouseEvent(
     { type: "click" },
     document.querySelectorAll(".request-list-item")[0]
   );
-  AccessibilityUtils.resetEnv();
-
-  store.dispatch(Actions.toggleNetworkDetails());
 
   clickOnSidebarTab(document, "timings");
-  await wait;
+  await onDomUpdated;
 
   const timings = document.querySelectorAll(timingsSelector, 3);
   // Note: The specific timing numbers change so this only asserts that the

@@ -18,6 +18,12 @@ const kDownloadAutohideCheckboxId = "downloads-button-autohide-checkbox";
 const kDownloadAutohidePanelId = "downloads-button-autohide-panel";
 const kDownloadAutoHidePref = "browser.download.autohideButton";
 
+const kSpecialWidgetL10nIds = {
+  toolbarspring: "customize-mode-toolbarspring",
+  toolbarseparator: "customize-mode-toolbarseparator",
+  toolbarspacer: "customize-mode-toolbarspacer",
+};
+
 import { CustomizableUI } from "moz-src:///browser/components/customizableui/CustomizableUI.sys.mjs";
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
@@ -29,11 +35,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
   DragPositionManager:
     "moz-src:///browser/components/customizableui/DragPositionManager.sys.mjs",
   URILoadingHelper: "resource:///modules/URILoadingHelper.sys.mjs",
-});
-ChromeUtils.defineLazyGetter(lazy, "gWidgetsBundle", function () {
-  const kUrl =
-    "chrome://browser/locale/customizableui/customizableWidgets.properties";
-  return Services.strings.createBundle(kUrl);
 });
 XPCOMUtils.defineLazyServiceGetter(
   lazy,
@@ -110,19 +111,8 @@ export class CustomizeMode {
     this.#translationObserver = new aWindow.MutationObserver(mutations =>
       this.#onTranslations(mutations)
     );
+    this.#window.MozXULElement.insertFTLIfNeeded("browser/customizeMode.ftl");
     this.#ensureCustomizationPanels();
-
-    let content = this.$("customization-content-container");
-    if (!content) {
-      this.#window.MozXULElement.insertFTLIfNeeded("browser/customizeMode.ftl");
-      let container = this.$("customization-container");
-      container.replaceChild(
-        this.#window.MozXULElement.parseXULToFragment(
-          container.firstChild.data
-        ),
-        container.lastChild
-      );
-    }
 
     this.#attachEventListeners();
 
@@ -338,8 +328,10 @@ export class CustomizeMode {
    *
    * @param {MozTabbrowserTab} aTab
    *   The tab to act as the tab representation of customize mode.
+   * @param {string} [aEntryPoint]
+   *   @see CustomizeMode.enter()
    */
-  setTab(aTab) {
+  setTab(aTab, aEntryPoint) {
     if (gTab == aTab) {
       return;
     }
@@ -368,7 +360,7 @@ export class CustomizeMode {
     win.addEventListener("unload", unregisterGlobalTab);
 
     if (gTab.selected) {
-      win.gCustomizeMode.enter();
+      win.gCustomizeMode.enter(aEntryPoint);
     }
   }
 
@@ -384,18 +376,25 @@ export class CustomizeMode {
    *
    * This method will return early if customize mode is already active in this
    * window.
+   *
+   * @param {string} [aEntryPoint]
+   *   The UI entry point that was used to enter customize mode, for telemetry
+   *   purposes (see the customize.opened event). If omitted (e.g. when
+   *   re-entering customize mode on session restore or tab switching), then
+   *   "other" is set as the entrypoint.
    */
-  enter() {
+  enter(aEntryPoint) {
     if (
       !this.#window.toolbar.visible ||
-      this.#window.document.documentElement.hasAttribute("taskbartab")
+      this.#window.document.documentElement.hasAttribute("taskbartab") ||
+      this.#window.document.documentElement.hasAttribute("mini-window")
     ) {
       let w = lazy.URILoadingHelper.getTargetWindow(this.#window, {
         skipPopups: true,
         skipTaskbarTabs: true,
       });
       if (w) {
-        w.gCustomizeMode.enter();
+        w.gCustomizeMode.enter(aEntryPoint);
         return;
       }
       let obs = () => {
@@ -404,7 +403,7 @@ export class CustomizeMode {
           skipPopups: true,
           skipTaskbarTabs: true,
         });
-        w.gCustomizeMode.enter();
+        w.gCustomizeMode.enter(aEntryPoint);
       };
       Services.obs.addObserver(obs, "browser-delayed-startup-finished");
       this.#window.openTrustedLinkIn("about:newtab", "window");
@@ -433,10 +432,19 @@ export class CustomizeMode {
           skipAnimation: true,
           triggeringPrincipal:
             Services.scriptSecurityManager.getSystemPrincipal(),
-        })
+        }),
+        aEntryPoint
       );
       return;
     }
+
+    Glean.customize.opened.record({
+      entry_point: aEntryPoint || "other",
+      tab_orientation: CustomizableUI.verticalTabsEnabled
+        ? "vertical"
+        : "horizontal",
+    });
+
     if (!gTab.selected) {
       // This will force another .enter() to be called via the
       // onlocationchange handler of the tabbrowser, so we return early.
@@ -1403,9 +1411,9 @@ export class CustomizeMode {
     }
 
     if (CustomizableUI.isSpecialWidget(aNode.id)) {
-      wrapper.setAttribute(
-        "title",
-        lazy.gWidgetsBundle.GetStringFromName(aNode.nodeName + ".label")
+      this.#document.l10n.setAttributes(
+        wrapper,
+        kSpecialWidgetL10nIds[aNode.nodeName]
       );
     }
 
@@ -2350,9 +2358,11 @@ export class CustomizeMode {
           this.#customizeTouchBar();
           break;
         case "customization-undo-reset-button":
+          Glean.customize.undoRestore.record();
           this.undoReset();
           break;
         case "customization-reset-button":
+          Glean.customize.restoreDefaults.record();
           this.reset();
           break;
         case "customization-done-button":
@@ -3024,8 +3034,6 @@ export class CustomizeMode {
     __dumpDragData(aEvent, "#onDragEnd");
 
     let document = aEvent.target.ownerDocument;
-    document.documentElement.removeAttribute("customizing-movingItem");
-
     let documentId = document.documentElement.id;
     if (!aEvent.dataTransfer.mozTypesAt(0)) {
       return;
@@ -3401,9 +3409,7 @@ export class CustomizeMode {
   /**
    * Handler for mousedown events in the customize mode UI for the primary
    * button. If the mousedown event is being fired on a customizable item, it
-   * will have a "mousedown" attribute set to "true" on it. A
-   * "customizing-movingItem" attribute is also set to "true" on the
-   * document element.
+   * will have a "mousedown" attribute set to "true" on it.
    *
    * @param {MouseEvent} aEvent
    *   The mousedown event being handled.
@@ -3413,8 +3419,6 @@ export class CustomizeMode {
     if (aEvent.button != 0) {
       return;
     }
-    let doc = aEvent.target.ownerDocument;
-    doc.documentElement.setAttribute("customizing-movingItem", true);
     let item = this.#getWrapper(aEvent.target);
     if (item) {
       item.toggleAttribute("mousedown", true);
@@ -3424,9 +3428,7 @@ export class CustomizeMode {
   /**
    * Handler for mouseup events in the customize mode UI for the primary
    * button. If the mouseup event is being fired on a customizable item, it
-   * will have the "mousedown" attribute added in #onMouseDown removed. This
-   * will also remove the "customizing-movingItem" attribute on the document
-   * element.
+   * will have the "mousedown" attribute added in #onMouseDown removed.
    *
    * @param {MouseEvent} aEvent
    *   The mouseup event being handled.
@@ -3436,8 +3438,6 @@ export class CustomizeMode {
     if (aEvent.button != 0) {
       return;
     }
-    let doc = aEvent.target.ownerDocument;
-    doc.documentElement.removeAttribute("customizing-movingItem");
     let item = this.#getWrapper(aEvent.target);
     if (item) {
       item.removeAttribute("mousedown");

@@ -53,8 +53,9 @@ class BaseType:
                 config.get("exclude_extensions", []),
             )
             config["exclude"] = exclude
-        elif config.get("exclude"):
-            del config["exclude"]
+        else:
+            config.pop("exclude", None)
+            config.pop("global_exclude", None)
 
         if not paths:
             return {"results": [], "fixed": 0}
@@ -83,17 +84,15 @@ class BaseType:
         return errors
 
     def _lint_dir(self, path, config, **lintargs):
-        if not config.get("extensions"):
-            patterns = ["**"]
-        else:
-            patterns = [f"**/*.{e}" for e in config["extensions"]]
-
+        extensions = tuple(f".{e}" for e in config.get("extensions", []))
         exclude = [os.path.relpath(e, path) for e in config.get("exclude", [])]
         finder = FileFinder(path, ignore=exclude)
 
         errors = []
-        for pattern in patterns:
-            for p, f in finder.find(pattern):
+        for p in finder.walk_unfiltered(""):
+            if extensions and not p.endswith(extensions):
+                continue
+            if finder.get(p, known_to_exist=True):
                 errors.extend(self._lint(os.path.join(path, p), config, **lintargs))
         return errors
 
@@ -157,7 +156,9 @@ class ExternalType(BaseType):
     batch = True
 
     def _lint(self, files, config, **lintargs):
-        func = findobject(config["payload"])
+        func = findobject(
+            config["payload"], config["path"], lintargs.get("linter_paths")
+        )
         return func(files, config, **lintargs)
 
 
@@ -179,8 +180,10 @@ class GlobalType(ExternalType):
         # them based on extensions and exclusions.
         files = list(expand_exclusions(files, config, lintargs["root"]))
         if not files:
-            return
-        func = findobject(config["payload"])
+            return []
+        func = findobject(
+            config["payload"], config["path"], lintargs.get("linter_paths")
+        )
         return func(files, config, **lintargs)
 
 
@@ -206,7 +209,9 @@ class StructuredLogType(BaseType):
             commandline.setup_logging(logger, {}, {"mach": sys.stdout})
         logger.add_handler(handler)
 
-        func = findobject(config["payload"])
+        func = findobject(
+            config["payload"], config["path"], lintargs.get("linter_paths")
+        )
         try:
             func(files, config, logger, **lintargs)
         except KeyboardInterrupt:

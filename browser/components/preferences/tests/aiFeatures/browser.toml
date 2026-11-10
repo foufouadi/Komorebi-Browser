@@ -1,7 +1,6 @@
 [DEFAULT]
-dupe-manifest=true
 prefs = [
-  "browser.settings-redesign.enabled=false",
+  "extensions.getAddons.langpacks.url=https://mochi.test:8000/langpacks",
 ]
 support-files = [
   "head.js",
@@ -31,6 +30,8 @@ tags = "os_integration"
 ["browser_aiFeatures_smart_window_model_settings_custom.js"]
 
 ["browser_aiFeatures_smart_window_telemetry.js"]
+
+["browser_aiFeatures_speech_recognition.js"]
 
 ["browser_aiFeatures_telemetry.js"]
 

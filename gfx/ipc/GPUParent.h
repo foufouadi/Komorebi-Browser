@@ -69,9 +69,8 @@ class GPUParent final : public PGPUParent {
   mozilla::ipc::IPCResult RecvInitUiCompositorController(
       const LayersId& aRootLayerTreeId,
       Endpoint<PUiCompositorControllerParent>&& aEndpoint);
-  mozilla::ipc::IPCResult RecvInitAPZInputBridge(
-      const LayersId& aRootLayerTreeId,
-      Endpoint<PAPZInputBridgeParent>&& aEndpoint);
+  mozilla::ipc::IPCResult RecvInitAPZBridge(
+      const LayersId& aRootLayerTreeId, Endpoint<PAPZBridgeParent>&& aEndpoint);
   mozilla::ipc::IPCResult RecvInitProfiler(
       Endpoint<PProfilerChild>&& aEndpoint);
   mozilla::ipc::IPCResult RecvUpdateVar(const nsTArray<GfxVarUpdate>& var);
@@ -81,7 +80,8 @@ class GPUParent final : public PGPUParent {
       const BatteryInformation& aBatteryInfo);
   mozilla::ipc::IPCResult RecvNewContentCompositorManager(
       Endpoint<PCompositorManagerParent>&& aEndpoint,
-      const ContentParentId& aChildId, uint32_t aNamespace);
+      const ContentParentId& aChildId, uint32_t aNamespace,
+      uint32_t aContentBridgeNamespace);
   mozilla::ipc::IPCResult RecvNewContentImageBridge(
       Endpoint<PImageBridgeParent>&& aEndpoint, const ContentParentId& aChildId,
       uint32_t aNamespace);

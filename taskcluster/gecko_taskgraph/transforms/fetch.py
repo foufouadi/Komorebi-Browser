@@ -19,11 +19,16 @@ from taskgraph.util.schema import Schema, validate_schema
 from taskgraph.util.treeherder import join_symbol
 
 import gecko_taskgraph
+from gecko_taskgraph import GECKO
 from gecko_taskgraph.transforms.task import TaskDescriptionSchema
+from gecko_taskgraph.util.hash import hash_paths
 
 from ..util.cached_tasks import add_optimization
 
 CACHE_TYPE = "content.v1"
+
+CRX3_SCRIPT = "taskcluster/scripts/misc/fetch-crx3.py"
+ONNXRUNTIME_DEPS_SCRIPT = "taskcluster/scripts/misc/fetch-onnxruntime-deps.sh"
 
 
 class FetchTypeSchema(Schema, forbid_unknown_fields=False, kw_only=True):
@@ -291,7 +296,13 @@ class GitFetchSchema(Schema, forbid_unknown_fields=False, kw_only=True):
     include_dot_git: Optional[bool] = None
     artifact_name: Optional[str] = None
     path_prefix: Optional[str] = None
+    # How to populate the checkout. "clone" (the default) clones the repo,
+    # "fetch" fetches only `revision` and leaves no branches or tags,
+    # for git servers that cannot serve a full clone. See
+    # https://bugzilla.mozilla.org/show_bug.cgi?id=2047876
+    fetch_mode: Optional[Literal["clone", "fetch"]] = None
     # ssh-key is a taskcluster secret path (e.g. project/civet/github-deploy-key)
+    # The path may contain `{level}`, which is replaced by the SCM level.
     # In the secret dictionary, the key should be specified as
     #  "ssh_privkey": "-----BEGIN OPENSSH PRIVATE KEY-----\nkfksnb3jc..."
     # n.b. The OpenSSH private key file format requires a newline at the end of the file.
@@ -332,6 +343,7 @@ def create_git_fetch_task(config, name, fetch):
 
     ssh_key = fetch.get("ssh-key")
     if ssh_key:
+        ssh_key = ssh_key.format(level=config.params["level"])
         args.append("--ssh-key-secret")
         args.append(ssh_key)
 
@@ -339,6 +351,10 @@ def create_git_fetch_task(config, name, fetch):
     if fetch.get("include-dot-git", False):
         args.append("--include-dot-git")
         digest_data.append(".git")
+
+    fetch_mode = fetch.get("fetch-mode")
+    if fetch_mode:
+        args.extend(["--fetch-mode", fetch_mode])
 
     return {
         "command": args,
@@ -360,7 +376,7 @@ def create_onnxruntime_deps_fetch_task(config, name, fetch):
     artifact_name = fetch.get("artifact-name")
     workdir = "/builds/worker"
 
-    script = os.path.join(workdir, "bin/fetch-onnxruntime-deps.sh")
+    script = os.path.join(workdir, "bin", os.path.basename(ONNXRUNTIME_DEPS_SCRIPT))
     repo = fetch["repo"]
     revision = fetch["revision"]
 
@@ -374,6 +390,7 @@ def create_onnxruntime_deps_fetch_task(config, name, fetch):
             f"repo={repo}",
             f"revision={revision}",
             f"artifact_name={artifact_name}",
+            hash_paths(GECKO, [ONNXRUNTIME_DEPS_SCRIPT]),
         ],
     }
 
@@ -387,6 +404,55 @@ class ChromiumFetchSchema(Schema, forbid_unknown_fields=False, kw_only=True):
     revision: Optional[str] = None
     # The name to give to the generated artifact.
     artifact_name: str
+
+
+class Crx3UrlFetchSchema(Schema, forbid_unknown_fields=False, kw_only=True):
+    type: Literal["crx3-url"]
+    # The URL of the CRX3 to download.
+    url: str
+    # The SHA-256 of the downloaded content.
+    sha256: str
+    # Size of the downloaded entity, in bytes.
+    size: int
+    # The name to give to the generated artifact. Must end with .tar.zst.
+    artifact_name: str
+    # Add the given prefix to each file entry in the archive.
+    add_prefix: Optional[str] = None
+    # IMPORTANT: when adding anything that changes the behavior of the task,
+    # it is important to update the digest data used to compute cache hits.
+
+
+@fetch_builder("crx3-url", schema=Crx3UrlFetchSchema)
+def create_crx3_fetch_task(config, name, fetch):
+    artifact_name = fetch["artifact-name"]
+    if not artifact_name.endswith(".tar.zst"):
+        raise Exception(f"Only producing .tar.zst archives is supported: {name}")
+
+    add_prefix = fetch.get("add-prefix", "")
+    command = [
+        "/builds/worker/bin/fetch-crx3.py",
+        "--sha256",
+        fetch["sha256"],
+        "--size",
+        str(fetch["size"]),
+    ]
+    if add_prefix:
+        command.extend(["--add-prefix", add_prefix])
+    command.extend([fetch["url"], f"/builds/worker/artifacts/{artifact_name}"])
+
+    return {
+        "command": command,
+        "artifact_name": artifact_name,
+        "docker-image": "fetch-more",
+        # The script decides the layout of the archive, so a change to it has
+        # to produce a new archive rather than a hit on the old one.
+        "digest_data": [
+            fetch["sha256"],
+            add_prefix,
+            artifact_name,
+            hash_paths(GECKO, [CRX3_SCRIPT]),
+        ],
+    }
 
 
 @fetch_builder("chromium-fetch", schema=ChromiumFetchSchema)

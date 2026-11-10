@@ -33,9 +33,9 @@ smartwindow-document-title = New Tab
 
 ## Smart Window Toggle Button
 
-toolbar-switcher-customizable-label =
+toolbar-switcher-customizable-label-v2 =
     .label = { -smart-window-brand-name } switcher
-    .tooltiptext = Switch between Smart and Classic windows.
+    .tooltiptext = Switch between Smart and Classic Windows
 
 ai-window-toggleview-switch-classic =
     .label = Classic Window
@@ -98,6 +98,7 @@ smartbar-placeholder-hint-4 = Search the web…
 
 smartbar-mention-typing-placeholder = Tag a tab or site
 smartbar-mentions-list-no-results-label = No results found
+smartbar-mentions-list-tab-groups-label = Recent groups
 smartbar-mentions-list-recent-tabs-label = Recent tabs
 
 ## Context mentions menu toggle button
@@ -116,27 +117,15 @@ aiwindow-website-chip-remove-button =
 ## Firstrun onboarding
 
 aiwindow-firstrun-title = Welcome to { -smart-window-brand-name }
-aiwindow-firstrun-model-title = What’s important to you?
 aiwindow-firstrun-model-title-v2 = Pick a model to start
-aiwindow-firstrun-model-subtitle = Pick a model to power { -smart-window-brand-name }. Switch anytime.
 aiwindow-firstrun-model-subtitle-v2 = Each model can help you to summarize, compare, and explore across your tabs. Switch anytime.
 
-# $model (string) - The name of the AI model
-# $ownerName (string) - The name of the model owner/provider
-# $shortName (string) - The short name of the model version
-aiwindow-firstrun-model-chip-subtitle = Model { $model } by { $ownerName }
-aiwindow-firstrun-model-personal-label = Personal
-aiwindow-firstrun-model-personal-body = Most tailored answers
 # $shortName (string) - The short name of the model version
 aiwindow-firstrun-model-personal-label-v2 = Personal: { $shortName }
 aiwindow-firstrun-model-personal-body-v2 = Built for personalized help across languages
-aiwindow-firstrun-model-fast-label = Fast
-aiwindow-firstrun-model-fast-body = Answers quickly
 # $shortName (string) - The short name of the model version
 aiwindow-firstrun-model-fast-label-v2 = Fast: { $shortName }
 aiwindow-firstrun-model-fast-body-v2 = Best for quick answers when you’re moving fast
-aiwindow-firstrun-model-allpurpose-label = Flexible
-aiwindow-firstrun-model-allpurpose-body = Solid fit for most needs
 # $shortName (string) - The short name of the model version
 aiwindow-firstrun-model-flexible-label = Flexible: { $shortName }
 aiwindow-firstrun-model-flexible-body = Ready for a variety of tasks
@@ -154,13 +143,7 @@ aiwindow-input-model-select-button-label-fast = Fast
 aiwindow-input-model-select-button-label-allpurpose = Flexible
 aiwindow-input-model-select-button-label-personal = Personal
 aiwindow-input-model-select-button-label-custom = Custom
-aiwindow-input-model-select-button-description-custom = Use your own LLM
 
-# Variables:
-# $ownerName (string) - The name of the model owner/provider
-# $model (string) - The model name
-aiwindow-input-model-select-menu-item-description = { $ownerName } { $model }
-aiwindow-input-model-select-menu-item-description-custom = Use your own LLM
 aiwindow-input-model-select-default-badge =
     .label = Default
     .title = The selected default model
@@ -407,3 +390,20 @@ aiwindow-starter-planning-plan = Help make a plan
 aiwindow-starter-browsing-history = Find tabs in history
 aiwindow-starter-browsing-summarize = Summarize tabs
 aiwindow-starter-browsing-compare = Compare tabs
+
+## Conversation Starter Scroll Buttons
+## Scrolls the conversation-starter pill row toward its start/end.
+
+aiwindow-starter-scroll-start =
+    .tooltiptext = Scroll back
+    .aria-label = Scroll back
+aiwindow-starter-scroll-end =
+    .tooltiptext = Scroll forward
+    .aria-label = Scroll forward
+
+# Dismisses a "pick up where you left off" resume-activity suggestion pill.
+# Variables:
+#   $text (String) - The suggestion headline being dismissed
+aiwindow-starter-dismiss =
+    .title = Dismiss { $text }
+    .aria-label = Dismiss { $text }

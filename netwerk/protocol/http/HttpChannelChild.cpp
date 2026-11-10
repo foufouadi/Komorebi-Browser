@@ -37,8 +37,6 @@
 #include "mozilla/net/ChannelClassifierUtils.h"
 #include "mozilla/net/DNS.h"
 #include "mozilla/net/NeckoChild.h"
-#include "mozilla/net/PBackgroundDataBridge.h"
-#include "mozilla/net/SocketProcessBridgeChild.h"
 #include "nsCOMPtr.h"
 #include "nsCORSListenerProxy.h"
 #include "nsContentPolicyUtils.h"
@@ -353,11 +351,13 @@ void HttpChannelChild::ProcessOnStartRequest(
   LOG(("HttpChannelChild::ProcessOnStartRequest [this=%p]\n", this));
   MOZ_ASSERT(OnSocketThread());
 
-  mAltDataInputStream = DeserializeIPCStream(aAltData.altDataInputStream());
+  nsCOMPtr<nsIInputStream> altDataInputStream =
+      DeserializeIPCStream(aAltData.altDataInputStream());
 
-  mEventQ->RunOrEnqueue(MakeUnique<NeckoTargetChannelFunctionEvent>(
+  mEventQ->RunOrEnqueue(std::make_unique<NeckoTargetChannelFunctionEvent>(
       this, [self = UnsafePtr<HttpChannelChild>(this), aResponseHead,
-             aUseResponseHead, aRequestHeaders, aArgs]() {
+             aUseResponseHead, aRequestHeaders, aArgs, altDataInputStream]() {
+        self->mAltDataInputStream = altDataInputStream;
         self->OnStartRequest(aResponseHead, aUseResponseHead, aRequestHeaders,
                              aArgs);
       }));
@@ -406,7 +406,8 @@ void HttpChannelChild::OnStartRequest(
   MOZ_ASSERT(!nsHttpResponseHead(aResponseHead).HasHeader(nsHttp::Set_Cookie));
 
   if (aUseResponseHead && !mCanceled) {
-    mResponseHead = MakeUnique<nsHttpResponseHead>(aResponseHead);
+    mResponseHead = std::make_unique<nsHttpResponseHead>(aResponseHead);
+    CollectAkamaiResponseTelemetry();
   }
 
   mSecurityInfo = aArgs.securityInfo();
@@ -508,7 +509,7 @@ void HttpChannelChild::OnStartRequest(
 
     mEventQ->Suspend();
     mSuspendedByWaitingForCookies = true;
-    mEventQ->PrependEvent(MakeUnique<NeckoTargetChannelFunctionEvent>(
+    mEventQ->PrependEvent(std::make_unique<NeckoTargetChannelFunctionEvent>(
         this, [self = UnsafePtr<HttpChannelChild>(this)]() {
           self->DoOnStartRequest(self);
         }));
@@ -527,7 +528,7 @@ void HttpChannelChild::OnStartRequest(
 void HttpChannelChild::ProcessOnAfterLastPart(const nsresult& aStatus) {
   LOG(("HttpChannelChild::ProcessOnAfterLastPart [this=%p]\n", this));
   MOZ_ASSERT(OnSocketThread());
-  mEventQ->RunOrEnqueue(MakeUnique<NeckoTargetChannelFunctionEvent>(
+  mEventQ->RunOrEnqueue(std::make_unique<NeckoTargetChannelFunctionEvent>(
       this, [self = UnsafePtr<HttpChannelChild>(this), aStatus]() {
         self->OnAfterLastPart(aStatus);
       }));
@@ -569,6 +570,25 @@ void HttpChannelChild::OnAfterLastPart(const nsresult& aStatus) {
   }
 }
 
+class HttpChannelChild::AkamaiWafBlockDetector final
+    : public nsIThreadRetargetableStreamListener {
+ public:
+  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_NSIREQUESTOBSERVER
+  NS_DECL_NSISTREAMLISTENER
+  NS_DECL_NSITHREADRETARGETABLESTREAMLISTENER
+
+  // The channel owns the listener chain, so it outlives the detector's use.
+  AkamaiWafBlockDetector(nsIStreamListener* aNext, HttpChannelChild* aChannel)
+      : mNext(aNext), mChannel(aChannel) {}
+
+ private:
+  ~AkamaiWafBlockDetector() = default;
+
+  nsCOMPtr<nsIStreamListener> mNext;
+  HttpChannelChild* mChannel;
+};
+
 void HttpChannelChild::DoOnStartRequest(nsIRequest* aRequest) {
   nsresult rv;
 
@@ -601,12 +621,22 @@ void HttpChannelChild::DoOnStartRequest(nsIRequest* aRequest) {
     return;
   }
 
+  // The detector is placed after the content decoders so it sees the decoded
+  // body.
+  nsCOMPtr<nsIStreamListener> nextListener = mListener;
+  if (mAkamaiWafState == AkamaiWafState::MaybeBlocked) {
+    nextListener = new AkamaiWafBlockDetector(mListener, this);
+  }
+
   nsCOMPtr<nsIStreamListener> listener;
-  rv = DoApplyContentConversions(mListener, getter_AddRefs(listener), nullptr);
+  rv = DoApplyContentConversions(nextListener, getter_AddRefs(listener),
+                                 nullptr);
   if (NS_FAILED(rv)) {
     CancelWithReason(rv,
                      "HttpChannelChild DoApplyContentConversions failed"_ns);
-  } else if (listener) {
+  } else if (!listener) {
+    mListener = nextListener;
+  } else {
     mListener = listener;
     mCompressListener = listener;
 
@@ -619,7 +649,7 @@ void HttpChannelChild::DoOnStartRequest(nsIRequest* aRequest) {
     }
   }
 
-#if defined(EARLY_BETA_OR_EARLIER) || defined(DEBUG)
+#if defined(NIGHTLY_BUILD) || defined(DEBUG)
   if (nsCOMPtr<nsIThreadRetargetableRequest> req =
           do_QueryInterface(aRequest)) {
     nsCOMPtr<nsISerialEventTarget> target;
@@ -643,7 +673,7 @@ void HttpChannelChild::ProcessOnTransportAndData(
     const TimeStamp& aOnDataAvailableStartTime) {
   LOG(("HttpChannelChild::ProcessOnTransportAndData [this=%p]\n", this));
   MOZ_ASSERT(OnSocketThread());
-  mEventQ->RunOrEnqueue(MakeUnique<ChannelFunctionEvent>(
+  mEventQ->RunOrEnqueue(std::make_unique<ChannelFunctionEvent>(
       [self = UnsafePtr<HttpChannelChild>(this)]() {
         return self->GetODATarget();
       },
@@ -662,8 +692,10 @@ void HttpChannelChild::OnTransportAndData(const nsresult& aChannelStatus,
                                           const nsACString& aData) {
   LOG(("HttpChannelChild::OnTransportAndData [this=%p]\n", this));
 
-  if (!mCanceled && NS_SUCCEEDED(mStatus)) {
-    mStatus = aChannelStatus;
+  nsresult status = mStatus;
+  while (!mCanceled && NS_SUCCEEDED(status) &&
+         !mStatus.compareExchange(status, aChannelStatus)) {
+    status = mStatus;
   }
 
   if (mCanceled || NS_FAILED(mStatus)) {
@@ -727,8 +759,6 @@ void HttpChannelChild::OnTransportAndData(const nsresult& aChannelStatus,
   DoOnDataAvailable(this, stringStream, aOffset, aData.Length());
   stringStream->Close();
 
-  // TODO: Bug 1523916 backpressure needs to take into account if the data is
-  // coming from the main process or from the socket process via PBackground.
   if (NeedToReportBytesRead()) {
     mUnreportBytesRead += aData.Length();
     if (mUnreportBytesRead >= gHttpHandler->SendWindowSize() >> 2) {
@@ -877,19 +907,16 @@ void HttpChannelChild::SendOnDataFinished(const nsresult& aChannelStatus) {
 void HttpChannelChild::ProcessOnStopRequest(
     const nsresult& aChannelStatus, const ResourceTimingStructArgs& aTiming,
     const nsHttpHeaderArray& aResponseTrailers,
-    nsTArray<ConsoleReportCollected>&& aConsoleReports, bool aFromSocketProcess,
+    nsTArray<ConsoleReportCollected>&& aConsoleReports,
     const TimeStamp& aOnStopRequestStartTime) {
-  LOG(
-      ("HttpChannelChild::ProcessOnStopRequest [this=%p, "
-       "aFromSocketProcess=%d]\n",
-       this, aFromSocketProcess));
+  LOG(("HttpChannelChild::ProcessOnStopRequest [this=%p]\n", this));
   MOZ_ASSERT(OnSocketThread());
   mTransferSize = aTiming.transferSize();
   mEncodedBodySize = aTiming.encodedBodySize();
   mDecodedBodySize = aTiming.decodedBodySize();
 
   if (StaticPrefs::network_send_OnDataFinished()) {
-    mEventQ->RunOrEnqueue(MakeUnique<ChannelFunctionEvent>(
+    mEventQ->RunOrEnqueue(std::make_unique<ChannelFunctionEvent>(
         [self = UnsafePtr<HttpChannelChild>(this)]() {
           return self->GetODATarget();
         },
@@ -897,28 +924,12 @@ void HttpChannelChild::ProcessOnStopRequest(
           self->SendOnDataFinished(status);
         }));
   }
-  mEventQ->RunOrEnqueue(MakeUnique<NeckoTargetChannelFunctionEvent>(
-      this, [self = UnsafePtr<HttpChannelChild>(this), aChannelStatus, aTiming,
-             aResponseTrailers,
-             consoleReports = CopyableTArray{aConsoleReports.Clone()},
-             aFromSocketProcess]() mutable {
-        self->OnStopRequest(aChannelStatus, aTiming, aResponseTrailers);
-        if (!aFromSocketProcess) {
-          self->DoOnConsoleReport(std::move(consoleReports));
-          self->ContinueOnStopRequest();
-        }
-      }));
-}
-
-void HttpChannelChild::ProcessOnConsoleReport(
-    nsTArray<ConsoleReportCollected>&& aConsoleReports) {
-  LOG(("HttpChannelChild::ProcessOnConsoleReport [this=%p]\n", this));
-  MOZ_ASSERT(OnSocketThread());
-
-  mEventQ->RunOrEnqueue(MakeUnique<NeckoTargetChannelFunctionEvent>(
+  mEventQ->RunOrEnqueue(std::make_unique<NeckoTargetChannelFunctionEvent>(
       this,
-      [self = UnsafePtr<HttpChannelChild>(this),
+      [self = UnsafePtr<HttpChannelChild>(this), aChannelStatus, aTiming,
+       aResponseTrailers,
        consoleReports = CopyableTArray{aConsoleReports.Clone()}]() mutable {
+        self->OnStopRequest(aChannelStatus, aTiming, aResponseTrailers);
         self->DoOnConsoleReport(std::move(consoleReports));
         self->ContinueOnStopRequest();
       }));
@@ -999,6 +1010,7 @@ void HttpChannelChild::OnStopRequest(
         mLastStatusReported, now, mTransferSize, kCacheUnknown,
         mLoadInfo->GetInnerWindowID(),
         mLoadInfo->GetOriginAttributes().IsPrivateBrowsing(), this, mStatus,
+        GetSecPurpose(), mLoadInfo->GetActivatedFromNavigationalPrefetch(),
         &mTransactionTimings, std::move(mSource),
         // Skip the version for a cached response: it reflects the original
         // fetch, not this request's connection.
@@ -1023,7 +1035,7 @@ void HttpChannelChild::OnStopRequest(
                                  now - mOnStopRequestStartTime);
   }
 
-  mResponseTrailers = MakeUnique<nsHttpHeaderArray>(aResponseTrailers);
+  mResponseTrailers = std::make_unique<nsHttpHeaderArray>(aResponseTrailers);
 
   DoPreOnStopRequest(aChannelStatus);
 
@@ -1164,6 +1176,158 @@ void HttpChannelChild::CollectMixedContentTelemetry() {
   }
 }
 
+void HttpChannelChild::CollectAkamaiResponseTelemetry() {
+  mAkamaiWafState = AkamaiWafState::None;
+  if (!StaticPrefs::network_http_akamai_waf_telemetry_enabled() ||
+      !mResponseHead) {
+    return;
+  }
+
+  bool isAkamai = false;
+  (void)mResponseHead->VisitHeaders(
+      nsHttpHeaderArray::eFilterResponse,
+      [&isAkamai](const nsACString& aHeader, const nsACString& aValue) {
+        if ((aHeader.LowerCaseEqualsLiteral("server") &&
+             StringBeginsWith(aValue, "akamai"_ns,
+                              nsCaseInsensitiveCStringComparator)) ||
+            StringBeginsWith(aHeader, "akamai"_ns,
+                             nsCaseInsensitiveCStringComparator) ||
+            StringBeginsWith(aHeader, "x-akamai-"_ns,
+                             nsCaseInsensitiveCStringComparator)) {
+          isAkamai = true;
+          return NS_ERROR_ABORT;
+        }
+        return NS_OK;
+      });
+  if (!isAkamai) {
+    return;
+  }
+
+  if (mResponseHead->Status() == 403) {
+    mAkamaiWafState = AkamaiWafState::MaybeBlocked;
+  } else {
+    mAkamaiWafState = AkamaiWafState::AkamaiResponse;
+  }
+}
+
+NS_IMPL_ISUPPORTS(HttpChannelChild::AkamaiWafBlockDetector, nsIStreamListener,
+                  nsIRequestObserver, nsIThreadRetargetableStreamListener)
+
+NS_IMETHODIMP
+HttpChannelChild::AkamaiWafBlockDetector::OnStartRequest(nsIRequest* aRequest) {
+  nsCOMPtr<nsIStreamListener> next = mNext;
+  return next->OnStartRequest(aRequest);
+}
+
+NS_IMETHODIMP
+HttpChannelChild::AkamaiWafBlockDetector::OnStopRequest(nsIRequest* aRequest,
+                                                        nsresult aStatusCode) {
+  nsCOMPtr<nsIStreamListener> next = mNext;
+  return next->OnStopRequest(aRequest, aStatusCode);
+}
+
+NS_IMETHODIMP
+HttpChannelChild::AkamaiWafBlockDetector::OnDataAvailable(
+    nsIRequest* aRequest, nsIInputStream* aInputStream, uint64_t aOffset,
+    uint32_t aCount) {
+  nsCOMPtr<nsIStreamListener> next = mNext;
+
+  // The block page is small, so only the beginning of the body is inspected.
+  static constexpr uint64_t kMaxInspectedOffset = 4096;
+  if (aOffset >= kMaxInspectedOffset ||
+      mChannel->mAkamaiWafState != AkamaiWafState::MaybeBlocked) {
+    return next->OnDataAvailable(aRequest, aInputStream, aOffset, aCount);
+  }
+
+  nsAutoCString data;
+  nsresult rv = NS_ReadInputStreamToString(aInputStream, data, aCount);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  if (FindInReadable("https://errors.edgesuite.net/18"_ns, data) ||
+      FindInReadable(
+          "https&#58;&#47;&#47;errors&#46;edgesuite&#46;net&#47;18"_ns, data)) {
+    mChannel->mAkamaiWafState = AkamaiWafState::Blocked;
+  }
+
+  nsCOMPtr<nsIInputStream> stream;
+  rv = NS_NewCStringInputStream(getter_AddRefs(stream), std::move(data));
+  NS_ENSURE_SUCCESS(rv, rv);
+  return next->OnDataAvailable(aRequest, stream, aOffset, aCount);
+}
+
+NS_IMETHODIMP
+HttpChannelChild::AkamaiWafBlockDetector::CheckListenerChain() {
+  nsCOMPtr<nsIThreadRetargetableStreamListener> listener =
+      do_QueryInterface(mNext);
+  if (!listener) {
+    return NS_ERROR_NO_INTERFACE;
+  }
+  return listener->CheckListenerChain();
+}
+
+NS_IMETHODIMP
+HttpChannelChild::AkamaiWafBlockDetector::OnDataFinished(nsresult aStatus) {
+  nsCOMPtr<nsIThreadRetargetableStreamListener> listener =
+      do_QueryInterface(mNext);
+  if (listener) {
+    return listener->OnDataFinished(aStatus);
+  }
+  return NS_OK;
+}
+
+void HttpChannelChild::MaybeCollectAkamaiWafBlockTelemetry() {
+  MOZ_ASSERT(NS_IsMainThread());
+  AkamaiWafState state = mAkamaiWafState.exchange(AkamaiWafState::None);
+  if (state == AkamaiWafState::None) {
+    return;
+  }
+
+  ExtContentPolicyType type = mLoadInfo->GetExternalContentPolicyType();
+  bool isDocumentLoad = type == ExtContentPolicy::TYPE_DOCUMENT ||
+                        type == ExtContentPolicy::TYPE_SUBDOCUMENT;
+  if (isDocumentLoad) {
+    switch (state) {
+      case AkamaiWafState::Blocked:
+        glean::network::akamai_waf_blocked.Set(true);
+        glean::network::akamai_document_loads.Get("waf_blocked"_ns).Add(1);
+        break;
+      case AkamaiWafState::MaybeBlocked:
+        glean::network::akamai_document_loads.Get("forbidden"_ns).Add(1);
+        break;
+      default:
+        glean::network::akamai_document_loads.Get("ok"_ns).Add(1);
+        break;
+    }
+  } else if (state == AkamaiWafState::Blocked) {
+    glean::network::akamai_waf_blocked_subresource.Set(true);
+  }
+
+  // Document and frame loads set the use counters on the document they
+  // created, subresources on the loading document. Frames propagate them to
+  // the page.
+  RefPtr<Document> doc;
+  if (isDocumentLoad) {
+    if (RefPtr<BrowsingContext> bc = mLoadInfo->GetTargetBrowsingContext()) {
+      doc = bc->GetExtantDocument();
+    }
+    if (doc && doc->GetChannel() != static_cast<nsIChannel*>(this)) {
+      doc = nullptr;
+    }
+  } else {
+    mLoadInfo->GetLoadingDocument(getter_AddRefs(doc));
+  }
+  if (!doc) {
+    return;
+  }
+
+  doc->SetUseCounter(eUseCounter_custom_AkamaiUsed);
+  if (state == AkamaiWafState::Blocked) {
+    doc->SetUseCounter(eUseCounter_custom_AkamaiWafBlocked);
+  } else if (state == AkamaiWafState::MaybeBlocked) {
+    doc->SetUseCounter(eUseCounter_custom_AkamaiForbidden);
+  }
+}
+
 void HttpChannelChild::DoOnStopRequest(nsIRequest* aRequest,
                                        nsresult aChannelStatus) {
   AUTO_PROFILER_LABEL("HttpChannelChild::DoOnStopRequest", NETWORK);
@@ -1222,6 +1386,10 @@ void HttpChannelChild::DoOnStopRequest(nsIRequest* aRequest,
   }
   StoreOnStopRequestCalled(true);
 
+  // Content decoders may deliver the last decoded data from OnStopRequest, so
+  // this must run after the listener has been notified.
+  MaybeCollectAkamaiWafBlockTelemetry();
+
   // If we're a multi-part stream, then don't cleanup yet, and we'll do so
   // in OnAfterLastPart.
   if (mMultiPartID) {
@@ -1253,7 +1421,7 @@ void HttpChannelChild::ProcessOnProgress(const int64_t& aProgress,
                                          const int64_t& aProgressMax) {
   MOZ_ASSERT(OnSocketThread());
   LOG(("HttpChannelChild::ProcessOnProgress [this=%p]\n", this));
-  mEventQ->RunOrEnqueue(MakeUnique<NeckoTargetChannelFunctionEvent>(
+  mEventQ->RunOrEnqueue(std::make_unique<NeckoTargetChannelFunctionEvent>(
       this,
       [self = UnsafePtr<HttpChannelChild>(this), aProgress, aProgressMax]() {
         AutoEventEnqueuer ensureSerialDispatch(self->mEventQ);
@@ -1264,7 +1432,7 @@ void HttpChannelChild::ProcessOnProgress(const int64_t& aProgress,
 void HttpChannelChild::ProcessOnStatus(const nsresult& aStatus) {
   MOZ_ASSERT(OnSocketThread());
   LOG(("HttpChannelChild::ProcessOnStatus [this=%p]\n", this));
-  mEventQ->RunOrEnqueue(MakeUnique<NeckoTargetChannelFunctionEvent>(
+  mEventQ->RunOrEnqueue(std::make_unique<NeckoTargetChannelFunctionEvent>(
       this, [self = UnsafePtr<HttpChannelChild>(this), aStatus]() {
         AutoEventEnqueuer ensureSerialDispatch(self->mEventQ);
         self->DoOnStatus(self, aStatus);
@@ -1274,7 +1442,7 @@ void HttpChannelChild::ProcessOnStatus(const nsresult& aStatus) {
 mozilla::ipc::IPCResult HttpChannelChild::RecvFailedAsyncOpen(
     const nsresult& aStatus) {
   LOG(("HttpChannelChild::RecvFailedAsyncOpen [this=%p]\n", this));
-  mEventQ->RunOrEnqueue(MakeUnique<NeckoTargetChannelFunctionEvent>(
+  mEventQ->RunOrEnqueue(std::make_unique<NeckoTargetChannelFunctionEvent>(
       this, [self = UnsafePtr<HttpChannelChild>(this), aStatus]() {
         self->FailedAsyncOpen(aStatus);
       }));
@@ -1360,7 +1528,7 @@ mozilla::ipc::IPCResult HttpChannelChild::RecvDeleteSelf() {
     mEventQ->Resume();
   }
 
-  mEventQ->RunOrEnqueue(MakeUnique<NeckoTargetChannelFunctionEvent>(
+  mEventQ->RunOrEnqueue(std::make_unique<NeckoTargetChannelFunctionEvent>(
       this,
       [self = UnsafePtr<HttpChannelChild>(this)]() { self->DeleteSelf(); }));
   return IPC_OK();
@@ -1406,7 +1574,7 @@ void HttpChannelChild::DoNotifyListener(bool aUseEventQueue) {
   StoreOnStartRequestCalled(true);
 
   if (aUseEventQueue) {
-    mEventQ->RunOrEnqueue(MakeUnique<NeckoTargetChannelFunctionEvent>(
+    mEventQ->RunOrEnqueue(std::make_unique<NeckoTargetChannelFunctionEvent>(
         this, [self = UnsafePtr<HttpChannelChild>(this)] {
           self->ContinueDoNotifyListener();
         }));
@@ -1617,7 +1785,7 @@ mozilla::ipc::IPCResult HttpChannelChild::RecvRedirect1Begin(
   // Cookies headers should not be visible to the child process
   MOZ_ASSERT(!nsHttpResponseHead(aResponseHead).HasHeader(nsHttp::Set_Cookie));
 
-  mEventQ->RunOrEnqueue(MakeUnique<NeckoTargetChannelFunctionEvent>(
+  mEventQ->RunOrEnqueue(std::make_unique<NeckoTargetChannelFunctionEvent>(
       this, [self = UnsafePtr<HttpChannelChild>(this), aRegistrarId,
              newUri = RefPtr{aNewUri}, aNewLoadFlags, aRedirectFlags,
              aLoadInfoForwarder, aResponseHead = std::move(aResponseHead),
@@ -1655,7 +1823,7 @@ nsresult HttpChannelChild::SetupRedirect(nsIURI* uri,
   NS_ENSURE_SUCCESS(rv, rv);
 
   // We won't get OnStartRequest, set cookies here.
-  mResponseHead = MakeUnique<nsHttpResponseHead>(*responseHead);
+  mResponseHead = std::make_unique<nsHttpResponseHead>(*responseHead);
 
   bool rewriteToGET = HttpBaseChannel::ShouldRewriteRedirectToGET(
       mResponseHead->Status(), mRequestHead.ParsedMethod());
@@ -1696,6 +1864,7 @@ void HttpChannelChild::Redirect1Begin(
         NetworkLoadType::LOAD_REDIRECT, mLastStatusReported, TimeStamp::Now(),
         0, kCacheUnknown, mLoadInfo->GetInnerWindowID(),
         mLoadInfo->GetOriginAttributes().IsPrivateBrowsing(), this, mStatus,
+        GetSecPurpose(), mLoadInfo->GetActivatedFromNavigationalPrefetch(),
         &mTransactionTimings, std::move(mSource), Some(responseHead.Version()),
         Some(responseHead.Status()),
         Some(nsDependentCString(contentType.get())), newOriginalURI,
@@ -1737,7 +1906,7 @@ mozilla::ipc::IPCResult HttpChannelChild::RecvRedirect3Complete() {
   nsCOMPtr<nsIChannel> redirectChannel =
       do_QueryInterface(mRedirectChannelChild);
   MOZ_ASSERT(redirectChannel);
-  mEventQ->RunOrEnqueue(MakeUnique<NeckoTargetChannelFunctionEvent>(
+  mEventQ->RunOrEnqueue(std::make_unique<NeckoTargetChannelFunctionEvent>(
       this, [self = UnsafePtr<HttpChannelChild>(this), redirectChannel]() {
         nsresult rv = NS_OK;
         (void)self->GetStatus(&rv);
@@ -1778,7 +1947,7 @@ mozilla::ipc::IPCResult HttpChannelChild::RecvRedirectFailed(
     const nsresult& status) {
   LOG(("HttpChannelChild::RecvRedirectFailed this=%p status=%X\n", this,
        static_cast<uint32_t>(status)));
-  mEventQ->RunOrEnqueue(MakeUnique<NeckoTargetChannelFunctionEvent>(
+  mEventQ->RunOrEnqueue(std::make_unique<NeckoTargetChannelFunctionEvent>(
       this, [self = UnsafePtr<HttpChannelChild>(this), status]() {
         nsCOMPtr<nsIRedirectResultListener> vetoHook;
         self->GetCallback(vetoHook);
@@ -1812,7 +1981,7 @@ void HttpChannelChild::ProcessNotifyClassificationFlags(
        static_cast<int>(aIsThirdParty), aClassificationFlags, this));
   MOZ_ASSERT(OnSocketThread());
 
-  mEventQ->RunOrEnqueue(MakeUnique<NeckoTargetChannelFunctionEvent>(
+  mEventQ->RunOrEnqueue(std::make_unique<NeckoTargetChannelFunctionEvent>(
       this, [self = UnsafePtr<HttpChannelChild>(this), aClassificationFlags,
              aIsThirdParty]() {
         self->AddClassificationFlags(aClassificationFlags, aIsThirdParty);
@@ -1825,7 +1994,7 @@ void HttpChannelChild::ProcessSetClassifierMatchedInfo(
   LOG(("HttpChannelChild::ProcessSetClassifierMatchedInfo [this=%p]\n", this));
   MOZ_ASSERT(OnSocketThread());
 
-  mEventQ->RunOrEnqueue(MakeUnique<NeckoTargetChannelFunctionEvent>(
+  mEventQ->RunOrEnqueue(std::make_unique<NeckoTargetChannelFunctionEvent>(
       this,
       [self = UnsafePtr<HttpChannelChild>(this), aList = nsCString(aList),
        aProvider = nsCString(aProvider), aFullHash = nsCString(aFullHash)]() {
@@ -1847,7 +2016,7 @@ void HttpChannelChild::ProcessSetClassifierMatchedTrackingInfo(
     fullhashes.AppendElement(token);
   }
 
-  mEventQ->RunOrEnqueue(MakeUnique<NeckoTargetChannelFunctionEvent>(
+  mEventQ->RunOrEnqueue(std::make_unique<NeckoTargetChannelFunctionEvent>(
       this, [self = UnsafePtr<HttpChannelChild>(this),
              lists = CopyableTArray{std::move(lists)},
              fullhashes = CopyableTArray{std::move(fullhashes)}]() {
@@ -1888,6 +2057,7 @@ void HttpChannelChild::CleanupRedirectingChannel(nsresult rv) {
 
   if (NS_SUCCEEDED(rv)) {
     mLoadInfo->AppendRedirectHistoryEntry(this, false);
+    MaybeReportTimingDataForRedirect(mRedirectChannelChild);
   } else {
     NS_WARNING("CompleteRedirectSetup failed, HttpChannelChild already open?");
   }
@@ -1920,7 +2090,8 @@ HttpChannelChild::ConnectParent(uint32_t registrarId) {
     return NS_ERROR_FAILURE;
   }
 
-  ContentChild* cc = static_cast<ContentChild*>(gNeckoChild->Manager());
+  ContentChild* cc =
+      mozilla::ipc::ActorCast<ContentChild>(gNeckoChild->Manager());
   if (cc->IsShuttingDown()) {
     return NS_ERROR_FAILURE;
   }
@@ -1985,9 +2156,6 @@ HttpChannelChild::ConnectParent(uint32_t registrarId) {
   MOZ_ASSERT(!mSuspendForWaitCompleteRedirectSetup);
   mSuspendForWaitCompleteRedirectSetup = true;
 
-  // Connect to socket process after mEventQ is suspended.
-  MaybeConnectToSocketProcess();
-
   return NS_OK;
 }
 
@@ -2022,7 +2190,8 @@ HttpChannelChild::CompleteRedirectSetup(nsIStreamListener* aListener) {
         mURI, requestMethod, mPriority, mChannelId, NetworkLoadType::LOAD_START,
         mChannelCreationTimestamp, mLastStatusReported, 0, kCacheUnknown,
         mLoadInfo->GetInnerWindowID(),
-        mLoadInfo->GetOriginAttributes().IsPrivateBrowsing(), this, mStatus);
+        mLoadInfo->GetOriginAttributes().IsPrivateBrowsing(), this, mStatus,
+        GetSecPurpose(), mLoadInfo->GetActivatedFromNavigationalPrefetch());
   }
   StoreIsPending(true);
   StoreWasOpened(true);
@@ -2045,7 +2214,6 @@ NS_IMETHODIMP
 HttpChannelChild::OnRedirectVerifyCallback(nsresult aResult) {
   LOG(("HttpChannelChild::OnRedirectVerifyCallback [this=%p]\n", this));
   MOZ_ASSERT(NS_IsMainThread());
-  nsCOMPtr<nsIURI> redirectURI;
 
   DebugOnly<nsresult> rv = NS_OK;
 
@@ -2093,13 +2261,6 @@ HttpChannelChild::OnRedirectVerifyCallback(nsresult aResult) {
     // "http-on-modify-request" observers the chance to cancel before that.
     // base->CallOnModifyRequestObservers();
 
-    nsCOMPtr<nsIHttpChannelInternal> newHttpChannelInternal =
-        do_QueryInterface(mRedirectChannelChild);
-    if (newHttpChannelInternal) {
-      (void)newHttpChannelInternal->GetApiRedirectToURI(
-          getter_AddRefs(redirectURI));
-    }
-
     nsCOMPtr<nsIRequest> request = do_QueryInterface(mRedirectChannelChild);
     if (request) {
       request->GetLoadFlags(&loadFlags);
@@ -2121,7 +2282,7 @@ HttpChannelChild::OnRedirectVerifyCallback(nsresult aResult) {
   if (CanSend()) {
     SendRedirect2Verify(aResult, *headerTuples, sourceRequestBlockingReason,
                         targetLoadInfoForwarder, loadFlags, referrerInfo,
-                        redirectURI, corsPreflightArgs);
+                        corsPreflightArgs);
   }
 
   return NS_OK;
@@ -2275,7 +2436,7 @@ HttpChannelChild::AsyncOpen(nsIStreamListener* aListener) {
                                                /*showThisProps=*/false);
       if (chars) {
         size_t len = strlen(chars.get());
-        mCallStack = mozilla::MakeUnique<char[]>(len + 1);
+        mCallStack = std::make_unique<char[]>(len + 1);
         memcpy(mCallStack.get(), chars.get(), len + 1);
       }
     }
@@ -2388,7 +2549,8 @@ nsresult HttpChannelChild::AsyncOpenInternal(nsIStreamListener* aListener) {
         mURI, requestMethod, mPriority, mChannelId, NetworkLoadType::LOAD_START,
         mChannelCreationTimestamp, mLastStatusReported, 0, kCacheUnknown,
         mLoadInfo->GetInnerWindowID(),
-        mLoadInfo->GetOriginAttributes().IsPrivateBrowsing(), this, mStatus);
+        mLoadInfo->GetOriginAttributes().IsPrivateBrowsing(), this, mStatus,
+        GetSecPurpose(), mLoadInfo->GetActivatedFromNavigationalPrefetch());
   }
   StoreIsPending(true);
   StoreWasOpened(true);
@@ -2487,7 +2649,8 @@ nsresult HttpChannelChild::ContinueAsyncOpen() {
     return NS_ERROR_FAILURE;
   }
 
-  ContentChild* cc = static_cast<ContentChild*>(gNeckoChild->Manager());
+  ContentChild* cc =
+      mozilla::ipc::ActorCast<ContentChild>(gNeckoChild->Manager());
   if (cc->IsShuttingDown()) {
     return NS_ERROR_FAILURE;
   }
@@ -2506,9 +2669,6 @@ nsresult HttpChannelChild::ContinueAsyncOpen() {
   openArgs.uri() = mURI;
   openArgs.original() = mOriginalURI;
   openArgs.doc() = mDocumentURI;
-  if (mAPIRedirectTo) {
-    openArgs.apiRedirectTo() = mAPIRedirectTo->first();
-  }
   openArgs.loadFlags() = mLoadFlags;
   openArgs.requestHeaders() = mClientSetRequestHeaders;
   mRequestHead.Method(openArgs.requestMethod());
@@ -2532,10 +2692,10 @@ nsresult HttpChannelChild::ContinueAsyncOpen() {
 
   openArgs.preflightArgs() = optionalCorsPreflightArgs;
 
+  openArgs.uploadStreamIsStreaming() = LoadUploadStreamIsStreaming();
   openArgs.priority() = mPriority;
   openArgs.classOfService() = mClassOfService;
   openArgs.redirectionLimit() = mRedirectionLimit;
-  openArgs.allowSTS() = LoadAllowSTS();
   openArgs.thirdPartyFlags() = LoadThirdPartyFlags();
   openArgs.resumeAt() = mSendResumeAt;
   openArgs.startPos() = mStartPos;
@@ -2581,8 +2741,6 @@ nsresult HttpChannelChild::ContinueAsyncOpen() {
   openArgs.dispatchFetchEventEnd() = mDispatchFetchEventEnd;
   openArgs.handleFetchEventStart() = mHandleFetchEventStart;
   openArgs.handleFetchEventEnd() = mHandleFetchEventEnd;
-
-  openArgs.forceMainDocumentChannel() = LoadForceMainDocumentChannel();
 
   openArgs.navigationStartTimeStamp() = navigationStartTimeStamp;
   openArgs.earlyHintPreloaderId() = mEarlyHintPreloaderId;
@@ -2654,8 +2812,6 @@ nsresult HttpChannelChild::ContinueAsyncOpen() {
     mEverHadBgChildAtAsyncOpen = true;
 #endif
   }
-
-  MaybeConnectToSocketProcess();
 
   return NS_OK;
 }
@@ -2890,7 +3046,8 @@ CacheEntryWriteHandleChild::OpenAlternativeOutputStream(
   if (!CanSend()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
-  if (static_cast<ContentChild*>(gNeckoChild->Manager())->IsShuttingDown()) {
+  if (mozilla::ipc::ActorCast<ContentChild>(gNeckoChild->Manager())
+          ->IsShuttingDown()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
@@ -2914,7 +3071,8 @@ HttpChannelChild::GetCacheEntryWriteHandle(nsICacheEntryWriteHandle** _retval) {
   if (!CanSend()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
-  if (static_cast<ContentChild*>(gNeckoChild->Manager())->IsShuttingDown()) {
+  if (mozilla::ipc::ActorCast<ContentChild>(gNeckoChild->Manager())
+          ->IsShuttingDown()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
@@ -2942,7 +3100,8 @@ HttpChannelChild::OpenAlternativeOutputStream(const nsACString& aType,
   if (!CanSend()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
-  if (static_cast<ContentChild*>(gNeckoChild->Manager())->IsShuttingDown()) {
+  if (mozilla::ipc::ActorCast<ContentChild>(gNeckoChild->Manager())
+          ->IsShuttingDown()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
@@ -3345,7 +3504,7 @@ void HttpChannelChild::CancelOnMainThread(nsresult aRv,
   // event in the front of mEventQ to make sure nsIStreamListener not receiving
   // any ODA/OnStopRequest callbacks.
   nsCString reason(aReason);
-  mEventQ->PrependEvent(MakeUnique<NeckoTargetChannelFunctionEvent>(
+  mEventQ->PrependEvent(std::make_unique<NeckoTargetChannelFunctionEvent>(
       this,
       [self = UnsafePtr<HttpChannelChild>(this), aRv,
        reason = std::move(reason)]() { self->CancelWithReason(aRv, reason); }));
@@ -3395,7 +3554,7 @@ void HttpChannelChild::ProcessAttachStreamFilter(
   LOG(("HttpChannelChild::ProcessAttachStreamFilter [this=%p]\n", this));
   MOZ_ASSERT(OnSocketThread());
 
-  mEventQ->RunOrEnqueue(MakeUnique<AttachStreamFilterEvent>(
+  mEventQ->RunOrEnqueue(std::make_unique<AttachStreamFilterEvent>(
       this, GetNeckoTarget(), std::move(aEndpoint)));
 }
 
@@ -3412,7 +3571,7 @@ void HttpChannelChild::ProcessDetachStreamFilters() {
   LOG(("HttpChannelChild::ProcessDetachStreamFilter [this=%p]\n", this));
   MOZ_ASSERT(OnSocketThread());
 
-  mEventQ->RunOrEnqueue(MakeUnique<NeckoTargetChannelFunctionEvent>(
+  mEventQ->RunOrEnqueue(std::make_unique<NeckoTargetChannelFunctionEvent>(
       this, [self = UnsafePtr<HttpChannelChild>(this)]() {
         self->OnDetachStreamFilters();
       }));
@@ -3534,41 +3693,6 @@ void HttpChannelChild::DoDiagnosticAssertWhenOnStopNotCalledOnDestroy() {
 #ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
   mDoDiagnosticAssertWhenOnStopNotCalledOnDestroy = true;
 #endif
-}
-
-void HttpChannelChild::MaybeConnectToSocketProcess() {
-  if (!nsIOService::UseSocketProcess()) {
-    return;
-  }
-
-  if (!StaticPrefs::network_send_ODA_to_content_directly()) {
-    return;
-  }
-
-  RefPtr<HttpBackgroundChannelChild> bgChild;
-  {
-    MutexAutoLock lock(mBgChildMutex);
-    bgChild = mBgChild;
-  }
-  SocketProcessBridgeChild::GetSocketProcessBridge()->Then(
-      GetCurrentSerialEventTarget(), __func__,
-      [bgChild, channelId = ChannelId()](
-          const RefPtr<SocketProcessBridgeChild>& aBridge) {
-        Endpoint<PBackgroundDataBridgeParent> parentEndpoint;
-        Endpoint<PBackgroundDataBridgeChild> childEndpoint;
-        PBackgroundDataBridge::CreateEndpoints(&parentEndpoint, &childEndpoint);
-        aBridge->SendInitBackgroundDataBridge(std::move(parentEndpoint),
-                                              channelId);
-
-        gSocketTransportService->Dispatch(
-            NS_NewRunnableFunction(
-                "HttpBackgroundChannelChild::CreateDataBridge",
-                [bgChild, endpoint = std::move(childEndpoint)]() mutable {
-                  bgChild->CreateDataBridge(std::move(endpoint));
-                }),
-            NS_DISPATCH_NORMAL);
-      },
-      []() { NS_WARNING("Failed to create SocketProcessBridgeChild"); });
 }
 
 NS_IMETHODIMP

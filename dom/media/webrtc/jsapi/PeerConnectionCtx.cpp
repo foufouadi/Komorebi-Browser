@@ -361,7 +361,7 @@ void PeerConnectionCtx::DeliverStats(
     if (i != mLastReports.end()) {
       lastReport = std::move(i->second);
     } else {
-      lastReport = MakeUnique<dom::RTCStatsReportInternal>();
+      lastReport = std::make_unique<dom::RTCStatsReportInternal>();
     }
   }
   // Record Telemetery
@@ -469,8 +469,8 @@ void PeerConnectionCtx::RemovePeerConnection(const std::string& aKey) {
     } else {
       using Update = WebrtcGlobalInformation::PcTrackingUpdate;
       auto update = Update::Remove(pcId);
-      auto finalStats =
-          MakeUnique<RTCStatsReportInternal>(*(it->second->GetFinalStats()));
+      auto finalStats = std::make_unique<RTCStatsReportInternal>(
+          *(it->second->GetFinalStats()));
       WebrtcGlobalStatsHistory::Record(std::move(finalStats));
       WebrtcGlobalInformation::PeerConnectionTracking(update);
     }
@@ -497,16 +497,15 @@ void PeerConnectionCtx::AddPeerConnection(const std::string& aKey,
     audioStateConfig.audio_device_module =
         new webrtc::RefCountedObject<FakeAudioDeviceModule>();
 
-    constexpr bool supportTailDispatch = true;
     // This task queue is passed into libwebrtc by means of
     // webrtc::TaskQueueBase::GetCurrent() while running on it.
     // WebrtcCallWrapper guarantees that it outlives its webrtc::Call instance.
     // Outside of libwebrtc it works as a regular TaskQueue.
     auto callWorkerThread = CreateWebrtcTaskQueueWrapper(
         GetMediaThreadPool(MediaThreadType::WEBRTC_CALL_THREAD),
-        "CallWorker"_ns, supportTailDispatch);
+        "CallWorker"_ns, TailDispatchPolicy::ConsistentOrdering);
 
-    auto trials = MakeUnique<MozTrialsConfig>();
+    auto trials = std::make_unique<MozTrialsConfig>();
 
     mSharedWebrtcState = MakeAndAddRef<SharedWebrtcState>(
         std::move(callWorkerThread), std::move(audioStateConfig),

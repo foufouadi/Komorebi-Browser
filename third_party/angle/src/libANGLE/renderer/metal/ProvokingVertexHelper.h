@@ -13,6 +13,7 @@
 
 #include "libANGLE/Context.h"
 #include "libANGLE/renderer/ContextImpl.h"
+#include "libANGLE/renderer/metal/BufferMtl.h"
 #include "libANGLE/renderer/metal/DisplayMtl.h"
 #include "libANGLE/renderer/metal/mtl_buffer_pool.h"
 #include "libANGLE/renderer/metal/mtl_command_buffer.h"
@@ -26,17 +27,19 @@ class ProvokingVertexHelper : angle::NonCopyable
 {
   public:
     ProvokingVertexHelper(ContextMtl *context);
+
+    // Rewrites indices for the last-vertex convention into a buffer that starts at firstIndex. A
+    // non-null conversion caches the result; pass nullptr for client-memory indices.
     angle::Result preconditionIndexBuffer(ContextMtl *context,
-                                          mtl::BufferRef indexBuffer,
-                                          GLsizei indexCount,
-                                          size_t indexOffset,
+                                          GLsizei count,
+                                          gl::PrimitiveMode mode,
+                                          size_t firstIndex,
                                           bool primitiveRestartEnabled,
-                                          gl::PrimitiveMode primitiveMode,
-                                          gl::DrawElementsType elementsType,
-                                          uint32_t &outIndexCount,
-                                          size_t &outIndexOffset,
-                                          gl::PrimitiveMode &outPrimitiveMode,
-                                          mtl::BufferRef &outNewBuffer);
+                                          const std::vector<DrawIndexRange> &drawIndexRanges,
+                                          mtl::BufferSlice indexBuffer,
+                                          gl::DrawElementsType indexBufferType,
+                                          ConversionBufferMtl *conversion,
+                                          mtl::BufferSlice *outNewIndexBuffer);
 
     angle::Result generateIndexBuffer(ContextMtl *context,
                                       size_t first,

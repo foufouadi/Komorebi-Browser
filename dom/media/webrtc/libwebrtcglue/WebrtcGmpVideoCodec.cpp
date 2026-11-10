@@ -23,6 +23,7 @@
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "modules/video_coding/svc/create_scalability_structure.h"
 #include "mozilla/CheckedInt.h"
+#include "mozilla/media/webrtc/GMPH264Utils.h"
 #include "mozilla/media/webrtc/H264FmtpParser.h"
 #include "nsServiceManagerUtils.h"
 
@@ -93,10 +94,6 @@ media::EncodeSupportSet WebrtcGmpEncoderSupports(const EncoderConfig& aConfig) {
   }
   return media::EncodeSupport::SoftwareEncode;
 }
-
-// QP scaling thresholds.
-static const int kLowH264QpThreshold = 24;
-static const int kHighH264QpThreshold = 37;
 
 // Encoder.
 WebrtcGmpVideoEncoder::WebrtcGmpVideoEncoder(
@@ -188,6 +185,7 @@ int32_t WebrtcGmpVideoEncoder::InitEncode(
   }
   mEncodeQueue->AssertOnCurrentThread();
 
+  MOZ_ASSERT(HaveGMPFor("encode-video"_ns, {"h264"_ns}));
   if (!mMPS) {
     mMPS = do_GetService("@mozilla.org/gecko-media-plugin-service;1");
   }
@@ -227,6 +225,17 @@ int32_t WebrtcGmpVideoEncoder::InitEncode(
   codecParams.mWidth = aCodecSettings->width;
   codecParams.mHeight = aCodecSettings->height;
 
+  // Firefox only ever negotiates baseline-family H264 (see bug 1950950), so
+  // this is a self-consistency fix: without it OpenH264's own unconfigured
+  // default profile might not match what we already declared over SDP.
+  // Level is not set here; it's derived from the actual encode dimensions in
+  // InitEncoderForSize instead, once the resolution/framerate has already
+  // been capped to fit the negotiated level (see bug 2013936).
+  auto profileLevel = ParseH264ProfileLevelFromParameters(mFormatParams);
+  if (profileLevel.isOk()) {
+    codecParams.mProfile = ToGMPProfile(profileLevel.inspect().mProfile);
+  }
+
   uint32_t maxPayloadSize = aSettings.max_payload_size;
   if (mFormatParams.count(webrtc::kH264FmtpPacketizationMode) == 1 &&
       mFormatParams.at(webrtc::kH264FmtpPacketizationMode) == "1") {
@@ -252,7 +261,7 @@ void WebrtcGmpVideoEncoder::InitEncode_g(const GMPVideoCodec& aCodecParams,
                                          uint32_t aMaxPayloadSize) {
   nsTArray<nsCString> tags;
   tags.AppendElement("h264"_ns);
-  auto callback = MakeUnique<InitDoneCallback>(this, aCodecParams);
+  auto callback = std::make_unique<InitDoneCallback>(this, aCodecParams);
   mInitting = true;
   mMaxPayloadSize = aMaxPayloadSize;
   mSyncLayerCap = aCodecParams.mTemporalLayerNum;
@@ -343,6 +352,15 @@ int32_t WebrtcGmpVideoEncoder::InitEncoderForSize(unsigned short aWidth,
                                                   std::string* aErrorOut) {
   mCodecParams.mWidth = aWidth;
   mCodecParams.mHeight = aHeight;
+  // Derive the level from what we're actually encoding at, rather than the
+  // raw negotiated ceiling: by this point the resolution/framerate has
+  // already been capped to fit the negotiated level (see bug 2013936), so
+  // this tells OpenH264 the level that actually matches, and stays correct
+  // across resolution changes since this function re-fires on those too.
+  if (Maybe<H264_LEVEL> level = H264SmallestConformingLevel(
+          aWidth, aHeight, mCodecParams.mMaxFramerate)) {
+    mCodecParams.mLevel = ToGMPLevel(*level);
+  }
   // Pass dummy codecSpecific data for now...
   nsTArray<uint8_t> codecSpecific;
 
@@ -392,7 +410,8 @@ void WebrtcGmpVideoEncoder::RegetEncoderForResolutionChange(uint32_t aWidth,
   Close_g();
 
   UniquePtr<GetGMPVideoEncoderCallback> callback =
-      MakeUnique<InitDoneForResolutionChangeCallback>(this, aWidth, aHeight);
+      std::make_unique<InitDoneForResolutionChangeCallback>(this, aWidth,
+                                                            aHeight);
 
   // OpenH264 codec (at least) can't handle dynamic input resolution changes
   // re-init the plugin when the resolution changes
@@ -834,6 +853,7 @@ WebrtcGmpVideoDecoder::~WebrtcGmpVideoDecoder() {
 
 bool WebrtcGmpVideoDecoder::Configure(
     const webrtc::VideoDecoder::Settings& settings) {
+  MOZ_ASSERT(HaveGMPFor("decode-video"_ns, {"h264"_ns}));
   if (!mMPS) {
     mMPS = do_GetService("@mozilla.org/gecko-media-plugin-service;1");
   }
@@ -857,7 +877,7 @@ void WebrtcGmpVideoDecoder::Configure_g(
   nsTArray<nsCString> tags;
   tags.AppendElement("h264"_ns);
   UniquePtr<GetGMPVideoDecoderCallback> callback =
-      MakeUnique<InitDoneCallback>(this);
+      std::make_unique<InitDoneCallback>(this);
   mInitting = true;
   nsresult rv =
       mMPS->GetGMPVideoDecoder(nullptr, &tags, ""_ns, std::move(callback));
@@ -975,8 +995,8 @@ int32_t WebrtcGmpVideoDecoder::Decode(const webrtc::EncodedImage& aInputImage,
   // know to request a PLI and the video stream will remain frozen unless an IDR
   // happens to arrive for other reasons. Bug 1492852 tracks implementing a
   // proper solution.
-  auto decodeData =
-      MakeUnique<GMPDecodeData>(aInputImage, aMissingFrames, aRenderTimeMs);
+  auto decodeData = std::make_unique<GMPDecodeData>(aInputImage, aMissingFrames,
+                                                    aRenderTimeMs);
 
   MOZ_ALWAYS_SUCCEEDS(
       mGMPThread->Dispatch(NewRunnableMethod<UniquePtr<GMPDecodeData>&&>(

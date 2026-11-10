@@ -3,6 +3,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
+use gleam::gl;
+use std::cell::RefCell;
+use std::rc::Rc;
 use crate::blob;
 use crossbeam::sync::chase_lev;
 #[cfg(windows)]
@@ -18,7 +21,7 @@ use std::time::Instant;
 use webrender::{api::*, CompositorConfig};
 use webrender::render_api::*;
 use webrender::api::units::*;
-use webrender::{DebugFlags, RenderResults, ShaderPrecacheFlags, LayerCompositor};
+use webrender::{DebugFlags, RenderResults, ShaderPrecacheFlags, Compositor};
 use crate::{WindowWrapper, NotifierEvent};
 
 #[derive(Clone)]
@@ -35,6 +38,8 @@ pub struct DisplayList {
     /// If set to true, the pipeline will be rendered off-screen. Only snapshotted
     /// stacking contexts will be kept.
     pub render_offscreen: bool,
+    /// The pipelines this display list may embed.
+    pub embed_policy: Option<EmbedPolicy>,
 }
 
 // TODO(gw): This descriptor matches what we currently support for fonts
@@ -50,6 +55,18 @@ pub enum FontDescriptor {
         style: u32,
         stretch: u32,
     },
+}
+
+/// Everything that distinguishes one registered font instance from another, so
+/// the cache hands the same `FontInstanceKey` back for an identical request.
+/// `render_mode` is part of it because reftests can override it per file.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct FontInstanceDescriptor {
+    pub font_key: FontKey,
+    pub size: FontSize,
+    pub flags: FontInstanceFlags,
+    pub render_mode: Option<FontRenderMode>,
+    pub synthetic_italics: SyntheticItalics,
 }
 
 struct NotifierData {
@@ -210,10 +227,32 @@ impl WrenchThing for CapturedSequence {
 pub struct Wrench {
     window_size: DeviceIntSize,
 
+    /// The GL context the renderer draws with, shared so that wrench can
+    /// create GL textures to hand to the renderer as external images.
+    gl: Rc<dyn gl::Gl>,
     pub renderer: webrender::Renderer,
     pub api: RenderApi,
     pub document_id: DocumentId,
     pub root_pipeline_id: PipelineId,
+
+    /// Font templates and instances, retained for the life of the process.
+    ///
+    /// Interning keys a text run on the `FontInstanceKey` the client picked, so a
+    /// client that deletes and re-registers an identical font gets a different key
+    /// and re-interns every run using it. Gecko keeps its instance keys across
+    /// paints; a per-yaml cache would not, and the mechanism would never dedup.
+    fonts: HashMap<FontDescriptor, FontKey>,
+    font_instances: HashMap<FontInstanceDescriptor, FontInstanceKey>,
+
+    /// Display list builders, retained per pipeline for the life of the process.
+    ///
+    /// A builder owns its interning state and is meant to be reused across
+    /// builds - that is what lets an unchanged item keep its handle instead of
+    /// being re-transmitted, and it is what Gecko does with its per-pipeline
+    /// `mDLBuilder`. Building each display list with a fresh builder would work,
+    /// but it restarts slot numbering and so re-sends everything every time,
+    /// leaving the whole mechanism untested.
+    dl_builders: HashMap<PipelineId, DisplayListBuilder>,
 
     window_title_to_set: Option<String>,
 
@@ -235,6 +274,10 @@ pub struct Wrench {
 }
 
 impl Wrench {
+    pub fn gl(&self) -> &dyn gl::Gl {
+        &*self.gl
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         window: &mut WindowWrapper,
@@ -251,7 +294,7 @@ impl Wrench {
         precache_shaders: bool,
         dump_shader_source: Option<String>,
         notifier: Option<Box<dyn RenderNotifier>>,
-        layer_compositor: Option<Box<dyn LayerCompositor>>,
+        layer_compositor: Option<Box<dyn Compositor>>,
         compositor_clips_override: Option<bool>,
     ) -> Self {
         println!("Shader override path: {:?}", shader_override_path);
@@ -310,12 +353,47 @@ impl Wrench {
             Box::new(Notifier(data))
         });
 
+        let gl = window.clone_gl();
+
+        // Build the shaders on a device of their own and share them with the
+        // renderer, as Gecko does, so that programs created or linked through
+        // one device are drawn with through another.
+        let shaders = {
+            let mut device = webrender::Device::new(
+                webrender::GpuBackendConfig::Gl(webrender::GlBackendConfig::new(gl.clone())),
+                webrender::DeviceOptions {
+                    crash_annotator: None,
+                    resource_override_path: opts.resource_override_path.clone(),
+                    use_optimized_shaders: opts.use_optimized_shaders,
+                    upload_method: opts.upload_method.clone(),
+                    batched_upload_threshold: opts.batched_upload_threshold,
+                    cached_programs: None,
+                    allow_texture_swizzling: opts.allow_texture_swizzling,
+                    dump_shader_source: opts.dump_shader_source.clone(),
+                    surface_origin_is_top_left: opts.surface_origin_is_top_left,
+                },
+            );
+            device.begin_frame();
+            let mut shaders = webrender::Shaders::new(&mut device, &opts).unwrap();
+            let precache_flags = if precache_shaders {
+                ShaderPrecacheFlags::FULL_COMPILE
+            } else {
+                ShaderPrecacheFlags::ASYNC_COMPILE
+            };
+            let mut pending = shaders.precache_all(precache_flags);
+            while shaders.resume_precache(&mut device, &mut pending).unwrap() {}
+            device.end_frame();
+            Rc::new(RefCell::new(shaders))
+        };
+
         let (renderer, sender) = webrender::create_webrender_instance(
-            window.clone_gl(),
+            webrender::GpuBackendConfig::Gl(webrender::GlBackendConfig::new(gl.clone())),
             notifier,
             opts,
-            None,
+            Some(&shaders),
         ).unwrap();
+        // The renderer now holds the only reference, so its deinit releases them.
+        drop(shaders);
 
         let api = sender.create_api();
         let document_id = api.add_document(size);
@@ -324,6 +402,7 @@ impl Wrench {
 
         let mut wrench = Wrench {
             window_size: size,
+            gl,
 
             renderer,
             api,
@@ -333,6 +412,9 @@ impl Wrench {
             rebuild_display_lists: do_rebuild,
 
             root_pipeline_id: PipelineId(0, 0),
+            fonts: HashMap::new(),
+            font_instances: HashMap::new(),
+            dl_builders: HashMap::new(),
 
             graphics_api,
             frame_start_sender: timing_sender,
@@ -434,6 +516,60 @@ impl Wrench {
         let bounding_rect = bounding_rect.inflate(2.0, 2.0);
 
         (indices, positions, bounding_rect)
+    }
+
+    /// A font template for this descriptor, loading it on first use. `load` is
+    /// only called on a miss, so the file read stays out of the hit path.
+    pub fn get_or_create_font(
+        &mut self,
+        desc: FontDescriptor,
+        load: impl FnOnce(&mut Self, &FontDescriptor) -> FontKey,
+    ) -> FontKey {
+        if let Some(key) = self.fonts.get(&desc) {
+            return *key;
+        }
+        let key = load(self, &desc);
+        self.fonts.insert(desc, key);
+        key
+    }
+
+    /// A font instance for this description, registering it on first use.
+    pub fn get_or_create_font_instance(
+        &mut self,
+        desc: FontInstanceDescriptor,
+    ) -> FontInstanceKey {
+        if let Some(key) = self.font_instances.get(&desc) {
+            return *key;
+        }
+        let key = self.add_font_instance(
+            desc.font_key,
+            desc.size.to_f32_px(),
+            desc.flags,
+            desc.render_mode,
+            desc.synthetic_italics,
+        );
+        self.font_instances.insert(desc, key);
+        key
+    }
+
+    /// Take this pipeline's retained display list builder, creating one on first
+    /// use. The caller must hand it back with `put_dl_builder` so the interning
+    /// state it accumulated survives into the next build.
+    pub fn take_dl_builder(&mut self, pipeline_id: PipelineId) -> DisplayListBuilder {
+        self.dl_builders
+            .remove(&pipeline_id)
+            .unwrap_or_else(|| DisplayListBuilder::new(pipeline_id))
+    }
+
+    pub fn put_dl_builder(&mut self, pipeline_id: PipelineId, builder: DisplayListBuilder) {
+        self.dl_builders.insert(pipeline_id, builder);
+    }
+
+    /// Forget every retained builder, so the next display list for a pipeline is
+    /// built by a new one. Models the content process for that pipeline being
+    /// replaced; see `test_invalidation`'s `new-builder` option.
+    pub fn drop_dl_builders(&mut self) {
+        self.dl_builders.clear();
     }
 
     pub fn set_title(&mut self, extra: &str) {
@@ -606,11 +742,19 @@ impl Wrench {
         display_lists: Vec<DisplayList>,
         scroll_offsets: &HashMap<ExternalScrollId, Vec<SampledScrollOffset>>,
         transform_properties: &[PropertyValue<LayoutTransform>],
+        enforce_embed_policy: bool,
     ) {
         let mut txn = Transaction::new();
+        // The document outlives the yaml file, so this and the policies are
+        // set for every display list to not inherit a previous file's state.
+        txn.set_embed_policy_enforcement(enforce_embed_policy);
         let mut present = false;
         for display_list in display_lists {
             present |= display_list.present;
+
+            let embed_policy = display_list.embed_policy
+                .unwrap_or_else(|| EmbedPolicy::Restricted(Vec::new()));
+            txn.set_embed_policy(display_list.pipeline, embed_policy);
 
             txn.set_display_list(
                 Epoch(*frame_number),

@@ -34,11 +34,12 @@ const lazy = XPCOMUtils.declareLazy({
   Progress: "chrome://global/content/ml/Utils.sys.mjs",
   OPFS: "chrome://global/content/ml/OPFS.sys.mjs",
   BACKENDS: "chrome://global/content/ml/EngineProcess.sys.mjs",
+  EngineProcess: "chrome://global/content/ml/EngineProcess.sys.mjs",
   stringifyForLog: "chrome://global/content/ml/Utils.sys.mjs",
   console: () =>
     console.createInstance({
       maxLogLevelPref: "browser.ml.logLevel",
-      prefix: "GeckoMLEngineParent",
+      logModule: "GeckoMLEngineParent",
     }),
   mlUtils: { service: "@mozilla.org/ml-utils;1", iid: Ci.nsIMLUtils },
   CHECK_FOR_MEMORY: { pref: "browser.ml.checkForMemory" },
@@ -47,6 +48,11 @@ const lazy = XPCOMUtils.declareLazy({
 
 const ONE_GiB = 1024 * 1024 * 1024;
 const RS_RUNTIME_COLLECTION = "ml-onnx-runtime";
+
+// Vendored llama.cpp revision, mirrored from third_party/llama.cpp/moz.yaml.
+// Update alongside a vendor bump so engine_run telemetry reflects the
+// running library. See the matching comment in that moz.yaml.
+export const LLAMA_CPP_VERSION = "74ade52741203e5c8f81eaf06a96cb1cfe15f2a3";
 const RS_INFERENCE_OPTIONS_COLLECTION = "ml-inference-options";
 const RS_ALLOW_DENY_COLLECTION = "ml-model-allow-deny-list";
 const TERMINATE_TIMEOUT = 5000;
@@ -353,7 +359,11 @@ export class MLEngineParent extends JSProcessActorParent {
       // Abort any pending operations as the engine creating failed
       abortController?.abort();
       const { modelId, taskName, flowId } = pipelineOptions;
-      const telemetry = new MLTelemetry({ featureId, flowId });
+      const telemetry = new MLTelemetry({
+        featureId,
+        flowId,
+        hostProcess: "inference",
+      });
       telemetry.recordEngineCreationFailure({
         modelId,
         featureId,
@@ -408,6 +418,11 @@ export class MLEngineParent extends JSProcessActorParent {
       case "MLEngine:GetWorkerConfig":
         return MLEngineParent.getWorkerConfig();
 
+      case "MLEngine:GetNativeOnnxRuntimeAvailability":
+        // Routed through EngineProcess so the child shares the parent's single
+        // cached probe result instead of running its own.
+        return lazy.EngineProcess.requestIsNativeOnnxRuntimeAvailable();
+
       case "MLEngine:DestroyEngineProcess":
         if (this.processKeepAlive) {
           ChromeUtils.addProfilerMarker(
@@ -458,11 +473,11 @@ export class MLEngineParent extends JSProcessActorParent {
     const modelHub = this.modelHub;
     await Promise.all(
       [...this.#modelFilesInUse].map(async ([key, entry]) => {
-        await modelHub.deleteNonMatchingModelRevisions(
-          entry.taskName,
-          entry.modelWithHostname,
-          entry.revision
-        );
+        await modelHub.deleteNonMatchingModelRevisions({
+          taskName: entry.taskName,
+          modelWithHostname: entry.modelWithHostname,
+          targetRevision: entry.revision,
+        });
         this.#modelFilesInUse.delete(key);
       })
     );
@@ -501,10 +516,9 @@ export class MLEngineParent extends JSProcessActorParent {
     // Create the model hub instance if needed
     if (this.modelHub === null) {
       lazy.console.debug("Creating model hub instance");
-      this.modelHub = new lazy.ModelHub({
+      this.modelHub = await MLEngineParent.createModelHub({
         rootUrl,
         urlTemplate,
-        allowDenyList: await MLEngineParent.getAllowDenyList(),
       });
     }
 
@@ -654,6 +668,28 @@ export class MLEngineParent extends JSProcessActorParent {
   }
 
   /**
+   * Creates a ModelHub instance configured with the shared allow/deny list.
+   *
+   * @param {object} [config]
+   * @param {string} [config.rootUrl] - Root URL used to download models.
+   * @param {string} [config.urlTemplate] - URL template for model files.
+   * @returns {Promise<ModelHub>}
+   */
+  static async createModelHub({ rootUrl, urlTemplate } = {}) {
+    const config = {
+      allowDenyList: await MLEngineParent.getAllowDenyList(),
+    };
+    // Unset hub fields arrive as null; let the ModelHub defaults apply.
+    if (rootUrl != null) {
+      config.rootUrl = rootUrl;
+    }
+    if (urlTemplate != null) {
+      config.urlTemplate = urlTemplate;
+    }
+    return new lazy.ModelHub(config);
+  }
+
+  /**
    * Gets the inference options from remote settings given a feature id or task name.
    *
    * Each feature can store default options in Remote Settings.
@@ -662,7 +698,7 @@ export class MLEngineParent extends JSProcessActorParent {
    *
    * @param {string} featureId - id of the feature
    * @param {string} taskName - name of the inference task
-   * @param {string|null} modelId - name of the model id
+   * @param {string|null} [modelId] - name of the model id
    * @returns {Promise<RemoteSettingsInferenceOptions | { runtimeFilename: string }>}
    */
 
@@ -1038,6 +1074,9 @@ export class MLEngine {
    */
   #requests = new Map();
 
+  /** @type {Set<number>} */
+  #canceledRequests = new Set();
+
   /**
    * @type {"uninitialized" | "ready" | "error" | "closed" | "crashed"}
    */
@@ -1122,32 +1161,12 @@ export class MLEngine {
     this.telemetry = new MLTelemetry({
       featureId: pipelineOptions.featureId,
       flowId: pipelineOptions.flowId,
+      hostProcess: "inference",
     });
     this.QueryInterface = ChromeUtils.generateQI([
       "nsIObserver",
       "nsISupportsWeakReference",
     ]);
-  }
-
-  /**
-   * Validates an inference request before sending to child process.
-   *
-   * @param {object} request - The request to validate
-   * @returns {object|null} The validated request, or null if blocked
-   */
-  #validateRequest(request) {
-    return request;
-  }
-
-  /**
-   * Validates an inference response after receiving from child process.
-   *
-   * @param {object} response - The response to validate
-   * @returns {object|null} The validated response, or null if blocked
-   */
-  #validateResponse(response) {
-    lazy.console.debug("[MLSecurity] Validating response:", response);
-    return response;
   }
 
   /**
@@ -1181,6 +1200,7 @@ export class MLEngine {
         `The inference process was shutdown (pid=${pid}), childId=${childID}`
       );
       this.setEngineStatus("crashed");
+      this.#rejectRequests(err);
       throw err;
     }
   }
@@ -1335,13 +1355,28 @@ export class MLEngine {
         if (this.#port && this.#port.onmessage) {
           this.#port.removeEventListener("message", this.#port.onmessage);
         }
-      } catch {}
+      } catch (e) {
+        lazy.console.warn("Failed to remove port message listener", e);
+      }
       try {
-        this.#port?.close?.();
-      } catch {}
+        this.#port?.postMessage({
+          type: "EnginePort:Terminate",
+          shutdown: true,
+          replacement: false,
+        });
+      } catch (e) {
+        lazy.console.warn("Failed to send terminate message to port", e);
+      }
+      try {
+        this.discardPort();
+      } catch (e) {
+        lazy.console.warn("Failed to discard port", e);
+      }
       try {
         childPort.close();
-      } catch {}
+      } catch (e) {
+        lazy.console.warn("Failed to close child port", e);
+      }
       this.#port = null;
 
       // Make sure the awaiting code is released
@@ -1405,29 +1440,34 @@ export class MLEngine {
         break;
       }
       case "EnginePort:RunResponse": {
-        const { response, error, requestId, resourcesBefore, resourcesAfter } =
-          data;
+        const {
+          response,
+          error,
+          errorDetails,
+          requestId,
+          resourcesBefore,
+          resourcesAfter,
+        } = data;
+        if (this.#canceledRequests.delete(requestId)) {
+          break;
+        }
         const request = this.#requests.get(requestId);
         if (request) {
           if (error) {
+            if (errorDetails && typeof error === "object") {
+              Object.assign(error, errorDetails);
+            }
             this.telemetry.recordRunInferenceFailure(error);
             request.reject(error);
           } else if (response) {
-            // Validate response before returning to caller
-            /** @type {any} */
-            const validatedResponse = this.#validateResponse(response);
-            if (!validatedResponse) {
-              request.reject(new Error("Response failed security validation"));
-            } else {
-              this.telemetry.recordRunInferenceSuccessFlow(
-                this.engineId,
-                validatedResponse.metrics
-              );
-              // Attach resource metrics from the child process
-              validatedResponse.resourcesBefore = resourcesBefore;
-              validatedResponse.resourcesAfter = resourcesAfter;
-              request.resolve(validatedResponse);
-            }
+            this.telemetry.recordRunInferenceSuccessFlow(
+              this.engineId,
+              response.metrics
+            );
+            // Attach resource metrics from the child process
+            response.resourcesBefore = resourcesBefore;
+            response.resourcesAfter = resourcesAfter;
+            request.resolve(response);
           }
         } else {
           lazy.console.error(
@@ -1445,6 +1485,9 @@ export class MLEngine {
         this.setEngineStatus("closed");
         newPortResolvers?.reject(
           new Error("Engine was terminated before initialization completed.")
+        );
+        this.#rejectRequests(
+          new Error("Engine was terminated before the request completed.")
         );
 
         this.discardPort();
@@ -1484,9 +1527,22 @@ export class MLEngine {
   };
 
   /**
+   * Rejects every request still waiting for a response.
+   *
+   * @param {Error} error
+   */
+  #rejectRequests(error) {
+    for (const request of this.#requests.values()) {
+      request.reject(error);
+    }
+    this.#requests.clear();
+  }
+
+  /**
    * Discards the current port and closes the connection.
    */
   discardPort() {
+    this.#canceledRequests.clear();
     if (this.#port !== null) {
       this.#port.postMessage({ type: "EnginePort:Discard" });
       this.#port.close();
@@ -1509,7 +1565,14 @@ export class MLEngine {
         shutdown,
         replacement,
       });
-      await this.#waitForStatus("closed");
+      try {
+        await this.#waitForStatus("closed");
+      } catch (error) {
+        this.#rejectRequests(
+          new Error("Engine was terminated before the request completed.")
+        );
+        throw error;
+      }
     }
   }
 
@@ -1554,9 +1617,17 @@ export class MLEngine {
    * Run the inference request
    *
    * @param {EngineRequests[FeatureID]} request
+   * @param {object} [options]
+   * @param {AbortSignal} [options.signal]
    * @returns {Promise<EngineResponses[FeatureID]>}
    */
-  async run(request) {
+  async run(request, { signal } = {}) {
+    signal?.throwIfAborted();
+    // If the port is null maybe the inference process has shut down
+    if (this.#port === null) {
+      throw new Error("Port does not exist");
+    }
+
     /** @type {PromiseWithResolvers<EngineResponses[FeatureID]>} */
     const resolvers = Promise.withResolvers();
     const requestId = this.#nextRequestId++;
@@ -1571,30 +1642,35 @@ export class MLEngine {
       transferables.push(request.data);
     }
 
-    // If the port is null maybe the inference process has shut down
-    if (this.#port === null) {
-      throw new Error("Port does not exist");
-    }
-
-    // Validate request before sending to child process
-    const validatedRequest = this.#validateRequest(request);
-    if (!validatedRequest) {
-      throw new Error("Request failed security validation");
-    }
-
     const beforeRun = ChromeUtils.now();
 
     this.#port.postMessage(
       {
         type: "EnginePort:Run",
         requestId,
-        request: validatedRequest,
+        request,
         engineRunOptions: { enableInferenceProgress: false },
       },
       transferables
     );
 
-    const result = await resolvers.promise;
+    const onAbort = () => {
+      if (this.#requests.get(requestId) !== resolvers) {
+        return;
+      }
+      this.#canceledRequests.add(requestId);
+      this.#requests.delete(requestId);
+      resolvers.reject(signal.reason);
+      this.#port?.postMessage({ type: "EnginePort:Cancel", requestId });
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+
+    let result;
+    try {
+      result = await resolvers.promise;
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
+    }
 
     this.telemetry.recordEngineRun({
       beforeRun,
@@ -1603,6 +1679,8 @@ export class MLEngine {
       engineId: this.engineId,
       modelId: this.pipelineOptions.modelId,
       backend: this.pipelineOptions.backend,
+      backendSourceRevision:
+        this.pipelineOptions.backend === "llama.cpp" ? LLAMA_CPP_VERSION : null,
     });
 
     return result;
@@ -1618,6 +1696,11 @@ export class MLEngine {
     lazy.console.debug(`runWithGenerator called for request ${request}`);
     const startTime = ChromeUtils.now();
 
+    // If the port is null maybe the inference process has shut down
+    if (this.#port === null) {
+      throw new Error("The port is null");
+    }
+
     // Create a promise to track when the engine has fully completed all runs
     const responseChunkResolvers = new ResponseOrChunkResolvers();
 
@@ -1631,6 +1714,13 @@ export class MLEngine {
       completed = true;
     });
 
+    // A consumer can abandon this generator before the `await completionPromise`
+    // below runs (an early return from its `for await`, or a throw while
+    // handling a chunk). The engine still settles the request, so make sure its
+    // rejection always has a handler and isn't reported as an uncaught rejection
+    // that keeps the caller alive when nobody is awaiting it anymore.
+    completionPromise.catch(() => {});
+
     // Handle transferables for performance optimization
     const transferables = [];
     if (
@@ -1642,23 +1732,12 @@ export class MLEngine {
       transferables.push(request.data);
     }
 
-    // If the port is null maybe the inference process has shut down
-    if (this.#port === null) {
-      throw new Error("The port is null");
-    }
-
-    // Validate request before sending to child process
-    const validatedRequest = this.#validateRequest(request);
-    if (!validatedRequest) {
-      throw new Error("Request failed security validation");
-    }
-
     // Send the request to the engine via postMessage with optional transferables
     this.#port.postMessage(
       {
         type: "EnginePort:Run",
         requestId,
-        request: validatedRequest,
+        request,
         engineRunOptions: { enableInferenceProgress: true },
       },
       transferables
@@ -1685,123 +1764,158 @@ export class MLEngine {
     let chunkPromise = responseChunkResolvers.getAndAdvanceChunkPromise();
     let chunkStartTime = ChromeUtils.now();
 
-    // Loop to yield chunks as they arrive
-    while (true) {
-      // Wait for the chunk with a timeout
-      const chunk = await Promise.race([chunkPromise, timeoutPromise(10)]);
+    let recorded = false;
 
-      // If there was no timeout we can yield the chunk and move to the next
-      if (!chunk.timeout) {
-        lazy.console.debug(
-          `Chunk received ${lazy.stringifyForLog(chunk.metadata)}`
-        );
-        tokenCount += chunk.metadata.tokens?.length ?? 0;
-        characterCount += chunk.metadata.text?.length ?? 0;
+    /**
+     * Report the run once, from whichever path reaches its end first.
+     *
+     * @param {any} result - The engine's response for the run.
+     */
+    const recordRun = result => {
+      if (recorded) {
+        return;
+      }
+      recorded = true;
 
-        if (!chunk.metadata.isPrompt) {
-          const now = ChromeUtils.now();
-          if (firstChunkTime === null) {
-            firstChunkTime = now;
-          } else {
-            interChunkTimeTotal += now - lastChunkTime;
-          }
-          lastChunkTime = now;
-          generatedChunkCount++;
-        }
+      // Tokens may not be available.
+      let markerText;
+      if (tokenCount) {
+        markerText = `${tokenCount} tokens`;
+      } else if (characterCount) {
+        markerText = `${characterCount} characters`;
+      } else {
+        markerText = "an empty response";
+      }
 
-        yield {
-          text: chunk.metadata.text,
-          tokens: chunk.metadata.tokens,
-          isPrompt: chunk.metadata.isPrompt,
-          toolCalls: chunk.metadata.toolCalls,
-          usage: chunk.metadata.usage,
-        };
+      ChromeUtils.addProfilerMarker(
+        "MLEngineParent",
+        { startTime },
+        `runWithGenerator generated ${markerText}` +
+          ` (${this.pipelineOptions.backend} ${this.pipelineOptions.modelId})`
+      );
 
-        // Be a bit defensive here in getting the metadata, as different engines may
-        // report different things back.
-        let markerText;
-        if (chunk.metadata.tokens?.length) {
-          markerText = `${chunk.metadata.tokens?.length} tokens`;
-        } else if (chunk.metadata.text?.length) {
-          markerText = `${chunk.metadata.text?.length} characters`;
-        } else {
-          markerText = "empty response";
-        }
+      this.telemetry.recordEngineRun({
+        beforeRun: startTime,
+        resourcesBefore: result.resourcesBefore,
+        resourcesAfter: result.resourcesAfter,
+        engineId: this.engineId,
+        modelId: this.pipelineOptions.modelId,
+        backend: this.pipelineOptions.backend,
+        backendSourceRevision:
+          this.pipelineOptions.backend === "llama.cpp"
+            ? LLAMA_CPP_VERSION
+            : null,
+        tokenCount,
+        characterCount,
+        timeToFirstChunk:
+          firstChunkTime === null ? null : firstChunkTime - startTime,
+        averageChunkTime:
+          generatedChunkCount > 1
+            ? interChunkTimeTotal / (generatedChunkCount - 1)
+            : null,
+      });
+    };
 
-        ChromeUtils.addProfilerMarker(
-          "MLEngineParent",
-          { startTime: chunkStartTime },
-          `chunk generated ${markerText}` +
-            ` (${this.pipelineOptions.backend} ${this.pipelineOptions.modelId})`
-        );
+    // A consumer that abandons this generator resumes it at the `finally`
+    // without ever reaching the assignment after the loop.
+    let loopEnded = false;
 
-        chunkStartTime = ChromeUtils.now();
-        chunkPromise = responseChunkResolvers.getAndAdvanceChunkPromise();
-      } else if (this.#port === null) {
-        // in case of a timeout check if the inference process is still alive
-        lazy.console.error("The port was closed.");
-        if (this.engineStatus === "crashed") {
-          throw new Error(
-            "The inference process has crashed, the port is null. This was for the following request: " +
-              lazy.stringifyForLog(request)
+    try {
+      // Loop to yield chunks as they arrive
+      while (true) {
+        // Wait for the chunk with a timeout
+        const chunk = await Promise.race([chunkPromise, timeoutPromise(10)]);
+
+        // If there was no timeout we can yield the chunk and move to the next
+        if (!chunk.timeout) {
+          lazy.console.debug(
+            `Chunk received ${lazy.stringifyForLog(chunk.metadata)}`
           );
+          tokenCount += chunk.metadata.tokens?.length ?? 0;
+          characterCount += chunk.metadata.text?.length ?? 0;
+
+          if (!chunk.metadata.isPrompt) {
+            const now = ChromeUtils.now();
+            if (firstChunkTime === null) {
+              firstChunkTime = now;
+            } else {
+              interChunkTimeTotal += now - lastChunkTime;
+            }
+            lastChunkTime = now;
+            generatedChunkCount++;
+          }
+
+          yield {
+            text: chunk.metadata.text,
+            tokens: chunk.metadata.tokens,
+            isPrompt: chunk.metadata.isPrompt,
+            toolCalls: chunk.metadata.toolCalls,
+            usage: chunk.metadata.usage,
+          };
+
+          // Be a bit defensive here in getting the metadata, as different engines may
+          // report different things back.
+          let markerText;
+          if (chunk.metadata.tokens?.length) {
+            markerText = `${chunk.metadata.tokens?.length} tokens`;
+          } else if (chunk.metadata.text?.length) {
+            markerText = `${chunk.metadata.text?.length} characters`;
+          } else {
+            markerText = "empty response";
+          }
+
+          ChromeUtils.addProfilerMarker(
+            "MLEngineParent",
+            { startTime: chunkStartTime },
+            `chunk generated ${markerText}` +
+              ` (${this.pipelineOptions.backend} ${this.pipelineOptions.modelId})`
+          );
+
+          chunkStartTime = ChromeUtils.now();
+          chunkPromise = responseChunkResolvers.getAndAdvanceChunkPromise();
+        } else if (this.#port === null) {
+          // in case of a timeout check if the inference process is still alive
+          lazy.console.error("The port was closed.");
+          if (this.engineStatus === "crashed") {
+            throw new Error(
+              "The inference process has crashed, the port is null. This was for the following request: " +
+                lazy.stringifyForLog(request)
+            );
+          }
+          break;
         }
-        break;
-      }
 
-      // Warn if the engine completed before receiving all chunks
-      if (completed) {
-        lazy.console.warn(
-          "Warning: The run completed before the last chunk was received. The full output may not have been received."
-        );
-        break;
-      }
+        // Warn if the engine completed before receiving all chunks
+        if (completed) {
+          lazy.console.warn(
+            "Warning: The run completed before the last chunk was received. The full output may not have been received."
+          );
+          break;
+        }
 
-      // Check if this is the last chunk or if an error occurred
-      if (
-        chunk.statusText === lazy.Progress.ProgressStatusText.DONE ||
-        !chunk.ok
-      ) {
-        break;
+        // Check if this is the last chunk or if an error occurred
+        if (
+          chunk.statusText === lazy.Progress.ProgressStatusText.DONE ||
+          !chunk.ok
+        ) {
+          break;
+        }
+      }
+      loopEnded = true;
+    } finally {
+      if (!loopEnded) {
+        this.#port?.postMessage({ type: "EnginePort:Cancel", requestId });
+
+        // The engine settles the run either way and records its own success
+        // metrics for it, so report it from there.
+        completionPromise.then(recordRun, () => {});
       }
     }
 
     // Wait for the engine to fully complete before exiting
     const result = await completionPromise;
 
-    // Tokens may not be available.
-    let markerText;
-    if (tokenCount) {
-      markerText = `${tokenCount} tokens`;
-    } else if (characterCount) {
-      markerText = `${characterCount} characters`;
-    } else {
-      markerText = "an empty response";
-    }
-
-    ChromeUtils.addProfilerMarker(
-      "MLEngineParent",
-      { startTime },
-      `runWithGenerator generated ${markerText}` +
-        ` (${this.pipelineOptions.backend} ${this.pipelineOptions.modelId})`
-    );
-
-    this.telemetry.recordEngineRun({
-      beforeRun: startTime,
-      resourcesBefore: result.resourcesBefore,
-      resourcesAfter: result.resourcesAfter,
-      engineId: this.engineId,
-      modelId: this.pipelineOptions.modelId,
-      backend: this.pipelineOptions.backend,
-      tokenCount,
-      characterCount,
-      timeToFirstChunk:
-        firstChunkTime === null ? null : firstChunkTime - startTime,
-      averageChunkTime:
-        generatedChunkCount > 1
-          ? interChunkTimeTotal / (generatedChunkCount - 1)
-          : null,
-    });
+    recordRun(result);
 
     return result;
   }

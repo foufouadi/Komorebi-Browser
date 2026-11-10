@@ -10,6 +10,7 @@
 #include "mozilla/FloatingPoint.h"
 
 #include <bit>
+#include <type_traits>
 
 #include "gc/Zone.h"
 #include "jit/CalleeToken.h"
@@ -96,6 +97,41 @@ CodeOffset MacroAssembler::PushWithPatch(ImmWord word) {
 
 CodeOffset MacroAssembler::PushWithPatch(ImmPtr imm) {
   return PushWithPatch(ImmWord(uintptr_t(imm.value)));
+}
+
+template <typename... Regs>
+void MacroAssembler::PushRegs(const Regs&... regs) {
+  static_assert((std::is_convertible_v<Regs, Register> && ...));
+  static_assert(sizeof...(Regs) > 0);
+
+  pushRegs(regs...);
+  adjustFrame(int32_t(sizeof...(Regs) * sizeof(intptr_t)));
+}
+
+template <typename... Regs>
+void MacroAssembler::PopRegs(const Regs&... regs) {
+  static_assert((std::is_convertible_v<Regs, Register> && ...));
+  static_assert(sizeof...(Regs) > 0);
+
+  popRegs(regs...);
+  adjustFrame(-int32_t(sizeof...(Regs) * sizeof(intptr_t)));
+}
+
+// ===============================================================
+// Indirect call/jump targets.
+
+CodeOffset MacroAssembler::indirectTarget(TargetKind kind) {
+  return CodeOffset(currentOffset());
+}
+
+void MacroAssembler::bindIndirectTarget(Label* label, TargetKind kind) {
+  CodeOffset offset = indirectTarget(kind);
+  bind(label, BufferOffset(offset.offset()));
+}
+
+void MacroAssembler::bindIndirectTarget(CodeLabel* label, TargetKind kind) {
+  CodeOffset offset = indirectTarget(kind);
+  label->target()->bind(offset.offset());
 }
 
 // ===============================================================
@@ -298,6 +334,24 @@ void MacroAssembler::branchIfNotActivationEntryFrame(Register scratch,
   load32(Address(FramePointer, CommonFrameLayout::offsetOfDescriptor()),
          scratch);
   and32(Imm32(FrameDescriptor::TypeMask), scratch);
+  if (JitOptions.emitInterpreterEntryTrampoline) {
+    // A frame entered through a per-script entry trampoline is still the
+    // activation's entry frame if the trampoline frame is.
+    Label isEntryFrame;
+    branch32(Assembler::Equal, scratch, Imm32(uint32_t(FrameType::CppToJSJit)),
+             &isEntryFrame);
+    branch32(Assembler::NotEqual, scratch,
+             Imm32(uint32_t(FrameType::BaselineInterpreterEntry)),
+             notEntryFrame);
+    loadPtr(Address(FramePointer, CommonFrameLayout::offsetOfCallerFramePtr()),
+            scratch);
+    load32(Address(scratch, CommonFrameLayout::offsetOfDescriptor()), scratch);
+    and32(Imm32(FrameDescriptor::TypeMask), scratch);
+    branch32(Assembler::NotEqual, scratch,
+             Imm32(uint32_t(FrameType::CppToJSJit)), notEntryFrame);
+    bind(&isEntryFrame);
+    return;
+  }
   branch32(Assembler::NotEqual, scratch, Imm32(uint32_t(FrameType::CppToJSJit)),
            notEntryFrame);
 }
@@ -462,12 +516,7 @@ void MacroAssembler::branchIfTrueBool(Register reg, Label* label) {
 
 void MacroAssembler::branchIfNotNullOrUndefined(ValueOperand val,
                                                 Label* label) {
-  Label nullOrUndefined;
-  ScratchTagScope tag(*this, val);
-  splitTagForTest(val, tag);
-  branchTestNull(Assembler::Equal, tag, &nullOrUndefined);
-  branchTestUndefined(Assembler::NotEqual, tag, label);
-  bind(&nullOrUndefined);
+  branchTestNullOrUndefined(Assembler::NotEqual, val, label);
 }
 
 void MacroAssembler::branchIfRope(Register str, Label* label) {
@@ -912,6 +961,7 @@ void MacroAssembler::branchFloat32NotInUInt64Range(Address src, Register temp,
 
 // ========================================================================
 // Canonicalization primitives.
+#ifndef JS_CODEGEN_RISCV64
 void MacroAssembler::canonicalizeFloatNaN(FloatRegister reg) {
   Label notNaN;
   branchFloat(DoubleOrdered, reg, reg, &notNaN);
@@ -925,6 +975,7 @@ void MacroAssembler::canonicalizeDoubleNaN(FloatRegister reg) {
   loadConstantDouble(JS::GenericNaN(), reg);
   bind(&notNaN);
 }
+#endif  // !JS_CODEGEN_RISCV64
 
 void MacroAssembler::canonicalizeDoubleZero(FloatRegister reg,
                                             FloatRegister scratch) {

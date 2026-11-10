@@ -29,6 +29,7 @@
 #include "wasm/WasmInstance.h"
 
 #include "gc/Marking-inl.h"
+#include "gc/StableCellHasher-inl.h"
 #include "gc/WeakMap-inl.h"
 #include "vm/JSObject-inl.h"
 #include "vm/Realm-inl.h"
@@ -69,8 +70,8 @@ Realm::~Realm() {
     runtime_->lcovOutput().writeLCovResult(*lcovRealm_);
   }
 
-  if (allocationMetadataBuilder_) {
-    forgetAllocationMetadataBuilder();
+  if (hasAllocationMetadataBuilder_) {
+    disableAllocationMetadataBuilder();
   }
 
   if (isTracingExecution_) {
@@ -304,7 +305,7 @@ void Realm::traceRoots(JSTracer* trc,
   }
 
   objects_.trace(trc);
-  baselineCompileQueue_.trace(trc);
+  jitRealm_.trace(trc);
 }
 
 void ObjectRealm::finishRoots() {
@@ -338,6 +339,19 @@ void Realm::sweepAfterMinorGC(JSTracer* trc) {
   objects_.sweepAfterMinorGC(trc);
 }
 
+#ifdef JSGC_HASH_TABLE_CHECKS
+void Realm::checkModuleScriptSourcesAfterMovingGC() {
+  objects_.checkModuleScriptSourcesAfterMovingGC(zone_);
+}
+
+void ObjectRealm::checkModuleScriptSourcesAfterMovingGC(JS::Zone* zone) {
+  gc::CheckTableAfterMovingGC(moduleScriptSources, [zone](const auto& entry) {
+    gc::CheckGCThingAfterMovingGC(entry, zone);
+    return entry.unbarrieredGet();
+  });
+}
+#endif
+
 void Realm::traceWeakSavedStacks(JSTracer* trc) { savedStacks_.traceWeak(trc); }
 
 void Realm::traceWeakGlobalEdge(JSTracer* trc) {
@@ -365,43 +379,32 @@ void Realm::purge() {
   newProxyCache.purge();
   newPlainObjectWithPropsCache.purge();
   plainObjectAssignCache.purge();
+  plainObjectSpreadCache.purge();
   objects_.iteratorCache.clearAndCompact();
 }
 
-void Realm::removeFromCompileQueue(JSScript* script) {
-  baselineCompileQueue_.remove(script);
-}
-
-// Check to see if this individual realm is recording allocations. Debuggers or
-// runtimes can try and record allocations, so this method can check to see if
-// any initialization is needed.
-bool Realm::isRecordingAllocations() { return !!allocationMetadataBuilder_; }
-
-void Realm::setAllocationMetadataBuilder(
-    const js::AllocationMetadataBuilder* builder) {
-  // Clear any jitcode in the runtime, which behaves differently depending on
-  // whether there is a creation callback.
-  if (bool(allocationMetadataBuilder_) != bool(builder)) {
-    ReleaseAllJITCode(runtime_->gcContext());
-    if (builder) {
-      zone()->incNumRealmsWithAllocMetadataBuilder();
-    } else {
-      zone()->decNumRealmsWithAllocMetadataBuilder();
-    }
-  }
-
-  for (auto iter = wasm.instances().iter(); !iter.done(); iter.next()) {
-    iter.get()->setAllocationMetadataBuilder(builder);
-  }
-  allocationMetadataBuilder_ = builder;
-}
-
-void Realm::forgetAllocationMetadataBuilder() {
-  if (!allocationMetadataBuilder_) {
+void Realm::enableAllocationMetadataBuilder() {
+  if (hasAllocationMetadataBuilder_) {
     return;
   }
 
-  // Unlike setAllocationMetadataBuilder, we don't have to discard all JIT
+  // Clear any jitcode in the runtime, which behaves differently depending on
+  // whether there is an allocation metadata builder.
+  ReleaseAllJITCode(runtime_->gcContext());
+  zone()->incNumRealmsWithAllocMetadataBuilder();
+
+  for (auto iter = wasm.instances().iter(); !iter.done(); iter.next()) {
+    iter.get()->setHasAllocationMetadataBuilder(true);
+  }
+  hasAllocationMetadataBuilder_ = true;
+}
+
+void Realm::disableAllocationMetadataBuilder() {
+  if (!hasAllocationMetadataBuilder_) {
+    return;
+  }
+
+  // Unlike enableAllocationMetadataBuilder, we don't have to discard all JIT
   // code here (code is still valid, just a bit slower because it doesn't do
   // inline GC allocations when a metadata builder is present), but we do want
   // to cancel off-thread Ion compilations to avoid races when Ion accesses
@@ -411,9 +414,9 @@ void Realm::forgetAllocationMetadataBuilder() {
   zone()->decNumRealmsWithAllocMetadataBuilder();
 
   for (auto iter = wasm.instances().iter(); !iter.done(); iter.next()) {
-    iter.get()->setAllocationMetadataBuilder(nullptr);
+    iter.get()->setHasAllocationMetadataBuilder(false);
   }
-  allocationMetadataBuilder_ = nullptr;
+  hasAllocationMetadataBuilder_ = false;
 }
 
 void Realm::setNewObjectMetadata(JSContext* cx, HandleObject obj) {
@@ -421,8 +424,8 @@ void Realm::setNewObjectMetadata(JSContext* cx, HandleObject obj) {
   cx->check(compartment(), obj);
 
   AutoEnterOOMUnsafeRegion oomUnsafe;
-  if (JSObject* metadata =
-          allocationMetadataBuilder_->build(cx, obj, oomUnsafe)) {
+  if (SavedFrame* metadata =
+          SavedStacks::buildAllocationMetadata(cx, obj, oomUnsafe)) {
     MOZ_ASSERT(metadata->maybeCCWRealm() == obj->maybeCCWRealm());
     cx->check(metadata);
 
@@ -440,6 +443,18 @@ void Realm::setNewObjectMetadata(JSContext* cx, HandleObject obj) {
       oomUnsafe.crash("setNewObjectMetadata");
     }
   }
+}
+
+SavedFrame* js::GetAllocationMetadata(JSObject* obj) {
+  ObjectRealm::ObjectMetadataTable* map =
+      ObjectRealm::get(obj).objectMetadataTable.get();
+  if (map) {
+    auto ptr = map->lookup(obj);
+    if (ptr) {
+      return ptr->value();
+    }
+  }
+  return nullptr;
 }
 
 void Realm::updateDebuggerObservesFlag(unsigned flag) {
@@ -629,7 +644,8 @@ void Realm::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                                    size_t* innerViewsArg,
                                    size_t* objectMetadataTablesArg,
                                    size_t* savedStacksSet,
-                                   size_t* nonSyntacticLexicalEnvironmentsArg) {
+                                   size_t* nonSyntacticLexicalEnvironmentsArg,
+                                   size_t* cacheIRStubs) {
   *realmObject += mallocSizeOf(this);
   wasm.addSizeOfExcludingThis(mallocSizeOf, realmTables);
 
@@ -638,6 +654,8 @@ void Realm::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                                   nonSyntacticLexicalEnvironmentsArg);
 
   *savedStacksSet += savedStacks_.sizeOfExcludingThis(mallocSizeOf);
+
+  jitRealm_.addSizeOfExcludingThis(mallocSizeOf, cacheIRStubs);
 }
 
 bool Realm::shouldCaptureStackForThrow() {
@@ -811,6 +829,16 @@ JS_PUBLIC_API JSObject* JS::GetRealmErrorPrototype(JSContext* cx) {
 JS_PUBLIC_API JSObject* JS::GetRealmIteratorPrototype(JSContext* cx) {
   CHECK_THREAD(cx);
   return GlobalObject::getOrCreateIteratorPrototype(cx, cx->global());
+}
+
+JS_PUBLIC_API JSObject* JS::GetRealmMapIteratorPrototype(JSContext* cx) {
+  CHECK_THREAD(cx);
+  return GlobalObject::getOrCreateMapIteratorPrototype(cx, cx->global());
+}
+
+JS_PUBLIC_API JSObject* JS::GetRealmSetIteratorPrototype(JSContext* cx) {
+  CHECK_THREAD(cx);
+  return GlobalObject::getOrCreateSetIteratorPrototype(cx, cx->global());
 }
 
 JS_PUBLIC_API JSObject* JS::GetRealmAsyncIteratorPrototype(JSContext* cx) {

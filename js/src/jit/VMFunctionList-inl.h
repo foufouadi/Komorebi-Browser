@@ -8,6 +8,7 @@
 #include "mozilla/MacroArgs.h"  // MOZ_CONCAT
 
 #include "builtin/Eval.h"
+#include "builtin/MapObject.h"
 #include "builtin/ModuleObject.h"  // js::GetOrCreateModuleMetaObject
 #include "builtin/Object.h"        // js::ObjectCreateWithTemplate
 #include "builtin/Promise.h"       // js::AsyncFunctionAwait
@@ -196,7 +197,6 @@ namespace jit {
   _(FunctionBindSpecializedBaseline,                                           \
     js::BoundFunctionObject::functionBindSpecializedBaseline)                  \
   VMFUNCTION_FUZZILLI_LIST(_)                                                  \
-  _(GeneratorThrowOrReturn, js::jit::GeneratorThrowOrReturn)                   \
   _(GetAndClearException, js::GetAndClearException)                            \
   _(GetElemMaybeCached, js::jit::GetElemMaybeCached)                           \
   _(GetFirstDollarIndexRaw, js::GetFirstDollarIndexRaw)                        \

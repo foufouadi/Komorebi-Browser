@@ -3,13 +3,13 @@ head = "../../../../../toolkit/profile/test/xpcshell/head.js ../../../../../brow
 tags = "nimbus"
 firefox-appdir = "browser"
 support-files = ["reference_aboutwelcome_experiment_content.json"]
-skip-if = [
-  "appname == 'thunderbird'",
-  "os == 'android'",
+run-if = [
+  "os != 'android' && appname != 'thunderbird'",
 ]
 prefs = [
   "app.normandy.run_interval_seconds=0", # This turns off the update interval for fetching recipes from Remote Settings
   "messaging-system.log=all", # Enable all Nimbus logging.
+  "nimbus.persistence.enabled=true", # Enable persistence for the Nimbus ExperimentStore in all tests.
 ]
 
 ["test_bug2054546.js"]
@@ -36,9 +36,6 @@ prefs = [
 
 ["test_ExperimentManager_prefs.js"]
 requesttimeoutfactor = 6  # Slow and high CPU use on Linux and Windows
-skip-if = [
-  "os == 'win' && msix", # Bug 1991153
-]
 
 ["test_ExperimentManager_unenroll.js"]
 
@@ -51,6 +48,8 @@ skip-if = [
 ["test_NimbusTestUtils.js"]
 
 ["test_RemoteSettingsExperimentLoader.js"]
+
+["test_RemoteSettingsExperimentLoader_timer.js"]
 
 ["test_RemoteSettingsExperimentLoader_updateRecipes.js"]
 requesttimeoutfactor = 2  # Slow on Windows
@@ -71,9 +70,5 @@ requesttimeoutfactor = 3  # Slow on Windows msix
 
 ["test_prefFlips.js"]
 requesttimeoutfactor = 2  # Slow on Linux and Windows
-skip-if = [
-  "os == 'mac' && os_version == '15.30' && arch == 'aarch64'", # Bug 1960885
-  "os == 'win' && msix", # Bug 1991153
-]
 
 ["test_schema_uris.js"]

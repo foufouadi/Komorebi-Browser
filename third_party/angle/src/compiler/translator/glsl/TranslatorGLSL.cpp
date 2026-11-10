@@ -15,6 +15,8 @@
 #include "compiler/translator/tree_ops/AddDefaultReturnStatements.h"
 #include "compiler/translator/tree_ops/MonomorphizeUnsupportedFunctions.h"
 #include "compiler/translator/tree_ops/PreTransformTextureCubeGradDerivatives.h"
+#include "compiler/translator/tree_ops/RemoveDynamicIndexing.h"
+#include "compiler/translator/tree_ops/RemoveInvariantDeclaration.h"
 #include "compiler/translator/tree_ops/RewriteTexelFetchOffset.h"
 #include "compiler/translator/tree_ops/glsl/apple/RewriteRowMajorMatrices.h"
 
@@ -47,8 +49,16 @@ bool TranslatorGLSL::translate(TIntermBlock *root,
     // variables. It should be harmless to do this twice in the case that the shader also explicitly
     // did this. However, it's important to emit invariant qualifiers only for those built-in
     // variables that are actually used, to avoid affecting the behavior of the shader.
-    if (compileOptions.flattenPragmaSTDGLInvariantAll && getPragma().stdgl.invariantAll &&
-        !sh::RemoveInvariant(getShaderType(), getShaderVersion(), getOutputType(), compileOptions))
+    const bool removeInvariant =
+        RemoveInvariant(getShaderType(), getShaderVersion(), getOutputType(), compileOptions);
+    if (removeInvariant)
+    {
+        if (!RemoveInvariantDeclaration(this, root))
+        {
+            return false;
+        }
+    }
+    else if (compileOptions.flattenPragmaSTDGLInvariantAll && getPragma().stdgl.invariantAll)
     {
         switch (getShaderType())
         {
@@ -115,6 +125,14 @@ bool TranslatorGLSL::translate(TIntermBlock *root,
     if (compileOptions.rewriteRowMajorMatrices && getShaderVersion() >= 300)
     {
         if (!RewriteRowMajorMatrices(this, root, &getSymbolTable()))
+        {
+            return false;
+        }
+    }
+
+    if (compileOptions.removeDynamicIndexingOfSwizzledVector)
+    {
+        if (!sh::RemoveDynamicIndexingOfSwizzledVector(this, root, &getSymbolTable(), nullptr))
         {
             return false;
         }

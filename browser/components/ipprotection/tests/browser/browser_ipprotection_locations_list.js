@@ -91,7 +91,7 @@ add_task(async function test_locations_list_default_rendering() {
   let recButton = locationsList.querySelector("#location-option-REC");
   Assert.ok(recButton, "recommended location button should be present");
   Assert.equal(
-    recButton.getAttribute("aria-checked"),
+    recButton.getAttribute("aria-selected"),
     "true",
     "recommended location should be selected by default"
   );
@@ -112,7 +112,7 @@ add_task(async function test_locations_list_default_rendering() {
       `#location-option-${code}`
     );
     Assert.equal(
-      unSelectedButton.getAttribute("aria-checked"),
+      unSelectedButton.getAttribute("aria-selected"),
       "false",
       `${code} button should not be selected`
     );
@@ -139,14 +139,14 @@ add_task(async function test_locations_list_preselected_location() {
   let caButton = locationsList.querySelector("#location-option-CA");
   Assert.ok(caButton, "CA location button should be present");
   Assert.equal(
-    caButton.getAttribute("aria-checked"),
+    caButton.getAttribute("aria-selected"),
     "true",
     "CA should be selected when passed as location"
   );
 
   let recButton = locationsList.querySelector("#location-option-REC");
   Assert.equal(
-    recButton.getAttribute("aria-checked"),
+    recButton.getAttribute("aria-selected"),
     "false",
     "recommended location should not be selected"
   );
@@ -171,7 +171,7 @@ add_task(async function test_locations_list_unknown_falls_back_to_rec() {
 
   let recButton = locationsList.querySelector("#location-option-REC");
   Assert.equal(
-    recButton.getAttribute("aria-checked"),
+    recButton.getAttribute("aria-selected"),
     "true",
     "recommended location button should be selected when an invalid code is passed"
   );
@@ -196,10 +196,10 @@ add_task(async function test_locations_list_sorted_alphabetically() {
   Assert.ok(locationsList, "locations-list element should exist");
 
   let locationItems = locationsList.querySelectorAll(
-    "#locations-list li:not(:first-child) button"
+    "#locations-list li:not(:first-child)"
   );
-  let renderedCodes = Array.from(locationItems).map(btn =>
-    btn.id.replace("location-option-", "")
+  let renderedCodes = Array.from(locationItems).map(option =>
+    option.id.replace("location-option-", "")
   );
 
   let expectedCodes = ["CA", "DE", "US"];
@@ -474,7 +474,7 @@ add_task(async function test_locations_list_premium_toggle_is_reactive() {
 /**
  * Tests that when a locked location is selected but the user is not premium,
  * the selection resolves to the recommended location, so the filtered
- * radiogroup still has exactly one checked radio.
+ * listbox still has exactly one selected option.
  */
 add_task(
   async function test_locations_list_locked_selection_falls_back_to_rec() {
@@ -498,18 +498,18 @@ add_task(
 
     let recButton = locationsList.querySelector("#location-option-REC");
     Assert.equal(
-      recButton.getAttribute("aria-checked"),
+      recButton.getAttribute("aria-selected"),
       "true",
-      "recommended location should be the checked radio"
+      "recommended location should be the selected option"
     );
 
-    let checkedButtons = locationsList.querySelectorAll(
-      '#locations-list button[aria-checked="true"]'
+    let selectedOptions = locationsList.querySelectorAll(
+      '#locations-list [aria-selected="true"]'
     );
     Assert.equal(
-      checkedButtons.length,
+      selectedOptions.length,
       1,
-      "exactly one radio should be checked after falling back to REC"
+      "exactly one option should be selected after falling back to REC"
     );
 
     await closePanel();
@@ -518,15 +518,19 @@ add_task(
 );
 
 /*
- * Tests that the user account is marked as premium when hasUpgraded is true,
- * bandwithUsage is unset, or isDefaultBrowser is true
+ * Tests that the user account is marked as premium when hasUpgraded is true or isDefaultBrowser is true
  */
 add_task(async function test_user_set_to_premium() {
-  let { locationsList } = await openLocationsList({
-    hasUpgraded: true,
-    bandwidthUsage: { used: 100, max: 1000 },
-    isDefaultBrowser: false,
-  });
+  let sandbox = sinon.createSandbox();
+  const { ShellService } = ChromeUtils.importESModule(
+    "moz-src:///browser/components/shell/ShellService.sys.mjs"
+  );
+  let isDefaultBrowserStub = sandbox
+    .stub(ShellService, "isDefaultBrowserAsync")
+    .resolves(false);
+
+  setupService({ isReady: true, hasUpgraded: true });
+  let { locationsList } = await openLocationsList({ hasUpgraded: true });
 
   Assert.ok(
     locationsList.premium,
@@ -536,25 +540,9 @@ add_task(async function test_user_set_to_premium() {
   await closePanel();
   cleanupService();
 
-  ({ locationsList } = await openLocationsList({
-    hasUpgraded: false,
-    bandwidthUsage: null,
-    isDefaultBrowser: false,
-  }));
-
-  Assert.ok(
-    locationsList.premium,
-    "user should be premium when bandwidthUsage is unset"
-  );
-
-  await closePanel();
-  cleanupService();
-
-  ({ locationsList } = await openLocationsList({
-    hasUpgraded: false,
-    bandwidthUsage: { used: 100, max: 1000 },
-    isDefaultBrowser: true,
-  }));
+  isDefaultBrowserStub.resolves(true);
+  setupService({ isReady: true, hasUpgraded: false });
+  ({ locationsList } = await openLocationsList({ hasUpgraded: false }));
 
   Assert.ok(
     locationsList.premium,
@@ -563,6 +551,7 @@ add_task(async function test_user_set_to_premium() {
 
   await closePanel();
   cleanupService();
+  sandbox.restore();
 });
 
 /**
@@ -603,6 +592,55 @@ add_task(async function test_promo_not_shown_when_upgraded() {
   let promo = locationsEl.querySelector("moz-promo");
   Assert.ok(!promo, "moz-promo should not be present when user has upgraded");
 
+  await closePanel();
+  cleanupService();
+});
+
+/**
+ * Tests that the locations subview waits for the serverlist before showing,
+ * so it is not shown empty and then resized once the list arrives.
+ */
+add_task(async function test_locations_subview_waits_for_serverlist() {
+  const { IPProtectionServerlist } = ChromeUtils.importESModule(
+    "moz-src:///toolkit/components/ipprotection/IPProtectionServerlist.sys.mjs"
+  );
+  let fetched = Promise.withResolvers();
+  let realGet = IPProtectionServerlist.bucket.get.bind(
+    IPProtectionServerlist.bucket
+  );
+  let getStub = sinon
+    .stub(IPProtectionServerlist.bucket, "get")
+    .callsFake(async () => {
+      await fetched.promise;
+      return realGet();
+    });
+  IPProtectionServerlist.__list = [];
+  await openPanel({ isReady: true, locationsList: [] });
+
+  let panel = IPProtection.getPanel(window);
+  let locationsView = PanelMultiView.getViewNode(
+    document,
+    IPProtectionPanel.LOCATIONS_PANELVIEW
+  );
+  let locationsOnShown = BrowserTestUtils.waitForEvent(
+    locationsView,
+    "ViewShown"
+  ).then(() => panel.state.locationsList);
+
+  panel.showLocationSelector();
+  Assert.ok(
+    !locationsView.querySelector(IPProtectionPanel.LOCATIONS_TAGNAME),
+    "the subview should not be shown while the serverlist is loading"
+  );
+
+  fetched.resolve();
+  Assert.deepEqual(
+    (await locationsOnShown).map(l => l.code),
+    ["US"],
+    "the serverlist should be loaded when the subview is shown"
+  );
+
+  getStub.restore();
   await closePanel();
   cleanupService();
 });

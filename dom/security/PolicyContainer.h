@@ -5,17 +5,21 @@
 #ifndef PolicyContainer_h_
 #define PolicyContainer_h_
 
+#include "mozilla/AlreadyAddRefed.h"
+#include "mozilla/Result.h"
 #include "nsCOMPtr.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsIIntegrityPolicy.h"
 #include "nsILoadInfo.h"
 #include "nsIPolicyContainer.h"
+#include "nsString.h"
 
 namespace mozilla::ipc {
 class PolicyContainerArgs;
 }
 
 namespace mozilla::dom {
+class ConnectionAllowlists;
 class Document;
 class IntegrityPolicyWAICT;
 }  // namespace mozilla::dom
@@ -24,6 +28,8 @@ class IntegrityPolicyWAICT;
 
 class nsIContentSecurityPolicy;
 class nsIIntegrityPolicy;
+class nsIPrincipal;
+class nsIURI;
 
 /**
   Implementation of
@@ -38,6 +44,21 @@ class PolicyContainer : public nsIPolicyContainer {
   NS_DECL_NSIPOLICYCONTAINER
 
   PolicyContainer();
+
+  // Raw values of the response headers that populate a Policy-Container.
+  // Empty values mean the header is absent.
+  struct Headers {
+    nsCString mContentSecurityPolicy;
+    nsCString mContentSecurityPolicyReportOnly;
+    nsCString mConnectionAllowlist;
+    nsCString mConnectionAllowlistReportOnly;
+  };
+
+  // Creates a Policy-Container for non-documents by parsing the provided
+  // security headers like Content-Security-Policy etc.
+  static mozilla::Result<already_AddRefed<PolicyContainer>, nsresult>
+  CreateForNonDocument(nsIPrincipal* aPrincipal, nsIURI* aSelfURI,
+                       const Headers& aHeaders);
 
   static void ToArgs(const PolicyContainer* aPolicy,
                      mozilla::ipc::PolicyContainerArgs& aArgs);
@@ -78,6 +99,13 @@ class PolicyContainer : public nsIPolicyContainer {
   static mozilla::dom::IntegrityPolicyWAICT* GetIntegrityPolicyWAICT(
       const nsIPolicyContainer* aPolicyContainer);
 
+  // == Connection Allowlists ==
+  // https://w3c.github.io/connection-allowlists/
+  mozilla::dom::ConnectionAllowlists* GetConnectionAllowlists() const;
+  void SetConnectionAllowlists(mozilla::dom::ConnectionAllowlists* aAllowlists);
+  static mozilla::dom::ConnectionAllowlists* GetConnectionAllowlists(
+      const nsIPolicyContainer* aPolicyContainer);
+
   // == IP Address Space ==
   // Stored per
   // https://wicg.github.io/local-network-access/#integration-with-html to allow
@@ -90,6 +118,7 @@ class PolicyContainer : public nsIPolicyContainer {
   nsCOMPtr<nsIContentSecurityPolicy> mCSP;
   nsCOMPtr<nsIIntegrityPolicy> mIntegrityPolicy;
   RefPtr<mozilla::dom::IntegrityPolicyWAICT> mIntegrityPolicyWAICT;
+  RefPtr<mozilla::dom::ConnectionAllowlists> mConnectionAllowlists;
   nsILoadInfo::IPAddressSpace mIPAddressSpace = nsILoadInfo::Unknown;
 
  protected:

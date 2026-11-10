@@ -5,8 +5,11 @@
 /* eslint no-shadow: error, mozilla/no-aArgs: error */
 
 /**
- * @typedef {import("resource://services-settings/RemoteSettingsClient.sys.mjs").RemoteSettingsClient} RemoteSettingsClient
- * @typedef {import("../uniffi-bindgen-gecko-js/components/generated/RustSearch.sys.mjs").SearchEngineDefinition} SearchEngineDefinition
+ * @import {RemoteSettingsClient} from "resource://services-settings/RemoteSettingsClient.sys.mjs"
+ * @import {
+ *   SearchEngineDefinition,
+ *   SearchEngineDefinitionV3,
+ * } from "../uniffi-bindgen-gecko-js/components/generated/RustSearch.sys.mjs"
  */
 
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
@@ -32,7 +35,7 @@ const lazy = XPCOMUtils.declareLazy({
   },
   logConsole: () =>
     console.createInstance({
-      prefix: "SearchEngine",
+      logModule: "SearchEngine",
       maxLogLevel: lazy.SearchUtils.loggingEnabled ? "Debug" : "Warn",
     }),
 });
@@ -309,9 +312,7 @@ const ParamPreferenceCache = {
     let branchFetcher = AppConstants.NIGHTLY_BUILD
       ? "getBranch"
       : "getDefaultBranch";
-    this.branch = Services.prefs[branchFetcher](
-      lazy.SearchUtils.BROWSER_SEARCH_PREF + "param."
-    );
+    this.branch = Services.prefs[branchFetcher]("browser.search.param.");
     this.cache = new Map();
     this.nimbusCache = new Map();
     for (let prefName of this.branch.getChildList("")) {
@@ -442,7 +443,7 @@ export class ConfigSearchEngine extends SearchEngine {
   /**
    * @param {object} options
    *   The options for this search engine.
-   * @param {SearchEngineDefinition} options.config
+   * @param {SearchEngineDefinition|SearchEngineDefinitionV3} options.config
    *   The engine config from Remote Settings.
    * @param {object} [options.settings]
    *   The saved settings for the user.
@@ -478,7 +479,7 @@ export class ConfigSearchEngine extends SearchEngine {
    *
    * @param {object} options
    *   The options object.
-   * @param {SearchEngineDefinition} options.configuration
+   * @param {SearchEngineDefinition|SearchEngineDefinitionV3} options.configuration
    *    The updated engine definition for this engine from the search config.
    */
   update({ configuration }) {
@@ -515,15 +516,16 @@ export class ConfigSearchEngine extends SearchEngine {
 
   /**
    * @type {string}
-   *   The partner code being used by this search engine in the Search URL.
+   *   The default partner code being used by this search engine in the
+   *   Search URL for the default SAP.
    */
   get partnerCode() {
     return this.#partnerCode;
   }
 
   /**
-   * Returns the appropriate identifier to use for telemetry. It is based on
-   * the following order:
+   * Returns the appropriate identifier to use for telemetry based on the
+   * search URL for the default SAP. It is based on the following order:
    *
    * - telemetryId: The telemetry id from the configuration, or derived from
    *                the WebExtension name.
@@ -663,7 +665,7 @@ export class ConfigSearchEngine extends SearchEngine {
   /**
    * Initializes the engine.
    *
-   * @param {SearchEngineDefinition} engineConfig
+   * @param {SearchEngineDefinition|SearchEngineDefinitionV3} engineConfig
    *   The engine definition from the search config for this engine.
    */
   #init(engineConfig) {
@@ -676,24 +678,69 @@ export class ConfigSearchEngine extends SearchEngine {
       this._queryCharset = engineConfig.charset;
     }
 
-    if (engineConfig.telemetrySuffix) {
-      this.#telemetryId += `-${engineConfig.telemetrySuffix}`;
-    }
-
-    if (engineConfig.clickUrl) {
-      this.clickUrl = engineConfig.clickUrl;
-    }
-
     this._name = engineConfig.name.trim();
     this._definedAliases =
       engineConfig.aliases?.map(alias => `@${alias}`) ?? [];
-    this.#partnerCode = engineConfig.partnerCode ?? "";
     /** @type {string} */
     this.isNewUntil = engineConfig.isNewUntil ?? "";
 
+    /** @type {Map<string, {code: ?string, telemetryId: ?string}>} */
+    let partnerCodeMap = new Map();
+
+    // The partner field replaced the partnerCode field in the v2 to v3 transition.
+    if ("partner" in engineConfig) {
+      // V3 configuration.
+
+      for (let [key, { code, telemetrySuffix }] of engineConfig.partner ?? []) {
+        if (telemetrySuffix) {
+          partnerCodeMap.set(key, {
+            code,
+            telemetryId: `${engineConfig.identifier}-${telemetrySuffix}`,
+          });
+        } else {
+          partnerCodeMap.set(key, {
+            code,
+            telemetryId: engineConfig.identifier,
+          });
+        }
+      }
+
+      let defaultEntry = partnerCodeMap.get("default");
+      this.#partnerCode = defaultEntry?.code ?? "";
+      this.#telemetryId = defaultEntry?.telemetryId ?? this.#telemetryId;
+    } else {
+      // V2 configuration.
+
+      if ("clickUrl" in engineConfig && engineConfig.clickUrl) {
+        this.clickUrl = engineConfig.clickUrl;
+      }
+      this.#partnerCode = engineConfig.partnerCode ?? "";
+      if (engineConfig.telemetrySuffix) {
+        this.#telemetryId += `-${engineConfig.telemetrySuffix}`;
+      }
+
+      partnerCodeMap.set("default", {
+        code: this.#partnerCode,
+        telemetryId: this.#telemetryId,
+      });
+
+      if (this.id == "google") {
+        for (let sapSource of ["errorpage"]) {
+          partnerCodeMap.set(sapSource, {
+            code: "",
+            telemetryId: "google-com-nocodes",
+          });
+        }
+        partnerCodeMap.set("newtab_search_widget", {
+          code: "firefox-b-exp1",
+          telemetryId: "google-b-exp1",
+        });
+      }
+    }
+
     for (const [type, urlData] of Object.entries(engineConfig.urls)) {
       if (urlData) {
-        this.#setUrl(type, urlData, engineConfig.partnerCode);
+        this.#setUrl(type, urlData, partnerCodeMap);
       }
     }
   }
@@ -705,10 +752,10 @@ export class ConfigSearchEngine extends SearchEngine {
    *   The type of url. This could be a url for search, suggestions, or trending.
    * @param {object} urlData
    *   The url data contains the template/base url and url params.
-   * @param {string} partnerCode
-   *   The partner code associated with the search engine.
+   * @param {Map<string, {code: ?string, telemetryId: ?string}>} partnerCodeMap
+   *   The map of search access points to partner codes and telemetry ids.
    */
-  #setUrl(type, urlData, partnerCode) {
+  #setUrl(type, urlData, partnerCodeMap) {
     let urlType = ConfigSearchEngine.URL_TYPE_MAP.get(type);
     if (!urlType) {
       console.warn("unexpected engine url type.", type);
@@ -719,6 +766,7 @@ export class ConfigSearchEngine extends SearchEngine {
       ...urlData,
       type: urlType,
       template: urlData.base,
+      partnerCodeMap,
     });
 
     if (urlData.params) {
@@ -731,10 +779,7 @@ export class ConfigSearchEngine extends SearchEngine {
         switch (true) {
           case param.value != undefined:
             if (!isEnterprise || !enterpriseParams.includes(param.name)) {
-              engineURL.addParam(
-                param.name,
-                param.value == "{partnerCode}" ? partnerCode : param.value
-              );
+              engineURL.addParam(param.name, param.value);
             }
             break;
           case param.experimentConfig != undefined:
@@ -746,12 +791,7 @@ export class ConfigSearchEngine extends SearchEngine {
             break;
           case param.enterpriseValue != undefined:
             if (isEnterprise) {
-              engineURL.addParam(
-                param.name,
-                param.enterpriseValue == "{partnerCode}"
-                  ? partnerCode
-                  : param.enterpriseValue
-              );
+              engineURL.addParam(param.name, param.enterpriseValue);
             }
             break;
         }
@@ -802,7 +842,7 @@ export class UserInstalledConfigEngine extends ConfigSearchEngine {
   /**
    * @param {object} options
    *   The options for this search engine.
-   * @param {SearchEngineDefinition} options.config
+   * @param {SearchEngineDefinition|SearchEngineDefinitionV3} options.config
    *   The engine config from Remote Settings.
    * @param {object} [options.settings]
    *   The saved settings for the user.

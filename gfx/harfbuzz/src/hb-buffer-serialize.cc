@@ -120,8 +120,8 @@ _hb_buffer_serialize_glyphs_json (hb_buffer_t *buffer,
   {
     for (unsigned int i = 0; i < start; i++)
     {
-      x += pos[i].x_advance;
-      y += pos[i].y_advance;
+      x = hb_saturate_add (x, pos[i].x_advance);
+      y = hb_saturate_add (y, pos[i].y_advance);
     }
   }
 
@@ -164,8 +164,10 @@ _hb_buffer_serialize_glyphs_json (hb_buffer_t *buffer,
 
     if (pos && !(flags & HB_BUFFER_SERIALIZE_FLAG_NO_POSITIONS))
     {
+      hb_position_t dx = hb_saturate_add (x, pos[i].x_offset);
+      hb_position_t dy = hb_saturate_add (y, pos[i].y_offset);
       p += hb_max (0, snprintf (p, ARRAY_LENGTH (b) - (p - b), ",\"dx\":%d,\"dy\":%d",
-		   x+pos[i].x_offset, y+pos[i].y_offset));
+		   dx, dy));
       if (!(flags & HB_BUFFER_SERIALIZE_FLAG_NO_ADVANCES))
         p += hb_max (0, snprintf (p, ARRAY_LENGTH (b) - (p - b), ",\"ax\":%d,\"ay\":%d",
 		     pos[i].x_advance, pos[i].y_advance));
@@ -206,8 +208,8 @@ _hb_buffer_serialize_glyphs_json (hb_buffer_t *buffer,
 
     if (pos && (flags & HB_BUFFER_SERIALIZE_FLAG_NO_ADVANCES))
     {
-      x += pos[i].x_advance;
-      y += pos[i].y_advance;
+      x = hb_saturate_add (x, pos[i].x_advance);
+      y = hb_saturate_add (y, pos[i].y_advance);
     }
   }
 
@@ -289,8 +291,8 @@ _hb_buffer_serialize_glyphs_text (hb_buffer_t *buffer,
   {
     for (unsigned int i = 0; i < start; i++)
     {
-      x += pos[i].x_advance;
-      y += pos[i].y_advance;
+      x = hb_saturate_add (x, pos[i].x_advance);
+      y = hb_saturate_add (y, pos[i].y_advance);
     }
   }
 
@@ -321,8 +323,10 @@ _hb_buffer_serialize_glyphs_text (hb_buffer_t *buffer,
 
     if (pos && !(flags & HB_BUFFER_SERIALIZE_FLAG_NO_POSITIONS))
     {
-      if (x+pos[i].x_offset || y+pos[i].y_offset)
-        p += hb_max (0, snprintf (p, ARRAY_LENGTH (b) - (p - b), "@%d,%d", x+pos[i].x_offset, y+pos[i].y_offset));
+      hb_position_t dx = hb_saturate_add (x, pos[i].x_offset);
+      hb_position_t dy = hb_saturate_add (y, pos[i].y_offset);
+      if (dx || dy)
+        p += hb_max (0, snprintf (p, ARRAY_LENGTH (b) - (p - b), "@%d,%d", dx, dy));
 
       if (!(flags & HB_BUFFER_SERIALIZE_FLAG_NO_ADVANCES))
       {
@@ -363,8 +367,8 @@ _hb_buffer_serialize_glyphs_text (hb_buffer_t *buffer,
 
     if (pos && (flags & HB_BUFFER_SERIALIZE_FLAG_NO_ADVANCES))
     {
-      x += pos[i].x_advance;
-      y += pos[i].y_advance;
+      x = hb_saturate_add (x, pos[i].x_advance);
+      y = hb_saturate_add (y, pos[i].y_advance);
     }
   }
 
@@ -890,5 +894,79 @@ hb_buffer_deserialize_unicode (hb_buffer_t *buffer,
   }
 }
 
+
+/**
+ * hb_buffer_deserialize_glyphs2:
+ * @buffer: an #hb_buffer_t buffer.
+ * @buf: (array length=buf_len) (element-type uint8_t): string to deserialize
+ * @buf_len: the size of @buf in bytes, or -1 if it is `NULL`-terminated
+ * @buf_consumed: (out) (optional): output byte offset of the character after
+ *               the last consumed one, on success or failure
+ * @font: (nullable): font for getting glyph IDs
+ * @format: the #hb_buffer_serialize_format_t of the input @buf
+ *
+ * Deserializes glyphs into @buffer from the textual representation produced
+ * by hb_buffer_serialize_glyphs().
+ *
+ * Behaves like hb_buffer_deserialize_glyphs(), including its return value and
+ * any partial buffer contents left on failure, but reports progress as a byte
+ * offset from @buf instead of a pointer into it. If no input is consumed,
+ * @buf_consumed is set to zero.
+ *
+ * Return value: `true` if the full string was parsed, `false` otherwise.
+ *
+ * Since: 15.1.0
+ **/
+hb_bool_t
+hb_buffer_deserialize_glyphs2 (hb_buffer_t *buffer,
+			       const char *buf,
+			       int buf_len,
+			       unsigned int *buf_consumed,
+			       hb_font_t *font,
+			       hb_buffer_serialize_format_t format)
+{
+  const char *end;
+  hb_bool_t ret = hb_buffer_deserialize_glyphs (buffer, buf, buf_len, &end,
+						font, format);
+  if (buf_consumed)
+    *buf_consumed = end == buf ? 0 : end - buf;
+  return ret;
+}
+
+/**
+ * hb_buffer_deserialize_unicode2:
+ * @buffer: an #hb_buffer_t buffer.
+ * @buf: (array length=buf_len) (element-type uint8_t): string to deserialize
+ * @buf_len: the size of @buf in bytes, or -1 if it is `NULL`-terminated
+ * @buf_consumed: (out) (optional): output byte offset of the character after
+ *               the last consumed one, on success or failure
+ * @format: the #hb_buffer_serialize_format_t of the input @buf
+ *
+ * Deserializes Unicode into @buffer from the textual representation produced
+ * by hb_buffer_serialize_unicode().
+ *
+ * Behaves like hb_buffer_deserialize_unicode(), including its return value and
+ * any partial buffer contents left on failure, but reports progress as a byte
+ * offset from @buf instead of a pointer into it. If no input is consumed,
+ * @buf_consumed is set to zero.
+ *
+ * Return value: `true` if the full string was parsed, `false` otherwise.
+ *
+ * Since: 15.1.0
+ **/
+hb_bool_t
+hb_buffer_deserialize_unicode2 (hb_buffer_t *buffer,
+				const char *buf,
+				int buf_len,
+				unsigned int *buf_consumed,
+				hb_buffer_serialize_format_t format)
+{
+  const char *end;
+  hb_bool_t ret = hb_buffer_deserialize_unicode (buffer, buf, buf_len, &end,
+						 format);
+  if (buf_consumed)
+    *buf_consumed = end == buf ? 0 : end - buf;
+  return ret;
+}
 
 #endif

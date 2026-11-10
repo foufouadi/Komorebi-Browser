@@ -50,10 +50,9 @@ OuterDocAccessible::~OuterDocAccessible() = default;
 void OuterDocAccessible::SendEmbedderAccessible(
     dom::BrowserBridgeChild* aBridge) {
   MOZ_ASSERT(mDoc);
-  DocAccessibleChild* ipcDoc = mDoc->IPCDoc();
-  if (ipcDoc) {
+  if (mDoc->IPCDoc()) {
     uint64_t id = reinterpret_cast<uintptr_t>(UniqueID());
-    aBridge->SetEmbedderAccessible(ipcDoc, id);
+    aBridge->SetEmbedderAccessible(id);
   }
 }
 
@@ -93,7 +92,7 @@ void OuterDocAccessible::Shutdown() {
       // We were the last embedder accessible sent via PBrowserBridge; i.e. a
       // new embedder accessible hasn't been created yet for this iframe. Clear
       // the embedder accessible on PBrowserBridge.
-      bridge->SetEmbedderAccessible(nullptr, 0);
+      bridge->SetEmbedderAccessible(0);
     }
   }
 
@@ -124,7 +123,7 @@ void OuterDocAccessible::Shutdown() {
   AccessibleWrap::Shutdown();
 }
 
-bool OuterDocAccessible::InsertChildAt(uint32_t aIdx,
+bool OuterDocAccessible::InsertChildAt(uint32_t /*aIdx*/,
                                        LocalAccessible* aAccessible) {
   MOZ_RELEASE_ASSERT(aAccessible->IsDoc(),
                      "OuterDocAccessible can have a document child only!");
@@ -172,7 +171,7 @@ bool OuterDocAccessible::RemoveChild(LocalAccessible* aAccessible) {
   return wasRemoved;
 }
 
-bool OuterDocAccessible::IsAcceptableChild(nsIContent* aEl) const {
+bool OuterDocAccessible::IsAcceptableChild(nsIContent* /*aEl*/) const {
   // outer document accessible doesn't not participate in ordinal tree
   // mutations.
   return false;

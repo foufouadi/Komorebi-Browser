@@ -282,7 +282,7 @@ bool RetransmissionQueue::HandleSack(Timestamp now, const SackChunk& sack) {
   MaybeExitFastRecovery(cumulative_tsn_ack);
 
   OutstandingData::AckInfo ack_info = outstanding_data_.HandleSack(
-      cumulative_tsn_ack, sack.gap_ack_blocks(), is_in_fast_recovery());
+      now, cumulative_tsn_ack, sack.gap_ack_blocks(), is_in_fast_recovery());
 
   // Add lifecycle events for delivered messages.
   for (LifecycleId lifecycle_id : ack_info.acked_lifecycle_ids) {
@@ -356,7 +356,7 @@ void RetransmissionQueue::UpdateRTT(Timestamp now,
   }
 }
 
-void RetransmissionQueue::HandleT3RtxTimerExpiry() {
+void RetransmissionQueue::HandleT3RtxTimerExpiry(Timestamp now) {
   size_t old_cwnd = cwnd_;
   size_t old_unacked_packet_bytes = unacked_packet_bytes();
   // https://tools.ietf.org/html/rfc4960#section-6.3.3
@@ -385,7 +385,7 @@ void RetransmissionQueue::HandleT3RtxTimerExpiry() {
   // T3-rtx timer expired but did not fit in one MTU (rule E3 above) should be
   // marked for retransmission and sent as soon as cwnd allows (normally, when a
   // SACK arrives)."
-  outstanding_data_.NackAll();
+  outstanding_data_.NackAll(now);
 
   // https://tools.ietf.org/html/rfc4960#section-6.3.3
   // "Start the retransmission timer T3-rtx on the destination address
@@ -401,14 +401,15 @@ void RetransmissionQueue::HandleT3RtxTimerExpiry() {
 }
 
 std::vector<std::pair<TSN, Data>>
-RetransmissionQueue::GetChunksForFastRetransmit(size_t bytes_in_packet) {
+RetransmissionQueue::GetChunksForFastRetransmit(Timestamp now,
+                                                size_t bytes_in_packet) {
   RTC_DCHECK(outstanding_data_.has_data_to_be_fast_retransmitted());
   RTC_DCHECK(IsDivisibleBy4(bytes_in_packet));
   std::vector<std::pair<TSN, Data>> to_be_sent;
   size_t old_unacked_packet_bytes = unacked_packet_bytes();
 
   to_be_sent =
-      outstanding_data_.GetChunksToBeFastRetransmitted(bytes_in_packet);
+      outstanding_data_.GetChunksToBeFastRetransmitted(now, bytes_in_packet);
   RTC_DCHECK(!to_be_sent.empty());
 
   // https://tools.ietf.org/html/rfc4960#section-7.2.4
@@ -480,7 +481,7 @@ std::vector<std::pair<TSN, Data>> RetransmissionQueue::GetChunksToSend(
                                      max_packet_bytes_allowed_by_rwnd),
                             bytes_remaining_in_packet));
 
-  to_be_sent = outstanding_data_.GetChunksToBeRetransmitted(max_bytes);
+  to_be_sent = outstanding_data_.GetChunksToBeRetransmitted(now, max_bytes);
 
   size_t bytes_retransmitted = absl::c_accumulate(
       to_be_sent, 0, [&](size_t r, const std::pair<TSN, Data>& d) {
@@ -584,27 +585,35 @@ void RetransmissionQueue::RollbackResetStreams() {
 
 HandoverReadinessStatus RetransmissionQueue::GetHandoverReadiness() const {
   HandoverReadinessStatus status;
-  if (!outstanding_data_.empty()) {
+  bool block_on_outstanding_data =
+      !options_.enable_handover_with_outstanding_data;
+  if (block_on_outstanding_data && !outstanding_data_.empty()) {
     status.Add(HandoverUnreadinessReason::kRetransmissionQueueOutstandingData);
   }
   if (fast_recovery_exit_tsn_.has_value()) {
     status.Add(HandoverUnreadinessReason::kRetransmissionQueueFastRecovery);
   }
-  if (outstanding_data_.has_data_to_be_retransmitted()) {
+  if (block_on_outstanding_data &&
+      outstanding_data_.has_data_to_be_retransmitted()) {
     status.Add(HandoverUnreadinessReason::kRetransmissionQueueNotEmpty);
   }
   return status;
 }
 
-void RetransmissionQueue::AddHandoverState(DcSctpSocketHandoverState& state) {
+void RetransmissionQueue::AddHandoverState(webrtc::Timestamp now,
+                                           DcSctpSocketHandoverState& state) {
   state.tx.next_tsn = next_tsn().value();
   state.tx.rwnd = rwnd_;
   state.tx.cwnd = cwnd_;
   state.tx.ssthresh = ssthresh_;
   state.tx.partial_bytes_acked = partial_bytes_acked_;
+  state.tx.last_cumulative_tsn_ack =
+      outstanding_data_.last_cumulative_tsn_ack().value();
+  outstanding_data_.AddHandoverState(now, state);
 }
 
 void RetransmissionQueue::RestoreFromState(
+    webrtc::Timestamp now,
     const DcSctpSocketHandoverState& state) {
   // Validate that the component is in pristine state.
   RTC_DCHECK(outstanding_data_.empty());
@@ -616,7 +625,20 @@ void RetransmissionQueue::RestoreFromState(
   ssthresh_ = state.tx.ssthresh;
   partial_bytes_acked_ = state.tx.partial_bytes_acked;
 
-  outstanding_data_.ResetSequenceNumbers(
-      tsn_unwrapper_.Unwrap(TSN(state.tx.next_tsn - 1)));
+  if (options_.enable_handover_with_outstanding_data) {
+    UnwrappedTSN last_cumulative_tsn_ack =
+        state.tx.outstanding_data.empty()
+            ? tsn_unwrapper_.Unwrap(TSN(state.tx.next_tsn - 1))
+            : tsn_unwrapper_.Unwrap(TSN(state.tx.last_cumulative_tsn_ack));
+
+    outstanding_data_.RestoreFromState(now, last_cumulative_tsn_ack, state);
+
+    if (!outstanding_data_.empty()) {
+      t3_rtx_.Start();
+    }
+  } else {
+    outstanding_data_.ResetSequenceNumbers(
+        tsn_unwrapper_.Unwrap(TSN(state.tx.next_tsn - 1)));
+  }
 }
 }  // namespace dcsctp

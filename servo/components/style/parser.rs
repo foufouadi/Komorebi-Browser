@@ -5,13 +5,15 @@
 //! The context within which CSS code is parsed.
 
 use crate::context::QuirksMode;
-use crate::custom_properties::{AttrTaint, AttrTaintedRange};
 use crate::error_reporting::{ContextualParseError, ParseErrorReporter};
+use crate::properties::PropertyIdRef;
 use crate::stylesheets::{CssRuleType, CssRuleTypes, Namespaces, Origin, UrlExtraData};
+use crate::substitution::{AttrTaint, AttrTaintedRange};
 use crate::use_counters::UseCounters;
 use cssparser::{Parser, SourceLocation, UnicodeRange};
 use selectors::parser::ParseRelative;
 use std::borrow::Cow;
+use std::cell::Cell;
 use style_traits::{OneOrMoreSeparated, ParseError, ParsingMode, Separator};
 
 /// Nesting context for parsing rules.
@@ -68,6 +70,38 @@ impl NestingContext {
     }
 }
 
+/// Context for the property declaration that is currently being parsed.
+#[derive(Debug, Default)]
+pub struct PropertyDeclarationContext<'a> {
+    /// Reference to the current property's name/ID.
+    property_id: Option<PropertyIdRef<'a>>,
+    /// Current count of random() functions that have been parsed so far
+    /// in the current property declaration. Used when a random() function
+    /// has a `property-index-scoped` key.
+    random_count: Cell<i32>,
+}
+
+impl<'a> PropertyDeclarationContext<'a> {
+    /// The declaration being parsed, if any.
+    pub fn property_id(&self) -> Option<PropertyIdRef<'a>> {
+        self.property_id
+    }
+
+    /// The index of the current random() function in this declaration.
+    pub fn current_random_index(&self) -> i32 {
+        self.random_count.get()
+    }
+
+    /// Claims the next index for a random() function in this declaration. The
+    /// index is 1-based and follows the order the functions appear in the
+    /// parsed value.
+    pub fn increment_random_count(&self) -> i32 {
+        let index = self.random_count.get() + 1;
+        self.random_count.set(index);
+        index
+    }
+}
+
 /// The data that the parser needs from outside in order to parse a stylesheet.
 pub struct ParserContext<'a> {
     /// The `Origin` of the stylesheet, whether it's a user, author or
@@ -88,7 +122,9 @@ pub struct ParserContext<'a> {
     /// Current nesting context.
     pub nesting_context: NestingContext,
     /// The relevant regions in the input that have been tainted by attr() if relevant.
-    pub attr_tainted_regions: AttrTaint,
+    pub attr_tainted_regions: Cow<'a, AttrTaint>,
+    /// Current property declaration context.
+    pub property_declaration_context: PropertyDeclarationContext<'a>,
 }
 
 impl<'a> ParserContext<'a> {
@@ -114,8 +150,64 @@ impl<'a> ParserContext<'a> {
             namespaces,
             use_counters,
             nesting_context: NestingContext::new_from_rule(rule_type),
-            attr_tainted_regions,
+            attr_tainted_regions: Cow::Owned(attr_tainted_regions),
+            property_declaration_context: Default::default(),
         }
+    }
+
+    /// Create a parser context with the given property ID.
+    #[inline]
+    pub fn new_with_property_id(
+        stylesheet_origin: Origin,
+        url_data: &'a UrlExtraData,
+        rule_type: Option<CssRuleType>,
+        parsing_mode: ParsingMode,
+        quirks_mode: QuirksMode,
+        namespaces: Cow<'a, Namespaces>,
+        error_reporter: Option<&'a dyn ParseErrorReporter>,
+        use_counters: Option<&'a UseCounters>,
+        attr_tainted_regions: AttrTaint,
+        property_id: Option<PropertyIdRef<'a>>,
+    ) -> Self {
+        Self {
+            stylesheet_origin,
+            url_data,
+            parsing_mode,
+            quirks_mode,
+            error_reporter,
+            namespaces,
+            use_counters,
+            nesting_context: NestingContext::new_from_rule(rule_type),
+            attr_tainted_regions: Cow::Owned(attr_tainted_regions),
+            property_declaration_context: PropertyDeclarationContext {
+                property_id,
+                ..Default::default()
+            },
+        }
+    }
+
+    /// Constructs a temporary ParserContext with the given property ID, passes it to the
+    /// callback and returns its result.
+    pub fn with_property_id<'b, R>(
+        &'b self,
+        property_id: Option<PropertyIdRef<'b>>,
+        cb: impl FnOnce(&ParserContext<'b>) -> R,
+    ) -> R {
+        cb(&ParserContext {
+            stylesheet_origin: self.stylesheet_origin,
+            url_data: self.url_data,
+            parsing_mode: self.parsing_mode,
+            quirks_mode: self.quirks_mode,
+            error_reporter: self.error_reporter,
+            namespaces: Cow::Borrowed(&*self.namespaces),
+            use_counters: self.use_counters,
+            nesting_context: self.nesting_context,
+            attr_tainted_regions: Cow::Borrowed(&*self.attr_tainted_regions),
+            property_declaration_context: PropertyDeclarationContext {
+                property_id,
+                ..Default::default()
+            },
+        })
     }
 
     /// Temporarily sets the rule_type and executes the callback function, returning its result.
@@ -172,10 +264,15 @@ impl<'a> ParserContext<'a> {
             return false;
         }
 
+        if !self.allows_computational_dependence() {
+            return false;
+        }
+
         true
     }
 
     /// Get the rule type, which assumes that one is available.
+    #[inline]
     pub fn rule_types(&self) -> CssRuleTypes {
         self.nesting_context.rule_types
     }
@@ -241,10 +338,7 @@ pub trait Parse: Sized {
     /// Parse a value of this type.
     ///
     /// Returns an error on failure.
-    fn parse<'i, 't>(
-        context: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Self, ParseError<'i>>;
+    fn parse(context: &ParserContext, input: &mut Parser) -> Result<Self, ParseError>;
 }
 
 impl<T> Parse for Vec<T>
@@ -252,10 +346,7 @@ where
     T: Parse + OneOrMoreSeparated,
     <T as OneOrMoreSeparated>::S: Separator,
 {
-    fn parse<'i, 't>(
-        context: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Self, ParseError<'i>> {
+    fn parse(context: &ParserContext, input: &mut Parser) -> Result<Self, ParseError> {
         <T as OneOrMoreSeparated>::S::parse(input, |i| T::parse(context, i))
     }
 }
@@ -264,28 +355,19 @@ impl<T> Parse for Box<T>
 where
     T: Parse,
 {
-    fn parse<'i, 't>(
-        context: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Self, ParseError<'i>> {
+    fn parse(context: &ParserContext, input: &mut Parser) -> Result<Self, ParseError> {
         T::parse(context, input).map(Box::new)
     }
 }
 
 impl Parse for crate::OwnedStr {
-    fn parse<'i, 't>(
-        _: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Self, ParseError<'i>> {
+    fn parse(_: &ParserContext, input: &mut Parser) -> Result<Self, ParseError> {
         Ok(input.expect_string()?.as_ref().to_owned().into())
     }
 }
 
 impl Parse for UnicodeRange {
-    fn parse<'i, 't>(
-        _: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Self, ParseError<'i>> {
+    fn parse(_: &ParserContext, input: &mut Parser) -> Result<Self, ParseError> {
         Ok(UnicodeRange::parse(input)?)
     }
 }

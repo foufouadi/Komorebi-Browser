@@ -4,13 +4,14 @@
 
 import hashlib
 import os
-import shutil
 import subprocess
 import tempfile
 
 import buildconfig
-from mozbuild.nodeutil import find_node_executable, package_setup
+from mozbuild.nodeutil import find_node_executable
 from mozbuild.util import FileAvoidWrite
+
+HASHED_EXTENSIONS = (".jsx", ".js", ".mjs", ".scss")
 
 
 def _newtab_dir():
@@ -27,136 +28,145 @@ def _node():
     return node
 
 
-def _hash_sources(newtab_dir):
-    hasher = hashlib.sha256()
-    watch_dirs = [
+def _node_modules():
+    node_modules = os.path.join(
+        buildconfig.topsrcdir, "third_party", "node", "node_modules"
+    )
+    if not os.path.isdir(node_modules):
+        raise Exception(
+            "The vendored node packages under third_party/node are missing. "
+            "Run `./mach vendor node`, or check out third_party/node."
+        )
+    return node_modules
+
+
+def _deps_record(objdir):
+    return os.path.join(objdir, "webpack-deps.txt")
+
+
+def _reported_inputs(objdir):
+    """Files webpack read during the previous build. The FasterMake backend
+    ignores the dependency files an action returns, so hashing these is what
+    makes a change to one of them rebuild the bundles."""
+    record = _deps_record(objdir)
+    if not os.path.exists(record):
+        return set()
+    with open(record, encoding="utf-8") as f:
+        return {line.strip() for line in f if line.strip()}
+
+
+def _declared_inputs(newtab_dir):
+    inputs = {
+        os.path.abspath(__file__),
+        os.path.join(newtab_dir, "package.json"),
+        os.path.join(newtab_dir, "webpack.system-addon.config.js"),
+        os.path.join(buildconfig.topsrcdir, "browser", "tools", "mozsrcUriPlugin.js"),
+        os.path.join(buildconfig.topsrcdir, "browser", "tools", "resourceUriPlugin.js"),
+        os.path.join(buildconfig.topsrcdir, "browser", "modules", "Dedupe.sys.mjs"),
+        os.path.join(
+            buildconfig.topsrcdir, "third_party", "node", "vendor-inputs.hash"
+        ),
+    }
+    for directory in (
         os.path.join(newtab_dir, "content-src"),
         os.path.join(newtab_dir, "common"),
-    ]
-    watch_files = [
-        os.path.join(newtab_dir, "package.json"),
-        os.path.join(newtab_dir, "package-lock.json"),
-        os.path.join(newtab_dir, "webpack.system-addon.config.js"),
-    ]
-    for path in watch_files:
-        if os.path.exists(path):
-            with open(path, "rb") as f:
-                hasher.update(f.read())
-    for watch_dir in watch_dirs:
-        for root, dirs, files in os.walk(watch_dir):
+        os.path.join(buildconfig.topsrcdir, "browser", "components", "topsites"),
+    ):
+        for root, dirs, files in os.walk(directory):
             dirs.sort()
-            for fname in sorted(files):
-                if fname.endswith((".jsx", ".js", ".mjs", ".scss")):
-                    with open(os.path.join(root, fname), "rb") as f:
-                        hasher.update(f.read())
-    return hasher.digest()
+            inputs.update(
+                os.path.join(root, f) for f in files if f.endswith(HASHED_EXTENSIONS)
+            )
+    return inputs
 
 
-def _lockfile_hash(newtab_dir):
-    lock_path = os.path.join(newtab_dir, "package-lock.json")
-    if not os.path.exists(lock_path):
-        return b""
+def _hash_sources(inputs):
     hasher = hashlib.sha256()
-    with open(lock_path, "rb") as f:
-        hasher.update(f.read())
-    return hasher.digest()
+    for path in sorted(inputs):
+        if not os.path.isfile(path):
+            continue
+        hasher.update(path.encode("utf-8"))
+        with open(path, "rb") as f:
+            hasher.update(f.read())
+    return hasher.hexdigest()
 
 
-def _fetched_node_modules():
-    """In CI the deps are provided by the newtab-node-modules toolchain task and
-    unpacked to $MOZ_FETCHES_DIR/newtab/node_modules, so the build stays hermetic
-    (no network access at build time). Returns that path if present."""
-    fetches_dir = os.environ.get("MOZ_FETCHES_DIR")
-    if not fetches_dir:
-        return None
-    fetched = os.path.join(fetches_dir, "newtab", "node_modules")
-    return fetched if os.path.isdir(fetched) else None
+def _is_up_to_date(hash_file, digest, outputs):
+    """The bundles are forced in moz.build so that Make doesn't wait on a
+    separate stamp before starting them; this is what skips running webpack
+    and sass when the sources haven't changed."""
+    if not all(os.path.exists(path) for path in outputs):
+        return False
+    try:
+        with open(hash_file, encoding="utf-8") as f:
+            return f.read() == digest
+    except FileNotFoundError:
+        return False
 
 
-def ensure_node_modules(output):
-    """Stamp target; runs before generate_js/generate_css so the install
-    completes once before they run in parallel.
+def _reuse_output(output):
+    with open(output.name, "rb") as f:
+        output.write(f.read())
 
-    Writes a hash of all source files so downstream GeneratedFile targets
-    only rebuild when sources actually change."""
+
+def _write_hash(hash_file, digest):
+    with FileAvoidWrite(hash_file) as f:
+        f.write(digest)
+
+
+def _record_reported_inputs(objdir, deps_file):
+    if not os.path.exists(deps_file):
+        return
+    with open(deps_file, encoding="utf-8") as f:
+        reported = sorted({line.strip() for line in f if line.strip()})
+    kept = [path for path in reported if os.path.isfile(path)]
+    with FileAvoidWrite(_deps_record(objdir)) as record:
+        for path in kept:
+            record.write(path + "\n")
+
+
+def _run(argv, newtab_dir, node_modules, extra_env=None):
+    env = dict(os.environ)
+    env["MOZ_NODE_MODULES"] = node_modules
+    env["WEBPACK_CLI_SKIP_IMPORT_LOCAL"] = "1"
+    env.update(extra_env or {})
+    result = subprocess.run(argv, check=False, cwd=newtab_dir, env=env)
+    if result.returncode != 0:
+        raise Exception(f"{argv[1]} failed with exit code {result.returncode}")
+
+
+def generate_js(output):
     newtab_dir = _newtab_dir()
-    webpack = os.path.join(newtab_dir, "node_modules", "webpack", "bin", "webpack.js")
-
-    # Reinstall when node_modules is missing/incomplete or when package-lock.json
-    # has changed since the last install, so dependency bumps take effect without
-    # a manual `./mach newtab install`.
-    install_stamp = os.path.join(newtab_dir, "node_modules", ".newtab-install-stamp")
-    lock_hash = _lockfile_hash(newtab_dir)
-    installed_hash = b""
-    if os.path.exists(install_stamp):
-        with open(install_stamp, "rb") as f:
-            installed_hash = f.read()
-
-    if not os.path.exists(webpack) or installed_hash != lock_hash:
-        # Prefer node_modules staged by the newtab-node-modules toolchain in CI,
-        # which avoids a network `npm ci` during the build.
-        fetched = _fetched_node_modules()
-        if fetched:
-            dest = os.path.join(newtab_dir, "node_modules")
-            if os.path.exists(dest):
-                shutil.rmtree(dest)
-            # Skip .bin: its POSIX symlinks (archive built on Linux) break
-            # copytree on Windows, and the build never invokes tools via .bin.
-            shutil.copytree(fetched, dest, ignore=shutil.ignore_patterns(".bin"))
-            with open(install_stamp, "wb") as f:
-                f.write(lock_hash)
-            output.write(_hash_sources(newtab_dir))
-            return
-
-        if os.environ.get("MOZ_FETCHES_DIR"):
-            raise Exception(
-                "newtab-node-modules must be fetched in CI: add it to this "
-                "task's toolchain fetches."
-            )
-
-        # Local dev builds: install via mozbuild's shared helper, which locates
-        # node/npm and runs `npm ci` (handles the node-on-PATH and Windows npm
-        # launcher details for us).
-        if package_setup(newtab_dir, "newtab"):
-            raise Exception(
-                "Failed to install newtab node dependencies. "
-                "Run ./mach newtab install manually."
-            )
-
-        with open(install_stamp, "wb") as f:
-            f.write(lock_hash)
-
-    output.write(_hash_sources(newtab_dir))
-
-
-def generate_js(output, node_modules_stamp):
-    newtab_dir = _newtab_dir()
-    node = _node()
-    webpack = os.path.join(newtab_dir, "node_modules", "webpack", "bin", "webpack.js")
-
-    if not os.path.exists(webpack):
-        raise Exception(
-            "webpack not found. Run ./mach newtab install to install dependencies."
-        )
-
     content_dir = os.path.dirname(output.name)
     as_path = os.path.join(content_dir, "activity-stream.bundle.js")
+    objdir = os.path.dirname(os.path.dirname(content_dir))
+
+    hash_file = os.path.join(objdir, "newtab-js.hash")
+    declared = _declared_inputs(newtab_dir)
+    reported = _reported_inputs(objdir)
+    digest = _hash_sources(declared | reported)
+    if _is_up_to_date(hash_file, digest, (output.name, as_path)):
+        _reuse_output(output)
+        return
+
+    node_modules = _node_modules()
+    webpack = os.path.join(node_modules, "webpack", "bin", "webpack.js")
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        result = subprocess.run(
+        deps_file = os.path.join(tmpdir, "webpack-deps.txt")
+        _run(
             [
-                node,
+                _node(),
                 webpack,
                 "--config",
                 os.path.join(newtab_dir, "webpack.system-addon.config.js"),
                 "--env",
                 "outputPath=" + tmpdir,
             ],
-            check=False,
-            cwd=newtab_dir,
+            newtab_dir,
+            node_modules,
+            extra_env={"MOZ_WEBPACK_DEPS": deps_file},
         )
-        if result.returncode != 0:
-            raise Exception(f"webpack failed with exit code {result.returncode}")
 
         with open(os.path.join(tmpdir, "vendor.bundle.js"), "rb") as f:
             output.write(f.read())
@@ -165,35 +175,44 @@ def generate_js(output, node_modules_stamp):
             with open(os.path.join(tmpdir, "activity-stream.bundle.js"), "rb") as f:
                 as_output.write(f.read())
 
+        _record_reported_inputs(objdir, deps_file)
 
-def generate_css(output, node_modules_stamp):
+    # The set of reported inputs is only known after webpack ran, so on a
+    # first build or when it changed, hash it now rather than have the next
+    # build see a different hash and run webpack again.
+    new_reported = _reported_inputs(objdir)
+    if new_reported != reported:
+        digest = _hash_sources(declared | new_reported)
+    _write_hash(hash_file, digest)
+
+
+def generate_css(output):
     newtab_dir = _newtab_dir()
-    node = _node()
-    sass = os.path.join(newtab_dir, "node_modules", "sass", "sass.js")
-
-    if not os.path.exists(sass):
-        raise Exception(
-            "sass not found. Run ./mach newtab install to install dependencies."
-        )
-
     css_dir = os.path.dirname(output.name)
     nova_css_path = os.path.join(css_dir, "nova", "activity-stream.css")
+
+    hash_file = os.path.join(os.path.dirname(css_dir), "newtab-css.hash")
+    digest = _hash_sources(_declared_inputs(newtab_dir))
+    if _is_up_to_date(hash_file, digest, (output.name, nova_css_path)):
+        _reuse_output(output)
+        return
+
+    node_modules = _node_modules()
+    sass = os.path.join(node_modules, "sass", "sass.js")
 
     src_styles_dir = os.path.join(newtab_dir, "content-src", "styles")
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        result = subprocess.run(
+        _run(
             [
-                node,
+                _node(),
                 sass,
                 src_styles_dir + ":" + tmpdir,
                 "--no-source-map",
             ],
-            check=False,
-            cwd=newtab_dir,
+            newtab_dir,
+            node_modules,
         )
-        if result.returncode != 0:
-            raise Exception(f"sass failed with exit code {result.returncode}")
 
         with open(os.path.join(tmpdir, "activity-stream.css"), "rb") as f:
             output.write(f.read())
@@ -202,3 +221,5 @@ def generate_css(output, node_modules_stamp):
         with FileAvoidWrite(nova_css_path, readmode="rb") as nova_output:
             with open(os.path.join(tmpdir, "nova", "activity-stream.css"), "rb") as f:
                 nova_output.write(f.read())
+
+    _write_hash(hash_file, digest)

@@ -45,7 +45,17 @@ function doRequestWhenReady() {
   return doRequestPromise;
 }
 
+// Infinite loading animations are gated on this class so they don't keep the
+// refresh driver running in a hidden document, such as a preloaded newtab.
+function syncPageVisibleClass() {
+  const sync = () =>
+    document.body.classList.toggle("page-visible", !document.hidden);
+  sync();
+  document.addEventListener("visibilitychange", sync);
+}
+
 export function renderWithoutState() {
+  syncPageVisibleClass();
   const store = initStore(reducers);
   new DetectUserSessionStart(store).sendEventOrAddListener();
 
@@ -58,16 +68,12 @@ export function renderWithoutState() {
     );
   });
 
-  // Fall back to ReactDOM.render for React 16 (karma tests).
   const container = document.getElementById("root");
-  if (ReactDOM.createRoot) {
-    ReactDOM.createRoot(container).render(<NewTab store={store} />);
-  } else {
-    ReactDOM.render(<NewTab store={store} />, container);
-  }
+  ReactDOM.createRoot(container).render(<NewTab store={store} />);
 }
 
 export function renderCache(initialState) {
+  syncPageVisibleClass();
   if (initialState) {
     initialState.App.isForStartupCache.App = false;
   }
@@ -84,11 +90,6 @@ export function renderCache(initialState) {
   });
 
   // Use createRoot so stale startup cache DOM doesn't cause hydration mismatches. (Issue with React 19)
-  // Fall back to ReactDOM.render for React 16 (karma tests).
   const container = document.getElementById("root");
-  if (ReactDOM.createRoot) {
-    ReactDOM.createRoot(container).render(<NewTab store={store} />);
-  } else {
-    ReactDOM.render(<NewTab store={store} />, container);
-  }
+  ReactDOM.createRoot(container).render(<NewTab store={store} />);
 }

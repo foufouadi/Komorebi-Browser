@@ -146,7 +146,7 @@ TimeDelta TransmissionControlBlock::OnRtxTimerExpiry() {
     RTC_DLOG(LS_VERBOSE) << "Not retransmitting as T1-cookie is active.";
   } else {
     if (IncrementTxErrorCounter("t3-rtx expired")) {
-      retransmission_queue_.HandleT3RtxTimerExpiry();
+      retransmission_queue_.HandleT3RtxTimerExpiry(now);
       SendBufferedPackets(now);
     }
   }
@@ -188,7 +188,7 @@ void TransmissionControlBlock::MaybeSendForwardTsn(SctpPacket::Builder& builder,
   }
 }
 
-void TransmissionControlBlock::MaybeSendFastRetransmit() {
+void TransmissionControlBlock::MaybeSendFastRetransmit(Timestamp now) {
   if (!retransmission_queue_.has_data_to_be_fast_retransmitted()) {
     return;
   }
@@ -204,7 +204,7 @@ void TransmissionControlBlock::MaybeSendFastRetransmit() {
 
   SctpPacket::Builder builder(peer_verification_tag_, options_);
   auto chunks = retransmission_queue_.GetChunksForFastRetransmit(
-      builder.bytes_remaining());
+      now, builder.bytes_remaining());
   for (auto& [tsn, data] : chunks) {
     if (capabilities_.message_interleaving) {
       builder.Add(IDataChunk(tsn, std::move(data), false));
@@ -320,6 +320,7 @@ HandoverReadinessStatus TransmissionControlBlock::GetHandoverReadiness() const {
 }
 
 void TransmissionControlBlock::AddHandoverState(
+    webrtc::Timestamp now,
     DcSctpSocketHandoverState& state) {
   state.capabilities.partial_reliability = capabilities_.partial_reliability;
   state.capabilities.message_interleaving = capabilities_.message_interleaving;
@@ -339,13 +340,14 @@ void TransmissionControlBlock::AddHandoverState(
   data_tracker_.AddHandoverState(state);
   stream_reset_handler_.AddHandoverState(state);
   reassembly_queue_.AddHandoverState(state);
-  retransmission_queue_.AddHandoverState(state);
+  retransmission_queue_.AddHandoverState(now, state);
 }
 
 void TransmissionControlBlock::RestoreFromState(
+    webrtc::Timestamp now,
     const DcSctpSocketHandoverState& state) {
   data_tracker_.RestoreFromState(state);
-  retransmission_queue_.RestoreFromState(state);
+  retransmission_queue_.RestoreFromState(now, state);
   reassembly_queue_.RestoreFromState(state);
 }
 }  // namespace dcsctp

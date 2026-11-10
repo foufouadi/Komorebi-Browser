@@ -151,6 +151,12 @@ uint32_t DecideAudioPlaybackSampleRate(const AudioInfo& info,
 
 bool IsDefaultPlaybackDeviceMono();
 
+// Record on an Opus config how many channels the audio will be rendered as.
+void SetOpusOutputChannels(AudioInfo& aInfo);
+
+// The number of channels the audio will be rendered as.
+uint32_t AudioPlaybackChannels(const AudioInfo& aInfo);
+
 bool IsVideoContentType(const nsCString& aContentType);
 
 // Returns true if it's safe to use aPicture as the picture to be
@@ -209,6 +215,13 @@ bool ExtractH264CodecDetails(const nsAString& aCodecs, uint8_t& aProfile,
                              uint8_t& aConstraint, H264_LEVEL& aLevel,
                              H264CodecStringStrictness aStrictness);
 
+// Extracts the profile, tier and level elements of an HEVC codecs parameter
+// string, per ISO/IEC 14496-15 Annex E.3.
+// Returns false on failure.
+struct H265CodecDetails;
+bool ExtractH265CodecDetails(const nsAString& aCodec,
+                             H265CodecDetails* aDetails);
+
 struct VideoColorSpace {
   // Default values are set according to
   // https://www.webmproject.org/vp9/mp4/#optional-fields
@@ -218,13 +231,7 @@ struct VideoColorSpace {
   gfx::CICP::MatrixCoefficients mMatrix = gfx::CICP::MC_BT709;
   gfx::ColorRange mRange = gfx::ColorRange::LIMITED;
 
-  bool operator==(const VideoColorSpace& aOther) const {
-    return mPrimaries == aOther.mPrimaries && mTransfer == aOther.mTransfer &&
-           mMatrix == aOther.mMatrix && mRange == aOther.mRange;
-  }
-  bool operator!=(const VideoColorSpace& aOther) const {
-    return !(*this == aOther);
-  }
+  bool operator==(const VideoColorSpace& aOther) const = default;
 };
 
 // Extracts the VPX codecs parameter string.

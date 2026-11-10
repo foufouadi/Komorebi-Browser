@@ -6,7 +6,6 @@
 
 use crate::color::AbsoluteColor;
 use crate::context::QuirksMode;
-use crate::custom_properties::CssEnvironment;
 use crate::device::Device;
 use crate::font_metrics::FontMetrics;
 use crate::gecko::wrapper::GeckoElement;
@@ -16,20 +15,23 @@ use crate::logical_geometry::WritingMode;
 use crate::media_queries::MediaType;
 use crate::properties::ComputedValues;
 use crate::string_cache::Atom;
+use crate::substitution::env::CssEnvironment;
 use crate::values::computed::font::GenericFontFamily;
 use crate::values::computed::{ColorScheme, Length, LinkParameters, NonNegativeLength};
+use crate::values::specified::ViewportVariant;
 use crate::values::specified::color::{ColorSchemeFlags, ForcedColors, SystemColor};
 use crate::values::specified::font::{
-    QueryFontMetricsFlags, FONT_MEDIUM_CAP_PX, FONT_MEDIUM_CH_PX, FONT_MEDIUM_EX_PX,
-    FONT_MEDIUM_IC_PX, FONT_MEDIUM_LINE_HEIGHT_PX, FONT_MEDIUM_PX,
+    FONT_MEDIUM_CAP_PX, FONT_MEDIUM_CH_PX, FONT_MEDIUM_EX_PX, FONT_MEDIUM_IC_PX,
+    FONT_MEDIUM_LINE_HEIGHT_PX, FONT_MEDIUM_PX, QueryFontMetricsFlags,
 };
-use crate::values::specified::ViewportVariant;
 use crate::values::{CustomIdent, KeyframesName};
-use app_units::{Au, AU_PER_PX};
+use app_units::{AU_PER_PX, Au};
 use euclid::default::Size2D;
 use euclid::{Scale, SideOffsets2D};
 use parking_lot::RwLock;
 use servo_arc::Arc;
+use siphasher::sip::SipHasher13;
+use std::hash::Hasher;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::{cmp, fmt};
 use style_traits::{CSSPixel, DevicePixel};
@@ -46,14 +48,18 @@ unsafe impl Send for Device {}
 impl Device {
     /// Trivially constructs a new `Device`.
     pub fn new(document: *const structs::Document) -> Self {
+        use nsstring::nsString;
+
         assert!(!document.is_null());
         let doc = unsafe { &*document };
         let prefs = unsafe { &*bindings::Gecko_GetPrefSheetPrefs(doc) };
         let default_values = ComputedValues::default_values(doc);
         let root_style = RwLock::new(Arc::clone(&default_values));
+        let mut submit_str = nsString::new();
+        unsafe { bindings::Gecko_GetSubmitString(doc, &mut *submit_str) };
         Device {
-            default_values: default_values,
-            root_style: root_style,
+            default_values,
+            root_style,
             root_font_size: AtomicU32::new(FONT_MEDIUM_PX.to_bits()),
             root_line_height: AtomicU32::new(FONT_MEDIUM_LINE_HEIGHT_PX.to_bits()),
             root_font_metrics_ex: AtomicU32::new(FONT_MEDIUM_EX_PX.to_bits()),
@@ -67,9 +73,10 @@ impl Device {
             used_viewport_size: AtomicBool::new(false),
             used_dynamic_viewport_size: AtomicBool::new(false),
             environment: CssEnvironment,
+            submit_string: submit_str.to_string().into(),
             // This gets updated when we see the <body>, so it doesn't really
             // matter which color-scheme we look at here.
-            body_text_color: AtomicU32::new(prefs.mLightColors.mDefault),
+            body_text_color: RwLock::new(AbsoluteColor::from_nscolor(prefs.mLightColors.mDefault)),
             extra: ExtraDeviceData { document },
         }
     }
@@ -84,10 +91,10 @@ impl Device {
         element: Option<GeckoElement>,
     ) -> NonNegativeLength {
         let pres_context = self.pres_context();
-        let line_height = font.clone_line_height();
+        let line_height = font.get_line_height();
         let au = Au(unsafe {
             bindings::Gecko_CalcLineHeight(
-                &line_height,
+                line_height,
                 pres_context.map_or(std::ptr::null(), |pc| pc),
                 writing_mode.is_text_vertical(),
                 &**font,
@@ -183,6 +190,16 @@ impl Device {
     #[inline]
     pub fn document(&self) -> &structs::Document {
         unsafe { &*self.extra.document }
+    }
+
+    /// Returns a keyed hasher specific to this document, used to vary the random
+    /// base values of `random()` functions between document instances. This uses
+    /// SipHash-1-3, modeled after `mozilla::HashCodeScrambler`.
+    #[inline]
+    pub fn document_random_hasher(&self) -> impl Hasher {
+        let (mut k0, mut k1) = (0, 0);
+        unsafe { bindings::Gecko_Document_GetRandomHasherKey(self.document(), &mut k0, &mut k1) };
+        SipHasher13::new_with_keys(k0, k1)
     }
 
     /// Gets the pres context associated with this document.
@@ -477,9 +494,7 @@ impl fmt::Debug for Device {
         use nsstring::nsCString;
 
         let mut doc_uri = nsCString::new();
-        unsafe {
-            bindings::Gecko_nsIURI_Debug((*self.document()).mDocumentURI.raw(), &mut doc_uri)
-        };
+        unsafe { bindings::Gecko_nsIURI_Debug(self.document().mDocumentURI.raw(), &mut doc_uri) };
 
         f.debug_struct("Device")
             .field("document_url", &doc_uri)

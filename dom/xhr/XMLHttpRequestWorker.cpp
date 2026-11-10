@@ -4,6 +4,8 @@
 
 #include "XMLHttpRequestWorker.h"
 
+#include <memory>
+
 #include "GeckoProfiler.h"
 #include "XMLHttpRequestMainThread.h"
 #include "XMLHttpRequestUpload.h"
@@ -1089,8 +1091,7 @@ bool EventRunnable::WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) {
     }
   }
 
-  UniquePtr<XMLHttpRequestWorker::StateData> state(
-      new XMLHttpRequestWorker::StateData());
+  auto state = std::make_unique<XMLHttpRequestWorker::StateData>();
 
   state->mStatusResult = mStatusResult;
   state->mStatus = mStatus;
@@ -1370,6 +1371,8 @@ XMLHttpRequestWorker::~XMLHttpRequestWorker() {
 
   mozilla::DropJSObjects(this);
 }
+
+XMLHttpRequestWorker::ResponseData::ResponseData() : mResponseResult(NS_OK) {}
 
 NS_IMPL_ADDREF_INHERITED(XMLHttpRequestWorker, XMLHttpRequestEventTarget)
 NS_IMPL_RELEASE_INHERITED(XMLHttpRequestWorker, XMLHttpRequestEventTarget)
@@ -2098,6 +2101,15 @@ void XMLHttpRequestWorker::Abort(ErrorResult& aRv) {
   WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
   RefPtr<AbortRunnable> runnable = new AbortRunnable(workerPrivate, mProxy);
   runnable->Dispatch(workerPrivate, Canceling, aRv);
+  if (aRv.Failed()) {
+    return;
+  }
+
+  // Dispatch() spun the event loop, so we may have been canceled and released.
+  if (!mProxy) {
+    MOZ_LOG(gXMLHttpRequestLog, LogLevel::Debug, ("Abort(no proxy)"));
+    return;
+  }
 
   // Spec step 2
   if ((mStateData->mReadyState == XMLHttpRequest_Binding::OPENED &&

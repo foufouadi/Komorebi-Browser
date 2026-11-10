@@ -18,16 +18,15 @@
 #include "compiler/translator/msl/SymbolEnv.h"
 #include "compiler/translator/msl/ToposortStructs.h"
 #include "compiler/translator/msl/UtilsMSL.h"
+#include "compiler/translator/tree_ops/AddDefaultReturnStatements.h"
 #include "compiler/translator/tree_ops/InitializeVariables.h"
 #include "compiler/translator/tree_ops/MonomorphizeUnsupportedFunctions.h"
 #include "compiler/translator/tree_ops/PreTransformTextureCubeGradDerivatives.h"
 #include "compiler/translator/tree_ops/ReduceInterfaceBlocks.h"
-#include "compiler/translator/tree_ops/RemoveAtomicCounterBuiltins.h"
 #include "compiler/translator/tree_ops/RewriteArrayOfArrayOfOpaqueUniforms.h"
-#include "compiler/translator/tree_ops/RewriteAtomicCounters.h"
 #include "compiler/translator/tree_ops/RewriteDfdy.h"
 #include "compiler/translator/tree_ops/RewriteStructSamplers.h"
-#include "compiler/translator/tree_ops/SeparateStructFromUniformDeclarations.h"
+#include "compiler/translator/tree_ops/UseGeneratedNamesForAnonymousStructs.h"
 #include "compiler/translator/tree_ops/msl/AddExplicitTypeCasts.h"
 #include "compiler/translator/tree_ops/msl/ConvertUnsupportedConstructorsToFunctionCalls.h"
 #include "compiler/translator/tree_ops/msl/FixTypeConstructors.h"
@@ -50,7 +49,6 @@
 #include "compiler/translator/tree_util/ReplaceVariable.h"
 #include "compiler/translator/tree_util/RunAtTheBeginningOfShader.h"
 #include "compiler/translator/tree_util/RunAtTheEndOfShader.h"
-#include "compiler/translator/tree_util/SpecializationConstant.h"
 #include "compiler/translator/util.h"
 
 namespace sh
@@ -873,13 +871,24 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
                                   TIntermBlock *root,
                                   const ShCompileOptions &compileOptions,
                                   PerformanceDiagnostics * /*perfDiagnostics*/,
-                                  SpecConst *specConst,
                                   DriverUniformMetal *driverUniforms)
 {
     TSymbolTable &symbolTable = getSymbolTable();
     IdGen idGen;
     ProgramPreludeConfig ppc(metalShaderTypeFromGLSL(getShaderType()));
     ppc.usesDerivatives = usesDerivatives();
+
+    // The MSL generator prefers every struct to have a name, and is not bound by GLSL's requirement
+    // that anonymous structs match their (lack of) name between shader stages.
+    if (!UseGeneratedNamesForAnonymousStructs(this, root))
+    {
+        return false;
+    }
+
+    if (!sh::AddDefaultReturnStatements(this, root))
+    {
+        return false;
+    }
 
     if (!WrapMain(*this, idGen, *root))
     {
@@ -888,17 +897,11 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
 
     // Write out default uniforms into a uniform block assigned to a specific set/binding.
     int aggregateTypesUsedForUniforms = 0;
-    int atomicCounterCount            = 0;
     for (const auto &uniform : getUniforms())
     {
         if (uniform.isStruct() || uniform.isArrayOfArrays())
         {
             ++aggregateTypesUsedForUniforms;
-        }
-
-        if (uniform.active && gl::IsAtomicCounterType(uniform.type))
-        {
-            ++atomicCounterCount;
         }
     }
 
@@ -918,35 +921,33 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
     // This has a few benefits:
     //
     // - It dramatically simplifies future transformations w.r.t to samplers in structs, array of
-    //   arrays of opaque types, atomic counters etc.
+    //   arrays of opaque types etc.
     // - Avoids the need for shader*ArrayDynamicIndexing Vulkan features.
     if (!compileOptions.useIR)
     {
         UnsupportedFunctionArgsBitSet args{UnsupportedFunctionArgs::StructContainingSamplers,
                                            UnsupportedFunctionArgs::ArrayOfArrayOfSamplerOrImage,
-                                           UnsupportedFunctionArgs::AtomicCounter,
                                            UnsupportedFunctionArgs::Image};
         if (!MonomorphizeUnsupportedFunctions(this, root, &getSymbolTable(), args))
         {
             return false;
         }
-    }
 
-    if (aggregateTypesUsedForUniforms > 0)
-    {
-        int removedUniformsCount;
-        if (!RewriteStructSamplers(this, root, &getSymbolTable(), &removedUniformsCount))
+        if (aggregateTypesUsedForUniforms > 0)
+        {
+            if (!RewriteStructSamplers(this, root, &getSymbolTable()))
+            {
+                return false;
+            }
+        }
+
+        // Replace array of array of opaque uniforms with a flattened array.  This is run after
+        // MonomorphizeUnsupportedFunctions and RewriteStructSamplers so that it's not possible for
+        // an array of array of opaque type to be partially subscripted and passed to a function.
+        if (!RewriteArrayOfArrayOfOpaqueUniforms(this, root, &getSymbolTable()))
         {
             return false;
         }
-    }
-
-    // Replace array of array of opaque uniforms with a flattened array.  This is run after
-    // MonomorphizeUnsupportedFunctions and RewriteStructSamplers so that it's not possible for an
-    // array of array of opaque type to be partially subscripted and passed to a function.
-    if (!RewriteArrayOfArrayOfOpaqueUniforms(this, root, &getSymbolTable()))
-    {
-        return false;
     }
 
     if (getShaderVersion() >= 300 ||
@@ -962,40 +963,20 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
         }
     }
 
-    if (getShaderType() == GL_COMPUTE_SHADER)
+    ASSERT(getShaderType() != GL_COMPUTE_SHADER && "compute shaders not currently supported");
+
+    if (compileOptions.useIR)
     {
-        driverUniforms->addComputeDriverUniformsToShader(root, &getSymbolTable());
+        driverUniforms->findDeclarationAddedByIR(root);
     }
     else
     {
         driverUniforms->addGraphicsDriverUniformsToShader(root, &getSymbolTable());
     }
 
-    if (atomicCounterCount > 0)
+    if (!ReplaceGLDepthRangeWithDriverUniform(this, root, driverUniforms, &getSymbolTable()))
     {
-        const TIntermTyped *acbBufferOffsets = driverUniforms->getAcbBufferOffsets();
-        if (!RewriteAtomicCounters(this, root, &symbolTable, acbBufferOffsets, nullptr))
-        {
-            return false;
-        }
-    }
-    else if (getShaderVersion() >= 310)
-    {
-        // Vulkan doesn't support Atomic Storage as a Storage Class, but we've seen
-        // cases where builtins are using it even with no active atomic counters.
-        // This pass simply removes those builtins in that scenario.
-        if (!RemoveAtomicCounterBuiltins(this, root))
-        {
-            return false;
-        }
-    }
-
-    if (getShaderType() != GL_COMPUTE_SHADER)
-    {
-        if (!ReplaceGLDepthRangeWithDriverUniform(this, root, driverUniforms, &getSymbolTable()))
-        {
-            return false;
-        }
+        return false;
     }
 
     {
@@ -1075,7 +1056,7 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
         bool usesFragDepth             = false;
         bool usesFragDepthEXT          = false;
         bool usesSecondaryFragColorEXT = false;
-        bool usesSecondaryFragDataEXT  = false;
+        bool usesSecondaryFragDataEXT  = symbolTable.isSecondaryFragDataUsed();
         for (const ShaderVariable &outputVarying : mOutputVariables)
         {
             if (outputVarying.isBuiltIn())
@@ -1099,10 +1080,6 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
                 else if (outputVarying.name == "gl_SecondaryFragColorEXT")
                 {
                     usesSecondaryFragColorEXT = true;
-                }
-                else if (outputVarying.name == "gl_SecondaryFragDataEXT")
-                {
-                    usesSecondaryFragDataEXT = true;
                 }
                 else if (outputVarying.name == "gl_SampleMask")
                 {
@@ -1197,8 +1174,7 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
             DeclareRightBeforeMain(*root, *BuiltInVariable::gl_PointCoord());
         }
 
-        if (usesFragCoord || compileOptions.emulateAlphaToCoverage ||
-            compileOptions.metal.generateShareableShaders)
+        if (usesFragCoord || compileOptions.emulateAlphaToCoverage)
         {
             if (!InsertFragCoordCorrection(this, compileOptions, root, GetMainSequence(root),
                                            &getSymbolTable(), driverUniforms))
@@ -1249,12 +1225,21 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
     else if (getShaderType() == GL_VERTEX_SHADER)
     {
         DeclareRightBeforeMain(*root, *BuiltInVariable::gl_Position());
-
-        if (FindSymbolNode(root, BuiltInVariable::gl_PointSize()->name()))
+        // Always declare gl_PointSize to get [[point_size]] defined in case
+        // client draws with GL_POINTS.
         {
-            const TVariable *pointSize = static_cast<const TVariable *>(
-                getSymbolTable().findBuiltIn(ImmutableString("gl_PointSize"), getShaderVersion()));
+
+            const TVariable *pointSize = getShaderVersion() >= 300
+                                             ? BuiltInVariable::gl_PointSize300()
+                                             : BuiltInVariable::gl_PointSize();
             DeclareRightBeforeMain(*root, *pointSize);
+            TIntermBinary *defaultPointSize =
+                new TIntermBinary(TOperator::EOpAssign, new TIntermSymbol(pointSize),
+                                  CreateFloatNode(1.0f, pointSize->getType().getPrecision()));
+            if (!RunAtTheBeginningOfShader(this, root, defaultPointSize))
+            {
+                return false;
+            }
         }
 
         // Append a macro for transform feedback substitution prior to modifying depth.
@@ -1308,9 +1293,7 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
     {
         mValidateASTOptions.validateVariableReferences = false;
         if (!AddSampleMaskDeclaration(*this, *root, symbolTable, driverUniforms,
-                                      compileOptions.emulateAlphaToCoverage ||
-                                          compileOptions.metal.generateShareableShaders,
-                                      usesSampleMask))
+                                      compileOptions.emulateAlphaToCoverage, usesSampleMask))
         {
             return false;
         }
@@ -1423,9 +1406,8 @@ bool TranslatorMSL::translate(TIntermBlock *root,
     mValidateASTOptions.validatePrecision = false;
 
     TInfoSinkBase &sink = getInfoSink().obj;
-    SpecConst specConst(&getSymbolTable(), getShaderType());
     DriverUniformMetal driverUniforms(DriverUniformMode::Structure);
-    if (!translateImpl(sink, root, compileOptions, perfDiagnostics, &specConst, &driverUniforms))
+    if (!translateImpl(sink, root, compileOptions, perfDiagnostics, &driverUniforms))
     {
         return false;
     }

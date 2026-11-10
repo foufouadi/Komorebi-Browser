@@ -46,6 +46,7 @@ genai.chatbot:
       - elee@mozilla.com
     send_in_pings:
       - metrics
+      - events # Temporary until bug 2087139
 
   menu:
     type: boolean
@@ -240,55 +241,6 @@ genai.chatbot:
         type: string
         description: Sidebar is currently open.
 
-  length_disclaimer:
-    type: event
-    description: >
-      Warning message for length disclaimer is shown.
-    bugs:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1980228
-    data_reviews:
-      - https://phabricator.services.mozilla.com/D260463
-    data_sensitivity:
-      - interaction
-    expires: 166
-    notification_emails:
-      - elee@mozilla.com
-    send_in_pings:
-      - events
-    extra_keys:
-      type:
-        type: string
-        description: Content scope.
-      length:
-        type: quantity
-        description: Page content length.
-      provider:
-        type: string
-        description: Current provider id.
-
-  length_disclaimer_dismissed:
-    type: event
-    description: >
-      Warning message is dismissed.
-    bugs:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1980228
-    data_reviews:
-      - https://phabricator.services.mozilla.com/D260463
-    data_sensitivity:
-      - interaction
-    expires: 166
-    notification_emails:
-      - elee@mozilla.com
-    send_in_pings:
-      - events
-    extra_keys:
-      type:
-        type: string
-        description: Content scope.
-      provider:
-        type: string
-        description: Current provider id.
-
   onboarding_close:
     type: event
     description: >
@@ -437,6 +389,7 @@ genai.chatbot:
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1974185
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2044112
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1972935
     data_reviews:
       - https://phabricator.services.mozilla.com/D255286
       - https://phabricator.services.mozilla.com/D309646
@@ -457,12 +410,9 @@ genai.chatbot:
       provider:
         type: string
         description: Selected provider id.
-      reader_mode:
-        type: boolean
-        description: Whether reader mode text was used.
       selection:
         type: quantity
-        description: Page content length.
+        description: Selected text length.
       smart_window:
         type: boolean
         description: Whether the prompt was sent from Smart Window.
@@ -717,6 +667,7 @@ genai.chatbot:
       Chatbot page summarization was requested.
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1974185
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1972935
     data_reviews:
       - https://phabricator.services.mozilla.com/D255286
     data_sensitivity:
@@ -730,12 +681,6 @@ genai.chatbot:
       provider:
         type: string
         description: Selected provider id.
-      reader_mode:
-        type: boolean
-        description: Whether reader mode text was used.
-      selection:
-        type: quantity
-        description: Page content length.
       source:
         type: string
         description: Entrypoint for the request, e.g., callout, footer, page.
@@ -754,7 +699,7 @@ genai.linkpreview:
       - https://phabricator.services.mozilla.com/D251779
     data_sensitivity:
       - interaction
-    expires: 162
+    expires: 180
     notification_emails:
       - elee@mozilla.com
     send_in_pings:
@@ -771,7 +716,7 @@ genai.linkpreview:
       - https://phabricator.services.mozilla.com/D243790
     data_sensitivity:
       - interaction
-    expires: 162
+    expires: 180
     notification_emails:
       - elee@mozilla.com
     send_in_pings:
@@ -788,7 +733,7 @@ genai.linkpreview:
       - https://phabricator.services.mozilla.com/D251779
     data_sensitivity:
       - interaction
-    expires: 162
+    expires: 180
     notification_emails:
       - elee@mozilla.com
     send_in_pings:
@@ -805,7 +750,7 @@ genai.linkpreview:
       - https://phabricator.services.mozilla.com/D251779
     data_sensitivity:
       - interaction
-    expires: 162
+    expires: 180
     notification_emails:
       - elee@mozilla.com
     send_in_pings:
@@ -823,7 +768,7 @@ genai.linkpreview:
       - https://phabricator.services.mozilla.com/D249104
     data_sensitivity:
       - interaction
-    expires: 162
+    expires: 180
     notification_emails:
       - elee@mozilla.com
     send_in_pings:
@@ -843,7 +788,7 @@ genai.linkpreview:
       - https://phabricator.services.mozilla.com/D243790
     data_sensitivity:
       - interaction
-    expires: 162
+    expires: 180
     notification_emails:
       - elee@mozilla.com
     send_in_pings:
@@ -866,7 +811,7 @@ genai.linkpreview:
       - https://phabricator.services.mozilla.com/D243790
     data_sensitivity:
       - interaction
-    expires: 162
+    expires: 180
     notification_emails:
       - elee@mozilla.com
     send_in_pings:
@@ -892,7 +837,7 @@ genai.linkpreview:
       - https://phabricator.services.mozilla.com/D243790
     data_sensitivity:
       - interaction
-    expires: 162
+    expires: 180
     notification_emails:
       - elee@mozilla.com
     send_in_pings:
@@ -936,7 +881,7 @@ genai.linkpreview:
       - https://phabricator.services.mozilla.com/D243790
     data_sensitivity:
       - interaction
-    expires: 162
+    expires: 180
     notification_emails:
       - elee@mozilla.com
     send_in_pings:
@@ -961,6 +906,43 @@ genai.linkpreview:
         type: quantity
         description: Milliseconds to generate full result
 
+  smoke_test:
+    type: event
+    description: >
+      This tests whether SmolLM2-360M is producing the correct output when set in greedy mode,
+      which is done to produce deterministic results.  This fires at most once per build ID per install.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2047026
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2047026
+    data_sensitivity:
+      - technical
+    expires: 170
+    notification_emails:
+      - firefox-ai-and-ml@mozilla.com
+    send_in_pings:
+      - events
+    extra_keys:
+      flow_id:
+        type: string
+        description: >
+          Joins to sibling firefox.ai.runtime.engine_run and
+          run_inference_success_flow events for the same inference.
+      output_hash:
+        type: string
+        description: >
+          SHA-256 of the greedy output. Analysts bucket users whose output
+          drifted the same way by grouping on this hash.
+      matches_pinned:
+        type: boolean
+        description: Whether output_hash equalled the pinned reference.
+      model_id:
+        type: string
+        description: Model identifier used by the smoke test run.
+      model_revision:
+        type: string
+        description: Model revision used by the smoke test run.
+
   key_points_toggle:
     type: event
     description: >
@@ -971,7 +953,7 @@ genai.linkpreview:
       - https://phabricator.services.mozilla.com/D249851
     data_sensitivity:
       - interaction
-    expires: 162
+    expires: 180
     notification_emails:
       - elee@mozilla.com
     send_in_pings:
@@ -991,7 +973,7 @@ genai.linkpreview:
       - https://phabricator.services.mozilla.com/D249855
     data_sensitivity:
       - interaction
-    expires: 162
+    expires: 180
     notification_emails:
       - elee@mozilla.com
     send_in_pings:
@@ -1016,7 +998,7 @@ genai.linkpreview:
       - https://phabricator.services.mozilla.com/D251779
     data_sensitivity:
       - interaction
-    expires: 162
+    expires: 180
     notification_emails:
       - elee@mozilla.com
     send_in_pings:
@@ -1039,7 +1021,7 @@ genai.linkpreview:
       - https://phabricator.services.mozilla.com/D243790
     data_sensitivity:
       - interaction
-    expires: 162
+    expires: 180
     notification_emails:
       - elee@mozilla.com
     send_in_pings:
@@ -1054,3 +1036,249 @@ genai.linkpreview:
       tab:
         type: string
         description: The type of tab where the event occurred. Potential values home, newtab
+
+selection_menu:
+  displayed:
+    type: event
+    description: >
+      The text selection actions menu was shown for a selection. This is the
+      denominator for the menu's action clicks.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2069144
+    data_reviews:
+      - https://phabricator.services.mozilla.com/D328221
+    data_sensitivity:
+      - interaction
+    expires: never
+    notification_emails:
+      - scunnane@mozilla.com
+      - fx-search-telemetry@mozilla.com
+    send_in_pings:
+      - events
+    extra_keys:
+      delay:
+        type: quantity
+        description: Milliseconds from mousedown to showing.
+      selection:
+        type: quantity
+        description: Selected text length.
+      smart_window:
+        type: boolean
+        description: Whether the menu was shown in Smart Window.
+
+  action_click:
+    type: event
+    description: >
+      An action in the text selection actions menu was clicked.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2069144
+    data_reviews:
+      - https://phabricator.services.mozilla.com/D328221
+    data_sensitivity:
+      - interaction
+    expires: never
+    notification_emails:
+      - scunnane@mozilla.com
+      - fx-search-telemetry@mozilla.com
+    send_in_pings:
+      - events
+    extra_keys:
+      action:
+        type: string
+        description: Which action was clicked, e.g., ai, search, copy.
+      selection:
+        type: quantity
+        description: Selected text length.
+      smart_window:
+        type: boolean
+        description: Whether the menu was shown in Smart Window.
+
+  dismissed:
+    type: event
+    description: >
+      The text selection actions menu was closed. Paired one-to-one with
+      displayed.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2083259
+    data_reviews:
+      - https://phabricator.services.mozilla.com/D334905
+    data_sensitivity:
+      - interaction
+    expires: never
+    notification_emails:
+      - scunnane@mozilla.com
+      - fx-search-telemetry@mozilla.com
+    send_in_pings:
+      - events
+    extra_keys:
+      interacted:
+        type: boolean
+        description: Whether the user completed an action from the menu.
+      duration:
+        type: quantity
+        description: Milliseconds the menu was shown.
+      smart_window:
+        type: boolean
+        description: Whether the menu was shown in Smart Window.
+
+  suppressed:
+    type: event
+    description: >
+      The text selection actions menu was not shown, or was hidden, because the
+      page is on a site that shows its own menu for selected text or showed its
+      own floating menu next to the selection.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2083889
+    data_reviews:
+      - https://phabricator.services.mozilla.com/D335446
+    data_sensitivity:
+      - interaction
+    expires: never
+    notification_emails:
+      - scunnane@mozilla.com
+      - fx-search-telemetry@mozilla.com
+    send_in_pings:
+      - events
+    extra_keys:
+      reason:
+        type: string
+        description: Why the menu was suppressed, one of site_list or page_menu.
+
+  option_toggled:
+    type: event
+    description: >
+      An action in the text selection actions menu, or the menu itself, was
+      turned on or off.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2069167
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2069167
+    data_sensitivity:
+      - interaction
+    expires: never
+    notification_emails:
+      - scunnane@mozilla.com
+      - fx-search-telemetry@mozilla.com
+    send_in_pings:
+      - events
+    extra_keys:
+      action:
+        type: string
+        description: Which action was toggled, e.g., ai, search, copy, master.
+      enabled:
+        type: boolean
+        description: Whether the action was turned on or off.
+      source:
+        type: string
+        description: >
+          Where the toggle happened, e.g., menu, settings, uncheck_all,
+          context_menu. uncheck_all is the menu turning itself off because
+          its last action was turned off.
+
+  menu_shown:
+    type: event
+    description: >
+      The three-dot menu of the text selection actions menu was opened. Each
+      extra says whether that action's toggle was on, off or absent from the
+      menu. This is the denominator for the toggles in option_toggled.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2069164
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2069164
+    data_sensitivity:
+      - interaction
+    expires: never
+    notification_emails:
+      - scunnane@mozilla.com
+      - fx-search-telemetry@mozilla.com
+    send_in_pings:
+      - events
+    extra_keys:
+      ai:
+        type: string
+        description: State of the AI toggle, one of on, off or absent.
+      search:
+        type: string
+        description: State of the search toggle, one of on, off or absent.
+      copy:
+        type: string
+        description: State of the copy toggle, one of on, off or absent.
+
+  menu_click:
+    type: event
+    description: >
+      An entry of the three-dot menu of the text selection actions menu, other
+      than its toggles, was clicked.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2069165
+    data_reviews:
+      - https://phabricator.services.mozilla.com/D335856
+    data_sensitivity:
+      - interaction
+    expires: never
+    notification_emails:
+      - scunnane@mozilla.com
+      - fx-search-telemetry@mozilla.com
+    send_in_pings:
+      - events
+    extra_keys:
+      item:
+        type: string
+        description: Which entry was clicked, e.g., settings.
+
+  search_enabled:
+    type: boolean
+    lifetime: application
+    description: >
+      Indicates if the text selection actions menu would show the search
+      action.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2069167
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2069167
+    data_sensitivity:
+      - interaction
+    expires: never
+    notification_emails:
+      - scunnane@mozilla.com
+      - fx-search-telemetry@mozilla.com
+    send_in_pings:
+      - metrics
+
+  enabled:
+    type: boolean
+    lifetime: application
+    description: >
+      Indicates if the text selection actions menu is turned on in the user's
+      settings. Always false while the Highlight to Search feature gate is off.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2069156
+    data_reviews:
+      - https://phabricator.services.mozilla.com/D334183
+    data_sensitivity:
+      - interaction
+    expires: never
+    notification_emails:
+      - scunnane@mozilla.com
+      - fx-search-telemetry@mozilla.com
+    send_in_pings:
+      - metrics
+
+  copy_enabled:
+    type: boolean
+    lifetime: application
+    description: >
+      Indicates if the text selection actions menu would show the copy
+      action.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2069152
+    data_reviews:
+      - https://phabricator.services.mozilla.com/D332275
+    data_sensitivity:
+      - interaction
+    expires: never
+    notification_emails:
+      - scunnane@mozilla.com
+      - fx-search-telemetry@mozilla.com
+    send_in_pings:
+      - metrics

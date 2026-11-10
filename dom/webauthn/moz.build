@@ -5,7 +5,7 @@
 with Files("**"):
     BUG_COMPONENT = ("Core", "DOM: Web Authentication")
 
-EXTRA_JS_MODULES += [
+MOZ_SRC_FILES += [
     "WebAuthnRelatedOriginFetcher.sys.mjs",
 ]
 
@@ -31,11 +31,14 @@ EXPORTS.mozilla.dom += [
     "AuthenticatorAttestationResponse.h",
     "AuthenticatorResponse.h",
     "PublicKeyCredential.h",
+    "WebAuthnArgs.h",
+    "WebAuthnEnumStrings.h",
     "WebAuthnHandler.h",
     "WebAuthnIPCUtils.h",
     "WebAuthnPromiseHolder.h",
     "WebAuthnTransactionChild.h",
     "WebAuthnTransactionParent.h",
+    "WebAuthnTransportIdentifiers.h",
     "WebAuthnUtil.h",
     "winwebauthn/webauthn.h",
 ]
@@ -72,10 +75,16 @@ if CONFIG["MOZ_WIDGET_TOOLKIT"] == "android":
     UNIFIED_SOURCES += [
         "AndroidWebAuthnService.cpp",
     ]
+    SOURCE_HEADERS += [
+        "AndroidWebAuthnService.h",
+    ]
 
 if CONFIG["TARGET_OS"] == "OSX":
     UNIFIED_SOURCES += [
         "MacOSWebAuthnService.mm",
+    ]
+    SOURCE_HEADERS += [
+        "MacOSWebAuthnService.h",
     ]
     OS_LIBS += [
         "-framework AuthenticationServices",
@@ -101,4 +110,12 @@ BROWSER_CHROME_MANIFESTS += [
 
 TEST_DIRS += [
     "tests/gtest",
+]
+
+SOURCE_HEADERS += [
+    "AuthrsBridge_ffi.h",
+    "WebAuthnAutoFillEntry.h",
+    "WebAuthnCoseIdentifiers.h",
+    "WebAuthnResult.h",
+    "WebAuthnService.h",
 ]

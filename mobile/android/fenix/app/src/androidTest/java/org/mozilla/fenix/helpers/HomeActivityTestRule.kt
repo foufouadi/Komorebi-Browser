@@ -15,9 +15,11 @@ import android.view.ViewConfiguration.getLongPressTimeout
 import androidx.test.espresso.intent.rule.IntentsTestRule
 import androidx.test.rule.ActivityTestRule
 import mozilla.components.feature.sitepermissions.SitePermissionsRules
+import mozilla.components.lib.crash.store.CrashReportOption
 import mozilla.components.support.base.log.logger.Logger
 import org.mozilla.fenix.HomeActivity
 import org.mozilla.fenix.components.initializeGlean
+import org.mozilla.fenix.crashes.crashReportOption
 import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.helpers.Constants.TAG
 import org.mozilla.fenix.helpers.FeatureSettingsHelper.Companion.settings
@@ -31,6 +33,7 @@ import org.mozilla.fenix.settings.PhoneFeature
  *
  * @param initialTouchMode See [ActivityTestRule]
  * @param launchActivity See [ActivityTestRule]
+ * @param skipOnboarding Whether onboarding is skipped before the activity launches.
  */
 class HomeActivityTestRule(
     initialTouchMode: Boolean = false,
@@ -47,7 +50,9 @@ class HomeActivityTestRule(
         initialTouchMode: Boolean = false,
         launchActivity: Boolean = true,
         skipOnboarding: Boolean = true,
+        isHomepageAsNewTabEnabled: Boolean = false,
         isPocketEnabled: Boolean = settings.showPocketRecommendationsFeature,
+        isBookmarksHomeFeatureEnabled: Boolean = settings.showBookmarksHomeFeature,
         isRecentTabsFeatureEnabled: Boolean = settings.showRecentTabsFeature,
         isRecentlyVisitedFeatureEnabled: Boolean = settings.historyMetadataUIFeature,
         isWallpaperOnboardingEnabled: Boolean = settings.showWallpaperOnboarding,
@@ -65,14 +70,20 @@ class HomeActivityTestRule(
         openLinksInExternalApp: OpenLinksInApp = getOpenLinksInApp(settings),
         hasSeenShakeToSummarizeToolbarCfr: Boolean = true,
         shakeToSummarizeFeatureFlagEnabled: Boolean = settings.shakeToSummarizeFeatureFlagEnabled,
-        isPrivateModeAndStoriesEntryPointEnabled: Boolean = false,
         shouldUseExpandedToolbar: Boolean = false,
         isTabStripEnabled: Boolean = false,
         nativeShareSheetEnabled: Boolean = false,
         showVoiceSearchInDisplayToolbar: Boolean = false,
         isHomepageTrendingRecentSearchEnabled: Boolean = false,
+        isGoogleLensIntegrationEnabled: Boolean = true,
+        isGoogleLensIntegrationUserEnabled: Boolean = true,
+        isFxSuggestEnabled: Boolean = true,
+        showAddressBarInFocusMode: Boolean = false,
+        crashReportOption: CrashReportOption = settings.crashReportOption(),
     ) : this(initialTouchMode, launchActivity, skipOnboarding) {
+        this.isHomepageAsNewTabEnabled = isHomepageAsNewTabEnabled
         this.isPocketEnabled = isPocketEnabled
+        this.isBookmarksHomeFeatureEnabled = isBookmarksHomeFeatureEnabled
         this.isRecentTabsFeatureEnabled = isRecentTabsFeatureEnabled
         this.isRecentlyVisitedFeatureEnabled = isRecentlyVisitedFeatureEnabled
         this.isWallpaperOnboardingEnabled = isWallpaperOnboardingEnabled
@@ -89,12 +100,16 @@ class HomeActivityTestRule(
         this.openLinksInExternalApp = openLinksInExternalApp
         this.hasSeenShakeToSummarizeToolbarCfr = hasSeenShakeToSummarizeToolbarCfr
         this.shakeToSummarizeFeatureFlagEnabled = shakeToSummarizeFeatureFlagEnabled
-        this.isPrivateModeAndStoriesEntryPointEnabled = isPrivateModeAndStoriesEntryPointEnabled
         this.shouldUseExpandedToolbar = shouldUseExpandedToolbar
         this.isTabStripEnabled = isTabStripEnabled
         this.nativeShareSheetEnabled = nativeShareSheetEnabled
         this.showVoiceSearchInDisplayToolbar = showVoiceSearchInDisplayToolbar
         this.isHomepageTrendingRecentSearchEnabled = isHomepageTrendingRecentSearchEnabled
+        this.isGoogleLensIntegrationEnabled = isGoogleLensIntegrationEnabled
+        this.isGoogleLensIntegrationUserEnabled = isGoogleLensIntegrationUserEnabled
+        this.isFxSuggestEnabled = isFxSuggestEnabled
+        this.showAddressBarInFocusMode = showAddressBarInFocusMode
+        this.crashReportOption = crashReportOption
     }
 
     /** Update settings after the activity was created. */
@@ -141,12 +156,12 @@ class HomeActivityTestRule(
             initialTouchMode: Boolean = false,
             launchActivity: Boolean = true,
             skipOnboarding: Boolean = true,
-            useNewCrashReporterFlow: Boolean = false,
         ) =
             HomeActivityTestRule(
                 initialTouchMode = initialTouchMode,
                 launchActivity = launchActivity,
                 skipOnboarding = skipOnboarding,
+                isHomepageAsNewTabEnabled = false,
                 isWallpaperOnboardingEnabled = false,
                 isOpenInAppBannerEnabled = false,
                 isMicrosurveyEnabled = false,
@@ -158,7 +173,6 @@ class HomeActivityTestRule(
                 isTabSwipeCFREnabled = true,
                 hasSeenShakeToSummarizeToolbarCfr = true,
                 isTermsOfServiceAccepted = true,
-                isPrivateModeAndStoriesEntryPointEnabled = false,
                 isTabStripEnabled = false,
             )
     }
@@ -170,6 +184,7 @@ class HomeActivityTestRule(
  *
  * @param initialTouchMode See [IntentsTestRule]
  * @param launchActivity See [IntentsTestRule]
+ * @param skipOnboarding Whether onboarding is skipped before the activity launches.
  */
 class HomeActivityIntentTestRule
 internal constructor(
@@ -186,7 +201,9 @@ internal constructor(
         initialTouchMode: Boolean = false,
         launchActivity: Boolean = true,
         skipOnboarding: Boolean = true,
+        isHomepageAsNewTabEnabled: Boolean = false,
         isPocketEnabled: Boolean = settings.showPocketRecommendationsFeature,
+        isBookmarksHomeFeatureEnabled: Boolean = settings.showBookmarksHomeFeature,
         isRecentTabsFeatureEnabled: Boolean = settings.showRecentTabsFeature,
         isRecentlyVisitedFeatureEnabled: Boolean = settings.historyMetadataUIFeature,
         isWallpaperOnboardingEnabled: Boolean = settings.showWallpaperOnboarding,
@@ -206,14 +223,20 @@ internal constructor(
         tabManagerOpeningAnimationEnabled: Boolean = false,
         hasSeenShakeToSummarizeToolbarCfr: Boolean = true,
         shakeToSummarizeFeatureFlagEnabled: Boolean = settings.shakeToSummarizeFeatureFlagEnabled,
-        isPrivateModeAndStoriesEntryPointEnabled: Boolean = false,
         shouldUseExpandedToolbar: Boolean = false,
         isTabStripEnabled: Boolean = false,
         nativeShareSheetEnabled: Boolean = false,
         showVoiceSearchInDisplayToolbar: Boolean = false,
         isHomepageTrendingRecentSearchEnabled: Boolean = false,
+        isGoogleLensIntegrationEnabled: Boolean = true,
+        isGoogleLensIntegrationUserEnabled: Boolean = true,
+        isFxSuggestEnabled: Boolean = true,
+        showAddressBarInFocusMode: Boolean = false,
+        crashReportOption: CrashReportOption = settings.crashReportOption(),
     ) : this(initialTouchMode, launchActivity, skipOnboarding) {
+        this.isHomepageAsNewTabEnabled = isHomepageAsNewTabEnabled
         this.isPocketEnabled = isPocketEnabled
+        this.isBookmarksHomeFeatureEnabled = isBookmarksHomeFeatureEnabled
         this.isRecentTabsFeatureEnabled = isRecentTabsFeatureEnabled
         this.isRecentlyVisitedFeatureEnabled = isRecentlyVisitedFeatureEnabled
         this.isWallpaperOnboardingEnabled = isWallpaperOnboardingEnabled
@@ -232,12 +255,16 @@ internal constructor(
         this.tabManagerOpeningAnimationEnabled = tabManagerOpeningAnimationEnabled
         this.hasSeenShakeToSummarizeToolbarCfr = hasSeenShakeToSummarizeToolbarCfr
         this.shakeToSummarizeFeatureFlagEnabled = shakeToSummarizeFeatureFlagEnabled
-        this.isPrivateModeAndStoriesEntryPointEnabled = isPrivateModeAndStoriesEntryPointEnabled
         this.shouldUseExpandedToolbar = shouldUseExpandedToolbar
         this.isTabStripEnabled = isTabStripEnabled
         this.nativeShareSheetEnabled = nativeShareSheetEnabled
         this.showVoiceSearchInDisplayToolbar = showVoiceSearchInDisplayToolbar
         this.isHomepageTrendingRecentSearchEnabled = isHomepageTrendingRecentSearchEnabled
+        this.isGoogleLensIntegrationEnabled = isGoogleLensIntegrationEnabled
+        this.isGoogleLensIntegrationUserEnabled = isGoogleLensIntegrationUserEnabled
+        this.isFxSuggestEnabled = isFxSuggestEnabled
+        this.showAddressBarInFocusMode = showAddressBarInFocusMode
+        this.crashReportOption = crashReportOption
     }
 
     private val longTapUserPreference = getLongPressTimeout()
@@ -292,7 +319,9 @@ internal constructor(
      * initial settings and override any changes made in the meantime.
      */
     fun updateCachedSettings() {
+        isHomepageAsNewTabEnabled = settings.enableHomepageAsNewTab
         isPocketEnabled = settings.showPocketRecommendationsFeature
+        isBookmarksHomeFeatureEnabled = settings.showBookmarksHomeFeature
         isRecentTabsFeatureEnabled = settings.showRecentTabsFeature
         isRecentlyVisitedFeatureEnabled = settings.historyMetadataUIFeature
         isWallpaperOnboardingEnabled = settings.showWallpaperOnboarding
@@ -307,10 +336,14 @@ internal constructor(
         openLinksInExternalApp = getOpenLinksInApp(settings)
         tabManagerOpeningAnimationEnabled = settings.tabManagerOpeningAnimationEnabled
         hasSeenShakeToSummarizeToolbarCfr = settings.shakeToSummarizeToolbarCfrShown
-        isPrivateModeAndStoriesEntryPointEnabled = settings.privateModeAndStoriesEntryPointEnabled
         nativeShareSheetEnabled = settings.nativeShareSheetEnabled
         isHomepageTrendingRecentSearchEnabled = settings.enableHomepageTrendingRecentSearch
         isTabStripEnabled = settings.isTabStripEnabled
+        isGoogleLensIntegrationEnabled = settings.googleLensIntegrationEnabled
+        isGoogleLensIntegrationUserEnabled = settings.googleLensIntegrationUserEnabled
+        isFxSuggestEnabled = settings.enableFxSuggest
+        showAddressBarInFocusMode = settings.showAddressBarInFocusMode
+        crashReportOption = settings.crashReportOption()
     }
 
     companion object {
@@ -331,6 +364,9 @@ internal constructor(
                 initialTouchMode = initialTouchMode,
                 launchActivity = launchActivity,
                 skipOnboarding = skipOnboarding,
+                isBookmarksHomeFeatureEnabled = true,
+                isRecentlyVisitedFeatureEnabled = true,
+                isHomepageAsNewTabEnabled = false,
                 isWallpaperOnboardingEnabled = false,
                 isOpenInAppBannerEnabled = false,
                 isMicrosurveyEnabled = false,
@@ -343,7 +379,6 @@ internal constructor(
                 hasSeenShakeToSummarizeToolbarCfr = true,
                 isTermsOfServiceAccepted = true,
                 tabManagerOpeningAnimationEnabled = false,
-                isPrivateModeAndStoriesEntryPointEnabled = false,
                 isTabStripEnabled = false,
             )
     }
@@ -360,8 +395,7 @@ fun setLongTapTimeout(delay: Int) {
             Log.i(TAG, "setLongTapTimeout: Executed command \"settings put secure long_press_timeout $delay\"")
             break
         } catch (e: RuntimeException) {
-            Log.i(TAG, "setLongTapTimeout: RuntimeException caught, executing fallback methods")
-            e.printStackTrace()
+            Log.e(TAG, "setLongTapTimeout: RuntimeException caught, executing fallback methods", e)
         }
     }
 }

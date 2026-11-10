@@ -38,14 +38,11 @@ MIRROR_TYPES = {
 # only ensuring that all the metric's extra keys are present in the probe,
 # not ensuring that all the probe's extra keys are defined in the metric.
 WEAKER_EVENT_COMPATIBILITY_PROBES = [
-    "security.ui.protectionspopup#click",
     "intl.ui.browserLanguage#action",
-    "privacy.ui.fpp#click",
     "slow_script_warning#shown",
     "pwmgr#mgmt_interaction",
     "relay_integration#popup_option",
     "relay_integration#mask_panel",
-    "security.ui.certerror#click",
     "security.ui.certerror#load",
 ]
 

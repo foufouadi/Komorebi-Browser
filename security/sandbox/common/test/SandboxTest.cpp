@@ -8,7 +8,6 @@
 #include "SandboxTestingChild.h"
 #include "SandboxTestingParent.h"
 #include "mozilla/Components.h"
-#include "mozilla/Preferences.h"
 #include "mozilla/RDDChild.h"
 #include "mozilla/RDDProcessManager.h"
 #include "mozilla/dom/ContentParent.h"
@@ -19,8 +18,6 @@
 #include "mozilla/ipc/UtilityProcessManager.h"
 #include "mozilla/ipc/UtilityProcessParent.h"
 #include "mozilla/ipc/UtilityProcessSandboxing.h"
-#include "mozilla/net/SocketProcessParent.h"
-#include "nsIOService.h"
 
 #ifdef XP_WIN
 #  include "nsAppDirectoryServiceDefs.h"
@@ -225,31 +222,6 @@ SandboxTest::StartTests(const nsTArray<nsCString>& aProcessesList) {
         break;
       }
 
-      case GeckoProcessType_Socket: {
-        // mochitest harness force this variable, but we actually do not want
-        // that
-        UnsetEnvVariable("MOZ_DISABLE_SOCKET_PROCESS"_ns);
-
-        nsresult rv_pref =
-            Preferences::SetBool("network.process.enabled", true);
-        MOZ_ASSERT(rv_pref == NS_OK, "Error enforcing pref");
-
-        MOZ_ASSERT(net::gIOService, "No gIOService?");
-
-        net::gIOService->CallOrWaitForSocketProcess([processPromise]() {
-          // If socket process was previously disabled by env,
-          // nsIOService code will take some time before it creates the new
-          // process and it triggers this callback
-          RefPtr<net::SocketProcessParent> parent =
-              net::SocketProcessParent::GetSingleton();
-          if (parent) {
-            return InitializeSandboxTestingActors(parent.get(), processPromise);
-          }
-          return processPromise->Reject(NS_ERROR_FAILURE, __func__);
-        });
-        break;
-      }
-
       case GeckoProcessType_Utility: {
         RefPtr<UtilityProcessManager> utilityProc =
             UtilityProcessManager::GetSingleton();
@@ -257,10 +229,12 @@ SandboxTest::StartTests(const nsTArray<nsCString>& aProcessesList) {
             ->Then(
                 GetMainThreadSerialEventTarget(), __func__,
                 [processPromise, utilityProc, sandboxingKind]() {
-                  RefPtr<UtilityProcessParent> utilityParent =
+                  RefPtr<UtilityProcessKeepAlive> keepAlive =
                       utilityProc
-                          ? utilityProc->GetProcessParent(sandboxingKind)
+                          ? utilityProc->GetSharedKeepAlive(sandboxingKind)
                           : nullptr;
+                  RefPtr<UtilityProcessParent> utilityParent =
+                      keepAlive ? keepAlive->GetProcessParent() : nullptr;
                   if (utilityParent) {
                     return InitializeSandboxTestingActors(utilityParent.get(),
                                                           processPromise);

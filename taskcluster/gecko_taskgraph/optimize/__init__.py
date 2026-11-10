@@ -14,6 +14,13 @@ See ``taskcluster/docs/optimization.rst`` for more information.
 from taskgraph.optimize.base import Alias, All, Any, Not, register_strategy
 from taskgraph.util.python_path import import_sibling_modules
 
+from gecko_taskgraph.optimize.perf_batching import (
+    SkipUnlessPushesSinceLastBatch,
+    SkipUnlessRiskThreshold,
+    SkipUnlessTimeSinceLastBatch,
+    perf_batch_overrides,
+)
+
 # Trigger registration in sibling modules.
 import_sibling_modules()
 
@@ -55,6 +62,17 @@ register_strategy(
     args=("skip-unless-missing", "skip-unless-changed"),
     kwargs={"split_args": lambda args, _: (args[0], args[1])},
 )(All)
+
+# Pass-through aliases through which performance tasks are optimized, so
+# their cadence can be overridden (e.g. by the perf batching shadow
+# schedulers) without affecting the builds and unit tests that share the
+# underlying strategies.
+register_strategy(
+    "perf-cadence-android", args=("skip-unless-android-perftest-backstop",)
+)(Alias)
+register_strategy("perf-cadence-backstop", args=("skip-unless-backstop",))(Alias)
+register_strategy("perf-cadence-default", args=("test",))(Alias)
+register_strategy("perf-cadence-expanded", args=("skip-unless-expanded",))(Alias)
 
 
 # Strategy overrides used to tweak the default strategies. These are referenced
@@ -218,6 +236,15 @@ class experimental:
     }
     """Choose configs selected by bugbug, medium confidence threshold with reduced tasks."""
 
+    bugbug_reduced_manifests_config_selection_high = {
+        "test": Any(
+            "skip-unless-schedules",
+            "bugbug-reduced-manifests-config-selection-high",
+            split_args=split_bugbug_arg,
+        ),
+    }
+    """Choose configs selected by bugbug, medium confidence threshold with reduced tasks."""
+
     bugbug_disperse_medium_no_unseen = {
         "test": Any(
             "skip-unless-schedules",
@@ -269,6 +296,66 @@ class experimental:
     }
     """Runs task containing tests in the same directories as modified files."""
 
+    # The perf batching parameters come from replaying each strategy over
+    # autoland's history with bugbug's perf scheduling simulator, on calibrated
+    # risk scores; see taskcluster/docs/optimization/perf-batching.md.
+    perf_fixed_batch = perf_batch_overrides(
+        project.autoland, SkipUnlessPushesSinceLastBatch(18, "perf_fixed_batch")
+    )
+    """Runs all performance tests when 18 pushes have been made since the last
+    batch, other tasks as on autoland."""
+
+    perf_time_batch = perf_batch_overrides(
+        project.autoland, SkipUnlessTimeSinceLastBatch(3, "perf_time_batch")
+    )
+    """Runs all performance tests when 3 hours have passed since the last
+    batch, other tasks as on autoland."""
+
+    perf_rasb = perf_batch_overrides(
+        project.autoland, SkipUnlessRiskThreshold(0.28, "product", "perf_rasb")
+    )
+    """Risk-aware stream batching (RASB): runs all performance tests when the
+    probability that a commit pushed since the last batch regressed
+    performance reaches 0.28, other tasks as on autoland."""
+
+    perf_rasb_la = perf_batch_overrides(
+        project.autoland, SkipUnlessRiskThreshold(0.32, "linear", "perf_rasb_la")
+    )
+    """RASB with linear aggregation: runs all performance tests when the sum of
+    the risk scores of the commits pushed since the last batch reaches 0.32,
+    other tasks as on autoland."""
+
+    perf_rapb = perf_batch_overrides(
+        project.autoland,
+        SkipUnlessRiskThreshold(0.6, "product", "perf_rapb", aging_rate=0.02),
+    )
+    """Risk-aged priority batching (RAPB): RASB with commit risk scores aged
+    at a rate of 0.02 per hour waited, and a threshold of 0.6."""
+
+    perf_rapb_la = perf_batch_overrides(
+        project.autoland,
+        SkipUnlessRiskThreshold(0.55, "linear", "perf_rapb_la", aging_rate=0.01),
+    )
+    """RAPB with linear aggregation: RASB-la with commit risk scores aged at a
+    rate of 0.01 per hour waited, and a threshold of 0.55."""
+
+
+def _mirror_test_strategy(overrides):
+    """talos/awsy are optimized through `perf-cadence-default`, an alias of
+    `test`; wherever `test` is overridden, mirror the override so they keep
+    being judged identically to the other test tasks."""
+    if "test" in overrides and "perf-cadence-default" not in overrides:
+        overrides["perf-cadence-default"] = overrides["test"]
+
+
+for _overrides in (
+    project.autoland,
+    project.beta,
+    project.pull_request,
+    *(value for value in vars(experimental).values() if isinstance(value, dict)),
+):
+    _mirror_test_strategy(_overrides)
+
 
 class ExperimentalOverride:
     """Overrides dictionaries that are stored in a container with new values.
@@ -302,6 +389,16 @@ tryselect = ExperimentalOverride(
         "build": Any(
             "skip-unless-schedules", "bugbug-reduced", split_args=split_bugbug_arg
         ),
+        "skip-unless-changed": All(
+            "skip-unless-changed", "bugbug-reduced", split_args=split_bugbug_arg
+        ),
+        # We override skip-unless-backstop and skip-unless-expanded because on try we
+        # want to be able to run any task. backstop and expanded pushes only make sense
+        # on autoland.
+        "skip-unless-backstop": Alias("bugbug-reduced"),
+        "skip-unless-expanded": Alias("bugbug-reduced"),
+        "perf-cadence-backstop": Alias("bugbug-reduced"),
+        "perf-cadence-expanded": Alias("bugbug-reduced"),
         "test-verify": "base:test",
         "upload-symbols": Alias("always"),
         "reprocess-symbols": Alias("always"),

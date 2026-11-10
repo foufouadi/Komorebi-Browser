@@ -1,12 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-add_setup(async function () {
-  await SpecialPowers.pushPrefEnv({
-    set: [["test.wait300msAfterTabSwitch", true]],
-  });
-});
-
 /**
  * Ensure that document wireframes are persisted when enabled,
  * and that we can generate previews for them.
@@ -31,7 +25,7 @@ add_task(async function thumbnails_wireframe_basic() {
   checkWireframeForTab(tab);
 
   await BrowserTestUtils.switchTab(gBrowser, gBrowser.tabs[0]);
-  gBrowser.discardBrowser(tab, true);
+  gBrowser.discardBrowser(tab, { forceDiscard: true });
 
   info("Checking a discarded tab");
   checkWireframeForTab(tab);

@@ -153,6 +153,10 @@ GLenum GetPixelFormatInfo(int pixelFormat, bool *isYUV)
             return GL_STENCIL_INDEX8;
         case ANGLE_AHB_FORMAT_R8_UNORM:
             return GL_R8;
+        case ANGLE_AHB_FORMAT_R16_UINT:
+            return GL_R16UI;
+        case ANGLE_AHB_FORMAT_R16G16_UINT:
+            return GL_RG16UI;
         case ANGLE_AHB_FORMAT_Y8Cb8Cr8_420:
         case ANGLE_AHB_FORMAT_YV12:
         case ANGLE_AHB_FORMAT_IMPLEMENTATION_DEFINED:
@@ -238,7 +242,6 @@ void GetANativeWindowBufferProperties(const ANativeWindowBuffer *buffer,
     *width       = buffer->width;
     *height      = buffer->height;
     *depth       = static_cast<int>(buffer->layerCount);
-    *height      = buffer->height;
     *pixelFormat = buffer->format;
     *usage       = buffer->usage;
 }
@@ -285,6 +288,10 @@ int GLInternalFormatToNativePixelFormat(GLenum internalFormat)
             return ANGLE_AHB_FORMAT_D32_FLOAT_S8_UINT;
         case GL_STENCIL_INDEX8:
             return ANGLE_AHB_FORMAT_S8_UINT;
+        case GL_R16UI:
+            return ANGLE_AHB_FORMAT_R16_UINT;
+        case GL_RG16UI:
+            return ANGLE_AHB_FORMAT_R16G16_UINT;
         default:
             WARN() << "Unknown internalFormat: " << internalFormat << ". Treating as 0";
             return 0;
@@ -318,7 +325,28 @@ AHardwareBuffer *ClientBufferToAHardwareBuffer(EGLClientBuffer clientBuffer)
 
 bool GetSystemProperty(const char *propertyName, std::string *value)
 {
-#if defined(ANGLE_PLATFORM_ANDROID)
+#if defined(ANGLE_PLATFORM_ANDROID) && __ANDROID_API__ >= 26
+    std::string propertyValue;
+
+    const prop_info *propertyInfo = __system_property_find(propertyName);
+    if (propertyInfo != nullptr)
+    {
+        __system_property_read_callback(
+            propertyInfo,
+            [](void *cookie, const char *, const char *value, unsigned) {
+                auto propertyValue = reinterpret_cast<std::string *>(cookie);
+                *propertyValue     = value;
+            },
+            &propertyValue);
+    }
+
+    if (propertyValue.empty())
+    {
+        return false;
+    }
+    *value = std::move(propertyValue);
+    return true;
+#elif defined(ANGLE_PLATFORM_ANDROID)
     // PROP_VALUE_MAX from <sys/system_properties.h>
     std::vector<char> propertyBuf(PROP_VALUE_MAX);
     int len = __system_property_get(propertyName, propertyBuf.data());

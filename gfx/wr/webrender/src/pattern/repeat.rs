@@ -8,11 +8,10 @@
 use api::units::*;
 use api::ColorF;
 use crate::pattern::PatternBuilder;
-use crate::pattern::PatternBuilderContext;
 use crate::pattern::PatternBuilderState;
 use crate::pattern::{Pattern, PatternKind, PatternShaderInput, PatternTextureInput};
 use crate::render_task_graph::RenderTaskId;
-use crate::renderer::{BlendMode, GpuBufferBuilder};
+use crate::renderer::{BlendMode, GpuBufferBuilderF};
 
 pub struct RepeatedPattern {
     pub stretch_size: LayoutSize,
@@ -23,9 +22,9 @@ pub struct RepeatedPattern {
 
 pub fn repeated_pattern(
     repeat: &RepeatedPattern,
-    gpu_buffer_builder: &mut GpuBufferBuilder,
+    gpu_buffer_builder: &mut GpuBufferBuilderF,
 ) -> Pattern {
-    let mut writer = gpu_buffer_builder.f32.write_blocks(1);
+    let mut writer = gpu_buffer_builder.write_blocks(1);
     writer.push_one([
         repeat.stretch_size.width,
         repeat.stretch_size.height,
@@ -52,11 +51,9 @@ pub fn repeated_pattern(
 impl PatternBuilder for RepeatedPattern {
     fn build(
         &self,
-        _sub_rect: Option<DeviceRect>,
-        _offset: LayoutVector2D,
-        _ctx: &PatternBuilderContext,
+        _pattern_rect: &LayoutRect,
         state: &mut PatternBuilderState,
     ) -> Pattern {
-        repeated_pattern(self, state.frame_gpu_data)
+        repeated_pattern(self, &mut state.frame_gpu_data.f32)
     }
 }

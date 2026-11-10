@@ -27,6 +27,7 @@ extern crate cubeb_coreaudio;
 extern crate cubeb_pulse;
 extern crate data_storage;
 extern crate dom_fragmentdirectives;
+extern crate dom_push;
 extern crate dom_speculationrules;
 extern crate encoding_glue;
 extern crate fog_control;
@@ -47,6 +48,7 @@ extern crate mapped_hyph;
 extern crate mozurl;
 extern crate mp4parse_capi;
 extern crate netwerk_helper;
+extern crate noise;
 extern crate nserror;
 extern crate nsstring;
 extern crate prefs_parser;
@@ -94,10 +96,8 @@ extern crate fluent_fallback;
 extern crate l10nregistry_ffi;
 extern crate localization_ffi;
 
-extern crate ipcclientcerts;
 extern crate pdf_trust_anchors;
 extern crate qwac_trust_anchors;
-extern crate ssl_tokens_cache;
 extern crate trust_anchors;
 
 #[cfg(any(
@@ -107,6 +107,9 @@ extern crate trust_anchors;
     all(target_os = "windows", not(target_arch = "aarch64"))
 ))]
 extern crate osclientcerts;
+
+#[cfg(not(target_os = "android"))]
+extern crate remotecerts;
 
 #[cfg(not(target_os = "android"))]
 extern crate gkrust_uniffi_components;
@@ -121,6 +124,8 @@ extern crate viaduct_necko;
 
 extern crate gecko_logger;
 extern crate gecko_tracing;
+#[cfg(feature = "with_dbus")]
+extern crate xdg_alerts;
 
 #[cfg(feature = "oxidized_breakpad")]
 extern crate rust_minidump_writer_linux;
@@ -136,12 +141,12 @@ extern crate midir_impl;
 
 #[cfg(all(target_os = "windows", feature = "backgroundtaskregistrar"))]
 extern crate backgroundtaskregistrar;
-#[cfg(target_os = "windows")]
-extern crate detect_win32k_conflicts;
 #[cfg(all(target_os = "windows", feature = "shell_windows"))]
 extern crate shell_windows;
 #[cfg(target_os = "windows")]
 extern crate widget_windows;
+#[cfg(target_os = "windows")]
+extern crate win32_process_mitigations;
 
 extern crate origin_trials_ffi;
 
@@ -161,8 +166,8 @@ extern crate uritemplate_glue;
 extern crate urlpattern;
 extern crate urlpattern_glue;
 
-extern crate adblock;
 extern crate content_classifier_engine;
+extern crate etp_engine;
 
 #[cfg(feature = "libz-rs-sys")]
 extern crate libz_rs_sys;

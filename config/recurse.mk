@@ -96,18 +96,20 @@ recurse_syms: $(syms_targets)
 ifneq ($(CURRENT_TIER),compile)
 
 # Recursion rule for all directories traversed for all subtiers in the
-# current tier.
-$(addsuffix /$(CURRENT_TIER),$(CURRENT_DIRS)): %/$(CURRENT_TIER):
+# current tier, except the ones the rule above already covers.
+current_tier_targets := $(filter-out $(pre_compile_targets) $(compile_targets) $(syms_targets),$(addsuffix /$(CURRENT_TIER),$(CURRENT_DIRS)))
+
+$(current_tier_targets): %/$(CURRENT_TIER):
 	$(call RECURSE,$(CURRENT_TIER),$*)
 
-.PHONY: $(addsuffix /$(CURRENT_TIER),$(CURRENT_DIRS))
+.PHONY: $(current_tier_targets)
 
 # Dummy rules for possibly inexisting dependencies for the above tier targets
 $(addsuffix /Makefile,$(CURRENT_DIRS)) $(addsuffix /backend.mk,$(CURRENT_DIRS)):
 
 ifeq ($(CURRENT_TIER),export)
-# At least build/export requires config/export for buildid, but who knows what
-# else, so keep this global dependency to make config/export first for now.
+# config/export builds the STL and system wrappers. Keep it first until the
+# export consumers are audited.
 $(addsuffix /$(CURRENT_TIER),$(filter-out config,$(CURRENT_DIRS))): config/$(CURRENT_TIER)
 
 # The export tier requires nsinstall, which is built from config. So every
@@ -163,17 +165,6 @@ recurse:
 
 ifeq (.,$(DEPTH))
 
-# This is required so that the pre-export tier sees the rules in
-# mobile/android
-ifeq ($(MOZ_WIDGET_TOOLKIT),android)
-recurse_pre-export: mobile/android/pre-export
-endif
-
-ifeq ($(TARGET_ENDIANNESS),big)
-config/external/icu/data/target-objects: config/external/icu/data/$(MDDEPDIR)/icudt$(MOZ_ICU_VERSION)b.dat.stub
-config/external/icu/data/$(MDDEPDIR)/icudt$(MOZ_ICU_VERSION)b.dat.stub: config/external/icu/icupkg/host
-endif
-
 ifdef ENABLE_CLANG_PLUGIN
 # Only target rules use the clang plugin.
 $(filter %/target %/target-objects,$(filter-out config/export config/host build/unix/stdc++compat/% build/clang-plugin/%,$(compile_targets))) security/rlbox/pre-compile media/libsoundtouch/src/pre-compile: build/clang-plugin/host build/clang-plugin/tests/target-objects
@@ -193,14 +184,6 @@ endif
 
 # Interdependencies that moz.build world don't know about yet for compilation.
 # Note some others are hardcoded or "guessed" in recursivemake.py and emitter.py
-ifdef MOZ_USING_WASM_SANDBOXING
-dom/media/ogg/target-objects extensions/spellcheck/hunspell/glue/target-objects gfx/thebes/target-objects parser/expat/target-objects parser/htmlparser/target-objects gfx/ots/src/target-objects: security/rlbox/pre-compile
-dom/media/target-objects dom/media/mediasink/target-objects: media/libsoundtouch/src/pre-compile
-endif
-
-# Most things are built during compile (target/host), but some things happen during export
-# Those need to depend on config/export for system wrappers.
-$(addprefix build/unix/stdc++compat/,target host) build/clang-plugin/host: config/export
 
 # Rust targets, and export targets that run cbindgen need
 # $topobjdir/.cargo/config.toml to be preprocessed first. Ideally, we'd only set it
@@ -209,18 +192,8 @@ $(addprefix build/unix/stdc++compat/,target host) build/clang-plugin/host: confi
 # prior to Make running. So we also set it as a dependency of pre-export, which
 # ensures it exists before recursing the rust targets and the export targets
 # that run cbindgen, tricking Make into keeping them early.
-# When $topobjdir/.cargo/config exists from an old build, we also remove it because
-# cargo will prefer to use it rather than config.toml.
-CARGO_CONFIG_DEPS = $(DEPTH)/.cargo/config.toml
-ifneq (,$(wildcard $(DEPTH)/.cargo/config))
-CARGO_CONFIG_DEPS += $(MDDEPDIR)/cargo-config-cleanup.stub
-endif
-$(rust_targets): $(CARGO_CONFIG_DEPS)
+$(rust_targets): $(DEPTH)/.cargo/config.toml
 ifndef TEST_MOZBUILD
-recurse_pre-export: $(CARGO_CONFIG_DEPS)
+recurse_pre-export: $(DEPTH)/.cargo/config.toml
 endif
-
-$(MDDEPDIR)/cargo-config-cleanup.stub:
-	rm $(DEPTH)/.cargo/config
-	touch $@
 endif

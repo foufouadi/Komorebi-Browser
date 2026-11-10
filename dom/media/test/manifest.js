@@ -542,6 +542,24 @@ var gMKVtests = [
     type: 'video/matroska; codecs="av1"',
     duration: 1.0,
   },
+  // ffmpeg -f lavfi -i sine=frequency=1000:duration=1 -c:a libmp3lame output_mp3.mkv
+  {
+    name: "output_mp3.mkv",
+    type: 'audio/matroska; codecs="mp3"',
+    duration: 1.0,
+  },
+  // ffmpeg -f lavfi -i sine=frequency=1000:duration=1 -c:a flac output_flac.mkv
+  {
+    name: "output_flac.mkv",
+    type: 'audio/matroska; codecs="flac"',
+    duration: 1.0,
+  },
+  // ffmpeg -f lavfi -i sine=frequency=1000:duration=1 -c:a pcm_s16le output_pcm.mkv
+  {
+    name: "output_pcm.mkv",
+    type: 'audio/matroska; codecs="pcm"',
+    duration: 1.0,
+  },
 ];
 
 // HEVC file can only be tested on the gpu worker which has hardware decoder
@@ -609,28 +627,6 @@ gMKVtests.push(
     duration: 0.1,
   }
 );
-
-// The following files should be added to gMKVtests once they are supported.
-var gUnsupportedMKVtests = [
-  // ffmpeg -f lavfi -i sine=frequency=1000:duration=1 -c:a flac output_flac.mkv
-  {
-    name: "output_flac.mkv",
-    type: "audio/matroska",
-    duration: 1.0,
-  },
-  // ffmpeg -f lavfi -i sine=frequency=1000:duration=1 -c:a libmp3lame output_mp3.mkv
-  {
-    name: "output_mp3.mkv",
-    type: "audio/matroska",
-    duration: 1.0,
-  },
-  // ffmpeg -f lavfi -i sine=frequency=1000:duration=1 -c:a pcm_s16le output_pcm.mkv
-  {
-    name: "output_pcm.mkv",
-    type: "audio/matroska",
-    duration: 1.0,
-  },
-];
 
 // AAC files with different sample rates. We add these here as some are added
 // conditionally.
@@ -990,6 +986,7 @@ var gDecodeErrorTests = [
   { name: "dirac.ogg", type: "video/ogg" },
   // Invalid files
   { name: "bogus.wav", type: "audio/x-wav" },
+  { name: "invalid-crop-wrap.webm", type: "video/webm" },
 
   { name: "bogus.duh", type: "bogus/duh" },
 ];
@@ -2185,6 +2182,23 @@ function getMajorMimeType(mimetype) {
   }
   return "audio";
 }
+
+// removeNodeAndSource() below intentionally aborts any in-flight media
+// resource fetch. If a play() promise is still pending at that point, it
+// rejects with AbortError; callers aren't expected to catch that themselves,
+// so silence just this specific rejection instead of letting it show up as a
+// JS error in logs.
+window.addEventListener("unhandledrejection", function (event) {
+  if (
+    event.reason instanceof DOMException &&
+    event.reason.name == "AbortError" &&
+    event.reason.message.startsWith(
+      "The fetching process for the media resource was aborted"
+    )
+  ) {
+    event.preventDefault();
+  }
+});
 
 // Force releasing decoder to avoid timeout in waiting for decoding resource.
 function removeNodeAndSource(n) {

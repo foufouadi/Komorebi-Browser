@@ -37,6 +37,20 @@ impl PictureGraph {
         self.update_passes.clear();
     }
 
+    /// The picture that contains `pic_index` this frame, if it is reachable and
+    /// not a root. Also set for a picture culled as invisible, which has no
+    /// surface this frame.
+    pub fn parent(&self, pic_index: PictureIndex) -> Option<PictureIndex> {
+        self.pic_info[pic_index.0 as usize].parent
+    }
+
+    /// The surface that `pic_index`'s content is drawn into this frame: its own
+    /// surface, or its parent's for a pass-through picture. `None` if the
+    /// picture is not reachable this frame.
+    pub fn surface_index(&self, pic_index: PictureIndex) -> Option<SurfaceIndex> {
+        self.pic_info[pic_index.0 as usize].surface_index
+    }
+
     /// Add a root picture to the graph
     pub fn add_root(
         &mut self,
@@ -84,7 +98,7 @@ impl PictureGraph {
         for (pic_index, info) in self.pic_info.iter().enumerate() {
             if let Some(update_pass) = info.update_pass {
                 let pass = &mut self.update_passes[update_pass];
-                pass.push(PictureIndex(pic_index));
+                pass.push(PictureIndex(pic_index as u32));
             }
         }
     }
@@ -99,17 +113,17 @@ impl PictureGraph {
     ) {
         for pass in &self.update_passes {
             for pic_index in pass {
-                let parent = self.pic_info[pic_index.0].parent;
+                let parent = self.pic_info[pic_index.0 as usize].parent;
 
                 let parent_surface_index = parent.map(|parent| {
                     // Can unwrap here as by the time we have a parent that parent's
                     // surface must have been assigned.
-                    self.pic_info[parent.0].surface_index.unwrap()
+                    self.pic_info[parent.0 as usize].surface_index.unwrap()
                 });
 
-                let info = &mut self.pic_info[pic_index.0];
+                let info = &mut self.pic_info[pic_index.0 as usize];
 
-                match pictures[pic_index.0].assign_surface(
+                match pictures[pic_index.0 as usize].assign_surface(
                     frame_context,
                     parent_surface_index,
                     tile_caches,
@@ -135,19 +149,19 @@ impl PictureGraph {
     ) {
         for pass in self.update_passes.iter().rev() {
             for pic_index in pass {
-                let parent = self.pic_info[pic_index.0].parent;
+                let parent = self.pic_info[pic_index.0 as usize].parent;
 
-                let surface_index = self.pic_info[pic_index.0]
+                let surface_index = self.pic_info[pic_index.0 as usize]
                     .surface_index
                     .expect("bug: no surface assigned during propagate_bounding_rects");
 
                 let parent_surface_index = parent.map(|parent| {
                     // Can unwrap here as by the time we have a parent that parent's
                     // surface must have been assigned.
-                    self.pic_info[parent.0].surface_index.unwrap()
+                    self.pic_info[parent.0 as usize].surface_index.unwrap()
                 });
 
-                pictures[pic_index.0].propagate_bounding_rect(
+                pictures[pic_index.0 as usize].propagate_bounding_rect(
                     surface_index,
                     parent_surface_index,
                     surfaces,
@@ -169,8 +183,8 @@ fn assign_update_pass(
     max_pass_index: &mut usize,
     frame_context: &FrameBuildingContext
 ) {
-    let pic = &mut pictures[pic_index.0];
-    let info = &mut pic_info[pic_index.0];
+    let pic = &mut pictures[pic_index.0 as usize];
+    let info = &mut pic_info[pic_index.0 as usize];
 
     info.parent = parent_pic_index;
 

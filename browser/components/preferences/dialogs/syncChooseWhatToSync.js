@@ -23,10 +23,25 @@ Preferences.addAll([
   { id: "services.sync.engine.creditcards", type: "bool" },
 ]);
 
+if (Services.prefs.getBoolPref("services.sync.perDeviceEngineChoices", false)) {
+  document.l10n.setAttributes(
+    document.documentElement,
+    "sync-choose-what-to-sync-dialog5"
+  );
+  let dialog = document.getElementById("syncChooseOptions");
+  document.l10n.setAttributes(dialog, "sync-choose-what-to-sync-dialog5");
+}
+
 let gSyncChooseWhatToSync = {
   init() {
+    this.perDeviceSyncEnabled = Services.prefs.getBoolPref(
+      "services.sync.perDeviceEngineChoices",
+      false
+    );
+
     this._setupEventListeners();
     this._adjustForPrefs();
+
     let options = window.arguments[0];
     if (options.disconnectFun) {
       // Offer 'Disconnect' functionality if it was provided
@@ -64,6 +79,16 @@ let gSyncChooseWhatToSync = {
         elt.hidden = true;
       }
     }
+
+    if (this.perDeviceSyncEnabled) {
+      Glean.syncSettings.cwtsUpgradeNoticeShown.record({
+        surface: "cwtsDialog",
+      });
+    } else {
+      document
+        .getElementById("syncCwtsMigrationNotificationContainer")
+        .remove();
+    }
   },
   _setupEventListeners() {
     document.addEventListener("dialogaccept", () => {
@@ -73,6 +98,17 @@ let gSyncChooseWhatToSync = {
         console.error("Failed to record save sync settings event", err);
       });
     });
+
+    if (this.perDeviceSyncEnabled) {
+      const learnMoreLink = document.getElementById(
+        "syncCwtsMigrationNotificationLearnMore"
+      );
+      learnMoreLink?.addEventListener("click", () => {
+        Glean.syncSettings.cwtsUpgradeNoticeLinkClicked.record({
+          surface: "cwtsDialog",
+        });
+      });
+    }
   },
   _getSyncEngineEnablementChanges() {
     let engines = [

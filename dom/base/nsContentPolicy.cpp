@@ -8,36 +8,49 @@
 
 #include "nsContentPolicy.h"
 
+#include "mozilla/Components.h"
 #include "mozilla/Logging.h"
+#include "mozilla/Try.h"
+#include "mozilla/dom/ConnectionAllowlistsService.h"
 #include "mozilla/dom/PolicyContainer.h"
 #include "mozilla/dom/nsCSPService.h"
 #include "mozilla/dom/nsMixedContentBlocker.h"
+#include "mozilla/net/DocumentChannel.h"
+#include "mozilla/net/DocumentLoadListener.h"
+#include "nsAsyncRedirectVerifyHelper.h"
 #include "nsCOMArray.h"
 #include "nsContentPolicyUtils.h"
 #include "nsContentUtils.h"
+#include "nsIAsyncVerifyRedirectCallback.h"
 #include "nsIBrowserChild.h"
+#include "nsIChannel.h"
 #include "nsIContent.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsIImageLoadingContent.h"
+#include "nsIParentChannel.h"
 #include "nsISupports.h"
 #include "nsIURI.h"
+#include "nsNetUtil.h"
+#include "nsQueryObject.h"
 #include "nsXPCOM.h"
 
 class nsIDOMWindow;
 
 using mozilla::LogLevel;
 
-NS_IMPL_ISUPPORTS(nsContentPolicy, nsIContentPolicy)
+NS_IMPL_ISUPPORTS(nsContentPolicy, nsIContentPolicy, nsIChannelEventSink)
 
 static mozilla::LazyLogModule gConPolLog("nsContentPolicy");
 
-nsresult NS_NewContentPolicy(nsIContentPolicy** aResult) {
-  *aResult = new nsContentPolicy;
-  NS_ADDREF(*aResult);
-  return NS_OK;
-}
-
 nsContentPolicy::nsContentPolicy() : mPolicies(NS_CONTENTPOLICY_CATEGORY) {}
+
+nsresult nsContentPolicy::Init() {
+  nsresult rv;
+  mCSPService = mozilla::components::CSPService::Service(&rv);
+  MOZ_TRY(rv);
+  mMixedContentBlocker = mozilla::components::MixedContentBlocker::Service(&rv);
+  return rv;
+}
 
 nsContentPolicy::~nsContentPolicy() = default;
 
@@ -80,20 +93,12 @@ inline nsresult nsContentPolicy::CheckPolicy(CPMethod policyMethod,
 #endif
 
   nsCOMPtr<mozilla::dom::Document> doc;
-  nsCOMPtr<nsIContent> node = do_QueryInterface(requestingContext);
-  if (node) {
+  if (nsCOMPtr<nsIContent> node = do_QueryInterface(requestingContext)) {
     doc = node->OwnerDoc();
-  }
-  if (!doc) {
+  } else {
     doc = do_QueryInterface(requestingContext);
   }
 
-  /*
-   * Enumerate mPolicies and ask each of them, taking the logical AND of
-   * their permissions.
-   */
-  nsresult rv;
-  const nsCOMArray<nsIContentPolicy>& entries = mPolicies.GetCachedEntries();
   if (doc) {
     if (nsCOMPtr<nsIContentSecurityPolicy> csp =
             PolicyContainer::GetCSP(doc->GetPolicyContainer())) {
@@ -101,18 +106,30 @@ inline nsresult nsContentPolicy::CheckPolicy(CPMethod policyMethod,
     }
   }
 
-  int32_t count = entries.Count();
-  for (int32_t i = 0; i < count; i++) {
-    /* check the appropriate policy */
-    rv = (entries[i]->*policyMethod)(contentLocation, loadInfo, decision);
+  /*
+   * mPolicies is enumerated in unspecified (hashtable) order and the first
+   * rejection stops the enumeration, which would suppress the reporting side
+   * effects of CSP and the mixed content blocker. Consult those two up front,
+   * in a defined order.
+   */
+  auto rejects = [&](nsIContentPolicy* policy) {
+    // Check the appropriate policy.
+    nsresult rv = (policy->*policyMethod)(contentLocation, loadInfo, decision);
+    return NS_SUCCEEDED(rv) && NS_CP_REJECTED(*decision);
+  };
 
-    if (NS_SUCCEEDED(rv) && NS_CP_REJECTED(*decision)) {
-      /* policy says no, no point continuing to check */
+  if (rejects(mCSPService) || rejects(mMixedContentBlocker)) {
+    return NS_OK;
+  }
+
+  const nsCOMArray<nsIContentPolicy>& entries = mPolicies.GetCachedEntries();
+  for (int32_t i = 0; i < entries.Count(); ++i) {
+    if (rejects(entries[i])) {
       return NS_OK;
     }
   }
 
-  // everyone returned failure, or no policies: sanitize result
+  // Everyone returned failure, or no policies: sanitize result
   *decision = nsIContentPolicy::ACCEPT;
   return NS_OK;
 }
@@ -155,6 +172,78 @@ nsContentPolicy::ShouldProcess(nsIURI* contentLocation, nsILoadInfo* loadInfo,
   nsresult rv = CheckPolicy(&nsIContentPolicy::ShouldProcess, contentLocation,
                             loadInfo, decision);
   LOG_CHECK("ShouldProcess");
+
+  return rv;
+}
+
+/* nsIChannelEventSink implementation */
+NS_IMETHODIMP
+nsContentPolicy::AsyncOnChannelRedirect(
+    nsIChannel* aOldChannel, nsIChannel* aNewChannel, uint32_t aFlags,
+    nsIAsyncVerifyRedirectCallback* aCallback) {
+  mozilla::net::nsAsyncRedirectAutoCallback autoCallback(aCallback);
+
+  if (XRE_IsE10sParentProcess()) {
+    nsCOMPtr<nsIParentChannel> parentChannel;
+    NS_QueryNotificationCallbacks(aOldChannel, parentChannel);
+    RefPtr<mozilla::net::DocumentLoadListener> docListener =
+        do_QueryObject(parentChannel);
+    // Since this is an IPC'd channel we do not have access to the request
+    // context. In turn, we do not have an event target for policy violations.
+    // Enforce the CSP check in the content process where we have that info.
+    // We allow redirect checks to run for document loads via
+    // DocumentLoadListener, since these are fully supported and we don't
+    // expose the redirects to the content process. We can't do this for all
+    // request types yet because we don't serialize nsICSPEventListener.
+    if (parentChannel && !docListener) {
+      return NS_OK;
+    }
+  }
+
+  // Don't do these checks if we're switching from DocumentChannel
+  // to a real channel. In that case, we should already have done
+  // the checks in the parent process. AsyncOnChannelRedirect
+  // isn't called in the content process if we switch process,
+  // so checking here would just hide bugs in the process switch
+  // cases.
+  if (RefPtr<mozilla::net::DocumentChannel> docChannel =
+          do_QueryObject(aOldChannel)) {
+    return NS_OK;
+  }
+
+  nsCOMPtr<nsIURI> newUri;
+  MOZ_TRY(aNewChannel->GetURI(getter_AddRefs(newUri)));
+
+  nsCOMPtr<nsILoadInfo> loadInfo = aOldChannel->LoadInfo();
+
+  /* Since redirecting channels don't call into nsIContentPolicy, we call our
+   * Content Policy implementation directly when redirects occur using the
+   * information set in the LoadInfo when channels are created.
+   *
+   * We check if the CSP permits this host for this type of load, and if the
+   * Connection Allowlists permit the redirect, if not, we cancel the load now.
+   */
+  nsCOMPtr<nsIURI> originalUri;
+  nsresult rv = aOldChannel->GetOriginalURI(getter_AddRefs(originalUri));
+  if (NS_FAILED(rv)) {
+    autoCallback.DontCallback();
+    aOldChannel->Cancel(NS_ERROR_DOM_BAD_URI);
+    return rv;
+  }
+
+  mozilla::Maybe<nsresult> cancelCode;
+  rv = CSPService::ConsultCSPForRedirect(originalUri, newUri, loadInfo, aFlags,
+                                         cancelCode);
+  if (NS_SUCCEEDED(rv)) {
+    rv = mozilla::dom::ConnectionAllowlistsService::ConsultForRedirect(
+        originalUri, newUri, loadInfo, aFlags, cancelCode);
+  }
+  if (cancelCode) {
+    aOldChannel->Cancel(*cancelCode);
+  }
+  if (NS_FAILED(rv)) {
+    autoCallback.DontCallback();
+  }
 
   return rv;
 }

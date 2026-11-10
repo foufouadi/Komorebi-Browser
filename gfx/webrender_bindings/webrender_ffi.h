@@ -30,8 +30,8 @@ void* get_proc_address_from_glcontext(void* glcontext_ptr,
 
 bool gecko_profiler_thread_is_being_profiled();
 
-// IMPORTANT: Keep this synchronized with enumerate_interners in
-// gfx/wr/webrender_api
+// IMPORTANT: Keep this synchronized with enumerate_interning_report_fields in
+// gfx/wr/webrender/src/intern.rs
 #define WEBRENDER_FOR_EACH_INTERNER(macro, comma_like_delim) \
   macro(clip) comma_like_delim macro(prim)                   \
   comma_like_delim macro(normal_border)                      \
@@ -48,7 +48,8 @@ bool gecko_profiler_thread_is_being_profiled();
   comma_like_delim macro(backdrop_capture)                   \
   comma_like_delim macro(backdrop_render)                    \
   comma_like_delim macro(polyon)                             \
-  comma_like_delim macro(box_shadow)
+  comma_like_delim macro(box_shadow)                         \
+  comma_like_delim macro(path)
 
 // Prelude of types necessary before including webrender_ffi_generated.h
 namespace mozilla {

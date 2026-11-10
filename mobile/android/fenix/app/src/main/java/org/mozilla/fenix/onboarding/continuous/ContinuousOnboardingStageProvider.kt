@@ -20,7 +20,7 @@ interface ContinuousOnboardingStageProvider {
 }
 
 private const val ONE_DAY = 1L
-private const val FOUR_DAYS = 4L
+private const val TWO_DAYS = 2L
 
 /**
  * Default implementation of [ContinuousOnboardingStageProvider].
@@ -48,6 +48,7 @@ class ContinuousOnboardingStageProviderDefault(
             return when {
                 shouldShowDay2(today, zoneId) -> ContinuousOnboardingStage.DAY_2
                 shouldShowDay3(today, zoneId) -> ContinuousOnboardingStage.DAY_3
+                shouldShowDay5(today, zoneId) -> ContinuousOnboardingStage.DAY_5
                 shouldShowDay7(today, zoneId) -> ContinuousOnboardingStage.DAY_7
                 else -> ContinuousOnboardingStage.NONE
             }
@@ -70,11 +71,20 @@ class ContinuousOnboardingStageProviderDefault(
         return result
     }
 
+    private fun Settings.shouldShowDay5(today: LocalDate, zoneId: ZoneId): Boolean {
+        val result =
+            fifthDayOnboardingCompletedTimestamp == -1L &&
+                thirdDayOnboardingCompletedTimestamp != -1L &&
+                thirdDayOnboardingCompletedTimestamp.daysElapsedTo(today, zoneId) >= TWO_DAYS
+        logger.info("shouldShowDay5: $result")
+        return result
+    }
+
     private fun Settings.shouldShowDay7(today: LocalDate, zoneId: ZoneId): Boolean {
         val result =
             seventhDayOnboardingCompletedTimestamp == -1L &&
-                thirdDayOnboardingCompletedTimestamp != -1L &&
-                thirdDayOnboardingCompletedTimestamp.daysElapsedTo(today, zoneId) >= FOUR_DAYS
+                fifthDayOnboardingCompletedTimestamp != -1L &&
+                fifthDayOnboardingCompletedTimestamp.daysElapsedTo(today, zoneId) >= TWO_DAYS
         logger.info("shouldShowDay7: $result")
         return result
     }

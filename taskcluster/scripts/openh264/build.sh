@@ -42,13 +42,16 @@ case "$TARGET" in
         export PATH="$MOZ_FETCHES_DIR/clang/bin:$MOZ_FETCHES_DIR/binutils/bin:$PATH"
         CC=clang; CXX=clang++
         ;;
+    # The mac targets deliberately don't use macos-setup.sh: new builds of the plugin are also
+    # shipped to older supported ESR releases with lower macOS minimums than the other toolchains
+    # target.
     x86_64-apple-darwin)
         PLATFORM=macosx64
         MAKE_OS=darwin
         MAKE_ARCH=x86_64
         MACOS_SDK=$(ls -d "$MOZ_FETCHES_DIR"/MacOSX*.sdk)
         CROSS_FLAGS="-target x86_64-apple-darwin -isysroot $MACOS_SDK -mmacosx-version-min=10.12"
-        export PATH="$MOZ_FETCHES_DIR/clang/bin:$MOZ_FETCHES_DIR/cctools/bin:$MOZ_FETCHES_DIR/nasm:$PATH"
+        export PATH="$MOZ_FETCHES_DIR/clang/bin:$MOZ_FETCHES_DIR/nasm:$PATH"
         CC=clang; CXX=clang++
         ;;
     aarch64-apple-darwin)
@@ -57,7 +60,7 @@ case "$TARGET" in
         MAKE_ARCH=arm64
         MACOS_SDK=$(ls -d "$MOZ_FETCHES_DIR"/MacOSX*.sdk)
         CROSS_FLAGS="-target aarch64-apple-darwin -mcpu=apple-a12 -isysroot $MACOS_SDK -mmacosx-version-min=11.0"
-        export PATH="$MOZ_FETCHES_DIR/clang/bin:$MOZ_FETCHES_DIR/cctools/bin:$PATH"
+        export PATH="$MOZ_FETCHES_DIR/clang/bin:$PATH"
         CC=clang; CXX=clang++
         ;;
     i686-pc-windows-msvc)
@@ -96,7 +99,12 @@ case "$TARGET" in
         OVERLAY="-Xclang -ivfsoverlay -Xclang $MOZ_FETCHES_DIR/vs/overlay.yaml"
         export CFLAGS="$CROSS_FLAGS $OVERLAY"
         CXX_LINK_O="$CROSS_FLAGS -nologo -fuse-ld=lld -Fe\$@"
+        MODULE_LDFLAGS="-PDBALTPATH:%_PDB% -Brepro"
         . "$GECKO_PATH/taskcluster/scripts/misc/vs-setup.sh"
+        ;;
+    *-apple-darwin)
+        export CFLAGS="$CROSS_FLAGS"
+        export LDFLAGS="$CROSS_FLAGS -fuse-ld=lld"
         ;;
     *)
         export CFLAGS="$CROSS_FLAGS"
@@ -114,6 +122,9 @@ MAKE_PARAMS=(
 if [ -n "${CXX_LINK_O:-}" ]; then
     MAKE_PARAMS+=("CXX_LINK_O=$CXX_LINK_O")
 fi
+if [ -n "${MODULE_LDFLAGS:-}" ]; then
+    MAKE_PARAMS+=("MODULE_LDFLAGS=$MODULE_LDFLAGS")
+fi
 
 make -C "$OPENH264_SRC" plugin "${MAKE_PARAMS[@]}"
 
@@ -122,9 +133,11 @@ mapfile -t PLUGIN_FILES < <(ls libgmpopenh264.so gmpopenh264.dll libgmpopenh264.
 : "${PLUGIN_FILES[0]:?No plugin files found in build output}"
 
 ARTIFACT_ZIP="$PRIVATE_DIR/openh264-v$OPENH264_VERSION-$PLATFORM.zip"
-zip "$ARTIFACT_ZIP" "${PLUGIN_FILES[@]}"
+PYTHONPATH="$GECKO_PATH/python/mozbuild:$GECKO_PATH/third_party/python/packaging" \
+    python3 -m mozbuild.action.zip \
+    -C "$OPENH264_SRC" "$ARTIFACT_ZIP" "${PLUGIN_FILES[@]}"
 
-SYMBOL_ZIP="$PUBLIC_DIR/openh264-v$OPENH264_VERSION-$PLATFORM.symbols.zip"
+SYMBOL_ARCHIVE="$PUBLIC_DIR/openh264-v$OPENH264_VERSION-$PLATFORM.symbols.tar.zst"
 DUMP_SYMS="$MOZ_FETCHES_DIR/dump_syms/dump_syms"
 for f in "${PLUGIN_FILES[@]}"; do
     case "$f" in
@@ -134,7 +147,7 @@ for f in "${PLUGIN_FILES[@]}"; do
 done
 : "${LIBRARY_FILE:?No library file found in build output}"
 
-python3 "$GECKO_PATH/testing/mozharness/external_tools/packagesymbols.py" \
-    --symbol-zip "$SYMBOL_ZIP" \
+python3 "$GECKO_PATH/python/mozbuild/mozbuild/action/packagesymbols.py" \
+    --symbol-archive "$SYMBOL_ARCHIVE" \
     "$DUMP_SYMS" \
     "$LIBRARY_FILE"

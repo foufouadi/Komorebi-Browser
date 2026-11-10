@@ -55,10 +55,11 @@ void FileSystemBackgroundRequestHandler::Shutdown() {
 
     mCreatingFileSystemManagerChild = false;
 
-    // We must either resolve/reject the promise or steal the internal promise
-    // before the holder is destroyed. The former isn't possible during
-    // shutdown.
-    mCreateFileSystemManagerChildPromiseHolder.Steal().leak();
+    // All downstream Then handlers should have been disconnected by
+    // FileSystemManager::Shutdown so we expect no dispatches from this
+    // rejection.
+    mCreateFileSystemManagerChildPromiseHolder.RejectIfExists(NS_ERROR_ABORT,
+                                                              __func__);
   }
 }
 
@@ -79,7 +80,7 @@ FileSystemBackgroundRequestHandler::CreateFileSystemManagerChild(
 
   // Throw if this process wouldn't be allowed to access storage.
   EnumSet<ValidatePrincipalOptions> options;
-  if (CurrentRemoteType() == INFERENCE_REMOTE_TYPE) {
+  if (CurrentRemoteType().IsInference()) {
     options += ValidatePrincipalOptions::AllowSystemIfLoaded;
   }
   if (!BackgroundChild::ValidatePrincipalInfo(aPrincipalInfo, options)) {

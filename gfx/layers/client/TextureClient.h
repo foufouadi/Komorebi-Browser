@@ -15,7 +15,8 @@
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"  // for override
 #include "mozilla/Mutex.h"
-#include "mozilla/RefPtr.h"               // for RefPtr, RefCounted
+#include "mozilla/RefPtr.h"  // for RefPtr, RefCounted
+#include "mozilla/UniquePtr.h"
 #include "mozilla/UniquePtrExtensions.h"  // for UniqueFileHandle
 #include "mozilla/dom/ipc/IdType.h"
 #include "mozilla/gfx/2D.h"  // for DrawTarget
@@ -56,6 +57,7 @@ class Image;
 class PTextureChild;
 class TextureChild;
 class TextureData;
+class ShmemHolder;
 class GPUVideoTextureData;
 class TextureClient;
 class ITextureClientRecycleAllocator;
@@ -276,7 +278,9 @@ class TextureData {
   virtual void Forget(LayersIPCChannel* aAllocator) {}
 
   virtual bool Serialize(SurfaceDescriptor& aDescriptor) = 0;
-  virtual void GetSubDescriptor(RemoteDecoderVideoSubDescriptor* aOutDesc) {}
+  virtual RemoteDecoderVideoType GetRemoteDecoderVideoType() {
+    return RemoteDecoderVideoType::TypeNone;
+  }
 
   virtual void OnForwardedToHost() {}
 
@@ -467,6 +471,9 @@ class TextureClient : public AtomicRefCountedWithFinalize<TextureClient> {
 
   already_AddRefed<gfx::SourceSurface> BorrowSnapshot();
 
+  // Snapshot BufferTextureData.
+  already_AddRefed<gfx::SourceSurface> GetBufferSnapshot();
+
   void ReturnSnapshot(already_AddRefed<gfx::SourceSurface> aSnapshot);
 
   /**
@@ -475,6 +482,11 @@ class TextureClient : public AtomicRefCountedWithFinalize<TextureClient> {
    */
   bool BorrowMappedData(MappedTextureData&);
   bool BorrowMappedYCbCrData(MappedYCbCrTextureData&);
+
+  // Also retain the shmem mapping when keeping plane pointers beyond Unlock().
+  // aShmemHolder is null for textures which do not use shmem.
+  bool BorrowMappedYCbCrData(MappedYCbCrTextureData& aMap,
+                             RefPtr<ShmemHolder>& aShmemHolder);
 
   /**
    * This function can be used to update the contents of the TextureClient
@@ -616,8 +628,15 @@ class TextureClient : public AtomicRefCountedWithFinalize<TextureClient> {
 
   /// If you add new code that uses this method, you are probably doing
   /// something wrong.
-  TextureData* GetInternalData() { return mData; }
-  const TextureData* GetInternalData() const { return mData; }
+  TextureData* GetInternalData() { return mData.get(); }
+  const TextureData* GetInternalData() const { return mData.get(); }
+
+  /**
+   * Serializes the underlying TextureData into aDescriptor. Returns false if
+   * the TextureData has already been destroyed. Safe to call from any thread
+   * concurrently with Destroy().
+   */
+  bool ToSurfaceDescriptor(SurfaceDescriptor& aDescriptor);
 
   uint64_t GetSerial() const { return mSerial; }
   void GetSurfaceDescriptorRemoteDecoder(
@@ -717,16 +736,6 @@ class TextureClient : public AtomicRefCountedWithFinalize<TextureClient> {
   friend class AtomicRefCountedWithFinalize<TextureClient>;
 
  protected:
-  /**
-   * Should only be called *once* per texture, in TextureClient::InitIPDLActor.
-   * Some texture implementations rely on the fact that the descriptor will be
-   * deserialized.
-   * Calling ToSurfaceDescriptor again after it has already returned true,
-   * or never constructing a TextureHost with aDescriptor may result in a memory
-   * leak (see TextureClientD3D9 for example).
-   */
-  bool ToSurfaceDescriptor(SurfaceDescriptor& aDescriptor);
-
   void LockActor() const;
   void UnlockActor() const;
 
@@ -738,7 +747,7 @@ class TextureClient : public AtomicRefCountedWithFinalize<TextureClient> {
   RefPtr<ITextureClientRecycleAllocator> mRecycleAllocator;
   RefPtr<TextureReadLock> mReadLock MOZ_GUARDED_BY(mMutex);
 
-  TextureData* mData;
+  UniquePtr<TextureData> mData;
   RefPtr<gfx::DrawTarget> mBorrowedDrawTarget;
   bool mBorrowedSnapshot = false;
 

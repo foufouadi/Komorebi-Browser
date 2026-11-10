@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
-// eslint-disable-next-line import/no-unresolved
+// eslint-disable-next-line import-x/no-unresolved
 import { testRule } from "stylelint-test-rule-node";
 import stylelint from "stylelint";
 import useDesignTokens from "../rules/use-design-tokens.mjs";
@@ -81,14 +81,6 @@ testRule({
       code: ".a { width: calc(var(--size-item-small) * 2); }",
       description:
         "Using the small item size token in a `calc()` declaration with the width property is valid.",
-    },
-    {
-      code: `
-        :root { --custom-size: calc(var(--dimension-2) * -1); }
-        .a { inset-inline-start: var(--custom-size); }
-      `,
-      description:
-        "Using dimension tokens in a `calc()` declaration in a local custom property is valid.",
     },
     {
       code: ".a { width: calc(2 * var(--size-item-small)); }",
@@ -184,22 +176,80 @@ testRule({
       code: ".a { inset-inline-start: 0.5em; }",
       description: "Using em unit in inset-inline-start property is valid.",
     },
-    {
-      code: `
-        :root { --custom-size: var(--dimension-16); }
-        .a { inset-inline-start: var(--custom-size); }
-      `,
-      description:
-        "Using a local variable that resolves to a dimension token is valid.",
-    },
   ],
   reject: [
     {
       code: ".a { max-height: 500px; }",
-      unfixable: true,
-      message: messages.rejected("500px", ["size", "icon-size"]),
+      fixed: ".a { max-height: var(--size-layout-xlarge); }",
+      message: messages.rejected(
+        "500px",
+        ["size", "icon-size"],
+        "var(--size-layout-xlarge)"
+      ),
       description:
         "Consider using a size design token instead of using a pixel value. This may be fixable by running the same command again with --fix.",
+    },
+    {
+      code: ".a { max-height: 400px; }",
+      fixed: ".a { max-height: var(--size-layout-large); }",
+      message: messages.rejected(
+        "400px",
+        ["size", "icon-size"],
+        "var(--size-layout-large)"
+      ),
+      description:
+        "Consider using a size design token instead of using a pixel value. This may be fixable by running the same command again with --fix.",
+    },
+    {
+      code: ".a { max-height: 100px; }",
+      fixed: ".a { max-height: var(--size-layout-xsmall); }",
+      message: messages.rejected(
+        "100px",
+        ["size", "icon-size"],
+        "var(--size-layout-xsmall)"
+      ),
+      description:
+        "Consider using a size design token instead of using a pixel value. This may be fixable by running the same command again with --fix.",
+    },
+    {
+      code: ".a { width: 56px; }",
+      fixed: ".a { width: var(--size-image-medium); }",
+      message: messages.rejected(
+        "56px",
+        ["size", "icon-size"],
+        "var(--size-image-medium)"
+      ),
+      description:
+        "Consider using a size design token instead of using a pixel value. This may be fixable by running the same command again with --fix.",
+    },
+    {
+      code: ".a { width: 96px; }",
+      fixed: ".a { width: var(--size-image-xxlarge); }",
+      message: messages.rejected(
+        "96px",
+        ["size", "icon-size"],
+        "var(--size-image-xxlarge)"
+      ),
+      description:
+        "Consider using a size design token instead of using a pixel value. This may be fixable by running the same command again with --fix.",
+    },
+    {
+      code: ".a { width: 40px; }",
+      fixed: ".a { width: var(--size-image-xsmall); }",
+      message: messages.rejected(
+        "40px",
+        ["size", "icon-size"],
+        "var(--size-image-xsmall)"
+      ),
+      description:
+        "A pixel value that a component token shares with the size scale is fixed to the scale token.",
+    },
+    {
+      code: ".a { width: 2px; }",
+      unfixable: true,
+      message: messages.rejected("2px", ["size", "icon-size"]),
+      description:
+        "A pixel value that only a component token has is not fixed to that token.",
     },
     {
       code: ".a { height: 0.75rem; }",
@@ -243,12 +293,6 @@ testRule({
       ),
       description:
         "Consider using a size design token instead of using a pixel value. This may be fixable by running the same command again with --fix.",
-    },
-    {
-      code: ".a { width: var(--dimension-16); }",
-      unfixable: true,
-      message: messages.rejected("var(--dimension-16)", ["size", "icon-size"]),
-      description: "Dimension tokens should not be used directly.",
     },
     {
       code: ".a { inset: 1rem; }",

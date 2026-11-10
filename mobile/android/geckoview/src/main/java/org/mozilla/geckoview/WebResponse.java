@@ -71,7 +71,7 @@ public class WebResponse extends WebMessage {
     this.isSecure = builder.mIsSecure;
     this.certificate = builder.mCertificate;
 
-    this.setReadTimeoutMillis(DEFAULT_READ_TIMEOUT_MS);
+    setReadTimeoutMillis(this.body, DEFAULT_READ_TIMEOUT_MS);
   }
 
   /**
@@ -83,8 +83,13 @@ public class WebResponse extends WebMessage {
    * @param millis The duration in milliseconds for the timeout.
    */
   public void setReadTimeoutMillis(final long millis) {
-    if (this.body != null && this.body instanceof GeckoInputStream) {
-      ((GeckoInputStream) this.body).setReadTimeoutMillis(millis);
+    setReadTimeoutMillis(this.body, millis);
+  }
+
+  @WrapForJNI(skip = true)
+  private static void setReadTimeoutMillis(final InputStream body, final long millis) {
+    if (body instanceof GeckoInputStream) {
+      ((GeckoInputStream) body).setReadTimeoutMillis(millis);
     }
   }
 
@@ -166,6 +171,8 @@ public class WebResponse extends WebMessage {
     }
 
     /**
+     * Set whether or not this response is secure.
+     *
      * @param isSecure Whether or not this response is secure.
      * @return This Builder instance.
      */
@@ -175,6 +182,8 @@ public class WebResponse extends WebMessage {
     }
 
     /**
+     * Set the server certificate used with this response.
+     *
      * @param certificate The certificate used.
      * @return This Builder instance.
      */
@@ -220,9 +229,7 @@ public class WebResponse extends WebMessage {
       return this;
     }
 
-    /**
-     * @return A {@link WebResponse} constructed with the values from this Builder instance.
-     */
+    /** {@return a {@link WebResponse} constructed with the values from this Builder instance} */
     public @NonNull WebResponse build() {
       return new WebResponse(this);
     }

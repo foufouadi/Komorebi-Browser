@@ -22,23 +22,28 @@ const lazy = XPCOMUtils.declareLazy({
 });
 
 const WHITESPACE_REGEX = /\s+/g;
+const HEADING_SELECTOR = "h1, h2, h3, h4, h5, h6";
+const LINK_TARGET_LENGTH = 40;
 const MARKDOWN_TEXT_ESCAPE_REGEX = /[\[\]()]/g;
 const OPEN_PAREN_REGEX = /\(/g;
 const CLOSE_PAREN_REGEX = /\)/g;
 
 const DEFAULT_STRATEGY = {
+  name: null,
   filterSelector: null,
-  formatBlockAnchorsAsMarkdown: false,
+  formatBlockAnchorsAsMarkdown: true,
   formatBlockAnchorSelector: null,
 };
 
 const GOOGLE_SEARCH_STRATEGY = {
+  name: "google-search",
   filterSelector: "cite",
   formatBlockAnchorsAsMarkdown: true,
   formatBlockAnchorSelector: "cite",
 };
 
 const YOUTUBE_STRATEGY = {
+  name: "youtube",
   filterSelector: [
     "transcript-segment-view-model",
     "ytd-transcript-segment-renderer",
@@ -67,7 +72,8 @@ class ExtractionContext {
 
   /**
    * Set of anchors that have already had their content formatted as a markdown link.
-   * Used to prevent duplicate markdown links for multiple blocks inside the same anchor.
+   * Used to prevent duplicate markdown links for multiple blocks inside the same anchor,
+   * and for an anchor that was already formatted inline.
    *
    * @type {Set<HTMLAnchorElement>}
    */
@@ -86,6 +92,14 @@ class ExtractionContext {
    * @type {string}
    */
   #textContent = "";
+
+  /**
+   * Added to the length of #textContent so that each markdown link target
+   * counts as LINK_TARGET_LENGTH characters.
+   *
+   * @type {number}
+   */
+  #linkTargetAdjustment = 0;
 
   /**
    * @type {Set<string>}
@@ -146,6 +160,13 @@ class ExtractionContext {
     if (options.sourceUrl) {
       this.#strategy = getStrategyForUrl(URL.parse(options.sourceUrl));
     }
+  }
+
+  /**
+   * @returns {string | null}
+   */
+  get siteStrategy() {
+    return this.#strategy.name;
   }
 
   /**
@@ -227,6 +248,23 @@ class ExtractionContext {
       return /** @type {HTMLAnchorElement} */ (ancestor);
     }
     return null;
+  }
+
+  /**
+   * Whether `element`, a block inside `ancestorAnchor`, carries the anchor's
+   * link: its heading when the heading can be the label, otherwise the first
+   * block with no link of its own.
+   *
+   * @param {Element} element - A block inside `ancestorAnchor`.
+   * @param {HTMLAnchorElement} ancestorAnchor - The anchor around the block.
+   * @returns {boolean}
+   */
+  #isAnchorLabelBlock(element, ancestorAnchor) {
+    const heading = ancestorAnchor.querySelector(HEADING_SELECTOR);
+    if (heading && isLabelHeading(heading, ancestorAnchor)) {
+      return element.contains(heading) || heading.contains(element);
+    }
+    return !element.querySelector("a[href]");
   }
 
   /**
@@ -347,10 +385,9 @@ class ExtractionContext {
   shouldStopExtraction() {
     const { sufficientLength } = this.#options;
 
-    if (
-      sufficientLength !== undefined &&
-      this.#textContent.length >= sufficientLength
-    ) {
+    const length = this.#textContent.length + this.#linkTargetAdjustment;
+
+    if (sufficientLength !== undefined && length >= sufficientLength) {
       return true;
     }
 
@@ -439,15 +476,20 @@ class ExtractionContext {
 
       // Wrap as markdown link if block is inside an ancestor anchor.
       // Only format once per anchor to avoid duplicate links
-      if (this.#strategy.formatBlockAnchorsAsMarkdown && innerText) {
+      if (
+        !this.#options.useSimpleText &&
+        this.#strategy.formatBlockAnchorsAsMarkdown &&
+        innerText
+      ) {
         const ancestorAnchor = this.#getAncestorAnchor(element);
         const selector = this.#strategy.formatBlockAnchorSelector;
         if (
           ancestorAnchor?.href &&
           !this.#linkedAnchors.has(ancestorAnchor) &&
-          (!selector || ancestorAnchor.querySelector(selector))
+          (!selector || ancestorAnchor.querySelector(selector)) &&
+          this.#isAnchorLabelBlock(element, ancestorAnchor)
         ) {
-          innerText = escapeMarkdownLink(innerText, ancestorAnchor.href);
+          innerText = this.#markdownLink(innerText, ancestorAnchor.href);
           this.#linkedAnchors.add(ancestorAnchor);
         }
       }
@@ -587,11 +629,28 @@ class ExtractionContext {
     // Use anchor.href which provides the resolved (absolute) URL.
     // Empty href resolves to the current document URL, which is valid.
     const href = anchor.href;
-    if (!href) {
+    if (this.#options.useSimpleText || !href) {
       return linkText;
     }
 
-    return escapeMarkdownLink(linkText, href);
+    // An anchor formatted inline must not be wrapped again as a block anchor.
+    this.#linkedAnchors.add(anchor);
+    return this.#markdownLink(linkText, href);
+  }
+
+  /**
+   * Format a markdown link and record its target for shouldStopExtraction.
+   *
+   * @param {string} text
+   * @param {string} url
+   * @returns {string}
+   */
+  #markdownLink(text, url) {
+    const link = escapeMarkdownLink(text, url);
+    // The text's brackets are escaped, so the first "](" ends the text.
+    const targetLength = link.length - link.indexOf("](") - 1;
+    this.#linkTargetAdjustment += LINK_TARGET_LENGTH - targetLength;
+    return link;
   }
 
   /**
@@ -687,10 +746,15 @@ export function extractTextFromDOM(document, rootNode, options) {
 
   subdivideAndExtractText(rootNode, context);
 
+  const text = options.useSimpleText
+    ? collapseWhitespace(context.textContent).replaceAll("\n\n", "\n").trim()
+    : context.textContent.trim();
+
   return {
-    text: context.textContent.trim(),
+    text,
     links: context.links,
     canvases: context.canvases,
+    siteStrategy: context.siteStrategy,
   };
 }
 
@@ -910,6 +974,27 @@ function nodeNeedsSubdividing(node) {
  * @param {Node} node
  * @returns {boolean}
  */
+/**
+ * Whether a heading inside a block anchor can label it: it has text, has no
+ * link of its own, and is not hidden, since hidden blocks are not extracted.
+ *
+ * @param {Element} heading
+ * @param {HTMLAnchorElement} ancestorAnchor
+ * @returns {boolean}
+ */
+function isLabelHeading(heading, ancestorAnchor) {
+  if (!heading.textContent.trim() || heading.querySelector("a[href]")) {
+    return false;
+  }
+  for (let node = heading; node && node !== ancestorAnchor; ) {
+    if (isNodeHidden(node)) {
+      return false;
+    }
+    node = node.parentElement;
+  }
+  return true;
+}
+
 function isNodeHidden(node) {
   if (!node.documentGlobal) {
     // This node is not actually connected to a live browser context, so we can't

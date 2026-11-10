@@ -5,12 +5,49 @@
 #ifndef LlamaRuntimeLinker_h_
 #define LlamaRuntimeLinker_h_
 
+#include "mozilla/Atomics.h"
 #include "llama/llama.h"
 #include "ggml.h"
+#include "ggml-backend.h"
+#ifdef MOZ_WEBSPEECH
+#  include "parakeet_capi.h"
+#endif
 
 struct PRLibrary;
 
 namespace mozilla::llama {
+
+#ifdef XP_MACOSX
+#  define MOZINFERENCE_METAL_FUNCTION_LIST(X) \
+    X(void, ggml_backend_metal_disable, (void))
+#else
+#  define MOZINFERENCE_METAL_FUNCTION_LIST(X)
+#endif
+
+#ifdef MOZ_WEBSPEECH
+// mudler/parakeet.cpp cache-aware streaming C-API
+#  define MOZINFERENCE_PARKEET_FUNCTION_LIST(X)                             \
+    X(parakeet_ctx*, parakeet_capi_load_fd, (int fd))                       \
+    X(void, parakeet_capi_free, (parakeet_ctx * ctx))                       \
+    X(size_t, parakeet_capi_weights_bytes, (const parakeet_ctx* ctx))       \
+    X(parakeet_stream*, parakeet_capi_stream_begin_lang,                    \
+      (parakeet_ctx * ctx, const char* target_lang))                        \
+    X(char*, parakeet_capi_stream_feed,                                     \
+      (parakeet_stream * s, const float* pcm, int n_samples, int* eou_out)) \
+    X(char*, parakeet_capi_stream_finalize, (parakeet_stream * s))          \
+    X(int, parakeet_capi_stream_chunk_samples, (parakeet_stream * s))       \
+    X(int, parakeet_capi_stream_has_eou, (parakeet_stream * s))             \
+    X(double, parakeet_capi_stream_blank_seconds, (parakeet_stream * s))    \
+    X(char*, parakeet_capi_stream_end_utterance, (parakeet_stream * s))     \
+    X(int, parakeet_capi_stream_drain_words,                                \
+      (parakeet_stream * s, parakeet_stream_word * *out_words))             \
+    X(void, parakeet_capi_free_words,                                       \
+      (parakeet_stream_word * words, int count))                            \
+    X(void, parakeet_capi_stream_free, (parakeet_stream * s))               \
+    X(void, parakeet_capi_free_string, (char* s))
+#else
+#  define MOZINFERENCE_PARKEET_FUNCTION_LIST(X)
+#endif
 
 // Format: X(return_type, name, params)
 #define MOZINFERENCE_FUNCTION_LIST(X)                                       \
@@ -82,7 +119,18 @@ namespace mozilla::llama {
      const struct ggml_threadpool_params* p1))                              \
   X(ggml_threadpool_t, ggml_threadpool_new,                                 \
     (struct ggml_threadpool_params * params))                               \
-  X(void, ggml_threadpool_free, (ggml_threadpool_t threadpool))
+  X(void, ggml_threadpool_free, (ggml_threadpool_t threadpool))             \
+  X(enum ggml_backend_dev_type, ggml_backend_dev_type,                      \
+    (ggml_backend_dev_t device))                                            \
+  X(size_t, ggml_backend_dev_count, (void))                                 \
+  X(ggml_backend_dev_t, ggml_backend_dev_get, (size_t index))               \
+  X(void, ggml_backend_dev_get_props,                                       \
+    (ggml_backend_dev_t device, struct ggml_backend_dev_props * props))     \
+  X(ggml_backend_t, ggml_backend_dev_init,                                  \
+    (ggml_backend_dev_t device, const char* params))                        \
+  X(void, ggml_backend_free, (ggml_backend_t backend))                      \
+  MOZINFERENCE_PARKEET_FUNCTION_LIST(X)                                     \
+  MOZINFERENCE_METAL_FUNCTION_LIST(X)
 
 struct LlamaLibWrapper {
   LlamaLibWrapper() = default;
@@ -113,7 +161,8 @@ class LlamaRuntimeLinker {
     LinkStatus_SUCCEEDED,
   };
 
-  // Initialize the dynamic linker, returns true on success
+  // Initialize the dynamic linker, returns true on success. Thread-safe:
+  // concurrent callers wait for the one loading the library.
   static bool Init();
 
   // Get the llama library wrapper
@@ -129,7 +178,7 @@ class LlamaRuntimeLinker {
 
  private:
   static LlamaLibWrapper sLlamaLib;
-  static LinkStatus sLinkStatus;
+  static Atomic<LinkStatus> sLinkStatus;
 };
 
 }  // namespace mozilla::llama

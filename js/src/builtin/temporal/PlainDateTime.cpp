@@ -32,6 +32,7 @@
 #include "gc/AllocKind.h"
 #include "gc/Barrier.h"
 #include "gc/GCEnum.h"
+#include "jit/InlinableNatives.h"
 #include "js/CallArgs.h"
 #include "js/CallNonGenericMethod.h"
 #include "js/Class.h"
@@ -296,21 +297,16 @@ static bool ToTemporalDateTime(JSContext* cx, Handle<JSObject*> item,
   }
 
   // Step 2.b.
-  if (auto* zonedDateTime = item->maybeUnwrapIf<ZonedDateTimeObject>()) {
-    auto epochNs = zonedDateTime->epochNanoseconds();
-    Rooted<TimeZoneValue> timeZone(cx, zonedDateTime->timeZone());
-    Rooted<CalendarValue> calendar(cx, zonedDateTime->calendar());
+  if (auto* zdtObj = item->maybeUnwrapIf<ZonedDateTimeObject>()) {
+    Rooted<ZonedDateTime> zonedDateTime(cx, ZonedDateTime{zdtObj});
 
-    if (!timeZone.wrap(cx)) {
-      return false;
-    }
-    if (!calendar.wrap(cx)) {
+    if (!zonedDateTime.wrap(cx)) {
       return false;
     }
 
     // Step 2.b.i.
     ISODateTime dateTime;
-    if (!GetISODateTimeFor(cx, timeZone, epochNs, &dateTime)) {
+    if (!GetISODateTimeFor(cx, zonedDateTime, &dateTime)) {
       return false;
     }
 
@@ -321,7 +317,7 @@ static bool ToTemporalDateTime(JSContext* cx, Handle<JSObject*> item,
     }
 
     // Step 2.b.iv.
-    result.set(PlainDateTime{dateTime, calendar});
+    result.set(PlainDateTime{dateTime, zonedDateTime.calendar()});
     return true;
   }
 
@@ -2179,12 +2175,15 @@ static const JSPropertySpec PlainDateTime_prototype_properties[] = {
     JS_PSG("month", PlainDateTime_month, 0),
     JS_PSG("monthCode", PlainDateTime_monthCode, 0),
     JS_PSG("day", PlainDateTime_day, 0),
-    JS_PSG("hour", PlainDateTime_hour, 0),
-    JS_PSG("minute", PlainDateTime_minute, 0),
-    JS_PSG("second", PlainDateTime_second, 0),
-    JS_PSG("millisecond", PlainDateTime_millisecond, 0),
-    JS_PSG("microsecond", PlainDateTime_microsecond, 0),
-    JS_PSG("nanosecond", PlainDateTime_nanosecond, 0),
+    JS_INLINABLE_PSG("hour", PlainDateTime_hour, 0, PlainDateTimeHour),
+    JS_INLINABLE_PSG("minute", PlainDateTime_minute, 0, PlainDateTimeMinute),
+    JS_INLINABLE_PSG("second", PlainDateTime_second, 0, PlainDateTimeSecond),
+    JS_INLINABLE_PSG("millisecond", PlainDateTime_millisecond, 0,
+                     PlainDateTimeMillisecond),
+    JS_INLINABLE_PSG("microsecond", PlainDateTime_microsecond, 0,
+                     PlainDateTimeMicrosecond),
+    JS_INLINABLE_PSG("nanosecond", PlainDateTime_nanosecond, 0,
+                     PlainDateTimeNanosecond),
     JS_PSG("dayOfWeek", PlainDateTime_dayOfWeek, 0),
     JS_PSG("dayOfYear", PlainDateTime_dayOfYear, 0),
     JS_PSG("weekOfYear", PlainDateTime_weekOfYear, 0),

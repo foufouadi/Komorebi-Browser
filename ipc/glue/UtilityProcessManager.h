@@ -8,6 +8,8 @@
 #include "mozilla/ipc/UtilityProcessHost.h"
 #include "mozilla/EnumeratedArray.h"
 #include "mozilla/ProcInfo.h"
+#include "mozilla/WeakPtr.h"
+#include "nsIAsyncShutdown.h"
 #include "nsIObserver.h"
 #include "nsTArray.h"
 
@@ -21,6 +23,12 @@ namespace mozilla {
 
 class MemoryReportingProcess;
 
+#ifndef ANDROID
+namespace hwinference {
+class HWInferenceParent;
+}  // namespace hwinference
+#endif  // !ANDROID
+
 namespace dom {
 class JSOracleParent;
 class WindowsUtilsParent;
@@ -33,12 +41,14 @@ class ProcessProxy;
 namespace ipc {
 
 class UtilityProcessParent;
+class UtilityProcessKeepAlive;
 
 // The UtilityProcessManager is a singleton responsible for creating
 // Utility-bound objects that may live in another process. Currently, it
 // provides access to the Utility process via ContentParent.
 class UtilityProcessManager final : public UtilityProcessHost::Listener {
   friend class UtilityProcessParent;
+  friend class UtilityProcessKeepAlive;
 
  public:
   template <typename T>
@@ -63,8 +73,15 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
 
   static RefPtr<UtilityProcessManager> GetIfExists();
 
-  // Launch a new Utility process asynchronously
+  // Launch the shared Utility process for aSandbox asynchronously.
   RefPtr<SharedLaunchPromise<Ok>> LaunchProcess(SandboxingKind aSandbox);
+
+  // Launch a new independent Utility process for aSandbox. This will always
+  // launch a new process. The process will be shut down when the returned
+  // keep-alive goes away. Returns nullptr if the launch failed outright. Main
+  // thread only.
+  already_AddRefed<UtilityProcessKeepAlive> LaunchIndependentProcess(
+      SandboxingKind aSandbox);
 
   template <typename Actor>
   RefPtr<LaunchPromise<Ok>> StartUtility(RefPtr<Actor> aActor,
@@ -93,43 +110,32 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
   RefPtr<PKCS11ModulePromise> StartPKCS11Module();
 #endif  // NIGHTLY_BUILD && !MOZ_NO_SMART_CARDS
 
+#ifndef ANDROID
+  // Launches an independent HWInference process and binds aActor to it.
+  already_AddRefed<UtilityProcessKeepAlive> LaunchIndependentHWInferenceProcess(
+      RefPtr<hwinference::HWInferenceParent> aActor);
+#endif  // !ANDROID
+
   void OnProcessUnexpectedShutdown(UtilityProcessHost* aHost);
 
   // Returns the platform pid for this utility sandbox process.
   Maybe<base::ProcessId> ProcessPid(SandboxingKind aSandbox);
 
+  RefPtr<UtilityProcessKeepAlive> GetSharedKeepAlive(SandboxingKind aSandbox);
+
   // Create a MemoryReportingProcess object for this utility process
   RefPtr<MemoryReportingProcess> GetProcessMemoryReporter(
       UtilityProcessParent* parent);
-
-  // Returns access to the PUtility protocol if a Utility process for that
-  // sandbox is present.
-  RefPtr<UtilityProcessParent> GetProcessParent(SandboxingKind aSandbox) {
-    RefPtr<ProcessFields> p = GetProcess(aSandbox);
-    if (!p) {
-      return nullptr;
-    }
-    return p->mProcessParent;
-  }
 
   // Get a list of all valid utility process parent references
   nsTArray<RefPtr<UtilityProcessParent>> GetAllProcessesProcessParent() {
     nsTArray<RefPtr<UtilityProcessParent>> rv;
     for (auto& p : mProcesses) {
-      if (p && p->mProcessParent) {
+      if (p->mProcessParent) {
         rv.AppendElement(p->mProcessParent);
       }
     }
     return rv;
-  }
-
-  // Returns the Utility Process for that sandbox
-  UtilityProcessHost* Process(SandboxingKind aSandbox) {
-    RefPtr<ProcessFields> p = GetProcess(aSandbox);
-    if (!p) {
-      return nullptr;
-    }
-    return p->mProcess;
   }
 
   void RegisterActor(const RefPtr<UtilityProcessParent>& aParent,
@@ -138,7 +144,7 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
   Span<const UtilityActorName> GetActors(
       const RefPtr<UtilityProcessParent>& aParent) {
     for (auto& p : mProcesses) {
-      if (p && p->mProcessParent && p->mProcessParent == aParent) {
+      if (p->mProcessParent && p->mProcessParent == aParent) {
         return p->mActors;
       }
     }
@@ -147,44 +153,42 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
 
   Span<const UtilityActorName> GetActors(GeckoChildProcessHost* aHost) {
     for (auto& p : mProcesses) {
-      if (p && p->mProcess == aHost) {
+      if (p->mProcess == aHost) {
         return p->mActors;
       }
     }
     return {};
   }
 
-  Span<const UtilityActorName> GetActors(SandboxingKind aSbKind) {
-    auto proc = GetProcess(aSbKind);
-    if (!proc) {
-      return {};
-    }
-    return proc->mActors;
-  }
-
-  // Shutdown the Utility process for that sandbox.
+  // Shutdown the shared Utility process for that sandbox.
   void CleanShutdown(SandboxingKind aSandbox);
 
   // Shutdown all utility processes
   void CleanShutdownAllProcesses();
 
-  uint16_t AliveProcesses();
+  size_t AliveProcesses();
 
  private:
   ~UtilityProcessManager();
 
-  bool IsProcessLaunching(SandboxingKind aSandbox);
-  bool IsProcessDestroyed(SandboxingKind aSandbox);
+  // Called from our async shutdown blocker. Tears the Utility processes down,
+  // holding the xpcom-will-shutdown phase open until they are all gone.
+  void OnXPCOMWillShutdown();
 
-  // Called from our xpcom-shutdown observer.
+  // Called from our xpcom-shutdown observer. Only does anything if we failed to
+  // register the async shutdown blocker.
   void OnXPCOMShutdown();
   void OnPreferenceChange(const char16_t* aData);
+
+  // Called once a UtilityProcessHost has completed its shutdown sequence.
+  void OnProcessShutdownComplete();
+
+  void RegisterShutdownBlocker();
+  void RemoveShutdownBlocker();
 
   UtilityProcessManager();
 
   void Init();
-
-  void DestroyProcess(SandboxingKind aSandbox);
 
   bool IsShutdown() const;
 
@@ -203,6 +207,33 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
 
   RefPtr<Observer> mObserver;
 
+  // Holds the xpcom-will-shutdown phase open while the Utility processes go
+  // through their graceful shutdown sequence, so that the main thread's IPC
+  // channels are still around when they send us their last messages.
+  class ShutdownBlocker final : public nsIAsyncShutdownBlocker {
+   public:
+    NS_DECL_ISUPPORTS
+    NS_DECL_NSIASYNCSHUTDOWNBLOCKER
+
+    explicit ShutdownBlocker(UtilityProcessManager* aManager)
+        : mManager(aManager) {}
+
+   protected:
+    ~ShutdownBlocker() = default;
+
+    RefPtr<UtilityProcessManager> mManager;
+  };
+
+  RefPtr<ShutdownBlocker> mShutdownBlocker;
+  nsCOMPtr<nsIAsyncShutdownClient> mShutdownBlockerClient;
+
+  // Number of UtilityProcessHosts whose shutdown sequence is still in flight.
+  uint32_t mPendingShutdowns = 0;
+
+  // Whether the xpcom-will-shutdown phase is waiting on our blocker. From then
+  // on it must be removed as soon as mPendingShutdowns drains, or we hang.
+  bool mBlockingShutdownPhase = false;
+
   class ProcessFields final {
    public:
     NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ProcessFields);
@@ -213,11 +244,8 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
     // and configured. Only accessed on the main thread.
     RefPtr<SharedLaunchPromise<Ok>> mLaunchPromise;
 
-    uint32_t mNumProcessAttempts = 0;
-    uint32_t mNumUnexpectedCrashes = 0;
-
     // Fields that are associated with the current Utility process.
-    UtilityProcessHost* mProcess = nullptr;
+    RefPtr<UtilityProcessHost> mProcess = nullptr;
     RefPtr<UtilityProcessParent> mProcessParent = nullptr;
 
     // Collects any pref changes that occur during process launch (after
@@ -233,16 +261,54 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
     ~ProcessFields() = default;
   };
 
-  EnumeratedArray<SandboxingKind, RefPtr<ProcessFields>,
-                  size_t(SandboxingKind::COUNT)>
-      mProcesses;
+  void DestroyProcess(ProcessFields* aProcess);
 
-  RefPtr<ProcessFields> GetProcess(SandboxingKind);
-  bool NoMoreProcesses();
+  nsTArray<RefPtr<ProcessFields>> mProcesses;
+
+  EnumeratedArray<SandboxingKind, RefPtr<UtilityProcessKeepAlive>,
+                  size_t(SandboxingKind::COUNT)>
+      mSharedKeepAlives;
+
+  // Core of both StartUtility() entry points: binds aActor to aProcess once
+  // aLaunchPromise resolves. The launch promise is passed in rather than read
+  // off aProcess because LaunchProcess() can reject without storing one there.
+  template <typename Actor>
+  RefPtr<LaunchPromise<Ok>> StartUtilityOnProcess(
+      RefPtr<Actor> aActor, ProcessFields* aProcess,
+      SharedLaunchPromise<Ok>* aLaunchPromise);
 
 #ifdef XP_WIN
   RefPtr<dom::WindowsUtilsParent> mWindowsUtils;
 #endif  // XP_WIN
+};
+
+// Holds the utility process it was acquired on, and shuts that process down
+// once the last reference on it goes away. Handed out by
+// UtilityProcessManager::LaunchIndependentProcess(). Main thread only.
+class UtilityProcessKeepAlive final : public SupportsWeakPtr {
+ public:
+  NS_INLINE_DECL_REFCOUNTING(UtilityProcessKeepAlive);
+
+  // Resolves once the process this was acquired on has finished launching.
+  RefPtr<UtilityProcessManager::SharedLaunchPromise<Ok>> GetLaunchPromise()
+      const;
+
+  // The process' PUtilityProcess actor: null until it has launched, and again
+  // once it is gone.
+  RefPtr<UtilityProcessParent> GetProcessParent() const;
+
+  // False once the process has been torn down, whether or not that was
+  // expected. This keep-alive is then inert.
+  bool IsAlive() const { return !!mProcess->mProcess; }
+
+ private:
+  friend class UtilityProcessManager;
+
+  explicit UtilityProcessKeepAlive(
+      UtilityProcessManager::ProcessFields* aProcess);
+  ~UtilityProcessKeepAlive();
+
+  const RefPtr<UtilityProcessManager::ProcessFields> mProcess;
 };
 
 }  // namespace ipc

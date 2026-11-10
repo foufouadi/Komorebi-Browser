@@ -13,34 +13,30 @@ import mozilla.components.concept.engine.ipprotection.IPProtectionHandler
 import mozilla.components.concept.engine.ipprotection.ServiceState
 import mozilla.components.lib.state.State
 
-const val BYTES_PER_GB = 1024 * 1024 * 1024f
-
 /**
  * State stored by the feature to drive UI and decisions.
  *
  * @property eligibilityStatus Whether the device is eligible of using the service.
  * @property proxyStatus The proxy state.
  * @property serviceStatus The state of the IPProtection service.
- * @property remainingDataBytes Remaining monthly data allowance in bytes, or -1 if unavailable.
- * @property maxDataBytes Maximum monthly data allowance in bytes, -1 if unavailable, or otherwise 0 if unlimited.
- * @property resetDate ISO 8601 string for when the monthly allowance resets, or null if unavailable.
+ * @property usageQuota The usage quota in the current cycle, or null if unavailable.
  * @property accountState The state of the authenticator being used.
  * @property lastError The last error received from the IPProtection service.
- * @property proxyActiveShown Whether the proxy-active status has been shown to the user.
- * @property activate To turn protection on or off.
+ * @property proxyActivation Tracks recent activation or deactivation state changes. See [ProxyActivation].
+ * @property proxyRequest The proxy request
+ *   [mozilla.components.feature.ipprotection.store.middleware.IPProtectionEngineMiddleware] is running, or null when it
+ *   runs none.
  * @property locationState The location selection state.
  */
 data class IPProtectionState(
     val eligibilityStatus: EligibilityStatus = EligibilityStatus.Unknown,
     val proxyStatus: ProxyStatus = Uninitialized,
     val serviceStatus: ServiceState = ServiceState.Uninitialized,
-    val remainingDataBytes: Long = -1L,
-    val maxDataBytes: Long = -1L,
-    val resetDate: String? = null,
+    val usageQuota: UsageQuota? = null,
     val accountState: AccountState = AccountState(),
     val lastError: String? = null,
-    val proxyActiveShown: Boolean = false,
-    val activate: Boolean? = null,
+    val proxyActivation: ProxyActivation = ProxyActivation.Idle,
+    val proxyRequest: ProxyRequest? = null,
     val locationState: LocationState = LocationState(),
 ) : State
 
@@ -49,26 +45,19 @@ val IPProtectionState.isEligible
     get() = eligibilityStatus == EligibilityStatus.Eligible
 
 /**
- * If we have negative values, then we haven't received new usage data yet.
+ * Whether we are waiting on the VPN to connect, either because it is being turned on or because the country is being
+ * changed.
  *
- * N.B: If we get -1, and we try to render that then the values are obviously incorrect, but we let the consumer handle
- * this for now.
+ * This is true from the moment [mozilla.components.feature.ipprotection.store.middleware.IPProtectionEngineMiddleware]
+ * starts sending the request, which is earlier than [proxyStatus] becoming [Authorized.Activating] - that only happens
+ * once the engine replies. We cannot change where the VPN is connecting during that time, so anything that lets the
+ * user try should be disabled while this is true.
  */
-val IPProtectionState.remainingDataGb: Float
-    get() = remainingDataBytes / BYTES_PER_GB
-
-/**
- * If we have negative values, then we haven't received new usage data yet. A value of zero means that we have unlimited
- * data.
- *
- * N.B: If we get -1, and we try to render that then the values are obviously incorrect, but we let the consumer handle
- * this for now.
- */
-val IPProtectionState.maxDataGb: Float
-    get() = maxDataBytes / BYTES_PER_GB
-
-val IPProtectionState.usedDataGb: Float
-    get() = maxDataGb - remainingDataGb
+val IPProtectionState.isActivationInFlight
+    get() =
+        proxyStatus == Authorized.Activating ||
+            proxyRequest is ProxyRequest.Activate ||
+            proxyRequest is ProxyRequest.SwitchLocation
 
 /**
  * The combined state of an FxA account pertinent to IP Protection.
@@ -82,10 +71,15 @@ data class AccountState(val status: AccountStatus = AccountStatus.Uninitialized)
  *
  * @property selectedLocation The location to use when connecting to VPN.
  * @property locations The list of locations for user to choose from.
+ * @property previousLocation Cached previous selection. Intended to be used as a rollback value in case switching to a
+ *   new locations fails.
+ * @property updateState the state of the location list update.
  */
 data class LocationState(
-    val selectedLocation: Location = Recommended(),
-    val locations: List<Location> = listOf(Recommended()),
+    val selectedLocation: Location = Recommended,
+    val locations: List<Location> = listOf(Recommended),
+    val previousLocation: Location? = null,
+    val updateState: LocationListUpdateState = LocationListUpdateState.NotRequested,
 )
 
 /**
@@ -98,26 +92,65 @@ sealed interface Location {
 }
 
 /** The "recommended" (default) location, letting the proxy pick the server automatically. */
-data class Recommended(override val countryCode: String? = null) : Location
+object Recommended : Location {
+    override val countryCode: String? = null
+}
 
 /**
  * A specific country from the IP protection proxy server list.
  *
  * @property countryCode ISO 3166-1 alpha-2 country code.
  * @property available Whether the country could be selected as the active proxy.
- * @property displayName The localized name for UI. If localization fails, returns raw [countryCode].
  */
 data class Country(
     override val countryCode: String,
     val available: Boolean,
 ) : Location {
-    val displayName: String
-        get() =
-            try {
-                Locale.Builder().setRegion(countryCode).build().getDisplayCountry(Locale.getDefault())
-            } catch (_: IllformedLocaleException) {
-                countryCode
-            }
+
+    /** Returns the country name localized for a [locale]. If localization fails, returns raw [countryCode]. */
+    fun displayName(locale: Locale): String =
+        try {
+            Locale.Builder().setRegion(countryCode).build().getDisplayCountry(locale)
+        } catch (_: IllformedLocaleException) {
+            countryCode
+        }
+}
+
+/** Represents the state of the location list update. */
+sealed class LocationListUpdateState {
+    /** The default, "no request yet", state. */
+    data object NotRequested : LocationListUpdateState()
+
+    /** A pending update request. */
+    data object Requested : LocationListUpdateState()
+
+    /** The location list has been updated. */
+    data object Updated : LocationListUpdateState()
+
+    /** The location list update failed. */
+    data object Failed : LocationListUpdateState()
+}
+
+/** A proxy request run by [mozilla.components.feature.ipprotection.store.middleware.IPProtectionEngineMiddleware]. */
+sealed class ProxyRequest {
+    /**
+     * Turning the proxy on.
+     *
+     * @property countryCode ISO 3166-1 alpha-2 country code for the proxy location, or null to use the recommended
+     *   default.
+     */
+    data class Activate(val countryCode: String?) : ProxyRequest()
+
+    /** Turning the proxy off. */
+    data object Deactivate : ProxyRequest()
+
+    /**
+     * Moving the running proxy to another location.
+     *
+     * @property countryCode ISO 3166-1 alpha-2 country code for the proxy location, or null to use the recommended
+     *   default.
+     */
+    data class SwitchLocation(val countryCode: String?) : ProxyRequest()
 }
 
 /**

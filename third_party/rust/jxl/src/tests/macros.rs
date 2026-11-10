@@ -3,50 +3,84 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-macro_rules! declare_test_file {
-    ($ident:ident, $path:expr) => {
-        declare_test_file!($ident, $path, checkpoints: &[]);
-    };
+macro_rules! declare_test_file_common {
     ($ident:ident, $path:expr, checkpoints: $checkpoints:expr) => {
         paste::paste! {
             #[test]
             fn [<test_decode_test_file_ $ident>]() {
                 let path = std::path::Path::new("resources/test/").join($path);
                 let file = std::fs::read(&path).unwrap();
-                crate::tests::decode::decode(&file).unwrap();
+                crate::tests::decode::decode::<f32>(&file, Default::default()).unwrap();
             }
 
             #[test]
             fn [<test_decode_test_file_chunks_ $ident>]() {
                 let path = std::path::Path::new("resources/test/").join($path);
                 let file = std::fs::read(&path).unwrap();
-                crate::tests::decode::decode_internal(&file, 1, false, false, None, None).unwrap();
+                crate::tests::decode::decode::<f32>(&file, crate::tests::decode::DecodeParams {
+                    chunk_size: 1,
+                    ..Default::default()
+                }).unwrap();
+            }
+
+            #[test]
+            fn [<test_decode_small_chunks_ $ident>]() {
+                let path = std::path::Path::new("resources/test/").join($path);
+                let file = std::fs::read(&path).unwrap();
+                arbtest::arbtest(|u| {
+                    let chunk_size = u.int_in_range(1..=1024)?;
+                    crate::tests::decode::decode::<f32>(
+                        &file,
+                        crate::tests::decode::DecodeParams {
+                            chunk_size,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                    Ok(())
+                });
             }
 
             #[test]
             fn [<test_scan_test_file_ $ident>]() {
                 let path = std::path::Path::new("resources/test/").join($path);
                 let file = std::fs::read(&path).unwrap();
-                crate::tests::decode::scan_frames_with_decoder(&file, usize::MAX);
+                crate::tests::decode::scan_frames(&file, usize::MAX);
             }
 
             #[test]
             fn [<test_scan_test_file_chunks_ $ident>]() {
                 let path = std::path::Path::new("resources/test/").join($path);
                 let file = std::fs::read(&path).unwrap();
-                crate::tests::decode::scan_frames_with_decoder(&file, 1);
+                crate::tests::decode::scan_frames(&file, 1);
             }
 
             #[test]
             fn [<test_compare_pipelines_ $ident>]() {
                 let path = std::path::Path::new("resources/test/").join($path);
                 let file = std::fs::read(&path).unwrap();
-                let simple_frames = crate::tests::decode::decode_internal(&file, usize::MAX, true, false, None, None).unwrap().1;
-                let frames = crate::tests::decode::decode(&file).unwrap().1;
+                let simple_frames = crate::tests::decode::decode(&file, crate::tests::decode::DecodeParams {
+                    use_simple_pipeline: true,
+                    ..Default::default()
+                }).unwrap();
+                let frames = crate::tests::decode::decode(&file, Default::default()).unwrap();
                 assert_eq!(frames.len(), simple_frames.len());
                 for (fc, (f, sf)) in frames.into_iter().zip(simple_frames).enumerate() {
                     crate::tests::decode::compare_frames(&path, fc, &f, &sf);
                 }
+            }
+
+            #[cfg(not(any(target_family = "wasm", target_arch = "wasm32")))]
+            #[test]
+            fn [<test_compare_pipelines_parallel_ $ident>]() {
+                let path = std::path::Path::new("resources/test/").join($path);
+                crate::tests::compare_parallel::run_compare_pipelines_parallel(&path);
+            }
+
+            #[test]
+            fn [<test_compare_modular_buffers_ $ident>]() {
+                let path = std::path::Path::new("resources/test/").join($path);
+                crate::tests::compare_modular::run(&path, $checkpoints);
             }
 
             #[test]
@@ -54,7 +88,69 @@ macro_rules! declare_test_file {
                 let path = std::path::Path::new("resources/test/").join($path);
                 crate::tests::compare_incremental::run(&path, $checkpoints);
             }
+
+            #[test]
+            fn [<test_compare_prefix_ $ident>]() {
+                let path = std::path::Path::new("resources/test/").join($path);
+                crate::tests::compare_prefix::run(&path);
+            }
+
+            #[cfg(not(any(target_family = "wasm", target_arch = "wasm32")))]
+            #[test]
+            fn [<test_compare_parallel_oneshot_ $ident>]() {
+                let path = std::path::Path::new("resources/test/").join($path);
+                crate::tests::compare_parallel::run_oneshot(&path);
+            }
+
+            #[cfg(not(any(target_family = "wasm", target_arch = "wasm32")))]
+            #[test]
+            fn [<test_compare_parallel_progressive_ $ident>]() {
+                let path = std::path::Path::new("resources/test/").join($path);
+                crate::tests::compare_parallel::run_progressive(&path);
+            }
         }
+    };
+}
+
+macro_rules! declare_test_file_shuttle {
+    ($ident:ident, $path:expr) => {
+        paste::paste! {
+            #[cfg(all(feature = "shuttle", not(any(target_family = "wasm", target_arch = "wasm32"))))]
+            #[test]
+            fn [<test_compare_parallel_oneshot_shuttle_ $ident>]() {
+                let path = std::path::Path::new("resources/test/").join($path);
+                crate::tests::compare_parallel::run_shuttle_test(
+                    path,
+                    crate::tests::compare_parallel::run_oneshot,
+                );
+            }
+
+            #[cfg(all(feature = "shuttle", not(any(target_family = "wasm", target_arch = "wasm32"))))]
+            #[test]
+            fn [<test_compare_parallel_progressive_shuttle_ $ident>]() {
+                let path = std::path::Path::new("resources/test/").join($path);
+                crate::tests::compare_parallel::run_shuttle_test(
+                    path,
+                    crate::tests::compare_parallel::run_progressive,
+                );
+            }
+        }
+    };
+}
+
+macro_rules! declare_test_file {
+    ($ident:ident, $path:expr) => {
+        declare_test_file!($ident, $path, checkpoints: &[]);
+    };
+    ($ident:ident, $path:expr, checkpoints: $checkpoints:expr) => {
+        declare_test_file_common!($ident, $path, checkpoints: $checkpoints);
+        declare_test_file_shuttle!($ident, $path);
+    };
+    ($ident:ident, $path:expr, skip_shuttle) => {
+        declare_test_file!($ident, $path, checkpoints: &[], skip_shuttle);
+    };
+    ($ident:ident, $path:expr, checkpoints: $checkpoints:expr, skip_shuttle) => {
+        declare_test_file_common!($ident, $path, checkpoints: $checkpoints);
     };
 }
 
@@ -264,7 +360,11 @@ macro_rules! assert_image_eq {
                 .zip(row_r.iter().copied())
                 .enumerate()
             {
-                if !(left_val == right_val) {
+                // In some cases, we compare partially rendered images.
+                // If that happens, they may still contain uninitialized pixels,
+                // so check for NaNs (without is_nan() as the image is not necessarily
+                // float)
+                if !(left_val == right_val || (left_val != left_val && right_val != right_val)) {
                     mismatch_count += 1;
 
                     if first_mismatch.is_none() {

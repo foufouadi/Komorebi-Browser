@@ -61,6 +61,17 @@ describe("selectPrivacyMessage", () => {
     expect(decision.variant).toBe("empty");
   });
 
+  it("still picks a message when no sites were visited today", () => {
+    // A zero site count is not a zero state, so the scheduler keeps running.
+    const { decision } = selectPrivacyMessage(
+      ctx({ trackersToday: 34, sitesToday: 0 }),
+      state(),
+      NOW,
+      rand()
+    );
+    expect(["blank", "streak", "tip"]).toContain(decision.variant);
+  });
+
   it("shows first-protection once, then records it", () => {
     const first = selectPrivacyMessage(
       ctx(),
@@ -378,13 +389,13 @@ describe("selectPrivacyMessage", () => {
 
     it("forces the empty message by id", () => {
       const { decision } = selectPrivacyMessage(
-        ctx({ forceMessageId: "newtab-privacy-empty" }),
+        ctx({ forceMessageId: "newtab-privacy-empty-state" }),
         state(),
         NOW,
         rand()
       );
       expect(decision.variant).toBe("empty");
-      expect(decision.messageId).toBe("newtab-privacy-empty");
+      expect(decision.messageId).toBe("newtab-privacy-empty-state");
     });
 
     it("does not mutate scheduler state", () => {

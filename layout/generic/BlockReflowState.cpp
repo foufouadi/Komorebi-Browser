@@ -18,6 +18,7 @@
 #include "mozilla/ReflowInput.h"
 #include "mozilla/StaticPrefs_layout.h"
 #include "nsBlockFrame.h"
+#include "nsBlockReflowContext.h"
 #include "nsIFrameInlines.h"
 #include "nsLineLayout.h"
 #include "nsPresContext.h"
@@ -65,6 +66,8 @@ BlockReflowState::BlockReflowState(
   if (aBlockNeedsFloatManager) {
     mFlags.mBlockNeedsFloatManager = true;
   }
+
+  mFlags.mIsCurrentLineAdjacentToBStart = !aFrame->GetPrevInFlow();
 
   // Determine the requested text-box-trim sides for this block by checking
   // the request both from the block's ancestors (passed down via `ReflowInput`)
@@ -181,6 +184,44 @@ void BlockReflowState::UndoAlignContentShift() {
   if (mReflowInput.AvailableBSize() != NS_UNCONSTRAINEDSIZE) {
     mContentArea.BSize(mReflowInput.GetWritingMode()) -= mAlignContentShift;
   }
+}
+
+/* static */
+ReflowInput::InitFlags BlockReflowState::ComputeChildMarginTrim(
+    nsBlockFrame* aBlock, bool aTrimChildBStartMargins,
+    bool aTrimChildBEndMargins, nsLineList::iterator aLine,
+    bool aIsAdjacentToBStart) {
+  ReflowInput::InitFlags flags;
+  if (!aTrimChildBStartMargins && !aTrimChildBEndMargins) {
+    return flags;
+  }
+  MOZ_ASSERT(aLine->IsBlock(), "Only block-level margins can be trimmed");
+
+  bool trimBStart = aTrimChildBStartMargins && aIsAdjacentToBStart;
+  bool trimBEnd = aTrimChildBEndMargins && aBlock->IsLineAdjacentToBEnd(aLine);
+  // An empty block's margins collapses, so trimming either adjoining margin
+  // also trims the other.
+  if ((trimBStart || trimBEnd) && aLine->IsEmpty()) {
+    trimBStart = true;
+    trimBEnd = true;
+  }
+  if (trimBStart) {
+    flags += ReflowInput::InitFlag::TrimBStartMargin;
+  }
+  if (trimBEnd) {
+    flags += ReflowInput::InitFlag::TrimBEndMargin;
+  }
+  return flags;
+}
+
+bool BlockReflowState::ShouldTrimChildBStartMargins() const {
+  return nsBlockReflowContext::StyleTrimsChildBStartMargins(mBlock) ||
+         (mReflowInput.mFlags.mTrimBStartMargin && !mFlags.mIsBStartMarginRoot);
+}
+
+bool BlockReflowState::ShouldTrimChildBEndMargins() const {
+  return nsBlockReflowContext::StyleTrimsChildBEndMargins(mBlock) ||
+         mFlags.mShouldTrimInheritedBEndMargins;
 }
 
 void BlockReflowState::ComputeFloatAvoidingOffsets(
@@ -372,7 +413,7 @@ nsFlowAreaRect BlockReflowState::GetFloatAvailableSpaceWithState(
 #ifdef DEBUG
   if (nsBlockFrame::gNoisyReflow) {
     nsIFrame::IndentBy(stdout, nsBlockFrame::gNoiseIndent);
-    fmt::println("{} band={} hasFloats={}", __func__, ToString(result.mRect),
+    fmt::println("{} band={} hasFloats={}", __func__, result.mRect,
                  YesOrNo(result.HasFloats()));
   }
 #endif
@@ -402,7 +443,7 @@ nsFlowAreaRect BlockReflowState::GetFloatAvailableSpaceForBSize(
 #ifdef DEBUG
   if (nsBlockFrame::gNoisyReflow) {
     nsIFrame::IndentBy(stdout, nsBlockFrame::gNoiseIndent);
-    fmt::println("{} band={} hasFloats={}", __func__, ToString(result.mRect),
+    fmt::println("{} band={} hasFloats={}", __func__, result.mRect,
                  YesOrNo(result.HasFloats()));
   }
 #endif

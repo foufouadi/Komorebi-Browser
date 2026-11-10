@@ -20,6 +20,7 @@
 #include "jit/JitRuntime.h"
 #include "jit/shared/IonAssemblerBuffer.h"  // jit::BufferOffset
 #include "js/ColumnNumber.h"  // JS::WasmFunctionIndex, LimitedColumnNumberOneOrigin, JS::TaggedColumnNumberOneOrigin, JS::TaggedColumnNumberOneOrigin
+#include "util/Denormals.h"
 #include "vm/JitActivation.h"  // js::jit::JitActivation
 #include "vm/JSAtomState.h"
 #include "vm/JSContext.h"
@@ -109,8 +110,6 @@ WasmFrameIter::WasmFrameIter(JitActivation* activation, wasm::Frame* fp)
     const TrapData& trapData = activation->wasmTrapData();
     void* unwoundPC = trapData.unwoundPC;
 
-    code_ = &instance_->code();
-
     const wasm::CodeRange* unwoundCodeRange = nullptr;
     const wasm::Code* unwoundCode = LookupCode(unwoundPC, &unwoundCodeRange);
     MOZ_RELEASE_ASSERT(unwoundCode);
@@ -141,6 +140,7 @@ WasmFrameIter::WasmFrameIter(JitActivation* activation, wasm::Frame* fp)
 
     // For a Function code range the unwound PC is in the trapping function,
     // which runs with instance_, so its code must match.
+    code_ = &instance_->code();
     MOZ_RELEASE_ASSERT(unwoundCode == code_);
     bytecodeOffset_ = trapData.trapSite.bytecodeOffset.offset();
     funcIndex_ =
@@ -151,17 +151,20 @@ WasmFrameIter::WasmFrameIter(JitActivation* activation, wasm::Frame* fp)
     currentFrameStackSwitched_ = dynamicSwitchToMainStack;
 #endif
 
-    // The debugEnabled() relies on valid value of resumePCinCurrentFrame_
-    // to identify DebugFrame. Normally this field is updated at popFrame().
-    // The only case when this can happend is during IndirectCallBadSig
-    // trapping and stack unwinding. The top frame will never be at ReturnStub
-    // callsite, except during IndirectCallBadSig unwinding.
-    CallSite site;
-    if (code_->lookupCallSite(unwoundPC, &site) &&
-        site.kind() == CallSiteKind::ReturnStub) {
+    // If wasm::StartUnwinding unwound the trapping frame (which only happens
+    // for IndirectCallBadSig), the current frame is the caller's, so its
+    // resume PC is the call site in the caller, not the trap's resume PC in
+    // the callee.  Stackmap lookup and debugEnabled() rely on this.  The top
+    // frame will never be at a ReturnStub callsite, except in this case.
+    if (trapData.unwoundFrame) {
       MOZ_ASSERT(trapData.trap == Trap::IndirectCallBadSig);
       resumePCinCurrentFrame_ = (uint8_t*)unwoundPC;
     } else {
+#ifdef DEBUG
+      CallSite site;
+      MOZ_ASSERT(!(code_->lookupCallSite(unwoundPC, &site) &&
+                   site.kind() == CallSiteKind::ReturnStub));
+#endif
       resumePCinCurrentFrame_ = (uint8_t*)trapData.resumePC;
     }
 
@@ -174,6 +177,11 @@ WasmFrameIter::WasmFrameIter(JitActivation* activation, wasm::Frame* fp)
   // at the caller of the exit frame, whose Code, CodeRange and CallSite are
   // indicated by the returnAddress of the exit stub's frame. If the caller
   // was Ion, we can just skip the wasm frames.
+
+  // The exit frame is about to be skipped, so no iterated frame will report
+  // the instance whose stub is running at this exit. Remember it so GC can
+  // keep its code alive.
+  exitInstance_ = instance_;
 
   // Skip the exit frame.
   popFrame(/*isLeavingFrame=*/false);
@@ -275,6 +283,13 @@ static inline void AssertDirectJitCall(const void* fp) {
 
 #ifdef ENABLE_WASM_JSPI
 void WasmFrameIter::popContBaseFrame() {
+  // Recover the initial function's instance from the base frame's callee slot
+  // so GC traces it while crossing this frame. When a return_call collapsed the
+  // initial function's frame (e.g. a return_call_indirect that trapped on a
+  // signature mismatch) this is the only remaining reference to it.
+  contBaseInstance_ =
+      const_cast<Instance*>(ExtractCalleeInstanceFromFrameWithInstances(fp_));
+
   ContStack* stack = ContStack::fromBaseFrameFP(fp_);
   MOZ_ASSERT(cx()->wasm().findStackForAddress(
                  cx(), reinterpret_cast<uintptr_t>(fp_)) == stack);
@@ -307,8 +322,9 @@ void WasmFrameIter::popContBaseFrame() {
 
 void WasmFrameIter::popFrame(bool isLeavingFrame) {
 #ifdef ENABLE_WASM_JSPI
-  // Clearing unwound continuation stack here.
+  // Clearing unwound continuation stack and base frame instance here.
   unwoundContStack_ = nullptr;
+  contBaseInstance_ = nullptr;
 #endif
 
   // If we're visiting inlined frames, see if this frame was inlined.
@@ -682,6 +698,53 @@ void wasm::ClearExitFP(MacroAssembler& masm, Register activation) {
       Address(activation, JitActivation::offsetOfEncodedWasmExitReason()));
 }
 
+#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
+static void ToggleMxcsr(MacroAssembler& masm, Register instance,
+                        size_t targetMxcsrOffset) {
+  Address flag(instance, wasm::Instance::offsetOfHasWasmMxcsr());
+  Label done;
+  masm.branchTest32(Assembler::Zero, flag, Imm32(1), &done);
+  masm.ldmxcsr(Address(instance, targetMxcsrOffset));
+  masm.bind(&done);
+}
+#endif
+
+void wasm::AssertDenormalsEnabled(MacroAssembler& masm) {
+#if defined(DEBUG) && (defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64))
+  masm.PushFlags();
+  masm.reserveStack(sizeof(uintptr_t));
+  Address mxcsr(masm.getStackPointer(), 0);
+  masm.stmxcsr(mxcsr);
+
+  Label ok;
+  masm.branchTest32(Assembler::Zero, mxcsr, Imm32(MxcsrDenormalsDisabled), &ok);
+  masm.breakpoint();
+  masm.bind(&ok);
+
+  masm.freeStack(sizeof(uintptr_t));
+  masm.PopFlags();
+#endif
+}
+
+void wasm::GenerateLeaveWasmFPEnvironment(MacroAssembler& masm,
+                                          Register instance) {
+#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
+  // Leaving is always safe: the ieee mxcsr is what we want no matter which
+  // environment we were in. Unwinding reaches some of these while already in
+  // the system environment.
+  ToggleMxcsr(masm, instance, wasm::Instance::offsetOfIeeeMxcsr());
+  AssertDenormalsEnabled(masm);
+#endif
+}
+
+void wasm::GenerateEnterWasmFPEnvironment(MacroAssembler& masm,
+                                          Register instance) {
+#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
+  AssertDenormalsEnabled(masm);
+  ToggleMxcsr(masm, instance, wasm::Instance::offsetOfWasmMxcsr());
+#endif
+}
+
 #ifndef JS_CODEGEN_ARM64
 static void GenerateCommonPrologue(MacroAssembler& masm, uint32_t* entry) {
 #  if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
@@ -830,18 +893,17 @@ static void GenerateCallableEpilogue(MacroAssembler& masm, unsigned framePushed,
 
 #elif defined(JS_CODEGEN_RISCV64)
   {
-    // Actually emits less instructions (maybe 11?), but reserving 20
-    // instructions definitely ensures no pool is placed in this scope.
-    AutoForbidPoolsAndNops afp(&masm, 20);
+    // Actually emits less instructions (maybe 4?), but reserving 8 instructions
+    // (100% slack) definitely ensures no pool is placed in this scope.
+    AutoForbidPoolsAndNops afp(&masm, 8);
 
+    masm.loadPtr(Address(StackPointer, Frame::returnAddressOffset()), ra);
     masm.loadPtr(Address(StackPointer, Frame::callerFPOffset()), FramePointer);
     poppedFP = masm.currentOffset();
-    masm.loadPtr(Address(StackPointer, Frame::returnAddressOffset()), ra);
 
-    *ret = masm.currentOffset();
     masm.addToStackPtr(Imm32(sizeof(Frame)));
+    *ret = masm.currentOffset();
     masm.jalr(zero, ra, 0);
-    masm.nop();
   }
 #elif defined(JS_CODEGEN_ARM64)
 
@@ -908,7 +970,8 @@ void wasm::GenerateMinimalEpilogue(MacroAssembler& masm, uint32_t* ret) {
 void wasm::GenerateFunctionPrologue(MacroAssembler& masm,
                                     const CallIndirectId& callIndirectId,
                                     const Maybe<uint32_t>& tier1FuncIndex,
-                                    FuncOffsets* offsets) {
+                                    FuncOffsets* offsets,
+                                    FaultingCodeRange* badSigTrap) {
   AutoCreatedBy acb(masm, "wasm::GenerateFunctionPrologue");
 
   // We are going to generate this code layout:
@@ -1016,7 +1079,11 @@ void wasm::GenerateFunctionPrologue(MacroAssembler& masm,
         // up wasm::StartUnwinding, which uses the PC to determine if the frame
         // has been constructed or not.
         masm.bind(&fail);
-        masm.wasmTrap(Trap::IndirectCallBadSig, TrapSiteDesc());
+        FaultingCodeRange fcr =
+            masm.wasmTrap(Trap::IndirectCallBadSig, TrapSiteDesc());
+        if (badSigTrap) {
+          *badSigTrap = fcr;
+        }
         break;
       }
       case CallIndirectIdKind::Immediate: {
@@ -1030,7 +1097,11 @@ void wasm::GenerateFunctionPrologue(MacroAssembler& masm,
         // up wasm::StartUnwinding, which uses the PC to determine if the frame
         // has been constructed or not.
         masm.bind(&fail);
-        masm.wasmTrap(Trap::IndirectCallBadSig, TrapSiteDesc());
+        FaultingCodeRange fcr =
+            masm.wasmTrap(Trap::IndirectCallBadSig, TrapSiteDesc());
+        if (badSigTrap) {
+          *badSigTrap = fcr;
+        }
         break;
       }
       case CallIndirectIdKind::None:
@@ -1347,6 +1418,9 @@ void wasm::GenerateExitPrologue(MacroAssembler& masm, ExitReason reason,
   LoadActivation(masm, InstanceReg, scratch1);
   SetExitFP(masm, reason, scratch1, scratch2);
 
+  // We are leaving wasm code.
+  GenerateLeaveWasmFPEnvironment(masm, InstanceReg);
+
 #ifdef ENABLE_WASM_JSPI
   if (switchToMainStack) {
     uint32_t frameStackSaveSlots =
@@ -1427,6 +1501,9 @@ void wasm::GenerateExitEpilogue(MacroAssembler& masm, ExitReason reason,
   }
 #endif  // ENABLE_WASM_JSPI
 
+  // We are about to return to wasm code.
+  GenerateEnterWasmFPEnvironment(masm, InstanceReg);
+
   // Reset our stack pointer back to the frame pointer. This may switch the
   // stack pointer back to our original stack.
   masm.moveToStackPtr(FramePointer);
@@ -1487,6 +1564,9 @@ void wasm::GenerateJitExitPrologue(MacroAssembler& masm,
 
   AssertNoWasmExitFPInJitExit(masm);
 
+  // We are leaving wasm code.
+  GenerateLeaveWasmFPEnvironment(masm, InstanceReg);
+
   MOZ_ASSERT(masm.framePushed() == 0);
 }
 
@@ -1495,6 +1575,10 @@ void wasm::GenerateJitExitEpilogue(MacroAssembler& masm,
   // Inverse of GenerateJitExitPrologue:
   MOZ_ASSERT(masm.framePushed() == 0);
   AssertNoWasmExitFPInJitExit(masm);
+
+  // We are about to return to wasm code.
+  GenerateEnterWasmFPEnvironment(masm, InstanceReg);
+
   GenerateCallableEpilogue(masm, /*framePushed*/ 0, &offsets->ret);
   MOZ_ASSERT(masm.framePushed() == 0);
 }
@@ -1987,17 +2071,8 @@ bool js::wasm::StartUnwinding(const RegisterState& registers,
         fixedPC = Frame::fromUntaggedWasmExitFP(sp)->returnAddress();
         fixedFP = fp;
         AssertMatchesCallSite(fixedPC, fixedFP);
-#elif defined(JS_CODEGEN_RISCV64)
-      } else if (offsetInCode >= codeRange->ret() - PoppedFP &&
-                 offsetInCode <= codeRange->ret()) {
-        // The fixedFP field of the Frame has been loaded into fp.
-        // The ra might also be loaded, but the Frame structure is still on
-        // stack, so we can acess the ra from there.
-        MOZ_ASSERT(*sp == fp);
-        fixedPC = Frame::fromUntaggedWasmExitFP(sp)->returnAddress();
-        fixedFP = fp;
-        AssertMatchesCallSite(fixedPC, fixedFP);
-#elif defined(JS_CODEGEN_ARM64) || defined(JS_CODEGEN_LOONG64)
+#elif defined(JS_CODEGEN_ARM64) || defined(JS_CODEGEN_LOONG64) || \
+    defined(JS_CODEGEN_RISCV64)
         // The stack pointer does not move until all values have
         // been restored so several cases can be coalesced here.
       } else if (offsetInCode >= codeRange->ret() - PoppedFP &&
@@ -2397,8 +2472,6 @@ const char* wasm::ThunkedNativeToDescription(SymbolicAddress func) {
       return "call to native wake m64 (in wasm)";
     case SymbolicAddress::CoerceInPlace_JitEntry:
       return "out-of-line coercion for jit entry arguments (in wasm)";
-    case SymbolicAddress::ReportV128JSCall:
-      return "jit call to v128 wasm function";
     case SymbolicAddress::MemCopyM32:
     case SymbolicAddress::MemCopySharedM32:
       return "call to native memory.copy m32 function";

@@ -21,18 +21,11 @@ JAR_MANIFESTS += ["addon-jar.mn"]
 
 if CONFIG["NODEJS"]:
     GeneratedFile(
-        "newtab-node-modules.stamp",
-        script="build-newtab-bundles.py",
-        entry_point="ensure_node_modules",
-        force=True,
-    )
-
-    GeneratedFile(
         "data/content/vendor.bundle.js",
         "data/content/activity-stream.bundle.js",
         script="build-newtab-bundles.py",
         entry_point="generate_js",
-        inputs=["!newtab-node-modules.stamp"],
+        force=True,
     )
 
     GeneratedFile(
@@ -40,7 +33,7 @@ if CONFIG["NODEJS"]:
         "css/nova/activity-stream.css",
         script="build-newtab-bundles.py",
         entry_point="generate_css",
-        inputs=["!newtab-node-modules.stamp"],
+        force=True,
     )
 
 DIRS += ["webext-glue"]

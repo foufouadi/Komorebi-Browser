@@ -13,6 +13,7 @@
 
 #include "gtest/gtest.h"
 #include "nss_scoped_ptrs.h"
+#include "pk11_import.h"
 
 namespace nss_test {
 
@@ -144,14 +145,14 @@ TEST_F(P7ImportTest, DigestsAlignWithDigestAlgorithms) {
       nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr));
   ASSERT_TRUE(dcx);
   SECStatus rv = SEC_PKCS7DecoderUpdate(
-      dcx.get(), reinterpret_cast<const char *>(p7_mixed_digest_algs),
+      dcx.get(), reinterpret_cast<const char*>(p7_mixed_digest_algs),
       sizeof(p7_mixed_digest_algs));
   ASSERT_EQ(SECSuccess, rv);
-  SEC_PKCS7ContentInfo *cinfo = SEC_PKCS7DecoderFinish(dcx.release());
+  SEC_PKCS7ContentInfo* cinfo = SEC_PKCS7DecoderFinish(dcx.release());
   ASSERT_TRUE(cinfo);
   ASSERT_EQ(SEC_OID_PKCS7_SIGNED_DATA, SEC_PKCS7ContentType(cinfo));
 
-  SEC_PKCS7SignedData *sigd = cinfo->content.signedData;
+  SEC_PKCS7SignedData* sigd = cinfo->content.signedData;
   ASSERT_TRUE(sigd);
   ASSERT_TRUE(sigd->digestAlgorithms);
   ASSERT_TRUE(sigd->digestAlgorithms[0]);
@@ -174,16 +175,16 @@ TEST_F(P7ImportTest, DigestLookupSkipsUnrecognizedAlgorithm) {
       nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr));
   ASSERT_TRUE(dcx);
   SECStatus rv = SEC_PKCS7DecoderUpdate(
-      dcx.get(), reinterpret_cast<const char *>(p7_mixed_digest_algs),
+      dcx.get(), reinterpret_cast<const char*>(p7_mixed_digest_algs),
       sizeof(p7_mixed_digest_algs));
   ASSERT_EQ(SECSuccess, rv);
-  SEC_PKCS7ContentInfo *cinfo = SEC_PKCS7DecoderFinish(dcx.release());
+  SEC_PKCS7ContentInfo* cinfo = SEC_PKCS7DecoderFinish(dcx.release());
   ASSERT_TRUE(cinfo);
 
-  SEC_PKCS7SignedData *sigd = cinfo->content.signedData;
+  SEC_PKCS7SignedData* sigd = cinfo->content.signedData;
   ASSERT_TRUE(sigd);
-  SECAlgorithmID **digestalgs = sigd->digestAlgorithms;
-  SECItem **digests = sigd->digests;
+  SECAlgorithmID** digestalgs = sigd->digestAlgorithms;
+  SECItem** digests = sigd->digests;
   ASSERT_TRUE(digestalgs);
   ASSERT_TRUE(digests);
 
@@ -209,12 +210,12 @@ TEST_F(P7ImportTest, DigestLookupSkipsUnrecognizedAlgorithm) {
 // contains an unrecognized OID before the signer's SHA-256.  This exercises
 // sec_pkcs7_verify_signature including the index-based digest lookup.
 TEST_F(P7ImportTest, VerifySignatureWithMixedDigestAlgorithms) {
-  CERTCertDBHandle *certdb = CERT_GetDefaultCertDB();
+  CERTCertDBHandle* certdb = CERT_GetDefaultCertDB();
   ASSERT_TRUE(certdb);
 
   // Import the test cert and trust it for object signing so that
   // CERT_VerifyCert succeeds inside sec_pkcs7_verify_signature.
-  SECItem certDER = {siBuffer, const_cast<uint8_t *>(p7_test_cert_der),
+  SECItem certDER = {siBuffer, const_cast<uint8_t*>(p7_test_cert_der),
                      sizeof(p7_test_cert_der)};
   ScopedCERTCertificate cert(
       CERT_NewTempCertificate(certdb, &certDER, nullptr, PR_TRUE, PR_TRUE));
@@ -231,10 +232,10 @@ TEST_F(P7ImportTest, VerifySignatureWithMixedDigestAlgorithms) {
       nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr));
   ASSERT_TRUE(dcx);
   SECStatus rv = SEC_PKCS7DecoderUpdate(
-      dcx.get(), reinterpret_cast<const char *>(p7_signed_mixed_algs),
+      dcx.get(), reinterpret_cast<const char*>(p7_signed_mixed_algs),
       sizeof(p7_signed_mixed_algs));
   ASSERT_EQ(SECSuccess, rv);
-  SEC_PKCS7ContentInfo *cinfo = SEC_PKCS7DecoderFinish(dcx.release());
+  SEC_PKCS7ContentInfo* cinfo = SEC_PKCS7DecoderFinish(dcx.release());
   ASSERT_TRUE(cinfo);
   ASSERT_EQ(SEC_OID_PKCS7_SIGNED_DATA, SEC_PKCS7ContentType(cinfo));
 
@@ -253,7 +254,7 @@ TEST_F(P7ImportTest, FailSafeWithUnknownHashes) {
       nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr));
   ASSERT_TRUE(dcx);
   SECStatus rv = SEC_PKCS7DecoderUpdate(
-      dcx.get(), reinterpret_cast<const char *>(p7_with_unknown_hashes),
+      dcx.get(), reinterpret_cast<const char*>(p7_with_unknown_hashes),
       sizeof(p7_with_unknown_hashes));
   ASSERT_EQ(SECFailure, rv);
 }
@@ -263,7 +264,7 @@ TEST_F(P7ImportTest, NoLeakWithMultipleHashes) {
       nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr));
   ASSERT_TRUE(dcx);
   SECStatus rv = SEC_PKCS7DecoderUpdate(
-      dcx.get(), reinterpret_cast<const char *>(p7_with_multiple_hashes),
+      dcx.get(), reinterpret_cast<const char*>(p7_with_multiple_hashes),
       sizeof(p7_with_multiple_hashes));
   ASSERT_EQ(SECFailure, rv);
 }
@@ -444,8 +445,7 @@ static const uint8_t kTestCert[] = {
     0x5a, 0x2e,
 };
 
-static PRBool DecryptionAllowed(SECAlgorithmID * /*alg*/,
-                                PK11SymKey * /*key*/) {
+static PRBool DecryptionAllowed(SECAlgorithmID* /*alg*/, PK11SymKey* /*key*/) {
   return PR_TRUE;
 }
 
@@ -456,15 +456,15 @@ class P7EnvelopedDataTest : public ::testing::Test {
     ScopedPK11SlotInfo slot(PK11_GetInternalKeySlot());
     ASSERT_NE(nullptr, slot.get());
 
-    SECItem key_item = {siBuffer, const_cast<uint8_t *>(kTestRsaKey),
+    SECItem key_item = {siBuffer, const_cast<uint8_t*>(kTestRsaKey),
                         sizeof(kTestRsaKey)};
-    ASSERT_EQ(SECSuccess, PK11_ImportDERPrivateKeyInfo(
+    ASSERT_EQ(SECSuccess, nss_test::ImportDERPrivateKeyInfoAndReturnKey(
                               slot.get(), &key_item, nullptr, nullptr, PR_TRUE,
-                              PR_FALSE, KU_ALL, nullptr));
+                              PR_FALSE, KU_ALL, nullptr, nullptr));
 
     // Decode the certificate DER into a CERTCertificate, then import it
     // permanently into the slot so the PKCS7 decoder can find the key.
-    SECItem cert_item = {siBuffer, const_cast<uint8_t *>(kTestCert),
+    SECItem cert_item = {siBuffer, const_cast<uint8_t*>(kTestCert),
                          sizeof(kTestCert)};
     ScopedCERTCertificate cert(CERT_NewTempCertificate(
         CERT_GetDefaultCertDB(), &cert_item, nullptr, PR_FALSE, PR_TRUE));
@@ -553,14 +553,14 @@ TEST_F(P7EnvelopedDataTest, MultiChunkDecryptPlaintextCorrect) {
   ASSERT_TRUE(dcx);
 
   ASSERT_EQ(SECSuccess,
-            SEC_PKCS7DecoderUpdate(
-                dcx.get(), reinterpret_cast<const char *>(envelopedData),
-                splitOffset));
-  ASSERT_EQ(SECSuccess,
-            SEC_PKCS7DecoderUpdate(
-                dcx.get(),
-                reinterpret_cast<const char *>(envelopedData) + splitOffset,
-                sizeof(envelopedData) - splitOffset));
+            SEC_PKCS7DecoderUpdate(dcx.get(),
+                                   reinterpret_cast<const char*>(envelopedData),
+                                   splitOffset));
+  ASSERT_EQ(
+      SECSuccess,
+      SEC_PKCS7DecoderUpdate(
+          dcx.get(), reinterpret_cast<const char*>(envelopedData) + splitOffset,
+          sizeof(envelopedData) - splitOffset));
 
   // SEC_PKCS7DecoderFinish takes ownership of dcx; release() prevents the
   // ScopedSEC_PKCS7DecoderContext destructor from calling Finish a second time.
@@ -568,7 +568,7 @@ TEST_F(P7EnvelopedDataTest, MultiChunkDecryptPlaintextCorrect) {
   ASSERT_NE(nullptr, cinfo);
   ASSERT_EQ(SEC_OID_PKCS7_ENVELOPED_DATA, SEC_PKCS7ContentType(cinfo.get()));
 
-  const SECItem *plain =
+  const SECItem* plain =
       &cinfo.get()->content.envelopedData->encContentInfo.plainContent;
   ASSERT_EQ(sizeof(kExpectedPlaintext), plain->len);
   EXPECT_EQ(

@@ -10,13 +10,63 @@
 const TEST_ENGINE_NAME = "Test";
 
 add_setup(async function () {
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      ["browser.urlbar.unifiedSearchButton.always", false],
+      ["browser.urlbar.unifiedSearchButton.historyInSearchMode", false],
+    ],
+  });
+  // The topSites task needs a search shortcut Top Site, so set up the
+  // configuration to make Baidu available as a search engine.
+  await SearchTestUtils.updateRemoteSettingsConfig([
+    {
+      identifier: "google",
+      base: {
+        name: "Google",
+        aliases: ["google"],
+        urls: {
+          search: {
+            base: "https://www.google.com/search",
+            searchTermParamName: "q",
+          },
+        },
+      },
+    },
+    {
+      identifier: "baidu",
+      base: {
+        name: "百度",
+        aliases: ["百度", "baidu"],
+        urls: {
+          search: {
+            base: "https://www.baidu.com/baidu",
+            searchTermParamName: "wd",
+          },
+        },
+      },
+    },
+  ]);
+
   await SearchTestUtils.installSearchExtension({
     name: TEST_ENGINE_NAME,
     keyword: "@test",
   });
 
   await SpecialPowers.pushPrefEnv({
-    set: [["browser.urlbar.scotchBonnet.enableOverride", false]],
+    set: [
+      ["browser.urlbar.scotchBonnet.enableOverride", false],
+      // baidu.com dedupes with the Baidu search shortcut that TopSites pins.
+      [
+        "browser.newtabpage.activity-stream.default.sites",
+        "https://www.baidu.com/",
+      ],
+      // The shortcuts to pin are region-derived, and Baidu is only listed for
+      // CN, so ask for it explicitly.
+      [
+        "browser.newtabpage.activity-stream.improvesearch.topSiteSearchShortcuts.searchEngines",
+        "baidu",
+      ],
+    ],
   });
   if (UrlbarPrefs.getScotchBonnetPref("searchRestrictKeywords.featureGate")) {
     await SpecialPowers.pushPrefEnv({
@@ -162,6 +212,8 @@ add_task(async function topSites() {
   let searchTopSite = await UrlbarTestUtils.getDetailsOfResultAt(window, 0);
   await UrlbarTestUtils.assertSearchMode(window, {
     engineName: searchTopSite.searchParams.engine,
+    // Baidu is a general purpose engine, so history results are hidden.
+    source: UrlbarShared.RESULT_SOURCE.SEARCH,
     isPreview: true,
     entry: "topsites_urlbar",
   });
@@ -301,6 +353,8 @@ add_task(async function oneOff_alt_downArrow() {
   let searchTopSite = await UrlbarTestUtils.getDetailsOfResultAt(window, 0);
   await UrlbarTestUtils.assertSearchMode(window, {
     engineName: searchTopSite.searchParams.engine,
+    // Baidu is a general purpose engine, so history results are hidden.
+    source: UrlbarShared.RESULT_SOURCE.SEARCH,
     isPreview: true,
     entry: "topsites_urlbar",
   });
@@ -330,6 +384,8 @@ add_task(async function oneOff_alt_downArrow() {
   EventUtils.synthesizeKey("KEY_ArrowUp");
   await UrlbarTestUtils.assertSearchMode(window, {
     engineName: searchTopSite.searchParams.engine,
+    // Baidu is a general purpose engine, so history results are hidden.
+    source: UrlbarShared.RESULT_SOURCE.SEARCH,
     isPreview: true,
     entry: "topsites_urlbar",
   });

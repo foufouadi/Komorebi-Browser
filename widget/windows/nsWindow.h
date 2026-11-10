@@ -19,6 +19,7 @@
 #include "cairo.h"
 #include "gfxWindowsPlatform.h"
 #include "gfxWindowsSurface.h"
+#include "gtest/MozGtestFriend.h"
 #include "mozilla/DataMutex.h"
 #include "mozilla/EnumeratedArray.h"
 #include "mozilla/EventForwards.h"
@@ -94,12 +95,8 @@ struct WindowStyles {
 
   static WindowStyles FromHWND(HWND);
 
-  constexpr bool operator==(WindowStyles const& that) const {
-    return style == that.style && ex == that.ex;
-  }
-  constexpr bool operator!=(WindowStyles const& that) const {
-    return !(*this == that);
-  }
+  constexpr bool operator==(WindowStyles const& that) const = default;
+
   constexpr WindowStyles operator|(WindowStyles const& that) const {
     return WindowStyles{.style = style | that.style, .ex = ex | that.ex};
   }
@@ -307,7 +304,7 @@ class nsWindow final : public nsIWidget {
       IsNonclient aIgnoreAPZ = IsNonclient::No,
       mozilla::Maybe<LayoutDeviceIntPoint> aMovement = mozilla::Nothing());
   void DispatchPendingEvents();
-  void DispatchCustomEvent(const nsString& eventName);
+  MOZ_CAN_RUN_SCRIPT void DispatchCustomEvent(const nsString& eventName);
 
 #ifdef ACCESSIBILITY
   /**
@@ -339,6 +336,11 @@ class nsWindow final : public nsIWidget {
 
   static void SetIsRestoringSession(const bool aIsRestoringSession) {
     sIsRestoringSession = aIsRestoringSession;
+  }
+
+  // The last time the application stopped being the active application.
+  static mozilla::TimeStamp GetLastAppDeactivationTime() {
+    return sLastAppDeactivationTime;
   }
 
   bool IsRTL() const { return mIsRTL; }
@@ -505,6 +507,7 @@ class nsWindow final : public nsIWidget {
 
   // Manager for taskbar-hiding. No persistent state.
   class TaskbarConcealer;
+  friend class TaskbarConcealerTest;
 
   // A magic number to identify the FAKETRACKPOINTSCROLLABLE window created
   // when the trackpoint hack is enabled.
@@ -523,8 +526,8 @@ class nsWindow final : public nsIWidget {
    */
   static LRESULT CALLBACK WindowProc(HWND hWnd, UINT msg, WPARAM wParam,
                                      LPARAM lParam);
-  static LRESULT CALLBACK WindowProcInternal(HWND hWnd, UINT msg, WPARAM wParam,
-                                             LPARAM lParam);
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY static LRESULT CALLBACK
+  WindowProcInternal(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
   static BOOL CALLBACK DispatchStarvedPaints(HWND aTopWindow, LPARAM aMsg);
   static BOOL CALLBACK RegisterTouchForDescendants(HWND aTopWindow,
@@ -569,11 +572,12 @@ class nsWindow final : public nsIWidget {
   HWND GetTopLevelForFocus(HWND aCurWnd);
   void DispatchFocusToTopLevelWindow(bool aIsActivate);
   void RelayMouseEvent(UINT aMsg, WPARAM wParam, LPARAM lParam);
-  bool ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
-                      LRESULT* aRetValue);
+  MOZ_CAN_RUN_SCRIPT bool ProcessMessage(UINT msg, WPARAM& wParam,
+                                         LPARAM& lParam, LRESULT* aRetValue);
   // We wrap this in ProcessMessage so we can log the return value
-  bool ProcessMessageInternal(UINT msg, WPARAM& wParam, LPARAM& lParam,
-                              LRESULT* aRetValue);
+  MOZ_CAN_RUN_SCRIPT bool ProcessMessageInternal(UINT msg, WPARAM& wParam,
+                                                 LPARAM& lParam,
+                                                 LRESULT* aRetValue);
   bool ExternalHandlerProcessMessage(UINT aMessage, WPARAM& aWParam,
                                      LPARAM& aLParam, MSGResult& aResult);
   LRESULT ProcessCharMessage(const MSG& aMsg, bool* aEventDispatched);
@@ -622,7 +626,7 @@ class nsWindow final : public nsIWidget {
    */
   void UserActivity();
 
-  DWORD WindowStyle();
+  DWORD WindowStyle() const;
   DWORD WindowExStyle();
 
   /**
@@ -669,7 +673,6 @@ class nsWindow final : public nsIWidget {
 
   void CreateCompositor() override;
   void DestroyCompositor() override;
-  void RequestFxrOutput() override;
 
   void RecreateDirectManipulationIfNeeded();
   void ResizeDirectManipulationViewport();
@@ -678,6 +681,7 @@ class nsWindow final : public nsIWidget {
   bool NeedsToTrackWindowOcclusionState();
 
   void AsyncUpdateWorkspaceID();
+  FRIEND_TEST(WinWorkspaceID, HungQueryDoesNotBlockShutdown);
 
   // See bug 603793
   static bool HasBogusPopupsDropShadowOnMultiMonitor();
@@ -720,6 +724,7 @@ class nsWindow final : public nsIWidget {
   static bool sJustGotDeactivate;
   static bool sJustGotActivate;
   static bool sIsInMouseCapture;
+  static mozilla::TimeStamp sLastAppDeactivationTime;
   static bool sIsRestoringSession;
   static bool sIsNativePointLocked;
   static bool sIsUsingRawInputForMouseMove;
@@ -799,6 +804,19 @@ class nsWindow final : public nsIWidget {
   HICON mIconBig = nullptr;
   HWND mLastKillFocusWindow = nullptr;
   PlatformCompositorWidgetDelegate* mCompositorWidgetDelegate = nullptr;
+
+  // Whether this window's style includes a caption.
+  bool HasCaption() const;
+
+  struct ResizeMargins {
+    mozilla::LayoutDeviceIntCoord mHorizontal;
+    mozilla::LayoutDeviceIntCoord mVertical;
+  };
+  ResizeMargins DefaultResizeMargins(UINT aDpi) const;
+
+  // The distance by which this window's frame extends beyond its visible
+  // edges.
+  LayoutDeviceIntMargin ResizeBorderOverhang() const;
 
   LayoutDeviceIntMargin NonClientSizeMargin() const {
     return NonClientSizeMargin(mCustomNonClientMetrics.mOffset);
@@ -905,10 +923,6 @@ class nsWindow final : public nsIWidget {
 
   ScreenPoint mLastPanGestureFocus;
 
-  // When true, used to indicate an async call to RequestFxrOutput to the GPU
-  // process after the Compositor is created
-  bool mRequestFxrOutputPending = false;
-
   // A stack based class used in DispatchMouseEvent() to tell whether we should
   // NOT open context menu when we receives WM_CONTEXTMENU after the
   // DispatchMouseEvent calls.
@@ -939,6 +953,10 @@ class nsWindow final : public nsIWidget {
       mWindowBtnRect;
 
   nsString mDesktopId MOZ_GUARDED_BY(mozilla::sMainThreadCapability);
+  bool mDesktopIdUpdatePending MOZ_GUARDED_BY(mozilla::sMainThreadCapability) =
+      false;
+  static uint32_t sDesktopIdRequestsInFlight;
+  static bool sDesktopIdHangForTesting;
 
   friend class nsWindowGfx;
 

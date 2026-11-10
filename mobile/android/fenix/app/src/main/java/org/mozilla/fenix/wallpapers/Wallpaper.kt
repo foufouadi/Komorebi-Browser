@@ -71,6 +71,15 @@ data class Wallpaper(
          * safer to do comparison directly with the collection name.
          */
         const val CLASSIC_FIREFOX_COLLECTION = "classic-firefox"
+
+        /*
+         * Note: this collection could get out of sync with the version of it generated when fetching
+         * remote metadata. It is included mostly for convenience, but use with utmost care until
+         * we find a better way of handling the edge cases around this collection. It is generally
+         * safer to do comparison directly with the collection name.
+         */
+        const val WREXHAM_FIREFOX_COLLECTION = "wrexham"
+
         val ClassicFirefoxCollection =
             Collection(
                 name = CLASSIC_FIREFOX_COLLECTION,
@@ -141,15 +150,9 @@ data class Wallpaper(
             val textColor = settings.currentWallpaperTextColor
             val cardColorLight = settings.currentWallpaperCardColorLight
             val cardColorDark = settings.currentWallpaperCardColorDark
-            return if (name == EDGE_TO_EDGE && settings.enableHomepageEdgeToEdgeBackgroundFeature) {
+            return if (name == EDGE_TO_EDGE) {
                 EdgeToEdge
-            } else if (
-                name.isNotEmpty() &&
-                    name != EDGE_TO_EDGE &&
-                    textColor != 0L &&
-                    cardColorLight != 0L &&
-                    cardColorDark != 0L
-            ) {
+            } else if (name.isNotEmpty() && textColor != 0L && cardColorLight != 0L && cardColorDark != 0L) {
                 Wallpaper(
                     name = name,
                     textColor = textColor,

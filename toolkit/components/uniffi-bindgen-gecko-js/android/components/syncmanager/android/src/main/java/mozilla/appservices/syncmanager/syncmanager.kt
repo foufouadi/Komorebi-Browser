@@ -32,8 +32,11 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import mozilla.appservices.sync15.DeviceType
+import mozilla.appservices.sync15.EngineChoicesModel
 import mozilla.appservices.sync15.FfiConverterTypeDeviceType
+import mozilla.appservices.sync15.FfiConverterTypeEngineChoicesModel
 import mozilla.appservices.sync15.RustBuffer as RustBufferDeviceType
+import mozilla.appservices.sync15.RustBuffer as RustBufferEngineChoicesModel
 
 // This is a helper for safely working with byte buffers returned from the Rust code.
 // A rust-owned buffer is represented by its capacity, its current length, and a
@@ -101,6 +104,43 @@ internal open class ForeignBytes : Structure() {
     @JvmField var data: Pointer? = null
 
     class ByValue : ForeignBytes(), Structure.ByValue
+}
+
+// Converter for `&[u8]` / `[ByRef] bytes` arguments.
+//
+// Only `lower` is valid — zero-copy byte buffers only flow foreign -> Rust,
+// and only in argument position. `lift`, `read`, `write`, and
+// `allocationSize` have no sound implementation here and all panic at
+// runtime. The `FfiConverter` interface is implemented so that the
+// compiler enforces the full method set (rather than relying on eyeball).
+//
+// The provided `ByteBuffer` MUST be direct — only direct buffers have a
+// stable native address that JNA can expose via `getDirectBufferPointer`.
+// The returned `ForeignBytes.ByValue` is only valid for the duration of
+// the FFI call; the Rust side treats it as a borrow.
+internal object FfiConverterByRefBytes : FfiConverter<java.nio.ByteBuffer, ForeignBytes.ByValue> {
+    override fun lower(value: java.nio.ByteBuffer): ForeignBytes.ByValue {
+        require(value.isDirect) { "UniFFI zero-copy &[u8] requires a direct ByteBuffer. Use ByteBuffer.allocateDirect()." }
+        val remaining = value.remaining()
+        val fb = ForeignBytes.ByValue()
+        fb.len = remaining
+        // Zero-length direct buffers: skip getDirectBufferPointer (platform-variable behavior)
+        // and pass null. The Rust side treats (null, 0) as &[].
+        fb.data = if (remaining == 0) null else com.sun.jna.Native.getDirectBufferPointer(value)
+        return fb
+    }
+
+    override fun lift(value: ForeignBytes.ByValue): java.nio.ByteBuffer =
+        error("ByRef bytes cannot be lifted: zero-copy &[u8] only flows foreign->Rust")
+
+    override fun read(buf: java.nio.ByteBuffer): java.nio.ByteBuffer =
+        error("ByRef bytes cannot be read from a buffer: zero-copy &[u8] is only supported in argument position, not nested in records/options/etc.")
+
+    override fun write(value: java.nio.ByteBuffer, buf: java.nio.ByteBuffer): Unit =
+        error("ByRef bytes cannot be written to a buffer: zero-copy &[u8] is only supported in argument position, not nested in records/options/etc.")
+
+    override fun allocationSize(value: java.nio.ByteBuffer): ULong =
+        error("ByRef bytes have no RustBuffer allocation size: zero-copy &[u8] is only supported in argument position, not nested in records/options/etc.")
 }
 /**
  * The FfiConverter interface handles converter types to and from the FFI
@@ -638,14 +678,16 @@ internal object IntegrityCheckingUniffiLib {
         Native.register(IntegrityCheckingUniffiLib::class.java, findLibraryName(componentName = "syncmanager"))
         uniffiCheckContractApiVersion(this)
     }
+
+    internal fun ensureInitialized() = Unit
     external fun uniffi_sync_manager_checksum_method_syncmanager_disconnect(
-    ): Short
+    ): Int
     external fun uniffi_sync_manager_checksum_method_syncmanager_get_available_engines(
-    ): Short
+    ): Int
     external fun uniffi_sync_manager_checksum_method_syncmanager_sync(
-    ): Short
+    ): Int
     external fun uniffi_sync_manager_checksum_constructor_syncmanager_new(
-    ): Short
+    ): Int
     external fun ffi_sync_manager_uniffi_contract_version(
     ): Int
 
@@ -665,6 +707,8 @@ internal object UniffiLib {
         mozilla.appservices.sync15.uniffiEnsureInitialized()
         
     }
+
+    internal fun ensureInitialized() = Unit
     external fun uniffi_sync_manager_fn_clone_syncmanager(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
     external fun uniffi_sync_manager_fn_free_syncmanager(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -692,7 +736,7 @@ internal object UniffiLib {
     external fun ffi_sync_manager_rust_future_free_u8(`handle`: Long,
     ): Unit
     external fun ffi_sync_manager_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Byte
+    ): Int
     external fun ffi_sync_manager_rust_future_poll_i8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
     ): Unit
     external fun ffi_sync_manager_rust_future_cancel_i8(`handle`: Long,
@@ -708,7 +752,7 @@ internal object UniffiLib {
     external fun ffi_sync_manager_rust_future_free_u16(`handle`: Long,
     ): Unit
     external fun ffi_sync_manager_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Short
+    ): Int
     external fun ffi_sync_manager_rust_future_poll_i16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
     ): Unit
     external fun ffi_sync_manager_rust_future_cancel_i16(`handle`: Long,
@@ -799,10 +843,10 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
  * @suppress
  */
 public fun uniffiEnsureInitialized() {
-    IntegrityCheckingUniffiLib
-    // UniffiLib() initialized as objects are used, but we still need to explicitly
-    // reference it so initialization across crates works as expected.
-    UniffiLib
+    // Call arbitrary methods on IntegrityCheckingUniffiLib and UniffiLib to ensure that
+    // their init blocks run. This ensures initialization across crates works as expected.
+    IntegrityCheckingUniffiLib.ensureInitialized()
+    UniffiLib.ensureInitialized()
 }
 
 // Async support
@@ -948,29 +992,6 @@ private class JavaLangRefCleanable(
     val cleanable: java.lang.ref.Cleaner.Cleanable
 ) : UniffiCleaner.Cleanable {
     override fun clean() = cleanable.clean()
-}
-
-/**
- * @suppress
- */
-public object FfiConverterBoolean: FfiConverter<Boolean, Byte> {
-    override fun lift(value: Byte): Boolean {
-        return value.toInt() != 0
-    }
-
-    override fun read(buf: ByteBuffer): Boolean {
-        return lift(buf.get())
-    }
-
-    override fun lower(value: Boolean): Byte {
-        return if (value) 1.toByte() else 0.toByte()
-    }
-
-    override fun allocationSize(value: Boolean) = 1UL
-
-    override fun write(value: Boolean, buf: ByteBuffer) {
-        buf.put(lower(value))
-    }
 }
 
 /**
@@ -1183,6 +1204,8 @@ public interface SyncManagerInterface {
     
     /**
      * Perform a sync.  See [SyncParams] and [SyncResult] for details on how this works
+     *
+     * Fails with [SyncManagerError::Busy] if a sync is already in progress.
      */
     fun `sync`(`params`: SyncParams): SyncResult
     
@@ -1227,6 +1250,11 @@ open class SyncManager: Disposable, AutoCloseable, SyncManagerInterface
 
     private val wasDestroyed = AtomicBoolean(false)
     private val callCounter = AtomicLong(1)
+
+    /**
+     * Whether the current object has been destroyed and its reference is gone in the Rust side.
+     */
+    val uniffiIsDestroyed: Boolean get() = wasDestroyed.get()
 
     override fun destroy() {
         // Only allow a single call to this method.
@@ -1327,6 +1355,8 @@ open class SyncManager: Disposable, AutoCloseable, SyncManagerInterface
     
     /**
      * Perform a sync.  See [SyncParams] and [SyncResult] for details on how this works
+     *
+     * Fails with [SyncManagerError::Busy] if a sync is already in progress.
      */
     @Throws(SyncManagerException::class)override fun `sync`(`params`: SyncParams): SyncResult {
             return FfiConverterTypeSyncResult.lift(
@@ -1334,6 +1364,7 @@ open class SyncManager: Disposable, AutoCloseable, SyncManagerInterface
     uniffiRustCallWithError(SyncManagerException) { _status ->
     UniffiLib.uniffi_sync_manager_fn_method_syncmanager_sync(
         it,
+        
         FfiConverterTypeSyncParams.lower(`params`),_status)
 }
     }
@@ -1387,6 +1418,12 @@ data class DeviceSettings (
     var `name`: kotlin.String
     , 
     var `kind`: DeviceType
+    , 
+    /**
+     * The engines this device syncs, to be published for other devices on the
+     * account to see. Not yet published.
+     */
+    var `enabledEngines`: List<kotlin.String> = listOf() 
     
 ){
     
@@ -1406,19 +1443,22 @@ public object FfiConverterTypeDeviceSettings: FfiConverterRustBuffer<DeviceSetti
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterTypeDeviceType.read(buf),
+            FfiConverterSequenceString.read(buf),
         )
     }
 
     override fun allocationSize(value: DeviceSettings) = (
             FfiConverterString.allocationSize(value.`fxaDeviceId`) +
             FfiConverterString.allocationSize(value.`name`) +
-            FfiConverterTypeDeviceType.allocationSize(value.`kind`)
+            FfiConverterTypeDeviceType.allocationSize(value.`kind`) +
+            FfiConverterSequenceString.allocationSize(value.`enabledEngines`)
     )
 
     override fun write(value: DeviceSettings, buf: ByteBuffer) {
             FfiConverterString.write(value.`fxaDeviceId`, buf)
             FfiConverterString.write(value.`name`, buf)
             FfiConverterTypeDeviceType.write(value.`kind`, buf)
+            FfiConverterSequenceString.write(value.`enabledEngines`, buf)
     }
 }
 
@@ -1484,11 +1524,9 @@ data class SyncParams (
     var `engines`: SyncEngineSelection
     , 
     /**
-     * Which engines should be enabled in the "account global" list (for
-     * example, if the UI was used to change an engine's state since the last
-     * sync).
+     * How the user's choice of engines to sync is modelled.
      */
-    var `enabledChanges`: Map<kotlin.String, kotlin.Boolean>
+    var `engineChoicesModel`: EngineChoicesModel
     , 
     /**
      * Keys to encrypt/decrypt data from local database files.  These are
@@ -1533,7 +1571,7 @@ public object FfiConverterTypeSyncParams: FfiConverterRustBuffer<SyncParams> {
         return SyncParams(
             FfiConverterTypeSyncReason.read(buf),
             FfiConverterTypeSyncEngineSelection.read(buf),
-            FfiConverterMapStringBoolean.read(buf),
+            FfiConverterTypeEngineChoicesModel.read(buf),
             FfiConverterMapStringString.read(buf),
             FfiConverterTypeSyncAuthInfo.read(buf),
             FfiConverterOptionalString.read(buf),
@@ -1544,7 +1582,7 @@ public object FfiConverterTypeSyncParams: FfiConverterRustBuffer<SyncParams> {
     override fun allocationSize(value: SyncParams) = (
             FfiConverterTypeSyncReason.allocationSize(value.`reason`) +
             FfiConverterTypeSyncEngineSelection.allocationSize(value.`engines`) +
-            FfiConverterMapStringBoolean.allocationSize(value.`enabledChanges`) +
+            FfiConverterTypeEngineChoicesModel.allocationSize(value.`engineChoicesModel`) +
             FfiConverterMapStringString.allocationSize(value.`localEncryptionKeys`) +
             FfiConverterTypeSyncAuthInfo.allocationSize(value.`authInfo`) +
             FfiConverterOptionalString.allocationSize(value.`persistedState`) +
@@ -1554,7 +1592,7 @@ public object FfiConverterTypeSyncParams: FfiConverterRustBuffer<SyncParams> {
     override fun write(value: SyncParams, buf: ByteBuffer) {
             FfiConverterTypeSyncReason.write(value.`reason`, buf)
             FfiConverterTypeSyncEngineSelection.write(value.`engines`, buf)
-            FfiConverterMapStringBoolean.write(value.`enabledChanges`, buf)
+            FfiConverterTypeEngineChoicesModel.write(value.`engineChoicesModel`, buf)
             FfiConverterMapStringString.write(value.`localEncryptionKeys`, buf)
             FfiConverterTypeSyncAuthInfo.write(value.`authInfo`, buf)
             FfiConverterOptionalString.write(value.`persistedState`, buf)
@@ -1730,7 +1768,7 @@ public object FfiConverterTypeSyncEngineSelection : FfiConverterRustBuffer<SyncE
         }
     }
 
-    override fun allocationSize(value: SyncEngineSelection) = when(value) {
+    override fun allocationSize(value: SyncEngineSelection): ULong = when(value) {
         is SyncEngineSelection.All -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -2036,45 +2074,6 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
 /**
  * @suppress
  */
-public object FfiConverterMapStringBoolean: FfiConverterRustBuffer<Map<kotlin.String, kotlin.Boolean>> {
-    override fun read(buf: ByteBuffer): Map<kotlin.String, kotlin.Boolean> {
-        val len = buf.getInt()
-        return buildMap<kotlin.String, kotlin.Boolean>(len) {
-            repeat(len) {
-                val k = FfiConverterString.read(buf)
-                val v = FfiConverterBoolean.read(buf)
-                this[k] = v
-            }
-        }
-    }
-
-    override fun allocationSize(value: Map<kotlin.String, kotlin.Boolean>): ULong {
-        val spaceForMapSize = 4UL
-        val spaceForChildren = value.map { (k, v) ->
-            FfiConverterString.allocationSize(k) +
-            FfiConverterBoolean.allocationSize(v)
-        }.sum()
-        return spaceForMapSize + spaceForChildren
-    }
-
-    override fun write(value: Map<kotlin.String, kotlin.Boolean>, buf: ByteBuffer) {
-        buf.putInt(value.size)
-        // The parens on `(k, v)` here ensure we're calling the right method,
-        // which is important for compatibility with older android devices.
-        // Ref https://blog.danlew.net/2017/03/16/kotlin-puzzler-whose-line-is-it-anyways/
-        value.forEach { (k, v) ->
-            FfiConverterString.write(k, buf)
-            FfiConverterBoolean.write(v, buf)
-        }
-    }
-}
-
-
-
-
-/**
- * @suppress
- */
 public object FfiConverterMapStringString: FfiConverterRustBuffer<Map<kotlin.String, kotlin.String>> {
     override fun read(buf: ByteBuffer): Map<kotlin.String, kotlin.String> {
         val len = buf.getInt()
@@ -2107,6 +2106,8 @@ public object FfiConverterMapStringString: FfiConverterRustBuffer<Map<kotlin.Str
         }
     }
 }
+
+
 
 
 

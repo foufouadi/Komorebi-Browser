@@ -94,7 +94,6 @@ pref(apz.allow_zooming,true) fuzzy(0-1,0-2) fuzzy-if(geckoview,0-1,0-88) fuzzy-i
 # be any subpixel "shimmers" during scrolling. In other words, the device pixel
 # rendering at scroll position zero and the device pixel rendering at any other scroll
 # position should be identical except for an integer device pixel translation of the contents.
-# The zoom tests are marked with fails-if(useDrawSnapshot) due to bug 1917424.
 pref(layout.disable-pixel-alignment,true) == snapped-scrolled-content-1.html snapped-scrolled-content-ref.html
 pref(layout.disable-pixel-alignment,true) == snapped-scrolled-content-1.html?top=-0.4 snapped-scrolled-content-ref.html
 pref(layout.disable-pixel-alignment,true) == snapped-scrolled-content-1.html?top=0.4 snapped-scrolled-content-ref.html
@@ -103,12 +102,12 @@ pref(layout.disable-pixel-alignment,true) == snapped-scrolled-content-1.html?scr
 pref(layout.disable-pixel-alignment,true) fails-if(useDrawSnapshot) == snapped-scrolled-content-1.html?scrollTop=999&innerBottom=240.3 snapped-scrolled-content-ref.html?offset=48
 pref(layout.disable-pixel-alignment,true) fails-if(useDrawSnapshot) == snapped-scrolled-content-1.html?top=-0.4&scrollTop=999&innerBottom=240.3 snapped-scrolled-content-ref.html?offset=48
 pref(layout.disable-pixel-alignment,true) fails-if(useDrawSnapshot) == snapped-scrolled-content-1.html?top=-0.4&scrollTop=999&innerBottom=239.6 snapped-scrolled-content-ref.html?offset=48
-pref(layout.disable-pixel-alignment,true) fails-if(useDrawSnapshot) == snapped-scrolled-content-2.html snapped-scrolled-content-ref.html
-pref(layout.disable-pixel-alignment,true) fails-if(useDrawSnapshot) == snapped-scrolled-content-2.html?scrollTop=4.1667 snapped-scrolled-content-ref.html?offset=5
+pref(layout.disable-pixel-alignment,true) == snapped-scrolled-content-2.html snapped-scrolled-content-ref.html
+pref(layout.disable-pixel-alignment,true) == snapped-scrolled-content-2.html?scrollTop=4.1667 snapped-scrolled-content-ref.html?offset=5
 pref(layout.disable-pixel-alignment,true) fails-if(useDrawSnapshot) == snapped-scrolled-content-2.html?scrollTop=4 snapped-scrolled-content-ref.html?offset=5
 pref(layout.disable-pixel-alignment,true) fails-if(useDrawSnapshot) == snapped-scrolled-content-2.html?scrollTop=3 snapped-scrolled-content-ref.html?offset=4
 pref(layout.disable-pixel-alignment,true) fails-if(useDrawSnapshot) == snapped-scrolled-content-2.html?scrollTop=2 snapped-scrolled-content-ref.html?offset=2
-pref(layout.disable-pixel-alignment,true) fails-if(useDrawSnapshot) == snapped-scrolled-content-2.html?scrollTop=1 snapped-scrolled-content-ref.html?offset=1
+pref(layout.disable-pixel-alignment,true) == snapped-scrolled-content-2.html?scrollTop=1 snapped-scrolled-content-ref.html?offset=1
 pref(layout.disable-pixel-alignment,true) fails-if(useDrawSnapshot) == snapped-scrolled-content-1.html?top=0&scrollIntoViewPos=4.4 snapped-scrolled-content-ref.html?offset=4
 pref(layout.disable-pixel-alignment,true) fails-if(useDrawSnapshot) == snapped-scrolled-content-1.html?top=0&scrollIntoViewPos=3.7 snapped-scrolled-content-ref.html?offset=4
 
@@ -120,12 +119,12 @@ pref(layout.disable-pixel-alignment,true) fuzzy-if(Android||cocoaWidget,255-255,
 pref(layout.disable-pixel-alignment,true) fuzzy-if(Android||cocoaWidget,255-255,296-321) fails-if(useDrawSnapshot) == snapped-scrolled-content-1.html?text=1&scrollTop=999&innerBottom=240.3 snapped-scrolled-content-ref.html?text=1&offset=48
 pref(layout.disable-pixel-alignment,true) fuzzy-if(Android||cocoaWidget,255-255,296-321) fails-if(useDrawSnapshot) == snapped-scrolled-content-1.html?text=1&top=-0.4&scrollTop=999&innerBottom=240.3 snapped-scrolled-content-ref.html?text=1&offset=48
 pref(layout.disable-pixel-alignment,true) fuzzy-if(Android||cocoaWidget,255-255,296-321) fails-if(useDrawSnapshot) == snapped-scrolled-content-1.html?text=1&top=-0.4&scrollTop=999&innerBottom=239.6 snapped-scrolled-content-ref.html?text=1&offset=48
-pref(layout.disable-pixel-alignment,true) fuzzy-if(Android||cocoaWidget,255-255,296-321) fails-if(useDrawSnapshot) == snapped-scrolled-content-2.html?text=1 snapped-scrolled-content-ref.html?text=1
-pref(layout.disable-pixel-alignment,true) fuzzy-if(Android||cocoaWidget,255-255,296-321) fails-if(useDrawSnapshot) == snapped-scrolled-content-2.html?text=1&scrollTop=4.1667 snapped-scrolled-content-ref.html?text=1&offset=5
+pref(layout.disable-pixel-alignment,true) fuzzy-if(Android||cocoaWidget,255-255,296-321) == snapped-scrolled-content-2.html?text=1 snapped-scrolled-content-ref.html?text=1
+pref(layout.disable-pixel-alignment,true) fuzzy-if(Android||cocoaWidget,255-255,296-321) == snapped-scrolled-content-2.html?text=1&scrollTop=4.1667 snapped-scrolled-content-ref.html?text=1&offset=5
 pref(layout.disable-pixel-alignment,true) fuzzy-if(Android||cocoaWidget,255-255,296-321) fails-if(useDrawSnapshot) == snapped-scrolled-content-2.html?text=1&scrollTop=4 snapped-scrolled-content-ref.html?text=1&offset=5
 pref(layout.disable-pixel-alignment,true) fuzzy-if(Android||cocoaWidget,255-255,296-321) fails-if(useDrawSnapshot) == snapped-scrolled-content-2.html?text=1&scrollTop=3 snapped-scrolled-content-ref.html?text=1&offset=4
 pref(layout.disable-pixel-alignment,true) fuzzy-if(Android||cocoaWidget,255-255,296-321) fails-if(useDrawSnapshot) == snapped-scrolled-content-2.html?text=1&scrollTop=2 snapped-scrolled-content-ref.html?text=1&offset=2
-pref(layout.disable-pixel-alignment,true) fuzzy-if(Android||cocoaWidget,255-255,296-321) fails-if(useDrawSnapshot) == snapped-scrolled-content-2.html?text=1&scrollTop=1 snapped-scrolled-content-ref.html?text=1&offset=1
+pref(layout.disable-pixel-alignment,true) fuzzy-if(Android||cocoaWidget,255-255,296-321) == snapped-scrolled-content-2.html?text=1&scrollTop=1 snapped-scrolled-content-ref.html?text=1&offset=1
 pref(layout.disable-pixel-alignment,true) fuzzy-if(Android||cocoaWidget,255-255,296-321) fails-if(useDrawSnapshot) == snapped-scrolled-content-1.html?text=1&top=0&scrollIntoViewPos=4.4 snapped-scrolled-content-ref.html?text=1&offset=4
 pref(layout.disable-pixel-alignment,true) fuzzy-if(Android||cocoaWidget,255-255,296-321) fails-if(useDrawSnapshot) == snapped-scrolled-content-1.html?text=1&top=0&scrollIntoViewPos=3.7 snapped-scrolled-content-ref.html?text=1&offset=4
 
@@ -163,16 +162,11 @@ pref(image.testing.decode-sync.enabled,false) == anchor-scroll-01.html anchor-sc
 # that needs a different value overrides it on its own line.
 defaults pref(layout.css.fake-webkit-scrollbar.enabled,true) pref(layout.css.fake-webkit-scrollbar.enabled-domains,"*")
 
-# Test case for @supports selector(::-webkit-scrollbar).
-# We do return true for the @supports
+# Test case for @supports selector(::-webkit-scrollbar). We report the
+# pseudo-element as unsupported even where we do enable it, so the @supports
+# answer doesn't depend on the allowlist.
 == webkit-scrollbar-in-at-supports.html about:blank
-# And we should return false when the document's domain is not on the allowlist.
-pref(layout.css.fake-webkit-scrollbar.enabled-domains,"example.com") HTTP != webkit-scrollbar-in-at-supports.html about:blank
-# Test case for CSS.supports("selector(::-webkit-scrollbar)") (the JS API).
-# We do return true when the pseudo-element is enabled.
-== webkit-scrollbar-in-css-supports.html about:blank
-# And we should return false when the document's domain is not on the allowlist.
-pref(layout.css.fake-webkit-scrollbar.enabled-domains,"example.com") HTTP != webkit-scrollbar-in-css-supports.html about:blank
+pref(layout.css.fake-webkit-scrollbar.enabled-domains,"example.com") HTTP == webkit-scrollbar-in-at-supports.html about:blank
 # Test case where two containers have ::-webkit-scrollbar has non-zero `width` and `height`, thus overlay scrollbars are disabled on the container, but there's another container has no ::-webkit-scrollbar.
 test-pref(ui.useOverlayScrollbars,1) test-pref(layout.testing.overlay-scrollbars.always-visible,false) test-pref(ui.scrollbarFadeBeginDelay,0) ref-pref(ui.useOverlayScrollbars,0) == webkit-scrollbar.html webkit-scrollbar-ref.html
 # And overlay scrollbars are left alone when the document's domain is not on the allowlist.
@@ -211,12 +205,15 @@ skip-if(Android) pref(layout.testing.overlay-scrollbars.always-visible,false) pr
 skip-if(!Android) pref(layout.testing.overlay-scrollbars.always-visible,false) pref(ui.scrollbarFadeBeginDelay,0) pref(ui.useOverlayScrollbars,1) == webkit-scrollbar-on-root-on-mobile.html about:blank
 
 # Test cases for the layout.css.fake-webkit-scrollbar.enabled-domains allowlist
-# itself, so they set the list instead of defaulting it to "*".
-defaults pref(layout.css.fake-webkit-scrollbar.enabled,true)
+# itself, so they set the list instead of defaulting it to "*". They probe the
+# allowlist with ::-webkit-scrollbar { display: none }, which only hides the
+# scrollbar when the pseudo-element is enabled; classic scrollbars keep that
+# observable.
+defaults pref(layout.css.fake-webkit-scrollbar.enabled,true) pref(ui.useOverlayScrollbars,0)
 
 # An entry matches the document's domain exactly. On Android the HTTP host is
 # not "localhost", it's the IP address of the host machine.
-skip-if(Android) pref(layout.css.fake-webkit-scrollbar.enabled-domains,"localhost") HTTP == webkit-scrollbar-in-css-supports.html about:blank
+skip-if(Android) pref(layout.css.fake-webkit-scrollbar.enabled-domains,"localhost") HTTP == webkit-scrollbar-display-none.html webkit-scrollbar-display-none-ref.html
 # An entry starting with "*." matches any sub-domain. The document in the
 # iframe is served from example.org, so "*.org" covers it and "*.example.com"
 # does not.
@@ -224,6 +221,6 @@ skip-if(Android) pref(layout.css.fake-webkit-scrollbar.enabled-domains,"*.org") 
 skip-if(Android) pref(layout.css.fake-webkit-scrollbar.enabled-domains,"*.example.com") HTTP != webkit-scrollbar-allowlist-subdomain.html webkit-scrollbar-allowlist-subdomain-ref.html
 # An empty allowlist lists no domain at all, so it disables the pseudo-element
 # everywhere.
-pref(layout.css.fake-webkit-scrollbar.enabled-domains,"") HTTP != webkit-scrollbar-in-css-supports.html about:blank
+pref(layout.css.fake-webkit-scrollbar.enabled-domains,"") HTTP != webkit-scrollbar-display-none.html webkit-scrollbar-display-none-ref.html
 
 defaults

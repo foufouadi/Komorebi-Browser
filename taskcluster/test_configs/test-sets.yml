@@ -74,6 +74,8 @@ talos:
     - talos-realworld-webextensions
     - talos-webgl
     - talos-pdfpaint
+    - talos-pdfpaint-main-hwa
+    - talos-pdfpaint-main-sw
     # - talos-h1 Bug 1487031 - Disabled for not finding actionable regressions
     # - talos-h2 Bug 1487031 - Disabled for not finding actionable regressions
 
@@ -109,6 +111,7 @@ browsertime:
     - browsertime-benchmark-wasm
     - browsertime-youtube-playback
     - browsertime-youtube-playback-power
+    - browsertime-media-playback
     - browsertime-media-seek
     - browsertime-custom
     - browsertime-first-install
@@ -126,6 +129,7 @@ browsertime:
     - browsertime-webcodecs
     - browsertime-trr-performance
     - browsertime-hev3-connection
+    - browsertime-doh-busy-site
 
 browsertime-clang:
     - browsertime-tp6
@@ -156,11 +160,20 @@ devtools-compat:
     - devtools-compat-release
 
 awsy:
-    - awsy
     - awsy-base
     - awsy-dmd
     - awsy-base-dmd
     - awsy-tp6
+
+# Pageload AWSY tests for the macOS tart VMs. The base tests stay on hardware
+# for now, as their results were less stable on the VMs (Bug 2045799).
+awsy-pageload:
+    - awsy-dmd
+    - awsy-tp6
+
+awsy-base:
+    - awsy-base
+    - awsy-base-dmd
 
 ccov-code-coverage-tests:
     - test-coverage
@@ -206,6 +219,7 @@ linux-tests:
     - mochitest-chrome-gpu
     - mochitest-devtools-chrome
     - mochitest-media
+    - mochitest-speech-recognition
     - mochitest-plain
     - mochitest-plain-gpu
     - mochitest-remote
@@ -216,6 +230,7 @@ linux-tests:
     - reftest
     - telemetry-tests-client
     - test-verify
+    - test-verify-path
     - test-verify-gpu
     - test-verify-wpt
     - xpcshell
@@ -238,6 +253,7 @@ linux-2404-tsan-tests:
     - mochitest-chrome-gpu
     - mochitest-devtools-chrome
     - mochitest-media
+    - mochitest-speech-recognition
     - mochitest-plain
     - mochitest-plain-gpu
     - mochitest-remote
@@ -248,6 +264,7 @@ linux-2404-tsan-tests:
     - reftest
     - telemetry-tests-client
     - test-verify
+    - test-verify-path
     - test-verify-gpu
     - test-verify-wpt
     - xpcshell
@@ -278,6 +295,7 @@ linux2204-wayland-tests:
     - mochitest-chrome-gpu
     - mochitest-devtools-chrome
     - mochitest-media
+    - mochitest-speech-recognition
     - mochitest-plain
     - mochitest-plain-gpu
     - mochitest-remote
@@ -288,6 +306,7 @@ linux2204-wayland-tests:
     - reftest
     - telemetry-tests-client
     - test-verify
+    - test-verify-path
     - test-verify-gpu
     - test-verify-wpt
     - xpcshell
@@ -309,6 +328,7 @@ windows32-tests:
     - mochitest-media
     - reftest
     - test-verify
+    - test-verify-path
     - test-verify-gpu
     - test-verify-wpt
     - xpcshell
@@ -358,6 +378,7 @@ windows11-25h2-tests:
     - mochitest-chrome-gpu
     - mochitest-devtools-chrome
     - mochitest-media
+    - mochitest-speech-recognition
     - mochitest-plain
     - mochitest-plain-gpu
     - mochitest-remote
@@ -367,6 +388,7 @@ windows11-25h2-tests:
     - mochitest-webgl2-ext
     - telemetry-tests-client
     - test-verify
+    - test-verify-path
     - test-verify-gpu
     - test-verify-wpt
     - xpcshell
@@ -427,6 +449,8 @@ windows-talos:
     - talos-tabswitch
     - talos-realworld-webextensions
     - talos-pdfpaint
+    - talos-pdfpaint-main-hwa
+    - talos-pdfpaint-main-sw
 
 windows-ref-hw-tests:
     - browsertime-video-playback-latency
@@ -436,9 +460,6 @@ talos-xperf:
     - talos-xperf
 
 # macOS
-macosx1500-64-jittests:
-    - jittest
-
 macosx1500-64-tests:
     - cppunittest
     - crashtest
@@ -456,6 +477,7 @@ macosx1500-64-tests:
     - mochitest-chrome-gpu
     - mochitest-devtools-chrome
     - mochitest-media
+    - mochitest-speech-recognition
     - mochitest-plain
     - mochitest-plain-gpu
     - mochitest-remote
@@ -466,6 +488,7 @@ macosx1500-64-tests:
     - reftest
     - telemetry-tests-client
     - test-verify
+    - test-verify-path
     - test-verify-gpu
     - test-verify-wpt
     - xpcshell
@@ -485,17 +508,17 @@ macosx1500-aarch64-tests:
     - jsreftest
     - marionette-integration
     - marionette-unittest
-    - crashtest
-    - jittest
     - mochitest-a11y
     - mochitest-browser-a11y
     - mochitest-browser-chrome
+    - mochitest-browser-chrome-ml-models
     - mochitest-browser-media
     - mochitest-browser-translations
     - mochitest-chrome
     - mochitest-chrome-gpu
     - mochitest-devtools-chrome
     - mochitest-media
+    - mochitest-speech-recognition
     - mochitest-plain
     - mochitest-plain-gpu
     - mochitest-remote
@@ -506,6 +529,7 @@ macosx1500-aarch64-tests:
     - reftest
     - telemetry-tests-client
     - test-verify
+    - test-verify-path
     - test-verify-gpu
     - test-verify-wpt
     - web-platform-tests
@@ -519,20 +543,12 @@ macosx1500-aarch64-tests:
     - web-platform-tests-webcodecs
     - xpcshell
 
-# Test set for ARM64 VMs (VirtualMac2,1). No GPU, no display, no perf hardware.
-# Limited to suites empirically validated on these workers; tests that need
-# a real WindowServer (focus management, accessibility hierarchy, browser
-# windows, fullscreen, compositor hooks) hang or timeout and are intentionally
-# omitted. web-platform-tests is also omitted pending Bug 2038639 (GPU process
-# leak in APZCTreeManager::CheckerboardFlushObservers on headless macOS).
-# Suites can be re-added as headless support improves.
-#
-# In particular, no browser-chrome flavor suite belongs here: browser-test.js
-# calls SimpleTest.waitForFocus before every test, which awaits a focus event
-# with no timeout, and window activation never completes on these workers. That
-# hangs the browser before the first test and burns the full harness timeout on
-# every retry. See Bug 2059365 (mochitest-remote) and Bug 2050174 (the
-# underlying activation issue).
+# Test set for ARM64 VMs (VirtualMac2,1). No GPU and no perf hardware, but the
+# guests run a logged-in Aqua session with a 1920x1080 display (Bug 2037084).
+# Limited to suites empirically validated on these workers; tests that only
+# fail here are skipped with the macos_vm mozinfo key. web-platform-tests is
+# omitted pending Bug 2038639 (GPU process leak in
+# APZCTreeManager::CheckerboardFlushObservers on macOS VMs).
 macosx1500-aarch64-vms-tests:
     - cppunittest
     - crashtest
@@ -540,8 +556,10 @@ macosx1500-aarch64-vms-tests:
     - jsreftest
     - marionette-integration
     - marionette-unittest
+    - mochitest-browser-chrome
     - mochitest-chrome
     - mochitest-plain
+    - mochitest-remote
     - telemetry-tests-client
     - xpcshell
 
@@ -549,7 +567,6 @@ macosx1470-64-tests:
     - cppunittest
 
 macosx1015-64-qr-tests:
-    - cppunittest
     - crashtest
     - jittest
     - mochitest-media
@@ -579,12 +596,13 @@ macosx64-talos:
     - talos-webgl
     - talos-tabswitch
     - talos-pdfpaint
+    - talos-pdfpaint-main-hwa
+    - talos-pdfpaint-main-sw
     # - talos-h1 # too long to unpack profile- Bug 1442893
 
-macosx1500-64-perftests:
+macosx2700-aarch64-perftests:
     - browsertime-benchmark
-    - browsertime-nav-bench
-    - browsertime-tp6-essential
+    - browsertime-video-playback-latency
 
 # Android
 
@@ -610,6 +628,10 @@ android14-x86_64-tests:
     - web-platform-tests-eme
     - web-platform-tests-webrtc
     - xpcshell
+
+android14-x86_64-appservices-tests:
+    - cppunittest
+    - gtest
 
 android-hw-aarch64-opt-unittests:
     - jittest
@@ -637,6 +659,7 @@ android-hw-aarch64:
 android-hw-browsertime:
     - browsertime-tp6m
     - browsertime-tp6m-essential
+    - browsertime-nav-bench-m
     - browsertime-tp6m-webextensions
     - browsertime-tp6m-live
     - browsertime-benchmark-speedometer2-mobile
@@ -644,12 +667,12 @@ android-hw-browsertime:
     - browsertime-youtube-playback-mobile
     - browsertime-benchmark-unity-webgl-mobile
     - browsertime-benchmark-motionmark-1-3
-    - browsertime-benchmark-jetstream2
     - browsertime-benchmark-jetstream3
     - browsertime-video-playback-latency-mobile
     - browsertime-youtube-playback-power-mobile
     - browsertime-trr-performance-m
     - browsertime-hev3-connection-m
+    - browsertime-doh-busy-site-m
 
 android-hw-browsertime-profiling:
     - browsertime-tp6m-profiling
@@ -658,8 +681,20 @@ android-hw-speedometer-tests:
     - browsertime-benchmark-speedometer2-mobile
     - browsertime-benchmark-speedometer3-mobile
 
-android-em-arm64-speedometer-tests:
+android-hw-doh-tests:
+    - browsertime-doh-busy-site-m
+
+android-em-arm64-benchmark-tests:
     - browsertime-benchmark-speedometer3-mobile
+    - browsertime-benchmark-jetstream3
+    - browsertime-youtube-playback-mobile
+    - browsertime-nav-bench-m
+
+android-hw-speedometer3-nightlyasrelease:
+    - browsertime-benchmark-speedometer3-mobile
+
+android-hw-nav-bench-nightlyasrelease:
+    - browsertime-nav-bench-m
 
 android-hw-power-tests:
     - browsertime-youtube-playback-power-mobile

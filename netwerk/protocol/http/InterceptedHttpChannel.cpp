@@ -4,6 +4,8 @@
 
 #include "InterceptedHttpChannel.h"
 
+#include <memory>
+
 #include "NetworkMarker.h"
 #include "mozilla/Logging.h"
 #include "mozilla/SchedulerGroup.h"
@@ -62,6 +64,7 @@ void InterceptedHttpChannel::ReleaseListeners() {
   mBodyReader = nullptr;
   mReleaseHandle = nullptr;
   mProgressSink = nullptr;
+  mHasProgressSink = false;
   mBodyCallback = nullptr;
   mPump = nullptr;
 
@@ -110,7 +113,8 @@ void InterceptedHttpChannel::AsyncOpenInternal() {
         mURI, requestMethod, mPriority, mChannelId, NetworkLoadType::LOAD_START,
         mChannelCreationTimestamp, mLastStatusReported, 0, kCacheUnknown,
         mLoadInfo->GetInnerWindowID(),
-        mLoadInfo->GetOriginAttributes().IsPrivateBrowsing(), this, mStatus);
+        mLoadInfo->GetOriginAttributes().IsPrivateBrowsing(), this, mStatus,
+        GetSecPurpose(), mLoadInfo->GetActivatedFromNavigationalPrefetch());
   }
 
   // If an error occurs in this file we must ensure mListener callbacks are
@@ -225,6 +229,12 @@ nsresult InterceptedHttpChannel::FollowSyntheticRedirect() {
 
   bool rewriteToGET = ShouldRewriteRedirectToGET(mResponseHead->Status(),
                                                  mRequestHead.ParsedMethod());
+
+  // A streaming body has no source, so it cannot be resent.
+  // https://fetch.spec.whatwg.org/#http-redirect-fetch
+  if (!rewriteToGET && LoadUploadStreamIsStreaming()) {
+    return NS_ERROR_NET_BODY_NOT_REPLAYABLE;
+  }
 
   nsCOMPtr<nsIChannel> newChannel;
   nsCOMPtr<nsILoadInfo> redirectLoadInfo =
@@ -491,7 +501,7 @@ InterceptedHttpChannel::CreateForSynthesis(
   RefPtr<InterceptedHttpChannel> ref = new InterceptedHttpChannel(
       aCreationTime, aCreationTimestamp, aAsyncOpenTimestamp);
 
-  ref->mResponseHead = MakeUnique<nsHttpResponseHead>(*aHead);
+  ref->mResponseHead = std::make_unique<nsHttpResponseHead>(*aHead);
   ref->mBodyReader = aBody;
   ref->mBodyCallback = aBodyCallback;
 
@@ -548,6 +558,7 @@ InterceptedHttpChannel::Cancel(nsresult aStatus) {
         mLastStatusReported, TimeStamp::Now(), size, kCacheUnknown,
         mLoadInfo->GetInnerWindowID(),
         mLoadInfo->GetOriginAttributes().IsPrivateBrowsing(), this, mStatus,
+        GetSecPurpose(), mLoadInfo->GetActivatedFromNavigationalPrefetch(),
         &mTransactionTimings, std::move(mSource));
   }
 
@@ -735,6 +746,11 @@ InterceptedHttpChannel::ResetInterception(bool aBypass) {
     return mStatus;
   }
 
+  // A streaming body handed to the worker must be returned before fallback.
+  if (LoadUploadStreamIsStreaming() && !mUploadStream) {
+    return NS_ERROR_NET_BODY_NOT_REPLAYABLE;
+  }
+
   mInterceptionReset = true;
 
   uint32_t flags = nsIChannelEventSink::REDIRECT_INTERNAL;
@@ -784,6 +800,7 @@ InterceptedHttpChannel::ResetInterception(bool aBypass) {
         NetworkLoadType::LOAD_REDIRECT, mLastStatusReported, TimeStamp::Now(),
         size, kCacheUnknown, mLoadInfo->GetInnerWindowID(),
         mLoadInfo->GetOriginAttributes().IsPrivateBrowsing(), this, mStatus,
+        GetSecPurpose(), mLoadInfo->GetActivatedFromNavigationalPrefetch(),
         &mTransactionTimings, std::move(mSource), httpVersion, responseStatus,
         Some(nsDependentCString(contentType.get())), mURI, flags,
         newBaseChannel->ChannelId());
@@ -841,7 +858,7 @@ InterceptedHttpChannel::SynthesizeStatus(uint16_t aStatus,
   }
 
   if (!mSynthesizedResponseHead) {
-    mSynthesizedResponseHead.reset(new nsHttpResponseHead());
+    mSynthesizedResponseHead = std::make_unique<nsHttpResponseHead>();
   }
 
   nsAutoCString statusLine;
@@ -863,7 +880,7 @@ InterceptedHttpChannel::SynthesizeHeader(const nsACString& aName,
   }
 
   if (!mSynthesizedResponseHead) {
-    mSynthesizedResponseHead.reset(new nsHttpResponseHead());
+    mSynthesizedResponseHead = std::make_unique<nsHttpResponseHead>();
   }
 
   nsAutoCString header = aName + ": "_ns + aValue;
@@ -910,7 +927,7 @@ InterceptedHttpChannel::StartSynthesizedResponse(
   mSynthesizedCacheInfo = aSynthesizedCacheInfo;
 
   if (!mSynthesizedResponseHead) {
-    mSynthesizedResponseHead.reset(new nsHttpResponseHead());
+    mSynthesizedResponseHead = std::make_unique<nsHttpResponseHead>();
   }
 
   mResponseHead = std::move(mSynthesizedResponseHead);
@@ -1147,6 +1164,7 @@ InterceptedHttpChannel::OnStartRequest(nsIRequest* aRequest) {
   if (!mProgressSink) {
     GetCallback(mProgressSink);
   }
+  mHasProgressSink = !!mProgressSink;
 
   MOZ_ASSERT_IF(!mLoadInfo->GetServiceWorkerTaintingSynthesized(),
                 mLoadInfo->GetLoadingPrincipal());
@@ -1239,6 +1257,7 @@ InterceptedHttpChannel::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
         mLastStatusReported, TimeStamp::Now(), size, kCacheUnknown,
         mLoadInfo->GetInnerWindowID(),
         mLoadInfo->GetOriginAttributes().IsPrivateBrowsing(), this, mStatus,
+        GetSecPurpose(), mLoadInfo->GetActivatedFromNavigationalPrefetch(),
         &mTransactionTimings, std::move(mSource), httpVersion, responseStatus,
         Some(nsDependentCString(contentType.get())));
   }
@@ -1269,7 +1288,7 @@ InterceptedHttpChannel::OnDataAvailable(nsIRequest* aRequest,
     aInputStream->ReadSegments(NS_DiscardSegment, nullptr, aCount, &unused);
     return mStatus;
   }
-  if (mProgressSink) {
+  if (mHasProgressSink) {
     if (!(mLoadFlags & HttpBaseChannel::LOAD_BACKGROUND)) {
       mProgress = aOffset + aCount;
       MaybeCallStatusAndProgress();

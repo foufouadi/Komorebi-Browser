@@ -312,6 +312,17 @@ static vpx_codec_err_t vp8_decode(vpx_codec_alg_priv_t *ctx,
     res = VPX_CODEC_OK;
   }
 
+#if CONFIG_SIZE_LIMIT
+  // Reject oversized keyframes before decoder initialization allocates frame
+  // buffers.
+  if (!res && ctx->si.is_kf &&
+      (ctx->si.w > DECODE_WIDTH_LIMIT || ctx->si.h > DECODE_HEIGHT_LIMIT)) {
+    ctx->si.w = 0;
+    ctx->si.h = 0;
+    res = VPX_CODEC_CORRUPT_FRAME;
+  }
+#endif
+
   if (!ctx->decoder_init && !ctx->si.is_kf) res = VPX_CODEC_UNSUP_BITSTREAM;
   if (!res && ctx->decoder_init && w == 0 && h == 0 && ctx->si.h == 0 &&
       ctx->si.w == 0) {
@@ -332,8 +343,13 @@ static vpx_codec_err_t vp8_decode(vpx_codec_alg_priv_t *ctx,
     VP8_COMMON *const pc = &pbi->common;
     if (setjmp(pbi->common.error.jmp)) {
       pbi->common.error.setjmp = 0;
+      /* on failure clear the cached resolution to ensure a full
+       * reallocation is attempted on resync. */
+      ctx->si.w = 0;
+      ctx->si.h = 0;
       vp8_decoder_remove_threads(pbi);
       vpx_clear_system_state();
+      ctx->fragments.count = 0;
       return VPX_CODEC_ERROR;
     }
     pbi->common.error.setjmp = 1;
@@ -407,6 +423,7 @@ static vpx_codec_err_t vp8_decode(vpx_codec_alg_priv_t *ctx,
           ctx->si.h = 0;
           vpx_clear_system_state();
           /* same return value as used in vp8dx_receive_compressed_data */
+          ctx->fragments.count = 0;
           return -1;
         }
 
@@ -506,6 +523,7 @@ static vpx_codec_err_t vp8_decode(vpx_codec_alg_priv_t *ctx,
       }
 #endif
       res = update_error_state(ctx, &pbi->common.error);
+      ctx->fragments.count = 0;
       return res;
     }
 
@@ -521,11 +539,11 @@ static vpx_codec_err_t vp8_decode(vpx_codec_alg_priv_t *ctx,
       res = update_error_state(ctx, &pbi->common.error);
     }
 
-    /* get ready for the next series of fragments */
-    ctx->fragments.count = 0;
     pbi->common.error.setjmp = 0;
   }
 
+  /* A complete fragment sequence is consumed even when decoding fails. */
+  ctx->fragments.count = 0;
   return res;
 }
 
@@ -593,6 +611,12 @@ static vpx_codec_err_t vp8_set_reference(vpx_codec_alg_priv_t *ctx,
     vpx_ref_frame_t *frame = (vpx_ref_frame_t *)data;
     YV12_BUFFER_CONFIG sd;
 
+    if (frame->img.planes[VPX_PLANE_Y] == NULL ||
+        frame->img.planes[VPX_PLANE_U] == NULL ||
+        frame->img.planes[VPX_PLANE_V] == NULL) {
+      return VPX_CODEC_INVALID_PARAM;
+    }
+
     image2yuvconfig(&frame->img, &sd);
 
     if (ctx->yv12_frame_buffers.pbi[0] == NULL) return VPX_CODEC_CORRUPT_FRAME;
@@ -611,6 +635,12 @@ static vpx_codec_err_t vp8_get_reference(vpx_codec_alg_priv_t *ctx,
   if (data) {
     vpx_ref_frame_t *frame = (vpx_ref_frame_t *)data;
     YV12_BUFFER_CONFIG sd;
+
+    if (frame->img.planes[VPX_PLANE_Y] == NULL ||
+        frame->img.planes[VPX_PLANE_U] == NULL ||
+        frame->img.planes[VPX_PLANE_V] == NULL) {
+      return VPX_CODEC_INVALID_PARAM;
+    }
 
     image2yuvconfig(&frame->img, &sd);
 

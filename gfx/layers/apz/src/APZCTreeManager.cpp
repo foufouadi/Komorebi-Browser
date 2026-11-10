@@ -176,7 +176,7 @@ class APZCTreeManager::CheckerboardFlushObserver : public nsIObserver {
 
   explicit CheckerboardFlushObserver(APZCTreeManager* aTreeManager)
       : mTreeManager(aTreeManager) {
-    MOZ_ASSERT(NS_IsMainThread());
+    MOZ_RELEASE_ASSERT(NS_IsMainThread());
     nsCOMPtr<nsIObserverService> obsSvc =
         mozilla::services::GetObserverService();
     MOZ_ASSERT(obsSvc);
@@ -186,7 +186,7 @@ class APZCTreeManager::CheckerboardFlushObserver : public nsIObserver {
   }
 
   void Unregister() {
-    MOZ_ASSERT(NS_IsMainThread());
+    MOZ_RELEASE_ASSERT(NS_IsMainThread());
     nsCOMPtr<nsIObserverService> obsSvc =
         mozilla::services::GetObserverService();
     if (obsSvc) {
@@ -208,7 +208,7 @@ NS_IMETHODIMP
 APZCTreeManager::CheckerboardFlushObserver::Observe(nsISupports* aSubject,
                                                     const char* aTopic,
                                                     const char16_t*) {
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_RELEASE_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mTreeManager.get());
 
   RecursiveMutexAutoLock lock(mTreeManager->mTreeLock);
@@ -226,7 +226,7 @@ APZCTreeManager::CheckerboardFlushObserver::Observe(nsISupports* aSubject,
       (void)gpu->SendFlushActiveCheckerboardReportsDone();
     }
   } else {
-    MOZ_ASSERT(XRE_IsParentProcess());
+    MOZ_RELEASE_ASSERT(XRE_IsParentProcess());
     nsCOMPtr<nsIObserverService> obsSvc =
         mozilla::services::GetObserverService();
     if (obsSvc) {
@@ -275,6 +275,7 @@ class MOZ_RAII AutoFocusSequenceNumberSetter {
 };
 
 APZCTreeManager::APZCTreeManager(LayersId aRootLayersId,
+                                 CSSToLayoutDeviceScale aWidgetScale,
                                  UniquePtr<IAPZHitTester> aHitTester)
     : mTestSampleTime(Nothing(), "APZCTreeManager::mTestSampleTime"),
       mInputQueue(new InputQueue()),
@@ -290,6 +291,7 @@ APZCTreeManager::APZCTreeManager(LayersId aRootLayersId,
       mApzcTreeLog("apzctree"),
       mTestDataLock("APZTestDataLock"),
       mDPI(160.0),
+      mWidgetScale(aWidgetScale),
       mHitTester(std::move(aHitTester)),
       mScrollGenerationLock("APZScrollGenerationLock"),
       mInteractiveWidget(
@@ -300,7 +302,7 @@ APZCTreeManager::APZCTreeManager(LayersId aRootLayersId,
   mApzcTreeLog.ConditionOnPrefFunction(StaticPrefs::apz_printtree);
 
   if (!mHitTester) {
-    mHitTester = MakeUnique<WRHitTester>();
+    mHitTester = std::make_unique<WRHitTester>();
   }
   mHitTester->Initialize(this);
 }
@@ -315,9 +317,10 @@ void APZCTreeManager::Init() {
 }
 
 already_AddRefed<APZCTreeManager> APZCTreeManager::Create(
-    LayersId aRootLayersId, UniquePtr<IAPZHitTester> aHitTester) {
+    LayersId aRootLayersId, CSSToLayoutDeviceScale aWidgetScale,
+    UniquePtr<IAPZHitTester> aHitTester) {
   RefPtr<APZCTreeManager> manager =
-      new APZCTreeManager(aRootLayersId, std::move(aHitTester));
+      new APZCTreeManager(aRootLayersId, aWidgetScale, std::move(aHitTester));
   manager->Init();
   return manager.forget();
 }
@@ -351,20 +354,6 @@ void APZCTreeManager::NotifyLayerTreeAdopted(
   // Resetting the focus state avoids this (the state will sync with content
   // on the next focus update).
   mFocusState.Reset();
-
-  UniquePtr<APZTestData> adoptedData;
-  if (aOldApzcTreeManager) {
-    MutexAutoLock lock(aOldApzcTreeManager->mTestDataLock);
-    auto it = aOldApzcTreeManager->mTestData.find(aLayersId);
-    if (it != aOldApzcTreeManager->mTestData.end()) {
-      adoptedData = std::move(it->second);
-      aOldApzcTreeManager->mTestData.erase(it);
-    }
-  }
-  if (adoptedData) {
-    MutexAutoLock lock(mTestDataLock);
-    mTestData[aLayersId] = std::move(adoptedData);
-  }
 }
 
 void APZCTreeManager::NotifyLayerTreeRemoved(LayersId aLayersId) {
@@ -464,7 +453,7 @@ std::vector<LayersId> APZCTreeManager::UpdateHitTestingTree(
   const bool testLoggingEnabled = StaticPrefs::apz_test_logging_enabled();
   if (testLoggingEnabled) {
     MutexAutoLock lock(mTestDataLock);
-    UniquePtr<APZTestData> ptr = MakeUnique<APZTestData>();
+    auto ptr = std::make_unique<APZTestData>();
     auto result =
         mTestData.insert(std::make_pair(aOriginatingLayersId, std::move(ptr)));
     testData = result.first->second.get();
@@ -930,8 +919,11 @@ void APZCTreeManager::SampleForWebRender(const Maybe<VsyncId>& aVsyncId,
       if (RefPtr<UiCompositorControllerParent> uiController =
               UiCompositorControllerParent::GetFromRootLayerTreeId(
                   mRootLayersId)) {
-        uiController->NotifyCompositorScrollUpdates(
-            apzc->GetCompositorScrollUpdates());
+        nsTArray<CompositorScrollUpdate> updates =
+            apzc->GetCompositorScrollUpdates();
+        if (!updates.IsEmpty()) {
+          uiController->NotifyCompositorScrollUpdates(std::move(updates));
+        }
       }
     }
   }
@@ -1151,28 +1143,33 @@ void APZCTreeManager::StartScrollbarDrag(const ScrollableLayerGuid& aGuid,
   mInputQueue->ConfirmDragBlock(inputBlockId, apzc, aDragMetrics);
 }
 
-bool APZCTreeManager::StartAutoscroll(const ScrollableLayerGuid& aGuid,
+void APZCTreeManager::StartAutoscroll(const ScrollableLayerGuid& aGuid,
                                       const ScreenPoint& aAnchorLocation) {
-  APZThreadUtils::AssertOnControllerThread();
+  if (!APZThreadUtils::IsControllerThread()) {
+    APZThreadUtils::RunOnControllerThread(
+        NewRunnableMethod<ScrollableLayerGuid, ScreenPoint>(
+            "layers::APZCTreeManager::StartAutoscroll", this,
+            &APZCTreeManager::StartAutoscroll, aGuid, aAnchorLocation));
+    return;
+  }
 
   RefPtr<AsyncPanZoomController> apzc = GetTargetAPZC(aGuid);
   if (!apzc) {
-    if (XRE_IsGPUProcess()) {
-      // If we're in the compositor process, the "return false" will be
-      // ignored because the query comes over the PAPZCTreeManager protocol
-      // via an async message. In this case, send an explicit rejection
-      // message to content.
-      NotifyAutoscrollRejected(aGuid);
-    }
-    return false;
+    NotifyAutoscrollRejected(aGuid);
+    return;
   }
 
   apzc->StartAutoscroll(aAnchorLocation);
-  return true;
 }
 
 void APZCTreeManager::StopAutoscroll(const ScrollableLayerGuid& aGuid) {
-  APZThreadUtils::AssertOnControllerThread();
+  if (!APZThreadUtils::IsControllerThread()) {
+    APZThreadUtils::RunOnControllerThread(
+        NewRunnableMethod<ScrollableLayerGuid>(
+            "layers::APZCTreeManager::StopAutoscroll", this,
+            &APZCTreeManager::StopAutoscroll, aGuid));
+    return;
+  }
 
   if (RefPtr<AsyncPanZoomController> apzc = GetTargetAPZC(aGuid)) {
     apzc->StopAutoscroll();
@@ -1203,8 +1200,9 @@ void APZCTreeManager::NotifyAutoscrollRejected(
     const ScrollableLayerGuid& aGuid) const {
   RefPtr<GeckoContentController> controller =
       GetContentController(aGuid.mLayersId);
-  MOZ_ASSERT(controller);
-  controller->NotifyAsyncAutoscrollRejected(aGuid.mScrollId);
+  if (controller) {
+    controller->NotifyAsyncAutoscrollRejected(aGuid.mScrollId);
+  }
 }
 
 void SetHitTestData(HitTestingTreeNode* aNode,
@@ -1552,7 +1550,7 @@ static bool WillHandleInput(const PanGestureOrScrollWheelInput& aPanInput) {
   }
 
   WidgetWheelEvent wheelEvent = aPanInput.ToWidgetEvent(nullptr);
-  return APZInputBridge::ActionForWheelEvent(&wheelEvent).isSome();
+  return APZBridge::ActionForWheelEvent(&wheelEvent).isSome();
 }
 
 /*static*/
@@ -1801,9 +1799,9 @@ APZEventResult APZCTreeManager::ReceiveInputEvent(
 
       // If/when we enable support for pan inputs off-main-thread, we'll need
       // to duplicate this EventStateManager code or something. See the call to
-      // GetUserPrefsForWheelEvent in APZInputBridge.cpp for why these fields
+      // GetUserPrefsForWheelEvent in APZBridge.cpp for why these fields
       // are stored separately.
-      MOZ_ASSERT(NS_IsMainThread());
+      MOZ_RELEASE_ASSERT(NS_IsMainThread());
       WidgetWheelEvent wheelEvent = panInput.ToWidgetEvent(nullptr);
       EventStateManager::GetUserPrefsForWheelEvent(
           &wheelEvent, &panInput.mUserDeltaMultiplierX,
@@ -2995,6 +2993,13 @@ ParentLayerPoint APZCTreeManager::DispatchFling(
   ParentLayerPoint finalResidualVelocity = aHandoffState.mVelocity;
 
   ParentLayerPoint currentVelocity = aHandoffState.mVelocity;
+
+  // The velocity which the APZCs this handoff has already passed through
+  // refused. It stays part of |currentVelocity|, and therefore of
+  // |availableVelocity| and |residualVelocity| below, but it is never offered
+  // to the rest of the chain again.
+  ParentLayerPoint refusedVelocity;
+
   for (; startIndex < overscrollHandoffChainLength; startIndex++) {
     current = chain->GetApzcAtIndex(startIndex);
 
@@ -3017,18 +3022,20 @@ ParentLayerPoint APZCTreeManager::DispatchFling(
     }
 
     ParentLayerPoint availableVelocity = (endPoint - startPoint);
-    ParentLayerPoint residualVelocity;
 
     FlingHandoffState transformedHandoffState = aHandoffState;
-    transformedHandoffState.mVelocity = availableVelocity;
+    // Don't offer |refusedVelocity|.
+    transformedHandoffState.mVelocity = availableVelocity - refusedVelocity;
 
-    // Obey overscroll-behavior.
     if (prevApzc) {
-      residualVelocity += prevApzc->AdjustHandoffVelocityForOverscrollBehavior(
+      refusedVelocity += prevApzc->AdjustHandoffVelocityForOverscrollBehavior(
           transformedHandoffState.mVelocity);
     }
 
-    residualVelocity += current->AttemptFling(transformedHandoffState);
+    ParentLayerPoint velocityToHandOff =
+        current->AttemptFling(transformedHandoffState);
+
+    ParentLayerPoint residualVelocity = refusedVelocity + velocityToHandOff;
 
     // If there's no residual velocity, there's nothing more to hand off.
     if (current->IsZero(residualVelocity)) {
@@ -3047,6 +3054,12 @@ ParentLayerPoint APZCTreeManager::DispatchFling(
       finalResidualVelocity.y *= (residualVelocity.y / availableVelocity.y);
     }
 
+    // Nothing was left over from |current|, so there is nothing the rest of
+    // the chain could consume. Whatever overscroll-behavior refused along the
+    // way is already part of |finalResidualVelocity| and goes back to |aPrev|.
+    if (current->IsZero(velocityToHandOff)) {
+      break;
+    }
     currentVelocity = residualVelocity;
   }
 
@@ -3342,6 +3355,42 @@ AsyncPanZoomController* APZCTreeManager::FindRootApzcFor(
 
   HitTestingTreeNode* resultNode = FindRootNodeForLayersId(aLayersId);
   return resultNode ? resultNode->GetApzc() : nullptr;
+}
+
+AsyncPanZoomController* APZCTreeManager::FindDoubleTapHandlerFor(
+    AsyncPanZoomController* aApzc) {
+  RecursiveMutexAutoLock lock(mTreeLock);
+
+  // aApzc is either:
+  //  a) an APZC in the top level content document, i.e. the root content APZC
+  //     or a sub scroll container sharing the document's layers id,
+  //  b) an APZC in the browser window's chrome document (browser.xhtml), or
+  //  c) an APZC having a different layers id, i.e. a scroll container in an
+  //     out-of-process iframe.
+  //
+  // a) wants the root content APZC it is a descendant of, or the one its fixed
+  // content is fixed to. The walk stays within the layers id, so b) doesn't
+  // reach the root content APZC of a top level content document loaded in the
+  // parent process, such as about:license, even though it shares
+  // browser.xhtml's layers id, and c) doesn't reach the root content APZC of
+  // the document embedding the iframe.
+  LayersId layersId = aApzc->GetLayersId();
+  AsyncPanZoomController* apzc = aApzc;
+  while (!apzc->IsRootContent()) {
+    AsyncPanZoomController* parent = FindHandoffParent(apzc).mApzc;
+    if (!parent) {
+      // b)'s root APZC has no enclosing document.
+      return nullptr;
+    }
+    if (parent->GetLayersId() != layersId) {
+      // The root APZC of c)'s layers id hands the zoom off to the root content
+      // APZC of the enclosing document.
+      MOZ_ASSERT(apzc->IsRootForLayersId());
+      return apzc;
+    }
+    apzc = parent;
+  }
+  return apzc;
 }
 
 AsyncPanZoomController* APZCTreeManager::FindRootContentApzcForLayersId(
@@ -3982,12 +4031,11 @@ void APZCTreeManager::SetFixedLayerMarginsOnRootContentApzcs(
 ScreenPoint APZCTreeManager::ComputeFixedMarginsOffset(
     const MutexAutoLock& aProofOfMapLock, SideBits aFixedSides,
     const ScreenMargin& aGeckoFixedLayerMargins) const {
-  // If the software keyboard is visible and the interactive-widget is not
-  // resizes-content, we don't need to move the position:fixed or sticky
-  // elements at all.
-  if (IsSoftwareKeyboardVisible(aProofOfMapLock) &&
-      InteractiveWidgetMode(aProofOfMapLock) !=
-          dom::InteractiveWidget::ResizesContent) {
+  // In `overlays-content` mode with the software keyboard visible, the main
+  // thread ignores dynamic toolbar movement (see
+  // nsPresContext::UpdateDynamicToolbarOffset) so the compositor needs to
+  // ignore it too.
+  if (IsKeyboardVisibleOnOverlaysContent(aProofOfMapLock)) {
     return ScreenPoint(0, 0);
   }
 
@@ -4071,6 +4119,10 @@ void APZCTreeManager::SetDPI(float aDpiValue) {
 float APZCTreeManager::GetDPI() const {
   APZThreadUtils::AssertOnControllerThread();
   return mDPI;
+}
+
+CSSToLayoutDeviceScale APZCTreeManager::GetWidgetScale() const {
+  return mWidgetScale;
 }
 
 void APZCTreeManager::EndWheelTransaction(

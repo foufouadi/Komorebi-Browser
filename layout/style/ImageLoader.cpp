@@ -196,7 +196,7 @@ void ImageLoader::AssociateRequestToFrame(imgIRequest* aRequest,
                   nsLayoutUtils::RegisterImageRequestIfAnimated(
                       presContext, aRequest, nullptr);
                 }
-                return MakeUnique<FrameSet>();
+                return std::make_unique<FrameSet>();
               })
           .get();
 
@@ -205,7 +205,7 @@ void ImageLoader::AssociateRequestToFrame(imgIRequest* aRequest,
           .LookupOrInsertWith(aFrame,
                               [=]() {
                                 aFrame->SetHasImageRequest(true);
-                                return MakeUnique<RequestSet>();
+                                return std::make_unique<RequestSet>();
                               })
           .get();
 
@@ -440,10 +440,13 @@ already_AddRefed<imgRequestProxy> ImageLoader::LoadImage(
 
   const URLExtraData& data = aImage.ExtraData();
 
+  const nsLiteralString initiatorType =
+      aImage.Initiator() == StyleUrlInitiator::Body ? u"body"_ns : u"css"_ns;
+
   RefPtr<imgRequestProxy> request;
   nsresult rv = nsContentUtils::LoadImage(
       uri, &aDocument, &aDocument, data.Principal(), 0, data.ReferrerInfo(),
-      sImageObserver, loadFlags, u"css"_ns, getter_AddRefs(request));
+      sImageObserver, loadFlags, initiatorType, getter_AddRefs(request));
 
   if (NS_FAILED(rv) || !request) {
     return nullptr;

@@ -108,8 +108,8 @@ export class AddonCard extends AboutAddonsHTMLElement {
   static get markup() {
     return `
       <template>
-        <div class="card addon">
-          <theme-preview></theme-preview>
+        <moz-card class="card addon">
+          <theme-preview slot="cover-image"></theme-preview>
           <div class="addon-card-collapsed">
             <img class="card-heading-icon addon-icon" alt="" />
             <div class="card-contents">
@@ -193,7 +193,7 @@ export class AddonCard extends AboutAddonsHTMLElement {
           </moz-message-bar>
           <moz-message-bar class="addon-card-message" align="center" hidden>
           </moz-message-bar>
-        </div>
+        </moz-card>
       </template>
     `;
   }
@@ -668,9 +668,13 @@ export class AddonCard extends AboutAddonsHTMLElement {
       type = "",
     } = await resolveMessageInfo(this.addon, {
       isCardExpanded: this.expanded,
+      // The themes list view sections are moz-card elements, other list
+      // views use section elements.
       isInDisabledSection:
         !this.expanded &&
-        !!this.closest(`section.${this.addon.type}-disabled-section`),
+        !!this.closest(
+          `:is(section, moz-card).${this.addon.type}-disabled-section`
+        ),
     });
 
     if (messageId) {

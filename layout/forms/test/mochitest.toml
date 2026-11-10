@@ -51,9 +51,6 @@ skip-if = [
 ["test_bug549170.html"]
 
 ["test_bug562447.html"]
-skip-if = [
-  "standalone", # Bug 2026600
-]
 
 ["test_bug563642.html"]
 
@@ -112,16 +109,13 @@ skip-if = [
 
 ["test_listcontrol_search.html"]
 
+["test_pending_selection_scroll_after_blur.html"]
+
 ["test_readonly.html"]
 
 ["test_select_ctrl_a.html"]
 
 ["test_select_collapsed_page_keys.html"]
-skip-if = [
-  "os == 'mac' && os_version == '10.15' && arch == 'x86_64'", # select control keyboard behavior is different
-  "os == 'mac' && os_version == '14.70' && arch == 'x86_64'", # select control keyboard behavior is different
-  "os == 'mac' && os_version == '15.30' && arch == 'aarch64'", # select control keyboard behavior is different
-]
 
 ["test_select_key_navigation_bug961363.html"]
 

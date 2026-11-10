@@ -40,7 +40,7 @@ static_assert(
     TCP_TYPE_SO);
 
 NrIceCandidateAttribute::NrIceCandidateAttribute()
-    : mBits(MakeUnique<nr_ice_candidate_parsedbits>()) {
+    : mBits(std::make_unique<nr_ice_candidate_parsedbits>()) {
   *mBits = {};
 }
 
@@ -62,7 +62,8 @@ NrIceCandidateAttribute& NrIceCandidateAttribute::operator=(
 Maybe<NrIceCandidateAttribute> NrIceCandidateAttribute::Parse(
     const nsACString& aAttr) {
   NrIceCandidateAttribute result;
-  if (nr_ice_parse_candidate_attribute(aAttr.Data(), result.mBits.get())) {
+  if (nr_ice_parse_candidate_attribute(aAttr.Data(), nullptr,
+                                       result.mBits.get())) {
     return Nothing();
   }
   return Some(std::move(result));

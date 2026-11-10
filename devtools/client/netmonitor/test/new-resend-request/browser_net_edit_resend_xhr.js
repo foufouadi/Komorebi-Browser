@@ -35,7 +35,7 @@ add_task(async function () {
 
   // Selects 1st XHR request
   const xhrRequest = document.querySelectorAll(".request-list-item")[0];
-  EventUtils.sendMouseEvent({ type: "mousedown" }, xhrRequest);
+  clickOnRequestRow(xhrRequest);
 
   // Stores original request for comparison of values later
   const { getSelectedRequest } = windowRequire(
@@ -56,7 +56,7 @@ add_task(async function () {
 
   // Selects cloned request
   const clonedRequest = document.querySelectorAll(".request-list-item")[1];
-  EventUtils.sendMouseEvent({ type: "mousedown" }, clonedRequest);
+  clickOnRequestRow(clonedRequest);
   const cloned = getSelectedRequest(store.getState());
 
   // Compares if the requests have the same cause type (XHR)
@@ -96,7 +96,7 @@ add_task(async function () {
 
     // Selects 1st XHR request
     const xhrRequest = document.querySelectorAll(".request-list-item")[0];
-    EventUtils.sendMouseEvent({ type: "mousedown" }, xhrRequest);
+    clickOnRequestRow(xhrRequest);
 
     // Stores original request for comparison of values later
     const { getSelectedRequest } = windowRequire(
@@ -123,7 +123,7 @@ add_task(async function () {
 
     // Selects new request
     const newRequest = document.querySelectorAll(".request-list-item")[1];
-    EventUtils.sendMouseEvent({ type: "mousedown" }, newRequest);
+    clickOnRequestRow(newRequest);
     const request = getSelectedRequest(store.getState());
 
     Assert.strictEqual(
@@ -161,7 +161,7 @@ add_task(async function () {
     info("Performing a CORS request");
     const requestUrl = "https://example.com" + CORS_SJS_PATH;
 
-    const wait = waitForNetworkEvents(monitor, 1);
+    const onNetworkEvents = waitForNetworkEvents(monitor, 1);
     await SpecialPowers.spawn(
       tab.linkedBrowser,
       [requestUrl],
@@ -171,7 +171,7 @@ add_task(async function () {
     );
 
     info("Waiting until the requests appear in netmonitor");
-    await wait;
+    await onNetworkEvents;
 
     const { getSelectedRequest } = windowRequire(
       "devtools/client/netmonitor/src/selectors/index"
@@ -179,7 +179,7 @@ add_task(async function () {
 
     info("Select XHR request");
     const xhrRequest = document.querySelectorAll(".request-list-item")[0];
-    EventUtils.sendMouseEvent({ type: "mousedown" }, xhrRequest);
+    clickOnRequestRow(xhrRequest);
 
     info("Fetch the Headers for the original XHR request");
     let originalRequest = getSelectedRequest(store.getState());

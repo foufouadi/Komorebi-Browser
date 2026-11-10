@@ -69,6 +69,11 @@ const ContentPermissionIntegration = {
       case "local-network": {
         return new lazy.PermissionUI.LocalNetworkPermissionPrompt(request);
       }
+      case "speech-recognition-model-download": {
+        return new lazy.PermissionUI.SpeechRecognitionModelDownloadPermissionPrompt(
+          request
+        );
+      }
     }
     return undefined;
   },
@@ -97,14 +102,6 @@ ContentPermissionPrompt.prototype = {
    *        The request that we're to show a prompt for.
    */
   prompt(request) {
-    if (request.element && request.element.fxrPermissionPrompt) {
-      // For Firefox Reality on Desktop, switch to a different mechanism to
-      // prompt the user since fewer permissions are available and since many
-      // UI dependencies are not availabe.
-      request.element.fxrPermissionPrompt(request);
-      return;
-    }
-
     let type;
     try {
       // Only allow exactly one permission request here.

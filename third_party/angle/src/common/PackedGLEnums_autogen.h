@@ -222,6 +222,24 @@ FogMode FromGLenum<FogMode>(GLenum from);
 GLenum ToGLenum(FogMode from);
 std::ostream &operator<<(std::ostream &os, FogMode value);
 
+enum class FramebufferParameter : uint8_t
+{
+    DefaultWidth                = 0,
+    DefaultHeight               = 1,
+    DefaultLayers               = 2,
+    DefaultSamples              = 3,
+    DefaultFixedSampleLocations = 4,
+    FlipY                       = 5,
+
+    InvalidEnum = 6,
+    EnumCount   = 6,
+};
+
+template <>
+FramebufferParameter FromGLenum<FramebufferParameter>(GLenum from);
+GLenum ToGLenum(FramebufferParameter from);
+std::ostream &operator<<(std::ostream &os, FramebufferParameter value);
+
 enum class GraphicsResetStatus : uint8_t
 {
     NoError              = 0,
@@ -375,6 +393,21 @@ MatrixType FromGLenum<MatrixType>(GLenum from);
 GLenum ToGLenum(MatrixType from);
 std::ostream &operator<<(std::ostream &os, MatrixType value);
 
+enum class MemoryTrimLevel : uint8_t
+{
+    Low    = 0,
+    Medium = 1,
+    High   = 2,
+
+    InvalidEnum = 3,
+    EnumCount   = 3,
+};
+
+template <>
+MemoryTrimLevel FromGLenum<MemoryTrimLevel>(GLenum from);
+GLenum ToGLenum(MemoryTrimLevel from);
+std::ostream &operator<<(std::ostream &os, MemoryTrimLevel value);
+
 enum class PlaneParameter : uint8_t
 {
     InternalFormat        = 0,
@@ -500,9 +533,10 @@ enum class SamplerParameter : uint8_t
     BorderColor   = 9,
     MaxAnisotropy = 10,
     SrgbDecode    = 11,
+    LodBiasQCOM   = 12,
 
-    InvalidEnum = 12,
-    EnumCount   = 12,
+    InvalidEnum = 13,
+    EnumCount   = 13,
 };
 
 template <>
@@ -642,9 +676,10 @@ enum class TextureEnvParameter : uint8_t
     Op1Alpha          = 16,
     Op2Alpha          = 17,
     PointCoordReplace = 18,
+    LodBias           = 19,
 
-    InvalidEnum = 19,
-    EnumCount   = 19,
+    InvalidEnum = 20,
+    EnumCount   = 20,
 };
 
 template <>
@@ -654,11 +689,12 @@ std::ostream &operator<<(std::ostream &os, TextureEnvParameter value);
 
 enum class TextureEnvTarget : uint8_t
 {
-    Env         = 0,
-    PointSprite = 1,
+    Env                  = 0,
+    PointSprite          = 1,
+    TextureFilterControl = 2,
 
-    InvalidEnum = 2,
-    EnumCount   = 2,
+    InvalidEnum = 3,
+    EnumCount   = 3,
 };
 
 template <>
@@ -750,11 +786,10 @@ enum class TextureTarget : uint8_t
     CubeMapPositiveZ    = 11,
     CubeMapNegativeZ    = 12,
     CubeMapArray        = 13,
-    VideoImage          = 14,
-    Buffer              = 15,
+    Buffer              = 14,
 
-    InvalidEnum = 16,
-    EnumCount   = 16,
+    InvalidEnum = 15,
+    EnumCount   = 15,
 };
 
 template <>
@@ -773,11 +808,10 @@ enum class TextureType : uint8_t
     Rectangle           = 6,
     CubeMap             = 7,
     CubeMapArray        = 8,
-    VideoImage          = 9,
-    Buffer              = 10,
+    Buffer              = 9,
 
-    InvalidEnum = 11,
-    EnumCount   = 11,
+    InvalidEnum = 10,
+    EnumCount   = 10,
 };
 
 template <>

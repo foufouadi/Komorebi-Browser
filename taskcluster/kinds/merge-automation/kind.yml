@@ -8,10 +8,6 @@ transforms:
     - gecko_taskgraph.transforms.merge_automation:transforms
     - gecko_taskgraph.transforms.task:transforms
 
-
-task-defaults:
-    run-on-repo-type: [hg]
-
 tasks:
     merge-automation:
         name: merge-automation
@@ -82,6 +78,12 @@ tasks:
                                   - - "browser/extensions/newtab/manifest.json"
                                     - '"version": "[0-9]+.[0-9]+.0"'
                                     - '"version": "{next_major_version}.0.0"'
+                                  # Start the next Fenix nightly development cycle: open a new
+                                  # changelog section for the upcoming version and demote the
+                                  # current "In Development" heading to a released section.
+                                  - - "mobile/android/android-components/docs/changelog.md"
+                                    - '# {current_major_version}\.0 \(In Development\)'
+                                    - '# {next_major_version}.0 (In Development)\n\n# {current_major_version}.0'
                               end-tag: 'FIREFOX_NIGHTLY_{major_version}_END'
                               to-branch: 'main'
                     bump-esr153:

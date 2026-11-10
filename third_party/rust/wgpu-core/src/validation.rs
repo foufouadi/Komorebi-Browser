@@ -7,7 +7,7 @@ use alloc::{
 use core::fmt;
 
 use arrayvec::ArrayVec;
-use hashbrown::{hash_map::Entry, HashSet};
+use hashbrown::hash_map::Entry;
 use shader_io_deductions::{display_deductions_as_optional_list, MaxVertexShaderOutputDeduction};
 use thiserror::Error;
 use wgt::{
@@ -153,15 +153,16 @@ impl fmt::Display for InterfaceVar {
 
 /// An [inter-stage input or output value][io].
 ///
-/// A value of this type describes one value to be passed to or returned from
-/// some entry point.
+/// A value of this type describes one value produced by some shader entry
+/// point, to be passed to the next pipeline stage.
 ///
 /// [io]: https://www.w3.org/TR/WGSL/#stage-inputs-outputs
 #[derive(Debug, Eq, PartialEq)]
 enum Varying {
     /// A [user-defined input or output][uio].
     ///
-    /// In WGSL, this is a value with a `@location` attribute.
+    /// In WGSL, this is a value with a `@location` attribute. In Naga terms,
+    /// these are the entry point's [`naga::Binding::Location`] inputs/outputs.
     ///
     /// [uio]: https://www.w3.org/TR/WGSL/#user-defined-inputs-outputs
     UserDefined { location: u32, iv: InterfaceVar },
@@ -225,6 +226,7 @@ enum BuiltIn {
     ObjectToWorld,
     WorldToObject,
     HitKind,
+    HitBarycentrics,
 }
 
 impl BuiltIn {
@@ -281,6 +283,7 @@ impl BuiltIn {
             Self::ObjectToWorld => naga::BuiltIn::ObjectToWorld,
             Self::WorldToObject => naga::BuiltIn::WorldToObject,
             Self::HitKind => naga::BuiltIn::HitKind,
+            Self::HitBarycentrics => naga::BuiltIn::HitBarycentrics,
         }
     }
 }
@@ -292,16 +295,65 @@ struct EntryPointMeshInfo {
     primitive_topology: wgt::PrimitiveTopology,
 }
 
+/// The [shader interface][si] of an entry point in a [`naga::Module`].
+///
+/// [si]: https://www.w3.org/TR/WGSL/#shader-interface
 #[derive(Debug, Default)]
 struct EntryPoint {
+    /// The builtin and user-defined values passed to the entry point.
+    ///
+    /// In WGSL, these can be either passed directly as arguments or
+    /// gathered up in structs that are passed; here, they are all
+    /// flattened out.
     inputs: Vec<Varying>,
+
+    /// The builtin and user-defined values returned by the entry point.
+    ///
+    /// In WGSL, a function either returns a single varying directly,
+    /// or returns a struct of varyings; here, they are all flattened
+    /// out.
+    ///
+    /// For mesh shaders, this also includes the vertex and primitive outputs.
     outputs: Vec<Varying>,
+
+    /// This entry point's [resource interface][ri].
+    ///
+    /// This lists all the bound resources (that is, global variables with
+    /// `@group` and `@binding` attributes) that this entry point statically
+    /// uses.
+    ///
+    /// Handles here refer to elements of [`Interface::resources`].
+    ///
+    /// [ri]: https://www.w3.org/TR/WGSL/#resource-interface
     resources: Vec<naga::Handle<Resource>>,
+
+    /// Pairs of (texture, sampler) handles that this entry point uses
+    /// together.
+    ///
+    /// This is the same information that Naga provides in
+    /// [`naga::valid::FunctionInfo::sampling_set`] (used for generating GLSL),
+    /// but adjusted to use handles referring to [`Interface::resources`].
     sampling_pairs: FastHashSet<(naga::Handle<Resource>, naga::Handle<Resource>)>,
+
+    /// This entry point's workgroup size, if it is a [compute-like] shader
+    /// (`compute`, `task`, or `mesh`).
+    ///
+    /// For non-compute-like entry points, this is `[0, 0, 0]`.
+    ///
+    /// [compute-like]: naga::ShaderStage::compute_like
     workgroup_size: [u32; 3],
+
+    /// Indicates that the entry point uses dual source blending.
     dual_source_blending: bool,
+
+    /// For task shaders and mesh shaders, the size of the task payload global
+    /// they use to communicate.
     task_payload_size: Option<u32>,
+
+    /// Additional information for mesh shader entry points.
     mesh_info: Option<EntryPointMeshInfo>,
+
+    /// Size of the immediate data, and which slots this entry point uses.
     immediate_usage: naga::valid::ImmediateUsage,
 }
 
@@ -317,34 +369,36 @@ impl hashbrown::Equivalent<EntryPointKey> for EntryPointKeyRef<'_> {
     }
 }
 
+/// A summary of the [shader interfaces][si] of the entry points in a [`naga::Module`].
+///
+/// [si]: https://www.w3.org/TR/WGSL/#shader-interface
 #[derive(Debug)]
 pub struct Interface {
+    /// A clone of the limits of the [`Device`] this module was created from.
+    ///
+    /// [`Interface::check_stage`] consults this for workgroup size checks.
+    ///
+    /// [`Device`]: crate::device::Device
     limits: wgt::Limits,
+
+    /// All the resources the module cites as global variables.
+    ///
+    /// This lists all the module's bound resources: global variables with
+    /// `@group` and `@binding` attributes.
+    ///
+    /// Fields of [`EntryPoint`] like [`resources`] and [`sampling_pairs`] refer to
+    /// elements in this arena by [`naga::Handle`].
+    ///
+    /// [`resources`]: EntryPoint::resources
+    /// [`sampling_pairs`]: EntryPoint::sampling_pairs
     resources: naga::Arena<Resource>,
+
+    /// The shader interface of each [`naga::EntryPoint`] in the module.
+    ///
+    /// This table is keyed by (stage, name) pairs: [`naga::Module`]s are
+    /// allowed to contain multiple entry points with the same name, as long as
+    /// they are for different shader stages.
     entry_points: FastHashMap<EntryPointKey, EntryPoint>,
-}
-
-#[derive(Debug)]
-pub struct PassthroughInterface {
-    pub entry_point_names: HashSet<String>,
-}
-
-// Most shaders will use a standard interface which is very large.
-// Passthrough shaders have a much smaller interface. No reason to
-// box the standard interface though.
-#[expect(clippy::large_enum_variant)]
-#[derive(Debug)]
-pub enum ShaderMetaData {
-    Interface(Interface),
-    Passthrough(PassthroughInterface),
-}
-impl ShaderMetaData {
-    pub fn interface(&self) -> Option<&Interface> {
-        match self {
-            Self::Interface(i) => Some(i),
-            Self::Passthrough(_) => None,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Error)]
@@ -438,10 +492,29 @@ impl WebGpuError for InputError {
 #[derive(Clone, Debug, Error)]
 #[non_exhaustive]
 pub enum StageError {
+    #[error("Unable to find entry point {0:?}")]
+    NoEntryPointWithName(String),
+    #[error("Unable to find entry point `{name}` for stage `{stage:?}`")]
+    NoEntryPointWithNameForStage {
+        name: String,
+        stage: naga::ShaderStage,
+    },
+    #[error(
+        "Unable to select an entry point: no entry points found in the provided shader module"
+    )]
+    NoEntryPoints,
+    #[error("No entry point found for stage `{0:?}`")]
+    NoEntryPointForStage(naga::ShaderStage),
+    #[error(
+        "Unable to select an entry point: \
+        multiple entry points were found in the provided shader module, \
+        but no entry point was specified"
+    )]
+    AmbiguousEntryPoint,
+    #[error("More than one entry point present in module for stage `{0:?}`, entry point name must be provided")]
+    AmbiguousEntryPointForStage(naga::ShaderStage),
     #[error(transparent)]
     InvalidWorkgroupSize(#[from] InvalidWorkgroupSizeError),
-    #[error("Unable to find entry point '{0}'")]
-    MissingEntryPoint(String),
     #[error("Shader global {0:?} is not available in the pipeline layout")]
     Binding(naga::ResourceBinding, #[source] BindingError),
     #[error("Unable to filter the texture ({texture:?}) by the sampler ({sampler:?})")]
@@ -458,16 +531,6 @@ pub enum StageError {
         #[source]
         error: InputError,
     },
-    #[error(
-        "Unable to select an entry point: no entry point was found in the provided shader module"
-    )]
-    NoEntryPointFound,
-    #[error(
-        "Unable to select an entry point: \
-        multiple entry points were found in the provided shader module, \
-        but no entry point was specified"
-    )]
-    MultipleEntryPointsFound,
     #[error(transparent)]
     InvalidResource(#[from] InvalidResourceError),
     #[error(
@@ -571,10 +634,13 @@ impl WebGpuError for StageError {
                 var: _,
                 error,
             } => error.webgpu_error_type(),
-            Self::InvalidWorkgroupSize { .. }
-            | Self::MissingEntryPoint(..)
-            | Self::NoEntryPointFound
-            | Self::MultipleEntryPointsFound
+            Self::NoEntryPointWithName { .. }
+            | Self::NoEntryPointWithNameForStage { .. }
+            | Self::NoEntryPoints
+            | Self::NoEntryPointForStage(_)
+            | Self::AmbiguousEntryPoint
+            | Self::AmbiguousEntryPointForStage(_)
+            | Self::InvalidWorkgroupSize { .. }
             | Self::VertexOutputLocationTooLarge { .. }
             | Self::TooManyUserDefinedVertexOutputs { .. }
             | Self::FragmentInputLocationTooLarge { .. }
@@ -930,7 +996,8 @@ impl NumericType {
             | Vf::Float16x4
             | Vf::Float32x4
             | Vf::Unorm10_10_10_2
-            | Vf::Unorm8x4Bgra => (NumericDimension::Vector(Vs::Quad), Scalar::F32),
+            | Vf::Unorm8x4Bgra
+            | Vf::Snorm10_10_10_2 => (NumericDimension::Vector(Vs::Quad), Scalar::F32),
             Vf::Float64 => (NumericDimension::Scalar, Scalar::F64),
             Vf::Float64x2 => (NumericDimension::Vector(Vs::Bi), Scalar::F64),
             Vf::Float64x3 => (NumericDimension::Vector(Vs::Tri), Scalar::F64),
@@ -1029,14 +1096,11 @@ impl NumericType {
         }
     }
 
-    fn is_subtype_of(self, other: NumericType) -> bool {
-        if self.scalar.width > other.scalar.width {
+    fn compatible_with_shader_output(self, shader: NumericType) -> bool {
+        if self.scalar.kind != shader.scalar.kind {
             return false;
         }
-        if self.scalar.kind != other.scalar.kind {
-            return false;
-        }
-        match (self.dim, other.dim) {
+        match (self.dim, shader.dim) {
             (NumericDimension::Scalar, NumericDimension::Scalar) => true,
             (NumericDimension::Scalar, NumericDimension::Vector(_)) => true,
             (NumericDimension::Vector(s0), NumericDimension::Vector(s1)) => s0 <= s1,
@@ -1054,7 +1118,7 @@ pub fn check_color_attachment_compatibility(
     output_ty: NumericType,
 ) -> Result<(), ColorStateError> {
     let pipeline_ty = NumericType::from_texture_format(state.format);
-    if !pipeline_ty.is_subtype_of(output_ty) {
+    if !pipeline_ty.compatible_with_shader_output(output_ty) {
         return Err(ColorStateError::IncompatibleFormat {
             pipeline: pipeline_ty,
             shader: output_ty,
@@ -1100,21 +1164,61 @@ impl BindingLayoutSource {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct StageIo {
-    pub varyings: FastHashMap<wgt::ShaderLocation, InterfaceVar>,
-    /// This must match between mesh & task shaders
-    pub task_payload_size: Option<u32>,
-    /// Fragment shaders cannot input primitive index on mesh shaders that don't output it on DX12.
-    /// Therefore, we track between shader stages if primitive index is written (or if vertex shader
-    /// is used).
-    ///
-    /// This is Some if it was a mesh shader.
-    pub primitive_index: Option<bool>,
+/// Resource usage accumulated across all of a pipeline's stages.
+pub struct PipelineResources {
+    pub layout: BindingLayoutSource,
+    pub minimum_binding_sizes: FastHashMap<naga::ResourceBinding, wgt::BufferSize>,
     pub immediates: naga::valid::ImmediateUsage,
 }
 
+impl PipelineResources {
+    pub fn new(layout: BindingLayoutSource) -> Self {
+        Self {
+            layout,
+            minimum_binding_sizes: FastHashMap::default(),
+            immediates: Default::default(),
+        }
+    }
+}
+
+/// Summary of one shader stage's outputs, presented as inputs to the next stage.
+///
+/// Each stage in a pipeline produces one of these values, to be validated
+/// against the input requirements of the pipeline's next stage.
+#[derive(Debug, Clone, Default)]
+pub struct StageIo {
+    /// The prior stage's [`Varying::UserDefined`] outputs.
+    pub varyings: FastHashMap<wgt::ShaderLocation, InterfaceVar>,
+
+    /// If the prior stage was a task shader, the size of its payload global.
+    ///
+    /// This must match the mesh shader's payload global.
+    pub task_payload_size: Option<u32>,
+
+    /// If the prior was a mesh shader, whether it output
+    /// [`BuiltIn::PrimitiveIndex`].
+    ///
+    /// In a mesh pipeline on DX12, the mesh shader and fragment shader must
+    /// agree on whether `PrimitiveIndex` is passed between them.
+    ///
+    /// This is `None` if the prior stage was not a mesh shader.
+    pub primitive_index: Option<bool>,
+}
+
 impl Interface {
+    /// Build some entry point's list of inputs or outputs.
+    ///
+    /// Given `ty` and `binding` that describe an entry point's argument or
+    /// return value, figure out which builtins or locations are involved and
+    /// add them to `list`, which is either [`EntryPoint::inputs`] or
+    /// [`EntryPoint::outputs`].
+    ///
+    /// - If `ty` is a struct type, visit its members to find
+    ///   individual bindings, and add them to `list`.
+    ///
+    /// - Otherwise, `binding` must be `Some(b)` where `b` describes a
+    ///   binding's builtin or location, and `ty` gives its type. Add
+    ///   this binding to `list`.
     fn populate(
         list: &mut Vec<Varying>,
         binding: Option<&naga::Binding>,
@@ -1243,6 +1347,7 @@ impl Interface {
                 naga::BuiltIn::ObjectToWorld => BuiltIn::ObjectToWorld,
                 naga::BuiltIn::WorldToObject => BuiltIn::WorldToObject,
                 naga::BuiltIn::HitKind => BuiltIn::HitKind,
+                naga::BuiltIn::HitBarycentrics => BuiltIn::HitBarycentrics,
             }),
             None => {
                 log::error!("Missing binding for a varying");
@@ -1252,6 +1357,11 @@ impl Interface {
         list.push(varying);
     }
 
+    /// Construct an [`Interface`] value describing `module`.
+    ///
+    /// The `info` argument must be the results from validating `module`, and
+    /// `limits` must be the limits for the device that we will use to create
+    /// this shader module.
     pub fn new(module: &naga::Module, info: &naga::valid::ModuleInfo, limits: wgt::Limits) -> Self {
         let mut resources = naga::Arena::new();
         let mut resource_mapping = FastHashMap::default();
@@ -1404,35 +1514,30 @@ impl Interface {
             .unwrap_or_default()
     }
 
-    pub fn finalize_entry_point_name(
-        &self,
-        stage: naga::ShaderStage,
-        entry_point_name: Option<&str>,
-    ) -> Result<String, StageError> {
-        entry_point_name
-            .map(|ep| ep.to_string())
-            .map(Ok)
-            .unwrap_or_else(|| {
-                let mut entry_points =
-                    self.entry_points
-                        .keys()
-                        .filter_map(|EntryPointKey(ep_stage, name)| {
-                            (ep_stage == &stage).then_some(name)
-                        });
-                let first = entry_points.next().ok_or(StageError::NoEntryPointFound)?;
-                if entry_points.next().is_some() {
-                    return Err(StageError::MultipleEntryPointsFound);
-                }
-                Ok(first.clone())
-            })
-    }
-
-    /// Among other things, this implements some validation logic defined by the WebGPU spec. at
-    /// <https://www.w3.org/TR/webgpu/#abstract-opdef-validating-inter-stage-interfaces>.
+    /// Analyze and validate an entry point for use as a given shader stage.
+    ///
+    /// Validate the entry point named `entry_point_name` for use in
+    /// `shader_stage`:
+    ///
+    /// - Apply the WebGPU specification's [validating inter-stage interfaces]
+    ///   algorithm.
+    ///
+    /// - Enforce workgroup size limits.
+    ///
+    /// - Check bind group layouts, and fill in derived bind group layouts.
+    ///
+    /// - Compute the minimum binding sizes, given the shader's resource
+    ///   interface.
+    ///
+    /// - Check the compatibility between textures and samplers.
+    ///
+    /// Given `inputs`, describing this stage's inputs, return a [`StageIo`]
+    /// describing its outputs.
+    ///
+    /// [validating inter-stage interfaces]: https://www.w3.org/TR/webgpu/#abstract-opdef-validating-inter-stage-interfaces
     pub fn check_stage(
         &self,
-        layouts: &mut BindingLayoutSource,
-        minimum_binding_sizes: &mut FastHashMap<naga::ResourceBinding, wgt::BufferSize>,
+        resources: &mut PipelineResources,
         entry_point_name: &str,
         shader_stage: ShaderStageForValidation,
         inputs: StageIo,
@@ -1443,17 +1548,27 @@ impl Interface {
         let pair = EntryPointKeyRef(shader_stage.to_naga(), entry_point_name);
         let entry_point = match self.entry_points.get(&pair) {
             Some(some) => some,
-            None => return Err(StageError::MissingEntryPoint(pair.1.to_string())),
+            None => {
+                return Err(StageError::NoEntryPointWithNameForStage {
+                    name: pair.1.to_string(),
+                    stage: shader_stage.to_naga(),
+                })
+            }
         };
         let EntryPointKeyRef(_, entry_point_name) = pair;
 
         let stage_bit = shader_stage.to_wgt_bit();
+        let PipelineResources {
+            ref mut layout,
+            ref mut minimum_binding_sizes,
+            ref mut immediates,
+        } = *resources;
 
         // check resources visibility
         for &handle in entry_point.resources.iter() {
             let res = &self.resources[handle];
             let result = 'err: {
-                match layouts {
+                match layout {
                     BindingLayoutSource::Provided(pipeline_layout) => {
                         // update the required binding size for this buffer
                         if let ResourceType::Buffer {
@@ -1526,7 +1641,7 @@ impl Interface {
         //
         // We only need to do this if the binding layout is provided by the user, as derived
         // layouts will inherently be correctly tagged.
-        if let BindingLayoutSource::Provided(pipeline_layout) = layouts {
+        if let BindingLayoutSource::Provided(pipeline_layout) = layout {
             for &(texture_handle, sampler_handle) in entry_point.sampling_pairs.iter() {
                 let texture_bind = &self.resources[texture_handle].bind;
                 let sampler_bind = &self.resources[sampler_handle].bind;
@@ -1647,7 +1762,7 @@ impl Interface {
                                         ));
                                     }
                                     (
-                                        iv.ty.is_subtype_of(provided.ty),
+                                        iv.ty == provided.ty,
                                         iv.per_primitive == provided.per_primitive,
                                     )
                                 }
@@ -1948,10 +2063,10 @@ impl Interface {
 
         let immediate_usage = self
             .immediate_usage(shader_stage.to_naga(), entry_point_name)
-            .merge(&inputs.immediates);
+            .merge(immediates);
 
         // Check pipeline layout immediate size
-        if let BindingLayoutSource::Provided(pipeline_layout) = layouts {
+        if let BindingLayoutSource::Provided(pipeline_layout) = layout {
             if pipeline_layout.immediate_size < immediate_usage.size() {
                 return Err(StageError::LayoutImmediateSize {
                     layout: pipeline_layout.immediate_size,
@@ -1959,6 +2074,8 @@ impl Interface {
                 });
             }
         }
+
+        *immediates = immediate_usage;
 
         Ok(StageIo {
             task_payload_size: entry_point.task_payload_size,
@@ -1968,7 +2085,6 @@ impl Interface {
             } else {
                 None
             },
-            immediates: immediate_usage,
         })
     }
 }

@@ -226,11 +226,6 @@ class RestyleManager {
 
 #ifdef DEBUG
   static nsCString ChangeHintToString(nsChangeHint aHint);
-
-  /**
-   * DEBUG ONLY method to verify integrity of style tree versus frame tree
-   */
-  void DebugVerifyStyleTree(nsIFrame* aFrame);
 #endif
 
   void FlushOverflowChangedTracker() { mOverflowChangedTracker.Flush(); }
@@ -273,9 +268,6 @@ class RestyleManager {
     void StopAnimationsForElementsWithoutFrames();
 
    private:
-    void StopAnimationsWithoutFrame(nsTArray<RefPtr<Element>>& aArray,
-                                    const PseudoStyleRequest& aPseudoRequest);
-
     RestyleManager* mRestyleManager;
     AutoRestore<AnimationsWithDestroyedFrame*> mRestorePointer;
 
@@ -300,7 +292,7 @@ class RestyleManager {
   void ContentAppended(nsIContent* aFirstNewContent);
 
   // Restyling for a content removal that is about to happen.
-  void ContentWillBeRemoved(nsIContent* aOldChild);
+  void ContentWillBeRemoved(nsIContent* aOldChild, const ContentRemoveInfo&);
 
   // Restyling for a ContentInserted (notification after insertion) or
   // for some CharacterDataChanged.
@@ -445,10 +437,7 @@ class RestyleManager {
    * Whether to clear all the style data (including the element itself), or just
    * the descendants' data.
    */
-  enum class IncludeRoot {
-    Yes,
-    No,
-  };
+  enum class IncludeRoot : bool { No, Yes };
 
   /**
    * Clears the ServoElementData and HasDirtyDescendants from all elements

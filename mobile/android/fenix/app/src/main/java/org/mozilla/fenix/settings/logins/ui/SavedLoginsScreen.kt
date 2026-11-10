@@ -60,6 +60,8 @@ import mozilla.components.compose.base.menu.DropdownMenu
 import mozilla.components.compose.base.menu.MenuItem
 import mozilla.components.compose.base.text.Text
 import mozilla.components.compose.base.textfield.TextField
+import mozilla.components.compose.base.theme.PreviewThemeProvider
+import mozilla.components.compose.base.theme.Theme
 import mozilla.components.support.ktx.kotlin.trimmed
 import mozilla.components.ui.icons.R as iconsR
 import org.mozilla.fenix.R
@@ -68,8 +70,6 @@ import org.mozilla.fenix.compose.list.SelectableFaviconListItem
 import org.mozilla.fenix.settings.biometric.ui.SecureScreen
 import org.mozilla.fenix.settings.logins.ui.LoginsSortOrder.Alphabetical.isGuidToDelete
 import org.mozilla.fenix.theme.FirefoxTheme
-import org.mozilla.fenix.theme.PreviewThemeProvider
-import org.mozilla.fenix.theme.Theme
 
 /**
  * The UI host for the Saved Logins list screen and related sub screens.
@@ -336,7 +336,7 @@ private fun LoginsListTopBar(
                         contentDescription = stringResource(R.string.passwords_import_menu_button),
                     ) {
                         Icon(
-                            painter = painterResource(iconsR.drawable.mozac_ic_ellipsis_vertical_24),
+                            painter = painterResource(iconsR.drawable.mozac_ic_more_vertical_round_24),
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurface,
                         )
@@ -446,7 +446,7 @@ private fun ImportPasswordsOverflowMenu(store: LoginsStore) {
         listOf(
             MenuItem.TextItem(
                 text = Text.Resource(R.string.passwords_import_menu_button),
-                onClick = { store.dispatch(ImportFileClicked) },
+                onClick = { store.dispatch(ImportAction.ImportFileClicked) },
             )
         )
 

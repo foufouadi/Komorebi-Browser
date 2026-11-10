@@ -24,6 +24,7 @@
 #include "mozpkix/pkixcheck.h"
 #include "mozpkix/pkixnss.h"
 #include "mozpkix/pkixutil.h"
+#include "nsCharSeparatedTokenizer.h"
 #include "nsNSSComponent.h"
 #include "nsNetCID.h"
 #include "nsPromiseFlatString.h"
@@ -200,7 +201,7 @@ static Result BuildCertChainForOneKeyUsage(
 }
 
 void CertVerifier::LoadKnownCTLogs() {
-  mCTVerifier = MakeUnique<MultiLogCTVerifier>();
+  mCTVerifier = std::make_unique<MultiLogCTVerifier>();
   for (const CTLogInfo& log : kCTLogList) {
     Input publicKey;
     Result rv = publicKey.Init(

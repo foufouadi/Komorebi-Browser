@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 import { Region } from "resource://gre/modules/Region.sys.mjs";
 import { AddressMetaDataLoader } from "resource://gre/modules/shared/AddressMetaDataLoader.sys.mjs";
@@ -27,6 +28,12 @@ const AUTOFILL_CREDITCARDS_HIDE_UI_PREF =
 const FORM_AUTOFILL_SUPPORT_RTL_PREF = "extensions.formautofill.supportRTL";
 const AUTOFILL_CREDITCARDS_AUTOCOMPLETE_OFF_PREF =
   "extensions.formautofill.creditCards.ignoreAutocompleteOff";
+const SUPPORTED_AUTOFILL_CREDITCARDS_CVV_PREF =
+  "extensions.formautofill.creditCards.cvv.supported";
+const ENABLED_AUTOFILL_CREDITCARDS_CVV_PREF =
+  "extensions.formautofill.creditCards.cvv.enabled";
+const CREDITCARDS_RUST_STORAGE_ACTIVE_PREF =
+  "extensions.formautofill.creditCards.storage.rust.active";
 const AUTOFILL_ADDRESSES_AUTOCOMPLETE_OFF_PREF =
   "extensions.formautofill.addresses.ignoreAutocompleteOff";
 const ENABLED_AUTOFILL_CAPTURE_ON_FORM_REMOVAL_PREF =
@@ -45,6 +52,8 @@ const AUTOFILL_REFILL_ON_SITE_CLEARING_VALUE_PREF =
   "extensions.formautofill.heuristics.refillOnSiteClearingFields";
 const AUTOFILL_REFILL_ON_SITE_CLEARING_VALUE_TIMEOUT_PREF =
   "extensions.formautofill.heuristics.refillOnSiteClearingFields.timeout";
+const SUPPRESS_UNRECOGNIZED_AUTOCOMPLETE_PREF =
+  "extensions.formautofill.suppressUnrecognizedAutocomplete.enabled";
 
 export const FormAutofill = {
   ENABLED_AUTOFILL_ADDRESSES_PREF,
@@ -53,6 +62,9 @@ export const FormAutofill = {
   ENABLED_AUTOFILL_CAPTURE_ON_PAGE_NAVIGATION_PREF,
   ENABLED_AUTOFILL_SAME_ORIGIN_WITH_TOP,
   ENABLED_AUTOFILL_CREDITCARDS_PREF,
+  SUPPORTED_AUTOFILL_CREDITCARDS_CVV_PREF,
+  ENABLED_AUTOFILL_CREDITCARDS_CVV_PREF,
+  CREDITCARDS_RUST_STORAGE_ACTIVE_PREF,
   ENABLED_AUTOFILL_DETECT_DYNAMIC_FORM_CHANGES_PREF,
   AUTOFILL_CREDITCARDS_OS_AUTH_LOCKED_PREF,
   AUTOFILL_CREDITCARDS_AUTOCOMPLETE_OFF_PREF,
@@ -162,6 +174,70 @@ export const FormAutofill = {
   },
 
   /**
+   * Whether the CVV feature has been rolled out to this user. Takes the same
+   * "on"/"off" values as the other supported prefs, and needs the Rust credit
+   * card store to be the one serving: only that store encrypts the security
+   * code, and the JSON store would keep it in the clear. On Android the app
+   * stores credit cards, always in the Rust store, so only the rollout counts.
+   *
+   * @returns {boolean}
+   */
+  get isAutofillCreditCardCVVSupported() {
+    return (
+      this._autofillCreditCardCVVSupportedPref == "on" &&
+      this._canStoreEncryptedCreditCardSecurityCode
+    );
+  },
+
+  /**
+   * Whether the store serving credit cards encrypts security codes, so they
+   * are never kept in the clear. Both android and desktop keep credit cards
+   * in the Application Services autofill store, which encrypts them, but reach
+   * it differently:
+   *
+   * - On desktop, Gecko owns the storage. `RustAutofillCreditCardStorage`
+   *   wraps the Application Services store, and
+   *   `_isCreditCardRustStorageActive` tells whether that wrapper is serving
+   *   rather than the JSON store, which would keep security codes in the
+   *   clear.
+   * - On Android, Gecko keeps no credit cards and hands them to the GeckoView
+   *   embedder. Fenix stores them through `GeckoAutocompleteStorageDelegate`
+   *   in Android Components, which uses the same Application Services store.
+   *   `_isCreditCardRustStorageActive` only applies to the desktop wrapper,
+   *   so it is not checked here.
+   *
+   * @returns {boolean}
+   */
+  get _canStoreEncryptedCreditCardSecurityCode() {
+    switch (AppConstants.platform) {
+      case "android":
+        return true;
+      default:
+        // Only the Rust store encrypts security codes, not the JSON one.
+        return this._isCreditCardRustStorageActive;
+    }
+  },
+
+  /**
+   * Whether credit card security codes may be captured and stored.
+   *
+   * Like `isAutofillTypeEnabled`, this folds the rollout gate
+   * (`creditCards.cvv.supported`) into the user's own choice
+   * (`creditCards.cvv.enabled`), so storage never has to test the two
+   * separately. UI that has to differ purely by whether the feature has
+   * shipped — such as whether to offer the settings checkbox at all — should
+   * read `isAutofillCreditCardCVVSupported` instead.
+   *
+   * @returns {boolean}
+   */
+  get isAutofillCreditCardCVVEnabled() {
+    return (
+      this.isAutofillCreditCardCVVSupported &&
+      this._isAutofillCreditCardCVVUserEnabled
+    );
+  },
+
+  /**
    * Whether any autofill data type is available to use in this browser.
    *
    * @returns {boolean}
@@ -234,8 +310,32 @@ XPCOMUtils.defineLazyPreferenceGetter(
 );
 XPCOMUtils.defineLazyPreferenceGetter(
   FormAutofill,
+  "suppressUnrecognizedAutocomplete",
+  SUPPRESS_UNRECOGNIZED_AUTOCOMPLETE_PREF,
+  false
+);
+XPCOMUtils.defineLazyPreferenceGetter(
+  FormAutofill,
   "isAutofillCreditCardsHideUI",
   AUTOFILL_CREDITCARDS_HIDE_UI_PREF
+);
+XPCOMUtils.defineLazyPreferenceGetter(
+  FormAutofill,
+  "_autofillCreditCardCVVSupportedPref",
+  SUPPORTED_AUTOFILL_CREDITCARDS_CVV_PREF,
+  "off"
+);
+XPCOMUtils.defineLazyPreferenceGetter(
+  FormAutofill,
+  "_isAutofillCreditCardCVVUserEnabled",
+  ENABLED_AUTOFILL_CREDITCARDS_CVV_PREF,
+  false
+);
+XPCOMUtils.defineLazyPreferenceGetter(
+  FormAutofill,
+  "_isCreditCardRustStorageActive",
+  CREDITCARDS_RUST_STORAGE_ACTIVE_PREF,
+  false
 );
 XPCOMUtils.defineLazyPreferenceGetter(
   FormAutofill,

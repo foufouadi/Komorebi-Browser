@@ -12,6 +12,7 @@
 #include "ClientSourceParent.h"
 #include "jsfriendapi.h"
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/Components.h"
 #include "mozilla/MozPromise.h"
 #include "mozilla/SchedulerGroup.h"
 #include "mozilla/ScopeExit.h"
@@ -75,7 +76,7 @@ RefPtr<GenericPromise> OnShutdown() {
   nsCOMPtr<nsIRunnable> r =
       NS_NewRunnableFunction("ClientManagerServer::OnShutdown", [ref]() {
         nsCOMPtr<nsIAsyncShutdownService> svc =
-            services::GetAsyncShutdownService();
+            components::AsyncShutdown::Service();
         if (!svc) {
           ref->Resolve(true, __func__);
           return;
@@ -708,9 +709,10 @@ RefPtr<ClientOpPromise> ClientManagerService::OpenWindow(
     ThreadsafeContentParentHandle* aOriginContent,
     const ClientOpenWindowArgs& aArgs) {
   return InvokeAsync(GetMainThreadSerialEventTarget(), __func__,
-                     [originContent = RefPtr{aOriginContent}, aArgs]() {
-                       return ClientOpenWindow(originContent, aArgs);
-                     });
+                     [originContent = RefPtr{aOriginContent}, aArgs]()
+                         MOZ_CAN_RUN_SCRIPT_BOUNDARY_LAMBDA {
+                           return ClientOpenWindow(originContent, aArgs);
+                         });
 }
 
 bool ClientManagerService::HasWindow(

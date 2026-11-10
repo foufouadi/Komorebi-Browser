@@ -135,15 +135,36 @@ class ReceiveStatisticsProxyTest : public ::testing::Test {
 
 TEST_F(ReceiveStatisticsProxyTest, OnDecodedFrameIncreasesFramesDecoded) {
   EXPECT_EQ(0u, statistics_proxy_->GetStats().frames_decoded);
-  EXPECT_EQ(0, statistics_proxy_->GetStats().frame_counts.key_frames);
+  EXPECT_EQ(0, statistics_proxy_->GetStats().received_frame_counts.key_frames);
   VideoFrame frame = CreateFrame(kWidth, kHeight);
   for (uint32_t i = 1; i <= 3; ++i) {
     statistics_proxy_->OnDecodedFrame(frame, std::nullopt, TimeDelta::Zero(),
                                       VideoContentType::UNSPECIFIED,
                                       VideoFrameType::kVideoFrameKey, Info());
     EXPECT_EQ(i, FlushAndGetStats().frames_decoded);
-    EXPECT_EQ(0, FlushAndGetStats().frame_counts.key_frames);
+    EXPECT_EQ(0, FlushAndGetStats().received_frame_counts.key_frames);
   }
+}
+
+TEST_F(ReceiveStatisticsProxyTest, OnDecodedFrameIncreasesKeyFramesDecoded) {
+  EXPECT_EQ(0u, statistics_proxy_->GetStats().key_frames_decoded);
+  VideoFrame frame = CreateFrame(kWidth, kHeight);
+  statistics_proxy_->OnDecodedFrame(frame, std::nullopt, TimeDelta::Zero(),
+                                    VideoContentType::UNSPECIFIED,
+                                    VideoFrameType::kVideoFrameKey, Info());
+  EXPECT_EQ(1u, FlushAndGetStats().key_frames_decoded);
+  statistics_proxy_->OnDecodedFrame(frame, std::nullopt, TimeDelta::Zero(),
+                                    VideoContentType::UNSPECIFIED,
+                                    VideoFrameType::kVideoFrameDelta, Info());
+  EXPECT_EQ(1u, FlushAndGetStats().key_frames_decoded);
+  EXPECT_EQ(2u, FlushAndGetStats().frames_decoded);
+}
+
+TEST_F(ReceiveStatisticsProxyTest,
+       OnCompleteFrameDoesNotIncreaseKeyFramesDecoded) {
+  statistics_proxy_->OnCompleteFrame(true, 1000, VideoContentType::UNSPECIFIED);
+  EXPECT_EQ(1, FlushAndGetStats().received_frame_counts.key_frames);
+  EXPECT_EQ(0u, FlushAndGetStats().key_frames_decoded);
 }
 
 TEST_F(ReceiveStatisticsProxyTest, DecodedFpsIsReported) {
@@ -617,8 +638,8 @@ TEST_F(ReceiveStatisticsProxyTest, GetStatsReportsOnCompleteFrame) {
                                      VideoContentType::UNSPECIFIED);
   VideoReceiveStreamInterface::Stats stats = FlushAndGetStats();
   EXPECT_EQ(1, stats.network_frame_rate);
-  EXPECT_EQ(1, stats.frame_counts.key_frames);
-  EXPECT_EQ(0, stats.frame_counts.delta_frames);
+  EXPECT_EQ(1, stats.received_frame_counts.key_frames);
+  EXPECT_EQ(0, stats.received_frame_counts.delta_frames);
 }
 
 TEST_F(ReceiveStatisticsProxyTest, GetStatsReportsOnDroppedFrame) {
@@ -714,8 +735,8 @@ TEST_F(ReceiveStatisticsProxyTest, GetStatsReportsFrameCounts) {
   }
 
   VideoReceiveStreamInterface::Stats stats = statistics_proxy_->GetStats();
-  EXPECT_EQ(0, stats.frame_counts.key_frames);
-  EXPECT_EQ(0, stats.frame_counts.delta_frames);
+  EXPECT_EQ(0, stats.received_frame_counts.key_frames);
+  EXPECT_EQ(0, stats.received_frame_counts.delta_frames);
 }
 
 TEST_F(ReceiveStatisticsProxyTest, GetStatsReportsCName) {
@@ -965,9 +986,9 @@ TEST_F(ReceiveStatisticsProxyTest,
   }
   FlushAndGetStats();
 
-  EXPECT_EQ(0, statistics_proxy_->GetStats().frame_counts.key_frames);
+  EXPECT_EQ(0, statistics_proxy_->GetStats().received_frame_counts.key_frames);
   EXPECT_EQ(kMinRequiredSamples - 1,
-            statistics_proxy_->GetStats().frame_counts.delta_frames);
+            statistics_proxy_->GetStats().received_frame_counts.delta_frames);
 
   statistics_proxy_->UpdateHistograms(std::nullopt, StreamDataCounters(),
                                       nullptr);
@@ -991,9 +1012,9 @@ TEST_F(ReceiveStatisticsProxyTest,
   }
   FlushAndGetStats();
 
-  EXPECT_EQ(0, statistics_proxy_->GetStats().frame_counts.key_frames);
+  EXPECT_EQ(0, statistics_proxy_->GetStats().received_frame_counts.key_frames);
   EXPECT_EQ(kMinRequiredSamples,
-            statistics_proxy_->GetStats().frame_counts.delta_frames);
+            statistics_proxy_->GetStats().received_frame_counts.delta_frames);
 
   statistics_proxy_->UpdateHistograms(std::nullopt, StreamDataCounters(),
                                       nullptr);
@@ -1025,9 +1046,9 @@ TEST_F(ReceiveStatisticsProxyTest, KeyFrameHistogramIsUpdated) {
   FlushAndGetStats();
 
   EXPECT_EQ(kMinRequiredSamples,
-            statistics_proxy_->GetStats().frame_counts.key_frames);
+            statistics_proxy_->GetStats().received_frame_counts.key_frames);
   EXPECT_EQ(kMinRequiredSamples,
-            statistics_proxy_->GetStats().frame_counts.delta_frames);
+            statistics_proxy_->GetStats().received_frame_counts.delta_frames);
 
   statistics_proxy_->UpdateHistograms(std::nullopt, StreamDataCounters(),
                                       nullptr);
@@ -1843,6 +1864,41 @@ TEST_P(ReceiveStatisticsProxyTestWithContent, TimeInBlockyVideoReported) {
   } else {
     EXPECT_METRIC_EQ(
         kExpectedTimeInHdPercents,
+        metrics::MinSample("WebRTC.Video.TimeInBlockyVideoPercentage"));
+  }
+}
+
+// The RTP timestamp is set by the remote sender, so more than one decoded frame
+// may have the same timestamp before any of them is rendered.
+TEST_P(ReceiveStatisticsProxyTestWithContent,
+       TimeInBlockyVideoReportedWhenRtpTimestampIsDecodedTwice) {
+  const TimeDelta kInterFrameDelay = TimeDelta::Millis(20);
+  const int kHighQp = 80;
+  VideoFrame frame = CreateFrame(kWidth, kHeight);
+
+  for (int i = 0; i < kMinRequiredSamples; ++i) {
+    VideoFrameMetaData meta = MetaData(frame);
+    for (int j = 0; j < 2; ++j) {
+      statistics_proxy_->OnDecodedFrame(
+          meta, kHighQp, TimeDelta::Zero(), TimeDelta::Zero(),
+          TimeDelta::Zero(), content_type_, VideoFrameType::kVideoFrameKey);
+    }
+    statistics_proxy_->OnRenderedFrame(meta);
+    time_controller_.AdvanceTime(kInterFrameDelay);
+  }
+  // Extra last frame.
+  statistics_proxy_->OnRenderedFrame(MetaData(frame));
+
+  FlushAndUpdateHistograms(std::nullopt, StreamDataCounters(), nullptr);
+  const int kExpectedTimeInBlockyVideoPercents = 100;
+  if (videocontenttypehelpers::IsScreenshare(content_type_)) {
+    EXPECT_METRIC_EQ(
+        kExpectedTimeInBlockyVideoPercents,
+        metrics::MinSample(
+            "WebRTC.Video.Screenshare.TimeInBlockyVideoPercentage"));
+  } else {
+    EXPECT_METRIC_EQ(
+        kExpectedTimeInBlockyVideoPercents,
         metrics::MinSample("WebRTC.Video.TimeInBlockyVideoPercentage"));
   }
 }

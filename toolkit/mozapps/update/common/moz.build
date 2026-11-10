@@ -4,9 +4,11 @@
 
 EXPORTS += [
     "commonupdatedir.h",
+    "elevation_type.h",
     "readstrings.h",
     "updatecommon.h",
     "updatedefines.h",
+    "updater_invocation.h",
     "updatererrors.h",
 ]
 
@@ -15,6 +17,7 @@ if CONFIG["OS_ARCH"] == "WINNT":
         "EnterprisePolicies.h",
         "EnterprisePoliciesFlagFile.h",
         "pathhash.h",
+        "PostUpdateEnvironment.h",
         "uachelper.h",
         "updatehelper.cpp",
         "updatehelper.h",
@@ -47,6 +50,7 @@ if CONFIG["OS_ARCH"] == "WINNT":
         "EnterprisePolicies.cpp",
         "EnterprisePoliciesFlagFile.cpp",
         "pathhash.cpp",
+        "PostUpdateEnvironment.cpp",
         "uachelper.cpp",
         "updatehelper.cpp",
         "updateutils_win.cpp",
@@ -70,8 +74,10 @@ if CONFIG["OS_ARCH"] == "WINNT":
 SOURCES += [
     "/other-licenses/nsis/Contrib/CityHash/cityhash/city.cpp",
     "commonupdatedir.cpp",
+    "elevation_type.cpp",
     "readstrings.cpp",
     "updatecommon.cpp",
+    "updater_invocation.cpp",
 ]
 
 LOCAL_INCLUDES += [

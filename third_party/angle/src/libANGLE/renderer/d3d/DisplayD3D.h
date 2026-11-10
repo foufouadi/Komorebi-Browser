@@ -23,7 +23,15 @@ class ShareGroupD3D : public ShareGroupImpl
     ShareGroupD3D(const egl::ShareGroupState &state) : ShareGroupImpl(state) {}
 };
 
-class DisplayD3D : public DisplayImpl, public d3d::Context
+// testDeviceLost(), restoreLostDevice(), and makeCurrent() are implemented by DisplayD3D
+class ThreadSafeDisplayD3D : public ThreadSafeDisplayImpl
+{
+  public:
+    ThreadSafeDisplayD3D()           = default;
+    ~ThreadSafeDisplayD3D() override = default;
+};
+
+class DisplayD3D : public DisplayImpl, public d3d::Context, public ThreadSafeDisplayD3D
 {
   public:
     DisplayD3D(const egl::DisplayState &state);
@@ -66,15 +74,14 @@ class DisplayD3D : public DisplayImpl, public d3d::Context
 
     ShareGroupImpl *createShareGroup(const egl::ShareGroupState &state) override;
 
-    egl::Error makeCurrent(egl::Display *display,
-                           egl::Surface *drawSurface,
+    egl::Error makeCurrent(egl::Surface *drawSurface,
                            egl::Surface *readSurface,
                            gl::Context *context) override;
 
     egl::ConfigSet generateConfigs() override;
 
     bool testDeviceLost() override;
-    egl::Error restoreLostDevice(const egl::Display *display) override;
+    egl::Error restoreLostDevice(const egl::ThreadSafeDisplay *display) override;
 
     bool isValidNativeWindow(EGLNativeWindowType window) const override;
     egl::Error validateClientBuffer(const egl::Config *configuration,
@@ -108,6 +115,8 @@ class DisplayD3D : public DisplayImpl, public d3d::Context
     void initializeFrontendFeatures(angle::FrontendFeatures *features) const override;
 
     void populateFeatureList(angle::FeatureList *features) override;
+
+    ThreadSafeDisplayImpl *getThreadSafeDisplayImpl() override { return this; }
 
   private:
     void generateExtensions(egl::DisplayExtensions *outExtensions) const override;
@@ -155,26 +164,6 @@ enum D3D11InitError
     // CreateDevice returned NULL
     D3D11_INIT_CREATEDEVICE_NULL,
     NUM_D3D11_INIT_ERRORS
-};
-
-enum D3D9InitError
-{
-    D3D9_INIT_SUCCESS = 0,
-    // Failed to load the D3D or ANGLE compiler
-    D3D9_INIT_COMPILER_ERROR,
-    // Failed to load a necessary DLL
-    D3D9_INIT_MISSING_DEP,
-    // Device creation error
-    D3D9_INIT_CREATE_DEVICE_ERROR,
-    // System does not meet minimum shader spec
-    D3D9_INIT_UNSUPPORTED_VERSION,
-    // System does not support stretchrect from textures
-    D3D9_INIT_UNSUPPORTED_STRETCHRECT,
-    // A call returned out of memory or device lost
-    D3D9_INIT_OUT_OF_MEMORY,
-    // Other unspecified error
-    D3D9_INIT_OTHER_ERROR,
-    NUM_D3D9_INIT_ERRORS
 };
 
 }  // namespace rx

@@ -122,8 +122,10 @@ export class PasswordSettingHelpers {
       Ci.nsIFIPSUtils
     );
     if (fipsUtils.isFIPSEnabled) {
-      let title = document.getElementById("fips-title").textContent;
-      let desc = document.getElementById("fips-desc").textContent;
+      let [title, desc] = await document.l10n.formatValues([
+        "forms-primary-pw-fips-title",
+        "forms-master-pw-fips-desc",
+      ]);
       Services.prompt.alert(window, title, desc);
       PasswordSettingHelpers._initMasterPasswordUI();
     } else {
@@ -145,23 +147,12 @@ export class PasswordSettingHelpers {
   static _initMasterPasswordUI() {
     var noMP = !LoginHelper.isPrimaryPasswordSet();
 
-    // Check if settings-redesign is enabled to determine which UI is active
-    const srdEnabled = Services.prefs.getBoolPref(
-      "browser.settings-redesign.enabled",
-      false
-    );
-
-    const buttonId = srdEnabled
-      ? "changePrimaryPassword"
-      : "changeMasterPassword";
-    const checkboxId = srdEnabled ? "usePrimaryPassword" : "useMasterPassword";
-
-    var button = document.getElementById(buttonId);
+    var button = document.getElementById("changePrimaryPassword");
     if (button) {
       button.disabled = noMP;
     }
 
-    var checkbox = document.getElementById(checkboxId);
+    var checkbox = document.getElementById("usePrimaryPassword");
     if (checkbox) {
       checkbox.checked = !noMP;
       checkbox.disabled =
@@ -182,8 +173,11 @@ const {
   EDIT_CREDITCARD_L10N_IDS,
 } = FormAutofillUtils;
 
-const { ENABLED_AUTOFILL_ADDRESSES_PREF, ENABLED_AUTOFILL_CREDITCARDS_PREF } =
-  FormAutofill;
+const {
+  ENABLED_AUTOFILL_ADDRESSES_PREF,
+  ENABLED_AUTOFILL_CREDITCARDS_PREF,
+  ENABLED_AUTOFILL_CREDITCARDS_CVV_PREF,
+} = FormAutofill;
 
 const FORM_AUTOFILL_CONFIG = {
   payments: {
@@ -199,9 +193,13 @@ const FORM_AUTOFILL_CONFIG = {
         items: [
           {
             id: "requireOSAuthForPayments",
-            l10nId: "autofill-reauth-payment-methods-checkbox-2",
+            l10nId: "autofill-payment-methods-require-device-sign-in-checkbox",
             supportPage:
               "credit-card-autofill#w_require-authentication-for-autofill",
+          },
+          {
+            id: "saveSecurityCodes",
+            l10nId: "autofill-payment-methods-save-security-codes-checkbox",
           },
         ],
       },
@@ -267,6 +265,7 @@ Preferences.addAll([
   // Credit cards and addresses
   { id: ENABLED_AUTOFILL_ADDRESSES_PREF, type: "bool" },
   { id: ENABLED_AUTOFILL_CREDITCARDS_PREF, type: "bool" },
+  { id: ENABLED_AUTOFILL_CREDITCARDS_CVV_PREF, type: "bool" },
 
   // Personal info (one .enabled pref per member type)
   ...personalInfoEnabledPrefs().map(pref => ({ id: pref, type: "bool" })),
@@ -395,6 +394,14 @@ Preferences.addSetting({
   setup: emitChange => {
     Services.obs.addObserver(emitChange, "OSAuthEnabledChange");
     return () => Services.obs.removeObserver(emitChange, "OSAuthEnabledChange");
+  },
+});
+Preferences.addSetting({
+  id: "saveSecurityCodes",
+  pref: ENABLED_AUTOFILL_CREDITCARDS_CVV_PREF,
+  visible: () => FormAutofill.isAutofillCreditCardCVVSupported,
+  onUserChange(enabled) {
+    lazy.FormAutofillPreferences.recordCvvSavingToggled(enabled, "settings");
   },
 });
 
@@ -922,9 +929,7 @@ SettingGroupManager.registerGroups({
         id: "additionalProtectionsGroup",
         l10nId: "forms-additional-protections-header",
         control: "moz-fieldset",
-        controlAttrs: {
-          headingLevel: 2,
-        },
+        headingLevel: 2,
         items: [
           {
             id: "primaryPasswordNotSet",

@@ -9,12 +9,27 @@
   }
 }
 
+@media not -moz-pref("sidebar.verticalTabs") {
+  :host {
+    /* --sidebar-launcher-button-size is set in the parent doc
+     * (browser/themes/shared/sidebar.css) so it can react to the document's
+     * uidensity attribute. */
+    --button-size-icon: var(--sidebar-launcher-button-size, var(--size-item-large));
+    --button-min-height: var(--button-size-icon);
+  }
+}
+
 [hidden] {
   display: none !important;
 }
 
 :host {
   width: 100%;
+  /* moz-button paints its focus indicator outside the button's border box, so
+   * containers that clip labels have to extend their clip rect by the same
+   * amount, or they slice the indicator. Resolves to 0 where the indicator is
+   * inset (negative offset), which needs no extra room. */
+  --focus-ring-clip-margin: max(0px, calc(var(--focus-outline-offset) + var(--focus-outline-width)));
 }
 
 .wrapper {
@@ -35,7 +50,7 @@
       /* TODO: These --space-* tokens should use semantic names shared with tabs.css */
       width: var(
         --sidebar-expanded-launcher-width,
-        calc(var(--tab-pinned-horizontal-count) * var(--tab-pinned-min-width-expanded) + 2 * var(--tab-pinned-container-margin-inline-expanded) + 1px)
+        calc(var(--tab-pinned-horizontal-count) * var(--tab-pinned-min-width-expanded) + 2 * var(--tab-container-margin-inline-pinned-expanded) + 1px)
       );
     }
 
@@ -47,12 +62,21 @@
 
 #sidebar-tools-and-extensions-splitter {
   display: block;
-  border-top: var(--tabstrip-inner-border);
-  margin-inline: var(--tab-inner-inline-margin);
+  border: none;
+  /* Overrides the default background-color for Win/Linux in splitter.css */
+  background-color: transparent;
+  background-size: var(--sidebar-divider-size);
+  background-position: var(--sidebar-divider-position);
+  background-repeat: no-repeat;
+  margin-inline: var(--tab-margin-inline-inner);
   margin-block-end: var(--space-small);
   min-height: 2px;
   @media -moz-pref("browser.nova.enabled") {
     min-height: 4px;
+  }
+
+  :host(:not([expanded])) & {
+    margin-inline-end: calc(var(--tab-margin-inline-inner) + var(--tab-collapsed-scrollbar-extra, 0px));
   }
 
   &:hover {
@@ -60,14 +84,8 @@
     border-radius: var(--border-radius-medium);
   }
 
-  @media not -moz-pref("sidebar.visibility", "expand-on-hover") {
-    /* We need these rules to apply at all times when the sidebar.visibility
-    pref is not set to "expand-on-hover" as opposed to when the "sidebar-expand-on-hover" attribute
-    has not been added to root. There are certain scenarios when that attribute is temporarily
-    removed from root such as when toggling the sidebar to expand with the toolbar button. */
-    :host([expanded]) & {
-      border-color: transparent;
-    }
+  :host([tabs-overflow]:not([expanded])) &:not(:hover) {
+    background-image: var(--sidebar-divider-image);
   }
 }
 
@@ -76,7 +94,14 @@
   flex-direction: column;
   align-items: start;
   max-width: 100%;
-  overflow: hidden;
+  overflow: clip;
+  overflow-clip-margin: var(--focus-ring-clip-margin);
+  /* Unlike overflow: hidden, clip doesn't make this a scroll container, so the
+   * automatic minimum size no longer collapses to zero. Restore it explicitly:
+   * collapsed expand-on-hover relies on this list shrinking away so that only
+   * the overflow chevron remains visible. */
+  min-height: 0;
+  min-width: 0;
 
   > moz-button {
     --button-icon-fill: var(--toolbarbutton-icon-fill);
@@ -92,6 +117,7 @@
      * visibly shrink in compact mode to keep the trigger stable. */
     --button-outer-padding-inline: var(--sidebar-launcher-button-padding-inline, var(--space-medium));
     --button-outer-padding-block: var(--space-xxsmall);
+    --button-outer-padding-inline-end: calc(var(--button-outer-padding-inline) + var(--tab-collapsed-scrollbar-extra, 0px));
 
     &:first-of-type {
       --button-outer-padding-block-start: var(--space-small);
@@ -159,7 +185,8 @@
   flex-shrink: 0;
   justify-content: space-between;
   min-height: calc(var(--button-min-height) + (var(--space-small) * 2));
-  overflow: hidden;
+  overflow: clip;
+  overflow-clip-margin: var(--focus-ring-clip-margin);
 
   :host([expanded]) & {
     flex-direction: row;

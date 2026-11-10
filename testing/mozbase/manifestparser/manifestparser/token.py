@@ -146,6 +146,9 @@ class ManifestTokens:
         _v2404: Token = self.add(
             Token(t_type=t_os_version, depends=linux, value="24.04")
         )
+        _v2604: Token = self.add(
+            Token(t_type=t_os_version, depends=linux, value="26.04")
+        )
 
         _v1015: Token = self.add(Token(t_type=t_os_version, depends=mac, value="10.15"))
         _v1470: Token = self.add(Token(t_type=t_os_version, depends=mac, value="14.70"))
@@ -191,6 +194,7 @@ class ManifestTokens:
         _a11y_checks: Token = self.add(Token(t_type=t_variant, value="a11y_checks"))
         _condprof: Token = self.add(Token(t_type=t_variant, value="condprof"))
         _e10s: Token = self.add(Token(t_type=t_variant, value="e10s"))
+        _emesigned: Token = self.add(Token(t_type=t_variant, value="emesigned"))
         _emewmf: Token = self.add(Token(t_type=t_variant, value="emewmf"))
         _fission: Token = self.add(Token(t_type=t_variant, value="fission"))
         # fission-high-value -- not used in any manifests
@@ -210,12 +214,6 @@ class ManifestTokens:
         _remote_async: Token = self.add(Token(t_type=t_variant, value="remote_async"))
         _snapshot: Token = self.add(Token(t_type=t_variant, value="snapshot"))
         _standalone: Token = self.add(Token(t_type=t_variant, value="standalone"))
-        _socketprocess_e10s: Token = self.add(
-            Token(t_type=t_variant, value="socketprocess_e10s")
-        )
-        _socketprocess_networking: Token = self.add(
-            Token(t_type=t_variant, value="socketprocess_networking")
-        )  # DOES NOT appear in variants.yml
         _swgl: Token = self.add(Token(t_type=t_variant, value="swgl"))
         _trainhop: Token = self.add(Token(t_type=t_variant, value="trainhop"))
         _vertical_tab: Token = self.add(Token(t_type=t_variant, value="vertical_tab"))
@@ -234,6 +232,7 @@ class ManifestTokens:
         _early_beta_or_earlier: Token = self.add(
             Token(t_type=t_other_flags, value="early_beta_or_earlier")
         )
+        _enterprise: Token = self.add(Token(t_type=t_other_flags, value="enterprise"))
         _false: Token = self.add(Token(t_type=t_other_flags, value="false"))
         _gecko_profiler: Token = self.add(
             Token(t_type=t_other_flags, value="gecko_profiler")

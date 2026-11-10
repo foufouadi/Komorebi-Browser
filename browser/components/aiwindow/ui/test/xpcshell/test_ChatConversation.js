@@ -1,6 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
+const STATE_CHOOSE = "choose";
+
 do_get_profile();
 
 const { ChatConversation, MESSAGE_ROLE, ChatMessage } =
@@ -485,6 +487,19 @@ add_task(function test_ChatConversation_getMostRecentPageVisited() {
   Assert.equal(mostRecentPageVisited, "https://www.espn.com/");
 });
 
+add_task(function test_revisited_ChatConversation_getMostRecentPageVisited() {
+  const conversation = new ChatConversation({});
+
+  const content = "user to assistant msg";
+  conversation.addUserMessage(content, new URL("https://www.mozilla.com"));
+  conversation.addUserMessage(content, new URL("https://www.firefox.com"));
+  conversation.addUserMessage(content, new URL("https://www.mozilla.com"));
+  conversation.addUserMessage(content, new URL("about:aiwindow"));
+
+  const mostRecentPageVisited = conversation.getMostRecentPageVisited();
+  Assert.equal(mostRecentPageVisited, "https://www.mozilla.com/");
+});
+
 add_task(function test_noBrowsing_ChatConversation_getMostRecentPageVisited() {
   const conversation = new ChatConversation({});
 
@@ -598,6 +613,7 @@ add_task(function test_ChatConversation_getMessagesInChatCompletionsFormat() {
 
   Assert.deepEqual(openAiFormat, [
     { role: "system", content: "the system prompt" },
+    { role: "user", content: "321" },
     { role: "user", content: "a user's prompt" },
     { role: "tool", content: "[1,2,3]", name: "tool_1", tool_call_id: "123" },
     { role: "assistant", content: "the llm response" },
@@ -607,6 +623,40 @@ add_task(function test_ChatConversation_getMessagesInChatCompletionsFormat() {
     { role: "assistant", content: "the second llm response" },
   ]);
 });
+
+add_task(
+  function test_getMessagesInChatCompletionsFormat_keeps_browser_context_in_history() {
+    const conversation = new ChatConversation({});
+    conversation.addUserMessage("turn 1", null, new UserRoleOpts(), {
+      realTimeContext: "TAB: A",
+      memoriesContext: "MEMORIES 1",
+    });
+    conversation.addAssistantMessage("text", "answer 1");
+    conversation.addUserMessage("turn 2", null, new UserRoleOpts(), {});
+    conversation.addAssistantMessage("text", "answer 2");
+    conversation.addUserMessage("turn 3", null, new UserRoleOpts(), {
+      realTimeContext: "TAB: B",
+      memoriesContext: "MEMORIES 3",
+    });
+
+    Assert.deepEqual(
+      conversation
+        .getMessagesInChatCompletionsFormat()
+        .map(({ role, content }) => ({ role, content })),
+      [
+        { role: "user", content: "TAB: A" },
+        { role: "user", content: "turn 1" },
+        { role: "assistant", content: "answer 1" },
+        { role: "user", content: "turn 2" },
+        { role: "assistant", content: "answer 2" },
+        { role: "user", content: "TAB: B" },
+        { role: "user", content: "MEMORIES 3" },
+        { role: "user", content: "turn 3" },
+      ],
+      "Browser context stays before the message it was sent with. Memories only go with the latest message"
+    );
+  }
+);
 
 add_task(async function test_unrelatedMessage_ChatConversation_retryMessage() {
   const conversation = new ChatConversation({});
@@ -753,6 +803,7 @@ add_task(
             feature: "browser-context",
             module: "tab",
             model: "generic",
+            version: "1.0",
             prompts: "TAB: {title} ({url})",
           },
         ]),
@@ -778,6 +829,45 @@ add_task(
   }
 );
 
+add_task(
+  async function test_injectRealTimeContext_no_op_without_user_message() {
+    _setRemoteClientForTesting({
+      get: () =>
+        Promise.resolve([
+          {
+            id: "browser-context--tab--v1--generic",
+            kind: "module",
+            feature: "browser-context",
+            module: "tab",
+            model: "generic",
+            version: "1.0",
+            prompts: "TAB: {title} ({url})",
+          },
+        ]),
+      on: () => {},
+    });
+    registerCleanupFunction(_clearRemoteClientForTesting);
+
+    const conversation = new ChatConversation({});
+    const opts = {
+      getRealTimeMapping: async () => ({
+        url: "https://example.com",
+        title: "Example",
+        hasTabInfo: true,
+      }),
+    };
+    await conversation.injectRealTimeContext(undefined, opts);
+    const userMessage = conversation.addUserMessage("hi");
+    await conversation.injectRealTimeContext(userMessage, opts);
+
+    Assert.equal(
+      userMessage.content.userContext.realTimeContext,
+      "TAB: Example (https://example.com)",
+      "The next user message still gets the context"
+    );
+  }
+);
+
 add_task(async function test_injectRealTimeContext_no_op_when_mapping_null() {
   const mockGetRealTimeMapping = lazy.sinon.stub().resolves(null);
 
@@ -793,6 +883,27 @@ add_task(async function test_injectRealTimeContext_no_op_when_mapping_null() {
   );
 });
 
+add_task(
+  async function test_injectRealTimeContext_marks_missing_context_after_reopen() {
+    const conversation = new ChatConversation({});
+    const earlierMessage = conversation.addUserMessage("turn 1");
+    earlierMessage.content.userContext.realTimeContext =
+      "TAB: Example (https://example.com)";
+    conversation.addAssistantMessage("text", "answer");
+
+    const userMessage = conversation.addUserMessage("turn 2");
+    await conversation.injectRealTimeContext(userMessage, {
+      getRealTimeMapping: async () => null,
+    });
+
+    Assert.equal(
+      userMessage.content.userContext.realTimeContext,
+      "No page context is available for this message.",
+      "Model is told the stored tab no longer applies"
+    );
+  }
+);
+
 add_task(async function test_injectRealTimeContext_dedupes_when_unchanged() {
   _setRemoteClientForTesting({
     get: () =>
@@ -803,6 +914,7 @@ add_task(async function test_injectRealTimeContext_dedupes_when_unchanged() {
           feature: "browser-context",
           module: "tab",
           model: "generic",
+          version: "1.0",
           prompts: "TAB: {title} ({url})",
         },
       ]),
@@ -851,6 +963,67 @@ add_task(async function test_injectRealTimeContext_dedupes_when_unchanged() {
   );
 });
 
+add_task(
+  async function test_injectRealTimeContext_reinjects_after_retry_or_missing_context() {
+    _setRemoteClientForTesting({
+      get: () =>
+        Promise.resolve([
+          {
+            id: "browser-context--tab--v1--generic",
+            kind: "module",
+            feature: "browser-context",
+            module: "tab",
+            model: "generic",
+            version: "1.0",
+            prompts: "TAB: {title} ({url})",
+          },
+        ]),
+      on: () => {},
+    });
+    registerCleanupFunction(_clearRemoteClientForTesting);
+
+    const conversation = new ChatConversation({});
+    const tab = async () => ({
+      url: "https://example.com",
+      title: "Example",
+      hasTabInfo: true,
+    });
+    const sendTurn = async (prompt, getRealTimeMapping) => {
+      const userMessage = conversation.addUserMessage(prompt);
+      await conversation.injectRealTimeContext(userMessage, {
+        getRealTimeMapping,
+      });
+      conversation.addAssistantMessage("text", "answer");
+      return userMessage;
+    };
+    const contextOf = message => message.content.userContext?.realTimeContext;
+    const context = "TAB: Example (https://example.com)";
+
+    const firstMessage = await sendTurn("turn 1", tab);
+    await conversation.retryMessage(firstMessage);
+    Assert.equal(
+      contextOf(await sendTurn("turn 1", tab)),
+      context,
+      "Retried message receives the context again"
+    );
+
+    Assert.equal(
+      contextOf(await sendTurn("turn 2", async () => null)),
+      "No page context is available for this message.",
+      "Model is told the earlier tab no longer applies"
+    );
+    Assert.ok(
+      !contextOf(await sendTurn("turn 2b", async () => null)),
+      "The note is not repeated while there is still no page context"
+    );
+    Assert.equal(
+      contextOf(await sendTurn("turn 3", tab)),
+      context,
+      "Context is resubmitted after the tab was left out"
+    );
+  }
+);
+
 add_task(function test_ChatConversation_renderState_filters_phantom_messages() {
   const conversation = new ChatConversation({});
 
@@ -879,6 +1052,119 @@ add_task(function test_ChatConversation_renderState_filters_phantom_messages() {
   Assert.equal(renderState[0].role, MESSAGE_ROLE.USER);
   Assert.equal(renderState[1].role, MESSAGE_ROLE.ASSISTANT);
   Assert.equal(renderState[1].content.body, "Here is the weather forecast.");
+});
+
+add_task(function test_renderState_includes_empty_message_with_tool_ui() {
+  const conversation = new ChatConversation({});
+  conversation.addUserMessage("Create a page", null);
+  const message = conversation.addAssistantMessage("text", "");
+  conversation.addUIToolToCurrentMessage(
+    "aitab-call",
+    { uiType: "aitab", properties: { state: STATE_CHOOSE } },
+    { emitComplete: false }
+  );
+
+  Assert.ok(conversation.renderState().includes(message));
+});
+
+function addToolRound(conversation, id) {
+  conversation.addAssistantMessage("function", {
+    tool_calls: [
+      { id, type: "function", function: { name: "tool_1", arguments: "{}" } },
+    ],
+  });
+  conversation.addToolCallMessage({
+    tool_call_id: id,
+    name: "tool_1",
+    body: [],
+  });
+}
+
+async function* toolCallStream(text) {
+  if (text) {
+    yield { text };
+  }
+  yield {
+    toolCalls: [
+      { id: "call_1", function: { name: "tool_1", arguments: "{}" } },
+    ],
+  };
+}
+
+add_task(
+  async function test_receiveResponse_streams_reply_after_tool_results_into_new_message() {
+    const conversation = new ChatConversation({});
+    const completed = [];
+    conversation.on("chat-conversation:message-complete", (_event, message) =>
+      completed.push(message)
+    );
+    conversation.addUserMessage("Find my recipe page");
+    const preamble = conversation.addAssistantMessage("text", "");
+
+    await conversation.receiveResponse(toolCallStream("Let me look."));
+    addToolRound(conversation, "call_1");
+    conversation.addCitations([{ url: "https://example.com/recipe" }]);
+    await conversation.receiveResponse(
+      (async function* () {
+        yield { text: "Found it." };
+      })()
+    );
+
+    const reply = conversation.messages.at(-1);
+    Assert.deepEqual(
+      conversation.messages.map(({ role, content }) => [role, content.type]),
+      [
+        [MESSAGE_ROLE.USER, "text"],
+        [MESSAGE_ROLE.ASSISTANT, "text"],
+        [MESSAGE_ROLE.ASSISTANT, "function"],
+        [MESSAGE_ROLE.TOOL, undefined],
+        [MESSAGE_ROLE.ASSISTANT, "text"],
+      ],
+      "The reply is stored after the tool results"
+    );
+    Assert.equal(preamble.content.body, "Let me look.", "The preamble is kept");
+    Assert.equal(
+      reply.content.body,
+      "Found it.",
+      "The reply has its own message"
+    );
+    Assert.deepEqual(
+      reply.citations.map(({ url }) => url),
+      ["https://example.com/recipe"],
+      "The reply carries the turn's citations"
+    );
+    Assert.deepEqual(
+      completed,
+      [reply],
+      "Only the reply completes, once the turn is done"
+    );
+  }
+);
+
+add_task(async function test_receiveResponse_empty_reply_completes_preamble() {
+  const conversation = new ChatConversation({});
+  const completed = [];
+  conversation.on("chat-conversation:message-complete", (_event, message) =>
+    completed.push(message)
+  );
+  conversation.addUserMessage("Find my recipe page");
+  const preamble = conversation.addAssistantMessage("text", "");
+
+  await conversation.receiveResponse(toolCallStream("Let me look."));
+  addToolRound(conversation, "call_1");
+  conversation.addCitations([{ url: "https://example.com/recipe" }]);
+  await conversation.receiveResponse((async function* () {})());
+
+  Assert.deepEqual(
+    completed,
+    [preamble],
+    "The preamble completes the turn when the reply after the tools is empty"
+  );
+  Assert.deepEqual(
+    preamble.citations.map(({ url }) => url),
+    ["https://example.com/recipe"],
+    "The preamble carries the citations found by the turn's tools"
+  );
 });
 
 add_task(
@@ -946,20 +1232,14 @@ add_task(
     sandbox.stub(MemoryStore, "requestSave").resolves();
 
     const conversation = new ChatConversation({});
+    conversation.addUserMessage("What do you remember?");
     conversation.addAssistantMessage("text", "");
     const assistantMsg = conversation.messages.at(-1);
 
-    // First turn: The model cites a memory and requests a tool call in the same pass,
-    // so this assistant message keeps streaming after the tool runs.
-    async function* toolCallStream() {
-      yield { text: "Let me check that.§existing_memory: mem-1§" };
-      yield {
-        toolCalls: [
-          { id: "call_1", function: { name: "run_search", arguments: "{}" } },
-        ],
-      };
-    }
-    const withToolCalls = await conversation.receiveResponse(toolCallStream());
+    // First pass: The model cites a memory and requests a tool call.
+    const withToolCalls = await conversation.receiveResponse(
+      toolCallStream("Let me check that.§existing_memory: mem-1§")
+    );
 
     Assert.equal(
       withToolCalls.pendingToolCalls.length,
@@ -976,11 +1256,14 @@ add_task(
       "memoriesApplied should still hold the raw cited id mid-turn"
     );
 
-    // Second Turn: The same memory is cited again once the tool result is in.
+    addToolRound(conversation, "call_1");
+
+    // Second pass: The same memory is cited again once the tool result is in.
     async function* finalStream() {
-      yield { text: " Here is what I found.§existing_memory: mem-1§" };
+      yield { text: "Here is what I found.§existing_memory: mem-1§" };
     }
     const final = await conversation.receiveResponse(finalStream());
+    const replyMsg = conversation.messages.at(-1);
 
     Assert.equal(
       final.pendingToolCalls,
@@ -1001,9 +1284,139 @@ add_task(
       "Use should be recorded once even though the memory was cited twice"
     );
     Assert.deepEqual(
+      replyMsg.memoriesApplied,
+      mockMemories,
+      "The reply should end up with the resolved memories"
+    );
+    Assert.deepEqual(
+      assistantMsg.memoriesApplied,
+      [],
+      "The preamble should not keep the raw cited ids"
+    );
+
+    sandbox.restore();
+  }
+);
+
+add_task(
+  async function test_promptEmbeddedMemories_ChatConversation_receiveResponse() {
+    let sandbox = lazy.sinon.createSandbox();
+
+    const mockMemories = [
+      { id: "mem-1", lifetime_accessed_count: 0, recent_accessed_counts: {} },
+    ];
+    sandbox.stub(MemoryStore, "getMemories").resolves(mockMemories);
+    sandbox.stub(MemoryStore, "requestSave").resolves();
+
+    const conversation = new ChatConversation({});
+    conversation.promptEmbeddedMemories = [
+      { id: "mem-1", memory_summary: "Trip planning" },
+    ];
+    conversation.addAssistantMessage("text", "some response");
+    const assistantMsg = conversation.messages.at(-1);
+
+    async function* emptyStream() {}
+    await conversation.receiveResponse(emptyStream());
+
+    Assert.deepEqual(
       assistantMsg.memoriesApplied,
       mockMemories,
-      "memoriesApplied should end up as the resolved memories"
+      "memoriesApplied should include the prompt-embedded memory, resolved through resolveUsedMemories, when nothing is cited"
+    );
+    Assert.equal(
+      mockMemories[0].lifetime_accessed_count,
+      1,
+      "Prompt-embedded memory use should be recorded like a cited one"
+    );
+    Assert.deepEqual(
+      conversation.promptEmbeddedMemories,
+      [],
+      "promptEmbeddedMemories should be consumed after the turn completes"
+    );
+
+    sandbox.restore();
+  }
+);
+
+add_task(
+  async function test_citedAndPromptEmbeddedMemoriesAreUnioned_ChatConversation_receiveResponse() {
+    let sandbox = lazy.sinon.createSandbox();
+
+    const mockMemories = [
+      { id: "mem-1", lifetime_accessed_count: 0, recent_accessed_counts: {} },
+      {
+        id: "mem-embedded",
+        lifetime_accessed_count: 0,
+        recent_accessed_counts: {},
+      },
+    ];
+    sandbox.stub(MemoryStore, "getMemories").resolves(mockMemories);
+    sandbox.stub(MemoryStore, "requestSave").resolves();
+
+    const conversation = new ChatConversation({});
+    conversation.promptEmbeddedMemories = [
+      { id: "mem-embedded", memory_summary: "Trip planning" },
+    ];
+    conversation.addAssistantMessage("text", "some response");
+    const assistantMsg = conversation.messages.at(-1);
+    assistantMsg.tokens.existing_memory = ["mem-1"];
+
+    async function* emptyStream() {}
+    await conversation.receiveResponse(emptyStream());
+
+    const memoryIds = new Set(
+      assistantMsg.memoriesApplied.map(memory => memory.id)
+    );
+    Assert.equal(
+      memoryIds.size,
+      2,
+      "memoriesApplied should include both the cited and prompt-embedded memories"
+    );
+    Assert.ok(memoryIds.has("mem-1"), "Should include the cited memory");
+    Assert.ok(
+      memoryIds.has("mem-embedded"),
+      "Should include the prompt-embedded memory"
+    );
+    Assert.deepEqual(
+      conversation.promptEmbeddedMemories,
+      [],
+      "promptEmbeddedMemories should be cleared after the turn completes"
+    );
+
+    sandbox.restore();
+  }
+);
+
+add_task(
+  async function test_citedAndPromptEmbeddedSameMemoryIsDeduped_ChatConversation_receiveResponse() {
+    let sandbox = lazy.sinon.createSandbox();
+
+    const mockMemories = [
+      { id: "mem-1", lifetime_accessed_count: 0, recent_accessed_counts: {} },
+    ];
+    sandbox.stub(MemoryStore, "getMemories").resolves(mockMemories);
+    sandbox.stub(MemoryStore, "requestSave").resolves();
+
+    const conversation = new ChatConversation({});
+    conversation.promptEmbeddedMemories = [
+      { id: "mem-1", memory_summary: "Trip planning" },
+    ];
+    conversation.addAssistantMessage("text", "some response");
+    const assistantMsg = conversation.messages.at(-1);
+    assistantMsg.tokens.existing_memory = ["mem-1"];
+
+    async function* emptyStream() {}
+    await conversation.receiveResponse(emptyStream());
+
+    Assert.equal(
+      assistantMsg.memoriesApplied.length,
+      1,
+      "The same memory cited and prompt-embedded should only appear once"
+    );
+    Assert.equal(
+      mockMemories[0].lifetime_accessed_count,
+      1,
+      "Use should be recorded once, not twice, for the same memory"
     );
 
     sandbox.restore();
@@ -1863,6 +2276,26 @@ add_task(function test_addUIToolToCurrentMessage_emits_events() {
 
   Assert.ok(updateEventFired, "Update event should be emitted");
   Assert.ok(completeEventFired, "Complete event should be re-emitted");
+});
+
+add_task(function test_addUIToolToCurrentMessage_can_defer_completion() {
+  const conversation = new ChatConversation({});
+  conversation.addUserMessage("Create a page", null);
+  conversation.addAssistantMessage("text", "");
+
+  let updates = 0;
+  let completions = 0;
+  conversation.on("chat-conversation:message-update", () => updates++);
+  conversation.on("chat-conversation:message-complete", () => completions++);
+
+  conversation.addUIToolToCurrentMessage(
+    "aitab-call",
+    { uiType: "aitab", properties: { state: STATE_CHOOSE } },
+    { emitComplete: false }
+  );
+
+  Assert.equal(updates, 1);
+  Assert.equal(completions, 0);
 });
 
 add_task(async function test_addUserMessage_dismisses_prior_undo() {

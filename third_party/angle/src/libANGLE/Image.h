@@ -17,6 +17,7 @@
 #include "libANGLE/Error.h"
 #include "libANGLE/FramebufferAttachment.h"
 #include "libANGLE/RefCountObject.h"
+#include "libANGLE/angletypes.h"
 #include "libANGLE/formatutils.h"
 
 namespace rx
@@ -35,6 +36,22 @@ namespace egl
 class Image;
 class Display;
 class ContextMutex;
+
+// Attributes of the image source that siblings might care about.
+struct ImageSourceAttributes
+{
+    // Corresponding to |target| in |eglCreateImage|
+    gl::TextureType type = gl::TextureType::InvalidEnum;
+    // Corresponding to |EGL_GL_TEXTURE_LEVEL| value in attributes of |eglCreateImage|
+    uint32_t level = 0;
+    // Corresponding to |EGL_GL_TEXTURE_ZOFFSET| value in attributes of |eglCreateImage|
+    uint32_t zoffset = 0;
+
+    gl::OwnerImageIndex toOwnerIndex(const gl::ImageIndex &ownIndex) const;
+    gl::OwnerLevel toOwnerLevel(gl::LevelIndex ownLevel) const;
+    gl::OwnerLayer toOwnerLayer(gl::LayerIndex ownLayer) const;
+    gl::OwnerLayer toOwnerDepth(const gl::Offset &offset) const;
+};
 
 // Only currently Renderbuffers and Textures can be bound with images. This makes the relationship
 // explicit, and also ensures that an image sibling can determine if it's been initialized or not,
@@ -67,7 +84,9 @@ class ImageSibling : public gl::FramebufferAttachmentObject
 
     const UnorderedSetSiblingSource &getSiblingSourcesOf() const { return mSourcesOf; }
     // Set the image target of this sibling
-    void setTargetImage(const gl::Context *context, egl::Image *imageTarget);
+    void setTargetImage(const gl::Context *context,
+                        egl::Image *imageTarget,
+                        ImageSourceAttributes *attributesOut);
 
     // Orphan all EGL image sources and targets
     angle::Result orphanImages(const gl::Context *context,
@@ -149,7 +168,7 @@ struct ImageState : private angle::NonCopyable
 
     EGLLabelKHR label;
     EGLenum target;
-    gl::ImageIndex imageIndex;
+    gl::OwnerImageIndex imageIndex;
     ImageSibling *source;
 
     gl::Format format;
@@ -215,7 +234,7 @@ class Image final : public ThreadSafeRefCountObject, public LabeledObject
 
     ContextMutex *getContextMutex() const { return mContextMutex; }
 
-    const gl::ImageIndex &getSourceImageIndex() const { return mState.imageIndex; }
+    const gl::OwnerImageIndex &getSourceImageIndex() const { return mState.imageIndex; }
 
   private:
     friend class ImageSibling;

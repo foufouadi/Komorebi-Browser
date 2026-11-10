@@ -6,7 +6,7 @@
 
 #include "mozilla/gfx/MacIOSurface.h"
 #include "mozilla/gfx/gfxVars.h"
-#include "mozilla/layers/GpuFence.h"
+#include "mozilla/layers/CompositeProcessFencesHolderMap.h"
 #include "mozilla/webrender/RenderMacIOSurfaceTextureHost.h"
 #include "mozilla/webrender/RenderThread.h"
 #include "mozilla/webrender/WebRenderAPI.h"
@@ -17,20 +17,39 @@ namespace layers {
 MacIOSurfaceTextureHostOGL::MacIOSurfaceTextureHostOGL(
     TextureFlags aFlags, const SurfaceDescriptorMacIOSurface& aDescriptor)
     : TextureHost(TextureHostType::MacIOSurface, aFlags),
+      mDescriptor(aDescriptor),
       mSurface(MacIOSurface::LookupSurface(
           aDescriptor.surfaceId(), aDescriptor.yUVColorSpace(),
           aDescriptor.transferFunction(),
           aDescriptor.isOpaque() ? MacIOSurface::AllowAlpha::No
-                                 : MacIOSurface::AllowAlpha::Yes)),
-      mGpuFence(aDescriptor.gpuFence()) {
+                                 : MacIOSurface::AllowAlpha::Yes)) {
   MOZ_COUNT_CTOR(MacIOSurfaceTextureHostOGL);
   if (!mSurface) {
     gfxCriticalNote << "Failed to look up MacIOSurface";
+  }
+
+  if (!mDescriptor.fencesHolderId()) {
+    return;
+  }
+  MOZ_ASSERT(mDescriptor.fencesHolderId()->IsValid());
+  if (auto* fenceHolderMap = CompositeProcessFencesHolderMap::Get()) {
+    fenceHolderMap->RegisterReference(mDescriptor.fencesHolderId().ref());
+  } else {
+    MOZ_ASSERT_UNREACHABLE("FencesHolderMap not available");
   }
 }
 
 MacIOSurfaceTextureHostOGL::~MacIOSurfaceTextureHostOGL() {
   MOZ_COUNT_DTOR(MacIOSurfaceTextureHostOGL);
+
+  if (!mDescriptor.fencesHolderId()) {
+    return;
+  }
+  if (auto* fenceHolderMap = CompositeProcessFencesHolderMap::Get()) {
+    fenceHolderMap->Unregister(mDescriptor.fencesHolderId().ref());
+  } else {
+    MOZ_ASSERT_UNREACHABLE("FencesHolderMap not available");
+  }
 }
 
 gfx::SurfaceFormat MacIOSurfaceTextureHostOGL::GetFormat() const {
@@ -84,7 +103,7 @@ void MacIOSurfaceTextureHostOGL::CreateRenderTexture(
   MOZ_ASSERT(mExternalImageId.isSome());
 
   RefPtr texture = MakeRefPtr<wr::RenderMacIOSurfaceTextureHost>(
-      GetMacIOSurface(), mGpuFence);
+      GetMacIOSurface(), mDescriptor.fencesHolderId());
 
   bool isDRM = (bool)(mFlags & TextureFlags::DRM_SOURCE);
   texture->SetIsFromDRMSource(isDRM);
@@ -143,6 +162,7 @@ void MacIOSurfaceTextureHostOGL::PushResourceUpdates(
                                      GetFormat() == gfx::SurfaceFormat::B8G8R8A8
                                          ? wr::OpacityType::HasAlphaChannel
                                          : wr::OpacityType::Opaque);
+      descriptor.is_drm_source = bool(mFlags & TextureFlags::DRM_SOURCE);
       (aResources.*method)(aImageKeys[0], descriptor, aExtID, imageType, 0,
                            /* aNormalizedUvs */ false);
       break;
@@ -158,6 +178,7 @@ void MacIOSurfaceTextureHostOGL::PushResourceUpdates(
       }
       wr::ImageDescriptor descriptor(GetSize(), wr::ImageFormat::BGRA8,
                                      wr::OpacityType::Opaque);
+      descriptor.is_drm_source = bool(mFlags & TextureFlags::DRM_SOURCE);
       (aResources.*method)(aImageKeys[0], descriptor, aExtID, imageType, 0,
                            /* aNormalizedUvs */ false);
       break;
@@ -176,6 +197,8 @@ void MacIOSurfaceTextureHostOGL::PushResourceUpdates(
           gfx::IntSize(mSurface->GetDevicePixelWidth(1),
                        mSurface->GetDevicePixelHeight(1)),
           wr::ImageFormat::RG8, wr::OpacityType::Opaque);
+      descriptor0.is_drm_source = bool(mFlags & TextureFlags::DRM_SOURCE);
+      descriptor1.is_drm_source = bool(mFlags & TextureFlags::DRM_SOURCE);
       (aResources.*method)(aImageKeys[0], descriptor0, aExtID, imageType, 0,
                            /* aNormalizedUvs */ false);
       (aResources.*method)(aImageKeys[1], descriptor1, aExtID, imageType, 1,
@@ -197,6 +220,8 @@ void MacIOSurfaceTextureHostOGL::PushResourceUpdates(
           gfx::IntSize(mSurface->GetDevicePixelWidth(1),
                        mSurface->GetDevicePixelHeight(1)),
           wr::ImageFormat::RG16, wr::OpacityType::HasAlphaChannel);
+      descriptor0.is_drm_source = bool(mFlags & TextureFlags::DRM_SOURCE);
+      descriptor1.is_drm_source = bool(mFlags & TextureFlags::DRM_SOURCE);
       (aResources.*method)(aImageKeys[0], descriptor0, aExtID, imageType, 0,
                            /* aNormalizedUvs */ false);
       (aResources.*method)(aImageKeys[1], descriptor1, aExtID, imageType, 1,
@@ -214,7 +239,8 @@ void MacIOSurfaceTextureHostOGL::PushDisplayItems(
     const wr::LayoutRect& aClip, wr::ImageRendering aFilter,
     const Range<wr::ImageKey>& aImageKeys, PushDisplayItemFlagSet aFlags) {
   bool preferCompositorSurface =
-      aFlags.contains(PushDisplayItemFlag::PREFER_COMPOSITOR_SURFACE);
+      aFlags.contains(PushDisplayItemFlag::PREFER_COMPOSITOR_SURFACE) ||
+      bool(mFlags & TextureFlags::DRM_SOURCE);
   switch (GetFormat()) {
     case gfx::SurfaceFormat::B8G8R8A8:
     case gfx::SurfaceFormat::B8G8R8X8: {
@@ -298,6 +324,10 @@ void MacIOSurfaceTextureHostOGL::PushDisplayItems(
       MOZ_ASSERT_UNREACHABLE("unexpected to be called");
     }
   }
+}
+
+SurfaceDescriptor MacIOSurfaceTextureHostOGL::GetSurfaceDescriptor() {
+  return mDescriptor;
 }
 
 }  // namespace layers

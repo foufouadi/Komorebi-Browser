@@ -6,6 +6,7 @@ package org.mozilla.fenix.ui.efficiency.pageObjects
 
 import android.os.SystemClock
 import android.util.Log
+import android.view.WindowManager
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ComposeTimeoutException
@@ -21,9 +22,12 @@ import mozilla.components.browser.state.selector.selectedTab
 import mozilla.components.compose.browser.toolbar.concept.BrowserToolbarTestTags.ADDRESSBAR_URL
 import mozilla.components.compose.browser.toolbar.concept.BrowserToolbarTestTags.ADDRESSBAR_URL_BOX
 import mozilla.components.concept.engine.mediasession.MediaSession
+import mozilla.components.feature.contextmenu.R as contextMenuR
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.mozilla.fenix.Config
 import org.mozilla.fenix.ext.components
+import org.mozilla.fenix.helpers.DataGenerationHelper.getStringResource
 import org.mozilla.fenix.helpers.HomeActivityIntentTestRule
 import org.mozilla.fenix.helpers.TestAssetHelper.waitingTime
 import org.mozilla.fenix.helpers.TestAssetHelper.waitingTimeLong
@@ -32,13 +36,17 @@ import org.mozilla.fenix.helpers.TestHelper.appContext
 import org.mozilla.fenix.helpers.TestHelper.mDevice
 import org.mozilla.fenix.helpers.TestHelper.packageName
 import org.mozilla.fenix.helpers.ext.waitNotNull
+import org.mozilla.fenix.ui.efficiency.core.WaitPolicy
+import org.mozilla.fenix.ui.efficiency.core.driveUntil
+import org.mozilla.fenix.ui.efficiency.data.AddressDetails
 import org.mozilla.fenix.ui.efficiency.helpers.BasePage
 import org.mozilla.fenix.ui.efficiency.helpers.Selector
-import org.mozilla.fenix.ui.efficiency.navigation.NavigationRegistry
+import org.mozilla.fenix.ui.efficiency.helpers.SwipeDirection
+import org.mozilla.fenix.ui.efficiency.navigation.NavigationGraph
+import org.mozilla.fenix.ui.efficiency.navigation.NavigationOptions
 import org.mozilla.fenix.ui.efficiency.navigation.NavigationStep
 import org.mozilla.fenix.ui.efficiency.selectors.BrowserPageSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.DownloadsSelectors
-import org.mozilla.fenix.ui.efficiency.selectors.HomeSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.MainMenuSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.SearchBarSelectors
 import org.mozilla.fenix.ui.efficiency.selectors.ToolbarSelectors
@@ -46,8 +54,8 @@ import org.mozilla.fenix.ui.efficiency.selectors.ToolbarSelectors
 class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule, *>) : BasePage(composeRule) {
     override val pageName = "BrowserPage"
 
-    init {
-        NavigationRegistry.register(
+    internal override fun registerNavigation(builder: NavigationGraph.Builder) {
+        builder.register(
             from = "HomePage",
             to = pageName,
             steps =
@@ -59,18 +67,18 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
         )
 
         // Use UIAutomator selector to avoid Compose sync hanging when GeckoView is active.
-        NavigationRegistry.register(
+        builder.register(
             from = pageName,
             to = pageName,
             steps =
                 listOf(
-                    NavigationStep.Click(ToolbarSelectors.TOOLBAR_URL_BOX_UIAUTOMATOR),
+                    NavigationStep.Click(ToolbarSelectors.TOOLBAR_URL_BOX_UIAUTOMATOR2),
                     NavigationStep.EnterText(SearchBarSelectors.TOOLBAR_IN_EDIT_MODE),
                     NavigationStep.PressEnter(SearchBarSelectors.TOOLBAR_IN_EDIT_MODE),
                 ),
         )
 
-        NavigationRegistry.register(
+        builder.register(
             from = "SearchBarComponent",
             to = pageName,
             steps =
@@ -81,14 +89,7 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
         )
 
         // Use UIAutomator selector to avoid Compose sync hanging when GeckoView is active.
-        NavigationRegistry.register(
-            from = pageName,
-            to = "MainMenuPage",
-            steps = listOf(NavigationStep.Click(HomeSelectors.MAIN_MENU_BUTTON_UIAUTOMATOR)),
-        )
-
-        // Use UIAutomator selector to avoid Compose sync hanging when GeckoView is active.
-        NavigationRegistry.register(
+        builder.register(
             from = pageName,
             to = "HomePage",
             steps =
@@ -98,7 +99,7 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
                 ),
         )
 
-        NavigationRegistry.register(
+        builder.register(
             from = pageName,
             to = "AddToHomeScreenComponent",
             steps =
@@ -108,26 +109,22 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
                     NavigationStep.Click(MainMenuSelectors.ADD_TO_HOMESCREEN_BUTTON),
                 ),
         )
-
-        // UIAutomator (Compose sync can hang while GeckoView is active) AND the content-description
-        // variant rather than the testTag: with shouldUseExpandedToolbar the counter moves to the bottom
-        // navigation bar, where it carries no tag. NOTE: TabDrawerPage registers this same edge — keep the
-        // two in step until the duplicate is removed.
-        NavigationRegistry.register(
-            from = pageName,
-            to = "TabDrawerPage",
-            steps = listOf(NavigationStep.Click(ToolbarSelectors.TAB_COUNTER_ANY_LAYOUT)),
-        )
     }
 
-    override fun navigateToPage(url: String, forceNavigation: Boolean): BrowserPage {
-        super.navigateToPage(url = url.ifBlank { "example.com" }, forceNavigation = forceNavigation)
+    override fun navigateToPage(
+        url: String,
+        forceNavigation: Boolean,
+        navigationOptions: NavigationOptions,
+    ): BrowserPage {
+        super.navigateToPage(
+            url = url.ifBlank { "example.com" },
+            forceNavigation = forceNavigation,
+            navigationOptions = navigationOptions,
+        )
         return this
     }
 
-    override fun mozGetSelectorsByGroup(group: String): List<Selector> {
-        return BrowserPageSelectors.all.filter { it.groups.contains(group) }
-    }
+    override val selectorCatalog = BrowserPageSelectors
 
     /**
      * Taps the Play control on a web media page (video or audio). The tap is confirmed by [verifyMediaPlaybackState],
@@ -186,13 +183,18 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
         return this
     }
 
-    fun verifyTranslationSheetIsDisplayed(): BrowserPage {
+    fun verifyTranslationSheetIsDisplayed(isDisplayed: Boolean = true): BrowserPage {
         // The "translate from/to" dropdowns render a beat after the sheet frame, title and
         // buttons because they depend on the async page-settings fetch. mozVerifyElementsByGroup
         // is a single-shot check, so firing it the instant the sheet animates in can miss the
         // dropdowns and fail spuriously. Gate on the last-rendered dropdown before the group check.
-        mozVerify(BrowserPageSelectors.TRANSLATION_SHEET_TRANSLATE_TO, timeout = waitingTimeLong)
-        mozVerifyElementsByGroup("notTranslatedPageTranslationSheet")
+        if (isDisplayed) {
+            mozVerify(BrowserPageSelectors.TRANSLATION_SHEET_TRANSLATE_TO, timeout = waitingTimeLong)
+            mozVerifyElementsByGroup(BrowserPageSelectors.Group.NOT_TRANSLATED_PAGE_TRANSLATION_SHEET)
+        } else {
+            mozWaitUntilAbsent(BrowserPageSelectors.TRANSLATION_SHEET_TRANSLATE_TO, timeout = waitingTimeLong)
+            mozVerifyElementsByGroupAbsent(BrowserPageSelectors.Group.NOT_TRANSLATED_PAGE_TRANSLATION_SHEET)
+        }
         return this
     }
 
@@ -328,6 +330,18 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
         return this
     }
 
+    fun clickDownloadPDFButton(): BrowserPage {
+        // Bug 2081247 to switch to new toolbar for testing
+        if (Config.channel.isNightlyOrDebug) {
+            mozClick(BrowserPageSelectors.PDF_TOOLS_DOWNLOAD_BUTTON, WaitPolicy.Poll(waitingTime))
+            verifyDownloadPrompt()
+            clickDownloadPromptConfirmButton()
+        } else {
+            mozClick(BrowserPageSelectors.PDF_DOWNLOAD_BUTTON)
+        }
+        return this
+    }
+
     /**
      * Assert the "Download completed" snackbar for [fileName] — the completion text, the "Open" action (tag and label)
      * and the file name itself, as legacy verifyDownloadCompleteSnackbar did.
@@ -375,6 +389,53 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
         return this
     }
 
+    // --- Strong (generated) password prompt ---
+
+    /** Focus the password field, which offers a strong password when no saved login matches. */
+    fun clickPasswordField(): BrowserPage {
+        mozVerify(BrowserPageSelectors.PASSWORD_WEB_FIELD, timeout = waitingTimeLong)
+        mozClick(BrowserPageSelectors.PASSWORD_WEB_FIELD_CLICKABLE)
+        return this
+    }
+
+    fun verifyStrongPasswordPromptIsDisplayed(): BrowserPage {
+        mozVerify(BrowserPageSelectors.STRONG_PASSWORD_SHEET_TITLE, timeout = waitingTimeLong)
+        return this
+    }
+
+    /** Raise the generated-password sheet via the "Use strong password" bar; the bar can lag the field focus. */
+    fun clickSuggestStrongPasswordBar(attempts: Int = 3): BrowserPage {
+        mozVerify(BrowserPageSelectors.PASSWORD_WEB_FIELD, timeout = waitingTimeLong)
+        // The bar appears asynchronously after the field takes focus, so re-focus until it shows.
+        driveUntil(
+            verb = "focus_password_field_for_strong_password_bar",
+            selector = BrowserPageSelectors.SUGGEST_STRONG_PASSWORD_BAR,
+            attempts = attempts,
+            want = true,
+            dumpOnFailure = true,
+            settle = { SystemClock.sleep(500) },
+            step = { mozClick(BrowserPageSelectors.PASSWORD_WEB_FIELD_CLICKABLE) },
+        )
+        mozClick(BrowserPageSelectors.SUGGEST_STRONG_PASSWORD_BAR)
+        return this
+    }
+
+    /** Accept the generated password: it is autofilled and the login is saved. */
+    fun clickUseStrongPassword(): BrowserPage {
+        mozClick(BrowserPageSelectors.STRONG_PASSWORD_USE_PASSWORD_BUTTON)
+        mozWaitUntilAbsent(BrowserPageSelectors.STRONG_PASSWORD_SHEET_TITLE, timeout = waitingTimeLong)
+        return this
+    }
+
+    /** Read the generated password autofilled into the web password field. */
+    fun getGeneratedPassword(): String = mozReadText(BrowserPageSelectors.PASSWORD_WEB_FIELD)
+
+    fun verifyUpdateUsernamePromptIsDisplayed(): BrowserPage {
+        mozVerify(BrowserPageSelectors.SAVE_LOGIN_PROMPT)
+        mozVerify(BrowserPageSelectors.UPDATE_USERNAME_PROMPT_MESSAGE)
+        return this
+    }
+
     fun continueToHttpSite(): BrowserPage {
         // The HTTPS-Only error page renders its buttons only once the HTTP->HTTPS upgrade has failed,
         // which lands after navigateToPage() has already returned on engineView. mozClick does a single
@@ -411,12 +472,21 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
     // --- Text selection on web content ---
 
     /**
-     * Long-press web-content text containing [text] to raise the text-selection floating action bar. Waits for the text
-     * to render first (a PDF or a freshly loaded page may not be interactive the instant navigation reports done),
-     * mirroring the legacy longClickPageObject's waitForExists.
+     * Long-press web-content text to raise the text-selection floating action bar. Waits for the text to render first
+     * (a PDF or a freshly loaded page may not be interactive the instant navigation reports done), mirroring the legacy
+     * longClickPageObject's waitForExists.
+     *
+     * Pass [exact] = true to match the full text run exactly instead of by substring. A substring match on a bare word
+     * can also resolve to a linked image whose accessible name contains that word -- in pdfForm.pdf the painting is a
+     * Wikipedia hyperlink -- and long-pressing the image raises the link context menu instead of the selection bar.
      */
-    fun longClickWebContentText(text: String): BrowserPage {
-        val selector = BrowserPageSelectors.PAGE_CONTENT(text)
+    fun longClickWebContentText(text: String, exact: Boolean = false): BrowserPage {
+        val selector =
+            if (exact) {
+                BrowserPageSelectors.PAGE_CONTENT_EXACT_LONG_PRESS_TARGET(text)
+            } else {
+                BrowserPageSelectors.PAGE_CONTENT_LONG_PRESS_TARGET(text)
+            }
         mozVerify(selector, timeout = waitingTimeLong)
         mozLongClick(selector)
         return this
@@ -449,9 +519,17 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
         return this
     }
 
-    /** Click a context-menu item (by content description) from the long-pressed display-mode toolbar. */
-    fun clickDisplayModeToolbarContextMenuItem(contentDescription: String): BrowserPage {
-        mozClick(ToolbarSelectors.DISPLAY_MODE_TOOLBAR_MENU_ITEM(contentDescription))
+    /**
+     * Load [url] by typing into the display-toolbar edit field directly, for use right after a display-mode "Copy"
+     * (which leaves navigateToPage's engineView readiness gate unavailable for ~10s). Mirrors the legacy
+     * enterURLAndEnterToBrowser.
+     */
+    fun loadUrlFromToolbar(url: String): BrowserPage {
+        mozClick(ToolbarSelectors.TOOLBAR_URL_BOX_UIAUTOMATOR2)
+        // mozClear is Immediate, so wait for edit mode before clearing.
+        mozVerify(SearchBarSelectors.TOOLBAR_IN_EDIT_MODE, timeout = waitingTime)
+        mozClearAndEnterText(url, SearchBarSelectors.TOOLBAR_IN_EDIT_MODE)
+        mozPressEnter(SearchBarSelectors.TOOLBAR_IN_EDIT_MODE)
         return this
     }
 
@@ -606,7 +684,34 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
         return this
     }
 
+    // --- Dynamic navigation toolbar ---
+
+    /**
+     * Scroll the web content by flinging the screen [times] times. Swiping up flings the page down (which auto-hides
+     * the dynamic navigation toolbar); swiping down flings it back up (which brings the toolbar back). This flings the
+     * screen from its center rather than swiping the engine view: a swipe that starts at the engine view's bottom edge
+     * is grabbed by the system navigation gesture and backgrounds the app. A single fling does not always move the
+     * toolbar far enough, so callers fling a few times before asserting.
+     */
+    fun scrollWebContent(direction: SwipeDirection, times: Int = 3): BrowserPage {
+        repeat(times) { mozSwipeScreen(direction) }
+        return this
+    }
+
     // --- Address autofill on a web form ---
+
+    // Matches addressForm.html's specific field ids; a differently-shaped address form would need its own fill method.
+    fun fillAddressForm(address: AddressDetails): BrowserPage {
+        mozClearAndEnterText(address.streetAddress, BrowserPageSelectors.ADDRESS_STREET_WEB_FIELD)
+        dismissKnownOverlaysIfPresent()
+        mozClearAndEnterText(address.city, BrowserPageSelectors.ADDRESS_CITY_WEB_FIELD)
+        mozClearAndEnterText(address.state, BrowserPageSelectors.ADDRESS_STATE_WEB_FIELD)
+        mozClearAndEnterText(address.zipCode, BrowserPageSelectors.ADDRESS_ZIP_WEB_FIELD)
+        mozClearAndEnterText(address.country, BrowserPageSelectors.ADDRESS_COUNTRY_WEB_FIELD)
+        mozClearAndEnterText(address.phoneNumber, BrowserPageSelectors.ADDRESS_TELEPHONE_WEB_FIELD)
+        mozClearAndEnterText(address.emailAddress, BrowserPageSelectors.ADDRESS_EMAIL_WEB_FIELD)
+        return this
+    }
 
     /** Focus the web address form's street-address field, which triggers the autofill prompt. */
     fun clickAddressFormStreetField(): BrowserPage {
@@ -692,6 +797,156 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
         return this
     }
 
+    /**
+     * Long-press the web-content link labelled [linkText] and wait for the context menu to offer [contextMenuItem],
+     * refreshing the page and retrying if it does not appear.
+     *
+     * Mirrors the legacy BrowserRobot.longClickPageObject, whose retry is load-bearing: mozLongClick is single-shot,
+     * and a long press that lands before GeckoView has settled opens no menu at all. The legacy fallback between
+     * attempts is a three-dot-menu Refresh, reproduced here rather than a swipe or a scroll. The caller still clicks
+     * the item; this only guarantees the menu is up.
+     */
+    fun longClickPageObjectUntilContextMenu(linkText: String, contextMenuItem: String): BrowserPage {
+        val link = BrowserPageSelectors.PAGE_LINK(linkText)
+        val menuItem = BrowserPageSelectors.CONTEXT_MENU_ITEM(contextMenuItem)
+        for (i in 1..CONTEXT_MENU_RETRY_COUNT) {
+            try {
+                mozVerify(link, timeout = waitingTime)
+                mozLongClick(link)
+                mozVerify(menuItem, timeout = waitingTimeShort)
+                return this
+            } catch (e: AssertionError) {
+                if (i == CONTEXT_MENU_RETRY_COUNT) throw e
+                mozClick(BrowserPageSelectors.MAIN_MENU_BUTTON)
+                mozClick(MainMenuSelectors.REFRESH_BUTTON)
+                mozVerify(BrowserPageSelectors.ENGINE_VIEW, timeout = waitingTime)
+            }
+        }
+        return this
+    }
+
+    /**
+     * Assert the web-content long-press context menu raised for a link to another local-host asset: its URL header and
+     * the "Open link in new tab", "Open link in private tab", "Copy link" and "Share link" options. Ports the legacy
+     * BrowserRobot.verifyContextMenuForLocalHostLinks — a same-host link offers no "Download link", and a non-applink
+     * offers no "Open in external app".
+     */
+    fun verifyContextMenuForLocalHostLinks(linkUrl: String): BrowserPage {
+        mozVerify(BrowserPageSelectors.CONTEXT_MENU_LINK_URL(linkUrl))
+        mozVerify(
+            BrowserPageSelectors.CONTEXT_MENU_ITEM(
+                getStringResource(contextMenuR.string.mozac_feature_contextmenu_open_link_in_new_tab)
+            )
+        )
+        mozVerify(
+            BrowserPageSelectors.CONTEXT_MENU_ITEM(
+                getStringResource(contextMenuR.string.mozac_feature_contextmenu_open_link_in_private_tab)
+            )
+        )
+        mozVerify(
+            BrowserPageSelectors.CONTEXT_MENU_ITEM(
+                getStringResource(contextMenuR.string.mozac_feature_contextmenu_copy_link)
+            )
+        )
+        mozVerify(
+            BrowserPageSelectors.CONTEXT_MENU_ITEM(
+                getStringResource(contextMenuR.string.mozac_feature_contextmenu_share_link)
+            )
+        )
+        return this
+    }
+
+    /**
+     * Assert the web-content long-press context menu raised for a link that wraps an image: the URL header plus the
+     * four link options ("Open link in new tab", "Open link in private tab", "Copy link", "Share link") and the three
+     * image options ("Open image in new tab", "Save image", "Copy image location"). Ports the legacy
+     * BrowserRobot.verifyLinkImageContextMenuItems.
+     */
+    fun verifyLinkImageContextMenuItems(linkUrl: String): BrowserPage {
+        mozVerify(BrowserPageSelectors.CONTEXT_MENU_LINK_URL(linkUrl))
+        mozVerify(
+            BrowserPageSelectors.CONTEXT_MENU_ITEM(
+                getStringResource(contextMenuR.string.mozac_feature_contextmenu_open_link_in_new_tab)
+            )
+        )
+        mozVerify(
+            BrowserPageSelectors.CONTEXT_MENU_ITEM(
+                getStringResource(contextMenuR.string.mozac_feature_contextmenu_open_link_in_private_tab)
+            )
+        )
+        mozVerify(
+            BrowserPageSelectors.CONTEXT_MENU_ITEM(
+                getStringResource(contextMenuR.string.mozac_feature_contextmenu_copy_link)
+            )
+        )
+        mozVerify(
+            BrowserPageSelectors.CONTEXT_MENU_ITEM(
+                getStringResource(contextMenuR.string.mozac_feature_contextmenu_share_link)
+            )
+        )
+        mozVerify(
+            BrowserPageSelectors.CONTEXT_MENU_ITEM(
+                getStringResource(contextMenuR.string.mozac_feature_contextmenu_open_image_in_new_tab)
+            )
+        )
+        mozVerify(
+            BrowserPageSelectors.CONTEXT_MENU_ITEM(
+                getStringResource(contextMenuR.string.mozac_feature_contextmenu_save_image)
+            )
+        )
+        mozVerify(
+            BrowserPageSelectors.CONTEXT_MENU_ITEM(
+                getStringResource(contextMenuR.string.mozac_feature_contextmenu_copy_image_location)
+            )
+        )
+        return this
+    }
+
+    /**
+     * Assert the web-content long-press context menu raised for a bare image (no wrapping link): the image URL header
+     * plus only the three image options ("Open image in new tab", "Save image", "Copy image location"). Ports the
+     * legacy BrowserRobot.verifyNoLinkImageContextMenuItems.
+     */
+    fun verifyNoLinkImageContextMenuItems(imageUrl: String): BrowserPage {
+        mozVerify(BrowserPageSelectors.CONTEXT_MENU_LINK_URL(imageUrl))
+        mozVerify(
+            BrowserPageSelectors.CONTEXT_MENU_ITEM(
+                getStringResource(contextMenuR.string.mozac_feature_contextmenu_open_image_in_new_tab)
+            )
+        )
+        mozVerify(
+            BrowserPageSelectors.CONTEXT_MENU_ITEM(
+                getStringResource(contextMenuR.string.mozac_feature_contextmenu_save_image)
+            )
+        )
+        mozVerify(
+            BrowserPageSelectors.CONTEXT_MENU_ITEM(
+                getStringResource(contextMenuR.string.mozac_feature_contextmenu_copy_image_location)
+            )
+        )
+        return this
+    }
+
+    /**
+     * Dismiss the open web-content context menu by tapping outside it, then confirm the page is back in view. The menu
+     * is a centered, touch-outside-cancelable MaterialAlertDialog, so a tap near the top of the screen lands in the
+     * dimmed scrim around it (even the tallest, 8-row link-image menu stays centred and never reaches the top tenth).
+     *
+     * This follows TestRail 352050's "Tap outside of menu to return to web page" step; the legacy
+     * BrowserRobot.dismissContentContextMenu used a device back-press instead.
+     */
+    fun dismissContextMenuByTappingOutside(): BrowserPage {
+        mDevice.click(mDevice.displayWidth / 2, mDevice.displayHeight / 10)
+        mozVerify(BrowserPageSelectors.ENGINE_VIEW)
+        return this
+    }
+
+    /** Assert a snackbar showing the message [text] is displayed, as legacy verifySnackBarText did. */
+    fun verifySnackbarText(text: String): BrowserPage {
+        mozVerify(BrowserPageSelectors.SNACKBAR_MESSAGE(text))
+        return this
+    }
+
     /** Pick the saved-card suggestion whose masked number ends in [lastDigits]. */
     fun clickCreditCardSuggestion(lastDigits: String): BrowserPage {
         val suggestion = BrowserPageSelectors.CREDIT_CARD_SUGGESTION(lastDigits)
@@ -706,6 +961,29 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
         return this
     }
 
+    /**
+     * Assert whether screenshots are currently permitted on the app window.
+     *
+     * Android blocks screen capture whenever the window carries [WindowManager.LayoutParams.FLAG_SECURE]. Fenix sets
+     * that flag on the activity window while a private tab is in the foreground and "Allow screenshots in private
+     * browsing" is off, and clears it otherwise. Asserting the flag is the deterministic equivalent of trying to take a
+     * screenshot, without depending on the flaky OS capture path.
+     *
+     * @param allowed true expects screenshots permitted (flag absent); false expects them blocked (flag present).
+     */
+    fun verifyScreenshotsAllowed(allowed: Boolean): BrowserPage {
+        val isSecure = composeRule.runOnUiThread {
+            (composeRule.activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE) != 0
+        }
+        assertTrue(
+            "Expected screenshots to be " +
+                (if (allowed) "allowed (FLAG_SECURE absent)" else "blocked (FLAG_SECURE present)") +
+                ", but FLAG_SECURE was ${if (isSecure) "present" else "absent"}",
+            isSecure != allowed,
+        )
+        return this
+    }
+
     private companion object {
         const val HTTPS_ERROR_GO_BACK = "Go Back (Recommended)"
         const val HTTPS_ERROR_CONTINUE = "Continue to HTTP Site"
@@ -713,5 +991,6 @@ class BrowserPage(composeRule: AndroidComposeTestRule<HomeActivityIntentTestRule
         const val FONT_SIZE_STEP_SIZE = 5
         const val FONT_SIZE_MIN_VALUE = 50
         const val FONT_SIZE_DECIMAL_CONVERSION = 100f
+        const val CONTEXT_MENU_RETRY_COUNT = 3
     }
 }

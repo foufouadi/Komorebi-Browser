@@ -115,6 +115,11 @@ void MacroAssembler::xor32(const Address& src, Register dest) {
   ma_xor(dest, scratch2);
 }
 
+void MacroAssembler::nor32(Imm32 imm, Register src, Register dest) {
+  or32(imm, src, dest);
+  not32(dest);
+}
+
 // ===============================================================
 // Swap instructions
 
@@ -1192,6 +1197,20 @@ void MacroAssembler::branchTestNull(Condition cond, Register tag,
   ma_b(tag, ImmTag(JSVAL_TAG_NULL), label, cond);
 }
 
+void MacroAssembler::branchTestNullOrUndefined(Condition cond, Register tag,
+                                               Label* label) {
+  MOZ_ASSERT(cond == Equal || cond == NotEqual);
+  if (cond == Equal) {
+    branchTestNull(Equal, tag, label);
+    branchTestUndefined(Equal, tag, label);
+    return;
+  }
+  Label done;
+  branchTestNull(Equal, tag, &done);
+  branchTestUndefined(NotEqual, tag, label);
+  bind(&done);
+}
+
 void MacroAssembler::branchTestNull(Condition cond, const Address& address,
                                     Label* label) {
   UseScratchRegisterScope temps(*this);
@@ -1230,6 +1249,13 @@ void MacroAssembler::branchTestObject(Condition cond, const BaseIndex& address,
   branchTestObject(cond, tag, label);
 }
 
+void MacroAssembler::branchTestGCThing(Condition cond, Register tag,
+                                       Label* label) {
+  MOZ_ASSERT(cond == Equal || cond == NotEqual);
+  ma_b(tag, ImmTag(JS::detail::ValueLowerInclGCThingTag), label,
+       (cond == Equal) ? AboveOrEqual : Below);
+}
+
 void MacroAssembler::branchTestGCThing(Condition cond, const Address& address,
                                        Label* label) {
   branchTestGCThingImpl(cond, address, label);
@@ -1260,8 +1286,8 @@ void MacroAssembler::branchTestGCThingImpl(Condition cond, const T& address,
 void MacroAssembler::branchTestPrimitive(Condition cond, Register tag,
                                          Label* label) {
   MOZ_ASSERT(cond == Equal || cond == NotEqual);
-  ma_b(tag, ImmTag(JS::detail::ValueUpperExclPrimitiveTag), label,
-       (cond == Equal) ? Below : AboveOrEqual);
+  ma_b(tag, ImmTag(JSVAL_TAG_OBJECT), label,
+       (cond == Equal) ? NotEqual : Equal);
 }
 
 void MacroAssembler::branchTestMagic(Condition cond, Register tag,

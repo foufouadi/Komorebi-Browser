@@ -5,9 +5,14 @@
 #ifndef jit_loong64_MacroAssembler_loong64_h
 #define jit_loong64_MacroAssembler_loong64_h
 
+#include <type_traits>
+
 #include "jit/loong64/Assembler-loong64.h"
 #include "jit/MoveResolver.h"
 #include "wasm/WasmBuiltins.h"
+
+using js::wasm::FaultingCodeRange;
+using js::wasm::FaultingCodeRangePair;
 
 namespace js {
 namespace jit {
@@ -36,8 +41,26 @@ struct ImmShiftedTag : public ImmWord {
   }
 };
 
-struct ImmTag : public Imm32 {
-  explicit ImmTag(JSValueTag mask) : Imm32(int32_t(mask)) {}
+struct ImmTagSignExt : public Imm32 {
+  static constexpr int32_t signExtend(JSValueTag mask) {
+    int64_t tag =
+        static_cast<int64_t>(static_cast<uint64_t>(mask) << JSVAL_TAG_SHIFT) >>
+        JSVAL_TAG_SHIFT;
+    MOZ_ASSERT(is_intN(tag, 12));
+    return static_cast<int32_t>(tag);
+  }
+
+  explicit ImmTagSignExt(JSValueTag mask) : Imm32(signExtend(mask)) {}
+};
+
+// The upper 32 bits of a Value whose payload fits in 32 bits are its tag
+// shifted left by 15. Sign-extended, as LD.W loads them, they are a multiple of
+// |1 << (JSVAL_TAG_SHIFT - 32)|, which LU12I.W loads in one instruction.
+struct ImmTagUpperWord : public Imm32 {
+  static_assert(JSVAL_TAG_SHIFT - 32 >= 12, "LU12I.W loads the shifted tag");
+
+  explicit ImmTagUpperWord(JSValueTag tag)
+      : Imm32(static_cast<int32_t>(tag << (JSVAL_TAG_SHIFT - 32))) {}
 };
 
 static const int defaultShift = 3;
@@ -107,6 +130,8 @@ class MacroAssemblerLOONG64 : public Assembler {
                             FPConditionBit fcc = FCC0);
 
  public:
+  void ma_move(Register dest, Register src);
+
   void ma_li(Register dest, CodeLabel* label);
   void ma_li(Register dest, ImmWord imm);
   void ma_liPatchable(Register dest, ImmPtr imm);
@@ -130,6 +155,9 @@ class MacroAssemblerLOONG64 : public Assembler {
   FaultingCodeRange ma_st_w(Register src, Address address);
   FaultingCodeRange ma_st_d(Register src, Address address);
   FaultingCodeRange ma_store(Register data, Address address,
+                             LoadStoreSize size = SizeWord,
+                             LoadStoreExtension extension = SignExtend);
+  FaultingCodeRange ma_store(Imm32 imm, Address address,
                              LoadStoreSize size = SizeWord,
                              LoadStoreExtension extension = SignExtend);
 
@@ -203,6 +231,9 @@ class MacroAssemblerLOONG64 : public Assembler {
 
   void ma_bl(Label* l);
 
+  void ma_jump36(int32_t offset, Register scratch);
+  void ma_call36(int32_t offset, Register scratch);
+
   // fp instructions
   void ma_lid(FloatRegister dest, double value);
 
@@ -213,6 +244,8 @@ class MacroAssemblerLOONG64 : public Assembler {
   FaultingCodeRange ma_fld_d(FloatRegister ft, Address address);
   FaultingCodeRange ma_fst_d(FloatRegister ft, Address address);
   FaultingCodeRange ma_fst_s(FloatRegister ft, Address address);
+  FaultingCodeRange ma_vld(VRegister vd, Address address);
+  FaultingCodeRange ma_vst(VRegister vd, Address address);
 
   void ma_pop(FloatRegister f);
   void ma_push(FloatRegister f);
@@ -260,10 +293,15 @@ class MacroAssemblerLOONG64 : public Assembler {
                 Register rk);
 
   void ma_and(Register rd, Register rj, Imm32 imm);
+  void ma_and(Register rd, Register rj, ImmWord imm);
 
   void ma_or(Register rd, Register rj, Imm32 imm);
+  void ma_or(Register rd, Register rj, ImmWord imm);
 
   void ma_xor(Register rd, Register rj, Imm32 imm);
+  void ma_xor(Register rd, Register rj, ImmWord imm);
+
+  void ma_nor(Register rd, Register rj, Imm32 imm);
 
   // load
   FaultingCodeRange ma_load(Register dest, const BaseIndex& src,
@@ -274,8 +312,9 @@ class MacroAssemblerLOONG64 : public Assembler {
   FaultingCodeRange ma_store(Register data, const BaseIndex& dest,
                              LoadStoreSize size = SizeWord,
                              LoadStoreExtension extension = SignExtend);
-  void ma_store(Imm32 imm, const BaseIndex& dest, LoadStoreSize size = SizeWord,
-                LoadStoreExtension extension = SignExtend);
+  FaultingCodeRange ma_store(Imm32 imm, const BaseIndex& dest,
+                             LoadStoreSize size = SizeWord,
+                             LoadStoreExtension extension = SignExtend);
 
   // arithmetic based ops
   // add
@@ -360,11 +399,12 @@ class MacroAssemblerLOONG64 : public Assembler {
   void minMaxPtr(Register lhs, ImmWord rhs, Register dest, bool isMax);
 
   // Evaluate srcDest = minmax<isMax>{Float32,Double}(srcDest, other).
-  // Handle NaN specially if handleNaN is true.
+  // Handle NaN specially if handleNaN is true. Handle zeroes specially if
+  // handleZero is true.
   void minMaxDouble(FloatRegister srcDest, FloatRegister other, bool handleNaN,
-                    bool isMax);
+                    bool handleZero, bool isMax);
   void minMaxFloat32(FloatRegister srcDest, FloatRegister other, bool handleNaN,
-                     bool isMax);
+                     bool handleZero, bool isMax);
 
   FaultingCodeRange loadDouble(const Address& addr, FloatRegister dest);
   FaultingCodeRange loadDouble(const BaseIndex& src, FloatRegister dest);
@@ -383,10 +423,14 @@ class MacroAssemblerLOONG64 : public Assembler {
 
   void outOfLineWasmTruncateToInt32Check(
       FloatRegister input, Register output, MIRType fromType, TruncFlags flags,
-      Label* rejoin, const wasm::TrapSiteDesc& trapSiteDesc);
+      Label* rejoin, const wasm::TrapSiteDesc& trapSiteDesc,
+      wasm::StackMap* stackMapForTraps,
+      wasm::StackMapRegistry* stackMapRegistry);
   void outOfLineWasmTruncateToInt64Check(
       FloatRegister input, Register64 output, MIRType fromType,
-      TruncFlags flags, Label* rejoin, const wasm::TrapSiteDesc& trapSiteDesc);
+      TruncFlags flags, Label* rejoin, const wasm::TrapSiteDesc& trapSiteDesc,
+      wasm::StackMap* stackMapForTraps,
+      wasm::StackMapRegistry* stackMapRegistry);
 
   // The complete address is in `address`, and `access` is used for its type
   // attributes only; its `offset` is ignored.
@@ -411,6 +455,11 @@ class MacroAssemblerLOONG64 : public Assembler {
     wasmStoreAbsoluteImpl(access, AnyRegister(value.reg), memoryBase, address);
   }
 
+  FaultingCodeRange wasmStoreLane(const wasm::MemoryAccessDesc& access,
+                                  FloatRegister src, Register memoryBase,
+                                  Register ptr, uint32_t laneSize,
+                                  uint32_t laneIndex);
+
  protected:
   void wasmLoadAbsoluteImpl(const wasm::MemoryAccessDesc& access,
                             Register memoryBase, uint64_t address,
@@ -419,20 +468,27 @@ class MacroAssemblerLOONG64 : public Assembler {
                              AnyRegister value, Register memoryBase,
                              uint64_t address);
 
-  void wasmLoadImpl(const wasm::MemoryAccessDesc& access, Register memoryBase,
-                    Register ptr, AnyRegister output);
-  void wasmLoadImpl(const wasm::MemoryAccessDesc& access, Address address,
-                    AnyRegister output);
-  void wasmLoadImpl(const wasm::MemoryAccessDesc& access, Register memoryBase,
-                    Register ptr, Register ptrScratch, AnyRegister output,
-                    Register tmp);
-  void wasmStoreImpl(const wasm::MemoryAccessDesc& access, AnyRegister value,
-                     Register memoryBase, Register ptr);
-  void wasmStoreImpl(const wasm::MemoryAccessDesc& access, AnyRegister value,
-                     Address address);
-  void wasmStoreImpl(const wasm::MemoryAccessDesc& access, AnyRegister value,
-                     Register memoryBase, Register ptr, Register ptrScratch,
-                     Register tmp);
+  FaultingCodeRange wasmLoadImpl(const wasm::MemoryAccessDesc& access,
+                                 Register memoryBase, Register ptr,
+                                 AnyRegister output);
+  FaultingCodeRange wasmLoadImpl(const wasm::MemoryAccessDesc& access,
+                                 Address address, AnyRegister output);
+  FaultingCodeRange wasmLoadImpl(const wasm::MemoryAccessDesc& access,
+                                 Register memoryBase, Register ptr,
+                                 Register ptrScratch, AnyRegister output,
+                                 Register tmp);
+  FaultingCodeRange wasmStoreImpl(const wasm::MemoryAccessDesc& access,
+                                  AnyRegister value, Register memoryBase,
+                                  Register ptr);
+  FaultingCodeRange wasmStoreImpl(const wasm::MemoryAccessDesc& access,
+                                  AnyRegister value, Address address);
+  FaultingCodeRange wasmStoreImpl(const wasm::MemoryAccessDesc& access,
+                                  AnyRegister value, Register memoryBase,
+                                  Register ptr, Register ptrScratch,
+                                  Register tmp);
+
+  template <typename T>
+  void RoundHelper(RoundingMode mode, FloatRegister src, FloatRegister dest);
 };
 
 class MacroAssembler;
@@ -517,9 +573,12 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
   Address computeScaledAddress(const BaseIndex& address,
                                UseScratchRegisterScope& temps);
 
+  Address computeAbsoluteAddress(AbsoluteAddress address,
+                                 UseScratchRegisterScope& temps);
+
   void j(Label* dest) { ma_b(dest); }
 
-  void mov(Register src, Register dest) { as_ori(dest, src, 0); }
+  void mov(Register src, Register dest) { ma_move(dest, src); }
   void mov(ImmWord imm, Register dest) { ma_li(dest, imm); }
   void mov(ImmPtr imm, Register dest) {
     mov(ImmWord(uintptr_t(imm.value)), dest);
@@ -545,7 +604,7 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
     Register scratch = temps.Acquire();
     BufferOffset bo = m_buffer.nextOffset();
     addPendingJump(bo, ImmPtr(c->raw()), RelocationKind::JITCODE);
-    ma_liPatchable(scratch, ImmPtr(c->raw()));
+    as_pcaddu18i(scratch, 0);
     as_jirl(zero, scratch, BOffImm16(0));
   }
   void branch(const Register reg) { as_jirl(zero, reg, BOffImm16(0)); }
@@ -584,18 +643,51 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
   void pop(Register reg) { ma_pop(reg); }
   void pop(FloatRegister reg) { ma_pop(reg); }
 
+  template <typename... Regs>
+  void pushRegs(const Regs&... regs) {
+    static_assert((std::is_convertible_v<Regs, Register> && ...));
+    static_assert(sizeof...(Regs) > 0);
+
+    if (((static_cast<Register>(regs) == StackPointer) || ...)) {
+      (ma_push(regs), ...);
+      return;
+    }
+
+    int32_t offset = int32_t(sizeof...(Regs) * sizeof(intptr_t));
+    ma_sub_d(StackPointer, StackPointer, Imm32(offset));
+    (storePtr(regs, Address(StackPointer, offset -= int32_t(sizeof(intptr_t)))),
+     ...);
+  }
+
+  template <typename... Regs>
+  void popRegs(const Regs&... regs) {
+    static_assert((std::is_convertible_v<Regs, Register> && ...));
+    static_assert(sizeof...(Regs) > 0);
+
+    if (((static_cast<Register>(regs) == StackPointer) || ...)) {
+      (ma_pop(regs), ...);
+      return;
+    }
+
+    int32_t offset = -int32_t(sizeof(intptr_t));
+    (loadPtr(Address(StackPointer, offset += int32_t(sizeof(intptr_t))), regs),
+     ...);
+    ma_add_d(StackPointer, StackPointer,
+             Imm32(int32_t(sizeof...(Regs) * sizeof(intptr_t))));
+  }
+
   // Emit a branch that can be toggled to a non-operation. On LOONG64 we use
   // "andi" instruction to toggle the branch.
   // See ToggleToJmp(), ToggleToCmp().
   CodeOffset toggledJump(Label* label);
 
-  // Emit a "jalr" or "nop" instruction. ToggleCall can be used to patch
-  // this instruction.
+  // Emit a "jalr" or "bne $zero, $zero, ..." instruction. ToggleCall can be
+  // used to patch this instruction.
   CodeOffset toggledCall(JitCode* target, bool enabled);
 
   static size_t ToggledCallSize(uint8_t* code) {
-    // Four instructions used in: MacroAssemblerLOONG64Compat::toggledCall
-    return 4 * sizeof(uint32_t);
+    // Two instructions used in: MacroAssemblerLOONG64Compat::toggledCall
+    return 2 * sizeof(uint32_t);
   }
 
   CodeOffset pushWithPatch(ImmWord imm) {
@@ -644,16 +736,18 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
 
   void jump(TrampolinePtr code) { jump(ImmPtr(code.value)); }
 
-  void splitTag(Register src, Register dest) {
-    as_srli_d(dest, src, JSVAL_TAG_SHIFT);
+  // See splitSignExtTag(Register, Register) in MacroAssembler-riscv64.h for
+  // rationale.
+  void splitSignExtTag(Register src, Register dest) {
+    as_srai_d(dest, src, JSVAL_TAG_SHIFT);
   }
 
-  void splitTag(const ValueOperand& operand, Register dest) {
-    splitTag(operand.valueReg(), dest);
+  void splitSignExtTag(const ValueOperand& operand, Register dest) {
+    splitSignExtTag(operand.valueReg(), dest);
   }
 
   void splitTagForTest(const ValueOperand& value, ScratchTagScope& tag) {
-    splitTag(value, tag);
+    splitSignExtTag(value, tag);
   }
 
   // unboxing code
@@ -800,8 +894,22 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
   [[nodiscard]] Register extractTag(const BaseIndex& address, Register scratch);
   [[nodiscard]] Register extractTag(const ValueOperand& value,
                                     Register scratch) {
-    splitTag(value, scratch);
+    splitSignExtTag(value, scratch);
     return scratch;
+  }
+
+  // Branch on the tag of a Value in memory by comparing its upper word with
+  // ImmTagUpperWord(tag), which takes one instruction fewer than loading the
+  // Value and extracting the sign-extended tag.
+  template <typename T>
+  void branchTestTagUpperWord(Condition cond, const T& address, JSValueTag tag,
+                              Label* label) {
+    T upperWord = address;
+    upperWord.offset += static_cast<int32_t>(sizeof(uint32_t));
+    UseScratchRegisterScope temps(*this);
+    const Register scratch = temps.Acquire();
+    load32(upperWord, scratch);
+    ma_b(scratch, ImmTagUpperWord(tag), label, cond);
   }
 
   void loadInt32OrDouble(const Address& src, FloatRegister dest);
@@ -953,12 +1061,12 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
 
   FaultingCodeRange store8(Register src, const Address& address);
   FaultingCodeRange store8(Register src, const BaseIndex& address);
-  void store8(Imm32 imm, const Address& address);
+  FaultingCodeRange store8(Imm32 imm, const Address& address);
   void store8(Imm32 imm, const BaseIndex& address);
 
   FaultingCodeRange store16(Register src, const Address& address);
   FaultingCodeRange store16(Register src, const BaseIndex& address);
-  void store16(Imm32 imm, const Address& address);
+  FaultingCodeRange store16(Imm32 imm, const Address& address);
   void store16(Imm32 imm, const BaseIndex& address);
 
   template <typename T>
@@ -969,7 +1077,7 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
   FaultingCodeRange store32(Register src, const Address& address);
   FaultingCodeRange store32(Register src, const BaseIndex& address);
   void store32(Register src, AbsoluteAddress address);
-  void store32(Imm32 src, const Address& address);
+  FaultingCodeRange store32(Imm32 src, const Address& address);
   void store32(Imm32 src, const BaseIndex& address);
 
   template <typename T>
@@ -977,8 +1085,8 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
     store32(src, dest);
   }
 
-  void store64(Imm64 imm, Address address) {
-    storePtr(ImmWord(imm.value), address);
+  FaultingCodeRange store64(Imm64 imm, Address address) {
+    return storePtr(ImmWord(imm.value), address);
   }
   void store64(Imm64 imm, const BaseIndex& address) {
     storePtr(ImmWord(imm.value), address);
@@ -1023,7 +1131,7 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
     UseScratchRegisterScope temps(*this);
     Register scratch = temps.Acquire();
     as_andi(scratch, sp, ABIStackAlignment - 1);
-    ma_b(scratch, zero, &aligned, Equal, ShortJump);
+    ma_b(scratch, scratch, &aligned, Zero, ShortJump);
     breakpoint();
     bind(&aligned);
 #endif
@@ -1044,12 +1152,14 @@ class MacroAssemblerLOONG64Compat : public MacroAssemblerLOONG64 {
  protected:
   bool buildOOLFakeExitFrame(void* fakeReturnAddr);
 
-  void wasmLoadI64Impl(const wasm::MemoryAccessDesc& access,
-                       Register memoryBase, Register ptr, Register ptrScratch,
-                       Register64 output, Register tmp);
-  void wasmStoreI64Impl(const wasm::MemoryAccessDesc& access, Register64 value,
-                        Register memoryBase, Register ptr, Register ptrScratch,
-                        Register tmp);
+  FaultingCodeRange wasmLoadI64Impl(const wasm::MemoryAccessDesc& access,
+                                    Register memoryBase, Register ptr,
+                                    Register ptrScratch, Register64 output,
+                                    Register tmp);
+  FaultingCodeRange wasmStoreI64Impl(const wasm::MemoryAccessDesc& access,
+                                     Register64 value, Register memoryBase,
+                                     Register ptr, Register ptrScratch,
+                                     Register tmp);
 
  public:
   void lea(Operand addr, Register dest) {

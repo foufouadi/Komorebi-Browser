@@ -20,12 +20,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
   ShortcutUtils: "resource://gre/modules/ShortcutUtils.sys.mjs",
 });
 
-ChromeUtils.defineLazyGetter(lazy, "gWidgetsBundle", function () {
-  const kUrl =
-    "chrome://browser/locale/customizableui/customizableWidgets.properties";
-  return Services.strings.createBundle(kUrl);
-});
-
 const kDefaultThemeID = "default-theme@mozilla.org";
 
 const kSpecialWidgetPfx = "customizableui-special-";
@@ -68,7 +62,7 @@ const kSubviewEvents = ["ViewShowing", "ViewHiding"];
  * The current version. We can use this to auto-add new default widgets as necessary.
  * (would be const but isn't because of testing purposes)
  */
-var kVersion = 26;
+var kVersion = 28;
 
 /**
  * Buttons removed from built-ins by version they were removed. kVersion must be
@@ -211,6 +205,13 @@ XPCOMUtils.defineLazyPreferenceGetter(
   lazy,
   "resetPBMToolbarButtonEnabled",
   "browser.privatebrowsing.resetPBM.enabled",
+  false
+);
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "fireButtonEnabled",
+  "browser.fireButton.enabled",
   false
 );
 
@@ -374,6 +375,7 @@ var CustomizableUIInternal = {
       lazy.ippEnabled ? "ipprotection-button" : null,
       "fxa-toolbar-menu-button",
       lazy.resetPBMToolbarButtonEnabled ? "reset-pbm-toolbar-button" : null,
+      lazy.fireButtonEnabled ? "fire-button" : null,
     ].filter(name => name);
 
     this.registerArea(
@@ -382,7 +384,11 @@ var CustomizableUIInternal = {
         type: CustomizableUI.TYPE_TOOLBAR,
         overflowable: true,
         defaultPlacements: navbarPlacements,
-        verticalTabsDefaultPlacements: ["alltabs-button", "ai-window-toggle"],
+        verticalTabsAdditionalPlacements: [
+          "alltabs-button",
+          "smartwindow-group-tabs-button",
+          "ai-window-toggle",
+        ],
         defaultCollapsed: false,
       },
       true
@@ -409,6 +415,7 @@ var CustomizableUIInternal = {
           "new-tab-button",
           "spring",
           "alltabs-button",
+          "smartwindow-group-tabs-button",
           "ai-window-toggle",
         ],
         verticalTabsDefaultPlacements: [],
@@ -924,6 +931,122 @@ var CustomizableUIInternal = {
         );
       }
     }
+
+    // The Organize Tabs button reached the defaults after these profiles were
+    // saved, so instead of landing in its default slot it was appended after
+    // the Smart Window switcher, or into the hidden tab strip when tabs are
+    // vertical. Put it back beside the switcher.
+    if (currentVersion < 27) {
+      const organizeTabs = "smartwindow-group-tabs-button";
+      const switcher = "ai-window-toggle";
+      const areaPlacements = area => {
+        const placements = gSavedState.placements[area];
+        return Array.isArray(placements) ? placements : [];
+      };
+      const tabstrip = areaPlacements(CustomizableUI.AREA_TABSTRIP);
+      const navbar = areaPlacements(CustomizableUI.AREA_NAVBAR);
+
+      const placeBeforeSwitcher = (placements, reserveSlot) => {
+        const switcherIndex = placements.indexOf(switcher);
+        if (switcherIndex == -1) {
+          return;
+        }
+        let appendedIndex = switcherIndex + 1;
+        if (placements[appendedIndex] == "sidebar-button") {
+          appendedIndex++;
+        }
+        const buttonIndex = placements.indexOf(organizeTabs);
+        if (buttonIndex == appendedIndex) {
+          placements.splice(buttonIndex, 1);
+          placements.splice(switcherIndex, 0, organizeTabs);
+        } else if (buttonIndex == -1 && reserveSlot) {
+          placements.splice(switcherIndex, 0, organizeTabs);
+        }
+      };
+
+      if (
+        CustomizableUI.verticalTabsEnabled &&
+        tabstrip.includes(organizeTabs) &&
+        !navbar.includes(organizeTabs) &&
+        navbar.includes(switcher)
+      ) {
+        tabstrip.splice(tabstrip.indexOf(organizeTabs), 1);
+        navbar.splice(navbar.indexOf(switcher), 0, organizeTabs);
+      }
+      const neverCreated =
+        !gSeenWidgets.has(organizeTabs) &&
+        !Object.values(gSavedState.placements).some(
+          placements =>
+            Array.isArray(placements) && placements.includes(organizeTabs)
+        );
+      placeBeforeSwitcher(tabstrip, neverCreated);
+      placeBeforeSwitcher(navbar, neverCreated);
+
+      // A snapshot taken before the button existed lacks it for that reason,
+      // not because the user removed it, so go by where the button is now.
+      const isPlaced =
+        tabstrip.includes(organizeTabs) || navbar.includes(organizeTabs);
+
+      const horizontalSnapshot =
+        CustomizableUIInternal.getSavedHorizontalSnapshotState();
+      if (horizontalSnapshot.length) {
+        placeBeforeSwitcher(horizontalSnapshot, isPlaced);
+        CustomizableUIInternal.saveHorizontalTabStripState(horizontalSnapshot);
+      }
+
+      const verticalSnapshot =
+        CustomizableUIInternal.getSavedVerticalSnapshotState();
+      if (verticalSnapshot.length) {
+        placeBeforeSwitcher(verticalSnapshot, isPlaced);
+        CustomizableUIInternal.saveNavBarWhenVerticalTabsState(
+          verticalSnapshot
+        );
+      }
+    }
+
+    // The version 26 migration above anchored the flexible space to the
+    // alltabs-button, so profiles that had removed that button kept no space
+    // at all between the tab strip and the window controls. Put one back at
+    // the end of the tab strip for them.
+    if (currentVersion < 28) {
+      let restoreFlexibleSpace = placements => {
+        // The live tab strip placements are empty while tabs are vertical, and
+        // a corrupt saved state can hold anything.
+        if (!Array.isArray(placements) || !placements.length) {
+          return;
+        }
+        // Version 26 had its anchor when there is an alltabs-button, so a
+        // space missing here is one the user removed on purpose.
+        if (placements.includes("alltabs-button")) {
+          return;
+        }
+        // Any flexible space left after the tabs already does this job,
+        // wherever in the strip the user put it.
+        let afterTabs = placements.slice(
+          placements.indexOf("tabbrowser-tabs") + 1
+        );
+        if (
+          !afterTabs.some(id =>
+            CustomizableUIInternal.matchingSpecials(id, "spring")
+          )
+        ) {
+          placements.push("spring");
+        }
+      };
+
+      restoreFlexibleSpace(
+        gSavedState.placements[CustomizableUI.AREA_TABSTRIP]
+      );
+
+      // Users currently in vertical tabs keep their horizontal layout in the
+      // snapshot rather than in the live tab strip placements.
+      let horizontalSnapshot =
+        CustomizableUIInternal.getSavedHorizontalSnapshotState();
+      if (horizontalSnapshot.length) {
+        restoreFlexibleSpace(horizontalSnapshot);
+        CustomizableUIInternal.saveHorizontalTabStripState(horizontalSnapshot);
+      }
+    }
   },
 
   /**
@@ -1010,6 +1133,31 @@ var CustomizableUIInternal = {
   },
 
   /**
+   * Returns the default placements for an area, taking the current tab
+   * orientation into account. When tabs are vertical, an area's
+   * verticalTabsDefaultPlacements replace its defaultPlacements, while its
+   * verticalTabsAdditionalPlacements are appended to them.
+   *
+   * @param {string} aAreaId
+   *   The ID of the area to get the default placements for.
+   * @returns {string[]}
+   */
+  getDefaultPlacements(aAreaId) {
+    let props = gAreas.get(aAreaId);
+    let defaults = props.get("defaultPlacements");
+    if (!CustomizableUI.verticalTabsEnabled) {
+      return defaults;
+    }
+    if (props.has("verticalTabsDefaultPlacements")) {
+      return props.get("verticalTabsDefaultPlacements");
+    }
+    if (props.has("verticalTabsAdditionalPlacements")) {
+      return [...defaults, ...props.get("verticalTabsAdditionalPlacements")];
+    }
+    return defaults;
+  },
+
+  /**
    * If a new area was defined, or new default widgets for an area are defined,
    * this reconciles the placements of those new default widgets with the
    * existing customization and toolbar state of the browser.
@@ -1021,17 +1169,7 @@ var CustomizableUIInternal = {
     let futurePlacedWidgets = gFuturePlacements.get(aArea);
     let savedPlacements =
       gSavedState && gSavedState.placements && gSavedState.placements[aArea];
-    let defaultPlacements;
-    if (
-      CustomizableUI.verticalTabsEnabled &&
-      gAreas.get(aArea).has("verticalTabsDefaultPlacements")
-    ) {
-      defaultPlacements = gAreas
-        .get(aArea)
-        .get("verticalTabsDefaultPlacements");
-    } else {
-      defaultPlacements = gAreas.get(aArea).get("defaultPlacements");
-    }
+    let defaultPlacements = this.getDefaultPlacements(aArea);
     if (
       !savedPlacements ||
       !savedPlacements.length ||
@@ -1217,6 +1355,14 @@ var CustomizableUIInternal = {
     // Sanity check default placements array:
     if (!Array.isArray(props.get("defaultPlacements"))) {
       throw new Error("Should provide an array of default placements");
+    }
+    if (
+      props.has("verticalTabsDefaultPlacements") &&
+      props.has("verticalTabsAdditionalPlacements")
+    ) {
+      throw new Error(
+        "An area cannot have both verticalTabsDefaultPlacements and verticalTabsAdditionalPlacements"
+      );
     }
 
     if (!areaIsKnown) {
@@ -2717,17 +2863,13 @@ var CustomizableUIInternal = {
           }
         }
       } else {
-        node.setAttribute("label", this.getLocalizedProperty(aWidget, "label"));
+        node.setAttribute("label", aWidget.label ?? "");
         if (button != node) {
           // This is probably a "button-and-view" widget.
           button.setAttribute("label", node.getAttribute("label"));
         }
 
-        let tooltip = this.getLocalizedProperty(
-          aWidget,
-          "tooltiptext",
-          shortcut ? [shortcut] : []
-        );
+        let tooltip = aWidget.tooltiptext;
         if (tooltip) {
           node.setAttribute("tooltiptext", tooltip);
           if (button != node) {
@@ -2795,62 +2937,9 @@ var CustomizableUIInternal = {
   },
 
   /**
-   * @see CustomizableUI.getLocalizedProperty
-   * @param {string|object} aWidget
-   * @param {string} aProp
-   * @param {string[]} [aFormatArgs]
-   * @param {string} [aDef]
-   * @returns {string}
-   */
-  getLocalizedProperty(aWidget, aProp, aFormatArgs, aDef) {
-    const kReqStringProps = ["label"];
-
-    if (typeof aWidget == "string") {
-      aWidget = gPalette.get(aWidget);
-    }
-    if (!aWidget) {
-      throw new Error(
-        "getLocalizedProperty was passed a non-widget to work with."
-      );
-    }
-    let def, name;
-    // Let widgets pass their own string identifiers or strings, so that
-    // we can use strings which aren't the default (in case string ids change)
-    // and so that non-builtin-widgets can also provide labels, tooltips, etc.
-    if (aWidget[aProp] != null) {
-      name = aWidget[aProp];
-      // By using this as the default, if a widget provides a full string rather
-      // than a string ID for localization, we will fall back to that string
-      // and return that.
-      def = aDef || name;
-    } else {
-      name = aWidget.id + "." + aProp;
-      def = aDef || "";
-    }
-    if (aWidget.localized === false) {
-      return def;
-    }
-    try {
-      if (Array.isArray(aFormatArgs) && aFormatArgs.length) {
-        return (
-          lazy.gWidgetsBundle.formatStringFromName(name, aFormatArgs) || def
-        );
-      }
-      return lazy.gWidgetsBundle.GetStringFromName(name) || def;
-    } catch (ex) {
-      // If an empty string was explicitly passed, treat it as an actual
-      // value rather than a missing property.
-      if (!def && (name != "" || kReqStringProps.includes(aProp))) {
-        lazy.log.error("Could not localize property '" + name + "'.");
-      }
-    }
-    return def;
-  },
-
-  /**
    * @see CustomizableUI.addShortcut
    * @param {Element} aShortcutNode
-   * @param {Element|null} aTargetNode
+   * @param {Element} [aTargetNode]
    */
   addShortcut(aShortcutNode, aTargetNode = aShortcutNode) {
     // Detect if we've already been here before.
@@ -3614,16 +3703,7 @@ var CustomizableUIInternal = {
 
       if (!restored) {
         lazy.log.debug("Restoring " + aAreaId + " from default state");
-        let defaults = gAreas.get(aAreaId).get("defaultPlacements");
-        if (
-          CustomizableUI.verticalTabsEnabled &&
-          gAreas.get(aAreaId).has("verticalTabsDefaultPlacements")
-        ) {
-          lazy.log.debug(
-            "Using verticalTabsDefaultPlacements to restore " + aAreaId
-          );
-          defaults = gAreas.get(aAreaId).get("verticalTabsDefaultPlacements");
-        }
+        let defaults = this.getDefaultPlacements(aAreaId);
 
         if (defaults) {
           for (let id of defaults) {
@@ -4134,11 +4214,17 @@ var CustomizableUIInternal = {
         // area here.
         let canBeAutoAdded = autoAdd && !gSeenWidgets.has(widget.id);
         if (!widget.currentArea && (!widget.removable || canBeAutoAdded)) {
-          if (widget.defaultArea) {
-            if (this.isAreaLazy(widget.defaultArea)) {
-              gFuturePlacements.get(widget.defaultArea).add(widget.id);
+          // The CustomizableUI.AREA_TABSTRIP is hidden while tabs are vertical, so a widget that
+          // defaults into it would be auto-added somewhere the user can't see.
+          let defaultArea =
+            (CustomizableUI.verticalTabsEnabled &&
+              widget.defaultAreaVerticalTabs) ||
+            widget.defaultArea;
+          if (defaultArea) {
+            if (this.isAreaLazy(defaultArea)) {
+              gFuturePlacements.get(defaultArea).add(widget.id);
             } else {
-              this.addWidgetToArea(widget.id, widget.defaultArea);
+              this.addWidgetToArea(widget.id, defaultArea);
             }
           }
         }
@@ -4244,10 +4330,10 @@ var CustomizableUIInternal = {
       source: aSource || CustomizableUI.SOURCE_EXTERNAL,
       instances: new Map(),
       currentArea: null,
-      localized: true,
       removable: true,
       overflows: true,
       defaultArea: null,
+      defaultAreaVerticalTabs: null,
       shortcutId: null,
       tabSpecific: false,
       locationSpecific: false,
@@ -4301,7 +4387,6 @@ var CustomizableUIInternal = {
       "overflows",
       "tabSpecific",
       "locationSpecific",
-      "localized",
       "keepBroadcastAttributesWhenCustomizing",
       "disallowSubView",
       "webExtension",
@@ -4328,6 +4413,14 @@ var CustomizableUIInternal = {
           "valid defaultArea as well."
       );
       return null;
+    }
+
+    if (
+      aData.defaultAreaVerticalTabs &&
+      (aSource == CustomizableUI.SOURCE_BUILTIN ||
+        gAreas.has(aData.defaultAreaVerticalTabs))
+    ) {
+      widget.defaultAreaVerticalTabs = aData.defaultAreaVerticalTabs;
     }
 
     if ("type" in aData && gSupportedWidgetTypes.has(aData.type)) {
@@ -4939,9 +5032,10 @@ var CustomizableUIInternal = {
   },
 
   /**
+   * True if the CustomizableUI state of the browser is in the stock state
+   * that is shipped by default.
+   *
    * @type {boolean}
-   *   True if the CustomizableUI state of the browser is in the stock state
-   *   that is shipped by default.
    */
   get inDefaultState() {
     if (CustomizableUI.verticalTabsEnabled) {
@@ -5361,8 +5455,9 @@ var CustomizableUIInternal = {
   },
 
   /**
+   * True if the horizontal and vertical tabstrips have been registered.
+   *
    * @type {boolean}
-   *   True if the horizontal and vertical tabstrips have been registered.
    */
   get tabstripAreasReady() {
     return (
@@ -5591,6 +5686,7 @@ export var CustomizableUI = {
   /**
    * An iteratable property of windows managed by CustomizableUI.
    * Note that this can *only* be used as an iterator. ie:
+   *
    *     for (let window of CustomizableUI.windows) { ... }
    */
   windows: {
@@ -6234,10 +6330,6 @@ export var CustomizableUI = {
    * @property {string} [label]
    *   **Deprecated** - use l10nId and Fluent instead. A string to use for the
    *   label of the widget.
-   * @property {string} [localized]
-   *   **Deprecated** - use l10nId and Fluent instead. If true, or undefined,
-   *   attempt to retrieve the widget's string properties from the customizable
-   *   widgets string bundle.
    * @property {boolean} [removable=true]
    *   Whether the widget can be removed from a customizable area.
    *   Note: if you specify false here, you must provide a defaultArea, too.
@@ -6247,13 +6339,17 @@ export var CustomizableUI = {
    *   The default area to add the widget to. If not supplied, this widget will
    *   be placed in the palette by default. A valid default area is required if
    *   the widget is not removable.
+   * @property {string} [defaultAreaVerticalTabs]
+   *   The default area to add the widget to while tabs are vertical, taking
+   *   precedence over defaultArea. Widgets that default into AREA_TABSTRIP
+   *   need this, as that area is hidden while tabs are vertical. If not
+   *   supplied, defaultArea is used regardless of tab orientation.
    * @property {string} [shortcutId]
    *   The id of an element that has a shortcut for this widget. This is only
-   *   used to display the shortcut as part of the tooltip for builtin widgets
-   *   (which have strings inside customizableWidgets.properties). If you're in
-   *   an add-on, you should not set this property. If l10nId is provided, the
-   *   resulting shortcut is passed as the "$shortcut" variable to the Fluent
-   *   message.
+   *   used to display the shortcut as part of the tooltip for builtin widgets.
+   *   If you're in an add-on, you should not set this property. If l10nId is
+   *   provided, the resulting shortcut is passed as the "$shortcut" variable to
+   *   the Fluent message.
    * @property {boolean} [showInPrivateBrowsing=true]
    *   True to show the widget in private browsing mode windows.
    * @property {boolean} [hideInNonPrivateBrowsing=false]
@@ -6708,48 +6804,14 @@ export var CustomizableUI = {
   },
 
   /**
-   * DEPRECATED! Use fluent instead.
-   *
-   * Get a localized property off a (widget?) object.
-   *
-   * NB: this is unlikely to be useful unless you're in Firefox code, because
-   *     this code uses the builtin widget stringbundle, and can't be told
-   *     to use add-on-provided strings. It's mainly here as convenience for
-   *     custom builtin widgets that build their own DOM but use the same
-   *     stringbundle as the other builtin widgets.
-   *
-   * @param {string|object} aWidget
-   *   The ID of a widget, or a widget object whose properties we should use to
-   *   fetch a localizable string.
-   * @param {string} aProp
-   *   The property on the object to use for the fetching from
-   *   customizableWidgets.properties.
-   * @param {string[]} [aFormatArgs]
-   *   Any extra arguments to use for a formatted string.
-   * @param {string} [aDef]
-   *   The default to return if we don't find the string in the stringbundle.
-   * @returns {string}
-   *   The localized string, or aDef if the string isn't in the bundle. If no
-   *   default is provided, if aProp exists on aWidget, we'll return that,
-   *   otherwise we'll return the empty string.
-   */
-  getLocalizedProperty(aWidget, aProp, aFormatArgs, aDef) {
-    return CustomizableUIInternal.getLocalizedProperty(
-      aWidget,
-      aProp,
-      aFormatArgs,
-      aDef
-    );
-  },
-  /**
    * Utility function to detect, find and set a keyboard shortcut for a menuitem
    * or (toolbar)button.
    *
    * @param {Element} aShortcutNode
    *   The XUL node where the shortcut will be derived from;
-   * @param {Element|null} aTargetNode
-   *   The XUL node on which the `shortcut` attribute will be set. If NULL, the
-   *   shortcut will be set on aShortcutNode.
+   * @param {Element} [aTargetNode]
+   *   The XUL node on which the `shortcut` attribute will be set. If missing,
+   *   the shortcut will be set on aShortcutNode.
    */
   addShortcut(aShortcutNode, aTargetNode) {
     return CustomizableUIInternal.addShortcut(aShortcutNode, aTargetNode);
@@ -7463,11 +7525,11 @@ function XULWidgetSingleWrapper(aWidgetId, aNode, aDocument) {
  * There are two panels that toolbar items can be overflowed to:
  *
  * 1. The default items overflow panel
- *   This is where built-in default toolbar items will go to.
+ *    This is where built-in default toolbar items will go to.
  * 2. The Unified Extensions panel
- *   This is where browser_action toolbar buttons created by extensions will
- *   go to if the Unified Extensions UI is enabled - otherwise, those items will
- *   go to the default items overflow panel.
+ *    This is where browser_action toolbar buttons created by extensions will
+ *    go to if the Unified Extensions UI is enabled - otherwise, those items will
+ *    go to the default items overflow panel.
  *
  * Finally, OverflowableToolbar manages the showing of the default items
  * overflow panel when the associated anchor is clicked or dragged over. The

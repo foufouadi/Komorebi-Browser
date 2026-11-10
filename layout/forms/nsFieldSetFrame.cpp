@@ -31,7 +31,7 @@ using image::ImgDrawResult;
 
 nsContainerFrame* NS_NewFieldSetFrame(PresShell* aPresShell,
                                       ComputedStyle* aStyle) {
-  return new (aPresShell) nsFieldSetFrame(aStyle, aPresShell->GetPresContext());
+  return new nsFieldSetFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsFieldSetFrame)
@@ -111,7 +111,7 @@ class nsDisplayFieldSetBorder final : public nsPaintedDisplayItem {
   MOZ_COUNTED_DTOR_FINAL(nsDisplayFieldSetBorder)
 
   void Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) override;
-  bool CreateWebRenderCommands(
+  WebRenderCommandsResult CreateWebRenderCommands(
       mozilla::wr::DisplayListBuilder& aBuilder,
       mozilla::wr::IpcResourceUpdateQueue& aResources,
       const StackingContextHelper& aSc,
@@ -139,7 +139,7 @@ nsRect nsDisplayFieldSetBorder::GetBounds(nsDisplayListBuilder* aBuilder,
   return Frame()->InkOverflowRectRelativeToSelf() + ToReferenceFrame();
 }
 
-bool nsDisplayFieldSetBorder::CreateWebRenderCommands(
+WebRenderCommandsResult nsDisplayFieldSetBorder::CreateWebRenderCommands(
     mozilla::wr::DisplayListBuilder& aBuilder,
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc,
@@ -193,9 +193,9 @@ bool nsDisplayFieldSetBorder::CreateWebRenderCommands(
       this, mFrame, rect, aBuilder, aResources, aSc, aManager,
       aDisplayListBuilder);
   if (drawResult == ImgDrawResult::NOT_SUPPORTED) {
-    return false;
+    return Err("fieldset border is not WebRender-representable");
   }
-  return true;
+  return Ok();
 };
 
 }  // namespace mozilla
@@ -381,8 +381,7 @@ void nsFieldSetFrame::Reflow(nsPresContext* aPresContext,
     ReflowOverflowContainerChildren(aPresContext, aReflowInput, ocBounds,
                                     ReflowChildFlags::Default, ocStatus);
 
-    AutoFrameListPtr prevOverflowFrames(PresContext(),
-                                        prevInFlow->StealOverflowFrames());
+    AutoFrameListPtr prevOverflowFrames(prevInFlow->StealOverflowFrames());
     if (prevOverflowFrames) {
       mFrames.InsertFrames(this, nullptr, std::move(*prevOverflowFrames));
     }

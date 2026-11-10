@@ -17,12 +17,8 @@ const { MockEngineManager } = ChromeUtils.importESModule(
   "resource://testing-common/AIWindowTestUtils.sys.mjs"
 );
 
-const { GET_OPEN_TABS, MAX_TABS } = ChromeUtils.importESModule(
+const { MAX_TABS } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/models/Tools.sys.mjs"
-);
-
-const { MESSAGE_ROLE } = ChromeUtils.importESModule(
-  "moz-src:///browser/components/aiwindow/ui/modules/ChatEnums.sys.mjs"
 );
 
 /**
@@ -42,51 +38,6 @@ function pinLastAccessed(tabsOldestFirst) {
   tabsOldestFirst.forEach((tab, index) => {
     tab._lastAccessed = index + 1;
   });
-}
-
-/**
- * @param {ChatConversation} conversation
- */
-async function waitForGetOpenTabsResult(conversation) {
-  return TestUtils.waitForCondition(
-    () =>
-      conversation.messages.find(
-        m => m.role === MESSAGE_ROLE.TOOL && m.content?.name === GET_OPEN_TABS
-      ),
-    "A tool result for get_open_tabs should be added to the conversation."
-  );
-}
-
-/**
- * Drive one chat turn whose mocked model emits a get_open_tabs tool_call, so the
- * real Chat -> Tools path executes getOpenTabs. Returns the tool result message.
- *
- * @param {object} options
- * @param {MockEngineManager} options.mockEngineManager
- * @param {ChatConversation} options.conversation
- * @param {string} options.callId
- */
-async function triggerGetOpenTabsToolCall({
-  mockEngineManager,
-  conversation,
-  callId,
-}) {
-  await mockEngineManager.respondTo({
-    purpose: "chat",
-    response: {
-      text: "",
-      tokens: null,
-      isPrompt: false,
-      toolCalls: [
-        {
-          id: callId,
-          function: { name: GET_OPEN_TABS, arguments: "{}" },
-        },
-      ],
-    },
-  });
-
-  return waitForGetOpenTabsResult(conversation);
 }
 
 /**
@@ -136,6 +87,12 @@ async function startFreshTurn({
 
   return conversation;
 }
+
+add_setup(async function () {
+  await SpecialPowers.pushPrefEnv({
+    set: [["places.semanticHistory.smartwindow.featureGate", false]],
+  });
+});
 
 /**
  * End-to-end: model sees the sanitized url/title/lastAccessed triple, titles are
@@ -217,8 +174,8 @@ add_task(async function test_get_open_tabs_returns_sanitized_data() {
   for (const tab of tabs) {
     Assert.deepEqual(
       Object.keys(tab).sort(),
-      ["lastAccessed", "title", "url"],
-      "Tab info exposes exactly url, title, lastAccessed and no other fields."
+      ["lastAccessed", "pinned", "title", "url", "windowId"],
+      "Tab info exposes exactly url, title, lastAccessed, windowId, pinned and no other fields."
     );
   }
 
@@ -267,7 +224,7 @@ add_task(async function test_get_open_tabs_returns_sanitized_data() {
 
   BrowserTestUtils.removeTab(aboutTab);
   await server.cleanup();
-  mockEngineManager.rejectAllRequests();
+  await mockEngineManager.rejectAllRequests();
   mockEngineManager.cleanupMocks();
   await BrowserTestUtils.closeWindow(win);
 });
@@ -309,7 +266,7 @@ add_task(async function test_get_open_tabs_empty_when_no_http_tabs() {
     "untrustedInput stays false when no tabs are returned."
   );
 
-  mockEngineManager.rejectAllRequests();
+  await mockEngineManager.rejectAllRequests();
   mockEngineManager.cleanupMocks();
   await BrowserTestUtils.closeWindow(win);
 });
@@ -375,7 +332,7 @@ add_task(async function test_get_open_tabs_caps_and_sorts() {
     "untrustedInput stays false; tab titles are truncated and spotlighted."
   );
 
-  mockEngineManager.rejectAllRequests();
+  await mockEngineManager.rejectAllRequests();
   mockEngineManager.cleanupMocks();
   await server.cleanup();
   await BrowserTestUtils.closeWindow(win);
@@ -442,7 +399,7 @@ add_task(async function test_get_open_tabs_records_seen_urls() {
     "seenUrls contains exactly the context mention plus the two http tab URLs."
   );
 
-  mockEngineManager.rejectAllRequests();
+  await mockEngineManager.rejectAllRequests();
   mockEngineManager.cleanupMocks();
   await server.cleanup();
   await BrowserTestUtils.closeWindow(win);
@@ -472,12 +429,16 @@ add_task(async function test_get_open_tabs_aggregates_across_ai_windows() {
     browser: gBrowser,
   });
 
-  const tabInWinA = await server.openTab({
+  const tabAInWinA = await server.openTab({
     title: "Tab in AI window A",
     body: "<p>A</p>",
   });
+  const tabBInWinA = await server.openTab({
+    title: "Second tab in window A",
+    body: "<p>A2</p>",
+  });
 
-  pinLastAccessed([tabInWinA.tab, tabInWinB.tab]);
+  pinLastAccessed([tabAInWinA.tab, tabBInWinA.tab, tabInWinB.tab]);
 
   await SimpleTest.promiseFocus(winA);
 
@@ -497,12 +458,12 @@ add_task(async function test_get_open_tabs_aggregates_across_ai_windows() {
   const tabs = toolMessage.content.body;
   Assert.equal(
     tabs.length,
-    2,
-    "Only the two AI-window tabs are returned; non-AI window is filtered out."
+    3,
+    "Only the three AI-window tabs are returned; non-AI window is filtered out."
   );
   Assert.deepEqual(
     new Set(tabs.map(t => t.url)),
-    new Set([tabInWinA.url, tabInWinB.url]),
+    new Set([tabAInWinA.url, tabBInWinA.url, tabInWinB.url]),
     "Result contains exactly the tabs from both AI windows."
   );
   Assert.ok(
@@ -515,6 +476,29 @@ add_task(async function test_get_open_tabs_aggregates_across_ai_windows() {
     "Most-recently-accessed tab (winB's, pinned newer) sorts first across windows."
   );
 
+  const tabA = tabs.find(tab => tab.url === tabAInWinA.url);
+  const tabA2 = tabs.find(tab => tab.url === tabBInWinA.url);
+  const tabB = tabs.find(tab => tab.url === tabInWinB.url);
+  Assert.equal(
+    tabA.windowId,
+    SessionStore.getWindowId(winA),
+    "Tab matches the SessionStore ID of the window holding it."
+  );
+  Assert.equal(
+    tabA2.windowId,
+    SessionStore.getWindowId(winA),
+    "Tabs in the same window have matching windowId."
+  );
+  Assert.equal(
+    tabB.windowId,
+    SessionStore.getWindowId(winB),
+    "Tab in window B matches the window ID."
+  );
+  Assert.notEqual(
+    tabA.windowId,
+    tabB.windowId,
+    "Tabs in different windows are distinguishable by window ID."
+  );
   Assert.equal(
     conversation.securityProperties.privateData,
     true,
@@ -527,7 +511,7 @@ add_task(async function test_get_open_tabs_aggregates_across_ai_windows() {
   );
 
   BrowserTestUtils.removeTab(noiseTab.tab);
-  mockEngineManager.rejectAllRequests();
+  await mockEngineManager.rejectAllRequests();
   mockEngineManager.cleanupMocks();
   await server.cleanup();
   await BrowserTestUtils.closeWindow(winA);

@@ -98,12 +98,6 @@ class RetryTestRule(private val retryCount: Int = 3) : TestRule {
         }
 }
 
-private inline fun statement(crossinline eval: () -> Unit): Statement {
-    return object : Statement() {
-        override fun evaluate() = eval()
-    }
-}
-
 /**
  * Represents a test case that supplies a Throwable to be thrown during a test.
  *

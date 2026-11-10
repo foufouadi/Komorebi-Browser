@@ -104,7 +104,7 @@ void RDDProcessManager::OnPreferenceChange(const char16_t* aData) {
                           /* isSanitized */ false, Nothing(), Nothing());
 
   Preferences::GetPreference(&pref, GeckoProcessType_RDD,
-                             /* remoteType */ ""_ns);
+                             /* remoteType */ {});
   if (!!mRDDChild) {
     MOZ_ASSERT(mQueuedPrefs.IsEmpty());
     mRDDChild->SendPreferenceUpdate(pref);
@@ -272,9 +272,7 @@ void RDDProcessManager::DestroyProcess() {
 
   // Move onto the stack to ensure we don't re-enter from a chained promise
   // rejection on the process shutdown.
-  RDDProcessHost* process = mProcess;
-  mProcess = nullptr;
-
+  RefPtr<RDDProcessHost> process = mProcess.forget();
   process->Shutdown();
   mProcessToken = 0;
   mRDDChild = nullptr;

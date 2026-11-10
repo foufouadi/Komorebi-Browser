@@ -460,6 +460,12 @@ class IDL:
                 return True
         return False
 
+    def needsFunctionTypes(self):
+        for p in self.productions:
+            if p.kind == "interface" and p.attributes.function:
+                return True
+        return False
+
 
 class CDATA:
     kind = "cdata"
@@ -888,6 +894,11 @@ class Interface:
                         )
                     else:
                         has_method = True
+            if self.base != "nsISupports":
+                raise IDLError(
+                    f"interface '{self.name}' is marked 'function', and does not inherit from nsISupports",
+                    self.location,
+                )
 
         parent.setName(self)
         if self.base is not None:
@@ -1211,7 +1222,8 @@ class CEnum:
 def ensureInfallibleIsSound(methodOrAttribute):
     if not methodOrAttribute.infallible:
         return
-    if methodOrAttribute.realtype.kind not in [
+    ty = unaliasType(methodOrAttribute.realtype)
+    if ty.kind not in [
         "builtin",
         "interface",
         "forward",
@@ -1274,9 +1286,7 @@ def ensureBuiltinClassIfNeeded(methodOrAttribute):
     # parameters are always passed indirectly, so do not impact calling
     # conventions.
     def typeNeedsBuiltinclass(type):
-        inner = type
-        while inner.kind == "typedef":
-            inner = inner.realtype
+        inner = unaliasType(type)
         return (
             inner.kind == "native"
             and inner.specialtype is None

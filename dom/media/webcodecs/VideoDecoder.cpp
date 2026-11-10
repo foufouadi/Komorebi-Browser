@@ -20,7 +20,6 @@
 #include "mozilla/Try.h"
 #include "mozilla/dom/EncodedVideoChunk.h"
 #include "mozilla/dom/EncodedVideoChunkBinding.h"
-#include "mozilla/dom/ImageUtils.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/VideoColorSpaceBinding.h"
 #include "mozilla/dom/VideoDecoderBinding.h"
@@ -131,21 +130,22 @@ nsCString VideoDecoderConfigInternal::ToString() const {
 
   rv.Append(NS_ConvertUTF16toUTF8(mCodec));
   if (mCodedWidth.isSome()) {
-    rv.AppendPrintf("coded: %dx%d", mCodedWidth.value(), mCodedHeight.value());
+    rv.AppendPrintf(", coded: %dx%d", mCodedWidth.value(),
+                    mCodedHeight.value());
   }
   if (mDisplayAspectWidth.isSome()) {
-    rv.AppendPrintf("display %dx%d", mDisplayAspectWidth.value(),
+    rv.AppendPrintf(", display %dx%d", mDisplayAspectWidth.value(),
                     mDisplayAspectHeight.value());
   }
   if (mColorSpace.isSome()) {
-    rv.AppendPrintf("colorspace %s", "todo");
+    rv.AppendPrintf(", %s", mColorSpace->ToString().get());
   }
   if (mDescription) {
-    rv.AppendPrintf("extradata: %zu bytes", mDescription->Length());
+    rv.AppendPrintf(", extradata: %zu bytes", mDescription->Length());
   }
-  rv.AppendPrintf("hw accel: %s", GetEnumString(mHardwareAcceleration).get());
+  rv.AppendPrintf(", hw accel: %s", GetEnumString(mHardwareAcceleration).get());
   if (mOptimizeForLatency.isSome()) {
-    rv.AppendPrintf("optimize for latency: %s",
+    rv.AppendPrintf(", optimize for latency: %s",
                     mOptimizeForLatency.value() ? "true" : "false");
   }
 
@@ -279,52 +279,6 @@ static Result<Ok, nsresult> CloneConfiguration(
   }
 
   return Ok();
-}
-
-static Maybe<VideoPixelFormat> GuessPixelFormat(layers::Image* aImage) {
-  if (aImage) {
-    // TODO: Implement ImageUtils::Impl for MacIOSurfaceImage and
-    // DMABUFSurfaceImage?
-    if (aImage->AsPlanarYCbCrImage() || aImage->AsNVImage()) {
-      const ImageUtils imageUtils(aImage);
-      Maybe<dom::ImageBitmapFormat> format = imageUtils.GetFormat();
-      Maybe<VideoPixelFormat> f =
-          format.isSome() ? ImageBitmapFormatToVideoPixelFormat(format.value())
-                          : Nothing();
-
-      // ImageBitmapFormat cannot distinguish YUV420 or YUV420A.
-      bool hasAlpha = aImage->AsPlanarYCbCrImage() &&
-                      aImage->AsPlanarYCbCrImage()->GetData() &&
-                      aImage->AsPlanarYCbCrImage()->GetData()->mAlpha;
-      if (f && *f == VideoPixelFormat::I420 && hasAlpha) {
-        return Some(VideoPixelFormat::I420A);
-      }
-      return f;
-    }
-    if (layers::GPUVideoImage* image = aImage->AsGPUVideoImage()) {
-      RefPtr<layers::ImageBridgeChild> imageBridge =
-          layers::ImageBridgeChild::GetSingleton();
-      layers::TextureClient* texture = image->GetTextureClient(imageBridge);
-      if (NS_WARN_IF(!texture)) {
-        return Nothing();
-      }
-      return SurfaceFormatToVideoPixelFormat(texture->GetFormat());
-    }
-#ifdef XP_MACOSX
-    if (layers::MacIOSurfaceImage* image = aImage->AsMacIOSurfaceImage()) {
-      MOZ_ASSERT(image->GetSurface());
-      return SurfaceFormatToVideoPixelFormat(image->GetSurface()->GetFormat());
-    }
-#endif
-#ifdef MOZ_WAYLAND
-    if (layers::DMABUFSurfaceImage* image = aImage->AsDMABUFSurfaceImage()) {
-      MOZ_ASSERT(image->GetSurface());
-      return SurfaceFormatToVideoPixelFormat(image->GetSurface()->GetFormat());
-    }
-#endif
-  }
-  LOGW("Failed to get pixel format from layers::Image");
-  return Nothing();
 }
 
 static VideoColorSpaceInternal GuessColorSpace(
@@ -539,7 +493,7 @@ static Result<gfx::IntSize, nsresult> AdjustDisplaySize(
 }
 
 // https://w3c.github.io/webcodecs/#create-a-videoframe
-static RefPtr<VideoFrame> CreateVideoFrame(
+static Result<RefPtr<VideoFrame>, MediaResult> CreateVideoFrame(
     nsIGlobalObject* aGlobalObject, const VideoData* aData, int64_t aTimestamp,
     uint64_t aDuration, const Maybe<uint32_t> aDisplayAspectWidth,
     const Maybe<uint32_t> aDisplayAspectHeight,
@@ -548,7 +502,10 @@ static RefPtr<VideoFrame> CreateVideoFrame(
   MOZ_ASSERT(aData);
   MOZ_ASSERT((!!aDisplayAspectWidth) == (!!aDisplayAspectHeight));
 
-  Maybe<VideoPixelFormat> format = GuessPixelFormat(aData->mImage.get());
+  Maybe<VideoPixelFormat> format = GuessVideoPixelFormat(aData->mImage.get());
+  if (!format) {
+    LOGW("Failed to get pixel format from layers::Image");
+  }
   gfx::IntSize displaySize = aData->mDisplay;
   if (aDisplayAspectWidth && aDisplayAspectHeight) {
     auto r = AdjustDisplaySize(*aDisplayAspectWidth, *aDisplayAspectHeight,
@@ -558,10 +515,9 @@ static RefPtr<VideoFrame> CreateVideoFrame(
     }
   }
 
-  return MakeRefPtr<VideoFrame>(aGlobalObject, aData->mImage, format,
-                                aData->mImage->GetSize(),
-                                aData->mImage->GetPictureRect(), displaySize,
-                                Some(aDuration), aTimestamp, aColorSpace);
+  return VideoFrame::CreateFromImage(
+      aGlobalObject, aData->mImage, format, aData->mImage->GetPictureRect(),
+      displaySize, Some(aDuration), aTimestamp, aColorSpace);
 }
 
 /* static */
@@ -573,8 +529,6 @@ bool VideoDecoderTraits::IsSupported(
 /* static */
 Result<UniquePtr<TrackInfo>, nsresult> VideoDecoderTraits::CreateTrackInfo(
     const VideoDecoderConfigInternal& aConfig) {
-  LOG("Create a VideoInfo from {} config", aConfig.ToString().get());
-
   nsTArray<UniquePtr<TrackInfo>> tracks = GetTracksInfo(aConfig);
   if (tracks.Length() != 1 || tracks[0]->GetType() != TrackInfo::kVideoTrack) {
     LOGE("Failed to get TrackInfo");
@@ -917,6 +871,7 @@ nsTArray<RefPtr<VideoFrame>> VideoDecoder::DecodedDataToOutputType(
     MOZ_RELEASE_ASSERT(data->mType == MediaData::Type::VIDEO_DATA);
     RefPtr<const VideoData> d(data->As<const VideoData>());
     VideoColorSpaceInternal colorSpace;
+    bool useConfigColorSpace = false;
     // Determine which color space to use: prefer the color space as configured
     // at the decoder level, if it has one, otherwise look at the underlying
     // image and make a guess.
@@ -925,13 +880,23 @@ nsTArray<RefPtr<VideoFrame>> VideoDecoder::DecodedDataToOutputType(
         aConfig.mColorSpace->mTransfer.isSome() &&
         aConfig.mColorSpace->mMatrix.isSome()) {
       colorSpace = aConfig.mColorSpace.value();
+      useConfigColorSpace = true;
     } else {
       colorSpace = GuessColorSpace(d->mImage.get());
     }
-    frames.AppendElement(CreateVideoFrame(
+    LOGV("Resolved decoded frame color space from {}: {}",
+         useConfigColorSpace ? "decoder configuration" : "decoded image",
+         colorSpace.ToString().get());
+    auto frame = CreateVideoFrame(
         aGlobalObject, d.get(), d->mTime.ToMicroseconds(),
         static_cast<uint64_t>(d->mDuration.ToMicroseconds()),
-        aConfig.mDisplayAspectWidth, aConfig.mDisplayAspectHeight, colorSpace));
+        aConfig.mDisplayAspectWidth, aConfig.mDisplayAspectHeight, colorSpace);
+    if (frame.isErr()) {
+      LOGW("Failed to create VideoFrame for {}: {}. Skipped",
+           d->ToString().get(), frame.inspectErr().Description().get());
+      continue;
+    }
+    frames.AppendElement(frame.unwrap());
   }
   return frames;
 }

@@ -6,7 +6,6 @@ package org.mozilla.fenix.components.menu.middleware
 
 import android.app.PendingIntent
 import android.content.SharedPreferences
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,13 +21,10 @@ import mozilla.components.feature.app.links.AppLinksUseCases
 import mozilla.components.feature.session.SessionUseCases
 import mozilla.components.feature.tabs.TabsUseCases
 import mozilla.components.feature.top.sites.PinnedSiteStorage
-import mozilla.components.feature.top.sites.TopSite
 import mozilla.components.feature.top.sites.TopSitesUseCases
 import mozilla.components.lib.state.Middleware
 import mozilla.components.lib.state.Store
 import mozilla.components.support.base.log.logger.Logger
-import mozilla.components.ui.widgets.withCenterAlignedButtons
-import org.mozilla.fenix.R
 import org.mozilla.fenix.components.AppStore
 import org.mozilla.fenix.components.appstate.AppAction
 import org.mozilla.fenix.components.appstate.AppAction.BookmarkAction
@@ -39,6 +35,8 @@ import org.mozilla.fenix.components.bookmarks.BookmarksUseCase
 import org.mozilla.fenix.components.menu.store.BookmarkState
 import org.mozilla.fenix.components.menu.store.MenuAction
 import org.mozilla.fenix.components.menu.store.MenuState
+import org.mozilla.fenix.components.menu.store.MenuStore
+import org.mozilla.fenix.components.menu.store.NavigationEvent
 import org.mozilla.fenix.components.menu.store.SummarizationMenuState
 import org.mozilla.fenix.components.metrics.MetricsUtils
 import org.mozilla.fenix.home.topsites.AddShortcutEntryPoint
@@ -68,13 +66,6 @@ import org.mozilla.fenix.utils.Settings
  * @param requestDesktopSiteUseCase The [SessionUseCases.RequestDesktopSiteUseCase] for toggling desktop mode for the
  *   current session.
  * @param migratePrivateTabUseCase The [TabsUseCases.MigratePrivateTabUseCase] for moving a private tab to a normal tab.
- * @param materialAlertDialogBuilder The [MaterialAlertDialogBuilder] used to create a popup when trying to add a
- *   shortcut after the shortcut limit has been reached.
- * @param topSitesMaxLimit The maximum number of top sites the user can have.
- * @param onDeleteAndQuit Callback invoked to delete browsing data and quit the browser.
- * @param onDismiss Callback invoked to dismiss the menu dialog.
- * @param onSendPendingIntentWithUrl Callback invoked to send the pending intent of a custom menu item with the url of
- *   the custom tab.
  * @param mainDispatcher The [CoroutineDispatcher] for performing UI updates.
  */
 @Suppress("LongParameterList", "CyclomaticComplexMethod")
@@ -92,11 +83,6 @@ class MenuDialogMiddleware(
     private val removePinnedSitesUseCase: TopSitesUseCases.RemoveTopSiteUseCase,
     private val requestDesktopSiteUseCase: SessionUseCases.RequestDesktopSiteUseCase,
     private val migratePrivateTabUseCase: TabsUseCases.MigratePrivateTabUseCase,
-    private val materialAlertDialogBuilder: MaterialAlertDialogBuilder,
-    private val topSitesMaxLimit: Int,
-    private val onDeleteAndQuit: () -> Unit,
-    private val onDismiss: suspend () -> Unit,
-    private val onSendPendingIntentWithUrl: (intent: PendingIntent, url: String?) -> Unit,
     private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
 ) : Middleware<MenuState, MenuAction> {
 
@@ -115,21 +101,22 @@ class MenuDialogMiddleware(
             is MenuAction.AddBookmark -> addBookmark(store)
             is MenuAction.AddShortcut -> addShortcut(store)
             is MenuAction.RemoveShortcut -> removeShortcut(store)
-            is MenuAction.DeleteBrowsingDataAndQuit -> deleteBrowsingDataAndQuit()
-            is MenuAction.FindInPage -> launchFindInPage()
-            is MenuAction.DismissMenuBanner -> dismissMenuBanner()
+            is MenuAction.DeleteBrowsingDataAndQuit -> deleteBrowsingDataAndQuit(store)
+            is MenuAction.FindInPage -> launchFindInPage(store)
+            is MenuAction.DefaultBrowserMenuBannerDismissed -> dismissMenuBanner()
             is MenuAction.OpenInApp -> openInApp(store)
-            is MenuAction.OpenInFirefox -> openInFirefox()
+            is MenuAction.OpenInFirefox -> openInFirefox(store)
             is MenuAction.InstallAddon -> installAddon(store, action.addon)
-            is MenuAction.InstallAddonSuccess -> installAddonSuccess()
-            is MenuAction.CustomMenuItemAction -> customMenuItemAction(action.intent, action.url)
-            is MenuAction.CustomizeReaderView -> customizeReaderView()
+            is MenuAction.InstallAddonSuccess -> installAddonSuccess(store)
+            is MenuAction.CustomMenuItemAction -> customMenuItemAction(store, action.intent, action.url)
+            is MenuAction.CustomizeReaderView -> customizeReaderView(store)
             is MenuAction.OnSummarizationMenuExposed -> cacheMenuExposure(store)
             is MenuAction.OnMoreMenuClicked -> cacheMoreMenuClick(store)
             is MenuAction.MoveToNonPrivateTab -> migratePrivateTab(store)
             is MenuAction.RequestDesktopSite,
             is MenuAction.RequestMobileSite ->
                 requestSiteMode(
+                    store = store,
                     tabId = currentState.browserMenuState?.selectedTab?.id,
                     shouldRequestDesktopMode = !currentState.isDesktopMode,
                 )
@@ -244,7 +231,7 @@ class MenuDialogMiddleware(
             )
         )
 
-        onDismiss()
+        store.emitEvent(NavigationEvent.Dismiss)
     }
 
     private fun SessionState.isNormalTab() = !content.private
@@ -253,26 +240,6 @@ class MenuDialogMiddleware(
         val browserMenuState = store.state.browserMenuState ?: return@launch
 
         if (browserMenuState.isPinned) {
-            return@launch
-        }
-
-        val numPinnedSites =
-            pinnedSiteStorage.getPinnedSites().filter { it is TopSite.Default || it is TopSite.Pinned }.size
-
-        if (numPinnedSites >= topSitesMaxLimit) {
-            materialAlertDialogBuilder
-                .apply {
-                    setTitle(R.string.shortcut_max_limit_title)
-                    setMessage(R.string.shortcut_max_limit_content)
-                    setPositiveButton(R.string.top_sites_max_limit_confirmation_button) { dialog, _ ->
-                        dialog.dismiss()
-                    }
-                    create().withCenterAlignedButtons()
-                }
-                .show()
-
-            onDismiss()
-
             return@launch
         }
 
@@ -286,12 +253,13 @@ class MenuDialogMiddleware(
 
         appStore.dispatch(
             ShortcutAction.ShortcutAdded(
+                url = url,
                 source = AddShortcutSource.MANUAL,
                 entryPoint = AddShortcutEntryPoint.PAGE_MENU,
             )
         )
 
-        onDismiss()
+        store.emitEvent(NavigationEvent.Dismiss)
     }
 
     private fun removeShortcut(store: Store<MenuState, MenuAction>) = scope.launch {
@@ -306,12 +274,12 @@ class MenuDialogMiddleware(
         val topSite = pinnedSiteStorage.getPinnedSites().firstOrNull { it.url == url } ?: return@launch
 
         removePinnedSitesUseCase(topSite = topSite)
-        onDismiss()
+        store.emitEvent(NavigationEvent.Dismiss)
     }
 
-    private fun deleteBrowsingDataAndQuit() = scope.launch {
-        onDeleteAndQuit()
-        onDismiss()
+    private fun deleteBrowsingDataAndQuit(store: Store<MenuState, MenuAction>) = scope.launch {
+        store.emitEvent(NavigationEvent.DeleteBrowsingDataAndQuit)
+        store.emitEvent(NavigationEvent.Dismiss)
     }
 
     private fun openInApp(store: Store<MenuState, MenuAction>) = scope.launch {
@@ -325,12 +293,12 @@ class MenuDialogMiddleware(
         settings.openInAppOpened = true
 
         appLinksUseCases.openAppLink.invoke(redirect.appIntent)
-        onDismiss()
+        store.emitEvent(NavigationEvent.Dismiss)
     }
 
-    private fun openInFirefox() = scope.launch {
+    private fun openInFirefox(store: Store<MenuState, MenuAction>) = scope.launch {
         appStore.dispatch(AppAction.OpenInFirefoxStarted)
-        onDismiss()
+        store.emitEvent(NavigationEvent.Dismiss)
     }
 
     private fun installAddon(
@@ -356,18 +324,18 @@ class MenuDialogMiddleware(
         )
     }
 
-    private fun installAddonSuccess() = scope.launch {
-        onDismiss()
+    private fun installAddonSuccess(store: Store<MenuState, MenuAction>) = scope.launch {
+        store.emitEvent(NavigationEvent.Dismiss)
     }
 
-    private fun customizeReaderView() = scope.launch {
+    private fun customizeReaderView(store: Store<MenuState, MenuAction>) = scope.launch {
         appStore.dispatch(ReaderViewAction.ReaderViewControlsShown)
-        onDismiss()
+        store.emitEvent(NavigationEvent.Dismiss)
     }
 
-    private fun launchFindInPage() = scope.launch {
+    private fun launchFindInPage(store: Store<MenuState, MenuAction>) = scope.launch {
         appStore.dispatch(FindInPageAction.FindInPageStarted)
-        onDismiss()
+        store.emitEvent(NavigationEvent.Dismiss)
     }
 
     private fun dismissMenuBanner() = scope.launch {
@@ -375,6 +343,7 @@ class MenuDialogMiddleware(
     }
 
     private fun requestSiteMode(
+        store: Store<MenuState, MenuAction>,
         tabId: String?,
         shouldRequestDesktopMode: Boolean,
     ) = scope.launch {
@@ -385,15 +354,16 @@ class MenuDialogMiddleware(
             )
         }
 
-        onDismiss()
+        store.emitEvent(NavigationEvent.Dismiss)
     }
 
     private fun customMenuItemAction(
+        store: Store<MenuState, MenuAction>,
         intent: PendingIntent,
         url: String?,
     ) = scope.launch {
-        onSendPendingIntentWithUrl(intent, url)
-        onDismiss()
+        store.emitEvent(NavigationEvent.SendPendingIntentWithUrl(intent, url))
+        store.emitEvent(NavigationEvent.Dismiss)
     }
 
     private fun cacheMenuExposure(store: Store<MenuState, MenuAction>) = scope.launch {
@@ -405,13 +375,17 @@ class MenuDialogMiddleware(
     private fun migratePrivateTab(store: Store<MenuState, MenuAction>) = scope.launch {
         val tabId = store.state.browserMenuState?.selectedTab?.id ?: return@launch
         migratePrivateTabUseCase(tabId)
-        onDismiss()
+        store.emitEvent(NavigationEvent.Dismiss)
     }
 
     private fun cacheMoreMenuClick(store: Store<MenuState, MenuAction>) = scope.launch {
         if (store.state.summarizationMenuState.overflowMenuHighlighted) {
             summarizeMenuSettings.cacheDiscoveryEvent(SummarizeDiscoveryEvent.MenuOverflowInteraction)
         }
+    }
+
+    private fun Store<MenuState, MenuAction>.emitEvent(effect: NavigationEvent) {
+        (this as? MenuStore)?.emitEvent(effect)
     }
 
     companion object {

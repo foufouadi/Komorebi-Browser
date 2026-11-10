@@ -7,9 +7,9 @@
  */
 
 import { UrlbarProvider } from "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs";
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-const lazy = {};
-ChromeUtils.defineESModuleGetters(lazy, {
+const lazy = XPCOMUtils.declareLazy({
   DEFAULT_FORM_HISTORY_PARAM:
     "moz-src:///toolkit/components/search/SearchSuggestionController.sys.mjs",
   FormHistory: "resource://gre/modules/FormHistory.sys.mjs",
@@ -44,9 +44,9 @@ export class UrlbarProviderRecentSearches extends UrlbarProvider {
   }
 
   async isActive(queryContext) {
-    if (queryContext.sapName == "searchbar") {
-      // On the searchbar, we show recent searches of all engines,
-      // regardless of searchmode or prefs.
+    if (queryContext.isSearchbarSAP) {
+      // In a search bar, we show recent searches of all engines, regardless of
+      // searchmode or prefs.
       return !queryContext.searchString;
     }
 
@@ -69,6 +69,11 @@ export class UrlbarProviderRecentSearches extends UrlbarProvider {
     return 1;
   }
 
+  /**
+   * @param {UrlbarQueryContext} queryContext
+   * @param {UrlbarParentController} controller
+   * @param {object} details
+   */
   onEngagement(queryContext, controller, details) {
     let { result } = details;
 
@@ -109,13 +114,13 @@ export class UrlbarProviderRecentSearches extends UrlbarProvider {
     let results = await lazy.FormHistory.search(["value", "lastUsed"], {
       fieldname: lazy.DEFAULT_FORM_HISTORY_PARAM,
       // Use undefined to show recent searches of all engines.
-      source: queryContext.sapName == "searchbar" ? undefined : engine.name,
+      source: queryContext.isSearchbarSAP ? undefined : engine.name,
     });
 
     let now = Date.now();
 
     let expiration;
-    if (queryContext.sapName != "searchbar") {
+    if (!queryContext.isSearchbarSAP) {
       expiration = parseInt(lazy.UrlbarPrefs.get(EXPIRATION_PREF), 10);
       let lastDefaultChanged = parseInt(
         lazy.UrlbarPrefs.get(LASTDEFAULTCHANGED_PREF),
@@ -137,7 +142,7 @@ export class UrlbarProviderRecentSearches extends UrlbarProvider {
     results.sort((a, b) => b.lastUsed - a.lastUsed);
 
     if (
-      queryContext.sapName != "searchbar" &&
+      !queryContext.isSearchbarSAP &&
       results.length > lazy.UrlbarPrefs.get("recentsearches.maxResults")
     ) {
       results.length = lazy.UrlbarPrefs.get("recentsearches.maxResults");
@@ -150,6 +155,7 @@ export class UrlbarProviderRecentSearches extends UrlbarProvider {
         payload: {
           engine: engine.name,
           suggestion: result.value,
+          lowerCaseSuggestion: result.value.toLocaleLowerCase(),
           title: result.value,
           isBlockable: true,
           blockL10n: { id: "urlbar-result-menu-remove-from-history2" },

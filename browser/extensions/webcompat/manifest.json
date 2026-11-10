@@ -2,7 +2,7 @@
   "manifest_version": 2,
   "name": "Web Compatibility Interventions",
   "description": "Urgent post-release fixes for web compatibility.",
-  "version": "156.0.0",
+  "version": "162.1.0",
   "browser_specific_settings": {
     "gecko": {
       "id": "webcompat@mozilla.org",
@@ -128,6 +128,7 @@
     "shims/disqus.svg",
     "shims/eluminate.js",
     "shims/embed-test-shim.js",
+    "shims/empty-page.html",
     "shims/empty-script.js",
     "shims/empty-shim.txt",
     "shims/everest.js",
@@ -167,6 +168,7 @@
     "shims/rambler-authenticator.js",
     "shims/rich-relevance.js",
     "shims/salesforce.js",
+    "shims/sendtonews-embed.js",
     "shims/spotify-embed.js",
     "shims/stackoverflow-login.js",
     "shims/tiktok-embed.js",
@@ -176,6 +178,7 @@
     "shims/twitter-embed.js",
     "shims/vast2.xml",
     "shims/vast3.xml",
+    "shims/video-embed.svg",
     "shims/vmad.xml",
     "shims/webtrends.js",
     "shims/x-logo.svg",

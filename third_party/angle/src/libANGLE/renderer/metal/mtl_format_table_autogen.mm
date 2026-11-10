@@ -757,15 +757,37 @@ void Format::init(const DisplayMtl *display, angle::FormatID intendedFormatId_)
             break;
 
         case angle::FormatID::R8G8B8X8_UNORM:
+            if (display->getFeatures().hasTextureSwizzle.enabled)
+            {
 
-            this->metalFormat    = MTLPixelFormatRGBA8Unorm;
-            this->actualFormatId = angle::FormatID::R8G8B8A8_UNORM;
+                this->metalFormat    = MTLPixelFormatRGBA8Unorm;
+                this->actualFormatId = angle::FormatID::R8G8B8A8_UNORM;
+                this->swizzled       = true;
+                this->swizzle        = {GL_RED, GL_GREEN, GL_BLUE, GL_ONE};
+            }
+            else
+            {
+
+                this->metalFormat    = MTLPixelFormatRGBA8Unorm;
+                this->actualFormatId = angle::FormatID::R8G8B8A8_UNORM;
+            }
             break;
 
         case angle::FormatID::R8G8B8X8_UNORM_SRGB:
+            if (display->getFeatures().hasTextureSwizzle.enabled)
+            {
 
-            this->metalFormat    = MTLPixelFormatRGBA8Unorm_sRGB;
-            this->actualFormatId = angle::FormatID::R8G8B8A8_UNORM_SRGB;
+                this->metalFormat    = MTLPixelFormatRGBA8Unorm_sRGB;
+                this->actualFormatId = angle::FormatID::R8G8B8A8_UNORM_SRGB;
+                this->swizzled       = true;
+                this->swizzle        = {GL_RED, GL_GREEN, GL_BLUE, GL_ONE};
+            }
+            else
+            {
+
+                this->metalFormat    = MTLPixelFormatRGBA8Unorm_sRGB;
+                this->actualFormatId = angle::FormatID::R8G8B8A8_UNORM_SRGB;
+            }
             break;
 
         case angle::FormatID::R8G8B8_SINT:
@@ -3843,10 +3865,10 @@ void FormatTable::initNativeFormatCapsAutogen(const DisplayMtl *display)
     const angle::FeaturesMtl &featuresMtl = display->getFeatures();
     // Skip auto resolve if either hasDepth/StencilAutoResolve or allowMultisampleStoreAndResolve
     // feature are disabled.
-    bool supportDepthAutoResolve = featuresMtl.hasDepthAutoResolve.enabled &&
-                                   featuresMtl.allowMultisampleStoreAndResolve.enabled;
-    bool supportStencilAutoResolve = featuresMtl.hasStencilAutoResolve.enabled &&
-                                     featuresMtl.allowMultisampleStoreAndResolve.enabled;
+    bool supportDepthAutoResolve        = featuresMtl.hasDepthAutoResolve.enabled &&
+                                          featuresMtl.allowMultisampleStoreAndResolve.enabled;
+    bool supportStencilAutoResolve      = featuresMtl.hasStencilAutoResolve.enabled &&
+                                          featuresMtl.allowMultisampleStoreAndResolve.enabled;
     bool supportDepthStencilAutoResolve = supportDepthAutoResolve && supportStencilAutoResolve;
 
     // Source: https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf

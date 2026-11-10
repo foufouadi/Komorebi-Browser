@@ -11,9 +11,6 @@
 let testEngine;
 
 add_setup(async () => {
-  // Force settings redesign to false, so that `hideOneOffButton` will correctly
-  // work for the time being.
-  Services.prefs.setBoolPref("browser.settings-redesign.enabled", false);
   // Disable search suggestions for a less verbose test.
   Services.prefs.setBoolPref("browser.search.suggest.enabled", false);
   // Disable ScotchBonnet that provides its own tab to search implementation.
@@ -102,7 +99,7 @@ add_task(async function noTabToSearchResultsInSmartbar() {
   ]);
 
   // Sanity check: the tab-to-search result appears in the urlbar SAP.
-  let urlbarController = UrlbarTestUtils.newMockController();
+  let urlbarController = UrlbarTestUtils.mockChildController();
   let urlbarContext = createContext("examp", {
     isPrivate: false,
   });
@@ -116,7 +113,7 @@ add_task(async function noTabToSearchResultsInSmartbar() {
   );
 
   // The same result should not appear in the smartbar SAP.
-  let smartbarController = UrlbarTestUtils.newMockController({
+  let smartbarController = UrlbarTestUtils.mockChildController({
     sapName: "smartbar",
   });
   let smartbarContext = createContext("examp", {
@@ -637,24 +634,6 @@ add_task(async function test_disabledEngine() {
       }),
     ],
   });
-
-  info("Now disable the engine.");
-  engine.hideOneOffButton = true;
-
-  await check_results({
-    context,
-    autofilled: "disabled.com/",
-    completed: "https://disabled.com/",
-    matches: [
-      makeVisitResult(context, {
-        uri: "https://disabled.com/",
-        title: "test visit for https://disabled.com/",
-        heuristic: true,
-        providerName: "UrlbarProviderAutofill",
-      }),
-    ],
-  });
-  engine.hideOneOffButton = false;
 
   await cleanupPlaces();
   await extension.unload();

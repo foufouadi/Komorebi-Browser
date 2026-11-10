@@ -13,6 +13,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.mozilla.fenix.IntentReceiverActivity
 import org.mozilla.fenix.customannotations.Converted
+import org.mozilla.fenix.customannotations.Critical
 import org.mozilla.fenix.customannotations.SmokeTest
 import org.mozilla.fenix.helpers.AppAndSystemHelper.openAppFromExternalLink
 import org.mozilla.fenix.helpers.DataGenerationHelper.createCustomTabIntent
@@ -40,10 +41,6 @@ class CustomTabsTest {
     private val customMenuItem = "TestMenuItem"
     private val customTabActionButton = "CustomActionButton"
 
-    /* Updated externalLinks.html to v2.0,
-      changed the hypertext reference to mozilla-mobile.github.io/testapp/downloads for "External link"
-    */
-    private val externalLinksPWAPage = "https://mozilla-mobile.github.io/testapp/v2.0/externalLinks.html"
     private val loginPage = "https://mozilla-mobile.github.io/testapp/loginForm"
 
     @get:Rule(order = 1)
@@ -61,6 +58,11 @@ class CustomTabsTest {
     @get:Rule(order = 2) val memoryLeaksRule = DetectMemoryLeaksRule(composeTestRule = { composeTestRule })
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/249659
+    @Converted(
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.CustomTabsTest#verifyLoginSaveInCustomTabTest"],
+        bug = 2063232,
+        since = "2026-08",
+    )
     @SmokeTest
     @Test
     fun verifyLoginSaveInCustomTabTest() {
@@ -95,6 +97,12 @@ class CustomTabsTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2334762
+    @Converted(
+        replacedBy = ["org.mozilla.fenix.ui.efficiency.tests.CustomTabsTest#copyCustomTabToolbarUrlTest"],
+        bug = 2078545,
+        since = "2026-10",
+    )
+    @Critical
     @Test
     fun copyCustomTabToolbarUrlTest() {
         val customTabPage = mockWebServer.getGenericAsset(1)
@@ -150,7 +158,7 @@ class CustomTabsTest {
 
         browserScreen(composeTestRule) {}
             .clickDownloadLink(downloadFile) {
-                verifyDownloadPrompt(composeTestRule, downloadFile)
+                verifyDownloadPrompt(composeTestRule)
             }
             .clickDownload(composeTestRule) {
                 verifyDownloadCompleteSnackbar(fileName = "web_icon.png")
@@ -245,7 +253,10 @@ class CustomTabsTest {
     fun verifyPDFViewerInACustomTabTest() {
         val customTabPage = mockWebServer.getGenericAsset(3)
         val pdfFormResource = mockWebServer.pdfFormAsset
+        val pdfTitle = "Untitled document - pdfForm.pdf"
+        val downloadFile = "pdfForm.pdf"
 
+        composeTestRule.activityRule.applySettingsExceptions { it.isPdfToolsEnabled = true }
         intentReceiverActivityTestRule.launchActivity(createCustomTabIntent(customTabPage.url.toString()))
 
         customTabScreen(composeTestRule) {
@@ -255,9 +266,16 @@ class CustomTabsTest {
             verifyPDFReaderToolbarItems()
             verifyCustomTabCloseButton()
             verifyCustomTabsSiteInfoButton()
-            verifyCustomTabToolbarTitle("Untitled document - pdfForm.pdf")
+            verifyCustomTabToolbarTitle(pdfTitle)
             verifyCustomTabUrl(pdfFormResource.url.toString())
             verifyMainMenuButton()
+        }
+        browserScreen(composeTestRule) {}
+            .clickDownloadPDFButton {
+                verifyDownloadCompleteSnackbar(fileName = downloadFile)
+                waitUntilDownloadSnackbarGone()
+            }
+        customTabScreen(composeTestRule) {
             clickCustomTabCloseButton()
         }
         homeScreen(composeTestRule) {

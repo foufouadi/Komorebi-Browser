@@ -2,9 +2,13 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import annotations
+
 import hashlib
 import os
 import sys
+import time
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from typing import Optional, Union
 
@@ -14,6 +18,34 @@ class UserError(Exception):
     an internal `mach` failure. Exceptions that are subclasses of this class
     will not be reported as failures to Sentry.
     """
+
+
+@contextmanager
+def resource_marker(name, text):
+    """Record the time the block takes as a marker in the resource usage
+    profile of the SystemResourceMonitor running in this process or, when
+    there is none yet, of one in a parent process accepting forwarded records,
+    e.g. run-task's."""
+    start = time.monotonic()
+    try:
+        yield
+    finally:
+        record_resource_marker(
+            name, start, time.monotonic(), {"type": "Text", "text": text}
+        )
+
+
+def record_resource_marker(name, start, end, data):
+    """Record a marker spanning the given time.monotonic() timestamps, like
+    resource_marker() does."""
+    monitor_module = sys.modules.get("mozsystemmonitor.resourcemonitor")
+    if monitor_module is None and os.environ.get("MOZ_RESOURCE_MONITOR_FORWARD"):
+        try:
+            from mozsystemmonitor import resourcemonitor as monitor_module
+        except ImportError:
+            pass
+    if monitor_module is not None:
+        monitor_module.SystemResourceMonitor.forward_marker(name, start, end, data)
 
 
 def setenv(key, value):
@@ -74,7 +106,61 @@ def get_state_dir(
         with (state_dir / "topsrcdir.txt").open(mode="w") as fh:
             fh.write(str(topsrcdir))
 
+        # A new checkout (e.g. a git worktree) is a good time to get rid of the
+        # state dirs of checkouts that have since been deleted.
+        remove_orphaned_state_dirs(state_dir.parent)
+
     return str(state_dir)
+
+
+def remove_orphaned_state_dirs(srcdirs_dir: Path):
+    """Remove the checkout-scoped state dirs whose checkout no longer exists.
+
+    A state dir is only removed if the parent of its recorded topsrcdir still
+    exists, so that checkouts on a temporarily unavailable drive are kept.
+    """
+    import shutil
+
+    try:
+        state_dirs = list(srcdirs_dir.iterdir())
+    except OSError:
+        return
+
+    for state_dir in state_dirs:
+        try:
+            topsrcdir = Path((state_dir / "topsrcdir.txt").read_text().strip())
+        except OSError:
+            continue
+        if not topsrcdir.is_absolute() or topsrcdir.exists():
+            continue
+        if not topsrcdir.parent.is_dir():
+            continue
+        print(f"Removing state directory of deleted checkout {topsrcdir}: {state_dir}")
+        shutil.rmtree(state_dir, ignore_errors=True)
+
+
+MACHRC_NAMES = ("machrc", ".machrc")
+
+
+def get_global_machrc_path():
+    """Return the path of the global machrc file, which may not exist yet.
+
+    This is "$state_dir/machrc", unless MACHRC already resolves to an existing
+    file, in which case that is the file mach reads settings from and thus the
+    one to write them back to. MACHRC is resolved the same way as when loading
+    settings: it either names the file itself, or a directory containing a
+    "machrc" or ".machrc".
+    """
+    machrc = os.environ.get("MACHRC")
+    if machrc:
+        machrc = Path(machrc)
+        if machrc.is_file():
+            return machrc
+        for name in MACHRC_NAMES:
+            if (machrc / name).is_file():
+                return machrc / name
+
+    return Path(get_state_dir()) / "machrc"
 
 
 def get_virtualenv_base_dir(topsrcdir):

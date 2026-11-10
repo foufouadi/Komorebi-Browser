@@ -25,6 +25,7 @@ from taskgraph.util.taskcluster import (
 from taskgraph.util.yaml import load_yaml
 
 from gecko_taskgraph import GECKO, TEST_CONFIGS
+from gecko_taskgraph.optimize.perf_batching import PERF_CADENCE_STRATEGIES
 from gecko_taskgraph.util.attributes import (
     match_run_on_hg_branches,
     match_run_on_projects,
@@ -67,6 +68,7 @@ UNCOMMON_TRY_TASK_LABELS = [
     # Can't actually run on try
     r"notarization",
     # not usually needed
+    r"^beetmover-integration-",
     "upload-symbols",
 ]
 
@@ -321,17 +323,94 @@ def accept_awsy_task(try_name, platform):
     return False
 
 
-def filter_unsupported_artifact_builds(task, parameters):
-    try_config = parameters.get("try_task_config", {})
-    if not try_config.get("use-artifact-builds", False):
-        return True
-
-    supports_artifact_builds = task.attributes.get("supports-artifact-builds", True)
-    return supports_artifact_builds
-
-
 def filter_out_shippable(task):
     return not task.attributes.get("shippable", False)
+
+
+def _restricts_tests(parameters):
+    """Whether try asked for a subset of each suite's tests."""
+    env = parameters["try_task_config"].get("env", {})
+    return "MOZHARNESS_TEST_PATHS" in env or "MOZHARNESS_TEST_TAG" in env
+
+
+def _chunk_number(label, base):
+    if not label.startswith(base + "-"):
+        return None
+    suffix = label[len(base) + 1 :]
+    return suffix if suffix.isnumeric() else None
+
+
+def _drop_redundant_chunks(full_task_graph, labels):
+    """Keep only the first chunk of the tasks whose manifests were not
+    restricted to what try asked for: the harness filters the whole suite down
+    for those, so every chunk of one runs the same tests."""
+    kept = []
+    for label in labels:
+        task = full_task_graph.tasks.get(label)
+        suite = task.attributes.get("unittest_suite", "") if task else ""
+        if task and task.attributes.get("test-manifests-restricted", False):
+            kept.append(label)
+        elif suite.startswith(("test-verify", "test-coverage")):
+            # Per-test mode slices the requested tests across chunks, so each
+            # chunk runs a different subset.
+            kept.append(label)
+        elif label.endswith("-1") or not label.rsplit("-", 1)[-1].isnumeric():
+            kept.append(label)
+    return kept
+
+
+def _renumbered_chunks(full_task_graph, labels, restricted):
+    """Map explicitly requested test labels that no longer exist onto the chunks
+    their task ends up with.
+
+    A task's chunk count is only known once the decision task has resolved it
+    from the manifest runtime data and from what try asked for, so a caller that
+    picked labels from a graph built with different counts can name a chunk that
+    doesn't exist. `mach try fuzzy` generates its task list with `taskgraph.fast`
+    set, which skips manifest loading and falls back to the hardcoded chunk
+    counts; `mach try coverage` builds an unrestricted graph; `mach try again`
+    replays the labels of an older push.
+
+    Such a label either names a chunk of a task that now has a different number
+    of them, or, when the graph it came from had the task down to a single
+    chunk, names the task without any chunk suffix at all.
+    """
+    recovered = []
+    for label in labels:
+        if label in full_task_graph.tasks:
+            recovered.append(label)
+            continue
+
+        # A numeric suffix means the label names a chunk of the task before it,
+        # anything else means the label is the whole (unchunked) task name.
+        base = label.rsplit("-", 1)[0]
+        if _chunk_number(label, base) is None:
+            base = label
+
+        chunks = [
+            t for t in full_task_graph.graph.nodes if _chunk_number(t, base) is not None
+        ] or [t for t in [base] if t in full_task_graph.graph.nodes]
+        # Only test tasks get renumbered, so anything else that happens to have a
+        # numeric suffix, like a toolchain version, is left to be reported as
+        # requested but missing.
+        chunks = [t for t in chunks if full_task_graph.tasks[t].kind in TEST_KINDS]
+        if not chunks:
+            recovered.append(label)
+            continue
+
+        # The chunks of a task that wasn't restricted to the request all run the
+        # same tests, so substituting them all would schedule identical jobs.
+        # Without a restriction each chunk runs its own share of the suite and
+        # they are all wanted.
+        if restricted:
+            chunks = _drop_redundant_chunks(full_task_graph, chunks)
+
+        logger.info(
+            f"{label} no longer exists, replacing it with the chunks the task "
+            f"was split into: {', '.join(sorted(chunks))}"
+        )
+        recovered.extend(chunks)
+    return recovered
 
 
 def _try_task_config(full_task_graph, parameters, graph_config):
@@ -357,19 +436,10 @@ def _try_task_config(full_task_graph, parameters, graph_config):
         else:
             missing.add(pattern)
 
-        if "MOZHARNESS_TEST_PATHS" in parameters["try_task_config"].get("env", {}):
-            matched_tasks = [
-                x
-                for x in matched_tasks
-                if x.endswith("-1") or not x.rsplit("-", 1)[-1].isnumeric()
-            ]
-
-        if "MOZHARNESS_TEST_TAG" in parameters["try_task_config"].get("env", {}):
-            matched_tasks = [
-                x
-                for x in matched_tasks
-                if x.endswith("-1") or not x.rsplit("-", 1)[-1].isnumeric()
-            ]
+    restricted = _restricts_tests(parameters)
+    if restricted:
+        matched_tasks = _drop_redundant_chunks(full_task_graph, matched_tasks)
+    tasks = _renumbered_chunks(full_task_graph, tasks, restricted)
 
     selected_tasks = set(tasks) | set(matched_tasks)
     missing.update(selected_tasks - set(full_task_graph.tasks))
@@ -405,6 +475,28 @@ def target_tasks_default(full_task_graph, parameters, graph_config):
     ]
 
 
+def filter_shippable_tests_on_non_backstop(task, parameters):
+    """Remove tests running against shippable builds on non-backstop pushes."""
+    if task.kind not in TEST_KINDS:
+        return True
+
+    if parameters["backstop"]:
+        return True
+
+    build_type = task.attributes.get("build_type")
+
+    if not build_type or build_type != "opt" or filter_out_shippable(task):
+        return True
+
+    return False
+
+
+def is_perf_cadence_task(task):
+    """Whether the task is a performance task optimized through one of the
+    perf-cadence-* strategies."""
+    return any(name in PERF_CADENCE_STRATEGIES for name in (task.optimization or {}))
+
+
 @register_target_task("autoland_tasks")
 def target_tasks_autoland(full_task_graph, parameters, graph_config):
     """In addition to doing the filtering by project that the 'default'
@@ -413,22 +505,30 @@ def target_tasks_autoland(full_task_graph, parameters, graph_config):
     filtered_for_project = target_tasks_default(
         full_task_graph, parameters, graph_config
     )
+    return [
+        l
+        for l in filtered_for_project
+        if filter_shippable_tests_on_non_backstop(full_task_graph[l], parameters)
+    ]
 
-    def filter(task):
-        if task.kind not in TEST_KINDS:
-            return True
 
-        if parameters["backstop"]:
-            return True
-
-        build_type = task.attributes.get("build_type")
-
-        if not build_type or build_type != "opt" or filter_out_shippable(task):
-            return True
-
-        return False
-
-    return [l for l in filtered_for_project if filter(full_task_graph[l])]
+@register_target_task("autoland_perf_shadow_scheduler_tasks")
+def target_tasks_autoland_perf_shadow_scheduler(
+    full_task_graph, parameters, graph_config
+):
+    """Same as 'autoland_tasks', except that performance tasks are targeted on
+    every push instead of only on backstop pushes. Used by the perf shadow
+    schedulers so the cadence strategies they evaluate get to judge every
+    push-based performance task."""
+    filtered_for_project = target_tasks_default(
+        full_task_graph, parameters, graph_config
+    )
+    return [
+        l
+        for l in filtered_for_project
+        if is_perf_cadence_task(full_task_graph[l])
+        or filter_shippable_tests_on_non_backstop(full_task_graph[l], parameters)
+    ]
 
 
 @register_target_task("mozilla_central_tasks")
@@ -447,6 +547,7 @@ def target_tasks_mozilla_central(full_task_graph, parameters, graph_config):
         build_platform = task.attributes.get("build_platform")
         build_type = task.attributes.get("build_type")
         shippable = task.attributes.get("shippable", False)
+        ccov = task.attributes.get("ccov", False)
 
         if not build_platform or not build_type:
             return True
@@ -456,11 +557,17 @@ def target_tasks_mozilla_central(full_task_graph, parameters, graph_config):
         # (which is to say, not shippable, asan, tsan, or any other opt build
         # with other properties). There's no positive test for this, so we have to
         # do it somewhat hackily. Android doesn't have variants other than shippable
-        # so it is pretty straightforward to check for. Other platforms have many
-        # variants, but none of the regular opt builds we're looking for have a "-"
-        # in their platform name, so this works (for now).
+        # and ccov so it is pretty straightforward to check for. Other platforms
+        # have many variants, but none of the regular opt builds we're looking for
+        # have a "-" in their platform name, so this works (for now). The
+        # Android nightly-as-release build is an opt build and is not
+        # shippable. But it is not a regular opt build. Thus exclude it
+        # by name.
         is_regular_opt = (
-            family == "android" and not shippable
+            family == "android"
+            and not shippable
+            and not ccov
+            and "nightlyasrelease" not in build_platform
         ) or "-" not in build_platform
 
         if build_type != "opt" or not is_regular_opt:
@@ -777,50 +884,10 @@ def target_tasks_custom_car_perf_testing(full_task_graph, parameters, graph_conf
         # Desktop and Android selection for CaR
         if accept_raptor_desktop_build(platform):
             if "browsertime" in try_name and "custom-car" in try_name:
-                # Bug 1898514: avoid tp6m or non-essential tp6 jobs in cron
-                if "tp6" in try_name and "essential" not in try_name:
-                    return False
-                # Bug 2008058 Linux CaR tp6 tests are broken
-                if "tp6" in try_name and "linux" in platform:
-                    return False
-                # Bug 2038340: temporarily limit CaR benchmarks on Windows
-                # to sp3/js3/motionmark during PSU replacement
-                if "windows" in platform and "benchmark" in try_name:
-                    if not any(
-                        x in try_name
-                        for x in ["speedometer3", "jetstream3", "motionmark"]
-                    ):
-                        return False
-                # Bug 1928416
-                # For ARM coverage, this will only run on M2 machines at the moment.
-                if "jetstream2" in try_name:
-                    # Bug 1963732 - Disable js2 on 1500 mac for custom-car due to near perma
-                    if "m-car" in try_name and "1500" in platform:
-                        return False
-                    return True
                 return True
         elif accept_raptor_android_build(platform):
             if "browsertime" in try_name and "cstm-car-m" in try_name:
-                if "-nofis" not in try_name:
-                    return False
                 if "hw-s24" in platform and "speedometer3" not in try_name:
-                    return False
-                if "jetstream2" in try_name:
-                    return True
-                if "jetstream3" in try_name:
-                    return True
-                # Bug 1898514 - Avoid tp6m or non-essential tp6 jobs in cron on non-a55 platform
-                # Bug 1961831 - Disable pageload tests temporarily during provider switch
-                if "tp6m" in try_name:
-                    return False
-                # Bug 1945165 - Disable ebay-kleinanzeigen on cstm-car-m because of permafail
-                if (
-                    "ebay-kleinanzeigen" in try_name
-                    and "ebay-kleinanzeigen-search" not in try_name
-                ):
-                    return False
-                # Bug 1960921 Disable ebay-kleinanzeigen-search-nofis on custom-car
-                if "ebay-kleinanzeigen-search-nofis" in try_name:
                     return False
                 return True
         return False
@@ -872,25 +939,16 @@ def target_tasks_general_perf_testing(full_task_graph, parameters, graph_config)
             # Bug 1961145 - Disable bing-search for test-windows11-64-24h2-shippable
             if "windows11" in platform and "bing-search" in try_name:
                 return False
+            # Bug 2074111 - Already running on macosx1500
+            if "macosx1470" in platform and (
+                "jetstream3" in try_name or "speedometer3" in try_name
+            ):
+                return False
             if "browsertime" in try_name:
-                if "chrome" in try_name or "custom-car" in try_name:
-                    # Bug 2049065: linux2404 chrome/custom-car tp6 and
-                    # chrome-unity-webgl are still broken
-                    if "linux2404" in platform and (
-                        "tp6" in try_name or "chrome-unity-webgl" in try_name
-                    ):
-                        return False
                 if "chrome" in try_name:
-                    if "tp6" in try_name and "essential" not in try_name:
+                    # Bug 2049065: linux2404 chrome-unity-webgl is still broken
+                    if "linux2404" in platform and "chrome-unity-webgl" in try_name:
                         return False
-                    # Bug 2038340: temporarily limit Chrome benchmarks on Windows
-                    # to sp3/js3/motionmark during PSU replacement
-                    if "windows" in platform and "benchmark" in try_name:
-                        if not any(
-                            x in try_name
-                            for x in ["speedometer3", "jetstream3", "motionmark"]
-                        ):
-                            return False
                     if "wasm-godot" in try_name:
                         return False
                     return True
@@ -904,48 +962,15 @@ def target_tasks_general_perf_testing(full_task_graph, parameters, graph_config)
                 if "linux" in platform:
                     if "speedometer3" in try_name:
                         return True
-                # Bug 2038340: temporarily limit Firefox benchmarks on Windows
-                # to sp3/js3/motionmark during PSU replacement
-                if "windows" in platform and "benchmark" in try_name:
-                    if not any(
-                        x in try_name
-                        for x in ["speedometer3", "jetstream3", "motionmark"]
-                    ):
-                        return False
+                # Labels for this suite carry no "benchmark" token, so the
+                # check below cannot match them.
+                if "safari" in try_name and "video-playback-latency" in try_name:
+                    return True
                 if "safari" and "benchmark" in try_name:
-                    if "jetstream2" in try_name and "safari" in try_name:
-                        return False
-                    # JetStream 3 fails with Safari 18.3 but not Safari-TP.
-                    # See bug 1996277.
-                    if (
-                        "safari-jetstream3" in try_name
-                        and "macosx1500-aarch64" in platform
-                    ):
-                        return False
                     return True
         # Android selection
         elif accept_raptor_android_build(platform):
             if "hw-s24" in platform and "speedometer3" not in try_name:
-                return False
-            if "chrome-m" in try_name and "-nofis" not in try_name:
-                return False
-            # Bug 1929960 - Enable all chrome-m tp6m tests on a55 only
-            if "chrome-m" in try_name and "tp6m" in try_name and "hw-a55" in platform:
-                # Bug 1954923 - Disable ebay-kleinanzeigen
-                if (
-                    "ebay-kleinanzeigen" in try_name
-                    and "search" not in try_name
-                    and "nofis" in try_name
-                ):
-                    return False
-                return True
-            if "chrome-m" in try_name and (
-                ("ebay" in try_name and "live" not in try_name)
-                or (
-                    "live" in try_name
-                    and ("facebook" in try_name or "dailymail" in try_name)
-                )
-            ):
                 return False
             # Ignore all fennec tests here, we run those weekly
             if "fennec" in try_name:
@@ -969,8 +994,6 @@ def target_tasks_general_perf_testing(full_task_graph, parameters, graph_config)
                 # Don't run android CaR sp tests as we already have a cron for this.
                 if "m-car" in try_name:
                     return False
-                if "jetstream2" in try_name:
-                    return True
                 if "jetstream3" in try_name:
                     return True
                 if "fenix" in try_name:
@@ -1018,10 +1041,18 @@ def make_desktop_nightly_filter(platforms, graph_config):
     """Returns a filter that gets all nightly tasks on the given platform."""
 
     def filter(task, parameters):
-        # _filter_by_release_project is used instead of filter_for_project
-        # because it fakes things a bit for Try, and allows tasks that
-        # otherwise wouldn't run there to be run
-        filter_for_target_project = _filter_by_release_project(parameters, graph_config)
+        # On Try, _filter_by_release_project fakes things a bit, and allows
+        # tasks that otherwise wouldn't run there to be run. Elsewhere,
+        # including project branches such as Pine, use the project's own
+        # run-on-projects.
+        if parameters["project"] == "try":
+            filter_for_target_project = _filter_by_release_project(
+                parameters, graph_config
+            )
+        else:
+            filter_for_target_project = functools.partial(
+                filter_for_project, parameters=parameters
+            )
 
         return all([
             filter_on_platforms(task, platforms),
@@ -1066,8 +1097,6 @@ def target_tasks_speedometer_tests(full_task_graph, parameters, graph_config):
                 and "speedometer3" in try_name
                 and "chrome-m" in try_name
             ):
-                if "-nofis" not in try_name:
-                    return False
                 return True
 
     return [l for l, t in full_task_graph.tasks.items() if filter(t)]
@@ -1190,6 +1219,31 @@ def target_tasks_nightly_all(full_task_graph, parameters, graph_config):
         set(target_tasks_nightly_desktop(full_task_graph, parameters, graph_config))
         | set(target_tasks_nightly_android(full_task_graph, parameters, graph_config))
     )
+
+
+@register_target_task("appservices")
+def target_tasks_appservices(full_task_graph, parameters, graph_config):
+    """Select the tasks that build app-services in tree and their tests"""
+
+    def counterpart_runs(task):
+        source = task.attributes.get("duplicate-of")
+        if source is None and "-appservices/" in task.label:
+            source = task.label.replace("-appservices/", "/")
+        counterpart = full_task_graph.tasks.get(source)
+        if counterpart is None:
+            return True
+        return bool(counterpart.attributes.get("run_on_projects"))
+
+    return [
+        l
+        for l, t in full_task_graph.tasks.items()
+        if (
+            t.attributes.get("build_platform", "").endswith("-appservices")
+            or "-appservices/" in t.attributes.get("test_platform", "")
+            or t.kind.endswith("-appservices")
+        )
+        and counterpart_runs(t)
+    ]
 
 
 # Run Searchfox analysis once daily.
@@ -1423,11 +1477,28 @@ def target_tasks_codereview(full_task_graph, parameters, graph_config):
 
     def filter(task):
         # Ending tasks
-        if task.kind in ["code-review"]:
+        if task.label == "code-review-issues":
             return True
 
         # Analyzer tasks
         if task.attributes.get("code-review") is True:
+            return True
+
+        return False
+
+    return [l for l, t in full_task_graph.tasks.items() if filter(t)]
+
+
+@register_target_task("codereview-build-test")
+def target_tasks_codereview_build_test(full_task_graph, parameters, graph_config):
+    """Select all build and test tasks that should run as part of code review pushes."""
+
+    def filter(task):
+        # Ending tasks
+        if task.label == "code-review-build-test-issues":
+            return True
+
+        if task.attributes.get("code-review-build-test") is True:
             return True
 
         return False
@@ -1716,8 +1787,15 @@ def target_tasks_perftest_fenix_startup(full_task_graph, parameters, graph_confi
     """
     Select perftest tasks we want to run daily for fenix startup
     """
+    # Bug 2070794 - the shopify applink tests perma-fails on the bitbar p6 and s24
+    FENIX_STARTUP_EXCLUDED_LABELS = {
+        "perftest-android-hw-p6-aarch64-shippable-startup-fenix-shopify-applink-startup",
+        "perftest-android-hw-s24-aarch64-shippable-startup-fenix-shopify-applink-startup",
+    }
     for name, task in full_task_graph.tasks.items():
         if task.kind != "perftest":
+            continue
+        if name in FENIX_STARTUP_EXCLUDED_LABELS:
             continue
         if "fenix" in name and "startup" in name and "profiling" not in name:
             yield name
@@ -1737,6 +1815,19 @@ def target_tasks_perftest_autoland(full_task_graph, parameters, graph_config):
             yield name
 
 
+APPLINK_PROFILING_LABELS = {
+    "perftest-android-hw-a55-aarch64-shippable-startup-fenix-newssite-applink-startup",
+}
+
+
+@register_target_task("perftest-applink-profiling")
+def target_tasks_perftest_applink_profiling(full_task_graph, parameters, graph_config):
+    """
+    Select the applink startup tasks and run them with profiling
+    """
+    return [name for name in full_task_graph.tasks if name in APPLINK_PROFILING_LABELS]
+
+
 @register_target_task("retrigger-perftests-autoland")
 def retrigger_perftests_autoland_commits(full_task_graph, parameters, graph_config):
     """
@@ -1745,8 +1836,7 @@ def retrigger_perftests_autoland_commits(full_task_graph, parameters, graph_conf
     - "perftest-android-hw-a55-aarch64-shippable-startup-fenix-cold-view-nav-start",
     - "perftest-android-hw-a55-aarch64-shippable-startup-fenix-homeview-startup",
     - "perftest-android-hw-a55-aarch64-shippable-startup-fenix-newssite-applink-startup",
-    - "perftest-android-hw-a55-aarch64-shippable-startup-fenix-shopify-applink-startup",
-    - "perftest-android-hw-a55-aarch64-shippable-startup-fenix-tab-restore-shopify"
+    - "perftest-android-hw-a55-aarch64-shippable-startup-fenix-tab-restore-newssite"
     - "test-windows11-64-24h2-shippable/opt-browsertime-benchmark-firefox-speedometer3",
     """
     retrigger_count = 4
@@ -1802,7 +1892,9 @@ def target_tasks_snap_upstream_tasks(full_task_graph, parameters, graph_config):
 def target_tasks_nightly_android(full_task_graph, parameters, graph_config):
     def filter(task, parameters):
         # geckoview
-        if task.attributes.get("shipping_product") == "fennec" and task.kind in (
+        if task.attributes.get(
+            "shipping_product"
+        ) == "firefox-android" and task.kind in (
             "beetmover-geckoview",
             "upload-symbols",
         ):
@@ -1942,7 +2034,11 @@ def target_firefox_pull_requests(full_task_graph, parameters, graph_config):
     labels = []
     for label, task in full_task_graph.tasks.items():
         # Always add the code review analysis & ending tasks
-        if task.attributes.get("code-review") or task.kind == "code-review":
+        if (
+            task.attributes.get("code-review")
+            or task.attributes.get("code-review-build-test")
+            or task.kind == "code-review"
+        ):
             labels.append(label)
 
         elif not standard_filter(task, parameters):

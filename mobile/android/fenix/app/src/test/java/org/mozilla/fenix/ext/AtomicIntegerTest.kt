@@ -21,7 +21,7 @@ class AtomicIntegerTest {
     fun `Safely increment an AtomicInteger from different coroutines`() {
         val integer = AtomicInteger(0)
         runBlocking {
-            for (i in 1..2) {
+            repeat(2) {
                 launch(Dispatchers.Default) {
                     integer.getAndIncrementNoOverflow()
                 }

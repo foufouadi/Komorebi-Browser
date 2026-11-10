@@ -44,8 +44,7 @@ use crate::{
     ConnectionParameters, Error, Res,
     cid::ConnectionIdRef,
     frame::{FrameEncoder as _, FrameType},
-    packet::{self},
-    recovery,
+    packet, recovery,
     recv_stream::RxStreamOrderer,
     send_stream::TxBuffer,
     sni::find_sni,
@@ -76,6 +75,8 @@ pub struct Crypto {
     tls: Agent,
     streams: CryptoStreams,
     states: CryptoStates,
+    /// Whether the resend-early allowance in Section 6.2.3 of RFC 9002 has been used.
+    early_resend_used: bool,
 }
 
 type TpHandler = Rc<RefCell<TransportParametersHandler>>;
@@ -133,6 +134,7 @@ impl Crypto {
             tls: agent,
             streams: CryptoStreams::default(),
             states: CryptoStates::default(),
+            early_resend_used: false,
         })
     }
 
@@ -148,6 +150,11 @@ impl Crypto {
     /// Get the set of enabled protocols.
     pub fn protocols(&self) -> &[String] {
         &self.protocols
+    }
+
+    /// Whether the local role is that of a server.
+    const fn is_server(&self) -> bool {
+        matches!(self.tls, Agent::Server(_))
     }
 
     pub fn server_enable_0rtt<Z: ZeroRttChecker + 'static>(
@@ -204,7 +211,7 @@ impl Crypto {
     ) -> Res<&HandshakeState> {
         let input = data.map(|d| {
             #[cfg(feature = "build-fuzzing-corpus")]
-            if space == PacketNumberSpace::Initial && matches!(self.tls, Agent::Server(_)) {
+            if space == PacketNumberSpace::Initial && self.is_server() {
                 neqo_common::write_item_to_fuzzing_corpus("find_sni", d);
             }
             let rec = Record {
@@ -233,22 +240,23 @@ impl Crypto {
     }
 
     /// Enable 0-RTT and return `true` if it is enabled successfully.
-    pub fn enable_0rtt(&mut self, version: Version, role: Role) -> Res<bool> {
+    pub fn enable_0rtt(&mut self, version: Version) -> Res<bool> {
         let info = self.tls.preinfo()?;
         // `info.early_data()` returns false for a server,
         // so use `early_data_cipher()` to tell if 0-RTT is enabled.
         let Some(cipher) = info.early_data_cipher() else {
             return Ok(false);
         };
-        let (dir, secret) = match role {
-            Role::Client => (
-                CryptoDxDirection::Write,
-                self.tls.write_secret(Epoch::ZeroRtt),
-            ),
-            Role::Server => (
+        let (dir, secret) = if self.is_server() {
+            (
                 CryptoDxDirection::Read,
                 self.tls.read_secret(Epoch::ZeroRtt),
-            ),
+            )
+        } else {
+            (
+                CryptoDxDirection::Write,
+                self.tls.write_secret(Epoch::ZeroRtt),
+            )
         };
         let secret = secret.ok_or(Error::Internal)?;
         self.states.set_0rtt_keys(version, dir, &secret, cipher)?;
@@ -263,12 +271,12 @@ impl Crypto {
     }
 
     /// Returns true if new handshake keys were installed.
-    pub fn install_keys(&mut self, role: Role) -> Res<bool> {
+    pub fn install_keys(&mut self) -> Res<bool> {
         if self.tls.state().is_final() {
             Ok(false)
         } else {
             let installed_hs = self.install_handshake_keys()?;
-            if role == Role::Server {
+            if self.is_server() {
                 self.maybe_install_application_write_key(self.version)?;
             }
             Ok(installed_hs)
@@ -349,30 +357,52 @@ impl Crypto {
             .write_frame(space, sni_slicing, builder, tokens, stats);
     }
 
-    pub fn acked(&mut self, token: &CryptoRecoveryToken) {
+    pub fn acked(&mut self, space: PacketNumberSpace, token: &CryptoRecoveryToken) {
         qdebug!(
-            "Acked crypto frame space={} offset={} length={}",
-            token.space,
+            "Acked crypto frame space={space} offset={} length={}",
             token.offset,
             token.length
         );
-        self.streams.acked(token);
+        self.streams.acked(space, token);
     }
 
-    pub fn lost(&mut self, token: &CryptoRecoveryToken) {
+    pub fn lost(&mut self, space: PacketNumberSpace, token: &CryptoRecoveryToken) {
         qinfo!(
-            "Lost crypto frame space={} offset={} length={}",
-            token.space,
+            "Lost crypto frame space={space} offset={} length={}",
             token.offset,
             token.length
         );
-        self.streams.lost(token);
+        self.streams.lost(space, token);
     }
 
     /// Mark any outstanding frames in the indicated space as "lost" so
     /// that they can be sent again.
     pub fn resend_unacked(&mut self, space: PacketNumberSpace) {
         self.streams.resend_unacked(space);
+    }
+
+    /// Resend unACK'ed Initial and Handshake data earlier than PTO, per Section 6.2.3 of RFC 9002.
+    /// Does nothing after the first call that finds data, until [`Self::reset_early_resend`].
+    pub fn resend_unacked_early(&mut self) {
+        if self.early_resend_used {
+            return;
+        }
+        let initial = self.streams.resend_unacked(PacketNumberSpace::Initial);
+        let handshake = self.streams.resend_unacked(PacketNumberSpace::Handshake);
+        self.early_resend_used = initial || handshake;
+        if self.early_resend_used {
+            qdebug!("Resending unACK'ed CRYPTO ahead of the PTO");
+        }
+    }
+
+    /// A Retry effectively restarts the connection (Section 6.3 of RFC 9002), so re-arm allowance.
+    pub const fn reset_early_resend(&mut self) {
+        self.early_resend_used = false;
+    }
+
+    #[cfg(test)]
+    pub const fn early_resend_used(&self) -> bool {
+        self.early_resend_used
     }
 
     /// Discard state for a packet number space and return true
@@ -632,6 +662,11 @@ impl CryptoDxState {
         self.epoch & 1 != 1
     }
 
+    #[must_use]
+    pub const fn epoch(&self) -> usize {
+        self.epoch
+    }
+
     /// This is a continuation of a previous, so adjust the range accordingly.
     /// Fail if the two ranges overlap.  Do nothing if the directions don't match.
     pub fn continuation(&mut self, prev: &Self) -> Res<()> {
@@ -824,12 +859,13 @@ impl CryptoDxAppData {
         Ok(Self {
             dx: CryptoDxState::new(version, dir, Epoch::ApplicationData, secret, cipher, 0)?,
             cipher,
-            next_secret: Self::update_secret(cipher, secret)?,
+            next_secret: Self::update_secret(version, cipher, secret)?,
         })
     }
 
-    fn update_secret(cipher: Cipher, secret: &SymKey) -> Res<SymKey> {
-        let next = hkdf::expand_label(TLS_VERSION_1_3, cipher, secret, &[], "quic ku")?;
+    fn update_secret(version: Version, cipher: Cipher, secret: &SymKey) -> Res<SymKey> {
+        let label = String::from(version.label_prefix()) + "ku";
+        let next = hkdf::expand_label(TLS_VERSION_1_3, cipher, secret, &[], &label)?;
         Ok(next)
     }
 
@@ -838,7 +874,7 @@ impl CryptoDxAppData {
             // Guard against too many key updates.
             return Err(Error::KeysExhausted);
         }
-        let next_secret = Self::update_secret(self.cipher, &self.next_secret)?;
+        let next_secret = Self::update_secret(self.dx.version, self.cipher, &self.next_secret)?;
         Ok(Self {
             dx: self.dx.next(&self.next_secret, self.cipher)?,
             cipher: self.cipher,
@@ -868,6 +904,11 @@ pub struct CryptoStates {
     // If this is set, then we have noticed a genuine update.
     // Once this time passes, we should switch in new keys.
     read_update_time: Option<Instant>,
+    // The read epoch of the most recent key update we have responded to.
+    // A duplicate of the packet that carried an update decrypts with the same
+    // keys and would otherwise be detected as that update again; comparing
+    // against this stops us from responding to the same update twice.
+    read_update_epoch: Option<usize>,
 }
 
 impl CryptoStates {
@@ -1307,7 +1348,17 @@ impl CryptoStates {
     /// Prepare to update read keys.  This doesn't happen immediately as
     /// we want to ensure that we can continue to receive any delayed
     /// packets that use the old keys.  So we just set a timer.
-    pub fn key_update_received(&mut self, expiration: Instant) -> Res<()> {
+    pub fn key_update_received(&mut self, epoch: usize, expiration: Instant) -> Res<()> {
+        // Respond to each key update once. A duplicate of the packet that
+        // carried the update decrypts with the same keys and is detected as
+        // the same update again; responding twice would advance the write keys
+        // a second time and trip an assertion in `maybe_update_write`.
+        if self.read_update_epoch.is_some_and(|e| epoch <= e) {
+            qtrace!("[{self}] Ignoring duplicate key update for epoch {epoch}");
+            return Ok(());
+        }
+        self.read_update_epoch = Some(epoch);
+
         qtrace!("[{self}] Key update received");
         // If we received a key update, then we assume that the peer has
         // acknowledged a packet we sent in this epoch. It's OK to do that
@@ -1402,6 +1453,7 @@ impl CryptoStates {
             app_read: Some(app_read(3)),
             app_read_next: Some(app_read(4)),
             read_update_time: None,
+            read_update_epoch: None,
         }
     }
 
@@ -1451,6 +1503,7 @@ impl CryptoStates {
             app_read: Some(app_read(3)),
             app_read_next: Some(app_read(4)),
             read_update_time: None,
+            read_update_epoch: None,
         }
     }
 }
@@ -1525,11 +1578,25 @@ impl CryptoStreams {
         Ok(())
     }
 
-    pub fn inbound_frame(&mut self, space: PacketNumberSpace, offset: u64, data: &[u8]) -> Res<()> {
+    /// Buffer a CRYPTO frame. Returns whether all of it had already been received.
+    /// # Errors
+    /// `CryptoBufferExceeded` when too much data is buffered, or when it is in too many ranges.
+    pub fn inbound_frame(
+        &mut self,
+        space: PacketNumberSpace,
+        offset: u64,
+        data: &[u8],
+    ) -> Res<bool> {
         let rx = &mut self.get_mut(space).ok_or(Error::Internal)?.rx;
-        rx.inbound_frame(offset, data);
+        // Nothing this far ahead can ever be delivered.
+        if !data.is_empty() && offset > rx.retired() + Self::BUFFER_LIMIT {
+            return Err(Error::CryptoBufferExceeded);
+        }
+        let duplicate = !data.is_empty() && rx.already_received(offset, data.len());
+        rx.inbound_frame(offset, data)
+            .map_err(|_| Error::CryptoBufferExceeded)?;
         if rx.received() - rx.retired() <= Self::BUFFER_LIMIT {
-            Ok(())
+            Ok(duplicate)
         } else {
             Err(Error::CryptoBufferExceeded)
         }
@@ -1547,27 +1614,24 @@ impl CryptoStreams {
             .read_to_end(buf))
     }
 
-    pub fn acked(&mut self, token: &CryptoRecoveryToken) {
-        if let Some(cs) = self.get_mut(token.space) {
+    pub fn acked(&mut self, space: PacketNumberSpace, token: &CryptoRecoveryToken) {
+        if let Some(cs) = self.get_mut(space) {
             cs.tx.mark_as_acked(token.offset, token.length);
         }
     }
 
-    pub fn lost(&mut self, token: &CryptoRecoveryToken) {
+    pub fn lost(&mut self, space: PacketNumberSpace, token: &CryptoRecoveryToken) {
         // See BZ 1624800, ignore lost packets in spaces we've dropped keys
-        if let Some(cs) = self.get_mut(token.space) {
+        if let Some(cs) = self.get_mut(space) {
             cs.tx.mark_as_lost(token.offset, token.length);
         }
     }
 
     /// Resend any Initial or Handshake CRYPTO frames that might be outstanding.
-    /// This can help speed up handshake times.
-    pub fn resend_unacked(&mut self, space: PacketNumberSpace) {
-        if space != PacketNumberSpace::ApplicationData
-            && let Some(cs) = self.get_mut(space)
-        {
-            cs.tx.unmark_sent();
-        }
+    /// This can help speed up handshake times. Returns whether anything was queued to resend.
+    pub fn resend_unacked(&mut self, space: PacketNumberSpace) -> bool {
+        space != PacketNumberSpace::ApplicationData
+            && self.get_mut(space).is_some_and(|cs| cs.tx.unmark_sent())
     }
 
     pub fn is_empty(&mut self, space: PacketNumberSpace) -> bool {
@@ -1659,7 +1723,6 @@ impl CryptoStreams {
             cs.tx.mark_as_sent(offset, len);
             qdebug!("CRYPTO for {space} offset={offset}, len={len}");
             tokens.push(recovery::Token::Crypto(CryptoRecoveryToken {
-                space,
                 offset,
                 length: len,
             }));
@@ -1754,9 +1817,10 @@ impl Default for CryptoStreams {
     }
 }
 
+/// The packet number space is not recorded because it can be derived from the carrying packet's
+/// type.
 #[derive(Debug, Clone)]
 pub struct CryptoRecoveryToken {
-    space: PacketNumberSpace,
     offset: u64,
     length: usize,
 }
@@ -1764,14 +1828,110 @@ pub struct CryptoRecoveryToken {
 #[cfg(all(test, not(feature = "disable-encryption")))]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use neqo_common::hex::Hex;
+    use nss::{TLS_CHACHA20_POLY1305_SHA256, TLS_VERSION_1_3, hkdf};
     use test_fixture::fixture_init;
 
-    use super::CryptoDxState;
+    use super::{CryptoDxAppData, CryptoDxDirection, CryptoDxState};
+    use crate::Version;
+
+    #[test]
+    fn key_update_secrets() {
+        // The initial secret and first update are from RFC 9001, Appendix A.5,
+        // and RFC 9369, Appendix A.5. The second update applies HKDF-Expand-Label
+        // again with SHA-256 and the respective "quic ku" or "quicv2 ku" label.
+        const SECRET: &[u8] = &[
+            0x9a, 0xc3, 0x12, 0xa7, 0xf8, 0x77, 0x46, 0x8e, 0xbe, 0x69, 0x42, 0x27, 0x48, 0xad,
+            0x00, 0xa1, 0x54, 0x43, 0xf1, 0x82, 0x03, 0xa0, 0x7d, 0x60, 0x60, 0xf6, 0x88, 0xf3,
+            0x0f, 0x21, 0x63, 0x2b,
+        ];
+        const V1_SECRETS: [&str; 2] = [
+            "1223504755036d556342ee9361d253421a826c9ecdf3c7148684b36b714881f9",
+            "ef172661d26526b8adddf9497f88649df5786fa7d2f49a2341da624e8d7f3f94",
+        ];
+        const V2_SECRETS: [&str; 2] = [
+            "c69374c49e3d2a9466fa689e49d476db5d0dfbc87d32ceeaa6343fd0ae4c7d88",
+            "7f81b8fa265dac8413d60045461c28d11a0b70300c479c44310d34284fd780bc",
+        ];
+
+        fixture_init();
+        let secret = hkdf::import_key(TLS_VERSION_1_3, SECRET).unwrap();
+        for version in Version::all() {
+            let expected = match version {
+                Version::Version2 => V2_SECRETS,
+                Version::Version1 => V1_SECRETS,
+                #[cfg(feature = "draft-29")]
+                Version::Draft29 => V1_SECRETS,
+            };
+            for direction in [CryptoDxDirection::Read, CryptoDxDirection::Write] {
+                let mut app =
+                    CryptoDxAppData::new(version, direction, &secret, TLS_CHACHA20_POLY1305_SHA256)
+                        .unwrap();
+                for expected_secret in expected {
+                    assert_eq!(
+                        Hex::new(app.next_secret.key_data().unwrap()).to_string(),
+                        expected_secret,
+                        "{version:?} {direction:?} epoch {}",
+                        app.epoch(),
+                    );
+                    app = app.next().unwrap();
+                }
+            }
+        }
+    }
 
     #[test]
     fn crypto_dx_state_display() {
         fixture_init();
         let dx = CryptoDxState::test_default_write();
         assert_eq!(dx.to_string(), "epoch 0 Write");
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod buffer_limits {
+    use neqo_common::to_u64;
+
+    use super::{CryptoStreams, PacketNumberSpace, RxStreamOrderer};
+    use crate::Error;
+
+    /// How many one-byte ranges, each separated by a one-byte gap, to offer.
+    const RANGES: u64 = to_u64(RxStreamOrderer::MAX_GAPS) * 2;
+
+    // Offsets have to stay inside `BUFFER_LIMIT`.
+    static_assertions::const_assert!(2 * RANGES < CryptoStreams::BUFFER_LIMIT);
+
+    #[test]
+    fn crypto_offset_beyond_buffer() {
+        let offset = CryptoStreams::BUFFER_LIMIT + 1;
+        assert_eq!(
+            CryptoStreams::default().inbound_frame(PacketNumberSpace::Initial, offset, &[0; 1]),
+            Err(Error::CryptoBufferExceeded)
+        );
+        assert_eq!(
+            CryptoStreams::default().inbound_frame(PacketNumberSpace::Initial, offset, &[]),
+            Ok(false) // Empty data is not duplicate data.
+        );
+    }
+
+    /// The same bytes twice are duplicate; a partial overlap is not.
+    #[test]
+    fn crypto_duplicate_data() {
+        const SPACE: PacketNumberSpace = PacketNumberSpace::Initial;
+        let mut cs = CryptoStreams::default();
+        assert_eq!(cs.inbound_frame(SPACE, 0, &[0; 2]), Ok(false));
+        assert_eq!(cs.inbound_frame(SPACE, 0, &[0; 2]), Ok(true), "duplicate");
+        assert_eq!(cs.inbound_frame(SPACE, 1, &[0; 2]), Ok(false), "partial");
+    }
+
+    #[test]
+    fn crypto_too_many_ranges() {
+        let mut cs = CryptoStreams::default();
+        let rejected = (0..RANGES).find_map(|i| {
+            cs.inbound_frame(PacketNumberSpace::Initial, 2 * i + 1, &[0; 1])
+                .err()
+        });
+        assert_eq!(rejected, Some(Error::CryptoBufferExceeded));
     }
 }

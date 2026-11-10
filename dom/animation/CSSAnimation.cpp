@@ -5,9 +5,12 @@
 #include "CSSAnimation.h"
 
 #include "mozilla/AnimationEventDispatcher.h"
+#include "mozilla/KeyframeUtils.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/dom/CSSAnimationBinding.h"
 #include "mozilla/dom/KeyframeEffectBinding.h"
+#include "nsAnimationManager.h"
+#include "nsContentUtils.h"
 #include "nsPresContext.h"
 
 namespace mozilla::dom {
@@ -78,6 +81,55 @@ bool CSSAnimation::PendingFromJS() const {
   // changed its possible we should now be pending.
   FlushUnanimatedStyle();
   return Animation::PendingFromJS();
+}
+
+void CSSAnimation::RemovedNamedTimelineReference(const nsAtom* aName) {
+  // Go through the owning element: the effect's target may have been changed
+  // or removed by script. An animation that style no longer owns has already
+  // been dropped.
+  if (!mOwningElement.IsSet()) {
+    return;
+  }
+  nsPresContext* presContext =
+      nsContentUtils::GetContextForContent(mOwningElement.Target().mElement);
+  if (!presContext) {
+    return;
+  }
+  if (auto* manager = presContext->AnimationManager()) {
+    manager->RemoveNamedTimelineAnimation(aName, this);
+  }
+}
+
+void CSSAnimation::CancelFromStyle(PostRestyleMode aPostRestyle) {
+  // Style no longer owns this animation, so nsAnimationManager must stop
+  // updating its named timeline reference.
+  if (const nsAtom* name = GetTimelineName().mName) {
+    RemovedNamedTimelineReference(name);
+  }
+
+  Animation::Cancel(aPostRestyle);
+
+  // When an animation is disassociated with style it enters an odd state
+  // where its composite order is undefined until it first transitions
+  // out of the idle state.
+  //
+  // Even if the composite order isn't defined we don't want it to be random
+  // in case we need to determine the order to dispatch events associated
+  // with an animation in this state. To solve this we treat the animation as
+  // if it had been added to the end of the global animation list so that
+  // its sort order is defined. We'll update this index again once the
+  // animation leaves the idle state.
+  //
+  // Note: We have to update |mAnimationIndex| after calling
+  // Animation::Cancel(), which enqueues animationcancel event, to make sure
+  // we have the correct |mAnimationIndex| in AnimationEventInfo.
+  mAnimationIndex = sNextAnimationIndex++;
+  mNeedsNewAnimationIndexWhenRun = true;
+
+  // We need to do this *after* calling Cancel() since
+  // Cancel() might synchronously trigger a cancel event for which
+  // we need an owning element to target the event at.
+  mOwningElement = OwningElementRef();
 }
 
 void CSSAnimation::PlayFromJS(ErrorResult& aRv) {
@@ -211,10 +263,6 @@ void CSSAnimation::QueueEvents(const StickyTimeDuration& aActiveTime) {
     }
   }
 
-  TimeStamp startTimeStamp = ElapsedTimeToTimeStamp(intervalStartTime);
-  TimeStamp endTimeStamp = ElapsedTimeToTimeStamp(intervalEndTime);
-  TimeStamp iterationTimeStamp = ElapsedTimeToTimeStamp(iterationStartTime);
-
   AutoTArray<AnimationEventInfo, 2> events;
 
   auto appendAnimationEvent = [&](EventMessage aMessage,
@@ -242,6 +290,11 @@ void CSSAnimation::QueueEvents(const StickyTimeDuration& aActiveTime) {
     appendAnimationEvent(eAnimationCancel, aActiveTime,
                          GetTimelineCurrentTimeAsTimeStamp());
   }
+
+  const TimeStamp startTimeStamp = ElapsedTimeToTimeStamp(intervalStartTime);
+  const TimeStamp endTimeStamp = ElapsedTimeToTimeStamp(intervalEndTime);
+  const TimeStamp iterationTimeStamp =
+      ElapsedTimeToTimeStamp(iterationStartTime);
 
   switch (mPreviousPhase) {
     case AnimationPhase::Idle:
@@ -282,6 +335,105 @@ void CSSAnimation::QueueEvents(const StickyTimeDuration& aActiveTime) {
 
   if (!events.IsEmpty()) {
     presContext->AnimationEventDispatcher()->QueueEvents(std::move(events));
+  }
+}
+
+void CSSAnimation::UpdatePropertiesWithNew(
+    const NonOwningAnimationTarget& aTarget,
+    const ComputedStyle* aComputedStyle, TimingParams&& aNewTiming,
+    nsTArray<Keyframe>&& aNewKeyframes,
+    const StyleComputedTimingFunction& aNewTimingFunction,
+    CompositeOperation aNewComposite, AnimationTimeline* aNewTimeline,
+    const dom::ScopedTimelineName& aNewTimelineName,
+    dom::AnimationRange&& aNewRange, bool aNewIsStylePaused) {
+  bool animationChanged = false;
+
+  // Update the old from the new so we can keep the original object
+  // identity (and any expando properties attached to it).
+  if (AnimationEffect* effect = GetEffect()) {
+    // Copy across the changes that are not overridden
+    TimingParams updatedTiming = effect->SpecifiedTiming();
+    if (~mOverriddenProperties & CSSAnimationProperties::Duration) {
+      updatedTiming.SetDuration(aNewTiming.Duration());
+    }
+    if (~mOverriddenProperties & CSSAnimationProperties::IterationCount) {
+      updatedTiming.SetIterations(aNewTiming.Iterations());
+    }
+    if (~mOverriddenProperties & CSSAnimationProperties::Direction) {
+      updatedTiming.SetDirection(aNewTiming.Direction());
+    }
+    if (~mOverriddenProperties & CSSAnimationProperties::Delay) {
+      updatedTiming.SetDelay(aNewTiming.Delay());
+    }
+    if (~mOverriddenProperties & CSSAnimationProperties::FillMode) {
+      updatedTiming.SetFill(aNewTiming.Fill());
+    }
+
+    animationChanged = effect->SpecifiedTiming() != updatedTiming;
+    effect->SetSpecifiedTiming(std::move(updatedTiming));
+
+    if (KeyframeEffect* keyframeEffect = effect->AsKeyframeEffect()) {
+      if (~mOverriddenProperties & CSSAnimationProperties::Keyframes) {
+        // FIXME(emilio): Should we update the effect target on top if different
+        // or something?
+        const auto* style = keyframeEffect->GetAnimationTarget() == aTarget
+                                ? aComputedStyle
+                                : nullptr;
+        keyframeEffect->SetKeyframes(std::move(aNewKeyframes), style,
+                                     aNewTimeline, &aNewRange);
+
+        // The default timing function and default composite for CSS Keyframes
+        // processing.
+        if (auto* cssEffect = keyframeEffect->AsCSSAnimationKeyframeEffect()) {
+          cssEffect->SetDefaultTimingFunction(aNewTimingFunction);
+          cssEffect->SetDefaultComposite(aNewComposite);
+        }
+      }
+
+      if (~mOverriddenProperties & CSSAnimationProperties::Composition) {
+        animationChanged = keyframeEffect->Composite() != aNewComposite;
+        keyframeEffect->SetCompositeFromStyle(aNewComposite);
+      }
+    }
+  }
+
+  // Checking pointers should be enough. If both are scroll-timeline, we reuse
+  // the scroll-timeline object if their scrollers and axes are the same.
+  if (GetTimeline() != aNewTimeline) {
+    // See `UpdateNamedTimelineAnimation` as to why `SetTimeline` isn't used.
+    const bool timelineDidChange = SetTimelineNoUpdate(
+        aNewTimeline, aNewTimelineName, Animation::FromJS::No);
+    animationChanged = animationChanged || timelineDidChange;
+  }
+
+  if (GetTimelineRange() != aNewRange) {
+    SetTimelineRange(std::move(aNewRange), Animation::FromJS::No);
+    animationChanged = true;
+  }
+
+  // Handle changes in play state.
+  if (mIsStylePaused != aNewIsStylePaused) {
+    // If the animation is idle, however, changes to animation-play-state should
+    // *not* restart it, e.g. if we call cancel() on this animation, updating
+    // the properties shouldn't make it live again.
+    // https://github.com/w3c/csswg-drafts/issues/13503
+    if (PlayState() != AnimationPlayState::Idle &&
+        ~mOverriddenProperties & CSSAnimationProperties::PlayState) {
+      if (aNewIsStylePaused) {
+        PauseFromStyle();
+      } else {
+        PlayFromStyle();
+      }
+      animationChanged = true;
+    }
+    mIsStylePaused = aNewIsStylePaused;
+  }
+
+  // Updating the effect timing above might already have caused the
+  // animation to become irrelevant so only add a changed record if
+  // the animation is still relevant.
+  if (animationChanged && IsRelevant()) {
+    MutationObservers::NotifyAnimationChanged(this);
   }
 }
 
@@ -342,16 +494,28 @@ void CSSAnimationKeyframeEffect::UpdateTiming(
 void CSSAnimationKeyframeEffect::SetKeyframes(JSContext* aContext,
                                               JS::Handle<JSObject*> aKeyframes,
                                               ErrorResult& aRv) {
-  // SetKeyframes will trigger the keyframe generation (for missing 0% and
-  // 100%), so we set this flag to avoid generating the keyframes if they come
-  // from JS.
-  mIgnoreKeyframesGeneration = true;
-  KeyframeEffect::SetKeyframes(aContext, aKeyframes, aRv);
-
+  nsTArray<Keyframe> keyframes = KeyframeUtils::GetKeyframesFromObject(
+      aContext, mDocument, aKeyframes, "KeyframeEffect.setKeyframes", aRv);
   if (aRv.Failed()) {
-    mIgnoreKeyframesGeneration = false;
     return;
   }
+
+  // SetKeyframes below will trigger the keyframe generation (for missing 0% and
+  // 100%), so we set this flag to avoid generating the keyframes if they come
+  // from JS.
+  // Note that this is different from CSSAnimationProperties::Keyframes below
+  // because we have to avoid generating keyframes even if we don't have
+  // animation, i.e. this is a keyframe-effect-specific flag for keyframes
+  // generation.
+  mIgnoreKeyframesGeneration = true;
+
+  // This is from the JS API, so we use the associated animation's timeline and
+  // range if any.
+  RefPtr<const ComputedStyle> style = GetTargetComputedStyle(Flush::None);
+  KeyframeEffect::SetKeyframes(
+      std::move(keyframes), style,
+      mAnimation ? mAnimation->GetTimeline() : nullptr,
+      mAnimation ? &mAnimation->GetTimelineRange() : nullptr);
 
   if (CSSAnimation* cssAnimation = GetOwningCSSAnimation()) {
     cssAnimation->PropertiesWillSetFromJS(CSSAnimationProperties::Keyframes);
@@ -492,8 +656,8 @@ static Keyframe* GetOrCreateInitialOrFinalComputedKeyframe(
 // https://drafts.csswg.org/web-animations-1/#computed-keyframes
 bool CSSAnimationKeyframeEffect::GetComputedKeyframes(
     nsTArray<Keyframe>& aKeyframes) const {
-  // Check if we do need to do this. If it is overrideen by JS, we should skip
-  // this function and the caller should just use the specified keyframes.
+  // Check if we do need to do this. This flag is set if the keyframes come from
+  // the JS API.
   if (mIgnoreKeyframesGeneration) {
     return false;
   }
@@ -528,6 +692,11 @@ bool CSSAnimationKeyframeEffect::GetComputedKeyframes(
 
     AnimatedPropertyIDSet currentProperties;
     for (const auto& pair : keyframe.mPropertyValues) {
+      MOZ_ASSERT(
+          !pair.mProperty.IsShorthand(),
+          "The shorthands should be expanded already for CSS Animations");
+      MOZ_ASSERT(KeyframeUtils::IsAnimatableProperty(pair.mProperty),
+                 "It should be animatable for CSS Animations");
       currentProperties.AddProperty(pair.mProperty);
     }
     allProperties.AddProperties(currentProperties);

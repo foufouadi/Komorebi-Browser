@@ -6,7 +6,7 @@
 
 // Bug 1948378: remove this exception when the eslint import plugin fully
 // supports exports in package.json files
-// eslint-disable-next-line import/no-unresolved
+// eslint-disable-next-line import-x/no-unresolved
 import { testRule } from "stylelint-test-rule-node";
 import stylelint from "stylelint";
 import useDesignTokens from "../rules/use-design-tokens.mjs";
@@ -71,6 +71,11 @@ testRule({
     {
       code: ".a { outline-color: var(--border-color); }",
       description: "Using border token in outline-color is valid.",
+    },
+    {
+      code: ".a { border-block-start: 1px solid var(--panel-separator-color); }",
+      description:
+        "Using the panel separator token as a border color is valid.",
     },
     // allowed CSS values
     {

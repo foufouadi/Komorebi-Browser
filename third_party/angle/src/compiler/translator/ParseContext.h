@@ -7,6 +7,7 @@
 #define COMPILER_TRANSLATOR_PARSECONTEXT_H_
 
 #include "common/hash_containers.h"
+#include "common/hash_utils.h"
 #include "common/span.h"
 #include "compiler/preprocessor/Preprocessor.h"
 #include "compiler/translator/Compiler.h"
@@ -63,6 +64,65 @@ struct VariableAndLocation
     const TVariable *variable = nullptr;
 };
 
+struct SamplerAccess
+{
+    const TVariable *uniform;
+    // Accessed fields in order.  For example `u.field2[3].field0.field1` will contain `[2, 0, 1]`,
+    TVector<uint32_t> fields;
+
+    bool operator==(const SamplerAccess &other) const
+    {
+        return uniform == other.uniform && fields == other.fields;
+    }
+};
+
+struct SamplerAsFunctionArg
+{
+    SamplerAccess access;
+    const TFunction *callee;
+    uint32_t calleeArgIndex;
+    bool operator==(const SamplerAsFunctionArg &other) const
+    {
+        return access == other.access && callee == other.callee &&
+               calleeArgIndex == other.calleeArgIndex;
+    }
+};
+}  // namespace sh
+
+namespace std
+{
+template <>
+struct hash<sh::SamplerAccess>
+{
+    size_t operator()(const sh::SamplerAccess &s) const
+    {
+        size_t hash = angle::HashMultiple(s.uniform, s.fields.size());
+        for (uint32_t field : s.fields)
+        {
+            angle::HashCombine(hash, field);
+        }
+        return hash;
+    }
+};
+template <>
+struct hash<sh::SamplerAsFunctionArg>
+{
+    size_t operator()(const sh::SamplerAsFunctionArg &s) const
+    {
+        return angle::HashMultiple(s.access, s.callee, s.calleeArgIndex);
+    }
+};
+}  // namespace std
+
+namespace sh
+{
+struct FunctionSamplerAccess
+{
+    TUnorderedSet<SamplerAsFunctionArg> uniformsPassedToCallee;
+    TVector<TUnorderedSet<SamplerAccess>> paramsStaticallyUsedWithTexelFetch;
+    TVector<TUnorderedSet<SamplerAsFunctionArg>> paramsPassedToCallee;
+};
+
 //
 // The following are extra variables needed during parsing, grouped together so
 // they can be passed to the parser without needing a global.
@@ -86,12 +146,15 @@ class TParseContext : angle::NonCopyable
     void *getScanner() const { return mScanner; }
     void setScanner(void *scanner) { mScanner = scanner; }
     int getShaderVersion() const { return mShaderVersion; }
-    void onShaderVersionDeclared(int version);
+    void onShaderVersionDeclared(const TSourceLoc &loc, int version);
+    bool checkShaderVersion(const TSourceLoc &loc);
+    bool checkCanUseShaderType(const TSourceLoc &loc);
     sh::GLenum getShaderType() const { return mShaderType; }
     ShShaderSpec getShaderSpec() const { return mShaderSpec; }
     int numErrors() const { return mDiagnostics->numErrors(); }
     void error(const TSourceLoc &loc, const char *reason, const char *token);
     void error(const TSourceLoc &loc, const char *reason, const ImmutableString &token);
+    void fatal(const TSourceLoc &loc, const char *reason);
     void warning(const TSourceLoc &loc, const char *reason, const char *token);
 
     // If isError is false, a warning will be reported instead.
@@ -213,6 +276,11 @@ class TParseContext : angle::NonCopyable
     bool checkWorkGroupSizeIsNotSpecified(const TSourceLoc &location,
                                           const TLayoutQualifier &layoutQualifier);
     void functionCallRValueLValueErrorCheck(const TFunction *fnCandidate, TIntermAggregate *fnCall);
+    void checkClipCullDistanceWholeArrayUse(const TSourceLoc &location,
+                                            TIntermTyped *node,
+                                            const char *message);
+    void functionCallClipCullDistanceCheck(const TFunction *fnCandidate, TIntermAggregate *fnCall);
+    void functionCallFragDataCheck(const TFunction *fnCandidate, TIntermAggregate *fnCall);
     void checkInvariantVariableQualifier(bool invariant,
                                          const TQualifier qualifier,
                                          const TSourceLoc &invariantLocation);
@@ -505,6 +573,7 @@ class TParseContext : angle::NonCopyable
 
     void checkTextureGather(TIntermAggregate *functionCall);
     void checkTextureOffset(TIntermAggregate *functionCall);
+    void checkTexelFetch(TIntermAggregate *functionCall);
     void checkImageMemoryAccessForBuiltinFunctions(TIntermAggregate *functionCall);
     void checkImageMemoryAccessForUserDefinedFunctions(const TFunction *functionDefinition,
                                                        const TIntermAggregate *functionCall);
@@ -568,6 +637,11 @@ class TParseContext : angle::NonCopyable
         return mTessEvaluationShaderInputPointType;
     }
 
+    const TUnorderedSet<SamplerAccess> &getSamplersStaticallyUsedWithTexelFetch() const
+    {
+        return mSamplersStaticallyUsedWithTexelFetch;
+    }
+
     void markShaderHasPrecise() { mHasAnyPreciseType = true; }
     bool hasAnyPreciseType() const { return mHasAnyPreciseType; }
     AdvancedBlendEquations getAdvancedBlendEquations() const { return mAdvancedBlendEquations; }
@@ -610,6 +684,7 @@ class TParseContext : angle::NonCopyable
                          const TType *type,
                          GeomTessArray sized,
                          TVariable **variable);
+    void addAndCheckOutputVaryings(const TVariable &variable, const TSourceLoc &line);
 
     void checkNestingLevel(const TSourceLoc &line);
     bool checkCase(const TSourceLoc &line, int64_t caseValue, const char *caseOrDefault);
@@ -753,6 +828,9 @@ class TParseContext : angle::NonCopyable
     bool parseTessControlShaderOutputLayoutQualifier(const TTypeQualifier &typeQualifier);
     bool parseTessEvaluationShaderInputLayoutQualifier(const TTypeQualifier &typeQualifier);
 
+    void trackSamplersPassedToFunction(const TFunction *fnCandidate, TIntermAggregate *fnCall);
+    void postParseTrackSamplersPassedToFunction();
+
     bool checkVariableSize(const TSourceLoc &line,
                            const ImmutableString &identifier,
                            const TType *type);
@@ -760,6 +838,8 @@ class TParseContext : angle::NonCopyable
     void checkFragmentOutputLocations(const TSourceLoc &line, const TVariable *variable);
     void checkVariableLocations(const TSourceLoc &line, const TVariable *variable);
     void postParseValidateFragmentOutputLocations();
+
+    void prependPendingStructDeclarations();
 
     void sizeUnsizedArrayTypes(uint32_t arraySize);
 
@@ -890,6 +970,9 @@ class TParseContext : angle::NonCopyable
     // Current count of declared uniform blocks.
     unsigned int mNumUniformBlocks;
 
+    // Current count of declared output varying components.
+    unsigned int mNumOutputVaryingComponents;
+
     // Keeps track of whether any of the built-ins that can be redeclared (see
     // IsRedeclarableBuiltIn()) has been marked as invariant/precise before the possible
     // redeclaration.
@@ -912,6 +995,8 @@ class TParseContext : angle::NonCopyable
     // Keeps track of the total size of shader-private variables, if validating that this size
     // should not exceed a sensible threshold.
     angle::base::CheckedNumeric<size_t> mTotalPrivateVariablesSize;
+    // Tracks if a type has been validated as safe in checkVariableSize.
+    TMap<TType, size_t> mValidatedVariableTypeSizes;
 
     // Track state related to control flow, used for various validation:
     //
@@ -967,6 +1052,16 @@ class TParseContext : angle::NonCopyable
     // Potential errors to generate immediately upon encountering a pixel local storage uniform.
     std::vector<std::tuple<const TSourceLoc, PLSIllegalOperations>> mPLSPotentialErrors;
 
+    // Some transformations might need to create helper functions that reference a function local
+    // struct.  For this reason, local structs are promoted to global scope.  To avoid naming
+    // collisions, global structs are suffixed by |_0| and function-local structs are suffixed by
+    // |_uniqueId|.
+    TVector<TStructure *> mGlobalNamedStructs;
+    TVector<TStructure *> mFunctionLocalNamedStructs;
+    // Nameless structs are also separated and declared globally, unless they are part of a shader
+    // input/output variable declaration.
+    TVector<TStructure *> mNamelessStructs;
+
     // Track the locations used by input and output varyings to detect conflicts.
     LocationValidationMap mInputVaryingLocations;
     LocationValidationMap mOutputVaryingLocations;
@@ -977,6 +1072,7 @@ class TParseContext : angle::NonCopyable
     TVector<VariableAndLocation> mFragmentOutputsYuv;
     bool mFragmentOutputIndex1Used;
     bool mFragmentOutputFragDepthUsed;
+    int mMaxFragDataArrayIndexUsed;
 
     // Track the geometry shader global parameters declared in layout.
     TLayoutPrimitiveType mGeometryShaderInputPrimitiveType;
@@ -1003,6 +1099,27 @@ class TParseContext : angle::NonCopyable
 
     // Track when we add new scope for func body in ESSL 1.00 spec
     bool mFunctionBodyNewScope;
+
+    // Track static usage of samplers with texelFetch.  Such samplers are required to ignore
+    // sRGB SKIP_DECODE, and are gathered in a set, namely S.  When a function F is declared, there
+    // are four possibilities considered:
+    //
+    // 1. Uniform sampler used in texelFetch: "Uniform + selected fields" is added to S.
+    // 2. Uniform sampler (or struct with sampler) is passed to function F: "Uniform + selected
+    //    fields so far + F + F's arg index" is tracked globally.
+    // 3. Function arg used in texelFetch: "Arg index + selected fields" is tracked for this
+    //    function.
+    // 4. Function arg (containing sampler) is passed to another function F2: "Arg index + selected
+    //    fields so far + F2 + F2's arg index" is tracked for this function.
+    //
+    // At the end of parse, the functions are traversed in reverse DAG order, and the uniform->arg
+    // information (#2) is propagated from caller to callee functions (by combining with #3 and #4),
+    // augmenting the global set S (#1) and the callee's tracking (#2).
+    //
+    // Set S is used when collecting reflection info to communicate with the backend which samplers
+    // are statically used with texelFetch.
+    TUnorderedSet<SamplerAccess> mSamplersStaticallyUsedWithTexelFetch;
+    TUnorderedMap<const TFunction *, FunctionSamplerAccess> mFunctionsSamplerAccess;
 
     ShShaderOutput mOutputType;
 

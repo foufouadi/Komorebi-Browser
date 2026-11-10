@@ -1,9 +1,14 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.fenix.tabstray.ui.tabitems
 
 import androidx.compose.material3.Surface
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -11,25 +16,28 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import mozilla.components.compose.base.theme.Theme
+import mozilla.components.compose.draggable.NoOpItemInteractionHandler
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mozilla.fenix.R
 import org.mozilla.fenix.tabstray.TabsTrayTestTag
-import org.mozilla.fenix.tabstray.controller.NoOpTabInteractionHandler
 import org.mozilla.fenix.tabstray.data.TabsTrayItem
 import org.mozilla.fenix.tabstray.data.createTab
 import org.mozilla.fenix.tabstray.redux.state.TabsTrayState
 import org.mozilla.fenix.tabstray.ui.tabpage.TabLayout
 import org.mozilla.fenix.theme.FirefoxTheme
-import org.mozilla.fenix.theme.Theme
 
 @RunWith(AndroidJUnit4::class)
 class TabGroupOnboardingItemTest {
     @get:Rule val composeTestRule = createComposeRule()
 
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
+
+    private val dismissContentDescription
+        get() = context.getString(R.string.tab_group_onboarding_item_dismiss_content_description)
 
     @Test
     fun verifyOnboardingGridItemVisible() {
@@ -45,7 +53,12 @@ class TabGroupOnboardingItemTest {
         }
 
         composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_GRID_ITEM).assertIsDisplayed()
-        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_ILLUSTRATION).assertIsDisplayed()
+        composeTestRule
+            .onNodeWithTag(
+                TabsTrayTestTag.TAB_GROUP_ONBOARDING_ILLUSTRATION,
+                useUnmergedTree = true,
+            )
+            .assertIsDisplayed()
         composeTestRule.onNodeWithText(title).assertIsDisplayed()
         composeTestRule.onNodeWithText(description).assertIsDisplayed()
     }
@@ -64,7 +77,12 @@ class TabGroupOnboardingItemTest {
         }
 
         composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_LIST_ITEM).assertIsDisplayed()
-        composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_ILLUSTRATION).assertIsDisplayed()
+        composeTestRule
+            .onNodeWithTag(
+                TabsTrayTestTag.TAB_GROUP_ONBOARDING_ILLUSTRATION,
+                useUnmergedTree = true,
+            )
+            .assertIsDisplayed()
         composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_ITEM_DISMISS).assertIsDisplayed()
         composeTestRule.onNodeWithText(title).assertIsDisplayed()
         composeTestRule.onNodeWithText(description).assertIsDisplayed()
@@ -104,6 +122,36 @@ class TabGroupOnboardingItemTest {
         composeTestRule.onNodeWithTag(TabsTrayTestTag.TAB_GROUP_ONBOARDING_ITEM_DISMISS).performClick()
 
         assertTrue(dismissed)
+    }
+
+    @Test
+    fun verifyOnboardingGridItemDismissIsLabeled() {
+        composeTestRule.setContent {
+            FirefoxTheme(theme = Theme.Light) {
+                Surface {
+                    TabGroupOnboardingGridItem(onDismiss = {})
+                }
+            }
+        }
+
+        composeTestRule
+            .onNode(hasContentDescription(dismissContentDescription) and hasClickAction())
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun verifyOnboardingListItemDismissIsLabeled() {
+        composeTestRule.setContent {
+            FirefoxTheme(theme = Theme.Light) {
+                Surface {
+                    TabGroupOnboardingListItem(onDismiss = {})
+                }
+            }
+        }
+
+        composeTestRule
+            .onNode(hasContentDescription(dismissContentDescription) and hasClickAction())
+            .assertIsDisplayed()
     }
 
     @Test
@@ -154,7 +202,7 @@ class TabGroupOnboardingItemTest {
                         selectedItemIndex = 0,
                         selectionMode = TabsTrayState.Mode.Normal,
                         focusEnabled = true,
-                        tabInteractionHandler = NoOpTabInteractionHandler,
+                        itemInteractionHandler = NoOpItemInteractionHandler,
                         onTabClose = {},
                         onItemClick = {},
                         onItemLongClick = {},
@@ -162,6 +210,7 @@ class TabGroupOnboardingItemTest {
                         onCloseTabGroupClick = {},
                         onShareTabGroupClick = {},
                         onDeleteTabGroupClick = {},
+                        onUngroupTabGroupClick = {},
                         onTabGroupOnboardingDismiss = {},
                         liveReorderEnabled = false,
                     )

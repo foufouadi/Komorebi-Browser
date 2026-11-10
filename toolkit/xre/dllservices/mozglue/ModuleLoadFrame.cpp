@@ -52,6 +52,13 @@ void ModuleLoadFrame::StaticInit(nt::LoaderObserver* aNewObserver,
         sLoaderAPI->GetHandleLauncherErrorFn();
     aOutWinLauncher->mSharedSection = sLoaderAPI->GetSharedSection();
   }
+
+  // An executable of another version may lay out ModuleLoadInfo differently,
+  // so it must not build ours.  Its services above are still needed.
+  if (!ModuleLoadInfo::IsLayoutCompatible(::GetModuleHandleW(nullptr))) {
+    gFallbackLoaderAPI.SetObserver(aNewObserver);
+    sLoaderAPI = &gFallbackLoaderAPI;
+  }
 }
 
 ModuleLoadFrame::ModuleLoadFrame(PCUNICODE_STRING aRequestedDllName)
@@ -72,7 +79,7 @@ ModuleLoadFrame::ModuleLoadFrame(PCUNICODE_STRING aRequestedDllName)
   } else {
     USHORT charLenExclNul = aRequestedDllName->Length / sizeof(WCHAR);
     USHORT charLenInclNul = charLenExclNul + 1;
-    nameBuf = MakeUnique<WCHAR[]>(charLenInclNul);
+    nameBuf = std::make_unique<WCHAR[]>(charLenInclNul);
     if (!wcsncpy_s(nameBuf.get(), charLenInclNul, aRequestedDllName->Buffer,
                    charLenExclNul)) {
       name = nameBuf.get();

@@ -51,8 +51,7 @@ bool IntermNodePatternMatcher::matchInternal(TIntermBinary *node, TIntermNode *p
 
     if ((mMask & kUnfoldedShortCircuitExpression) != 0)
     {
-        if (node->getRight()->hasSideEffects() &&
-            (node->getOp() == EOpLogicalOr || node->getOp() == EOpLogicalAnd))
+        if (node->isShortCircuitNeeded())
         {
             return true;
         }
@@ -155,15 +154,6 @@ bool IntermNodePatternMatcher::match(TIntermDeclaration *node) const
             {
                 return true;
             }
-        }
-    }
-    if ((mMask & kNamelessStructDeclaration) != 0)
-    {
-        TIntermTyped *declarator = node->getSequence()->front()->getAsTyped();
-        if (declarator->getBasicType() == EbtStruct &&
-            declarator->getType().getStruct()->symbolType() == SymbolType::Empty)
-        {
-            return true;
         }
     }
     return false;

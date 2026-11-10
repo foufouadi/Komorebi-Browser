@@ -43,6 +43,31 @@ export const DESCRIPTION_PARTS_MAP = {
     ];
   },
   connectionFailureDescription(context) {
+    if (context.loopback) {
+      const dataL10nArgs = { port: context.loopback.port };
+      const parts = [
+        {
+          tag: "li",
+          dataL10nId: "neterror-loopback-refused-not-running",
+          dataL10nArgs,
+        },
+        {
+          tag: "li",
+          dataL10nId: "neterror-loopback-refused-wrong-port",
+          dataL10nArgs,
+        },
+      ];
+      // Names such as localhost resolve to both 127.0.0.1 and ::1 and both
+      // are tried before the error is reported, so address hints only
+      // apply to IP literals.
+      if (context.loopback.isIPLiteral) {
+        parts.push({
+          tag: "li",
+          dataL10nId: "neterror-loopback-refused-address",
+        });
+      }
+      return parts;
+    }
     const parts = [
       { tag: "li", dataL10nId: "neterror-load-error-try-again" },
       { tag: "li", dataL10nId: "neterror-load-error-connection" },
@@ -176,38 +201,6 @@ export const NET_ERRORS = [
     hasNoUserFix: false,
   },
   {
-    id: "netReset",
-    errorCode: "NS_ERROR_NET_EMPTY_RESPONSE",
-    category: "net",
-    bodyTitleL10nId: "problem-with-this-site-title",
-    introContent: {
-      dataL10nId: "neterror-http-empty-response-description",
-      dataL10nArgs: { hostname: null },
-    },
-    descriptionParts: DESCRIPTION_PARTS_MAP.connectionFailureDescription,
-    buttons: {
-      showTryAgain: true,
-      showGoBack: false,
-    },
-    customNetError: {
-      titleL10nId: "problem-with-this-site-title",
-      whatCanYouDoItems(context) {
-        const items = [
-          "neterror-load-error-try-again",
-          "neterror-load-error-connection",
-          "neterror-load-error-firewall",
-        ];
-        if (context.showOSXPermissionWarning) {
-          items.push("neterror-load-osx-permission");
-        }
-        return items;
-      },
-      showErrorCode: true,
-    },
-    hasNoUserFix: false,
-    image: NET_ERROR_ILLUSTRATIONS.noConnection,
-  },
-  {
     id: "nssBadCert",
     errorCode: "nssBadCert",
     category: "cert",
@@ -260,6 +253,21 @@ export const NET_ERRORS = [
     customNetError: {
       titleL10nId: "connectionFailure-title",
       whatCanYouDoItems(context) {
+        if (context.loopback) {
+          const args = { port: context.loopback.port };
+          const items = [
+            { id: "neterror-loopback-refused-not-running", args },
+            { id: "neterror-loopback-refused-wrong-port", args },
+          ];
+
+          // Names such as localhost resolve to both 127.0.0.1 and ::1 and both
+          // are tried before the error is reported, so address hints only
+          // apply to IP literals.
+          if (context.loopback.isIPLiteral) {
+            items.push("neterror-loopback-refused-address");
+          }
+          return items;
+        }
         const items = [
           "neterror-load-error-try-again",
           "neterror-load-error-connection",
@@ -290,6 +298,37 @@ export const NET_ERRORS = [
     },
     customNetError: {
       titleL10nId: "netInterrupt-title",
+      whatCanYouDoItems(context) {
+        const items = [
+          "neterror-load-error-try-again",
+          "neterror-load-error-connection",
+          "neterror-load-error-firewall",
+        ];
+        if (context.showOSXPermissionWarning) {
+          items.push("neterror-load-osx-permission");
+        }
+        return items;
+      },
+    },
+    hasNoUserFix: false,
+    image: NET_ERROR_ILLUSTRATIONS.noConnection,
+  },
+  {
+    id: "netReset",
+    errorCode: "netReset",
+    category: "net",
+    bodyTitleL10nId: "netReset-title",
+    introContent: {
+      dataL10nId: "fp-neterror-offline-intro",
+      dataL10nArgs: { hostname: null },
+    },
+    descriptionParts: DESCRIPTION_PARTS_MAP.connectionFailureDescription,
+    buttons: {
+      showTryAgain: true,
+      showGoBack: false,
+    },
+    customNetError: {
+      titleL10nId: "netReset-title",
       whatCanYouDoItems(context) {
         const items = [
           "neterror-load-error-try-again",

@@ -34,6 +34,7 @@ support-files = [
   "ting-48k-2ch.wav",
   "sine-440-10s.opus",
   "webaudio.js",
+  "webaudio_asan_fill.js",
   # See ./generate-test-files.py
   "half-a-second-1ch-44100-aac.aac",
   "half-a-second-1ch-44100-aac.mp4",
@@ -83,6 +84,7 @@ support-files = [
   "sixteen-frames.mp3", # only 16 frames of valid audio
   "8ch-f32le.wav",
   "8ch-s16.wav",
+  "vorbis-6ch-channel-order.webm",
   "../../webrtc/tests/mochitests/mediaStreamPlayback.js",
   "../../webrtc/tests/mochitests/head.js",
   "tiny.flac"
@@ -117,6 +119,16 @@ run-if = [
 
 ["test_bug2038465.html"]
 
+["test_bug2059164.html"]
+support-files = [
+  "bug2059164_1hz_stereo.flac",
+  "webaudio_channel_fill_probe_processor.js",
+]
+scheme = "https"
+run-if = [
+  "asan",
+]
+
 ["test_channelMergerNode.html"]
 
 ["test_channelMergerNodeWithVolume.html"]
@@ -146,10 +158,6 @@ run-if = [
 ["test_convolverNodeNormalization.html"]
 
 ["test_convolverNodeOOM.html"]
-skip-if = [
-  "asan",
-  "tsan", # 1672869
-]
 
 ["test_convolverNodePassThrough.html"]
 
@@ -166,15 +174,13 @@ skip-if = [
 ["test_decodeAudioError.html"]
 
 ["test_decodeMultichannel.html"]
-skip-if = [
-  "isolated_process", # Bug 1709948
-]
+
+["test_decodeMultichannelOrder.html"]
 
 ["test_decodeOpusTail.html"]
 
 ["test_decoderDelay.html"]
 skip-if = [
-  "isolated_process", # Bug 1709948
   "os == 'android'", # Bug 2018243
 ]
 
@@ -255,6 +261,8 @@ run-if = [
 ["test_offlineDestinationChannelCountLess.html"]
 
 ["test_offlineDestinationChannelCountMore.html"]
+
+["test_offlineRendering_promise_release.html"]
 
 ["test_oscillatorNode.html"]
 
@@ -345,5 +353,4 @@ scheme = "https"
 skip-if = [
   "os == 'android'", # Bug 1404995, no loopback devices on some platforms
   "os == 'mac' && os_version == '10.15' && arch == 'x86_64'",
-  "os == 'win'",
 ]

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import eslintPluginImport from "eslint-plugin-import";
+import { importX } from "eslint-plugin-import-x";
 import mozilla from "eslint-plugin-mozilla";
 import sdl from "eslint-plugin-sdl";
 
@@ -27,9 +27,9 @@ export default [
       "devtools/shared/compatibility/**",
       "browser/components/storybook/**",
     ],
-    plugins: { import: eslintPluginImport },
+    plugins: { "import-x": importX },
     rules: {
-      "import/no-unresolved": "off",
+      "import-x/no-unresolved": "off",
     },
   },
   {
@@ -109,7 +109,7 @@ export default [
     // switch, we log these as warnings until they have been transitioned.
     name: "rollout-reject-import-preferences-module",
     files: [
-      "browser/base/content/test/performance/browser_startup.js",
+      "browser/base/content/test/browser-performance/browser_startup.js",
       "browser/components/enterprisepolicies/tests/xpcshell/head.js",
       "browser/components/urlbar/QuickSuggest.sys.mjs",
       "browser/components/urlbar/tests/browser/head-common.js",
@@ -182,7 +182,7 @@ export default [
       "browser/components/migration/SafariProfileMigrator.sys.mjs",
       "browser/components/places/content/places-tree.js",
       "browser/components/places/content/treeView.js",
-      "browser/components/tabbrowser/content/tabbrowser.js",
+      "browser/components/tabbrowser/Tabbrowser.sys.mjs",
       "browser/extensions/webcompat/**",
       "browser/modules/BackgroundTask_*.sys.mjs",
       "browser/themes/BuiltInThemes.sys.mjs",
@@ -247,10 +247,10 @@ export default [
       "browser/components/asrouter/**",
       "browser/components/attribution/AttributionCode.sys.mjs",
       "browser/components/downloads/**",
+      "browser/components/nimbus/**",
       "browser/components/originattributes/test/browser/**",
       "browser/components/preferences/**",
       "browser/components/privatebrowsing/test/browser/**",
-      "browser/components/safebrowsing/content/test/browser_bug415846.js",
       "browser/components/screenshots/**",
       "browser/components/sessionstore/**",
       "browser/components/storybook/.storybook/**",
@@ -304,7 +304,14 @@ export default [
       "toolkit/mozapps/update/**",
       "uriloader/**",
     ],
-    ignores: ["devtools/shared/css/parsing-utils.js", "devtools/startup/**"],
+    ignores: [
+      "browser/components/sessionstore/SessionStore.sys.mjs",
+      "browser/components/tabbrowser/Tabbrowser.sys.mjs",
+      "browser/modules/URILoadingHelper.sys.mjs",
+      "devtools/client/settings/**",
+      "devtools/shared/css/parsing-utils.js",
+      "devtools/startup/**",
+    ],
     rules: {
       "jsdoc/check-param-names": "off",
       "jsdoc/require-returns-type": "off",
@@ -330,6 +337,7 @@ export default [
       "browser/components/firefoxview/**",
       "browser/components/messagepreview/actors/**",
       "browser/components/newtab/**",
+      "browser/components/nimbus/**",
       "browser/components/originattributes/test/browser/**",
       "browser/components/preferences/**",
       "browser/components/privatebrowsing/**",
@@ -339,7 +347,6 @@ export default [
       "browser/components/reportbrokensite/ReportBrokenSite.sys.mjs",
       "browser/components/reportbrokensite/test/browser/head.js",
       "browser/components/resistfingerprinting/test/browser/head.js",
-      "browser/components/safebrowsing/content/test/**",
       "browser/components/screenshots/**",
       "browser/components/sidebar/**",
       "browser/components/shell/**",
@@ -360,7 +367,6 @@ export default [
       "browser/extensions/pictureinpicture/**",
       "browser/extensions/search-detection/extension/background.js",
       "browser/extensions/webcompat/**",
-      "browser/fxr/content/permissions.js",
       "browser/modules/**",
       "browser/themes/BuiltInThemes.sys.mjs",
       "browser/tools/mozscreenshots/mozscreenshots/extension/TestRunner.sys.mjs",
@@ -472,7 +478,14 @@ export default [
       "widget/tests/file*.js",
       "widget/tests/window_composition_text_querycontent.xhtml",
     ],
-    ignores: ["devtools/shared/css/parsing-utils.js", "devtools/startup/**"],
+    ignores: [
+      "browser/components/sessionstore/SessionStore.sys.mjs",
+      "browser/components/tabbrowser/Tabbrowser.sys.mjs",
+      "browser/modules/URILoadingHelper.sys.mjs",
+      "devtools/client/settings/**",
+      "devtools/shared/css/parsing-utils.js",
+      "devtools/startup/**",
+    ],
     rules: mozilla.turnOff(mozilla.configs["flat/require-jsdoc"].rules),
   },
   {
@@ -616,12 +629,12 @@ export default [
       "browser/components/downloads/test/browser/browser_image_mimetype_issues.js",
       "browser/components/enterprisepolicies/tests/browser/browser_policy_cookie_settings.js",
       "browser/components/enterprisepolicies/tests/browser/browser_policy_extensionsettings.js",
+      "browser/components/nimbus/tests/browser/browser_about_studies.js",
       "devtools/server/tests/browser/browser_storage_listings.js",
       "image/test/browser/browser_offscreen_image_in_out_of_process_iframe.js",
       "security/manager/ssl/tests/mochitest/browser/browser_HSTS.js",
       "testing/mochitest/tests/browser/browser_browserLoaded_content_loaded.js",
       "toolkit/components/messaging-system/schemas/TriggerActionSchemas/test/browser/browser_asrouter_trigger_listeners.js",
-      "toolkit/components/normandy/test/browser/browser_about_studies.js",
       "toolkit/components/remotebrowserutils/tests/browser/browser_RemoteWebNavigation.js",
       "toolkit/components/viewsource/test/browser/browser_bug464222.js",
       "toolkit/components/viewsource/test/browser/browser_viewsource_newwindow.js",
@@ -650,16 +663,19 @@ export default [
       // No .(s)js or html test files Bug 1780024
       "services/sync/tests/tps/**",
       // Files that test https and http already
-      "browser/base/content/test/general/browser_remoteTroubleshoot.js",
-      "browser/base/content/test/favicons/browser_mixed_content.js",
-      "browser/base/content/test/sanitize/browser_sanitize-history.js",
+      "browser/base/content/test/browser-general/browser_remoteTroubleshoot.js",
+      "browser/base/content/test/browser-favicons/browser_mixed_content.js",
+      "browser/base/content/test/browser-sanitize/browser_sanitize-history.js",
       "devtools/client/shared/test/shared-head.js",
       "devtools/client/shared/test/head.js",
       // uses new HttpServer which doesn't support https
-      "browser/base/content/test/favicons/browser_favicon_nostore.js",
+      "browser/base/content/test/browser-favicons/browser_favicon_nostore.js",
       // That are all files that produes warnings in the existing test infrastructure.
       // Since our focus is that new tests won't use http without thinking twice we exempt
       // these test files for now. Bug 1758951
+      "browser/base/content/test/browser-safebrowsing/browser_bug400731.js",
+      "browser/base/content/test/browser-safebrowsing/browser_bug415846.js",
+      "browser/base/content/test/browser-safebrowsing/browser_whitelisted.js",
       "browser/components/aboutlogins/tests/browser/browser_createLogin.js",
       "browser/components/aboutlogins/tests/chrome/test_login_item.html",
       "browser/components/contextualidentity/test/browser/browser_broadcastchannel.js",
@@ -781,7 +797,6 @@ export default [
       "browser/components/preferences/tests/etp/browser_contentblocking.js",
       "browser/components/preferences/tests/etp/browser_cookie_exceptions_addRemove.js",
       "browser/components/preferences/tests/etp/browser_cookies_exceptions.js",
-      "browser/components/preferences/tests/home/browser_homepages_use_bookmark.js",
       "browser/components/preferences/tests/networking/browser_https_only_exceptions.js",
       "browser/components/preferences/tests/permissions/browser_permissions_checkPermissionsWereAdded.js",
       "browser/components/preferences/tests/permissions/browser_permissions_dialog.js",
@@ -800,9 +815,6 @@ export default [
       "browser/components/privatebrowsing/test/browser/browser_privatebrowsing_history_shift_click.js",
       "browser/components/protocolhandler/test/test_registerHandler.html",
       "browser/components/resistfingerprinting/test/browser/head.js",
-      "browser/components/safebrowsing/content/test/browser_bug400731.js",
-      "browser/components/safebrowsing/content/test/browser_bug415846.js",
-      "browser/components/safebrowsing/content/test/browser_whitelisted.js",
       "browser/components/sessionstore/test/browser_1284886_suspend_tab.js",
       "browser/components/sessionstore/test/browser_394759_behavior.js",
       "browser/components/sessionstore/test/browser_394759_purge.js",
@@ -1769,7 +1781,6 @@ export default [
       "toolkit/components/formautofill/FormAutofillPreferences.sys.mjs",
       "toolkit/components/formautofill/default/FormAutofillPrompter.sys.mjs",
       "toolkit/components/messaging-system/lib/SpecialMessageActions.sys.mjs",
-      "toolkit/components/normandy/actions/ShowHeartbeatAction.sys.mjs",
       "toolkit/components/passwordmgr/LoginAutoComplete.sys.mjs",
       "toolkit/components/passwordmgr/LoginHelper.sys.mjs",
       "toolkit/components/passwordmgr/LoginManagerParent.sys.mjs",
@@ -1788,7 +1799,6 @@ export default [
       "toolkit/content/widgets/menu.js",
       "toolkit/modules/LightweightThemeConsumer.sys.mjs",
       "toolkit/modules/NewTabUtils.sys.mjs",
-      "toolkit/mozapps/extensions/ColorwayThemeMigration.sys.mjs",
       "toolkit/mozapps/extensions/content/aboutaddons.js",
       "toolkit/mozapps/extensions/internal/AddonTestUtils.sys.mjs",
       "toolkit/mozapps/extensions/internal/XPIDatabase.sys.mjs",

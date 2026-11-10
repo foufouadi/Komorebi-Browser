@@ -6,37 +6,34 @@
 
 use crate::data::ElementData;
 use crate::dom::{TElement, TNode};
-#[cfg(feature = "gecko")]
-use crate::gecko_bindings::structs::ServoElementSnapshotTable;
-use crate::invalidation::element::element_wrapper::ElementWrapper;
+use crate::invalidation::element::element_wrapper::{ElementWrapper, Snapshots};
 use crate::invalidation::element::invalidation_map::{
     AdditionalRelativeSelectorInvalidationMap, Dependency, DependencyInvalidationKind,
     InvalidationMap, NormalDependencyInvalidationKind, RelativeDependencyInvalidationKind,
     ScopeDependencyInvalidationKind, TSStateForInvalidation,
 };
 use crate::invalidation::element::invalidator::{
-    note_scope_dependency_force_at_subject, DescendantInvalidationLists, Invalidation,
-    InvalidationProcessor, InvalidationResult, InvalidationVector, SiblingTraversalMap,
-    TreeStyleInvalidator,
+    DescendantInvalidationLists, Invalidation, InvalidationProcessor, InvalidationResult,
+    InvalidationVector, SiblingTraversalMap, TreeStyleInvalidator,
+    note_scope_dependency_force_at_subject,
 };
 use crate::invalidation::element::restyle_hints::RestyleHint;
 use crate::invalidation::element::state_and_attributes::{
     check_dependency, dependency_may_be_relevant, invalidated_descendants, invalidated_self,
     invalidated_sibling, push_invalidation, should_process_descendants,
 };
-#[cfg(feature = "servo")]
-use crate::selector_parser::SnapshotMap as ServoElementSnapshotTable;
 use crate::stylist::{CascadeData, Stylist};
+use crate::{FxHashMap, FxHashSet};
 use dom::ElementState;
-use rustc_hash::FxHashMap;
+use selectors::OpaqueElement;
+use selectors::kleene_value::KleeneValue;
 use selectors::matching::{
-    early_reject_by_local_name, matches_selector, ElementSelectorFlags, MatchingContext,
-    MatchingForInvalidation, MatchingMode, NeedsSelectorFlags, QuirksMode, SelectorCaches,
-    VisitedHandlingMode,
+    ElementSelectorFlags, MatchingContext, MatchingForInvalidation, MatchingMode,
+    NeedsSelectorFlags, QuirksMode, SelectorCaches, SubjectOrPseudoElement, VisitedHandlingMode,
+    early_reject_by_local_name, matches_compound_selector, matches_selector,
 };
 use selectors::parser::SelectorKey;
-use selectors::OpaqueElement;
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 use std::ops::DerefMut;
 
 /// Kind of DOM mutation this relative selector invalidation is being carried out in.
@@ -84,13 +81,13 @@ impl DomMutationOperation {
 /// Context required to try and optimize away relative dependencies.
 struct OptimizationContext<'a, E: TElement> {
     sibling_traversal_map: &'a SiblingTraversalMap<E>,
-    quirks_mode: QuirksMode,
     operation: DomMutationOperation,
 }
 
 impl<'a, E: TElement> OptimizationContext<'a, E> {
     fn can_be_ignored(
         &self,
+        quirks_mode: QuirksMode,
         is_subtree: bool,
         element: E,
         host: Option<OpaqueElement>,
@@ -124,8 +121,8 @@ impl<'a, E: TElement> OptimizationContext<'a, E> {
         };
         {
             // Run through the affected compund.
-            let mut iter = dependency.selector.iter_from(dependency.selector_offset);
-            while let Some(c) = iter.next() {
+            let iter = dependency.selector.iter_from(dependency.selector_offset);
+            for c in iter {
                 if c.has_indexed_selector_in_subject() {
                     // We do not calculate indices during invalidation as they're wasteful - as a side effect,
                     // such selectors always return true, breaking this optimization. Note that we only check
@@ -173,7 +170,7 @@ impl<'a, E: TElement> OptimizationContext<'a, E> {
             MatchingMode::Normal,
             None,
             &mut caches,
-            self.quirks_mode,
+            quirks_mode,
             NeedsSelectorFlags::No,
             MatchingForInvalidation::Yes,
         );
@@ -182,7 +179,7 @@ impl<'a, E: TElement> OptimizationContext<'a, E> {
             &dependency.selector,
             dependency.selector_offset,
             None,
-            &sibling,
+            sibling,
             &mut matching_context,
         );
         if sibling_matches {
@@ -195,7 +192,7 @@ impl<'a, E: TElement> OptimizationContext<'a, E> {
                 dependency.next.is_some(),
                 "No relative selector outer dependency?"
             );
-            return dependency.next.as_ref().map_or(false, |deps| {
+            return dependency.next.as_ref().is_some_and(|deps| {
                 // ... However, if the standin sibling can be the anchor, we can't skip it, since
                 // that sibling should be invlidated to become the anchor.
                 let next = &deps.as_ref().slice()[0];
@@ -203,7 +200,7 @@ impl<'a, E: TElement> OptimizationContext<'a, E> {
                     &next.selector,
                     next.selector_offset,
                     None,
-                    &sibling,
+                    sibling,
                     &mut matching_context,
                 )
             });
@@ -235,16 +232,16 @@ impl<'a, E: TElement> OptimizationContext<'a, E> {
             &dependency.selector,
             dependency.selector_offset,
             None,
-            &element,
+            element,
             &mut matching_context,
         )
     }
 }
 
 /// Overall invalidator for handling relative selector invalidations.
-pub struct RelativeSelectorInvalidator<'a, 'b, E>
+pub struct RelativeSelectorInvalidator<'a, 'b: 'a, E>
 where
-    E: TElement + 'a,
+    E: TElement,
 {
     /// Element triggering the invalidation.
     pub element: E,
@@ -252,13 +249,11 @@ where
     pub quirks_mode: QuirksMode,
     /// Snapshot containing changes to invalidate against.
     /// Can be None if it's a DOM mutation.
-    pub snapshot_table: Option<&'b ServoElementSnapshotTable>,
+    pub snapshots: Option<&'a Snapshots<'b>>,
     /// Callback to trigger when the subject element is invalidated.
     pub invalidated: fn(E, &InvalidationResult),
     /// The traversal map that should be used to process invalidations.
     pub sibling_traversal_map: SiblingTraversalMap<E>,
-    /// Marker for 'a lifetime.
-    pub _marker: ::std::marker::PhantomData<&'a ()>,
 }
 
 struct RelativeSelectorInvalidation<'a> {
@@ -321,7 +316,7 @@ where
 }
 
 /// Interface for collecting relative selector dependencies.
-pub struct RelativeSelectorDependencyCollector<'a, E>
+pub struct RelativeSelectorDependencyCollector<'a, 's, E>
 where
     E: TElement,
 {
@@ -335,10 +330,20 @@ where
     /// Optional context that will be used to try and skip invalidations
     /// by running selector matches.
     optimization_context: Option<OptimizationContext<'a, E>>,
+    quirks_mode: QuirksMode,
+    /// Snapshots map, if not in the context of DOM mutation.
+    snapshots: Option<&'a Snapshots<'s>>,
 }
 
 type Invalidations<'a> = SmallVec<[RelativeSelectorInvalidation<'a>; 1]>;
 type InnerInvalidations<'a, E> = SmallVec<[(E, RelativeSelectorInvalidation<'a>); 1]>;
+/// Anchors already processed for a given outer dependency, host and invalidation kind.
+type HandledAnchors<E> = FxHashSet<(
+    E,
+    *const Dependency,
+    Option<OpaqueElement>,
+    RelativeDependencyInvalidationKind,
+)>;
 
 struct ToInvalidate<'a, E: TElement + 'a> {
     /// Dependencies to run through normal invalidator.
@@ -432,16 +437,23 @@ fn invalidation_can_collapse(
     }
 }
 
-impl<'a, E> RelativeSelectorDependencyCollector<'a, E>
+impl<'a, 's, E> RelativeSelectorDependencyCollector<'a, 's, E>
 where
     E: TElement,
 {
-    fn new(top: E, optimization_context: Option<OptimizationContext<'a, E>>) -> Self {
+    fn new(
+        top: E,
+        quirks_mode: QuirksMode,
+        optimization_context: Option<OptimizationContext<'a, E>>,
+        snapshots: Option<&'a Snapshots<'s>>,
+    ) -> Self {
         Self {
             dependencies: FxHashMap::default(),
             invalidations: AlreadyInvalidated::default(),
             top,
+            quirks_mode,
             optimization_context,
+            snapshots,
         }
     }
 
@@ -480,6 +492,18 @@ where
         element: E,
         host: Option<OpaqueElement>,
     ) {
+        if let Some(snapshots) = self.snapshots
+            && !Self::compound_may_be_different(
+                self.quirks_mode,
+                dependency,
+                element,
+                host,
+                snapshots,
+            )
+        {
+            // Nothing in the compound changed, we can safely ignore.
+            return;
+        }
         match dependency.invalidation_kind() {
             DependencyInvalidationKind::FullSelector => unreachable!(),
             DependencyInvalidationKind::Normal(..) | DependencyInvalidationKind::Scope(..) => {
@@ -506,13 +530,57 @@ where
                 if early_reject_by_local_name(
                     &dependency.selector,
                     dependency.selector_offset,
-                    &element,
+                    element,
                 ) {
                     return;
                 }
                 self.insert_invalidation(element, dependency, host);
             },
         };
+    }
+
+    /// Check for a quick exit for the invalidation initiating element. Dependencies
+    /// up the chain are checked by the invalidator.
+    fn compound_may_be_different(
+        quirks_mode: QuirksMode,
+        dependency: &'a Dependency,
+        element: E,
+        host: Option<OpaqueElement>,
+        snapshots: &Snapshots<'s>,
+    ) -> bool {
+        debug_assert!(element.has_snapshot());
+        let mut selector_caches = SelectorCaches::default();
+        let mut matching_context = MatchingContext::<'_, E::Impl>::new_for_visited(
+            MatchingMode::Normal,
+            None,
+            &mut selector_caches,
+            VisitedHandlingMode::AllLinksVisitedAndUnvisited,
+            quirks_mode,
+            NeedsSelectorFlags::No,
+            MatchingForInvalidation::YesForComparison,
+        );
+        matching_context.current_host = host;
+        // Pseudos are disallowed in :has, so this should work.
+        let is_rightmost = if dependency.selector_offset == 0 {
+            SubjectOrPseudoElement::Yes
+        } else {
+            SubjectOrPseudoElement::No
+        };
+        let matches_now = matches_compound_selector(
+            &mut dependency.selector.iter_from(dependency.selector_offset),
+            element,
+            &mut matching_context,
+            is_rightmost,
+        );
+
+        let wrapper = ElementWrapper::new(element, snapshots);
+        let matched_then = matches_compound_selector(
+            &mut dependency.selector.iter_from(dependency.selector_offset),
+            wrapper,
+            &mut matching_context,
+            is_rightmost,
+        );
+        matched_then != matches_now || matches_now == KleeneValue::Unknown
     }
 
     /// Get the dependencies in a list format.
@@ -525,16 +593,17 @@ where
                     unreachable!("Inner selector in invalidation?")
                 },
                 DependencyInvalidationKind::Relative(kind) => {
-                    if let Some(context) = self.optimization_context.as_ref() {
-                        if context.can_be_ignored(
+                    if let Some(context) = self.optimization_context.as_ref()
+                        && context.can_be_ignored(
+                            self.quirks_mode,
                             invalidation.element != self.top,
                             invalidation.element,
                             invalidation.host,
                             invalidation.dependency,
                             invalidation.leftmost_collapse_offset,
-                        ) {
-                            continue;
-                        }
+                        )
+                    {
+                        continue;
                     }
                     let dependency = &invalidation.dependency.next.as_ref().unwrap().slice()[0];
                     result.invalidations.push(RelativeSelectorInvalidation {
@@ -569,7 +638,6 @@ where
             };
         }
         for (key, element_dependencies) in self.dependencies {
-            // At least for now, we don't try to optimize away dependencies emitted from nested selectors.
             result.dependencies.push((key, element_dependencies));
         }
         result
@@ -584,51 +652,45 @@ where
         additional_relative_selector_invalidation_map: &'a AdditionalRelativeSelectorInvalidationMap,
         operation: DomMutationOperation,
     ) {
-        element
-            .id()
-            .map(|v| match map.id_to_selector.get(v, quirks_mode) {
-                Some(v) => {
-                    for dependency in v {
-                        if !operation.accept(dependency, element) {
-                            continue;
-                        }
-                        self.add_dependency(dependency, element, scope);
-                    }
-                },
-                None => (),
-            });
-        element.each_class(|v| match map.class_to_selector.get(v, quirks_mode) {
-            Some(v) => {
+        element.id().map(|v| {
+            if let Some(v) = map.id_to_selector.get(v, quirks_mode) {
                 for dependency in v {
                     if !operation.accept(dependency, element) {
                         continue;
                     }
                     self.add_dependency(dependency, element, scope);
                 }
-            },
-            None => (),
+            }
         });
-        element.each_custom_state(|v| match map.custom_state_affecting_selectors.get(v) {
-            Some(v) => {
+        element.each_class(|v| {
+            if let Some(v) = map.class_to_selector.get(v, quirks_mode) {
                 for dependency in v {
                     if !operation.accept(dependency, element) {
                         continue;
                     }
                     self.add_dependency(dependency, element, scope);
                 }
-            },
-            None => (),
+            }
         });
-        element.each_attr_name(|v| match map.other_attribute_affecting_selectors.get(v) {
-            Some(v) => {
+        element.each_custom_state(|v| {
+            if let Some(v) = map.custom_state_affecting_selectors.get(v) {
                 for dependency in v {
                     if !operation.accept(dependency, element) {
                         continue;
                     }
                     self.add_dependency(dependency, element, scope);
                 }
-            },
-            None => (),
+            }
+        });
+        element.each_attr_name(|v| {
+            if let Some(v) = map.other_attribute_affecting_selectors.get(v) {
+                for dependency in v {
+                    if !operation.accept(dependency, element) {
+                        continue;
+                    }
+                    self.add_dependency(dependency, element, scope);
+                }
+            }
         });
         let state = element.state();
         map.state_affecting_selectors.lookup_with_additional(
@@ -746,10 +808,15 @@ where
             Option<OpaqueElement>,
             &'a CascadeData,
             QuirksMode,
-            &mut RelativeSelectorDependencyCollector<'a, E>,
+            &mut RelativeSelectorDependencyCollector<'a, 'b, E>,
         ),
     {
-        let mut collector = RelativeSelectorDependencyCollector::new(self.element, None);
+        let mut collector = RelativeSelectorDependencyCollector::new(
+            self.element,
+            self.quirks_mode,
+            None,
+            self.snapshots,
+        );
         stylist.for_each_cascade_data_with_scope(self.element, |data, scope| {
             let map = data.relative_invalidation_map_attributes();
             if !map.used {
@@ -780,15 +847,16 @@ where
     ) {
         let mut collector = RelativeSelectorDependencyCollector::new(
             self.element,
+            self.quirks_mode,
             if operation.is_side_effect() {
                 None
             } else {
                 Some(OptimizationContext {
                     sibling_traversal_map: &self.sibling_traversal_map,
-                    quirks_mode: self.quirks_mode,
                     operation,
                 })
             },
+            None,
         );
         let mut traverse_subtree = false;
         self.element.apply_selector_flags(inherited_search_path);
@@ -841,26 +909,32 @@ where
 
     /// Carry out complete invalidation triggered by a relative selector invalidation.
     fn invalidate_from_dependencies(&self, to_invalidate: ToInvalidate<'a, E>) {
+        let mut handled = HandledAnchors::default();
         for (element, dependencies) in to_invalidate.dependencies {
             let mut selector_caches = SelectorCaches::default();
             let mut processor = RelativeSelectorInnerInvalidationProcessor::new(
                 self.quirks_mode,
-                self.snapshot_table,
+                self.snapshots,
                 &dependencies,
                 &mut selector_caches,
                 &self.sibling_traversal_map,
             );
             TreeStyleInvalidator::new(element, None, &mut processor).invalidate();
             for (element, invalidation) in processor.take_invalidations() {
-                self.invalidate_upwards(element, &invalidation);
+                self.invalidate_upwards(element, &invalidation, &mut handled);
             }
         }
         for invalidation in to_invalidate.invalidations {
-            self.invalidate_upwards(self.element, &invalidation);
+            self.invalidate_upwards(self.element, &invalidation, &mut handled);
         }
     }
 
-    fn invalidate_upwards(&self, element: E, invalidation: &RelativeSelectorInvalidation<'a>) {
+    fn invalidate_upwards(
+        &self,
+        element: E,
+        invalidation: &RelativeSelectorInvalidation<'a>,
+        handled: &mut HandledAnchors<E>,
+    ) {
         // This contains the main reason for why relative selector invalidation is handled
         // separately - It travels ancestor and/or earlier sibling direction.
         match invalidation.kind {
@@ -872,7 +946,7 @@ where
                     ) {
                         return;
                     }
-                    self.handle_anchor(e, invalidation.dependency, invalidation.host);
+                    self.handle_anchor(e, invalidation, handled);
                 });
             },
             RelativeDependencyInvalidationKind::Ancestors => {
@@ -884,7 +958,10 @@ where
                     ) {
                         return;
                     }
-                    self.handle_anchor(par, invalidation.dependency, invalidation.host);
+                    if !self.handle_anchor(par, invalidation, handled) {
+                        // Everything above has been handled already for this dependency.
+                        return;
+                    }
                     parent = par.parent_element();
                 }
             },
@@ -898,7 +975,7 @@ where
                         ) {
                             return;
                         }
-                        self.handle_anchor(e, invalidation.dependency, invalidation.host);
+                        self.handle_anchor(e, invalidation, handled);
                     });
             },
             RelativeDependencyInvalidationKind::AncestorPrevSibling => {
@@ -917,7 +994,7 @@ where
                         ) {
                             return;
                         }
-                        self.handle_anchor(e, invalidation.dependency, invalidation.host);
+                        self.handle_anchor(e, invalidation, handled);
                     });
                     parent = par.parent_element();
                 }
@@ -931,7 +1008,7 @@ where
                     ) {
                         return;
                     }
-                    self.handle_anchor(sib, invalidation.dependency, invalidation.host);
+                    self.handle_anchor(sib, invalidation, handled);
                     sibling = sib.prev_sibling_element();
                 }
             },
@@ -952,7 +1029,7 @@ where
                         ) {
                             return;
                         }
-                        self.handle_anchor(sib, invalidation.dependency, invalidation.host);
+                        self.handle_anchor(sib, invalidation, handled);
                         sibling = sib.prev_sibling_element();
                     }
                     parent = par.parent_element();
@@ -968,13 +1045,24 @@ where
             .intersects(desired)
     }
 
-    /// Handle a potential relative selector anchor.
+    /// Handle a potential relative selector anchor. Returns false if this anchor was already
+    /// handled for this invalidation.
     fn handle_anchor(
         &self,
         element: E,
-        outer_dependency: &Dependency,
-        host: Option<OpaqueElement>,
-    ) {
+        invalidation: &RelativeSelectorInvalidation<'a>,
+        handled: &mut HandledAnchors<E>,
+    ) -> bool {
+        let outer_dependency = invalidation.dependency;
+        let host = invalidation.host;
+        if !handled.insert((
+            element,
+            std::ptr::from_ref(outer_dependency),
+            host,
+            invalidation.kind,
+        )) {
+            return false;
+        }
         let is_rightmost = Self::is_subject(outer_dependency);
         if (is_rightmost
             && !element.has_selector_flags(ElementSelectorFlags::ANCHORS_RELATIVE_SELECTOR))
@@ -984,7 +1072,7 @@ where
                 ))
         {
             // If it was never a relative selector anchor, don't bother.
-            return;
+            return true;
         }
         let mut selector_caches = SelectorCaches::default();
         let matching_context = MatchingContext::<'_, E::Impl>::new_for_visited(
@@ -998,18 +1086,19 @@ where
         );
         let mut data = match element.mutate_data() {
             Some(data) => data,
-            None => return,
+            None => return true,
         };
         let mut processor = RelativeSelectorOuterInvalidationProcessor {
             element,
             host,
             data: data.deref_mut(),
-            dependency: &*outer_dependency,
+            dependency: outer_dependency,
             matching_context,
             traversal_map: &self.sibling_traversal_map,
         };
         let result = TreeStyleInvalidator::new(element, None, &mut processor).invalidate();
         (self.invalidated)(element, &result);
+        true
     }
 
     /// Does this relative selector dependency have its relative selector in the subject position?
@@ -1029,11 +1118,10 @@ where
             if matches!(
                 outer_dependency.invalidation_kind(),
                 DependencyInvalidationKind::Normal(..)
-            ) {
-                if !Self::is_subject(&x.as_ref().slice()[0]) {
-                    // Not subject in outer selector.
-                    return false;
-                }
+            ) && !Self::is_subject(&x.as_ref().slice()[0])
+            {
+                // Not subject in outer selector.
+                return false;
             }
         }
         outer_dependency
@@ -1126,7 +1214,7 @@ where
                     &d.selector,
                     d.selector_offset,
                     None,
-                    &element,
+                    element,
                     self.matching_context(),
                 ) {
                     continue;
@@ -1134,25 +1222,25 @@ where
 
                 let invalidation_kind = d.invalidation_kind();
 
-                if let DependencyInvalidationKind::Scope(scope_kind) = invalidation_kind {
-                    if d.selector.is_rightmost(d.selector_offset) {
-                        if scope_kind == ScopeDependencyInvalidationKind::ScopeEnd {
-                            let invalidations = note_scope_dependency_force_at_subject(
-                                d,
-                                self.matching_context.current_host.clone(),
-                                self.matching_context.scope_element,
-                                false,
-                            );
-                            descendant_invalidations
-                                .dom_descendants
-                                .extend(invalidations);
+                if let DependencyInvalidationKind::Scope(scope_kind) = invalidation_kind
+                    && d.selector.is_rightmost(d.selector_offset)
+                {
+                    if scope_kind == ScopeDependencyInvalidationKind::ScopeEnd {
+                        let invalidations = note_scope_dependency_force_at_subject(
+                            d,
+                            self.matching_context.current_host,
+                            self.matching_context.scope_element,
+                            false,
+                        );
+                        descendant_invalidations
+                            .dom_descendants
+                            .extend(invalidations);
 
-                            invalidated |= true;
-                        } else if let Some(ref next) = d.next {
-                            dependencies_to_invalidate.extend(next.as_ref().slice());
-                        }
-                        continue;
+                        invalidated |= true;
+                    } else if let Some(ref next) = d.next {
+                        dependencies_to_invalidate.extend(next.as_ref().slice());
                     }
+                    continue;
                 }
 
                 if matches!(
@@ -1169,7 +1257,7 @@ where
                 }
                 debug_assert_ne!(d.selector_offset, 0);
                 debug_assert_ne!(d.selector_offset, d.selector.len());
-                let invalidation = Invalidation::new(&d, self.host, None);
+                let invalidation = Invalidation::new(d, self.host, None);
                 invalidated |= push_invalidation(
                     invalidation,
                     d.invalidation_kind(),
@@ -1188,12 +1276,12 @@ where
 
     fn should_process_descendants(&mut self, element: E) -> bool {
         if element == self.element {
-            return should_process_descendants(&self.data);
+            return should_process_descendants(self.data);
         }
 
         match element.borrow_data() {
             Some(d) => should_process_descendants(&d),
-            None => return false,
+            None => false,
         }
     }
 
@@ -1217,30 +1305,30 @@ where
 }
 
 /// Invalidation for the selector(s) inside a relative selector.
-pub struct RelativeSelectorInnerInvalidationProcessor<'a, 'b, 'c, E>
+pub struct RelativeSelectorInnerInvalidationProcessor<'a, 'b, 's, E>
 where
-    E: TElement + 'a,
+    E: TElement,
 {
     /// Matching context to be used.
     matching_context: MatchingContext<'b, E::Impl>,
     /// Table of snapshots.
-    snapshot_table: Option<&'c ServoElementSnapshotTable>,
+    snapshots: Option<&'b Snapshots<'s>>,
     /// Incoming dependencies to be processed.
-    dependencies: &'c ElementDependencies<'a>,
+    dependencies: &'b ElementDependencies<'a>,
     /// Generated invalidations.
     invalidations: InnerInvalidations<'a, E>,
     /// Traversal map for this invalidation.
     traversal_map: &'b SiblingTraversalMap<E>,
 }
 
-impl<'a, 'b, 'c, E> RelativeSelectorInnerInvalidationProcessor<'a, 'b, 'c, E>
+impl<'a, 'b, 's, E> RelativeSelectorInnerInvalidationProcessor<'a, 'b, 's, E>
 where
-    E: TElement + 'a,
+    E: TElement,
 {
     fn new(
         quirks_mode: QuirksMode,
-        snapshot_table: Option<&'c ServoElementSnapshotTable>,
-        dependencies: &'c ElementDependencies<'a>,
+        snapshots: Option<&'b Snapshots<'s>>,
+        dependencies: &'b ElementDependencies<'a>,
         selector_caches: &'b mut SelectorCaches,
         traversal_map: &'b SiblingTraversalMap<E>,
     ) -> Self {
@@ -1255,7 +1343,7 @@ where
         );
         Self {
             matching_context,
-            snapshot_table,
+            snapshots,
             dependencies,
             invalidations: InnerInvalidations::default(),
             traversal_map,
@@ -1298,7 +1386,7 @@ where
             }
             return;
         }
-        let invalidation = Invalidation::new(&dependency, None, None);
+        let invalidation = Invalidation::new(dependency, None, None);
         match dependency.normal_invalidation_kind() {
             NormalDependencyInvalidationKind::Descendants => {
                 // Descendant invalidations are simplified due to pseudo-elements not being available within the relative selector.
@@ -1319,10 +1407,10 @@ where
     }
 }
 
-impl<'a, 'b, 'c, E> InvalidationProcessor<'a, 'b, E>
-    for RelativeSelectorInnerInvalidationProcessor<'a, 'b, 'c, E>
+impl<'a, 'b, E> InvalidationProcessor<'a, 'b, E>
+    for RelativeSelectorInnerInvalidationProcessor<'a, 'b, '_, E>
 where
-    E: TElement + 'a,
+    E: TElement,
 {
     fn check_outer_dependency(
         &mut self,
@@ -1330,12 +1418,12 @@ where
         element: E,
         _: Option<OpaqueElement>,
     ) -> bool {
-        if let Some(snapshot_table) = self.snapshot_table {
-            let wrapper = ElementWrapper::new(element, snapshot_table);
+        if let Some(snapshots) = self.snapshots {
+            let wrapper = ElementWrapper::new(element, snapshots);
             return check_dependency(
                 dependency,
-                &element,
-                &wrapper,
+                element,
+                wrapper,
                 &mut self.matching_context,
                 None,
             );
@@ -1345,7 +1433,7 @@ where
     }
 
     fn matching_context(&mut self) -> &mut MatchingContext<'b, E::Impl> {
-        return &mut self.matching_context;
+        &mut self.matching_context
     }
 
     fn collect_invalidations(
@@ -1401,6 +1489,6 @@ where
     }
 
     fn sibling_traversal_map(&self) -> &SiblingTraversalMap<E> {
-        &self.traversal_map
+        self.traversal_map
     }
 }

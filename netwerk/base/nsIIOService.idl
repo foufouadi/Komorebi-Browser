@@ -231,6 +231,20 @@ interface nsIIOService : nsISupports
     boolean allowPort(in long aPort, in string aScheme);
 
     /**
+     * Prevents connections to aPort on the local machine, i.e. to loopback,
+     * unspecified, or any of this machine's own addresses. Unlike
+     * network.security.ports.banned, this cannot be overridden and does not
+     * affect remote hosts. Connections that are already established are not
+     * affected. Only available in the parent process.
+     */
+    void addBlockedLocalPort(in long aPort);
+
+    /**
+     * Removes a port previously added with addBlockedLocalPort.
+     */
+    void removeBlockedLocalPort(in long aPort);
+
+    /**
      * Utility to extract the scheme from a URL string, consistently and
      * according to spec (see RFC 2396).
      *
@@ -325,16 +339,6 @@ interface nsIIOService : nsISupports
                                                in nsIPrincipal aTriggeringPrincipal,
                                                in unsigned long aSecurityFlags,
                                                in nsContentPolicyType aContentPolicyType);
-
-    /**
-     * Return true if socket process is launched.
-     */
-    readonly attribute boolean socketProcessLaunched;
-
-    /**
-     * The pid for socket process.
-     */
-    readonly attribute unsigned long long socketProcessId;
 
     /**
      * Register a protocol handler at runtime, given protocol flags and a

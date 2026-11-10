@@ -2,18 +2,18 @@
   "data": [
     {
       "schemaVersion": "1.12.0",
-      "slug": "add-voice-search-icon-to-addressbar",
-      "id": "add-voice-search-icon-to-addressbar",
+      "slug": "add-voice-search-icon-to-addressbar-rollout",
+      "id": "add-voice-search-icon-to-addressbar-rollout",
       "appName": "fenix",
       "appId": "org.mozilla.firefox",
       "channel": "release",
-      "userFacingName": "Add voice search icon to addressbar",
+      "userFacingName": "Add voice search icon to addressbar (Rollout)",
       "userFacingDescription": "Add voice search icon to addressbar",
       "isEnrollmentPaused": false,
-      "isRollout": false,
+      "isRollout": true,
       "bucketConfig": {
         "randomizationUnit": "nimbus_id",
-        "namespace": "fenix-voice-search-in-display-mode-release-1",
+        "namespace": "fenix-voice-search-in-display-mode-release-no_targeting-rollout-1",
         "start": 0,
         "count": 10000,
         "total": 10000
@@ -44,31 +44,14 @@
             {
               "featureId": "voice-search-in-display-mode",
               "value": {
-                "enabled": false
-              }
-            }
-          ]
-        },
-        {
-          "slug": "treatment-a",
-          "ratio": 1,
-          "feature": {
-            "featureId": "this-is-included-for-mobile-pre-96-support",
-            "enabled": false,
-            "value": {}
-          },
-          "features": [
-            {
-              "featureId": "voice-search-in-display-mode",
-              "value": {
                 "enabled": true
               }
             }
           ]
         }
       ],
-      "targeting": "(('add-voice-search-icon-to-addressbar' in active_experiments) || ((app_version|versionCompare('153.!') >= 0)))",
-      "startDate": "2026-07-20",
+      "targeting": "(('add-voice-search-icon-to-addressbar-rollout' in active_experiments) || ((app_version|versionCompare('153.!') >= 0)))",
+      "startDate": "2026-08-13",
       "enrollmentEndDate": null,
       "endDate": null,
       "proposedDuration": 14,
@@ -77,7 +60,7 @@
       "featureValidationOptOut": false,
       "localizations": null,
       "locales": null,
-      "publishedDate": "2026-07-20T16:39:40.476755Z",
+      "publishedDate": "2026-08-13T22:48:24.908053Z",
       "isFirefoxLabsOptIn": false,
       "firefoxLabsTitle": "",
       "firefoxLabsDescription": "",
@@ -287,24 +270,25 @@
     },
     {
       "schemaVersion": "1.12.0",
-      "slug": "casual-game-release",
-      "id": "casual-game-release",
+      "slug": "homescreen-default-content-android-new-users-v2",
+      "id": "homescreen-default-content-android-new-users-v2",
       "appName": "fenix",
       "appId": "org.mozilla.firefox",
       "channel": "release",
-      "userFacingName": "Casual Game RELEASE",
-      "userFacingDescription": "Casual game for early user journey engagement and fun",
+      "userFacingName": "Homescreen Default Content Android - New Users V2",
+      "userFacingDescription": "Homescreen Default Content Android",
       "isEnrollmentPaused": true,
       "isRollout": false,
       "bucketConfig": {
         "randomizationUnit": "nimbus_id",
-        "namespace": "fenix-longfox-release-1",
+        "namespace": "fenix-homepage-opening-screen-default-homescreen-release-1",
         "start": 0,
         "count": 10000,
         "total": 10000
       },
       "featureIds": [
-        "longfox"
+        "homepage-opening-screen-default",
+        "homescreen"
       ],
       "outcomes": [
         {
@@ -312,11 +296,11 @@
           "priority": "primary"
         },
         {
-          "slug": "sponsored_tiles",
+          "slug": "pocket",
           "priority": "secondary"
         },
         {
-          "slug": "pocket",
+          "slug": "sponsored_tiles",
           "priority": "secondary"
         }
       ],
@@ -331,9 +315,22 @@
           },
           "features": [
             {
-              "featureId": "longfox",
+              "featureId": "homepage-opening-screen-default",
               "value": {
-                "enabled": false
+                "default-option": "last-tab"
+              }
+            },
+            {
+              "featureId": "homescreen",
+              "value": {
+                "sections-enabled": {
+                  "top-sites": true,
+                  "jump-back-in": true,
+                  "pocket": true,
+                  "synced-tabs": true,
+                  "pocket-sponsored-stories": true,
+                  "collections": false
+                }
               }
             }
           ]
@@ -348,25 +345,38 @@
           },
           "features": [
             {
-              "featureId": "longfox",
+              "featureId": "homepage-opening-screen-default",
               "value": {
-                "enabled": true
+                "default-option": "last-tab"
+              }
+            },
+            {
+              "featureId": "homescreen",
+              "value": {
+                "sections-enabled": {
+                  "top-sites": true,
+                  "jump-back-in": false,
+                  "pocket": true,
+                  "synced-tabs": true,
+                  "pocket-sponsored-stories": true,
+                  "collections": false
+                }
               }
             }
           ]
         }
       ],
-      "targeting": "(('casual-game-release' in active_experiments) || ((days_since_install < 7) && (app_version|versionCompare('153.!') >= 0)))",
-      "startDate": "2026-07-06",
-      "enrollmentEndDate": "2026-08-05",
+      "targeting": "(('homescreen-default-content-android-new-users-v2' in active_experiments) || ((isFirstRun == 'true') && (app_version|versionCompare('158.!') >= 0)))",
+      "startDate": "2026-10-08",
+      "enrollmentEndDate": "2026-10-26",
       "endDate": null,
-      "proposedDuration": 28,
-      "proposedEnrollment": 7,
+      "proposedDuration": 21,
+      "proposedEnrollment": 15,
       "referenceBranch": "control",
       "featureValidationOptOut": false,
       "localizations": null,
       "locales": null,
-      "publishedDate": "2026-07-06T20:33:15.625250Z",
+      "publishedDate": "2026-10-08T16:00:32.632179Z",
       "isFirefoxLabsOptIn": false,
       "firefoxLabsTitle": "",
       "firefoxLabsDescription": "",
@@ -444,104 +454,6 @@
       "firefoxLabsDescription": null,
       "firefoxLabsDescriptionLinks": null,
       "firefoxLabsGroup": null,
-      "requiresRestart": false
-    },
-    {
-      "schemaVersion": "1.12.0",
-      "slug": "tab-groups-android-experiment-new-users",
-      "id": "tab-groups-android-experiment-new-users",
-      "appName": "fenix",
-      "appId": "org.mozilla.firefox",
-      "channel": "release",
-      "userFacingName": "Tab Groups - Android - Experiment (new users)",
-      "userFacingDescription": "Tab Groups for Android",
-      "isEnrollmentPaused": false,
-      "isRollout": false,
-      "bucketConfig": {
-        "randomizationUnit": "nimbus_id",
-        "namespace": "fenix-tab-groups-tab-groups-drag-and-drop-release-2",
-        "start": 0,
-        "count": 10000,
-        "total": 10000
-      },
-      "featureIds": [
-        "tab-groups",
-        "tab-groups-drag-and-drop"
-      ],
-      "outcomes": [
-        {
-          "slug": "awesomebar",
-          "priority": "primary"
-        },
-        {
-          "slug": "default-browser",
-          "priority": "primary"
-        }
-      ],
-      "branches": [
-        {
-          "slug": "control",
-          "ratio": 1,
-          "feature": {
-            "featureId": "this-is-included-for-mobile-pre-96-support",
-            "enabled": false,
-            "value": {}
-          },
-          "features": [
-            {
-              "featureId": "tab-groups",
-              "value": {
-                "enabled": false
-              }
-            },
-            {
-              "featureId": "tab-groups-drag-and-drop",
-              "value": {
-                "enabled": false
-              }
-            }
-          ]
-        },
-        {
-          "slug": "treatment-a",
-          "ratio": 1,
-          "feature": {
-            "featureId": "this-is-included-for-mobile-pre-96-support",
-            "enabled": false,
-            "value": {}
-          },
-          "features": [
-            {
-              "featureId": "tab-groups",
-              "value": {
-                "enabled": true
-              }
-            },
-            {
-              "featureId": "tab-groups-drag-and-drop",
-              "value": {
-                "enabled": true
-              }
-            }
-          ]
-        }
-      ],
-      "targeting": "((is_already_enrolled) || ((isFirstRun == 'true') && (app_version|versionCompare('152.!') >= 0)))",
-      "startDate": "2026-05-20",
-      "enrollmentEndDate": null,
-      "endDate": null,
-      "proposedDuration": 28,
-      "proposedEnrollment": 14,
-      "referenceBranch": "control",
-      "featureValidationOptOut": false,
-      "localizations": null,
-      "locales": null,
-      "publishedDate": "2026-05-20T14:51:32.328638Z",
-      "isFirefoxLabsOptIn": false,
-      "firefoxLabsTitle": "",
-      "firefoxLabsDescription": "",
-      "firefoxLabsDescriptionLinks": null,
-      "firefoxLabsGroup": "",
       "requiresRestart": false
     },
     {

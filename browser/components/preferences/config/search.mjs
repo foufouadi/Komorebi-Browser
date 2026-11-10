@@ -36,13 +36,18 @@ Preferences.addAll([
   { id: "browser.urlbar.showSearchSuggestionsFirst", type: "bool" },
   { id: "browser.urlbar.showSearchTerms.enabled", type: "bool" },
   { id: "browser.urlbar.showSearchTerms.featureGate", type: "bool" },
-  { id: "browser.search.separatePrivateDefault", type: "bool" },
-  { id: "browser.search.separatePrivateDefault.ui.enabled", type: "bool" },
+  { id: "browser.search.separatePrivateDefault.enabled", type: "bool" },
+  { id: "browser.search.separatePrivateDefault.featureGate", type: "bool" },
   { id: "browser.urlbar.suggest.trending", type: "bool" },
   { id: "browser.urlbar.trending.featureGate", type: "bool" },
   { id: "browser.urlbar.recentsearches.featureGate", type: "bool" },
   { id: "browser.urlbar.suggest.recentsearches", type: "bool" },
   { id: "browser.urlbar.scotchBonnet.enableOverride", type: "bool" },
+  {
+    id: "browser.urlbar.resultMenu.keyboardAccessible",
+    type: "bool",
+    inverted: true,
+  },
 
   // Suggest Section.
   { id: "browser.urlbar.suggest.bookmark", type: "bool" },
@@ -58,6 +63,8 @@ Preferences.addAll([
   { id: "browser.urlbar.quicksuggest.enabled", type: "bool" },
   { id: "browser.urlbar.suggest.quicksuggest.all", type: "bool" },
   { id: "browser.urlbar.suggest.quicksuggest.sponsored", type: "bool" },
+  { id: "browser.urlbar.temporal.featureGate", type: "bool" },
+  { id: "browser.urlbar.suggest.temporal.seasonal", type: "bool" },
   { id: "browser.urlbar.quicksuggest.online.enabled", type: "bool" },
 ]);
 
@@ -190,6 +197,11 @@ Preferences.addSetting({
 });
 
 Preferences.addSetting({
+  id: "skipResultMenuOnTab",
+  pref: "browser.urlbar.resultMenu.keyboardAccessible",
+});
+
+Preferences.addSetting({
   id: "searchShowSearchTermCheckbox",
   pref: "browser.urlbar.showSearchTerms.enabled",
   deps: ["scotchBonnetEnabled", "showSearchTermsFeatureGate"],
@@ -217,12 +229,12 @@ Preferences.addSetting({
 
 Preferences.addSetting({
   id: "separatePrivateDefaultUI",
-  pref: "browser.search.separatePrivateDefault.ui.enabled",
+  pref: "browser.search.separatePrivateDefault.featureGate",
 });
 
 Preferences.addSetting({
   id: "browserSeparateDefaultEngine",
-  pref: "browser.search.separatePrivateDefault",
+  pref: "browser.search.separatePrivateDefault.enabled",
   deps: ["separatePrivateDefaultUI"],
   visible: ({ separatePrivateDefaultUI }) => {
     return separatePrivateDefaultUI.value;
@@ -566,6 +578,28 @@ Preferences.addSetting({
     "nimbusListener",
   ],
   visible: determineSuggestionSettingsVisibility,
+  disabled: deps => {
+    return !deps.firefoxSuggestAll.value;
+  },
+});
+
+Preferences.addSetting({
+  id: "temporalFeatureGate",
+  pref: "browser.urlbar.temporal.featureGate",
+});
+
+Preferences.addSetting({
+  id: "temporalSeasonalSuggestions",
+  pref: "browser.urlbar.suggest.temporal.seasonal",
+  deps: [
+    "firefoxSuggestAll",
+    "temporalFeatureGate",
+    "quickSuggestEnabledPref",
+    "quickSuggestSettingsUiPref",
+    "nimbusListener",
+  ],
+  visible: deps =>
+    deps.temporalFeatureGate.value && determineSuggestionSettingsVisibility(),
   disabled: deps => {
     return !deps.firefoxSuggestAll.value;
   },
@@ -1116,7 +1150,6 @@ SettingGroupManager.registerGroups({
     ],
   },
   searchShortcuts: {
-    inProgress: true,
     l10nId: "search-one-click-header-3",
     headingLevel: 2,
     items: [
@@ -1140,10 +1173,22 @@ SettingGroupManager.registerGroups({
       },
       {
         id: "engineList",
+        l10nId: "search-engine-list",
         control: "moz-box-group",
         controlAttrs: {
           type: "reorderable-list",
         },
+      },
+    ],
+  },
+  addressBarNavigation: {
+    l10nId: "addressbar-navigation-group",
+    subcategory: "addressBarNavigation",
+    headingLevel: 2,
+    items: [
+      {
+        id: "skipResultMenuOnTab",
+        l10nId: "addressbar-skip-result-menu-on-tab",
       },
     ],
   },
@@ -1193,9 +1238,7 @@ SettingGroupManager.registerGroups({
         l10nId: "addressbar-header-1",
         supportPage: "firefox-suggest",
         control: "moz-fieldset",
-        controlAttrs: {
-          headinglevel: 2,
-        },
+        headingLevel: 2,
         items: [
           {
             id: "historySuggestion",
@@ -1244,15 +1287,17 @@ SettingGroupManager.registerGroups({
                 supportPage: "firefox-suggest",
                 subcategory: "w_what-is-firefox-suggest",
               },
+              {
+                id: "temporalSeasonalSuggestions",
+                l10nId: "addressbar-locbar-suggest-temporal-seasonal-option",
+              },
             ],
           },
           {
             id: "dismissedSuggestionsDescription",
             l10nId: "addressbar-dismissed-suggestions-label-2",
             control: "moz-fieldset",
-            controlAttrs: {
-              headinglevel: 3,
-            },
+            headingLevel: 3,
             items: [
               {
                 id: "restoreDismissedSuggestions",

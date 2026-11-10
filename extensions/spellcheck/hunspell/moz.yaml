@@ -10,15 +10,27 @@ origin:
 
   url: http://hunspell.github.io
 
-  release: c5f98152a274e25b5107101104bef632b83a0cc9 (2026-05-05T07:19:07Z).
-  revision: c5f98152a274e25b5107101104bef632b83a0cc9
+  release: v1.7.6 (2026-10-26T16:29:20Z).
+  revision: v1.7.6
   license: MPL-1.1
   license-file: COPYING.MPL
+
+updatebot:
+  maintainer-phab: smaug
+  maintainer-bz: smaug@mozilla.com
+  fuzzy-query: "'mochitest-plain | 'mochitest-chrome-1proc | 'xpcshell !android !gpu !swr !http !xorig !headless !standalone !no-nv !msix !nofis"
+  fuzzy-paths:
+    - extensions/spellcheck
+    - editor/spellchecker
+  tasks:
+    - type: vendoring
+      enabled: true
+      frequency: every
 
 vendoring:
   url: https://github.com/hunspell/hunspell
   source-hosting: github
-  tracking: commit
+  tracking: tag
 
   exclude:
     - "**"
@@ -35,13 +47,6 @@ vendoring:
 
   include:
     - src/hunspell
-
-  patches:
-    - patches/bug1410214.patch
-    - patches/bug1653659.patch
-    - patches/bug1739761.patch
-    - patches/bug2037089-build-fixes.patch
-    - patches/bug2037089-hentry-pack.patch
 
   update-actions:
     - action: move-dir
@@ -61,6 +66,8 @@ vendoring:
       path: "src/filemgr.cxx"
     - action: delete-path
       path: "src/hunvisapi.h.in"
+    - action: delete-path
+      path: "src/hunversion.h.in"
     - action: delete-path
       path: "src/hunzip.cxx"
     - action: delete-path

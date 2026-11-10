@@ -20,7 +20,7 @@
           "text=name,popupid",
         ".popup-notification-description > span:nth-of-type(2)":
           "text=endlabel,popupid",
-        ".popup-notification-description > b:last-of-type":
+        ".popup-notification-description > .popup-notification-description-second-name":
           "text=secondname,popupid",
         ".popup-notification-description > span:last-of-type":
           "text=secondendlabel,popupid",
@@ -86,7 +86,7 @@
           <!-- These need to be on the same line to avoid creating
               whitespace between them (whitespace is added in the
               localization file, if necessary). -->
-          <description class="popup-notification-description"><html:span></html:span><html:b class="popup-notification-description-name"></html:b><html:span></html:span><html:b></html:b><html:span></html:span></description>
+          <description class="popup-notification-description"><html:span></html:span><html:b class="popup-notification-description-name"></html:b><html:span></html:span><html:b class="popup-notification-description-second-name"></html:b><html:span></html:span></description>
           <description class="popup-notification-hint-text"></description>
           <vbox class="popup-notification-bottom-content" align="start">
             <label class="popup-notification-learnmore-link" is="text-link" data-l10n-id="popup-notification-learn-more"></label>
@@ -147,6 +147,7 @@
       this.menupopup = this.querySelector(
         ".popup-notification-more-actions-popup"
       );
+      this.buttonGroup = this.querySelector(".panel-footer");
 
       let popupnotificationfooter = this.querySelector(
         "popupnotificationfooter"
@@ -216,6 +217,9 @@
           );
         }
       });
+      this.buttonGroup.addEventListener("keydown", event =>
+        this.onButtonGroupKeydown(event)
+      );
       this.checkbox.addEventListener("command", event => {
         PopupNotifications._onCheckboxCommand(event);
       });
@@ -236,6 +240,57 @@
 
     appendNotificationContent(el) {
       this.querySelector(".popup-notification-bottom-content").before(el);
+    }
+
+    get footerFocusableButtons() {
+      let buttons = [];
+      for (let child of this.buttonGroup.children) {
+        if (
+          child.localName !== "moz-button" ||
+          child.hidden ||
+          child.disabled ||
+          !child.buttonEl
+        ) {
+          continue;
+        }
+        buttons.push(child.buttonEl);
+        if (child.isSplitButton) {
+          buttons.push(child.chevronButtonEl);
+        }
+      }
+      return buttons;
+    }
+
+    onButtonGroupKeydown(event) {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+        return;
+      }
+
+      let isRTL = this.matches(":dir(rtl)");
+      let forwardKey = isRTL ? "ArrowLeft" : "ArrowRight";
+      let backwardKey = isRTL ? "ArrowRight" : "ArrowLeft";
+      if (event.key !== forwardKey && event.key !== backwardKey) {
+        return;
+      }
+
+      let buttons = this.footerFocusableButtons;
+      let currentIndex = buttons.findIndex(
+        button => button.getRootNode().activeElement === button
+      );
+      if (currentIndex === -1) {
+        return;
+      }
+
+      let lastIndex = buttons.length - 1;
+      let nextIndex;
+      if (event.key === forwardKey) {
+        nextIndex = currentIndex === lastIndex ? 0 : currentIndex + 1;
+      } else {
+        nextIndex = currentIndex === 0 ? lastIndex : currentIndex - 1;
+      }
+
+      event.preventDefault();
+      buttons[nextIndex].focus();
     }
   }
 

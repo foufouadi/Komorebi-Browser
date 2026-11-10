@@ -5,14 +5,14 @@
 import { html, when } from "chrome://global/content/vendor/lit.all.mjs";
 import { MozLitElement } from "chrome://global/content/lit-utils.mjs";
 
-// eslint-disable-next-line import/no-unassigned-import
+// eslint-disable-next-line import-x/no-unassigned-import
 import "chrome://global/content/elements/moz-input-url.mjs";
-// eslint-disable-next-line import/no-unassigned-import
+// eslint-disable-next-line import-x/no-unassigned-import
 import "chrome://global/content/elements/moz-input-text.mjs";
-// eslint-disable-next-line import/no-unassigned-import
+// eslint-disable-next-line import-x/no-unassigned-import
 import "chrome://global/content/elements/moz-input-password.mjs";
 
-/* eslint-disable-next-line import/no-unassigned-import, mozilla/no-browser-refs-in-toolkit */
+/* eslint-disable-next-line import-x/no-unassigned-import, mozilla/no-browser-refs-in-toolkit */
 import "chrome://browser/content/aboutlogins/components/login-message-popup.mjs";
 
 export class LoginForm extends MozLitElement {
@@ -26,6 +26,7 @@ export class LoginForm extends MozLitElement {
     usernameValue: { type: String },
     passwordValue: { type: String },
     passwordVisible: { type: Boolean },
+    perDeviceSyncEnabled: { type: Boolean },
     _showDeleteCard: { type: Boolean, state: true },
     _originInvalid: { type: Boolean, state: true },
     _passwordInvalid: { type: Boolean, state: true },
@@ -45,6 +46,7 @@ export class LoginForm extends MozLitElement {
     this.originValue = "";
     this.usernameValue = "";
     this.passwordValue = "";
+    this.perDeviceSyncEnabled = false;
     this._showDeleteCard = false;
     this._originInvalid = false;
     this._passwordInvalid = false;
@@ -65,6 +67,9 @@ export class LoginForm extends MozLitElement {
   }
 
   #revealPassword() {
+    if (!Services.policies.isAllowed("passwordReveal")) {
+      return;
+    }
     this.passwordField.inputEl.type = "text";
   }
 
@@ -72,11 +77,35 @@ export class LoginForm extends MozLitElement {
     this.passwordField.inputEl.type = "password";
   }
 
-  #addHTTPSPrefix() {
-    const originValue = this.originField.value.trim();
-    if (originValue && !originValue.match(/:\/\//)) {
-      this.originField.value = "https://" + originValue;
+  #normalizeOrigin() {
+    const field = this.originField;
+    if (!field) {
+      return "";
     }
+
+    const input = field.inputEl;
+    const originValue = (input?.value ?? field.value).trim();
+    const normalized =
+      originValue && !originValue.match(/:\/\//)
+        ? `https://${originValue}`
+        : originValue;
+
+    if (field.value !== normalized) {
+      field.value = normalized;
+    }
+
+    if (input) {
+      if (input.value !== normalized) {
+        input.value = normalized;
+      }
+      this._originInvalid = !input.checkValidity();
+      if (!this._originInvalid) {
+        this.#removeWarning(this.originWarning);
+        input.removeAttribute("aria-describedby");
+      }
+    }
+
+    return normalized;
   }
 
   #renderReadonlyOrigin() {
@@ -214,12 +243,14 @@ export class LoginForm extends MozLitElement {
   onSubmit(e) {
     e.preventDefault();
 
+    const origin = this.originValue || this.#normalizeOrigin();
+
     if (!this.#isFormValid()) {
       return;
     }
 
     const loginFromForm = {
-      origin: this.originValue || this.originField?.value,
+      origin,
       username: this.usernameField.value.trim(),
       password: this.passwordField.value,
     };
@@ -278,7 +309,9 @@ export class LoginForm extends MozLitElement {
         </div>
         <div class="remove-card-text">
           <h3
-            data-l10n-id="contextual-manager-passwords-remove-login-card-title"
+            data-l10n-id=${this.perDeviceSyncEnabled
+              ? "contextual-manager-passwords-delete-login-card-title"
+              : "contextual-manager-passwords-remove-login-card-title"}
           ></h3>
           <p
             data-l10n-id="contextual-manager-passwords-remove-login-card-message"
@@ -292,7 +325,9 @@ export class LoginForm extends MozLitElement {
           </moz-button>
           <moz-button
             type="destructive"
-            data-l10n-id="contextual-manager-passwords-remove-login-card-remove-button"
+            data-l10n-id=${this.perDeviceSyncEnabled
+              ? "contextual-manager-passwords-delete-login-card-delete-button"
+              : "contextual-manager-passwords-remove-login-card-remove-button"}
             @click=${this.onDeleteClick}
           >
           </moz-button>
@@ -321,7 +356,9 @@ export class LoginForm extends MozLitElement {
             <div class="delete-login-button-container">
               <moz-button
                 class="delete-login-button"
-                data-l10n-id="contextual-manager-passwords-remove-label"
+                data-l10n-id=${this.perDeviceSyncEnabled
+                  ? "contextual-manager-passwords-delete-label"
+                  : "contextual-manager-passwords-remove-label"}
                 type="icon"
                 iconSrc="chrome://global/skin/icons/delete.svg"
                 @click=${this.#toggleDeleteCard}
@@ -346,7 +383,7 @@ export class LoginForm extends MozLitElement {
                       data-l10n-id="contextual-manager-passwords-origin-field"
                       .value=${this.originValue}
                       @input=${e => this.onInput(e)}
-                      @change=${() => this.#addHTTPSPrefix()}
+                      @change=${() => this.#normalizeOrigin()}
                     ></moz-input-url>
                     <p
                       id="origin-description"

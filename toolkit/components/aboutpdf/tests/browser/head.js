@@ -3,12 +3,49 @@
 
 "use strict";
 
-async function openAboutPDF() {
-  return BrowserTestUtils.openNewForegroundTab({
+async function openAboutPDF(hash = "") {
+  const tab = await BrowserTestUtils.openNewForegroundTab({
     gBrowser,
-    opening: "about:pdf",
+    opening: "about:pdf" + hash,
     waitForLoad: true,
   });
+  // The load event can fire before painting is unsuppressed, making synthesized
+  // clicks miss their target.
+  await BrowserTestUtils.waitForPaintingUnsuppressed(
+    tab.linkedBrowser.browsingContext
+  );
+  return tab;
+}
+
+// Wait for a layout box before synthesizing the click.
+async function clickInAboutPDF(tab, selector) {
+  await SpecialPowers.spawn(tab.linkedBrowser, [selector], async sel => {
+    const element = content.document.querySelector(sel);
+    await ContentTaskUtils.waitForCondition(
+      () => element.checkVisibility(),
+      `${sel} has a layout box`
+    );
+  });
+  await BrowserTestUtils.synthesizeMouseAtCenter(
+    selector,
+    {},
+    tab.linkedBrowser
+  );
+}
+
+// Arm before opening the picker.
+function promisePickerShown() {
+  const { MockFilePicker } = SpecialPowers;
+  return new Promise(resolve => {
+    MockFilePicker.showCallback = () => {
+      MockFilePicker.showCallback = null;
+      resolve();
+    };
+  });
+}
+
+function resetPdfNotificationPrefs() {
+  Services.prefs.clearUserPref("pdfjs.featuresNotificationImpressionCount");
 }
 
 function getAboutPDFActor(tab) {

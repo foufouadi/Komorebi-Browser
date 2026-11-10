@@ -28,14 +28,15 @@
  * of text contents that strictly matches the exact index order and length of
  * the requested `url_list` arguments.
  *
- * @param {Array<object>} messages - The cloned conversation history array.
- * @returns {Array<object>} The array with compacted get_page_content payloads.
+ * @param {Array<object>} messages - The caller-owned history array, compacted in place.
+ * @returns {Array<object>} The same array, with compacted get_page_content payloads.
  */
 function deduplicatePageContent(messages) {
   const callIdToUrls = new Map();
   const urlToLatestCallId = new Map();
+  const pageContents = new Map();
 
-  // PASS 1: Build the relational map from the Assistant's requests
+  // PASS 1: Match the Assistant's requests to completed page-content responses.
   for (const msg of messages) {
     if (msg.role === "assistant" && Array.isArray(msg.tool_calls)) {
       for (const toolCall of msg.tool_calls) {
@@ -49,11 +50,6 @@ function deduplicatePageContent(messages) {
             if (Array.isArray(args.url_list)) {
               // Map the Call ID to the ordered array of URLs it requested
               callIdToUrls.set(toolCall.id, args.url_list);
-
-              // Continually overwrite to guarantee we only store the LATEST ID for each URL
-              for (const url of args.url_list) {
-                urlToLatestCallId.set(url, toolCall.id);
-              }
             }
           } catch (error) {
             console.warn(
@@ -63,12 +59,7 @@ function deduplicatePageContent(messages) {
           }
         }
       }
-    }
-  }
-
-  // PASS 2: Execute the replacement on the Tool responses
-  for (const msg of messages) {
-    if (
+    } else if (
       msg.role === "tool" &&
       msg.name === "get_page_content" &&
       msg.tool_call_id
@@ -80,22 +71,17 @@ function deduplicatePageContent(messages) {
           // The get_page_content tool returns a JSON stringified array of text blocks
           const contentArray = JSON.parse(msg.content);
 
-          if (Array.isArray(contentArray)) {
-            const compactedContentArray = contentArray.map(
-              (textContent, index) => {
-                // Relies on the assumption that contentArray[index] maps perfectly to requestedUrls[index]
-                const url = requestedUrls[index];
-
-                // If we tracked this URL, and this tool_call_id is NOT the newest one, drop the heavy text
-                if (url && urlToLatestCallId.get(url) !== msg.tool_call_id) {
-                  return `[System Note: Content omitted for ${url}. A fresher read occurs later in context.]`;
-                }
-
-                return textContent;
+          if (
+            Array.isArray(contentArray) &&
+            contentArray.length === requestedUrls.length
+          ) {
+            pageContents.set(msg, contentArray);
+            // Continually overwrite to guarantee we only store the LATEST ID for each URL
+            contentArray.forEach((textContent, index) => {
+              if (typeof textContent === "string" && textContent.trim()) {
+                urlToLatestCallId.set(requestedUrls[index], msg.tool_call_id);
               }
-            );
-
-            msg.content = JSON.stringify(compactedContentArray);
+            });
           }
         } catch (error) {
           console.warn(
@@ -107,6 +93,28 @@ function deduplicatePageContent(messages) {
     }
   }
 
+  // PASS 2: Execute the replacement on the Tool responses
+  for (const [msg, contentArray] of pageContents) {
+    const requestedUrls = callIdToUrls.get(msg.tool_call_id);
+    const compactedContentArray = contentArray.map((textContent, index) => {
+      // Relies on the assumption that contentArray[index] maps perfectly to requestedUrls[index]
+      const url = requestedUrls[index];
+
+      // If we tracked this URL, and this tool_call_id is NOT the newest one, drop the heavy text
+      if (
+        url &&
+        urlToLatestCallId.has(url) &&
+        urlToLatestCallId.get(url) !== msg.tool_call_id
+      ) {
+        return `[System Note: Content omitted for ${url}. A fresher read occurs later in context.]`;
+      }
+
+      return textContent;
+    });
+
+    msg.content = JSON.stringify(compactedContentArray);
+  }
+
   return messages;
 }
 
@@ -114,16 +122,19 @@ function deduplicatePageContent(messages) {
  * MAIN ENTRY POINT
  * Orchestrates the prompt compaction waterfall.
  *
- * @param {Array<object>} rawMessages - The original conversation history.
+ * Compacts in place: callers must pass a wire-format snapshot they own, such as
+ * the freshly built array from Conversation.getMessagesInChatCompletionsFormat.
+ * Stages may reassign top-level message fields, but values reached *through*
+ * those fields (content objects, tool_calls) still alias live UI state, so they
+ * must be replaced rather than mutated.
+ *
+ * @param {Array<object>} rawMessages - A caller-owned wire-format history array.
  * @returns {Array<object>} The optimized array ready to be sent to the LLM API.
  */
 export function compactMessages(rawMessages) {
   try {
-    // Deep clone to guarantee we never mutate the frontend's active UI state
-    let compactedMessages = structuredClone(rawMessages);
-
     // Stage 1: Deduplication (Always runs, zero semantic loss)
-    compactedMessages = deduplicatePageContent(compactedMessages);
+    let compactedMessages = deduplicatePageContent(rawMessages);
 
     // Future stages (Threshold checking, proportional shaving) will be injected here
 

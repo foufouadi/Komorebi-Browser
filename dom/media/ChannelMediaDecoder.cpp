@@ -210,7 +210,6 @@ ChannelMediaDecoder::CreateStateMachine(bool aDisableExternalEngine) {
   MOZ_ASSERT(NS_IsMainThread());
   MediaFormatReaderInit init;
   init.mVideoFrameContainer = GetVideoFrameContainer();
-  init.mKnowsCompositor = GetCompositor();
   init.mCrashHelper = GetOwner()->CreateGMPCrashHelper();
   init.mFrameStats = mFrameStats;
   init.mResource = mResource;
@@ -312,6 +311,7 @@ void ChannelMediaDecoder::NotifyDownloadEnded(nsresult aStatus) {
   if (NS_SUCCEEDED(aStatus)) {
     // Download ends successfully. This is a stream with a finite length.
     GetStateMachine()->DispatchIsLiveStream(false);
+    NotifyReaderDataArrived();
   }
 
   MediaDecoderOwner* owner = GetOwner();
@@ -560,13 +560,6 @@ void ChannelMediaDecoder::MetadataLoaded(
                                aEventVisibility);
   // Set mode to PLAYBACK after reading metadata.
   mResource->SetReadMode(MediaCacheStream::MODE_PLAYBACK);
-}
-
-void ChannelMediaDecoder::GetDebugInfo(dom::MediaDecoderDebugInfo& aInfo) {
-  MediaDecoder::GetDebugInfo(aInfo);
-  if (mResource) {
-    mResource->GetDebugInfo(aInfo.mResource);
-  }
 }
 
 bool ChannelMediaDecoder::MediaStatistics::CanPlayThrough() const {

@@ -78,10 +78,11 @@ prefs = [
 
 ["browser_contextMenu.js"]
 
+["browser_controlButtonClickFocus.js"]
+
 ["browser_controlsHover.js"]
-skip-if = [
-  "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && display == 'x11' && socketprocess_networking", # bug 1784652
-]
+
+["browser_controlsTabOrder.js"]
 
 ["browser_cornerSnapping.js"]
 run-if = [
@@ -91,25 +92,12 @@ run-if = [
 ["browser_dblclickFullscreen.js"]
 
 ["browser_disableSwipeGestures.js"]
-skip-if = [
-  "os == 'mac' && os_version == '10.15' && arch == 'x86_64'", # Bug 1840716
-  "os == 'mac' && os_version == '14.70' && arch == 'x86_64'", # Bug 1869710
-  "os == 'mac' && os_version == '15.30' && arch == 'aarch64'", # Bug 1840716
-]
 
 ["browser_durationChange.js"]
 
 ["browser_flipIconWithRTL.js"]
-skip-if = [
-  "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && display == 'x11' && ccov", # Bug 1678091
-]
 
 ["browser_fontSize_change.js"]
-skip-if = [
-  "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && display == 'x11' && asan && swgl", # Bug 1775867
-  "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && display == 'x11' && opt", # Bug 1775867
-  "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && display == 'x11' && tsan && swgl", # Bug 1775867
-]
 
 ["browser_fullscreen.js"]
 
@@ -146,11 +134,15 @@ support-files = ["test-page-with-nan-video-duration.html"]
 
 ["browser_noToggleOnAudio.js"]
 
+["browser_occludedSelectedTab.js"]
+
 ["browser_occluded_window.js"]
 
 ["browser_playbackRate.js"]
 
 ["browser_playerControls.js"]
+
+["browser_playerFullscreenFocus.js"]
 
 ["browser_preserveTabPipIconOverlay.js"]
 
@@ -159,6 +151,8 @@ support-files = ["test-page-with-nan-video-duration.html"]
 ["browser_reconnectPiPAfterVideoReparented.js"]
 
 ["browser_removeVideoElement.js"]
+
+["browser_resistFingerprinting.js"]
 
 ["browser_resizeVideo.js"]
 skip-if = [
@@ -191,10 +185,6 @@ skip-if = [
 ["browser_text_tracks_webvtt_2.js"]
 
 ["browser_text_tracks_webvtt_3.js"]
-skip-if = [
-  "os == 'win' && os_version == '11.26100' && arch == 'x86_64' && ccov",
-  "os == 'win' && os_version == '11.26200' && arch == 'x86_64' && ccov",
-]
 
 ["browser_thirdPartyIframe.js"]
 
@@ -223,9 +213,6 @@ skip-if = [
 ]
 
 ["browser_togglePolicies.js"]
-skip-if = [
-  "os == 'mac' && os_version == '14.70' && arch == 'x86_64'", # Bug 1869710
-]
 
 ["browser_togglePositionChange.js"]
 
@@ -247,7 +234,6 @@ skip-if = [
 
 ["browser_urlbar_toggle.js"]
 skip-if = [
-  "os == 'win' && os_version == '11.26100' && arch == 'x86_64' && debug && msix && verify-standalone", # Bug 1833445
   "os == 'win' && os_version == '11.26200' && arch == 'x86_64' && debug && msix && verify-standalone", # Bug 1833445
 ]
 

@@ -1208,7 +1208,7 @@ devtools.main:
         type: string
       entrypoint:
         description: >
-          How was the toolbox opened? CommandLine, ContextMenu, HamburgerMenu, KeyShortcut, SessionRestore, SystemMenu or SlowScript
+          How was the toolbox opened? CommandLine, ContextMenu, HamburgerMenu, KeyShortcut, SessionRestore or SystemMenu
         type: string
       first_panel:
         description: >
@@ -2996,7 +2996,6 @@ devtools:
       - ContextMenu
       - CommandLine
       - SessionRestore
-      - SlowScript
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1378863
     data_reviews:
@@ -3066,4 +3065,130 @@ devtools.localmode.mappings:
     notification_emails:
       - devtools-telemetry-alerts@mozilla.com
       - apoirot@mozilla.com
+    expires: never
+
+devtools.debugger.stylesheets:
+  links_opened_in_debugger_count:
+    type: counter
+    description: >
+      Number of times stylesheets link from another panel opens
+      the stylesheet in the debugger.
+    bugs:
+      - https://bugzil.la/2060500
+    data_reviews:
+      - https://bugzil.la/2060500
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - devtools-telemetry-alerts@mozilla.com
+      - hmanilla@mozilla.com
+    expires: never
+
+  stylesheets_edited_count:
+    type: counter
+    description: >
+      Number of unique stylesheets edited in the debugger.
+    bugs:
+      - https://bugzil.la/2060500
+    data_reviews:
+      - https://bugzil.la/2060500
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - devtools-telemetry-alerts@mozilla.com
+      - hmanilla@mozilla.com
+    expires: never
+
+  stylesheets_opened_count:
+    type: counter
+    description: >
+      Number of times stylesheets have been selected and opened in the debugger.
+    bugs:
+      - https://bugzil.la/2060500
+    data_reviews:
+      - https://bugzil.la/2060500
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - devtools-telemetry-alerts@mozilla.com
+      - hmanilla@mozilla.com
+    expires: never
+
+  stylesheet_pref_enabled_count:
+    type: counter
+    description: >
+      Number of times the preference to enable the stylesheets in the debugger
+      feature has been enabled from the Settings panel.
+    bugs:
+      - https://bugzil.la/2060500
+    data_reviews:
+      - https://bugzil.la/2060500
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - devtools-telemetry-alerts@mozilla.com
+      - hmanilla@mozilla.com
+    expires: never
+
+  stylesheet_pref_disabled_count:
+    type: counter
+    description: >
+      Number of times the preference to enable the stylesheets in the debugger
+      feature has been disabled from the Settings panel.
+    bugs:
+      - https://bugzil.la/2060500
+    data_reviews:
+      - https://bugzil.la/2060500
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - devtools-telemetry-alerts@mozilla.com
+      - hmanilla@mozilla.com
+    expires: never
+
+devtools.styleeditor.stylesheets:
+  links_opened_in_style_editor_count:
+    type: counter
+    description: >
+      Number of times stylesheets link from another panel opens
+      the stylesheet in the style editor.
+    bugs:
+      - https://bugzil.la/2063209
+    data_reviews:
+      - https://bugzil.la/2063209
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - devtools-telemetry-alerts@mozilla.com
+      - hmanilla@mozilla.com
+    expires: never
+
+  stylesheets_edited_count:
+    type: counter
+    description: >
+      Number of unique stylesheets edited in the style editor.
+    bugs:
+      - https://bugzil.la/2063209
+    data_reviews:
+      - https://bugzil.la/2063209
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - devtools-telemetry-alerts@mozilla.com
+      - hmanilla@mozilla.com
+    expires: never
+
+  stylesheets_opened_count:
+    type: counter
+    description: >
+      Number of times stylesheets have been selected and opened in the style editor.
+    bugs:
+      - https://bugzil.la/2063209
+    data_reviews:
+      - https://bugzil.la/2063209
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - devtools-telemetry-alerts@mozilla.com
+      - hmanilla@mozilla.com
     expires: never

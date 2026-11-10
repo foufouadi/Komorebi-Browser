@@ -26,6 +26,7 @@
 
 #  include "mozilla/java/GeckoSurfaceTextureWrappers.h"
 #  include "mozilla/layers/AndroidHardwareBuffer.h"
+#  include "mozilla/layers/AndroidImageReader.h"
 #  include "mozilla/widget/AndroidCompositorWidget.h"
 #endif
 
@@ -49,12 +50,12 @@ UniquePtr<RenderCompositor> RenderCompositorEGL::Create(
     }
     return nullptr;
   }
-  return MakeUnique<RenderCompositorEGL>(aWidget, std::move(gl));
+  return std::make_unique<RenderCompositorEGL>(aWidget, std::move(gl));
 }
 
 EGLSurface RenderCompositorEGL::CreateEGLSurface() {
   EGLSurface surface = EGL_NO_SURFACE;
-  surface = gl::GLContextEGL::CreateEGLSurfaceForCompositorWidget(
+  surface = gl::GLContextEGL::Cast(gl())->CreateEGLSurfaceForCompositorWidget(
       mWidget, gl::GLContextEGL::Cast(gl())->mSurfaceConfig);
   if (surface == EGL_NO_SURFACE) {
     const auto* renderThread = RenderThread::Get();
@@ -69,7 +70,7 @@ RenderCompositorEGL::RenderCompositorEGL(
     const RefPtr<widget::CompositorWidget>& aWidget,
     RefPtr<gl::GLContext>&& aGL)
     : RenderCompositor(aWidget), mGL(aGL), mEGLSurface(EGL_NO_SURFACE) {
-  MOZ_ASSERT(mGL);
+  MOZ_RELEASE_ASSERT(mGL);
   LOG("RenderCompositorEGL::RenderCompositorEGL()");
 #ifdef MOZ_WAYLAND
   if (widget::GdkIsWaylandDisplay()) {
@@ -133,7 +134,8 @@ RenderedFrameId RenderCompositorEGL::EndFrame(
   const auto& egl = gle->mEgl;
 
   EGLSync sync = nullptr;
-  if (layers::AndroidHardwareBufferManager::Get()) {
+  if (layers::AndroidHardwareBufferManager::Get() ||
+      layers::GpuProcessAndroidImageReaderMap::Get()) {
     sync = egl->fCreateSyncKHR(LOCAL_EGL_SYNC_NATIVE_FENCE_ANDROID, nullptr);
   }
   if (sync) {
@@ -282,8 +284,27 @@ void RenderCompositorEGL::DestroyEGLSurface() {
   }
 }
 
-RefPtr<layers::Fence> RenderCompositorEGL::GetAndResetReleaseFence() {
+void RenderCompositorEGL::MaybeWaitingForPendingReadFence(
+    RenderTextureHost* aTexture) {
+  if (!aTexture || !aTexture->AsRenderAndroidImageReaderImageTextureHost()) {
+    return;
+  }
+  mWaitingForPendingReadFence.emplace_back(aTexture);
+}
+
+RefPtr<layers::Fence> RenderCompositorEGL::GetAndResetReadFence() {
 #ifdef MOZ_WIDGET_ANDROID
+  if (mReleaseFence && !mWaitingForPendingReadFence.empty()) {
+    auto* fileFence = mReleaseFence->AsFenceFileHandle();
+    MOZ_ASSERT(fileFence);
+
+    for (auto& textureHost : mWaitingForPendingReadFence) {
+      auto fence = fileFence->DuplicateFileHandle();
+      textureHost->SetReadFenceFd(std::move(fence));
+    }
+  }
+  mWaitingForPendingReadFence.clear();
+
   MOZ_ASSERT(!layers::AndroidHardwareBufferManager::Get() || mReleaseFence);
   return mReleaseFence.forget();
 #else
@@ -295,7 +316,7 @@ LayoutDeviceIntSize RenderCompositorEGL::GetBufferSize() {
   return mWidget->GetClientSize();
 }
 
-bool RenderCompositorEGL::UsePartialPresent() {
+bool RenderCompositorEGL::UseWindowPartialPresent() {
   return gfx::gfxVars::WebRenderMaxPartialPresentRects() > 0;
 }
 
@@ -303,10 +324,6 @@ bool RenderCompositorEGL::RequestFullRender() { return false; }
 
 uint32_t RenderCompositorEGL::GetMaxPartialPresentRects() {
   return gfx::gfxVars::WebRenderMaxPartialPresentRects();
-}
-
-bool RenderCompositorEGL::ShouldDrawPreviousPartialPresentRegions() {
-  return true;
 }
 
 size_t RenderCompositorEGL::GetBufferAge() const {
@@ -349,5 +366,17 @@ void RenderCompositorEGL::SetBufferDamageRegion(const wr::DeviceIntRect* aRects,
     }
   }
 }
+
+#ifdef MOZ_WIDGET_ANDROID
+bool RenderCompositorEGL::CaptureScreenPixels(
+    const gfx::IntRect& aSourceRect,
+    layers::AndroidHardwareBuffer* aHardwareBuffer) {
+  return CaptureScreenPixelsFromGL(
+      gl::GLContextEGL::Cast(mGL), aSourceRect, GetBufferSize(),
+      SurfaceOriginIsTopLeft() ? gl::OriginPos::TopLeft
+                               : gl::OriginPos::BottomLeft,
+      aHardwareBuffer);
+}
+#endif
 
 }  // namespace mozilla::wr

@@ -100,22 +100,13 @@ Changelog
 
 ## Histograms
 
-### SEARCH_SUGGESTIONS_LATENCY_MS
-
-This histogram records the latency in milliseconds of fetches to the
-suggestions endpoints of search engines, or in other words, the time from
-Firefox's request to a suggestions endpoint to the time Firefox receives a
-response. It is a keyed exponential histogram with 50 buckets and values
-between 0 and 30000 (0s and 30s). Keys in this histogram are search engine IDs
-for built-in search engines and 'other' for non-built-in search engines.
-
 ### Default Search Engine
 
 Telemetry for the user's default search engine is currently reported via two
 systems:
 
 1. Legacy telemetry:
-   [Fields are reported within the legacy telemetry environment](https://firefox-source-docs.mozilla.org/toolkit/components/telemetry/data/environment.html#defaultsearchengine)
+   [Fields are reported within the legacy telemetry environment](/toolkit/components/telemetry/data/environment.md#defaultsearchengine)
 2. Glean:
    [Fields are documented in the Glean dictionary](https://dictionary.telemetry.mozilla.org/apps/firefox_desktop?search=search.engine).
 
@@ -135,10 +126,3 @@ start up. Labels include: `failedSettings`, `failedFetchEngines`,
 `success`.
 
 A counter for initialization successes on start up.
-
-### search.suggestions.latency
-
-A labelled timing distribution that records the latencies (ms) of search
-suggestions fetches per search engine. Keys in this histogram are the search
-engine identifier for configuration provided search engines and 'other' for
-search engines installed via other methods.

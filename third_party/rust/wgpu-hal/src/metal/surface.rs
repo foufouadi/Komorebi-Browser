@@ -1,5 +1,3 @@
-use std::sync::LazyLock;
-
 use alloc::borrow::ToOwned as _;
 
 use objc2::{
@@ -13,7 +11,7 @@ use objc2_core_graphics::CGColorSpace;
 use objc2_foundation::NSObjectProtocol;
 use objc2_metal::MTLTextureType;
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
-use parking_lot::{Mutex, RwLock};
+use wgpu_sync::{Lazy, Mutex, RwLock};
 
 use super::OsFeatures;
 
@@ -40,6 +38,8 @@ impl super::Surface {
             render_layer: Mutex::new(layer),
             swapchain_format: RwLock::new(None),
             extent: RwLock::new(wgt::Extent3d::default()),
+            #[cfg(target_os = "macos")]
+            has_been_visible: wgpu_sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -79,15 +79,15 @@ impl super::Surface {
                 // environmental), so leave a breadcrumb instead of failing
                 // silently. Warn once per process so a caller that polls this
                 // per frame is not spammed.
-                static WARN_ONCE: std::sync::Once = std::sync::Once::new();
-                WARN_ONCE.call_once(|| {
+                static WARN_ONCE: wgpu_sync::OnceCell<()> = wgpu_sync::OnceCell::new();
+                if WARN_ONCE.set(()).is_ok() {
                     log::warn!(
                         "Surface::display_hdr_info() was called from thread {:?} \
                          and will return None. On the Metal backend, it must be \
                          called from the main thread to succeed.",
                         std::thread::current().id()
                     );
-                });
+                }
                 return None;
             }
 
@@ -216,7 +216,7 @@ struct ColorSpaces {
     itur_bt2100_hlg: &'static CFString,
 }
 
-static COLOR_SPACES: LazyLock<Result<ColorSpaces, crate::SurfaceError>> = LazyLock::new(|| {
+static COLOR_SPACES: Lazy<Result<ColorSpaces, crate::SurfaceError>> = Lazy::new(|| {
     // Stable Rust doesn't support weak linkage, so objc2 doesn't
     // offer it. To avoid link errors on old OS versions, resolve
     // these dynamically.
@@ -228,9 +228,11 @@ static COLOR_SPACES: LazyLock<Result<ColorSpaces, crate::SurfaceError>> = LazyLo
         lib: &libloading::Library,
         name: &core::ffi::CStr,
     ) -> Result<&'static CFString, crate::SurfaceError> {
-        let sym = unsafe { lib.get(name.to_bytes_with_nul()) }
+        // The symbol is the address of the global holding the `CFString`
+        // pointer, so an extra dereference is needed to read it.
+        let sym = unsafe { lib.get::<*const &'static CFString>(name.to_bytes_with_nul()) }
             .map_err(|_| crate::SurfaceError::Other("error resolving symbol in CoreGraphics"))?;
-        Ok(*sym)
+        Ok(unsafe { **sym })
     }
     let extended_display_p3 = lookup(&lib, c"kCGColorSpaceExtendedDisplayP3")?;
     let itur_bt2100_pq = lookup(&lib, c"kCGColorSpaceITUR_2100_PQ")?;
@@ -257,7 +259,12 @@ impl crate::Surface for super::Surface {
         *self.extent.write() = config.extent;
 
         let render_layer = self.render_layer.lock();
-        let framebuffer_only = config.usage == wgt::TextureUses::COLOR_TARGET;
+        // Metal forbids creating alternate-format views of framebuffer-only textures.
+        let framebuffer_only = config.usage == wgt::TextureUses::COLOR_TARGET
+            && config
+                .view_formats
+                .iter()
+                .all(|format| *format == config.format);
         let display_sync = match config.present_mode {
             wgt::PresentMode::Fifo => true,
             wgt::PresentMode::Immediate => false,
@@ -268,8 +275,8 @@ impl crate::Surface for super::Surface {
 
         match config.composite_alpha_mode {
             wgt::CompositeAlphaMode::Opaque => render_layer.setOpaque(true),
-            wgt::CompositeAlphaMode::PostMultiplied => render_layer.setOpaque(false),
-            _ => (),
+            wgt::CompositeAlphaMode::PreMultiplied => render_layer.setOpaque(false),
+            m => unreachable!("Unsupported alpha mode: {m:?}"),
         }
 
         let device_raw = &device.shared.device;
@@ -278,17 +285,21 @@ impl crate::Surface for super::Surface {
         render_layer.setFramebufferOnly(framebuffer_only);
         // Opt into Metal EDR for the HDR color spaces (more display power, memory,
         // and bandwidth). The HDR spaces are exactly those `is_hdr()` classifies.
-        let wants_edr = config.color_space.is_hdr();
-        if wants_edr != render_layer.wantsExtendedDynamicRangeContent() {
-            render_layer.setWantsExtendedDynamicRangeContent(wants_edr);
+        //
+        // `wantsExtendedDynamicRangeContent` is iOS 16+. On older iOS calling it
+        // throws an unrecognized selector exception and the app aborts.
+        if available!(macos = 10.11, ios = 16.0, visionos = 1.0) {
+            let wants_edr = config.color_space.is_hdr();
+            if wants_edr != render_layer.wantsExtendedDynamicRangeContent() {
+                render_layer.setWantsExtendedDynamicRangeContent(wants_edr);
+            }
         }
 
         let colorspace_name: Option<&'static CFString> = match config.color_space {
             wgt::SurfaceColorSpace::Auto => {
                 unreachable!("wgpu-core resolves `Auto` before configuring the surface")
             }
-            // Reset to the layer's default, which treats contents as sRGB.
-            wgt::SurfaceColorSpace::Srgb => None,
+            wgt::SurfaceColorSpace::Srgb => Some(unsafe { objc2_core_graphics::kCGColorSpaceSRGB }),
             wgt::SurfaceColorSpace::ExtendedSrgbLinear => {
                 Some(unsafe { objc2_core_graphics::kCGColorSpaceExtendedLinearSRGB })
             }
@@ -360,14 +371,23 @@ impl crate::Surface for super::Surface {
             // When the window is occluded on macOS, presented drawables get stuck waiting
             // for vsync. Check the window's occlusion state and skip acquisition if
             // the window is not visible - this avoids a 1-second hang in nextDrawable().
+            //
+            // Only drawables presented while the window was visible get stuck, so this
+            // waits until the window has been visible once. Until then, nextDrawable()
+            // returns right away, and applications rely on that to render a first frame
+            // before the window is shown, or right after, while AppKit hasn't updated the
+            // occlusion state yet.
             use objc2::rc::Retained;
+            use wgpu_sync::atomic;
 
             // The CAMetalLayer is typically a sublayer; find the hosting window
             // and skip acquisition while it is occluded.
             if let Some(window) = hosting_window(Retained::into_super(render_layer.clone())) {
                 const NS_WINDOW_OCCLUSION_STATE_VISIBLE: usize = 1 << 1;
                 let occlusion_state: usize = unsafe { objc2::msg_send![&*window, occlusionState] };
-                if occlusion_state & NS_WINDOW_OCCLUSION_STATE_VISIBLE == 0 {
+                if occlusion_state & NS_WINDOW_OCCLUSION_STATE_VISIBLE != 0 {
+                    self.has_been_visible.store(true, atomic::Ordering::Relaxed);
+                } else if self.has_been_visible.load(atomic::Ordering::Relaxed) {
                     return Err(crate::SurfaceError::Occluded);
                 }
             }

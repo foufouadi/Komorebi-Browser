@@ -46,10 +46,18 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(ShadowRoot)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(ShadowRoot, DocumentFragment)
   DocumentOrShadowRoot::Traverse(tmp, cb);
+  if (tmp->GetCustomElementRegistryState() ==
+      CustomElementRegistryState::Scoped) {
+    RefPtr<CustomElementRegistry> registry =
+        CustomElementRegistry::GetScopedRegistry(*tmp);
+    NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "scoped CustomElementRegistry");
+    cb.NoteXPCOMChild(registry);
+  }
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(ShadowRoot)
   DocumentOrShadowRoot::Unlink(tmp);
+  CustomElementRegistry::RemoveScopedRegistry(*tmp);
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END_INHERITED(DocumentFragment)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ShadowRoot)
@@ -69,15 +77,6 @@ ShadowRoot::ShadowRoot(Element* aElement, ShadowRootMode aMode,
                        const Maybe<RefPtr<CustomElementRegistry>> aRegistry,
                        already_AddRefed<mozilla::dom::NodeInfo> aNodeInfo)
     : DocumentFragment(std::move(aNodeInfo)), DocumentOrShadowRoot(this) {
-  if (StaticPrefs::dom_scoped_custom_element_registries_enabled() &&
-      aRegistry.isSome()) {
-    if (*aRegistry) {
-      SetCustomElementRegistry(*aRegistry);
-    } else {
-      SetKeepCustomElementRegistryNull();
-    }
-  }
-
   // nsINode.h relies on this.
   MOZ_ASSERT(static_cast<nsINode*>(this) == reinterpret_cast<nsINode*>(this));
   MOZ_ASSERT(static_cast<nsIContent*>(this) ==
@@ -108,6 +107,14 @@ ShadowRoot::ShadowRoot(Element* aElement, ShadowRootMode aMode,
     flags |= SHADOW_ROOT_HAS_CUSTOM_SLOT_DISPATCH;
   }
   SetFlags(flags);
+  if (StaticPrefs::dom_scoped_custom_element_registries_enabled() &&
+      aRegistry.isSome()) {
+    if (*aRegistry) {
+      SetCustomElementRegistry(*aRegistry);
+    } else {
+      SetNullCustomElementRegistry();
+    }
+  }
   if (Host()->IsInNativeAnonymousSubtree()) {
     // NOTE(emilio): We could consider just propagating the
     // IN_NATIVE_ANONYMOUS_SUBTREE flag (not making this an anonymous root), but
@@ -128,10 +135,9 @@ ShadowRoot::~ShadowRoot() {
   }
   MOZ_DIAGNOSTIC_ASSERT(!OwnerDoc()->IsComposedDocShadowRoot(*this));
 
-  if (StaticPrefs::dom_scoped_custom_element_registries_enabled() &&
-      GetCustomElementRegistryState() == CustomElementRegistryState::Scoped) {
-    CustomElementRegistry::RemoveScopedRegistry(*this);
-  }
+  MOZ_DIAGNOSTIC_ASSERT(
+      GetCustomElementRegistryState() != CustomElementRegistryState::Scoped,
+      "Scoped registry should have been removed in LastRelease or Unlink");
 
   DocumentOrShadowRoot::Unlink(this);
 }
@@ -716,18 +722,33 @@ ShadowRoot::SlotInsertionPoint ShadowRoot::SlotInsertionPointFor(
     if (index != manuallyAssignedNodes.NoIndex) {
       return {slot, Some(index)};
     }
-  } else {
-    const Span assignedNodes = slot->AssignedNodes();
-    nsIContent* currentContent = GetHost()->GetFirstChild();
-    for (uint32_t i = 0; i < assignedNodes.Length(); i++) {
-      // Seek through the host's explicit children until the
-      // assigned content is found.
-      while (currentContent && currentContent != assignedNodes[i]) {
-        if (currentContent == &aContent) {
-          return {slot, Some(i)};
-        }
-        currentContent = currentContent->GetNextSibling();
+    return {slot, Nothing()};
+  }
+
+  // Named slots keep assigned nodes in tree order, so find the closest sibling
+  // of aContent assigned to the same slot.
+  const Span assignedNodes = slot->AssignedNodes();
+  if (assignedNodes.IsEmpty()) {
+    return {slot, Nothing()};
+  }
+  nsIContent* prev = aContent.GetPreviousSibling();
+  nsIContent* next = aContent.GetNextSibling();
+  while (prev || next) {
+    if (prev) {
+      if (prev->GetAssignedSlot() == slot) {
+        auto index = assignedNodes.LastIndexOf(prev);
+        MOZ_ASSERT(index != assignedNodes.npos);
+        return {slot, Some(index + 1)};
       }
+      prev = prev->GetPreviousSibling();
+    }
+    if (next) {
+      if (next->GetAssignedSlot() == slot) {
+        auto index = assignedNodes.IndexOf(next);
+        MOZ_ASSERT(index != assignedNodes.npos);
+        return {slot, Some(index)};
+      }
+      next = next->GetNextSibling();
     }
   }
 
@@ -899,7 +920,7 @@ void ShadowRoot::MaybeSlotHostChild(nsIContent& aChild) {
 
 ServoStyleRuleMap& ShadowRoot::ServoStyleRuleMap() {
   if (!mStyleRuleMap) {
-    mStyleRuleMap = MakeUnique<mozilla::ServoStyleRuleMap>();
+    mStyleRuleMap = std::make_unique<mozilla::ServoStyleRuleMap>();
   }
   mStyleRuleMap->EnsureTable(*this);
   return *mStyleRuleMap;
@@ -936,6 +957,8 @@ MOZ_CAN_RUN_SCRIPT void ShadowRoot::SetInnerHTML(
     const TrustedHTMLOrNullIsEmptyString& aInnerHTML,
     nsIPrincipal* aSubjectPrincipal, ErrorResult& aError) {
   constexpr nsLiteralString sink = u"ShadowRoot innerHTML"_ns;
+  // Bug 2072122: Trusted Types readiness experiment only, to be removed.
+  OwnerDoc()->RecordTrustedTypesHTMLSink(aInnerHTML.IsTrustedHTML());
 
   Maybe<nsAutoString> compliantStringHolder;
   const nsAString* compliantString =
@@ -1031,7 +1054,6 @@ void ShadowRoot::SetCustomElementRegistry(CustomElementRegistry* aRegistry) {
       GetCustomElementRegistryState() != CustomElementRegistryState::Scoped,
       "We shouldn't override an already assigned scoped registry");
   if (aRegistry->IsScoped()) {
-    SetCustomElementRegistryState(CustomElementRegistryState::Scoped);
     CustomElementRegistry::SetScopedRegistry(*this, *aRegistry);
     // https://html.spec.whatwg.org/#scoped-document-set
     // Append shadow root's node document to the registry's scoped document set.
@@ -1041,15 +1063,6 @@ void ShadowRoot::SetCustomElementRegistry(CustomElementRegistry* aRegistry) {
                "Tried to set a global registry different to docs");
     SetCustomElementRegistryState(CustomElementRegistryState::Global);
   }
-}
-
-/* https://dom.spec.whatwg.org/#shadowroot-keep-custom-element-registry-null */
-void ShadowRoot::SetKeepCustomElementRegistryNull() {
-  MOZ_ASSERT(StaticPrefs::dom_scoped_custom_element_registries_enabled());
-  MOZ_ASSERT(!HasCustomElementRegistry(),
-             "We shouldn't set a custom element registry without clearing "
-             "first");
-  SetCustomElementRegistryState(CustomElementRegistryState::Null);
 }
 
 /* https://dom.spec.whatwg.org/#shadowroot-custom-element-registry */

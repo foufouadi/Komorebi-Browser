@@ -34,7 +34,7 @@ class CrossShadowBoundaryRange final : public StaticRange,
   template <typename SPT, typename SRT, typename EPT, typename ERT>
   static already_AddRefed<CrossShadowBoundaryRange> Create(
       const RangeBoundaryBase<SPT, SRT>& aStartBoundary,
-      const RangeBoundaryBase<EPT, ERT>& aEndBoundary, nsRange* aOwner);
+      const RangeBoundaryBase<EPT, ERT>& aEndBoundary, Range* aOwner);
 
   void NotifyNodeBecomesShadowHost(nsINode* aNode) {
     if (aNode == mStart.GetContainer()) {
@@ -54,6 +54,16 @@ class CrossShadowBoundaryRange final : public StaticRange,
   // every boundary change rather than only on initial creation.
   void UpdateCommonAncestor();
 
+  /**
+   * Return true if the boundaries are in the same range root, i.e., in the
+   * same uncomposed document or in the same shadow container.
+   */
+  [[nodiscard]] bool IsPositionedInSameRangeRoot() const {
+    return IsPositioned() &&
+           RangeUtils::ComputeRootNode(mStart.GetContainer()) ==
+               RangeUtils::ComputeRootNode(mEnd.GetContainer());
+  }
+
   // CrossShadowBoundaryRange should have a very limited usage.
   nsresult SetStartAndEnd(nsINode* aStartContainer, uint32_t aStartOffset,
                           nsINode* aEndContainer, uint32_t aEndOffset) = delete;
@@ -69,7 +79,7 @@ class CrossShadowBoundaryRange final : public StaticRange,
   NS_DECL_NSIMUTATIONOBSERVER_PARENTCHAINCHANGED
 
  private:
-  explicit CrossShadowBoundaryRange(nsINode* aNode, nsRange* aOwner)
+  explicit CrossShadowBoundaryRange(nsINode* aNode, Range* aOwner)
       : StaticRange(aNode, StaticRange::MutationObserved::Yes,
                     TreeKind::FlatForSelection),
         mOwner(aOwner) {}
@@ -86,9 +96,9 @@ class CrossShadowBoundaryRange final : public StaticRange,
 
   friend class AbstractRange;
 
-  // nsRange owns CrossShadowBoundaryRange; it always outlives
+  // Range owns CrossShadowBoundaryRange; it always outlives
   // CrossShadowBoundaryRange, so it's safe to use raw pointer here.
-  nsRange* mOwner;
+  Range* mOwner;
 };
 
 inline CrossShadowBoundaryRange* StaticRange::AsCrossShadowBoundaryRange() {

@@ -15,7 +15,7 @@ namespace layers {
 
 APZChild::APZChild(RefPtr<GeckoContentController> aController)
     : mController(aController) {
-  MOZ_ASSERT(mController);
+  MOZ_RELEASE_ASSERT(mController);
 }
 
 APZChild::~APZChild() {
@@ -29,15 +29,9 @@ APZChild::~APZChild() {
   }
 }
 
-mozilla::ipc::IPCResult APZChild::RecvLayerTransforms(
-    nsTArray<MatrixMessage>&& aTransforms) {
-  mController->NotifyLayerTransforms(std::move(aTransforms));
-  return IPC_OK();
-}
-
 mozilla::ipc::IPCResult APZChild::RecvRequestContentRepaint(
     const RepaintRequest& aRequest) {
-  MOZ_ASSERT(mController->IsRepaintThread());
+  MOZ_RELEASE_ASSERT(mController->IsRepaintThread());
 
   EnsureAPZTaskRunnable();
 
@@ -45,38 +39,17 @@ mozilla::ipc::IPCResult APZChild::RecvRequestContentRepaint(
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult APZChild::RecvUpdateOverscrollVelocity(
-    const ScrollableLayerGuid& aGuid, const float& aX, const float& aY,
-    const bool& aIsRootContent) {
-  mController->UpdateOverscrollVelocity(aGuid, aX, aY, aIsRootContent);
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult APZChild::RecvUpdateOverscrollOffset(
-    const ScrollableLayerGuid& aGuid, const float& aX, const float& aY,
-    const bool& aIsRootContent) {
-  mController->UpdateOverscrollOffset(aGuid, aX, aY, aIsRootContent);
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult APZChild::RecvHideDynamicToolbar() {
-  // Only the RemoteContentController implementation uses the
-  // ScrollableLayerGuid parameter. APZChild::mController is never a
-  // RemoteContentController, so it's fine to invent a value here.
-  mController->HideDynamicToolbar(ScrollableLayerGuid{});
-  return IPC_OK();
-}
-
 mozilla::ipc::IPCResult APZChild::RecvNotifyMozMouseScrollEvent(
     const ViewID& aScrollId, const nsString& aEvent) {
-  mController->NotifyMozMouseScrollEvent(aScrollId, aEvent);
+  const RefPtr<GeckoContentController> controller = mController;
+  controller->NotifyMozMouseScrollEvent(aScrollId, aEvent);
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult APZChild::RecvNotifyAPZStateChange(
     const ScrollableLayerGuid& aGuid, const APZStateChange& aChange,
     const int& aArg, Maybe<uint64_t> aInputBlockId) {
-  MOZ_ASSERT(mController->IsRepaintThread());
+  MOZ_RELEASE_ASSERT(mController->IsRepaintThread());
   EnsureAPZTaskRunnable();
 
   mAPZTaskRunnable->QueueAPZStateChange(aGuid, aChange, aArg, aInputBlockId);
@@ -85,7 +58,7 @@ mozilla::ipc::IPCResult APZChild::RecvNotifyAPZStateChange(
 }
 
 mozilla::ipc::IPCResult APZChild::RecvNotifyFlushComplete() {
-  MOZ_ASSERT(mController->IsRepaintThread());
+  MOZ_RELEASE_ASSERT(mController->IsRepaintThread());
   EnsureAPZTaskRunnable();
 
   mAPZTaskRunnable->QueueFlushCompleteNotification();

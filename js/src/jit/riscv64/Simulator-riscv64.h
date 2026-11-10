@@ -940,7 +940,7 @@ class Simulator {
   // Handle any wasm faults, returning true if the fault was handled.
   // This method is rather hot so inline the normal (no-wasm) case.
   bool MOZ_ALWAYS_INLINE handleWasmSegFault(uint64_t addr, unsigned numBytes) {
-    if (MOZ_LIKELY(!js::wasm::CodeExists)) {
+    if (MOZ_LIKELY(!js::wasm::CodeExists())) {
       return false;
     }
 
@@ -1132,6 +1132,10 @@ class Simulator {
   void setCallResultDouble(double result);
   void setCallResultFloat(float result);
   void setCallResult(int64_t res);
+#ifdef XP_DARWIN
+  // add a dedicated setCallResult for intptr_t on Darwin
+  void setCallResult(intptr_t res);
+#endif
   void setCallResult(__int128 res);
 
   void callInternal(uint8_t* entry);

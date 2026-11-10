@@ -802,7 +802,8 @@ bool nsXULPopupManager::ShowNativeMenuInternal(
 
   // Hide the menu from our accessibility code so that we don't dispatch custom
   // accessibility notifications which would conflict with the system ones.
-  aPopup->SetAttr(kNameSpaceID_None, nsGkAtoms::aria_hidden, u"true"_ns, true);
+  aPopup->SetAttr(kNameSpaceID_None, nsGkAtoms::aria_hidden, u"true"_ns, true,
+                  IsKnownNewAttr::No);
 
   nsMenuPopupFrame* popupFrame = GetPopupFrameForContent(aPopup, true);
   if (!popupFrame) {
@@ -1187,8 +1188,8 @@ void nsXULPopupManager::ShowPopupCallback(Element* aPopup,
   bool isNoAutoHide =
       aPopupFrame->IsNoAutoHide() || popupType == PopupType::Tooltip;
 
-  auto item = MakeUnique<nsMenuChainItem>(aPopupFrame, isNoAutoHide,
-                                          aIsContextMenu, popupType);
+  auto item = std::make_unique<nsMenuChainItem>(aPopupFrame, isNoAutoHide,
+                                                aIsContextMenu, popupType);
 
   // install keyboard event listeners for navigating menus. For panels, the
   // escape key may be used to close the panel. However, the ignorekeys
@@ -1521,19 +1522,10 @@ void nsXULPopupManager::HidePopupsInList(
     const nsTArray<nsMenuPopupFrame*>& aFrames) {
   // Create a weak frame list. This is done in a separate array with the
   // right capacity predetermined to avoid multiple allocations.
-  nsTArray<WeakFrame> weakPopups(aFrames.Length());
-  uint32_t f;
-  for (f = 0; f < aFrames.Length(); f++) {
-    WeakFrame* wframe = weakPopups.AppendElement();
-    if (wframe) {
-      *wframe = aFrames[f];
-    }
-  }
-
-  for (f = 0; f < weakPopups.Length(); f++) {
+  for (auto& f : ToTArray<AutoTArray<WeakFrame, 32>>(aFrames)) {
     // check to ensure that the frame is still alive before hiding it.
-    if (weakPopups[f].IsAlive()) {
-      auto* frame = static_cast<nsMenuPopupFrame*>(weakPopups[f].GetFrame());
+    if (f.IsAlive()) {
+      auto* frame = static_cast<nsMenuPopupFrame*>(f.GetFrame());
       frame->HidePopup(true, ePopupInvisible);
     }
   }
@@ -1596,9 +1588,11 @@ void nsXULPopupManager::PaintPopups(nsRefreshDriver* aRefreshDriver) {
   AutoTArray<std::pair<RefPtr<nsIWidget>, WeakFrame>, 32> popupsToPaint;
   for (nsMenuChainItem* item = mPopups.get(); item; item = item->GetParent()) {
     nsMenuPopupFrame* frame = item->Frame();
-    if (!frame->IsVisibleOrHiding() ||
-        frame->PresContext()->GetRootPresContext()->RefreshDriver() !=
-            aRefreshDriver) {
+    if (!frame->IsVisibleOrHiding()) {
+      continue;
+    }
+    nsPresContext* rootPc = frame->PresContext()->GetRootPresContext();
+    if (!rootPc || rootPc->RefreshDriver() != aRefreshDriver) {
       continue;
     }
     if (nsIWidget* widget = frame->GetWidget()) {
@@ -1644,6 +1638,9 @@ void nsXULPopupManager::PaintPopups(nsRefreshDriver* aRefreshDriver) {
     nsAutoScriptBlocker scriptBlocker;
     RefPtr<PresShell> ps = frame->PresShell();
     RefPtr<WindowRenderer> renderer = widget->GetWindowRenderer();
+    if (!renderer) {
+      continue;
+    }
     if (renderer->AsFallback()) {
       // FIXME: A bit of a hack. This matches what PaintAndRequestComposite
       // does for views (eventually).
@@ -2282,12 +2279,12 @@ void nsXULPopupManager::UpdateMenuItems(Element* aPopup) {
           nsAutoString commandValue;
           if (commandElement->GetAttr(nsGkAtoms::label, commandValue)) {
             grandChildElement->SetAttr(kNameSpaceID_None, nsGkAtoms::label,
-                                       commandValue, true);
+                                       commandValue, true, IsKnownNewAttr::No);
           }
 
           if (commandElement->GetAttr(nsGkAtoms::accesskey, commandValue)) {
             grandChildElement->SetAttr(kNameSpaceID_None, nsGkAtoms::accesskey,
-                                       commandValue, true);
+                                       commandValue, true, IsKnownNewAttr::No);
           }
         }
       }

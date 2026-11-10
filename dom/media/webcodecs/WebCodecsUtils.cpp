@@ -10,11 +10,11 @@
 #include "VideoUtils.h"
 #include "js/experimental/TypedData.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/EnumTypeTraits.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/StaticPrefs_media.h"
 #include "mozilla/ToString.h"
 #include "mozilla/dom/EncoderTypes.h"
-#include "mozilla/dom/ImageBitmapBinding.h"
 #include "mozilla/dom/UnionTypes.h"
 #include "mozilla/dom/VideoColorSpaceBinding.h"
 #include "mozilla/dom/VideoFrameBinding.h"
@@ -222,17 +222,14 @@ VideoColorSpaceInit VideoColorSpaceInternal::ToColorSpaceInit() const {
 }
 
 nsCString VideoColorSpaceInternal::ToString() const {
-  nsCString rv("VideoColorSpace");
-  rv.AppendPrintf(" range: %s",
-                  mFullRange ? mFullRange.value() ? "true" : "false" : "none");
-  rv.AppendPrintf(" matrix: %s",
-                  mMatrix ? GetEnumString(mMatrix.value()).get() : "none");
-  rv.AppendPrintf(
-      " primaries: %s",
-      mPrimaries ? GetEnumString(mPrimaries.value()).get() : "none");
-  rv.AppendPrintf(" transfer: %s",
-                  mTransfer ? GetEnumString(mTransfer.value()).get() : "none");
-
+  nsCString rv;
+  rv.AppendFmt(
+      "VideoColorSpace {{ range={}, matrix={}, primaries={}, transfer={} }}",
+      mFullRange ? mozilla::ToString(mFullRange.value()) : "none",
+      mMatrix ? mozilla::ToString(GetEnumString(mMatrix.value())) : "none",
+      mPrimaries ? mozilla::ToString(GetEnumString(mPrimaries.value()))
+                 : "none",
+      mTransfer ? mozilla::ToString(GetEnumString(mTransfer.value())) : "none");
   return rv;
 }
 
@@ -353,49 +350,23 @@ Maybe<VideoColorPrimaries> ToPrimaries(const gfx::ColorSpace2& aColorSpace) {
  * VideoPixelFormats.
  */
 
-Maybe<VideoPixelFormat> SurfaceFormatToVideoPixelFormat(
-    gfx::SurfaceFormat aFormat) {
-  switch (aFormat) {
-    case gfx::SurfaceFormat::B8G8R8A8:
-      return Some(VideoPixelFormat::BGRA);
-    case gfx::SurfaceFormat::B8G8R8X8:
-      return Some(VideoPixelFormat::BGRX);
-    case gfx::SurfaceFormat::R8G8B8A8:
-      return Some(VideoPixelFormat::RGBA);
-    case gfx::SurfaceFormat::R8G8B8X8:
-      return Some(VideoPixelFormat::RGBX);
-    case gfx::SurfaceFormat::YUV420:
-      return Some(VideoPixelFormat::I420);
-    case gfx::SurfaceFormat::YUV422P10:
-      return Some(VideoPixelFormat::I422P10);
-    case gfx::SurfaceFormat::NV12:
-      return Some(VideoPixelFormat::NV12);
+static_assert(uint8_t(ImagePixelFormat::I420) ==
+              uint8_t(VideoPixelFormat::I420));
+static_assert(uint8_t(ImagePixelFormat::BGRX) ==
+              uint8_t(VideoPixelFormat::BGRX));
+static_assert(uint8_t(ImagePixelFormat::NV21) ==
+              uint8_t(MaxContiguousEnumValue<VideoPixelFormat>::value) + 1);
 
-    default:
-      break;
+Maybe<VideoPixelFormat> ToVideoPixelFormat(ImagePixelFormat aFormat) {
+  if (uint8_t(aFormat) >
+      uint8_t(MaxContiguousEnumValue<VideoPixelFormat>::value)) {
+    return Nothing();
   }
-  return Nothing();
+  return Some(static_cast<VideoPixelFormat>(aFormat));
 }
 
-Maybe<VideoPixelFormat> ImageBitmapFormatToVideoPixelFormat(
-    ImageBitmapFormat aFormat) {
-  switch (aFormat) {
-    case ImageBitmapFormat::RGBA32:
-      return Some(VideoPixelFormat::RGBA);
-    case ImageBitmapFormat::BGRA32:
-      return Some(VideoPixelFormat::BGRA);
-    case ImageBitmapFormat::YUV444P:
-      return Some(VideoPixelFormat::I444);
-    case ImageBitmapFormat::YUV422P:
-      return Some(VideoPixelFormat::I422);
-    case ImageBitmapFormat::YUV420P:
-      return Some(VideoPixelFormat::I420);
-    case ImageBitmapFormat::YUV420SP_NV12:
-      return Some(VideoPixelFormat::NV12);
-    default:
-      break;
-  }
-  return Nothing();
+Maybe<VideoPixelFormat> GuessVideoPixelFormat(layers::Image* aImage) {
+  return ImageToPixelFormat(aImage).andThen(ToVideoPixelFormat);
 }
 
 bool IsOnAndroid() {
@@ -554,7 +525,7 @@ WebCodecsConfigurationChangeList::ToPEMChangeList() const {
 RefPtr<TaskQueue> GetWebCodecsEncoderTaskQueue() {
   return TaskQueue::Create(
       GetMediaThreadPool(MediaThreadType::PLATFORM_ENCODER),
-      "WebCodecs encoding", false);
+      "WebCodecs encoding", TailDispatchPolicy::NoTailDispatch);
 }
 
 VideoColorSpaceInternal FallbackColorSpaceForVideoContent() {
@@ -643,7 +614,7 @@ nsCString ConvertCodecName(const nsCString& aContainer,
   if (aCodec.EqualsLiteral("alaw")) {
     return nsCString("6");
   }
-  if (aCodec.Find("f32")) {
+  if (aCodec.EqualsLiteral("pcm-f32")) {
     return nsCString("3");
   }
   // Linear PCM

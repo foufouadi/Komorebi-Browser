@@ -25,17 +25,33 @@ import androidx.work.WorkerParameters
 import java.io.Closeable
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
-import kotlinx.coroutines.Dispatchers
+import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import mozilla.appservices.fxaclient.FxaException
+import mozilla.appservices.sync15.EngineChoicesModel
 import mozilla.appservices.sync15.SyncTelemetryPing
 import mozilla.appservices.syncmanager.ServiceStatus
 import mozilla.appservices.syncmanager.SyncAuthInfo
 import mozilla.appservices.syncmanager.SyncEngineSelection
-import mozilla.appservices.syncmanager.SyncManager as RustSyncManager
 import mozilla.appservices.syncmanager.SyncParams
 import mozilla.appservices.syncmanager.SyncTelemetry
 import mozilla.components.concept.storage.KeyProvider
+import mozilla.components.concept.sync.AccountObserver
+import mozilla.components.concept.sync.AuthFlowError
+import mozilla.components.concept.sync.AuthType
+import mozilla.components.concept.sync.OAuthAccount
 import mozilla.components.concept.sync.SyncConfig
 import mozilla.components.concept.sync.SyncEngine
 import mozilla.components.service.fxa.FxaDeviceSettingsCache
@@ -54,7 +70,7 @@ internal enum class SyncWorkerTag {
     Debounce, // will debounce if another sync happened recently
 }
 
-private enum class SyncWorkerName {
+internal enum class SyncWorkerName {
     Periodic,
     Immediate,
 }
@@ -62,13 +78,9 @@ private enum class SyncWorkerName {
 private const val KEY_DATA_STORES = "stores"
 private const val KEY_REASON = "reason"
 
-private const val SYNC_WORKER_BACKOFF_DELAY_MINUTES = 3L
+private const val KEY_IS_FULL_SYNC = "is_full_sync"
 
-/**
- * The Rust implemented SyncManager. Must be a singleton as it carries some state between syncs. Does no IO at creation
- * time so is safe to call on any thread.
- */
-val syncManager: RustSyncManager by lazy { RustSyncManager() }
+private const val SYNC_WORKER_BACKOFF_DELAY_MINUTES = 3L
 
 /**
  * A [SyncManager] implementation which uses WorkManager APIs to schedule sync tasks.
@@ -77,11 +89,25 @@ val syncManager: RustSyncManager by lazy { RustSyncManager() }
  */
 internal class WorkManagerSyncManager(
     private val context: Context,
-    syncConfig: SyncConfig,
+    private val syncConfig: SyncConfig,
+    private val syncStateStorageProvider: SyncStateStorage.Provider,
+    private val syncEnginesStorage: SyncEnginesStorage = SyncEnginesStorage(context),
+    private val rustSyncManager: RustSyncManager = DefaultRustSyncManager,
+    private val accountManager: FxaAccountManager = GlobalAccountManager.requireAccountManager(),
+    private val coroutineContext: CoroutineContext,
 ) : SyncManager(syncConfig) {
     override val logger = Logger("BgSyncManager")
 
+    private val coroutineScope = CoroutineScope(coroutineContext + SupervisorJob())
+
+    override val syncConnectionState: StateFlow<SyncConnectionState>
+        field = MutableStateFlow<SyncConnectionState>(SyncConnectionState.Uninitialized)
+
+    private val accountChangesObserver = AccountChangesObserver()
+
     init {
+        GlobalAccountManager.setRustSyncManager(rustSyncManager)
+
         WorkersLiveDataObserver.init(context)
 
         if (syncConfig.periodicSyncConfig == null) {
@@ -91,12 +117,126 @@ internal class WorkManagerSyncManager(
         }
     }
 
+    override fun initialize() {
+        accountManager.register(accountChangesObserver)
+
+        updateSyncConnectionState()
+    }
+
+    /**
+     * Keeps [syncConnectionState] up to date with the account state, and with the stored connection preference when
+     * sync decoupling is enabled. Never returns: it collects for as long as this manager lives.
+     */
+    private fun updateSyncConnectionState() = coroutineScope.launch {
+        val syncConnectedFlow =
+            if (syncConfig.syncDecouplingEnabled) {
+                syncStateStorageProvider.get().syncConnectedFlow
+            } else {
+                flowOf(true)
+            }
+
+        accountChangesObserver.accountChangedFlow
+            .onStart { emit(Unit) }
+            .combine(syncConnectedFlow) { _, syncConnected: Boolean? ->
+                // A `null` stored state means sync was never explicitly connected or disconnected, in which case we
+                // assume it is connected: the user may be coming from a version where sync was always on.
+                resolveConnectionState(syncConnected = syncConnected ?: true)
+            }
+            .distinctUntilChanged()
+            .collect { syncConnectionState.value = it }
+    }
+
+    /**
+     * Resolves the current [SyncConnectionState].
+     *
+     * @param syncConnected Whether sync is connected.
+     * @return [SyncConnectionState.Disconnected] if there's no authenticated account, or sync is explicitly
+     *   disconnected
+     */
+    private fun resolveConnectionState(syncConnected: Boolean): SyncConnectionState {
+        return when {
+            accountManager.authenticatedAccount() == null || syncConnected.not() -> SyncConnectionState.Disconnected
+            else -> SyncConnectionState.Connected
+        }
+    }
+
+    override suspend fun connect(params: ConnectParams): ConnectResult {
+        if (params.initiateSync) checkSupportedEngines(params.engines)
+
+        return withContext(coroutineContext) {
+            logger.info("connect - setting up sync")
+
+            val account = accountManager.connectedAccount()
+            val result =
+                when {
+                    account == null -> ConnectResult.Failure.NeedsAuthentication
+                    !account.hasScope(SCOPE_SYNC) -> ConnectResult.Failure.NeedsSyncAuthorization
+                    else -> connectSync(params)
+                }
+            logger.info("connect - result = $result")
+            result
+        }
+    }
+
+    override suspend fun disconnect() {
+        withContext(coroutineContext) {
+            logger.info("disconnect - disabling sync")
+            stop()
+            rustSyncManager.disconnect()
+            syncStateStorageProvider.get().reset()
+            syncEnginesStorage.clear()
+        }
+    }
+
+    private suspend fun connectSync(params: ConnectParams): ConnectResult.Success {
+        syncStateStorageProvider.get().storeSyncConnected(connected = true)
+
+        // Call start only if we don't already have a sync dispatcher
+        if (syncDispatcher == null) start()
+        if (params.initiateSync) {
+            now(
+                reason = params.reason,
+                debounce = false,
+                customEngineSubset = params.engines.toList(),
+            )
+        }
+
+        return ConnectResult.Success
+    }
+
     override fun createDispatcher(supportedEngines: Set<SyncEngine>): SyncDispatcher {
-        return WorkManagerSyncDispatcher(context, supportedEngines)
+        return WorkManagerSyncDispatcher(
+            context = context,
+            supportedEngines = supportedEngines,
+            coroutineContext = coroutineContext,
+        )
     }
 
     override fun dispatcherUpdated(dispatcher: SyncDispatcher) {
         WorkersLiveDataObserver.setDispatcher(dispatcher)
+    }
+
+    /**
+     * Observes the account for changes that can connect or disconnect sync. The callbacks are used purely as triggers
+     * to cause the account manager states to be re-read.
+     */
+    private class AccountChangesObserver : AccountObserver {
+        val accountChangedFlow =
+            MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+        override fun onReady(authenticatedAccount: OAuthAccount?) = onAccountChanged()
+
+        override fun onAuthenticated(account: OAuthAccount, authType: AuthType) = onAccountChanged()
+
+        override fun onAuthenticationProblems() = onAccountChanged()
+
+        override fun onLoggedOut() = onAccountChanged()
+
+        override fun onFlowError(error: AuthFlowError) = onAccountChanged()
+
+        private fun onAccountChanged() {
+            accountChangedFlow.tryEmit(Unit)
+        }
     }
 }
 
@@ -141,10 +281,11 @@ internal object WorkersLiveDataObserver {
 internal class WorkManagerSyncDispatcher(
     private val context: Context,
     private val supportedEngines: Set<SyncEngine>,
+    private val coroutineContext: CoroutineContext,
 ) : SyncDispatcher, Observable<SyncStatusObserver> by ObserverRegistry(), Closeable {
     private val logger = Logger("WMSyncDispatcher")
+    private val coroutineScope = CoroutineScope(coroutineContext + SupervisorJob())
 
-    // TODO does this need to be volatile?
     private var isSyncActive = false
 
     init {
@@ -153,15 +294,22 @@ internal class WorkManagerSyncDispatcher(
         stopPeriodicSync()
     }
 
-    override fun workersStateChanged(currentWorkStates: List<WorkInfo.State>?) {
-        if (currentWorkStates?.any { it == WorkInfo.State.RUNNING } == true) {
-            notifyObservers { onStarted() }
-            isSyncActive = true
-        } else if (currentWorkStates?.any { it.isFinished } == true) {
-            notifyObservers { onIdle() }
-            isSyncActive = false
+    override fun initialize() {
+        coroutineScope.launch(context = coroutineContext) {
+            SyncOperationTracker.isSyncInProgress.collect { active ->
+                isSyncActive = active
+                notifyObservers {
+                    if (active) {
+                        onStarted()
+                    } else {
+                        onIdle()
+                    }
+                }
+            }
         }
     }
+
+    override fun workersStateChanged(currentWorkStates: List<WorkInfo.State>?) = Unit
 
     override fun isSyncActive(): Boolean {
         return isSyncActive
@@ -172,7 +320,8 @@ internal class WorkManagerSyncDispatcher(
         debounce: Boolean,
         customEngineSubset: List<SyncEngine>,
     ) {
-        logger.debug("Immediate sync requested, reason = $reason, debounce = $debounce")
+        val engines = customEngineSubset.joinToString { it.nativeName }
+        logger.debug("Immediate sync requested, reason = $reason, debounce = $debounce, custom engines = $engines")
         val delayMs =
             if (reason == SyncReason.Startup) {
                 // Startup delay is there to avoid SQLITE_BUSY crashes, since we currently do a poor job
@@ -190,8 +339,10 @@ internal class WorkManagerSyncDispatcher(
         // So if the user is requesting a "sync now" then we do not want that retry state to be
         // enforced, and we rely on the UI disabling the "sync now" button to avoid multi
         // user-requested syncs.
+        // Only a sync of every engine gets to replace a scheduled work manager sync work: a subset sync would otherwise
+        // cancel a broader sync that hasn't started yet, dropping the engines it doesn't cover.
         val policy =
-            if (reason == SyncReason.User) {
+            if (reason == SyncReason.User && customEngineSubset.isEmpty()) {
                 ExistingWorkPolicy.REPLACE
             } else {
                 ExistingWorkPolicy.KEEP
@@ -211,8 +362,10 @@ internal class WorkManagerSyncDispatcher(
     }
 
     override fun close() {
+        coroutineScope.cancel()
         unregisterObservers()
         stopPeriodicSync()
+        stopImmediateSync()
     }
 
     /** Periodic background syncing is mainly intended to reduce workload when we sync during application startup. */
@@ -237,8 +390,14 @@ internal class WorkManagerSyncDispatcher(
         WorkManager.getInstance(context).cancelUniqueWork(SyncWorkerName.Periodic.name)
     }
 
+    /** Disables any immediate sync jobs running. */
+    private fun stopImmediateSync() {
+        logger.debug("Cancelling immediate syncing")
+        WorkManager.getInstance(context).cancelUniqueWork(SyncWorkerName.Immediate.name)
+    }
+
     private fun periodicSyncWorkRequest(unit: TimeUnit, period: Long, initialDelay: Long): PeriodicWorkRequest {
-        val data = getWorkerData(SyncReason.Scheduled)
+        val data = getWorkerData(reason = SyncReason.Scheduled, supportedEngines = supportedEngines)
         // Periodic interval must be at least PeriodicWorkRequest.MIN_PERIODIC_INTERVAL_MILLIS,
         // e.g. not more frequently than 15 minutes.
         return PeriodicWorkRequestBuilder<WorkManagerSyncWorker>(period, unit, initialDelay, unit)
@@ -260,7 +419,12 @@ internal class WorkManagerSyncDispatcher(
         debounce: Boolean = false,
         customEngineSubset: List<SyncEngine> = listOf(),
     ): OneTimeWorkRequest {
-        val data = getWorkerData(reason, customEngineSubset)
+        val data =
+            getWorkerData(
+                reason = reason,
+                supportedEngines = supportedEngines,
+                customEngineSubset = customEngineSubset,
+            )
         return OneTimeWorkRequestBuilder<WorkManagerSyncWorker>()
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .setInputData(data)
@@ -275,15 +439,32 @@ internal class WorkManagerSyncDispatcher(
             .build()
     }
 
-    private fun getWorkerData(
-        reason: SyncReason,
-        customEngineSubset: List<SyncEngine> = listOf(),
-    ): Data {
-        val enginesToSync = customEngineSubset.takeIf { it.isNotEmpty() } ?: supportedEngines
-        return Data.Builder()
-            .putStringArray(KEY_DATA_STORES, enginesToSync.map { it.nativeName }.toTypedArray())
-            .putString(KEY_REASON, reason.asString())
-            .build()
+    companion object {
+
+        /**
+         * Creates the worker data for [WorkManagerSyncWorker]
+         *
+         * @param reason The [SyncReason] for the sync
+         * @param supportedEngines The set of supported [SyncEngine] defined by [SyncConfig]
+         * @param customEngineSubset The specific set of [SyncEngine]s which are to be synced. The collection must be a
+         *   subset of [supportedEngines]. An empty collection implies that we want to sync all of the user's active
+         *   engines (full sync) and a non-empty collection implies that these are the specific engines that we want to
+         *   sync.
+         */
+        internal fun getWorkerData(
+            reason: SyncReason,
+            supportedEngines: Set<SyncEngine>,
+            customEngineSubset: List<SyncEngine> = listOf(),
+        ): Data {
+            // an empty list of engine subset implies "do a full sync of all the user's enabled engines"
+            val isFullSync = customEngineSubset.isEmpty()
+            val enginesToSync = customEngineSubset.takeIf { it.isNotEmpty() } ?: supportedEngines
+            return Data.Builder()
+                .putStringArray(KEY_DATA_STORES, enginesToSync.map { it.nativeName }.toTypedArray())
+                .putBoolean(KEY_IS_FULL_SYNC, isFullSync)
+                .putString(KEY_REASON, reason.asString())
+                .build()
+        }
     }
 }
 
@@ -295,6 +476,25 @@ internal class WorkManagerSyncWorker(
 
     private val accountManager: FxaAccountManager
         get() = GlobalAccountManager.requireAccountManager()
+
+    private val rustSyncManager: RustSyncManager
+        get() = GlobalAccountManager.requireRustSyncManager()
+
+    private val syncStateStorageProvider: SyncStateStorage.Provider
+        get() = GlobalAccountManager.requireSyncStateStorageProvider()
+
+    private val clock by lazy {
+        GlobalAccountManager.systemClock
+    }
+
+    /**
+     * Whether or not this sync is a full sync. See [WorkManagerSyncDispatcher.Companion.getWorkerData] for how
+     * [KEY_IS_FULL_SYNC] input is determined.
+     *
+     * We choose to default to true in this case to keep existing behaviours on jobs that have been scheduled prior to
+     * this update. Once the app is opened and we schedule new sync, this flag will always be present.
+     */
+    private val isFullSync by lazy { params.inputData.getBoolean(KEY_IS_FULL_SYNC, true) }
 
     @VisibleForTesting
     internal fun isDebounced(): Boolean {
@@ -311,13 +511,14 @@ internal class WorkManagerSyncWorker(
     }
 
     override suspend fun doWork(): Result =
-        withContext(Dispatchers.IO) {
+        withContext(GlobalAccountManager.syncIoDispatcher) {
             logger.debug("Starting sync... Tagged as: ${params.tags}")
 
             // We will need a list of SyncableStores.
             val syncableStores =
                 params.inputData
-                    .getStringArray(KEY_DATA_STORES)
+                    .getNullableStringArray(KEY_DATA_STORES)
+                    ?.filterNotNull()
                     ?.filter {
                         !lastSyncedWithinStaggerBuffer(it)
                     }
@@ -346,13 +547,16 @@ internal class WorkManagerSyncWorker(
                 // Don't update the "last-synced" timestamp because we haven't actually synced anything.
                 Result.success()
             } else {
-                doSync(syncableStores)
+                SyncOperationTracker.executeSyncOperation {
+                    doSync(syncableStores)
+                }
             }
         }
 
     @Suppress("LongMethod", "CyclomaticComplexMethod")
     private suspend fun doSync(syncableStores: Map<SyncEngine, LazyStoreWithKey>): Result {
         val engineKeyProviders = mutableMapOf<SyncEngine, KeyProvider>()
+        val syncStateStorage = syncStateStorageProvider.get()
 
         // We need to tell RustSyncManager which engines to sync.
         val enginesToSync = SyncEngineSelection.Some(syncableStores.map { it.key.nativeName })
@@ -368,12 +572,6 @@ internal class WorkManagerSyncWorker(
                 SyncEngine.Bookmarks -> it.value.lazyStore.value.registerWithSyncManager()
                 SyncEngine.CreditCards -> {
                     it.value.lazyStore.value.registerWithSyncManager()
-
-                    checkNotNull(it.value.keyProvider) {
-                        "CreditCards store must be configured with a KeyProvider"
-                    }
-
-                    engineKeyProviders[it.key] = it.value.keyProvider!!.value
                 }
                 SyncEngine.Addresses -> {
                     it.value.lazyStore.value.registerWithSyncManager()
@@ -397,7 +595,7 @@ internal class WorkManagerSyncWorker(
         // We need any persisted state that we received from RustSyncManager in the past.
         // We should be able to pass a `null` value, but currently the library will crash.
         // See https://github.com/mozilla/application-services/issues/1829
-        val currentSyncState = getSyncState(context) ?: ""
+        val currentSyncState = syncStateStorage.persistedSyncState ?: ""
 
         // We need to tell RustSyncManager about our local "which engines are enabled/disabled" state.
         // This is a global state, shared by every sync client for this account. State that we will
@@ -453,17 +651,18 @@ internal class WorkManagerSyncWorker(
                 reason = reason.toRustSyncReason(),
                 engines = enginesToSync,
                 authInfo = syncAuthInfo,
-                enabledChanges = enabledChanges,
+                engineChoicesModel = EngineChoicesModel.Account(enabledChanges = enabledChanges),
                 persistedState = currentSyncState,
                 deviceSettings = deviceSettings,
                 localEncryptionKeys = localEncryptionKeys,
             )
 
-        val syncResult = syncManager.sync(syncParams)
+        logger.debug("Calling into rust sync manager")
+        val syncResult = rustSyncManager.sync(syncParams)
 
         // Persist the sync state; it may have changed during a sync, and RustSyncManager relies on us
         // to store it.
-        setSyncState(context, syncResult.persistedState)
+        syncStateStorage.persistedSyncState = syncResult.persistedState
 
         // Log the results.
         syncResult.failures.entries.forEach {
@@ -500,8 +699,10 @@ internal class WorkManagerSyncWorker(
                 // it's not clear if a single failure should prevent its update. That's the current behaviour
                 // in Fennec, but for very specific reasons that aren't relevant here. We could have
                 // a timestamp per store, or whatever we want here really.
-                // For now, we just update it every time we succeed to sync.
-                setLastSynced(context)
+                // For now, we just update it every time we successfully do a full sync
+                if (isFullSync) {
+                    syncStateStorage.lastSynced = clock.now()
+                }
                 Result.success()
             }
 
@@ -522,7 +723,6 @@ internal class WorkManagerSyncWorker(
                 // `nextSyncAllowedAt`, so we should be good either way.
                 Result.retry()
             }
-
             // Failure cases.
             ServiceStatus.AUTH_ERROR -> {
                 logger.error("Auth error")
@@ -543,6 +743,7 @@ internal class WorkManagerSyncWorker(
     /** Get sync auth info and notify the sync observers of any error */
     private suspend fun getSyncAuthInfo(): SyncAuthInfo? {
         return try {
+            logger.debug("Fetching account & sync token for auth info")
             val account = accountManager.connectedAccount() ?: error("No connected account")
             val token = account.getAccessToken(SCOPE_SYNC) ?: error("Unable to retrieve the sync access token")
             val tokenServerUrl = account.getTokenServerEndpointURL() ?: error("Unable to retrieve the token server url")
@@ -573,7 +774,6 @@ internal class WorkManagerSyncWorker(
 
 private const val SYNC_STATE_PREFS_KEY = "syncPrefs"
 private const val SYNC_LAST_SYNCED_KEY = "lastSynced"
-private const val SYNC_STATE_KEY = "persistedState"
 
 private const val SYNC_STARTUP_DELAY_MS = 5 * 1000L // 5 seconds.
 
@@ -585,34 +785,31 @@ private fun recordEngineSyncedTime(engine: String, now: Long = System.currentTim
     WorkManagerSyncWorker.engineSyncTimestamp[engine] = now
 }
 
+/**
+ * This API is currently compatible with [SharedPrefsSyncStateStorage] because they have the underlying shared
+ * preferences, but this API will be completely removed in bug https://bugzilla.mozilla.org/show_bug.cgi?id=2067060
+ */
+@Deprecated(
+    message =
+        "This API will be removed in the future. The last synced time should be accessed through the standard way" +
+            " of accessing sync state"
+)
 fun getLastSynced(context: Context): Long {
     return context.getSharedPreferences(SYNC_STATE_PREFS_KEY, Context.MODE_PRIVATE).getLong(SYNC_LAST_SYNCED_KEY, 0)
 }
 
-internal fun clearSyncState(context: Context) {
-    context.getSharedPreferences(SYNC_STATE_PREFS_KEY, Context.MODE_PRIVATE).edit { clear() }
-}
-
-internal fun getSyncState(context: Context): String? {
-    return context.getSharedPreferences(SYNC_STATE_PREFS_KEY, Context.MODE_PRIVATE).getString(SYNC_STATE_KEY, null)
-}
-
 /**
- * Saves the lastSyncedTime to the shared preferences
+ * Saves the lastSyncedTime to the shared preferences. Will be removed in
+ * https://bugzilla.mozilla.org/show_bug.cgi?id=2067060
  *
  * @param context the context
  * @param lastSyncedTime - the last synced time in milliseconds. Defaults to the current time.
  * @return the time that was stored.
  */
+@Deprecated(message = "This API will be removed in bug 2067060. This should not be set externally")
 fun setLastSynced(context: Context, lastSyncedTime: Long = System.currentTimeMillis()): Long {
     context.getSharedPreferences(SYNC_STATE_PREFS_KEY, Context.MODE_PRIVATE).edit {
         putLong(SYNC_LAST_SYNCED_KEY, lastSyncedTime)
     }
     return lastSyncedTime
-}
-
-internal fun setSyncState(context: Context, state: String) {
-    context.getSharedPreferences(SYNC_STATE_PREFS_KEY, Context.MODE_PRIVATE).edit {
-        putString(SYNC_STATE_KEY, state)
-    }
 }

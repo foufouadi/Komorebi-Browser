@@ -14,11 +14,15 @@ if CONFIG["MOZ_WIDGET_TOOLKIT"]:
         "Authenticode.cpp",
         "LoaderObserver.cpp",
         "ModuleLoadFrame.cpp",
-        "WindowsBCryptInitialization.cpp",
         "WindowsFallbackLoaderAPI.cpp",
         "WindowsMsctfInitialization.cpp",
         "WindowsOleAut32Initialization.cpp",
         "WindowsStackWalkInitialization.cpp",
+    ]
+    SOURCE_HEADERS += [
+        "LoaderObserver.h",
+        "ModuleLoadFrame.h",
+        "WindowsFallbackLoaderAPI.h",
     ]
 
 if not CONFIG["JS_STANDALONE"]:
@@ -42,7 +46,6 @@ EXPORTS.mozilla += [
     "CacheNtDllThunk.h",
     "LoaderAPIInterfaces.h",
     "ModuleLoadInfo.h",
-    "WindowsBCryptInitialization.h",
     "WindowsDllBlocklist.h",
     "WindowsDllBlocklistCommon.h",
     "WindowsDllBlocklistInfo.h",
@@ -77,3 +80,7 @@ DIRS += [
 ]
 
 FINAL_LIBRARY = "mozglue"
+
+SOURCE_HEADERS += [
+    "NtLoaderAPI.h",
+]

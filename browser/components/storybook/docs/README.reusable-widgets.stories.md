@@ -104,7 +104,7 @@ start altering the generated files and see your changes reflected in Storybook.
 ### Known `browser_all_files_referenced.js` issue
 
 Unfortunately for now [the
-browser_all_files_referenced.js test](https://searchfox.org/firefox-main/source/browser/base/content/test/static/browser_all_files_referenced.js)
+browser_all_files_referenced.js test](https://searchfox.org/firefox-main/source/browser/base/content/test/browser-static/browser_all_files_referenced.js)
 will fail unless your new component is immediately used somewhere outside
 of Storybook. We have plans to fix this issue, [see Bug 1806002 for more details](https://bugzilla.mozilla.org/show_bug.cgi?id=1806002), but for now you can get around it
 by updating [this array](https://searchfox.org/mozilla-central/rev/5c922d8b93b43c18bf65539bfc72a30f84989003/browser/base/content/test/static/browser_all_files_referenced.js#113) to include your new chrome filepath.
@@ -144,9 +144,6 @@ page it may be due to one of the following issues:
   ```html
   <html:your-component-name></html:your-component-name>
   ```
-- Adding a `script` tag to an `inc.xhtml` file. For example when using a new
-  component in the privacy section of `about:preferences` the `script` tag needs
-  to be added to `preferences.xhtml` rather than to `privacy.inc.xhtml`.
 - Trying to extend a built-in HTML element in Lit. [Because Webkit never
   implemented support for customized built-ins, Lit doesn't support it either.](https://github.com/lit/lit-element/issues/879#issuecomment-1061892879)
   That means if you want to do something like:

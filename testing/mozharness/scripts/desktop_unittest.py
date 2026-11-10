@@ -52,6 +52,8 @@ SUITE_INSTALL_EXTENSIONS = ["mochitest"]
 
 # DesktopUnittest {{{1
 class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin, CodeCoverageMixin):
+    python_constraints = "requirements-marionette.txt"
+
     config_options = (
         [
             [
@@ -694,7 +696,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin, CodeCoverageM
             abs_app_dir = self.query_abs_app_dir()
             abs_res_dir = self.query_abs_res_dir()
 
-            raw_log_file, error_summary_file, test_summary_file = self.get_indexed_logs(
+            raw_log_file, error_summary_file = self.get_indexed_logs(
                 dirs["abs_blob_upload_dir"], suite
             )
 
@@ -706,7 +708,6 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin, CodeCoverageM
                 "abs_res_dir": abs_res_dir,
                 "raw_log_file": raw_log_file,
                 "error_summary_file": error_summary_file,
-                "test_summary_file": test_summary_file,
                 "gtest_dir": os.path.join(dirs["abs_test_install_dir"], "gtest"),
             }
 
@@ -786,7 +787,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin, CodeCoverageM
                         else:
                             self.warning(
                                 "--tag does not currently work with the "
-                                "'{suite_category}' suite."
+                                f"'{suite_category}' suite."
                             )
                 elif c.get("total_chunks") and c.get("this_chunk"):
                     base_cmd.extend([
@@ -840,6 +841,9 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin, CodeCoverageM
                         "--filter-set does not currently work with suites other than "
                         "gtest."
                     )
+
+            if suite_category == "gtest":
+                base_cmd.extend(self.query_gtest_symbols_options())
 
             if c["combine_suites"]:
                 if suite_category == "gtest":
@@ -1285,6 +1289,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin, CodeCoverageM
 
     def run_tests(self):
         self._remove_xen_clipboard()
+        self.mkdir_p(self.query_abs_dirs()["abs_blob_upload_dir"])
         self._report_system_info()
         self.start_time = datetime.now()
         for category in SUITE_CATEGORIES:
@@ -1307,9 +1312,14 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin, CodeCoverageM
         max_per_test_tests = 10
         if self.per_test_coverage:
             max_per_test_tests = 30
+        if self.config.get("verify_paths"):
+            # The decision task sized each chunk for its share of the tests,
+            # rather than for the few a push usually modifies.
+            # max_per_test_time is the time limit of the whole per-test task,
+            # not of each test.
+            max_per_test_time = timedelta(minutes=150)
         executed_tests = 0
         executed_too_many_tests = False
-        xpcshell_selftests = 0
 
         if suites:
             self.info("#### Running %s suites" % suite_category)
@@ -1359,6 +1369,10 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin, CodeCoverageM
                     config=self.config,
                     error_list=error_list,
                     log_obj=self.log_obj,
+                    test_summary_file=self.query_test_summary_file(
+                        dirs["abs_blob_upload_dir"],
+                        self.config["suite_definitions"][suite_category],
+                    ),
                 )
 
                 if suite_category == "reftest":
@@ -1377,8 +1391,6 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin, CodeCoverageM
                 env["MOZ_UPLOAD_DIR"] = self.query_abs_dirs()["abs_blob_upload_dir"]
                 env["MINIDUMP_SAVE_PATH"] = self.query_abs_dirs()["abs_blob_upload_dir"]
                 env["RUST_BACKTRACE"] = "full"
-                if not os.path.isdir(env["MOZ_UPLOAD_DIR"]):
-                    self.mkdir_p(env["MOZ_UPLOAD_DIR"])
 
                 if self.config["allow_software_gl_layers"]:
                     env["MOZ_LAYERS_ALLOW_SOFTWARE_GL"] = "1"
@@ -1438,60 +1450,54 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin, CodeCoverageM
                     final_cmd = copy.copy(cmd)
                     final_cmd.extend(per_test_args)
 
-                    # Run xpcshell self-tests only once per test-verify run or only in chunk 1.
-                    if "--self-test" in final_cmd:
-                        should_remove_selftest = False
-
-                        # Remove self-test for test-verify runs after the first one
-                        if self.verify_enabled or self.per_test_coverage:
-                            xpcshell_selftests += 1
-                            if xpcshell_selftests > 1:
-                                should_remove_selftest = True
-
-                        # Remove self-test for chunked runs when not in chunk 1
-                        if (
+                    # Run xpcshell self-tests only in chunk 1, and never in per-test runs.
+                    if "--self-test" in final_cmd and (
+                        self.verify_enabled
+                        or self.per_test_coverage
+                        or (
                             self.config.get("this_chunk")
                             and int(self.config["this_chunk"]) != 1
-                        ):
-                            should_remove_selftest = True
-
-                        if should_remove_selftest:
-                            final_cmd.remove("--self-test")
+                        )
+                    ):
+                        final_cmd.remove("--self-test")
 
                     final_env = copy.copy(env)
 
                     if self.per_test_coverage:
-                        self.set_coverage_env(final_env)
+                        final_env.update(self.coverage_env())
 
-                    with VideoTestRecorder(suite, self):
-                        return_code = self.run_command(
-                            final_cmd,
-                            cwd=dirs["abs_work_dir"],
-                            output_timeout=cmd_timeout,
-                            output_parser=parser,
-                            env=final_env,
+                    try:
+                        with VideoTestRecorder(suite, self):
+                            return_code = self.run_command(
+                                final_cmd,
+                                cwd=dirs["abs_work_dir"],
+                                output_timeout=cmd_timeout,
+                                output_parser=parser,
+                                env=final_env,
+                            )
+
+                        if self.per_test_coverage:
+                            self.add_per_test_coverage_report(
+                                final_env, suite, per_test_args[-1]
+                            )
+
+                        # mochitest, reftest, and xpcshell suites do not return
+                        # appropriate return codes. Therefore, we must parse the output
+                        # to determine what the tbpl_status and worst_log_level must
+                        # be. We do this by:
+                        # 1) checking to see if our mozharness script ran into any
+                        #    errors itself with 'num_errors' <- OutputParser
+                        # 2) if num_errors is 0 then we look in the subclassed 'parser'
+                        #    findings for harness/suite errors <- DesktopUnittestOutputParser
+                        # 3) checking to see if the return code is in success_codes
+
+                        success_codes = None
+                        tbpl_status, log_level, summary = parser.evaluate_parser(
+                            return_code, success_codes, summary
                         )
-
-                    if self.per_test_coverage:
-                        self.add_per_test_coverage_report(
-                            final_env, suite, per_test_args[-1]
-                        )
-
-                    # mochitest, reftest, and xpcshell suites do not return
-                    # appropriate return codes. Therefore, we must parse the output
-                    # to determine what the tbpl_status and worst_log_level must
-                    # be. We do this by:
-                    # 1) checking to see if our mozharness script ran into any
-                    #    errors itself with 'num_errors' <- OutputParser
-                    # 2) if num_errors is 0 then we look in the subclassed 'parser'
-                    #    findings for harness/suite errors <- DesktopUnittestOutputParser
-                    # 3) checking to see if the return code is in success_codes
-
-                    success_codes = None
-                    tbpl_status, log_level, summary = parser.evaluate_parser(
-                        return_code, success_codes, summary
-                    )
-                    parser.append_tinderboxprint_line(suite_name)
+                        parser.append_tinderboxprint_line(suite_name)
+                    finally:
+                        parser.finish()
 
                     self.record_status(tbpl_status, level=log_level)
                     if len(per_test_args) > 0:

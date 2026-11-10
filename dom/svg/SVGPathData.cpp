@@ -187,13 +187,14 @@ static inline StyleCSSFloat GetRotate(const StyleAngle& aAngle) {
   return aAngle.ToDegrees();
 }
 
-template <typename Angle, typename Position, typename LP>
+template <typename Angle, typename AxisPosition, typename Position, typename LP>
 static already_AddRefed<Path> BuildPathInternal(
-    Span<const StyleGenericShapeCommand<Angle, Position, LP>> aPath,
+    Span<const StyleGenericShapeCommand<Angle, AxisPosition, Position, LP>>
+        aPath,
     PathBuilder* aBuilder, StyleStrokeLinecap aStrokeLineCap,
     Float aStrokeWidth, const CSSSize& aPercentageBasis, const Point& aOffset,
     float aZoomFactor) {
-  using Command = StyleGenericShapeCommand<Angle, Position, LP>;
+  using Command = StyleGenericShapeCommand<Angle, AxisPosition, Position, LP>;
 
   if (aPath.IsEmpty() || !aPath[0].IsMove()) {
     return nullptr;  // paths without an initial moveto are invalid
@@ -675,7 +676,7 @@ void SVGPathData::GetMarkerPositioningData(Span<const StylePathCommand> aPath,
     }
 
     // Set the angle of the mark at the start of this segment:
-    if (aMarks->Length()) {
+    if (!aMarks->IsEmpty()) {
       SVGMark& mark = aMarks->LastElement();
       if (!cmd.IsMove() && prevSeg && prevSeg->IsMove()) {
         // start of new subpath

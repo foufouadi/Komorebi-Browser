@@ -22,7 +22,7 @@ use crate::stylesheets::{CssRules, CustomMediaEvaluator};
 use crate::stylist::Stylist;
 use crate::values::computed::{CSSPixelLength, ContainerType, Context, Ratio};
 use crate::values::specified::ContainerName;
-use crate::{derives::*, LocalName};
+use crate::{LocalName, derives::*};
 use app_units::Au;
 use cssparser::{Parser, SourceLocation};
 use euclid::default::Size2D;
@@ -62,7 +62,7 @@ impl DeepCloneWithLock for ContainerRule {
         Self {
             conditions: self.conditions.clone(),
             rules: Arc::new(lock.wrap(rules.deep_clone_with_lock(lock, guard))),
-            source_location: self.source_location.clone(),
+            source_location: self.source_location,
         }
     }
 }
@@ -87,7 +87,23 @@ pub struct ContainerConditions(#[css(iterable)] pub ArcSlice<ContainerCondition>
 
 /// A set of attribute names used for invalidation of attr() inside
 /// style container queries.
-pub type AttrReferenceSet = PrecomputedHashSet<LocalName>;
+#[derive(Clone, Debug, ToShmem)]
+pub struct AttrReferenceSet {
+    /// Referenced attribute names.
+    pub names: PrecomputedHashSet<LocalName>,
+    /// Whether all observed references were fully parsed as names;
+    /// false if any `attr()` had nested references.
+    pub is_fully_parsed: bool,
+}
+
+impl Default for AttrReferenceSet {
+    fn default() -> Self {
+        Self {
+            names: Default::default(),
+            is_fully_parsed: true,
+        }
+    }
+}
 
 /// Whether this container uses attr() references and if so whether or not this
 /// is a named or unnamed container query. Used for determining which kind of
@@ -206,10 +222,7 @@ impl ContainerCondition {
         self.condition.as_ref()
     }
     /// Parse a container condition.
-    pub fn parse<'a>(
-        context: &ParserContext,
-        input: &mut Parser<'a, '_>,
-    ) -> Result<Self, ParseError<'a>> {
+    pub fn parse(context: &ParserContext, input: &mut Parser) -> Result<Self, ParseError> {
         let name = input
             .try_parse(|input| ContainerName::parse_for_query(context, input))
             .ok()
@@ -218,12 +231,12 @@ impl ContainerCondition {
             .try_parse(|input| QueryCondition::parse(context, input, FeatureType::Container))
             .ok();
         if condition.is_none() && name.is_none() {
-            return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError));
+            return Err(ParseError::custom(StyleParseErrorKind::UnspecifiedError));
         }
         let mut attributes_referenced = AttrReferenceSet::default();
-        condition
-            .as_ref()
-            .map(|c| c.collect_attribute_references(&mut attributes_referenced));
+        if let Some(c) = condition.as_ref() {
+            c.collect_attribute_references(&mut attributes_referenced)
+        }
         let flags = condition
             .as_ref()
             .map_or(FeatureFlags::empty(), |c| c.cumulative_flags());
@@ -258,21 +271,21 @@ impl ContainerCondition {
         let box_style = style.get_box();
 
         // Filter by container-type.
-        let container_type = box_style.clone_container_type();
+        let container_type = *box_style.get_container_type();
         let available_axes = container_type_axes(container_type, wm);
         if !available_axes.contains(self.flags.container_axes()) {
             return TraversalResult::InProgress;
         }
 
         // Filter by container-name.
-        let container_name = box_style.clone_container_name();
+        let container_name = box_style.get_container_name();
         for filter_name in self.name.0.iter() {
             if !container_name.0.contains(filter_name) {
                 return TraversalResult::InProgress;
             }
         }
 
-        let size = potential_container.query_container_size(&box_style.clone_display());
+        let size = potential_container.query_container_size(box_style.get_display());
         let style = style.to_arc();
         TraversalResult::Done(ContainerLookupResult {
             element: potential_container,
@@ -300,16 +313,14 @@ impl ContainerCondition {
     where
         E: TElement,
     {
-        match traverse_container(
+        traverse_container(
             e,
             originating_element_style,
             |element, originating_element_style| {
                 self.valid_container_info(element, originating_element_style)
             },
-        ) {
-            Some((_, result)) => Some(result),
-            None => None,
-        }
+        )
+        .map(|(_, result)| result)
     }
 
     /// Tries to match a container query condition for a given element.
@@ -395,28 +406,35 @@ impl ContainerCondition {
         &self.attributes_referenced
     }
 
-    /// Insert the attribute dependencies and attribute dependency kind into
-    /// the attribute_dependencies set and the attr_function_dependencies map.
+    /// Insert the attribute dependencies and attribute dependency kind into the
+    /// attribute_dependencies set and the container_attr_function_dependencies map.
+    /// Returns whether there are dependencies on attributes whose names could not
+    /// be known at parse time.
     pub fn insert_attribute_references_in_dependency_map(
         &self,
         kind_map: &mut PrecomputedHashMap<LocalName, ContainerAttributeDependencyKind>,
-        attribute_dependencies: &mut AttrReferenceSet,
-    ) {
+        attribute_dependencies: &mut PrecomputedHashSet<LocalName>,
+    ) -> ContainerAttributeDependencyKind {
         let name_kind = if self.name.is_none() {
             ContainerAttributeDependencyKind::UnnamedContainer
         } else {
             ContainerAttributeDependencyKind::NamedContainer
         };
-        for attr in self.get_attributes_referenced() {
+        for attr in &self.get_attributes_referenced().names {
             kind_map
-                .entry(attr.clone())
+                .entry_ref(attr)
                 .and_modify(|v| {
                     if *v == ContainerAttributeDependencyKind::UnnamedContainer {
                         *v = name_kind
                     }
                 })
                 .or_insert(name_kind);
-            attribute_dependencies.insert(attr.clone());
+            attribute_dependencies.get_or_insert_with(attr, Clone::clone);
+        }
+        if self.attributes_referenced.is_fully_parsed {
+            ContainerAttributeDependencyKind::None
+        } else {
+            name_kind
         }
     }
 }
@@ -562,10 +580,8 @@ impl ContainerSizeQueryResult {
             if let Some(w) = self.width {
                 return w;
             }
-        } else {
-            if let Some(h) = self.height {
-                return h;
-            }
+        } else if let Some(h) = self.height {
+            return h;
         }
         Self::get_logical_viewport_size(context).inline
     }
@@ -650,8 +666,8 @@ impl<'a> ContainerSizeQuery<'a> {
         let wm = style.writing_mode;
         let box_style = style.get_box();
 
-        let container_type = box_style.clone_container_type();
-        let size = e.query_container_size(&box_style.clone_display());
+        let container_type = *box_style.get_container_type();
+        let size = e.query_container_size(box_style.get_display());
         if container_type.intersects(ContainerType::SIZE) {
             TraversalResult::Done(ContainerSizeQueryResult {
                 width: size.width,
@@ -727,16 +743,16 @@ impl<'a> ContainerSizeQuery<'a> {
 
         // If there's no style, such as being `display: none` or so, we still want to show a
         // correct computed value, so give it a try.
-        let should_traverse = parent_style.map_or(true, |s| {
+        let should_traverse = parent_style.is_none_or(|s| {
             s.flags
                 .contains(ComputedValueFlags::SELF_OR_ANCESTOR_HAS_SIZE_CONTAINER_TYPE)
         });
         if !should_traverse {
             return Self::none();
         }
-        return Self::NotEvaluated(Box::new(move || {
+        Self::NotEvaluated(Box::new(move || {
             Self::lookup(element, if is_pseudo { known_parent_style } else { None })
-        }));
+        }))
     }
 
     /// Create a new instance, but with optional element.

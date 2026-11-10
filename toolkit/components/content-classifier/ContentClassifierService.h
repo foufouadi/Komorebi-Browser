@@ -20,10 +20,12 @@
 #include "nsIClassifiedChannel.h"
 #include "nsIContentClassifierService.h"
 #include "nsIContentClassifierRemoteSettingsClient.h"
+#include "nsIMemoryReporter.h"
 #include "nsISupportsImpl.h"
 #include "nsLiteralString.h"
 #include "nsTArray.h"
 #include "nsTHashMap.h"
+#include "nsCharSeparatedTokenizer.h"
 
 #include "mozilla/ContentClassifierEngine.h"
 
@@ -90,10 +92,10 @@ struct ContentClassifierFeature {
   Maybe<nsIScopedPrefs::Pref> mReferencedScopedPref;
 
   // Optional predicate evaluated before classification. When non-null, the
-  // feature's engine is skipped for any request where this returns false.
-  // Allows features to restrict classification to a request subset without
-  // needing per-request engine variants.
-  bool (*mRequestFilter)(const ContentClassifierRequest&);
+  // feature's engine is skipped for any request where this returns false for
+  // the given mode. Allows features to restrict classification to a request
+  // subset without needing per-request engine variants.
+  bool (*mRequestFilter)(const ContentClassifierRequest&, ClassifyMode);
 
   // Optional callback invoked just before a matched channel is cancelled, after
   // SetBlockedContent and before aChannel->Cancel(). Null for most features.
@@ -173,13 +175,32 @@ struct EnginesPrefsSnapshot {
         mAnnotatePBM);
   }
 
+  // Whether test_block and test_annotate stand in for the trackers engine.
+  static bool UseTestTrackersEngines() {
+    return Preferences::GetBool(
+        "privacy.trackingprotection.content.testing.use_test_trackers_engines",
+        false);
+  }
+
+  // Appends the feature names listed in the engines pref |aPref|. With
+  // UseTestTrackersEngines(), the trackers engine is replaced by test_block in
+  // the protection engines prefs and by test_annotate in the annotation ones.
   static void AppendFeatureNamesFromPref(const char* aPref,
                                          nsTArray<nsCString>& aOut) {
     nsAutoCString value;
     Preferences::GetCString(aPref, value);
+    const bool useTestEngines = UseTestTrackersEngines();
+    const bool isProtectionPref =
+        !strcmp(aPref,
+                "privacy.trackingprotection.content.protection.engines") ||
+        !strcmp(aPref,
+                "privacy.trackingprotection.content.protection.engines.pbmode");
     for (const auto& part : value.Split(',')) {
       nsAutoCString name(part);
       name.Trim("\b\t\r\n ");
+      if (useTestEngines && name.EqualsLiteral("trackers")) {
+        name = isProtectionPref ? "test_block"_ns : "test_annotate"_ns;
+      }
       if (!name.IsEmpty() && !aOut.Contains(name)) {
         aOut.AppendElement(name);
       }
@@ -236,11 +257,13 @@ class ContentClassifierProbeReport final
 };
 
 class ContentClassifierService final : public nsIAsyncShutdownBlocker,
-                                       public nsIContentClassifierService {
+                                       public nsIContentClassifierService,
+                                       public nsIMemoryReporter {
  public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIASYNCSHUTDOWNBLOCKER
   NS_DECL_NSICONTENTCLASSIFIERSERVICE
+  NS_DECL_NSIMEMORYREPORTER
 
   static already_AddRefed<ContentClassifierService> GetInstance();
 
@@ -282,14 +305,15 @@ class ContentClassifierService final : public nsIAsyncShutdownBlocker,
   void RemoveBlocker();
   already_AddRefed<nsIAsyncShutdownClient> GetAsyncShutdownBarrier() const;
 
-  // aIndependentEngines makes every engine evaluate its own rules in
-  // isolation; matched_rule is not threaded across engines. Used by the
-  // annotate phase so MaybeAnnotateChannel can attribute matches to every
-  // feature whose rules actually fired. The cancel phase passes false so
-  // trailing exception engines see the propagated matched_rule.
+  // Cancel threads matched_rule across engines so trailing exception engines
+  // see an earlier hit. Annotate evaluates every engine in isolation so
+  // MaybeAnnotateChannel can attribute matches to every feature whose rules
+  // fired, and also classifies top-level documents. Which requests a feature
+  // considers in each mode is decided by its mRequestFilter.
   ContentClassifierResult ClassifyWithEngines(
       const nsTArray<RefPtr<ContentClassifierEngine>>& aEngines,
-      const ContentClassifierRequest& aRequest, bool aIndependentEngines);
+      const ContentClassifierRequest& aRequest, ClassifyMode aMode)
+      MOZ_REQUIRES(mLock);
 
   // Take a fresh pref snapshot, decide which active features need to be
   // (re)built — either because they have no engine yet, or because one of
@@ -301,10 +325,12 @@ class ContentClassifierService final : public nsIAsyncShutdownBlocker,
   // This rebuilds the given features,
   // according to that preference snapshot. This also means that features that
   // aren't referenced by the current pref snapshot are going to have their
-  // engine destroyed.
-  void UpdateFeatures(
-      const nsTArray<const ContentClassifierFeature*>& aFeatures,
-      EnginesPrefsSnapshot aPreferenceSnapshot);
+  // engine destroyed. aFeatureVersions holds the version of each entry in
+  // aFeatures and aGeneration the update generation, both already bumped
+  // by ProcessListChanges.
+  void UpdateFeatures(nsTArray<const ContentClassifierFeature*> aFeatures,
+                      nsTArray<uint64_t> aFeatureVersions, uint64_t aGeneration,
+                      EnginesPrefsSnapshot aPreferenceSnapshot);
 
   // Put the given engine into the authoritative map. Doesn't update references
   // to this feature's engine elsewhere. See
@@ -359,7 +385,7 @@ class ContentClassifierService final : public nsIAsyncShutdownBlocker,
       MOZ_GUARDED_BY(mLock);
 
   // Per-feature monotonic version counter, bumped each time
-  // UpdateFeatures decides to rebuild that feature's engine. The
+  // ProcessListChanges decides to rebuild that feature's engine. The
   // version is captured into the build closure at dispatch time;
   // when the closure later runs it skips installation for any feature
   // whose recorded version no longer matches the current one (i.e. a
@@ -367,11 +393,12 @@ class ContentClassifierService final : public nsIAsyncShutdownBlocker,
   // can't write each other's stale results.
   nsTHashMap<nsCStringHashKey, uint64_t> mFeatureVersions MOZ_GUARDED_BY(mLock);
 
-  // Global update generation. Bumped under mLock on every UpdateFeatures
-  // call (including the empty-features path). Each closure captures
-  // its generation at dispatch time and only runs Populate / Prune /
-  // Notify when its generation equals mUpdateGeneration — i.e., no
-  // newer UpdateFeatures has been issued. This prevents an older
+  // Global update generation. Bumped under mLock on every
+  // ProcessListChanges call (including the empty-features path), under the
+  // same lock that decides which features to rebuild. Each
+  // closure captures its generation at dispatch time and only runs
+  // Populate / Prune / Notify when its generation equals mUpdateGeneration
+  // — i.e., no newer ProcessListChanges has been issued. This prevents an older
   // closure with a stale snapshot from clobbering active-engine lists
   // populated by a newer call's snapshot.
   uint64_t mUpdateGeneration MOZ_GUARDED_BY(mLock) = 0;
@@ -394,8 +421,9 @@ class ContentClassifierService final : public nsIAsyncShutdownBlocker,
 
   // Serial background task queue used for the CPU-heavy half of engine
   // rebuilds (BuildEngineFromRules) plus the lock-holding install /
-  // populate / prune phase. Created in Init(); drained and cleared in
-  // BlockShutdown before RemoveBlocker runs.
+  // populate / prune phase. Created in Init(); cleared in BlockShutdown.
+  // Shutdown does not wait for it to drain: closures already on it are no-ops
+  // once mInitPhase leaves InitSucceeded.
   nsCOMPtr<nsISerialEventTarget> mBuildThread;
 };
 

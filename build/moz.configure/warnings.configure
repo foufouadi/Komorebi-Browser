@@ -21,7 +21,6 @@ def warnings_as_errors(warnings_as_errors):
 set_config("WARNINGS_AS_ERRORS", warnings_as_errors)
 
 not_clang_cl = depends(c_compiler)(lambda c: c.type != "clang-cl")
-not_clang = depends(c_compiler)(lambda c: c.type != "clang")
 not_clang_based = depends(c_compiler)(lambda c: c.type not in ("clang", "clang-cl"))
 
 # GCC/Clang warnings:
@@ -45,8 +44,21 @@ check_and_add_warning("-Wformat-type-confusion", min_clang_version="10.0.0")
 # catches return types with qualifiers like const
 add_warning("-Wignored-qualifiers")
 
+# catches some implicit conversions from int to enum
+check_and_add_warning(
+    "-Wimplicit-int-enum-cast", cxx_compiler, min_clang_version="21.0.0"
+)
+
+# gcc doesn't support clang's nonstandard 0o octal prefix, so make clang warn
+check_and_add_warning(
+    "-Woctal-prefix-extension", cxx_compiler, min_clang_version="21.0.0"
+)
+
 # catches pointer arithmetic using NULL or sizeof(void)
 add_warning("-Wpointer-arith")
+
+# catches right shifting a bool, which implicitly converts it to int
+check_and_add_warning("-Wshift-bool", min_clang_version="21.0.0")
 
 # catch modifying constructor parameter that shadows member variable
 check_and_add_warning(
@@ -80,6 +92,9 @@ check_and_add_warning(
     min_clang_version="13.0.0",
     when=depends(c_compiler)(lambda c: c.type in ("clang", "clang-cl")),
 )
+
+# catches implicit conversions between incompatible SIMD vector types
+check_and_add_warning("-Wvector-conversion", min_clang_version="4.0.0")
 
 # turned on by -Wall, but we use offsetof on non-POD types frequently
 add_warning("-Wno-invalid-offsetof", cxx_compiler)
@@ -317,6 +332,7 @@ check_and_add_warning(
     ),
     min_clang_version="4.0.0",
 )
+check_and_add_warning("-Wthread-safety-pointer", min_clang_version="21.0.0")
 
 # Warn if APIs are used without available() checks on macOS.
 check_and_add_warning(

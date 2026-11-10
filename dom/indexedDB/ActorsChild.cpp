@@ -1151,7 +1151,7 @@ mozilla::ipc::IPCResult BackgroundFactoryRequestChild::RecvBlocked(
 
 BackgroundDatabaseChild::BackgroundDatabaseChild(
     const DatabaseSpec& aSpec, BackgroundFactoryRequestChild* aOpenRequestActor)
-    : mSpec(MakeUnique<DatabaseSpec>(aSpec)),
+    : mSpec(std::make_unique<DatabaseSpec>(aSpec)),
       mOpenRequestActor(aOpenRequestActor),
       mDatabase(nullptr),
       mPendingInvalidate(false) {
@@ -2275,7 +2275,7 @@ nsresult BackgroundRequestChild::PreprocessHelper::Init(
 
   mStream = std::move(stream);
 
-  mCloneData = MakeUnique<JSStructuredCloneData>(
+  mCloneData = std::make_unique<JSStructuredCloneData>(
       JS::StructuredCloneScope::DifferentProcessForIndexedDB);
 
   return NS_OK;
@@ -2688,8 +2688,14 @@ void BackgroundCursorChild<CursorType>::SendContinueInternal(
 template <IDBCursorType CursorType>
 void BackgroundCursorChild<CursorType>::CompleteContinueRequestFromCache() {
   AssertIsOnOwningThread();
+
+  if (!mCursor) {
+    mStrongCursor = nullptr;
+    mDelayedResponses.clear();
+    return;
+  }
+
   MOZ_ASSERT(mTransaction);
-  MOZ_ASSERT(mCursor);
   MOZ_ASSERT(mStrongCursor);
   MOZ_ASSERT(!mDelayedResponses.empty());
   MOZ_ASSERT(mCursor->GetType() == CursorType);
@@ -2991,9 +2997,7 @@ void BackgroundCursorChild<CursorType>::ActorDestroy(ActorDestroyReason aWhy) {
 
   if (mCursor) {
     mCursor->ClearBackgroundActor();
-#ifdef DEBUG
     mCursor = nullptr;
-#endif
   }
 
 #ifdef DEBUG

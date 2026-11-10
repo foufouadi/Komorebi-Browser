@@ -69,8 +69,6 @@ class BaseContentList : public NodeList {
 
   void Reset() { mElements.Clear(); }
 
-  virtual int32_t IndexOf(nsIContent* aContent, bool aDoFlush);
-
   JSObject* WrapObject(JSContext* cx,
                        JS::Handle<JSObject*> aGivenProto) override = 0;
 
@@ -121,8 +119,21 @@ class SimpleContentList : public BaseContentList {
 class HTMLCollection : public BaseContentList {
  public:
   Element* Item(uint32_t aIndex) override = 0;
+  // Non-virtual getter for populated mElements, otherwise falls back to Item()
+  Element* FastItem(uint32_t aIndex) {
+    if (aIndex < mElements.Length()) {
+      nsIContent* content = mElements[aIndex];
+      MOZ_ASSERT(content->IsElement(),
+                 "HTMLCollection can only contain elements");
+      MOZ_ASSERT(Item(aIndex) == content,
+                 "Subclasses should keep mElements consistent");
+      return content->AsElement();
+    } else {
+      return Item(aIndex);
+    }
+  }
   Element* IndexedGetter(uint32_t aIndex, bool& aFound) {
-    Element* item = Item(aIndex);
+    Element* item = FastItem(aIndex);
     aFound = !!item;
     return item;
   }
@@ -232,6 +243,7 @@ class ContentList : public HTMLCollection, public nsStubMultiMutationObserver {
 
  public:
   NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(ContentList, HTMLCollection)
 
   /**
    * @param aRootNode The node under which to limit our search.
@@ -250,12 +262,10 @@ class ContentList : public HTMLCollection, public nsStubMultiMutationObserver {
    *              our root.
    * @param aLiveList Whether the created list should be a live list observing
    *                  mutations to the DOM tree.
-   * @param aKnownParserCreated Whether the element is known to be parser
-   *                  created, even if not in the document yet.
    */
   ContentList(nsINode* aRootNode, int32_t aMatchNameSpaceId,
               nsAtom* aHTMLMatchAtom, nsAtom* aXMLMatchAtom, bool aDeep = true,
-              bool aLiveList = true, bool aKnownParserCreated = false);
+              bool aLiveList = true);
 
   /**
    * @param aRootNode The node under which to limit our search.
@@ -274,15 +284,12 @@ class ContentList : public HTMLCollection, public nsStubMultiMutationObserver {
    *                             sensitive to attribute changes.
    * @param aLiveList Whether the created list should be a live list observing
    *                  mutations to the DOM tree.
-   * @param aKnownParserCreated Whether the element is known to be parser
-   *                  created, even if not in the document yet.
    */
   ContentList(nsINode* aRootNode, nsContentListMatchFunc aFunc,
               nsContentListDestroyFunc aDestroyFunc, void* aData,
               bool aDeep = true, nsAtom* aMatchAtom = nullptr,
               int32_t aMatchNameSpaceId = kNameSpaceID_None,
-              bool aFuncMayDependOnAttr = true, bool aLiveList = true,
-              bool aKnownParserCreated = false);
+              bool aFuncMayDependOnAttr = true, bool aLiveList = true);
 
   JSObject* WrapObject(JSContext* aCx,
                        JS::Handle<JSObject*> aGivenProto) override;
@@ -292,40 +299,27 @@ class ContentList : public HTMLCollection, public nsStubMultiMutationObserver {
 
  public:
   // BaseContentList overrides
-  int32_t IndexOf(nsIContent* aContent, bool aDoFlush) override;
   int32_t IndexOf(nsIContent* aContent) override;
   nsINode* GetParentObject() override { return mRootNode; }
 
-  uint32_t Length() final { return Length(true); }
+  uint32_t Length() final;
   Element* Item(uint32_t aIndex) final;
-  Element* GetFirstNamedElement(const nsAString& aName, bool& aFound) override {
-    Element* item = NamedItem(aName, true);
-    aFound = !!item;
-    return item;
-  }
+  Element* GetFirstNamedElement(const nsAString& aName, bool& aFound) override;
   void GetSupportedNames(nsTArray<nsString>& aNames) override {
     GetSupportedNames(aNames, nullptr);
   }
 
   void GetSupportedNames(nsTArray<nsString>& aNames,
                          FilterElementWithName aFilter) {
-    BringSelfUpToDate(true);
+    BringSelfUpToDate();
     HTMLCollection::GetSupportedNames(aNames, aFilter);
   }
-
-  using HTMLCollection::NamedItem;
-
-  // ContentList public methods
-  uint32_t Length(bool aDoFlush);
-  Element* Item(uint32_t aIndex, bool aDoFlush);
-  Element* NamedItem(const nsAString& aName, bool aDoFlush);
 
   // nsIMutationObserver
   NS_DECL_NSIMUTATIONOBSERVER_ATTRIBUTECHANGED
   NS_DECL_NSIMUTATIONOBSERVER_CONTENTAPPENDED
   NS_DECL_NSIMUTATIONOBSERVER_CONTENTINSERTED
   NS_DECL_NSIMUTATIONOBSERVER_CONTENTREMOVED
-  NS_DECL_NSIMUTATIONOBSERVER_NODEWILLBEDESTROYED
 
   bool MatchesKey(const ContentListKey& aKey) const {
     // The root node is most commonly the same: the document.  And the
@@ -356,6 +350,11 @@ class ContentList : public HTMLCollection, public nsStubMultiMutationObserver {
   class HashEntry;
 
  protected:
+  /**
+   * Stop observing the root nodes and release mRootNode.
+   */
+  virtual void DisconnectFromRoot();
+
   // A cache from name to the first named item in mElements. Only possibly
   // non-null when mState is State::UpToDate. Elements are kept alive by our
   // mElements array.
@@ -372,7 +371,7 @@ class ContentList : public HTMLCollection, public nsStubMultiMutationObserver {
   inline void InvalidateNamedItemsCacheForInsertion(Element&);
   inline void InvalidateNamedItemsCacheForDeletion(Element&);
 
-  void EnsureNamedItemsCacheValid(bool aDoFlush);
+  void EnsureNamedItemsCacheValid();
 
   /**
    * Returns whether the element matches our criterion
@@ -381,6 +380,15 @@ class ContentList : public HTMLCollection, public nsStubMultiMutationObserver {
    * @return whether we match
    */
   bool Match(Element* aElement);
+
+  enum class MatchSelfMode : uint8_t {
+    Insertion,
+    // Also accept SVG elements that may have a class. SMIL can change their
+    // class without notification, so they can be in the list without
+    // matching now. Needed when aContent leaves the subtree.
+    Removal,
+  };
+
   /**
    * See if anything in the subtree rooted at aContent, including
    * aContent itself, matches our criterion.
@@ -388,6 +396,7 @@ class ContentList : public HTMLCollection, public nsStubMultiMutationObserver {
    * @param  aContent the root of the subtree to match against
    * @return whether we match something in the tree rooted at aContent
    */
+  template <MatchSelfMode Mode>
   bool MatchSelf(nsIContent* aContent);
 
   virtual nsINode* GetNextNode(nsINode* aCurrent);
@@ -400,11 +409,8 @@ class ContentList : public HTMLCollection, public nsStubMultiMutationObserver {
    *
    * @param aNeededLength the length the list should have when we are
    *        done (unless it exhausts the document)
-   * @param aExpectedElementsIfDirty is for debugging only to
-   *        assert that mElements has expected number of entries.
    */
-  virtual void PopulateSelf(uint32_t aNeededLength,
-                            uint32_t aExpectedElementsIfDirty = 0);
+  virtual void PopulateSelf(uint32_t aNeededLength);
 
   /**
    * @param  aContainer a content node which must be a descendant of
@@ -426,7 +432,7 @@ class ContentList : public HTMLCollection, public nsStubMultiMutationObserver {
    * If state is not LIST_UP_TO_DATE, fully populate ourselves with
    * all the nodes we can find.
    */
-  void BringSelfUpToDate(bool aDoFlush);
+  void BringSelfUpToDate();
 
   /**
    * To be called from non-destructor locations that want to remove from caches.
@@ -442,7 +448,7 @@ class ContentList : public HTMLCollection, public nsStubMultiMutationObserver {
     }
   }
 
-  nsINode* mRootNode;  // Weak ref
+  RefPtr<nsINode> mRootNode;
   int32_t mMatchNameSpaceId;
   RefPtr<nsAtom> mHTMLMatchAtom;
   RefPtr<nsAtom> mXMLMatchAtom;
@@ -482,10 +488,6 @@ class ContentList : public HTMLCollection, public nsStubMultiMutationObserver {
    * attributes.
    */
   bool mFuncMayDependOnAttr : 1;
-  /**
-   * Whether we actually need to flush to get our state correct.
-   */
-  bool mFlushesNeeded : 1;
   /**
    * Whether the ownerDocument of our root node at list creation time was an
    * HTML document.  Only needed when we're doing a namespace/atom match, not
@@ -641,10 +643,10 @@ class LabelsNodeList final : public ContentList {
    */
   void ResetRoots();
 
-  void LastRelease() override;
-
  protected:
   virtual ~LabelsNodeList();
+
+  void DisconnectFromRoot() override;
 
   nsINode* GetNextNode(nsINode* aCurrent) override;
 
@@ -655,11 +657,8 @@ class LabelsNodeList final : public ContentList {
    *
    * @param aNeededLength The list of length should have when we are
    *                      done (unless it exhausts the document).
-   * @param aExpectedElementsIfDirty is for debugging only to
-   *        assert that mElements has expected number of entries.
    */
-  void PopulateSelf(uint32_t aNeededLength,
-                    uint32_t aExpectedElementsIfDirty = 0) override;
+  void PopulateSelf(uint32_t aNeededLength) override;
 
   bool NodeIsInScope(nsINode* aNode);
 

@@ -66,7 +66,7 @@ WMFVideoMFTManager::WMFVideoMFTManager(
       mImageSize(aConfig.mImage),
       mStreamType(GetStreamTypeFromMimeType(aConfig.mMimeType)),
       mSoftwareImageSize(aConfig.mImage),
-      mSoftwarePictureSize(aConfig.mImage),
+      mPictureSize(aConfig.mImage),
       mVideoStride(0),
       mColorSpace(aConfig.mColorSpace),
       mColorRange(aConfig.mColorRange),
@@ -325,9 +325,13 @@ MediaResult WMFVideoMFTManager::InitInternal() {
         uint32_t(media::MediaDecoderBackend::WMFSoftware));
   }
 
-  // Note that some HDR videos are 8bit, and end up decoding to NV12/YV12,
-  // rather than the more obvious P010, and the decoder won't let us force P010.
-  // See https://bugzilla.mozilla.org/show_bug.cgi?id=2008887
+  // Note that some HDR videos are 8bit, and end up decoding to NV12/YV12 rather
+  // than the more common HDR formats (P010/P012/P016 which are all identical
+  // layouts in memory) which is uncommon but fine, whether it is HDR is a
+  // decision we make based on transfer function rather than format.
+  //
+  // See https://bugzilla.mozilla.org/show_bug.cgi?id=2008887 for samples of
+  // this kind of video.
   const GUID& outputSubType = GetOutputSubtype();
   LOG("Created a video decoder, useDxva={}, streamType={}, outputSubType={}, "
       "isHDR={}",
@@ -680,8 +684,8 @@ WMFVideoMFTManager::CreateBasicVideoFrame(IMFSample* aSample,
   }
   TimeUnit duration = GetSampleDurationOrLastKnownDuration(aSample);
   NS_ENSURE_TRUE(duration.IsValid(), E_FAIL);
-  gfx::IntRect pictureRegion = mVideoInfo.ScaledImageRect(
-      mSoftwarePictureSize.width, mSoftwarePictureSize.height);
+  gfx::IntRect pictureRegion =
+      mVideoInfo.ScaledImageRect(mPictureSize.width, mPictureSize.height);
 
   if (colorDepth != gfx::ColorDepth::COLOR_8 || !mKnowsCompositor ||
       !mKnowsCompositor->SupportsD3D11() || !mIMFUsable) {
@@ -765,7 +769,7 @@ WMFVideoMFTManager::CreateD3DVideoFrame(IMFSample* aSample,
   HRESULT hr;
 
   gfx::IntRect pictureRegion =
-      mVideoInfo.ScaledImageRect(mImageSize.width, mImageSize.height);
+      mVideoInfo.ScaledImageRect(mPictureSize.width, mPictureSize.height);
   RefPtr<Image> image;
   if (mZeroCopyNV12Texture && mDXVA2Manager->SupportsZeroCopyNV12Texture()) {
     hr = mDXVA2Manager->WrapTextureWithImage(aSample, pictureRegion,
@@ -883,16 +887,25 @@ WMFVideoMFTManager::Output(int64_t aStreamOffset, RefPtr<MediaData>& aOutData) {
       hr = mDecoder->GetOutputMediaType(outputType);
       NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
 
+      gfx::IntRect picture;
+      hr = GetPictureRegion(outputType, picture);
+      NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
+      MOZ_ASSERT(picture.width != 0 && picture.height != 0);
+      mPictureSize = gfx::IntSize(picture.width, picture.height);
+      LOG("Output stream change, picture=[{},{}]", mPictureSize.width,
+          mPictureSize.height);
+
       // Now we need to convert the video decode output to a display format.
       if (mUseHwAccel) {
+        const gfx::IntRect pictureRegion =
+            mVideoInfo.ScaledImageRect(mPictureSize.width, mPictureSize.height);
         hr = mDXVA2Manager->ConfigureForSize(
             outputType,
             mColorSpace.refOr(
                 DefaultColorSpace({mImageSize.width, mImageSize.height})),
             mColorRange, mColorDepth,
             mVideoInfo.mTransferFunction.refOr(gfx::TransferFunction::BT709),
-            mVideoInfo.mHDRMetadata, mVideoInfo.ImageRect().width,
-            mVideoInfo.ImageRect().height);
+            mVideoInfo.mHDRMetadata, pictureRegion.width, pictureRegion.height);
         NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
       } else {
         // The stride may have changed, recheck for it.
@@ -906,15 +919,8 @@ WMFVideoMFTManager::Output(int64_t aStreamOffset, RefPtr<MediaData>& aOutData) {
         NS_ENSURE_TRUE(width <= MAX_VIDEO_WIDTH, E_FAIL);
         NS_ENSURE_TRUE(height <= MAX_VIDEO_HEIGHT, E_FAIL);
         mSoftwareImageSize = gfx::IntSize(width, height);
-
-        gfx::IntRect picture;
-        hr = GetPictureRegion(outputType, picture);
-        NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
-        MOZ_ASSERT(picture.width != 0 && picture.height != 0);
-        mSoftwarePictureSize = gfx::IntSize(picture.width, picture.height);
-        LOG("Output stream change, image size=[{}x{}], picture=[{},{}]",
-            mSoftwareImageSize.width, mSoftwareImageSize.height,
-            mSoftwarePictureSize.width, mSoftwarePictureSize.height);
+        LOG("Output stream change, image size=[{}x{}]",
+            mSoftwareImageSize.width, mSoftwareImageSize.height);
       }
       // Catch infinite loops, but some decoders perform at least 2 stream
       // changes on consecutive calls, so be permissive.

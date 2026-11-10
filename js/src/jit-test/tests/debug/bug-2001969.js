@@ -1,4 +1,4 @@
-// |jit-test| --fuzzing-safe; --ion-offthread-compile=off; --baseline-warmup-threshold=0; error: ReferenceError
+// |jit-test| --ion-offthread-compile=off; --baseline-warmup-threshold=0; error: ReferenceError
 
 gczeal(2, 5);
 function assertOffsetColumns(code) {
@@ -9,8 +9,8 @@ function assertOffsetColumns(code) {
   const dbg = new Debugger;
   let debuggeeFn = dbg.addDebuggee(global).makeDebuggeeValue(global.f);
   const { script } = debuggeeFn;
-  for (const offset of script.getAllColumnOffsets()) {
-    script.setBreakpoint(offset.offset, {});
+  for (const bp of script.getPossibleBreakpoints()) {
+    script.setBreakpoint(bp.offset, {});
   }
   global.f(3);
   throw new Error(`Assertion failed: ${foo}`);

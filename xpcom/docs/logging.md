@@ -79,6 +79,9 @@ terms:
 | profilerstacks      | Profiler | When profiling with the Firefox Profiler and log modules are enabled, capture the callstack for each log statement.                                                                                                 |
 | jsstacks            | Any      | Enables logging JavaScript stack traces when logging JavaScript console messages. (this may be extended outside of only console messages)                                                                           |
 
+For `rotate` and `maxsize`, **N** is clamped to 2047 MB, and 0 or a negative
+value disables the option.
+
 This syntax is used for most methods of enabling logging.
 
 ### Enabling Logging
@@ -436,8 +439,8 @@ Any call made to a `console` API from JavaScript will be logged through the
   module name.
 - Privileged context can use a specific module name by instantiating their own
   console object:
-  `const logger = console.createInstance({ prefix: "module-name" })`,
-  `prefix` value will be used as the MOZ_LOG module name.
+  `const logger = console.createInstance({ logModule: "module-name" })`,
+  `logModule` value will be used as the MOZ_LOG module name.
 
 More info about `console.createInstance` is available on the
 [JavaScript Logging page](/toolkit/javascript-logging.md)
@@ -461,7 +464,7 @@ console.error("Error happened");
 
 // From a privileged context, you can instantiate your own console object
 // with a specific module name, here "example_logger":
-const logger = console.createInstance({ prefix: "example_logger" });
+const logger = console.createInstance({ logModule: "example_logger" });
 
 logger.warn("something failed");
 
@@ -475,7 +478,7 @@ the current `MOZ_LOG` environment variable.
 
 ```javascript
 const logger = console.createInstance({
-  prefix: "example_logger",
+  logModule: "example_logger",
   maxLogLevel: "Warn",
 });
 

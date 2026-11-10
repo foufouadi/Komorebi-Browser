@@ -58,7 +58,6 @@ class GeckoProcessManager final
 
     static void AttachTo(
         java::GeckoProcessManager::ConnectionManager::Param aInstance);
-    void ObserveNetworkNotifications();
 
    private:
     java::GeckoProcessManager::ConnectionManager::WeakRef mJavaConnMgr;
@@ -68,7 +67,7 @@ class GeckoProcessManager final
   static void Init();
 
   static void GetEditableParent(jni::Object::Param aEditableChild,
-                                int64_t aContentId, int64_t aTabId);
+                                int32_t aContentId, int64_t aTabId);
 };
 
 }  // namespace mozilla

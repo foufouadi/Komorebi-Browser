@@ -15,10 +15,17 @@ ChromeUtils.defineESModuleGetters(lazy, {
   AIWindowUI:
     "moz-src:///browser/components/aiwindow/ui/modules/AIWindowUI.sys.mjs",
   ASRouterTargeting: "resource:///modules/asrouter/ASRouterTargeting.sys.mjs",
+  BrowserSearchTelemetry:
+    "moz-src:///browser/components/search/BrowserSearchTelemetry.sys.mjs",
   ContentAnalysisUtils: "resource://gre/modules/ContentAnalysisUtils.sys.mjs",
+  E10SUtils: "resource://gre/modules/E10SUtils.sys.mjs",
   EveryWindow: "resource:///modules/EveryWindow.sys.mjs",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   PrefUtils: "moz-src:///toolkit/modules/PrefUtils.sys.mjs",
+  PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
+  ReaderMode: "moz-src:///toolkit/components/reader/ReaderMode.sys.mjs",
+  SearchService: "moz-src:///toolkit/components/search/SearchService.sys.mjs",
+  SearchUIUtils: "moz-src:///browser/components/search/SearchUIUtils.sys.mjs",
   SidebarManager:
     "moz-src:///browser/components/sidebar/SidebarManager.sys.mjs",
 });
@@ -85,7 +92,7 @@ XPCOMUtils.defineLazyPreferenceGetter(
   lazy,
   "chatProviders",
   "browser.ml.chat.providers",
-  "claude,chatgpt,copilot,gemini,lechat",
+  "claude,chatgpt,gemini,huggingchat,lechat",
   reorderChatProviders
 );
 XPCOMUtils.defineLazyPreferenceGetter(
@@ -109,13 +116,58 @@ XPCOMUtils.defineLazyPreferenceGetter(
   lazy,
   "chatShortcutsIgnoreFields",
   "browser.ml.chat.shortcuts.ignoreFields",
-  "input",
+  "input,moz-multiline-editor",
   updateIgnoredInputs
 );
 XPCOMUtils.defineLazyPreferenceGetter(
   lazy,
   "chatSidebar",
   "browser.ml.chat.sidebar"
+);
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "highlightToSearchFeatureGate",
+  "browser.highlightToSearch.featureGate",
+  null,
+  () => {
+    recordSelectionMenuEnabled();
+    updateIgnoredInputs();
+  }
+);
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "highlightToSearchEnabled",
+  "browser.highlightToSearch.enabled",
+  null,
+  () => recordSelectionMenuEnabled()
+);
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "highlightToSearchCopyEnabled",
+  "browser.highlightToSearch.copy.enabled",
+  null,
+  (_pref, _old, val) => Glean.selectionMenu.copyEnabled.set(val)
+);
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "highlightToSearchSearchEnabled",
+  "browser.highlightToSearch.search.enabled",
+  null,
+  (_pref, _old, val) => Glean.selectionMenu.searchEnabled.set(val)
+);
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "highlightToSearchIgnoredSites",
+  "browser.highlightToSearch.ignoredSites",
+  "",
+  updateIgnoredSites
+);
+const PREF_SELECTION_CALLOUT_SEEN = "browser.highlightToSearch.callout.seen";
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "highlightToSearchCalloutSeen",
+  PREF_SELECTION_CALLOUT_SEEN,
+  false
 );
 XPCOMUtils.defineLazyPreferenceGetter(lazy, "sidebarRevamp", "sidebar.revamp");
 XPCOMUtils.defineLazyPreferenceGetter(
@@ -130,12 +182,82 @@ XPCOMUtils.defineLazyPreferenceGetter(
   0
 );
 
+const CALLOUT_CARET = {
+  half: 12.8301,
+  shoulder: 3.1211,
+  rise: 12.1074,
+  handle: 1.5199,
+  cap: 14.1043,
+};
+const CALLOUT_CARET_ROOM = 16;
+
+function calloutCardRadius(callout) {
+  const body = callout.querySelector(".panel-subview-body");
+  return parseFloat(
+    body.documentGlobal.getComputedStyle(body).borderTopLeftRadius
+  );
+}
+
+/**
+ * Outline of the callout card and its caret as a single closed path.
+ *
+ * @param {number} width card width
+ * @param {number} height card height
+ * @param {number} radius card corner radius
+ * @param {number} caretX horizontal position the caret points at
+ * @param {boolean} above whether the caret sits on the bottom edge
+ * @returns {string} value for the path's d attribute
+ */
+function calloutOutlinePath(width, height, radius, caretX, above) {
+  const n = v => Math.round(v * 100) / 100;
+  const c = CALLOUT_CARET;
+  const r = radius;
+  const x = Math.max(r + c.half, Math.min(width - r - c.half, caretX));
+  const arc = (dx, dy) => `A${r} ${r} 0 0 1 ${n(dx)} ${n(dy)}`;
+  if (!above) {
+    return (
+      `M${n(x - c.shoulder)} ${n(-c.rise)}` +
+      `C${n(x - c.handle)} ${n(-c.cap)} ${n(x + c.handle)} ${n(-c.cap)} ` +
+      `${n(x + c.shoulder)} ${n(-c.rise)}` +
+      `L${n(x + c.half)} 0H${n(width - r)}${arc(width, r)}` +
+      `V${n(height - r)}${arc(width - r, height)}H${r}${arc(0, height - r)}` +
+      `V${r}${arc(r, 0)}H${n(x - c.half)}Z`
+    );
+  }
+  return (
+    `M${r} 0H${n(width - r)}${arc(width, r)}V${n(height - r)}` +
+    `${arc(width - r, height)}H${n(x + c.half)}` +
+    `L${n(x + c.shoulder)} ${n(height + c.rise)}` +
+    `C${n(x + c.handle)} ${n(height + c.cap)} ${n(x - c.handle)} ` +
+    `${n(height + c.cap)} ${n(x - c.shoulder)} ${n(height + c.rise)}` +
+    `L${n(x - c.half)} ${n(height)}H${r}${arc(0, height - r)}V${r}${arc(r, 0)}Z`
+  );
+}
+
+function markSelectionCalloutSeen() {
+  if (!lazy.highlightToSearchCalloutSeen) {
+    Services.prefs.setBoolPref(PREF_SELECTION_CALLOUT_SEEN, true);
+  }
+}
+
 XPCOMUtils.defineLazyServiceGetter(
   lazy,
   "parserUtils",
   "@mozilla.org/parserutils;1",
   Ci.nsIParserUtils
 );
+XPCOMUtils.defineLazyServiceGetter(
+  lazy,
+  "ClipboardHelper",
+  "@mozilla.org/widget/clipboardhelper;1",
+  Ci.nsIClipboardHelper
+);
+
+function recordSelectionMenuEnabled() {
+  Glean.selectionMenu.enabled.set(
+    lazy.highlightToSearchFeatureGate && lazy.highlightToSearchEnabled
+  );
+}
 
 export const GenAI = {
   // Cache of potentially localized prompt
@@ -243,6 +365,19 @@ export const GenAI = {
         name: "localhost",
       },
     ],
+    [
+      "https://search.yahoo.com/ays/ff?fr=firefox_widget",
+      {
+        iconUrl: "chrome://browser/content/genai/assets/brands/scout.svg",
+        id: "scout",
+        link1: "https://guce.yahoo.com/terms",
+        link2: "https://guce.yahoo.com/privacy-policy",
+        linksId: "genai-settings-chat-scout-links",
+        maxLength: 11500,
+        name: "Yahoo Scout",
+        tooltipId: "genai-onboarding-scout-tooltip",
+      },
+    ],
   ]),
 
   /**
@@ -261,18 +396,117 @@ export const GenAI = {
   },
 
   /**
-   * Determine if chat entrypoints can be shown
+   * Determine if the chatbot can be offered, whether or not the user has
+   * chosen a provider yet. Clicking an entrypoint with no provider starts
+   * onboarding, so surfaces that want to onboard use this instead of
+   * canShowChatEntrypoint.
    *
-   * @returns {bool} can show
+   * @returns {bool} can offer
    */
-  get canShowChatEntrypoint() {
+  get canOfferChatbot() {
     return (
       lazy.chatEnabled &&
-      lazy.chatProvider != "" &&
       // Chatbot needs to be a tool if new sidebar
       (!lazy.sidebarRevamp || lazy.sidebarTools.includes("aichat"))
     );
   },
+
+  /**
+   * @returns {bool} can show
+   */
+  get canShowChatEntrypoint() {
+    return this.canOfferChatbot && lazy.chatProvider != "";
+  },
+
+  /**
+   * @returns {bool} can show
+   */
+  get canShowAIAction() {
+    return this.canOfferChatbot && lazy.chatShortcuts;
+  },
+
+  /**
+   * @returns {bool} can show
+   */
+  get canShowCopyAction() {
+    return (
+      lazy.highlightToSearchFeatureGate &&
+      lazy.highlightToSearchEnabled &&
+      lazy.highlightToSearchCopyEnabled
+    );
+  },
+
+  /**
+   * @returns {bool} can show
+   */
+  get canShowMoreActions() {
+    return lazy.highlightToSearchFeatureGate && lazy.highlightToSearchEnabled;
+  },
+
+  /**
+   * @param {Window} window browser window of the context menu
+   * @returns {boolean} whether the selection menu was turned off and can be
+   *   turned back on from the context menu
+   */
+  canTurnOnSelectionMenu(window) {
+    return (
+      lazy.highlightToSearchFeatureGate &&
+      !lazy.highlightToSearchEnabled &&
+      !lazy.AIWindow.isAIWindowActive(window)
+    );
+  },
+
+  /**
+   * Turn the selection menu back on and show it over the selection that was
+   * right-clicked. Turning every action off is what turned it off, which isn't
+   * a preference worth restoring, so each action comes back too.
+   *
+   * @param {WindowGlobalParent} windowGlobal frame that was right-clicked
+   * @param {{screenXDevPx: number, screenYDevPx: number}} point where the
+   *   context menu was opened
+   */
+  turnOnSelectionMenu(windowGlobal, point) {
+    Services.prefs.setBoolPref("browser.highlightToSearch.enabled", true);
+    this.markSelectionCalloutSeen();
+    if (
+      !this.canShowAIAction &&
+      !lazy.highlightToSearchSearchEnabled &&
+      !lazy.highlightToSearchCopyEnabled
+    ) {
+      Services.prefs.setBoolPref("browser.ml.chat.shortcuts", true);
+      Services.prefs.setBoolPref(
+        "browser.highlightToSearch.search.enabled",
+        true
+      );
+      Services.prefs.setBoolPref(
+        "browser.highlightToSearch.copy.enabled",
+        true
+      );
+    }
+    Glean.selectionMenu.optionToggled.record({
+      action: "master",
+      enabled: true,
+      source: "context_menu",
+    });
+    windowGlobal.getActor("GenAI").sendAsyncMessage("ShowSelectionMenu", point);
+  },
+
+  /**
+   * @returns {bool} can show
+   */
+  get canShowSelectionMenu() {
+    if (lazy.highlightToSearchFeatureGate) {
+      return (
+        lazy.highlightToSearchEnabled &&
+        (this.canShowAIAction ||
+          lazy.highlightToSearchSearchEnabled ||
+          lazy.highlightToSearchCopyEnabled)
+      );
+    }
+    return lazy.chatShortcuts && this.canShowChatEntrypoint;
+  },
+
+  markSelectionCalloutSeen,
 
   /**
    * Handle startup tasks like telemetry, adding listeners.
@@ -291,10 +525,12 @@ export const GenAI = {
     lazy.chatProviders;
     lazy.chatShortcuts;
     lazy.chatShortcutsIgnoreFields;
+    lazy.highlightToSearchIgnoredSites;
 
     // Apply initial ordering of providers
     reorderChatProviders();
     updateIgnoredInputs();
+    updateIgnoredSites();
 
     // Handle nimbus feature pref setting
     const feature = lazy.NimbusFeatures.chatbot;
@@ -357,6 +593,9 @@ export const GenAI = {
     Glean.genaiChatbot.shortcuts.set(lazy.chatShortcuts);
     Glean.genaiChatbot.shortcutsCustom.set(lazy.chatShortcutsCustom);
     Glean.genaiChatbot.sidebar.set(lazy.chatSidebar);
+    Glean.selectionMenu.copyEnabled.set(lazy.highlightToSearchCopyEnabled);
+    Glean.selectionMenu.searchEnabled.set(lazy.highlightToSearchSearchEnabled);
+    recordSelectionMenuEnabled();
   },
 
   /**
@@ -389,7 +628,7 @@ export const GenAI = {
       ...extraContext,
       entry,
       provider: lazy.chatProvider,
-      tabTitle: (tab?._labelIsContentTitle && tab?.label) || "",
+      tabTitle: (tab?.labelIsContentTitle && tab.label) || "",
       url: uri?.asciiHost + uri?.filePath,
       window,
     };
@@ -407,47 +646,583 @@ export const GenAI = {
   },
 
   /**
-   * Setup helpers and callbacks for ai shortcut button.
+   * Setup helpers and callbacks for the selection shortcut panel.
    *
-   * @param {MozButton} aiActionButton instance for the browser window
-   * @param {string} iconSrc URL for the button icon
+   * The panel owns the state shared by its actions: whether it has been
+   * initialized, how to hide it, and the selection it was opened for.
+   *
+   * @param {MozPanel} panel selection shortcut panel for the browser window
+   * @param {string} iconSrc URL for the ai action button icon
    */
-  initializeAIShortcut(
-    aiActionButton,
+  initializeSelectionShortcutPanel(
+    panel,
     iconSrc = "chrome://global/skin/icons/highlights.svg"
   ) {
+    const document = panel.ownerDocument;
+    const aiActionButton = panel.querySelector("#ai-action-button");
     aiActionButton.iconSrc = iconSrc;
-    if (aiActionButton.initialized) {
+    if (panel.initialized) {
       return;
     }
-    aiActionButton.initialized = true;
+    panel.initialized = true;
 
-    const setAIButtonAriaLabel = (chatProviderName = "localhost") => {
-      document.l10n.setAttributes(aiActionButton, "genai-shortcut-button", {
-        provider: chatProviderName,
-      });
+    // Set the icons here rather than in markup, because the panel lives in the
+    // popupset and an iconsrc there loads the image during startup while the
+    // action is still hidden.
+    for (const [id, src] of [
+      ["#search-action-button", "chrome://global/skin/icons/search-glass.svg"],
+      ["#copy-action-button", "chrome://global/skin/icons/edit-copy.svg"],
+      ["#more-actions-button", "chrome://global/skin/icons/more.svg"],
+    ]) {
+      panel.querySelector(id).iconSrc = src;
+    }
+
+    document.l10n.setAttributes(aiActionButton, "genai-shortcut-button-3");
+
+    const searchActionButton = panel.querySelector("#search-action-button");
+
+    // Matches the context menu's "Search <engine> for <selection>" label.
+    const truncateSelection = selection => {
+      const collapsed = selection.replace(/\s+/g, " ").trim();
+      if (collapsed.length <= 15) {
+        return collapsed;
+      }
+      let truncLength = 15;
+      const truncChar = collapsed[15].charCodeAt(0);
+      // Handle surrogate pairs.
+      if (truncChar >= 0xdc00 && truncChar <= 0xdfff) {
+        truncLength++;
+      }
+      return collapsed.substring(0, truncLength) + Services.locale.ellipsis;
     };
 
-    const document = aiActionButton.ownerDocument;
-    const initialChatProvider = this.chatProviders.get(lazy.chatProvider);
-    setAIButtonAriaLabel(initialChatProvider?.name);
+    // Returns the engine the action searches with, or null if the action ends
+    // up hidden, so callers can tell whether the menu has anything to offer.
+    panel.setSearchButtonLabel = (selection, browser) => {
+      // The default engine getters throw rather than return null until the
+      // search service has initialized, and throwing here would stop the panel
+      // from opening at all, so hide the action like nsContextMenu does.
+      let engine = null;
+      if (lazy.SearchService.hasSuccessfullyInitialized) {
+        engine = lazy.PrivateBrowsingUtils.isBrowserPrivate(browser)
+          ? lazy.SearchService.defaultPrivateEngine
+          : lazy.SearchService.defaultEngine;
+      }
+      const canShow =
+        !!engine &&
+        lazy.highlightToSearchFeatureGate &&
+        lazy.highlightToSearchEnabled &&
+        lazy.highlightToSearchSearchEnabled;
+      searchActionButton.hidden = !canShow;
+      if (!canShow) {
+        return null;
+      }
+      document.l10n.setAttributes(
+        searchActionButton,
+        "genai-shortcut-search-button",
+        {
+          engine: engine.name,
+          selection: truncateSelection(selection),
+        }
+      );
+      return engine;
+    };
+
+    const copyActionButton = panel.querySelector("#copy-action-button");
+    const copyConfirmation = panel.querySelector("#copy-action-confirmation");
+    const copyConfirmationText = copyConfirmation.querySelector(
+      ".copy-action-confirmation-text"
+    );
+    let copyConfirmationTimer = null;
+    let copyGeneration = 0;
+
+    const moreActionsButton = panel.querySelector("#more-actions-button");
+    const moreActionsSeparator = panel.querySelector("#more-actions-separator");
+
+    // Returns whether any action ends up visible, so callers can tell whether
+    // the menu has anything to offer, and the engine the Search action uses
+    // (null if it is hidden).
+    panel.updateActions = (selection, browser, isSmartWindow = false) => {
+      if (isSmartWindow) {
+        aiActionButton.hidden = false;
+        searchActionButton.hidden = true;
+        copyActionButton.hidden = true;
+        moreActionsButton.hidden = true;
+        moreActionsSeparator.hidden = true;
+        return { hasActions: true, searchEngine: null };
+      }
+      const aiVisible = this.canShowAIAction;
+      aiActionButton.hidden = !aiVisible;
+      const searchEngine = panel.setSearchButtonLabel(selection, browser);
+      const copyVisible = this.canShowCopyAction;
+      copyActionButton.hidden = !copyVisible;
+      moreActionsButton.hidden = !this.canShowMoreActions;
+      const hasActions = aiVisible || !!searchEngine || copyVisible;
+      moreActionsSeparator.hidden = moreActionsButton.hidden || !hasActions;
+      return { hasActions, searchEngine };
+    };
+
+    panel.resetCopyConfirmation = () => {
+      copyGeneration++;
+      document.defaultView.clearTimeout(copyConfirmationTimer);
+      copyConfirmation.removeAttribute("copied");
+      panel.removeAttribute("copied");
+      panel.removeAttribute("copy-fading");
+      copyConfirmationText.removeAttribute("data-l10n-id");
+      copyConfirmationText.textContent = "";
+    };
+    panel.addEventListener("popuphidden", event => {
+      if (event.target == panel) {
+        panel.resetCopyConfirmation();
+      }
+    });
+
+    copyActionButton.addEventListener("click", async () => {
+      lazy.ClipboardHelper.copyString(
+        panel.selectionData.selection,
+        panel.selectionData.browser.browsingContext.currentWindowContext
+      );
+
+      Glean.selectionMenu.actionClick.record({
+        action: "copy",
+        selection: panel.selectionData.selection.length,
+        smart_window: lazy.AIWindow.isAIWindowActive(document.defaultView),
+      });
+      panel.markInteracted();
+
+      const generation = ++copyGeneration;
+      document.l10n.setAttributes(
+        copyConfirmationText,
+        "genai-shortcut-copy-confirmation"
+      );
+      await document.l10n.translateElements([copyConfirmationText]);
+      if (generation != copyGeneration) {
+        if (!copyConfirmationText.hasAttribute("data-l10n-id")) {
+          copyConfirmationText.textContent = "";
+        }
+        return;
+      }
+      if (panel.state != "open") {
+        panel.resetCopyConfirmation();
+        return;
+      }
+      copyConfirmation.setAttribute("copied", "true");
+      panel.setAttribute("copied", "true");
+      panel.removeAttribute("copy-fading");
+
+      document.defaultView.clearTimeout(copyConfirmationTimer);
+      copyConfirmationTimer = document.defaultView.setTimeout(() => {
+        panel.setAttribute("copy-fading", "");
+        copyConfirmationTimer = document.defaultView.setTimeout(
+          () => panel.hide(),
+          240
+        );
+      }, 850);
+    });
+
+    searchActionButton.addEventListener("click", () => {
+      const { selection, principal, policyContainer } = panel.selectionData;
+      lazy.SearchUIUtils.loadSearch({
+        window: document.defaultView,
+        searchText: selection,
+        where: "tab",
+        triggeringPrincipal: principal,
+        policyContainer:
+          lazy.E10SUtils.deserializePolicyContainer(policyContainer),
+        sapSource: "text_selection",
+      });
+      Glean.selectionMenu.actionClick.record({
+        action: "search",
+        selection: selection.length,
+        smart_window: lazy.AIWindow.isAIWindowActive(document.defaultView),
+      });
+      panel.markInteracted();
+      panel.hide();
+    });
     const buttonActiveState = "icon";
     const buttonDefaultState = "icon ghost";
     const chatShortcutsOptionsPanel = document.getElementById(
       "chat-shortcuts-options-panel"
     );
-    const selectionShortcutActionPanel = document.getElementById(
-      "selection-shortcut-action-panel"
+    const moreActionsPanel = document.getElementById(
+      "selection-more-actions-panel"
     );
-    aiActionButton.hide = () => {
-      chatShortcutsOptionsPanel.hidePopup();
-      selectionShortcutActionPanel.hidePopup();
+    let calloutPanel = null;
+    const isCalloutOpen = () =>
+      !!calloutPanel && calloutPanel.state != "closed";
+    const calloutTarget = () =>
+      [searchActionButton, aiActionButton, copyActionButton].find(
+        button => !button.hidden
+      ) ?? moreActionsButton;
+
+    const createCallout = () => {
+      const popupSet = document.getElementById("mainPopupSet");
+      const template = document.getElementById("selectionCalloutTemplate");
+      const callout = popupSet.appendChild(
+        document.importNode(template.content, true).firstElementChild
+      );
+      const calloutBody = callout.querySelector(".panel-subview-body");
+      const calloutShape = callout.querySelector(".selection-callout-shape");
+      const calloutEdge = callout.querySelector(".selection-callout-edge");
+      const win = document.defaultView;
+
+      const drawCalloutOutline = () => {
+        const card = calloutBody.getBoundingClientRect();
+        const target = calloutTarget().getBoundingClientRect();
+        const above = card.top < target.top;
+        const caretX = target.left + target.width / 2 - card.left;
+        const radius = calloutCardRadius(callout);
+        calloutShape.setAttribute(
+          "viewBox",
+          `0 ${-CALLOUT_CARET_ROOM} ${card.width} ${
+            card.height + CALLOUT_CARET_ROOM * 2
+          }`
+        );
+        calloutShape.setAttribute("width", card.width);
+        calloutShape.setAttribute(
+          "height",
+          card.height + CALLOUT_CARET_ROOM * 2
+        );
+        calloutEdge.setAttribute(
+          "d",
+          calloutOutlinePath(card.width, card.height, radius, caretX, above)
+        );
+      };
+      const resizeObserver = new win.ResizeObserver(drawCalloutOutline);
+
+      callout.addEventListener("popupshown", event => {
+        if (event.target != callout) {
+          return;
+        }
+        if (panel.state != "open") {
+          callout.hidePopup();
+          return;
+        }
+        markSelectionCalloutSeen();
+        drawCalloutOutline();
+        resizeObserver.observe(calloutBody);
+      });
+      callout.addEventListener("popuphidden", event => {
+        if (event.target != callout) {
+          return;
+        }
+        resizeObserver.disconnect();
+        moreActionsButton.removeAttribute("highlighted");
+      });
+      // The link is replaced each time the sentence is translated, so listen on
+      // the sentence.
+      const message = callout.querySelector(".selection-callout-message");
+      const isMoreLink = event =>
+        event.target.closest(".selection-callout-more-link");
+      message.addEventListener("mouseover", event => {
+        if (isMoreLink(event)) {
+          moreActionsButton.toggleAttribute("highlighted", true);
+        }
+      });
+      message.addEventListener("mouseout", event => {
+        if (isMoreLink(event)) {
+          moreActionsButton.removeAttribute("highlighted");
+        }
+      });
+      message.addEventListener("click", event => {
+        if (isMoreLink(event)) {
+          moreActionsButton.click();
+        }
+      });
+      message.addEventListener("keydown", event => {
+        if (isMoreLink(event) && (event.key == "Enter" || event.key == " ")) {
+          event.preventDefault();
+          moreActionsButton.click();
+        }
+      });
+      return callout;
     };
+
+    panel.hideCallout = () => {
+      calloutPanel?.hidePopup();
+    };
+    const shouldShowCallout = () =>
+      panel.state == "open" &&
+      !panel.hasAttribute("ime-hiding") &&
+      moreActionsPanel.state == "closed" &&
+      chatShortcutsOptionsPanel.state == "closed" &&
+      !lazy.highlightToSearchCalloutSeen &&
+      !moreActionsButton.hidden &&
+      (!searchActionButton.hidden || !copyActionButton.hidden) &&
+      !isCalloutOpen();
+    panel.showCallout = async () => {
+      if (!shouldShowCallout()) {
+        return;
+      }
+      calloutPanel ??= createCallout();
+      await document.l10n.translateElements([
+        calloutPanel.querySelector(".selection-callout-title"),
+        calloutPanel.querySelector(".selection-callout-message"),
+      ]);
+      if (!shouldShowCallout()) {
+        return;
+      }
+      const strip = moreActionsButton.parentNode.getBoundingClientRect();
+      const target = calloutTarget().getBoundingClientRect();
+      const targetCenter = target.left + target.width / 2;
+      const fromStart = Services.locale.isAppLocaleRTL
+        ? strip.right - targetCenter
+        : targetCenter - strip.left;
+      calloutPanel.openPopup(
+        moreActionsButton.parentNode,
+        "after_start",
+        fromStart - calloutCardRadius(calloutPanel) - CALLOUT_CARET.half,
+        0
+      );
+    };
+    const openBelowBar = popup => {
+      if (lazy.highlightToSearchFeatureGate) {
+        const content = panel.shadowRoot?.querySelector("[part=content]");
+        popup.openPopup(content ?? panel, "after_start", 0, 2);
+      } else {
+        popup.openPopup(panel, "after_start", 0, 10);
+      }
+    };
+    panel.hideDropdowns = () => {
+      chatShortcutsOptionsPanel.hidePopup();
+      moreActionsPanel.hidePopup();
+    };
+    panel.hide = () => {
+      panel.hideDropdowns();
+      panel.hideCallout();
+      panel.hidePopup();
+    };
+
+    // Tell the page whether a dropdown is open, so that Escape in the page
+    // closes just the dropdown.
+    const sendDropdownState = () => {
+      if (!lazy.highlightToSearchFeatureGate) {
+        return;
+      }
+      const open =
+        chatShortcutsOptionsPanel.state != "closed" ||
+        moreActionsPanel.state != "closed";
+      const windowGlobal = panel.selectionData?.windowGlobal;
+      if (windowGlobal?.isCurrentGlobal) {
+        windowGlobal.getActor("GenAI").sendAsyncMessage("DropdownState", open);
+      }
+    };
+    for (const dropdown of [chatShortcutsOptionsPanel, moreActionsPanel]) {
+      for (const type of ["popupshown", "popuphidden"]) {
+        dropdown.addEventListener(type, event => {
+          if (event.target == dropdown) {
+            sendDropdownState();
+          }
+        });
+      }
+    }
+    document.addEventListener("keydown", event => {
+      if (
+        event.key != "Escape" ||
+        event.defaultPrevented ||
+        !lazy.highlightToSearchFeatureGate ||
+        panel.state != "open"
+      ) {
+        return;
+      }
+      if (
+        chatShortcutsOptionsPanel.state != "closed" ||
+        moreActionsPanel.state != "closed"
+      ) {
+        panel.hideDropdowns();
+      } else {
+        panel.hide();
+      }
+    });
+    panel.startDisplay = smartWindow => {
+      panel.display = {
+        start: ChromeUtils.now(),
+        smartWindow,
+        interacted: false,
+      };
+    };
+    panel.markInteracted = () => {
+      if (panel.display) {
+        panel.display.interacted = true;
+      }
+    };
+    // Idempotent - only the first call after startDisplay records.
+    panel.recordDismissed = () => {
+      if (!panel.display) {
+        return;
+      }
+      const { start, smartWindow, interacted } = panel.display;
+      panel.display = null;
+      Glean.selectionMenu.dismissed.record({
+        interacted,
+        duration: Math.round(ChromeUtils.now() - start),
+        smart_window: smartWindow,
+      });
+    };
+    panel.addEventListener("popupshown", event => {
+      if (event.target == panel) {
+        panel.showCallout();
+      }
+    });
+    panel.addEventListener("popuphidden", event => {
+      if (event.target == panel) {
+        panel.recordDismissed();
+        panel.hideCallout();
+      }
+    });
     aiActionButton.setAttribute("type", buttonDefaultState);
-    chatShortcutsOptionsPanel.addEventListener("popuphidden", () =>
-      aiActionButton.setAttribute("type", buttonDefaultState)
-    );
+    aiActionButton.ariaHasPopup = "menu";
+    aiActionButton.ariaExpanded = "false";
+    chatShortcutsOptionsPanel.addEventListener("popupshown", () => {
+      aiActionButton.ariaExpanded = "true";
+    });
+    chatShortcutsOptionsPanel.addEventListener("popuphidden", () => {
+      aiActionButton.setAttribute("type", buttonDefaultState);
+      aiActionButton.ariaExpanded = "false";
+    });
     chatShortcutsOptionsPanel.firstChild.id = "ask-chat-shortcuts";
+
+    const aiToggle = document.getElementById("more-actions-ai-toggle");
+    const searchToggle = document.getElementById("more-actions-search-toggle");
+    const copyToggle = document.getElementById("more-actions-copy-toggle");
+    const moreActionToggles = [
+      { toggle: aiToggle, action: "ai", pref: "browser.ml.chat.shortcuts" },
+      {
+        toggle: searchToggle,
+        action: "search",
+        pref: "browser.highlightToSearch.search.enabled",
+      },
+      {
+        toggle: copyToggle,
+        action: "copy",
+        pref: "browser.highlightToSearch.copy.enabled",
+      },
+    ];
+
+    aiToggle.iconSrc = "chrome://global/skin/icons/highlights.svg";
+    searchToggle.iconSrc = "chrome://global/skin/icons/search-glass.svg";
+    copyToggle.iconSrc = "chrome://global/skin/icons/edit-copy.svg";
+
+    const allOffNotice = document.getElementById("more-actions-all-off-notice");
+    let turnOffWhenClosed = false;
+
+    const renderMoreActions = () => {
+      // The chatbot row is absent, not unchecked, while the chatbot is blocked.
+      aiToggle.hidden = !this.canOfferChatbot;
+      const providerName = this.chatProviders.get(lazy.chatProvider)?.name;
+      document.l10n.setAttributes(
+        aiToggle,
+        providerName
+          ? "genai-more-actions-ai-provider"
+          : "genai-more-actions-ai-generic",
+        { provider: providerName }
+      );
+      aiToggle.pressed = lazy.chatShortcuts;
+      searchToggle.pressed = lazy.highlightToSearchSearchEnabled;
+      copyToggle.pressed = lazy.highlightToSearchCopyEnabled;
+      allOffNotice.hidden = true;
+      turnOffWhenClosed = false;
+    };
+
+    const hasEnabledAction = () =>
+      this.canShowAIAction ||
+      lazy.highlightToSearchSearchEnabled ||
+      lazy.highlightToSearchCopyEnabled;
+
+    for (const { toggle, action, pref } of moreActionToggles) {
+      toggle.addEventListener("click", event => {
+        const target = event.composedTarget;
+        if (target != toggle.buttonEl && !toggle.labelEl?.contains(target)) {
+          toggle.buttonEl.click();
+        }
+      });
+      toggle.addEventListener("toggle", () => {
+        panel.editingActions = true;
+        try {
+          Services.prefs.setBoolPref(pref, toggle.pressed);
+        } finally {
+          panel.editingActions = false;
+        }
+        Glean.selectionMenu.optionToggled.record({
+          action,
+          enabled: toggle.pressed,
+          source: "menu",
+        });
+        turnOffWhenClosed = !hasEnabledAction();
+        allOffNotice.hidden = !turnOffWhenClosed;
+        // Re-render the bar in place rather than waiting for the next
+        // selection.
+        panel.updateActions(
+          panel.selectionData.selection,
+          panel.selectionData.browser
+        );
+      });
+    }
+
+    const manageSettingsButton = document.getElementById(
+      "more-actions-manage-settings"
+    );
+    manageSettingsButton.iconSrc = "chrome://global/skin/icons/settings.svg";
+    manageSettingsButton.addEventListener("click", () => {
+      Glean.selectionMenu.menuClick.record({ item: "settings" });
+      document.defaultView.openPreferences("general-highlight-to-search");
+      panel.hide();
+    });
+
+    moreActionsButton.setAttribute("type", buttonDefaultState);
+    moreActionsButton.ariaExpanded = "false";
+    moreActionsPanel.addEventListener("popupshown", event => {
+      if (event.target == moreActionsPanel) {
+        moreActionsButton.ariaExpanded = "true";
+      }
+    });
+    moreActionsPanel.addEventListener("popuphidden", event => {
+      if (event.target == moreActionsPanel) {
+        moreActionsButton.setAttribute("type", buttonDefaultState);
+        moreActionsButton.ariaExpanded = "false";
+        if (turnOffWhenClosed) {
+          turnOffWhenClosed = false;
+          Services.prefs.setBoolPref(
+            "browser.highlightToSearch.enabled",
+            false
+          );
+          Glean.selectionMenu.optionToggled.record({
+            action: "master",
+            enabled: false,
+            source: "uncheck_all",
+          });
+          panel.hide();
+        }
+      }
+    });
+    moreActionsButton.addEventListener("click", async () => {
+      panel.hideCallout();
+      if (moreActionsPanel.state != "closed") {
+        moreActionsPanel.hidePopup();
+        return;
+      }
+      chatShortcutsOptionsPanel.hidePopup();
+      renderMoreActions();
+      // Open with the AI row already named, so a screen reader doesn't land on
+      // an unnamed switch while Fluent catches up.
+      await document.l10n.translateElements([aiToggle]);
+      if (panel.state != "open" || moreActionsPanel.state != "closed") {
+        return;
+      }
+      moreActionsButton.setAttribute("type", buttonActiveState);
+      openBelowBar(moreActionsPanel);
+      const state = toggle => {
+        if (toggle.hidden) {
+          return "absent";
+        }
+        return toggle.pressed ? "on" : "off";
+      };
+      Glean.selectionMenu.menuShown.record({
+        ai: state(aiToggle),
+        search: state(searchToggle),
+        copy: state(copyToggle),
+      });
+    });
 
     // Helper to show rounded warning numbers
     const roundDownToNearestHundred = number => {
@@ -481,7 +1256,7 @@ export const GenAI = {
           this.estimateSelectionLimit(chatProvider?.maxLength)
         ),
         selectionLength: roundDownToNearestHundred(
-          aiActionButton.data.selection.length
+          panel.selectionData.selection.length
         ),
       });
 
@@ -490,6 +1265,8 @@ export const GenAI = {
 
     // build the ask popup
     const buildPopup = async () => {
+      moreActionsPanel.hidePopup();
+      panel.hideCallout();
       aiActionButton.setAttribute("type", buttonActiveState);
       const vbox = chatShortcutsOptionsPanel.querySelector("vbox");
       vbox.innerHTML = "";
@@ -497,12 +1274,8 @@ export const GenAI = {
       const currentIsSmartWindow = lazy.AIWindow.isAIWindowActive(
         document.defaultView
       );
-      const showWarning = this.isContextTooLong(aiActionButton.data.selection);
+      const showWarning = this.isContextTooLong(panel.selectionData.selection);
       const chatProvider = this.chatProviders.get(lazy.chatProvider);
-
-      if (initialChatProvider !== chatProvider?.name) {
-        setAIButtonAriaLabel(chatProvider?.name);
-      }
 
       // Show warning if selection is too long
       if (showWarning) {
@@ -521,7 +1294,7 @@ export const GenAI = {
       const browser = document.documentGlobal.gBrowser.selectedBrowser;
       const context = await this.addAskChatItems(
         browser,
-        aiActionButton.data,
+        panel.selectionData,
         promptObj => {
           if (currentIsSmartWindow && promptObj.id === "quiz") {
             return null;
@@ -531,7 +1304,10 @@ export const GenAI = {
           return button;
         },
         "shortcuts",
-        aiActionButton.hide
+        () => {
+          panel.markInteracted();
+          panel.hide();
+        }
       );
 
       // Add custom textarea box if configured
@@ -543,7 +1319,9 @@ export const GenAI = {
         } else if (chatProvider?.name) {
           textAreaL10nId = "genai-input-ask-provider";
         } else {
-          textAreaL10nId = "genai-input-ask-generic";
+          textAreaL10nId = lazy.highlightToSearchFeatureGate
+            ? "genai-input-ask-ai"
+            : "genai-input-ask-generic";
         }
         document.l10n.setAttributes(textAreaEl, textAreaL10nId, {
           provider: chatProvider?.name,
@@ -554,7 +1332,8 @@ export const GenAI = {
         textAreaEl.addEventListener("keydown", event => {
           if (event.key == "Enter" && !event.shiftKey) {
             this.handleAskChat({ value: textAreaEl.value }, context);
-            aiActionButton.hide();
+            panel.markInteracted();
+            panel.hide();
           }
         });
 
@@ -581,29 +1360,30 @@ export const GenAI = {
         });
       }
 
-      // Allow hiding these shortcuts (not shown in Smart Window)
-      if (!currentIsSmartWindow) {
+      // Allow hiding these shortcuts (not shown in Smart Window or with the
+      // Highlight to Search feature turned on)
+      if (!currentIsSmartWindow && !lazy.highlightToSearchFeatureGate) {
         vbox.appendChild(document.createXULElement("toolbarseparator"));
         const hider = addItem();
         document.l10n.setAttributes(hider, "genai-shortcuts-hide");
         hider.addEventListener("command", () => {
           Services.prefs.setBoolPref("browser.ml.chat.shortcuts", false);
           Glean.genaiChatbot.shortcutsHideClick.record({
-            selection: aiActionButton.data.selection.length,
+            selection: panel.selectionData.selection.length,
           });
         });
       }
 
-      chatShortcutsOptionsPanel.openPopup(
-        selectionShortcutActionPanel,
-        "after_start",
-        0,
-        10
-      );
+      openBelowBar(chatShortcutsOptionsPanel);
       Glean.genaiChatbot.shortcutsExpanded.record({
-        selection: aiActionButton.data.selection.length,
+        selection: panel.selectionData.selection.length,
         provider: this.getProviderId(),
         warning: showWarning,
+      });
+      Glean.selectionMenu.actionClick.record({
+        action: "ai",
+        selection: panel.selectionData.selection.length,
+        smart_window: currentIsSmartWindow,
       });
     };
 
@@ -612,7 +1392,7 @@ export const GenAI = {
       const mouseoverCounter = lazy.shortcutMouseoverCount;
       const maxMouseoverCount = 2;
 
-      if (mouseoverCounter >= maxMouseoverCount) {
+      if (mouseoverCounter >= maxMouseoverCount || isCalloutOpen()) {
         return;
       }
 
@@ -643,14 +1423,17 @@ export const GenAI = {
    * @param {string} name of message
    * @param {{
    *   inputType: string,
+   *   host?: string,
    *   selection: string,
    *   delay: number,
    *   x: number,
    *   y: number,
    * }} data for the message
    * @param {MozBrowser} browser that provided the message
+   * @param {nsIURI} [documentURI] URI of the frame that sent the message
+   * @param {WindowGlobalParent} [windowGlobal] frame that sent the message
    */
-  handleShortcutsMessage(name, data, browser) {
+  handleShortcutsMessage(name, data, browser, documentURI, windowGlobal) {
     const isInBrowserStack = browser?.closest(".browserStack");
 
     const isSmartWindow =
@@ -658,39 +1441,114 @@ export const GenAI = {
     if (
       !isInBrowserStack ||
       !browser ||
+      !this.isSupportedContext(browser) ||
       this.ignoredInputs.has(data.inputType) ||
+      this.ignoredInputs.has(data.host) ||
       (isSmartWindow
         ? !lazy.chatShortcutsSmartWindow
-        : !lazy.chatShortcuts || !this.canShowChatEntrypoint)
+        : !this.canShowSelectionMenu)
     ) {
+      return;
+    }
+
+    if (
+      !isSmartWindow &&
+      lazy.highlightToSearchFeatureGate &&
+      this.isIgnoredSite(documentURI)
+    ) {
+      if (name == "GenAI:ShowShortcuts") {
+        Glean.selectionMenu.suppressed.record({ reason: "site_list" });
+      }
       return;
     }
 
     const window = browser.documentGlobal;
     const { document, devicePixelRatio } = window;
-    const aiActionButton = document.getElementById("ai-action-button");
+    const shortcutPanel = document.getElementById(
+      "selection-shortcut-action-panel"
+    );
     if (isSmartWindow) {
-      this.initializeAIShortcut(
-        aiActionButton,
+      this.initializeSelectionShortcutPanel(
+        shortcutPanel,
         "chrome://browser/content/aiwindow/assets/new-chat.svg"
       );
     } else {
-      this.initializeAIShortcut(aiActionButton);
+      this.initializeSelectionShortcutPanel(shortcutPanel);
     }
 
     switch (name) {
-      case "GenAI:HideShortcuts":
-        aiActionButton.hide();
+      case "GenAI:HideDropdowns":
+        shortcutPanel.hideDropdowns();
         break;
+      case "GenAI:HideShortcuts": {
+        // For an IME selection change, hide via CSS
+        // to avoid hidePopup() cancelling the active IME composition.
+        // Any other hide reason closes the panel normally.
+        const imeHiding = data === "selectionchange-ime";
+        shortcutPanel.toggleAttribute("ime-hiding", imeHiding);
+        if (imeHiding) {
+          shortcutPanel.recordDismissed();
+          shortcutPanel.hideCallout();
+        } else {
+          shortcutPanel.hide();
+        }
+        break;
+      }
+      case "GenAI:SuppressedShortcuts": {
+        if (!isSmartWindow && shortcutPanel.state != "closed") {
+          Glean.selectionMenu.suppressed.record({ reason: data.reason });
+          shortcutPanel.hide();
+        }
+        break;
+      }
       case "GenAI:ShowShortcuts": {
         // Save the latest selection so it can be used by popup
-        aiActionButton.data = data;
+        shortcutPanel.selectionData = { ...data, browser, windowGlobal };
+        shortcutPanel.resetCopyConfirmation();
 
+        // Smart Window has its own separate gate above and only ever offers
+        // the AI action.
+        const { hasActions, searchEngine } = shortcutPanel.updateActions(
+          data.selection,
+          browser,
+          isSmartWindow
+        );
+        if (!hasActions) {
+          // Nothing to offer: don't open an empty menu or log an impression
+          // of one, and close any menu left from the previous selection.
+          shortcutPanel.hide();
+          return;
+        }
+        if (!isSmartWindow && data.pageMenu) {
+          Glean.selectionMenu.suppressed.record({ reason: "page_menu" });
+          shortcutPanel.hide();
+          return;
+        }
+
+        // Clear any CSS hide from a prior selectionchange so the panel
+        // is visible when it opens for the new selection.
+        shortcutPanel.removeAttribute("ime-hiding");
+        shortcutPanel.showCallout();
+
+        shortcutPanel.recordDismissed();
         Glean.genaiChatbot.shortcutsDisplayed.record({
           delay: data.delay,
           inputType: data.inputType,
           selection: data.selection.length,
         });
+        Glean.selectionMenu.displayed.record({
+          delay: data.delay,
+          selection: data.selection.length,
+          smart_window: isSmartWindow,
+        });
+        if (searchEngine) {
+          lazy.BrowserSearchTelemetry.recordSapImpression(
+            browser,
+            searchEngine,
+            "text_selection"
+          );
+        }
+        shortcutPanel.startDisplay(isSmartWindow);
 
         // Position the shortcuts relative to the browser's top-left corner
         const screenYBase = data.screenYDevPx / devicePixelRatio;
@@ -700,14 +1558,17 @@ export const GenAI = {
         const screenX = data.screenXDevPx / devicePixelRatio;
         const screenY = screenYBase + bottomPadding;
 
-        aiActionButton
-          .closest("panel")
-          .openPopup(
-            browser,
-            "before_start",
-            screenX - browser.screenX,
-            screenY - browser.screenY
-          );
+        const isRTL = Services.locale.isAppLocaleRTL;
+        const xOffset = isRTL
+          ? browser.screenX + browser.getBoundingClientRect().width - screenX
+          : screenX - browser.screenX;
+
+        shortcutPanel.openPopup(
+          browser,
+          "before_start",
+          xOffset,
+          screenY - browser.screenY
+        );
         break;
       }
     }
@@ -764,17 +1625,14 @@ export const GenAI = {
   },
 
   /**
-   * Whether the ask-chat entrypoint may be shown for the given context. Shared
-   * by the full submenu (buildAskChatMenu) and the single page-summarize item
-   * (buildTabSummarizeItem) so the gating stays in one place.
+   * Whether the browser's context supports gen-AI surfaces at all. Shared by
+   * the ask-chat entrypoints and the selection menu so that both refuse the
+   * same contexts.
    *
    * @param {MozBrowser} browser browser for the context's page
-   * @param {string} source one of "page", "tab", "tool"
-   * @param {MozTabbrowserTab[] | null} contextTabs tabs for a "tab" source
-   * @param {object | null} selectionInfo selection details, if any
    * @returns {boolean}
    */
-  canShowAskChat(browser, source, contextTabs, selectionInfo) {
+  isSupportedContext(browser) {
     // DO NOT show when inside an extension panel
     const uri = browser.browsingContext?.currentURI.spec;
     if (uri?.startsWith("moz-extension:")) {
@@ -784,7 +1642,37 @@ export const GenAI = {
     // Popups don't have a sidebar, so don't show the menu.
     // Also, it's not useful for most Document Picture-in-Picture API use-cases.
     const isPopup = browser.documentGlobal.toolbar?.visible === false;
-    if (browser.browsingContext?.isDocumentPiP || isPopup) {
+    return !browser.browsingContext?.isDocumentPiP && !isPopup;
+  },
+
+  /**
+   * Whether the page is on a site whose own menu for selected text the actions
+   * menu would overlap. A site in the list also matches its subdomains.
+   *
+   * @param {nsIURI | null} uri URI of the frame the selection is in
+   * @returns {boolean}
+   */
+  isIgnoredSite(uri) {
+    let host;
+    try {
+      host = uri.asciiHost;
+    } catch {
+      return false;
+    }
+    return this.ignoredSites.some(
+      site => host == site || host.endsWith("." + site)
+    );
+  },
+
+  /**
+   * @param {MozBrowser} browser browser for the context's page
+   * @param {string} source one of "page", "tab", "tool"
+   * @param {MozTabbrowserTab[] | null} contextTabs tabs for a "tab" source
+   * @param {object | null} selectionInfo selection details, if any
+   * @returns {boolean}
+   */
+  canShowAskChat(browser, source, contextTabs, selectionInfo) {
+    if (!this.isSupportedContext(browser)) {
       return false;
     }
 
@@ -818,7 +1706,7 @@ export const GenAI = {
 
   /**
    * Build the prompt context, using the current selection when present and
-   * otherwise the page content.
+   * otherwise the page URL.
    *
    * @param {MozBrowser} browser browser for the context's page
    * @param {object | null} selectionInfo selection details, if any
@@ -830,8 +1718,8 @@ export const GenAI = {
       selection: selectionInfo?.fullText ?? "",
     };
     if (lazy.chatPage && !context.selection) {
-      // Get page content for prompts when no selection
-      await this.addPageContext(browser, context);
+      // Get page URL for prompts when no selection
+      this.addPageContext(browser, context);
     }
     return context;
   },
@@ -893,12 +1781,12 @@ export const GenAI = {
         if (isSmartWindow && promptObj.id === "quiz") {
           return null;
         }
-        const { contentType, selection } = context;
+        const { contentType, pageUrl } = context;
         const item = addItem();
         item.setAttribute("label", promptObj.label);
 
         // Disabled menu if page is invalid
-        if (contentType === "page" && !selection) {
+        if (contentType === "page" && !pageUrl) {
           item.disabled = true;
         }
         if (promptObj.badge && lazy.chatPageMenuBadge) {
@@ -1038,14 +1926,17 @@ export const GenAI = {
       return;
     }
 
-    item.setAttribute("label", summarize.label);
+    item.setAttribute(
+      "label",
+      await lazy.l10n.formatValue("genai-menu-summarize-with-ai")
+    );
     if (summarize.badge && lazy.chatPageMenuBadge) {
       item.setAttribute("badge", summarize.badge);
     } else {
       item.removeAttribute("badge");
     }
-    // Disabled when the page has no usable content to summarize.
-    item.disabled = context.contentType === "page" && !context.selection;
+    // Disabled when the page has no URL the provider can summarize.
+    item.disabled = context.contentType === "page" && !context.pageUrl;
     this.showItem(item, true);
 
     // The item is reused across shows, so refresh the prompt/context it acts on
@@ -1119,12 +2010,14 @@ export const GenAI = {
     if (context.contentType == "page") {
       for (const promptObj of toFormat) {
         if (promptObj.id == "summarize") {
-          const [badge, label] = await lazy.l10n.formatValues([
+          const [badge, label, value] = await lazy.l10n.formatValues([
             "genai-menu-new-badge",
             "genai-menu-summarize-page",
+            { id: "genai-prompts-summarize-page", args: { url: "%pageUrl%" } },
           ]);
           promptObj.badge = badge;
           promptObj.label = label;
+          promptObj.value = value;
         }
       }
     }
@@ -1196,8 +2089,11 @@ export const GenAI = {
    */
   buildChatPrompt(item, context = {}, document = null) {
     // Combine prompt prefix with the item then replace placeholders from the
-    // original prompt (and not from context)
-    return (this.chatPromptPrefix + (item.value || item.label)).replace(
+    // original prompt (and not from context). Page prompts skip the selection
+    // prefix as they only reference the page URL.
+    const prefix = context.contentType == "page" ? "" : this.chatPromptPrefix;
+    const template = prefix + (item.value || item.label);
+    const prompt = template.replace(
       // Handle %placeholder% as key|options
       /\%(\w+)(?:\|([^%]+))?\%/g,
       (placeholder, key, options) => {
@@ -1206,9 +2102,13 @@ export const GenAI = {
         const value = context[key];
         let sanitized;
 
-        // Sanitize and truncate context values before sending prompt
-        // otherwise return placeholder
-        if (value !== undefined) {
+        // pageUrl is an http(s) URI spec that is already percent-encoded, and
+        // sanitizing it as HTML would break the "&" in the query.
+        if (key == "pageUrl" && value !== undefined) {
+          sanitized = value;
+        } else if (value !== undefined) {
+          // Sanitize and truncate context values before sending prompt
+          // otherwise return placeholder
           const contextElement = document.createElement("div");
           sanitized = lazy.parserUtils.parseFragment(
             value,
@@ -1236,27 +2136,50 @@ export const GenAI = {
         return `<${key}>${sanitized}</${key}>`;
       }
     );
+    if (
+      context.contentType == "page" &&
+      context.pageUrl &&
+      !/%pageUrl(?:\|[^%]+)?%/.test(template)
+    ) {
+      return `${prompt}\n\n<pageUrl>${context.pageUrl}</pageUrl>`;
+    }
+    return prompt;
   },
 
   /**
-   * Update context with page content.
+   * Get the page URL to send with page prompts. Only http(s) pages get a URL
+   * as providers can't access other schemes.
    *
-   * @param {MozBrowser} browser for the tab to get content
+   * @param {MozBrowser} browser for the tab to get the URL
+   * @returns {string | undefined} URL without credentials or ref
+   */
+  getPageUrl(browser) {
+    let uri = browser?.currentURI;
+    const readerOriginalUrl = uri && lazy.ReaderMode.getOriginalUrl(uri.spec);
+    if (readerOriginalUrl) {
+      try {
+        uri = Services.io.newURI(readerOriginalUrl);
+      } catch {
+        return undefined;
+      }
+    }
+    if (uri?.schemeIs("http") || uri?.schemeIs("https")) {
+      return Services.io.createExposableURI(uri).specIgnoringRef;
+    }
+    return undefined;
+  },
+
+  /**
+   * Update context with the page URL instead of the page content, so that no
+   * page-controlled text is placed in the prompt.
+   *
+   * @param {MozBrowser} browser for the tab to get the URL
    * @param {object} context optional existing context to update
    * @returns {object} updated context
    */
-  async addPageContext(browser, context = {}) {
+  addPageContext(browser, context = {}) {
     context.contentType = "page";
-    try {
-      Object.assign(
-        context,
-        await browser?.browsingContext?.currentWindowContext
-          .getActor("GenAI")
-          .sendQuery("GetReadableText")
-      );
-    } catch (ex) {
-      console.warn("Failed to get page content", ex);
-    }
+    context.pageUrl = this.getPageUrl(browser);
     return context;
   },
 
@@ -1268,12 +2191,16 @@ export const GenAI = {
    */
   async summarizeCurrentPage(window, entry) {
     const browser = window.gBrowser.selectedBrowser;
+    const context = this.addPageContext(browser);
+    if (!context.pageUrl) {
+      return;
+    }
     await this.addAskChatItems(
       browser,
-      await this.addPageContext(browser),
-      (promptObj, context) => {
+      context,
+      (promptObj, context2) => {
         if (promptObj.id === "summarize") {
-          this.handleAskChat(promptObj, context);
+          this.handleAskChat(promptObj, context2);
         }
       },
       entry
@@ -1378,8 +2305,6 @@ export const GenAI = {
     if (isPageSummarizeRequest) {
       Glean.genaiChatbot.summarizePage.record({
         provider: this.getProviderId(),
-        reader_mode: context.readerMode,
-        selection: context.selection?.length ?? 0,
         source: context.entry,
       });
     }
@@ -1400,13 +2325,13 @@ export const GenAI = {
       content_type: context.contentType,
       prompt: promptObj.id ?? "custom",
       provider: this.getProviderId(),
-      reader_mode: context.readerMode,
       selection: context.selection?.length ?? 0,
       smart_window: lazy.AIWindow.isAIWindowActive(win),
       source: context.entry,
     });
 
-    // In Smart Window, send selected text with prompt label to the assistant
+    // In Smart Window, send selected text or page URL with prompt label to the
+    // assistant
     if (lazy.AIWindow.isAIWindowActive(win)) {
       if (!lazy.AIWindowUI.isSidebarOpen(win)) {
         const activeConversation = lazy.AIWindow.getActiveConversation(win);
@@ -1416,9 +2341,11 @@ export const GenAI = {
       if (aiWindowEl) {
         // TODO (Bug 2048401): Revisit prompt construction once Smart Window prompt definitions
         // are finalized via Remote Settings.
+        const content =
+          context.contentType == "page" ? context.pageUrl : context.selection;
         const text = promptObj.label
-          ? `${promptObj.label}: ${context.selection}`
-          : `${promptObj.value}\n\n${context.selection}`;
+          ? `${promptObj.label}: ${content}`
+          : `${promptObj.value}\n\n${content}`;
         aiWindowEl.submitChatMessage({ text, submitType: "shortcuts" });
       }
       return;
@@ -1485,15 +2412,6 @@ export const GenAI = {
         console.error("Failed to get chat sidebar browser");
         return;
       }
-      const showWarning =
-        isPageSummarizeRequest && this.isContextTooLong(context.selection);
-
-      await SidebarController.browser.contentWindow.onNewPrompt({
-        show: showWarning,
-        ...(showWarning
-          ? { contextLength: context.selection?.length ?? 0 }
-          : {}),
-      });
     } else {
       browser = context.window.gBrowser.addTab("", options).linkedBrowser;
     }
@@ -1619,7 +2537,9 @@ function onChatShortcutsChange(value) {
         "selection-shortcut-action-panel"
       );
 
-      selectionShortcutActionPanel.hidePopup();
+      if (!selectionShortcutActionPanel.editingActions) {
+        selectionShortcutActionPanel.hidePopup();
+      }
     });
   }
 }
@@ -1655,13 +2575,25 @@ function reorderChatProviders() {
 }
 
 /**
+ * Update ignored sites list.
+ */
+function updateIgnoredSites() {
+  GenAI.ignoredSites = lazy.highlightToSearchIgnoredSites
+    .split(",")
+    .map(site => site.trim().toLowerCase())
+    .filter(site => site);
+}
+
+/**
  * Update ignored input fields Set.
  */
 function updateIgnoredInputs() {
-  GenAI.ignoredInputs = new Set(
-    // Skip empty string as no input type is ""
-    lazy.chatShortcutsIgnoreFields.split(",").filter(v => v)
-  );
+  // Skip empty string as no input type is ""
+  const ignored = lazy.chatShortcutsIgnoreFields.split(",").filter(v => v);
+  if (lazy.highlightToSearchFeatureGate) {
+    ignored.push("textarea");
+  }
+  GenAI.ignoredInputs = new Set(ignored);
 }
 
 // Initialize on first import

@@ -12,8 +12,6 @@ from mozpack.errors import errors
 from mozpack.files import BaseFile, FileFinder
 from mozpack.manifests import InstallManifest
 
-from mozbuild.util import DefinesAction
-
 COMPLETE = (
     "Elapsed: {elapsed:.2f}s; From {dest}: Kept {existing} existing; "
     "Added/updated {updated}; "
@@ -21,7 +19,7 @@ COMPLETE = (
 )
 
 
-def process_manifest(destdir, paths, track, no_symlinks=False, defines={}):
+def process_manifest(destdir, paths, track, no_symlinks=False):
     if os.path.exists(track):
         # We use the same format as install manifests for the tracking
         # data.
@@ -39,8 +37,9 @@ def process_manifest(destdir, paths, track, no_symlinks=False, defines={}):
 
     else:
         # If tracking is enabled and there is no file, we don't want to
-        # be removing anything.
-        remove_unaccounted = False
+        # be removing anything. An empty FileRegistry removes nothing and is
+        # faster, because the copier then avoids walking the whole destination.
+        remove_unaccounted = FileRegistry()
         remove_empty_directories = False
         remove_all_directory_symlinks = False
 
@@ -50,9 +49,7 @@ def process_manifest(destdir, paths, track, no_symlinks=False, defines={}):
 
     copier = FileCopier()
     link_policy = "copy" if no_symlinks else "symlink"
-    manifest.populate_registry(
-        copier, defines_override=defines, link_policy=link_policy
-    )
+    manifest.populate_registry(copier, link_policy=link_policy)
     with errors.accumulate():
         result = copier.copy(
             destdir,
@@ -85,14 +82,6 @@ def main(argv):
         required=True,
         help="Use installed files tracking information from the given path.",
     )
-    parser.add_argument(
-        "-D",
-        action=DefinesAction,
-        dest="defines",
-        metavar="VAR[=VAL]",
-        help="Define a variable to override what is specified in the manifest",
-    )
-
     args = parser.parse_args(argv)
 
     start = time.monotonic()
@@ -102,7 +91,6 @@ def main(argv):
         args.manifests,
         track=args.track,
         no_symlinks=args.no_symlinks,
-        defines=args.defines,
     )
 
     elapsed = time.monotonic() - start

@@ -132,6 +132,7 @@ class MainMenuTest {
 
         navigationToolbar(composeTestRule) {}
             .enterURLAndEnterToBrowser(pdfPage.url) {
+                clickPageObject(composeTestRule, itemContainingText("Stay in"))
                 waitForPageToLoad()
                 verifyPageContent(pdfPage.content)
             }
@@ -308,10 +309,7 @@ class MainMenuTest {
                 recommendedExtensionTitle = installRecommendedAddon(composeTestRule)
                 verifyAddonPermissionPrompt(recommendedExtensionTitle)
                 acceptPermissionToInstallAddon()
-                verifyAddonInstallCompletedPrompt(
-                    recommendedExtensionTitle,
-                    composeTestRule.activityRule,
-                )
+                verifyAddonInstallCompletedPrompt(recommendedExtensionTitle)
                 closeAddonInstallCompletePrompt()
             }
 
@@ -356,10 +354,7 @@ class MainMenuTest {
                 recommendedExtensionTitle = installRecommendedAddon(composeTestRule)
                 verifyAddonPermissionPrompt(recommendedExtensionTitle)
                 acceptPermissionToInstallAddon()
-                verifyAddonInstallCompletedPrompt(
-                    recommendedExtensionTitle,
-                    composeTestRule.activityRule,
-                )
+                verifyAddonInstallCompletedPrompt(recommendedExtensionTitle)
                 closeAddonInstallCompletePrompt()
             }
         browserScreen(composeTestRule) {
@@ -527,7 +522,7 @@ class MainMenuTest {
                 clickTheMoreButton()
             }
             .clickSaveAsPDFButton {
-                verifyDownloadPrompt(composeTestRule, testPage.title + ".pdf")
+                verifyDownloadPrompt(composeTestRule)
             }
             .clickDownload(composeTestRule) {
                 clickSnackbarButton(composeTestRule = composeTestRule, "OPEN")
@@ -610,6 +605,7 @@ class MainMenuTest {
 
         navigationToolbar(composeTestRule) {}
             .enterURLAndEnterToBrowser(youtubeURL) {
+                clickPageObject(composeTestRule, itemContainingText("Stay in"))
                 waitForPageToLoad(waitingTime)
             }
             .openThreeDotMenu {
@@ -697,10 +693,7 @@ class MainMenuTest {
             .clickExtensionsButton {
                 recommendedExtensionTitle = installRecommendedAddon(composeTestRule)
                 acceptPermissionToInstallAddon()
-                verifyAddonInstallCompletedPrompt(
-                    recommendedExtensionTitle,
-                    composeTestRule.activityRule,
-                )
+                verifyAddonInstallCompletedPrompt(recommendedExtensionTitle)
                 closeAddonInstallCompletePrompt()
             }
         browserScreen(composeTestRule) {}
@@ -945,10 +938,7 @@ class MainMenuTest {
             .clickExtensionsButton {
                 recommendedExtensionTitle = installRecommendedAddon(composeTestRule)
                 acceptPermissionToInstallAddon()
-                verifyAddonInstallCompletedPrompt(
-                    recommendedExtensionTitle,
-                    composeTestRule.activityRule,
-                )
+                verifyAddonInstallCompletedPrompt(recommendedExtensionTitle)
                 closeAddonInstallCompletePrompt()
             }
         browserScreen(composeTestRule) {}
@@ -1025,30 +1015,6 @@ class MainMenuTest {
                 clickSiteDoesNotLoadReason(composeTestRule)
                 verifyChooseReasonErrorMessageIsNotDisplayed(composeTestRule)
                 verifySendButtonIsEnabled(isEnabled = true)
-            }
-    }
-
-    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2937926
-    @Ignore("https://bugzilla.mozilla.org/show_bug.cgi?id=2053348")
-    @Test
-    fun verifyThatTheBrokenSiteFormSubmissionCanBeCanceledTest() {
-        val defaultWebPage = mockWebServer.getGenericAsset(1)
-
-        navigationToolbar(composeTestRule) {}
-            .enterURLAndEnterToBrowser(defaultWebPage.url) {}
-            .openThreeDotMenu {
-                clickTheMoreButton()
-            }
-            .clickReportBrokenSiteButton {
-                verifyWebCompatReporterViewItems(defaultWebPage.url.toString())
-                clickSiteDoesNotLoadReason(composeTestRule)
-                clickBrokenSiteFormCancelButton(composeTestRule)
-            }
-            .openThreeDotMenu {
-                clickTheMoreButton()
-            }
-            .clickReportBrokenSiteButton {
-                verifyWhatIsBrokenField(composeTestRule)
             }
     }
 
@@ -1665,6 +1631,13 @@ class MainMenuTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3080099
+    @Converted(
+        replacedBy =
+            ["org.mozilla.fenix.ui.efficiency.tests.CustomTabsTest#verifyTheMainMenuShareButtonFromCustomTabTest"],
+        bug = 2063252,
+        since = "2026-08",
+    )
+    @SmokeTest
     @Test
     fun verifyTheMainMenuShareButtonFromCustomTabTest() {
         val customMenuItem = "TestMenuItem"
@@ -1698,13 +1671,14 @@ class MainMenuTest {
         )
 
         browserScreen(composeTestRule) {
+            clickPageObject(composeTestRule, itemContainingText("Stay in"))
             verifyPageContent(customTabPDF.content)
         }
 
         customTabScreen(composeTestRule) {}
             .openMainMenu {
                 verifySwitchToDesktopSiteButton()
-                verifyDesktopSiteButtonState(isEnabled = false)
+                verifyDesktopSiteButtonIsDisabled()
             }
     }
 
@@ -1728,7 +1702,12 @@ class MainMenuTest {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/4036009
-    @Ignore("Will be fixed in bug 2059592")
+    @Converted(
+        replacedBy =
+            ["org.mozilla.fenix.ui.efficiency.tests.MainMenuTest#verifyTheMoreMainMenuSummarizePageButtonTest"],
+        bug = 2074835,
+        since = "2026-09",
+    )
     @SmokeTest
     @Test
     fun verifyTheMoreMainMenuSummarizePageButtonTest() {

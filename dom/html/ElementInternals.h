@@ -84,8 +84,8 @@ class ElementInternals final : public nsIFormControl,
   ValidityState* GetValidity(ErrorResult& aRv);
   void GetValidationMessage(nsAString& aValidationMessage,
                             ErrorResult& aRv) const;
-  bool CheckValidity(ErrorResult& aRv);
-  bool ReportValidity(ErrorResult& aRv);
+  MOZ_CAN_RUN_SCRIPT bool CheckValidity(ErrorResult&);
+  MOZ_CAN_RUN_SCRIPT bool ReportValidity(ErrorResult&);
   already_AddRefed<NodeList> GetLabels(ErrorResult& aRv) const;
   nsGenericHTMLElement* GetValidationAnchor(ErrorResult& aRv) const;
   CustomStateSet* States();
@@ -230,9 +230,7 @@ class ElementInternals final : public nsIFormControl,
   RefPtr<HTMLElement> mTarget;
 
   // The form that contains the target element.
-  // It's safe to use raw pointer because it will be reset via
-  // CustomElementData::Unlink when mTarget is released or unlinked.
-  HTMLFormElement* mForm;
+  RefPtr<HTMLFormElement> mForm;
 
   // This is a pointer to the target element's closest fieldset parent if any.
   // It's safe to use raw pointer because it will be reset via

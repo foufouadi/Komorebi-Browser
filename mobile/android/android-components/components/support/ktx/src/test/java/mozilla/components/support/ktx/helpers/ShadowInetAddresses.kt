@@ -12,6 +12,8 @@ import org.robolectric.annotation.Implements
 
 /** Custom [InetAddresses] shadow to use with [Robolectric] tests to reduce their flakiness. */
 @Implements(InetAddresses::class)
+// Robolectric instantiates shadows, so this has to stay a class.
+@Suppress("UtilityClassWithPublicConstructor")
 class ShadowInetAddresses {
     companion object {
         // Strict IPv4 regex to ensure domains like "example.com" fail immediately

@@ -9,7 +9,7 @@ const lazy = {};
 ChromeUtils.defineLazyGetter(lazy, "console", () => {
   return console.createInstance({
     maxLogLevelPref: "dom.push.loglevel",
-    prefix: "Push",
+    logModule: "Push",
   });
 });
 
@@ -93,7 +93,7 @@ export class Push {
       let permissionDenied = () => {
         reject(
           new this._window.DOMException(
-            "User denied permission to use the Push API.",
+            "Permission to create push subscription is denied.",
             "NotAllowedError"
           )
         );

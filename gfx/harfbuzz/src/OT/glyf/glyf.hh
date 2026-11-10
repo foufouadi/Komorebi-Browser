@@ -25,6 +25,7 @@ namespace OT {
  * https://docs.microsoft.com/en-us/typography/opentype/spec/glyf
  */
 #define HB_OT_TAG_glyf HB_TAG('g','l','y','f')
+#define HB_OT_TAG_GLYF HB_TAG('G','L','Y','F')
 
 struct glyf
 {
@@ -36,6 +37,20 @@ struct glyf
   {
     const OT::head &head = *face->table.head;
     return head.indexToLocFormat <= 1 && head.glyphDataFormat <= 1;
+  }
+
+  static bool has_extended_glyf (hb_face_t *face)
+  {
+#ifndef HB_NO_BEYOND_64K
+    hb_blob_ptr_t<glyf> GLYF_table = hb_sanitize_context_t ().reference_table<glyf> (face, HB_OT_TAG_GLYF);
+    hb_blob_ptr_t<loca> LOCA_table = hb_sanitize_context_t ().reference_table<loca> (face, HB_OT_TAG_LOCA);
+    bool ret = GLYF_table.get_length () && LOCA_table.get_length ();
+    GLYF_table.destroy ();
+    LOCA_table.destroy ();
+    return ret;
+#else
+    return false;
+#endif
   }
 
   bool sanitize (hb_sanitize_context_t *c HB_UNUSED) const
@@ -79,6 +94,12 @@ struct glyf
   {
     TRACE_SUBSET (this);
 
+    bool extended = has_extended_glyf (c->plan->source);
+#ifndef HB_NO_BEYOND_64K
+    if (extended != (c->table_tag == HB_OT_TAG_GLYF))
+      return_trace (false);
+#endif
+
     if (!has_valid_glyf_format (c->plan->source)) {
       // glyf format is unknown don't attempt to subset it.
       DEBUG_MSG (SUBSET, nullptr,
@@ -96,12 +117,15 @@ struct glyf
 
     hb_vector_t<unsigned> padded_offsets;
     if (unlikely (!padded_offsets.alloc_exact (c->plan->new_to_old_gid_list.length)))
+    {
+      hb_font_destroy (font);
       return_trace (false);
+    }
 
     hb_vector_t<glyf_impl::SubsetGlyph> glyphs;
     /* SubsetGlyphs borrow bytes from this blob until they are serialized. */
     hb_blob_t *source_glyf = nullptr;
-    if (!_populate_subset_glyphs (c->plan, font, glyphs, &source_glyf))
+    if (!_populate_subset_glyphs (c->plan, font, glyphs, &source_glyf, &c->budget_remaining))
     {
       hb_blob_destroy (source_glyf);
       hb_font_destroy (font);
@@ -132,13 +156,14 @@ struct glyf
 
     auto *glyf_prime = c->serializer->start_embed <glyf> ();
     bool result = glyf_prime->serialize (c->serializer, hb_iter (glyphs), use_short_loca, c->plan);
-    if (c->plan->normalized_coords && !c->plan->pinned_at_default)
+    if (c->plan->normalized_coords)
       _free_compiled_subset_glyphs (glyphs);
     hb_blob_destroy (source_glyf);
 
     if (unlikely (!c->serializer->check_success (glyf_impl::_add_loca_and_head (c,
 						 padded_offsets.iter (),
-						 use_short_loca))))
+						 use_short_loca,
+						 extended))))
       return_trace (false);
 
     return result;
@@ -148,7 +173,8 @@ struct glyf
   _populate_subset_glyphs (const hb_subset_plan_t   *plan,
 			   hb_font_t                *font,
 			   hb_vector_t<glyf_impl::SubsetGlyph>& glyphs /* OUT */,
-			   hb_blob_t               **source_glyf /* OUT */) const;
+			   hb_blob_t               **source_glyf /* OUT */,
+			   int64_t                  *budget /* IN/OUT */) const;
 
   hb_font_t *
   _create_font_for_instancing (const hb_subset_plan_t *plan) const;
@@ -168,19 +194,24 @@ struct glyf
 			 * defining it _MIN instead. */
 };
 
+#ifndef HB_NO_BEYOND_64K
+struct GLYF : glyf
+{
+  static constexpr hb_tag_t tableTag = HB_OT_TAG_GLYF;
+};
+#endif
+
 struct glyf_accelerator_t
 {
   glyf_accelerator_t (hb_face_t *face)
   {
+    extended = false;
     short_offset = false;
     num_glyphs = 0;
     loca_table = nullptr;
     glyf_table = nullptr;
 #ifndef HB_NO_VAR
     gvar = nullptr;
-#ifndef HB_NO_BEYOND_64K
-    GVAR = nullptr;
-#endif
 #endif
     hmtx = nullptr;
 #ifndef HB_NO_VERTICAL
@@ -192,13 +223,28 @@ struct glyf_accelerator_t
       return;
     short_offset = 0 == head.indexToLocFormat;
 
-    loca_table = face->table.loca.get_blob (); // Needs no destruct!
-    glyf_table = hb_sanitize_context_t ().reference_table<glyf> (face);
+#ifndef HB_NO_BEYOND_64K
+    hb_blob_ptr_t<glyf> GLYF_table = hb_sanitize_context_t ().reference_table<glyf> (face, HB_OT_TAG_GLYF);
+    hb_blob_ptr_t<loca> LOCA_table = hb_sanitize_context_t ().reference_table<loca> (face, HB_OT_TAG_LOCA);
+    extended = GLYF_table.get_length () && LOCA_table.get_length ();
+    if (extended)
+    {
+      glyf_table = std::move (GLYF_table);
+      loca_table = std::move (LOCA_table);
+    }
+    else
+    {
+      GLYF_table.destroy ();
+      LOCA_table.destroy ();
+    }
+#endif
+    if (!extended)
+    {
+      glyf_table = hb_sanitize_context_t ().reference_table<glyf> (face);
+      loca_table = hb_sanitize_context_t ().reference_table<loca> (face);
+    }
 #ifndef HB_NO_VAR
     gvar = face->table.gvar;
-#ifndef HB_NO_BEYOND_64K
-    GVAR = face->table.GVAR;
-#endif
 #endif
     hmtx = face->table.hmtx;
 #ifndef HB_NO_VERTICAL
@@ -218,9 +264,11 @@ struct glyf_accelerator_t
     }
 
     glyf_table.destroy ();
+    loca_table.destroy ();
   }
 
   bool has_data () const { return num_glyphs; }
+  bool is_extended () const { return extended; }
 
   void depend (hb_depend_data_builder_t *builder) const
   {
@@ -229,7 +277,9 @@ struct glyf_accelerator_t
     {
       auto glyph = glyph_for_gid (gid);
       for (auto &item : glyph.get_composite_iterator ())
-        builder->add_depend (gid, HB_OT_TAG_glyf, item.get_gid ());
+        builder->add_depend (gid,
+                             extended ? HB_OT_TAG_GLYF : HB_OT_TAG_glyf,
+                             item.get_gid (extended));
     }
   }
 
@@ -238,15 +288,25 @@ struct glyf_accelerator_t
   bool get_points (hb_font_t *font, hb_codepoint_t gid, T consumer,
 		   hb_array_t<const int> coords,
 		   hb_glyf_scratch_t &scratch,
-		   hb_scalar_cache_t *gvar_cache = nullptr) const
+		   hb_scalar_cache_t *gvar_cache = nullptr,
+		   int64_t *budget = nullptr) const
   {
     if (gid >= num_glyphs) return false;
 
+    int64_t stack_budget = HB_BUDGET_GLYPH;
+    if (!budget) budget = &stack_budget;
+
     auto &all_points = scratch.all_points;
     all_points.clear ();
+    /* The scratch is cached across loads; don't let a failed one leave
+     * component points behind. */
+    scratch.comp_points.clear ();
 
     bool phantom_only = !consumer.is_consuming_contour_points ();
-    if (unlikely (!glyph_for_gid (gid).get_points (font, *this, all_points, scratch, nullptr, nullptr, nullptr, true, true, phantom_only, coords, gvar_cache)))
+    if (unlikely (!glyph_for_gid (gid).get_points (font, *this, all_points, scratch, nullptr, nullptr, nullptr, true, true, phantom_only, coords, gvar_cache, 0, nullptr, budget)))
+      return false;
+
+    if (unlikely (!hb_budget_spend (*budget, HB_BUDGET_1, all_points.length)))
       return false;
 
     unsigned count = all_points.length;
@@ -298,12 +358,25 @@ struct glyf_accelerator_t
 
 	    unsigned end = i;
 
-	    // Enough to start from the end. Our path-builder takes care of the rest.
-	    if (likely (end < count)) // Can only fail in case of alloc failure *maybe*.
+	    unsigned limit = end;
+#ifndef HB_NO_CUBIC_GLYF
+	    /* Rotating by one control point changes cubic pairing.  Preserve
+	     * the original order when the contour starts and ends off-curve
+	     * with cubic controls, including all-off-curve contours. */
+	    if (likely (end < count) &&
+		(points[start].flag & glyf_impl::SimpleGlyph::FLAG_CUBIC) &&
+		(points[end].flag & (glyf_impl::SimpleGlyph::FLAG_ON_CURVE |
+				    glyf_impl::SimpleGlyph::FLAG_CUBIC)) ==
+		 glyf_impl::SimpleGlyph::FLAG_CUBIC)
+	      limit++;
+	    else
+#endif
+	    if (likely (end < count))
 	      consumer.consume_point (points[end]);
 
-	    for (i = start; i < end; i++)
+	    for (i = start; i < limit; i++)
 	      consumer.consume_point (points[i]);
+	    i = end;
 
 	    consumer.contour_end ();
 	  }
@@ -324,7 +397,6 @@ struct glyf_accelerator_t
 
   public:
 
-#ifndef HB_NO_VAR
   struct points_aggregator_t
   {
     hb_font_t *font;
@@ -357,10 +429,12 @@ struct glyf_accelerator_t
 	  return;
 	}
 	{
-	  extents->x_bearing = roundf (min_x);
-	  extents->width = roundf (max_x - extents->x_bearing);
-	  extents->y_bearing = roundf (max_y);
-	  extents->height = roundf (min_y - extents->y_bearing);
+	  double x_bearing = (double) roundf (min_x);
+	  double y_bearing = (double) roundf (max_y);
+	  extents->x_bearing = hb_clamp_to<hb_position_t> (x_bearing);
+	  extents->width = hb_clamp_to<hb_position_t> ((double) roundf (max_x) - x_bearing);
+	  extents->y_bearing = hb_clamp_to<hb_position_t> (y_bearing);
+	  extents->height = hb_clamp_to<hb_position_t> ((double) roundf (min_y) - y_bearing);
 
 	  if (scaled)
 	    font->scale_glyph_extents (extents);
@@ -417,6 +491,7 @@ struct glyf_accelerator_t
 		 : phantoms[glyf_impl::PHANTOM_RIGHT].x - phantoms[glyf_impl::PHANTOM_LEFT].x;
     return hb_clamp (roundf (result), 0.f, (float) UINT_MAX / 2);
   }
+#endif
 
   float
   get_v_origin_with_var_unscaled (hb_codepoint_t gid,
@@ -440,8 +515,6 @@ struct glyf_accelerator_t
 
     return phantoms[glyf_impl::PHANTOM_TOP].y;
   }
-#endif
-#endif
 
   public:
 
@@ -468,8 +541,9 @@ struct glyf_accelerator_t
 			     gid,
 			     points_aggregator_t (font, extents, nullptr, true),
 			     coords,
-			     *scratch);
-      if (budget) *budget -= scratch->all_points.length;
+			     *scratch,
+			     nullptr,
+			     budget);
       release_scratch (scratch);
       return ret;
     }
@@ -501,12 +575,14 @@ struct glyf_accelerator_t
       return glyf_impl::Glyph ();
 
     glyf_impl::Glyph glyph (hb_bytes_t ((const char *) this->glyf_table + start_offset,
-			     end_offset - start_offset), gid);
-    return needs_padding_removal ? glyf_impl::Glyph (glyph.trim_padding (), gid) : glyph;
+			     end_offset - start_offset), gid, extended);
+    return needs_padding_removal ? glyf_impl::Glyph (glyph.trim_padding (), gid, extended) : glyph;
   }
 
   bool
-  get_path (hb_font_t *font, hb_codepoint_t gid, hb_draw_session_t &draw_session, hb_scalar_cache_t *gvar_cache = nullptr) const
+  get_path (hb_font_t *font, hb_codepoint_t gid, hb_draw_session_t &draw_session,
+	    hb_scalar_cache_t *gvar_cache = nullptr,
+	    int64_t *budget = nullptr) const
   {
     if (!has_data ()) return false;
 
@@ -517,7 +593,8 @@ struct glyf_accelerator_t
 			   hb_array (font->coords,
 				     font->has_nonzero_coords ? font->num_coords : 0),
 			   *scratch,
-			    gvar_cache);
+			   gvar_cache,
+			   budget);
 
     release_scratch (scratch);
 
@@ -535,8 +612,8 @@ struct glyf_accelerator_t
     bool ret = get_points (font, gid, glyf_impl::path_builder_t (font, draw_session),
 			   coords,
 			   scratch,
-			   gvar_cache);
-    if (budget) *budget -= scratch.all_points.length;
+			   gvar_cache,
+			   budget);
     return ret;
   }
 
@@ -565,14 +642,12 @@ struct glyf_accelerator_t
   }
 
   unsigned int get_num_glyphs () const { return num_glyphs; }
+  unsigned int get_table_length () const { return glyf_table.get_length (); }
   hb_blob_t *reference_glyf_table () const
   { return hb_blob_reference (glyf_table.get_blob ()); }
 
 #ifndef HB_NO_VAR
   const gvar_accelerator_t *gvar;
-#ifndef HB_NO_BEYOND_64K
-  const GVAR_accelerator_t *GVAR;
-#endif
 #endif
   const hmtx_accelerator_t *hmtx;
 #ifndef HB_NO_VERTICAL
@@ -580,6 +655,7 @@ struct glyf_accelerator_t
 #endif
 
   private:
+  bool extended;
   bool short_offset;
   unsigned int num_glyphs;
   hb_blob_ptr_t<loca> loca_table;
@@ -592,7 +668,8 @@ inline bool
 glyf::_populate_subset_glyphs (const hb_subset_plan_t   *plan,
 			       hb_font_t *font,
 			       hb_vector_t<glyf_impl::SubsetGlyph>& glyphs /* OUT */,
-			       hb_blob_t **source_glyf /* OUT */) const
+			       hb_blob_t **source_glyf /* OUT */,
+			       int64_t *budget /* IN/OUT */) const
 {
   OT::glyf_accelerator_t glyf (plan->source);
   if (!glyphs.alloc_exact (plan->new_to_old_gid_list.length)) return false;
@@ -624,14 +701,19 @@ glyf::_populate_subset_glyphs (const hb_subset_plan_t   *plan,
 
     if (font)
     {
-      if (unlikely (!subset_glyph.compile_bytes_with_deltas (plan, font, glyf)))
+      if (unlikely (!subset_glyph.compile_bytes_with_deltas (plan, font, glyf, budget)))
       {
-        // when pinned at default, only bounds are updated, thus no need to free
-        if (!plan->pinned_at_default)
-          _free_compiled_subset_glyphs (glyphs);
+        _free_compiled_subset_glyphs (glyphs);
         return false;
       }
     }
+  }
+  /* All retained glyphs can be empty. Do not write the untouched bounds
+   * accumulator's inverted sentinels into the instance's head table. */
+  if (font && plan->head_maxp_info.xMin > plan->head_maxp_info.xMax)
+  {
+    plan->head_maxp_info.xMin = plan->head_maxp_info.xMax = 0;
+    plan->head_maxp_info.yMin = plan->head_maxp_info.yMax = 0;
   }
   return true;
 }

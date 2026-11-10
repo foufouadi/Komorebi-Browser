@@ -1,7 +1,4 @@
-use alloc::{
-    format,
-    string::{String, ToString},
-};
+use alloc::{format, string::String};
 use core::fmt::Write;
 
 use crate::{
@@ -11,7 +8,7 @@ use crate::{
             writer::{NameKeyExt, StatementContext, TypeContext, WrappedFunction},
             BackendResult, Error, Writer, NAMESPACE,
         },
-        Baked, INDENT,
+        INDENT,
     },
     Handle,
 };
@@ -386,9 +383,7 @@ impl<W: Write> Writer<W> {
             crate::RayQueryFunction::Proceed { result } => {
                 let mut current_level = level;
                 write!(self.out, "{current_level}")?;
-                let name = Baked(result).to_string();
-                self.start_baking_expression(result, &context.expression, &name)?;
-                self.named_expressions.insert(result, name.clone());
+                let name = self.write_result_assignment(result, &context.expression)?;
 
                 writeln!(self.out, "false;")?;
 
@@ -524,6 +519,14 @@ impl<W: Write> Writer<W> {
                 // the API docs.
                 if context.expression.ray_query_initialization_tracking {
                     writeln!(self.out, "{level}}}")?;
+                }
+            }
+            // Reset the initialization tracker to have no flags set which is equivalent to having
+            // a new variable as nothing else should be used if the ray query is marked as
+            // uninitialized.
+            crate::RayQueryFunction::Begin => {
+                if context.expression.ray_query_initialization_tracking {
+                    writeln!(self.out, "{level}{tracker_expr_name} = 0u;")?;
                 }
             }
         }

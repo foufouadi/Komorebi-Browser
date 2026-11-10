@@ -5,6 +5,35 @@
 #include "nsComponentManagerUtils.h"
 #include "nsSystemAlertsService.h"
 #include "nsAlertsIconListener.h"
+#include "mozilla/Components.h"
+#include "mozilla/WidgetUtilsGtk.h"
+
+#ifdef MOZ_ENABLE_DBUS
+#  include "rust/src/PortalAlertsService.h"
+#endif
+
+NS_IMPL_COMPONENT_FACTORY(nsIAlertsService) {
+#ifdef MOZ_ENABLE_DBUS
+  if (mozilla::widget::ShouldUsePortal(
+          mozilla::widget::PortalKind::Notification)) {
+    nsCOMPtr<nsIAlertsService> service;
+    if (NS_SUCCEEDED(new_portal_alerts_service(NS_GET_IID(nsIAlertsService),
+                                               getter_AddRefs(service)))) {
+      return service.forget();
+    }
+    return nullptr;
+  }
+
+  RefPtr service = mozilla::MakeRefPtr<nsSystemAlertsService>();
+  if (NS_FAILED(service->Init())) {
+    return nullptr;
+  }
+  return service.forget().downcast<nsIAlertsService>();
+#else
+  // The libnotify backend requires D-Bus as well.
+  return nullptr;
+#endif
+}
 
 NS_IMPL_ADDREF(nsSystemAlertsService)
 NS_IMPL_RELEASE(nsSystemAlertsService)
@@ -21,8 +50,8 @@ nsSystemAlertsService::~nsSystemAlertsService() = default;
 
 nsresult nsSystemAlertsService::Init() { return NS_OK; }
 
-NS_IMETHODIMP nsSystemAlertsService::ShowAlert(nsIAlertNotification* aAlert,
-                                               nsIObserver* aAlertListener) {
+NS_IMETHODIMP nsSystemAlertsService::ShowAlert(
+    nsIAlertNotification* /*aAlert*/, nsIObserver* /*aAlertListener*/) {
   return NS_ERROR_NOT_IMPLEMENTED;  // Implemented in nsAlertsService
 }
 
@@ -48,7 +77,7 @@ NS_IMETHODIMP nsSystemAlertsService::ShowAlertWithCallbacks(
 }
 
 NS_IMETHODIMP nsSystemAlertsService::CloseAlert(const nsAString& aAlertName,
-                                                bool aContextClosed) {
+                                                bool /*aContextClosed*/) {
   RefPtr<nsAlertsIconListener> listener = mActiveListeners.Get(aAlertName);
   if (!listener) {
     return NS_OK;
@@ -57,7 +86,8 @@ NS_IMETHODIMP nsSystemAlertsService::CloseAlert(const nsAString& aAlertName,
   return listener->Close();
 }
 
-NS_IMETHODIMP nsSystemAlertsService::GetHistory(nsTArray<nsString>& aResult) {
+NS_IMETHODIMP nsSystemAlertsService::GetHistory(
+    nsTArray<nsString>& /*aResult*/) {
   // Neither org.freedesktop.Notifications nor
   // org.freedesktop.portal.Notification supports getting the previous
   // notifications
@@ -66,11 +96,12 @@ NS_IMETHODIMP nsSystemAlertsService::GetHistory(nsTArray<nsString>& aResult) {
   return NS_ERROR_NOT_AVAILABLE;
 }
 
-NS_IMETHODIMP nsSystemAlertsService::GetManualDoNotDisturb(bool* aRetVal) {
+NS_IMETHODIMP nsSystemAlertsService::GetManualDoNotDisturb(bool* /*aRetVal*/) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-NS_IMETHODIMP nsSystemAlertsService::SetManualDoNotDisturb(bool aDoNotDisturb) {
+NS_IMETHODIMP nsSystemAlertsService::SetManualDoNotDisturb(
+    bool /*aDoNotDisturb*/) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 

@@ -188,6 +188,7 @@ static Maybe<unsigned> HaveMemfd() {
 #endif  // USE_MEMFD_CREATE
 }
 
+[[maybe_unused]]
 static bool MemfdCanSeal(Maybe<unsigned> aMaybeFlags) {
 #ifdef USE_MEMFD_CREATE
   return aMaybeFlags && (*aMaybeFlags & MFD_ALLOW_SEALING);
@@ -229,8 +230,8 @@ static Maybe<PlatformHandle> CreateImpl(size_t aSize,
   mozilla::UniqueFileHandle fd;
   mozilla::UniqueFileHandle frozen_fd;
 
+  [[maybe_unused]] auto memfdStatus = HaveMemfd();
 #ifdef USE_MEMFD_CREATE
-  auto memfdStatus = HaveMemfd();
   if (memfdStatus) {
     fd.reset(memfd_create("mozilla-ipc", *memfdStatus));
     if (!fd) {

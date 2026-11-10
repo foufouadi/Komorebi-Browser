@@ -36,6 +36,7 @@ import org.mozilla.fenix.BuildConfig
 import org.mozilla.fenix.Config
 import org.mozilla.fenix.FeatureFlags
 import org.mozilla.fenix.R
+import org.mozilla.fenix.components.appstate.AppAction
 import org.mozilla.fenix.debugsettings.data.DefaultDebugSettingsRepository
 import org.mozilla.fenix.e2e.SystemInsetsPaddedFragment
 import org.mozilla.fenix.ext.components
@@ -44,6 +45,7 @@ import org.mozilla.fenix.ext.showToolbar
 import org.mozilla.fenix.ext.showToolbarWithIconButton
 import org.mozilla.fenix.theme.FirefoxTheme
 import org.mozilla.fenix.utils.SecretSettingsPrefDefaults
+import org.mozilla.gecko.search.SearchWidgetProvider
 
 /** Settings screen allowing users to configure options not intended for general release. */
 class SecretSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFragment {
@@ -199,39 +201,30 @@ class SecretSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFra
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 
-        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_universal_edge_to_edge_wallpapers).apply {
-            isChecked = settings.enableUniversalEdgeToEdgeWallpapers
-            onPreferenceChangeListener = SharedPreferenceUpdater()
-        }
-
-        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_firefox_labs).apply {
-            isChecked = settings.enableFirefoxLabs
-            onPreferenceChangeListener = SharedPreferenceUpdater()
-        }
-
-        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_top_sites_pager).apply {
-            isChecked = settings.topSitesPager
-            onPreferenceChangeListener = SharedPreferenceUpdater()
-        }
-
-        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_add_shortcuts_improvement).apply {
-            isChecked = settings.enableAddShortcutsImprovement
-            onPreferenceChangeListener = SharedPreferenceUpdater()
-        }
-
         requirePreference<SwitchPreferenceCompat>(R.string.pref_key_show_more_shortcuts).apply {
             isChecked = settings.showMoreShortcuts
-            onPreferenceChangeListener = SharedPreferenceUpdater()
-        }
-
-        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_merino_client).apply {
-            isChecked = settings.enableMerinoClient
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 
         requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_homepage_weather_widget).apply {
             isChecked = settings.enableHomepageWeatherWidget
             onPreferenceChangeListener = SharedPreferenceUpdater()
+        }
+
+        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_homepage_wrexham_widget).apply {
+            isChecked = settings.enableHomepageWrexhamWidget
+            onPreferenceChangeListener =
+                object : SharedPreferenceUpdater() {
+                    override fun onPreferenceChange(preference: Preference, newValue: Any?): Boolean {
+                        val handled = super.onPreferenceChange(preference, newValue)
+                        if (handled) {
+                            preference.context.components.appStore.dispatch(
+                                AppAction.SportsWidgetAction.FeatureEnabledChanged(isEnabled = newValue as Boolean)
+                            )
+                        }
+                        return handled
+                    }
+                }
         }
 
         requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_ads_client_for_stories).apply {
@@ -351,6 +344,36 @@ class SecretSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFra
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 
+        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_listen_to_page).apply {
+            isVisible = Config.channel.isNightlyOrDebug
+            isChecked = settings.listenToPageFeatureFlagEnabled
+            onPreferenceChangeListener = SharedPreferenceUpdater()
+        }
+
+        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_weekly_privacy_notification).apply {
+            isVisible = Config.channel.isNightlyOrDebug
+            isChecked = settings.weeklyPrivacyNotificationFeatureFlagEnabled
+            onPreferenceChangeListener =
+                object : SharedPreferenceUpdater() {
+                    override fun onPreferenceChange(preference: Preference, newValue: Any?): Boolean {
+                        if (newValue as? Boolean == false) {
+                            requirePreference<SwitchPreferenceCompat>(
+                                    R.string.pref_key_debug_force_weekly_privacy_report_notification
+                                )
+                                .isChecked = false
+                        }
+                        return super.onPreferenceChange(preference, newValue)
+                    }
+                }
+        }
+
+        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_debug_force_weekly_privacy_report_notification)
+            .apply {
+                isVisible = Config.channel.isNightlyOrDebug
+                isChecked = settings.debugForceWeeklyPrivacyReportNotification
+                onPreferenceChangeListener = SharedPreferenceUpdater()
+            }
+
         requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_import_bookmarks).apply {
             isVisible = Config.channel.isDebug
             isChecked = settings.importBookmarksFeatureFlagEnabled
@@ -359,13 +382,7 @@ class SecretSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFra
 
         requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_ip_protection).apply {
             isVisible = Config.channel.isNightlyOrDebug
-            isChecked = settings.isIPProtectionEnabled
-            onPreferenceChangeListener = SharedPreferenceUpdater()
-        }
-
-        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_ip_protection_locations).apply {
-            isVisible = Config.channel.isNightlyOrDebug
-            isChecked = settings.isIPProtectionLocationsEnabled
+            isChecked = settings.overrideIPProtectionEnabled
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 
@@ -376,8 +393,14 @@ class SecretSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFra
         }
 
         requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_import_passwords).apply {
-            isVisible = Config.channel.isDebug
-            isChecked = settings.importPasswordsFeatureFlagEnabled
+            isVisible = Config.channel.isNightlyOrDebug
+            isChecked = settings.overrideImportPasswordsEnabled
+            onPreferenceChangeListener = SharedPreferenceUpdater()
+        }
+
+        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_use_search_config_v3).apply {
+            isVisible = Config.channel.isNightlyOrDebug
+            isChecked = settings.useSearchConfigV3
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 
@@ -397,13 +420,24 @@ class SecretSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFra
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 
-        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_homepage_customization).apply {
-            isChecked = settings.enableHomepageCustomization
+        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_account_settings_new_ui).apply {
+            isChecked = settings.accountSettingsNewUi
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 
-        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_homepage_trending_recent_search).apply {
-            isChecked = settings.enableHomepageTrendingRecentSearch
+        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_sync_decoupling).apply {
+            isChecked = settings.syncDecouplingEnabled
+            onPreferenceChangeListener = SharedPreferenceUpdater()
+        }
+
+        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_open_links_in_youtube_feature_enabled).apply {
+            isVisible = Config.channel.isDebug
+            isChecked = settings.openLinksInYoutubeFeatureEnabled
+            onPreferenceChangeListener = SharedPreferenceUpdater()
+        }
+
+        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_homepage_customization).apply {
+            isChecked = settings.enableHomepageCustomization
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 
@@ -422,6 +456,36 @@ class SecretSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFra
         requirePreference<SwitchPreferenceCompat>(R.string.pref_key_tab_manager_opening_animation).apply {
             isVisible = true
             isChecked = settings.tabManagerOpeningAnimationEnabled
+            onPreferenceChangeListener = SharedPreferenceUpdater()
+        }
+
+        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_tab_reload_cover_enabled).apply {
+            isVisible = true
+            isChecked = settings.tabReloadCoverEnabled
+            onPreferenceChangeListener =
+                object : SharedPreferenceUpdater() {
+                    override fun onPreferenceChange(preference: Preference, newValue: Any?): Boolean {
+                        // When the cover is turned off, also force the scroll-aware toggle to off. The XML
+                        // `android:dependency` alone would only grey out the child toggle but leave its
+                        // stored value intact — so re-enabling the cover would silently reactivate
+                        // scroll-aware without the user re-confirming it.
+                        if (newValue == false) {
+                            requirePreference<SwitchPreferenceCompat>(
+                                    R.string.pref_key_tab_reload_cover_scroll_aware_enabled
+                                )
+                                .isChecked = false
+                        }
+                        return super.onPreferenceChange(preference, newValue)
+                    }
+                }
+        }
+
+        // XML `android:dependency` greys out this toggle whenever the cover toggle above is off. The change
+        // listener on the cover toggle also flips this toggle's stored value to false, so re-enabling the
+        // cover doesn't silently reactivate scroll-aware.
+        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_tab_reload_cover_scroll_aware_enabled).apply {
+            isVisible = true
+            isChecked = settings.tabReloadCoverScrollAwareEnabled
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 
@@ -455,14 +519,41 @@ class SecretSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFra
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 
-        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_persistent_onboarding).apply {
-            isChecked = settings.enablePersistentOnboarding
+        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_qwac_ui).apply {
+            isVisible = Config.channel.isNightlyOrDebug
+            isChecked = settings.isQwacUiEnabled
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 
-        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_tab_groups).apply {
+        // These two are mutually exclusive, which the Settings setters enforce, so they write through Settings
+        // rather than SharedPreferenceUpdater and refresh each other to reflect the setter's side effect.
+        val powerSavingModeAutoPreference =
+            requirePreference<SwitchPreferenceCompat>(R.string.pref_key_power_saving_mode_auto_enabled)
+        val powerSavingModeManualPreference =
+            requirePreference<SwitchPreferenceCompat>(R.string.pref_key_power_saving_mode_manually_enabled)
+
+        powerSavingModeAutoPreference.apply {
             isVisible = Config.channel.isNightlyOrDebug
-            isChecked = settings.tabGroupsEnabled
+            isChecked = settings.powerSavingModeAutoEnabled
+            onPreferenceChangeListener = Preference.OnPreferenceChangeListener { _, newValue ->
+                settings.powerSavingModeAutoEnabled = newValue as Boolean
+                powerSavingModeManualPreference.isChecked = settings.powerSavingModeManuallyEnabled
+                true
+            }
+        }
+
+        powerSavingModeManualPreference.apply {
+            isVisible = Config.channel.isNightlyOrDebug
+            isChecked = settings.powerSavingModeManuallyEnabled
+            onPreferenceChangeListener = Preference.OnPreferenceChangeListener { _, newValue ->
+                settings.powerSavingModeManuallyEnabled = newValue as Boolean
+                powerSavingModeAutoPreference.isChecked = settings.powerSavingModeAutoEnabled
+                true
+            }
+        }
+
+        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_persistent_onboarding).apply {
+            isChecked = settings.enablePersistentOnboarding
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 
@@ -484,8 +575,20 @@ class SecretSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFra
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 
-        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_private_mode_and_stories_entry_point).apply {
-            isChecked = settings.privateModeAndStoriesEntryPointEnabled
+        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_tab_groups_strip).apply {
+            isVisible = Config.channel.isNightlyOrDebug
+            isChecked = settings.tabGroupsStripEnabled
+            onPreferenceChangeListener = SharedPreferenceUpdater()
+        }
+
+        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_show_tab_groups_in_menu).apply {
+            isVisible = Config.channel.isDebug
+            isChecked = settings.showTabGroupsInMenu
+            onPreferenceChangeListener = SharedPreferenceUpdater()
+        }
+
+        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_migrate_collections_to_tab_groups).apply {
+            isChecked = settings.migrateCollectionsToTabGroupsEnabled
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 
@@ -503,13 +606,41 @@ class SecretSettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFra
         requirePreference<SwitchPreferenceCompat>(R.string.pref_key_google_lens_integration).apply {
             isVisible = Config.channel.isNightlyOrDebug || Config.channel.isBeta
             isChecked = settings.googleLensIntegrationEnabled
-            onPreferenceChangeListener = SharedPreferenceUpdater()
+            onPreferenceChangeListener =
+                object : SharedPreferenceUpdater() {
+                    override fun onPreferenceChange(preference: Preference, newValue: Any?): Boolean {
+                        val persisted = super.onPreferenceChange(preference, newValue)
+                        SearchWidgetProvider.updateAllWidgets(context)
+                        return persisted
+                    }
+                }
         }
 
         requirePreference<SwitchPreferenceCompat>(R.string.pref_key_show_voice_search_in_display_toolbar).apply {
             isVisible = Config.channel.isNightlyOrDebug
             isChecked = context.components.settings.showVoiceSearchInDisplayToolbar
             onPreferenceChangeListener = SharedPreferenceUpdater()
+        }
+
+        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_toolbar_focus_mode).apply {
+            isVisible = Config.channel.isNightlyOrDebug
+            isChecked = context.components.settings.showAddressBarInFocusMode
+            onPreferenceChangeListener = SharedPreferenceUpdater()
+        }
+
+        requirePreference<SwitchPreferenceCompat>(R.string.pref_key_enable_menu_customization_screen).apply {
+            isVisible = Config.channel.isDebug
+            isChecked = context.components.settings.isMenuCustomizationScreenEnabled
+            onPreferenceChangeListener =
+                object : SharedPreferenceUpdater() {
+                    override fun onPreferenceChange(preference: Preference, newValue: Any?): Boolean {
+                        val enabled = newValue as? Boolean ?: false
+                        if (enabled) {
+                            context.components.menuCustomizationRepository.warmUp()
+                        }
+                        return super.onPreferenceChange(preference, newValue)
+                    }
+                }
         }
     }
 

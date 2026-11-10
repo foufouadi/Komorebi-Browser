@@ -531,7 +531,8 @@ class DevTools extends EventEmitter {
    *        Whether we need to raise the toolbox or not.
    *
    * @return {Toolbox} toolbox
-   *        The toolbox that was opened
+   *        The toolbox that was opened, or null if the toolbox was destroyed
+   *        while it was still initializing.
    */
   async showToolbox(
     commands,
@@ -579,6 +580,12 @@ class DevTools extends EventEmitter {
       toolbox = await toolboxPromise;
       this.#creatingToolboxes.delete(commands);
 
+      // Return early if the toolbox already started destroying, e.g. if the
+      // user closed the window during initialization (Bug 2044027).
+      if (toolbox.isDestroying()) {
+        return null;
+      }
+
       if (startTime) {
         this.logToolboxOpenTime(toolbox, startTime);
       }
@@ -618,6 +625,10 @@ class DevTools extends EventEmitter {
    * @param {object} options
    *        Various options that will be forwarded to `showToolbox`. See the
    *        JSDoc on this method.
+   * @return {Promise<Toolbox|null>}
+   *        Resolves to null if the tab can't get its own toolbox: a popup
+   *        debugged from its opener, or a system principal document while
+   *        devtools.chrome.enabled is locked to false.
    */
   async showToolboxForTab(
     tab,
@@ -649,7 +660,15 @@ class DevTools extends EventEmitter {
         return null;
       }
     }
-    const commands = await LocalTabCommandsFactory.createCommandsForTab(tab);
+    let commands;
+    try {
+      commands = await LocalTabCommandsFactory.createCommandsForTab(tab);
+    } catch (e) {
+      if (e.serverPacket?.error == "chromeDebuggingDisabled") {
+        return null;
+      }
+      throw e;
+    }
     return this.showToolbox(commands, {
       toolId,
       toolOptions,
@@ -830,6 +849,19 @@ class DevTools extends EventEmitter {
   }
 
   /**
+   * Closes all toolboxes (fire and forget)
+   *
+   * @return {Promise} Returns a promise that resolves
+   *                   after all toolbox destroyal completed
+   */
+  closeAllToolboxes() {
+    for (const [, toolbox] of this.#toolboxesPerCommands) {
+      toolbox.closeToolbox();
+      toolbox.destroy();
+    }
+  }
+
+  /**
    * Compatibility layer for web-extensions. Used by DevToolsShim for
    * browser/components/extensions/parent/ext-devtools-inspectedWindow.js and
    * browser/components/extensions/parent/ext-devtools-panels.js
@@ -868,6 +900,10 @@ class DevTools extends EventEmitter {
       startTime,
       reason: "inspect_dom",
     });
+    // See showToolboxForTab for when the tab can't be debugged.
+    if (!toolbox) {
+      return;
+    }
 
     // If the toolbox wasn't opened yet, the selection of the node will be handled by
     // the defaultStartupNodeDomReference option, so we can stop here.
@@ -919,6 +955,10 @@ class DevTools extends EventEmitter {
       toolId: "accessibility",
       startTime,
     });
+    // See showToolboxForTab for when the tab can't be debugged.
+    if (!toolbox) {
+      return;
+    }
     const inspectorFront = await toolbox.target.getFront("inspector");
     const nodeFront =
       await inspectorFront.getNodeActorFromContentDomReference(domReference);
@@ -945,9 +985,7 @@ class DevTools extends EventEmitter {
   destroy({ shuttingDown }) {
     // Do not cleanup everything during firefox shutdown.
     if (!shuttingDown) {
-      for (const [, toolbox] of this.#toolboxesPerCommands) {
-        toolbox.destroy();
-      }
+      gDevTools.closeAllToolboxes();
     }
 
     for (const [key] of this.getToolDefinitionMap()) {

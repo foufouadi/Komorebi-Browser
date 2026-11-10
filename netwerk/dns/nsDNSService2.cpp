@@ -23,7 +23,6 @@
 #include "nsIDNSListener.h"
 #include "nsIDNSRecord.h"
 #include "nsINetworkLinkService.h"
-#include "nsIOService.h"
 #include "nsIObliviousHttp.h"
 #include "nsIObserverService.h"
 #include "nsIPrefBranch.h"
@@ -66,7 +65,8 @@ class nsDNSRecord : public nsIDNSAddrRecord {
   NS_DECL_NSIDNSRECORD
   NS_DECL_NSIDNSADDRRECORD
 
-  explicit nsDNSRecord(nsHostRecord* hostRecord) {
+  explicit nsDNSRecord(nsHostRecord* hostRecord, bool aFromStaleCache = false)
+      : mFromStaleCache(aFromStaleCache) {
     mHostRecord = do_QueryObject(hostRecord);
   }
 
@@ -74,6 +74,9 @@ class nsDNSRecord : public nsIDNSAddrRecord {
   virtual ~nsDNSRecord() = default;
 
   RefPtr<AddrHostRecord> mHostRecord;
+  // Whether the answer this record represents was served from a stale
+  // (grace-period) cache entry. Snapshotted at delivery time.
+  const bool mFromStaleCache;
   // Since mIter is holding a weak reference to the NetAddr array we must
   // make sure it is not released. So we also keep a RefPtr to the AddrInfo
   // which is immutable.
@@ -128,12 +131,6 @@ nsDNSRecord::IsTRR(bool* retval) {
   } else {
     *retval = false;
   }
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsDNSRecord::ResolvedInSocketProcess(bool* retval) {
-  *retval = false;
   return NS_OK;
 }
 
@@ -240,9 +237,6 @@ nsDNSRecord::GetAddresses(nsTArray<NetAddr>& aAddressArray) {
   mHostRecord->addr_info_lock.Lock();
   if (mHostRecord->addr_info) {
     for (const auto& address : mHostRecord->addr_info->Addresses()) {
-      if (mHostRecord->Blocklisted(&address)) {
-        continue;
-      }
       NetAddr* addr = aAddressArray.AppendElement(address);
       if (addr->raw.family == AF_INET) {
         addr->inet.port = 0;
@@ -366,6 +360,13 @@ nsDNSRecord::GetLastUpdate(mozilla::TimeStamp* aLastUpdate) {
   return mHostRecord->GetLastUpdate(aLastUpdate);
 }
 
+NS_IMETHODIMP
+nsDNSRecord::GetFromStaleCache(bool* aResult) {
+  NS_ENSURE_ARG(aResult);
+  *aResult = mFromStaleCache;
+  return NS_OK;
+}
+
 class nsDNSByTypeRecord : public nsIDNSByTypeRecord,
                           public nsIDNSTXTRecord,
                           public nsIDNSHTTPSSVCRecord {
@@ -376,13 +377,17 @@ class nsDNSByTypeRecord : public nsIDNSByTypeRecord,
   NS_DECL_NSIDNSTXTRECORD
   NS_DECL_NSIDNSHTTPSSVCRECORD
 
-  explicit nsDNSByTypeRecord(nsHostRecord* hostRecord) {
+  explicit nsDNSByTypeRecord(nsHostRecord* hostRecord,
+                             bool aFromStaleCache = false)
+      : mFromStaleCache(aFromStaleCache) {
     mHostRecord = do_QueryObject(hostRecord);
   }
 
  private:
   virtual ~nsDNSByTypeRecord() = default;
   RefPtr<TypeHostRecord> mHostRecord;
+  // See nsDNSRecord::mFromStaleCache.
+  const bool mFromStaleCache;
 };
 
 NS_IMPL_ISUPPORTS(nsDNSByTypeRecord, nsIDNSRecord, nsIDNSByTypeRecord,
@@ -462,6 +467,13 @@ nsDNSByTypeRecord::GetResults(mozilla::net::TypeRecordResultType* aResults) {
 }
 
 NS_IMETHODIMP
+nsDNSByTypeRecord::GetFromStaleCache(bool* aResult) {
+  NS_ENSURE_ARG(aResult);
+  *aResult = mFromStaleCache;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDNSByTypeRecord::GetTtl(uint32_t* aTtl) { return mHostRecord->GetTtl(aTtl); }
 
 //-----------------------------------------------------------------------------
@@ -485,7 +497,8 @@ class nsDNSAsyncRequest final : public nsResolveHostCallback,
         mFlags(flags),
         mAF(af) {}
 
-  void OnResolveHostComplete(nsHostResolver*, nsHostRecord*, nsresult) override;
+  void OnResolveHostComplete(nsHostResolver*, nsHostRecord*, nsresult,
+                             bool aFromStaleCache) override;
   // Returns TRUE if the DNS listener arg is the same as the member listener
   // Used in Cancellations to remove DNS requests associated with a
   // particular hostname and nsIDNSListener
@@ -511,7 +524,8 @@ NS_IMPL_ISUPPORTS(nsDNSAsyncRequest, nsICancelable)
 
 void nsDNSAsyncRequest::OnResolveHostComplete(nsHostResolver* resolver,
                                               nsHostRecord* hostRecord,
-                                              nsresult status) {
+                                              nsresult status,
+                                              bool aFromStaleCache) {
   // need to have an owning ref when we issue the callback to enable
   // the caller to be able to addref/release multiple times without
   // destroying the record prematurely.
@@ -525,9 +539,9 @@ void nsDNSAsyncRequest::OnResolveHostComplete(nsHostResolver* resolver,
       return;
     }
     if (hostRecord->type != nsDNSService::RESOLVE_TYPE_DEFAULT) {
-      rec = new nsDNSByTypeRecord(hostRecord);
+      rec = new nsDNSByTypeRecord(hostRecord, aFromStaleCache);
     } else {
-      rec = new nsDNSRecord(hostRecord);
+      rec = new nsDNSRecord(hostRecord, aFromStaleCache);
     }
   }
 
@@ -576,9 +590,10 @@ class DNSCacheRequest : public nsResolveHostCallback {
   DNSCacheRequest() = default;
 
   void OnResolveHostComplete(nsHostResolver* resolver, nsHostRecord* hostRecord,
-                             nsresult status) override {
+                             nsresult status, bool aFromStaleCache) override {
     mStatus = status;
     mHostRecord = hostRecord;
+    mFromStaleCache = aFromStaleCache;
   }
 
   bool EqualsAsyncListener(nsIDNSListener* aListener) override {
@@ -602,6 +617,7 @@ class DNSCacheRequest : public nsResolveHostCallback {
 
   nsresult mStatus = NS_OK;
   RefPtr<nsHostRecord> mHostRecord;
+  bool mFromStaleCache = false;
 
  protected:
   virtual ~DNSCacheRequest() = default;
@@ -613,7 +629,8 @@ class nsDNSSyncRequest : public DNSCacheRequest {
  public:
   explicit nsDNSSyncRequest(PRMonitor* mon) : mMonitor(mon) {}
 
-  void OnResolveHostComplete(nsHostResolver*, nsHostRecord*, nsresult) override;
+  void OnResolveHostComplete(nsHostResolver*, nsHostRecord*, nsresult,
+                             bool aFromStaleCache) override;
 
   bool mDone = false;
 
@@ -625,11 +642,13 @@ class nsDNSSyncRequest : public DNSCacheRequest {
 
 void nsDNSSyncRequest::OnResolveHostComplete(nsHostResolver* resolver,
                                              nsHostRecord* hostRecord,
-                                             nsresult status) {
+                                             nsresult status,
+                                             bool aFromStaleCache) {
   // store results, and wake up nsDNSService::Resolve to process results.
   PR_EnterMonitor(mMonitor);
   mDone = true;
-  DNSCacheRequest::OnResolveHostComplete(resolver, hostRecord, status);
+  DNSCacheRequest::OnResolveHostComplete(resolver, hostRecord, status,
+                                         aFromStaleCache);
   PR_Notify(mMonitor);
   PR_ExitMonitor(mMonitor);
 }
@@ -654,57 +673,6 @@ class NotifyDNSResolution : public Runnable {
 };
 
 //-----------------------------------------------------------------------------
-
-static StaticRefPtr<DNSServiceWrapper> gDNSServiceWrapper;
-
-NS_IMPL_ISUPPORTS(DNSServiceWrapper, nsIDNSService, nsPIDNSService)
-
-// static
-already_AddRefed<nsIDNSService> DNSServiceWrapper::GetSingleton() {
-  if (!gDNSServiceWrapper) {
-    gDNSServiceWrapper = new DNSServiceWrapper();
-    // Not strictly needed, but simple and avoids bypassing lock-checking
-    MutexAutoLock lock(gDNSServiceWrapper->mLock);
-    gDNSServiceWrapper->mDNSServiceInUse = ChildDNSService::GetSingleton();
-    if (gDNSServiceWrapper->mDNSServiceInUse) {
-      ClearOnShutdown(&gDNSServiceWrapper);
-      nsDNSPrefetch::Initialize(gDNSServiceWrapper);
-    } else {
-      MutexAutoUnlock unlock(
-          gDNSServiceWrapper->mLock);  // don't destroy with held lock
-      gDNSServiceWrapper = nullptr;
-    }
-  }
-
-  return do_AddRef(gDNSServiceWrapper);
-}
-
-// static
-void DNSServiceWrapper::SwitchToBackupDNSService() {
-  if (!gDNSServiceWrapper) {
-    return;
-  }
-
-  gDNSServiceWrapper->mBackupDNSService = nsDNSService::GetSingleton();
-
-  MutexAutoLock lock(gDNSServiceWrapper->mLock);
-  gDNSServiceWrapper->mBackupDNSService.swap(
-      gDNSServiceWrapper->mDNSServiceInUse);
-}
-
-nsIDNSService* DNSServiceWrapper::DNSService() {
-  MOZ_ASSERT(XRE_IsParentProcess());
-
-  MutexAutoLock lock(mLock);
-  return mDNSServiceInUse.get();
-}
-
-nsPIDNSService* DNSServiceWrapper::PIDNSService() {
-  MOZ_ASSERT(XRE_IsParentProcess());
-
-  nsCOMPtr<nsPIDNSService> service = do_QueryInterface(DNSService());
-  return service.get();
-}
 
 //-----------------------------------------------------------------------------
 NS_IMPL_ISUPPORTS_INHERITED(nsDNSService, DNSServiceBase, nsIDNSService,
@@ -750,27 +718,11 @@ already_AddRefed<nsIDNSService> GetOrInitDNSService() {
 
 already_AddRefed<nsIDNSService> nsDNSService::GetXPCOMSingleton() {
   auto getDNSHelper = []() -> already_AddRefed<nsIDNSService> {
-    if (nsIOService::UseSocketProcess()) {
-      if (XRE_IsSocketProcess()) {
-        return GetSingleton();
-      }
-
-      if (XRE_IsParentProcess()) {
-        return DNSServiceWrapper::GetSingleton();
-      }
-
-      if (XRE_IsContentProcess()) {
-        return ChildDNSService::GetSingleton();
-      }
-
-      return nullptr;
-    }
-
     if (XRE_IsParentProcess()) {
       return GetSingleton();
     }
 
-    if (XRE_IsContentProcess() || XRE_IsSocketProcess()) {
+    if (XRE_IsContentProcess()) {
       return ChildDNSService::GetSingleton();
     }
 
@@ -789,8 +741,7 @@ already_AddRefed<nsIDNSService> nsDNSService::GetXPCOMSingleton() {
 }
 
 already_AddRefed<nsDNSService> nsDNSService::GetSingleton() {
-  MOZ_ASSERT_IF(nsIOService::UseSocketProcess(), XRE_IsSocketProcess());
-  MOZ_ASSERT_IF(!nsIOService::UseSocketProcess(), XRE_IsParentProcess());
+  MOZ_ASSERT(XRE_IsParentProcess());
 
   if (!gDNSService) {
     if (!NS_IsMainThread()) {
@@ -973,10 +924,17 @@ already_AddRefed<nsHostResolver> nsDNSService::GetResolverLocked() {
 nsresult nsDNSService::PreprocessHostname(bool aLocalDomain,
                                           const nsACString& aInput,
                                           nsACString& aACE) {
-  // Enforce RFC 7686
-  if (StaticPrefs::network_dns_blockDotOnion() &&
-      StringEndsWith(aInput, ".onion"_ns)) {
-    return NS_ERROR_UNKNOWN_HOST;
+  // Enforce RFC 7686, whatever the case of the name, and with or without the
+  // trailing dot of its fully qualified form.
+  if (StaticPrefs::network_dns_blockDotOnion()) {
+    uint32_t length = aInput.Length();
+    while (length && aInput[length - 1] == '.') {
+      --length;
+    }
+    if (StringEndsWith(Substring(aInput, 0, length), ".onion"_ns,
+                       nsCaseInsensitiveCStringComparator)) {
+      return NS_ERROR_UNKNOWN_HOST;
+    }
   }
 
   if (aLocalDomain) {
@@ -1208,22 +1166,6 @@ nsDNSService::CancelAsyncResolveNative(
 }
 
 NS_IMETHODIMP
-nsDNSService::Resolve(const nsACString& aHostname,
-                      nsIDNSService::DNSFlags flags,
-                      JS::Handle<JS::Value> aOriginAttributes, JSContext* aCx,
-                      uint8_t aArgc, nsIDNSRecord** result) {
-  OriginAttributes attrs;
-
-  if (aArgc == 1) {
-    if (!aOriginAttributes.isObject() || !attrs.Init(aCx, aOriginAttributes)) {
-      return NS_ERROR_INVALID_ARG;
-    }
-  }
-
-  return ResolveNative(aHostname, flags, attrs, result);
-}
-
-NS_IMETHODIMP
 nsDNSService::ResolveNative(const nsACString& aHostname,
                             nsIDNSService::DNSFlags flags,
                             const OriginAttributes& aOriginAttributes,
@@ -1235,12 +1177,6 @@ nsDNSService::ResolveNative(const nsACString& aHostname,
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  return ResolveInternal(aHostname, flags, aOriginAttributes, result);
-}
-
-nsresult nsDNSService::DeprecatedSyncResolve(
-    const nsACString& aHostname, nsIDNSService::DNSFlags flags,
-    const OriginAttributes& aOriginAttributes, nsIDNSRecord** result) {
   return ResolveInternal(aHostname, flags, aOriginAttributes, result);
 }
 
@@ -1286,7 +1222,8 @@ nsresult nsDNSService::ResolveInternal(
     rv = res->ResolveHost(hostname, ""_ns, -1, RESOLVE_TYPE_DEFAULT,
                           aOriginAttributes, flags, af, req);
     if (NS_SUCCEEDED(rv)) {
-      RefPtr<nsDNSRecord> rec = new nsDNSRecord(req->mHostRecord);
+      RefPtr<nsDNSRecord> rec =
+          new nsDNSRecord(req->mHostRecord, req->mFromStaleCache);
       rec.forget(result);
     }
     return rv;
@@ -1330,7 +1267,8 @@ nsresult nsDNSService::ResolveInternal(
       rv = syncReq->mStatus;
     } else {
       NS_ASSERTION(syncReq->mHostRecord, "no host record");
-      RefPtr<nsDNSRecord> rec = new nsDNSRecord(syncReq->mHostRecord);
+      RefPtr<nsDNSRecord> rec =
+          new nsDNSRecord(syncReq->mHostRecord, syncReq->mFromStaleCache);
       rec.forget(result);
     }
   }

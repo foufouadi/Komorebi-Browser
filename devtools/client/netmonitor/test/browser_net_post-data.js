@@ -72,16 +72,13 @@ add_task(async function () {
   );
 
   // Wait for raw data toggle to be displayed
-  const wait = waitForDOM(
+  const onDomUpdated = waitForDOM(
     document,
     "#request-panel .raw-data-toggle-input .devtools-checkbox-toggle"
   );
-  EventUtils.sendMouseEvent(
-    { type: "mousedown" },
-    document.querySelectorAll(".request-list-item")[0]
-  );
+  clickOnRequestRow(document.querySelectorAll(".request-list-item")[0]);
   clickOnSidebarTab(document, "request");
-  await wait;
+  await onDomUpdated;
   await testParamsTab("urlencoded");
 
   // Wait for header and CodeMirror editor to be displayed
@@ -90,10 +87,7 @@ add_task(async function () {
     document,
     "#request-panel .cm-content"
   );
-  EventUtils.sendMouseEvent(
-    { type: "mousedown" },
-    document.querySelectorAll(".request-list-item")[1]
-  );
+  clickOnRequestRow(document.querySelectorAll(".request-list-item")[1]);
   await Promise.all([waitForHeader, waitForSourceEditor]);
   await testParamsTab("multipart");
 

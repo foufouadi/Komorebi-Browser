@@ -35,6 +35,9 @@ const METRIC_SOURCE = Object.freeze({
   CTRL_TAB: "ctrl_tab",
   // The Smart Window "Group my tabs" suggestion panel.
   SMART_WINDOW_GROUP_SUGGESTIONS: "smartwindow_group_suggestions",
+  // The Smart Window "Tasks" panel.
+  SMART_WINDOW_TASKS: "smartwindow_tasks",
+  APP_MENU_GROUP_LIST: "appmenu_group_list",
   UNKNOWN: "unknown",
 });
 
@@ -82,9 +85,8 @@ const METRIC_GROUP_TYPE = Object.freeze({
  *   (as opposed to some action being taken internally or for technical
  *   bookkeeping reasons alone). This causes telemetry events to fire.
  * @property {string} [telemetrySource="unknown"]
- *   The system, surface, or control the user used to take this action.
- *   @see TabMetrics.METRIC_SOURCE for possible values.
- *   Defaults to "unknown".
+ *   The system, surface, or control the user used to take this action, one of
+ *   the TabMetrics.METRIC_SOURCE values. Defaults to "unknown".
  * @property {boolean} [isDecomposed=false]
  *   Some combination operations are handled internally individually, moving
  *   five tabs is split into five moves for instance. This flag is set to true

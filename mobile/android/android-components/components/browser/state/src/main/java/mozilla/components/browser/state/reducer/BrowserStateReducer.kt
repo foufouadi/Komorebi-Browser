@@ -20,6 +20,7 @@ import mozilla.components.browser.state.action.ExtensionsProcessAction
 import mozilla.components.browser.state.action.HistoryMetadataAction
 import mozilla.components.browser.state.action.InitAction
 import mozilla.components.browser.state.action.LastAccessAction
+import mozilla.components.browser.state.action.ListenToPageAction
 import mozilla.components.browser.state.action.LocaleAction
 import mozilla.components.browser.state.action.MediaSessionAction
 import mozilla.components.browser.state.action.ReaderAction
@@ -29,7 +30,6 @@ import mozilla.components.browser.state.action.SearchAction
 import mozilla.components.browser.state.action.ShareResourceAction
 import mozilla.components.browser.state.action.SystemAction
 import mozilla.components.browser.state.action.SystemPermissionRequestAction
-import mozilla.components.browser.state.action.TabGroupAction
 import mozilla.components.browser.state.action.TabListAction
 import mozilla.components.browser.state.action.TrackingProtectionAction
 import mozilla.components.browser.state.action.TranslationsAction
@@ -63,7 +63,6 @@ internal object BrowserStateReducer {
             is ReaderAction -> ReaderStateReducer.reduce(state, action)
             is SystemAction -> SystemReducer.reduce(state, action)
             is TabListAction -> TabListReducer.reduce(state, action)
-            is TabGroupAction -> TabGroupReducer.reduce(state, action)
             is TrackingProtectionAction -> TrackingProtectionStateReducer.reduce(state, action)
             is TranslationsAction -> TranslationsStateReducer.reduce(state, action)
             is WebExtensionAction -> WebExtensionReducer.reduce(state, action)
@@ -83,6 +82,7 @@ internal object BrowserStateReducer {
             is UpdateDistribution -> state.copy(distributionId = action.distributionId)
             is DefaultDesktopModeAction -> DesktopModeReducer.reduce(state = state, action = action)
             is SystemPermissionRequestAction -> SystemPermissionReducer.reduce(state, action)
+            is ListenToPageAction -> ListenToPageReducer.reduce(state, action)
         }
     }
 }

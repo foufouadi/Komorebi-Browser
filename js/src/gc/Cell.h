@@ -256,12 +256,12 @@ class Cell {
   void dump() const;
 #endif
 
+  // Cells are destroyed by the GC. Do not delete them directly.
+  void operator delete(void*) = delete;
+
  protected:
   uintptr_t address() const;
 
- private:
-  // Cells are destroyed by the GC. Do not delete them directly.
-  void operator delete(void*) = delete;
 } JS_HAZ_GC_THING;
 
 // A GC TenuredCell gets behaviors that are valid for things in the Tenured
@@ -572,7 +572,11 @@ MOZ_ALWAYS_INLINE void PreWriteBarrierImpl(Cell* thing) {
 template <typename T>
 MOZ_ALWAYS_INLINE void PreWriteBarrier(T* thing) {
   static_assert(std::is_base_of_v<Cell, T>);
-  static_assert(!std::is_same_v<Cell, T> && !std::is_same_v<TenuredCell, T>);
+
+  // We'd like to assert that T != TenuredCell here too but Symbol's use of
+  // CellWithTenuredGCPointer instantiates this with that template parameter,
+  // even though it's never used.
+  static_assert(!std::is_same_v<Cell, T>);
 
   if (thing) {
     PreWriteBarrierImpl(thing);
@@ -995,9 +999,31 @@ inline bool TenuredThingIsMarkedAny<Cell>(Cell* thing) {
   return thing->asTenured().isMarkedAny();
 }
 
+// Check whether to trace through an edge based on the color of the source.
+template <typename T>
+bool ShouldTraceEdge(T* source, gc::EdgeSelector whichEdges) {
+  switch (whichEdges) {
+    case gc::AllEdges:
+      return true;
+    case gc::NonGrayEdges:
+      return !source->isMarkedGray();
+    case gc::GrayEdges:
+      return source->isMarkedGray();
+    case gc::BlackEdges:
+      return source->isMarkedBlack();
+    default:
+      MOZ_CRASH("Unexpected EdgeSelector value");
+  }
+}
+
 class MarkingLock : public LightLock {
  public:
   MarkingLock() : LightLock(js::mutexid::GCMarkingLock) {}
+};
+
+class AtomRefLock : public LightLock {
+ public:
+  AtomRefLock() : LightLock(js::mutexid::GCAtomRefLock) {}
 };
 
 // A lock used to synchronize access to some data structures during concurrent
@@ -1011,16 +1037,13 @@ class MarkingLock : public LightLock {
 // This is a no op outside concurrent marking builds.
 class MOZ_RAII AutoMarkingLock {
 #ifdef JS_GC_CONCURRENT_MARKING
-  MarkingLock* lock = nullptr;
+  LightLock* lock = nullptr;
   JSRuntime* runtime = nullptr;
 #endif
 
-  AutoMarkingLock(const AutoMarkingLock& other) = delete;
-  AutoMarkingLock& operator=(const AutoMarkingLock& other) = delete;
-
  public:
   // Take the lock if concurrent marking is currently happening in zone |zone|.
-  AutoMarkingLock(JS::Zone* zone, MarkingLock& markingLock) {
+  AutoMarkingLock(JS::Zone* zone, LightLock& markingLock) {
 #ifdef JS_GC_CONCURRENT_MARKING
     auto* shadowZone = JS::shadow::Zone::from(zone);
     if (shadowZone->needsMarkingBarrier(JS::shadow::Zone::Concurrent)) {
@@ -1032,7 +1055,10 @@ class MOZ_RAII AutoMarkingLock {
   }
 
   // Take the lock if |trc| is a concurrent marking tracer.
-  inline AutoMarkingLock(JSTracer* trc, MarkingLock& markingLock);
+  inline AutoMarkingLock(JSTracer* trc, LightLock& markingLock);
+
+  // Take the lock if any concurrent marking is currently happening.
+  inline AutoMarkingLock(JSRuntime* rt, LightLock& markingLock);
 
   ~AutoMarkingLock() {
 #ifdef JS_GC_CONCURRENT_MARKING
@@ -1042,6 +1068,9 @@ class MOZ_RAII AutoMarkingLock {
     }
 #endif
   }
+
+  AutoMarkingLock(const AutoMarkingLock& other) = delete;
+  AutoMarkingLock& operator=(const AutoMarkingLock& other) = delete;
 };
 
 } /* namespace gc */

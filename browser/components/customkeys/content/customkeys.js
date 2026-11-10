@@ -57,7 +57,14 @@ async function buildTable() {
       keyLabelContainer.className = "key-label-container";
       keyLabel.className = "key-label";
       keyLabel.textContent = keyLabelText;
-      if (key.internal) {
+      if (key.systemAssigned) {
+        row.classList.add("system-assigned");
+        keyDescription.className = "text-deemphasized";
+        keyDescription.setAttribute(
+          "data-l10n-id",
+          "customkeys-key-system-assigned"
+        );
+      } else if (key.internal) {
         row.classList.add("internal");
         keyDescription.className = "text-deemphasized";
         keyDescription.setAttribute(
@@ -162,7 +169,10 @@ async function maybeHandleConflict(data) {
       return false;
     }
     const conflictDesc = row.dataset.label;
-    if (row.classList.contains("internal")) {
+    if (
+      row.classList.contains("internal") ||
+      row.classList.contains("system-assigned")
+    ) {
       const [title, body] = await document.l10n.formatValues([
         { id: "customkeys-conflict-unusable-title" },
         {

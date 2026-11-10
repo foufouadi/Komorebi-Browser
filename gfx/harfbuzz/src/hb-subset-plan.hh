@@ -169,6 +169,9 @@ struct hb_subset_plan_t
   // whether GDEF ItemVariationStore is retained
   mutable bool has_gdef_varstore;
 
+  // whether every COLR variation region uses pinned axes only; -1 until computed
+  int colrv1_constant_after_pinning;
+
   // whether we're doing avar2 partial instancing
   bool has_avar2;
 
@@ -181,8 +184,8 @@ struct hb_subset_plan_t
 
   os2_info_t os2_info;
 
-  const hb_subset_accelerator_t* accelerator;
-  hb_subset_accelerator_t* inprogress_accelerator;
+  const hb_subset_accelerator_t* accelerator = nullptr;
+  hb_subset_accelerator_t* inprogress_accelerator = nullptr;
 
  public:
 
@@ -215,6 +218,8 @@ struct hb_subset_plan_t
 
   bool in_error () const { return !successful; }
 
+  HB_INTERNAL double layout_variation_delta (unsigned var_idx);
+
   bool check_success(bool success)
   {
     successful = (successful && success);
@@ -239,6 +244,18 @@ struct hb_subset_plan_t
   glyphset_gsub () const
   {
     return &_glyphset_gsub;
+  }
+
+  /*
+   * Old-to-new glyph id mapping for GSUB glyphs, through the flat
+   * array; returns HB_MAP_VALUE_INVALID for glyphs not retained.
+   */
+  inline hb_codepoint_t
+  map_gsub_glyph (hb_codepoint_t old_gid) const
+  {
+    return old_gid < glyph_map_gsub_flat.length
+	 ? glyph_map_gsub_flat.arrayZ[old_gid]
+	 : HB_MAP_VALUE_INVALID;
   }
 
   /*

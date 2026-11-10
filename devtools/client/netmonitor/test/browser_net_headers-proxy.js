@@ -12,18 +12,15 @@ add_task(async function () {
 
   const { document } = monitor.panelWin;
 
-  const wait = waitForNetworkEvents(monitor, 1);
+  const onNetworkEvents = waitForNetworkEvents(monitor, 1);
   await reloadSelectedTab();
-  await wait;
+  await onNetworkEvents;
 
   // Wait until the tab panel summary is displayed
   const waitForTab = waitUntil(() =>
     document.querySelector(".tabpanel-summary-label")
   );
-  EventUtils.sendMouseEvent(
-    { type: "mousedown" },
-    document.querySelector(".request-list-item")
-  );
+  clickOnRequestRow(document.querySelector(".request-list-item"));
   await waitForTab;
 
   // Expand preview
@@ -88,18 +85,15 @@ add_task(async function () {
 
   const { document } = monitor.panelWin;
 
-  const wait = waitForNetworkEvents(monitor, 1);
+  const onNetworkEvents = waitForNetworkEvents(monitor, 1);
   await reloadSelectedTab();
-  await wait;
+  await onNetworkEvents;
 
   // Wait until the tab panel summary is displayed
   const waitForTab = waitUntil(() =>
     document.querySelector(".tabpanel-summary-label")
   );
-  EventUtils.sendMouseEvent(
-    { type: "mousedown" },
-    document.querySelector(".request-list-item")
-  );
+  clickOnRequestRow(document.querySelector(".request-list-item"));
   await waitForTab;
 
   // Expand preview
@@ -193,7 +187,7 @@ add_task(async function () {
   const requestEl = await waitFor(() =>
     document.querySelector(".request-list-item")
   );
-  EventUtils.sendMouseEvent({ type: "mousedown" }, requestEl);
+  clickOnRequestRow(requestEl);
 
   await waitUntil(() => document.querySelector(".headers-overview"));
 

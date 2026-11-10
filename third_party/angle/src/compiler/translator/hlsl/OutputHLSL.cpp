@@ -4,11 +4,8 @@
 // found in the LICENSE file.
 //
 
-#ifdef UNSAFE_BUFFERS_BUILD
-#    pragma allow_unsafe_buffers
-#endif
-
 #include "compiler/translator/hlsl/OutputHLSL.h"
+#include "common/unsafe_buffers.h"
 
 #include <stdio.h>
 #include <algorithm>
@@ -253,7 +250,7 @@ const TConstantUnion *OutputHLSL::writeConstantUnionArray(TInfoSinkBase &out,
                                                           const size_t size)
 {
     const TConstantUnion *constUnionIterated = constUnion;
-    for (size_t i = 0; i < size; i++, constUnionIterated++)
+    for (size_t i = 0; i < size; i++, ANGLE_UNSAFE_TODO(constUnionIterated++))
     {
         writeSingleConstant(out, constUnionIterated);
 
@@ -274,6 +271,7 @@ OutputHLSL::OutputHLSL(sh::GLenum shaderType,
                        int numRenderTargets,
                        int maxDualSourceDrawBuffers,
                        const std::vector<ShaderVariable> &uniforms,
+                       const ExtractedSamplerNameMap &extractedSamplerNames,
                        const ShCompileOptions &compileOptions,
                        TSymbolTable *symbolTable,
                        PerformanceDiagnostics *perfDiagnostics,
@@ -301,14 +299,14 @@ OutputHLSL::OutputHLSL(sh::GLenum shaderType,
       mIsEarlyFragmentTestsSpecified(isEarlyFragmentTestsSpecified),
       mNeedStructMapping(false)
 {
-    mUsesFragColor        = false;
-    mUsesFragData         = false;
-    mUsesDepthRange       = false;
-    mUsesFragCoord        = false;
-    mUsesPointCoord       = false;
-    mUsesFrontFacing      = false;
-    mUsesPointSize        = false;
-    mUsesInstanceID       = false;
+    mUsesFragColor   = false;
+    mUsesFragData    = false;
+    mUsesDepthRange  = false;
+    mUsesFragCoord   = false;
+    mUsesPointCoord  = false;
+    mUsesFrontFacing = false;
+    mUsesPointSize   = false;
+    mUsesInstanceID  = false;
     mHasMultiviewExtensionEnabled =
         IsExtensionEnabled(mExtensionBehavior, TExtension::OVR_multiview) ||
         IsExtensionEnabled(mExtensionBehavior, TExtension::OVR_multiview2);
@@ -335,29 +333,20 @@ OutputHLSL::OutputHLSL(sh::GLenum shaderType,
     mInsideDiscontinuousLoop = false;
     mNestedLoopDepth         = 0;
 
-    mExcessiveLoopIndex = nullptr;
-
     mStructureHLSL       = new StructureHLSL;
     mTextureFunctionHLSL = new TextureFunctionHLSL;
     mImageFunctionHLSL   = new ImageFunctionHLSL;
 
     unsigned int firstUniformRegister = compileOptions.skipD3DConstantRegisterZero ? 1u : 0u;
-    mResourcesHLSL = new ResourcesHLSL(mStructureHLSL, outputType, uniforms, firstUniformRegister);
+    mResourcesHLSL =
+        new ResourcesHLSL(mStructureHLSL, uniforms, extractedSamplerNames, firstUniformRegister);
 
-    if (mOutputType == SH_HLSL_3_0_OUTPUT)
+    // D3D links every sampler field of an active struct uniform, including fields unused in the
+    // AST.
+    for (const auto &extractedSampler : extractedSamplerNames)
     {
-        // Fragment shaders need dx_DepthRange, dx_ViewCoords, dx_DepthFront,
-        // and dx_FragCoordOffset.
-        // Vertex shaders need a slightly different set: dx_DepthRange, dx_ViewCoords and
-        // dx_ViewAdjust.
-        if (mShaderType == GL_VERTEX_SHADER)
-        {
-            mResourcesHLSL->reserveUniformRegisters(3);
-        }
-        else
-        {
-            mResourcesHLSL->reserveUniformRegisters(4);
-        }
+        const TVariable *variable = extractedSampler.first;
+        mReferencedUniforms.emplace(variable->uniqueId().get(), variable);
     }
 
     // Reserve registers for the default uniform block and driver constants
@@ -486,7 +475,7 @@ TString OutputHLSL::structInitializerString(int indent,
         for (unsigned int fieldIndex = 0; fieldIndex < fields.size(); fieldIndex++)
         {
             const TField &field      = *fields[fieldIndex];
-            const TString &fieldName = name + "." + Decorate(field.name());
+            const TString &fieldName = name + "." + DecorateField(field.name(), structure);
             const TType &fieldType   = *field.type();
 
             init += structInitializerString(indent + 1, fieldType, fieldName);
@@ -549,7 +538,9 @@ TString OutputHLSL::generateStructMapping(const std::vector<MappedStruct> &std14
                     mappedStruct.blockDeclarator->variable().name();
                 unsigned int instanceStringArrayIndex = GL_INVALID_INDEX;
                 if (isInstanceArray)
+                {
                     instanceStringArrayIndex = instanceArrayIndex;
+                }
                 TString instanceString = mResourcesHLSL->InterfaceBlockInstanceString(
                     instanceName, instanceStringArrayIndex);
                 originalName += instanceString;
@@ -558,13 +549,13 @@ TString OutputHLSL::generateStructMapping(const std::vector<MappedStruct> &std14
                 mappedName += "_";
             }
 
-            TString fieldName = Decorate(mappedStruct.field->name());
+            TType *structType = mappedStruct.field->type();
+            TString fieldName = DecorateField(mappedStruct.field->name(), *structType->getStruct());
             originalName += fieldName;
             mappedName += fieldName;
 
-            TType *structType = mappedStruct.field->type();
             mappedStructs +=
-                "static " + Decorate(structType->getStruct()->name()) + " " + mappedName;
+                "static " + DecorateStruct(structType->getStruct()->name()) + " " + mappedName;
 
             if (structType->isArray())
             {
@@ -586,8 +577,8 @@ void OutputHLSL::writeReferencedAttributes(TInfoSinkBase &out) const
         const TType &type           = attribute.second->getType();
         const ImmutableString &name = attribute.second->name();
 
-        out << "static " << TypeString(type) << " " << Decorate(name) << ArrayString(type) << " = "
-            << zeroInitializer(type) << ";\n";
+        out << "static " << TypeString(type) << " " << DecorateInterfaceVariable(name)
+            << ArrayString(type) << " = " << zeroInitializer(type) << ";\n";
     }
 }
 
@@ -615,14 +606,16 @@ void OutputHLSL::header(TInfoSinkBase &out,
     }
 
     // Suppress some common warnings:
+    // 3081 : comma expression used where a vector constructor may have been intended
     // 3556 : Integer divides might be much slower, try using uints if possible.
+    // 3557 : loop only executes for 1 iteration(s), forcing loop to unroll
     // 3571 : The pow(f, e) intrinsic function won't work for negative f, use abs(f) or
     //        conditionally handle negative values if you expect them.
-    out << "#pragma warning( disable: 3556 3571 )\n";
+    out << "#pragma warning( disable: 3081 3556 3557 3571 )\n";
 
     out << mStructureHLSL->structsHeader();
 
-    mResourcesHLSL->uniformsHeader(out, mOutputType, mReferencedUniforms, mSymbolTable);
+    mResourcesHLSL->uniformsHeader(out, mOutputType, mReferencedUniforms);
     out << mResourcesHLSL->uniformBlocksHeader(mReferencedUniformBlocks, mUniformBlockOptimizedMap);
 
     if (!mEqualityFunctions.empty())
@@ -836,36 +829,15 @@ void OutputHLSL::header(TInfoSinkBase &out,
                 out << "    float2 dx_ViewScale : packoffset(c3.z);\n";
             }
 
-            if (mOutputType == SH_HLSL_4_1_OUTPUT)
-            {
-                out << "    uint dx_Misc : packoffset(c2.w);\n";
-                const unsigned int registerIndex = 4;
-                mResourcesHLSL->samplerMetadataUniforms(out, registerIndex);
-            }
+            out << "    uint dx_Misc : packoffset(c2.w);\n";
+            const unsigned int registerIndex = 4;
+            mResourcesHLSL->samplerMetadataUniforms(out, registerIndex);
 
             out << "};\n";
 
-            if (mOutputType == SH_HLSL_4_1_OUTPUT && mResourcesHLSL->hasImages())
+            if (mResourcesHLSL->hasImages())
             {
                 out << kImage2DFunctionString << "\n";
-            }
-        }
-        else
-        {
-            if (mUsesDepthRange)
-            {
-                out << "uniform float3 dx_DepthRange : register(c0);";
-            }
-
-            if (mUsesFragCoord)
-            {
-                out << "uniform float4 dx_ViewCoords : register(c1);\n";
-            }
-
-            if (mUsesFragCoord || mUsesFrontFacing)
-            {
-                out << "uniform float3 dx_DepthFront : register(c2);\n";
-                out << "uniform float2 dx_FragCoordOffset : register(c3);\n";
             }
         }
 
@@ -995,49 +967,25 @@ void OutputHLSL::header(TInfoSinkBase &out,
                 out << "    float3 dx_DepthRange : packoffset(c0);\n";
             }
 
-            // dx_ViewAdjust and dx_ViewCoords will only be used in Feature Level 9
-            // shaders. However, we declare it for all shaders (including Feature Level 10+).
-            // The bytecode is the same whether we declare it or not, since D3DCompiler removes it
-            // if it's unused.
-            out << "    float4 dx_ViewAdjust : packoffset(c1);\n";
-            out << "    float2 dx_ViewCoords : packoffset(c2);\n";
-            out << "    float2 dx_ViewScale  : packoffset(c3);\n";
+            out << "    float2 dx_ViewScale  : packoffset(c1);\n";
 
-            out << "    float clipControlOrigin : packoffset(c3.z);\n";
-            out << "    float clipControlZeroToOne : packoffset(c3.w);\n";
+            out << "    float clipControlOrigin : packoffset(c1.z);\n";
+            out << "    float clipControlZeroToOne : packoffset(c1.w);\n";
 
-            if (mOutputType == SH_HLSL_4_1_OUTPUT)
-            {
-                mResourcesHLSL->samplerMetadataUniforms(out, 5);
-            }
+            mResourcesHLSL->samplerMetadataUniforms(out, 3);
 
             if (mUsesVertexID)
             {
-                out << "    uint dx_VertexID : packoffset(c4.x);\n";
+                out << "    uint dx_VertexID : packoffset(c2.x);\n";
             }
 
             if (mClipDistanceSize)
             {
-                out << "    uint clipDistancesEnabled : packoffset(c4.y);\n";
+                out << "    uint clipDistancesEnabled : packoffset(c2.y);\n";
             }
 
             out << "};\n"
                    "\n";
-        }
-        else
-        {
-            if (mUsesDepthRange)
-            {
-                out << "uniform float3 dx_DepthRange : register(c0);\n";
-            }
-
-            out << "uniform float4 dx_ViewAdjust : register(c1);\n";
-            out << "uniform float2 dx_ViewCoords : register(c2);\n";
-
-            out << "static const float clipControlOrigin = -1.0f;\n";
-            out << "static const float clipControlZeroToOne = 0.0f;\n";
-
-            out << "\n";
         }
 
         if (mUsesDepthRange)
@@ -1047,7 +995,7 @@ void OutputHLSL::header(TInfoSinkBase &out,
                    "\n";
         }
 
-        if (mOutputType == SH_HLSL_4_1_OUTPUT && mResourcesHLSL->hasImages())
+        if (mResourcesHLSL->hasImages())
         {
             out << kImage2DFunctionString << "\n";
         }
@@ -1189,8 +1137,6 @@ void OutputHLSL::visitSymbol(TIntermSymbol *node)
         const TType &variableType = variable.getType();
         TQualifier qualifier      = variable.getType().getQualifier();
 
-        ensureStructDefined(variableType);
-
         if (qualifier == EvqUniform)
         {
             const TInterfaceBlock *interfaceBlock = variableType.getInterfaceBlock();
@@ -1222,7 +1168,7 @@ void OutputHLSL::visitSymbol(TIntermSymbol *node)
         else if (qualifier == EvqAttribute || qualifier == EvqVertexIn)
         {
             mReferencedAttributes[uniqueId.get()] = &variable;
-            out << Decorate(name);
+            out << DecorateInterfaceVariable(name);
         }
         else if (IsVarying(qualifier))
         {
@@ -1380,40 +1326,6 @@ void OutputHLSL::outputAssign(Visit visit, const TType &type, TInfoSinkBase &out
     {
         outputTriplet(out, visit, "(", " = ", ")");
     }
-}
-
-bool OutputHLSL::ancestorEvaluatesToSamplerInStruct()
-{
-    for (unsigned int n = 0u; getAncestorNode(n) != nullptr; ++n)
-    {
-        TIntermNode *ancestor               = getAncestorNode(n);
-        const TIntermBinary *ancestorBinary = ancestor->getAsBinaryNode();
-        if (ancestorBinary == nullptr)
-        {
-            return false;
-        }
-        switch (ancestorBinary->getOp())
-        {
-            case EOpIndexDirectStruct:
-            {
-                const TStructure *structure = ancestorBinary->getLeft()->getType().getStruct();
-                const TIntermConstantUnion *index =
-                    ancestorBinary->getRight()->getAsConstantUnion();
-                const TField *field = structure->fields()[index->getIConst(0)];
-                if (IsSampler(field->type()->getBasicType()))
-                {
-                    return true;
-                }
-                break;
-            }
-            case EOpIndexDirect:
-                break;
-            default:
-                // Returning a sampler from indirect indexing is not supported.
-                return false;
-        }
-    }
-    return false;
 }
 
 bool OutputHLSL::visitSwizzle(Visit visit, TIntermSwizzle *node)
@@ -1581,12 +1493,6 @@ bool OutputHLSL::visitBinary(Visit visit, TIntermBinary *node)
                     return false;
                 }
             }
-            else if (ancestorEvaluatesToSamplerInStruct())
-            {
-                // All parts of an expression that access a sampler in a struct need to use _ as
-                // separator to access the sampler variable that has been moved out of the struct.
-                outputTriplet(out, visit, "", "_", "");
-            }
             else
             {
                 outputTriplet(out, visit, "", "[", "]");
@@ -1605,7 +1511,7 @@ bool OutputHLSL::visitBinary(Visit visit, TIntermBinary *node)
                         if (fieldType->isMatrix() || fieldType->isVectorArray() ||
                             fieldType->isScalarArray())
                         {
-                            out << "." << Decorate(field->name());
+                            out << "." << DecorateUserStructField(field->name());
                         }
                     }
                 }
@@ -1634,7 +1540,7 @@ bool OutputHLSL::visitBinary(Visit visit, TIntermBinary *node)
                         if (fieldType->isMatrix() || fieldType->isVectorArray() ||
                             fieldType->isScalarArray())
                         {
-                            out << "." << Decorate(field->name());
+                            out << "." << DecorateUserStructField(field->name());
                         }
                     }
                 }
@@ -1647,32 +1553,9 @@ bool OutputHLSL::visitBinary(Visit visit, TIntermBinary *node)
             const TIntermConstantUnion *index = node->getRight()->getAsConstantUnion();
             const TField *field               = structure->fields()[index->getIConst(0)];
 
-            // In cases where indexing returns a sampler, we need to access the sampler variable
-            // that has been moved out of the struct.
-            bool indexingReturnsSampler = IsSampler(field->type()->getBasicType());
-            if (visit == PreVisit && indexingReturnsSampler)
-            {
-                // Samplers extracted from structs have "angle" prefix to avoid name conflicts.
-                // This prefix is only output at the beginning of the indexing expression, which
-                // may have multiple parts.
-                out << "angle";
-            }
-            if (!indexingReturnsSampler)
-            {
-                // All parts of an expression that access a sampler in a struct need to use _ as
-                // separator to access the sampler variable that has been moved out of the struct.
-                indexingReturnsSampler = ancestorEvaluatesToSamplerInStruct();
-            }
             if (visit == InVisit)
             {
-                if (indexingReturnsSampler)
-                {
-                    out << "_" << field->name();
-                }
-                else
-                {
-                    out << "." << DecorateField(field->name(), *structure);
-                }
+                out << "." << DecorateField(field->name(), *structure);
 
                 return false;
             }
@@ -1703,7 +1586,7 @@ bool OutputHLSL::visitBinary(Visit visit, TIntermBinary *node)
                 {
                     out << ".";
                 }
-                out << Decorate(field->name());
+                out << DecorateUserStructField(field->name());
 
                 return false;
             }
@@ -1905,9 +1788,13 @@ bool OutputHLSL::visitUnary(Visit visit, TIntermUnary *node)
             break;
         case EOpIsnan:
             if (node->getUseEmulatedFunction())
+            {
                 writeEmulatedFunctionTriplet(out, visit, node->getFunction());
+            }
             else
+            {
                 outputTriplet(out, visit, "isnan(", "", ")");
+            }
             mRequiresIEEEStrictCompiling = true;
             break;
         case EOpIsinf:
@@ -1985,41 +1872,6 @@ bool OutputHLSL::visitUnary(Visit visit, TIntermUnary *node)
     }
 
     return true;
-}
-
-ImmutableString OutputHLSL::samplerNamePrefixFromStruct(TIntermTyped *node)
-{
-    if (node->getAsSymbolNode())
-    {
-        ASSERT(node->getAsSymbolNode()->variable().symbolType() != SymbolType::Empty);
-        return node->getAsSymbolNode()->getName();
-    }
-    TIntermBinary *nodeBinary = node->getAsBinaryNode();
-    switch (nodeBinary->getOp())
-    {
-        case EOpIndexDirect:
-        {
-            int index = nodeBinary->getRight()->getAsConstantUnion()->getIConst(0);
-
-            std::stringstream prefixSink = sh::InitializeStream<std::stringstream>();
-            prefixSink << samplerNamePrefixFromStruct(nodeBinary->getLeft()) << "_" << index;
-            return ImmutableString(prefixSink.str());
-        }
-        case EOpIndexDirectStruct:
-        {
-            const TStructure *s = nodeBinary->getLeft()->getAsTyped()->getType().getStruct();
-            int index           = nodeBinary->getRight()->getAsConstantUnion()->getIConst(0);
-            const TField *field = s->fields()[index];
-
-            std::stringstream prefixSink = sh::InitializeStream<std::stringstream>();
-            prefixSink << samplerNamePrefixFromStruct(nodeBinary->getLeft()) << "_"
-                       << field->name();
-            return ImmutableString(prefixSink.str());
-        }
-        default:
-            UNREACHABLE();
-            return kEmptyImmutableString;
-    }
 }
 
 bool OutputHLSL::visitBlock(Visit visit, TIntermBlock *node)
@@ -2134,7 +1986,6 @@ bool OutputHLSL::visitFunctionDefinition(Visit visit, TIntermFunctionDefinition 
         for (unsigned int i = 0; i < paramCount; i++)
         {
             const TVariable *param = func->getParam(i);
-            ensureStructDefined(param->getType());
 
             writeParameter(param, out);
 
@@ -2180,10 +2031,11 @@ bool OutputHLSL::visitDeclaration(Visit visit, TIntermDeclaration *node)
         ASSERT(sequence->size() == 1);
         ASSERT(declarator);
 
+        ensureStructDefined(declarator->getType());
+
         if (IsDeclarationWrittenOut(node))
         {
             TInfoSinkBase &out = getInfoSink();
-            ensureStructDefined(declarator->getType());
 
             if (!declarator->getAsSymbolNode() ||
                 declarator->getAsSymbolNode()->variable().symbolType() !=
@@ -2333,26 +2185,7 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
 
             for (TIntermSequence::iterator arg = arguments->begin(); arg != arguments->end(); arg++)
             {
-                TIntermTyped *typedArg = (*arg)->getAsTyped();
-
                 (*arg)->traverse(this);
-
-                if (typedArg->getType().isStructureContainingSamplers())
-                {
-                    const TType &argType = typedArg->getType();
-                    TVector<const TVariable *> samplerSymbols;
-                    ImmutableString structName = samplerNamePrefixFromStruct(typedArg);
-                    std::string namePrefix     = "angle_";
-                    namePrefix += structName.data();
-                    argType.createSamplerSymbols(ImmutableString(namePrefix), "", &samplerSymbols,
-                                                 nullptr, mSymbolTable);
-                    for (const TVariable *sampler : samplerSymbols)
-                    {
-                        // In case of HLSL 4.1+, this symbol is the sampler index, and in case
-                        // of D3D9, it's the sampler variable.
-                        out << ", " << sampler->name();
-                    }
-                }
 
                 if (arg < arguments->end() - 1)
                 {
@@ -2676,17 +2509,6 @@ bool OutputHLSL::visitLoop(Visit visit, TIntermLoop *node)
 
     TInfoSinkBase &out = getInfoSink();
 
-    if (mOutputType == SH_HLSL_3_0_OUTPUT)
-    {
-        if (handleExcessiveLoop(out, node))
-        {
-            mInsideDiscontinuousLoop = wasDiscontinuous;
-            mNestedLoopDepth--;
-
-            return false;
-        }
-    }
-
     const char *unroll = mCurrentFunctionMetadata->hasGradientInCallGraph(node) ? "LOOP" : "";
     if (node->getType() == ELoopDoWhile)
     {
@@ -2762,16 +2584,7 @@ bool OutputHLSL::visitBranch(Visit visit, TIntermBranch *node)
                     mUsesNestedBreak = true;
                 }
 
-                if (mExcessiveLoopIndex)
-                {
-                    out << "{Break";
-                    mExcessiveLoopIndex->traverse(this);
-                    out << " = true; break;}\n";
-                }
-                else
-                {
-                    out << "break";
-                }
+                out << "break";
                 break;
             case EOpContinue:
                 out << "continue";
@@ -2800,225 +2613,6 @@ bool OutputHLSL::visitBranch(Visit visit, TIntermBranch *node)
     }
 
     return true;
-}
-
-// Handle loops with more than 254 iterations (unsupported by D3D9) by splitting them
-// (The D3D documentation says 255 iterations, but the compiler complains at anything more than
-// 254).
-bool OutputHLSL::handleExcessiveLoop(TInfoSinkBase &out, TIntermLoop *node)
-{
-    const int MAX_LOOP_ITERATIONS = 254;
-
-    // Parse loops of the form:
-    // for(int index = initial; index [comparator] limit; index += increment)
-    TIntermSymbol *index = nullptr;
-    TOperator comparator = EOpNull;
-    int initial          = 0;
-    int limit            = 0;
-    int increment        = 0;
-
-    // Parse index name and intial value
-    if (node->getInit())
-    {
-        TIntermDeclaration *init = node->getInit()->getAsDeclarationNode();
-
-        if (init)
-        {
-            TIntermSequence *sequence = init->getSequence();
-            TIntermTyped *variable    = (*sequence)[0]->getAsTyped();
-
-            if (variable && variable->getQualifier() == EvqTemporary)
-            {
-                TIntermBinary *assign = variable->getAsBinaryNode();
-
-                if (assign != nullptr && assign->getOp() == EOpInitialize)
-                {
-                    TIntermSymbol *symbol          = assign->getLeft()->getAsSymbolNode();
-                    TIntermConstantUnion *constant = assign->getRight()->getAsConstantUnion();
-
-                    if (symbol && constant)
-                    {
-                        if (constant->getBasicType() == EbtInt && constant->isScalar())
-                        {
-                            index   = symbol;
-                            initial = constant->getIConst(0);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Parse comparator and limit value
-    if (index != nullptr && node->getCondition())
-    {
-        TIntermBinary *test = node->getCondition()->getAsBinaryNode();
-
-        if (test && test->getLeft()->getAsSymbolNode()->uniqueId() == index->uniqueId())
-        {
-            TIntermConstantUnion *constant = test->getRight()->getAsConstantUnion();
-
-            if (constant)
-            {
-                if (constant->getBasicType() == EbtInt && constant->isScalar())
-                {
-                    comparator = test->getOp();
-                    limit      = constant->getIConst(0);
-                }
-            }
-        }
-    }
-
-    // Parse increment
-    if (index != nullptr && comparator != EOpNull && node->getExpression())
-    {
-        TIntermBinary *binaryTerminal = node->getExpression()->getAsBinaryNode();
-        TIntermUnary *unaryTerminal   = node->getExpression()->getAsUnaryNode();
-
-        if (binaryTerminal)
-        {
-            TOperator op                   = binaryTerminal->getOp();
-            TIntermConstantUnion *constant = binaryTerminal->getRight()->getAsConstantUnion();
-
-            if (constant)
-            {
-                if (constant->getBasicType() == EbtInt && constant->isScalar())
-                {
-                    int value = constant->getIConst(0);
-
-                    switch (op)
-                    {
-                        case EOpAddAssign:
-                            increment = value;
-                            break;
-                        case EOpSubAssign:
-                            increment = -value;
-                            break;
-                        default:
-                            UNIMPLEMENTED();
-                    }
-                }
-            }
-        }
-        else if (unaryTerminal)
-        {
-            TOperator op = unaryTerminal->getOp();
-
-            switch (op)
-            {
-                case EOpPostIncrement:
-                    increment = 1;
-                    break;
-                case EOpPostDecrement:
-                    increment = -1;
-                    break;
-                case EOpPreIncrement:
-                    increment = 1;
-                    break;
-                case EOpPreDecrement:
-                    increment = -1;
-                    break;
-                default:
-                    UNIMPLEMENTED();
-            }
-        }
-    }
-
-    if (index != nullptr && comparator != EOpNull && increment != 0)
-    {
-        if (comparator == EOpLessThanEqual)
-        {
-            comparator = EOpLessThan;
-            limit += 1;
-        }
-
-        if (comparator == EOpLessThan)
-        {
-            int iterations = (limit - initial) / increment;
-
-            if (iterations <= MAX_LOOP_ITERATIONS)
-            {
-                return false;  // Not an excessive loop
-            }
-
-            TIntermSymbol *restoreIndex = mExcessiveLoopIndex;
-            mExcessiveLoopIndex         = index;
-
-            out << "{int ";
-            index->traverse(this);
-            out << ";\n"
-                   "bool Break";
-            index->traverse(this);
-            out << " = false;\n";
-
-            bool firstLoopFragment = true;
-
-            while (iterations > 0)
-            {
-                int clampedLimit = initial + increment * std::min(MAX_LOOP_ITERATIONS, iterations);
-
-                if (!firstLoopFragment)
-                {
-                    out << "if (!Break";
-                    index->traverse(this);
-                    out << ") {\n";
-                }
-
-                if (iterations <= MAX_LOOP_ITERATIONS)  // Last loop fragment
-                {
-                    mExcessiveLoopIndex = nullptr;  // Stops setting the Break flag
-                }
-
-                // for(int index = initial; index < clampedLimit; index += increment)
-                const char *unroll =
-                    mCurrentFunctionMetadata->hasGradientInCallGraph(node) ? "LOOP" : "";
-
-                out << unroll << " for(";
-                index->traverse(this);
-                out << " = ";
-                out << initial;
-
-                out << "; ";
-                index->traverse(this);
-                out << " < ";
-                out << clampedLimit;
-
-                out << "; ";
-                index->traverse(this);
-                out << " += ";
-                out << increment;
-                out << ")\n";
-
-                outputLineDirective(out, node->getLine().first_line);
-                out << "{\n";
-
-                node->getBody()->traverse(this);
-
-                outputLineDirective(out, node->getLine().first_line);
-                out << ";}\n";
-
-                if (!firstLoopFragment)
-                {
-                    out << "}\n";
-                }
-
-                firstLoopFragment = false;
-
-                initial += MAX_LOOP_ITERATIONS * increment;
-                iterations -= MAX_LOOP_ITERATIONS;
-            }
-
-            out << "}";
-
-            mExcessiveLoopIndex = restoreIndex;
-
-            return true;
-        }
-        else
-            UNIMPLEMENTED();
-    }
-
-    return false;  // Not handled as an excessive loop
 }
 
 void OutputHLSL::outputTriplet(TInfoSinkBase &out,
@@ -3067,43 +2661,15 @@ void OutputHLSL::writeParameter(const TVariable *param, TInfoSinkBase &out)
 
     if (IsSampler(type.getBasicType()))
     {
-        if (mOutputType == SH_HLSL_4_1_OUTPUT)
-        {
-            // Samplers are passed as indices to the sampler array.
-            ASSERT(qualifier != EvqParamOut && qualifier != EvqParamInOut);
-            out << "const uint " << nameStr << ArrayString(type);
-            return;
-        }
+        // Samplers are passed as indices to the sampler array.
+        ASSERT(qualifier != EvqParamOut && qualifier != EvqParamInOut);
+        out << "const uint " << nameStr << ArrayString(type);
+        return;
     }
 
     out << QualifierString(qualifier) << " " << TypeString(type) << " " << nameStr
         << ArrayString(type);
 
-    // If the structure parameter contains samplers, they need to be passed into the function as
-    // separate parameters. HLSL doesn't natively support samplers in structs.
-    if (type.isStructureContainingSamplers())
-    {
-        ASSERT(qualifier != EvqParamOut && qualifier != EvqParamInOut);
-        TVector<const TVariable *> samplerSymbols;
-        std::string namePrefix = "angle";
-        namePrefix += nameStr.c_str();
-        type.createSamplerSymbols(ImmutableString(namePrefix), "", &samplerSymbols, nullptr,
-                                  mSymbolTable);
-        for (const TVariable *sampler : samplerSymbols)
-        {
-            const TType &samplerType = sampler->getType();
-            if (mOutputType == SH_HLSL_4_1_OUTPUT)
-            {
-                out << ", const uint " << sampler->name() << ArrayString(samplerType);
-            }
-            else
-            {
-                ASSERT(IsSampler(samplerType.getBasicType()));
-                out << ", " << QualifierString(qualifier) << " " << TypeString(samplerType) << " "
-                    << sampler->name() << ArrayString(samplerType);
-            }
-        }
-    }
 }
 
 TString OutputHLSL::zeroInitializer(const TType &type) const
@@ -3282,8 +2848,8 @@ TString OutputHLSL::addStructEqualityFunction(const TStructure &structure)
         const TField *field    = fields[i];
         const TType *fieldType = field->type();
 
-        const TString &fieldNameA = "a." + Decorate(field->name());
-        const TString &fieldNameB = "b." + Decorate(field->name());
+        const TString &fieldNameA = "a." + DecorateUserStructField(field->name());
+        const TString &fieldNameB = "b." + DecorateUserStructField(field->name());
 
         if (i > 0)
         {

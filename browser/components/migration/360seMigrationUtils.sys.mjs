@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { MigrationUtils } from "resource:///modules/MigrationUtils.sys.mjs";
+import { MigrationUtils } from "moz-src:///browser/components/migration/MigrationUtils.sys.mjs";
 
 const lazy = {};
 
@@ -54,6 +54,7 @@ Bookmarks.prototype = {
            )
            SELECT id, parent_id, is_folder, title, url FROM bookmark WHERE id`
         );
+        this.available = rows.length;
 
         for (let row of rows) {
           let id = parseInt(row.getResultByName("id"), 10);

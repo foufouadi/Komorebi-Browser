@@ -2,11 +2,15 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this,
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import annotations
+
+import functools
 import json
 import re
 import string
 import subprocess
 import sys
+import threading
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -23,9 +27,23 @@ from mozversioncontrol.errors import (
     CannotDeleteFromRootOfRepositoryException,
     MissingVCSExtension,
     MissingVCSInfo,
+    StaleWorkspaceError,
 )
 from mozversioncontrol.repo.base import Repository
 from mozversioncontrol.repo.git import GitRepository
+
+_git_root_lock = threading.Lock()
+
+
+@functools.cache
+def _git_root(jj: str, path: str) -> str:
+    return subprocess.run(
+        (jj, "--quiet", "git", "root"),
+        cwd=path,
+        encoding="utf-8",
+        capture_output=True,
+        check=True,
+    ).stdout
 
 
 class JjVersionError(Exception):
@@ -46,7 +64,16 @@ class JujutsuRepository(Repository):
         super().__init__(path, tool=jj)
         self._git = GitRepository(path, git=git)
 
-        git_dir = self._run("git", "root")
+        try:
+            with _git_root_lock:
+                git_dir = _git_root(str(self._tool), self.path)
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr or ""
+            if "working copy is stale" in stderr.lower():
+                raise StaleWorkspaceError(stderr.rstrip()) from e
+            print(stderr, end="", file=sys.stderr)
+            raise
+
         if not git_dir:
             raise MissingVCSInfo("cannot find `jj git root`")
 
@@ -111,6 +138,10 @@ class JujutsuRepository(Repository):
     def head_rev(self):
         return self._resolve_to_commit(self.HEAD_REVSET)
 
+    @property
+    def is_shallow(self):
+        return self._git.is_shallow
+
     def is_cinnabar_repo(self) -> bool:
         return self._git.is_cinnabar_repo()
 
@@ -144,7 +175,9 @@ class JujutsuRepository(Repository):
             "--revisions",
             self.HEAD_REVSET,
             "--template",
-            'local_bookmarks.join("\n")',
+            # Use name() rather than the default RefName formatting, which
+            # decorates diverged ("*") and conflicted ("??") bookmarks.
+            'local_bookmarks.map(|b| b.name()).join("\n")',
         )
         bookmark = output.split("\n")[0].strip()
         return bookmark or None
@@ -320,6 +353,11 @@ class JujutsuRepository(Repository):
         files = [mozpath.normsep(p) for p in self._run("file", "list").splitlines()]
         return FileListFinder(files)
 
+    def _get_tracked_files(self, patterns):
+        fileset = " | ".join(f'root-glob:"{pattern}"' for pattern in patterns)
+        files = self._run("file", "list", fileset).splitlines()
+        return sorted(mozpath.normsep(p) for p in files)
+
     def get_ignored_files_finder(self):
         raise Exception("unimplemented")
 
@@ -463,6 +501,10 @@ class JujutsuRepository(Repository):
             cmd.extend(follow)
 
         return list(reversed(self._run_read_only(*cmd).splitlines()))
+
+    def get_ancestors(self, limit: int = 20) -> list[str]:
+        """Return the SHAs of the head commit and its ancestors, newest first."""
+        return self._git.get_ancestors(self.head_rev, limit)
 
     def _looks_like_change_id(self, id):
         return len(id) > 0 and all(letter >= "k" and letter <= "z" for letter in id)
@@ -649,13 +691,18 @@ class JujutsuRepository(Repository):
             return True
         return False
 
-    def configure(self, state_dir: Path, update_only: bool = False):
+    def configure(
+        self,
+        state_dir: Path,
+        update_only: bool = False,
+        no_system_changes: bool = False,
+    ):
         """Run the Jujutsu configuration steps."""
         print(
             "\nOur jj support currently relies on Git; checks will run for both jj and Git.\n"
         )
 
-        self._git.configure(state_dir, update_only)
+        self._git.configure(state_dir, update_only, no_system_changes=no_system_changes)
 
         topsrcdir = Path(self.path)
         if not update_only:

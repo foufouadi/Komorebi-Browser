@@ -149,6 +149,75 @@ add_task(async function test_multiple_groups() {
   BrowserTestUtils.removeTab(tab);
 });
 
+add_task(async function test_tab_group_items_render_icon() {
+  const { tab, browser } = await openTestPage(TEST_PAGE);
+
+  await setPanelPropsInContent(browser, "test-panel", {
+    groups: [
+      {
+        headerL10nId: "smartbar-mentions-list-tab-groups-label",
+        items: [
+          {
+            id: "group-1",
+            type: "tabGroup",
+            label: "Trip planning",
+            color: "blue",
+          },
+          { id: "group-2", type: "tabGroup", label: "work docs", color: "red" },
+        ],
+      },
+      {
+        headerL10nId: "smartbar-mentions-list-recent-tabs-label",
+        items: [
+          {
+            id: "tab1",
+            label: "Mozilla",
+            icon: "chrome://branding/content/icon16.png",
+          },
+        ],
+      },
+    ],
+    alwaysOpen: true,
+  });
+
+  await SpecialPowers.spawn(browser, [], async () => {
+    const panel = content.document.getElementById("test-panel");
+    const shadow = panel.shadowRoot;
+
+    const groupRows = Array.from(
+      shadow.querySelectorAll(".panel-tab-group-item")
+    );
+    Assert.equal(groupRows.length, 2, "Both tab group rows render");
+
+    const [first] = groupRows;
+    const icon = first.querySelector(".panel-tab-group-icon");
+    Assert.ok(icon, "Group row has a colored tab group icon");
+    Assert.equal(
+      icon.shadowRoot.textContent.trim(),
+      "T",
+      "The icon shows the group label's initial"
+    );
+    Assert.equal(
+      icon.getAttribute("color"),
+      "blue",
+      "The icon takes the group color, which it maps to the palette itself"
+    );
+    Assert.equal(
+      first.querySelector(".panel-tab-group-label").textContent.trim(),
+      "Trip planning",
+      "Group label renders"
+    );
+
+    Assert.equal(
+      shadow.querySelectorAll("panel-item:not(.panel-section-header)").length,
+      3,
+      "Both groups and the tab render a selectable panel-item"
+    );
+  });
+
+  BrowserTestUtils.removeTab(tab);
+});
+
 add_task(async function test_item_selection() {
   const { tab, browser } = await openTestPage(TEST_PAGE);
 
@@ -343,6 +412,67 @@ add_task(
   }
 );
 
+add_task(async function test_active_selection_and_navigation() {
+  const { tab, browser } = await openTestPage(TEST_PAGE);
+
+  await SpecialPowers.spawn(browser, [], async () => {
+    const panel = content.document.getElementById("test-panel");
+    // The persistent highlight only renders in command mode
+    panel.setAttribute("data-triggered-by", "inline-command");
+    panel.groups = [
+      {
+        items: [
+          { id: "a", label: "A" },
+          { id: "b", label: "B" },
+          { id: "c", label: "C" },
+        ],
+      },
+    ];
+    await panel.updateComplete;
+
+    Assert.equal(panel.selectedItemId, "a", "First item selected by default");
+    Assert.equal(
+      panel.getSelectedItem().id,
+      "a",
+      "getSelectedItem is the first"
+    );
+
+    panel.moveSelection(1);
+    await panel.updateComplete;
+    Assert.equal(panel.selectedItemId, "b", "Moves to the second item");
+
+    panel.moveSelection(1);
+    panel.moveSelection(1);
+    await panel.updateComplete;
+    Assert.equal(panel.selectedItemId, "a", "Wraps to the first past the end");
+
+    panel.moveSelection(-1);
+    await panel.updateComplete;
+    Assert.equal(panel.selectedItemId, "c", "Wraps to the last from the first");
+
+    const selected = panel.shadowRoot.querySelector("panel-item.selected");
+    Assert.ok(selected, "The active item carries the selected class");
+    Assert.equal(selected.itemId, "c", "Selected class is on the active item");
+
+    panel.groups = [
+      {
+        items: [
+          { id: "x", label: "X" },
+          { id: "y", label: "Y" },
+        ],
+      },
+    ];
+    await panel.updateComplete;
+    Assert.equal(
+      panel.selectedItemId,
+      "x",
+      "Selection resets to the first item when the item set changes"
+    );
+  });
+
+  BrowserTestUtils.removeTab(tab);
+});
+
 add_task(async function test_keyboard_events() {
   const { tab, browser } = await openTestPage(TEST_PAGE);
 
@@ -393,6 +523,52 @@ add_task(async function test_keyboard_events() {
       "Original event key should match"
     );
   });
+
+  BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_tab_group_item_selection() {
+  const { tab, browser } = await openTestPage(TEST_PAGE);
+
+  await setPanelPropsInContent(browser, "test-panel", {
+    groups: [
+      {
+        headerL10nId: "smartbar-mentions-list-tab-groups-label",
+        items: [
+          {
+            id: "group:group-1",
+            type: "tabGroup",
+            label: "Trip planning",
+            color: "blue",
+          },
+        ],
+      },
+    ],
+    alwaysOpen: true,
+  });
+
+  const detail = await SpecialPowers.spawn(browser, [], async () => {
+    const panel = content.document.getElementById("test-panel");
+    const selected = new Promise(resolve => {
+      panel.addEventListener("item-selected", event => resolve(event.detail));
+    });
+
+    panel.shadowRoot.querySelector(".panel-tab-group-item panel-item").click();
+
+    const { id, type, label, color } = await selected;
+    return { id, type, label, color };
+  });
+
+  Assert.deepEqual(
+    detail,
+    {
+      id: "group:group-1",
+      type: "tabGroup",
+      label: "Trip planning",
+      color: "blue",
+    },
+    "Selecting a tab group row reports its mention ID, type, label and color"
+  );
 
   BrowserTestUtils.removeTab(tab);
 });

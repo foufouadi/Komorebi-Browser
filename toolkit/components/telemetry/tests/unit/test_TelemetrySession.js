@@ -211,10 +211,10 @@ function checkPayloadInfo(data, reason) {
     );
   }
 
-  // Check for a valid revision.
+  // Check for a valid revision: an hg.mozilla.org changeset or a GitHub commit.
   if (data.revision != "") {
     const revisionUrlRegEx =
-      /^http[s]?:\/\/hg.mozilla.org(\/[a-z\S]+)+(\/rev\/[0-9a-z]+)$/g;
+      /^https?:\/\/(hg\.mozilla\.org(\/[a-z\S]+)+\/rev\/[0-9a-z]+|github\.com\/[\w.-]+\/[\w.-]+\/commit\/[0-9a-f]+)$/;
     Assert.ok(revisionUrlRegEx.test(data.revision));
   }
 
@@ -402,10 +402,6 @@ function checkPayload(payload, reason, successfulPings) {
 
   Assert.notEqual(Glean.memory.total.testGetValue(), null); // UNITS_BYTES
   Assert.notEqual(Glean.memory.jsCompartmentsSystem.testGetValue(), null); // UNITS_COUNT
-
-  Assert.ok(
-    "mainThread" in payload.slowSQL && "otherThreads" in payload.slowSQL
-  );
 
   // Check keyed histogram payload.
 
@@ -1726,10 +1722,7 @@ add_task(async function test_abortedSession() {
   );
 
   // Make sure the aborted sessions directory does not exist to test its creation.
-  await IOUtils.remove(DATAREPORTING_PATH, {
-    ignoreAbsent: true,
-    recursive: true,
-  });
+  await IOUtils.remove(ABORTED_FILE, { ignoreAbsent: true });
 
   let schedulerTickCallback = null;
   let now = new Date(2040, 1, 1, 0, 0, 0);
@@ -1847,10 +1840,7 @@ add_task(async function test_abortedDailyCoalescing() {
   );
 
   // Make sure the aborted sessions directory does not exist to test its creation.
-  await IOUtils.remove(DATAREPORTING_PATH, {
-    ignoreAbsent: true,
-    recursive: true,
-  });
+  await IOUtils.remove(ABORTED_FILE, { ignoreAbsent: true });
 
   let schedulerTickCallback = null;
   PingServer.clearRequests();
@@ -1923,10 +1913,7 @@ add_task(async function test_schedulerComputerSleep() {
   PingServer.clearRequests();
 
   // Remove any aborted-session ping from the previous tests.
-  await IOUtils.remove(DATAREPORTING_PATH, {
-    ignoreAbsent: true,
-    recursive: true,
-  });
+  await IOUtils.remove(ABORTED_FILE, { ignoreAbsent: true });
 
   // Set a fake current date and start Telemetry.
   let nowDate = fakeNow(2009, 10, 18, 0, 0, 0);
@@ -2065,10 +2052,7 @@ add_task(async function test_schedulerNothingDue() {
   );
 
   // Remove any aborted-session ping from the previous tests.
-  await IOUtils.remove(DATAREPORTING_PATH, {
-    ignoreAbsent: true,
-    recursive: true,
-  });
+  await IOUtils.remove(ABORTED_FILE, { ignoreAbsent: true });
   await TelemetryStorage.testClearPendingPings();
   await TelemetryController.testReset();
 
@@ -2110,12 +2094,7 @@ add_task(async function test_schedulerNothingDue() {
 });
 
 add_task(async function test_pingExtendedStats() {
-  const EXTENDED_PAYLOAD_FIELDS = [
-    "log",
-    "slowSQL",
-    "fileIOReports",
-    "addonDetails",
-  ];
+  const EXTENDED_PAYLOAD_FIELDS = ["log", "fileIOReports", "addonDetails"];
 
   // Reset telemetry and disable sending extended statistics.
   await TelemetryStorage.testClearPendingPings();
@@ -2136,13 +2115,6 @@ add_task(async function test_pingExtendedStats() {
         " must not be in the payload if the extended set is off."
     );
   }
-
-  // We check this one separately so that we can reuse EXTENDED_PAYLOAD_FIELDS below, since
-  // slowSQLStartup might not be there.
-  Assert.ok(
-    !("slowSQLStartup" in ping.payload),
-    "slowSQLStartup must not be sent if the extended set is off"
-  );
 
   Assert.ok(
     !("addonManager" in ping.payload.simpleMeasurements),

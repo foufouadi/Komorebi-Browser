@@ -13,14 +13,13 @@ transforms:
 
 kind-dependencies:
     - build-signing
-    - shippable-l10n-signing
+    - l10n-signing
 
 only-for-attributes:
     - nightly
     - shippable
 
 task-defaults:
-    run-on-repo-type: [hg]
     task-context:
         from-parameters:
             release-type: release_type

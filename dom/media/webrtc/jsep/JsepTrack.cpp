@@ -103,13 +103,50 @@ std::vector<uint32_t> JsepTrack::GetRtxSsrcs() const {
   return result;
 }
 
+void JsepTrack::PopulatePreferredCodecs(
+    const nsTArray<UniquePtr<JsepCodecDescription>>& aPreferredCodecs,
+    bool aUsePreferredCodecsOrder) {
+  mUsePreferredCodecsOrder = aUsePreferredCodecsOrder;
+  if (!aUsePreferredCodecsOrder) {
+    // aPreferredCodecs is just the full default list here; no real
+    // preference order to apply.
+    return;
+  }
+
+  // Unlike PopulateCodecs(), this reorders mPrototypeCodecs to put
+  // aPreferredCodecs first (in their given order), without discarding any
+  // existing codec that isn't in aPreferredCodecs. A negotiated answer may
+  // still legitimately select one of those codecs for sending, even if it
+  // was excluded by setCodecPreferences() (RFC 8829 5.3.1 allows the answer
+  // to list codecs absent from the offer).
+  auto preferredIndex =
+      [&](const UniquePtr<JsepCodecDescription>& aCodec) -> size_t {
+    for (size_t i = 0; i < aPreferredCodecs.Length(); ++i) {
+      const auto& preferred = aPreferredCodecs[i];
+      if (aCodec->Type() == preferred->Type() &&
+          aCodec->mName == preferred->mName &&
+          aCodec->mClock == preferred->mClock &&
+          aCodec->mChannels == preferred->mChannels) {
+        return i;
+      }
+    }
+    return aPreferredCodecs.Length();
+  };
+
+  std::stable_sort(mPrototypeCodecs.begin(), mPrototypeCodecs.end(),
+                   [&](const UniquePtr<JsepCodecDescription>& aLhs,
+                       const UniquePtr<JsepCodecDescription>& aRhs) {
+                     return preferredIndex(aLhs) < preferredIndex(aRhs);
+                   });
+}
+
 void JsepTrack::PopulateCodecs(
-    const std::vector<UniquePtr<JsepCodecDescription>>& prototype,
+    const nsTArray<UniquePtr<JsepCodecDescription>>& aPreferredCodecs,
     bool aUsePreferredCodecsOrder) {
   mPrototypeCodecs.clear();
   mUsePreferredCodecsOrder = aUsePreferredCodecsOrder;
-  for (const auto& prototypeCodec : prototype) {
-    if (prototypeCodec->Type() == mType) {
+  for (const auto& prototypeCodec : aPreferredCodecs) {
+    if (prototypeCodec->Type() == mType.type) {
       mPrototypeCodecs.emplace_back(prototypeCodec->Clone());
       mPrototypeCodecs.back()->mDirection = mDirection;
     }
@@ -126,6 +163,13 @@ void JsepTrack::AddToOffer(SsrcGenerator& ssrcGenerator,
     uint16_t pt;
     if (SdpHelper::GetPtAsInt(codec->mDefaultPt, &pt)) {
       mReceivePayloadTypes.push_back(pt);
+    }
+  }
+
+  if (mDirection == sdp::kRecv) {
+    mEarlyRecvCodecs.clear();
+    for (const auto& codec : mPrototypeCodecs) {
+      mEarlyRecvCodecs.emplace_back(codec->Clone());
     }
   }
 
@@ -269,12 +313,23 @@ void JsepTrack::RecvTrackSetLocal(const SdpMediaSection& aMsection) {
   // TODO: Should more stuff live in here? Anything that needs to happen when we
   // decide we're ready to receive packets should probably go in here.
   mReceptive = aMsection.IsReceiving();
+
+  mEarlyRtpExtensions.clear();
+  if (aMsection.GetAttributeList().HasAttribute(
+          SdpAttribute::kExtmapAttribute)) {
+    for (const auto& extmap :
+         aMsection.GetAttributeList().GetExtmap().mExtmaps) {
+      if (extmap.direction & sdp::kRecv) {
+        mEarlyRtpExtensions.push_back(extmap);
+      }
+    }
+  }
 }
 
 void JsepTrack::SendTrackSetRemote(SsrcGenerator& aSsrcGenerator,
                                    const SdpMediaSection& aRemoteMsection) {
   mInHaveRemote = true;
-  if (mType == SdpMediaSection::kApplication) {
+  if (mType.type == SdpMediaSection::kApplication) {
     return;
   }
 
@@ -282,7 +337,7 @@ void JsepTrack::SendTrackSetRemote(SsrcGenerator& aSsrcGenerator,
 
   // TODO: Current language in webrtc-pc is completely broken, and so I will
   // not be quoting it here.
-  if ((mType == SdpMediaSection::kVideo) &&
+  if ((mType.type == SdpMediaSection::kVideo) &&
       aRemoteMsection.GetAttributeList().HasAttribute(
           SdpAttribute::kSimulcastAttribute)) {
     // Note: webrtc-pc does not appear to support the full IETF simulcast
@@ -336,7 +391,7 @@ void JsepTrack::SendTrackSetRemote(SsrcGenerator& aSsrcGenerator,
 void JsepTrack::AddToMsection(
     const std::vector<UniquePtr<JsepCodecDescription>>& codecs,
     SdpMediaSection* msection) const {
-  if (msection->GetMediaType() != mType) {
+  if (msection->GetMediaType() != mType.type) {
     MOZ_MTLOG(ML_ERROR, "AddToMsection called on wrong media section type");
     MOZ_ASSERT(false);
     return;
@@ -350,8 +405,8 @@ void JsepTrack::AddToMsection(
     codec->AddToMediaSection(*msection);
   }
 
-  if ((mDirection == sdp::kSend) && (mType != SdpMediaSection::kApplication) &&
-      msection->IsSending()) {
+  if ((mDirection == sdp::kSend) &&
+      (mType.type != SdpMediaSection::kApplication) && msection->IsSending()) {
     if (mStreamIds.empty()) {
       msection->AddMsid("-", mTrackId);
     } else {
@@ -368,7 +423,7 @@ void JsepTrack::UpdateSsrcs(SsrcGenerator& ssrcGenerator, size_t encodings) {
     MOZ_ASSERT(false);
     return;
   }
-  if (mType == SdpMediaSection::kApplication) {
+  if (mType.type == SdpMediaSection::kApplication) {
     MOZ_MTLOG(ML_ERROR, "UpdateSsrcs called on application media section");
     MOZ_ASSERT(false);
     return;
@@ -419,8 +474,8 @@ void JsepTrack::AddToMsection(const std::vector<std::string>& aRids,
                               SsrcGenerator& ssrcGenerator, bool rtxEnabled,
                               SdpMediaSection* msection) {
   if (aRids.size() > 1) {
-    auto simulcast = MakeUnique<SdpSimulcastAttribute>();
-    auto ridAttrs = MakeUnique<SdpRidAttributeList>();
+    auto simulcast = std::make_unique<SdpSimulcastAttribute>();
+    auto ridAttrs = std::make_unique<SdpRidAttributeList>();
     for (const std::string& rid : aRids) {
       SdpRidAttributeList::Rid ridAttr;
       ridAttr.id = rid;
@@ -442,7 +497,8 @@ void JsepTrack::AddToMsection(const std::vector<std::string>& aRids,
 
   bool requireRtxSsrcs = rtxEnabled && msection->IsSending();
 
-  if (mType != SdpMediaSection::kApplication && mDirection == sdp::kSend) {
+  // Only update SSRCs for RTP tracks.
+  if (mType.IsRtp() && mDirection == sdp::kSend) {
     UpdateSsrcs(ssrcGenerator, aRids.size());
 
     if (requireRtxSsrcs) {
@@ -453,7 +509,7 @@ void JsepTrack::AddToMsection(const std::vector<std::string>& aRids,
         return;
       }
       std::vector<uint32_t> allSsrcs;
-      auto group = MakeUnique<SdpSsrcGroupAttributeList>();
+      auto group = std::make_unique<SdpSsrcGroupAttributeList>();
       for (const auto& ssrc : mSsrcs) {
         const auto rtxSsrc = mSsrcToRtxSsrc[ssrc];
         allSsrcs.push_back(ssrc);
@@ -542,7 +598,7 @@ void JsepTrack::CreateEncodings(
   // For each stream make sure we have an encoding, and configure
   // that encoding appropriately.
   for (size_t i = 0; i < numEncodings; ++i) {
-    auto encoding = MakeUnique<JsepTrackEncoding>();
+    auto encoding = std::make_unique<JsepTrackEncoding>();
     if (mRids.size() > i) {
       encoding->mRid = mRids[i];
     }
@@ -802,8 +858,7 @@ nsresult JsepTrack::Negotiate(const SdpMediaSection& answer,
     return NS_ERROR_FAILURE;
   }
 
-  UniquePtr<JsepTrackNegotiatedDetails> negotiatedDetails =
-      MakeUnique<JsepTrackNegotiatedDetails>();
+  auto negotiatedDetails = std::make_unique<JsepTrackNegotiatedDetails>();
 
   CreateEncodings(remote, negotiatedCodecs, negotiatedDetails.get());
 

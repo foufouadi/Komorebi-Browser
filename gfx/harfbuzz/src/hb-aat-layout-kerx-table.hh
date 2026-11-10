@@ -256,20 +256,26 @@ struct KerxSubTableFormat1
 	 * other subtables in kerx.  Discovered via testing. */
 	kernAction (&table->machine + table->kernAction),
 	depth (0),
+	stack_pos (0),
 	crossStream (table->header.coverage & table->header.CrossStream) {}
 
+    HB_AAT_TRANSITION_INLINE
     void transition (hb_buffer_t *buffer,
 		     StateTableDriver<Types, EntryData, Flags> *driver,
 		     const Entry<EntryData> &entry)
     {
       unsigned int flags = entry.flags;
 
-      if (flags & Format1EntryT::Reset)
-	depth = 0;
-
+      /* CoreText ignores the kerx Reset flag. */
       if (flags & Format1EntryT::Push)
       {
-	if (likely (depth < ARRAY_LENGTH (stack)))
+	if (Types::extended)
+	{
+	  stack[stack_pos] = buffer->idx;
+	  stack_pos = (stack_pos + 1) % ARRAY_LENGTH (stack);
+	  depth = hb_min (depth + 1, (unsigned) ARRAY_LENGTH (stack));
+	}
+	else if (likely (depth < ARRAY_LENGTH (stack)))
 	  stack[depth++] = buffer->idx;
 	else
 	  depth = 0; /* Probably not what CoreText does, but better? */
@@ -280,9 +286,9 @@ struct KerxSubTableFormat1
 	unsigned int tuple_count = hb_max (1u, table->header.tuple_count ());
 
 	unsigned int kern_idx = Format1EntryT::kernActionIndex (entry);
-	kern_idx = Types::byteOffsetToIndex (kern_idx, &table->machine, kernAction.arrayZ);
+	kern_idx = Types::offsetToIndex (kern_idx, &table->machine, kernAction.arrayZ);
 	const FWORD *actions = &kernAction[kern_idx];
-	if (!c->sanitizer.check_array (actions, depth, tuple_count))
+	if (!Types::extended && !c->sanitizer.check_array (actions, depth, tuple_count))
 	{
 	  depth = 0;
 	  return;
@@ -291,20 +297,57 @@ struct KerxSubTableFormat1
 
 	hb_mask_t kern_mask = c->plan->kern_mask;
 
-	/* From Apple 'kern' spec:
-	 * "Each pops one glyph from the kerning stack and applies the kerning value to it.
-	 * The end of the list is marked by an odd value... */
+	/* Contrary to the kerx spec's destructive pops, CoreText retains an
+	 * eight-slot circular history and walks it anew for each action list.
+	 * See test/shape/data/in-house/tests/aat-kerx.tests for native cases. */
+	unsigned int cursor = stack_pos;
 	bool last = false;
 	while (!last && depth)
 	{
-	  unsigned int idx = stack[--depth];
+	  if (Types::extended)
+	  {
+	    if (unlikely (buffer->max_ops-- <= 0))
+	    {
+	      buffer->successful = false;
+	      return;
+	    }
+	    if (!actions->sanitize (&c->sanitizer))
+	    {
+	      depth = 0;
+	      return;
+	    }
+	    hb_barrier ();
+	    /* kerx ends a list with a single 0xFFFF, without popping a glyph. */
+	    if (*actions == -1)
+	      break;
+	    if (tuple_count > 1 && !c->sanitizer.check_array (actions, 1, tuple_count))
+	    {
+	      depth = 0;
+	      return;
+	    }
+	    hb_barrier ();
+	  }
+
+	  unsigned int idx;
+	  if (Types::extended)
+	  {
+	    cursor = (cursor + ARRAY_LENGTH (stack) - 1) % ARRAY_LENGTH (stack);
+	    idx = stack[cursor];
+	  }
+	  else
+	    idx = stack[--depth];
 	  int v = *actions;
 	  actions += tuple_count;
 	  if (idx >= buffer->len) continue;
+	  if (Types::extended)
+	    buffer->unsafe_to_break (idx, buffer->idx + 1);
 
-	  /* "The end of the list is marked by an odd value..." */
-	  last = v & 1;
-	  v &= ~1;
+	  /* kern uses the low bit of the final value as the list terminator. */
+	  if (!Types::extended)
+	  {
+	    last = v & 1;
+	    v &= ~1;
+	  }
 
 	  hb_glyph_position_t &o = buffer->pos[idx];
 
@@ -322,15 +365,15 @@ struct KerxSubTableFormat1
 	      }
 	      else if (o.attach_type())
 	      {
-		o.y_offset += c->font->em_scale_y (v);
+		o.y_offset = hb_saturate_add (o.y_offset, c->font->em_scale_y (v));
 		buffer->scratch_flags |= HB_BUFFER_SCRATCH_FLAG_HAS_GPOS_ATTACHMENT;
 	      }
 	    }
 	    else if (buffer->info[idx].mask & kern_mask)
 	    {
 	      auto scaled = c->font->em_scale_x (v);
-	      o.x_advance += scaled;
-	      o.x_offset += scaled;
+	      o.x_advance = hb_saturate_add (o.x_advance, scaled);
+	      o.x_offset = hb_saturate_add (o.x_offset, scaled);
 	    }
 	  }
 	  else
@@ -346,14 +389,15 @@ struct KerxSubTableFormat1
 	      }
 	      else if (o.attach_type())
 	      {
-		o.x_offset += c->font->em_scale_x (v);
+		o.x_offset = hb_saturate_add (o.x_offset, c->font->em_scale_x (v));
 		buffer->scratch_flags |= HB_BUFFER_SCRATCH_FLAG_HAS_GPOS_ATTACHMENT;
 	      }
 	    }
 	    else if (buffer->info[idx].mask & kern_mask)
 	    {
-	      o.y_advance += c->font->em_scale_y (v);
-	      o.y_offset += c->font->em_scale_y (v);
+	      auto scaled = c->font->em_scale_y (v);
+	      o.y_advance = hb_saturate_add (o.y_advance, scaled);
+	      o.y_offset = hb_saturate_add (o.y_offset, scaled);
 	    }
 	  }
 	}
@@ -365,8 +409,9 @@ struct KerxSubTableFormat1
     const KerxSubTableFormat1 *table;
     private:
     const UnsizedArrayOf<FWORD> &kernAction;
-    unsigned int stack[8];
+    unsigned int stack[8] = {};
     unsigned int depth;
+    unsigned int stack_pos;
     bool crossStream;
   };
 
@@ -425,7 +470,7 @@ struct KerxSubTableFormat2
 
     const UnsizedArrayOf<FWORD> &arrayZ = this+array;
     unsigned int kern_idx = l + r;
-    kern_idx = Types::offsetToIndex (kern_idx, this, arrayZ.arrayZ);
+    kern_idx = Types::byteOffsetToIndex (kern_idx, this, arrayZ.arrayZ);
     const FWORD *v = &arrayZ[kern_idx];
     if (unlikely (!v->sanitize (&c->sanitizer))) return 0;
     hb_barrier ();
@@ -550,6 +595,7 @@ struct KerxSubTableFormat4
 	mark_set (false),
 	mark (0) {}
 
+    HB_AAT_TRANSITION_INLINE
     void transition (hb_buffer_t *buffer,
 		     StateTableDriver<Types, EntryData, Flags> *driver,
 		     const Entry<EntryData> &entry)
@@ -567,6 +613,10 @@ struct KerxSubTableFormat4
 	    const HBUINT16 *data = &ankrData[entry.data.ankrActionIndex * 2];
 	    if (!c->sanitizer.check_array (data, 2)) return;
 	    hb_barrier ();
+	    /* Font functions may load the whole glyph outline to find a contour
+	     * point, and a non-advancing transition can repeat that at will.
+	     * Charge the two lookups to the buffer's work budget. */
+	    if (unlikely ((buffer->max_ops -= 2 * HB_BUDGET_256) <= 0)) return;
 	    unsigned int markControlPoint = *data++;
 	    unsigned int currControlPoint = *data++;
 	    hb_position_t markX = 0;
@@ -583,8 +633,8 @@ struct KerxSubTableFormat4
 							      &currX, &currY))
 	      return;
 
-	    o.x_offset = markX - currX;
-	    o.y_offset = markY - currY;
+	    o.x_offset = hb_saturate_sub (markX, currX);
+	    o.y_offset = hb_saturate_sub (markY, currY);
 	  }
 	  break;
 
@@ -605,8 +655,10 @@ struct KerxSubTableFormat4
 								  currAnchorPoint,
 								  c->sanitizer.get_num_glyphs ());
 
-	    o.x_offset = c->font->em_scale_x (markAnchor.xCoordinate) - c->font->em_scale_x (currAnchor.xCoordinate);
-	    o.y_offset = c->font->em_scale_y (markAnchor.yCoordinate) - c->font->em_scale_y (currAnchor.yCoordinate);
+	    o.x_offset = hb_saturate_sub (c->font->em_scale_x (markAnchor.xCoordinate),
+					  c->font->em_scale_x (currAnchor.xCoordinate));
+	    o.y_offset = hb_saturate_sub (c->font->em_scale_y (markAnchor.yCoordinate),
+					  c->font->em_scale_y (currAnchor.yCoordinate));
 	  }
 	  break;
 
@@ -622,11 +674,18 @@ struct KerxSubTableFormat4
 	    int currX = *data++;
 	    int currY = *data++;
 
-	    o.x_offset = c->font->em_scale_x (markX) - c->font->em_scale_x (currX);
-	    o.y_offset = c->font->em_scale_y (markY) - c->font->em_scale_y (currY);
+	    o.x_offset = hb_saturate_sub (c->font->em_scale_x (markX), c->font->em_scale_x (currX));
+	    o.y_offset = hb_saturate_sub (c->font->em_scale_y (markY), c->font->em_scale_y (currY));
 	  }
 	  break;
 	}
+	hb_position_t base_offset = OT::Layout::GPOS_impl::resolve_cross_offset (buffer->pos, buffer->len, mark,
+										 buffer->props.direction,
+										 c->buffer_is_reversed);
+	if (HB_DIRECTION_IS_HORIZONTAL (buffer->props.direction))
+	  o.y_offset = hb_saturate_add (o.y_offset, base_offset);
+	else
+	  o.x_offset = hb_saturate_add (o.x_offset, base_offset);
 	o.attach_type() = OT::Layout::GPOS_impl::ATTACH_TYPE_MARK;
 	o.attach_chain() = (int) mark - (int) buffer->idx;
 	if (c->buffer_is_reversed)
@@ -1032,6 +1091,9 @@ struct KerxTable
       reverse = bool (st->u.header.coverage & st->u.header.Backwards) !=
 		HB_DIRECTION_IS_BACKWARD (c->buffer->props.direction);
 
+      if (unlikely (!c->charge_buffer_pass ()))
+	break;
+
       if (!c->buffer->message (c->font, "start subtable %u", c->lookup_index))
 	goto skip;
 
@@ -1063,6 +1125,8 @@ struct KerxTable
 
       (void) c->buffer->message (c->font, "end subtable %u", c->lookup_index);
 
+      if (unlikely (!c->buffer->successful)) break;
+
     skip:
       st = &StructAfter<SubTable> (*st);
       c->set_lookup_index (c->lookup_index + 1);
@@ -1086,6 +1150,9 @@ struct KerxTable
 
     const SubTable *st = &thiz()->firstSubTable;
     unsigned int count = thiz()->tableCount;
+    /* The accelerator keeps two glyph sets per subtable. */
+    if (unlikely (count > HB_AAT_MAX_SUBTABLES))
+      return_trace (false);
     for (unsigned int i = 0; i < count; i++)
     {
       if (unlikely (!st->u.header.sanitize (c)))

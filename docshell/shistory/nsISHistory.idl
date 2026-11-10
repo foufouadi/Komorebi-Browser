@@ -26,7 +26,7 @@ native MaybeInt32(mozilla::Maybe<int32_t>);
 [ptr] native SHEntrySharedParentStatePtr(mozilla::dom::SHEntrySharedParentState);
 /**
  * An interface to the primary properties of the Session History
- * component. In an embedded browser environment, the nsIWebBrowser
+ * component. In an embedded browser environment, the nsWebBrowser
  * object creates an instance of session history for each open window.
  * A handle to the session history object can be obtained from
  * nsIWebNavigation. In a non-embedded situation, the  owner of the
@@ -263,6 +263,14 @@ interface nsISHistory: nsISupports
   */
   [noscript, notxpcom]
   void RemoveFrameEntries(in nsISHEntry aEntry);
+
+  /**
+   * Prepare the entry for being reloaded:
+   * - Compute the load type from aReloadFlags and set it on aEntry
+   * - Purge child entries for force-reload
+   */
+  [noscript, notxpcom]
+  unsigned long PrepareReloadEntry(in nsISHEntry aEntry, in unsigned long aReloadFlags);
 
   [can_run_script] void reload(in unsigned long aReloadFlags);
 

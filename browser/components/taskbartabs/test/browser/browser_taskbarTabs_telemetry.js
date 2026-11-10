@@ -7,11 +7,13 @@ ChromeUtils.defineESModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.sys.mjs",
   FileTestUtils: "resource://testing-common/FileTestUtils.sys.mjs",
   TaskbarTabsRegistry:
-    "resource:///modules/taskbartabs/TaskbarTabsRegistry.sys.mjs",
+    "moz-src:///browser/components/taskbartabs/TaskbarTabsRegistry.sys.mjs",
   TaskbarTabsWindowManager:
-    "resource:///modules/taskbartabs/TaskbarTabsWindowManager.sys.mjs",
-  TaskbarTabsPin: "resource:///modules/taskbartabs/TaskbarTabsPin.sys.mjs",
-  TaskbarTabsUtils: "resource:///modules/taskbartabs/TaskbarTabsUtils.sys.mjs",
+    "moz-src:///browser/components/taskbartabs/TaskbarTabsWindowManager.sys.mjs",
+  TaskbarTabsPin:
+    "moz-src:///browser/components/taskbartabs/TaskbarTabsPin.sys.mjs",
+  TaskbarTabsUtils:
+    "moz-src:///browser/components/taskbartabs/TaskbarTabsUtils.sys.mjs",
   ShellService: "moz-src:///browser/components/shell/ShellService.sys.mjs",
   sinon: "resource://testing-common/Sinon.sys.mjs",
   MockRegistrar: "resource://testing-common/MockRegistrar.sys.mjs",
@@ -226,10 +228,10 @@ add_task(async function testMoveToTaskbarHighLevelMetric() {
   // moveTabIntoTaskbarTab is implemented in the TaskbarTabs module itself, so
   // we need to stub out system interaction.
   const sandbox = sinon.createSandbox();
-  sandbox.stub(TaskbarTabsPin, "pinTaskbarTab");
+  sandbox.stub(TaskbarTabsPin, "pinTaskbarTab").resolves({});
   sandbox.stub(TaskbarTabsPin, "unpinTaskbarTab");
   const { TaskbarTabs } = ChromeUtils.importESModule(
-    "resource:///modules/taskbartabs/TaskbarTabs.sys.mjs"
+    "moz-src:///browser/components/taskbartabs/TaskbarTabs.sys.mjs"
   );
 
   Services.fog.testResetFOG();
@@ -304,3 +306,37 @@ add_task(async function testUsageTimeMetricSingleWindow() {
 
   gRegistry.removeTaskbarTab(taskbarTab.id);
 });
+
+add_task(async function testUsageTimeMetricIgnoresRaisedWindows() {
+  const taskbarTab = createTaskbarTab(gRegistry, PARSED_URL, 0);
+
+  const winExisting = await gWindowManager.openWindow(taskbarTab);
+  await SimpleTest.promiseFocus(window);
+  Services.fog.testResetFOG();
+
+  const winNew = await gWindowManager.openWindow(taskbarTab);
+  is(
+    Services.focus.activeWindow,
+    winNew,
+    "The new window should be the active window."
+  );
+  Assert.deepEqual(
+    BrowserWindowTracker.getOrderedWindows().slice(0, 2),
+    [winNew, winExisting],
+    "The existing window should have been raised below the new window."
+  );
+
+  // Close the raised window first, so it doesn't get focused again.
+  await BrowserTestUtils.closeWindow(winExisting);
+  await BrowserTestUtils.closeWindow(winNew);
+  await SimpleTest.promiseFocus(window);
+
+  const snapshot = Glean.webApp.usageTime.testGetValue();
+  is(
+    snapshot.count,
+    1,
+    "Only the new window should record usage time, not the raised one"
+  );
+
+  gRegistry.removeTaskbarTab(taskbarTab.id);
+}).skip(AppConstants.platform !== "win"); // Existing windows are only raised on Windows.

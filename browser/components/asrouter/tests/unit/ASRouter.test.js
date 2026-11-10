@@ -13,7 +13,6 @@ import {
   TARGETING_PREFERENCES,
 } from "modules/ASRouterPreferences.sys.mjs";
 import { ASRouterTriggerListeners } from "modules/ASRouterTriggerListeners.sys.mjs";
-import { CFRPageActions } from "modules/CFRPageActions.sys.mjs";
 import { GlobalOverrider } from "tests/unit/utils";
 import { PanelTestProvider } from "modules/PanelTestProvider.sys.mjs";
 import ProviderResponseSchema from "content-src/schemas/provider-response.schema.json";
@@ -804,8 +803,6 @@ describe("ASRouter", () => {
   describe("#routeCFRMessage", () => {
     let browser;
     beforeEach(() => {
-      sandbox.stub(CFRPageActions, "forceRecommendation");
-      sandbox.stub(CFRPageActions, "addRecommendation");
       browser = {};
     });
     it("should route moments messages to the right hub", () => {
@@ -813,78 +810,11 @@ describe("ASRouter", () => {
 
       assert.calledOnce(FakeMomentsPageHub.executeAction);
       assert.notCalled(FakeToolbarBadgeHub.registerBadgeNotificationListener);
-      assert.notCalled(CFRPageActions.addRecommendation);
-      assert.notCalled(CFRPageActions.forceRecommendation);
     });
     it("should route toolbar_badge message to the right hub", () => {
       Router.routeCFRMessage({ template: "toolbar_badge" }, browser);
 
       assert.calledOnce(FakeToolbarBadgeHub.registerBadgeNotificationListener);
-      assert.notCalled(CFRPageActions.addRecommendation);
-      assert.notCalled(CFRPageActions.forceRecommendation);
-      assert.notCalled(FakeMomentsPageHub.executeAction);
-    });
-    it("should route milestone_message to the right hub", () => {
-      Router.routeCFRMessage(
-        { template: "milestone_message" },
-        browser,
-        "",
-        false
-      );
-
-      assert.calledOnce(CFRPageActions.addRecommendation);
-      assert.notCalled(CFRPageActions.forceRecommendation);
-      assert.notCalled(FakeToolbarBadgeHub.registerBadgeNotificationListener);
-      assert.notCalled(FakeMomentsPageHub.executeAction);
-    });
-    it("should route cfr_doorhanger message to the right hub force = false", () => {
-      Router.routeCFRMessage(
-        { template: "cfr_doorhanger" },
-        browser,
-        { param: {} },
-        false
-      );
-
-      assert.calledOnce(CFRPageActions.addRecommendation);
-      assert.notCalled(FakeToolbarBadgeHub.registerBadgeNotificationListener);
-      assert.notCalled(CFRPageActions.forceRecommendation);
-      assert.notCalled(FakeMomentsPageHub.executeAction);
-    });
-    it("should route cfr_doorhanger message to the right hub force = true", () => {
-      Router.routeCFRMessage({ template: "cfr_doorhanger" }, browser, {}, true);
-
-      assert.calledOnce(CFRPageActions.forceRecommendation);
-      assert.notCalled(CFRPageActions.addRecommendation);
-      assert.notCalled(FakeToolbarBadgeHub.registerBadgeNotificationListener);
-      assert.notCalled(FakeMomentsPageHub.executeAction);
-    });
-    it("should route cfr_urlbar_chiclet message to the right hub force = false", () => {
-      Router.routeCFRMessage(
-        { template: "cfr_urlbar_chiclet" },
-        browser,
-        { param: {} },
-        false
-      );
-
-      assert.calledOnce(CFRPageActions.addRecommendation);
-      const { args } = CFRPageActions.addRecommendation.firstCall;
-      // Host should be null
-      assert.isNull(args[1]);
-      assert.notCalled(FakeToolbarBadgeHub.registerBadgeNotificationListener);
-      assert.notCalled(CFRPageActions.forceRecommendation);
-      assert.notCalled(FakeMomentsPageHub.executeAction);
-    });
-    it("should route cfr_urlbar_chiclet message to the right hub force = true", () => {
-      Router.routeCFRMessage(
-        { template: "cfr_urlbar_chiclet" },
-        browser,
-        {},
-        true
-      );
-
-      assert.calledOnce(CFRPageActions.forceRecommendation);
-      assert.notCalled(CFRPageActions.addRecommendation);
-      assert.notCalled(FakeToolbarBadgeHub.registerBadgeNotificationListener);
       assert.notCalled(FakeMomentsPageHub.executeAction);
     });
     it("should route default to sending to content", () => {
@@ -895,8 +825,6 @@ describe("ASRouter", () => {
         true
       );
 
-      assert.notCalled(CFRPageActions.forceRecommendation);
-      assert.notCalled(CFRPageActions.addRecommendation);
       assert.notCalled(FakeToolbarBadgeHub.registerBadgeNotificationListener);
       assert.notCalled(FakeMomentsPageHub.executeAction);
     });
@@ -935,6 +863,28 @@ describe("ASRouter", () => {
         });
         assert.notCalled(addImpressionStub);
         assert.notCalled(blockMessageByIdStub);
+      });
+      it("allowlists the SET_DEFAULT_BROWSER_OPEN_WITH action", () => {
+        assert.isTrue(
+          Router._isAllowedActionOnlyMessageAction({
+            type: "SET_DEFAULT_BROWSER_OPEN_WITH",
+          }),
+          "SET_DEFAULT_BROWSER_OPEN_WITH is an allowed action-only action"
+        );
+      });
+      it("allowlists ENABLE_CLOSED_BROWSER_NOTIFICATIONS but not its opposite", () => {
+        assert.isTrue(
+          Router._isAllowedActionOnlyMessageAction({
+            type: "ENABLE_CLOSED_BROWSER_NOTIFICATIONS",
+          }),
+          "the enabling action can fire from an action_only message"
+        );
+        assert.isFalse(
+          Router._isAllowedActionOnlyMessageAction({
+            type: "DISABLE_CLOSED_BROWSER_NOTIFICATIONS",
+          }),
+          "the disabling action only ever fires from UI the user clicked"
+        );
       });
       it("does nothing for a non-allowlisted action", () => {
         const badMessage = {
@@ -1085,6 +1035,120 @@ describe("ASRouter", () => {
         assert.notCalled(FakeSpecialMessageActions.handleAction);
         assert.notCalled(addImpressionStub);
       });
+      describe("promptOnly pin actions", () => {
+        it("sets promptOnly on a top level PIN_FIREFOX_TO_TASKBAR action", () => {
+          const message = {
+            id: "PIN",
+            template: "action_only",
+            content: {
+              action: {
+                type: "PIN_FIREFOX_TO_TASKBAR",
+                data: { fireAndForget: true },
+              },
+            },
+          };
+          const original = structuredClone(message);
+          Router.routeCFRMessage(message, browser, {});
+
+          assert.calledOnceWithExactly(
+            FakeSpecialMessageActions.handleAction,
+            {
+              type: "PIN_FIREFOX_TO_TASKBAR",
+              data: { fireAndForget: true, promptOnly: true },
+            },
+            browser
+          );
+          assert.deepEqual(message, original, "message is not modified");
+        });
+        it("sets promptOnly on a PIN_FIREFOX_TO_TASKBAR action with no data", () => {
+          const message = {
+            id: "PIN_NO_DATA",
+            template: "action_only",
+            content: { action: { type: "PIN_FIREFOX_TO_TASKBAR" } },
+          };
+          Router.routeCFRMessage(message, browser, {});
+
+          assert.calledOnceWithExactly(
+            FakeSpecialMessageActions.handleAction,
+            { type: "PIN_FIREFOX_TO_TASKBAR", data: { promptOnly: true } },
+            browser
+          );
+          assert.deepEqual(message.content.action, {
+            type: "PIN_FIREFOX_TO_TASKBAR",
+          });
+        });
+        it("sets promptOnly on a PIN_AND_DEFAULT action", () => {
+          FakeMessagingSystemAllowlists.getActionOnlyActions.returns([
+            "PIN_AND_DEFAULT",
+          ]);
+          const message = {
+            id: "PIN_AND_DEFAULT",
+            template: "action_only",
+            content: { action: { type: "PIN_AND_DEFAULT" } },
+          };
+          Router.routeCFRMessage(message, browser, {});
+
+          assert.calledOnceWithExactly(
+            FakeSpecialMessageActions.handleAction,
+            { type: "PIN_AND_DEFAULT", data: { promptOnly: true } },
+            browser
+          );
+          assert.deepEqual(message.content.action, {
+            type: "PIN_AND_DEFAULT",
+          });
+        });
+        it("sets promptOnly on pin actions nested in a MULTI_ACTION", () => {
+          const message = {
+            id: "MULTI_PIN",
+            template: "action_only",
+            content: {
+              action: {
+                type: "MULTI_ACTION",
+                data: {
+                  orderedExecution: true,
+                  actions: [
+                    { type: "CONFIRM_LAUNCH_ON_LOGIN" },
+                    {
+                      type: "PIN_FIREFOX_TO_TASKBAR",
+                      data: { privatePin: true },
+                    },
+                  ],
+                },
+              },
+            },
+          };
+          const original = structuredClone(message);
+          Router.routeCFRMessage(message, browser, {});
+
+          assert.calledOnceWithExactly(
+            FakeSpecialMessageActions.handleAction,
+            {
+              type: "MULTI_ACTION",
+              data: {
+                orderedExecution: true,
+                actions: [
+                  { type: "CONFIRM_LAUNCH_ON_LOGIN" },
+                  {
+                    type: "PIN_FIREFOX_TO_TASKBAR",
+                    data: { privatePin: true, promptOnly: true },
+                  },
+                ],
+              },
+            },
+            browser
+          );
+          assert.deepEqual(message, original, "message is not modified");
+        });
+        it("does not set promptOnly on other actions", () => {
+          Router.routeCFRMessage(allowedMessage, browser, {});
+
+          assert.calledOnceWithExactly(
+            FakeSpecialMessageActions.handleAction,
+            { type: "CONFIRM_LAUNCH_ON_LOGIN" },
+            browser
+          );
+        });
+      });
       it("allows MULTI_ACTION mixing baseline and Remote Settings actions", async () => {
         FakeMessagingSystemAllowlists.getActionOnlyActions.returns([
           "FOO_ACTION",
@@ -1118,6 +1182,28 @@ describe("ASRouter", () => {
           data: multiMessage,
         });
       });
+    });
+    it("should tag the message with panel_local_testing when force is true", () => {
+      const msg = {
+        template: "feature_callout",
+        provider: "cfr",
+        targeting: "true",
+      };
+      const { message } = Router.routeCFRMessage(msg, browser, {}, true);
+      assert.equal(message.provider, "panel_local_testing");
+      assert.include(
+        message.targeting,
+        'providerCohorts.panel_local_testing == "SHOW_TEST"'
+      );
+    });
+    it("should not modify the message provider when force is false", () => {
+      const msg = {
+        template: "feature_callout",
+        provider: "cfr",
+        targeting: "true",
+      };
+      const { message } = Router.routeCFRMessage(msg, browser, {}, false);
+      assert.equal(message.provider, "cfr");
     });
   });
 
@@ -1343,7 +1429,6 @@ describe("ASRouter", () => {
           type: "local",
           enabled: true,
           messages: [
-            "cfr_doorhanger",
             "toolbar_badge",
             "update_action",
             "infobar",
@@ -1718,13 +1803,6 @@ describe("ASRouter", () => {
 
       assert.isNull(result);
     });
-    it("should have messageImpressions in the message context", () => {
-      assert.propertyVal(
-        Router._getMessagesContext(),
-        "messageImpressions",
-        Router.state.messageImpressions
-      );
-    });
     it("should forward trigger param info", async () => {
       const trigger = {
         triggerId: "foo",
@@ -1936,6 +2014,11 @@ describe("ASRouter", () => {
 
       assert.isFalse(Router.isUnblockedMessage(msg));
     });
+    it("should not exclude a message with no provider", async () => {
+      const msg = { id: "msg1", groups: [] };
+      await Router.setState({ messages: [msg], providers: [] });
+      assert.isTrue(Router.isUnblockedMessage(msg));
+    });
   });
 
   describe("#hasMessageForTrigger", () => {
@@ -2089,21 +2172,6 @@ describe("ASRouter", () => {
       let msg = Router.routeCFRMessage(data.content, browser, data, false);
       assert.deepEqual(msg.message, message);
     });
-    it("should call CFRPageActions.forceRecommendation if the template is cfr_action and force is true", async () => {
-      sandbox.stub(CFRPageActions, "forceRecommendation");
-      const testMessage = { id: "foo", template: "cfr_doorhanger" };
-      await Router.setState({ messages: [testMessage] });
-      Router.routeCFRMessage(testMessage, {}, null, true);
-
-      assert.calledOnce(CFRPageActions.forceRecommendation);
-    });
-    it("should call CFRPageActions.addRecommendation if the template is cfr_action and force is false", async () => {
-      sandbox.stub(CFRPageActions, "addRecommendation");
-      const testMessage = { id: "foo", template: "cfr_doorhanger" };
-      await Router.setState({ messages: [testMessage] });
-      Router.routeCFRMessage(testMessage, {}, {}, false);
-      assert.calledOnce(CFRPageActions.addRecommendation);
-    });
   });
 
   describe("#updateTargetingParameters", () => {
@@ -2237,13 +2305,6 @@ describe("ASRouter", () => {
       assert.calledOnce(stopAndAccumulate);
       assert.calledWithExactly(stopAndAccumulate, fakeTimerId);
     });
-    it("should have previousSessionEnd in the message context", () => {
-      assert.propertyVal(
-        Router._getMessagesContext(),
-        "previousSessionEnd",
-        100
-      );
-    });
     it("should record the Reach event if found any", async () => {
       let messages = [
         {
@@ -2314,10 +2375,10 @@ describe("ASRouter", () => {
     // four tests with `forEach`) doesn't work, because it will always
     // pass, so don't use it as a pattern to write other tests. Bug 1967593
     it("should record the Exposure event for each valid feature", async () => {
-      ["cfr_doorhanger", "update_action", "infobar", "spotlight"].forEach(
+      ["feature_callout", "update_action", "infobar", "spotlight"].forEach(
         async template => {
           let featureMap = {
-            cfr_doorhanger: "cfr",
+            feature_callout: "cfr",
             spotlight: "spotlight",
             infobar: "infobar",
             update_action: "moments-page",
@@ -2890,19 +2951,20 @@ describe("ASRouter", () => {
     });
   });
   describe("#observe", () => {
-    it("should reload l10n for CFRPageActions when the `USE_REMOTE_L10N_PREF` pref is changed", () => {
-      sandbox.spy(CFRPageActions, "reloadL10n");
-
+    let reloadL10nStub;
+    beforeEach(() => {
+      reloadL10nStub = sandbox.stub();
+      globals.set("RemoteL10n", { reloadL10n: reloadL10nStub });
+    });
+    it("should reload l10n when the `USE_REMOTE_L10N_PREF` pref is changed", () => {
       Router.observe("", "", USE_REMOTE_L10N_PREF);
 
-      assert.calledOnce(CFRPageActions.reloadL10n);
+      assert.calledOnce(reloadL10nStub);
     });
     it("should not react to other pref changes", () => {
-      sandbox.spy(CFRPageActions, "reloadL10n");
-
       Router.observe("", "", "foo");
 
-      assert.notCalled(CFRPageActions.reloadL10n);
+      assert.notCalled(reloadL10nStub);
     });
   });
   describe("#loadAllMessageGroups", () => {
@@ -3362,6 +3424,56 @@ describe("ASRouter", () => {
         2: [],
         3: [0, 1, 2],
       });
+    });
+    it("should update multiprofile message impressions in shared storage", async () => {
+      sandbox.stub(ASRouterPreferences, "devtoolsEnabled").get(() => true);
+      await Router.setState({
+        multiProfileMessageImpressions: { 1: [0, 1, 2], 2: [0, 1, 2] },
+      });
+
+      await Router.editState("multiProfileMessageImpressions", {
+        1: [3, 4],
+        3: [0, 1, 2],
+      });
+
+      // State reflects the edited value
+      assert.deepEqual(Router.state.multiProfileMessageImpressions, {
+        1: [3, 4],
+        3: [0, 1, 2],
+      });
+      // Added/changed entries are persisted to shared storage
+      assert.calledWithExactly(
+        Router._storage.setSharedMessageImpressions,
+        "1",
+        [3, 4]
+      );
+      assert.calledWithExactly(
+        Router._storage.setSharedMessageImpressions,
+        "3",
+        [0, 1, 2]
+      );
+      // Removed entry is deleted from shared storage
+      assert.calledWithExactly(
+        Router._storage.setSharedMessageImpressions,
+        "2",
+        undefined
+      );
+      // Regular storage is not used for multiprofile impressions
+      assert.neverCalledWith(
+        Router._storage.set,
+        "multiProfileMessageImpressions"
+      );
+    });
+    it("should throw for invalid state key", async () => {
+      sandbox.stub(ASRouterPreferences, "devtoolsEnabled").get(() => true);
+      let error;
+      try {
+        await Router.editState("notARealKey", {});
+      } catch (e) {
+        error = e;
+      }
+      assert.instanceOf(error, Error);
+      assert.equal(error.message, "Invalid state key");
     });
   });
 

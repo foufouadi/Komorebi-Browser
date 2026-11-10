@@ -281,6 +281,18 @@ private fun AcornColorGrid(@PreviewParameter(ColorParameterProvider::class) para
                     )
 
                     Text(
+                        text = "successContainer",
+                        modifier = Modifier.colorGridItemShort(color = colorScheme.successContainer),
+                        color = colorScheme.onPrimary,
+                    )
+
+                    Text(
+                        text = "onSuccessContainer",
+                        modifier = Modifier.colorGridItemShort(color = colorScheme.onSuccessContainer),
+                        color = colorScheme.onPrimary,
+                    )
+
+                    Text(
                         text = "warning",
                         modifier = Modifier.colorGridItemShort(color = colorScheme.warning),
                         color = colorScheme.onPrimary,
@@ -305,6 +317,12 @@ private fun AcornColorGrid(@PreviewParameter(ColorParameterProvider::class) para
                     )
 
                     Text(
+                        text = "surfaceContainerSelected",
+                        modifier = Modifier.colorGridItemShort(color = colorScheme.surfaceContainerSelected),
+                        color = colorScheme.onSurface,
+                    )
+
+                    Text(
                         text = "autofillText",
                         modifier = Modifier.colorGridItemShort(color = colorScheme.autofillText),
                         color = colorScheme.onPrimary,
@@ -320,6 +338,12 @@ private fun AcornColorGrid(@PreviewParameter(ColorParameterProvider::class) para
                         text = "iconPrivate",
                         modifier = Modifier.colorGridItemShort(color = colorScheme.iconPrivate),
                         color = colorScheme.onPrimary,
+                    )
+
+                    Text(
+                        text = "sheetOutline",
+                        modifier = Modifier.colorGridItemShort(color = colorScheme.sheetOutline),
+                        color = colorScheme.onSurface,
                     )
                 }
 

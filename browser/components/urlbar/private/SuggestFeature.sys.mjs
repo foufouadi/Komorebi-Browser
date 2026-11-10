@@ -256,6 +256,29 @@ export class SuggestProvider extends SuggestFeature {
   }
 
   /**
+   * If the feature's results are dynamic, the subclass should override this
+   * and return the view template, per `UrlbarProvider.getViewTemplate()`.
+   *
+   * @param {UrlbarResult} _result
+   * @returns {?object}
+   */
+  getViewTemplate(_result) {
+    return undefined;
+  }
+
+  /**
+   * If the feature's results are dynamic, the subclass should override this
+   * and return the view update, per `UrlbarProvider.getViewUpdate()`.
+   *
+   * @param {UrlbarResult} _result
+   * @param {UrlbarParentController} _controller
+   * @returns {?object}
+   */
+  getViewUpdate(_result, _controller) {
+    return undefined;
+  }
+
+  /**
    * Whether the "show less frequently" result-menu command should still be
    * offered. Subclasses that support the command override this.
    *
@@ -337,7 +360,7 @@ export class SuggestProvider extends SuggestFeature {
    *   The urlbar session's query context.
    * @param {UrlbarParentController} controller
    *   The controller.
-   * @param {Array} featureResults
+   * @param {{index: number, result: UrlbarResult}[]} featureResults
    *   The feature's results that were visible at the end of the session. This
    *   will always be non-empty and will only contain results from the feature.
    * @param {object|null} details
@@ -397,7 +420,7 @@ export class SuggestProvider extends SuggestFeature {
    *   The result the command acted on.
    */
   handleShowLessFrequently(controller, result) {
-    controller.view.acknowledgeFeedback(result);
+    controller.view.acknowledgeFeedback(result.id);
     this.incrementShowLessFrequentlyCount();
     if (!this.canShowLessFrequently) {
       controller.view.updateResultMenuCommands(

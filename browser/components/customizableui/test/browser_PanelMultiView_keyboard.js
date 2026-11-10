@@ -592,6 +592,65 @@ add_task(async function testActivationMousedown() {
   await hidePopup();
 });
 
+// Test that keyboard activation doesn't leave the mouse button pressed, which
+// would suppress drag and drop on the next window move or resize.
+add_task(async function testActivationMouseup() {
+  await openPopup();
+  await expectFocusAfterKey("ArrowDown", gMainButton1);
+  let events = [];
+  let listener = e => events.push(e.type);
+  for (let type of ["mousedown", "mouseup", "click"]) {
+    gMainButton1.addEventListener(type, listener);
+  }
+  EventUtils.synthesizeKey(" ");
+  Assert.deepEqual(
+    events,
+    ["mousedown", "mouseup", "click"],
+    "mouseup dispatched between mousedown and click"
+  );
+  for (let type of ["mousedown", "mouseup", "click"]) {
+    gMainButton1.removeEventListener(type, listener);
+  }
+  await hidePopup();
+});
+
+// Test that keyboard activation tells listeners it came from the keyboard,
+// including the command event of XUL buttons and moz-button hosts.
+add_task(async function testActivationInputSource() {
+  for (let [button, types] of [
+    [
+      gMainButton1,
+      ["pointerdown", "mousedown", "pointerup", "mouseup", "click", "command"],
+    ],
+    [gMozButton, ["click"]],
+  ]) {
+    await openPopup();
+    // Focus using the arrow keys so PanelMultiView#selectedElement is set.
+    for (let i = 0; i < gMainTabOrder.length; i++) {
+      EventUtils.synthesizeKey("KEY_ArrowDown");
+      if (document.activeElement == button) {
+        break;
+      }
+    }
+    is(document.activeElement, button, `${button.id} focused`);
+    let events = [];
+    let listener = e => events.push([e.type, e.inputSource]);
+    for (let type of types) {
+      button.addEventListener(type, listener);
+    }
+    EventUtils.synthesizeKey("KEY_Enter");
+    for (let type of types) {
+      button.removeEventListener(type, listener);
+    }
+    Assert.deepEqual(
+      events,
+      types.map(type => [type, MouseEvent.MOZ_SOURCE_KEYBOARD]),
+      `${button.id}: the events say the keyboard activated it`
+    );
+    await hidePopup();
+  }
+});
+
 // Test that tab and the arrow keys aren't overridden in embedded documents.
 async function testTabArrowsEmbeddedDoc(aView, aEmbedder) {
   await openPopup();

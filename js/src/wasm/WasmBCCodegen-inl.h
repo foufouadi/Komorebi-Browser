@@ -67,7 +67,7 @@ void BaseCompiler::moveF32(RegF32 src, RegF32 dest) {
   }
 }
 
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
 void BaseCompiler::moveV128(RegV128 src, RegV128 dest) {
   if (src != dest) {
     masm.moveSimd128(src, dest);
@@ -105,7 +105,7 @@ inline void BaseCompiler::move<RegPtr>(RegPtr src, RegPtr dest) {
   movePtr(src, dest);
 }
 
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
 template <>
 inline void BaseCompiler::move<RegV128>(RegV128 src, RegV128 dest) {
   moveV128(src, dest);
@@ -189,7 +189,7 @@ RegF64 BaseCompiler::captureReturnedF64(const FunctionCall& call) {
   return r;
 }
 
-#ifdef ENABLE_WASM_SIMD
+#ifdef ENABLE_JIT_SIMD
 RegV128 BaseCompiler::captureReturnedV128(const FunctionCall& call) {
   RegV128 r = RegV128(ReturnSimd128Reg);
   MOZ_ASSERT(isAvailableV128(r));
@@ -209,41 +209,30 @@ RegRef BaseCompiler::captureReturnedRef() {
 //
 // Miscellaneous.
 
-void BaseCompiler::trap(Trap t) {
-  masm.wasmTrap(t, trapSiteDesc());
+FaultingCodeRange BaseCompiler::trap(Trap t) {
+  FaultingCodeRange fcr = masm.wasmTrap(t, trapSiteDesc());
 
-  if (MOZ_LIKELY(!compilerEnv_.debugEnabled())) {
-    return;
+  if (MOZ_LIKELY(!compilerEnv_.debugEnabled()) || !fcr.isValid()) {
+    return fcr;
   }
 
   masm.propagateOOM(
-      createStackMap("BaseCompiler::trap", HasDebugFrameWithLiveRefs::Maybe));
+      createStackMap(mozilla::Some(t), fcr, HasDebugFrameWithLiveRefs::Maybe));
+  return fcr;
 }
 
-void BaseCompiler::trap(Trap t, const TrapSiteDesc& trapSite,
-                        StackMap* stackMap) {
-  masm.wasmTrap(t, trapSite);
+FaultingCodeRange BaseCompiler::trap(Trap t, const TrapSiteDesc& trapSite,
+                                     StackMap* stackMap) {
+  // TODO: ideally we should check that the resumability of `t` was taken into
+  // account when constructing `stackMap`.
+  FaultingCodeRange fcr = masm.wasmTrap(t, trapSite);
 
-  if (stackMap && !stackMaps_->add(masm.currentOffset(), stackMap)) {
+  if (stackMap && fcr.isValid() &&
+      !stackMaps_->add(fcr.resumeOffset(), stackMap)) {
     masm.setOOM();
   }
-}
 
-void BaseCompiler::cmp64Set(Assembler::Condition cond, RegI64 lhs, RegI64 rhs,
-                            RegI32 dest) {
-#if defined(JS_PUNBOX64)
-  masm.cmpPtrSet(cond, lhs.reg, rhs.reg, dest);
-#else
-  // TODO / OPTIMIZE (Bug 1316822): This is pretty branchy, we should be
-  // able to do better.
-  Label done, condTrue;
-  masm.branch64(cond, lhs, rhs, &condTrue);
-  moveImm32(0, dest);
-  masm.jump(&done);
-  masm.bind(&condTrue);
-  moveImm32(1, dest);
-  masm.bind(&done);
-#endif
+  return fcr;
 }
 
 [[nodiscard]] bool BaseCompiler::supportsRoundInstruction(RoundingMode mode) {

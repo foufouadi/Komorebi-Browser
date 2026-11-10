@@ -22,9 +22,7 @@ var gTabsPanel = {
     hiddenTabsViewTabs: "allTabsMenu-hiddenTabsView-tabs",
     hiddenAudioTabs: "allTabsMenu-allTabsView-hiddenAudio-tabs",
     groupsView: "allTabsMenu-groupsView",
-    groupsSeparator: "allTabsMenu-groupsSeparator",
     groupsSubView: "allTabsMenu-groupsSubView",
-    currentWindowHeader: "allTabsMenu-currentWindowHeader",
   },
   _initialized: false,
   _initializedElements: false,
@@ -81,17 +79,6 @@ var gTabsPanel = {
 
     this.allTabsView.addEventListener("ViewShowing", () => {
       PanelUI._ensureShortcutsShown(this.allTabsView);
-
-      // The tab groups list will disappear from the TOM once the alternate UX surfaces
-      // (toolbar and app menu) are released. These are currently gated behind the
-      // `alternateMenu` flag.
-      // See bug2021095
-      let tabGroupsAlternateMenu = Services.prefs.getBoolPref(
-        "browser.tabs.groups.alternateMenu",
-        false
-      );
-      this.groupsSeparator.hidden = tabGroupsAlternateMenu;
-      this.currentWindowHeader.hidden = tabGroupsAlternateMenu;
 
       let containersEnabled =
         Services.prefs.getBoolPref("privacy.userContext.enabled") &&
@@ -178,11 +165,10 @@ var gTabsPanel = {
       ContextualIdentityService.getPublicIdentities().forEach(identity => {
         let menuitem = document.createXULElement("toolbarbutton");
         menuitem.setAttribute("class", "subviewbutton subviewbutton-iconic");
-        if (identity.name) {
-          menuitem.setAttribute("label", identity.name);
-        } else {
-          document.l10n.setAttributes(menuitem, identity.l10nId);
-        }
+        menuitem.setAttribute(
+          "label",
+          ContextualIdentityService.getUserContextLabel(identity.userContextId)
+        );
         // The styles depend on this.
         menuitem.setAttribute("usercontextid", identity.userContextId);
         // The command handler depends on this.
@@ -191,6 +177,7 @@ var gTabsPanel = {
         menuitem.classList.add("identity-color-" + identity.color);
 
         menuitem.setAttribute("command", "Browser:NewUserContextTab");
+        menuitem.setAttribute("data-container-entrypoint", "all_tabs_menu");
 
         frag.appendChild(menuitem);
         elements.push(menuitem);

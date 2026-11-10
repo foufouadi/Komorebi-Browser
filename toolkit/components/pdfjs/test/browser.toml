@@ -4,6 +4,8 @@ support-files = [
   "file_empty_test.pdf",
   "head.js",
 ]
+# Suppress the notification in unrelated PDF viewer tests.
+prefs = ["pdfjs.featuresNotificationImpressionCount=99"]
 
 ["browser_pdfjs_aifeature_settings.js"]
 
@@ -22,9 +24,21 @@ run-if = [
   "nightly_build", # Bug 1890946
 ]
 
+["browser_pdfjs_brotli_large_window.js"]
+support-files = [
+  "file_pdfjs_brotli_large_window.pdf",
+]
+
 ["browser_pdfjs_caret_browsing_mode.js"]
 
 ["browser_pdfjs_chrome_events.js"]
+
+["browser_pdfjs_coi_attachment.js"]
+support-files = [
+  "file_pdfjs_coi_opener.html",
+  "file_pdfjs_coi_opener.html^headers^",
+  "file_pdfjs_coi_attachment.sjs",
+]
 
 ["browser_pdfjs_comment.js"]
 
@@ -41,14 +55,43 @@ support-files = [
   "file_pdfjs_signed_invalid.pdf",
 ]
 
+["browser_pdfjs_disabled_handle_internally.js"]
+
 ["browser_pdfjs_download_button.js"]
 
 ["browser_pdfjs_editing_contextmenu.js"]
+support-files = [
+  "file_pdfjs_iframe.html",
+  "file_pdfjs_middle_iframe.html",
+  "file_pdfjs_nested_iframe.html",
+  "file_pdfjs_target.html",
+]
 run-if = [
   "!headless", # the headless clipboard only recognizes unicode mime type
 ]
 
 ["browser_pdfjs_editing_telemetry.js"]
+
+["browser_pdfjs_embed_fallback.js"]
+support-files = [
+  "file_pdfjs_embed.html",
+  "file_pdfjs_embed_cross_site.html",
+  "file_pdfjs_embed_short.html",
+  "file_pdfjs_embed_referrer.html",
+  "file_pdfjs_embed_slow.html",
+  "file_pdfjs_frames.html",
+  "file_pdfjs_frames_cross_site.html",
+  "file_pdfjs_frameset.html",
+  "file_pdfjs_frameset_cross_site.html",
+  "file_pdfjs_iframe.html",
+  "file_pdfjs_iframe_cross_site.html",
+  "file_pdfjs_referrer.sjs",
+  "file_pdfjs_slow.sjs",
+]
+
+["browser_pdfjs_features_notification.js"]
+
+["browser_pdfjs_features_notification_sync.js"]
 
 ["browser_pdfjs_fill_login.js"]
 support-files = ["file_pdfjs_form.pdf"]
@@ -67,6 +110,24 @@ support-files = [
 ["browser_pdfjs_form.js"]
 support-files = ["file_pdfjs_form.pdf"]
 
+["browser_pdfjs_frame_pdfs.js"]
+support-files = [
+  "file_pdfjs_attachment.sjs",
+  "file_pdfjs_embed.html",
+  "file_pdfjs_frame_attachment.html",
+  "file_pdfjs_frame_attachment_cross_site.html",
+  "file_pdfjs_frame_sandboxed.html",
+  "file_pdfjs_frame_sandboxed_cross_site.html",
+  "file_pdfjs_frame_target.html",
+  "file_pdfjs_frame_target_cross_site.html",
+  "file_pdfjs_frames.html",
+  "file_pdfjs_frames_cross_site.html",
+  "file_pdfjs_frameset.html",
+  "file_pdfjs_frameset_cross_site.html",
+  "file_pdfjs_iframe.html",
+  "file_pdfjs_iframe_cross_site.html",
+]
+
 ["browser_pdfjs_fullscreen.js"]
 
 ["browser_pdfjs_hcm.js"]
@@ -82,18 +143,20 @@ support-files = ["file_pdfjs_jp2_image.pdf"]
 
 ["browser_pdfjs_js.js"]
 support-files = ["file_pdfjs_js.pdf"]
-skip-if = [
-  "os == 'linux' && debug && standalone", # Bug 2028655
-  "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && debug && nova", # Bug 2057889
-  "os == 'win' && os_version == '11.26200' && asan", # Bug 2019745
-  "tsan",
-]
 
 ["browser_pdfjs_load_telemetry.js"]
 
 ["browser_pdfjs_main.js"]
 
+["browser_pdfjs_max_canvas_dim.js"]
+
 ["browser_pdfjs_minimum_font_size.js"]
+
+["browser_pdfjs_mlguess_validation.js"]
+support-files = ["file_pdf_download_link.html"]
+
+["browser_pdfjs_multipart_response.js"]
+support-files = ["pdf_multipart.sjs"]
 
 ["browser_pdfjs_navigation.js"]
 
@@ -120,7 +183,15 @@ support-files = ["file_pdfjs_numbered_pages.pdf"]
 ["browser_pdfjs_pages_contextmenu.js"]
 support-files = ["file_pdfjs_numbered_pages.pdf"]
 
+["browser_pdfjs_preloaded_worker.js"]
+support-files = [
+  "pdf_empty.sjs",
+  "pdf_truncated.sjs",
+]
+
 ["browser_pdfjs_print_enabled.js"]
+
+["browser_pdfjs_printtopdf.js"]
 
 ["browser_pdfjs_properties.js"]
 
@@ -140,6 +211,7 @@ support-files = [
 support-files = [
   "!/toolkit/content/tests/browser/common/mockTransfer.js",
   "file_pdf_download_link.html",
+  "file_pdfjs_form.pdf",
 ]
 
 ["browser_pdfjs_savedialog.js"]
@@ -149,6 +221,12 @@ support-files = [
 ["browser_pdfjs_signature_storage.js"]
 
 ["browser_pdfjs_signature_telemetry.js"]
+
+["browser_pdfjs_slow_script.js"]
+support-files = [
+  "file_pdfjs_slow_script.html",
+  "file_pdfjs_slow_script.pdf",
+]
 
 ["browser_pdfjs_stamp_telemetry.js"]
 support-files = ["moz.png"]
@@ -163,6 +241,8 @@ support-files = [
 ["browser_pdfjs_unload_dialog.js"]
 
 ["browser_pdfjs_update_preferences.js"]
+
+["browser_pdfjs_view_certificate_window.js"]
 
 ["browser_pdfjs_views.js"]
 

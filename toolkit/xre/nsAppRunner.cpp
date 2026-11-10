@@ -26,6 +26,8 @@
 #include "mozilla/ProcessType.h"
 #include "mozilla/ResultExtensions.h"
 #include "mozilla/RuntimeExceptionModule.h"
+#include "mozilla/SHA1.h"
+#include "mozilla/FileUtils.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/StaticPrefs_browser.h"
 #include "mozilla/StaticPrefs_fission.h"
@@ -60,6 +62,7 @@
 #  include "MacApplicationDelegate.h"
 #  include "MacAutoreleasePool.h"
 #  include "MacRunFromDmgUtils.h"
+#  include "ASWebAuthSessionHandler.h"
 // these are needed for sysctl
 #  include <sys/types.h>
 #  include <sys/sysctl.h>
@@ -111,13 +114,12 @@
 #ifdef XP_WIN
 #  include "nsIWinAppHelper.h"
 #  include <windows.h>
+#  include <userenv.h>
 #  include <intrin.h>
 #  include <math.h>
 #  include "cairo/cairo-features.h"
-#  include "detect_win32k_conflicts.h"
 #  include "mozilla/PreXULSkeletonUI.h"
 #  include "mozilla/DllPrefetchExperimentRegistryInfo.h"
-#  include "mozilla/WindowsBCryptInitialization.h"
 #  include "mozilla/WindowsDllBlocklist.h"
 #  include "mozilla/WindowsMsctfInitialization.h"
 #  include "mozilla/WindowsOleAut32Initialization.h"
@@ -153,6 +155,7 @@
 #  endif
 #endif
 
+#include "json/json.h"
 #include "nsCRT.h"
 #include "nsCOMPtr.h"
 #include "nsDirectoryServiceDefs.h"
@@ -173,10 +176,16 @@
 
 #include "nsINIParser.h"
 #include "mozilla/Omnijar.h"
+#include "nsZipArchive.h"
+#include "nsContentUtils.h"
+#include "mozilla/JSONStringWriteFuncs.h"
+#include "mozilla/ChromeScriptPath.h"
+#include "mozilla/ErrorNames.h"
 #include "mozilla/StartupTimeline.h"
 #include "mozilla/LateWriteChecks.h"
 
 #include <stdlib.h>
+#include <string_view>
 
 #ifdef XP_UNIX
 #  include <errno.h>
@@ -211,6 +220,12 @@
 
 #if defined(XP_MACOSX)
 #  include <Carbon/Carbon.h>
+#  include <IOKit/IOKitLib.h>
+#endif
+
+#if defined(XP_LINUX)
+#  include <fstream>
+#  include <string>
 #endif
 
 #ifdef DEBUG
@@ -222,6 +237,9 @@
 #include "nsICrashReporter.h"
 #include "nsIPrefService.h"
 #include "nsIMemoryInfoDumper.h"
+#include "js/ErrorReport.h"
+#include "js/Exception.h"
+#include "js/Wrapper.h"
 #include "js/String.h"
 #if defined(XP_LINUX) && !defined(ANDROID)
 #  include "mozilla/widget/LSBUtils.h"
@@ -280,6 +298,10 @@ static const char kPrefHealthReportUploadEnabled[] =
     "datareporting.healthreport.uploadEnabled";
 #endif  // defined(MOZ_BLOCK_PROFILE_DOWNGRADE) || defined(MOZ_LAUNCHER_PROCESS)
         // || defined(MOZ_DEFAULT_BROWSER_AGENT)
+#ifdef MOZ_BLOCK_PROFILE_DOWNGRADE
+// Holds a hash of the machine ID. Never send this in telemetry.
+static const char kPrefMachineId[] = "toolkit.profiles.machineID";
+#endif
 #if defined(MOZ_DEFAULT_BROWSER_AGENT)
 static const char kPrefDefaultAgentEnabled[] = "default-browser-agent.enabled";
 
@@ -389,15 +411,6 @@ using mozilla::dom::quota::QuotaManager;
 using mozilla::intl::LocaleService;
 using mozilla::scache::StartupCache;
 
-struct AppRunnerTelemFlags {
-  uint8_t isBackgroundTaskModeRequested : 1;
-  uint8_t isBackgroundTaskMode : 1;
-  uint8_t hasRestartPidParameter : 1;
-  uint8_t isRestartPidNotInteger : 1;
-  uint8_t isRestartPidWaitTimeout : 1;
-  uint8_t isRestartPidFailure : 1;
-};
-
 #ifndef XP_WIN
 // Save the given word to the specified environment variable.
 static void MOZ_NEVER_INLINE SaveWordToEnv(const char* name,
@@ -485,7 +498,8 @@ bool IsWaylandEnabled() { return false; }
  * @param fmt
  *        printf-style format string followed by arguments.
  */
-static MOZ_FORMAT_PRINTF(2, 3) void Output(bool isError, const char* fmt, ...) {
+static MOZ_FORMAT_PRINTF(2, 3) void Output([[maybe_unused]] bool isError,
+                                           const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
 
@@ -548,7 +562,6 @@ static ArgResult CheckArgExists(const char* aArg) {
 }
 
 bool gSafeMode = false;
-bool gFxREmbedded = false;
 
 enum E10sStatus {
   kE10sEnabledByDefault,
@@ -1233,7 +1246,7 @@ nsXULAppInfo::GetWidgetToolkit(nsACString& aResult) {
                     static_cast<int>(GeckoProcessType_##enum_name),           \
                 "GeckoProcessType in nsXULAppAPI.h not synchronized with "    \
                 "nsIXULRuntime.idl");
-#include "mozilla/GeckoProcessTypes.h"
+#include "mozilla/GeckoProcessTypes.inc"
 #undef GECKO_PROCESS_TYPE
 
 // .. and ensure that that is all of them:
@@ -1271,9 +1284,9 @@ nsXULAppInfo::GetUniqueProcessID(uint64_t* aResult) {
 NS_IMETHODIMP
 nsXULAppInfo::GetRemoteType(nsACString& aRemoteType) {
   if (XRE_IsContentProcess()) {
-    aRemoteType = ContentChild::GetSingleton()->GetRemoteType();
+    aRemoteType = ContentChild::GetSingleton()->GetRemoteType().Stringify();
   } else {
-    aRemoteType = NOT_REMOTE_TYPE;
+    aRemoteType = dom::RemoteType::NotRemote().Stringify();
   }
 
   return NS_OK;
@@ -1662,7 +1675,7 @@ nsXULAppInfo::GetIsWayland(bool* aResult) {
 }
 
 NS_IMETHODIMP
-nsXULAppInfo::GetProcessStartupShortcut(nsAString& aShortcut) {
+nsXULAppInfo::GetProcessStartupShortcut([[maybe_unused]] nsAString& aShortcut) {
 #if defined(XP_WIN)
   if (XRE_IsParentProcess()) {
     aShortcut.Assign(gProcessStartupShortcut);
@@ -1680,7 +1693,7 @@ static Maybe<LauncherRegistryInfo::EnabledState> gLauncherProcessState;
 #endif  // defined(XP_WIN) && defined(MOZ_LAUNCHER_PROCESS)
 
 NS_IMETHODIMP
-nsXULAppInfo::GetLauncherProcessState(uint32_t* aResult) {
+nsXULAppInfo::GetLauncherProcessState([[maybe_unused]] uint32_t* aResult) {
 #if defined(XP_WIN) && defined(MOZ_LAUNCHER_PROCESS)
   SetupLauncherProcessPref();
 
@@ -1934,12 +1947,7 @@ nsXULAppInfo::AppendAppNotesToCrashReport(const nsACString& data) {
 }
 
 NS_IMETHODIMP
-nsXULAppInfo::RegisterAppMemory(uint64_t pointer, uint64_t len) {
-  return CrashReporter::RegisterAppMemory((void*)pointer, len);
-}
-
-NS_IMETHODIMP
-nsXULAppInfo::WriteMinidumpForException(void* aExceptionInfo) {
+nsXULAppInfo::WriteMinidumpForException([[maybe_unused]] void* aExceptionInfo) {
 #ifdef XP_WIN
   return CrashReporter::WriteMinidumpForException(
       static_cast<EXCEPTION_POINTERS*>(aExceptionInfo));
@@ -1949,7 +1957,8 @@ nsXULAppInfo::WriteMinidumpForException(void* aExceptionInfo) {
 }
 
 NS_IMETHODIMP
-nsXULAppInfo::AppendObjCExceptionInfoToAppNotes(void* aException) {
+nsXULAppInfo::AppendObjCExceptionInfoToAppNotes(
+    [[maybe_unused]] void* aException) {
 #ifdef XP_MACOSX
   return CrashReporter::AppendObjCExceptionInfoToAppNotes(aException);
 #else
@@ -2738,8 +2747,8 @@ nsresult LaunchChild(bool aBlankCommandLine, bool aTryExec) {
   // immediately returns non-zero then we may mask that by returning a zero
   // exit status.
 
-#    endif  // WP_WIN
-#  endif    // WP_MACOSX
+#    endif  // XP_WIN
+#  endif    // XP_MACOSX
 #endif      // MOZ_WIDGET_ANDROID
 
   return NS_ERROR_LAUNCHED_CHILD_PROCESS;
@@ -2922,11 +2931,10 @@ static nsresult ProfileEncryptionMismatchDialog(const char* aMsgKey,
 #endif  // MOZ_WIDGET_ANDROID
 }
 
-static ReturnAbortOnError ProfileLockedDialog(nsIFile* aProfileDir,
-                                              nsIFile* aProfileLocalDir,
-                                              nsIProfileUnlocker* aUnlocker,
-                                              nsINativeAppSupport* aNative,
-                                              nsIProfileLock** aResult) {
+static ReturnAbortOnError ProfileLockedDialog(
+    nsIFile* aProfileDir, nsIFile* aProfileLocalDir,
+    nsIProfileUnlocker* aUnlocker, nsINativeAppSupport* aNative,
+    [[maybe_unused]] nsIProfileLock** aResult) {
   nsresult rv;
 
   // We aren't going to start this instance so we can unblock other instances
@@ -3043,9 +3051,11 @@ static ReturnAbortOnError ProfileLockedDialog(nsIFile* aProfileDir,
   }
 }
 
+MOZ_CAN_RUN_SCRIPT
 static ReturnAbortOnError ShowProfileDialog(
-    nsIToolkitProfileService* aProfileSvc, nsINativeAppSupport* aNative,
-    const char* aDialogURL, const char* aTelemetryEnvVar) {
+    [[maybe_unused]] nsIToolkitProfileService* aProfileSvc,
+    nsINativeAppSupport* aNative, const char* aDialogURL,
+    const char* aTelemetryEnvVar) {
   nsresult rv;
 
   nsCOMPtr<nsIFile> profD, profLD;
@@ -3097,7 +3107,7 @@ static ReturnAbortOnError ShowProfileDialog(
       }
       nsCOMPtr<mozIDOMWindowProxy> newWindow;
       rv = windowWatcher->OpenWindow(nullptr, nsDependentCString(aDialogURL),
-                                     "_blank"_ns, features, ioParamBlock,
+                                     u"_blank"_ns, features, ioParamBlock,
                                      getter_AddRefs(newWindow));
 
       NS_ENSURE_SUCCESS_LOG(rv, rv);
@@ -3170,6 +3180,7 @@ static ReturnAbortOnError ShowProfileDialog(
   return LaunchChild(false, true);
 }
 
+MOZ_CAN_RUN_SCRIPT
 static ReturnAbortOnError ShowProfileManager(
     nsIToolkitProfileService* aProfileSvc, nsINativeAppSupport* aNative) {
   static const char kProfileManagerURL[] =
@@ -3180,6 +3191,7 @@ static ReturnAbortOnError ShowProfileManager(
                            kTelemetryEnv);
 }
 
+MOZ_CAN_RUN_SCRIPT
 static ReturnAbortOnError ShowProfileSelector(
     nsIToolkitProfileService* aProfileSvc, nsINativeAppSupport* aNative) {
   static const char kProfileSelectorURL[] = "about:profilemanager";
@@ -3187,6 +3199,17 @@ static ReturnAbortOnError ShowProfileSelector(
 
   return ShowProfileDialog(aProfileSvc, aNative, kProfileSelectorURL,
                            kTelemetryEnv);
+}
+
+// Both profile dialogs relaunch Firefox to start the chosen profile, and macOS
+// hands an ASWebAuthenticationSession request to the process it launched rather
+// than to the relaunched one, so showing a dialog would drop the request.
+static bool ShouldSkipProfileDialogForWebAuth() {
+#if defined(XP_MACOSX)
+  return WasLaunchedByAuthenticationServices();
+#else
+  return false;
+#endif
 }
 
 static bool gDoMigration = false;
@@ -3234,6 +3257,7 @@ static nsresult LockProfile(nsINativeAppSupport* aNative, nsIFile* aRootDir,
 // 4) use the default profile, if there is one
 // 5) if there are *no* profiles, set up profile-migration
 // 6) display the profile-manager UI
+MOZ_CAN_RUN_SCRIPT
 static nsresult SelectProfile(nsToolkitProfileService* aProfileSvc,
                               nsINativeAppSupport* aNative, nsIFile** aRootDir,
                               nsIFile** aLocalDir, nsIToolkitProfile** aProfile,
@@ -3329,52 +3353,192 @@ struct FileWriteFunc final : public JSONWriteFunc {
   }
 };
 
-static void SubmitDowngradeTelemetry(const nsCString& aLastVersion,
-                                     bool aHasSync, int32_t aButton,
-                                     AppRunnerTelemFlags appRunnerTelemFlags) {
-  nsCOMPtr<nsIPrefService> prefSvc =
-      do_GetService("@mozilla.org/preferences-service;1");
-  NS_ENSURE_TRUE_VOID(prefSvc);
-
-  nsCOMPtr<nsIPrefBranch> prefBranch = do_QueryInterface(prefSvc);
-  NS_ENSURE_TRUE_VOID(prefBranch);
-
-  bool enabled;
-  nsresult rv =
-      prefBranch->GetBoolPref(kPrefHealthReportUploadEnabled, &enabled);
-  NS_ENSURE_SUCCESS_VOID(rv);
-  if (!enabled) {
-    return;
+// Parses a JSON string and returns the raw install_timestamp value, or
+// Nothing() if the JSON is malformed or lacks the property.
+static mozilla::Maybe<uint64_t> ParseInstallTimestamp(
+    std::string_view aUtf8Json) {
+  Json::Value root;
+  Json::Reader reader;
+  if (!reader.parse(aUtf8Json.data(), aUtf8Json.data() + aUtf8Json.size(),
+                    root) ||
+      !root.isMember("install_timestamp")) {
+    return mozilla::Nothing();
   }
 
-  nsCString server;
-  rv = prefBranch->GetCharPref("toolkit.telemetry.server", server);
-  NS_ENSURE_SUCCESS_VOID(rv);
+  std::string tsStr = root["install_timestamp"].asString();
+  char* end = nullptr;
+  uint64_t val = strtoull(tsStr.c_str(), &end, 10);
+  if (!end || *end != '\0') {
+    return mozilla::Nothing();
+  }
+  return mozilla::Some(val);
+}
+
+#  ifndef XP_MACOSX
+// Reads aJsonFile and returns the raw install_timestamp value, or Nothing() if
+// the file is absent, unreadable, or lacks the property.
+static mozilla::Maybe<uint64_t> ReadInstallTimestamp(nsIFile* aJsonFile,
+                                                     bool aIsUTF16LE) {
+  FILE* raw = nullptr;
+  if (NS_FAILED(aJsonFile->OpenANSIFileDesc("rb", &raw)) || !raw) {
+    return mozilla::Nothing();
+  }
+  ScopedCloseFile f(raw);
+
+  fseek(f.get(), 0, SEEK_END);
+  auto len = ftell(f.get());
+  if (len <= 0) {
+    return mozilla::Nothing();
+  }
+  rewind(f.get());
+
+  auto buf = std::make_unique<uint8_t[]>(len);
+  if (fread(buf.get(), 1, len, f.get()) != (size_t)len) {
+    return mozilla::Nothing();
+  }
+
+  nsAutoCString converted;
+  std::string_view utf8View;
+  if (aIsUTF16LE) {
+#    if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    const char16_t* chars = reinterpret_cast<const char16_t*>(buf.get());
+    uint32_t charLen = len / 2;
+    CopyUTF16toUTF8(Span(chars, charLen), converted);
+    utf8View = std::string_view(converted.get(), converted.Length());
+#    else
+    MOZ_ASSERT_UNREACHABLE(
+        "UTF-16LE reading not supported on big-endian architectures");
+    return mozilla::Nothing();
+#    endif
+  } else {
+    utf8View = std::string_view(reinterpret_cast<const char*>(buf.get()), len);
+  }
+
+  return ParseInstallTimestamp(utf8View);
+}
+#  endif  // !XP_MACOSX
+
+#  if defined(XP_LINUX)
+static nsresult ReadLinuxMachineId(const char* aPath, nsACString& aMachineId) {
+  std::ifstream input(aPath);
+  if (!input.is_open()) {
+    return NS_ERROR_FAILURE;
+  }
+  std::string line;
+  if (!std::getline(input, line) || line.empty()) {
+    return NS_ERROR_FAILURE;
+  }
+  aMachineId.Assign(line.c_str(), line.length());
+  return NS_OK;
+}
+#  endif
+
+static nsresult GetRawMachineId(nsACString& aMachineId) {
+#  if defined(XP_WIN)
+  wchar_t guid[64];
+  DWORD size = sizeof(guid);
+  if (::RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Cryptography",
+                     L"MachineGuid", RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY,
+                     nullptr, guid, &size) != ERROR_SUCCESS) {
+    return NS_ERROR_FAILURE;
+  }
+  CopyUTF16toUTF8(nsDependentString(guid), aMachineId);
+  return NS_OK;
+#  elif defined(XP_MACOSX)
+  io_service_t platformExpert = IOServiceGetMatchingService(
+      MACH_PORT_NULL, IOServiceMatching("IOPlatformExpertDevice"));
+  if (!platformExpert) {
+    return NS_ERROR_FAILURE;
+  }
+
+  CFTypeRef uuid = IORegistryEntryCreateCFProperty(
+      platformExpert, CFSTR(kIOPlatformUUIDKey), kCFAllocatorDefault, 0);
+  IOObjectRelease(platformExpert);
+  if (!uuid) {
+    return NS_ERROR_FAILURE;
+  }
+  auto releaseUuid = MakeScopeExit([&] { CFRelease(uuid); });
+
+  char buffer[128];
+  if (CFGetTypeID(uuid) != CFStringGetTypeID() ||
+      !CFStringGetCString(static_cast<CFStringRef>(uuid), buffer,
+                          sizeof(buffer), kCFStringEncodingUTF8) ||
+      !buffer[0]) {
+    return NS_ERROR_FAILURE;
+  }
+  aMachineId.Assign(buffer);
+  return NS_OK;
+#  elif defined(XP_LINUX)
+  if (NS_SUCCEEDED(ReadLinuxMachineId("/etc/machine-id", aMachineId))) {
+    return NS_OK;
+  }
+  return ReadLinuxMachineId("/var/lib/dbus/machine-id", aMachineId);
+#  else
+  return NS_ERROR_NOT_AVAILABLE;
+#  endif
+}
+
+/**
+ * Returns the hash of a unique identifier for the current device. As a unique
+ * identifier this must not be included in telemetry data without passing a
+ * sensitive data review.
+ *
+ * We use SHA1 as the hashing function as it is available without starting NSS
+ * and we only need to use it for comparison purposes.
+ */
+nsresult GetMachineId(nsACString& aMachineId) {
+  nsAutoCString rawId;
+  nsresult rv = GetRawMachineId(rawId);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  SHA1Sum sha1;
+  sha1.update(kPrefMachineId, sizeof(kPrefMachineId) - 1);
+  sha1.update(rawId.BeginReading(), rawId.Length());
+  SHA1Sum::Hash hash;
+  sha1.finish(hash);
+
+  aMachineId.Truncate();
+  for (uint8_t byte : hash) {
+    aMachineId.AppendPrintf("%02x", byte);
+  }
+  return NS_OK;
+}
+
+static void StoreMachineId() {
+  nsAutoCString machineId;
+  if (NS_SUCCEEDED(GetMachineId(machineId))) {
+    Preferences::SetCString(kPrefMachineId, machineId);
+  } else {
+    Preferences::ClearUser(kPrefMachineId);
+  }
+}
+
+Maybe<mozilla::PathString> GenerateDowngradeTelemetry(
+    const nsACString& aPingId, const nsCString& aLastVersion, bool aHasSync,
+    int32_t aButton, const nsACString& aChannel,
+    const nsACString& aProfileSelectionReason,
+    mozilla::Maybe<PRTime> aReplacedLockTime, bool aIsDifferentInstall) {
+  nsCOMPtr<nsIPrefService> prefSvc =
+      do_GetService("@mozilla.org/preferences-service;1");
+  NS_ENSURE_TRUE(prefSvc, Nothing());
+
+  nsCOMPtr<nsIPrefBranch> prefBranch = do_QueryInterface(prefSvc);
+  NS_ENSURE_TRUE(prefBranch, Nothing());
 
   nsCString clientId;
-  rv = prefBranch->GetCharPref("toolkit.telemetry.cachedClientID", clientId);
-  NS_ENSURE_SUCCESS_VOID(rv);
+  nsresult rv =
+      prefBranch->GetCharPref("toolkit.telemetry.cachedClientID", clientId);
+  NS_ENSURE_SUCCESS(rv, Nothing());
 
   nsCString profileGroupId;
   rv = prefBranch->GetCharPref("toolkit.telemetry.cachedProfileGroupID",
                                profileGroupId);
-  NS_ENSURE_SUCCESS_VOID(rv);
-
-  rv = prefSvc->GetDefaultBranch(nullptr, getter_AddRefs(prefBranch));
-  NS_ENSURE_SUCCESS_VOID(rv);
-
-  nsCString channel("default");
-  rv = prefBranch->GetCharPref("app.update.channel", channel);
-  NS_ENSURE_SUCCESS_VOID(rv);
-
-  nsID uuid;
-  rv = nsID::GenerateUUIDInPlace(uuid);
-  NS_ENSURE_SUCCESS_VOID(rv);
+  NS_ENSURE_SUCCESS(rv, Nothing());
 
   nsCString arch("null");
   nsCOMPtr<nsIPropertyBag2> sysInfo =
       do_GetService("@mozilla.org/system-info;1");
-  NS_ENSURE_TRUE_VOID(sysInfo);
+  NS_ENSURE_TRUE(sysInfo, Nothing());
   sysInfo->GetPropertyAsACString(u"arch"_ns, arch);
 
   bool isMSIX = false;
@@ -3384,70 +3548,139 @@ static void SubmitDowngradeTelemetry(const nsCString& aLastVersion,
     // Don't early return.
     NS_ERROR("Failed to get property: hasWinPackageId");
   }
+
+  const char* profileType = nullptr;
+  DWORD profileFlags = 0;
+  if (::GetProfileType(&profileFlags)) {
+    if (profileFlags & PT_TEMPORARY) {
+      profileType = "temporary";
+    } else if (profileFlags & PT_MANDATORY) {
+      profileType = "mandatory";
+    } else if (profileFlags & (PT_ROAMING | PT_ROAMING_PREEXISTING)) {
+      profileType = "roaming";
+    } else {
+      profileType = "normal";
+    }
+  }
 #  endif
 
-  time_t now;
-  time(&now);
-  char date[sizeof "YYYY-MM-DDThh:mm:ss.000Z"];
-  strftime(date, sizeof date, "%FT%T.000Z", gmtime(&now));
+  mozilla::Maybe<bool> maybeIsDifferentMachine;
+  nsCString lastMachineId;
+  if (NS_SUCCEEDED(prefBranch->GetCharPref(kPrefMachineId, lastMachineId))) {
+    nsAutoCString machineId;
+    if (NS_SUCCEEDED(GetMachineId(machineId))) {
+      maybeIsDifferentMachine = mozilla::Some(lastMachineId != machineId);
+    }
+  }
 
-  NSID_TrimBracketsASCII pingId(uuid);
+  mozilla::Maybe<PRTime> maybeInstallTime;
+  mozilla::Maybe<PRTime> maybeUpdateTime;
+  nsCOMPtr<nsIFile> greDir;
+  if (NS_SUCCEEDED(
+          NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(greDir)))) {
+#  ifdef XP_WIN
+    // installation_telemetry.json uses a Windows FILETIME (100ns intervals
+    // since Jan 1, 1601 UTC).
+    nsCOMPtr<nsIFile> installTelemetry;
+    if (NS_SUCCEEDED(greDir->Clone(getter_AddRefs(installTelemetry))) &&
+        NS_SUCCEEDED(
+            installTelemetry->Append(u"installation_telemetry.json"_ns))) {
+      if (auto filetime =
+              ReadInstallTimestamp(installTelemetry, /* aIsUTF16LE */ true)) {
+        constexpr uint64_t kEpochOffset = 116444736000000000ULL;
+        if (*filetime > kEpochOffset) {
+          // The offset converts to an epoch of 1970, divide by 10 to convert
+          // from 100ns to usec
+          maybeInstallTime =
+              mozilla::Some(PRTime((*filetime - kEpochOffset) / 10));
+        }
+      }
+    }
+#  endif
+
+#  ifdef XP_MACOSX
+    // GreD is <app>.app/Contents/Resources; go up two levels to the .app
+    // bundle directory where the updater stores the xattr.
+    maybeUpdateTime = [&]() -> mozilla::Maybe<PRTime> {
+      nsCOMPtr<nsIFile> contentsDir;
+      if (NS_FAILED(greDir->GetParent(getter_AddRefs(contentsDir))) ||
+          !contentsDir) {
+        return mozilla::Nothing();
+      }
+      nsCOMPtr<nsIFile> appBundle;
+      if (NS_FAILED(contentsDir->GetParent(getter_AddRefs(appBundle))) ||
+          !appBundle) {
+        return mozilla::Nothing();
+      }
+      nsCOMPtr<nsILocalFileMac> macFile = do_QueryInterface(appBundle);
+      if (!macFile) {
+        return mozilla::Nothing();
+      }
+      nsTArray<uint8_t> attrValue;
+      if (NS_FAILED(macFile->GetXAttr("org.mozilla.update-telemetry"_ns,
+                                      attrValue))) {
+        return mozilla::Nothing();
+      }
+      auto msTime = ParseInstallTimestamp(
+          std::string_view(reinterpret_cast<const char*>(attrValue.Elements()),
+                           attrValue.Length()));
+      if (!msTime) {
+        return mozilla::Nothing();
+      }
+      return mozilla::Some(PRTime(int64_t(*msTime) * PR_USEC_PER_MSEC));
+    }();
+#  else
+    // update_telemetry.json uses a Unix timestamp in milliseconds.
+    nsCOMPtr<nsIFile> updateTelemetry;
+    if (NS_SUCCEEDED(greDir->Clone(getter_AddRefs(updateTelemetry))) &&
+        NS_SUCCEEDED(updateTelemetry->Append(u"update_telemetry.json"_ns))) {
+      if (auto msTime =
+              ReadInstallTimestamp(updateTelemetry, /* aIsUTF16LE */ false)) {
+        maybeUpdateTime =
+            mozilla::Some(PRTime(int64_t(*msTime) * PR_USEC_PER_MSEC));
+      }
+    }
+#  endif
+  }
+
+  PRTime nowUsec = PR_Now();
+  time_t nowTime = time_t(nowUsec / PR_USEC_PER_SEC);
+  char date[sizeof "YYYY-MM-DDThh:mm:ss.000Z"];
+  strftime(date, sizeof date, "%FT%T.000Z", gmtime(&nowTime));
+
   constexpr auto pingType = "downgrade"_ns;
 
   int32_t pos = aLastVersion.Find("_");
   if (pos == kNotFound) {
-    return;
+    return Nothing();
   }
 
   const nsDependentCSubstring lastVersion = Substring(aLastVersion, 0, pos);
   const nsDependentCSubstring lastBuildId =
       Substring(aLastVersion, pos + 1, 14);
 
-  nsPrintfCString url("%s/submit/telemetry/%s/%s/%s/%s/%s/%s?v=%d",
-                      server.get(), PromiseFlatCString(pingId).get(),
-                      pingType.get(), (const char*)gAppData->name,
-                      (const char*)gAppData->version, channel.get(),
-                      (const char*)gAppData->buildID,
-                      TELEMETRY_PING_FORMAT_VERSION);
-
   nsCOMPtr<nsIFile> pingFile;
   rv = NS_GetSpecialDirectory(XRE_USER_APP_DATA_DIR, getter_AddRefs(pingFile));
-  NS_ENSURE_SUCCESS_VOID(rv);
+  NS_ENSURE_SUCCESS(rv, Nothing());
   rv = pingFile->Append(u"Pending Pings"_ns);
-  NS_ENSURE_SUCCESS_VOID(rv);
+  NS_ENSURE_SUCCESS(rv, Nothing());
   rv = pingFile->Create(nsIFile::DIRECTORY_TYPE, 0755);
   if (NS_FAILED(rv) && rv != NS_ERROR_FILE_ALREADY_EXISTS) {
-    return;
+    return Nothing();
   }
-  rv = pingFile->Append(NS_ConvertUTF8toUTF16(pingId));
-  NS_ENSURE_SUCCESS_VOID(rv);
-
-  nsCOMPtr<nsIFile> pingSender;
-  rv = NS_GetSpecialDirectory(NS_GRE_BIN_DIR, getter_AddRefs(pingSender));
-  NS_ENSURE_SUCCESS_VOID(rv);
-#  ifdef XP_WIN
-  pingSender->Append(u"pingsender.exe"_ns);
-#  else
-  pingSender->Append(u"pingsender"_ns);
-#  endif
-
-  bool exists;
-  rv = pingSender->Exists(&exists);
-  NS_ENSURE_SUCCESS_VOID(rv);
-  if (!exists) {
-    return;
-  }
+  rv = pingFile->Append(NS_ConvertUTF8toUTF16(aPingId));
+  NS_ENSURE_SUCCESS(rv, Nothing());
 
   FILE* file;
   rv = pingFile->OpenANSIFileDesc("w", &file);
-  NS_ENSURE_SUCCESS_VOID(rv);
+  NS_ENSURE_SUCCESS(rv, Nothing());
 
-  JSONWriter w(MakeUnique<FileWriteFunc>(file));
+  JSONWriter w(std::make_unique<FileWriteFunc>(file));
   w.Start();
   {
     w.StringProperty("type",
                      Span<const char>(pingType.Data(), pingType.Length()));
-    w.StringProperty("id", PromiseFlatCString(pingId));
+    w.StringProperty("id", PromiseFlatCString(aPingId));
     w.StringProperty("creationDate", MakeStringSpan(date));
     w.IntProperty("version", TELEMETRY_PING_FORMAT_VERSION);
     w.StringProperty("clientId", clientId);
@@ -3473,7 +3706,7 @@ static void SubmitDowngradeTelemetry(const nsCString& aLastVersion,
 #  else
       w.StringProperty("xpcomAbi", "unknown");
 #  endif
-      w.StringProperty("channel", channel);
+      w.StringProperty("channel", PromiseFlatCString(aChannel));
     }
     w.EndObject();
     w.StartObjectProperty("payload");
@@ -3483,26 +3716,128 @@ static void SubmitDowngradeTelemetry(const nsCString& aLastVersion,
       w.BoolProperty("hasSync", aHasSync);
       w.IntProperty("button", aButton);
       w.BoolProperty("isMSIX", isMSIX);
-      w.BoolProperty("isBackgroundTaskModeRequested",
-                     appRunnerTelemFlags.isBackgroundTaskModeRequested);
-      w.BoolProperty("isBackgroundTaskMode",
-                     appRunnerTelemFlags.isBackgroundTaskMode);
-      w.BoolProperty("hasRestartPidParameter",
-                     appRunnerTelemFlags.hasRestartPidParameter);
-      w.BoolProperty("isRestartPidNotInteger",
-                     appRunnerTelemFlags.isRestartPidNotInteger);
-      w.BoolProperty("isRestartPidWaitTimeout",
-                     appRunnerTelemFlags.isRestartPidWaitTimeout);
-      w.BoolProperty("isRestartPidFailure",
-                     appRunnerTelemFlags.isRestartPidFailure);
+      w.StringProperty("profileSelectionReason",
+                       PromiseFlatCString(aProfileSelectionReason));
+
+      w.BoolProperty("isDifferentInstall", aIsDifferentInstall);
+
+      if (maybeIsDifferentMachine) {
+        w.BoolProperty("isDifferentMachine", *maybeIsDifferentMachine);
+      }
+
+#  ifdef XP_WIN
+      if (profileType) {
+        w.StringProperty("profileType", MakeStringSpan(profileType));
+      }
+#  endif
+
+      if (aReplacedLockTime) {
+        // aReplacedLockTime is in milliseconds.
+        PRTime lockTimeUsec = *aReplacedLockTime * PR_USEC_PER_MSEC;
+        constexpr int64_t kUsecsPerDay =
+            int64_t(PR_USEC_PER_SEC) * 60 * 60 * 24;
+        int64_t elapsedUsec = nowUsec - lockTimeUsec;
+        if (elapsedUsec >= 0) {
+          w.IntProperty("daysSinceLock", elapsedUsec / kUsecsPerDay);
+        }
+        if (maybeInstallTime) {
+          w.BoolProperty("isNewInstall", *maybeInstallTime > lockTimeUsec);
+        }
+        if (maybeUpdateTime) {
+          w.BoolProperty("isNewUpdate", *maybeUpdateTime > lockTimeUsec);
+        }
+      }
     }
     w.EndObject();
   }
   w.End();
 
   fclose(file);
+  return Some(pingFile->NativePath());
+}
 
-  PathString filePath = pingFile->NativePath();
+bool BuildDowngradePingUrl(const nsACString& aPingId,
+                           const nsACString& aChannel, nsACString& aUrlOut) {
+  nsCOMPtr<nsIPrefService> prefSvc =
+      do_GetService("@mozilla.org/preferences-service;1");
+  NS_ENSURE_TRUE(prefSvc, false);
+
+  nsCOMPtr<nsIPrefBranch> prefBranch = do_QueryInterface(prefSvc);
+  NS_ENSURE_TRUE(prefBranch, false);
+
+  nsCString server;
+  nsresult rv = prefBranch->GetCharPref("toolkit.telemetry.server", server);
+  NS_ENSURE_SUCCESS(rv, false);
+
+  aUrlOut = nsPrintfCString(
+      "%s/submit/telemetry/%s/%s/%s/%s/%s/%s?v=%d", server.get(),
+      PromiseFlatCString(aPingId).get(), "downgrade",
+      (const char*)gAppData->name, (const char*)gAppData->version,
+      PromiseFlatCString(aChannel).get(), (const char*)gAppData->buildID,
+      TELEMETRY_PING_FORMAT_VERSION);
+  return true;
+}
+
+static void SubmitDowngradeTelemetry(const nsACString& aProfileSelectionReason,
+                                     mozilla::Maybe<PRTime> aReplacedLockTime,
+                                     const nsCString& aLastVersion,
+                                     bool aHasSync, int32_t aButton,
+                                     bool aIsDifferentInstall) {
+  nsCOMPtr<nsIPrefService> prefSvc =
+      do_GetService("@mozilla.org/preferences-service;1");
+  NS_ENSURE_TRUE_VOID(prefSvc);
+
+  nsCOMPtr<nsIPrefBranch> prefBranch = do_QueryInterface(prefSvc);
+  NS_ENSURE_TRUE_VOID(prefBranch);
+
+  bool enabled;
+  nsresult rv =
+      prefBranch->GetBoolPref(kPrefHealthReportUploadEnabled, &enabled);
+  NS_ENSURE_SUCCESS_VOID(rv);
+  if (!enabled) {
+    return;
+  }
+
+  nsCOMPtr<nsIFile> pingSender;
+  rv = NS_GetSpecialDirectory(NS_GRE_BIN_DIR, getter_AddRefs(pingSender));
+  NS_ENSURE_SUCCESS_VOID(rv);
+#  ifdef XP_WIN
+  pingSender->Append(u"pingsender.exe"_ns);
+#  else
+  pingSender->Append(u"pingsender"_ns);
+#  endif
+
+  bool exists;
+  rv = pingSender->Exists(&exists);
+  NS_ENSURE_SUCCESS_VOID(rv);
+  if (!exists) {
+    return;
+  }
+
+  rv = prefSvc->GetDefaultBranch(nullptr, getter_AddRefs(prefBranch));
+  NS_ENSURE_SUCCESS_VOID(rv);
+
+  nsCString channel("default");
+  rv = prefBranch->GetCharPref("app.update.channel", channel);
+  NS_ENSURE_SUCCESS_VOID(rv);
+
+  nsID uuid;
+  rv = nsID::GenerateUUIDInPlace(uuid);
+  NS_ENSURE_SUCCESS_VOID(rv);
+  NSID_TrimBracketsASCII pingId(uuid);
+
+  nsCString url;
+  if (!BuildDowngradePingUrl(pingId, channel, url)) {
+    return;
+  }
+
+  Maybe<PathString> filePath = GenerateDowngradeTelemetry(
+      pingId, aLastVersion, aHasSync, aButton, channel, aProfileSelectionReason,
+      aReplacedLockTime, aIsDifferentInstall);
+  if (!filePath) {
+    return;
+  }
+
   const filesystem::Path::value_type* args[2];
 #  ifdef XP_WIN
   nsString urlw = NS_ConvertUTF8toUTF16(url);
@@ -3510,7 +3845,7 @@ static void SubmitDowngradeTelemetry(const nsCString& aLastVersion,
 #  else
   args[0] = url.get();
 #  endif
-  args[1] = filePath.get();
+  args[1] = filePath->get();
 
   nsCOMPtr<nsIProcess> process =
       do_CreateInstance("@mozilla.org/process/util;1");
@@ -3529,10 +3864,11 @@ static void SubmitDowngradeTelemetry(const nsCString& aLastVersion,
 static const char kProfileDowngradeURL[] =
     "chrome://mozapps/content/profile/profileDowngrade.xhtml";
 
+MOZ_CAN_RUN_SCRIPT
 static ReturnAbortOnError HandleDetectedDowngrade(
     nsIFile* aProfileDir, nsINativeAppSupport* aNative,
-    nsIToolkitProfileService* aProfileSvc, const nsCString& aLastVersion,
-    AppRunnerTelemFlags appRunnerTelemFlags) {
+    nsToolkitProfileService* aProfileSvc, nsIProfileLock* aProfileLock,
+    const nsCString& aLastVersion, bool aIsDifferentInstall) {
   int32_t result = 0;
   nsresult rv;
 
@@ -3605,14 +3941,21 @@ static ReturnAbortOnError HandleDetectedDowngrade(
       }
       nsCOMPtr<mozIDOMWindowProxy> newWindow;
       rv = windowWatcher->OpenWindow(
-          nullptr, nsDependentCString(kProfileDowngradeURL), "_blank"_ns,
+          nullptr, nsDependentCString(kProfileDowngradeURL), u"_blank"_ns,
           features, paramBlock, getter_AddRefs(newWindow));
       NS_ENSURE_SUCCESS(rv, rv);
 
       paramBlock->GetInt(1, &result);
 
-      SubmitDowngradeTelemetry(aLastVersion, hasSync, result,
-                               appRunnerTelemFlags);
+      PRTime replacedLockTime = 0;
+      mozilla::Maybe<PRTime> maybeReplacedLockTime;
+      if (NS_SUCCEEDED(aProfileLock->GetReplacedLockTime(&replacedLockTime)) &&
+          replacedLockTime != 0) {
+        maybeReplacedLockTime = mozilla::Some(replacedLockTime);
+      }
+      SubmitDowngradeTelemetry(aProfileSvc->ProfileSelectionReason(),
+                               maybeReplacedLockTime, aLastVersion, hasSync,
+                               result, aIsDifferentInstall);
     }
   }
 
@@ -3657,9 +4000,9 @@ static ReturnAbortOnError HandleDetectedDowngrade(
  * can only handle 32-bit numbers and in the normal case build IDs are larger
  * than this. So if the build ID is numeric we split it into two version parts.
  */
-static void ExtractCompatVersionInfo(const nsACString& aCompatVersion,
-                                     nsACString& aAppVersion,
-                                     nsACString& aAppBuildID) {
+void ExtractCompatVersionInfo(const nsACString& aCompatVersion,
+                              nsACString& aAppVersion,
+                              nsACString& aAppBuildID) {
   int32_t underscorePos = aCompatVersion.FindChar('_');
   int32_t slashPos = aCompatVersion.FindChar('/');
 
@@ -3708,103 +4051,106 @@ int32_t CompareCompatVersions(const nsACString& aOldCompatVersion,
 
 /**
  * Checks the compatibility.ini file to see if we have updated our application
- * or otherwise invalidated our caches. If the application has been updated,
- * we return false; otherwise, we return true.
- *
- * We also write the status of the caches (valid/invalid) into the return param
- * aCachesOK. The aCachesOK is always invalid if the application has been
- * updated.
- *
- * Finally, aIsDowngrade is set to true if the current application is older
- * than that previously used by the profile.
+ * or otherwise invalidated our caches. The result struct reports whether the
+ * profile is compatible, whether caches are valid, whether this is a
+ * downgrade, and the last-run version info.
  */
-static bool CheckCompatibility(nsIFile* aProfileDir, const nsCString& aVersion,
-                               const nsCString& aOSABI, nsIFile* aXULRunnerDir,
-                               nsIFile* aAppDir, nsIFile* aFlagFile,
-                               bool* aCachesOK, bool* aIsDowngrade,
-                               nsCString& aLastVersion) {
-  *aCachesOK = false;
-  *aIsDowngrade = false;
-  gLastAppVersion.SetIsVoid(true);
-  gLastAppBuildID.SetIsVoid(true);
-  gProfileEncryptedDatabases = false;
+CompatCheckResult CheckCompatibility(nsIFile* aProfileDir,
+                                     const nsCString& aVersion,
+                                     const nsCString& aOSABI,
+                                     nsIFile* aXULRunnerDir, nsIFile* aAppDir,
+                                     nsIFile* aFlagFile) {
+  CompatCheckResult result;
 
   nsCOMPtr<nsIFile> file;
   aProfileDir->Clone(getter_AddRefs(file));
-  if (!file) return false;
+  if (!file) return result;
   file->AppendNative(FILE_COMPATIBILITY_INFO);
 
   nsINIParser parser;
   nsresult rv = parser.Init(file);
-  if (NS_FAILED(rv)) return false;
+  if (NS_FAILED(rv)) return result;
 
   // The EncryptedDatabases marker is independent of version compatibility, so
   // read it here -- compatibility.ini is already parsed -- before the early
   // returns below. Consumed by the encryption gate in XRE_mainStartup.
   {
     nsAutoCString encBuf;
-    gProfileEncryptedDatabases =
+    result.hasEncryptedDatabases =
         NS_SUCCEEDED(
             parser.GetString("Compatibility", "EncryptedDatabases", encBuf)) &&
         encBuf.EqualsLiteral("1");
   }
 
-  rv = parser.GetString("Compatibility", "LastVersion", aLastVersion);
+  rv = parser.GetString("Compatibility", "LastVersion", result.lastVersion);
   if (NS_FAILED(rv)) {
-    return false;
+    return result;
   }
 
-  if (!aLastVersion.Equals(aVersion)) {
+  // Check whether this is the same install by comparing the platform and app
+  // directories. Done before the version comparison so it is set even for
+  // downgrades.
+  result.isDifferentInstall = ![&]() {
+    nsAutoCString dirBuf;
+    nsCOMPtr<nsIFile> lf;
+    bool eq = false;
+
+    if (NS_FAILED(
+            parser.GetString("Compatibility", "LastPlatformDir", dirBuf)) ||
+        NS_FAILED(NS_NewLocalFileWithPersistentDescriptor(
+            dirBuf, getter_AddRefs(lf))) ||
+        NS_FAILED(lf->Equals(aXULRunnerDir, &eq)) || !eq) {
+      return false;
+    }
+
+    if (!aAppDir) {
+      return true;
+    }
+
+    if (NS_FAILED(parser.GetString("Compatibility", "LastAppDir", dirBuf)) ||
+        NS_FAILED(NS_NewLocalFileWithPersistentDescriptor(
+            dirBuf, getter_AddRefs(lf))) ||
+        NS_FAILED(lf->Equals(aAppDir, &eq)) || !eq) {
+      return false;
+    }
+
+    return true;
+  }();
+
+  if (!result.lastVersion.Equals(aVersion)) {
     // The version is not the same. Whether it's a downgrade depends on an
     // actual comparison:
-    *aIsDowngrade = 0 < CompareCompatVersions(aLastVersion, aVersion);
-    ExtractCompatVersionInfo(aLastVersion, gLastAppVersion, gLastAppBuildID);
-    return false;
+    result.isDowngrade =
+        0 < CompareCompatVersions(result.lastVersion, aVersion);
+    ExtractCompatVersionInfo(result.lastVersion, result.lastAppVersion,
+                             result.lastAppBuildID);
+    return result;
   }
 
   // If we get here, the version matched, but there may still be other
   // differences between us and the build that the profile last ran under.
 
-  gLastAppVersion.Assign(gAppData->version);
-  gLastAppBuildID.Assign(gAppData->buildID);
+  result.lastAppVersion.Assign(gAppData->version);
+  result.lastAppBuildID.Assign(gAppData->buildID);
 
   nsAutoCString buf;
   rv = parser.GetString("Compatibility", "LastOSABI", buf);
-  if (NS_FAILED(rv) || !aOSABI.Equals(buf)) return false;
+  if (NS_FAILED(rv) || !aOSABI.Equals(buf)) return result;
 
-  rv = parser.GetString("Compatibility", "LastPlatformDir", buf);
-  if (NS_FAILED(rv)) return false;
-
-  nsCOMPtr<nsIFile> lf;
-  rv = NS_NewLocalFileWithPersistentDescriptor(buf, getter_AddRefs(lf));
-  if (NS_FAILED(rv)) return false;
-
-  bool eq;
-  rv = lf->Equals(aXULRunnerDir, &eq);
-  if (NS_FAILED(rv) || !eq) return false;
-
-  if (aAppDir) {
-    rv = parser.GetString("Compatibility", "LastAppDir", buf);
-    if (NS_FAILED(rv)) return false;
-
-    rv = NS_NewLocalFileWithPersistentDescriptor(buf, getter_AddRefs(lf));
-    if (NS_FAILED(rv)) return false;
-
-    rv = lf->Equals(aAppDir, &eq);
-    if (NS_FAILED(rv) || !eq) return false;
-  }
+  if (result.isDifferentInstall) return result;
 
   // If we see this flag, caches are invalid.
   rv = parser.GetString("Compatibility", "InvalidateCaches", buf);
-  *aCachesOK = (NS_FAILED(rv) || !buf.EqualsLiteral("1"));
+  result.cachesOK = (NS_FAILED(rv) || !buf.EqualsLiteral("1"));
 
   bool purgeCaches = false;
   if (aFlagFile && NS_SUCCEEDED(aFlagFile->Exists(&purgeCaches)) &&
       purgeCaches) {
-    *aCachesOK = false;
+    result.cachesOK = false;
   }
 
-  return true;
+  result.isCompatible = true;
+  return result;
 }
 
 void BuildCompatVersion(const char* aAppVersion, const char* aAppBuildID,
@@ -4108,11 +4454,12 @@ class XREMain {
     mAppData = nullptr;
   }
 
+  MOZ_CAN_RUN_SCRIPT
   int XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig);
-  int XRE_mainInit(bool* aExitFlag, AppRunnerTelemFlags& appRunnerTelemFlags);
-  int XRE_mainStartup(bool* aExitFlag,
-                      AppRunnerTelemFlags& appRunnerTelemFlags);
-  nsresult XRE_mainRun();
+  int XRE_mainInit(bool* aExitFlag);
+  MOZ_CAN_RUN_SCRIPT
+  int XRE_mainStartup(bool* aExitFlag);
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY nsresult XRE_mainRun();
 
   bool CheckLastStartupWasCrash();
 
@@ -4194,16 +4541,12 @@ static bool CheckForUserMismatch() { return false; }
 
 void mozilla::startup::IncreaseDescriptorLimits() {
 #ifdef XP_UNIX
-  // Increase the fd limit to accomodate IPC resources like shared memory.
-#  ifdef XP_DARWIN
-  // We use Mach IPC for shared memory, so a lower limit suffices.
-  // See also the Darwin case in config/external/nspr/pr/moz.build
-  static constexpr rlim_t kFDs = 4096;
-#  else   // Unix but not Darwin
+  // Increase the fd limit to accommodate IPC resources like shared memory.
   // This can be increased if needed, but also be aware that Linux
-  // distributions may impose hard limits less than this.
+  // distributions may impose hard limits less than this. macOS accepts any
+  // value and caps the effective limit at kern.maxfilesperproc, and it must
+  // not exceed the FD_SETSIZE in config/external/nspr/pr/moz.build.
   static constexpr rlim_t kFDs = 65536;
-#  endif  // Darwin or not
   struct rlimit rlim;
 
   if (getrlimit(RLIMIT_NOFILE, &rlim) != 0) {
@@ -4315,8 +4658,7 @@ static void SetupConsoleForBackgroundTask(
  * Main() will exit early if either return value != 0 or if aExitFlag is
  * true.
  */
-int XREMain::XRE_mainInit(bool* aExitFlag,
-                          AppRunnerTelemFlags& appRunnerTelemFlags) {
+int XREMain::XRE_mainInit(bool* aExitFlag) {
   if (!aExitFlag) return 1;
   *aExitFlag = false;
 
@@ -4361,7 +4703,6 @@ int XREMain::XRE_mainInit(bool* aExitFlag,
   if (ARG_FOUND ==
       CheckArg("backgroundtask", &backgroundTaskName, CheckArgFlag::None)) {
     backgroundTask = Some(backgroundTaskName);
-    appRunnerTelemFlags.isBackgroundTaskModeRequested = 1;
     SetupConsoleForBackgroundTask(backgroundTask.ref());
   }
 
@@ -4396,10 +4737,6 @@ int XREMain::XRE_mainInit(bool* aExitFlag,
     ChaosMode::SetChaosFeature(feature);
     ChaosMode::enterChaosMode();
     MOZ_ASSERT(ChaosMode::isActive(ChaosFeature::Any));
-  }
-
-  if (CheckArgExists("fxr")) {
-    gFxREmbedded = true;
   }
 
   if (ChaosMode::isActive(ChaosFeature::Any)) {
@@ -4619,6 +4956,8 @@ int XREMain::XRE_mainInit(bool* aExitFlag,
     CrashReporter::RecordAnnotationNSCString(
         CrashReporter::Annotation::ReleaseChannel, releaseChannel);
 
+    CrashReporter::RecordPlatformAnnotations();
+
 #ifdef XP_WIN
     nsAutoString appInitDLLs;
     if (widget::WinUtils::GetAppInitDLLs(appInitDLLs)) {
@@ -4812,8 +5151,7 @@ int XREMain::XRE_mainInit(bool* aExitFlag,
     return 1;
   }
   if (ar == ARG_FOUND) {
-    UniquePtr<DBusService> dbusService =
-        MakeUnique<DBusService>(dbusServiceLauncher);
+    auto dbusService = std::make_unique<DBusService>(dbusServiceLauncher);
     if (dbusService->Init()) {
       dbusService->Run();
     }
@@ -5040,8 +5378,7 @@ bool XREMain::CheckLastStartupWasCrash() {
  * Main() will exit early if either return value != 0 or if aExitFlag is
  * true.
  */
-int XREMain::XRE_mainStartup(bool* aExitFlag,
-                             AppRunnerTelemFlags& appRunnerTelemFlags) {
+int XREMain::XRE_mainStartup(bool* aExitFlag) {
   nsresult rv;
 
   if (!aExitFlag) return 1;
@@ -5125,11 +5462,9 @@ int XREMain::XRE_mainStartup(bool* aExitFlag,
     if (const char* currentDesktop = PR_GetEnv("XDG_CURRENT_DESKTOP")) {
       useXI2 |= (nsDependentCString(currentDesktop) == "gamescope"_ns);
     }
-#    ifdef EARLY_BETA_OR_EARLIER
     // We tried 3.24.0+ but had problems, let's retry with newer versions. See
     // bug 1660212.
     useXI2 |= !gtk_check_version(3, 24, 49);
-#    endif
   }
   if (!useXI2) {
     gdk_disable_multidevice();
@@ -5170,9 +5505,6 @@ int XREMain::XRE_mainStartup(bool* aExitFlag,
   bool isBackgroundTaskMode = false;
 #ifdef MOZ_BACKGROUNDTASKS
   isBackgroundTaskMode = BackgroundTasks::IsBackgroundTaskMode();
-  if (isBackgroundTaskMode) {
-    appRunnerTelemFlags.isBackgroundTaskMode = 1;
-  }
 #endif
 
 #ifdef MOZ_HAS_REMOTE
@@ -5373,7 +5705,9 @@ int XREMain::XRE_mainStartup(bool* aExitFlag,
 
   bool wasDefaultSelection;
   nsCOMPtr<nsIToolkitProfile> profile;
-  rv = SelectProfile(mProfileSvc, mNativeApp, getter_AddRefs(mProfD),
+  RefPtr profileSvc = mProfileSvc;
+  nsCOMPtr nativeApp = mNativeApp;
+  rv = SelectProfile(profileSvc, nativeApp, getter_AddRefs(mProfD),
                      getter_AddRefs(mProfLD), getter_AddRefs(profile),
                      &wasDefaultSelection);
   if (rv == NS_ERROR_LAUNCHED_CHILD_PROCESS || rv == NS_ERROR_ABORT) {
@@ -5459,7 +5793,6 @@ int XREMain::XRE_mainStartup(bool* aExitFlag,
     // Ensure we keep -restart-pid if we are running tests
     if (ARG_FOUND == CheckArgExists("restart-pid") &&
         !CheckArg("test-only-automatic-restart-no-wait")) {
-      appRunnerTelemFlags.hasRestartPidParameter = 1;
       // We're not testing and can safely remove it now and read the pid.
       const char* restartPidString = nullptr;
       CheckArg("restart-pid", &restartPidString, CheckArgFlag::RemoveArg);
@@ -5472,16 +5805,9 @@ int XREMain::XRE_mainStartup(bool* aExitFlag,
         rv = updater->WaitForProcessExit(pid, MAYBE_WAIT_TIMEOUT_MS);
         if (NS_FAILED(rv)) {
           NS_WARNING("Failure in nsUpdateProcessor::WaitForProcessExit.");
-          // Is this a timeout?
-          if (rv == NS_ERROR_ABORT) {
-            appRunnerTelemFlags.isRestartPidWaitTimeout = 1;
-          } else {
-            appRunnerTelemFlags.isRestartPidFailure = 1;
-          }
         }
       } else {
         NS_WARNING("Failed to parse pid from -restart-pid.");
-        appRunnerTelemFlags.isRestartPidNotInteger = 1;
       }
     }
   }
@@ -5553,12 +5879,14 @@ int XREMain::XRE_mainStartup(bool* aExitFlag,
   // We only ever show the profile selector if a specific profile wasn't chosen
   // via command line arguments or environment variables.
   if (wasDefaultSelection) {
-    if (!mProfileSvc->GetStartWithLastProfile()) {
+    if (ShouldSkipProfileDialogForWebAuth()) {
+      rv = NS_OK;
+    } else if (!mProfileSvc->GetStartWithLastProfile()) {
       // First check the old style profile manager
-      rv = ShowProfileManager(mProfileSvc, mNativeApp);
+      rv = ShowProfileManager(profileSvc, nativeApp);
     } else if (profile && profile->GetShowProfileSelector()) {
       // Now check the new profile group selector
-      rv = ShowProfileSelector(mProfileSvc, mNativeApp);
+      rv = ShowProfileSelector(profileSvc, nativeApp);
     } else {
       rv = NS_OK;
     }
@@ -5664,14 +5992,17 @@ int XREMain::XRE_mainStartup(bool* aExitFlag,
     flagFile->AppendNative(FILE_INVALIDATE_CACHES);
   }
 
-  bool cachesOK;
-  bool isDowngrade;
-  nsCString lastVersion;
-  bool versionOK = CheckCompatibility(
-      mProfD, version, osABI, mDirProvider.GetGREDir(), mAppData->directory,
-      flagFile, &cachesOK, &isDowngrade, lastVersion);
+  CompatCheckResult compatResult =
+      CheckCompatibility(mProfD, version, osABI, mDirProvider.GetGREDir(),
+                         mAppData->directory, flagFile);
 
-  MOZ_RELEASE_ASSERT(!cachesOK || lastVersion.Equals(version),
+  bool cachesOK = compatResult.cachesOK;
+
+  gLastAppVersion = compatResult.lastAppVersion;
+  gLastAppBuildID = compatResult.lastAppBuildID;
+  gProfileEncryptedDatabases = compatResult.hasEncryptedDatabases;
+
+  MOZ_RELEASE_ASSERT(!cachesOK || compatResult.lastVersion.Equals(version),
                      "Caches cannot be good if the version has changed.");
 
   // Refuse to launch if the profile's on-disk encryption state and the
@@ -5706,13 +6037,16 @@ int XREMain::XRE_mainStartup(bool* aExitFlag,
 #ifdef MOZ_BLOCK_PROFILE_DOWNGRADE
   // The argument check must come first so the argument is always removed from
   // the command line regardless of whether this is a downgrade or not.
-  if (!CheckArg("allow-downgrade") && isDowngrade &&
+  if (!CheckArg("allow-downgrade") && compatResult.isDowngrade &&
       !EnvHasValue("MOZ_ALLOW_DOWNGRADE")) {
 #  ifdef XP_MACOSX
     InitializeMacApp();
 #  endif
-    rv = HandleDetectedDowngrade(mProfD, mNativeApp, mProfileSvc, lastVersion,
-                                 appRunnerTelemFlags);
+    nsCOMPtr profD = mProfD;
+    nsCOMPtr profileLock = mProfileLock;
+    rv = HandleDetectedDowngrade(profD, nativeApp, profileSvc, profileLock,
+                                 compatResult.lastVersion,
+                                 compatResult.isDifferentInstall);
     if (rv == NS_ERROR_LAUNCHED_CHILD_PROCESS || rv == NS_ERROR_ABORT) {
       *aExitFlag = true;
       return 0;
@@ -5756,7 +6090,8 @@ int XREMain::XRE_mainStartup(bool* aExitFlag,
   }
 
   CrashReporter::RecordAnnotationBool(
-      CrashReporter::Annotation::StartupCacheValid, cachesOK && versionOK);
+      CrashReporter::Annotation::StartupCacheValid,
+      cachesOK && compatResult.isCompatible);
 
 #ifdef XP_MACOSX
   static bool status = nsCocoaFeatures::ProcessIsRosettaTranslated();
@@ -5774,7 +6109,7 @@ int XREMain::XRE_mainStartup(bool* aExitFlag,
   //
   bool startupCacheValid = true;
 
-  if (!cachesOK || !versionOK) {
+  if (!cachesOK || !compatResult.isCompatible) {
     QuotaManager::InvalidateQuotaCache(
         QuotaManager::CacheInvalidationLevel::Soft);
 
@@ -5817,7 +6152,7 @@ int XREMain::XRE_mainStartup(bool* aExitFlag,
 }
 
 #if defined(MOZ_SANDBOX)
-void AddSandboxAnnotations() {
+void AddSandboxAnnotations() MOZ_CAN_RUN_SCRIPT_BOUNDARY {
   CrashReporter::RecordAnnotationU32(
       CrashReporter::Annotation::ContentSandboxLevel,
       GetEffectiveContentSandboxLevel());
@@ -5844,6 +6179,70 @@ void AddSandboxAnnotations() {
       CrashReporter::Annotation::ContentSandboxCapable, sSandboxCapable);
 }
 #endif /* MOZ_SANDBOX */
+
+static bool IsSystemPrincipalException(JS::Handle<JS::Value> aExn) {
+  if (!aExn.isObject()) {
+    return false;
+  }
+  JSObject* obj = js::UncheckedUnwrap(&aExn.toObject());
+  return nsContentUtils::ObjectPrincipal(obj)->IsSystemPrincipal();
+}
+
+static void AnnotateOmnijarCanaryFailure(JSContext* aCx, nsresult aRv,
+                                         mozilla::Omnijar::Type aOmnijar,
+                                         const nsACString& aEntry) {
+  mozilla::JSONStringWriteFunc<nsAutoCString> json;
+  mozilla::JSONWriter w(json, mozilla::JSONWriter::SingleLineStyle);
+  w.Start();
+  nsAutoCString rvName;
+  mozilla::GetErrorName(aRv, rvName);
+  w.StringProperty("rv", rvName);
+
+  JS::ExceptionStack exnStack(aCx);
+  bool hasException = JS_IsExceptionPending(aCx) &&
+                      JS::StealPendingExceptionStack(aCx, &exnStack);
+  w.BoolProperty("exn", hasException);
+  if (hasException) {
+    bool isChrome = IsSystemPrincipalException(exnStack.exception());
+    w.BoolProperty("exnChrome", isChrome);
+    JS::ErrorReportBuilder builder(aCx);
+    if (builder.init(aCx, exnStack, JS::ErrorReportBuilder::NoSideEffects)) {
+      if (JSErrorReport* report = builder.report()) {
+        w.IntProperty("exnNumber", report->errorNumber);
+        if (isChrome && report->filename) {
+          w.StringProperty(
+              "exnFile",
+              mozilla::MakeStringSpan(mozilla::GetReportableChromeScriptPath(
+                  report->filename.c_str())));
+          w.IntProperty("exnLine", report->lineno);
+        }
+      }
+    }
+  }
+
+  nsCOMPtr<nsIFile> omnijar = mozilla::Omnijar::GetPath(aOmnijar);
+  w.BoolProperty("omnijar", !!omnijar);
+  int64_t omnijarSize = 0;
+  if (omnijar && NS_SUCCEEDED(omnijar->GetFileSize(&omnijarSize))) {
+    w.IntProperty("omnijarSize", omnijarSize);
+  }
+
+  RefPtr<nsZipArchive> zip = mozilla::Omnijar::GetReader(aOmnijar);
+  w.BoolProperty("reader", !!zip);
+  if (zip) {
+    nsZipItem* item = zip->GetItem(aEntry);
+    w.BoolProperty("entry", !!item);
+    if (item) {
+      nsZipItemPtr<char> data(zip, aEntry, /* doCRC */ true);
+      w.IntProperty("entrySize", item->RealSize());
+      w.BoolProperty("entryRead", !!data.Buffer());
+    }
+  }
+  w.End();
+
+  CrashReporter::RecordAnnotationNSCString(
+      CrashReporter::Annotation::OmnijarCanaryFailure, json.StringCRef());
+}
 
 /*
  * XRE_mainRun - Command line startup, profile migration, and
@@ -5877,6 +6276,9 @@ nsresult XREMain::XRE_mainRun() {
 
     rv = mScopedXPCOM->SetWindowCreator(mNativeApp);
     NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
+
+    // Record platform annotations which need XPCOM initialized.
+    CrashReporter::RecordXPCOMPlatformAnnotations();
 
     // tell the crash reporter to also send the release channel
     nsCOMPtr<nsIPrefService> prefs =
@@ -6028,8 +6430,9 @@ nsresult XREMain::XRE_mainRun() {
           initializedJSContext = true;
         }
 
-        nsresult backupCreated =
-            ProfileResetCleanup(mProfileSvc, gResetOldProfile);
+        const RefPtr<nsToolkitProfileService> profileSvc = mProfileSvc;
+        const nsCOMPtr<nsIToolkitProfile> oldProfile = gResetOldProfile;
+        nsresult backupCreated = ProfileResetCleanup(profileSvc, oldProfile);
         if (NS_FAILED(backupCreated)) {
           NS_WARNING("Could not cleanup the profile that was reset");
         }
@@ -6077,9 +6480,12 @@ nsresult XREMain::XRE_mainRun() {
       JS::Rooted<JSObject*> mod(jsapi.cx());
       // AppConstants.sys.mjs is small, widely used and most likely will
       // never go away.
+      constexpr auto canaryEntry = "modules/AppConstants.sys.mjs"_ns;
       rv = mozJSModuleLoader::Get()->ImportESModule(
-          jsapi.cx(), "resource://gre/modules/AppConstants.sys.mjs"_ns, &mod);
+          jsapi.cx(), nsAutoCString("resource://gre/"_ns + canaryEntry), &mod);
       if (NS_FAILED(rv)) {
+        AnnotateOmnijarCanaryFailure(jsapi.cx(), rv, mozilla::Omnijar::GRE,
+                                     canaryEntry);
         return NS_ERROR_OMNIJAR_OR_DIR_MISSING;
       }
     }
@@ -6116,6 +6522,10 @@ nsresult XREMain::XRE_mainRun() {
     NS_ENSURE_TRUE(appStartup, NS_ERROR_FAILURE);
 
     mDirProvider.DoStartup();
+
+#ifdef MOZ_BLOCK_PROFILE_DOWNGRADE
+    StoreMachineId();
+#endif
 
 #ifdef XP_WIN
     // It needs to be called on the main thread because it has to use
@@ -6244,10 +6654,13 @@ nsresult XREMain::XRE_mainRun() {
       // Check if we're running from a DMG or an app translocated location and
       // allow the user to install to the Applications directory.
       if (MacRunFromDmgUtils::MaybeInstallAndRelaunch()) {
-        bool userAllowedQuit = true;
-        appStartup->Quit(nsIAppStartup::eForceQuit, 0, &userAllowedQuit);
+        appStartup->Quit(nsIAppStartup::eForceQuit, 0);
       }
 #  endif
+#endif
+
+#if defined(XP_MACOSX)
+      RegisterASWebAuthSessionObservers();
 #endif
 
       nsCOMPtr<nsIObserverService> obsService =
@@ -6339,6 +6752,13 @@ nsresult XREMain::XRE_mainRun() {
   // the `nsICommandLineRunner` anymore.
   cmdLine = nullptr;
 
+#ifdef ACCESSIBILITY
+  // If accessibility.force_disabled is force enabled, start accessibility
+  // now rather than waiting for something to request it. This is the one
+  // place we can do this reliably on every platform.
+  a11y::MaybeStartForceEnabled();
+#endif
+
   {
     rv = appStartup->Run();
     if (NS_FAILED(rv)) {
@@ -6383,8 +6803,6 @@ static already_AddRefed<nsIFile> GreOmniPath(int argc, char** argv) {
 int XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig) {
   gArgc = argc;
   gArgv = argv;
-  AppRunnerTelemFlags appRunnerTelemFlags{};
-
   ScopedLogging log;
 
   mozilla::LogModule::Init(gArgc, gArgv);
@@ -6417,7 +6835,7 @@ int XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig) {
   nsresult rv = NS_OK;
 
   if (aConfig.appData) {
-    mAppData = MakeUnique<XREAppData>(*aConfig.appData);
+    mAppData = std::make_unique<XREAppData>(*aConfig.appData);
   } else {
     MOZ_RELEASE_ASSERT(aConfig.appDataPath);
     nsCOMPtr<nsIFile> appini;
@@ -6427,7 +6845,7 @@ int XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig) {
       return 1;
     }
 
-    mAppData = MakeUnique<XREAppData>();
+    mAppData = std::make_unique<XREAppData>();
     rv = XRE_ParseAppData(appini, *mAppData);
     if (NS_FAILED(rv)) {
       Output(true, "Couldn't read application.ini");
@@ -6509,11 +6927,6 @@ int XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig) {
   mAppData->sandboxBrokerServices = aConfig.sandboxBrokerServices;
 #  endif  // defined(MOZ_SANDBOX)
 
-  {
-    DebugOnly<bool> result = WindowsBCryptInitialization();
-    MOZ_ASSERT(result);
-  }
-
 #  if defined(_M_IX86) || defined(_M_X64)
   {
     DebugOnly<bool> result = WindowsMsctfInitialization();
@@ -6561,7 +6974,7 @@ int XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig) {
 
   // init
   bool exit = false;
-  int result = XRE_mainInit(&exit, appRunnerTelemFlags);
+  int result = XRE_mainInit(&exit);
   if (result != 0 || exit) return result;
 
   // If we exit gracefully, remove the startup crash canary file.
@@ -6574,13 +6987,13 @@ int XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig) {
   });
 
   // startup
-  result = XRE_mainStartup(&exit, appRunnerTelemFlags);
+  result = XRE_mainStartup(&exit);
   if (result != 0 || exit) return result;
 
   // Start the real application. We use |aInitJSContext = false| because
   // XRE_mainRun wants to initialize the JSContext after reading user prefs.
 
-  mScopedXPCOM = MakeUnique<ScopedXPCOMStartup>();
+  mScopedXPCOM = std::make_unique<ScopedXPCOMStartup>();
 
   rv = mScopedXPCOM->Initialize(/* aInitJSContext = */ false);
   if (rv == NS_ERROR_OMNIJAR_CORRUPT) {
@@ -6764,7 +7177,7 @@ bool XRE_IsE10sParentProcess() {
   bool XRE_Is##proc_typename##Process() {                                     \
     return XRE_GetProcessType() == GeckoProcessType_##enum_name;              \
   }
-#include "mozilla/GeckoProcessTypes.h"
+#include "mozilla/GeckoProcessTypes.inc"
 #undef GECKO_PROCESS_TYPE
 
 bool XRE_UseNativeEventProcessing() {
@@ -6778,7 +7191,6 @@ bool XRE_UseNativeEventProcessing() {
   switch (XRE_GetProcessType()) {
 #if defined(XP_DARWIN) || defined(XP_WIN)
     case GeckoProcessType_RDD:
-    case GeckoProcessType_Socket:
       return false;
     case GeckoProcessType_Utility: {
 #  if defined(XP_WIN)
@@ -6893,7 +7305,7 @@ mozilla::BinPathType XRE_GetChildProcBinPathType(
                              procinfo_typename, webidl_typename, allcaps_name) \
     case GeckoProcessType_##enum_name:                                         \
       return BinPathType::process_bin_type;
-#  include "mozilla/GeckoProcessTypes.h"
+#  include "mozilla/GeckoProcessTypes.inc"
 #  undef GECKO_PROCESS_TYPE
     default:
       return BinPathType::PluginContainer;

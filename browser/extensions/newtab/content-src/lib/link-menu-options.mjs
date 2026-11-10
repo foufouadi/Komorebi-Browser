@@ -6,6 +6,7 @@ import {
   actionCreators as ac,
   actionTypes as at,
 } from "../../common/Actions.mjs";
+import { nextDwellId } from "./dwell-id.mjs";
 
 const _OpenInPrivateWindow = site => ({
   id: "newtab-menu-open-new-private-window",
@@ -13,9 +14,25 @@ const _OpenInPrivateWindow = site => ({
   action: ac.OnlyToMain({
     type: at.OPEN_PRIVATE_WINDOW,
     data: {
+      card_type: site.card_type,
       url: site.url,
       referrer: site.referrer,
       event_source: "CONTEXT_MENU",
+      topic: site.topic,
+      tile_id: site.tile_id,
+      scheduled_corpus_item_id: site.scheduled_corpus_item_id,
+      corpus_item_id: site.corpus_item_id,
+      received_rank: site.received_rank,
+      recommended_at: site.recommended_at,
+      format: site.format,
+      is_pocket_card: site.type === "CardGrid",
+      ...(site.section
+        ? {
+            section: site.section,
+            section_position: site.section_position,
+            is_section_followed: site.is_section_followed,
+          }
+        : {}),
     },
   }),
   userEvent: "OPEN_PRIVATE_WINDOW",
@@ -89,6 +106,8 @@ export const LinkMenuOptions = {
         recommended_at: site.recommended_at,
         format: site.format,
         ...(site.flight_id ? { flight_id: site.flight_id } : {}),
+        // Opts the window this opens into newtab.opened_page_dwell_time.
+        ...(site.dwell_label ? { dwell_label: site.dwell_label } : {}),
         is_pocket_card: site.type === "CardGrid",
         ...(site.section
           ? {
@@ -154,36 +173,16 @@ export const LinkMenuOptions = {
           : {}),
       })),
     }),
-    impression: ac.ImpressionStats({
-      source: eventSource,
-      block: 0,
-      tiles: tiles.map((site, index) => ({
-        id: site.guid,
-        pos: pos + index,
-        ...(site.shim && site.shim.delete ? { shim: site.shim.delete } : {}),
-      })),
-    }),
     userEvent: "BLOCK",
   }),
 
   // This is the "Dismiss" action for leaderboard/billboard ads.
-  BlockAdUrl: (site, pos, eventSource) => ({
+  BlockAdUrl: site => ({
     id: "newtab-menu-dismiss",
     icon: "dismiss",
     action: ac.AlsoToMain({
       type: at.BLOCK_URL,
       data: [site],
-    }),
-    impression: ac.ImpressionStats({
-      source: eventSource,
-      block: 0,
-      tiles: [
-        {
-          id: site.guid,
-          pos,
-          ...(site.shim && site.shim.save ? { shim: site.shim.save } : {}),
-        },
-      ],
     }),
     userEvent: "BLOCK",
   }),
@@ -479,7 +478,7 @@ export const LinkMenuOptions = {
         data: {
           card_type: site.card_type,
           position: site.position,
-          reporting_url: site.shim.report,
+          reporting_url: site.shim?.report,
           url: site.url,
         },
       }),
@@ -505,3 +504,155 @@ export const LinkMenuOptions = {
     };
   },
 };
+
+const DEFAULT_SITE_MENU_OPTIONS = [
+  "CheckPinTopSite",
+  "EditTopSite",
+  "AddTopSite",
+  "Separator",
+  "OpenInNewWindow",
+  "OpenInPrivateWindow",
+  "Separator",
+  "BlockUrl",
+];
+
+/**
+ * Turns a list of option keys (e.g. "CheckPinTopSite") into concrete
+ * LinkMenuOptions entries with onClick handlers wired up to dispatch/
+ * telemetry. Shared by any menu renderer (ContextMenu- or panel-list-based)
+ * that needs the same option-building behavior.
+ */
+export function getLinkMenuOptions(props) {
+  const {
+    site,
+    index,
+    source,
+    isPrivateBrowsingEnabled,
+    siteInfo,
+    platform,
+    privacyInfoUrl,
+    dispatch,
+    options,
+    shouldSendImpressionStats,
+    userEvent = ac.UserEvent,
+  } = props;
+
+  // Handle special case of default site
+  const propOptions =
+    site.isDefault && !site.searchTopSite && !site.sponsored_position
+      ? DEFAULT_SITE_MENU_OPTIONS
+      : options;
+
+  const linkMenuOptions = propOptions
+    .map(o =>
+      LinkMenuOptions[o](
+        site,
+        index,
+        source,
+        isPrivateBrowsingEnabled,
+        siteInfo,
+        platform,
+        privacyInfoUrl
+      )
+    )
+    .map(option => {
+      const {
+        action,
+        impression,
+        toast,
+        id,
+        type,
+        userEvent: eventName,
+      } = option;
+      if (!type && id) {
+        option.onClick = (event = {}) => {
+          const { ctrlKey, metaKey, shiftKey, button } = event;
+          // Only send along event info if there's something non-default to send
+          if (ctrlKey || metaKey || shiftKey || button === 1) {
+            action.data = Object.assign(
+              {
+                event: { ctrlKey, metaKey, shiftKey, button },
+              },
+              action.data
+            );
+          }
+          // A fresh id per open, shared with the user event below, so the
+          // dwell time on a story can find the click it belongs to.
+          const dwellId = action.data?.dwell_label?.startsWith("story_")
+            ? nextDwellId()
+            : undefined;
+          if (dwellId) {
+            action.data = { ...action.data, dwell_id: dwellId };
+          }
+          dispatch(action);
+          if (toast) {
+            dispatch(toast);
+          }
+          if (eventName) {
+            let value;
+            // Bug 1958135: Pass additional info to ac.OPEN_NEW_WINDOW event
+            if (
+              action.type === "OPEN_NEW_WINDOW" ||
+              action.type === "OPEN_PRIVATE_WINDOW"
+            ) {
+              const {
+                card_type,
+                corpus_item_id,
+                event_source,
+                format,
+                is_section_followed,
+                received_rank,
+                recommended_at,
+                scheduled_corpus_item_id,
+                section_position,
+                section,
+                selected_topics,
+                tile_id,
+                topic,
+              } = action.data;
+
+              value = {
+                card_type,
+                corpus_item_id,
+                event_source,
+                format,
+                received_rank,
+                recommended_at,
+                scheduled_corpus_item_id,
+                ...(section
+                  ? { is_section_followed, section_position, section }
+                  : {}),
+                selected_topics: selected_topics ? selected_topics : "",
+                tile_id,
+                topic,
+                ...(dwellId ? { dwell_id: dwellId } : {}),
+              };
+            } else {
+              value = { card_type: site.flight_id ? "spoc" : "organic" };
+            }
+            const userEventData = Object.assign(
+              {
+                event: eventName,
+                source,
+                action_position: index,
+                value,
+              },
+              siteInfo
+            );
+            dispatch(userEvent(userEventData));
+            if (impression && shouldSendImpressionStats) {
+              dispatch(impression);
+            }
+          }
+        };
+      }
+      return option;
+    });
+
+  // This is for accessibility to support making each item tabbable.
+  // We want to know which item is the first and which item
+  // is the last, so we can close the context menu accordingly.
+  linkMenuOptions[0].first = true;
+  linkMenuOptions[linkMenuOptions.length - 1].last = true;
+  return linkMenuOptions;
+}

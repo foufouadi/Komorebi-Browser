@@ -14,16 +14,9 @@ buildscript {
 
         dependencies {
             classpath libs.mozilla.glean.gradle.plugin
+            classpath libs.kotlin.serialization
         }
     }
-
-    dependencies {
-        classpath libs.kotlin.serialization
-    }
-}
-
-plugins {
-    alias libs.plugins.python.envs.plugin
 }
 
 apply plugin: 'kotlinx-serialization'
@@ -49,7 +42,7 @@ dependencies {
 }
 
 android {
-    namespace 'org.mozilla.appservices.errorsupport'
+    namespace = 'org.mozilla.appservices.errorsupport'
 }
 
 ext.configureUniFFIBindgen("error_support")

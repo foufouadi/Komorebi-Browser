@@ -11,22 +11,6 @@
   color: var(--sidebar-text-color);
 }
 
-#sidebar-panel-header {
-  justify-content: space-between;
-  padding-inline: var(--space-large);
-  padding-block-start: var(--space-large);
-
-  > h4 {
-    margin-block: var(--space-large);
-    font-weight: var(--font-weight-heading);
-    font-size: 15px;
-  }
-
-  @media not -moz-pref("sidebar.revamp") {
-    display: none;
-  }
-}
-
 /* Themed sidebars */
 
 .sidebar-panel[lwt-sidebar] {

@@ -4,9 +4,9 @@
 
 /** @import { ExperimentManager } from "./ExperimentManager.sys.mjs" */
 
-const lazy = {};
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-ChromeUtils.defineESModuleGetters(lazy, {
+const lazy = XPCOMUtils.declareLazy({
   ExperimentManager: "resource://nimbus/lib/ExperimentManager.sys.mjs",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   PrefUtils: "moz-src:///toolkit/modules/PrefUtils.sys.mjs",
@@ -270,12 +270,6 @@ export class PrefFlipsFeature {
     for (const slug of newSlugs) {
       const enrollment = this.manager.store.get(slug);
       this.#addEnrollment(enrollment);
-    }
-
-    if (inactiveSlugs.size || newSlugs.size) {
-      // If we've modified any enrollments in the store we must ensure that
-      // there is a save queued.
-      this.manager.store._jsonFile.saveSoon();
     }
   }
 

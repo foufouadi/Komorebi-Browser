@@ -2,109 +2,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import groovy.json.JsonBuilder
+import groovy.lang.GroovyObject
 import org.gradle.api.Plugin
 import org.gradle.api.flow.FlowAction
 import org.gradle.api.flow.FlowParameters
 import org.gradle.api.flow.FlowProviders
 import org.gradle.api.flow.FlowScope
 import org.gradle.api.initialization.Settings
-import org.gradle.api.invocation.Gradle
 import org.gradle.api.provider.Property
-import org.gradle.api.services.BuildService
-import org.gradle.api.services.BuildServiceParameters
 import org.gradle.api.tasks.Input
-import org.gradle.build.event.BuildEventsListenerRegistry
 import org.gradle.kotlin.dsl.always
-import org.gradle.tooling.events.FinishEvent
-import org.gradle.tooling.events.OperationCompletionListener
-import org.gradle.tooling.events.task.TaskFailureResult
-import org.gradle.tooling.events.task.TaskFinishEvent
-import org.gradle.tooling.events.task.TaskSkippedResult
-import org.gradle.tooling.events.task.TaskSuccessResult
-import java.io.File
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 import java.util.Optional
-import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 
 // If you ever need to force a toolchain rebuild (taskcluster) then edit the following comment.
 // FORCE REBUILD 2024-05-02
-
-interface BuildMetricsServiceParameters : BuildServiceParameters {
-    val outputDir: Property<String>
-    val fileSuffix: Property<String>
-}
-
-abstract class BuildMetricsService @Inject constructor(
-    private val parameters: BuildMetricsServiceParameters
-) : BuildService<BuildMetricsServiceParameters>, OperationCompletionListener, AutoCloseable {
-    private val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm-ss-SSS")
-    private val taskRecords = mutableListOf<Map<String, Any>>()
-
-    var invocationStart = 0L
-    var configStart = 0L
-    var configEnd = 0L
-
-    override fun onFinish(event: FinishEvent) {
-        if (event is TaskFinishEvent) {
-            val result = event.result
-            val startMs = result.startTime
-            val stopMs = result.endTime
-
-            val status = when (result) {
-                is TaskFailureResult -> "FAILED"
-                is TaskSkippedResult -> "SKIPPED"
-                is TaskSuccessResult -> when {
-                    result.isUpToDate -> "UP-TO-DATE"
-                    result.isFromCache -> "FROM-CACHE"
-                    else -> "EXECUTED"
-                }
-                else -> "UNKNOWN"
-            }
-
-            taskRecords += mapOf(
-                "path" to event.descriptor.taskPath,
-                "start" to dateFormatter.format(Instant.ofEpochMilli(startMs).atZone(ZoneId.systemDefault())),
-                "stop" to dateFormatter.format(Instant.ofEpochMilli(stopMs).atZone(ZoneId.systemDefault())),
-                "duration" to String.format(Locale.ROOT, "%.3f", (stopMs - startMs) / 1_000.0),
-                "status" to status
-            )
-        }
-    }
-
-    override fun close() {
-        val invocationEnd = System.currentTimeMillis()
-        val invocationDuration = String.format(Locale.ROOT, "%.3f", (invocationEnd - invocationStart) / 1_000.0)
-
-        val configStartFormatted = dateFormatter.format(
-            Instant.ofEpochMilli(configStart).atZone(ZoneId.systemDefault())
-        )
-        val configEndFormatted = dateFormatter.format(Instant.ofEpochMilli(configEnd).atZone(ZoneId.systemDefault()))
-        val configDuration = String.format(Locale.ROOT, "%.3f", (configEnd - configStart) / 1_000.0)
-
-        val content = mapOf(
-            "invocation" to mapOf(
-                "start" to dateFormatter.format(Instant.ofEpochMilli(invocationStart).atZone(ZoneId.systemDefault())),
-                "end" to dateFormatter.format(Instant.ofEpochMilli(invocationEnd).atZone(ZoneId.systemDefault())),
-                "duration" to invocationDuration
-            ),
-            "configPhase" to mapOf(
-                "start" to configStartFormatted,
-                "end" to configEndFormatted,
-                "duration" to configDuration
-            ),
-            "tasks" to taskRecords
-        )
-
-        val outputDir = File(parameters.outputDir.get()).apply { mkdirs() }
-        val fileSuffix = parameters.fileSuffix.get()
-        File(outputDir, "build-metrics-$fileSuffix.json").writeText(JsonBuilder(content).toPrettyString())
-    }
-}
 
 /**
  * Print Gradle errors in such a way that Treeherder includes them in its "Failure Summary".  This
@@ -169,91 +81,107 @@ abstract class DependenciesPlugin : Plugin<Settings> {
     @get:Inject
     protected abstract val flowProviders: FlowProviders
 
-    @get:Inject
-    protected abstract val buildEventsListenerRegistry: BuildEventsListenerRegistry
-
-    // No public Gradle API exposes a unique build-invocation id.
-    @get:Inject
-    @Suppress("InternalGradleApiUsage")
-    protected abstract val buildInvocationScopeId: org.gradle.internal.scopeids.id.BuildInvocationScopeId
-
-    companion object {
-        private val rootGradleBuild = AtomicReference<Gradle?>(null)
-
-        @Volatile
-        private var buildMetricsInitialized = false
-    }
-
     override fun apply(settings: Settings) {
+        val mozconfig = settings.gradle.extensions.extraProperties["mozconfig"] as Map<*, *>
+        val substs = mozconfig["substs"] as Map<*, *>
+        val appservicesInTree = (substs["MOZ_APPSERVICES_IN_TREE"] as? String ?: "0") == "1"
+        val onTry = settings.providers.environmentVariable("MOZ_SOURCE_REPO")
+            .orNull == "https://hg.mozilla.org/try"
+
+        // `mobile/android/shared-settings.gradle` sets `config` in `projectsLoaded`, which is
+        // after this plugin is applied, so resolve the version lazily.
+        @Suppress("GradleProjectIsolation")
+        val componentsVersion = lazy {
+            val config = settings.gradle.rootProject.extensions.extraProperties["config"] as GroovyObject
+            config.getProperty("componentsVersion") as String
+        }
+
+        ComponentsDependencies.initialize(appservicesInTree, onTry, componentsVersion)
+
         flowScope.always(LogGradleErrorForTreeHerder::class) {
             parameters.failure.set(flowProviders.buildWorkResult.map { result -> result.failure })
         }
-
-        // Initialize build metrics only if the buildMetrics property is set
-        settings.gradle.projectsEvaluated {
-            if (gradle.rootProject.hasProperty("buildMetrics")) {
-                initializeBuildMetrics(settings)
-            }
-        }
-    }
-
-    private fun initializeBuildMetrics(settings: Settings) {
-        val rootGradle = generateSequence(settings.gradle) { it.parent }.last()
-
-        // Only initialize the shared service once from the root gradle build
-        if (rootGradleBuild.compareAndSet(null, rootGradle)) {
-            rootGradle.taskGraph.whenReady {
-                val provider = rootGradle.sharedServices.registrations.getByName("buildMetricsService")
-                val service = provider.service.get() as BuildMetricsService
-
-                service.invocationStart = System.currentTimeMillis()
-                service.configStart = System.currentTimeMillis()
-                service.configEnd = System.currentTimeMillis()
-            }
-        }
-
-        // Register a task listener for all builds
-        val buildMetricsProvider = rootGradle.sharedServices.registerIfAbsent(
-            "buildMetricsService",
-            BuildMetricsService::class.java
-        ) {
-            val outputDir = rootGradle.startParameter.projectProperties["buildMetricsOutputDir"]
-                ?: throw IllegalStateException("buildMetricsOutputDir property is required when buildMetrics is enabled")
-            @Suppress("InternalGradleApiUsage")
-            val fileSuffix = rootGradle.startParameter.projectProperties["buildMetricsFileSuffix"]
-                ?: buildInvocationScopeId.id.toString()
-
-            parameters.outputDir.set(outputDir)
-            parameters.fileSuffix.set(fileSuffix)
-        }
-
-        buildEventsListenerRegistry.onTaskCompletion(buildMetricsProvider)
     }
 }
 
 // Synchronized dependencies used by (some) modules
 @Suppress("Unused", "MaxLineLength")
 object ComponentsDependencies {
-    val mozilla_appservices_ads_client = "${ApplicationServicesConfig.groupId}:ads-client:${ApplicationServicesConfig.version}"
-    val mozilla_appservices_fxaclient = "${ApplicationServicesConfig.groupId}:fxaclient:${ApplicationServicesConfig.version}"
-    val mozilla_appservices_nimbus = "${ApplicationServicesConfig.groupId}:nimbus:${ApplicationServicesConfig.version}"
-    val mozilla_appservices_autofill = "${ApplicationServicesConfig.groupId}:autofill:${ApplicationServicesConfig.version}"
-    val mozilla_appservices_logins = "${ApplicationServicesConfig.groupId}:logins:${ApplicationServicesConfig.version}"
-    val mozilla_appservices_merino = "${ApplicationServicesConfig.groupId}:merino:${ApplicationServicesConfig.version}"
-    val mozilla_appservices_places = "${ApplicationServicesConfig.groupId}:places:${ApplicationServicesConfig.version}"
-    val mozilla_appservices_syncmanager = "${ApplicationServicesConfig.groupId}:syncmanager:${ApplicationServicesConfig.version}"
-    val mozilla_remote_settings = "${ApplicationServicesConfig.groupId}:remotesettings:${ApplicationServicesConfig.version}"
-    val mozilla_appservices_push = "${ApplicationServicesConfig.groupId}:push:${ApplicationServicesConfig.version}"
-    val mozilla_appservices_search = "${ApplicationServicesConfig.groupId}:search:${ApplicationServicesConfig.version}"
-    val mozilla_appservices_tabs = "${ApplicationServicesConfig.groupId}:tabs:${ApplicationServicesConfig.version}"
-    val mozilla_appservices_suggest = "${ApplicationServicesConfig.groupId}:suggest:${ApplicationServicesConfig.version}"
-    val mozilla_appservices_viaduct = "${ApplicationServicesConfig.groupId}:viaduct:${ApplicationServicesConfig.version}"
-    val mozilla_appservices_init_rust_components = "${ApplicationServicesConfig.groupId}:init_rust_components:${ApplicationServicesConfig.version}"
-    val mozilla_appservices_full_megazord = "${ApplicationServicesConfig.groupId}:full-megazord:${ApplicationServicesConfig.version}"
-    val mozilla_appservices_full_megazord_libsForTests = "${ApplicationServicesConfig.groupId}:full-megazord-libsForTests:${ApplicationServicesConfig.version}"
+    private var appservicesInTree: Boolean? = null
+    private var onTry: Boolean = false
+    private var componentsVersion: Lazy<String>? = null
 
-    val mozilla_appservices_errorsupport = "${ApplicationServicesConfig.groupId}:errorsupport:${ApplicationServicesConfig.version}"
-    val mozilla_appservices_rust_log_forwarder = "${ApplicationServicesConfig.groupId}:rust-log-forwarder:${ApplicationServicesConfig.version}"
-    val mozilla_appservices_sync15 = "${ApplicationServicesConfig.groupId}:sync15:${ApplicationServicesConfig.version}"
-    val mozilla_appservices_fxrelay = "${ApplicationServicesConfig.groupId}:relay:${ApplicationServicesConfig.version}"
+    internal fun initialize(inTree: Boolean, onTry: Boolean, componentsVersion: Lazy<String>) {
+        appservicesInTree = inTree
+        this.onTry = onTry
+        this.componentsVersion = componentsVersion
+    }
+
+    internal fun getGroupId(): String {
+        if (appservicesInTree ?: false) {
+            return "org.mozilla.appservices"
+        }
+        return ApplicationServicesConfig.groupId
+    }
+
+    internal fun getVersionNumber(): String {
+        if (appservicesInTree ?: false) {
+            // On try, relax version pin to allow for --use-existing-task.
+            if (onTry) {
+                return "+"
+            }
+            // In-tree app-services publishes with the android-components version, like `159.0a1`;
+            // see `configurePublish` in `third_party/application-services/publish.gradle`.
+            return componentsVersion!!.value
+        }
+        return ApplicationServicesConfig.version
+    }
+
+    @JvmStatic
+    val mozilla_appservices_ads_client get() = "${getGroupId()}:ads-client:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_appservices_fxaclient get() = "${getGroupId()}:fxaclient:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_appservices_nimbus get() = "${getGroupId()}:nimbus:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_appservices_autofill get() = "${getGroupId()}:autofill:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_appservices_db_crypto get() = "${getGroupId()}:db-crypto:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_appservices_logins get() = "${getGroupId()}:logins:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_appservices_merino get() = "${getGroupId()}:merino:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_appservices_places get() = "${getGroupId()}:places:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_appservices_syncmanager get() = "${getGroupId()}:syncmanager:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_remote_settings get() = "${getGroupId()}:remotesettings:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_appservices_push get() = "${getGroupId()}:push:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_appservices_search get() = "${getGroupId()}:search:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_appservices_tabs get() = "${getGroupId()}:tabs:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_appservices_suggest get() = "${getGroupId()}:suggest:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_appservices_viaduct get() = "${getGroupId()}:viaduct:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_appservices_init_rust_components get() = "${getGroupId()}:init_rust_components:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_appservices_full_megazord get() = "${getGroupId()}:full-megazord:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_appservices_full_megazord_libsForTests get() = "${getGroupId()}:full-megazord-libsForTests:${getVersionNumber()}"
+
+    @JvmStatic
+    val mozilla_appservices_errorsupport get() = "${getGroupId()}:errorsupport:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_appservices_rust_log_forwarder get() = "${getGroupId()}:rust-log-forwarder:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_appservices_sync15 get() = "${getGroupId()}:sync15:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_appservices_tracing get() = "${getGroupId()}:tracing:${getVersionNumber()}"
+    @JvmStatic
+    val mozilla_appservices_fxrelay get() = "${getGroupId()}:relay:${getVersionNumber()}"
 }

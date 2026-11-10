@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <ctime>
+#include <limits>
 
 #include "BorderConsts.h"
 #include "ImageContainer.h"
@@ -1856,51 +1857,28 @@ bool nsCSSRendering::CanBuildWebRenderDisplayItemsForStyleImageLayer(
     WebRenderLayerManager* aManager, nsPresContext& aPresCtx, nsIFrame* aFrame,
     const nsStyleBackground* aBackgroundStyle, int32_t aLayer,
     uint32_t aPaintFlags) {
-  if (!aBackgroundStyle) {
-    return false;
-  }
-
-  MOZ_ASSERT(aFrame && aLayer >= 0 &&
+  MOZ_ASSERT(aBackgroundStyle);
+  MOZ_ASSERT(aFrame);
+  MOZ_ASSERT(aLayer >= 0 &&
              (uint32_t)aLayer < aBackgroundStyle->mImage.mLayers.Length());
 
-  // We cannot draw native themed backgrounds
-  StyleAppearance appearance = aFrame->StyleDisplay()->EffectiveAppearance();
-  if (appearance != StyleAppearance::None) {
-    nsITheme* theme = aPresCtx.Theme();
-    if (theme->ThemeSupportsWidget(&aPresCtx, aFrame, appearance)) {
-      return false;
-    }
-  }
-
-  // We only support painting gradients and image for a single style image
-  // layer, and we don't support crop-rects.
   const auto& styleImage =
       aBackgroundStyle->mImage.mLayers[aLayer].mImage.FinalImage();
-  if (styleImage.IsImageRequestType()) {
-    imgRequestProxy* requestProxy = styleImage.GetImageRequest();
-    if (!requestProxy) {
-      return false;
-    }
-
-    uint32_t imageFlags = imgIContainer::FLAG_NONE;
-    if (aPaintFlags & nsCSSRendering::PAINTBG_SYNC_DECODE_IMAGES) {
-      imageFlags |= imgIContainer::FLAG_SYNC_DECODE;
-    }
-
-    nsCOMPtr<imgIContainer> srcImage;
-    requestProxy->GetImage(getter_AddRefs(srcImage));
-    if (!srcImage ||
-        !srcImage->IsImageContainerAvailable(aManager, imageFlags)) {
-      return false;
-    }
-
-    return true;
+  switch (styleImage.tag) {
+    case StyleImage::Tag::ImageSet:
+    case StyleImage::Tag::LightDark:
+      MOZ_FALLTHROUGH_ASSERT("Should've been resolved");
+    case StyleImage::Tag::Url:
+    case StyleImage::Tag::Gradient:
+    case StyleImage::Tag::MozSymbolicIcon:
+    case StyleImage::Tag::Image:
+    case StyleImage::Tag::None:
+    case StyleImage::Tag::CrossFade:
+      return true;
+    case StyleImage::Tag::Element:
+      // Try to not add to this branch.
+      break;
   }
-
-  if (styleImage.IsGradient()) {
-    return true;
-  }
-
   return false;
 }
 
@@ -1996,32 +1974,37 @@ static bool IsSVGStyleGeometryBox(StyleGeometryBox aBox) {
           aBox == StyleGeometryBox::ViewBox);
 }
 
-static bool IsHTMLStyleGeometryBox(StyleGeometryBox aBox) {
-  return (aBox == StyleGeometryBox::ContentBox ||
-          aBox == StyleGeometryBox::PaddingBox ||
-          aBox == StyleGeometryBox::BorderBox ||
-          aBox == StyleGeometryBox::MarginBox);
-}
-
-static StyleGeometryBox ComputeBoxValueForOrigin(nsIFrame* aForFrame,
-                                                 StyleGeometryBox aBox) {
+static StyleGeometryBox ComputeBoxValueForOrigin(
+    nsIFrame* aForFrame, StyleBackgroundOrigin aOrigin) {
   // The mapping for mask-origin is from
   // https://drafts.fxtf.org/css-masking/#the-mask-origin
-  if (!aForFrame->HasAnyStateBits(NS_FRAME_SVG_LAYOUT)) {
-    // For elements with associated CSS layout box, the values fill-box,
-    // stroke-box and view-box compute to the initial value of mask-origin.
-    if (IsSVGStyleGeometryBox(aBox)) {
-      return StyleGeometryBox::BorderBox;
-    }
-  } else {
+  const bool svgLayout = aForFrame->HasAnyStateBits(NS_FRAME_SVG_LAYOUT);
+  switch (aOrigin) {
     // For SVG elements without associated CSS layout box, the values
     // content-box, padding-box, border-box compute to fill-box.
-    if (IsHTMLStyleGeometryBox(aBox)) {
-      return StyleGeometryBox::FillBox;
-    }
+    case StyleBackgroundOrigin::ContentBox:
+      return svgLayout ? StyleGeometryBox::FillBox
+                       : StyleGeometryBox::ContentBox;
+    case StyleBackgroundOrigin::PaddingBox:
+      return svgLayout ? StyleGeometryBox::FillBox
+                       : StyleGeometryBox::PaddingBox;
+    case StyleBackgroundOrigin::BorderBox:
+      return svgLayout ? StyleGeometryBox::FillBox
+                       : StyleGeometryBox::BorderBox;
+    // For elements with associated CSS layout box, the values fill-box,
+    // stroke-box and view-box compute to the initial value of mask-origin.
+    case StyleBackgroundOrigin::FillBox:
+      return svgLayout ? StyleGeometryBox::FillBox
+                       : StyleGeometryBox::BorderBox;
+    case StyleBackgroundOrigin::StrokeBox:
+      return svgLayout ? StyleGeometryBox::StrokeBox
+                       : StyleGeometryBox::BorderBox;
+    case StyleBackgroundOrigin::ViewBox:
+      return svgLayout ? StyleGeometryBox::ViewBox
+                       : StyleGeometryBox::BorderBox;
   }
-
-  return aBox;
+  MOZ_ASSERT_UNREACHABLE("Unknown background-origin value");
+  return StyleGeometryBox::BorderBox;
 }
 
 // Resolves a background-clip/mask-clip value into the geometry box it paints
@@ -2785,14 +2768,6 @@ nsRect nsCSSRendering::ComputeImageLayerPositioningArea(
     positionArea = nsRect(nsPoint(0, 0), aBorderArea.Size());
   }
 
-  // See the comment of StyleGeometryBox::MarginBox.
-  // Hitting this assertion means we decide to turn on margin-box support for
-  // positioned mask from CSS parser and style system. In this case, you
-  // should *inflate* positionArea by the margin returning from
-  // geometryFrame->GetUsedMargin() in the code chunk bellow.
-  MOZ_ASSERT(aLayer.mOrigin != StyleGeometryBox::MarginBox,
-             "StyleGeometryBox::MarginBox rendering is not supported yet.\n");
-
   // {background|mask} images are tiled over the '{background|mask}-clip' area
   // but the origin of the tiling is based on the '{background|mask}-origin'
   // area.
@@ -2950,6 +2925,32 @@ static nsSize ComputeDrawnSizeForBackground(
   return imageSize;
 }
 
+auto nsCSSRendering::ComputeBackgroundImageInfo(
+    const CSSSizeOrRatio& aIntrinsicSize, const nsSize& aPositionAreaSize,
+    const nsStyleImageLayers::Layer& aLayer) -> BackgroundImageInfo {
+  BackgroundImageInfo result;
+
+  // Scale the image as specified for background-size and background-repeat.
+  // Also as required for proper background positioning when background-position
+  // is defined with percentages.
+  result.mSize = ComputeDrawnSizeForBackground(
+      aIntrinsicSize, aPositionAreaSize, aLayer.mSize, aLayer.mRepeat.mXRepeat,
+      aLayer.mRepeat.mYRepeat);
+
+  if (result.mSize.IsEmpty()) {
+    return result;
+  }
+
+  // Compute the anchor point, relative to the positioning area's top left
+  // (which is where the top-left of aForFrame's border-box will be rendered).
+  // Also compute the position of the background now that the background's size
+  // is determined.
+  nsImageRenderer::ComputeObjectAnchorPoint(aLayer.mPosition, aPositionAreaSize,
+                                            result.mSize, &result.mTopLeft,
+                                            &result.mAnchor);
+  return result;
+}
+
 /* ComputeSpacedRepeatSize
  * aImageDimension: the image width/height
  * aAvailableSpace: the background positioning area width/height
@@ -3063,7 +3064,11 @@ nsBackgroundLayerState nsCSSRendering::PrepareImageLayer(
   }
 
   nsBackgroundLayerState state(aForFrame, &aLayer.mImage, irFlags);
-  if (!state.mImageRenderer.PrepareImage()) {
+  if (!state.mImageRenderer.PrepareImage(Some(nsImageRenderer::PositionParams{
+          aLayer,
+          aBorderArea,
+          aBGClipRect,
+      }))) {
     // There's no image or it's not ready to be painted.
     if (aOutIsTransformedFixed &&
         StyleImageLayerAttachment::Fixed == aLayer.mAttachment) {
@@ -3091,7 +3096,7 @@ nsBackgroundLayerState nsCSSRendering::PrepareImageLayer(
   bool transformedFixed = false;
   // Compute background origin area relative to aBorderArea now as we may need
   // it to compute the effective image size for a CSS gradient.
-  nsRect positionArea = ComputeImageLayerPositioningArea(
+  const auto positionArea = ComputeImageLayerPositioningArea(
       aPresContext, aForFrame, aBorderArea, aLayer, &attachedToFrame,
       &transformedFixed);
   if (aOutIsTransformedFixed) {
@@ -3107,41 +3112,27 @@ nsBackgroundLayerState nsCSSRendering::PrepareImageLayer(
     bgClipRect = positionArea + aBorderArea.TopLeft();
   }
 
-  StyleImageLayerRepeat repeatX = aLayer.mRepeat.mXRepeat;
-  StyleImageLayerRepeat repeatY = aLayer.mRepeat.mYRepeat;
+  auto repeatX = aLayer.mRepeat.mXRepeat;
+  auto repeatY = aLayer.mRepeat.mYRepeat;
 
-  // Scale the image as specified for background-size and background-repeat.
-  // Also as required for proper background positioning when background-position
-  // is defined with percentages.
-  CSSSizeOrRatio intrinsicSize = state.mImageRenderer.ComputeIntrinsicSize();
-  nsSize bgPositionSize = positionArea.Size();
-  nsSize imageSize = ComputeDrawnSizeForBackground(
-      intrinsicSize, bgPositionSize, aLayer.mSize, repeatX, repeatY);
-
-  if (imageSize.width <= 0 || imageSize.height <= 0) {
+  const auto intrinsicSize = state.mImageRenderer.ComputeIntrinsicSize();
+  const auto bgPositionSize = positionArea.Size();
+  auto imageInfo =
+      ComputeBackgroundImageInfo(intrinsicSize, bgPositionSize, aLayer);
+  if (imageInfo.IsEmpty()) {
     return state;
   }
 
-  state.mImageRenderer.SetPreferredSize(intrinsicSize, imageSize);
+  state.mAnchor = imageInfo.mAnchor;
+  state.mImageRenderer.SetPreferredSize(intrinsicSize, imageInfo.mSize);
 
-  // Compute the anchor point.
-  //
-  // relative to aBorderArea.TopLeft() (which is where the top-left
-  // of aForFrame's border-box will be rendered)
-  nsPoint imageTopLeft;
-
-  // Compute the position of the background now that the background's size is
-  // determined.
-  nsImageRenderer::ComputeObjectAnchorPoint(aLayer.mPosition, bgPositionSize,
-                                            imageSize, &imageTopLeft,
-                                            &state.mAnchor);
-  state.mRepeatSize = imageSize;
+  state.mRepeatSize = imageInfo.mSize;
   if (repeatX == StyleImageLayerRepeat::Space) {
     bool isRepeat;
     state.mRepeatSize.width = ComputeSpacedRepeatSize(
-        imageSize.width, bgPositionSize.width, isRepeat);
+        imageInfo.mSize.width, bgPositionSize.width, isRepeat);
     if (isRepeat) {
-      imageTopLeft.x = 0;
+      imageInfo.mTopLeft.x = 0;
       state.mAnchor.x = 0;
     } else {
       repeatX = StyleImageLayerRepeat::NoRepeat;
@@ -3151,18 +3142,19 @@ nsBackgroundLayerState nsCSSRendering::PrepareImageLayer(
   if (repeatY == StyleImageLayerRepeat::Space) {
     bool isRepeat;
     state.mRepeatSize.height = ComputeSpacedRepeatSize(
-        imageSize.height, bgPositionSize.height, isRepeat);
+        imageInfo.mSize.height, bgPositionSize.height, isRepeat);
     if (isRepeat) {
-      imageTopLeft.y = 0;
+      imageInfo.mTopLeft.y = 0;
       state.mAnchor.y = 0;
     } else {
       repeatY = StyleImageLayerRepeat::NoRepeat;
     }
   }
 
-  imageTopLeft += positionArea.TopLeft();
+  imageInfo.mTopLeft += positionArea.TopLeft();
   state.mAnchor += positionArea.TopLeft();
-  state.mDestArea = nsRect(imageTopLeft + aBorderArea.TopLeft(), imageSize);
+  state.mDestArea =
+      nsRect(imageInfo.mTopLeft + aBorderArea.TopLeft(), imageInfo.mSize);
   state.mFillArea = state.mDestArea;
 
   ExtendMode repeatMode = ExtendMode::CLAMP;
@@ -3952,22 +3944,39 @@ static sk_sp<const SkTextBlob> CreateTextBlob(
 static void GetTextIntercepts(const sk_sp<const SkTextBlob>& aBlob,
                               const SkScalar aBounds[],
                               nsTArray<SkScalar>& aIntercepts) {
+  uint32_t numGlyphs = 0;
+  SkTextBlob::Iter::Run run;
+  for (SkTextBlob::Iter iter(*aBlob); iter.next(&run);) {
+    numGlyphs += run.fGlyphCount;
+    if (numGlyphs >= std::numeric_limits<uint32_t>::max() / 2) {
+      // Bail out if there are potentially too many intercepts; skia returns a
+      // maximum of two per glyph.
+      return;
+    }
+  }
+  if (!numGlyphs) {
+    return;
+  }
+
+  const auto oldLength = aIntercepts.Length();
+  auto* newElements = aIntercepts.AppendElements(numGlyphs * 2, fallible);
+  if (!newElements) {
+    return;
+  }
+
   // It's possible that we'll encounter a Windows exception deep inside
   // Skia's DirectWrite code while trying to get the intercepts. To avoid
   // crashing in this case, catch any such exception here and discard the
   // newly-added (and incompletely filled in) elements.
-  int count = 0;
   MOZ_SEH_TRY {
-    // https://skia.org/user/api/SkTextBlob_Reference#Text_Blob_Text_Intercepts
-    count = aBlob->getIntercepts(aBounds, nullptr);
-    if (count < 2) {
-      return;
-    }
-    aBlob->getIntercepts(aBounds, aIntercepts.AppendElements(count));
+    int count = aBlob->getIntercepts(aBounds, newElements);
+    MOZ_DIAGNOSTIC_ASSERT(uint32_t(count) <= numGlyphs * 2,
+                          "skia returned > 2 intercepts per glyph?");
+    aIntercepts.TruncateLength(oldLength + count);
   }
   MOZ_SEH_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
     gfxCriticalNote << "Exception occurred getting text intercepts";
-    aIntercepts.TruncateLength(aIntercepts.Length() - count);
+    aIntercepts.TruncateLength(oldLength);
   }
 }
 

@@ -7,7 +7,12 @@ const { buildChatSystemPrompt, loadPrompt } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/models/PromptLoader.sys.mjs"
 );
 
-const { getRemoteClient, MODEL_FEATURES } = ChromeUtils.importESModule(
+const {
+  checkMajorVersion,
+  FEATURE_MAJOR_VERSIONS,
+  getRemoteClient,
+  MODEL_FEATURES,
+} = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/models/Utils.sys.mjs"
 );
 
@@ -18,19 +23,19 @@ let gChatModuleRecords;
 let gSkillNames;
 
 add_setup(async function read_real_chat_records() {
-  // TODO: Bug 2053495 - Refactor tests upon pref removal. FEATURE_MAJOR_VERSIONS
-  // for chat depends on this pref (10 when off, 11 when on), which selects which
-  // params version buildChatSystemPrompt resolves.
   await SpecialPowers.pushPrefEnv({
-    set: [["browser.smartwindow.mistralRelease", false]],
+    set: [["browser.smartwindow.aitab.enabled", true]],
   });
-
   const records = await getRemoteClient().get();
   gChatParams = records.find(
     record =>
       record.kind === "params" &&
       record.feature === MODEL_FEATURES.CHAT &&
-      record.model === CHAT_MODEL
+      record.model === CHAT_MODEL &&
+      checkMajorVersion(
+        record.version,
+        FEATURE_MAJOR_VERSIONS[MODEL_FEATURES.CHAT]
+      )
   );
   gChatModuleRecords = records.filter(
     record => record.kind === "module" && record.feature === MODEL_FEATURES.CHAT
@@ -101,6 +106,7 @@ add_task(
       "{skill_list}",
       "{locale}",
       "{timezone}",
+      "{location}",
       "{isoTimestamp}",
       "{todayDate}",
     ]) {
@@ -119,3 +125,54 @@ add_task(
     }
   }
 );
+
+/**
+ * Test that the pages module follows the AITab preference.
+ */
+add_task(async function test_buildChatSystemPrompt_skips_gated_module() {
+  const AITAB_PREF = "browser.smartwindow.aitab.enabled";
+
+  await SpecialPowers.pushPrefEnv({
+    set: [[AITAB_PREF, false]],
+  });
+  const records = await getRemoteClient().get();
+  const params = records.find(
+    record =>
+      record.kind === "params" &&
+      record.feature === MODEL_FEATURES.CHAT &&
+      record.model === CHAT_MODEL &&
+      checkMajorVersion(
+        record.version,
+        FEATURE_MAJOR_VERSIONS[MODEL_FEATURES.CHAT]
+      )
+  );
+  const entry = params?.modules.find(module => module.name === "pages");
+  Assert.ok(entry, "Chat manifest names the gated pages module");
+  const pagesRecord = records.find(
+    record =>
+      record.kind === "module" &&
+      record.feature === MODEL_FEATURES.CHAT &&
+      record.module === "pages" &&
+      record.model === CHAT_MODEL &&
+      checkMajorVersion(record.version, parseInt(entry.version, 10))
+  );
+  Assert.ok(pagesRecord, "Remote Settings provides the pages module");
+  const marker = pagesRecord.prompts.trim().split("\n")[0];
+
+  let { prompt } = await buildChatSystemPrompt(CHAT_MODEL);
+  Assert.ok(
+    !prompt.includes(marker),
+    "pages module is left out while the aitab pref is off"
+  );
+  await SpecialPowers.popPrefEnv();
+
+  await SpecialPowers.pushPrefEnv({
+    set: [[AITAB_PREF, true]],
+  });
+  ({ prompt } = await buildChatSystemPrompt(CHAT_MODEL));
+  Assert.ok(
+    prompt.includes(marker),
+    "pages module is assembled while the aitab pref is on"
+  );
+  await SpecialPowers.popPrefEnv();
+});

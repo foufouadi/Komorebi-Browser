@@ -148,6 +148,12 @@ void RemoteCDMProxy::Init(PromiseId aPromiseId, const nsAString& aOrigin,
                        fmt::ptr(self.get()), aPromiseId, aValue.IsResolve());
 
                   if (aValue.IsReject()) {
+                    // The GPU process, or decoding in it, is disabled.
+                    if (self->mLocation == RemoteMediaIn::GpuProcess &&
+                        aValue.RejectValue() == NS_ERROR_NOT_AVAILABLE) {
+                      self->FallbackToRDD(aPromiseId, originID);
+                      return;
+                    }
                     self->RejectPromise(
                         aPromiseId,
                         MediaResult(NS_ERROR_DOM_INVALID_STATE_ERR,
@@ -157,6 +163,27 @@ void RemoteCDMProxy::Init(PromiseId aPromiseId, const nsAString& aOrigin,
                   self->InitInternal(aPromiseId, originID);
                 });
           });
+}
+
+void RemoteCDMProxy::FallbackToRDD(PromiseId aPromiseId,
+                                   const nsCString& aOriginID) {
+  LOGD("[{}] RemoteCDMProxy::FallbackToRDD -- promise {}", fmt::ptr(this),
+       aPromiseId);
+  MOZ_ASSERT(mLocation == RemoteMediaIn::GpuProcess);
+  mLocation = RemoteMediaIn::RddProcess;
+  RemoteMediaManagerChild::LaunchRDDProcessIfNeeded()->Then(
+      mThread, __func__,
+      [self = RefPtr{this}, aPromiseId, originID = nsCString(aOriginID)](
+          const GenericNonExclusivePromise::ResolveOrRejectValue& aValue) {
+        if (aValue.IsReject()) {
+          self->RejectPromise(
+              aPromiseId,
+              MediaResult(NS_ERROR_DOM_INVALID_STATE_ERR,
+                          "PRemoteCDMChild ensure process fail"_ns));
+          return;
+        }
+        self->InitInternal(aPromiseId, originID);
+      });
 }
 
 void RemoteCDMProxy::InitInternal(PromiseId aPromiseId,
@@ -359,27 +386,40 @@ void RemoteCDMProxy::CloseSession(const nsAString& aSessionId,
                  aPromiseId]() mutable {
         LOGD("[{}] RemoteCDMProxy::CloseSession -- promise {}",
              fmt::ptr(self.get()), aPromiseId);
-        self->mChild->SendCloseSession(std::move(sessionId))
-            ->Then(
-                GetMainThreadSerialEventTarget(), __func__,
-                [self, aPromiseId](const PRemoteCDMChild::CloseSessionPromise::
-                                       ResolveOrRejectValue& aValue) {
-                  if (self->mKeys.IsNull()) {
-                    return;
-                  }
+        self->mChild->SendCloseSession(sessionId)->Then(
+            GetMainThreadSerialEventTarget(), __func__,
+            [self, aPromiseId,
+             sessionId](const PRemoteCDMChild::CloseSessionPromise::
+                            ResolveOrRejectValue& aValue) {
+              if (self->mKeys.IsNull()) {
+                return;
+              }
 
-                  if (aValue.IsReject()) {
-                    self->RejectPromise(
-                        aPromiseId,
-                        MediaResult(
-                            NS_ERROR_DOM_INVALID_STATE_ERR,
-                            "PRemoteCDMProxy::SendCloseSession IPC fail"_ns));
-                    return;
-                  }
+              bool keyStatusesChange = false;
+              {
+                auto caps = self->mCapabilites.Lock();
+                keyStatusesChange = caps->RemoveKeysForSession(sessionId);
+              }
+              if (RefPtr<dom::MediaKeySession> session =
+                      self->mKeys->GetSession(sessionId)) {
+                if (keyStatusesChange) {
+                  session->DispatchKeyStatusesChange();
+                }
+                session->OnClosed(
+                    dom::MediaKeySessionClosedReason::Closed_by_application);
+              }
 
-                  self->ResolveOrRejectPromise(aPromiseId,
-                                               aValue.ResolveValue());
-                });
+              if (aValue.IsReject()) {
+                self->RejectPromise(
+                    aPromiseId,
+                    MediaResult(
+                        NS_ERROR_DOM_INVALID_STATE_ERR,
+                        "PRemoteCDMProxy::SendCloseSession IPC fail"_ns));
+                return;
+              }
+
+              self->ResolveOrRejectPromise(aPromiseId, aValue.ResolveValue());
+            });
       })));
 }
 
@@ -427,7 +467,13 @@ void RemoteCDMProxy::Shutdown() {
 }
 
 void RemoteCDMProxy::Terminated() {
-  MOZ_ASSERT_UNREACHABLE("Unexpected to be called!");
+  LOGD("[{}] RemoteCDMProxy::Terminated", fmt::ptr(this));
+  NS_DispatchToMainThread(
+      NS_NewRunnableFunction(__func__, [self = RefPtr{this}]() {
+        if (!self->mKeys.IsNull()) {
+          self->mKeys->Terminated();
+        }
+      }));
 }
 
 void RemoteCDMProxy::OnSetSessionId(uint32_t aCreateSessionToken,

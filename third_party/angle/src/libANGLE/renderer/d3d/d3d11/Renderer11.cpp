@@ -100,6 +100,8 @@ enum
 enum ANGLEFeatureLevel
 {
     ANGLE_FEATURE_LEVEL_INVALID,
+    // Feature Level 9_3 is no longer supported, but the enum value is kept reserved to preserve the
+    // bucket numbering of the GPU.ANGLE.D3D11FeatureLevel histogram.
     ANGLE_FEATURE_LEVEL_9_3,
     ANGLE_FEATURE_LEVEL_10_0,
     ANGLE_FEATURE_LEVEL_10_1,
@@ -112,8 +114,6 @@ ANGLEFeatureLevel GetANGLEFeatureLevel(D3D_FEATURE_LEVEL d3dFeatureLevel)
 {
     switch (d3dFeatureLevel)
     {
-        case D3D_FEATURE_LEVEL_9_3:
-            return ANGLE_FEATURE_LEVEL_9_3;
         case D3D_FEATURE_LEVEL_10_0:
             return ANGLE_FEATURE_LEVEL_10_0;
         case D3D_FEATURE_LEVEL_10_1:
@@ -327,22 +327,6 @@ void GetTriFanIndices(const void *indices,
     }
 }
 
-bool IsArrayRTV(ID3D11RenderTargetView *rtv)
-{
-    D3D11_RENDER_TARGET_VIEW_DESC desc;
-    rtv->GetDesc(&desc);
-    if (desc.ViewDimension == D3D11_RTV_DIMENSION_TEXTURE1DARRAY &&
-        desc.Texture1DArray.ArraySize > 1)
-        return true;
-    if (desc.ViewDimension == D3D11_RTV_DIMENSION_TEXTURE2DARRAY &&
-        desc.Texture2DArray.ArraySize > 1)
-        return true;
-    if (desc.ViewDimension == D3D11_RTV_DIMENSION_TEXTURE2DMSARRAY &&
-        desc.Texture2DMSArray.ArraySize > 1)
-        return true;
-    return false;
-}
-
 GLsizei GetAdjustedInstanceCount(const ProgramExecutableD3D *executable, GLsizei instanceCount)
 {
     if (!executable->getExecutable()->usesMultiview())
@@ -355,8 +339,6 @@ GLsizei GetAdjustedInstanceCount(const ProgramExecutableD3D *executable, GLsizei
     }
     return executable->getExecutable()->getNumViews() * instanceCount;
 }
-
-const uint32_t ScratchMemoryBufferLifetime = 1000;
 
 void PopulateFormatDeviceCaps(ID3D11Device *device,
                               DXGI_FORMAT format,
@@ -419,7 +401,7 @@ Renderer11::Renderer11(egl::Display *display)
       mStateCache(),
       mStateManager(this),
       mDebug(nullptr),
-      mScratchMemoryBuffer(ScratchMemoryBufferLifetime)
+      mResourceManager11(this)
 {
     mLineLoopIB    = nullptr;
     mTriangleFanIB = nullptr;
@@ -598,37 +580,7 @@ egl::Error Renderer11::initialize()
         mDeviceContext.As(&mDeviceContext1);
         mDeviceContext.As(&mDeviceContext3);
 
-        angle::ComPtr<IDXGIAdapter2> dxgiAdapter2;
-        mDxgiAdapter.As(&dxgiAdapter2);
-
-        // On D3D_FEATURE_LEVEL_9_*, IDXGIAdapter::GetDesc returns "Software Adapter" for the
-        // description string.
-        // If DXGI1.2 is available then IDXGIAdapter2::GetDesc2 can be used to get the actual
-        // hardware values.
-        if (mRenderer11DeviceCaps.featureLevel <= D3D_FEATURE_LEVEL_9_3 && dxgiAdapter2 != nullptr)
-        {
-            DXGI_ADAPTER_DESC2 adapterDesc2 = {};
-            result                          = dxgiAdapter2->GetDesc2(&adapterDesc2);
-            if (SUCCEEDED(result))
-            {
-                // Copy the contents of the DXGI_ADAPTER_DESC2 into mAdapterDescription (a
-                // DXGI_ADAPTER_DESC).
-                memcpy(mAdapterDescription.Description, adapterDesc2.Description,
-                       sizeof(mAdapterDescription.Description));
-                mAdapterDescription.VendorId              = adapterDesc2.VendorId;
-                mAdapterDescription.DeviceId              = adapterDesc2.DeviceId;
-                mAdapterDescription.SubSysId              = adapterDesc2.SubSysId;
-                mAdapterDescription.Revision              = adapterDesc2.Revision;
-                mAdapterDescription.DedicatedVideoMemory  = adapterDesc2.DedicatedVideoMemory;
-                mAdapterDescription.DedicatedSystemMemory = adapterDesc2.DedicatedSystemMemory;
-                mAdapterDescription.SharedSystemMemory    = adapterDesc2.SharedSystemMemory;
-                mAdapterDescription.AdapterLuid           = adapterDesc2.AdapterLuid;
-            }
-        }
-        else
-        {
-            result = mDxgiAdapter->GetDesc(&mAdapterDescription);
-        }
+        result = mDxgiAdapter->GetDesc(&mAdapterDescription);
 
         if (FAILED(result))
         {
@@ -707,10 +659,10 @@ egl::Error Renderer11::initializeDXGIAdapter()
             return egl::Error(EGL_NOT_INITIALIZED, "Inputted D3D11 device has been lost.");
         }
 
-        if (d3dDevice->GetFeatureLevel() < D3D_FEATURE_LEVEL_9_3)
+        if (d3dDevice->GetFeatureLevel() < D3D_FEATURE_LEVEL_10_0)
         {
             return egl::Error(EGL_NOT_INITIALIZED,
-                              "Inputted D3D11 device must be Feature Level 9_3 or greater.");
+                              "Inputted D3D11 device must be Feature Level 10_0 or greater.");
         }
 
         // The Renderer11 adds a ref to the inputted D3D11 device, like D3D11CreateDevice does.
@@ -1114,7 +1066,7 @@ egl::Error Renderer11::initializeDevice()
     // We don't actually request a 11_1 device, because of complications with the platform
     // update. Instead we check if the mDeviceContext1 pointer cast succeeded.
     // Note: we should support D3D11_0 always, but we aren't guaranteed to be at FL11_0
-    // because the app can specify a lower version (such as 9_3) on Display creation.
+    // because the app can specify a lower version (such as 10_0) on Display creation.
     if (mDeviceContext1 != nullptr)
     {
         angleFeatureLevel = ANGLE_FEATURE_LEVEL_11_1;
@@ -1648,6 +1600,61 @@ egl::Error Renderer11::getD3DTextureInfo(const egl::Config *configuration,
 
         ASSERT(textureAngleFormat);
         sizedInternalFormat = textureAngleFormat->glInternalFormat;
+    }
+    else if (desc.Format == DXGI_FORMAT_Y410 || desc.Format == DXGI_FORMAT_Y210)
+    {
+        // Packed 10-bit YUV is sample-only: the texture keeps its native DXGI
+        // format and is sampled through the documented view alias
+        // (see GetPackedYUVFormat), exposed as GL_RGB10_A2 (Y410) or
+        // GL_RGBA16_EXT (Y210, half width).
+        if (configuration)
+        {
+            // Pbuffers require a renderable surface; packed YUV has no
+            // renderable view.
+            return egl::Error(EGL_BAD_PARAMETER, "Packed YUV textures are not valid for pbuffers.");
+        }
+
+        if (attribs.contains(EGL_D3D11_TEXTURE_PLANE_ANGLE))
+        {
+            return egl::Error(
+                EGL_BAD_PARAMETER,
+                "EGL_D3D11_TEXTURE_PLANE_ANGLE is not valid for packed YUV textures.");
+        }
+
+        textureAngleFormat = desc.Format == DXGI_FORMAT_Y410
+                                 ? &angle::Format::Get(angle::FormatID::R10G10B10A2_UNORM)
+                                 : &angle::Format::Get(angle::FormatID::R16G16B16A16_UNORM);
+        ASSERT(textureAngleFormat);
+        sizedInternalFormat = textureAngleFormat->glInternalFormat;
+
+        // Y210 packs two pixels per word pair: the width must be even, and the
+        // RGBA16 view covers a pair of words, halving the texture width.
+        if (desc.Format == DXGI_FORMAT_Y210)
+        {
+            if (desc.Width % 2 != 0)
+            {
+                return egl::Error(EGL_BAD_PARAMETER,
+                                  "Y210 client buffer textures must have an even width.");
+            }
+            imageWidth /= 2;
+        }
+
+        // The internal format must match the packed format's bit layout.
+        // GL_RGB10_A2_EXT has the same value as GL_RGB10_A2, so both are accepted.
+        if (attribs.contains(EGL_TEXTURE_INTERNAL_FORMAT_ANGLE))
+        {
+            const GLenum internalFormat =
+                static_cast<GLenum>(attribs.get(EGL_TEXTURE_INTERNAL_FORMAT_ANGLE));
+            const GLenum expectedInternalFormat =
+                desc.Format == DXGI_FORMAT_Y410 ? GL_RGB10_A2 : GL_RGBA16_EXT;
+            if (internalFormat != expectedInternalFormat)
+            {
+                std::ostringstream err;
+                err << "Invalid client buffer texture internal format: " << std::hex
+                    << internalFormat;
+                return egl::Error(EGL_BAD_PARAMETER, err.str());
+            }
+        }
     }
     else
     {
@@ -2289,8 +2296,6 @@ bool Renderer11::testDeviceResettable()
 
 void Renderer11::release()
 {
-    mScratchMemoryBuffer.clear();
-
     mAnnotatorContext.release();
     gl::UninitializeDebugAnnotations();
 
@@ -2364,10 +2369,8 @@ std::string Renderer11::getRendererDescription() const
     if (mD3d12Module)
         rendererString << "on12";
 
-    rendererString << " vs_" << getMajorShaderModel() << "_" << getMinorShaderModel()
-                   << getShaderModelSuffix();
-    rendererString << " ps_" << getMajorShaderModel() << "_" << getMinorShaderModel()
-                   << getShaderModelSuffix();
+    rendererString << " vs_" << getMajorShaderModel() << "_" << getMinorShaderModel();
+    rendererString << " ps_" << getMajorShaderModel() << "_" << getMinorShaderModel();
 
     return rendererString.str();
 }
@@ -2452,14 +2455,6 @@ bool Renderer11::getShareHandleSupport() const
         return false;
     }
 
-    // Also disable share handles on Feature Level 9_3, since it doesn't support share handles on
-    // RGBA8 textures/swapchains.
-    if (mRenderer11DeviceCaps.featureLevel <= D3D_FEATURE_LEVEL_9_3)
-    {
-        mSupportsShareHandles = false;
-        return false;
-    }
-
     // Find out which type of D3D11 device the Renderer11 is using
     d3d11::ANGLED3D11DeviceType deviceType = getDeviceType();
     if (deviceType == d3d11::ANGLE_D3D11_DEVICE_TYPE_UNKNOWN)
@@ -2511,8 +2506,6 @@ int Renderer11::getMajorShaderModel() const
             return D3D10_1_SHADER_MAJOR_VERSION;  // 4
         case D3D_FEATURE_LEVEL_10_0:
             return D3D10_SHADER_MAJOR_VERSION;  // 4
-        case D3D_FEATURE_LEVEL_9_3:
-            return D3D10_SHADER_MAJOR_VERSION;  // 4
         default:
             UNREACHABLE();
             return 0;
@@ -2532,32 +2525,9 @@ int Renderer11::getMinorShaderModel() const
             return D3D10_1_SHADER_MINOR_VERSION;  // 1
         case D3D_FEATURE_LEVEL_10_0:
             return D3D10_SHADER_MINOR_VERSION;  // 0
-        case D3D_FEATURE_LEVEL_9_3:
-            return D3D10_SHADER_MINOR_VERSION;  // 0
         default:
             UNREACHABLE();
             return 0;
-    }
-}
-
-std::string Renderer11::getShaderModelSuffix() const
-{
-    switch (mRenderer11DeviceCaps.featureLevel)
-    {
-        case D3D_FEATURE_LEVEL_12_1:
-        case D3D_FEATURE_LEVEL_12_0:
-        case D3D_FEATURE_LEVEL_11_1:
-        case D3D_FEATURE_LEVEL_11_0:
-            return "";
-        case D3D_FEATURE_LEVEL_10_1:
-            return "";
-        case D3D_FEATURE_LEVEL_10_0:
-            return "";
-        case D3D_FEATURE_LEVEL_9_3:
-            return "_level_9_3";
-        default:
-            UNREACHABLE();
-            return "";
     }
 }
 
@@ -2914,6 +2884,8 @@ angle::Result Renderer11::copyCompressedTexture(const gl::Context *context,
     mDeviceContext->CopySubresourceRegion(destResource->get(), destSubresource, 0, 0, 0,
                                           sourceResource->get(), sourceSubresource, nullptr);
 
+    destStorage11->markLevelDirty(destLevel);
+
     return angle::Result::Continue;
 }
 
@@ -3168,8 +3140,7 @@ angle::Result Renderer11::compileToExecutable(d3d::Context *context,
             ANGLE_HR_UNREACHABLE(context);
     }
 
-    profileStream << "_" << getMajorShaderModel() << "_" << getMinorShaderModel()
-                  << getShaderModelSuffix();
+    profileStream << "_" << getMajorShaderModel() << "_" << getMinorShaderModel();
     std::string profile = profileStream.str();
 
     UINT flags = D3DCOMPILE_OPTIMIZATION_LEVEL2;
@@ -3191,15 +3162,6 @@ angle::Result Renderer11::compileToExecutable(d3d::Context *context,
     configs.push_back(CompileConfig(flags, "default"));
     configs.push_back(CompileConfig(flags | D3DCOMPILE_SKIP_VALIDATION, "skip validation"));
     configs.push_back(CompileConfig(flags | D3DCOMPILE_SKIP_OPTIMIZATION, "skip optimization"));
-
-    if (getMajorShaderModel() == 4 && getShaderModelSuffix() != "")
-    {
-        // Some shaders might cause a "blob content mismatch between level9 and d3d10 shader".
-        // e.g. dEQP-GLES2.functional.shaders.struct.local.loop_nested_struct_array_*.
-        // Using the [unroll] directive works around this, as does this D3DCompile flag.
-        configs.push_back(
-            CompileConfig(flags | D3DCOMPILE_AVOID_FLOW_CONTROL, "avoid flow control"));
-    }
 
     D3D_SHADER_MACRO loopMacros[] = {{"ANGLE_ENABLE_LOOP_FLATTEN", "1"}, {0, 0}};
 
@@ -3366,6 +3328,12 @@ angle::Result Renderer11::generateMipmapUsingD3D(const gl::Context *context,
 
     mDeviceContext->GenerateMips(srv->get());
 
+    for (size_t level = textureState.getEffectiveBaseLevel() + 1;
+         level <= textureState.getEffectiveMaxLevel(); ++level)
+    {
+        storage11->markLevelDirty(static_cast<int>(level));
+    }
+
     return angle::Result::Continue;
 }
 
@@ -3412,22 +3380,18 @@ TextureStorage *Renderer11::createTextureStorage2D(GLenum internalformat,
                                                    GLsizei width,
                                                    GLsizei height,
                                                    int levels,
-                                                   const std::string &label,
-                                                   bool hintLevelZeroOnly)
+                                                   const std::string &label)
 {
-    return new TextureStorage11_2D(this, internalformat, bindFlags, width, height, levels, label,
-                                   hintLevelZeroOnly);
+    return new TextureStorage11_2D(this, internalformat, bindFlags, width, height, levels, label);
 }
 
 TextureStorage *Renderer11::createTextureStorageCube(GLenum internalformat,
                                                      BindFlags bindFlags,
                                                      int size,
                                                      int levels,
-                                                     bool hintLevelZeroOnly,
                                                      const std::string &label)
 {
-    return new TextureStorage11_Cube(this, internalformat, bindFlags, size, levels,
-                                     hintLevelZeroOnly, label);
+    return new TextureStorage11_Cube(this, internalformat, bindFlags, size, levels, label);
 }
 
 TextureStorage *Renderer11::createTextureStorage3D(GLenum internalformat,
@@ -3499,8 +3463,6 @@ angle::Result Renderer11::readFromAttachment(const gl::Context *context,
     ASSERT(sourceArea.width >= 0);
     ASSERT(sourceArea.height >= 0);
 
-    const bool invertTexture = UsePresentPathFast(this, &srcAttachment);
-
     RenderTarget11 *rt11 = nullptr;
     ANGLE_TRY(srcAttachment.getRenderTarget(context, 0, &rt11));
     ASSERT(rt11->getTexture().valid());
@@ -3508,37 +3470,17 @@ angle::Result Renderer11::readFromAttachment(const gl::Context *context,
     const TextureHelper11 &textureHelper = rt11->getTexture();
     unsigned int sourceSubResource       = rt11->getSubresourceIndex();
 
-    const gl::Extents &texSize = textureHelper.getExtents();
-
-    gl::Rectangle actualArea = sourceArea;
-    bool reverseRowOrder     = pack.reverseRowOrder;
-    if (invertTexture)
-    {
-        actualArea.y    = texSize.height - actualArea.y - actualArea.height;
-        reverseRowOrder = !reverseRowOrder;
-    }
-
-    // Clamp read region to the defined texture boundaries, preventing out of bounds reads
-    // and reads of uninitialized data.
-    gl::Rectangle safeArea;
-    safeArea.x = gl::clamp(actualArea.x, 0, texSize.width);
-    safeArea.y = gl::clamp(actualArea.y, 0, texSize.height);
-    safeArea.width =
-        gl::clamp(actualArea.width + std::min(actualArea.x, 0), 0, texSize.width - safeArea.x);
-    safeArea.height =
-        gl::clamp(actualArea.height + std::min(actualArea.y, 0), 0, texSize.height - safeArea.y);
-
-    ASSERT(safeArea.x >= 0 && safeArea.y >= 0);
-    ASSERT(safeArea.x + safeArea.width <= texSize.width);
-    ASSERT(safeArea.y + safeArea.height <= texSize.height);
-
-    if (safeArea.width == 0 || safeArea.height == 0)
+    gl::Rectangle clippedReadArea;
+    bool reverseRowOrder     = false;
+    const bool invertTexture = UsePresentPathFast(this, &srcAttachment);
+    if (!ClipRenderTargetReadArea(*rt11, sourceArea, invertTexture, pack.reverseRowOrder,
+                                  &clippedReadArea, &reverseRowOrder))
     {
         // no work to do
         return angle::Result::Continue;
     }
 
-    gl::Extents safeSize(safeArea.width, safeArea.height, 1);
+    const gl::Extents stagingTextureSize(clippedReadArea.width, clippedReadArea.height, 1);
 
     // Intermediate texture used for copy for multiplanar formats or resolving multisampled
     // textures.
@@ -3554,8 +3496,8 @@ angle::Result Renderer11::readFromAttachment(const gl::Context *context,
         if (d3d11::IsSupportedMultiplanarFormat(textureHelper.getFormat()))
         {
             D3D11_TEXTURE2D_DESC planeDesc;
-            planeDesc.Width              = static_cast<UINT>(safeSize.width);
-            planeDesc.Height             = static_cast<UINT>(safeSize.height);
+            planeDesc.Width              = static_cast<UINT>(stagingTextureSize.width);
+            planeDesc.Height             = static_cast<UINT>(stagingTextureSize.height);
             planeDesc.MipLevels          = 1;
             planeDesc.ArraySize          = 1;
             planeDesc.Format             = textureHelper.getFormatSet().srvFormat;
@@ -3593,19 +3535,21 @@ angle::Result Renderer11::readFromAttachment(const gl::Context *context,
             ANGLE_TRY(allocateResource(context11, srvDesc, textureHelper.get(), &srv));
             srv.setInternalName("readFromAttachment.SRV");
 
-            gl::Box srcGlBox(safeArea.x, safeArea.y, 0, safeArea.width, safeArea.height, 1);
-            gl::Box destGlBox(0, 0, 0, safeSize.width, safeSize.height, 1);
+            gl::Box srcGlBox(clippedReadArea.x, clippedReadArea.y, 0, clippedReadArea.width,
+                             clippedReadArea.height, 1);
+            gl::Box destGlBox(0, 0, 0, stagingTextureSize.width, stagingTextureSize.height, 1);
 
             // Perform a copy to planeTexture as we cannot read directly from NV12 d3d11 textures.
-            ANGLE_TRY(mBlit->copyTexture(
-                context, srv, srcGlBox, safeSize, internalFormat, rtv, destGlBox, safeSize, nullptr,
-                gl::GetUnsizedFormat(internalFormat), GL_NONE, GL_NEAREST, false, false, false));
+            ANGLE_TRY(mBlit->copyTexture(context, srv, srcGlBox, stagingTextureSize, internalFormat,
+                                         rtv, destGlBox, stagingTextureSize, nullptr,
+                                         gl::GetUnsizedFormat(internalFormat), GL_NONE, GL_NEAREST,
+                                         false, false, false));
 
-            // Update safeArea based on the destination.
-            safeArea.x      = destGlBox.x;
-            safeArea.y      = destGlBox.y;
-            safeArea.width  = destGlBox.width;
-            safeArea.height = destGlBox.height;
+            // Update clippedReadArea based on the destination.
+            clippedReadArea.x      = destGlBox.x;
+            clippedReadArea.y      = destGlBox.y;
+            clippedReadArea.width  = destGlBox.width;
+            clippedReadArea.height = destGlBox.height;
 
             sourceSubResource = 0;
             srcTexture        = &intermediateTextureHelper;
@@ -3615,8 +3559,8 @@ angle::Result Renderer11::readFromAttachment(const gl::Context *context,
             if (textureHelper.getSampleCount() > 1)
             {
                 D3D11_TEXTURE2D_DESC resolveDesc;
-                resolveDesc.Width              = static_cast<UINT>(texSize.width);
-                resolveDesc.Height             = static_cast<UINT>(texSize.height);
+                resolveDesc.Width              = static_cast<UINT>(rt11->getWidth());
+                resolveDesc.Height             = static_cast<UINT>(rt11->getHeight());
                 resolveDesc.MipLevels          = 1;
                 resolveDesc.ArraySize          = 1;
                 resolveDesc.Format             = textureHelper.getFormat();
@@ -3644,10 +3588,10 @@ angle::Result Renderer11::readFromAttachment(const gl::Context *context,
     }
 
     D3D11_BOX srcBox;
-    srcBox.left   = static_cast<UINT>(safeArea.x);
-    srcBox.right  = static_cast<UINT>(safeArea.x + safeArea.width);
-    srcBox.top    = static_cast<UINT>(safeArea.y);
-    srcBox.bottom = static_cast<UINT>(safeArea.y + safeArea.height);
+    srcBox.left   = static_cast<UINT>(clippedReadArea.x);
+    srcBox.right  = static_cast<UINT>(clippedReadArea.x + clippedReadArea.width);
+    srcBox.top    = static_cast<UINT>(clippedReadArea.y);
+    srcBox.bottom = static_cast<UINT>(clippedReadArea.y + clippedReadArea.height);
 
     // Select the correct layer from a 3D attachment
     srcBox.front = 0;
@@ -3659,8 +3603,8 @@ angle::Result Renderer11::readFromAttachment(const gl::Context *context,
 
     TextureHelper11 stagingHelper;
     ANGLE_TRY(createStagingTexture(context, textureHelper.getTextureType(),
-                                   srcTexture->getFormatSet(), safeSize, StagingAccess::READ,
-                                   &stagingHelper));
+                                   srcTexture->getFormatSet(), stagingTextureSize,
+                                   StagingAccess::READ, &stagingHelper));
     stagingHelper.setInternalName("readFromAttachment::stagingHelper");
 
     mDeviceContext->CopySubresourceRegion(stagingHelper.get(), 0, 0, 0, 0, srcTexture->get(),
@@ -3669,7 +3613,8 @@ angle::Result Renderer11::readFromAttachment(const gl::Context *context,
     const angle::Format &angleFormat = GetFormatFromFormatType(format, type);
     gl::Buffer *packBuffer = context->getState().getTargetBuffer(gl::BufferBinding::PixelPack);
 
-    PackPixelsParams packParams(safeArea, angleFormat, outputPitch, reverseRowOrder, packBuffer, 0);
+    PackPixelsParams packParams(clippedReadArea, angleFormat, outputPitch, reverseRowOrder,
+                                packBuffer, 0);
     return packPixels(context, stagingHelper, packParams, pixelsOut);
 }
 
@@ -3838,6 +3783,29 @@ angle::Result Renderer11::blitRenderbufferRect(const gl::Context *context,
     bool partialDSBlit =
         (nativeFormat.depthBits > 0 && depthBlit) != (nativeFormat.stencilBits > 0 && stencilBlit);
 
+    // Fast path: resolve a multisampled source straight into the destination.
+    //
+    // ResolveSubresource covers an entire subresource and cannot offset, scale or flip, so this
+    // is only valid for an unscaled, unflipped, full-surface color blit between matching formats.
+    // When it applies it replaces both the resolve into the renderer-owned scratch texture and the
+    // subsequent full-screen shader blit with a single GPU operation. This is the common shape of
+    // a GLES 3.0 MSAA resolve (render into a multisampled FBO, glBlitFramebuffer to a
+    // single-sampled one), including the blit that presents to the swapchain.
+    if (colorBlit && wholeBufferCopy && !stretchRequired && readRenderTarget->isMultisampled() &&
+        !drawRenderTarget->isMultisampled() &&
+        readRenderTarget11->getFormatSet().formatID ==
+            drawRenderTarget11->getFormatSet().formatID &&
+        !readRenderTarget11->getTexture().is3D() && !drawTexture.is3D())
+    {
+        ASSERT(!outOfBounds && !reversalRequired && !colorMaskingNeeded);
+        ASSERT(!depthBlit && !stencilBlit && !partialDSBlit);
+        mDeviceContext->ResolveSubresource(drawTexture.get(), drawSubresource,
+                                           readRenderTarget11->getTexture().get(),
+                                           readRenderTarget11->getSubresourceIndex(),
+                                           readRenderTarget11->getFormatSet().texFormat);
+        return angle::Result::Continue;
+    }
+
     const bool canCopySubresource =
         drawRenderTarget->getSamples() == readRenderTarget->getSamples() &&
         readRenderTarget11->getFormatSet().formatID ==
@@ -3888,6 +3856,9 @@ angle::Result Renderer11::blitRenderbufferRect(const gl::Context *context,
             ASSERT(readSRV.valid());
         }
     }
+
+    // Stencil blits don't use shaders.
+    ASSERT(readSRV.valid() || stencilBlit || canCopySubresource);
 
     if (canCopySubresource)
     {
@@ -4103,18 +4074,9 @@ angle::Result Renderer11::getVertexSpaceRequired(const gl::Context *context,
         return angle::Result::Continue;
     }
 
-    size_t elementCount        = 0;
     const unsigned int divisor = binding.getDivisor();
-    if (instances == 0 || divisor == 0)
-    {
-        elementCount = count;
-    }
-    else
-    {
-        // Round up to divisor, if possible
-        elementCount = static_cast<size_t>(UnsignedCeilDivide64(
-            static_cast<uint64_t>(instances) + baseInstance, static_cast<uint64_t>(divisor)));
-    }
+    size_t elementCount =
+        gl::ComputeVertexBindingElementCount(divisor, count, instances, baseInstance);
 
     ASSERT(elementCount > 0);
 
@@ -4176,14 +4138,6 @@ ContextImpl *Renderer11::createContext(const gl::State &state, gl::ErrorSet *err
 FramebufferImpl *Renderer11::createDefaultFramebuffer(const gl::FramebufferState &state)
 {
     return new Framebuffer11(state, this);
-}
-
-angle::Result Renderer11::getScratchMemoryBuffer(Context11 *context11,
-                                                 size_t requestedSize,
-                                                 angle::MemoryBuffer **bufferOut)
-{
-    ANGLE_CHECK_GL_ALLOC(context11, mScratchMemoryBuffer.get(requestedSize, bufferOut));
-    return angle::Result::Continue;
 }
 
 gl::Version Renderer11::getMaxSupportedESVersion() const
@@ -4340,10 +4294,6 @@ angle::Result Renderer11::clearRenderTarget(const gl::Context *context,
 
     ASSERT(rt11->getRenderTargetView().valid());
     ID3D11RenderTargetView *rtv = rt11->getRenderTargetView().get();
-
-    // There are complications with some types of RTV and FL 9_3 with ClearRenderTargetView.
-    // See https://msdn.microsoft.com/en-us/library/windows/desktop/ff476388(v=vs.85).aspx
-    ASSERT(mRenderer11DeviceCaps.featureLevel > D3D_FEATURE_LEVEL_9_3 || !IsArrayRTV(rtv));
 
     const auto &d3d11Format = rt11->getFormatSet();
     const auto &glFormat    = gl::GetSizedInternalFormatInfo(renderTarget->getInternalFormat());

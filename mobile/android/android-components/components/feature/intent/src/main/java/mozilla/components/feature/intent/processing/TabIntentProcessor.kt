@@ -18,16 +18,17 @@ import java.net.InetAddress
 import java.net.MalformedURLException
 import java.net.URL
 import java.net.UnknownHostException
-import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers.IO
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import mozilla.components.browser.state.state.SessionState
 import mozilla.components.browser.state.state.externalPackage
+import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.concept.engine.Engine
 import mozilla.components.concept.engine.EngineSession.LoadUrlFlags
 import mozilla.components.concept.engine.EngineSession.LoadUrlFlags.Companion.APP_LINK_LAUNCH_TYPE_UNKNOWN
 import mozilla.components.feature.search.SearchUseCases
+import mozilla.components.feature.search.ext.waitForSelectedOrDefaultSearchEngine
 import mozilla.components.feature.tabs.TabsUseCases
 import mozilla.components.support.base.log.logger.Logger
 import mozilla.components.support.ktx.kotlin.isUrl
@@ -38,16 +39,20 @@ import mozilla.components.support.utils.WebURLFinder
 /**
  * Processor for intents which should trigger session-related actions.
  *
+ * @property store The [BrowserStore] used to wait for the search engine list to finish loading.
  * @property tabsUseCases An instance of [TabsUseCases] used to open new tabs.
  * @property newTabSearchUseCase A reference to [SearchUseCases.NewTabSearchUseCase] to be used for ACTION_SEND intents
  *   if the provided text is not a URL.
  * @property isPrivate Whether a processed intent should open a new tab as private
+ * @property applicationScope A [CoroutineScope] tied to the lifetime of the application process.
  */
 class TabIntentProcessor(
+    private val store: BrowserStore,
     private val tabsUseCases: TabsUseCases,
     private val newTabSearchUseCase: SearchUseCases.NewTabSearchUseCase,
     private val isPrivate: Boolean = false,
     private val engine: Engine? = null,
+    private val applicationScope: CoroutineScope,
 ) : IntentProcessor {
 
     private val logger = Logger("TabIntentProcessor")
@@ -85,9 +90,11 @@ class TabIntentProcessor(
         }
     }
 
-    @OptIn(DelicateCoroutinesApi::class) // GlobalScope usage for DNS warmup in the background
+    // applicationScope is used here: DNS warmup is a fire-and-forget background task
+    // with no result and no cleanup needed. It should continue even if the Activity that
+    // triggered it is destroyed, and the short-lived lookup does not cause a memory leak.
     private fun warmupNativeDNS(normalizedUrl: String) {
-        GlobalScope.launch(IO) {
+        applicationScope.launch(IO) {
             try {
                 val hostToWarmup = getHostForDnsWarmup(normalizedUrl)
                 if (hostToWarmup != null) {
@@ -161,18 +168,22 @@ class TabIntentProcessor(
 
     private fun processSearchIntent(intent: SafeIntent): Boolean {
         val searchQuery = intent.getStringExtra(SearchManager.QUERY)
-
-        return if (searchQuery.isNullOrBlank()) {
-            false
-        } else {
-            val source = SessionState.Source.External.ActionSearch(intent.externalPackage())
-            if (searchQuery.isUrl()) {
-                addNewTab(searchQuery, source)
-            } else {
-                newTabSearchUseCase(searchQuery, source)
-            }
-            true
+        if (searchQuery.isNullOrBlank()) {
+            return false
         }
+
+        val source = SessionState.Source.External.ActionSearch(intent.externalPackage())
+        if (searchQuery.isUrl()) {
+            addNewTab(searchQuery, source)
+        } else {
+            // An external search intent can arrive before the search engine list has loaded.
+            store.waitForSelectedOrDefaultSearchEngine { searchEngine ->
+                if (searchEngine != null) {
+                    newTabSearchUseCase(searchQuery, source)
+                }
+            }
+        }
+        return true
     }
 
     private fun addNewTab(url: String, source: SessionState.Source) {

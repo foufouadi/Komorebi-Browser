@@ -14,9 +14,11 @@
 #include "mozIGeckoMediaPluginService.h"
 #include "mozilla/Casting.h"
 #include "mozilla/FOGIPC.h"
+#ifdef MOZ_WIDGET_ANDROID
+#  include "mozilla/ProcInfoParent.h"
+#endif
 #include "mozilla/dom/KeySystemNames.h"
 #include "mozilla/dom/WidevineCDMManifestBinding.h"
-#include "mozilla/ipc/CrashReporterHost.h"
 #include "mozilla/ipc/Endpoint.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
 #if defined(XP_LINUX) && defined(MOZ_SANDBOX)
@@ -70,7 +72,6 @@ namespace mozilla::gmp {
 GMPParent::GMPParent(nsISerialEventTarget* aGMPEventTarget)
     : mState(GMPState::NotLoaded),
       mPluginId(GeckoChildProcessHost::GetUniqueID()),
-      mProcess(nullptr),
       mDeleteProcessOnlyOnUnload(false),
       mAbnormalShutdownInProgress(false),
       mIsBlockingDeletion(false),
@@ -410,7 +411,6 @@ nsresult GMPParent::LoadProcess() {
     if (!mProcess->Launch(kLaunchTimeoutMs)) {
       GMP_PARENT_LOG_DEBUG("{}: Failed to launch new child process",
                            __FUNCTION__);
-      mProcess->Delete();
       mProcess = nullptr;
       return NS_ERROR_FAILURE;
     }
@@ -422,7 +422,6 @@ nsresult GMPParent::LoadProcess() {
     if (!opened) {
       GMP_PARENT_LOG_DEBUG("{}: Failed to open channel to new child process",
                            __FUNCTION__);
-      mProcess->Delete();
       mProcess = nullptr;
       return NS_ERROR_FAILURE;
     }
@@ -451,6 +450,24 @@ nsresult GMPParent::LoadProcess() {
       }
       GMP_PARENT_LOG_DEBUG("{}: Sent preload-libs ('{}') to child process",
                            __FUNCTION__, mLibs.get());
+    }
+#endif
+
+#ifdef MOZ_WIDGET_ANDROID
+    // On Android the GMP process may be isolated, meaning we must create a
+    // ProcInfoParent to allow GetProcInfo() to query the process info remotely.
+    Endpoint<PProcInfoParent> procInfoParent;
+    Endpoint<PProcInfoChild> procInfoChild;
+    if (NS_SUCCEEDED(PProcInfo::CreateEndpoints(
+            mozilla::ipc::EndpointProcInfo::Current(), OtherEndpointProcInfo(),
+            &procInfoParent, &procInfoChild)) &&
+        SendInitProcInfo(std::move(procInfoChild))) {
+      NS_DispatchToMainThread(NS_NewRunnableFunction(
+          "GMPParent::CreateProcInfoParent",
+          [endpoint = std::move(procInfoParent)]() mutable {
+            RefPtr<ProcInfoParent> actor =
+                ProcInfoParent::Create(std::move(endpoint));
+          }));
     }
 #endif
 
@@ -497,21 +514,22 @@ mozilla::ipc::IPCResult GMPParent::RecvFOGData(ByteBuf&& aBuf) {
 
 #if defined(XP_WIN)
 mozilla::ipc::IPCResult GMPParent::RecvGetModulesTrust(
-    ModulePaths&& aModPaths, bool aRunAtNormalPriority,
+    ModuleIdentifiers&& aModIdents, bool aRunAtNormalPriority,
     GetModulesTrustResolver&& aResolver) {
   class ModulesTrustRunnable final : public Runnable {
    public:
-    ModulesTrustRunnable(ModulePaths&& aModPaths, bool aRunAtNormalPriority,
+    ModulesTrustRunnable(ModuleIdentifiers&& aModIdents,
+                         bool aRunAtNormalPriority,
                          GetModulesTrustResolver&& aResolver)
         : Runnable("GMPParent::RecvGetModulesTrust::ModulesTrustRunnable"),
-          mModPaths(std::move(aModPaths)),
+          mModIdents(std::move(aModIdents)),
           mResolver(std::move(aResolver)),
           mEventTarget(GetCurrentSerialEventTarget()),
           mRunAtNormalPriority(aRunAtNormalPriority) {}
 
     NS_IMETHOD Run() override {
       RefPtr<DllServices> dllSvc(DllServices::Get());
-      dllSvc->GetModulesTrust(std::move(mModPaths), mRunAtNormalPriority)
+      dllSvc->GetModulesTrust(std::move(mModIdents), mRunAtNormalPriority)
           ->Then(
               mEventTarget, __func__,
               [self = RefPtr{this}](ModulesMapResult&& aResult) {
@@ -526,14 +544,14 @@ mozilla::ipc::IPCResult GMPParent::RecvGetModulesTrust(
    private:
     ~ModulesTrustRunnable() override = default;
 
-    ModulePaths mModPaths;
+    ModuleIdentifiers mModIdents;
     GetModulesTrustResolver mResolver;
     nsCOMPtr<nsISerialEventTarget> mEventTarget;
     bool mRunAtNormalPriority;
   };
 
   NS_DispatchToMainThread(MakeAndAddRef<ModulesTrustRunnable>(
-      std::move(aModPaths), aRunAtNormalPriority, std::move(aResolver)));
+      std::move(aModIdents), aRunAtNormalPriority, std::move(aResolver)));
   return IPC_OK();
 }
 #endif  // defined(XP_WIN)
@@ -630,26 +648,6 @@ class NotifyGMPShutdownTask : public Runnable {
   nsString mNodeId;
 };
 
-void GMPParent::ChildTerminated() {
-  RefPtr<GMPParent> self(this);
-  nsCOMPtr<nsISerialEventTarget> gmpEventTarget = GMPEventTarget();
-
-  if (!gmpEventTarget) {
-    // Bug 1163239 - this can happen on shutdown.
-    // PluginTerminated removes the GMP from the GMPService.
-    // On shutdown we can have this case where it is already been
-    // removed so there is no harm in not trying to remove it again.
-    GMP_PARENT_LOG_DEBUG("{}::{}: GMPEventTarget() returned nullptr.",
-                         __CLASS__, __FUNCTION__);
-  } else {
-    gmpEventTarget->Dispatch(
-        NewRunnableMethod<RefPtr<GMPParent>>(
-            "gmp::GeckoMediaPluginServiceParent::PluginTerminated", mService,
-            &GeckoMediaPluginServiceParent::PluginTerminated, self),
-        NS_DISPATCH_NORMAL);
-  }
-}
-
 void GMPParent::DeleteProcess() {
   MOZ_ASSERT(GMPEventTarget()->IsOnCurrentThread());
 
@@ -705,10 +703,11 @@ void GMPParent::DeleteProcess() {
     }
   }
 
+  GMPEventTarget()->Dispatch(NS_NewRunnableFunction(
+      "gmp::GeckoMediaPluginServiceParent::PluginTerminated",
+      [self = RefPtr{this}] { self->mService->PluginTerminated(self); }));
+
   GMP_PARENT_LOG_DEBUG("{}: Shutting down process.", __FUNCTION__);
-  mProcess->Delete(NewRunnableMethod("gmp::GMPParent::ChildTerminated", this,
-                                     &GMPParent::ChildTerminated));
-  GMP_PARENT_LOG_DEBUG("{}: Shut down process", __FUNCTION__);
   mProcess = nullptr;
 
 #if defined(MOZ_WIDGET_ANDROID)

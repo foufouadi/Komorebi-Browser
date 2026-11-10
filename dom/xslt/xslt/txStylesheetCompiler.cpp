@@ -4,6 +4,7 @@
 
 #include "txStylesheetCompiler.h"
 
+#include <memory>
 #include <utility>
 
 #include "mozilla/UniquePtr.h"
@@ -107,7 +108,7 @@ nsresult txStylesheetCompiler::startElement(const char16_t* aName,
 
   UniquePtr<txStylesheetAttr[]> atts;
   if (aAttrCount > 0) {
-    atts = MakeUnique<txStylesheetAttr[]>(aAttrCount);
+    atts = std::make_unique<txStylesheetAttr[]>(aAttrCount);
   }
 
   bool hasOwnNamespaceMap = false;
@@ -290,7 +291,7 @@ nsresult txStylesheetCompiler::endElement() {
   for (i = mInScopeVariables.Length() - 1; i >= 0; --i) {
     txInScopeVariable& var = mInScopeVariables[i];
     if (!--(var.mLevel)) {
-      addInstruction(MakeUnique<txRemoveVariable>(var.mName));
+      addInstruction(std::make_unique<txRemoveVariable>(var.mName));
 
       mInScopeVariables.RemoveElementAt(i);
     }
@@ -343,11 +344,9 @@ void txStylesheetCompiler::cancel(nsresult aError, const char16_t* aErrorText,
     mStatus = aError;
   }
 
-  if (mObserver) {
-    mObserver->onDoneCompiling(this, mStatus, aErrorText, aParam);
-    // This will ensure that we don't call onDoneCompiling twice. Also
-    // ensures that we don't keep the observer alive longer then necessary.
-    mObserver = nullptr;
+  // Clear mObserver before notifying in case of re-entry.
+  if (RefPtr<txACompileObserver> observer = std::move(mObserver)) {
+    observer->onDoneCompiling(this, mStatus, aErrorText, aParam);
   }
 }
 
@@ -409,7 +408,7 @@ nsresult txStylesheetCompiler::ensureNewElementContext() {
     return NS_OK;
   }
 
-  UniquePtr<txElementContext> context(new txElementContext(*mElementContext));
+  auto context = std::make_unique<txElementContext>(*mElementContext);
   pushObject(mElementContext.release());
   mElementContext = std::move(context);
 
@@ -429,11 +428,9 @@ nsresult txStylesheetCompiler::maybeDoneCompiling() {
     }
   }
 
-  if (mObserver) {
-    mObserver->onDoneCompiling(this, mStatus);
-    // This will ensure that we don't call onDoneCompiling twice. Also
-    // ensures that we don't keep the observer alive longer then necessary.
-    mObserver = nullptr;
+  // Clear mObserver before notifying in case of re-entry.
+  if (RefPtr<txACompileObserver> observer = std::move(mObserver)) {
+    observer->onDoneCompiling(this, mStatus);
   }
 
   return NS_OK;
@@ -498,7 +495,7 @@ nsresult txStylesheetCompilerState::init(const nsAString& aStylesheetURI,
     mIsTopCompiler = true;
   }
 
-  mElementContext = MakeUnique<txElementContext>(aStylesheetURI);
+  mElementContext = std::make_unique<txElementContext>(aStylesheetURI);
 
   // Push the "old" txElementContext
   pushObject(nullptr);
@@ -532,7 +529,7 @@ void txStylesheetCompilerState::popSorter() {
 
 void txStylesheetCompilerState::pushChooseGotoList() {
   pushObject(mChooseGotoList.release());
-  mChooseGotoList = MakeUnique<txList>();
+  mChooseGotoList = std::make_unique<txList>();
 }
 
 void txStylesheetCompilerState::popChooseGotoList() {

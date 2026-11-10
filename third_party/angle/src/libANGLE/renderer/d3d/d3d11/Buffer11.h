@@ -110,7 +110,8 @@ class Buffer11 : public BufferD3D
                           const void *data,
                           size_t size,
                           gl::BufferUsage usage,
-                          BufferFeedback *feedback) override;
+                          BufferFeedback *feedback,
+                          gl::ZeroFillRequired zeroFillRequired) override;
     angle::Result setSubData(const gl::Context *context,
                              gl::BufferBinding target,
                              const void *data,
@@ -152,20 +153,34 @@ class Buffer11 : public BufferD3D
         BufferCacheEntry() : storage(nullptr), lruCount(0) {}
 
         BufferStorage *storage;
-        unsigned int lruCount;
+        uint64_t lruCount;
+    };
+
+    struct ConstantBufferKey
+    {
+        ConstantBufferKey(GLintptr offsetIn, GLsizeiptr sizeIn) : offset(offsetIn), size(sizeIn) {}
+        bool operator<(const ConstantBufferKey &rhs) const
+        {
+            return std::tie(offset, size) < std::tie(rhs.offset, rhs.size);
+        }
+        GLintptr offset;
+        GLsizeiptr size;
     };
 
     struct StructuredBufferKey
     {
-        StructuredBufferKey(unsigned int offsetIn, unsigned int structureByteStrideIn)
-            : offset(offsetIn), structureByteStride(structureByteStrideIn)
+        StructuredBufferKey(unsigned int offsetIn,
+                            unsigned int sizeIn,
+                            unsigned int structureByteStrideIn)
+            : offset(offsetIn), size(sizeIn), structureByteStride(structureByteStrideIn)
         {}
         bool operator<(const StructuredBufferKey &rhs) const
         {
-            return std::tie(offset, structureByteStride) <
-                   std::tie(rhs.offset, rhs.structureByteStride);
+            return std::tie(offset, size, structureByteStride) <
+                   std::tie(rhs.offset, rhs.size, rhs.structureByteStride);
         }
         unsigned int offset;
+        unsigned int size;
         unsigned int structureByteStride;
     };
 
@@ -236,8 +251,8 @@ class Buffer11 : public BufferD3D
 
     // Cache of D3D11 constant buffer for specific ranges of buffer data.
     // This is used to emulate UBO ranges on 11.0 devices.
-    // Constant buffers are indexed by there start offset.
-    typedef std::map<GLintptr /*offset*/, BufferCacheEntry> BufferCache;
+    // Constant buffers are indexed by their start offset and size.
+    typedef std::map<ConstantBufferKey, BufferCacheEntry> BufferCache;
     BufferCache mConstantBufferRangeStoragesCache;
     size_t mConstantBufferStorageAdditionalSize;
     unsigned int mMaxConstantBufferLruCount;

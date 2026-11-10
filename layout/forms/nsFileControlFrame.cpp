@@ -38,8 +38,7 @@ using namespace mozilla;
 using namespace mozilla::dom;
 
 nsIFrame* NS_NewFileControlFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell)
-      nsFileControlFrame(aStyle, aPresShell->GetPresContext());
+  return new nsFileControlFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsFileControlFrame)
@@ -287,8 +286,7 @@ nsFileControlFrame::DnDListener::HandleEvent(Event* aEvent) {
           nsContentUtils::DispatchInputEvent(inputElement);
       NS_WARNING_ASSERTION(NS_SUCCEEDED(rvIgnored),
                            "Failed to dispatch input event");
-      nsContentUtils::DispatchTrustedEvent(inputElement->OwnerDoc(),
-                                           inputElement, u"change"_ns,
+      nsContentUtils::DispatchTrustedEvent(inputElement, u"change"_ns,
                                            CanBubble::eYes, Cancelable::eNo);
     }
   }
@@ -363,7 +361,7 @@ bool nsFileControlFrame::DnDListener::CanDropTheseFiles(
 void nsFileControlFrame::SyncDisabledState() {
   if (mContent->AsElement()->State().HasState(ElementState::DISABLED)) {
     mBrowseFilesOrDirs->SetAttr(kNameSpaceID_None, nsGkAtoms::disabled, u""_ns,
-                                true);
+                                true, IsKnownNewAttr::No);
   } else {
     mBrowseFilesOrDirs->UnsetAttr(kNameSpaceID_None, nsGkAtoms::disabled, true);
   }
@@ -421,6 +419,5 @@ NS_IMPL_FRAMEARENA_HELPERS(FileControlLabelFrame)
 
 nsIFrame* NS_NewFileControlLabelFrame(PresShell* aPresShell,
                                       ComputedStyle* aStyle) {
-  return new (aPresShell)
-      FileControlLabelFrame(aStyle, aPresShell->GetPresContext());
+  return new FileControlLabelFrame(aStyle, aPresShell->GetPresContext());
 }

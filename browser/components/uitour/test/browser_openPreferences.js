@@ -19,7 +19,7 @@ add_UITour_task(async function test_openInvalidPreferences() {
   await gContentAPI.openPreferences(999);
 
   try {
-    await waitForConditionPromise(() => {
+    await TestUtils.waitForCondition(() => {
       return gBrowser.selectedBrowser.currentURI.spec.startsWith(
         "about:preferences"
       );
@@ -55,16 +55,9 @@ add_UITour_task(async function test_openPrivacyReports() {
   let tab = await promiseTabOpened;
   await BrowserTestUtils.waitForEvent(gBrowser.selectedBrowser, "Initialized");
   let doc = gBrowser.selectedBrowser.contentDocument;
-  // The Settings Redesign LegacyPaneMappings shim routes "privacy-reports" to
-  // the new "permissionsData" pane while keeping the "reports" spotlight.
-  let expectedHash = Services.prefs.getBoolPref(
-    "browser.settings-redesign.enabled"
-  )
-    ? "#permissionsData"
-    : "#privacy";
   is(
     doc.location.hash,
-    expectedHash,
+    "#permissionsData",
     "Should not display the reports subcategory in the location hash."
   );
   await TestUtils.waitForCondition(

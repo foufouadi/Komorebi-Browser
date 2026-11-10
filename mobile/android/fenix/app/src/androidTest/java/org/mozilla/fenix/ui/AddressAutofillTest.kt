@@ -19,37 +19,36 @@ import org.mozilla.fenix.helpers.TestHelper.exitMenu
 import org.mozilla.fenix.helpers.TestHelper.packageName
 import org.mozilla.fenix.helpers.TestHelper.waitForAppWindowToBeUpdated
 import org.mozilla.fenix.helpers.perf.DetectMemoryLeaksRule
+import org.mozilla.fenix.ui.efficiency.data.AddressDetails
 import org.mozilla.fenix.ui.robots.autofillScreen
 import org.mozilla.fenix.ui.robots.clickPageObject
 import org.mozilla.fenix.ui.robots.homeScreen
 import org.mozilla.fenix.ui.robots.navigationToolbar
 
 class AddressAutofillTest {
-    object FirstAddressAutofillDetails {
-        var navigateToAutofillSettings = true
-        var isAddressAutofillEnabled = true
-        var userHasSavedAddress = false
-        var name = "Mozilla Fenix Firefox"
-        var streetAddress = "Harrison Street"
-        var city = "San Francisco"
-        var state = "Alaska"
-        var zipCode = "94105"
-        var country = "United States"
-        var phoneNumber = "555-5555"
-        var emailAddress = "foo@bar.com"
-    }
+    private val firstAddress =
+        AddressDetails(
+            name = "Mozilla Fenix Firefox",
+            streetAddress = "Harrison Street",
+            city = "San Francisco",
+            state = "Alaska",
+            zipCode = "94105",
+            country = "United States",
+            phoneNumber = "555-5555",
+            emailAddress = "foo@bar.com",
+        )
 
-    object SecondAddressAutofillDetails {
-        var navigateToAutofillSettings = false
-        var name = "Android Test Name"
-        var streetAddress = "Fort Street"
-        var city = "Alberta"
-        var state = "Alberta"
-        var zipCode = "95141"
-        var country = "Canada"
-        var phoneNumber = "777-7777"
-        var emailAddress = "fuu@bar.org"
-    }
+    private val secondAddress =
+        AddressDetails(
+            name = "Android Test Name",
+            streetAddress = "Fort Street",
+            city = "Alberta",
+            state = "Alberta",
+            zipCode = "95141",
+            country = "Canada",
+            phoneNumber = "777-7777",
+            emailAddress = "fuu@bar.org",
+        )
 
     @get:Rule(order = 0) val fenixTestRule: FenixTestRule = FenixTestRule()
 
@@ -76,17 +75,8 @@ class AddressAutofillTest {
         autofillScreen(composeTestRule) {
                 fillAndSaveAddress(
                     composeTestRule,
-                    navigateToAutofillSettings = FirstAddressAutofillDetails.navigateToAutofillSettings,
-                    isAddressAutofillEnabled = FirstAddressAutofillDetails.isAddressAutofillEnabled,
-                    userHasSavedAddress = FirstAddressAutofillDetails.userHasSavedAddress,
-                    name = FirstAddressAutofillDetails.name,
-                    streetAddress = FirstAddressAutofillDetails.streetAddress,
-                    city = FirstAddressAutofillDetails.city,
-                    state = FirstAddressAutofillDetails.state,
-                    zipCode = FirstAddressAutofillDetails.zipCode,
-                    country = FirstAddressAutofillDetails.country,
-                    phoneNumber = FirstAddressAutofillDetails.phoneNumber,
-                    emailAddress = FirstAddressAutofillDetails.emailAddress,
+                    address = firstAddress,
+                    navigateToAutofillSettings = true,
                 )
             }
             .goBack {}
@@ -119,21 +109,12 @@ class AddressAutofillTest {
         autofillScreen(composeTestRule) {
             fillAndSaveAddress(
                 composeTestRule,
-                navigateToAutofillSettings = FirstAddressAutofillDetails.navigateToAutofillSettings,
-                isAddressAutofillEnabled = FirstAddressAutofillDetails.isAddressAutofillEnabled,
-                userHasSavedAddress = FirstAddressAutofillDetails.userHasSavedAddress,
-                name = FirstAddressAutofillDetails.name,
-                streetAddress = FirstAddressAutofillDetails.streetAddress,
-                city = FirstAddressAutofillDetails.city,
-                state = FirstAddressAutofillDetails.state,
-                zipCode = FirstAddressAutofillDetails.zipCode,
-                country = FirstAddressAutofillDetails.country,
-                phoneNumber = FirstAddressAutofillDetails.phoneNumber,
-                emailAddress = FirstAddressAutofillDetails.emailAddress,
+                address = firstAddress,
+                navigateToAutofillSettings = true,
             )
 
             clickManageAddressesButton()
-            clickSavedAddress(composeTestRule, FirstAddressAutofillDetails.name)
+            clickSavedAddress(composeTestRule, firstAddress.name)
             clickDeleteAddressButton()
             clickCancelDeleteAddressButton()
             clickDeleteAddressButton()
@@ -163,20 +144,11 @@ class AddressAutofillTest {
         autofillScreen(composeTestRule) {
             fillAndSaveAddress(
                 composeTestRule,
-                navigateToAutofillSettings = FirstAddressAutofillDetails.navigateToAutofillSettings,
-                isAddressAutofillEnabled = FirstAddressAutofillDetails.isAddressAutofillEnabled,
-                userHasSavedAddress = FirstAddressAutofillDetails.userHasSavedAddress,
-                name = FirstAddressAutofillDetails.name,
-                streetAddress = FirstAddressAutofillDetails.streetAddress,
-                city = FirstAddressAutofillDetails.city,
-                state = FirstAddressAutofillDetails.state,
-                zipCode = FirstAddressAutofillDetails.zipCode,
-                country = FirstAddressAutofillDetails.country,
-                phoneNumber = FirstAddressAutofillDetails.phoneNumber,
-                emailAddress = FirstAddressAutofillDetails.emailAddress,
+                address = firstAddress,
+                navigateToAutofillSettings = true,
             )
             clickManageAddressesButton()
-            clickSavedAddress(composeTestRule, FirstAddressAutofillDetails.name)
+            clickSavedAddress(composeTestRule, firstAddress.name)
             waitForAppWindowToBeUpdated()
             verifyEditAddressView()
         }
@@ -190,17 +162,8 @@ class AddressAutofillTest {
         autofillScreen(composeTestRule) {
             fillAndSaveAddress(
                 composeTestRule,
-                navigateToAutofillSettings = FirstAddressAutofillDetails.navigateToAutofillSettings,
-                isAddressAutofillEnabled = FirstAddressAutofillDetails.isAddressAutofillEnabled,
-                userHasSavedAddress = FirstAddressAutofillDetails.userHasSavedAddress,
-                name = FirstAddressAutofillDetails.name,
-                streetAddress = FirstAddressAutofillDetails.streetAddress,
-                city = FirstAddressAutofillDetails.city,
-                state = FirstAddressAutofillDetails.state,
-                zipCode = FirstAddressAutofillDetails.zipCode,
-                country = FirstAddressAutofillDetails.country,
-                phoneNumber = FirstAddressAutofillDetails.phoneNumber,
-                emailAddress = FirstAddressAutofillDetails.emailAddress,
+                address = firstAddress,
+                navigateToAutofillSettings = true,
             )
         }
 
@@ -236,17 +199,8 @@ class AddressAutofillTest {
         autofillScreen(composeTestRule) {
             fillAndSaveAddress(
                 composeTestRule,
-                navigateToAutofillSettings = FirstAddressAutofillDetails.navigateToAutofillSettings,
-                isAddressAutofillEnabled = FirstAddressAutofillDetails.isAddressAutofillEnabled,
-                userHasSavedAddress = FirstAddressAutofillDetails.userHasSavedAddress,
-                name = FirstAddressAutofillDetails.name,
-                streetAddress = FirstAddressAutofillDetails.streetAddress,
-                city = FirstAddressAutofillDetails.city,
-                state = FirstAddressAutofillDetails.state,
-                zipCode = FirstAddressAutofillDetails.zipCode,
-                country = FirstAddressAutofillDetails.country,
-                phoneNumber = FirstAddressAutofillDetails.phoneNumber,
-                emailAddress = FirstAddressAutofillDetails.emailAddress,
+                address = firstAddress,
+                navigateToAutofillSettings = true,
             )
         }
 
@@ -273,31 +227,15 @@ class AddressAutofillTest {
         autofillScreen(composeTestRule) {
             fillAndSaveAddress(
                 composeTestRule,
-                navigateToAutofillSettings = FirstAddressAutofillDetails.navigateToAutofillSettings,
-                isAddressAutofillEnabled = FirstAddressAutofillDetails.isAddressAutofillEnabled,
-                userHasSavedAddress = FirstAddressAutofillDetails.userHasSavedAddress,
-                name = FirstAddressAutofillDetails.name,
-                streetAddress = FirstAddressAutofillDetails.streetAddress,
-                city = FirstAddressAutofillDetails.city,
-                state = FirstAddressAutofillDetails.state,
-                zipCode = FirstAddressAutofillDetails.zipCode,
-                country = FirstAddressAutofillDetails.country,
-                phoneNumber = FirstAddressAutofillDetails.phoneNumber,
-                emailAddress = FirstAddressAutofillDetails.emailAddress,
+                address = firstAddress,
+                navigateToAutofillSettings = true,
             )
             clickManageAddressesButton()
             clickAddAddressButton()
             fillAndSaveAddress(
                 composeTestRule,
-                navigateToAutofillSettings = SecondAddressAutofillDetails.navigateToAutofillSettings,
-                name = SecondAddressAutofillDetails.name,
-                streetAddress = SecondAddressAutofillDetails.streetAddress,
-                city = SecondAddressAutofillDetails.city,
-                state = SecondAddressAutofillDetails.state,
-                zipCode = SecondAddressAutofillDetails.zipCode,
-                country = SecondAddressAutofillDetails.country,
-                phoneNumber = SecondAddressAutofillDetails.phoneNumber,
-                emailAddress = SecondAddressAutofillDetails.emailAddress,
+                address = secondAddress,
+                navigateToAutofillSettings = false,
             )
             verifyManageAddressesToolbarTitle()
         }
@@ -336,31 +274,15 @@ class AddressAutofillTest {
         autofillScreen(composeTestRule) {
             fillAndSaveAddress(
                 composeTestRule,
-                navigateToAutofillSettings = FirstAddressAutofillDetails.navigateToAutofillSettings,
-                isAddressAutofillEnabled = FirstAddressAutofillDetails.isAddressAutofillEnabled,
-                userHasSavedAddress = FirstAddressAutofillDetails.userHasSavedAddress,
-                name = FirstAddressAutofillDetails.name,
-                streetAddress = FirstAddressAutofillDetails.streetAddress,
-                city = FirstAddressAutofillDetails.city,
-                state = FirstAddressAutofillDetails.state,
-                zipCode = FirstAddressAutofillDetails.zipCode,
-                country = FirstAddressAutofillDetails.country,
-                phoneNumber = FirstAddressAutofillDetails.phoneNumber,
-                emailAddress = FirstAddressAutofillDetails.emailAddress,
+                address = firstAddress,
+                navigateToAutofillSettings = true,
             )
             clickManageAddressesButton()
-            clickSavedAddress(composeTestRule, FirstAddressAutofillDetails.name)
+            clickSavedAddress(composeTestRule, firstAddress.name)
             fillAndSaveAddress(
                 composeTestRule,
-                navigateToAutofillSettings = SecondAddressAutofillDetails.navigateToAutofillSettings,
-                name = SecondAddressAutofillDetails.name,
-                streetAddress = SecondAddressAutofillDetails.streetAddress,
-                city = SecondAddressAutofillDetails.city,
-                state = SecondAddressAutofillDetails.state,
-                zipCode = SecondAddressAutofillDetails.zipCode,
-                country = SecondAddressAutofillDetails.country,
-                phoneNumber = SecondAddressAutofillDetails.phoneNumber,
-                emailAddress = SecondAddressAutofillDetails.emailAddress,
+                address = secondAddress,
+                navigateToAutofillSettings = false,
             )
             verifyManageAddressesToolbarTitle()
         }
@@ -392,17 +314,8 @@ class AddressAutofillTest {
         autofillScreen(composeTestRule) {
             fillAndSaveAddress(
                 composeTestRule,
-                navigateToAutofillSettings = FirstAddressAutofillDetails.navigateToAutofillSettings,
-                isAddressAutofillEnabled = FirstAddressAutofillDetails.isAddressAutofillEnabled,
-                userHasSavedAddress = FirstAddressAutofillDetails.userHasSavedAddress,
-                name = FirstAddressAutofillDetails.name,
-                streetAddress = FirstAddressAutofillDetails.streetAddress,
-                city = FirstAddressAutofillDetails.city,
-                state = FirstAddressAutofillDetails.state,
-                zipCode = FirstAddressAutofillDetails.zipCode,
-                country = FirstAddressAutofillDetails.country,
-                phoneNumber = FirstAddressAutofillDetails.phoneNumber,
-                emailAddress = FirstAddressAutofillDetails.emailAddress,
+                address = firstAddress,
+                navigateToAutofillSettings = true,
             )
         }
 
@@ -431,22 +344,13 @@ class AddressAutofillTest {
         autofillScreen(composeTestRule) {
             fillAndSaveAddress(
                 composeTestRule,
-                navigateToAutofillSettings = FirstAddressAutofillDetails.navigateToAutofillSettings,
-                isAddressAutofillEnabled = FirstAddressAutofillDetails.isAddressAutofillEnabled,
-                userHasSavedAddress = FirstAddressAutofillDetails.userHasSavedAddress,
-                name = FirstAddressAutofillDetails.name,
-                streetAddress = FirstAddressAutofillDetails.streetAddress,
-                city = FirstAddressAutofillDetails.city,
-                state = FirstAddressAutofillDetails.state,
-                zipCode = FirstAddressAutofillDetails.zipCode,
-                country = FirstAddressAutofillDetails.country,
-                phoneNumber = FirstAddressAutofillDetails.phoneNumber,
-                emailAddress = FirstAddressAutofillDetails.emailAddress,
+                address = firstAddress,
+                navigateToAutofillSettings = true,
             )
             verifyAddressAutofillSection(true, true)
             clickManageAddressesButton()
             verifyManageAddressesSection(
-                FirstAddressAutofillDetails.name,
+                firstAddress.name,
                 "Harrison Street, San Francisco, AK, US, 94105, 555-5555, foo@bar.com",
             )
         }

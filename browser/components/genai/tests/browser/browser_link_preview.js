@@ -15,7 +15,7 @@ const { LinkPreviewModel } = ChromeUtils.importESModule(
 );
 
 const { LinkPreviewChild } = ChromeUtils.importESModule(
-  "resource:///actors/LinkPreviewChild.sys.mjs"
+  "moz-src:///browser/components/genai/LinkPreviewChild.sys.mjs"
 );
 
 const { Readerable } = ChromeUtils.importESModule(
@@ -196,15 +196,25 @@ add_task(async function test_link_preview_with_long_press() {
 
   is(LinkPreview.cancelLongPress, null, "long press not started");
 
-  window.dispatchEvent(new MouseEvent("mousedown", { button: 1 }));
+  window.dispatchEvent(new MouseEvent("mousedown", { button: 1, buttons: 4 }));
 
   is(LinkPreview.cancelLongPress, null, "long press ignore non-primary button");
 
-  window.dispatchEvent(new MouseEvent("mousedown", { ctrlKey: true }));
+  window.dispatchEvent(
+    new MouseEvent("mousedown", { buttons: 1, ctrlKey: true })
+  );
 
   is(LinkPreview.cancelLongPress, null, "long press ignore modifier keys");
 
   window.dispatchEvent(new MouseEvent("mousedown"));
+
+  is(
+    LinkPreview.cancelLongPress,
+    null,
+    "long press ignore activation without a held button"
+  );
+
+  window.dispatchEvent(new MouseEvent("mousedown", { buttons: 1 }));
 
   ok(LinkPreview.cancelLongPress, "long press timer started");
 
@@ -213,7 +223,7 @@ add_task(async function test_link_preview_with_long_press() {
   is(LinkPreview.cancelLongPress, null, "long press cancelled");
   is(stub.callCount, 0, "no link preview shown");
 
-  window.dispatchEvent(new MouseEvent("mousedown"));
+  window.dispatchEvent(new MouseEvent("mousedown", { buttons: 1 }));
 
   await TestUtils.waitForCondition(
     () => stub.callCount,
@@ -225,6 +235,8 @@ add_task(async function test_link_preview_with_long_press() {
   is(stub.firstCall.args[0], window, "link preview shown for correct window");
   is(stub.firstCall.args[1], TEST_LINK_URL, "preview test link");
   is(stub.firstCall.args[2], "long_press", "source set for long press");
+
+  window.dispatchEvent(new MouseEvent("mouseup"));
 
   stub.restore();
 });

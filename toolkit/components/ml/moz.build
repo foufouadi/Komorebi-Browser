@@ -14,12 +14,20 @@ with Files("**"):
 
 DIRS += [
     "actors",
-    "security",
     "tests",
 ]
 
+# ggml has no armv7-android CPU backend variant upstream, so there is no
+# inference engine to run on Android, and consequently no HWInference utility
+# process to talk to: SandboxingKind::HW_INFERENCE does not exist there.
 if CONFIG["MOZ_WIDGET_TOOLKIT"] != "android":
-    DIRS += ["backends/llama"]
+    DIRS += [
+        "backends/llama",
+        "ipc",
+        "textgeneration",
+    ]
+    if CONFIG["ENABLE_TESTS"]:
+        TEST_DIRS += ["tests/gtest"]
 
 XPCSHELL_TESTS_MANIFESTS += ["tests/xpcshell/xpcshell.toml"]
 
@@ -30,10 +38,25 @@ BROWSER_CHROME_MANIFESTS += [
     "tests/browser_models/browser_models.toml",
 ]
 
-XPIDL_SOURCES += ["nsIMLUtils.idl"]
+XPIDL_SOURCES += [
+    "nsIMLModelHub.idl",
+    "nsIMLModelResolver.idl",
+    "nsIMLUtils.idl",
+]
 
-UNIFIED_SOURCES += ["MLUtils.cpp"]
-EXPORTS.mozilla.ml += ["MLUtils.h"]
+MOZ_SRC_FILES += [
+    "MLModelHubService.sys.mjs",
+    "textgeneration/TextGenerationEngine.sys.mjs",
+]
+
+UNIFIED_SOURCES += [
+    "MLUtils.cpp",
+]
+
+EXPORTS.mozilla.ml += [
+    "MLProfilerMarkers.h",
+    "MLUtils.h",
+]
 
 with Files("docs/**"):
     SCHEDULES.exclusive = ["docs"]
@@ -42,8 +65,26 @@ XPCOM_MANIFESTS += [
     "components.conf",
 ]
 
+LOCAL_INCLUDES += [
+    "/dom/base",
+    "/dom/file/ipc",
+    "/dom/ipc",
+    "/ipc/glue",
+]
+
 XPIDL_MODULE = "ml"
 
 include("/ipc/chromium/chromium-config.mozbuild")
 
 FINAL_LIBRARY = "xul"
+
+LICENSED_UNDER += ["apache"]
+LICENSED_UNDER["apache"].paths = [
+    "vendor/openai/dist/openai.mjs",
+    "vendor/transformers.js",
+]
+if CONFIG["NIGHTLY_BUILD"]:
+    LICENSED_UNDER["apache"].paths += [
+        "vendor/openai/dist/openai-dev.mjs",
+        "vendor/transformers-dev.js",
+    ]

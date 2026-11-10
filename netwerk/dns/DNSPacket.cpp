@@ -217,6 +217,16 @@ nsresult DNSPacket::PassQName(unsigned int& index,
   return NS_OK;
 }
 
+// static
+bool DNSPacket::IsSameName(const nsACString& aName, const nsACString& aOther) {
+  auto withoutRootDot = [](const nsACString& aStr) {
+    return StringEndsWith(aStr, "."_ns) ? Substring(aStr, 0, aStr.Length() - 1)
+                                        : Substring(aStr, 0);
+  };
+  return withoutRootDot(aName).Equals(withoutRootDot(aOther),
+                                      nsCaseInsensitiveCStringComparator);
+}
+
 // GetQname: retrieves the qname (stores in 'aQname') and stores the index
 // after qname was parsed into the 'aIndex'.
 // static
@@ -644,6 +654,7 @@ nsresult DNSPacket::DecodeInternal(
   LOG(("doh decode %s %d bytes\n", aHost.get(), aLen));
 
   aCname.Truncate();
+  mCnameIsHTTPSAlias = false;
 
   // Reset any type record accumulated by a previous decode of this packet.
   aTypeResult = mozilla::AsVariant(Nothing());
@@ -754,10 +765,7 @@ nsresult DNSPacket::DecodeInternal(
 
     // We check if the qname is a case-insensitive match for the host or the
     // FQDN version of the host
-    bool responseMatchesQuestion =
-        (qname.Length() == aHost.Length() ||
-         (aHost.Length() == qname.Length() + 1 && aHost.Last() == '.')) &&
-        StringBeginsWith(aHost, qname, nsCaseInsensitiveCStringComparator);
+    bool responseMatchesQuestion = IsSameName(qname, aHost);
 
     if (responseMatchesQuestion) {
       // RDATA
@@ -868,7 +876,7 @@ nsresult DNSPacket::DecodeInternal(
               parsed.mSvcFieldPriority == 0) {
             // For AliasMode SVCB RRs, a TargetName of "." indicates that the
             // service is not available or does not exist.
-            continue;
+            break;
           }
 
           // Check for AliasForm
@@ -878,6 +886,7 @@ nsresult DNSPacket::DecodeInternal(
               return NS_ERROR_UNEXPECTED;
             }
             aCname = parsed.mSvcDomainName;
+            mCnameIsHTTPSAlias = true;
             // If aliasForm is present, Service form must be ignored.
             aTypeResult = mozilla::AsVariant(Nothing());
             ToLowerCase(aCname);

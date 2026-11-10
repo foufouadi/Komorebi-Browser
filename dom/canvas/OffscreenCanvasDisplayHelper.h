@@ -7,6 +7,7 @@
 
 #include "GLContextTypes.h"
 #include "ImageContainer.h"
+#include "Units.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/RefPtr.h"
@@ -22,6 +23,7 @@ namespace mozilla::dom {
 class HTMLCanvasElement;
 class OffscreenCanvas;
 class ThreadSafeWorkerRef;
+class WorkerPrivate;
 
 struct OffscreenCanvasDisplayData final {
   mozilla::gfx::IntSize mSize = {0, 0};
@@ -38,16 +40,27 @@ class OffscreenCanvasDisplayHelper final {
   explicit OffscreenCanvasDisplayHelper(HTMLCanvasElement* aCanvasElement,
                                         uint32_t aWidth, uint32_t aHeight);
 
+  CSSIntSize GetPlaceholderSize() const {
+    MOZ_ASSERT(NS_IsMainThread());
+    return mPlaceholderSize;
+  }
+
   CanvasContextType GetContextType() const;
 
   RefPtr<layers::ImageContainer> GetImageContainer() const;
 
+  bool MayUpdateContext(WorkerPrivate* aWorker, ErrorResult& aRv);
   void UpdateContext(OffscreenCanvas* aOffscreenCanvas,
                      RefPtr<ThreadSafeWorkerRef>&& aWorkerRef,
                      CanvasContextType aType,
                      const Maybe<mozilla::ipc::ActorId>& aChildId);
 
   void FlushForDisplay();
+
+  // While presentation is disabled, the frames the canvas draws are kept in
+  // the context's own buffers instead of being handed to the compositor. The
+  // latest one is presented when presentation is enabled again.
+  void SetPresentationEnabled(bool aEnabled);
 
   bool CommitFrameToCompositor(nsICanvasRenderingContextInternal* aContext,
                                const Maybe<OffscreenCanvasDisplayData>& aData);
@@ -82,11 +95,15 @@ class OffscreenCanvasDisplayHelper final {
  private:
   ~OffscreenCanvasDisplayHelper();
   void MaybeQueueInvalidateElement() MOZ_REQUIRES(mMutex);
+  already_AddRefed<OffscreenCanvas> GetCanvasForWorker(WorkerPrivate* aWorker);
   void InvalidateElement();
 
   already_AddRefed<gfx::SourceSurface> TransformSurface(
       gfx::SourceSurface* aSurface, bool aHasAlpha, bool aIsAlphaPremult,
       gl::OriginPos aOriginPos) const;
+
+  // Main-thread-only size used for placeholder layout.
+  CSSIntSize mPlaceholderSize;
 
   mutable Mutex mMutex;
   HTMLCanvasElement* MOZ_NON_OWNING_REF mCanvasElement MOZ_GUARDED_BY(mMutex);
@@ -104,8 +121,12 @@ class OffscreenCanvasDisplayHelper final {
   mozilla::layers::ImageContainer::FrameID mLastFrameID MOZ_GUARDED_BY(mMutex) =
       0;
   bool mPendingInvalidate MOZ_GUARDED_BY(mMutex) = false;
+  bool mPresentationEnabled MOZ_GUARDED_BY(mMutex) = true;
+  bool mPendingPresent MOZ_GUARDED_BY(mMutex) = false;
   bool mIsWriteOnly MOZ_GUARDED_BY(mMutex) = false;
   RefPtr<nsIPrincipal> mExpandedReader MOZ_GUARDED_BY(mMutex);
+  bool mCreatedOnMainThread MOZ_GUARDED_BY(mMutex) = false;
+  bool mCreatedOnWorker MOZ_GUARDED_BY(mMutex) = false;
 };
 
 }  // namespace mozilla::dom

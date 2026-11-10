@@ -5,7 +5,7 @@
 <popupset id="mainPopupSet">
   <script src="chrome://browser/content/main-popupset.js" />
 
-  <menupopup id="tabContextMenu">
+  <menupopup id="tabContextMenu" accesskey-conflicts-bug="2073890">
     <menuitem id="context_openANewTab" data-lazy-l10n-id="tab-context-new-tab-open"/>
     <menuitem id="context_moveTabToNewGroup"
       data-lazy-l10n-id="tab-context-move-tab-to-new-group"
@@ -30,6 +30,21 @@
         </menu>
       </menupopup>
     </menu>
+    <menu id="context_addTabToGroup"
+      data-lazy-l10n-id="tab-context-add-tab-to-group"
+      data-l10n-args='{"tabCount": 1}'
+      hidden="true">
+      <menupopup id="context_addTabToGroupPopupMenu">
+        <menuitem id="context_addTabToGroupNewGroup"
+                  data-lazy-l10n-id="tab-context-add-tab-to-group-new-group"/>
+        <menuseparator id="add-tab-to-group-separator" />
+        <menu id="context_addTabToSavedGroup"
+          data-lazy-l10n-id="tab-context-add-tab-to-group-closed-groups">
+          <menupopup id="context_addTabToSavedGroupPopupMenu">
+          </menupopup>
+        </menu>
+      </menupopup>
+    </menu>
     <menuitem id="context_ungroupTab"
       data-lazy-l10n-id="tab-context-ungroup-tab"
       data-l10n-args='{"groupCount": 1}'
@@ -42,6 +57,7 @@
       hidden="true"/>
     <menuitem id="context_separateSplitView"
       data-lazy-l10n-id="tab-context-separate-split-view"
+      data-alt-l10n-id="tab-context-separate-split-view-alt"
       hidden="true"/>
     <menuitem id="context_reverseSplitView"
       data-lazy-l10n-id="tab-context-reverse-split-view"
@@ -65,10 +81,13 @@
     <menuitem id="context_duplicateTabs" data-lazy-l10n-id="duplicate-tabs" data-alt-l10n-id="duplicate-tabs2"/>
     <menuseparator id="context_tabStateSeparator"/>
     <menu id="context_askChat"/>
-    <!-- Flat "Summarize Page" item used by the alternate tab context menu layout
+    <!-- Flat "Summarize with AI" item used by the alternate tab context menu layout
          in place of the #context_askChat submenu. Populated by
          GenAI.buildTabSummarizeItem; hidden by default. -->
     <menuitem id="context_askChatSummarize" hidden="true"/>
+    <menuitem id="context_createAITab"
+              hidden="true"
+              data-l10n-id="tab-context-create-aitab"/>
     <menuseparator id="context_aiSeparator"/>
     <menuitem id="context_bookmarkSelectedTabs"
               hidden="true"
@@ -82,23 +101,32 @@
     <menu id="context_moveTabOptions"
           data-lazy-l10n-id="tab-context-move-tabs"
           data-l10n-args='{"tabCount": 1}'>
-      <menupopup id="moveTabOptionsMenu">
+      <menupopup id="moveTabOptionsMenu" accesskey-conflicts-bug="2073897">
         <menuitem id="context_moveToStart"
                   data-lazy-l10n-id="move-to-start"
+                  data-alt-l10n-id="move-to-start-alt"
                   tbattr="tabbrowser-multiple-visible"/>
         <menuitem id="context_moveToEnd"
                   data-lazy-l10n-id="move-to-end"
+                  data-alt-l10n-id="move-to-end-alt"
                   tbattr="tabbrowser-multiple-visible"/>
-        <menuitem id="context_openTabInWindow" data-lazy-l10n-id="move-to-new-window"
+        <menuitem id="context_openTabInWindow"
+                  data-lazy-l10n-id="move-to-new-window"
+                  data-alt-l10n-id="move-to-new-window-alt"
                   tbattr="tabbrowser-multiple-visible"/>
+        <menuitem id="context_openTabInMiniWindow"
+                  data-lazy-l10n-id="move-to-mini-window"
+                  data-l10n-args='{"tabCount": 1}'
+                  hidden="true"/>
         <menuseparator id="moveTabSeparator" hidden="true"/>
         <menuseparator id="context_moveTabToGroupSeparator" hidden="true"/>
         <menuseparator id="context_selectAllSeparator" hidden="true"/>
+        <menuseparator id="context_moveTabPositionsSeparator" hidden="true"/>
       </menupopup>
     </menu>
     <menu id="context_reopenInContainer"
           data-lazy-l10n-id="tab-context-open-in-new-container-tab"
-          data-alt-l10n-id="tab-context-open-in-new-container-tab2"
+          data-alt-l10n-id="tab-context-open-in-container"
           hidden="true">
       <menupopup id="context_reopenInContainerPopupMenu"/>
     </menu>
@@ -121,14 +149,18 @@
               data-l10n-args='{"tabCount": 1}'/>
     <menuitem id="context_closeDuplicateTabs"
               data-lazy-l10n-id="tab-context-close-duplicate-tabs"
-              data-alt-l10n-id="tab-context-close-duplicate-tabs2"/>
+              data-alt-l10n-id="tab-context-close-duplicate-tabs-alt"/>
     <menu id="context_closeTabOptions"
           data-lazy-l10n-id="tab-context-close-multiple-tabs"
           data-alt-l10n-id="tab-context-close-multiple-tabs2">
       <menupopup id="closeTabOptions">
-        <menuitem id="context_closeTabsToTheStart" data-lazy-l10n-id="close-tabs-to-the-start"/>
-        <menuitem id="context_closeTabsToTheEnd" data-lazy-l10n-id="close-tabs-to-the-end"/>
-        <menuitem id="context_closeOtherTabs" data-lazy-l10n-id="close-other-tabs"/>
+        <menuitem id="context_closeTabsToTheStart"
+          data-lazy-l10n-id="close-tabs-to-the-start"/>
+        <menuitem id="context_closeTabsToTheEnd"
+          data-lazy-l10n-id="close-tabs-to-the-end"/>
+        <menuseparator id="context_closeOtherTabsSeparator" hidden="true"/>
+        <menuitem id="context_closeOtherTabs"
+          data-lazy-l10n-id="close-other-tabs"/>
       </menupopup>
     </menu>
     <menuitem id="context_undoCloseTab"
@@ -225,6 +257,30 @@
          type="arrow">
     <hbox class="panel-subview-body">
       <html:moz-button id="ai-action-button"/>
+      <!-- The search label needs the engine and the selection, so it is set
+           from GenAI.initializeSelectionShortcutPanel rather than here. -->
+      <html:moz-button id="search-action-button"
+                       hidden="true"
+                       type="icon ghost"/>
+      <html:moz-button id="copy-action-button"
+                       hidden="true"
+                       type="icon ghost"
+                       data-l10n-id="genai-shortcut-copy-button"/>
+      <html:span id="more-actions-separator"
+                 class="more-actions-separator"
+                 hidden="true"
+                 aria-hidden="true"/>
+      <html:span id="copy-action-confirmation"
+                  class="copy-action-confirmation"
+                  role="status"
+                  aria-live="polite">
+        <html:span class="copy-action-confirmation-icon" aria-hidden="true"/>
+        <html:span class="copy-action-confirmation-text"/>
+      </html:span>
+      <html:moz-button id="more-actions-button"
+                       hidden="true"
+                       type="icon ghost"
+                       data-l10n-id="genai-shortcut-more-actions-button"/>
     </hbox>
   </panel>
 
@@ -237,6 +293,84 @@
          type="arrow">
     <vbox class="panel-subview-body"/>
   </panel>
+
+  <panel id="selection-more-actions-panel"
+         role="group"
+         data-l10n-id="genai-more-actions-panel"
+         noautofocus="true"
+         nonnative=""
+         type="arrow">
+    <vbox class="panel-subview-body">
+      <html:moz-toggle id="more-actions-ai-toggle"
+                       inputlayout="inline-end"
+                       data-l10n-attrs="label"/>
+      <html:moz-toggle id="more-actions-search-toggle"
+                       inputlayout="inline-end"
+                       data-l10n-id="genai-more-actions-search"
+                       data-l10n-attrs="label"/>
+      <html:moz-toggle id="more-actions-copy-toggle"
+                       inputlayout="inline-end"
+                       data-l10n-id="genai-more-actions-copy"
+                       data-l10n-attrs="label"/>
+      <toolbarseparator/>
+      <html:p id="more-actions-all-off-notice"
+              class="more-actions-notice"
+              role="status"
+              hidden=""
+              data-l10n-id="genai-more-actions-all-off-notice">
+        <html:span class="more-actions-notice-chevron"
+                   data-l10n-name="chevron"/>
+      </html:p>
+      <html:moz-button id="more-actions-manage-settings"
+                       type="ghost"
+                       data-l10n-id="genai-more-actions-manage-settings"
+                       data-l10n-attrs="label"/>
+    </vbox>
+  </panel>
+
+  <!-- Feature callout for the selection actions. -->
+  <html:template id="selectionCalloutTemplate">
+    <panel id="selection-callout-panel"
+           role="status"
+           noautofocus="true"
+           consumeoutsideclicks="never"
+           nonnative="">
+      <vbox class="panel-subview-body">
+        <svg xmlns="http://www.w3.org/2000/svg"
+             class="selection-callout-shape"
+             aria-hidden="true">
+          <defs>
+            <linearGradient id="selection-callout-edge"
+                            x1="0.2217" y1="-0.0354" x2="1.0972" y2="0.2903">
+              <stop class="selection-callout-gradient-start" offset="0"/>
+              <stop class="selection-callout-gradient-end" offset="0.711538"/>
+            </linearGradient>
+          </defs>
+          <path class="selection-callout-edge"/>
+        </svg>
+        <html:div class="selection-callout-content">
+          <html:p class="selection-callout-title"
+                  data-l10n-id="genai-selection-callout-title"/>
+          <html:div class="selection-callout-row">
+            <html:div class="selection-callout-mark-column">
+              <html:img class="selection-callout-mark"
+                        src="chrome://branding/content/about-logo.svg"
+                        alt=""/>
+              <html:moz-badge class="selection-callout-new-badge"
+                              type="new"/>
+            </html:div>
+            <html:p class="selection-callout-message"
+                    data-l10n-id="genai-selection-callout-text">
+              <html:span class="selection-callout-more-link"
+                         role="button"
+                         tabindex="0"
+                         data-l10n-name="more-actions"/>
+            </html:p>
+          </html:div>
+        </html:div>
+      </vbox>
+    </panel>
+  </html:template>
 
   <html:template id="screenshotsPagePanelTemplate">
     <box class="screenshotsPagePanel" hidden="true">
@@ -279,7 +413,7 @@
               data-l10n-attrs="style">
           <button id="editBookmarkPanelDoneButton"
                   class="footer-button"
-                  data-l10n-id="bookmark-panel-save-button"
+                  data-l10n-id="bookmark-panel-save-button2"
                   default="true"/>
           <button id="editBookmarkPanelRemoveButton"
                   class="footer-button"/>
@@ -398,12 +532,15 @@
     <menuitem data-l10n-id="sidebar-history-sort-option-last-visited"
               id="sidebar-history-sort-by-last-visited"
               type="checkbox"/>
+    <menuitem data-l10n-id="sidebar-history-sort-option-most-visited"
+              id="sidebar-history-sort-by-most-visited"
+              type="checkbox"/>
     <menuseparator/>
     <menuitem data-l10n-id="sidebar-history-clear"
               id="sidebar-history-clear"/>
   </menupopup>
 
-  <menupopup id="sidebar-history-context-menu">
+  <menupopup id="sidebar-history-context-menu" accesskey-conflicts-bug="2073894">
     <menuitem data-l10n-id="sidebar-context-menu-open-in-tab"
               id="sidebar-history-context-open-in-tab"/>
     <menu id="sidebar-history-context-menu-container-tab"
@@ -431,14 +568,20 @@
               id="sidebar-history-context-bookmark-page"/>
     <menuitem data-l10n-id="places-open-all-in-tabs"
               id="sidebar-history-context-open-all-in-tabs"
-              class="sidebar-history-multiselect-command"/>
-    <menuseparator class="sidebar-history-multiselect-command"/>
+              class="sidebar-history-multiselect-command sidebar-history-card-command"/>
+    <menuseparator class="sidebar-history-multiselect-command sidebar-history-card-command"/>
     <menuitem data-l10n-id="sidebar-history-context-menu-delete-pages"
               id="sidebar-history-context-delete-pages"
               class="sidebar-history-multiselect-command"/>
+    <menuitem data-l10n-id="sidebar-history-context-menu-delete"
+              id="sidebar-history-context-delete-card"
+              class="sidebar-history-card-command"/>
+    <menuitem data-l10n-id="sidebar-context-menu-forget-site"
+              id="sidebar-history-context-forget-card-site"
+              class="sidebar-history-card-command"/>
   </menupopup>
 
-  <menupopup id="sidebar-synced-tabs-context-menu">
+  <menupopup id="sidebar-synced-tabs-context-menu" accesskey-conflicts-bug="2073894">
     <menuitem data-l10n-id="sidebar-context-menu-open-in-tab"
               id="sidebar-synced-tabs-context-open-in-tab"/>
     <menu id="sidebar-synced-tabs-context-menu-container-tab"
@@ -472,7 +615,7 @@
               id="sidebar-synced-tabs-context-manage-this-device"/>
   </menupopup>
 
-  <menupopup id="sidebar-opentabs-menu">
+  <menupopup id="sidebar-opentabs-menu" accesskey-conflicts-bug="2073894">
     <menucaption data-l10n-id="sidebar-opentabs-sort-by-heading"
                  id="sidebar-opentabs-sort-by-heading"
                  role="heading"/>
@@ -500,7 +643,7 @@
               id="sidebar-opentabs-context-close-tab"/>
   </menupopup>
 
-  <menupopup id="sidebar-bookmarks-context-menu">
+  <menupopup id="sidebar-bookmarks-context-menu" accesskey-conflicts-bug="2073894">
     <menuitem data-l10n-id="places-open-all-bookmarks"
               id="sidebar-bookmarks-context-open-all-bookmarks"/>
     <menuseparator id="sidebar-bookmarks-context-sep-open-all"/>
@@ -555,7 +698,7 @@
               data-l10n-id="split-view-menuitem-close-both-tabs"/>
   </menupopup>
 
-  <menupopup id="toolbar-context-menu">
+  <menupopup id="toolbar-context-menu" accesskey-conflicts-bug="2073893">
     <menuitem id="toolbar-context-manage-extension"
               data-lazy-l10n-id="toolbar-context-menu-manage-extension"
               contexttype="toolbaritem"
@@ -643,7 +786,7 @@
               data-lazy-l10n-id="full-screen-exit"/>
   </menupopup>
 
-  <menupopup id="blockedPopupOptions">
+  <menupopup id="blockedPopupOptions" accesskey-conflicts-bug="2073898">
     <menuitem id="blockedPopupAllowSite"/>
     <menuitem id="blockedPopupEdit"
               data-l10n-id="edit-popup-settings2"/>
@@ -656,7 +799,8 @@
 
   <menupopup id="contentAreaContextMenu"
 # read by macOS cocoa code to enable the "services" menu here:
-             showservicesmenu="true">
+             showservicesmenu="true"
+             accesskey-conflicts-bug="2073889">
 #include browser-context.inc.xhtml
   </menupopup>
 
@@ -801,9 +945,11 @@
   </menupopup>
 
   <menupopup id="userContext-indicator-menu">
-    <menuitem data-l10n-id="user-context-add-container"
+    <menuitem data-l10n-id="user-context-add-container2"
+              data-container-entrypoint="container_indicator_menu"
               command="Browser:AddContainer"/>
-    <menuitem data-l10n-id="user-context-manage-containers"
+    <menuitem data-l10n-id="user-context-manage-containers2"
+              data-container-entrypoint="container_indicator_menu"
               command="Browser:OpenAboutContainers"/>
   </menupopup>
 

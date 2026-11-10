@@ -28,7 +28,6 @@ import androidx.test.espresso.matcher.ViewMatchers.withEffectiveVisibility
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.Until
-import org.hamcrest.CoreMatchers
 import org.hamcrest.CoreMatchers.containsString
 import org.mozilla.fenix.R
 import org.mozilla.fenix.compose.snackbar.SNACKBAR_TEST_TAG
@@ -317,13 +316,13 @@ class SettingsSubMenuLoginsAndPasswordsSavedLoginsRobot(private val composeTestR
 
     fun clickConfirmDeleteLogin() {
         Log.i(TAG, "clickConfirmDeleteLogin: Trying to click the \"Delete\" dialog button")
-        composeTestRule.onNodeWithText(getStringResource(R.string.dialog_delete_positive)).performClick()
+        composeTestRule.onNodeWithText(getStringResource(R.string.bookmark_menu_delete_button)).performClick()
         Log.i(TAG, "clickConfirmDeleteLogin: Clicked the \"Delete\" dialog button")
     }
 
     fun clickCancelDeleteLogin() {
         Log.i(TAG, "clickCancelDeleteLogin: Trying to click the \"Cancel\" dialog button")
-        composeTestRule.onNodeWithText(getStringResource(R.string.dialog_delete_negative)).performClick()
+        composeTestRule.onNodeWithText(getStringResource(R.string.bookmark_delete_negative)).performClick()
         Log.i(TAG, "clickCancelDeleteLogin: Clicked the \"Cancel\" dialog button")
     }
 
@@ -563,5 +562,3 @@ class SettingsSubMenuLoginsAndPasswordsSavedLoginsRobot(private val composeTestR
         }
     }
 }
-
-private fun goBackButton() = onView(CoreMatchers.allOf(ViewMatchers.withContentDescription("Navigate up")))

@@ -14,7 +14,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
 });
 ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
   return console.createInstance({
-    prefix: "TabNotesController",
+    logModule: "TabNotesController",
     maxLogLevel: Services.prefs.getBoolPref("browser.tabs.notes.debug", false)
       ? "Debug"
       : "Warn",
@@ -470,7 +470,7 @@ class TabNotesControllerClass {
    * @param {MozTabbrowserTab} tab
    */
   #resetTab(tab) {
-    delete tab.canonicalUrl;
+    tab.canonicalUrl = null;
     tab.hasTabNote = false;
   }
 }

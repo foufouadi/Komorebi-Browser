@@ -14,13 +14,10 @@ transforms:
     - gecko_taskgraph.transforms.task
 
 kind-dependencies:
-    - shippable-l10n-signing
+    - l10n-signing
     - shippable-l10n-mac-signing
     - shippable-l10n-mac-notarization
     - toolchain
-
-task-defaults:
-    run-on-repo-type: [hg]
 
 only-for-build-platforms:
     - linux64-shippable/opt

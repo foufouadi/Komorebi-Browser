@@ -132,13 +132,6 @@ namespace js {
 
 extern JS_PUBLIC_API JSObject* UnwrapArrayBufferView(JSObject* obj);
 
-namespace detail {
-
-constexpr size_t TypedArrayLengthSlot = 1;
-constexpr size_t TypedArrayDataSlot = 3;
-
-}  // namespace detail
-
 // This one isn't inlined because it's rather tricky (by dint of having to deal
 // with a dozen-plus classes and varying slot layouts.
 extern JS_PUBLIC_API void GetArrayBufferViewLengthAndData(JSObject* obj,
@@ -400,6 +393,11 @@ class JS_PUBLIC_API ArrayBuffer : public ArrayBufferOrView {
 
   static ArrayBuffer create(JSContext* cx, size_t nbytes);
 
+  // Create from a copy of data. This function will GC before copying the data,
+  // so the caller must ensure that the data remains valid until this function
+  // returns.
+  static ArrayBuffer create(JSContext* cx, mozilla::Span<const uint8_t> src);
+
   mozilla::Span<uint8_t> getData(bool* isSharedMemory,
                                  const JS::AutoRequireNoGC&);
 };
@@ -429,9 +427,6 @@ class JS_PUBLIC_API ArrayBufferView : public ArrayBufferOrView {
 
   mozilla::Span<uint8_t> getData(bool* isSharedMemory,
                                  const JS::AutoRequireNoGC&);
-
-  // Must only be called if !isDetached().
-  size_t getByteLength(const JS::AutoRequireNoGC&);
 };
 
 class JS_PUBLIC_API DataView : public ArrayBufferView {
@@ -589,11 +584,6 @@ ArrayBufferView ArrayBufferView::fromObject(JSObject* unwrapped) {
  *                       bool* isSharedMemory,
  *                       const JS::AutoRequireNoGC&)
  *
- * js::Get(type)ArrayLengthAndData(JSObject* obj,
- *                                 size_t* length,
- *                                 bool* isSharedMemory,
- *                                 const JS::AutoRequireNoGC&)
- *
  * Return a pointer to the start of the data referenced by a typed array. The
  * data is still owned by the typed array, and should not be modified on
  * another thread. Furthermore, the pointer can become invalid on GC (if the
@@ -614,19 +604,6 @@ ArrayBufferView ArrayBufferView::fromObject(JSObject* unwrapped) {
       const JS::AutoRequireNoGC&);                                         \
                                                                            \
   namespace js {                                                           \
-  inline void Get##Name##ArrayLengthAndData(JSObject* unwrapped,           \
-                                            size_t* length,                \
-                                            bool* isSharedMemory,          \
-                                            ExternalType** data) {         \
-    MOZ_ASSERT(JS::TypedArray<JS::Scalar::Name>::fromObject(unwrapped));   \
-    const JS::Value& lenSlot = JS::GetNativeObjectReservedSlot(            \
-        unwrapped, detail::TypedArrayLengthSlot);                          \
-    *length = size_t(lenSlot.toPrivate());                                 \
-    *isSharedMemory = JS_GetTypedArraySharedness(unwrapped);               \
-    *data = JS::GetMaybePtrFromNativeObjectReservedSlot<ExternalType>(     \
-        unwrapped, detail::TypedArrayDataSlot);                            \
-  }                                                                        \
-                                                                           \
   JS_PUBLIC_API JSObject* Unwrap##Name##Array(JSObject* maybeWrapped);     \
   } /* namespace js */
 

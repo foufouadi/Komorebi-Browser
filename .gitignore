@@ -113,15 +113,10 @@ tools/terser/node_modules/
 browser/components/asrouter/node_modules/
 browser/components/aboutwelcome/node_modules/
 browser/extensions/newtab/node_modules/
-tools/ts/node_modules/
 testing/xpcshell/moz-http2/node_modules/
 
 # Ignore newtab component build assets
 browser/extensions/newtab/logs/
-browser/extensions/newtab/data/content/activity-stream.bundle.js
-browser/extensions/newtab/data/content/vendor.bundle.js
-browser/extensions/newtab/css/activity-stream.css
-browser/extensions/newtab/css/nova/activity-stream.css
 
 # Ignore about:welcome component build assets
 browser/components/aboutwelcome/logs/
@@ -312,6 +307,7 @@ testing/talos/talos/tests/tp5n.tar.gz
 testing/talos/talos/tests/tp5n
 testing/talos/talos/tests/pdfpaint/pdfs
 testing/talos/talos/tests/devtools/damp.manifest.develop
+testing/talos/talos/tests/perf-reftest/perf_reftest.manifest.develop
 testing/talos/talos/startup_test/startup_about_home_paint/startup_about_home_paint.manifest.develop
 testing/talos/talos/webextensions/
 talos-venv
@@ -345,6 +341,10 @@ lextab.py
 .vs/
 .vscode/
 *.user
+
+# Sublime Text project config
+*.sublime-project
+*.sublime-workspace
 
 # Ignore Zed editor configuration files.
 .zed/
@@ -391,6 +391,9 @@ browser/components/storybook/component-status/components.json
 
 # Ignore design-system node_modules
 toolkit/themes/shared/design-system/node_modules/
+
+# Ignore design-system generated files
+toolkit/themes/shared/design-system/dist/token-audit
 
 # Ignore TypeScript declarations reference file updated by tooling.
 tools/@types/index.d.ts

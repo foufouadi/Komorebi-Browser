@@ -14,10 +14,6 @@ using namespace mozilla;
 nsTreeStyleCache::Transition::Transition(DFAState aState, nsAtom* aSymbol)
     : mState(aState), mInputSymbol(aSymbol) {}
 
-bool nsTreeStyleCache::Transition::operator==(const Transition& aOther) const {
-  return aOther.mState == mState && aOther.mInputSymbol == mInputSymbol;
-}
-
 uint32_t nsTreeStyleCache::Transition::Hash() const {
   // Make a 32-bit integer that combines the low-order 16 bits of the state and
   // the input symbol.
@@ -37,7 +33,7 @@ ComputedStyle* nsTreeStyleCache::GetComputedStyle(nsPresContext* aPresContext,
   // Go ahead and init the transition table.
   if (!mTransitionTable) {
     // Automatic miss. Build the table
-    mTransitionTable = MakeUnique<TransitionTable>();
+    mTransitionTable = std::make_unique<TransitionTable>();
   }
 
   // The first transition is always made off the atom for the pseudo-element.
@@ -84,7 +80,7 @@ ComputedStyle* nsTreeStyleCache::GetComputedStyle(nsPresContext* aPresContext,
     // Put the ComputedStyle in our table, transferring the owning reference to
     // the table.
     if (!mCache) {
-      mCache = MakeUnique<ComputedStyleCache>();
+      mCache = std::make_unique<ComputedStyleCache>();
     }
     result = newResult.get();
     mCache->InsertOrUpdate(currState, std::move(newResult));

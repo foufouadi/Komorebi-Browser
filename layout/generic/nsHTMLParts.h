@@ -42,17 +42,8 @@ class nsBlockFrame;
 nsBlockFrame* NS_NewBlockFrame(mozilla::PresShell* aPresShell,
                                mozilla::ComputedStyle* aStyle);
 
-// Special Generated Content Node. It contains text taken from an
-// attribute of its *grandparent* content node.
-nsresult NS_NewAttributeContent(nsNodeInfoManager* aNodeInfoManager,
-                                int32_t aNameSpaceID, nsAtom* aAttrName,
-                                nsAtom* aFallback, nsIContent** aResult);
-
 nsIFrame* NS_NewBRFrame(mozilla::PresShell* aPresShell,
                         mozilla::ComputedStyle* aStyle);
-
-nsIFrame* NS_NewCommentFrame(mozilla::PresShell* aPresShell,
-                             mozilla::ComputedStyle* aStyle);
 
 // <frame> and <iframe>
 nsIFrame* NS_NewSubDocumentFrame(mozilla::PresShell* aPresShell,

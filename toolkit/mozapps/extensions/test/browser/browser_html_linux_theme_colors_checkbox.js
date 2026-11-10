@@ -15,7 +15,6 @@ const { AddonTestUtils } = ChromeUtils.importESModule(
 AddonTestUtils.initMochitest(this);
 
 const PREF_NATIVE_THEME = "browser.theme.native-theme";
-const PREF_NOVA_ENABLED = "browser.nova.enabled";
 const DEFAULT_THEME_ID = "default-theme@mozilla.org";
 const OTHER_THEME_ID = "other-theme@mozilla.org";
 
@@ -53,32 +52,11 @@ registerCleanupFunction(async () => {
   }
 });
 
-add_task(async function test_checkbox_hidden_when_nova_disabled() {
-  if (!IS_OS_LINUX) {
-    info("SKIPPED. This test is only meant to run on Linux");
-    return;
-  }
-
-  await SpecialPowers.pushPrefEnv({ set: [[PREF_NOVA_ENABLED, false]] });
-
-  const win = await loadInitialView("theme");
-  const checkbox = getNativeThemeCheckbox(win);
-  Assert.ok(
-    !BrowserTestUtils.isVisible(checkbox),
-    "native-theme-colors-checkbox should be hidden when nova is disabled"
-  );
-
-  await closeView(win);
-  await SpecialPowers.popPrefEnv();
-});
-
 add_task(async function test_checkbox_hidden_when_os_is_not_linux() {
   if (IS_OS_LINUX) {
     info("SKIPPED. This test is only meant to run on non-Linux platforms");
     return;
   }
-
-  await SpecialPowers.pushPrefEnv({ set: [[PREF_NOVA_ENABLED, true]] });
 
   const win = await loadInitialView("theme");
   const checkbox = getNativeThemeCheckbox(win);
@@ -92,7 +70,6 @@ add_task(async function test_checkbox_hidden_when_os_is_not_linux() {
   );
 
   await closeView(win);
-  await SpecialPowers.popPrefEnv();
 });
 
 add_task(async function test_checkbox_not_hidden_on_linux() {
@@ -103,7 +80,6 @@ add_task(async function test_checkbox_not_hidden_on_linux() {
 
   await SpecialPowers.pushPrefEnv({
     set: [
-      [PREF_NOVA_ENABLED, true],
       // Set a non-default starting value (it defaults to true on Linux/GTK).
       [PREF_NATIVE_THEME, false],
     ],
@@ -203,10 +179,7 @@ add_task(async function test_checkbox_pref_changes() {
   }
 
   await SpecialPowers.pushPrefEnv({
-    set: [
-      [PREF_NOVA_ENABLED, true],
-      [PREF_NATIVE_THEME, false],
-    ],
+    set: [[PREF_NATIVE_THEME, false]],
   });
 
   const win = await loadInitialView("theme");
@@ -250,6 +223,55 @@ add_task(async function test_checkbox_pref_changes() {
     !Services.prefs.getBoolPref(PREF_NATIVE_THEME),
     "clicking the checkbox again sets the pref back to false"
   );
+
+  await closeView(win);
+  await SpecialPowers.popPrefEnv();
+});
+
+add_task(async function test_checkbox_change_telemetry() {
+  if (!IS_OS_LINUX) {
+    info("SKIPPED. This test is only meant to run on Linux");
+    return;
+  }
+
+  await SpecialPowers.pushPrefEnv({
+    set: [[PREF_NATIVE_THEME, false]],
+  });
+
+  const win = await loadInitialView("theme");
+  const checkbox = getNativeThemeCheckbox(win);
+  await checkbox.updateComplete;
+
+  const mozCheckbox = getMozCheckbox(checkbox);
+  await mozCheckbox.updateComplete;
+  const input = mozCheckbox.shadowRoot.querySelector("#input");
+
+  for (const expectedChecked of [true, false]) {
+    Services.fog.testResetFOG();
+    input.click();
+
+    const events = Glean.themePicker.change.testGetValue();
+    Assert.equal(
+      events?.length,
+      1,
+      `theme_picker.change is recorded once for native_theme=${expectedChecked}`
+    );
+    Assert.deepEqual(
+      {
+        source: events[0].extra.source,
+        layout: events[0].extra.layout,
+        property: events[0].extra.property,
+        native_theme: events[0].extra.native_theme,
+      },
+      {
+        source: "about:addons",
+        layout: "full",
+        property: "nativeTheme",
+        native_theme: String(expectedChecked),
+      },
+      "theme_picker.change event got the expected extra properties"
+    );
+  }
 
   await closeView(win);
   await SpecialPowers.popPrefEnv();

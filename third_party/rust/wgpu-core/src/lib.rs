@@ -7,8 +7,6 @@
 //!
 
 #![no_std]
-// `-Znext-solver` requires deeper recursion limits (at least for now) to prove Send/Sync
-#![recursion_limit = "256"]
 // When we have no backends, we end up with a lot of dead or otherwise unreachable code.
 #![cfg_attr(
     all(
@@ -75,10 +73,7 @@ pub mod command;
 mod conv;
 pub mod device;
 pub mod error;
-pub mod global;
-pub mod hub;
 pub mod id;
-pub mod identity;
 mod indirect_validation;
 mod init_tracker;
 pub mod instance;
@@ -89,7 +84,6 @@ mod pipeline_cache;
 mod pool;
 pub mod present;
 pub mod ray_tracing;
-pub mod registry;
 pub mod resource;
 mod snatch;
 pub mod storage;
@@ -120,13 +114,10 @@ pub(crate) use nt::{FastHashMap, FastHashSet, FastIndexMap};
 /// These are the values stored in `Device::fence`.
 pub type SubmissionIndex = hal::FenceValue;
 
-type Index = u32;
-type Epoch = u32;
-
 pub type RawString = *const core::ffi::c_char;
 pub type Label<'a> = Option<Cow<'a, str>>;
 
-trait LabelHelpers<'a> {
+pub trait LabelHelpers<'a> {
     fn to_hal(&'a self, flags: wgt::InstanceFlags) -> Option<&'a str>;
     fn to_string(&self) -> String;
 }
@@ -226,11 +217,6 @@ pub(crate) fn get_greatest_common_divisor(mut a: u32, mut b: u32) -> u32 {
         }
     }
 }
-
-#[cfg(not(feature = "std"))]
-use core::cell::OnceCell as OnceCellOrLock;
-#[cfg(feature = "std")]
-use std::sync::OnceLock as OnceCellOrLock;
 
 #[cfg(test)]
 mod tests {

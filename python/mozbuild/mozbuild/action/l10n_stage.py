@@ -11,30 +11,56 @@ at <merge-tree>/ to materialize
 Invoked in make via $(call py_action,l10n_stage,...).
 """
 
+from __future__ import annotations
+
 import argparse
-import fnmatch
 import importlib.util
 import shutil
 import sys
+from dataclasses import dataclass
 from glob import glob
 from pathlib import Path
 from typing import Callable, Iterator, Optional
 
 import mozpack.path as mozpath
+from mach.filelock import FileLock, Timeout
 from mozpack.chrome.manifest import parse_manifest_line
 
 from mozbuild.frontend.l10n_manifest import (
-    MOZ_L10N_AB_CD_PLACEHOLDER,
     JarSection,
     L10nManifest,
     L10nManifestContextData,
     LocalizedFileGroup,
     LocalizedGenScript,
     load_l10n_manifest,
-    locale_pp_placeholder,
 )
 from mozbuild.preprocessor import Preprocessor
 from mozbuild.util import FileAvoidWrite
+
+
+class MissingJarSource(Exception):
+    def __init__(
+        self,
+        locale: str,
+        context_relsrcdir: str,
+        relsrcdir: str,
+        source: str,
+        is_locale: bool,
+        resolved: str,
+    ) -> None:
+        self.locale = locale
+        self.context_relsrcdir = context_relsrcdir
+        self.relsrcdir = relsrcdir
+        self.source = source
+        self.is_locale = is_locale
+        self.resolved = resolved
+        origin = "merge tree" if is_locale else "source tree"
+        super().__init__(
+            f"No {origin} source for locale {locale}: {resolved}\n"
+            f"  manifest context: {context_relsrcdir}\n"
+            f"  jar.mn relativesrcdir: {relsrcdir or '(none)'}\n"
+            f"  jar.mn source: {source}"
+        )
 
 
 def stage_locale(
@@ -89,6 +115,31 @@ class StageState:
         self.topobjdir = topobjdir
         self.mode = mode
         self.manifest_entries: dict[str, list[str]] = {}
+
+
+@dataclass(frozen=True)
+class SrcDirs:
+    """The two relative source dirs a context resolves against.
+
+    relsrcdir is topsrcdir-relative and locates en-US sources,
+    locale_relsrcdir is merge-tree-relative. They only differ for
+    comm-central, which localizes from commtopsrcdir.
+    """
+
+    relsrcdir: str
+    locale_relsrcdir: str
+
+    @staticmethod
+    def for_context(context: L10nManifestContextData) -> SrcDirs:
+        return SrcDirs(context.relsrcdir, context.locale_relsrcdir)
+
+    def override(self, relativesrcdir: str) -> SrcDirs:
+        """A jar.mn relativesrcdir replaces both forms: it is relative to
+        the same locale top dir the context is rooted at.
+        """
+        if not relativesrcdir:
+            return self
+        return SrcDirs(relativesrcdir, relativesrcdir)
 
 
 def _write_multilocale_txt(state: StageState) -> None:
@@ -160,8 +211,7 @@ def _stage_file_group(
     /path/locales/en-US/... (topsrcdir-rooted, merge tree), !output
     (objdir-relative, typically a LOCALIZED_GENERATED_FILES output),
     or a glob pattern. preprocess=True runs each entry through the
-    preprocessor with LOCALE_PP_DEFINES resolved for the current
-    locale.
+    preprocessor.
     """
     install_target = mozpath.normpath(
         mozpath.join(context.install_subdir, group.subpath)
@@ -215,15 +265,14 @@ def _resolve_localized_sources(
             yield src_abs, dest_rel
         return
 
+    dirs = SrcDirs.for_context(context)
     if src_template.startswith("en-US/"):
         rest = src_template[len("en-US/") :]
-        src_abs = mozpath.join(_locale_source_root(state, context.relsrcdir), rest)
+        src_abs = mozpath.join(_locale_source_root(state, dirs), rest)
     elif "/locales/en-US/" in src_template:
-        src_abs = _resolve_locales_marker_path(state, context.relsrcdir, src_template)
+        src_abs = _resolve_locales_marker_path(state, dirs, src_template)
     else:
-        src_abs = mozpath.join(
-            _locale_source_root(state, context.relsrcdir), src_template
-        )
+        src_abs = mozpath.join(_locale_source_root(state, dirs), src_template)
 
     if _has_wildcard(src_abs):
         for match in sorted(glob(src_abs)):
@@ -249,7 +298,7 @@ def _merge_subdir_for(relsrcdir: str) -> str:
     return relsrcdir
 
 
-def _locale_source_root(state: StageState, relsrcdir: str) -> str:
+def _locale_source_root(state: StageState, dirs: SrcDirs) -> str:
     """Root directory that locale-marked sources resolve under for
     state.locale. en-US reads directly from the source tree (the merge
     step is skipped for en-US, so the merge tree is empty). Other
@@ -257,20 +306,21 @@ def _locale_source_root(state: StageState, relsrcdir: str) -> str:
     the l10n source repo.
     """
     if state.locale == "en-US":
-        return mozpath.join(state.topsrcdir or "", relsrcdir, "en-US")
-    return mozpath.join(state.merge_tree, _merge_subdir_for(relsrcdir))
+        return mozpath.join(state.topsrcdir or "", dirs.relsrcdir, "en-US")
+    return mozpath.join(state.merge_tree, _merge_subdir_for(dirs.locale_relsrcdir))
 
 
-def _resolve_locales_marker_path(state: StageState, relsrcdir: str, path: str) -> str:
+def _resolve_locales_marker_path(state: StageState, dirs: SrcDirs, path: str) -> str:
     """Resolve a path containing a /locales/en-US/ marker. en-US reads
     from topsrcdir directly. Other locales split at the marker and read
     from the merge tree.
     """
+    is_en_us = state.locale == "en-US"
     if path.startswith("/"):
         rel = path.lstrip("/")
     else:
-        rel = mozpath.join(relsrcdir, path)
-    if state.locale == "en-US":
+        rel = mozpath.join(dirs.relsrcdir if is_en_us else dirs.locale_relsrcdir, path)
+    if is_en_us:
         return mozpath.join(state.topsrcdir or "", rel)
     before, rest = rel.split("/locales/en-US/", 1)
     return mozpath.join(state.merge_tree, before, rest)
@@ -280,10 +330,9 @@ def _resolve_locale_defines(
     state: StageState, context: L10nManifestContextData
 ) -> dict[str, object]:
     """Compose the preprocessor define dict for context and the current
-    locale: DEFINES + LOCALE_PP_DEFINES-resolved + AB_CD.
+    locale: DEFINES plus AB_CD.
     """
     out = dict(context.defines or {})
-    out.update(_locale_resolved_defines(context.locale_pp_defines or {}, state.locale))
     out["AB_CD"] = state.locale
     return out
 
@@ -292,6 +341,7 @@ def _stage_entry(
     src: str, dest: str, preprocess: bool, defines: Optional[dict[str, object]]
 ) -> None:
     Path(dest).parent.mkdir(parents=True, exist_ok=True)
+    Path(dest).unlink(missing_ok=True)
     if preprocess:
         _preprocess_to(src, dest, defines)
     else:
@@ -311,23 +361,39 @@ def _copy_to(src: str, dest: str) -> None:
 
 
 def _write_chrome_manifests(state: StageState) -> None:
-    """Write all collected chrome.manifest files. Each file's entries are
-    deduplicated while preserving insertion order. If a manifest file
-    already exists on disk, its lines merge ahead of the new entries so
-    chrome-mode multi-locale runs accumulate per-locale entries on top
-    of the en-US baseline (and on top of any earlier locales' entries)
-    instead of clobbering them.
+    """Write all collected manifest files. Entries are deduplicated and
+    sorted, so a file's content does not depend on the order locales are
+    staged in. If a manifest file already exists on disk, its lines merge
+    with the new entries so chrome-mode multi-locale runs accumulate
+    per-locale entries on top of the en-US baseline (and on top of any
+    earlier locales' entries) instead of clobbering them. Locales stage
+    concurrently into the same destination, so the read, merge and write
+    runs under one lock, held on a file beside the destination rather than
+    inside it.
     """
-    for relpath, entries in state.manifest_entries.items():
-        path = state.dest / relpath
-        existing = []
-        if path.exists():
-            with path.open(encoding="utf-8") as f:
-                existing = [line.rstrip("\r\n") for line in f if line.strip()]
-        ordered = list(dict.fromkeys(existing + entries))
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8", newline="\n") as f:
-            f.write("\n".join(ordered) + "\n")
+    if not state.manifest_entries:
+        return
+
+    lock_path = state.dest.parent / f"{state.dest.name}.l10n-stage.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    timeout = 60
+    try:
+        with FileLock(lock_path, timeout=timeout):
+            for relpath, entries in state.manifest_entries.items():
+                path = state.dest / relpath
+                path.parent.mkdir(parents=True, exist_ok=True)
+                existing = []
+                if path.exists():
+                    with path.open(encoding="utf-8") as f:
+                        existing = [line.rstrip("\r\n") for line in f if line.strip()]
+                ordered = sorted(set(existing + entries))
+                with path.open("w", encoding="utf-8", newline="\n") as f:
+                    f.write("\n".join(ordered) + "\n")
+    except Timeout as exc:
+        raise RuntimeError(
+            f"Could not acquire {lock_path} after {timeout} seconds. Another "
+            "locale is staging into the same destination."
+        ) from exc
 
 
 def _stage_jar_section(
@@ -343,43 +409,45 @@ def _stage_jar_section(
     Otherwise only entries explicitly marked % (is_locale=True) are
     staged.
 
-    All locale-templated strings in the captured section (section name,
-    entry source, entry output, chrome.manifest lines) are substituted
-    from MOZ_L10N_AB_CD_PLACEHOLDER to state.locale here.
+    Every string in the section holding the locale placeholder (section name,
+    entry source, entry output, chrome.manifest lines) is resolved for
+    state.locale here.
     """
     install_target = _resolve_jar_install_target(context, section)
     defines = _resolve_locale_defines(state, context)
-    subs = _build_jar_subs(state, context)
-    unresolved = _unresolved_locale_pp_placeholders(state, context)
-    src_relsrcdir = section.relativesrcdir or context.relsrcdir or ""
-    section_name = _sub_jar(section.name, subs)
+    dirs = SrcDirs.for_context(context).override(section.relativesrcdir)
+    section_name = section.name.resolve(state.locale)
 
     is_localization_block = section.base == "localization"
     block_keep_all_entries = is_localization_block or any(
-        _sub_jar(m, subs).lstrip().startswith("locale ")
+        m.resolve(state.locale).lstrip().startswith("locale ")
         for m in section.chrome_manifests
     )
 
     for entry in section.entries:
         if not (entry.is_locale or block_keep_all_entries):
             continue
-        entry_source = _sub_jar(entry.source, subs)
-        entry_output = _sub_jar(entry.output, subs)
-        # Entry came from a #if defined(LOCALE_PP_DEFINES_KEY) branch
-        # that didn't resolve for this locale. The en-US fallback from
-        # the first emit-time pass will cover this output.
-        if any(p in entry_source or p in entry_output for p in unresolved):
-            continue
+        entry_source = entry.source.resolve(state.locale)
+        entry_output = entry.output.resolve(state.locale)
         if _has_wildcard(entry_source):
             for match_src, match_rel in _expand_wildcard_jar_source(
-                state, src_relsrcdir, entry_source, entry.is_locale
+                state, dirs, entry_source, entry.is_locale
             ):
                 output_path = _resolve_wildcard_output(entry_output, match_rel)
                 dest_rel = mozpath.join(install_target, section_name, output_path)
                 dest_path = mozpath.join(state.dest, dest_rel)
                 _stage_entry(match_src, dest_path, entry.preprocess, defines)
             continue
-        src = _resolve_jar_source(state, src_relsrcdir, entry_source, entry.is_locale)
+        src = _resolve_jar_source(state, dirs, entry_source, entry.is_locale)
+        if not Path(src).is_file():
+            raise MissingJarSource(
+                locale=state.locale,
+                context_relsrcdir=context.relsrcdir,
+                relsrcdir=dirs.relsrcdir,
+                source=entry_source,
+                is_locale=entry.is_locale,
+                resolved=src,
+            )
         dest_rel = mozpath.join(install_target, section_name, entry_output)
         dest_path = mozpath.join(state.dest, dest_rel)
         _stage_entry(src, dest_path, entry.preprocess, defines)
@@ -393,7 +461,7 @@ def _stage_jar_section(
         chromebase = mozpath.basename(section_name) + "/"
         base = mozpath.dirname(section_name)
         for raw in section.chrome_manifests:
-            line = _sub_jar(raw, subs)
+            line = raw.resolve(state.locale)
             entry = parse_manifest_line(base, line.replace("%", chromebase))
             state.manifest_entries.setdefault(manifest_relpath, []).append(str(entry))
         top_manifest = mozpath.join(install_target, "chrome.manifest")
@@ -435,53 +503,18 @@ def _resolve_jar_install_target(
     return mozpath.normpath("/".join(parts))
 
 
-def _build_jar_subs(
-    state: StageState, context: L10nManifestContextData
-) -> dict[str, str]:
-    """Substitution map applied to captured jar.mn strings at stage time:
-    AB_CD plus any LOCALE_PP_DEFINES keys that resolve for the current
-    locale.
-    """
-    subs = {MOZ_L10N_AB_CD_PLACEHOLDER: state.locale}
-    resolved = _locale_resolved_defines(context.locale_pp_defines or {}, state.locale)
-    for k, v in resolved.items():
-        subs[locale_pp_placeholder(k)] = str(v)
-    return subs
-
-
-def _unresolved_locale_pp_placeholders(
-    state: StageState, context: L10nManifestContextData
-) -> set[str]:
-    """Placeholders for LOCALE_PP_DEFINES keys that don't resolve for
-    the current locale. Captured-but-unresolved entries are dropped at
-    stage time so the en-US #else entries from the first emit-time pass
-    take effect.
-    """
-    table = context.locale_pp_defines or {}
-    resolved = _locale_resolved_defines(table, state.locale)
-    return {locale_pp_placeholder(k) for k in table if k not in resolved}
-
-
-def _sub_jar(s: str, subs: dict[str, str]) -> str:
-    if not s:
-        return s
-    for placeholder, value in subs.items():
-        s = s.replace(placeholder, value)
-    return s
-
-
 def _resolve_jar_source(
-    state: StageState, relsrcdir: str, source: str, is_locale: bool
+    state: StageState, dirs: SrcDirs, source: str, is_locale: bool
 ) -> str:
     """Resolve a jar.mn entry's source path. Locale entries resolve
     against the locale source root for the current locale. Non-locale
     (en-US fallback) entries resolve against topsrcdir.
     """
     if is_locale:
-        return mozpath.join(_locale_source_root(state, relsrcdir), source)
+        return mozpath.join(_locale_source_root(state, dirs), source)
     if source.startswith("/"):
         return mozpath.join(state.topsrcdir or "", source.lstrip("/"))
-    return mozpath.join(state.topsrcdir or "", relsrcdir, source)
+    return mozpath.join(state.topsrcdir or "", dirs.relsrcdir, source)
 
 
 def _split_at_wildcard(parts: list[str]) -> tuple[list[str], list[str]]:
@@ -495,7 +528,7 @@ def _split_at_wildcard(parts: list[str]) -> tuple[list[str], list[str]]:
 
 
 def _expand_wildcard_jar_source(
-    state: StageState, relsrcdir: str, source: str, is_locale: bool
+    state: StageState, dirs: SrcDirs, source: str, is_locale: bool
 ) -> Iterator[tuple[str, str]]:
     """Glob-expand a wildcard source in a jar.mn entry.
 
@@ -506,12 +539,12 @@ def _expand_wildcard_jar_source(
     and is ready to combine with the entry's output template.
     """
     if is_locale:
-        base = _locale_source_root(state, relsrcdir)
+        base = _locale_source_root(state, dirs)
     elif source.startswith("/"):
         base = str(state.topsrcdir or "")
         source = source.lstrip("/")
     else:
-        base = mozpath.join(state.topsrcdir or "", relsrcdir)
+        base = mozpath.join(state.topsrcdir or "", dirs.relsrcdir)
 
     parts = source.split("/")
     prefix_parts, pattern_parts = _split_at_wildcard(parts)
@@ -567,17 +600,14 @@ def _run_localized_generated(
                 f"substitution in {output}"
             )
 
+    dirs = SrcDirs.for_context(context)
     resolved_inputs = []
     for inp in gen.inputs:
         if inp.startswith("en-US/"):
             rest = inp[len("en-US/") :]
-            resolved_inputs.append(
-                mozpath.join(_locale_source_root(state, context.relsrcdir), rest)
-            )
+            resolved_inputs.append(mozpath.join(_locale_source_root(state, dirs), rest))
         elif "/locales/en-US/" in inp:
-            resolved_inputs.append(
-                _resolve_locales_marker_path(state, context.relsrcdir, inp)
-            )
+            resolved_inputs.append(_resolve_locales_marker_path(state, dirs, inp))
         elif inp.startswith("/"):
             resolved_inputs.append(mozpath.join(state.topsrcdir or "", inp.lstrip("/")))
         else:
@@ -639,36 +669,6 @@ def _ab_rcd(locale: str) -> str:
 
 def _has_wildcard(path: str) -> bool:
     return any(c in path for c in "*?[")
-
-
-def _resolve_locale_pp_define(table: dict[str, str], locale: str) -> Optional[str]:
-    """Resolve a single LOCALE_PP_DEFINES inner dict for locale.
-
-    Exact ab_cd keys take precedence over fnmatch-style patterns.
-    Returns the resolved value, or None if neither matches.
-    """
-    if locale in table:
-        return table[locale]
-    for pattern, value in table.items():
-        if _has_wildcard(pattern):
-            if fnmatch.fnmatchcase(locale, pattern):
-                return value
-    return None
-
-
-def _locale_resolved_defines(
-    locale_pp_defines: dict[str, dict[str, str]],
-    locale: str,
-) -> dict[str, str]:
-    """Resolve every LOCALE_PP_DEFINES entry for locale, dropping
-    defines whose inner table has no match.
-    """
-    out = {}
-    for name, table in locale_pp_defines.items():
-        value = _resolve_locale_pp_define(table, locale)
-        if value is not None:
-            out[name] = value
-    return out
 
 
 def main(argv: list[str]) -> int:

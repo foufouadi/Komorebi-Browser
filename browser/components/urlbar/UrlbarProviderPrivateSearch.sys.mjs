@@ -9,11 +9,11 @@
 import {
   SkippableTimer,
   UrlbarProvider,
+  UrlbarUtils,
 } from "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs";
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
-const lazy = {};
-
-ChromeUtils.defineESModuleGetters(lazy, {
+const lazy = XPCOMUtils.declareLazy({
   SearchService: "moz-src:///toolkit/components/search/SearchService.sys.mjs",
   UrlbarResult: "chrome://browser/content/urlbar/UrlbarResult.mjs",
   UrlbarSearchUtils:
@@ -57,8 +57,9 @@ export class UrlbarProviderPrivateSearch extends UrlbarProvider {
    * @param {UrlbarQueryContext} queryContext
    * @param {(provider: UrlbarProvider, result: UrlbarResult) => void} addCallback
    *   Callback invoked by the provider to add a new result.
+   * @param {UrlbarParentController} controller The controller instance.
    */
-  async startQuery(queryContext, addCallback) {
+  async startQuery(queryContext, addCallback, controller) {
     let searchString = queryContext.trimmedSearchString;
     if (
       queryContext.tokens.some(
@@ -96,7 +97,7 @@ export class UrlbarProviderPrivateSearch extends UrlbarProvider {
       logger: this.logger,
     }).promise;
 
-    let icon = await engine.getIconURL();
+    let icon = await UrlbarUtils.getEngineIconUrl(engine, controller);
     if (instance != this.queryInstance) {
       return;
     }

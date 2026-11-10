@@ -57,7 +57,7 @@ var SelectTranslationsPanel = new (class {
       try {
         this.#console = console.createInstance({
           maxLogLevelPref: "browser.translations.logLevel",
-          prefix: "Translations",
+          logModule: "Translations",
         });
       } catch {
         // The console may not be initialized yet.
@@ -348,7 +348,9 @@ var SelectTranslationsPanel = new (class {
     }
 
     this.#isFullPageTranslationsRestrictedForPage =
-      TranslationsParent.isFullPageTranslationsRestrictedForPage(gBrowser);
+      TranslationsParent.isFullPageTranslationsRestrictedForPage(
+        gBrowser.selectedBrowser
+      );
     this.#activeFullPageTranslationsTargetLanguage = this
       .#isFullPageTranslationsRestrictedForPage
       ? undefined
@@ -381,7 +383,9 @@ var SelectTranslationsPanel = new (class {
       // Select Translations is often still available, so we can safely continue to
       // the final return fallback.
       if (
-        !TranslationsParent.isFullPageTranslationsRestrictedForPage(gBrowser)
+        !TranslationsParent.isFullPageTranslationsRestrictedForPage(
+          gBrowser.selectedBrowser
+        )
       ) {
         // If we failed to retrieve the TranslationsParent actor on a non-restricted page,
         // we should warn about this, because it is unexpected. The SelectTranslationsPanel
@@ -2194,8 +2198,7 @@ var SelectTranslationsPanel = new (class {
   }
 
   /**
-   * Retrieves the existing translator for the specified language pair if it matches,
-   * otherwise creates a new translator.
+   * Creates a translator for a single Select Translations request.
    *
    * @param {LanguagePair} languagePair
    *
@@ -2240,18 +2243,23 @@ var SelectTranslationsPanel = new (class {
     TranslationsParent.storeMostRecentTargetLanguage(targetLanguage);
 
     this.#createTranslator(languagePair)
-      .then(translator => {
-        if (
-          this.#shouldContinueTranslation(
-            translationId,
-            sourceLanguage,
-            targetLanguage
-          )
-        ) {
-          this.#changeStateToTranslating();
-          return translator.translate(this.getSourceText());
+      .then(async translator => {
+        try {
+          if (
+            this.#shouldContinueTranslation(
+              translationId,
+              sourceLanguage,
+              targetLanguage
+            )
+          ) {
+            this.#changeStateToTranslating();
+            return await translator.translate(this.getSourceText());
+          }
+
+          return null;
+        } finally {
+          translator.destroy();
         }
-        return null;
       })
       .then(translatedText => {
         if (

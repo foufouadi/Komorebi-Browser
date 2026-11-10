@@ -556,6 +556,57 @@ add_atomic_task(
 );
 
 add_atomic_task(
+  async function test_updateLLMTelemetryRecord_merges_over_null_columns() {
+    const conversation = new ChatConversation({});
+    conversation.title = "null llm telemetry conversation";
+    conversation.addUserMessage("test content", "https://www.firefox.com");
+    await gChatStore.updateConversation(conversation);
+
+    await gChatStore.updateLLMTelemetryRecord(
+      conversation.id,
+      { "wasSuccessful-v1": 1 },
+      { "wasSuccessful-v1": 0.5 },
+      0,
+      0
+    );
+
+    await gChatStore.connection.execute(
+      `UPDATE llm_telemetry
+       SET telemetry_prompts = NULL,
+           telemetry_probabilities = NULL
+       WHERE conv_id = :conv_id`,
+      { conv_id: conversation.id }
+    );
+
+    await gChatStore.updateLLMTelemetryRecord(
+      conversation.id,
+      { "isLongConvo-v1": 3 },
+      { "isLongConvo-v1": 0.7 },
+      0,
+      1
+    );
+
+    const telemetry = await gChatStore.findLLMTelemetryByConversationId(
+      conversation.id
+    );
+
+    Assert.ok(telemetry, "LLM telemetry row should exist");
+    Assert.withSoftAssertions(function (soft) {
+      soft.deepEqual(
+        telemetry.telemetryPrompts,
+        { "isLongConvo-v1": 3 },
+        "a NULL prompts column merges to the incoming values, not to NULL"
+      );
+      soft.deepEqual(
+        telemetry.telemetryProbabilities,
+        { "isLongConvo-v1": 0.7 },
+        "a NULL probabilities column merges to the incoming values, not to NULL"
+      );
+    });
+  }
+);
+
+add_atomic_task(
   async function test_findLLMTelemetryByConversationId_returns_null_for_missing_row() {
     const telemetry =
       await gChatStore.findLLMTelemetryByConversationId("missing-conv-id");
@@ -762,3 +813,53 @@ add_atomic_task(async function test_other_ui_types_no_isRestored_flag() {
     "uiType should be preserved"
   );
 });
+
+add_atomic_task(async function test_group_tabs_confirmation_isRestored_flag() {
+  const conversation = new ChatConversation({});
+  conversation.title = "Test group_tabs isRestored flag";
+  conversation.addUserMessage("Group my tabs", "https://example.com/", 0);
+  conversation.addAssistantMessage("text", "I'll group those tabs");
+
+  const assistant = conversation.messages.at(-1);
+
+  const toolUIData = makeToolUIData({ uiType: "tab-group-confirmation" });
+  toolUIData.properties.actionType = "group_tabs";
+  assistant.toolUIData = toolUIData;
+
+  await gChatStore.updateConversation(conversation);
+
+  const reloaded = await gChatStore.findConversationById(conversation.id);
+  const reloadedAssistant = reloaded.messages.find(m => m.id === assistant.id);
+
+  Assert.ok(
+    reloadedAssistant.isRestored,
+    "group_tabs confirmations should still have isRestored flag set when loaded from DB"
+  );
+});
+
+add_atomic_task(
+  async function test_open_tabs_confirmation_no_isRestored_flag() {
+    const conversation = new ChatConversation({});
+    conversation.title = "Test open_tabs no isRestored flag";
+    conversation.addUserMessage("Open my tabs", "https://example.com/", 0);
+    conversation.addAssistantMessage("text", "I'll open those tabs");
+
+    const assistant = conversation.messages.at(-1);
+
+    const toolUIData = makeToolUIData({ uiType: "tab-group-confirmation" });
+    toolUIData.properties.actionType = "open_tabs";
+    assistant.toolUIData = toolUIData;
+
+    await gChatStore.updateConversation(conversation);
+
+    const reloaded = await gChatStore.findConversationById(conversation.id);
+    const reloadedAssistant = reloaded.messages.find(
+      m => m.id === assistant.id
+    );
+
+    Assert.ok(
+      !reloadedAssistant.isRestored,
+      "open_tabs confirmations should NOT have isRestored flag set when loaded from DB"
+    );
+  }
+);

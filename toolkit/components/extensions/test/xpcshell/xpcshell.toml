@@ -129,20 +129,10 @@ run-if = [
 head = "head.js head_schemas.js"
 
 ["test_ext_secfetch.js"]
-skip-if = [
-  "socketprocess_networking", # Bug 1759035
-]
 
 ["test_ext_shared_array_buffer.js"]
 
 ["test_ext_startup_cache_telemetry.js"]
-skip-if = [
-  "os == 'win' && os_version == '10.2009' && arch == 'x86_64'", # Bug 1996467
-  "os == 'win' && os_version == '11.26100' && arch == 'x86'", # Bug 1996467
-  "os == 'win' && os_version == '11.26100' && arch == 'x86_64'", # Bug 1996467
-  "os == 'win' && os_version == '11.26200' && arch == 'x86'", # Bug 1996467
-  "os == 'win' && os_version == '11.26200' && arch == 'x86_64'", # Bug 1996467
-]
 
 ["test_ext_test_mock.js"]
 
@@ -151,6 +141,12 @@ skip-if = [
 ["test_ext_unknown_permissions.js"]
 
 ["test_ext_urlclassifier.js"]
+# Covers url-classifier's own harmful-addon feature, so keep url-classifier
+# as the channel classifier even where the content classifier is the default.
+prefs = [
+  "privacy.trackingprotection.content.mirror.mode=0",
+  "privacy.trackingprotection.urlclassifier.disable_for_channel_classifier=false",
+]
 
 ["test_ext_webRequest_handlerBehaviorChanged.js"]
 

@@ -40,14 +40,11 @@ add_task(async function () {
   const newres = "res=<p>" + new Array(10).join(Math.random(10)) + "</p>";
   requests[0].url = requests[0].url.replace("res=undefined", newres);
 
-  let wait = waitForNetworkEvents(monitor, 7);
+  let onNetworkEvents = waitForNetworkEvents(monitor, 7);
   await performRequestsInContent(requests);
-  await wait;
+  await onNetworkEvents;
 
-  EventUtils.sendMouseEvent(
-    { type: "mousedown" },
-    document.querySelectorAll(".request-list-item")[0]
-  );
+  clickOnRequestRow(document.querySelectorAll(".request-list-item")[0]);
 
   isnot(
     getSelectedRequest(store.getState()),
@@ -86,9 +83,11 @@ add_task(async function () {
 
   info("Performing more requests.");
   // As the view is filtered and there is only one request for which we fetch event timings
-  wait = waitForNetworkEvents(monitor, 7, { expectedEventTimings: 1 });
+  onNetworkEvents = waitForNetworkEvents(monitor, 7, {
+    expectedEventTimings: 1,
+  });
   performRequestsInContent(REQUESTS_WITH_MEDIA);
-  await wait;
+  await onNetworkEvents;
 
   info("Testing html filtering again.");
   resetSorting();
@@ -97,9 +96,11 @@ add_task(async function () {
 
   info("Performing more requests.");
   // As the view is filtered and there is only one request for which we fetch event timings
-  wait = waitForNetworkEvents(monitor, 7, { expectedEventTimings: 1 });
+  onNetworkEvents = waitForNetworkEvents(monitor, 7, {
+    expectedEventTimings: 1,
+  });
   performRequestsInContent(REQUESTS_WITH_MEDIA);
-  await wait;
+  await onNetworkEvents;
 
   info("Testing html filtering again.");
   resetSorting();

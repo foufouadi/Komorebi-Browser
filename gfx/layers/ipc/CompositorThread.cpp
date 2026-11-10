@@ -16,6 +16,9 @@
 #include "mozilla/media/MediaSystemResourceService.h"
 #include "nsThread.h"
 #include "nsThreadUtils.h"
+#ifdef XP_WIN
+#  include "mozilla/WindowsUserHandleValidation.h"
+#endif
 
 namespace mozilla {
 namespace layers {
@@ -37,7 +40,7 @@ CompositorThreadHolder* CompositorThreadHolder::GetSingleton() {
 
 CompositorThreadHolder::CompositorThreadHolder()
     : mCompositorThread(CreateCompositorThread()) {
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_RELEASE_ASSERT(NS_IsMainThread());
 }
 
 CompositorThreadHolder::~CompositorThreadHolder() {
@@ -46,10 +49,10 @@ CompositorThreadHolder::~CompositorThreadHolder() {
 
 /* static */ already_AddRefed<nsIThread>
 CompositorThreadHolder::CreateCompositorThread() {
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
-  MOZ_ASSERT(!sCompositorThreadHolder,
-             "The compositor thread has already been started!");
+  MOZ_RELEASE_ASSERT(!sCompositorThreadHolder,
+                     "The compositor thread has already been started!");
 
   // When the CanvasRenderer thread is disabled, WebGL may be handled on this
   // thread, requiring a bigger stack size. See: CanvasManagerParent::Init
@@ -94,6 +97,9 @@ CompositorThreadHolder::CreateCompositorThread() {
                 2048);
             nsCOMPtr<nsIThread> thread = NS_GetCurrentThread();
             static_cast<nsThread*>(thread.get())->SetUseHangMonitor(true);
+#ifdef XP_WIN
+            mozilla::ForceToGuiThreadAndFixTebValidateHandlesFlag();
+#endif
           }),
       {.stackSize = stackSize});
 
@@ -107,9 +113,9 @@ CompositorThreadHolder::CreateCompositorThread() {
 }
 
 void CompositorThreadHolder::Start() {
-  MOZ_ASSERT(NS_IsMainThread(), "Should be on the main Thread!");
-  MOZ_ASSERT(!sCompositorThreadHolder,
-             "The compositor thread has already been started!");
+  MOZ_RELEASE_ASSERT(NS_IsMainThread(), "Should be on the main Thread!");
+  MOZ_RELEASE_ASSERT(!sCompositorThreadHolder,
+                     "The compositor thread has already been started!");
 
   // We unset the holder instead of asserting because failing to start the
   // compositor thread may not be a fatal error. As long as this succeeds in
@@ -126,7 +132,7 @@ void CompositorThreadHolder::Start() {
 }
 
 void CompositorThreadHolder::Shutdown() {
-  MOZ_ASSERT(NS_IsMainThread(), "Should be on the main Thread!");
+  MOZ_RELEASE_ASSERT(NS_IsMainThread(), "Should be on the main Thread!");
   if (!sCompositorThreadHolder) {
     // We've already shutdown or never started.
     return;

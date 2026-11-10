@@ -81,9 +81,28 @@ static void UnregisterMedieEngine(MFMediaEngineParent* aMediaEngine) {
 }
 
 /* static */
-MFMediaEngineParent* MFMediaEngineParent::GetMediaEngineById(uint64_t aId) {
+already_AddRefed<MFMediaEngineParent> MFMediaEngineParent::GetMediaEngineById(
+    uint64_t aId) {
   StaticMutexAutoLock lock(sMediaEnginesLock);
-  return sMediaEngines->Get(aId);
+  if (!sMediaEngines) {
+    return nullptr;
+  }
+  RefPtr<MFMediaEngineParent> engine = sMediaEngines->Get(aId);
+  return engine.forget();
+}
+
+/* static */
+bool MFMediaEngineParent::IsMediaEngineIdAllowed(
+    uint64_t aId, const RemoteMediaManagerParent* aManager) {
+  MOZ_ASSERT(RemoteMediaManagerParent::OnManagerThread());
+  MOZ_ASSERT(aManager);
+  if (aId == 0 || aId > sMediaEngineIdx) {
+    return false;
+  }
+  StaticMutexAutoLock lock(sMediaEnginesLock);
+  MFMediaEngineParent* engine =
+      sMediaEngines ? sMediaEngines->Get(aId) : nullptr;
+  return !engine || engine->mManager.get() == aManager;
 }
 
 MFMediaEngineParent::MFMediaEngineParent(RemoteMediaManagerParent* aManager,
@@ -104,14 +123,23 @@ MFMediaEngineParent::MFMediaEngineParent(RemoteMediaManagerParent* aManager,
 
 MFMediaEngineParent::~MFMediaEngineParent() {
   LOG("Destoryed MFMediaEngineParent");
-  DestroyEngineIfExists();
   UnregisterMedieEngine(this);
+  DestroyEngineIfExists();
+}
+
+void MFMediaEngineParent::ActorDestroy(ActorDestroyReason aWhy) {
+  AssertOnManagerThread();
+  LOG("ActorDestroy");
+  UnregisterMedieEngine(this);
+  DestroyEngineIfExists();
 }
 
 void MFMediaEngineParent::DestroyEngineIfExists(
     const Maybe<MediaResult>& aError) {
   LOG("DestroyEngineIfExists, hasError={}", aError.isSome());
   ENGINE_MARKER("MFMediaEngineParent::DestroyEngineIfExists");
+  mMediaEngineEventListener.DisconnectIfExists();
+  mRequestSampleListener.DisconnectIfExists();
   mMediaEngineNotify = nullptr;
   mMediaEngineExtension = nullptr;
   if (mMediaSource) {
@@ -130,8 +158,6 @@ void MFMediaEngineParent::DestroyEngineIfExists(
     LOG_IF_FAILED(mMediaEngine->Shutdown());
     mMediaEngine = nullptr;
   }
-  mMediaEngineEventListener.DisconnectIfExists();
-  mRequestSampleListener.DisconnectIfExists();
   if (mDXGIDeviceManager) {
     mDXGIDeviceManager = nullptr;
     wmf::MFUnlockDXGIDeviceManager();
@@ -585,16 +611,22 @@ HRESULT MFMediaEngineParent::SetMediaInfo(const MediaInfoIPDL& aInfo,
 
   const bool isEncrypted = mMediaSource->IsEncrypted();
   ENGINE_MARKER("MFMediaEngineParent,CreatedMediaSource");
+  const gfx::IntSize videoImage =
+      aInfo.videoInfo() ? aInfo.videoInfo()->mImage : gfx::IntSize{};
+  const gfx::IntSize videoDisplay =
+      aInfo.videoInfo() ? aInfo.videoInfo()->mDisplay : gfx::IntSize{};
   nsPrintfCString message(
       "Created the media source, audio=%s, video=%s, encrypted-audio=%s, "
-      "encrypted-video=%s, aIsEncryptedCustomInit=%d, isEncrypted=%d",
+      "encrypted-video=%s, aIsEncryptedCustomInit=%d, isEncrypted=%d, "
+      "video-image=[%dx%d], video-display=[%dx%d]",
       aInfo.audioInfo() ? aInfo.audioInfo()->mMimeType.get() : "none",
       aInfo.videoInfo() ? aInfo.videoInfo()->mMimeType.get() : "none",
       aInfo.audioInfo() && aInfo.audioInfo()->mCrypto.IsEncrypted() ? "yes"
                                                                     : "no",
       aInfo.videoInfo() && aInfo.videoInfo()->mCrypto.IsEncrypted() ? "yes"
                                                                     : "no",
-      aIsEncryptedCustomInit, isEncrypted);
+      aIsEncryptedCustomInit, isEncrypted, videoImage.width, videoImage.height,
+      videoDisplay.width, videoDisplay.height);
   LOG("{}", message.get());
 
   if (aInfo.videoInfo()) {

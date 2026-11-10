@@ -112,8 +112,20 @@ internal class GeckoIPProtectionHandler(private val runtime: GeckoRuntime) : IPP
         )
     }
 
-    override fun updateCountryList() {
-        runtime.ipProtectionController.getCountryList()
+    override fun updateCountryList(onResult: (Throwable?) -> Unit) {
+        runtime.ipProtectionController
+            .getCountryList()
+            .then(
+                {
+                    onResult(null)
+                    GeckoResult.fromValue(null)
+                },
+                { ex ->
+                    logger.error("updateCountryList() failed", ex)
+                    onResult(ex)
+                    GeckoResult.fromValue(null)
+                },
+            )
     }
 
     override fun setAuthProvider(provider: IPProtectionHandler.AuthProvider?) {
@@ -161,7 +173,7 @@ internal class GeckoIPProtectionHandler(private val runtime: GeckoRuntime) : IPP
                         if (token != null) {
                             result.complete(token)
                         } else {
-                            result.completeExceptionally(RuntimeException("no-gpi-token"))
+                            result.completeExceptionally(RuntimeException("no_gpi_token"))
                         }
                     }
                     return result

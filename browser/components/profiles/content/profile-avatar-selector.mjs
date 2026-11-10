@@ -109,6 +109,7 @@ export class ProfileAvatarSelector extends MozLitElement {
     bottomRightMover: "#mover-bottomRight",
     avatarPicker: "#avatars",
     avatars: { all: "moz-visual-picker-item" },
+    dialog: "dialog",
   };
 
   constructor() {
@@ -161,21 +162,10 @@ export class ProfileAvatarSelector extends MozLitElement {
   }
 
   toggleHidden(force = null) {
-    if (force === true) {
-      this.hidden = true;
-    } else if (force === false) {
-      this.hidden = false;
+    if (force === true || (this.dialog.open && force !== false)) {
+      this.dialog.close();
     } else {
-      this.hidden = !this.hidden;
-    }
-
-    // Add or remove event listeners as necessary
-    if (this.hidden) {
-      document.removeEventListener("click", this);
-      window.removeEventListener("keydown", this);
-    } else {
-      document.addEventListener("click", this);
-      window.addEventListener("keydown", this);
+      this.dialog.showModal();
     }
   }
 
@@ -187,19 +177,11 @@ export class ProfileAvatarSelector extends MozLitElement {
     this.toggleHidden(true);
   }
 
-  maybeHide() {
-    if (this.view === VIEWS.CROP) {
-      this.setView(VIEWS.CUSTOM);
-      return;
-    }
-
-    this.hide();
-  }
-
   cropViewStart() {
     window.addEventListener("pointerdown", this);
     window.addEventListener("pointermove", this);
     window.addEventListener("pointerup", this);
+    window.addEventListener("keydown", this);
     document.documentElement.classList.add("disable-text-selection");
   }
 
@@ -207,6 +189,7 @@ export class ProfileAvatarSelector extends MozLitElement {
     window.removeEventListener("pointerdown", this);
     window.removeEventListener("pointermove", this);
     window.removeEventListener("pointerup", this);
+    window.removeEventListener("keydown", this);
     document.documentElement.classList.remove("disable-text-selection");
   }
   getAvatarL10nId(value) {
@@ -294,6 +277,7 @@ export class ProfileAvatarSelector extends MozLitElement {
   iconTabContentTemplate() {
     return html`<moz-visual-picker
       type="listbox"
+      data-l10n-id="avatar-selector-icon-list"
       value=${this.value}
       name="avatar"
       id="avatars"
@@ -596,23 +580,6 @@ export class ProfileAvatarSelector extends MozLitElement {
         this.handleKeyDown(event);
         break;
       }
-      case "click": {
-        if (this.view === VIEWS.CROP) {
-          return;
-        }
-
-        let element = event.originalTarget;
-        while (element && element !== this) {
-          element = element?.getRootNode()?.host;
-        }
-
-        if (element === this) {
-          return;
-        }
-
-        this.hide();
-        break;
-      }
     }
   }
 
@@ -708,11 +675,10 @@ export class ProfileAvatarSelector extends MozLitElement {
   }
 
   handleKeyDown(event) {
+    // The keydown listener is only registered while in the crop view.
     if (event.key === "Escape") {
-      this.maybeHide();
-    }
-
-    if (this.view !== VIEWS.CROP) {
+      event.preventDefault();
+      this.setView(VIEWS.CUSTOM);
       return;
     }
 
@@ -1015,29 +981,34 @@ export class ProfileAvatarSelector extends MozLitElement {
         rel="stylesheet"
         href="chrome://browser/content/profiles/profile-avatar-selector.css"
       />
-      <moz-card id="avatar-selector">
-        <div id="content">
-          <moz-segmented-control
-            class="button-group"
-            value=${this.view === VIEWS.ICON ? VIEWS.ICON : VIEWS.CUSTOM}
-            @change=${this.handleTabChange}
-          >
-            <moz-segmented-control-item
-              id="icon"
-              value=${VIEWS.ICON}
-              size="small"
-              data-l10n-id="avatar-selector-icon-tab"
-            ></moz-segmented-control-item>
-            <moz-segmented-control-item
-              id="custom"
-              value=${VIEWS.CUSTOM}
-              size="small"
-              data-l10n-id="avatar-selector-custom-tab"
-            ></moz-segmented-control-item>
-          </moz-segmented-control>
-          ${this.contentTemplate()}
-        </div>
-      </moz-card>`;
+      <dialog
+        data-l10n-id="avatar-selector-dialog"
+        closedby=${this.view === VIEWS.CROP ? "closerequest" : "any"}
+      >
+        <moz-card id="avatar-selector">
+          <div id="content">
+            <moz-segmented-control
+              class="button-group"
+              value=${this.view === VIEWS.ICON ? VIEWS.ICON : VIEWS.CUSTOM}
+              @change=${this.handleTabChange}
+            >
+              <moz-segmented-control-item
+                id="icon"
+                value=${VIEWS.ICON}
+                size="small"
+                data-l10n-id="avatar-selector-icon-tab"
+              ></moz-segmented-control-item>
+              <moz-segmented-control-item
+                id="custom"
+                value=${VIEWS.CUSTOM}
+                size="small"
+                data-l10n-id="avatar-selector-custom-tab"
+              ></moz-segmented-control-item>
+            </moz-segmented-control>
+            ${this.contentTemplate()}
+          </div>
+        </moz-card>
+      </dialog>`;
   }
 }
 

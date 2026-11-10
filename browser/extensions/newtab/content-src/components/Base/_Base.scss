@@ -264,8 +264,54 @@ main.newtab-main {
   color: var(--newtab-text-primary-color);
   min-height: 100vh;
   padding-block-start: var(--space-xlarge);
+
+  // The attribution is positioned against #root, so the page needs clear space
+  // at the bottom for it. Classic gets that from .outer-wrapper's all-round
+  // padding; .nova-outer-wrapper only pads block-start. Sized to clear the
+  // attribution's own inset plus a line of text.
+  // @nova-cleanup(remove-conditional): Delete this &:has() block only when
+  // .nova-outer-wrapper merges into .outer-wrapper AND the merged rule keeps a
+  // block-end padding at least this large. If that merge is deferred to its own
+  // bug, leave this block alone.
+  &:has(.wallpaper-attribution) {
+    padding-block-end: calc(var(--space-large) + var(--space-xxlarge));
+  }
 }
 
 .asrouter-multistage-message-wrapper {
   margin-block: var(--space-xlarge);
+
+  .nova-enabled & {
+    @media (height >= 800px) {
+      margin-block-start: calc(3 * var(--space-xxlarge));
+    }
+  }
+}
+
+.nova-enabled.container {
+  .message-wrapper:has(> .asrouter-multistage-message-wrapper) {
+    justify-self: center;
+    // ensure that the min width matches the min-width of topsites
+    min-width: 324px;
+
+    @include at-outer-grid-cols(6) {
+      width: calc(6 * var(--col-width) + 5 * var(--space-medium));
+    }
+
+    @include at-outer-grid-cols(10) {
+      width: calc(10 * var(--col-width) + 9 * var(--space-medium));
+    }
+  }
+
+  &:has(.search-inner-wrapper > moz-urlbar) {
+    @include at-outer-grid-cols(6) {
+      .message-wrapper:has(> .asrouter-multistage-message-wrapper) {
+        width: $search-width-ratio * 100cqi;
+      }
+
+      &.logo-in-content .message-wrapper:has(> .asrouter-multistage-message-wrapper) {
+        width: $search-width-ratio * 100%;
+      }
+    }
+  }
 }

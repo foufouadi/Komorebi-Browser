@@ -81,15 +81,9 @@ xul|findbar {
 
 .findbar-textbox {
   appearance: none;
-  background-color: var(--background-color-box);
-  color: var(--input-text-color);
+  background-color: var(--toolbar-field-background-color);
+  color: var(--toolbar-field-text-color);
   min-height: 28px;
-
-  :root[lwtheme] &:not([status="notfound"], [flash="true"]) {
-    background-color: var(--toolbar-field-background-color);
-    color: var(--toolbar-field-text-color);
-  }
-
   border: var(--border-width) solid var(--border-color-interactive);
   border-radius: var(--border-radius-xlarge);
   outline: none;
@@ -99,11 +93,9 @@ xul|findbar {
   width: 18em;
   box-sizing: border-box;
 
-  /* stylelint-disable-next-line media-query-no-invalid */
   @media not -moz-pref("browser.nova.enabled") {
     border-radius: var(--border-radius-small);
     border: 1px solid var(--input-border-color);
-    background-color: var(--input-text-background-color);
     min-height: auto;
     padding: 2px 5px;
 
@@ -152,7 +144,6 @@ xul|findbar {
   border-radius: var(--border-radius-circle);
   padding: var(--space-xsmall) var(--space-small);
 
-  /* stylelint-disable-next-line media-query-no-invalid */
   @media not -moz-pref("browser.nova.enabled") {
     border-radius: var(--border-radius-small);
     padding: 4px 7px;
@@ -175,7 +166,9 @@ xul|findbar {
     background-color: var(--toolbarbutton-background-color-active, rgba(190, 190, 190, 0.4));
   }
 
-  &[disabled] > .toolbarbutton-icon {
+  &[disabled] {
+    border-color: var(--toolbarbutton-outline-color-disabled);
+    fill: var(--toolbarbutton-icon-fill-disabled);
     opacity: var(--toolbarbutton-opacity-disabled);
   }
 }
@@ -242,7 +235,6 @@ xul|findbar {
     background-color: var(--toolbarbutton-background-color-active, rgba(190, 190, 190, 0.4));
   }
 
-  /* stylelint-disable-next-line media-query-no-invalid */
   @media not -moz-pref("browser.nova.enabled") {
     border-radius: var(--border-radius-small);
     width: 24px;

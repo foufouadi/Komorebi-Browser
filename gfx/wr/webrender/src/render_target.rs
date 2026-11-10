@@ -7,7 +7,8 @@ use api::units::*;
 use api::{ColorF, LineOrientation, BorderStyle};
 use crate::batch::{AlphaBatchBuilder, AlphaBatchContainer, BatchTextures, TextureSet};
 use crate::batch::{BatchBuilder, INVALID_SEGMENT_INDEX, ClipMaskInstanceList};
-use crate::render_task::{SubTask, RectangleClipSubTask, ImageClipSubTask};
+use crate::render_task::{SubTask, RectangleClipSubTask, ImageClipSubTask, PathClipSubTask};
+use crate::path_tiler::{PathInfo, PathTiler, PathTilerOutput};
 use crate::command_buffer::{CommandBufferList, QuadFlags};
 use crate::pattern::{Pattern, PatternKind, PatternShaderInput};
 use crate::segment::EdgeMask;
@@ -24,8 +25,9 @@ use crate::tile_cache::{SliceId, TileCacheInstance};
 use crate::transform::TransformPalette;
 use crate::quad;
 use crate::prim_store::{PrimitiveInstance, PrimitiveStore, PrimitiveScratchBuffer};
+use crate::profiler::{self, TransactionProfile};
 use crate::renderer::{BlendMode, GpuBufferAddress, GpuBufferBuilder};
-use crate::render_backend::DataStores;
+use crate::render_backend::{DataStores, DlStores};
 use crate::render_task::{RenderTaskKind, RenderTaskAddress};
 use crate::render_task::{RenderTask, ScalingTask, SVGFEFilterTask};
 use crate::render_task_graph::{RenderTaskGraph, RenderTaskId};
@@ -35,6 +37,7 @@ use crate::spatial_tree::SpatialNodeIndex;
 
 const STYLE_SOLID: i32 = ((BorderStyle::Solid as i32) << 8) | ((BorderStyle::Solid as i32) << 16);
 const STYLE_MASK: i32 = 0x00FF_FF00;
+const SUPERELLIPSE_MASK: i32 = 1 << 29;
 
 /// A tag used to identify the output format of a `RenderTarget`.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -53,11 +56,13 @@ pub struct RenderTargetContext<'a, 'rc> {
     pub batch_lookback_count: usize,
     pub spatial_tree: &'a SpatialTree,
     pub data_stores: &'a DataStores,
+    pub dl_stores: &'a DlStores,
     pub scratch: &'a PrimitiveScratchBuffer,
     pub screen_device_rect: DeviceRect,
     pub tile_caches: &'a FastHashMap<SliceId, Box<TileCacheInstance>>,
     pub root_spatial_node_index: SpatialNodeIndex,
     pub frame_memory: &'a mut FrameMemory,
+    pub profile: &'a mut TransactionProfile,
 }
 
 /// A series of `RenderTarget` instances, serving as the high-level container
@@ -108,6 +113,7 @@ impl RenderTargetList {
         prim_instances: &[PrimitiveInstance],
         cmd_buffers: &CommandBufferList,
         gpu_buffer_builder: &mut GpuBufferBuilder,
+        path_tiler: &mut PathTiler,
     ) {
         if self.targets.is_empty() {
             return;
@@ -123,6 +129,7 @@ impl RenderTargetList {
                 prim_instances,
                 cmd_buffers,
                 gpu_buffer_builder,
+                path_tiler,
             );
         }
     }
@@ -156,7 +163,6 @@ pub struct RenderTarget {
     pub svg_nodes: FrameVec<(BatchTextures, FrameVec<SVGFEFilterInstance>)>,
     pub blits: FrameVec<BlitJob>,
     alpha_tasks: FrameVec<RenderTaskId>,
-    pub resolve_ops: FrameVec<ResolveOp>,
 
     pub prim_instances: [FastHashMap<TextureSet, FrameVec<PrimitiveInstanceData>>; NUM_PATTERNS],
     pub prim_instances_with_scissor: FastHashMap<(DeviceIntRect, PatternKind), FastHashMap<TextureSet, FrameVec<PrimitiveInstanceData>>>,
@@ -165,6 +171,8 @@ pub struct RenderTarget {
 
     pub border_segments_complex: FrameVec<BorderInstance>,
     pub border_segments_solid: FrameVec<BorderInstance>,
+    pub border_segments_complex_superellipse: FrameVec<BorderInstance>,
+    pub border_segments_solid_superellipse: FrameVec<BorderInstance>,
     pub line_decorations: FrameVec<LineDecorationJob>,
 
     // Clearing render targets has a fair amount of special cases.
@@ -218,13 +226,14 @@ impl RenderTarget {
             blits: memory.new_vec(),
             alpha_tasks: memory.new_vec(),
             used_rect,
-            resolve_ops: memory.new_vec(),
             clear_color: Some(ColorF::TRANSPARENT),
             prim_instances: std::array::from_fn(|_| FastHashMap::default()),
             prim_instances_with_scissor: FastHashMap::default(),
             clip_masks: ClipMaskInstanceList::new(memory),
             border_segments_complex: memory.new_vec(),
             border_segments_solid: memory.new_vec(),
+            border_segments_complex_superellipse: memory.new_vec(),
+            border_segments_solid_superellipse: memory.new_vec(),
             clears: memory.new_vec(),
             line_decorations: memory.new_vec(),
         }
@@ -240,6 +249,7 @@ impl RenderTarget {
         prim_instances: &[PrimitiveInstance],
         cmd_buffers: &CommandBufferList,
         gpu_buffer_builder: &mut GpuBufferBuilder,
+        path_tiler: &mut PathTiler,
     ) {
         tracy_rs::profile_scope!("build");
         let mut merged_batches = AlphaBatchContainer::new(None, &ctx.frame_memory);
@@ -252,7 +262,13 @@ impl RenderTarget {
                 RenderTaskKind::Picture(ref pic_task) => {
                     let target_rect = task.get_target_rect();
 
-                    let scissor_rect = if pic_task.can_merge {
+                    let content_rect = DeviceIntRect::from_origin_and_size(
+                        target_rect.min,
+                        pic_task.content_size,
+                    );
+                    let scissor_rect = if pic_task.capture_clear_color.is_some() {
+                        Some(content_rect)
+                    } else if pic_task.can_merge {
                         None
                     } else {
                         Some(target_rect)
@@ -261,7 +277,25 @@ impl RenderTarget {
                     if !pic_task.can_use_shared_surface {
                         self.clear_color = pic_task.clear_color;
                     }
-                    if let Some(clear_color) = pic_task.clear_color {
+                    if let Some(content_clear_color) = pic_task.capture_clear_color {
+                        // The renderer may skip a clear whose color matches the
+                        // target's, so the content and padding clears must not
+                        // overlap.
+                        self.clears.push((content_rect, content_clear_color));
+                        let right = DeviceIntRect::new(
+                            DeviceIntPoint::new(content_rect.max.x, target_rect.min.y),
+                            target_rect.max,
+                        );
+                        let bottom = DeviceIntRect::new(
+                            DeviceIntPoint::new(target_rect.min.x, content_rect.max.y),
+                            DeviceIntPoint::new(content_rect.max.x, target_rect.max.y),
+                        );
+                        for rect in [right, bottom] {
+                            if !rect.is_empty() {
+                                self.clears.push((rect, ColorF::TRANSPARENT));
+                            }
+                        }
+                    } else if let Some(clear_color) = pic_task.clear_color {
                         self.clears.push((target_rect, clear_color));
                     } else if self.cached {
                         self.clears.push((target_rect, ColorF::TRANSPARENT));
@@ -281,7 +315,12 @@ impl RenderTarget {
                         &ctx.frame_memory,
                     );
 
-                    let mut batch_builder = BatchBuilder::new(alpha_batch_builder);
+                    let mut batch_builder = BatchBuilder::new(
+                        alpha_batch_builder,
+                        DeviceIntRect::from_size(target_rect.size()),
+                        pic_task.content_origin,
+                    );
+                    path_tiler.begin_target(DeviceIntRect::from_size(target_rect.size()));
                     let cmd_buffer = cmd_buffers.get(pic_task.cmd_buffer_index);
 
                     cmd_buffer.iter_prims(&mut |cmd, spatial_node_index, segments| {
@@ -294,9 +333,11 @@ impl RenderTarget {
                             transforms,
                             pic_task.raster_spatial_node_index,
                             pic_task.surface_spatial_node_index,
+                            pic_task.device_pixel_scale,
                             z_generator,
                             prim_instances,
                             gpu_buffer_builder,
+                            path_tiler,
                             segments,
                         );
                     });
@@ -328,10 +369,11 @@ impl RenderTarget {
     pub fn add_task(
         &mut self,
         task_id: RenderTaskId,
-        ctx: &RenderTargetContext,
+        ctx: &mut RenderTargetContext,
         gpu_buffer_builder: &mut GpuBufferBuilder,
         render_tasks: &RenderTaskGraph,
         transforms: &mut TransformPalette,
+        path_tiler: &mut PathTiler,
     ) {
         tracy_rs::profile_scope!("add_task");
         let task = &render_tasks[task_id];
@@ -412,10 +454,7 @@ impl RenderTarget {
                     &ctx.frame_memory,
                 );
             }
-            RenderTaskKind::Picture(ref pic_task) => {
-                if let Some(ref resolve_op) = pic_task.resolve_op {
-                    self.resolve_ops.push(resolve_op.clone());
-                }
+            RenderTaskKind::Picture(..) => {
                 self.alpha_tasks.push(task_id);
             }
             RenderTaskKind::SVGFENode(ref task_info) => {
@@ -443,7 +482,7 @@ impl RenderTarget {
 
                 let device_rect = DeviceRect::from_size(target_rect.size().to_f32());
 
-                let (clip_address, fast_path) = quad::write_rounded_rect_clip_blocks(
+                let (clip_address, fast_path, superellipse) = quad::write_rounded_rect_clip_blocks(
                     &mut gpu_buffer_builder.f32,
                     region_task.clip_rect,
                     &region_task.radius,
@@ -497,6 +536,8 @@ impl RenderTarget {
 
                         if fast_path {
                             self.clip_masks.mask_instances_fast.push(instance);
+                        } else if superellipse {
+                            self.clip_masks.mask_instances_superellipse.push(instance);
                         } else {
                             self.clip_masks.mask_instances_slow.push(instance);
                         }
@@ -547,16 +588,24 @@ impl RenderTarget {
                     // TODO(gw): It may be better to store the task origin in
                     //           the render task data instead of per instance.
                     instance.task_origin = task_origin;
+                    let superellipse = (instance.flags & SUPERELLIPSE_MASK) != 0;
                     if instance.flags & STYLE_MASK == STYLE_SOLID {
-                        self.border_segments_solid.push(instance);
+                        if superellipse {
+                            self.border_segments_solid_superellipse.push(instance);
+                        } else {
+                            self.border_segments_solid.push(instance);
+                        }
                     } else {
-                        self.border_segments_complex.push(instance);
+                        if superellipse {
+                            self.border_segments_complex_superellipse.push(instance);
+                        } else {
+                            self.border_segments_complex.push(instance);
+                        }
                     }
                 }
             }
             RenderTaskKind::Image(..) |
-            RenderTaskKind::Cached(..) |
-            RenderTaskKind::TileComposite(..) => {
+            RenderTaskKind::Cached(..) => {
                 panic!("Should not be added to color target!");
             }
             RenderTaskKind::Readback(..) => {}
@@ -590,6 +639,17 @@ impl RenderTarget {
                         &mut self.clip_masks
                     );
                 }
+                SubTask::PathClip(clip_task) => {
+                    ctx.profile.add(profiler::PATH_CLIPS, 1);
+                    add_path_clip_task_to_batch(
+                        clip_task,
+                        &target_rect,
+                        task_address,
+                        gpu_buffer_builder,
+                        path_tiler,
+                        &mut self.clip_masks
+                    );
+                }
             }
         }
     }
@@ -603,29 +663,9 @@ impl RenderTarget {
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(Debug, PartialEq, Clone)]
-pub struct ResolveOp {
-    pub src_task_ids: Vec<RenderTaskId>,
-    pub dest_task_id: RenderTaskId,
-    /// Maps a rect from the dest (resolve target) surface's raster space into
-    /// the src (parent) surface's raster space. Identity unless the resolve
-    /// target established a different raster root than the parent it reads back
-    /// from (e.g. a backdrop-filter promoted to a root-snapping raster root
-    /// inside a scrolled/transformed subtree). Used by `handle_resolve` to read
-    /// back the region the backdrop actually covers rather than one offset by
-    /// the difference between the two raster roots.
-    pub dest_to_src_raster: ScaleOffset,
-}
-
-#[cfg_attr(feature = "capture", derive(Serialize))]
-#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub enum PictureCacheTargetKind {
     Draw {
         alpha_batch_container: AlphaBatchContainer,
-    },
-    Blit {
-        task_id: RenderTaskId,
-        sub_rect_offset: DeviceIntVector2D,
     },
 }
 
@@ -927,6 +967,11 @@ fn add_rect_clip_task_to_batch(
                             .entry(*target_rect)
                             .or_insert_with(|| memory.new_vec())
                             .push(instance);
+                } else if task.rounded_rect_superellipse {
+                    results.mask_instances_superellipse_with_scissor
+                            .entry(*target_rect)
+                            .or_insert_with(|| memory.new_vec())
+                            .push(instance);
                 } else {
                     results.mask_instances_slow_with_scissor
                             .entry(*target_rect)
@@ -936,11 +981,47 @@ fn add_rect_clip_task_to_batch(
             } else {
                 if task.rounded_rect_fast_path {
                     results.mask_instances_fast.push(instance);
+                } else if task.rounded_rect_superellipse {
+                    results.mask_instances_superellipse.push(instance);
                 } else {
                     results.mask_instances_slow.push(instance);
                 }
             }
         }
+    );
+}
+
+fn add_path_clip_task_to_batch(
+    task: &PathClipSubTask,
+    target_rect: &DeviceIntRect,
+    masked_task_address: RenderTaskAddress,
+    gpu_buffers: &mut GpuBufferBuilder,
+    tiler: &mut PathTiler,
+    results: &mut ClipMaskInstanceList,
+) {
+    let path_info = PathInfo {
+        render_task_address: masked_task_address.0 as u32,
+        fill_rule: task.fill_rule,
+        // The tiles cover the outside of the path, which dest-out removes.
+        inverted: true,
+        opacity: 1.0,
+    };
+    let mut writer = gpu_buffers.i32.write_blocks(1);
+    writer.push_one(path_info.encode());
+    let path_address = writer.finish();
+
+    tiler.begin_target(DeviceIntRect::from_size(target_rect.size()));
+    tiler.fill_path(
+        &task.path,
+        &task.transform,
+        task.fill_rule,
+        path_info.inverted,
+        path_address.as_u32(),
+        &mut PathTilerOutput {
+            edges: &mut gpu_buffers.edges,
+            tiles: &mut results.path_tiles,
+            solid_tiles: None,
+        },
     );
 }
 

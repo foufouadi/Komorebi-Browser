@@ -6,9 +6,12 @@ import UrlbarPrefs from "chrome://browser/content/urlbar/UrlbarContentPrefs.mjs"
 import { UrlbarResult } from "chrome://browser/content/urlbar/UrlbarResult.mjs";
 import { UrlbarShared } from "chrome://browser/content/urlbar/UrlbarShared.mjs";
 
-const lazy = {};
+const { XPCOMUtils } =
+  typeof ChromeUtils == "undefined"
+    ? { XPCOMUtils: null }
+    : ChromeUtils.importESModule("resource://gre/modules/XPCOMUtils.sys.mjs");
 
-ChromeUtils.defineESModuleGetters(lazy, {
+const lazy = XPCOMUtils?.declareLazy({
   UrlbarUtils: "moz-src:///browser/components/urlbar/UrlbarUtils.sys.mjs",
 });
 
@@ -63,7 +66,7 @@ export class UrlbarTelemetryUtils {
     if (details.selType === "dismiss") {
       return "dismiss";
     }
-    if (MouseEvent.isInstance(event)) {
+    if (UrlbarShared.isInstance(event, MouseEvent)) {
       // TODO (Bug 2018250): Don’t rely on `event` and use `selType` or
       // `details.element` if possible.
       return /** @type {HTMLElement} */ (event.target).classList.contains(
@@ -73,6 +76,28 @@ export class UrlbarTelemetryUtils {
         : "click";
     }
     return "enter";
+  }
+
+  /**
+   * Collects the modifier keys held during an engagement from its DOM event.
+   *
+   * @param {?(Event)} event
+   *   The DOM event behind the engagement.
+   * @returns {string} Comma separated modifier names. If no modifiers, returns
+   *   empty string.
+   */
+  static modifiersFromEvent(event) {
+    // Only MouseEvent and KeyboardEvent have getModifierState(), so we ignore
+    // other events such as blur, and the null event for paste&go and drop&go.
+    let inputEvent = /** @type {?(MouseEvent|KeyboardEvent)} */ (event);
+    if (typeof inputEvent?.getModifierState != "function") {
+      return "";
+    }
+    let allModifiers = ["Accel", "Alt", "AltGraph", "Shift"];
+    return allModifiers
+      .filter(m => inputEvent.getModifierState(m))
+      .map(m => m.toLowerCase())
+      .join(",");
   }
 
   /**
@@ -207,6 +232,7 @@ export class UrlbarTelemetryUtils {
     return {
       method,
       action,
+      modifiers: this.modifiersFromEvent(event),
       startEventInfo,
       numChars,
       numWords,
@@ -332,19 +358,23 @@ export class UrlbarTelemetryUtils {
    *
    * @param {object} wire
    *   The payload from `recordedEngagementToWire()`.
+   * @param {?UrlbarResult[]} [liveResults]
+   *   The parent's own results, which the shipped ones resolve back to. See
+   *   `UrlbarResult.fromWire()`.
    * @returns {object} The reconstructed data.
    */
-  static recordedEngagementFromWire(wire) {
+  static recordedEngagementFromWire(wire, liveResults = null) {
     return {
       ...wire,
       visibleResults:
-        wire.visibleResults?.map(r => UrlbarResult.fromWire(r)) ?? [],
+        wire.visibleResults?.map(r => UrlbarResult.fromWire(r, liveResults)) ??
+        [],
       internalDetails: {
         ...wire.internalDetails,
         event: null,
         element: null,
         result: wire.internalDetails.result
-          ? UrlbarResult.fromWire(wire.internalDetails.result)
+          ? UrlbarResult.fromWire(wire.internalDetails.result, liveResults)
           : null,
       },
     };
@@ -500,7 +530,7 @@ export class UrlbarTelemetryUtils {
     let next = previousSearchWords;
     if (
       (method === "engagement" &&
-        lazy.UrlbarUtils.isPersistedSearchTermsEnabled()) ||
+        lazy?.UrlbarUtils.isPersistedSearchTermsEnabled()) ||
       method === "abandonment"
     ) {
       next = new Set(searchWords);
@@ -525,6 +555,9 @@ export class UrlbarTelemetryUtils {
    *   One of engagement / abandonment / disable / bounce.
    * @param {string} data.action
    *   The action behind the engagement (from `actionFromEvent`).
+   * @param {string} [data.modifiers]
+   *   The modifier keys held during the engagement (from
+   *   `modifiersFromEvent`).
    * @param {string} data.interaction
    *   The resolved interaction type (from `getInteractionType`).
    * @param {number} data.numChars
@@ -565,6 +598,7 @@ export class UrlbarTelemetryUtils {
   static buildEventInfo({
     method,
     action,
+    modifiers = "",
     interaction,
     numChars,
     numWords,
@@ -595,15 +629,24 @@ export class UrlbarTelemetryUtils {
       : {};
     let numResults = visibleResults.length;
     let groups = visibleResults
-      .map(r => lazy.UrlbarUtils.searchEngagementTelemetryGroup(r))
+      .map(r => UrlbarShared.searchEngagementTelemetryGroup(r))
       .join(",");
     let results = visibleResults
       .map(r => UrlbarShared.searchEngagementTelemetryType(r))
       .join(",");
     let actions = visibleResults
-      .map(r => lazy.UrlbarUtils.searchEngagementTelemetryAction(r))
+      .map(r => UrlbarShared.searchEngagementTelemetryAction(r))
       .filter(v => v)
       .join(",");
+    let semanticDistanceExtras = visibleResults.some(
+      r => r.payload.semanticDistance !== undefined
+    )
+      ? {
+          semantic_distances: visibleResults
+            .map(r => r.payload.semanticDistance ?? "")
+            .join(","),
+        }
+      : {};
 
     switch (method) {
       case "engagement": {
@@ -612,7 +655,7 @@ export class UrlbarTelemetryUtils {
           selType
         );
         if (selType == "action") {
-          let actionKey = lazy.UrlbarUtils.searchEngagementTelemetryAction(
+          let actionKey = UrlbarShared.searchEngagementTelemetryAction(
             visibleResults[selIndex],
             pickedActionKey
           );
@@ -622,6 +665,7 @@ export class UrlbarTelemetryUtils {
           numResults = 0;
           groups = "";
           results = "";
+          semanticDistanceExtras = {};
         }
         return {
           metric: "engagement",
@@ -642,9 +686,11 @@ export class UrlbarTelemetryUtils {
               selType === "search_button"
                 ? selType
                 : action,
+            modifiers,
             groups,
             results,
             actions,
+            ...semanticDistanceExtras,
             window_mode: windowMode,
             ...smartbarExtras,
           },
@@ -663,6 +709,7 @@ export class UrlbarTelemetryUtils {
             groups,
             results,
             actions,
+            ...semanticDistanceExtras,
             window_mode: windowMode,
             ...smartbarExtras,
           },
@@ -815,6 +862,7 @@ export class UrlbarTelemetryUtils {
     let built = this.buildEventInfo({
       method,
       action: snapshot.action,
+      modifiers: snapshot.modifiers,
       interaction: interactionResult.interaction,
       numChars: snapshot.numChars,
       numWords: snapshot.numWords,

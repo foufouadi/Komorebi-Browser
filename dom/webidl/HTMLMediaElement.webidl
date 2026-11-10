@@ -88,6 +88,10 @@ interface HTMLMediaElement : HTMLElement {
   [CEReactions, SetterThrows]
            attribute boolean defaultMuted;
 
+  // lazy loading
+  [CEReactions, SetterThrows, Pref="media.lazy_loading.enabled"]
+           attribute DOMString loading;
+
   // TODO: Bug 847379
   // tracks
   [Pref="media.track.enabled"]
@@ -102,15 +106,15 @@ interface HTMLMediaElement : HTMLElement {
 
 // Mozilla extensions:
 partial interface HTMLMediaElement {
-  [Func="HasDebuggerOrTabsPrivilege"]
+  [Func="MediaUtils::HasDebuggerOrTabsPrivilege"]
   readonly attribute MediaSource? mozMediaSourceObject;
 
-  [Func="HasDebuggerOrTabsPrivilege", NewObject]
+  [Func="MediaUtils::HasDebuggerOrTabsPrivilege", NewObject]
   Promise<HTMLMediaElementDebugInfo> mozRequestDebugInfo();
 
-  [Func="HasDebuggerOrTabsPrivilege", NewObject]
+  [Func="MediaUtils::HasDebuggerOrTabsPrivilege", NewObject]
   static undefined mozEnableDebugLog();
-  [Func="HasDebuggerOrTabsPrivilege", NewObject]
+  [Func="MediaUtils::HasDebuggerOrTabsPrivilege", NewObject]
   Promise<DOMString> mozRequestDebugLog();
 
   attribute MediaStream? srcObject;

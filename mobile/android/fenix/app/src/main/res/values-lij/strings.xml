@@ -21,10 +21,6 @@
   <string name="search_hint">Scrivi ò çerca indirisso</string>
   <!-- About content. %1$s is the name of the app (for example "Firefox"). -->
   <string name="about_content" tools:ignore="BrandUsage">%1$s o l\'é svilupou da Mozilla.</string>
-  <!-- Private Browsing -->
-  <string name="private_browsing_common_myths">Miti comuin in sciâ navegaçion privâ</string>
-  <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
-
   <!--
     Home screen icons - Long press shortcuts
 
@@ -33,11 +29,7 @@
   <string name="home_screen_shortcut_open_new_tab_2">Neuvo feuggio</string>
   <!-- Shortcut action to open new private tab -->
   <string name="home_screen_shortcut_open_new_private_tab_2">Neuvo feuggio privou</string>
-  <!--
-    Browser Fragment
-
-    Content description (not visible, for screen readers etc.): Navigate backward (browsing history)
-  -->
+  <!-- Content description (not visible, for screen readers etc.): Navigate backward (browsing history) -->
   <string name="browser_menu_back">Inderê</string>
   <!-- Content description (not visible, for screen readers etc.): Navigate forward (browsing history) -->
   <string name="browser_menu_forward">Avanti</string>
@@ -99,10 +91,6 @@
   <string name="search_suggestions_onboarding_title">Permette i conseggi de riçerca inte sescioin privæ?</string>
   <!-- Search suggestion onboarding hint description text, %s is the name of the app (for example "Firefox"). -->
   <string name="search_suggestions_onboarding_text">Tutto quello che scrivi inta bara di indirissi de %s saiâ condivizo co-o motô de riçerca predefinio.</string>
-  <!-- ==== Project "Nova" onboarding strings ==== -->
-
-  <!-- ==== End of Project "Nova" onboarding strings ==== -->
-
   <!-- Text preview for smaller sized widgets -->
   <string name="search_widget_text_short">Çerca</string>
   <!-- Text preview for larger sized widgets -->
@@ -112,10 +100,8 @@
   <!--
     Preferences
 
-    Title for the settings page
+    Preference category for general settings
   -->
-  <string name="settings">Inpostaçioin</string>
-  <!-- Preference category for general settings -->
   <string name="preferences_category_general">Generale</string>
   <!-- Preference category for all links about Fenix -->
   <string name="preferences_category_about">Informaçioin</string>
@@ -300,8 +286,6 @@
   <string name="close_tab_title">Særa feuggio %s</string>
   <!-- Content description (not visible, for screen readers etc.): Opens the open tabs menu when pressed -->
   <string name="open_tabs_menu">Menû feuggi averti</string>
-  <!-- Open tabs menu item to save tabs to collection -->
-  <string name="tabs_menu_save_to_collection1">Sarva feuggi in coleçion</string>
   <!-- Text for the menu button to delete a collection -->
   <string name="collection_delete">Scancella coleçion</string>
   <!-- Text for the menu button to rename a collection -->
@@ -323,12 +307,6 @@
     %1$d is the number of bookmarks selected
   -->
   <string name="history_multi_select_title">%1$d seleçionæ</string>
-  <!-- Text for the header that groups the history the past 7 days -->
-  <string name="history_7_days">Urtimi 7 giorni</string>
-  <!-- Text for the header that groups the history the past 30 days -->
-  <string name="history_30_days">Urtimi 30 giorni</string>
-  <!-- Text for the header that groups the history older than the last month -->
-  <string name="history_older">Ciù vegio</string>
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">No gh\'é stöia</string>
   <!--
@@ -533,8 +511,6 @@
   <string name="qr_scanner_dialog_positive">PERMETTI</string>
   <!-- QR code scanner prompt dialog positive option to deny navigation to scanned link -->
   <string name="qr_scanner_dialog_negative">NO PERMETTE</string>
-  <!-- Tab collection deletion prompt dialog message. %1$s is the collection name. -->
-  <string name="tab_collection_dialog_message">T\'ê seguo de voei scancelâ %1$s?</string>
   <!-- Sample text for accessibility font size -->
   <string name="accessibility_text_size_sample_text_1">Sto chi o l\'é \'n testo d\'ezenpio. Serve pe fa vedde comme saiâ o testo quande ti t\'aomenti o ti diminoisci o testo con sta inpostaçion.</string>
   <!-- Summary for Accessibility Text Size Scaling Preference -->
@@ -720,8 +696,6 @@
   <string name="add_to_homescreen_cancel">Anulla</string>
   <!-- Add button text for the Add to Homescreen dialog -->
   <string name="add_to_homescreen_add">Azonzi</string>
-  <!-- Continue to website button text for the first-time Add to Homescreen dialog -->
-  <string name="add_to_homescreen_continue">Vanni a-o scito</string>
   <!-- Placeholder text for the TextView in the Add to Homescreen dialog -->
   <string name="add_to_homescreen_text_placeholder">Nomme scorsaieu</string>
   <!-- Preference option for asking to save passwords in Fenix -->
@@ -796,8 +770,6 @@
   <string name="confirm_clear_permission_site">Te seguo de scancelâ sto permisso pe sto scito?</string>
   <!-- label shown when there are not site exceptions to show in the site exception settings -->
   <string name="no_site_exceptions">Nisciunn-a eceçion pe-i sciti</string>
-  <!-- Positive action of a dialog asking to delete -->
-  <string name="dialog_delete_positive">Scancella</string>
   <!-- Voice search button content description -->
   <string name="voice_search_content_description">Çerca co-a voxe</string>
   <!-- Voice search prompt description displayed after the user presses the voice search button -->
@@ -820,13 +792,4 @@
   <string name="synced_tabs_sign_in_button">Acedi a Sync</string>
   <!-- Confirmation dialog button text when top sites limit is reached. -->
   <string name="top_sites_max_limit_confirmation_button">Va ben, ò capio</string>
-  <!-- Translations feature -->
-
-  <!-- TextField Design System Component -->
-
-  <!-- ==== Terms of use pop up prompt ==== -->
-
-  <!-- ==== Experiment strings. ==== -->
-
-  <!-- ==== End of Terms of use popup prompt. ==== -->
 </resources>

@@ -13,7 +13,7 @@ Each reporter implements a `collectReports` function which takes a `nsIMemoryRep
 * a unit (most commonly bytes, but sometimes a unitless count or percentage);
 * a description of what is measured.
 
-See the [nsIMemoryReporter documentation](/en/XPCOM_Interface_Reference/nsIMemoryReporter) and [nsIMemoryReporter.idl](http://dxr.mozilla.org/mozilla-central/source/xpcom/base/nsIMemoryReporter.idl) for full details.
+See {searchfox}`xpcom/base/nsIMemoryReporter.idl` for full details.
 
 ## Making Measurements
 
@@ -101,7 +101,7 @@ public:
     // |gMyString.SizeOfExcludingThis(MallocSizeOf)| instead.
     return MOZ_COLLECT_REPORT(
       "explicit/mystring", KIND_HEAP, UNITS_BYTES,
-      gMyString-&gt;SizeOfIncludingThis(MallocSizeOf),
+      gMyString->SizeOfIncludingThis(MallocSizeOf),
       "Memory used for MyString.");
   }
 };

@@ -11,7 +11,7 @@ import mockwebserver3.MockWebServer
 
 /** Helper for hosting web pages locally for testing purposes. */
 object TestAssetHelper {
-    @Suppress("MagicNumber") val waitingTime: Long = TimeUnit.SECONDS.toMillis(15)
+    val waitingTime: Long = TimeUnit.SECONDS.toMillis(15)
     val waitingTimeLong = TimeUnit.SECONDS.toMillis(25)
     val waitingTimeShort: Long = TimeUnit.SECONDS.toMillis(3)
     val waitingTimeVeryShort: Long = TimeUnit.SECONDS.toMillis(1)
@@ -24,7 +24,6 @@ object TestAssetHelper {
      *
      * Content for these pages all follow the same pattern. See [generic1.html] for content implementation details.
      */
-    @Suppress("MagicNumber")
     val MockWebServer.genericAssets
         get() = (1..4).map { getGenericAsset(it) }
 
@@ -42,6 +41,14 @@ object TestAssetHelper {
                 content = "Page content: lorem ipsum",
                 title =
                     "Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt",
+            )
+
+    val MockWebServer.tallPageAsset
+        get() =
+            createTestAsset(
+                path = "pages/tallPage.html",
+                content = "Page content: tall page",
+                title = "Tall page",
             )
 
     val MockWebServer.refreshAsset
@@ -80,6 +87,9 @@ object TestAssetHelper {
 
     val MockWebServer.saveLoginAsset
         get() = createTestAsset("pages/password.html")
+
+    val MockWebServer.signupFormAsset
+        get() = createTestAsset("pages/signupForm.html")
 
     val MockWebServer.addressFormAsset
         get() = createTestAsset("pages/addressForm.html")

@@ -232,17 +232,14 @@ add_task(async function () {
 
   info("Starting test... ");
 
-  const wait = waitForNetworkEvents(
+  const onNetworkEvents = waitForNetworkEvents(
     monitor,
     REQUESTS_WITH_MEDIA_AND_FLASH_AND_WS.length
   );
   await performRequestsInContent(REQUESTS_WITH_MEDIA_AND_FLASH_AND_WS);
-  await wait;
+  await onNetworkEvents;
 
-  EventUtils.sendMouseEvent(
-    { type: "mousedown" },
-    document.querySelectorAll(".request-list-item")[0]
-  );
+  clickOnRequestRow(document.querySelectorAll(".request-list-item")[0]);
 
   isnot(
     getSelectedRequest(store.getState()),

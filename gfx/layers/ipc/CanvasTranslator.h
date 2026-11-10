@@ -253,7 +253,7 @@ class CanvasTranslator final : public gfx::InlineTranslator,
       uint64_t aKey) final;
 
   already_AddRefed<gfx::SourceSurface> LookupSourceSurfaceFromSurfaceDescriptor(
-      const SurfaceDescriptor& aDesc) final;
+      gfx::DrawTarget* aDT, const SurfaceDescriptor& aDesc) final;
 
   /**
    * Gets the cached DataSourceSurface, if it exists, associated with a
@@ -341,44 +341,45 @@ class CanvasTranslator final : public gfx::InlineTranslator,
    public:
     explicit CanvasTranslatorEvent(const Tag aTag)
         : mTag(aTag), mBufferHandle(ipc::ReadOnlySharedMemoryHandle()) {
-      MOZ_ASSERT(mTag == Tag::TranslateRecording ||
-                 mTag == Tag::ClearCachedResources ||
-                 mTag == Tag::DropFreeBuffersWhenDormant);
+      MOZ_RELEASE_ASSERT(mTag == Tag::TranslateRecording ||
+                         mTag == Tag::ClearCachedResources ||
+                         mTag == Tag::DropFreeBuffersWhenDormant);
     }
     CanvasTranslatorEvent(const Tag aTag,
                           ipc::ReadOnlySharedMemoryHandle&& aBufferHandle)
         : mTag(aTag), mBufferHandle(std::move(aBufferHandle)) {
-      MOZ_ASSERT(mTag == Tag::AddBuffer);
+      MOZ_RELEASE_ASSERT(mTag == Tag::AddBuffer);
     }
     CanvasTranslatorEvent(const Tag aTag,
                           ipc::MutableSharedMemoryHandle&& aBufferHandle,
                           uint32_t aId = 0)
         : mTag(aTag), mBufferHandle(std::move(aBufferHandle)), mId(aId) {
-      MOZ_ASSERT(mTag == Tag::SetDataSurfaceBuffer);
+      MOZ_RELEASE_ASSERT(mTag == Tag::SetDataSurfaceBuffer);
     }
 
     static UniquePtr<CanvasTranslatorEvent> TranslateRecording() {
-      return MakeUnique<CanvasTranslatorEvent>(Tag::TranslateRecording);
+      return std::make_unique<CanvasTranslatorEvent>(Tag::TranslateRecording);
     }
 
     static UniquePtr<CanvasTranslatorEvent> AddBuffer(
         ipc::ReadOnlySharedMemoryHandle&& aBufferHandle) {
-      return MakeUnique<CanvasTranslatorEvent>(Tag::AddBuffer,
-                                               std::move(aBufferHandle));
+      return std::make_unique<CanvasTranslatorEvent>(Tag::AddBuffer,
+                                                     std::move(aBufferHandle));
     }
 
     static UniquePtr<CanvasTranslatorEvent> SetDataSurfaceBuffer(
         uint32_t aId, ipc::MutableSharedMemoryHandle&& aBufferHandle) {
-      return MakeUnique<CanvasTranslatorEvent>(Tag::SetDataSurfaceBuffer,
-                                               std::move(aBufferHandle), aId);
+      return std::make_unique<CanvasTranslatorEvent>(
+          Tag::SetDataSurfaceBuffer, std::move(aBufferHandle), aId);
     }
 
     static UniquePtr<CanvasTranslatorEvent> ClearCachedResources() {
-      return MakeUnique<CanvasTranslatorEvent>(Tag::ClearCachedResources);
+      return std::make_unique<CanvasTranslatorEvent>(Tag::ClearCachedResources);
     }
 
     static UniquePtr<CanvasTranslatorEvent> DropFreeBuffersWhenDormant() {
-      return MakeUnique<CanvasTranslatorEvent>(Tag::DropFreeBuffersWhenDormant);
+      return std::make_unique<CanvasTranslatorEvent>(
+          Tag::DropFreeBuffersWhenDormant);
     }
 
     ipc::ReadOnlySharedMemoryHandle TakeBufferHandle() {
@@ -473,6 +474,14 @@ class CanvasTranslator final : public gfx::InlineTranslator,
   MaybeRecycleDataSurfaceForSurfaceDescriptor(
       TextureHost* aTextureHost,
       const SurfaceDescriptorRemoteDecoder& aSurfaceDescriptor);
+
+#ifdef MOZ_WIDGET_GTK
+  // Imports a DMABuf video frame into the canvas GL context and converts it
+  // on the GPU, returning a directly samplable surface (no CPU download).
+  // Falls back to nullptr when GL import is unavailable.
+  already_AddRefed<gfx::SourceSurface> GetZeroCopySurfaceFromDMABuf(
+      gfx::DrawTarget* aDT, TextureHost* aTextureHost);
+#endif
 
   bool UsePendingCanvasTranslatorEvents();
   void PostCanvasTranslatorEvents(const MutexAutoLock& aProofOfLock);

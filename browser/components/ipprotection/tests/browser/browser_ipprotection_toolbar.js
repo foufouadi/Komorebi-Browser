@@ -179,6 +179,63 @@ add_task(async function toolbar_icon_status() {
 });
 
 /**
+ * Tests that the toolbar icon layers are built when the widget is re-added
+ * while the proxy is already paused.
+ */
+add_task(async function toolbar_icon_paused_after_readded() {
+  IPPProxyManager.reset();
+
+  const usage = makeUsage("5368709120", "0", "2027-01-01T00:00:00.000Z");
+  setupService({
+    isReady: true,
+    usageInfo: usage,
+  });
+  IPProtectionService.updateState();
+
+  await openPanel();
+
+  IPPProxyManager.refreshUsage();
+  await waitForProxyState(IPPProxyStates.PAUSED);
+
+  await closePanel();
+
+  Services.prefs.clearUserPref("browser.ipProtection.enabled");
+  Assert.equal(
+    document.getElementById(IPProtectionWidget.WIDGET_ID),
+    null,
+    "IP Protection widget is removed"
+  );
+
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.ipProtection.enabled", true]],
+  });
+  await waitForProxyState(IPPProxyStates.PAUSED);
+
+  let button = document.getElementById(IPProtectionWidget.WIDGET_ID);
+  Assert.ok(
+    BrowserTestUtils.isVisible(button),
+    "IP Protection widget should be added back to the navbar"
+  );
+  Assert.ok(
+    button.classList.contains("ipprotection-paused"),
+    "Toolbar icon should show paused status"
+  );
+  let pausedLayer = button.querySelector(
+    ".ipprotection-icon-layer[data-state='paused']"
+  );
+  Assert.ok(pausedLayer, "Paused-state overlay layer should exist");
+  Assert.equal(
+    getComputedStyle(pausedLayer).opacity,
+    "1",
+    "Paused layer should be revealed when paused"
+  );
+
+  IPPProxyManager.reset();
+  cleanupService();
+  IPProtectionService.updateState();
+});
+
+/**
  * Tests that the panel opens when the toolbar button is activated via the
  * Enter or Space keys. Bug 2027922 — on macOS, native XUL toolbarbutton key
  * handling does not fire `command` for Enter, so we rely on the explicit
@@ -215,6 +272,153 @@ add_task(async function toolbar_keyboard_activation() {
 
     button.removeAttribute("tabindex");
   }
+});
+
+/**
+ * Tests that a connection kept up for the sites that always use the VPN does
+ * not show the icon as on for a site without an inclusion.
+ */
+add_task(async function toolbar_icon_status_inclusion_mode() {
+  setupService({
+    isReady: true,
+  });
+  IPProtectionService.updateState();
+  await putServerInRemoteSettings();
+
+  let button = document.getElementById(IPProtectionWidget.WIDGET_ID);
+  let { started } = await IPPProxyManager.start(
+    false,
+    false,
+    undefined,
+    IPPMode.MODE_INCLUSION
+  );
+  Assert.ok(started, "Proxy should start in inclusion mode");
+  Assert.ok(
+    !button.classList.contains("ipprotection-on"),
+    "Toolbar icon should not show connected status in inclusion mode"
+  );
+
+  IPPProxyManager.setMode(IPPMode.MODE_FULL);
+  Assert.ok(
+    button.classList.contains("ipprotection-on"),
+    "Toolbar icon should show connected status once widened to full mode"
+  );
+
+  await IPPProxyManager.stop(false);
+  cleanupService();
+});
+
+/**
+ * Tests that a failed connection kept up for the sites that always use the VPN
+ * only shows the error on tabs with an included site, while a failed full
+ * connection shows it everywhere.
+ */
+add_task(async function toolbar_icon_error_inclusion_mode() {
+  const INCLUDED_SITE = "https://example.org";
+  const sandbox = sinon.createSandbox();
+  sandbox.stub(IPPProxyManager, "state").value(IPPProxyStates.ERROR);
+  sandbox.stub(IPPProxyManager, "mode").value(IPPMode.MODE_INCLUSION);
+  sandbox
+    .stub(IPPSiteRuleManager, "getRule")
+    .callsFake(principal =>
+      principal?.origin === INCLUDED_SITE
+        ? IPPPrincipalRules.INCLUDED
+        : IPPPrincipalRules.DEFAULT
+    );
+
+  let button = document.getElementById(IPProtectionWidget.WIDGET_ID);
+  let otherTab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    "https://example.com"
+  );
+  Assert.ok(
+    !button.classList.contains("ipprotection-error"),
+    "No error on a site the connection does not carry"
+  );
+
+  let includedTab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    INCLUDED_SITE
+  );
+  Assert.ok(
+    button.classList.contains("ipprotection-error"),
+    "Error on an included site"
+  );
+
+  sandbox.stub(IPPProxyManager, "mode").value(IPPMode.MODE_FULL);
+  await BrowserTestUtils.switchTab(gBrowser, otherTab);
+  Assert.ok(
+    button.classList.contains("ipprotection-error"),
+    "Error on every site in full mode"
+  );
+
+  BrowserTestUtils.removeTab(includedTab);
+  BrowserTestUtils.removeTab(otherTab);
+  sandbox.restore();
+  IPPProxyManager.dispatchEvent(
+    new CustomEvent("IPPProxyManager:StateChanged")
+  );
+});
+
+/**
+ * Tests that an included site only shows as included while a connection
+ * carries it, and not in a tab excluded on its own.
+ */
+add_task(async function toolbar_icon_included_only_while_carried() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.ipProtection.features.siteInclusions", true]],
+  });
+  const INCLUDED_SITE = "https://example.org";
+  const excludedTabs = new Set();
+  const sandbox = sinon.createSandbox();
+  sandbox.stub(IPPProxyManager, "state").value(IPPProxyStates.READY);
+  sandbox.stub(IPPProxyManager, "mode").value(IPPMode.MODE_INCLUSION);
+  sandbox.stub(IPPSiteRuleManager, "canManage").returns(true);
+  sandbox
+    .stub(IPPSiteRuleManager, "getRule")
+    .callsFake((principal, browserId) => {
+      if (excludedTabs.has(browserId)) {
+        return IPPPrincipalRules.EXCLUDED;
+      }
+      return principal?.origin === INCLUDED_SITE
+        ? IPPPrincipalRules.INCLUDED
+        : IPPPrincipalRules.DEFAULT;
+    });
+
+  let button = document.getElementById(IPProtectionWidget.WIDGET_ID);
+  let tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    INCLUDED_SITE
+  );
+  Assert.ok(
+    !button.classList.contains("ipprotection-included"),
+    "Not included while no connection carries the site"
+  );
+
+  sandbox.stub(IPPProxyManager, "state").value(IPPProxyStates.ACTIVE);
+  IPPProxyManager.dispatchEvent(
+    new CustomEvent("IPPProxyManager:StateChanged")
+  );
+  Assert.ok(
+    button.classList.contains("ipprotection-included"),
+    "Included while the connection carries the site"
+  );
+
+  excludedTabs.add(tab.linkedBrowser.browserId);
+  IPPSiteRuleManager.dispatchEvent(
+    new CustomEvent("SiteRuleManager:RuleChanged")
+  );
+  Assert.ok(
+    !button.classList.contains("ipprotection-included"),
+    "Not included in a tab excluded on its own"
+  );
+
+  BrowserTestUtils.removeTab(tab);
+  sandbox.restore();
+  IPPProxyManager.dispatchEvent(
+    new CustomEvent("IPPProxyManager:StateChanged")
+  );
+  await SpecialPowers.popPrefEnv();
 });
 
 /**
@@ -359,34 +563,6 @@ add_task(async function toolbar_placement_customized() {
     start.area,
     start.position
   );
-});
-
-/**
- * Tests that the toolbar button badge reflects the openedPanelWithLocation pref.
- */
-add_task(async function toolbar_badge_opened_with_location() {
-  const OPENED_WITH_LOCATION_PREF =
-    "browser.ipProtection.openedPanelWithLocation";
-  let button = document.getElementById(IPProtectionWidget.WIDGET_ID);
-
-  await SpecialPowers.pushPrefEnv({
-    set: [[OPENED_WITH_LOCATION_PREF, false]],
-  });
-  Assert.ok(
-    button.hasAttribute("badged"),
-    "Toolbar button should be badged when user has not yet opened the panel with location"
-  );
-
-  await SpecialPowers.pushPrefEnv({ set: [[OPENED_WITH_LOCATION_PREF, true]] });
-  Assert.ok(
-    !button.hasAttribute("badged"),
-    "Toolbar button badge should be removed once the user has opened the panel with location"
-  );
-
-  // Each popPrefEnv unwraps one layer from the stack, restoring the
-  // pref to the value it had before that push
-  await SpecialPowers.popPrefEnv();
-  await SpecialPowers.popPrefEnv();
 });
 
 /**

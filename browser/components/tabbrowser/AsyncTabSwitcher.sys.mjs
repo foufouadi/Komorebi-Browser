@@ -5,39 +5,21 @@
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 
-const lazy = {};
-
-ChromeUtils.defineESModuleGetters(lazy, {
+const lazy = XPCOMUtils.declareLazy({
   PictureInPicture:
     "moz-src:///toolkit/components/pictureinpicture/PictureInPicture.sys.mjs",
+  gTabWarmingEnabled: {
+    pref: "browser.tabs.remote.warmup.enabled",
+    default: true,
+  },
+  gTabWarmingMax: { pref: "browser.tabs.remote.warmup.maxTabs", default: 3 },
+  gTabWarmingUnloadDelayMs: {
+    pref: "browser.tabs.remote.warmup.unloadDelayMs",
+    default: 2000,
+  },
+  gTabCacheSize: { pref: "browser.tabs.remote.tabCacheSize", default: 0 },
+  gTabUnloadDelay: { pref: "browser.tabs.remote.unloadDelayMs", default: 300 },
 });
-
-XPCOMUtils.defineLazyPreferenceGetter(
-  lazy,
-  "gTabWarmingEnabled",
-  "browser.tabs.remote.warmup.enabled"
-);
-XPCOMUtils.defineLazyPreferenceGetter(
-  lazy,
-  "gTabWarmingMax",
-  "browser.tabs.remote.warmup.maxTabs"
-);
-XPCOMUtils.defineLazyPreferenceGetter(
-  lazy,
-  "gTabWarmingUnloadDelayMs",
-  "browser.tabs.remote.warmup.unloadDelayMs"
-);
-XPCOMUtils.defineLazyPreferenceGetter(
-  lazy,
-  "gTabCacheSize",
-  "browser.tabs.remote.tabCacheSize"
-);
-XPCOMUtils.defineLazyPreferenceGetter(
-  lazy,
-  "gTabUnloadDelay",
-  "browser.tabs.remote.unloadDelayMs",
-  300
-);
 
 /**
  * The tab switcher is responsible for asynchronously switching
@@ -789,7 +771,7 @@ export class AsyncTabSwitcher {
       return;
     }
 
-    this.logState(`onLayersReady(${tab._tPos}, ${browser.isRemoteBrowser})`);
+    this.logState(`onLayersReady(${tab.index}, ${browser.isRemoteBrowser})`);
     this.assert(
       this.getTabState(tab) == this.STATE_LOADING ||
         this.getTabState(tab) == this.STATE_LOADED
@@ -821,7 +803,7 @@ export class AsyncTabSwitcher {
     if (!tab) {
       return;
     }
-    this.logState(`onLayersCleared(${tab._tPos})`);
+    this.logState(`onLayersCleared(${tab.index})`);
     this.assert(
       this.getTabState(tab) == this.STATE_UNLOADING ||
         this.getTabState(tab) == this.STATE_UNLOADED
@@ -834,7 +816,7 @@ export class AsyncTabSwitcher {
   // so we need to simulate it.
   onRemotenessChange(tab) {
     this.logState(
-      `onRemotenessChange(${tab._tPos}, ${tab.linkedBrowser.isRemoteBrowser})`
+      `onRemotenessChange(${tab.index}, ${tab.linkedBrowser.isRemoteBrowser})`
     );
     if (!tab.linkedBrowser.isRemoteBrowser) {
       if (this.getTabState(tab) == this.STATE_LOADING) {
@@ -860,6 +842,29 @@ export class AsyncTabSwitcher {
   // about to be removed from the DOM.
   onTabRemovedImpl() {
     this.lastVisibleTab = null;
+  }
+
+  onTabDiscarded(tab) {
+    this.handleEvent({ type: "tabDiscarded", tab });
+  }
+
+  // Called when a tab's browser has been discarded. The tab keeps its
+  // browser element as a lazy browser, so preActions won't drop it and
+  // its state has to be reset here.
+  onTabDiscardedImpl(tab) {
+    this.logState(`onTabDiscarded(${tab.index})`);
+    if (this.loadingTab === tab) {
+      this.maybeClearLoadTimer("onTabDiscarded");
+    }
+    this.unwarmTab(tab);
+    let cacheIndex = this.tabLayerCache.indexOf(tab);
+    if (cacheIndex != -1) {
+      this.tabLayerCache.splice(cacheIndex, 1);
+    }
+    this.setTabStateNoAction(tab, this.STATE_UNLOADED);
+    if (this.lastVisibleTab === tab) {
+      this.lastVisibleTab = null;
+    }
   }
 
   onVisibilityChange() {
@@ -1122,7 +1127,10 @@ export class AsyncTabSwitcher {
           this.onLoadTimeout();
           break;
         case "tabRemoved":
-          this.onTabRemovedImpl(event.tab);
+          this.onTabRemovedImpl();
+          break;
+        case "tabDiscarded":
+          this.onTabDiscardedImpl(event.tab);
           break;
         case "MozLayerTreeReady": {
           let browser = event.originalTarget;
@@ -1230,7 +1238,7 @@ export class AsyncTabSwitcher {
 
   tinfo(tab) {
     if (tab) {
-      return tab._tPos + "(" + tab.linkedBrowser.currentURI.spec + ")";
+      return tab.index + "(" + tab.linkedBrowser.currentURI.spec + ")";
     }
     return "null";
   }

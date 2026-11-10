@@ -254,8 +254,6 @@ class HttpBaseChannel : public nsHashPropertyBag,
   NS_IMETHOD SetDocumentURI(nsIURI* aDocumentURI) override;
   NS_IMETHOD GetRequestVersion(uint32_t* major, uint32_t* minor) override;
   NS_IMETHOD GetResponseVersion(uint32_t* major, uint32_t* minor) override;
-  NS_IMETHOD SetCookieHeaders(
-      const nsTArray<nsCString>& aCookieHeaders) override;
   NS_IMETHOD GetThirdPartyFlags(uint32_t* aForce) override;
   NS_IMETHOD SetThirdPartyFlags(uint32_t aForce) override;
   NS_IMETHOD GetForceAllowThirdPartyCookie(bool* aForce) override;
@@ -289,12 +287,10 @@ class HttpBaseChannel : public nsHashPropertyBag,
   NS_IMETHOD GetEffectiveTRRMode(
       nsIRequest::TRRMode* aEffectiveTRRMode) override;
   NS_IMETHOD GetTrrSkipReason(nsITRRSkipReason::value* aTrrSkipReason) override;
-  NS_IMETHOD GetIsLoadedBySocketProcess(bool* aResult) override;
   NS_IMETHOD GetIsOCSP(bool* value) override;
   NS_IMETHOD SetIsOCSP(bool value) override;
   NS_IMETHOD GetTlsFlags(uint32_t* aTlsFlags) override;
   NS_IMETHOD SetTlsFlags(uint32_t aTlsFlags) override;
-  NS_IMETHOD GetApiRedirectToURI(nsIURI** aApiRedirectToURI) override;
   [[nodiscard]] virtual nsresult AddSecurityMessage(
       const nsAString& aMessageTag, const nsAString& aMessageCategory);
   NS_IMETHOD TakeAllSecurityMessages(
@@ -506,6 +502,11 @@ class HttpBaseChannel : public nsHashPropertyBag,
 
   bool IsDeliveringAltData() const { return LoadDeliveringAltData(); }
 
+  // The principal, and its origin, used to bind alternative (bytecode) cache
+  // data to the principal that produced it.
+  nsIPrincipal* GetAltDataBindingPrincipal();
+  nsresult GetAltDataBindingOrigin(nsACString& aOrigin);
+
   static void PropagateReferenceIfNeeded(nsIURI* aURI,
                                          nsCOMPtr<nsIURI>& aRedirectURI);
 
@@ -531,6 +532,17 @@ class HttpBaseChannel : public nsHashPropertyBag,
   nsresult InternalSetUploadStream(nsIInputStream* uploadStream,
                                    int64_t aContentLength = -1,
                                    bool aSetContentLengthHeader = false);
+
+  void SetUploadStreamIsStreaming(bool aIsStreaming) {
+    StoreUploadStreamIsStreaming(aIsStreaming);
+  }
+  bool UploadStreamIsStreaming() const { return LoadUploadStreamIsStreaming(); }
+
+  // Transfers ownership of the upload stream to the caller, leaving the
+  // request method and headers untouched.
+  already_AddRefed<nsIInputStream> TakeUploadStream() {
+    return mUploadStream.forget();
+  }
 
   virtual nsresult SetReferrerHeader(const nsACString& aReferrer,
                                      bool aRespectBeforeConnect = true) {
@@ -567,6 +579,7 @@ class HttpBaseChannel : public nsHashPropertyBag,
     Maybe<dom::TimedChannelInfo> timedChannelInfo;
     nsCOMPtr<nsIInputStream> uploadStream;
     uint64_t uploadStreamLength = 0;
+    bool uploadStreamIsStreaming = false;
     Maybe<nsCString> contentType;
     Maybe<nsCString> contentLength;
 
@@ -617,6 +630,12 @@ class HttpBaseChannel : public nsHashPropertyBag,
   }
 
  protected:
+  nsCString GetSecPurpose() const {
+    nsCString secPurpose;
+    (void)mRequestHead.GetHeader(nsHttp::Sec_Purpose, secPurpose);
+    return secPurpose;
+  }
+
   nsresult GetTopWindowURI(nsIURI* aURIBeingLoaded, nsIURI** aTopWindowURI);
 
   // Handle notifying listener, removing from loadgroup if request failed.
@@ -630,6 +649,9 @@ class HttpBaseChannel : public nsHashPropertyBag,
   virtual void DoAsyncAbort(nsresult aStatus) = 0;
 
   void MaybeReportTimingData();
+  // Reports timing data for this channel if aNewChannel, the target of a
+  // redirect, will not report it itself (e.g. moz-extension: channels).
+  void MaybeReportTimingDataForRedirect(nsISupports* aNewChannel);
   nsIURI* GetReferringPage();
   nsPIDOMWindowInner* GetInnerDOMWindow();
 
@@ -683,6 +705,11 @@ class HttpBaseChannel : public nsHashPropertyBag,
   void MaybeFlushConsoleReports();
 
   bool IsBrowsingContextDiscarded() const;
+
+  // Sets cookies on the cookie service using consumer-provided Set-Cookie
+  // header values, but using this channel's other information (URI,
+  // prompters, date headers etc).
+  nsresult SetCookieHeaders(const nsTArray<nsCString>& aCookieHeaders);
 
   nsresult ProcessCrossOriginEmbedderPolicyHeader();
 
@@ -995,17 +1022,17 @@ class HttpBaseChannel : public nsHashPropertyBag,
     // retry requests without proxies.
     (uint32_t, BypassProxy, 1),
 
-    // Indicate whether the response of this channel is coming from
-    // socket process.
-    (uint32_t, LoadedBySocketProcess, 1),
-
     // Indicates whether the user-agent header has been modifed since the channel
     // was created.
     (uint32_t, IsUserAgentHeaderModified, 1),
 
     // Indicates whether the user-agent header is outdated and can not be used as
     // a user agent value.
-    (uint32_t, IsUserAgentHeaderOutdated, 1)
+    (uint32_t, IsUserAgentHeaderOutdated, 1),
+
+    // True if the upload stream is from a JS ReadableStream and must not be
+    // normalized, buffered, or cloned.
+    (uint32_t, UploadStreamIsStreaming, 1)
   ))
   // clang-format on
 
@@ -1208,7 +1235,7 @@ nsresult HttpAsyncAborter<T>::AsyncCall(void (T::*funcPtr)(),
 
   RefPtr<nsRunnableMethod<T>> event =
       NewRunnableMethod("net::HttpAsyncAborter::AsyncCall", mThis, funcPtr);
-  rv = NS_DispatchToCurrentThread(event);
+  rv = DispatchToCurrent(event);
   if (NS_SUCCEEDED(rv) && retval) {
     *retval = event;
   }

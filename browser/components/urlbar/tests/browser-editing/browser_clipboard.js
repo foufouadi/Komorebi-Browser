@@ -12,14 +12,20 @@ const { UrlbarProviderClipboard, CLIPBOARD_IMPRESSION_LIMIT } =
     "moz-src:///browser/components/urlbar/UrlbarProviderClipboard.sys.mjs"
   );
 
+const TEST_TOP_SITE = "https://example.com";
+
 add_setup(async function () {
   await SpecialPowers.pushPrefEnv({
     set: [
       ["browser.urlbar.clipboard.featureGate", true],
       ["browser.urlbar.scotchBonnet.enableOverride", false],
       ["browser.urlbar.suggest.clipboard", true],
+      ["browser.urlbar.suggest.topsites", true],
+      ["browser.newtabpage.activity-stream.default.sites", TEST_TOP_SITE],
     ],
   });
+
+  await updateTopSites(sites => sites?.length == 1);
 
   registerCleanupFunction(async () => {
     SpecialPowers.clipboardCopyString("");
@@ -56,7 +62,8 @@ add_task(async function testFormattingOfClipboardSuggestion() {
   await BrowserTestUtils.withNewTab(
     { gBrowser, url: "about:home" },
     async () => {
-      let { result } = await searchEmptyStringAndGetFirstRow();
+      let { result, _elements: elements } =
+        await searchEmptyStringAndGetFirstRow();
 
       Assert.equal(
         result.providerName,
@@ -72,6 +79,16 @@ add_task(async function testFormattingOfClipboardSuggestion() {
         result.payload.title,
         unicodeURL,
         "The Clipboard suggestion title should be decoded."
+      );
+
+      let title = elements.get("title");
+      Assert.ok(
+        title.hasAttribute("is-url"),
+        "The Clipboard suggestion title should have the is-url attribute."
+      );
+      Assert.ok(
+        !title.hasAttribute("dir"),
+        "The Clipboard suggestion title should not have a dir attribute."
       );
     }
   );

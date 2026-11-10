@@ -54,6 +54,8 @@ class MOZ_STACK_CLASS WarpScriptOracle {
   HandleScript script_;
   const CompileInfo* info_;
   ICScript* icScript_;
+  Vector<uint32_t, 16, SystemAllocPolicy> monomorphicInlineHints_;
+  bool monomorphicInlineHintsComputed_ = false;
 
   // Index of the next ICEntry for getICEntry. This assumes the script's
   // bytecode is processed from first to last instruction.
@@ -67,6 +69,7 @@ class MOZ_STACK_CLASS WarpScriptOracle {
   WarpEnvironment createEnvironment();
   AbortReasonOr<Ok> maybeInlineIC(WarpOpSnapshotList& snapshots,
                                   BytecodeLocation loc);
+  AbortReasonOr<Ok> ensureMonomorphicInlineHints();
   AbortReasonOr<bool> maybeInlineCall(WarpOpSnapshotList& snapshots,
                                       BytecodeLocation loc, ICCacheIRStub* stub,
                                       ICFallbackStub* fallbackStub,
@@ -355,13 +358,26 @@ AbortReasonOr<WarpScriptSnapshot*> WarpScriptOracle::createScriptSnapshot() {
       }
 
       case JSOp::FunctionThis:
-        if (!script_->strict() && script_->hasNonSyntacticScope()) {
-          // Abort because MBoxNonStrictThis doesn't support non-syntactic
-          // scopes (a deprecated SpiderMonkey mechanism). If this becomes an
-          // issue we could support it by refactoring GetFunctionThis to not
-          // take a frame pointer and then call that.
-          return abort(AbortReason::Disable,
-                       "JSOp::FunctionThis with non-syntactic scope");
+        if (!script_->strict()) {
+          if (script_->hasNonSyntacticScope()) {
+            // Abort because MBoxNonStrictThis doesn't support non-syntactic
+            // scopes (a deprecated SpiderMonkey mechanism). If this becomes an
+            // issue we could support it by refactoring GetFunctionThis to not
+            // take a frame pointer and then call that.
+            return abort(AbortReason::Disable,
+                         "JSOp::FunctionThis with non-syntactic scope");
+          }
+
+          // Ensure that all constructors called by PrimitiveToObject are
+          // already resolved.
+          Handle<GlobalObject*> global = cx_->global();
+          if (!GlobalObject::ensureConstructor(cx_, global, JSProto_Number) ||
+              !GlobalObject::ensureConstructor(cx_, global, JSProto_Boolean) ||
+              !GlobalObject::ensureConstructor(cx_, global, JSProto_String) ||
+              !GlobalObject::ensureConstructor(cx_, global, JSProto_Symbol) ||
+              !GlobalObject::ensureConstructor(cx_, global, JSProto_BigInt)) {
+            return abort(AbortReason::Error);
+          }
         }
         break;
 
@@ -426,14 +442,22 @@ AbortReasonOr<WarpScriptSnapshot*> WarpScriptOracle::createScriptSnapshot() {
       }
 
       case JSOp::Rest: {
-        if (Shape* shape =
-                script_->global().maybeArrayShapeWithDefaultProto()) {
-          if (!AddOpSnapshot<WarpRest>(alloc_, opSnapshots, offset, shape)) {
-            return abort(AbortReason::Alloc);
-          }
+        Shape* shape = GlobalObject::getArrayShapeWithDefaultProto(cx_);
+        if (!shape) {
+          return abort(AbortReason::Error);
+        }
+        if (!AddOpSnapshot<WarpRest>(alloc_, opSnapshots, offset, shape)) {
+          return abort(AbortReason::Alloc);
         }
         break;
       }
+
+      case JSOp::NewArray:
+        if (!GlobalObject::getArrayShapeWithDefaultProto(cx_)) {
+          return abort(AbortReason::Error);
+        }
+        MOZ_TRY(maybeInlineIC(opSnapshots, loc));
+        break;
 
       case JSOp::BindUnqualifiedGName: {
         GlobalObject* global = &script_->global();
@@ -576,7 +600,6 @@ AbortReasonOr<WarpScriptSnapshot*> WarpScriptOracle::createScriptSnapshot() {
       case JSOp::TypeofEq:
       case JSOp::NewObject:
       case JSOp::NewInit:
-      case JSOp::NewArray:
       case JSOp::JumpIfFalse:
       case JSOp::JumpIfTrue:
       case JSOp::And:
@@ -660,7 +683,6 @@ AbortReasonOr<WarpScriptSnapshot*> WarpScriptOracle::createScriptSnapshot() {
       case JSOp::MoreIter:
       case JSOp::EndIter:
       case JSOp::IsNoIter:
-      case JSOp::IsGenClosing:
       case JSOp::IsNullOrUndefined:
       case JSOp::DelProp:
       case JSOp::StrictDelProp:
@@ -677,7 +699,6 @@ AbortReasonOr<WarpScriptSnapshot*> WarpScriptOracle::createScriptSnapshot() {
       case JSOp::FinalYieldRval:
       case JSOp::AsyncResolve:
       case JSOp::AsyncReject:
-      case JSOp::CheckResumeKind:
       case JSOp::CanSkipAwait:
       case JSOp::MaybeExtractAwaitValue:
       case JSOp::AsyncAwait:
@@ -766,30 +787,45 @@ static void LineNumberAndColumn(HandleScript script, BytecodeLocation loc,
 #endif
 }
 
-static void MaybeSetInliningStateFromJitHints(JSContext* cx,
-                                              ICFallbackStub* fallbackStub,
-                                              JSScript* script,
-                                              BytecodeLocation loc) {
+static bool ShouldSetInliningStateFromJitHints(ICFallbackStub* fallbackStub,
+                                               BytecodeLocation loc) {
   // Only update the state if it has already been marked as a candidate.
   if (fallbackStub->trialInliningState() != TrialInliningState::Candidate) {
-    return;
+    return false;
   }
 
   // Make sure the op is inlineable.
   if (!TrialInliner::IsValidInliningOp(loc.getOp())) {
-    return;
+    return false;
   }
 
-  if (!cx->runtime()->jitRuntime()->hasJitHintsMap()) {
-    return;
+  return true;
+}
+
+// Lazily snapshot this script's monomorphic inline hint offsets so subsequent
+// ICs can check them without looking up the script in the JitHintsMap.
+AbortReasonOr<Ok> WarpScriptOracle::ensureMonomorphicInlineHints() {
+  if (monomorphicInlineHintsComputed_) {
+    return Ok();
   }
 
-  JitHintsMap* jitHints = cx->runtime()->jitRuntime()->getJitHintsMap();
-  uint32_t offset = loc.bytecodeToOffset(script);
-
-  if (jitHints->hasMonomorphicInlineHintAtOffset(script, offset)) {
-    fallbackStub->setTrialInliningState(TrialInliningState::MonomorphicInlined);
+  monomorphicInlineHintsComputed_ = true;
+  if (!cx_->runtime()->jitRuntime()->hasJitHintsMap()) {
+    return Ok();
   }
+
+  JitHintsMap* jitHints = cx_->runtime()->jitRuntime()->getJitHintsMap();
+  auto offsets = jitHints->getMonomorphicInlineOffsets(script_);
+  if (offsets.empty()) {
+    return Ok();
+  }
+
+  // Copy the hints into this WarpScriptOracle.
+  if (!monomorphicInlineHints_.append(offsets.data(), offsets.size())) {
+    return abort(AbortReason::Alloc);
+  }
+
+  return Ok();
 }
 
 template <auto FuseMember, CompilationDependency::Type DepType>
@@ -851,6 +887,24 @@ bool WarpOracle::addFuseDependency(RealmFuses::FuseIndex fuseIndex) {
       using Dependency =
           RealmFuseDependency<&RealmFuses::optimizeRegExpPrototypeFuse,
                               CompilationDependency::Type::RegExpPrototype>;
+      return addDep(Dependency());
+    }
+    case RealmFuses::FuseIndex::ObjectProtoHasNoIndexedPropsFuse: {
+      using Dependency = RealmFuseDependency<
+          &RealmFuses::objectProtoHasNoIndexedPropsFuse,
+          CompilationDependency::Type::ObjectProtoHasNoIndexedProps>;
+      return addDep(Dependency());
+    }
+    case RealmFuses::FuseIndex::ArrayProtoHasNoIndexedPropsFuse: {
+      using Dependency = RealmFuseDependency<
+          &RealmFuses::arrayProtoHasNoIndexedPropsFuse,
+          CompilationDependency::Type::ArrayProtoHasNoIndexedProps>;
+      return addDep(Dependency());
+    }
+    case RealmFuses::FuseIndex::StringProtoHasNoIndexedPropsFuse: {
+      using Dependency = RealmFuseDependency<
+          &RealmFuses::stringProtoHasNoIndexedPropsFuse,
+          CompilationDependency::Type::StringProtoHasNoIndexedProps>;
       return addDep(Dependency());
     }
     default:
@@ -1002,7 +1056,15 @@ AbortReasonOr<Ok> WarpScriptOracle::maybeInlineIC(WarpOpSnapshotList& snapshots,
 
   // Set the trial inlining state directly if there is a hint cached from a
   // previous compilation.
-  MaybeSetInliningStateFromJitHints(cx_, fallbackStub, script_, loc);
+  if (ShouldSetInliningStateFromJitHints(fallbackStub, loc)) {
+    MOZ_TRY(ensureMonomorphicInlineHints());
+    if (std::find(monomorphicInlineHints_.begin(),
+                  monomorphicInlineHints_.end(),
+                  offset) != monomorphicInlineHints_.end()) {
+      fallbackStub->setTrialInliningState(
+          TrialInliningState::MonomorphicInlined);
+    }
+  }
 
   // Clear the used-by-transpiler flag on the IC. It can still be set from a
   // previous compilation because we don't clear the flag on every IC when
@@ -1158,6 +1220,19 @@ AbortReasonOr<Ok> WarpScriptOracle::maybeInlineIC(WarpOpSnapshotList& snapshots,
           return abort(AbortReason::Error);
         }
         break;
+      case CacheOp::CallDOMGetterResult:
+      case CacheOp::CallDOMFunction:
+      case CacheOp::CallDOMFunctionWithAllocSite: {
+        // WebIDL sequences map to JS arrays. A sequence that doesn't
+        // contain any objects can be allocated without side-effects
+        // if the Array constructor has already been resolved.
+        reader.skip(opInfo.argLength);
+        Handle<GlobalObject*> global = cx_->global();
+        if (!GlobalObject::ensureConstructor(cx_, global, JSProto_Array)) {
+          return abort(AbortReason::Error);
+        }
+        break;
+      }
       case CacheOp::GuardFuse: {
         auto [fuseIndex] = reader.argsForGuardFuse();
         if (!RealmFuses::isInvalidatingFuse(fuseIndex)) {
@@ -1277,6 +1352,9 @@ AbortReasonOr<Ok> WarpScriptOracle::maybeInlineIC(WarpOpSnapshotList& snapshots,
     }
   }
 
+  // Add pending fuse dependencies to the CompilationDependencyTracker. It's
+  // important to do this after we've committed to adding a WarpCacheIR snapshot
+  // because this snapshot ensures the ObjectFuse owner objects are kept alive.
   for (auto& pending : pendingFuseDeps) {
     auto addDep = [&](const auto& dep) {
       return oracle_->addFuseDependency(dep);
@@ -1523,7 +1601,7 @@ AbortReasonOr<bool> WarpScriptOracle::maybeInlinePolymorphicTypes(
     if (!types.hasData()) {
       return false;
     }
-    if (!candidates.append(TypeFrequency(types, successCount))) {
+    if (!candidates.emplaceBack(types, successCount)) {
       return abort(AbortReason::Alloc);
     }
   }
@@ -1707,7 +1785,7 @@ bool WarpScriptOracle::maybeReplaceNurseryPointer(
     size_t offset) {
   // ValueOrNurseryValueIndex uses MagicValueUint32 to encode nursery indexes.
   // Assert this doesn't conflict with |v|.
-  MOZ_ASSERT(ValueOrNurseryValueIndex::fromValue(v).isValue());
+  MOZ_RELEASE_ASSERT(ValueOrNurseryValueIndex::fromValue(v).isValue());
 
   if (!v.isGCThing() || !IsInsideNursery(v.toGCThing())) {
     return true;

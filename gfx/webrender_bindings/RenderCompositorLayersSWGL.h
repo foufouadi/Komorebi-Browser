@@ -37,8 +37,6 @@ class RenderCompositorLayersSWGL : public RenderCompositor {
   void CancelFrame() override;
   RenderedFrameId EndFrame(const nsTArray<DeviceIntRect>& aDirtyRects) override;
 
-  bool SurfaceOriginIsTopLeft() override { return true; }
-
   LayoutDeviceIntSize GetBufferSize() override;
 
   // Should we support this?
@@ -58,16 +56,16 @@ class RenderCompositorLayersSWGL : public RenderCompositor {
 
   void CompositorBeginFrame() override {}
   void CompositorEndFrame() override;
-  void Bind(wr::NativeTileId aId, wr::DeviceIntPoint* aOffset, uint32_t* aFboId,
-            wr::DeviceIntRect aDirtyRect,
+  void Bind(wr::NativeTileId aId, wr::DeviceIntPoint* aOffset,
+            uint64_t* aSurfaceHandle, wr::DeviceIntRect aDirtyRect,
             wr::DeviceIntRect aValidRect) override;
   void Unbind() override;
   bool MapTile(wr::NativeTileId aId, wr::DeviceIntRect aDirtyRect,
                wr::DeviceIntRect aValidRect, void** aData,
                int32_t* aStride) override;
   void UnmapTile() override;
-  void CreateSurface(wr::NativeSurfaceId aId, wr::DeviceIntPoint aVirtualOffset,
-                     wr::DeviceIntSize aTileSize, bool aIsOpaque) override;
+  void CreateSurface(wr::NativeSurfaceId aId, wr::DeviceIntSize aTileSize,
+                     bool aIsOpaque) override;
   void CreateExternalSurface(wr::NativeSurfaceId aId, bool aIsOpaque) override;
   void DestroySurface(NativeSurfaceId aId) override;
   void CreateTile(wr::NativeSurfaceId, int32_t aX, int32_t aY) override;

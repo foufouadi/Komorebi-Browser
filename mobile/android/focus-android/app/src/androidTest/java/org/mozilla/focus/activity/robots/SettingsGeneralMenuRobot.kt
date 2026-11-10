@@ -155,10 +155,6 @@ private fun assertDefaultBrowserSwitchState(enabled: Boolean) {
     }
 }
 
-private val openWithDialogTitle = mDevice.findObject(UiSelector().text("Open with"))
-
-private val openWithList = mDevice.findObject(UiSelector().resourceId("android:id/resolver_list"))
-
 private fun languageMenuButton(localizedText: String = "Language") = onView(withText(localizedText))
 
 private val languageMenu = UiScrollable(UiSelector().scrollable(true))

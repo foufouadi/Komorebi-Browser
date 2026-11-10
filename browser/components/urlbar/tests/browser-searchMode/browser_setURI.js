@@ -16,6 +16,7 @@ add_task(async function setURI() {
   await SpecialPowers.pushPrefEnv({
     set: [["browser.urlbar.scotchBonnet.enableOverride", false]],
   });
+  UrlbarTestUtils.registerZeroPrefixProvider();
   for (let test of [
     // initialURL, searchString, url, expectSearchMode
 

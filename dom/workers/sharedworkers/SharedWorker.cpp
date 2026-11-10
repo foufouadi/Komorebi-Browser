@@ -237,19 +237,13 @@ already_AddRefed<SharedWorker> SharedWorker::Constructor(
   UniqueMessagePortId portIdentifier;
   channel->Port1()->CloneAndDisentangle(portIdentifier);
 
-  URIParams resolvedScriptURL;
-  SerializeURI(loadInfo.mResolvedScriptURI, resolvedScriptURL);
-
-  URIParams baseURL;
-  SerializeURI(loadInfo.mBaseURI, baseURL);
-
   // Register this component to PBackground.
   bool isSecureContext = JS::GetIsSecureContext(js::GetContextRealm(cx));
 
-  Maybe<IPCClientInfo> ipcClientInfo;
   Maybe<ClientInfo> clientInfo = window->GetClientInfo();
-  if (clientInfo.isSome()) {
-    ipcClientInfo.emplace(clientInfo.value().ToIPC());
+  if (clientInfo.isNothing()) {
+    aRv.ThrowInvalidStateError("Cannot create worker without a client");
+    return nullptr;
   }
 
   nsID agentClusterId = nsID::GenerateUUID();
@@ -265,17 +259,19 @@ already_AddRefed<SharedWorker> SharedWorker::Constructor(
   }
 
   RemoteWorkerData remoteWorkerData(
-      nsString(*compliantString), baseURL, resolvedScriptURL, aOptions,
-      loadingPrincipalInfo, principalInfo, partitionedPrincipalInfo,
-      loadInfo.mUseRegularPrincipal, loadInfo.mUsingStorageAccess, cjsData,
-      loadInfo.mDomain, isSecureContext, ipcClientInfo, loadInfo.mReferrerInfo,
-      storageAllowed, AntiTrackingUtils::IsThirdPartyWindow(window, nullptr),
+      nsString(*compliantString), loadInfo.mBaseURI,
+      loadInfo.mResolvedScriptURI, aOptions, loadingPrincipalInfo,
+      principalInfo, partitionedPrincipalInfo, loadInfo.mUseRegularPrincipal,
+      loadInfo.mUsingStorageAccess, cjsData, loadInfo.mDomain, isSecureContext,
+      clientInfo->ToIPC(), loadInfo.mReferrerInfo, storageAllowed,
+      AntiTrackingUtils::IsThirdPartyWindow(window, nullptr),
       loadInfo.mShouldResistFingerprinting, overriddenFingerprintingSettingsArg,
       loadInfo.mIsOn3PCBExceptionList,
       OriginTrials::FromWindow(nsGlobalWindowInner::Cast(window)),
       void_t() /* OptionalServiceWorkerData */, agentClusterId,
-      DEFAULT_REMOTE_TYPE /* ignored */, loadInfo.mLanguageOverrideLocale,
-      loadInfo.mLanguageOverride.Clone(), loadInfo.mTimezoneOverride);
+      RemoteType(RemoteType::Kind::WebContent) /* ignored */,
+      loadInfo.mLanguageOverrideLocale, loadInfo.mLanguageOverride.Clone(),
+      loadInfo.mTimezoneOverride);
 
   PSharedWorkerChild* pActor = actorChild->SendPSharedWorkerConstructor(
       remoteWorkerData, loadInfo.mWindowID, portIdentifier.release());

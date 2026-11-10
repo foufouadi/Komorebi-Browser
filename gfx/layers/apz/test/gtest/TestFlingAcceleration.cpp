@@ -17,8 +17,7 @@ class APZCFlingAccelerationTester : public APZCTreeManagerTester {
         LayerIntRect(0, 0, 800, 1000),
     };
     CreateScrollData(treeShape, layerVisibleRect);
-    SetScrollableFrameMetrics(root, ScrollableLayerGuid::START_SCROLL_ID,
-                              CSSRect(0, 0, 800, 50000));
+    SetScrollableFrameMetrics(root, START_SCROLL_ID, CSSRect(0, 0, 800, 50000));
     // Scroll somewhere into the middle of the scroll range, so that we have
     // lots of space to scroll in both directions.
     ModifyFrameMetrics(root, [](ScrollMetadata& aSm, FrameMetrics& aMetrics) {
@@ -26,7 +25,8 @@ class APZCFlingAccelerationTester : public APZCTreeManagerTester {
       aMetrics.SetVisualDestination(CSSPoint(0, 25000));
     });
 
-    registration = MakeUnique<ScopedLayerTreeRegistration>(LayersId{0}, mcc);
+    registration =
+        std::make_unique<ScopedLayerTreeRegistration>(LayersId{0}, mcc);
     UpdateHitTestingTree();
 
     apzc = ApzcOf(root);
@@ -34,12 +34,7 @@ class APZCFlingAccelerationTester : public APZCTreeManagerTester {
 
   void ExecutePanGesture100Hz(const ScreenIntPoint& aStartPoint,
                               std::initializer_list<int32_t> aYDeltas) {
-    APZEventResult result = TouchDown(apzc, aStartPoint, mcc->Time());
-
-    // Allowed touch behaviours must be set after sending touch-start.
-    if (result.GetStatus() != nsEventStatus_eConsumeNoDefault) {
-      SetDefaultAllowedTouchBehavior(apzc, result.mInputBlockId);
-    }
+    TouchDown(apzc, aStartPoint, mcc->Time());
 
     const TimeDuration kTouchTimeDelta100Hz =
         TimeDuration::FromMilliseconds(10);

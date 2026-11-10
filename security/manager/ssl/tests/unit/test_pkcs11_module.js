@@ -47,9 +47,10 @@ add_task(async function test_pkcs11_module() {
 
   Services.fog.initializeFOG();
 
+  await Services.fog.testFlushAllChildren();
   equal(
     0,
-    await Glean.pkcs11.thirdPartyModulesLoaded.testGetValue(),
+    (await Glean.pkcs11.thirdPartyModulesLoaded.testGetValue()) ?? 0,
     "should have no third-party modules to begin with"
   );
 
@@ -62,6 +63,7 @@ add_task(async function test_pkcs11_module() {
   libraryFile.append("pkcs11testmodule");
   libraryFile.append(ctypes.libraryName("pkcs11testmodule"));
   await loadPKCS11Module(libraryFile, "PKCS11 Test Module", true);
+  await Services.fog.testFlushAllChildren();
   equal(
     1,
     await Glean.pkcs11.thirdPartyModulesLoaded.testGetValue(),
@@ -72,13 +74,19 @@ add_task(async function test_pkcs11_module() {
     "pkcs11testmodule"
   );
 
-  let testClientCertificate = null;
-  for (const cert of gCertDB.getCerts()) {
-    if (cert.subjectName == "CN=client cert rsa") {
-      testClientCertificate = cert;
-    }
-  }
+  let testClientCertificate = await findCertByCommonName("client cert rsa");
   ok(testClientCertificate, "test module should expose rsa client certificate");
+
+  let testServerCertificate = await findCertByCommonName(
+    "EE issued by intermediate"
+  );
+  ok(testServerCertificate, "test module should expose server certificate");
+  // If the server certificate verifies as a server certificate without having
+  // explicitly loaded any CAs, the module is correctly exposing the trust
+  // information from the CAs it provides.
+  await asyncTestCertificateUsages(gCertDB, testServerCertificate, [
+    Ci.nsIX509CertDB.verifyUsageTLSServer,
+  ]);
 
   // Check that listing the slots for the test module works.
   let testModuleSlotNames = Array.from(testModule.slots, slot => slot.name);
@@ -99,6 +107,7 @@ add_task(async function test_pkcs11_module() {
     Ci.nsIPKCS11ModuleDB
   );
   await pkcs11ModuleDB.deleteModule("PKCS11 Test Module");
+  await Services.fog.testFlushAllChildren();
   equal(
     0,
     await Glean.pkcs11.thirdPartyModulesLoaded.testGetValue(),

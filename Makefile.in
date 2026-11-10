@@ -15,16 +15,6 @@ endif
 
 include $(topsrcdir)/config/config.mk
 
-ifneq (mobile/android,$(MOZ_BUILD_APP))
-# We only want to generate buildid.h once, during the (recurse) export phase.
-# faster make build the files explicitly so also match thoses
-ifneq ($(filter $(MAKECMDGOALS),recurse_export buildid.h source-repo.h),)
-$(MDDEPDIR)/buildid.h.stub $(MDDEPDIR)/source-repo.h.stub: FORCE
-endif
-endif
-source-repo.h: $(MDDEPDIR)/source-repo.h.stub
-buildid.h: $(MDDEPDIR)/buildid.h.stub
-
 BUILD_BACKEND_FILES := $(addprefix backend.,$(addsuffix Backend,$(BUILD_BACKENDS)))
 
 ifndef TEST_MOZBUILD
@@ -69,11 +59,19 @@ recurse_artifact:
 
 ifdef MOZ_ANDROID_FAT_AAR_ARCHITECTURES
 recurse_android-fat-aar-artifact:
-	$(call py_action,fat_aar,$(MOZ_ANDROID_FAT_AAR_ARCHITECTURES) \
+	$(call py_action,fat_aar,--android-architectures $(MOZ_ANDROID_FAT_AAR_ARCHITECTURES) \
     $(if $(MOZ_ANDROID_FAT_AAR_ARMEABI_V7A),--armeabi-v7a $(MOZ_ANDROID_FAT_AAR_ARMEABI_V7A)) \
     $(if $(MOZ_ANDROID_FAT_AAR_ARM64_V8A),--arm64-v8a $(MOZ_ANDROID_FAT_AAR_ARM64_V8A)) \
     $(if $(MOZ_ANDROID_FAT_AAR_X86_64),--x86-64 $(MOZ_ANDROID_FAT_AAR_X86_64)) \
-    --distdir $(abspath $(DIST)/fat-aar))
+    $(if $(MOZ_ANDROID_FAT_AAR_DESKTOP_ARCHITECTURES),--desktop-architectures $(MOZ_ANDROID_FAT_AAR_DESKTOP_ARCHITECTURES)) \
+    $(if $(MOZ_ANDROID_FAT_AAR_DESKTOP_LINUX_X86_64),--linux-x86-64 $(MOZ_ANDROID_FAT_AAR_DESKTOP_LINUX_X86_64)) \
+    $(if $(MOZ_ANDROID_FAT_AAR_DESKTOP_LINUX_AARCH64),--linux-aarch64 $(MOZ_ANDROID_FAT_AAR_DESKTOP_LINUX_AARCH64)) \
+    $(if $(MOZ_ANDROID_FAT_AAR_DESKTOP_DARWIN_X86_64),--darwin-x86-64 $(MOZ_ANDROID_FAT_AAR_DESKTOP_DARWIN_X86_64)) \
+    $(if $(MOZ_ANDROID_FAT_AAR_DESKTOP_DARWIN_AARCH64),--darwin-aarch64 $(MOZ_ANDROID_FAT_AAR_DESKTOP_DARWIN_AARCH64)) \
+    $(if $(MOZ_ANDROID_FAT_AAR_DESKTOP_WIN32_X86_64),--win32-x86-64 $(MOZ_ANDROID_FAT_AAR_DESKTOP_WIN32_X86_64)) \
+    $(if $(MOZ_ANDROID_FAT_AAR_DESKTOP_WIN32_AARCH64),--win32-aarch64 $(MOZ_ANDROID_FAT_AAR_DESKTOP_WIN32_AARCH64)) \
+    --distdir $(abspath $(DIST)/fat-aar) \
+    $(verbose_flag))
 endif
 
 ifeq ($(MOZ_BUILD_APP),mobile/android)
@@ -104,11 +102,6 @@ default::
 	@echo "==================="
 endif
 
-ifdef MOZ_CRASHREPORTER
-include $(topsrcdir)/toolkit/mozapps/installer/package-name.mk
-
-endif
-
 .PHONY: prepsymbolsarchive
 prepsymbolsarchive:
 	echo packing symbols
@@ -124,12 +117,19 @@ symbolsfullarchive: prepsymbolsarchive
 	$(call py_action,symbols_archive $(SYMBOL_FULL_ARCHIVE_BASENAME).tar.zst,'$(DIST)/$(PKG_PATH)$(SYMBOL_FULL_ARCHIVE_BASENAME).tar.zst' \
                                      $(abspath $(DIST)/crashreporter-symbols) \
                                      --full-archive)
+	$(RM) '$(DIST)/$(PKG_PATH)$(SYMBOL_GTEST_FULL_ARCHIVE_BASENAME).tar.zst'
+	$(call py_action,symbols_archive $(SYMBOL_GTEST_FULL_ARCHIVE_BASENAME).tar.zst,'$(DIST)/$(PKG_PATH)$(SYMBOL_GTEST_FULL_ARCHIVE_BASENAME).tar.zst' \
+                                     $(abspath $(DIST)/crashreporter-symbols-gtest) \
+                                     --full-archive --test-only)
 
 .PHONY: symbolsarchive
 symbolsarchive: prepsymbolsarchive
 	$(RM) '$(DIST)/$(PKG_PATH)$(SYMBOL_ARCHIVE_BASENAME).zip'
 	$(call py_action,symbols_archive $(SYMBOL_ARCHIVE_BASENAME).zip,'$(DIST)/$(PKG_PATH)$(SYMBOL_ARCHIVE_BASENAME).zip' \
                                      $(abspath $(DIST)/crashreporter-symbols))
+	$(RM) '$(DIST)/$(PKG_PATH)$(SYMBOL_GTEST_ARCHIVE_BASENAME).zip'
+	$(call py_action,symbols_archive $(SYMBOL_GTEST_ARCHIVE_BASENAME).zip,'$(DIST)/$(PKG_PATH)$(SYMBOL_GTEST_ARCHIVE_BASENAME).zip' \
+                                     $(abspath $(DIST)/crashreporter-symbols-gtest))
 
 # Set MOZ_ENABLE_FULL_SYMBOLS to enable generation and upload of the full
 # crashreporter symbols archives
@@ -155,9 +155,6 @@ package-generated-sources:
 
 ifdef JS_STANDALONE
 # Delegate js-specific rules to js
-check-%:
-	$(MAKE) -C js/src $@
-
 install:
 	$(MAKE) -C js/src $@
 

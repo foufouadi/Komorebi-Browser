@@ -25,8 +25,8 @@ import org.mozilla.fenix.GleanMetrics.Pings
  * val gleanRule = GleanTestRule(ApplicationProvider.getApplicationContext())
  * ```
  *
- * @param context the application context
- * @param configToUse an optional [Configuration] to initialize the Glean SDK with
+ * @property context the application context
+ * @property configToUse an optional [Configuration] to initialize the Glean SDK with
  */
 @VisibleForTesting(otherwise = VisibleForTesting.NONE)
 class FenixGleanTestRule(

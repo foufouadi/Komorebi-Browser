@@ -1,0 +1,13 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+browser.jar:
+    content/browser/widgets/moz-widget.mjs           (content/moz-widget.mjs)
+    content/browser/widgets/moz-widget.css           (content/moz-widget.css)
+    content/browser/widgets/moz-widget-header.mjs    (content/moz-widget-header.mjs)
+    content/browser/widgets/moz-widget-header.css    (content/moz-widget-header.css)
+    content/browser/widgets/prompt.md                (prompt.md)
+    content/browser/widgets/sidebar-widget-studio.html (content/sidebar-widget-studio.html)
+    content/browser/widgets/sidebar-widget-studio.mjs (content/sidebar-widget-studio.mjs)
+    content/browser/widgets/sidebar-widget-studio.css (content/sidebar-widget-studio.css)

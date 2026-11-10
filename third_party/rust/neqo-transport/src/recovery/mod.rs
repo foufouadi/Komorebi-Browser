@@ -114,6 +114,12 @@ impl SendProfile {
     pub const fn limit(&self) -> usize {
         self.limit
     }
+
+    /// Whether the next packet can be `plpmtu`-sized.
+    #[must_use]
+    pub const fn permits_full_mtu(&self, plpmtu: usize) -> bool {
+        self.limit >= plpmtu
+    }
 }
 
 #[derive(Debug)]
@@ -269,6 +275,19 @@ impl LossRecoverySpace {
             eliciting |= p.ack_eliciting();
             if p.lost() {
                 stats.late_ack += 1;
+                if let Some(reduced) = stats.lost.checked_sub(1) {
+                    stats.lost = reduced;
+                } else {
+                    debug_assert!(false, "spurious losses should have been lost already");
+                }
+                if let Some(reduced) = stats.bytes_lost.checked_sub(p.len()) {
+                    stats.bytes_lost = reduced;
+                } else {
+                    debug_assert!(
+                        false,
+                        "spurious lost bytes should have been counted already"
+                    );
+                }
             }
             if p.pto_fired() {
                 stats.pto_ack += 1;
@@ -472,7 +491,6 @@ impl PtoState {
     }
 }
 
-#[derive(Debug)]
 pub struct Loss {
     /// When the handshake was confirmed, if it has been.
     confirmed_time: Option<Instant>,
@@ -510,6 +528,12 @@ impl Loss {
         self.qlog = qlog;
     }
 
+    fn count_lost(&self, lost: &[sent::Packet]) {
+        let mut stats = self.stats.borrow_mut();
+        stats.lost += lost.len();
+        stats.bytes_lost += lost.iter().map(sent::Packet::len).sum::<usize>();
+    }
+
     /// Drop all 0rtt packets.
     pub fn drop_0rtt(&mut self, primary_path: &PathRef, now: Instant) -> Vec<sent::Packet> {
         let Some(sp) = self.spaces.get_mut(PacketNumberSpace::ApplicationData) else {
@@ -528,7 +552,7 @@ impl Loss {
     }
 
     pub fn on_packet_sent(&mut self, path: &PathRef, mut sent_packet: sent::Packet, now: Instant) {
-        let pn_space = PacketNumberSpace::from(sent_packet.packet_type());
+        let pn_space = sent_packet.space();
         qtrace!("[{self}] packet {pn_space}-{} sent", sent_packet.pn());
         if let Some(pto) = self.pto_state.as_mut() {
             pto.pto_sent(pn_space);
@@ -673,7 +697,7 @@ impl Loss {
         let loss_delay = primary_path.borrow().rtt().loss_delay();
         let mut lost = Vec::new();
         sp.detect_lost_packets(now, loss_delay, cleanup_delay, &mut lost);
-        self.stats.borrow_mut().lost += lost.len();
+        self.count_lost(&lost);
 
         // Tell the congestion controller about any lost packets.
         // The PTO for congestion control is the raw number, without exponential
@@ -732,7 +756,7 @@ impl Loss {
             && pto < now
         {
             let probes = enum_set!(PacketNumberSpace::ApplicationData);
-            self.fire_pto(PacketNumberSpace::ApplicationData, probes, now);
+            self.fire_pto(PacketNumberSpace::ApplicationData, probes, rtt, now);
         }
     }
 
@@ -842,6 +866,12 @@ impl Loss {
         )
     }
 
+    /// The number of consecutive PTOs that have fired without being acknowledged.
+    /// The value is reset to `0` whenever an acknowledgement is received.
+    pub(crate) fn pto_count(&self) -> usize {
+        self.pto_state.as_ref().map_or(0, PtoState::count)
+    }
+
     // Calculate PTO time for the given space.
     fn pto_time(&self, rtt: &RttEstimate, pn_space: PacketNumberSpace) -> Option<Instant> {
         self.spaces
@@ -868,6 +898,7 @@ impl Loss {
         &mut self,
         pn_space: PacketNumberSpace,
         allow_probes: PacketNumberSpaceSet,
+        rtt: &RttEstimate,
         now: Instant,
     ) {
         if let Some(st) = &mut self.pto_state {
@@ -880,7 +911,8 @@ impl Loss {
             st.count_pto(&mut self.stats.borrow_mut());
             qlog::metrics_updated(&mut self.qlog, [qlog::Metric::PtoCount(st.count())], now);
         }
-        qlog::loss_timer_set(&mut self.qlog, now);
+        let pto = self.pto_period(rtt);
+        qlog::loss_timer_set(&mut self.qlog, pn_space, pto, now);
     }
 
     /// This checks whether the PTO timer has fired and fires it if needed.
@@ -943,7 +975,7 @@ impl Loss {
         }
 
         qtrace!("[{self}] PTO {pn_space}, probing {allow_probes:?}");
-        self.fire_pto(pn_space, allow_probes, now);
+        self.fire_pto(pn_space, allow_probes, primary_path.borrow().rtt(), now);
 
         // Maybe prime the Handshake PTO when PTO fires in Initial space.
         if pn_space == PacketNumberSpace::Initial {
@@ -988,7 +1020,7 @@ impl Loss {
                 now,
             );
         }
-        self.stats.borrow_mut().lost += lost_packets.len();
+        self.count_lost(&lost_packets);
 
         self.maybe_fire_pto(primary_path, now, &mut lost_packets, has_handshake_keys);
         lost_packets
@@ -1008,7 +1040,7 @@ impl Loss {
         {
             profile
         } else {
-            let limit = min(sender.cwnd_avail(), path.amplification_limit());
+            let limit = path.send_budget();
             if limit > mtu {
                 // More than an MTU available; we might need to pace.
                 if sender
@@ -1543,7 +1575,7 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             );
-            let pn_space = PacketNumberSpace::from(sent_pkt.packet_type());
+            let pn_space = sent_pkt.space();
             lr.on_packet_sent(sent_pkt, now());
             lr.on_ack_received(
                 pn_space,

@@ -3,7 +3,7 @@
 "use strict";
 
 const POPUP_PAGE =
-  "https://example.com/browser/browser/base/content/test/popups/popup_blocker2.html";
+  "https://example.com/browser/browser/base/content/test/browser-popups/popup_blocker2.html";
 
 function clearPrefs() {
   Services.prefs.clearUserPref("dom.disable_open_during_load");
@@ -40,9 +40,7 @@ registerCleanupFunction(async function () {
 async function test_popup_blocker_disabled({ disabled, locked }) {
   let tab = await BrowserTestUtils.openNewForegroundTab(
     gBrowser,
-    Services.prefs.getBoolPref("browser.settings-redesign.enabled", false)
-      ? "about:preferences#permissionsData"
-      : "about:preferences#privacy"
+    "about:preferences#permissionsData"
   );
   await SpecialPowers.spawn(
     tab.linkedBrowser,

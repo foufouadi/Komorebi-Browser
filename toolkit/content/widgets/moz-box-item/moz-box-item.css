@@ -27,6 +27,7 @@
 
   .description-wrapper {
     grid-area: description;
+    overflow-wrap: anywhere;
   }
 
   &.has-support-page .label,

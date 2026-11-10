@@ -15,6 +15,7 @@
 #include "gfxUtils.h"
 #include "mozilla/ProfilerLabels.h"
 #include "mozilla/Range.h"
+#include "mozilla/SVGImageContext.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/Helpers.h"
 #include "mozilla/gfx/PathHelpers.h"
@@ -3309,6 +3310,19 @@ void nsCSSBorderRenderer::CreateWebRenderCommands(
                       wrsides, borderRadius, borderInset);
 }
 
+wr::WrClipId nsCSSBorderRenderer::CreateWebRenderClip(
+    wr::DisplayListBuilder& aBuilder) {
+  wr::BorderSide sides[4];
+  for (auto side : AllPhysicalSides()) {
+    sides[side] = wr::ToBorderSide(ToDeviceColor(NS_RGB(255, 255, 255)),
+                                   mBorderStyles[side]);
+  }
+  return aBuilder.DefineBorderClip(
+      wr::ToLayoutRect(LayoutDeviceRect::FromUnknownRect(mOuterRect)),
+      wr::ToBorderWidths(mBorderWidths), Range<const wr::BorderSide>(sides, 4),
+      wr::ToBorderRadius(mBorderRadii), wr::ToLayoutSideOffsets(mBorderInset));
+}
+
 /* static */
 Maybe<nsCSSBorderImageRenderer>
 nsCSSBorderImageRenderer::CreateBorderImageRenderer(
@@ -3362,8 +3376,10 @@ ImgDrawResult nsCSSBorderImageRenderer::DrawBorderImage(
   // In this condition, we pass imageSize(a resolved size comes from
   // default sizing algorithm) to renderer as the viewport size.
   CSSSizeOrRatio intrinsicSize = mImageRenderer.ComputeIntrinsicSize();
-  Maybe<nsSize> svgViewportSize =
-      intrinsicSize.CanComputeConcreteSize() ? Nothing() : Some(mImageSize);
+  Maybe<CSSSize> svgViewportSize =
+      intrinsicSize.CanComputeConcreteSize()
+          ? Nothing()
+          : Some(CSSSize::FromAppUnits(mImageSize));
   bool hasIntrinsicRatio = intrinsicSize.HasRatio();
 
   // These helper tables recharacterize the 'slice' and 'width' margins
@@ -3569,8 +3585,8 @@ ImgDrawResult nsCSSBorderImageRenderer::CreateWebRenderCommands(
       Maybe<ImageIntRegion> region;
       gfx::IntSize decodeSize =
           nsLayoutUtils::ComputeImageContainerDrawingParameters(
-              img, aForFrame, imageRect, imageRect, aSc, flags, svgContext,
-              region);
+              img, aForFrame, imageRect, imageRect, aBuilder, aSc, flags,
+              svgContext, region);
 
       RefPtr<WebRenderImageProvider> provider;
       drawResult = img->GetImageProvider(aManager->LayerManager(), decodeSize,
@@ -3586,31 +3602,6 @@ ImgDrawResult nsCSSBorderImageRenderer::CreateWebRenderCommands(
 
       auto rendering =
           wr::ToImageRendering(aItem->Frame()->UsedImageRendering());
-      if (mFill) {
-        float epsilon = 0.0001;
-        bool noVerticalBorders = widths[0] <= epsilon && widths[2] < epsilon;
-        bool noHorizontalBorders = widths[1] <= epsilon && widths[3] < epsilon;
-
-        // Border image with no border. It's a little silly but WebRender
-        // currently does not handle this. We could fall back to a blob image
-        // but there are reftests that are sensible to the test going through a
-        // blob while the reference doesn't.
-        if (noVerticalBorders && noHorizontalBorders) {
-          aBuilder.PushImage(dest, clip, !aItem->BackfaceIsHidden(), false,
-                             rendering, key.value());
-          break;
-        }
-
-        // Fall-back if we want to fill the middle area and opposite edges are
-        // both empty.
-        // TODO(bug 1609893): moving some of the repetition handling code out
-        // of the image shader will make it easier to handle these cases
-        // properly.
-        if (noHorizontalBorders || noVerticalBorders) {
-          return ImgDrawResult::NOT_SUPPORTED;
-        }
-      }
-
       wr::WrBorderImage params{
           wr::ToBorderWidths(widths[0], widths[1], widths[2], widths[3]),
           key.value(),
@@ -3653,20 +3644,20 @@ ImgDrawResult nsCSSBorderImageRenderer::CreateWebRenderCommands(
             (float)(mImageSize.width) / appUnitsPerDevPixel,
             (float)(mImageSize.height) / appUnitsPerDevPixel, mFill,
             wr::ToDeviceIntSideOffsets(slice[0], slice[1], slice[2], slice[3]),
-            wr::ToLayoutPoint(startPoint), wr::ToLayoutPoint(endPoint), stops,
-            extendMode);
+            wr::ToLayoutVector2D(startPoint), wr::ToLayoutVector2D(endPoint),
+            stops, extendMode);
       } else if (gradient.IsRadial()) {
         aBuilder.PushBorderRadialGradient(
             dest, clip, !aItem->BackfaceIsHidden(),
             wr::ToBorderWidths(widths[0], widths[1], widths[2], widths[3]),
-            mFill, wr::ToLayoutPoint(lineStart),
+            mFill, wr::ToLayoutVector2D(lineStart),
             wr::ToLayoutSize(gradientRadius), stops, extendMode);
       } else {
         MOZ_ASSERT(gradient.IsConic());
         aBuilder.PushBorderConicGradient(
             dest, clip, !aItem->BackfaceIsHidden(),
             wr::ToBorderWidths(widths[0], widths[1], widths[2], widths[3]),
-            mFill, wr::ToLayoutPoint(gradientCenter), gradientAngle, stops,
+            mFill, wr::ToLayoutVector2D(gradientCenter), gradientAngle, stops,
             extendMode);
       }
       break;
@@ -3770,7 +3761,10 @@ nsCSSBorderImageRenderer::nsCSSBorderImageRenderer(
     if (value > imgDimension && imgDimension > 0) {
       value = imgDimension;
     }
-    mSlice.Side(s) = value;
+    // Round rather than truncate so that two percentages that add up to
+    // exactly 100% of an odd dimension cannot leave a 1 app unit middle band,
+    // which would otherwise be stretched into phantom edge segments.
+    mSlice.Side(s) = NSToCoordRound(value);
 
     const auto& width = aStyleBorder.mBorderImageWidth.Get(s);
     switch (width.tag) {

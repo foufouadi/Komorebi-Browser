@@ -31,6 +31,7 @@
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ElementInlines.h"
+#include "nsBlockFrame.h"
 #include "nsCSSProps.h"
 #include "nsContentUtils.h"
 #include "nsDOMCSSDeclaration.h"
@@ -565,11 +566,7 @@ nsComputedDOMStyle::DoGetComputedStyleNoFlush(const Element* aElement,
     return nullptr;
   }
 
-  // XXX the !aElement->IsHTMLElement(nsGkAtoms::area)
-  // check is needed due to bug 135040 (to avoid using
-  // mPrimaryFrame). Remove it once that's fixed.
-  if (inDocWithShell && aStyleType == StyleType::All &&
-      !aElement->IsHTMLElement(nsGkAtoms::area)) {
+  if (inDocWithShell && aStyleType == StyleType::All) {
     if (const Element* element = aElement->GetPseudoElement(aPseudo)) {
       if (element->HasServoData()) {
         const ComputedStyle* result =
@@ -991,6 +988,7 @@ bool nsComputedDOMStyle::NeedsToFlushLayout(
       // anchor-dependent values here.
       Side side = SideForPaddingOrMarginOrInsetProperty(aPropId);
       return !style->StyleMargin()->mMargin.Get(side).ConvertsToLength() ||
+             MarginMayBeTrimmed(outerFrame, side) ||
              HasPositionFallbacks(frame);
     }
     default:
@@ -1099,10 +1097,7 @@ void nsComputedDOMStyle::UpdateCurrentStyleSources(
 
   mComputedStyle = nullptr;
 
-  // XXX the !mElement->IsHTMLElement(nsGkAtoms::area) check is needed due to
-  // bug 135040 (to avoid using mPrimaryFrame). Remove it once that's fixed.
-  if (mStyleType == StyleType::All &&
-      !mElement->IsHTMLElement(nsGkAtoms::area)) {
+  if (mStyleType == StyleType::All) {
     mOuterFrame = GetOuterFrame();
     mInnerFrame = mOuterFrame;
     if (mOuterFrame) {
@@ -1717,8 +1712,17 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::GetGridTemplateColumnsRows(
 }
 
 already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetGridTemplateColumns() {
+  AutoWeakFrame weakFrameRef(mInnerFrame);
+
   nsGridContainerFrame* gridFrame =
       nsGridContainerFrame::GetGridFrameWithComputedInfo(mInnerFrame);
+
+  if (mInnerFrame && !weakFrameRef.IsAlive()) {
+    // We had a non-null frame, but GetGridFrameWithComputedInfo's
+    // layout-flush seems to have destroyed it. Bail out.
+    return nullptr;
+  }
+
   if (!gridFrame) {
     // The element doesn't have a box - return the computed value.
     // https://drafts.csswg.org/css-grid/#resolved-track-list
@@ -1737,8 +1741,17 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetGridTemplateColumns() {
 }
 
 already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetGridTemplateRows() {
+  AutoWeakFrame weakFrameRef(mInnerFrame);
+
   nsGridContainerFrame* gridFrame =
       nsGridContainerFrame::GetGridFrameWithComputedInfo(mInnerFrame);
+
+  if (mInnerFrame && !weakFrameRef.IsAlive()) {
+    // We had a non-null frame, but GetGridFrameWithComputedInfo's
+    // layout-flush seems to have destroyed it. Bail out.
+    return nullptr;
+  }
+
   if (!gridFrame) {
     // The element doesn't have a box - return the computed value.
     // https://drafts.csswg.org/css-grid/#resolved-track-list
@@ -2033,6 +2046,9 @@ nscoord nsComputedDOMStyle::GetUsedAbsoluteOffset(mozilla::Side aSide) {
         viewportFrame->AdjustViewportSizeForFixedPosition(containerRect));
   } else if (container->IsGridContainerFrame() &&
              mOuterFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW)) {
+    if (MOZ_UNLIKELY(mOuterFrame->HasAnyStateBits(NS_FRAME_FIRST_REFLOW))) {
+      return 0;
+    }
     containerRect = nsGridContainerFrame::GridItemCB(mOuterFrame);
     rect.MoveBy(-containerRect.x, -containerRect.y);
   }
@@ -2093,11 +2109,54 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::GetPaddingWidthFor(
   return AppUnitsToCSSValue(mInnerFrame->GetUsedPadding().Side(aSide));
 }
 
+/* static */
+bool nsComputedDOMStyle::MarginMayBeTrimmed(const nsIFrame* aFrame,
+                                            Side aSide) {
+  if (!aFrame->IsBlockOutside() ||
+      aFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW)) {
+    return false;
+  }
+
+  for (const nsIFrame* parent = aFrame->GetParent(); parent;
+       parent = parent->GetParent()) {
+    const nsBlockFrame* block = do_QueryFrame(parent);
+    if (!block) {
+      return false;
+    }
+    const WritingMode wm = parent->GetWritingMode();
+    const StyleMarginTrim trim = parent->StyleMargin()->mMarginTrim;
+    if ((bool(trim & StyleMarginTrim::BLOCK_START) &&
+         aSide == wm.PhysicalSide(LogicalSide::BStart)) ||
+        (bool(trim & StyleMarginTrim::BLOCK_END) &&
+         aSide == wm.PhysicalSide(LogicalSide::BEnd))) {
+      return true;
+    }
+    // A further ancestor can only discard our margin if the margin collapses
+    // out through this block to reach that ancestor's content edge.
+    const bool isBStart = aSide == wm.PhysicalSide(LogicalSide::BStart);
+    const bool isBEnd = aSide == wm.PhysicalSide(LogicalSide::BEnd);
+    if (!isBStart && !isBEnd) {
+      return false;
+    }
+    bool bStartMarginRoot, bEndMarginRoot;
+    block->IsMarginRoot(&bStartMarginRoot, &bEndMarginRoot);
+    if ((isBStart && bStartMarginRoot) || (isBEnd && bEndMarginRoot) ||
+        parent->StyleBorder()->GetComputedBorderWidth(aSide) != 0 ||
+        !nsLayoutUtils::IsPaddingZero(
+            parent->StylePadding()->mPadding.Get(aSide))) {
+      return false;
+    }
+  }
+  return false;
+}
+
 already_AddRefed<CSSValue> nsComputedDOMStyle::GetMarginFor(Side aSide) {
   // Use raw margin here, layout-dependent margins should be stored in used
-  // margin.
+  // margin. Note that a plain length can be layout-dependent too, since
+  // `margin-trim` on an ancestor may have discarded it.
   const auto& margin = StyleMargin()->mMargin.Get(aSide);
-  if (!mInnerFrame || margin.ConvertsToLength()) {
+  if (!mInnerFrame ||
+      (margin.ConvertsToLength() && !MarginMayBeTrimmed(mOuterFrame, aSide))) {
     auto val = MakeRefPtr<nsROCSSPrimitiveValue>();
     SetValueToMargin(val, margin);
     return val.forget();
@@ -2368,14 +2427,14 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::GetTransformValue(
    * using the named transforms.  Until a real solution is found, we'll just
    * use this approach.
    */
+
+  // The zoomed refbox is used so we can resolve the percentages with the
+  // already zoomed lengths, and then unzoom everything together.
   nsStyleTransformMatrix::TransformReferenceBox refBox(mInnerFrame, nsRect());
   gfx::Matrix4x4 matrix = nsStyleTransformMatrix::ReadTransforms(
       aTransform, refBox, float(mozilla::AppUnitsPerCSSPixel()),
-      mozilla::StyleZoom::ONE);  // One is passed in, as computed value does not
-                                 // need zooming
-  // TODO(salipov, bug 2045846): Fix zooming for transforms other than matrix.
-  // Note that unzooming may be neded here for transforms using lengths as
-  // opposed to numbers.
+      nsStyleTransformMatrix::Zoomed::
+          No);  // We need to unzoom the translations for GetComputedStyle().
 
   return MatrixToCSSValue(matrix);
 }

@@ -3,8 +3,6 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origin of this IDL file is
- * http://dev.w3.org/2011/webrtc/editor/webrtc.html#rtcstatsreport-object
- * http://www.w3.org/2011/04/webrtc/wiki/Stats
  * https://www.w3.org/TR/webrtc-stats/
  */
 
@@ -134,7 +132,7 @@ dictionary RTCOutboundRtpStreamStats : RTCSentRtpStreamStats {
   unsigned long long retransmittedPacketsSent;
   unsigned long long retransmittedBytesSent;
   unsigned long rtxSsrc;
-  unsigned long long totalEncodedBytesTarget;
+  double targetBitrate;
   unsigned long frameWidth;
   unsigned long frameHeight;
   double framesPerSecond;
@@ -221,7 +219,7 @@ dictionary RTCIceCandidatePairStats : RTCStats {
 
 dictionary RTCIceCandidateStats : RTCStats {
   required DOMString transportId;
-  DOMString address;
+  DOMString? address;
   long port;
   DOMString protocol;
   RTCIceCandidateType candidateType;
@@ -354,6 +352,7 @@ dictionary RTCConfigurationInternal {
   RTCIceTransportPolicy          iceTransportPolicy;
   required boolean               peerIdentityProvided;
   DOMString                      sdpSemantics;
+  boolean alwaysNegotiateDataChannels = false;
 };
 
 dictionary RTCSdpHistoryInternal {

@@ -104,6 +104,11 @@ struct AxisValueMap
     from_coord = renormalizeValue ((double) from_coord, unmapped_range, triple_distances);
     to_coord = renormalizeValue ((double) to_coord, axis_range, triple_distances);
 
+    /* Malformed input can renormalize outside [-1,1], which would
+     * overflow F2DOT14. */
+    from_coord = hb_clamp (from_coord, -1.f, 1.f);
+    to_coord = hb_clamp (to_coord, -1.f, 1.f);
+
     coords[0].set_float (from_coord);
     coords[1].set_float (to_coord);
   }
@@ -221,10 +226,10 @@ struct SegmentMaps : Array16Of<AxisValueMap>
       if (value < map[i].fromCoord)
 	break;
 
-    if (i == 0)
+    if (i == start)
     {
       // Value before all segments; Shift.
-      return value - map[0].fromCoord + map[0].toCoord;
+      return value - map[start].fromCoord + map[start].toCoord;
     }
     if (i == end)
     {
@@ -252,7 +257,7 @@ struct SegmentMaps : Array16Of<AxisValueMap>
     float unmapped_middle = unmap_float (axis_range.middle);
     float unmapped_max = unmap_float (axis_range.maximum);
 
-    return Triple{(double) unmapped_min, (double) unmapped_middle, (double) unmapped_max};
+    return Triple{unmapped_min, unmapped_middle, unmapped_max};
   }
 
   bool subset (hb_subset_context_t *c, hb_tag_t axis_tag,
@@ -380,28 +385,40 @@ _avar2_eval_offset (const hb_vector_t<avar2_offset_knot_t> &knots, double z)
  * produced by SegmentMaps::subset (sorted, with -1/0/+1 anchors).
  * Matches SegmentMaps::map_float for such well-formed mappings. */
 static inline double
-_avar2_map_new_mapping (const hb_vector_t<AxisValueMap> &mappings, double v)
+_avar2_map_new_mapping (const hb_vector_t<AxisValueMap> &mappings, double v,
+			unsigned from_offset = 0, unsigned to_offset = 1)
 {
   unsigned len = mappings.length;
   if (!len) return v;
 
   for (unsigned i = 0; i < len; i++)
   {
-    double from = (double) mappings.arrayZ[i].coords[0].to_float ();
-    if (v == from) return (double) mappings.arrayZ[i].coords[1].to_float ();
+    double from = (double) mappings.arrayZ[i].coords[from_offset].to_float ();
+    if (v == from)
+      return (double) mappings.arrayZ[i].coords[to_offset].to_float ();
     if (v < from)
     {
-      double to = (double) mappings.arrayZ[i].coords[1].to_float ();
+      double to = (double) mappings.arrayZ[i].coords[to_offset].to_float ();
       if (!i) return v - from + to;
-      double prev_from = (double) mappings.arrayZ[i - 1].coords[0].to_float ();
-      double prev_to = (double) mappings.arrayZ[i - 1].coords[1].to_float ();
+      double prev_from = (double) mappings.arrayZ[i - 1].coords[from_offset].to_float ();
+      double prev_to = (double) mappings.arrayZ[i - 1].coords[to_offset].to_float ();
       double denom = from - prev_from;
       if (denom == 0.0) return prev_to;
       return prev_to + (to - prev_to) * (v - prev_from) / denom;
     }
   }
-  return v - (double) mappings.arrayZ[len - 1].coords[0].to_float ()
-           + (double) mappings.arrayZ[len - 1].coords[1].to_float ();
+  return v - (double) mappings.arrayZ[len - 1].coords[from_offset].to_float ()
+           + (double) mappings.arrayZ[len - 1].coords[to_offset].to_float ();
+}
+
+/* Inverse of _avar2_map_new_mapping: pull an output coordinate back to a
+ * preimage input coordinate. For a non-strictly-monotone mapping this picks
+ * one preimage, which is fine for its only use (augmenting the error
+ * estimator's sample set). */
+static inline double
+_avar2_unmap_new_mapping (const hb_vector_t<AxisValueMap> &mappings, double v)
+{
+  return _avar2_map_new_mapping (mappings, v, 1, 0);
 }
 
 /* Plain (non-avar) fvar-style normalization of a user value against a
@@ -429,8 +446,13 @@ _avar2_denormalize_value (double v, double min, double def, double max)
  * through the knots. The residual is dominated by F2Dot14 requantization of
  * a steep retained avar v1 segment (e.g. a moved default compressing part
  * of the axis into a narrow z band); offset compensation cannot remove it.
- * Used only to pick the better knot set and decide whether to warn, so a
- * coarse uniform sample suffices. */
+ * Used only to pick the better knot set and decide whether to warn.
+ *
+ * Sampled on a uniform grid augmented with the user-space preimages of
+ * every kink of the residual (old/new avar v1 breakpoints and offset(z)
+ * knots), so the worst kink cannot fall between uniform samples. The
+ * pointwise F2Dot14 rounding makes this an estimate rather than an exact
+ * bound, but every piecewise-linear extremum is visited. */
 static inline unsigned
 _avar2_estimate_offset_error (const SegmentMaps &old_seg,
                               const hb_vector_t<AxisValueMap> &new_mapping,
@@ -438,11 +460,29 @@ _avar2_estimate_offset_error (const SegmentMaps &old_seg,
                               double new_min, double new_def, double new_max,
                               const hb_vector_t<avar2_offset_knot_t> &knots)
 {
-  unsigned max_err = 0;
   constexpr unsigned samples = 257;
+  hb_vector_t<double> us;
+  if (unlikely (!us.alloc (samples + old_seg.as_array ().length +
+                           new_mapping.length + knots.length)))
+    return UINT_MAX; /* estimator only; fail towards "worse" */
   for (unsigned i = 0; i < samples; i++)
+    us.push (new_min + (new_max - new_min) * i / (samples - 1));
+  for (const auto &_ : old_seg.as_array ())
+    us.push (_avar2_denormalize_value ((double) _.coords[0].to_float (),
+                                       old_min, old_def, old_max));
+  for (const auto &_ : new_mapping)
+    us.push (_avar2_denormalize_value ((double) _.coords[0].to_float (),
+                                       new_min, new_def, new_max));
+  for (const auto &knot : knots)
+    us.push (_avar2_denormalize_value (
+               _avar2_unmap_new_mapping (new_mapping, knot.z),
+               new_min, new_def, new_max));
+  if (unlikely (us.in_error ())) return UINT_MAX;
+
+  unsigned max_err = 0;
+  for (double u : us)
   {
-    double u = new_min + (new_max - new_min) * i / (samples - 1);
+    if (u < new_min || u > new_max) continue;
     double n_old = _avar2_normalize_value (u, old_min, old_def, old_max);
     double old_final = (double) old_seg.map_float ((float) n_old);
     double n_new = _avar2_normalize_value (u, new_min, new_def, new_max);
@@ -555,9 +595,14 @@ struct avar
 #endif
   }
 
+  /* An avar version 2 font is never downgraded to v1: even with a NULL
+   * varStore offset (legal; maps like plain v1) the avar2 subsetting path
+   * applies, with "no variation" semantics for rows that don't resolve —
+   * offset compensation then creates delta rows on demand. */
   bool has_v2_data () const { return version.major > 1; }
 
-  /* Resolve the avar2 VarStore and VarIdxMap, for the subset planner. */
+  /* Resolve the avar2 VarStore and VarIdxMap, for the subset planner.
+   * Either pointer may be to the Null object (nullable offsets). */
   bool get_v2_store_and_map (const ItemVariationStore **store,
                              const DeltaSetIndexMap **varidx_map) const
   {
@@ -828,11 +873,22 @@ struct avar
      * other variation tables by standard instancing at the plan's
      * axes_location/normalized_coords. */
 
-    /* 5. Build per-axis varIdx mapping (may create new VarDatas) */
+    /* 5. Build per-axis varIdx mapping (may create new VarDatas).
+     * Entries (or the implicit identity mapping) that don't resolve to a
+     * real store row behave as "no variation" at runtime; normalize them to
+     * NO_VARIATIONS_INDEX so the offset loop creates fresh rows instead of
+     * writing into nonexistent ones. This also covers a NULL VarStore
+     * (never downgraded: rows are created on demand). */
     hb_vector_t<uint32_t> new_varidx_mapping;
     if (!new_varidx_mapping.resize (axisCount)) return false;
     for (unsigned i = 0; i < axisCount; i++)
-      new_varidx_mapping[i] = varidx_map.map (i);
+    {
+      uint32_t varidx = varidx_map.map (i);
+      if (varidx != HB_OT_LAYOUT_NO_VARIATIONS_INDEX &&
+	  !var_store.has_delta_set (varidx))
+	varidx = HB_OT_LAYOUT_NO_VARIATIONS_INDEX;
+      new_varidx_mapping[i] = varidx;
+    }
 
     /* 5.5. Privatize shared varIdx delta rows before adding offset
      * compensation. avar2's VarIdxMap may map several fvar axes to the SAME
@@ -969,9 +1025,9 @@ struct avar
            * Omitting that knot (as a plain two-tent encoding would) makes
            * interior coordinates wrong. */
           double z_old = _avar2_normalize_value ((double) old_def,
-                                                 new_user->minimum,
-                                                 new_user->middle,
-                                                 new_user->maximum);
+                                                 (double) new_user->minimum,
+                                                 (double) new_user->middle,
+                                                 (double) new_user->maximum);
           z_old = _avar2_map_new_mapping (new_mapping, z_old);
           z_old = (double) roundf ((float) (z_old * 16384.0)) / 16384.0;
           if (-1.0 < z_old && z_old < 1.0)
@@ -994,9 +1050,9 @@ struct avar
             if (!(-1.0 < z && z < 1.0))
               continue;
             double user = _avar2_denormalize_value (from,
-                                                    new_user->minimum,
-                                                    new_user->middle,
-                                                    new_user->maximum);
+                                                    (double) new_user->minimum,
+                                                    (double) new_user->middle,
+                                                    (double) new_user->maximum);
             double n_old = _avar2_normalize_value (user, old_min, old_def, old_max);
             double x_old = (double) old_seg_maps[i]->map_float ((float) n_old);
             x_old = (double) roundf ((float) (x_old * 16384.0)) / 16384.0;
@@ -1015,17 +1071,17 @@ struct avar
            * steep retained segment that cannot be reproduced in F2Dot14). */
           unsigned err = _avar2_estimate_offset_error (*old_seg_maps[i], new_mapping,
                                                        old_min, old_def, old_max,
-                                                       new_user->minimum,
-                                                       new_user->middle,
-                                                       new_user->maximum,
+                                                       (double) new_user->minimum,
+                                                       (double) new_user->middle,
+                                                       (double) new_user->maximum,
                                                        knots);
           if (with_breakpoints.length != knots.length)
           {
             unsigned err_with = _avar2_estimate_offset_error (*old_seg_maps[i], new_mapping,
                                                               old_min, old_def, old_max,
-                                                              new_user->minimum,
-                                                              new_user->middle,
-                                                              new_user->maximum,
+                                                              (double) new_user->minimum,
+                                                              (double) new_user->middle,
+                                                              (double) new_user->maximum,
                                                               with_breakpoints);
             if (err_with <= err)
             {

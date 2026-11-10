@@ -10,6 +10,11 @@
   const { AppConstants } = ChromeUtils.importESModule(
     "resource://gre/modules/AppConstants.sys.mjs"
   );
+  const lazy = {};
+  ChromeUtils.defineESModuleGetters(lazy, {
+    assignAutoAccessKeys: "chrome://global/content/elements/auto-accesskey.mjs",
+    checkAccessKeys: "chrome://global/content/elements/accesskey-check.mjs",
+  });
 
   // For the non-native context menu styling, we need to know if we need a
   // gutter for checkboxes or icons. On linux any checkbox / radio / icon
@@ -30,19 +35,35 @@
   document.addEventListener(
     "popupshowing",
     function (e) {
-      if (
-        e.target.nodeName == "menupopup" &&
-        e.target.getAttribute("needsgutter") != "always"
-      ) {
-        e.target.toggleAttribute(
+      let menupopup = e.target;
+      if (menupopup.nodeName != "menupopup") {
+        return;
+      }
+      if (menupopup.getAttribute("needsgutter") != "always") {
+        menupopup.toggleAttribute(
           "needsgutter",
-          !!e.target.querySelector(GUTTER_SELECTOR)
+          !!menupopup.querySelector(GUTTER_SELECTOR)
         );
       }
+      lazy.assignAutoAccessKeys(menupopup);
     },
     // we use a system bubbling event listener to ensure we run *after* the
     // "normal" popupshowing listeners, so (visibility) changes they make to
-    // their items take effect first, before we check for checkable menuitems.
+    // their items take effect first, before we check for checkable menuitems,
+    // and items they add get their accesskeys.
+    { mozSystemGroup: true }
+  );
+
+  document.addEventListener(
+    "popupshown",
+    function (e) {
+      if (
+        e.target.nodeName == "menupopup" &&
+        e.target.ownerDocument == document
+      ) {
+        lazy.checkAccessKeys(e.target);
+      }
+    },
     { mozSystemGroup: true }
   );
 
@@ -103,22 +124,13 @@
       if (!super.shadowRoot.firstChild) {
         // We generate shadow DOM lazily on popupshowing event to avoid extra
         // load on the system during browser startup.
-        super.shadowRoot.appendChild(this.fragment);
+        super.shadowRoot.appendChild(this.constructor.fragment);
         this.initShadowDOM();
       }
       return super.shadowRoot;
     }
 
-    get fragment() {
-      if (!this.constructor.hasOwnProperty("_fragment")) {
-        this.constructor._fragment = MozXULElement.parseXULToFragment(
-          this.markup
-        );
-      }
-      return document.importNode(this.constructor._fragment, true);
-    }
-
-    get markup() {
+    static get markup() {
       return `
         <html:link rel="stylesheet" href="chrome://global/skin/global.css"/>
         <html:link rel="stylesheet" href="chrome://global/content/elements/menupopup.css"/>

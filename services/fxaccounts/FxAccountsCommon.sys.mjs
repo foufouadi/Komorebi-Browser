@@ -96,12 +96,13 @@ let TB_OAUTH_CLIENT_ID = "8269bacd7bbc7f80";
 export let OAUTH_CLIENT_ID = CLIENT_IS_THUNDERBIRD
   ? TB_OAUTH_CLIENT_ID
   : FX_OAUTH_CLIENT_ID;
+
+// We prefer string literals for all scopes which are a full URL, but not these short ones.
 export let SCOPE_PROFILE = "profile";
 export let SCOPE_PROFILE_WRITE = "profile:write";
 export let SCOPE_PROFILE_UID = "profile:uid";
-export let SCOPE_SMART_WINDOW = "https://identity.mozilla.com/apps/smartwindow";
 
-// Sync scope in Firefox.
+// Exception is "sync", which might be thunderbird (which might actually be unused?)
 export let SCOPE_OLD_SYNC = "https://identity.mozilla.com/apps/oldsync";
 // Sync scope in Thunderbird.
 let SCOPE_THUNDERBIRD_SYNC = "https://identity.thunderbird.net/apps/sync";
@@ -117,6 +118,59 @@ export let SCOPE_APP_SYNC = CLIENT_IS_THUNDERBIRD
 // most clients to update; ref Bug 1697596.
 export let DEPRECATED_SCOPE_ECOSYSTEM_TELEMETRY =
   "https://identity.mozilla.com/ids/ecosystem_telemetry";
+
+// A map between what we call a "service" and the scopes that service requires.
+// Used when connecting "services" to Firefox and when migrating to a refresh token.
+//
+// Intentional choice to use a string literal instead of an enum-looking thing,
+// unknown services throw.
+//
+// These should include all scopes needed by the service, even if they match
+// other services or scopes in BROWSER_SCOPES. The scopes should be as narrow as possible.
+const SERVICE_SCOPES = {
+  sync: [SCOPE_APP_SYNC],
+  relay: [SCOPE_PROFILE, "https://identity.mozilla.com/apps/relay"],
+  vpn: [SCOPE_PROFILE, "https://identity.mozilla.com/apps/vpn"],
+  smartwindow: [
+    SCOPE_PROFILE_UID,
+    "https://identity.mozilla.com/apps/smartwindow",
+  ],
+  monitor: [SCOPE_PROFILE_UID, "https://identity.mozilla.com/apps/monitor"],
+};
+
+// Scopes the browser itself wants.
+const BROWSER_SCOPES = [
+  SCOPE_PROFILE,
+  SCOPE_PROFILE_WRITE,
+  "https://identity.mozilla.com/account/subscriptions",
+];
+
+/**
+ * Returns the OAuth scopes required by an FxA service.
+ *
+ * @param {keyof typeof SERVICE_SCOPES} service
+ * @returns {string[]} The scopes to request for that service.
+ * @throws If the service is unknown - we don't want accidental services
+ *         sneaking in.
+ */
+export function scopesForService(service) {
+  const scopes = SERVICE_SCOPES[service];
+  if (!scopes) {
+    throw new Error(`unknown FxA service '${service}'`);
+  }
+  return [...scopes];
+}
+
+/**
+ * Returns the OAuth scopes required directly by Firefox.
+ *
+ * @param {keyof typeof SERVICE_SCOPES} service
+ * @returns {string[]} The scopes needed for Firefox's builtin FxA capabilities
+ *                     to function.
+ */
+export function scopesForBrowser() {
+  return [...BROWSER_SCOPES];
+}
 
 // OAuth metadata for other Firefox-related services that we might need to know about
 // in order to provide an enhanced user experience.
@@ -137,6 +191,12 @@ export let COMMAND_PAIR_SUPP_METADATA = "fxaccounts:pair_supplicant_metadata";
 export let COMMAND_PAIR_AUTHORIZE = "fxaccounts:pair_authorize";
 export let COMMAND_PAIR_DECLINE = "fxaccounts:pair_decline";
 export let COMMAND_PAIR_COMPLETE = "fxaccounts:pair_complete";
+// Asks the browser to start an OAuth flow on behalf of a pairing supplicant
+// and to hand the resulting OAuth parameters back to FxA.
+export let COMMAND_PAIR_OAUTH_START = "fxaccounts:pair_oauth_start";
+// Asks the browser, acting as the pairing authority, to grant an OAuth
+// authorization code for the supplicant's OAuth parameters.
+export let COMMAND_PAIR_OAUTH_FINISH = "fxaccounts:pair_oauth_finish";
 
 export let COMMAND_PROFILE_CHANGE = "profile:change";
 export let COMMAND_CAN_LINK_ACCOUNT = "fxaccounts:can_link_account";

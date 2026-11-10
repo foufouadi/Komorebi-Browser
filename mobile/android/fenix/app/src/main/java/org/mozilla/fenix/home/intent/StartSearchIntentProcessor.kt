@@ -6,31 +6,47 @@ package org.mozilla.fenix.home.intent
 
 import android.content.Intent
 import androidx.navigation.NavController
-import mozilla.telemetry.glean.private.NoExtras
 import org.mozilla.fenix.GleanMetrics.SearchWidget
 import org.mozilla.fenix.HomeActivity
 import org.mozilla.fenix.NavGraphDirections
+import org.mozilla.fenix.browser.browsingmode.BrowsingModeManager
 import org.mozilla.fenix.components.metrics.MetricsUtils
+import org.mozilla.fenix.components.usecases.FenixBrowserUseCases
 import org.mozilla.fenix.ext.nav
 import org.mozilla.fenix.utils.Settings
+import org.mozilla.fenix.widget.SearchWidgetIntents
 
 /**
- * When the search widget is tapped and the user has been onboarded, Fenix should open directly to search. Tapping the
- * private browsing mode launcher icon should also open to search.
+ * When the search widget is tapped, Fenix should open directly to search. Tapping the private browsing mode launcher
+ * icon should also open to search.
+ *
+ * @param fenixBrowserUseCases [FenixBrowserUseCases] used to add a new homepage tab when the homepage as a new tab
+ *   feature is enabled.
+ * @param browsingModeManager [BrowsingModeManager] used to get and set the browsing mode of the new tab.
  */
-class StartSearchIntentProcessor(private val userHasBeenOnboarded: () -> Boolean) : HomeIntentProcessor {
+class StartSearchIntentProcessor(
+    private val fenixBrowserUseCases: FenixBrowserUseCases,
+    private val browsingModeManager: BrowsingModeManager,
+) : HomeIntentProcessor {
 
     override fun process(intent: Intent, navController: NavController, out: Intent, settings: Settings): Boolean {
-        if (!userHasBeenOnboarded()) {
+        val event = intent.extras?.getString(HomeActivity.OPEN_TO_SEARCH)
+
+        // When the homepage is a new tab, the private browsing shortcut opens the private homepage instead, which
+        // OpenHomeIntentProcessor handles.
+        if (event == PRIVATE_BROWSING_PINNED_SHORTCUT && settings.enableHomepageAsNewTab) {
             return false
         }
 
-        val event = intent.extras?.getString(HomeActivity.OPEN_TO_SEARCH)
         return if (event != null) {
             val source =
                 when (event) {
                     SEARCH_WIDGET -> {
-                        SearchWidget.newTabButton.record(NoExtras())
+                        SearchWidget.newTabButton.record(
+                            SearchWidget.NewTabButtonExtra(
+                                widgetType = intent.getStringExtra(SearchWidgetIntents.EXTRA_WIDGET_TYPE)
+                            )
+                        )
                         MetricsUtils.Source.WIDGET
                     }
                     STATIC_SHORTCUT_NEW_TAB,
@@ -42,8 +58,14 @@ class StartSearchIntentProcessor(private val userHasBeenOnboarded: () -> Boolean
                 }
 
             out.removeExtra(HomeActivity.OPEN_TO_SEARCH)
+            out.removeExtra(SearchWidgetIntents.EXTRA_WIDGET_TYPE)
 
             source?.let {
+                if (settings.enableHomepageAsNewTab) {
+                    browsingModeManager.updateMode(intent)
+                    fenixBrowserUseCases.addNewHomepageTab(private = browsingModeManager.mode.isPrivate)
+                }
+
                 navController.nav(
                     id = null,
                     directions =

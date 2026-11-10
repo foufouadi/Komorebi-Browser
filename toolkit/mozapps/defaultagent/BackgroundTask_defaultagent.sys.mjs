@@ -18,6 +18,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
   // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
   ShellService: "moz-src:///browser/components/shell/ShellService.sys.mjs",
+  WindowsInstallsInfo:
+    "resource://gre/modules/components-utils/WindowsInstallsInfo.sys.mjs",
 });
 XPCOMUtils.defineLazyServiceGetters(lazy, {
   AlertsService: ["@mozilla.org/alerts-service;1", Ci.nsIAlertsService],
@@ -72,7 +74,8 @@ const kNotificationAction = Object.freeze({
 //   is run. unique-token is required and should be some string that uniquely
 //   identifies this installation of the product; typically this will be the
 //   install path hash that's used for the update directory, the AppUserModelID,
-//   and other related purposes.
+//   and other related purposes. For MSIX builds, this command is a no-op. we register
+//   the task during first startup.
 // update-task [unique-token]
 //   Update an existing task registration, without changing its schedule. This
 //   should be called during updates of the application, in case this program
@@ -82,14 +85,16 @@ const kNotificationAction = Object.freeze({
 // unregister-task [unique-token]
 //   Removes the previously created task. The unique token argument is required
 //   and should be the same one that was passed in when the task was registered.
+//   No-op for MSIX builds.
 // uninstall [unique-token]
 //   Removes the previously created task, and also removes all registry entries
 //   running the task may have created. The unique token argument is required
 //   and should be the same one that was passed in when the task was registered.
-// do-task [app-user-model-id]
+// do-task [unused-app-user-model-id (non-MSIX)]
 //   Actually performs the default agent task, which currently means generating
 //   and sending our telemetry ping and possibly showing a notification to the
-//   user if their browser has switched from Firefox to Edge with Blink.
+//   user if their browser has switched from Firefox to Edge with Blink. The
+//   argument is unused: non-MSIX launches pass one, an MSIX launch cannot.
 // set-default-browser-user-choice [app-user-model-id] [[.file1 ProgIDRoot1]
 // ...]
 //   Set the default browser via the UserChoice registry keys.  Additional
@@ -150,10 +155,9 @@ export async function runBackgroundTask(commandLine) {
       return EXIT_CODE.SUCCESS;
     }
     case "do-task": {
-      let aumid = commandLine.getArgument(1);
       let force = commandLine.findFlag("force", true) != -1;
 
-      lazy.log.info(`Running do-task with AUMID "${aumid}"`);
+      lazy.log.info("Running do-task");
 
       try {
         lazy.log.info("Running JS do-task.");
@@ -202,6 +206,93 @@ async function runWithRegistryLocked(aMutexGuardedFunction) {
   }
 }
 
+// Keep in sync with the `system.win_package_family_name` filter in
+// TelemetryEnvironment.
+const kMozillaPackageFamilyNamePrefixes = ["Mozilla.", "MozillaCorporation."];
+
+function getSysinfoProperty(name, defaultValue) {
+  try {
+    return Services.sysinfo.getProperty(name);
+  } catch (e) {
+    return defaultValue;
+  }
+}
+
+/**
+ * Collects how this installation was installed, for the default-agent ping.
+ *
+ * @param {object} [options]
+ * @param {nsIFile} [options.installTelemetryFile]
+ *   Overrides `installation_telemetry.json` in the installation directory.
+ * @param {nsIFile} [options.distributionIniFile]
+ *   Overrides `distribution.ini` in the distribution directory.
+ * @returns {Promise<object>}
+ *   `hasWinPackageId`, `winPackageFamilyName`, `installerType`,
+ *   `installerFromMsi`, `installerSilent` and `distributionId`. Strings are
+ *   empty when unknown.
+ */
+export async function getInstallInfo({
+  installTelemetryFile,
+  distributionIniFile,
+} = {}) {
+  let info = {
+    hasWinPackageId: getSysinfoProperty("hasWinPackageId", false),
+    winPackageFamilyName: "",
+    installerType: "",
+    installerFromMsi: false,
+    installerSilent: false,
+    distributionId: "",
+  };
+
+  if (info.hasWinPackageId) {
+    let packageFamilyName = getSysinfoProperty("winPackageFamilyName", "");
+    if (
+      kMozillaPackageFamilyNamePrefixes.some(p =>
+        packageFamilyName.startsWith(p)
+      )
+    ) {
+      info.winPackageFamilyName = packageFamilyName;
+    }
+    info.installerType = "msix";
+  } else {
+    try {
+      let data =
+        (await lazy.WindowsInstallsInfo.readInstallationTelemetry(
+          installTelemetryFile
+        )) ?? {};
+      if (data.installer_type == "stub" || data.installer_type == "full") {
+        info.installerType = data.installer_type;
+      }
+      if (info.installerType == "full") {
+        info.installerFromMsi = data.from_msi === true;
+        info.installerSilent = data.silent === true;
+      }
+    } catch (e) {
+      lazy.log.error(`Reading installation telemetry failed: ${e}`);
+    }
+  }
+
+  // The browser gets `distribution.id` from this file through
+  // DistributionCustomizer, which background tasks don't run.
+  try {
+    let file = distributionIniFile;
+    if (!file) {
+      file = Services.dirsvc.get("XREAppDist", Ci.nsIFile);
+      file.append("distribution.ini");
+    }
+    if (file.exists()) {
+      let ini = Cc["@mozilla.org/xpcom/ini-parser-factory;1"]
+        .getService(Ci.nsIINIParserFactory)
+        .createINIParser(file);
+      info.distributionId = ini.getString("Global", "id");
+    }
+  } catch (e) {
+    lazy.log.error(`Reading distribution ID failed: ${e}`);
+  }
+
+  return info;
+}
+
 const kSecondsPerDay = 24 /*hours*/ * 60 /*minutes*/ * 60; /*seconds*/
 
 const kTaskExpirationSeconds = 90 /*days*/ * kSecondsPerDay;
@@ -209,7 +300,7 @@ const kTaskExpirationSeconds = 90 /*days*/ * kSecondsPerDay;
 export async function doTask(defaultAgent, force) {
   let secondsSinceAppRan;
   try {
-    secondsSinceAppRan = defaultAgent.SecondsSinceLastAppRun();
+    secondsSinceAppRan = defaultAgent.secondsSinceLastAppRun();
   } catch (err) {
     if (err.result == Cr.NS_ERROR_NOT_AVAILABLE) {
       // There was no registry value to read to determine when the last app run occurred
@@ -266,7 +357,9 @@ export async function doTask(defaultAgent, force) {
 
     notificationTelemetry = await Promise.race([notification, timeout]);
   }
-  lazy.log.debug(`Notification telemetry: ${notificationTelemetry}`);
+  lazy.log.debug(
+    `Notification telemetry: ${JSON.stringify(notificationTelemetry)}`
+  );
 
   if (
     notificationTelemetry.action ==
@@ -278,6 +371,12 @@ export async function doTask(defaultAgent, force) {
     });
   }
 
+  let installInfo = await getInstallInfo();
+  lazy.log.debug(`Install info: ${JSON.stringify(installInfo)}`);
+  if (installInfo.distributionId) {
+    Services.fog.updateDistribution(installInfo.distributionId);
+  }
+
   defaultAgent.sendPing(
     browser,
     previousBrowser,
@@ -285,7 +384,12 @@ export async function doTask(defaultAgent, force) {
     notificationTelemetry.shown,
     notificationTelemetry.action,
     daysSinceLastAppLaunch,
-    isTaskbarPinned
+    isTaskbarPinned,
+    installInfo.hasWinPackageId,
+    installInfo.winPackageFamilyName,
+    installInfo.installerType,
+    installInfo.installerFromMsi,
+    installInfo.installerSilent
   );
 }
 

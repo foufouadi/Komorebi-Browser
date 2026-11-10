@@ -16,6 +16,7 @@ const SHIMMABLE_TEST_PAGE_3 = `${TEST_ROOT}shims_test_3.html`;
 const EMBEDDING_TEST_PAGE = `${THIRD_PARTY_ROOT}iframe_test.html`;
 const TEST_PAGE_WITH_SMARTBLOCK_COMPATIBLE_EMBED = `${TEST_ROOT}smartblock_embed_test.html`;
 const TEST_PAGE_WITH_SMARTBLOCK_LINK_CONTAINER_EMBED = `${TEST_ROOT}smartblock_embed_link_container_test.html`;
+const TEST_PAGE_WITH_SMARTBLOCK_COMPATIBLE_IFRAME_EMBED = `${TEST_ROOT}smartblock_embed_iframe_test.html`;
 const BLOCKED_TRACKER_URL =
   "//trackertest.org/tests/toolkit/components/url-classifier/tests/mochitest/evil.js";
 
@@ -35,6 +36,8 @@ const CONTENT_CLASSIFIER_PROTECTION_ENABLED_PREF =
   "privacy.trackingprotection.content.protection.enabled";
 const CONTENT_CLASSIFIER_PROTECTION_LIST_URLS_PREF =
   "privacy.trackingprotection.content.protection.test_list_urls";
+const CONTENT_CLASSIFIER_MIRROR_MODE_PREF =
+  "privacy.trackingprotection.content.mirror.mode";
 const CONTENT_CLASSIFIER_BLOCK_LIST_URL = `${TEST_ROOT}content_classifier_block_list.txt`;
 // Must match NS_CONTENT_CLASSIFIER_FILTER_LISTS_LOADED_TOPIC in
 // nsIContentClassifierService.idl.
@@ -444,6 +447,9 @@ async function enableContentClassifierBlockList(blockListUrl) {
     ? TestUtils.topicObserved(CONTENT_CLASSIFIER_LISTS_LOADED_TOPIC)
     : null;
 
+  // Take the content prefs back from the ETP pref mirror, which would
+  // otherwise overwrite the engines pref the test list relies on.
+  Services.prefs.setIntPref(CONTENT_CLASSIFIER_MIRROR_MODE_PREF, 0);
   Services.prefs.setBoolPref(CONTENT_CLASSIFIER_TESTING_PREF, true);
   Services.prefs.setBoolPref(CONTENT_CLASSIFIER_PROTECTION_ENABLED_PREF, true);
   Services.prefs.setStringPref(
@@ -460,6 +466,7 @@ function disableContentClassifier() {
   Services.prefs.clearUserPref(CONTENT_CLASSIFIER_TESTING_PREF);
   Services.prefs.clearUserPref(CONTENT_CLASSIFIER_PROTECTION_ENABLED_PREF);
   Services.prefs.clearUserPref(CONTENT_CLASSIFIER_PROTECTION_LIST_URLS_PREF);
+  Services.prefs.clearUserPref(CONTENT_CLASSIFIER_MIRROR_MODE_PREF);
 }
 
 // Wait for the webcompat extension to settle a shim's effective enabled
@@ -606,12 +613,18 @@ async function generateTestShims() {
       file: "empty-script.js",
       matches: [
         "https://itisatracker.org/browser/browser/extensions/webcompat/tests/browser/embed_test.js",
+        {
+          patterns: [
+            "https://itisatracker.org/browser/browser/extensions/webcompat/tests/browser/embed_test_iframe.html",
+          ],
+          types: ["sub_frame"],
+          target: "empty-page.html",
+        },
       ],
       // Use instagram logo as an example
       logos: ["instagram.svg"],
       needsShimHelpers: [
         "embedClicked",
-        "smartblockEmbedReplaced",
         "smartblockGetFluentString",
         "shouldShowEmbedContentInPlaceholders",
       ],

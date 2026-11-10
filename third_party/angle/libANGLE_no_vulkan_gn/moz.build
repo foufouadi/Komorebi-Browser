@@ -16,6 +16,7 @@ DEFINES["ANGLE_ENABLE_KEYEDMUTEX"] = True
 DEFINES["ANGLE_ENABLE_SHARE_CONTEXT_LOCK"] = "1"
 DEFINES["ANGLE_PLATFORM_EXPORT"] = ""
 DEFINES["ANGLE_SKIP_DXGI_1_2_CHECK"] = True
+DEFINES["EGL_NO_X11"] = True
 DEFINES["LIBANGLE_IMPLEMENTATION"] = True
 
 LOCAL_INCLUDES += [
@@ -24,7 +25,7 @@ LOCAL_INCLUDES += [
     "/third_party/angle/include/",
     "/third_party/angle/src/",
     "/third_party/angle/src/common/base/",
-    "/third_party/angle/src/common/third_party/xxhash/",
+    "/third_party/angle/src/common/third_party/xxhash/src/",
     "/third_party/angle/third_party/zlib/google/",
     "/tools/profiler/public"
 ]
@@ -34,9 +35,6 @@ SOURCES += [
     "/third_party/angle/src/libANGLE/Context_gles_1_0.cpp",
     "/third_party/angle/src/libANGLE/Device.cpp",
     "/third_party/angle/src/libANGLE/Display.cpp",
-    "/third_party/angle/src/libANGLE/Overlay.cpp",
-    "/third_party/angle/src/libANGLE/Overlay_autogen.cpp",
-    "/third_party/angle/src/libANGLE/OverlayWidgets.cpp",
     "/third_party/angle/src/libANGLE/validationES2.cpp",
     "/third_party/angle/src/libANGLE/validationESEXT.cpp"
 ]
@@ -72,7 +70,6 @@ UNIFIED_SOURCES += [
     "/third_party/angle/src/libANGLE/MemoryProgramCache.cpp",
     "/third_party/angle/src/libANGLE/MemoryShaderCache.cpp",
     "/third_party/angle/src/libANGLE/Observer.cpp",
-    "/third_party/angle/src/libANGLE/Overlay_font_autogen.cpp",
     "/third_party/angle/src/libANGLE/PixelLocalStorage.cpp",
     "/third_party/angle/src/libANGLE/Platform.cpp",
     "/third_party/angle/src/libANGLE/Program.cpp",
@@ -151,6 +148,32 @@ if CONFIG["MOZ_DEBUG"] == "1":
     DEFINES["ANGLE_GENERATE_SHADER_DEBUG_INFO"] = True
     DEFINES["DYNAMIC_ANNOTATIONS_ENABLED"] = "1"
 
+if CONFIG["OS_TARGET"] == "Android":
+
+    DEFINES["ANDROID"] = True
+    DEFINES["ANDROID_NDK_VERSION_ROLL"] = "r27_1"
+    DEFINES["ANGLE_ENABLE_GLOBAL_MUTEX_LOAD_TIME_ALLOCATE"] = "1"
+    DEFINES["ANGLE_ENABLE_OPENGL"] = True
+    DEFINES["ANGLE_USE_ANDROID_TLS_SLOT"] = "1"
+    DEFINES["HAVE_SYS_UIO_H"] = True
+    DEFINES["_GNU_SOURCE"] = True
+    DEFINES["__ANDROID_UNAVAILABLE_SYMBOLS_ARE_WEAK__"] = True
+    DEFINES["__STDC_CONSTANT_MACROS"] = True
+    DEFINES["__STDC_FORMAT_MACROS"] = True
+
+    LOCAL_INCLUDES += [
+        "/third_party/angle/src/third_party/khronos/"
+    ]
+
+    OS_LIBS += [
+        "log",
+        "nativewindow"
+    ]
+
+    USE_LIBS += [
+        "angle_gl_backend_gn"
+    ]
+
 if CONFIG["OS_TARGET"] == "Darwin":
 
     DEFINES["ANGLE_ENABLE_METAL"] = True
@@ -182,7 +205,6 @@ if CONFIG["OS_TARGET"] == "Darwin":
 if CONFIG["OS_TARGET"] == "WINNT":
 
     DEFINES["ANGLE_ENABLE_D3D11"] = True
-    DEFINES["ANGLE_ENABLE_D3D9"] = True
     DEFINES["ANGLE_IS_WIN"] = True
     DEFINES["ANGLE_PRELOADED_D3DCOMPILER_MODULE_NAMES"] = "{ \"d3dcompiler_47.dll\", \"d3dcompiler_46.dll\", \"d3dcompiler_43.dll\" }"
     DEFINES["CERT_CHAIN_PARA_HAS_EXTRA_FIELDS"] = True
@@ -210,8 +232,6 @@ if CONFIG["OS_TARGET"] == "WINNT":
     DEFINES["__STD_C"] = True
 
     OS_LIBS += [
-        "d3d9",
-        "delayimp",
         "dxgi",
         "dxguid",
         "gdi32",
@@ -221,13 +241,16 @@ if CONFIG["OS_TARGET"] == "WINNT":
     ]
 
     USE_LIBS += [
-        "angle_d3d11_backend_gn",
-        "angle_d3d9_backend_gn"
+        "angle_d3d11_backend_gn"
     ]
 
 if CONFIG["TARGET_CPU"] == "aarch64":
 
     DEFINES["__ARM_NEON__"] = "1"
+
+if CONFIG["MOZ_DEBUG"] == "1" and CONFIG["OS_TARGET"] == "Android":
+
+    DEFINES["_DEBUG"] = True
 
 if CONFIG["MOZ_DEBUG"] == "1" and CONFIG["OS_TARGET"] == "Darwin":
 

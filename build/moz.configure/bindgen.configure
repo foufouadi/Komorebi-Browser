@@ -28,9 +28,7 @@ def check_cbindgen_version(cbindgen, fatal=False):
     Please update using 'cargo install cbindgen --force' or running
     './mach bootstrap', after removing the existing executable located at
     {}.
-    """.format(
-                version, cbindgen_min_version, cbindgen
-            )
+    """.format(version, cbindgen_min_version, cbindgen)
         )
     )
 
@@ -109,6 +107,7 @@ option(
     target,
     target_sysroot.path,
     android_version,
+    msvc_sysroot_flags,
 )
 @checking("for clang for bindgen", lambda x: x.path if x else "not found")
 def bindgen_clang_compiler(
@@ -120,6 +119,7 @@ def bindgen_clang_compiler(
     target,
     sysroot_path,
     android_version,
+    msvc_sysroot_flags,
 ):
     # When the target compiler is clang, use that, including flags.
     if cxx_compiler.type == "clang":
@@ -159,6 +159,8 @@ def bindgen_clang_compiler(
     flags = []
     if sysroot_path:
         flags.extend(("--sysroot", sysroot_path))
+    if cxx_compiler.type == "clang-cl" and msvc_sysroot_flags:
+        flags.extend(msvc_sysroot_flags.clang)
     info = check_compiler(
         configure_cache, [clang_path] + flags, "C++", target, android_version
     )
@@ -187,8 +189,7 @@ def bindgen_libclang_path(libclang_path, clang, library_name_info, host):
     if not clang:
         if libclang_path:
             die(
-                "--with-libclang-path is not valid without a clang compiler "
-                "for bindgen"
+                "--with-libclang-path is not valid without a clang compiler for bindgen"
             )
         return
 
@@ -301,9 +302,7 @@ def min_libclang_version(libclang):
 
         Please make sure to update it or point to a newer libclang using
         --with-libclang-path.
-        """.format(
-                    libclang
-                )
+        """.format(libclang)
             )
         )
         return False
@@ -343,6 +342,11 @@ def basic_bindgen_cflags(
         ],
     }.get(target.os, [])
 
+    # bindgen passes the windows-gnullvm Rust target to clang unchanged, which
+    # clang rejects. https://github.com/rust-lang/rust-bindgen/pull/3505
+    if target.abi == "mingw":
+        args.append(f"--target={target.alias}")
+
     if compiler_info.type == "clang-cl":
         args += [
             # To enable the builtin __builtin_offsetof so that CRT wouldn't
@@ -375,3 +379,13 @@ def bindgen_cflags(base_flags, extra_flags):
 
 
 set_config("BINDGEN_SYSTEM_FLAGS", bindgen_cflags)
+
+
+# Force the target down to all bindgen callers, even those that may not
+# read BINDGEN_SYSTEM_FLAGS some way or another.
+@depends(bindgen_cflags)
+def bindgen_extra_clang_args(flags):
+    return [f for f in flags or [] if f.startswith("--target=")]
+
+
+set_config("BINDGEN_EXTRA_CLANG_ARGS", bindgen_extra_clang_args)

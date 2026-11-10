@@ -19,6 +19,14 @@ NS_IMPL_ISUPPORTS(nsConverterInputStream, nsIConverterInputStream,
 NS_IMETHODIMP
 nsConverterInputStream::Init(nsIInputStream* aStream, const char* aCharset,
                              int32_t aBufferSize, char16_t aReplacementChar) {
+  mInput = nullptr;
+  mByteData.Clear();
+  mUnicharData.Clear();
+  mLastErrorCode = NS_OK;
+  mLeftOverBytes = 0;
+  mUnicharDataOffset = 0;
+  mUnicharDataLength = 0;
+
   nsAutoCString label;
   if (!aCharset) {
     label.AssignLiteral("UTF-8");
@@ -248,7 +256,7 @@ uint32_t nsConverterInputStream::Fill(nsresult* aErrorCode) {
 NS_IMETHODIMP
 nsConverterInputStream::ReadLine(nsAString& aLine, bool* aResult) {
   if (!mLineBuffer) {
-    mLineBuffer = MakeUnique<nsLineBuffer<char16_t>>();
+    mLineBuffer = std::make_unique<nsLineBuffer<char16_t>>();
   }
   return NS_ReadLine(this, mLineBuffer.get(), aLine, aResult);
 }

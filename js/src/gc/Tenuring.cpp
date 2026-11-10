@@ -8,8 +8,11 @@
 
 #include "gc/Tenuring.h"
 
+#include "mozilla/glue/Debug.h"
+
 #include <bit>
 
+#include "gc/BufferAllocator.h"
 #include "gc/Cell.h"
 #include "gc/GCInternals.h"
 #include "gc/GCProbes.h"
@@ -82,12 +85,6 @@ class js::gc::PromotionStats {
                                  const JS::AutoRequireNoGC& nogc);
 };
 #endif  // JS_GC_ZEAL
-
-/* static */
-TenuringTracer* TenuringTracer::From(JSTracer* trc) {
-  MOZ_ASSERT(trc->isTenuringTracer());
-  return static_cast<TenuringTracer*>(trc);
-}
 
 TenuringTracer::TenuringTracer(JSRuntime* rt, Nursery* nursery,
                                bool tenureEverything)
@@ -260,6 +257,11 @@ bool TenuringTracer::onJitCodeEdge(jit::JitCode** codep, const char* name) {
 }
 bool TenuringTracer::onScopeEdge(Scope** scopep, const char* name) {
   return true;
+}
+
+JSTracer::TraceBufferResult TenuringTracer::onBufferEdge(void** bufferp,
+                                                         const char* name) {
+  return BufferAllocator::PromoteBuffer(this, bufferp, name, sourceIsInNursery);
 }
 
 void TenuringTracer::traverse(JS::Value* thingp) {
@@ -1185,6 +1187,18 @@ JSString* js::gc::TenuringTracer::promoteString(JSString* src) {
   }
 #endif
 
+  MOZ_ASSERT(!src->isAtom());
+
+  // An atom ref already points to a tenured atom with the same characters and
+  // encoding, so forward to that instead of promoting a copy.
+  if (src->isAtomRef()) {
+    JSAtom* atom = src->atom();
+    MOZ_ASSERT(src->hasLatin1Chars() == atom->hasLatin1Chars());
+    StringRelocationOverlay::forwardString(src, atom);
+    gcprobes::PromoteToTenured(src, atom);
+    return atom;
+  }
+
   AllocKind dstKind = src->getAllocKind();
   Zone* zone = src->nurseryZone();
 
@@ -1192,7 +1206,6 @@ JSString* js::gc::TenuringTracer::promoteString(JSString* src) {
   // the atom. Don't do this for dependent strings because they're more
   // complicated. See StringRelocationOverlay and DeduplicationStringHasher
   // comments.
-  MOZ_ASSERT(!src->isAtom());
   if (src->isLinear() && src->inStringToAtomCache() &&
       src->isDeduplicatable() && !src->hasBase()) {
     JSLinearString* linear = &src->asLinear();
@@ -1293,11 +1306,13 @@ JSString* js::gc::TenuringTracer::promoteString(JSString* src) {
     JSLinearString* base = src->asDependent().rootBaseDuringMinorGC();
 
     // Limited recursion: the root base cannot be dependent, so this will not
-    // recurse again.
+    // recurse again. Preserve the value of |promotedToNursery|.
+    bool promotedToNurseryPrev = promotedToNursery;
     JSString* promotedBase =
         InCollectedNurseryRegion(base) ? promoteOrForward(base) : base;
-    MOZ_ASSERT(!promotedBase->isDependent());
+    promotedToNursery = promotedToNurseryPrev;
 
+    MOZ_ASSERT(!promotedBase->isDependent());
     dst->asDependent().setBase(&promotedBase->asLinear());
     if (base != promotedBase) {
       dst->asDependent().updateToPromotedBase(base);
@@ -1598,11 +1613,11 @@ void TenuringTracer::printPromotionReport(
   double fractionPromoted = double(getPromotedSize()) / usedBytes;
   double usedMB = usedBytes / (1024 * 1024);
   double capacityMB = capacityBytes / (1024 * 1024);
-  fprintf(stderr, "Promotion stats for minor GC %zu:\n", minorGCCount);
-  fprintf(stderr, "  Reason: %s\n", ExplainGCReason(reason));
-  fprintf(stderr, "  Nursery size: %4.1f MB used of %4.1f MB\n", usedMB,
-          capacityMB);
-  fprintf(stderr, "  Promotion rate: %5.1f%%\n", 100 * fractionPromoted);
+  printf_stderr("Promotion stats for minor GC %zu:\n", minorGCCount);
+  printf_stderr("  Reason: %s\n", ExplainGCReason(reason));
+  printf_stderr("  Nursery size: %4.1f MB used of %4.1f MB\n", usedMB,
+                capacityMB);
+  printf_stderr("  Promotion rate: %5.1f%%\n", 100 * fractionPromoted);
 
   promotionStats->printReport(cx, nogc);
 }
@@ -1645,21 +1660,21 @@ bool PromotionStats::shouldPrintReport() const {
 void PromotionStats::printReport(JSContext* cx,
                                  const JS::AutoRequireNoGC& nogc) {
   if (objectCount) {
-    fprintf(stderr, "  Objects promoted: %zu\n", objectCount);
+    printf_stderr("  Objects promoted: %zu\n", objectCount);
     printObjectCounts(cx, nogc);
   }
 
   if (stringCount) {
-    fprintf(stderr, "  Strings promoted: %zu\n", stringCount);
+    printf_stderr("  Strings promoted: %zu\n", stringCount);
     printStringCounts();
   }
 
   if (bigIntCount) {
-    fprintf(stderr, "  BigInts promoted: %zu\n", bigIntCount);
+    printf_stderr("  BigInts promoted: %zu\n", bigIntCount);
   }
 
   if (getterSetterCount) {
-    fprintf(stderr, "  GetterSetters promoted: %zu\n", getterSetterCount);
+    printf_stderr("  GetterSetters promoted: %zu\n", getterSetterCount);
   }
 }
 
@@ -1761,7 +1776,7 @@ void PromotionStats::printCounts(CountsVector& counts, size_t total) {
 
 void PromotionStats::printLine(const char* name, size_t count, size_t total) {
   double percent = 100.0 * double(count) / double(total);
-  fprintf(stderr, "    %5.1f%%: %s\n", percent, name);
+  printf_stderr("    %5.1f%%: %s\n", percent, name);
 }
 
 #endif

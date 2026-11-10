@@ -420,12 +420,7 @@
   gen_boilerplate: false
 
 - name: NewBoundFunction
-  arguments:
-    templateObj: JSObject*
-  result_type: Object
-  alias_set: none
-  generate_lir: true
-  lir_temps: 1
+  gen_boilerplate: false
 
 - name: BoundFunctionNumArgs
   operands:
@@ -849,8 +844,8 @@
 - name: ToFloat16
   gen_boilerplate: false
 
-# Converts a uint32 to a double (coming from wasm).
-- name: WasmUnsignedToDouble
+# Converts a uint32 to a double.
+- name: UnsignedToDouble
   operands:
     def: Int32
   type_policy: none
@@ -860,8 +855,10 @@
   congruent_to: if_operands_equal
   alias_set: none
   clone: true
+  can_recover: true
 
-- name: WasmUnsignedToFloat32
+# Converts a uint32 to a float32.
+- name: UnsignedToFloat32
   gen_boilerplate: false
 
 - name: WrapInt64ToInt32
@@ -3630,15 +3627,6 @@
   alias_set: none
   generate_lir: true
 
-- name: IsGenClosing
-  operands:
-    value: Value
-  result_type: Boolean
-  movable: true
-  congruent_to: if_operands_equal
-  alias_set: none
-  generate_lir: true
-
 - name: IsSuspendedGenerator
   operands:
     object: Object
@@ -3769,14 +3757,6 @@
   movable: false
   congruent_to: if_operands_and_arguments_equal
   alias_set: none
-  generate_lir: true
-
-# Assert this frame's ResumeFrameArgs resume kind is GeneratorResumeKind::Next.
-# Only used in DEBUG builds.
-- name: AssertResumeKindIsNext
-  guard: true
-  alias_set: none
-  lir_temps: 1
   generate_lir: true
 
 # Clear the frame's FrameDescriptor::IsResumingGenerator bit.
@@ -3989,15 +3969,15 @@
   alias_set: none
   generate_lir: true
 
-# Load the JSValueTag on all platforms except ARM64 and RISCV64.
+# Load the JSValueTag on all platforms except ARM64, RISCV64, and LOONG64.
 #
 # See the comments in MacroAssembler-arm64.h for the |cmpTag(Register, ImmTag)|
 # method for why ARM64 doesn't use the raw JSValueTag, but instead a modified
 # tag value. That modified tag value can't be directly compared against
 # JSValueTag constants.
 #
-# RISCV64 uses a similar scheme, see comments in MacroAssembler-riscv64.h for
-# the |splitSignExtTag(...)| method.
+# RISCV64 and LOONG64 use a similar scheme, see comments in
+# MacroAssembler-riscv64.h for the |splitSignExtTag(...)| method.
 - name: LoadValueTag
   operands:
     value: Value
@@ -4700,6 +4680,31 @@
   generate_lir: true
   lir_temps: 1
 
+- name: UnpackTime
+  operands:
+    packedVal: Value
+  arguments:
+    shiftImm: uint32_t
+    maskImm: uint32_t
+  result_type: Int32
+  movable: true
+  congruent_to: if_operands_and_arguments_equal
+  alias_set: none
+  # Only used on 32-bit systems
+  lir_temps: 1
+  generate_lir: true
+
+- name: EpochMilliseconds
+  operands:
+    seconds: Double
+    nanoseconds: Int32
+  result_type: Double
+  movable: true
+  congruent_to: if_operands_equal
+  alias_set: none
+  lir_temps: 1
+  generate_lir: true
+
 - name: PostIntPtrConversion
   gen_boilerplate: false
 
@@ -4982,6 +4987,25 @@
 
 - name: WasmReplaceLaneSimd128
   gen_boilerplate: false
+
+# (v128, v128) -> v128 replace_lane of lhs with a lane extracted from rhs.
+# simdOp is the replace_lane operation, which gives the lane size, and
+# srcLaneIndex is in units of that lane size.
+- name: WasmMoveLaneSimd128
+  operands:
+    lhs: Simd128
+    rhs: Simd128
+  arguments:
+    laneIndex: uint32_t
+    srcLaneIndex: uint32_t
+    simdOp: wasm::SimdOp
+  type_policy: none
+  result_type: Simd128
+  movable: true
+  congruent_to: if_operands_and_arguments_equal
+  alias_set: none
+  clone: true
+  generate_lir: true
 
 - name: WasmUnarySimd128
   operands:

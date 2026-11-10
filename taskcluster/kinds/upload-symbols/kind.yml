@@ -12,6 +12,7 @@ transforms:
 
 kind-dependencies:
     - build
+    - fetch
     - toolchain
 
 not-for-build-platforms:
@@ -22,9 +23,6 @@ not-for-build-platforms:
     - win32-geckodriver/opt
     - win64-geckodriver/opt
     - win64-aarch64-geckodriver/opt
-
-task-defaults:
-    run-on-repo-type: [hg]
 
 tasks:
     upload-symbols:
@@ -40,14 +38,16 @@ tasks:
                 # {level} gets replaced in the upload_symbols transform
                 SYMBOL_SECRET: "project/releng/gecko/build/level-{level}/gecko-symbol-upload"
                 MAKECAB: /builds/worker/fetches/makecab/makecab
+                UPLOAD_SYMBOLS: /builds/worker/fetches/upload-symbols-cli/upload-symbols
                 MACH_BUILD_PYTHON_NATIVE_PACKAGE_SOURCE: system
         run:
-            clone-with: hg
             using: mach
             mach: {artifact-reference: "python toolkit/crashreporter/tools/upload_symbols.py <build/public/cidata/target.crashreporter-symbols-full.tar.zst>"}
             sparse-profile: upload-symbols
         scopes:
             - secrets:get:project/releng/gecko/build/level-{level}/gecko-symbol-upload
         fetches:
+            fetch:
+                - upload-symbols-linux64
             toolchain:
                 - linux64-makecab

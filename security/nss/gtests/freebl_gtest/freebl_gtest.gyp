@@ -30,17 +30,21 @@
       'target_name': 'freebl_gtest',
       'type': 'executable',
       'sources': [
+        'aes_ctr_unittest.cc',
         'blake2b_unittest.cc',
+        'chacha20poly1305_unittest.cc',
         'shake_unittest.cc',
         'cmac_unittests.cc',
         'ecl_unittest.cc',
         'ghash_unittest.cc',
         'kyber_unittest.cc',
+        'mldsa_unittest.cc',
         'mpi_unittest.cc',
         'prng_kat_unittest.cc',
         'rsa_unittest.cc',
         'ed25519_unittest.cc',
-        '<(DEPTH)/gtests/common/gtests.cc'
+        '<(DEPTH)/gtests/common/gtests.cc',
+        '<(DEPTH)/gtests/common/json_reader.cc'
       ],
       'dependencies': [
         'freebl_gtest_deps',
@@ -60,6 +64,9 @@
       '<(DEPTH)/lib/freebl/ecl',
       '<(DEPTH)/lib/freebl/mpi',
       '<(DEPTH)/lib/freebl/',
+      '<(DEPTH)/lib/freebl/verified',
+      '<(DEPTH)/lib/freebl/verified/karamel/include',
+      '<(DEPTH)/lib/freebl/verified/karamel/krmllib/dist/minimal',
       '<(DEPTH)/lib/ssl/',
       '<(DEPTH)/lib/util/',
       '<(DEPTH)/lib/certdb/',
@@ -82,6 +89,12 @@
           'MP_ASSEMBLY_MULTIPLY',
           'MP_ASSEMBLY_SQUARE',
           'MP_ASSEMBLY_DIV_2DX1D',
+        ],
+      }],
+      # Matches where freebl.gyp builds Hacl_Chacha20Poly1305_128.
+      [ 'target_arch=="x64" or target_arch=="arm64" or target_arch=="aarch64"', {
+        'defines': [
+          'HACL_CAN_COMPILE_VEC128',
         ],
       }],
       [ 'OS=="win"', {

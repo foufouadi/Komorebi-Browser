@@ -27,6 +27,7 @@
 #include "api/scoped_refptr.h"
 #include "api/test/create_frame_generator.h"
 #include "api/test/frame_generator_interface.h"
+#include "api/test/mock_video_decoder.h"
 #include "api/test/mock_video_encoder.h"
 #include "api/units/data_rate.h"
 #include "api/units/timestamp.h"
@@ -81,9 +82,7 @@ using ::testing::A;
 using ::testing::AllOf;
 using ::testing::An;
 using ::testing::AnyNumber;
-using ::testing::ByRef;
 using ::testing::Combine;
-using ::testing::DoAll;
 using ::testing::Each;
 using ::testing::ElementsAre;
 using ::testing::ElementsAreArray;
@@ -94,8 +93,6 @@ using ::testing::Mock;
 using ::testing::NiceMock;
 using ::testing::Return;
 using ::testing::SafeMatcherCast;
-using ::testing::SaveArgPointee;
-using ::testing::SetArgPointee;
 using ::testing::SizeIs;
 using ::testing::TypedEq;
 using ::testing::UnorderedElementsAreArray;
@@ -2356,6 +2353,45 @@ TEST_F(TestVp9ImplProfile2, EncodeDecode) {
             31);
 }
 
+// A 16x16 mid-gray VP9 key frame with 12-bit samples (profile 2) and the
+// BT.2020 color space, encoded by libvpx.
+constexpr uint8_t kVp9KeyFrameWith12BitDepth[] = {
+    0x92, 0x49, 0x83, 0x42, 0xd0, 0x00, 0x78, 0x00, 0x7b, 0x03, 0x1c,
+    0x12, 0x0e, 0x0c, 0x29, 0x00, 0x00, 0x10, 0x40, 0x00, 0x37, 0x80};
+
+TEST(Vp9ImplTest, DecodeReturnsNoOutputForUnsupportedBitDepth) {
+  // Decoding 12-bit samples requires libvpx to be built with high bit depth
+  // support, which VP9 profile 2 support also depends on.
+  bool profile_2_is_supported = false;
+  for (const auto& format : SupportedVP9DecoderCodecs()) {
+    if (ParseSdpForVP9Profile(format.parameters) == VP9Profile::kProfile2) {
+      profile_2_is_supported = true;
+    }
+  }
+  if (!profile_2_is_supported) {
+    GTEST_SKIP() << "libvpx is built without high bit depth support.";
+  }
+  std::optional<Vp9UncompressedHeader> header =
+      ParseUncompressedVp9Header(kVp9KeyFrameWith12BitDepth);
+  ASSERT_TRUE(header);
+  ASSERT_EQ(header->bit_detph, Vp9BitDept::k12Bit);
+  ASSERT_EQ(header->color_space, Vp9ColorSpace::CS_BT_2020);
+
+  MockDecodedImageCallback callback;
+  EXPECT_CALL(callback, Decoded(_, _, _)).Times(0);
+  std::unique_ptr<VideoDecoder> decoder = VP9Decoder::Create();
+  decoder->RegisterDecodeCompleteCallback(&callback);
+  ASSERT_TRUE(decoder->Configure(VideoDecoder::Settings()));
+
+  EncodedImage encoded_image;
+  encoded_image.SetEncodedData(EncodedImageBuffer::Create(
+      kVp9KeyFrameWith12BitDepth, sizeof(kVp9KeyFrameWith12BitDepth)));
+  encoded_image.set_frame_type(VideoFrameType::kVideoFrameKey);
+  // There are no frame buffer types that can represent 12-bit content.
+  EXPECT_EQ(decoder->Decode(encoded_image, /*render_time_ms=*/0),
+            WEBRTC_VIDEO_CODEC_NO_OUTPUT);
+}
+
 TEST_F(TestVp9Impl, EncodeWithDynamicRate) {
   // Configured dynamic rate field trial and re-create the encoder.
   field_trials_.Set("WebRTC-VideoRateControl", "vp9_dynamic_rate:true");
@@ -2519,10 +2555,10 @@ TEST_F(TestVp9Impl, ScalesInputToActiveResolution) {
         return VPX_CODEC_OK;
       }));
   ON_CALL(*vpx, codec_enc_config_default)
-      .WillByDefault(DoAll(WithArg<1>([](vpx_codec_enc_cfg_t* cfg) {
-                             memset(cfg, 0, sizeof(vpx_codec_enc_cfg_t));
-                           }),
-                           Return(VPX_CODEC_OK)));
+      .WillByDefault(WithArg<1>([](vpx_codec_enc_cfg_t* cfg) {
+        memset(cfg, 0, sizeof(vpx_codec_enc_cfg_t));
+        return VPX_CODEC_OK;
+      }));
 
   vpx_codec_priv_output_cx_pkt_cb_pair_t callback_pointer = {};
   EXPECT_CALL(*vpx, codec_control(_, VP9E_REGISTER_CX_CALLBACK, A<void*>()))
@@ -2839,10 +2875,10 @@ TEST(Vp9SpeedSettingsTrialsTest, NoSvcUsesGlobalSpeedFromTl0InLayerConfig) {
 
   ON_CALL(*vpx, img_wrap).WillByDefault(GetWrapImageFunction(&img));
   ON_CALL(*vpx, codec_enc_config_default)
-      .WillByDefault(DoAll(WithArg<1>([](vpx_codec_enc_cfg_t* cfg) {
-                             memset(cfg, 0, sizeof(vpx_codec_enc_cfg_t));
-                           }),
-                           Return(VPX_CODEC_OK)));
+      .WillByDefault(WithArg<1>([](vpx_codec_enc_cfg_t* cfg) {
+        memset(cfg, 0, sizeof(vpx_codec_enc_cfg_t));
+        return VPX_CODEC_OK;
+      }));
   EXPECT_CALL(*vpx, codec_control(_, _, An<int>())).Times(AnyNumber());
 
   EXPECT_CALL(*vpx, codec_control(_, VP9E_SET_SVC_PARAMETERS,
@@ -2884,10 +2920,10 @@ TEST(Vp9SpeedSettingsTrialsTest,
 
   ON_CALL(*vpx, img_wrap).WillByDefault(GetWrapImageFunction(&img));
   ON_CALL(*vpx, codec_enc_config_default)
-      .WillByDefault(DoAll(WithArg<1>([](vpx_codec_enc_cfg_t* cfg) {
-                             memset(cfg, 0, sizeof(vpx_codec_enc_cfg_t));
-                           }),
-                           Return(VPX_CODEC_OK)));
+      .WillByDefault(WithArg<1>([](vpx_codec_enc_cfg_t* cfg) {
+        memset(cfg, 0, sizeof(vpx_codec_enc_cfg_t));
+        return VPX_CODEC_OK;
+      }));
   EXPECT_CALL(*vpx, codec_control(_, _, An<int>())).Times(AnyNumber());
 
   // Speed settings not populated when 'use_per_layer_speed' flag is absent.
@@ -2963,10 +2999,10 @@ TEST(Vp9SpeedSettingsTrialsTest, DefaultPerLayerFlagsWithSvc) {
         return VPX_CODEC_OK;
       }));
   ON_CALL(*vpx, codec_enc_config_default)
-      .WillByDefault(DoAll(WithArg<1>([](vpx_codec_enc_cfg_t* cfg) {
-                             memset(cfg, 0, sizeof(vpx_codec_enc_cfg_t));
-                           }),
-                           Return(VPX_CODEC_OK)));
+      .WillByDefault(WithArg<1>([](vpx_codec_enc_cfg_t* cfg) {
+        memset(cfg, 0, sizeof(vpx_codec_enc_cfg_t));
+        return VPX_CODEC_OK;
+      }));
   EXPECT_CALL(
       *vpx, codec_control(_, VP9E_SET_SVC_PARAMETERS,
                           SafeMatcherCast<vpx_svc_extra_cfg_t*>(
@@ -3018,12 +3054,16 @@ TEST(Vp9SpeedSettingsTrialsTest, DefaultPerLayerFlagsWithSvc) {
   vpx_svc_ref_frame_config_t stored_refs = {};
   ON_CALL(*vpx, codec_control(_, VP9E_SET_SVC_REF_FRAME_CONFIG,
                               A<vpx_svc_ref_frame_config_t*>()))
-      .WillByDefault(
-          DoAll(SaveArgPointee<2>(&stored_refs), Return(VPX_CODEC_OK)));
+      .WillByDefault(WithArg<2>([&stored_refs](void* ptr) {
+        stored_refs = *reinterpret_cast<vpx_svc_ref_frame_config_t*>(ptr);
+        return VPX_CODEC_OK;
+      }));
   ON_CALL(*vpx, codec_control(_, VP9E_GET_SVC_REF_FRAME_CONFIG,
                               A<vpx_svc_ref_frame_config_t*>()))
-      .WillByDefault(
-          DoAll(SetArgPointee<2>(ByRef(stored_refs)), Return(VPX_CODEC_OK)));
+      .WillByDefault(WithArg<2>([&stored_refs](void* ptr) {
+        *reinterpret_cast<vpx_svc_ref_frame_config_t*>(ptr) = stored_refs;
+        return VPX_CODEC_OK;
+      }));
 
   // First frame is keyframe.
   encoded_data.data.frame.flags = VPX_FRAME_IS_KEY;

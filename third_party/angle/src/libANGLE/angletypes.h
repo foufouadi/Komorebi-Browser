@@ -9,10 +9,6 @@
 #ifndef LIBANGLE_ANGLETYPES_H_
 #define LIBANGLE_ANGLETYPES_H_
 
-#ifdef UNSAFE_BUFFERS_BUILD
-#    pragma allow_unsafe_buffers
-#endif
-
 #include <anglebase/sha1.h>
 #include "common/Color.h"
 #include "common/FixedVector.h"
@@ -21,6 +17,7 @@
 #include "common/bitset_utils.h"
 #include "common/hash_utils.h"
 #include "common/span.h"
+#include "common/unsafe_buffers.h"
 #include "libANGLE/Constants.h"
 #include "libANGLE/Error.h"
 #include "libANGLE/RefCountObject.h"
@@ -46,12 +43,24 @@ struct Extents
     Extents(const Extents &other)            = default;
     Extents &operator=(const Extents &other) = default;
 
-    bool empty() const { return (width * height * depth) == 0; }
+    constexpr bool empty() const { return width == 0 || height == 0 || depth == 0; }
 
     T width;
     T height;
     T depth;
 };
+
+static_assert(Extents(0, 0, 0).empty());
+static_assert(Extents(0, 1, 1).empty());
+static_assert(Extents(1, 0, 1).empty());
+static_assert(Extents(1, 1, 0).empty());
+static_assert(!Extents(1, 1, 1).empty());
+static_assert(!Extents<int32_t>(1, 65536, 65536).empty());
+static_assert(!Extents<int32_t>(65536, 1, 65536).empty());
+static_assert(!Extents<int32_t>(65536, 65536, 1).empty());
+static_assert(!Extents<uint32_t>(1, 65536, 65536).empty());
+static_assert(!Extents<uint32_t>(65536, 1, 65536).empty());
+static_assert(!Extents<uint32_t>(65536, 65536, 1).empty());
 
 template <typename T>
 struct Offset
@@ -140,14 +149,18 @@ struct RectangleImpl
         : x(x_in), y(y_in), width(width_in), height(height_in)
     {}
     explicit constexpr RectangleImpl(const T corners[4])
-        : x(corners[0]),
-          y(corners[1]),
-          width(corners[2] - corners[0]),
-          height(corners[3] - corners[1])
+        : x(ANGLE_UNSAFE_TODO(corners[0])),
+          y(ANGLE_UNSAFE_TODO(corners[1])),
+          width(ANGLE_UNSAFE_TODO(corners[2] - corners[0])),
+          height(ANGLE_UNSAFE_TODO(corners[3] - corners[1]))
     {}
     template <typename S>
     explicit constexpr RectangleImpl(const RectangleImpl<S> rect)
         : x(rect.x), y(rect.y), width(rect.width), height(rect.height)
+    {}
+    template <typename O, typename E>
+    RectangleImpl(const O &offset, const E &size)
+        : x(offset.x), y(offset.y), width(size.width), height(size.height)
     {}
 
     T x0() const { return x; }
@@ -197,6 +210,14 @@ bool operator==(const RectangleImpl<T> &a, const RectangleImpl<T> &b);
 template <typename T>
 bool operator!=(const RectangleImpl<T> &a, const RectangleImpl<T> &b);
 
+template <typename T>
+std::ostream &operator<<(std::ostream &os, const RectangleImpl<T> &rect)
+{
+    os << "x = " << rect.x << ", y = " << rect.y << ", width = " << rect.width
+       << ", height = " << rect.height;
+    return os;
+}
+
 using Rectangle = RectangleImpl<int>;
 
 // Calculate the intersection of two rectangles.  Returns false if the intersection is empty.
@@ -227,6 +248,10 @@ using Extents = angle::Extents<int>;
 using Offset  = angle::Offset<int>;
 constexpr Offset kOffsetZero(0, 0, 0);
 
+// Compute the size of a mip level based on a the size of a base level and a relative offset.
+// Handles array texture types using the same depth for all levels.
+Extents ComputeMipSize(const Extents &baseSize, int relativeLevel, gl::TextureType textureType);
+
 struct Box
 {
     Box() : x(0), y(0), z(0), width(0), height(0), depth(0) {}
@@ -253,6 +278,9 @@ struct Box
     bool contains(const Box &other) const;
     size_t volume() const;
     void extend(const Box &other);
+
+    Offset getOffset() const { return Offset(x, y, z); }
+    Extents getExtents() const { return Extents(width, height, depth); }
 
     int x;
     int y;
@@ -304,29 +332,6 @@ struct RasterizerState final
 
 bool operator==(const RasterizerState &a, const RasterizerState &b);
 bool operator!=(const RasterizerState &a, const RasterizerState &b);
-
-struct BlendState final
-{
-    // This will zero-initialize the struct, including padding.
-    BlendState();
-    BlendState(const BlendState &other);
-
-    bool blend;
-    GLenum sourceBlendRGB;
-    GLenum destBlendRGB;
-    GLenum sourceBlendAlpha;
-    GLenum destBlendAlpha;
-    GLenum blendEquationRGB;
-    GLenum blendEquationAlpha;
-
-    bool colorMaskRed;
-    bool colorMaskGreen;
-    bool colorMaskBlue;
-    bool colorMaskAlpha;
-};
-
-bool operator==(const BlendState &a, const BlendState &b);
-bool operator!=(const BlendState &a, const BlendState &b);
 
 struct DepthStencilState final
 {
@@ -435,6 +440,10 @@ class SamplerState final
 
     bool setMaxLod(GLfloat maxLod);
 
+    GLfloat getLodBias() const { return mSampleLodBias; }
+
+    bool setLodBias(GLfloat lodBias);
+
     GLenum getCompareMode() const { return mCompareMode; }
 
     bool setCompareMode(GLenum compareMode);
@@ -471,6 +480,7 @@ class SamplerState final
 
     GLfloat mMinLod;
     GLfloat mMaxLod;
+    GLfloat mSampleLodBias;
 
     GLenum mCompareMode;
     GLenum mCompareFunc;
@@ -536,15 +546,26 @@ struct PixelStoreStateBase
     GLint skipPixels  = 0;
     GLint imageHeight = 0;
     GLint skipImages  = 0;
+
+    bool operator==(const PixelStoreStateBase &other) const = default;
+    bool operator!=(const PixelStoreStateBase &other) const = default;
 };
 
 struct PixelUnpackState : PixelStoreStateBase
-{};
+{
+    bool operator==(const PixelUnpackState &other) const = default;
+    bool operator!=(const PixelUnpackState &other) const = default;
+};
+std::ostream &operator<<(std::ostream &os, const PixelUnpackState &unpackState);
 
 struct PixelPackState : PixelStoreStateBase
 {
     bool reverseRowOrder = false;
+
+    bool operator==(const PixelPackState &other) const = default;
+    bool operator!=(const PixelPackState &other) const = default;
 };
+std::ostream &operator<<(std::ostream &os, const PixelPackState &packState);
 
 struct SupportedSampleSet
 {
@@ -812,7 +833,11 @@ class BlendStateExt final
     EquationStorage::Type expandEquationColorIndexed(const size_t index) const;
     EquationStorage::Type expandEquationAlphaIndexed(const size_t index) const;
     void setEquations(const GLenum modeColor, const GLenum modeAlpha);
+    void setEquations(const BlendEquationType modeColor, const BlendEquationType modeAlpha);
     void setEquationsIndexed(const size_t index, const GLenum modeColor, const GLenum modeAlpha);
+    void setEquationsIndexed(const size_t index,
+                             const BlendEquationType modeColor,
+                             const BlendEquationType modeAlpha);
     void setEquationsIndexed(const size_t index,
                              const size_t otherIndex,
                              const BlendStateExt &other);
@@ -845,11 +870,15 @@ class BlendStateExt final
                     const GLenum dstColor,
                     const GLenum srcAlpha,
                     const GLenum dstAlpha);
+    void setFactors(const BlendFactorType srcColorFactor,
+                    const BlendFactorType dstColorFactor,
+                    const BlendFactorType srcAlphaFactor,
+                    const BlendFactorType dstAlphaFactor);
     void setFactorsIndexed(const size_t index,
-                           const gl::BlendFactorType srcColorFactor,
-                           const gl::BlendFactorType dstColorFactor,
-                           const gl::BlendFactorType srcAlphaFactor,
-                           const gl::BlendFactorType dstAlphaFactor);
+                           const BlendFactorType srcColorFactor,
+                           const BlendFactorType dstColorFactor,
+                           const BlendFactorType srcAlphaFactor,
+                           const BlendFactorType dstAlphaFactor);
     void setFactorsIndexed(const size_t index,
                            const GLenum srcColor,
                            const GLenum dstColor,
@@ -911,14 +940,24 @@ class BlendStateExt final
 
     constexpr uint8_t getDrawBufferCount() const { return mDrawBufferCount; }
 
-    constexpr void setSrcColorBits(const FactorStorage::Type srcColor) { mSrcColor = srcColor; }
-    constexpr void setSrcAlphaBits(const FactorStorage::Type srcAlpha) { mSrcAlpha = srcAlpha; }
-    constexpr void setDstColorBits(const FactorStorage::Type dstColor) { mDstColor = dstColor; }
-    constexpr void setDstAlphaBits(const FactorStorage::Type dstAlpha) { mDstAlpha = dstAlpha; }
+    constexpr void setFactorBits(const FactorStorage::Type srcColor,
+                                 const FactorStorage::Type dstColor,
+                                 const FactorStorage::Type srcAlpha,
+                                 const FactorStorage::Type dstAlpha,
+                                 const DrawBufferMask usesExtendedBlendFactorMask)
+    {
+        mSrcColor                    = srcColor;
+        mDstColor                    = dstColor;
+        mSrcAlpha                    = srcAlpha;
+        mDstAlpha                    = dstAlpha;
+        mUsesExtendedBlendFactorMask = usesExtendedBlendFactorMask;
+    }
 
-    constexpr void setEquationColorBits(const EquationStorage::Type equationColor)
+    constexpr void setEquationColorBits(const EquationStorage::Type equationColor,
+                                        const DrawBufferMask usesAdvancedEquationmask)
     {
         mEquationColor = equationColor;
+        mUsesAdvancedBlendEquationMask = usesAdvancedEquationmask;
     }
     constexpr void setEquationAlphaBits(const EquationStorage::Type equationAlpha)
     {
@@ -931,6 +970,9 @@ class BlendStateExt final
     }
 
     constexpr void setEnabledMask(const DrawBufferMask enabledMask) { mEnabledMask = enabledMask; }
+
+    bool operator==(const BlendStateExt &other) const;
+    bool operator!=(const BlendStateExt &other) const;
 
     ///////// Data Members /////////
   private:
@@ -1265,6 +1307,8 @@ class LevelIndexWrapper
 
 // A GL texture level index.
 using LevelIndex = LevelIndexWrapper<GLint>;
+// A GL texture layer index.
+using LayerIndex = LevelIndexWrapper<uint32_t>;
 
 enum class MultisamplingMode
 {
@@ -1375,7 +1419,7 @@ class BlobCacheValue  // To be replaced with std::span when C++20 is required
     const uint8_t &operator[](size_t pos) const
     {
         ASSERT(pos < mSize);
-        return mPtr[pos];
+        return ANGLE_UNSAFE_TODO(mPtr[pos]);
     }
 
   private:
@@ -1388,6 +1432,15 @@ bool DecompressBlob(const uint8_t *compressedData,
                     const size_t compressedSize,
                     size_t maxUncompressedDataSize,
                     MemoryBuffer *uncompressedData);
+#if defined(ANGLE_HAS_ZSTD)
+bool CompressBlobZstd(const size_t cacheSize,
+                      const uint8_t *cacheData,
+                      MemoryBuffer *compressedData);
+bool DecompressBlobZstd(const uint8_t *compressedData,
+                        const size_t compressedSize,
+                        size_t maxUncompressedDataSize,
+                        MemoryBuffer *uncompressedData);
+#endif  // defined(ANGLE_HAS_ZSTD)
 uint32_t GenerateCRC32(const uint8_t *data, size_t size);
 uint32_t InitCRC32();
 uint32_t UpdateCRC32(uint32_t prevCrc32, const uint8_t *data, size_t size);
@@ -1635,6 +1688,14 @@ enum class BufferStorage : bool
     Mutable,
     // The buffer storage is immutable
     Immutable,
+};
+
+enum class ZeroFillRequired : bool
+{
+    // The buffer should remain unchanged after initialization if there is no specified data.
+    No,
+    // The buffer should be zero-filled after initialization if there is no specified data.
+    Yes,
 };
 
 }  // namespace gl

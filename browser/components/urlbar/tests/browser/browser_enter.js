@@ -182,18 +182,6 @@ add_task(async function searchOnEnterSoon() {
     "The input field in urlbar still has focus"
   );
 
-  // Check the caret position.
-  Assert.equal(
-    gURLBar.selectionStart,
-    gURLBar.value.length,
-    "The selectionStart indicates at ending of the value"
-  );
-  Assert.equal(
-    gURLBar.selectionEnd,
-    gURLBar.value.length,
-    "The selectionEnd indicates at ending of the value"
-  );
-
   // Keyup both key as soon as pagehide event happens.
   EventUtils.synthesizeKey("x", { type: "keyup" });
   EventUtils.synthesizeKey("KEY_Enter", { type: "keyup" });
@@ -207,18 +195,6 @@ add_task(async function searchOnEnterSoon() {
   // Check whether keyup event is not captured before unload event happens.
   const result = await onResult;
   is(result, "unload", "Keyup event is not captured.");
-
-  // Check the caret position again.
-  Assert.equal(
-    gURLBar.selectionStart,
-    0,
-    "The selectionStart indicates at beginning of the value"
-  );
-  Assert.equal(
-    gURLBar.selectionEnd,
-    0,
-    "The selectionEnd indicates at beginning of the value"
-  );
 
   // Cleanup.
   await onLoad;
@@ -261,6 +237,42 @@ add_task(async function searchByMultipleEnters() {
     ownerDocument.activeElement,
     gBrowser.selectedBrowser,
     "The focus is moved to the browser"
+  );
+
+  // Cleanup.
+  BrowserTestUtils.removeTab(tab);
+});
+
+// Make sure the caret stays at the end after enter keydown, but
+// goes to the beginning when the browser is focused (Bug 1676054).
+add_task(async function goToBeginningAfterKeyup() {
+  info("Search on Enter, keeping the key down");
+  const tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    START_VALUE
+  );
+  const url = "https://example.com/some/url";
+
+  EventUtils.synthesizeMouseAtCenter(gURLBar.inputField, {});
+  gURLBar.value = url;
+  EventUtils.synthesizeKey("KEY_Enter", { type: "keydown" });
+
+  // Check the caret position a bit after keydown.
+  // It should still be at the end
+  await TestUtils.waitForTick();
+  Assert.equal(
+    gURLBar.selectionStart,
+    gURLBar.value.length,
+    "The selectionStart indicates at ending of the value"
+  );
+
+  // Check the caret position again after keyup when the browser is focused.
+  // It should now be at the beginning for spoof protection and usability.
+  // The parent focuses the browser and replies, so the caret moves a hop after.
+  EventUtils.synthesizeKey("KEY_Enter", { type: "keyup" });
+  await TestUtils.waitForCondition(
+    () => !gURLBar.selectionStart && !gURLBar.selectionEnd,
+    "The caret moved to the beginning of the value"
   );
 
   // Cleanup.
@@ -328,4 +340,45 @@ add_task(async function keyupEnterWhilePressingMeta() {
 
   // Cleanup.
   BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function closeTabRightAfterEnter() {
+  info("Closing the tab right after Enter doesn't load in another tab");
+  const tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    START_VALUE
+  );
+  const sandbox = sinon.createSandbox();
+  const loadURLSpy = sandbox.spy(gURLBar.parentController, "loadURL");
+
+  gURLBar.focus();
+  gURLBar.value = "https://example.com/some/url";
+  EventUtils.synthesizeKey("KEY_Enter");
+  Assert.ok(loadURLSpy.calledOnce, "Enter started the load");
+
+  BrowserTestUtils.removeTab(tab);
+  await loadURLSpy.firstCall.returnValue;
+  Assert.equal(
+    gBrowser.selectedBrowser.userTypedValue,
+    null,
+    "The load didn't go to the newly selected tab"
+  );
+
+  sandbox.restore();
+});
+
+add_task(async function repeatedEnterLoadsOnce() {
+  info("Holding Enter loads only once");
+  let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, START_VALUE);
+  let loadURLSpy = sinon.spy(gURLBar.parentController, "loadURL");
+
+  gURLBar.focus();
+  gURLBar.value = "https://example.com/some/url";
+  let onLoad = BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);
+  EventUtils.synthesizeKey("KEY_Enter", { repeat: 3 });
+  await onLoad;
+  Assert.ok(loadURLSpy.calledOnce, "Repeated keydowns started one load");
+
+  BrowserTestUtils.removeTab(tab);
+  loadURLSpy.restore();
 });

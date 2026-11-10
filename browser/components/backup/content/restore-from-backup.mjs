@@ -7,7 +7,7 @@ import { MozLitElement } from "chrome://global/content/lit-utils.mjs";
 import { ERRORS } from "chrome://browser/content/backup/backup-constants.mjs";
 import { getErrorL10nId } from "chrome://browser/content/backup/backup-errors.mjs";
 
-// eslint-disable-next-line import/no-unassigned-import
+// eslint-disable-next-line import-x/no-unassigned-import
 import "chrome://global/content/elements/moz-message-bar.mjs";
 
 /**
@@ -342,7 +342,6 @@ export default class RestoreFromBackup extends MozLitElement {
         <fieldset id="backup-filepicker-controls">
           <label
             id="backup-filepicker-label"
-            class="heading-medium"
             for="backup-filepicker-input"
             data-l10n-id="restore-from-backup-filepicker-label"
           ></label>
@@ -535,11 +534,11 @@ export default class RestoreFromBackup extends MozLitElement {
 
   headerTemplate() {
     return html`
-      <h1
+      <h2
         id="restore-from-backup-header"
-        class="heading-large"
+        class="heading-medium"
         data-l10n-id="restore-from-backup-header"
-      ></h1>
+      ></h2>
     `;
   }
 

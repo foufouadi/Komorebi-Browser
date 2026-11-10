@@ -35,12 +35,15 @@
     <color name="fx_mobile_on_information_container">@color/novaVioletDesaturated90</color>
     <color name="fx_mobile_success">@color/novaGreen50</color>
     <color name="fx_mobile_on_success">@color/novaWhite</color>
+    <color name="fx_mobile_success_container">@color/novaGreen10</color>
+    <color name="fx_mobile_on_success_container">@color/novaVioletDesaturated90</color>
     <color name="fx_mobile_warning">@color/novaYellow50</color>
     <color name="fx_mobile_on_warning">@color/novaWhite</color>
     <color name="fx_mobile_warning_container">@color/novaYellow10</color>
     <color name="fx_mobile_on_warning_container">@color/novaVioletDesaturated90</color>
     <color name="fx_mobile_outline">@color/novaGray45</color>
     <color name="fx_mobile_outline_variant">@color/novaGray15</color>
+    <color name="fx_mobile_sheet_outline">@color/novaGray5</color>
     <color name="fx_mobile_surface_bright">@color/novaWhite</color>
     <color name="fx_mobile_surface_dim">@color/novaGray15</color>
     <color name="fx_mobile_surface_container">@color/novaGray5</color>
@@ -48,6 +51,7 @@
     <color name="fx_mobile_surface_container_highest">@color/novaGray15</color>
     <color name="fx_mobile_surface_container_low">@color/novaGray0</color>
     <color name="fx_mobile_surface_container_lowest">@color/novaWhite</color>
+    <color name="fx_mobile_surface_container_selected">@color/novaGray25</color>
     <color name="fx_mobile_autofill_text">@color/novaVioletDesaturated30</color>
     <color name="fx_mobile_selected_text">@color/novaGray35</color>
     <color name="fx_mobile_icon_private">@color/novaViolet50</color>
@@ -60,8 +64,6 @@
     <!-- Layers -->
     <!-- Card background, Menu background, Dialog, Banner -->
     <color name="fx_mobile_layer_color_2">@color/novaWhite</color>
-    <!-- Search -->
-    <color name="fx_mobile_layer_color_3">@color/photonLightGrey20</color>
     <!-- Warning background -->
     <color name="fx_mobile_layer_color_warning">@color/photonYellow20</color>
     <!-- Error background -->
@@ -122,12 +124,15 @@
     <color name="fx_mobile_private_on_information_container">@color/novaVioletDesaturated0</color>
     <color name="fx_mobile_private_success">@color/novaGreen30</color>
     <color name="fx_mobile_private_on_success">@color/novaGray80</color>
+    <color name="fx_mobile_private_success_container">@color/novaGreen70</color>
+    <color name="fx_mobile_private_on_success_container">@color/novaVioletDesaturated0</color>
     <color name="fx_mobile_private_warning">@color/novaYellow30</color>
     <color name="fx_mobile_private_on_warning">@color/novaGray80</color>
     <color name="fx_mobile_private_warning_container">@color/novaYellow70</color>
     <color name="fx_mobile_private_on_warning_container">@color/novaVioletDesaturated0</color>
     <color name="fx_mobile_private_outline">@color/novaGray45</color>
     <color name="fx_mobile_private_outline_variant">#FF332752</color>
+    <color name="fx_mobile_private_sheet_outline">@color/novaVioletDesaturated90</color>
     <color name="fx_mobile_private_surface_bright">@color/novaVioletDesaturated80</color>
     <color name="fx_mobile_private_surface_dim">#FF0D0321</color>
     <color name="fx_mobile_private_surface_container">@color/novaVioletDesaturated90</color>
@@ -135,6 +140,7 @@
     <color name="fx_mobile_private_surface_container_highest">@color/novaVioletDesaturated80</color>
     <color name="fx_mobile_private_surface_container_low">#FF11042B</color>
     <color name="fx_mobile_private_surface_container_lowest">#FF0D0321</color>
+    <color name="fx_mobile_private_surface_container_selected">@color/novaVioletDesaturated60</color>
     <color name="fx_mobile_private_autofill_text">@color/novaVioletDesaturated30A55</color>
     <color name="fx_mobile_private_selected_text">@color/novaGray45A81</color>
     <color name="fx_mobile_private_icon_private">@color/novaViolet50</color>
@@ -151,14 +157,45 @@
     <color name="fx_mobile_private_action_color_primary_disabled">@color/photonInk20A20</color>
 
     <!-- Text -->
-    <!-- Text Inverted/On Color -->
-    <color name="fx_mobile_private_text_color_oncolor_primary">@color/photonLightGrey05</color>
     <!-- Action Primary disabled text -->
     <color name="fx_mobile_private_text_color_action_primary_disabled">@color/photonLightGrey05A40</color>
 
-    <!-- Icon -->
-    <!-- Icon inverted (on color) -->
-    <color name="fx_mobile_private_icon_color_oncolor">@color/photonLightGrey05</color>
+    <!-- OLED theme color variables -->
+    <!-- The OLED theme inherits from the dark theme and only the tokens that differ are listed. -->
+
+    <!-- Material3 color variables -->
+    <color name="fx_mobile_oled_primary_container" tools:ignore="UnusedResources">@color/novaViolet70</color>
+    <color name="fx_mobile_oled_on_primary_container" tools:ignore="UnusedResources">@color/novaGray20</color>
+    <color name="fx_mobile_oled_secondary_container" tools:ignore="UnusedResources">@color/novaVioletDesaturated80</color>
+    <color name="fx_mobile_oled_on_secondary_container" tools:ignore="UnusedResources">@color/novaGray20</color>
+    <color name="fx_mobile_oled_tertiary_container" tools:ignore="UnusedResources">@color/novaGray90</color>
+    <color name="fx_mobile_oled_on_tertiary_container" tools:ignore="UnusedResources">@color/novaGray20</color>
+    <color name="fx_mobile_oled_background" tools:ignore="UnusedResources">@color/novaBlack</color>
+    <color name="fx_mobile_oled_on_background" tools:ignore="UnusedResources">@color/novaGray20</color>
+    <color name="fx_mobile_oled_surface" tools:ignore="UnusedResources">@color/novaBlack</color>
+    <color name="fx_mobile_oled_on_surface" tools:ignore="UnusedResources">@color/novaGray20</color>
+    <color name="fx_mobile_oled_on_surface_variant" tools:ignore="UnusedResources">@color/novaGray40</color>
+    <color name="fx_mobile_oled_error_container" tools:ignore="UnusedResources">@color/novaRed80</color>
+    <color name="fx_mobile_oled_on_error_container" tools:ignore="UnusedResources">@color/novaGray20</color>
+    <color name="fx_mobile_oled_information_container" tools:ignore="UnusedResources">@color/novaBlue80</color>
+    <color name="fx_mobile_oled_on_information_container" tools:ignore="UnusedResources">@color/novaGray20</color>
+    <color name="fx_mobile_oled_success_container" tools:ignore="UnusedResources">@color/novaGreen80</color>
+    <color name="fx_mobile_oled_on_success_container" tools:ignore="UnusedResources">@color/novaGray20</color>
+    <color name="fx_mobile_oled_warning_container" tools:ignore="UnusedResources">@color/novaYellow80</color>
+    <color name="fx_mobile_oled_on_warning_container" tools:ignore="UnusedResources">@color/novaGray20</color>
+    <color name="fx_mobile_oled_outline" tools:ignore="UnusedResources">@color/novaGray50</color>
+    <color name="fx_mobile_oled_outline_variant" tools:ignore="UnusedResources">@color/novaGray65</color>
+    <color name="fx_mobile_oled_sheet_outline" tools:ignore="UnusedResources">@color/novaGray65</color>
+    <color name="fx_mobile_oled_surface_bright" tools:ignore="UnusedResources">@color/novaGray80</color>
+    <color name="fx_mobile_oled_surface_dim" tools:ignore="UnusedResources">@color/novaBlack</color>
+    <color name="fx_mobile_oled_surface_container" tools:ignore="UnusedResources">@color/novaBlack</color>
+    <color name="fx_mobile_oled_surface_container_high" tools:ignore="UnusedResources">@color/novaGray90</color>
+    <color name="fx_mobile_oled_surface_container_highest" tools:ignore="UnusedResources">@color/novaGray80</color>
+    <color name="fx_mobile_oled_surface_container_low" tools:ignore="UnusedResources">@color/novaGray90</color>
+    <color name="fx_mobile_oled_surface_container_lowest" tools:ignore="UnusedResources">@color/novaBlack</color>
+    <color name="fx_mobile_oled_surface_container_selected" tools:ignore="UnusedResources">@color/novaGray65</color>
+    <color name="fx_mobile_oled_autofill_text" tools:ignore="UnusedResources">@color/novaVioletDesaturated60</color>
+    <color name="fx_mobile_oled_selected_text" tools:ignore="UnusedResources">@color/novaGray60</color>
 
     <!-- Light theme color palette -->
     <color name="primary_text_light_theme">@color/photonInk80</color>
@@ -167,18 +204,10 @@
 
     <!-- Private theme color palette -->
     <color name="accent_private_theme">@color/photonViolet50</color>
-    <color name="accent_high_contrast_private_theme">#AA71FF</color>
-    <color name="neutral_private_theme">@color/photonGrey20</color>
-    <color name="neutral_faded_private_theme">#1FFBFBFE</color>
     <color name="prompt_login_edit_text_cursor_color_private_theme">@color/photonViolet50</color>
 
     <!-- Normal theme colors for light mode -->
     <color name="accent_normal_theme">@color/photonInk20</color>
-    <color name="accent_high_contrast_normal_theme">@color/photonInk20</color>
-    <color name="neutral_normal_theme">@color/photonGrey30</color>
-    <color name="neutral_faded_normal_theme">@color/photonGrey20</color>
-    <color name="fill_link_from_clipboard_normal_theme">@color/photonInk20</color>
-    <color name="add_on_private_browsing_exterior_circle_background_normal_theme">@color/photonViolet70</color>
     <color name="prompt_login_edit_text_cursor_color_normal_theme">@color/photonInk20</color>
     <color name="search_suggestion_indicator_icon_color_normal_theme">@color/photonGreen70</color>
     <color name="search_suggestion_indicator_icon_bookmark_color_normal_theme">@color/photonBlue50</color>
@@ -200,14 +229,9 @@
     <!-- Colors for Edge to Edge background  -->
     <color name="homepage_edge_to_edge_gradient_start">#FFF7EAE8</color>
     <color name="homepage_edge_to_edge_gradient_end">#FFF8F3F4</color>
-    <color name="homepage_tab_edge_to_edge_tab_strip_item_background_active">#FCF4F2</color>
-    <color name="homepage_tab_edge_to_edge_tab_strip_item_background_inactive">#EFDCD6</color>
     <color name="homepage_tab_edge_to_edge_toolbar_background">#00000000</color>
     <color name="homepage_tab_edge_to_edge_toolbar_outline">#00000000</color>
     <color name="homepage_tab_edge_to_edge_private_toolbar_outline">#564A75</color>
-
-    <!-- Bookmark buttons -->
-    <color name="bookmark_favicon_background">#DFDFE3</color>
 
     <!-- Toggle Colors -->
     <color name="toggle_off_knob_dark_theme">@color/photonLightGrey05</color>
@@ -267,4 +291,9 @@
     <!-- Private mode circle fill colors for mozac_ic_private_mode_circle_fill_72 -->
     <color name="mozac_ic_private_mode_circle_fill_72_background_color" tools:ignore="UnusedResources">@color/fx_mobile_icon_private</color>
     <color name="mozac_ic_private_mode_circle_fill_72_icon_color" tools:ignore="UnusedResources">@color/private_mode_mask_gradient</color>
+
+    <!-- Glance search bar widgets -->
+    <color name="search_bar_widget_background">@color/novaWhite</color>
+    <color name="search_bar_widget_button_background">@color/novaGray10</color>
+    <color name="search_bar_widget_divider">@color/novaGray15</color>
 </resources>

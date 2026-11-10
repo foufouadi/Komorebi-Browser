@@ -141,3 +141,119 @@ TEST(AomImageTest, AomImgAllocHugeWidth) {
     aom_img_free(image);
   }
 }
+
+TEST(AomImageTest, AomImgFlipNoAlpha) {
+  aom_image_t *img = aom_img_alloc(nullptr, AOM_IMG_FMT_I420, 64, 64, 16);
+  ASSERT_NE(img, nullptr);
+  aom_img_flip(img);
+  aom_img_free(img);
+}
+
+TEST(AomImageTest, AomImgFlipOneRow) {
+  aom_image_t *img = aom_img_alloc(nullptr, AOM_IMG_FMT_I420, 16, 1, 1);
+  ASSERT_NE(img, nullptr);
+  unsigned char *const y_plane = img->planes[AOM_PLANE_Y];
+  unsigned char *const u_plane = img->planes[AOM_PLANE_U];
+  unsigned char *const v_plane = img->planes[AOM_PLANE_V];
+  const int y_stride = img->stride[AOM_PLANE_Y];
+  const int u_stride = img->stride[AOM_PLANE_U];
+  const int v_stride = img->stride[AOM_PLANE_V];
+
+  aom_img_flip(img);
+
+  EXPECT_EQ(img->planes[AOM_PLANE_Y], y_plane);
+  EXPECT_EQ(img->planes[AOM_PLANE_U], u_plane);
+  EXPECT_EQ(img->planes[AOM_PLANE_V], v_plane);
+  EXPECT_EQ(img->stride[AOM_PLANE_Y], -y_stride);
+  EXPECT_EQ(img->stride[AOM_PLANE_U], -u_stride);
+  EXPECT_EQ(img->stride[AOM_PLANE_V], -v_stride);
+
+  aom_img_flip(img);
+
+  EXPECT_EQ(img->planes[AOM_PLANE_Y], y_plane);
+  EXPECT_EQ(img->planes[AOM_PLANE_U], u_plane);
+  EXPECT_EQ(img->planes[AOM_PLANE_V], v_plane);
+  EXPECT_EQ(img->stride[AOM_PLANE_Y], y_stride);
+  EXPECT_EQ(img->stride[AOM_PLANE_U], u_stride);
+  EXPECT_EQ(img->stride[AOM_PLANE_V], v_stride);
+
+  aom_img_free(img);
+}
+
+TEST(AomImageTest, AomImgSetRectRejectsFlipped) {
+  static constexpr aom_img_fmt_t kFormats[] = {
+    AOM_IMG_FMT_YV12,   AOM_IMG_FMT_I420,   AOM_IMG_FMT_NV12,
+    AOM_IMG_FMT_I42016, AOM_IMG_FMT_YV1216,
+  };
+
+  for (const aom_img_fmt_t format : kFormats) {
+    SCOPED_TRACE(format);
+    aom_image_t *img = aom_img_alloc(nullptr, format, 4, 4, 1);
+    ASSERT_NE(img, nullptr);
+
+    // An ordinary crop is valid before flipping.
+    ASSERT_EQ(aom_img_set_rect(img, 2, 2, 2, 2, 0), 0);
+    EXPECT_EQ(img->d_w, 2u);
+    EXPECT_EQ(img->d_h, 2u);
+    ASSERT_EQ(aom_img_set_rect(img, 0, 0, 4, 4, 0), 0);
+
+    aom_img_flip(img);
+    const unsigned char *const flipped_planes[] = { img->planes[AOM_PLANE_Y],
+                                                    img->planes[AOM_PLANE_U],
+                                                    img->planes[AOM_PLANE_V] };
+    EXPECT_EQ(aom_img_set_rect(img, 2, 2, 2, 2, 0), -1);
+    EXPECT_EQ(img->d_w, 4u);
+    EXPECT_EQ(img->d_h, 4u);
+    for (int plane = AOM_PLANE_Y; plane <= AOM_PLANE_V; ++plane) {
+      EXPECT_EQ(img->planes[plane], flipped_planes[plane]);
+    }
+
+    // Flipping back permits changing the viewport again.
+    aom_img_flip(img);
+    EXPECT_GT(img->stride[AOM_PLANE_Y], 0);
+    const unsigned char *const unflipped_y_plane = img->planes[AOM_PLANE_Y];
+    EXPECT_EQ(aom_img_set_rect(img, 2, 2, 2, 2, 0), 0);
+    EXPECT_NE(img->planes[AOM_PLANE_Y], unflipped_y_plane);
+    EXPECT_EQ(img->d_w, 2u);
+    EXPECT_EQ(img->d_h, 2u);
+    aom_img_free(img);
+  }
+}
+
+TEST(AomImageTest, AomImgFlipOddHeight) {
+  static constexpr aom_img_fmt_t kFormats[] = {
+    AOM_IMG_FMT_YV12,   AOM_IMG_FMT_I420,   AOM_IMG_FMT_NV12,
+    AOM_IMG_FMT_I42016, AOM_IMG_FMT_YV1216,
+  };
+
+  for (const aom_img_fmt_t format : kFormats) {
+    aom_image_t *img = aom_img_alloc(nullptr, format, 16, 3, 1);
+    ASSERT_NE(img, nullptr);
+    unsigned char *const y_plane = img->planes[AOM_PLANE_Y];
+    unsigned char *const u_plane = img->planes[AOM_PLANE_U];
+    unsigned char *const v_plane = img->planes[AOM_PLANE_V];
+    const int y_stride = img->stride[AOM_PLANE_Y];
+    const int u_stride = img->stride[AOM_PLANE_U];
+    const int v_stride = img->stride[AOM_PLANE_V];
+
+    aom_img_flip(img);
+
+    EXPECT_EQ(img->planes[AOM_PLANE_Y], y_plane + 2 * y_stride);
+    EXPECT_EQ(img->planes[AOM_PLANE_U], u_plane + u_stride);
+    EXPECT_EQ(img->planes[AOM_PLANE_V], v_plane + v_stride);
+    EXPECT_EQ(img->stride[AOM_PLANE_Y], -y_stride);
+    EXPECT_EQ(img->stride[AOM_PLANE_U], -u_stride);
+    EXPECT_EQ(img->stride[AOM_PLANE_V], -v_stride);
+
+    aom_img_flip(img);
+
+    EXPECT_EQ(img->planes[AOM_PLANE_Y], y_plane);
+    EXPECT_EQ(img->planes[AOM_PLANE_U], u_plane);
+    EXPECT_EQ(img->planes[AOM_PLANE_V], v_plane);
+    EXPECT_EQ(img->stride[AOM_PLANE_Y], y_stride);
+    EXPECT_EQ(img->stride[AOM_PLANE_U], u_stride);
+    EXPECT_EQ(img->stride[AOM_PLANE_V], v_stride);
+
+    aom_img_free(img);
+  }
+}

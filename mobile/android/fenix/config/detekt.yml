@@ -98,6 +98,7 @@ complexity:
   active: true
   CognitiveComplexMethod:
     active: true
+    excludes: ['**/test/**', '**/androidTest/**']
     threshold: 15
   ComplexCondition:
     active: true
@@ -110,6 +111,7 @@ complexity:
     ignoreOverloaded: false
   CyclomaticComplexMethod:
     active: true
+    excludes: ['**/test/**', '**/androidTest/**']
     threshold: 18 # (Default: 15) Increased in https://github.com/mozilla-mobile/android-components/pull/10328
     ignoreSingleWhenExpression: true # Enabled in https://github.com/mozilla-mobile/android-components/pull/3271
     ignoreSimpleWhenEntries: false
@@ -129,14 +131,18 @@ complexity:
     ignoredLabels: []
   LargeClass:
     active: true
+    excludes: ['**/test/**', '**/androidTest/**']
     threshold: 600
   LongMethod:
     active: true
+    excludes: ['**/test/**', '**/androidTest/**']
     threshold: 75 # (Default: 60) Increased in https://github.com/mozilla-mobile/android-components/issues/6350
   LongParameterList:
     active: true
     functionThreshold: 8 # (Default: 6) Increased in https://bugzilla.mozilla.org/show_bug.cgi?id=1872996
-    constructorThreshold: 7
+    # threshold of 10 means up to 9 parameters are allowed
+    # this behavior changed in detekt > 1.23.8 see - https://github.com/detekt/detekt/issues/3679
+    constructorThreshold: 10 # Increased in https://bugzilla.mozilla.org/show_bug.cgi?id=2074093
     ignoreDefaultParameters: true # Enabled in https://github.com/mozilla-mobile/android-components/issues/10835
     ignoreDataClasses: true
     ignoreAnnotatedParameter: []
@@ -149,6 +155,7 @@ complexity:
     ignoreArgumentsMatchingNames: false
   NestedBlockDepth:
     active: true
+    excludes: ['**/test/**', '**/androidTest/**']
     threshold: 4
   NestedScopeFunctions:
     active: false
@@ -196,7 +203,7 @@ coroutines:
   SleepInsteadOfDelay:
     active: false # (Default: true)
   SuspendFunSwallowedCancellation:
-    active: false
+    active: true # (Default: false)
   SuspendFunWithCoroutineScopeReceiver:
     active: false
   SuspendFunWithFlowReturnType:
@@ -221,6 +228,7 @@ empty-blocks:
     active: true
   EmptyFunctionBlock:
     active: true
+    excludes: ['**/test/**', '**/androidTest/**']
     ignoreOverridden: false
   EmptyIfBlock:
     active: true
@@ -232,10 +240,12 @@ empty-blocks:
     active: true
   EmptyTryBlock:
     active: true
+    excludes: ['**/test/**', '**/androidTest/**']
   EmptyWhenBlock:
     active: true
   EmptyWhileBlock:
     active: true
+    excludes: ['**/test/**', '**/androidTest/**']
 
 exceptions:
   active: true
@@ -302,6 +312,7 @@ exceptions:
     allowedExceptionNameRegex: '_|(ignore|expected).*'
   TooGenericExceptionThrown:
     active: true
+    excludes: ['**/test/**', '**/androidTest/**']
     exceptionNames:
       - 'Error'
       - 'Exception'
@@ -639,6 +650,7 @@ style:
     maxChainedCalls: 5
   MaxLineLength:
     active: true
+    excludes: ['**/test/**', '**/androidTest/**']
     maxLineLength: 120
     excludePackageStatements: true
     excludeImportStatements: true
@@ -796,21 +808,23 @@ mozilla-rules:
   active: true
   ClassAcronymCasing:
     active: true
+    excludes: ['**/test/**', '**/androidTest/**']
 
 mozilla-detekt-rules:
   active: true
   MozillaBannedPropertyAccess:
     active: true
+    excludes: ['**/test/**', '**/androidTest/**']
     # BuildConfig.Debug: This property tests whether the application was built
     # with the debuggable flag or not. Use a check for different build variants,
     # instead.
     bannedProperties: 'BuildConfig.DEBUG'
   MozillaStrictModeSuppression:
     active: true
+    excludes: ['**/test/**', '**/androidTest/**']
   MozillaRunBlockingCheck:
     active: true
-  MozillaUseLazyMonitored:
-    active: true
+    excludes: ['**/test/**', '**/androidTest/**']
 
 acorn-detekt-rules:
   active: true

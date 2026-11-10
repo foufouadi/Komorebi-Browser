@@ -5,7 +5,9 @@
 
 package org.mozilla.fenix.helpers
 
+import android.app.Activity.RESULT_OK
 import android.app.ActivityManager
+import android.app.Instrumentation
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -27,6 +29,8 @@ import androidx.test.espresso.Espresso
 import androidx.test.espresso.IdlingRegistry
 import androidx.test.espresso.IdlingResource
 import androidx.test.espresso.intent.Intents.intended
+import androidx.test.espresso.intent.Intents.intending
+import androidx.test.espresso.intent.matcher.IntentMatchers.hasAction
 import androidx.test.espresso.intent.matcher.IntentMatchers.toPackage
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.ActivityTestRule
@@ -42,6 +46,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import mozilla.appservices.places.BookmarkRoot
+import mozilla.components.browser.state.search.RegionState
 import mozilla.components.browser.storage.sync.PlacesBookmarksStorage
 import mozilla.components.browser.storage.sync.PlacesHistoryStorage
 import mozilla.components.feature.top.sites.TopSite
@@ -49,6 +54,7 @@ import mozilla.components.support.locale.LocaleManager.resetToSystemDefault
 import mozilla.components.support.locale.LocaleManager.setNewLocale
 import org.junit.Assert
 import org.junit.Assert.assertEquals
+import org.mozilla.fenix.Config
 import org.mozilla.fenix.HomeActivity
 import org.mozilla.fenix.components.PermissionStorage
 import org.mozilla.fenix.customtabs.ExternalAppBrowserActivity
@@ -145,6 +151,51 @@ object AppAndSystemHelper {
                 }
             }
         }
+    }
+
+    /**
+     * The [File] handle for [fileName] in the device's public Downloads directory. Different implementation needed for
+     * newer API levels, as Environment.getExternalStorageDirectory() is deprecated starting with API 29.
+     */
+    private fun downloadedFileOnStorage(fileName: String): File =
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.Q) {
+            val storageManager = appContext.getSystemService(Context.STORAGE_SERVICE) as StorageManager
+            File(storageManager.storageVolumes[0].directory!!.path + "/Download/" + fileName)
+        } else {
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), fileName)
+        }
+
+    /**
+     * Assert [fileName] no longer exists in the device's public Downloads directory. Deletion from device can lag the
+     * UI confirmation, so this polls briefly before failing.
+     */
+    fun assertDownloadedFileIsDeletedFromStorage(fileName: String) {
+        val file = downloadedFileOnStorage(fileName)
+        var attempts = 0
+        while (file.exists() && attempts < 5) {
+            Log.i(
+                TAG,
+                "assertDownloadedFileIsDeletedFromStorage: $fileName still present, waiting (try ${attempts + 1})",
+            )
+            Thread.sleep(1000)
+            attempts++
+        }
+        Assert.assertFalse(
+            "$TAG assertDownloadedFileIsDeletedFromStorage: $fileName still exists on device storage",
+            file.exists(),
+        )
+    }
+
+    /**
+     * Assert [fileName] still exists in the device's public Downloads directory. Used by the "only remove from download
+     * history" flow, which removes the list entry but must leave the file on disk.
+     */
+    fun assertDownloadedFileExistsOnStorage(fileName: String) {
+        val file = downloadedFileOnStorage(fileName)
+        Assert.assertTrue(
+            "$TAG assertDownloadedFileExistsOnStorage: $fileName does not exist on device storage",
+            file.exists(),
+        )
     }
 
     /**
@@ -591,6 +642,18 @@ object AppAndSystemHelper {
         Log.i(TAG, "denyPermissionAndDontAskAgainButton: Clicked the negative camera system permission button.")
     }
 
+    /**
+     * Stubs the system file picker so that [selectedFile] is returned as the picker result, allowing file-picker flows
+     * to run without user interaction. Espresso Intents must be initialized for the stubbing to take effect.
+     *
+     * @param selectedFile The file the stubbed picker should return.
+     * @param action The intent action to intercept. Defaults to [Intent.ACTION_GET_CONTENT].
+     */
+    fun stubFilePickerSelection(selectedFile: File, action: String = Intent.ACTION_GET_CONTENT) {
+        val resultData = Intent().apply { data = selectedFile.toUri() }
+        intending(hasAction(action)).respondWith(Instrumentation.ActivityResult(RESULT_OK, resultData))
+    }
+
     fun verifySystemPhotoAndVideoPickerExists() {
         assertUIObjectExists(itemWithResId("com.google.android.providers.media.module:id/bottom_sheet"))
     }
@@ -668,11 +731,7 @@ object AppAndSystemHelper {
             testBlock()
             Log.i(TAG, "Test block finished.")
         } catch (e: Exception) {
-            Log.i(
-                TAG,
-                "runWithSystemLocaleChanged: The test block has thrown an exception.${e.message}",
-            )
-            e.printStackTrace()
+            Log.e(TAG, "runWithSystemLocaleChanged: The test block has thrown an exception.", e)
             throw e
         } finally {
             ThreadUtils.runOnUiThread { AppCompatDelegate.setApplicationLocales(LocaleListCompat.getEmptyLocaleList()) }
@@ -698,8 +757,7 @@ object AppAndSystemHelper {
             testBlock()
             Log.i(TAG, "runWithAppLocaleChanged: Test block finished.")
         } catch (e: Exception) {
-            Log.i(TAG, "runWithAppLocaleChanged: The test block has thrown an exception.${e.message}")
-            e.printStackTrace()
+            Log.e(TAG, "runWithAppLocaleChanged: The test block has thrown an exception.", e)
             throw e
         } finally {
             Log.i(
@@ -836,8 +894,7 @@ object AppAndSystemHelper {
             testBlock()
             Log.i(TAG, "runWithLauncherIntent: Finished running the test block.")
         } catch (e: Exception) {
-            Log.i(TAG, "runWithLauncherIntent: Exception caught while running the test block: ${e.message}")
-            e.printStackTrace()
+            Log.e(TAG, "runWithLauncherIntent: Exception caught while running the test block.", e)
         }
     }
 
@@ -945,5 +1002,20 @@ object AppAndSystemHelper {
         composeTestRule.waitForIdle()
         Log.i(TAG, "setScreenOrientation: Waited for the compose test rule to be idle.")
         Log.i(TAG, "setScreenOrientation: Orientation set to $orientation.")
+    }
+
+    /**
+     * Whether the default pinned shortcuts are expected on the homepage.
+     *
+     * Mirrors the condition in `DefaultPinnedSitesBinding`.
+     */
+    fun isDefaultPinnedShortcutsOnHomepage(): Boolean {
+        val region = appContext.components.core.store.state.search.region
+        val expected = region != null && (!Config.channel.isReleased || region != RegionState.Default)
+        Log.i(
+            TAG,
+            "isDefaultPinnedShortcutsOnHomepage: region=$region channel=${Config.channel} expected=$expected",
+        )
+        return expected
     }
 }

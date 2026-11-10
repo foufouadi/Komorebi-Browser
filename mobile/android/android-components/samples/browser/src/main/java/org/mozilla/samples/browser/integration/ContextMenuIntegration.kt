@@ -26,7 +26,7 @@ import mozilla.components.support.base.feature.LifecycleAwareFeature
 import mozilla.components.ui.widgets.DefaultSnackbarDelegate
 import org.mozilla.samples.browser.databinding.FragmentBrowserBinding
 
-@Suppress("LongParameterList", "UndocumentedPublicClass")
+@Suppress("UndocumentedPublicClass")
 class ContextMenuIntegration(
     context: Context,
     fragmentManager: FragmentManager,
@@ -68,7 +68,7 @@ class ContextMenuIntegration(
                     appLinksUseCases =
                         AppLinksUseCases(
                             context = context,
-                            launchInApp = { true },
+                            launchInApp = { _ -> true },
                         ),
                 )
             ContextMenuCandidate.defaultCandidates(

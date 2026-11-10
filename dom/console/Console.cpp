@@ -46,7 +46,6 @@
 #include "nsIException.h"  // for nsIStackFrame
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsILoadContext.h"
-#include "nsISensitiveInfoHiddenURI.h"
 #include "nsISupportsPrimitives.h"
 #include "nsIWebNavigation.h"
 #include "nsIXPConnect.h"
@@ -111,7 +110,7 @@ class ConsoleCallData final {
                   Console* aConsole)
       : mMutex("ConsoleCallData"),
         mConsoleID(aConsole->mConsoleID),
-        mPrefix(aConsole->mPrefix),
+        mConsolePrefix(aConsole->mConsolePrefix),
         mMethodName(aName),
         mMicroSecondTimeStamp(JS_Now()),
         mStartTimerValue(0),
@@ -160,7 +159,7 @@ class ConsoleCallData final {
   Mutex mMutex;
 
   const nsString mConsoleID MOZ_GUARDED_BY(mMutex);
-  const nsString mPrefix MOZ_GUARDED_BY(mMutex);
+  const nsString mConsolePrefix MOZ_GUARDED_BY(mMutex);
 
   const Console::MethodName mMethodName MOZ_GUARDED_BY(mMutex);
   int64_t mMicroSecondTimeStamp MOZ_GUARDED_BY(mMutex);
@@ -891,13 +890,12 @@ already_AddRefed<Console> Console::CreateForWorklet(JSContext* aCx,
 
 Console::Console(JSContext* aCx, nsIGlobalObject* aGlobal,
                  uint64_t aOuterWindowID, uint64_t aInnerWindowID,
-                 const nsAString& aPrefix)
+                 const nsAString& aLogModule, const nsAString& aPrefix)
     : mGlobal(aGlobal),
       mOuterID(aOuterWindowID),
       mInnerID(aInnerWindowID),
       mDumpToStdout(false),
       mLogModule(nullptr),
-      mPrefix(aPrefix),
       mChromeInstance(false),
       mCurrentLogLevel(WebIDLLogLevelToInteger(ConsoleLogLevel::All)),
       mStatus(eUnknown),
@@ -909,12 +907,24 @@ Console::Console(JSContext* aCx, nsIGlobalObject* aGlobal,
     mDumpToStdout = StaticPrefs::devtools_console_stdout_content();
   }
 
-  // By default, the console uses "console" MOZ_LOG module name,
-  // but ConsoleInstance may pass a custom prefix which we will use a module
-  // name.
-  mLogModule = mPrefix.IsEmpty()
+  // An empty logModule defaults to "console".
+  // DEPRECATED: An empty logModule can default to the prefix, for backward
+  // compatibility with the callers written before logModule existed, such as
+  // in comm-central.
+  const nsAString& logModule = aLogModule.IsEmpty() ? aPrefix : aLogModule;
+  mLogModule = logModule.IsEmpty()
                    ? LogModule::Get("console")
-                   : LogModule::Get(NS_ConvertUTF16toUTF8(mPrefix).get());
+                   : LogModule::Get(NS_ConvertUTF16toUTF8(logModule).get());
+
+  // A prefix that also names the module isn't printed again. This happens when
+  // only a prefix was given, or when a caller supporting older versions, which
+  // ignore logModule, gave logModule and prefix the same value.
+  mMozLogPrefix = aPrefix.Equals(logModule) ? EmptyString() : aPrefix;
+  // MOZ_LOG already prints the module name, but stdout and console events
+  // don't, so their prefix starts with it.
+  mConsolePrefix = logModule.IsEmpty() || mMozLogPrefix.IsEmpty()
+                       ? logModule + mMozLogPrefix
+                       : logModule + u": "_ns + mMozLogPrefix;
 
   mozilla::HoldJSObjects(this);
 }
@@ -1304,7 +1314,7 @@ void Console::Method(const GlobalObject& aGlobal, MethodName aMethodName,
 struct ConsoleTimingMarker : public BaseMarkerType<ConsoleTimingMarker> {
   static constexpr const char* Name = "ConsoleTiming";
   static constexpr const char* Description =
-      "Console timing timeStampers created using the Console API methods "
+      "Console timing markers created using the Console API methods "
       "console.time(), console.timeEnd(), and console.timeStamp().";
 
   using MS = MarkerSchema;
@@ -1314,7 +1324,7 @@ struct ConsoleTimingMarker : public BaseMarkerType<ConsoleTimingMarker> {
 
   static constexpr MS::Location Locations[] = {MS::Location::MarkerChart,
                                                MS::Location::MarkerTable};
-  static constexpr const char* AllLabels = "{timeStamper.data.label}";
+  static constexpr const char* AllLabels = "{marker.data.label}";
 
   static constexpr MS::ETWMarkerGroup Group = MS::ETWMarkerGroup::UserMarkers;
 };
@@ -1719,21 +1729,10 @@ bool Console::PopulateConsoleNotificationInTheTargetScope(
 
   event.mConsoleID = aData->mConsoleID;
   event.mLevel = aData->mMethodString;
-  event.mFilename = frame.mFilename;
-  event.mPrefix = aData->mPrefix;
+  // TODO: Pass the log module and the prefix separately.
+  event.mPrefix = aData->mConsolePrefix;
 
-  nsCOMPtr<nsIURI> filenameURI;
-  nsAutoCString pass;
-  if (NS_IsMainThread() &&
-      NS_SUCCEEDED(NS_NewURI(getter_AddRefs(filenameURI), frame.mFilename)) &&
-      NS_SUCCEEDED(filenameURI->GetPassword(pass)) && !pass.IsEmpty()) {
-    nsCOMPtr<nsISensitiveInfoHiddenURI> safeURI =
-        do_QueryInterface(filenameURI);
-    nsAutoCString spec;
-    if (safeURI && NS_SUCCEEDED(safeURI->GetSensitiveInfoHiddenSpec(spec))) {
-      event.mFilename = spec;
-    }
-  }
+  NS_GetSanitizedSpecFromSpec(frame.mFilename, event.mFilename);
 
   event.mSourceId = frame.mSourceId;
   event.mLineNumber = frame.mLineNumber;
@@ -2906,20 +2905,9 @@ nsString Console::GetDumpMessage(JSContext* aCx, MethodName aMethodName,
                                  nsIStackFrame* aStack,
                                  DOMHighResTimeStamp aMonotonicTimer,
                                  bool aIsForMozLog) {
-  nsString message;
-  // MOZ_LOG already logs either console or the prefix
-  if (!aIsForMozLog) {
-    message.AssignLiteral("console.");
-  } else {
-    message.AssignLiteral("");
-  }
-  message.Append(aMethodString);
-  message.AppendLiteral(": ");
-
-  if (!aIsForMozLog && !mPrefix.IsEmpty()) {
-    message.Append(mPrefix);
-    message.AppendLiteral(": ");
-  }
+  const nsString& prefix = aIsForMozLog ? mMozLogPrefix : mConsolePrefix;
+  nsString message = (aIsForMozLog ? u""_ns : u"console."_ns) + aMethodString +
+                     u": "_ns + prefix + (prefix.IsEmpty() ? u""_ns : u": "_ns);
 
   for (uint32_t i = 0; i < aData.Length(); ++i) {
     JS::Rooted<JS::Value> v(aCx, aData[i]);

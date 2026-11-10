@@ -232,7 +232,7 @@ this.management = class extends ExtensionAPIPersistent {
         async install({ url, hash }) {
           let listener = {
             onDownloadEnded(install) {
-              if (install.addon.appDisabled || install.addon.type !== "theme") {
+              if (install.addon.appDisabled) {
                 install.cancel();
                 return false;
               }
@@ -247,6 +247,7 @@ this.management = class extends ExtensionAPIPersistent {
             hash,
             telemetryInfo,
             triggeringPrincipal: extension.principal,
+            type: "theme",
           });
           install.addListener(listener);
           try {
@@ -317,6 +318,15 @@ this.management = class extends ExtensionAPIPersistent {
           }
           if (!checkAllowedAddon(addon)) {
             throw new ExtensionError("setEnabled not allowed for this addon");
+          }
+          if (
+            !enabled &&
+            Services.policies &&
+            !Services.policies.isAllowed(`disable-extension:${id}`)
+          ) {
+            throw new ExtensionError(
+              `Cannot disable add-on ${id}: disallowed by enterprise policy`
+            );
           }
           if (enabled) {
             await addon.enable();

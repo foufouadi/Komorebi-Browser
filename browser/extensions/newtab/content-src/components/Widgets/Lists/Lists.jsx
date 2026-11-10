@@ -9,14 +9,16 @@ import React, {
   useCallback,
   useMemo,
 } from "react";
-import { useSelector, batch } from "react-redux";
+import { useSelector } from "react-redux";
 import { actionCreators as ac, actionTypes as at } from "common/Actions.mjs";
 import { WIDGET_REGISTRY, resolveWidgetSize } from "common/WidgetsRegistry.mjs";
 import { WidgetCelebration } from "../WidgetCelebration";
 import { useWidgetCelebration } from "../useWidgetCelebration";
 import { SizeSubmenu } from "../SizeSubmenu";
+import { WidgetMenuButton } from "../WidgetMenuButton";
 import { WidgetMenuFooter } from "../WidgetMenuFooter";
 import { useWidgetTelemetry } from "../useWidgetTelemetry";
+import { focusOnceRendered } from "../../../lib/utils";
 
 const TASK_TYPE = {
   IN_PROGRESS: "tasks",
@@ -95,15 +97,23 @@ const renderListSwitcherOrTitle = ({
   onSelect,
   selected,
   defaultListLabelL10nId,
+  onCreateList,
+  isAtMaxListsLimit,
+  switcherButtonRef,
 }) => {
   const selectedLabel = lists[selected]?.label;
 
   if (currentListsCount > 1) {
     return (
       <div className="lists-switcher">
-        <span
-          className="lists-title"
-          id="lists-switcher-label"
+        <moz-button
+          className="lists-switcher-button"
+          ref={switcherButtonRef}
+          type="default"
+          size="small"
+          iconSrc="chrome://global/skin/icons/arrow-down-12.svg"
+          iconPosition="end"
+          menuId="lists-switcher-panel"
           {...(selectedLabel
             ? {}
             : {
@@ -111,22 +121,14 @@ const renderListSwitcherOrTitle = ({
               })}
         >
           {selectedLabel || null}
-        </span>
-        <moz-button
-          aria-haspopup="true"
-          aria-labelledby="lists-switcher-label"
-          className="lists-switcher-button"
-          iconSrc="chrome://global/skin/icons/arrow-down-12.svg"
-          menuId="lists-switcher-panel"
-          type="ghost"
-        />
+        </moz-button>
         <panel-list id="lists-switcher-panel">
           {Object.entries(lists).map(([key, list]) => (
             <panel-item
               key={key}
-              checked={key === selected}
-              onClick={() => onSelect(key)}
               type="checkbox"
+              checked={key === selected || undefined}
+              onClick={() => onSelect(key)}
               {...(list.label
                 ? {}
                 : {
@@ -136,6 +138,13 @@ const renderListSwitcherOrTitle = ({
               {list.label || null}
             </panel-item>
           ))}
+          <hr />
+          <panel-item
+            className="lists-switcher-create"
+            {...(isAtMaxListsLimit ? { disabled: true } : {})}
+            data-l10n-id="newtab-widget-lists-menu-create"
+            onClick={onCreateList}
+          ></panel-item>
         </panel-list>
       </div>
     );
@@ -143,7 +152,7 @@ const renderListSwitcherOrTitle = ({
 
   return (
     <span
-      className="lists-title"
+      className="newtab-widget-title lists-title"
       {...(selectedLabel
         ? {}
         : {
@@ -204,6 +213,8 @@ function Lists({
   const inputRef = useRef(null);
   const reorderListRef = useRef(null);
   const widgetRef = useRef(null);
+  const switcherButtonRef = useRef(null);
+  const focusSwitcherAfterEditRef = useRef(false);
   const {
     celebrationFrame,
     celebrationId,
@@ -334,6 +345,22 @@ function Lists({
     }
   }, [isAddingTask]);
 
+  // The name input replaces the switcher, so the switcher loses focus. Put
+  // focus back on it when editing ends, unless the user has moved focus
+  // somewhere else. After a save, wait until the new list is selected,
+  // because selecting it re-creates the switcher.
+  useEffect(() => {
+    const pending = focusSwitcherAfterEditRef.current;
+    if (isEditing || !pending || (pending !== true && pending !== selected)) {
+      return;
+    }
+    focusSwitcherAfterEditRef.current = false;
+    if (document.activeElement && document.activeElement !== document.body) {
+      return;
+    }
+    focusOnceRendered(switcherButtonRef.current);
+  }, [isEditing, selected]);
+
   useEffect(() => {
     setShowCompactCompleted(false);
   }, [selected]);
@@ -362,17 +389,15 @@ function Lists({
           tasks: [formattedTask, ...lists[selected].tasks],
         },
       };
-      batch(() => {
-        dispatch(
-          ac.AlsoToMain({
-            type: at.WIDGETS_LISTS_UPDATE,
-            data: { lists: updatedLists },
-          })
-        );
-        recordUserAction(USER_ACTION_TYPES.TASK_CREATE, {
-          source: "widget",
-          legacy: true,
-        });
+      dispatch(
+        ac.AlsoToMain({
+          type: at.WIDGETS_LISTS_UPDATE,
+          data: { lists: updatedLists },
+        })
+      );
+      recordUserAction(USER_ACTION_TYPES.TASK_CREATE, {
+        source: "widget",
+        legacy: true,
       });
       setNewTask("");
     }
@@ -432,21 +457,19 @@ function Lists({
       },
     };
 
-    batch(() => {
-      dispatch(
-        ac.AlsoToMain({
-          type: at.WIDGETS_LISTS_UPDATE,
-          data: { lists: updatedLists },
-        })
-      );
-      if (userAction) {
-        recordUserAction(userAction, {
-          source: "widget",
-          legacy: true,
-          alsoToMain: true,
-        });
-      }
-    });
+    dispatch(
+      ac.AlsoToMain({
+        type: at.WIDGETS_LISTS_UPDATE,
+        data: { lists: updatedLists },
+      })
+    );
+    if (userAction) {
+      recordUserAction(userAction, {
+        source: "widget",
+        legacy: true,
+        alsoToMain: true,
+      });
+    }
     handleListInteraction();
   }
 
@@ -461,17 +484,15 @@ function Lists({
         [type]: updatedTasks,
       },
     };
-    batch(() => {
-      dispatch(
-        ac.AlsoToMain({
-          type: at.WIDGETS_LISTS_UPDATE,
-          data: { lists: updatedLists },
-        })
-      );
-      recordUserAction(USER_ACTION_TYPES.TASK_DELETE, {
-        source: "widget",
-        legacy: true,
-      });
+    dispatch(
+      ac.AlsoToMain({
+        type: at.WIDGETS_LISTS_UPDATE,
+        data: { lists: updatedLists },
+      })
+    );
+    recordUserAction(USER_ACTION_TYPES.TASK_DELETE, {
+      source: "widget",
+      legacy: true,
     });
     handleListInteraction();
   }
@@ -506,6 +527,9 @@ function Lists({
       }
 
       const id = crypto.randomUUID();
+      if (focusSwitcherAfterEditRef.current) {
+        focusSwitcherAfterEditRef.current = id;
+      }
       const newLists = {
         ...lists,
         [id]: {
@@ -515,23 +539,21 @@ function Lists({
         },
       };
 
-      batch(() => {
-        dispatch(
-          ac.AlsoToMain({
-            type: at.WIDGETS_LISTS_UPDATE,
-            data: { lists: newLists },
-          })
-        );
-        dispatch(
-          ac.AlsoToMain({
-            type: at.WIDGETS_LISTS_CHANGE_SELECTED,
-            data: id,
-          })
-        );
-        recordUserAction(USER_ACTION_TYPES.LIST_CREATE, {
-          source: "widget",
-          legacy: true,
-        });
+      dispatch(
+        ac.AlsoToMain({
+          type: at.WIDGETS_LISTS_UPDATE,
+          data: { lists: newLists },
+        })
+      );
+      dispatch(
+        ac.AlsoToMain({
+          type: at.WIDGETS_LISTS_CHANGE_SELECTED,
+          data: id,
+        })
+      );
+      recordUserAction(USER_ACTION_TYPES.LIST_CREATE, {
+        source: "widget",
+        legacy: true,
       });
       handleListInteraction();
       return;
@@ -545,17 +567,15 @@ function Lists({
           label: trimmedLabel,
         },
       };
-      batch(() => {
-        dispatch(
-          ac.AlsoToMain({
-            type: at.WIDGETS_LISTS_UPDATE,
-            data: { lists: updatedLists },
-          })
-        );
-        recordUserAction(USER_ACTION_TYPES.LIST_EDIT, {
-          source: "widget",
-          legacy: true,
-        });
+      dispatch(
+        ac.AlsoToMain({
+          type: at.WIDGETS_LISTS_UPDATE,
+          data: { lists: updatedLists },
+        })
+      );
+      recordUserAction(USER_ACTION_TYPES.LIST_EDIT, {
+        source: "widget",
+        legacy: true,
       });
       setIsEditing(false);
       handleListInteraction();
@@ -566,6 +586,11 @@ function Lists({
     setIsCreatingNewList(true);
     setIsEditing(true);
     handleListInteraction();
+  }
+
+  function handleCreateNewListFromSwitcher() {
+    focusSwitcherAfterEditRef.current = true;
+    handleCreateNewList();
   }
 
   function handleCancelNewList() {
@@ -593,23 +618,21 @@ function Lists({
       }
       const listKeys = Object.keys(updatedLists);
       const key = listKeys[listKeys.length - 1];
-      batch(() => {
-        dispatch(
-          ac.AlsoToMain({
-            type: at.WIDGETS_LISTS_UPDATE,
-            data: { lists: updatedLists },
-          })
-        );
-        dispatch(
-          ac.AlsoToMain({
-            type: at.WIDGETS_LISTS_CHANGE_SELECTED,
-            data: key,
-          })
-        );
-        recordUserAction(USER_ACTION_TYPES.LIST_DELETE, {
-          source: "widget",
-          legacy: true,
-        });
+      dispatch(
+        ac.AlsoToMain({
+          type: at.WIDGETS_LISTS_UPDATE,
+          data: { lists: updatedLists },
+        })
+      );
+      dispatch(
+        ac.AlsoToMain({
+          type: at.WIDGETS_LISTS_CHANGE_SELECTED,
+          data: key,
+        })
+      );
+      recordUserAction(USER_ACTION_TYPES.LIST_DELETE, {
+        source: "widget",
+        legacy: true,
       });
     }
     handleListInteraction();
@@ -651,18 +674,16 @@ function Lists({
 
   const handleChangeSize = useCallback(
     size => {
-      batch(() => {
-        dispatch(
-          ac.OnlyToMain({
-            type: at.SET_PREF,
-            data: { name: PREF_WIDGETS_LISTS_SIZE, value: size },
-          })
-        );
-        recordUserAction(USER_ACTION_TYPES.CHANGE_SIZE, {
-          source: "context_menu",
-          value: size,
-          size,
-        });
+      dispatch(
+        ac.OnlyToMain({
+          type: at.SET_PREF,
+          data: { name: PREF_WIDGETS_LISTS_SIZE, value: size },
+        })
+      );
+      recordUserAction(USER_ACTION_TYPES.CHANGE_SIZE, {
+        source: "context_menu",
+        value: size,
+        size,
       });
     },
     [dispatch, recordUserAction]
@@ -806,6 +827,9 @@ function Lists({
             onSelect: handleSelectList,
             selected,
             defaultListLabelL10nId,
+            onCreateList: handleCreateNewListFromSwitcher,
+            isAtMaxListsLimit,
+            switcherButtonRef,
           })}
         </EditableText>
         {/* Hide the badge when user is editing task list title */}
@@ -848,14 +872,12 @@ function Lists({
               />
             </button>
           )}
-        <moz-button
+        <WidgetMenuButton
           className="lists-panel-button"
-          data-l10n-id="newtab-widget-lists-menu-button"
-          iconSrc="chrome://global/skin/icons/more.svg"
           menuId="lists-panel"
-          type="ghost"
+          l10nId="newtab-widget-lists-open-menu-button"
         />
-        <panel-list id="lists-panel">
+        <panel-list className="panel-list-no-icons" id="lists-panel">
           <panel-item
             data-l10n-id="newtab-widget-lists-menu-edit"
             onClick={() => setIsEditing(true)}
@@ -1021,14 +1043,16 @@ function ListItem({
     typeof window.matchMedia === "function" &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  function handleCheckboxChange(e) {
-    const { checked } = e.target;
-    const updatedTask = { ...task, completed: checked };
-    if (checked && !prefersReducedMotion) {
+  function toggleCompleted(completed) {
+    if (completed && !prefersReducedMotion) {
       setExiting(true);
     } else {
-      updateTask(updatedTask, type);
+      updateTask({ ...task, completed }, type);
     }
+  }
+
+  function handleCheckboxChange(e) {
+    toggleCompleted(e.target.checked);
   }
 
   // When the CSS transition finishes, dispatch the real “completed = true”
@@ -1069,8 +1093,9 @@ function ListItem({
     <label
       className="task-label"
       title={task.value}
-      htmlFor={`task-${task.id}`}
-      onClick={() => setIsEditing(true)}
+      onClick={() =>
+        isCompleted ? toggleCompleted(false) : setIsEditing(true)
+      }
     >
       {task.value}
     </label>
@@ -1084,11 +1109,10 @@ function ListItem({
       onTransitionEnd={handleTransitionEnd}
     >
       <div className="checkbox-wrapper" key={isEditing}>
-        <input
-          type="checkbox"
+        <moz-checkbox
           onChange={handleCheckboxChange}
-          checked={task.completed || exiting}
-          id={`task-${task.id}`}
+          checked={task.completed || exiting || undefined}
+          aria-label={task.value}
         />
         {isCompleted ? (
           taskLabel
@@ -1111,7 +1135,7 @@ function ListItem({
         menuId={`panel-task-${task.id}`}
         type="ghost"
       />
-      <panel-list id={`panel-task-${task.id}`}>
+      <panel-list className="panel-list-no-icons" id={`panel-task-${task.id}`}>
         {!isCompleted && (
           <>
             {task.isUrl && (

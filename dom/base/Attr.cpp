@@ -23,6 +23,7 @@
 #include "nsError.h"
 #include "nsIContentInlines.h"
 #include "nsNameSpaceManager.h"
+#include "nsNodeSupportsWeakRefTearoff.h"
 #include "nsTextNode.h"
 #include "nsUnicharUtils.h"
 #include "nsWrapperCacheInlines.h"
@@ -97,11 +98,20 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE_WITH_LAST_RELEASE_AND_DESTROY(Attr,
 
 NS_IMPL_DOMARENA_DESTROY(Attr)
 
-void Attr::SetMap(nsDOMAttributeMap* aMap) {
+void Attr::SetMap(nsDOMAttributeMap* aMap, const nsAttrValue* aValue) {
   if (mAttrMap && !aMap && sInitialized) {
     // We're breaking a relationship with content and not getting a new one,
-    // need to locally cache value. GetValue() does that.
-    GetValue(mValue);
+    // need to locally cache value.
+    if (aValue) {
+#ifdef DEBUG
+      nsAutoString expectedValue;
+      GetValue(expectedValue);
+      MOZ_ASSERT(aValue->Equals(expectedValue, nsCaseTreatment::eCaseMatters));
+#endif
+      aValue->ToString(mValue);
+    } else {
+      GetValue(mValue);
+    }
   }
 
   mAttrMap = aMap;
@@ -115,29 +125,12 @@ Element* Attr::GetElement() const {
   return content ? content->AsElement() : nullptr;
 }
 
-nsresult Attr::SetOwnerDocument(Document* aDocument) {
-  NS_ASSERTION(aDocument, "Missing document");
-
-  Document* doc = OwnerDoc();
-  NS_ASSERTION(doc != aDocument, "bad call to Attr::SetOwnerDocument");
-  doc->RemoveAllPropertiesFor(this);
-
-  RefPtr<dom::NodeInfo> newNodeInfo = aDocument->NodeInfoManager()->GetNodeInfo(
-      mNodeInfo->NameAtom(), mNodeInfo->GetPrefixAtom(),
-      mNodeInfo->NamespaceID(), ATTRIBUTE_NODE);
-  NS_ASSERTION(newNodeInfo, "GetNodeInfo lies");
-  mNodeInfo.swap(newNodeInfo);
-
-  return NS_OK;
-}
-
 void Attr::GetName(nsAString& aName) { aName = NodeName(); }
 
 void Attr::GetValue(nsAString& aValue) {
   Element* element = GetElement();
   if (element) {
-    RefPtr<nsAtom> nameAtom = mNodeInfo->NameAtom();
-    element->GetAttr(mNodeInfo->NamespaceID(), nameAtom, aValue);
+    element->GetAttr(mNodeInfo->NamespaceID(), mNodeInfo->NameAtom(), aValue);
   } else {
     aValue = mValue;
   }

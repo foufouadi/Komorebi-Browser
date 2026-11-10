@@ -71,6 +71,7 @@ Atomics.h:
     - Atomic
   functions:
     - cpu_pause
+    - AtomicRefCountDecrement
 
 Attributes.h:
   macros:
@@ -101,6 +102,7 @@ Attributes.h:
     - MOZ_GSL_POINTER
     - MOZ_LIFETIME_BOUND
     - MOZ_LIFETIME_CAPTURE_BY
+    - MOZ_LIFETIME_CAPTURE_BY_THIS
     - MOZ_STANDALONE_DEBUG
     - MOZ_NULL_AFTER_MOVE
     - MOZ_PUSH_DISABLE_NONTRIVIAL_UNION_WARNINGS
@@ -897,10 +899,8 @@ UniquePtrExtensions.h:
 
 UniquePtr.h:
   types:
-    - DefaultDelete
     - UniquePtr
   functions:
-    - MakeUnique
     - WrapUnique
     - TempPtrToSetter
 
@@ -1007,3 +1007,7 @@ WrappingOperations.h:
 XorShift128PlusRNG.h:
   types:
     - XorShift128PlusRNG
+
+MaybeFmt.h:
+  types:
+    - Maybe

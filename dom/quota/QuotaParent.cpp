@@ -155,6 +155,20 @@ bool Quota::TrustParams() const {
   return trustParams;
 }
 
+mozilla::Result<mozilla::Ok, nsresult> Quota::VerifyIsParentProcessActor()
+    const {
+  AssertIsOnBackgroundThread();
+
+  return MOZ_TO_RESULT(!BackgroundParent::IsOtherProcessActor(Manager()));
+}
+
+bool Quota::VerifyPrincipalInfo(const PrincipalInfo& aPrincipalInfo) const {
+  AssertIsOnBackgroundThread();
+
+  return IsPrincipalInfoValid(aPrincipalInfo) &&
+         BackgroundParent::ValidatePrincipalInfo(Manager(), aPrincipalInfo);
+}
+
 bool Quota::VerifyRequestParams(const RequestParams& aParams) const {
   AssertIsOnBackgroundThread();
   MOZ_ASSERT(aParams.type() != RequestParams::T__None);
@@ -171,7 +185,7 @@ bool Quota::VerifyRequestParams(const RequestParams& aParams) const {
         return false;
       }
 
-      if (NS_WARN_IF(!IsPrincipalInfoValid(params.principalInfo()))) {
+      if (NS_WARN_IF(!VerifyPrincipalInfo(params.principalInfo()))) {
         MOZ_CRASH_UNLESS_FUZZING();
         return false;
       }
@@ -182,7 +196,7 @@ bool Quota::VerifyRequestParams(const RequestParams& aParams) const {
     case RequestParams::TPersistedParams: {
       const PersistedParams& params = aParams.get_PersistedParams();
 
-      if (NS_WARN_IF(!IsPrincipalInfoValid(params.principalInfo()))) {
+      if (NS_WARN_IF(!VerifyPrincipalInfo(params.principalInfo()))) {
         MOZ_CRASH_UNLESS_FUZZING();
         return false;
       }
@@ -193,7 +207,7 @@ bool Quota::VerifyRequestParams(const RequestParams& aParams) const {
     case RequestParams::TPersistParams: {
       const PersistParams& params = aParams.get_PersistParams();
 
-      if (NS_WARN_IF(!IsPrincipalInfoValid(params.principalInfo()))) {
+      if (NS_WARN_IF(!VerifyPrincipalInfo(params.principalInfo()))) {
         MOZ_CRASH_UNLESS_FUZZING();
         return false;
       }
@@ -204,7 +218,19 @@ bool Quota::VerifyRequestParams(const RequestParams& aParams) const {
     case RequestParams::TEstimateParams: {
       const EstimateParams& params = aParams.get_EstimateParams();
 
-      if (NS_WARN_IF(!IsPrincipalInfoValid(params.principalInfo()))) {
+      if (NS_WARN_IF(!VerifyPrincipalInfo(params.principalInfo()))) {
+        MOZ_CRASH_UNLESS_FUZZING();
+        return false;
+      }
+
+      break;
+    }
+
+    case RequestParams::TEstimateGroupUsageParams: {
+      const EstimateGroupUsageParams& params =
+          aParams.get_EstimateGroupUsageParams();
+
+      if (NS_WARN_IF(!VerifyPrincipalInfo(params.principalInfo()))) {
         MOZ_CRASH_UNLESS_FUZZING();
         return false;
       }
@@ -241,6 +267,13 @@ PQuotaRequestParent* Quota::AllocPQuotaRequestParent(
     return nullptr;
   }
 
+  // Group usage must not be exposed to content processes.
+  if (aParams.type() == RequestParams::TEstimateGroupUsageParams &&
+      NS_WARN_IF(VerifyIsParentProcessActor().isErr())) {
+    MOZ_CRASH_UNLESS_FUZZING();
+    return nullptr;
+  }
+
   QM_TRY_UNWRAP(const NotNull<RefPtr<QuotaManager>> quotaManager,
                 QuotaManager::GetOrCreate(), nullptr);
 
@@ -261,6 +294,10 @@ PQuotaRequestParent* Quota::AllocPQuotaRequestParent(
 
       case RequestParams::TEstimateParams:
         return CreateEstimateOp(quotaManager, aParams.get_EstimateParams());
+
+      case RequestParams::TEstimateGroupUsageParams:
+        return CreateEstimateGroupUsageOp(
+            quotaManager, aParams.get_EstimateGroupUsageParams());
 
       default:
         MOZ_CRASH("Should never get here!");
@@ -305,6 +342,8 @@ mozilla::ipc::IPCResult Quota::RecvStorageInitialized(
   QM_TRY(MOZ_TO_RESULT(!QuotaManager::IsShuttingDown()),
          ResolveBoolResponseAndReturn(aResolver));
 
+  QM_TRY(VerifyIsParentProcessActor(), QM_CUF_AND_IPC_FAIL(this));
+
   QM_TRY_UNWRAP(const NotNull<RefPtr<QuotaManager>> quotaManager,
                 QuotaManager::GetOrCreate(),
                 ResolveBoolResponseAndReturn(aResolver));
@@ -323,6 +362,8 @@ mozilla::ipc::IPCResult Quota::RecvPersistentStorageInitialized(
   QM_TRY(MOZ_TO_RESULT(!QuotaManager::IsShuttingDown()),
          ResolveBoolResponseAndReturn(aResolver));
 
+  QM_TRY(VerifyIsParentProcessActor(), QM_CUF_AND_IPC_FAIL(this));
+
   QM_TRY_UNWRAP(const NotNull<RefPtr<QuotaManager>> quotaManager,
                 QuotaManager::GetOrCreate(),
                 ResolveBoolResponseAndReturn(aResolver));
@@ -340,6 +381,8 @@ mozilla::ipc::IPCResult Quota::RecvTemporaryStorageInitialized(
 
   QM_TRY(MOZ_TO_RESULT(!QuotaManager::IsShuttingDown()),
          ResolveBoolResponseAndReturn(aResolver));
+
+  QM_TRY(VerifyIsParentProcessActor(), QM_CUF_AND_IPC_FAIL(this));
 
   QM_TRY_UNWRAP(const NotNull<RefPtr<QuotaManager>> quotaManager,
                 QuotaManager::GetOrCreate(),
@@ -361,7 +404,7 @@ mozilla::ipc::IPCResult Quota::RecvTemporaryGroupInitialized(
          ResolveBoolResponseAndReturn(aResolve));
 
   if (!TrustParams()) {
-    QM_TRY(MOZ_TO_RESULT(IsPrincipalInfoValid(aPrincipalInfo)),
+    QM_TRY(MOZ_TO_RESULT(VerifyPrincipalInfo(aPrincipalInfo)),
            QM_CUF_AND_IPC_FAIL(this));
   }
 
@@ -390,7 +433,7 @@ mozilla::ipc::IPCResult Quota::RecvPersistentOriginInitialized(
          ResolveBoolResponseAndReturn(aResolve));
 
   if (!TrustParams()) {
-    QM_TRY(MOZ_TO_RESULT(IsPrincipalInfoValid(aPrincipalInfo)),
+    QM_TRY(MOZ_TO_RESULT(VerifyPrincipalInfo(aPrincipalInfo)),
            QM_CUF_AND_IPC_FAIL(this));
   }
 
@@ -425,7 +468,7 @@ mozilla::ipc::IPCResult Quota::RecvTemporaryOriginInitialized(
     QM_TRY(MOZ_TO_RESULT(IsValidPersistenceType(aPersistenceType)),
            QM_CUF_AND_IPC_FAIL(this));
 
-    QM_TRY(MOZ_TO_RESULT(IsPrincipalInfoValid(aPrincipalInfo)),
+    QM_TRY(MOZ_TO_RESULT(VerifyPrincipalInfo(aPrincipalInfo)),
            QM_CUF_AND_IPC_FAIL(this));
   }
 
@@ -454,6 +497,8 @@ mozilla::ipc::IPCResult Quota::RecvInitializeStorage(
   QM_TRY(MOZ_TO_RESULT(!QuotaManager::IsShuttingDown()),
          ResolveBoolResponseAndReturn(aResolver));
 
+  QM_TRY(VerifyIsParentProcessActor(), QM_CUF_AND_IPC_FAIL(this));
+
   QM_TRY_UNWRAP(const NotNull<RefPtr<QuotaManager>> quotaManager,
                 QuotaManager::GetOrCreate(),
                 ResolveBoolResponseAndReturn(aResolver));
@@ -471,6 +516,8 @@ mozilla::ipc::IPCResult Quota::RecvInitializePersistentStorage(
 
   QM_TRY(MOZ_TO_RESULT(!QuotaManager::IsShuttingDown()),
          ResolveBoolResponseAndReturn(aResolver));
+
+  QM_TRY(VerifyIsParentProcessActor(), QM_CUF_AND_IPC_FAIL(this));
 
   QM_TRY_UNWRAP(const NotNull<RefPtr<QuotaManager>> quotaManager,
                 QuotaManager::GetOrCreate(),
@@ -494,6 +541,8 @@ mozilla::ipc::IPCResult Quota::RecvInitializeAllTemporaryOrigins(
   QM_TRY(MOZ_TO_RESULT(!QuotaManager::IsShuttingDown()),
          ResolveBoolResponseAndReturn(aResolver));
 
+  QM_TRY(VerifyIsParentProcessActor(), QM_CUF_AND_IPC_FAIL(this));
+
   QM_TRY_UNWRAP(const NotNull<RefPtr<QuotaManager>> quotaManager,
                 QuotaManager::GetOrCreate(),
                 ResolveBoolResponseAndReturn(aResolver));
@@ -514,7 +563,7 @@ mozilla::ipc::IPCResult Quota::RecvInitializeTemporaryGroup(
          ResolveBoolResponseAndReturn(aResolve));
 
   if (!TrustParams()) {
-    QM_TRY(MOZ_TO_RESULT(IsPrincipalInfoValid(aPrincipalInfo)),
+    QM_TRY(MOZ_TO_RESULT(VerifyPrincipalInfo(aPrincipalInfo)),
            QM_CUF_AND_IPC_FAIL(this));
   }
 
@@ -543,7 +592,7 @@ mozilla::ipc::IPCResult Quota::RecvInitializePersistentOrigin(
          ResolveBoolResponseAndReturn(aResolve));
 
   if (!TrustParams()) {
-    QM_TRY(MOZ_TO_RESULT(IsPrincipalInfoValid(aPrincipalInfo)),
+    QM_TRY(MOZ_TO_RESULT(VerifyPrincipalInfo(aPrincipalInfo)),
            QM_CUF_AND_IPC_FAIL(this));
   }
 
@@ -578,7 +627,7 @@ mozilla::ipc::IPCResult Quota::RecvInitializeTemporaryOrigin(
     QM_TRY(MOZ_TO_RESULT(IsValidPersistenceType(aPersistenceType)),
            QM_CUF_AND_IPC_FAIL(this));
 
-    QM_TRY(MOZ_TO_RESULT(IsPrincipalInfoValid(aPrincipalInfo)),
+    QM_TRY(MOZ_TO_RESULT(VerifyPrincipalInfo(aPrincipalInfo)),
            QM_CUF_AND_IPC_FAIL(this));
   }
 
@@ -610,7 +659,7 @@ mozilla::ipc::IPCResult Quota::RecvInitializePersistentClient(
          ResolveBoolResponseAndReturn(aResolve));
 
   if (!TrustParams()) {
-    QM_TRY(MOZ_TO_RESULT(IsPrincipalInfoValid(aPrincipalInfo)),
+    QM_TRY(MOZ_TO_RESULT(VerifyPrincipalInfo(aPrincipalInfo)),
            QM_CUF_AND_IPC_FAIL(this));
 
     QM_TRY(MOZ_TO_RESULT(Client::IsValidType(aClientType)),
@@ -652,7 +701,7 @@ mozilla::ipc::IPCResult Quota::RecvInitializeTemporaryClient(
     QM_TRY(MOZ_TO_RESULT(IsValidPersistenceType(aPersistenceType)),
            QM_CUF_AND_IPC_FAIL(this));
 
-    QM_TRY(MOZ_TO_RESULT(IsPrincipalInfoValid(aPrincipalInfo)),
+    QM_TRY(MOZ_TO_RESULT(VerifyPrincipalInfo(aPrincipalInfo)),
            QM_CUF_AND_IPC_FAIL(this));
 
     QM_TRY(MOZ_TO_RESULT(Client::IsValidType(aClientType)),
@@ -686,6 +735,8 @@ mozilla::ipc::IPCResult Quota::RecvInitializeTemporaryStorage(
   QM_TRY(MOZ_TO_RESULT(!QuotaManager::IsShuttingDown()),
          ResolveBoolResponseAndReturn(aResolver));
 
+  QM_TRY(VerifyIsParentProcessActor(), QM_CUF_AND_IPC_FAIL(this));
+
   QM_TRY_UNWRAP(const NotNull<RefPtr<QuotaManager>> quotaManager,
                 QuotaManager::GetOrCreate(),
                 ResolveBoolResponseAndReturn(aResolver));
@@ -705,6 +756,8 @@ mozilla::ipc::IPCResult Quota::RecvGetUsage(
 
   QM_TRY(MOZ_TO_RESULT(!QuotaManager::IsShuttingDown()),
          ResolveOriginUsageMetadataArrayResponseAndReturn(aResolve));
+
+  QM_TRY(VerifyIsParentProcessActor(), QM_CUF_AND_IPC_FAIL(this));
 
   QM_TRY_UNWRAP(const NotNull<RefPtr<QuotaManager>> quotaManager,
                 QuotaManager::GetOrCreate(),
@@ -745,7 +798,7 @@ mozilla::ipc::IPCResult Quota::RecvGetOriginUsage(
          ResolveUsageInfoResponseAndReturn(aResolve));
 
   if (!TrustParams()) {
-    QM_TRY(MOZ_TO_RESULT(IsPrincipalInfoValid(aPrincipalInfo)),
+    QM_TRY(MOZ_TO_RESULT(VerifyPrincipalInfo(aPrincipalInfo)),
            QM_CUF_AND_IPC_FAIL(this));
   }
 
@@ -785,7 +838,7 @@ mozilla::ipc::IPCResult Quota::RecvGetCachedOriginUsage(
          ResolveUInt64ResponseAndReturn(aResolver));
 
   if (!TrustParams()) {
-    QM_TRY(MOZ_TO_RESULT(IsPrincipalInfoValid(aPrincipalInfo)),
+    QM_TRY(MOZ_TO_RESULT(VerifyPrincipalInfo(aPrincipalInfo)),
            QM_CUF_AND_IPC_FAIL(this));
   }
 
@@ -807,6 +860,8 @@ mozilla::ipc::IPCResult Quota::RecvListOrigins(
   QM_TRY(MOZ_TO_RESULT(!QuotaManager::IsShuttingDown()),
          ResolveCStringArrayResponseAndReturn(aResolver));
 
+  QM_TRY(VerifyIsParentProcessActor(), QM_CUF_AND_IPC_FAIL(this));
+
   QM_TRY_UNWRAP(const NotNull<RefPtr<QuotaManager>> quotaManager,
                 QuotaManager::GetOrCreate(),
                 ResolveCStringArrayResponseAndReturn(aResolver));
@@ -824,6 +879,8 @@ mozilla::ipc::IPCResult Quota::RecvListCachedOrigins(
 
   QM_TRY(MOZ_TO_RESULT(!QuotaManager::IsShuttingDown()),
          ResolveCStringArrayResponseAndReturn(aResolver));
+
+  QM_TRY(VerifyIsParentProcessActor(), QM_CUF_AND_IPC_FAIL(this));
 
   QM_TRY_UNWRAP(const NotNull<RefPtr<QuotaManager>> quotaManager,
                 QuotaManager::GetOrCreate(),
@@ -851,7 +908,7 @@ mozilla::ipc::IPCResult Quota::RecvClearStoragesForOrigin(
              QM_CUF_AND_IPC_FAIL(this));
     }
 
-    QM_TRY(MOZ_TO_RESULT(IsPrincipalInfoValid(aPrincipalInfo)),
+    QM_TRY(MOZ_TO_RESULT(VerifyPrincipalInfo(aPrincipalInfo)),
            QM_CUF_AND_IPC_FAIL(this));
   }
 
@@ -881,7 +938,7 @@ mozilla::ipc::IPCResult Quota::RecvClearStoragesForClient(
              QM_CUF_AND_IPC_FAIL(this));
     }
 
-    QM_TRY(MOZ_TO_RESULT(IsPrincipalInfoValid(aPrincipalInfo)),
+    QM_TRY(MOZ_TO_RESULT(VerifyPrincipalInfo(aPrincipalInfo)),
            QM_CUF_AND_IPC_FAIL(this));
 
     QM_TRY(MOZ_TO_RESULT(Client::IsValidType(aClientType)),
@@ -909,13 +966,15 @@ mozilla::ipc::IPCResult Quota::RecvClearStoragesForOriginPrefix(
   QM_TRY(MOZ_TO_RESULT(!QuotaManager::IsShuttingDown()),
          ResolveBoolResponseAndReturn(aResolver));
 
+  QM_TRY(VerifyIsParentProcessActor(), QM_CUF_AND_IPC_FAIL(this));
+
   if (!TrustParams()) {
     if (aPersistenceType) {
       QM_TRY(MOZ_TO_RESULT(IsValidPersistenceType(*aPersistenceType)),
              QM_CUF_AND_IPC_FAIL(this));
     }
 
-    QM_TRY(MOZ_TO_RESULT(IsPrincipalInfoValid(aPrincipalInfo)),
+    QM_TRY(MOZ_TO_RESULT(VerifyPrincipalInfo(aPrincipalInfo)),
            QM_CUF_AND_IPC_FAIL(this));
   }
 
@@ -939,8 +998,7 @@ mozilla::ipc::IPCResult Quota::RecvClearStoragesForOriginAttributesPattern(
          ResolveBoolResponseAndReturn(aResolver));
 
   if (!TrustParams()) {
-    QM_TRY(MOZ_TO_RESULT(!BackgroundParent::IsOtherProcessActor(Manager())),
-           QM_CUF_AND_IPC_FAIL(this));
+    QM_TRY(VerifyIsParentProcessActor(), QM_CUF_AND_IPC_FAIL(this));
   }
 
   QM_TRY_UNWRAP(const NotNull<RefPtr<QuotaManager>> quotaManager,
@@ -962,8 +1020,7 @@ mozilla::ipc::IPCResult Quota::RecvClearStoragesForPrivateBrowsing(
          ResolveBoolResponseAndReturn(aResolver));
 
   if (!TrustParams()) {
-    QM_TRY(MOZ_TO_RESULT(!BackgroundParent::IsOtherProcessActor(Manager())),
-           QM_CUF_AND_IPC_FAIL(this));
+    QM_TRY(VerifyIsParentProcessActor(), QM_CUF_AND_IPC_FAIL(this));
   }
 
   QM_TRY_UNWRAP(const NotNull<RefPtr<QuotaManager>> quotaManager,
@@ -983,6 +1040,8 @@ mozilla::ipc::IPCResult Quota::RecvClearStorage(
 
   QM_TRY(MOZ_TO_RESULT(!QuotaManager::IsShuttingDown()),
          ResolveBoolResponseAndReturn(aResolver));
+
+  QM_TRY(VerifyIsParentProcessActor(), QM_CUF_AND_IPC_FAIL(this));
 
   QM_TRY_UNWRAP(const NotNull<RefPtr<QuotaManager>> quotaManager,
                 QuotaManager::GetOrCreate(),
@@ -1010,7 +1069,7 @@ mozilla::ipc::IPCResult Quota::RecvShutdownStoragesForOrigin(
              QM_CUF_AND_IPC_FAIL(this));
     }
 
-    QM_TRY(MOZ_TO_RESULT(IsPrincipalInfoValid(aPrincipalInfo)),
+    QM_TRY(MOZ_TO_RESULT(VerifyPrincipalInfo(aPrincipalInfo)),
            QM_CUF_AND_IPC_FAIL(this));
   }
 
@@ -1040,7 +1099,7 @@ mozilla::ipc::IPCResult Quota::RecvShutdownStoragesForClient(
              QM_CUF_AND_IPC_FAIL(this));
     }
 
-    QM_TRY(MOZ_TO_RESULT(IsPrincipalInfoValid(aPrincipalInfo)),
+    QM_TRY(MOZ_TO_RESULT(VerifyPrincipalInfo(aPrincipalInfo)),
            QM_CUF_AND_IPC_FAIL(this));
 
     QM_TRY(MOZ_TO_RESULT(Client::IsValidType(aClientType)),
@@ -1065,6 +1124,8 @@ mozilla::ipc::IPCResult Quota::RecvShutdownStorage(
 
   QM_TRY(MOZ_TO_RESULT(!QuotaManager::IsShuttingDown()),
          ResolveBoolResponseAndReturn(aResolver));
+
+  QM_TRY(VerifyIsParentProcessActor(), QM_CUF_AND_IPC_FAIL(this));
 
   QM_TRY_UNWRAP(const NotNull<RefPtr<QuotaManager>> quotaManager,
                 QuotaManager::GetOrCreate(),
@@ -1160,8 +1221,7 @@ mozilla::ipc::IPCResult Quota::RecvSetThumbnailPrivateIdentityId(
   QM_TRY(MOZ_TO_RESULT(!QuotaManager::IsShuttingDown()), IPC_OK());
 
   if (!TrustParams()) {
-    QM_TRY(MOZ_TO_RESULT(!BackgroundParent::IsOtherProcessActor(Manager())),
-           QM_CUF_AND_IPC_FAIL(this));
+    QM_TRY(VerifyIsParentProcessActor(), QM_CUF_AND_IPC_FAIL(this));
   }
 
   QM_TRY_UNWRAP(const NotNull<RefPtr<QuotaManager>> quotaManager,

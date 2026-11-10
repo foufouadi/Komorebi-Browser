@@ -8,14 +8,10 @@ import android.Manifest.permission.CAMERA
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
-import android.content.DialogInterface
 import android.content.Intent
-import android.graphics.Typeface
-import android.text.style.StyleSpan
 import androidx.activity.result.ActivityResultLauncher
 import androidx.core.net.toUri
 import androidx.fragment.app.Fragment
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,19 +26,18 @@ import mozilla.components.support.base.feature.OnNeedToRequestPermissions
 import mozilla.components.support.base.feature.PermissionsFeature
 import mozilla.components.support.base.feature.ViewBoundFeatureWrapper
 import mozilla.components.support.ktx.android.content.isPermissionGranted
-import mozilla.components.support.ktx.android.content.res.getSpanned
 import mozilla.components.support.ktx.android.net.isHttpOrHttps
 import mozilla.components.support.ktx.kotlin.toNormalizedUrl
-import mozilla.components.ui.widgets.withCenterAlignedButtons
 import org.mozilla.fenix.GleanMetrics.Events
-import org.mozilla.fenix.R
 import org.mozilla.fenix.components.appstate.AppAction.QrScannerAction
+import org.mozilla.fenix.components.lens.LensCameraActivity
 import org.mozilla.fenix.ext.components
 
 /**
  * Handles QR Scan Activity requests and results.
  * - Observes QR scan requests from the AppStore.
- * - Launches QR scan activity and updates AppStore with the result.
+ * - Launches [LensCameraActivity] in QR-only mode or [QrScanActivity], based on whether the Google Lens integration is
+ *   enabled, and updates AppStore with the result.
  * - Does NOT update any UI or toolbar state directly.
  *
  * Other features (such as toolbar middleware) should observe AppStore for QR scan results and update their own state
@@ -54,6 +49,7 @@ class QrScanFenixFeature(
     private val qrScanActivityLauncher: ActivityResultLauncher<Intent>,
     private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
     override val onNeedToRequestPermissions: OnNeedToRequestPermissions = {},
+    private val isLensCameraEnabled: () -> Boolean = { context.components.settings.googleLensIntegrationEnabled },
 ) : LifecycleAwareFeature, PermissionsFeature {
 
     private var scope: CoroutineScope? = null
@@ -85,7 +81,12 @@ class QrScanFenixFeature(
     }
 
     private fun launchQrScan() {
-        val intent = QrScanActivity.newIntent(context = context)
+        val intent =
+            if (isLensCameraEnabled()) {
+                LensCameraActivity.newQrScannerIntent(context = context)
+            } else {
+                QrScanActivity.newIntent(context = context)
+            }
         try {
             qrScanActivityLauncher.launch(intent)
         } catch (e: ActivityNotFoundException) {
@@ -109,38 +110,17 @@ class QrScanFenixFeature(
         if (url != null && url.isNotEmpty()) {
             val normalizedUrl = url.toNormalizedUrl()
             if (!normalizedUrl.toUri().isHttpOrHttps) {
-                MaterialAlertDialogBuilder(context)
-                    .apply {
-                        setMessage(R.string.qr_scanner_dialog_invalid)
-                        setPositiveButton(R.string.qr_scanner_dialog_invalid_ok) { dialog: DialogInterface, _ ->
-                            appStore.dispatch(QrScannerAction.QrScannerInputConsumed)
-                            dialog.dismiss()
-                        }
-                        create().withCenterAlignedButtons()
-                    }
-                    .show()
+                context.showQrScanInvalidUrlDialog(
+                    onDismiss = { appStore.dispatch(QrScannerAction.QrScannerInputConsumed) }
+                )
             } else {
-                val appName = context.resources.getString(R.string.app_name)
-                MaterialAlertDialogBuilder(context)
-                    .apply {
-                        val spannable =
-                            context.resources.getSpanned(
-                                R.string.qr_scanner_confirmation_dialog_message,
-                                appName to StyleSpan(Typeface.BOLD),
-                                normalizedUrl to StyleSpan(Typeface.ITALIC),
-                            )
-                        setMessage(spannable)
-                        setNegativeButton(R.string.qr_scanner_dialog_negative) { dialog: DialogInterface, _ ->
-                            appStore.dispatch(QrScannerAction.QrScannerInputConsumed)
-                            dialog.cancel()
-                        }
-                        setPositiveButton(R.string.qr_scanner_dialog_positive) { dialog: DialogInterface, _ ->
-                            appStore.dispatch(QrScannerAction.QrScannerInputAvailable(normalizedUrl))
-                            dialog.dismiss()
-                        }
-                        create().withCenterAlignedButtons()
-                    }
-                    .show()
+                context.showQrScanConfirmationDialog(
+                    url = normalizedUrl,
+                    onConfirm = {
+                        appStore.dispatch(QrScannerAction.QrScannerInputAvailable(normalizedUrl))
+                    },
+                    onDeny = { appStore.dispatch(QrScannerAction.QrScannerInputConsumed) },
+                )
             }
         }
         appStore.dispatch(QrScannerAction.QrScannerInputConsumed)

@@ -82,6 +82,12 @@ class WebProgressListener final : public nsIWebProgressListener,
       rv.ThrowInvalidStateError("Unable to open window");
       mPromise->Reject(rv, __func__);
       mPromise = nullptr;
+      if (browsingContext) {
+        if (nsCOMPtr<nsIWebProgress> webProgress =
+                browsingContext->GetWebProgress()) {
+          (void)webProgress->RemoveProgressListener(this);
+        }
+      }
       return NS_OK;
     }
 
@@ -208,6 +214,7 @@ struct ClientOpenWindowArgsParsed {
 
 #ifndef MOZ_GECKOVIEW
 
+MOZ_CAN_RUN_SCRIPT
 static Result<Ok, nsresult> OpenNewWindow(
     const ClientOpenWindowArgsParsed& aArgsValidated,
     nsOpenWindowInfo* aOpenWindowInfo) {
@@ -260,7 +267,7 @@ static Result<Ok, nsresult> OpenNewWindow(
 
   nsCOMPtr<mozIDOMWindowProxy> win;
   MOZ_TRY(ww->OpenWindow(nullptr, nsDependentCString(BROWSER_CHROME_URL_QUOTED),
-                         "_blank"_ns, features, args, getter_AddRefs(win)));
+                         u"_blank"_ns, features, args, getter_AddRefs(win)));
   return Ok();
 }
 
@@ -268,6 +275,7 @@ static Result<Ok, nsresult> OpenNewWindow(
  * @return true when the caller need to load URI on the resulting browsing
  *         context, otherwise false
  */
+MOZ_CAN_RUN_SCRIPT
 bool OpenWindow(const ClientOpenWindowArgsParsed& aArgsValidated,
                 nsOpenWindowInfo* aOpenInfo, BrowsingContext** aBC,
                 ErrorResult& aRv) {
@@ -321,6 +329,7 @@ bool OpenWindow(const ClientOpenWindowArgsParsed& aArgsValidated,
 }
 #endif
 
+MOZ_CAN_RUN_SCRIPT
 void WaitForLoad(const ClientOpenWindowArgsParsed& aArgsValidated,
                  BrowsingContext* aBrowsingContext,
                  ClientOpPromise::Private* aPromise, bool aShouldLoadURI) {
@@ -366,7 +375,7 @@ void WaitForLoad(const ClientOpenWindowArgsParsed& aArgsValidated,
     loadState->SetTriggeringRemoteType(
         aArgsValidated.originContent
             ? aArgsValidated.originContent->GetRemoteType()
-            : NOT_REMOTE_TYPE);
+            : RemoteType::NotRemote());
 
     rv = aBrowsingContext->LoadURI(loadState, true);
     if (NS_FAILED(rv)) {
@@ -393,7 +402,8 @@ void GeckoViewOpenWindow(const ClientOpenWindowArgsParsed& aArgsValidated,
   // passes the request to open a new window to GeckoView. Allowing the
   // application to decide how to hand the open window request.
   nsCOMPtr<nsIGeckoViewServiceWorker> sw = do_ImportESModule(
-      "resource://gre/modules/GeckoViewServiceWorker.sys.mjs");
+      "moz-src:///mobile/shared/components/geckoview/"
+      "GeckoViewServiceWorker.sys.mjs");
   MOZ_ASSERT(sw);
 
   RefPtr<dom::Promise> promise;
@@ -477,6 +487,16 @@ RefPtr<ClientOpPromise> ClientOpenWindow(
   nsCOMPtr<nsIPrincipal> principal = principalOrErr.unwrap();
   MOZ_DIAGNOSTIC_ASSERT(principal);
 
+  rv = nsContentUtils::GetSecurityManager()->CheckLoadURIWithPrincipal(
+      principal, uri, nsIScriptSecurityManager::DONT_REPORT_ERRORS, 0);
+  if (NS_FAILED(rv)) {
+    nsPrintfCString err("Opening \"%s\" is not allowed", aArgs.url().get());
+    CopyableErrorResult errResult;
+    errResult.ThrowTypeError(err);
+    promise->Reject(errResult, __func__);
+    return promise;
+  }
+
   nsCOMPtr<nsIContentSecurityPolicy> csp;
   nsCOMPtr<PolicyContainer> policyContainer;
   if (aArgs.cspInfo().isSome()) {
@@ -524,7 +544,7 @@ RefPtr<ClientOpPromise> ClientOpenWindow(
   browsingContextReadyPromise->Then(
       GetCurrentSerialEventTarget(), __func__,
       [argsValidated, promise,
-       shouldLoadURI](const RefPtr<BrowsingContext>& aBC) {
+       shouldLoadURI](const RefPtr<BrowsingContext>& aBC) MOZ_CAN_RUN_SCRIPT {
         WaitForLoad(argsValidated, aBC, promise, shouldLoadURI);
       },
       [promise]() {

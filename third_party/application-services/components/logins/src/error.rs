@@ -10,6 +10,7 @@ pub type ApiResult<T> = std::result::Result<T, LoginsApiError>;
 pub use error_support::{breadcrumb, handle_error, report_error};
 pub use error_support::{debug, error, info, trace, warn};
 
+use db_crypto::DbCryptoApiError;
 use error_support::{ErrorHandling, GetErrorHandling};
 use jwcrypto::JwCryptoError;
 
@@ -96,7 +97,10 @@ pub enum Error {
     InvalidPath(OsString),
 
     #[error("CryptoError({0})")]
-    CryptoError(#[from] JwCryptoError),
+    CryptoError(#[from] DbCryptoApiError),
+
+    #[error("JwCryptoError({0})")]
+    JwCryptoError(#[from] JwCryptoError),
 
     #[error("{0}")]
     Interrupted(#[from] interrupt_support::Interrupted),
@@ -196,8 +200,9 @@ impl GetErrorHandling for Error {
 }
 
 // The bridged sync engine (`sync::bridge`) deals in `anyhow::Result`, as that's
-// what the `sync15` BridgedEngine traits use. This lets UniFFI map those errors
-// onto our public error type when the bridge methods are exposed via the UDL.
+// what the `sync15` `SyncEngine`/`BridgedEngineWrapper` use. This lets UniFFI map
+// those errors onto our public error type when the bridge methods are exposed
+// via the UDL.
 impl From<anyhow::Error> for LoginsApiError {
     fn from(value: anyhow::Error) -> Self {
         LoginsApiError::UnexpectedLoginsApiError {

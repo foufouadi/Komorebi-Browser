@@ -110,6 +110,7 @@ public class CrashHandler implements Thread.UncaughtExceptionHandler {
    * @param aAppContext A Context for retrieving application information.
    * @param aHandlerService Service receiving native code crashes
    */
+  @SuppressWarnings("this-escape")
   public CrashHandler(
       @Nullable final Context aAppContext,
       @Nullable final Class<? extends Service> aHandlerService) {
@@ -137,6 +138,7 @@ public class CrashHandler implements Thread.UncaughtExceptionHandler {
    * @param aAppContext A Context for retrieving application information.
    * @param aHandlerService Service receiving native code crashes
    */
+  @SuppressWarnings("this-escape")
   public CrashHandler(
       @Nullable final Thread thread,
       final Context aAppContext,
@@ -236,8 +238,8 @@ public class CrashHandler implements Thread.UncaughtExceptionHandler {
   }
 
   /**
-   * @return the application package name. if context is not null; if context is null,
-   *     CrashHandler's package name will be returned.
+   * {@return the application package name if context is not null; if context is null,
+   * CrashHandler's package name will be returned}
    */
   @Nullable
   @AnyThread
@@ -258,9 +260,7 @@ public class CrashHandler implements Thread.UncaughtExceptionHandler {
     return getJavaPackageName();
   }
 
-  /**
-   * @return application context.
-   */
+  /** {@return the application context} */
   @AnyThread
   @Nullable
   public Context getAppContext() {

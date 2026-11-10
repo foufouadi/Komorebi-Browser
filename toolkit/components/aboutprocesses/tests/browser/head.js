@@ -140,6 +140,13 @@ function getTimeMultiplier(unit) {
   }
   throw new Error("Invalid time unit: " + unit);
 }
+// We produce localized numbers, with "," as a thousands separator in en-US
+// builds, but `parseFloat` doesn't understand the ",", so we need to remove it
+// before parsing.
+function parseLocalizedFloat(str) {
+  return Number.parseFloat(str.replace(/,/g, ""));
+}
+
 async function testCpu(element, total, slope, assumptions) {
   info(
     `Testing CPU display ${element.textContent} - ${element.title} vs total ${total}, slope ${slope}`
@@ -177,8 +184,8 @@ async function testCpu(element, total, slope, assumptions) {
       // Nothing else to do here.
       return;
     default: {
-      // `Number.parseFloat("99%")` returns `99`.
-      let computedPercentage = Number.parseFloat(extractedPercentage);
+      // `parseLocalizedFloat("99%")` returns `99`.
+      let computedPercentage = parseLocalizedFloat(extractedPercentage);
       Assert.ok(
         isCloseEnough(computedPercentage, slope * 100),
         `The displayed approximation of the slope is reasonable: ${computedPercentage} vs ${
@@ -213,11 +220,7 @@ async function testCpu(element, total, slope, assumptions) {
 
   let totalMS = total / MS_PER_NS;
   let computedTotal =
-    // We produce localized numbers, with "," as a thousands separator in en-US builds,
-    // but `parseFloat` doesn't understand the ",", so we need to remove it
-    // before parsing.
-    Number.parseFloat(extractedTotal.replace(/,/g, "")) *
-    getTimeMultiplier(extractedUnit);
+    parseLocalizedFloat(extractedTotal) * getTimeMultiplier(extractedUnit);
   Assert.ok(
     isCloseEnough(computedTotal, totalMS),
     `The displayed approximation of the total duration is reasonable: ${computedTotal} vs ${totalMS}`
@@ -243,7 +246,7 @@ async function testMemory(element, total, delta, assumptions) {
   );
   let [, extractedTotal, extractedUnit] = extracted;
 
-  let extractedTotalNumber = Number.parseFloat(extractedTotal);
+  let extractedTotalNumber = parseLocalizedFloat(extractedTotal);
   Assert.greater(
     extractedTotalNumber,
     0,
@@ -287,10 +290,7 @@ async function testMemory(element, total, delta, assumptions) {
     Assert.equal(delta || 0, 0);
     return;
   }
-  let deltaTotalNumber = Number.parseFloat(
-    // Remove the thousands separator that breaks parseFloat.
-    extractedDeltaTotal.replace(/,/g, "")
-  );
+  let deltaTotalNumber = parseLocalizedFloat(extractedDeltaTotal);
   // Note: displaying 1024KB can happen if the value is slightly less than
   // 1024*1024B but rounded to 1024KB.
   Assert.ok(
@@ -370,14 +370,22 @@ function findProcessRowByOrigin(doc, origin) {
   return null;
 }
 
-async function setupTabWithOriginAndTitle(origin, title) {
-  let tab = BrowserTestUtils.addTab(gBrowser, origin, { skipAnimation: true });
+async function setupTabWithOriginAndTitle(origin, title, win = window) {
+  let tab = BrowserTestUtils.addTab(win.gBrowser, origin, {
+    skipAnimation: true,
+  });
   tab.testTitle = title;
   tab.testOrigin = origin;
   await BrowserTestUtils.browserLoaded(tab.linkedBrowser);
   await SpecialPowers.spawn(tab.linkedBrowser, [title], async title => {
     content.document.title = title;
   });
+  // Rows are matched by title, which the view reads from the tab's label.
+  await BrowserTestUtils.waitForMutationCondition(
+    tab,
+    { attributeFilter: ["label"] },
+    () => tab.label == title
+  );
   return tab;
 }
 
@@ -397,7 +405,28 @@ async function setupAudioTab() {
     audio.setAttribute("loop", true);
     audio.src = `${ROOT}/small-shot.mp3`;
     content.document.body.appendChild(audio);
-    await audio.play();
+
+    // play() sometimes never settles on Windows, which would stall the test
+    // until the harness kills it after several minutes with no output. Bound
+    // the wait so the failure is reported with the element's state instead.
+    const PLAY_TIMEOUT_MS = 10000;
+    let timer;
+    await Promise.race([
+      audio.play().then(() => content.clearTimeout(timer)),
+      new Promise((resolve, reject) => {
+        timer = content.setTimeout(
+          () =>
+            reject(
+              new Error(
+                `audio.play() did not resolve within ${PLAY_TIMEOUT_MS}ms ` +
+                  `(readyState=${audio.readyState}, networkState=${audio.networkState}, ` +
+                  `paused=${audio.paused}, currentTime=${audio.currentTime})`
+              )
+            ),
+          PLAY_TIMEOUT_MS
+        );
+      }),
+    ]);
   });
   return tab;
 }
@@ -1086,4 +1115,127 @@ async function testAboutProcessesWithConfig({ showAllFrames, showThreads }) {
   await SpecialPowers.popPrefEnv();
 
   await extension.unload();
+}
+
+// Helpers for the about:processes?groupby=tab view.
+
+async function forceTabViewUpdate(tabAboutProcesses) {
+  await SpecialPowers.spawn(tabAboutProcesses.linkedBrowser, [], async () => {
+    await content.TabControl.update();
+  });
+}
+
+// Stops the page's own poll so the test decides when polls run. Returns a
+// function that runs one real poll.
+function pauseTabViewPolling(doc) {
+  let control = doc.defaultView.TabControl;
+  let update = control.update.bind(control);
+  control.update = async () => {};
+  return update;
+}
+
+// Unload/reload buttons ignore clicks until their row's action is done.
+function promiseRowActionDone(row) {
+  return BrowserTestUtils.waitForMutationCondition(
+    row,
+    { attributeFilter: ["aria-busy"] },
+    () => !row.hasAttribute("aria-busy")
+  );
+}
+
+function promiseTabViewUpdated(doc) {
+  return new Promise(resolve =>
+    doc.addEventListener("AboutProcessesUpdated", resolve, { once: true })
+  );
+}
+
+// Rows hidden by a search are skipped; collapsed rows aren't.
+function tabRowTitles(doc) {
+  return [...doc.querySelectorAll("tr.tab-row:not([hidden])")].map(
+    row => row.querySelector(".name").textContent
+  );
+}
+
+function findTabRow(doc, title) {
+  return [...doc.querySelectorAll("tr.tab-row")].find(row =>
+    row.querySelector(".name").textContent.includes(title)
+  );
+}
+
+function findSiteHeaderRow(doc, siteKey) {
+  return [...doc.querySelectorAll("tr.site-header-row")].find(
+    row => row.querySelector(".site-label").textContent == siteKey
+  );
+}
+
+// Child rows are the header's immediate <tr> siblings, up to the next header/solo row.
+function childRowsOf(headerRow) {
+  let rows = [];
+  for (
+    let sibling = headerRow.nextElementSibling;
+    sibling?.classList.contains("child-row");
+    sibling = sibling.nextElementSibling
+  ) {
+    rows.push(sibling);
+  }
+  return rows;
+}
+
+// Not a raw dispatchEvent: that skips the layout/a11y flush real input goes through.
+function clickRow(target, options = {}) {
+  EventUtils.synthesizeMouseAtCenter(target, options, target.documentGlobal);
+}
+
+function clickCheckbox(doc, title) {
+  clickRow(findTabRow(doc, title).querySelector(".select-checkbox"));
+}
+
+// Any recent mouse event freezes existing row order until the next real sort.
+function startMouseFreeze(doc) {
+  EventUtils.synthesizeMouse(
+    doc.getElementById("process-tbody"),
+    5,
+    5,
+    { type: "mousemove" },
+    doc.defaultView
+  );
+}
+
+async function openTabView() {
+  let tabAboutProcesses = await BrowserTestUtils.openNewForegroundTab({
+    gBrowser,
+    opening: "about:processes?groupby=tab",
+    waitForLoad: true,
+  });
+  await forceTabViewUpdate(tabAboutProcesses);
+  let doc = tabAboutProcesses.linkedBrowser.contentDocument;
+  await TestUtils.waitForCondition(
+    () => doc.querySelector("tr.tab-row"),
+    "Waiting for at least one row to exist"
+  );
+  return { tabAboutProcesses, doc };
+}
+
+// Checks that metric recorded exactly one event with these extra values, and
+// returns it (undefined otherwise) for any further checks.
+function assertOneEvent(metric, extra, description) {
+  let events = metric.testGetValue();
+  Assert.equal(events?.length, 1, description);
+  let event = events?.length == 1 ? events[0] : undefined;
+  for (let [key, value] of Object.entries(extra)) {
+    Assert.equal(event?.extra[key], value, `${description}: ${key}`);
+  }
+  return event;
+}
+
+// Replaces any earlier query and waits for the search box's debounced event.
+async function enterTabSearch(doc, query) {
+  let search = doc.getElementById("tab-search-input");
+  await doc.defaultView.customElements.whenDefined("moz-input-search");
+  await search.updateComplete;
+  let searched = BrowserTestUtils.waitForEvent(search, "MozInputSearch:search");
+  clickRow(search.inputEl);
+  EventUtils.synthesizeKey("a", { accelKey: true }, doc.defaultView);
+  EventUtils.sendString(query, doc.defaultView);
+  await searched;
 }
